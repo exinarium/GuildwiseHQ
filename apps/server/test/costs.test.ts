@@ -275,6 +275,15 @@ describe('budgets: thresholds, pause, raise, override, reset', () => {
     await q(`UPDATE users SET timezone=NULL WHERE id=$1`, [w.owner.id]);
   };
 
+  it('shows the real month spend on a project without a budget (#56)', async () => {
+    await fresh();
+    await addSpend(w.projectId, 2_500_000);
+    const p = await project();
+    expect(p.budget).toMatchObject({ state: 'none', monthlyMicros: null, spentMicros: 2_500_000 });
+    const list = await ok<any>(owner('GET', '/api/projects'));
+    expect(list.projects.find((x: any) => x.id === w.projectId).budget.spentMicros).toBe(2_500_000);
+  });
+
   it('an Owner sets the monthly budget; a plain Member cannot, and the amounts show on the project', async () => {
     await fresh();
     const member = await roleUser('member');

@@ -81,7 +81,6 @@ const finishChat = async (start: any, text = 'ok') => {
 const draft = (over: Record<string, unknown> = {}) => ({
   title: 'Add the login page',
   cardType: 'feature',
-  completionAction: 'pr',
   docsNeeded: false,
   repo: 'toy',
   externalRef: 'ABC-123',
@@ -164,7 +163,7 @@ describe('starting an intake', () => {
 });
 
 describe('the BA drafts cards in the intake chat', () => {
-  it('maps the ticket, drafts a card with every required field and a completion action, and specifies it', async () => {
+  it('maps the ticket, drafts a card with every required field (the completion action follows the project), and specifies it', async () => {
     await setup();
     const { intake, start } = await openIntake();
     // cards need a project first
@@ -186,7 +185,7 @@ describe('the BA drafts cards in the intake chat', () => {
       origin: 'intake',
       status: 'draft',
       stage: 'spec',
-      completion_action: 'pr',
+      completion_action: null,
       owner_user_id: w.owner.id,
       repo_id: w.repoId,
     });
@@ -235,8 +234,12 @@ describe('the BA drafts cards in the intake chat', () => {
     const noTitle = await rpc(start.chatId, 'card.create', { fields: {} });
     expect(noTitle.ok).toBe(false);
     expect(noTitle.error).toMatch(/title/);
-    const badAction = await rpc(start.chatId, 'card.create', draft({ completionAction: 'ship' }));
+    const badAction = await rpc(start.chatId, 'card.create', draft({ completionAction: 'pr' }));
     expect(badAction.ok).toBe(false);
+    // #52: an agent never sets the completion action; the refusal says what to do instead
+    expect(badAction.error).toMatch(/agents may not set the completion action/);
+    expect(badAction.error).toMatch(/ask the manager/);
+    expect((await rpc(start.chatId, 'card.create', draft({ completionAction: 'ship' }))).ok).toBe(false);
     const badRepo = await rpc(start.chatId, 'card.create', draft({ repo: 'nope' }));
     expect(badRepo.error).toMatch(/unknown repo 'nope'/);
     const wrongProject = await rpc(start.chatId, 'card.create', draft({ project: 'OTHER' }));
@@ -258,9 +261,14 @@ describe('the BA drafts cards in the intake chat', () => {
     expect((await q('SELECT status FROM cards'))[0]).toMatchObject({ status: 'draft' });
     expect(await eventsOfType('CardSpecified')).toHaveLength(0);
 
-    const fixed = await rpc(start.chatId, 'card.update', {
+    const noAction = await rpc(start.chatId, 'card.update', {
       ref: incomplete.result.ref,
       completionAction: 'push_branch',
+    });
+    expect(noAction.ok).toBe(false);
+    expect(noAction.error).toMatch(/agents may not set the completion action/);
+    const fixed = await rpc(start.chatId, 'card.update', {
+      ref: incomplete.result.ref,
       fields: { testPlan: 'Run it.' },
     });
     expect(fixed).toMatchObject({ ok: true, result: { missing: [] } });

@@ -303,3 +303,50 @@ describe('edit form helpers', () => {
     expect(Object.keys(errors)).toContain('affectedAreas');
   });
 });
+
+describe('priority and completion action in place (#54)', () => {
+  const claimed = (over: Partial<CardDetailResponse['permissions']> = {}) =>
+    data({
+      card: { ...baseCard, status: 'claimed', stage: 'build', priority: 5 },
+      permissions: {
+        ...data().permissions,
+        canEdit: false,
+        canEditPriority: true,
+        canEditCompletion: true,
+        ...over,
+      },
+    });
+
+  it('patch directly on a claimed card, with the hint, and no Edit button', async () => {
+    const patches = stubFetch(false);
+    const user = renderCard(claimed());
+    expect(screen.queryByRole('button', { name: /^edit$/i })).toBeNull();
+    expect(screen.getByTestId('completion-hint')).toHaveTextContent('Applies to the next finalise');
+    await user.selectOptions(screen.getByTestId('card-priority'), '1');
+    await waitFor(() => expect(patches).toContainEqual({ priority: 1 }));
+    await user.selectOptions(screen.getByTestId('card-completion'), 'push_branch');
+    await waitFor(() => expect(patches).toContainEqual({ completionAction: 'push_branch' }));
+    await user.selectOptions(screen.getByTestId('card-completion'), '');
+    await waitFor(() => expect(patches).toContainEqual({ completionAction: null }));
+  });
+
+  it('shows plain text when the server says the completion action is locked', () => {
+    stubFetch(false);
+    renderCard(claimed({ canEditCompletion: false }));
+    expect(screen.getByTestId('card-priority')).toBeInTheDocument();
+    expect(screen.queryByTestId('card-completion')).toBeNull();
+  });
+
+  it('shows the server refusal next to the control', async () => {
+    stubFetch(
+      false,
+      () =>
+        new Response(JSON.stringify({ error: { code: 'finalize_pending', message: 'settle it first' } }), {
+          status: 409,
+        }),
+    );
+    const user = renderCard(claimed());
+    await user.selectOptions(screen.getByTestId('card-completion'), 'pr');
+    expect(await screen.findByText(/settle it first/)).toBeInTheDocument();
+  });
+});

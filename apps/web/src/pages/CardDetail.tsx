@@ -26,7 +26,12 @@ import {
 import { useDecisionPolicy, useRehomeCard } from '../api/queries/members.ts';
 import { AttachmentsPanel } from '../components/AttachmentsPanel.tsx';
 import { BackoffBadge } from '../components/BackoffBadge.tsx';
-import { EditCardDialog, RiskTierDialog } from '../components/CardEdit.tsx';
+import {
+  CompletionControl,
+  EditCardDialog,
+  PriorityControl,
+  RiskTierDialog,
+} from '../components/CardEdit.tsx';
 import { CardPhase } from '../components/CardPhase.tsx';
 import { AskDevOpsButton } from '../components/devops/AskDevOps.tsx';
 import { EvidencePanel, TestingLinks } from '../components/EvidencePanel.tsx';
@@ -476,7 +481,9 @@ export function CardDetailView({
               )}
               {(!workflow || workflowUsesRepos(workflow)) && (
                 <>
-                  {expert ? (
+                  {permissions.canEditCompletion ? (
+                    <CompletionControl card={card} />
+                  ) : expert ? (
                     <Meta
                       k="Completion action"
                       v={
@@ -498,7 +505,11 @@ export function CardDetailView({
                 </>
               )}
               {expert && card.branchName && <Meta k="Branch" v={card.branchName} mono />}
-              <Meta k="Priority" v={priorityLabel(card.priority)} />
+              {permissions.canEditPriority ? (
+                <PriorityControl card={card} />
+              ) : (
+                <Meta k="Priority" v={priorityLabel(card.priority)} />
+              )}
               {(data.phase || permissions.canSetPhase) && (
                 <div className="sm:col-span-2 lg:col-span-1">
                   <dt className="sr-only">Phase</dt>

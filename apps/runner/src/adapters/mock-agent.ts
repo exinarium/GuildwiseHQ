@@ -156,7 +156,7 @@ async function report(brief: Brief, action: Action): Promise<{ code: number; out
       ? aom(['test', 'fail', '--title', 'Mock bug', '--note', 'mock failure', '--evidence', 'mock: 1 failed'])
       : aom(['test', 'pass', '--evidence', 'mock: 1 passed', '--command', 'mock test']);
   }
-  // M7: the BA claims Finalize and runs the card's completion action (a different `--action` would revise it).
+  // M7: the BA claims Finalize and runs the card's own completion action (an agent never chooses it).
   if (has('finalized')) {
     // An investigation-only card: record the architect's result first (ledger + PROJECT.md), then finalize; a report in
     // the vault needs no git step.
@@ -174,13 +174,7 @@ async function report(brief: Brief, action: Action): Promise<{ code: number; out
         kind: 'progress',
         text: `mock BA: investigation record: ${(rec.code === 0 ? rec.out : rec.err).trim()}`.slice(0, 300),
       });
-      return aom([
-        'finalize',
-        '--action',
-        brief.investigation?.report?.location === 'vault' ? 'none' : (brief.card.completionAction ?? 'merge'),
-        '--note',
-        `mock BA: ${brief.card.ref} investigated`,
-      ]);
+      return aom(['finalize', '--note', `mock BA: ${brief.card.ref} investigated`]);
     }
     // M8: a card that came from a ticket gets its outside update drafted first (`fields.mockOutbound` overrides the text;
     // a blocked draft is rewritten once, as the real BA would).
@@ -191,13 +185,7 @@ async function report(brief: Brief, action: Action): Promise<{ code: number; out
         if (aom(['outbound', 'draft', '--kind', mock.kind ?? 'resolution', '--body', body]).code === 0) break;
       }
     }
-    return aom([
-      'finalize',
-      '--action',
-      brief.card.completionAction ?? 'push_branch',
-      '--note',
-      `mock BA: ${brief.card.ref} is ready`,
-    ]);
+    return aom(['finalize', '--note', `mock BA: ${brief.card.ref} is ready`]);
   }
   const wanted = outcomes.find((o) => o.kind === (failing ? 'failure' : 'success')) ?? outcomes[0];
   if (!wanted) return { code: 1, out: '', err: `no outcomes for stage ${stage}` };
@@ -1093,7 +1081,6 @@ async function intakeMain(): Promise<number> {
     const draft = {
       title,
       cardType: 'feature',
-      completionAction: d.completionAction ?? source.completionAction ?? 'push_branch',
       docsNeeded: d.docsNeeded ?? false,
       ...((d.repo ?? repo) ? { repo: d.repo ?? repo } : {}),
       ...(key ? { externalRef: key } : {}),
@@ -1256,7 +1243,6 @@ async function deskMain(): Promise<number> {
   const draft = {
     title,
     cardType: 'feature',
-    completionAction: 'push_branch',
     docsNeeded: false,
     ...(repoName ? { repo: repoName } : {}),
     fields: {

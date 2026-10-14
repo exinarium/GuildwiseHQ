@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
+  BA_ROLE_KEY,
   CHAT_ERROR,
   type ChatContext,
   canDirectAgentInOrg,
@@ -169,21 +170,26 @@ export class ChatRelay {
       const intake = await intakeContext(ctx, msg.threadId);
       // A chat about a project may read the project's own clones and its reference repositories (when this workstation has
       // them); the DevOps engineer reads anywhere anyway.
-      const readRepos: ReadRepo[] = row.thread_project_id
-        ? [
-            ...(await projectReadRepos(ctx.pool, row.thread_project_id)),
-            ...(await referenceReadRepos(ctx.pool, row.thread_project_id)),
-          ]
-        : [];
+      // The business analyst never reads code (#47): the Architect investigates the repositories, the BA specifies. A BA chat
+      // gets no repository at all, neither the project's, the reference repositories nor a card's worktree.
+      const readsCode = row.role_key !== BA_ROLE_KEY;
+      const readRepos: ReadRepo[] =
+        row.thread_project_id && readsCode
+          ? [
+              ...(await projectReadRepos(ctx.pool, row.thread_project_id)),
+              ...(await referenceReadRepos(ctx.pool, row.thread_project_id)),
+            ]
+          : [];
       // A role with `readOrgRepos` (the architect) also reads every repository of the organization (read-only).
-      if (row.permissions?.readOrgRepos === true) {
+      if (readsCode && row.permissions?.readOrgRepos === true) {
         const seen = new Set(readRepos.map((r) => r.repoId));
         for (const r of await orgReadRepos(ctx.pool, row.org_id, userId))
           if (!seen.has(r.repoId)) readRepos.push(r);
       }
-      const localRepos = row.thread_project_id
-        ? await localReadRepos(ctx.pool, row.thread_project_id, row.workstation_id)
-        : [];
+      const localRepos =
+        row.thread_project_id && readsCode
+          ? await localReadRepos(ctx.pool, row.thread_project_id, row.workstation_id)
+          : [];
       // A chat with no project yet (an intake chat maps the ticket to a project during the chat) gets the servers granted
       // to the organization's projects this user belongs to; the agent's own mcp:<server> permission still applies.
       const mcpGranted = row.thread_project_id
@@ -202,7 +208,9 @@ export class ChatRelay {
         ...(row.thread_card_id && typeof row.card_external_ref === 'string' && row.card_external_ref
           ? { cardExternalRef: row.card_external_ref }
           : {}),
-        ...(row.thread_card_id && row.card_worktree_path ? { cardWorktreePath: row.card_worktree_path } : {}),
+        ...(readsCode && row.thread_card_id && row.card_worktree_path
+          ? { cardWorktreePath: row.card_worktree_path }
+          : {}),
         ...(readRepos.length > 0 ? { readRepos } : {}),
         ...(localRepos.length > 0 ? { localReadRepos: localRepos } : {}),
         ...(mcpGranted.length > 0 ? { mcpServers: mcpGranted } : {}),

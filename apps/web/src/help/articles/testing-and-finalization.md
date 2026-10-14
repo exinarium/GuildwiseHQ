@@ -33,7 +33,7 @@ At the Finalize stage, your BA ships the work the way the project says. Every pr
 
 Agents work on a card branch of their own. In each project's settings, **How finished work lands** is either **Commit and push to the working branch (no pull request)** (the default) or **Pull request I approve**. If the working branch is protected on the code host, Guildwise opens a pull request instead, switches the project to pull requests and tells you on the card. On the card you see plain results: *"Your change is live on main"* or *"Waiting for you to merge the pull request"*.
 
-With **expert mode** on (Settings), each card also has its own **completion action**, which the BA may revise:
+With **expert mode** on (Settings), each card also has its own **completion action**, which only you change (the BA never does):
 
 - **Commit and push to the working branch**: no pull request. The card's branch is merged into the working branch and the working branch is pushed. Small cards go straight in; large cards wait for your approval on the desk (**Approve merge**).
 - **Pull request**: push the card branch to the git host and open a pull request into the working branch (the main branch when you use one branch), when the workstation is connected to the host, or ask the desk if it cannot.

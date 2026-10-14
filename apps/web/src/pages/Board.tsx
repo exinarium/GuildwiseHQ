@@ -144,6 +144,9 @@ export function Board() {
                 Convert to project
               </Button>
             )}
+            <ButtonLink to={`/p/${project.key}/archive`} variant="ghost">
+              Archive
+            </ButtonLink>
             <ButtonLink
               to={`/projects/${project.id}/settings`}
               variant="ghost"

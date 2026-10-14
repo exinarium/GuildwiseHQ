@@ -1,7 +1,10 @@
 import {
+  type ArchiveQuery,
+  type ArchiveResponse,
   type BlockedReason,
   type BoardResponse,
   boardColumnsWith,
+  CARD_ARCHIVE_AFTER_HOURS,
   type CardBudget,
   type CardDetailResponse,
   type CardDto,
@@ -296,6 +299,9 @@ export async function getCardDetail(ctx: Ctx, userId: string, idOrRef: string): 
     })),
     permissions: {
       canEdit: manage && (card.status === 'draft' || (card.status === 'queued' && !card.claim_id)),
+      canEditPriority: manage && card.status !== 'cancelled',
+      canEditCompletion:
+        manage && open && !['awaiting_approval', 'running'].includes(card.finalize_state ?? ''),
       canSetRisk: manage && open && !['awaiting_approval', 'running'].includes(card.finalize_state ?? ''),
       canSetPhase: open && memberRefusal(card) === null,
       canSpecify: manage && card.status === 'draft',
@@ -404,6 +410,73 @@ export async function boardNotices(
   return { blocked, hygiene, budget };
 }
 
+/** Cards finished before this moment are archived: they are off the board and listed in the project's archive. */
+export const archiveCutoff = (now: Date): Date =>
+  new Date(now.getTime() - CARD_ARCHIVE_AFTER_HOURS * 3_600_000);
+
+const escapeLike = (q: string) => q.replace(/[\\%_]/g, (c) => `\\${c}`);
+
+/** The archive of a project: done and cancelled cards finished more than a day ago, newest first, searchable and filterable. */
+export async function getArchive(ctx: Ctx, userId: string, query: ArchiveQuery): Promise<ArchiveResponse> {
+  const project = await loadVisibleProject(ctx.pool, userId, query.projectId);
+  const where: string[] = [
+    `c.project_id = $1`,
+    `c.finished_at IS NOT NULL`,
+    `c.finished_at <= $2`,
+    `c.status IN ('done','cancelled')`,
+  ];
+  const args: unknown[] = [project.id, archiveCutoff(ctx.clock.now())];
+  const arg = (v: unknown) => `$${args.push(v)}`;
+  if (query.status) where.push(`c.status = ${arg(query.status)}`);
+  if (query.q) {
+    const like = `%${escapeLike(query.q)}%`;
+    const pfx = arg(`${escapeLike(query.q)}%`);
+    const lk = arg(like);
+    where.push(`(c.ref ILIKE ${pfx} OR c.title ILIKE ${lk} OR c.fields->>'externalRef' ILIKE ${lk})`);
+  }
+  if (query.from) where.push(`c.finished_at >= ${arg(`${query.from}T00:00:00Z`)}::timestamptz`);
+  if (query.to)
+    where.push(`c.finished_at < (${arg(`${query.to}T00:00:00Z`)}::timestamptz + interval '1 day')`);
+  if (query.agentId)
+    where.push(
+      `EXISTS (SELECT 1 FROM card_handoffs h WHERE h.card_id = c.id AND h.agent_id = ${arg(query.agentId)})`,
+    );
+  const clause = where.join(' AND ');
+  const total = Number(
+    (await one(ctx.pool, `SELECT count(*)::int AS n FROM cards c WHERE ${clause}`, args))?.n ?? 0,
+  );
+  const list = await rows(
+    ctx.pool,
+    `SELECT c.id, c.ref, c.title, c.card_type, c.status, c.priority, c.finished_at, c.finalize_action,
+            c.fields->>'externalRef' AS external_ref,
+            (SELECT a.name FROM card_handoffs h JOIN agents a ON a.id = h.agent_id
+              WHERE h.card_id = c.id ORDER BY h.created_at DESC LIMIT 1) AS last_agent
+       FROM cards c WHERE ${clause}
+      ORDER BY c.finished_at DESC, c.number DESC
+      LIMIT ${arg(query.pageSize)} OFFSET ${arg((query.page - 1) * query.pageSize)}`,
+    args,
+  );
+  return {
+    projectId: project.id,
+    afterHours: CARD_ARCHIVE_AFTER_HOURS,
+    total,
+    page: query.page,
+    pageSize: query.pageSize,
+    cards: list.map((c) => ({
+      id: c.id,
+      ref: c.ref,
+      title: c.title,
+      cardType: c.card_type,
+      status: c.status,
+      externalRef: c.external_ref ?? null,
+      priority: c.priority,
+      finishedAt: iso(c.finished_at) as string,
+      completionAction: c.finalize_action ?? null,
+      lastAgent: c.last_agent ?? null,
+    })),
+  };
+}
+
 export async function getBoard(
   ctx: Ctx,
   userId: string,
@@ -422,8 +495,9 @@ export async function getBoard(
                              AND ch.status NOT IN ('done','cancelled') ORDER BY ch.number DESC LIMIT 1) wo ON c.status = 'waiting'
       WHERE c.project_id=$1 AND c.status <> 'cancelled'
         AND ($2::text IS NULL OR ($2 = 'none' AND c.phase_id IS NULL) OR c.phase_id::text = $2)
+        AND (c.finished_at IS NULL OR c.finished_at > $3)
       ORDER BY c.priority, c.queued_at NULLS LAST, c.number`,
-    [projectId, phaseId ?? null],
+    [projectId, phaseId ?? null, archiveCutoff(ctx.clock.now())],
   );
   // Open cards that run on other workflows than the project's (research cards in a code project, cards kept through a
   // conversion) add their columns before the terminal one; they show only while such cards exist.

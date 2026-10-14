@@ -90,7 +90,6 @@ describe('projection rebuild', () => {
     await call('intake.map', { project: 'TOY' });
     await call('card.create', {
       title: 'From intake',
-      completionAction: 'pr',
       repo: 'toy',
       fields: {
         context: 'c',

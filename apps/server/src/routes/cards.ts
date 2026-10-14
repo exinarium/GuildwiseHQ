@@ -1,4 +1,5 @@
 import {
+  ArchiveQuerySchema,
   BoardQuerySchema,
   CancelCardRequestSchema,
   CardParamsSchema,
@@ -26,7 +27,7 @@ import {
 } from '../commands/cards.ts';
 import type { Ctx } from '../context.ts';
 import { iso, one } from '../db/sql.ts';
-import { getBoard, getCardDetail, searchCards, toCardDto } from '../queries/cards.ts';
+import { getArchive, getBoard, getCardDetail, searchCards, toCardDto } from '../queries/cards.ts';
 import { typed } from './util.ts';
 
 export function cardRoutes(ctx: Ctx) {
@@ -36,6 +37,11 @@ export function cardRoutes(ctx: Ctx) {
     app.get('/api/board', { schema: { querystring: BoardQuerySchema } }, async (req) => {
       const s = await requireUser(ctx, req);
       return getBoard(ctx, s.user.id, req.query.projectId, req.query.phaseId);
+    });
+
+    app.get('/api/archive', { schema: { querystring: ArchiveQuerySchema } }, async (req) => {
+      const s = await requireUser(ctx, req);
+      return getArchive(ctx, s.user.id, req.query);
     });
 
     app.get('/api/search/cards', { schema: { querystring: CardSearchQuerySchema } }, async (req) => {

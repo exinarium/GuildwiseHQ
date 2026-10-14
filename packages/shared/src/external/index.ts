@@ -104,13 +104,13 @@ export interface ExternalAdapter {
 export const JIRA_SKILL_PATH = 'skills/jira.md';
 export const JIRA_SKILL_MD = `# Skill: read a Jira ticket
 
-Use this to read one Jira ticket during intake. It is read-only: never create, edit, comment on or transition a ticket.
+Use this to read one Jira ticket during intake. It is read-only: never create, edit, comment on or transition a ticket. Your shell has no network, so you read through the workstation's own Jira connection.
 
-1. Use the Jira tool your runtime provides (an Atlassian/Jira MCP server, a \`jira\` CLI, or the REST API with the credentials already configured on this workstation). Do not ask the manager for credentials.
-2. Fetch the issue by key: summary, description, issue type, status, priority, labels, components, reporter, and the comments.
-3. Fetch linked issues (blocks, is blocked by, relates to) and the parent epic, when present; they feed the dependency graph.
+1. Read the ticket: \`aom source read --ref <KEY>\` prints the fields (summary, type, status, priority, labels, components, reporter), the description, the comments and the links (blocks, is blocked by, relates to, the parent epic). Attachments: \`aom source attachments <KEY>\` lists them and \`aom source attachment <KEY> --all\` downloads them into your scratch directory.
+2. If the runner says Jira is not connected, ask the manager to run \`aom-runner jira-connect\` on this workstation. Do not ask for credentials. Only if that cannot be done, fall back to the Atlassian MCP server when your runtime offers one.
+3. Linked issues and the parent epic feed the dependency graph: read them with the same command.
 4. Note the Jira project key (the part before the dash). It usually identifies the Guildwise HQ project.
-5. If the ticket cannot be read (no tool, no access), say so plainly in the conversation; never invent ticket content.
+5. If the ticket cannot be read (no connection, no access), say so plainly in the conversation; never invent ticket content.
 6. Store the ticket key in the card's \`externalRef\` field. Quote the ticket in the card's context; do not paste secrets.
 `;
 

@@ -59,7 +59,6 @@ async function rpc(method: string, params: Record<string, unknown> = {}) {
 const draft = (over: Record<string, unknown> = {}) => ({
   title: 'Draft card',
   cardType: 'feature',
-  completionAction: 'merge',
   repo: 'toy',
   fields: {
     context: 'c',

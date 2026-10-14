@@ -13,6 +13,7 @@ export function crumbsFor(pathname: string, search: string, projects: ProjectDto
   const name = (k?: string) => projects.find((p) => p.key === k)?.name ?? k ?? '';
   const table: Array<[string, (p: Record<string, string | undefined>) => Crumb[]]> = [
     ['/p/:key/board', (p) => [{ label: name(p.key) }, { label: 'Board' }]],
+    ['/p/:key/archive', (p) => [{ label: name(p.key), to: `/p/${p.key}/board` }, { label: 'Archive' }]],
     ['/p/:key/feed', (p) => [{ label: name(p.key), to: `/p/${p.key}/board` }, { label: 'Feed' }]],
     [
       '/p/:key/phases/:number',

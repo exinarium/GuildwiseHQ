@@ -838,13 +838,12 @@ const VERBS: Record<string, Verb> = {
     return report(ctx, { kind: 'escalate', itemId, note: textFlag(ctx, p, 'note', true) as string });
   },
   finalize: async (ctx, p) => {
-    const action = one(p, 'action');
-    if (action !== 'pr' && action !== 'push_branch' && action !== 'merge' && action !== 'none')
+    if (one(p, 'action') !== undefined)
       throw new UsageError(
-        'usage: aom finalize --action <pr|push_branch|merge|none> --note "<why this action>"   (none: only an investigation-only card whose report is in the vault)',
+        'agents may not choose the completion action: finalize runs the card\'s own completion action (set by a person on the card, else the project\'s default). Run `aom finalize --note "<note>"` without --action. If the card should land differently, say so in the conversation and ask the manager to change it on the card page.',
       );
-    const note = textFlag(ctx, p, 'note', false)?.trim() || `Finalize with ${action}`;
-    return report(ctx, outcome('finalized', note, { action }));
+    const note = textFlag(ctx, p, 'note', false)?.trim() || 'Finalize';
+    return report(ctx, outcome('finalized', note, {}));
   },
   intake: async (ctx, p) => {
     const sub = p.positionals[0];
@@ -1017,7 +1016,7 @@ export const USAGE = `usage: aom <verb> [options]
   outcome <id> --note "<text>" [--data-file <json>]
   answer --item <id> --text "<answer>" [--option <id>]   answer a colleague's question (question shifts)
   escalate --item <id> --note "<what must be decided>"   pass the question on (peer -> BA -> manager's desk)
-  finalize --action <pr|push_branch|merge|none> [--note "<why>"]   BA: run the completion action (revise it with a different action; none: investigation-only card, report in the vault)
+  finalize [--note "<note>"]   BA: run the card's own completion action (you never choose it; an investigation-only card with its report in the vault needs no git step)
   design --report <path> --summary "<text>" | investigate --report <path> --summary "<text>"   architect: hand the card on with its design (build), or end an investigation-only card (finalize); the runner checks the report is committed
   investigation record --title "<t>" --summary-file <md> [--decision]   BA: record an investigation-only card's result in the ledger and PROJECT.md (needed before finalize)
   git push | fetch | merge-main | verify-merge   architect: the runner pushes the card branch, fetches origin, merges the latest main, checks the conflict resolution

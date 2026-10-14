@@ -112,7 +112,7 @@ function renderChatCardsSection(ctx: ChatContext): string {
   out.push(
     [
       '- `aom intake map --project <KEY>`: cards of this chat belong to this project (skip it when a project is in context).',
-      `- \`aom card create --json '<draft json>'\`: draft a card (project, title, cardType, completionAction, docsNeeded, priority, repo, dependencies, externalRef, fields). Prints the new ref and what is still missing. \`--file <path>\` or \`--file -\` (stdin) also work.`,
+      `- \`aom card create --json '<draft json>'\`: draft a card (project, title, cardType, docsNeeded, priority, repo, dependencies, externalRef, fields). Prints the new ref and what is still missing. Never set completionAction: the project decides, and only the manager changes it. \`--file <path>\` or \`--file -\` (stdin) also work.`,
       "- `aom card update <REF> --json '<patch json>'`: change a card you created.",
       '- `aom card specify <REF>`: validate the card and move it to the build queue; refused while required fields are missing.',
       '- `aom repo create [--provider github|gitlab|azure-devops|bitbucket-cloud] --name <name> --private|--public --project <KEY> [--description "<text>"]`: ask the project owner to create a new repository for the project (name shape: `owner/repo` for GitHub, `group/subgroup/project` GitLab, `organization/project/repo` Azure DevOps, `workspace/repo` Bitbucket Cloud). They approve on the desk and their own runner creates it, so never try `gh` or `git push` yourself; you are told the result in the conversation, then use the repo in your cards.',
@@ -171,26 +171,26 @@ function renderIntakeSection(intake: NonNullable<ChatContext['intake']>, jiraSki
   out.push('## How to run the intake');
   out.push(
     [
-      '1. Read the source (GitHub: `aom source read`; Jira: the Jira skill). Never invent ticket content.',
+      "1. Read the source with `aom source read --ref <KEY or owner/repo#n>` (Jira: through the workstation's Jira connection; the Atlassian MCP server is only a fallback). If the runner says Jira is not connected, ask the manager to run `aom-runner jira-connect` on the workstation. Never invent ticket content.",
       '2. Map the ticket to a project; if none fits, run `aom intake unmapped` instead of guessing. `aom ledger search` shows earlier mapping decisions.',
-      '3. Investigate (project docs, the repository read-only, the ledger) and ask the manager only what the sources cannot answer.',
-      '4. Draft one card per independently deliverable change with every field a builder needs: context, requirements, acceptance criteria (each one checkable), affected areas, constraints, test plan, completion action (pr, push_branch or merge, chosen now), repo, dependencies and the ticket key as externalRef.',
+      '3. Investigate with PROJECT.md, the vault, the ledger and the ticket. Do not read source code and never ask the manager for repository or reference-repository access: put code questions into the card and set designNeeded (or investigationOnly) so the Architect investigates.',
+      '4. Draft one card per independently deliverable change with every field a builder needs: context, requirements, acceptance criteria (each one checkable), affected areas, constraints, test plan, repo, dependencies and the ticket key as externalRef.',
       '5. Specify each complete card with `aom card specify`, and tell the manager which cards you created.',
     ].join('\n'),
   );
   out.push('## Intake commands');
   out.push(
     [
-      '- `aom source read --ref <owner/repo#n>`: read a GitHub issue (read-only, through `gh` on this workstation). Jira is read with the Jira skill below.',
+      "- `aom source read --ref <KEY>`: read a Jira ticket (fields, description, comments, links) through the workstation's Jira connection, or a GitHub issue `<owner/repo#n>` through `gh` (read-only). The Atlassian MCP server is only a fallback; if the runner says Jira is not connected, ask the manager to run `aom-runner jira-connect` on the workstation.",
       ...(intake.externalSystem === 'jira' || !intake.externalSystem
         ? [
-            '- `aom source attachments <KEY>` / `aom source attachment <KEY> [<filename|id> | --all]`: the Jira tool lists attachments but cannot show them, and your shell has no network. The runner downloads them with its own Jira login into your scratch directory (20 MB per file) and prints the paths; open screenshots and SVG with the Read tool. Only the ticket of this intake.',
+            '- `aom source attachments <KEY>` / `aom source attachment <KEY> [<filename|id> | --all]`: your shell has no network, so the runner downloads them through its own Jira connection into your scratch directory (20 MB per file) and prints the paths; open screenshots and SVG with the Read tool. Only the ticket of this intake.',
           ]
         : []),
       '- `aom card attach <path> [--card <REF>]`: attach a downloaded file (from your scratch directory) to a card you drafted, so the builder and tester can look at it.',
       '- `aom intake map --project <KEY>`: the ticket belongs to this project.',
       '- `aom intake unmapped --note "<why>"`: no project fits; the manager is asked on the desk and you are told the answer.',
-      "- `aom card create --json '<draft json>'`: draft a card (project, title, cardType, completionAction, docsNeeded, priority, repo, dependencies, externalRef, fields). Prints the new ref and what is still missing. `--file <path>` and `--file -` (stdin) also work: you do not need to write a file first.",
+      "- `aom card create --json '<draft json>'`: draft a card (project, title, cardType, docsNeeded, priority, repo, dependencies, externalRef, fields). Prints the new ref and what is still missing. Never set completionAction: the project decides, and only the manager changes it. `--file <path>` and `--file -` (stdin) also work: you do not need to write a file first.",
       "- `aom card update <REF> --json '<patch json>'`: change a card you created.",
       '- `aom card specify <REF>`: validate the card and move it to the build queue; refused while required fields are missing.',
       '',

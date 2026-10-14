@@ -28,12 +28,13 @@ afterAll(async () => {
 });
 
 const desk = () => ok<any>(w.t.req('GET', '/api/desk', { cookie: w.owner.cookie }));
-const finalized = (action: string, note = 'ready') => ({
+const finalized = (note = 'ready') => ({
   kind: 'outcome',
   outcomeId: 'finalized',
   note,
-  data: { action },
+  data: {},
 });
+const finalizedWith = (action: string, note = 'ready') => ({ ...finalized(note), data: { action } });
 const nextCommand = (from: number, name = 'finalize.execute') =>
   r.waitFor('command', (f) => f.command === name, 15_000, from);
 
@@ -65,7 +66,7 @@ describe('BA finalize', () => {
     expect(start.brief.card.completionAction).toBe('merge');
     expect(start.worktree).toMatchObject({ mode: 'reuse' });
     await p.startShift(r, start);
-    const res = await p.report(r, start.shiftId, finalized('merge', 'branch is ready'));
+    const res = await p.report(r, start.shiftId, finalized('branch is ready'));
     expect(res).toMatchObject({ accepted: true });
     expect(res.message).toMatch(/executing the completion action \(merge\)/);
     r.ended(start.shiftId, 'reported');
@@ -100,28 +101,38 @@ describe('BA finalize', () => {
     ).toHaveLength(1);
   });
 
-  it('the BA may revise the completion action before finalizing; the revision is recorded on the card', async () => {
-    const card = await cardAtFinalize({ title: 'Revise' });
+  it("the BA may not choose the completion action: the card's own action runs", async () => {
+    const card = await cardAtFinalize({ title: 'No revision' });
+    const start = await p.next('Ben');
+    await p.startShift(r, start);
+    for (const action of ['pr', 'merge', 'push_branch']) {
+      const refused = await p.report(r, start.shiftId, finalizedWith(action, 'touches the auth flow'));
+      expect(refused.accepted).toBe(false);
+      expect(refused.error).toMatch(/agents may not choose the completion action/);
+      expect(refused.error).toMatch(/ask the manager/);
+    }
+    expect((await cardRow(card.id)).completion_action).toBe('merge');
     const from = r.received.length;
-    const out = await p.run('Ben', finalized('pr', 'touches the auth flow: a human should read the diff'));
-    expect(out.res).toMatchObject({ accepted: true });
-    expect((await cardRow(card.id)).completion_action).toBe('pr');
-    const cmd = await nextCommand(from);
-    expect(cmd.payload).toMatchObject({ action: 'pr' });
-    const msgs = await q(`SELECT body FROM thread_messages WHERE thread_id=$1 AND kind='comment'`, [card.id]);
-    expect(msgs.map((m) => m.body).join('\n')).toMatch(
-      /Completion action revised from merge to pr: touches the auth flow/,
-    );
+    expect((await p.report(r, start.shiftId, finalized())).accepted).toBe(true);
+    expect((await nextCommand(from)).payload).toMatchObject({ action: 'merge' });
     const updated = (await eventsOfType('CardUpdated')).filter(
-      (e) => e.cardId === card.id && e.changes.completionAction === 'pr',
+      (e) => e.cardId === card.id && e.changes.completionAction !== undefined,
     );
-    expect(updated).toHaveLength(1);
+    expect(updated).toHaveLength(0);
+  });
+
+  it("a card with a person's override finalizes with that action; without one, the project default", async () => {
+    const card = await cardAtFinalize({ title: 'Override', completionAction: 'pr' });
+    const from = r.received.length;
+    const out = await p.run('Ben', finalized());
+    expect(out.res).toMatchObject({ accepted: true });
+    expect((await nextCommand(from)).payload).toMatchObject({ cardId: card.id, action: 'pr' });
   });
 
   it('a large merge waits for the manager even when the BA finalizes', async () => {
     const card = await cardAtFinalize({ title: 'Large' }, true);
     const from = r.received.length;
-    const out = await p.run('Ben', finalized('merge'));
+    const out = await p.run('Ben', finalized());
     expect(out.res.message).toMatch(/needs the manager/);
     expect(await cardRow(card.id)).toMatchObject({ status: 'waiting', finalize_state: 'awaiting_approval' });
     expect(await q(`SELECT 1 FROM runner_commands WHERE type='finalize.execute'`)).toHaveLength(0);
@@ -146,7 +157,7 @@ describe('BA finalize', () => {
     await q('UPDATE projects SET merge_large_without_approval=true WHERE id=$1', [w.projectId]);
     try {
       const from = r.received.length;
-      const out = await p.run('Ben', finalized('merge'));
+      const out = await p.run('Ben', finalized());
       expect(out.res.message).toMatch(/executing the completion action \(merge\)/);
       expect(await cardRow(card.id)).toMatchObject({ status: 'waiting', finalize_state: 'running' });
       expect((await desk()).items.filter((i: any) => i.subkind === 'large_merge')).toHaveLength(0);
@@ -165,7 +176,7 @@ describe('BA finalize', () => {
     await cardAtFinalize({ title: 'Bad action' });
     const start = await p.next('Ben');
     await p.startShift(r, start);
-    const res = await p.report(r, start.shiftId, finalized('ship_it'));
+    const res = await p.report(r, start.shiftId, finalizedWith('ship_it'));
     expect(res.accepted).toBe(false);
     expect(res.error).toMatch(/invalid data/);
   });

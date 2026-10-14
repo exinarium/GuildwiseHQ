@@ -443,7 +443,7 @@ export async function applyShiftReport(
       });
       if (!fin.ok) return { accepted: false, error: fin.error };
       mains = fin.events;
-      handoffData = { action: payloadData.action };
+      handoffData = { action: fin.action };
       acceptMessage = fin.message;
       break;
     }

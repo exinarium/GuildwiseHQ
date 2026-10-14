@@ -30,7 +30,7 @@ export function commandForOutcome(outcome: BriefOutcome): string {
     case 'unsupported':
       return 'aom outcome unsupported --note "<each unsupported claim and why>"';
     case 'finalized':
-      return 'aom finalize --action <merge|pr|push_branch> --note "<why this action; say so when you revise the card\'s completion action>"';
+      return 'aom finalize --note "<note>"   # runs the card\'s own completion action; never pass --action, only the manager changes it';
     case 'devops_done':
       return 'aom devops-done --summary "<what you did>" --command "<command you ran>"';
     case 'devops_approval':

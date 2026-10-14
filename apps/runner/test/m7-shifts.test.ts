@@ -130,7 +130,7 @@ describe('question shifts on the mock runtime', () => {
 });
 
 describe('BA finalize on the mock runtime', () => {
-  it('claims the Finalize stage of a built card and reports the completion action as the finalized outcome', async () => {
+  it('claims the Finalize stage of a built card and reports the finalized outcome (no action chosen)', async () => {
     h = await startHarness();
     await h.runShift({ stage: 'build' });
     const f = await h.runShift({ stage: 'finalize', agentName: 'Ben' });
@@ -138,7 +138,7 @@ describe('BA finalize on the mock runtime', () => {
     expect(reports(h, f.shiftId)[0]?.report).toMatchObject({
       kind: 'outcome',
       outcomeId: 'finalized',
-      data: { action: 'push_branch' },
+      data: {},
     });
     expect(h.server.invalid).toEqual([]);
   }, 120_000);
@@ -201,14 +201,13 @@ describe('the BA intake chat on the mock runtime', () => {
     writeFileSync(join(dir, `${key}.json`), JSON.stringify(body));
   };
 
-  it('reads a Jira ticket with the skill, maps it to a project and drafts a card with a completion action', async () => {
+  it('reads a Jira ticket with the skill, maps it to a project and drafts a card (the project decides the completion action)', async () => {
     const s = server();
     h = await startHarness({ rpc: s.rpc });
     fixture(h, 'ABC-123', {
       title: 'Add the login page',
       body: 'Users cannot sign in.',
       project: 'TOY',
-      completionAction: 'pr',
       acceptanceCriteria: ['The form validates the email'],
       mock: { build: ['ok'] },
     });
@@ -219,7 +218,6 @@ describe('the BA intake chat on the mock runtime', () => {
     expect(s.calls[0]?.params).toEqual({ project: 'TOY' });
     expect(s.calls[1]?.params).toMatchObject({
       title: 'Add the login page',
-      completionAction: 'pr',
       repo: 'toy',
       externalRef: 'ABC-123',
       dependencies: [],
@@ -230,6 +228,7 @@ describe('the BA intake chat on the mock runtime', () => {
         mock: { build: ['ok'] },
       },
     });
+    expect(s.calls[1]?.params).not.toHaveProperty('completionAction');
     expect(s.calls[2]?.params).toEqual({ ref: 'TOY-1' });
     expect(done.messageText).toContain('Read Jira ticket ABC-123 with the Jira skill');
     expect(done.messageText).toContain('Created TOY-1 from ABC-123');

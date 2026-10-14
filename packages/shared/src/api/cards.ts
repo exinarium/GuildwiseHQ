@@ -228,6 +228,10 @@ export const CardDetailResponseSchema = z.object({
     canAttach: z.boolean().optional(),
     /** Set or clear the risk tier override: while the card is open and no merge is pending. */
     canSetRisk: z.boolean().default(false),
+    /** Change the priority at any time (any card but a cancelled one, also while it is claimed). */
+    canEditPriority: z.boolean().optional(),
+    /** Change the completion action: while the card is open and no finalise is waiting for approval or running. */
+    canEditCompletion: z.boolean().optional(),
     /** Put the card in a phase or take it out (the card is open and not a suite or bug child). */
     canSetPhase: z.boolean().optional(),
   }),

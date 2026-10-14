@@ -146,4 +146,27 @@ describe('project reference repositories', () => {
     b.close();
     r.close();
   });
+
+  it('a business analyst chat gets no repository at all (#47: the Architect reads code, the BA specifies)', async () => {
+    const r = await w.connectRunner();
+    const agent = await w.hire('Bea', 'ba', 'senior');
+    const chat = (
+      await ok<any>(
+        w.t.req('POST', '/api/chats', {
+          cookie: w.owner.cookie,
+          body: { agentId: agent.id, projectId: w.projectId },
+        }),
+        201,
+      )
+    ).chat;
+    const b = await Browser.open(w.baseUrl, w.owner.cookie);
+    await b.hello();
+    b.send({ type: 'chat.send', threadId: chat.threadId, body: 'what does it say', clientMsgId: 'm2' });
+    const start = await r.waitFor('chat.start');
+    expect(start.context.readRepos).toBeUndefined();
+    expect(start.context.localReadRepos).toBeUndefined();
+    expect(start.context.cardWorktreePath).toBeUndefined();
+    b.close();
+    r.close();
+  });
 });

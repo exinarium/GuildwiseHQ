@@ -63,16 +63,18 @@ describe('aom answer / escalate / finalize', () => {
     expect(await t.run('escalate', '--item', ITEM)).toBe(1);
   });
 
-  it('finalize reports the completion action as the finalized outcome', async () => {
+  it('finalize reports the finalized outcome without an action; an agent may not choose one', async () => {
     const t = await cli();
-    expect(await t.run('finalize', '--action', 'merge', '--note', 'small and green')).toBe(0);
+    expect(await t.run('finalize', '--note', 'small and green')).toBe(0);
     expect(t.reports).toEqual([
-      { kind: 'outcome', outcomeId: 'finalized', note: 'small and green', data: { action: 'merge' } },
+      { kind: 'outcome', outcomeId: 'finalized', note: 'small and green', data: {} },
     ]);
-    expect(await t.run('finalize', '--action', 'ship')).toBe(1);
-    expect(await t.run('finalize')).toBe(1);
-    expect(await t.run('finalize', '--action', 'pr')).toBe(0);
-    expect(t.reports.at(-1)).toMatchObject({ note: 'Finalize with pr' });
+    expect(await t.run('finalize')).toBe(0);
+    expect(t.reports.at(-1)).toMatchObject({ note: 'Finalize' });
+    const before = t.reports.length;
+    expect(await t.run('finalize', '--action', 'pr')).toBe(1);
+    expect(await t.run('finalize', '--action', 'merge', '--note', 'x')).toBe(1);
+    expect(t.reports).toHaveLength(before);
   });
 });
 

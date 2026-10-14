@@ -192,7 +192,6 @@ describe('thin specs are attributed to the BA through the intake', () => {
   const draft = (title: string) => ({
     title,
     cardType: 'feature',
-    completionAction: 'pr',
     docsNeeded: false,
     repo: 'toy',
     fields: {
