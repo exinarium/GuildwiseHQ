@@ -102,7 +102,7 @@ If an agent seems stuck, open the card: the live shift shows how long it has run
 
 ## Integration tests {#integration-tests}
 
-**Project settings > Run and test > Integration tests** (off until you switch it on) makes the tester run integration and end-to-end suites against a running copy of each card's branch. The card waits in Test while its workstation starts it; the card page lists every suite run (a pass after a failure is marked flaky), and a failed card's copy is kept for the time you set. Switch it off for one card in **Details**.
+**Project settings > Run and test > Integration tests** (off until you switch it on) makes the tester run integration and end-to-end suites against a running copy of each card's branch. The card waits in Test while its workstation starts it; the card page lists every suite run (a pass after a failure is marked flaky), and a failed card's copy is kept for the time you set. Switch it off for one card in **Details**. Instead of a copy per card, choose **a deployed target** (opted in under **Deploy targets > Testing**; production is never tested): the tester then tests what is deployed there, with test accounts you set per workstation.
 
 ## Backing off {#backing-off}
 

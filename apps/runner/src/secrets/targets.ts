@@ -61,9 +61,13 @@ export class TargetSecrets {
 
   /** `env.secret.set`: store one value for a target. Never returns or logs the value. */
   set(p: { targetId: string; name: string; keyId: string; ciphertext: string }): TargetSecretSetResult {
-    if (!TARGET_SECRET_NAME.test(p.name)) return { stored: false, error: 'the name must look like MY_ACCOUNT_PASSWORD' };
+    if (!TARGET_SECRET_NAME.test(p.name))
+      return { stored: false, error: 'the name must look like MY_ACCOUNT_PASSWORD' };
     if (p.keyId !== this.deps.keys.publicKey.keyId)
-      return { stored: false, error: 'the value was encrypted for another key (the runner key changed): enter it again' };
+      return {
+        stored: false,
+        error: 'the value was encrypted for another key (the runner key changed): enter it again',
+      };
     let plain: string;
     try {
       plain = this.deps.keys.decrypt(p.ciphertext);
@@ -130,7 +134,11 @@ export class TargetSecrets {
   }
 
   /** Writes the dotenv file for a shift (mode 0600, in the shift's own temp dir); returns its path, or null without values. */
-  writeFile(dir: string, targetId: string, wanted: readonly string[]): { path: string | null; missing: string[] } {
+  writeFile(
+    dir: string,
+    targetId: string,
+    wanted: readonly string[],
+  ): { path: string | null; missing: string[] } {
     const { values, missing } = this.values(targetId, wanted);
     const names = Object.keys(values);
     if (names.length === 0) return { path: null, missing };

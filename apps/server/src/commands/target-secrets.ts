@@ -1,8 +1,4 @@
-import {
-  EnvSecretResultSchema,
-  type SetTargetSecretRequest,
-  type TargetSecretsResponse,
-} from '@aom/shared';
+import { EnvSecretResultSchema, type SetTargetSecretRequest, type TargetSecretsResponse } from '@aom/shared';
 import type { AuthSession } from '../auth/sessions.ts';
 import { loadVisibleProject } from '../authz/scope.ts';
 import type { Ctx } from '../context.ts';
@@ -30,7 +26,9 @@ export async function setTargetSecret(
       user.id,
     ]);
     if (!ws) throw notFound('workstation not found');
-    const target = await one(tx, 'SELECT * FROM deploy_targets WHERE id=$1 AND removed_at IS NULL', [body.targetId]);
+    const target = await one(tx, 'SELECT * FROM deploy_targets WHERE id=$1 AND removed_at IS NULL', [
+      body.targetId,
+    ]);
     if (!target) throw notFound('deploy target not found');
     await loadVisibleProject(tx, user.id, target.project_id);
     if (!((target.secret_names ?? []) as string[]).includes(body.name))
@@ -40,7 +38,10 @@ export async function setTargetSecret(
       );
     const k = await one(tx, 'SELECT key_id FROM workstation_keys WHERE workstation_id=$1', [workstationId]);
     if (!k || k.key_id !== body.keyId)
-      throw conflict('sudo_key_changed', "the runner's key changed: reload the page and enter the value again");
+      throw conflict(
+        'sudo_key_changed',
+        "the runner's key changed: reload the page and enter the value again",
+      );
     // One value per name is pending at a time.
     await exec(
       tx,

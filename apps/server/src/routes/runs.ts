@@ -5,15 +5,14 @@ import {
   RestartRunRequestSchema,
   RunsQuerySchema,
   SetIntegrationTestsRequestSchema,
-  SetTargetSecretRequestSchema,
   SetRunSettingsRequestSchema,
+  SetTargetSecretRequestSchema,
   StartRunRequestSchema,
 } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { requireUser } from '../auth/guards.ts';
 import { confirmSuite, getIntegrationTests, setIntegrationTests } from '../commands/integration-tests.ts';
-import { setTargetSecret, targetSecretStatuses } from '../commands/target-secrets.ts';
 import {
   extendRun,
   getRun,
@@ -24,6 +23,7 @@ import {
   startRun,
   stopRun,
 } from '../commands/runs.ts';
+import { setTargetSecret, targetSecretStatuses } from '../commands/target-secrets.ts';
 import type { Ctx } from '../context.ts';
 import { typed } from './util.ts';
 

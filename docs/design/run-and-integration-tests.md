@@ -266,3 +266,19 @@ or crash (a test environment that lost its services ends as `runner_restarted` a
 **Spike (a)** (2026-10-14) passed with a real bubblewrap `--unshare-net` call: `socat` bridging a Unix socket to the host's app,
 `curl` and Playwright Chromium reach `http://localhost:<port>` inside it (RUNNER.md, "Integration tests by the tester").
 
+**P4 is built, except private-address targets** (backlog #59, migration 1920). `deploy_targets` gets `test_enabled`, `production` (CHECK:
+never both), `destructive_ok`, `test_hosts` and `secret_names` (events `DeployTargetAdded/Updated`, `PATCH /api/deploy-targets/:id`;
+a tested target needs its app URL). The project setting `remote` takes such a target (`deployTargetId`; checked on save and again
+when a shift starts: a target switched off meanwhile gives the tester no environment). Remote mode starts nothing: the tester's
+brief carries `environment {mode:'remote', target{url, hosts, destructiveOk, secretNames}, suites}`; the runner probes the URL
+(`target_unreachable` becomes a blocking desk item, no retry loop) and gives the sandbox exactly the target's hostnames. A
+destructive suite on a target without `destructive_ok` is refused unless it is reported `skipped`, and `aom test pass` does not
+wait for it. Test accounts: the durable command `env.secret.set` (payload sealed in the browser like the sudo password, emptied
+when answered, expires after a day; `target_secret_status` keeps names and time only), `PUT /api/workstations/:id/target-secrets`,
+`GET /api/projects/:id/target-secrets`; the web UI is under Project settings > Deploy targets > Testing. Per-card remote testing
+needs the branch deployed to the target first (owner decision Q2: per-card runs are local). **Spike (b)** (2026-10-14): `curl` and
+Chromium honour the sandbox proxy variables, Node's `fetch` needs `NODE_USE_ENV_PROXY=1` (set by `aom-env`) and Playwright's
+`request` fixture needs an explicit `proxy`. **Spike (c)** (an IP literal or a private address in `allowedDomains`) could not be run
+outside a Claude session; the design note in RUNNER.md proposes forwarding private targets through the Unix-socket forwarders
+instead. Not built: private-address targets, macOS testers, copying a plan between workstations, tunnels.
+

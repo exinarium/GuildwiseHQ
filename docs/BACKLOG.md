@@ -44,14 +44,6 @@ sending domain may be Guildwise), and commits already on the working branches ar
 (local, removed after the merge). The runner still reads `.aom/test-env.json` from a repository when it exists (retiring it
 is design D12 / P3). The mock agent writes `aom-mock/` files (test only).
 
-### 59. Integration and E2E tests per project, run by testers
-
-**Owner decision (2026-10-14):** whether integration and E2E tests run is a per-project setting. They need networking, so
-builders and reviewers never run them (unit tests only; the handoff names the suites left out). Dedicated tester agents
-run them, when enabled, against a **local** environment (started on the workstation, see the start action #58) or a
-**remote** one (a URL configured in the project). The tester's sandbox then allows exactly that host (localhost ports or
-the remote host), nothing else.
-
 ### 67. Support e-mail into the Support console; an inbox for every organisation
 
 **Owner request (2026-10-14):** route support e-mail through inbound mail (SendGrid Inbound Parse, #62) so the console
@@ -262,7 +254,8 @@ The details of each done item follow this list, by date.
 - #61: No card or agent branch is pushed unless the goal is a pull request. Done 2026-10-14.
 - #62: Inbound e-mail through SendGrid Inbound Parse. Done 2026-10-14.
 - #63: Batch intake: hand the BA a list of tickets. Done 2026-10-14.
-- #58: Start action: run a project branch on a workstation (phase 1: manual start, supervised services, panel, plans recorded). Done 2026-10-14; P2 done (plan replay, service sandbox, Restart / Update & restart, run worktree sweep, services survive a runner restart); P3 and P4 leftovers on the item.
+- #58: Start action: run a project branch on a workstation (phase 1: manual start, supervised services, panel, plans recorded). Done 2026-10-14; P2 done (plan replay, service sandbox, Restart / Update & restart, run worktree sweep, services survive a runner restart); P3 and P4 done under #59.
+- #59: Integration and E2E tests per project, run by testers (local test environment per card, remote deploy targets). Done 2026-10-14 (P3 and P4; private-address targets and macOS testers left).
 - #34: Integrations page (MVP): connect Claude, GitHub, Bitbucket, GitLab, Azure DevOps, Jira and MCP servers from the web. Done 2026-10-14 (phase 2 and 3 leftovers on the item).
 - #60: Claude sign-in from the web (`claude setup-token` driven by the runner; MCP sign-in with paste-back). Done 2026-10-14 (MVP).
 - #64: Manual QA after Finalize, assigned to the person who started the card. Done 2026-10-14.
@@ -351,13 +344,66 @@ engineer of a workstation works out how to run a project; the **runner** runs an
 
 **Left for later phases (design section 7).**
 - **P2: done (2026-10-14), see below.**
-- **P3:** integration tests per project (migration `integration_tests`, `code` v3, the `integrationTests` card field, the
-  `environment` stage property, dispatcher provisioning), per-port forwarders and `aom-env` for testers, `aom test suite`,
-  suite results (1910), flaky handling, retiring `.aom/test-env.json`, automatic restart of environments after a runner restart,
-  memory use per environment. Spike (a) (socat forwarders inside a real tester Bash call) was skipped: it belongs to P3.
-- **P4:** remote targets (1920, secrets, `allowedDomains`), copy a plan between workstations, macOS testers, tunnels.
+- **P3 and P4: done, see #59** (integration tests, forwarders and `aom-env`, suite results, remote targets). Left from this list:
+  automatic restart of environments after a runner restart, memory use per environment, copy a plan between workstations, macOS
+  testers, tunnels.
 - Not done in P1 either: a desk notification when an environment fails or stops (the DevOps request thread gets a system
   note), `ssh -L` is only a hint, `run.status` is not acknowledged (it is resent after every `welcome`).
+
+### 59. Integration and E2E tests per project, run by testers
+
+**Owner decision (2026-10-14):** whether integration and E2E tests run is a per-project setting. They need networking, so
+builders and reviewers never run them (unit tests only; the handoff names the suites left out). Dedicated tester agents
+run them, when enabled, against a **local** environment (started on the workstation, see the start action #58) or a
+**remote** one (a deploy target configured in the project). The tester's sandbox then allows exactly that host (localhost
+ports or the remote host), nothing else. Every existing project starts with the setting **off**. Design:
+`docs/design/run-and-integration-tests.md` (sections 4 and 7).
+
+**Done, P3 (2026-10-14), local mode** (runner capability `runs:3`, migrations 1910 and 1990, tester role v6):
+- **Workflow `code` v4** = v3 (manual QA) plus, on `test`: `when integrationTests = true`, `environment: 'project'`,
+  `maxShiftMinutes` 120. v1 to v3 stay registered. A card on v1 to v3 moves to v4 as **Review approves it**
+  (`ReviewApproved.workflowVersionId`, same stages up to Test) and takes the project setting then; a card already in Test or beyond
+  finishes on its version (v1/v2 cards still move to the newest version at Finalize, as for manual QA). Project variants extending
+  an older version keep their stages until rebased. New stage property `environment: 'none' | 'project'` in the schema, the
+  validator (rule 12: agent stage, role with a shell), variants (template `smokeTestInsertion`, tester claims `smoke*`) and the
+  workflow builder ("Needs a running environment (Run & test settings)").
+- **Card field `integrationTests`** (code field set), defaulted from the project when the card is created or review approves a card
+  that never had it; `PATCH /api/cards/:id {integrationTests}` until the Test stage starts; a switch in Details.
+- **Project setting** `projects.integration_tests` (`ProjectIntegrationTestsSet`, `GET|PUT /api/projects/:id/integration-tests`,
+  owner only): mode `off`/`local`/`remote`, suites (name, repository, folder, command, kind, timeout, destructive, JUnit path,
+  confirmed), keep-on-failure minutes, flaky retries, services. "Run and test > Integration tests" in Project settings;
+  suites a tester proposes (`aom env suites propose`) wait unconfirmed with a Confirm button.
+- **Provisioning (D9)** in `commands/test-environments.ts`, run from the dispatcher pass: a card queued at an environment stage
+  gets a test environment on its workstation (`run.start` `purpose: test`, `rebaseCard`: the card branch is rebased onto its base
+  first, a conflict sends the card to Rework), replaying the saved plan or, without one, through a DevOps `run` request. The
+  candidate query's `envReady` clause keeps the card back until the environment is healthy on the agent's workstation (not for
+  suite and regression cards, opted-out cards, other modes, or runners without `runs:3`); the card page and the board say "starting its
+  test environment". A failed environment parks the card on its DevOps request and tries again; the third failure is a blocking
+  desk item. The environment is stopped at the verdict (`run.stop` `verdict`), kept `keepOnFailureMin` after a failure, stopped when
+  the card leaves the stage or ends, and stopped by a four-hour safety TTL.
+- **Tester access (D6)**: per-port Unix-socket forwarders (`runs/forward.ts`) and `bin/aom-env [--timeout min] -- cmd`
+  (socat per forward inside the command's namespace, `timeout` kills the process group, exit 124). **Spike (a) passed** with a real
+  `bwrap --unshare-net` call: `curl` and Playwright Chromium reach `http://localhost:<port>` through the bridge.
+- **`aom env info|logs|restart|suites [propose]`, `aom test suite`** with JUnit parsing, redacted log attachments,
+  `TestSuiteReported` + `test_suite_results` (1910); a pass after a failure is recorded `flaky`; **`aom test pass` is refused**
+  while a confirmed suite has no passing result; a desk notice when a suite is flaky three times in seven days. Results table on the card
+  ("Integration tests") with the environment (kept until...).
+- **`.aom/test-env.json` retired (D12)**: still read in this version with a deprecation note in the shift, not required, ignored from the next.
+- Tests: shared `integration-tests.test.ts`; server `integration-tests.test.ts` (22), `remote-targets.test.ts` (13); runner
+  `runs-tester.test.ts`, `test-env-tools.test.ts`, `remote-tester.test.ts`; web `integration-tests-ui.test.tsx`; the existing
+  suites that pass through Test switch integration tests on (`createWorld`'s `integrationTests`, e2e specs).
+
+**Done, P4 (2026-10-14), remote targets** (migration 1920): `deploy_targets.test_enabled`, `production` (never both), `destructive_ok`,
+`test_hosts`, `secret_names`; remote mode takes such a target; the tester starts nothing, the runner probes the URL and
+the sandbox's `allowedDomains` is the registries plus exactly the target's hostnames; destructive suites are skipped (and not
+required) on a target that does not allow them; test accounts are sealed in the browser per workstation (`env.secret.set`,
+`PUT /api/workstations/:id/target-secrets`, runner `secrets/targets.json`, 0600 dotenv file `AOM_ENV_SECRETS_FILE`, values
+redacted); UI under Deploy targets > Testing. **Spike (b):** `curl` and Chromium honour the sandbox proxy variables, Node `fetch` needs
+`NODE_USE_ENV_PROXY=1` (`aom-env` sets it), Playwright's `request` fixture needs an explicit `proxy`. **Spike (c)**
+(private-address targets): not run (needs the sandbox's own proxy inside a Claude session); proposal in RUNNER.md.
+
+**Left:** private-address targets (the 192.168.x UAT), macOS testers (no network namespace), "Update & restart" and automatic
+restart for test environments, destructive-suite auditing beyond the skip, copy a plan between workstations, tunnels.
 
 ### 34. Integrations page: set up a workstation's integrations and API keys in one place
 

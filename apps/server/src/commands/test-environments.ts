@@ -133,6 +133,8 @@ interface Provision {
   card: Row;
   project: Row;
   settings: IntegrationTests;
+  /** The role that works the stage (an agent of it must be hired on the workstation): the tester for `test`. */
+  role?: string;
 }
 
 /** Why a card could not be provisioned right now (it waits and is tried again on the next pass). */
@@ -150,6 +152,7 @@ export async function startTestRunIn(
   opts: { forceDevops?: boolean; failure?: string } = {},
 ): Promise<{ envId: string; requestId: string | null; wsId: string } | Skip> {
   const { card, project, settings } = p;
+  const role = p.role ?? 'tester';
   const now = ctx.clock.now();
   const wsId = card.home_workstation_id as string | null;
   if (!wsId) return { skip: 'the card has no workstation yet' };
@@ -173,11 +176,11 @@ export async function startTestRunIn(
   const tester = await one(
     tx,
     `SELECT 1 AS ok FROM agents a
-      WHERE a.workstation_id=$1 AND a.status='active' AND NOT a.is_devops AND a.role_key='tester'
+      WHERE a.workstation_id=$1 AND a.status='active' AND NOT a.is_devops AND a.role_key=$3
         AND (a.allowed_project_ids IS NULL OR $2::uuid = ANY (a.allowed_project_ids)) LIMIT 1`,
-    [ws.id, project.id],
+    [ws.id, project.id, role],
   );
-  if (!tester) return { skip: 'no tester is hired on its workstation' };
+  if (!tester) return { skip: `no ${role} is hired on its workstation` };
 
   const repos = await rows(
     tx,
@@ -354,10 +357,10 @@ export async function testEnvironmentPass(ctx: Ctx): Promise<void> {
 }
 
 const NEEDS_ENV_SQL = `
-SELECT c.id FROM cards c
+SELECT c.id, st.claim_role AS role FROM cards c
   JOIN projects p ON p.id = c.project_id AND p.status = 'active' AND p.integration_tests->>'mode' = 'local'
   JOIN workflow_stages st ON st.workflow_version_id = c.workflow_version_id AND st.stage_id = c.stage
- WHERE st.kind = 'agent' AND st.environment = 'project' AND st.claim_role = 'tester'
+ WHERE st.kind = 'agent' AND st.environment = 'project' AND st.claim_role IS NOT NULL
    AND c.status = 'queued' AND c.claim_id IS NULL
    AND c.origin NOT IN ('full_suite', 'regression')
    AND COALESCE((c.fields->>'integrationTests')::boolean, true) = true
@@ -368,16 +371,21 @@ SELECT c.id FROM cards c
  LIMIT 20`;
 
 async function provisionPass(ctx: Ctx): Promise<void> {
-  const due = await rows<{ id: string }>(ctx.pool, NEEDS_ENV_SQL);
+  const due = await rows<{ id: string; role: string }>(ctx.pool, NEEDS_ENV_SQL);
   const wss = new Set<string>();
-  for (const { id } of due) {
+  for (const { id, role } of due) {
     try {
       const ws = await withAppendTx(ctx.pool, async (tx) => {
         const card = await one(tx, 'SELECT * FROM cards WHERE id=$1 FOR UPDATE', [id]);
         if (!card || card.status !== 'queued' || card.claim_id) return null;
         if (await currentTestEnv(tx, id)) return null;
         const project = (await one(tx, 'SELECT * FROM projects WHERE id=$1', [card.project_id])) as Row;
-        const r = await startTestRunIn(ctx, tx, { card, project, settings: integrationTestsOf(project) });
+        const r = await startTestRunIn(ctx, tx, {
+          card,
+          project,
+          settings: integrationTestsOf(project),
+          role,
+        });
         return 'skip' in r ? null : r.wsId;
       });
       if (ws) wss.add(ws);
@@ -558,10 +566,20 @@ export async function runProblemEvents(
       'The DevOps engineer already tried to make the project run twice.',
     );
   const project = (await one(tx, 'SELECT * FROM projects WHERE id=$1', [card.project_id])) as Row;
+  const stageRole = await one(
+    tx,
+    'SELECT claim_role FROM workflow_stages WHERE workflow_version_id=$1 AND stage_id=$2',
+    [card.workflow_version_id, card.stage],
+  );
   const started = await startTestRunIn(
     ctx,
     tx,
-    { card, project, settings: integrationTestsOf(project) },
+    {
+      card,
+      project,
+      settings: integrationTestsOf(project),
+      ...(stageRole?.claim_role ? { role: stageRole.claim_role as string } : {}),
+    },
     { forceDevops: true, failure: detail || PROBLEM_TEXT[problem] },
   );
   if ('skip' in started || !started.requestId)
@@ -645,7 +663,12 @@ export async function recordSuiteResult(
     );
     const remote =
       settings.mode === 'remote' ? await remoteEnvironment(tx, card.project_id, settings) : undefined;
-    if (remote?.target && configured?.destructive && !remote.target.destructiveOk && report.status !== 'skipped')
+    if (
+      remote?.target &&
+      configured?.destructive &&
+      !remote.target.destructiveOk &&
+      report.status !== 'skipped'
+    )
       return [
         false,
         undefined,
@@ -763,7 +786,8 @@ export async function openSuitesOf(db: Queryable, card: Row, shift: Row): Promis
     `SELECT suite, status FROM test_suite_results WHERE shift_id=$1 ORDER BY created_at, event_seq`,
     [shift.id],
   );
-  const remote = settings.mode === 'remote' ? await remoteEnvironment(db, card.project_id, settings) : undefined;
+  const remote =
+    settings.mode === 'remote' ? await remoteEnvironment(db, card.project_id, settings) : undefined;
   let suites = settings.suites;
   if (remote?.target) {
     // Against a target that does not allow tests that change data, the destructive suites are skipped, not required.

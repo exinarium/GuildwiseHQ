@@ -219,7 +219,6 @@ export function suitesWithoutPass(
     .map((s) => s.name);
 }
 
-
 // ----------------------------------------------------------------------------------- test accounts of a target
 
 /**
@@ -236,7 +235,10 @@ export const EnvSecretSetPayloadSchema = z.object({
 export type EnvSecretSetPayload = z.infer<typeof EnvSecretSetPayloadSchema>;
 export const EnvSecretClearPayloadSchema = z.object({
   targetId: z.uuid(),
-  name: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,99}$/).optional(),
+  name: z
+    .string()
+    .regex(/^[A-Za-z_][A-Za-z0-9_]{0,99}$/)
+    .optional(),
 });
 export const EnvSecretResultSchema = z.object({ stored: z.boolean(), error: z.string().max(500).optional() });
 export type EnvSecretResult = z.infer<typeof EnvSecretResultSchema>;

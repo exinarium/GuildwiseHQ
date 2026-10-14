@@ -5,6 +5,7 @@ import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { IntegrationTestsSettings } from '../components/runs/IntegrationTestsSettings.tsx';
 import { IntegrationTestsToggle, SuiteResultsPanel } from '../components/runs/SuiteResults.tsx';
+import { TargetTesting } from '../components/runs/TargetTesting.tsx';
 import { ToastProvider } from '../components/ui.tsx';
 import { fromDefinition, toDefinition } from '../lib/builder.ts';
 
@@ -290,5 +291,165 @@ describe('workflow builder', () => {
     const back = toDefinition(model);
     expect(back.stages?.[0]).toMatchObject({ environment: 'project' });
     expect(back.stages?.[1]).not.toHaveProperty('environment');
+  });
+});
+
+describe('remote mode and deployed targets', () => {
+  const target = (over: Record<string, unknown> = {}) => ({
+    id: ID(40),
+    projectId: PROJECT,
+    name: 'staging',
+    kind: 'local_docker',
+    workstationId: null,
+    workstationName: null,
+    host: null,
+    appUrl: 'https://staging.example.test',
+    notes: '',
+    createdAt: new Date().toISOString(),
+    testEnabled: false,
+    production: false,
+    destructiveOk: false,
+    testHosts: [],
+    secretNames: [],
+    ...over,
+  });
+  const ws = (over: Record<string, unknown> = {}) => ({
+    id: ID(20),
+    name: 'Desk',
+    ownerId: ID(2),
+    ownerName: 'Pieter',
+    mine: true,
+    connected: true,
+    hasDevops: true,
+    ...over,
+  });
+
+  it('offers only targets the tester may test, and saves the chosen one', async () => {
+    routes[`GET ${URL_}`] = () =>
+      json(
+        response({
+          targets: [
+            {
+              id: ID(40),
+              name: 'staging',
+              url: 'https://staging.example.test',
+              testEnabled: true,
+              production: false,
+            },
+            {
+              id: ID(41),
+              name: 'live',
+              url: 'https://live.example.test',
+              testEnabled: false,
+              production: true,
+            },
+          ],
+        }),
+      );
+    routes[`PUT ${URL_}`] = (init) => json(response({ settings: JSON.parse(String(init.body)).settings }));
+    const user = userEvent.setup();
+    wrap(<IntegrationTestsSettings projectId={PROJECT} canEdit />);
+    await user.selectOptions(await screen.findByTestId('integration-mode'), 'remote');
+    const select = screen.getByTestId('integration-target');
+    expect(within(select).getByRole('option', { name: /live .*production, never tested/ })).toBeDisabled();
+    await user.click(screen.getByTestId('integration-save'));
+    expect(await screen.findByTestId('integration-problem')).toHaveTextContent(/needs a deploy target/);
+    await user.selectOptions(select, ID(40));
+    await user.click(screen.getByTestId('integration-save'));
+    await waitFor(() => expect(calls.find((c) => c.method === 'PUT')).toBeTruthy());
+    expect(calls.find((c) => c.method === 'PUT')?.body.settings).toMatchObject({
+      mode: 'remote',
+      deployTargetId: ID(40),
+    });
+  });
+
+  it('opts a target in with its hosts and test accounts; production is refused before the server hears of it', async () => {
+    routes[`PATCH /api/deploy-targets/${ID(40)}`] = () => json(target());
+    const user = userEvent.setup();
+    wrap(<TargetTesting projectId={PROJECT} target={target() as never} workstations={[ws()]} />);
+    await user.click(screen.getByTestId('target-production'));
+    await user.click(screen.getByTestId('target-test-enabled'));
+    await user.click(screen.getByTestId('target-testing-save'));
+    expect(await screen.findByTestId('target-testing-problem')).toHaveTextContent(/never tested/);
+    expect(calls.some((c) => c.method === 'PATCH')).toBe(false);
+    await user.click(screen.getByTestId('target-production'));
+    await user.click(screen.getByTestId('target-destructive'));
+    await user.type(screen.getByLabelText('Extra hosts the tester may reach'), 'api.staging.example.test');
+    await user.type(screen.getByLabelText('Test accounts (names)'), 'TEST_USER_PASSWORD');
+    await user.click(screen.getByTestId('target-testing-save'));
+    await waitFor(() => expect(calls.find((c) => c.method === 'PATCH')).toBeTruthy());
+    expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({
+      testEnabled: true,
+      production: false,
+      destructiveOk: true,
+      testHosts: ['api.staging.example.test'],
+      secretNames: ['TEST_USER_PASSWORD'],
+    });
+  });
+
+  it('seals a test account value in the browser and sends only the ciphertext', async () => {
+    const pair = await crypto.subtle.generateKey(
+      { name: 'RSA-OAEP', modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: 'SHA-256' },
+      true,
+      ['encrypt', 'decrypt'],
+    );
+    const spki = new Uint8Array(await crypto.subtle.exportKey('spki', pair.publicKey));
+    let bin = '';
+    for (const b of spki) bin += String.fromCharCode(b);
+    routes[`GET /api/workstations/${ID(20)}/sudo-key`] = () =>
+      json({ keyId: 'abcd1234abcd1234', publicKey: btoa(bin) });
+    routes[`PUT /api/workstations/${ID(20)}/target-secrets`] = () => json({ queued: true }, 202);
+    routes[`GET /api/projects/${PROJECT}/target-secrets`] = () =>
+      json({
+        secrets: [
+          {
+            workstationId: ID(20),
+            workstationName: 'Desk',
+            targetId: ID(40),
+            name: 'TEST_USER_EMAIL',
+            setAt: new Date().toISOString(),
+          },
+        ],
+      });
+    const user = userEvent.setup();
+    wrap(
+      <TargetTesting
+        projectId={PROJECT}
+        target={
+          target({ testEnabled: true, secretNames: ['TEST_USER_EMAIL', 'TEST_USER_PASSWORD'] }) as never
+        }
+        workstations={[ws()]}
+      />,
+    );
+    expect(await screen.findByPlaceholderText('set: type to replace')).toBeInTheDocument(); // the email has a value already
+    const input = screen.getByTestId('secret-TEST_USER_PASSWORD');
+    expect(screen.getByTestId('secret-save-TEST_USER_PASSWORD')).toBeDisabled();
+    await user.type(input, 'hunter2-hunter2');
+    await user.click(screen.getByTestId('secret-save-TEST_USER_PASSWORD'));
+    await waitFor(() => expect(calls.find((c) => c.method === 'PUT')).toBeTruthy());
+    const sent = calls.find((c) => c.method === 'PUT')!.body;
+    expect(sent).toMatchObject({ targetId: ID(40), name: 'TEST_USER_PASSWORD', keyId: 'abcd1234abcd1234' });
+    expect(JSON.stringify(sent)).not.toContain('hunter2');
+    // what was sent opens with the private key and holds the value
+    const plain = new TextDecoder().decode(
+      await crypto.subtle.decrypt(
+        { name: 'RSA-OAEP' },
+        pair.privateKey,
+        Uint8Array.from(atob(sent.ciphertext), (c) => c.charCodeAt(0)),
+      ),
+    );
+    expect(plain).toBe('hunter2-hunter2');
+    await waitFor(() => expect(input).toHaveValue(''));
+  });
+
+  it('says so when you have no workstation to hold the accounts', () => {
+    wrap(
+      <TargetTesting
+        projectId={PROJECT}
+        target={target({ secretNames: ['X'] }) as never}
+        workstations={[ws({ mine: false })]}
+      />,
+    );
+    expect(screen.getByText(/no workstation to hold the test accounts/)).toBeInTheDocument();
   });
 });

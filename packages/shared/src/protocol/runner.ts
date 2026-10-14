@@ -40,7 +40,11 @@ import { MAX_MCP_SERVERS, McpServerInfoSchema } from '../mcp/index.ts';
 import { BaTaskShiftSchema, BranchCheckMergedPayloadSchema } from '../phases/index.ts';
 import { CommitAsSchema, RepoCreatePayloadSchema, RepoIdentityFactSchema } from '../repo/index.ts';
 import { AgentPermissionsSchema, Seniority } from '../roles/schema.ts';
-import { EnvSecretClearPayloadSchema, EnvSecretSetPayloadSchema, ShiftEnvironmentSchema } from '../runs/integration.ts';
+import {
+  EnvSecretClearPayloadSchema,
+  EnvSecretSetPayloadSchema,
+  ShiftEnvironmentSchema,
+} from '../runs/integration.ts';
 import {
   RunExtendPayloadSchema,
   RunLogLinesSchema,
@@ -595,7 +599,11 @@ export const CommandPayloadSchemas = {
 } as const;
 
 /** The commands that carry a sealed envelope: their payload is emptied once answered, and they expire. */
-export const ENVELOPE_COMMANDS: ReadonlySet<string> = new Set(['integration.connect', 'integration.input', 'env.secret.set']);
+export const ENVELOPE_COMMANDS: ReadonlySet<string> = new Set([
+  'integration.connect',
+  'integration.input',
+  'env.secret.set',
+]);
 
 export const ShiftRejectReasonSchema = z.enum([
   'busy',

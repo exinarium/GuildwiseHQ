@@ -12,9 +12,13 @@ import {
   RunSettingsResponseSchema,
   type SetIntegrationTestsRequest,
   type SetRunSettingsRequest,
+  type SetTargetSecretRequest,
   type StartRunRequest,
+  type TargetSecretsResponse,
+  TargetSecretsResponseSchema,
 } from '@aom/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { encryptForRunner } from '../../lib/runner-seal.ts';
 import { get, post, put, qs } from '../client.ts';
 
 export interface RunsFilter {
@@ -165,5 +169,44 @@ export function useConfirmSuite(projectId: string) {
         IntegrationTestsResponseSchema,
       ),
     onSuccess: (data) => qc.setQueryData(['integration-tests', projectId], data),
+  });
+}
+
+/** Which of my workstations hold which test accounts of the project's deploy targets (names and time, never values). */
+export function useTargetSecrets(projectId: string | undefined) {
+  return useQuery({
+    enabled: !!projectId,
+    queryKey: ['target-secrets', projectId],
+    queryFn: async (): Promise<TargetSecretsResponse> => {
+      const d = await get<Partial<TargetSecretsResponse>>(
+        `/projects/${projectId}/target-secrets`,
+        TargetSecretsResponseSchema,
+      );
+      return { secrets: d.secrets ?? [] };
+    },
+  });
+}
+
+/**
+ * Sets one test account of a deploy target on one of my workstations: fetches the runner's public key, encrypts the value in
+ * the browser (RSA-OAEP, the same way as the sudo password) and sends only the ciphertext.
+ */
+export function useSetTargetSecret(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (v: { workstationId: string; targetId: string; name: string; value: string }) => {
+      const key = await get<{ keyId: string; publicKey: string }>(
+        `/workstations/${v.workstationId}/sudo-key`,
+      );
+      const body: SetTargetSecretRequest = {
+        targetId: v.targetId,
+        name: v.name,
+        keyId: key.keyId,
+        ciphertext: await encryptForRunner(key.publicKey, v.value),
+      };
+      return put(`/workstations/${v.workstationId}/target-secrets`, body);
+    },
+    onSuccess: () =>
+      setTimeout(() => qc.invalidateQueries({ queryKey: ['target-secrets', projectId] }), 2000),
   });
 }

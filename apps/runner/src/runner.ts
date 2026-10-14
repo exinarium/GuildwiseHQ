@@ -117,6 +117,8 @@ export interface RunnerOptions {
   external?: ExternalAdapters;
   /** Test hook: replaces the tester environment check (docker, deployed app). */
   envChecker?: import('./testing/environment.ts').EnvChecker;
+  /** Test hook: how a deployed target is probed before a tester shift (default: an HTTP request to its URL). */
+  probeTarget?: (url: string) => Promise<string | null>;
   /** Sweep stale worktrees this long after the first connection of the process (default 15 s); a negative value turns it off. */
   startupSweepMs?: number;
   /** How long a sweep waits for the server's answer about live worktrees (default 15 s). */
@@ -260,7 +262,10 @@ export class Runner {
       keys: this.keys,
       exec: this.exec,
     });
-    this.targetSecrets = new TargetSecrets({ file: join(this.paths.secrets, 'targets.json'), keys: this.keys });
+    this.targetSecrets = new TargetSecrets({
+      file: join(this.paths.secrets, 'targets.json'),
+      keys: this.keys,
+    });
     this.maxConcurrent = opts.config.maxConcurrentShifts;
     this.sync = new SyncService({
       file: join(this.paths.root, 'sync-targets.json'),
@@ -379,6 +384,7 @@ export class Runner {
       reportWaitMs: opts.reportWaitMs,
       exitGraceMs: opts.exitGraceMs,
       envChecker: opts.envChecker,
+      ...(opts.probeTarget ? { probeTarget: opts.probeTarget } : {}),
       sudoRun: (cmd, args) => this.sudo.run(cmd, args),
       git: this.agentGit,
       toolchains: this.toolchains,

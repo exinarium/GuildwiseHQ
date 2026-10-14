@@ -269,14 +269,14 @@ export async function buildBrief(
   };
 }
 
-/** The environment a tester shift tests against (backlog #59): the card's healthy local test environment on this workstation. */
+/** The environment a shift of an environment stage works against (backlog #59): the card's healthy test environment, or the target. */
 async function testerEnvironment(
   ctx: Ctx,
   card: Row,
   agent: Row,
   shift: Row,
 ): Promise<{ environment: NonNullable<ShiftBrief['environment']> } | Record<string, never>> {
-  if (agent.role_key !== 'tester' || agent.is_devops) return {};
+  if (agent.is_devops) return {};
   const env = await shiftEnvironmentFor(ctx.pool, card, shift.workstation_id ?? agent.workstation_id);
   return env ? { environment: env } : {};
 }

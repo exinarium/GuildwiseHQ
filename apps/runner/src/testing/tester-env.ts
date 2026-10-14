@@ -4,8 +4,8 @@ import type { IpcRpcResponse, ShiftEnvironment } from '@aom/shared';
 import { attachFileFromAgent, type ServerHttp } from '../attachments/index.ts';
 import type { RunManager } from '../runs/manager.ts';
 import { redactValues } from '../runs/text.ts';
-import { redact } from '../secrets/redact.ts';
 import type { Sandbox } from '../sandbox/sandbox.ts';
+import { redact } from '../secrets/redact.ts';
 import { environmentNote } from './environment-note.ts';
 import { findJunitFiles, type JunitCounts, readJunit } from './junit.ts';
 

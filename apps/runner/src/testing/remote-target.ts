@@ -37,7 +37,11 @@ export function targetHosts(target: { url: string; hosts?: readonly string[] }):
  */
 export async function probeTargetUrl(url: string, fetchImpl: typeof fetch = fetch): Promise<string | null> {
   try {
-    const res = await fetchImpl(url, { method: 'GET', redirect: 'manual', signal: AbortSignal.timeout(8000) });
+    const res = await fetchImpl(url, {
+      method: 'GET',
+      redirect: 'manual',
+      signal: AbortSignal.timeout(8000),
+    });
     if ([502, 503, 504].includes(res.status)) return `${url} answered ${res.status}`;
     return null;
   } catch (err) {

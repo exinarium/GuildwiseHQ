@@ -52,9 +52,14 @@ export const TestHostSchema = z
   .string()
   .trim()
   .toLowerCase()
-  .regex(/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$/, 'a hostname such as api.staging.example.com');
+  .regex(
+    /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$/,
+    'a hostname such as api.staging.example.com',
+  );
 /** The name of a test account secret: environment-variable shaped. */
-export const SecretNameSchema = z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,99}$/, 'letters, digits and _, such as TEST_USER_PASSWORD');
+export const SecretNameSchema = z
+  .string()
+  .regex(/^[A-Za-z_][A-Za-z0-9_]{0,99}$/, 'letters, digits and _, such as TEST_USER_PASSWORD');
 
 const DeployTargetBodySchema = z.object({
   name: z.string().trim().min(1).max(120),

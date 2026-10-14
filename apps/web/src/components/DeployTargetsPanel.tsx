@@ -6,6 +6,7 @@ import {
   useProjectWorkstations,
   useRemoveDeployTarget,
 } from '../api/queries/phases.ts';
+import { TargetTesting } from './runs/TargetTesting.tsx';
 import { Badge, Button, ErrorBox, Panel, Select, TextArea, TextInput } from './ui.tsx';
 
 /**
@@ -63,13 +64,14 @@ export function DeployTargetsPanel({ projectId }: { projectId: string }) {
       <ul className="mb-3 flex flex-col gap-1.5" data-testid="deploy-target-list">
         {(targets.data ?? []).map((t) => (
           <li key={t.id} className="flex flex-wrap items-center justify-between gap-2 text-sm">
-            <span>
+            <span className="min-w-0 flex-1">
               <span className="font-medium">{t.name}</span>{' '}
               <Badge>
                 {t.kind === 'local_docker' ? 'local Docker (every member workstation)' : `ssh ${t.host}`}
               </Badge>{' '}
               {t.workstationName && <span className="text-xs text-subtle">via {t.workstationName}</span>}{' '}
               {t.appUrl && <span className="font-mono text-xs text-subtle">{t.appUrl}</span>}
+              <TargetTesting projectId={projectId} target={t} workstations={workstations.data ?? []} />
             </span>
             <Button
               variant="ghost"

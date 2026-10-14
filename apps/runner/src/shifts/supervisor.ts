@@ -89,8 +89,8 @@ import { mergeReadFolders, resolveOrgFolderRepos, resolveReadRepos } from '../re
 import { preparePublication } from '../research/publish.ts';
 import { type EnvForwards, startForwards } from '../runs/forward.ts';
 import type { RunManager } from '../runs/manager.ts';
-import type { TargetSecrets } from '../secrets/targets.ts';
 import { ensureSandbox, type Sandbox, sandboxEnv } from '../sandbox/sandbox.ts';
+import type { TargetSecrets } from '../secrets/targets.ts';
 import {
   defaultEnvChecker,
   type EnvChecker,
@@ -628,7 +628,9 @@ export class ShiftSupervisor {
     // Test environment (spec "Testing strategy"): a tester needs the deployed app and Docker. If not, the server
     // raises a DevOps request for the card and parks it (the shift is rejected, nothing started).
     const testEnv = msg.brief.environment;
-    if (!s.resumed && needsTestEnvironment(msg)) {
+    // Any card shift of a stage that needs the project's environment gets it (the tester's `test`, a project's own smoke test).
+    const hasEnv = msg.kind === 'card' && !msg.agent.isDevops && !!testEnv;
+    if (!s.resumed && (hasEnv || needsTestEnvironment(msg))) {
       if (testEnv?.mode === 'local' && testEnv.envId && this.deps.runs) {
         // The server started this environment for the card (D9): it must be up here, healthy, right now.
         const view = this.deps.runs.testEnvironment(testEnv.envId);
@@ -743,7 +745,7 @@ export class ShiftSupervisor {
     const signIn = msg.kind === 'card' ? this.deps.mcpSignInNote?.(msg.mcpServers) : undefined;
     if (signIn) texts.instructions += `\n${signIn}\n`;
     // The tester's environment: where the app is, which suites to run, how to reach it from the sandbox.
-    if (msg.kind === 'card' && testEnv && needsTestEnvironment(msg))
+    if (hasEnv && testEnv)
       texts.instructions += `\n${environmentNote(testEnv, testEnv.envId ? this.deps.runs?.testEnvironment(testEnv.envId) : null)}\n`;
     else if (msg.kind === 'card' && needsTestEnvironment(msg) && s.worktree) {
       // `.aom/test-env.json` is retired (D12): still read for this version, then ignored. Say so once, to the owner.
@@ -768,7 +770,7 @@ export class ShiftSupervisor {
       PATH: tc ? agentPath(tc, paths.bin) : `${paths.bin}${delimiter}${process.env.PATH ?? ''}`,
     };
     // A remote target: its address, and the test accounts declared for it as a 0600 file the tester's tools read.
-    if (testEnv?.mode === 'remote' && testEnv.target && needsTestEnvironment(msg)) {
+    if (hasEnv && testEnv?.mode === 'remote' && testEnv.target) {
       s.env.AOM_TARGET_URL = testEnv.target.url;
       s.env.AOM_TARGET_NAME = testEnv.target.name;
       if (this.deps.targetSecrets && testEnv.target.secretNames.length > 0) {
@@ -787,7 +789,7 @@ export class ShiftSupervisor {
       }
     }
     // The environment's ports reach the tester's sandbox through Unix sockets (`aom-env` bridges them to localhost).
-    if (testEnv?.mode === 'local' && testEnv.envId && this.deps.runs && needsTestEnvironment(msg)) {
+    if (hasEnv && testEnv?.mode === 'local' && testEnv.envId && this.deps.runs) {
       const runs = this.deps.runs;
       const envId = testEnv.envId;
       try {
@@ -815,7 +817,7 @@ export class ShiftSupervisor {
         ...(tc ? { toolchainReadDirs: tc.readDirs } : {}),
         // plugin MCP servers: card shifts only (the DevOps engineer, questions and BA tasks keep their behaviour)
         ...(msg.kind === 'card' && msg.mcpServers?.length ? { mcpServers: msg.mcpServers } : {}),
-        ...(testEnv?.mode === 'remote' && testEnv.target && needsTestEnvironment(msg)
+        ...(hasEnv && testEnv?.mode === 'remote' && testEnv.target
           ? { extraAllowedDomains: targetHosts(testEnv.target) }
           : {}),
         maxShiftMinutes: msg.maxShiftMinutes,
@@ -1165,8 +1167,8 @@ export class ShiftSupervisor {
     method: string,
     params: Record<string, unknown>,
   ): Promise<IpcRpcResponse> {
-    if (s.msg.kind !== 'card' || s.msg.agent.roleKey !== 'tester' || s.msg.agent.isDevops)
-      return { ok: false, error: '`aom env` and `aom test suite` are for a tester working a card' };
+    if (s.msg.kind !== 'card' || s.msg.agent.isDevops)
+      return { ok: false, error: '`aom env` and `aom test suite` are for an agent working a card' };
     return testerRpc(
       {
         env: s.msg.brief.environment,
