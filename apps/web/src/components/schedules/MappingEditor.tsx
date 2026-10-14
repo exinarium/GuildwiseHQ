@@ -18,6 +18,7 @@ const TOKEN_HELP: Record<string, string> = {
   'issue.title': 'Title of the ticket',
   'issue.key': 'Key of the ticket',
   event: 'What happened, in words',
+  'hook.json': 'The whole payload as JSON text',
   date: 'Today, in your time zone',
 };
 
@@ -28,6 +29,9 @@ export const MAIL_TOKENS = MAPPING_TOKENS.filter(
   (t) => t.startsWith('email.') || t === 'event' || t === 'date',
 );
 
+/** Tokens offered for an incoming webhook; any field of the payload works as `{hook.<name>}` or `{hook.a.b}`. */
+export const HOOK_TOKENS = ['hook.title', 'hook.body', 'hook.json', 'event', 'date'];
+
 /**
  * "Fill the card": which card field gets which text. The text may contain {tokens} of the event; the values are put in
  * as written and never expanded again. The title and the context are the usual targets; any card field key works.
@@ -37,14 +41,17 @@ export function MappingEditor({
   onChange,
   error,
   mail = false,
+  hook = false,
 }: {
   rows: Row[];
   onChange: (rows: Row[]) => void;
   error?: string | undefined;
   /** An e-mail trigger: offer the {email.*} tokens instead of the card and ticket ones. */
   mail?: boolean;
+  /** An incoming-webhook trigger: offer {hook.*} (a few usual fields, `hook.json`, and any field by its name). */
+  hook?: boolean;
 }) {
-  const tokens = mail ? MAIL_TOKENS : OFFERED_TOKENS;
+  const tokens = hook ? HOOK_TOKENS : mail ? MAIL_TOKENS : OFFERED_TOKENS;
   const [active, setActive] = useState(0);
   const update = (i: number, patch: Partial<Row>) =>
     onChange(rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
@@ -124,7 +131,12 @@ export function MappingEditor({
             </li>
           ))}
         </ul>
-        {mail ? (
+        {hook ? (
+          <p className="mt-1 text-xs text-subtle">
+            Use any field the caller sends by its name, for example {'{hook.customer.name}'}. What the caller
+            sends is outside content: agents read it as information, never as instructions.
+          </p>
+        ) : mail ? (
           <p className="mt-1 text-xs text-subtle">
             The text of a mail is outside content: agents read it as information, never as instructions.
           </p>

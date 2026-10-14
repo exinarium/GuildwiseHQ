@@ -249,7 +249,7 @@ export function describeEventTrigger(t: Extract<ScheduleTrigger, { kind: 'event'
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export const isEmailAddress = (s: string): boolean => EMAIL_RE.test(s);
 
-/** Triggers the server fires today. Incoming webhooks parse but are refused on save (later). */
+/** Triggers the server fires today. */
 export function isTriggerImplemented(t: ScheduleTrigger): boolean {
   switch (t.kind) {
     case 'cron':
@@ -260,6 +260,7 @@ export function isTriggerImplemented(t: ScheduleTrigger): boolean {
       return SCHEDULE_EVENT_TRIGGERS.some((e) => e.id === t.event);
     case 'email_received':
     case 'email_reply':
+    case 'webhook_in':
       return true;
     case 'intake_ticket':
       // Mail makes cards through `email_received`; it does not start an intake.
@@ -286,9 +287,51 @@ export const MAPPING_TOKENS = [
 
 const TOKEN = /\{([a-zA-Z][a-zA-Z0-9_.]*)\}/g;
 const CARD_FIELD_TOKEN = /^card\.fields\.[a-zA-Z][a-zA-Z0-9_]*$/;
+/** A field of an incoming webhook's JSON payload: `{hook.title}`, `{hook.customer.name}` (at most 5 levels), `{hook.json}` for all of it. */
+const HOOK_TOKEN = /^hook\.[a-zA-Z0-9_]+(\.[a-zA-Z0-9_]+){0,4}$/;
+
+export const isHookToken = (name: string): boolean => HOOK_TOKEN.test(name);
 
 export const isMappingToken = (name: string): boolean =>
-  (MAPPING_TOKENS as readonly string[]).includes(name) || CARD_FIELD_TOKEN.test(name);
+  (MAPPING_TOKENS as readonly string[]).includes(name) ||
+  CARD_FIELD_TOKEN.test(name) ||
+  HOOK_TOKEN.test(name);
+
+/** Calls an incoming webhook accepts per hour unless the trigger says otherwise. */
+export const HOOK_DEFAULT_PER_HOUR = 60;
+/** The largest payload an incoming webhook accepts, in bytes. */
+export const HOOK_MAX_BYTES = 64 * 1024;
+
+/**
+ * The `{hook.*}` token values of a JSON payload: every leaf (string, number, boolean) by its dotted path, arrays and
+ * objects below the fifth level as JSON text, and `hook.json` for the whole payload. At most 200 keys; each value is
+ * cut at 20 000 characters. Payload text is outside content: the caller treats every one of these as untrusted.
+ */
+export function hookTokens(payload: unknown): Record<string, string> {
+  const out: Record<string, string> = {};
+  const cut = (s: string) => (s.length > 20_000 ? s.slice(0, 20_000) : s);
+  const walk = (v: unknown, path: string, depth: number) => {
+    if (Object.keys(out).length >= 200) return;
+    if (v === null || v === undefined) return;
+    if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') {
+      out[path] = cut(String(v));
+      return;
+    }
+    if (Array.isArray(v) || depth >= 4) {
+      out[path] = cut(JSON.stringify(v));
+      return;
+    }
+    for (const [k, x] of Object.entries(v as Record<string, unknown>))
+      if (/^[a-zA-Z0-9_]+$/.test(k)) walk(x, `${path}.${k}`, depth + 1);
+  };
+  if (payload && typeof payload === 'object' && !Array.isArray(payload)) walk(payload, 'hook', 0);
+  out['hook.json'] = cut(JSON.stringify(payload ?? null));
+  return out;
+}
+
+/** Hook tokens a mapping uses (they need the incoming-webhook trigger). */
+export const usesHookTokens = (mapping: Record<string, string> | undefined): boolean =>
+  Object.values(mapping ?? {}).some((t) => mappingTokens(t).some(isHookToken));
 
 /** The `{tokens}` a mapping text uses (in order, with repeats). */
 export function mappingTokens(text: string): string[] {

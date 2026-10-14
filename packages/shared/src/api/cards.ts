@@ -13,6 +13,7 @@ import {
 } from '../cards/types.ts';
 import { CardChangesSchema } from '../events/card.ts';
 import { CardMcpUsageSchema } from '../mcp/index.ts';
+import { CardApprovalSchema } from './approval.ts';
 import { WorkabilitySchema } from './board.ts';
 import { IsoTime } from './common.ts';
 import { SpendBriefSchema } from './costs.ts';
@@ -125,7 +126,16 @@ export const TransitionDtoSchema = z.object({
 /** A timeline entry that is not a stage or status change: a field edit or a risk tier override. */
 export const CardActivityDtoSchema = z.object({
   id: z.number().int(),
-  kind: z.enum(['edited', 'risk_tier', 'merge_policy', 'phase', 'merge_verified', 'reopened', 'qa']),
+  kind: z.enum([
+    'edited',
+    'risk_tier',
+    'merge_policy',
+    'phase',
+    'merge_verified',
+    'reopened',
+    'qa',
+    'approval',
+  ]),
   summary: z.string(),
   reason: z.string().nullable(),
   userId: z.uuid().nullable(),
@@ -244,6 +254,8 @@ export const CardDetailResponseSchema = z.object({
   testing: CardTestingSchema.optional(),
   /** Manual QA: the steps, the assignee, the decision and the held outgoing comment (absent: the card has no QA). */
   qa: CardQaSchema.nullable().optional(),
+  /** An approval step: the approver, the decision and where the card goes next (absent: the card has no approval step). */
+  approval: CardApprovalSchema.nullable().optional(),
   /** Sub-workflows: children this card started and the parent that started it (absent: neither). */
   subworkflows: SubworkflowsPanelSchema.optional(),
   /** M6: the published research note of a research card. */

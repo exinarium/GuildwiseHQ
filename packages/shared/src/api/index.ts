@@ -1,6 +1,7 @@
 // Registry: later milestones add one `export *` line per resource file.
 export * from './admin.ts';
 export * from './agents.ts';
+export * from './approval.ts';
 export * from './assistant.ts';
 export * from './auth.ts';
 export * from './billing.ts';

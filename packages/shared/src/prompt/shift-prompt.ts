@@ -31,17 +31,15 @@ function handoffOneLine(h: Handoff): string {
  * Previous handoffs for a shift prompt: the latest few in full, older ones as one line each, the whole section within a
  * character budget (oldest full notes shortened first; the latest is only truncated, never dropped).
  */
-export function renderHandoffs(
-  handoffs: Handoff[],
-  opts: { full?: number; budget?: number } = {},
-): string {
+export function renderHandoffs(handoffs: Handoff[], opts: { full?: number; budget?: number } = {}): string {
   if (handoffs.length === 0) return '';
   const full = Math.max(1, opts.full ?? HANDOFFS_FULL);
   const budget = opts.budget ?? HANDOFFS_BUDGET;
   const fullFrom = { v: Math.max(0, handoffs.length - full) };
   const fullBlock = (h: Handoff, max?: number): string => {
     const note = h.note.trim();
-    const body = max !== undefined && note.length > max ? `${note.slice(0, Math.max(0, max))}\n${TRUNCATED}` : note;
+    const body =
+      max !== undefined && note.length > max ? `${note.slice(0, Math.max(0, max))}\n${TRUNCATED}` : note;
     return `### ${handoffHead(h)}\n${body}`;
   };
   const build = (latestMax?: number): string => {
@@ -161,14 +159,15 @@ export function renderShiftPrompt(brief: ShiftBrief): string {
   const mail = card.untrusted;
   const outside = new Set(mail?.fields ?? []);
   const from = mail?.from ? ` from ${mail.from}` : '';
+  const what = mail?.kind === 'webhook' ? 'Webhook' : 'E-mail';
   /** A text field that came from an outside e-mail goes inside the untrusted block. */
   const guarded = (key: string, title: string, body: string): string | null =>
     outside.has(key)
-      ? section(title, renderUntrusted(`E-mail${from}: ${title.toLowerCase()}`, body))
+      ? section(title, renderUntrusted(`${what}${from}: ${title.toLowerCase()}`, body))
       : section(title, body);
 
   if (mail?.title !== false && mail)
-    parts.push(`# ${card.ref}\n${renderUntrusted(`E-mail subject${from}`, card.title)}`);
+    parts.push(`# ${card.ref}\n${renderUntrusted(`${what} subject${from}`, card.title)}`);
   else parts.push(`# ${card.ref}: ${card.title}`);
   parts.push(
     [
@@ -207,7 +206,7 @@ export function renderShiftPrompt(brief: ShiftBrief): string {
     if (known.has(key)) continue;
     const v = f[key];
     const body = typeof v === 'string' ? v : v === undefined || v === null ? '' : JSON.stringify(v);
-    parts.push(section(`Field: ${key}`, renderUntrusted(`E-mail${from}: ${key}`, body)));
+    parts.push(section(`Field: ${key}`, renderUntrusted(`${what}${from}: ${key}`, body)));
   }
   parts.push(section('Completion action', card.completionAction ?? ''));
   parts.push(

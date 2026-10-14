@@ -55,6 +55,9 @@ export function canAnswerItem(
   // Manual QA: the person it is addressed to, the project's owner and managers, organization Owners and Admins.
   if (r.subkind === 'manual_qa')
     return r.addressee_user_id === userId || isProjectMember(role) || isOrgManager({ orgRole });
+  // An approval step: the person asked, the project owner, organization Owners and Admins.
+  if (r.subkind === 'approval_step')
+    return r.addressee_user_id === userId || isProjectOwner(role) || isOrgManager({ orgRole });
   if (r.card_id) {
     return canAnswerCardDeskItem({
       userId,

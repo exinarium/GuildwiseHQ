@@ -61,12 +61,6 @@ export function validateCustomWorkflow(
         `stage '${s.id}': only the first stage may be a manual (BA/manager) stage`,
         s.id,
       );
-    if (s.kind === 'human')
-      err(
-        'human_stage_not_custom',
-        `stage '${s.id}': person-completed steps (manual QA) are built in; custom workflows cannot use them yet`,
-        s.id,
-      );
     if (s.fallbackRole !== undefined)
       err('unknown_fallback_role', `stage '${s.id}': custom steps have no fallback role`, s.id);
     if (s.claimRole === 'devops')

@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { RoleDefinition } from '../roles/schema.ts';
 import { roleClaimsStage } from '../roles/schema.ts';
 import {
+  ApproverSchema,
   OutcomeSchema,
   type Stage,
   StageSchema,
@@ -34,8 +35,14 @@ export const InsertedStageSchema = StageSchema.pick({
 }).extend({
   /** Board column; defaults to the label. */
   column: z.string().optional(),
-  /** The role that works the step. */
-  claimRole: z.string().min(1),
+  /** `approval`: a person approves on the desk instead of an agent working (backlog #16). Default: an agent step. */
+  kind: z.enum(['agent', 'approval']).default('agent'),
+  /** Agent steps: the role that works the step. */
+  claimRole: z.string().min(1).optional(),
+  /** Approval steps: who approves (default: the organization's Owner). */
+  approver: ApproverSchema.optional(),
+  /** Approval steps: the earlier step a send back goes to (default: the step the approval is inserted after). */
+  sendBackTo: z.string().min(1).optional(),
   /**
    * Absent (the usual case): derived from where the step sits: `create` before the workflow's first worktree stage,
    * `reuse` after it, `none` in a workflow that never uses a worktree.
@@ -74,7 +81,9 @@ export type VariantErrorCode =
   | 'duplicate_stage_id'
   | 'unknown_redirect'
   | 'nothing_to_redirect'
-  | 'ambiguous_successor';
+  | 'ambiguous_successor'
+  | 'missing_role'
+  | 'bad_send_back';
 
 export class VariantError extends Error {
   constructor(
@@ -134,8 +143,52 @@ export function materialiseVariant(
         after.id,
       );
     const successor = targets[0] as string;
-    for (const o of redirected) o.to = ins.stage.id;
     const s = ins.stage;
+    if (s.kind === 'approval') {
+      const back = s.sendBackTo ?? after.id;
+      const backStage = stages.find((x) => x.id === back);
+      if (!backStage || (backStage.kind !== 'agent' && backStage.kind !== 'manual'))
+        throw new VariantError(
+          `a send back from '${s.id}' goes to an agent step; '${back}' is not one`,
+          'bad_send_back',
+          s.id,
+        );
+      for (const o of redirected) o.to = s.id;
+      stages.splice(
+        idx + 1,
+        0,
+        StageSchema.parse({
+          id: s.id,
+          label: s.label,
+          column: s.column?.trim() || s.label,
+          kind: 'human',
+          human: { purpose: 'approval', approver: s.approver ?? { kind: 'org_owner' } },
+          claimRole: null,
+          requiredFields: [],
+          doneCriteria: s.doneCriteria,
+          outcomes: [
+            OutcomeSchema.parse({
+              id: 'approve',
+              label: 'Approve',
+              kind: 'success',
+              to: successor,
+              event: 'StageCompleted',
+            }),
+            OutcomeSchema.parse({
+              id: 'send_back',
+              label: 'Send back',
+              kind: 'failure',
+              to: back,
+              event: 'StageCompleted',
+              rework: true,
+            }),
+          ],
+        }),
+      );
+      continue;
+    }
+    if (!s.claimRole) throw new VariantError(`step '${s.id}' needs a role`, 'missing_role', s.id);
+    for (const o of redirected) o.to = ins.stage.id;
     const usesWorktree = stages.some((x) => x.worktree !== 'none');
     const worktree =
       s.worktree ??
@@ -285,6 +338,7 @@ export function validateVariant(
   const order = def.stages.map((s) => s.id);
   for (const ins of spec.insertions) {
     const s = def.stages[order.indexOf(ins.stage.id)] as Stage;
+    if (s.kind === 'human') continue; // an approval step: checked by the workflow rules (rule 12)
     const role = roles.find((r) => r.key === s.claimRole);
     if (s.claimRole === 'devops')
       err('role_not_claimable', 'the DevOps engineer cannot claim workflow stages', s.id);

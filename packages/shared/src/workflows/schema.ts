@@ -92,13 +92,26 @@ export const MAX_SUBWORKFLOW_DEPTH = 3;
 
 /**
  * Configuration of a `human` stage: a step a person completes, never an agent (docs/design/manual-qa.md section 3).
- * `purpose` selects the server's handling: `qa` is manual QA after Finalize; `approval` is reserved for the generic
- * "owner approves" step (backlog #16), which reuses this kind. `assignee` says who gets it: the person who started the
- * card (intake chat, batch, or card creator; the project owner as a fallback).
+ * `purpose` selects the server's handling: `qa` is manual QA (pass, skip or send back); `approval` is the generic
+ * "owner approves" step (backlog #16: `approver` says who; outcomes `approve` and `send_back`). `assignee` says who
+ * gets a QA step: the person who started the card (intake chat, batch, or card creator; the project owner as a fallback).
  */
+export const ApproverSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('org_owner') }),
+  z.object({ kind: z.literal('project_owner') }),
+  /** The person who started the card (intake chat, batch or the card's creator); the project owner as a fallback. */
+  z.object({ kind: z.literal('starter') }),
+  z.object({ kind: z.literal('member'), userId: z.uuid() }),
+]);
+export type Approver = z.infer<typeof ApproverSchema>;
+
+export const APPROVER_KINDS = ['org_owner', 'project_owner', 'starter', 'member'] as const;
+
 export const HumanConfigSchema = z.object({
   purpose: z.enum(['qa', 'approval']),
   assignee: z.enum(['starter']).default('starter'),
+  /** `approval` only: who approves on the desk. Others (the organization's Owner and Admins) may act for them. */
+  approver: ApproverSchema.optional(),
 });
 export type HumanConfig = z.infer<typeof HumanConfigSchema>;
 

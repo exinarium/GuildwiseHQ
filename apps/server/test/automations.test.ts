@@ -335,16 +335,11 @@ describe('who may create what, and what is refused', () => {
     expect(s.id).toBeTruthy();
   });
 
-  it('refuses incoming-webhook triggers and an intake from e-mail with a clear message', async () => {
-    for (const trigger of [
-      { kind: 'webhook_in', secretHash: 'x' },
-      { kind: 'intake_ticket', source: 'email' },
-    ]) {
-      const res = await make(trigger);
-      expect(res.status).toBe(400);
-      expect(res.body.error.code).toBe('trigger_not_available');
-      expect(res.body.error.message).toMatch(/not available yet|does not start from e-mail/);
-    }
+  it('refuses an intake from e-mail with a clear message', async () => {
+    const res = await make({ kind: 'intake_ticket', source: 'email' });
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('trigger_not_available');
+    expect(res.body.error.message).toMatch(/does not start from e-mail/);
   });
 
   it('refuses conditions an event does not take, an unknown stage and unknown mapping tokens', async () => {

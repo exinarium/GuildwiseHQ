@@ -6,8 +6,12 @@ import {
   CreateScheduleRequestSchema,
   DomainEventSchema,
   eventTypesOf,
+  expandMapping,
   expandText,
   expandTitle,
+  hookTokens,
+  isHookToken,
+  isMappingToken,
   isOrgLevelAction,
   isoWeek,
   isRetryableStatus,
@@ -16,6 +20,8 @@ import {
   SCHEDULE_EVENT_TRIGGERS,
   ScheduleActionSchema,
   ScheduleTriggerSchema,
+  unknownMappingTokens,
+  usesHookTokens,
   WEBHOOK_MAX_ATTEMPTS,
   webhookBackoffMs,
   webhookBody,
@@ -220,7 +226,52 @@ describe('automation triggers', () => {
       { kind: 'email_reply', inboxId: inbox },
     ] as const)
       expect(isTriggerImplemented(ScheduleTriggerSchema.parse(t)), t.kind).toBe(true);
-    for (const t of [{ kind: 'webhook_in', secretHash: 'x' }] as const)
-      expect(isTriggerImplemented(ScheduleTriggerSchema.parse(t)), t.kind).toBe(false);
+    expect(isTriggerImplemented(ScheduleTriggerSchema.parse({ kind: 'webhook_in' }))).toBe(true);
+  });
+});
+
+describe('incoming webhook tokens', () => {
+  it('names payload fields as {hook.path} tokens, up to five levels', () => {
+    for (const t of ['hook.title', 'hook.customer.name', 'hook.a.b.c.d.e', 'hook.json']) {
+      expect(isHookToken(t), t).toBe(true);
+      expect(isMappingToken(t), t).toBe(true);
+    }
+    for (const t of ['hook', 'hook.', 'hook.a.b.c.d.e.f', 'hooks.title', 'hook.a-b'])
+      expect(isHookToken(t), t).toBe(false);
+    expect(unknownMappingTokens({ title: '{hook.title} {nope.x}' })).toEqual(['nope.x']);
+    expect(usesHookTokens({ title: 'x {hook.a}' })).toBe(true);
+    expect(usesHookTokens({ title: 'x {email.subject}' })).toBe(false);
+    expect(usesHookTokens(undefined)).toBe(false);
+  });
+
+  it('flattens a payload into token values and never re-expands them', () => {
+    const t = hookTokens({
+      title: 'Disk full',
+      n: 3,
+      ok: true,
+      none: null,
+      customer: { name: 'Acme', tags: ['a', 'b'] },
+      deep: { a: { b: { c: { d: { e: 'x' } } } } },
+      'bad key': 'skipped',
+      sneaky: '{hook.title}',
+    });
+    expect(t['hook.title']).toBe('Disk full');
+    expect(t['hook.n']).toBe('3');
+    expect(t['hook.ok']).toBe('true');
+    expect(t['hook.none']).toBeUndefined();
+    expect(t['hook.customer.name']).toBe('Acme');
+    expect(t['hook.customer.tags']).toBe('["a","b"]');
+    expect(t['hook.deep.a.b.c']).toBe('{"d":{"e":"x"}}');
+    expect(t['hook.bad key']).toBeUndefined();
+    expect(JSON.parse(t['hook.json'] as string).title).toBe('Disk full');
+    expect(expandMapping('{hook.sneaky} / {hook.missing}', t)).toBe('{hook.title} / ');
+  });
+
+  it('bounds the number of keys and the length of a value', () => {
+    const big = Object.fromEntries(Array.from({ length: 500 }, (_, i) => [`k${i}`, 'v']));
+    expect(Object.keys(hookTokens(big)).length).toBeLessThanOrEqual(201);
+    expect(hookTokens({ s: 'x'.repeat(50_000) })['hook.s']).toHaveLength(20_000);
+    expect(hookTokens([1, 2])['hook.json']).toBe('[1,2]');
+    expect(hookTokens('text')['hook.json']).toBe('"text"');
   });
 });

@@ -50,6 +50,7 @@ const EnvSchema = z.object({
   AOM_INBOUND_MAX_BYTES: z.coerce.number().int().min(10_000).max(35_000_000).default(10_000_000),
   /** Messages one organisation can receive per hour; more are recorded as skipped. */
   AOM_INBOUND_RATE_PER_HOUR: z.coerce.number().int().min(1).max(100_000).default(60),
+  AOM_INBOUND_RATE_PER_SENDER_PER_HOUR: z.coerce.number().int().min(0).max(100_000).default(20),
   /** Spam score (SpamAssassin scale) from which a message is skipped as spam. */
   AOM_INBOUND_SPAM_THRESHOLD: z.coerce.number().min(0).max(100).default(5),
   /** Anthropic API key for the public landing-page assistant (a secret: never sent to the browser, never logged). */
@@ -151,6 +152,8 @@ export interface Config {
     secret: string | undefined;
     maxMessageBytes: number;
     ratePerHour: number;
+    /** Per sender address and organisation; 0 = off. */
+    ratePerSenderPerHour: number;
     spamThreshold: number;
   };
   /** Key of the Anthropic API (the public assistant); undefined: the assistant is off. */
@@ -223,6 +226,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       secret: e.AOM_INBOUND_SECRET,
       maxMessageBytes: e.AOM_INBOUND_MAX_BYTES,
       ratePerHour: e.AOM_INBOUND_RATE_PER_HOUR,
+      ratePerSenderPerHour: e.AOM_INBOUND_RATE_PER_SENDER_PER_HOUR,
       spamThreshold: e.AOM_INBOUND_SPAM_THRESHOLD,
     },
     anthropicApiKey: e.ANTHROPIC_API_KEY,

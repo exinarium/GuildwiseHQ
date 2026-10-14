@@ -9,11 +9,13 @@ import {
   useRotateMailInbox,
 } from '../../api/queries/mail.ts';
 import { formatDateTime } from '../../lib/time.ts';
+import { MailThreadPanel } from '../MailThreadPanel.tsx';
 import {
   Badge,
   Button,
   Callout,
   ConfirmDialog,
+  Dialog,
   EmptyState,
   ErrorBox,
   ListSkeleton,
@@ -41,6 +43,7 @@ export function messageOutcome(m: MailMessageDto): string {
 /** The recent messages of one inbox: sender, subject, and what became of each. */
 function Messages({ inboxId }: { inboxId: string }) {
   const list = useInboxMessages(inboxId);
+  const [open, setOpen] = useState<MailMessageDto | null>(null);
   if (list.isPending) return <ListSkeleton label="Loading messages" rows={2} />;
   if (list.isError) return <ErrorBox error={list.error} onRetry={() => list.refetch()} />;
   if (list.data.length === 0)
@@ -65,8 +68,24 @@ function Messages({ inboxId }: { inboxId: string }) {
           <Badge tone={STATUS_TONE[m.status] ?? 'neutral'} data-testid="message-status">
             {messageOutcome(m)}
           </Badge>
+          {m.status !== 'skipped' && (
+            <Button size="sm" onClick={() => setOpen(m)} data-testid="open-thread">
+              Conversation
+            </Button>
+          )}
         </li>
       ))}
+      <li className="list-none">
+        <Dialog
+          open={open !== null}
+          onOpenChange={(o) => !o && setOpen(null)}
+          title={open?.subject ?? 'Conversation'}
+          description="The messages of this conversation and your replies to it."
+          size="lg"
+        >
+          {open && <MailThreadPanel refTo={{ kind: 'thread', id: open.threadId }} />}
+        </Dialog>
+      </li>
     </ul>
   );
 }

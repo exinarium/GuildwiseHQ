@@ -193,6 +193,8 @@ export const ShiftBriefSchema = z.object({
     untrusted: z
       .object({
         source: z.literal('email'),
+        /** `webhook`: the text came from an incoming webhook, not an e-mail (older runners still say "e-mail"). */
+        kind: z.enum(['email', 'webhook']).optional(),
         fields: z.array(z.string()),
         title: z.boolean().default(true),
         from: z.string().optional(),

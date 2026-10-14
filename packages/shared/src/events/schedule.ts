@@ -113,8 +113,18 @@ export const ScheduleTriggerSchema = z.discriminatedUnion('kind', [
     source: z.enum(['issues', 'email', 'web']).optional(),
     projectId: Id.nullish(),
   }),
-  /** `POST /api/hooks/:scheduleId`, signed with an HMAC of `secretHash`'s secret (later; docs Q5). */
-  z.object({ kind: z.literal('webhook_in'), secretHash: z.string().min(1).max(200) }),
+  /**
+   * `POST /api/hooks/:scheduleId[/:secret]` (backlog #14). The server makes the secret and keeps only `secretHash`
+   * (SHA-256); a client never sends or reads it. Without a hash the hook refuses every call (revoked).
+   */
+  z.object({
+    kind: z.literal('webhook_in'),
+    secretHash: z.string().min(1).max(200).optional(),
+    /** Calls accepted per hour (more are refused with 429). Default `HOOK_DEFAULT_PER_HOUR`. */
+    maxPerHour: z.number().int().min(1).max(10000).optional(),
+    /** The Owner lets cards from this hook start queued when the automation asks for it. Absent: drafts only. */
+    allowQueued: z.boolean().optional(),
+  }),
 ]);
 export type ScheduleTrigger = z.infer<typeof ScheduleTriggerSchema>;
 

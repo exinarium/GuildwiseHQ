@@ -56,6 +56,11 @@ export type IssueCode =
   | 'human_has_role'
   | 'fallback_role_misplaced'
   | 'unknown_fallback_role'
+  // rule 12 (what a person's step offers)
+  | 'approval_missing_approver'
+  | 'approver_misplaced'
+  | 'human_outcomes'
+  | 'approval_send_back_target'
   // custom workflows only
   | 'not_custom'
   | 'invalid_key'
@@ -66,7 +71,6 @@ export type IssueCode =
   | 'manual_stage_not_initial'
   | 'role_not_claimable'
   | 'unsupported_custom_event'
-  | 'human_stage_not_custom'
   // project variants only
   | 'variant_base_not_allowed'
   | 'variant_base_mismatch'
@@ -419,6 +423,66 @@ export function validateWorkflow(
           s.id,
         );
       }
+    }
+  }
+
+  // Rule 12: a person's step offers fixed outcomes. Approval: `approve` (success) and `send_back` (failure, rework) with an
+  // approver; QA: `pass` and `send_back`, `skip` optional. A send back goes to a step that leads here.
+  const leadsTo = (from: string, target: string): boolean => {
+    const seen = new Set<string>();
+    const walk = (id: string): boolean => {
+      if (id === target) return true;
+      if (seen.has(id)) return false;
+      seen.add(id);
+      return (byId.get(id)?.outcomes ?? []).some((o) => walk(o.to));
+    };
+    return walk(from);
+  };
+  for (const s of def.stages) {
+    if (s.kind !== 'human' || !s.human) continue;
+    const h = s.human;
+    const approval = h.purpose === 'approval';
+    if (approval && !h.approver)
+      err(12, 'approval_missing_approver', `approval step '${s.id}' needs an approver`, s.id);
+    if (!approval && h.approver)
+      err(12, 'approver_misplaced', `step '${s.id}' is not an approval step: it takes no approver`, s.id);
+    const allowed = approval ? ['approve', 'send_back'] : ['pass', 'skip', 'send_back'];
+    const forward = approval ? 'approve' : 'pass';
+    for (const o of s.outcomes)
+      if (!allowed.includes(o.id))
+        err(
+          12,
+          'human_outcomes',
+          `'${s.id}.${o.id}': this step offers ${allowed.map((a) => `'${a}'`).join(', ')} only`,
+          s.id,
+          o.id,
+        );
+    const fwd = s.outcomes.find((o) => o.id === forward);
+    const back = s.outcomes.find((o) => o.id === 'send_back');
+    if (!fwd || fwd.kind !== 'success')
+      err(12, 'human_outcomes', `step '${s.id}' needs a success outcome '${forward}'`, s.id);
+    if (!back || back.kind !== 'failure' || !back.rework)
+      err(
+        12,
+        'human_outcomes',
+        `step '${s.id}' needs a failure outcome 'send_back' that counts as rework`,
+        s.id,
+      );
+    if (back) {
+      const target = byId.get(back.to);
+      if (
+        !target ||
+        back.to === s.id ||
+        (target.kind !== 'agent' && target.kind !== 'manual') ||
+        !leadsTo(back.to, s.id)
+      )
+        err(
+          12,
+          'approval_send_back_target',
+          `'${s.id}.send_back' must go to an earlier agent step that leads to '${s.id}'`,
+          s.id,
+          back.id,
+        );
     }
   }
 

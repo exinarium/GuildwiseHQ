@@ -56,6 +56,8 @@ export const ScheduleDtoSchema = z.object({
   canEdit: z.boolean().optional(),
   /** A webhook schedule has a signing secret (shown once, when created or rotated). */
   hasWebhookSecret: z.boolean().optional(),
+  /** Incoming webhook: the URL to call (without the secret). */
+  hookUrl: z.string().optional(),
   lastStatus: z.enum(['ok', 'failed', 'pending']).nullable().optional(),
   lastSummary: z.string().nullable().optional(),
 });
@@ -117,6 +119,8 @@ export type PatchScheduleRequest = z.infer<typeof PatchScheduleRequestSchema>;
 /** The create response: the schedule, and for a webhook its signing secret (shown this once). */
 export const CreateScheduleResponseSchema = ScheduleDtoSchema.extend({
   webhookSecret: z.string().optional(),
+  /** Incoming webhook: the URL with the secret in it, shown this once (also after a rotate). */
+  hookUrlWithSecret: z.string().optional(),
 });
 export type CreateScheduleResponse = z.infer<typeof CreateScheduleResponseSchema>;
 
@@ -174,4 +178,8 @@ export const ScheduleTestResponseSchema = z.object({
 export type ScheduleTestResponse = z.infer<typeof ScheduleTestResponseSchema>;
 
 /** `POST /api/schedules/:id/rotate-secret`. */
-export const RotateSecretResponseSchema = z.object({ webhookSecret: z.string() });
+export const RotateSecretResponseSchema = z.object({
+  webhookSecret: z.string(),
+  /** Incoming webhook: the URL with the new secret in it. */
+  hookUrlWithSecret: z.string().optional(),
+});

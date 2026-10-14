@@ -284,10 +284,23 @@ const SPEC: Record<IssueCode, Spec> = {
     field: 'role',
     text: ({ step }) => `${step} names a fallback role that does not exist. Pick another role.`,
   },
-  human_stage_not_custom: {
-    field: 'kind',
+  approval_missing_approver: {
+    field: 'role',
+    text: ({ step }) => `${step} waits for an approval but does not say who approves. Choose the approver.`,
+  },
+  approver_misplaced: {
+    field: 'role',
+    text: ({ step }) => `${step} names an approver but is not an approval step.`,
+  },
+  human_outcomes: {
+    field: 'route',
+    text: ({ step, issue }) =>
+      `${step} is a step for a person with fixed results (${issue.message}). Use the routes it offers.`,
+  },
+  approval_send_back_target: {
+    field: 'route',
     text: ({ step }) =>
-      `${step} is a step for a person (manual QA). Custom workflows cannot use it yet; make it an agent step.`,
+      `${step} sends the card back to a step that does not lead to it. Pick an earlier agent step to send it back to.`,
   },
   missing_done_criteria: {
     field: 'doneCriteria',

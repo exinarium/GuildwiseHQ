@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { type EditorInsertion, investigateInsertion, slugId } from '../../lib/workflowVariant.ts';
 import { Button, Select, TextArea, TextInput } from '../ui.tsx';
 
-type Template = 'investigate' | 'custom';
+type Template = 'investigate' | 'custom' | 'approval';
 
 /**
  * "Insert step after X" in project-variant scope: a template (Investigate & design for the architect, or a custom
@@ -31,6 +31,7 @@ export function InsertStepForm({
   const [role, setRole] = useState(template === 'investigate' ? 'architect' : '');
   const [criteria, setCriteria] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [approver, setApprover] = useState<'org_owner' | 'project_owner' | 'starter'>('org_owner');
 
   const pick = (t: Template) => {
     setTemplate(t);
@@ -38,6 +39,10 @@ export function InsertStepForm({
     if (t === 'investigate') {
       setLabel('Investigate & design');
       setRole('architect');
+      setCriteria('');
+    } else if (t === 'approval') {
+      setLabel('Owner approves');
+      setRole('');
       setCriteria('');
     } else {
       setLabel('');
@@ -51,6 +56,19 @@ export function InsertStepForm({
     if (!label.trim()) return setError('Give the step a label');
     if (!id) return setError('The label needs letters or digits');
     if (taken.includes(id)) return setError(`A step '${id}' exists already: pick another label`);
+    if (template === 'approval') {
+      onAdd({
+        after: after.id,
+        stage: {
+          id,
+          label: label.trim(),
+          kind: 'approval',
+          approver: { kind: approver },
+          doneCriteria: criteria.trim() || 'A person approved it on the desk.',
+        },
+      });
+      return;
+    }
     if (!role) return setError('Pick the role that works this step');
     if (template === 'custom' && !criteria.trim()) return setError('Say what done means for this step');
     if (template === 'investigate') {
@@ -73,22 +91,42 @@ export function InsertStepForm({
       <Select label="Template" value={template} onChange={(e) => pick(e.target.value as Template)}>
         {hasArchitect && <option value="investigate">Investigate &amp; design (architect)</option>}
         <option value="custom">Custom step</option>
+        <option value="approval">A person approves it on the desk</option>
       </Select>
       <TextInput label="Label" value={label} onChange={(e) => setLabel(e.target.value)} />
-      <Select
-        label="Role"
-        value={role}
-        onChange={(e) => setRole(e.target.value)}
-        disabled={template === 'investigate'}
-      >
-        <option value="">Pick a role</option>
-        {roles.map((r) => (
-          <option key={r.key} value={r.key}>
-            {r.name}
-            {id && !can(r) ? ' (cannot claim this step yet)' : ''}
-          </option>
-        ))}
-      </Select>
+      {template === 'approval' && (
+        <>
+          <Select
+            label="Who approves"
+            value={approver}
+            onChange={(e) => setApprover(e.target.value as typeof approver)}
+          >
+            <option value="org_owner">The organization Owner</option>
+            <option value="project_owner">The project owner</option>
+            <option value="starter">The person who started the card</option>
+          </Select>
+          <p className="text-xs text-subtle">
+            The card waits here for an approval on the desk. Sending it back needs a comment and returns it to{' '}
+            {after.label}.
+          </p>
+        </>
+      )}
+      {template !== 'approval' && (
+        <Select
+          label="Role"
+          value={role}
+          onChange={(e) => setRole(e.target.value)}
+          disabled={template === 'investigate'}
+        >
+          <option value="">Pick a role</option>
+          {roles.map((r) => (
+            <option key={r.key} value={r.key}>
+              {r.name}
+              {id && !can(r) ? ' (cannot claim this step yet)' : ''}
+            </option>
+          ))}
+        </Select>
+      )}
       {template === 'custom' && (
         <>
           <TextArea

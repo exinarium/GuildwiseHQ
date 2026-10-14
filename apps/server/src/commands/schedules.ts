@@ -1,4 +1,5 @@
-import { randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import {
   actionKind,
   actionProjectId,
@@ -33,6 +34,7 @@ import {
   scheduleEventLabel,
   streamId,
   unknownMappingTokens,
+  usesHookTokens,
 } from '@aom/shared';
 import { CronExpressionParser } from 'cron-parser';
 import { orgRoleOf } from '../auth/org-context.ts';
@@ -109,11 +111,14 @@ const toDto = (r: Row, roles: Map<string, OrgRole>): ScheduleDto => {
   const action = r.action as ScheduleAction;
   const orgLevel = isOrgLevelAction(action);
   const role = roles.get(r.org_id) ?? null;
-  const trigger = (r.trigger as ScheduleTrigger | null) ?? {
+  const stored = (r.trigger as ScheduleTrigger | null) ?? {
     kind: 'cron' as const,
     cron: r.cron,
     timezone: r.timezone,
   };
+  // The hash of an incoming webhook's secret stays on the server.
+  const trigger: ScheduleTrigger =
+    stored.kind === 'webhook_in' ? (({ secretHash: _h, ...rest }) => rest)(stored) : stored;
   return {
     id: r.id,
     projectId: r.project_id ?? null,
@@ -137,7 +142,11 @@ const toDto = (r: Row, roles: Map<string, OrgRole>): ScheduleDto => {
     ownerName: r.owner_name ?? null,
     orgLevel,
     canEdit: !orgLevel || isOrgManager({ orgRole: role }),
-    hasWebhookSecret: !!action && isWebhookAction(action) && !!action.secretEnc,
+    hasWebhookSecret:
+      stored.kind === 'webhook_in'
+        ? !!stored.secretHash
+        : !!action && isWebhookAction(action) && !!action.secretEnc,
+    ...(stored.kind === 'webhook_in' ? { hookUrl: `/api/hooks/${r.id}` } : {}),
     lastStatus: r.last_status ?? null,
     lastSummary: r.last_summary ?? null,
   };
@@ -349,7 +358,7 @@ async function authorize(
 
 /** Triggers that react to something that happened in the organization (the "Automations" of the UI). */
 const isEventTrigger = (t: ScheduleTrigger): boolean =>
-  t.kind === 'event' || t.kind === 'intake_ticket' || isMailTrigger(t);
+  t.kind === 'event' || t.kind === 'intake_ticket' || t.kind === 'webhook_in' || isMailTrigger(t);
 
 /** What can be checked about an event trigger now: which events take which conditions, and that the stage exists. */
 async function validateEventTrigger(tx: Tx, orgId: string, t: ScheduleTrigger): Promise<void> {
@@ -413,6 +422,10 @@ async function validate(
           : 'this kind of trigger is not available yet',
     );
   await validateEventTrigger(tx, orgId, t);
+  if (t.kind === 'webhook_in' && t.allowQueued && (await orgRoleOf(tx, user.id, orgId)) !== 'owner')
+    throw forbidden('only the Owner can let cards from an incoming webhook start queued');
+  if (n.action.kind === 'create_card' && usesHookTokens(n.action.template.mapping) && t.kind !== 'webhook_in')
+    throw badRequest('invalid_mapping', 'the {hook.*} fields only exist for an incoming webhook trigger');
   if (t.kind === 'cron' || t.kind === 'issue_labelled') assertCronAndZone(t.cron, t.timezone);
   if (t.kind === 'issue_labelled') {
     if (t.provider === 'github' && !GITHUB_REPO.test(t.query.trim()))
@@ -511,6 +524,16 @@ async function validate(
 
 const newSecret = () => `whsec_${randomBytes(24).toString('base64url')}`;
 
+/** The secret of an incoming webhook: shown once; only its SHA-256 is kept (it is 192 random bits, so no salt is needed). */
+export const newHookSecret = () => `hook_${randomBytes(24).toString('base64url')}`;
+export const hashHookSecret = (secret: string) => createHash('sha256').update(secret).digest('hex');
+const stripHash = (
+  t: Extract<ScheduleTrigger, { kind: 'webhook_in' }>,
+): Extract<ScheduleTrigger, { kind: 'webhook_in' }> => {
+  const { secretHash: _h, ...rest } = t;
+  return rest;
+};
+
 /** `next_fire_at`: cron and polling triggers only. */
 const nextFor = (t: ScheduleTrigger, enabled: boolean, now: Date): string | null =>
   enabled && (t.kind === 'cron' || t.kind === 'issue_labelled')
@@ -557,6 +580,10 @@ export async function createSchedule(
     const isManager = isOrgManager({ orgRole: await orgRoleOf(tx, user.id, orgId) });
     await validate(ctx, tx, user, orgId, project, n, isManager);
     let webhookSecret: string | undefined;
+    if (n.trigger.kind === 'webhook_in') {
+      webhookSecret = newHookSecret();
+      n.trigger = { ...stripHash(n.trigger), secretHash: hashHookSecret(webhookSecret) };
+    }
     if (n.action.kind === 'integration' && n.action.integration === 'webhook') {
       webhookSecret = newSecret();
       n.action = { ...n.action, secretEnc: await encryptSecret(ctx, webhookSecret) };
@@ -637,6 +664,10 @@ export async function patchSchedule(
       throw badRequest('action_kind_fixed', 'what a schedule does cannot be changed: create a new schedule');
     if (isWebhookAction(action) && isWebhookAction(cur))
       action = { ...action, secretEnc: cur.secretEnc as string };
+    if (trigger.kind === 'webhook_in') {
+      const kept = curTrigger.kind === 'webhook_in' ? curTrigger.secretHash : undefined;
+      trigger = { ...stripHash(trigger), ...(kept ? { secretHash: kept } : {}) } as ScheduleTrigger;
+    }
     const n: Normalized = {
       name: patch.name ?? s.name,
       enabled: patch.enabled ?? s.enabled,
@@ -644,7 +675,7 @@ export async function patchSchedule(
       action,
     };
     const actionChanged = JSON.stringify(action) !== JSON.stringify(cur);
-    const triggerChanged = JSON.stringify(trigger) !== JSON.stringify(curTrigger);
+    const triggerChanged = !isDeepStrictEqual(trigger, curTrigger);
     if (actionChanged || triggerChanged) {
       await authorize(ctx, tx, user, org, n);
       await validate(
@@ -691,11 +722,16 @@ export async function rotateWebhookSecret(
   return withAppendTx(ctx.pool, async (tx) => {
     const { s } = await lockManaged(tx, user, org, id);
     const cur = s.action as ScheduleAction;
-    if (!isWebhookAction(cur))
+    const curTrigger: ScheduleTrigger = s.trigger ?? { kind: 'cron', cron: s.cron, timezone: s.timezone };
+    if (curTrigger.kind !== 'webhook_in' && !isWebhookAction(cur))
       throw badRequest('not_a_webhook', 'only a webhook schedule has a signing secret');
-    const secret = newSecret();
-    const action: ScheduleAction = { ...cur, secretEnc: await encryptSecret(ctx, secret) };
-    const trigger: ScheduleTrigger = s.trigger ?? { kind: 'cron', cron: s.cron, timezone: s.timezone };
+    const secret = curTrigger.kind === 'webhook_in' ? newHookSecret() : newSecret();
+    const action: ScheduleAction =
+      curTrigger.kind === 'webhook_in' || !isWebhookAction(cur)
+        ? cur
+        : { ...cur, secretEnc: await encryptSecret(ctx, secret) };
+    const trigger: ScheduleTrigger =
+      curTrigger.kind === 'webhook_in' ? { ...curTrigger, secretHash: hashHookSecret(secret) } : curTrigger;
     await ctx.store.append(
       [
         {
@@ -715,6 +751,39 @@ export async function rotateWebhookSecret(
       { tx },
     );
     return secret;
+  });
+}
+
+/** Switches an incoming webhook off for good until a new secret is made: every call is refused. */
+export async function revokeHookSecret(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  org: OrgCtx | null,
+  id: string,
+): Promise<void> {
+  await withAppendTx(ctx.pool, async (tx) => {
+    const { s } = await lockManaged(tx, user, org, id);
+    const trigger = s.trigger as ScheduleTrigger | null;
+    if (trigger?.kind !== 'webhook_in')
+      throw badRequest('not_a_webhook', 'only an incoming-webhook automation has a secret');
+    await ctx.store.append(
+      [
+        {
+          streamId: streamId.schedule(s.id),
+          event: {
+            type: 'ScheduleUpdated',
+            payload: bodyOf(
+              s.id,
+              { name: s.name, enabled: s.enabled, trigger: stripHash(trigger), action: s.action },
+              { ownerUserId: s.owner_user_id ?? undefined, nextFireAt: iso(s.next_fire_at) },
+            ),
+          },
+          actor: userActor(user.id),
+          scope: scheduleScope(s),
+        },
+      ],
+      { tx },
+    );
   });
 }
 

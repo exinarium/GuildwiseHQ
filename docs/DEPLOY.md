@@ -193,6 +193,7 @@ Organisations receive e-mail at their own Guildwise addresses (`<name>-<random>@
 | `AOM_INBOUND_SECRET` | unset | Secret (at least 16 characters). The webhook is refused (401) without it: it is the password of the Basic-auth URL given to SendGrid or Postmark (or the `X-AOM-Inbound-Secret` header). Generate with `openssl rand -hex 24` |
 | `AOM_INBOUND_MAX_BYTES` | `10000000` | Largest message (attachments included) that is stored. Bigger ones are recorded as skipped ("too large") with no text. SendGrid delivers at most 30 MB and Postmark 35 MB |
 | `AOM_INBOUND_RATE_PER_HOUR` | `60` | Messages one organisation can receive per hour. Over it, messages are recorded as skipped; at twice the limit they are only counted |
+| `AOM_INBOUND_RATE_PER_SENDER_PER_HOUR` | `20` | Messages one sender address can send to an organisation per hour. Over it, messages are recorded as skipped (`sender_rate_limited`) and the Owner gets one desk notice per sender per day. `0` switches the limit off |
 | `AOM_INBOUND_SPAM_THRESHOLD` | `5` | Spam score (SpamAssassin scale, as Postmark reports it) from which a message is skipped as spam |
 
 ### Landing-page assistant ("Ask Guildwise")

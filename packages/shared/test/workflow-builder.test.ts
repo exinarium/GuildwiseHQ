@@ -641,7 +641,7 @@ describe('schedule schema extensions', () => {
     expect(isTriggerImplemented({ kind: 'intake_ticket', source: 'email' })).toBe(false);
     expect(isTriggerImplemented({ kind: 'email_reply', inboxId: U })).toBe(true);
     expect(isTriggerImplemented({ kind: 'email_received', inboxId: U })).toBe(true);
-    expect(isTriggerImplemented({ kind: 'webhook_in', secretHash: 'x' })).toBe(false);
+    expect(isTriggerImplemented({ kind: 'webhook_in' })).toBe(true);
   });
 
   it('create_card gains mapping, start, rate and dedupe (all optional)', () => {
