@@ -33,6 +33,11 @@ export const PairingIndexSchema = z.object({
   version: z.literal(1),
   /** Shifts the whole machine runs at once, across pairings (default: the largest `maxConcurrentShifts` of them). */
   maxConcurrentShifts: z.number().int().positive().optional(),
+  /**
+   * The pairing that may change machine-wide logins (`~/.claude`, `gh`, MCP sign-ins) from the web (docs/design/integrations-page.md
+   * D8). Unset: the first pairing. Set with `aom-runner integrations machine-admin <pairing>`.
+   */
+  machineAdmin: z.string().optional(),
   pairings: z.array(PairingEntrySchema),
 });
 export type PairingIndex = z.infer<typeof PairingIndexSchema>;
@@ -91,6 +96,13 @@ export function saveIndex(root: string, index: PairingIndex): void {
  * place: the index gains one entry for the existing config, which stays where it is. No data is moved or rewritten.
  * Returns an empty index when nothing is paired.
  */
+/** Is this pairing the machine's primary one (the `machineAdmin` pairing, else the first enabled one)? */
+export function isMachinePrimary(index: PairingIndex, entry: PairingEntry): boolean {
+  if (index.machineAdmin && index.pairings.some((p) => p.id === index.machineAdmin))
+    return index.machineAdmin === entry.id;
+  return (index.pairings.find((p) => !p.disabled) ?? index.pairings[0])?.id === entry.id;
+}
+
 export function loadIndex(root: string): PairingIndex {
   const file = pairingIndexPath(root);
   if (existsSync(file)) return PairingIndexSchema.parse(JSON.parse(readFileSync(file, 'utf8')));

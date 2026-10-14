@@ -1,10 +1,12 @@
 import { statSync, writeFileSync } from 'node:fs';
-import { hostname, platform } from 'node:os';
+import { homedir, hostname, platform } from 'node:os';
 import { basename, join } from 'node:path';
 import {
   CommandPayloadSchemas,
   defaultHost,
   type EnvEnsurePayload,
+  INTEGRATIONS_VERSION,
+  type IntegrationKindId,
   type IpcRpcResponse,
   type McpAuthState,
   normalizeRemoteUrl,
@@ -16,8 +18,8 @@ import {
   uuidv7,
   type WorktreeSweepResult,
 } from '@aom/shared';
-import { ClaudeAuthMonitor } from './adapters/claude-auth.ts';
-import { ClaudeCodeAdapter } from './adapters/claude-code.ts';
+import { ClaudeAuthMonitor, probeClaudeLogin } from './adapters/claude-auth.ts';
+import { ClaudeCodeAdapter, realClaudeBlocked } from './adapters/claude-code.ts';
 import { buildAdapters } from './adapters/registry.ts';
 import type { RuntimeAdapter } from './adapters/types.ts';
 import { ServerHttp } from './attachments/index.ts';
@@ -30,7 +32,7 @@ import { ExternalAdapters } from './external/index.ts';
 import { resolveJira } from './external/jira-store.ts';
 import { OutboundExecutor } from './external/outbound.ts';
 import { AgentGit } from './forge/agent-git.ts';
-import { recheckFile } from './forge/connect.ts';
+import { recheckFile, touchRecheck } from './forge/connect.ts';
 import {
   branchRulesFor,
   FileTokenStore,
@@ -49,7 +51,10 @@ import { type ScannedRepo, scanAllRepos, withRemote } from './git/repo-scan.ts';
 import { sweepWorktrees } from './git/sweep.ts';
 import { SyncService } from './git/sync-service.ts';
 import { removeWorktree } from './git/worktrees.ts';
+import { ClaudeCredentialStore, claudeFile, resolveClaudeCredential } from './integrations/claude-store.ts';
+import { type AdapterEnv, type IntegrationAdapter, IntegrationService } from './integrations/index.ts';
 import { IntegrationPoller } from './integrations/poll.ts';
+import type { LoginSpawner } from './integrations/pty.ts';
 import { IpcServer } from './ipc/server.ts';
 import { type Logger, nullLogger } from './log.ts';
 import {
@@ -135,6 +140,16 @@ export interface RunnerOptions {
   mcpReport?: boolean;
   /** Test hook: the plugin MCP servers of this machine (default: read from the Claude Code home). */
   mcpDiscover?: () => PluginMcpServer[];
+  /**
+   * Report the integrations (`integrations.report`). Default on, off with the mock runtime and under tests so nothing
+   * reaches a real provider from them. Commands (`integration.*`) work either way.
+   */
+  integrationsReport?: boolean;
+  /** Test hooks: the integration adapters and the sign-in process spawner. */
+  integrationAdapters?: Map<IntegrationKindId, IntegrationAdapter>;
+  integrationSpawn?: LoginSpawner;
+  /** This pairing may change machine-wide logins from the web (default: yes; the host decides with several pairings). */
+  isPrimaryPairing?: () => boolean;
   /** Test hook: platform for the toolchain table (default: this machine). */
   platform?: Platform;
   /** The process-wide self-update status, sent to the server after each welcome (see `update/updater.ts`). */
@@ -166,6 +181,9 @@ export class Runner {
   /** The key pair for secrets the manager sends (the sudo password) and the store that holds the password. */
   readonly keys: RunnerKeys;
   readonly sudo: SudoVault;
+  /** The integrations of this workstation: status, connect from the web, interactive sign-ins (docs/design/integrations-page.md). */
+  readonly integrations: IntegrationService;
+  readonly claudeStore: ClaudeCredentialStore;
   /** Tools agents may use: detected, configured and registered by the DevOps engineer (`aom toolchain`). */
   readonly toolchains: ToolchainRegistry;
   private readonly exec: Executor;
@@ -257,8 +275,28 @@ export class Runner {
         }),
       log: this.log,
     });
-    this.adapters = opts.adapters ?? buildAdapters(opts.config, this.paths);
-    this.adapters = opts.adapters ?? buildAdapters(opts.config, this.paths, this.claudeAuth);
+    this.claudeStore = new ClaudeCredentialStore(claudeFile(this.paths.secrets));
+    this.adapters =
+      opts.adapters ??
+      buildAdapters(opts.config, this.paths, this.claudeAuth, () => {
+        // secrets/claude.json over config.json, read at every session start: a new token needs no restart
+        const c = resolveClaudeCredential(this.claudeStore, this.freshConfig().runtimes['claude-code']);
+        return {
+          authMode: c.authMode,
+          ...(c.oauthToken ? { oauthToken: c.oauthToken } : {}),
+          ...(c.apiKey ? { apiKey: c.apiKey } : {}),
+        };
+      });
+    this.integrations = new IntegrationService({
+      workstationId: opts.config.workstationId,
+      keys: this.keys,
+      env: this.adapterEnv(),
+      ...(opts.integrationAdapters ? { adapters: opts.integrationAdapters } : {}),
+      ...(opts.integrationSpawn ? { spawn: opts.integrationSpawn } : {}),
+      ...(opts.isPrimaryPairing ? { isPrimary: opts.isPrimaryPairing } : {}),
+      log: this.log,
+      send: (type, payload) => void this.client.send(type as 'integrations.report', payload as never),
+    });
     this.claudeAuth.onChange((state) => {
       this.log.warn(
         state === 'expired'
@@ -379,6 +417,7 @@ export class Runner {
     this.client.on('message', (m) => this.onMessage(m));
     this.client.on('welcome', (w) => {
       void this.reportGit(true);
+      void this.reportIntegrations(true);
       void this.reportOrgFolders();
       this.reportMcpServers(true);
       this.reportToolchains(true);
@@ -399,6 +438,73 @@ export class Runner {
       // Unpaired is a normal end (exit 0, so a service manager does not restart a runner that cannot work).
       this.fatalResolve?.(this.unpaired ? 0 : code === 4409 ? 3 : 2);
     });
+  }
+
+  /** What the integration adapters need from this machine. */
+  private adapterEnv(): AdapterEnv {
+    const claude = () => {
+      const a = this.adapters.get('claude-code');
+      return a instanceof ClaudeCodeAdapter ? a : undefined;
+    };
+    return {
+      paths: this.paths,
+      forge: this.forgeEnv,
+      exec: this.exec,
+      fetch: globalThis.fetch,
+      config: () => this.freshConfig(),
+      now: () => new Date(),
+      home: homedir(),
+      claudeStore: this.claudeStore,
+      claude: {
+        bin: () => this.freshConfig().runtimes['claude-code'].bin,
+        blocked: () => realClaudeBlocked(),
+        probe: async (env) =>
+          realClaudeBlocked()
+            ? 'unknown'
+            : probeClaudeLogin({ bin: this.freshConfig().runtimes['claude-code'].bin, env }),
+        probeLogin: async () => (await claude()?.probeLogin()) ?? 'unknown',
+        authState: () => this.claudeAuth.state,
+        afterChange: async () => {
+          await claude()?.probeLogin();
+          await this.reportRuntimes();
+        },
+      },
+      mcp: {
+        discover: () => (this.opts.mcpDiscover ?? (() => discoverPluginMcpServers()))(),
+        authOf: () => (this.opts.mcpAuth ?? mcpAuthStates)(),
+      },
+      repoHosts: () => this.repoHosts(),
+      sessionCwd: join(this.paths.root, 'tmp', 'integrations'),
+      touchRecheck: () => touchRecheck(this.paths.secrets),
+    };
+  }
+
+  /** Hosts of the GitHub and GitLab repositories on this workstation (instances of those integrations). */
+  private repoHosts(): Partial<Record<'github' | 'gitlab', string[]>> {
+    const hosts: Partial<Record<'github' | 'gitlab', string[]>> = {};
+    for (const r of this.repos) {
+      const p = forgeForUrl(this.forgeEnv, r.remoteUrl);
+      if (p && (p.repo.kind === 'github' || p.repo.kind === 'gitlab')) {
+        const list = hosts[p.repo.kind] ?? [];
+        if (!list.includes(p.repo.host)) list.push(p.repo.host);
+        hosts[p.repo.kind] = list;
+      }
+    }
+    return hosts;
+  }
+
+  private integrationsOn(): boolean {
+    return this.opts.integrationsReport ?? !(this.opts.config.runtimes.mock?.enabled || process.env.VITEST);
+  }
+
+  /** `integrations.report` when something changed (or forced). Quiet under tests and the mock runtime. */
+  private async reportIntegrations(force: boolean): Promise<void> {
+    if (!this.integrationsOn()) return;
+    try {
+      await this.integrations.report(force);
+    } catch (err) {
+      this.log.warn(`integrations report failed: ${String(err)}`);
+    }
   }
 
   /** Jira credentials in force: `secrets/jira.json` (written by `aom-runner jira-connect`), else config.json's `jira` block. */
@@ -500,6 +606,7 @@ export class Runner {
         if (m > this.lastRecheck) {
           this.lastRecheck = m;
           void this.reportGit(false);
+          void this.reportIntegrations(false);
         }
       } catch {
         // no marker yet
@@ -512,6 +619,7 @@ export class Runner {
 
   async stop(): Promise<void> {
     for (const t of this.timers) clearInterval(t);
+    this.integrations.stop();
     this.sync.stop();
     this.vaults.stop();
     await this.supervisor.stopAll('manager');
@@ -561,7 +669,10 @@ export class Runner {
     const key = JSON.stringify(runtimes);
     const changed = this.lastRuntimes !== undefined && key !== this.lastRuntimes;
     this.lastRuntimes = key;
-    if (changed) this.client.send('runtimes.report', { runtimes });
+    if (changed) {
+      this.client.send('runtimes.report', { runtimes });
+      void this.reportIntegrations(false);
+    }
   }
 
   /**
@@ -604,6 +715,7 @@ export class Runner {
       activeShifts: this.supervisor.activeShifts(),
       maxConcurrentShifts: this.opts.config.maxConcurrentShifts,
       sudoKey: this.keys.publicKey,
+      integrationsVersion: INTEGRATIONS_VERSION,
     };
   }
 
@@ -613,6 +725,7 @@ export class Runner {
     // A re-probe may change a runtime (bubblewrap installed, claude upgraded): tell the server when it did.
     await this.reportRuntimes();
     await this.reportGit(false);
+    await this.reportIntegrations(false);
     await this.reportOrgFolders();
     this.reportMcpServers(false);
     this.reportToolchains(false);
@@ -633,6 +746,7 @@ export class Runner {
       if (!force && key === this.lastMcp) return;
       this.lastMcp = key;
       this.client.send('mcp.servers', { servers: report });
+      void this.reportIntegrations(false);
     } catch (err) {
       this.log.warn(`plugin MCP server discovery failed: ${String(err)}`);
     }
@@ -1091,6 +1205,16 @@ export class Runner {
         const removed = this.toolchains.remove(name);
         this.reportToolchains(false);
         done(true, { removed });
+      } else if (
+        command === 'integration.connect' ||
+        command === 'integration.begin' ||
+        command === 'integration.input' ||
+        command === 'integration.cancel' ||
+        command === 'integration.test' ||
+        command === 'integration.remove'
+      ) {
+        // Refusals (web turned off, wrong envelope, machine-wide login) are answers: ok:true with a sentence, never a retry.
+        done(true, await this.integrations.handle(command, payload));
       } else if (command === 'sudo.clear') {
         this.sudo.clear();
         done(true, { cleared: true });
