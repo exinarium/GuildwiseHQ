@@ -2,6 +2,7 @@ import {
   type BudgetDto,
   detectForgeKind,
   isOrgOperational,
+  McpServerInfoSchema,
   type ProjectDetailResponse,
   type ProjectDto,
   type RoleCatalogueEntrySchema,
@@ -382,6 +383,19 @@ export async function workstationDtos(
     },
     git: { connections: w.git_connections ?? [], checkedAt: iso(w.git_checked_at) },
     jira: { status: w.jira_status ?? null, checkedAt: iso(w.jira_checked_at) },
+    mcpServers: ((w.mcp_servers ?? []) as Array<Record<string, unknown>>).flatMap((s) => {
+      const p = McpServerInfoSchema.safeParse(s);
+      return p.success
+        ? [
+            {
+              name: p.data.name,
+              plugin: p.data.plugin,
+              server: p.data.server,
+              ...(p.data.authState ? { authState: p.data.authState } : {}),
+            },
+          ]
+        : [];
+    }),
     orgFolders: {
       folders: w.org_folders ?? [],
       errors: w.org_folder_errors ?? {},

@@ -144,6 +144,8 @@ export const McpServerCandidateDtoSchema = z.object({
   host: z.string().nullable(),
   tools: z.array(z.string()).nullable(),
   workstations: z.array(z.string()),
+  /** The workstations (of `workstations`) where this server is not signed in. Absent from older servers. */
+  needsSignIn: z.array(z.string()).optional(),
 });
 export type McpServerCandidateDto = z.infer<typeof McpServerCandidateDtoSchema>;
 

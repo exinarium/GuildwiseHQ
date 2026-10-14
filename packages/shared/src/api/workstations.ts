@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { RightsReportSchema } from '../devops/environment.ts';
 import { DevOpsAccessSchema } from '../events/devops.ts';
 import { ConnectableForgeSchema, GitConnectionSchema, RepoRefSchema } from '../forge/index.ts';
+import { McpAuthStateSchema } from '../mcp/index.ts';
 import {
   JiraStatusSchema,
   OrgFolderStateSchema,
@@ -83,6 +84,17 @@ export const WorkstationDtoSchema = z.object({
   git: z.object({ connections: z.array(GitConnectionSchema), checkedAt: IsoTime.nullable() }).optional(),
   /** Jira on this workstation (facts only): connected, not connected or refused. */
   jira: z.object({ status: JiraStatusSchema.nullable(), checkedAt: IsoTime.nullable() }).optional(),
+  /** The plugin MCP servers this workstation reports, with their sign-in state (facts only; absent: not reported). */
+  mcpServers: z
+    .array(
+      z.object({
+        name: z.string(),
+        plugin: z.string(),
+        server: z.string(),
+        authState: McpAuthStateSchema.optional(),
+      }),
+    )
+    .optional(),
   /**
    * The organisation source folders the runner reports (set with the app or `aom-runner org-folder`), by organisation,
    * with the folders it offers in the picker. Only sent to the workstation's owner (absent in the admin list).

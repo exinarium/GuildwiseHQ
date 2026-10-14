@@ -1,4 +1,4 @@
-import { type McpServerCandidateDto, mcpServerWarning } from '@aom/shared';
+import { type McpServerCandidateDto, mcpServerWarning, mcpSignInInstruction } from '@aom/shared';
 import { useState } from 'react';
 import { useSetProjectMcpServers } from '../api/queries/mcp.ts';
 import { Badge, Button, Callout, ErrorBox, Panel, Select } from './ui.tsx';
@@ -90,6 +90,15 @@ export function McpServersPanel({
                 <p className="text-xs text-muted" data-testid={`mcp-warning-${name}`}>
                   {d.warning.text}
                 </p>
+                {(byName.get(name)?.needsSignIn ?? []).map((ws) => (
+                  <p
+                    key={ws}
+                    className="text-xs text-amber-700 dark:text-amber-400"
+                    data-testid={`mcp-needs-sign-in-${name}`}
+                  >
+                    Needs sign-in: {mcpSignInInstruction(byName.get(name)?.server ?? name, ws)}
+                  </p>
+                ))}
               </li>
             );
           })}

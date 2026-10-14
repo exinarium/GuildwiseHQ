@@ -175,7 +175,9 @@ export class RunnerHandlers {
         return;
       case 'mcp.servers':
         await applyMcpServersReport(this.ctx, conn.workstationId, msg);
-        await syncMcpSignInNotices(this.ctx, { id: conn.workstationId, userId: conn.userId }, msg).catch(() => {});
+        await syncMcpSignInNotices(this.ctx, { id: conn.workstationId, userId: conn.userId }, msg).catch(
+          () => {},
+        );
         return;
       case 'toolchains.report':
         await applyToolchainsReport(this.ctx, conn.workstationId, msg);
@@ -399,7 +401,9 @@ export class RunnerHandlers {
       JSON.stringify(runtimes),
     ]);
     await alignDevopsRuntime(ctx, conn.workstationId, runtimes);
-    await syncClaudeAuthNotice(ctx, { id: conn.workstationId, userId: conn.userId }, runtimes).catch(() => {});
+    await syncClaudeAuthNotice(ctx, { id: conn.workstationId, userId: conn.userId }, runtimes).catch(
+      () => {},
+    );
     const brief = (rs: Array<{ id: string; available: boolean; sandbox?: string; auth?: string }>) =>
       rs.map((r) => ({
         id: r.id,
