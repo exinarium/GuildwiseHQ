@@ -8,6 +8,7 @@ import {
   type PairingCodeResponse,
   PairingCodeResponseSchema,
   type PatchUserRequest,
+  type SetShiftLimitRequest,
   WorkstationsResponseSchema,
 } from '@aom/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -92,5 +93,14 @@ export function useInstallerStatus(id: string | undefined) {
       const s = q.state.data?.state;
       return s === 'done' || s === 'expired' ? false : 1500;
     },
+  });
+}
+
+/** The owner sets how many shifts a workstation runs at once: a number, "unlimited", or null for the runner's own value. */
+export function useSetShiftLimit(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (limit: SetShiftLimitRequest['limit']) => put(`/workstations/${id}/shift-limit`, { limit }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['workstations'] }),
   });
 }

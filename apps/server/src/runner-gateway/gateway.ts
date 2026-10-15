@@ -4,6 +4,7 @@ import {
   RunnerToServerSchema,
   type ServerToRunnerOf,
   streamId,
+  UNLIMITED_SHIFTS,
   UNPAIRED_CLOSE_REASON,
   WS_CLOSE,
 } from '@aom/shared';
@@ -21,6 +22,7 @@ import { enqueueRunnerCommand } from './commands-queue.ts';
 import { RunnerHandlers } from './handlers.ts';
 import type { RunnerConn } from './registry.ts';
 import { promoteRotatedToken } from './rotation.ts';
+import { platformShiftCap } from './shift-limit.ts';
 
 const PING_MS = 15_000;
 
@@ -173,7 +175,7 @@ export class RunnerGateway {
       lastRepos: [],
       missing: new Map(),
       stopSentAt: new Map(),
-      maxShifts: ctx.config.maxShiftsPerWorkstation,
+      maxShifts: platformShiftCap(ctx) ?? UNLIMITED_SHIFTS,
     };
     const old = ctx.services.runners.set(conn);
     if (old) {

@@ -1,3 +1,4 @@
+import { UNLIMITED_SHIFTS } from '@aom/shared';
 import pg from 'pg';
 import { ceoPass } from '../ceo/pass.ts';
 import { withCommitAs } from '../commands/commit-as.ts';
@@ -197,6 +198,15 @@ export class Dispatcher {
     return out;
   }
 
+  /** Agent shifts that are not finished, per workstation (chats are not counted: the runner runs them apart). */
+  private async shiftLoad(): Promise<Map<string, number>> {
+    const list = await rows<{ workstation_id: string; n: number }>(
+      this.ctx.pool,
+      `SELECT workstation_id, count(*)::int AS n FROM shifts WHERE status <> 'ended' AND kind <> 'chat' GROUP BY workstation_id`,
+    );
+    return new Map(list.map((r) => [r.workstation_id, r.n]));
+  }
+
   private skip(a: Row, nowMs: number): boolean {
     const until = this.cooldown.get(a.id);
     if (until && until > nowMs) return true;
@@ -212,6 +222,12 @@ export class Dispatcher {
     await phasePass(this.ctx);
     const made: ClaimResult[] = [];
     const agents = await this.freeAgents();
+    // Shifts each workstation runs now against the limit its owner set (backlog #76): a full workstation is not offered more.
+    const load = await this.shiftLoad();
+    const full = (workstationId: string): boolean => {
+      const limit = this.ctx.services.runners.get(workstationId)?.maxShifts;
+      return limit !== undefined && limit < UNLIMITED_SHIFTS && (load.get(workstationId) ?? 0) >= limit;
+    };
     for (const [cardId, p] of [...this.preferred]) {
       if (p.until < nowMs) {
         this.preferred.delete(cardId);
@@ -219,28 +235,37 @@ export class Dispatcher {
       }
       const a = agents.find((x) => x.row.id === p.agentId);
       const card = await one(this.ctx.pool, 'SELECT stage, status FROM cards WHERE id=$1', [cardId]);
-      if (!a || !card || card.status !== 'queued' || a.active >= a.row.capacity || this.skip(a.row, nowMs))
+      if (
+        !a ||
+        !card ||
+        card.status !== 'queued' ||
+        a.active >= a.row.capacity ||
+        this.skip(a.row, nowMs) ||
+        full(a.row.workstation_id)
+      )
         continue;
       const r = await claim(this.ctx, { cardId, agentId: a.row.id, expectedStage: card.stage });
       this.preferred.delete(cardId);
       if (r) {
         made.push(r);
         a.active++;
+        load.set(a.row.workstation_id, (load.get(a.row.workstation_id) ?? 0) + 1);
       }
     }
     for (const { row, caps, active } of agents) {
-      if (active >= row.capacity || this.skip(row, nowMs)) continue;
+      if (active >= row.capacity || this.skip(row, nowMs) || full(row.workstation_id)) continue;
       const view = agentView(row, caps);
       const cands = await candidateCards(this.ctx.pool, view, new Date(nowMs));
       for (const c of cands) {
         const r = await claim(this.ctx, { cardId: c.id, agentId: row.id, expectedStage: c.stage });
         if (r) {
           made.push(r);
+          load.set(row.workstation_id, (load.get(row.workstation_id) ?? 0) + 1);
           break;
         }
       }
     }
-    made.push(...(await this.overflowPass(agents, nowMs)));
+    made.push(...(await this.overflowPass(agents, nowMs, full)));
     await devopsPass(this.ctx, (agentId) => (this.cooldown.get(agentId) ?? 0) > nowMs);
     await questionPass(this.ctx, (agentId) => (this.cooldown.get(agentId) ?? 0) > nowMs);
     await baTaskPass(this.ctx, (agentId) => (this.cooldown.get(agentId) ?? 0) > nowMs);
@@ -256,6 +281,7 @@ export class Dispatcher {
   private async overflowPass(
     agents: Array<{ row: Row; caps: string[]; active: number }>,
     nowMs: number,
+    full: (workstationId: string) => boolean = () => false,
   ): Promise<ClaimResult[]> {
     const late = await rows(
       this.ctx.pool,
@@ -272,7 +298,13 @@ export class Dispatcher {
       );
       if (busy.length || made.some((m) => m.cardId === card.id)) continue;
       const atCapacity = agents
-        .filter((a) => a.row.org_id === card.org_id && a.active >= a.row.capacity && !this.skip(a.row, nowMs))
+        .filter(
+          (a) =>
+            a.row.org_id === card.org_id &&
+            a.active >= a.row.capacity &&
+            !this.skip(a.row, nowMs) &&
+            !full(a.row.workstation_id),
+        )
         .sort((x, y) => x.active - y.active);
       for (const a of atCapacity) {
         if (!(await isCandidate(this.ctx.pool, agentView(a.row, a.caps), card.id, new Date(nowMs)))) continue;

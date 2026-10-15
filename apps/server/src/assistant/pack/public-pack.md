@@ -181,6 +181,7 @@ Desk items and kinds, blocking, answering questions, standing orders and adding 
 ### Ledger and vaults
 The ledger, searching it, vaults and shared knowledge, vault conflicts.
 - Ledger: The ledger keeps three kinds of entry:
+- Editing a standing order: The Owner and Admins (a project's owner for its own) can press Edit on a standing order to change its title or text. Agents get the new wording from their next shift or chat, the DevOps engineer included, and History keeps the earlier versions.
 - Searching the ledger: To find something in the ledger:
 - Vaults: Vaults are git repositories of markdown notes that your DevOps engineers keep in sync on your workstations. By default each workstation syncs every 300 seconds (5 minutes); you can set another interval per vault.
 - Which vault an agent reads: Agents only ever read a vault, never write it directly. What they can read depends on the work:
@@ -271,6 +272,7 @@ What a workstation is, the Add a workstation wizard, installing by hand, Claude 
 - Claude sign-in: The installer asks how agents should use Claude:
 - Installing by hand: Only needed when the guided setup is not an option:
 - Health checks: While the installer runs, this page lists the health checks as they finish: Node, git, Claude, the sandbox, Docker, yt-dlp, your repositories and server connectivity. Each shows ok, warn or fail. A fail means something is missing or broken and the line says what. A warn (Docker, yt-dlp) is optional.
+- Shifts at once: Open a workstation and set Shifts at once: the runner's own value, a number or Unlimited. The machine's memory and CPU and the model usage limit still apply, and a platform ceiling, when there is one, is shown.
 - Shared package caches: Agents of one workstation share its package caches (NuGet, npm, pnpm, pip, Gradle, Maven, Go), kept in the runner's data folder, so each package is downloaded once. Packages already restored in your own NuGet folder are reused too, read-only.…
 - Agent toolchains: Agents use the tools found under your home (several .NET SDKs, Node, Go, Python, Java) and any the DevOps engineer registers. The Workstations page lists them; you can remove a registered one. A tool you want agents to have, such as .NET 10, is installed by asking DevOps.
 - Windows: Default: WSL2 (recommended). Install the runner inside a WSL2 Ubuntu distribution and follow the Linux instructions. The installer turns on WSL2 for you; you just follow the steps. Agents run sandboxed inside WSL2 just like on Linux.

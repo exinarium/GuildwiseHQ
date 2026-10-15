@@ -267,6 +267,80 @@ The details of each done item follow this list, by date.
 
 ## 2026-10-15 (done)
 
+### 76. Shifts at once, editable on the Workstations page, including unlimited (built)
+
+**Owner request (2026-10-15).** The maximum number of concurrent shifts was only in the runner's `config.json` (default 4) with a
+platform cap `AOM_MAX_SHIFTS_PER_WORKSTATION` (16). The owner wants to edit it on the Workstations page, with "Unlimited" as an option.
+
+**Built.**
+- **Server**: event `WorkstationShiftLimitSet` (projection onto `workstations.shift_limit` / `shift_limit_unlimited`, migration 2013),
+  `PUT /api/workstations/:id/shift-limit {limit: 1..10000 | "unlimited" | null}` for the workstation's owner (the existing workstation
+  permission: owner only; org Owner/Admin have no workstation settings today). The effective value is the choice, else what the runner
+  reports from its config, always under the platform ceiling (`AOM_MAX_SHIFTS_PER_WORKSTATION`, now `0` = no ceiling; the default stays 16).
+  It is kept on the live connection (`conn.maxShifts`), the dispatcher no longer offers card shifts to a workstation whose unfinished
+  non-chat shifts have reached it (unlimited bypasses the check), and the workstation DTO carries `shifts: {running, limit, setting,
+  unlimited, platformCap, runnerLimit, supported}`.
+- **Protocol** (additive): `welcome.limits.shiftLimit` (the choice) beside the existing `maxConcurrentShifts` (what the server enforces),
+  command `shifts.limit` for a live change (only sent to a runner that announced the new capability `shift-limit:1`; older unanswered
+  copies are dropped so a stale one is never replayed over a newer choice or a `welcome`).
+- **Runner**: applies the choice to the next shift offered without a restart, saves it in `server-limits.json`, loads it at start before
+  the server has answered; `config.json`'s `maxConcurrentShifts` stays the fallback (no choice, or an older server). In a runner with
+  several pairings the machine limit also counts the granted value.
+- **Web**: **Shifts at once** control (Runner's own value / A number / Unlimited) with the note that memory, CPU and the model usage limit
+  still apply, a warning when the platform ceiling is lower than the choice and one when the runner is too old to apply it.
+- Tests: server `workstation-shift-limit.test.ts` (setting, ceiling, no ceiling, command, stale command, dispatcher with limit 1, 3,
+  unlimited), runner `shift-limit.test.ts`, web `shift-limit.test.tsx`. Docs: RUNNER.md, DEPLOY.md, user guide 4.25, help, What's new.
+- Not done: no separate org Owner/Admin right over someone else's workstation (the workstation list is the owner's own); DevOps, question
+  and BA-task shifts are still gated only by the runner's own `busy` rejection, not by the dispatcher pre-check.
+
+### 75. The DevOps agent does not follow standing orders (fixed)
+
+**Owner request (2026-10-15).** "The DevOps agent does not follow standing orders." Investigate first, then fix the root cause.
+
+**Evidence** (production, read-only, 2026-10-15). 14 standing orders exist, all organization-wide (none per project, none per workstation;
+there is no workstation-level standing order in the product). The owner's own: *JIRA* "If any interaction with Jira is needed use the
+Atlassian-MCP", and *Working Branch* (twice, 10:59 and 11:08) "For every project and repository, always use the repository's current working
+branch for new work. Do not ask which branch to use. Only use a different branch if the intake names one explicitly"; the rest came from
+the CEO/HR (ledger search, bwrap, sandbox, design, ...). DevOps requests that day (devops_requests, 60 hours) include run-a-branch
+("Make dCode Flow P5 run ... Flow-P5@aom/p5-26-..."), hygiene runs, card requests and many review-sandbox escalations, all through
+`buildDevopsShiftStart`. The runner's shift logs do not store the instructions file, so the proof is in the code path below.
+
+**Root cause.** `buildDevopsShiftStart` (apps/server/src/runner-gateway/brief.ts) built the DevOps brief with `standingOrders: []`, and
+`renderDevopsInstructions` (packages/shared/src/prompt/devops.ts) never rendered standing orders at all, so no DevOps shift (a request, a
+card request, a hygiene run, a run-a-branch request, a fix-environment request) ever contained one. Vault standing orders did not help:
+a DevOps shift has `vault: null`, and the DevOps chat explicitly skips the vault. Card shifts (builder, reviewer, tester) get them through
+`renderInstructions` and `standingOrdersFor`; question shifts through `renderQuestionInstructions`. Chats (every role) only ever got the
+vault copy, never the ledger. BA phase tasks had the orders in their brief but `renderBaTaskInstructions` did not render them.
+Which order was "ignored": all of them, including *Working Branch* and *JIRA*; an agent that was never told them cannot follow them (I
+found no logged DevOps shift that cites a standing order).
+
+**Fix.**
+- Every DevOps shift now carries the organization-wide orders plus those of the projects involved (the card's, the project the user was
+  looking at, the run's, every project of a hygiene run) plus the owner's standing orders for the DevOps role extension; the instructions
+  render them as binding rules in a "Standing orders" section ("the standing order wins ... do not ask the owner again").
+- Chats get `context.standingOrders` (organization + the chat's project; the DevOps engineer without a project gets every project's) and render
+  them for every role, DevOps included. BA phase tasks render theirs.
+- DevOps role v9: core rule "the standing orders in your prompt are binding and override your defaults and habits".
+- Tests per path: server `standing-orders-devops.test.ts` (card request, project page request, no project, run request, hygiene run, edited
+  order, project chat, DevOps chat), shared `standing-orders-prompts.test.ts`.
+- Not changed: batch/mail-draft/reporter BA task variants, the CEO and question shifts' separate renderers.
+
+### 74. Edit standing orders (built)
+
+**Owner request (2026-10-15).** Standing orders could be added, replaced by a newer one and (through HR/CEO) proposed, but not edited.
+
+**Built.**
+- Event `LedgerEntryEdited` (full new title, text, tags); projection updates `ledger_entries` (`version`, `edited_at`, `edited_by_*`) and
+  keeps every earlier wording in `ledger_entry_versions` (migration 2012). Search is re-indexed (the vector is generated from title and text).
+- `PATCH /api/ledger/:id` and `GET /api/ledger/:id/history`; the people who may add may edit (organization-wide: Owner and Admins;
+  project: the project owner; a Member gets 403). Only live standing orders; a decision, requirement or replaced order is 409; unchanged
+  input makes no new version. The list entries carry `version`, `editedAt`, `editedByName` and `canEdit`.
+- Agents: briefs are built from the ledger at shift start, so the next shift or chat has the new wording. The vault's `standing-orders.md`
+  is rewritten from the live orders of that scope (`replace`, one commit), not appended with a second contradicting version.
+- Web: **Edit** (dialog with title and text) and **History** (versions, who, when) on each standing order of the Ledger page; *edited by ... *
+  line. Tests: server `ledger-edit.test.ts` and `org-authz.test.ts` (matrix), web `ledger-edit.test.tsx`. Docs: user guide 4.5, help, What's new.
+- Not done: a Retire/archive action (there is none today either; replacing is still how an order is withdrawn).
+
 ### 73. Pause work until a model usage limit resets (built)
 
 **Owner request (2026-10-15).** "Enable the runner to pause the project until the limit resets, otherwise the board just keeps

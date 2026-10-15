@@ -23,6 +23,14 @@ export const workstationProjectors: Record<string, Projector> = {
       ],
     );
   },
+  WorkstationShiftLimitSet: async (tx, e) => {
+    const p = (e.event as EventOf<'WorkstationShiftLimitSet'>).payload;
+    await exec(tx, 'UPDATE workstations SET shift_limit=$2, shift_limit_unlimited=$3 WHERE id=$1', [
+      p.workstationId,
+      typeof p.limit === 'number' ? p.limit : null,
+      p.limit === 'unlimited',
+    ]);
+  },
   WorkstationRenamed: async (tx, e) => {
     const p = (e.event as EventOf<'WorkstationRenamed'>).payload;
     await exec(tx, 'UPDATE workstations SET name=$2 WHERE id=$1', [p.workstationId, p.name]);

@@ -281,7 +281,7 @@ PayFast set-up (fallback): PayFast is told the notification URL `https://<your p
 | `AOM_RATE_LIMIT` | `true` | Enable request rate limiting |
 | `AOM_ALLOW_LOCAL_REMOTES` | `false` | **Tests only.** Accept `file://` and local-path git remotes for repositories and vaults; production refuses them |
 | `AOM_MOCK_UI` | `false` | **Dev and tests only.** Show the mock-runtime card fields (Mock script, ...) in the UI and accept them on the API; off, the API refuses them with 422 |
-| `AOM_MAX_SHIFTS_PER_WORKSTATION` | `16` | Ceiling for a workstation's `maxConcurrentShifts` (the runner's own setting, default 4, is what normally applies) |
+| `AOM_MAX_SHIFTS_PER_WORKSTATION` | `16` | Platform ceiling for the shifts one workstation runs at once. Owners choose their own number (or Unlimited) on the Workstations page, the runner's own `maxConcurrentShifts` (default 4) applies when they choose nothing, and this ceiling holds over both. `0` = no ceiling |
 | `AOM_TEST_CLOCK` | `false` | **Never enable in production.** Exposes `POST /api/test/clock` for testing |
 | `LOG_LEVEL` | `info` | Logging level (`debug`, `info`, `warn`, `error`) |
 

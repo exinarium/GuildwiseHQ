@@ -114,8 +114,13 @@ export class RunnerHost {
     const index = loadIndex(this.opts.root);
     if (index.maxConcurrentShifts) return index.maxConcurrentShifts;
     let max = 1;
+    // A pairing whose owner raised the limit on the Workstations page (backlog #76) may use what the server grants.
     for (const r of this.running.values())
-      max = Math.max(max, loadSafe(entryConfigPath(this.opts.root, r.entry))?.maxConcurrentShifts ?? 4);
+      max = Math.max(
+        max,
+        loadSafe(entryConfigPath(this.opts.root, r.entry))?.maxConcurrentShifts ?? 4,
+        r.runner.shiftLimit(),
+      );
     return max;
   }
 
