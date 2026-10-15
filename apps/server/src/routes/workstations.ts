@@ -7,6 +7,7 @@ import {
   RemoveToolchainRequestSchema,
   RunnerPairRequestSchema,
   SetOrgFolderRequestSchema,
+  SetShiftLimitRequestSchema,
 } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -20,6 +21,7 @@ import {
   createPairingCode,
   pairRunner,
   renameWorkstation,
+  setShiftLimit,
   unlinkWorkstation,
 } from '../commands/workstations.ts';
 import type { Ctx } from '../context.ts';
@@ -57,6 +59,17 @@ export function workstationRoutes(ctx: Ctx) {
       async (req) => {
         const s = await requireUser(ctx, req);
         await renameWorkstation(ctx, s.user, req.params.id, req.body.name);
+        return own(s.user.id, req.params.id);
+      },
+    );
+
+    /** How many shifts this workstation runs at once: a number, "unlimited", or null for the runner's own value (#76). */
+    app.put(
+      '/api/workstations/:id/shift-limit',
+      { schema: { params: IdParamsSchema, body: SetShiftLimitRequestSchema } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        await setShiftLimit(ctx, s.user, req.params.id, req.body.limit);
         return own(s.user.id, req.params.id);
       },
     );

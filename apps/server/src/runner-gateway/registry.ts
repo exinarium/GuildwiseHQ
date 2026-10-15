@@ -14,8 +14,13 @@ export interface RunnerConn {
   /** shiftId -> consecutive heartbeats that did not report it. */
   missing: Map<string, number>;
   stopSentAt: Map<string, number>;
-  /** Shifts this workstation takes at once: the runner's `maxConcurrentShifts`, capped by the server. */
+  /**
+   * Shifts this workstation takes at once (backlog #76): the owner's setting, else the runner's `maxConcurrentShifts`,
+   * capped by the platform. `UNLIMITED_SHIFTS` is no limit at all.
+   */
   maxShifts: number;
+  /** The runner's own configured `maxConcurrentShifts` from `hello` (the fallback when the owner set none). */
+  reportedMaxShifts?: number;
   /**
    * The runner can prepare toolchains, check rights and keep a sudo password (it announced a `sudoKey` in `hello`).
    * An older runner answers those commands with an error, and holding its cards back for that would be wrong.

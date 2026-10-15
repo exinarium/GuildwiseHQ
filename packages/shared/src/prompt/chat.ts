@@ -2,6 +2,7 @@ import { JIRA_SKILL_MD } from '../external/index.ts';
 import type { AgentRuntimeSpec, ChatContext } from '../protocol/runner.ts';
 import { renderCeoChatSection } from './ceo.ts';
 import { type ReadableFolder, renderReadableFolders } from './readable.ts';
+import { renderBindingStandingOrders } from './standing-orders.ts';
 
 /** What the runner found in the vault clone for a chat: `missing` when this workstation has no clone of the vault. */
 export interface ChatVaultNotes {
@@ -66,6 +67,8 @@ export function renderChatInstructions(
           ]),
     ].join('\n'),
   );
+  // The ledger's standing orders bind every agent in a conversation too (DevOps included, backlog #75).
+  if (ctx.standingOrders?.length) out.push(renderBindingStandingOrders(ctx.standingOrders));
   // The DevOps engineer reads anywhere (it runs as the user); everyone else only what the runner opened.
   if (agent.roleKey !== 'devops' && opts.readFolders) out.push(renderReadableFolders(opts.readFolders));
   const vaultSection =

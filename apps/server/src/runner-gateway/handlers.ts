@@ -79,6 +79,7 @@ import { claimPendingCommands, completeCommand, requeueSentCommands } from './co
 import { ledgerSearchRpc } from './ledger-rpc.ts';
 import type { RunnerConn } from './registry.ts';
 import { issueRotatedToken } from './rotation.ts';
+import { dropStaleShiftLimitCommands, effectiveShiftLimit, shiftLimitSettingOf } from './shift-limit.ts';
 import { recordRepoCatalog } from './workstation-repos.ts';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -530,10 +531,14 @@ export class RunnerHandlers {
     const { ctx } = this;
     const now = ctx.clock.now();
     conn.helloAt = now;
-    conn.maxShifts = Math.min(
-      msg.maxConcurrentShifts ?? ctx.config.maxShiftsPerWorkstation,
-      ctx.config.maxShiftsPerWorkstation,
+    // The owner's choice on the Workstations page wins over what the runner reports from its config (backlog #76).
+    conn.reportedMaxShifts = msg.maxConcurrentShifts;
+    const setting = shiftLimitSettingOf(
+      (await one(ctx.pool, 'SELECT shift_limit, shift_limit_unlimited FROM workstations WHERE id=$1', [
+        conn.workstationId,
+      ])) ?? {},
     );
+    conn.maxShifts = effectiveShiftLimit(ctx, setting, msg.maxConcurrentShifts);
     conn.lastRepos = msg.repos;
     conn.helloShiftIds = msg.activeShifts.map((s) => s.shiftId);
     await exec(
@@ -568,6 +573,8 @@ export class RunnerHandlers {
       [conn.workstationId, msg.capabilities ?? [], msg.maxRunEnvironments ?? null, now],
     );
     ctx.services.browser.resendRunFollows(conn.workstationId);
+    // `welcome` carries the shift limit: an older, unanswered `shifts.limit` must not be replayed over it.
+    await dropStaleShiftLimitCommands(ctx.pool, conn.workstationId);
     // Whatever the previous connection was sent may not have arrived: it is due again on this one.
     await requeueSentCommands(ctx.pool, conn.workstationId);
     await this.matchRepos(conn);
@@ -595,7 +602,7 @@ export class RunnerHandlers {
       workstationId: conn.workstationId,
       serverTime: now.toISOString(),
       heartbeatSec: HEARTBEAT_SEC,
-      limits: { maxConcurrentShifts: conn.maxShifts },
+      limits: { maxConcurrentShifts: conn.maxShifts, shiftLimit: setting },
     });
     // With nothing in the runner's outbox there is nothing to wait for; otherwise reconcile on outbox.flushed.
     if (msg.outboxPending === 0) await this.reconcile(conn);

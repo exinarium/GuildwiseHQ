@@ -30,7 +30,7 @@ import { projectHasVault, vaultForProject } from '../commands/vaults.ts';
 import type { Ctx } from '../context.ts';
 import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import type { ClaimResult } from '../dispatcher/claim.ts';
-import { cardLedgerEntries, standingOrdersFor } from '../queries/ledger.ts';
+import { cardLedgerEntries, standingOrdersFor, standingOrdersForProjects } from '../queries/ledger.ts';
 import { orgReadRepos, referenceReadRepos } from './read-repos.ts';
 import { localReadRepos } from './workstation-repos.ts';
 
@@ -540,6 +540,44 @@ export async function withRequestContext(ctx: Ctx, req: Record<string, any>): Pr
     : req.summary;
 }
 
+/** The projects a DevOps request touches: its card's, the one the user was looking at, a run's and a hygiene run's. */
+async function devopsProjectIds(ctx: Ctx, req: Row, orgId: string): Promise<string[]> {
+  const ids = new Set<string>();
+  const add = (v: unknown) => typeof v === 'string' && ids.add(v);
+  if (req.card_id)
+    add((await one(ctx.pool, 'SELECT project_id FROM cards WHERE id=$1', [req.card_id]))?.project_id);
+  const c = (req.context ?? null) as { projectId?: string; envId?: string } | null;
+  if (c?.projectId)
+    add((await one(ctx.pool, 'SELECT id FROM projects WHERE id=$1 AND org_id=$2', [c.projectId, orgId]))?.id);
+  if (c?.envId)
+    add((await one(ctx.pool, 'SELECT project_id FROM run_environments WHERE id=$1', [c.envId]))?.project_id);
+  for (const r of (req.hygiene?.repos ?? []) as Array<{ projectId?: string }>) add(r.projectId);
+  return [...ids];
+}
+
+/**
+ * Standing orders for a DevOps shift (backlog #75): the organization-wide ones, those of every project the request
+ * touches, and the owner's standing orders for the DevOps role. Before this the brief carried none, so the engineer never saw them.
+ */
+export async function devopsStandingOrders(
+  ctx: Ctx,
+  req: Row,
+  orgId: string,
+  roleKey: string,
+): Promise<Array<{ title: string; body: string }>> {
+  const ext = await one(ctx.pool, 'SELECT extensions FROM role_extensions WHERE org_id=$1 AND role_key=$2', [
+    orgId,
+    roleKey,
+  ]);
+  const own = ((ext?.extensions as { standingOrders?: string[] } | undefined)?.standingOrders ?? []).map(
+    (body, i) => ({ title: `Owner standing order for DevOps ${i + 1}`, body }),
+  );
+  return [
+    ...(await standingOrdersForProjects(ctx.pool, orgId, await devopsProjectIds(ctx, req, orgId))),
+    ...own,
+  ];
+}
+
 /**
  * The `shift.start` for one DevOps request. A DevOps shift has no card, but the runner's shift machinery is brief
  * driven, so the brief carries a placeholder card ("DEVOPS") and the real request travels in `devops`.
@@ -615,7 +653,8 @@ export async function buildDevopsShiftStart(
     handoffs: [],
     reviewComments: [],
     thread: [],
-    standingOrders: [],
+    // Binding like every other agent's: the organization's orders plus those of each project the request touches.
+    standingOrders: await devopsStandingOrders(ctx, req, agent.org_id, role.definition.key),
     ledger: [],
   };
   return {

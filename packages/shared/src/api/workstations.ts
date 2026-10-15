@@ -9,6 +9,7 @@ import {
   RepoSyncStatusSchema,
   RunnerUpdateStateSchema,
   RuntimeInfoSchema,
+  ShiftLimitSettingSchema,
   ToolchainInfoSchema,
 } from '../protocol/runner.ts';
 import { IsoTime } from './common.ts';
@@ -125,9 +126,22 @@ export const WorkstationDtoSchema = z.object({
     .optional(),
   /** Agent toolchains the runner reports (detected, configured, registered by the DevOps engineer). Owner only. */
   toolchains: z.object({ items: z.array(ToolchainInfoSchema), checkedAt: IsoTime.nullable() }).optional(),
-  /** Shifts running now and how many this workstation takes at once (`limit` is null while it is offline). */
+  /**
+   * Shifts running now and how many this workstation takes at once (backlog #76). `limit` is what is in force (null while
+   * it is offline and nothing is set, and while it is unlimited), `setting` what the owner chose (null: the runner's own
+   * value), `unlimited` that nothing but the machine limits it, `platformCap` the platform's ceiling (null: none) and
+   * `runnerLimit` the runner's own configured value. `supported` says whether the runner applies the setting (false: update it).
+   */
   shifts: z
-    .object({ running: z.number().int().nonnegative(), limit: z.number().int().positive().nullable() })
+    .object({
+      running: z.number().int().nonnegative(),
+      limit: z.number().int().positive().nullable(),
+      setting: ShiftLimitSettingSchema.default(null),
+      unlimited: z.boolean().default(false),
+      platformCap: z.number().int().positive().nullable().default(null),
+      runnerLimit: z.number().int().positive().nullable().default(null),
+      supported: z.boolean().nullable().default(null),
+    })
     .optional(),
 });
 export type WorkstationDto = z.infer<typeof WorkstationDtoSchema>;
@@ -153,6 +167,10 @@ export type SetOrgFolderRequest = z.infer<typeof SetOrgFolderRequestSchema>;
 /** `POST /api/workstations/:id/toolchains/remove`: the owner removes a toolchain the DevOps engineer registered. */
 export const RemoveToolchainRequestSchema = z.object({ name: z.string().trim().min(1).max(80) });
 export type RemoveToolchainRequest = z.infer<typeof RemoveToolchainRequestSchema>;
+
+/** `PUT /api/workstations/:id/shift-limit`: how many shifts this workstation runs at once (null: the runner's own value). */
+export const SetShiftLimitRequestSchema = z.object({ limit: ShiftLimitSettingSchema });
+export type SetShiftLimitRequest = z.infer<typeof SetShiftLimitRequestSchema>;
 
 export const PatchWorkstationRequestSchema = z.object({ name: z.string().min(1).max(80) });
 

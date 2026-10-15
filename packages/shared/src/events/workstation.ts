@@ -16,6 +16,15 @@ export const workstationEvents = [
       simulationOrgId: Id.optional(),
     }),
   ),
+  /** The owner set how many shifts this workstation runs at once: a number, `unlimited`, or null (the runner's own value). */
+  defineEvent(
+    'WorkstationShiftLimitSet',
+    z.object({
+      workstationId: Id,
+      limit: z.union([z.number().int().min(1).max(10_000), z.literal('unlimited')]).nullable(),
+      changedBy: Id,
+    }),
+  ),
   defineEvent('WorkstationRenamed', z.object({ workstationId: Id, name: z.string().min(1) })),
   defineEvent('WorkstationUnlinked', z.object({ workstationId: Id, by: z.enum(['owner', 'admin']) })),
   defineEvent('WorkstationConnected', z.object({ workstationId: Id, runnerVersion: z.string().optional() })),

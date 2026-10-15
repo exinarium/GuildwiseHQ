@@ -7,6 +7,8 @@ import {
   type ProjectDetailResponse,
   type ProjectDto,
   type RoleCatalogueEntrySchema,
+  SHIFT_LIMIT_CAPABILITY,
+  UNLIMITED_SHIFTS,
   type WorkstationDto,
 } from '@aom/shared';
 import type { z } from 'zod';
@@ -19,6 +21,7 @@ import { budgetDto, canEditBudget, monthSpendByProject, orgCostCtx, seesAmounts 
 import { iso, one, type Row, rows } from '../db/sql.ts';
 import { conflict, notFound } from '../errors.ts';
 import { referenceRepoCandidates, referenceRepoDtos } from '../runner-gateway/read-repos.ts';
+import { effectiveShiftLimit, platformShiftCap, shiftLimitSettingOf } from '../runner-gateway/shift-limit.ts';
 import {
   referenceWorkstationRepoDtos,
   type StoredWorkstationRepo,
@@ -317,6 +320,35 @@ export function syncDto(r: Row | undefined) {
   };
 }
 
+/**
+ * Shifts running now and the limit in force (backlog #76): the owner's setting, else the runner's own value, under the
+ * platform ceiling. Offline, only an explicit setting is known.
+ */
+function shiftsDto(
+  ctx: Ctx,
+  w: Row,
+  running: number,
+  caps: Row | undefined,
+): NonNullable<WorkstationDto['shifts']> {
+  const conn = ctx.services.runners.isOnline(w.id) ? ctx.services.runners.get(w.id) : undefined;
+  const setting = shiftLimitSettingOf(w);
+  const effective = conn
+    ? conn.maxShifts
+    : setting !== null
+      ? effectiveShiftLimit(ctx, setting, undefined)
+      : null;
+  const unlimited = effective !== null && effective >= UNLIMITED_SHIFTS;
+  return {
+    running,
+    limit: effective === null || unlimited ? null : effective,
+    setting,
+    unlimited,
+    platformCap: platformShiftCap(ctx),
+    runnerLimit: conn?.reportedMaxShifts ?? null,
+    supported: caps ? ((caps.capabilities ?? []) as string[]).includes(SHIFT_LIMIT_CAPABILITY) : null,
+  };
+}
+
 export async function workstationDtos(
   ctx: Ctx,
   where: string,
@@ -440,10 +472,7 @@ export async function workstationDtos(
       setAt: iso(w.devops_sudo_set_at),
       works: w.devops_sudo_works ?? null,
     },
-    shifts: {
-      running: running.find((r) => r.workstation_id === w.id)?.n ?? 0,
-      limit: ctx.services.runners.isOnline(w.id) ? (ctx.services.runners.get(w.id)?.maxShifts ?? null) : null,
-    },
+    shifts: shiftsDto(ctx, w, running.find((r) => r.workstation_id === w.id)?.n ?? 0, caps.get(w.id)),
     git: { connections: w.git_connections ?? [], checkedAt: iso(w.git_checked_at) },
     jira: { status: w.jira_status ?? null, checkedAt: iso(w.jira_checked_at) },
     mcpServers: ((w.mcp_servers ?? []) as Array<Record<string, unknown>>).flatMap((s) => {

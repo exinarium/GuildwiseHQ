@@ -59,6 +59,7 @@ This guide is for people who have never worked with AI agents before. You do not
   - [4.22 Your CEO](#422-your-ceo)
   - [4.23 Integration tests run by the tester](#423-integration-tests-run-by-the-tester)
   - [4.24 When the Claude usage limit is reached](#424-when-the-claude-usage-limit-is-reached)
+  - [4.25 How many shifts a workstation runs at once](#425-how-many-shifts-a-workstation-runs-at-once)
 - [5. For Members](#5-for-members)
   - [5.1 What you can do](#51-what-you-can-do)
   - [5.2 Your first day](#52-your-first-day)
@@ -556,6 +557,8 @@ When you answer you can also record it in the **ledger** as a **requirement** (a
 
 The **Ledger** page lists everything and is searchable. Organization-wide standing orders can only come from the Owner and Admins. A project owner adds project-wide ones.
 
+**Editing a standing order.** Press **Edit** on a standing order in the Ledger to change its title or text; the people who may add it may edit it (the Owner and Admins for an organization-wide one, the project's owner for a project one). The order keeps its place, shows *edited* with who and when, and **History** lists every earlier wording. Agents are briefed from the Ledger each time, so the new wording reaches their next shift or chat, and the copy in the vault's `standing-orders.md` is rewritten to match. Every agent follows the standing orders as binding rules that override its usual habits: builders, reviewers and the BA, and also the DevOps engineer (for its requests, repository hygiene, running a branch and its chats), which receives the organization's orders plus those of the projects involved. Decisions and requirements cannot be edited, only replaced.
+
 ![The ledger](guide/assets/ledger.jpg)
 
 > **In the app:** Help, "The Decision desk" (`/help/desk`) and "Ledger and vaults" (`/help/ledger-and-vaults`).
@@ -1003,6 +1006,10 @@ Unit tests are run by builders and reviewers. **Integration and end-to-end tests
 ### 4.24 When the Claude usage limit is reached
 
 A Claude subscription has a session limit and a weekly limit. When it is reached, Guildwise **pauses the work** instead of letting every card fail and retry. The board and the project settings show **Paused until 18:00 (usage limit on <workstation>)** in your time zone. Cards stay in their queue with a note ("Paused: the model usage limit resets at 18:00"), no shift is counted as failed, and nothing needs doing: when the limit resets the workstation checks with one tiny request and work continues by itself. Your desk gets one notice (and one e-mail) *Claude usage limit reached on <workstation>*, which closes by itself. Projects that also have agents on another workstation keep working there. A chat started meanwhile says when it can be used again.
+
+### 4.25 How many shifts a workstation runs at once
+
+Each workstation runs a limited number of agent shifts at the same time; further cards wait in the queue. Open the workstation on the **Workstations** page and set **Shifts at once**: **Runner's own value** (what is in the runner's config file, normally 4), **A number**, or **Unlimited**. Only the workstation's owner can change it. It takes effect at once, with no restart, and the runner remembers it. **Unlimited** means Guildwise sets no limit; the computer's memory and CPU and your model's usage limit still apply, so watch the machine the first time. The platform administrator can also set a ceiling for the whole platform: when it is lower than your choice the page says which number applies. A runner from before this feature (0.1.20 and older) keeps using its own value and the page tells you to update it.
 
 ## 5. For Members
 

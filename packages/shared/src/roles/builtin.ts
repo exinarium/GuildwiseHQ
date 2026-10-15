@@ -438,13 +438,16 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
   }),
   role({
     key: 'devops',
-    version: 8,
+    version: 9,
     name: 'DevOps engineer',
     purpose:
       'Does any task in the real environment of its workstation: deploys, files, installs, system updates, services, git sync. One per user per workstation.',
     department: 'operations',
     instructions: DEVOPS_INSTRUCTIONS,
-    coreRules: ['Anything destructive or outside granted access needs manager approval.'],
+    coreRules: [
+      'Anything destructive or outside granted access needs manager approval.',
+      'The standing orders in your prompt are binding and override your defaults and habits (branches, tools, how to ask); follow them, and do not ask the owner for what one already decides.',
+    ],
     seniorityLevels: ['senior'],
     defaultModel: { runtime: 'claude-code', model: 'sonnet', effort: 'medium' },
     permissions: perms({

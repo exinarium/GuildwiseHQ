@@ -112,7 +112,13 @@ describe('runner websocket auth', () => {
     const welcome = await r.waitFor('welcome');
     expect(welcome.limits.maxConcurrentShifts).toBe(8);
     await w.t.app.ctx.notifier.flush();
-    expect(await shifts()).toEqual({ running: 0, limit: 8 });
+    expect(await shifts()).toMatchObject({
+      running: 0,
+      limit: 8,
+      setting: null,
+      runnerLimit: 8,
+      platformCap: 16,
+    });
     r.close();
     // a runner that asks for more than the server allows is capped (AOM_MAX_SHIFTS_PER_WORKSTATION, default 16)
     const greedy = await w.connectRunner({ hello: false });

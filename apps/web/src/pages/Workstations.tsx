@@ -36,6 +36,7 @@ import { AgentToolchains } from '../components/workstations/AgentToolchains.tsx'
 import { CloudWorkstations } from '../components/workstations/CloudWorkstations.tsx';
 import { OrgSourceFolder } from '../components/workstations/OrgSourceFolder.tsx';
 import { RunnerUpdateBadge } from '../components/workstations/RunnerUpdateBadge.tsx';
+import { ShiftLimit } from '../components/workstations/ShiftLimit.tsx';
 import { integrationsLink } from '../lib/integrations.ts';
 import { useCanManageOrg } from '../lib/orgRole.ts';
 import { unavailableRuntimes, unsandboxedConsequence, unsandboxedRuntimes } from '../lib/sandbox.ts';
@@ -314,14 +315,21 @@ export function WorkstationCard({
                 <p className="mb-1 text-xs font-medium text-subtle">Shifts running</p>
                 <p
                   data-testid="workstation-shifts"
-                  title="Set maxConcurrentShifts in the runner config.json (default 4)"
+                  title={
+                    admin
+                      ? undefined
+                      : 'Change the limit below, or set maxConcurrentShifts in the runner config.json'
+                  }
                 >
                   {w.shifts
                     ? w.shifts.limit
                       ? `${w.shifts.running} of ${w.shifts.limit}`
-                      : `${w.shifts.running} (limit shown while connected)`
+                      : w.shifts.unlimited
+                        ? `${w.shifts.running} (unlimited)`
+                        : `${w.shifts.running} (limit shown while connected)`
                     : 'Not reported'}
                 </p>
+                {!admin && <ShiftLimit w={w} />}
                 {!admin && <CardlessShifts workstationId={w.id} />}
               </div>
               <div>

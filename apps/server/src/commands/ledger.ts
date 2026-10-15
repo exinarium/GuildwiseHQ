@@ -1,11 +1,17 @@
 import { randomUUID } from 'node:crypto';
-import { type CreateLedgerEntryRequest, isOrgManager, streamId } from '@aom/shared';
+import {
+  type CreateLedgerEntryRequest,
+  type EditLedgerEntryRequest,
+  isOrgManager,
+  streamId,
+} from '@aom/shared';
 import { orgRoleOf } from '../auth/org-context.ts';
 import type { AuthSession } from '../auth/sessions.ts';
 import { loadVisibleCard, loadVisibleProject } from '../authz/scope.ts';
 import type { Ctx } from '../context.ts';
+import { one } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
-import { forbidden } from '../errors.ts';
+import { conflict, forbidden, notFound } from '../errors.ts';
 import { orgScope, projectScope, userActor } from './common.ts';
 import { plannedVaultPath } from './decisions.ts';
 
@@ -73,5 +79,53 @@ export async function addLedgerEntry(
       { tx },
     );
     return entryId;
+  });
+}
+
+/**
+ * Edits the wording of a live standing order in place (backlog #74): the title, the text and the tags. The people who may
+ * add one may edit it (an organization-wide order: the Owner and Admins; a project's: the project owner). The earlier
+ * wording stays in the entry's history, and the next brief any agent gets carries the new one. Returns false when
+ * nothing changed.
+ */
+export async function editLedgerEntry(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  entryId: string,
+  req: EditLedgerEntryRequest,
+): Promise<boolean> {
+  return withAppendTx(ctx.pool, async (tx) => {
+    const e = await one(tx, 'SELECT * FROM ledger_entries WHERE id=$1 FOR UPDATE', [entryId]);
+    if (!e) throw notFound('ledger entry not found');
+    if (e.project_id) {
+      // Not a member of the project: it does not exist for the caller.
+      const project = await loadVisibleProject(tx, user.id, e.project_id);
+      if (e.scope === 'standing_order' && project.my_role !== 'owner')
+        throw forbidden('only the organization Owner and Admins can edit project standing orders');
+    } else {
+      const role = await orgRoleOf(tx, user.id, e.org_id);
+      if (!role) throw notFound('ledger entry not found');
+      if (!isOrgManager({ orgRole: role }))
+        throw forbidden('only the organization Owner and Admins can edit organization-wide standing orders');
+    }
+    if (e.scope !== 'standing_order') throw conflict('not_editable', 'only standing orders can be edited');
+    if (e.superseded_by)
+      throw conflict('superseded', 'this standing order was replaced; edit the current one');
+    const title = req.title?.trim() ?? e.title;
+    const body = req.body?.trim() ?? e.body;
+    const tags = req.tags ?? e.tags;
+    if (title === e.title && body === e.body && JSON.stringify(tags) === JSON.stringify(e.tags)) return false;
+    await ctx.store.append(
+      [
+        {
+          streamId: streamId.ledger(entryId),
+          event: { type: 'LedgerEntryEdited', payload: { entryId, title, body, tags } },
+          actor: userActor(user.id),
+          scope: e.project_id ? projectScope(e.org_id, e.project_id) : orgScope(e.org_id),
+        },
+      ],
+      { tx },
+    );
+    return true;
   });
 }

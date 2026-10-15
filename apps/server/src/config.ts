@@ -30,7 +30,8 @@ const EnvSchema = z.object({
   AOM_REPORTER_SECONDS: z.coerce.number().int().min(1).max(3600).default(60),
   AOM_HYGIENE_SCHEDULE: bool(true),
   AOM_WEBHOOK_ALLOW_PRIVATE: bool(false),
-  AOM_MAX_SHIFTS_PER_WORKSTATION: z.coerce.number().int().min(1).max(256).default(16),
+  /** Platform ceiling for the shifts one workstation runs at once; 0 = no ceiling (backlog #76). */
+  AOM_MAX_SHIFTS_PER_WORKSTATION: z.coerce.number().int().min(0).max(100000).default(16),
   /** Where the packaged runner (`aom-runner-<version>.tgz`, `pnpm package:runner`) is served from. */
   AOM_RUNNER_RELEASE_DIR: z.string().optional(),
   /** The support address new Contact us requests are emailed to, until the super admin sets one in the platform settings. */
@@ -131,11 +132,11 @@ export interface Config {
   mockUi: boolean;
   /** A user who has never seen the first-login tour gets it on their first visit (off in the e2e suite, which switches it on per user). */
   tourAutostart: boolean;
-  /** Ceiling for a workstation's `maxConcurrentShifts` (the runner's own setting, default 4, is what applies). */
   /** How often the reporter sweeps for signals, expired triage holds and the daily floor report (docs/design/phases.md B4). */
   reporterSeconds: number;
   /** Run the workstations' scheduled repository hygiene (each workstation's own cadence). "Run hygiene now" always works. */
   hygieneSchedule: boolean;
+  /** Platform ceiling for a workstation's shift limit (its owner sets the limit on the Workstations page); 0 = none. */
   maxShiftsPerWorkstation: number;
   /** Let outgoing webhooks reach loopback and private-network addresses (local tests; off in production). */
   webhookAllowPrivate: boolean;

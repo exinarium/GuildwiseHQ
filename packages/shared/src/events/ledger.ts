@@ -22,5 +22,18 @@ export const ledgerEvents = [
       vaultPath: z.string().optional(),
     }),
   ),
+  /**
+   * A standing order was edited in place (backlog #74). Carries the full new wording; the projection keeps the previous
+   * version in `ledger_entry_versions`, so the history stays visible.
+   */
+  defineEvent(
+    'LedgerEntryEdited',
+    z.object({
+      entryId: Id,
+      title: z.string().min(1).max(300),
+      body: z.string().min(1).max(20000),
+      tags: z.array(z.string()).default([]),
+    }),
+  ),
   defineEvent('LedgerEntrySuperseded', z.object({ entryId: Id, supersededBy: Id })),
 ] as const;

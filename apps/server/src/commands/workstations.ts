@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { canUnlinkWorkstation, streamId } from '@aom/shared';
+import { canUnlinkWorkstation, type ShiftLimitSetting, streamId } from '@aom/shared';
 import type { AuthSession } from '../auth/sessions.ts';
 import type { Ctx } from '../context.ts';
 import { generatePairingCode, normalizePairingCode, randomToken, sha256Hex } from '../crypto.ts';
@@ -7,6 +7,12 @@ import { exec, one, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import { conflict, HttpError, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
+import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
+import {
+  dropStaleShiftLimitCommands,
+  effectiveShiftLimit,
+  runnerAppliesShiftLimit,
+} from '../runner-gateway/shift-limit.ts';
 import { cardMessage, orgScope, runnerActor, SYSTEM_ACTOR, userActor, userScope } from './common.ts';
 import { devopsHireEvents as devopsHireEventsNew, threadMessage } from './devops.ts';
 
@@ -141,6 +147,50 @@ export async function renameWorkstation(ctx: Ctx, user: AuthSession['user'], id:
       { tx },
     );
   });
+}
+
+/**
+ * The workstation's owner sets how many shifts it runs at once: a number, unlimited, or null (the runner's own value,
+ * backlog #76). Event sourced; applied at once to the live connection (the dispatcher reads it there) and sent to a runner
+ * that announced it can apply it, which keeps it across restarts. The platform ceiling still applies.
+ */
+export async function setShiftLimit(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  id: string,
+  limit: ShiftLimitSetting,
+): Promise<void> {
+  await withAppendTx(ctx.pool, async (tx) => {
+    const ws = await one(tx, `SELECT user_id FROM workstations WHERE id=$1 AND status='active'`, [id]);
+    if (!ws || ws.user_id !== user.id) throw notFound('workstation not found');
+    await ctx.store.append(
+      [
+        {
+          streamId: streamId.workstation(id),
+          event: {
+            type: 'WorkstationShiftLimitSet',
+            payload: { workstationId: id, limit, changedBy: user.id },
+          },
+          actor: userActor(user.id),
+          scope: userScope(user.id),
+        },
+      ],
+      { tx },
+    );
+  });
+  const conn = ctx.services.runners.get(id);
+  if (!conn) return;
+  conn.maxShifts = effectiveShiftLimit(ctx, limit, conn.reportedMaxShifts);
+  await dropStaleShiftLimitCommands(ctx.pool, id);
+  if (await runnerAppliesShiftLimit(ctx.pool, id)) {
+    await enqueueRunnerCommand(ctx.pool, id, 'shifts.limit', {
+      shiftLimit: limit,
+      maxConcurrentShifts: conn.maxShifts,
+    });
+    void Promise.resolve(ctx.services.gateway.deliverPending(id)).catch(() => undefined);
+  }
+  // A raised limit may let waiting cards start now.
+  ctx.services.dispatcher.trigger();
 }
 
 /**

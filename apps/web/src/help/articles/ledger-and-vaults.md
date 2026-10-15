@@ -17,6 +17,10 @@ The ledger keeps three kinds of entry:
 
 Agents search the ledger before they ask you a question, and the BA checks new questions against it. When you answer a desk item, the answer is written to the ledger (see **Add to ledger as** on the answer form). You can also add entries yourself with **Add entry** on the Ledger page.
 
+## Editing a standing order {#editing-standing-orders}
+
+The Owner and Admins (a project's owner for its own) can press **Edit** on a standing order to change its title or text. Agents get the new wording from their next shift or chat, the DevOps engineer included, and **History** keeps the earlier versions.
+
 ## Searching the ledger {#searching-the-ledger}
 
 To find something in the ledger:

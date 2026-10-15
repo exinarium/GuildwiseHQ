@@ -2,6 +2,7 @@ import type { DevopsRun, DevopsShift } from '../devops/index.ts';
 import type { ShiftBrief } from '../protocol/runner.ts';
 import { formatCommandLine } from '../runs/plan.ts';
 import { commandForOutcome } from './commands.ts';
+import { renderBindingStandingOrders } from './standing-orders.ts';
 
 /** Appended by the runner to the instructions of card shifts (kept out of `renderInstructions` on purpose). */
 export const ENVIRONMENT_HELP_SECTION = `# Environment help
@@ -53,6 +54,7 @@ export function renderDevopsInstructions(brief: ShiftBrief, devops: DevopsShift)
   out.push(brief.role.instructions.trim());
   out.push('# Core rules');
   out.push(brief.role.coreRules.length ? brief.role.coreRules.map((r) => `- ${r}`).join('\n') : '- (none)');
+  out.push(renderBindingStandingOrders(brief.standingOrders));
   out.push('# Granted access');
   out.push(
     [

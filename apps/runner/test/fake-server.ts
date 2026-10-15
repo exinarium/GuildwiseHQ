@@ -19,6 +19,8 @@ export interface FakeServerOptions {
   token?: string;
   heartbeatSec?: number;
   maxConcurrentShifts?: number;
+  /** The owner's shift limit choice sent in `welcome.limits.shiftLimit` (undefined: an older server that sends none). */
+  shiftLimit?: number | 'unlimited' | null;
   /** Ack runner messages that require an ack (default true). */
   autoAck?: boolean;
   /** Verdict for each `shift.report` (default: accept). */
@@ -158,7 +160,10 @@ export class FakeServer {
         workstationId: '019e3f6a-7b1c-7a2d-8c3e-0123456789b1',
         serverTime: new Date().toISOString(),
         heartbeatSec: this.opts.heartbeatSec ?? 15,
-        limits: { maxConcurrentShifts: this.opts.maxConcurrentShifts ?? 4 },
+        limits: {
+          maxConcurrentShifts: this.opts.maxConcurrentShifts ?? 4,
+          ...(this.opts.shiftLimit !== undefined ? { shiftLimit: this.opts.shiftLimit } : {}),
+        },
       });
       return;
     }

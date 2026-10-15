@@ -402,6 +402,11 @@ export const ChatContextSchema = z.object({
   vault: ChatVaultSchema.optional(),
   /** Set for the owner's chat with the CEO: persona, standing instructions, rules and the policy in words. */
   ceo: z.object({ brief: z.string() }).optional(),
+  /**
+   * The standing orders that bind this conversation's agent: the organization's plus those of the project in
+   * context (DevOps: every project of the organization). Additive; an older server sends none.
+   */
+  standingOrders: z.array(z.object({ title: z.string(), body: z.string() })).optional(),
 });
 export type ChatContext = z.infer<typeof ChatContextSchema>;
 
@@ -533,6 +538,21 @@ export const RepoSyncStatusSchema = z.object({
 });
 export type RepoSyncStatus = z.infer<typeof RepoSyncStatusSchema>;
 
+/**
+ * What the workstation's owner chose for the shifts it runs at once (backlog #76): a number, `unlimited`, or null (none
+ * chosen: the runner's own `maxConcurrentShifts` applies).
+ */
+export const ShiftLimitSettingSchema = z.union([
+  z.number().int().min(1).max(10_000),
+  z.literal('unlimited'),
+  z.null(),
+]);
+export type ShiftLimitSetting = z.infer<typeof ShiftLimitSettingSchema>;
+/** What the wire carries for "no limit": a count nobody reaches. UIs show a value at or above it as unlimited. */
+export const UNLIMITED_SHIFTS = 100_000;
+/** Announced in `hello.capabilities` by a runner that applies `limits.shiftLimit` and the `shifts.limit` command. */
+export const SHIFT_LIMIT_CAPABILITY = 'shift-limit:1';
+
 export const RunnerCommandNameSchema = z.enum([
   'agent.wipe',
   'worktree.remove',
@@ -572,6 +592,7 @@ export const RunnerCommandNameSchema = z.enum([
   'integration.cancel',
   'integration.test',
   'integration.remove',
+  'shifts.limit',
 ]);
 export type RunnerCommandName = z.infer<typeof RunnerCommandNameSchema>;
 
@@ -620,6 +641,11 @@ export const CommandPayloadSchemas = {
   'integration.cancel': IntegrationCancelPayloadSchema,
   'integration.test': IntegrationRequestPayloadSchema,
   'integration.remove': IntegrationRequestPayloadSchema,
+  /** The owner changed the shift limit: apply `maxConcurrentShifts` live and remember it (see `WelcomeSchema`). */
+  'shifts.limit': z.object({
+    shiftLimit: ShiftLimitSettingSchema,
+    maxConcurrentShifts: z.number().int().positive(),
+  }),
 } as const;
 
 /** The commands that carry a sealed envelope: their payload is emptied once answered, and they expire. */
@@ -932,7 +958,15 @@ export const WelcomeSchema = msg('welcome', {
   workstationId: z.uuid(),
   serverTime: z.iso.datetime(),
   heartbeatSec: z.number().int().positive().default(HEARTBEAT_SEC),
-  limits: z.object({ maxConcurrentShifts: z.number().int().positive() }),
+  limits: z.object({
+    /** What the server enforces: the owner's setting (or the runner's own value) capped by the platform. */
+    maxConcurrentShifts: z.number().int().positive(),
+    /**
+     * Additive: the owner's setting (null: none). When present (not undefined) a runner that announced
+     * `shift-limit:1` uses `maxConcurrentShifts` as is, ignoring its own config value, and keeps it across restarts.
+     */
+    shiftLimit: ShiftLimitSettingSchema.optional(),
+  }),
 });
 export const ShiftStartSchema = msg('shift.start', {
   shiftId: z.uuid(),
