@@ -15,6 +15,7 @@ import { RegressionDialog } from '../components/RegressionDialog.tsx';
 import { RunBranchDialog } from '../components/runs/RunBranchDialog.tsx';
 import { RunList } from '../components/runs/RunPanel.tsx';
 import { projectTypeLabel } from '../components/shell/ProjectSwitcher.tsx';
+import { UsageLimitBanner } from '../components/UsageLimitBanner.tsx';
 import {
   Button,
   ButtonLink,
@@ -169,6 +170,7 @@ export function Board() {
           </>
         }
       />
+      <UsageLimitBanner limit={project.usageLimit} />
       <BudgetBanner
         budget={project.budget}
         projectId={project.id}

@@ -155,3 +155,7 @@ To fix it:
 4. Click **Add**.
 
 Secret files like `.env` and keys stay blocked even in reference repositories. Agents are told which folders they can read, so they may ask you to add a repository instead of searching for a setting. See [Projects](/help/projects#reference-repos) for the full explanation.
+
+## A project says "Paused until ..." {#usage-limit}
+
+The Claude subscription behind the project reached its session or weekly **usage limit**. Nothing is broken: cards wait in their queue without penalty and work continues by itself when the limit resets (shown on the board and the project page, in your time zone). You also get one notice on the **Desk**, which closes by itself. To avoid waiting, use another workstation or a different Claude plan.

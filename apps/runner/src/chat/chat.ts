@@ -13,6 +13,7 @@ import {
   type ServerToRunnerOf,
   type Usage,
 } from '@aom/shared';
+import { formatLimitTime } from '../adapters/claude-usage-limit.ts';
 import type { RuntimeAdapter, RuntimeSession } from '../adapters/types.ts';
 import {
   allowedJiraKeys,
@@ -415,7 +416,12 @@ export class ChatManager {
     let sessionId: string | undefined;
     let streamed = '';
     let finalText: string | undefined;
-    let exit: { code: number | null; error?: string; authFailed?: boolean } = { code: null };
+    let exit: {
+      code: number | null;
+      error?: string;
+      authFailed?: boolean;
+      usageLimit?: { until: string };
+    } = { code: null };
     for await (const ev of chat.session.events()) {
       if (ev.kind === 'session') sessionId = ev.runtimeSessionId;
       else if (ev.kind === 'delta') {
@@ -431,6 +437,11 @@ export class ChatManager {
         return this.error(
           msg,
           'The Claude login on this workstation has expired. On that machine run `claude`, then `/login`; this conversation works again once you have.',
+        );
+      if (exit.usageLimit)
+        return this.error(
+          msg,
+          `The Claude usage limit on this workstation has been reached. Conversations and agents work again at ${formatLimitTime(new Date(exit.usageLimit.until))}; nothing is lost, please try again then.`,
         );
       return this.error(msg, exit.error ?? `the ${msg.agent.runtime} process exited with code ${exit.code}`);
     }

@@ -1,5 +1,6 @@
 import type { Usage } from '@aom/shared';
 import { isAuthFailureText } from './claude-auth.ts';
+import { isUsageLimitText } from './claude-usage-limit.ts';
 import type { RuntimeEvent } from './types.ts';
 
 type Json = Record<string, unknown>;
@@ -44,6 +45,13 @@ export function usageFromClaude(u: unknown): Usage {
   };
 }
 
+/** The text blocks of an assistant message, joined. */
+function assistantText(message: Record<string, unknown>): string {
+  const c = message.content;
+  if (!Array.isArray(c)) return '';
+  return c.map((b) => (isObj(b) && b.type === 'text' && typeof b.text === 'string' ? b.text : '')).join('\n');
+}
+
 /**
  * Parses `claude -p --output-format stream-json --verbose` lines (docs/ARCHITECTURE.md section 12.2):
  * `system/init` -> session; assistant text -> progress; tool_use -> tool; `result` -> usage + final.
@@ -58,6 +66,16 @@ export class ClaudeStreamParser {
   private errorSubtype: string | undefined;
   sessionId: string | undefined;
   private authFailed = false;
+  private limitText: string | undefined;
+
+  /**
+   * The session failed because the subscription's usage limit was hit ("You've hit your session limit · resets 6pm"):
+   * the message text, seen on an error result or on an assistant message flagged as an API error. Ordinary text that
+   * talks about limits is not enough. The reset time is read from it by `detectUsageLimit`.
+   */
+  get usageLimitText(): string | undefined {
+    return this.limitText;
+  }
 
   /**
    * The session failed because the Claude login does not work ("OAuth session expired and could not be refreshed",
@@ -116,6 +134,10 @@ export class ClaudeStreamParser {
       }
     } else if (msg.type === 'assistant' && isObj(msg.message)) {
       if (msg.error === 'authentication_failed') this.authFailed = true;
+      if (typeof msg.error === 'string' && msg.error) {
+        const t = assistantText(msg.message);
+        if (isUsageLimitText(t)) this.limitText = t;
+      }
       if (typeof msg.message.model === 'string' && msg.message.model && !msg.message.model.startsWith('<'))
         this.lastModel = msg.message.model;
       if (isObj(msg.message.usage) && typeof msg.message.id === 'string')
@@ -150,6 +172,8 @@ export class ClaudeStreamParser {
       if (failed) this.errorSubtype = typeof msg.subtype === 'string' ? msg.subtype : 'error';
       if (failed && isAuthFailureText(`${typeof msg.result === 'string' ? msg.result : ''}`))
         this.authFailed = true;
+      if (failed && typeof msg.result === 'string' && isUsageLimitText(msg.result))
+        this.limitText = msg.result;
       if (typeof msg.result === 'string' && msg.result.trim()) {
         events.push({ kind: 'final', text: msg.result });
       }

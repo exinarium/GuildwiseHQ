@@ -175,6 +175,14 @@ export const ProjectDtoSchema = z.object({
   maxConcurrentShifts: z.number().int().nullable().optional(),
   /** The monthly budget and this month's spend (amounts hidden from guests); absent in lists that do not compute it. */
   budget: BudgetDtoSchema.optional(),
+  /**
+   * Backlog #73: the project's work is paused because the model usage limit was hit on the workstation(s) that run it;
+   * work resumes at `until`. Absent when nothing is paused.
+   */
+  usageLimit: z
+    .object({ until: IsoTime, workstationName: z.string(), label: z.string().nullable() })
+    .nullable()
+    .optional(),
   createdAt: IsoTime,
   /** The workflow the project was created with (`research` for research-first projects). */
   startedAs: z.string().nullable().optional(),

@@ -111,6 +111,14 @@ export const RuntimeInfoSchema = z.object({
    * runtime is also reported `available: false` so nothing is dispatched to it. Absent from older runners.
    */
   auth: z.enum(['ok', 'expired']).optional(),
+  /**
+   * The runtime's model usage limit (Claude subscription session/weekly limit): `limited` until `limitedUntil`; such a
+   * runtime is also reported `available: false`. `limitedLabel` is that time in the workstation's own zone ("18:00
+   * (Africa/Johannesburg)") for notices. Absent from older runners and while no limit is in force.
+   */
+  usage: z.enum(['ok', 'limited']).optional(),
+  limitedUntil: z.iso.datetime().optional(),
+  limitedLabel: z.string().max(100).optional(),
 });
 export type RuntimeInfo = z.infer<typeof RuntimeInfoSchema>;
 
@@ -631,6 +639,8 @@ export const ShiftRejectReasonSchema = z.enum([
   'environment_not_ready',
   /** The runtime's login expired (Claude Code: "OAuth session expired"): the card goes back to the queue, no penalty. */
   'auth_expired',
+  /** The model usage limit was hit (`limitedUntil` says when it resets): the card goes back to the queue, no penalty. */
+  'usage_limited',
   'internal',
 ]);
 export const ShiftStopReasonSchema = z.enum([
@@ -787,6 +797,8 @@ export const ShiftRejectedSchema = msg('shift.rejected', {
   shiftId: z.uuid(),
   reason: ShiftRejectReasonSchema,
   detail: z.string().optional(),
+  /** Set with `reason: 'usage_limited'`: when the usage limit resets (ISO); `detail` is that time as the workstation reads it. */
+  limitedUntil: z.iso.datetime().optional(),
   conflictedFiles: z.array(z.string()).optional(),
   /** Set with `reason: 'environment_not_ready'`. */
   environment: z.object({ problem: TestEnvProblem, detail: z.string().optional() }).optional(),

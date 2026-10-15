@@ -24,8 +24,14 @@ export interface ProcessSpec {
   exitError?: () => string | undefined;
   /** Did the process fail because the runtime's login does not work? (Given the stderr tail; asked only on a failure.) */
   authFailure?: (stderrTail: string) => boolean;
+  /** Did the process fail because the subscription's usage limit was hit? The reset time when so. (Asked only on a failure.) */
+  usageLimit?: (stderrTail: string) => { until: Date; parsed: boolean } | undefined;
   /** Runs once the process is gone, before the exit event is announced (collecting what the session left behind). */
-  onExit?: (r: { code: number | null; authFailed: boolean }) => void | Promise<void>;
+  onExit?: (r: {
+    code: number | null;
+    authFailed: boolean;
+    usageLimit?: { until: Date; parsed: boolean };
+  }) => void | Promise<void>;
   /** How long SIGTERM gets before the whole process group is killed (default 10 s). */
   killAfterMs?: number;
 }
@@ -150,8 +156,9 @@ export function spawnSession(spec: ProcessSpec): RuntimeSession {
           .slice(0, 1000) || undefined
       : undefined;
     const authFailed = failed && !startFailed && spec.authFailure?.(stderrTail) === true;
+    const limit = failed && !startFailed && !authFailed ? spec.usageLimit?.(stderrTail) : undefined;
     try {
-      await spec.onExit?.({ code, authFailed });
+      await spec.onExit?.({ code, authFailed, ...(limit ? { usageLimit: limit } : {}) });
     } catch {
       // best effort
     }
@@ -161,6 +168,7 @@ export function spawnSession(spec: ProcessSpec): RuntimeSession {
       ...(r.signal ? { signal: String(r.signal) } : {}),
       ...(startFailed ? { startFailed: true as const } : {}),
       ...(authFailed ? { authFailed: true as const } : {}),
+      ...(limit ? { usageLimit: { until: limit.until.toISOString() } } : {}),
       ...(error ? { error } : {}),
     });
     queue.end();

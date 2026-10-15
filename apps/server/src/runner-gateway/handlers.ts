@@ -57,7 +57,11 @@ import { proposeSuites, recordSuiteResult, suitesFor } from '../commands/test-en
 import { applyToolchainsReport } from '../commands/toolchains.ts';
 import { transcriptStoreRpc } from '../commands/transcripts.ts';
 import { applyVaultConflict, markVaultStatus, queueVaultConfigure } from '../commands/vaults.ts';
-import { syncClaudeAuthNotice, syncMcpSignInNotices } from '../commands/workstation-notices.ts';
+import {
+  syncClaudeAuthNotice,
+  syncClaudeUsageNotice,
+  syncMcpSignInNotices,
+} from '../commands/workstation-notices.ts';
 import {
   applyEnvEnsureResult,
   applyRepoCloneResult,
@@ -485,12 +489,25 @@ export class RunnerHandlers {
     await syncClaudeAuthNotice(ctx, { id: conn.workstationId, userId: conn.userId }, runtimes).catch(
       () => {},
     );
-    const brief = (rs: Array<{ id: string; available: boolean; sandbox?: string; auth?: string }>) =>
+    await syncClaudeUsageNotice(ctx, { id: conn.workstationId, userId: conn.userId }, runtimes).catch(
+      () => {},
+    );
+    const brief = (
+      rs: Array<{
+        id: string;
+        available: boolean;
+        sandbox?: string;
+        auth?: string;
+        usage?: string;
+        limitedUntil?: string;
+      }>,
+    ) =>
       rs.map((r) => ({
         id: r.id,
         available: r.available,
         ...(r.sandbox ? { sandbox: r.sandbox } : {}),
         ...(r.auth ? { auth: r.auth } : {}),
+        ...(r.usage === 'limited' ? { usage: r.usage, limitedUntil: r.limitedUntil } : {}),
       }));
     const now = brief(runtimes);
     if (JSON.stringify(brief(before?.runtimes ?? [])) === JSON.stringify(now)) return;
@@ -558,6 +575,9 @@ export class RunnerHandlers {
     await this.recordVaults(conn, msg.vaults);
     await alignDevopsRuntime(ctx, conn.workstationId, msg.runtimes);
     await syncClaudeAuthNotice(ctx, { id: conn.workstationId, userId: conn.userId }, msg.runtimes).catch(
+      () => {},
+    );
+    await syncClaudeUsageNotice(ctx, { id: conn.workstationId, userId: conn.userId }, msg.runtimes).catch(
       () => {},
     );
     await ctx.store.append([

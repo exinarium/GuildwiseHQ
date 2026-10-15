@@ -26,6 +26,7 @@ import { EnvironmentPanel, RepoSetupStatus } from '../components/RepoSetupStatus
 import { RepoSyncLine } from '../components/RepoSync.tsx';
 import { IntegrationTestsSettings } from '../components/runs/IntegrationTestsSettings.tsx';
 import { RunSettings } from '../components/runs/RunSettings.tsx';
+import { UsageLimitBanner } from '../components/UsageLimitBanner.tsx';
 import {
   Badge,
   Button,
@@ -168,6 +169,7 @@ export function ProjectSettings() {
           </a>
         ))}
       </nav>
+      {project && <UsageLimitBanner limit={project.usageLimit} />}
       {project && (
         <BudgetBanner
           budget={project.budget}

@@ -32,6 +32,13 @@ import {
   toolchainReadPaths,
 } from './claude-policy.ts';
 import { ClaudeStreamParser } from './claude-stream-parser.ts';
+import {
+  type ClaudeUsageMonitor,
+  detectUsageLimit,
+  formatLimitTime,
+  probeClaudeUsage,
+  type UsageProbeResult,
+} from './claude-usage-limit.ts';
 import { spawnSession } from './process-session.ts';
 import type {
   ChatStartInput,
@@ -221,6 +228,13 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       auth?: ClaudeAuthMonitor;
       /** Test hook: the login probe (default: `claude auth status`, then one minimal `claude -p`). */
       probe?: () => Promise<'ok' | 'expired' | 'unknown'>;
+      /** The subscription's usage-limit state of this runner (pause until the limit resets); see claude-usage-limit.ts. */
+      usage?: ClaudeUsageMonitor;
+      /** Test hook: the usage probe (default: one minimal `claude -p` on the cheapest model). */
+      usageProbe?: () => Promise<UsageProbeResult>;
+      /** Test hook: the clock and the zone used to read and show reset times. */
+      now?: () => Date;
+      zone?: string;
       /** The credential in force (secrets/claude.json over config.json); read at every session start. */
       credentials?: () => Pick<ClaudeConfig, 'authMode' | 'oauthToken' | 'apiKey'> | undefined;
     } = {},
@@ -299,10 +313,26 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       return { runtime: this.id, version: 'blocked', available: false, capabilities: [] };
     const sb = this.sandboxStatus();
     const expired = this.host.auth?.state === 'expired';
+    const limited = this.host.usage?.state === 'limited';
     const sandbox = {
       sandbox: sb.state,
       sandboxReason: sb.reason,
       ...(this.host.auth ? { auth: expired ? ('expired' as const) : ('ok' as const) } : {}),
+      ...(this.host.usage
+        ? {
+            usage: limited ? ('limited' as const) : ('ok' as const),
+            ...(limited && this.host.usage.limitedUntil
+              ? {
+                  limitedUntil: this.host.usage.limitedUntil,
+                  limitedLabel: formatLimitTime(
+                    new Date(this.host.usage.limitedUntil),
+                    this.nowDate(),
+                    this.host.zone,
+                  ),
+                }
+              : {}),
+          }
+        : {}),
     };
     try {
       const r = await execa(this.cfg.bin, ['--version'], { reject: false, timeout: 10_000, stdin: 'ignore' });
@@ -322,6 +352,8 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       if (sb.state === 'unavailable') ok = false;
       // An expired login pauses the runtime: nothing is dispatched to it until the login works again.
       if (expired) ok = false;
+      // So does a hit usage limit, until it resets and a probe works (backlog #73).
+      if (limited) ok = false;
       return { runtime: this.id, version: m[0], available: ok, capabilities: ok ? caps : [], ...sandbox };
     } catch {
       return { runtime: this.id, version: 'unknown', available: false, capabilities: [], ...sandbox };
@@ -511,16 +543,49 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     return r;
   }
 
+  private nowDate(): Date {
+    return this.host.now?.() ?? new Date();
+  }
+
+  /**
+   * While the usage limit is in force and its reset time has passed: one minimal call (cheapest model, one turn). Clean:
+   * the runtime is available again. Still limited: the new reset time is read and the pause extended (an hour when
+   * the text has none). Nothing readable (network): the state stays and the caller retries later.
+   */
+  async probeUsage(): Promise<UsageProbeResult['state']> {
+    const mon = this.host.usage;
+    if (!mon || mon.state !== 'limited' || realClaudeBlocked()) return 'unknown';
+    const r = await (
+      this.host.usageProbe ??
+      (() =>
+        probeClaudeUsage({
+          bin: this.cfg.bin,
+          env: this.probeEnv(),
+          now: () => this.nowDate(),
+          ...(this.host.zone ? { tz: this.host.zone } : {}),
+        }))
+    )();
+    if (r.state === 'ok') mon.markOk();
+    else if (r.state === 'limited') mon.markLimited(r.hit.until);
+    return r.state;
+  }
+
   /** What the process session needs to notice a dead login and to hand back refreshed tokens. */
   private sessionHooks(
     configDir: string,
     parser: ClaudeStreamParser,
-  ): Pick<Parameters<typeof spawnSession>[0], 'authFailure' | 'onExit'> {
+  ): Pick<Parameters<typeof spawnSession>[0], 'authFailure' | 'usageLimit' | 'onExit'> {
     return {
       authFailure: (stderr) => parser.authFailure || isAuthFailureText(stderr),
-      onExit: async ({ code, authFailed }) => {
+      usageLimit: (stderr) =>
+        detectUsageLimit(parser.usageLimitText, this.nowDate(), this.host.zone) ??
+        detectUsageLimit(stderr, this.nowDate(), this.host.zone),
+      onExit: async ({ code, authFailed, usageLimit }) => {
         if (authFailed) this.host.auth?.markExpired();
         else if (code === 0 && parser.usage().outputTokens > 0) this.host.auth?.markOk();
+        if (usageLimit) this.host.usage?.markLimited(usageLimit.until);
+        // a real session that worked proves the limit is gone: resume without waiting for the probe
+        else if (code === 0 && parser.usage().outputTokens > 0) this.host.usage?.markOk();
         if (this.usesSharedLogin()) await harvestAgentCredentials(this.credentialPaths(configDir));
       },
     };

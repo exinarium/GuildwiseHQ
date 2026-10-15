@@ -1989,6 +1989,34 @@ shift log: `Failed to authenticate: OAuth session expired and could not be refre
   shared (only the `mcpOAuth` entries of granted servers are copied), so nothing races or rotates. If that token is
   revoked the same detection, pause and resume apply.
 
+### The model usage limit: pause until it resets
+
+A Claude subscription has a session limit (5 hours) and a weekly limit. When one is hit every shift would fail
+(`You've hit your session limit · resets 6pm (Africa/Johannesburg)`, `5-hour limit reached ∙ resets 3am`,
+`Claude AI usage limit reached|<epoch>`), so the runner pauses instead of failing and retrying.
+
+- **Detection.** On a failed session the runner looks for a limit message in the stream result, in an assistant message flagged as
+  an API error, and in the stderr tail. Ordinary text that talks about limits does not count. The reset time is read from the
+  message: a named zone (`6pm (Africa/Johannesburg)`) is used as given, a bare `3am` or `18:30` is read in the runner's own
+  zone, `Oct 20, 9am` is a date, `|1760000000` is an epoch (seconds or milliseconds). A time that cannot be read means one hour
+  from now; the probe below then re-checks.
+- **State.** The Claude runtime is reported `usage: limited` with `limitedUntil` (ISO) and `limitedLabel` (the time in the
+  machine's zone, for notices) in `runtimes.report`, and as `available: false`. Both are additive; older servers ignore them.
+- **The failing shift** returns as `shift.rejected` with the reason `usage_limited` and `limitedUntil`: the card goes back to the
+  queue without penalty, with the note *Paused: the model usage limit resets at 18:00 (Africa/Johannesburg)*. It is not a crash:
+  no loop-breaker count, no back-off, not in the digests.
+- **Server.** The dispatcher dispatches nothing to that runtime until `limitedUntil`. A project whose Claude agents all sit on
+  limited workstations shows *Paused until 18:00 (usage limit on <workstation>)* on its board and settings page; work on other
+  workstations continues. One desk notice and one e-mail (*Claude usage limit reached on <workstation>; work resumes at ...*),
+  closed by the system on recovery. The CEO is woken as information, not as an incident.
+- **Probe and resume.** Once `limitedUntil` has passed, the runner (checked every minute, at most every `usageProbeMs`, default
+  3 minutes) runs one minimal `claude -p` call (one turn, the smallest model; `claude auth status` shows no limits). Clean: the
+  runtime is available again and the server resumes. Still limited: the freshly read time extends the pause. Network trouble: the
+  state stays and the probe is tried again. A real session that succeeds (a chat, for example) also ends the pause at once.
+- **Chats** that hit the limit answer *The Claude usage limit on this workstation has been reached ... work again at ...* instead
+  of an error. A restart of the runner forgets the state; the first shift finds it out again and is put back the same way.
+
+
 ### Shift did not complete
 
 1. Check the shift log in `logs/shifts/<shiftId>.jsonl`

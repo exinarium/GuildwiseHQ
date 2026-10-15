@@ -252,6 +252,7 @@ The details of each done item follow this list, by date.
 - #63: Batch intake: hand the BA a list of tickets. Done 2026-10-14.
 - #58: Start action: run a project branch on a workstation (phase 1: manual start, supervised services, panel, plans recorded). Done 2026-10-14; P2 done (plan replay, service sandbox, Restart / Update & restart, run worktree sweep, services survive a runner restart); P3 and P4 done under #59.
 - #59: Integration and E2E tests per project, run by testers (local test environment per card, remote deploy targets). Done 2026-10-14 (P3 and P4; private-address targets and macOS testers left).
+- #73: Pause work until a model usage limit resets. Done 2026-10-15.
 - #71: Plain tester stage when integration tests are off (workflow `code` v5: the Test stage always runs; the environment only when the card's integration tests are on). Done 2026-10-15.
 - #34: Integrations page (MVP): connect Claude, GitHub, Bitbucket, GitLab, Azure DevOps, Jira and MCP servers from the web. Done 2026-10-14 (phase 2 and 3 leftovers on the item).
 - #60: Claude sign-in from the web (`claude setup-token` driven by the runner; MCP sign-in with paste-back). Done 2026-10-14 (MVP).
@@ -264,6 +265,33 @@ The details of each done item follow this list, by date.
 - #17: Stale figures in the user guide: guide seeds fixed, every figure re-captured, figures for the newer features, guide.html and PDF rebuilt. Done 2026-10-14.
 
 ## 2026-10-15 (done)
+
+### 73. Pause work until a model usage limit resets (built)
+
+**Owner request (2026-10-15).** "Enable the runner to pause the project until the limit resets, otherwise the board just keeps
+throwing errors and retrying with backoffs." When the Claude subscription hit its session or weekly limit every shift failed
+(`You've hit your session limit · resets 6pm (Africa/Johannesburg)`), cards bounced through retries, back-off and the loop breaker,
+and the board filled with errors.
+
+**Built** (mirrors the #50 login-expiry mechanism).
+- **Runner** (`claude-usage-limit.ts`): recognises the limit in the stream result, a flagged API-error assistant message or stderr
+  (session/weekly/Opus/"5-hour limit reached"/"usage limit reached|resets 3pm"/"Claude AI usage limit reached|<epoch>"/out of extra
+  usage); reads the reset time (`6pm (Africa/Johannesburg)` in that zone, `3am` and `18:30` in the runner's zone, `Oct 20, 9am`,
+  epoch seconds or ms; DST aware); an unreadable time means one hour and a re-probe. State `limited` + `limitedUntil`, reported
+  additively in `RuntimeInfo` (`usage`, `limitedUntil`, `limitedLabel`) and the runtime is `available: false` meanwhile.
+- **The failing shift** goes back as `shift.rejected` reason `usage_limited` (+ `limitedUntil`): card queued, no penalty, card note
+  "Paused: the model usage limit resets at 18:00 (Africa/Johannesburg)"; the shift ends `rejected`, which the loop breaker, back-off
+  and digests ignore.
+- **Server**: the dispatcher skips a workstation's limited Claude runtime until `limitedUntil`; `ProjectDto.usageLimit` (project
+  list and detail) is set when every active Claude agent of the project's organization sits on a limited workstation (the earliest
+  reset); the board header and project settings show "Paused until 18:00 (usage limit on <workstation>)"; one desk notice
+  `claude_usage_limit` + one e-mail, closed by the system on recovery; the CEO wake is `info:claude_usage_limit`, normal urgency.
+- **Resume**: at `limitedUntil` the runner (minute timer, `usageProbeMs`, default 3 minutes between probes) runs one minimal
+  `claude -p` (one turn, `--model haiku`); clean: back to available; still limited: the new time extends the pause; unclear
+  (network): retried later. A successful real session also resumes at once.
+- **Chats** that hit the limit answer with a clear message instead of an error.
+- Tests: runner `claude-usage-limit.test.ts`, server `usage-limit.test.ts`, web `usage-limit-banner.test.tsx`. Docs: RUNNER.md, user
+  guide 4.24, help (Troubleshooting), What's new.
 
 ### 71. Plain tester stage when integration tests are off (built)
 

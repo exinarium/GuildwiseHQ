@@ -6,6 +6,7 @@ import type { Ctx } from '../context.ts';
 import { one, type Row, rows } from '../db/sql.ts';
 import { DISPATCH_LOCK_ID } from '../db/tx.ts';
 import type { StoredEvent } from '../eventstore/types.ts';
+import { activeUsageLimit } from '../queries/usage-limit.ts';
 import { buildShiftStart } from '../runner-gateway/brief.ts';
 import { wsServesOrgSql } from '../simulation/fit.ts';
 import { baTaskPass } from './ba-tasks.ts';
@@ -189,6 +190,8 @@ export class Dispatcher {
       ).find((r) => r.id === a.runtime);
       // An expired login (Claude Code `/login`) pauses the workstation's work; it resumes when the runner reports ok.
       if (!rt?.available || rt.auth === 'expired') continue;
+      // A hit model usage limit (backlog #73) pauses the workstation's Claude runtime until it resets.
+      if (activeUsageLimit(a.runtimes, a.runtime, now)) continue;
       out.push({ row: a, caps: rt.capabilities, active: Number(a.active) });
     }
     return out;
