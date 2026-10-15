@@ -223,7 +223,17 @@ function reviewRiskData(ctx: AomContext, p: Parsed): Record<string, unknown> {
   const file = one(p, 'risk-file');
   if (inline !== undefined && file !== undefined)
     throw new UsageError('use either --risk-file or --risk-analysis');
-  const analysis = inline ?? (file !== undefined ? ctx.readFile(file) : '');
+  let analysis = inline ?? '';
+  if (file !== undefined) {
+    try {
+      analysis = ctx.readFile(file);
+    } catch (e) {
+      // a relative path is resolved against the shell's working directory (the read-only worktree for a reviewer)
+      throw new UsageError(
+        `cannot read --risk-file ${file} (${(e as NodeJS.ErrnoException).code ?? 'error'}). The worktree is read-only: write the file in your scratch directory ("$TMPDIR/risk.md") and pass its full path, or pass the text inline with --risk-analysis "<text>"`,
+      );
+    }
+  }
   if (!analysis.trim())
     throw new UsageError(
       '--risk-file <md> is required: your risk analysis (blast radius, failure scenarios, verified, unverified, mitigations)',
@@ -1467,8 +1477,8 @@ export const USAGE = `usage: aom <verb> [options]
   handoff --note "<text>" [--data-file <json>]   builder/scout/researcher: hand the card on (scout: candidates)
   publish --file <note.md> [--title "<t>"] [--citations-file <json>] [--path <p>]   checker: publish the verified note
   digest --file <json> [--note "<text>"] | --none   curator: post the digest (empty when nothing qualifies)
-  review approve --score <1-5> --risk low|medium|high --risk-file <md> [--qa-focus "<what a person should test>"] --note "<text>"
-  review changes --reason <r>[,<r>] --score <1-5> --risk low|medium|high --risk-file <md> [--criteria-missed "<c>"]... --note "<text>"
+  review approve --score <1-5> --risk low|medium|high (--risk-file <md in your scratch dir> | --risk-analysis "<text>") [--qa-focus "<what a person should test>"] --note "<text>"
+  review changes --reason <r>[,<r>] --score <1-5> --risk low|medium|high (--risk-file <md in your scratch dir> | --risk-analysis "<text>") [--criteria-missed "<c>"]... --note "<text>"
   test suite --name <suite> --status passed|failed|timeout|skipped [--junit <glob>] [--log <file>]   tester: report one suite run (a pass after a failure counts as flaky)
   env info | logs <service> | restart | suites [propose ...]   tester: the running environment (use \`aom-env --timeout <min> -- <cmd>\` to reach it) and the project's suites
   test pass --evidence "<text>" [--command "<cmd>"]...

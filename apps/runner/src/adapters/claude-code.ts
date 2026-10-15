@@ -33,6 +33,7 @@ import {
 } from './claude-policy.ts';
 import { ClaudeStreamParser } from './claude-stream-parser.ts';
 import { spawnSession } from './process-session.ts';
+import { createSandboxPlaceholders } from './sandbox-placeholders.ts';
 import type {
   ChatStartInput,
   RuntimeAdapter,
@@ -339,10 +340,18 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     if (!input.agent.isDevops) this.assertCanRun();
     const dir = input.sandbox.configDir;
     await mkdir(dir, { recursive: true });
-    await writeFile(
-      join(dir, 'settings.json'),
-      `${JSON.stringify(buildShiftSettings(input.agent.permissions, this.policy(input, input.cwd), input.sandbox, input.agent.roleKey, input.agent.isDevops), null, 2)}\n`,
+    const settings = buildShiftSettings(
+      input.agent.permissions,
+      this.policy(input, input.cwd),
+      input.sandbox,
+      input.agent.roleKey,
+      input.agent.isDevops,
     );
+    await writeFile(join(dir, 'settings.json'), `${JSON.stringify(settings, null, 2)}\n`);
+    // A read-only worktree (reviewer): Claude Code's sandbox must find its protected dotfile names already there.
+    const dropPlaceholders = settings.sandbox?.filesystem.denyWrite.includes(input.cwd)
+      ? createSandboxPlaceholders(input.cwd)
+      : () => {};
     const used = this.writeMcpConfig(
       dir,
       input.agent.permissions.allowedTools,
@@ -365,6 +374,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       this.live,
     );
     const parser = new ClaudeStreamParser();
+    const hooks = this.sessionHooks(dir, parser);
     return spawnSession({
       bin: cmd.bin,
       args: cmd.args,
@@ -376,7 +386,14 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       usage: () => parser.usage(),
       logFile: input.logFile,
       exitError: () => (parser.resultError ? `claude result: ${parser.resultError}` : undefined),
-      ...this.sessionHooks(dir, parser),
+      ...hooks,
+      onExit: async (r) => {
+        try {
+          await hooks.onExit?.(r);
+        } finally {
+          dropPlaceholders();
+        }
+      },
     });
   }
 

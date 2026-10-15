@@ -1386,6 +1386,13 @@ The architect (built-in role `architect`, claims every `investigate*` stage) is 
   agent's scratch or temp directory (or the worktree), scanned, and written into the project's vault folder with a vault
   commit; nothing is committed in the repository.
 
+### Card branch already exists (worktree creation)
+
+`ensureWorktree` never creates a card branch that exists: it asks `show-ref` for the local ref, prunes stale worktree
+registrations, and uses `worktree add <path> <branch>`. If the branch appears between that check and `worktree add -b`
+(the fetches in between take seconds, and a second runner or the owner's git can share the clone) the add falls back to
+the branch that is there, so a shift is no longer rejected with `fatal: a branch named '...' already exists` (#72).
+
 ### Read-only roles and path scopes
 
 A role without the `edit` tool that may not commit (reviewer, business analyst, custom read-only roles) gets a
@@ -1395,14 +1402,18 @@ scratch dir (`rsync -a ./ "$TMPDIR/review/"`) and runs it there; the reviewer in
 The shared package caches stay writable, so a read-only shift can still restore, build and test in its copy.
 
 A read-only worktree used to make **every** shell command of such a role fail with
-`bwrap: Can't create file <worktree>/.gitconfig: Read-only file system`. Cause: the runner masked the whole data dir
-(`denyRead`), and the worktree lives inside it. When the read-only working directory sits under a masked directory,
-bubblewrap tries to create Claude Code's protected dotfiles (`.gitconfig`, `.bashrc`, ...) as mount points inside it,
-which a read-only directory refuses (reproduced with the real sandbox; the same read-only directory with no masked
-parent works, and a writable worktree is not affected). For a read-only shift the runner now masks the data dir entry by entry
-(`denyAround`): everything except the path down to the worktree is still hidden (`config.json`, other agents, other
-cards' worktrees), but no parent of the worktree is masked. Worktrees created after the shift started are not hidden
-from it (they are made before their own shift begins).
+`bwrap: Can't create file <worktree>/.gitconfig: Read-only file system` (backlog #72). Real cause, reproduced with the
+real Claude Code binary and bubblewrap (`apps/runner/test/claude-sandbox-real.test.ts`, which runs `claude -p` against a
+fake local API with the settings the runner generates): Claude Code 2.1.296 and later mounts `/dev/null` over its
+protected dotfile names in the working directory (`.gitconfig`, `.gitmodules`, `.bashrc`, `.bash_profile`, `.zshrc`,
+`.zprofile`, `.profile`, `.ripgreprc`, `.vscode`, `.idea`), creating each missing one as a mount point first. With a
+read-only working directory that creation fails, and every Bash command dies. The earlier 0.1.10 attempt (masking the data
+dir entry by entry, `denyAround`) did not touch this and is kept only as a tighter mask. Fix
+(`src/adapters/sandbox-placeholders.ts`): before a read-only shift the runner creates the missing names in the worktree
+(empty), the sandbox then binds `/dev/null` over files that exist, and the runner removes exactly what it made when the
+shift ends. If a future Claude Code protects more names, the real-sandbox test (skipped without `claude` and `bwrap`) is
+the signal. The risk analysis of a review goes in a file in the scratch directory (`$TMPDIR/risk.md`) or inline with
+`--risk-analysis "<text>"`; an unreadable `--risk-file` now says so.
 A role that may not commit (reviewer, scout, ...) is also rolled back after every shift, which stays as the safety net
 and is still recorded as a guard violation: `git checkout -f <branch>`,
 `git reset --hard <start sha>`, `git clean -fd` inside its worktree. Roles with `writableGlobs` (tester: the project's

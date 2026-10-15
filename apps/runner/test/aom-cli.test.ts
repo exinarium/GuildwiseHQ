@@ -240,6 +240,48 @@ describe('aom CLI', () => {
     expect(t.reports).toHaveLength(1);
   });
 
+  it('an unreadable --risk-file says to use the scratch dir or --risk-analysis; the inline text works (hotfix #72)', async () => {
+    const t = await setup();
+    t.ctx.readFile = () => {
+      throw Object.assign(new Error('ENOENT: no such file'), { code: 'ENOENT' });
+    };
+    expect(
+      await t.run(
+        'review',
+        'changes',
+        '--reason',
+        'weak_tests',
+        '--score',
+        '2',
+        '--risk',
+        'low',
+        '--risk-file',
+        'risk.md',
+        '--note',
+        'x',
+      ),
+    ).toBe(1);
+    const err = t.err.join('');
+    expect(err).toContain('cannot read --risk-file risk.md');
+    expect(err).toContain('scratch directory');
+    expect(err).toContain('--risk-analysis');
+    expect(
+      await t.run(
+        'review',
+        'approve',
+        '--score',
+        '4',
+        '--risk',
+        'low',
+        '--risk-analysis',
+        'inline text',
+        '--note',
+        'x',
+      ),
+    ).toBe(0);
+    expect((t.reports[0] as any).data).toMatchObject({ risk: 'low', riskAnalysis: 'inline text' });
+  });
+
   it('a rejected report prints the reason and guard violations and exits 1', async () => {
     const t = await setup(() => ({
       accepted: false,

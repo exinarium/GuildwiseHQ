@@ -195,6 +195,104 @@ describe('worktrees', () => {
   });
 });
 
+// Production (2026-10-15): "fatal: a branch named 'aom/p5-8-...' already exists" rejected shifts and put the card back
+// in the queue, over and over. An existing card branch must always be reused, never created again with -b.
+describe('an existing card branch is reused, never created again (hotfix #72)', () => {
+  const BRANCH = 'aom/toy-1-add-greeting';
+  const setup = async () => {
+    const repo = makeRepo();
+    const path = join(tmp(), 'wt', 'TOY-1');
+    const first = await ensureWorktree({
+      repoPath: repo.clone,
+      roots: ['/'],
+      spec: spec(),
+      defaultPath: path,
+    });
+    expect(first.created).toBe(true);
+    writeFileSync(join(path, 'work.txt'), 'x');
+    sh(path, 'git', ['add', '-A']);
+    sh(path, 'git', ['commit', '-m', 'work']);
+    return { repo, path, sha: first.headSha };
+  };
+
+  it('branch exists, the worktree directory is gone and still registered (stale)', async () => {
+    const { repo, path } = await setup();
+    rmSync(path, { recursive: true, force: true });
+    const tip = sh(repo.clone, 'git', ['rev-parse', BRANCH]).trim();
+    const again = await ensureWorktree({
+      repoPath: repo.clone,
+      roots: ['/'],
+      spec: spec(),
+      defaultPath: path,
+    });
+    expect(again.created).toBe(false);
+    expect(again.headSha).toBe(tip);
+    expect(existsSync(join(path, 'work.txt'))).toBe(true);
+  });
+
+  it('branch exists, the worktree was removed cleanly (create mode, then reuse mode)', async () => {
+    const { repo, path } = await setup();
+    sh(repo.clone, 'git', ['worktree', 'remove', '--force', path]);
+    for (const mode of ['create', 'reuse'] as const) {
+      const r = await ensureWorktree({
+        repoPath: repo.clone,
+        roots: ['/'],
+        spec: spec({ mode, path }),
+        defaultPath: path,
+      });
+      expect(r.created).toBe(false);
+      expect(existsSync(join(path, 'work.txt'))).toBe(true);
+      sh(repo.clone, 'git', ['worktree', 'remove', '--force', path]);
+    }
+  });
+
+  it('rework after merge: the card branch is merged into main, its worktree gone, the branch kept', async () => {
+    const { repo, path } = await setup();
+    sh(repo.clone, 'git', ['worktree', 'remove', '--force', path]);
+    sh(repo.clone, 'git', ['merge', '--no-ff', '-m', 'merge card', BRANCH]);
+    sh(repo.clone, 'git', ['push', 'origin', 'main']);
+    const r = await ensureWorktree({
+      repoPath: repo.clone,
+      roots: ['/'],
+      spec: spec({ mode: 'reuse', path }),
+      defaultPath: path,
+    });
+    expect(r.created).toBe(false);
+    expect(sh(path, 'git', ['branch', '--show-current']).trim()).toBe(BRANCH);
+  });
+
+  it('the branch appears while the runner fetches (another process of the clone): it is used, not recreated', async () => {
+    const repo = makeRepo();
+    const path = join(tmp(), 'wt', 'TOY-1');
+    let raced = false;
+    const r = await ensureWorktree({
+      repoPath: repo.clone,
+      roots: ['/'],
+      spec: spec(),
+      defaultPath: path,
+      // the auth callback runs between the "does the branch exist" check and `worktree add -b`
+      auth: async () => {
+        if (!raced) {
+          raced = true;
+          sh(repo.clone, 'git', ['branch', BRANCH, 'main']);
+        }
+        return { args: [], env: {} };
+      },
+    });
+    expect(raced).toBe(true);
+    expect(r.created).toBe(false);
+    expect(sh(path, 'git', ['branch', '--show-current']).trim()).toBe(BRANCH);
+  });
+
+  it('is idempotent: calling it again and again keeps returning the same worktree', async () => {
+    const { repo, path } = await setup();
+    for (let i = 0; i < 3; i++) {
+      const r = await ensureWorktree({ repoPath: repo.clone, roots: ['/'], spec: spec(), defaultPath: path });
+      expect(r.created).toBe(false);
+    }
+  });
+});
+
 describe('a working branch the clone does not have', () => {
   const masterOnly = () => {
     const root = tmp();

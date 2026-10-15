@@ -284,10 +284,10 @@ function sandboxBlock(
   const denyRead = [
     // the whole data dir: config.json (runner token, Jira/provider credentials), the outbox, every other agent's
     // sandbox and every other card's worktree; the agent's own areas are re-opened below.
-    // Exception: a read-only worktree. Masking a directory that contains it makes bubblewrap try to create Claude
-    // Code's protected dotfiles (`.gitconfig`, `.bashrc`, ...) inside the read-only cwd, and every command then
-    // fails with "bwrap: Can't create file <worktree>/.gitconfig: Read-only file system". So the data dir is masked
-    // entry by entry, leaving only the path down to the worktree open.
+    // Exception: a read-only worktree is masked entry by entry, leaving only the path down to it open (a mask over a
+    // parent of the worktree also hides the worktree's own folder from the shell's view of its siblings). NOTE this does
+    // NOT cause "bwrap: Can't create file <worktree>/.gitconfig: Read-only file system"; that comes from Claude Code
+    // mounting its protected dotfile names over a read-only cwd, handled by sandbox-placeholders.ts.
     ...(worktreeLocked && inside(ctx.cwd, ctx.runnerRoot)
       ? denyAround(ctx.runnerRoot, ctx.cwd)
       : [ctx.runnerRoot]),

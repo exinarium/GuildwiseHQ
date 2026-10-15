@@ -253,6 +253,7 @@ The details of each done item follow this list, by date.
 - #58: Start action: run a project branch on a workstation (phase 1: manual start, supervised services, panel, plans recorded). Done 2026-10-14; P2 done (plan replay, service sandbox, Restart / Update & restart, run worktree sweep, services survive a runner restart); P3 and P4 done under #59.
 - #59: Integration and E2E tests per project, run by testers (local test environment per card, remote deploy targets). Done 2026-10-14 (P3 and P4; private-address targets and macOS testers left).
 - #71: Plain tester stage when integration tests are off (workflow `code` v5: the Test stage always runs; the environment only when the card's integration tests are on). Done 2026-10-15.
+- #72: Hotfix: reviewer sandbox read-only regression (Claude Code 2.1.296+ mounts its protected dotfile names over a read-only cwd; the runner now pre-creates them and removes them after the shift; risk file in the scratch dir or `--risk-analysis`); existing card branch on worktree creation (`worktree add -b` raced with a branch created meanwhile: now reused, never `-b` when it exists). Done 2026-10-15.
 - #34: Integrations page (MVP): connect Claude, GitHub, Bitbucket, GitLab, Azure DevOps, Jira and MCP servers from the web. Done 2026-10-14 (phase 2 and 3 leftovers on the item).
 - #60: Claude sign-in from the web (`claude setup-token` driven by the runner; MCP sign-in with paste-back). Done 2026-10-14 (MVP).
 - #64: Manual QA after Finalize, assigned to the person who started the card. Done 2026-10-14.

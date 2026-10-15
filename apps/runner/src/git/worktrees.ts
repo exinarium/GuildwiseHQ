@@ -73,8 +73,39 @@ export type GitAuth = (
   forge?: ForgeKind,
 ) => Promise<{ args: string[]; env: Record<string, string> }>;
 
+/**
+ * Whether the local branch ref exists. Asks for the ref itself (not for a commit it resolves to): a ref whose commit
+ * cannot be read still makes `git worktree add -b` refuse with "a branch named ... already exists".
+ */
 async function branchExists(repo: string, branch: string): Promise<boolean> {
-  return (await revParse(repo, `refs/heads/${branch}`)) !== null;
+  return (await git(repo, ['show-ref', '--verify', '--quiet', `refs/heads/${branch}`])).exitCode === 0;
+}
+
+/**
+ * `worktree add -b <branch> <path> <start>`, except that a branch which turns out to exist (created by another process
+ * of this clone between our check and now: the fetches in between take seconds, and a second runner or the owner's own
+ * git can share the clone) is reused as it is: `worktree add <path> <branch>`. Never fails with "already exists".
+ * Returns whether the branch was created here.
+ */
+async function addWorktreeOnBranch(
+  repo: string,
+  branch: string,
+  path: string,
+  start: string,
+  fail: (m: string) => never,
+): Promise<boolean> {
+  const exists = () => branchExists(repo, branch);
+  if (!(await exists())) {
+    const r = await git(repo, ['worktree', 'add', '-b', branch, '--', path, start]);
+    if (r.exitCode === 0) return true;
+    // lost a race for the branch name: fall through and use the branch that is there now
+    if (!/already exists/i.test(r.stderr) && !(await exists()))
+      return fail(`git worktree add -b ${branch} failed: ${r.stderr.trim()}`);
+  }
+  await git(repo, ['worktree', 'prune']);
+  const r = await git(repo, ['worktree', 'add', '--', path, branch]);
+  if (r.exitCode !== 0) fail(`git worktree add ${branch} failed: ${r.stderr.trim()}`);
+  return false;
 }
 
 async function isWorktreeOn(path: string, branch: string): Promise<boolean> {
@@ -146,8 +177,7 @@ async function ensureWorktreeLocked(input: EnsureWorktreeInput): Promise<Worktre
     const a = input.auth && url ? await input.auth(url) : { args: [], env: {} };
     await git(repoPath, [...a.args, 'fetch', '--', 'origin', branch], { env: a.env });
     if (await revParse(repoPath, `refs/remotes/origin/${branch}`)) {
-      const r = await git(repoPath, ['worktree', 'add', '-b', branch, '--', path, `origin/${branch}`]);
-      if (r.exitCode !== 0) fail(`git worktree add ${branch} from origin failed: ${r.stderr.trim()}`);
+      await addWorktreeOnBranch(repoPath, branch, path, `origin/${branch}`, fail);
       return result(false);
     }
   }
@@ -177,12 +207,11 @@ async function ensureWorktreeLocked(input: EnsureWorktreeInput): Promise<Worktre
     createdBranch = made.created;
     startPoint = base;
   }
-  const r = await git(repoPath, ['worktree', 'add', '-b', branch, '--', path, startPoint]);
-  if (r.exitCode !== 0) fail(`git worktree add -b ${branch} failed: ${r.stderr.trim()}`);
+  const madeHere = await addWorktreeOnBranch(repoPath, branch, path, startPoint, fail);
   return {
-    ...(await result(true)),
+    ...(await result(madeHere)),
     ...(createdBranch ? { createdBranch } : {}),
-    ...(recreated ? { branchRecreated: true } : {}),
+    ...(recreated && madeHere ? { branchRecreated: true } : {}),
   };
 }
 
