@@ -347,7 +347,7 @@ export async function hygieneRepo(
         ? !(await isAncestor(repo, `refs/heads/${wb}`, `refs/remotes/origin/${wb}`))
         : true;
       if (ahead) {
-        const push = await repo.git(['push', '-u', 'origin', wb], true);
+        const push = await repo.git(['push', 'origin', `${wb}:${wb}`], true);
         if (push.exitCode === 0) {
           res.pushed = true;
           res.actions.push(`pushed ${wb}`);
@@ -389,7 +389,7 @@ export async function hygieneRepo(
         if (moved.exitCode === 0) res.actions.push(`moved ${wb} forward to origin/${wb}`);
       }
     } else if (hasLocal && !hasRemoteRef && remote && fetched) {
-      const push = await repo.git(['push', '-u', 'origin', wb], true);
+      const push = await repo.git(['push', 'origin', `${wb}:${wb}`], true);
       if (push.exitCode === 0) {
         res.pushed = true;
         res.actions.push(`pushed ${wb}`);

@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import { type FinalizeExecutePayload, type FinalizeResult, isSafeGitRef } from '@aom/shared';
-import type { BranchRules } from '../forge/types.ts';
 import { statusLinesWithoutStubs } from '../adapters/sandbox-placeholders.ts';
+import type { BranchRules } from '../forge/types.ts';
 import { isProtectedBranchRejection, type PrCreator } from './gh.ts';
 import { git, gitOk, hasRemote, revParse } from './git.ts';
 import { commitEnv, NoCommitIdentityError, requireCommitIdentity } from './identity.ts';
@@ -176,14 +176,14 @@ async function remoteBranchFor(input: CompletionInput, wt: string): Promise<stri
   return base;
 }
 
-/** `git push -u origin <local>:<remote>` with the host's credentials when the runner has any. */
+/** `git push origin <local>:<remote>` (never -u: it writes .git/config, which the sandbox locks) with the host's credentials when the runner has any. */
 async function pushBranch(input: CompletionInput, wt: string, remoteName?: string) {
   const { payload: p } = input;
   const url = (await git(wt, ['remote', 'get-url', 'origin'])).stdout.trim();
   const a = input.auth && url ? await input.auth(url, p.forge) : { args: [], env: {} };
   const spec =
     remoteName && remoteName !== p.branchName ? `${p.branchName}:refs/heads/${remoteName}` : p.branchName;
-  return git(wt, [...a.args, 'push', '-u', 'origin', '--', spec], { env: a.env });
+  return git(wt, [...a.args, 'push', 'origin', '--', spec], { env: a.env });
 }
 
 async function merge(input: CompletionInput, wt: string): Promise<FinalizeResult> {

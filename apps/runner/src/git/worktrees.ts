@@ -96,7 +96,7 @@ async function addWorktreeOnBranch(
 ): Promise<boolean> {
   const exists = () => branchExists(repo, branch);
   if (!(await exists())) {
-    const r = await git(repo, ['worktree', 'add', '-b', branch, '--', path, start]);
+    const r = await git(repo, ['worktree', 'add', '--no-track', '-b', branch, '--', path, start]);
     if (r.exitCode === 0) return true;
     // lost a race for the branch name: fall through and use the branch that is there now
     if (!/already exists/i.test(r.stderr) && !(await exists()))
@@ -274,7 +274,7 @@ async function createWorkingBranchLocked(
   if (remote) {
     const url = (await git(repoPath, ['remote', 'get-url', 'origin'])).stdout.trim();
     const a = opts.auth && url ? await opts.auth(url) : { args: [], env: {} };
-    const push = await git(repoPath, [...a.args, 'push', '-u', 'origin', `${base}:${base}`], { env: a.env });
+    const push = await git(repoPath, [...a.args, 'push', 'origin', `${base}:${base}`], { env: a.env });
     if (push.exitCode !== 0) {
       await git(repoPath, ['branch', '-D', '--', base]);
       return failed(

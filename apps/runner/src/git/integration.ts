@@ -24,6 +24,7 @@ export async function withIntegrationWorktree<T>(
   const add = await git(input.repoPath, [
     'worktree',
     'add',
+    '--no-track',
     '-B',
     input.tempBranch,
     '--',

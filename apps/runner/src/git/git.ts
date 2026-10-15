@@ -1,4 +1,6 @@
+import { isAbsolute, resolve } from 'node:path';
 import { execa } from 'execa';
+import { clearLockStub } from './config-lock.ts';
 
 export interface GitResult {
   stdout: string;
@@ -27,6 +29,16 @@ export interface GitOptions {
 const LOCK_ERROR =
   /could not lock|unable to create '[^']*\.lock'|index\.lock|cannot lock ref|another git process/i;
 
+const CONFIG_LOCK_ERROR = /could not lock config file|config(\.worktree)?\.lock/i;
+
+/** Removes the sandbox's `config.lock` stub of the clone `cwd` belongs to; true when one was removed. */
+async function clearConfigLockStub(cwd: string): Promise<boolean> {
+  const r = await execa('git', ['rev-parse', '--git-common-dir'], { cwd, reject: false, stdin: 'ignore' });
+  const out = String(r.stdout ?? '').trim();
+  if (r.exitCode !== 0 || !out) return false;
+  return clearLockStub(isAbsolute(out) ? out : resolve(cwd, out)).length > 0;
+}
+
 /** Pauses (ms) between the retries of a command that hit a lock error; tests shorten them. */
 export const lockRetry = { delaysMs: [100, 250, 500, 1000, 2000] };
 
@@ -46,6 +58,16 @@ export async function git(cwd: string, args: string[], opts: GitOptions = {}): P
     });
     const res = { stdout: String(r.stdout ?? ''), stderr: String(r.stderr ?? ''), exitCode: r.exitCode ?? 1 };
     const delay = lockRetry.delaysMs[attempt];
+    // A sandbox's empty read-only config.lock stub (never a real lock) is removed; the command then runs again.
+    if (
+      res.exitCode !== 0 &&
+      attempt < 3 &&
+      CONFIG_LOCK_ERROR.test(res.stderr) &&
+      (await clearConfigLockStub(cwd))
+    ) {
+      await new Promise((r) => setTimeout(r, 50));
+      continue;
+    }
     if (res.exitCode === 0 || delay === undefined || !LOCK_ERROR.test(res.stderr)) return res;
     await new Promise((resolve) => setTimeout(resolve, delay));
   }

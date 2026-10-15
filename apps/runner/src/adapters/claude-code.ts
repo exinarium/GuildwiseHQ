@@ -6,6 +6,7 @@ import { CARD_ATTACHMENTS_DIR } from '@aom/shared';
 import { execa } from 'execa';
 import type { z } from 'zod';
 import type { ClaudeRuntimeConfigSchema } from '../config.ts';
+import { holdSandboxRepo } from '../git/config-lock.ts';
 import { discoverPluginMcpServers, mcpConfigFor, type PluginMcpServer } from '../mcp/plugins.ts';
 import type { RunnerPaths } from '../paths.ts';
 import { agentTmpDir, CACHE_ENV_KEYS, DOTNET_SHM_DIR, userNugetPackages } from '../sandbox/sandbox.ts';
@@ -407,6 +408,8 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     );
     const parser = new ClaudeStreamParser();
     const hooks = this.sessionHooks(dir, parser);
+    // The sandbox leaves an empty read-only .git/config.lock behind on the host: removed when the clone's last shift ends.
+    const releaseRepo = holdSandboxRepo(gitDirsOf(input.cwd));
     return spawnSession({
       bin: cmd.bin,
       args: cmd.args,
@@ -424,6 +427,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
           await hooks.onExit?.(r);
         } finally {
           dropPlaceholders();
+          releaseRepo();
         }
       },
     });

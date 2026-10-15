@@ -317,7 +317,7 @@ describe('a working branch the clone does not have', () => {
       defaultPath: join(tmp(), 'wt', ref),
     }).catch((e) => e);
 
-  it("creates it from the repository's default branch and pushes it with upstream", async () => {
+  it("creates it from the repository's default branch and pushes it (no upstream: that would write .git/config)", async () => {
     const clone = masterOnly();
     const r = await ensure(clone, 'main');
     expect(r.created).toBe(true);
@@ -326,7 +326,7 @@ describe('a working branch the clone does not have', () => {
     expect(sh(origin, 'git', ['rev-parse', 'refs/heads/main'])).toBe(
       sh(origin, 'git', ['rev-parse', 'refs/heads/master']),
     );
-    expect(sh(clone, 'git', ['config', 'branch.main.remote'])).toBe('origin');
+    expect(() => sh(clone, 'git', ['config', 'branch.main.remote'])).toThrow();
     // The worktree starts from the new branch; a second call finds the branch and creates nothing.
     expect(sh(r.path, 'git', ['rev-parse', 'HEAD'])).toBe(sh(clone, 'git', ['rev-parse', 'main']));
     const again = await ensure(clone, 'main', 'BC-2');

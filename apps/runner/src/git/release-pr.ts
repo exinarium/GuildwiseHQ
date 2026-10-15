@@ -63,7 +63,7 @@ export async function openReleasePr(input: ReleasePrInput): Promise<RepoOpenPrRe
       error: `the working branch '${head}' does not exist yet. It is created from '${base}' when the first card starts.`,
     };
   if (!remoteHead) {
-    const push = await git(repoPath, [...a.args, 'push', '-u', 'origin', `${head}:${head}`], { env: a.env });
+    const push = await git(repoPath, [...a.args, 'push', 'origin', `${head}:${head}`], { env: a.env });
     if (push.exitCode !== 0)
       return {
         ok: false,

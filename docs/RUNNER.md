@@ -1422,6 +1422,29 @@ sandbox stubs: untracked, empty files at the worktree root with one of the prote
 `sandbox-placeholders.ts`; the empty directories are invisible to git). A non-empty file (a real `.gitmodules`) or a tracked
 one that was modified still counts. The runner also removes such empty untracked stubs (its own and Claude Code's) when the
 shift ends, before the guard, discard and autocommit run, and `autoCommit` excludes them from `git add` for every role.
+
+Hotfix #78 (merges failed at Finalize with "could not create the integration worktree ... could not lock config file
+.git/config: File exists"): Claude Code's sandbox protects `<gitDir>/config` together with `config.lock`,
+`config.worktree`, `config.worktree.lock` and `commondir` (strings of the claude 2.1.300 binary). bubblewrap creates a missing
+protected name on the host as an empty read-only file, and the stub outlives the sandbox. With agents running on a
+clone (dcode-flow-5: 6 shifts, `.git/config.lock` 0 bytes, `r--r--r--`, created while they ran) every git command that
+writes `.git/config` failed, among them the tracking set-up of `git worktree add -B <branch> <path> origin/<x>` of the
+integration worktree. The sandbox deny on `config` and `hooks` stays (an agent must never write them). Fixes
+(`src/git/config-lock.ts`):
+- The runner no longer writes `.git/config` for its routine work: integration, card and sync worktrees use `--no-track`,
+  and `git push -u` became a plain `git push origin <local>:<remote>` (completion, release-pr, branch creation, hygiene).
+  `repo.create` keeps `push -u` (a new clone, no agent yet).
+- `git()` recovers: a command that failed on `config.lock` / `config.worktree.lock` looks for a lock in the clone's common
+  git dir that is certainly a sandbox stub (regular file, 0 bytes, no write permission), removes it and runs the command
+  again. A real lock (non-empty, or writable, which every git creates) is never deleted.
+- Each sandboxed shift holds its clone (`holdSandboxRepo`, ref-counted: many shifts share one `.git`); the stubs are removed
+  when the last shift on the clone ends, so no `config.lock` stays on the host while no agent runs there.
+
+Residual window: while an agent shift runs on a clone, the stub is there, so the owner's own `git config` / `git branch -u`
+in that clone can fail with "could not lock config file"; the runner removes it before its own writes and at the end of
+the last shift. After a runner crash a stub can survive: the owner can delete the 0-byte `.git/config.lock`, or the
+runner's next config write removes it.
+
 A role that may not commit (reviewer, scout, ...) is also rolled back after every shift, which stays as the safety net
 and is still recorded as a guard violation: `git checkout -f <branch>`,
 `git reset --hard <start sha>`, `git clean -fd` inside its worktree. Roles with `writableGlobs` (tester: the project's
