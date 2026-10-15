@@ -4,6 +4,7 @@ import type { BaTaskShift } from '../phases/index.ts';
 import type { ShiftBrief } from '../protocol/runner.ts';
 import { commandForOutcome } from './commands.ts';
 import { renderReporterInstructions, renderReporterPrompt } from './reporter-task.ts';
+import { renderBindingStandingOrders } from './standing-orders.ts';
 
 const TASK_TITLE: Record<
   'phase_report' | 'followups_brief' | 'followup_custom' | 'followups_report',
@@ -37,6 +38,7 @@ export function renderBaTaskInstructions(brief: ShiftBrief, task: BaTaskShift): 
     out.push('# Core rules');
     out.push(brief.role.coreRules.map((r) => `- ${r}`).join('\n'));
   }
+  if (brief.standingOrders.length > 0) out.push(renderBindingStandingOrders(brief.standingOrders));
   out.push('# Your job in this shift');
   out.push(
     [

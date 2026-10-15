@@ -1,4 +1,4 @@
-import type { LedgerEntryDto, LedgerMatch } from '@aom/shared';
+import type { LedgerEntryDto, LedgerMatch, LedgerVersionDto } from '@aom/shared';
 import { iso, type Queryable, type Row, rows } from '../db/sql.ts';
 
 export type LedgerScopeFilter = 'all' | 'feature' | 'decision' | 'standing_order';
@@ -85,6 +85,27 @@ export async function standingOrdersFor(
   ).map((r) => ({ title: r.title, body: r.body }));
 }
 
+/**
+ * Standing orders for work that spans projects or none (a DevOps request, a chat): the organization-wide ones plus
+ * those of every project involved. A project's order is titled with the project key so the reader knows its reach.
+ */
+export async function standingOrdersForProjects(
+  db: Queryable,
+  orgId: string,
+  projectIds: string[],
+): Promise<Array<{ title: string; body: string }>> {
+  return (
+    await rows(
+      db,
+      `SELECT e.title, e.body, p.key AS project_key FROM ledger_entries e LEFT JOIN projects p ON p.id = e.project_id
+        WHERE e.org_id=$1 AND e.scope='standing_order' AND e.superseded_by IS NULL
+          AND (e.project_id IS NULL OR e.project_id = ANY($2::uuid[]))
+        ORDER BY e.project_id NULLS FIRST, e.created_at, e.id`,
+      [orgId, [...new Set(projectIds)]],
+    )
+  ).map((r) => ({ title: r.project_key ? `${r.project_key}: ${r.title}` : r.title, body: r.body }));
+}
+
 /** Requirements and decisions linked to a card (answers to its questions land here). */
 export async function cardLedgerEntries(
   db: Queryable,
@@ -102,7 +123,9 @@ export async function cardLedgerEntries(
 
 const DTO_SELECT = `SELECT e.*, p.key AS project_key, c.ref AS card_ref,
        CASE WHEN e.created_by_kind='user' THEN (SELECT display_name FROM users WHERE id=e.created_by_id)
-            WHEN e.created_by_kind='agent' THEN (SELECT name FROM agents WHERE id=e.created_by_id) END AS created_by_name
+            WHEN e.created_by_kind='agent' THEN (SELECT name FROM agents WHERE id=e.created_by_id) END AS created_by_name,
+       CASE WHEN e.edited_by_kind='user' THEN (SELECT display_name FROM users WHERE id=e.edited_by_id)
+            WHEN e.edited_by_kind='agent' THEN (SELECT name FROM agents WHERE id=e.edited_by_id) END AS edited_by_name
   FROM ledger_entries e LEFT JOIN projects p ON p.id = e.project_id LEFT JOIN cards c ON c.id = e.card_id`;
 
 export const toLedgerDto = (r: Row, rank?: number): LedgerEntryDto => ({
@@ -121,6 +144,10 @@ export const toLedgerDto = (r: Row, rank?: number): LedgerEntryDto => ({
   createdByName: r.created_by_name,
   supersededBy: r.superseded_by,
   createdAt: iso(r.created_at) as string,
+  version: r.version ?? 1,
+  editedAt: iso(r.edited_at) ?? null,
+  editedByName: r.edited_by_name ?? null,
+  canEdit: false,
   ...(rank !== undefined ? { rank } : {}),
 });
 
@@ -134,6 +161,52 @@ const VISIBLE = `((e.project_id IS NULL AND EXISTS (SELECT 1 FROM org_members om
 /** The tab's organization, plus the projects of organizations where the user is only a guest. */
 const IN_ORG = (p: string) => `(${p}::uuid IS NULL OR e.org_id = ${p}::uuid OR NOT EXISTS
    (SELECT 1 FROM org_members om2 WHERE om2.org_id = e.org_id AND om2.user_id = $1 AND om2.status = 'active'))`;
+
+/**
+ * Marks the live standing orders the user may edit: organization-wide ones for the organization's Owner and Admins, a
+ * project's own for its owner (the same people who may add them).
+ */
+export async function withCanEdit(
+  db: Queryable,
+  userId: string,
+  entries: LedgerEntryDto[],
+): Promise<LedgerEntryDto[]> {
+  const live = entries.filter((e) => e.scope === 'standing_order' && !e.supersededBy);
+  if (live.length === 0) return entries;
+  const projectIds = [...new Set(live.map((e) => e.projectId).filter((x): x is string => !!x))];
+  const owned = new Set(
+    (
+      await rows<{ project_id: string }>(
+        db,
+        `SELECT project_id FROM project_members WHERE user_id=$1 AND status='active' AND role='owner' AND project_id = ANY($2::uuid[])`,
+        [userId, projectIds],
+      )
+    ).map((r) => r.project_id),
+  );
+  const managerOrgs = new Set(
+    (
+      await rows<{ org_id: string }>(
+        db,
+        `SELECT org_id FROM org_members WHERE user_id=$1 AND status='active' AND role IN ('owner','admin')`,
+        [userId],
+      )
+    ).map((r) => r.org_id),
+  );
+  const orgOf = new Map(
+    (
+      await rows<{ id: string; org_id: string }>(
+        db,
+        'SELECT id, org_id FROM ledger_entries WHERE id = ANY($1::uuid[])',
+        [live.map((e) => e.id)],
+      )
+    ).map((r) => [r.id, r.org_id]),
+  );
+  return entries.map((e) =>
+    live.includes(e)
+      ? { ...e, canEdit: e.projectId ? owned.has(e.projectId) : managerOrgs.has(orgOf.get(e.id) ?? '') }
+      : e,
+  );
+}
 
 export async function listLedger(
   db: Queryable,
@@ -167,9 +240,13 @@ export async function listLedger(
       `${DTO_SELECT} WHERE e.id = ANY($2::uuid[]) AND ${VISIBLE} AND ${IN_ORG('$3')}`,
       [userId, [...ids.keys()], orgId],
     );
-    return found
-      .map((r) => toLedgerDto(r, ids.get(r.id)))
-      .sort((a, b) => (b.rank ?? 0) - (a.rank ?? 0) || b.createdAt.localeCompare(a.createdAt));
+    return withCanEdit(
+      db,
+      userId,
+      found
+        .map((r) => toLedgerDto(r, ids.get(r.id)))
+        .sort((a, b) => (b.rank ?? 0) - (a.rank ?? 0) || b.createdAt.localeCompare(a.createdAt)),
+    );
   }
   const list = await rows(
     db,
@@ -180,10 +257,61 @@ export async function listLedger(
       ORDER BY e.created_at DESC, e.id LIMIT 200`,
     [userId, o.projectId ?? null, scope, orgId],
   );
-  return list.map((r) => toLedgerDto(r));
+  return withCanEdit(
+    db,
+    userId,
+    list.map((r) => toLedgerDto(r)),
+  );
 }
 
-export async function getLedgerDto(db: Queryable, id: string): Promise<LedgerEntryDto | undefined> {
+export async function getLedgerDto(
+  db: Queryable,
+  id: string,
+  userId?: string,
+): Promise<LedgerEntryDto | undefined> {
   const r = (await rows(db, `${DTO_SELECT} WHERE e.id = $1`, [id]))[0];
-  return r ? toLedgerDto(r) : undefined;
+  if (!r) return undefined;
+  const dto = toLedgerDto(r);
+  return userId ? (await withCanEdit(db, userId, [dto]))[0] : dto;
+}
+
+/** An entry the user may see (same visibility as the list), or undefined. */
+export async function getVisibleLedgerDto(
+  db: Queryable,
+  userId: string,
+  id: string,
+): Promise<LedgerEntryDto | undefined> {
+  const r = (await rows(db, `${DTO_SELECT} WHERE e.id = $2 AND ${VISIBLE}`, [userId, id]))[0];
+  return r ? (await withCanEdit(db, userId, [toLedgerDto(r)]))[0] : undefined;
+}
+
+/** The wordings of an entry, newest first: the current one, then every earlier one. */
+export async function ledgerVersions(db: Queryable, entry: LedgerEntryDto): Promise<LedgerVersionDto[]> {
+  const earlier = await rows(
+    db,
+    `SELECT v.*, CASE WHEN v.saved_by_kind='user' THEN (SELECT display_name FROM users WHERE id=v.saved_by_id)
+                      WHEN v.saved_by_kind='agent' THEN (SELECT name FROM agents WHERE id=v.saved_by_id) END AS by_name
+       FROM ledger_entry_versions v WHERE v.entry_id=$1 ORDER BY v.version DESC`,
+    [entry.id],
+  );
+  return [
+    {
+      version: entry.version,
+      title: entry.title,
+      body: entry.body,
+      tags: entry.tags,
+      savedAt: entry.editedAt ?? entry.createdAt,
+      savedByName: entry.editedAt ? entry.editedByName : entry.createdByName,
+      current: true,
+    },
+    ...earlier.map((v) => ({
+      version: v.version as number,
+      title: v.title as string,
+      body: v.body as string,
+      tags: v.tags as string[],
+      savedAt: iso(v.saved_at) as string,
+      savedByName: (v.by_name as string | null) ?? null,
+      current: false,
+    })),
+  ];
 }

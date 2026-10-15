@@ -19,9 +19,10 @@ import { intakeContext } from '../commands/intake.ts';
 import { grantedMcpServers, orgGrantedMcpServers } from '../commands/mcp-servers.ts';
 import { vaultForConversation } from '../commands/vaults.ts';
 import type { Ctx } from '../context.ts';
-import { one } from '../db/sql.ts';
+import { one, rows } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
 import type { AppendInput } from '../eventstore/types.ts';
+import { standingOrdersForProjects } from '../queries/ledger.ts';
 import { agentSpecFor } from '../runner-gateway/brief.ts';
 import { orgReadRepos, projectReadRepos, referenceReadRepos } from '../runner-gateway/read-repos.ts';
 import { localReadRepos } from '../runner-gateway/workstation-repos.ts';
@@ -208,7 +209,23 @@ export class ChatRelay {
         workstationId: row.workstation_id,
       });
       const ceoState = isCeo ? await loadCeo(ctx.pool, row.org_id) : undefined;
+      // Standing orders bind every agent in a conversation (backlog #75). The DevOps engineer works across projects, so
+      // without a project in context it gets those of every project of the organization.
+      const orders = isCeo
+        ? []
+        : await standingOrdersForProjects(
+            ctx.pool,
+            row.org_id,
+            row.thread_project_id
+              ? [row.thread_project_id]
+              : row.is_devops
+                ? (await rows(ctx.pool, 'SELECT id FROM projects WHERE org_id=$1', [row.org_id])).map(
+                    (p) => p.id,
+                  )
+                : [],
+          );
       const context: ChatContext = {
+        ...(orders.length > 0 ? { standingOrders: orders } : {}),
         orgId: row.org_id,
         ...(ceoState ? { ceo: { brief: await buildChatBrief(ctx, ceoState, row) } } : {}),
         ...(row.thread_project_id ? { projectId: row.thread_project_id, projectKey: row.project_key } : {}),

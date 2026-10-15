@@ -136,6 +136,7 @@ export const PROJECTION_TABLES = [
   'desk_items',
   'card_blockers',
   'ledger_entries',
+  'ledger_entry_versions',
   'vaults',
   'devops_requests',
   'run_plans',

@@ -18,6 +18,12 @@ export const LedgerEntryDtoSchema = z.object({
   createdByName: z.string().nullable(),
   supersededBy: z.uuid().nullable(),
   createdAt: IsoTime,
+  /** 1 until the first edit (backlog #74). */
+  version: z.number().int().default(1),
+  editedAt: IsoTime.nullable().default(null),
+  editedByName: z.string().nullable().default(null),
+  /** The caller may edit this entry (a live standing order they may manage). */
+  canEdit: z.boolean().default(false),
   /** Full-text rank when a query was given. */
   rank: z.number().optional(),
 });
@@ -50,3 +56,36 @@ export const CreateLedgerEntryRequestSchema = z
 export type CreateLedgerEntryRequest = z.infer<typeof CreateLedgerEntryRequestSchema>;
 
 export const CreateLedgerEntryResponseSchema = z.object({ entry: LedgerEntryDtoSchema });
+
+/** `PATCH /api/ledger/:id`: edit a live standing order. At least one of title, body, tags. */
+export const EditLedgerEntryRequestSchema = z
+  .object({
+    title: z.string().min(1).max(300).optional(),
+    body: z.string().min(1).max(20000).optional(),
+    tags: z.array(z.string().min(1).max(60)).max(20).optional(),
+  })
+  .refine((v) => v.title !== undefined || v.body !== undefined || v.tags !== undefined, {
+    message: 'give a new title, text or tags',
+  });
+export type EditLedgerEntryRequest = z.infer<typeof EditLedgerEntryRequestSchema>;
+
+/** One wording of a standing order, newest first; `current` is the one agents are briefed with. */
+export const LedgerVersionDtoSchema = z.object({
+  version: z.number().int(),
+  title: z.string(),
+  body: z.string(),
+  tags: z.array(z.string()),
+  /** When this wording came into force, and who wrote it. */
+  savedAt: IsoTime,
+  savedByName: z.string().nullable(),
+  current: z.boolean(),
+});
+export type LedgerVersionDto = z.infer<typeof LedgerVersionDtoSchema>;
+
+export const LedgerHistoryResponseSchema = z.object({
+  entry: LedgerEntryDtoSchema,
+  versions: z.array(LedgerVersionDtoSchema),
+});
+export type LedgerHistoryResponse = z.infer<typeof LedgerHistoryResponseSchema>;
+
+export const EditLedgerEntryResponseSchema = z.object({ entry: LedgerEntryDtoSchema });

@@ -402,6 +402,11 @@ export const ChatContextSchema = z.object({
   vault: ChatVaultSchema.optional(),
   /** Set for the owner's chat with the CEO: persona, standing instructions, rules and the policy in words. */
   ceo: z.object({ brief: z.string() }).optional(),
+  /**
+   * The standing orders that bind this conversation's agent: the organization's plus those of the project in
+   * context (DevOps: every project of the organization). Additive; an older server sends none.
+   */
+  standingOrders: z.array(z.object({ title: z.string(), body: z.string() })).optional(),
 });
 export type ChatContext = z.infer<typeof ChatContextSchema>;
 

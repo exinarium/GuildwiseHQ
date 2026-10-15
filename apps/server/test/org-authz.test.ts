@@ -278,6 +278,50 @@ describe('org roles', () => {
     ['owner', 200],
     ['admin', 200],
     ['member', 403],
+  ] as const)('edit an organization-wide standing order: %s -> %s', async (role, status) => {
+    const made = await ok<any>(
+      call('owner', 'POST', '/api/ledger', {
+        scope: 'standing_order',
+        title: `Edit me ${role}`,
+        body: 'Always be kind.',
+      }),
+      201,
+    );
+    const r = await call(role, 'PATCH', `/api/ledger/${made.entry.id}`, {
+      body: 'Always be kind and brief.',
+    });
+    expect(r.status).toBe(status);
+  });
+
+  it('a project standing order is edited by the Owner and Admins only, never by a Member', async () => {
+    const made = await ok<any>(
+      call('admin', 'POST', '/api/ledger', {
+        scope: 'standing_order',
+        projectId,
+        title: 'P rule',
+        body: 'Yes.',
+      }),
+      201,
+    );
+    expect(made.entry.canEdit).toBe(true);
+    expect((await call('member', 'PATCH', `/api/ledger/${made.entry.id}`, { body: 'No.' })).status).toBe(403);
+    expect(
+      (await call('admin', 'PATCH', `/api/ledger/${made.entry.id}`, { body: 'Yes, always.' })).status,
+    ).toBe(200);
+    const seen = await ok<any>(
+      call('member', 'GET', `/api/ledger?projectId=${projectId}&scope=standing_order`),
+    );
+    expect(seen.entries.find((e: any) => e.id === made.entry.id)).toMatchObject({
+      body: 'Yes, always.',
+      canEdit: false,
+      version: 2,
+    });
+  });
+
+  it.each([
+    ['owner', 200],
+    ['admin', 200],
+    ['member', 403],
   ] as const)('change how the BA reports: %s -> %s', async (role, status) => {
     expect((await call(role, 'PUT', '/api/reporting', { routeViaBa: false })).status).toBe(status);
     // everyone in the organization can read the settings

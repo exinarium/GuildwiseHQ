@@ -1,6 +1,6 @@
 import { decisionFilePath, projectVaultFolder, renderDecisionFile } from '@aom/shared';
 import type { Ctx } from '../context.ts';
-import { one, type Queryable } from '../db/sql.ts';
+import { one, type Queryable, rows } from '../db/sql.ts';
 import type { StoredEvent } from '../eventstore/types.ts';
 import { enqueueVaultWrite } from './vaults.ts';
 
@@ -102,16 +102,11 @@ export async function writeDecisionFile(ctx: Ctx, rec: DecisionRecord): Promise<
   return { queued: true, path, workstationId: r.workstationId, commandId: r.commandId };
 }
 
-/**
- * Appends a standing order added on the desk to the vault: `projects/<name>/standing-orders.md` for a project order,
- * the organization vault's `standing-orders.md` for an organization-wide one (docs/ARCHITECTURE.md section 16.4).
-
- * Called by `registerDecisionHook` for every standing order added to the ledger.
- */
-export async function appendStandingOrder(
+/** The vault and file a scope's standing orders live in, or why there is none. */
+async function appendTarget(
   ctx: Ctx,
-  input: { orgId: string; projectId?: string | null; title: string; body: string; at?: Date },
-): Promise<DecisionWriteResult> {
+  input: { orgId: string; projectId?: string | null },
+): Promise<{ vaultId: string; path: string } | Extract<DecisionWriteResult, { queued: false }>> {
   let vaultId: string | undefined;
   let path = 'standing-orders.md';
   if (input.projectId) {
@@ -137,6 +132,22 @@ export async function appendStandingOrder(
     )?.id;
   }
   if (!vaultId) return { queued: false, reason: 'no_vault' };
+  return { vaultId, path };
+}
+
+/**
+ * Appends a standing order added on the desk to the vault: `projects/<name>/standing-orders.md` for a project order,
+ * the organization vault's `standing-orders.md` for an organization-wide one (docs/ARCHITECTURE.md section 16.4).
+
+ * Called by `registerDecisionHook` for every standing order added to the ledger.
+ */
+export async function appendStandingOrder(
+  ctx: Ctx,
+  input: { orgId: string; projectId?: string | null; title: string; body: string; at?: Date },
+): Promise<DecisionWriteResult> {
+  const target = await appendTarget(ctx, input);
+  if ('queued' in target) return target;
+  const { vaultId, path } = target;
   const day = (input.at ?? ctx.clock.now()).toISOString().slice(0, 10);
   const r = await enqueueVaultWrite(ctx, ctx.pool, vaultId, {
     path,
@@ -147,6 +158,41 @@ export async function appendStandingOrder(
   if (!r.queued || !r.workstationId || !r.commandId) return { queued: false, reason: 'no_workstation' };
   await ctx.services.gateway.deliverPending(r.workstationId);
   return { queued: true, path, workstationId: r.workstationId, commandId: r.commandId };
+}
+
+/**
+ * An edited standing order (backlog #74): the vault's `standing-orders.md` is a copy of the ledger, so it is written again
+ * from the live standing orders of that scope (`replace` mode), instead of appending a second, contradicting version.
+ * Same file, vault and commit path as `appendStandingOrder`.
+ */
+export async function rewriteStandingOrders(
+  ctx: Ctx,
+  input: { orgId: string; projectId?: string | null },
+): Promise<DecisionWriteResult> {
+  const first = await appendTarget(ctx, input);
+  if ('queued' in first) return first;
+  const live = await rows(
+    ctx.pool,
+    `SELECT title, body, created_at FROM ledger_entries
+      WHERE org_id=$1 AND scope='standing_order' AND superseded_by IS NULL AND project_id IS NOT DISTINCT FROM $2
+      ORDER BY created_at, id`,
+    [input.orgId, input.projectId ?? null],
+  );
+  const content = live
+    .map(
+      (o) =>
+        `\n## ${String(o.title).trim()}\n\n${String(o.body).trim()}\n\n_Added ${(o.created_at as Date).toISOString().slice(0, 10)}._\n`,
+    )
+    .join('');
+  const r = await enqueueVaultWrite(ctx, ctx.pool, first.vaultId, {
+    path: first.path,
+    mode: 'replace',
+    content: content || '\n',
+    commitMessage: 'standing orders edited',
+  });
+  if (!r.queued || !r.workstationId || !r.commandId) return { queued: false, reason: 'no_workstation' };
+  await ctx.services.gateway.deliverPending(r.workstationId);
+  return { queued: true, path: first.path, workstationId: r.workstationId, commandId: r.commandId };
 }
 
 /**
@@ -167,6 +213,14 @@ export function registerDecisionHook(ctx: Ctx): () => void {
           body: p.body,
           at: e.createdAt,
         });
+        return;
+      }
+      if (e.event.type === 'LedgerEntryEdited') {
+        const row = await one(ctx.pool, `SELECT org_id, project_id, scope FROM ledger_entries WHERE id=$1`, [
+          e.event.payload.entryId,
+        ]);
+        if (row?.scope === 'standing_order')
+          await rewriteStandingOrders(ctx, { orgId: row.org_id, projectId: row.project_id });
         return;
       }
       if (e.event.type !== 'QuestionAnswered') return;
