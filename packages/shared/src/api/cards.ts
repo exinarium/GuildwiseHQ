@@ -103,8 +103,29 @@ export const CardDtoSchema = z.object({
   queuedAt: IsoTime.nullable(),
   blockedSince: IsoTime.nullable(),
   dependencies: z.array(
-    z.object({ cardId: z.uuid(), ref: z.string(), title: z.string(), status: CardStatus }),
+    z.object({
+      cardId: z.uuid(),
+      ref: z.string(),
+      title: z.string(),
+      status: CardStatus,
+      /** The stage the dependency is in (a landed card may still be in Manual QA). */
+      stage: z.string().optional(),
+      /** Its work is in the working branch (merged at Finalize), even while the card is in Manual QA or an approval step. */
+      landed: z.boolean().optional(),
+    }),
   ),
+  /** A design made before dependencies landed: the assumptions to review, and the review once done (backlog #80). */
+  designReview: z
+    .object({
+      state: z.enum(['waiting', 'review_due', 'reviewed']),
+      dependencies: z.array(z.string()),
+      assumptions: z.array(z.object({ assumption: z.string(), dependency: z.string(), ifWrong: z.string() })),
+      result: z
+        .object({ confirmed: z.number().int(), revised: z.number().int(), note: z.string() })
+        .nullable(),
+    })
+    .nullable()
+    .optional(),
   createdAt: IsoTime,
   updatedAt: IsoTime,
   finalizedAt: IsoTime.nullable(),

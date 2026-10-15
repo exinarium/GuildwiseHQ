@@ -137,6 +137,12 @@ function feedContext(brief: ShiftBrief): string {
   return lines.join('\n');
 }
 
+const indent = (text: string, pad: string): string =>
+  text
+    .split('\n')
+    .map((l) => pad + l)
+    .join('\n');
+
 /** Investigate & design: where the architect writes, what was recorded, the investigation-only note for the BA. */
 function investigationContext(brief: ShiftBrief): string {
   const inv = brief.investigation;
@@ -144,22 +150,67 @@ function investigationContext(brief: ShiftBrief): string {
   const lines: string[] = [];
   if (brief.card.investigationOnly)
     lines.push('- This is an investigation-only card: the result is the report; nothing is built.');
-  if (brief.shift.stage.startsWith('investigate')) {
+  if (brief.shift.stage.startsWith('investigate') && inv.readOnly) {
+    lines.push(
+      '- DESIGN BEFORE THE DEPENDENCIES HAVE LANDED. This card has no branch yet: you work in a read-only checkout of the project\'s working branch (listed under "Folders you can read"), not in a worktree, and you cannot commit or edit repository files.',
+      inv.location === 'vault'
+        ? `- Write your report to the file \`${inv.reportPath}\` under your scratch directory (the runner copies it into the project's knowledge vault when you report).`
+        : `- Write your report to the file \`${inv.reportPath}\` under your scratch directory (the same relative path), not in the repository: the runner keeps its text on the card and the builder commits it on the card branch when Build starts.`,
+    );
+    const un = inv.unlandedDependencies ?? [];
+    if (un.length > 0) {
+      lines.push(
+        '- These dependencies are not in the working branch yet. Design on top of their specs and designs below, state your assumptions about what they will provide in a section "Assumptions about unlanded dependencies" of the report, and keep your design adjustable once they land:',
+      );
+      for (const d of un) {
+        lines.push(`  - ${d.ref} ${d.title} (${d.status})`);
+        if (d.spec) lines.push(`    Spec:\n${indent(d.spec, '      ')}`);
+        if (d.report)
+          lines.push(
+            `    Design report (${d.report.location === 'vault' ? `in the project vault: ${d.report.reportPath}` : `${d.report.reportPath}`}): ${d.report.summary.replace(/\s+/g, ' ')}`,
+            ...(d.report.body ? [indent(d.report.body, '      ')] : []),
+          );
+      }
+    }
+    lines.push(
+      '- Record every assumption with the report: `aom design --report <path> --summary "..." --assumption "<assumption> | <dependency ref> | <what changes if it is wrong>"` (repeat the flag; or `--assumptions-file <json>`). If the design really assumes nothing about them, say so with `--no-assumptions "<why>"`. After the dependencies land you review these assumptions in a short follow-up shift.',
+    );
+  } else if (brief.shift.stage.startsWith('investigate') && inv.review) {
+    lines.push(
+      `- ASSUMPTION REVIEW. You designed this card before ${inv.review.dependencies.join(', ')} landed; they are in the working branch now. Check each assumption below against the landed code, then finish with exactly one of: \`aom design confirm --summary "<how you checked>"\` (all hold; the design stands) or \`aom design revise --report <path> --summary "..." --revised <numbers> --note "<what changed and why>"\` (update the report first; the numbers are the assumptions that did not hold, the others count as confirmed). This is a review, not a new design: change only what the landed code makes wrong.`,
+      ...inv.review.assumptions.map(
+        (a, i) => `  ${i + 1}. ${a.assumption} (${a.dependency}); if wrong: ${a.ifWrong}`,
+      ),
+      inv.location === 'vault'
+        ? `- The design report is in the project vault: \`${inv.report?.reportPath ?? inv.reportPath}\`. To revise it, write the new text to \`${inv.reportPath}\` under your scratch directory.`
+        : inv.report?.body
+          ? `- The design report is carried on the card (text below). To revise it, write the revised report to \`${inv.reportPath}\` in your worktree and commit it on the card branch.\n\n${inv.report.body}`
+          : `- The design report is \`${inv.report?.reportPath ?? inv.reportPath}\` on the card branch; to revise it, edit and commit it.`,
+    );
+  } else if (brief.shift.stage.startsWith('investigate')) {
     lines.push(
       inv.location === 'vault'
         ? `- Write your report to the file \`${inv.reportPath}\` under your scratch directory (the runner copies it into the project's knowledge vault when you report). It is not committed to the repository.`
         : `- Write your report to \`${inv.reportPath}\` in your worktree and commit it on the card branch.`,
     );
     if (inv.note) lines.push(`- ${inv.note}`);
-    if (inv.mergeMainFirst)
+    if (inv.mergeMainFirst && !inv.readOnly)
       lines.push('- The latest main branch is merged first (see the note on a waiting merge below, if any).');
+  }
+  if (inv.report?.body && !brief.shift.stage.startsWith('investigate')) {
+    lines.push(
+      `- The design report was written before this card had a branch. Create \`${inv.report.reportPath}\` on your branch with exactly the text below, and commit it first, as its own commit:`,
+      '```markdown',
+      inv.report.body,
+      '```',
+    );
   }
   if (inv.report) {
     lines.push(
-      `- Recorded report: \`${inv.report.reportPath}\` (${inv.report.location === 'vault' ? 'in the project vault' : `on the card branch${inv.report.commit ? `, commit ${inv.report.commit.slice(0, 10)}` : ''}`})`,
+      `- Recorded report: \`${inv.report.reportPath}\` (${inv.report.location === 'vault' ? 'in the project vault' : inv.report.body ? 'carried on the card until you commit it' : `on the card branch${inv.report.commit ? `, commit ${inv.report.commit.slice(0, 10)}` : ''}`})`,
       `- Summary of the report: ${inv.report.summary.replace(/\s+/g, ' ')}`,
     );
-    if (inv.report.location === 'repo' && !brief.shift.stage.startsWith('investigate'))
+    if (inv.report.location === 'repo' && !inv.report.body && !brief.shift.stage.startsWith('investigate'))
       lines.push('- Read the report before you start; it is on your branch.');
   }
   return lines.join('\n');
@@ -228,7 +279,15 @@ export function renderShiftPrompt(brief: ShiftBrief): string {
   }
   parts.push(section('Completion action', card.completionAction ?? ''));
   parts.push(
-    section('Dependencies', card.dependencies.map((d) => `- ${d.ref} ${d.title} (${d.status})`).join('\n')),
+    section(
+      'Dependencies',
+      card.dependencies
+        .map(
+          (d) =>
+            `- ${d.ref} ${d.title} (${d.status}${d.landed === undefined ? '' : d.landed ? '; landed in the working branch' : '; not landed yet'})`,
+        )
+        .join('\n'),
+    ),
   );
   if (brief.investigation) parts.push(section('Investigation', investigationContext(brief)));
   parts.push(section('Previous handoffs', renderHandoffs(brief.handoffs)));

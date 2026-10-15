@@ -1,5 +1,7 @@
+import { READONLY_DESIGN_CAPABILITY } from '@aom/shared';
 import { budgetPausedSql } from '../costs/index.ts';
 import { one, type Queryable, type Row, rows } from '../db/sql.ts';
+import { landedSql } from './dependencies.ts';
 
 /** A runner that has not been heard from for this long counts as offline. */
 export const ONLINE_WINDOW_MS = 45_000;
@@ -159,11 +161,22 @@ WHERE c.status = 'queued'
   AND NOT EXISTS (
         SELECT 1 FROM card_dependencies d JOIN cards dc ON dc.id = d.depends_on_card_id
          WHERE d.card_id = c.id
-           -- The first stage that creates the card branch waits for the dependencies (build, or investigate when the
-           -- architect's stage creates the worktree), so a branch is never cut before they have landed.
+           -- The first stage that creates the card branch waits for the dependencies to have LANDED (done, cancelled or
+           -- finalized with a merge: dependencies.ts), so a branch is never cut before they are in the working branch.
            AND ((c.stage = 'build' AND c.rework_round = 0)
                 OR (c.repo_id IS NOT NULL AND c.worktree_path IS NULL AND c.worktree_card_id IS NULL))
-           AND dc.status NOT IN ('done','cancelled'))
+           AND NOT ${landedSql('dc')}
+           -- Except the architect's design stage (backlog #80): it may start without a card branch, in a read-only
+           -- checkout of the working branch, on a runner that can do that. An investigation-only card has no later
+           -- Build to carry its report, so it still waits.
+           AND NOT (c.stage LIKE 'investigate%' AND st.claim_role = 'architect' AND c.investigation_only IS NOT TRUE
+                    AND c.repo_id IS NOT NULL AND c.worktree_path IS NULL AND c.worktree_card_id IS NULL
+                    AND EXISTS (SELECT 1 FROM workstation_capabilities wc
+                                 WHERE wc.workstation_id = $6 AND '${READONLY_DESIGN_CAPABILITY}' = ANY (wc.capabilities))))
+  -- A design held until its dependencies land (assumption review pending) waits for all of them.
+  AND NOT (COALESCE(c.design_review->>'state', '') = 'waiting' AND EXISTS (
+        SELECT 1 FROM card_dependencies d JOIN cards dc ON dc.id = d.depends_on_card_id
+         WHERE d.card_id = c.id AND NOT ${landedSql('dc')}))
   ${cardFilter}
 ORDER BY
   -- 1. scheduled work first: schedules, interest scans and an on-demand "Research this" (they are scheduled cards)
@@ -174,6 +187,8 @@ ORDER BY
     WHEN c.is_rework_or_bug THEN 1
     ELSE 2
   END,
+  -- 2b. the assumption review goes to the architect who made the design, when that one is free
+  COALESCE(c.design_review->>'agentId' = ($1::uuid)::text, false) DESC,
   -- 3. the agent's focus projects: a soft preference, ahead of the ranking
   (c.project_id = ANY ($10::uuid[])) DESC,
   -- 4. an interest's preferred agent sorts ahead (a soft preference: no claim window, any allowed agent takes the run)

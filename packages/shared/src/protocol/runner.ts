@@ -158,7 +158,11 @@ export const AgentRuntimeSpecSchema = z.object({
 export type AgentRuntimeSpec = z.infer<typeof AgentRuntimeSpecSchema>;
 
 export const WorktreeSpecSchema = z.object({
-  mode: z.enum(['create', 'reuse']),
+  /**
+   * `readonly`: no card branch exists yet (the card's dependencies have not landed); the runner opens a detached,
+   * read-only checkout of `baseBranch` for the architect to read and removes it after the shift.
+   */
+  mode: z.enum(['create', 'reuse', 'readonly']),
   repoId: z.uuid(),
   remoteUrlNormalized: z.string(),
   baseBranch: z.string(),
@@ -198,7 +202,15 @@ export const ShiftBriefSchema = z.object({
     designNeeded: z.boolean().optional(),
     /** The card only investigates: investigate -> finalize, no build. */
     investigationOnly: z.boolean().optional(),
-    dependencies: z.array(z.object({ ref: z.string(), title: z.string(), status: z.string() })),
+    dependencies: z.array(
+      z.object({
+        ref: z.string(),
+        title: z.string(),
+        status: z.string(),
+        /** The dependency's work is in the working branch (merged at Finalize, or done): it counts as satisfied. */
+        landed: z.boolean().optional(),
+      }),
+    ),
     /** Files attached to the card: the runner copies them into a read-only folder next to the shift. */
     attachments: z.array(BriefAttachmentSchema).optional(),
     parent: z.object({ ref: z.string(), title: z.string() }).optional(),
@@ -256,6 +268,43 @@ export const ShiftBriefSchema = z.object({
       note: z.string().optional(),
       /** Merge the latest main branch first applies to this card (the architect resolves a conflict). */
       mergeMainFirst: z.boolean().default(false),
+      /**
+       * Designing before the card's dependencies have landed: the shift has no card branch, only a read-only checkout of
+       * the working branch. The report is written in the scratch directory; the runner saves it in the vault, or hands
+       * its text to the server (`deferred`), and the builder commits it on the card branch.
+       */
+      readOnly: z.boolean().optional(),
+      /**
+       * The assumption-review shift (the dependencies landed since the design was made): check each recorded assumption
+       * against the landed code, then `aom design confirm` or `aom design revise`.
+       */
+      review: z
+        .object({
+          assumptions: z.array(
+            z.object({ assumption: z.string(), dependency: z.string(), ifWrong: z.string() }),
+          ),
+          dependencies: z.array(z.string()),
+        })
+        .optional(),
+      /** With `readOnly`: the dependencies that are not in the working branch yet, with what is known of their design. */
+      unlandedDependencies: z
+        .array(
+          z.object({
+            ref: z.string(),
+            title: z.string(),
+            status: z.string(),
+            spec: z.string().optional(),
+            report: z
+              .object({
+                reportPath: z.string(),
+                location: z.enum(['repo', 'vault']),
+                summary: z.string(),
+                body: z.string().optional(),
+              })
+              .optional(),
+          }),
+        )
+        .optional(),
       /** The report that was recorded by the investigate stage (later stages read it). */
       report: z
         .object({
@@ -263,6 +312,8 @@ export const ShiftBriefSchema = z.object({
           location: z.enum(['repo', 'vault']),
           summary: z.string(),
           commit: z.string().optional(),
+          /** A repository report written before the card branch existed: the builder commits this text at `reportPath`. */
+          body: z.string().optional(),
         })
         .optional(),
     })
@@ -552,6 +603,11 @@ export type ShiftLimitSetting = z.infer<typeof ShiftLimitSettingSchema>;
 export const UNLIMITED_SHIFTS = 100_000;
 /** Announced in `hello.capabilities` by a runner that applies `limits.shiftLimit` and the `shifts.limit` command. */
 export const SHIFT_LIMIT_CAPABILITY = 'shift-limit:1';
+/**
+ * Announced by a runner that can run the architect's design shift without a card branch (`worktree.mode: 'readonly'`:
+ * a detached, read-only checkout of the working branch). The server offers an unlanded-dependency design only to these.
+ */
+export const READONLY_DESIGN_CAPABILITY = 'design-ro:1';
 
 export const RunnerCommandNameSchema = z.enum([
   'agent.wipe',

@@ -30,6 +30,7 @@ import { projectHasVault, vaultForProject } from '../commands/vaults.ts';
 import type { Ctx } from '../context.ts';
 import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import type { ClaimResult } from '../dispatcher/claim.ts';
+import { dependencyStates } from '../dispatcher/dependencies.ts';
 import { cardLedgerEntries, standingOrdersFor, standingOrdersForProjects } from '../queries/ledger.ts';
 import { orgReadRepos, referenceReadRepos } from './read-repos.ts';
 import { localReadRepos } from './workstation-repos.ts';
@@ -120,7 +121,7 @@ function reviewCommentsOf(
 export async function buildBrief(
   ctx: Ctx,
   shift: Row,
-  opts: { vaultAvailable?: boolean } = {},
+  opts: { vaultAvailable?: boolean; readOnly?: boolean } = {},
 ): Promise<ShiftBrief | null> {
   const card = await one(ctx.pool, 'SELECT * FROM cards WHERE id=$1', [shift.card_id]);
   const agent = await one(ctx.pool, 'SELECT * FROM agents WHERE id=$1', [shift.agent_id]);
@@ -151,11 +152,7 @@ export async function buildBrief(
       WHERE m.thread_id=$1 ORDER BY m.created_at DESC, m.event_seq DESC LIMIT 30`,
     [card.id],
   );
-  const deps = await rows(
-    ctx.pool,
-    `SELECT dc.ref, dc.title, dc.status FROM card_dependencies d JOIN cards dc ON dc.id = d.depends_on_card_id WHERE d.card_id=$1`,
-    [card.id],
-  );
+  const deps = await dependencyStates(ctx.pool, card.id);
   const repo = card.repo_id
     ? await one(ctx.pool, 'SELECT project_path FROM project_repos WHERE id=$1', [card.repo_id])
     : undefined;
@@ -211,7 +208,7 @@ export async function buildBrief(
       docsNeeded: card.docs_needed,
       designNeeded: card.design_needed ?? false,
       investigationOnly: card.investigation_only ?? false,
-      dependencies: deps.map((d) => ({ ref: d.ref, title: d.title, status: d.status })),
+      dependencies: deps.map((d) => ({ ref: d.ref, title: d.title, status: d.status, landed: d.landed })),
       attachments: await briefAttachments(ctx.pool, card.id),
       parent: parent ? { ref: parent.ref, title: parent.title } : undefined,
       ...(hookLink
@@ -262,6 +259,12 @@ export async function buildBrief(
             card,
             project,
             opts.vaultAvailable ?? (await projectHasVault(ctx.pool, project.id)),
+            opts.readOnly
+              ? await unlandedForDesign(
+                  ctx.pool,
+                  deps.filter((d) => !d.landed),
+                )
+              : undefined,
           ),
         }
       : {}),
@@ -322,6 +325,7 @@ function investigationBrief(
   card: Row,
   project: Row,
   vaultAvailable: boolean,
+  unlanded?: NonNullable<NonNullable<ShiftBrief['investigation']>['unlandedDependencies']>,
 ): NonNullable<ShiftBrief['investigation']> {
   const target = resolveReportTarget({
     cardReportPath: card.fields?.reportPath,
@@ -336,7 +340,10 @@ function investigationBrief(
     location: InvestigationLocation;
     summary: string;
     commit: string | null;
+    body?: string;
+    assumptions?: Array<{ assumption: string; dependency: string; ifWrong: string }>;
   } | null;
+  const held = card.design_review?.state === 'waiting';
   return {
     reportPath: target.reportPath,
     location: target.location,
@@ -351,10 +358,57 @@ function investigationBrief(
             location: rec.location,
             summary: rec.summary,
             ...(rec.commit ? { commit: rec.commit } : {}),
+            ...(rec.body ? { body: rec.body } : {}),
+          },
+        }
+      : {}),
+    ...(unlanded ? { readOnly: true, unlandedDependencies: unlanded } : {}),
+    ...(held
+      ? {
+          review: {
+            assumptions: rec?.assumptions ?? [],
+            dependencies: (card.design_review?.dependencies ?? []) as string[],
           },
         }
       : {}),
   };
+}
+
+/** What a design made before its dependencies landed builds on: their specs, and their design reports if any. */
+async function unlandedForDesign(
+  db: Queryable,
+  unlanded: Array<{ id: string; ref: string; title: string; status: string }>,
+): Promise<NonNullable<NonNullable<ShiftBrief['investigation']>['unlandedDependencies']>> {
+  const out: NonNullable<NonNullable<ShiftBrief['investigation']>['unlandedDependencies']> = [];
+  for (const d of unlanded) {
+    const c = await one(db, 'SELECT fields, investigation FROM cards WHERE id=$1', [d.id]);
+    const f = (c?.fields ?? {}) as Record<string, unknown>;
+    const spec = ['context', 'requirements', 'acceptanceCriteria']
+      .flatMap((k) => (typeof f[k] === 'string' && f[k] ? [`${k}: ${f[k] as string}`] : []))
+      .join('\n')
+      .slice(0, 6000);
+    const inv = c?.investigation as
+      | { reportPath: string; location: 'repo' | 'vault'; summary: string; body?: string }
+      | null
+      | undefined;
+    out.push({
+      ref: d.ref,
+      title: d.title,
+      status: d.status,
+      ...(spec ? { spec } : {}),
+      ...(inv
+        ? {
+            report: {
+              reportPath: inv.reportPath,
+              location: inv.location,
+              summary: inv.summary,
+              ...(inv.body ? { body: inv.body.slice(0, 30000) } : {}),
+            },
+          }
+        : {}),
+    });
+  }
+  return out;
 }
 
 /** The vault a question or BA task shift of `projectId` reads (read-only), on the agent's workstation. */
@@ -375,11 +429,11 @@ export async function buildShiftStart(ctx: Ctx, claim: ClaimResult): Promise<Shi
   const shift = await one(ctx.pool, 'SELECT * FROM shifts WHERE id=$1', [claim.shiftId]);
   const agent = await one(ctx.pool, 'SELECT * FROM agents WHERE id=$1', [claim.agentId]);
   if (!shift || !agent) return null;
-  let brief = await buildBrief(ctx, shift);
+  let brief = await buildBrief(ctx, shift, { readOnly: !!claim.worktree?.readOnly });
   if (!brief) return null;
   const worktree: WorktreeSpec | null = claim.worktree
     ? {
-        mode: claim.worktree.created ? 'create' : 'reuse',
+        mode: claim.worktree.readOnly ? 'readonly' : claim.worktree.created ? 'create' : 'reuse',
         repoId: claim.worktree.repoId,
         remoteUrlNormalized: claim.worktree.remoteUrlNormalized,
         baseBranch: claim.worktree.baseBranch,
@@ -393,7 +447,9 @@ export async function buildShiftStart(ctx: Ctx, claim: ClaimResult): Promise<Shi
   const vault = ws ? await vaultForProject(ctx.pool, brief.project.id, ws.user_id) : null;
   // This workstation's user cannot reach a vault the project-level check found (an organization vault): the runner would refuse a vault report.
   if (!vault && brief.investigation?.location === 'vault')
-    brief = (await buildBrief(ctx, shift, { vaultAvailable: false })) ?? brief;
+    brief =
+      (await buildBrief(ctx, shift, { vaultAvailable: false, readOnly: !!claim.worktree?.readOnly })) ??
+      brief;
   // plugin MCP servers the project's Owner granted (names only; the runner holds the configuration)
   const mcp = await grantedMcpServers(ctx.pool, brief.project.id);
   return {

@@ -28,6 +28,7 @@ import { endCeoShift } from '../ceo/shift.ts';
 import type { Ctx } from '../context.ts';
 import { exec, one, type Row } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
+import { dependencyStates } from '../dispatcher/dependencies.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { baFinalizeEvents } from './ba-finalize.ts';
 import { applyBaTaskReport, endBaTaskShift } from './ba-tasks.ts';
@@ -276,6 +277,8 @@ export async function applyShiftReport(
   /** Events that belong to the outcome and follow it (desk items, thread notes). */
   const followUps: AppendInput[] = [];
   let acceptMessage: string | undefined;
+  /** Refs of the unlanded dependencies when this design is held for the assumption review. */
+  let holdDesign: string[] | undefined;
   switch (outcome.event) {
     case 'ReviewRequested': {
       const diffStats = msg.diffStats ?? ZERO_DIFF;
@@ -388,49 +391,123 @@ export async function applyShiftReport(
       }
       if (outcome.data === 'investigation') {
         const inv = payloadData as InvestigationData;
-        if (!isValidReportPath(inv.reportPath))
+        const pending = card.design_review?.state === 'waiting';
+        const states = await dependencyStates(tx, cardId);
+        const unlanded = states.filter((d) => !d.landed);
+        // A design made before the dependencies landed (no card branch yet): its assumptions are recorded and the card
+        // is held in the design stage until they land (backlog #80).
+        const early =
+          !pending &&
+          !card.investigation_only &&
+          unlanded.length > 0 &&
+          !card.worktree_path &&
+          String(card.stage).startsWith('investigate');
+        const total = ((card.investigation?.assumptions ?? []) as unknown[]).length;
+        if (inv.review && !pending)
+          return { accepted: false, error: 'no assumption review is pending on this card: use `aom design`' };
+        if (pending && !inv.review)
           return {
             accepted: false,
-            error: `the report path '${inv.reportPath}' is not a valid relative path`,
+            error:
+              'this is the assumption review of a design made before its dependencies landed: finish with `aom design confirm` or `aom design revise`',
           };
-        followUps.push(
-          {
-            streamId: streamId.card(cardId),
-            event: {
-              type: 'InvestigationReported',
+        if (early && !inv.assumptions?.length && !inv.noAssumptions)
+          return {
+            accepted: false,
+            error: `${card.ref} is designed before ${unlanded.map((d) => d.ref).join(', ')} landed: record the assumptions you made about them (\`--assumption "<assumption> | <dependency ref> | <what changes if wrong>"\`, repeatable) or say there are none with \`--no-assumptions "<why>"\``,
+          };
+        const review = inv.review;
+        const confirming = pending && review?.decision === 'confirm';
+        if (review) {
+          const revised = [...new Set(review.revised)];
+          if (revised.some((n) => n > total))
+            return {
+              accepted: false,
+              error: `the design has ${total} recorded assumptions: --revised numbers them 1..${total}`,
+            };
+          if (review.decision === 'confirm' && revised.length > 0)
+            return {
+              accepted: false,
+              error:
+                '`aom design confirm` confirms every assumption: use `aom design revise --revised <numbers>`',
+            };
+          if (review.decision === 'revise' && revised.length === 0)
+            return {
+              accepted: false,
+              error: '`aom design revise` needs --revised <numbers> (the assumptions that did not hold)',
+            };
+          followUps.push(
+            mk({
+              type: 'DesignReviewed',
               payload: {
                 cardId,
-                reportPath: inv.reportPath,
-                location: inv.location,
-                summary: inv.summary,
-                ...(inv.commit ? { commit: inv.commit } : {}),
-                investigationOnly: !!card.investigation_only,
+                decision: review.decision,
+                confirmed: total - revised.length,
+                revised: revised.length,
+                note: review.note,
+                agentId: agent.id,
               },
+            }),
+            cardMessage(
+              card,
+              { kind: 'agent', agentId: agent.id },
+              'comment',
+              `Assumption review: ${total - revised.length} confirmed, ${revised.length} revised.${review.note ? `\n\n${review.note}` : ''}`,
+            ),
+          );
+        }
+        if (!confirming) {
+          if (!isValidReportPath(inv.reportPath))
+            return {
+              accepted: false,
+              error: `the report path '${inv.reportPath}' is not a valid relative path`,
+            };
+          followUps.push(
+            {
+              streamId: streamId.card(cardId),
+              event: {
+                type: 'InvestigationReported',
+                payload: {
+                  cardId,
+                  reportPath: inv.reportPath,
+                  location: inv.location,
+                  summary: inv.summary,
+                  ...(inv.commit ? { commit: inv.commit } : {}),
+                  ...(inv.body ? { body: inv.body } : {}),
+                  ...(inv.assumptions?.length ? { assumptions: inv.assumptions } : {}),
+                  investigationOnly: !!card.investigation_only,
+                },
+              },
+              actor,
+              scope,
             },
-            actor,
-            scope,
-          },
-          cardMessage(
-            card,
-            { kind: 'agent', agentId: agent.id },
-            'comment',
-            `Investigation report ${inv.location === 'vault' ? 'in the vault' : 'on the card branch'}: ${inv.reportPath}\n\n${inv.summary}`,
-          ),
-        );
-        acceptMessage = card.investigation_only
-          ? 'Recorded. The BA records the result next. Finish now.'
-          : 'Recorded. The card goes to the builder with your design. Finish now.';
+            cardMessage(
+              card,
+              { kind: 'agent', agentId: agent.id },
+              'comment',
+              `Investigation report ${inv.location === 'vault' ? 'in the vault' : inv.body ? 'carried on the card (committed when Build starts)' : 'on the card branch'}: ${inv.reportPath}\n\n${inv.summary}${inv.assumptions?.length ? `\n\nAssumptions about ${unlanded.map((d) => d.ref).join(', ')}:\n${inv.assumptions.map((a, i) => `${i + 1}. ${a.assumption} (${a.dependency}); if wrong: ${a.ifWrong}`).join('\n')}` : ''}`,
+            ),
+          );
+        }
+        if (early && inv.assumptions?.length) holdDesign = unlanded.map((d) => d.ref);
+        acceptMessage = holdDesign
+          ? 'Recorded. The card waits until its dependencies have landed; you review the assumptions then. Finish now.'
+          : card.investigation_only
+            ? 'Recorded. The BA records the result next. Finish now.'
+            : 'Recorded. The card goes to the builder with your design. Finish now.';
       }
-      main = mk({
-        type: 'StageCompleted',
-        payload: {
-          cardId,
-          fromStage: card.stage,
-          toStage: resolved.toStage,
-          outcome: outcome.id,
-          ...(outcome.rework ? { rework: true } : {}),
-        },
-      });
+      main = holdDesign
+        ? mk({ type: 'DesignHeld', payload: { cardId, dependencies: holdDesign, agentId: agent.id } })
+        : mk({
+            type: 'StageCompleted',
+            payload: {
+              cardId,
+              fromStage: card.stage,
+              toStage: resolved.toStage,
+              outcome: outcome.id,
+              ...(outcome.rework ? { rework: true } : {}),
+            },
+          });
       if (outcome.effect === 'resume_parent' && card.parent_card_id) {
         const parent = await one(tx, 'SELECT * FROM cards WHERE id=$1 FOR UPDATE', [card.parent_card_id]);
         if (parent && parent.status === 'waiting') {

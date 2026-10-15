@@ -36,6 +36,7 @@ import {
   RiskTierDialog,
 } from '../components/CardEdit.tsx';
 import { CardPhase } from '../components/CardPhase.tsx';
+import { DependenciesPanel } from '../components/DependenciesPanel.tsx';
 import { AskDevOpsButton } from '../components/devops/AskDevOps.tsx';
 import { EvidencePanel, TestingLinks } from '../components/EvidencePanel.tsx';
 import { AgentAvatar } from '../components/Face.tsx';
@@ -400,6 +401,7 @@ export function CardDetailView({
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
         <div className="flex min-w-0 flex-col gap-4">
+          <DependenciesPanel card={card} />
           <ReviewRiskPanel risk={card.reviewRisk} />
           {data.qa && <QaPanel cardId={card.id} qa={data.qa} />}
           {data.approval && <ApprovalPanel cardId={card.id} approval={data.approval} />}

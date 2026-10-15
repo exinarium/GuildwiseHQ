@@ -7,6 +7,8 @@ import { resolve as resolvePath } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
   type BaTaskShift,
+  type DesignAssumption,
+  DesignAssumptionSchema,
   type DevopsShift,
   formatCommandLine,
   formatLedgerMatches,
@@ -30,6 +32,7 @@ import {
   type ShiftBrief,
   type ShiftReport,
 } from '@aom/shared';
+import { z } from 'zod';
 import type { ChangeStateLookup } from '../devops/branch-cleanup.ts';
 import { runHygiene } from '../devops/hygiene.ts';
 
@@ -554,6 +557,40 @@ async function orgDesign(ctx: AomContext, p: Parsed): Promise<number> {
   }
 }
 
+/** `--assumption "<assumption> | <dependency ref> | <what changes if wrong>"` (repeatable) or `--assumptions-file <json>`. */
+function designAssumptions(ctx: AomContext, p: Parsed): DesignAssumption[] {
+  const out: DesignAssumption[] = [];
+  for (const raw of many(p, 'assumption')) {
+    const parts = raw.split('|').map((x) => x.trim());
+    if (parts.length < 3 || parts.some((x) => !x))
+      throw new UsageError(
+        `--assumption needs three parts: "<assumption> | <dependency ref> | <what changes if wrong>" (got: ${raw.slice(0, 80)})`,
+      );
+    const [assumption, dependency, ...rest] = parts as [string, string, ...string[]];
+    out.push({ assumption, dependency, ifWrong: rest.join(' | ') });
+  }
+  const file = one(p, 'assumptions-file');
+  if (file) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(ctx.readFile(file));
+    } catch {
+      throw new UsageError(`--assumptions-file ${file} is not valid JSON`);
+    }
+    const r = z.array(DesignAssumptionSchema).safeParse(parsed);
+    if (!r.success)
+      throw new UsageError(
+        '--assumptions-file must be a JSON list of {"assumption", "dependency", "ifWrong"} objects',
+      );
+    out.push(...r.data);
+  }
+  return out;
+}
+
+const DESIGN_USAGE_EXTRA =
+  '\n       a design made before its dependencies landed also needs --assumption "<assumption> | <dependency ref> | <what changes if wrong>" (repeatable) or --no-assumptions "<why>"' +
+  '\n       the assumption review: aom design confirm --summary "<how you checked>"   |   aom design revise --report <path> --summary "..." --revised <numbers> --note "<what changed>"';
+
 /** `aom design` / `aom investigate`: the architect's terminal report (the runner checks and commits the report file). */
 async function investigationReport(
   ctx: AomContext,
@@ -561,12 +598,40 @@ async function investigationReport(
   outcomeId: 'handoff' | 'report',
   verb: 'design' | 'investigate',
 ): Promise<number> {
+  // `aom design confirm|revise`: the review of the assumptions of a design made before its dependencies landed.
+  const sub = verb === 'design' ? p.positionals[0] : undefined;
+  if (sub === 'confirm' || sub === 'revise') {
+    const summary = (textFlag(ctx, p, 'summary', true) as string).trim();
+    const revised = (one(p, 'revised') ?? '')
+      .split(/[\s,]+/)
+      .filter(Boolean)
+      .map(Number);
+    if (revised.some((n) => !Number.isInteger(n) || n < 1))
+      throw new UsageError(
+        '--revised takes the numbers of the assumptions that did not hold, e.g. --revised 1,3',
+      );
+    if (sub === 'revise' && (!one(p, 'report') || revised.length === 0))
+      throw new UsageError(
+        'usage: aom design revise --report <path> --summary "..." --revised <numbers> --note "<what changed and why>"',
+      );
+    return report(
+      ctx,
+      outcome(outcomeId, summary.slice(0, 20000), {
+        reportPath: one(p, 'report')?.trim() || 'existing',
+        summary: summary.slice(0, 2000),
+        location: 'repo',
+        review: { decision: sub, revised, note: (one(p, 'note') ?? '').slice(0, 4000) },
+      }),
+    );
+  }
   const reportFile = one(p, 'report');
   if (!reportFile?.trim())
     throw new UsageError(
-      `usage: aom ${verb} --report <report path> --summary "<${verb === 'design' ? '3-6 lines for the builder' : 'what you found and recommend'}>" | --summary-file <md>`,
+      `usage: aom ${verb} --report <report path> --summary "<${verb === 'design' ? '3-6 lines for the builder' : 'what you found and recommend'}>" | --summary-file <md>${verb === 'design' ? DESIGN_USAGE_EXTRA : ''}`,
     );
   const summary = (textFlag(ctx, p, 'summary', true) as string).trim();
+  const assumptions = verb === 'design' ? designAssumptions(ctx, p) : [];
+  const none = verb === 'design' ? one(p, 'no-assumptions')?.trim() : undefined;
   // `location` is decided by the runner from the brief; the schema needs a value.
   return report(
     ctx,
@@ -574,6 +639,8 @@ async function investigationReport(
       reportPath: reportFile.trim(),
       summary: summary.slice(0, 2000),
       location: 'repo',
+      ...(assumptions.length ? { assumptions } : {}),
+      ...(none ? { noAssumptions: none } : {}),
     }),
   );
 }
