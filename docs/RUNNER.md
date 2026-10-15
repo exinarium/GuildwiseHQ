@@ -1083,6 +1083,13 @@ worktree and no `--resume`**: the working directory is the agent's scratch direc
 (`CEO`), and a review shift has 30 minutes, a wake 15. The runner announces the capability `ceo:1` in `hello`; the server
 sends a CEO shift only to a runner that has it (an older runner is shown "update the runner" on the CEO page).
 
+The CEO shift has a slot of its own (backlog #79): it does not count against `maxConcurrentShifts` (nor do card shifts count it),
+and only one CEO shift runs at a time (a second is refused `busy`: "a CEO shift is already running"). Before #79 a workstation
+running its limit of card shifts refused the CEO's shift every time. Every `shift.rejected` now carries a `detail` and is
+logged as `shift <id> rejected (<reason>): <detail>`; the server keeps the text on the batch (`ceo_batches.error`) and shows it
+on the CEO Overview. The `brief` stays small: counts per reason and the 25 most important wakes when many have piled up, and the
+snapshot is read with `aom ceo snapshot`, not inlined.
+
 **Sandbox profile** (`buildCeoSettings`, the same for the wake shift and the chat): allow `Read`, `Glob`, `Grep`, `Bash(aom:*)`
 and `Edit` in the agent's scratch directory only; deny `WebFetch`, `WebSearch`, every MCP server, `NotebookEdit` and the
 usual git denies; `sandbox.network.allowedDomains` is empty; the organization vault is a read-only folder (`--add-dir`

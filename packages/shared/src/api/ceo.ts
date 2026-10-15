@@ -95,6 +95,8 @@ export interface CeoStatusDto {
   totals: { agreed: number; total: number };
   pendingWakes: number;
   running: { since: string; purpose: string } | null;
+  /** The last CEO shift that failed to run (rejected by the runner, lost, crashed) and why; null once a shift has worked since. */
+  lastError: { at: string; outcome: string; message: string; failures: number } | null;
   openTasks: number;
   spend: { currency: string; todayMicros: number; monthMicros: number; orgMonthMicros: number };
   lastReportAt: string | null;

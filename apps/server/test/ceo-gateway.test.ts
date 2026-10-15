@@ -45,7 +45,7 @@ describe('the gateway accepts only the CEO', () => {
     const start = r.of('shift.start').find((f: any) => f.kind === 'ceo') as any;
     expect(start.worktree).toBeNull();
     expect(start.ceo.purpose).toBe('wake');
-    expect(start.ceo.brief).toContain('Organisation snapshot');
+    expect(start.ceo.brief).toContain('aom ceo snapshot');
     expect(start.ceo.brief).toContain('What you may do');
     expect(start.brief.shift.outcomes.map((o: any) => o.id)).toEqual(['ceo_done']);
   });

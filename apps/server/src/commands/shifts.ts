@@ -24,7 +24,7 @@ import {
 } from '@aom/shared';
 import { loadWorkflowById } from '../catalogue/loader.ts';
 import { applyCeoReport } from '../ceo/report.ts';
-import { endCeoShift } from '../ceo/shift.ts';
+import { endCeoShift, rejectionText } from '../ceo/shift.ts';
 import type { Ctx } from '../context.ts';
 import { exec, one, type Row } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
@@ -804,7 +804,12 @@ export async function applyShiftRejected(
     return;
   }
   if (s.kind === 'ceo') {
-    await ctx.store.append(await endCeoShift(tx, s, 'rejected'), { tx });
+    const error = rejectionText(msg.reason, msg.detail);
+    ctx.log.warn(
+      { shiftId: s.id, reason: msg.reason, detail: msg.detail },
+      'the runner rejected the CEO shift',
+    );
+    await ctx.store.append(await endCeoShift(tx, s, 'rejected', { error, at: ctx.clock.now() }), { tx });
     return;
   }
   const card = s.card_id
@@ -944,6 +949,10 @@ export async function applyShiftEnded(ctx: Ctx, tx: Tx, ws: WsRef, msg: RunnerTo
         usage: msg.usage,
         exitCode: msg.exitCode,
         guardViolations: msg.guardViolations,
+        at: ctx.clock.now(),
+        ...(msg.finalText
+          ? { error: `${msg.outcome}: ${msg.finalText.replace(/\s+/g, ' ').slice(0, 400)}` }
+          : {}),
       }),
       { tx },
     );
