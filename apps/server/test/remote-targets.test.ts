@@ -314,7 +314,7 @@ describe('test accounts', () => {
 });
 
 describe('cards not pinned to this setting', () => {
-  it('a card of a project in remote mode skips Test when the owner opts it out', async () => {
+  it('a card of a project in remote mode runs the plain tester stage when the owner opts it out', async () => {
     await addTarget();
     const target = (await call('GET', targetsUrl())).targets[0];
     await call('PUT', settingsUrl(), { settings: { mode: 'remote', deployTargetId: target.id } });
@@ -322,6 +322,8 @@ describe('cards not pinned to this setting', () => {
     const card = await w.card({ title: 'No tests' });
     await call('PATCH', `/api/cards/${card.id}`, { integrationTests: false });
     await p.toTest('Bea', ['Rex']);
-    expect((await cardRow(card.id)).stage).toBe('finalize');
+    expect((await cardRow(card.id)).stage).toBe('test');
+    // no target in the brief: the tester works as before #59
+    expect((await p.next('Tess')).brief.environment).toBeUndefined();
   });
 });

@@ -4,6 +4,7 @@ import {
   BUILTIN_WORKFLOWS,
   codeWorkflowV3,
   codeWorkflowV4,
+  codeWorkflowV5,
   DomainEventSchema,
   explainIssues,
   fieldCatalogue,
@@ -24,6 +25,7 @@ import {
   validateWorkflow,
   type WorkflowDefinition,
   WorkflowVariantSpecSchema,
+  workflowHasIntegrationGuard,
 } from '../src/index.ts';
 
 const REPO = '5b6d3c0e-9b0c-4d6e-8d2e-1f2a3b4c5d6e';
@@ -126,8 +128,8 @@ describe('code v4', () => {
   it('equals v3 except for the test stage, and leaves v1 to v3 registered', () => {
     expect(validateWorkflow(codeWorkflowV4, BUILTIN_ROLES)).toEqual([]);
     expect(codeWorkflowV4.version).toBe(4);
-    expect(getBuiltinWorkflow('code')?.version).toBe(4);
-    expect(BUILTIN_WORKFLOWS.filter((w) => w.key === 'code').map((w) => w.version)).toEqual([1, 2, 3, 4]);
+    expect(getBuiltinWorkflow('code', 4)).toBe(codeWorkflowV4);
+    expect(BUILTIN_WORKFLOWS.filter((w) => w.key === 'code').map((w) => w.version)).toEqual([1, 2, 3, 4, 5]);
     const strip = (d: WorkflowDefinition) =>
       JSON.stringify(d.stages.filter((s) => s.id !== 'test').map((s) => s));
     expect(strip(codeWorkflowV4)).toBe(strip(codeWorkflowV3));
@@ -161,6 +163,47 @@ describe('code v4', () => {
       success: true,
       data: { integrationTests: false },
     });
+  });
+});
+
+describe('code v5 (plain tester stage when integration tests are off, #71)', () => {
+  it('is v4 without the skip guard on the test stage, and v1 to v4 stay registered', () => {
+    expect(validateWorkflow(codeWorkflowV5, BUILTIN_ROLES)).toEqual([]);
+    expect(codeWorkflowV5.version).toBe(5);
+    expect(getBuiltinWorkflow('code')).toBe(codeWorkflowV5);
+    const strip = (d: WorkflowDefinition) =>
+      JSON.stringify(d.stages.filter((s) => s.id !== 'test').map((s) => s));
+    expect(strip(codeWorkflowV5)).toBe(strip(codeWorkflowV4));
+    const test = getStage(codeWorkflowV5, 'test')!;
+    expect(test.when).toBeUndefined();
+    expect(test).toMatchObject({ environment: 'project', maxShiftMinutes: 120, rebaseBefore: true });
+    expect(stageNeedsEnvironment(test)).toBe(true);
+    expect(workflowHasIntegrationGuard(codeWorkflowV5)).toBe(true);
+    expect(workflowHasIntegrationGuard(codeWorkflowV4)).toBe(true);
+    expect(workflowHasIntegrationGuard(codeWorkflowV3)).toBe(false);
+  });
+
+  it('always goes through the test stage, whatever the integrationTests field says', () => {
+    const to = (card: Record<string, unknown>) =>
+      resolveOutcome(codeWorkflowV5, card, 'review', 'approve').toStage;
+    expect(to({ docsNeeded: false, fields: { integrationTests: false } })).toBe('test');
+    expect(to({ docsNeeded: false, fields: { integrationTests: true } })).toBe('test');
+    expect(to({ docsNeeded: false })).toBe('test');
+    expect(resolveOutcome(codeWorkflowV5, { docsNeeded: true }, 'test', 'pass').toStage).toBe('docs');
+  });
+
+  it('keeps the tester brief rule: the stage is claimed by the tester and variants can extend it', () => {
+    const spec = WorkflowVariantSpecSchema.parse({
+      key: 'code-smoke5',
+      name: 'Code 5 with a smoke test',
+      projectId: U,
+      base: { key: 'code', version: 5 },
+      insertions: [smokeTestInsertion('review')],
+    });
+    const def = materialiseVariant(codeWorkflowV5, spec);
+    expect(getStage(def, 'test')?.claimRole).toBe('tester');
+    const v = validateVariant(spec, codeWorkflowV5, BUILTIN_ROLES, { builtinWorkflowKeys: ['code'] });
+    expect(v.issues.filter((i) => i.severity === 'error')).toEqual([]);
   });
 });
 

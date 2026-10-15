@@ -109,7 +109,7 @@ describe('the design step is off unless the project opts in', () => {
     await team();
     const a = await w.card({ title: 'plain' });
     expect(a).toMatchObject({ designNeeded: false, investigationOnly: false, stage: 'build' });
-    expect(a.workflowVersion).toBe(4);
+    expect(a.workflowVersion).toBe(5);
     // the card asks for it
     const b = await w.card({ title: 'asks', designNeeded: true });
     expect(b).toMatchObject({ designNeeded: true, stage: 'investigate', status: 'queued' });

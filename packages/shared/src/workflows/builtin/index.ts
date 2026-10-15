@@ -3,6 +3,7 @@ import { codeWorkflowV1, codeWorkflowV2 } from './code.ts';
 import { codeBugfixWorkflowV1 } from './code-bugfix.ts';
 import { codeWorkflowV3 } from './code-v3.ts';
 import { codeWorkflowV4 } from './code-v4.ts';
+import { codeWorkflowV5 } from './code-v5.ts';
 import { feedWorkflowV1 } from './feed.ts';
 import { researchWorkflowV1 } from './research.ts';
 
@@ -12,6 +13,7 @@ export {
   codeWorkflowV2,
   codeWorkflowV3,
   codeWorkflowV4,
+  codeWorkflowV5,
   feedWorkflowV1,
   researchWorkflowV1,
 };
@@ -22,6 +24,7 @@ export const BUILTIN_WORKFLOWS: readonly WorkflowDefinition[] = [
   codeWorkflowV2,
   codeWorkflowV3,
   codeWorkflowV4,
+  codeWorkflowV5,
   codeBugfixWorkflowV1,
   researchWorkflowV1,
   feedWorkflowV1,

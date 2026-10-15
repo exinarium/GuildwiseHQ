@@ -282,3 +282,15 @@ Chromium honour the sandbox proxy variables, Node's `fetch` needs `NODE_USE_ENV_
 outside a Claude session; the design note in RUNNER.md proposes forwarding private targets through the Unix-socket forwarders
 instead. Not built: private-address targets, macOS testers, copying a plan between workstations, tunnels.
 
+**#71 (2026-10-15): the Test stage runs even when integration tests are off.** D8's skip guard meant every project with the
+setting off (all of them by default, production included) had no tester at all from `code` v4 on. The owner chose: with
+integration tests off the Test stage runs as the plain tester stage, as before #59 (the tester checks the card's branch
+against its test plan in its worktree with what it can run without a running environment; the pre-test rebase still
+happens); with them on it is D8/D9 as built. Workflow `code` **v5** is v4 without the `when` guard on `test`; the stage keeps
+`environment: 'project'`, and the server applies that only when the card's `integrationTests` is not `false`
+(`stageEnvironmentOf`; the dispatcher's `NEEDS_ENV_SQL` and `envReady` and `shiftEnvironmentFor` already honoured the card
+field). With it off the brief has no `environment`, so the runner opens no forwarders and uses the pre-#59 tester checks. The
+card field is still set from the project at creation. `reviewApprovedPlan` moves a card on any older built-in `code` version
+(v1 to v4) to v5 as review approves it, so a v4 card that has not reached Test no longer skips it; cards already in Test or
+beyond finish on their version. The tester's brief keeps the reviewer's risk analysis for both modes. Tester role v7 makes its
+Environment section conditional and adds the no-environment instructions.

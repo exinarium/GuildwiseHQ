@@ -252,6 +252,7 @@ The details of each done item follow this list, by date.
 - #63: Batch intake: hand the BA a list of tickets. Done 2026-10-14.
 - #58: Start action: run a project branch on a workstation (phase 1: manual start, supervised services, panel, plans recorded). Done 2026-10-14; P2 done (plan replay, service sandbox, Restart / Update & restart, run worktree sweep, services survive a runner restart); P3 and P4 done under #59.
 - #59: Integration and E2E tests per project, run by testers (local test environment per card, remote deploy targets). Done 2026-10-14 (P3 and P4; private-address targets and macOS testers left).
+- #71: Plain tester stage when integration tests are off (workflow `code` v5: the Test stage always runs; the environment only when the card's integration tests are on). Done 2026-10-15.
 - #34: Integrations page (MVP): connect Claude, GitHub, Bitbucket, GitLab, Azure DevOps, Jira and MCP servers from the web. Done 2026-10-14 (phase 2 and 3 leftovers on the item).
 - #60: Claude sign-in from the web (`claude setup-token` driven by the runner; MCP sign-in with paste-back). Done 2026-10-14 (MVP).
 - #64: Manual QA after Finalize, assigned to the person who started the card. Done 2026-10-14.
@@ -263,6 +264,19 @@ The details of each done item follow this list, by date.
 - #17: Stale figures in the user guide: guide seeds fixed, every figure re-captured, figures for the newer features, guide.html and PDF rebuilt. Done 2026-10-14.
 
 ## 2026-10-15 (done)
+
+### 71. Plain tester stage when integration tests are off (built)
+
+**Owner decision (2026-10-15).** Since #59 the `test` stage of `code` v4 had a skip guard on `integrationTests`, so projects with
+integration tests off (all of them by default, production P4/P5 included) had no tester at all. The owner chose: when integration
+tests are off the Test stage still runs as the plain tester stage, as before #59; when they are on it behaves as #59 built it.
+
+Built: workflow `code` v5 (v4 without the skip guard; v1 to v4 stay registered). The stage keeps `environment: 'project'`, and the
+server applies it only when the card's `integrationTests` is not false (`stageEnvironmentOf`; provisioning, the candidate
+`envReady` clause, the shift brief environment and the suite gate), so a card with it off is dispatched with no environment and no
+forwarders. Cards on v1 to v4 move to v5 as review approves them; cards in Test or beyond are untouched. Tester role v7: the
+Environment section is conditional and the plain instructions apply without one; the reviewer risk analysis still reaches the
+tester. `simulation-host.test.ts` expects `build, review, test` again. Docs: user guide 4.23, help, What's new, design note.
 
 ### 69. Run a branch: build guide above the repositories, environment-aware DevOps, failed environments stay visible (built)
 

@@ -64,13 +64,19 @@ export async function currentTestEnv(db: Queryable, cardId: string): Promise<Row
   );
 }
 
+/**
+ * Does the card's current stage run against the project's environment? The stage declares it (`environment: 'project'`),
+ * and it applies only to a card whose `integrationTests` is on (code v5, backlog #71): with it off the stage is the plain
+ * tester stage, with no environment, forwarders or suites. A card that never had the field counts as on.
+ */
 export async function stageEnvironmentOf(db: Queryable, card: Row): Promise<'none' | 'project'> {
   const st = await one(
     db,
     'SELECT environment FROM workflow_stages WHERE workflow_version_id=$1 AND stage_id=$2',
     [card.workflow_version_id, card.stage],
   );
-  return st?.environment === 'project' ? 'project' : 'none';
+  if (st?.environment !== 'project') return 'none';
+  return (card.fields as Record<string, unknown> | null)?.integrationTests === false ? 'none' : 'project';
 }
 
 /** The deployed target a tester tests in remote mode (opted in, not production), or nothing when the setting is not usable. */
@@ -879,10 +885,10 @@ export interface ReviewApprovedPlan {
 }
 
 /**
- * Where an approved card goes next when the integration test guard applies (docs/design/run-and-integration-tests.md D8).
- * A card on `code` v1 to v3 moves to the newest built-in version as it leaves Review (the same stages up to Test; it
- * gets the guard and the environment) and a card whose `integrationTests` was never set takes the project's setting
- * now. A card already in Test or beyond is never touched. Null: nothing changes.
+ * Where an approved card goes next (docs/design/run-and-integration-tests.md D8, backlog #71). A card on a built-in
+ * `code` version older than the newest moves to it as it leaves Review (the same stages up to Test; v5 always runs the
+ * Test stage and gives it the environment when the card's `integrationTests` is on) and a card whose `integrationTests`
+ * was never set takes the project's setting now. A card already in Test or beyond is never touched. Null: nothing changes.
  */
 export async function reviewApprovedPlan(
   tx: Queryable,
@@ -892,8 +898,7 @@ export async function reviewApprovedPlan(
 ): Promise<ReviewApprovedPlan | null> {
   let def = wf.definition;
   let upgraded: string | undefined;
-  const test = getStage(def, 'test');
-  if (def.builtIn && def.key === 'code' && test && test.environment !== 'project') {
+  if (def.builtIn && def.key === 'code' && getStage(def, 'test')) {
     const latest = await resolveWorkflow(tx, card.org_id, 'code', card.project_id);
     if (
       latest &&

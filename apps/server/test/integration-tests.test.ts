@@ -3,7 +3,16 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { expireRuns } from '../src/commands/runs.ts';
 import { closeAdminPool, q as rawQ } from './helpers/db.ts';
 import type { FakeRunner } from './helpers/fake-runner.ts';
-import { approve, cardRow, handoff, hireTeam, pipeline, testFail, testPass } from './helpers/pipeline.ts';
+import {
+  approve,
+  cardRow,
+  DIFF_SMALL,
+  handoff,
+  hireTeam,
+  pipeline,
+  testFail,
+  testPass,
+} from './helpers/pipeline.ts';
 import { createWorld, ok, until, type World } from './helpers/world.ts';
 
 const q = async (sql: string, params?: unknown[]): Promise<any[]> => (await rawQ(sql, params)) as any[];
@@ -189,16 +198,38 @@ describe('the card follows the setting', () => {
     expect((await cardRow(off.id)).fields.integrationTests).toBe(true);
   });
 
-  it('skips the Test stage when integration tests are off for the card', async () => {
+  it('runs the plain tester stage when integration tests are off for the card (code v5, #71)', async () => {
     await hireTeam(w);
     const card = await w.card({ title: 'No integration tests' });
     expect(card.fields.integrationTests).toBe(false);
+    const v5 = (
+      await q(`SELECT id FROM workflow_versions WHERE key='code' AND version=5 AND org_id IS NULL`)
+    )[0];
+    expect((await cardRow(card.id)).workflow_version_id).toBe(v5.id);
     await p.toTest('Bea', ['Rex']);
-    // review approval goes past Test (docs needed? no) to Finalize
-    expect((await cardRow(card.id)).stage).toBe('finalize');
+    // review approval lands in Test now, whatever the setting
+    expect((await cardRow(card.id)).stage).toBe('test');
+    // no environment is provisioned and nothing waits for one: a tester shift starts without an Environment section
+    const before = startFrames().length;
+    await dispatcher().run();
+    expect(await envOf(card.id)).toBeUndefined();
+    expect(startFrames().length).toBe(before);
+    const start = await p.next('Tess');
+    expect(start.brief.environment).toBeUndefined();
+    await p.startShift(r, start);
+    // the suites do not apply: a pass is accepted without any suite result
+    const res = await p.report(r, start.shiftId, testPass());
+    expect(res.accepted).toBe(true);
+    r.ended(start.shiftId, 'reported');
+    await until(
+      async () => (await cardRow(card.id)).stage === 'finalize',
+      3000,
+      'the card to reach Finalize',
+    );
+    expect(await envOf(card.id)).toBeUndefined();
   });
 
-  it('moves a card started on code v3 to v4 when it leaves Review, with the project setting applied', async () => {
+  it('moves a card started on code v3 to v5 when it leaves Review, with the project setting applied', async () => {
     await setSettings();
     await hireTeam(w);
     const card = await w.card({ title: 'In flight' });
@@ -214,22 +245,42 @@ describe('the card follows the setting', () => {
     const row = await cardRow(card.id);
     expect(row.stage).toBe('test');
     expect(row.fields.integrationTests).toBe(true);
+    const v5 = (
+      await q(`SELECT id FROM workflow_versions WHERE key='code' AND version=5 AND org_id IS NULL`)
+    )[0];
+    expect(row.workflow_version_id).toBe(v5.id);
+  });
+
+  it('moves an in-flight card on code v4 to v5 at review approval: it no longer skips Test with the setting off', async () => {
+    await hireTeam(w);
+    const card = await w.card({ title: 'In flight on v4' });
     const v4 = (
       await q(`SELECT id FROM workflow_versions WHERE key='code' AND version=4 AND org_id IS NULL`)
     )[0];
-    expect(row.workflow_version_id).toBe(v4.id);
+    const v5 = (
+      await q(`SELECT id FROM workflow_versions WHERE key='code' AND version=5 AND org_id IS NULL`)
+    )[0];
+    await q(`UPDATE cards SET workflow_version_id=$2 WHERE id=$1`, [card.id, v4.id]);
+    await p.run('Bea', handoff(), DIFF_SMALL);
+    expect((await cardRow(card.id)).workflow_version_id).toBe(v4.id); // still v4 while in build and review
+    await p.run('Rex', approve());
+    const row = await cardRow(card.id);
+    expect(row.stage).toBe('test'); // v4 would have skipped to Finalize
+    expect(row.workflow_version_id).toBe(v5.id);
+    expect(row.fields.integrationTests).toBe(false); // its own flag is kept
   });
 
   it('leaves a card that already reached Test on its version', async () => {
     await hireTeam(w);
     const card = await w.card({ title: 'Already testing' });
-    const v3 = (
-      await q(`SELECT id FROM workflow_versions WHERE key='code' AND version=3 AND org_id IS NULL`)
-    )[0];
-    await q(`UPDATE cards SET workflow_version_id=$2 WHERE id=$1`, [card.id, v3.id]);
     await p.toTest('Bea', ['Rex']);
-    // project is off, but v3 always tests: the card stays on v3 and is tested as before
-    expect(await cardRow(card.id)).toMatchObject({ stage: 'finalize' });
+    const v4 = (
+      await q(`SELECT id FROM workflow_versions WHERE key='code' AND version=4 AND org_id IS NULL`)
+    )[0];
+    expect((await cardRow(card.id)).stage).toBe('test');
+    await q(`UPDATE cards SET workflow_version_id=$2 WHERE id=$1`, [card.id, v4.id]);
+    await p.run('Tess', testPass());
+    expect(await cardRow(card.id)).toMatchObject({ stage: 'finalize', workflow_version_id: v4.id });
   });
 });
 
@@ -334,7 +385,9 @@ describe('provisioning a test environment (local mode)', () => {
     await p.toTest('Bea', ['Rex']);
     await dispatcher().run();
     expect(await envOf(card.id)).toBeUndefined();
-    expect((await cardRow(card.id)).stage).toBe('finalize');
+    // the stage still runs, as the plain tester stage (v5)
+    expect((await cardRow(card.id)).stage).toBe('test');
+    expect((await p.next('Tess')).brief.environment).toBeUndefined();
   });
 
   it('a runner that refuses the rebase conflict sends the card to Rework with the files', async () => {

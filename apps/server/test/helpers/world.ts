@@ -99,11 +99,12 @@ export async function createWorld(
      */
     manualQa?: boolean;
     /**
-     * The tester's `test` stage is skipped unless the project switched integration tests on (code v4, backlog #59). The
-     * suites that drive a card through Test with the plain test plan run with the setting on (mode `local`): the fake
-     * runner of those suites does not announce `runs:3`, so nothing is provisioned and the tester works as before.
-     * `'off'` keeps the production default (the stage is skipped); `'local'` leaves it to the test, which sets it up
-     * through the API (its runner announces `runs:3`).
+     * The project's integration test setting (backlog #59, #71). Since code v5 the tester's `test` stage always runs; with
+     * the setting off it is the plain tester stage (no environment). The suites that drive a card through Test with the
+     * plain test plan run with the setting on (mode `local`): the fake runner of those suites does not announce `runs:3`,
+     * so nothing is provisioned and the tester works as before. `'off'` keeps the production default (plain tester
+     * stage, cards get `integrationTests: false`); `'local'` leaves it to the test, which sets it up through the API
+     * (its runner announces `runs:3`).
      */
     integrationTests?: 'plain' | 'off' | 'local';
   } = {},
