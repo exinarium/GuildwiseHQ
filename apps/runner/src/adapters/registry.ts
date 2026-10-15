@@ -2,6 +2,7 @@ import type { RunnerConfig } from '../config.ts';
 import type { RunnerPaths } from '../paths.ts';
 import type { ClaudeAuthMonitor } from './claude-auth.ts';
 import { ClaudeCodeAdapter } from './claude-code.ts';
+import type { ClaudeUsageMonitor } from './claude-usage-limit.ts';
 import { MockAdapter } from './mock.ts';
 import type { RuntimeAdapter } from './types.ts';
 
@@ -11,6 +12,7 @@ export function buildAdapters(
   paths: RunnerPaths,
   auth?: ClaudeAuthMonitor,
   credentials?: NonNullable<ConstructorParameters<typeof ClaudeCodeAdapter>[2]>['credentials'],
+  usage?: ClaudeUsageMonitor,
 ): Map<string, RuntimeAdapter> {
   const adapters = new Map<string, RuntimeAdapter>();
   adapters.set(
@@ -18,6 +20,7 @@ export function buildAdapters(
     new ClaudeCodeAdapter(config.runtimes['claude-code'], paths, {
       ...(auth ? { auth } : {}),
       ...(credentials ? { credentials } : {}),
+      ...(usage ? { usage } : {}),
     }),
   );
   if (config.runtimes.mock?.enabled) adapters.set('mock', new MockAdapter(config.runtimes.mock, paths));

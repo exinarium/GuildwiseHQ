@@ -128,12 +128,18 @@ export function registerCeoWakes(ctx: Ctx): () => void {
         if (NO_WAKE_SUBKINDS.has(sub) || p.kind === 'rating') return;
         if (p.askedBy?.agentId === ceo.agentId) return;
         const auth = sub === 'claude_auth_expired' || sub === 'mcp_needs_sign_in';
+        // A reached model usage limit is information (work resumes by itself), never an incident.
+        const info = sub === 'claude_usage_limit';
         await enqueueWake(
           ctx.pool,
           orgId,
           {
-            reason: auth ? `sign_in:${sub}` : 'desk_item',
-            urgency: auth || p.blocking || p.pinned || p.kind !== 'alert' ? 'urgent' : 'normal',
+            reason: auth ? `sign_in:${sub}` : info ? `info:${sub}` : 'desk_item',
+            urgency: info
+              ? 'normal'
+              : auth || p.blocking || p.pinned || p.kind !== 'alert'
+                ? 'urgent'
+                : 'normal',
             subjectKind: 'desk',
             subjectId: p.deskItemId,
             subjectLabel: p.title,

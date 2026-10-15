@@ -41,6 +41,7 @@ import {
   uuidv7,
   type VaultWriteCommand,
 } from '@aom/shared';
+import { formatLimitTime } from '../adapters/claude-usage-limit.ts';
 import type { RuntimeAdapter, RuntimeEvent, RuntimeSession } from '../adapters/types.ts';
 import {
   attachFileFromAgent,
@@ -515,11 +516,13 @@ export class ShiftSupervisor {
       | 'rebase_conflict'
       | 'environment_not_ready'
       | 'auth_expired'
+      | 'usage_limited'
       | 'internal',
     detail?: string,
     conflictedFiles?: string[],
     environment?: { problem: string; detail?: string },
     branchProblem?: { base: string; defaultBranch?: string; branches: string[] },
+    limitedUntil?: string,
   ): void {
     this.deps.transport.send('shift.rejected', {
       shiftId,
@@ -528,6 +531,7 @@ export class ShiftSupervisor {
       ...(conflictedFiles ? { conflictedFiles } : {}),
       ...(environment ? { environment } : {}),
       ...(branchProblem ? { branchProblem } : {}),
+      ...(limitedUntil ? { limitedUntil } : {}),
     });
   }
 
@@ -977,6 +981,26 @@ export class ShiftSupervisor {
       );
       await this.deps.beforeAuthReject?.().catch(() => undefined);
       this.reject(msg.shiftId, 'auth_expired', 'The Claude login on this workstation has expired.');
+      return;
+    }
+
+    // The subscription's usage limit was hit: likewise put back without penalty; the runtime is reported limited until
+    // the limit resets, so the server dispatches nothing here meanwhile (backlog #73).
+    if (exit.usageLimit && s.reportState === 'none' && !s.stopReason) {
+      const until = new Date(exit.usageLimit.until);
+      this.log.warn(
+        `shift ${msg.shiftId}: the ${msg.agent.runtime} usage limit was reached (resets ${until.toISOString()}); the shift is put back`,
+      );
+      await this.deps.beforeAuthReject?.().catch(() => undefined);
+      this.reject(
+        msg.shiftId,
+        'usage_limited',
+        formatLimitTime(until),
+        undefined,
+        undefined,
+        undefined,
+        until.toISOString(),
+      );
       return;
     }
 

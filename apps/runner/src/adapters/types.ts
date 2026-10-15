@@ -12,6 +12,11 @@ export interface RuntimeCapabilities {
   sandboxReason?: string;
   /** The runtime's login: `expired` makes it unavailable until it works again (absent: the runtime has no login). */
   auth?: 'ok' | 'expired';
+  /** The subscription's usage limit: `limited` makes the runtime unavailable until `limitedUntil` (ISO) passes and a probe works. */
+  usage?: 'ok' | 'limited';
+  limitedUntil?: string;
+  /** `limitedUntil` as the owner of this machine reads it ("18:00 (Africa/Johannesburg)"). */
+  limitedLabel?: string;
 }
 
 export interface ShiftStartInput {
@@ -68,6 +73,8 @@ export type RuntimeEvent =
       startFailed?: boolean;
       /** The runtime's login does not work (expired / not signed in): the shift is put back, not counted as a crash. */
       authFailed?: boolean;
+      /** The subscription's usage limit was hit; it resets at `until` (ISO). The shift is put back, not counted as a crash. */
+      usageLimit?: { until: string };
     };
 
 export interface RuntimeSession {

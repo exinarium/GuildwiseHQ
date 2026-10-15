@@ -14,6 +14,7 @@ import { RepoSyncLine } from '../components/RepoSync.tsx';
 import { RunList } from '../components/runs/RunPanel.tsx';
 import { SandboxUnavailable, SandboxWarning } from '../components/SandboxWarning.tsx';
 import { ShiftClock, ShiftStopControls } from '../components/ShiftStop.tsx';
+import { formatUntil } from '../components/UsageLimitBanner.tsx';
 import {
   Badge,
   Button,
@@ -302,6 +303,9 @@ export function WorkstationCard({
                     <Badge key={r.id} tone={r.available ? 'green' : 'neutral'}>
                       {r.id} {r.version}
                       {r.auth === 'expired' ? ' (login expired)' : ''}
+                      {r.usage === 'limited' && r.limitedUntil
+                        ? ` (usage limit until ${formatUntil(r.limitedUntil)})`
+                        : ''}
                     </Badge>
                   ))}
                 </p>

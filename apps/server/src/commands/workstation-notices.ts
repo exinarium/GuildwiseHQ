@@ -164,6 +164,64 @@ export async function syncClaudeAuthNotice(
   await sendMails(ctx, ws, mails);
 }
 
+export const claudeUsageText = (workstation: string, resumes: string): { title: string; body: string } => ({
+  title: `Claude usage limit reached on ${workstation}`,
+  body: `The Claude subscription on ${workstation} has hit its usage limit; work resumes at ${resumes}. Work waiting for ${workstation} is paused, not failed: cards stay in the queue without penalty and the project continues by itself once the limit resets. Nothing needs doing.`,
+});
+
+/** Formats a reset time for a notice when the runner sent none of its own: UTC. */
+const utcLabel = (iso: string): string => `${new Date(iso).toISOString().slice(11, 16)} UTC`;
+
+/**
+ * After a runtimes report or hello: raise or clear the "Claude usage limit reached" notice of the workstation (backlog #73).
+ * One notice per workstation and organization, mailed once, closed when the runtime is no longer limited.
+ */
+export async function syncClaudeUsageNotice(
+  ctx: Ctx,
+  ws: WsRef,
+  runtimes: Array<{
+    id: string;
+    usage?: string | undefined;
+    limitedUntil?: string | undefined;
+    limitedLabel?: string | undefined;
+  }>,
+): Promise<void> {
+  const lim = runtimes.find(
+    (r) =>
+      r.id === 'claude-code' &&
+      r.usage === 'limited' &&
+      r.limitedUntil &&
+      new Date(r.limitedUntil).getTime() > ctx.clock.now().getTime(),
+  );
+  const w = await one<{ name: string }>(ctx.pool, 'SELECT name FROM workstations WHERE id=$1', [ws.id]);
+  if (!w) return;
+  const key = `claude_usage:${ws.id}`;
+  const mails = await withAppendTx(ctx.pool, async (tx) => {
+    const text = lim?.limitedUntil
+      ? claudeUsageText(w.name, lim.limitedLabel ?? utcLabel(lim.limitedUntil))
+      : undefined;
+    return reconcile(
+      ctx,
+      tx,
+      ws,
+      DESK_SUBKIND.claudeUsageLimit,
+      key,
+      text
+        ? [
+            {
+              key,
+              subkind: DESK_SUBKIND.claudeUsageLimit,
+              ...text,
+              orgIds: await agentOrgs(tx, ws.id),
+              mail: { subject: text.title, text: `${text.body}\n` },
+            },
+          ]
+        : [],
+    );
+  });
+  await sendMails(ctx, ws, mails);
+}
+
 /** After an `mcp.servers` report: a notice per granted server of the workstation that needs a sign-in. */
 export async function syncMcpSignInNotices(ctx: Ctx, ws: WsRef, report: unknown): Promise<void> {
   const servers = ((report as { servers?: unknown[] } | null)?.servers ?? []).flatMap((s) => {

@@ -344,6 +344,7 @@ Day-to-day problems: offline workstations, missing handoffs, vault conflicts, mi
 - Runner update rolled back: The runner tried to update to a new version but rolled back automatically because the new version did not connect within a few minutes. The label on the runner shows Update rolled back.
 - Working branch could not be created or pushed: A card shows Last attempt failed: working branch 'X' could not be created or pushed or names a reason like "protected repository".
 - An agent says it cannot read a repository: In a chat or on a card, the agent says it cannot find or read a code repository (for example to compare two or look up how something is used elsewhere).
+- A project says "Paused until ...": The Claude subscription behind the project reached its session or weekly usage limit. Nothing is broken: cards wait in their queue without penalty and work continues by itself when the limit resets (shown on the board and the project page, in your time zone).…
 
 ### Plans and billing
 Plans and limits, the 7-day free trial, cards and invoices, changing plan, Business add-ons, cancelling and what happens when a payment fails.

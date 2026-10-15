@@ -848,9 +848,11 @@ export async function applyShiftRejected(
   if (noIdentity) extra.push(...(await noCommitIdentityNotice(tx, ws, card)));
   const text = noIdentity
     ? NO_COMMIT_IDENTITY_MESSAGE
-    : msg.reason === 'auth_expired'
-      ? 'The Claude login on this workstation has expired, so the shift could not run. The card is back in the queue without penalty and resumes once the login works again.'
-      : `Shift rejected by the runner (${msg.reason}${msg.detail ? `: ${msg.detail}` : ''}); the card is back in the queue.`;
+    : msg.reason === 'usage_limited'
+      ? `Paused: the model usage limit resets at ${(msg.detail ?? '').trim().slice(0, 100) || (msg.limitedUntil ? `${new Date(msg.limitedUntil).toISOString().slice(11, 16)} UTC` : 'a later time')}. The card is back in the queue without penalty and work resumes by itself.`
+      : msg.reason === 'auth_expired'
+        ? 'The Claude login on this workstation has expired, so the shift could not run. The card is back in the queue without penalty and resumes once the login works again.'
+        : `Shift rejected by the runner (${msg.reason}${msg.detail ? `: ${msg.detail}` : ''}); the card is back in the queue.`;
   await ctx.store.append(
     await releaseClaimEvents(tx, card, 'runner_rejected', text, 'rejected', extra, rejection),
     { tx },

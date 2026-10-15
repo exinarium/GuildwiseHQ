@@ -20,6 +20,7 @@ import {
 } from '@aom/shared';
 import { ClaudeAuthMonitor, probeClaudeLogin } from './adapters/claude-auth.ts';
 import { ClaudeCodeAdapter, realClaudeBlocked } from './adapters/claude-code.ts';
+import { ClaudeUsageMonitor, formatLimitTime } from './adapters/claude-usage-limit.ts';
 import { buildAdapters } from './adapters/registry.ts';
 import type { RuntimeAdapter } from './adapters/types.ts';
 import { ServerHttp } from './attachments/index.ts';
@@ -102,6 +103,8 @@ export interface RunnerOptions {
   idle?: SupervisorDeps['idle'];
   /** How often an expired Claude login is probed (default 3 minutes). */
   authProbeMs?: number;
+  /** Minimum time between two usage-limit probes (default 3 minutes). */
+  usageProbeMs?: number;
   /** Test seam: the sign-in state per MCP server key (default: read from the Claude credentials file). */
   mcpAuth?: () => (server: PluginMcpServer) => McpAuthState;
   /** The once-a-minute tick (MCP sign-in state, login probe); tests shorten it. */
@@ -213,6 +216,9 @@ export class Runner {
   /** The Claude login of this machine: expired pauses the runtime (reported unavailable) until a probe succeeds. */
   readonly claudeAuth = new ClaudeAuthMonitor();
   private lastAuthProbe = 0;
+  /** The Claude subscription's usage limit: limited pauses the runtime until it resets and a probe works (backlog #73). */
+  readonly claudeUsage = new ClaudeUsageMonitor();
+  private lastUsageProbe = 0;
   private maxConcurrent: number;
   private readonly rpcs = new Map<string, (r: IpcRpcResponse) => void>();
   private readonly sweepQueries = new Map<string, (live: string[]) => void>();
@@ -292,15 +298,21 @@ export class Runner {
     this.claudeStore = new ClaudeCredentialStore(claudeFile(this.paths.secrets));
     this.adapters =
       opts.adapters ??
-      buildAdapters(opts.config, this.paths, this.claudeAuth, () => {
-        // secrets/claude.json over config.json, read at every session start: a new token needs no restart
-        const c = resolveClaudeCredential(this.claudeStore, this.freshConfig().runtimes['claude-code']);
-        return {
-          authMode: c.authMode,
-          ...(c.oauthToken ? { oauthToken: c.oauthToken } : {}),
-          ...(c.apiKey ? { apiKey: c.apiKey } : {}),
-        };
-      });
+      buildAdapters(
+        opts.config,
+        this.paths,
+        this.claudeAuth,
+        () => {
+          // secrets/claude.json over config.json, read at every session start: a new token needs no restart
+          const c = resolveClaudeCredential(this.claudeStore, this.freshConfig().runtimes['claude-code']);
+          return {
+            authMode: c.authMode,
+            ...(c.oauthToken ? { oauthToken: c.oauthToken } : {}),
+            ...(c.apiKey ? { apiKey: c.apiKey } : {}),
+          };
+        },
+        this.claudeUsage,
+      );
     this.integrations = new IntegrationService({
       workstationId: opts.config.workstationId,
       keys: this.keys,
@@ -316,6 +328,14 @@ export class Runner {
         state === 'expired'
           ? 'the Claude login does not work: work on this workstation is paused until you run `claude` and `/login` here'
           : 'the Claude login works again: work resumes',
+      );
+      void this.reportRuntimes();
+    });
+    this.claudeUsage.onChange((state) => {
+      this.log.warn(
+        state === 'limited' && this.claudeUsage.limitedUntil
+          ? `the Claude usage limit was reached: work on this workstation is paused until ${formatLimitTime(new Date(this.claudeUsage.limitedUntil))}`
+          : 'the Claude usage limit is gone: work resumes',
       );
       void this.reportRuntimes();
     });
@@ -635,6 +655,7 @@ export class Runner {
     const m = setInterval(() => {
       this.reportMcpServers(false);
       void this.probeAuth();
+      void this.probeUsage();
     }, this.opts.minuteMs ?? 60_000);
     m.unref();
     this.timers.push(m);
@@ -699,6 +720,9 @@ export class Runner {
         capabilities: c.capabilities,
         ...(c.sandbox ? { sandbox: c.sandbox, sandboxReason: c.sandboxReason } : {}),
         ...(c.auth ? { auth: c.auth } : {}),
+        ...(c.usage ? { usage: c.usage } : {}),
+        ...(c.limitedUntil ? { limitedUntil: c.limitedUntil } : {}),
+        ...(c.limitedLabel ? { limitedLabel: c.limitedLabel } : {}),
       });
     }
     return out;
@@ -726,6 +750,20 @@ export class Runner {
     this.lastAuthProbe = Date.now();
     const a = this.adapters.get('claude-code');
     if (a instanceof ClaudeCodeAdapter) await a.probeLogin();
+  }
+
+  /**
+   * While the usage limit is in force: once its reset time has passed, a cheap probe (one minimal call); when it works
+   * the runtime is reported available again and the server resumes dispatching and closes its notice; when the limit is
+   * still there the new reset time extends the pause. A probe that could not tell is retried after 3 minutes.
+   */
+  private async probeUsage(): Promise<void> {
+    const until = this.claudeUsage.limitedUntilMs;
+    if (this.claudeUsage.state !== 'limited' || until === undefined || Date.now() < until) return;
+    if (Date.now() - this.lastUsageProbe < (this.opts.usageProbeMs ?? 180_000)) return;
+    this.lastUsageProbe = Date.now();
+    const a = this.adapters.get('claude-code');
+    if (a instanceof ClaudeCodeAdapter) await a.probeUsage();
   }
 
   /** The instructions note for granted plugin MCP servers that are not signed in on this workstation. */

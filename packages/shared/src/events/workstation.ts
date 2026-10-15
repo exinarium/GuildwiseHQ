@@ -30,6 +30,8 @@ export const workstationEvents = [
           available: z.boolean(),
           sandbox: z.string().optional(),
           auth: z.string().optional(),
+          usage: z.string().optional(),
+          limitedUntil: z.string().optional(),
         }),
       ),
     }),

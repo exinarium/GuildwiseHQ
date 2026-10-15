@@ -24,6 +24,7 @@ import {
   type StoredWorkstationRepo,
   workstationRepoCandidates,
 } from '../runner-gateway/workstation-repos.ts';
+import { usageLimitsFor } from './usage-limit.ts';
 
 /** The department of a project's workflow (its type): the owner's own workflow first, else the built-in. */
 export const PROJECT_DEPARTMENT_SQL = `(SELECT w.department FROM workflow_versions w
@@ -99,7 +100,12 @@ export async function listProjects(
     )
   ).filter((p) => !department || p.department === department);
   const budgets = await budgetsFor(ctx, userId, r);
-  return r.map((p) => ({ ...toProjectDto(p, p.my_role), budget: budgets.get(p.id) as BudgetDto }));
+  const limits = await usageLimitsFor(ctx, r);
+  return r.map((p) => ({
+    ...toProjectDto(p, p.my_role),
+    budget: budgets.get(p.id) as BudgetDto,
+    ...(limits.has(p.id) ? { usageLimit: limits.get(p.id) } : {}),
+  }));
 }
 
 /** The budget block (state, amounts for org members, the reset time) of each project row, one query per organization. */
@@ -208,11 +214,13 @@ export async function getProjectDetail(
       WHERE e.type = 'ProjectMergePolicyChanged' AND e.project_id = $1 ORDER BY e.seq DESC LIMIT 20`,
     [projectId],
   );
+  const limit = (await usageLimitsFor(ctx, [p])).get(p.id);
   return {
     project: {
       ...toProjectDto(p, p.my_role),
       pendingConversion: await pendingConversionOf(ctx.pool, p),
       budget: (await budgetsFor(ctx, userId, [p])).get(p.id) as BudgetDto,
+      ...(limit ? { usageLimit: limit } : {}),
     },
     repos: repos.map((r) => ({
       id: r.id,
