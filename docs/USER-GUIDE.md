@@ -58,6 +58,7 @@ This guide is for people who have never worked with AI agents before. You do not
   - [4.21 Run a branch to try it](#421-run-a-branch-to-try-it)
   - [4.22 Your CEO](#422-your-ceo)
   - [4.23 Integration tests run by the tester](#423-integration-tests-run-by-the-tester)
+  - [4.24 When the Claude usage limit is reached](#424-when-the-claude-usage-limit-is-reached)
 - [5. For Members](#5-for-members)
   - [5.1 What you can do](#51-what-you-can-do)
   - [5.2 Your first day](#52-your-first-day)
@@ -95,6 +96,7 @@ This guide is for people who have never worked with AI agents before. You do not
 - [Appendix B. More documentation](#appendix-b-more-documentation)
 
 <!-- /toc -->
+
 
 
 
