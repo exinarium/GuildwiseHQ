@@ -121,11 +121,16 @@ describe('working branch sync line', () => {
     );
   });
 
-  it('names diverged and uncommitted changes, and is silent when in step', () => {
+  it('names diverged and uncommitted changes, and says so when in step', () => {
     expect(syncText(sync({ state: 'diverged', ahead: 2, behind: 1 }) as never)?.text).toMatch(/diverged/);
     expect(syncText(sync({ state: 'dirty', dirty: true }) as never)?.text).toMatch(/uncommitted changes/);
-    expect(syncText(sync({ state: 'synced', behind: 0 }) as never)).toBeNull();
-    expect(syncText(sync({ state: 'updated', behind: 0 }) as never)).toBeNull();
+    expect(syncText(sync({ state: 'synced', behind: 0, dirty: false }) as never)).toEqual({
+      text: 'pieter/dev is in sync with origin',
+      tone: 'success',
+    });
+    expect(syncText(sync({ state: 'updated', behind: 0, dirty: true }) as never)?.text).toMatch(
+      /in sync with origin \(your checkout has uncommitted changes\)/,
+    );
   });
 
   it('hides Sync now where the user may not sync', () => {

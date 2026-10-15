@@ -19,14 +19,19 @@ export function useSyncNow() {
   });
 }
 
-/** What to tell the user about a working branch (null: nothing worth saying, it is in step). */
-export function syncText(s: RepoSyncDto): { text: string; tone: 'warning' | 'danger' | 'neutral' } | null {
+/** What to tell the user about a working branch: always a line once it has been checked, so "in step" is visible too. */
+export function syncText(
+  s: RepoSyncDto,
+): { text: string; tone: 'success' | 'warning' | 'danger' | 'neutral' } | null {
   const b = s.workingBranch;
   const n = (k: number, word: string) => `${k} ${word}${k === 1 ? '' : 's'}`;
   switch (s.state) {
     case 'synced':
     case 'updated':
-      return null;
+      return {
+        text: `${b} is in sync with origin${s.dirty ? ' (your checkout has uncommitted changes)' : ''}`,
+        tone: 'success',
+      };
     case 'behind':
       return { text: `${b} is ${n(s.behind, 'commit')} behind origin`, tone: 'warning' };
     case 'busy':
@@ -54,8 +59,9 @@ export function syncText(s: RepoSyncDto): { text: string; tone: 'warning' | 'dan
 }
 
 /**
- * One line under a repository: "pieter/dev is 3 behind origin" with a "Sync now" button (only where the user may
- * sync: their own workstation). Nothing is shown while the branch is in step or has not been checked.
+ * One line under a repository: "pieter/dev is in sync with origin" or "pieter/dev is 3 behind origin", when it was last
+ * checked, and a "Sync now" button (only where the user may sync: their own workstation). Nothing is shown until the
+ * runner has checked the branch once.
  */
 export function RepoSyncLine({
   sync,
@@ -79,10 +85,15 @@ export function RepoSyncLine({
   const canFix = sync.state !== 'ahead';
   return (
     <p className="mt-0.5 flex flex-wrap items-center gap-2 text-xs" data-testid="repo-sync">
-      <Badge tone={t.tone === 'neutral' ? 'neutral' : t.tone}>
+      <Badge tone={t.tone}>
         {where ? `${where}: ` : ''}
         {t.text}
       </Badge>
+      {sync.checkedAt && (
+        <span className="text-muted" data-testid="repo-sync-checked">
+          checked {new Date(sync.checkedAt).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}
+        </span>
+      )}
       {canSync && canFix && (
         <Button
           size="sm"
