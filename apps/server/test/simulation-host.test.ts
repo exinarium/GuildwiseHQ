@@ -51,7 +51,7 @@ afterAll(async () => {
 });
 
 describe.skipIf(!hasRunner)('the simulated workstation', () => {
-  it('runs a card through build, review and test on a mock runner with a local repository', async () => {
+  it('runs a card through build and review (Test off by default) on a mock runner with a local repository', async () => {
     const orgId = owner.id;
     const host = t.app.ctx.services.simulation as SimulationHostImpl;
     const on = await t.req('PUT', `/api/platform/orgs/${orgId}/simulation`, {
@@ -156,7 +156,9 @@ describe.skipIf(!hasRunner)('the simulated workstation', () => {
     const stages = (await q(`SELECT DISTINCT stage FROM shifts WHERE card_id=$1`, [card.id])).map(
       (r) => r.stage,
     );
-    expect(stages).toEqual(expect.arrayContaining(['build', 'review', 'test']));
+    // Code v4 (#59): the Test stage runs only when the project switches integration tests on; it is off here.
+    expect(stages).toEqual(expect.arrayContaining(['build', 'review']));
+    expect(stages).not.toContain('test');
     // every shift ran on the simulated workstation
     const other = await q(`SELECT 1 FROM shifts WHERE card_id=$1 AND workstation_id <> $2`, [card.id, ws.id]);
     expect(other).toEqual([]);
