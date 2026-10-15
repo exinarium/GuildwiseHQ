@@ -382,7 +382,7 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
   }),
   role({
     key: 'reviewer',
-    version: 3,
+    version: 4,
     name: 'Reviewer',
     purpose: 'Reviews builder output against the card and the repository conventions.',
     department: 'delivery',

@@ -76,7 +76,7 @@ describe('reviewer role v3', () => {
   const role = BUILTIN_ROLES.find((r) => r.key === 'reviewer')!;
 
   it('is version 3 and keeps high effort', () => {
-    expect(role.version).toBe(3);
+    expect(role.version).toBe(4);
     expect(role.defaultModel.effort).toBe('high');
   });
 
