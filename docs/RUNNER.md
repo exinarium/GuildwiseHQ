@@ -1508,8 +1508,29 @@ and the DevOps engineer split the work:
   `worktrees/<KEY>-<project>/run-<env>/<repo>` (the local branch head, else `origin/<branch>`; `git worktree add --detach`, **no
   branch is created**, nothing is written into the repository). It answers the command with `ok:false` and the reason when the
   cap (`maxRunEnvironments`) is reached, there is no clone or the branch does not exist.
-- **The DevOps engineer works out how.** Its brief carries `BUILD.md` (the runner looks in the repository's project folder,
-  then the root, case-insensitively), the project's run instructions and the declared services. It calls `aom run step|service`
+- **Build guides (backlog #69).** The runner finds the guides itself and passes their text in the brief, nearest first and
+  without duplicates, each with its absolute path: the `BUILD.md` of the repository's project folder and root (as before), then
+  every `BUILD.md` in the **folders above the clone**, up to and including the `repoRoots` entry that holds it (the organization
+  source folder sits inside one), case-insensitively, never the home directory or anything above it, and nothing for a clone that
+  is not under a repo root. A guide that sits above several clones is listed once, with the repositories it applies to. Only when
+  no `BUILD.md` exists anywhere are README files (`README.md`, `README`, `.txt`, `.rst`) used as a fallback. The project's **Build
+  guide** setting (absolute paths on this workstation, Project settings > Run and test; sent as `buildGuides` in `run.start`)
+  **replaces all discovery**, the repository's own `BUILD.md` included; the runner reads those files, they are never stored on
+  the server. Guides outside the run worktrees are passed as text, and the brief carries the pairs *user's checkout => run
+  worktree* (`pathMap`) with the instruction to map paths in a guide accordingly. The plan fingerprint (the runner's `buildHash`)
+  covers the repository guides and every parent or configured guide (path and content hash; a README fallback is not part of
+  it, and with no guide above the repositories the value is the same as before). A new parent guide, or a changed one, makes
+  the plan stale. **Submodules:** a new run worktree runs `git submodule update --init --recursive` with the repository's git
+  auth (the origin's token or ssh key); a failure does not stop the start, the runner logs it and `aom run info` shows
+  "WARNING: the submodules could not be initialised: ...".
+- **The DevOps engineer works out how.** Its brief carries the guides above, the project's run instructions and the declared
+  services, and the rules of the role: follow the guide first and literally, check the environment's own configuration
+  (`appsettings.{Environment}.json`, `launchSettings.json`, `.env.development`) before it calls a dependency missing, start
+  services in the environment the guide implies (`ASPNETCORE_ENVIRONMENT=Development`), count a host on the private network as
+  available, and when it is still blocked **ask the owner** with `aom devops-approval --action "Question: ..." --reason
+  "<options>"` instead of failing. The request then waits (`needs_approval`) and the environment shows as **waiting for you**
+  in the app until the owner answers on the desk; `aom run fail` is for when asking cannot help, and its reason is what the
+  failed environment shows. It calls `aom run step|service`
   (above). The runner runs them: **it** spawns each service, never the Claude session, so a service outlives the shift. The
   command is an argument list (no shell). `${port}`, `${<port name>}`, `${<service>.port}` and `${<service>.<port name>}` are
   substituted in arguments, `--env` values and health URLs. `--env` values must pass the toolchain credential filter
@@ -1555,7 +1576,9 @@ and the DevOps engineer split the work:
   `/run/user/<uid>` (the user's systemd manager: `systemd-run --user` would start a unit outside the sandbox) and the Docker
   socket are masked too. Writable: the run worktrees, the shared caches (`<data dir>/cache`, with the same cache variables
   agents get) and a private `/tmp` (`/tmp/aom-run-<env>`, removed when the environment stops) in which `HOME` lives
-  (`/tmp/home`). The environment is scrubbed of credentials (names like TOKEN/SECRET/KEY, `SSH_AUTH_SOCK`, the bus variables,
+  (`/tmp/home`). **.NET user secrets:** `~/.microsoft/usersecrets` of the real home is bound **read-only** at
+  `/tmp/home/.microsoft/usersecrets` (the services' `HOME`), because `dotnet run` in Development reads its secrets there; only
+  run steps and services get it, an agent's shell never does, and nothing else of the home is opened. The environment is scrubbed of credentials (names like TOKEN/SECRET/KEY, `SSH_AUTH_SOCK`, the bus variables,
   `AOM_*`, `CLAUDE*`, `ANTHROPIC*`); env-file values are injected on top. There is **no `--die-with-parent` and no
   `--new-session`**: a service is detached (its own process group) and outlives the runner and the shift. The sandbox follows
   `runtimes["claude-code"].sandbox`: `required` (default) refuses to start a step or service when bubblewrap cannot run;

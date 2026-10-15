@@ -689,6 +689,9 @@ export class ShiftSupervisor {
     if (msg.kind === 'devops' && msg.devops?.run && this.deps.runs) {
       const run = msg.devops.run;
       run.buildDocs = await this.deps.runs.buildDocs(run.envId).catch(() => []);
+      const outside = await this.deps.runs.buildGuides(run.envId).catch(() => ({ guides: [], pathMap: [] }));
+      run.buildGuides = outside.guides;
+      run.pathMap = outside.pathMap;
       const commits = this.deps.runs.sourcesOf(run.envId);
       run.sources = run.sources.map((r) => ({
         ...r,

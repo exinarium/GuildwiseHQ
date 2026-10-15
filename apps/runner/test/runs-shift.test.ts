@@ -32,6 +32,11 @@ function repoWithServer() {
   const repo = makeRepo();
   writeFileSync(join(repo.clone, 'server.js'), SERVER_JS);
   writeFileSync(join(repo.clone, 'BUILD.md'), '# How to run\nUse node server.js with PORT.\n');
+  // the guide of the folder above the clone (in no repository)
+  writeFileSync(
+    join(repo.scanRoot, 'BUILD.md'),
+    '# Above the repositories\nStart the embedded server first.\n',
+  );
   sh(repo.clone, 'git', ['add', '-A']);
   sh(repo.clone, 'git', ['commit', '-m', 'server']);
   return repo;
@@ -112,6 +117,8 @@ describe('run a branch through the runner', () => {
       allowDocker: false,
       ttlAt: null,
       buildDocs: [],
+      buildGuides: [],
+      pathMap: [],
     };
     h.server.send('shift.start', start);
     const ended = await h.server.waitFor('shift.ended', (m) => m.shiftId === start.shiftId, 60_000);
@@ -122,6 +129,10 @@ describe('run a branch through the runner', () => {
     expect(prompt).toContain('Run request: Toy (TOY)');
     expect(prompt).toContain('Use node server.js with PORT.');
     expect(prompt).toContain('Prefer the default port.');
+    // ... and the guide above the repository, with its absolute path and the checkout-to-worktree mapping
+    expect(prompt).toContain(`Build guide above the repositories: ${join(repo.scanRoot, 'BUILD.md')}`);
+    expect(prompt).toContain('Start the embedded server first.');
+    expect(prompt).toContain(`${repo.clone} => `);
     expect(prompt).toContain(`--env ${envId}`);
 
     expect(seen.info.json.result.message).toContain('run-');

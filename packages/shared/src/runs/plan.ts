@@ -260,6 +260,11 @@ export const RunSettingsSchema = z.object({
   /** Branch code may use Docker (compose, docker run): such steps run outside any service sandbox. */
   allowDocker: z.boolean().default(false),
   services: z.array(RunDeclaredServiceSchema).max(20).default([]),
+  /**
+   * Build guide(s): absolute path(s) on the workstation. When set they replace the runner's discovery of BUILD.md (in the
+   * repository and in the folders above the clones); the runner reads them and passes them to the DevOps engineer as text.
+   */
+  buildGuides: z.array(z.string().min(1).max(500)).max(5).default([]),
 });
 export type RunSettings = z.infer<typeof RunSettingsSchema>;
 
@@ -278,6 +283,8 @@ export function validateRunSettings(s: RunSettings): string[] {
     for (const a of d.after)
       if (!names.has(a.toLowerCase())) problems.push(`service "${d.name}": after "${a}" is not a service`);
   }
+  for (const g of s.buildGuides)
+    if (!isAbsolutePath(g)) problems.push(`build guide "${g}": must be an absolute path on the workstation`);
   if (runOrder(s.services.map((d) => ({ name: d.name, after: d.after }))) === null)
     problems.push('the "after" dependencies form a cycle');
   return problems;

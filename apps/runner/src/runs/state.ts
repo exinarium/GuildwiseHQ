@@ -60,7 +60,11 @@ export interface SourceState {
   projectPath?: string;
   /** The run worktree (a directory of its own; detached HEAD, no branch created). */
   path: string;
+  /** The user's own clone the worktree was cut from (the folders above it are searched for build guides). */
+  clonePath?: string;
   commit: string | null;
+  /** Initialising the submodules of the run worktree failed: the end of the message. */
+  submoduleWarning?: string;
 }
 
 export interface EnvState {
@@ -75,6 +79,8 @@ export interface EnvState {
   portRange: { from: number; to: number };
   ttlAt: string;
   allowDocker: boolean;
+  /** The project's "Build guide" setting: absolute paths that replace the discovery of BUILD.md. */
+  buildGuides?: string[];
   state: RunEnvState;
   activity?: string;
   error?: string;

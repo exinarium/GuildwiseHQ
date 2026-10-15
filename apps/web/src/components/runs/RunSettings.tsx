@@ -75,6 +75,7 @@ export function RunSettings({ projectId, canEdit }: { projectId: string; canEdit
   const [repoText, setRepoText] = useState<Record<string, string>>({});
   const [ttl, setTtl] = useState(8);
   const [docker, setDocker] = useState(false);
+  const [guides, setGuides] = useState('');
   const [rows, setRows] = useState<Row[]>([]);
   const [problem, setProblem] = useState<string | undefined>();
 
@@ -85,6 +86,7 @@ export function RunSettings({ projectId, canEdit }: { projectId: string; canEdit
     setRepoText(Object.fromEntries(data.repos.map((r) => [r.repoId, r.runInstructions])));
     setTtl(data.settings.ttlHours);
     setDocker(data.settings.allowDocker);
+    setGuides((data.settings.buildGuides ?? []).join('\n'));
     setRows(data.settings.services.map((s, i) => toRow(s, i)));
   }, [data]);
 
@@ -110,7 +112,15 @@ export function RunSettings({ projectId, canEdit }: { projectId: string; canEdit
     const body: SetRunSettingsRequest = {
       runInstructions: instructions,
       repoInstructions: repos.map((r) => ({ repoId: r.repoId, runInstructions: repoText[r.repoId] ?? '' })),
-      settings: { ttlHours: ttl, allowDocker: docker, services },
+      settings: {
+        ttlHours: ttl,
+        allowDocker: docker,
+        services,
+        buildGuides: guides
+          .split('\n')
+          .map((l) => l.trim())
+          .filter(Boolean),
+      },
     };
     const issues = validateRunSettings(body.settings);
     if (issues.length) {
@@ -145,6 +155,15 @@ export function RunSettings({ projectId, canEdit }: { projectId: string; canEdit
           hint="Free text for the whole project. It wins over BUILD.md where they disagree."
           data-testid="run-instructions"
           onChange={(e) => setInstructions(e.target.value)}
+        />
+        <TextArea
+          label="Build guide (optional)"
+          rows={2}
+          value={guides}
+          disabled={!canEdit}
+          hint="Absolute path(s) on the workstation, one per line, for example /home/you/src/sources/BUILD.md. When set, only these guides are given to the DevOps engineer; otherwise the runner finds BUILD.md in the repository and in the folders above the clones. The files are read when an environment starts and are not stored here."
+          data-testid="run-build-guides"
+          onChange={(e) => setGuides(e.target.value)}
         />
         {repos.map((r) => (
           <TextArea

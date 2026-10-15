@@ -25,7 +25,7 @@ export interface RunsFilter {
   projectId?: string;
   cardId?: string;
   workstationId?: string;
-  /** Only environments that still run (default). */
+  /** Only environments that still run, plus failed ones nobody dismissed yet (default). */
   live?: boolean;
 }
 
@@ -86,6 +86,15 @@ export const useRestartRun = () =>
     post(`/runs/${v.id}/restart`, v.update ? { update: true } : {}),
   );
 
+/** "Try again" on a failed environment: the same repositories, branches and services, started anew. */
+export const useRetryRun = () =>
+  useRunAction(
+    async (id: string) =>
+      (await post<{ environment: RunEnvironmentDto }>(`/runs/${id}/retry`, {})).environment,
+  );
+/** "Dismiss": the failed environment leaves the board, the card and the Workstations page. */
+export const useDismissRun = () => useRunAction((id: string) => post(`/runs/${id}/dismiss`, {}));
+
 export function useRunSettings(projectId: string | undefined) {
   return useQuery({
     enabled: !!projectId,
@@ -103,6 +112,7 @@ export function useRunSettings(projectId: string | undefined) {
           ttlHours: d.settings?.ttlHours ?? 8,
           allowDocker: d.settings?.allowDocker ?? false,
           services: d.settings?.services ?? [],
+          buildGuides: d.settings?.buildGuides ?? [],
         },
         plans: d.plans ?? [],
       };

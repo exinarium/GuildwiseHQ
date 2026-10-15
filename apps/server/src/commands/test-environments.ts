@@ -314,7 +314,7 @@ export async function startTestRunIn(
     { tx },
   );
   const commitAs = await loadCommitAs(tx, project.id);
-  const runSettings = (project.run_settings ?? {}) as { allowDocker?: boolean };
+  const runSettings = (project.run_settings ?? {}) as { allowDocker?: boolean; buildGuides?: string[] };
   const payload: RunStartPayload = {
     envId,
     projectId: project.id,
@@ -333,6 +333,7 @@ export async function startTestRunIn(
     portRange: { ...DEFAULT_RUN_PORT_RANGE },
     ttlAt: expiresAt.toISOString(),
     allowDocker: runSettings.allowDocker === true,
+    ...(runSettings.buildGuides?.length ? { buildGuides: runSettings.buildGuides } : {}),
     rebaseCard: {
       repoId: cardRepo.id,
       cardWorktreePath: wcard.worktree_path,

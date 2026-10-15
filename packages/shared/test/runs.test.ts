@@ -167,7 +167,12 @@ describe('command lines, ports and health checks', () => {
 
 describe('run settings', () => {
   it('has the owner decisions as defaults: 8 hours, Docker off', () => {
-    expect(RunSettingsSchema.parse({})).toEqual({ ttlHours: 8, allowDocker: false, services: [] });
+    expect(RunSettingsSchema.parse({})).toEqual({
+      ttlHours: 8,
+      allowDocker: false,
+      services: [],
+      buildGuides: [],
+    });
     expect(() => RunSettingsSchema.parse({ ttlHours: 0 })).toThrow();
     expect(() => RunSettingsSchema.parse({ ttlHours: 73 })).toThrow();
   });
@@ -451,6 +456,53 @@ describe('the DevOps prompt of a run request', () => {
     expect(text).toContain('aom run ready');
     expect(text).toContain('This is a run request');
     expect(text).not.toContain('hygiene');
+  });
+
+  it('lists the guides above the repositories with their absolute paths, tells DevOps to map paths, and how to ask when blocked', () => {
+    const text = renderDevopsPrompt(
+      devops({
+        run: DevopsRunSchema.parse({
+          ...run,
+          buildGuides: [
+            {
+              path: '/home/u/src/dcode/sources/BUILD.md',
+              content: 'Use the embedded server of the webconsole.',
+              origin: 'parent',
+              repoIds: [ID(1)],
+            },
+          ],
+          pathMap: [
+            {
+              repoId: ID(1),
+              clonePath: '/home/u/src/dcode/sources/web',
+              worktreePath: '/home/u/.aom-runner/worktrees/run-1/web',
+            },
+          ],
+        }),
+      }),
+    );
+    expect(text).toContain(
+      'Build guide above the repositories: /home/u/src/dcode/sources/BUILD.md (for web)',
+    );
+    expect(text).toContain('Use the embedded server of the webconsole.');
+    expect(text).toContain('follow them first, and literally');
+    expect(text).toContain(
+      "Map every path in a guide that points into the owner's checkout to its run worktree equivalent: /home/u/src/dcode/sources/web => /home/u/.aom-runner/worktrees/run-1/web",
+    );
+    expect(text).toContain('follow the guide and say so in your summary');
+    expect(text).toContain('appsettings.{Environment}.json');
+    expect(text).toContain('ASPNETCORE_ENVIRONMENT=Development');
+    expect(text).toContain('private IP');
+    expect(text).toContain('aom devops-approval --action "Question:');
+    // the repository's own BUILD.md is still there, and the "no BUILD.md" hint is not
+    expect(text).toContain('### BUILD.md of web (BUILD.md)');
+    expect(text).not.toContain('no BUILD.md and no run instructions');
+    const settings = RunSettingsSchema.parse({ buildGuides: ['/abs/BUILD.md'] });
+    expect(validateRunSettings(settings)).toEqual([]);
+    expect(validateRunSettings(RunSettingsSchema.parse({ buildGuides: ['relative/BUILD.md'] }))[0]).toMatch(
+      /absolute path/,
+    );
+    expect(RunSettingsSchema.parse({}).buildGuides).toEqual([]);
   });
 
   it('says what to do without any instructions, and shows the saved plan', () => {

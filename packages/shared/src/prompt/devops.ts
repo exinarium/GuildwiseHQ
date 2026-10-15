@@ -139,20 +139,52 @@ export function renderRunSection(run: DevopsRun): string {
     out.push(`### Run instructions for ${r.name}`);
     out.push(clip(r.text.trim(), 8000));
   }
-  for (const d of run.buildDocs) {
+  const nameOf = (id: string) => run.sources.find((x) => x.repoId === id)?.name ?? id;
+  const guideHead = (g: DevopsRun['buildGuides'][number]) =>
+    g.origin === 'configured'
+      ? `### Build guide set in the project settings: ${g.path}`
+      : g.origin === 'readme'
+        ? `### README (no BUILD.md exists): ${g.path}`
+        : `### Build guide above the repositories: ${g.path}${g.repoIds.length ? ` (for ${g.repoIds.map(nameOf).join(', ')})` : ''}`;
+  const guides = run.buildGuides ?? [];
+  const pathMap = run.pathMap ?? [];
+  if (guides.length || run.buildDocs.length) {
     out.push(
-      `### BUILD.md of ${run.sources.find((x) => x.repoId === d.repoId)?.name ?? d.repoId} (${d.path})`,
+      [
+        '### Build guides: follow them first, and literally',
+        "The guides below are the owner's own instructions for running this code. Read all of them before you decide anything, and do what they say, in their order, before you improvise. Where a guide and the repositories you were given disagree (a guide that says the webconsole uses its embedded server submodule means the standalone server repository is not needed), follow the guide and say so in your summary.",
+        pathMap.length
+          ? `A guide is written for the owner's own checkout; you work in the run worktrees. Map every path in a guide that points into the owner's checkout to its run worktree equivalent: ${pathMap.map((m) => `${m.clonePath} => ${m.worktreePath}`).join('; ')}. Submodules are initialised in the run worktrees.`
+          : "A guide is written for the owner's own checkout; you work in the run worktrees (`aom run info`). Map every path in a guide that points into the owner's checkout to its run worktree equivalent.",
+      ].join('\n'),
     );
+  }
+  for (const g of guides) {
+    out.push(guideHead(g));
+    out.push(clip(g.content.trim(), 12000));
+  }
+  for (const d of run.buildDocs) {
+    out.push(`### BUILD.md of ${nameOf(d.repoId)} (${d.path})`);
     out.push(clip(d.content.trim(), 12000));
   }
   if (
     run.buildDocs.length === 0 &&
+    guides.length === 0 &&
     !run.runInstructions.trim() &&
     run.repoInstructions.every((x) => !x.text.trim())
   )
     out.push(
       'There is no BUILD.md and no run instructions: read the README, compose files and package scripts of each repository.',
     );
+  out.push(
+    [
+      '### Before you give up',
+      '- Before you conclude that a dependency (a database, a queue, a service) is missing, read the configuration of the environment the guide implies: `appsettings.{Environment}.json` next to `appsettings.json` and `Properties/launchSettings.json`, `.env.development`, `application-dev.*`. The base file often holds a placeholder (`localhost`) while the development file points at the real server. Compose files are the last resort.',
+      '- Start services in that environment (for .NET: `--env ASPNETCORE_ENVIRONMENT=Development` when the guide relies on `appsettings.Development.json`; without it ASP.NET Core runs as Production and ignores `appsettings.Development.json`; check what `Properties/launchSettings.json` sets). .NET user secrets (`~/.microsoft/usersecrets`) are readable by services.',
+      '- A dependency on another host of the network (a private IP such as 192.168.x.x or 10.x.x.x) counts as available: services run with the host network. Check that it answers (`bash -lc "timeout 3 bash -c \'</dev/tcp/<host>/<port>\'"`) before you call it missing.',
+      '- If you are still blocked, do not just fail: ask the owner with `aom devops-approval --action "Question: <exactly what is missing>" --reason "<what you checked, and the options, e.g. A) use X, B) allow Docker, C) give me the connection string>"`. The environment then shows as waiting for the owner, who answers on the desk; you are called again with the answer. Use `aom run fail` only when the owner answered and it still cannot run.',
+    ].join('\n'),
+  );
   if (run.declared.length) {
     out.push(
       '### Services declared in the project settings (use these names, commands, ports and health checks; do not contradict them)',
@@ -183,7 +215,7 @@ export function renderRunSection(run: DevopsRun): string {
       '2. Setup steps, in order: `aom run step --name "npm ci" --repo <name> --cwd . -- npm ci`.',
       '3. Each service: `aom run service --name api --repo <name> --cwd src/Api --port http:5000:ASPNETCORE_HTTP_PORTS --health http://localhost:${port}/health [--env-file <absolute path outside the repository>] [--env KEY=VALUE] [--after db] -- dotnet run`. It returns when the service is healthy or failed (`aom run logs <service>` shows why).',
       '4. `aom run status` to check; `aom run ready --notes "<what you learned>"` when every wanted service is healthy: the runner then saves the steps as the project\'s run plan. Never put secrets in --env; use an env file outside the repository.',
-      '5. Give up with `aom run fail --reason "<why>"` (the environment ends as failed). Either way end the request with `aom devops-done` (summarise the URLs and ports).',
+      '5. Blocked after the checks above: ask the owner (`aom devops-approval --action "Question: ..." --reason "<what is missing, the options>"`). Give up with `aom run fail --reason "<why and what would fix it>"` only when asking cannot help (the environment ends as failed and stays visible with your reason). Either way end the request with `aom devops-done` (summarise the URLs and ports, or why it failed).',
     ].join('\n'),
   );
   return out.join('\n\n');

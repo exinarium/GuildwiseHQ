@@ -1,7 +1,14 @@
 import { isLiveRunState, type RunEnvironmentDto, type RunEnvState, type RunServiceState } from '@aom/shared';
-import { ArrowUpFromLine, ExternalLink, RotateCw, Square, Timer } from 'lucide-react';
+import { ArrowUpFromLine, ExternalLink, RefreshCw, RotateCw, Square, Timer, X } from 'lucide-react';
 import { useState } from 'react';
-import { useExtendRun, useRestartRun, useStopRun } from '../../api/queries/runs.ts';
+import { Link } from 'react-router';
+import {
+  useDismissRun,
+  useExtendRun,
+  useRestartRun,
+  useRetryRun,
+  useStopRun,
+} from '../../api/queries/runs.ts';
 import { Badge, Button, ConfirmDialog, ErrorBox, Panel, useToast } from '../ui.tsx';
 import { RunLogs } from './RunLogs.tsx';
 
@@ -60,6 +67,8 @@ export function RunPanel({ env, showProject = false }: { env: RunEnvironmentDto;
   const stop = useStopRun();
   const extend = useExtendRun();
   const restart = useRestartRun();
+  const retry = useRetryRun();
+  const dismiss = useDismissRun();
   const toast = useToast();
   const [logs, setLogs] = useState(false);
   const [confirm, setConfirm] = useState(false);
@@ -77,14 +86,46 @@ export function RunPanel({ env, showProject = false }: { env: RunEnvironmentDto;
             {showProject ? `${env.projectKey} · ` : ''}
             {env.sources.map((s) => `${s.repoName}@${s.branch}`).join(', ')}
           </span>
-          <Badge tone={ENV_TONE[env.state]} data-testid="run-state">
-            {ENV_STATE_LABEL[env.state]}
-          </Badge>
+          {env.waiting ? (
+            <Badge tone="warning" data-testid="run-state">
+              Waiting for you
+            </Badge>
+          ) : (
+            <Badge tone={ENV_TONE[env.state]} data-testid="run-state">
+              {ENV_STATE_LABEL[env.state]}
+            </Badge>
+          )}
         </span>
       }
       actions={
-        (live || env.canRestart) && (
+        (live || env.canRestart || env.canRetry || env.canDismiss) && (
           <>
+            {env.canRetry && (
+              <Button
+                size="sm"
+                data-testid="run-retry"
+                loading={retry.isPending}
+                title="Start it again with the same repositories, branches and services"
+                onClick={() =>
+                  retry.mutate(env.id, { onSuccess: () => toast.success('Starting the environment again') })
+                }
+              >
+                <RefreshCw aria-hidden="true" className="size-4" />
+                Try again
+              </Button>
+            )}
+            {env.canDismiss && (
+              <Button
+                size="sm"
+                variant="ghost"
+                data-testid="run-dismiss"
+                loading={dismiss.isPending}
+                onClick={() => dismiss.mutate(env.id)}
+              >
+                <X aria-hidden="true" className="size-4" />
+                Dismiss
+              </Button>
+            )}
             {env.canRestart && (
               <>
                 <Button
@@ -155,12 +196,53 @@ export function RunPanel({ env, showProject = false }: { env: RunEnvironmentDto;
           {env.cardRef ? ` for ${env.cardRef}` : ''}.{' '}
           {env.activity && live && <span data-testid="run-activity">{env.activity}.</span>}
         </p>
-        {env.lastError && env.state !== 'stopped' && (
+        {env.waiting && (
+          <div
+            role="status"
+            className="rounded-control bg-warning-soft p-3 text-warning-soft-fg"
+            data-testid="run-waiting"
+          >
+            <p className="font-medium">The DevOps engineer is waiting for you: {env.waiting.action}</p>
+            {env.waiting.reason && <p className="mt-1 whitespace-pre-wrap">{env.waiting.reason}</p>}
+            {env.devopsRequestId && (
+              <p className="mt-2">
+                <Link
+                  to={`/workstations?devopsRequest=${env.devopsRequestId}`}
+                  className="text-brand-text underline-offset-2 hover:underline"
+                  data-testid="run-devops-link"
+                >
+                  Answer on the DevOps request
+                </Link>
+              </p>
+            )}
+          </div>
+        )}
+        {env.state === 'failed' && (env.failureReason || env.lastError) && (
+          <div role="alert" className="rounded-control border border-line p-3" data-testid="run-failure">
+            <p className="font-medium text-danger">Why it failed</p>
+            <p className="mt-1 max-h-60 overflow-auto whitespace-pre-wrap" data-testid="run-error">
+              {env.failureReason ?? env.lastError}
+            </p>
+            {env.devopsRequestId && (
+              <p className="mt-2">
+                <Link
+                  to={`/workstations?devopsRequest=${env.devopsRequestId}`}
+                  className="text-brand-text underline-offset-2 hover:underline"
+                  data-testid="run-devops-link"
+                >
+                  Open the DevOps request
+                </Link>
+              </p>
+            )}
+          </div>
+        )}
+        {env.lastError && env.state !== 'stopped' && env.state !== 'failed' && (
           <p role="alert" className="text-danger" data-testid="run-error">
             {env.lastError}
           </p>
         )}
-        {env.state === 'requested' || env.state === 'preparing' || env.state === 'starting' ? (
+        {!env.waiting &&
+        (env.state === 'requested' || env.state === 'preparing' || env.state === 'starting') ? (
           env.replayed && !env.devopsRequestId ? (
             <p className="text-muted" data-testid="run-working">
               Starting from the saved run plan{env.planVersion ? ` (version ${env.planVersion})` : ''}: no
@@ -278,7 +360,7 @@ export function RunPanel({ env, showProject = false }: { env: RunEnvironmentDto;
             {logs && <RunLogs envId={env.id} services={env.servicesStatus.map((s) => s.name)} />}
           </div>
         )}
-        <ErrorBox error={stop.error ?? extend.error ?? restart.error} />
+        <ErrorBox error={stop.error ?? extend.error ?? restart.error ?? retry.error ?? dismiss.error} />
       </div>
       <ConfirmDialog
         open={confirm}

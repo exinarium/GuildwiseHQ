@@ -3,15 +3,15 @@ import { ChevronRight, Server, TriangleAlert } from 'lucide-react';
 import { useCallback, useId, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { useMe } from '../api/queries/auth.ts';
+import { useRuns } from '../api/queries/runs.ts';
 import { useRunningShifts } from '../api/queries/shifts.ts';
 import { usePairingCode, useUnlinkWorkstation, useWorkstations } from '../api/queries/workstations.ts';
 import { BRAND } from '../brand.ts';
 import { DevOpsPanel } from '../components/DevOpsPanel.tsx';
-import { RunList } from '../components/runs/RunPanel.tsx';
-import { useRuns } from '../api/queries/runs.ts';
 import { GitConnectionsPanel } from '../components/GitConnections.tsx';
 import { JiraStatusLine } from '../components/JiraStatusLine.tsx';
 import { RepoSyncLine } from '../components/RepoSync.tsx';
+import { RunList } from '../components/runs/RunPanel.tsx';
 import { SandboxUnavailable, SandboxWarning } from '../components/SandboxWarning.tsx';
 import { ShiftClock, ShiftStopControls } from '../components/ShiftStop.tsx';
 import {
@@ -181,7 +181,7 @@ function WorkstationRuns({ workstationId }: { workstationId: string }) {
   if (!runs.data || runs.data.length === 0) return null;
   return (
     <div className="mt-3" data-testid="workstation-runs">
-      <p className="mb-1 text-xs font-medium text-subtle">Running environments</p>
+      <p className="mb-1 text-xs font-medium text-subtle">Environments</p>
       <RunList envs={runs.data} showProject />
     </div>
   );

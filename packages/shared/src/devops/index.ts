@@ -63,6 +63,28 @@ export const DevopsRunSchema = z.object({
   ttlAt: z.iso.datetime().nullable().default(null),
   /** BUILD.md of each repository (looked for in the project path, then the repository root); filled by the runner. */
   buildDocs: z.array(z.object({ repoId: z.uuid(), path: z.string(), content: z.string() })).default([]),
+  /**
+   * Guides outside the run worktrees, read by the runner: the BUILD.md found in folders above the clones, the project's
+   * "Build guide" setting (`configured`, replaces discovery) or README files (`readme`, only when no BUILD.md exists
+   * anywhere). `path` is absolute on the workstation, nearest first; `repoIds` are the repositories it was found for.
+   */
+  buildGuides: z
+    .array(
+      z.object({
+        path: z.string(),
+        content: z.string(),
+        origin: z.enum(['parent', 'configured', 'readme']),
+        repoIds: z.array(z.uuid()).default([]),
+      }),
+    )
+    .default([]),
+  /**
+   * Where each repository's checkout of the user lives on the workstation (the clone) and where the run worktree is:
+   * a guide that names the first means the second. Filled by the runner.
+   */
+  pathMap: z
+    .array(z.object({ repoId: z.uuid(), clonePath: z.string(), worktreePath: z.string() }))
+    .default([]),
 });
 export type DevopsRun = z.infer<typeof DevopsRunSchema>;
 

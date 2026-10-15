@@ -12,6 +12,8 @@ import { SECRETISH } from '../toolchain/registry.ts';
  *   let a process break out: the system and session buses, systemd's user manager (`systemd-run --user` would start a
  *   unit outside the sandbox) and Docker's socket (Unix sockets are not filtered here, unlike in an agent's shell);
  * - writes only to the run worktrees, the shared package caches and a private run tmp dir (bound over `/tmp`);
+ * - read-only access to the .NET user secrets (`~/.microsoft/usersecrets`, shown at the services' HOME): they are the
+ *   secrets a developer keeps outside the repository for `dotnet run` in Development, and only run services get them;
  * - NOT `--die-with-parent`: services outlive the runner process and a shift (the runner re-adopts them).
  */
 
@@ -31,6 +33,12 @@ export interface SandboxSpec {
   /** OS user id for `/run/user/<uid>` (injectable for tests). */
   uid?: number;
 }
+
+/** The services' HOME inside the sandbox (inside the private `/tmp`). */
+export const SERVICE_HOME = '/tmp/home';
+
+/** `~/.microsoft/usersecrets` of the real home: the .NET user secrets that `dotnet run` needs in Development. */
+export const userSecretsDir = (realHome: string): string => join(realHome, '.microsoft', 'usersecrets');
 
 /** Directories and files that stay out of reach, skipping the ones that do not exist (bwrap cannot create them). */
 export function maskedPaths(spec: Pick<SandboxSpec, 'runnerRoot' | 'realHome' | 'uid'>): string[] {
@@ -76,6 +84,10 @@ export function bwrapArgs(spec: SandboxSpec): string[] {
   for (const g of spec.gitDirs ?? []) if (existsSync(g)) args.push('--ro-bind', g, g);
   args.push('--bind', spec.runTmp, '/tmp');
   for (const w of [...spec.worktrees, spec.cacheRoot]) args.push('--bind', w, w);
+  // .NET user secrets (`dotnet run` in Development reads them): read-only, at the services' HOME. Services only: an
+  // agent's shell never gets them.
+  const secrets = userSecretsDir(spec.realHome);
+  if (existsSync(secrets)) args.push('--ro-bind', secrets, `${SERVICE_HOME}/.microsoft/usersecrets`);
   return args;
 }
 

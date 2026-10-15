@@ -62,9 +62,29 @@ const REQUEST_DONE_GRACE_MS = 30_000;
 const ENV_SQL = `SELECT e.*, p.key AS project_key, p.name AS project_name, w.name AS workstation_name, w.user_id AS ws_user_id,
        c.ref AS card_ref, u.display_name AS requested_by_name,
        (SELECT jsonb_object_agg(r.id::text, r.name) FROM project_repos r WHERE r.project_id = e.project_id) AS repo_names,
-       COALESCE((SELECT 'runs:2' = ANY(c2.capabilities) FROM workstation_capabilities c2 WHERE c2.workstation_id = e.workstation_id), false) AS ws_replay
+       COALESCE((SELECT 'runs:2' = ANY(c2.capabilities) FROM workstation_capabilities c2 WHERE c2.workstation_id = e.workstation_id), false) AS ws_replay,
+       q.status AS req_status, q.approval AS req_approval, q.result_summary AS req_summary
   FROM run_environments e JOIN projects p ON p.id = e.project_id JOIN workstations w ON w.id = e.workstation_id
-  LEFT JOIN cards c ON c.id = e.card_id LEFT JOIN users u ON u.id = e.requested_by`;
+  LEFT JOIN cards c ON c.id = e.card_id LEFT JOIN users u ON u.id = e.requested_by
+  LEFT JOIN devops_requests q ON q.id = e.devops_request_id`;
+
+/** A failed environment stays on the board, the card and the Workstations page this long (or until it is dismissed). */
+const FAILED_VISIBLE_MS = 14 * 24 * 3600_000;
+
+/** The DevOps engineer asked the owner (`aom devops-approval`) and waits for the answer: what and why. */
+function waitingOf(r: Row): { action: string; reason: string } | null {
+  if (!isLiveRunState(r.state) || r.req_status !== 'needs_approval') return null;
+  const ap = r.req_approval as { action?: string; reason?: string; resolution?: string | null } | null;
+  if (!ap || ap.resolution) return null;
+  return { action: String(ap.action ?? 'DevOps needs an answer'), reason: String(ap.reason ?? '') };
+}
+
+/** Why a failed environment failed: the DevOps engineer's report, else the last error the runner saw. */
+function failureReasonOf(r: Row): string | null {
+  if (r.state !== 'failed') return null;
+  const summary = typeof r.req_summary === 'string' ? r.req_summary.trim() : '';
+  return summary || (r.last_error as string | null) || null;
+}
 
 /** Who may stop and extend an environment: its starter, the workstation's owner, and the organization's Owners and Admins. */
 async function mayManage(db: Queryable, userId: string, r: Row): Promise<boolean> {
@@ -135,6 +155,10 @@ async function toDto(
     canExtend: live && r.state !== 'stopping' && manage && r.expires_at !== null,
     canRestart: manage && restartable(r, now) !== null,
     replayed: r.replayed === true,
+    failureReason: failureReasonOf(r),
+    waiting: waitingOf(r),
+    canRetry: manage && r.state === 'failed' && r.purpose === 'manual',
+    canDismiss: manage && (r.state === 'failed' || r.state === 'stopped') && r.dismissed_at == null,
   };
 }
 
@@ -149,9 +173,18 @@ export async function listRuns(
     `${ENV_SQL} WHERE (e.project_id = ANY($1::uuid[]) OR w.user_id = $2)
         AND ($3::uuid IS NULL OR e.project_id = $3) AND ($4::uuid IS NULL OR e.card_id = $4)
         AND ($5::uuid IS NULL OR e.workstation_id = $5)
-        AND ($6::boolean IS NOT TRUE OR e.state NOT IN ('stopped','failed'))
+        AND ($6::boolean IS NOT TRUE OR e.state NOT IN ('stopped','failed')
+             OR (e.state = 'failed' AND e.purpose = 'manual' AND e.dismissed_at IS NULL AND e.created_at > $7))
       ORDER BY e.created_at DESC, e.id LIMIT 100`,
-    [visible, userId, q.projectId ?? null, q.cardId ?? null, q.workstationId ?? null, q.live ?? true],
+    [
+      visible,
+      userId,
+      q.projectId ?? null,
+      q.cardId ?? null,
+      q.workstationId ?? null,
+      q.live ?? true,
+      new Date(ctx.clock.now().getTime() - FAILED_VISIBLE_MS),
+    ],
   );
   return Promise.all(list.map((r) => toDto(ctx.pool, userId, r, ctx.clock.now())));
 }
@@ -166,6 +199,51 @@ async function loadEnv(db: Queryable, userId: string, id: string, forUpdate = fa
 
 export async function getRun(ctx: Ctx, userId: string, id: string): Promise<RunEnvironmentDto> {
   return toDto(ctx.pool, userId, await loadEnv(ctx.pool, userId, id), ctx.clock.now());
+}
+
+/**
+ * "Dismiss": the owner has seen the failed (or stopped) environment; it leaves the board, the card and the Workstations
+ * page. Idempotent; nothing runs any more.
+ */
+export async function dismissRun(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  id: string,
+): Promise<RunEnvironmentDto> {
+  await withAppendTx(ctx.pool, async (tx) => {
+    const r = await loadEnv(tx, user.id, id, true);
+    if (!(await mayManage(tx, user.id, r))) throw notFound('environment not found');
+    if (!['failed', 'stopped'].includes(r.state))
+      throw conflict('still_running', 'this environment still runs: stop it first');
+    await exec(tx, 'UPDATE run_environments SET dismissed_at = COALESCE(dismissed_at, $2) WHERE id=$1', [
+      id,
+      ctx.clock.now(),
+    ]);
+  });
+  ctx.services.browser.runChanged(id);
+  return getRun(ctx, user.id, id);
+}
+
+/** "Try again": a failed manual environment is started anew with the same repositories, branches and services. */
+export async function retryRun(ctx: Ctx, user: AuthSession['user'], id: string): Promise<RunEnvironmentDto> {
+  const r = await loadEnv(ctx.pool, user.id, id);
+  if (!(await mayManage(ctx.pool, user.id, r))) throw notFound('environment not found');
+  if (r.state !== 'failed' || r.purpose !== 'manual')
+    throw conflict('not_failed', 'only a failed environment can be tried again');
+  const sources = (r.sources ?? []) as Array<{ repoId: string; branch: string }>;
+  const fresh = await startRun(ctx, user, {
+    projectId: r.project_id,
+    workstationId: r.workstation_id,
+    ...(r.card_id ? { cardId: r.card_id } : {}),
+    sources: sources.map((s) => ({ repoId: s.repoId, branch: s.branch })),
+    ...((r.services ?? []).length ? { services: r.services } : {}),
+  });
+  await exec(ctx.pool, 'UPDATE run_environments SET dismissed_at = COALESCE(dismissed_at, $2) WHERE id=$1', [
+    id,
+    ctx.clock.now(),
+  ]);
+  ctx.services.browser.runChanged(id);
+  return fresh;
 }
 
 // ------------------------------------------------------------------------------------------- settings
@@ -595,6 +673,7 @@ export async function startRun(
       portRange: { ...DEFAULT_RUN_PORT_RANGE },
       ttlAt: expiresAt.toISOString(),
       allowDocker: settings.allowDocker,
+      ...(settings.buildGuides.length ? { buildGuides: settings.buildGuides } : {}),
       ...(replay ? { replay } : {}),
     };
     await enqueueRunnerCommand(tx, ws.id, 'run.start', payload);
@@ -1206,5 +1285,7 @@ export async function runBriefFor(ctx: Ctx, req: Row): Promise<DevopsRun | null>
     allowDocker: settings.allowDocker,
     ttlAt: iso(env.expires_at),
     buildDocs: [],
+    buildGuides: [],
+    pathMap: [],
   };
 }

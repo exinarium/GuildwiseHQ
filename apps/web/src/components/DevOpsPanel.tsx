@@ -4,7 +4,7 @@ import {
   hygieneCadenceLabel,
   type WorkstationDto,
 } from '@aom/shared';
-import { type FormEvent, useState } from 'react';
+import { type FormEvent, useEffect, useRef, useState } from 'react';
 import {
   useClearSudoPassword,
   useCreateDevOpsRequest,
@@ -366,10 +366,26 @@ function AskDevOps({ workstationId, name }: { workstationId: string; name: strin
   );
 }
 
+/** `?devopsRequest=<id>` (the link on a run environment) opens that request's thread and scrolls to it. */
+const linkedRequest = (): string | null => {
+  try {
+    return new URLSearchParams(window.location.search).get('devopsRequest');
+  } catch {
+    return null;
+  }
+};
+
 function RequestRow({ r }: { r: DevOpsRequestDto }) {
-  const [open, setOpen] = useState(r.status === 'needs_approval');
+  const linked = linkedRequest() === r.id;
+  const [open, setOpen] = useState(r.status === 'needs_approval' || linked);
+  const rowRef = useRef<HTMLLIElement>(null);
+  useEffect(() => {
+    if (linked) rowRef.current?.scrollIntoView?.({ block: 'center' });
+  }, [linked]);
   return (
     <li
+      id={`devops-request-${r.id}`}
+      ref={rowRef}
       className="rounded-control border border-line p-2"
       data-testid={`devops-request-${r.summary.slice(0, 40)}`}
       data-status={r.status}

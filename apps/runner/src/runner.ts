@@ -351,6 +351,8 @@ export class Runner {
       maxEnvironments: () => this.freshConfig().maxRunEnvironments,
       portRange: () => this.freshConfig().runPortRange,
       pathDirs: () => this.toolchains.resolve().pathDirs,
+      repoRoots: () => this.freshConfig().repoRoots,
+      gitAuth: (url, forge) => gitAuthFor(this.forgeEnv, url, forge),
       sandboxMode: () => {
         const c = this.freshConfig().runtimes['claude-code'];
         return { mode: c.sandbox, allowUnsandboxed: c.allowUnsandboxed };

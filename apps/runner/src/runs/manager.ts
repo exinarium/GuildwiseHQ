@@ -40,17 +40,17 @@ import type { SandboxMode } from '../adapters/claude-policy.ts';
 import { git } from '../git/git.ts';
 import { RebaseConflictError, rebaseOntoBase } from '../git/rebase.ts';
 import { withRepoLock } from '../git/repo-lock.ts';
-import { removeWorktree } from '../git/worktrees.ts';
+import { type GitAuth, removeWorktree } from '../git/worktrees.ts';
 import type { Logger } from '../log.ts';
 import type { RunnerPaths } from '../paths.ts';
 import { cacheEnv, ensureSharedCaches, sharedCacheRoot } from '../sandbox/sandbox.ts';
 import { checkEnvVar } from '../toolchain/registry.ts';
-import { buildHash, findBuildDoc } from './discovery.ts';
+import { discoverExtraGuides, type ExtraGuide, findBuildDoc, guidesHash } from './discovery.ts';
 import { probeHttp, probeTcp } from './health.ts';
 import { FileFollower, rotateIfBig, tailLines } from './logs.ts';
 import { PortAllocator, type PortRange } from './ports.ts';
 import { pidAlive, procStartTime, sameProcess, signalGroup, stopGroup } from './proc.ts';
-import { ServiceLauncher, sandboxCommand, scopeCommand, scrubEnv } from './sandbox.ts';
+import { SERVICE_HOME, ServiceLauncher, sandboxCommand, scopeCommand, scrubEnv } from './sandbox.ts';
 import {
   type EnvState,
   isLiveEnv,
@@ -117,6 +117,10 @@ export interface RunManagerDeps {
   launcher?: ServiceLauncher;
   /** The real home directory (its credential folders are unreadable for services). */
   realHome?: string;
+  /** The runner's `repoRoots`: build guides are looked for in the folders above a clone, up to the root that holds it. */
+  repoRoots?(): string[];
+  /** Credentials for git against a repository's host (submodules of the run worktrees are fetched with them). */
+  gitAuth?: GitAuth;
 }
 
 interface ReplayCtx {
@@ -329,6 +333,7 @@ export class RunManager {
       portRange: p.portRange,
       ttlAt: p.ttlAt,
       allowDocker: p.allowDocker,
+      ...(p.buildGuides?.length ? { buildGuides: p.buildGuides } : {}),
       state: 'preparing',
       activity: 'creating the worktrees',
       reportedFinal: false,
@@ -398,6 +403,7 @@ export class RunManager {
             `could not create the run worktree for ${s.name}: ${r.stderr.trim().slice(0, 400)}`,
           );
       });
+      const submoduleWarning = await this.initSubmodules(repo.localPath, path, s.name);
       env.sources.push({
         repoId: s.repoId,
         name: s.name,
@@ -405,10 +411,30 @@ export class RunManager {
         branch: s.branch,
         ...(s.projectPath ? { projectPath: s.projectPath } : {}),
         path,
+        clonePath: repo.localPath,
         commit,
+        ...(submoduleWarning ? { submoduleWarning } : {}),
       });
       this.save(env);
     }
+  }
+
+  /**
+   * `git submodule update --init --recursive` in a new run worktree (a worktree starts with empty submodule folders), with
+   * the repository's git auth. Not fatal: the warning is kept and shown to the DevOps engineer by `aom run info`.
+   */
+  private async initSubmodules(clone: string, worktree: string, name: string): Promise<string | null> {
+    if (!existsSync(join(worktree, '.gitmodules'))) return null;
+    const url = (await git(clone, ['remote', 'get-url', 'origin'])).stdout.trim();
+    const a = this.deps.gitAuth && url ? await this.deps.gitAuth(url) : { args: [], env: {} };
+    const r = await git(worktree, [...a.args, 'submodule', 'update', '--init', '--recursive'], {
+      env: a.env,
+      timeoutMs: 15 * 60_000,
+    });
+    if (r.exitCode === 0) return null;
+    const why = r.stderr.trim().slice(-400) || `exit code ${r.exitCode}`;
+    this.deps.log.warn(`could not initialise the submodules of the run worktree of ${name}: ${why}`);
+    return why;
   }
 
   /**
@@ -542,11 +568,38 @@ export class RunManager {
   // ----------------------------------------------------------------------------- replay and restart
 
   private currentBuildHash(env: EnvState): string {
-    const docs = env.sources.flatMap((s) => {
-      const d = findBuildDoc(s.path, s.projectPath);
-      return d ? [{ repoId: s.repoId, content: d.content }] : [];
+    const { docs, extra } = this.guidesOf(env);
+    return guidesHash(docs, extra);
+  }
+
+  /**
+   * The build guides of an environment: the BUILD.md of each run worktree and the guides outside them (folders above the
+   * clones, README fallbacks, or the project's "Build guide" setting, which replaces all of that).
+   */
+  private guidesOf(env: EnvState): {
+    docs: Array<{ repoId: string; path: string; content: string }>;
+    extra: ExtraGuide[];
+  } {
+    const configured = env.buildGuides ?? [];
+    const found = configured.length
+      ? []
+      : env.sources.flatMap((s) => {
+          const d = findBuildDoc(s.path, s.projectPath);
+          return d ? [{ repoId: s.repoId, path: d.path, content: d.content }] : [];
+        });
+    const extra = discoverExtraGuides({
+      sources: env.sources.map((s) => ({
+        repoId: s.repoId,
+        clonePath: s.clonePath,
+        worktree: s.path,
+        projectPath: s.projectPath,
+      })),
+      configured,
+      repoRoots: this.deps.repoRoots?.() ?? [],
+      home: this.deps.realHome ?? homedir(),
+      repoHasBuildDoc: found.length > 0,
     });
-    return buildHash(docs);
+    return { docs: found, extra };
   }
 
   /** The first start from a saved plan: BUILD.md must still be what the plan was made from, then the plan runs. */
@@ -996,7 +1049,7 @@ export class RunManager {
       'Repositories (detached run worktrees, no branch; your own commands may read and build there):',
       ...env.sources.map(
         (s) =>
-          `- ${s.name} (--repo ${s.name}): ${s.path}  branch ${s.branch} @ ${s.commit?.slice(0, 10) ?? '?'}${s.projectPath ? `  project folder ${s.projectPath}` : ''}`,
+          `- ${s.name} (--repo ${s.name}): ${s.path}  branch ${s.branch} @ ${s.commit?.slice(0, 10) ?? '?'}${s.projectPath ? `  project folder ${s.projectPath}` : ''}${s.clonePath ? `  (the user's own checkout: ${s.clonePath})` : ''}${s.submoduleWarning ? `  WARNING: the submodules could not be initialised: ${s.submoduleWarning}` : ''}`,
       ),
     ];
     if (env.wanted.length) lines.push(`Services wanted: ${env.wanted.join(', ')}`);
@@ -1079,7 +1132,7 @@ export class RunManager {
       Object.assign(
         out,
         {
-          HOME: '/tmp/home',
+          HOME: SERVICE_HOME,
           TMPDIR: '/tmp',
           TMP: '/tmp',
           TEMP: '/tmp',
@@ -1808,13 +1861,9 @@ export class RunManager {
     env.notes = notes;
     env.state = 'healthy';
     env.activity = undefined;
-    const docs = env.sources.flatMap((s) => {
-      const d = findBuildDoc(s.path, s.projectPath);
-      return d ? [{ repoId: s.repoId, content: d.content }] : [];
-    });
     this.save(env);
     this.report(env, true);
-    this.deps.send('run.plan.saved', { envId: env.envId, plan, buildHash: buildHash(docs) });
+    this.deps.send('run.plan.saved', { envId: env.envId, plan, buildHash: this.currentBuildHash(env) });
     const urls = env.services.flatMap((s) =>
       s.ports.filter((p) => p.url).map((p) => `${s.def.name}: ${p.url}`),
     );
@@ -1908,10 +1957,26 @@ export class RunManager {
     const env = this.envs.get(envId);
     if (!env) return [];
     await Promise.race([this.prepared.get(envId), sleep(120_000)]);
-    return env.sources.flatMap((s) => {
-      const d = findBuildDoc(s.path, s.projectPath);
-      return d ? [{ repoId: s.repoId, path: d.path, content: d.content }] : [];
-    });
+    return this.guidesOf(env).docs;
+  }
+
+  /**
+   * The guides outside the run worktrees (folders above the clones, the project's setting, README fallbacks) and where
+   * each repository's clone and run worktree are, for the DevOps brief.
+   */
+  async buildGuides(envId: string): Promise<{
+    guides: ExtraGuide[];
+    pathMap: Array<{ repoId: string; clonePath: string; worktreePath: string }>;
+  }> {
+    const env = this.envs.get(envId);
+    if (!env) return { guides: [], pathMap: [] };
+    await Promise.race([this.prepared.get(envId), sleep(120_000)]);
+    return {
+      guides: this.guidesOf(env).extra,
+      pathMap: env.sources.flatMap((s) =>
+        s.clonePath ? [{ repoId: s.repoId, clonePath: s.clonePath, worktreePath: s.path }] : [],
+      ),
+    };
   }
 
   /** The commit and branch of each repository, for the brief. */

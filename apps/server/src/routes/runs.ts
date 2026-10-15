@@ -14,11 +14,13 @@ import { z } from 'zod';
 import { requireUser } from '../auth/guards.ts';
 import { confirmSuite, getIntegrationTests, setIntegrationTests } from '../commands/integration-tests.ts';
 import {
+  dismissRun,
   extendRun,
   getRun,
   getRunSettings,
   listRuns,
   restartRun,
+  retryRun,
   setRunSettings,
   startRun,
   stopRun,
@@ -83,6 +85,18 @@ export function runRoutes(ctx: Ctx) {
         return { environment };
       },
     );
+
+    app.post('/api/runs/:id/dismiss', { schema: { params: IdParamsSchema } }, async (req) => {
+      const s = await requireUser(ctx, req);
+      return { environment: await dismissRun(ctx, s.user, req.params.id) };
+    });
+
+    app.post('/api/runs/:id/retry', { schema: { params: IdParamsSchema } }, async (req, reply) => {
+      const s = await requireUser(ctx, req);
+      const environment = await retryRun(ctx, s.user, req.params.id);
+      reply.code(201);
+      return { environment };
+    });
 
     app.get('/api/projects/:id/run-settings', { schema: { params: IdParamsSchema } }, async (req) => {
       const s = await requireUser(ctx, req);

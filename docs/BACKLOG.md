@@ -229,6 +229,40 @@ The details of each done item follow this list, by date.
 - #38: Monday briefing e-mail per member (long version for Owners and Admins, opt-out in Settings). Done 2026-10-14.
 - #17: Stale figures in the user guide: guide seeds fixed, every figure re-captured, figures for the newer features, guide.html and PDF rebuilt. Done 2026-10-14.
 
+## 2026-10-15 (done)
+
+### 69. Run a branch: build guide above the repositories, environment-aware DevOps, failed environments stay visible (built)
+
+**Owner report (2026-10-15).** "Flow-Server@pieter/dev, Flow-Web@pieter/dev of dCode Flow P4" failed: DevOps found
+`couchbase://localhost` in `appsettings.json`, saw no Couchbase and no Docker, and gave up; on the page the "running" message just
+vanished. The facts: the repositories are clones side by side under `/home/user/projects/sources/`; the build guide is
+`sources/BUILD.md`, in the folder **above** the repositories (in no repository); it says the webconsole uses its embedded server
+(a git submodule) and that `appsettings.Development.json` already points at a Couchbase on the private network.
+
+**Done.**
+- **Build guide discovery** (`apps/runner/src/runs/discovery.ts`): `BUILD.md` in the folders above each clone, up to and including
+  the `repoRoots` entry that holds it, never the home directory or above; nearest first, deduplicated, absolute paths in the brief;
+  README fallbacks only when no `BUILD.md` exists anywhere; a per-project **Build guide** setting (absolute paths, Run and test)
+  replaces discovery (`RunSettings.buildGuides`, `run.start.buildGuides`). The fingerprint (`guidesHash`) covers parent guides.
+  The brief tells DevOps to map the user's checkout to the run worktree (`pathMap`). New run worktrees run
+  `git submodule update --init --recursive` with the repository's git auth (a failure is a warning in `aom run info`).
+- **DevOps** (`renderRunSection`, role `devops` v8, "Running a project"): the guide first and literally; environment configuration
+  (`appsettings.{Environment}.json`, `launchSettings.json`, `.env.development`) before "missing"; `ASPNETCORE_ENVIRONMENT=Development`
+  when the guide relies on it; private-network hosts count as available; when blocked, ask the owner through the existing
+  `aom devops-approval` ("Question: ...") instead of failing; a guide that contradicts the selected repositories wins.
+- **Service sandbox:** `~/.microsoft/usersecrets` bound read-only at the services' HOME (services only).
+- **Web:** `GET /api/runs` (default) now also returns failed manual environments nobody dismissed (14 days); the cause of the
+  vanishing message was the live-states-only list. The panel shows the DevOps report (else the last error), a link to the DevOps
+  request (`/workstations?devopsRequest=<id>` opens the thread), **Try again** (`POST /api/runs/:id/retry`, same selection, dismisses the
+  old one), **Dismiss** (`POST /api/runs/:id/dismiss`, migration 2010 `dismissed_at`) and a **Waiting for you** state (request in
+  `needs_approval`) with the question and options.
+- Tests: runner `runs-guides.test.ts`, `runs-p2.test.ts`, `runs-shift.test.ts`; server `runs-visible.test.ts`; shared `runs.test.ts`;
+  web `runs-ui.test.tsx`.
+
+**Left.** The owner can answer a question only through the DevOps request's approve/reject box (the note is the answer); a typed
+answer form on the run panel itself is not built. Test environments of cards do not show the Try again / Dismiss buttons (the card
+flow handles their failure).
+
 ## 2026-10-14 (done)
 
 ### 67. Support e-mail into the Support console; an inbox for every organisation

@@ -121,6 +121,8 @@ export const RunStartPayloadSchema = z.object({
   portRange: z.object({ from: z.number().int(), to: z.number().int() }),
   ttlAt: z.iso.datetime(),
   allowDocker: z.boolean().default(false),
+  /** The project's "Build guide" setting (absolute paths on this workstation): replaces the discovery of BUILD.md. */
+  buildGuides: z.array(z.string().min(1).max(500)).max(5).optional(),
   /**
    * A test environment for a card (#59, D9): before the run worktrees are cut, the runner rebases the card branch onto its
    * base branch (the `test` stage's `rebaseBefore`) and the environment runs the rebased commit. A conflict fails the start.
@@ -270,6 +272,19 @@ export const RunEnvironmentDtoSchema = z.object({
   canRestart: z.boolean().default(false),
   /** The environment started from a saved plan (no model call) rather than through the DevOps engineer. */
   replayed: z.boolean().default(false),
+  /**
+   * Why a failed (or stopped-as-failed) environment failed: the DevOps engineer's report, else the last error the runner
+   * saw. Null while nothing went wrong.
+   */
+  failureReason: z.string().nullable().default(null),
+  /**
+   * The DevOps engineer is blocked and asked the owner (the request waits for an answer on the desk): what it needs and
+   * why. The environment stays in a visible "waiting for you" state meanwhile.
+   */
+  waiting: z.object({ action: z.string(), reason: z.string() }).nullable().default(null),
+  /** "Try again" (same selection) and "Dismiss" are offered on a failed environment. */
+  canRetry: z.boolean().default(false),
+  canDismiss: z.boolean().default(false),
 });
 export type RunEnvironmentDto = z.infer<typeof RunEnvironmentDtoSchema>;
 export const RunEnvironmentsResponseSchema = z.object({ environments: z.array(RunEnvironmentDtoSchema) });

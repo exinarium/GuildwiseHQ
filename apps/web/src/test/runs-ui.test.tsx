@@ -230,6 +230,88 @@ describe('environment panel', () => {
     expect(screen.queryByTestId('run-extend')).toBeNull();
   });
 
+  it('a failed environment stays visible with the reason, a link to the DevOps request, Try again and Dismiss', async () => {
+    const user = userEvent.setup();
+    routes[`POST /api/runs/${ID(50)}/retry`] = () =>
+      json({ environment: env({ id: ID(51), state: 'requested' }) }, 201);
+    routes[`POST /api/runs/${ID(50)}/dismiss`] = () => json({ environment: env({ state: 'failed' }) });
+    wrap(
+      <RunPanel
+        env={
+          env({
+            state: 'failed',
+            servicesStatus: [],
+            canStop: false,
+            canExtend: false,
+            canRetry: true,
+            canDismiss: true,
+            stoppedAt: new Date().toISOString(),
+            stopReason: 'failed',
+            lastError: 'DevOps gave up',
+            failureReason:
+              'The environment failed: Flow-Server needs a Couchbase server and none is running.',
+          }) as never
+        }
+      />,
+    );
+    expect(screen.getByTestId('run-state')).toHaveTextContent('Failed');
+    expect(screen.getByTestId('run-failure')).toHaveTextContent('Flow-Server needs a Couchbase server');
+    expect(screen.getByTestId('run-error')).not.toHaveTextContent('DevOps gave up');
+    expect(screen.getByTestId('run-devops-link')).toHaveAttribute(
+      'href',
+      `/workstations?devopsRequest=${ID(60)}`,
+    );
+    expect(screen.queryByTestId('run-stop')).toBeNull();
+    await user.click(screen.getByTestId('run-retry'));
+    await waitFor(() => expect(calls.some((c) => c.url.endsWith(`/runs/${ID(50)}/retry`))).toBe(true));
+    await user.click(screen.getByTestId('run-dismiss'));
+    await waitFor(() => expect(calls.some((c) => c.url.endsWith(`/runs/${ID(50)}/dismiss`))).toBe(true));
+  });
+
+  it('a failed environment without a DevOps report shows the last error; without the rights there are no buttons', () => {
+    wrap(
+      <RunPanel
+        env={
+          env({
+            state: 'failed',
+            servicesStatus: [],
+            canStop: false,
+            canExtend: false,
+            lastError: 'the runner could not prepare the environment',
+            failureReason: null,
+            devopsRequestId: null,
+          }) as never
+        }
+      />,
+    );
+    expect(screen.getByTestId('run-error')).toHaveTextContent('the runner could not prepare the environment');
+    expect(screen.queryByTestId('run-retry')).toBeNull();
+    expect(screen.queryByTestId('run-dismiss')).toBeNull();
+    expect(screen.queryByTestId('run-devops-link')).toBeNull();
+  });
+
+  it('an environment whose DevOps engineer asked the owner shows "Waiting for you" with the question and options', () => {
+    wrap(
+      <RunPanel
+        env={
+          env({
+            state: 'starting',
+            servicesStatus: [],
+            waiting: {
+              action: 'Question: Flow-Server needs Couchbase',
+              reason: 'A) use 192.168.1.12 B) allow Docker',
+            },
+          }) as never
+        }
+      />,
+    );
+    expect(screen.getByTestId('run-state')).toHaveTextContent('Waiting for you');
+    expect(screen.getByTestId('run-waiting')).toHaveTextContent('Question: Flow-Server needs Couchbase');
+    expect(screen.getByTestId('run-waiting')).toHaveTextContent('A) use 192.168.1.12 B) allow Docker');
+    expect(screen.getByTestId('run-devops-link')).toBeInTheDocument();
+    expect(screen.queryByTestId('run-working')).toBeNull();
+  });
+
   it('a start from the saved plan says so, and services outside the sandbox are flagged', () => {
     wrap(
       <RunPanel
@@ -554,11 +636,19 @@ describe('run and test settings', () => {
     await user.type(instr, 'Use the sample data.');
     await user.click(screen.getByTestId('run-docker'));
     expect(screen.getByText(/root-equivalent access/)).toBeInTheDocument();
+    await user.type(
+      screen.getByTestId('run-build-guides'),
+      '/home/u/src/dcode/sources/BUILD.md{enter}/home/u/other.md',
+    );
     await user.click(screen.getByTestId('run-settings-save'));
     await waitFor(() => expect(calls.find((c) => c.method === 'PUT')).toBeTruthy());
     const body = calls.find((c) => c.method === 'PUT')!.body;
     expect(body.runInstructions).toBe('Use the sample data.');
-    expect(body.settings).toMatchObject({ ttlHours: 8, allowDocker: true });
+    expect(body.settings).toMatchObject({
+      ttlHours: 8,
+      allowDocker: true,
+      buildGuides: ['/home/u/src/dcode/sources/BUILD.md', '/home/u/other.md'],
+    });
     expect(body.settings.services.map((s: any) => s.name)).toEqual(['db', 'api', 'web']);
     expect(body.settings.services[1]).toMatchObject({
       name: 'api',

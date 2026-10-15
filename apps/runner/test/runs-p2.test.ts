@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { type RunPlan, RunPlanSchema } from '@aom/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { runnerPaths } from '../src/paths.ts';
-import { buildHash } from '../src/runs/discovery.ts';
+import { buildHash, guidesHash } from '../src/runs/discovery.ts';
 import { RunManager, type RunManagerDeps } from '../src/runs/manager.ts';
 import { pidAlive } from '../src/runs/proc.ts';
 import {
@@ -595,6 +595,30 @@ describe('plan replay', () => {
     expect(failures(t.sent)[0]).toMatchObject({ stale: true });
     expect(failures(t.sent)[0]?.reason).toMatch(/BUILD\.md has changed/);
     expect(last(t.sent, envId)!.services).toEqual([]);
+  });
+
+  it('a BUILD.md above the repository is part of the fingerprint: a plan made without it is stale, one made with it replays', async () => {
+    const roots: string[] = [];
+    const t = setup({ repoRoots: () => roots });
+    mgrs.push(t.mgr);
+    roots.push(t.repo.scanRoot);
+    const parentPath = join(t.repo.scanRoot, 'BUILD.md');
+    writeFileSync(parentPath, '# above the repositories\n');
+    const plan = await t.planFor();
+    const stale = t.start({ plan }); // hash of the repository's BUILD.md only
+    await t.mgr.startEnv(stale.p);
+    await waitUntil(() => failures(t.sent).length === 1, 15_000, 'the fallback');
+    expect(failures(t.sent)[0]).toMatchObject({ stale: true });
+    expect(failures(t.sent)[0]?.reason).toMatch(/BUILD\.md has changed/);
+
+    const hash = guidesHash(
+      [{ repoId: t.repoId, content: BUILD_MD }],
+      [{ path: parentPath, content: '# above the repositories\n', origin: 'parent' }],
+    );
+    const current = t.start({ plan: await t.planFor(), hash });
+    await t.mgr.startEnv(current.p);
+    await waitUntil(() => last(t.sent, current.envId)?.state === 'healthy', 15_000, 'the replay');
+    expect(failures(t.sent)).toHaveLength(1);
   });
 
   it('a plan whose cwd leaves the repository is refused by the runner too', async () => {
