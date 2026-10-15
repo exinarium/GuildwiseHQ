@@ -1414,6 +1414,13 @@ dir entry by entry, `denyAround`) did not touch this and is kept only as a tight
 shift ends. If a future Claude Code protects more names, the real-sandbox test (skipped without `claude` and `bwrap`) is
 the signal. The risk analysis of a review goes in a file in the scratch directory (`$TMPDIR/risk.md`) or inline with
 `--risk-analysis "<text>"`; an unreadable `--risk-file` now says so.
+Hotfix #77: those stubs exist while the shift runs, so a report (`aom finalize`, `aom review`) used to be refused by the guard
+(`readonly_role_modified_code` for `.bash_profile`, `.gitmodules`, `.profile`, ...). The guard, the leftovers autocommit, the
+unreported-work note, the read-only rollback check, the worktree sweep and the finalize dirty check now ignore exactly the
+sandbox stubs: untracked, empty files at the worktree root with one of the protected names (list exported from
+`sandbox-placeholders.ts`; the empty directories are invisible to git). A non-empty file (a real `.gitmodules`) or a tracked
+one that was modified still counts. The runner also removes such empty untracked stubs (its own and Claude Code's) when the
+shift ends, before the guard, discard and autocommit run, and `autoCommit` excludes them from `git add` for every role.
 A role that may not commit (reviewer, scout, ...) is also rolled back after every shift, which stays as the safety net
 and is still recorded as a guard violation: `git checkout -f <branch>`,
 `git reset --hard <start sha>`, `git clean -fd` inside its worktree. Roles with `writableGlobs` (tester: the project's

@@ -119,6 +119,7 @@ import {
   transcriptPath,
 } from '../transcript/service.ts';
 import { readVaultContext, withVaultContext } from '../vaults/context.ts';
+import { removeSandboxStubs } from '../adapters/sandbox-placeholders.ts';
 import { autoCommit, uncommittedFiles, unreportedWorkNote } from './autocommit.ts';
 import {
   type BranchSnapshot,
@@ -920,6 +921,10 @@ export class ShiftSupervisor {
     }
     // A report may still be waiting for the server's verdict.
     while (s.pendingReports.size > 0) await sleep(50);
+
+    // The sandbox's empty mount stubs (.gitmodules, .bashrc, ...) go before anything looks at the worktree, whoever made
+    // them (the runner's placeholders or Claude Code itself): never tracked files, never non-empty ones.
+    if (msg.worktree && s.worktree) await removeSandboxStubs(s.worktree.path).catch(() => []);
 
     if (msg.worktree && s.worktree && msg.agent.permissions.mayCommit) {
       // A guard rejection leaves the agent's out-of-scope edits in the worktree: discard them, never commit them.

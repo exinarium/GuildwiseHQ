@@ -1,3 +1,4 @@
+import { statusLinesWithoutStubs, untrackedSandboxStubs } from '../adapters/sandbox-placeholders.ts';
 import { git } from '../git/git.ts';
 
 export interface AutoCommitInput {
@@ -13,9 +14,13 @@ export async function autoCommit(input: AutoCommitInput): Promise<boolean> {
   // A merge of the main branch waiting for its conflicts to be resolved must not be committed half done (that would
   // record the conflict markers as the resolution): the next architect shift picks it up.
   if ((await git(input.worktree, ['rev-parse', '-q', '--verify', 'MERGE_HEAD'])).exitCode === 0) return false;
-  const status = await git(input.worktree, ['status', '--porcelain', '--untracked-files=all']);
-  if (status.exitCode !== 0 || !status.stdout.trim()) return false;
-  const add = await git(input.worktree, ['add', '-A'], { env: input.env });
+  // The sandbox's empty mount stubs (.gitmodules, .bashrc, ...) are never work: not committed, not a reason to commit.
+  const status = await statusLinesWithoutStubs(input.worktree);
+  if (!status.ok || status.lines.length === 0) return false;
+  const stubs = await untrackedSandboxStubs(input.worktree);
+  const add = await git(input.worktree, ['add', '-A', '--', '.', ...stubs.map((n) => `:(exclude,top)${n}`)], {
+    env: input.env,
+  });
   if (add.exitCode !== 0) return false;
   const msg = input.ticket ? `${input.ticket}: Work in progress` : 'Work in progress';
   const c = await git(input.worktree, ['commit', '--no-verify', '-m', msg], { env: input.env });
@@ -24,12 +29,8 @@ export async function autoCommit(input: AutoCommitInput): Promise<boolean> {
 
 /** Files `git status` shows as changed or untracked in the worktree (porcelain lines), empty when clean. */
 export async function uncommittedFiles(worktree: string): Promise<string[]> {
-  const status = await git(worktree, ['status', '--porcelain', '--untracked-files=all']);
-  if (status.exitCode !== 0) return [];
-  return status.stdout
-    .split('\n')
-    .map((l) => l.trimEnd())
-    .filter(Boolean);
+  const status = await statusLinesWithoutStubs(worktree);
+  return status.ok ? status.lines.map((l) => l.trimEnd()) : [];
 }
 
 const MAX_LISTED = 30;

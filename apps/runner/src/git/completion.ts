@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 import { type FinalizeExecutePayload, type FinalizeResult, isSafeGitRef } from '@aom/shared';
 import type { BranchRules } from '../forge/types.ts';
+import { statusLinesWithoutStubs } from '../adapters/sandbox-placeholders.ts';
 import { isProtectedBranchRejection, type PrCreator } from './gh.ts';
 import { git, gitOk, hasRemote, revParse } from './git.ts';
 import { commitEnv, NoCommitIdentityError, requireCommitIdentity } from './identity.ts';
@@ -100,7 +101,7 @@ export async function executeCompletion(input: CompletionInput): Promise<Finaliz
     return fail(action, `the card worktree is not available: ${errMsg(err)}`);
   }
 
-  const dirty = (await git(wt, ['status', '--porcelain'])).stdout.trim();
+  const dirty = (await statusLinesWithoutStubs(wt)).lines.join('\n').trim();
   if (dirty) return fail(action, `the card worktree has uncommitted changes:\n${dirty.slice(0, 500)}`);
 
   try {

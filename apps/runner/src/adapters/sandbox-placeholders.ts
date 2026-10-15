@@ -1,5 +1,6 @@
-import { closeSync, existsSync, mkdirSync, openSync, rmdirSync, statSync, unlinkSync } from 'node:fs';
+import { closeSync, existsSync, lstatSync, mkdirSync, openSync, rmdirSync, statSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
+import { git } from '../git/git.ts';
 
 /**
  * Claude Code's sandbox protects a handful of dotfiles in the working directory (`.gitconfig`, `.bashrc`, `.vscode`,
@@ -23,6 +24,69 @@ export const SANDBOX_PROTECTED_FILES = [
   '.ripgreprc',
 ] as const;
 export const SANDBOX_PROTECTED_DIRS = ['.vscode', '.idea'] as const;
+
+/**
+ * Names (at the worktree root) of the sandbox mount stubs: the protected files, which show up in `git status` as empty
+ * untracked files. (The protected directories are empty, which git never lists.)
+ */
+export const SANDBOX_STUB_NAMES: readonly string[] = [...SANDBOX_PROTECTED_FILES];
+
+const isEmptyFile = (p: string): boolean => {
+  try {
+    const st = lstatSync(p);
+    return st.isFile() && st.size === 0;
+  } catch {
+    return false;
+  }
+};
+
+/** The stub names present in `cwd` as empty files that git does not track: exactly what the sandbox leaves behind. */
+export async function untrackedSandboxStubs(cwd: string): Promise<string[]> {
+  const out: string[] = [];
+  for (const n of SANDBOX_STUB_NAMES) {
+    if (!isEmptyFile(join(cwd, n))) continue;
+    // a tracked file (even an empty one) is the project's own
+    if ((await git(cwd, ['ls-files', '--error-unmatch', '--', n])).exitCode === 0) continue;
+    out.push(n);
+  }
+  return out;
+}
+
+/** `git status --porcelain` lines without the untracked entries for the given stubs. */
+export function withoutSandboxStubs(lines: string[], stubs: readonly string[]): string[] {
+  if (stubs.length === 0) return lines;
+  const drop = new Set(stubs.map((n) => `?? ${n}`));
+  return lines.filter((l) => !drop.has(l.trimEnd()));
+}
+
+/** Porcelain status lines of `cwd` (untracked files included) minus the sandbox stubs. */
+export async function statusLinesWithoutStubs(cwd: string): Promise<{ ok: boolean; lines: string[] }> {
+  const r = await git(cwd, ['status', '--porcelain', '--untracked-files=all']);
+  if (r.exitCode !== 0) return { ok: false, lines: [] };
+  const lines = r.stdout.split('\n').filter((l) => l.trim());
+  return { ok: true, lines: withoutSandboxStubs(lines, await untrackedSandboxStubs(cwd)) };
+}
+
+/**
+ * Removes the sandbox stubs in `cwd`, whoever made them (our placeholders or Claude Code's own bwrap): empty untracked
+ * files and empty directories with the protected names. Tracked and non-empty entries are never touched.
+ */
+export async function removeSandboxStubs(cwd: string): Promise<string[]> {
+  const removed: string[] = [];
+  for (const n of await untrackedSandboxStubs(cwd)) {
+    try {
+      unlinkSync(join(cwd, n));
+      removed.push(n);
+    } catch {}
+  }
+  for (const n of SANDBOX_PROTECTED_DIRS) {
+    try {
+      rmdirSync(join(cwd, n)); // fails unless empty
+      removed.push(n);
+    } catch {}
+  }
+  return removed;
+}
 
 /** Creates the missing protected names in `cwd`; returns a function that removes exactly what it created. */
 export function createSandboxPlaceholders(cwd: string): () => void {

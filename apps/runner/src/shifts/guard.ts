@@ -1,5 +1,10 @@
 import { isRunnerOwnedBranch, type AgentPermissions, type GuardViolation } from '@aom/shared';
 import picomatch from 'picomatch';
+import {
+  statusLinesWithoutStubs,
+  untrackedSandboxStubs,
+  withoutSandboxStubs,
+} from '../adapters/sandbox-placeholders.ts';
 import { currentBranch, git } from '../git/git.ts';
 
 export interface BranchSnapshot {
@@ -126,7 +131,9 @@ export async function changedPaths(
   const exempt = await mainMergeExemptPaths(worktree, startSha, mainMergeShas);
   const out = new Set<string>();
   for (const l of committed.stdout.split('\n')) if (l.trim() && !exempt.has(l.trim())) out.add(l.trim());
-  for (const l of dirty.stdout.split('\n')) {
+  // the sandbox's empty mount stubs (.gitmodules, .bashrc, ...) are not changes (hotfix #77)
+  const dirtyLines = withoutSandboxStubs(dirty.stdout.split('\n'), await untrackedSandboxStubs(worktree));
+  for (const l of dirtyLines) {
     if (l.length > 3) out.add(l.slice(3).replace(/^"|"$/g, '').split(' -> ').pop() as string);
   }
   return [...out].filter((p) => !isTestArtifact(p));
@@ -167,7 +174,7 @@ export async function resetReadOnlyWorktree(input: {
   startSha: string;
 }): Promise<boolean> {
   const head = (await git(input.worktree, ['rev-parse', 'HEAD'])).stdout.trim();
-  const dirty = (await git(input.worktree, ['status', '--porcelain', '--untracked-files=all'])).stdout.trim();
+  const dirty = (await statusLinesWithoutStubs(input.worktree)).lines.length > 0;
   const branch = await currentBranch(input.worktree);
   if (head === input.startSha && !dirty && branch === input.branchName) return false;
   await git(input.worktree, ['checkout', '-f', input.branchName]);

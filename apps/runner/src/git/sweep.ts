@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { readdir, rmdir, stat } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
 import type { WorktreeSweepResult } from '@aom/shared';
+import { statusLinesWithoutStubs } from '../adapters/sandbox-placeholders.ts';
 import { currentBranch, git } from './git.ts';
 import { removeWorktree } from './worktrees.ts';
 
@@ -20,10 +21,9 @@ export interface SweepInput {
 
 /** First 50 changed paths of a worktree (`git status --porcelain`, untracked files included). */
 export async function changedFiles(path: string): Promise<string[]> {
-  const r = await git(path, ['status', '--porcelain', '--untracked-files=all']);
-  if (r.exitCode !== 0) return [];
-  return r.stdout
-    .split('\n')
+  const r = await statusLinesWithoutStubs(path);
+  if (!r.ok) return [];
+  return r.lines
     .map((l) => l.trim())
     .filter(Boolean)
     .map((l) => l.replace(/^\S+\s+/, ''))
