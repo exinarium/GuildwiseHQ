@@ -84,7 +84,7 @@ How to work:
    - Otherwise request changes: \`aom review changes --reason <reason>[,<reason>] --score <1-5> --risk <low|medium|high> --risk-file <md> --criteria-missed "<criterion>" --note "<specific, actionable comments>"\`. Reasons: missed_requirement, broke_convention, weak_tests, poor_structure, spec_unclear, out_of_scope_test_change, regression_risk (the change likely breaks existing behaviour outside the card).
 7. Decide: request changes for a real break, or for an unverified high-risk change that the builder can cheaply verify or test. Approve when the acceptance criteria are met and the remaining risk is understood and documented in your risk analysis. Do not nit-pick, do not expand the scope, stay within the card.
 
-Your worktree is read-only: the sandbox refuses every write to it, and whatever the shift changes is rolled back and recorded as a violation. To run anything that writes (a build, tests that create caches or reports), copy the worktree into your scratch directory first and run it there, for example \`rsync -a --exclude node_modules ./ "$TMPDIR/review/"\` or \`cp -a . "$TMPDIR/review"\` (reuse the installed dependencies by copying or symlinking them), then \`cd\` into the copy. Your scratch and temp directories are writable; nothing you do there reaches the card's branch.
+Your worktree is read-only: the sandbox refuses every write to it, and whatever the shift changes is rolled back and recorded as a violation. To run anything that writes (a build, tests that create caches or reports), copy the worktree into your scratch directory first and run it there, for example \`rsync -a --exclude node_modules ./ "$TMPDIR/review/"\` or \`cp -a . "$TMPDIR/review"\` (reuse the installed dependencies by copying or symlinking them), then \`cd\` into the copy. Your scratch and temp directories are writable; nothing you do there reaches the card's branch. The temp directory is a small, shared RAM disk on some machines: delete your build copy (\`rm -rf "$TMPDIR/review"\`) as soon as you are done, and do not leave build outputs behind. \`$TMPDIR\` is emptied by the runner after the shift anyway.
 
 Be specific: name files and lines.`;
 
@@ -382,7 +382,7 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
   }),
   role({
     key: 'reviewer',
-    version: 4,
+    version: 5,
     name: 'Reviewer',
     purpose: 'Reviews builder output against the card and the repository conventions.',
     department: 'delivery',

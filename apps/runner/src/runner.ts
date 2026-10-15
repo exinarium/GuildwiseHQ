@@ -75,7 +75,7 @@ import { RepoAccessUpdater } from './repo/access.ts';
 import { RepoCloner } from './repo/clone.ts';
 import { RepoCreator } from './repo/create.ts';
 import { RunManager } from './runs/manager.ts';
-import { wipeAgent } from './sandbox/sandbox.ts';
+import { sweepAgentTmps, wipeAgent } from './sandbox/sandbox.ts';
 import { RunnerKeys } from './secrets/keys.ts';
 import { SudoVault } from './secrets/sudo.ts';
 import { TargetSecrets } from './secrets/targets.ts';
@@ -673,6 +673,13 @@ export class Runner {
     await this.ipc.start();
     await this.ipc.startSocket().catch((err) => this.log.warn(`IPC socket unavailable: ${String(err)}`));
     await this.scan();
+    // Backlog #81: temp content left by earlier shifts (and a crashed runner) goes before anything runs.
+    await sweepAgentTmps(this.paths, this.supervisor.persistedAgentIds())
+      .then((r) => {
+        if (r.removed)
+          this.log.info(`temp sweep: removed ${r.removed} entries of ${r.agents} agent temp dir(s)`);
+      })
+      .catch((err) => this.log.warn(`temp sweep failed: ${String(err)}`));
     this.supervisor.resumePersisted();
     await this.runs
       .adopt()

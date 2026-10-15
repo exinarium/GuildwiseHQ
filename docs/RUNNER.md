@@ -780,6 +780,28 @@ See [DevOps shifts are unsandboxed](#devops-shifts-are-unsandboxed).
 
 All are cleaned up when the agent is fired.
 
+### Agent temp directory (`TMPDIR`), cleaned after every shift
+
+The agent's `TMPDIR`/`TMP`/`TEMP` and `CLAUDE_CODE_TMPDIR` is `/tmp/aom-<10 hex>` (hash of data dir + agent id), mode 0700,
+on Linux/macOS. It is a short path on purpose: Unix socket paths are limited to 108 bytes and Claude Code puts its
+sockets (`cc-socks/`, `claude-http-*.sock`) and `claude-<uid>/<cwd>/` temp there. Claude Code's sandboxed shell uses
+`claude-<uid>/` inside it as its `$TMPDIR`, which is where reviewers' and testers' build copies landed. On a machine
+where `/tmp` is a RAM tmpfs nothing removed them, and they filled it (backlog #81, 24 GB tmpfs, about 21 GB of
+`/tmp/aom-*/claude-1000/*`).
+
+- **End of every shift** (done, crash, stop, timeout, rejected after start) and end of every chat: everything in the
+  agent's temp dir is removed except `node-compile-cache/`. The card attachments are copied again at the next start. The
+  cleanup is skipped while another shift or chat of the same agent (this process) uses the same dir, and it only ever
+  lists the direct entries of the dir, so a symlink is unlinked and never followed, a dir that is itself a symlink or is
+  not named `aom-*` is refused, and another agent's or runner's dir is never touched.
+- **Runner start**: before shifts are resumed, the temp dirs of all agents under `<data dir>/agents/` are cleaned
+  (agents with a shift about to be resumed are skipped), which also removes what a killed runner left behind.
+- The reviewer instructions (role version 5) tell the reviewer to delete its build copy when done and say that
+  `$TMPDIR` is emptied after the shift.
+- **Not moved to disk**: the temp dir stays under `/tmp` because of the socket length limit, and Claude Code's shell
+  derives its `$TMPDIR` from `CLAUDE_CODE_TMPDIR`, so a long on-disk path would break the sockets; cleaning is the fix.
+  The agent's `scratch/` is on disk under the data dir.
+
 ### Shared package caches and .NET in the sandbox
 
 Every agent has a private HOME, so `~/.nuget/packages`, `~/.npm`, the pnpm store, pip, Gradle and Maven caches used to

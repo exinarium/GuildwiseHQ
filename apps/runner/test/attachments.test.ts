@@ -597,7 +597,14 @@ describe('in a BA chat and in card shifts', () => {
     const [id1, id2] = [uuidv7(), uuidv7()];
     const files: Record<string, Buffer> = { [id1]: SVG, [id2]: PNG };
     const asked: string[] = [];
-    const adapter = new ScriptedAdapter(async (_i, ctl) => {
+    // the temp dir is emptied when the shift ends (#81): read the files while it runs
+    const seen: { svg?: Buffer; png?: Buffer; mode?: number; dirs?: string[] } = {};
+    const adapter = new ScriptedAdapter(async (i, ctl) => {
+      const d = join(i.sandbox.tmp, 'card-attachments');
+      seen.svg = readFileSync(join(d, 'SlideOutHistory.svg'));
+      seen.png = readFileSync(join(d, 'screen.png'));
+      seen.mode = statSync(join(d, 'screen.png')).mode;
+      seen.dirs = cardAttachmentDirs(i.sandbox);
       await ctl.post('/v1/report', {
         report: { kind: 'outcome', outcomeId: 'handoff', note: 'n', data: {} },
       });
@@ -632,12 +639,13 @@ describe('in a BA chat and in card shifts', () => {
     const input = adapter.inputs[0];
     expect(input).toBeDefined();
     const dir = join(input?.sandbox.tmp as string, 'card-attachments');
-    expect(readFileSync(join(dir, 'SlideOutHistory.svg')).equals(SVG)).toBe(true);
-    expect(readFileSync(join(dir, 'screen.png')).equals(PNG)).toBe(true);
-    if (process.platform !== 'win32') expect(statSync(join(dir, 'screen.png')).mode & 0o222).toBe(0);
+    expect(seen.svg?.equals(SVG)).toBe(true);
+    expect(seen.png?.equals(PNG)).toBe(true);
+    if (process.platform !== 'win32') expect((seen.mode as number) & 0o222).toBe(0);
+    expect(existsSync(join(dir, 'screen.png'))).toBe(false); // cleaned after the shift
     // outside the worktree, readable by the agent's file tools, and in the instructions
     expect(dir.startsWith(input?.cwd as string)).toBe(false);
-    expect(cardAttachmentDirs(input?.sandbox as { tmp: string })).toEqual([dir]); // the claude adapter adds it as a read folder
+    expect(seen.dirs).toEqual([dir]); // the claude adapter adds it as a read folder
     expect(input?.instructionsMarkdown).toContain('# Attachments of this card');
     expect(input?.instructionsMarkdown).toContain(join(dir, 'SlideOutHistory.svg'));
     // asked for as this shift

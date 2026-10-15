@@ -93,7 +93,7 @@ import { mergeReadFolders, resolveOrgFolderRepos, resolveReadRepos } from '../re
 import { preparePublication } from '../research/publish.ts';
 import { type EnvForwards, startForwards } from '../runs/forward.ts';
 import type { RunManager } from '../runs/manager.ts';
-import { ensureSandbox, type Sandbox, sandboxEnv } from '../sandbox/sandbox.ts';
+import { cleanAgentTmp, ensureSandbox, holdAgentTmp, type Sandbox, sandboxEnv } from '../sandbox/sandbox.ts';
 import type { TargetSecrets } from '../secrets/targets.ts';
 import {
   defaultEnvChecker,
@@ -264,6 +264,8 @@ interface ActiveShift {
   mainShas: string[];
   /** The tester's environment forwarders (Unix sockets to the environment's ports), closed when the shift ends. */
   forwards?: EnvForwards;
+  /** Releases the hold on the agent's TMPDIR (see `holdAgentTmp`). */
+  releaseTmp?: () => void;
 }
 
 type ShiftStartedSyncMain = {
@@ -389,6 +391,9 @@ export class ShiftSupervisor {
       if (shift.graceTimer) clearTimeout(shift.graceTimer);
       shift.forwards?.close();
       this.active.delete(msg.shiftId);
+      // every outcome (done, crash, stop, timeout): the agent's per-shift temp content goes (backlog #81)
+      shift.releaseTmp?.();
+      if (shift.sandbox) await cleanAgentTmp(shift.sandbox.tmp);
       this.forget(msg.shiftId);
     }
   }
@@ -418,6 +423,26 @@ export class ShiftSupervisor {
         rmSync(join(this.deps.paths.activeShifts, f), { force: true });
       }
     }
+  }
+
+  /** Agent ids of the persisted (to be resumed) shifts: their TMPDIR must survive the startup sweep. */
+  persistedAgentIds(): string[] {
+    const out: string[] = [];
+    let files: string[] = [];
+    try {
+      files = readdirSync(this.deps.paths.activeShifts).filter((f) => f.endsWith('.json'));
+    } catch {
+      return out;
+    }
+    for (const f of files) {
+      try {
+        const rec = JSON.parse(readFileSync(join(this.deps.paths.activeShifts, f), 'utf8')) as PersistedShift;
+        out.push(rec.msg.agent.agentId);
+      } catch {
+        /* unreadable: resumePersisted discards it */
+      }
+    }
+    return out;
   }
 
   private persist(s: ActiveShift): void {
@@ -577,6 +602,7 @@ export class ShiftSupervisor {
     s.identity = identity;
     const sandbox = await ensureSandbox(paths, msg.agent.agentId, msg.agent.name, identity);
     s.sandbox = sandbox;
+    s.releaseTmp = holdAgentTmp(sandbox);
     let cwd = sandbox.scratch;
 
     if (msg.worktree?.mode === 'readonly') {

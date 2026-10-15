@@ -32,7 +32,7 @@ import type { IpcServer, ShiftIpcHandler } from '../ipc/server.ts';
 import { type Logger, nullLogger } from '../log.ts';
 import type { RunnerPaths } from '../paths.ts';
 import { mergeReadFolders, resolveOrgFolderRepos, resolveReadRepos } from '../read-repos.ts';
-import { ensureSandbox, type Sandbox, sandboxEnv } from '../sandbox/sandbox.ts';
+import { cleanAgentTmp, ensureSandbox, holdAgentTmp, type Sandbox, sandboxEnv } from '../sandbox/sandbox.ts';
 import { agentPath, type ToolchainRegistry, toolchainRpc } from '../toolchain/registry.ts';
 import { readVaultContext } from '../vaults/context.ts';
 
@@ -71,6 +71,7 @@ interface ActiveChat {
   session?: RuntimeSession;
   token?: string;
   sandbox?: Sandbox;
+  releaseTmp?: () => void;
   stopReason?: 'cancelled' | string;
 }
 
@@ -141,6 +142,8 @@ export class ChatManager {
     } finally {
       if (chat.token) this.deps.ipc.revoke(chat.token);
       this.active.delete(msg.chatId);
+      chat.releaseTmp?.();
+      if (chat.sandbox) await cleanAgentTmp(chat.sandbox.tmp);
     }
   }
 
@@ -323,6 +326,7 @@ export class ChatManager {
       await resolveCommitIdentity(paths.root),
     );
     chat.sandbox = sandbox;
+    chat.releaseTmp = holdAgentTmp(sandbox);
     const attachDir = cardAttachmentsDir(sandbox.tmp);
     mkdirSync(attachDir, { recursive: true });
     // A card in context: read its worktree (if this workstation has it) without being able to change it.

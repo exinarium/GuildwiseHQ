@@ -252,6 +252,7 @@ The details of each done item follow this list, by date.
 - #63: Batch intake: hand the BA a list of tickets. Done 2026-10-14.
 - #58: Start action: run a project branch on a workstation (phase 1: manual start, supervised services, panel, plans recorded). Done 2026-10-14; P2 done (plan replay, service sandbox, Restart / Update & restart, run worktree sweep, services survive a runner restart); P3 and P4 done under #59.
 - #59: Integration and E2E tests per project, run by testers (local test environment per card, remote deploy targets). Done 2026-10-14 (P3 and P4; private-address targets and macOS testers left).
+- #81: Agent temp folders are never cleaned (filled the RAM /tmp). Done 2026-10-16.
 - #80: Dependencies count as landed at Finalize; the Architect designs before dependencies land (assumptions reviewed after landing). Done 2026-10-15.
 - #73: Pause work until a model usage limit resets. Done 2026-10-15.
 - #71: Plain tester stage when integration tests are off (workflow `code` v5: the Test stage always runs; the environment only when the card's integration tests are on). Done 2026-10-15.
@@ -268,6 +269,21 @@ The details of each done item follow this list, by date.
 - #37: Value report per organisation on the Costs page (hours estimate by card type, trend, next best actions, CSV). Done 2026-10-14.
 - #38: Monday briefing e-mail per member (long version for Owners and Admins, opt-out in Settings). Done 2026-10-14.
 - #17: Stale figures in the user guide: guide seeds fixed, every figure re-captured, figures for the newer features, guide.html and PDF rebuilt. Done 2026-10-14.
+
+## 2026-10-16 (done)
+
+### 81. Agent temp folders are never cleaned (filled the RAM /tmp) (done)
+
+Production 2026-10-16: `/tmp` is a 24 GB tmpfs; `/tmp/aom-*/claude-1000/*` (review/, review12/, p5-13/, p527/ with .NET
+build outputs, copies made by reviewers and testers) grew to about 21 GB and every write on the machine failed with
+ENOSPC. Nothing removed an agent's temp dir after a shift.
+
+**Done (2026-10-16).** `cleanAgentTmp` (`apps/runner/src/sandbox/sandbox.ts`) empties the agent's TMPDIR (keeps
+`node-compile-cache`) at the end of every shift (`ShiftSupervisor.handleStart` finally) and chat; skipped while another
+shift or chat of the agent holds the dir (`holdAgentTmp`); symlinks are never followed. `sweepAgentTmps` runs at runner
+start, before shifts are resumed. Reviewer instructions (role v5): delete your build copy. Not done: moving TMPDIR to
+disk (the short `/tmp` path is needed for sockets, and Claude Code derives its shell TMPDIR from it), see RUNNER.md
+"Agent temp directory". Tests: `apps/runner/test/agent-tmp-cleanup.test.ts`.
 
 ## 2026-10-15 (done)
 

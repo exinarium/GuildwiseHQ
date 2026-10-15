@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
 import { chmodSync, existsSync } from 'node:fs';
-import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readdir, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, sep } from 'node:path';
 import { commitEnv } from '../git/identity.ts';
 import type { RunnerPaths } from '../paths.ts';
 
@@ -226,4 +226,90 @@ export async function wipeAgent(paths: RunnerPaths, agentId: string): Promise<{ 
   await rm(dir, { recursive: true, force: true });
   await rm(agentTmpDir(paths, agentId), { recursive: true, force: true });
   return { removed: existed };
+}
+
+/** Entries of an agent's TMPDIR that survive the end of a shift (a compile cache is rebuilt slowly and is small). */
+export const TMP_KEEP = ['node-compile-cache'] as const;
+
+/** Agent TMPDIR -> number of shifts/chats that use it right now (this process). */
+const tmpHolds = new Map<string, number>();
+
+/**
+ * Marks the agent's TMPDIR as in use by a shift or chat; the returned function releases it (idempotent). An agent has
+ * one shift at a time, but a chat of the same agent (or a resumed shift) can use the same TMPDIR, so end-of-shift
+ * cleanup only runs when nobody holds it.
+ */
+export function holdAgentTmp(sb: Pick<Sandbox, 'tmp'>): () => void {
+  tmpHolds.set(sb.tmp, (tmpHolds.get(sb.tmp) ?? 0) + 1);
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    const n = (tmpHolds.get(sb.tmp) ?? 1) - 1;
+    if (n <= 0) tmpHolds.delete(sb.tmp);
+    else tmpHolds.set(sb.tmp, n);
+  };
+}
+
+export function agentTmpHeld(tmp: string): boolean {
+  return (tmpHolds.get(tmp) ?? 0) > 0;
+}
+
+/**
+ * Removes the per-shift content of one agent TMPDIR (build copies, Claude Code's `claude-<uid>/<cwd>` dirs, sockets,
+ * card attachments), keeping `TMP_KEEP`. Safe by construction: it only lists the direct entries of `tmp`, removes each
+ * with `rm` (a symlink is unlinked, never followed), refuses a `tmp` that is itself a symlink or not a directory or
+ * whose last segment is not `aom-*` / `tmp`, and does nothing while a shift or chat holds the dir. Never throws;
+ * returns the number of entries removed.
+ */
+export async function cleanAgentTmp(tmp: string): Promise<number> {
+  try {
+    if (agentTmpHeld(tmp)) return 0;
+    const parts = tmp.split(sep).filter(Boolean);
+    const base = parts[parts.length - 1] ?? '';
+    if (!(base.startsWith('aom-') || base === 'tmp') || parts.length < 2) return 0;
+    const st = await lstat(tmp);
+    if (!st.isDirectory() || st.isSymbolicLink()) return 0;
+    let removed = 0;
+    for (const name of await readdir(tmp)) {
+      if ((TMP_KEEP as readonly string[]).includes(name)) continue;
+      try {
+        await rm(join(tmp, name), { recursive: true, force: true, maxRetries: 2 });
+        removed++;
+      } catch {
+        /* busy or not ours: leave it, the next sweep tries again */
+      }
+    }
+    return removed;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Runner start: cleans the TMPDIR of every agent that has a directory under `<data dir>/agents`. The naming scheme
+ * `/tmp/aom-<hash of data dir + agent id>` makes other runners' and other agents' dirs unreachable from here.
+ * `skipAgentIds`: agents whose shift is about to be resumed.
+ */
+export async function sweepAgentTmps(
+  paths: RunnerPaths,
+  skipAgentIds: Iterable<string> = [],
+): Promise<{ agents: number; removed: number }> {
+  const skip = new Set(skipAgentIds);
+  let ids: string[] = [];
+  try {
+    ids = await readdir(paths.agents);
+  } catch {
+    return { agents: 0, removed: 0 };
+  }
+  let agents = 0;
+  let removed = 0;
+  for (const id of ids) {
+    if (skip.has(id)) continue;
+    const tmp = agentTmpDir(paths, id);
+    if (!existsSync(tmp)) continue;
+    agents++;
+    removed += await cleanAgentTmp(tmp);
+  }
+  return { agents, removed };
 }
