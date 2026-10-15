@@ -112,6 +112,26 @@ describe('the CEO page: overview', () => {
     expect(await screen.findByTestId('ceo-undo-hint')).toHaveTextContent('tightening');
   });
 
+  it('shows why the CEO could not run its last shifts', async () => {
+    stubApi('owner', [
+      [
+        'GET /api/ceo/status',
+        () =>
+          ceoStatus({
+            lastError: {
+              at: '2026-10-15T19:58:00.000Z',
+              outcome: 'rejected',
+              message: 'busy: 4 shifts already running',
+              failures: 21,
+            },
+          }),
+      ],
+    ]);
+    renderCeoPage();
+    expect(await screen.findByTestId('ceo-last-error')).toHaveTextContent('busy: 4 shifts already running');
+    expect(screen.getByTestId('ceo-last-error')).toHaveTextContent('21 shifts');
+  });
+
   it('shows a paused and an offline CEO in words', async () => {
     stubApi('owner', [['GET /api/ceo/status', () => ceoStatus({ state: 'paused' })]]);
     renderCeoPage();

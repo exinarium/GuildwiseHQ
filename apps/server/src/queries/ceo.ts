@@ -8,6 +8,7 @@ import {
   sumScores,
   trainingDaysLeft,
 } from '@aom/shared';
+import { ceoFailures } from '../ceo/shift.ts';
 import { CEO_CAPABILITY, ceoReachable, loadCeo } from '../ceo/state.ts';
 import type { Ctx } from '../context.ts';
 import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
@@ -165,6 +166,7 @@ export async function ceoStatus(
       totals: { agreed: 0, total: 0 },
       pendingWakes: 0,
       running: null,
+      lastError: null,
       openTasks: 0,
       lastReportAt: null,
       policyVersion: 0,
@@ -204,6 +206,7 @@ export async function ceoStatus(
     `SELECT started_at, b.purpose FROM shifts s JOIN ceo_batches b ON b.shift_id = s.id WHERE s.org_id=$1 AND s.kind='ceo' AND s.status <> 'ended' LIMIT 1`,
     [orgId],
   );
+  const failures = await ceoFailures(ctx.pool, orgId);
   const tasks = await one<{ n: string }>(
     ctx.pool,
     `SELECT count(*)::text AS n FROM ceo_tasks WHERE org_id=$1 AND status IN ('open','in_progress','waiting_owner','waiting_work')`,
@@ -242,6 +245,15 @@ export async function ceoStatus(
     totals: sumScores(scores),
     pendingWakes: Number(pending?.n ?? 0),
     running: running ? { since: iso(running.started_at) as string, purpose: running.purpose } : null,
+    lastError:
+      failures.streak > 0 && failures.lastError
+        ? {
+            at: iso(failures.lastAt) as string,
+            outcome: failures.lastOutcome ?? 'failed',
+            message: failures.lastError,
+            failures: failures.streak,
+          }
+        : null,
     openTasks: Number(tasks?.n ?? 0),
     lastReportAt: iso(lastReport?.t),
     policyVersion: ceo.policyVersion,

@@ -42,6 +42,7 @@ import {
   type VaultWriteCommand,
 } from '@aom/shared';
 import { formatLimitTime } from '../adapters/claude-usage-limit.ts';
+import { removeSandboxStubs } from '../adapters/sandbox-placeholders.ts';
 import type { RuntimeAdapter, RuntimeEvent, RuntimeSession } from '../adapters/types.ts';
 import {
   attachFileFromAgent,
@@ -119,7 +120,6 @@ import {
   transcriptPath,
 } from '../transcript/service.ts';
 import { readVaultContext, withVaultContext } from '../vaults/context.ts';
-import { removeSandboxStubs } from '../adapters/sandbox-placeholders.ts';
 import { autoCommit, uncommittedFiles, unreportedWorkNote } from './autocommit.ts';
 import {
   type BranchSnapshot,
@@ -342,8 +342,16 @@ export class ShiftSupervisor {
   ): Promise<void> {
     if (this.active.has(msg.shiftId)) return; // redelivery
     const max = this.deps.maxConcurrentShifts?.() ?? this.deps.config.maxConcurrentShifts;
-    if (this.active.size >= max) {
-      this.reject(msg.shiftId, 'busy', `${this.active.size} shifts already running`);
+    // The CEO's management shift has a slot of its own (one at a time, outside the owner's limit like a chat): a
+    // workstation full of card shifts used to refuse it every time and nothing was logged (backlog #79).
+    const isCeo = msg.kind === 'ceo';
+    const sameKind = [...this.active.values()].filter((a) => (a.msg.kind === 'ceo') === isCeo).length;
+    if (isCeo ? sameKind >= 1 : sameKind >= max) {
+      this.reject(
+        msg.shiftId,
+        'busy',
+        isCeo ? 'a CEO shift is already running' : `${sameKind} shifts already running (limit ${max})`,
+      );
       return;
     }
     const shift: ActiveShift = {
@@ -525,10 +533,14 @@ export class ShiftSupervisor {
     branchProblem?: { base: string; defaultBranch?: string; branches: string[] },
     limitedUntil?: string,
   ): void {
+    // Every rejection leaves a line here and a reason on the wire: "the runner refused" without either cost a day of
+    // searching (backlog #79).
+    const why = detail || reason.replaceAll('_', ' ');
+    this.log.warn(`shift ${shiftId} rejected (${reason}): ${why}`);
     this.deps.transport.send('shift.rejected', {
       shiftId,
       reason,
-      ...(detail ? { detail } : {}),
+      detail: why,
       ...(conflictedFiles ? { conflictedFiles } : {}),
       ...(environment ? { environment } : {}),
       ...(branchProblem ? { branchProblem } : {}),

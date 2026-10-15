@@ -15,7 +15,6 @@ import { one, type Row, rows } from '../db/sql.ts';
 import { buildFloorDigest } from '../reporter/digest.ts';
 import { trainingScores } from './commands.ts';
 import { relevantMemories } from './memory.ts';
-import { buildSnapshot } from './snapshot.ts';
 import type { CeoState } from './state.ts';
 
 /** The policy as the CEO is told it: in plain words, with the training period said first. */
@@ -105,6 +104,51 @@ async function trainingSection(ctx: Ctx, ceo: CeoState): Promise<string> {
     .join('\n');
 }
 
+/** Wakes named one by one in a brief; beyond this the brief gives counts per reason and the most important ones. */
+export const MAX_LISTED_WAKES = 25;
+/** A brief never grows past this many characters, whatever the organization holds. */
+export const MAX_BRIEF_CHARS = 60_000;
+
+const URGENCY_RANK: Record<string, number> = { urgent: 0, scheduled: 1, normal: 2 };
+
+/** The wakes that are named in the brief: all of them when few, else the daily review, then urgent ones, oldest first. */
+export function pickListed(wakes: Row[]): Row[] {
+  if (wakes.length <= MAX_LISTED_WAKES) return wakes;
+  const rank = (w: Row) => (w.reason === 'daily_review' ? -1 : (URGENCY_RANK[w.urgency] ?? 3));
+  return [...wakes]
+    .sort((a, b) => rank(a) - rank(b) || new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+    .slice(0, MAX_LISTED_WAKES);
+}
+
+/** The "why you were woken" text: every wake when few; counts per reason and the top items when many (a backlog). */
+export function wakeSummary(wakes: Row[], listed: Row[] = pickListed(wakes)): string {
+  const line = (w: Row) =>
+    `- [${w.urgency}] ${w.reason} ${w.subject_kind ? `${w.subject_kind}=${w.subject_id}` : ''}${w.reason === 'daily_review' ? ' (the daily review)' : ''}`;
+  if (!wakes.length) return '- nothing specific';
+  if (listed.length === wakes.length) return wakes.map(line).join('\n');
+  const counts = new Map<string, { n: number; urgent: number }>();
+  for (const w of wakes) {
+    const c = counts.get(w.reason) ?? { n: 0, urgent: 0 };
+    c.n++;
+    if (w.urgency === 'urgent') c.urgent++;
+    counts.set(w.reason, c);
+  }
+  const first = new Date(Math.min(...wakes.map((w) => new Date(w.created_at).getTime()))).toISOString();
+  return [
+    `${wakes.length} wakes have piled up since ${first} (they are one batch: handle them together, do not go through them one by one). By reason:`,
+    ...[...counts.entries()]
+      .sort((a, b) => b[1].n - a[1].n)
+      .map(([r, c]) => `- ${r}: ${c.n}${c.urgent ? ` (${c.urgent} urgent)` : ''}`),
+    `The ${listed.length} that matter most (the rest are in the snapshot, \`aom ceo snapshot --section desk\`):`,
+    ...listed.map(line),
+  ].join('\n');
+}
+
+function capBrief(text: string): string {
+  if (text.length <= MAX_BRIEF_CHARS) return text;
+  return `${text.slice(0, MAX_BRIEF_CHARS)}\n\n[The brief was shortened to fit; read the rest with \`aom ceo snapshot\`.]`;
+}
+
 /** The fully rendered body of a CEO shift: why, the snapshot, the owner's rules, what it may decide. */
 export async function buildCeoBrief(
   ctx: Ctx,
@@ -115,28 +159,20 @@ export async function buildCeoBrief(
   localDate?: string,
 ): Promise<{ text: string; reasons: CeoShift['reasons'] }> {
   const now = ctx.clock.now();
-  const reasons: CeoShift['reasons'] = wakes.map((w) => ({
+  const listed = pickListed(wakes);
+  const reasons: CeoShift['reasons'] = listed.map((w) => ({
     reason: w.reason,
     urgency: w.urgency,
     subject: `${w.subject_kind}:${w.subject_id}`,
     at: new Date(w.created_at).toISOString(),
   }));
-  const topic = wakes.map((w) => `${w.reason} ${w.subject_label}`).join(' ');
+  const topic = listed.map((w) => `${w.reason} ${w.subject_label}`).join(' ');
   const parts: string[] = [];
   parts.push(`You are ${agent.name}. ${personaText(ceo)}`);
-  parts.push(
-    `## Why you were woken\n${
-      wakes
-        .map(
-          (w) =>
-            `- [${w.urgency}] ${w.reason} ${w.subject_kind ? `${w.subject_kind}=${w.subject_id}` : ''}${w.reason === 'daily_review' ? ' (the daily review)' : ''}`,
-        )
-        .join('\n') || '- nothing specific'
-    }`,
-  );
-  const labels = wakes
+  parts.push(`## Why you were woken\n${wakeSummary(wakes, listed)}`);
+  const labels = listed
     .filter((w) => w.subject_label)
-    .map((w) => `${String(w.subject_id).slice(0, 8)}: ${w.subject_label}`);
+    .map((w) => `${String(w.subject_id).slice(0, 8)}: ${String(w.subject_label).slice(0, 120)}`);
   if (labels.length)
     parts.push(
       renderCeoData(
@@ -144,7 +180,10 @@ export async function buildCeoBrief(
         labels.join('\n'),
       ),
     );
-  parts.push(`## Organisation snapshot\n${await buildSnapshot(ctx, ceo.orgId)}`);
+  // The snapshot is large and grows with the organization: the CEO reads it when it needs it (`aom ceo snapshot`).
+  parts.push(
+    '## The organisation\nRead it with `aom ceo snapshot` (all of it, or `--section desk|cards|agents|signals|...`) before you decide anything; it is not repeated here.',
+  );
   parts.push(`## The owner's rules\n${await ownerRules(ctx, ceo, topic)}`);
   parts.push(`## What you may do\n${policyInWords(ceo.policy, ceo.training, now)}`);
   const tasks = await rows(
@@ -184,7 +223,7 @@ export async function buildCeoBrief(
     );
   }
   void one;
-  return { text: parts.join('\n\n'), reasons };
+  return { text: capBrief(parts.join('\n\n')), reasons };
 }
 
 /** The brief of the owner's chat with the CEO: persona, the owner's rules, what it may decide. The snapshot is on demand. */

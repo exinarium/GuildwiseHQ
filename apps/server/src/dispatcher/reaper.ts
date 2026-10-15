@@ -106,7 +106,14 @@ export class Reaper {
         }
         if (shift.kind === 'ceo') {
           ctx.services.dispatcher.cooldown.set(shift.agent_id, ctx.clock.now().getTime() + 30_000);
-          await ctx.store.append(await endCeoShift(tx, shift, 'rejected'), { tx });
+          ctx.log.warn({ shiftId: shift.id }, 'the runner did not accept the CEO shift within 30 seconds');
+          await ctx.store.append(
+            await endCeoShift(tx, shift, 'rejected', {
+              error: 'the runner did not accept the shift within 30 seconds',
+              at: ctx.clock.now(),
+            }),
+            { tx },
+          );
           return;
         }
         const card = shift.card_id

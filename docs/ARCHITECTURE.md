@@ -1259,6 +1259,14 @@ only through the rpc method `ceo` (`ceo/gateway.ts`, `ceo/engine.ts`): every wri
 the CEO as actor and the action id as `causation_id`), and audited as `CeoActionTaken`. Owner responses to recommendations are
 the training signal (`ceo/learning.ts`). Full design: `docs/design/ceo-agent-v2.md`.
 
+CEO shift failures (backlog #79): whatever ends a CEO shift without its report (the runner's `shift.rejected` reason and detail,
+the reaper's 30 s accept timeout, a lost connection, a crash) is written on `ceo_batches.outcome/error`. `ceoPass` backs off
+1, 2, 4 ... 30 minutes after shifts the runner never started (rejected, lost; they do not count against `maxWakesPerHour`), raises
+one desk notice "Your CEO cannot start: <reason>" after three failures in a row (flag `start_failed`, cleared once a shift is
+accepted), frees batches whose shift is gone, and takes every pending wake into one batch whose brief is compact. The CEO
+Overview (`GET /api/ceo/status`) returns `lastError`. A CEO shift is held by the server while it has not ended (like question and
+BA task shifts), so the heartbeat never stops it as "claim lost".
+
 ### 9.6 Hire cap for first runs (removed in M9)
 
 The first-run cap (2 builders, 1 of each other role) and `AOM_FIRST_RUN_HIRE_CAP` are gone; the HR board's recommendations (model, split, fire or reassign) replace the guard rail.

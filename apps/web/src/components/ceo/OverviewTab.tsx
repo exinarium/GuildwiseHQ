@@ -134,6 +134,17 @@ export function OverviewTab({
         <ErrorBox error={pause.error ?? resume.error ?? disable.error} />
       </Panel>
 
+      {s.lastError && s.state !== 'disabled' && (
+        <Callout tone="warning" role="alert" data-testid="ceo-last-error">
+          The CEO could not run its last{' '}
+          {s.lastError.failures === 1 ? 'shift' : `${s.lastError.failures} shifts`}
+          {' ('}
+          {formatDateTime(s.lastError.at)}
+          {'): '}
+          {s.lastError.message}. It tries again by itself.
+        </Callout>
+      )}
+
       {s.state === 'disabled' && (
         <>
           <Callout tone="warning" role="note">

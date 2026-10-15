@@ -21,6 +21,13 @@ import { buildCeoBrief } from './brief.ts';
 import { notifyOwner } from './notify.ts';
 import { checkOrgBudget } from './orgbudget.ts';
 import { postFallbackReview } from './report.ts';
+import {
+  ceoFailures,
+  FAILURE_NOTICE_AT,
+  releaseBatch,
+  releaseStuckBatches,
+  startBackoffMs,
+} from './shift.ts';
 import { type CeoState, ceoReachable, loadCeo } from './state.ts';
 import { enqueueWake } from './wakes.ts';
 
@@ -168,6 +175,40 @@ async function offlineNotice(ctx: Ctx, ceo: CeoState, reason: string | undefined
   });
 }
 
+/**
+ * After `FAILURE_NOTICE_AT` failed CEO shifts in a row: one desk notice (and e-mail) naming the reason. The flag keeps it to
+ * one per episode; it is cleared when a shift has run since.
+ */
+async function failureNotice(
+  ctx: Ctx,
+  orgId: string,
+  streak: number,
+  lastError: string | null,
+  now: Date,
+): Promise<void> {
+  const flag = await one(ctx.pool, `SELECT 1 FROM ceo_flags WHERE org_id=$1 AND flag='start_failed'`, [
+    orgId,
+  ]);
+  if (streak < FAILURE_NOTICE_AT) {
+    if (flag && streak === 0)
+      await exec(ctx.pool, `DELETE FROM ceo_flags WHERE org_id=$1 AND flag='start_failed'`, [orgId]);
+    return;
+  }
+  if (flag) return;
+  await exec(
+    ctx.pool,
+    `INSERT INTO ceo_flags (org_id, flag, value, at) VALUES ($1,'start_failed','1',$2) ON CONFLICT DO NOTHING`,
+    [orgId, now],
+  );
+  const reason = lastError ?? 'unknown reason';
+  await notifyOwner(ctx, orgId, {
+    kind: 'urgent',
+    title: `Your CEO cannot start: ${reason}`.slice(0, 200),
+    text: `The last ${streak} shifts of your CEO failed, so nothing it was woken for has been handled. Reason: ${reason}. Items still reach your desk unchanged. The CEO tries again by itself; the Overview shows the last error.`,
+    subject: 'start_failed',
+  });
+}
+
 /** Ends CEO shifts the runner never reported on (a lost connection). */
 async function endStale(ctx: Ctx, now: Date): Promise<void> {
   const cutoff = new Date(now.getTime() - CEO_REVIEW_MAX_MINUTES * 60_000 - OVERRUN_SLACK_MS);
@@ -181,7 +222,11 @@ async function endStale(ctx: Ctx, now: Date): Promise<void> {
   for (const s of stale)
     await withAppendTx(ctx.pool, async (tx) => {
       const shift = await one(tx, `SELECT * FROM shifts WHERE id=$1 AND status <> 'ended'`, [s.id]);
-      if (shift) await ctx.store.append(await endCeoShift(tx, shift, 'lost'), { tx });
+      if (shift)
+        await ctx.store.append(
+          await endCeoShift(tx, shift, 'lost', { error: 'the runner never reported on this shift', at: now }),
+          { tx },
+        );
     });
 }
 
@@ -226,7 +271,21 @@ export async function ceoPass(ctx: Ctx): Promise<number> {
       await postFallbackReview(ctx, orgId, r.local_date ?? '', [r.id]).catch((err) =>
         ctx.log.error({ err }, 'ceo fallback report failed'),
       );
+    // A batch that can never finish must not hold its wakes (backlog #79).
+    await releaseStuckBatches(ctx, orgId).catch((err) => ctx.log.error({ err }, 'ceo stuck batches failed'));
+    // The CEO's shifts keep failing: tell the owner once, with the reason; the Overview shows it too.
+    const failures = await ceoFailures(ctx.pool, orgId);
+    await failureNotice(ctx, orgId, failures.streak, failures.lastError, now).catch((err) =>
+      ctx.log.error({ err }, 'ceo failure notice failed'),
+    );
     if (!reach.ok) continue;
+    // The runner never started the last shifts (busy, not accepted, lost): wait longer after each, not once a second.
+    if (
+      failures.startFailures > 0 &&
+      failures.lastAt &&
+      now.getTime() - new Date(failures.lastAt).getTime() < startBackoffMs(failures.startFailures)
+    )
+      continue;
 
     const running = await one(
       ctx.pool,
@@ -236,7 +295,7 @@ export async function ceoPass(ctx: Ctx): Promise<number> {
     if (running) continue;
     const cap = await one<{ n: string }>(
       ctx.pool,
-      `SELECT count(*)::text AS n FROM ceo_batches WHERE org_id=$1 AND created_at > $2`,
+      `SELECT count(*)::text AS n FROM ceo_batches WHERE org_id=$1 AND created_at > $2 AND COALESCE(outcome,'') NOT IN ('rejected','lost')`,
       [orgId, new Date(now.getTime() - 3_600_000)],
     );
     if (Number(cap?.n ?? 0) >= ceo.policy.limits.maxWakesPerHour) continue;
@@ -308,23 +367,32 @@ export async function ceoPass(ctx: Ctx): Promise<number> {
       return true;
     });
     if (!ok) continue;
-    const built = await buildCeoShiftStart(
-      ctx,
-      ceo,
-      agent,
-      batchId,
-      shiftId,
-      pending,
-      purpose,
-      review?.local_date ?? undefined,
-    );
+    let built: ShiftStartPayload | null = null;
+    try {
+      built = await buildCeoShiftStart(
+        ctx,
+        ceo,
+        agent,
+        batchId,
+        shiftId,
+        pending,
+        purpose,
+        review?.local_date ?? undefined,
+      );
+    } catch (err) {
+      ctx.log.error({ err }, 'ceo brief failed');
+      await releaseBatch(ctx, batchId, `could not build the brief: ${(err as Error).message}`);
+      continue;
+    }
     if (!built) {
-      const { releaseBatch } = await import('./shift.ts');
-      await releaseBatch(ctx, batchId, 'could not build the brief');
+      await releaseBatch(ctx, batchId, 'could not build the brief (the CEO role is missing)');
+      continue;
+    }
+    if (!ctx.services.runners.send(reach.workstationId as string, 'shift.start', built, now)) {
+      await releaseBatch(ctx, batchId, 'the runner is not connected');
       continue;
     }
     started++;
-    ctx.services.runners.send(reach.workstationId as string, 'shift.start', built, now);
   }
   return started;
 }

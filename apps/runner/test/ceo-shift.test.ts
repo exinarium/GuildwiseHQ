@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { makeShiftStart } from './fixtures.ts';
 import { type Harness, startHarness, worktreeOf } from './harness.ts';
 import { cleanupTmp } from './helpers.ts';
+import { ScriptedAdapter } from './scripted-adapter.ts';
 
 cleanupTmp();
 let h: Harness | undefined;
@@ -126,5 +127,39 @@ describe('ceo shifts on the mock runtime', () => {
     await run(h, msg);
     expect(seen).not.toContain('ceo');
     expect(reports(h, msg.shiftId)).toHaveLength(0);
+  }, 60_000);
+
+  // Backlog #79: a workstation running its limit of card shifts refused every CEO shift as "busy", silently, so the CEO
+  // never ran (production, 2026-10-15). The CEO has a slot of its own, and every rejection says why.
+  it('a CEO shift runs even when the workstation is full of card shifts; a second CEO shift is refused with a reason', async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const adapter = new ScriptedAdapter(async () => {
+      await gate;
+    });
+    h = await startHarness({}, { adapters: new Map([['mock', adapter]]) });
+    (h.runner as any).maxConcurrent = 1;
+    const card = makeShiftStart({ remoteNormalized: h.repo.remoteNormalized, ref: 'TOY-1', title: 'one' });
+    h.server.send('shift.start', card);
+    await h.server.waitFor('shift.started', (m) => m.shiftId === card.shiftId);
+
+    const ceo1 = ceoShift(h, 'wake');
+    h.server.send('shift.start', ceo1 as never);
+    await h.server.waitFor('shift.started', (m) => m.shiftId === ceo1.shiftId);
+
+    const ceo2 = ceoShift(h, 'wake');
+    h.server.send('shift.start', ceo2 as never);
+    const refused = await h.server.waitFor('shift.rejected', (m) => m.shiftId === ceo2.shiftId);
+    expect(refused.reason).toBe('busy');
+    expect(refused.detail).toBe('a CEO shift is already running');
+
+    const card2 = makeShiftStart({ remoteNormalized: h.repo.remoteNormalized, ref: 'TOY-2', title: 'two' });
+    h.server.send('shift.start', card2);
+    const full = await h.server.waitFor('shift.rejected', (m) => m.shiftId === card2.shiftId);
+    expect(full.detail).toMatch(/1 shifts already running \(limit 1\)/);
+    release();
+    await h.server.waitFor('shift.ended', (m) => m.shiftId === ceo1.shiftId);
   }, 60_000);
 });

@@ -8,6 +8,7 @@ import {
   streamId,
 } from '@aom/shared';
 import { ceoRpc } from '../ceo/gateway.ts';
+import { endCeoShift } from '../ceo/shift.ts';
 import type { ChatTerminal } from '../chat/relay.ts';
 import { baTaskRpc, endBaTaskShift } from '../commands/ba-tasks.ts';
 import { attachmentRpc } from '../commands/card-attachments.ts';
@@ -646,6 +647,7 @@ export class RunnerHandlers {
     await this.reconcileDevops(conn, known, helloAt);
     await this.reconcileQuestions(conn, known, helloAt);
     await this.reconcileBaTasks(conn, known, helloAt);
+    await this.reconcileCeo(conn, known, helloAt);
     await queueVaultConfigure(ctx, ctx.pool, conn.workstationId);
     await queueApprovedFor(ctx, conn.userId, conn.workstationId);
     await this.deliverPending(conn.workstationId);
@@ -720,6 +722,30 @@ export class RunnerHandlers {
     }
   }
 
+  /** CEO shifts the server holds as running but the reconnected runner does not: the batch fails and its wakes go back. */
+  private async reconcileCeo(conn: RunnerConn, known: Set<string>, helloAt: Date): Promise<void> {
+    const { ctx } = this;
+    const open = await rows(
+      ctx.pool,
+      `SELECT id FROM shifts WHERE workstation_id=$1 AND kind='ceo' AND status <> 'ended' AND started_at <= $2`,
+      [conn.workstationId, helloAt],
+    );
+    for (const s of open) {
+      if (known.has(s.id)) continue;
+      await withAppendTx(ctx.pool, async (tx) => {
+        const shift = await one(tx, `SELECT * FROM shifts WHERE id=$1 AND status <> 'ended'`, [s.id]);
+        if (shift)
+          await ctx.store.append(
+            await endCeoShift(tx, shift, 'lost', {
+              error: 'the runner reconnected without this shift',
+              at: ctx.clock.now(),
+            }),
+            { tx },
+          );
+      });
+    }
+  }
+
   private async stopIfClaimLost(conn: RunnerConn, shiftId: string): Promise<void> {
     const holder =
       (await one(this.ctx.pool, 'SELECT 1 FROM cards WHERE claim_shift_id=$1 AND claim_id IS NOT NULL', [
@@ -729,10 +755,11 @@ export class RunnerHandlers {
       (await one(this.ctx.pool, `SELECT 1 FROM devops_requests WHERE shift_id=$1 AND status='running'`, [
         shiftId,
       ])) ??
-      // Question and BA task shifts are held while they have not ended.
+      // Question, BA task and CEO shifts are held while they have not ended (a CEO shift has no card: without this the
+      // first heartbeat told the runner to stop it as "claim lost", backlog #79).
       (await one(
         this.ctx.pool,
-        `SELECT 1 FROM shifts WHERE id=$1 AND kind IN ('question','ba_task') AND status <> 'ended'`,
+        `SELECT 1 FROM shifts WHERE id=$1 AND kind IN ('question','ba_task','ceo') AND status <> 'ended'`,
         [shiftId],
       ));
     if (holder) return;
