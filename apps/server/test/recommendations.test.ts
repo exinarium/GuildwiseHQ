@@ -277,6 +277,17 @@ describe('model up and down', () => {
     expect((await agentRow('Bea')).model).toBe('sonnet');
   });
 
+  it('a reviewer never gets an applicable model-down: it is advice for the owner (backlog #70)', async () => {
+    await resetHr();
+    await team('opus');
+    for (let i = 0; i < 4; i++) await build();
+    await q(`UPDATE agents SET role_key='reviewer' WHERE name='Bea'`);
+    const rec = await recOf('model_down');
+    expect(rec).toMatchObject({ action: { type: 'none' }, canApply: false });
+    expect(rec.summary).toContain('reviewers run at high effort');
+    expect((await agentRow('Bea')).model).toBe('opus');
+  });
+
   it('control: one bounce in four cards, or the lightest model, gives no model-down advice', async () => {
     await resetHr();
     await team('opus');

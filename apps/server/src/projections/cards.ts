@@ -4,6 +4,7 @@ import {
   type EventType,
   LEGACY_DEFAULT_CARD_PRIORITY,
 } from '@aom/shared';
+import { mergeRisk, type StoredRisk } from '../commands/review-risk.ts';
 import { exec, one, type Row } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
 import type { Projector, StoredEvent } from '../eventstore/types.ts';
@@ -522,7 +523,7 @@ export const cardProjectors: Record<string, Projector> = {
       e,
       p.cardId,
       p.toStage,
-      `risk_tier = CASE WHEN risk_tier_overridden THEN risk_tier ELSE $4 END, review_approvals = 0,
+      `risk_tier = CASE WHEN risk_tier_overridden THEN risk_tier ELSE $4 END, review_approvals = 0, review_risk = NULL,
        excluded_agent_ids = ${DISTINCT_EXCLUDED}`,
       [p.riskTier],
     );
@@ -541,6 +542,15 @@ export const cardProjectors: Record<string, Projector> = {
 
   ReviewApproved: async (tx, e) => {
     const p = ev<'ReviewApproved'>(e).payload;
+    // The reviewer's risk call (backlog #70): the highest risk of this round's approvals, with every analysis.
+    {
+      const cur = (await one(tx, 'SELECT review_risk FROM cards WHERE id=$1', [p.cardId])) as Row | null;
+      const merged = mergeRisk(cur?.review_risk as StoredRisk | null, p);
+      await exec(tx, 'UPDATE cards SET review_risk=$2::jsonb WHERE id=$1', [
+        p.cardId,
+        JSON.stringify(merged),
+      ]);
+    }
     // A card on an older built-in `code` version moves to the version that has the integration test guard when it leaves
     // Review (docs/design/run-and-integration-tests.md D8); the project's setting decides `integrationTests` then.
     if (p.workflowVersionId || p.integrationTests !== undefined)

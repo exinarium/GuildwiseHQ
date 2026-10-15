@@ -71,8 +71,8 @@ aom card [--json]                                   print the card and brief
 aom ledger search "<query>" [--scope s]             forwarded to the server (M2)
 aom comment --note "<text>" | --note-file <path>    non-terminal thread message
 aom handoff --note "<text>"                         builder: outcome "handoff"
-aom review approve --score <1-5> --note "<text>"
-aom review changes --reason <r>[,<r>] --score <1-5> [--criteria-missed "<c>"]... --note "<text>"
+aom review approve --score <1-5> --risk low|medium|high --risk-file <md> [--qa-focus "<text>"] --note "<text>"
+aom review changes --reason <r>[,<r>] --score <1-5> --risk low|medium|high --risk-file <md> [--criteria-missed "<c>"]... --note "<text>"
 aom test pass --evidence "<text>"|--evidence-file <path> [--command "<cmd>"]...
 aom test fail --title "<bug>" --note "<text>" [--evidence "<text>"]
 aom outcome <id> --note "<text>" [--data-file <json>]   generic form

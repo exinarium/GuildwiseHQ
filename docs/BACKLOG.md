@@ -2,6 +2,39 @@
 
 Logged fixes to pick up when development resumes. Newest first.
 
+## 2026-10-15
+
+### 70. Adversarial review and risk analysis by reviewers
+
+**Owner request (2026-10-15):** "Our reviewers must do an adversarial review and risk analysis while doing the review, to
+ensure we do not break anything unnecessarily and catch issues early." Addition the same day: reviewers' effort defaults
+to high and is protected.
+
+**Done (2026-10-15).**
+- Reviewer role v3 (`packages/shared/src/roles/builtin.ts`): three parts per review, the acceptance check, an adversarial
+  pass (callers and callees of every changed symbol, edge cases, backwards compatibility, security, performance, would the
+  tests fail if the change were wrong; build and tests in the scratch copy, throwaway checks only in scratch) and a risk
+  analysis (blast radius, failure scenarios with likelihood and impact, verified, unverified, mitigations). Decision rules:
+  request changes for a real break or an unverified high-risk change the builder can cheaply verify; approve when the
+  criteria are met and the remaining risk is understood and documented; no nit-picking, no scope growth. `effort: 'high'`
+  stays explicit in the role default.
+- `aom review approve|changes` take `--risk low|medium|high` and `--risk-file <md>` (or `--risk-analysis "<text>"`),
+  and `--qa-focus "<text>"`; the analysis is capped at 20,000 characters, the focus at 2,000. New change reason
+  `regression_risk`. The runner refuses a reviewer shift's report without `--risk` and an analysis; an older runner
+  without the flags still works and the server stores `risk: unknown`.
+- Server: `ReviewApproved` and `ChangesRequested` carry `risk`, `riskAnalysis`, `qaFocus`; `cards.review_risk` (migration
+  2011) keeps the highest risk of the round's approvals with all analyses and is cleared by `ReviewRequested`; the card
+  query returns `card.reviewRisk`. A **high** risk makes the finalize merge need the manager's approval (the `large_merge`
+  desk path, also when the project waives approval of large merges, with the reason on the desk item and the Finalize
+  panel). The tester (`test`) and QA steps (`qa_steps`) shift briefs get a "Reviewer's risk analysis" section with the QA
+  focus and the failure scenarios.
+- Web: risk badge and analysis on the card page, on each review handoff and in the Finalize panel.
+- Effort protection: a reviewer hired without an effort gets `high`; the HR `model_down` suggestion for a reviewer is
+  advice for the owner and is never applied automatically; the CEO `model` action refuses to lower a reviewer's effort
+  below high or to move it to a lighter model.
+- Not done: the CEO/BA reporter signals do not mention the risk (optional in the request). Custom roles define their own
+  default model and effort; only the built-in reviewer is protected.
+
 ## 2026-10-14
 
 Owner's bug and wish list from a day of real use (production, P4 / Flow-Web). Root causes are being investigated; each

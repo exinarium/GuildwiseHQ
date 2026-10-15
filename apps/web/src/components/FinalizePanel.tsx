@@ -72,7 +72,9 @@ export function FinalizePanel({
             )}
             {needsApproval && (
               <p data-testid="finalize-approval-note" className="text-sm text-warning-soft-fg">
-                Large change: merging needs your approval on the desk first.{' '}
+                {finalize.approvalReason
+                  ? `The reviewer rated this change high risk: merging needs your approval on the desk first.`
+                  : 'Large change: merging needs your approval on the desk first.'}{' '}
                 <Link to="/desk" className="underline">
                   Open the desk
                 </Link>

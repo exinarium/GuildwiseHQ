@@ -159,6 +159,87 @@ describe('aom CLI', () => {
     expect(t.out.join('')).toContain('found it');
   });
 
+  it('review approve|changes carry --risk, --risk-file and --qa-focus (backlog #70)', async () => {
+    const t = await setup();
+    t.ctx.readFile = (p) => (p === '/risk.md' ? '## Blast radius\nthe importer\n' : '');
+    expect(
+      await t.run(
+        'review',
+        'approve',
+        '--score',
+        '4',
+        '--risk',
+        'high',
+        '--risk-file',
+        '/risk.md',
+        '--qa-focus',
+        'Import twice',
+        '--note',
+        'ok',
+      ),
+    ).toBe(0);
+    expect(
+      await t.run(
+        'review',
+        'changes',
+        '--reason',
+        'regression_risk',
+        '--score',
+        '2',
+        '--risk',
+        'medium',
+        '--risk-file',
+        '/risk.md',
+        '--note',
+        'breaks the importer',
+      ),
+    ).toBe(0);
+    expect((t.reports[0] as any).data).toEqual({
+      score: 4,
+      risk: 'high',
+      riskAnalysis: '## Blast radius\nthe importer',
+      qaFocus: 'Import twice',
+    });
+    expect((t.reports[1] as any).data).toMatchObject({
+      reasons: ['regression_risk'],
+      risk: 'medium',
+      riskAnalysis: '## Blast radius\nthe importer',
+    });
+    expect((t.reports[1] as any).data.qaFocus).toBeUndefined();
+  });
+
+  it('review flags are validated; old flags (no --risk) still work', async () => {
+    const t = await setup();
+    t.ctx.readFile = (p) => (p === '/risk.md' ? 'analysis' : p === '/big.md' ? 'x'.repeat(30000) : '');
+    // old runner behaviour: no risk flags at all
+    expect(await t.run('review', 'approve', '--score', '4', '--note', 'ok')).toBe(0);
+    expect((t.reports[0] as any).data).toEqual({ score: 4 });
+    // bad value, missing file, oversized file, flags without --risk
+    expect(await t.run('review', 'approve', '--score', '4', '--risk', 'extreme', '--note', 'x')).toBe(1);
+    expect(t.err.join('')).toContain('--risk must be');
+    expect(await t.run('review', 'approve', '--score', '4', '--risk', 'low', '--note', 'x')).toBe(1);
+    expect(t.err.join('')).toContain('--risk-file');
+    expect(
+      await t.run(
+        'review',
+        'approve',
+        '--score',
+        '4',
+        '--risk',
+        'low',
+        '--risk-file',
+        '/big.md',
+        '--note',
+        'x',
+      ),
+    ).toBe(1);
+    expect(t.err.join('')).toContain('too long');
+    expect(await t.run('review', 'approve', '--score', '4', '--risk-file', '/risk.md', '--note', 'x')).toBe(
+      1,
+    );
+    expect(t.reports).toHaveLength(1);
+  });
+
   it('a rejected report prints the reason and guard violations and exits 1', async () => {
     const t = await setup(() => ({
       accepted: false,

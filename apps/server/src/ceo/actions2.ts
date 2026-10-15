@@ -1,5 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import { type ActionClass, type CeoActionName, type CeoInverse, modelTier, streamId } from '@aom/shared';
+import {
+  type ActionClass,
+  type CeoActionName,
+  type CeoInverse,
+  effortBelowRoleMinimum,
+  modelTier,
+  streamId,
+} from '@aom/shared';
 import { z } from 'zod';
 import { loadRole } from '../catalogue/loader.ts';
 import {
@@ -169,6 +176,15 @@ const modelAction: ActionDef<z.infer<typeof ModelP>> = {
       `SELECT 1 FROM ceo_actions WHERE org_id=$1 AND class='agent.change_model' AND mode='decided' AND status='done' AND subject_id=$2 AND created_at > $3`,
       [env.orgId, a.id, new Date(env.now.getTime() - 7 * 86_400_000)],
     );
+    // Reviewers stay on high effort (backlog #70): lowering their effort or model is a recommendation for the owner.
+    if (
+      a.role_key === 'reviewer' &&
+      (effortBelowRoleMinimum('reviewer', p.effort) || (from !== null && to < from))
+    )
+      return {
+        ...base,
+        refuse: `${a.name} is a reviewer: reviewers stay on high effort and their model is not lowered automatically. Raise it as a recommendation for the owner instead.`,
+      };
     const jump = from !== null && Math.abs(to - from) > 1;
     const up = from !== null && to > from;
     const budget = up ? await budgetBlock(env, a.allowed_project_ids ?? null, 'model_up', 0) : undefined;

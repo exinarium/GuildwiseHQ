@@ -31,6 +31,24 @@ function handoffOneLine(h: Handoff): string {
  * Previous handoffs for a shift prompt: the latest few in full, older ones as one line each, the whole section within a
  * character budget (oldest full notes shortened first; the latest is only truncated, never dropped).
  */
+/** The reviewer's risk call for the stages that test the card: what to look at first (backlog #70). */
+function renderReviewRisk(brief: ShiftBrief): string {
+  const r = brief.reviewRisk;
+  if (!r) return '';
+  const lines = [`Overall risk: ${r.level.toUpperCase()}.`];
+  if (r.qaFocus.trim()) lines.push(`QA focus (what the reviewer wants tested by hand):\n${r.qaFocus.trim()}`);
+  if (r.analysis.trim())
+    lines.push(
+      `Risk analysis (blast radius, failure scenarios, what was and was not verified):\n${r.analysis.trim()}`,
+    );
+  lines.push(
+    brief.shift.stage === 'qa_steps'
+      ? 'Write explicit steps for the QA focus and for each failure scenario above, in addition to the usual scenarios.'
+      : 'Test the QA focus and each failure scenario above first, then the rest of the test plan.',
+  );
+  return lines.join('\n\n');
+}
+
 export function renderHandoffs(handoffs: Handoff[], opts: { full?: number; budget?: number } = {}): string {
   if (handoffs.length === 0) return '';
   const full = Math.max(1, opts.full ?? HANDOFFS_FULL);
@@ -214,6 +232,7 @@ export function renderShiftPrompt(brief: ShiftBrief): string {
   );
   if (brief.investigation) parts.push(section('Investigation', investigationContext(brief)));
   parts.push(section('Previous handoffs', renderHandoffs(brief.handoffs)));
+  if (brief.reviewRisk) parts.push(section("Reviewer's risk analysis", renderReviewRisk(brief)));
   if (card.reworkRound > 0) {
     parts.push(
       section(

@@ -23,6 +23,7 @@ import { workflowView } from '../commands/cards.ts';
 import { effectiveCompletionAction } from '../commands/completion.ts';
 import { scoutCandidates, seenUrls, tasteSeedFor } from '../commands/feeds.ts';
 import { grantedMcpServers } from '../commands/mcp-servers.ts';
+import { riskOf } from '../commands/review-risk.ts';
 import { runBriefFor } from '../commands/runs.ts';
 import { shiftEnvironmentFor } from '../commands/test-environments.ts';
 import { projectHasVault, vaultForProject } from '../commands/vaults.ts';
@@ -252,6 +253,9 @@ export async function buildBrief(
       extensions: mergedInstr || undefined,
       skills: [...new Set([...(agent.skills as string[]), ...(extension?.skills ?? [])])],
     },
+    ...(['test', 'qa_steps'].includes(stage.id) && riskOf(card)
+      ? { reviewRisk: riskOf(card) as NonNullable<ReturnType<typeof riskOf>> }
+      : {}),
     ...(card.design_needed || card.investigation_only || card.investigation
       ? {
           investigation: investigationBrief(

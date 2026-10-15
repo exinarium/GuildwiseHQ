@@ -46,6 +46,7 @@ import { McpUsagePanel } from '../components/McpUsagePanel.tsx';
 import { OutboundHistory } from '../components/OutboundHistory.tsx';
 import { PublicationPanel } from '../components/PublicationPanel.tsx';
 import { QaPanel } from '../components/QaPanel.tsx';
+import { ReviewRiskPanel, RiskBadge } from '../components/ReviewRiskPanel.tsx';
 import { RunBranchDialog } from '../components/runs/RunBranchDialog.tsx';
 import { RunList } from '../components/runs/RunPanel.tsx';
 import { IntegrationTestsToggle, SuiteResultsPanel } from '../components/runs/SuiteResults.tsx';
@@ -399,6 +400,7 @@ export function CardDetailView({
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
         <div className="flex min-w-0 flex-col gap-4">
+          <ReviewRiskPanel risk={card.reviewRisk} />
           {data.qa && <QaPanel cardId={card.id} qa={data.qa} />}
           {data.approval && <ApprovalPanel cardId={card.id} approval={data.approval} />}
           {currentShift && currentShift.status !== 'ended' && (
@@ -722,10 +724,14 @@ function HandoffData({ data }: { data: Record<string, unknown> }) {
   const reasons = Array.isArray(data.reasons) ? (data.reasons as string[]) : [];
   const missed = Array.isArray(data.criteriaMissed) ? (data.criteriaMissed as string[]) : [];
   const score = typeof data.score === 'number' ? data.score : null;
-  if (!reasons.length && !missed.length && score === null) return null;
+  const risk = data.risk === 'low' || data.risk === 'medium' || data.risk === 'high' ? data.risk : null;
+  const analysis = typeof data.riskAnalysis === 'string' ? data.riskAnalysis : '';
+  const qaFocus = typeof data.qaFocus === 'string' ? data.qaFocus : '';
+  if (!reasons.length && !missed.length && score === null && !risk) return null;
   return (
     <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs" data-testid="handoff-review">
       {score !== null && <Badge>Score {score}/5</Badge>}
+      {risk && <RiskBadge level={risk} />}
       {reasons.map((r) => (
         <Badge key={r} tone="red">
           {r.replaceAll('_', ' ')}
@@ -736,6 +742,13 @@ function HandoffData({ data }: { data: Record<string, unknown> }) {
           Missed: {m}
         </span>
       ))}
+      {qaFocus && <span className="basis-full text-subtle">QA focus: {qaFocus}</span>}
+      {analysis && (
+        <details className="basis-full" data-testid="handoff-risk-analysis">
+          <summary className="cursor-pointer text-subtle">Risk analysis</summary>
+          <p className="mt-1 whitespace-pre-wrap text-muted">{analysis}</p>
+        </details>
+      )}
     </div>
   );
 }

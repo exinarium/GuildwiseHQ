@@ -44,6 +44,7 @@ import { QA_STEPS_STAGE } from './qa-flow.ts';
 import { raiseQuestion } from './questions.ts';
 import { rebaseConflictEvents } from './rebase.ts';
 import { buildPublicationEvents } from './research.ts';
+import { riskFields } from './review-risk.ts';
 import {
   endTestEnvironmentIn,
   openSuitesOf,
@@ -308,6 +309,7 @@ export async function applyShiftReport(
           reviewerAgentId: agent.id,
           score: payloadData.score,
           comments: report.note,
+          ...riskFields(payloadData),
           approvalsSoFar: soFar,
           approvalsRequired: required,
           toStage,
@@ -333,6 +335,7 @@ export async function applyShiftReport(
           score: payloadData.score,
           criteriaMissed: payloadData.criteriaMissed ?? [],
           comments: report.note,
+          ...riskFields(payloadData),
         },
       });
       break;

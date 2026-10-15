@@ -144,12 +144,27 @@ async function report(brief: Brief, action: Action): Promise<{ code: number; out
           'missed_requirement',
           '--score',
           '2',
+          '--risk',
+          'low',
+          '--risk-analysis',
+          'mock risk analysis',
           '--criteria-missed',
           'mock criterion',
           '--note',
           'mock: changes requested',
         ])
-      : aom(['review', 'approve', '--score', '4', '--note', 'mock approve']);
+      : aom([
+          'review',
+          'approve',
+          '--score',
+          '4',
+          '--risk',
+          'low',
+          '--risk-analysis',
+          'mock risk analysis',
+          '--note',
+          'mock approve',
+        ]);
   }
   if (has('pass') && has('fail')) {
     return failing

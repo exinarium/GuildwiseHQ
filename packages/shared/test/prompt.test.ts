@@ -107,9 +107,9 @@ describe('renderShiftPrompt', () => {
 
       Allowed outcomes (run exactly one when you are done):
       - approve (success): Approve
-        \`aom review approve --score <1-5> --note "<why this meets the card>"\`
+        \`aom review approve --score <1-5> --risk <low|medium|high> --risk-file <risk-analysis.md> [--qa-focus "<what a person should test>"] --note "<why this meets the card>"\`
       - changes (failure): Request changes
-        \`aom review changes --reason <reason>[,<reason>] --score <1-5> --criteria-missed "<criterion>" --note "<specific, actionable comments>"\`
+        \`aom review changes --reason <reason>[,<reason>] --score <1-5> --risk <low|medium|high> --risk-file <risk-analysis.md> --criteria-missed "<criterion>" --note "<specific, actionable comments>"\`
       "
     `);
   });
@@ -230,9 +230,9 @@ describe('renderInstructions', () => {
 
       Allowed outcomes for the "Review" stage:
       - approve (success): Approve
-        \`aom review approve --score <1-5> --note "<why this meets the card>"\`
+        \`aom review approve --score <1-5> --risk <low|medium|high> --risk-file <risk-analysis.md> [--qa-focus "<what a person should test>"] --note "<why this meets the card>"\`
       - changes (failure): Request changes
-        \`aom review changes --reason <reason>[,<reason>] --score <1-5> --criteria-missed "<criterion>" --note "<specific, actionable comments>"\`
+        \`aom review changes --reason <reason>[,<reason>] --score <1-5> --risk <low|medium|high> --risk-file <risk-analysis.md> --criteria-missed "<criterion>" --note "<specific, actionable comments>"\`
 
       Other commands:
       - \`aom card [--json]\`: print this card and brief again.

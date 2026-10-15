@@ -65,6 +65,7 @@ export const REWORK_REASON_LABEL: Record<ReworkReason, string> = {
   poor_structure: 'Poor structure',
   spec_unclear: 'Spec unclear',
   out_of_scope_test_change: 'Changed tests out of scope',
+  regression_risk: 'Likely regression',
 };
 
 /** Everything except an unclear spec counts against the builder. */
@@ -82,6 +83,8 @@ export const REWORK_STANDING_ORDER: Record<ReworkReason, string | null> = {
     'Keep changes small and cohesive: reuse existing modules and helpers instead of adding parallel structures.',
   out_of_scope_test_change:
     'Do not edit existing unit tests outside the card scope; add new tests for new behaviour instead.',
+  regression_risk:
+    'Before handing off, search the repository for every caller and user of what you changed and check each still works; add a test for the existing behaviour your change could affect.',
   spec_unclear: null,
 };
 

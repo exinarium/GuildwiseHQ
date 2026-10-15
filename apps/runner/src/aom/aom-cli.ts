@@ -18,7 +18,10 @@ import {
   parseCommandLine,
   parseRunHealth,
   parseRunPort,
+  QA_FOCUS_MAX,
   type QuestionShift,
+  ReviewRisk,
+  RISK_ANALYSIS_MAX,
   type RpcMethod,
   renderBaTaskPrompt,
   renderDevopsPrompt,
@@ -206,6 +209,34 @@ const outcome = (outcomeId: string, note: string, data: Record<string, unknown> 
   note,
   data,
 });
+
+/** `--risk low|medium|high --risk-file <md> [--qa-focus "<text>"]` of `aom review`: nothing when `--risk` is absent. */
+function reviewRiskData(ctx: AomContext, p: Parsed): Record<string, unknown> {
+  const risk = one(p, 'risk');
+  if (risk === undefined) {
+    if (has(p, 'risk-file') || has(p, 'risk-analysis') || has(p, 'qa-focus'))
+      throw new UsageError('--risk <low|medium|high> is required with --risk-file / --qa-focus');
+    return {};
+  }
+  if (!ReviewRisk.safeParse(risk).success) throw new UsageError('--risk must be low, medium or high');
+  const inline = one(p, 'risk-analysis');
+  const file = one(p, 'risk-file');
+  if (inline !== undefined && file !== undefined)
+    throw new UsageError('use either --risk-file or --risk-analysis');
+  const analysis = inline ?? (file !== undefined ? ctx.readFile(file) : '');
+  if (!analysis.trim())
+    throw new UsageError(
+      '--risk-file <md> is required: your risk analysis (blast radius, failure scenarios, verified, unverified, mitigations)',
+    );
+  if (analysis.length > RISK_ANALYSIS_MAX)
+    throw new UsageError(
+      `--risk-file is too long (${analysis.length} characters, at most ${RISK_ANALYSIS_MAX}): shorten it`,
+    );
+  const qaFocus = one(p, 'qa-focus')?.trim() ?? '';
+  if (qaFocus.length > QA_FOCUS_MAX)
+    throw new UsageError(`--qa-focus is too long (${qaFocus.length} characters, at most ${QA_FOCUS_MAX})`);
+  return { risk, riskAnalysis: analysis.trim(), ...(qaFocus ? { qaFocus } : {}) };
+}
 
 function score(p: Parsed): number {
   const s = Number(one(p, 'score'));
@@ -863,7 +894,10 @@ const VERBS: Record<string, Verb> = {
   review: async (ctx, p) => {
     const sub = p.positionals[0];
     const note = textFlag(ctx, p, 'note', true) as string;
-    if (sub === 'approve') return report(ctx, outcome('approve', note, { score: score(p) }));
+    // The risk call (backlog #70). Optional here so an older reviewer prompt still works; the runner refuses a reviewer
+    // shift's report without it (see the supervisor).
+    const riskData = reviewRiskData(ctx, p);
+    if (sub === 'approve') return report(ctx, outcome('approve', note, { score: score(p), ...riskData }));
     if (sub === 'changes') {
       const reasons = many(p, 'reason')
         .flatMap((r) => r.split(','))
@@ -872,7 +906,12 @@ const VERBS: Record<string, Verb> = {
       if (reasons.length === 0) throw new UsageError('--reason <reason>[,<reason>] is required');
       return report(
         ctx,
-        outcome('changes', note, { score: score(p), reasons, criteriaMissed: many(p, 'criteria-missed') }),
+        outcome('changes', note, {
+          score: score(p),
+          reasons,
+          criteriaMissed: many(p, 'criteria-missed'),
+          ...riskData,
+        }),
       );
     }
     throw new UsageError('usage: aom review approve|changes ...');
@@ -1428,8 +1467,8 @@ export const USAGE = `usage: aom <verb> [options]
   handoff --note "<text>" [--data-file <json>]   builder/scout/researcher: hand the card on (scout: candidates)
   publish --file <note.md> [--title "<t>"] [--citations-file <json>] [--path <p>]   checker: publish the verified note
   digest --file <json> [--note "<text>"] | --none   curator: post the digest (empty when nothing qualifies)
-  review approve --score <1-5> --note "<text>"
-  review changes --reason <r>[,<r>] --score <1-5> [--criteria-missed "<c>"]... --note "<text>"
+  review approve --score <1-5> --risk low|medium|high --risk-file <md> [--qa-focus "<what a person should test>"] --note "<text>"
+  review changes --reason <r>[,<r>] --score <1-5> --risk low|medium|high --risk-file <md> [--criteria-missed "<c>"]... --note "<text>"
   test suite --name <suite> --status passed|failed|timeout|skipped [--junit <glob>] [--log <file>]   tester: report one suite run (a pass after a failure counts as flaky)
   env info | logs <service> | restart | suites [propose ...]   tester: the running environment (use \`aom-env --timeout <min> -- <cmd>\` to reach it) and the project's suites
   test pass --evidence "<text>" [--command "<cmd>"]...

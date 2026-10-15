@@ -26,11 +26,16 @@ import { cardConflictAttemptEvents } from './conflict-attempts.ts';
 import { qaOpenEvents } from './qa.ts';
 import { finalizeNext, qaAssignee } from './qa-flow.ts';
 import { rebaseConflictEvents } from './rebase.ts';
+import { isHighRisk, riskOf } from './review-risk.ts';
 import { spawnCardEvent } from './spawn.ts';
 
 /** A large-tier merge, the kind that waits for the manager unless the owner's project setting lets it through. */
 export const isLargeMerge = (card: Row, action: StoredCompletionAction): boolean =>
   action === 'merge' && card.risk_tier === 'large';
+
+/** A merge of a change the reviewer rated high risk (backlog #70): always waits for the manager. */
+export const isHighRiskMerge = (card: Row, action: StoredCompletionAction): boolean =>
+  action === 'merge' && isHighRisk(card);
 
 export type MergeGate = 'none' | 'approval' | 'waived';
 
@@ -43,6 +48,7 @@ export async function mergeGate(
   card: Row,
   action: StoredCompletionAction,
 ): Promise<MergeGate> {
+  if (isHighRiskMerge(card, action)) return 'approval'; // the project's waiver does not apply to a high risk
   if (!isLargeMerge(card, action)) return 'none';
   const p = await one(db, 'SELECT merge_large_without_approval AS waived FROM projects WHERE id=$1', [
     card.project_id,
@@ -122,7 +128,7 @@ export function mergeApprovalEvents(
             kind: 'approval',
             subkind: DESK_SUBKIND.largeMerge,
             title: `Approve merge of ${card.ref}: ${card.title}`,
-            body: `${card.ref} is a large change (two reviewers approved). Approving merges ${card.branch_name} into the working branch (${card.base_branch ?? 'main'}); the runner does it, then a full E2E suite runs on the result.`,
+            body: `${isHighRisk(card) ? `${card.ref} was rated HIGH risk by the reviewer (${riskOf(card)?.analysis.slice(0, 600) ?? ''}). ` : ''}${card.ref} is a ${card.risk_tier === 'large' ? 'large change (two reviewers approved)' : 'change'}. Approving merges ${card.branch_name} into the working branch (${card.base_branch ?? 'main'}); the runner does it, then a full E2E suite runs on the result.`,
             options: [],
             blocking: false,
             pinned: true,

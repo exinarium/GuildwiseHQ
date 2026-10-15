@@ -24,6 +24,10 @@ Testers use browsers (Playwright and Chromium). Their sandbox allows Unix socket
 
 Playwright's test output folders (`test-results/`, `playwright-report/`, `blob-report/`) are discarded after the shift and never committed to your repository.
 
+## Reviewer risk {#reviewer-risk}
+
+The reviewer tries to break each change and rates its risk low, medium or high, with a short analysis (what else could break, failure scenarios, what was and was not verified). You see it on the card. Medium and high risks pass the reviewer's "what to test by hand" to the tester and the manual QA steps, and a high risk makes the merge wait for your approval on the desk.
+
 ## Finalization {#finalization}
 
 At the Finalize stage, your BA ships the work the way the project says. Every project repository has two branches, named in the project's repository settings:

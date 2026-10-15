@@ -50,7 +50,10 @@ describe('supervisor', () => {
     const seen: any = {};
     await start(async (_i, ctl) => {
       seen.r = await ctl.post('/v1/report', outcome('approve', 'ok', {}));
-      await ctl.post('/v1/report', outcome('approve', 'ok', { score: 5 }));
+      await ctl.post(
+        '/v1/report',
+        outcome('approve', 'ok', { score: 5, risk: 'low', riskAnalysis: 'contained' }),
+      );
     });
     await h!.runShift({ stage: 'build' }); // create the worktree first
     // run a review shift (reuse)
@@ -158,6 +161,46 @@ describe('supervisor', () => {
         .of('shift.report')
         .filter((r) => r.shiftId === reported.shiftId && r.report.kind === 'comment'),
     ).toHaveLength(0);
+  });
+
+  it('refuses a reviewer report without the risk call, accepts it with one (backlog #70)', async () => {
+    const seen: any = {};
+    await start(async (_i, ctl) => {
+      seen.noRisk = await ctl.post('/v1/report', outcome('approve', 'ok', { score: 4 }));
+      seen.noAnalysis = await ctl.post('/v1/report', outcome('approve', 'ok', { score: 4, risk: 'high' }));
+      seen.ok = await ctl.post(
+        '/v1/report',
+        outcome('approve', 'ok', {
+          score: 4,
+          risk: 'high',
+          riskAnalysis: 'Blast radius: the importer',
+          qaFocus: 'Import twice',
+        }),
+      );
+    });
+    await h!.runShift({ stage: 'build' });
+    const { shiftId, ended } = await h!.runShift({ stage: 'review' });
+    expect(seen.noRisk.status).toBe(422);
+    expect(seen.noRisk.json.error).toContain('--risk');
+    expect(seen.noAnalysis.status).toBe(422);
+    expect(seen.ok.status).toBe(200);
+    expect(ended.outcome).toBe('reported');
+    const sent = h!.server.of('shift.report').filter((r) => r.shiftId === shiftId);
+    expect(sent).toHaveLength(1);
+    expect((sent[0]!.report as any).data).toMatchObject({
+      risk: 'high',
+      riskAnalysis: 'Blast radius: the importer',
+      qaFocus: 'Import twice',
+    });
+  });
+
+  it('a builder shift is not asked for a risk call', async () => {
+    const seen: any = {};
+    await start(async (_i, ctl) => {
+      seen.r = await ctl.post('/v1/report', outcome('handoff', 'built'));
+    });
+    await h!.runShift({ stage: 'build' });
+    expect(seen.r.status).toBe(200);
   });
 
   it('guard rejects a reviewer who changed code and records the violation on shift.ended', async () => {

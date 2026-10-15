@@ -2,6 +2,7 @@ import type { CardTesting, RelatedCard } from '@aom/shared';
 import { effectiveCompletionAction } from '../commands/completion.ts';
 import { mergeGate } from '../commands/finalize.ts';
 import { suiteResultsOf } from '../commands/integration-tests.ts';
+import { HIGH_RISK_MERGE_REASON, isHighRisk } from '../commands/review-risk.ts';
 import type { Ctx } from '../context.ts';
 import { iso, type Row, rows } from '../db/sql.ts';
 
@@ -62,6 +63,7 @@ export async function cardTesting(ctx: Ctx, card: Row, canManage: boolean): Prom
       available: canManage && open_,
       action,
       requiresApproval: action ? (await mergeGate(ctx.pool, card, action)) === 'approval' : false,
+      approvalReason: action === 'merge' && isHighRisk(card) ? HIGH_RISK_MERGE_REASON : null,
       state: card.finalize_state ?? 'idle',
       deskItemId: card.finalize_desk_item_id ?? null,
       lastError: card.finalize_error ?? null,

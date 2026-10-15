@@ -105,6 +105,21 @@ describe('agents', () => {
     expect((await agent('Bea')).model).toBe('sonnet');
   });
 
+  it('never lowers a reviewer below high effort or to a lighter model (backlog #70)', async () => {
+    await w.hire('Rev', 'reviewer', 'senior', { model: 'opus' });
+    expect((await agent('Rev')).effort).toBe('high'); // hired without an effort: the role default
+    const lowEffort = result(await act(r, shiftId, 'model', { agent: 'Rev', to: 'opus', effort: 'medium' }));
+    expect(lowEffort.status).toBe('refused');
+    expect(lowEffort.message).toContain('reviewers stay on high effort');
+    const down = result(await act(r, shiftId, 'model', { agent: 'Rev', to: 'sonnet' }));
+    expect(down.status).toBe('refused');
+    const row = await agent('Rev');
+    expect(row).toMatchObject({ model: 'opus', effort: 'high' });
+    // staying on high effort is fine for the guard (the model is already opus: nothing to change)
+    const same = result(await act(r, shiftId, 'model', { agent: 'Rev', to: 'opus', effort: 'high' }));
+    expect(same.message).not.toContain('reviewers stay on high effort');
+  });
+
   it('a model-up is held back when it would pass the budget forecast', async () => {
     await ok(owner('PUT', `/api/projects/${w.projectId}/budget`, { monthly: 1 }));
     await q(

@@ -16,9 +16,9 @@ export function commandForOutcome(outcome: BriefOutcome): string {
         return 'aom investigate --report <report path> --summary "<what you found and recommend>"';
       return `aom outcome report --note "<summary>"`;
     case 'approve':
-      return 'aom review approve --score <1-5> --note "<why this meets the card>"';
+      return 'aom review approve --score <1-5> --risk <low|medium|high> --risk-file <risk-analysis.md> [--qa-focus "<what a person should test>"] --note "<why this meets the card>"';
     case 'changes':
-      return 'aom review changes --reason <reason>[,<reason>] --score <1-5> --criteria-missed "<criterion>" --note "<specific, actionable comments>"';
+      return 'aom review changes --reason <reason>[,<reason>] --score <1-5> --risk <low|medium|high> --risk-file <risk-analysis.md> --criteria-missed "<criterion>" --note "<specific, actionable comments>"';
     case 'pass':
       return 'aom test pass --evidence "<what you ran and saw>" --command "<command you ran>"';
     case 'fail':

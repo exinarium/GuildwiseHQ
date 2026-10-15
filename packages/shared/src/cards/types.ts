@@ -91,6 +91,8 @@ export const ReworkReason = z.enum([
   'poor_structure',
   'spec_unclear',
   'out_of_scope_test_change',
+  /** A likely break of existing behaviour outside the card. */
+  'regression_risk',
 ]);
 export type ReworkReason = z.infer<typeof ReworkReason>;
 
@@ -141,10 +143,23 @@ export const TestEvidence = z.object({
 });
 export type TestEvidence = z.infer<typeof TestEvidence>;
 
+/** The reviewer's overall risk of the change (`aom review --risk`). `unknown`: an older runner reported none. */
+export const ReviewRisk = z.enum(['low', 'medium', 'high']);
+export type ReviewRisk = z.infer<typeof ReviewRisk>;
+export const StoredReviewRisk = z.enum(['low', 'medium', 'high', 'unknown']);
+export type StoredReviewRisk = z.infer<typeof StoredReviewRisk>;
+/** Size caps of the reviewer's risk text. */
+export const RISK_ANALYSIS_MAX = 20000;
+export const QA_FOCUS_MAX = 2000;
+
 export const ReviewData = z.object({
   score: z.number().int().min(1).max(5),
   reasons: z.array(ReworkReason).optional(),
   criteriaMissed: z.array(z.string()).optional(),
+  /** Absent from an older runner: the server stores `unknown`. */
+  risk: ReviewRisk.optional(),
+  riskAnalysis: z.string().max(RISK_ANALYSIS_MAX).optional(),
+  qaFocus: z.string().max(QA_FOCUS_MAX).optional(),
 });
 export type ReviewData = z.infer<typeof ReviewData>;
 

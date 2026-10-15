@@ -259,6 +259,17 @@ export const ShiftBriefSchema = z.object({
         .optional(),
     })
     .optional(),
+  /**
+   * The reviewer's risk call on this card (backlog #70): given to the stages that test it (test, qa_steps) so they
+   * look at the risky areas first.
+   */
+  reviewRisk: z
+    .object({
+      level: z.enum(['low', 'medium', 'high', 'unknown']),
+      analysis: z.string(),
+      qaFocus: z.string(),
+    })
+    .optional(),
   /** All handoffs, oldest first. */
   handoffs: z.array(
     z.object({

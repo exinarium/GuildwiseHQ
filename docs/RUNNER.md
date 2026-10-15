@@ -613,8 +613,8 @@ aom question ...                                       ask a blocking question
 
 **Reviewer shifts (Review stage):**
 ```sh
-aom review approve --score <1-5> --note "<text>"
-aom review changes --reason <r>[,<r>] --score <1-5> [--criteria-missed "<c>"]... --note "<text>"
+aom review approve --score <1-5> --risk low|medium|high --risk-file <md> [--qa-focus "<text>"] --note "<text>"
+aom review changes --reason <r>[,<r>] --score <1-5> --risk low|medium|high --risk-file <md> [--criteria-missed "<c>"]... --note "<text>"
 ```
 
 **Tester shifts (Test stage):**

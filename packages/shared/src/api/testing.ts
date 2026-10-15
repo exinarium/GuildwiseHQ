@@ -73,6 +73,8 @@ export const CardTestingSchema = z.object({
     action: StoredCompletionAction.nullable(),
     /** Merge on a large-tier card waits for a desk approval first. */
     requiresApproval: z.boolean(),
+    /** Why the merge waits for the manager when the reviewer rated it high risk (backlog #70). */
+    approvalReason: z.string().nullable().optional(),
     state: z.enum(['idle', 'awaiting_approval', 'running', 'failed']),
     deskItemId: z.uuid().nullable(),
     lastError: z.string().nullable(),

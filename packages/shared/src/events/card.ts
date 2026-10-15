@@ -11,6 +11,7 @@ import {
   RiskTier,
   StoredCompletionAction,
   StoredFinalizeAction,
+  StoredReviewRisk,
   TestEvidence,
   ThreadMessageKind,
 } from '../cards/types.ts';
@@ -185,6 +186,10 @@ export const cardEvents = [
       score: z.number().int().min(1).max(5),
       criteriaMissed: z.array(z.string()),
       comments: z.string(),
+      /** The reviewer's risk call (absent in events from before backlog #70 and from an older runner: `unknown`). */
+      risk: StoredReviewRisk.optional(),
+      riskAnalysis: z.string().optional(),
+      qaFocus: z.string().optional(),
     }),
   ),
   defineEvent(
@@ -194,6 +199,10 @@ export const cardEvents = [
       reviewerAgentId: Id,
       score: z.number().int().min(1).max(5),
       comments: z.string(),
+      /** The reviewer's risk call (absent in events from before backlog #70 and from an older runner: `unknown`). */
+      risk: StoredReviewRisk.optional(),
+      riskAnalysis: z.string().optional(),
+      qaFocus: z.string().optional(),
       approvalsSoFar: z.number().int().min(1),
       approvalsRequired: z.number().int().min(1),
       /** `review` while more approvals are due, else the next stage (`test`, or a step a project variant inserted). */

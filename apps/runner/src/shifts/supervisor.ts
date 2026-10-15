@@ -1708,6 +1708,19 @@ export class ShiftSupervisor {
       }
     }
 
+    // Reviewers must report the adversarial review's risk call (backlog #70); other roles never send one.
+    if (report.kind === 'outcome' && msg.agent.roleKey === 'reviewer') {
+      const reviewOutcome = msg.brief.shift.outcomes.find((o) => o.id === report.outcomeId);
+      const d = (toSend as { data: Record<string, unknown> }).data as {
+        risk?: string;
+        riskAnalysis?: string;
+      };
+      if (reviewOutcome?.data === 'review' && (!d.risk || !d.riskAnalysis?.trim()))
+        return rejected(
+          'A review needs your risk call: add `--risk low|medium|high` and `--risk-file <your risk analysis markdown>` (blast radius, failure scenarios, verified, unverified, mitigations), and `--qa-focus "<what a person should test>"` for a medium or high risk. Run the command again.',
+        );
+    }
+
     const reportId = uuidv7();
     if (terminal) s.reportState = 'pending';
     const verdict = new Promise<ReportVerdict | 'timeout'>((resolve) => {

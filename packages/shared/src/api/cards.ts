@@ -9,6 +9,7 @@ import {
   DiffStats,
   RiskTier,
   StoredCompletionAction,
+  StoredReviewRisk,
   ThreadMessageKind,
 } from '../cards/types.ts';
 import { CardChangesSchema } from '../events/card.ts';
@@ -21,6 +22,16 @@ import { CardQaSchema } from './qa.ts';
 import { PublicationDtoSchema } from './research.ts';
 import { ShiftDtoSchema } from './shifts.ts';
 import { CardTestingSchema } from './testing.ts';
+
+/** The reviewer's risk call on the card's current review round (backlog #70). */
+export const ReviewRiskDtoSchema = z.object({
+  level: StoredReviewRisk,
+  analysis: z.string(),
+  qaFocus: z.string(),
+  /** Why the merge waits for the manager's approval (only a high risk). */
+  mergeApprovalReason: z.string().nullable().optional(),
+});
+export type ReviewRiskDto = z.infer<typeof ReviewRiskDtoSchema>;
 
 export const CardDtoSchema = z.object({
   id: z.uuid(),
@@ -39,6 +50,8 @@ export const CardDtoSchema = z.object({
   decisionPolicy: DecisionPolicy,
   riskTier: RiskTier.nullable(),
   riskTierOverridden: z.boolean(),
+  /** The reviewer's risk call (null before any approval, or after a new review round starts). */
+  reviewRisk: ReviewRiskDtoSchema.nullable().optional(),
   docsNeeded: z.boolean(),
   /** Architect: run Investigate & design before build. */
   designNeeded: z.boolean().optional(),

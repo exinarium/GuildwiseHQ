@@ -3,6 +3,7 @@ import {
   HR_WINDOW_DAYS,
   isThinSpec,
   LEDGER_SEARCH_STANDING_ORDER,
+  MIN_EFFORT_BY_ROLE,
   REWORK_REASON_LABEL,
   REWORK_STANDING_ORDER,
   type Recommendation,
@@ -262,10 +263,12 @@ export async function computeRecommendations(
       r.buggy === 0 &&
       r.small / r.submitted >= HR_RULES.smallShare
     ) {
+      // Reviewers keep their strong model and high effort (backlog #70): advice for the owner, never applied automatically.
+      const protectedRole = a.role_key in MIN_EFFORT_BY_ROLE;
       push(
         mk('model_down', a.id, a, null, {
           title: `${a.name} does small, clean work: ${down} would do`,
-          summary: `${r.small} of ${r.submitted} cards were small, with ${pct(r.reworked / r.submitted)} rework and no bugs. A cheaper model would do the same work with fewer tokens.`,
+          summary: `${r.small} of ${r.submitted} cards were small, with ${pct(r.reworked / r.submitted)} rework and no bugs. A cheaper model would do the same work with fewer tokens.${protectedRole ? ' This is a reviewer: reviewers run at high effort for the adversarial review, so this is advice for the owner and is not applied automatically.' : ''}`,
           evidence: {
             metrics: [
               { label: 'Cards submitted', value: String(r.submitted) },
@@ -276,8 +279,10 @@ export async function computeRecommendations(
             ],
             items: [],
           },
-          action: { type: 'change_model', agentId: a.id, model: down, fromModel: a.model },
-          ownerOnly: false,
+          action: protectedRole
+            ? { type: 'none' }
+            : { type: 'change_model', agentId: a.id, model: down, fromModel: a.model },
+          ownerOnly: protectedRole,
         }),
       );
     }
