@@ -342,3 +342,63 @@ async function removeWorktreeLocked(
 }
 
 export { RebaseConflictError, rebaseOntoBase } from './rebase.ts';
+
+export interface ReadOnlyCheckout {
+  path: string;
+  /** The commit of `origin/<base>` (or the local base branch) the checkout is at. */
+  headSha: string;
+  /** The ref it was cut from. */
+  ref: string;
+}
+
+/**
+ * The architect's design before the card's dependencies landed (backlog #80): a DETACHED checkout of the working branch at
+ * `origin/<base>`, no branch created, nothing to push. The agent reads it (it is opened as a read-only folder); the
+ * runner removes it after the shift (`removeReadOnlyCheckout`). Idempotent: a leftover of a crashed shift is replaced.
+ */
+export async function ensureReadOnlyCheckout(input: {
+  repoPath: string;
+  baseBranch: string;
+  path: string;
+  roots: string[];
+  auth?: GitAuth;
+}): Promise<ReadOnlyCheckout> {
+  return withRepoLock(input.repoPath, async () => {
+    const { repoPath, baseBranch: base } = input;
+    if (!isSafeGitRef(base)) throw new WorktreeError(`refusing unsafe base branch ${JSON.stringify(base)}`);
+    let path: string;
+    try {
+      path = confineAny(input.roots, input.path);
+    } catch (err) {
+      throw new WorktreeError(err instanceof Error ? err.message : String(err));
+    }
+    await git(repoPath, ['worktree', 'prune']);
+    if (existsSync(path)) {
+      await git(repoPath, ['worktree', 'remove', '--force', '--', path]);
+      await rm(path, { recursive: true, force: true });
+    }
+    let ref = base;
+    if (await hasRemote(repoPath)) {
+      const url = (await git(repoPath, ['remote', 'get-url', 'origin'])).stdout.trim();
+      const a = input.auth && url ? await input.auth(url) : { args: [], env: {} };
+      await git(repoPath, [...a.args, 'fetch', '--', 'origin', base], { env: a.env });
+      if (await revParse(repoPath, `refs/remotes/origin/${base}`)) ref = `origin/${base}`;
+    }
+    if (!(await revParse(repoPath, ref)))
+      throw new BaseBranchMissingError(base, null, await branchNames(repoPath));
+    await mkdir(dirname(path), { recursive: true });
+    const r = await git(repoPath, ['worktree', 'add', '--detach', '--', path, ref]);
+    if (r.exitCode !== 0)
+      throw new WorktreeError(`git worktree add --detach ${ref} failed: ${r.stderr.trim()}`);
+    return { path, ref, headSha: await gitOk(path, ['rev-parse', 'HEAD']) };
+  });
+}
+
+/** Removes a read-only checkout (its registration in the clone and the directory). Never throws. */
+export async function removeReadOnlyCheckout(repoPath: string, path: string): Promise<void> {
+  await withRepoLock(repoPath, async () => {
+    await git(repoPath, ['worktree', 'remove', '--force', '--', path]).catch(() => undefined);
+    await rm(path, { recursive: true, force: true }).catch(() => undefined);
+    await git(repoPath, ['worktree', 'prune']).catch(() => undefined);
+  });
+}

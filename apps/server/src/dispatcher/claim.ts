@@ -7,6 +7,7 @@ import { one } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { wsServesOrgSql } from '../simulation/fit.ts';
 import { type AgentView, agentView, isCandidate } from './candidates.ts';
+import { dependencyStates } from './dependencies.ts';
 
 export interface WorktreeClaim {
   repoId: string;
@@ -16,6 +17,8 @@ export interface WorktreeClaim {
   worktreePath: string;
   homeWorkstationId: string;
   created: boolean;
+  /** No card branch yet (the dependencies have not landed): a read-only checkout of the working branch for the design. */
+  readOnly?: boolean;
   /** The repository's main branch, when the owner named one (a missing working branch is created from it). */
   mainBranch?: string;
 }
@@ -127,6 +130,15 @@ export async function claim(ctx: Ctx, args: ClaimArgs): Promise<ClaimResult | nu
         created: path === null,
         ...(repo.main_branch ? { mainBranch: repo.main_branch } : {}),
       };
+      // The architect designing before the dependencies landed (backlog #80): no card branch, only a read-only checkout.
+      if (
+        path === null &&
+        !card.worktree_card_id &&
+        !card.investigation_only &&
+        String(card.stage).startsWith('investigate') &&
+        (await dependencyStates(tx, card.id)).some((d) => !d.landed)
+      )
+        worktree.readOnly = true;
       // Merge the latest main first: only when the card's worktree is created now (never on reuse), never for a card that
       // works in another card's worktree (bug children), and not when the main branch is the working branch.
       const mergeMain = card.merge_main_first ?? project.merge_main_first ?? true;
@@ -134,6 +146,7 @@ export async function claim(ctx: Ctx, args: ClaimArgs): Promise<ClaimResult | nu
         stage.syncMainBefore &&
         mergeMain &&
         worktree.created &&
+        !worktree.readOnly &&
         !card.worktree_card_id &&
         repo.main_branch !== worktree.baseBranch
       )
@@ -157,14 +170,17 @@ export async function claim(ctx: Ctx, args: ClaimArgs): Promise<ClaimResult | nu
               shiftId,
               stage: card.stage,
               overflow,
-              worktree: worktree && {
-                repoId: worktree.repoId,
-                baseBranch: worktree.baseBranch,
-                branchName: worktree.branchName,
-                worktreePath: worktree.worktreePath,
-                homeWorkstationId: worktree.homeWorkstationId,
-                created: worktree.created,
-              },
+              worktree:
+                worktree && !worktree.readOnly
+                  ? {
+                      repoId: worktree.repoId,
+                      baseBranch: worktree.baseBranch,
+                      branchName: worktree.branchName,
+                      worktreePath: worktree.worktreePath,
+                      homeWorkstationId: worktree.homeWorkstationId,
+                      created: worktree.created,
+                    }
+                  : null,
             },
           },
           actor: SYSTEM_ACTOR,

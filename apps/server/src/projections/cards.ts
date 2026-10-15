@@ -350,6 +350,11 @@ export const cardProjectors: Record<string, Projector> = {
 
   InvestigationReported: async (tx, e) => {
     const p = ev<'InvestigationReported'>(e).payload;
+    const prev = await one<{ investigation: { assumptions?: unknown } | null }>(
+      tx,
+      'SELECT investigation FROM cards WHERE id=$1',
+      [p.cardId],
+    );
     await exec(tx, 'UPDATE cards SET investigation=$2, updated_at=$3 WHERE id=$1', [
       p.cardId,
       JSON.stringify({
@@ -357,10 +362,50 @@ export const cardProjectors: Record<string, Projector> = {
         location: p.location,
         summary: p.summary,
         commit: p.commit ?? null,
+        ...(p.body ? { body: p.body } : {}),
+        // a revised report keeps the assumptions it was reviewed against
+        assumptions: p.assumptions ?? prev?.investigation?.assumptions ?? [],
         at: e.createdAt,
       }),
       e.createdAt,
     ]);
+  },
+
+  DesignHeld: async (tx, e) => {
+    const p = ev<'DesignHeld'>(e).payload;
+    await exec(tx, 'UPDATE cards SET design_review=$2, updated_at=$3 WHERE id=$1', [
+      p.cardId,
+      JSON.stringify({ state: 'waiting', dependencies: p.dependencies, agentId: p.agentId ?? null }),
+      e.createdAt,
+    ]);
+    await attachmentActivity(
+      tx,
+      e,
+      p.cardId,
+      `Design made before ${p.dependencies.join(', ')} landed: the assumptions are reviewed once they have`,
+    );
+  },
+
+  DesignReviewed: async (tx, e) => {
+    const p = ev<'DesignReviewed'>(e).payload;
+    await exec(
+      tx,
+      `UPDATE cards SET design_review = COALESCE(design_review, '{}'::jsonb) || $2::jsonb, updated_at=$3 WHERE id=$1`,
+      [
+        p.cardId,
+        JSON.stringify({
+          state: 'reviewed',
+          result: { confirmed: p.confirmed, revised: p.revised, note: p.note },
+        }),
+        e.createdAt,
+      ],
+    );
+    await attachmentActivity(
+      tx,
+      e,
+      p.cardId,
+      `Assumptions reviewed: ${p.confirmed} confirmed, ${p.revised} revised`,
+    );
   },
 
   CardMainSynced: async (tx, e) => {

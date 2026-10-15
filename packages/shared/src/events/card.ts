@@ -391,8 +391,34 @@ export const cardEvents = [
       location: z.enum(['repo', 'vault']),
       summary: z.string(),
       commit: z.string().optional(),
+      /** A `repo` report written before the card branch existed: the text the builder commits at `reportPath`. */
+      body: z.string().optional(),
+      /** Assumptions about unlanded dependencies (a design made before they landed). */
+      assumptions: z
+        .array(z.object({ assumption: z.string(), dependency: z.string(), ifWrong: z.string() }))
+        .optional(),
       /** The card only investigated (no build follows). */
       investigationOnly: z.boolean().default(false),
+    }),
+  ),
+  /**
+   * A design made before the card's dependencies landed is recorded: the card stays in the design stage until they
+   * land, then the architect reviews the assumptions (backlog #80).
+   */
+  defineEvent(
+    'DesignHeld',
+    z.object({ cardId: Id, dependencies: z.array(z.string()), agentId: Id.optional() }),
+  ),
+  /** The assumption review is done: confirmed as they were, or the design revised; the card goes on to Build. */
+  defineEvent(
+    'DesignReviewed',
+    z.object({
+      cardId: Id,
+      decision: z.enum(['confirm', 'revise']),
+      confirmed: z.number().int().nonnegative(),
+      revised: z.number().int().nonnegative(),
+      note: z.string().default(''),
+      agentId: Id.optional(),
     }),
   ),
   /**

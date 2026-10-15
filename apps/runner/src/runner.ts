@@ -10,6 +10,7 @@ import {
   type IpcRpcResponse,
   type McpAuthState,
   normalizeRemoteUrl,
+  READONLY_DESIGN_CAPABILITY,
   type RepoReport,
   type RunnerCommandName,
   type RunnerUpdateState,
@@ -830,10 +831,10 @@ export class Runner {
       // for real testers: the mock runtime (CI, demos) runs no tests, so its cards keep the plain test step.
       capabilities:
         platform() === 'win32'
-          ? ['ceo:1', SHIFT_LIMIT_CAPABILITY]
+          ? ['ceo:1', SHIFT_LIMIT_CAPABILITY, READONLY_DESIGN_CAPABILITY]
           : this.opts.config.runtimes.mock?.enabled
-            ? ['runs:1', 'runs:2', 'ceo:1', SHIFT_LIMIT_CAPABILITY]
-            : ['runs:1', 'runs:2', 'runs:3', 'ceo:1', SHIFT_LIMIT_CAPABILITY],
+            ? ['runs:1', 'runs:2', 'ceo:1', SHIFT_LIMIT_CAPABILITY, READONLY_DESIGN_CAPABILITY]
+            : ['runs:1', 'runs:2', 'runs:3', 'ceo:1', SHIFT_LIMIT_CAPABILITY, READONLY_DESIGN_CAPABILITY],
       maxRunEnvironments: this.freshConfig().maxRunEnvironments,
       integrationsVersion: INTEGRATIONS_VERSION,
     };

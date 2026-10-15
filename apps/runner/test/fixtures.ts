@@ -39,7 +39,7 @@ export interface ShiftOptions {
   shiftId?: string;
   agentId?: string;
   agentName?: string;
-  mode?: 'create' | 'reuse';
+  mode?: 'create' | 'reuse' | 'readonly';
   worktreePath?: string;
   rebase?: boolean;
   cardType?: string;

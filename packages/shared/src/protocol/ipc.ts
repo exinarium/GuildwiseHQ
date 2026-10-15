@@ -65,6 +65,25 @@ export const isTerminalReport = (r: ShiftReport): boolean =>
   r.kind === 'escalate' ||
   (r.kind === 'question' && r.blocking);
 
+/** One assumption of a design made before the card's dependencies landed (owner decision #80). */
+export const DesignAssumptionSchema = z.object({
+  assumption: z.string().min(1).max(1000),
+  /** The ref of the unlanded dependency the assumption is about. */
+  dependency: z.string().min(1).max(40),
+  /** What would change in the design if the assumption is wrong. */
+  ifWrong: z.string().min(1).max(1000),
+});
+export type DesignAssumption = z.infer<typeof DesignAssumptionSchema>;
+
+/** The assumption review after the dependencies landed: `aom design confirm` / `aom design revise`. */
+export const DesignReviewDataSchema = z.object({
+  decision: z.enum(['confirm', 'revise']),
+  /** 1-based numbers of the assumptions the design was revised for (the others were confirmed). */
+  revised: z.array(z.number().int().positive()).max(100).default([]),
+  note: z.string().max(4000).default(''),
+});
+export type DesignReviewData = z.infer<typeof DesignReviewDataSchema>;
+
 /** Architect outcome data (`aom design` / `aom investigate`): where the report is and a short summary for the next stage. */
 export const InvestigationDataSchema = z.object({
   reportPath: z.string().min(1),
@@ -72,6 +91,14 @@ export const InvestigationDataSchema = z.object({
   location: z.enum(['repo', 'vault']),
   /** Filled by the runner (HEAD of the card branch) for a `repo` report. */
   commit: z.string().optional(),
+  /** Filled by the runner for a `repo` report written without a card branch: the text the builder commits later. */
+  body: z.string().max(200_000).optional(),
+  /** A design made before dependencies landed lists what it assumed about them (at least one, unless `noAssumptions`). */
+  assumptions: z.array(DesignAssumptionSchema).max(50).optional(),
+  /** The architect states the design assumes nothing about the unlanded dependencies. */
+  noAssumptions: z.string().max(1000).optional(),
+  /** Set by the assumption-review shift (`aom design confirm|revise`). */
+  review: DesignReviewDataSchema.optional(),
 });
 export type InvestigationData = z.infer<typeof InvestigationDataSchema>;
 

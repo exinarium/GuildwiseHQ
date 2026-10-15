@@ -31,7 +31,7 @@ When a repository has a main branch and a different working branch, the runner m
 - It **writes** only documentation and its report; the runner checks this after each shift.
 - It **reads** the card's repository and every repository of the organization's projects cloned on its workstation, read-only, secret files blocked. The workstation's owner can also set an **organisation source folder** (see below): every git repository under it is readable too.
 - It **never pushes** itself: the runner publishes the card branch for it.
-- A card's investigation waits for the cards it depends on.
+- It may design a card before the cards it depends on have *landed* (merged into the working branch, even while they wait in Manual QA): it works in a read-only copy of the working branch, writes down its assumptions, and reviews them in a short follow-up shift once the dependencies have landed. Only then does the card go to build.
 
 ## Organisation source folder {#source-folder}
 

@@ -40,6 +40,7 @@ import {
   spendBriefs,
 } from '../costs/index.ts';
 import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
+import { dependencyStates } from '../dispatcher/dependencies.ts';
 import { notFound } from '../errors.ts';
 import { cardPhaseRef } from './phases.ts';
 import { publicationOfCard } from './research.ts';
@@ -101,13 +102,29 @@ async function investigationDto(ctx: Ctx, c: Row): Promise<CardDto['investigatio
   };
 }
 
+/** A design made before its dependencies landed: waiting for them, due for the assumption review, or reviewed. */
+function designReviewOf(c: Row, deps: Array<{ landed: boolean }>): CardDto['designReview'] {
+  const r = c.design_review as {
+    state: 'waiting' | 'reviewed';
+    dependencies?: string[];
+    result?: { confirmed: number; revised: number; note: string };
+  } | null;
+  if (!r) return null;
+  return {
+    state: r.state === 'reviewed' ? 'reviewed' : deps.every((d) => d.landed) ? 'review_due' : 'waiting',
+    dependencies: r.dependencies ?? [],
+    assumptions: (c.investigation?.assumptions ?? []) as Array<{
+      assumption: string;
+      dependency: string;
+      ifWrong: string;
+    }>,
+    result: r.result ?? null,
+  };
+}
+
 export async function toCardDto(ctx: Ctx, c: Row): Promise<CardDto> {
   const { column, key, version } = await cardColumn(ctx, c);
-  const deps = await rows(
-    ctx.pool,
-    `SELECT dc.id, dc.ref, dc.title, dc.status FROM card_dependencies d JOIN cards dc ON dc.id = d.depends_on_card_id WHERE d.card_id=$1 ORDER BY dc.number`,
-    [c.id],
-  );
+  const deps = await dependencyStates(ctx.pool, c.id);
   const completion = await effectiveCompletion(ctx.pool, c);
   const agent = c.claimed_by_agent_id
     ? await one(ctx.pool, 'SELECT name FROM agents WHERE id=$1', [c.claimed_by_agent_id])
@@ -161,7 +178,15 @@ export async function toCardDto(ctx: Ctx, c: Row): Promise<CardDto> {
     claimedAt: iso(c.claimed_at),
     queuedAt: iso(c.queued_at),
     blockedSince: iso(c.blocked_since),
-    dependencies: deps.map((d) => ({ cardId: d.id, ref: d.ref, title: d.title, status: d.status })),
+    dependencies: deps.map((d) => ({
+      cardId: d.id,
+      ref: d.ref,
+      title: d.title,
+      status: d.status as CardDto['dependencies'][number]['status'],
+      stage: d.stage,
+      landed: d.landed,
+    })),
+    designReview: designReviewOf(c, deps),
     createdAt: iso(c.created_at) as string,
     updatedAt: iso(c.updated_at) as string,
     finalizedAt: iso(c.finalized_at),

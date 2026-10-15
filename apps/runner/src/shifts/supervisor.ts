@@ -77,10 +77,12 @@ import {
 } from '../git/sync-main.ts';
 import {
   BaseBranchMissingError,
+  ensureReadOnlyCheckout,
   ensureWorktree,
   type GitAuth,
   RebaseConflictError,
   rebaseOntoBase,
+  removeReadOnlyCheckout,
   WorktreeError,
   type WorktreeResult,
 } from '../git/worktrees.ts';
@@ -225,6 +227,8 @@ interface ActiveShift {
   token?: string;
   session?: RuntimeSession;
   worktree?: WorktreeResult;
+  /** A design before the dependencies landed: a detached read-only checkout of the working branch, removed at the end. */
+  readOnlyCheckout?: { path: string; repoPath: string; baseBranch: string };
   startSha?: string;
   branchesAtStart: BranchSnapshot;
   /** The branches origin had at this shift's fetch (reported on shift.started so the server's branch list is fresh). */
@@ -324,6 +328,7 @@ export class ShiftSupervisor {
     const out: string[] = [];
     for (const s of this.active.values()) {
       if (s.worktree) out.push(s.worktree.path);
+      if (s.readOnlyCheckout) out.push(s.readOnlyCheckout.path);
       const spec = s.msg.worktree;
       if (spec) {
         if (spec.path) out.push(spec.path);
@@ -378,6 +383,8 @@ export class ShiftSupervisor {
       if (!shift.session)
         this.reject(msg.shiftId, 'internal', err instanceof Error ? err.message : String(err));
     } finally {
+      if (shift.readOnlyCheckout)
+        await removeReadOnlyCheckout(shift.readOnlyCheckout.repoPath, shift.readOnlyCheckout.path);
       if (shift.token) this.deps.ipc.revoke(shift.token);
       if (shift.graceTimer) clearTimeout(shift.graceTimer);
       shift.forwards?.close();
@@ -572,7 +579,27 @@ export class ShiftSupervisor {
     s.sandbox = sandbox;
     let cwd = sandbox.scratch;
 
-    if (msg.worktree) {
+    if (msg.worktree?.mode === 'readonly') {
+      const repo = await this.deps.findRepo(msg.worktree.remoteUrlNormalized);
+      if (!repo) {
+        this.reject(msg.shiftId, 'repo_missing', `no local clone for ${msg.worktree.remoteUrlNormalized}`);
+        return;
+      }
+      const path = `${paths.worktreePath(msg.brief.project.key, msg.brief.card.ref, msg.brief.project.id)}-design`;
+      try {
+        const co = await ensureReadOnlyCheckout({
+          repoPath: repo.localPath,
+          baseBranch: msg.worktree.baseBranch,
+          path,
+          roots: [paths.worktrees],
+          auth: this.deps.gitAuth,
+        });
+        s.readOnlyCheckout = { path: co.path, repoPath: repo.localPath, baseBranch: msg.worktree.baseBranch };
+      } catch (err) {
+        this.reject(msg.shiftId, 'worktree_failed', err instanceof Error ? err.message : String(err));
+        return;
+      }
+    } else if (msg.worktree) {
       const repo = await this.deps.findRepo(msg.worktree.remoteUrlNormalized);
       if (!repo) {
         this.reject(msg.shiftId, 'repo_missing', `no local clone for ${msg.worktree.remoteUrlNormalized}`);
@@ -738,7 +765,20 @@ export class ShiftSupervisor {
             runnerRoot: paths.root,
           })
         : [];
-    const readFolders = mergeReadFolders(registeredFolders, folderRepos);
+    const readFolders = mergeReadFolders(
+      s.readOnlyCheckout
+        ? [
+            {
+              repoId: 'design-checkout',
+              name: `${msg.brief.project.name}, working branch ${s.readOnlyCheckout.baseBranch} (no card branch yet)`,
+              kind: 'project' as const,
+              path: s.readOnlyCheckout.path,
+            },
+            ...registeredFolders,
+          ]
+        : registeredFolders,
+      folderRepos,
+    );
     if (msg.kind === 'card')
       texts.instructions += `\n${renderReadableFolders(readFolders, { workingDir: cwd })}\n`;
     else if (vaultReadFolder.length > 0)
@@ -1396,8 +1436,24 @@ export class ShiftSupervisor {
   ): Promise<{ data: InvestigationData } | { error: string }> {
     const { msg } = s;
     const wt = s.worktree?.path;
-    if (!wt) return { error: 'this shift has no card worktree' };
     const inv = msg.brief.investigation;
+    // No card branch yet (the dependencies have not landed): the report is written in the scratch directory.
+    const detached = !wt && !!inv?.readOnly;
+    if (!wt && !detached) return { error: 'this shift has no card worktree' };
+    // The assumption review confirms the recorded design: there is no new report to check.
+    if (data.review?.decision === 'confirm' && inv?.review)
+      return {
+        data: {
+          ...data,
+          reportPath: inv.report?.reportPath ?? data.reportPath,
+          location: inv.report?.location ?? data.location,
+        },
+      };
+    if (detached && !data.assumptions?.length && !data.noAssumptions)
+      return {
+        error:
+          'this design is made before its dependencies landed: record the assumptions you made about them (`--assumption "<assumption> | <dependency ref> | <what changes if wrong>"`, repeatable) or say there are none with `--no-assumptions "<why>"`',
+      };
     const location = inv?.location ?? 'repo';
     const asked = data.reportPath.trim();
     const secretsIn = (text: string): string | null => {
@@ -1406,7 +1462,7 @@ export class ShiftSupervisor {
         ? `the report seems to contain ${found.join(', ')}: remove it (never put secrets or credentials in a report)`
         : null;
     };
-    if (location === 'repo') {
+    if (location === 'repo' && wt) {
       const rel = asked.replace(/\\/g, '/').replace(/^\.\//, '');
       if (!isValidReportPath(rel) || rel.startsWith('vault:'))
         return { error: `the report path '${asked}' must be a relative path inside the worktree` };
@@ -1428,10 +1484,20 @@ export class ShiftSupervisor {
       if ((await git(wt, ['status', '--porcelain', '--', rel])).stdout.trim())
         return { error: `the report '${rel}' has uncommitted changes: commit them, then report again` };
       const commit = (await git(wt, ['rev-parse', 'HEAD'])).stdout.trim();
-      return { data: { reportPath: rel, summary: data.summary, location: 'repo', commit } };
+      return {
+        data: {
+          reportPath: rel,
+          summary: data.summary,
+          location: 'repo',
+          commit,
+          ...(data.assumptions ? { assumptions: data.assumptions } : {}),
+          ...(data.noAssumptions ? { noAssumptions: data.noAssumptions } : {}),
+          ...(data.review ? { review: data.review } : {}),
+        },
+      };
     }
     // Vault location: the architect wrote the file under its scratch or temp directory; the runner copies it.
-    if (!msg.vault || !this.deps.writeVault)
+    if (location === 'vault' && (!msg.vault || !this.deps.writeVault))
       return {
         error:
           'there is no knowledge vault for this project, so a vault report cannot be saved: ask the manager to use the repository location',
@@ -1439,7 +1505,9 @@ export class ShiftSupervisor {
     const sb = s.sandbox;
     const candidates = isAbsolute(asked)
       ? [asked]
-      : [sb ? join(sb.tmp, asked) : '', sb ? join(sb.scratch, asked) : '', join(wt, asked)].filter(Boolean);
+      : [sb ? join(sb.tmp, asked) : '', sb ? join(sb.scratch, asked) : '', wt ? join(wt, asked) : ''].filter(
+          Boolean,
+        );
     const roots = [sb?.tmp, sb?.scratch, wt].flatMap((r) => (r && existsSync(r) ? [realpathSync(r)] : []));
     let file: string | undefined;
     for (const c of candidates) {
@@ -1461,6 +1529,12 @@ export class ShiftSupervisor {
     const leak = secretsIn(text);
     if (leak) return { error: leak };
     const rel = inv?.reportPath ?? `${msg.brief.card.ref}.md`;
+    if (location === 'repo') {
+      // Written before the card branch exists: the text travels with the report and the builder commits it.
+      if (!isValidReportPath(rel)) return { error: `the report path '${rel}' is not a valid relative path` };
+      return { data: { ...data, reportPath: rel, summary: data.summary, location: 'repo', body: text } };
+    }
+    if (!msg.vault || !this.deps.writeVault) return { error: 'there is no knowledge vault for this project' };
     const vaultPath = `${msg.vault.folder}/${rel}`;
     try {
       await this.deps.writeVault({
@@ -1477,7 +1551,16 @@ export class ShiftSupervisor {
       };
     }
     this.addProgress(s, 'status', `report saved in the vault: ${vaultPath}`);
-    return { data: { reportPath: vaultPath, summary: data.summary, location: 'vault' } };
+    return {
+      data: {
+        reportPath: vaultPath,
+        summary: data.summary,
+        location: 'vault',
+        ...(data.assumptions ? { assumptions: data.assumptions } : {}),
+        ...(data.noAssumptions ? { noAssumptions: data.noAssumptions } : {}),
+        ...(data.review ? { review: data.review } : {}),
+      },
+    };
   }
 
   /**
@@ -1698,6 +1781,12 @@ export class ShiftSupervisor {
         const published = await this.publishNote(s, toSend.data as unknown as PublishRequest);
         if (!published.ok) return rejected(published.error);
         toSend = { ...report, data: published.data };
+      }
+
+      if (!s.worktree && outcome.kind === 'success' && outcome.data === 'investigation') {
+        const prepared = await this.prepareInvestigation(s, toSend.data as unknown as InvestigationData);
+        if ('error' in prepared) return rejected(prepared.error);
+        toSend = { ...toSend, data: prepared.data as unknown as Record<string, unknown> };
       }
 
       if (s.worktree && s.startSha) {

@@ -252,6 +252,7 @@ The details of each done item follow this list, by date.
 - #63: Batch intake: hand the BA a list of tickets. Done 2026-10-14.
 - #58: Start action: run a project branch on a workstation (phase 1: manual start, supervised services, panel, plans recorded). Done 2026-10-14; P2 done (plan replay, service sandbox, Restart / Update & restart, run worktree sweep, services survive a runner restart); P3 and P4 done under #59.
 - #59: Integration and E2E tests per project, run by testers (local test environment per card, remote deploy targets). Done 2026-10-14 (P3 and P4; private-address targets and macOS testers left).
+- #80: Dependencies count as landed at Finalize; the Architect designs before dependencies land (assumptions reviewed after landing). Done 2026-10-15.
 - #73: Pause work until a model usage limit resets. Done 2026-10-15.
 - #71: Plain tester stage when integration tests are off (workflow `code` v5: the Test stage always runs; the environment only when the card's integration tests are on). Done 2026-10-15.
 - #72: Hotfix: reviewer sandbox read-only regression (Claude Code 2.1.296+ mounts its protected dotfile names over a read-only cwd; the runner now pre-creates them and removes them after the shift; risk file in the scratch dir or `--risk-analysis`); existing card branch on worktree creation (`worktree add -b` raced with a branch created meanwhile: now reused, never `-b` when it exists). Done 2026-10-15.
@@ -269,6 +270,42 @@ The details of each done item follow this list, by date.
 - #17: Stale figures in the user guide: guide seeds fixed, every figure re-captured, figures for the newer features, guide.html and PDF rebuilt. Done 2026-10-14.
 
 ## 2026-10-15 (done)
+
+### 80. Dependencies count as landed at Finalize; the Architect designs before dependencies land (done)
+
+**Owner decisions (2026-10-15).** Production architect Donald sat idle while P5 investigate cards were queued behind
+dependencies still in the pipeline (P5-15/16/17 on P5-14, P5-21/22 on P5-20). Rule 1: a dependency is satisfied once its
+work has *landed* in the working branch. Rule 2: the architect may design before the dependencies landed, and reviews its
+assumptions afterwards.
+
+**Done (2026-10-15).**
+- **Landed** (`apps/server/src/dispatcher/dependencies.ts`, `landedSql`): `status IN (done, cancelled)` or
+  `merged_into_working_at IS NOT NULL` (set by a `merge` Finalize, or by the merge check / manual confirm for a `pr` or
+  `push_branch` card). A card in Manual QA or an approval step after a merge-finalize has landed. For `pr` cards the merge
+  signal exists only for phase cards (`branch.check_merged`); without it a pr card counts at done, as before. Used by the
+  dispatcher candidates, the card DTO (`dependencies[].landed/stage`), the shift brief and the prompt. A Manual QA
+  send-back of a dependency after dependents started does not stop them; its rework lands on the working branch later (a
+  reopened card keeps its `merged_into_working_at`). The CEO and BA snapshots never listed dependencies, so nothing changes
+  there.
+- **Design before landing**: a card at `investigate*` (architect, not investigation-only) with unlanded dependencies is a
+  candidate for a workstation whose runner announces `design-ro:1`. The claim gives `worktree.mode: 'readonly'` and
+  records no `worktree_path` or branch. The runner opens a detached checkout of `origin/<working branch>` as a read-only
+  folder, the report is written in the scratch directory, and the checkout is removed after the shift. The brief
+  (`investigation.readOnly`, `unlandedDependencies`) carries the dependencies' titles, specs and design reports. Build
+  still waits for landed dependencies. An older runner and an investigation-only card keep waiting.
+- **Where the report goes**: a vault report is copied into the vault as before; a repository report cannot be committed
+  without a branch, so the runner sends its text (`body`) with the report, the server keeps it in `cards.investigation`
+  and the Build brief tells the builder to commit it first at the report path.
+- **Assumptions and review (owner addition)**: `aom design --assumption "<assumption> | <dependency> | <if wrong>"`
+  (repeatable, or `--assumptions-file`; `--no-assumptions "<why>"` skips the review). With assumptions the handoff does
+  not move the card: event `DesignHeld`, `cards.design_review = waiting` (migration 2014), the card stays queued in the
+  design stage and is not claimable until all dependencies landed. Then the same architect (preferred) gets a review shift
+  on a normal created branch; `aom design confirm --summary` or `aom design revise --report --revised <n,..> --note`
+  (event `DesignReviewed`) releases the card to Build. The card page shows the state and the counts.
+- Tests: server `design-before-landing.test.ts` (12), runner `readonly-design.test.ts` (4), shared
+  `design-before-landing.test.ts` (5), web `dependencies-panel.test.tsx` (4). Docs: user guide, architect help, What's new.
+- Not done: a revise shift in a vault-less repo project edits the report in the review worktree (committed by the
+  architect); the CEO is not told about held designs.
 
 ### 76. Shifts at once, editable on the Workstations page, including unlimited (built)
 
