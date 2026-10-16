@@ -196,6 +196,16 @@ describe('claude settings.json: permissions per role (review M3)', () => {
     expect(custom.permissions.allow.some((a) => a === `Edit(${CWD}/**)`)).toBe(false);
   });
 
+  it('tester: may edit its own scratch folder (QA steps) but not the card worktree outside e2e globs', () => {
+    const s = buildShiftSettings(tester.permissions, policyCtx(), POLICY_PATHS, 'tester');
+    expect(s.permissions.allow).toContain(`Edit(//data/agents/a1/scratch/**)`);
+    expect(s.permissions.allow).not.toContain(`Edit(${CWD}/**)`);
+    expect(s.permissions.allow).toContain(`Edit(${CWD}/e2e/**)`);
+    // a non-tester role does not get the scratch edit
+    const b = buildShiftSettings(builder.permissions, policyCtx(), POLICY_PATHS, 'builder');
+    expect(b.permissions.allow.some((a) => a.includes('/scratch/'))).toBe(false);
+  });
+
   it('roles without the edit tool deny Edit, Write and NotebookEdit outright', () => {
     const s = settings({ ...reviewer.permissions, allowedTools: ['read', 'shell', 'web'] });
     expect(s.permissions.allow).toEqual(['Read', 'Glob', 'Grep', 'Bash', 'WebFetch', 'WebSearch']);

@@ -473,6 +473,9 @@ export function buildShiftSettings(
     else if (tool === 'web') allow.push('WebFetch', 'WebSearch');
     else if (tool.startsWith('mcp:')) allow.push(`mcp__${tool.slice(4)}`);
   }
+  // Testers write QA steps and test notes in their own scratch folder (qa_steps has no worktree). The worktree
+  // stays limited to the e2e globs above, so this widens nothing in the card's code.
+  if (roleKey === 'tester') allow.push(`Edit(${ruleAbs(paths.scratch)}/**)`);
   if (!tools.has('edit')) deny.push('Edit', 'Write', 'NotebookEdit');
   if (!tools.has('web')) deny.push('WebFetch', 'WebSearch');
   if (!tools.has('shell')) deny.push('Bash');
