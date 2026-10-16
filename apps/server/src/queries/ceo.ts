@@ -8,6 +8,7 @@ import {
   sumScores,
   trainingDaysLeft,
 } from '@aom/shared';
+import { ceoGate } from '../ceo/gate.ts';
 import { ceoFailures } from '../ceo/shift.ts';
 import { CEO_CAPABILITY, ceoReachable, loadCeo } from '../ceo/state.ts';
 import type { Ctx } from '../context.ts';
@@ -165,6 +166,7 @@ export async function ceoStatus(
       scores: [],
       totals: { agreed: 0, total: 0 },
       pendingWakes: 0,
+      waiting: null,
       running: null,
       lastError: null,
       openTasks: 0,
@@ -223,6 +225,18 @@ export async function ceoStatus(
        FROM ceo_actions WHERE org_id=$1 AND created_at > $2`,
     [orgId, new Date(now.getTime() - 7 * 86_400_000)],
   );
+  // Why a reachable CEO with wakes waiting is not starting a shift (backlog #82).
+  let waiting: { text: string; until: string | null } | null = null;
+  if (ceo.enabled && !ceo.paused && reach.ok) {
+    const gate = await ceoGate(ctx.pool, orgId, ceo.policy.limits.maxWakesPerHour, failures, now);
+    if (gate && gate.code !== 'running')
+      waiting = { text: gate.text, until: gate.until ? gate.until.toISOString() : null };
+    else if (!gate && Number(pending?.n ?? 0) > 0 && !running) {
+      const conn = ctx.services.runners.get((reach as { workstationId?: string }).workstationId as string);
+      if (!conn || !conn.reconciled)
+        waiting = { text: 'waiting: the runner is not connected yet', until: null };
+    }
+  }
   const state = !ceo.enabled ? 'disabled' : ceo.paused ? 'paused' : reach.ok ? 'active' : 'offline';
   return {
     hired: true,
@@ -244,6 +258,7 @@ export async function ceoStatus(
     scores,
     totals: sumScores(scores),
     pendingWakes: Number(pending?.n ?? 0),
+    waiting,
     running: running ? { since: iso(running.started_at) as string, purpose: running.purpose } : null,
     lastError:
       failures.streak > 0 && failures.lastError

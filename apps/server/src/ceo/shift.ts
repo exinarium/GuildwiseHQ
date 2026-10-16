@@ -170,7 +170,8 @@ export async function ceoFailures(db: Queryable, orgId: string): Promise<CeoFail
     // A batch the runner has not accepted yet proves nothing; one it accepted, or finished, ends the run of failures.
     if (b.status === 'running' && !b.accepted_at) continue;
     if (b.status !== 'failed') break;
-    if (b.outcome === 'stopped' || b.outcome === 'released') continue;
+    // No outcome: written by a server before #79, the reason was never kept.
+    if (b.outcome === 'stopped' || b.outcome === 'released' || b.outcome == null) continue;
     out.streak++;
     if (b.outcome === 'rejected' || b.outcome === 'lost') {
       if (startRun) out.startFailures++;

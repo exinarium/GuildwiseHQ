@@ -131,6 +131,7 @@ export function ceoStatus(over: Partial<CeoStatusDto> = {}): CeoStatusDto {
     pendingWakes: 2,
     running: null,
     lastError: null,
+    waiting: null,
     openTasks: 1,
     spend: { currency: 'USD', todayMicros: 1_200_000, monthMicros: 8_000_000, orgMonthMicros: 40_000_000 },
     lastReportAt: '2026-10-13T07:00:00.000Z',

@@ -112,6 +112,25 @@ describe('the CEO page: overview', () => {
     expect(await screen.findByTestId('ceo-undo-hint')).toHaveTextContent('tightening');
   });
 
+  it('says why an active CEO with wakes waiting starts no shift', async () => {
+    stubApi('owner', [
+      [
+        'GET /api/ceo/status',
+        () =>
+          ceoStatus({
+            pendingWakes: 48,
+            waiting: {
+              text: 'waiting: hourly limit reached (12 of 12 shifts in the last hour), next shift at 23:57 UTC',
+              until: '2026-10-15T23:57:30.000Z',
+            },
+          }),
+      ],
+    ]);
+    renderCeoPage();
+    expect(await screen.findByTestId('ceo-waiting')).toHaveTextContent('48 wakes pending');
+    expect(screen.getByTestId('ceo-waiting')).toHaveTextContent('hourly limit reached (12 of 12');
+  });
+
   it('shows why the CEO could not run its last shifts', async () => {
     stubApi('owner', [
       [

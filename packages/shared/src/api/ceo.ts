@@ -94,6 +94,8 @@ export interface CeoStatusDto {
   scores: Array<{ class: string; agreed: number; total: number }>;
   totals: { agreed: number; total: number };
   pendingWakes: number;
+  /** Why the CEO has wakes but starts no shift (backoff until, hourly limit, runner not connected); null when nothing holds it back. */
+  waiting: { text: string; until: string | null } | null;
   running: { since: string; purpose: string } | null;
   /** The last CEO shift that failed to run (rejected by the runner, lost, crashed) and why; null once a shift has worked since. */
   lastError: { at: string; outcome: string; message: string; failures: number } | null;

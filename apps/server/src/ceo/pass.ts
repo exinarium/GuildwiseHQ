@@ -18,16 +18,11 @@ import { reportingOf } from '../reporter/settings.ts';
 import { carrierProject } from '../reporter/tasks.ts';
 import { agentSpecFor, shiftVault } from '../runner-gateway/brief.ts';
 import { buildCeoBrief } from './brief.ts';
+import { ceoGate } from './gate.ts';
 import { notifyOwner } from './notify.ts';
 import { checkOrgBudget } from './orgbudget.ts';
 import { postFallbackReview } from './report.ts';
-import {
-  ceoFailures,
-  FAILURE_NOTICE_AT,
-  releaseBatch,
-  releaseStuckBatches,
-  startBackoffMs,
-} from './shift.ts';
+import { ceoFailures, FAILURE_NOTICE_AT, releaseBatch, releaseStuckBatches } from './shift.ts';
 import { type CeoState, ceoReachable, loadCeo } from './state.ts';
 import { enqueueWake } from './wakes.ts';
 
@@ -147,7 +142,12 @@ async function buildCeoShiftStart(
 }
 
 /** Is the CEO's workstation unreachable for a while with something urgent waiting? One e-mail and one notice. */
-async function offlineNotice(ctx: Ctx, ceo: CeoState, reason: string | undefined, now: Date): Promise<void> {
+async function offlineNotice(
+  ctx: Ctx,
+  ceo: CeoState,
+  block: { reason: string; unreachable: boolean } | null,
+  now: Date,
+): Promise<void> {
   const waiting = await one<{ at: Date }>(
     ctx.pool,
     `SELECT min(created_at) AS at FROM ceo_wakes WHERE org_id=$1 AND status='pending' AND urgency='urgent'`,
@@ -156,7 +156,7 @@ async function offlineNotice(ctx: Ctx, ceo: CeoState, reason: string | undefined
   const flag = await one(ctx.pool, `SELECT value FROM ceo_flags WHERE org_id=$1 AND flag='offline_notice'`, [
     ceo.orgId,
   ]);
-  if (!waiting?.at) {
+  if (!block || !waiting?.at) {
     if (flag)
       await exec(ctx.pool, `DELETE FROM ceo_flags WHERE org_id=$1 AND flag='offline_notice'`, [ceo.orgId]);
     return;
@@ -169,8 +169,12 @@ async function offlineNotice(ctx: Ctx, ceo: CeoState, reason: string | undefined
   );
   await notifyOwner(ctx, ceo.orgId, {
     kind: 'urgent',
-    title: 'Your CEO is offline',
-    text: `Something urgent is waiting for your CEO, but it cannot work right now (${reason ?? 'unreachable'}). Items still reach your desk unchanged. Bring the workstation back online, or sign in again if the login expired.`,
+    title: block.unreachable
+      ? `Your CEO is offline`
+      : `Your CEO is not running: ${block.reason}`.slice(0, 200),
+    text: block.unreachable
+      ? `Something urgent is waiting for your CEO, but it cannot work right now (${block.reason}). Items still reach your desk unchanged. Bring the workstation back online, or sign in again if the login expired.`
+      : `Something urgent has been waiting for your CEO for over 30 minutes and no shift was started: ${block.reason}. Items still reach your desk unchanged.`,
     subject: 'offline',
   });
 }
@@ -257,9 +261,6 @@ export async function ceoPass(ctx: Ctx): Promise<number> {
     // Organization budget: 80% and 100% notices; at 100% minimal mode (only the daily report; the chat is not a wake).
     const { minimal } = await checkOrgBudget(ctx, ceo, now).catch(() => ({ minimal: false }));
     const reach = await ceoReachable(ctx.pool, orgId, now);
-    await offlineNotice(ctx, ceo, reach.ok ? undefined : reach.reason, now).catch((err) =>
-      ctx.log.error({ err }, 'ceo offline notice failed'),
-    );
     // A review nobody took for two hours: the server writes it.
     const lateReview = await rows(
       ctx.pool,
@@ -278,27 +279,19 @@ export async function ceoPass(ctx: Ctx): Promise<number> {
     await failureNotice(ctx, orgId, failures.streak, failures.lastError, now).catch((err) =>
       ctx.log.error({ err }, 'ceo failure notice failed'),
     );
-    if (!reach.ok) continue;
-    // The runner never started the last shifts (busy, not accepted, lost): wait longer after each, not once a second.
-    if (
-      failures.startFailures > 0 &&
-      failures.lastAt &&
-      now.getTime() - new Date(failures.lastAt).getTime() < startBackoffMs(failures.startFailures)
-    )
-      continue;
-
-    const running = await one(
-      ctx.pool,
-      `SELECT 1 FROM shifts WHERE org_id=$1 AND kind='ceo' AND status <> 'ended' LIMIT 1`,
-      [orgId],
+    // Why nothing starts, if so: unreachable, backoff after shifts the runner never started, a running shift, the hourly limit.
+    const gate = reach.ok
+      ? await ceoGate(ctx.pool, orgId, ceo.policy.limits.maxWakesPerHour, failures, now)
+      : null;
+    const block = !reach.ok
+      ? { reason: reach.reason ?? 'unreachable', unreachable: true }
+      : gate && gate.code !== 'running'
+        ? { reason: gate.text, unreachable: false }
+        : null;
+    await offlineNotice(ctx, ceo, block, now).catch((err) =>
+      ctx.log.error({ err }, 'ceo offline notice failed'),
     );
-    if (running) continue;
-    const cap = await one<{ n: string }>(
-      ctx.pool,
-      `SELECT count(*)::text AS n FROM ceo_batches WHERE org_id=$1 AND created_at > $2 AND COALESCE(outcome,'') NOT IN ('rejected','lost')`,
-      [orgId, new Date(now.getTime() - 3_600_000)],
-    );
-    if (Number(cap?.n ?? 0) >= ceo.policy.limits.maxWakesPerHour) continue;
+    if (!reach.ok || gate) continue;
 
     const all = await rows(
       ctx.pool,

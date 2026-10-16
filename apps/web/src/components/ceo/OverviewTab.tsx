@@ -134,6 +134,12 @@ export function OverviewTab({
         <ErrorBox error={pause.error ?? resume.error ?? disable.error} />
       </Panel>
 
+      {s.waiting && s.state === 'active' && (
+        <Callout tone="warning" role="status" data-testid="ceo-waiting">
+          The CEO has {s.pendingWakes} wake{s.pendingWakes === 1 ? '' : 's'} pending and is {s.waiting.text}.
+        </Callout>
+      )}
+
       {s.lastError && s.state !== 'disabled' && (
         <Callout tone="warning" role="alert" data-testid="ceo-last-error">
           The CEO could not run its last{' '}
