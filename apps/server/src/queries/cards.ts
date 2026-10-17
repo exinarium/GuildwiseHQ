@@ -555,6 +555,16 @@ export async function getBoard(
   const columns = boardColumnsWith(wf.definition as WorkflowDefinition, others);
   const workability = await cardWorkability(ctx, cards);
   const notices = await boardNotices(ctx, userId, project, cards);
+  // What each card has cost (members of the organization only; amounts are the organization's business).
+  const spendOf = (await orgRoleOf(ctx.pool, userId, project.org_id))
+    ? await spendBriefs(
+        ctx.pool,
+        await orgCostCtx(ctx.pool, project.org_id),
+        ctx.clock.now(),
+        'card',
+        cards.map((c) => c.id as string),
+      )
+    : new Map();
   const subWaiting = await waitingChildren(
     ctx,
     userId,
@@ -669,6 +679,9 @@ export async function getBoard(
         ? { budget: notices.budget }
         : {}),
       ...(workability.get(c.id)?.ok === false ? { workability: workability.get(c.id) } : {}),
+      ...(spendOf.get(c.id)
+        ? { spend: { totalMicros: spendOf.get(c.id).totalMicros, currency: spendOf.get(c.id).currency } }
+        : {}),
     });
   }
   // The Investigate & design column shows only for projects that switched the design step on, or while a card is in it.

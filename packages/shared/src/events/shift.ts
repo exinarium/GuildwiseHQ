@@ -46,6 +46,11 @@ export const shiftEvents = [
         .optional(),
     }),
   ),
+  /**
+   * The runner reported the usage of a shift the server had already ended without it (crashed, lost, timed out): the
+   * tokens and the price are filled in afterwards. Recorded once, only when the shift was priced at zero.
+   */
+  defineEvent('ShiftUsageRecorded', z.object({ shiftId: Id, usage: Usage })),
   defineEvent(
     'ShiftEnded',
     z.object({

@@ -116,6 +116,8 @@ export const BoardCardSchema = z.object({
   hygiene: z.array(CardHygieneSchema).optional(),
   /** Absent unless the project's budget is at the warning level or beyond. */
   budget: CardBudgetSchema.optional(),
+  /** What the card has cost so far in the organization's currency (absent for viewers outside the organization). */
+  spend: z.object({ totalMicros: z.number().int().nonnegative(), currency: z.string() }).optional(),
   /** The phase this card belongs to (a small chip on the card). */
   phase: z
     .object({ id: z.uuid(), ref: z.string(), assignment: z.enum(['proposed', 'confirmed']) })

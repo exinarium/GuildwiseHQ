@@ -14,12 +14,16 @@ export interface ModelPrice {
   input: number;
   output: number;
   cacheRead: number;
+  /** Cache write at the 5-minute rate (1.25x the input price). */
   cacheWrite: number;
+  /** Cache write at the 1-hour rate (2x the input price): Claude Code writes 1-hour caches unless told otherwise. */
+  cacheWrite1h: number;
 }
 
 /**
- * DEFAULT price table: Anthropic's list prices in USD per million tokens as of September 2026 (cache writes at the
- * 5-minute rate, 1.25x the input price; cache reads at 10% of the input price). These are DEFAULTS, not billing data:
+ * DEFAULT price table: Anthropic's list prices in USD per million tokens as of October 2026 (cache writes at the
+ * 5-minute rate, 1.25x the input price, or at the 1-hour rate, 2x, when the usage says how many tokens were written with
+ * the longer TTL; cache reads at 10% of the input price, 5% on Opus 5.5). These are DEFAULTS, not billing data:
  * verify them against anthropic.com/pricing, because the real invoice depends on the plan, discounts and
  * batch/priority tiers. The table is deliberately plain data in shared config so the super admin can edit it later (a
  * platform setting that stamps `costMicros` on new `ShiftEnded` events; history keeps the price it was recorded at).
@@ -27,12 +31,50 @@ export interface ModelPrice {
  * fallback for an unknown model. The SQL in migration 1318 mirrors this table.
  */
 export const DEFAULT_MODEL_PRICES: readonly ModelPrice[] = [
-  { match: 'fable', label: 'Fable', input: 10, output: 50, cacheRead: 1, cacheWrite: 12.5 },
-  { match: 'opus', label: 'Opus', input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
-  { match: 'sonnet', label: 'Sonnet', input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 },
-  { match: 'haiku', label: 'Haiku', input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25 },
+  { match: 'fable', label: 'Fable', input: 10, output: 50, cacheRead: 1, cacheWrite: 12.5, cacheWrite1h: 20 },
+  // Opus 5.5 is cheaper than the earlier Opus models ($4 / $20, cache reads $0.20); the plain `opus` alias stays at the
+  // earlier price so spend is never under-counted when the alias points at an older Opus.
+  { match: 'opus-5-5', label: 'Opus', input: 4, output: 20, cacheRead: 0.2, cacheWrite: 5, cacheWrite1h: 8 },
+  { match: 'opus', label: 'Opus', input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25, cacheWrite1h: 10 },
+  // Sonnet 4.x was $3 / $15; Sonnet 5 and 5.5 are $2 / $10 (cache reads $0.20).
+  {
+    match: 'sonnet-4',
+    label: 'Sonnet',
+    input: 3,
+    output: 15,
+    cacheRead: 0.3,
+    cacheWrite: 3.75,
+    cacheWrite1h: 6,
+  },
+  {
+    match: 'sonnet',
+    label: 'Sonnet',
+    input: 2,
+    output: 10,
+    cacheRead: 0.2,
+    cacheWrite: 2.5,
+    cacheWrite1h: 4,
+  },
+  {
+    match: 'haiku-5',
+    label: 'Haiku',
+    input: 0.1,
+    output: 0.5,
+    cacheRead: 0.01,
+    cacheWrite: 0.125,
+    cacheWrite1h: 0.2,
+  },
+  { match: 'haiku', label: 'Haiku', input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25, cacheWrite1h: 2 },
   // Unknown models (the mock runtime, other providers) are priced like Sonnet so spend is never silently zero.
-  { match: '', label: 'Other (priced as Sonnet)', input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 },
+  {
+    match: '',
+    label: 'Other (priced as Sonnet)',
+    input: 2,
+    output: 10,
+    cacheRead: 0.2,
+    cacheWrite: 2.5,
+    cacheWrite1h: 4,
+  },
 ];
 
 export interface TokenCounts {
@@ -40,6 +82,8 @@ export interface TokenCounts {
   outputTokens: number;
   cacheReadTokens?: number;
   cacheWriteTokens?: number;
+  /** Of `cacheWriteTokens`, the ones written with the 1-hour TTL (priced at `cacheWrite1h`); the rest are 5-minute writes. */
+  cacheWrite1hTokens?: number;
 }
 
 export function priceFor(model: string, table: readonly ModelPrice[] = DEFAULT_MODEL_PRICES): ModelPrice {
@@ -64,11 +108,14 @@ export function costUsdMicros(
   const p = priceFor(model, table);
   // Integer arithmetic in hundredths of a micro-USD so the result is exact (and equals the SQL backfill's numeric math).
   const c = (price: number) => Math.round(price * 100);
+  const writes = usage.cacheWriteTokens ?? 0;
+  const writes1h = Math.min(writes, Math.max(0, usage.cacheWrite1hTokens ?? 0));
   const total =
     usage.inputTokens * c(p.input) +
     usage.outputTokens * c(p.output) +
     (usage.cacheReadTokens ?? 0) * c(p.cacheRead) +
-    (usage.cacheWriteTokens ?? 0) * c(p.cacheWrite);
+    (writes - writes1h) * c(p.cacheWrite) +
+    writes1h * c(p.cacheWrite1h);
   return Math.floor((total + 50) / 100);
 }
 

@@ -60,6 +60,8 @@ export const ModelPriceDtoSchema = z.object({
   output: z.number(),
   cacheRead: z.number(),
   cacheWrite: z.number(),
+  /** Cache write at the 1-hour rate (2x the input price). */
+  cacheWrite1h: z.number().optional(),
 });
 
 export const CostsQuerySchema = z.object({
@@ -105,6 +107,27 @@ export const CostsReportSchema = z.object({
 export type CostsReport = z.infer<typeof CostsReportSchema>;
 
 /** A spend line for one agent, phase, card or interest (`spend` on their DTOs): this month and all time. */
+/** What a shift was spent on (Lean Team v3 measurement). */
+export const COST_CAUSES = [
+  'working',
+  'asking',
+  'answering',
+  'reviewing',
+  're_review_after_conflict',
+  'rejected',
+  'other',
+] as const;
+export type CostCause = (typeof COST_CAUSES)[number];
+const CauseTotals = z.object({ costMicros: z.number(), shifts: z.number().int() });
+export const CostByCauseSchema = z.object({
+  currency: z.string(),
+  totalMicros: z.number(),
+  total: z.record(z.enum(COST_CAUSES), CauseTotals),
+  /** `GET /api/costs/causes`: the same split per local day (oldest first). */
+  days: z.array(z.object({ day: z.string(), causes: z.record(z.enum(COST_CAUSES), CauseTotals) })).optional(),
+});
+export type CostByCause = z.infer<typeof CostByCauseSchema>;
+
 export const SpendBriefSchema = z.object({
   monthMicros: z.number().int().nonnegative(),
   totalMicros: z.number().int().nonnegative(),

@@ -13,6 +13,8 @@ export const Usage = z.object({
   outputTokens: z.number().int().nonnegative(),
   cacheReadTokens: z.number().int().nonnegative().default(0),
   cacheWriteTokens: z.number().int().nonnegative().default(0),
+  /** Of the cache writes, the tokens written with the 1-hour TTL (2x the input price instead of 1.25x); absent: all 5-minute. */
+  cacheWrite1hTokens: z.number().int().nonnegative().optional(),
   /** The model that did the work when the runtime says (Claude Code `modelUsage`); else the agent's configured one. */
   model: z.string().max(120).optional(),
   /** What the runtime itself reported as cost in USD (Claude Code `total_cost_usd`); informational. */

@@ -469,6 +469,7 @@ export async function applyFinalizeResult(
       );
     } else {
       const message = result?.error ?? error ?? 'the completion action failed';
+      ctx.log.warn({ cardId: card.id, ref: card.ref, action, error: message }, 'finalize failed');
       const deskItemId = randomUUID();
       events.push(
         {

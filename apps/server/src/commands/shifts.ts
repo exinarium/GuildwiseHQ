@@ -1044,7 +1044,31 @@ async function branchProblemEvents(
 
 export async function applyShiftEnded(ctx: Ctx, tx: Tx, ws: WsRef, msg: RunnerToServerOf<'shift.ended'>) {
   const s = await one(tx, 'SELECT * FROM shifts WHERE id=$1 AND workstation_id=$2', [msg.shiftId, ws.id]);
-  if (!s || s.status === 'ended') return;
+  if (s?.status === 'ended') {
+    // The server already ended this shift (a lost lease, a timeout) and priced it at zero; the runner now says what it
+    // used (a crashed shift still burned tokens): record it once.
+    const used =
+      msg.usage.inputTokens + msg.usage.outputTokens + msg.usage.cacheReadTokens + msg.usage.cacheWriteTokens;
+    const had =
+      Number(s.tokens_input) +
+      Number(s.tokens_output) +
+      Number(s.tokens_cache_read) +
+      Number(s.tokens_cache_write);
+    if (used > 0 && had === 0)
+      await ctx.store.append(
+        [
+          {
+            streamId: streamId.shift(s.id),
+            event: { type: 'ShiftUsageRecorded', payload: { shiftId: s.id, usage: msg.usage } },
+            actor: runnerActor(ws.id),
+            scope: { orgId: s.org_id, projectId: null, audience: 'org' },
+          },
+        ],
+        { tx },
+      );
+    return;
+  }
+  if (!s) return;
   if (s.kind === 'devops') {
     await ctx.store.append(
       await endDevopsShift(tx, s, msg.outcome, {
@@ -1135,9 +1159,12 @@ export async function applyShiftEnded(ctx: Ctx, tx: Tx, ws: WsRef, msg: RunnerTo
       )),
     );
   }
+  // A shift that reported (the report was accepted) and was then stopped did its work: it ended as reported, not stopped.
+  const reportOutcome = handoff?.outcome ?? (asked ? 'question' : undefined);
+  const endedAs = msg.outcome === 'stopped' && reportOutcome ? 'reported' : msg.outcome;
   events.push(
-    await shiftEndedFor(tx, s, msg.outcome, {
-      reportOutcome: handoff?.outcome ?? (asked ? 'question' : undefined),
+    await shiftEndedFor(tx, s, endedAs, {
+      reportOutcome,
       durationMs: msg.durationMs,
       usage: msg.usage,
       exitCode: msg.exitCode,
