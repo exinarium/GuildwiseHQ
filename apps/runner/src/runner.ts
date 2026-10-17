@@ -55,6 +55,8 @@ import { type ScannedRepo, scanAllRepos, withRemote } from './git/repo-scan.ts';
 import { sweepWorktrees } from './git/sweep.ts';
 import { SyncService } from './git/sync-service.ts';
 import { removeWorktree } from './git/worktrees.ts';
+import { runRoleSmoke } from './health/role-smoke.ts';
+import { sanitizeError } from './health/runner-error.ts';
 import { ClaudeCredentialStore, claudeFile, resolveClaudeCredential } from './integrations/claude-store.ts';
 import { type AdapterEnv, type IntegrationAdapter, IntegrationService } from './integrations/index.ts';
 import { IntegrationPoller } from './integrations/poll.ts';
@@ -174,6 +176,16 @@ export interface RunnerOptions {
   onConnected?: () => void;
   /** Test seam: timings of the run supervision (see `runs/manager.ts`). */
   runTiming?: Partial<import('./runs/manager.ts').RunTiming>;
+  /**
+   * Run the role smoke test after the first welcome of this process (a runner start, and so after every update) and send
+   * `role.smoke`. Default on, off with the mock runtime and under tests.
+   */
+  roleSmoke?: boolean;
+  /** Test hook: the roles the smoke test goes through and the `aom` command it runs. */
+  roleSmokeRoles?: NonNullable<import('./health/role-smoke.ts').RoleSmokeDeps['roles']>;
+  roleSmokeAom?: string[];
+  /** Test seam: replaces or adds supervisor dependencies (disk check, grace, context reporting, ...). */
+  supervisorOverrides?: Partial<SupervisorDeps>;
 }
 
 /** The long-running runner process: connection, IPC server, supervisor and command handlers. */
@@ -426,6 +438,9 @@ export class Runner {
       syncAfterFetch: (t) => this.sync.sync(t, { fetch: false, locked: true }).then(() => undefined),
       mcpSignInNote: (granted) => this.mcpSignInNote(granted),
       external: () => this.external,
+      reportError: (err, context) =>
+        this.reportRunnerError(sanitizeError(err, { version: RUNNER_VERSION, context })),
+      ...(opts.supervisorOverrides ?? {}),
     });
     this.external =
       opts.external ??
@@ -447,6 +462,7 @@ export class Runner {
       findLocal: (k) => this.findLocal(k),
       git: this.agentGit,
       toolchains: this.toolchains,
+      sudoRun: (cmd, args) => this.sudo.run(cmd, args),
       orgSourceFolder: (orgId) => this.orgSourceFolder(orgId),
       repoRoots: () => this.opts.config.repoRoots,
     });
@@ -490,6 +506,7 @@ export class Runner {
       this.applyShiftLimit(w.limits.shiftLimit, w.limits.maxConcurrentShifts);
       this.writeStatus(true);
       this.scheduleStartupSweep();
+      void this.roleSmokeOnce();
     });
     this.client.on('disconnected', () => {
       this.writeStatus(false);
@@ -666,6 +683,42 @@ export class Runner {
   reportUpdate(): void {
     const u = this.opts.updateStatus?.();
     if (u) this.client.send('runner.update', u);
+  }
+
+  /** An error of the runner itself, sanitised, to the server (`runner.error`). Acked: kept in the outbox until delivered. */
+  reportRunnerError(payload: import('./health/runner-error.ts').RunnerErrorPayload): void {
+    this.client.send('runner.error', { ...payload });
+  }
+
+  private smokeStarted = false;
+
+  /**
+   * The role smoke test, once per process (so on every runner start, which includes the start after an update): each
+   * role goes down its own handoff path with no call to Claude and the result goes to the server, which keeps a failed
+   * role from being offered work here.
+   */
+  private async roleSmokeOnce(): Promise<void> {
+    if (this.smokeStarted) return;
+    if (!(this.opts.roleSmoke ?? !(this.opts.config.runtimes.mock?.enabled || process.env.VITEST))) return;
+    this.smokeStarted = true;
+    try {
+      const results = await runRoleSmoke({
+        paths: this.paths,
+        ipc: this.ipc,
+        ...(this.opts.roleSmokeRoles ? { roles: this.opts.roleSmokeRoles } : {}),
+        ...(this.opts.roleSmokeAom ? { aom: this.opts.roleSmokeAom } : {}),
+      });
+      const failed = results.filter((r) => !r.ok);
+      if (failed.length > 0)
+        this.log.warn(
+          `role smoke test failed for ${failed.map((f) => `${f.roleKey} (${f.detail ?? 'failed'})`).join('; ')}`,
+        );
+      else this.log.info(`role smoke test passed for ${results.length} role(s)`);
+      this.client.send('role.smoke', { runnerVersion: RUNNER_VERSION, results });
+    } catch (err) {
+      this.smokeStarted = false; // try again at the next welcome
+      this.log.warn(`role smoke test could not run: ${String(err)}`);
+    }
   }
 
   async start(): Promise<void> {

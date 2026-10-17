@@ -336,8 +336,10 @@ worktrees/
 runs/
   <envId>/                      one run environment ("Run a branch"): state.json, <service>.log (+ .1), steps/
 mock-state/                     per-card attempt counters for mock script (test only)
+sessions.json                   the Claude sessions this runner started (agent, folder, start, context size): what a resume request is checked against
 logs/
   runner.log                    JSON Lines log of runner events
+  devops-audit.jsonl            every shell command of the DevOps engineer, allowed or refused (see "DevOps guardrails")
   shifts/
     <shiftId>.jsonl             raw runtime output for each shift
 ```
@@ -720,6 +722,61 @@ The shift prompt includes:
 - Previous related decisions from the ledger
 - Agent role and permissions
 - Org and team context
+
+### Runner 0.1.24: sessions, cache, shifts that start cleanly
+
+**Session id and context size.** Claude's session id is only known after the process printed its first line, which is after
+`shift.started` went out. The runner sends it as a late `shift.session` (with the context size: the last call's input +
+cache read + cache write tokens) and again every two minutes while it grows, and the end of the shift carries the final size
+in `shift.ended.contextTokens`. The server keeps both on the shift row (`runtime_session_id`, `context_tokens`).
+
+**Resume.** A `shift.start` may carry `resumeSessionId`: the agent's own earlier session. The runner checks it against
+`<data dir>/sessions.json` and **starts fresh** (and says which in the first `shift.session.resume`) when the session is
+unknown on this workstation, belongs to another agent, holds more than 120K context tokens, is more than 4 hours old (counted
+from the first shift of that session), or its transcript is gone. Otherwise it passes `--resume`. Claude Code keeps a session
+transcript under the project folder of the directory it ran in (`<CLAUDE_CONFIG_DIR>/projects/<directory with every
+character that is not a letter or digit turned into "-">/<session id>.jsonl`); a builder that moves from one card worktree to
+the next resumes in a different directory, so the runner copies the transcript into the new directory's project folder first
+(never overwriting). Spiked with claude 2.1.302: Claude Code also finds the session in another project folder of the same
+config dir, so the copy is belt and braces.
+
+**Shell timeout.** Card shifts start Claude with `BASH_DEFAULT_TIMEOUT_MS=660000` (11 minutes) so `aom question --wait` (up to
+10 minutes) is not cut off by the shell's default; the hard cap `BASH_MAX_TIMEOUT_MS` stays at 15 minutes. Other kinds keep 5 minutes.
+
+**Prompt cache.** The agent's instructions (`CLAUDE.md`) start with the stable role text (role instructions, core rules,
+standing orders, project, boundaries), then the stage-specific outcomes, then this shift's attachments and notes, and end with
+the agent's name and seniority, so agents of one role share a cache prefix. Question prompts put the card first and the question
+last. Short shifts (question, CEO, DevOps, QA steps) run with `CLAUDE_CODE_PROMPT_CACHE_TTL=5m` (a 1-hour cache write costs
+twice the input price and is never read again). Every agent session runs with `--disable-slash-commands`: the account's synced
+skills (`anthropic-skills:*`) and the bundled ones add their descriptions to every first call and no agent uses them (verified
+with claude 2.1.302: the init message lists 0 skills). The BA's role text leaves out the intake-chat and organisation-design
+sections in background shifts, and the sections its kind of shift does not use.
+
+**Before a shift starts.** The runner refuses with `disk_full: ...` (reason `worktree_failed`, which the server backs off on)
+when the OS temp folder has under 512 MB or the data folder under 1 GB free; DevOps shifts are exempt. It checks the Claude login
+(`auth_expired`, no penalty, instead of a crashed first shift): the expiry in `~/.claude/.credentials.json` is read and only when
+the token expires within 10 minutes does one minimal probe run (which also refreshes it). A card worktree left on its own
+`conflict/<ref>-aN` branch is switched back to the card branch when it is clean and the conflict branch has nothing the card
+branch lacks; a dirty or ahead worktree is refused with the reason and left alone (a DevOps resolution is never discarded).
+
+**End of a shift.** When the server releases the claim after an accepted report, the runner waits up to 5 seconds for Claude's
+result line before stopping the process, so the real usage is recorded and the shift counts as `reported`. The sandbox stubs
+(`.gitmodules`, `.bashrc`, ...) are removed only when no other shift of this runner works in the same worktree. A crashed
+shift's usage is the sum of its messages (an all-zero error result no longer replaces it).
+
+**Role smoke test.** On every runner start (so after every update) each built-in role goes down its own handoff path with no
+call to Claude: its permissions are turned into Claude Code settings (a role without the edit tool must still be able to write
+its scratch folder: the reviewer's `--risk-file`, the BA's notes), then its own `aom` command (`handoff --note-file`, `review
+approve --risk-file`, `test pass`, ...) runs as the real `bin/aom` shim with the environment of the role's sandbox against the
+runner's IPC server, which answers it as a dry run. The result goes to the server as `role.smoke`: a failed role gets no work on
+this workstation until a later run passes, and one desk alert names the role and the reason. (`aom` runs outside Claude Code's
+shell sandbox by design, so the bubblewrap boundary itself is covered by `claude-sandbox-real.test.ts`.)
+
+**Errors to the server.** `unhandledRejection` is logged and reported and the runner keeps running; `uncaughtException` is
+reported and the process exits. A failed shift handler is reported too. `runner.error` carries a signature, the first line of
+the message with paths, ids and secrets masked, a stack of function names with file basenames, the version and a short context
+label, never a prompt, card text or client code. The server keeps one row per signature with a counter in `runner_errors`
+(`GET /api/platform/runner-errors`, super admin).
 
 ### Mock adapter
 
@@ -1431,6 +1488,12 @@ home directories stay writable. A reviewer that needs a build or tests that writ
 scratch dir (`rsync -a ./ "$TMPDIR/review/"`) and runs it there; the reviewer instructions say so (role version 2).
 The shared package caches stay writable, so a read-only shift can still restore, build and test in its copy.
 
+The Edit/Write permission rules of such a role are **path-scoped** (runner 0.1.24): `Edit`, `Write` and `NotebookEdit` are
+denied for the worktree only, and the role's scratch folder is allowed (`Edit(<scratch>/**)`, `Write(<scratch>/**)`). The
+earlier bare `Edit`/`Write` deny also beat the scratch allow, so a reviewer could not write the file its
+`aom review approve --risk-file` or a tester's `aom outcome steps --note-file` reads. (A role whose working folder is its
+own scratch folder has no worktree deny.) The role smoke test checks this rule for every role on every runner start.
+
 A read-only worktree used to make **every** shell command of such a role fail with
 `bwrap: Can't create file <worktree>/.gitconfig: Read-only file system` (backlog #72). Real cause, reproduced with the
 real Claude Code binary and bubblewrap (`apps/runner/test/claude-sandbox-real.test.ts`, which runs `claude -p` against a
@@ -1444,6 +1507,8 @@ dir entry by entry, `denyAround`) did not touch this and is kept only as a tight
 shift ends. If a future Claude Code protects more names, the real-sandbox test (skipped without `claude` and `bwrap`) is
 the signal. The risk analysis of a review goes in a file in the scratch directory (`$TMPDIR/risk.md`) or inline with
 `--risk-analysis "<text>"`; an unreadable `--risk-file` now says so.
+Since 0.1.24 the stubs are removed at the end of a shift only when no other shift of this runner works in the same worktree
+(another shift may be using them as mount points); they stay empty files, which every check above already ignores.
 Hotfix #77: those stubs exist while the shift runs, so a report (`aom finalize`, `aom review`) used to be refused by the guard
 (`readonly_role_modified_code` for `.bash_profile`, `.gitmodules`, `.profile`, ...). The guard, the leftovers autocommit, the
 unreported-work note, the read-only rollback check, the worktree sweep and the finalize dirty check now ignore exactly the
@@ -1728,8 +1793,30 @@ home, the same denies), so a command, a `docker build` or a deploy asked for in 
 missing `bwrap`/`socat` does not stop a DevOps chat either. Every other agent's chat is unchanged: sandboxed, read-only,
 scratch directory only. In a DevOps chat the verb `aom devops "<instruction>"` (`devops.request`) is available, which turns an
 instruction into a DevOps task with its own thread (the same request the Ask DevOps dialog can send); other chats cannot use it.
-Commands in a DevOps chat run at once, with no approval step. The decision is deliberate: it is the user's own machine and the
+Commands in a DevOps chat run at once, with no approval step, except the ones the guardrails below refuse. The decision is deliberate: it is the user's own machine and the
 chat is the user talking to their own engineer.
+
+**DevOps guardrails (runner 0.1.24).** Every Bash command of a DevOps shift and a DevOps chat goes through a Claude Code
+PreToolUse hook (`aom devops-guard`, configured in the agent's own `settings.json`; its inputs are in
+`<agent config dir>/devops-guard.json`, found through `AOM_DEVOPS_GUARD`). The hook reads the command line (pipes, `&&`, `;`,
+`$( )`, backticks, `bash -c`, `eval`, `env`/`nohup`/`timeout`/`xargs`, and `cd` are looked through) and:
+
+- **always refuses**: deleting outside the worktrees and the runner's data folders (and the OS temp folder); disk and partition
+  tools (`fdisk`, `parted`, `mkfs`, `dd of=/dev/...`, ...); user, group, password and sudo changes and raw `sudo`/`su` (privileged
+  work goes through `aom sudo -- <command>`, which still refuses the other rules for the inner command); force-pushing or
+  deleting `main`, `master`, `develop`, `trunk` or the project's working branch; dropping a database or schema;
+- **refuses unless the manager approved that exact command**: anything that leaves this workstation (`ssh`, `scp`, `sftp`,
+  `rsync` with a remote, `docker` with `-H`/`--context`/another `DOCKER_HOST`, `kubectl`, `helm`, cloud CLIs, `terraform`, ...).
+  The message tells the agent to ask with `aom devops-approval --action ... --reason ... --command "<exact command>"`; after the
+  manager approves, the request resumes with `devops.approval.commands`, and those commands pass. In a chat the same refusal
+  tells the agent to file a request (`aom devops "<request>"`), because a chat has no shift to resume;
+- **audits** every command, allowed or refused (secrets in the command line are masked): appended to
+  `<data dir>/logs/devops-audit.jsonl` and sent to the server (`devops.audit`, table `devops_audit`,
+  `GET /api/platform/devops-audit`, super admin).
+
+In a DevOps chat `aom devops-approval` posts the request into the conversation for the owner and `aom sudo` works.
+This is a guardrail for an agent that follows its instructions, not a security boundary against one that tries to get around it
+(`python -c`, a script it wrote itself): the threat model below still applies.
 
 **Access checkboxes stay guidance (G-Q5).** The ticked rights on the Workstations page (install, Docker, administrator,
 paths) are instructions to the DevOps engineer and a precondition of the toolchain step, not an enforced boundary: shifts and

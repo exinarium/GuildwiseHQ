@@ -1,5 +1,5 @@
 import { closeSync, existsSync, lstatSync, mkdirSync, openSync, rmdirSync, statSync, unlinkSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { git } from '../git/git.ts';
 
 /**
@@ -30,6 +30,32 @@ export const SANDBOX_PROTECTED_DIRS = ['.vscode', '.idea'] as const;
  * untracked files. (The protected directories are empty, which git never lists.)
  */
 export const SANDBOX_STUB_NAMES: readonly string[] = [...SANDBOX_PROTECTED_FILES];
+
+/**
+ * Which shifts work in which worktree right now (the supervisor registers each one). The stubs are shared by every
+ * shift in a worktree: one shift ending must not take them from another that is still running in it (they were
+ * removed at every shift end, which broke the next Bash call of the other shift).
+ */
+const worktreeUsers = new Map<string, Set<string>>();
+
+/** Registers `shiftId` as working in `cwd`; returns the release. */
+export function holdWorktree(cwd: string, shiftId: string): () => void {
+  const key = resolve(cwd);
+  const set = worktreeUsers.get(key) ?? new Set<string>();
+  set.add(shiftId);
+  worktreeUsers.set(key, set);
+  return () => {
+    const s = worktreeUsers.get(key);
+    s?.delete(shiftId);
+    if (s && s.size === 0) worktreeUsers.delete(key);
+  };
+}
+
+/** Does a shift other than `shiftId` work in `cwd`? */
+export function otherShiftsUse(cwd: string, shiftId: string): boolean {
+  const s = worktreeUsers.get(resolve(cwd));
+  return !!s && [...s].some((id) => id !== shiftId);
+}
 
 const isEmptyFile = (p: string): boolean => {
   try {
@@ -89,7 +115,7 @@ export async function removeSandboxStubs(cwd: string): Promise<string[]> {
 }
 
 /** Creates the missing protected names in `cwd`; returns a function that removes exactly what it created. */
-export function createSandboxPlaceholders(cwd: string): () => void {
+export function createSandboxPlaceholders(cwd: string, shiftId?: string): () => void {
   const files: string[] = [];
   const dirs: string[] = [];
   try {
@@ -109,6 +135,8 @@ export function createSandboxPlaceholders(cwd: string): () => void {
     // best effort: a worktree that cannot be written to is as before
   }
   return () => {
+    // another shift of this worktree still runs: it may be using these as mount points; the last one to end cleans up
+    if (shiftId && otherShiftsUse(cwd, shiftId)) return;
     for (const p of files) {
       try {
         if (statSync(p).size === 0) unlinkSync(p);

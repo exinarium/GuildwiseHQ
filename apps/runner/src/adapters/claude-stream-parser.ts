@@ -35,6 +35,9 @@ function dominantModel(modelUsage: unknown): string | undefined {
   return best?.[0];
 }
 
+const isZero = (u: Usage): boolean =>
+  u.inputTokens + u.outputTokens + u.cacheReadTokens + u.cacheWriteTokens === 0;
+
 export function usageFromClaude(u: unknown): Usage {
   const o = isObj(u) ? u : {};
   return {
@@ -62,6 +65,8 @@ export class ClaudeStreamParser {
   private total: Usage | undefined;
   /** What each assistant message reported, by message id: the running total of a session that never reaches `result`. */
   private readonly perMessage = new Map<string, Usage>();
+  /** The latest assistant message's usage: what the session's context holds right now (see `contextTokens`). */
+  private lastCall: Usage | undefined;
   private lastModel: string | undefined;
   private errorSubtype: string | undefined;
   sessionId: string | undefined;
@@ -93,7 +98,23 @@ export class ClaudeStreamParser {
    * itself reported (`total_cost_usd`).
    */
   usage(): Usage {
-    if (this.total) return { ...this.total };
+    // An error result (session limit, crash on exit) can carry an all-zero usage block: it must not wipe out what
+    // the assistant messages already reported (crashed shifts used to record 0 tokens).
+    const summed = this.summed();
+    if (this.total && !(isZero(this.total) && !isZero(summed))) return { ...this.total };
+    return this.lastModel ? { ...summed, model: this.lastModel } : summed;
+  }
+
+  /**
+   * The size of the session's context: the last call's input + cache read + cache write tokens (what the next
+   * message resumes on top of). 0 until the first assistant message.
+   */
+  contextTokens(): number {
+    const u = this.lastCall;
+    return u ? u.inputTokens + u.cacheReadTokens + u.cacheWriteTokens : 0;
+  }
+
+  private summed(): Usage {
     const sum: Usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
     for (const u of this.perMessage.values()) {
       sum.inputTokens += u.inputTokens;
@@ -101,7 +122,7 @@ export class ClaudeStreamParser {
       sum.cacheReadTokens += u.cacheReadTokens;
       sum.cacheWriteTokens += u.cacheWriteTokens;
     }
-    return this.lastModel ? { ...sum, model: this.lastModel } : sum;
+    return sum;
   }
 
   /** Set when the `result` line reported an error (e.g. `error_max_turns`). */
@@ -140,8 +161,12 @@ export class ClaudeStreamParser {
       }
       if (typeof msg.message.model === 'string' && msg.message.model && !msg.message.model.startsWith('<'))
         this.lastModel = msg.message.model;
-      if (isObj(msg.message.usage) && typeof msg.message.id === 'string')
-        this.perMessage.set(msg.message.id, usageFromClaude(msg.message.usage));
+      if (isObj(msg.message.usage) && typeof msg.message.id === 'string') {
+        const u = usageFromClaude(msg.message.usage);
+        this.perMessage.set(msg.message.id, u);
+        // a sub-agent's calls carry `parent_tool_use_id`: they do not grow this session's own context
+        if (msg.parent_tool_use_id == null && !isZero(u)) this.lastCall = u;
+      }
     }
     if (msg.type === 'assistant' && isObj(msg.message) && Array.isArray(msg.message.content)) {
       for (const block of msg.message.content) {

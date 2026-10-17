@@ -226,6 +226,8 @@ export const RpcMethodSchema = z.enum([
   /** Videos and podcasts: `transcript.fetch` is answered by the runner itself; `transcript.store` goes on to the site. */
   /** The DevOps engineer runs a command with the stored sudo password; answered by the runner itself. */
   'sudo.run',
+  /** The DevOps guard hook (a Bash PreToolUse hook) reports the commands it saw; answered by the runner itself. */
+  'devops.audit',
   'toolchain.list',
   'toolchain.add',
   'toolchain.remove',

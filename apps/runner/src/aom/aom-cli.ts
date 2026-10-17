@@ -34,6 +34,7 @@ import {
 } from '@aom/shared';
 import { z } from 'zod';
 import type { ChangeStateLookup } from '../devops/branch-cleanup.ts';
+import { loadGuardConfig, runGuardHook } from '../devops/guard.ts';
 import { runHygiene } from '../devops/hygiene.ts';
 
 export interface AomIo {
@@ -1228,6 +1229,26 @@ const VERBS: Record<string, Verb> = {
         commands: many(p, 'command'),
       }),
     );
+  },
+  /**
+   * The DevOps guard hook (a Claude Code PreToolUse hook on Bash, see devops/guard.ts): reads the hook input on stdin,
+   * records the command through the runner and prints the permission decision. Not listed in `aom help`: agents never call it.
+   */
+  'devops-guard': async (ctx) => {
+    const r = await runGuardHook({
+      stdin: ctx.readFile('-'),
+      cfg: loadGuardConfig(ctx.env.AOM_DEVOPS_GUARD),
+      report: async (entries) => {
+        try {
+          await rpc(ctx, 'devops.audit', { entries });
+          return true;
+        } catch {
+          return false;
+        }
+      },
+    });
+    if (r.stdout) ctx.io.out(r.stdout);
+    return r.code;
   },
   'devops-done': async (ctx, p) => {
     const summary = textFlag(ctx, p, 'summary', true) as string;

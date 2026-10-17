@@ -89,6 +89,17 @@ export const shiftProjectors: Record<string, Projector> = {
       ],
     );
   },
+  ShiftSessionRecorded: async (tx, e) => {
+    const p = (e.event as EventOf<'ShiftSessionRecorded'>).payload;
+    await exec(
+      tx,
+      `UPDATE shifts SET runtime_session_id = COALESCE($2, runtime_session_id),
+                         context_tokens = COALESCE($3, context_tokens),
+                         resume_state = COALESCE($4, resume_state)
+        WHERE id=$1`,
+      [p.shiftId, p.runtimeSessionId ?? null, p.contextTokens ?? null, p.resumeState ?? null],
+    );
+  },
   ShiftEnded: async (tx, e) => {
     const p = (e.event as EventOf<'ShiftEnded'>).payload;
     await exec(

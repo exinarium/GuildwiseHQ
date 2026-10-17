@@ -51,6 +51,18 @@ export const shiftEvents = [
    * tokens and the price are filled in afterwards. Recorded once, only when the shift was priced at zero.
    */
   defineEvent('ShiftUsageRecorded', z.object({ shiftId: Id, usage: Usage })),
+  /** The runner learned Claude's session id after `shift.started`, or re-measured the session's context size. */
+  defineEvent(
+    'ShiftSessionRecorded',
+    z.object({
+      shiftId: Id,
+      runtimeSessionId: z.string().optional(),
+      /** The session's context size: the last call's input + cache read + cache write tokens. */
+      contextTokens: z.number().int().nonnegative().optional(),
+      /** What the runner did with a resume request: `resumed` or `fresh_<why>`. */
+      resumeState: z.string().max(60).optional(),
+    }),
+  ),
   defineEvent(
     'ShiftEnded',
     z.object({

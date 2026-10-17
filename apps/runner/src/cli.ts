@@ -29,6 +29,7 @@ import { AzureDevOpsForge, defaultHost, FileTokenStore, gitConnections } from '.
 import { runSshAction, SshSettingsStore } from './forge/ssh.ts';
 import { gitVersion } from './git/git.ts';
 import { scanRepos } from './git/repo-scan.ts';
+import { installErrorHandlers } from './health/runner-error.ts';
 import { RunnerHost } from './host.ts';
 import { ClaudeCredentialStore, claudeFile } from './integrations/claude-store.ts';
 import { headlessAdapters, headlessEnv } from './integrations/headless.ts';
@@ -197,6 +198,12 @@ async function start(opts: { dataDir?: string; mock?: boolean }): Promise<void> 
     maxShiftMsOverride: override,
     onConnected: () => updater?.noteConnected(),
   });
+  // Unhandled errors go to the server (sanitised) so the platform team can see them; see health/runner-error.ts.
+  const removeErrorHandlers = installErrorHandlers({
+    report: (e) => host.reportError(e),
+    version: RUNNER_VERSION,
+    log,
+  });
   await host.start();
   log.info(
     `aom-runner ${RUNNER_VERSION} started (${host.running.size} pairing(s): ${[...host.running.keys()].join(', ')})`,
@@ -237,6 +244,7 @@ async function start(opts: { dataDir?: string; mock?: boolean }): Promise<void> 
   void host.fatal.then(finish);
   const code = await ended;
   updater?.stop();
+  removeErrorHandlers();
   await host.stop();
   if (host.unpaired) console.log(`aom-runner: ${UNPAIRED_MESSAGE}`);
   process.exit(code);

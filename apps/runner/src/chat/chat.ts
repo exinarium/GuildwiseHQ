@@ -25,6 +25,8 @@ import {
   type ServerHttp,
   syncCardAttachments,
 } from '../attachments/index.ts';
+import { recordDevopsAudit } from '../devops/audit.ts';
+import { redactCommand } from '../devops/guard.ts';
 import { type ExternalAdapters, formatSource, readScopedJira } from '../external/index.ts';
 import { confine } from '../fs-safe.ts';
 import { resolveCommitIdentity } from '../git/identity.ts';
@@ -44,7 +46,12 @@ export interface ChatDeps {
   ipc: IpcServer;
   log?: Logger;
   /** Acked types (`chat.done`, `chat.error`) go through the outbox; `chat.delta` is dropped while offline. */
-  send(type: 'chat.delta' | 'chat.done' | 'chat.error', payload: Record<string, unknown>): void;
+  send(
+    type: 'chat.delta' | 'chat.done' | 'chat.error' | 'devops.audit',
+    payload: Record<string, unknown>,
+  ): void;
+  /** `aom sudo` in the DevOps engineer's chat: runs a command with administrator rights (the stored password stays here). */
+  sudoRun?: (cmd: string, args: string[]) => Promise<{ exitCode: number; stdout: string; stderr: string }>;
   /** M7: the ticket systems of this workstation (`aom source read`); credentials never leave it. */
   external?: ExternalAdapters;
   /** Text for the agent's instructions about granted MCP servers that need a sign-in here (empty: none). */
@@ -169,6 +176,33 @@ export class ChatManager {
     const { chatId } = chat.msg;
     return {
       report: async (req: IpcReportRequest): Promise<IpcReportResponse> => {
+        // `aom devops-approval` in the DevOps engineer's chat: the owner is in the conversation, so the request is
+        // posted there (a chat has no shift to end) and the agent waits for their answer.
+        if (
+          chat.msg.agent.isDevops &&
+          req.report.kind === 'outcome' &&
+          req.report.outcomeId === 'devops_approval'
+        ) {
+          const d = req.report.data as { action?: string; reason?: string; commands?: string[] };
+          const body = [
+            `**Approval needed:** ${d.action ?? req.report.note}`,
+            d.reason ? `Reason: ${d.reason}` : '',
+            d.commands?.length
+              ? `Commands:\n${d.commands.map((c) => `- \`${redactCommand(c)}\``).join('\n')}`
+              : '',
+            'Reply here to approve or decline.',
+          ]
+            .filter(Boolean)
+            .join('\n\n');
+          const r = await this.deps.rpc(chatId, 'thread.post', { body });
+          return r.ok
+            ? {
+                accepted: true,
+                message:
+                  'Asked in this conversation. Do not run the command yet: wait for the owner to reply. Commands that leave this workstation stay blocked in a chat; for an approved deployment file a request with `aom devops "<what>"`, which runs as a shift with the approval.',
+              }
+            : { accepted: false, message: `Rejected: ${r.error ?? 'failed'}`, error: r.error ?? 'failed' };
+        }
         if (req.report.kind !== 'comment') {
           return {
             accepted: false,
@@ -197,6 +231,17 @@ export class ChatManager {
           return this.attachments(chat, req.method, req.params);
         if (req.method.startsWith('toolchain.'))
           return toolchainRpc(this.deps.toolchains, req.method, req.params, chat.msg.agent.isDevops === true);
+        // The DevOps engineer's guard hook (devops/guard.ts) reports every command it saw in this conversation.
+        if (req.method === 'devops.audit')
+          return recordDevopsAudit(req.params, {
+            isDevops: chat.msg.agent.isDevops === true,
+            logFile: join(this.deps.paths.logs, 'devops-audit.jsonl'),
+            send: (entries) => this.deps.send('devops.audit', { entries }),
+            redact: redactCommand,
+          });
+        // `aom sudo -- <command>` in the DevOps engineer's chat: the runner runs it with the stored password (the
+        // always-refused rules of the guard still apply to the command: the hook judged it before `aom` ran).
+        if (req.method === 'sudo.run') return this.sudoRun(chat, req.params);
         if (req.method === 'git.status' || req.method === 'git.connect')
           return chat.msg.agent.isDevops && this.deps.git
             ? this.deps.git.handle(req.method, req.params)
@@ -205,6 +250,23 @@ export class ChatManager {
           ? this.deps.rpc(chatId, req.method, req.params)
           : { ok: false, error: `${req.method} is not available in a chat conversation` };
       },
+    };
+  }
+
+  /**
+   * `aom sudo -- <command>` in the DevOps engineer's chat. The owner is in the conversation, so there is no separate grant
+   * to check; the stored password exists only when the owner set it on this workstation (the runner refuses without it).
+   */
+  private async sudoRun(chat: ActiveChat, params: Record<string, unknown>): Promise<IpcRpcResponse> {
+    if (!chat.msg.agent.isDevops) return { ok: false, error: 'only the DevOps engineer may use sudo' };
+    const argv = Array.isArray(params.argv) ? params.argv.map(String) : [];
+    if (argv.length === 0 || !this.deps.sudoRun)
+      return { ok: false, error: 'usage: aom sudo -- <command> [args...]' };
+    const [cmd, ...args] = argv as [string, ...string[]];
+    const r = await this.deps.sudoRun(cmd, args);
+    return {
+      ok: true,
+      result: { exitCode: r.exitCode, stdout: r.stdout.slice(-20000), stderr: r.stderr.slice(-8000) },
     };
   }
 
@@ -414,6 +476,7 @@ export class ChatManager {
       context: msg.context,
       ...(msg.context.intake ? { intake: true } : {}),
       ...(msg.resumeSessionId ? { resumeSessionId: msg.resumeSessionId } : {}),
+      ...(devops ? { devopsGuard: { sessionRef: msg.chatId } } : {}),
       logFile: `${paths.shiftLogs}/chat-${msg.chatId}.jsonl`,
     });
     if (chat.stopReason) void chat.session.stop(`chat.${chat.stopReason}`); // cancelled while starting

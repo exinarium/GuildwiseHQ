@@ -14,6 +14,8 @@ export interface ProcessSpec {
   /** Maps one stdout line to runtime events. */
   parseLine: (line: string) => RuntimeEvent[];
   usage: () => Usage;
+  /** The session's context size right now (see `RuntimeSession.contextTokens`). */
+  contextTokens?: () => number;
   /** Also pass the runner's own environment to the child (default). Agent sessions with an allow-listed `env` set false. */
   inheritEnv?: boolean;
   /** Written to the child's stdin (then closed); without it stdin is closed. Keeps a big prompt out of argv (E2BIG). */
@@ -194,5 +196,6 @@ export function spawnSession(spec: ProcessSpec): RuntimeSession {
     killTools: () => killToolProcesses(pid),
     lastActivityAt: () => lastActivity,
     usage: spec.usage,
+    ...(spec.contextTokens ? { contextTokens: spec.contextTokens } : {}),
   };
 }

@@ -46,6 +46,8 @@ export const DESK_SUBKIND = {
   noCommitIdentity: 'no_commit_identity',
   /** The runtime's login (Claude Code `/login`) expired on a workstation; cleared when it works again (a notice). */
   claudeAuthExpired: 'claude_auth_expired',
+  /** The runner's role smoke test failed for a role on a workstation: that role gets no work there (an alert). */
+  roleSmokeFailed: 'role_smoke_failed',
   /** The model usage limit (Claude subscription) was hit on a workstation; cleared when work can resume (a notice, backlog #73). */
   claudeUsageLimit: 'claude_usage_limit',
   /** A plugin MCP server granted to a project needs sign-in on a workstation; cleared when signed in (a notice). */

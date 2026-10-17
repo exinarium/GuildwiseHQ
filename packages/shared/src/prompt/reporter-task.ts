@@ -2,7 +2,7 @@ import type { BaTaskShift } from '../phases/index.ts';
 import type { ShiftBrief } from '../protocol/runner.ts';
 import type { ReporterTaskKind, SignalBrief } from '../reporter/index.ts';
 import { SIGNAL_LABEL } from '../reporter/index.ts';
-import { commandForOutcome } from './commands.ts';
+import { AOM_NO_PIPES_NOTE, commandForOutcome } from './commands.ts';
 
 const TITLE: Record<ReporterTaskKind, string> = {
   desk_triage: 'Held items: decide what reaches the manager',
@@ -68,6 +68,7 @@ export function renderReporterInstructions(brief: ShiftBrief, task: BaTaskShift)
       ...brief.shift.outcomes.map((o) => `- ${o.id}: ${o.label}\n  \`${commandForOutcome(o)}\``),
       '',
       'Write the file first (your scratch directory).',
+      AOM_NO_PIPES_NOTE,
     ].join('\n'),
   );
   return `${out.join('\n\n')}\n`;

@@ -720,6 +720,47 @@ export async function applyShiftStarted(ctx: Ctx, tx: Tx, ws: WsRef, msg: Runner
   );
 }
 
+/**
+ * `shift.session`: Claude's session id (only known after `shift.started`), the session's context size and, once, what
+ * the runner did with a resume request. Recorded as an event so a replay rebuilds `shifts.runtime_session_id`.
+ */
+export async function applyShiftSession(
+  ctx: Ctx,
+  tx: Tx,
+  ws: WsRef,
+  msg: {
+    shiftId: string;
+    runtimeSessionId?: string | undefined;
+    contextTokens?: number | undefined;
+    resume?: RunnerToServerOf<'shift.session'>['resume'];
+  },
+) {
+  const s = await one(tx, 'SELECT * FROM shifts WHERE id=$1 AND workstation_id=$2', [msg.shiftId, ws.id]);
+  if (!s) return;
+  const card = s.card_id
+    ? await one(tx, 'SELECT org_id, project_id FROM cards WHERE id=$1', [s.card_id])
+    : undefined;
+  await ctx.store.append(
+    [
+      {
+        streamId: streamId.shift(s.id),
+        event: {
+          type: 'ShiftSessionRecorded',
+          payload: {
+            shiftId: s.id,
+            ...(msg.runtimeSessionId ? { runtimeSessionId: msg.runtimeSessionId } : {}),
+            ...(msg.contextTokens !== undefined ? { contextTokens: msg.contextTokens } : {}),
+            ...(msg.resume ? { resumeState: msg.resume.state } : {}),
+          },
+        },
+        actor: runnerActor(ws.id),
+        scope: card ? projectScope(card.org_id, card.project_id) : orgScope(s.org_id),
+      },
+    ],
+    { tx },
+  );
+}
+
 const SYNC_NOTES: Record<NonNullable<RunnerToServerOf<'shift.started'>['syncMain']>['result'], string> = {
   merged_into_working:
     'The latest main branch was merged into the working branch and pushed before work started.',

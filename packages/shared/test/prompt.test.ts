@@ -161,6 +161,15 @@ describe('renderInstructions', () => {
       - Architectural paths (changes here make a card large): apps/web/src/router.tsx
       - End-to-end test paths: e2e/**
 
+      # Boundaries
+
+      - Work only inside your current working directory (the card worktree).
+      - Never push; the runner lands your work. Do not rebase, checkout or switch branches; do not touch other worktrees.
+      - Search the ledger with \`aom ledger search\` before asking a question.
+      - The toolchains (for example .NET, Node) and the package caches are shared and already installed; do not install SDKs. Build and test in the shell. Ask DevOps to build outside the sandbox only if a sandbox error persists after a retry.
+      - .NET: plain \`dotnet build\` and \`dotnet test\` work as they are (the sandbox runs MSBuild in one process, one CPU). Do not pass \`-m\`/\`-maxcpucount\` with a number above 1 and do not start build servers: MSBuild worker nodes cannot start in the sandbox (\`SocketException\` in \`NamedPipeServerStream\`, or a build that hangs).
+      - Tests: run unit tests only, in the foreground, with a hang limit (\`dotnet test ... --blame-hang-timeout 2m --blame-hang-dump-type none\`; any other long command: \`timeout <seconds> <command>\`). Never run integration or end-to-end suites (anything that needs a running server, network or other services): filter them out when a solution mixes both, and name in your handoff the suites you left for the testers. Never run two full suites at once, never start a long command as a background task and poll it with \`sleep\` loops. If tests already fail on the base commit, check that once, note it in the handoff and do not try to fix unrelated failures.
+
       # How to report
 
       You report through the \`aom\` command, never through free text. Run exactly one terminal command to end the shift.
@@ -172,7 +181,7 @@ describe('renderInstructions', () => {
       Other commands:
       - \`aom card [--json]\`: print this card and brief again.
       - \`aom ledger search "<query>"\`: search decisions and standing orders. Do this before asking a question.
-      - Run every \`aom\` command on its own: no pipes, redirects, \`;\`, \`&&\`, \`cd\` or \`$(...)\` around it (for example \`aom ledger search "tech stack"\`, not \`aom ledger search "tech stack" | head\`). Otherwise it runs inside the shell sandbox and cannot reach the runner.
+      - Run every \`aom\` command on its own: no pipes, redirects, \`;\`, \`&&\`, \`cd\` or \`$(...)\` around it (for example \`aom ledger search "tech stack"\`, not \`aom ledger search "tech stack" | head\`), or it runs inside the shell sandbox and cannot reach the runner.
       - \`aom comment --note "<text>"\`: post a note on the card thread without ending the shift.
       - \`aom question --text "<question>" [--option "<answer a>"]... [--recommend <n>] --doing "<what you were doing>"\`: ask the manager when the card and ledger cannot answer; this ends the shift and parks the card as Blocked.
       - \`aom question ... --non-blocking\`: ask the manager without ending the shift (add \`--force\` if the ledger already has a similar entry).
@@ -183,15 +192,7 @@ describe('renderInstructions', () => {
 
       Never end the shift without one of these commands, and never stop to explain a problem to the user: nobody answers inside the shift. If a shell command is denied ("Permission to use Bash has been denied", "don't ask mode") or keeps failing, do not give up: try a simpler equivalent. Run one plain command per Bash call instead of \`cd x && ...; VAR=1 cmd\` chains, heredocs or inline scripts (a denial is per command; the next, simpler call is allowed), use \`git -C <dir>\` or a path argument instead of \`cd\`, and use the Edit or Write tool for file changes instead of a script. Stashes are shared with the user's own saved work: use \`git stash apply\` for your own entry (never \`pop\`, \`drop\` or \`clear\`, which are denied) and never apply an entry you did not create. If you are still blocked, commit what you have and run the question command (or the handoff command if the work is done) with a note that says what is finished, what is uncommitted and which command you could not run.
 
-      # Boundaries
-
-      - Work only inside your current working directory (the card worktree).
-      - Never push; the runner lands your work. Do not rebase, checkout or switch branches; do not touch other worktrees.
-      - Search the ledger with \`aom ledger search\` before asking a question.
-      - The toolchains (for example .NET, Node) and the package caches are shared and already installed; do not install SDKs. Build and test in the shell. Ask DevOps to build outside the sandbox only if a sandbox error persists after a retry.
-      - .NET: plain \`dotnet build\` and \`dotnet test\` work as they are (the sandbox runs MSBuild in one process, one CPU). Do not pass \`-m\`/\`-maxcpucount\` with a number above 1 and do not start build servers: MSBuild worker nodes cannot start in the sandbox (\`SocketException\` in \`NamedPipeServerStream\`, or a build that hangs).
-      - Tests: run unit tests only, in the foreground, with a hang limit (\`dotnet test ... --blame-hang-timeout 2m --blame-hang-dump-type none\`; any other long command: \`timeout <seconds> <command>\`). Never run integration or end-to-end suites (anything that needs a running server, network or other services): filter them out when a solution mixes both, and name in your handoff the suites you left for the testers. Never run two full suites at once, never start a long command as a background task and poll it with \`sleep\` loops. If tests already fail on the base commit, check that once, note it in the handoff and do not try to fix unrelated failures.
-      - This shift may run for at most 60 minutes.
+      This shift may run for at most 60 minutes.
       "
     `);
   });
@@ -228,6 +229,15 @@ describe('renderInstructions', () => {
       - Architectural paths (changes here make a card large): apps/web/src/router.tsx
       - End-to-end test paths: e2e/**
 
+      # Boundaries
+
+      - Work only inside your current working directory (the card worktree).
+      - Never push; the runner lands your work. Do not rebase, checkout or switch branches; do not touch other worktrees.
+      - Search the ledger with \`aom ledger search\` before asking a question.
+      - The toolchains (for example .NET, Node) and the package caches are shared and already installed; do not install SDKs. Build and test in the shell. Ask DevOps to build outside the sandbox only if a sandbox error persists after a retry.
+      - .NET: plain \`dotnet build\` and \`dotnet test\` work as they are (the sandbox runs MSBuild in one process, one CPU). Do not pass \`-m\`/\`-maxcpucount\` with a number above 1 and do not start build servers: MSBuild worker nodes cannot start in the sandbox (\`SocketException\` in \`NamedPipeServerStream\`, or a build that hangs).
+      - Tests: run unit tests only, in the foreground, with a hang limit (\`dotnet test ... --blame-hang-timeout 2m --blame-hang-dump-type none\`; any other long command: \`timeout <seconds> <command>\`). Never run integration or end-to-end suites (anything that needs a running server, network or other services): filter them out when a solution mixes both, and name in your handoff the suites you left for the testers. Never run two full suites at once, never start a long command as a background task and poll it with \`sleep\` loops. If tests already fail on the base commit, check that once, note it in the handoff and do not try to fix unrelated failures.
+
       # How to report
 
       You report through the \`aom\` command, never through free text. Run exactly one terminal command to end the shift.
@@ -241,7 +251,7 @@ describe('renderInstructions', () => {
       Other commands:
       - \`aom card [--json]\`: print this card and brief again.
       - \`aom ledger search "<query>"\`: search decisions and standing orders. Do this before asking a question.
-      - Run every \`aom\` command on its own: no pipes, redirects, \`;\`, \`&&\`, \`cd\` or \`$(...)\` around it (for example \`aom ledger search "tech stack"\`, not \`aom ledger search "tech stack" | head\`). Otherwise it runs inside the shell sandbox and cannot reach the runner.
+      - Run every \`aom\` command on its own: no pipes, redirects, \`;\`, \`&&\`, \`cd\` or \`$(...)\` around it (for example \`aom ledger search "tech stack"\`, not \`aom ledger search "tech stack" | head\`), or it runs inside the shell sandbox and cannot reach the runner.
       - \`aom comment --note "<text>"\`: post a note on the card thread without ending the shift.
       - \`aom question --text "<question>" [--option "<answer a>"]... [--recommend <n>] --doing "<what you were doing>"\`: ask the manager when the card and ledger cannot answer; this ends the shift and parks the card as Blocked.
       - \`aom question ... --non-blocking\`: ask the manager without ending the shift (add \`--force\` if the ledger already has a similar entry).
@@ -252,15 +262,7 @@ describe('renderInstructions', () => {
 
       Never end the shift without one of these commands, and never stop to explain a problem to the user: nobody answers inside the shift. If a shell command is denied ("Permission to use Bash has been denied", "don't ask mode") or keeps failing, do not give up: try a simpler equivalent. Run one plain command per Bash call instead of \`cd x && ...; VAR=1 cmd\` chains, heredocs or inline scripts (a denial is per command; the next, simpler call is allowed), use \`git -C <dir>\` or a path argument instead of \`cd\`, and use the Edit or Write tool for file changes instead of a script. Stashes are shared with the user's own saved work: use \`git stash apply\` for your own entry (never \`pop\`, \`drop\` or \`clear\`, which are denied) and never apply an entry you did not create. If you are still blocked, commit what you have and run the question command (or the handoff command if the work is done) with a note that says what is finished, what is uncommitted and which command you could not run.
 
-      # Boundaries
-
-      - Work only inside your current working directory (the card worktree).
-      - Never push; the runner lands your work. Do not rebase, checkout or switch branches; do not touch other worktrees.
-      - Search the ledger with \`aom ledger search\` before asking a question.
-      - The toolchains (for example .NET, Node) and the package caches are shared and already installed; do not install SDKs. Build and test in the shell. Ask DevOps to build outside the sandbox only if a sandbox error persists after a retry.
-      - .NET: plain \`dotnet build\` and \`dotnet test\` work as they are (the sandbox runs MSBuild in one process, one CPU). Do not pass \`-m\`/\`-maxcpucount\` with a number above 1 and do not start build servers: MSBuild worker nodes cannot start in the sandbox (\`SocketException\` in \`NamedPipeServerStream\`, or a build that hangs).
-      - Tests: run unit tests only, in the foreground, with a hang limit (\`dotnet test ... --blame-hang-timeout 2m --blame-hang-dump-type none\`; any other long command: \`timeout <seconds> <command>\`). Never run integration or end-to-end suites (anything that needs a running server, network or other services): filter them out when a solution mixes both, and name in your handoff the suites you left for the testers. Never run two full suites at once, never start a long command as a background task and poll it with \`sleep\` loops. If tests already fail on the base commit, check that once, note it in the handoff and do not try to fix unrelated failures.
-      - This shift may run for at most 60 minutes.
+      This shift may run for at most 60 minutes.
       "
     `);
   });
@@ -282,8 +284,8 @@ describe('renderInstructions', () => {
       '# Core rules',
       '# Standing orders',
       '# Project',
-      '# How to report',
       '# Boundaries',
+      '# How to report',
     ];
     const idx = order.map((h) => out.indexOf(h));
     expect(idx.every((i) => i >= 0)).toBe(true);
