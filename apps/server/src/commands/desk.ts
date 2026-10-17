@@ -6,6 +6,7 @@ import {
   type DeskResolution,
   isOrgManager,
   isPhaseDeskSubkind,
+  PLATFORM_APPROVAL_SUBKINDS,
   type ResolveDeskItemRequest,
   streamId,
   UNMAPPED_TICKET_SUBKIND,
@@ -28,6 +29,7 @@ import { plannedVaultPath } from './decisions.ts';
 import { resolveDefinitionIn } from './designer.ts';
 import { resolveDevOpsApprovalIn } from './devops.ts';
 import { mergedAnswerNotes } from './escalation.ts';
+import { resolvePlatformApprovalIn } from '../platform-team/approvals.ts';
 import { resolveLargeMergeIn } from './finalize.ts';
 import { runHygieneForConfirmedRepo, workingBranchAnsweredEvents } from './hygiene.ts';
 import { continueIntake, mappingAnsweredEvents } from './intake.ts';
@@ -323,6 +325,10 @@ async function closeItem(
       if (resolution === 'acknowledged')
         throw badRequest('wrong_resolution', 'a merge approval is approved or rejected');
       workstationToDeliver = (await resolveLargeMergeIn(ctx, tx, user, item, resolution, note)) ?? undefined;
+    } else if (item.kind === 'approval' && PLATFORM_APPROVAL_SUBKINDS.has(item.subkind)) {
+      // Platform team (Lean Team v3): deploy and downtime approvals and stop-loss decisions on the platform organisation's
+      // desk, a grant request on the client organisation's desk.
+      await resolvePlatformApprovalIn(ctx, tx, user, item, resolution, note);
     } else if (isPhaseDeskSubkind(item.subkind)) {
       // Phases: confirm a BA proposal, approve or reject the follow-ups, acknowledge the results (any member).
       await resolvePhaseDeskItemIn(ctx, tx, user, item, resolution, note);

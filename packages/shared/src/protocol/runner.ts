@@ -656,6 +656,7 @@ export const RunnerCommandNameSchema = z.enum([
   'integration.test',
   'integration.remove',
   'shifts.limit',
+  'runner.pin',
 ]);
 export type RunnerCommandName = z.infer<typeof RunnerCommandNameSchema>;
 
@@ -709,7 +710,16 @@ export const CommandPayloadSchemas = {
     shiftLimit: ShiftLimitSettingSchema,
     maxConcurrentShifts: z.number().int().positive(),
   }),
+  /**
+   * Safe mode (platform team): run exactly this runner version (an older one too: a rollback), or null to follow the
+   * latest release again. The same value rides on `welcome.runnerPin`; a runner without the `runner-pin:1` capability
+   * ignores both.
+   */
+  'runner.pin': z.object({ version: z.string().max(40).nullable() }),
 } as const;
+
+/** Announced in `hello.capabilities`-style lists by runners that apply a version pin (`runner.pin`, `welcome.runnerPin`). */
+export const RUNNER_PIN_CAPABILITY = 'runner-pin:1';
 
 /** The commands that carry a sealed envelope: their payload is emptied once answered, and they expire. */
 export const ENVELOPE_COMMANDS: ReadonlySet<string> = new Set([
@@ -1095,6 +1105,8 @@ export const WelcomeSchema = msg('welcome', {
      */
     shiftLimit: ShiftLimitSettingSchema.optional(),
   }),
+  /** Additive, safe mode: the runner version this workstation is pinned to (absent or null: none). */
+  runnerPin: z.object({ version: z.string().max(40) }).nullable().optional(),
 });
 export const ShiftStartSchema = msg('shift.start', {
   shiftId: z.uuid(),

@@ -81,6 +81,8 @@ import { exec, one, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import { buildBrief } from './brief.ts';
 import { claimPendingCommands, completeCommand, requeueSentCommands } from './commands-queue.ts';
+import { pinForWelcome } from '../platform-team/pins.ts';
+import { platformTriageRpc } from '../platform-team/rpc.ts';
 import { ledgerRetireRpc, ledgerSearchRpc } from './ledger-rpc.ts';
 import type { RunnerConn } from './registry.ts';
 import { issueRotatedToken } from './rotation.ts';
@@ -606,6 +608,12 @@ export class RunnerHandlers {
     ctx.services.browser.resendRunFollows(conn.workstationId);
     // `welcome` carries the shift limit: an older, unanswered `shifts.limit` must not be replayed over it.
     await dropStaleShiftLimitCommands(ctx.pool, conn.workstationId);
+    await exec(
+      ctx.pool,
+      `UPDATE runner_commands SET status='failed', last_error='superseded'
+        WHERE workstation_id=$1 AND type='runner.pin' AND status IN ('pending','sent')`,
+      [conn.workstationId],
+    );
     // Whatever the previous connection was sent may not have arrived: it is due again on this one.
     await requeueSentCommands(ctx.pool, conn.workstationId);
     await this.matchRepos(conn);
@@ -634,6 +642,8 @@ export class RunnerHandlers {
       serverTime: now.toISOString(),
       heartbeatSec: HEARTBEAT_SEC,
       limits: { maxConcurrentShifts: conn.maxShifts, shiftLimit: setting },
+      // Safe mode: the runner version this workstation is pinned to (the runner's updater follows it, not the latest).
+      runnerPin: await pinForWelcome(ctx.pool, conn.workstationId),
     });
     // With nothing in the runner's outbox there is nothing to wait for; otherwise reconcile on outbox.flushed.
     if (msg.outboxPending === 0) await this.reconcile(conn);
@@ -1004,6 +1014,7 @@ export class RunnerHandlers {
       if (!shift) return reply(false, undefined, 'unknown shift');
       if (msg.method === 'ledger.search') return reply(true, await ledgerSearchRpc(ctx, shift, msg.params));
       if (msg.method === 'ledger.retire') return reply(...(await ledgerRetireRpc(ctx, shift, msg.params)));
+      if (msg.method === 'platform.triage') return reply(...(await platformTriageRpc(ctx, shift, msg.params)));
       if (msg.method === 'card.attachments' || msg.method === 'card.attach.begin')
         return reply(...(await attachmentRpc(ctx, shift, msg.method, msg.params)));
       // The CEO's management verbs (a CEO shift or the owner's chat with the CEO); the gateway checks the agent.

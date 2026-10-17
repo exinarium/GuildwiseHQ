@@ -21,6 +21,7 @@ import { mailEvents } from './mail.ts';
 import { orgEvents } from './org.ts';
 import { outboundEvents } from './outbound.ts';
 import { phaseEvents } from './phase.ts';
+import { platformEvents } from './platform.ts';
 import { projectEvents } from './project.ts';
 import { projectWorkflowEvents } from './project-workflows.ts';
 import { qaEvents } from './qa.ts';
@@ -76,6 +77,7 @@ export const DomainEventSchema = z.discriminatedUnion('type', [
   ...qaEvents,
   ...approvalEvents,
   ...questionFlowEvents,
+  ...platformEvents,
 ]);
 export type DomainEvent = z.infer<typeof DomainEventSchema>;
 export type EventType = DomainEvent['type'];

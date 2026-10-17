@@ -129,6 +129,17 @@ export const platformAuditProjectors: Record<string, Projector> = {
       meta: p.meta,
     };
   }),
+  PlatformTeamDesignated: byPlatform(async (tx, e) => {
+    const p = ev<'PlatformTeamDesignated'>(e).payload;
+    return {
+      action: e.event.type,
+      orgId: p.orgId ?? null,
+      summary: p.orgId
+        ? `Designated ${await orgName(tx, p.orgId)} as the platform team organization`
+        : 'Cleared the platform team organization',
+      details: { projectId: p.projectId },
+    };
+  }),
   // Kept forever (the wiped organization's own events are gone): org_id stays empty so nothing links back to it.
   SimulationOrgWiped: always(async (_tx, e) => {
     const p = ev<'SimulationOrgWiped'>(e).payload;

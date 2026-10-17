@@ -82,7 +82,9 @@ import { orgChartRoutes } from './routes/org-chart.ts';
 import { orgRoutes } from './routes/orgs.ts';
 import { outboundRoutes } from './routes/outbound.ts';
 import { phaseRoutes } from './routes/phases.ts';
+import { reportServerError } from './platform-team/detectors.ts';
 import { platformRoutes } from './routes/platform.ts';
+import { platformTeamRoutes } from './routes/platform-team.ts';
 import { projectWorkflowRoutes } from './routes/project-workflows.ts';
 import { projectRoutes } from './routes/projects.ts';
 import { qaRoutes } from './routes/qa.ts';
@@ -262,7 +264,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   app.decorateRequest('auth', null);
 
   // ---- error mapping: {error:{code,message,details?}}
-  app.setErrorHandler((err: any, _req, reply) => {
+  app.setErrorHandler((err: any, req, reply) => {
     if (err instanceof HttpError) {
       return reply
         .code(err.status)
@@ -282,6 +284,8 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
         : 500;
     if (status === 500) {
       app.log.error({ err }, 'unhandled error');
+      // Platform team bug intake: a 5xx is a bug report (sanitised, deduped by route and error signature).
+      reportServerError(ctx, req, err);
       return reply.code(500).send({ error: { code: 'internal_error', message: 'internal server error' } });
     }
     const code = status === 429 ? 'rate_limited' : status === 415 ? 'unsupported_media_type' : 'bad_request';
@@ -351,6 +355,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   await app.register(adminRoutes(ctx));
   await app.register(orgRoutes(ctx));
   await app.register(platformRoutes(ctx));
+  await app.register(platformTeamRoutes(ctx));
   await app.register(workstationRoutes(ctx));
   await app.register(integrationRoutes(ctx));
   await app.register(installerRoutes(ctx));

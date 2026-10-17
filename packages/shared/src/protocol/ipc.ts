@@ -203,6 +203,8 @@ export const RpcMethodSchema = z.enum([
   'ledger.search',
   /** The BA retires a ledger entry with a reason (`aom ledger retire <id> --reason "<why>"`). */
   'ledger.retire',
+  /** The platform architect triages a platform bug card (`aom bug triage`): invalid, or severity and fix size. */
+  'platform.triage',
   'thread.post',
   'thread.read',
   'devops.request',

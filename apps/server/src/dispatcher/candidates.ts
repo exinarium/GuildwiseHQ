@@ -1,6 +1,7 @@
 import { READONLY_DESIGN_CAPABILITY } from '@aom/shared';
 import { budgetPausedSql } from '../costs/index.ts';
 import { one, type Queryable, type Row, rows } from '../db/sql.ts';
+import { platformPausedSql } from '../platform-team/pause.ts';
 import { landedSql } from './dependencies.ts';
 
 /** A runner that has not been heard from for this long counts as offline. */
@@ -165,6 +166,8 @@ WHERE c.status = 'queued'
                        AND aa.paused_at IS NULL))
   -- A project over its monthly budget starts nothing new (running shifts finish): costs/index.ts budgetPausedSql.
   AND NOT ${budgetPausedSql('p', '$9')}
+  -- A scope the platform team paused (project, workflow, stage, workstation) starts nothing new; the platform project never.
+  AND NOT ${platformPausedSql('c', '$6')}
   AND NOT EXISTS (
         SELECT 1 FROM card_dependencies d JOIN cards dc ON dc.id = d.depends_on_card_id
          WHERE d.card_id = c.id

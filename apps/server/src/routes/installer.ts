@@ -103,8 +103,11 @@ export function installerRoutes(ctx: Ctx) {
       },
     );
 
-    app.get('/api/runner/release', async () => {
-      const r = await latestRelease(ctx.config);
+    app.get('/api/runner/release', async (req) => {
+      // `?version=` asks for one specific release (safe mode: a runner pinned to a version, an older one too).
+      const wanted = (req.query as { version?: string }).version;
+      if (wanted !== undefined && !RELEASE_VERSION_PATTERN.test(wanted)) throw notFound();
+      const r = wanted ? await findRelease(ctx.config, wanted) : await latestRelease(ctx.config);
       if (!r) throw notFound('this server has no runner release', 'no_release');
       return RunnerReleaseResponseSchema.parse({
         version: r.version,

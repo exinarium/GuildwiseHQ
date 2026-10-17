@@ -8,6 +8,7 @@ import type { Ctx } from '../context.ts';
 import { one, type Row, rows } from '../db/sql.ts';
 import { DISPATCH_LOCK_ID } from '../db/tx.ts';
 import type { StoredEvent } from '../eventstore/types.ts';
+import { platformPass } from '../platform-team/detectors.ts';
 import { activeUsageLimit } from '../queries/usage-limit.ts';
 import { buildShiftStart } from '../runner-gateway/brief.ts';
 import { wsServesOrgSql } from '../simulation/fit.ts';
@@ -281,6 +282,8 @@ export class Dispatcher {
     counted(await baTaskPass(this.ctx, cooling, full));
     await ceoPass(this.ctx);
     await testingPass(this.ctx);
+    // Platform team: bug intake from the detectors, pauses of fixed bugs end, grants expire, fix stop-loss (never throws).
+    await platformPass(this.ctx);
     // Test environments for cards waiting at an environment stage (the tester can claim them once healthy).
     await testEnvironmentPass(this.ctx);
     for (const r of made) await this.sendShiftStart(r);

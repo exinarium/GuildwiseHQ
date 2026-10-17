@@ -20,6 +20,7 @@ import { ledgerProjectors } from './ledger.ts';
 import { orgProjectors } from './orgs.ts';
 import { outboundProjectors } from './outbound.ts';
 import { phaseProjectors } from './phases.ts';
+import { platformProjectors } from './platform.ts';
 import { platformAuditProjectors } from './platform-audit.ts';
 import { projectWorkflowProjectors } from './project-workflows.ts';
 import { projectProjectors } from './projects.ts';
@@ -47,6 +48,7 @@ const domains: Array<Record<string, Projector>> = [
   userProjectors,
   orgProjectors,
   platformAuditProjectors,
+  platformProjectors,
   blogProjectors,
   catalogueProjectors,
   workstationProjectors,
@@ -106,6 +108,7 @@ export const PROJECTION_TABLES = [
   'organizations',
   'org_members',
   'platform_audit_log',
+  'platform_pauses',
   'invitations',
   'blog_posts',
   'workstations',
