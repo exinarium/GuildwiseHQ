@@ -250,6 +250,20 @@ export async function environmentNotReadyEvents(
   env: NonNullable<RunnerToServerOf<'shift.rejected'>['environment']>,
 ): Promise<AppendInput[]> {
   const problem = env.problem;
+  // "Test without an environment" is on for the project: no DevOps request, the tester carries on with what it has.
+  const policy = await one(tx, 'SELECT test_without_environment FROM projects WHERE id=$1', [
+    card.project_id,
+  ]);
+  if (policy?.test_without_environment)
+    return [
+      cardMessage(
+        card,
+        { kind: 'system' },
+        'system',
+        `${PROBLEM_TEXT[problem]}. This project allows testing without an environment, so ${card.ref} goes back to the tester, who runs what it can and records that no environment was used.`,
+        { problem },
+      ),
+    ];
   const wsRow = (await one(tx, 'SELECT devops_access FROM workstations WHERE id=$1', [ws.id])) as Row;
   const access = DevOpsAccessSchema.parse(wsRow?.devops_access ?? {});
   const canInstall = problem !== 'docker_missing' || (access.allowInstall && access.allowDocker);

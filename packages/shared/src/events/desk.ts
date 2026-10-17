@@ -121,7 +121,14 @@ export const deskEvents = [
       chatThreadId: Id.optional(),
       /** Org-level items addressed to one user (DevOps, vault conflict, workstation bottleneck): only they and the org's Owner and Admins see it. */
       addresseeUserId: Id.optional(),
+      /** What the item is about; while an item with this key is open, the same subject raises a counter instead of a new item. */
+      subjectKey: z.string().max(300).optional(),
     }),
+  ),
+  /** The same subject was raised again while its item was open: the item keeps one row and a counter. */
+  defineEvent(
+    'DeskItemRepeated',
+    z.object({ deskItemId: Id, count: z.number().int().min(2), note: z.string().max(500).optional() }),
   ),
   defineEvent(
     'DeskItemResolved',

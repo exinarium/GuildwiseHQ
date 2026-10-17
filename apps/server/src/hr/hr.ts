@@ -22,7 +22,8 @@ import { orgRoleOf, type Who } from '../auth/org-context.ts';
 import type { AuthSession } from '../auth/sessions.ts';
 import { loadRole } from '../catalogue/loader.ts';
 import { agentScope, fireAgent, manageableAgent, suggestNames } from '../commands/agents.ts';
-import { orgScope, SYSTEM_ACTOR, userActor } from '../commands/common.ts';
+import { orgScope, projectScope, SYSTEM_ACTOR, userActor } from '../commands/common.ts';
+import { isNearDuplicate } from '../commands/ledger-checks.ts';
 import type { Ctx } from '../context.ts';
 import { orgCostCtx, spendBriefs } from '../costs/index.ts';
 import { one, rows } from '../db/sql.ts';
@@ -208,6 +209,21 @@ export async function applyRecommendation(
 
     case 'standing_order':
       return withAppendTx(ctx.pool, async (tx) => {
+        const same = await rows<{ id: string; title: string; body: string }>(
+          tx,
+          `SELECT id, title, body FROM ledger_entries
+            WHERE org_id=$1 AND scope='standing_order' AND project_id IS NULL AND superseded_by IS NULL AND retired_at IS NULL`,
+          [orgId],
+        );
+        const dup = same.find((o) =>
+          isNearDuplicate({ title: action.topic ?? rec.title, body: action.text }, o),
+        );
+        if (dup)
+          throw conflict(
+            'duplicate_order',
+            `the organization already has this standing order: "${dup.title}" (${dup.id})`,
+            { existingId: dup.id },
+          );
         const open = await one<{ id: string }>(
           tx,
           `SELECT id FROM desk_items WHERE org_id=$1 AND subkind=$2 AND status='open' AND lower(body)=lower($3)`,
@@ -447,11 +463,35 @@ export function registerHrHook(ctx: Ctx): () => void {
     try {
       const ev = e.event;
       if (ev.type !== 'DeskItemResolved' || ev.payload.resolution !== 'approved') return;
-      const d = await one(ctx.pool, `SELECT org_id, title, body FROM desk_items WHERE id=$1 AND subkind=$2`, [
-        ev.payload.deskItemId,
-        HR_DESK_SUBKIND.standingOrder,
-      ]);
+      const d = await one(
+        ctx.pool,
+        `SELECT d.org_id, d.project_id, d.title, d.body, p.decisions_project_only
+           FROM desk_items d LEFT JOIN projects p ON p.id = d.project_id WHERE d.id=$1 AND d.subkind=$2`,
+        [ev.payload.deskItemId, HR_DESK_SUBKIND.standingOrder],
+      );
       if (!d) return;
+      // A proposal that came from one project (a card's answer, a CEO order for a project) stays at that project's scope;
+      // only an item with no project is an organization-wide order. The owner promotes by approving an org-level item.
+      const projectId: string | undefined = d.project_id ?? undefined;
+      const title =
+        String(d.title)
+          .replace(/^Add a standing order: /, '')
+          .slice(0, 120) || 'Standing order';
+      // Duplicate check: an approved proposal that says what a live order already says adds nothing.
+      const live = await rows<{ title: string; body: string }>(
+        ctx.pool,
+        `SELECT title, body FROM ledger_entries
+          WHERE org_id=$1 AND scope='standing_order' AND superseded_by IS NULL AND retired_at IS NULL
+            AND (project_id IS NULL OR project_id IS NOT DISTINCT FROM $2::uuid)`,
+        [d.org_id, projectId ?? null],
+      );
+      if (live.some((o) => isNearDuplicate({ title, body: d.body }, o))) {
+        ctx.log.info(
+          { deskItemId: ev.payload.deskItemId },
+          'standing order proposal is a duplicate; not added',
+        );
+        return;
+      }
       const entryId = randomUUID();
       await ctx.store.append([
         {
@@ -461,17 +501,15 @@ export function registerHrHook(ctx: Ctx): () => void {
             payload: {
               entryId,
               scope: 'standing_order',
-              title:
-                String(d.title)
-                  .replace(/^Add a standing order: /, '')
-                  .slice(0, 120) || 'Standing order',
+              ...(projectId ? { projectId } : {}),
+              title,
               body: d.body,
               tags: ['hr'],
               sourceDeskItemId: ev.payload.deskItemId,
             },
           },
           actor: SYSTEM_ACTOR,
-          scope: orgScope(d.org_id),
+          scope: projectId ? projectScope(d.org_id, projectId) : orgScope(d.org_id),
         },
       ]);
     } catch (err) {

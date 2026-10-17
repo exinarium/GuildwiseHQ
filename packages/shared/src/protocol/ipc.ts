@@ -194,6 +194,8 @@ export type IpcReportResponse = z.infer<typeof IpcReportResponseSchema>;
 export const RpcMethodSchema = z.enum([
   'card.get',
   'ledger.search',
+  /** The BA retires a ledger entry with a reason (`aom ledger retire <id> --reason "<why>"`). */
+  'ledger.retire',
   'thread.post',
   'thread.read',
   'devops.request',

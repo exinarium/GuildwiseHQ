@@ -366,6 +366,8 @@ export const ShiftBriefSchema = z.object({
   ledger: z
     .array(z.object({ id: z.string(), scope: z.string(), title: z.string(), body: z.string() }))
     .default([]),
+  /** How many entries the card has in all when `ledger` holds only the newest few (the prompt points at `aom ledger search`). */
+  ledgerTotal: z.number().int().optional(),
   /**
    * M5: feed context for scouts and curators. `candidates` are the items the scout handed off (curator only),
    * `seenUrls` the project's seen-list (normalized), `taste` the project's `taste.md` (filled in by the runner from
@@ -385,6 +387,11 @@ export const ShiftBriefSchema = z.object({
    * for the project). Absent: the shift has none (the tester follows the card's test plan as before).
    */
   environment: ShiftEnvironmentSchema.optional(),
+  /**
+   * The project's setting "test without an environment" is on and this is a tester shift: the runner does not require a
+   * ready environment, and the tester records that none was used when there is none.
+   */
+  testWithoutEnvironment: z.boolean().optional(),
 });
 export type ShiftBrief = z.infer<typeof ShiftBriefSchema>;
 

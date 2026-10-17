@@ -174,7 +174,7 @@ export async function rewriteStandingOrders(
   const live = await rows(
     ctx.pool,
     `SELECT title, body, created_at FROM ledger_entries
-      WHERE org_id=$1 AND scope='standing_order' AND superseded_by IS NULL AND project_id IS NOT DISTINCT FROM $2
+      WHERE org_id=$1 AND scope='standing_order' AND superseded_by IS NULL AND retired_at IS NULL AND project_id IS NOT DISTINCT FROM $2
       ORDER BY created_at, id`,
     [input.orgId, input.projectId ?? null],
   );

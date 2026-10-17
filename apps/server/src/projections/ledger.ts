@@ -50,4 +50,17 @@ export const ledgerProjectors: Record<string, Projector> = {
     const p = (e.event as EventOf<'LedgerEntrySuperseded'>).payload;
     await exec(tx, 'UPDATE ledger_entries SET superseded_by=$2 WHERE id=$1', [p.entryId, p.supersededBy]);
   },
+  LedgerEntryRetired: async (tx, e) => {
+    const p = (e.event as EventOf<'LedgerEntryRetired'>).payload;
+    await exec(
+      tx,
+      `UPDATE ledger_entries SET retired_at=COALESCE(retired_at, $2), retired_reason=COALESCE(retired_reason, $3),
+              retired_by=COALESCE(retired_by, $4), superseded_by=COALESCE(superseded_by, $5::uuid) WHERE id=$1`,
+      [p.entryId, e.createdAt, p.reason, p.by ?? e.actor.kind, p.supersededBy ?? null],
+    );
+  },
+  LedgerEntryFlagged: async (tx, e) => {
+    const p = (e.event as EventOf<'LedgerEntryFlagged'>).payload;
+    await exec(tx, 'UPDATE ledger_entries SET conflicts_with=$2 WHERE id=$1', [p.entryId, p.conflictsWith]);
+  },
 };

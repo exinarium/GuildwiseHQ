@@ -37,6 +37,7 @@ export const ACTION_CLASSES = [
   'devops.approve',
   'standing_order.propose',
   'standing_order.activate',
+  'standing_order.retire',
   'message.agent',
   'notify.owner',
   'memory.write',
@@ -81,6 +82,7 @@ export const CLASS_LABEL: Record<ActionClass, string> = {
   'devops.approve': 'Approve DevOps actions',
   'standing_order.propose': 'Propose a standing order',
   'standing_order.activate': 'Activate a standing order',
+  'standing_order.retire': 'Retire a ledger entry',
   'message.agent': 'Message an agent',
   'notify.owner': 'Notify the owner',
   'memory.write': 'Remember an owner rule',
@@ -195,6 +197,7 @@ export const DEFAULT_CEO_POLICY: CeoPolicy = {
     'devops.approve': recommend,
     'standing_order.propose': decide,
     'standing_order.activate': recommend,
+    'standing_order.retire': recommend,
     'message.agent': decide,
     'notify.owner': decide,
     'memory.write': decide,
@@ -295,6 +298,7 @@ const UNTRUSTED_RECOMMEND: readonly string[] = [
   'agent.allow_list',
   'standing_order.propose',
   'standing_order.activate',
+  'standing_order.retire',
   'memory.write',
 ];
 

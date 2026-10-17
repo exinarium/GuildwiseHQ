@@ -162,6 +162,10 @@ export const ProjectDtoSchema = z.object({
   mergeLargeChanged: z.object({ byName: z.string(), at: IsoTime }).nullable().optional(),
   /** Whether finishing a card automatically starts a full end-to-end test run card (default true). */
   fullSuiteAfterFinalize: z.boolean().optional(),
+  /** Answers and orders of this project stay at project scope (the platform project): no org-wide promotion (default off). */
+  decisionsProjectOnly: z.boolean().optional(),
+  /** Test a card without a test environment: the tester runs what it can and records that none was used (default off). */
+  testWithoutEnvironment: z.boolean().optional(),
   /** Manual QA after Finalize: the person who started a card tests it before it is done (default true). */
   manualQa: z.boolean().optional(),
   /** Architect settings: run Investigate & design before build by default (off unless the project opts in). */
@@ -278,6 +282,13 @@ export const CreateProjectRequestSchema = z.object({
 export type CreateProjectRequest = z.infer<typeof CreateProjectRequestSchema>;
 
 /** `PUT /api/projects/:id/merge-policy` (owner only). */
+/** `PUT /api/projects/:id/policy` (organization Owner, Admins and the project owner). At least one field. */
+export const SetProjectPolicyRequestSchema = z
+  .object({ decisionsProjectOnly: z.boolean().optional(), testWithoutEnvironment: z.boolean().optional() })
+  .refine((v) => v.decisionsProjectOnly !== undefined || v.testWithoutEnvironment !== undefined, {
+    message: 'nothing to change',
+  });
+export type SetProjectPolicyRequest = z.infer<typeof SetProjectPolicyRequestSchema>;
 export const SetFullSuiteRequestSchema = z.object({ enabled: z.boolean() });
 /** `PUT /api/projects/:id/architect-settings` (organization Owner, Admins and the project owner). */
 export const SetArchitectSettingsRequestSchema = z.object({

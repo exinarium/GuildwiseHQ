@@ -70,6 +70,8 @@ export function toProjectDto(p: Row, myRole: 'owner' | 'manager'): ProjectDto {
       : null,
     maxConcurrentShifts: p.max_concurrent_shifts ?? null,
     fullSuiteAfterFinalize: p.full_suite_after_finalize ?? true,
+    decisionsProjectOnly: p.decisions_project_only ?? false,
+    testWithoutEnvironment: p.test_without_environment ?? false,
     manualQa: p.manual_qa ?? true,
     designStep: p.design_step ?? false,
     mergeMainFirst: p.merge_main_first ?? true,

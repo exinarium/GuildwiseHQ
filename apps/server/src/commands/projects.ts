@@ -194,6 +194,55 @@ export async function setMergePolicy(
 }
 
 /**
+ * Project policy flags (Lean Team v3): decisions stay at project scope, test without an environment. The project's Owner
+ * or an organization Owner/Admin may change them.
+ */
+export async function setProjectPolicy(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  org: { id: string; role: OrgRole | null },
+  projectId: string,
+  req: { decisionsProjectOnly?: boolean | undefined; testWithoutEnvironment?: boolean | undefined },
+) {
+  await withAppendTx(ctx.pool, async (tx) => {
+    const p = await loadVisibleProject(tx, user.id, projectId);
+    const orgAdmin = isOrgManager({ orgRole: org.role }) && org.id === p.org_id;
+    if (p.my_role !== 'owner' && !orgAdmin)
+      throw forbidden('only the project Owner or an organization Owner or Admin can do this');
+    const decisions =
+      req.decisionsProjectOnly !== undefined &&
+      req.decisionsProjectOnly !== (p.decisions_project_only ?? false)
+        ? req.decisionsProjectOnly
+        : undefined;
+    const test =
+      req.testWithoutEnvironment !== undefined &&
+      req.testWithoutEnvironment !== (p.test_without_environment ?? false)
+        ? req.testWithoutEnvironment
+        : undefined;
+    if (decisions === undefined && test === undefined) return;
+    await ctx.store.append(
+      [
+        {
+          streamId: streamId.project(projectId),
+          event: {
+            type: 'ProjectPolicySet',
+            payload: {
+              projectId,
+              ...(decisions !== undefined ? { decisionsProjectOnly: decisions } : {}),
+              ...(test !== undefined ? { testWithoutEnvironment: test } : {}),
+              by: user.id,
+            },
+          },
+          actor: userActor(user.id),
+          scope: projectScope(p.org_id, projectId),
+        },
+      ],
+      { tx },
+    );
+  });
+}
+
+/**
  * "Run the full end-to-end test suite after each finished card": the project's Owner or an organization Owner/Admin
  * turns the automatic regression card spawned by finalize off or on (default on).
  */

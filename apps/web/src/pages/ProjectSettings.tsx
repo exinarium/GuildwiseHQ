@@ -17,6 +17,7 @@ import { MembersPanel } from '../components/MembersPanel.tsx';
 import { MergePolicyPanel } from '../components/MergePolicyPanel.tsx';
 import { FollowupDefaultsPanel, PhasesPanel } from '../components/PhasesPanel.tsx';
 import { ProjectDangerZone } from '../components/ProjectDangerZone.tsx';
+import { ProjectPolicyPanel } from '../components/ProjectPolicyPanel.tsx';
 import { ProjectWorkflows } from '../components/ProjectWorkflows.tsx';
 import { ReferenceReposPanel } from '../components/ReferenceReposPanel.tsx';
 import { RepoAccessControl } from '../components/RepoAccessControl.tsx';
@@ -411,6 +412,15 @@ export function ProjectSettings() {
       {project && traits.usesRepos && (
         <div id="full-suite" className="scroll-mt-20">
           <FullSuitePanel
+            projectId={id}
+            project={project}
+            canChange={project.myRole === 'owner' || canConvert}
+          />
+        </div>
+      )}
+      {project && traits.usesRepos && (
+        <div id="policy" className="scroll-mt-20">
+          <ProjectPolicyPanel
             projectId={id}
             project={project}
             canChange={project.myRole === 'owner' || canConvert}

@@ -18,6 +18,8 @@ import {
 } from '../commands/agents.ts';
 import { cancelCard } from '../commands/cards.ts';
 import { cardMessage, orgScope, userActor } from '../commands/common.ts';
+import { isNearDuplicate } from '../commands/ledger-checks.ts';
+import { retireLedgerEntryAs } from '../commands/ledger-retire.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { conflict } from '../errors.ts';
@@ -667,6 +669,8 @@ const applyRec: ActionDef<z.infer<typeof RecP>> = {
 const OrderP = z.object({
   scope: z.enum(['org', 'project']).default('org'),
   project: z.string().max(10).optional(),
+  /** The card the order comes from (an answer on a card): such an order stays at the card's project, never org-wide. */
+  card: z.string().max(40).optional(),
   text: z.string().trim().min(10).max(4000),
   title: z.string().trim().max(120).optional(),
 });
@@ -674,10 +678,33 @@ async function orderTarget(
   env: ActionEnv,
   p: z.infer<typeof OrderP>,
 ): Promise<{ projectId: string | null } | string> {
-  if (p.scope === 'org') return { projectId: null };
+  // Decisions that come from a card are project decisions: the owner alone promotes one to the organization.
+  if (p.card) {
+    const card = await cardOf(env.ctx.pool, env, p.card);
+    if (!card) return `card ${p.card} not found`;
+    return { projectId: card.project_id as string };
+  }
+  if (p.scope === 'org' && !p.project) return { projectId: null };
   if (!p.project) return 'a project order needs --project';
   const ps = await projectsByKey(env.ctx.pool, env.orgId, [p.project]);
   return typeof ps === 'string' ? ps : { projectId: ps[0]!.id };
+}
+
+/** The refusal text when a live order already says the same (the CEO does not add duplicates). */
+async function duplicateOrder(
+  env: ActionEnv,
+  projectId: string | null,
+  p: z.infer<typeof OrderP>,
+): Promise<string | undefined> {
+  const live = await rows<{ id: string; title: string; body: string }>(
+    env.ctx.pool,
+    `SELECT id, title, body FROM ledger_entries
+      WHERE org_id=$1 AND scope='standing_order' AND superseded_by IS NULL AND retired_at IS NULL
+        AND (project_id IS NULL OR project_id IS NOT DISTINCT FROM $2::uuid)`,
+    [env.orgId, projectId],
+  );
+  const hit = live.find((o) => isNearDuplicate({ title: p.title ?? truncate(p.text, 100), body: p.text }, o));
+  return hit ? `a standing order that says the same already exists: "${hit.title}" (${hit.id})` : undefined;
 }
 
 const proposeOrder: ActionDef<z.infer<typeof OrderP>> = {
@@ -687,7 +714,9 @@ const proposeOrder: ActionDef<z.infer<typeof OrderP>> = {
   async prepare(env, p) {
     const base = { subjectKind: 'order', subjectId: '', subjectLabel: truncate(p.text, 100) };
     const t = await orderTarget(env, p);
-    return typeof t === 'string' ? { ...base, refuse: t } : { ...base, data: t };
+    if (typeof t === 'string') return { ...base, refuse: t };
+    const dup = await duplicateOrder(env, t.projectId, p);
+    return dup ? { ...base, refuse: dup } : { ...base, data: t };
   },
   async execute(env, p, pr) {
     const deskItemId = randomUUID();
@@ -736,7 +765,9 @@ const activateOrder: ActionDef<z.infer<typeof OrderP>> = {
   async prepare(env, p) {
     const base = { subjectKind: 'order', subjectId: '', subjectLabel: truncate(p.text, 100) };
     const t = await orderTarget(env, p);
-    return typeof t === 'string' ? { ...base, refuse: t } : { ...base, data: t };
+    if (typeof t === 'string') return { ...base, refuse: t };
+    const dup = await duplicateOrder(env, t.projectId, p);
+    return dup ? { ...base, refuse: dup } : { ...base, data: t };
   },
   async execute(env, p, pr) {
     const entryId = randomUUID();
@@ -760,6 +791,39 @@ const activateOrder: ActionDef<z.infer<typeof OrderP>> = {
       },
     ]);
     return { message: 'The standing order is active.', result: { entryId } };
+  },
+};
+
+const RetireP = z.object({
+  entry: z.uuid(),
+  text: z.string().trim().min(3).max(1000),
+  supersededBy: z.uuid().optional(),
+});
+const retireEntry: ActionDef<z.infer<typeof RetireP>> = {
+  cls: 'standing_order.retire',
+  schema: RetireP,
+  describe: (p) => `Retire the ledger entry ${p.entry}: ${truncate(p.text, 100)}`,
+  async prepare(env, p) {
+    const e = await one(env.ctx.pool, 'SELECT title, org_id, retired_at FROM ledger_entries WHERE id=$1', [
+      p.entry,
+    ]);
+    const base = {
+      subjectKind: 'order',
+      subjectId: p.entry,
+      subjectLabel: truncate(e?.title ?? p.entry, 100),
+    };
+    if (!e || e.org_id !== env.orgId) return { ...base, refuse: 'ledger entry not found' };
+    if (e.retired_at) return { ...base, refuse: 'that entry is already retired' };
+    return base;
+  },
+  async execute(env, p) {
+    await retireLedgerEntryAs(
+      env.ctx,
+      p.entry,
+      { reason: p.text, supersededBy: p.supersededBy },
+      { actor: userActor(env.owner.id), label: 'ceo', orgId: env.orgId },
+    );
+    return { message: 'The entry is retired.', result: { entryId: p.entry } };
   },
 };
 
@@ -830,6 +894,7 @@ export const ACTIONS2: Partial<Record<CeoActionName, ActionDef>> = {
   'apply-rec': applyRec,
   'propose-order': proposeOrder,
   'activate-order': activateOrder,
+  'retire-entry': retireEntry,
   intake,
 };
 

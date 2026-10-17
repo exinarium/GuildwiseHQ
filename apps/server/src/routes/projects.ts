@@ -16,6 +16,7 @@ import {
   SetManualQaRequestSchema,
   SetMergePolicyRequestSchema,
   SetProjectMcpServersRequestSchema,
+  SetProjectPolicyRequestSchema,
   SetReferenceReposRequestSchema,
   SetWorkingBranchRequestSchema,
 } from '@aom/shared';
@@ -41,6 +42,7 @@ import {
   setFullSuite,
   setManualQa,
   setMergePolicy,
+  setProjectPolicy,
   setReferenceRepos,
   updateProject,
 } from '../commands/projects.ts';
@@ -151,6 +153,17 @@ export function projectRoutes(ctx: Ctx) {
         const s = await requireUser(ctx, req);
         await setMergePolicy(ctx, s.user, req.params.id, req.body.mergeLargeWithoutApproval);
         return getProjectDetail(ctx, s.user.id, req.params.id);
+      },
+    );
+
+    /** Lean Team v3 project policy: decisions stay at project scope; test without a test environment. */
+    app.put(
+      '/api/projects/:id/policy',
+      { schema: { params: IdParamsSchema, body: SetProjectPolicyRequestSchema } },
+      async (req) => {
+        const a = await requireOrg(ctx, req);
+        await setProjectPolicy(ctx, a.session.user, { id: a.orgId, role: a.role }, req.params.id, req.body);
+        return getProjectDetail(ctx, a.session.user.id, req.params.id);
       },
     );
 

@@ -81,6 +81,7 @@ interface ActiveChat {
  */
 const CHAT_RPC = new Set([
   'ledger.search',
+  'ledger.retire',
   'thread.post',
   'thread.read',
   'card.create',

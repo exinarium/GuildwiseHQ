@@ -114,6 +114,7 @@ export function eligibility(A: AgentRefs) {
     // D9). No wait when the project does not run local environments, the card opted out, it is a suite or regression
     // card (they use a target URL), or the workstation's runner cannot provision (an older runner: the tester works as before).
     envReady: `(st.environment <> 'project'
+      OR p.test_without_environment
       OR c.origin IN ('full_suite','regression')
       OR p.integration_tests->>'mode' IS DISTINCT FROM 'local'
       OR COALESCE((c.fields->>'integrationTests')::boolean, true) = false

@@ -2,7 +2,6 @@ import {
   HR_RULES,
   HR_WINDOW_DAYS,
   isThinSpec,
-  LEDGER_SEARCH_STANDING_ORDER,
   MIN_EFFORT_BY_ROLE,
   REWORK_REASON_LABEL,
   REWORK_STANDING_ORDER,
@@ -14,6 +13,7 @@ import {
   topicWords,
 } from '@aom/shared';
 import { suggestNames } from '../commands/agents.ts';
+import { isNearDuplicate } from '../commands/ledger-checks.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Row, rows } from '../db/sql.ts';
 import { computeTrack, type StatsAgent, windowStart } from './track-record.ts';
@@ -79,6 +79,7 @@ export async function computeRecommendations(
             c.ref, c.id AS card_id, c.fields
        FROM desk_items d LEFT JOIN cards c ON c.id = d.card_id
       WHERE d.org_id=$1 AND d.kind='question' AND d.asked_by_kind='agent' AND d.created_at >= $2
+        AND NOT EXISTS (SELECT 1 FROM projects pr WHERE pr.id = d.project_id AND pr.decisions_project_only)
       ORDER BY d.created_at, d.id`,
     [orgId, from],
   );
@@ -98,7 +99,7 @@ export async function computeRecommendations(
       push(
         mk('blocked_ledger', a.id, a, null, {
           title: `${a.name} asks what the ledger already answers`,
-          summary: `${known.length} of ${qs.length} questions had a similar ledger entry when they were asked: ledger search is failing, so agents re-ask settled questions.`,
+          summary: `${known.length} of ${qs.length} questions had a similar ledger entry when they were asked: agents re-ask settled questions. The server attaches the best ledger matches to an answer brief, so this is advice only: tighten the ledger entries on the cited cards.`,
           evidence: {
             metrics: [
               ...metrics,
@@ -106,7 +107,7 @@ export async function computeRecommendations(
             ],
             items: known.slice(0, 5).map((q) => ({ text: trunc(q.title), ...(q.ref ? { ref: q.ref } : {}) })),
           },
-          action: { type: 'standing_order', text: LEDGER_SEARCH_STANDING_ORDER, topic: 'ledger search' },
+          action: { type: 'none' },
           ownerOnly: true,
         }),
       );
@@ -119,24 +120,18 @@ export async function computeRecommendations(
     if (top && top[1] >= HR_RULES.topicQuestions) {
       const [word, n] = top;
       const cluster = qs.filter((q) => topicWords(q.title).includes(word));
-      const answered = [...cluster].reverse().find((q) => q.status === 'answered' && q.answer);
       push(
         mk('blocked_topic', `${a.id}:${word}`, a, null, {
           title: `${a.name}'s questions cluster on "${word}"`,
-          summary: `${n} questions mention "${word}". A standing order stops the repeat questions.`,
+          summary: `${n} questions mention "${word}". The card specs probably leave this open: answer it once as a decision of the project (a card's answer stays at project level; only the owner can promote one to the organization).`,
           evidence: {
             metrics: [...metrics, { label: `Questions about "${word}"`, value: String(n) }],
             items: cluster
               .slice(0, 5)
               .map((q) => ({ text: trunc(q.title), ...(q.ref ? { ref: q.ref } : {}) })),
           },
-          action: {
-            type: 'standing_order',
-            topic: word,
-            text: answered
-              ? `On "${word}": ${trunc(answered.answer, 400)}`
-              : `Questions about "${word}" keep coming up: ask the manager once and record the answer as a standing order.`,
-          },
+          // Advice only: a card's answer is a decision of its project, never an organization-wide order HR writes.
+          action: { type: 'none' },
           ownerOnly: true,
         }),
       );
@@ -429,5 +424,19 @@ export async function computeRecommendations(
       )
     ).map((x) => x.recommendation_id),
   );
-  return recs.filter((r) => !applied.has(r.id));
+  // A proposal for a standing order the organization already has is not made (duplicate check before proposing).
+  const live = await rows<{ title: string; body: string }>(
+    ctx.pool,
+    `SELECT title, body FROM ledger_entries
+      WHERE org_id=$1 AND scope='standing_order' AND project_id IS NULL AND superseded_by IS NULL AND retired_at IS NULL`,
+    [orgId],
+  );
+  const isDuplicateOrder = (r: OrgRecommendation): boolean => {
+    const a = r.action;
+    return (
+      a.type === 'standing_order' &&
+      live.some((o) => isNearDuplicate({ title: a.topic ?? r.title, body: a.text }, o))
+    );
+  };
+  return recs.filter((r) => !applied.has(r.id) && !isDuplicateOrder(r));
 }

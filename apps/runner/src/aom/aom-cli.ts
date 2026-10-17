@@ -885,6 +885,23 @@ const VERBS: Record<string, Verb> = {
     return 0;
   },
   ledger: async (ctx, p) => {
+    if (p.positionals[0] === 'retire') {
+      const id = p.positionals[1];
+      const reason = one(p, 'reason');
+      if (!id || !reason)
+        throw new UsageError(
+          'usage: aom ledger retire <entry id> --reason "<why>" [--superseded-by <entry id>]',
+        );
+      const result = await rpc(ctx, 'ledger.retire', {
+        id,
+        reason,
+        ...(one(p, 'superseded-by') ? { supersededBy: one(p, 'superseded-by') } : {}),
+      });
+      ctx.io.out(
+        `${typeof result === 'string' ? result : ((result as { message?: string } | null)?.message ?? JSON.stringify(result))}\n`,
+      );
+      return 0;
+    }
     if (p.positionals[0] !== 'search' || !p.positionals[1])
       throw new UsageError(
         'usage: aom ledger search "<query>" [--scope all|feature|decision|standing_order]',
@@ -1539,6 +1556,7 @@ const VERBS: Record<string, Verb> = {
 export const USAGE = `usage: aom <verb> [options]
   card [--json]                              print the card and brief
   ledger search "<query>" [--scope s]        search decisions and standing orders
+  ledger retire <id> --reason "<why>"         BA: withdraw a ledger entry (never briefed or found again)
   comment --note "<text>"                    post a note without ending the shift
   question --text "<q>" [--option "<a>"]... [--recommend <n>] [--doing "<x>"] [--non-blocking] [--force]
   handoff --note "<text>" [--data-file <json>]   builder/scout/researcher: hand the card on (scout: candidates)

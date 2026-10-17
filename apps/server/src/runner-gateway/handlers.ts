@@ -77,7 +77,7 @@ import { exec, one, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import { buildBrief } from './brief.ts';
 import { claimPendingCommands, completeCommand, requeueSentCommands } from './commands-queue.ts';
-import { ledgerSearchRpc } from './ledger-rpc.ts';
+import { ledgerRetireRpc, ledgerSearchRpc } from './ledger-rpc.ts';
 import type { RunnerConn } from './registry.ts';
 import { issueRotatedToken } from './rotation.ts';
 import { dropStaleShiftLimitCommands, effectiveShiftLimit, shiftLimitSettingOf } from './shift-limit.ts';
@@ -973,6 +973,7 @@ export class RunnerHandlers {
       ]);
       if (!shift) return reply(false, undefined, 'unknown shift');
       if (msg.method === 'ledger.search') return reply(true, await ledgerSearchRpc(ctx, shift, msg.params));
+      if (msg.method === 'ledger.retire') return reply(...(await ledgerRetireRpc(ctx, shift, msg.params)));
       if (msg.method === 'card.attachments' || msg.method === 'card.attach.begin')
         return reply(...(await attachmentRpc(ctx, shift, msg.method, msg.params)));
       // The CEO's management verbs (a CEO shift or the owner's chat with the CEO); the gateway checks the agent.
@@ -1003,11 +1004,11 @@ export class RunnerHandlers {
       if (!shift.card_id) return reply(false, undefined, 'this conversation has no card');
       switch (msg.method) {
         case 'card.get': {
-          const brief = await buildBrief(ctx, shift);
+          const brief = await buildBrief(ctx, shift, { fullThread: true });
           return reply(!!brief, brief ?? undefined, brief ? undefined : 'card unavailable');
         }
         case 'thread.read': {
-          const brief = await buildBrief(ctx, shift);
+          const brief = await buildBrief(ctx, shift, { fullThread: true });
           return reply(true, { messages: brief?.thread ?? [] });
         }
         case 'thread.post': {

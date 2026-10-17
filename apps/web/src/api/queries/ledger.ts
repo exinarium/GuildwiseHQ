@@ -5,6 +5,7 @@ import {
   LedgerHistoryResponseSchema,
   type LedgerListResponse,
   LedgerListResponseSchema,
+  type RetireLedgerEntryRequest,
 } from '@aom/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { get, patch, post, qs } from '../client.ts';
@@ -13,16 +14,18 @@ export interface LedgerFilter {
   q?: string;
   projectId?: string;
   scope?: 'all' | 'feature' | 'decision' | 'standing_order';
+  /** Also list retired entries (shown greyed out). */
+  includeRetired?: boolean;
 }
 
 export function useLedger(f: LedgerFilter = {}) {
   const scope = f.scope ?? 'all';
   return useQuery({
-    queryKey: ['ledger', f.projectId ?? 'all', scope, f.q ?? ''],
+    queryKey: ['ledger', f.projectId ?? 'all', scope, f.q ?? '', f.includeRetired ? 'retired' : 'live'],
     queryFn: async () =>
       (
         await get<LedgerListResponse>(
-          `/ledger${qs({ q: f.q?.trim(), projectId: f.projectId, scope })}`,
+          `/ledger${qs({ q: f.q?.trim(), projectId: f.projectId, scope, includeRetired: f.includeRetired ? 'true' : undefined })}`,
           LedgerListResponseSchema,
         )
       ).entries,
@@ -42,6 +45,15 @@ export function useEditLedgerEntry(id: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (b: EditLedgerEntryRequest) => patch(`/ledger/${id}`, b),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['ledger'] }),
+  });
+}
+
+/** Withdraws an entry with a reason: it is kept for the record, never briefed and never found by a search. */
+export function useRetireLedgerEntry(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (b: RetireLedgerEntryRequest) => post(`/ledger/${id}/retire`, b),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['ledger'] }),
   });
 }

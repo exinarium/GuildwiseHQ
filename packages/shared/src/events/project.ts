@@ -276,6 +276,16 @@ export const projectEvents = [
    * The project's Owner or an organization Owner/Admin turned the automatic "Full E2E suite after <card>" regression
    * card (spawned when a card is finalized) off or on. On by default.
    */
+  /** Lean Team v3: the project's decision scope and whether it may be tested without a test environment. */
+  defineEvent(
+    'ProjectPolicySet',
+    z.object({
+      projectId: Id,
+      decisionsProjectOnly: z.boolean().optional(),
+      testWithoutEnvironment: z.boolean().optional(),
+      by: Id.optional(),
+    }),
+  ),
   defineEvent('ProjectFullSuiteSet', z.object({ projectId: Id, enabled: z.boolean(), by: Id })),
   /**
    * Manual QA after Finalize (docs/design/manual-qa.md) turned off or on for the project. On by default. Only cards

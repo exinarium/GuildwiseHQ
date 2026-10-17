@@ -103,6 +103,17 @@ export async function answerDeskItem(
     const entryId = randomUUID();
     const scope = req.ledger.scope;
     const orgWide = scope === 'standing_order' && req.ledger.orgWide === true;
+    // A project that keeps its decisions to itself (the platform project) never promotes an answer to the organization.
+    if (orgWide && item.project_id) {
+      const flag = await one(tx, 'SELECT decisions_project_only FROM projects WHERE id=$1', [
+        item.project_id,
+      ]);
+      if (flag?.decisions_project_only)
+        throw conflict(
+          'project_only',
+          'this project keeps its decisions at project level: they cannot be made organization-wide',
+        );
+    }
     // Standing orders bind agents beyond this card: project-wide ones need the project owner, org-wide ones the
     // org owner (the item's org is the project owner's org; other managers are only guests in it).
     if (scope === 'standing_order') {
