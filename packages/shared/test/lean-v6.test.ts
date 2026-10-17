@@ -8,7 +8,7 @@ import {
   DIFF_TRUNCATED_NOTE,
   deriveE2eAreas,
   getStage,
-  HIGH_RISK_PATH_GLOBS,
+  HIGH_RISK_GLOBS,
   highRiskPaths,
   highRiskSummary,
   isHighRiskPath,
@@ -21,7 +21,7 @@ import {
 
 describe('high-risk paths (shared with the platform team)', () => {
   it('exports the glob list and a matcher', () => {
-    expect(HIGH_RISK_PATH_GLOBS.length).toBeGreaterThan(10);
+    expect(HIGH_RISK_GLOBS.length).toBeGreaterThan(10);
     expect(isHighRiskPath('apps/server/src/auth/login.ts')).toBe(true);
     expect(isHighRiskPaths(['README.md', 'src/a.ts'])).toBe(false);
     expect(isHighRiskPaths(['README.md', 'db/migrations/0001_init.sql'])).toBe(true);

@@ -62,6 +62,10 @@ export const HIGH_RISK_RULES: readonly HighRiskRule[] = [
       '**/db/schema*',
       '**/schema.prisma',
       '**/data-migrations/**',
+      // Guildwise's own data layer (the platform team's fixes)
+      'apps/server/src/db/**',
+      'apps/server/src/eventstore/**',
+      'apps/server/src/projections/rebuild.ts',
     ],
   },
   {
@@ -81,6 +85,13 @@ export const HIGH_RISK_RULES: readonly HighRiskRule[] = [
       '**/stripe*',
       '**/paystack*',
       '**/payfast*',
+      // Guildwise's own organisations, members and sharing (the platform team's fixes)
+      'apps/server/src/orgs/**',
+      'apps/server/src/commands/orgs.ts',
+      'apps/server/src/commands/platform.ts',
+      'apps/server/src/commands/sharing.ts',
+      'apps/server/src/commands/members.ts',
+      'packages/shared/src/orgs/**',
     ],
   },
 ];
@@ -106,6 +117,7 @@ export const HIGH_RISK_EXEMPT_GLOBS: readonly string[] = [
   'apps/runner/src/devops/**',
   'apps/runner/src/sandbox/**',
   'apps/runner/src/adapters/claude-policy.ts',
+  'apps/runner/src/adapters/sandbox*',
 ];
 
 /** A glob (`**`, `*`, `?`) as a case-insensitive regular expression over `/`-separated paths. */

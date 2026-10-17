@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { globToRegExp, type HighRiskCategory, highRiskCategoriesOf } from '../workflows/high-risk.ts';
 
 export * from './sanitize.ts';
 
@@ -167,78 +168,15 @@ export type TriageBugRequest = z.infer<typeof TriageBugRequestSchema>;
 /** Which part of the fix diff makes a deploy high risk (design 13: auth/secrets, data/migrations, tenancy/billing). */
 export type RiskCategory = 'auth_permissions_secrets' | 'data_migrations' | 'tenancy_billing';
 
-export const HIGH_RISK_GLOBS: Record<RiskCategory, string[]> = {
-  auth_permissions_secrets: [
-    'apps/server/src/auth/**',
-    'apps/server/src/authz/**',
-    'packages/shared/src/authz/**',
-    'apps/server/src/crypto.ts',
-    '**/*secret*',
-    '**/*secrets*/**',
-    '**/*password*',
-    '**/*two-factor*',
-    '**/*totp*',
-    '**/*permission*',
-    '**/.env',
-    '**/.env.*',
-  ],
-  data_migrations: [
-    'apps/server/migrations/**',
-    'apps/server/src/db/**',
-    'apps/server/src/eventstore/**',
-    'apps/server/src/data-migrations/**',
-    'apps/server/src/projections/rebuild.ts',
-    '**/*.sql',
-  ],
-  tenancy_billing: [
-    'apps/server/src/billing/**',
-    'apps/server/src/orgs/**',
-    'apps/server/src/commands/orgs.ts',
-    'apps/server/src/commands/platform.ts',
-    'apps/server/src/commands/sharing.ts',
-    'apps/server/src/commands/members.ts',
-    'packages/shared/src/orgs/**',
-    '**/billing/**',
-    '**/*tenan*',
-  ],
+/** One definition of "high risk" for cards and deploys: the shared list in `workflows/high-risk.ts`. */
+const CATEGORY: Record<HighRiskCategory, RiskCategory> = {
+  auth: 'auth_permissions_secrets',
+  data: 'data_migrations',
+  tenancy: 'tenancy_billing',
 };
 
-/** Sandbox, policy and deploy code is NOT high risk (design 8.4): those fixes go live after review and UAT. */
-export const NOT_HIGH_RISK_GLOBS: string[] = [
-  'apps/runner/src/adapters/claude-policy.ts',
-  'apps/runner/src/adapters/sandbox*',
-  'apps/runner/src/devops/**',
-  'apps/runner/test/**',
-  'apps/server/test/**',
-  'deploy/**',
-  'docs/**',
-];
-
-function globToRegExp(glob: string): RegExp {
-  let re = '';
-  for (let i = 0; i < glob.length; i++) {
-    const c = glob[i] as string;
-    if (c === '*') {
-      if (glob[i + 1] === '*') {
-        i++;
-        if (glob[i + 1] === '/') {
-          i++;
-          re += '(?:.*/)?';
-        } else re += '.*';
-      } else re += '[^/]*';
-    } else if ('.+?^${}()|[]\\'.includes(c)) re += `\\${c}`;
-    else re += c;
-  }
-  return new RegExp(`^${re}$`, 'i');
-}
-const GLOB_CACHE = new Map<string, RegExp>();
 export function matchesGlob(path: string, glob: string): boolean {
-  let re = GLOB_CACHE.get(glob);
-  if (!re) {
-    re = globToRegExp(glob);
-    GLOB_CACHE.set(glob, re);
-  }
-  return re.test(path);
+  return globToRegExp(glob).test(path);
 }
 
 export interface DeployRisk {
@@ -254,12 +192,9 @@ export function classifyDeployRisk(changedFiles: string[]): DeployRisk {
   const paths: string[] = [];
   for (const raw of changedFiles) {
     const file = raw.replace(/\\/g, '/').replace(/^\.\//, '').replace(/^\/+/, '');
-    if (NOT_HIGH_RISK_GLOBS.some((g) => matchesGlob(file, g))) continue;
-    for (const [cat, globs] of Object.entries(HIGH_RISK_GLOBS) as Array<[RiskCategory, string[]]>) {
-      if (globs.some((g) => matchesGlob(file, g))) {
-        categories.add(cat);
-        if (!paths.includes(file)) paths.push(file);
-      }
+    for (const cat of highRiskCategoriesOf(file)) {
+      categories.add(CATEGORY[cat]);
+      if (!paths.includes(file)) paths.push(file);
     }
   }
   return { high: categories.size > 0, categories: [...categories], paths };
