@@ -74,6 +74,8 @@ export function toProjectDto(p: Row, myRole: 'owner' | 'manager'): ProjectDto {
     maxConcurrentShifts: p.max_concurrent_shifts ?? null,
     stopLoss: StopLossSettingsSchema.safeParse(p.stop_loss).data ?? DEFAULT_STOP_LOSS,
     fullSuiteAfterFinalize: p.full_suite_after_finalize ?? true,
+    ownerApprovalPolicy: p.owner_approval_policy ?? 'large_or_high_risk',
+    e2eAreas: p.e2e_areas ?? null,
     decisionsProjectOnly: p.decisions_project_only ?? false,
     testWithoutEnvironment: p.test_without_environment ?? false,
     manualQa: p.manual_qa ?? true,

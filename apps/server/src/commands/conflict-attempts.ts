@@ -33,11 +33,11 @@ export function cardConflictBrief(
       ? `The card's worktree is ${card.worktree_path}; nobody else is using it while you work.`
       : '',
     'Do this:',
-    `1. In the card's worktree create a temporary branch ${tmp} from the card branch.`,
-    `2. Fetch origin and rebase ${tmp} onto origin/${base}. Resolve every conflict so that the intent of BOTH sides is kept.`,
+    `1. Work in a SCRATCH worktree, never in the card's own worktree: from the repository that holds the card worktree run \`git worktree add -b ${tmp} <a new folder under your temp directory> ${branch}\` and do steps 2 and 3 there. The card's worktree stays exactly as it is until step 4, so a failure or a full disk never leaves it on a conflict branch.`,
+    `2. Fetch origin and rebase ${tmp} onto origin/${base}. Resolve every conflict so that the intent of BOTH sides is kept, and change nothing else (no refactoring, no behaviour change): a reviewer reads the resolution next.`,
     '3. Run the project build and its unit tests.',
-    `4. Only if they pass, move the card branch to the result (check out ${branch}, then fast-forward it to ${tmp}) and delete ${tmp}.`,
-    `5. If you cannot resolve it or the tests fail, leave the card branch exactly as it was, delete ${tmp}, and say what blocked you.`,
+    `4. Only if they pass, move the card branch to the result in one step: in the card's worktree (where ${branch} is checked out) run \`git merge --ff-only ${tmp}\`; then remove the scratch worktree and delete ${tmp}.`,
+    `5. If you cannot resolve it or the tests fail, do not touch the card worktree: remove the scratch worktree, delete ${tmp}, and say what blocked you.`,
     'Never force-push and never push to the working branch. The card goes back through review and test afterwards.',
     'Finish with `aom devops-done --summary "Resolved: ..."` or `--summary "Not resolved: ..."` in plain language.',
   ]

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { StoredBuildEvidenceSchema } from '../cards/lean-v6.ts';
 import {
   CardOrigin,
   CardStatus,
@@ -173,13 +174,20 @@ export const cardEvents = [
       toStage: Stage,
       riskTier: RiskTier,
       diffStats: DiffStats,
+      /** code-v6: the commit the runner measured after the shift's autocommit, and the build evidence bound to it. */
+      headSha: z.string().min(7).max(64).optional(),
+      evidence: StoredBuildEvidenceSchema.optional(),
+      /** code-v6: computed by the server from the paths of the diff (auth, data and migrations, tenancy and billing). */
+      highRisk: z.boolean().optional(),
+      highRiskPaths: z.array(z.string().max(500)).max(50).optional(),
     }),
   ),
   defineEvent(
     'ChangesRequested',
     z.object({
       cardId: Id,
-      fromStage: z.literal('review'),
+      /** `pre_review` (code-v6): the Sonnet pre-review sent the card back; the cap counts only Opus review rounds. */
+      fromStage: z.enum(['review', 'pre_review', 'merge_review']),
       toStage: z.literal('build'),
       reviewerAgentId: Id,
       reasons: z.array(ReworkReason),
@@ -213,6 +221,25 @@ export const cardEvents = [
        */
       workflowVersionId: Id.optional(),
       integrationTests: z.boolean().optional(),
+      /**
+       * code-v6: false when the second approval of a high-risk card may come from the same reviewer because no other
+       * reviewer is hired (default: the reviewer is not offered the card again).
+       */
+      excludeReviewer: z.boolean().optional(),
+      /** code-v6: the owner approval decision of the last review approval, recorded with its reason. */
+      ownerApproval: z
+        .object({
+          required: z.boolean(),
+          reason: z.enum([
+            'high_risk',
+            'reviewer_high_risk',
+            'large',
+            'policy_always',
+            'waived_large',
+            'auto_small',
+          ]),
+        })
+        .optional(),
     }),
   ),
   defineEvent(

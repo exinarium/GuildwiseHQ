@@ -51,8 +51,9 @@ export async function createProject(
   const projectId = randomUUID();
   await withAppendTx(ctx.pool, async (tx) => {
     await assertWithinLimit(tx, org.id, 'projects');
-    if (!(await resolveWorkflow(tx, org.id, input.workflowKey))) {
-      throw badRequest('unknown_workflow', `workflow '${input.workflowKey}' does not exist`);
+    const workflowKey = input.workflowKey ?? ctx.config.defaultWorkflow;
+    if (!(await resolveWorkflow(tx, org.id, workflowKey))) {
+      throw badRequest('unknown_workflow', `workflow '${workflowKey}' does not exist`);
     }
     if (await one(tx, 'SELECT 1 FROM projects WHERE org_id=$1 AND key=$2', [org.id, input.key])) {
       throw conflict('project_key_taken', `project key ${input.key} is already in use`);
@@ -63,7 +64,7 @@ export async function createProject(
           streamId: streamId.project(projectId),
           event: {
             type: 'ProjectCreated',
-            payload: { projectId, orgId: org.id, createdByUserId: user.id, ...input },
+            payload: { projectId, orgId: org.id, createdByUserId: user.id, ...input, workflowKey },
           },
           actor: userActor(user.id),
           scope: projectScope(org.id, projectId),

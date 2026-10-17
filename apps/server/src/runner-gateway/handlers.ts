@@ -13,6 +13,7 @@ import type { ChatTerminal } from '../chat/relay.ts';
 import { baTaskRpc, endBaTaskShift } from '../commands/ba-tasks.ts';
 import { attachmentRpc } from '../commands/card-attachments.ts';
 import { cardDependRpc, cardFactsRpc } from '../commands/card-facts.ts';
+import { cardBriefRpc, cardGroupRpc } from '../commands/card-group.ts';
 import { cardMessage, SYSTEM_ACTOR, userScope } from '../commands/common.ts';
 import { designRpc } from '../commands/design-rpc.ts';
 import { alignDevopsRuntime, createDevOpsRequestIn, endDevopsShift } from '../commands/devops.ts';
@@ -1035,6 +1036,8 @@ export class RunnerHandlers {
       if (msg.method === 'card.facts')
         return reply(...(await cardFactsRpc(ctx, await cardOfShift(ctx, shift), msg.params)));
       if (msg.method === 'card.depend') return reply(...(await cardDependRpc(ctx, shift, msg.params)));
+      if (msg.method === 'card.group') return reply(...(await cardGroupRpc(ctx, shift, msg.params)));
+      if (msg.method === 'card.brief') return reply(...(await cardBriefRpc(ctx, shift, msg.params)));
       if (msg.method === 'question.status') return reply(true, await questionStatus(ctx, shift));
       if (msg.method === 'test.suite') return reply(...(await recordSuiteResult(ctx, shift, msg.params)));
       if (msg.method === 'env.suites') return reply(...(await suitesFor(ctx.pool, shift)));

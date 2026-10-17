@@ -23,6 +23,33 @@ import { PublicationDtoSchema } from './research.ts';
 import { ShiftDtoSchema } from './shifts.ts';
 import { CardTestingSchema } from './testing.ts';
 
+/** code-v6 facts of a card (see `CardDto.lean`). */
+export const LeanCardDtoSchema = z.object({
+  groupId: z.string().nullable(),
+  cardBrief: z.string().nullable(),
+  headSha: z.string().nullable(),
+  /** Computed by the server from the paths of the diff; an agent cannot lower it. */
+  highRisk: z.boolean(),
+  highRiskPaths: z.array(z.string()),
+  evidence: z
+    .object({
+      sha: z.string(),
+      commands: z.array(
+        z.object({ kind: z.string(), command: z.string(), status: z.string(), result: z.string() }),
+      ),
+      waived: z.string().nullable(),
+      at: z.string(),
+    })
+    .nullable(),
+  ownerApproval: z.object({
+    required: z.boolean().nullable(),
+    reason: z.string().nullable(),
+    approvedSha: z.string().nullable(),
+  }),
+  testDeploy: z.enum(['healthy', 'skipped']).nullable(),
+});
+export type LeanCardDto = z.infer<typeof LeanCardDtoSchema>;
+
 /** The reviewer's risk call on the card's current review round (backlog #70). */
 export const ReviewRiskDtoSchema = z.object({
   level: StoredReviewRisk,
@@ -52,6 +79,8 @@ export const CardDtoSchema = z.object({
   riskTierOverridden: z.boolean(),
   /** The reviewer's risk call (null before any approval, or after a new review round starts). */
   reviewRisk: ReviewRiskDtoSchema.nullable().optional(),
+  /** code-v6: group, Card Brief, the commit the branch is at, build evidence, the high-risk flag and the owner approval decision. */
+  lean: LeanCardDtoSchema.optional(),
   docsNeeded: z.boolean(),
   /** Architect: run Investigate & design before build. */
   designNeeded: z.boolean().optional(),

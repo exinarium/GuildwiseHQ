@@ -340,6 +340,28 @@ function reviewRiskData(ctx: AomContext, p: Parsed): Record<string, unknown> {
   return { risk, riskAnalysis: analysis.trim(), ...(qaFocus ? { qaFocus } : {}) };
 }
 
+/**
+ * `aom handoff --build-command ... --build-result ... --test-command ... --test-result ... [--lint-command ... --lint-result ...]`
+ * or `--no-evidence "<why>"` (code-v6): the build and unit test evidence of the handoff. The commit it is bound to is measured
+ * by the runner, not stated by the agent. Nothing when no evidence flag is given (the older workflows).
+ */
+function buildEvidenceFlags(p: Parsed): Record<string, unknown> | undefined {
+  const waived = one(p, 'no-evidence');
+  const commands: Array<{ kind: string; command: string; status: 'passed'; result: string }> = [];
+  for (const kind of ['build', 'test', 'lint'] as const) {
+    const command = one(p, `${kind}-command`);
+    const result = one(p, `${kind}-result`);
+    if (command === undefined && result === undefined) continue;
+    if (!command?.trim())
+      throw new UsageError(`--${kind}-result needs --${kind}-command "<the command you ran>"`);
+    commands.push({ kind, command: command.trim(), status: 'passed', result: (result ?? '').trim() });
+  }
+  if (waived !== undefined && commands.length > 0)
+    throw new UsageError('use either --no-evidence or the --build/--test flags, not both');
+  if (waived !== undefined) return { commands: [], waived: waived.trim() };
+  return commands.length > 0 ? { commands } : undefined;
+}
+
 function score(p: Parsed): number {
   const s = Number(one(p, 'score'));
   if (!Number.isInteger(s) || s < 1 || s > 5) throw new UsageError('--score <1-5> is required');
@@ -1088,7 +1110,34 @@ const VERBS: Record<string, Verb> = {
   handoff: async (ctx, p) => {
     const dataFile = one(p, 'data-file');
     const data = dataFile ? (JSON.parse(ctx.readFile(dataFile)) as Record<string, unknown>) : {};
+    const evidence = buildEvidenceFlags(p);
+    if (evidence) data.buildEvidence = evidence;
     return report(ctx, outcome('handoff', textFlag(ctx, p, 'note', true) as string, data));
+  },
+  /** `aom plan --note "<planning note>"` (planner): hands the card to the architect with the planning note. */
+  plan: async (ctx, p) => report(ctx, outcome('planned', textFlag(ctx, p, 'note', true) as string)),
+  /** `aom group set <id> [--card <REF>]` / `aom group clear [--card <REF>]` (planner, architect, BA). */
+  group: async (ctx, p) => {
+    const sub = p.positionals[0];
+    const card = one(p, 'card');
+    if (sub !== 'set' && sub !== 'clear')
+      throw new UsageError('usage: aom group set <group id> [--card <REF>] | aom group clear [--card <REF>]');
+    if (sub === 'set' && !p.positionals[1])
+      throw new UsageError('usage: aom group set <group id> [--card <REF>]');
+    const r = (await rpc(ctx, 'card.group', {
+      ...(sub === 'set' ? { id: p.positionals[1] } : { clear: true }),
+      ...(card ? { card } : {}),
+    })) as { message?: string } | undefined;
+    ctx.io.out(`${r?.message ?? 'Recorded.'}\n`);
+    return 0;
+  },
+  /** `aom brief --text "<Card Brief>"` (planner, architect, BA): the short summary the builder reads. */
+  brief: async (ctx, p) => {
+    const r = (await rpc(ctx, 'card.brief', { text: textFlag(ctx, p, 'text', true) as string })) as
+      | { message?: string }
+      | undefined;
+    ctx.io.out(`${r?.message ?? 'Recorded.'}\n`);
+    return 0;
   },
   publish: async (ctx, p) => {
     const file = one(p, 'file');
@@ -1732,7 +1781,10 @@ export const USAGE = `usage: aom <verb> [options]
   question --text "<q>" [--option "<a>"]... [--recommend <n>] [--doing "<x>"] [--topic environment|sandbox|tooling|dependency|order|requirements|design|code] [--wait [10m]] [--non-blocking] [--force]   --wait: keep working in this shift until it is answered (default 10 minutes); no answer in time parks the card on the question and you resume it when it is answered
   card facts [<REF>]                         what the server knows: environment, whether each dependency has merged, branch, stage, blockers (look here before you ask)
   block --on dependency <REF> [--card <REF>]   architect/planner/BA: this card waits for another card (only its design may run until that one has merged)
-  handoff --note "<text>" [--data-file <json>]   builder/scout/researcher: hand the card on (scout: candidates)
+  handoff --note "<text>" [--data-file <json>] [--build-command "<c>" --build-result "<r>" --test-command "<c>" --test-result "<r>" [--lint-command "<c>" --lint-result "<r>"] | --no-evidence "<why>"]   builder/scout/researcher: hand the card on (builder: with the build and unit test evidence; scout: candidates)
+  plan --note "<text>"                       planner: hand the card to the architect with the planning note
+  group set <id> [--card <REF>] | group clear [--card <REF>]   planner/architect/BA: put an open card in a group (one builder works a group in order) or take it out
+  brief --text "<text>"                      planner/architect/BA: write the Card Brief of this card for the builder (about 2000 characters at most)
   publish --file <note.md> [--title "<t>"] [--citations-file <json>] [--path <p>]   checker: publish the verified note
   digest --file <json> [--note "<text>"] | --none   curator: post the digest (empty when nothing qualifies)
   review approve --score <1-5> --risk low|medium|high (--risk-file <md in your scratch dir> | --risk-analysis "<text>") [--qa-focus "<what a person should test>"] --note "<text>"

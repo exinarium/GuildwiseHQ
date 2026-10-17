@@ -2,6 +2,7 @@ import type { CardApproval } from '@aom/shared';
 import { useState } from 'react';
 import { useApprovalSendBack, useApprove } from '../api/queries/approval.ts';
 import { formatDateTime } from '../lib/time.ts';
+import { ApprovalReview } from './ApprovalReview.tsx';
 import { Badge, Button, ErrorBox, Panel, TextArea } from './ui.tsx';
 
 const STATE_LABEL: Record<CardApproval['state'], string> = {
@@ -48,6 +49,7 @@ export function ApprovalPanel({ cardId, approval }: { cardId: string; approval: 
               : ''}
           </p>
         )}
+        {approval.review && <ApprovalReview cardId={cardId} review={approval.review} defaultOpen={open} />}
         {approval.decision && (
           <p className="text-sm text-muted" data-testid="approval-decision">
             {approval.decision.kind === 'approved' ? 'Approved' : 'Sent back'} by {approval.decision.byName},{' '}

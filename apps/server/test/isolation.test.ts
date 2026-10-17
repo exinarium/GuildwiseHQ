@@ -161,6 +161,8 @@ describe('two-user isolation', () => {
       'checker',
       'curator',
       'devops',
+      'planner',
+      'pre_reviewer',
       'researcher',
       'reviewer',
       'scout',
@@ -171,6 +173,7 @@ describe('two-user isolation', () => {
     expect(wfs.workflows.map((x: any) => x.definition.key).sort()).toEqual([
       'code',
       'code-bugfix',
+      'code-v6',
       'feed',
       'research',
     ]);

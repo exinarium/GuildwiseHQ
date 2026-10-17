@@ -1,7 +1,7 @@
 import { ApprovalApproveRequestSchema, ApprovalSendBackRequestSchema, CardParamsSchema } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
 import { requireUser } from '../auth/guards.ts';
-import { approveStep, sendBackStep } from '../commands/approval.ts';
+import { approveStep, cardDiff, sendBackStep } from '../commands/approval.ts';
 import type { Ctx } from '../context.ts';
 import { getCardDetail } from '../queries/cards.ts';
 import { typed } from './util.ts';
@@ -20,6 +20,12 @@ export function approvalRoutes(ctx: Ctx) {
         return getCardDetail(ctx, s.user.id, req.params.id);
       },
     );
+
+    /** The diff the runner uploaded at the review handoff (code-v6), for the owner approval's diff view. */
+    app.get('/api/cards/:id/diff', { schema: { params: CardParamsSchema } }, async (req) => {
+      const s = await requireUser(ctx, req);
+      return cardDiff(ctx.pool, s.user, req.params.id);
+    });
 
     app.post(
       '/api/cards/:id/approval/send-back',

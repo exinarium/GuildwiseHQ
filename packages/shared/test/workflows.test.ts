@@ -50,6 +50,7 @@ describe('built-in workflows', () => {
   it('exposes the built-in definitions (code v1 to v5, the others v1)', () => {
     expect(BUILTIN_WORKFLOWS.map((w) => `${w.key}@${w.version}`).sort()).toEqual([
       'code-bugfix@1',
+      'code-v6@1',
       'code@1',
       'code@2',
       'code@3',
@@ -258,9 +259,9 @@ describe('validateWorkflow: one failing fixture per rule', () => {
     expect(issues).toEqual([expect.objectContaining({ code: 'missing_done_criteria', severity: 'warning' })]);
     expect(hasErrors(issues)).toBe(false);
   });
-  it('warns above 12 stages', () => {
+  it('warns above 16 stages', () => {
     const d = clone();
-    for (let i = 0; i < 6; i++)
+    for (let i = 0; i < 10; i++)
       d.stages.splice(1, 0, {
         ...stage(d, 'docs'),
         id: `extra${i}`,

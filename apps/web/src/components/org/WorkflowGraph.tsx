@@ -6,6 +6,7 @@ const FILL: Record<GraphNode['kind'], string> = {
   manual: '#fef9c3',
   subworkflow: '#fae8ff',
   human: '#ffedd5',
+  server: '#e0f2fe',
   terminal: '#dcfce7',
 };
 

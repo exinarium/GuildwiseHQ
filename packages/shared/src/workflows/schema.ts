@@ -31,6 +31,11 @@ export const OutcomeDataKindSchema = z.enum([
   'finalize',
   /** Architect report: `{reportPath, summary, location, commit?}` (protocol/ipc.ts `InvestigationDataSchema`). */
   'investigation',
+  /**
+   * Build handoff with evidence (code-v6): like `diffStats` (the runner attaches the diff, head SHA and changed paths) but the
+   * builder also passes `buildEvidence`, which the server requires (`cards/lean-v6.ts`).
+   */
+  'buildHandoff',
 ]);
 export type OutcomeDataKind = z.infer<typeof OutcomeDataKindSchema>;
 
@@ -115,6 +120,14 @@ export const HumanConfigSchema = z.object({
 });
 export type HumanConfig = z.infer<typeof HumanConfigSchema>;
 
+/**
+ * Configuration of a `server` stage: a stage the server runs itself, with no agent assigned (Lean Team v3, code-v6).
+ * `test_deploy` starts the project's test environment for the reviewed commit and moves the card on when it is healthy at
+ * that commit; on a failure the DevOps request path runs and the card stays.
+ */
+export const ServerStageConfigSchema = z.object({ action: z.enum(['test_deploy']) });
+export type ServerStageConfig = z.infer<typeof ServerStageConfigSchema>;
+
 export const StageSchema = z.object({
   id: z.string().regex(IdPattern),
   label: z.string(),
@@ -123,9 +136,12 @@ export const StageSchema = z.object({
   /**
    * manual = moved by a user/BA command, never dispatched. subworkflow = run by the server: starts a child card
    * (`subworkflow` holds the details); never dispatched to an agent. human = completed by a person (`human` holds the
-   * details), e.g. manual QA; never dispatched to an agent.
+   * details), e.g. manual QA; never dispatched to an agent. server = run by the server (`server` holds the action),
+   * e.g. the test deploy of code-v6; never dispatched to an agent.
    */
-  kind: z.enum(['agent', 'manual', 'terminal', 'subworkflow', 'human']),
+  kind: z.enum(['agent', 'manual', 'terminal', 'subworkflow', 'human', 'server']),
+  /** Required for kind 'server', absent otherwise. */
+  server: ServerStageConfigSchema.optional(),
   /** Required for kind 'human', absent otherwise. */
   human: HumanConfigSchema.optional(),
   /** Required for kind 'subworkflow', absent otherwise. */
@@ -161,6 +177,14 @@ export const StageSchema = z.object({
    * verdict (docs/design/run-and-integration-tests.md D8, D9). Agent stages claimed by a role with a shell only.
    */
   environment: z.enum(['none', 'project']).default('none'),
+  /**
+   * With `environment: 'project'`: the environment is prepared by the server-run stage before this one (code-v6 `test_deploy`),
+   * so there are no escapes: an agent starts here only on a healthy environment at the reviewed commit, after the server
+   * recorded that none applies, or when the project works without one (`test_without_environment`).
+   */
+  envStrict: z.boolean().optional(),
+  /** Build stages: the handoff must carry build and unit test evidence (`buildHandoff`); the server refuses one without. */
+  requireBuildEvidence: z.boolean().optional(),
 });
 export type Stage = z.infer<typeof StageSchema>;
 
@@ -186,6 +210,8 @@ export const WorkflowDefinitionSchema = z.object({
   customFields: z.array(CustomFieldSchema).default([]),
   cardTypes: z.array(z.string()),
   initialStage: z.string(),
+  /** Defaults a card of this workflow starts with (code-v6: every card is designed). */
+  defaults: z.object({ designNeeded: z.boolean().optional() }).optional(),
   stages: z.array(StageSchema).min(2),
   /** Project variants only: the base workflow (key and version) this definition was materialised from. */
   extends: z.object({ key: z.string(), version: z.number().int().min(1) }).optional(),

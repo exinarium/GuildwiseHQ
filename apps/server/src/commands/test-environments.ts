@@ -21,7 +21,7 @@ import {
   type WorkflowCardView,
   workflowHasIntegrationGuard,
 } from '@aom/shared';
-import { resolveWorkflow, type WorkflowVersionRow } from '../catalogue/loader.ts';
+import { loadWorkflowById, resolveWorkflow, type WorkflowVersionRow } from '../catalogue/loader.ts';
 import type { Ctx } from '../context.ts';
 import { exec, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
@@ -30,6 +30,7 @@ import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { workflowView } from './cards.ts';
 import { loadCommitAs } from './commit-as.ts';
 import { cardMessage, projectScope, SYSTEM_ACTOR } from './common.ts';
+import { openItemForSubject, raiseOrCoalesce } from './desk-coalesce.ts';
 import { createDevOpsRequestIn } from './devops.ts';
 import { cardIntegrationTests, integrationTestsOf } from './integration-tests.ts';
 import { branchKey, capsOf, findReplay, requestStopIn } from './runs.ts';
@@ -155,7 +156,7 @@ export async function startTestRunIn(
   ctx: Ctx,
   tx: Tx,
   p: Provision,
-  opts: { forceDevops?: boolean; failure?: string } = {},
+  opts: { forceDevops?: boolean; failure?: string; noRebase?: boolean } = {},
 ): Promise<{ envId: string; requestId: string | null; wsId: string } | Skip> {
   const { card, project, settings } = p;
   const role = p.role ?? 'tester';
@@ -340,12 +341,17 @@ export async function startTestRunIn(
     ttlAt: expiresAt.toISOString(),
     allowDocker: runSettings.allowDocker === true,
     ...(runSettings.buildGuides?.length ? { buildGuides: runSettings.buildGuides } : {}),
-    rebaseCard: {
-      repoId: cardRepo.id,
-      cardWorktreePath: wcard.worktree_path,
-      baseBranch: (cardRepo.working_branch ?? project.working_branch) as string,
-      ...(commitAs ? { commitAs } : {}),
-    },
+    // code-v6: the commit under test is the reviewed commit, so the card branch is not rebased here.
+    ...(opts.noRebase
+      ? {}
+      : {
+          rebaseCard: {
+            repoId: cardRepo.id,
+            cardWorktreePath: wcard.worktree_path,
+            baseBranch: (cardRepo.working_branch ?? project.working_branch) as string,
+            ...(commitAs ? { commitAs } : {}),
+          },
+        }),
     ...(replay ? { replay } : {}),
   };
   await enqueueRunnerCommand(tx, ws.id, 'run.start', payload);
@@ -357,6 +363,7 @@ export async function testEnvironmentPass(ctx: Ctx): Promise<void> {
   try {
     await sweepTestEnvironments(ctx);
     await handleFailedEnvironments(ctx);
+    await testDeployPass(ctx);
     await provisionPass(ctx);
   } catch (err) {
     ctx.log.error({ err }, 'test environment pass failed');
@@ -364,12 +371,14 @@ export async function testEnvironmentPass(ctx: Ctx): Promise<void> {
 }
 
 const NEEDS_ENV_SQL = `
-SELECT c.id, st.claim_role AS role FROM cards c
+SELECT c.id, COALESCE(st.claim_role, 'tester') AS role, st.env_strict AS strict FROM cards c
   JOIN projects p ON p.id = c.project_id AND p.status = 'active' AND p.integration_tests->>'mode' = 'local'
   JOIN workflow_stages st ON st.workflow_version_id = c.workflow_version_id AND st.stage_id = c.stage
- WHERE st.kind = 'agent' AND st.environment = 'project' AND st.claim_role IS NOT NULL
+ WHERE st.kind IN ('agent', 'server') AND st.environment = 'project'
+   AND (st.kind = 'server' OR st.claim_role IS NOT NULL)
    AND c.status = 'queued' AND c.claim_id IS NULL
    AND c.origin NOT IN ('full_suite', 'regression')
+   AND c.test_deploy_state IS DISTINCT FROM 'skipped'
    AND COALESCE((c.fields->>'integrationTests')::boolean, true) = true
    AND c.repo_id IS NOT NULL AND c.home_workstation_id IS NOT NULL
    AND NOT EXISTS (SELECT 1 FROM run_environments e
@@ -378,26 +387,174 @@ SELECT c.id, st.claim_role AS role FROM cards c
  LIMIT 20`;
 
 async function provisionPass(ctx: Ctx): Promise<void> {
-  const due = await rows<{ id: string; role: string }>(ctx.pool, NEEDS_ENV_SQL);
+  const due = await rows<{ id: string; role: string; strict: boolean }>(ctx.pool, NEEDS_ENV_SQL);
   const wss = new Set<string>();
-  for (const { id, role } of due) {
+  for (const { id, role, strict } of due) {
     try {
       const ws = await withAppendTx(ctx.pool, async (tx) => {
         const card = await one(tx, 'SELECT * FROM cards WHERE id=$1 FOR UPDATE', [id]);
         if (!card || card.status !== 'queued' || card.claim_id) return null;
         if (await currentTestEnv(tx, id)) return null;
         const project = (await one(tx, 'SELECT * FROM projects WHERE id=$1', [card.project_id])) as Row;
-        const r = await startTestRunIn(ctx, tx, {
-          card,
-          project,
-          settings: integrationTestsOf(project),
-          role,
-        });
+        const r = await startTestRunIn(
+          ctx,
+          tx,
+          { card, project, settings: integrationTestsOf(project), role },
+          strict ? { noRebase: true } : {},
+        );
         return 'skip' in r ? null : r.wsId;
       });
       if (ws) wss.add(ws);
     } catch (err) {
       ctx.log.warn({ err, cardId: id }, 'could not start a test environment');
+    }
+  }
+  if (wss.size) deliver(ctx, [...wss]);
+}
+
+// ------------------------------------------------------------------------------ test deploy (code-v6)
+
+const TEST_DEPLOY_SQL = `
+SELECT c.id FROM cards c
+  JOIN projects p ON p.id = c.project_id AND p.status = 'active'
+  JOIN workflow_stages st ON st.workflow_version_id = c.workflow_version_id AND st.stage_id = c.stage
+ WHERE st.kind = 'server' AND c.status = 'queued' AND c.claim_id IS NULL
+ ORDER BY c.queued_at NULLS LAST, c.created_at
+ LIMIT 20`;
+
+/** Why a card needs no test environment (the tester works without one), or null when it does. */
+export function testDeploySkipReason(card: Row, project: Row, settings: IntegrationTests): string | null {
+  if (project.test_without_environment) return 'the project tests without an environment (project setting)';
+  if (card.origin === 'full_suite' || card.origin === 'regression')
+    return 'a suite card tests a target, not a card commit';
+  if ((card.fields as Record<string, unknown> | null)?.integrationTests === false)
+    return 'integration tests are switched off for this card';
+  if (settings.mode === 'off') return 'the project does not run integration tests';
+  if (settings.mode === 'remote') return 'the project tests against a deployed target: nothing to start';
+  return null;
+}
+
+/**
+ * The server-run Test deploy stage (code-v6, design 5.6): no agent works here. For a card queued in a `server` stage with the
+ * `test_deploy` action the server starts the project's test environment for the reviewed commit (never rebased), and moves
+ * the card to the next stage when the environment is healthy at that commit. A project or card that needs none moves on at
+ * once with the reason recorded. A failed start goes through `handleFailedEnvironments`: a DevOps request parks the card
+ * (it stays in Test deploy) and a second failure needs a person. A problem no start can fix (the runner cannot start
+ * environments, nobody to run the tests) raises one desk item and the card waits.
+ */
+export async function testDeployPass(ctx: Ctx): Promise<void> {
+  const due = await rows<{ id: string }>(ctx.pool, TEST_DEPLOY_SQL);
+  const wss = new Set<string>();
+  for (const { id } of due) {
+    try {
+      const ws = await withAppendTx(ctx.pool, async (tx) => {
+        const card = await one(tx, 'SELECT * FROM cards WHERE id=$1 FOR UPDATE', [id]);
+        if (!card || card.status !== 'queued' || card.claim_id) return null;
+        const wf = await loadWorkflowById(tx, card.workflow_version_id);
+        const stage = wf ? getStage(wf.definition, card.stage) : undefined;
+        if (!wf || stage?.kind !== 'server' || stage.server?.action !== 'test_deploy') return null;
+        const project = (await one(tx, 'SELECT * FROM projects WHERE id=$1', [card.project_id])) as Row;
+        const settings = integrationTestsOf(project);
+        const next = (): string =>
+          resolveOutcome(wf.definition, workflowView(card), stage.id, 'ready').toStage;
+        const done = async (result: 'healthy' | 'skipped', reason: string, env?: Row): Promise<null> => {
+          await ctx.store.append(
+            [
+              {
+                streamId: streamId.card(card.id),
+                event: {
+                  type: 'TestDeployResolved',
+                  payload: {
+                    cardId: card.id,
+                    result,
+                    reason,
+                    ...(env ? { envId: env.id } : {}),
+                    ...(card.head_sha ? { sha: card.head_sha } : {}),
+                  },
+                },
+                actor: SYSTEM_ACTOR,
+                scope: projectScope(card.org_id, card.project_id),
+              },
+              {
+                streamId: streamId.card(card.id),
+                event: {
+                  type: 'StageCompleted',
+                  payload: { cardId: card.id, fromStage: stage.id, toStage: next(), outcome: 'ready' },
+                },
+                actor: SYSTEM_ACTOR,
+                scope: projectScope(card.org_id, card.project_id),
+              },
+              cardMessage(
+                card,
+                { kind: 'system' },
+                'system',
+                result === 'healthy'
+                  ? `Test deploy: the environment is healthy at the reviewed commit${card.head_sha ? ` ${String(card.head_sha).slice(0, 10)}` : ''}; ${card.ref} goes to Test.`
+                  : `Test deploy skipped: ${reason}. ${card.ref} goes to Test without an environment.`,
+              ),
+            ],
+            { tx },
+          );
+          return null;
+        };
+        const skip = testDeploySkipReason(card, project, settings);
+        if (skip) return done('skipped', skip);
+        const env = await currentTestEnv(tx, card.id);
+        if (env) {
+          if (env.state !== 'healthy') return null; // still coming up (or failed: handleFailedEnvironments deals with it)
+          const sources = (env.sources ?? []) as Array<{ repoId: string; commit?: string | null }>;
+          const at = sources.find((s) => s.repoId === card.repo_id)?.commit ?? null;
+          if (card.head_sha && at && at !== card.head_sha) {
+            // Healthy, but at another commit than the reviewed one: it is stopped and a new one is started next pass.
+            await requestStopIn(ctx, tx, env, null, 'failed');
+            await ctx.store.append(
+              [
+                cardMessage(
+                  card,
+                  { kind: 'system' },
+                  'system',
+                  `Test deploy: the environment runs ${String(at).slice(0, 10)} but ${String(card.head_sha).slice(0, 10)} was reviewed; it is restarted at the reviewed commit.`,
+                ),
+              ],
+              { tx },
+            );
+            return env.workstation_id as string;
+          }
+          return done('healthy', 'the environment is healthy at the reviewed commit', env);
+        }
+        const started = await startTestRunIn(
+          ctx,
+          tx,
+          { card, project, settings, role: 'tester' },
+          { noRebase: true },
+        );
+        if (!('skip' in started)) return started.wsId;
+        // Waiting for the workstation (offline, full) is normal; the rest needs a person, once.
+        if (/offline|maximum number|no worktree yet|no workstation yet/.test(started.skip)) return null;
+        const subjectKey = `test_deploy:${card.id}`;
+        if (!(await openItemForSubject(tx, card.org_id, subjectKey)))
+          await raiseOrCoalesce(
+            ctx,
+            {
+              subjectKey,
+              orgId: card.org_id,
+              kind: 'alert',
+              subkind: DESK_SUBKIND.testEnvironment,
+              title: `${card.ref} cannot be deployed for testing: ${started.skip}`,
+              body: `The server could not start the test environment for ${card.ref}: ${started.skip}. The card waits in Test deploy and is tried again on every pass; fix the cause (or switch on "test without an environment" in the project settings) and it moves on by itself.`,
+              pinned: true,
+              projectId: card.project_id,
+              cardId: card.id,
+              actor: SYSTEM_ACTOR,
+              scope: projectScope(card.org_id, card.project_id),
+            },
+            { tx },
+          );
+        return null;
+      });
+      if (ws) wss.add(ws);
+    } catch (err) {
+      ctx.log.warn({ err, cardId: id }, 'could not run the test deploy of a card');
     }
   }
   if (wss.size) deliver(ctx, [...wss]);
@@ -575,7 +732,7 @@ export async function runProblemEvents(
   const project = (await one(tx, 'SELECT * FROM projects WHERE id=$1', [card.project_id])) as Row;
   const stageRole = await one(
     tx,
-    'SELECT claim_role FROM workflow_stages WHERE workflow_version_id=$1 AND stage_id=$2',
+    'SELECT claim_role, env_strict FROM workflow_stages WHERE workflow_version_id=$1 AND stage_id=$2',
     [card.workflow_version_id, card.stage],
   );
   const started = await startTestRunIn(
@@ -587,7 +744,11 @@ export async function runProblemEvents(
       settings: integrationTestsOf(project),
       ...(stageRole?.claim_role ? { role: stageRole.claim_role as string } : {}),
     },
-    { forceDevops: true, failure: detail || PROBLEM_TEXT[problem] },
+    {
+      forceDevops: true,
+      failure: detail || PROBLEM_TEXT[problem],
+      ...(stageRole?.env_strict ? { noRebase: true } : {}),
+    },
   );
   if ('skip' in started || !started.requestId)
     return testEnvironmentHardStop(

@@ -114,7 +114,12 @@ export function eligibility(A: AgentRefs) {
     // server started for the card's commit is healthy on this agent's workstation (docs/design/run-and-integration-tests.md
     // D9). No wait when the project does not run local environments, the card opted out, it is a suite or regression
     // card (they use a target URL), or the workstation's runner cannot provision (an older runner: the tester works as before).
-    envReady: `(st.environment <> 'project'
+    //
+    // code-v6 (`st.env_strict`): the environment was prepared by the server-run Test deploy stage before this one, so the
+    // escapes above do not apply. The tester starts only on a healthy environment of the card, after the server recorded
+    // that none applies (`test_deploy_state = 'skipped'`), or when the project works without one (S1b's
+    // `test_without_environment`). Suite and regression cards test a target and are not part of the card flow.
+    envReady: `((st.environment <> 'project' OR COALESCE(st.env_strict, false)
       OR p.test_without_environment
       OR c.origin IN ('full_suite','regression')
       OR p.integration_tests->>'mode' IS DISTINCT FROM 'local'
@@ -123,7 +128,14 @@ export function eligibility(A: AgentRefs) {
                       WHERE wc.workstation_id = ${A.workstationId} AND 'runs:3' = ANY (wc.capabilities))
       OR EXISTS (SELECT 1 FROM run_environments re
                   WHERE re.card_id = c.id AND re.purpose = 'test' AND re.verdict_at IS NULL AND re.state = 'healthy'
-                    AND re.workstation_id = ${A.workstationId}))`,
+                    AND re.workstation_id = ${A.workstationId}))
+      AND (NOT COALESCE(st.env_strict, false)
+        OR p.test_without_environment
+        OR c.origin IN ('full_suite','regression')
+        OR c.test_deploy_state = 'skipped'
+        OR EXISTS (SELECT 1 FROM run_environments re
+                    WHERE re.card_id = c.id AND re.purpose = 'test' AND re.verdict_at IS NULL AND re.state = 'healthy'
+                      AND re.workstation_id = ${A.workstationId})))`,
     vault: `(c.repo_id IS NOT NULL OR NOT EXISTS (SELECT 1 FROM vaults v WHERE ${vaultOfCard}) OR EXISTS (
         SELECT 1 FROM vaults v JOIN workstation_vaults wv ON wv.vault_id = v.id AND wv.workstation_id = ${A.workstationId}
          WHERE ${vaultOfCard}))`,
@@ -164,6 +176,12 @@ WHERE c.status = 'queued'
        OR c.affinity_agent_id = $1
        OR NOT EXISTS (SELECT 1 FROM agents aa WHERE aa.id = c.affinity_agent_id AND aa.status = 'active'
                        AND aa.paused_at IS NULL))
+  -- Group builder affinity (code-v6): the first builder of a group keeps the rest of its build cards, a hard clause, until it
+  -- is gone or paused or the assignment expired. Review, test and the other roles are not held back.
+  AND (c.group_id IS NULL OR st.claim_role IS DISTINCT FROM 'builder' OR NOT EXISTS (
+        SELECT 1 FROM card_groups g JOIN agents ga ON ga.id = g.builder_agent_id AND ga.status = 'active' AND ga.paused_at IS NULL
+         WHERE g.project_id = c.project_id AND g.group_id = c.group_id AND g.until > $9::timestamptz
+           AND g.builder_agent_id <> $1))
   -- A project over its monthly budget starts nothing new (running shifts finish): costs/index.ts budgetPausedSql.
   AND NOT ${budgetPausedSql('p', '$9')}
   -- A scope the platform team paused (project, workflow, stage, workstation) starts nothing new; the platform project never.
@@ -193,6 +211,9 @@ WHERE c.status = 'queued'
 ORDER BY
   -- 0. cards this agent holds affinity to resume before any new work
   (c.affinity_agent_id = $1 AND c.affinity_until > $9::timestamptz) DESC,
+  -- 0b. the next card of the group this agent builds (one sticky session moves from card to card in order)
+  (c.group_id IS NOT NULL AND EXISTS (SELECT 1 FROM card_groups g WHERE g.project_id = c.project_id
+     AND g.group_id = c.group_id AND g.builder_agent_id = $1 AND g.until > $9::timestamptz)) DESC,
   -- 1. scheduled work first: schedules, interest scans and an on-demand "Research this" (they are scheduled cards)
   c.scheduled DESC,
   -- 2. the agent's own rework, then other rework

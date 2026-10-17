@@ -142,6 +142,8 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     AOM_TEST_CLOCK: 'true',
     AOM_ALLOW_LOCAL_REMOTES: 'true',
     AOM_MOCK_UI: 'true',
+    // The existing e2e flows were written for the code workflow; new projects default to code-v6 in production.
+    AOM_DEFAULT_WORKFLOW: 'code',
     // the first-login tour is off for every user (the tour spec switches it on for its own); it would cover the page under test
     AOM_TOUR_AUTOSTART: 'false',
     // phases: re-check a finalized pull request / pushed branch against the working branch every few seconds

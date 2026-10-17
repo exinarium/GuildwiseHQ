@@ -9,6 +9,7 @@ import {
   devopsBriefOutcomes,
   effectiveFeatures,
   getStage,
+  highRiskSummary,
   type InvestigationLocation,
   type ReadRepo,
   renderUntrusted,
@@ -319,6 +320,7 @@ export async function buildBrief(
     ledger: cardLedger.entries,
     ...(cardLedger.total > cardLedger.entries.length ? { ledgerTotal: cardLedger.total } : {}),
     ...(await testerEnvironment(ctx, card, agent, shift)),
+    ...(await leanBrief(ctx, card, project, stage.id, agent)),
     ...(project.test_without_environment && agent.role_key === 'tester' && !agent.is_devops
       ? { testWithoutEnvironment: true }
       : {}),
@@ -332,6 +334,88 @@ export async function buildBrief(
         }
       : {}),
   };
+}
+
+const REVIEW_SIDE = new Set(['pre_review', 'review', 'merge_review']);
+
+/**
+ * code-v6 context, role-scoped by stage: the Card Brief (as written), the group, the build evidence and the high-risk paths
+ * for the review side and the tester, a merge review's resolution, the card's changed paths for the tester's area E2E and
+ * the open cards of the project for the planner. Absent for a card that has none of it (the older workflows).
+ */
+async function leanBrief(
+  ctx: Ctx,
+  card: Row,
+  project: Row,
+  stageId: string,
+  agent: Row,
+): Promise<Partial<ShiftBrief>> {
+  const out: Partial<ShiftBrief> = {};
+  if (card.card_brief) out.cardBrief = card.card_brief;
+  if (card.group_id) {
+    const others = await rows(
+      ctx.pool,
+      `SELECT ref, title, stage, status FROM cards WHERE project_id=$1 AND group_id=$2 AND id <> $3
+        AND status NOT IN ('cancelled') ORDER BY number LIMIT 12`,
+      [card.project_id, card.group_id, card.id],
+    );
+    out.group = {
+      id: card.group_id,
+      cards: others.map((c) => ({ ref: c.ref, title: c.title, stage: c.stage, status: c.status })),
+    };
+  }
+  const ev = card.build_evidence as {
+    sha: string;
+    commands: Array<{ kind: string; command: string; status: string; result: string }>;
+    waived?: string;
+    at: string;
+  } | null;
+  if (ev && (REVIEW_SIDE.has(stageId) || ['test', 'qa_steps'].includes(stageId)))
+    out.buildEvidence = {
+      sha: ev.sha,
+      commands: ev.commands,
+      ...(ev.waived ? { waived: ev.waived } : {}),
+      at: ev.at,
+    };
+  if (card.high_risk && (REVIEW_SIDE.has(stageId) || stageId === 'test')) {
+    const paths = (card.high_risk_paths ?? []) as string[];
+    out.highRisk = { paths, labels: highRiskSummary(paths).labels };
+  }
+  if (card.merge_review && stageId === 'merge_review') {
+    const m = card.merge_review as { oldHead?: string; newHead?: string; touched?: string[] };
+    out.mergeReview = {
+      ...(m.oldHead ? { oldHead: m.oldHead } : {}),
+      ...(m.newHead ? { newHead: m.newHead } : {}),
+      touched: m.touched ?? [],
+    };
+  }
+  if (stageId === 'test' && agent.role_key === 'tester') {
+    const d = await one(ctx.pool, 'SELECT paths FROM card_diffs WHERE card_id=$1', [card.id]);
+    if (d?.paths) {
+      const fields = (card.fields ?? {}) as Record<string, unknown>;
+      out.e2e = {
+        changedPaths: d.paths as string[],
+        mapping: (project.e2e_areas as NonNullable<ShiftBrief['e2e']>['mapping']) ?? null,
+        hint: [fields.affectedAreas, fields.testPlan].filter((x) => typeof x === 'string').join('\n'),
+      };
+    }
+  }
+  if (stageId === 'planning') {
+    const open = await rows(
+      ctx.pool,
+      `SELECT ref, title, stage, group_id, fields->>'affectedAreas' AS areas FROM cards
+        WHERE project_id=$1 AND id <> $2 AND status NOT IN ('done','cancelled','draft') ORDER BY number DESC LIMIT 40`,
+      [card.project_id, card.id],
+    );
+    out.openCards = open.map((c) => ({
+      ref: c.ref,
+      title: c.title,
+      stage: c.stage,
+      ...(c.group_id ? { groupId: c.group_id } : {}),
+      ...(c.areas ? { affectedAreas: String(c.areas).slice(0, 200) } : {}),
+    }));
+  }
+  return out;
 }
 
 /** The environment a shift of an environment stage works against (backlog #59): the card's healthy test environment, or the target. */
@@ -504,7 +588,7 @@ export async function buildShiftStart(ctx: Ctx, claim: ClaimResult): Promise<Shi
  * went back to it): resume the agent's own session on this card and open it with the answer or the findings. Only when a
  * session id is known; otherwise the shift starts from the brief as usual.
  */
-async function affinityResume(
+async function cardAffinityResume(
   ctx: Ctx,
   claim: ClaimResult,
   brief: ShiftBrief,
@@ -557,6 +641,36 @@ async function affinityResume(
       message = `${c.reviewerName} reviewed your work and asks for changes.\n\n${c.comments}${c.reasons.length ? `\n\nReasons: ${c.reasons.join(', ')}` : ''}${c.criteriaMissed.length ? `\n\nCriteria missed: ${c.criteriaMissed.join('; ')}` : ''}\n\nAddress them, then hand off again.`;
   }
   return { resumeSessionId: sessionId, ...(message ? { resumeMessage: message.slice(0, 38_000) } : {}) };
+}
+
+/**
+ * A claim of a card the agent holds affinity to resumes its session on the card; otherwise a group builder moving to the next
+ * card of its group (code-v6) resumes the session of its last build shift in the group, with the next card as the first
+ * message. The runner decides whether it may (120K tokens, 4 hours) and copies the transcript into the new worktree's folder.
+ */
+async function affinityResume(
+  ctx: Ctx,
+  claim: ClaimResult,
+  brief: ShiftBrief,
+): Promise<{ resumeSessionId?: string; resumeMessage?: string }> {
+  const own = await cardAffinityResume(ctx, claim, brief);
+  if (own.resumeSessionId || claim.stage !== 'build') return own;
+  const card = await one(ctx.pool, 'SELECT group_id, project_id FROM cards WHERE id=$1', [claim.cardId]);
+  if (!card?.group_id) return own;
+  const last = await one<{ runtime_session_id: string; ref: string; title: string; card_id: string }>(
+    ctx.pool,
+    `SELECT s.runtime_session_id, c.ref, c.title, s.card_id FROM shifts s JOIN cards c ON c.id = s.card_id
+      WHERE s.agent_id=$1 AND s.kind='card' AND s.stage='build' AND s.id <> $2 AND s.runtime_session_id IS NOT NULL
+        AND c.project_id=$3 AND c.group_id=$4
+      ORDER BY s.started_at DESC LIMIT 1`,
+    [claim.agentId, claim.shiftId, card.project_id, card.group_id],
+  );
+  if (!last) return own;
+  const message =
+    last.card_id === claim.cardId
+      ? ''
+      : `Next card of your group ${card.group_id}: ${brief.card.ref} ${brief.card.title}. You built ${last.ref} before in this session. This card has its own worktree and branch: work only in the one you were given, and do not carry ${last.ref}'s changes over. Read its Card Brief and requirements, then build and hand off as usual.`;
+  return { resumeSessionId: last.runtime_session_id, ...(message ? { resumeMessage: message } : {}) };
 }
 
 /** Reference repositories, plus (for a role with `readOrgRepos`) the organization's, without the card's own repository. */

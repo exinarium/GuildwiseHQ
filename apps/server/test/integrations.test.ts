@@ -628,9 +628,10 @@ describe('operational tables survive a rebuild', () => {
     await settle();
     const before = await qa(`SELECT count(*)::int AS n FROM workstation_integrations`);
     await rebuildProjections(w.t.app.ctx.pool, w.t.app.ctx.store);
-    const after = await qa(`SELECT count(*)::int AS n FROM workstation_integrations WHERE workstation_id=$1`, [
-      w.workstationId,
-    ]);
+    const after = await qa(
+      `SELECT count(*)::int AS n FROM workstation_integrations WHERE workstation_id=$1`,
+      [w.workstationId],
+    );
     expect(after[0].n).toBe(1);
     expect(before[0].n).toBeGreaterThan(0);
   });

@@ -85,7 +85,13 @@ export type CardView = FillableCard & WorkflowCardView;
 export function workflowView(c: Row): WorkflowCardView {
   // A card that has a QA document is in the manual QA flow: its QA stages are active (`when manualQa` / `qaAgent`).
   // The flags for a card that has not left Finalize are derived by `finalizeNext` (commands/qa-flow.ts).
-  return { ...c, ...cardView(c), ...(c.qa ? { manualQa: true, qaAgent: true } : {}) };
+  return {
+    ...c,
+    ...cardView(c),
+    ...(c.qa ? { manualQa: true, qaAgent: true } : {}),
+    // code-v6: decided by the last review approval; `mergeReview` is only ever moved to by the server.
+    ownerApproval: c.owner_approval_required === true,
+  };
 }
 
 export function cardView(c: Row): CardView {
@@ -204,7 +210,9 @@ export function architectFlags(
   if (req.designNeeded === true && !hasStage)
     throw badRequest('design_not_supported', `workflow '${def.key}' has no Investigate & design stage`);
   return {
-    designNeeded: hasStage ? (req.designNeeded ?? project.design_step === true) : false,
+    designNeeded: hasStage
+      ? (req.designNeeded ?? def.defaults?.designNeeded ?? project.design_step === true)
+      : false,
     investigationOnly: false,
   };
 }
@@ -642,7 +650,11 @@ export async function moveCard(
     if (stage.kind === 'terminal')
       throw badRequest('invalid_stage', 'use cancel or finalize to close a card');
     // A person's step (manual QA, an approval) opens by itself when the card reaches it: it is not a place to move to.
-    if (stage.kind === 'human' || (stage.id === 'qa_steps' && wf?.definition.key === 'code'))
+    if (
+      stage.kind === 'human' ||
+      stage.kind === 'server' ||
+      (stage.id === 'qa_steps' && (wf?.definition.key === 'code' || wf?.definition.key === 'code-v6'))
+    )
       throw badRequest('invalid_stage', 'a step for a person starts by itself when the card reaches it');
     const missing = stage.kind === 'agent' ? requiredMissing(cardView(card), stage) : [];
     if (missing.length)

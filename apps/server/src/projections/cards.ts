@@ -569,8 +569,18 @@ export const cardProjectors: Record<string, Projector> = {
       p.cardId,
       p.toStage,
       `risk_tier = CASE WHEN risk_tier_overridden THEN risk_tier ELSE $4 END, review_approvals = 0, review_risk = NULL,
-       excluded_agent_ids = ${DISTINCT_EXCLUDED}`,
-      [p.riskTier],
+       excluded_agent_ids = ${DISTINCT_EXCLUDED},
+       head_sha = COALESCE($5, head_sha), build_evidence = COALESCE($6::jsonb, build_evidence),
+       high_risk = COALESCE($7::boolean, high_risk), high_risk_paths = COALESCE($8::jsonb, high_risk_paths),
+       owner_approval_required = NULL, owner_approval_reason = NULL, owner_approved_sha = NULL,
+       test_deploy_state = NULL, merge_review = NULL`,
+      [
+        p.riskTier,
+        p.headSha ?? null,
+        p.evidence ? JSON.stringify(p.evidence) : null,
+        p.highRisk ?? null,
+        p.highRiskPaths ? JSON.stringify(p.highRiskPaths) : null,
+      ],
     );
   },
 
@@ -614,12 +624,21 @@ export const cardProjectors: Record<string, Projector> = {
         exec(
           tx,
           `UPDATE cards SET status='queued', queued_at=$3, review_approvals = review_approvals + 1,
-                  excluded_agent_ids = excluded_agent_ids || $2::uuid, updated_at=$3 WHERE id=$1`,
-          [p.cardId, p.reviewerAgentId, e.createdAt],
+                  excluded_agent_ids = CASE WHEN $4::boolean THEN excluded_agent_ids || $2::uuid ELSE excluded_agent_ids END,
+                  updated_at=$3 WHERE id=$1`,
+          [p.cardId, p.reviewerAgentId, e.createdAt, p.excludeReviewer !== false],
         ),
       );
     } else {
-      await moveTo(tx, e, p.cardId, p.toStage, `excluded_agent_ids = '{}'`);
+      await moveTo(
+        tx,
+        e,
+        p.cardId,
+        p.toStage,
+        `excluded_agent_ids = '{}', owner_approval_required = COALESCE($4::boolean, owner_approval_required),
+         owner_approval_reason = COALESCE($5, owner_approval_reason)`,
+        [p.ownerApproval?.required ?? null, p.ownerApproval?.reason ?? null],
+      );
     }
   },
 
@@ -904,6 +923,7 @@ export const cardProjectors: Record<string, Projector> = {
       openedAt: e.createdAt,
       deskItemId: p.deskItemId,
       entrySeq: p.entrySeq ?? null,
+      sha: p.sha ?? null,
       decision: null,
     });
     await approvalActivity(tx, e, p.cardId, 'Waiting for approval', null, null);
@@ -923,6 +943,8 @@ export const cardProjectors: Record<string, Projector> = {
           }
         : {}),
     });
+    if (p.decision === 'approved' && p.sha)
+      await exec(tx, 'UPDATE cards SET owner_approved_sha=$2 WHERE id=$1', [p.cardId, p.sha]);
     await approvalActivity(
       tx,
       e,

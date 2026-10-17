@@ -735,7 +735,10 @@ describe('the architect reads the whole organization (read-only), others do not'
     expect(def).toMatchObject({
       seniorityLevels: ['senior'],
       defaultModel: { model: 'opus', effort: 'high' },
-      claimableStages: [{ workflowKey: '*', stageId: 'investigate*' }],
+      claimableStages: [
+        { workflowKey: '*', stageId: 'investigate*' },
+        { workflowKey: 'code-v6', stageId: 'planning' },
+      ],
     });
     expect(def.permissions).toMatchObject({
       readOrgRepos: true,

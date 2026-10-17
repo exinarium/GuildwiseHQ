@@ -199,6 +199,9 @@ export const projectProjectors: Record<string, Projector> = {
         p.vaultDir ?? null,
       ],
     );
+    // code-v6: the full E2E suite is a manual trigger, not run after every merge.
+    if (p.workflowKey === 'code-v6')
+      await exec(tx, 'UPDATE projects SET full_suite_after_finalize=false WHERE id=$1', [p.projectId]);
     if (p.createdByUserId) {
       // Organizations: the creator is an Owner or Admin; every active Owner and Admin gets an organization grant.
       await exec(

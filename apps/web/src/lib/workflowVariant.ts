@@ -25,7 +25,7 @@ export type EditorInsertion = StageInsertionInput;
 export interface VariantRow {
   id: string;
   label: string;
-  kind: 'agent' | 'manual' | 'terminal' | 'subworkflow' | 'human';
+  kind: 'agent' | 'manual' | 'terminal' | 'subworkflow' | 'human' | 'server';
   claimRole: string | null;
   doneCriteria: string;
   inserted: boolean;

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { BuildHandoffDataSchema } from '../cards/lean-v6.ts';
 import { ReviewData, TestEvidence } from '../cards/types.ts';
 import { CeoDoneDataSchema, CeoReportDataSchema } from '../ceo/ipc.ts';
 import { DevopsApprovalDataSchema, DevopsDoneDataSchema } from '../devops/index.ts';
@@ -112,6 +113,8 @@ export type InvestigationData = z.infer<typeof InvestigationDataSchema>;
 /** Data attached to an outcome report, by the outcome's `data` kind. `diffStats` is attached by the runner, not the agent. */
 export function outcomeDataSchema(kind: string): z.ZodType {
   switch (kind) {
+    case 'buildHandoff':
+      return BuildHandoffDataSchema;
     case 'review':
       return ReviewData;
     case 'testEvidence':
@@ -282,6 +285,9 @@ export const RpcMethodSchema = z.enum([
   'card.facts',
   /** Lean Team v3: record a dependency between open cards of a project, add only (`aom block --on dependency <ref>`). */
   'card.depend',
+  /** Lean Team v3 (code-v6): the planner or architect puts a card in a group (`aom group set <id>`) and writes its Card Brief (`aom brief`). */
+  'card.group',
+  'card.brief',
   /** Lean Team v3: has the question of this shift been answered yet (`aom question --wait` polls it). */
   'question.status',
   /** The tester's environment (#59): `aom env info|logs|restart|suites`, answered by the runner (suites: by the server). */

@@ -1,4 +1,10 @@
-import { QA_FOCUS_MAX, type ReviewRiskDto, RISK_ANALYSIS_MAX, type StoredReviewRisk } from '@aom/shared';
+import {
+  type LeanCardDto,
+  QA_FOCUS_MAX,
+  type ReviewRiskDto,
+  RISK_ANALYSIS_MAX,
+  type StoredReviewRisk,
+} from '@aom/shared';
 import type { Row } from '../db/sql.ts';
 
 /** The reviewer's risk call stored on the card (`cards.review_risk`, backlog #70). */
@@ -54,6 +60,30 @@ export const isHighRisk = (card: Row): boolean => riskOf(card)?.level === 'high'
 
 export const HIGH_RISK_MERGE_REASON =
   'the reviewer rated the change HIGH risk, so the merge needs the manager approval (the project setting that waives approval of large merges does not apply)';
+
+/** The code-v6 facts of a card for the web (group, Card Brief, head commit, evidence, high risk, owner approval decision). */
+export function leanCardDto(card: Row): LeanCardDto {
+  const ev = card.build_evidence as {
+    sha: string;
+    commands?: Array<{ kind: string; command: string; status: string; result: string }>;
+    waived?: string;
+    at: string;
+  } | null;
+  return {
+    groupId: card.group_id ?? null,
+    cardBrief: card.card_brief ?? null,
+    headSha: card.head_sha ?? null,
+    highRisk: card.high_risk === true,
+    highRiskPaths: ((card.high_risk_paths ?? []) as string[]).slice(0, 50),
+    evidence: ev ? { sha: ev.sha, commands: ev.commands ?? [], waived: ev.waived ?? null, at: ev.at } : null,
+    ownerApproval: {
+      required: card.owner_approval_required ?? null,
+      reason: card.owner_approval_reason ?? null,
+      approvedSha: card.owner_approved_sha ?? null,
+    },
+    testDeploy: card.test_deploy_state ?? null,
+  };
+}
 
 export function reviewRiskDto(card: Row): ReviewRiskDto | null {
   const r = riskOf(card);

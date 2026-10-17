@@ -72,6 +72,7 @@ const HUMAN_ENTRY_EVENTS = new Set([
   'QaSkipped',
   'CardFinalized',
   'CardReopened',
+  'OwnerApprovalLapsed',
 ]);
 const INTEREST = [...new Set([...HUMAN_ENTRY_EVENTS, ...END_EVENTS])];
 
@@ -101,7 +102,7 @@ export async function sweepSubworkflows(ctx: Ctx): Promise<number> {
   const any = await one(
     ctx.pool,
     `SELECT 1 FROM workflow_stages s JOIN workflow_versions v ON v.id = s.workflow_version_id
-      WHERE s.kind = 'subworkflow' OR (s.kind = 'human' AND NOT (v.org_id IS NULL AND v.key = 'code' AND s.stage_id = 'manual_qa'))
+      WHERE s.kind = 'subworkflow' OR (s.kind = 'human' AND NOT (v.org_id IS NULL AND v.key IN ('code','code-v6') AND s.stage_id = 'manual_qa'))
       LIMIT 1`,
   );
   let done = 0;

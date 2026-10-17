@@ -10,6 +10,7 @@ import { closeAdminPool, q as rawQ } from './helpers/db.ts';
 
 // rows as loose records (the tests read columns by name)
 const q = async (sql: string, params?: unknown[]): Promise<any[]> => (await rawQ(sql, params)) as any[];
+
 import { FakeRunner } from './helpers/fake-runner.ts';
 import { createWorld, MOCK_RUNTIME, ok, pairWorkstation, until, type World } from './helpers/world.ts';
 

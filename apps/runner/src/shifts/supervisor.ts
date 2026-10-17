@@ -69,6 +69,7 @@ import {
   architectVerifyMerge,
   type GitReply,
 } from '../git/architect-git.ts';
+import { computeCardDiff } from '../git/card-diff.ts';
 import { computeDiffStats, riskTier } from '../git/diffstat.ts';
 import { git, originBranchNames } from '../git/git.ts';
 import { NO_IDENTITY_WIRE, resolveCommitIdentity } from '../git/identity.ts';
@@ -101,6 +102,7 @@ import type { RunManager } from '../runs/manager.ts';
 import { cleanAgentTmp, ensureSandbox, holdAgentTmp, type Sandbox, sandboxEnv } from '../sandbox/sandbox.ts';
 import type { TargetSecrets } from '../secrets/targets.ts';
 import { copySessionTranscript, SessionRegistry } from '../sessions/registry.ts';
+import { e2eAreasSection } from '../testing/e2e-areas.ts';
 import {
   defaultEnvChecker,
   type EnvChecker,
@@ -274,6 +276,8 @@ interface ActiveShift {
   brief?: ShiftBrief;
   /** Resumed after a runner restart: the server already holds the claim and has seen accepted/started. */
   resumed?: boolean;
+  /** The card branch was rebased (or merged) onto its base before the shift: the commit moved with it. */
+  rebased?: boolean;
   startedSent?: boolean;
   sandbox?: Sandbox;
   /** The commit identity resolved for this shift (project setting, repository, workstation); null when none is set. */
@@ -753,7 +757,9 @@ export class ShiftSupervisor {
             : {}),
         });
         if (msg.prepare.rebase && !s.resumed)
-          await rebaseOntoBase(s.worktree.path, msg.worktree.baseBranch, msg.commitAs ?? null);
+          s.rebased = ['rebased', 'merged'].includes(
+            await rebaseOntoBase(s.worktree.path, msg.worktree.baseBranch, msg.commitAs ?? null),
+          );
         if (sync && s.worktree.created) await this.finishMainSync(s, sync);
         else await this.resumeMainMerge(s);
       } catch (err) {
@@ -917,6 +923,11 @@ export class ShiftSupervisor {
       mkdirSync(attachDir, { recursive: true });
     }
     if (s.syncMain && msg.kind === 'card') texts.prompt += `\n${mainSyncNote(s.syncMain)}\n`;
+    // code-v6: the tester runs the E2E specs of the areas the card touches, not the whole suite.
+    if (msg.kind === 'card' && msg.brief.e2e) {
+      const areas = await e2eAreasSection(msg.brief, s.worktree?.path ?? null).catch(() => undefined);
+      if (areas) texts.prompt += `\n${areas.text}\n`;
+    }
     const tc = this.deps.toolchains?.resolve();
     if (tc && msg.kind !== 'devops')
       texts.instructions += `\n${toolchainNote(describeToolchains(tc.entries))}\n`;
@@ -1063,6 +1074,7 @@ export class ShiftSupervisor {
                 baseBranch: s.worktree.baseBranch,
                 created: s.worktree.created,
                 headSha: s.startSha ?? s.worktree.headSha,
+                ...(s.rebased ? { rebased: true } : {}),
               },
             }
           : {}),
@@ -2049,7 +2061,7 @@ export class ShiftSupervisor {
           if ('error' in prepared) return rejected(prepared.error);
           toSend = { ...toSend, data: prepared.data as unknown as Record<string, unknown> };
         }
-        if (outcome.kind === 'success' && outcome.data === 'diffStats') {
+        if (outcome.kind === 'success' && (outcome.data === 'diffStats' || outcome.data === 'buildHandoff')) {
           if (msg.agent.permissions.mayCommit) {
             await autoCommit({
               worktree: s.worktree.path,
@@ -2067,6 +2079,12 @@ export class ShiftSupervisor {
                 : '',
           });
           attach = { diffStats: stats, riskTier: riskTier(stats, msg.brief.card.cardType) };
+          // code-v6: the commit the evidence is bound to, the changed paths (the server computes the high-risk flag from
+          // them) and the diff for the owner approval. Measured after the autocommit above, by the runner, never by the agent.
+          if (outcome.data === 'buildHandoff') {
+            const cd = await computeCardDiff(s.worktree.path, s.worktree.baseBranch);
+            attach = { ...attach, headSha: cd.headSha, changedPaths: cd.changedPaths, diff: cd.diff };
+          }
         }
       }
     }

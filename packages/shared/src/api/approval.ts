@@ -5,6 +5,55 @@ import { IsoTime } from './common.ts';
  * An approval step on a card (backlog #16). `state`: `open` while the approver has not decided, `approved` when the card
  * moved on, `sent_back` while it is back with the earlier step.
  */
+/**
+ * What the owner approval step of code-v6 shows besides the buttons: the commit the approval is for, why it is needed, the
+ * stored diff (the view loads it from `GET /api/cards/:id/diff`), the builder's evidence and the review verdicts.
+ */
+export const ApprovalReviewInfoSchema = z.object({
+  /** The commit the approval is bound to (the one whose diff is shown); null when none was recorded. */
+  sha: z.string().nullable(),
+  /** The branch moved after the diff was shown: an approval is refused until the card is asked again. */
+  stale: z.boolean(),
+  highRisk: z.boolean(),
+  highRiskPaths: z.array(z.string()),
+  riskTier: z.string().nullable(),
+  /** Why the owner approves (large, high risk, the project asks for every change). */
+  reason: z.string().nullable(),
+  diff: z.object({ bytes: z.number().int(), truncated: z.boolean(), files: z.number().int() }).nullable(),
+  evidence: z
+    .object({
+      commands: z.array(
+        z.object({ kind: z.string(), command: z.string(), status: z.string(), result: z.string() }),
+      ),
+      waived: z.string().nullable(),
+    })
+    .nullable(),
+  verdicts: z.array(
+    z.object({
+      reviewerName: z.string(),
+      score: z.number().int(),
+      risk: z.string().nullable(),
+      comments: z.string(),
+    }),
+  ),
+  /** The architect's design summary (the card's investigation) and the Card Brief. */
+  designSummary: z.string().nullable(),
+  cardBrief: z.string().nullable(),
+});
+export type ApprovalReviewInfo = z.infer<typeof ApprovalReviewInfoSchema>;
+
+/** `GET /api/cards/:id/diff`: the unified diff stored at the review handoff (capped at 2 MB). */
+export const CardDiffResponseSchema = z.object({
+  sha: z.string(),
+  base: z.string(),
+  body: z.string(),
+  bytes: z.number().int(),
+  truncated: z.boolean(),
+  files: z.number().int(),
+  at: IsoTime,
+});
+export type CardDiffResponse = z.infer<typeof CardDiffResponseSchema>;
+
 export const CardApprovalSchema = z.object({
   state: z.enum(['open', 'approved', 'sent_back']),
   stageId: z.string(),
@@ -29,6 +78,8 @@ export const CardApprovalSchema = z.object({
   /** The viewer may approve or send back (the approver, the organization's Owner and Admins, the project owner). */
   canAct: z.boolean(),
   deskItemId: z.uuid().nullable(),
+  /** code-v6: the owner approval's review information (absent for an approval step of the older workflows). */
+  review: ApprovalReviewInfoSchema.optional(),
 });
 export type CardApproval = z.infer<typeof CardApprovalSchema>;
 

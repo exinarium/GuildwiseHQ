@@ -1,7 +1,8 @@
 import type { DeskItemDto } from '@aom/shared';
 import { useState } from 'react';
 import { Link } from 'react-router';
-import { useApprovalSendBack, useApprove } from '../api/queries/approval.ts';
+import { useApprovalSendBack, useApprove, useCardDiff } from '../api/queries/approval.ts';
+import { DiffView } from './DiffView.tsx';
 import { Button, ErrorBox, TextArea } from './ui.tsx';
 
 /** The desk item of an approval step: approve, or send the card back with a comment (same actions as the card page). */
@@ -11,6 +12,8 @@ export function ApprovalDeskItem({ item }: { item: DeskItemDto }) {
   const sendBack = useApprovalSendBack(cardId);
   const [note, setNote] = useState('');
   const [failing, setFailing] = useState(false);
+  const [showDiff, setShowDiff] = useState(false);
+  const diff = useCardDiff(cardId, showDiff);
   const busy = approve.isPending || sendBack.isPending;
   if (!item.card) return <p className="mt-2 text-sm text-subtle">This card is gone.</p>;
   return (
@@ -21,6 +24,19 @@ export function ApprovalDeskItem({ item }: { item: DeskItemDto }) {
         </Link>{' '}
         to look at it first, or decide here.
       </p>
+      {/* code-v6: the owner reads the final diff of the reviewed commit before approving it (a card without one has none). */}
+      <div className="flex flex-col gap-2">
+        <Button
+          variant="secondary"
+          onClick={() => setShowDiff((o) => !o)}
+          data-testid="approval-desk-diff-toggle"
+        >
+          {showDiff ? 'Hide the diff' : 'Show the diff'}
+        </Button>
+        {showDiff && diff.isLoading && <p className="text-sm text-subtle">Loading the diff…</p>}
+        {showDiff && diff.error && <p className="text-sm text-subtle">No diff was stored for this card.</p>}
+        {showDiff && diff.data && <DiffView diff={diff.data.body} truncated={diff.data.truncated} />}
+      </div>
       <TextArea
         label={failing ? 'What is missing? (required)' : 'Note (optional)'}
         value={note}

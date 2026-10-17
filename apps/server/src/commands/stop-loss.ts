@@ -108,8 +108,10 @@ export async function stopLossBudget(db: Queryable, card: Row): Promise<StopLoss
 export function limitReached(
   usage: CardUsage,
   budget: StopLossBudget,
-  next: { reviewRound?: boolean } = {},
+  next: { reviewRound?: boolean; preReview?: boolean } = {},
 ): 'review rounds' | 'build passes' | 'shifts' | null {
+  // code-v6 pre-review: a Sonnet pass, not an Opus round; only the build passes it causes are capped.
+  if (next.preReview) return usage.buildPasses >= budget.buildPasses ? 'build passes' : null;
   const rounds = usage.reviewRounds + (next.reviewRound ? 1 : 0);
   if (next.reviewRound && rounds >= budget.reviewRounds) return 'review rounds';
   if (next.reviewRound && usage.buildPasses >= budget.buildPasses) return 'build passes';

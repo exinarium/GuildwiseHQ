@@ -66,6 +66,17 @@ const CASES: Record<string, SmokeCase> = {
       r.outcomeId === 'approve' &&
       typeof (r.data as { riskAnalysis?: unknown }).riskAnalysis === 'string',
   },
+  // code-v6: the planner hands its planning note over from a file, the pre-reviewer approves without a risk analysis.
+  planner: {
+    files: { 'note.md': 'smoke test of the planning note\n' },
+    argv: ['plan', '--note-file', '{scratch}/note.md'],
+    expect: (r) => r.kind === 'outcome' && r.outcomeId === 'planned',
+  },
+  pre_reviewer: {
+    files: { 'note.md': 'smoke test of the pre-review\n' },
+    argv: ['review', 'approve', '--score', '5', '--note-file', '{scratch}/note.md'],
+    expect: (r) => r.kind === 'outcome' && r.outcomeId === 'approve',
+  },
   tester: {
     files: { 'evidence.md': 'smoke test evidence\n' },
     argv: ['test', 'pass', '--evidence', 'smoke test'],

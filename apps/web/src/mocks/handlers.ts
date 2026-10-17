@@ -203,6 +203,7 @@ export const handlers = [
       return err(409, 'conflict', `Project key ${b.key} already exists`);
     const project = {
       ...b,
+      workflowKey: b.workflowKey ?? 'code',
       id: uuid(),
       orgId: ORG_ID,
       rank: Math.max(0, ...db.projects.map((p) => p.rank ?? 0)) + 1,

@@ -7,11 +7,13 @@ import {
   type FinalizeExecutePayload,
   type FinalizeResult,
   FinalizeResultSchema,
+  getStage,
   isSafeGitRef,
   type StoredCompletionAction,
   streamId,
 } from '@aom/shared';
 import type { AuthSession } from '../auth/sessions.ts';
+import { loadWorkflowById } from '../catalogue/loader.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Queryable, type Row } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
@@ -48,12 +50,67 @@ export async function mergeGate(
   card: Row,
   action: StoredCompletionAction,
 ): Promise<MergeGate> {
+  // code-v6: the owner approved (or the policy waived it) at the approval step after the review, bound to the reviewed
+  // commit; the merge does not ask again (the lapse check below guards the commit).
+  if (await hasOwnerApprovalStep(db, card)) return 'none';
   if (isHighRiskMerge(card, action)) return 'approval'; // the project's waiver does not apply to a high risk
   if (!isLargeMerge(card, action)) return 'none';
   const p = await one(db, 'SELECT merge_large_without_approval AS waived FROM projects WHERE id=$1', [
     card.project_id,
   ]);
   return p?.waived ? 'waived' : 'approval';
+}
+
+/** Does the card's workflow have the owner approval step after the review (code-v6)? */
+export async function hasOwnerApprovalStep(db: Queryable, card: Row): Promise<boolean> {
+  return !!(await one(
+    db,
+    `SELECT 1 FROM workflow_stages WHERE workflow_version_id=$1 AND stage_id='owner_approval'`,
+    [card.workflow_version_id],
+  ));
+}
+
+/**
+ * The owner's approval is bound to the reviewed commit. When the branch is at another commit than the one the owner
+ * approved, the approval no longer counts: nothing is merged and the card returns to the approval step.
+ */
+export async function ownerApprovalLapse(
+  db: Queryable,
+  card: Row,
+): Promise<{ approvedSha: string; actualSha: string } | null> {
+  if (card.owner_approval_required !== true || !card.head_sha || !card.owner_approved_sha) return null;
+  if (card.owner_approved_sha === card.head_sha) return null;
+  if (!(await hasOwnerApprovalStep(db, card))) return null;
+  return { approvedSha: card.owner_approved_sha as string, actualSha: card.head_sha as string };
+}
+
+/** The events that send a card whose approval lapsed back to the approval step (the caller appends them). */
+export function ownerApprovalLapsedEvents(
+  card: Row,
+  lapse: { approvedSha: string; actualSha: string },
+): AppendInput[] {
+  return [
+    {
+      streamId: streamId.card(card.id),
+      event: {
+        type: 'OwnerApprovalLapsed',
+        payload: {
+          cardId: card.id,
+          approvedSha: lapse.approvedSha,
+          actualSha: lapse.actualSha,
+          fromStage: card.stage,
+        },
+      },
+      actor: SYSTEM_ACTOR,
+      scope: projectScope(card.org_id, card.project_id),
+    },
+    cardMessage(
+      card,
+      { kind: 'system' },
+      'system',
+      `The owner approved ${lapse.approvedSha.slice(0, 10)} but ${card.ref} is at ${lapse.actualSha.slice(0, 10)} now: the approval no longer counts and nothing was merged. The card is back at the owner approval for the new commit.`,
+    ),
+  ];
 }
 
 /** The ticket in a pull request branch name: the tracker key the card came from (Jira), else the card ref. */
@@ -100,6 +157,8 @@ export async function queueExecute(tx: Tx, card: Row, action: CompletionAction):
     prBody: card.title,
     ...(repo.forge_kind ? { forge: repo.forge_kind } : {}),
     commitAs: await loadCommitAs(tx, project.id),
+    // code-v6: the runner lands only the commit that was reviewed (and approved).
+    ...(card.head_sha && card.build_evidence ? { expectedSha: card.head_sha as string } : {}),
   };
   await enqueueRunnerCommand(tx, card.home_workstation_id, 'finalize.execute', payload as never);
   return card.home_workstation_id;
@@ -186,6 +245,11 @@ export async function requestFinalize(
     const inherited = await effectiveCompletionAction(tx, card);
     const action: CompletionAction | null = req.action ?? inherited;
     if (!action) throw conflict('no_completion_action', 'the card has no completion action');
+    const lapse = await ownerApprovalLapse(tx, card);
+    if (lapse) {
+      await ctx.store.append(ownerApprovalLapsedEvents(card, lapse), { tx });
+      return { cardId: card.id, ref: card.ref, state: 'awaiting_approval', action, deskItemId: null };
+    }
     const scope = projectScope(card.org_id, card.project_id);
     const events: AppendInput[] = [];
     // Choosing what the card would get anyway stores nothing: only a different landing is a card-level override.
@@ -448,25 +512,79 @@ export async function applyFinalizeResult(
           branchName: card.branch_name ?? undefined,
           deleteBranch: action === 'merge' && !!result.mergeCommit,
         });
+    } else if (ok && result?.headMoved) {
+      // code-v6: the branch is not at the commit that was reviewed: nothing was landed.
+      const actualSha = result.headSha ?? (card.head_sha as string);
+      if (card.owner_approval_required === true)
+        events.push(
+          ...ownerApprovalLapsedEvents(card, {
+            approvedSha: (card.owner_approved_sha ?? card.head_sha) as string,
+            actualSha,
+          }),
+        );
+      else
+        events.push(
+          {
+            streamId: streamId.card(card.id),
+            event: {
+              type: 'EvidenceLapsed',
+              payload: {
+                cardId: card.id,
+                stage: card.stage,
+                expectedSha: card.head_sha as string,
+                actualSha,
+              },
+            },
+            actor: SYSTEM_ACTOR,
+            scope,
+          },
+          cardMessage(
+            card,
+            { kind: 'system' },
+            'system',
+            `The card branch is at ${actualSha.slice(0, 10)} but ${String(card.head_sha).slice(0, 10)} was reviewed: nothing was merged and the card goes back to Build.`,
+          ),
+        );
     } else if (ok && result?.conflict) {
-      events.push(
-        ...rebaseConflictEvents(
-          card,
-          workstationId,
-          'finalize',
-          card.base_branch ?? '',
-          result.conflictedFiles ?? [],
-        ),
-        ...(await cardConflictAttemptEvents(
-          ctx,
-          tx,
-          card,
-          workstationId,
-          'finalize',
-          card.base_branch ?? '',
-          result.conflictedFiles ?? [],
-        )),
+      const attempt = await cardConflictAttemptEvents(
+        ctx,
+        tx,
+        card,
+        workstationId,
+        'finalize',
+        card.base_branch ?? '',
+        result.conflictedFiles ?? [],
       );
+      // code-v6: a card that was reviewed and approved is not sent back to Build for a merge conflict. DevOps resolves it in
+      // a scratch worktree while the card waits in Finalize; the resolution then gets a merge review, which keeps the earlier
+      // approvals when it only merged (dispatcher/bottleneck.ts `unparkPass`).
+      const held =
+        attempt.some((a) => a.event.type === 'ConflictAttemptStarted') &&
+        !!getStage(
+          (await loadWorkflowById(tx, card.workflow_version_id))?.definition ?? { stages: [] },
+          'merge_review',
+        );
+      if (held)
+        events.push(
+          {
+            streamId: streamId.card(card.id),
+            event: { type: 'FinalizeConflictHeld', payload: { cardId: card.id } },
+            actor: SYSTEM_ACTOR,
+            scope,
+          },
+          ...attempt,
+        );
+      else
+        events.push(
+          ...rebaseConflictEvents(
+            card,
+            workstationId,
+            'finalize',
+            card.base_branch ?? '',
+            result.conflictedFiles ?? [],
+          ),
+          ...attempt,
+        );
     } else {
       const message = result?.error ?? error ?? 'the completion action failed';
       ctx.log.warn({ cardId: card.id, ref: card.ref, action, error: message }, 'finalize failed');

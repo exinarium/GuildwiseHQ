@@ -104,6 +104,19 @@ export async function executeCompletion(input: CompletionInput): Promise<Finaliz
   const dirty = (await statusLinesWithoutStubs(wt)).lines.join('\n').trim();
   if (dirty) return fail(action, `the card worktree has uncommitted changes:\n${dirty.slice(0, 500)}`);
 
+  // code-v6: the review and the owner's approval were for one commit; another one is not landed.
+  if (p.expectedSha) {
+    const head = (await git(wt, ['rev-parse', 'HEAD'])).stdout.trim();
+    if (head && head !== p.expectedSha)
+      return {
+        ok: false,
+        action,
+        headMoved: true,
+        headSha: head,
+        error: `the card branch is at ${head.slice(0, 10)} but ${p.expectedSha.slice(0, 10)} was reviewed`,
+      };
+  }
+
   try {
     await rebaseOntoBase(wt, p.baseBranch, p.commitAs);
   } catch (err) {

@@ -101,7 +101,10 @@ describe('Investigate & design inserted after test in a variant of code v2', () 
     const res = await ok<any>(w.t.req('GET', `/api/roles?projectId=${w.projectId}`, owner()));
     const arch = res.roles.find((x: any) => x.definition.key === 'architect');
     expect(arch).toBeTruthy();
-    expect(arch.definition.claimableStages).toEqual([{ workflowKey: '*', stageId: 'investigate*' }]);
+    expect(arch.definition.claimableStages).toEqual([
+      { workflowKey: '*', stageId: 'investigate*' },
+      { workflowKey: 'code-v6', stageId: 'planning' },
+    ]);
   });
 
   it('validates with the built-in architect, and the owner approves it', async () => {

@@ -55,7 +55,8 @@ export function columnFor(
     card.status === 'waiting' &&
     !isFinalizeWait(card) &&
     stage.kind !== 'subworkflow' &&
-    stage.kind !== 'human'
+    stage.kind !== 'human' &&
+    stage.kind !== 'server'
   )
     return COLUMN.waiting;
   if (stage.id === 'build') {

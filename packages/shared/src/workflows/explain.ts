@@ -293,6 +293,27 @@ const SPEC: Record<IssueCode, Spec> = {
     text: ({ step }) =>
       `${step} needs a running environment, but the role chosen for it cannot run commands to test it. Pick a role with a shell, such as the tester.`,
   },
+  server_missing_config: {
+    field: 'kind',
+    text: ({ step }) => `${step} is a step the server runs but does not say which. This is a built-in step.`,
+  },
+  server_config_misplaced: {
+    field: 'kind',
+    text: ({ step }) => `${step} carries settings for a server step but is not one.`,
+  },
+  server_has_role: {
+    field: 'role',
+    text: ({ step }) => `${step} is run by the server, so it takes no role.`,
+  },
+  env_strict_misplaced: {
+    field: 'kind',
+    text: ({ step }) =>
+      `${step} is set to start only on a prepared environment but does not use an environment.`,
+  },
+  evidence_misplaced: {
+    field: 'kind',
+    text: ({ step }) => `${step} asks for build evidence but is not an agent step.`,
+  },
   approval_missing_approver: {
     field: 'role',
     text: ({ step }) => `${step} waits for an approval but does not say who approves. Choose the approver.`,

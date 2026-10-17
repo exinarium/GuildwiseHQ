@@ -1,6 +1,19 @@
-import type { ApprovalApproveRequest, ApprovalSendBackRequest } from '@aom/shared';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { post } from '../client.ts';
+import {
+  type ApprovalApproveRequest,
+  type ApprovalSendBackRequest,
+  type CardDiffResponse,
+  CardDiffResponseSchema,
+} from '@aom/shared';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { get, post } from '../client.ts';
+
+/** The diff stored at the review handoff (code-v6), loaded when the owner opens it. */
+export const useCardDiff = (cardId: string, enabled: boolean, sha?: string | null) =>
+  useQuery({
+    queryKey: ['card-diff', cardId, sha ?? null],
+    enabled: enabled && !!cardId,
+    queryFn: () => get<CardDiffResponse>(`/cards/${cardId}/diff`, CardDiffResponseSchema),
+  });
 
 /** Approval-step actions on a card (backlog #16). Each refreshes the card, the board and the desk. */
 function useApprovalAction<V>(fn: (v: V) => Promise<unknown>) {

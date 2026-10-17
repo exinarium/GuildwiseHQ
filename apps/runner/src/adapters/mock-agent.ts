@@ -133,8 +133,30 @@ async function report(brief: Brief, action: Action): Promise<{ code: number; out
   const outcomes = brief.shift.outcomes;
   const has = (id: string) => outcomes.some((o) => o.id === id);
 
+  // code-v6: the planner writes the Card Brief and hands the planning note to the architect.
+  if (has('planned')) {
+    aom(['brief', '--text', `mock Card Brief for ${brief.card.ref}: build what the card says.`]);
+    return aom(['plan', '--note', `mock planning note for ${brief.card.ref}`]);
+  }
   if (has('handoff') && !failing)
-    return aom(['handoff', '--note', `mock ${stage} round ${brief.card.reworkRound + 1}`]);
+    return aom([
+      'handoff',
+      '--note',
+      `mock ${stage} round ${brief.card.reworkRound + 1}`,
+      // code-v6 handoffs carry the build and unit test evidence
+      ...(outcomes.find((o) => o.id === 'handoff')?.data === 'buildHandoff'
+        ? [
+            '--build-command',
+            'mock build',
+            '--build-result',
+            'mock: build ok',
+            '--test-command',
+            'mock unit tests',
+            '--test-result',
+            'mock: 3 passed',
+          ]
+        : []),
+    ]);
   if (has('approve') && has('changes')) {
     return failing
       ? aom([

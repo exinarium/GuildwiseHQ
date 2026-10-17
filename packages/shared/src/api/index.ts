@@ -24,6 +24,7 @@ export * from './intake.ts';
 export * from './integrations.ts';
 export * from './interests.ts';
 export * from './invitations.ts';
+export * from './lean-v6.ts';
 export * from './ledger.ts';
 export * from './mail.ts';
 export * from './members.ts';

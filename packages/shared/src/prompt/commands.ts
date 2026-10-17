@@ -13,7 +13,11 @@ export const AOM_NO_PIPES_NOTE =
 /** The exact `aom` command line an agent runs to report `outcome` (docs/ARCHITECTURE.md section 13.4). */
 export function commandForOutcome(outcome: BriefOutcome): string {
   switch (outcome.id) {
+    case 'planned':
+      return 'aom plan --note "<planning note for the architect: affected areas and files, relevant docs, overlaps with other cards, what you grouped and why>"';
     case 'handoff':
+      if (outcome.data === 'buildHandoff')
+        return 'aom handoff --note "<what you did, what to look at, anything risky>" --build-command "<build command you ran>" --build-result "<what it printed>" --test-command "<unit test command you ran>" --test-result "<what it printed>"   # or --no-evidence "<why there is nothing to build or test>"';
       if (outcome.data === 'investigation')
         return 'aom design --report <report path> --summary "<3-6 lines for the builder: what to build and where>"';
       if (outcome.data === 'candidates')

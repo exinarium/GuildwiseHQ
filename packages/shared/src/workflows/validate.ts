@@ -64,6 +64,12 @@ export type IssueCode =
   // rule 13 (environment stages)
   | 'environment_misplaced'
   | 'environment_role_no_shell'
+  // rule 14 (server stages and code-v6 flags)
+  | 'server_missing_config'
+  | 'server_config_misplaced'
+  | 'server_has_role'
+  | 'env_strict_misplaced'
+  | 'evidence_misplaced'
   // custom workflows only
   | 'not_custom'
   | 'invalid_key'
@@ -93,7 +99,7 @@ export interface ValidationIssue {
   outcomeId?: string;
 }
 
-const MAX_STAGES_WARNING = 12;
+const MAX_STAGES_WARNING = 16;
 
 /**
  * Validates a workflow definition (draft save and again before approval). Returns errors and warnings;
@@ -493,6 +499,8 @@ export function validateWorkflow(
   // (it starts commands that talk to the running app). The role is checked when it is known.
   for (const s of def.stages) {
     if (s.environment !== 'project') continue;
+    // A server stage (the test deploy) starts the environment; the agent stage after it uses it.
+    if (s.kind === 'server') continue;
     if (s.kind !== 'agent') {
       err(13, 'environment_misplaced', `stage '${s.id}': only agent stages can need an environment`, s.id);
       continue;
@@ -505,6 +513,27 @@ export function validateWorkflow(
         `stage '${s.id}' needs a running environment but role '${role.key}' has no shell to test it with`,
         s.id,
       );
+  }
+
+  // Rule 14: a server stage is run by the server (no role, a `server` block); the code-v6 flags sit on the right stages.
+  for (const s of def.stages) {
+    if (s.kind !== 'server') {
+      if (s.server)
+        err(
+          14,
+          'server_config_misplaced',
+          `stage '${s.id}' is not a server stage but has a server block`,
+          s.id,
+        );
+    } else if (!s.server) {
+      err(14, 'server_missing_config', `server stage '${s.id}' needs a server block`, s.id);
+    } else if (s.claimRole) {
+      err(14, 'server_has_role', `server stage '${s.id}' is run by the server: it takes no claimRole`, s.id);
+    }
+    if (s.envStrict && s.environment !== 'project')
+      err(14, 'env_strict_misplaced', `stage '${s.id}': envStrict needs environment 'project'`, s.id);
+    if (s.requireBuildEvidence && s.kind !== 'agent')
+      err(14, 'evidence_misplaced', `stage '${s.id}': only agent stages can require build evidence`, s.id);
   }
 
   // Warnings.

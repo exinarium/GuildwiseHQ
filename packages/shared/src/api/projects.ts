@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { isValidReportPath } from '../cards/fields.ts';
+import { E2eAreaMapSchema, OwnerApprovalPolicySchema } from '../cards/lean-v6.ts';
 import { EnvironmentReportSchema, EnvStateSchema, RepoCloneStateSchema } from '../devops/environment.ts';
 import { ConvertCardDecision, ProjectChangesSchema } from '../events/project.ts';
 import {
@@ -163,6 +164,10 @@ export const ProjectDtoSchema = z.object({
   mergeLargeChanged: z.object({ byName: z.string(), at: IsoTime }).nullable().optional(),
   /** Whether finishing a card automatically starts a full end-to-end test run card (default true). */
   fullSuiteAfterFinalize: z.boolean().optional(),
+  /** code-v6: when the owner approves a card after the review (large and high-risk cards by default). */
+  ownerApprovalPolicy: OwnerApprovalPolicySchema.optional(),
+  /** code-v6: the project's mapping of changed paths to E2E specs; null: derived from the E2E folders. */
+  e2eAreas: E2eAreaMapSchema.nullable().optional(),
   /** Answers and orders of this project stay at project scope (the platform project): no org-wide promotion (default off). */
   decisionsProjectOnly: z.boolean().optional(),
   /** Test a card without a test environment: the tester runs what it can and records that none was used (default off). */
@@ -280,7 +285,8 @@ export type ProjectDetailResponse = z.infer<typeof ProjectDetailResponseSchema>;
 export const CreateProjectRequestSchema = z.object({
   key: ProjectKeySchema,
   name: z.string().min(1).max(120),
-  workflowKey: z.string().min(1).default('code'),
+  /** Absent: the server's default workflow (code-v6 for new projects). */
+  workflowKey: z.string().min(1).optional(),
   branchPrefix: BranchPrefixSchema.default('aom/'),
   workingBranch: GitRefSchema.default('main'),
   subCategories: z.array(z.string()).default([]),

@@ -12,9 +12,11 @@ import {
   RepoParamsSchema,
   SetArchitectSettingsRequestSchema,
   SetConcurrencyCapRequestSchema,
+  SetE2eAreasRequestSchema,
   SetFullSuiteRequestSchema,
   SetManualQaRequestSchema,
   SetMergePolicyRequestSchema,
+  SetOwnerApprovalRequestSchema,
   SetProjectMcpServersRequestSchema,
   SetProjectPolicyRequestSchema,
   SetReferenceReposRequestSchema,
@@ -27,6 +29,12 @@ import { setArchitectSettings } from '../commands/architect.ts';
 import { cancelConversion, convertPreview, convertProject } from '../commands/convert.ts';
 import { setRepoForge, setRepoMainBranch, setRepoProjectPath } from '../commands/forges.ts';
 import { setRepoWorkingBranch } from '../commands/hygiene.ts';
+import {
+  requestFullSuite,
+  setE2eAreas,
+  setOwnerApprovalPolicy,
+  upgradeProjectWorkflow,
+} from '../commands/lean-project.ts';
 import { mcpServerCandidates, setProjectMcpServers } from '../commands/mcp-servers.ts';
 import {
   addRepo,
@@ -168,6 +176,54 @@ export function projectRoutes(ctx: Ctx) {
         return getProjectDetail(ctx, a.session.user.id, req.params.id);
       },
     );
+
+    /** code-v6: when the owner approves a card after the review; the mapping of changed paths to E2E specs. */
+    app.put(
+      '/api/projects/:id/owner-approval',
+      { schema: { params: IdParamsSchema, body: SetOwnerApprovalRequestSchema } },
+      async (req) => {
+        const a = await requireOrg(ctx, req);
+        await setOwnerApprovalPolicy(
+          ctx,
+          a.session.user,
+          { id: a.orgId, role: a.role },
+          req.params.id,
+          req.body.policy,
+        );
+        return getProjectDetail(ctx, a.session.user.id, req.params.id);
+      },
+    );
+
+    app.put(
+      '/api/projects/:id/e2e-areas',
+      { schema: { params: IdParamsSchema, body: SetE2eAreasRequestSchema } },
+      async (req) => {
+        const a = await requireOrg(ctx, req);
+        await setE2eAreas(
+          ctx,
+          a.session.user,
+          { id: a.orgId, role: a.role },
+          req.params.id,
+          req.body.mapping,
+        );
+        return getProjectDetail(ctx, a.session.user.id, req.params.id);
+      },
+    );
+
+    /** Opt-in upgrade of an existing project: new cards run on code-v6, cards in flight keep their version. */
+    app.post('/api/projects/:id/upgrade-workflow', { schema: { params: IdParamsSchema } }, async (req) => {
+      const a = await requireOrg(ctx, req);
+      return upgradeProjectWorkflow(ctx, a.session.user, { id: a.orgId, role: a.role }, req.params.id);
+    });
+
+    /** The manual full E2E suite run (the automatic run after every merge is off in code-v6). */
+    app.post('/api/projects/:id/full-suite', { schema: { params: IdParamsSchema } }, async (req, reply) => {
+      const s = await requireUser(ctx, req);
+      const r = await requestFullSuite(ctx, s.user, req.params.id);
+      ctx.services.dispatcher.trigger();
+      reply.code(201);
+      return r;
+    });
 
     app.put(
       '/api/projects/:id/full-suite',

@@ -94,7 +94,12 @@ describe('manual QA workflow (code v3)', () => {
   });
 
   it('knows the derived flags as boolean fields', () => {
-    expect(Object.keys(DERIVED_BOOLEAN_FIELDS).sort()).toEqual(['manualQa', 'qaAgent']);
+    expect(Object.keys(DERIVED_BOOLEAN_FIELDS).sort()).toEqual([
+      'manualQa',
+      'mergeReview',
+      'ownerApproval',
+      'qaAgent',
+    ]);
     expect(fieldCatalogue('code').manualQa?.kind).toBe('boolean');
   });
 });

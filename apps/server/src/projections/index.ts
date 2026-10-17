@@ -5,6 +5,7 @@ import { cardProjectors } from './cards.ts';
 import { catalogueProjectors } from './catalogue.ts';
 import { ceoProjectors } from './ceo.ts';
 import { chatProjectors } from './chats.ts';
+import { codeV6Projectors } from './code-v6.ts';
 import { commitAsProjectors } from './commit-as.ts';
 import { costProjectors } from './costs.ts';
 import { deskProjectors } from './desk.ts';
@@ -85,6 +86,7 @@ const domains: Array<Record<string, Projector>> = [
   commitAsProjectors,
   ceoProjectors,
   questionFlowProjectors,
+  codeV6Projectors,
 ];
 
 export function buildProjectors(): ProjectorMap {
@@ -128,6 +130,7 @@ export const PROJECTION_TABLES = [
   'ceo_memories',
   'cards',
   'card_dependencies',
+  'card_groups',
   'subworkflow_runs',
   'card_handoffs',
   'card_transitions',

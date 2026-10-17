@@ -11,7 +11,7 @@ import type {
 export interface GraphNode {
   id: string;
   label: string;
-  kind: 'agent' | 'manual' | 'terminal' | 'subworkflow' | 'human';
+  kind: 'agent' | 'manual' | 'terminal' | 'subworkflow' | 'human' | 'server';
   role: string | null;
   layer: number;
   row: number;

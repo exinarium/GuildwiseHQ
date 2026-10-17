@@ -1,23 +1,34 @@
 import { randomUUID } from 'node:crypto';
 import {
   allowedOutcomes,
+  BuildEvidenceInputSchema,
+  buildEvidenceProblem,
   type ClaimReleaseReason,
+  capDiff,
+  DEFAULT_OWNER_APPROVAL_POLICY,
   DESK_SUBKIND,
   type DiffStats,
   type DigestData,
   getOutcome,
   getStage,
+  highRiskPaths,
+  highRiskSummary,
   type InvestigationData,
   isSuiteOrigin,
   isValidReportPath,
   type LedgerMatch,
   NO_COMMIT_IDENTITY_CODE,
   NO_COMMIT_IDENTITY_MESSAGE,
+  OWNER_APPROVAL_REASON_TEXT,
+  type OwnerApprovalPolicy,
+  type OwnerApprovalReason,
   outcomeDataSchema,
+  ownerApprovalDecision,
   type RunnerToServerOf,
   requiredMissing,
   resolveOutcome,
   type ShiftEndOutcome,
+  type StoredBuildEvidence,
   streamId,
   type TestEvidence,
   WorkflowResolveError,
@@ -47,7 +58,7 @@ import { affinityEvent } from './question-flow.ts';
 import { raiseQuestion } from './questions.ts';
 import { rebaseConflictEvents } from './rebase.ts';
 import { buildPublicationEvents } from './research.ts';
-import { riskFields } from './review-risk.ts';
+import { mergeRisk, riskFields, type StoredRisk } from './review-risk.ts';
 import { cardUsage, limitReached, stopLossBudget, stopLossEvents } from './stop-loss.ts';
 import {
   endTestEnvironmentIn,
@@ -273,6 +284,12 @@ export async function applyShiftReport(
     scope,
   });
 
+  // code-v6: a review verdict is for the commit the build evidence is bound to; a verdict for another commit is refused.
+  if (outcome.kind === 'success' && REVIEW_STAGES.has(card.stage) && card.build_evidence) {
+    const problem = reviewShaProblem(card, shift);
+    if (problem) return { accepted: false, error: problem };
+  }
+
   let handoffData: Record<string, unknown> = payloadData;
   let main: AppendInput | undefined;
   let mains: AppendInput[] | null = null;
@@ -288,9 +305,42 @@ export async function applyShiftReport(
       const riskTier =
         card.risk_tier_overridden && card.risk_tier ? card.risk_tier : (msg.riskTier ?? 'small');
       handoffData = { diffStats, riskTier };
+      // code-v6: the handoff carries build and unit test evidence bound to the commit the runner measured; the server
+      // computes the high-risk flag from the paths of the diff (an agent cannot lower it) and keeps the diff for the owner.
+      let lean: Extract<ReturnType<typeof leanHandoff>, { ok: true }> | undefined;
+      if (stage.requireBuildEvidence) {
+        const built = leanHandoff(ctx, agent.id, payloadData, msg);
+        if (!built.ok) return { accepted: false, error: built.error };
+        lean = built;
+        handoffData = { diffStats, riskTier, buildEvidence: built.evidence, highRisk: built.highRisk };
+        await storeCardDiff(ctx, tx, cardId, built.evidence.sha, msg);
+        if (built.highRisk)
+          followUps.push(
+            cardMessage(
+              card,
+              { kind: 'system' },
+              'system',
+              `${card.ref} touches high-risk paths (${highRiskSummary(built.highRiskPaths).labels.join('; ')}): it needs a second Opus review and the owner's approval.`,
+            ),
+          );
+      }
       main = mk({
         type: 'ReviewRequested',
-        payload: { cardId, fromStage: 'build', toStage: resolved.toStage, riskTier, diffStats },
+        payload: {
+          cardId,
+          fromStage: 'build',
+          toStage: resolved.toStage,
+          riskTier,
+          diffStats,
+          ...(lean
+            ? {
+                headSha: lean.evidence.sha,
+                evidence: lean.evidence,
+                highRisk: lean.highRisk,
+                highRiskPaths: lean.highRiskPaths.slice(0, 50),
+              }
+            : {}),
+        },
       });
       break;
     }
@@ -302,12 +352,53 @@ export async function applyShiftReport(
             'the builder changed unit tests outside the card scope (flagged on the diff): request changes with `--reason out_of_scope_test_change`; this cannot be approved',
         };
       const tier = (card.risk_tier ?? 'small') as 'small' | 'large';
-      const required = stage.approvals?.[tier] ?? 1;
+      // code-v6: a high-risk change (paths computed by the server) needs a second Opus approval.
+      const required = Math.max(stage.approvals?.[tier] ?? 1, card.high_risk === true ? 2 : 1);
       const soFar = Number(card.review_approvals) + 1;
       // The last approval: a card on an older `code` version moves to the one with the integration test guard, and a card
       // that never had `integrationTests` takes the project's setting now (docs/design/run-and-integration-tests.md D8).
       const plan = soFar >= required ? await reviewApprovedPlan(tx, card, wf, outcome.id) : null;
-      const toStage = soFar >= required ? (plan?.toStage ?? resolved.toStage) : card.stage;
+      let toStage = soFar >= required ? (plan?.toStage ?? resolved.toStage) : card.stage;
+      // code-v6: the owner approval decision of the last approval (policy, size, high risk), recorded with its reason.
+      let ownerApproval: { required: boolean; reason: OwnerApprovalReason } | undefined;
+      if (soFar >= required && getStage(wf.definition, 'owner_approval')) {
+        const project = (await one(tx, 'SELECT * FROM projects WHERE id=$1', [card.project_id])) as Row;
+        ownerApproval = ownerApprovalDecision({
+          policy: (project.owner_approval_policy ?? DEFAULT_OWNER_APPROVAL_POLICY) as OwnerApprovalPolicy,
+          highRisk: card.high_risk === true,
+          reviewerHighRisk:
+            mergeRisk(card.review_risk as StoredRisk | null, riskFields(payloadData)).level === 'high',
+          riskTier: tier,
+          largeWaived: project.merge_large_without_approval === true,
+        });
+        toStage = resolveOutcome(
+          wf.definition,
+          { ...workflowCard, ownerApproval: ownerApproval.required },
+          card.stage,
+          outcome.id,
+        ).toStage;
+        followUps.push(
+          cardMessage(
+            card,
+            { kind: 'system' },
+            'system',
+            ownerApproval.required
+              ? `Owner approval required for ${card.ref}: ${OWNER_APPROVAL_REASON_TEXT[ownerApproval.reason]}.`
+              : `Owner approval not required for ${card.ref}: ${OWNER_APPROVAL_REASON_TEXT[ownerApproval.reason]}.`,
+          ),
+        );
+      }
+      // The second approval of a high-risk card comes from another reviewer when one is hired.
+      const another =
+        soFar < required && card.high_risk === true
+          ? await one(
+              tx,
+              `SELECT 1 AS ok FROM agents a WHERE a.org_id=$1 AND a.status='active' AND a.paused_at IS NULL AND NOT a.is_devops
+                  AND a.role_key=$2 AND a.id <> $3 AND NOT (a.id = ANY ($5::uuid[])) AND a.seniority='senior'
+                  AND (a.allowed_project_ids IS NULL OR $4::uuid = ANY (a.allowed_project_ids)) LIMIT 1`,
+              [card.org_id, agent.role_key, agent.id, card.project_id, card.excluded_agent_ids ?? []],
+            )
+          : null;
       main = mk({
         type: 'ReviewApproved',
         payload: {
@@ -321,6 +412,8 @@ export async function applyShiftReport(
           toStage,
           ...(plan?.workflowVersionId ? { workflowVersionId: plan.workflowVersionId } : {}),
           ...(plan?.integrationTests !== undefined ? { integrationTests: plan.integrationTests } : {}),
+          ...(soFar < required && card.high_risk === true && !another ? { excludeReviewer: false } : {}),
+          ...(ownerApproval ? { ownerApproval } : {}),
         },
       });
       break;
@@ -332,7 +425,7 @@ export async function applyShiftReport(
         type: 'ChangesRequested',
         payload: {
           cardId,
-          fromStage: 'review',
+          fromStage: card.stage === 'pre_review' || card.stage === 'merge_review' ? card.stage : 'review',
           toStage: 'build',
           reviewerAgentId: agent.id,
           reasons: (await outOfScopeTestChange(tx, cardId))
@@ -348,7 +441,12 @@ export async function applyShiftReport(
       // otherwise the findings go back to the builder, who keeps affinity to the card (and resumes its session).
       const usage = await cardUsage(tx, cardId);
       const budget = await stopLossBudget(tx, card);
-      const limit = limitReached(usage, budget, { reviewRound: true });
+      // The pre-review (code-v6) is not an Opus review round: only the build passes cap its loop.
+      const limit = limitReached(
+        usage,
+        budget,
+        card.stage === 'pre_review' ? { preReview: true } : { reviewRound: true },
+      );
       if (limit) {
         followUps.push(
           ...(await stopLossEvents(
@@ -648,6 +746,79 @@ export async function applyShiftReport(
   return { accepted: true, ...(acceptMessage ? { message: acceptMessage } : {}) };
 }
 
+const REVIEW_STAGES = new Set(['pre_review', 'review', 'merge_review']);
+
+/** Why a review verdict cannot be taken: the evidence, the branch and the commit the reviewer read must be one commit. */
+export function reviewShaProblem(card: Row, shift: Row): string | null {
+  const ev = card.build_evidence as { sha?: string } | null;
+  const head = card.head_sha as string | null;
+  if (!ev?.sha || !head) return null;
+  if (ev.sha !== head)
+    return `the build evidence is for commit ${ev.sha.slice(0, 10)} but the card branch is at ${head.slice(0, 10)}: the code changed after the builder's evidence. Request changes so the builder runs the build and tests again and hands off`;
+  const read = shift.start_sha as string | null;
+  if (read && read !== head)
+    return `you read commit ${read.slice(0, 10)} but the card branch is at ${head.slice(0, 10)} now: this verdict is not for the commit that will merge. Finish the shift without a verdict; the card is reviewed again`;
+  return null;
+}
+
+/** A code-v6 build handoff: the evidence the builder passed, bound to the commit the runner measured, and the high-risk flag. */
+function leanHandoff(
+  ctx: Ctx,
+  agentId: string,
+  data: Record<string, any>,
+  msg: RunnerToServerOf<'shift.report'>,
+):
+  | { ok: true; evidence: StoredBuildEvidence; highRisk: boolean; highRiskPaths: string[] }
+  | { ok: false; error: string } {
+  const parsed = BuildEvidenceInputSchema.safeParse(data.buildEvidence);
+  const problem = buildEvidenceProblem(parsed.success ? parsed.data : undefined);
+  if (problem) return { ok: false, error: problem };
+  if (!parsed.success) return { ok: false, error: 'the build evidence is not valid' };
+  if (!msg.headSha)
+    return {
+      ok: false,
+      error:
+        'the runner did not report the commit of this handoff, so the evidence cannot be bound to it: update the runner on this workstation',
+    };
+  const paths = highRiskPaths(msg.changedPaths ?? []);
+  return {
+    ok: true,
+    evidence: { ...parsed.data, sha: msg.headSha, at: ctx.clock.now().toISOString(), agentId },
+    highRisk: paths.length > 0,
+    highRiskPaths: paths,
+  };
+}
+
+/** Keeps the diff the runner uploaded (capped at 2 MB, cut with a note) for the owner's approval view. */
+async function storeCardDiff(
+  ctx: Ctx,
+  tx: Tx,
+  cardId: string,
+  sha: string,
+  msg: RunnerToServerOf<'shift.report'>,
+): Promise<void> {
+  if (!msg.diff) return;
+  const capped = capDiff(msg.diff.text);
+  await exec(
+    tx,
+    `INSERT INTO card_diffs (card_id, sha, base, body, bytes, truncated, files, created_at, paths)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb)
+     ON CONFLICT (card_id) DO UPDATE SET sha=EXCLUDED.sha, base=EXCLUDED.base, body=EXCLUDED.body, bytes=EXCLUDED.bytes,
+       truncated=EXCLUDED.truncated, files=EXCLUDED.files, created_at=EXCLUDED.created_at, paths=EXCLUDED.paths`,
+    [
+      cardId,
+      sha,
+      msg.diff.base,
+      capped.text,
+      Math.max(msg.diff.bytes, capped.bytes),
+      msg.diff.truncated || capped.truncated,
+      msg.diffStats?.files ?? 0,
+      ctx.clock.now(),
+      JSON.stringify(msg.changedPaths ?? []),
+    ],
+  );
+}
+
 /** The latest build handoff's diff carries the out-of-scope unit test change flag (spec: an automatic bounce). */
 async function outOfScopeTestChange(tx: Tx, cardId: string): Promise<boolean> {
   const h = await one(
@@ -745,9 +916,57 @@ export async function applyShiftStarted(ctx: Ctx, tx: Tx, ws: WsRef, msg: Runner
         actor: runnerActor(ws.id),
         scope: card ? projectScope(card.org_id, card.project_id) : orgScope(s.org_id),
       },
+      ...(card && msg.worktree ? await leanHeadEvents(tx, ws, card, s, msg.worktree) : []),
     ],
     { tx },
   );
+}
+
+/**
+ * code-v6: the commit a card shift started at against the commit the server knows. A clean rebase, a documentation commit
+ * and a builder's own commits move the head and are recorded (the evidence and the approvals follow a rebase and a
+ * documentation commit). A review shift that finds the branch at another commit than the build evidence is not for the
+ * commit that will merge: the card goes back to Build for fresh evidence and the shift is released (the runner stops it).
+ * Only a card that already has a recorded head is looked at, so cards of the older workflows are never touched.
+ */
+async function leanHeadEvents(
+  tx: Tx,
+  ws: WsRef,
+  card: Row,
+  s: Row,
+  wt: NonNullable<RunnerToServerOf<'shift.started'>['worktree']>,
+): Promise<AppendInput[]> {
+  const known = card.head_sha as string | null;
+  if (!known || known === wt.headSha) return [];
+  const scope = projectScope(card.org_id, card.project_id);
+  const observed = (source: 'rebase' | 'docs' | 'bugfix' | 'shift_start' | 'conflict'): AppendInput => ({
+    streamId: streamId.card(card.id),
+    event: { type: 'CardHeadObserved', payload: { cardId: card.id, sha: wt.headSha, source, from: known } },
+    actor: runnerActor(ws.id),
+    scope,
+  });
+  if (wt.rebased) return [observed('rebase')];
+  // A merge review reads the commit DevOps resolved a conflict to: the branch moved on purpose, the approvals follow.
+  if (card.stage === 'merge_review') return [observed('conflict')];
+  if (REVIEW_STAGES.has(card.stage) && card.build_evidence) {
+    const text = `The review of ${card.ref} found the card branch at ${wt.headSha.slice(0, 10)} but the build evidence is for ${known.slice(0, 10)}: the code changed after the builder's evidence. The card goes back to Build; the builder runs the build and the unit tests again and hands off.`;
+    return [
+      {
+        streamId: streamId.card(card.id),
+        event: {
+          type: 'EvidenceLapsed',
+          payload: { cardId: card.id, stage: card.stage, expectedSha: known, actualSha: wt.headSha },
+        },
+        actor: runnerActor(ws.id),
+        scope,
+      },
+      cardMessage(card, { kind: 'system' }, 'system', text),
+      ...(await releaseClaimEvents(tx, card, 'runner_rejected', null, 'rejected')),
+    ];
+  }
+  if (card.stage === 'docs') return [observed('docs')];
+  if (card.stage === 'build' || card.stage === 'investigate') return [observed('shift_start')];
+  return [observed('bugfix')];
 }
 
 /**

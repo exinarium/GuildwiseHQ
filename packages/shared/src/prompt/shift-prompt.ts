@@ -313,6 +313,58 @@ export function renderShiftPrompt(brief: ShiftBrief): string {
         .join('\n'),
     ),
   );
+  parts.push(section('Card Brief (from the planner and architect)', brief.cardBrief ?? ''));
+  if (brief.group)
+    parts.push(
+      section(
+        `Group ${brief.group.id}`,
+        [
+          'This card is part of a group of related cards: one builder works them in order, in one continuing session, each in its own worktree and branch.',
+          ...brief.group.cards.map((c) => `- ${c.ref} ${c.title} (${c.stage}, ${c.status})`),
+        ].join('\n'),
+      ),
+    );
+  if (brief.openCards)
+    parts.push(
+      section(
+        'Open cards of this project',
+        brief.openCards
+          .map(
+            (c) =>
+              `- ${c.ref} ${c.title} (${c.stage}${c.groupId ? `, group ${c.groupId}` : ''})${c.affectedAreas ? `: ${c.affectedAreas.replace(/\s+/g, ' ')}` : ''}`,
+          )
+          .join('\n') || 'None.',
+      ),
+    );
+  if (brief.buildEvidence) {
+    const e = brief.buildEvidence;
+    parts.push(
+      section(
+        'Build evidence (the builder built and tested this commit; do not rebuild)',
+        [
+          `Commit: ${e.sha}`,
+          ...e.commands.map(
+            (c) => `- ${c.kind}: \`${c.command}\` ${c.status}${c.result ? `: ${c.result}` : ''}`,
+          ),
+          ...(e.waived ? [`- No build or tests, because: ${e.waived}`] : []),
+        ].join('\n'),
+      ),
+    );
+  }
+  if (brief.highRisk)
+    parts.push(
+      section(
+        'High-risk change',
+        `The server flagged this change as high risk (${brief.highRisk.labels.join('; ')}). It needs a second Opus approval and the owner's approval.\n${brief.highRisk.paths.map((p) => `- ${p}`).join('\n')}`,
+      ),
+    );
+  if (brief.mergeReview)
+    parts.push(
+      section(
+        'Merge review',
+        `A merge conflict was resolved after the earlier approvals. Review the resolution only: \`git diff ${brief.mergeReview.oldHead ?? '<reviewed commit>'} ${brief.mergeReview.newHead ?? 'HEAD'}\`. The earlier approvals stand.${brief.mergeReview.touched.length ? `\nFiles the resolution touched beyond the merge:\n${brief.mergeReview.touched.map((p) => `- ${p}`).join('\n')}` : ''}`,
+      ),
+    );
   if (brief.investigation) parts.push(section('Investigation', investigationContext(brief)));
   parts.push(section('Previous handoffs', renderHandoffs(brief.handoffs)));
   if (brief.reviewRisk) parts.push(section("Reviewer's risk analysis", renderReviewRisk(brief)));

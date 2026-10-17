@@ -5,7 +5,13 @@ import type { AppendInput } from '../eventstore/types.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { agentActor, cardMessage, projectScope } from './common.ts';
 import { effectiveCompletionAction } from './completion.ts';
-import { mergeApprovalEvents, mergeGate, queueExecute } from './finalize.ts';
+import {
+  mergeApprovalEvents,
+  mergeGate,
+  ownerApprovalLapse,
+  ownerApprovalLapsedEvents,
+  queueExecute,
+} from './finalize.ts';
 import { investigationRecorded } from './investigation.ts';
 
 /**
@@ -112,6 +118,16 @@ export async function baFinalizeEvents(
       error: `${card.ref} has no completion action: ask the manager to set one on the card or in the project settings`,
     };
   const by = `${agent.name} (BA)`;
+  // code-v6: the owner's approval is for the reviewed commit; a branch that moved since goes back to the approval step.
+  const lapse = await ownerApprovalLapse(tx, card);
+  if (lapse)
+    return {
+      ok: true,
+      events: ownerApprovalLapsedEvents(card, lapse),
+      message:
+        'Recorded. The code changed after the owner approved it, so nothing was merged: the card is back at the owner approval. Finish now.',
+      action,
+    };
   const gate = await mergeGate(tx, card, action);
   if (gate === 'approval') {
     const approval = mergeApprovalEvents(card, action, { requestedBy: agent.id, actor, by });

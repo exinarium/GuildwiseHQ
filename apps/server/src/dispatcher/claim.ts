@@ -10,6 +10,9 @@ import { wsServesOrgSql } from '../simulation/fit.ts';
 import { type AgentView, agentView, isCandidate } from './candidates.ts';
 import { dependencyStates } from './dependencies.ts';
 
+/** How long the first builder of a group keeps the rest of it after its last build claim (hard clause, renewed on every claim). */
+export const GROUP_BUILDER_HOURS = 24;
+
 export interface WorktreeClaim {
   repoId: string;
   remoteUrlNormalized: string;
@@ -122,7 +125,8 @@ export async function claim(ctx: Ctx, args: ClaimArgs): Promise<ClaimResult | nu
 
     let worktree: WorktreeClaim | null = null;
     let syncMain: ClaimResult['syncMain'];
-    if (stage && stage.worktree !== 'none' && card.repo_id) {
+    // Planning (code-v6) has no worktree of its own but reads the code: a read-only checkout of the working branch.
+    if (stage && (stage.worktree !== 'none' || stage.id === 'planning') && card.repo_id) {
       const wcard = card.worktree_card_id
         ? ((await one(tx, 'SELECT * FROM cards WHERE id=$1', [card.worktree_card_id])) as Record<string, any>)
         : card;
@@ -154,6 +158,7 @@ export async function claim(ctx: Ctx, args: ClaimArgs): Promise<ClaimResult | nu
         (await dependencyStates(tx, card.id)).some((d) => !d.landed)
       )
         worktree.readOnly = true;
+      if (stage.id === 'planning' && path === null && !card.worktree_card_id) worktree.readOnly = true;
       // Merge the latest main first: only when the card's worktree is created now (never on reuse), never for a card that
       // works in another card's worktree (bug children), and not when the main branch is the working branch.
       const mergeMain = card.merge_main_first ?? project.merge_main_first ?? true;
@@ -201,6 +206,26 @@ export async function claim(ctx: Ctx, args: ClaimArgs): Promise<ClaimResult | nu
           actor: SYSTEM_ACTOR,
           scope: projectScope(card.org_id, card.project_id),
         },
+        // code-v6: the first builder of a group keeps the rest of the group (each build claim of a group card renews it).
+        ...(card.group_id && stage?.claimRole === 'builder'
+          ? [
+              {
+                streamId: streamId.project(card.project_id),
+                event: {
+                  type: 'GroupBuilderAssigned' as const,
+                  payload: {
+                    projectId: card.project_id,
+                    groupId: card.group_id,
+                    agentId: a.id,
+                    cardId: card.id,
+                    until: new Date(now.getTime() + GROUP_BUILDER_HOURS * 3600_000).toISOString(),
+                  },
+                },
+                actor: SYSTEM_ACTOR,
+                scope: projectScope(card.org_id, card.project_id),
+              },
+            ]
+          : []),
       ],
       { tx },
     );

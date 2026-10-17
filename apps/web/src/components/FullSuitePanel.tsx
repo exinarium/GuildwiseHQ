@@ -1,6 +1,6 @@
 import type { ProjectDetailResponse } from '@aom/shared';
-import { useSetFullSuite } from '../api/queries/projects.ts';
-import { Badge, ErrorBox, Panel } from './ui.tsx';
+import { useRunFullSuite, useSetFullSuite } from '../api/queries/projects.ts';
+import { Badge, Button, ErrorBox, Panel } from './ui.tsx';
 
 /**
  * "Run the full end-to-end test suite after each finished card": whether finalizing a card automatically starts a
@@ -16,6 +16,7 @@ export function FullSuitePanel({
   canChange: boolean;
 }) {
   const set = useSetFullSuite(projectId);
+  const run = useRunFullSuite(projectId);
   const on = project.fullSuiteAfterFinalize ?? true;
 
   return (
@@ -48,6 +49,28 @@ export function FullSuitePanel({
         </p>
       )}
       <ErrorBox error={set.error} />
+      {/* The lean team workflow (code-v6) turns the automatic run off: the full suite is a manual regression run. */}
+      <div className="mt-4 border-t border-line pt-3">
+        <p className="mb-2 text-sm text-muted">
+          Run the whole suite now, for example after several cards are merged. It takes 10 to 20 minutes and
+          starts one "Full E2E suite" card for a tester.
+        </p>
+        <Button
+          variant="secondary"
+          loading={run.isPending}
+          disabled={run.isPending}
+          data-testid="full-suite-run"
+          onClick={() => run.mutate()}
+        >
+          Run the full suite now
+        </Button>
+        {run.data && (
+          <p className="mt-2 text-sm text-muted" data-testid="full-suite-started">
+            Started {run.data.ref}.
+          </p>
+        )}
+        <ErrorBox error={run.error} />
+      </div>
     </Panel>
   );
 }

@@ -42,6 +42,7 @@ export const shiftEvents = [
           baseBranch: z.string(),
           created: z.boolean(),
           headSha: z.string(),
+          rebased: z.boolean().optional(),
         })
         .optional(),
     }),

@@ -119,6 +119,8 @@ export default async function globalSetup(): Promise<(() => Promise<void>) | und
     AOM_TEST_CLOCK: 'true',
     AOM_ALLOW_LOCAL_REMOTES: 'true',
     AOM_MOCK_UI: 'true',
+    // The existing e2e flows were written for the code workflow; new projects default to code-v6 in production.
+    AOM_DEFAULT_WORKFLOW: 'code',
     AOM_TOUR_AUTOSTART: 'false',
     LOG_LEVEL: 'info',
   };

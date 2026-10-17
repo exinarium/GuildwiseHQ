@@ -29,7 +29,7 @@ import { effectiveCompletion } from '../commands/completion.ts';
 import { memberRefusal } from '../commands/phases.ts';
 import { cardQaDto } from '../commands/qa.ts';
 import { humanPurposeOf } from '../commands/qa-flow.ts';
-import { reviewRiskDto } from '../commands/review-risk.ts';
+import { leanCardDto, reviewRiskDto } from '../commands/review-risk.ts';
 import type { Ctx } from '../context.ts';
 import {
   budgetDto,
@@ -147,6 +147,7 @@ export async function toCardDto(ctx: Ctx, c: Row): Promise<CardDto> {
     riskTier: c.risk_tier,
     riskTierOverridden: c.risk_tier_overridden,
     reviewRisk: reviewRiskDto(c),
+    ...(c.head_sha || c.group_id || c.card_brief ? { lean: leanCardDto(c) } : {}),
     docsNeeded: c.docs_needed,
     designNeeded: c.design_needed ?? false,
     investigationOnly: c.investigation_only ?? false,

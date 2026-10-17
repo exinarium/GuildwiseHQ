@@ -17,10 +17,11 @@ describe('batch intake in an organization whose id is not a user id', () => {
   it('stores the batch (the org foreign key points at organizations)', async () => {
     const orgId = await w.t.createOrg(w.owner.id, 'Agency');
     const id = randomUUID();
-    await q(
-      'INSERT INTO intake_batches (id, org_id, created_by, created_at) VALUES ($1, $2, $3, now())',
-      [id, orgId, w.owner.id],
-    );
+    await q('INSERT INTO intake_batches (id, org_id, created_by, created_at) VALUES ($1, $2, $3, now())', [
+      id,
+      orgId,
+      w.owner.id,
+    ]);
     expect(await q('SELECT org_id FROM intake_batches WHERE id=$1', [id])).toEqual([{ org_id: orgId }]);
   });
 

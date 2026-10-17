@@ -76,7 +76,7 @@ describe('reviewer role v3', () => {
   const role = BUILTIN_ROLES.find((r) => r.key === 'reviewer')!;
 
   it('is version 3 and keeps high effort', () => {
-    expect(role.version).toBe(5);
+    expect(role.version).toBe(6);
     expect(role.defaultModel.effort).toBe('high');
   });
 
@@ -90,8 +90,8 @@ describe('reviewer role v3', () => {
       'Verified',
       'Unverified',
       'Mitigations',
-      'throwaway check',
-      'never in the worktree',
+      'you never build or test it',
+      'NEVER in the worktree',
       '--risk <low|medium|high>',
       '--risk-file',
       '--qa-focus',

@@ -23,7 +23,9 @@ export async function unparkPass(ctx: Ctx): Promise<number> {
   const parked = await rows(
     ctx.pool,
     `SELECT c.id, c.org_id, c.project_id, c.ref, c.parked_request_id, c.park_problem, r.status AS request_status,
-            r.result_summary FROM cards c
+            r.result_summary, c.stage, c.head_sha,
+            EXISTS (SELECT 1 FROM workflow_stages ms WHERE ms.workflow_version_id = c.workflow_version_id
+                      AND ms.stage_id = 'merge_review') AS has_merge_review FROM cards c
        JOIN devops_requests r ON r.id = c.parked_request_id
       WHERE c.status='waiting' AND r.status IN ('done','failed')`,
   );
@@ -34,6 +36,87 @@ export async function unparkPass(ctx: Ctx): Promise<number> {
         [c.id, c.parked_request_id],
       );
       if (cur.rowCount === 0) return;
+      // code-v6: a reviewed card held in Finalize for a merge conflict. A resolved conflict goes to a merge review (the
+      // earlier approvals stand unless the reviewer finds the resolution touched more than the merge); an unresolved one
+      // goes back to Build as the older flow does.
+      if (c.park_problem === 'conflict' && c.has_merge_review && c.stage === 'finalize') {
+        const scope = projectScope(c.org_id, c.project_id);
+        const resolved = c.request_status === 'done';
+        await ctx.store.append(
+          [
+            {
+              streamId: streamId.card(c.id),
+              event: {
+                type: 'TestEnvironmentReady',
+                payload: { cardId: c.id, requestId: c.parked_request_id },
+              },
+              actor: SYSTEM_ACTOR,
+              scope,
+            },
+            ...(resolved
+              ? [
+                  {
+                    streamId: streamId.card(c.id),
+                    event: {
+                      type: 'ConflictResolutionRecorded' as const,
+                      payload: {
+                        cardId: c.id,
+                        requestId: c.parked_request_id,
+                        touched: [] as string[],
+                        ...(c.head_sha ? { oldHead: c.head_sha as string } : {}),
+                      },
+                    },
+                    actor: SYSTEM_ACTOR,
+                    scope,
+                  },
+                  {
+                    streamId: streamId.card(c.id),
+                    event: {
+                      type: 'StageCompleted' as const,
+                      payload: {
+                        cardId: c.id,
+                        fromStage: 'finalize',
+                        toStage: 'merge_review',
+                        outcome: 'conflict_resolved',
+                      },
+                    },
+                    actor: SYSTEM_ACTOR,
+                    scope,
+                  },
+                  cardMessage(
+                    c,
+                    { kind: 'system' },
+                    'system',
+                    `DevOps resolved the merge conflict of ${c.ref} in a scratch worktree (${c.result_summary ?? 'no summary'}). A merge review reads the resolution; the earlier approvals stand unless it touched more than the merge.`,
+                  ),
+                ]
+              : [
+                  {
+                    streamId: streamId.card(c.id),
+                    event: {
+                      type: 'RebaseConflict' as const,
+                      payload: {
+                        cardId: c.id,
+                        stage: 'finalize',
+                        baseBranch: '',
+                        conflictedFiles: [],
+                      },
+                    },
+                    actor: SYSTEM_ACTOR,
+                    scope,
+                  },
+                  cardMessage(
+                    c,
+                    { kind: 'system' },
+                    'system',
+                    `DevOps could not resolve the merge conflict of ${c.ref} (${c.result_summary ?? 'it failed'}). The card goes back to Build.`,
+                  ),
+                ]),
+          ],
+          { tx },
+        );
+        return;
+      }
       await ctx.store.append(
         [
           // G-Q2: say on the card what DevOps' conflict attempt came to; the card then goes on to Rework.

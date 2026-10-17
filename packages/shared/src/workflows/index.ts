@@ -2,6 +2,7 @@ export * from './builtin/index.ts';
 export * from './custom.ts';
 export * from './diff.ts';
 export * from './explain.ts';
+export * from './high-risk.ts';
 export * from './ids.ts';
 export * from './resolve.ts';
 export * from './schema.ts';

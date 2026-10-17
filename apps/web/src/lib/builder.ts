@@ -29,7 +29,7 @@ import {
 
 type StageIn = WorkflowDefinitionInput['stages'][number];
 type OutcomeIn = NonNullable<StageIn['outcomes']>[number];
-type StepKindValue = 'agent' | 'manual' | 'terminal' | 'subworkflow' | 'human';
+type StepKindValue = 'agent' | 'manual' | 'terminal' | 'subworkflow' | 'human' | 'server';
 
 /** What the builder stores for a draft: the definition without the server-assigned `version` and `builtIn`. */
 export type BuilderDef = Omit<WorkflowDefinitionInput, 'version' | 'builtIn'>;
@@ -77,6 +77,10 @@ export interface BuilderStep {
     /** Built-in steps only: a person's step (manual QA) and the role an agent step falls back to. */
     human?: NonNullable<StageIn['human']>;
     fallbackRole?: string;
+    /** Built-in code-v6 steps only: a step the server runs, one that starts only on a prepared environment, evidence. */
+    server?: NonNullable<StageIn['server']>;
+    envStrict?: boolean;
+    requireBuildEvidence?: boolean;
   };
 }
 
@@ -102,6 +106,8 @@ export interface BuilderModel {
   steps: BuilderStep[];
   /** uid of the first step. */
   initial: string;
+  /** Built-in code-v6 only: what a new card of the workflow starts with. */
+  defaults?: NonNullable<WorkflowDefinitionInput['defaults']>;
 }
 
 const DEFAULT_MAX_SHIFT = 60;
@@ -219,6 +225,9 @@ export function fromDefinition(
       requiredCapabilities: [...(s.requiredCapabilities ?? [])],
       ...(s.human ? { human: { ...s.human } } : {}),
       ...(s.fallbackRole ? { fallbackRole: s.fallbackRole } : {}),
+      ...(s.server ? { server: { ...s.server } } : {}),
+      ...(s.envStrict ? { envStrict: true } : {}),
+      ...(s.requireBuildEvidence ? { requireBuildEvidence: true } : {}),
     },
   }));
   return {
@@ -232,6 +241,7 @@ export function fromDefinition(
     fields,
     steps,
     initial: stepRef(def.initialStage),
+    ...(def.defaults ? { defaults: { ...def.defaults } } : {}),
   };
 }
 
@@ -318,7 +328,11 @@ export function toDefinition(model: BuilderModel, opts: { frozen?: FrozenIds } =
       requiredCapabilities: [...s.extra.requiredCapabilities],
       ...(s.extra.human ? { human: { ...s.extra.human } } : {}),
       ...(s.extra.fallbackRole ? { fallbackRole: s.extra.fallbackRole } : {}),
+      ...(s.extra.server ? { server: { ...s.extra.server } } : {}),
+      ...(s.extra.envStrict ? { envStrict: true } : {}),
+      ...(s.extra.requireBuildEvidence ? { requireBuildEvidence: true } : {}),
     })),
+    ...(model.defaults ? { defaults: { ...model.defaults } } : {}),
     ...(model.extends ? { extends: { ...model.extends } } : {}),
   };
 }
@@ -929,6 +943,7 @@ export const KIND_LABEL: Record<StepKindValue, string> = {
   agent: 'Work done by an agent',
   subworkflow: 'Start another workflow',
   human: 'A person does this step',
+  server: 'The server does this step',
   terminal: 'Finished',
 };
 

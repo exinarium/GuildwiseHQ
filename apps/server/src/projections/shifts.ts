@@ -65,6 +65,7 @@ export const shiftProjectors: Record<string, Projector> = {
         ]);
     }
     if (p.worktree && p.cardId) {
+      await exec(tx, 'UPDATE shifts SET start_sha=$2 WHERE id=$1', [p.shiftId, p.worktree.headSha]);
       await exec(
         tx,
         `UPDATE cards SET worktree_path = COALESCE(worktree_path, $2), branch_name = COALESCE(branch_name, $3),

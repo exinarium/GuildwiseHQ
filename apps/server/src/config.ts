@@ -26,6 +26,8 @@ const EnvSchema = z.object({
   AOM_TEST_CLOCK: bool(false),
   AOM_ALLOW_LOCAL_REMOTES: bool(false),
   AOM_MOCK_UI: bool(false),
+  /** The workflow new projects start on (Lean Team v3: code-v6). Existing projects keep theirs. */
+  AOM_DEFAULT_WORKFLOW: z.string().min(1).default('code-v6'),
   AOM_TOUR_AUTOSTART: bool(true),
   AOM_REPORTER_SECONDS: z.coerce.number().int().min(1).max(3600).default(60),
   AOM_HYGIENE_SCHEDULE: bool(true),
@@ -130,6 +132,8 @@ export interface Config {
   allowLocalRemotes: boolean;
   /** Mock-runtime card fields (Mock script, ...) are shown in the UI and accepted on the API (dev and e2e only). */
   mockUi: boolean;
+  /** The workflow a new project starts on when the request names none (code-v6; tests run on `code`). */
+  defaultWorkflow: string;
   /** A user who has never seen the first-login tour gets it on their first visit (off in the e2e suite, which switches it on per user). */
   tourAutostart: boolean;
   /** How often the reporter sweeps for signals, expired triage holds and the daily floor report (docs/design/phases.md B4). */
@@ -213,6 +217,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     testClock: e.AOM_TEST_CLOCK,
     allowLocalRemotes: e.AOM_ALLOW_LOCAL_REMOTES,
     mockUi: e.AOM_MOCK_UI,
+    defaultWorkflow: e.AOM_DEFAULT_WORKFLOW,
     tourAutostart: e.AOM_TOUR_AUTOSTART,
     reporterSeconds: e.AOM_REPORTER_SECONDS,
     hygieneSchedule: e.AOM_HYGIENE_SCHEDULE,

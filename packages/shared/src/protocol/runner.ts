@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { BriefAttachmentSchema } from '../attachments/index.ts';
+import { CHANGED_PATHS_MAX, DiffUploadSchema, E2eAreaMapSchema } from '../cards/lean-v6.ts';
 import { DiffStats, StoredCompletionAction } from '../cards/types.ts';
 import { CeoShiftSchema } from '../ceo/ipc.ts';
 import {
@@ -392,6 +393,66 @@ export const ShiftBriefSchema = z.object({
    * ready environment, and the tester records that none was used when there is none.
    */
   testWithoutEnvironment: z.boolean().optional(),
+  /**
+   * code-v6, the Card Brief and the group: the short summary the planner or architect wrote for the builder, and the other
+   * cards of the group (one builder works them in order, in one resumed session).
+   */
+  cardBrief: z.string().optional(),
+  group: z
+    .object({
+      id: z.string(),
+      cards: z.array(z.object({ ref: z.string(), title: z.string(), stage: z.string(), status: z.string() })),
+    })
+    .optional(),
+  /** code-v6, the planning shift: the other open cards of the project (to group and to order), newest first. */
+  openCards: z
+    .array(
+      z.object({
+        ref: z.string(),
+        title: z.string(),
+        stage: z.string(),
+        groupId: z.string().optional(),
+        affectedAreas: z.string().optional(),
+      }),
+    )
+    .optional(),
+  /** code-v6: the build and unit test evidence of the card's handoff, bound to a commit (reviewers read it instead of building). */
+  buildEvidence: z
+    .object({
+      sha: z.string(),
+      commands: z.array(
+        z.object({
+          kind: z.string(),
+          command: z.string(),
+          status: z.string(),
+          result: z.string(),
+        }),
+      ),
+      waived: z.string().optional(),
+      at: z.string(),
+    })
+    .optional(),
+  /** code-v6: the paths of the diff that make the change high risk (computed by the server, never lowered by an agent). */
+  highRisk: z.object({ paths: z.array(z.string()), labels: z.array(z.string()) }).optional(),
+  /** code-v6, a merge review: the commit that was reviewed and the one DevOps resolved the conflict to. */
+  mergeReview: z
+    .object({
+      oldHead: z.string().optional(),
+      newHead: z.string().optional(),
+      touched: z.array(z.string()).default([]),
+    })
+    .optional(),
+  /**
+   * code-v6, a tester shift: the paths of the card diff and the project's E2E area mapping (absent: the default derived from
+   * the E2E folders); the runner picks the specs that belong to the card.
+   */
+  e2e: z
+    .object({
+      changedPaths: z.array(z.string()),
+      mapping: E2eAreaMapSchema.nullable(),
+      hint: z.string().default(''),
+    })
+    .optional(),
 });
 export type ShiftBrief = z.infer<typeof ShiftBriefSchema>;
 
@@ -923,6 +984,8 @@ export const ShiftStartedSchema = msg('shift.started', {
       baseBranch: z.string(),
       created: z.boolean(),
       headSha: z.string(),
+      /** code-v6: the runner rebased (or merged) the card branch onto its base before the shift; the commit moved with it. */
+      rebased: z.boolean().optional(),
     })
     .optional(),
   /** The working branch did not exist: the runner created it from `from` (the default branch) and pushed it. */
@@ -1020,6 +1083,14 @@ export const ShiftReportMsgSchema = msg('shift.report', {
   report: ShiftReportSchema,
   diffStats: DiffStats.optional(),
   riskTier: z.enum(['small', 'large']).optional(),
+  /**
+   * code-v6, a build handoff: the commit the runner measured after the shift's autocommit (the build evidence is bound to
+   * it), the paths of the card diff (the server computes the high-risk flag from them) and the diff itself, capped at 2 MB.
+   * Additive: an older runner sends none.
+   */
+  headSha: z.string().min(7).max(64).optional(),
+  changedPaths: z.array(z.string().max(500)).max(CHANGED_PATHS_MAX).optional(),
+  diff: DiffUploadSchema.optional(),
 });
 export const ShiftEndedSchema = msg('shift.ended', {
   shiftId: z.uuid(),

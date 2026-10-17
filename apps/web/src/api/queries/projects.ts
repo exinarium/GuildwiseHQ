@@ -191,6 +191,45 @@ export function useSetFullSuite(id: string) {
   });
 }
 
+/** code-v6: when the owner approves a card after the review. */
+export function useSetOwnerApproval(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (policy: 'large_or_high_risk' | 'always') =>
+      put(`/projects/${id}/owner-approval`, { policy }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['project', id] });
+      qc.invalidateQueries({ queryKey: ['projects'] });
+    },
+  });
+}
+
+/** code-v6: the manual full E2E suite run on the working branch (the automatic run after every merge is off). */
+export function useRunFullSuite(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => post<{ cardId: string; ref: string }>(`/projects/${id}/full-suite`, {}),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['board'] }),
+  });
+}
+
+/** Opt-in upgrade of an existing project to code-v6: new cards run on it, cards in flight keep their version. */
+export function useUpgradeWorkflow(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      post<{ workflowKey: string; openCardsOnOlderVersion: number; missingRoles: string[] }>(
+        `/projects/${id}/upgrade-workflow`,
+        {},
+      ),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['project', id] });
+      qc.invalidateQueries({ queryKey: ['projects'] });
+      qc.invalidateQueries({ queryKey: ['project-workflows', id] });
+    },
+  });
+}
+
 /** Lean Team v3 project policy: decisions stay at project scope; test without a test environment. */
 export function useSetProjectPolicy(id: string) {
   const qc = useQueryClient();

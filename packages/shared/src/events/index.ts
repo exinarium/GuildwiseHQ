@@ -6,6 +6,7 @@ import { cardEvents } from './card.ts';
 import { catalogueEvents } from './catalogue.ts';
 import { ceoEvents } from './ceo.ts';
 import { chatEvents } from './chat.ts';
+import { codeV6Events } from './code-v6.ts';
 import { costEvents } from './cost.ts';
 import { deskEvents } from './desk.ts';
 import { devopsEvents } from './devops.ts';
@@ -78,6 +79,7 @@ export const DomainEventSchema = z.discriminatedUnion('type', [
   ...approvalEvents,
   ...questionFlowEvents,
   ...platformEvents,
+  ...codeV6Events,
 ]);
 export type DomainEvent = z.infer<typeof DomainEventSchema>;
 export type EventType = DomainEvent['type'];
@@ -91,6 +93,7 @@ export * from './card.ts';
 export * from './catalogue.ts';
 export * from './ceo.ts';
 export * from './chat.ts';
+export * from './code-v6.ts';
 export * from './cost.ts';
 export { defineEvent, IsoDate, Usage, UserRole } from './define.ts';
 export * from './desk.ts';

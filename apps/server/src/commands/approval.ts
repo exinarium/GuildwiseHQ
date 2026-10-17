@@ -1,13 +1,17 @@
 import { randomUUID } from 'node:crypto';
 import {
   type ApprovalApproveRequest,
+  type ApprovalReviewInfo,
   type ApprovalSendBackRequest,
   type Approver,
   type CardApproval,
+  type CardDiffResponse,
   DESK_SUBKIND,
   getStage,
   isOrgManager,
   isProjectOwner,
+  OWNER_APPROVAL_REASON_TEXT,
+  type OwnerApprovalReason,
   resolveOutcome,
   type Stage,
   streamId,
@@ -19,7 +23,7 @@ import { loadWorkflowById } from '../catalogue/loader.ts';
 import type { Ctx } from '../context.ts';
 import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
-import { badRequest, conflict, forbidden } from '../errors.ts';
+import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { workflowView } from './cards.ts';
 import { cardMessage, projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
@@ -52,6 +56,8 @@ export interface ApprovalDoc {
   openedAt: string;
   deskItemId: string | null;
   entrySeq: string | null;
+  /** code-v6: the commit the approver is shown; the approval is for it and lapses when the branch moves. */
+  sha?: string | null;
   decision: { kind: 'approved' | 'sent_back'; by: string; note: string | null; at: string } | null;
   sentBackCount?: number;
   lastSendBack?: { by: string; comment: string; at: string };
@@ -83,7 +89,7 @@ export async function resolveApprover(
         db,
         `SELECT pm.user_id FROM project_members pm JOIN users u ON u.id = pm.user_id
           WHERE pm.project_id=$1 AND pm.role='owner' AND pm.status='active' AND u.status='active'
-          ORDER BY (pm.org_grant IS NOT TRUE) DESC, pm.created_at LIMIT 1`,
+          ORDER BY (pm.org_grant IS NOT TRUE) DESC, pm.joined_at NULLS LAST, pm.user_id LIMIT 1`,
         [card.project_id],
       )
     )?.user_id as string | undefined;
@@ -221,6 +227,7 @@ export async function enterHumanStep(ctx: Ctx, cardId: string): Promise<boolean>
               ...(approver.fellBack ? { fellBack: true } : {}),
               deskItemId,
               ...(entrySeq ? { entrySeq } : {}),
+              ...(card.head_sha ? { sha: card.head_sha as string } : {}),
             },
           },
           actor: SYSTEM_ACTOR,
@@ -300,9 +307,42 @@ async function decide(
   idOrRef: string,
   kind: 'approved' | 'sent_back',
   text: string | undefined,
-): Promise<void> {
-  await withAppendTx(ctx.pool, async (tx) => {
+): Promise<'stale' | undefined> {
+  const stale = await withAppendTx(ctx.pool, async (tx): Promise<'stale' | undefined> => {
     const { card, ap, stage, def } = await lockApprovalCard(tx, user, idOrRef);
+    // code-v6: an approval is for the commit whose diff was shown. When the branch moved since, nothing is approved: the
+    // card is asked again for the commit it is at now (the same desk item) and the approver reads the new diff first.
+    if (kind === 'approved' && ap.sha && card.head_sha && ap.sha !== card.head_sha && ap.deskItemId) {
+      await ctx.store.append(
+        [
+          {
+            streamId: streamId.card(card.id),
+            event: {
+              type: 'ApprovalRequested',
+              payload: {
+                cardId: card.id,
+                stageId: stage.id,
+                approverUserId: ap.approverUserId,
+                approverKind: ap.approverKind,
+                deskItemId: ap.deskItemId,
+                ...(ap.entrySeq ? { entrySeq: ap.entrySeq } : {}),
+                sha: card.head_sha as string,
+              },
+            },
+            actor: SYSTEM_ACTOR,
+            scope: projectScope(card.org_id, card.project_id),
+          },
+          cardMessage(
+            card,
+            { kind: 'system' },
+            'system',
+            `The code of ${card.ref} changed after the diff was shown (${String(ap.sha).slice(0, 10)} to ${String(card.head_sha).slice(0, 10)}): the approval was not taken. Read the new diff and approve again.`,
+          ),
+        ],
+        { tx },
+      );
+      return 'stale';
+    }
     const outcomeId = kind === 'approved' ? 'approve' : 'send_back';
     let toStage: string;
     try {
@@ -330,6 +370,7 @@ async function decide(
               ...(text ? { note: text } : {}),
               toStage,
               ...(ap.deskItemId ? { deskItemId: ap.deskItemId } : {}),
+              ...(kind === 'approved' && ap.sha ? { sha: ap.sha } : {}),
             },
           },
           actor: userActor(user.id),
@@ -384,16 +425,25 @@ async function decide(
       ],
       { tx },
     );
+    return undefined;
   });
   ctx.services.dispatcher.trigger();
+  return stale;
 }
 
-export const approveStep = (
+export async function approveStep(
   ctx: Ctx,
   user: AuthSession['user'],
   idOrRef: string,
   req: ApprovalApproveRequest,
-) => decide(ctx, user, idOrRef, 'approved', req.note?.trim() || undefined);
+): Promise<void> {
+  const r = await decide(ctx, user, idOrRef, 'approved', req.note?.trim() || undefined);
+  if (r === 'stale')
+    throw conflict(
+      'approval_stale',
+      'the code changed after the diff was shown, so nothing was approved: read the new diff and approve again',
+    );
+}
 
 export async function sendBackStep(
   ctx: Ctx,
@@ -462,5 +512,64 @@ export async function cardApprovalDto(
     sentBackCount: ap.sentBackCount ?? 0,
     canAct: open && (await mayDecide(db, viewer, card, projectRole)),
     deskItemId: ap.deskItemId,
+    ...(card.head_sha ? { review: await approvalReviewInfo(db, card, ap) } : {}),
+  };
+}
+
+/** code-v6: what the owner is shown at the approval step: the commit, why it is needed, the diff, the evidence and the verdicts. */
+async function approvalReviewInfo(db: Queryable, card: Row, ap: ApprovalDoc): Promise<ApprovalReviewInfo> {
+  const diff = await one(db, 'SELECT sha, bytes, truncated, files FROM card_diffs WHERE card_id=$1', [
+    card.id,
+  ]);
+  const ev = card.build_evidence as {
+    commands?: Array<{ kind: string; command: string; status: string; result: string }>;
+    waived?: string;
+  } | null;
+  const verdicts = await rows(
+    db,
+    `SELECT a.name, h.note, h.data FROM card_handoffs h LEFT JOIN agents a ON a.id = h.agent_id
+      WHERE h.card_id=$1 AND h.stage IN ('review','merge_review') AND h.outcome='approve'
+      ORDER BY h.created_at, h.event_seq`,
+    [card.id],
+  );
+  return {
+    sha: ap.sha ?? (card.head_sha as string | null),
+    stale: !!ap.sha && !!card.head_sha && ap.sha !== card.head_sha,
+    highRisk: card.high_risk === true,
+    highRiskPaths: ((card.high_risk_paths ?? []) as string[]).slice(0, 50),
+    riskTier: (card.risk_tier as string | null) ?? null,
+    reason: card.owner_approval_reason
+      ? (OWNER_APPROVAL_REASON_TEXT[card.owner_approval_reason as OwnerApprovalReason] ?? null)
+      : null,
+    diff: diff ? { bytes: Number(diff.bytes), truncated: !!diff.truncated, files: Number(diff.files) } : null,
+    evidence: ev ? { commands: ev.commands ?? [], waived: ev.waived ?? null } : null,
+    verdicts: verdicts.map((v) => ({
+      reviewerName: v.name ?? 'a reviewer',
+      score: Number(v.data?.score ?? 0),
+      risk: (v.data?.risk as string | undefined) ?? null,
+      comments: String(v.note ?? '').slice(0, 4000),
+    })),
+    designSummary: (card.investigation as { summary?: string } | null)?.summary ?? null,
+    cardBrief: (card.card_brief as string | null) ?? null,
+  };
+}
+
+/** `GET /api/cards/:id/diff`: the diff stored at the review handoff, for any member who can see the card. */
+export async function cardDiff(
+  db: Queryable,
+  user: { id: string },
+  idOrRef: string,
+): Promise<CardDiffResponse> {
+  const visible = await loadVisibleCard(db, user.id, idOrRef);
+  const d = await one(db, 'SELECT * FROM card_diffs WHERE card_id=$1', [visible.card.id]);
+  if (!d) throw notFound('no_diff', 'no diff was stored for this card');
+  return {
+    sha: d.sha,
+    base: d.base,
+    body: d.body,
+    bytes: Number(d.bytes),
+    truncated: !!d.truncated,
+    files: Number(d.files),
+    at: iso(d.created_at) as string,
   };
 }

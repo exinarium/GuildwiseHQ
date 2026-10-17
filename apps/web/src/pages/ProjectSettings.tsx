@@ -15,6 +15,7 @@ import { ManualQaPanel } from '../components/ManualQaPanel.tsx';
 import { McpServersPanel } from '../components/McpServersPanel.tsx';
 import { MembersPanel } from '../components/MembersPanel.tsx';
 import { MergePolicyPanel } from '../components/MergePolicyPanel.tsx';
+import { OwnerApprovalPanel } from '../components/OwnerApprovalPanel.tsx';
 import { FollowupDefaultsPanel, PhasesPanel } from '../components/PhasesPanel.tsx';
 import { ProjectDangerZone } from '../components/ProjectDangerZone.tsx';
 import { ProjectPolicyPanel } from '../components/ProjectPolicyPanel.tsx';
@@ -403,6 +404,15 @@ export function ProjectSettings() {
       {project && traits.usesRepos && (
         <div id="manual-qa" className="scroll-mt-20">
           <ManualQaPanel
+            projectId={id}
+            project={project}
+            canChange={project.myRole === 'owner' || canConvert}
+          />
+        </div>
+      )}
+      {project && traits.usesRepos && (
+        <div id="owner-approval" className="scroll-mt-20">
+          <OwnerApprovalPanel
             projectId={id}
             project={project}
             canChange={project.myRole === 'owner' || canConvert}
