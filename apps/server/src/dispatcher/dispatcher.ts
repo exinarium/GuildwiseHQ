@@ -2,6 +2,7 @@ import { UNLIMITED_SHIFTS } from '@aom/shared';
 import pg from 'pg';
 import { ceoPass } from '../ceo/pass.ts';
 import { withCommitAs } from '../commands/commit-as.ts';
+import { blockedRoles } from '../commands/runner-telemetry.ts';
 import { testEnvironmentPass } from '../commands/test-environments.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Row, rows } from '../db/sql.ts';
@@ -184,8 +185,11 @@ export class Dispatcher {
       ).map((r) => r.id),
     );
     list.sort((x, y) => Number(originals.has(y.id)) - Number(originals.has(x.id)));
+    // Roles whose smoke test failed on a workstation get no work there (runner 0.1.24, role.smoke).
+    const blocked = await blockedRoles(this.ctx);
     const out = [];
     for (const a of list) {
+      if (blocked.has(`${a.workstation_id}|${a.role_key}`)) continue;
       const rt = (
         a.runtimes as Array<{ id: string; available: boolean; capabilities: string[]; auth?: string }>
       ).find((r) => r.id === a.runtime);

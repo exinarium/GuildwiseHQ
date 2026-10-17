@@ -721,6 +721,7 @@ Heartbeats are not events.
 | Event | Payload | Projection effect |
 | --- | --- | --- |
 | `ShiftStarted` | `{shiftId, agentId, workstationId, cardId?, kind, stage?, runtime, model, overflow, runtimeSessionId?}` | shifts status running |
+| `ShiftSessionRecorded` | `{shiftId, runtimeSessionId?, contextTokens?, resumeState?}` | shifts.runtime_session_id, context_tokens, resume_state |
 | **`ShiftEnded`** | `{shiftId, agentId, cardId?, outcome, reportOutcome?, durationMs, usage, exitCode?, guardViolations[]}` | shifts ended, tokens, duration; agents.last_shift_ended_at |
 | **`AgentHired`** | `{agentId, orgId, projectId?, hiredByUserId, workstationId, name, roleKey, roleVersion, seniority, runtime, model, effort?, skills, permissions, capacity, isDevops}` | insert agents |
 | `AgentChanged` | `{agentId, changes:{model?, effort?, runtime?, roleKey?, roleVersion?, seniority?, skills?, permissions?, capacity?}}` | update |
@@ -1419,9 +1420,13 @@ Runner → server:
 | `shift.accepted` | `{shiftId}` | yes |
 | `shift.rejected` | `{shiftId, reason:'busy'|'runtime_unavailable'|'repo_missing'|'worktree_failed'|'rebase_conflict'|'internal', detail?, conflictedFiles?, branchProblem?:{base, defaultBranch?, branches[], createFailed?}}` | yes |
 | `shift.started` | `{shiftId, runtimeSessionId?, worktree?:{path, branchName, baseBranch, created:boolean, headSha}, branchCreated?:{base, from, pushed}}` | yes |
+| `shift.session` | `{shiftId, runtimeSessionId, contextTokens?, resume?:{state:'resumed'|'fresh_unknown_session'|'fresh_too_large'|'fresh_too_old'|'fresh_other_agent'|'fresh_transcript_missing', detail?}}` (Claude's session id arrives after `shift.started`; re-sent while the context grows; `resume` once, for a `shift.start` that carried `resumeSessionId`) | yes |
+| `runner.error` | `{signature, message, stack?, version, context?}` (sanitised on the runner; stored once per signature with a counter) | yes |
+| `devops.audit` | `{entries:[{at, sessionRef, kind:'shift'|'chat', decision:'allowed'|'refused', rule, command}]}` (the DevOps guard hook's audit trail) | yes |
+| `role.smoke` | `{runnerVersion, results:[{roleKey, ok, detail?}]}` (a failed role gets no work on the workstation) | yes |
 | `shift.progress` | `{shiftId, items:[{at, kind:'text'|'tool'|'status', text}]}` (batched ≤ 1/s, text ≤ 500 chars each) | no |
 | `shift.report` | `{shiftId, reportId, report: ShiftReport}` (§13.4) | yes; server replies `shift.report.result {reportId, accepted, error?}` |
-| `shift.ended` | `{shiftId, outcome:'reported'|'no_report'|'stopped'|'crashed'|'timeout', exitCode?, durationMs, usage:Usage, finalText?:string(≤4000), guardViolations:[{rule, detail}]}` | yes |
+| `shift.ended` | `{shiftId, outcome:'reported'|'no_report'|'stopped'|'crashed'|'timeout', exitCode?, durationMs, usage:Usage, contextTokens?, finalText?:string(≤4000), guardViolations:[{rule, detail}]}` | yes |
 | `rpc.request` | `{rpcId, shiftId, method:'card.get'|'ledger.search'|'thread.post'|'thread.read'|'devops.request', params}` | reply `rpc.response` |
 | `chat.delta` | `{chatId, threadId, text}` | no |
 | `chat.done` | `{chatId, threadId, messageText, usage}` | yes |

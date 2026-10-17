@@ -15,6 +15,10 @@ export interface Ctl {
   signal: AbortSignal;
   /** Emits a runtime event as the runtime would (e.g. a `WebFetch` tool use). */
   emit(event: RuntimeEvent): void;
+  /** What `contextTokens()` of the session reports from now on. */
+  setContextTokens(n: number): void;
+  /** What `usage()` reports from now on (default 1 input, 2 output). */
+  setUsage(u: Partial<import('@aom/shared').Usage>): void;
   /** POST to the runner's IPC the way `aom` does. */
   post(
     path: '/v1/report' | '/v1/rpc',
@@ -29,6 +33,8 @@ export class ScriptedAdapter implements RuntimeAdapter {
   inputs: ShiftStartInput[] = [];
   /** How often `killTools` was called. */
   killed = 0;
+  /** Test hook: the login check the supervisor makes before a shift (absent: no check). */
+  checkLogin?: () => Promise<'ok' | 'expired' | 'unknown'>;
 
   constructor(
     private readonly script: (input: ShiftStartInput, ctl: Ctl) => Promise<unknown>,
@@ -41,7 +47,12 @@ export class ScriptedAdapter implements RuntimeAdapter {
     return { runtime: this.id, version: 'scripted', available: true, capabilities: ['shell', 'edit'] };
   }
 
-  async writeInstructions(): Promise<void> {}
+  /** The CLAUDE.md text of each shift, as the supervisor wrote it. */
+  instructions: string[] = [];
+
+  async writeInstructions(_sandbox: unknown, markdown: string): Promise<void> {
+    this.instructions.push(markdown);
+  }
 
   async start(input: ShiftStartInput): Promise<RuntimeSession> {
     this.inputs.push(input);
@@ -53,9 +64,17 @@ export class ScriptedAdapter implements RuntimeAdapter {
       queue.push(e);
       wake?.();
     };
+    let contextTokens = 0;
+    let usage = { inputTokens: 1, outputTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0 };
     const ctl: Ctl = {
       signal: abort.signal,
       emit: push,
+      setContextTokens: (n) => {
+        contextTokens = n;
+      },
+      setUsage: (u) => {
+        usage = { ...usage, ...u };
+      },
       post: async (path, body, token = input.env.AOM_SHIFT_TOKEN) => {
         const res = await fetch(`${input.env.AOM_IPC_URL}${path}`, {
           method: 'POST',
@@ -109,7 +128,8 @@ export class ScriptedAdapter implements RuntimeAdapter {
         this.killed++;
         return 1;
       },
-      usage: () => ({ inputTokens: 1, outputTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0 }),
+      usage: () => usage,
+      contextTokens: () => contextTokens,
     };
   }
 }

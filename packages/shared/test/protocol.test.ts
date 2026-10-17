@@ -152,6 +152,42 @@ const runnerToServer: Record<string, Record<string, unknown>> = {
     detail: 'conflict',
     conflictedFiles: ['a.ts'],
   },
+  'shift.session': {
+    ...env('shift.session'),
+    shiftId: U.a,
+    runtimeSessionId: 'sess-1',
+    contextTokens: 42_000,
+    resume: { state: 'fresh_too_large', detail: '130K context tokens (limit 120K)' },
+  },
+  'runner.error': {
+    ...env('runner.error'),
+    signature: 'unhandledRejection:TypeError:cannot read x',
+    message: 'cannot read x',
+    stack: 'TypeError: cannot read x\n    at f (runner.mjs:1:1)',
+    version: '0.1.24',
+    context: 'shift.start',
+  },
+  'devops.audit': {
+    ...env('devops.audit'),
+    entries: [
+      {
+        at: TS,
+        sessionRef: U.a,
+        kind: 'shift',
+        decision: 'refused',
+        rule: 'off_workstation',
+        command: 'ssh uat ls',
+      },
+    ],
+  },
+  'role.smoke': {
+    ...env('role.smoke'),
+    runnerVersion: '0.1.24',
+    results: [
+      { roleKey: 'reviewer', ok: true },
+      { roleKey: 'builder', ok: false, detail: 'aom handoff could not reach the runner' },
+    ],
+  },
   'shift.started': {
     ...env('shift.started'),
     shiftId: U.a,

@@ -75,6 +75,7 @@ describe('claude command builder (ARCHITECTURE section 12.2)', () => {
       '--strict-mcp-config',
       '--mcp-config',
       '/data/agents/a1/claude/mcp.json',
+      '--disable-slash-commands',
       '--add-dir',
       '/vaults/work/proj',
       '--add-dir',
@@ -206,11 +207,34 @@ describe('claude settings.json: permissions per role (review M3)', () => {
     expect(b.permissions.allow.some((a) => a.includes('/scratch/'))).toBe(false);
   });
 
-  it('roles without the edit tool deny Edit, Write and NotebookEdit outright', () => {
+  it('roles without the edit tool deny writes in the worktree only and may write their scratch folder', () => {
     const s = settings({ ...reviewer.permissions, allowedTools: ['read', 'shell', 'web'] });
-    expect(s.permissions.allow).toEqual(['Read', 'Glob', 'Grep', 'Bash', 'WebFetch', 'WebSearch']);
-    expect(s.permissions.deny).toEqual(expect.arrayContaining(['Edit', 'Write', 'NotebookEdit']));
+    expect(s.permissions.allow).toEqual([
+      'Read',
+      'Glob',
+      'Grep',
+      'Bash',
+      'WebFetch',
+      'WebSearch',
+      'Edit(//data/agents/a1/scratch/**)',
+      'Write(//data/agents/a1/scratch/**)',
+    ]);
+    // path-scoped, never bare: a bare Edit/Write deny beats the scratch allow (the reviewer could not write its risk file)
+    expect(s.permissions.deny).toEqual(
+      expect.arrayContaining([`Edit(${CWD}/**)`, `Write(${CWD}/**)`, `NotebookEdit(${CWD}/**)`]),
+    );
+    for (const bare of ['Edit', 'Write', 'NotebookEdit']) expect(s.permissions.deny).not.toContain(bare);
     expect(s.permissions.deny).not.toContain('WebFetch');
+  });
+
+  it('a no-edit role working in its own scratch folder has no worktree deny that would lock the scratch folder', () => {
+    const s = settings(
+      { ...reviewer.permissions, allowedTools: ['read', 'shell'] },
+      { cwd: '/data/agents/a1/scratch' },
+    );
+    for (const tool of ['Edit', 'Write', 'NotebookEdit'])
+      expect(s.permissions.deny).not.toContain(`${tool}(//data/agents/a1/scratch/**)`);
+    expect(s.permissions.allow).toContain('Edit(//data/agents/a1/scratch/**)');
   });
 
   it('nobody edits the vault, the agent config dir or the worktree .git; runner state is unreadable', () => {
@@ -483,7 +507,8 @@ describe('browser roles and read-only worktrees in the sandbox', () => {
       expect.arrayContaining(['/data/agents/a1/scratch', '/data/agents/a1/tmp', '/data/agents/a1/home']),
     );
     const s = buildShiftSettings(reviewer.permissions, policyCtx(), POLICY_PATHS, 'reviewer');
-    expect(s.permissions.deny).toEqual(expect.arrayContaining(['Edit', 'Write', 'NotebookEdit']));
+    expect(s.permissions.deny).not.toContain('Edit');
+    expect(s.permissions.deny).toContain('Edit(//data/worktrees/TOY-0192abcd/TOY-1/**)');
   });
 
   it('BA and any custom role without edit and commit are read-only too; builder and tester are not', () => {

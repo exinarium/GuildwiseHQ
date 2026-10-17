@@ -38,6 +38,7 @@ import { applyReleasePrResult } from '../commands/release-pr.ts';
 import { applyRepoCreateResult, repoCreateRpc } from '../commands/repo-create.ts';
 import { applyRepoSyncStatus, seedRepoSync } from '../commands/repo-sync.ts';
 import { riskTierRpc } from '../commands/risk.ts';
+import { applyDevopsAudit, applyRoleSmoke, applyRunnerError } from '../commands/runner-telemetry.ts';
 import {
   applyRunPlanSaved,
   applyRunReplayFailed,
@@ -50,6 +51,7 @@ import {
   applyShiftEnded,
   applyShiftRejected,
   applyShiftReport,
+  applyShiftSession,
   applyShiftStarted,
   markShiftAccepted,
   type ReportResult,
@@ -247,6 +249,18 @@ export class RunnerHandlers {
       case 'shift.started':
         await this.withInbox(conn, msg.id, (tx) => applyShiftStarted(this.ctx, tx, ws, msg));
         return this.ack(conn, msg);
+      case 'shift.session':
+        await this.withInbox(conn, msg.id, (tx) => applyShiftSession(this.ctx, tx, ws, msg));
+        return this.ack(conn, msg);
+      case 'runner.error':
+        await this.withInbox(conn, msg.id, (tx) => applyRunnerError(tx, ws, msg, this.ctx.clock.now()));
+        return this.ack(conn, msg);
+      case 'devops.audit':
+        await this.withInbox(conn, msg.id, (tx) => applyDevopsAudit(tx, ws, msg));
+        return this.ack(conn, msg);
+      case 'role.smoke':
+        await applyRoleSmoke(this.ctx, ws, msg);
+        return this.ack(conn, msg);
       case 'shift.progress':
         return this.progress(conn, msg);
       case 'shift.report': {
@@ -267,7 +281,15 @@ export class RunnerHandlers {
         return;
       }
       case 'shift.ended':
-        await this.withInbox(conn, msg.id, (tx) => applyShiftEnded(this.ctx, tx, ws, msg));
+        await this.withInbox(conn, msg.id, async (tx) => {
+          // the context size at the end of the shift, recorded before the shift is closed
+          if (msg.contextTokens !== undefined)
+            await applyShiftSession(this.ctx, tx, ws, {
+              shiftId: msg.shiftId,
+              contextTokens: msg.contextTokens,
+            });
+          await applyShiftEnded(this.ctx, tx, ws, msg);
+        });
         return this.ack(conn, msg);
       case 'rpc.request':
         return this.rpc(conn, msg);

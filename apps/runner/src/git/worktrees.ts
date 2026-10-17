@@ -46,6 +46,8 @@ export interface WorktreeResult {
   createdBranch?: { base: string; from: string; pushed: boolean; mainBranchSet: boolean };
   /** Set when a `reuse` found the card branch gone locally and on origin and cut it afresh from the working branch. */
   branchRecreated?: boolean;
+  /** Set when the worktree was left on a `conflict/<ref>-aN` branch (a DevOps conflict attempt) and was switched back. */
+  recoveredFrom?: string;
 }
 
 export interface EnsureWorktreeInput {
@@ -108,6 +110,40 @@ async function addWorktreeOnBranch(
   return false;
 }
 
+/**
+ * Switches a card worktree that sits on `conflict/...` back to the card branch. Only when the worktree is clean and the
+ * conflict branch holds no commit the card branch lacks (a resolution DevOps made must never be lost): otherwise it
+ * throws a `WorktreeError` that names what is there.
+ */
+export async function switchBackFromConflictBranch(
+  path: string,
+  branch: string,
+  onBranch: string,
+  fail: (m: string) => never = (m) => {
+    throw new WorktreeError(m);
+  },
+): Promise<void> {
+  const dirty = (await gitOk(path, ['status', '--porcelain'])).trim();
+  if (dirty)
+    fail(
+      `The worktree is on ${onBranch}, not ${branch}, and has uncommitted changes (${dirty.split('\n').length} file(s)): a conflict resolution may be in progress, so it was left as it is. A DevOps conflict attempt or a person must finish or discard it.`,
+    );
+  if (!(await branchExists(path, branch)))
+    fail(
+      `The worktree is on ${onBranch} and the card branch ${branch} does not exist in this clone to switch back to.`,
+    );
+  const ahead = Number((await git(path, ['rev-list', '--count', `${branch}..HEAD`])).stdout.trim() || '0');
+  if (ahead > 0)
+    fail(
+      `The worktree is on ${onBranch}, which has ${ahead} commit(s) that ${branch} does not: a conflict resolution that was not merged back. It was left as it is for DevOps or a person.`,
+    );
+  const r = await git(path, ['checkout', branch]);
+  if (r.exitCode !== 0)
+    fail(
+      `Switching the worktree from ${onBranch} back to ${branch} failed: ${r.stderr.trim().slice(0, 300)}`,
+    );
+}
+
 async function isWorktreeOn(path: string, branch: string): Promise<boolean> {
   if (!existsSync(path)) return false;
   return (await currentBranch(path)) === branch;
@@ -157,6 +193,12 @@ async function ensureWorktreeLocked(input: EnsureWorktreeInput): Promise<Worktre
   if (existsSync(path)) {
     // Directory exists but is not a worktree on the branch: only clean up if it is not a registered worktree.
     const onOther = await currentBranch(path);
+    // A DevOps conflict attempt that died left the card worktree on its own `conflict/<ref>-aN` branch (P5-27): when
+    // nothing of value is there, switch back to the card branch; otherwise refuse and say why (never discard a resolution).
+    if (onOther?.startsWith('conflict/')) {
+      await switchBackFromConflictBranch(path, branch, onOther, fail);
+      return { ...(await result(false)), recoveredFrom: onOther };
+    }
     if (onOther !== null || existsSync(`${path}/.git`)) {
       fail(`Path ${path} exists but is on branch ${onOther ?? '(detached)'}, expected ${branch}`);
     }

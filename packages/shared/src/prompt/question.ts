@@ -1,5 +1,6 @@
 import type { QuestionShift } from '../intake/index.ts';
 import type { ShiftBrief } from '../protocol/runner.ts';
+import { AOM_NO_PIPES_NOTE } from './commands.ts';
 import { renderShiftPrompt } from './shift-prompt.ts';
 
 export const ANSWER_COMMAND = 'aom answer --item <id> --text "<your answer>" [--option <option id>]';
@@ -48,20 +49,39 @@ export function renderQuestionInstructions(brief: ShiftBrief, q: QuestionShift):
       `- Pass it on: \`${ESCALATE_COMMAND}\``,
       '',
       'Other commands: `aom card [--json]` prints the card, `aom ledger search "<query>"` searches decisions and standing orders.',
+      AOM_NO_PIPES_NOTE,
     ].join('\n'),
   );
   return `${out.join('\n\n')}\n`;
 }
 
-/** The prompt of a question shift: the question, who asked, what was tried, the ledger matches and the card. */
+/** The prompt of a question shift: the card, what was tried and matched, then the question last. */
 export function renderQuestionPrompt(brief: ShiftBrief, q: QuestionShift): string {
+  // The card comes first and the question last: the card is the same for every question about it, so its prompt-cache
+  // prefix is shared between the question shifts of a card; what changes (the question) is at the end.
   const out: string[] = [];
+  out.push('## The card');
+  out.push(
+    renderShiftPrompt({ ...brief, shift: { ...brief.shift, outcomes: [] } }).split(
+      '\n## Your job',
+    )[0] as string,
+  );
+  out.push('## Ledger entries that matched');
+  out.push(
+    q.ledgerMatches.length > 0
+      ? q.ledgerMatches
+          .map((m) => `- [${m.scope}] ${m.title} (id ${m.id})\n  ${m.body.trim().replace(/\n/g, '\n  ')}`)
+          .join('\n')
+      : 'None.',
+  );
+  if (q.trail.length > 0) {
+    out.push('## Already looked at by');
+    out.push(q.trail.map((t) => `- ${t}`).join('\n'));
+  }
   out.push(`# Question ${q.deskItemId}`);
   out.push(
     `Asked by ${q.askedBy.name}${q.askedBy.role ? ` (${q.askedBy.role})` : ''} on ${brief.card.ref} ${brief.card.title}${q.blocking ? '; the card is blocked until it is answered' : ' (non-blocking)'}.`,
   );
-  out.push('## The question');
-  out.push(q.text.trim());
   if (q.doing.trim()) {
     out.push('## What the asker was doing');
     out.push(q.doing.trim());
@@ -74,24 +94,8 @@ export function renderQuestionPrompt(brief: ShiftBrief, q: QuestionShift): strin
         .join('\n'),
     );
   }
-  if (q.trail.length > 0) {
-    out.push('## Already looked at by');
-    out.push(q.trail.map((t) => `- ${t}`).join('\n'));
-  }
-  out.push('## Ledger entries that matched');
-  out.push(
-    q.ledgerMatches.length > 0
-      ? q.ledgerMatches
-          .map((m) => `- [${m.scope}] ${m.title} (id ${m.id})\n  ${m.body.trim().replace(/\n/g, '\n  ')}`)
-          .join('\n')
-      : 'None.',
-  );
-  out.push('## The card');
-  out.push(
-    renderShiftPrompt({ ...brief, shift: { ...brief.shift, outcomes: [] } }).split(
-      '\n## Your job',
-    )[0] as string,
-  );
+  out.push('## The question');
+  out.push(q.text.trim());
   out.push('## Your job in this shift');
   out.push(
     [

@@ -2,6 +2,7 @@ import {
   type BaTaskShift,
   type CeoShift,
   type DevopsShift,
+  dropSections,
   ENVIRONMENT_HELP_SECTION,
   type QuestionShift,
   renderBaTaskInstructions,
@@ -14,6 +15,7 @@ import {
   renderQuestionInstructions,
   renderQuestionPrompt,
   renderShiftPrompt,
+  roleSectionsToDrop,
   type ServerToRunnerOf,
   type ShiftBrief,
 } from '@aom/shared';
@@ -37,6 +39,18 @@ export const questionOf = (msg: ShiftStartMsg): QuestionShift | undefined =>
 
 /** The instructions file and the prompt of a shift (DevOps request, question or card), from the (vault-enriched) brief. */
 export function shiftTexts(msg: ShiftStartMsg, brief: ShiftBrief): { instructions: string; prompt: string } {
+  const { instructions, prompt } = rawShiftTexts(msg, brief);
+  // Sections of the role text this kind of shift never uses (the BA's intake chat in a background shift) stay out.
+  return {
+    instructions: dropSections(
+      instructions,
+      roleSectionsToDrop(brief.role.key, msg.kind, { batchIntake: !!baTaskOf(msg)?.batch }),
+    ),
+    prompt,
+  };
+}
+
+function rawShiftTexts(msg: ShiftStartMsg, brief: ShiftBrief): { instructions: string; prompt: string } {
   const devops = devopsOf(msg);
   if (devops) {
     return { instructions: renderDevopsInstructions(brief, devops), prompt: renderDevopsPrompt(devops) };
@@ -54,9 +68,15 @@ export function shiftTexts(msg: ShiftStartMsg, brief: ShiftBrief): { instruction
       prompt: renderQuestionPrompt(brief, question),
     };
   }
+  // Card agents learn how to ask the DevOps engineer (`aom devops`); the section is runner-side by design. It is the
+  // same for every card shift, so it goes before the stage-specific "How to report" (cache-friendly order).
+  const rendered = renderInstructions(brief);
+  const at = rendered.indexOf('# How to report');
   return {
-    // Card agents learn how to ask the DevOps engineer (`aom devops`); the section is runner-side by design.
-    instructions: `${renderInstructions(brief)}\n${ENVIRONMENT_HELP_SECTION}`,
+    instructions:
+      at >= 0
+        ? `${rendered.slice(0, at)}${ENVIRONMENT_HELP_SECTION.trim()}\n\n${rendered.slice(at)}`
+        : `${rendered}\n${ENVIRONMENT_HELP_SECTION}`,
     prompt: renderShiftPrompt(brief),
   };
 }

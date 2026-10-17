@@ -2,7 +2,7 @@ import { renderBatchInstructions, renderBatchPrompt } from '../intake/batch.ts';
 import { renderMailDraftInstructions, renderMailDraftPrompt } from '../mail/draft.ts';
 import type { BaTaskShift } from '../phases/index.ts';
 import type { ShiftBrief } from '../protocol/runner.ts';
-import { commandForOutcome } from './commands.ts';
+import { AOM_NO_PIPES_NOTE, commandForOutcome } from './commands.ts';
 import { renderReporterInstructions, renderReporterPrompt } from './reporter-task.ts';
 import { renderBindingStandingOrders } from './standing-orders.ts';
 
@@ -56,6 +56,7 @@ export function renderBaTaskInstructions(brief: ShiftBrief, task: BaTaskShift): 
       task.kind === 'followups_brief'
         ? 'Before the terminal command, delegate every follow-up with `aom phase followup brief <n> --to devops|tester|ba --text "<instructions>"`.'
         : 'Write the report as markdown in a file first (your scratch directory).',
+      AOM_NO_PIPES_NOTE,
     ].join('\n'),
   );
   return `${out.join('\n\n')}\n`;

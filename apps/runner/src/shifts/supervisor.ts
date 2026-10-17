@@ -20,6 +20,7 @@ import {
   type IpcReportResponse,
   type IpcRpcRequest,
   type IpcRpcResponse,
+  identityLast,
   isPublishRequest,
   isTerminalReport,
   isValidReportPath,
@@ -29,6 +30,7 @@ import {
   type PublishRequest,
   type ReadableFolder,
   type RepoReport,
+  type ResumeState,
   renderCardAttachments,
   renderReadableFolders,
   type ServerToRunnerOf,
@@ -42,7 +44,7 @@ import {
   type VaultWriteCommand,
 } from '@aom/shared';
 import { formatLimitTime } from '../adapters/claude-usage-limit.ts';
-import { removeSandboxStubs } from '../adapters/sandbox-placeholders.ts';
+import { holdWorktree, otherShiftsUse, removeSandboxStubs } from '../adapters/sandbox-placeholders.ts';
 import type { RuntimeAdapter, RuntimeEvent, RuntimeSession } from '../adapters/types.ts';
 import {
   attachFileFromAgent,
@@ -55,6 +57,8 @@ import {
 } from '../attachments/index.ts';
 import type { RunnerConfig } from '../config.ts';
 import type { Outbox } from '../connection/outbox.ts';
+import { recordDevopsAudit } from '../devops/audit.ts';
+import { redactCommand } from '../devops/guard.ts';
 import { cardPayload, shiftTexts } from '../devops/requests.ts';
 import { type ExternalAdapters, formatSource } from '../external/index.ts';
 import { checkFeedItemsFetched, FetchedUrls } from '../feeds/validation.ts';
@@ -86,6 +90,7 @@ import {
   WorktreeError,
   type WorktreeResult,
 } from '../git/worktrees.ts';
+import { diskProblem } from '../health/disk.ts';
 import type { IpcServer, ShiftIpcHandler } from '../ipc/server.ts';
 import { type Logger, nullLogger } from '../log.ts';
 import type { RunnerPaths } from '../paths.ts';
@@ -95,6 +100,7 @@ import { type EnvForwards, startForwards } from '../runs/forward.ts';
 import type { RunManager } from '../runs/manager.ts';
 import { cleanAgentTmp, ensureSandbox, holdAgentTmp, type Sandbox, sandboxEnv } from '../sandbox/sandbox.ts';
 import type { TargetSecrets } from '../secrets/targets.ts';
+import { copySessionTranscript, SessionRegistry } from '../sessions/registry.ts';
 import {
   defaultEnvChecker,
   type EnvChecker,
@@ -204,6 +210,20 @@ export interface SupervisorDeps {
   targetSecrets?: TargetSecrets;
   /** Test hook: how a remote target is probed before a tester shift starts (default: an HTTP request). */
   probeTarget?: (url: string) => Promise<string | null>;
+  /** Claude sessions started on this workstation (resume decisions); default: `<data dir>/sessions.json`. */
+  sessions?: SessionRegistry;
+  /** Test hook: free bytes of a folder (default: statfs). */
+  diskFree?: (path: string) => number;
+  /** Test hook: where the OS temp folder is (the disk check measures it). */
+  diskTmpDir?: string;
+  /** Free-space limits of the disk check (tests lower them). */
+  diskLimits?: { minTmp?: number; minData?: number };
+  /** After the server released the claim of a shift whose report was accepted: how long Claude gets to write its result line. Default 5 s. */
+  claimLostGraceMs?: number;
+  /** How often a running session's context size is sent to the server. Default 2 min. */
+  contextReportMs?: number;
+  /** An unexpected failure of the runner's own code while handling a shift (sent to the server as `runner.error`). */
+  reportError?: (err: unknown, context: string) => void;
 }
 
 /** The server's answer to a `shift.report`: what the agent is told (and any ledger matches for a question). */
@@ -266,6 +286,17 @@ interface ActiveShift {
   forwards?: EnvForwards;
   /** Releases the hold on the agent's TMPDIR (see `holdAgentTmp`). */
   releaseTmp?: () => void;
+  /** Releases this shift's claim on its worktree (the sandbox stubs stay while another shift uses it). */
+  releaseWorktree?: () => void;
+  /** The server accepted a terminal report of this shift (as opposed to `reportState`, which a lost claim also sets). */
+  reportAccepted?: boolean;
+  /** Resolves when the agent's event stream has ended (the process is gone and its result line was read). */
+  streamEnded?: Promise<void>;
+  /** Claude's session id of this shift, once the stream said it. */
+  runtimeSessionId?: string;
+  /** The session this shift was asked to resume, and what the runner decided (reported with the first session update). */
+  resumeAsked?: { sessionId: string; state: ResumeState; detail?: string; cwd: string };
+  lastContextSent?: number;
 }
 
 type ShiftStartedSyncMain = {
@@ -298,14 +329,20 @@ export const IDLE_LIMITS: IdleLimits = {
   checkMs: 30_000,
 };
 
+/** The workflow stage of the QA-steps shifts (the server's `QA_STEPS_STAGE`); they are short. */
+const QA_STEPS_STAGE = 'qa_steps';
+
 const ACCEPTED_MESSAGE = 'Recorded. Finish now; do not make further changes.';
 
 export class ShiftSupervisor {
   private readonly active = new Map<string, ActiveShift>();
   private readonly log: Logger;
 
+  private readonly sessions: SessionRegistry;
+
   constructor(private readonly deps: SupervisorDeps) {
     this.log = deps.log ?? nullLogger;
+    this.sessions = deps.sessions ?? new SessionRegistry(join(deps.paths.root, 'sessions.json'));
   }
 
   /** Shifts that are running (for `hello` and heartbeats). */
@@ -382,6 +419,7 @@ export class ShiftSupervisor {
       await this.run(shift);
     } catch (err) {
       this.log.error(`shift ${msg.shiftId} failed unexpectedly`, err);
+      this.deps.reportError?.(err, `shift.${msg.kind}`);
       if (!shift.session)
         this.reject(msg.shiftId, 'internal', err instanceof Error ? err.message : String(err));
     } finally {
@@ -390,6 +428,7 @@ export class ShiftSupervisor {
       if (shift.token) this.deps.ipc.revoke(shift.token);
       if (shift.graceTimer) clearTimeout(shift.graceTimer);
       shift.forwards?.close();
+      shift.releaseWorktree?.();
       this.active.delete(msg.shiftId);
       // every outcome (done, crash, stop, timeout): the agent's per-shift temp content goes (backlog #81)
       shift.releaseTmp?.();
@@ -468,7 +507,24 @@ export class ShiftSupervisor {
   async handleStop(shiftId: string, reason: StopReason): Promise<void> {
     const s = this.active.get(shiftId);
     if (!s) return;
-    s.stopReason ??= reason;
+    // The server releases the claim as soon as it accepted the report, and that used to kill the process 1.5 s later,
+    // before Claude wrote its result line: 577 such shifts recorded estimated usage and were labelled "stopped". Give a
+    // session whose report was accepted a short grace to finish by itself (its usage is then the real one).
+    const afterAccepted = reason === 'claim_lost' && s.reportAccepted === true;
+    if (afterAccepted && s.streamEnded) {
+      const grace = this.deps.claimLostGraceMs ?? 5_000;
+      let timer: NodeJS.Timeout | undefined;
+      const done = await Promise.race([
+        s.streamEnded.then(() => true),
+        new Promise<boolean>((resolve) => {
+          timer = setTimeout(() => resolve(false), grace);
+          timer.unref?.();
+        }),
+      ]);
+      if (timer) clearTimeout(timer);
+      if (done) return;
+    }
+    if (!afterAccepted) s.stopReason ??= reason;
     if (reason === 'claim_lost') {
       s.reportState = 'accepted'; // no further reports for a shift the server no longer holds
       this.deps.outbox.discard((e) => e.type === 'shift.report' && e.frame.shiftId === shiftId);
@@ -589,6 +645,35 @@ export class ShiftSupervisor {
       this.reject(msg.shiftId, 'runtime_unavailable', `runtime ${msg.agent.runtime} is not available`);
       return;
     }
+    // A full disk killed a shift in P5-27 (#81) and the card came back every 39 s: refuse up front with a reason the
+    // server backs off on. The DevOps engineer is exempt, it is the one who frees the space.
+    if (msg.kind !== 'devops') {
+      const problem = diskProblem(paths.root, {
+        ...(this.deps.diskFree ? { free: this.deps.diskFree } : {}),
+        ...(this.deps.diskTmpDir ? { tmpDir: this.deps.diskTmpDir } : {}),
+        ...(this.deps.diskLimits?.minTmp !== undefined ? { minTmp: this.deps.diskLimits.minTmp } : {}),
+        ...(this.deps.diskLimits?.minData !== undefined ? { minData: this.deps.diskLimits.minData } : {}),
+      });
+      if (problem) {
+        this.log.warn(`shift ${msg.shiftId} not started: ${problem}`);
+        this.reject(msg.shiftId, 'worktree_failed', problem);
+        return;
+      }
+    }
+    // A login that expired since the last shift: put the card back without penalty now, instead of crashing the first
+    // shift on it (the check reads the expiry and only calls Claude when the token is about to expire).
+    if (
+      !s.resumed &&
+      adapter.checkLogin &&
+      (await adapter.checkLogin().catch(() => 'unknown')) === 'expired'
+    ) {
+      this.log.warn(
+        `shift ${msg.shiftId}: the ${msg.agent.runtime} login has expired; the shift is put back`,
+      );
+      await this.deps.beforeAuthReject?.().catch(() => undefined);
+      this.reject(msg.shiftId, 'auth_expired', 'The Claude login on this workstation has expired.');
+      return;
+    }
 
     // Every commit of this shift (the agent's, the runner's leftovers commit, merges) carries one identity: the project's
     // "Commit as", else the clone's git config, else the workstation's (backlog #65). With none set a shift that works in
@@ -689,6 +774,12 @@ export class ShiftSupervisor {
         return;
       }
       cwd = s.worktree.path;
+      s.releaseWorktree = holdWorktree(cwd, msg.shiftId);
+      if (s.worktree.recoveredFrom) {
+        const note = `the worktree was left on ${s.worktree.recoveredFrom} (a conflict attempt that did not finish); it was clean and had nothing of its own, so it was switched back to ${s.worktree.branchName}`;
+        this.addProgress(s, 'status', note);
+        this.log.warn(`${msg.brief.card.ref}: ${note}`);
+      }
       s.startSha = (await git(cwd, ['rev-parse', 'HEAD'])).stdout.trim();
       s.branchesAtStart = await snapshotBranches(cwd);
       const seen = await originBranchNames(repo.localPath);
@@ -842,6 +933,8 @@ export class ShiftSupervisor {
         this.log.warn(`${msg.brief.card.ref}: ${note}`);
       }
     }
+    // the agent's name and seniority close the file: everything before is shared by every agent of the role and project
+    texts.instructions = identityLast(texts.instructions);
     await adapter.writeInstructions(sandbox, texts.instructions);
     s.token = this.deps.ipc.registerShift(this.handlerFor(s));
     s.env = {
@@ -890,11 +983,55 @@ export class ShiftSupervisor {
       }
     }
 
+    // Resume the agent's own earlier session when it may (same agent, under 120K context tokens and 4 hours old).
+    let resumeSessionId: string | undefined;
+    if (msg.resumeSessionId && !s.resumed) {
+      const d = this.sessions.decide(msg.resumeSessionId, msg.agent.agentId, sandbox.configDir);
+      s.resumeAsked = { sessionId: msg.resumeSessionId, ...d, cwd };
+      if (d.state === 'resumed') {
+        // a group builder moves from one card worktree to the next: its transcript follows it into the new folder
+        const how = copySessionTranscript(
+          sandbox.configDir,
+          msg.resumeSessionId,
+          cwd,
+          this.sessions.get(msg.resumeSessionId)?.cwd,
+        );
+        if (how === 'missing') s.resumeAsked = { ...s.resumeAsked, state: 'fresh_transcript_missing' };
+        else resumeSessionId = msg.resumeSessionId;
+      }
+      this.addProgress(
+        s,
+        'status',
+        s.resumeAsked.state === 'resumed'
+          ? "continuing this agent's earlier session"
+          : `starting a fresh session: ${s.resumeAsked.detail ?? s.resumeAsked.state}`,
+      );
+    }
+    // Short shifts make a few calls and end: the 5 minute prompt cache is cheaper than the 1 hour one (2x the write).
+    const shortShift =
+      msg.kind === 'question' ||
+      msg.kind === 'ceo' ||
+      msg.kind === 'devops' ||
+      (msg.kind === 'card' && msg.brief.shift.stage === QA_STEPS_STAGE);
     try {
       s.session = await adapter.start({
         shiftId: msg.shiftId,
         prompt: texts.prompt,
         instructionsMarkdown: texts.instructions,
+        kind: msg.kind,
+        ...(shortShift ? { promptCacheTtl: '5m' as const } : {}),
+        ...(resumeSessionId ? { resumeSessionId } : {}),
+        ...(msg.kind === 'devops' && msg.agent.isDevops
+          ? {
+              devopsGuard: {
+                sessionRef: msg.shiftId,
+                protectedBranches: [msg.brief.project.workingBranch, msg.worktree?.baseBranch].filter(
+                  (b): b is string => !!b,
+                ),
+                approvedCommands: msg.devops?.approval?.commands ?? [],
+              },
+            }
+          : {}),
         cwd,
         sandbox,
         agent: msg.agent as AgentRuntimeSpec,
@@ -967,6 +1104,13 @@ export class ShiftSupervisor {
     if (s.stopReason) void s.session.stop(`stop:${s.stopReason}`); // stop arrived while preparing
 
     let exit: Extract<RuntimeEvent, { kind: 'exit' }> = { kind: 'exit', code: null };
+    let streamDone: () => void = () => {};
+    s.streamEnded = new Promise<void>((resolve) => {
+      streamDone = resolve;
+    });
+    // The session's size, now and then: a long shift's growing context is visible on the server before it ends.
+    const contextTimer = setInterval(() => this.reportContext(s), this.deps.contextReportMs ?? 120_000);
+    contextTimer.unref?.();
     try {
       for await (const ev of s.session.events()) {
         s.lastActivity = now();
@@ -979,6 +1123,8 @@ export class ShiftSupervisor {
       clearInterval(watchdog);
       clearTimeout(timeout);
       clearInterval(flush);
+      clearInterval(contextTimer);
+      streamDone();
     }
     this.flushProgress(s);
     // The agent process never ran (spawn failed): not an agent crash, nothing to collect or roll back.
@@ -1002,7 +1148,10 @@ export class ShiftSupervisor {
 
     // The sandbox's empty mount stubs (.gitmodules, .bashrc, ...) go before anything looks at the worktree, whoever made
     // them (the runner's placeholders or Claude Code itself): never tracked files, never non-empty ones.
-    if (msg.worktree && s.worktree) await removeSandboxStubs(s.worktree.path).catch(() => []);
+    // Not while another shift still works in this worktree (it may be using them as mount points); the last one out
+    // clears them. They are empty files, which `untrackedSandboxStubs` keeps out of every status and commit.
+    if (msg.worktree && s.worktree && !otherShiftsUse(s.worktree.path, msg.shiftId))
+      await removeSandboxStubs(s.worktree.path).catch(() => []);
 
     if (msg.worktree && s.worktree && msg.agent.permissions.mayCommit) {
       // A guard rejection leaves the agent's out-of-scope edits in the worktree: discard them, never commit them.
@@ -1088,18 +1237,22 @@ export class ShiftSupervisor {
     }
 
     let outcome: 'reported' | 'no_report' | 'stopped' | 'crashed' | 'timeout';
-    if (s.reportState !== 'none' && s.stopReason !== 'claim_lost') outcome = 'reported';
+    if ((s.reportState !== 'none' && s.stopReason !== 'claim_lost') || s.reportAccepted) outcome = 'reported';
     else if (s.stopReason === 'timeout' || s.stopReason === 'idle') outcome = 'timeout';
     else if (s.stopReason) outcome = 'stopped';
     else if (exit.code !== 0) outcome = 'crashed';
     else outcome = 'no_report';
 
+    const contextTokens = s.session.contextTokens?.() ?? 0;
+    if (s.runtimeSessionId && contextTokens > 0)
+      this.sessions.updateContext(s.runtimeSessionId, contextTokens);
     this.deps.transport.send('shift.ended', {
       shiftId: msg.shiftId,
       outcome,
       exitCode: exit.code,
       durationMs: Date.now() - s.startedAt.getTime(),
       usage: s.session.usage(),
+      ...(contextTokens > 0 ? { contextTokens } : {}),
       ...(s.finalText || exit.error ? { finalText: (s.finalText ?? exit.error ?? '').slice(0, 4000) } : {}),
       guardViolations: s.guardViolations,
     });
@@ -1125,6 +1278,53 @@ export class ShiftSupervisor {
       s.fetched.record(ev.name, ev.summary);
       this.addProgress(s, 'tool', `${ev.name}: ${ev.summary}`);
     } else if (ev.kind === 'final') s.finalText = ev.text;
+    else if (ev.kind === 'session') this.onSession(s, ev.runtimeSessionId);
+  }
+
+  /**
+   * Claude's session id: known only once the process printed its first line, after `shift.started` went out. Recorded
+   * on this workstation (so a later shift can resume it) and sent as a late update with the context size and, for a
+   * shift that was asked to resume, what was decided.
+   */
+  private onSession(s: ActiveShift, runtimeSessionId: string): void {
+    if (s.runtimeSessionId === runtimeSessionId) return;
+    s.runtimeSessionId = runtimeSessionId;
+    const cwd = s.worktree?.path ?? s.sandbox?.scratch ?? '';
+    this.sessions.record({
+      sessionId: runtimeSessionId,
+      agentId: s.msg.agent.agentId,
+      cwd,
+      ...(s.resumeAsked?.state === 'resumed' ? { inheritFrom: s.resumeAsked.sessionId } : {}),
+    });
+    const contextTokens = s.session?.contextTokens?.() ?? 0;
+    s.lastContextSent = contextTokens;
+    this.deps.transport.send('shift.session', {
+      shiftId: s.msg.shiftId,
+      runtimeSessionId,
+      ...(contextTokens > 0 ? { contextTokens } : {}),
+      ...(s.resumeAsked
+        ? {
+            resume: {
+              state: s.resumeAsked.state,
+              ...(s.resumeAsked.detail ? { detail: s.resumeAsked.detail } : {}),
+            },
+          }
+        : {}),
+    });
+  }
+
+  /** Sends the session's context size when it changed (every couple of minutes while the shift runs). */
+  private reportContext(s: ActiveShift): void {
+    if (!s.runtimeSessionId) return;
+    const contextTokens = s.session?.contextTokens?.() ?? 0;
+    if (contextTokens <= 0 || contextTokens === s.lastContextSent) return;
+    s.lastContextSent = contextTokens;
+    this.sessions.updateContext(s.runtimeSessionId, contextTokens);
+    this.deps.transport.send('shift.session', {
+      shiftId: s.msg.shiftId,
+      runtimeSessionId: s.runtimeSessionId,
+      contextTokens,
+    });
   }
 
   private addProgress(s: ActiveShift, kind: 'text' | 'tool' | 'status', text: string): void {
@@ -1161,6 +1361,13 @@ export class ShiftSupervisor {
         if (req.method === 'card.attachments') return this.cardAttachments(s, req.params);
         if (req.method === 'transcript.fetch') return this.transcriptFetch(s, req.params);
         if (req.method === 'sudo.run') return this.sudoRun(s, req.params);
+        if (req.method === 'devops.audit')
+          return recordDevopsAudit(req.params, {
+            isDevops: s.msg.agent.isDevops === true,
+            logFile: join(this.deps.paths.logs, 'devops-audit.jsonl'),
+            send: (entries) => void this.deps.transport.send('devops.audit', { entries }),
+            redact: redactCommand,
+          });
         if (req.method.startsWith('run.')) return this.runRpc(s, req.method, req.params);
         if (req.method.startsWith('env.') || req.method === 'test.suite')
           return this.testerRpc(s, req.method, req.params);
@@ -1898,6 +2105,7 @@ export class ShiftSupervisor {
     }
     if (terminal) {
       s.reportState = 'accepted';
+      s.reportAccepted = true;
       s.graceTimer = setTimeout(
         () => void s.session?.stop('report_accepted'),
         this.deps.exitGraceMs ?? 120_000,
