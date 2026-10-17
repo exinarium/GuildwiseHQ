@@ -1290,6 +1290,10 @@ An amber badge "Backing off until 14:32 (3 failures)" on a card means the **loop
 3. Click **Release back-off** on the card to try again at once. Moving the card to another stage also clears it.
 4. If it keeps failing, cancel the card and write a better one.
 
+**A card that keeps crashing is parked.** After 10 failed shifts in one episode the loop breaker stops backing off and parks the card: it becomes blocked and one blocking item appears on the desk, naming the card, the failure count and the last error. Fix the cause, then answer (resolve) the item or move the card back to the queue. The failure count starts again from zero.
+
+Cards made by a schedule or an interest run in a project with exactly one repository get that repository, like a card you create by hand. With several repositories the card has none until you pick one.
+
 ![The back-off badge on a card](guide/assets/card-backoff.jpg)
 
 ### 9.4 A budget pause

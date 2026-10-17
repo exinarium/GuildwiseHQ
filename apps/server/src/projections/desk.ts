@@ -1,4 +1,4 @@
-import type { EventOf, EventType } from '@aom/shared';
+import { DESK_SUBKIND, type EventOf, type EventType } from '@aom/shared';
 import { exec, one, rows } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
 import type { Projector, StoredEvent } from '../eventstore/types.ts';
@@ -126,6 +126,11 @@ async function unblock(
     'SELECT card_id FROM card_blockers WHERE desk_item_id=$1',
     [itemId],
   );
+  // Releasing a card the loop breaker parked ends its episode: the failure count starts again from zero.
+  const parkedItem = await one(tx, 'SELECT 1 FROM desk_items WHERE id=$1 AND subkind=$2', [
+    itemId,
+    DESK_SUBKIND.loopParked,
+  ]);
   await exec(tx, 'DELETE FROM card_blockers WHERE desk_item_id=$1', [itemId]);
   for (const { card_id } of blocked) {
     if (only && !only.includes(card_id)) continue;
@@ -139,6 +144,12 @@ async function unblock(
         [card_id, e.createdAt],
       ),
     );
+    if (parkedItem)
+      await exec(
+        tx,
+        'UPDATE cards SET retry_after=NULL, retry_failures=0, retry_episode_id=NULL WHERE id=$1',
+        [card_id],
+      );
   }
 }
 

@@ -33,6 +33,8 @@ export const DESK_SUBKIND = {
   repoCreate: 'repo_create',
   repoCreateFailed: 'repo_create_failed',
   loopBackoff: 'loop_backoff',
+  /** A card failed `LOOP_PARK_FAILURES` shifts in one loop-breaker episode: it is parked on one blocking item (S4 hook). */
+  loopParked: 'loop_parked',
   /** The same question asked again on the same card and stage with nothing changed: the card is parked (one item). */
   repeatQuestion: 'repeat_question',
   /** A card used its budget of passes, rounds or shifts: the architect arbitrates, then the owner. */
@@ -140,6 +142,12 @@ export function bugDescription(input: { note: string; evidence: TestEvidence; pa
 
 /** Loop breaker (docs/design/phases.md B0): failed shifts on one card within a window put the card in back-off. */
 export const LOOP_BREAKER = { failures: 3, windowMinutes: 10, baseMinutes: 1, capMinutes: 60 } as const;
+
+/**
+ * Failures of one loop-breaker episode after which the card is parked (blocked on one desk item) instead of backing off
+ * again: the dispatcher stops claiming it until a manager answers the item or moves the card back to the queue.
+ */
+export const LOOP_PARK_FAILURES = 10;
 
 /** Back-off after the `failures`-th failed shift of an episode (3 -> 1 min, 4 -> 2 min, ... capped at 1 h). */
 export function loopBackoffMinutes(failures: number): number {

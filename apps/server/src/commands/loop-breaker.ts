@@ -1,10 +1,18 @@
 import { randomUUID } from 'node:crypto';
-import { DESK_SUBKIND, LOOP_BREAKER, loopBackoffMinutes, QUESTION_LOOP, streamId } from '@aom/shared';
+import {
+  DESK_SUBKIND,
+  LOOP_BREAKER,
+  LOOP_PARK_FAILURES,
+  loopBackoffMinutes,
+  QUESTION_LOOP,
+  streamId,
+} from '@aom/shared';
 import type { Ctx } from '../context.ts';
 import { one, type Queryable, type Row } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { projectScope, SYSTEM_ACTOR } from './common.ts';
+import { openItemForSubject } from './desk-coalesce.ts';
 
 /** Shift end outcomes that count as a failed shift when no report was written. */
 const FAILED_OUTCOMES = ['no_report', 'crashed', 'timeout', 'lost'];
@@ -22,6 +30,7 @@ export interface LoopBreakerPlan {
  * Called when a card shift ended without a report (docs/design/phases.md B0). Decides the thread message and, once
  * 3 shifts failed within 10 minutes (counting only shifts after the card's last report), the back-off: 1 min,
  * doubling per further failure of the episode, capped at 1 h. One desk alert per episode, raised with its first back-off.
+ * At `LOOP_PARK_FAILURES` failures the episode ends in a park instead of another back-off (`parkEvents`).
  */
 export async function loopBreakerPlan(
   ctx: Ctx,
@@ -29,6 +38,7 @@ export async function loopBreakerPlan(
   card: Row,
   defaultMessage: string,
   finalText: string | undefined,
+  outcome?: string,
 ): Promise<LoopBreakerPlan> {
   const now = ctx.clock.now();
   const inEpisode = Number(card.retry_failures) >= LOOP_BREAKER.failures;
@@ -54,6 +64,8 @@ export async function loopBreakerPlan(
   const until = new Date(now.getTime() + loopBackoffMinutes(failures) * 60_000);
   const episodeId: string = inEpisode && card.retry_episode_id ? card.retry_episode_id : randomUUID();
   const newEpisode = !inEpisode;
+  if (failures >= LOOP_PARK_FAILURES)
+    return parkPlan(tx, card, { failures, until, episodeId, newEpisode, finalText, outcome });
   const scope = projectScope(card.org_id, card.project_id);
   const events: AppendInput[] = [
     {
@@ -95,6 +107,92 @@ export async function loopBreakerPlan(
   const message = newEpisode
     ? `${defaultMessage.split('; the card is back')[0]}. This is failure ${failures} within ${LOOP_BREAKER.windowMinutes} minutes: the card is held back until ${hhmm(until)} and then retried with a longer wait after each failure. A manager can release the back-off from the card page.${finalText ? `\n\n${finalText}` : ''}`
     : null;
+  return { message, events };
+}
+
+/** Subject key of the one blocking item that parks a crash-looping card. */
+export const loopParkSubject = (cardId: string) => `loop-parked:${cardId}`;
+
+/**
+ * The episode reached `LOOP_PARK_FAILURES` failed shifts: the card is parked. `CardRetryDeferred` (with `parked: true`,
+ * the signal bug intake can hook into) records the count, and one blocking desk item (subkind `loop_parked`, keyed by card)
+ * blocks the card so the dispatcher stops claiming it. Answering the item or moving the card back to the queue ends
+ * the episode (projections/desk.ts, CardMovedByManager). A stale open item of the card is superseded, never doubled.
+ */
+async function parkPlan(
+  tx: Tx,
+  card: Row,
+  p: {
+    failures: number;
+    until: Date;
+    episodeId: string;
+    newEpisode: boolean;
+    finalText: string | undefined;
+    outcome: string | undefined;
+  },
+): Promise<LoopBreakerPlan> {
+  const scope = projectScope(card.org_id, card.project_id);
+  const subjectKey = loopParkSubject(card.id);
+  const events: AppendInput[] = [];
+  const stale = await openItemForSubject(tx, card.org_id, subjectKey);
+  if (stale)
+    events.push({
+      streamId: streamId.desk(stale.id),
+      event: {
+        type: 'DeskItemResolved',
+        payload: {
+          deskItemId: stale.id,
+          resolution: 'acknowledged',
+          note: 'The card failed again and is parked on a new item.',
+          by: { kind: 'system' },
+        },
+      },
+      actor: SYSTEM_ACTOR,
+      scope,
+    });
+  events.push({
+    streamId: streamId.card(card.id),
+    event: {
+      type: 'CardRetryDeferred',
+      payload: {
+        cardId: card.id,
+        until: p.until.toISOString(),
+        failures: p.failures,
+        episodeId: p.episodeId,
+        newEpisode: p.newEpisode,
+        parked: true,
+      },
+    },
+    actor: SYSTEM_ACTOR,
+    scope,
+  });
+  const lastError = (p.finalText ?? '').trim().slice(0, 1500) || (p.outcome ?? 'no output');
+  const deskItemId = randomUUID();
+  events.push({
+    streamId: streamId.desk(deskItemId),
+    event: {
+      type: 'DeskItemCreated',
+      payload: {
+        deskItemId,
+        kind: 'escalation',
+        subkind: DESK_SUBKIND.loopParked,
+        title: `${card.ref} is parked: ${p.failures} failed shifts in a row`,
+        body: `The shifts on ${card.ref} (${card.title}) ended without a report ${p.failures} times, so the card is parked and the dispatcher no longer claims it.\n\nLast error${p.outcome ? ` (${p.outcome})` : ''}:\n${lastError}\n\nFix the cause (a denied tool, a missing repository or environment, a crashing runtime), then answer this item or move the card back to the queue: the failure count starts again from zero.`,
+        options: [],
+        blocking: true,
+        pinned: true,
+        cardId: card.id,
+        projectId: card.project_id,
+        affectedCardIds: [card.id],
+        data: { failures: p.failures, episodeId: p.episodeId, lastOutcome: p.outcome ?? null, lastError },
+        askedBy: { kind: 'system' },
+        subjectKey,
+      },
+    },
+    actor: SYSTEM_ACTOR,
+    scope,
+  });
+  const message = `${p.failures} shifts in a row ended without a report: the card is parked and the manager was told. It returns to the queue when they answer the desk item or move it back.`;
   return { message, events };
 }
 

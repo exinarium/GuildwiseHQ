@@ -1218,7 +1218,7 @@ export async function applyShiftEnded(ctx: Ctx, tx: Tx, ws: WsRef, msg: RunnerTo
     const plan =
       stopped || handoff || asked
         ? { message: text, events: [] as AppendInput[] }
-        : await loopBreakerPlan(ctx, tx, card, text, msg.finalText);
+        : await loopBreakerPlan(ctx, tx, card, text, msg.finalText, msg.outcome);
     events.push(
       ...(await releaseClaimEvents(
         tx,

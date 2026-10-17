@@ -1,4 +1,4 @@
-import { loopBackoffMinutes } from '@aom/shared';
+import { LOOP_PARK_FAILURES, loopBackoffMinutes } from '@aom/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { closeAdminPool, q } from './helpers/db.ts';
 import type { FakeRunner } from './helpers/fake-runner.ts';
@@ -104,10 +104,10 @@ describe('loop breaker (shift failures)', () => {
     expect(await failMessages(card.id)).toEqual(msgsBefore);
 
     // the cap
-    await q('UPDATE cards SET retry_failures=9, retry_after=NULL WHERE id=$1', [card.id]);
+    await q('UPDATE cards SET retry_failures=8, retry_after=NULL WHERE id=$1', [card.id]);
     await failShift(card.id);
     const capped = await cardRow(card.id);
-    expect(capped.retry_failures).toBe(10);
+    expect(capped.retry_failures).toBe(9);
     expect(new Date(capped.retry_after).getTime() - clock().now().getTime()).toBeLessThanOrEqual(3_600_000);
     expect(new Date(capped.retry_after).getTime() - clock().now().getTime()).toBeGreaterThan(3_590_000);
   });
@@ -178,6 +178,81 @@ describe('loop breaker (shift failures)', () => {
     r.ended(start.shiftId, 'no_report');
     await until(async () => (await cardRow(card.id)).retry_failures === 4, 3000, 'doubled');
     expect(await alerts(card.id)).toHaveLength(1);
+  });
+
+  describe('parking a crash loop', () => {
+    const parkItems = (cardId: string) =>
+      q(`SELECT * FROM desk_items WHERE card_id=$1 AND subkind='loop_parked' ORDER BY created_at`, [cardId]);
+    /** The episode of the card stands at `failures`; the next failed shift is the one after. */
+    const episodeAt = (cardId: string, failures: number) =>
+      q(
+        `UPDATE cards SET retry_failures=$2, retry_after=NULL, retry_episode_id=gen_random_uuid() WHERE id=$1`,
+        [cardId, failures],
+      );
+
+    it('below the threshold the card only backs off', async () => {
+      const card = await setup();
+      await episodeAt(card.id, LOOP_PARK_FAILURES - 2);
+      await failShift(card.id);
+      const c = await cardRow(card.id);
+      expect(c.retry_failures).toBe(LOOP_PARK_FAILURES - 1);
+      expect(c.status).toBe('queued');
+      expect(await parkItems(card.id)).toHaveLength(0);
+    });
+
+    it('the threshold parks the card on one blocking item that names the card, the count and the last error', async () => {
+      const card = await setup();
+      await episodeAt(card.id, LOOP_PARK_FAILURES - 1);
+      await failShift(card.id);
+      const c = await cardRow(card.id);
+      expect(c.status).toBe('blocked');
+      expect(c.retry_failures).toBe(LOOP_PARK_FAILURES);
+      const items = await parkItems(card.id);
+      expect(items).toHaveLength(1);
+      expect(items[0]).toMatchObject({ status: 'open', blocking: true });
+      expect(items[0]?.title).toContain(card.ref);
+      expect(items[0]?.title).toContain(String(LOOP_PARK_FAILURES));
+      expect(items[0]?.body).toContain('Bash was denied');
+      const parkedEvents = (
+        await q(`SELECT payload FROM events WHERE stream_id=$1 AND type='CardRetryDeferred'`, [
+          `card-${card.id}`,
+        ])
+      ).filter((e) => e.payload.parked === true);
+      expect(parkedEvents).toHaveLength(1);
+    });
+
+    it('the dispatcher skips the parked card, even when its back-off time has passed', async () => {
+      const card = await setup();
+      await episodeAt(card.id, LOOP_PARK_FAILURES - 1);
+      await failShift(card.id);
+      clock().setOffset(2 * 3600_000);
+      await markOnline(w.t, w.workstationId, { repoIds: [w.repoId] });
+      expect(await w.t.app.ctx.services.dispatcher.run()).toEqual([]);
+      expect((await cardRow(card.id)).claim_id).toBeNull();
+    });
+
+    it('answering the item releases the card and resets the episode', async () => {
+      const card = await setup();
+      await episodeAt(card.id, LOOP_PARK_FAILURES - 1);
+      await failShift(card.id);
+      const [item] = await parkItems(card.id);
+      await ok(
+        w.t.req('POST', `/api/desk/${item?.id}/resolve`, {
+          cookie: w.owner.cookie,
+          body: { resolution: 'acknowledged', note: 'fixed the permissions' },
+        }),
+      );
+      expect(await cardRow(card.id)).toMatchObject({
+        status: 'queued',
+        retry_after: null,
+        retry_failures: 0,
+        retry_episode_id: null,
+      });
+      // a fresh episode: the next failure is the first one
+      await markOnline(w.t, w.workstationId, { repoIds: [w.repoId] });
+      await failShift(card.id);
+      expect((await cardRow(card.id)).status).toBe('queued');
+    });
   });
 
   it('a stopped shift is not a failure', async () => {

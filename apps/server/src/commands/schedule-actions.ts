@@ -35,6 +35,7 @@ import { badRequest, conflict } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { carrierProject } from '../reporter/tasks.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
+import { singleRepoDefault } from './card-repo.ts';
 import { resolveCardWorkflow, specifyTarget } from './cards.ts';
 import { orgScope, projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
 import { createDevOpsRequestIn } from './devops.ts';
@@ -97,6 +98,7 @@ export async function scheduledCard(
   );
   const cardId = randomUUID();
   const ref = cardRef(project.key, number);
+  const repoId = await singleRepoDefault(tx, project.id, def);
   const draft = extra.start === 'draft';
   return {
     cardId,
@@ -119,6 +121,7 @@ export async function scheduledCard(
           status: draft ? 'draft' : 'queued',
           fields: parsed.data,
           ownerUserId: await orgOwnerId(tx, project.org_id),
+          ...(repoId ? { repoId } : {}),
           origin: extra.origin ?? 'schedule',
           scheduled: !draft,
           ...(scheduleId ? { scheduleId } : {}),

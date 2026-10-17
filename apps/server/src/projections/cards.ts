@@ -704,7 +704,7 @@ export const cardProjectors: Record<string, Projector> = {
       await exec(
         tx,
         `DELETE FROM card_blockers WHERE card_id=$1 AND desk_item_id IN (
-           SELECT id FROM desk_items WHERE keep_blocked_until IS NOT NULL AND status='answered')`,
+           SELECT id FROM desk_items WHERE (keep_blocked_until IS NOT NULL AND status='answered') OR subkind='loop_parked')`,
         [p.cardId],
       );
   },

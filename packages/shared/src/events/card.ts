@@ -338,6 +338,8 @@ export const cardEvents = [
       episodeId: Id,
       /** First back-off of the episode: the desk alert is raised with it. */
       newEpisode: z.boolean(),
+      /** The episode reached `LOOP_PARK_FAILURES`: the card is parked on a blocking desk item (signal for bug intake). */
+      parked: z.boolean().optional(),
     }),
   ),
   defineEvent(

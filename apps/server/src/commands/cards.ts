@@ -35,6 +35,7 @@ import { type Tx, withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, notFound, unprocessable } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
+import { singleRepoDefault } from './card-repo.ts';
 import { cardMessage, projectScope, userActor } from './common.ts';
 import { integrationTestsDefault } from './integration-tests.ts';
 import { openLoopAlerts } from './loop-breaker.ts';
@@ -259,14 +260,7 @@ export async function createCardIn(
   // A card whose workflow works in the vault (research in a code project) never takes a repository.
   if (!workflowUsesRepos(def)) repoId = undefined;
   else if (repoId) await assertRepoInProject(tx, project.id, repoId);
-  else {
-    const repos = await rows<{ id: string }>(
-      tx,
-      'SELECT id FROM project_repos WHERE project_id=$1 AND removed_at IS NULL',
-      [project.id],
-    );
-    if (repos.length === 1) repoId = repos[0]?.id;
-  }
+  else repoId = await singleRepoDefault(tx, project.id, def);
   // No completion action named: the card inherits the project's default (resolved when it is used), so only a
   // deliberate override is stored on the card.
   const completionAction: CompletionAction | undefined = req.completionAction;
