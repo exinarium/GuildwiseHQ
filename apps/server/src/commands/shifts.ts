@@ -35,6 +35,7 @@ import { applyBaTaskReport, endBaTaskShift } from './ba-tasks.ts';
 import { cardView, workflowView } from './cards.ts';
 import { agentActor, cardMessage, orgScope, projectScope, runnerActor, SYSTEM_ACTOR } from './common.ts';
 import { cardConflictAttemptEvents } from './conflict-attempts.ts';
+import { raiseOrCoalesce } from './desk-coalesce.ts';
 import { applyDevopsReport, endDevopsShift } from './devops.ts';
 import { applyQuestionReport, endQuestionShift } from './escalation.ts';
 import { buildDigestEvents } from './feeds.ts';
@@ -924,7 +925,21 @@ export async function applyShiftRejected(
     rejection = branch.rejection;
   } else if (['repo_missing', 'worktree_failed', 'runtime_unavailable', 'internal'].includes(msg.reason)) {
     rejection = { reason: msg.reason, detail: msg.detail ?? msg.reason.replaceAll('_', ' ') };
+    // Every kind of rejection that will not fix itself holds the card back (1 min, doubling, up to 1 h), not only a
+    // missing branch: 958 rejections in 10 hours came from a card that was claimed again every tick.
+    extra.push(...rejectionBackoffEvents(ctx, card));
   }
+  // Three identical rejections in a row: one desk item for the manager (further ones only raise its counter).
+  if (rejection) {
+    const same =
+      card.last_rejection?.reason === rejection.reason && card.last_rejection?.detail === rejection.detail;
+    const streak = Number(card.retry_failures ?? 0) + 1;
+    if (same && streak >= REJECTION_DESK_AT) await raiseRejectionStormItem(ctx, tx, card, rejection, streak);
+  }
+  ctx.log.warn(
+    { shiftId: s.id, cardId: card.id, ref: card.ref, reason: msg.reason, detail: msg.detail },
+    'the runner rejected the shift',
+  );
   const noIdentity =
     msg.reason === 'internal' && (msg.detail ?? '').startsWith(`${NO_COMMIT_IDENTITY_CODE}:`);
   if (noIdentity) extra.push(...(await noCommitIdentityNotice(tx, ws, card)));
@@ -935,8 +950,44 @@ export async function applyShiftRejected(
       : msg.reason === 'auth_expired'
         ? 'The Claude login on this workstation has expired, so the shift could not run. The card is back in the queue without penalty and resumes once the login works again.'
         : `Shift rejected by the runner (${msg.reason}${msg.detail ? `: ${msg.detail}` : ''}); the card is back in the queue.`;
-  await ctx.store.append(
-    await releaseClaimEvents(tx, card, 'runner_rejected', text, 'rejected', extra, rejection),
+  const released = await releaseClaimEvents(tx, card, 'runner_rejected', text, 'rejected', extra, rejection);
+  // The reason is stored on the shift itself (measurement): what the runner said, not only that it said no.
+  for (const ev of released)
+    if (ev.event.type === 'ShiftEnded' && ev.event.payload.shiftId === s.id)
+      ev.event.payload.rejectionReason = `${msg.reason}${msg.detail ? `: ${msg.detail}` : ''}`.slice(0, 600);
+  await ctx.store.append(released, { tx });
+}
+
+/** How many identical rejections of one card in a row raise a desk item. */
+export const REJECTION_DESK_AT = 3;
+
+/**
+ * One desk item for a card whose shifts keep being rejected for the same reason (a broken worktree, a missing runtime):
+ * the dispatcher backs off by itself, but somebody has to fix the cause. Coalesced by card and reason, so later rejections
+ * only raise the counter of the open item.
+ */
+async function raiseRejectionStormItem(
+  ctx: Ctx,
+  tx: Tx,
+  card: Row,
+  rejection: { reason: string; detail: string },
+  streak: number,
+): Promise<void> {
+  await raiseOrCoalesce(
+    ctx,
+    {
+      subjectKey: `rejections:${card.id}:${rejection.reason}:${rejection.detail.slice(0, 120)}`,
+      orgId: card.org_id,
+      kind: 'alert',
+      subkind: 'worktree_rejections',
+      title: `${card.ref} keeps being turned away: ${rejection.reason.replaceAll('_', ' ')}`,
+      body: `The runner rejected the shifts of ${card.ref} (${card.title}) ${streak} times in a row for the same reason: ${rejection.detail}. The dispatcher holds the card back for longer after each rejection. Fix the cause on the workstation (the repository, its worktree, the runtime), or release the back-off on the card page to retry now.`,
+      cardId: card.id,
+      projectId: card.project_id,
+      data: { reason: rejection.reason, detail: rejection.detail },
+      actor: SYSTEM_ACTOR,
+      scope: projectScope(card.org_id, card.project_id),
+    },
     { tx },
   );
 }

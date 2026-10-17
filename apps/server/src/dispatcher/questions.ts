@@ -29,6 +29,8 @@ export interface QuestionDispatch {
 export async function questionPass(
   ctx: Ctx,
   skipAgent: (agentId: string) => boolean = () => false,
+  /** The workstation already runs as many shifts as its owner allows (backlog #76): nothing more is offered to it. */
+  workstationFull: (workstationId: string) => boolean = () => false,
 ): Promise<QuestionDispatch[]> {
   const now = ctx.clock.now();
   await endStaleShifts(ctx, now);
@@ -68,7 +70,8 @@ export async function questionPass(
       );
       continue;
     }
-    if (!reachable || busy.has(r.routed_agent_id) || skipAgent(r.routed_agent_id)) continue;
+    if (!reachable || busy.has(r.routed_agent_id) || skipAgent(r.routed_agent_id) || workstationFull(r.ws_id))
+      continue;
     const conn = ctx.services.runners.get(r.ws_id);
     if (!conn || !conn.reconciled) continue;
     const shiftId = randomUUID();

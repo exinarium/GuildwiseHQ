@@ -79,7 +79,8 @@ export const shiftProjectors: Record<string, Projector> = {
     await exec(
       tx,
       `UPDATE shifts SET status='ended', outcome=$2, report_outcome=$3, ended_at=$4, duration_ms=$5,
-              tokens_input=$6, tokens_output=$7, tokens_cache_read=$8, tokens_cache_write=$9
+              tokens_input=$6, tokens_output=$7, tokens_cache_read=$8, tokens_cache_write=$9,
+              rejection_reason=COALESCE($10, rejection_reason)
         WHERE id=$1`,
       [
         p.shiftId,
@@ -91,6 +92,7 @@ export const shiftProjectors: Record<string, Projector> = {
         p.usage.outputTokens,
         p.usage.cacheReadTokens,
         p.usage.cacheWriteTokens,
+        p.rejectionReason ?? null,
       ],
     );
     await exec(tx, 'UPDATE agents SET last_shift_ended_at=$2 WHERE id=$1', [p.agentId, e.createdAt]);

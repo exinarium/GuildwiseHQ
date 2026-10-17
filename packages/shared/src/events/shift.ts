@@ -60,6 +60,8 @@ export const shiftEvents = [
       costMicros: z.number().int().nonnegative().optional(),
       exitCode: z.number().int().nullable().optional(),
       guardViolations: z.array(GuardViolation).default([]),
+      /** Outcome `rejected`: why the runner turned the shift away (`reason: detail`). */
+      rejectionReason: z.string().max(600).optional(),
     }),
   ),
 ] as const;

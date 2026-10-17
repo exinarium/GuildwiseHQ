@@ -266,9 +266,15 @@ export class Dispatcher {
       }
     }
     made.push(...(await this.overflowPass(agents, nowMs, full)));
-    await devopsPass(this.ctx, (agentId) => (this.cooldown.get(agentId) ?? 0) > nowMs);
-    await questionPass(this.ctx, (agentId) => (this.cooldown.get(agentId) ?? 0) > nowMs);
-    await baTaskPass(this.ctx, (agentId) => (this.cooldown.get(agentId) ?? 0) > nowMs);
+    // The DevOps, question and BA passes respect the workstation's shift limit like the card passes do (each shift they
+    // start counts, so the next pass sees it).
+    const cooling = (agentId: string) => (this.cooldown.get(agentId) ?? 0) > nowMs;
+    const counted = <T extends { workstationId: string }>(started: T[]): void => {
+      for (const s of started) load.set(s.workstationId, (load.get(s.workstationId) ?? 0) + 1);
+    };
+    counted(await devopsPass(this.ctx, cooling, full));
+    counted(await questionPass(this.ctx, cooling, full));
+    counted(await baTaskPass(this.ctx, cooling, full));
     await ceoPass(this.ctx);
     await testingPass(this.ctx);
     // Test environments for cards waiting at an environment stage (the tester can claim them once healthy).
