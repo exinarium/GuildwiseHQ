@@ -30,7 +30,9 @@ export async function platformTeamSettings(ctx: Ctx): Promise<PlatformTeamSettin
     PLATFORM_TEAM_KEY,
   ]);
   const team = await getPlatformTeam(ctx.pool);
-  const org = team ? await one(ctx.pool, 'SELECT name FROM organizations WHERE id=$1', [team.orgId]) : undefined;
+  const org = team
+    ? await one(ctx.pool, 'SELECT name FROM organizations WHERE id=$1', [team.orgId])
+    : undefined;
   const project = team
     ? await one(ctx.pool, 'SELECT key, name FROM projects WHERE id=$1', [team.projectId])
     : undefined;
@@ -63,7 +65,10 @@ export async function setPlatformTeam(
         [
           {
             streamId: streamId.platformTeam(),
-            event: { type: 'PlatformTeamDesignated', payload: { orgId: null, projectId: null, by: admin.user.id } },
+            event: {
+              type: 'PlatformTeamDesignated',
+              payload: { orgId: null, projectId: null, by: admin.user.id },
+            },
             actor: userActor(admin.user.id),
             scope: { orgId: prev?.orgId ?? null, projectId: null, audience: 'admin' },
           },
@@ -81,9 +86,11 @@ export async function setPlatformTeam(
     if (!org) throw notFound('organization not found');
     if (!['trial', 'active'].includes(org.status))
       throw badRequest('org_not_active', 'the platform team organization must be active');
-    const project = await one(tx, 'SELECT id, org_id, status, decisions_project_only FROM projects WHERE id=$1', [
-      projectId,
-    ]);
+    const project = await one(
+      tx,
+      'SELECT id, org_id, status, decisions_project_only FROM projects WHERE id=$1',
+      [projectId],
+    );
     if (!project || project.org_id !== orgId)
       throw badRequest('project_not_in_org', 'that project does not belong to the organization');
     if (project.status !== 'active') throw badRequest('project_archived', 'the project is archived');

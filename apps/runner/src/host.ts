@@ -26,6 +26,8 @@ export interface HostOptions {
   runnerOptions?: Partial<RunnerOptions>;
   /** Called when a pairing connects (the self-updater uses it to confirm a freshly installed version). */
   onConnected?: () => void;
+  /** Safe mode: the server pinned the runner version (the self-updater follows it). */
+  onRunnerPin?: (version: string | null) => void;
 }
 
 interface Running {
@@ -209,6 +211,7 @@ export class RunnerHost {
         }
       },
       onConnected: () => this.opts.onConnected?.(),
+      onRunnerPin: (v) => this.opts.onRunnerPin?.(v),
       ...this.opts.runnerOptions,
     });
     this.running.set(entry.id, { entry, runner, signature, log, serverUrl: config.serverUrl });

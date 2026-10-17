@@ -42,10 +42,11 @@ async function ensureApproval(
   req: DeployCheckRequest,
   risk: { categories: string[]; paths: string[] },
 ): Promise<{ id: string; status: string }> {
-  const have = await one(tx, 'SELECT id, status FROM platform_deploy_approvals WHERE version=$1 AND kind=$2', [
-    req.version,
-    kind,
-  ]);
+  const have = await one(
+    tx,
+    'SELECT id, status FROM platform_deploy_approvals WHERE version=$1 AND kind=$2',
+    [req.version, kind],
+  );
   if (have) return have as { id: string; status: string };
   const team = await getPlatformTeam(tx);
   const id = randomUUID();
@@ -53,7 +54,12 @@ async function ensureApproval(
   const label = kind === 'high_risk' ? 'High-risk deploy' : 'Deploy with downtime';
   const body =
     kind === 'high_risk'
-      ? `Version ${req.version}${req.fromVersion ? ` (from ${req.fromVersion})` : ''} changes ${risk.categories.join(', ').replaceAll('_', ' ')}.\n\nChanged files that make it high risk:\n${risk.paths.slice(0, 25).map((p) => `- ${p}`).join('\n')}${risk.paths.length > 25 ? `\n- and ${risk.paths.length - 25} more` : ''}\n\n${req.diffSummary ?? ''}\n\nApprove to let the deploy go ahead; reject to hold it. Rollback: ${req.rollbackPath ?? 'not given'}.`
+      ? `Version ${req.version}${req.fromVersion ? ` (from ${req.fromVersion})` : ''} changes ${risk.categories.join(', ').replaceAll('_', ' ')}.\n\nChanged files that make it high risk:\n${risk.paths
+          .slice(0, 25)
+          .map((p) => `- ${p}`)
+          .join(
+            '\n',
+          )}${risk.paths.length > 25 ? `\n- and ${risk.paths.length - 25} more` : ''}\n\n${req.diffSummary ?? ''}\n\nApprove to let the deploy go ahead; reject to hold it. Rollback: ${req.rollbackPath ?? 'not given'}.`
       : `Version ${req.version}${req.fromVersion ? ` (from ${req.fromVersion})` : ''} needs the service down while it deploys.\n\n${req.diffSummary ?? ''}\n\nApprove to give the explicit go-ahead; reject to hold it. Rollback: ${req.rollbackPath ?? 'not given'}.`;
   await tx.query(
     `INSERT INTO platform_deploy_approvals (id, version, kind, desk_item_id, detail, requested_at)
@@ -104,7 +110,10 @@ async function audit(
   tx: Tx,
   a: {
     kind: 'check' | 'deploy' | 'approval' | 'rollback';
-    req: Pick<DeployCheckRequest, 'version' | 'fromVersion' | 'bugCardId' | 'downtime' | 'rollbackPath' | 'diffSummary'> &
+    req: Pick<
+      DeployCheckRequest,
+      'version' | 'fromVersion' | 'bugCardId' | 'downtime' | 'rollbackPath' | 'diffSummary'
+    > &
       Partial<Pick<DeployCheckRequest, 'reviewApproved' | 'testsPassed' | 'uatPassed'>>;
     decision?: DeployDecision;
     risk?: { high: boolean; categories: string[]; paths: string[] };
@@ -115,7 +124,11 @@ async function audit(
     at?: Date;
   },
 ): Promise<void> {
-  const risk = a.risk ?? { high: a.decision?.risk === 'high', categories: a.decision?.riskCategories ?? [], paths: a.decision?.riskPaths ?? [] };
+  const risk = a.risk ?? {
+    high: a.decision?.risk === 'high',
+    categories: a.decision?.riskCategories ?? [],
+    paths: a.decision?.riskPaths ?? [],
+  };
   await tx.query(
     `INSERT INTO platform_deploy_audit (at, kind, version, from_version, risk, risk_categories, risk_paths, downtime, allowed,
         outcome, bug_card_id, fixes_pausing, review_approved, tests_passed, uat_passed, approved_by, rollback_path,
@@ -162,11 +175,16 @@ export async function checkDeploy(
     if (!req.uatPassed) missing.push('uat');
     const fixesPausingBug =
       !!req.bugCardId &&
-      !!(await one(tx, 'SELECT 1 AS x FROM platform_pauses WHERE bug_card_id=$1 AND resumed_at IS NULL LIMIT 1', [
-        req.bugCardId,
-      ]));
+      !!(await one(
+        tx,
+        'SELECT 1 AS x FROM platform_pauses WHERE bug_card_id=$1 AND resumed_at IS NULL LIMIT 1',
+        [req.bugCardId],
+      ));
     const pendingApprovalIds: string[] = [];
-    const need: ApprovalKind[] = [...(risk.high ? (['high_risk'] as const) : []), ...(req.downtime ? (['downtime'] as const) : [])];
+    const need: ApprovalKind[] = [
+      ...(risk.high ? (['high_risk'] as const) : []),
+      ...(req.downtime ? (['downtime'] as const) : []),
+    ];
     let reason = '';
     for (const kind of need) {
       if (!team) {
@@ -178,7 +196,8 @@ export async function checkDeploy(
       if (a.status === 'approved') continue;
       missing.push(kind === 'high_risk' ? 'high_risk_approval' : 'downtime_approval');
       if (a.status === 'pending') pendingApprovalIds.push(a.id);
-      else reason = `The platform organization declined the ${kind.replace('_', '-')} approval for ${req.version}.`;
+      else
+        reason = `The platform organization declined the ${kind.replace('_', '-')} approval for ${req.version}.`;
     }
     const allowed = missing.length === 0;
     if (!reason)
@@ -251,7 +270,9 @@ export async function recordDeploy(
     });
     return approvedBy;
   });
-  const card = req.bugCardId ? await one(ctx.pool, 'SELECT ref, title FROM cards WHERE id=$1', [req.bugCardId]) : undefined;
+  const card = req.bugCardId
+    ? await one(ctx.pool, 'SELECT ref, title FROM cards WHERE id=$1', [req.bugCardId])
+    : undefined;
   await notifyPlatformDesk(ctx, {
     subjectKey: `platform_deploy_report:${req.version}:${outcome}`,
     subkind: PLATFORM_DESK_SUBKIND.deployReport,
@@ -285,8 +306,11 @@ export async function resolveDeployApprovalIn(
   resolution: 'approved' | 'rejected' | 'acknowledged' | 'dismissed',
   note?: string,
 ): Promise<void> {
-  if (resolution === 'acknowledged') throw badRequest('wrong_resolution', 'a deploy approval is approved or rejected');
-  const a = await one(tx, 'SELECT * FROM platform_deploy_approvals WHERE desk_item_id=$1 FOR UPDATE', [item.id]);
+  if (resolution === 'acknowledged')
+    throw badRequest('wrong_resolution', 'a deploy approval is approved or rejected');
+  const a = await one(tx, 'SELECT * FROM platform_deploy_approvals WHERE desk_item_id=$1 FOR UPDATE', [
+    item.id,
+  ]);
   if (!a || a.status !== 'pending') return;
   const status = resolution === 'approved' ? 'approved' : 'denied';
   await tx.query(
@@ -297,7 +321,11 @@ export async function resolveDeployApprovalIn(
   await audit(ctx, tx, {
     kind: 'approval',
     req: { version: a.version, downtime: a.kind === 'downtime' },
-    risk: { high: a.kind === 'high_risk', categories: a.detail?.risk?.categories ?? [], paths: a.detail?.risk?.paths ?? [] },
+    risk: {
+      high: a.kind === 'high_risk',
+      categories: a.detail?.risk?.categories ?? [],
+      paths: a.detail?.risk?.paths ?? [],
+    },
     outcome: status,
     approvedBy: status === 'approved' ? (who?.display_name ?? user.id) : null,
     reason: `${a.kind.replace('_', ' ')} approval ${status}${note ? `: ${note}` : ''}`,
@@ -324,8 +352,10 @@ const auditDto = (r: Row): PlatformDeployAuditDto => ({
 });
 
 export async function listDeployAudit(ctx: Ctx, limit = 100): Promise<PlatformDeployAuditDto[]> {
-  const list = await rows(ctx.pool, 'SELECT * FROM platform_deploy_audit ORDER BY at DESC, id DESC LIMIT $1', [
-    Math.min(Math.max(1, limit), 500),
-  ]);
+  const list = await rows(
+    ctx.pool,
+    'SELECT * FROM platform_deploy_audit ORDER BY at DESC, id DESC LIMIT $1',
+    [Math.min(Math.max(1, limit), 500)],
+  );
   return list.map(auditDto);
 }

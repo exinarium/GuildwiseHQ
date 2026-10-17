@@ -22,6 +22,7 @@ import type { Ctx } from '../context.ts';
 import { budgetDto, canEditBudget, monthSpendByProject, orgCostCtx, seesAmounts } from '../costs/index.ts';
 import { iso, one, type Row, rows } from '../db/sql.ts';
 import { conflict, notFound } from '../errors.ts';
+import { type EffectivePin, effectivePin } from '../platform-team/pins.ts';
 import { referenceRepoCandidates, referenceRepoDtos } from '../runner-gateway/read-repos.ts';
 import { effectiveShiftLimit, platformShiftCap, shiftLimitSettingOf } from '../runner-gateway/shift-limit.ts';
 import {
@@ -366,6 +367,18 @@ export async function workstationDtos(
        FROM workstations w JOIN users u ON u.id = w.user_id WHERE ${where} ORDER BY w.paired_at`,
     params,
   );
+  const pins = new Map<string, EffectivePin | null>();
+  for (const w of list) pins.set(w.id, await effectivePin(ctx.pool, w.id));
+  const paused = new Map(
+    (
+      await rows(
+        ctx.pool,
+        `SELECT w.id, count(*)::int AS n FROM workstations w JOIN platform_pauses pp ON pp.resumed_at IS NULL AND pp.workstation_id = w.id
+          WHERE w.id = ANY($1::uuid[]) GROUP BY w.id`,
+        [list.map((x) => x.id)],
+      )
+    ).map((r) => [r.id as string, Number(r.n)]),
+  );
   const repos = await rows(
     ctx.pool,
     `SELECT workstation_id, project_repo_id, local_path, reported_at FROM workstation_repos WHERE workstation_id = ANY($1::uuid[])`,
@@ -446,6 +459,8 @@ export async function workstationDtos(
     hostname: w.hostname,
     runnerVersion: w.runner_version,
     runnerUpdate: w.runner_update ?? null,
+    runnerPin: pins.get(w.id) ?? null,
+    platformPauses: paused.get(w.id) ?? 0,
     status: w.status,
     connected: w.connected && w.status === 'active',
     lastSeenAt: iso(w.last_seen_at),

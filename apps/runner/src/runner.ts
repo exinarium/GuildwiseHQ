@@ -12,6 +12,7 @@ import {
   normalizeRemoteUrl,
   READONLY_DESIGN_CAPABILITY,
   type RepoReport,
+  RUNNER_PIN_CAPABILITY,
   type RunnerCommandName,
   type RunnerUpdateState,
   type RuntimeInfo,
@@ -174,6 +175,8 @@ export interface RunnerOptions {
   } | null;
   /** Called once per welcome: a freshly updated version uses it to prove it can connect. */
   onConnected?: () => void;
+  /** Safe mode: the server pinned this workstation to a runner version (null: follow the latest release again). */
+  onRunnerPin?: (version: string | null) => void;
   /** Test seam: timings of the run supervision (see `runs/manager.ts`). */
   runTiming?: Partial<import('./runs/manager.ts').RunTiming>;
   /**
@@ -503,6 +506,7 @@ export class Runner {
       this.reportUpdate();
       this.runs.reportAll();
       opts.onConnected?.();
+      opts.onRunnerPin?.(w.runnerPin?.version ?? null);
       this.applyShiftLimit(w.limits.shiftLimit, w.limits.maxConcurrentShifts);
       this.writeStatus(true);
       this.scheduleStartupSweep();
@@ -891,10 +895,25 @@ export class Runner {
       // for real testers: the mock runtime (CI, demos) runs no tests, so its cards keep the plain test step.
       capabilities:
         platform() === 'win32'
-          ? ['ceo:1', SHIFT_LIMIT_CAPABILITY, READONLY_DESIGN_CAPABILITY]
+          ? ['ceo:1', SHIFT_LIMIT_CAPABILITY, READONLY_DESIGN_CAPABILITY, RUNNER_PIN_CAPABILITY]
           : this.opts.config.runtimes.mock?.enabled
-            ? ['runs:1', 'runs:2', 'ceo:1', SHIFT_LIMIT_CAPABILITY, READONLY_DESIGN_CAPABILITY]
-            : ['runs:1', 'runs:2', 'runs:3', 'ceo:1', SHIFT_LIMIT_CAPABILITY, READONLY_DESIGN_CAPABILITY],
+            ? [
+                'runs:1',
+                'runs:2',
+                'ceo:1',
+                SHIFT_LIMIT_CAPABILITY,
+                READONLY_DESIGN_CAPABILITY,
+                RUNNER_PIN_CAPABILITY,
+              ]
+            : [
+                'runs:1',
+                'runs:2',
+                'runs:3',
+                'ceo:1',
+                SHIFT_LIMIT_CAPABILITY,
+                READONLY_DESIGN_CAPABILITY,
+                RUNNER_PIN_CAPABILITY,
+              ],
       maxRunEnvironments: this.freshConfig().maxRunEnvironments,
       integrationsVersion: INTEGRATIONS_VERSION,
     };
@@ -1237,6 +1256,11 @@ export class Runner {
             roots: [this.paths.worktrees],
           }),
         );
+      } else if (command === 'runner.pin') {
+        // Safe mode: the platform team pinned (or unpinned) this workstation's runner version.
+        const p = CommandPayloadSchemas['runner.pin'].parse(payload);
+        this.opts.onRunnerPin?.(p.version);
+        done(true, { version: p.version });
       } else if (command === 'shifts.limit') {
         // The owner changed the limit on the Workstations page: it applies to the next shift offered, no restart.
         const p = CommandPayloadSchemas['shifts.limit'].parse(payload);

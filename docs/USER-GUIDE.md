@@ -1180,6 +1180,25 @@ A **simulation organization** is a safe sandbox for testing (for example your fa
 - **Load demo scenario:** on an empty simulation organization it adds two projects with repositories, a team for each, cards at several priorities, two desk questions, a draft idea and a schedule. It refuses when the organization already has projects.
 - **Delete simulation organization:** removes the organization and everything in it, including its history. You type its name to confirm. Accounts that belong only to it are deleted so their email addresses can be used again; accounts that also belong elsewhere only leave this organization. The audit log keeps a short record. The server does not back up the database for you: on a live system take a backup first (`docs/DEPLOY.md`).
 
+### 7.9 Platform team: Guildwise repairs itself
+
+Guildwise repairs itself with a normal team. You, the platform administrator, only pick which organisation and project run it; the approvals and reports land on **that organisation's desk**, not yours.
+
+**Set it up.** Platform, Platform team: choose one existing organisation and paste the id of one of its projects (Project settings shows it), then Designate. The project keeps its decisions at project level. Until you do, bugs are recorded but no cards are filed. Clear removes the designation.
+
+**What happens automatically.**
+- Runner crashes, server errors, loops (a card failing 3 times, or asking question after question), rejection storms on a workstation and failed role self-tests become one bug card per problem in the platform project, with a counter ("seen 10 times"). The platform architect triages it: close as invalid, or set a severity and a fix size and design the fix, then the normal flow runs (review, test, deploy).
+- A **critical** bug (a stage cannot complete, or the same failure 3 or more times) pauses only what it hits: that project and stage, or that workstation. You see a banner on the affected project and a badge on the workstation; running shifts finish, new ones do not start. It resumes by itself when the bug card is done, or from Platform team, Resume. The platform project itself is never paused.
+- Every pause, resume, deploy and approval is a note on the platform organisation's desk.
+
+**Deploys.** A fix that passed review, tests and UAT may go live without anyone's consent when it only unpauses current work; the platform organisation is told. A **high-risk** fix (login, permissions or secrets; data or migrations; organisations or billing, decided from the files the fix changes) and any deploy with **downtime** wait for the platform organisation's approval on its desk. Every deploy is in the audit trail (version, risk, who approved, how to roll back). The deploy script asks `POST /api/platform-team/deploy/check` and records with `.../deploy/record`; Guildwise does not deploy anything itself.
+
+**Client privacy.** A bug that hit another organisation shows the platform team only a cleaned-up error (error type, function and file names, counts, versions): no paths, secrets, card content or user data. The team can ask that organisation for more of one bug; the Owner or an Admin approves on their desk, the access lasts 24 hours at most 72, every read is logged and they can revoke it at any time (Platform team, Grants; `POST /api/platform-team/grants/:id/revoke`).
+
+**Safe mode.** If a runner release is bad, pin one workstation or all of them to the last good version (Platform team, Safe mode). The runner downloads exactly that version, even an older one, and does not follow newer releases until you unpin. The Workstations page shows "Pinned to 0.1.20".
+
+**For the platform organisation.** Its members open Platform team (`/platform-team`) to read pauses, bugs, pins and the audit trail; its Owner and Admins can pause, resume and pin there. Fix cards that use up their budget (small 2 rework rounds / 2 reviews / 10 shifts, medium 3/2/15, large 4/2/25) go to the architect, then to the desk.
+
 ## 8. Everyday workflows
 
 Four situations you will meet again and again, start to finish.

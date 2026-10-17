@@ -33,6 +33,7 @@ import { OrgChartPage } from './pages/OrgChart.tsx';
 import { OrgDesigner } from './pages/OrgDesigner.tsx';
 import { OrgSettings } from './pages/OrgSettings.tsx';
 import { Phase } from './pages/Phase.tsx';
+import { PlatformTeamDesk } from './pages/PlatformTeamDesk.tsx';
 import { ProjectSettings } from './pages/ProjectSettings.tsx';
 import { Projects } from './pages/Projects.tsx';
 import { PlatformApiKeys } from './pages/platform/PlatformApiKeys.tsx';
@@ -47,6 +48,7 @@ import { PlatformOrgs } from './pages/platform/PlatformOrgs.tsx';
 import { PlatformRunners } from './pages/platform/PlatformRunners.tsx';
 import { PlatformSupport } from './pages/platform/PlatformSupport.tsx';
 import { PlatformSupportTicket } from './pages/platform/PlatformSupportTicket.tsx';
+import { PlatformTeam } from './pages/platform/PlatformTeam.tsx';
 import { PlatformUsers } from './pages/platform/PlatformUsers.tsx';
 import { ResearchTab } from './pages/ResearchTab.tsx';
 import { ResetPassword } from './pages/ResetPassword.tsx';
@@ -123,6 +125,7 @@ export const routes = [
       { path: '/settings/org', element: <OrgSettings /> },
       { path: '/admin', element: <Navigate to="/settings/org" replace /> },
       { path: '/desk', element: <Desk /> },
+      { path: '/platform-team', element: <PlatformTeamDesk /> },
       { path: '/help', element: <Help /> },
       { path: '/help/glossary', element: <Help /> },
       { path: '/help/contact', element: <Help /> },
@@ -156,6 +159,7 @@ export const routes = [
           { path: '/platform/blog/:id', element: <PlatformBlogPost /> },
           { path: '/platform/api-keys', element: <PlatformApiKeys /> },
           { path: '/platform/runners', element: <PlatformRunners /> },
+          { path: '/platform/team', element: <PlatformTeam /> },
           { path: '/platform/inbound', element: <PlatformInbound /> },
           { path: '/platform/audit', element: <PlatformAudit /> },
           { path: '/platform/help', element: <PlatformHelp /> },

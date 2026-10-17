@@ -79,10 +79,10 @@ import { liveWorktreePaths } from '../commands/worktree-sweep.ts';
 import type { Ctx } from '../context.ts';
 import { exec, one, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
-import { buildBrief } from './brief.ts';
-import { claimPendingCommands, completeCommand, requeueSentCommands } from './commands-queue.ts';
 import { pinForWelcome } from '../platform-team/pins.ts';
 import { platformTriageRpc } from '../platform-team/rpc.ts';
+import { buildBrief } from './brief.ts';
+import { claimPendingCommands, completeCommand, requeueSentCommands } from './commands-queue.ts';
 import { ledgerRetireRpc, ledgerSearchRpc } from './ledger-rpc.ts';
 import type { RunnerConn } from './registry.ts';
 import { issueRotatedToken } from './rotation.ts';
@@ -1014,7 +1014,8 @@ export class RunnerHandlers {
       if (!shift) return reply(false, undefined, 'unknown shift');
       if (msg.method === 'ledger.search') return reply(true, await ledgerSearchRpc(ctx, shift, msg.params));
       if (msg.method === 'ledger.retire') return reply(...(await ledgerRetireRpc(ctx, shift, msg.params)));
-      if (msg.method === 'platform.triage') return reply(...(await platformTriageRpc(ctx, shift, msg.params)));
+      if (msg.method === 'platform.triage')
+        return reply(...(await platformTriageRpc(ctx, shift, msg.params)));
       if (msg.method === 'card.attachments' || msg.method === 'card.attach.begin')
         return reply(...(await attachmentRpc(ctx, shift, msg.method, msg.params)));
       // The CEO's management verbs (a CEO shift or the owner's chat with the CEO); the gateway checks the agent.

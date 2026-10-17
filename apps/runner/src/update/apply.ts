@@ -44,8 +44,12 @@ export async function fetchRelease(
   serverUrl: string,
   f: typeof fetch = fetch,
   timeoutMs = 15_000,
+  /** Safe mode: ask for exactly this release (an older one too) instead of the latest. */
+  version?: string,
 ): Promise<RunnerReleaseResponse> {
-  const res = await f(new URL('/api/runner/release', serverUrl), { signal: AbortSignal.timeout(timeoutMs) });
+  const url = new URL('/api/runner/release', serverUrl);
+  if (version) url.searchParams.set('version', version);
+  const res = await f(url, { signal: AbortSignal.timeout(timeoutMs) });
   if (!res.ok) throw new Error(`the server answered HTTP ${res.status} for the runner release`);
   return RunnerReleaseResponseSchema.parse(await res.json());
 }

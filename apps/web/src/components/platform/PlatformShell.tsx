@@ -11,6 +11,7 @@ import {
   Newspaper,
   ScrollText,
   Users,
+  Wrench,
 } from 'lucide-react';
 import { useState } from 'react';
 import { Link, NavLink, Outlet } from 'react-router';
@@ -33,6 +34,7 @@ const NAV = [
   { to: '/platform/blog', label: 'Blog', icon: Newspaper, end: false },
   { to: '/platform/api-keys', label: 'API keys', icon: KeyRound, end: false },
   { to: '/platform/runners', label: 'Runners', icon: Download, end: false },
+  { to: '/platform/team', label: 'Platform team', icon: Wrench, end: false },
   { to: '/platform/inbound', label: 'Inbound mail', icon: MailQuestion, end: false },
   { to: '/platform/audit', label: 'Audit log', icon: ScrollText, end: false },
 ];

@@ -64,7 +64,10 @@ export async function cardUsage(db: Queryable, cardId: string): Promise<CardUsag
 export async function stopLossBudget(db: Queryable, card: Row): Promise<StopLossBudget> {
   const p = await one(db, 'SELECT stop_loss FROM projects WHERE id=$1', [card.project_id]);
   const parsed = StopLossSettingsSchema.safeParse(p?.stop_loss);
-  const base = (parsed.success ? parsed.data : DEFAULT_STOP_LOSS)[cardSize(card)];
+  // A platform bug card is sized by the architect's triage (platform team), not by the diff.
+  const bug = await one(db, 'SELECT fix_size FROM platform_bugs WHERE card_id=$1', [card.id]);
+  const size: CardSize = (bug?.fix_size as CardSize | undefined) ?? cardSize(card);
+  const base = (parsed.success ? parsed.data : DEFAULT_STOP_LOSS)[size];
   const ext = await one<{ n: number }>(
     db,
     `SELECT count(*)::int AS n FROM desk_items WHERE card_id=$1 AND subkind=$2 AND status='answered'

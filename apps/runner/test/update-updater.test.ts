@@ -260,3 +260,77 @@ describe('probation after an update', () => {
     expect(t.updater.current.detail).toMatch(/0\.1\.1/);
   });
 });
+
+describe('safe mode: a runner version pin from the platform team', () => {
+  const SHA = 'a'.repeat(64);
+  /** A server that offers 0.1.5 as the latest release and any pinned version on request. */
+  const pinServer = (paused = false): typeof fetch =>
+    (async (input: URL | string) => {
+      const asked = new URL(String(input)).searchParams.get('version');
+      const version = asked ?? '0.1.5';
+      return new Response(
+        JSON.stringify({
+          version,
+          sha256: SHA,
+          size: 10,
+          url: `http://server.test/api/runner/release/aom-runner-${version}.tgz`,
+          autoUpdatePaused: paused,
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    }) as typeof fetch;
+
+  function setupPin(version: string, paused = false) {
+    const install = makeInstall(version);
+    const restart = vi.fn();
+    const stage = vi.fn(async (_l: unknown, release: { version: string }) =>
+      addVersion(install.root, release.version),
+    );
+    const updater = new Updater({
+      layout: install.layout,
+      version,
+      serverUrl: () => 'http://server.test',
+      isIdle: () => true,
+      restart,
+      report: () => undefined,
+      log: quiet,
+      mode: 'systemd',
+      fetch: pinServer(paused),
+      timing: FAST,
+      stage: stage as UpdaterOptions['stage'],
+      scheduleRestartFn: vi.fn(),
+    });
+    running.push(updater);
+    return { ...install, restart, stage, updater };
+  }
+
+  it('rolls back to an OLDER pinned version (the normal cycle never goes down)', async () => {
+    const t = setupPin('0.1.4');
+    t.updater.setPin('0.1.2');
+    await until(() => t.restart.mock.calls.length > 0);
+    expect(readlinkSync(t.layout.current)).toBe(join(t.root, '0.1.2', 'aom-runner'));
+    expect(readPending(t.layout)).toMatchObject({ from: '0.1.4', to: '0.1.2' });
+  });
+
+  it('stays where it is when already on the pinned version, and does not follow the newer release', async () => {
+    const t = setupPin('0.1.2');
+    t.updater.setPin('0.1.2');
+    await t.updater.check();
+    expect(t.stage).not.toHaveBeenCalled();
+    expect(t.restart).not.toHaveBeenCalled();
+    expect(t.updater.current.detail).toMatch(/Pinned to 0\.1\.2/);
+  });
+
+  it('follows the pin even while automatic updates are paused, and unpinning goes back to the latest', async () => {
+    const t = setupPin('0.1.4', true);
+    t.updater.setPin('0.1.3');
+    await until(() => t.restart.mock.calls.length > 0);
+    expect(readPending(t.layout)).toMatchObject({ to: '0.1.3' });
+    const u = setupPin('0.1.3');
+    u.updater.setPin('0.1.3');
+    await u.updater.check();
+    u.updater.setPin(null);
+    await until(() => u.restart.mock.calls.length > 0);
+    expect(readPending(u.layout)).toMatchObject({ from: '0.1.3', to: '0.1.5' });
+  });
+});

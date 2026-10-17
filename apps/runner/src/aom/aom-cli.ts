@@ -64,6 +64,7 @@ interface Parsed {
 const BOOLEAN_FLAGS = new Set([
   'json',
   'non-blocking',
+  'invalid',
   'force',
   'help',
   'none',
@@ -978,6 +979,23 @@ const VERBS: Record<string, Verb> = {
       );
     return 0;
   },
+  // The platform architect triages a platform bug card: close it as invalid, or set the severity and the fix size.
+  bug: async (ctx, p) => {
+    if (p.positionals[0] !== 'triage')
+      throw new UsageError(
+        'usage: aom bug triage --invalid --reason "<why>"  |  aom bug triage --severity critical|degraded|minor [--size small|medium|large] [--reason "<one line>"]',
+      );
+    const result = await rpc(ctx, 'platform.triage', {
+      ...(has(p, 'invalid') ? { invalid: true } : {}),
+      ...(one(p, 'severity') ? { severity: one(p, 'severity') } : {}),
+      ...(one(p, 'size') ? { size: one(p, 'size') } : {}),
+      ...(one(p, 'reason') ? { reason: one(p, 'reason') } : {}),
+    });
+    ctx.io.out(
+      `${typeof result === 'string' ? result : ((result as { message?: string } | null)?.message ?? JSON.stringify(result))}\n`,
+    );
+    return 0;
+  },
   ledger: async (ctx, p) => {
     if (p.positionals[0] === 'retire') {
       const id = p.positionals[1];
@@ -1708,6 +1726,7 @@ const VERBS: Record<string, Verb> = {
 export const USAGE = `usage: aom <verb> [options]
   card [--json]                              print the card and brief
   ledger search "<query>" [--scope s]        search decisions and standing orders
+  bug triage --invalid --reason "<why>" | --severity critical|degraded|minor [--size small|medium|large]   platform architect: close a platform bug card as invalid, or rate it (critical pauses the affected scope until it is fixed)
   ledger retire <id> --reason "<why>"         BA: withdraw a ledger entry (never briefed or found again)
   comment --note "<text>"                    post a note without ending the shift
   question --text "<q>" [--option "<a>"]... [--recommend <n>] [--doing "<x>"] [--topic environment|sandbox|tooling|dependency|order|requirements|design|code] [--wait [10m]] [--non-blocking] [--force]   --wait: keep working in this shift until it is answered (default 10 minutes); no answer in time parks the card on the question and you resume it when it is answered

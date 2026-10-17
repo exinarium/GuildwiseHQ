@@ -1,6 +1,6 @@
-import type { Ctx } from '../context.ts';
-import { raiseOrCoalesce } from '../commands/desk-coalesce.ts';
 import { orgScope, SYSTEM_ACTOR } from '../commands/common.ts';
+import { raiseOrCoalesce } from '../commands/desk-coalesce.ts';
+import type { Ctx } from '../context.ts';
 import type { Tx } from '../db/tx.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { getPlatformTeam } from './settings.ts';

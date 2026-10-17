@@ -4,7 +4,6 @@ import type { Row } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
 import { resolveDeployApprovalIn } from './deploy.ts';
 import { resolveGrantIn } from './grants.ts';
-import { resolveStopLossIn } from './stop-loss.ts';
 
 /** Routes a resolved platform approval item to its owner (called from the desk's `closeItem`, inside its transaction). */
 export async function resolvePlatformApprovalIn(
@@ -21,7 +20,5 @@ export async function resolvePlatformApprovalIn(
       return resolveDeployApprovalIn(ctx, tx, user, item, resolution, note);
     case PLATFORM_DESK_SUBKIND.grantRequest:
       return resolveGrantIn(ctx, tx, user, item, resolution);
-    case PLATFORM_DESK_SUBKIND.fixStopLoss:
-      return resolveStopLossIn(ctx, tx, user, item, resolution, note);
   }
 }

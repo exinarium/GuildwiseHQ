@@ -52,7 +52,8 @@ export function platformTeamRoutes(ctx: Ctx) {
       const first = await requireSession(ctx, req).catch(() => {
         throw notFound();
       });
-      const session = first.user.kind === 'super_admin' ? await requireSuperAdmin(ctx, req) : await requireUser(ctx, req);
+      const session =
+        first.user.kind === 'super_admin' ? await requireSuperAdmin(ctx, req) : await requireUser(ctx, req);
       const a = await platformAccessOf(ctx, session);
       if (!a.team) throw notFound('no platform team is designated');
       if (a.superAdmin) return a;
@@ -98,25 +99,29 @@ export function platformTeamRoutes(ctx: Ctx) {
     });
 
     // ---------------------------------------------------------------- pauses
-    app.post('/api/platform-team/pauses', { schema: { body: CreatePlatformPauseRequestSchema } }, async (req) => {
-      const a = await access(req, true);
-      const b = req.body;
-      if (!b.projectId && !b.workflowKey && !b.stageId && !b.workstationId)
-        throw forbidden('a pause needs a project, workflow, stage or workstation');
-      const r = await startPause(ctx, {
-        scope: {
-          projectId: b.projectId ?? null,
-          workflowKey: b.workflowKey ?? null,
-          stageId: b.stageId ?? null,
-          workstationId: b.workstationId ?? null,
-        },
-        reason: b.reason,
-        source: 'manual',
-        ...(b.bugCardId ? { bugCardId: b.bugCardId } : {}),
-        byUserId: a.session.user.id,
-      });
-      return { pauseId: r?.pauseId ?? null, created: r?.created ?? false };
-    });
+    app.post(
+      '/api/platform-team/pauses',
+      { schema: { body: CreatePlatformPauseRequestSchema } },
+      async (req) => {
+        const a = await access(req, true);
+        const b = req.body;
+        if (!b.projectId && !b.workflowKey && !b.stageId && !b.workstationId)
+          throw forbidden('a pause needs a project, workflow, stage or workstation');
+        const r = await startPause(ctx, {
+          scope: {
+            projectId: b.projectId ?? null,
+            workflowKey: b.workflowKey ?? null,
+            stageId: b.stageId ?? null,
+            workstationId: b.workstationId ?? null,
+          },
+          reason: b.reason,
+          source: 'manual',
+          ...(b.bugCardId ? { bugCardId: b.bugCardId } : {}),
+          byUserId: a.session.user.id,
+        });
+        return { pauseId: r?.pauseId ?? null, created: r?.created ?? false };
+      },
+    );
     app.post(
       '/api/platform-team/pauses/:id/resume',
       { schema: { params: IdParamsSchema, body: ResumePlatformPauseRequestSchema } },
@@ -143,12 +148,7 @@ export function platformTeamRoutes(ctx: Ctx) {
       { schema: { params: IdParamsSchema, body: TriageBugRequestSchema } },
       async (req) => {
         const a = await access(req, true);
-        return triageBug(
-          ctx,
-          { userId: a.session.user.id, label: actorLabel(a) },
-          req.params.id,
-          req.body,
-        );
+        return triageBug(ctx, { userId: a.session.user.id, label: actorLabel(a) }, req.params.id, req.body);
       },
     );
 
@@ -183,18 +183,22 @@ export function platformTeamRoutes(ctx: Ctx) {
       const s = await requireUser(ctx, req);
       return revokeGrant(ctx, s.user, req.params.id);
     });
-    app.get('/api/platform-team/grants/:id/access-log', { schema: { params: IdParamsSchema } }, async (req) => {
-      const s = await requireUser(ctx, req);
-      const g = (await listGrants(ctx)).find((x) => x.id === req.params.id);
-      if (!g) throw notFound();
-      const m = await rows(
-        ctx.pool,
-        `SELECT 1 FROM org_members WHERE org_id=$1 AND user_id=$2 AND status='active' AND role IN ('owner','admin')`,
-        [g.clientOrgId, s.user.id],
-      );
-      if (m.length === 0) throw notFound();
-      return { entries: await grantAccessLog(ctx, g.id) };
-    });
+    app.get(
+      '/api/platform-team/grants/:id/access-log',
+      { schema: { params: IdParamsSchema } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        const g = (await listGrants(ctx)).find((x) => x.id === req.params.id);
+        if (!g) throw notFound();
+        const m = await rows(
+          ctx.pool,
+          `SELECT 1 FROM org_members WHERE org_id=$1 AND user_id=$2 AND status='active' AND role IN ('owner','admin')`,
+          [g.clientOrgId, s.user.id],
+        );
+        if (m.length === 0) throw notFound();
+        return { entries: await grantAccessLog(ctx, g.id) };
+      },
+    );
 
     // ---------------------------------------------------------------- safe mode (runner version pin)
     app.get('/api/platform-team/runner-pins', async (req) => {
@@ -208,13 +212,21 @@ export function platformTeamRoutes(ctx: Ctx) {
 
     // ---------------------------------------------------------------- deploy policy (for a deploy script)
     // "Is this deploy allowed?" and "this deploy happened". Nothing here deploys anything.
-    app.post('/api/platform-team/deploy/check', { schema: { body: DeployCheckRequestSchema } }, async (req) => {
-      const a = await access(req, true);
-      return checkDeploy(ctx, req.body, actorLabel(a));
-    });
-    app.post('/api/platform-team/deploy/record', { schema: { body: RecordDeployRequestSchema } }, async (req) => {
-      const a = await access(req, true);
-      return recordDeploy(ctx, req.body, actorLabel(a));
-    });
+    app.post(
+      '/api/platform-team/deploy/check',
+      { schema: { body: DeployCheckRequestSchema } },
+      async (req) => {
+        const a = await access(req, true);
+        return checkDeploy(ctx, req.body, actorLabel(a));
+      },
+    );
+    app.post(
+      '/api/platform-team/deploy/record',
+      { schema: { body: RecordDeployRequestSchema } },
+      async (req) => {
+        const a = await access(req, true);
+        return recordDeploy(ctx, req.body, actorLabel(a));
+      },
+    );
   };
 }

@@ -53,7 +53,11 @@ async function describeScope(ctx: Ctx, s: PauseScope): Promise<string> {
 /** The pause event's scope: the project's own audience (its members see the banner), else the platform organisation. */
 function eventScope(s: PauseScope, orgOfProject: string | null, team: PlatformTeam | null) {
   if (s.projectId && orgOfProject) return projectScope(orgOfProject, s.projectId);
-  return { orgId: team?.orgId ?? null, projectId: null, audience: team ? ('org' as const) : ('admin' as const) };
+  return {
+    orgId: team?.orgId ?? null,
+    projectId: null,
+    audience: team ? ('org' as const) : ('admin' as const),
+  };
 }
 
 export interface StartPause {

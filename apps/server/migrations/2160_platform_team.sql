@@ -44,9 +44,6 @@ CREATE TABLE IF NOT EXISTS platform_bugs (
   severity_by      text NOT NULL DEFAULT 'rules' CHECK (severity_by IN ('rules', 'architect', 'manager')),
   filed_at         timestamptz,                          -- when the bug card was created (rate limit)
   fixed_cards      text[] NOT NULL DEFAULT '{}',         -- refs of earlier cards of this signature (a regression files a new card)
-  stop_loss_level  integer NOT NULL DEFAULT 0,           -- 0 within budget, 1 architect arbitration, 2 owner
-  budget_extra     integer NOT NULL DEFAULT 0,           -- extra budgets granted by arbitration or the owner
-  stop_loss_desk_item_id uuid,                           -- the owner's decision on the platform organisation's desk
   notified_count   integer NOT NULL DEFAULT 0,           -- the highest counter milestone already noted on the card
   first_seen_at    timestamptz NOT NULL,
   last_seen_at     timestamptz NOT NULL,

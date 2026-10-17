@@ -3,11 +3,11 @@ import { maskText, REJECTION_STORM, topFrames } from '@aom/shared';
 import type { FastifyRequest } from 'fastify';
 import type { Ctx } from '../context.ts';
 import { one, rows } from '../db/sql.ts';
+import { detectLoops } from '../reporter/detectors.ts';
+import { expireGrants } from './grants.ts';
 import { drainBugs, markFixedBugs, reportBug } from './intake.ts';
 import { resumeFixedPauses } from './pause.ts';
 import { getPlatformTeam } from './settings.ts';
-import { checkFixStopLoss } from './stop-loss.ts';
-import { expireGrants } from './grants.ts';
 
 /**
  * The detectors of platform bug intake (Lean Team v3, design 8.2). Each turns something the system already measures
@@ -76,41 +76,47 @@ async function scanRunnerErrors(ctx: Ctx): Promise<number> {
 
 async function scanLoops(ctx: Ctx): Promise<number> {
   const platform = await platformOrg(ctx);
-  const list = await rows(
-    ctx.pool,
-    `SELECT c.id, c.ref, c.org_id, c.project_id, c.stage, c.retry_failures, c.retry_episode_id, wv.key AS workflow_key,
-            (SELECT count(*)::int FROM shifts s WHERE s.card_id = c.id AND s.status='ended'
-                AND s.outcome IN ('no_report','crashed','timeout','lost','rejected')
-                AND s.ended_at > now() - interval '6 hours') AS failed_shifts
-       FROM cards c JOIN workflow_versions wv ON wv.id = c.workflow_version_id
-      WHERE c.retry_failures >= 3 AND c.retry_episode_id IS NOT NULL AND c.status NOT IN ('done','cancelled')
-        AND NOT EXISTS (SELECT 1 FROM platform_bug_hits h
-                         WHERE h.signature = 'loop:' || c.project_id || ':' || wv.key || ':' || c.stage
-                           AND h.evidence_key = c.id || ':' || c.retry_episode_id)
-      LIMIT 50`,
-  );
-  for (const c of list) {
+  // The existing detector (reporter/detectors.ts): the loop breaker's open back-off episodes (3+ failed shifts or
+  // rejections of one card) and cards that cause 5+ question shifts in 2 hours (`loop:questions:<card>`).
+  const found = await detectLoops(ctx.pool);
+  for (const d of found) {
+    const cardId = d.subject.cardId;
+    if (!cardId) continue;
+    const c = await one(
+      ctx.pool,
+      `SELECT c.id, c.ref, c.org_id, c.project_id, c.stage, wv.key AS workflow_key FROM cards c
+         JOIN workflow_versions wv ON wv.id = c.workflow_version_id WHERE c.id=$1`,
+      [cardId],
+    );
+    if (!c) continue;
+    const questions = d.fingerprint.startsWith('loop:questions:');
+    const episode = questions
+      ? `q:${Math.floor(ctx.clock.now().getTime() / (2 * 3_600_000))}`
+      : String(d.evidence.episodeId ?? '');
     await reportBug(ctx, {
       source: 'loop',
-      signature: `loop:${c.project_id}:${c.workflow_key}:${c.stage}`,
-      title: `Cards loop in stage ${c.stage} (${c.workflow_key}): shifts keep ending without a result`,
-      description: `A card failed ${c.retry_failures} times in a row in stage ${c.stage}.`,
-      evidenceKey: `${c.id}:${c.retry_episode_id}`,
+      signature: `loop:${c.project_id}:${c.workflow_key}:${c.stage}${questions ? ':questions' : ''}`,
+      title: questions
+        ? `Cards loop in stage ${c.stage} (${c.workflow_key}): question after question`
+        : `Cards loop in stage ${c.stage} (${c.workflow_key}): shifts keep ending without a result`,
+      description: `A card went round in stage ${c.stage} (${d.count}).`,
+      evidenceKey: `${c.id}:${episode}`,
       severityHint: 'critical',
       scope: { projectId: c.project_id, workflowKey: c.workflow_key, stageId: c.stage },
       clientOrgId: clientOf(c.org_id, platform),
       diagnostics: {
-        kind: 'loop',
-        summary: `A card keeps failing in stage ${c.stage} of workflow ${c.workflow_key}: ${c.retry_failures} failures in one episode.`,
+        kind: questions ? 'loop_questions' : 'loop',
+        summary: questions
+          ? `A card keeps asking questions in stage ${c.stage} of workflow ${c.workflow_key} (${d.count} question shifts).`
+          : `A card keeps failing in stage ${c.stage} of workflow ${c.workflow_key}: ${d.count} failures in one episode.`,
         workflow: c.workflow_key,
         stage: c.stage,
-        failures: Number(c.retry_failures),
-        failedShifts: Number(c.failed_shifts),
+        count: d.count,
       },
       extended: { cardRef: c.ref },
     });
   }
-  return list.length;
+  return found.length;
 }
 
 // ---------------------------------------------------------------------------------------------- rejection storms
@@ -202,7 +208,10 @@ export async function flushServerErrors(ctx: Ctx): Promise<void> {
   if (!map || map.size === 0) return;
   const batch = [...map.values()];
   map.clear();
-  for (const p of batch) await reportBug(ctx, { ...p.report, increment: p.hits }).catch((err) => ctx.log.error({ err }, 'bug intake failed'));
+  for (const p of batch)
+    await reportBug(ctx, { ...p.report, increment: p.hits }).catch((err) =>
+      ctx.log.error({ err }, 'bug intake failed'),
+    );
 }
 
 /**
@@ -210,7 +219,11 @@ export async function flushServerErrors(ctx: Ctx): Promise<void> {
  * top frames as function plus file name), deduped by route plus error signature, and aggregated for 2 seconds so an error
  * storm is one report with a count, not a database write per request. Never throws.
  */
-export function reportServerError(ctx: Ctx, req: Pick<FastifyRequest, 'method' | 'routeOptions'>, err: unknown): void {
+export function reportServerError(
+  ctx: Ctx,
+  req: Pick<FastifyRequest, 'method' | 'routeOptions'>,
+  err: unknown,
+): void {
   try {
     const e = err instanceof Error ? err : new Error(String(err));
     const route = String(req.routeOptions?.url ?? 'unmatched').slice(0, 120);
@@ -271,7 +284,6 @@ export async function platformHousekeeping(ctx: Ctx): Promise<void> {
   await markFixedBugs(ctx);
   await drainBugs(ctx);
   await expireGrants(ctx);
-  await checkFixStopLoss(ctx);
 }
 
 const lastRun = new WeakMap<Ctx, number>();

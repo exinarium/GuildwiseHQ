@@ -129,7 +129,8 @@ export async function resolveGrantIn(
 ): Promise<void> {
   const g = await one(tx, `SELECT * FROM platform_diag_grants WHERE desk_item_id=$1 FOR UPDATE`, [item.id]);
   if (!g || g.status !== 'requested') return;
-  if (resolution === 'acknowledged') throw badRequest('wrong_resolution', 'a grant request is approved or rejected');
+  if (resolution === 'acknowledged')
+    throw badRequest('wrong_resolution', 'a grant request is approved or rejected');
   const now = ctx.clock.now();
   const approved = resolution === 'approved';
   await tx.query(
@@ -147,7 +148,9 @@ export async function resolveGrantIn(
     {
       subjectKey: `platform_grant_decided:${g.id}`,
       subkind: PLATFORM_DESK_SUBKIND.grantRequest,
-      title: approved ? 'A client organization granted more diagnostics' : 'A client organization declined more diagnostics',
+      title: approved
+        ? 'A client organization granted more diagnostics'
+        : 'A client organization declined more diagnostics',
       body: approved
         ? `Granted for ${g.hours} hours. Read the extra detail on the platform page; every read is logged.`
         : 'The organization declined. Work from the sanitised diagnostics.',
@@ -158,7 +161,11 @@ export async function resolveGrantIn(
 }
 
 /** The client organisation (its Owner or Admin) withdraws a grant. */
-export async function revokeGrant(ctx: Ctx, user: AuthSession['user'], grantId: string): Promise<PlatformGrantDto> {
+export async function revokeGrant(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  grantId: string,
+): Promise<PlatformGrantDto> {
   await withAppendTx(ctx.pool, async (tx) => {
     const g = await one(tx, 'SELECT * FROM platform_diag_grants WHERE id=$1 FOR UPDATE', [grantId]);
     if (!g) throw notFound('grant not found');
@@ -171,11 +178,10 @@ export async function revokeGrant(ctx: Ctx, user: AuthSession['user'], grantId: 
       throw forbidden('only the Owner or an Admin of the organization can revoke this grant');
     if (g.status !== 'approved' && g.status !== 'requested')
       throw conflict('not_active', `this grant is already ${g.status}`);
-    await tx.query(`UPDATE platform_diag_grants SET status='revoked', revoked_at=$2, revoked_by=$3 WHERE id=$1`, [
-      grantId,
-      ctx.clock.now(),
-      user.id,
-    ]);
+    await tx.query(
+      `UPDATE platform_diag_grants SET status='revoked', revoked_at=$2, revoked_by=$3 WHERE id=$1`,
+      [grantId, ctx.clock.now(), user.id],
+    );
     // A request still open on the desk closes with it.
     if (g.status === 'requested' && g.desk_item_id)
       await ctx.store.append(
@@ -246,9 +252,14 @@ export async function readExtendedDiagnostics(
   });
 }
 
-export async function grantAccessLog(ctx: Ctx, grantId: string): Promise<Array<{ userId: string; at: string }>> {
-  const list = await rows(ctx.pool, 'SELECT user_id, at FROM platform_diag_access WHERE grant_id=$1 ORDER BY at', [
-    grantId,
-  ]);
+export async function grantAccessLog(
+  ctx: Ctx,
+  grantId: string,
+): Promise<Array<{ userId: string; at: string }>> {
+  const list = await rows(
+    ctx.pool,
+    'SELECT user_id, at FROM platform_diag_access WHERE grant_id=$1 ORDER BY at',
+    [grantId],
+  );
   return list.map((r) => ({ userId: r.user_id, at: iso(r.at) as string }));
 }

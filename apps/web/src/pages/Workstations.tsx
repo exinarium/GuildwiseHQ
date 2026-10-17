@@ -243,6 +243,24 @@ export function WorkstationCard({
           </button>
           <div className="flex items-center gap-3">
             <RunnerUpdateBadge update={w.runnerUpdate} />
+            {w.runnerPin && (
+              <Badge
+                tone="amber"
+                title={`Safe mode: the platform team pinned this runner to ${w.runnerPin.version}${w.runnerPin.reason ? ` (${w.runnerPin.reason})` : ''}. It does not follow newer releases until the pin is removed.`}
+                data-testid="runner-pin"
+              >
+                Pinned to {w.runnerPin.version}
+              </Badge>
+            )}
+            {(w.platformPauses ?? 0) > 0 && (
+              <Badge
+                tone="amber"
+                title="The platform team paused new work on this workstation while a bug is fixed."
+                data-testid="platform-paused"
+              >
+                Paused by platform team
+              </Badge>
+            )}
             {!expanded && warnings > 0 && (
               <Badge
                 tone="amber"

@@ -37,14 +37,19 @@ export async function effectivePin(db: Queryable, workstationId: string): Promis
 }
 
 /** What `welcome` carries: the pinned version or null. */
-export async function pinForWelcome(db: Queryable, workstationId: string): Promise<{ version: string } | null> {
+export async function pinForWelcome(
+  db: Queryable,
+  workstationId: string,
+): Promise<{ version: string } | null> {
   const p = await effectivePin(db, workstationId);
   return p ? { version: p.version } : null;
 }
 
 export async function listPins(ctx: Ctx): Promise<RunnerPinDto[]> {
   const out: RunnerPinDto[] = [];
-  const all = await one(ctx.pool, 'SELECT value, updated_at FROM platform_settings WHERE key=$1', [ALL_PIN_KEY]);
+  const all = await one(ctx.pool, 'SELECT value, updated_at FROM platform_settings WHERE key=$1', [
+    ALL_PIN_KEY,
+  ]);
   const v = all?.value as { version?: string; reason?: string | null } | null | undefined;
   if (v?.version)
     out.push({
@@ -66,7 +71,11 @@ export async function listPins(ctx: Ctx): Promise<RunnerPinDto[]> {
 /** Tells the connected runners their pin changed (a `runner.pin` command, delivered now or when they connect). */
 async function deliverPin(ctx: Ctx, workstationIds: string[]): Promise<void> {
   for (const id of workstationIds) {
-    const caps = await one(ctx.pool, 'SELECT capabilities FROM workstation_capabilities WHERE workstation_id=$1', [id]);
+    const caps = await one(
+      ctx.pool,
+      'SELECT capabilities FROM workstation_capabilities WHERE workstation_id=$1',
+      [id],
+    );
     if (!((caps?.capabilities ?? []) as string[]).includes(RUNNER_PIN_CAPABILITY)) continue;
     // A newer pin replaces older ones still waiting.
     await exec(
@@ -108,7 +117,10 @@ export async function setRunnerPin(
            pinned_by=EXCLUDED.pinned_by, pinned_at=EXCLUDED.pinned_at`,
         [req.workstationId, req.version, req.reason ?? null, who.id, now],
       );
-    else await exec(ctx.pool, 'DELETE FROM workstation_runner_pins WHERE workstation_id=$1', [req.workstationId]);
+    else
+      await exec(ctx.pool, 'DELETE FROM workstation_runner_pins WHERE workstation_id=$1', [
+        req.workstationId,
+      ]);
     affected = [req.workstationId];
   } else {
     if (req.version)

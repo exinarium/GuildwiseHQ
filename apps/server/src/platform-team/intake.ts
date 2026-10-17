@@ -94,9 +94,11 @@ export async function platformOwner(db: Tx | Ctx['pool'], team: PlatformTeam): P
     [team.projectId],
   );
   if (p?.user_id) return p.user_id as string;
-  const o = await one(db, `SELECT user_id FROM org_members WHERE org_id=$1 AND status='active' AND role='owner' LIMIT 1`, [
-    team.orgId,
-  ]);
+  const o = await one(
+    db,
+    `SELECT user_id FROM org_members WHERE org_id=$1 AND status='active' AND role='owner' LIMIT 1`,
+    [team.orgId],
+  );
   return (o?.user_id as string | undefined) ?? null;
 }
 
@@ -169,8 +171,6 @@ async function recordBug(
         fixed_cards = CASE WHEN status = 'fixed' THEN array_append(fixed_cards, COALESCE((SELECT ref FROM cards WHERE id = card_id), '?')) ELSE fixed_cards END,
         severity = CASE WHEN status = 'fixed' THEN 'unrated' ELSE severity END,
         severity_by = CASE WHEN status = 'fixed' THEN 'rules' ELSE severity_by END,
-        stop_loss_level = CASE WHEN status = 'fixed' THEN 0 ELSE stop_loss_level END,
-        budget_extra = CASE WHEN status = 'fixed' THEN 0 ELSE budget_extra END,
         notified_count = CASE WHEN status = 'fixed' THEN 0 ELSE notified_count END
       WHERE signature=$1 RETURNING *`,
     [
@@ -198,12 +198,16 @@ async function fileBugCard(ctx: Ctx, tx: Tx, bug: Row, team: PlatformTeam): Prom
     String(diag.summary ?? bug.title),
     '',
     'Sanitised diagnostics:',
-    JSON.stringify(
-      Object.fromEntries(Object.entries(diag).filter(([k]) => k !== 'summary')),
-      null,
-      2,
-    ).slice(0, 4000),
-    ...(prior.length > 0 ? ['', `Regression: an earlier card for this signature (${prior.join(', ')}) was fixed and the bug came back.`] : []),
+    JSON.stringify(Object.fromEntries(Object.entries(diag).filter(([k]) => k !== 'summary')), null, 2).slice(
+      0,
+      4000,
+    ),
+    ...(prior.length > 0
+      ? [
+          '',
+          `Regression: an earlier card for this signature (${prior.join(', ')}) was fixed and the bug came back.`,
+        ]
+      : []),
     bug.client_org_id
       ? '\nThis bug hit a client organization: only the sanitised diagnostics above are shown. Ask for more with a grant (the client organization approves on its desk); never copy client data into this card.'
       : '',
@@ -286,7 +290,10 @@ async function settleBug(
         `Seen ${bug.occurrences} times now (first ${new Date(bug.first_seen_at).toISOString()}, last ${new Date(bug.last_seen_at).toISOString()}).`,
       ),
     );
-    await exec(tx, 'UPDATE platform_bugs SET notified_count=$2 WHERE signature=$1', [bug.signature, milestone]);
+    await exec(tx, 'UPDATE platform_bugs SET notified_count=$2 WHERE signature=$1', [
+      bug.signature,
+      milestone,
+    ]);
     await notifyPlatformDesk(
       ctx,
       {
@@ -359,7 +366,12 @@ export async function reportBug(ctx: Ctx, r: BugReport): Promise<BugOutcome> {
       isNew: rec.isNew,
     };
     if (!team || bug.status !== 'open')
-      return { ...base, cardId: (bug.card_id as string | null) ?? null, severity: bug.severity, paused: false };
+      return {
+        ...base,
+        cardId: (bug.card_id as string | null) ?? null,
+        severity: bug.severity,
+        paused: false,
+      };
     let fresh = false;
     if (!bug.card_id && (await newCardsLastHour(ctx, tx)) < INTAKE_NEW_CARDS_PER_HOUR) {
       const filed = await fileBugCard(ctx, tx, bug, team);
@@ -381,7 +393,11 @@ export async function reportBug(ctx: Ctx, r: BugReport): Promise<BugOutcome> {
         );
       }
     }
-    const settled = await settleBug(ctx, tx, bug, team, { hint: r.severityHint, counted: rec.counted, fresh });
+    const settled = await settleBug(ctx, tx, bug, team, {
+      hint: r.severityHint,
+      counted: rec.counted,
+      fresh,
+    });
     if (fresh) ctx.services.dispatcher.trigger();
     return {
       ...base,
@@ -404,9 +420,11 @@ export async function drainBugs(ctx: Ctx): Promise<number> {
   for (const o of open) {
     const done = await withAppendTx(ctx.pool, async (tx) => {
       if ((await newCardsLastHour(ctx, tx)) >= INTAKE_NEW_CARDS_PER_HOUR) return false;
-      const bug = await one(tx, `SELECT * FROM platform_bugs WHERE signature=$1 AND card_id IS NULL AND status='open' FOR UPDATE`, [
-        o.signature,
-      ]);
+      const bug = await one(
+        tx,
+        `SELECT * FROM platform_bugs WHERE signature=$1 AND card_id IS NULL AND status='open' FOR UPDATE`,
+        [o.signature],
+      );
       if (!bug) return false;
       const filed = await fileBugCard(ctx, tx, bug, team);
       if (!filed) return false;
@@ -452,9 +470,11 @@ export async function triageBug(
     const card = (await one(tx, 'SELECT * FROM cards WHERE id=$1 FOR UPDATE', [cardId])) as Row;
     if (['done', 'cancelled'].includes(card.status)) throw conflict('card_closed', `card is ${card.status}`);
     if (req.verdict === 'invalid') {
-      await exec(tx, `UPDATE platform_bugs SET status='invalid', severity_by='architect' WHERE signature=$1`, [
-        bug.signature,
-      ]);
+      await exec(
+        tx,
+        `UPDATE platform_bugs SET status='invalid', severity_by='architect' WHERE signature=$1`,
+        [bug.signature],
+      );
       const ws = await cancelCardIn(
         ctx,
         tx,
@@ -462,9 +482,11 @@ export async function triageBug(
         card,
         `Closed as invalid: ${req.reason}`,
       );
-      for (const p of await rows(tx, 'SELECT id FROM platform_pauses WHERE resumed_at IS NULL AND bug_card_id=$1', [
-        cardId,
-      ]))
+      for (const p of await rows(
+        tx,
+        'SELECT id FROM platform_pauses WHERE resumed_at IS NULL AND bug_card_id=$1',
+        [cardId],
+      ))
         await endPause(ctx, p.id, { by: 'invalid', reason: `${card.ref} was closed as invalid` }, { tx });
       if (ws) ctx.services.gateway.deliverPending(ws).catch(() => {});
       return { signature: bug.signature, severity: bug.severity, status: 'invalid' };
@@ -507,7 +529,12 @@ export async function triageBug(
         `SELECT id FROM platform_pauses WHERE resumed_at IS NULL AND bug_card_id=$1 AND source='auto'`,
         [cardId],
       ))
-        await endPause(ctx, p.id, { by: 'manual', reason: `Triage rated ${card.ref} ${severity}: work keeps running` }, { tx });
+        await endPause(
+          ctx,
+          p.id,
+          { by: 'manual', reason: `Triage rated ${card.ref} ${severity}: work keeps running` },
+          { tx },
+        );
     }
     return { signature: next.signature, severity, status: 'open' };
   });

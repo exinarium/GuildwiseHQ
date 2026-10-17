@@ -16,12 +16,14 @@ const bugDto = (r: Row): PlatformBugDto => ({
   clientOrgId: r.client_org_id,
   firstSeenAt: iso(r.first_seen_at) as string,
   lastSeenAt: iso(r.last_seen_at) as string,
-  stopLossLevel: Number(r.stop_loss_level),
   diagnostics: r.diagnostics,
 });
 
 /** The platform bugs, open first then most recent. Diagnostics are the sanitised ones; the extended detail never. */
-export async function listBugs(ctx: Ctx, opts: { limit?: number; openOnly?: boolean } = {}): Promise<PlatformBugDto[]> {
+export async function listBugs(
+  ctx: Ctx,
+  opts: { limit?: number; openOnly?: boolean } = {},
+): Promise<PlatformBugDto[]> {
   const list = await rows(
     ctx.pool,
     `SELECT b.*, c.ref AS card_ref, c.status AS card_status FROM platform_bugs b LEFT JOIN cards c ON c.id = b.card_id

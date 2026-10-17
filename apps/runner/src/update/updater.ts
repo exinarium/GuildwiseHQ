@@ -90,6 +90,8 @@ export class Updater {
   private connected = false;
   private checking: Promise<UpdateStatus> | null = null;
   private waitingFor: string | null = null;
+  /** Safe mode: the version the platform team pinned this workstation to (null: follow the latest release). */
+  private pin: string | null = null;
   private status: UpdateStatus = {
     state: 'up_to_date',
     latestVersion: null,
@@ -136,6 +138,17 @@ export class Updater {
     this.stopped = true;
     for (const t of this.timers) clearTimeout(t);
     this.timers.clear();
+  }
+
+  /**
+   * Safe mode (`welcome.runnerPin`, the `runner.pin` command): run exactly this version, an older one too, and do not
+   * follow newer releases while it is set. Null ends it. A change starts a check at once.
+   */
+  setPin(version: string | null): void {
+    if (version === this.pin) return;
+    this.pin = version;
+    this.waitingFor = null;
+    if (!this.stopped && this.status.state !== 'unmanaged') void this.check().catch(() => undefined);
   }
 
   /** A pairing completed the handshake: a version on probation has proven it can connect. */
@@ -285,13 +298,24 @@ export class Updater {
     if (!layout || this.status.state === 'unmanaged' || !server) return this.status;
     let release: Awaited<ReturnType<typeof fetchRelease>>;
     try {
-      release = await fetchRelease(server, this.f);
+      release = await fetchRelease(server, this.f, undefined, this.pin ?? undefined);
     } catch (err) {
       log.warn(`update check: could not read the release from ${server}: ${String(err)}`);
       return this.status;
     }
     const checkedAt = new Date(this.now()).toISOString();
-    if (release.autoUpdatePaused) {
+    // A pin is an explicit order of the platform team: it is followed even while automatic updates are paused.
+    if (this.pin && release.version === version) {
+      this.waitingFor = null;
+      this.set({
+        state: 'up_to_date',
+        latestVersion: release.version,
+        lastCheckedAt: checkedAt,
+        detail: `Pinned to ${release.version} by the platform team (safe mode)`,
+      });
+      return this.status;
+    }
+    if (release.autoUpdatePaused && !this.pin) {
       this.waitingFor = null;
       this.set({
         state: 'paused',
@@ -301,7 +325,7 @@ export class Updater {
       });
       return this.status;
     }
-    if (!isNewer(release.version, version)) {
+    if (!this.pin && !isNewer(release.version, version)) {
       this.waitingFor = null;
       this.set({ state: 'up_to_date', latestVersion: release.version, lastCheckedAt: checkedAt });
       return this.status;
@@ -371,8 +395,8 @@ export class Updater {
     const server = this.opts.serverUrl();
     if (!layout || !server) return true;
     try {
-      const release = await fetchRelease(server, this.f);
-      if (release.autoUpdatePaused) {
+      const release = await fetchRelease(server, this.f, undefined, this.pin ?? undefined);
+      if (release.autoUpdatePaused && !this.pin) {
         this.waitingFor = null;
         this.set({
           state: 'paused',

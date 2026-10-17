@@ -1,13 +1,13 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { classifyDeployRisk, FIX_BUDGETS, maskText, topFrames } from '@aom/shared';
+import { classifyDeployRisk, maskText, topFrames } from '@aom/shared';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { agentView, candidateCards } from '../src/dispatcher/candidates.ts';
-import { reportServerError, platformPass, platformScan } from '../src/platform-team/detectors.ts';
+import { platformPass, platformScan, reportServerError } from '../src/platform-team/detectors.ts';
 import { drainBugs, reportBug } from '../src/platform-team/intake.ts';
 import { startPause } from '../src/platform-team/pause.ts';
-import { overBudget, platformFixBudget } from '../src/platform-team/stop-loss.ts';
+import { platformFixBudget } from '../src/platform-team/stop-loss.ts';
 import { uniqueEmail } from './helpers/app.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import type { FakeRunner } from './helpers/fake-runner.ts';
@@ -68,7 +68,9 @@ async function addRepo(projectId: string) {
     }),
     201,
   );
-  await markOnline(w.t, w.workstationId, { repoIds: (await q('SELECT id FROM project_repos')).map((x) => x.id) });
+  await markOnline(w.t, w.workstationId, {
+    repoIds: (await q('SELECT id FROM project_repos')).map((x) => x.id),
+  });
 }
 async function newProject(key: string): Promise<string> {
   const p = await ok<any>(
@@ -82,7 +84,12 @@ async function newProject(key: string): Promise<string> {
 const api = (method: string, url: string, body?: unknown, cookie = w.owner.cookie) =>
   w.t.req(method, url, { cookie, body });
 const designate = () =>
-  ok<any>(w.t.req('PUT', '/api/platform/team', { cookie: root.cookie, body: { orgId, projectId: platformProjectId } }));
+  ok<any>(
+    w.t.req('PUT', '/api/platform/team', {
+      cookie: root.cookie,
+      body: { orgId, projectId: platformProjectId },
+    }),
+  );
 const eventsOf = async (type: string) =>
   (await q('SELECT payload FROM events WHERE type=$1 ORDER BY seq', [type])).map((e) => e.payload);
 const bugRows = () => q('SELECT * FROM platform_bugs ORDER BY created_at');
@@ -105,7 +112,9 @@ async function loopingCard(projectId = toyId, title = 'Looping card') {
 
 describe('designating the platform team (super admin)', () => {
   it('is for the super admin only; the project keeps its decisions at project level', async () => {
-    expect((await api('PUT', '/api/platform/team', { orgId, projectId: platformProjectId })).status).toBe(404);
+    expect((await api('PUT', '/api/platform/team', { orgId, projectId: platformProjectId })).status).toBe(
+      404,
+    );
     expect((await api('GET', '/api/platform/team')).status).toBe(404);
     const s = await designate();
     expect(s).toMatchObject({ orgId, projectId: platformProjectId, projectKey: 'PLT' });
@@ -113,7 +122,10 @@ describe('designating the platform team (super admin)', () => {
       (await q('SELECT decisions_project_only FROM projects WHERE id=$1', [platformProjectId]))[0]
         ?.decisions_project_only,
     ).toBe(true);
-    expect((await eventsOf('PlatformTeamDesignated')).at(-1)).toMatchObject({ orgId, projectId: platformProjectId });
+    expect((await eventsOf('PlatformTeamDesignated')).at(-1)).toMatchObject({
+      orgId,
+      projectId: platformProjectId,
+    });
     // the audit log names the super admin
     expect(
       (await q(`SELECT action FROM platform_audit_log WHERE action='PlatformTeamDesignated'`)).length,
@@ -177,11 +189,17 @@ describe('bug intake', () => {
     expect(c.occurrences).toBe(3);
     const cards = await platformCards();
     expect(cards).toHaveLength(1);
-    expect(cards[0]).toMatchObject({ card_type: 'bug', status: 'queued', stage: expect.stringMatching(/investigate/) });
+    expect(cards[0]).toMatchObject({
+      card_type: 'bug',
+      status: 'queued',
+      stage: expect.stringMatching(/investigate/),
+    });
     // one desk item on the platform organisation's desk (not the super admin's: they have none)
     expect(await deskItems('platform_bug')).toHaveLength(1);
     // the architect takes it, the builder does not
-    await markOnline(w.t, w.workstationId);
+    await markOnline(w.t, w.workstationId, {
+      repoIds: (await q('SELECT id FROM project_repos')).map((x) => x.id),
+    });
     const made = await ctx.services.dispatcher.runPass();
     const claimed = made.find((m) => m.cardId === cards[0]?.id);
     expect(claimed).toBeTruthy();
@@ -193,7 +211,8 @@ describe('bug intake', () => {
     const err = (over: Record<string, unknown> = {}) => ({
       signature: 'TypeError:doThing (aom-runner.mjs):abcdef0123',
       message: 'cannot read x',
-      stack: 'TypeError: cannot read x\n    at doThing (/home/u/runner/aom-runner.mjs:1:1)\n    at run (/home/u/runner/main.mjs:5:2)',
+      stack:
+        'TypeError: cannot read x\n    at doThing (/home/u/runner/aom-runner.mjs:1:1)\n    at run (/home/u/runner/main.mjs:5:2)',
       version: '0.1.24',
       context: 'shift.card',
       ...over,
@@ -210,7 +229,9 @@ describe('bug intake', () => {
     await platformScan(ctx); // scanning again counts nothing twice
     expect(await platformCards()).toHaveLength(1);
     expect((await bugRows())[0]).toMatchObject({ occurrences: 3 });
-    expect((await q('SELECT bug_card_id FROM runner_errors'))[0]?.bug_card_id).toBe((await platformCards())[0]?.id);
+    expect((await q('SELECT bug_card_id FROM runner_errors'))[0]?.bug_card_id).toBe(
+      (await platformCards())[0]?.id,
+    );
     r.send('runner.error', err({ signature: 'Error:other:0000000001', message: 'other', stack: undefined }));
     await r.barrier();
     await platformScan(ctx);
@@ -225,7 +246,9 @@ describe('bug intake', () => {
     await designate();
     const req = (route: string) => ({ method: 'POST', routeOptions: { url: route } }) as never;
     const boom = () => {
-      const e = new TypeError("cannot read 'secret' of undefined (token=abc123456789 user pieter@example.com)");
+      const e = new TypeError(
+        "cannot read 'secret' of undefined (token=abc123456789 user pieter@example.com)",
+      );
       e.stack = `TypeError: x\n    at handler (/srv/app/routes/foo.ts:10:5)\n    at run (/srv/app/lib/run.ts:2:1)`;
       return e;
     };
@@ -285,7 +308,10 @@ describe('bug intake', () => {
 
   it('files a role smoke-test failure once per role and version', async () => {
     await designate();
-    r.send('role.smoke', { runnerVersion: '0.1.24', results: [{ roleKey: 'builder', ok: false, detail: 'handoff failed' }] });
+    r.send('role.smoke', {
+      runnerVersion: '0.1.24',
+      results: [{ roleKey: 'builder', ok: false, detail: 'handoff failed' }],
+    });
     await r.barrier();
     await platformScan(ctx);
     await platformScan(ctx);
@@ -352,14 +378,20 @@ describe('scoped pauses', () => {
     const offered = async () => (await candidateCards(ctx.pool, view, ctx.clock.now())).map((c) => c.id);
     expect(await offered()).not.toContain(paused.id);
     // ...a card of another project is (same workflow, same stage)
-    const free = await w.card({ title: 'Free', projectId: await newProject(`OK${Math.floor(Math.random() * 90 + 10)}`) });
+    const free = await w.card({
+      title: 'Free',
+      projectId: await newProject(`OK${Math.floor(Math.random() * 90 + 10)}`),
+    });
     expect(await offered()).toContain(free.id);
     // the platform project's own cards are never held, whatever the scope
     const own = await w.card({ title: 'Platform work', projectId: platformProjectId });
     expect(await offered()).toContain(own.id);
     // every pause is told to the platform organisation's desk
     expect(await deskItems('platform_pause')).toHaveLength(1);
-    expect((await eventsOf('PlatformPauseStarted'))[0]).toMatchObject({ source: 'auto', severity: 'critical' });
+    expect((await eventsOf('PlatformPauseStarted'))[0]).toMatchObject({
+      source: 'auto',
+      severity: 'critical',
+    });
   });
 
   it('resumes by itself when the linked bug card is done, and tells the desk', async () => {
@@ -407,7 +439,9 @@ describe('scoped pauses', () => {
       reason: 'try to stop the fix flow',
     });
     expect(refused.status).toBe(409);
-    expect(await startPause(ctx, { scope: { projectId: platformProjectId }, reason: 'auto', source: 'auto' })).toBeNull();
+    expect(
+      await startPause(ctx, { scope: { projectId: platformProjectId }, reason: 'auto', source: 'auto' }),
+    ).toBeNull();
     // a loop inside the platform project is a bug like any other, but its scope is not paused
     await loopingCard(platformProjectId, 'Platform loop');
     await platformScan(ctx);
@@ -415,8 +449,12 @@ describe('scoped pauses', () => {
     expect(await pauses()).toHaveLength(0);
     // a workstation-wide pause still lets the platform project's cards through
     await w.hire('Bea', 'builder', 'junior');
-    await markOnline(w.t, w.workstationId);
-    await ok(api('POST', '/api/platform-team/pauses', { workstationId: w.workstationId, reason: 'runner crashes' }));
+    await markOnline(w.t, w.workstationId, {
+      repoIds: (await q('SELECT id FROM project_repos')).map((x) => x.id),
+    });
+    await ok(
+      api('POST', '/api/platform-team/pauses', { workstationId: w.workstationId, reason: 'runner crashes' }),
+    );
     const view = agentView((await q(`SELECT * FROM agents WHERE name='Bea'`))[0]!, ['shell', 'edit', 'web']);
     const toy = await w.card({ title: 'On the paused workstation' });
     const own = await w.card({ title: 'Platform fix', projectId: platformProjectId });
@@ -429,33 +467,52 @@ describe('scoped pauses', () => {
 describe('pure pieces', () => {
   it('classifies high-risk diffs from path globs (auth/secrets, data/migrations, tenancy/billing)', () => {
     expect(classifyDeployRisk(['apps/web/src/pages/Board.tsx', 'docs/USER-GUIDE.md']).high).toBe(false);
-    expect(classifyDeployRisk(['apps/server/src/auth/sessions.ts']).categories).toEqual(['auth_permissions_secrets']);
+    expect(classifyDeployRisk(['apps/server/src/auth/sessions.ts']).categories).toEqual([
+      'auth_permissions_secrets',
+    ]);
     expect(classifyDeployRisk(['apps/server/src/commands/target-secrets.ts']).high).toBe(true);
     expect(classifyDeployRisk(['apps/server/migrations/2200_x.sql']).categories).toEqual(['data_migrations']);
     expect(classifyDeployRisk(['apps/server/src/billing/engine.ts']).categories).toEqual(['tenancy_billing']);
-    const mixed = classifyDeployRisk(['apps/server/src/authz/scope.ts', 'apps/server/migrations/1.sql', 'a.ts']);
+    const mixed = classifyDeployRisk([
+      'apps/server/src/authz/scope.ts',
+      'apps/server/migrations/1.sql',
+      'a.ts',
+    ]);
     expect(mixed.categories.sort()).toEqual(['auth_permissions_secrets', 'data_migrations']);
     expect(mixed.paths).toEqual(['apps/server/src/authz/scope.ts', 'apps/server/migrations/1.sql']);
     // sandbox, policy and deploy code is not on the list
-    expect(classifyDeployRisk(['apps/runner/src/adapters/claude-policy.ts', 'deploy/prod.sh']).high).toBe(false);
+    expect(classifyDeployRisk(['apps/runner/src/adapters/claude-policy.ts', 'deploy/prod.sh']).high).toBe(
+      false,
+    );
     // windows separators and leading ./ are normalised
-    expect(classifyDeployRisk(['.\\apps\\server\\src\\auth\\x.ts'].map((p) => p.replaceAll('\\', '/'))).high).toBe(true);
+    expect(
+      classifyDeployRisk(['.\\apps\\server\\src\\auth\\x.ts'].map((p) => p.replaceAll('\\', '/'))).high,
+    ).toBe(true);
   });
 
-  it('fix budgets by size: small 2/2/10, medium 3/2/15, large 4/2/25; each extension adds a budget', () => {
-    expect(FIX_BUDGETS).toEqual({
-      small: { reworkRounds: 2, reviews: 2, shifts: 10 },
-      medium: { reworkRounds: 3, reviews: 2, shifts: 15 },
-      large: { reworkRounds: 4, reviews: 2, shifts: 25 },
+  it('the fix budget of a platform bug card follows the size the architect set (S1a stop-loss defaults)', async () => {
+    const budget = async (size: string) => {
+      await q(`UPDATE platform_bugs SET fix_size=$1`, [size]);
+      return platformFixBudget(ctx.pool, (await q('SELECT * FROM cards WHERE id=$1', [cardId]))[0]!);
+    };
+    await designate();
+    const out = await reportBug(ctx, {
+      source: 'server_5xx',
+      signature: '5xx:GET /budget:Error:1',
+      title: 'budget',
+      description: 'x',
+      diagnostics: {},
     });
-    expect(platformFixBudget({ fixSize: 'small' })).toEqual({ reworkRounds: 2, reviews: 2, shifts: 10 });
-    expect(platformFixBudget({ fixSize: 'small', budgetExtra: 1 })).toEqual({ reworkRounds: 4, reviews: 4, shifts: 20 });
-    expect(overBudget({ reworkRounds: 3, reviews: 0, shifts: 4 }, platformFixBudget({ fixSize: 'small' }))).toHaveLength(1);
-    expect(overBudget({ reworkRounds: 2, reviews: 2, shifts: 10 }, platformFixBudget({ fixSize: 'small' }))).toHaveLength(0);
+    const cardId = out.cardId as string;
+    expect(await budget('small')).toEqual({ buildPasses: 2, reviewRounds: 2, shifts: 10 });
+    expect(await budget('medium')).toEqual({ buildPasses: 3, reviewRounds: 2, shifts: 15 });
+    expect(await budget('large')).toEqual({ buildPasses: 4, reviewRounds: 2, shifts: 25 });
   });
 
   it('masks paths, secrets and e-mail addresses; keeps function plus file name of frames', () => {
-    expect(maskText('open /home/user/src/x/y.ts with token=abc123 for a@b.co')).not.toMatch(/pieter|abc123|a@b\.co/);
+    expect(maskText('open /home/user/src/x/y.ts with token=abc123 for a@b.co')).not.toMatch(
+      /pieter|abc123|a@b\.co/,
+    );
     expect(topFrames('E: x\n    at fn (/a/b/c.ts:1:2)\n    at /d/e.ts:3:4')).toEqual([
       { fn: 'fn', file: 'c.ts' },
       { fn: '(anonymous)', file: 'e.ts' },

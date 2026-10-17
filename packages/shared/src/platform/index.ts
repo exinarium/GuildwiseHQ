@@ -21,8 +21,6 @@ export const PLATFORM_DESK_SUBKIND = {
   deployReport: 'platform_deploy_report',
   /** The platform team asks a client organisation for more diagnostics (raised on the CLIENT organisation's desk). */
   grantRequest: 'platform_grant_request',
-  /** A bug fix used up its budget: architect arbitration, then the owner. */
-  fixStopLoss: 'platform_fix_stop_loss',
   /** A runner version pin was set or cleared. */
   runnerPin: 'platform_runner_pin',
 } as const;
@@ -31,7 +29,6 @@ export const PLATFORM_APPROVAL_SUBKINDS: ReadonlySet<string> = new Set([
   PLATFORM_DESK_SUBKIND.deployApproval,
   PLATFORM_DESK_SUBKIND.downtimeApproval,
   PLATFORM_DESK_SUBKIND.grantRequest,
-  PLATFORM_DESK_SUBKIND.fixStopLoss,
 ]);
 
 export const BugSourceSchema = z.enum([
@@ -53,13 +50,6 @@ export type BugStatus = z.infer<typeof BugStatusSchema>;
 
 export const FixSizeSchema = z.enum(['small', 'medium', 'large']);
 export type FixSize = z.infer<typeof FixSizeSchema>;
-
-/** Stop-loss of a bug-fix card by size (owner decision, v3.1): after it, architect arbitration, then the owner. */
-export const FIX_BUDGETS: Record<FixSize, { reworkRounds: number; reviews: number; shifts: number }> = {
-  small: { reworkRounds: 2, reviews: 2, shifts: 10 },
-  medium: { reworkRounds: 3, reviews: 2, shifts: 15 },
-  large: { reworkRounds: 4, reviews: 2, shifts: 25 },
-};
 
 /** The same failure this many times is a critical bug (design 8.3). */
 export const CRITICAL_REPEATS = 3;
@@ -153,7 +143,6 @@ export const PlatformBugDtoSchema = z.object({
   clientOrgId: z.uuid().nullable(),
   firstSeenAt: z.iso.datetime(),
   lastSeenAt: z.iso.datetime(),
-  stopLossLevel: z.number().int(),
   /** The sanitised diagnostics (signature, top frames, counts, versions). Never more without a grant. */
   diagnostics: z.record(z.string(), z.unknown()),
 });
@@ -167,7 +156,9 @@ export const TriageBugRequestSchema = z
     size: FixSizeSchema.optional(),
     reason: z.string().trim().min(3).max(2000).optional(),
   })
-  .refine((b) => b.verdict === 'valid' || !!b.reason, { message: 'a reason is required to close a bug as invalid' })
+  .refine((b) => b.verdict === 'valid' || !!b.reason, {
+    message: 'a reason is required to close a bug as invalid',
+  })
   .refine((b) => b.verdict === 'invalid' || !!b.severity, { message: 'set a severity for a valid bug' });
 export type TriageBugRequest = z.infer<typeof TriageBugRequestSchema>;
 

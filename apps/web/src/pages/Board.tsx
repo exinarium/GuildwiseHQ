@@ -11,6 +11,7 @@ import { BoardView, NO_FILTER } from '../components/BoardView.tsx';
 import { BudgetBanner } from '../components/BudgetBanner.tsx';
 import { ConvertProjectDialog } from '../components/ConvertProjectDialog.tsx';
 import { PhaseFilter } from '../components/PhaseFilter.tsx';
+import { PlatformPauseBanner } from '../components/platform/PlatformPauseBanner.tsx';
 import { RegressionDialog } from '../components/RegressionDialog.tsx';
 import { RunBranchDialog } from '../components/runs/RunBranchDialog.tsx';
 import { RunList } from '../components/runs/RunPanel.tsx';
@@ -171,6 +172,7 @@ export function Board() {
         }
       />
       <UsageLimitBanner limit={project.usageLimit} />
+      <PlatformPauseBanner projectId={project.id} />
       <BudgetBanner
         budget={project.budget}
         projectId={project.id}

@@ -1626,6 +1626,46 @@ export const PAGE_HELP: Record<string, PageHelp> = {
     ],
     article: 'workstations-and-installer#runner-updates',
   },
+  '/platform/team': {
+    title: 'Platform team',
+    intro:
+      "Which of your organizations and projects fixes Guildwise itself. Bugs the runners and the server report become cards in that project; its approvals and reports go to that organization's desk, not to you.",
+    controls: [
+      {
+        name: 'Designate',
+        text: 'Pick one existing organization and the id of one of its projects. The project keeps its decisions at project level. Clear removes the designation: bugs are still recorded but no cards are filed.',
+      },
+      {
+        name: 'Pauses',
+        text: 'Work paused for what a critical bug hits (a project and stage, or a workstation). Pauses end by themselves when the bug card is fixed, or with Resume. The platform project is never paused.',
+      },
+      {
+        name: 'Safe mode pins',
+        text: 'Pin all workstations to a runner version, an older one too, to roll back a bad release. Unpin follows the latest release again.',
+      },
+    ],
+    article: 'workstations-and-installer#runner-updates',
+  },
+  '/platform-team': {
+    title: 'Platform team',
+    intro:
+      'Bugs, pauses, safe mode, grants and the deploy audit trail of Guildwise itself. Members of the platform project read; the Owner and Admins of this organization act. Approvals are items on the Desk.',
+    controls: [
+      {
+        name: 'Pauses',
+        text: 'Open pauses and why they started. Resume ends one by hand; they also end when the bug card is fixed.',
+      },
+      {
+        name: 'Bugs',
+        text: 'One row per problem, with severity and how often it was seen. The card is in the platform project.',
+      },
+      {
+        name: 'Deploy audit trail',
+        text: 'Every deploy check and deploy: version, risk, who approved, and the rollback path.',
+      },
+    ],
+    article: 'workstations-and-installer#runner-updates',
+  },
   '/platform/inbound': {
     title: 'Inbound mail',
     intro:

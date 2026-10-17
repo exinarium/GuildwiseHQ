@@ -191,12 +191,18 @@ async function start(opts: { dataDir?: string; mock?: boolean }): Promise<void> 
     : undefined;
   const mock = mockEnabled(opts.mock);
   let updater: Updater | undefined;
+  /** The safe-mode pin the server sent before the updater existed (welcome comes first). */
+  let pendingPin: string | null = null;
   const host = new RunnerHost({
     root: paths.root,
     log,
     mock,
     maxShiftMsOverride: override,
     onConnected: () => updater?.noteConnected(),
+    onRunnerPin: (v) => {
+      pendingPin = v;
+      updater?.setPin(v);
+    },
   });
   // Unhandled errors go to the server (sanitised) so the platform team can see them; see health/runner-error.ts.
   const removeErrorHandlers = installErrorHandlers({
@@ -232,6 +238,7 @@ async function start(opts: { dataDir?: string; mock?: boolean }): Promise<void> 
     });
     host.setUpdateStatus(updater.current);
     updater.start();
+    if (pendingPin) updater.setPin(pendingPin);
   }
   process.once('SIGINT', () => {
     log.info('SIGINT received, shutting down');

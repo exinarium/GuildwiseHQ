@@ -1106,7 +1106,10 @@ export const WelcomeSchema = msg('welcome', {
     shiftLimit: ShiftLimitSettingSchema.optional(),
   }),
   /** Additive, safe mode: the runner version this workstation is pinned to (absent or null: none). */
-  runnerPin: z.object({ version: z.string().max(40) }).nullable().optional(),
+  runnerPin: z
+    .object({ version: z.string().max(40) })
+    .nullable()
+    .optional(),
 });
 export const ShiftStartSchema = msg('shift.start', {
   shiftId: z.uuid(),

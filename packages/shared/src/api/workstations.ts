@@ -47,6 +47,13 @@ export const WorkstationDtoSchema = z.object({
     })
     .nullable()
     .optional(),
+  /** Safe mode: the runner version the platform team pinned this workstation to (its own pin, else the all-workstations one). */
+  runnerPin: z
+    .object({ version: z.string(), reason: z.string().nullable(), scope: z.enum(['workstation', 'all']) })
+    .nullable()
+    .optional(),
+  /** Work in a project or on this workstation is paused by the platform team (the count of open pauses that apply). */
+  platformPauses: z.number().int().optional(),
   status: z.enum(['active', 'unlinked']),
   connected: z.boolean(),
   lastSeenAt: IsoTime.nullable(),

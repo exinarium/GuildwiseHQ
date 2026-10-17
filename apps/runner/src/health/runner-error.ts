@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
-import { basename } from 'node:path';
+import { maskText as sharedMaskText, sanitizeStack as sharedSanitizeStack } from '@aom/shared';
 
 /**
  * Errors of the runner itself, reported to the server as `runner.error` (Lean Team v3: the platform team turns them into
@@ -18,46 +18,13 @@ export interface RunnerErrorPayload {
   context?: string;
 }
 
-const SECRET =
-  /\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{8,}|\b(sk-[A-Za-z0-9_-]{10,}|gh[pousr]_[A-Za-z0-9]{20,}|aomr_[A-Za-z0-9_-]{8,}|AKIA[0-9A-Z]{12,}|xox[abp]-[A-Za-z0-9-]{10,}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})\b/g;
-const KEYED_SECRET =
-  /((?:pass(?:word|wd)?|secret|token|api[_-]?key|access[_-]?key|authorization)[\w-]*["']?\s*[=:]\s*)(?:"[^"]*"|'[^']*'|\S+)/gi;
-const URL_CREDENTIALS = /(\w+:\/\/)[^/\s:@]+:[^/\s@]+@/g;
-const UUID = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi;
-/** An absolute path: keeps only the last two segments (`/home/u/.aom-runner/worktrees/X/y.ts` -> `…/X/y.ts`). */
-const ABS_PATH = /(?:[A-Za-z]:)?(?:[\\/][^\s"'`()<>:,;|]+){2,}/g;
-
+/** Masks paths, ids, secrets and e-mail addresses (the one definition lives in `@aom/shared`, also used by the server). */
 export function maskText(text: string, home: string = homedir()): string {
-  let t = text;
-  if (home && home.length > 1) t = t.split(home).join('~');
-  return t
-    .replace(URL_CREDENTIALS, '$1***@')
-    .replace(SECRET, '***')
-    .replace(KEYED_SECRET, '$1***')
-    .replace(UUID, '<id>')
-    .replace(ABS_PATH, (p) => {
-      const parts = p.split(/[\\/]/).filter(Boolean);
-      return `…/${parts.slice(-2).join('/')}`;
-    });
+  return sharedMaskText(text, home);
 }
 
 /** `at fn (/abs/dir/file.ts:12:3)` -> `at fn (file.ts:12:3)`; frames that are not code locations are dropped. */
-export function sanitizeStack(stack: string | undefined): string | undefined {
-  if (!stack) return undefined;
-  const lines = stack
-    .split('\n')
-    .slice(1) // the first line repeats the message
-    .map((l) => l.trim())
-    .filter((l) => l.startsWith('at '))
-    .slice(0, 20)
-    .map((l) => {
-      const m = /^at (?:(.+?) \()?(.+?):(\d+):(\d+)\)?$/.exec(l);
-      if (!m) return maskText(l).slice(0, 160);
-      const file = basename(m[2] ?? '').replace(/^file:\/\//, '');
-      return `at ${m[1] ? `${m[1]} ` : ''}(${file}:${m[3]}:${m[4]})`;
-    });
-  return lines.length > 0 ? lines.join('\n').slice(0, 5000) : undefined;
-}
+export const sanitizeStack = sharedSanitizeStack;
 
 /** The message normalised for grouping: numbers, quoted values and ids no longer tell two occurrences apart. */
 function groupingText(message: string): string {
