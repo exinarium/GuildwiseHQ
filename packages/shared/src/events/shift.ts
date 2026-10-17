@@ -46,6 +46,11 @@ export const shiftEvents = [
         .optional(),
     }),
   ),
+  /**
+   * The runner reported the usage of a shift the server had already ended without it (crashed, lost, timed out): the
+   * tokens and the price are filled in afterwards. Recorded once, only when the shift was priced at zero.
+   */
+  defineEvent('ShiftUsageRecorded', z.object({ shiftId: Id, usage: Usage })),
   /** The runner learned Claude's session id after `shift.started`, or re-measured the session's context size. */
   defineEvent(
     'ShiftSessionRecorded',
@@ -72,6 +77,8 @@ export const shiftEvents = [
       costMicros: z.number().int().nonnegative().optional(),
       exitCode: z.number().int().nullable().optional(),
       guardViolations: z.array(GuardViolation).default([]),
+      /** Outcome `rejected`: why the runner turned the shift away (`reason: detail`). */
+      rejectionReason: z.string().max(600).optional(),
     }),
   ),
 ] as const;

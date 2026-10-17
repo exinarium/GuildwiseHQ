@@ -1,4 +1,4 @@
-import type { BoardCard, BoardResponse } from '@aom/shared';
+import { type BoardCard, type BoardResponse, formatMoney } from '@aom/shared';
 import { ChevronsLeft } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
@@ -182,6 +182,11 @@ export function CardTile({
           {(card.origin === 'full_suite' || card.origin === 'regression') && (
             <span data-testid="suite-badge">
               <Badge tone="blue">{card.origin === 'full_suite' ? 'full suite' : 'regression'}</Badge>
+            </span>
+          )}
+          {card.spend && card.spend.totalMicros > 0 && (
+            <span data-testid="card-spend" title="What this card has cost so far (list prices)">
+              <Badge tone="neutral">{formatMoney(card.spend.totalMicros, card.spend.currency)}</Badge>
             </span>
           )}
         </div>

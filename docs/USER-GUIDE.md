@@ -563,9 +563,19 @@ The **Ledger** page lists everything and is searchable. Organization-wide standi
 
 **Editing a standing order.** Press **Edit** on a standing order in the Ledger to change its title or text; the people who may add it may edit it (the Owner and Admins for an organization-wide one, the project's owner for a project one). The order keeps its place, shows *edited* with who and when, and **History** lists every earlier wording. Agents are briefed from the Ledger each time, so the new wording reaches their next shift or chat, and the copy in the vault's `standing-orders.md` is rewritten to match. Every agent follows the standing orders as binding rules that override its usual habits: builders, reviewers and the BA, and also the DevOps engineer (for its requests, repository hygiene, running a branch and its chats), which receives the organization's orders plus those of the projects involved. Decisions and requirements cannot be edited, only replaced.
 
+**Retiring an entry.** Press **Retire** on an entry in the Ledger and give a reason when it is a one-off order, a duplicate, or a rule that a setting now replaces. A retired entry is kept for the record (switch on **Show retired** to see it greyed out, with its reason), but no agent is briefed with it and a search no longer finds it. The same people who may edit an entry may retire it, the BA can retire one (`aom ledger retire <id> --reason "..."`), and so can the CEO (as a recommendation until you let it decide).
+
+**Duplicates and contradictions.** When you save a standing order the ledger compares it with the live ones. A near-duplicate is refused with a pointer to the existing order; the form offers **Merge into the existing order instead**, which puts the new wording into that order. An order that looks like it says the opposite of another one (the same subject, one asks and the other forbids) is saved but marked **May contradict another order**, and one desk item asks you or the BA to retire or reword one of them.
+
+**Decisions stay with their project.** An answer on a card is a decision of that card's project. HR and the CEO never turn it into an organization-wide order; only you can promote one (the **organization-wide** switch when you answer). For a project that must keep its decisions to itself, such as the platform project, switch on **Keep this project's decisions at project level** in its settings: the switch is then refused on its questions and HR leaves its questions out when it looks for patterns.
+
 ![The ledger](guide/assets/ledger.jpg)
 
 > **In the app:** Help, "The Decision desk" (`/help/desk`) and "Ledger and vaults" (`/help/ledger-and-vaults`).
+
+#### Testing without an environment
+
+In the project settings, **Test without an environment** replaces the old "Test mode" and "Test Environment" standing orders (which contradicted each other). Off (the default): when a card needs a test environment and none is ready, it waits for DevOps to start one. On: the tester runs what it can without an environment and records in its note that none was used.
 
 ### 4.6 Budgets and costs
 
@@ -591,6 +601,8 @@ Every shift records what it used (input, output and cache tokens and the model).
 ![The board banner when a project is over budget](guide/assets/budget-banner.jpg)
 
 Setting a budget below what was already spent pauses the project at once. Members can see the progress but not change it. Guests see only that a project is paused.
+
+**Cost by cause.** Each card on the board shows what it has cost so far. Behind it, the cost of a card (and of a day) is split by what the shift was spent on: working, asking (a shift that ended with a question), answering (a colleague's question), reviewing, re-review after a conflict (a review done again because a rebase conflict reset it) and rejected (the runner turned the shift away). Prices are the list prices of October 2026 (Sonnet 5.5 $2 / $10 per million tokens, Opus 5.5 $4 / $20, cache reads at 10%, writes at 1.25x, or 2x when the runner reports a one-hour cache write). A shift that reported and was then stopped counts as reported, and a crashed shift is priced from the usage the runner reports afterwards.
 
 **Value report.** At the top of the Costs page: "This month: 42 cards, ~168 hours of work, $84 usage, ~80x return", the change against last month, and **Next best actions** (cards that have not moved for days, agents that fail often, projects with no work). The hours are an estimate of what a person would have needed, by card type; Owners and Admins can change them under **Adjust the estimates**. **Export value report (CSV)** downloads it.
 
@@ -983,7 +995,9 @@ The **CEO** is an agent that runs the floor for you. It watches every project, a
 
 **When it is offline.** If its workstation is offline or its Claude sign-in expired, wakes wait, desk items reach you unchanged (nothing is held), you get one notice after 30 minutes if something urgent waits, and the daily report is posted from a template after two hours. **Pause** stops it acting and hands the reporter job back to the BA; **Disable** retires it (a new one can be appointed).
 
-**Cost.** Its spend is shown as **Management (CEO)** on the Costs page. Routine wakes use a lighter model, the daily review and the chat a stronger one (both configurable on the Persona tab). There is no cap of its own; it is bounded by its wake limits (twelve shifts an hour at most), its action limits and the budgets above.
+**Cost.** Its spend is shown as **Management (CEO)** on the Costs page. Wakes, the daily review and the chat run on Sonnet by default; only a **handover**, when it hands work over to the team, runs on Opus (all four configurable on the Persona tab; an organization that still had the older defaults was moved to these by a one-off migration, a model you chose yourself was left alone).
+
+**Once per subject.** The CEO deals with a subject once until it changes: a card sitting in Manual QA wakes it and notifies you once, however many reminders the card raises, and again only when the card moves on. Notices about one subject share one desk item with a counter ("x3"). The "CEO offline" notice is raised once and is cleared only after a CEO shift has actually run, so it no longer comes and goes. There is no cap of its own; it is bounded by its wake limits (twelve shifts an hour at most), its action limits and the budgets above.
 
 > **Good to know:** the CEO acts with your rights but the events show it as the actor; everything it does is in the activity log. It never names agents or Guildwise to clients: cards it drafts go through the same checks as any other card.
 

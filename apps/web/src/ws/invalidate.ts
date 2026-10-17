@@ -160,3 +160,41 @@ export function keysForEvent(event: Pick<VisibleEvent, 'type' | 'streamId' | 'pr
 export function invalidateForEvent(qc: QueryClient, event: VisibleEvent): void {
   for (const key of keysForEvent(event)) void qc.invalidateQueries({ queryKey: key as unknown[] });
 }
+
+/** How long a burst of events is gathered before the stale queries are refetched. */
+export const INVALIDATE_WINDOW_MS = 120;
+
+/**
+ * Gathers the keys that a burst of events makes stale and invalidates each once when the window closes (a shift that
+ * posts ten events refetches the board once, not ten times). `flush` runs the pending invalidation at once; `clear`
+ * drops it (a full invalidation follows).
+ */
+export class InvalidationBatcher {
+  private pending = new Map<string, readonly unknown[]>();
+  private timer: ReturnType<typeof setTimeout> | undefined;
+
+  constructor(
+    private readonly qc: QueryClient,
+    private readonly windowMs: number = INVALIDATE_WINDOW_MS,
+  ) {}
+
+  add(event: Pick<VisibleEvent, 'type' | 'streamId' | 'projectId'>): void {
+    for (const key of keysForEvent(event)) this.pending.set(JSON.stringify(key), key);
+    if (this.pending.size > 0 && this.timer === undefined)
+      this.timer = setTimeout(() => this.flush(), this.windowMs);
+  }
+
+  flush(): void {
+    clearTimeout(this.timer);
+    this.timer = undefined;
+    const keys = [...this.pending.values()];
+    this.pending.clear();
+    for (const key of keys) void this.qc.invalidateQueries({ queryKey: key as unknown[] });
+  }
+
+  clear(): void {
+    clearTimeout(this.timer);
+    this.timer = undefined;
+    this.pending.clear();
+  }
+}

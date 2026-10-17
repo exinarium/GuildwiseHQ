@@ -99,6 +99,23 @@ async function pullRebase(
   return { ok: true, changed: before !== after };
 }
 
+/**
+ * A sync failure that retrying does not fix: the login or key is refused, the repository does not exist or is not a
+ * repository, the URL is refused. Anything else (network, a busy remote) is treated as temporary. Retrying a permanent
+ * error every 2.5 minutes only fills the logs and the server's status table.
+ */
+export function isPermanentSyncError(message: string): boolean {
+  return /authentication failed|permission denied|could not read (username|password)|repository not found|not found\b.*\bremote|remote: not found|does not appear to be a git repository|repository .{0,200}does not exist|access denied|\b40[134]\b|refusing to clone|host key verification failed|invalid credentials|bad credentials/i.test(
+    message,
+  );
+}
+
+/** How long a vault whose last `failures` syncs failed permanently waits for the next timer pass: doubles, up to 6 hours. */
+export function syncBackoffMs(failures: number, intervalMs: number): number {
+  if (failures <= 0) return 0;
+  return Math.min(6 * 3600_000, intervalMs * 2 ** Math.min(failures, 16));
+}
+
 /** Does the local branch have commits the remote lacks (or does the remote branch not exist yet)? */
 async function needsPush(dir: string, branch: string, env: Record<string, string>): Promise<boolean> {
   const remote = await git(dir, ['rev-parse', '--verify', '--quiet', `refs/remotes/origin/${branch}`], {

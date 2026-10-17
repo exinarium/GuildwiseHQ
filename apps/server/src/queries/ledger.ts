@@ -32,7 +32,7 @@ export async function searchLedger(db: Queryable, query: string, o: SearchOpts):
   const sql = (tsquery: string, minRank: boolean) => `
     SELECT ${COLS}, ts_rank(e.search, q) AS rank
       FROM ledger_entries e, ${tsquery} AS q
-     WHERE e.org_id = $2 AND e.superseded_by IS NULL AND e.search @@ q
+     WHERE e.org_id = $2 AND e.superseded_by IS NULL AND e.retired_at IS NULL AND e.search @@ q
        AND ($3::uuid IS NULL OR e.project_id IS NULL OR e.project_id = $3)
        AND ($4 = 'all' OR e.scope = $4)
        ${minRank ? 'AND ts_rank(e.search, q) >= $6' : ''}
@@ -78,7 +78,7 @@ export async function standingOrdersFor(
     await rows(
       db,
       `SELECT title, body FROM ledger_entries
-        WHERE org_id=$1 AND scope='standing_order' AND superseded_by IS NULL AND (project_id IS NULL OR project_id=$2)
+        WHERE org_id=$1 AND scope='standing_order' AND superseded_by IS NULL AND retired_at IS NULL AND (project_id IS NULL OR project_id=$2)
         ORDER BY created_at, id`,
       [orgId, projectId],
     )
@@ -98,7 +98,7 @@ export async function standingOrdersForProjects(
     await rows(
       db,
       `SELECT e.title, e.body, p.key AS project_key FROM ledger_entries e LEFT JOIN projects p ON p.id = e.project_id
-        WHERE e.org_id=$1 AND e.scope='standing_order' AND e.superseded_by IS NULL
+        WHERE e.org_id=$1 AND e.scope='standing_order' AND e.superseded_by IS NULL AND e.retired_at IS NULL
           AND (e.project_id IS NULL OR e.project_id = ANY($2::uuid[]))
         ORDER BY e.project_id NULLS FIRST, e.created_at, e.id`,
       [orgId, [...new Set(projectIds)]],
@@ -106,19 +106,63 @@ export async function standingOrdersForProjects(
   ).map((r) => ({ title: r.project_key ? `${r.project_key}: ${r.title}` : r.title, body: r.body }));
 }
 
-/** Requirements and decisions linked to a card (answers to its questions land here). */
+/** What a card's brief carries of its own ledger entries: the newest few, as one-liners, within a byte budget. */
+export const CARD_LEDGER_MAX_ENTRIES = 5;
+export const CARD_LEDGER_MAX_BYTES = 4096;
+const ONE_LINER_CHARS = 280;
+
+const oneLine = (s: string, n: number) => {
+  const t = s.replace(/\s+/g, ' ').trim();
+  return t.length > n ? `${t.slice(0, n - 1)}…` : t;
+};
+
+/** Pure: caps the entries (newest first in, oldest-to-newest out) to `max` one-liners within `maxBytes`. */
+export function capLedgerEntries<T extends { title: string; body: string }>(
+  newestFirst: T[],
+  max = CARD_LEDGER_MAX_ENTRIES,
+  maxBytes = CARD_LEDGER_MAX_BYTES,
+): T[] {
+  const out: T[] = [];
+  let bytes = 0;
+  for (const e of newestFirst.slice(0, max)) {
+    const one = { ...e, title: oneLine(e.title, 120), body: oneLine(e.body, ONE_LINER_CHARS) };
+    const size = Buffer.byteLength(`${one.title}${one.body}`) + 40;
+    if (bytes + size > maxBytes && out.length > 0) break;
+    bytes += size;
+    out.push(one);
+  }
+  return out.reverse();
+}
+
+/**
+ * Requirements and decisions linked to a card (answers to its questions land here), capped at the source: the newest
+ * five as one-liners within 4 KB. `total` counts all of them, so the prompt can point at `aom ledger search` for the rest.
+ */
 export async function cardLedgerEntries(
   db: Queryable,
   cardId: string,
-): Promise<Array<{ id: string; scope: string; title: string; body: string }>> {
-  return (
-    await rows(
-      db,
-      `SELECT id, scope, title, body FROM ledger_entries
-        WHERE card_id=$1 AND scope <> 'standing_order' AND superseded_by IS NULL ORDER BY created_at, id`,
-      [cardId],
-    )
-  ).map((r) => ({ id: r.id, scope: r.scope, title: r.title, body: r.body }));
+): Promise<{ entries: Array<{ id: string; scope: string; title: string; body: string }>; total: number }> {
+  const live = await rows(
+    db,
+    `SELECT id, scope, title, body FROM ledger_entries
+      WHERE card_id=$1 AND scope <> 'standing_order' AND superseded_by IS NULL AND retired_at IS NULL
+      ORDER BY created_at DESC, id DESC LIMIT $2`,
+    [cardId, CARD_LEDGER_MAX_ENTRIES + 50],
+  );
+  const total = Number(
+    (
+      await rows<{ n: string }>(
+        db,
+        `SELECT count(*)::text AS n FROM ledger_entries
+          WHERE card_id=$1 AND scope <> 'standing_order' AND superseded_by IS NULL AND retired_at IS NULL`,
+        [cardId],
+      )
+    )[0]?.n ?? 0,
+  );
+  return {
+    entries: capLedgerEntries(live.map((r) => ({ id: r.id, scope: r.scope, title: r.title, body: r.body }))),
+    total,
+  };
 }
 
 const DTO_SELECT = `SELECT e.*, p.key AS project_key, c.ref AS card_ref,
@@ -147,7 +191,11 @@ export const toLedgerDto = (r: Row, rank?: number): LedgerEntryDto => ({
   version: r.version ?? 1,
   editedAt: iso(r.edited_at) ?? null,
   editedByName: r.edited_by_name ?? null,
+  retiredAt: iso(r.retired_at) ?? null,
+  retiredReason: r.retired_reason ?? null,
+  conflictsWith: r.conflicts_with ?? [],
   canEdit: false,
+  canRetire: false,
   ...(rank !== undefined ? { rank } : {}),
 });
 
@@ -171,7 +219,7 @@ export async function withCanEdit(
   userId: string,
   entries: LedgerEntryDto[],
 ): Promise<LedgerEntryDto[]> {
-  const live = entries.filter((e) => e.scope === 'standing_order' && !e.supersededBy);
+  const live = entries.filter((e) => !e.supersededBy && !e.retiredAt);
   if (live.length === 0) return entries;
   const projectIds = [...new Set(live.map((e) => e.projectId).filter((x): x is string => !!x))];
   const owned = new Set(
@@ -203,7 +251,10 @@ export async function withCanEdit(
   );
   return entries.map((e) =>
     live.includes(e)
-      ? { ...e, canEdit: e.projectId ? owned.has(e.projectId) : managerOrgs.has(orgOf.get(e.id) ?? '') }
+      ? (() => {
+          const may = e.projectId ? owned.has(e.projectId) : managerOrgs.has(orgOf.get(e.id) ?? '');
+          return { ...e, canEdit: e.scope === 'standing_order' && may, canRetire: may };
+        })()
       : e,
   );
 }
@@ -212,7 +263,12 @@ export async function listLedger(
   db: Queryable,
   userId: string,
   orgId: string | null,
-  o: { q?: string | undefined; projectId?: string | undefined; scope: LedgerScopeFilter },
+  o: {
+    q?: string | undefined;
+    projectId?: string | undefined;
+    scope: LedgerScopeFilter;
+    includeRetired?: string | undefined;
+  },
 ): Promise<LedgerEntryDto[]> {
   const scope = o.scope;
   const q = o.q?.trim();
@@ -251,11 +307,11 @@ export async function listLedger(
   const list = await rows(
     db,
     `${DTO_SELECT}
-      WHERE ${VISIBLE} AND e.superseded_by IS NULL
+      WHERE ${VISIBLE} AND ($5::boolean OR (e.superseded_by IS NULL AND e.retired_at IS NULL))
         AND ($2::uuid IS NULL OR e.project_id IS NULL OR e.project_id = $2)
         AND ($3 = 'all' OR e.scope = $3) AND ${IN_ORG('$4')}
-      ORDER BY e.created_at DESC, e.id LIMIT 200`,
-    [userId, o.projectId ?? null, scope, orgId],
+      ORDER BY (e.retired_at IS NOT NULL), e.created_at DESC, e.id LIMIT 200`,
+    [userId, o.projectId ?? null, scope, orgId, o.includeRetired === 'true'],
   );
   return withCanEdit(
     db,

@@ -191,6 +191,19 @@ export function useSetFullSuite(id: string) {
   });
 }
 
+/** Lean Team v3 project policy: decisions stay at project scope; test without a test environment. */
+export function useSetProjectPolicy(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (b: { decisionsProjectOnly?: boolean; testWithoutEnvironment?: boolean }) =>
+      put(`/projects/${id}/policy`, b),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['project', id] });
+      qc.invalidateQueries({ queryKey: ['projects'] });
+    },
+  });
+}
+
 export function useSetManualQa(id: string) {
   const qc = useQueryClient();
   return useMutation({

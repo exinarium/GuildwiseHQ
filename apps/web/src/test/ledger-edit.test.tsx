@@ -30,13 +30,21 @@ const entry = (over: Record<string, unknown> = {}) => ({
   editedAt: null,
   editedByName: null,
   canEdit: true,
+  canRetire: true,
+  retiredAt: null,
+  retiredReason: null,
+  conflictsWith: [],
   ...over,
 });
 
 let list: Array<ReturnType<typeof entry>>;
 let patched: unknown[];
+let retired: Array<{ url: string; body: unknown }>;
+let includeRetired: boolean[];
 beforeEach(() => {
   patched = [];
+  retired = [];
+  includeRetired = [];
   list = [
     entry(),
     entry({ id: ID(21), title: 'Read only rule', canEdit: false }),
@@ -80,7 +88,27 @@ beforeEach(() => {
         ];
         return json({ entry: list[0] });
       }
-      if (url.startsWith('/api/ledger')) return json({ entries: list });
+      if (method === 'POST' && url.endsWith('/retire')) {
+        const body = JSON.parse(String(init.body));
+        retired.push({ url, body });
+        const id = url.split('/')[3];
+        list = list.map((e) =>
+          e.id === id
+            ? entry({
+                ...e,
+                retiredAt: '2026-10-17T10:00:00.000Z',
+                retiredReason: body.reason,
+                canRetire: false,
+              })
+            : e,
+        );
+        return json({ entry: list.find((e) => e.id === id) });
+      }
+      if (url.startsWith('/api/ledger')) {
+        const showRetired = url.includes('includeRetired=true');
+        includeRetired.push(showRetired);
+        return json({ entries: list.filter((e) => showRetired || !e.retiredAt) });
+      }
       return json({});
     }),
   );
@@ -149,5 +177,50 @@ describe('editing a standing order on the Ledger page', () => {
     await user.click(within(form).getByRole('button', { name: 'Save changes' }));
     expect(await within(form).findByText('A title and the text are required')).toBeInTheDocument();
     expect(patched).toEqual([]);
+  });
+});
+
+describe('retiring a ledger entry', () => {
+  it('asks for a reason, retires the entry and lists it greyed out only when retired entries are shown', async () => {
+    const user = userEvent.setup();
+    wrap();
+    await user.click(await screen.findByRole('button', { name: 'Retire Working Branch' }));
+    const form = await screen.findByRole('form', { name: 'Retire entry' });
+    // a reason is required
+    await user.click(within(form).getByRole('button', { name: 'Retire' }));
+    expect(retired).toEqual([]);
+    expect(await within(form).findByText('Say why it is retired')).toBeInTheDocument();
+    await user.type(within(form).getByLabelText('Reason'), 'one-off order');
+    await user.click(within(form).getByRole('button', { name: 'Retire' }));
+    await waitFor(() => expect(retired).toHaveLength(1));
+    expect(retired[0]).toEqual({ url: `/api/ledger/${ID(20)}/retire`, body: { reason: 'one-off order' } });
+    // retired entries leave the default list
+    await waitFor(() => expect(screen.queryByText('Working Branch')).toBeNull());
+    // and come back, greyed out with the reason, behind the filter
+    await user.click(screen.getByRole('button', { name: 'Show retired' }));
+    const row = (await screen.findAllByTestId('ledger-entry')).find((r) => r.dataset.retired === 'true');
+    expect(row).toBeDefined();
+    expect(within(row as HTMLElement).getByTestId('ledger-retired')).toBeInTheDocument();
+    expect(within(row as HTMLElement).getByTestId('ledger-retired-reason')).toHaveTextContent(
+      'one-off order',
+    );
+    expect(within(row as HTMLElement).queryByRole('button', { name: /^Retire/ })).toBeNull();
+    expect(includeRetired).toContain(true);
+  });
+
+  it('shows Retire only where the person may', async () => {
+    list = [entry(), entry({ id: ID(21), title: 'Not yours', canRetire: false, canEdit: false })];
+    wrap();
+    const rows = await screen.findAllByTestId('ledger-entry');
+    expect(
+      within(rows[0] as HTMLElement).getByRole('button', { name: 'Retire Working Branch' }),
+    ).toBeInTheDocument();
+    expect(within(rows[1] as HTMLElement).queryByRole('button', { name: /^Retire/ })).toBeNull();
+  });
+
+  it('marks an order that may contradict another', async () => {
+    list = [entry({ conflictsWith: [ID(21)] })];
+    wrap();
+    expect(await screen.findByTestId('ledger-conflict')).toHaveTextContent('May contradict another order');
   });
 });

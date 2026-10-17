@@ -4,6 +4,7 @@ import {
   type CeoShift,
   floorDigestIsEmpty,
   floorReportDue,
+  isHandoverReason,
   type ServerToRunnerOf,
   type ShiftBrief,
   streamId,
@@ -39,7 +40,7 @@ const MAX_ATTEMPTS = 2;
 /** Model and effort for a purpose: the owner's settings (wake, review, chat) override the role default. */
 export function modelFor(
   ceo: CeoState,
-  purpose: 'wake' | 'review' | 'chat',
+  purpose: 'wake' | 'review' | 'chat' | 'handover',
 ): { model: string; effort: string } {
   return ceo.settings.models[purpose];
 }
@@ -71,7 +72,8 @@ async function buildCeoShiftStart(
     : undefined;
   const { text, reasons } = await buildCeoBrief(ctx, ceo, agent, wakes, purpose, localDate);
   const maxMinutes = purpose === 'review' ? CEO_REVIEW_MAX_MINUTES : CEO_WAKE_MAX_MINUTES;
-  const m = modelFor(ceo, purpose === 'review' ? 'review' : 'wake');
+  const handover = purpose === 'wake' && wakes.some((w) => isHandoverReason(String(w.reason)));
+  const m = modelFor(ceo, purpose === 'review' ? 'review' : handover ? 'handover' : 'wake');
   const spec = await agentSpecFor(ctx, agent);
   const ceoShift: CeoShift = {
     purpose,
@@ -141,6 +143,16 @@ async function buildCeoShiftStart(
   };
 }
 
+/** Has a CEO shift run (started) since `since`? */
+async function ceoShiftSince(ctx: Ctx, orgId: string, since: Date): Promise<boolean> {
+  return !!(await one(
+    ctx.pool,
+    `SELECT 1 FROM shifts s JOIN agents a ON a.id = s.agent_id
+      WHERE s.kind='ceo' AND a.org_id=$1 AND s.started_at > $2 AND COALESCE(s.outcome,'') NOT IN ('rejected','lost') LIMIT 1`,
+    [orgId, since],
+  ));
+}
+
 /** Is the CEO's workstation unreachable for a while with something urgent waiting? One e-mail and one notice. */
 async function offlineNotice(
   ctx: Ctx,
@@ -153,11 +165,15 @@ async function offlineNotice(
     `SELECT min(created_at) AS at FROM ceo_wakes WHERE org_id=$1 AND status='pending' AND urgency='urgent'`,
     [ceo.orgId],
   );
-  const flag = await one(ctx.pool, `SELECT value FROM ceo_flags WHERE org_id=$1 AND flag='offline_notice'`, [
-    ceo.orgId,
-  ]);
+  const flag = await one<{ at: Date }>(
+    ctx.pool,
+    `SELECT at FROM ceo_flags WHERE org_id=$1 AND flag='offline_notice'`,
+    [ceo.orgId],
+  );
   if (!block || !waiting?.at) {
-    if (flag)
+    // The episode ends only when a CEO shift has actually run since the notice: being reachable for a moment (or the urgent
+    // wake being dropped) is not recovery, and clearing the flag then made the notice flap (33 times in production).
+    if (flag && (await ceoShiftSince(ctx, ceo.orgId, new Date(flag.at))))
       await exec(ctx.pool, `DELETE FROM ceo_flags WHERE org_id=$1 AND flag='offline_notice'`, [ceo.orgId]);
     return;
   }

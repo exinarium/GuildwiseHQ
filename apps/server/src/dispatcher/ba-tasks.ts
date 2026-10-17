@@ -36,6 +36,8 @@ export interface BaTaskDispatch {
 export async function baTaskPass(
   ctx: Ctx,
   skipAgent: (agentId: string) => boolean = () => false,
+  /** The workstation already runs as many shifts as its owner allows (backlog #76): nothing more is offered to it. */
+  workstationFull: (workstationId: string) => boolean = () => false,
 ): Promise<BaTaskDispatch[]> {
   const now = ctx.clock.now();
   await endStaleShifts(ctx, now);
@@ -91,7 +93,7 @@ export async function baTaskPass(
       );
       const reachable =
         a.connected && a.last_seen_at && new Date(a.last_seen_at) > onlineSince && rt?.available === true;
-      if (!reachable || busy.has(a.id) || skipAgent(a.id)) continue;
+      if (!reachable || busy.has(a.id) || skipAgent(a.id) || workstationFull(a.ws_id)) continue;
       const conn = ctx.services.runners.get(a.ws_id);
       if (!conn || !conn.reconciled) continue;
       const shiftId = randomUUID();

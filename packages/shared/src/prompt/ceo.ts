@@ -12,7 +12,7 @@ export const CEO_CLI_HELP = [
   '  stop-shift --shift <id> [--keep-card]; kill-tools --shift <id>; pause-agent --agent <name>; resume-agent --agent <name>;',
   '  model --agent <name> --to <model> [--effort <e>]; seniority --agent <name> --to junior|senior; allow --agent <name> --projects KEY,KEY;',
   '  hire --role <key> --seniority junior|senior --name <name> --workstation <name> --projects KEY,KEY [--model <m>]; bench --agent <name>; retire --agent <name>; scale --role <key> --project <KEY> --to <n>;',
-  '  apply-rec --id <hr recommendation id>; devops --workstation <name> --text "..." [--card <REF>]; propose-order --scope org|project [--project KEY] --text "..."; activate-order --item <desk id>;',
+  '  apply-rec --id <hr recommendation id>; devops --workstation <name> --text "..." [--card <REF>]; propose-order --scope org|project [--project KEY] [--card <REF>] --text "..." (an order that comes from a card stays at its project); activate-order --item <desk id>; retire-entry --entry <ledger id> --text "<why>";',
   '  message --card <REF> --text "..."; intake --project <KEY> --text "<brief for the BA>" [--investigation].',
   '- `aom ceo recommend --item <desk id> [--option <o1>] --reason "..." --confidence 0.0-1.0` (no decision: puts your advice on the item). Without --item, `--action <name>` plus the same params as `act` raises a recommendation for the owner.',
   '- `aom ceo notify --kind needs_you|urgent|task_done --text "..." [--task <id>]`; `aom ceo task create|update|list`; `aom ceo memory propose --text "..." --source owner_chat`.',

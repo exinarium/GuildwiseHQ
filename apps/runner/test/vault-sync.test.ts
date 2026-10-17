@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { runnerPaths } from '../src/paths.ts';
 import { VaultManager } from '../src/vaults/manager.ts';
-import { syncVault } from '../src/vaults/sync.ts';
+import { isPermanentSyncError, syncBackoffMs, syncVault } from '../src/vaults/sync.ts';
 import { cleanupTmp, sh, tmp, waitUntil } from './helpers.ts';
 import {
   IDENTITY,
@@ -221,9 +221,9 @@ describe('VaultManager', () => {
     rmSync(a.root, { recursive: true, force: true });
   });
 
-  it('an error is reported as status with the message and retried on the next tick', async () => {
+  it('a permanent error is reported once, then the timer backs off instead of retrying every interval', async () => {
     const dir = tmp();
-    const { m, sent } = manager();
+    const { m, sent } = manager(200);
     m.configure(cfg('v4', join(dir, 'nope.git')));
     await waitUntil(
       () => sent.some((s) => s.type === 'vault.status' && s.payload.error),
@@ -232,9 +232,53 @@ describe('VaultManager', () => {
     );
     const e = sent.find((s) => s.payload.error)!;
     expect(e.payload.error).toMatch(/clone/);
+    expect(m.backingOff()).toEqual([expect.objectContaining({ vaultId: 'v4', failures: 1 })]);
+    // The interval is 200 ms and the first back-off 400 ms: the tick at 200 ms is skipped.
     const n = sent.length;
-    await waitUntil(() => sent.length > n + 1, 3000, 'retry');
+    await new Promise((r) => setTimeout(r, 300));
+    expect(sent.length).toBe(n);
+    expect(m.backingOff()[0]?.failures).toBe(1);
+    // a manual sync still runs, and a new configuration ends the back-off
+    await m.syncNow('v4');
+    expect(m.backingOff()[0]?.failures).toBe(2);
+    m.configure(cfg('v4', join(dir, 'nope.git')));
+    expect(m.backingOff()).toEqual([]);
     m.stop();
+  });
+
+  it('a temporary error is retried on the next tick', async () => {
+    const { m, sent } = manager();
+    m.configure(cfg('v5', 'https://vault.invalid/none.git'));
+    await waitUntil(() => sent.length > 2, 8000, 'retries');
+    expect(m.backingOff()).toEqual([]);
+    m.stop();
+  });
+});
+
+describe('sync error classes and back-off', () => {
+  it('tells permanent errors from temporary ones', () => {
+    for (const msg of [
+      "git clone failed: fatal: repository '/x/nope.git' does not appear to be a git repository",
+      'git push failed: remote: Permission denied to user.',
+      "fatal: Authentication failed for 'https://github.com/acme/v.git/'",
+      'git@github.com: Permission denied (publickey).',
+      'remote: Repository not found.',
+      'refusing to clone "x": credentials in the URL',
+    ])
+      expect(isPermanentSyncError(msg), msg).toBe(true);
+    for (const msg of [
+      "fatal: unable to access 'https://x/': Could not resolve host: x",
+      'git push failed: ! [rejected] main -> main (fetch first)',
+      'Connection timed out',
+    ])
+      expect(isPermanentSyncError(msg), msg).toBe(false);
+  });
+
+  it('doubles the wait up to six hours', () => {
+    expect(syncBackoffMs(0, 150_000)).toBe(0);
+    expect(syncBackoffMs(1, 150_000)).toBe(300_000);
+    expect(syncBackoffMs(2, 150_000)).toBe(600_000);
+    expect(syncBackoffMs(30, 150_000)).toBe(6 * 3600_000);
   });
 });
 

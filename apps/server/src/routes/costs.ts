@@ -1,4 +1,5 @@
 import {
+  CostByCauseSchema,
   CostsQuerySchema,
   CostsReportSchema,
   IdParamsSchema,
@@ -10,6 +11,8 @@ import {
 } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
 import { requireOrg, requireUser } from '../auth/guards.ts';
+import { orgRoleOf } from '../auth/org-context.ts';
+import { loadVisibleCard } from '../authz/scope.ts';
 import {
   overrideProjectBudget,
   setCostSettings,
@@ -17,7 +20,9 @@ import {
   setValueSettings,
 } from '../commands/budgets.ts';
 import type { Ctx } from '../context.ts';
-import { costSettings, costsCsv, costsReport, csvField } from '../costs/report.ts';
+import { costByCause } from '../costs/causes.ts';
+import { orgCostCtx } from '../costs/index.ts';
+import { costSettings, costsCsv, costsReport, csvField, rangeOf } from '../costs/report.ts';
 import { valueCsv, valueReport } from '../costs/value.ts';
 import { one } from '../db/sql.ts';
 import { notFound } from '../errors.ts';
@@ -43,6 +48,23 @@ export function costRoutes(ctx: Ctx) {
     app.get('/api/costs', { schema: { querystring: CostsQuerySchema } }, async (req) => {
       const a = await requireOrg(ctx, req, { min: 'admin' });
       return CostsReportSchema.parse(await costsReport(ctx.pool, a.orgId, req.query, ctx.clock.now()));
+    });
+
+    /** Cost by cause (working, asking, answering, reviewing, re-review after a conflict, rejected) per local day. */
+    app.get('/api/costs/causes', { schema: { querystring: CostsQuerySchema } }, async (req) => {
+      const a = await requireOrg(ctx, req, { min: 'admin' });
+      const c = await orgCostCtx(ctx.pool, a.orgId);
+      const { start, end } = rangeOf(c, req.query, ctx.clock.now());
+      return CostByCauseSchema.parse(await costByCause(ctx.pool, c, { from: start, to: end, byDay: true }));
+    });
+
+    /** Cost by cause of one card (members of its organization). */
+    app.get('/api/cards/:id/cost-causes', { schema: { params: IdParamsSchema } }, async (req) => {
+      const s = await requireUser(ctx, req);
+      const { card } = await loadVisibleCard(ctx.pool, s.user.id, req.params.id);
+      if (!(await orgRoleOf(ctx.pool, s.user.id, card.org_id))) throw notFound('card not found');
+      const c = await orgCostCtx(ctx.pool, card.org_id);
+      return CostByCauseSchema.parse(await costByCause(ctx.pool, c, { cardId: card.id }));
     });
 
     app.get('/api/costs/export.csv', { schema: { querystring: CostsQuerySchema } }, async (req, reply) => {

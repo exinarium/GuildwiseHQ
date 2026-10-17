@@ -1,6 +1,7 @@
 import { migrateBlogCiteCleanup } from './blog-cite-cleanup.ts';
 import { migrateBlogLaunch } from './blog-launch.ts';
 import { migrateCardCompletionInherit } from './card-completion-inherit.ts';
+import { migrateCeoModels } from './ceo-models.ts';
 import { migrateNoPersonal } from './no-personal.ts';
 import { migrateOrgInboxes } from './org-inboxes.ts';
 import { type DataMigrationEnv, migrateOrgs } from './orgs.ts';
@@ -18,6 +19,7 @@ export {
   type CardCompletionInheritReport,
   migrateCardCompletionInherit,
 } from './card-completion-inherit.ts';
+export { CEO_MODELS_MIGRATION, type CeoModelsReport, migrateCeoModels } from './ceo-models.ts';
 export {
   formatNoPersonalPlan,
   migrateNoPersonal,
@@ -51,6 +53,7 @@ export const DATA_MIGRATIONS: Array<{ name: string; run: (env: DataMigrationEnv)
   { name: 'card-completion-inherit-2026-10', run: (env) => migrateCardCompletionInherit(env) },
   { name: 'push-branch-retired-2026-10', run: (env) => migratePushBranchRetired(env) },
   { name: 'org-inboxes-2026-10', run: (env) => migrateOrgInboxes(env) },
+  { name: 'ceo-models-2026-10', run: (env) => migrateCeoModels(env) },
 ];
 
 export async function runDataMigrations(env: DataMigrationEnv): Promise<void> {

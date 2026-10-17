@@ -21,6 +21,34 @@ type Reply = [boolean, unknown?, string?];
 
 const WRITE_OPS = new Set(['act', 'recommend', 'notify', 'task', 'memory']);
 
+/** The durable subject of a notify call: the card (with its stage and status) behind a desk item, the desk item, or the task. */
+async function noticeSubject(
+  ctx: Ctx,
+  orgId: string,
+  rpc: { kind: string; item?: string | undefined; task?: string | undefined },
+): Promise<{ key: string; state: string } | undefined> {
+  if (rpc.item) {
+    const d = await one(
+      ctx.pool,
+      'SELECT card_id, status, subkind FROM desk_items WHERE id=$1 AND org_id=$2',
+      [rpc.item, orgId],
+    );
+    if (d?.card_id) {
+      const c = await one(ctx.pool, 'SELECT stage, status FROM cards WHERE id=$1', [d.card_id]);
+      return { key: `card:${d.card_id}:notify:${rpc.kind}`, state: c ? `${c.stage}/${c.status}` : '' };
+    }
+    if (d) return { key: `desk:${rpc.item}:notify:${rpc.kind}`, state: d.status };
+  }
+  if (rpc.task) {
+    const t = await one(ctx.pool, 'SELECT status FROM ceo_tasks WHERE id=$1 AND org_id=$2', [
+      rpc.task,
+      orgId,
+    ]);
+    if (t) return { key: `task:${rpc.task}:notify:${rpc.kind}`, state: t.status };
+  }
+  return undefined;
+}
+
 /**
  * `rpc ceo` from a CEO shift or from the owner's chat with the CEO (docs/design/ceo-agent-v2.md section 4.2): the token
  * must belong to a shift of the organization's CEO agent; anything else is refused. Reads are free; writes go through the
@@ -107,11 +135,17 @@ export async function ceoRpc(ctx: Ctx, shift: Row, params: Record<string, unknow
         return [true, r];
       }
       case 'notify': {
-        const key = rpc.key ?? defaultKey(origin.scopeId, 'notify', { k: rpc.kind, t: rpc.text });
-        const dup = await one(ctx.pool, 'SELECT 1 FROM ceo_flags WHERE org_id=$1 AND flag=$2', [
-          orgId,
-          `notify:${key}`,
-        ]);
+        // The dedupe key is the subject (a card, a desk item, a task) and its state, not the wording: the CEO rewording
+        // a reminder about a subject it already handled raises nothing. Only a notice about no subject falls back to the text.
+        const subject = rpc.key ? undefined : await noticeSubject(ctx, orgId, rpc);
+        const key =
+          rpc.key ?? subject?.key ?? defaultKey(origin.scopeId, 'notify', { k: rpc.kind, t: rpc.text });
+        const dup = subject
+          ? undefined
+          : await one(ctx.pool, 'SELECT 1 FROM ceo_flags WHERE org_id=$1 AND flag=$2', [
+              orgId,
+              `notify:${key}`,
+            ]);
         if (dup) return [true, { status: 'duplicate', message: 'Already sent.' }];
         const r = await notifyOwner(ctx, orgId, {
           kind: rpc.kind,
@@ -120,7 +154,13 @@ export async function ceoRpc(ctx: Ctx, shift: Row, params: Record<string, unknow
           taskId: rpc.task,
           deskItemId: rpc.item,
           subject: key,
+          ...(subject ? { once: subject } : {}),
         });
+        if (r.suppressed)
+          return [
+            true,
+            { status: 'duplicate', message: 'Already sent for this subject; it has not changed.' },
+          ];
         await ctx.pool.query(
           `INSERT INTO ceo_flags (org_id, flag, value, at) VALUES ($1,$2,'1',$3) ON CONFLICT DO NOTHING`,
           [orgId, `notify:${key}`, ctx.clock.now()],

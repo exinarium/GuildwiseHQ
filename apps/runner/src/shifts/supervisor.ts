@@ -791,7 +791,7 @@ export class ShiftSupervisor {
     const testEnv = msg.brief.environment;
     // Any card shift of a stage that needs the project's environment gets it (the tester's `test`, a project's own smoke test).
     const hasEnv = msg.kind === 'card' && !msg.agent.isDevops && !!testEnv;
-    if (!s.resumed && (hasEnv || needsTestEnvironment(msg))) {
+    if (!s.resumed && !msg.brief.testWithoutEnvironment && (hasEnv || needsTestEnvironment(msg))) {
       if (testEnv?.mode === 'local' && testEnv.envId && this.deps.runs) {
         // The server started this environment for the card (D9): it must be up here, healthy, right now.
         const view = this.deps.runs.testEnvironment(testEnv.envId);

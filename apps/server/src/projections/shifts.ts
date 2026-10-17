@@ -74,6 +74,21 @@ export const shiftProjectors: Record<string, Projector> = {
       );
     }
   },
+  ShiftUsageRecorded: async (tx, e) => {
+    const p = (e.event as EventOf<'ShiftUsageRecorded'>).payload;
+    await exec(
+      tx,
+      `UPDATE shifts SET tokens_input=$2, tokens_output=$3, tokens_cache_read=$4, tokens_cache_write=$5
+        WHERE id=$1 AND tokens_input + tokens_output + tokens_cache_read + tokens_cache_write = 0`,
+      [
+        p.shiftId,
+        p.usage.inputTokens,
+        p.usage.outputTokens,
+        p.usage.cacheReadTokens,
+        p.usage.cacheWriteTokens,
+      ],
+    );
+  },
   ShiftSessionRecorded: async (tx, e) => {
     const p = (e.event as EventOf<'ShiftSessionRecorded'>).payload;
     await exec(
@@ -89,8 +104,9 @@ export const shiftProjectors: Record<string, Projector> = {
     const p = (e.event as EventOf<'ShiftEnded'>).payload;
     await exec(
       tx,
-      `UPDATE shifts SET status='ended', outcome=$2, report_outcome=$3, ended_at=$4, duration_ms=$5,
-              tokens_input=$6, tokens_output=$7, tokens_cache_read=$8, tokens_cache_write=$9
+      `UPDATE shifts SET status='ended', outcome=CASE WHEN $2 = 'stopped' AND $3::text IS NOT NULL THEN 'reported' ELSE $2 END, report_outcome=$3, ended_at=$4, duration_ms=$5,
+              tokens_input=$6, tokens_output=$7, tokens_cache_read=$8, tokens_cache_write=$9,
+              rejection_reason=COALESCE($10, rejection_reason)
         WHERE id=$1`,
       [
         p.shiftId,
@@ -102,6 +118,7 @@ export const shiftProjectors: Record<string, Projector> = {
         p.usage.outputTokens,
         p.usage.cacheReadTokens,
         p.usage.cacheWriteTokens,
+        p.rejectionReason ?? null,
       ],
     );
     await exec(tx, 'UPDATE agents SET last_shift_ended_at=$2 WHERE id=$1', [p.agentId, e.createdAt]);

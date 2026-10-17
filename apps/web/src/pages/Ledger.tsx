@@ -1,7 +1,12 @@
 import { BookOpen, Search } from 'lucide-react';
 import { type FormEvent, useState } from 'react';
 import { Link } from 'react-router';
-import { useEditLedgerEntry, useLedger, useLedgerHistory } from '../api/queries/ledger.ts';
+import {
+  useEditLedgerEntry,
+  useLedger,
+  useLedgerHistory,
+  useRetireLedgerEntry,
+} from '../api/queries/ledger.ts';
 import { useProjects } from '../api/queries/projects.ts';
 import { LedgerForm } from '../components/LedgerForm.tsx';
 import {
@@ -65,6 +70,41 @@ function EditForm({ e, onDone }: { e: LedgerEntry; onDone: () => void }) {
   );
 }
 
+/** Retire form: a reason is required; the entry stays in the ledger greyed out and agents stop seeing it. */
+function RetireForm({ e, onDone }: { e: LedgerEntry; onDone: () => void }) {
+  const toast = useToast();
+  const retire = useRetireLedgerEntry(e.id);
+  const [reason, setReason] = useState('');
+  const [err, setErr] = useState('');
+  const submit = (ev: FormEvent) => {
+    ev.preventDefault();
+    if (!reason.trim()) return setErr('Say why it is retired');
+    setErr('');
+    retire.mutate(
+      { reason: reason.trim() },
+      {
+        onSuccess: () => {
+          toast.success('Entry retired');
+          onDone();
+        },
+      },
+    );
+  };
+  return (
+    <form onSubmit={submit} aria-label="Retire entry" className="flex flex-col gap-4" noValidate>
+      <p className="text-sm text-muted">
+        "{e.title}" stays in the ledger for the record, but agents no longer see it and a search no longer
+        finds it.
+      </p>
+      <TextArea label="Reason" value={reason} onChange={(ev) => setReason(ev.target.value)} error={err} />
+      <ErrorBox error={retire.error} />
+      <Button type="submit" variant="primary" loading={retire.isPending} className="self-start">
+        Retire
+      </Button>
+    </form>
+  );
+}
+
 /** Every wording of an entry, newest first. */
 function History({ id }: { id: string }) {
   const h = useLedgerHistory(id, true);
@@ -90,9 +130,16 @@ function Entry({ e }: { e: LedgerEntry }) {
   const [more, setMore] = useState(false);
   const [editing, setEditing] = useState(false);
   const [history, setHistory] = useState(false);
+  const [retiring, setRetiring] = useState(false);
+  const retired = !!e.retiredAt;
   const long = e.body.length > 260 || e.body.split('\n').length > 4;
   return (
-    <li data-testid="ledger-entry" data-scope={e.scope} className="px-4 py-4">
+    <li
+      data-testid="ledger-entry"
+      data-scope={e.scope}
+      data-retired={retired ? 'true' : undefined}
+      className={`px-4 py-4 ${retired ? 'opacity-60' : ''}`}
+    >
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-subtle">
         <Badge tone={e.scope === 'standing_order' ? 'amber' : e.scope === 'decision' ? 'blue' : 'violet'}>
           {scopeLabel(e.scope)}
@@ -106,6 +153,16 @@ function Entry({ e }: { e: LedgerEntry }) {
         <span>
           {e.createdByName ?? e.createdByKind} · {formatDateTime(e.createdAt)}
         </span>
+        {retired && (
+          <Badge tone="neutral">
+            <span data-testid="ledger-retired">Retired</span>
+          </Badge>
+        )}
+        {(e.conflictsWith ?? []).length > 0 && !retired && (
+          <Badge tone="amber">
+            <span data-testid="ledger-conflict">May contradict another order</span>
+          </Badge>
+        )}
         {e.version > 1 && e.editedAt && (
           <span data-testid="ledger-edited">
             edited {formatDateTime(e.editedAt)}
@@ -127,7 +184,24 @@ function Entry({ e }: { e: LedgerEntry }) {
           {more ? 'Show less' : 'Show more'}
         </button>
       )}
-      {e.scope === 'standing_order' && (e.canEdit || e.version > 1) && (
+      {retired && e.retiredReason && (
+        <p className="mt-1 text-sm text-subtle" data-testid="ledger-retired-reason">
+          Retired{e.retiredAt ? ` ${formatDateTime(e.retiredAt)}` : ''}: {e.retiredReason}
+        </p>
+      )}
+      {!retired && e.canRetire && (
+        <div className="mt-2">
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => setRetiring(true)}
+            aria-label={`Retire ${e.title}`}
+          >
+            Retire
+          </Button>
+        </div>
+      )}
+      {e.scope === 'standing_order' && !retired && (e.canEdit || e.version > 1) && (
         <div className="mt-2 flex flex-wrap gap-2">
           {e.canEdit && (
             <Button size="sm" onClick={() => setEditing(true)} aria-label={`Edit ${e.title}`}>
@@ -149,6 +223,14 @@ function Entry({ e }: { e: LedgerEntry }) {
       )}
       {history && <History id={e.id} />}
       <Dialog
+        open={retiring}
+        onOpenChange={setRetiring}
+        title="Retire entry"
+        description="Use this for a one-off order, a duplicate or a rule that a setting replaced."
+      >
+        <RetireForm e={e} onDone={() => setRetiring(false)} />
+      </Dialog>
+      <Dialog
         open={editing}
         onOpenChange={setEditing}
         title="Edit standing order"
@@ -166,9 +248,11 @@ export function Ledger() {
   const [scope, setScope] = useState<(typeof SCOPES)[number]['value']>('all');
   const [projectId, setProjectId] = useState('');
   const [adding, setAdding] = useState(false);
+  const [showRetired, setShowRetired] = useState(false);
   const entries = useLedger({
     ...(q.trim() ? { q: q.trim() } : {}),
     scope,
+    includeRetired: showRetired,
     ...(projectId ? { projectId } : {}),
   });
   const filtered = !!q.trim() || scope !== 'all' || !!projectId;
@@ -218,6 +302,9 @@ export function Ledger() {
               {s.label}
             </FilterChip>
           ))}
+          <FilterChip pressed={showRetired} onClick={() => setShowRetired((v) => !v)}>
+            Show retired
+          </FilterChip>
         </div>
       </search>
       {entries.isPending && <ListSkeleton label="Loading the ledger" />}

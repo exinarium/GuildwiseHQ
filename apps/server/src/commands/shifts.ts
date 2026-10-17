@@ -35,6 +35,7 @@ import { applyBaTaskReport, endBaTaskShift } from './ba-tasks.ts';
 import { cardView, workflowView } from './cards.ts';
 import { agentActor, cardMessage, orgScope, projectScope, runnerActor, SYSTEM_ACTOR } from './common.ts';
 import { cardConflictAttemptEvents } from './conflict-attempts.ts';
+import { raiseOrCoalesce } from './desk-coalesce.ts';
 import { applyDevopsReport, endDevopsShift } from './devops.ts';
 import { applyQuestionReport, endQuestionShift } from './escalation.ts';
 import { buildDigestEvents } from './feeds.ts';
@@ -995,10 +996,21 @@ export async function applyShiftRejected(
     rejection = branch.rejection;
   } else if (['repo_missing', 'worktree_failed', 'runtime_unavailable', 'internal'].includes(msg.reason)) {
     rejection = { reason: msg.reason, detail: msg.detail ?? msg.reason.replaceAll('_', ' ') };
-  }
-  // A full disk (runner: `disk_full: ...`) is not fixed by trying again at once: hold the card back (#81).
-  if (msg.reason === 'worktree_failed' && (msg.detail ?? '').startsWith('disk_full:'))
+    // Every kind of rejection that will not fix itself holds the card back (1 min, doubling, up to 1 h), not only a
+    // missing branch: 958 rejections in 10 hours came from a card that was claimed again every tick.
     extra.push(...rejectionBackoffEvents(ctx, card));
+  }
+  // Three identical rejections in a row: one desk item for the manager (further ones only raise its counter).
+  if (rejection) {
+    const same =
+      card.last_rejection?.reason === rejection.reason && card.last_rejection?.detail === rejection.detail;
+    const streak = Number(card.retry_failures ?? 0) + 1;
+    if (same && streak >= REJECTION_DESK_AT) await raiseRejectionStormItem(ctx, tx, card, rejection, streak);
+  }
+  ctx.log.warn(
+    { shiftId: s.id, cardId: card.id, ref: card.ref, reason: msg.reason, detail: msg.detail },
+    'the runner rejected the shift',
+  );
   const noIdentity =
     msg.reason === 'internal' && (msg.detail ?? '').startsWith(`${NO_COMMIT_IDENTITY_CODE}:`);
   if (noIdentity) extra.push(...(await noCommitIdentityNotice(tx, ws, card)));
@@ -1009,8 +1021,44 @@ export async function applyShiftRejected(
       : msg.reason === 'auth_expired'
         ? 'The Claude login on this workstation has expired, so the shift could not run. The card is back in the queue without penalty and resumes once the login works again.'
         : `Shift rejected by the runner (${msg.reason}${msg.detail ? `: ${msg.detail}` : ''}); the card is back in the queue.`;
-  await ctx.store.append(
-    await releaseClaimEvents(tx, card, 'runner_rejected', text, 'rejected', extra, rejection),
+  const released = await releaseClaimEvents(tx, card, 'runner_rejected', text, 'rejected', extra, rejection);
+  // The reason is stored on the shift itself (measurement): what the runner said, not only that it said no.
+  for (const ev of released)
+    if (ev.event.type === 'ShiftEnded' && ev.event.payload.shiftId === s.id)
+      ev.event.payload.rejectionReason = `${msg.reason}${msg.detail ? `: ${msg.detail}` : ''}`.slice(0, 600);
+  await ctx.store.append(released, { tx });
+}
+
+/** How many identical rejections of one card in a row raise a desk item. */
+export const REJECTION_DESK_AT = 3;
+
+/**
+ * One desk item for a card whose shifts keep being rejected for the same reason (a broken worktree, a missing runtime):
+ * the dispatcher backs off by itself, but somebody has to fix the cause. Coalesced by card and reason, so later rejections
+ * only raise the counter of the open item.
+ */
+async function raiseRejectionStormItem(
+  ctx: Ctx,
+  tx: Tx,
+  card: Row,
+  rejection: { reason: string; detail: string },
+  streak: number,
+): Promise<void> {
+  await raiseOrCoalesce(
+    ctx,
+    {
+      subjectKey: `rejections:${card.id}:${rejection.reason}:${rejection.detail.slice(0, 120)}`,
+      orgId: card.org_id,
+      kind: 'alert',
+      subkind: 'worktree_rejections',
+      title: `${card.ref} keeps being turned away: ${rejection.reason.replaceAll('_', ' ')}`,
+      body: `The runner rejected the shifts of ${card.ref} (${card.title}) ${streak} times in a row for the same reason: ${rejection.detail}. The dispatcher holds the card back for longer after each rejection. Fix the cause on the workstation (the repository, its worktree, the runtime), or release the back-off on the card page to retry now.`,
+      cardId: card.id,
+      projectId: card.project_id,
+      data: { reason: rejection.reason, detail: rejection.detail },
+      actor: SYSTEM_ACTOR,
+      scope: projectScope(card.org_id, card.project_id),
+    },
     { tx },
   );
 }
@@ -1067,7 +1115,31 @@ async function branchProblemEvents(
 
 export async function applyShiftEnded(ctx: Ctx, tx: Tx, ws: WsRef, msg: RunnerToServerOf<'shift.ended'>) {
   const s = await one(tx, 'SELECT * FROM shifts WHERE id=$1 AND workstation_id=$2', [msg.shiftId, ws.id]);
-  if (!s || s.status === 'ended') return;
+  if (s?.status === 'ended') {
+    // The server already ended this shift (a lost lease, a timeout) and priced it at zero; the runner now says what it
+    // used (a crashed shift still burned tokens): record it once.
+    const used =
+      msg.usage.inputTokens + msg.usage.outputTokens + msg.usage.cacheReadTokens + msg.usage.cacheWriteTokens;
+    const had =
+      Number(s.tokens_input) +
+      Number(s.tokens_output) +
+      Number(s.tokens_cache_read) +
+      Number(s.tokens_cache_write);
+    if (used > 0 && had === 0)
+      await ctx.store.append(
+        [
+          {
+            streamId: streamId.shift(s.id),
+            event: { type: 'ShiftUsageRecorded', payload: { shiftId: s.id, usage: msg.usage } },
+            actor: runnerActor(ws.id),
+            scope: { orgId: s.org_id, projectId: null, audience: 'org' },
+          },
+        ],
+        { tx },
+      );
+    return;
+  }
+  if (!s) return;
   if (s.kind === 'devops') {
     await ctx.store.append(
       await endDevopsShift(tx, s, msg.outcome, {
@@ -1158,9 +1230,12 @@ export async function applyShiftEnded(ctx: Ctx, tx: Tx, ws: WsRef, msg: RunnerTo
       )),
     );
   }
+  // A shift that reported (the report was accepted) and was then stopped did its work: it ended as reported, not stopped.
+  const reportOutcome = handoff?.outcome ?? (asked ? 'question' : undefined);
+  const endedAs = msg.outcome === 'stopped' && reportOutcome ? 'reported' : msg.outcome;
   events.push(
-    await shiftEndedFor(tx, s, msg.outcome, {
-      reportOutcome: handoff?.outcome ?? (asked ? 'question' : undefined),
+    await shiftEndedFor(tx, s, endedAs, {
+      reportOutcome,
       durationMs: msg.durationMs,
       usage: msg.usage,
       exitCode: msg.exitCode,

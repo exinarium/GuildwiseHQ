@@ -26,7 +26,9 @@ describe('renderShiftPrompt', () => {
 
       ## Constraints
       No new dependencies.
-      - Ledger (decision) Use cookies: Session cookie auth.
+
+      ## Decisions on this card
+      - (decision) Use cookies: Session cookie auth.
 
       ## Test plan
       Unit test the form validation.
@@ -75,7 +77,9 @@ describe('renderShiftPrompt', () => {
 
       ## Constraints
       No new dependencies.
-      - Ledger (decision) Use cookies: Session cookie auth.
+
+      ## Decisions on this card
+      - (decision) Use cookies: Session cookie auth.
 
       ## Test plan
       Unit test the form validation.

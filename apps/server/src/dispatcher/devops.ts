@@ -25,6 +25,8 @@ export interface DevopsDispatch {
 export async function devopsPass(
   ctx: Ctx,
   skipAgent: (agentId: string) => boolean = () => false,
+  /** The workstation already runs as many shifts as its owner allows (backlog #76): nothing more is offered to it. */
+  workstationFull: (workstationId: string) => boolean = () => false,
 ): Promise<DevopsDispatch[]> {
   const onlineSince = new Date(ctx.clock.now().getTime() - ONLINE_WINDOW_MS);
   const queued = await rows(
@@ -42,7 +44,8 @@ export async function devopsPass(
   const started: DevopsDispatch[] = [];
   const busy = new Set<string>();
   for (const r of queued) {
-    if (busy.has(r.devops_agent_id) || skipAgent(r.devops_agent_id)) continue;
+    if (busy.has(r.devops_agent_id) || skipAgent(r.devops_agent_id) || workstationFull(r.workstation_id))
+      continue;
     const rt = (r.runtimes as Array<{ id: string; available: boolean }>).find((x) => x.id === r.runtime);
     if (!rt?.available) continue;
     const conn = ctx.services.runners.get(r.workstation_id);

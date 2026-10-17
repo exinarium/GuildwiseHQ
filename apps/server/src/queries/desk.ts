@@ -161,6 +161,7 @@ export function toDeskDto(
     baNoteAt: iso(r.ba_note_at),
     triage: r.triage,
     supersededBy: r.superseded_by ?? null,
+    ...((r.repeat_count ?? 1) > 1 ? { repeatCount: r.repeat_count as number } : {}),
     chatThreadId: r.chat_thread_id ?? null,
     floor: r.subkind === 'floor_report' ? (r.data ?? null) : null,
     budgetProject:

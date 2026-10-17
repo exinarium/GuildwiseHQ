@@ -257,10 +257,34 @@ export function renderShiftPrompt(brief: ShiftBrief): string {
   parts.push(guarded('affectedAreas', 'Affected areas', text(f.affectedAreas)));
   if (outside.has('constraints') && text(f.constraints))
     parts.push(guarded('constraints', 'Constraints from the sender', text(f.constraints)));
+  // Constraints are the card's own field; the organization's and the project's standing orders are binding rules in your
+  // instructions. The card's own decisions (answers to its questions) are listed separately, newest few only.
   const constraintLines: string[] = [];
   if (text(f.constraints) && !outside.has('constraints')) constraintLines.push(text(f.constraints));
-  for (const l of brief.ledger) constraintLines.push(`- Ledger (${l.scope}) ${l.title}: ${l.body.trim()}`);
   parts.push(section('Constraints', constraintLines.join('\n')));
+  if (brief.ledger.length > 0) {
+    const more = (brief.ledgerTotal ?? brief.ledger.length) - brief.ledger.length;
+    parts.push(
+      section(
+        'Decisions on this card',
+        [
+          ...brief.ledger.map((l) => `- (${l.scope}) ${l.title}: ${l.body.trim()}`),
+          ...(more > 0
+            ? [
+                `- ${more} older ${more === 1 ? 'entry' : 'entries'} not shown: \`aom ledger search "<query>"\` finds them.`,
+              ]
+            : []),
+        ].join('\n'),
+      ),
+    );
+  }
+  if (brief.testWithoutEnvironment && !brief.environment)
+    parts.push(
+      section(
+        'Test environment',
+        'No test environment is ready and this project allows testing without one. Run what you can (unit tests, static checks, reading the code against the criteria) and say in your handoff note that no environment was used. Do not wait for one and do not ask DevOps.',
+      ),
+    );
   parts.push(guarded('testPlan', 'Test plan', text(f.testPlan)));
   // Any other field that holds mail text (a custom workflow's field) is listed in its own block.
   const known = new Set([

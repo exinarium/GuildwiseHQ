@@ -29,6 +29,7 @@ export const CEO_ACTIONS = [
   'devops',
   'propose-order',
   'activate-order',
+  'retire-entry',
   'message',
   'intake',
 ] as const;

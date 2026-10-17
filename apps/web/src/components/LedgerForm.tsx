@@ -1,5 +1,6 @@
 import type { CreateLedgerEntryRequest } from '@aom/shared';
 import { type FormEvent, useState } from 'react';
+import { ApiError } from '../api/client.ts';
 import { useAddLedgerEntry } from '../api/queries/ledger.ts';
 import { useProjects } from '../api/queries/projects.ts';
 import { Button, ErrorBox, Select, TextArea, TextInput, useToast } from './ui.tsx';
@@ -27,8 +28,7 @@ export function LedgerForm({
   const [err, setErr] = useState('');
   const needsProject = kind !== 'standing_order';
 
-  const submit = (e: FormEvent) => {
-    e.preventDefault();
+  const send = (merge: boolean) => {
     if (!title.trim() || !body.trim()) return setErr('A title and the text are required');
     if (needsProject && !projectId) return setErr('Choose the project this applies to');
     setErr('');
@@ -38,6 +38,7 @@ export function LedgerForm({
       body: body.trim(),
       tags: [],
       ...(projectId ? { projectId } : {}),
+      ...(merge ? { onDuplicate: 'merge' as const } : {}),
     };
     add.mutate(req, {
       onSuccess: () => {
@@ -48,6 +49,11 @@ export function LedgerForm({
       },
     });
   };
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    send(false);
+  };
+  const duplicate = add.error instanceof ApiError && add.error.code === 'duplicate_order';
 
   return (
     <form onSubmit={submit} aria-label="Add to ledger" className="flex flex-col gap-4" noValidate>
@@ -71,6 +77,11 @@ export function LedgerForm({
       <TextInput label="Title" value={title} onChange={(e) => setTitle(e.target.value)} />
       <TextArea label="Text" value={body} onChange={(e) => setBody(e.target.value)} error={err} />
       <ErrorBox error={add.error} />
+      {duplicate && (
+        <Button type="button" onClick={() => send(true)} className="self-start">
+          Merge into the existing order instead
+        </Button>
+      )}
       {add.isSuccess && !add.isPending && !onDone && (
         <p role="status" className="text-sm text-success">
           Added to the ledger.

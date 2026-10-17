@@ -118,11 +118,31 @@ function reviewCommentsOf(
     : [];
 }
 
+/** What a prompt carries of the card thread: the last 3 messages within 3 KB (`aom thread read` still reads 30). */
+export const THREAD_MAX_MESSAGES = 3;
+export const THREAD_MAX_BYTES = 3072;
+
+/** Pure: keeps the newest messages that fit the byte budget (input oldest first, output oldest first); long bodies are cut. */
+export function capThread<T extends { body?: unknown }>(oldestFirst: T[], full = false): T[] {
+  if (full) return oldestFirst;
+  const out: T[] = [];
+  let bytes = 0;
+  for (const m of [...oldestFirst].reverse().slice(0, THREAD_MAX_MESSAGES)) {
+    const room = THREAD_MAX_BYTES - bytes;
+    if (room <= 0) break;
+    const text = String(m.body ?? '');
+    const body = Buffer.byteLength(text) > room ? `${text.slice(0, Math.max(0, room - 3))}...` : text;
+    bytes += Buffer.byteLength(body);
+    out.unshift({ ...m, body });
+  }
+  return out;
+}
+
 /** Brief for one card shift: what the agent sees (docs/ARCHITECTURE.md section 11.2, ShiftBrief). */
 export async function buildBrief(
   ctx: Ctx,
   shift: Row,
-  opts: { vaultAvailable?: boolean; readOnly?: boolean } = {},
+  opts: { vaultAvailable?: boolean; readOnly?: boolean; fullThread?: boolean } = {},
 ): Promise<ShiftBrief | null> {
   const card = await one(ctx.pool, 'SELECT * FROM cards WHERE id=$1', [shift.card_id]);
   const agent = await one(ctx.pool, 'SELECT * FROM agents WHERE id=$1', [shift.agent_id]);
@@ -150,10 +170,11 @@ export async function buildBrief(
     ctx.pool,
     `SELECT m.*, u.display_name AS user_name, a.name AS agent_name FROM thread_messages m
        LEFT JOIN users u ON u.id = m.author_user_id LEFT JOIN agents a ON a.id = m.author_agent_id
-      WHERE m.thread_id=$1 ORDER BY m.created_at DESC, m.event_seq DESC LIMIT 30`,
-    [card.id],
+      WHERE m.thread_id=$1 ORDER BY m.created_at DESC, m.event_seq DESC LIMIT $2`,
+    [card.id, opts.fullThread ? 30 : THREAD_MAX_MESSAGES],
   );
   const deps = await dependencyStates(ctx.pool, card.id);
+  const cardLedger = await cardLedgerEntries(ctx.pool, card.id);
   const repo = card.repo_id
     ? await one(ctx.pool, 'SELECT project_path FROM project_repos WHERE id=$1', [card.repo_id])
     : undefined;
@@ -277,7 +298,7 @@ export async function buildBrief(
       at: iso(h.created_at) as string,
     })),
     reviewComments: reviewCommentsOf(lastChanges, card, await personSendBack(ctx.pool, card)),
-    thread: thread.reverse().map((m) => {
+    thread: capThread(thread.reverse(), opts.fullThread).map((m) => {
       // Replies that came in by e-mail are outside text: their name is not the sender's to choose either.
       const outside = m.data?.source === 'email';
       return {
@@ -295,8 +316,12 @@ export async function buildBrief(
         body,
       })),
     ],
-    ledger: await cardLedgerEntries(ctx.pool, card.id),
+    ledger: cardLedger.entries,
+    ...(cardLedger.total > cardLedger.entries.length ? { ledgerTotal: cardLedger.total } : {}),
     ...(await testerEnvironment(ctx, card, agent, shift)),
+    ...(project.test_without_environment && agent.role_key === 'tester' && !agent.is_devops
+      ? { testWithoutEnvironment: true }
+      : {}),
     ...(card.card_type === 'feed'
       ? {
           feed: {

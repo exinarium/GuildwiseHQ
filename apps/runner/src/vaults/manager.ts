@@ -13,7 +13,15 @@ import { confine } from '../fs-safe.ts';
 import { type Logger, nullLogger } from '../log.ts';
 import type { RunnerPaths } from '../paths.ts';
 import { mergeVaultInto, SAME_REPOSITORY_MESSAGE, type VaultMergeResult } from './merge.ts';
-import { ensureClone, isClean, isCloned, syncVault, type VaultSyncResult } from './sync.ts';
+import {
+  ensureClone,
+  isClean,
+  isCloned,
+  isPermanentSyncError,
+  syncBackoffMs,
+  syncVault,
+  type VaultSyncResult,
+} from './sync.ts';
 import { moveVaultFolder, type VaultMoveResult, VaultWriteError, writeVaultFile } from './write.ts';
 
 export interface VaultTransport {
@@ -56,6 +64,8 @@ export class VaultManager {
   private chains = new Map<string, Promise<unknown>>();
   private lastPull = new Map<string, string>();
   private lastPush = new Map<string, string>();
+  /** Consecutive permanent failures per vault and the time before which the timer does not try again. */
+  private failing = new Map<string, { count: number; until: number; error: string }>();
   private stopped = false;
   private readonly log: Logger;
   private readonly file: string;
@@ -109,6 +119,8 @@ export class VaultManager {
     this.config = cmd;
     for (const id of [...this.paused.keys()]) if (!ids.has(id)) this.paused.delete(id);
     for (const id of cmd.resume) this.paused.delete(id);
+    // A new configuration (a new URL or key may fix it) ends any back-off.
+    this.failing.clear();
     this.persist();
     this.schedule();
     for (const id of cmd.resume) if (ids.has(id)) void this.syncNow(id);
@@ -122,7 +134,7 @@ export class VaultManager {
     if (this.stopped || !this.config) return;
     for (const v of this.config.vaults) {
       const t = setInterval(
-        () => void this.syncNow(v.vaultId),
+        () => void this.timerSync(v.vaultId),
         v.syncIntervalSec * (this.opts.secondMs ?? 1000),
       );
       t.unref?.();
@@ -140,6 +152,18 @@ export class VaultManager {
       next.catch(() => {}),
     );
     return next;
+  }
+
+  /** The interval timer's pass: skipped while the vault backs off after a permanent error (a manual sync still runs). */
+  async timerSync(vaultId: string): Promise<void> {
+    const f = this.failing.get(vaultId);
+    if (f && Date.now() < f.until) return;
+    await this.syncNow(vaultId);
+  }
+
+  /** Vaults that are backing off after a permanent sync error, with the error and the number of failures. */
+  backingOff(): Array<{ vaultId: string; failures: number; error: string }> {
+    return [...this.failing].map(([vaultId, f]) => ({ vaultId, failures: f.count, error: f.error }));
   }
 
   /** One sync pass now (also what the interval timer runs). A paused vault is skipped. */
@@ -164,6 +188,20 @@ export class VaultManager {
 
   private afterSync(vaultId: string, r: VaultSyncResult): void {
     const now = new Date().toISOString();
+    if (r.status === 'error' && isPermanentSyncError(r.error)) {
+      const count = (this.failing.get(vaultId)?.count ?? 0) + 1;
+      const interval = (this.vault(vaultId)?.syncIntervalSec ?? 150) * (this.opts.secondMs ?? 1000);
+      this.failing.set(vaultId, {
+        count,
+        until: Date.now() + syncBackoffMs(count, interval),
+        error: r.error,
+      });
+      if (count > 1) {
+        // Already reported: the server has the status; say it once more only in the log.
+        this.log.warn(`vault ${vaultId} sync failed again (${count} in a row, backing off): ${r.error}`);
+        return;
+      }
+    } else this.failing.delete(vaultId);
     if (r.status === 'ok') {
       this.lastPull.set(vaultId, now);
       if (r.pushed) this.lastPush.set(vaultId, now);

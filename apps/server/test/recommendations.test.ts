@@ -101,13 +101,13 @@ describe('blocked', () => {
     expect(thin.evidence.items).toHaveLength(3);
   });
 
-  it('questions clustering on one topic propose a standing order with the last answer', async () => {
+  it('questions clustering on one topic are advice only: a card answer never becomes an org-wide order ("On <word>" rule removed)', async () => {
     await resetHr();
     await team();
     const c1 = await ask('What naming should the orders schema use?');
     await ask('Should the billing schema keep audit columns?');
     await ask('Which schema holds the reporting views?');
-    // The manager answered one of them: the proposal reuses the answer.
+    // The manager answered one of them: the answer stays a decision of the project, HR does not promote it.
     const d = (await q(`SELECT id FROM desk_items WHERE card_id=$1`, [c1.id]))[0]!;
     await ok(
       w.t.req('POST', `/api/desk/${d.id}/answer`, {
@@ -117,15 +117,37 @@ describe('blocked', () => {
     );
     const recs = await recommendations(w);
     expect(kindsOf(recs)).toEqual(['blocked_topic']);
-    expect(recs[0].action).toMatchObject({
-      type: 'standing_order',
-      topic: 'schema',
-      text: expect.stringContaining('snake_case'),
-    });
+    expect(recs[0].action).toEqual({ type: 'none' });
+    expect(JSON.stringify(recs[0])).not.toContain('snake_case');
     expect(recs[0].evidence.items.length).toBe(3);
+    expect(
+      await q(`SELECT 1 FROM ledger_entries WHERE scope='standing_order' AND body LIKE '%snake_case%'`),
+    ).toEqual([]);
   });
 
-  it('questions the ledger already answered mean ledger search is failing', async () => {
+  it('HR clustering ignores the questions of a project that keeps its decisions at project level', async () => {
+    await resetHr();
+    await team();
+    await ask('What naming should the orders schema use?');
+    await ask('Should the billing schema keep audit columns?');
+    await ask('Which schema holds the reporting views?');
+    expect(kindsOf(await recommendations(w))).toEqual(['blocked_topic']);
+    await ok(
+      w.t.req('PUT', `/api/projects/${w.projectId}/policy`, {
+        cookie: w.owner.cookie,
+        body: { decisionsProjectOnly: true },
+      }),
+    );
+    expect(kindsOf(await recommendations(w)).filter((k) => k.startsWith('blocked_'))).toEqual([]);
+    await ok(
+      w.t.req('PUT', `/api/projects/${w.projectId}/policy`, {
+        cookie: w.owner.cookie,
+        body: { decisionsProjectOnly: false },
+      }),
+    );
+  });
+
+  it('questions the ledger already answered are reported as advice, not as a standing order', async () => {
     await resetHr();
     await team();
     await ok(
@@ -147,7 +169,7 @@ describe('blocked', () => {
     expect(kindsOf(recs).filter((k) => k.startsWith('blocked'))).toContain('blocked_ledger');
     const rec = recs.find((x) => x.kind === 'blocked_ledger');
     expect(rec.summary).toMatch(/3 of 3 questions/);
-    expect(rec.action).toMatchObject({ type: 'standing_order', topic: 'ledger search' });
+    expect(rec.action).toEqual({ type: 'none' });
   });
 
   it('control: one question in three cards is under the blocked rate, and a lone card is under the minimum', async () => {

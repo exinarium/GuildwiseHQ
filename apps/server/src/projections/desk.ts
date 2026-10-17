@@ -37,6 +37,7 @@ interface NewItem {
   chatThreadId?: string | undefined;
   addresseeUserId?: string | undefined;
   topic?: string | undefined;
+  subjectKey?: string | undefined;
 }
 
 async function insertItem(tx: Tx, e: StoredEvent, i: NewItem): Promise<void> {
@@ -45,10 +46,10 @@ async function insertItem(tx: Tx, e: StoredEvent, i: NewItem): Promise<void> {
     tx,
     `INSERT INTO desk_items (id, org_id, project_id, card_id, kind, subkind, status, routed_to, routed_agent_id, title, body,
        doing, options, recommendation, blocking, affected_card_ids, asked_by_kind, asked_by_agent_id, asked_by_user_id,
-       asked_by_role, shift_id, pinned, dedup_ledger_ids, triage, triage_deadline, data, chat_thread_id, created_at, updated_at, addressee_user_id,
+       asked_by_role, shift_id, pinned, dedup_ledger_ids, triage, triage_deadline, data, chat_thread_id, created_at, updated_at, addressee_user_id, subject_key,
        topic, stage)
-     VALUES ($1,$2,$3,$4,$5,$6,'open',$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$27,$28,
-             $29, (SELECT stage FROM cards WHERE id = $4))`,
+     VALUES ($1,$2,$3,$4,$5,$6,'open',$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$27,$28,$29,
+             $30, (SELECT stage FROM cards WHERE id = $4))`,
     [
       i.id,
       e.scope.orgId,
@@ -78,6 +79,7 @@ async function insertItem(tx: Tx, e: StoredEvent, i: NewItem): Promise<void> {
       i.chatThreadId ?? null,
       e.createdAt,
       i.addresseeUserId ?? null,
+      i.subjectKey ?? null,
       i.topic ?? null,
     ],
   );
@@ -188,7 +190,17 @@ export const deskProjectors: Record<string, Projector> = {
       data: p.data,
       chatThreadId: p.chatThreadId,
       addresseeUserId: p.addresseeUserId,
+      subjectKey: p.subjectKey,
     });
+  },
+
+  DeskItemRepeated: async (tx, e) => {
+    const p = ev<'DeskItemRepeated'>(e).payload;
+    await exec(
+      tx,
+      `UPDATE desk_items SET repeat_count=GREATEST(repeat_count, $2), last_repeated_at=$3, updated_at=$3 WHERE id=$1`,
+      [p.deskItemId, p.count, e.createdAt],
+    );
   },
 
   QuestionEscalated: async (tx, e) => {

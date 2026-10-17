@@ -36,4 +36,26 @@ export const ledgerEvents = [
     }),
   ),
   defineEvent('LedgerEntrySuperseded', z.object({ entryId: Id, supersededBy: Id })),
+  /**
+   * An entry was withdrawn (a one-off order, a duplicate, a rule replaced by a setting). A retired entry is kept for the
+   * record but is never injected into a prompt and never found by a search. `supersededBy` names the entry that replaces
+   * it when there is one. `by` is the actor kind as written ('owner', 'ba', 'ceo', 'system') for the history.
+   */
+  defineEvent(
+    'LedgerEntryRetired',
+    z.object({
+      entryId: Id,
+      reason: z.string().min(1).max(1000),
+      supersededBy: Id.optional(),
+      by: z.string().max(40).optional(),
+    }),
+  ),
+  /**
+   * A saved standing order may contradict a live one (same subject, opposing instruction). The order is kept and flagged;
+   * `conflictsWith` names the entries it may contradict and `reason` the heuristic that fired.
+   */
+  defineEvent(
+    'LedgerEntryFlagged',
+    z.object({ entryId: Id, conflictsWith: z.array(Id).min(1).max(10), reason: z.string().max(500) }),
+  ),
 ] as const;

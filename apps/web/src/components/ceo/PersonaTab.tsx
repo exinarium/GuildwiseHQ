@@ -7,6 +7,7 @@ const PURPOSES: Array<{ id: keyof CeoSettings['models']; label: string; hint: st
   { id: 'wake', label: 'Wakes', hint: 'Routine handling of the desk and the floor.' },
   { id: 'review', label: 'Daily review', hint: 'The report and the training review.' },
   { id: 'chat', label: 'Chat', hint: 'When you talk to it.' },
+  { id: 'handover', label: 'Handover', hint: 'When it hands work over to the team.' },
 ];
 
 type Draft = Pick<CeoSettings, 'persona' | 'standingInstructions' | 'models'>;

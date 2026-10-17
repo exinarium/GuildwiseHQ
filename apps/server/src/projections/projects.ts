@@ -316,6 +316,15 @@ export const projectProjectors: Record<string, Projector> = {
     );
   },
 
+  ProjectPolicySet: async (tx, e) => {
+    const p = (e.event as EventOf<'ProjectPolicySet'>).payload;
+    await exec(
+      tx,
+      `UPDATE projects SET decisions_project_only=COALESCE($2, decisions_project_only),
+              test_without_environment=COALESCE($3, test_without_environment) WHERE id=$1`,
+      [p.projectId, p.decisionsProjectOnly ?? null, p.testWithoutEnvironment ?? null],
+    );
+  },
   ProjectFullSuiteSet: async (tx, e) => {
     const p = (e.event as EventOf<'ProjectFullSuiteSet'>).payload;
     await exec(tx, 'UPDATE projects SET full_suite_after_finalize=$2 WHERE id=$1', [p.projectId, p.enabled]);

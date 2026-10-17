@@ -22,6 +22,13 @@ export const LedgerEntryDtoSchema = z.object({
   version: z.number().int().default(1),
   editedAt: IsoTime.nullable().default(null),
   editedByName: z.string().nullable().default(null),
+  /** Set once the entry was retired (never injected into prompts or found by a search). */
+  retiredAt: IsoTime.nullable().default(null),
+  retiredReason: z.string().nullable().default(null),
+  /** Live orders that this one may contradict (flagged on save). */
+  conflictsWith: z.array(z.uuid()).default([]),
+  /** The caller may retire this entry. */
+  canRetire: z.boolean().default(false),
   /** The caller may edit this entry (a live standing order they may manage). */
   canEdit: z.boolean().default(false),
   /** Full-text rank when a query was given. */
@@ -33,6 +40,8 @@ export const LedgerQuerySchema = z.object({
   q: z.string().max(500).optional(),
   projectId: z.uuid().optional(),
   scope: z.enum(['all', 'feature', 'decision', 'standing_order']).default('all'),
+  /** Also list retired entries (the web page greys them out). */
+  includeRetired: z.enum(['true', 'false']).optional(),
 });
 export type LedgerQuery = z.infer<typeof LedgerQuerySchema>;
 
@@ -48,6 +57,11 @@ export const CreateLedgerEntryRequestSchema = z
     title: z.string().min(1).max(300),
     body: z.string().min(1).max(20000),
     tags: z.array(z.string().min(1).max(60)).max(20).default([]),
+    /**
+     * What to do when a near-duplicate standing order exists: `refuse` (default, 409 with a pointer to the existing
+     * entry) or `merge` (the existing entry takes the new wording; nothing new is saved).
+     */
+    onDuplicate: z.enum(['refuse', 'merge']).optional(),
   })
   .refine((v) => v.scope === 'standing_order' || !!v.projectId || !!v.cardId, {
     message: 'feature and decision entries need a projectId or a cardId',
@@ -55,7 +69,20 @@ export const CreateLedgerEntryRequestSchema = z
   });
 export type CreateLedgerEntryRequest = z.infer<typeof CreateLedgerEntryRequestSchema>;
 
-export const CreateLedgerEntryResponseSchema = z.object({ entry: LedgerEntryDtoSchema });
+export const CreateLedgerEntryResponseSchema = z.object({
+  entry: LedgerEntryDtoSchema,
+  /** True when the entry merged into an existing near-duplicate instead of being added. */
+  merged: z.boolean().optional(),
+  /** Live entries this standing order may contradict; it was saved and one desk item raised. */
+  conflictsWith: z.array(z.uuid()).optional(),
+});
+
+/** `POST /api/ledger/:id/retire`: withdraw an entry with a reason (optionally naming the entry that replaces it). */
+export const RetireLedgerEntryRequestSchema = z.object({
+  reason: z.string().trim().min(1).max(1000),
+  supersededBy: z.uuid().optional(),
+});
+export type RetireLedgerEntryRequest = z.infer<typeof RetireLedgerEntryRequestSchema>;
 
 /** `PATCH /api/ledger/:id`: edit a live standing order. At least one of title, body, tags. */
 export const EditLedgerEntryRequestSchema = z

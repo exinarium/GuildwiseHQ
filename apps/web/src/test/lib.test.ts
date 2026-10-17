@@ -2,7 +2,7 @@ import { QueryClient } from '@tanstack/react-query';
 import { describe, expect, it, vi } from 'vitest';
 import { hueFor, initials } from '../lib/avatar.ts';
 import { ageLabel } from '../lib/time.ts';
-import { keysForEvent } from '../ws/invalidate.ts';
+import { INVALIDATE_WINDOW_MS, keysForEvent } from '../ws/invalidate.ts';
 import { LiveSocket } from '../ws/socket.ts';
 
 describe('avatar', () => {
@@ -42,6 +42,7 @@ describe('query invalidation', () => {
 
 describe('LiveSocket', () => {
   it('invalidates board queries when an event message arrives and ignores junk', () => {
+    vi.useFakeTimers();
     const qc = new QueryClient();
     const spy = vi.spyOn(qc, 'invalidateQueries');
     const s = new LiveSocket(qc);
@@ -59,7 +60,11 @@ describe('LiveSocket', () => {
         createdAt: '2026-01-01T00:00:00.000Z',
       },
     });
+    // events are gathered for a short window, then each stale query is invalidated once
+    expect(spy).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(INVALIDATE_WINDOW_MS + 1);
     expect(spy).toHaveBeenCalledWith({ queryKey: ['board', 'p1'] });
+    vi.useRealTimers();
   });
   it('forwards shift progress to watchers', () => {
     const s = new LiveSocket(new QueryClient());

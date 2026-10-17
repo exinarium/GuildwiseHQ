@@ -68,6 +68,8 @@ export const DeskItemDtoSchema = z.object({
   decisionPolicy: DecisionPolicy.nullable(),
   /** M7: who looked at the question on its way to the desk (senior peer, BA), and who answered it. */
   escalationTrail: z.array(EscalationStepSchema).optional(),
+  /** How often the same subject was raised while this item was open (1: once). */
+  repeatCount: z.number().int().min(1).optional(),
   /** A hint about the item (a waiting large-merge approval the project setting now allows to merge without you). */
   hint: z.string().nullable().optional(),
   /** M7: the intake whose ticket this mapping question (`subkind 'unmapped_ticket'`) is about. */

@@ -26,7 +26,7 @@ export const costProjectors: Record<string, Projector> = {
     );
     if (!s) return;
     const model = p.usage.model ?? s.model;
-    const cost = p.costMicros ?? costUsdMicros(model, p.usage);
+    const cost = p.costMicros ?? costUsdMicros(model, { ...p.usage });
     await exec(
       tx,
       `INSERT INTO shift_costs (shift_id, org_id, agent_id, project_id, card_id, phase_id, kind, model,
@@ -50,6 +50,34 @@ export const costProjectors: Record<string, Projector> = {
         p.usage.costUsd === undefined ? null : Math.round(p.usage.costUsd * 1_000_000),
         e.createdAt,
         p.costMicros !== undefined,
+      ],
+    );
+  },
+
+  /** Usage that arrived after the shift was closed at zero: tokens and price are filled in (a stamped price is kept). */
+  ShiftUsageRecorded: async (tx, e) => {
+    const p = ev<EventOf<'ShiftUsageRecorded'>>(e).payload;
+    const row = await one(
+      tx,
+      `SELECT model, cost_stamped, tokens_input + tokens_output + tokens_cache_read + tokens_cache_write AS had
+         FROM shift_costs WHERE shift_id=$1`,
+      [p.shiftId],
+    );
+    if (!row || Number(row.had) > 0) return;
+    const model = p.usage.model ?? row.model;
+    await exec(
+      tx,
+      `UPDATE shift_costs SET model=$2, tokens_input=$3, tokens_output=$4, tokens_cache_read=$5, tokens_cache_write=$6,
+              cost_usd_micros=$7, reported_usd_micros=$8 WHERE shift_id=$1`,
+      [
+        p.shiftId,
+        model,
+        p.usage.inputTokens,
+        p.usage.outputTokens,
+        p.usage.cacheReadTokens,
+        p.usage.cacheWriteTokens,
+        costUsdMicros(model, { ...p.usage }),
+        p.usage.costUsd === undefined ? null : Math.round(p.usage.costUsd * 1_000_000),
       ],
     );
   },
