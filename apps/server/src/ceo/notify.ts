@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { type NotifyKind, streamId } from '@aom/shared';
 import { orgOwnerId } from '../auth/org-context.ts';
 import { agentActor, orgScope } from '../commands/common.ts';
+import { raiseOrCoalesce } from '../commands/desk-coalesce.ts';
 import type { Ctx } from '../context.ts';
 import { exec, one } from '../db/sql.ts';
 import type { AppendInput } from '../eventstore/types.ts';
@@ -34,43 +35,34 @@ export async function notifyOwner(
     taskId?: string | undefined;
     deskItemId?: string | undefined;
     subject?: string;
+    /**
+     * What the notice is about, durably (a card and what is said about it): the same key and state is never raised again
+     * until the state changes, whatever the wording. Without it, an open notice of the same subject only gets a counter.
+     */
+    once?: { key: string; state: string } | undefined;
   },
-): Promise<{ notificationId: string; deskItemId?: string; emailed: boolean }> {
+): Promise<{
+  notificationId: string;
+  deskItemId?: string;
+  emailed: boolean;
+  /** The subject was already handled in this state: nothing was raised. */
+  suppressed?: boolean;
+}> {
   const ceo = await loadCeo(ctx.pool, orgId);
   if (!ceo || !ceo.agentId) return { notificationId: '', emailed: false };
   const ch = ceo.settings.notify[input.kind];
-  const notificationId = randomUUID();
-  const events: AppendInput[] = [];
-  let deskItemId: string | undefined;
-  if (ch.desk) {
-    deskItemId = randomUUID();
-    events.push({
-      streamId: streamId.desk(deskItemId),
-      event: {
-        type: 'DeskItemCreated',
-        payload: {
-          deskItemId,
-          kind: 'alert',
-          subkind: 'ceo_notice',
-          title: input.title.slice(0, 200),
-          body: input.text,
-          options: [],
-          blocking: false,
-          pinned: input.kind !== 'task_done',
-          affectedCardIds: [],
-          askedBy: { kind: 'agent', agentId: ceo.agentId, role: 'ceo' },
-          data: {
-            kind: input.kind,
-            ...(input.taskId ? { taskId: input.taskId } : {}),
-            ...(input.deskItemId ? { about: input.deskItemId } : {}),
-          },
-        },
-      },
-      actor: agentActor(ceo.agentId),
-      scope: orgScope(orgId),
-    });
+  const onceFlag = input.once ? `once:${input.once.key}` : undefined;
+  if (onceFlag) {
+    const seen = await one<{ value: string }>(
+      ctx.pool,
+      'SELECT value FROM ceo_flags WHERE org_id=$1 AND flag=$2',
+      [orgId, onceFlag],
+    );
+    if (seen && seen.value === input.once?.state)
+      return { notificationId: '', emailed: false, suppressed: true };
   }
-  events.push({
+  const notificationId = randomUUID();
+  const noticeEvent = (deskItemId?: string): AppendInput => ({
     streamId: streamId.ceoNotice(notificationId),
     event: {
       type: 'CeoNotified',
@@ -85,10 +77,43 @@ export async function notifyOwner(
         channels: ch,
       },
     },
-    actor: agentActor(ceo.agentId),
+    actor: agentActor(ceo.agentId as string),
     scope: orgScope(orgId),
   });
-  await ctx.store.append(events);
+  let deskItemId: string | undefined;
+  if (ch.desk) {
+    // One desk item per subject: while it is open, the same subject only raises its counter.
+    const subjectKey = `ceo_notice:${input.kind}:${input.once?.key ?? input.subject ?? input.title.slice(0, 80)}`;
+    const r = await raiseOrCoalesce(
+      ctx,
+      {
+        subjectKey,
+        orgId,
+        kind: 'alert',
+        subkind: 'ceo_notice',
+        title: input.title,
+        body: input.text,
+        pinned: input.kind !== 'task_done',
+        data: {
+          kind: input.kind,
+          ...(input.taskId ? { taskId: input.taskId } : {}),
+          ...(input.deskItemId ? { about: input.deskItemId } : {}),
+        },
+        askedBy: { kind: 'agent', agentId: ceo.agentId, role: 'ceo' },
+        actor: agentActor(ceo.agentId),
+        scope: orgScope(orgId),
+      },
+      { extra: (id) => [noticeEvent(id)] },
+    );
+    deskItemId = r.deskItemId;
+  } else await ctx.store.append([noticeEvent()]);
+  if (onceFlag && input.once)
+    await exec(
+      ctx.pool,
+      `INSERT INTO ceo_flags (org_id, flag, value, at) VALUES ($1,$2,$3,$4)
+       ON CONFLICT (org_id, flag) DO UPDATE SET value=EXCLUDED.value, at=EXCLUDED.at`,
+      [orgId, onceFlag, input.once.state, ctx.clock.now()],
+    );
 
   let emailed = false;
   if (ch.email) {

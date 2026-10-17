@@ -362,6 +362,11 @@ export function DeskItem({ item, now }: { item: DeskItemDto; now?: number }) {
           <span data-testid="desk-kind">{deskKindLabel(item)}</span>
         </Badge>
         {item.blocking && <Badge tone="amber">Blocking</Badge>}
+        {(item.repeatCount ?? 1) > 1 && (
+          <Badge tone="neutral" title="The same thing was raised again while this item was open">
+            <span data-testid="repeat-count">x{item.repeatCount}</span>
+          </Badge>
+        )}
         <span className="text-xs text-subtle" data-testid="affected-count">
           Affects {item.affectedCount} {item.affectedCount === 1 ? 'card' : 'cards'}
         </span>

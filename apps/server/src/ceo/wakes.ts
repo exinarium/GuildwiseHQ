@@ -16,7 +16,16 @@ export interface NewWake {
   eventSeq?: bigint | undefined;
   untrusted?: boolean;
   localDate?: string | undefined;
+  /**
+   * The subject this wake is about, durably: `key` names the subject and the reason (not one event), `state` is what the
+   * subject looked like when raised. The same key and state does not wake the CEO again within a day while its earlier wake
+   * is pending, taken or done; a change of state (the card moved on) does.
+   */
+  dedupe?: { key: string; state: string } | undefined;
 }
+
+/** How long a handled subject stays quiet while its state does not change. */
+export const HANDLED_SUBJECT_MS = 24 * 3_600_000;
 
 /** The same subject and reason coalesce while pending; a subject the CEO just acted on is not woken again (loop guard). */
 const RECENT_ACTION_MS = 30 * 60_000;
@@ -29,9 +38,39 @@ const NO_WAKE_SUBKINDS = new Set([
   'ceo_report',
 ]);
 
+/**
+ * The durable subject of a desk item: with a card, the card and the kind of item (the state is the card's stage and status,
+ * so "the card is in Manual QA" is one subject until it moves on); without one, the kind and title of the item.
+ */
+export async function deskSubject(
+  db: Queryable,
+  p: { cardId?: string; subkind?: string; kind?: string; title?: string },
+): Promise<{ key: string; state: string } | undefined> {
+  const sub = p.subkind ?? p.kind ?? '';
+  if (p.cardId) {
+    const c = await one(db, 'SELECT stage, status FROM cards WHERE id=$1', [p.cardId]);
+    return { key: `card:${p.cardId}:desk:${sub}`, state: c ? `${c.stage}/${c.status}` : '' };
+  }
+  const title = String(p.title ?? '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 120);
+  return title ? { key: `desk:${sub}:${title}`, state: '' } : undefined;
+}
+
 export async function enqueueWake(db: Queryable, orgId: string, w: NewWake, now: Date): Promise<boolean> {
   const subjectKind = w.subjectKind ?? '';
   const subjectId = w.subjectId ?? '';
+  if (w.dedupe) {
+    const seen = await one(
+      db,
+      `SELECT 1 FROM ceo_wakes WHERE org_id=$1 AND dedupe_key=$2 AND dedupe_state=$3 AND status IN ('pending','taken','done')
+          AND created_at > $4 LIMIT 1`,
+      [orgId, w.dedupe.key, w.dedupe.state, new Date(now.getTime() - HANDLED_SUBJECT_MS)],
+    );
+    if (seen) return false;
+  }
   if (subjectId) {
     const pending = await one(
       db,
@@ -54,8 +93,8 @@ export async function enqueueWake(db: Queryable, orgId: string, w: NewWake, now:
   }
   await exec(
     db,
-    `INSERT INTO ceo_wakes (org_id, reason, urgency, subject_kind, subject_id, subject_label, detail, event_seq, untrusted, local_date, created_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+    `INSERT INTO ceo_wakes (org_id, reason, urgency, subject_kind, subject_id, subject_label, detail, event_seq, untrusted, local_date, created_at, dedupe_key, dedupe_state)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
     [
       orgId,
       w.reason,
@@ -68,6 +107,8 @@ export async function enqueueWake(db: Queryable, orgId: string, w: NewWake, now:
       w.untrusted === true,
       w.localDate ?? null,
       now,
+      w.dedupe?.key ?? null,
+      w.dedupe?.state ?? null,
     ],
   );
   return true;
@@ -128,6 +169,8 @@ export function registerCeoWakes(ctx: Ctx): () => void {
         if (NO_WAKE_SUBKINDS.has(sub) || p.kind === 'rating') return;
         if (p.askedBy?.agentId === ceo.agentId) return;
         const auth = sub === 'claude_auth_expired' || sub === 'mcp_needs_sign_in';
+        // The same subject (a card and what is asked about it, or an alert of one title) is handled once until it changes.
+        const dedupe = await deskSubject(ctx.pool, p);
         // A reached model usage limit is information (work resumes by itself), never an incident.
         const info = sub === 'claude_usage_limit';
         await enqueueWake(
@@ -146,6 +189,7 @@ export function registerCeoWakes(ctx: Ctx): () => void {
             detail: { kind: p.kind, subkind: sub },
             eventSeq: e.seq,
             untrusted: p.askedBy?.kind === 'agent',
+            ...(dedupe ? { dedupe } : {}),
           },
           now,
         );

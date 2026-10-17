@@ -45,10 +45,12 @@ export async function openItemForSubject(
 export async function raiseOrCoalesce(
   ctx: Ctx,
   item: CoalescedItem,
-  opts: { tx?: Tx; extra?: AppendInput[] } = {},
+  opts: { tx?: Tx; extra?: AppendInput[] | ((deskItemId: string, created: boolean) => AppendInput[]) } = {},
 ): Promise<{ deskItemId: string; created: boolean; count: number }> {
   const db: Queryable = opts.tx ?? ctx.pool;
   const open = await openItemForSubject(db, item.orgId, item.subjectKey);
+  const extraFor = (id: string, created: boolean): AppendInput[] =>
+    typeof opts.extra === 'function' ? opts.extra(id, created) : (opts.extra ?? []);
   const append = (events: AppendInput[]) =>
     opts.tx ? ctx.store.append(events, { tx: opts.tx }) : ctx.store.append(events);
   if (open) {
@@ -60,7 +62,7 @@ export async function raiseOrCoalesce(
         actor: item.actor,
         scope: item.scope,
       },
-      ...(opts.extra ?? []),
+      ...extraFor(open.id, false),
     ]);
     return { deskItemId: open.id, created: false, count };
   }
@@ -90,7 +92,7 @@ export async function raiseOrCoalesce(
       actor: item.actor,
       scope: item.scope,
     },
-    ...(opts.extra ?? []),
+    ...extraFor(deskItemId, true),
   ]);
   return { deskItemId, created: true, count: 1 };
 }

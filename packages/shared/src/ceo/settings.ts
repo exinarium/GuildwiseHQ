@@ -27,17 +27,34 @@ export const CeoTrainingSchema = z.object({
 });
 export type CeoTraining = z.infer<typeof CeoTrainingSchema>;
 
+const ModelEffort = z.object({ model: z.string().min(1), effort: z.string().min(1) });
+/**
+ * The model the CEO runs on, per purpose. Lean Team v3: Sonnet for the routine work (wake, review, chat) and Opus for the
+ * `handover`, when the CEO hands work over to the team (a wake whose reason starts with `handover`).
+ */
 export const CeoModelsSchema = z.object({
-  wake: z.object({ model: z.string().min(1), effort: z.string().min(1) }),
-  review: z.object({ model: z.string().min(1), effort: z.string().min(1) }),
-  chat: z.object({ model: z.string().min(1), effort: z.string().min(1) }),
+  wake: ModelEffort,
+  review: ModelEffort,
+  chat: ModelEffort,
+  handover: ModelEffort.default({ model: 'opus', effort: 'high' }),
 });
 export type CeoModels = z.infer<typeof CeoModelsSchema>;
-export const DEFAULT_CEO_MODELS: CeoModels = {
+export type CeoModelPurpose = keyof CeoModels;
+/** What organizations had before Lean Team v3: the data migration moves only settings that still equal these. */
+export const OLD_CEO_MODELS = {
   wake: { model: 'sonnet', effort: 'medium' },
   review: { model: 'opus', effort: 'high' },
   chat: { model: 'opus', effort: 'high' },
+} as const;
+export const DEFAULT_CEO_MODELS: CeoModels = {
+  wake: { model: 'sonnet', effort: 'medium' },
+  review: { model: 'sonnet', effort: 'high' },
+  chat: { model: 'sonnet', effort: 'medium' },
+  handover: { model: 'opus', effort: 'high' },
 };
+/** A wake reason that means "the CEO hands work over": its shift runs on the `handover` model. */
+export const isHandoverReason = (reason: string): boolean =>
+  reason === 'handover' || reason.startsWith('handover:');
 
 export const CeoSettingsSchema = z.object({
   persona: z.object({
