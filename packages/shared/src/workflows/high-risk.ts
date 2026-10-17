@@ -88,6 +88,26 @@ export const HIGH_RISK_RULES: readonly HighRiskRule[] = [
 /** Every high-risk glob, all categories (the platform team's deploy policy imports this). */
 export const HIGH_RISK_GLOBS: readonly string[] = HIGH_RISK_RULES.flatMap((r) => r.globs);
 
+/**
+ * Paths that are never high risk by themselves: tests, documentation and the sandbox, policy and deploy code (owner decision
+ * of design 13: those fixes go live after review and UAT). A change that also touches a listed high-risk path is still flagged
+ * by that path.
+ */
+export const HIGH_RISK_EXEMPT_GLOBS: readonly string[] = [
+  'docs/**',
+  '**/*.md',
+  'e2e/**',
+  '**/test/**',
+  '**/tests/**',
+  '**/__tests__/**',
+  '**/*.test.*',
+  '**/*.spec.*',
+  'deploy/**',
+  'apps/runner/src/devops/**',
+  'apps/runner/src/sandbox/**',
+  'apps/runner/src/adapters/claude-policy.ts',
+];
+
 /** A glob (`**`, `*`, `?`) as a case-insensitive regular expression over `/`-separated paths. */
 export function globToRegExp(glob: string): RegExp {
   let re = '';
@@ -115,11 +135,14 @@ const COMPILED: ReadonlyArray<{ id: HighRiskCategory; res: RegExp[] }> = HIGH_RI
   res: r.globs.map(globToRegExp),
 }));
 
+const EXEMPT: readonly RegExp[] = HIGH_RISK_EXEMPT_GLOBS.map(globToRegExp);
+
 const normalise = (p: string): string => p.replace(/\\/g, '/').replace(/^\.?\/+/, '');
 
 /** The categories a path falls in (empty: not high risk). */
 export function highRiskCategoriesOf(path: string): HighRiskCategory[] {
   const p = normalise(path);
+  if (EXEMPT.some((re) => re.test(p))) return [];
   return COMPILED.filter((c) => c.res.some((re) => re.test(p))).map((c) => c.id);
 }
 

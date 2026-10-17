@@ -8,7 +8,7 @@ import {
   DIFF_TRUNCATED_NOTE,
   deriveE2eAreas,
   getStage,
-  HIGH_RISK_GLOBS,
+  HIGH_RISK_PATH_GLOBS,
   highRiskPaths,
   highRiskSummary,
   isHighRiskPath,
@@ -21,7 +21,7 @@ import {
 
 describe('high-risk paths (shared with the platform team)', () => {
   it('exports the glob list and a matcher', () => {
-    expect(HIGH_RISK_GLOBS.length).toBeGreaterThan(10);
+    expect(HIGH_RISK_PATH_GLOBS.length).toBeGreaterThan(10);
     expect(isHighRiskPath('apps/server/src/auth/login.ts')).toBe(true);
     expect(isHighRiskPaths(['README.md', 'src/a.ts'])).toBe(false);
     expect(isHighRiskPaths(['README.md', 'db/migrations/0001_init.sql'])).toBe(true);
@@ -33,7 +33,7 @@ describe('high-risk paths (shared with the platform team)', () => {
     ['src/permissions/roles.ts', 'auth'],
     ['config/secrets.yaml', 'auth'],
     ['.env.production', 'auth'],
-    ['deploy/server.pem', 'auth'],
+    ['certs/server.pem', 'auth'],
     ['apps/server/migrations/2140_code_v6.sql', 'data'],
     ['db/schema.prisma', 'data'],
     ['apps/server/src/data-migrations/ledger.ts', 'data'],
@@ -51,6 +51,8 @@ describe('high-risk paths (shared with the platform team)', () => {
     'apps/runner/src/sandbox/policy.ts',
     'apps/runner/src/devops/guard.ts',
     'deploy/docker-compose.yml',
+    'apps/server/test/billing.test.ts',
+    'docs/design/secrets-and-migrations.md',
   ])('%s is not high risk (sandbox, policy and deploy code are not on the list)', (path) => {
     expect(isHighRiskPath(path)).toBe(false);
   });
