@@ -40,8 +40,10 @@ export async function detectLoops(db: Queryable): Promise<Detected[]> {
               ORDER BY d.created_at DESC LIMIT 1) AS alert_id
        FROM cards c JOIN projects p ON p.id = c.project_id
       WHERE c.retry_failures >= $1 AND c.retry_episode_id IS NOT NULL AND c.retry_after IS NOT NULL AND c.status NOT IN ('done','cancelled')
-        AND p.status = 'active'`,
-    [REPORTER.loop.failures, DESK_SUBKIND.loopBackoff],
+        AND p.status = 'active'
+        -- a parked card has its own blocking desk item (loop_parked): no second signal for it
+        AND NOT EXISTS (SELECT 1 FROM desk_items pd WHERE pd.card_id = c.id AND pd.subkind = $3 AND pd.status = 'open')`,
+    [REPORTER.loop.failures, DESK_SUBKIND.loopBackoff, DESK_SUBKIND.loopParked],
   );
   const failing: Detected[] = list.map((c) => ({
     orgId: c.org_id,

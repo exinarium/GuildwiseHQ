@@ -8,6 +8,7 @@ import { platformPass, platformScan, reportServerError } from '../src/platform-t
 import { drainBugs, reportBug } from '../src/platform-team/intake.ts';
 import { startPause } from '../src/platform-team/pause.ts';
 import { platformFixBudget } from '../src/platform-team/stop-loss.ts';
+import { detectLoops } from '../src/reporter/detectors.ts';
 import { uniqueEmail } from './helpers/app.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import type { FakeRunner } from './helpers/fake-runner.ts';
@@ -286,6 +287,43 @@ describe('bug intake', () => {
     expect(body).not.toContain('Loop A');
     expect(bugs[0]?.extended).toMatchObject({ cardRef: expect.any(String) });
     expect(b.id).not.toBe(a.id);
+  });
+
+  it('takes a parked card (loop_parked item) as a loop, and the reporter does not raise a second signal for it', async () => {
+    await designate();
+    const card = await loopingCard(toyId, 'Parked');
+    await q('UPDATE cards SET retry_failures=10, status=$2 WHERE id=$1', [card.id, 'blocked']);
+    const deskItemId = crypto.randomUUID();
+    await ctx.store.append([
+      {
+        streamId: `desk-${deskItemId}`,
+        event: {
+          type: 'DeskItemCreated',
+          payload: {
+            deskItemId,
+            kind: 'escalation',
+            subkind: 'loop_parked',
+            title: 'parked',
+            body: 'parked',
+            options: [],
+            blocking: true,
+            pinned: false,
+            cardId: card.id,
+            projectId: toyId,
+            affectedCardIds: [card.id],
+            askedBy: { kind: 'system' },
+            subjectKey: `loop-parked:${card.id}`,
+          },
+        },
+        actor: { kind: 'system', id: null },
+        scope: { orgId, projectId: toyId, audience: 'project' },
+      },
+    ]);
+    expect((await detectLoops(ctx.pool)).filter((d) => d.subject.cardId === card.id)).toHaveLength(0);
+    await platformScan(ctx);
+    const bugs = await bugRows();
+    expect(bugs).toHaveLength(1);
+    expect(bugs[0]).toMatchObject({ source: 'loop', occurrences: 1, severity: 'critical' });
   });
 
   it('files a rejection storm once per hour, scoped to the workstation', async () => {

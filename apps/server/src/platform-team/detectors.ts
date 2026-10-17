@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { maskText, REJECTION_STORM, topFrames } from '@aom/shared';
+import { DESK_SUBKIND, maskText, REJECTION_STORM, topFrames } from '@aom/shared';
 import type { FastifyRequest } from 'fastify';
 import type { Ctx } from '../context.ts';
 import { one, rows } from '../db/sql.ts';
@@ -79,7 +79,25 @@ async function scanLoops(ctx: Ctx): Promise<number> {
   // The existing detector (reporter/detectors.ts): the loop breaker's open back-off episodes (3+ failed shifts or
   // rejections of one card) and cards that cause 5+ question shifts in 2 hours (`loop:questions:<card>`).
   const found = await detectLoops(ctx.pool);
-  for (const d of found) {
+  // Cards the loop breaker PARKED (10 crash-loop failures, blocking `loop_parked` desk item): the reporter leaves them to
+  // that item, so this is where they reach bug intake.
+  const parked = await rows(
+    ctx.pool,
+    `SELECT c.id, c.retry_failures, c.retry_episode_id FROM cards c
+       JOIN desk_items d ON d.card_id = c.id AND d.subkind = $1 AND d.status = 'open'
+      WHERE c.status NOT IN ('done','cancelled') AND c.retry_episode_id IS NOT NULL`,
+    [DESK_SUBKIND.loopParked],
+  );
+  const all = [
+    ...found,
+    ...parked.map((c) => ({
+      fingerprint: `loop:card:${c.id}`,
+      count: Number(c.retry_failures),
+      subject: { cardId: c.id as string },
+      evidence: { episodeId: c.retry_episode_id as string },
+    })),
+  ];
+  for (const d of all) {
     const cardId = d.subject.cardId;
     if (!cardId) continue;
     const c = await one(
@@ -116,7 +134,7 @@ async function scanLoops(ctx: Ctx): Promise<number> {
       extended: { cardRef: c.ref },
     });
   }
-  return found.length;
+  return all.length;
 }
 
 // ---------------------------------------------------------------------------------------------- rejection storms
