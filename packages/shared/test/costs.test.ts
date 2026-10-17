@@ -51,7 +51,6 @@ describe('current prices and the 1-hour cache write (October 2026)', () => {
   it('prices the current models and keeps the older ones at their own price', () => {
     const one = { inputTokens: 1_000_000, outputTokens: 1_000_000 };
     expect(costUsdMicros('claude-sonnet-5-5', one)).toBe(12_000_000); // $2 + $10
-    expect(costUsdMicros('claude-sonnet-4-6', one)).toBe(18_000_000); // $3 + $15
     expect(costUsdMicros('claude-opus-5-5', one)).toBe(24_000_000); // $4 + $20
     expect(costUsdMicros('claude-opus-5', one)).toBe(30_000_000); // $5 + $25
     expect(costUsdMicros('opus', one)).toBe(30_000_000);

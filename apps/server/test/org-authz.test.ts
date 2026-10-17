@@ -236,7 +236,7 @@ describe('org roles', () => {
     const r = await call(role, 'POST', '/api/ledger', {
       scope: 'standing_order',
       title: `Order ${role}`,
-      body: 'Always be kind.',
+      body: `Always be kind to ${role}s in unique ways.`,
     });
     expect(r.status).toBe(status);
   });
@@ -283,7 +283,7 @@ describe('org roles', () => {
       call('owner', 'POST', '/api/ledger', {
         scope: 'standing_order',
         title: `Edit me ${role}`,
-        body: 'Always be kind.',
+        body: `Always be kind, said the ${role}.`,
       }),
       201,
     );
@@ -299,7 +299,7 @@ describe('org roles', () => {
         scope: 'standing_order',
         projectId,
         title: 'P rule',
-        body: 'Yes.',
+        body: 'Yes, the project rule applies.',
       }),
       201,
     );

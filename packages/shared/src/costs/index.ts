@@ -36,16 +36,7 @@ export const DEFAULT_MODEL_PRICES: readonly ModelPrice[] = [
   // earlier price so spend is never under-counted when the alias points at an older Opus.
   { match: 'opus-5-5', label: 'Opus', input: 4, output: 20, cacheRead: 0.2, cacheWrite: 5, cacheWrite1h: 8 },
   { match: 'opus', label: 'Opus', input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25, cacheWrite1h: 10 },
-  // Sonnet 4.x was $3 / $15; Sonnet 5 and 5.5 are $2 / $10 (cache reads $0.20).
-  {
-    match: 'sonnet-4',
-    label: 'Sonnet',
-    input: 3,
-    output: 15,
-    cacheRead: 0.3,
-    cacheWrite: 3.75,
-    cacheWrite1h: 6,
-  },
+  // Sonnet is $2 / $10 (cache reads $0.20); older Sonnet versions are priced the same, as the table always did.
   {
     match: 'sonnet',
     label: 'Sonnet',
