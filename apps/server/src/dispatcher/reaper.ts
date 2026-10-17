@@ -9,6 +9,7 @@ import { releaseClaimEvents } from '../commands/shifts.ts';
 import type { Ctx } from '../context.ts';
 import { rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
+import { pruneRunnerInbox } from '../runner-gateway/inbox-prune.ts';
 
 const ACCEPT_TIMEOUT_MS = 30_000;
 const STALE_HEARTBEAT_MS = 45_000;
@@ -21,6 +22,7 @@ const OVERRUN_SLACK_MS = 10 * 60_000;
 export class Reaper {
   private timer: NodeJS.Timeout | null = null;
   private running: Promise<void> = Promise.resolve();
+  private lastInboxPrune = 0;
 
   constructor(private readonly ctx: Ctx) {}
 
@@ -37,6 +39,14 @@ export class Reaper {
       await this.releaseUnaccepted();
       await this.releaseExpiredLeases();
       await this.stopOverrunShifts();
+      // Housekeeping once an hour: the runner inbox keeps 7 days of idempotency records.
+      const t = this.ctx.clock.now().getTime();
+      if (t - this.lastInboxPrune > 3_600_000) {
+        this.lastInboxPrune = t;
+        await pruneRunnerInbox(this.ctx).catch((err) =>
+          this.ctx.log.error({ err }, 'runner inbox prune failed'),
+        );
+      }
     });
     this.running = next.catch(() => {});
     return next;

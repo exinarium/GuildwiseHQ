@@ -10,6 +10,7 @@ import type { AppendInput } from '../eventstore/types.ts';
 import { type Detected, detectAll } from './detectors.ts';
 import { buildFloorDigest } from './digest.ts';
 import { systemBy } from './report-items.ts';
+import { sameJson } from './same-json.ts';
 import { reportingOf } from './settings.ts';
 import { enqueueReporterTask } from './tasks.ts';
 
@@ -91,8 +92,6 @@ async function releaseExpired(ctx: Ctx, now: Date): Promise<number> {
     return events.length;
   });
 }
-
-const sameJson = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
 /** Step 2. */
 async function reconcileSignals(ctx: Ctx, now: Date): Promise<{ raised: number; resolved: number }> {

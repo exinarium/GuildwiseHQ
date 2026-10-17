@@ -8,7 +8,7 @@ import {
 import type { QueryClient } from '@tanstack/react-query';
 import { useSyncExternalStore } from 'react';
 import { getActiveOrgId } from '../lib/activeOrg.ts';
-import { invalidateForEvent } from './invalidate.ts';
+import { InvalidationBatcher } from './invalidate.ts';
 
 export type SocketState = 'connecting' | 'open' | 'closed';
 
@@ -38,11 +38,20 @@ export class LiveSocket {
   private watchers = new Map<string, Set<ProgressListener>>();
   private runWatchers = new Map<string, Set<RunLogListener>>();
   private chatListeners = new Map<string, Set<ChatListener>>();
+  private readonly batcher: InvalidationBatcher;
 
   constructor(
     private readonly qc: QueryClient,
     private readonly url: () => string = defaultUrl,
-  ) {}
+  ) {
+    this.batcher = new InvalidationBatcher(qc);
+  }
+
+  /** Invalidates everything now (a resync) and forgets what was waiting for the batch. */
+  private invalidateAll(): void {
+    this.batcher.clear();
+    void this.qc.invalidateQueries();
+  }
 
   getState = (): SocketState => this.state;
   subscribeState = (cb: () => void) => {
@@ -79,6 +88,7 @@ export class LiveSocket {
 
   stop(): void {
     this.stopped = true;
+    this.batcher.clear();
     clearTimeout(this.timer);
     clearInterval(this.pingTimer);
     this.ws?.close();
@@ -128,16 +138,17 @@ export class LiveSocket {
     switch (msg.type) {
       case 'ready':
         this.setState('open');
-        if (this.lastSeq === undefined || msg.seq - this.lastSeq > RESYNC_THRESHOLD)
-          void this.qc.invalidateQueries();
+        // The first `ready` (nothing seen yet) is just the page loading: its queries are fetching already, so
+        // invalidating all of them fetched everything twice. Only a reconnect that missed a lot refetches everything.
+        if (this.lastSeq !== undefined && msg.seq - this.lastSeq > RESYNC_THRESHOLD) this.invalidateAll();
         this.lastSeq = msg.seq;
         break;
       case 'event':
         this.lastSeq = Math.max(this.lastSeq ?? 0, msg.event.seq);
-        invalidateForEvent(this.qc, msg.event);
+        this.batcher.add(msg.event);
         break;
       case 'resync':
-        void this.qc.invalidateQueries();
+        this.invalidateAll();
         break;
       case 'presence':
         void this.qc.invalidateQueries({ queryKey: ['workstations'] });
@@ -151,7 +162,8 @@ export class LiveSocket {
         void this.qc.invalidateQueries({ queryKey: ['runs'] });
         break;
       case 'run.log':
-        for (const cb of this.runWatchers.get(msg.envId) ?? []) cb(msg.service, msg.lines, msg.history === true);
+        for (const cb of this.runWatchers.get(msg.envId) ?? [])
+          cb(msg.service, msg.lines, msg.history === true);
         break;
       case 'chat.delta':
         this.emitChat(msg.threadId, { type: 'delta', text: msg.text });
