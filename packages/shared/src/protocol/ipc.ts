@@ -11,6 +11,7 @@ import {
   PhaseReportDataSchema,
   PhaseResultsDataSchema,
 } from '../phases/index.ts';
+import { QuestionTopicSchema } from '../questions/index.ts';
 import { PublicationOutcomeSchema } from '../research/index.ts';
 
 /**
@@ -39,6 +40,12 @@ export const QuestionReportSchema = z.object({
   blocking: z.boolean().default(true),
   /** Ask even though the ledger already has a matching entry (non-blocking questions need this). */
   force: z.boolean().default(false),
+  /** Lean Team v3: the problem the question is about; the server routes by it (`aom question --topic`). */
+  topic: QuestionTopicSchema.optional(),
+  /** `aom question --wait`: raised non-blocking; the CLI polls `question.status` inside the shift. */
+  wait: z.boolean().default(false),
+  /** A waiting question ran out of time: this report turns the shift's open waiting question into a blocking one. */
+  converts: z.boolean().default(false),
 });
 
 /** Non-terminal thread message. */
@@ -265,6 +272,12 @@ export const RpcMethodSchema = z.enum([
   'run.fail',
   /** The CEO agent's management verbs (`aom ceo ...`): one method, the op is in the params. */
   'ceo',
+  /** Lean Team v3: facts the server knows (environment, dependencies, branch, stage, blockers), so no question is spent on them (`aom card facts`). */
+  'card.facts',
+  /** Lean Team v3: record a dependency between open cards of a project, add only (`aom block --on dependency <ref>`). */
+  'card.depend',
+  /** Lean Team v3: has the question of this shift been answered yet (`aom question --wait` polls it). */
+  'question.status',
   /** The tester's environment (#59): `aom env info|logs|restart|suites`, answered by the runner (suites: by the server). */
   'env.info',
   'env.logs',

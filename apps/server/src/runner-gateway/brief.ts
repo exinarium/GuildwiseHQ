@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
+  AFFINITY_HOURS,
   AgentPermissionsSchema,
   type AgentRuntimeSpec,
   allowedOutcomes,
@@ -452,6 +453,7 @@ export async function buildShiftStart(ctx: Ctx, claim: ClaimResult): Promise<Shi
       brief;
   // plugin MCP servers the project's Owner granted (names only; the runner holds the configuration)
   const mcp = await grantedMcpServers(ctx.pool, brief.project.id);
+  const resume = await affinityResume(ctx, claim, brief);
   return {
     shiftId: claim.shiftId,
     claimId: claim.claimId,
@@ -468,7 +470,68 @@ export async function buildShiftStart(ctx: Ctx, claim: ClaimResult): Promise<Shi
     readRepos: await shiftReadRepos(ctx, agent, brief.project.id, ws?.user_id, claim.worktree?.repoId),
     localReadRepos: await localReadRepos(ctx.pool, brief.project.id, claim.workstationId),
     ...(mcp.length > 0 ? { mcpServers: mcp } : {}),
+    ...resume,
   };
+}
+
+/**
+ * A claim of a card the agent holds affinity to (it asked a question that stayed unanswered, or the review findings
+ * went back to it): resume the agent's own session on this card and open it with the answer or the findings. Only when a
+ * session id is known; otherwise the shift starts from the brief as usual.
+ */
+async function affinityResume(
+  ctx: Ctx,
+  claim: ClaimResult,
+  brief: ShiftBrief,
+): Promise<{ resumeSessionId?: string; resumeMessage?: string }> {
+  const card = await one(
+    ctx.pool,
+    `SELECT affinity_agent_id, affinity_session_id, affinity_until, affinity_reason, affinity_desk_item_id
+       FROM cards WHERE id=$1`,
+    [claim.cardId],
+  );
+  const now = ctx.clock.now();
+  if (
+    !card?.affinity_agent_id ||
+    card.affinity_agent_id !== claim.agentId ||
+    !card.affinity_until ||
+    new Date(card.affinity_until) <= now
+  )
+    return {};
+  const sessionId =
+    (card.affinity_session_id as string | null) ??
+    (
+      await one<{ runtime_session_id: string }>(
+        ctx.pool,
+        `SELECT runtime_session_id FROM shifts WHERE card_id=$1 AND agent_id=$2 AND id <> $3
+            AND runtime_session_id IS NOT NULL ORDER BY started_at DESC LIMIT 1`,
+        [claim.cardId, claim.agentId, claim.shiftId],
+      )
+    )?.runtime_session_id;
+  if (!sessionId) return {};
+  // The first message is sent once: a later claim of the same card resumes the session without repeating it.
+  const setAt = new Date(new Date(card.affinity_until).getTime() - AFFINITY_HOURS * 3600_000);
+  const since = await one(
+    ctx.pool,
+    `SELECT 1 FROM shifts WHERE card_id=$1 AND agent_id=$2 AND id <> $3 AND started_at > $4 LIMIT 1`,
+    [claim.cardId, claim.agentId, claim.shiftId, setAt],
+  );
+  if (since) return { resumeSessionId: sessionId };
+  let message = '';
+  if (card.affinity_reason === 'question' && card.affinity_desk_item_id) {
+    const q = await one(
+      ctx.pool,
+      'SELECT title, answer, status, keep_blocked_until FROM desk_items WHERE id=$1',
+      [card.affinity_desk_item_id],
+    );
+    if (q?.status === 'answered' || q?.answer)
+      message = `Your question was answered while you were away.\n\nQuestion: ${q.title}\n\nAnswer: ${q.answer ?? ''}\n\nContinue with ${brief.card.ref} from where you stopped.`;
+  } else if (card.affinity_reason === 'review' && brief.reviewComments.length > 0) {
+    const c = brief.reviewComments[brief.reviewComments.length - 1];
+    if (c)
+      message = `${c.reviewerName} reviewed your work and asks for changes.\n\n${c.comments}${c.reasons.length ? `\n\nReasons: ${c.reasons.join(', ')}` : ''}${c.criteriaMissed.length ? `\n\nCriteria missed: ${c.criteriaMissed.join('; ')}` : ''}\n\nAddress them, then hand off again.`;
+  }
+  return { resumeSessionId: sessionId, ...(message ? { resumeMessage: message.slice(0, 38_000) } : {}) };
 }
 
 /** Reference repositories, plus (for a role with `readOrgRepos`) the organization's, without the card's own repository. */

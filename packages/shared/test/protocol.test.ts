@@ -408,6 +408,8 @@ describe('ipc', () => {
       doing: 'picking a db',
       force: false,
       blocking: true,
+      wait: false,
+      converts: false,
     },
     comment: { kind: 'comment', note: 'fyi' },
   } as const;
@@ -423,6 +425,8 @@ describe('ipc', () => {
       options: [],
       doing: '',
       blocking: true,
+      wait: false,
+      converts: false,
     });
   });
   it('terminal reports', () => {

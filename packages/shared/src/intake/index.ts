@@ -109,7 +109,7 @@ export type IntakeContext = z.infer<typeof IntakeContextSchema>;
 export const EscalationStepSchema = z.object({
   at: z.iso.datetime(),
   /** `asked` is the agent's question; `answered` closes the trail; `merged` marks a duplicate attached to an open question. */
-  step: z.enum(['asked', 'peer', 'ba', 'desk', 'answered', 'merged']),
+  step: z.enum(['asked', 'peer', 'ba', 'ceo', 'desk', 'answered', 'merged']),
   agentId: z.uuid().optional(),
   agentName: z.string().optional(),
   role: z.string().optional(),
@@ -149,6 +149,8 @@ export const AnswerReportSchema = z.object({
   text: z.string().min(1).max(20000),
   /** One of the item's option ids (`o1`, ...), when the answer picks an option. */
   optionId: z.string().min(1).optional(),
+  /** `--keep-blocked-until "<condition>"`: the asker's card stays parked (no re-queue) until this condition holds. */
+  keepBlockedUntil: z.string().trim().min(1).max(500).optional(),
 });
 /** `aom escalate --item <id> --note ...`. */
 export const EscalateReportSchema = z.object({

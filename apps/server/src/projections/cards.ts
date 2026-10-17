@@ -699,6 +699,14 @@ export const cardProjectors: Record<string, Projector> = {
         ),
       { agentId: null },
     );
+    // Lean Team v3: moving the card to the queue ends a park that an answer asked for ("keep blocked until ...").
+    if (p.status === 'queued')
+      await exec(
+        tx,
+        `DELETE FROM card_blockers WHERE card_id=$1 AND desk_item_id IN (
+           SELECT id FROM desk_items WHERE keep_blocked_until IS NOT NULL AND status='answered')`,
+        [p.cardId],
+      );
   },
 
   // A done or cancelled card goes back to work. The branch, worktree and the earlier finalize result (`finalize_action`,

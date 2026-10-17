@@ -10,6 +10,7 @@ import {
 } from '../forge/index.ts';
 import { ProjectKeySchema } from '../ids.ts';
 import { McpServerCandidateDtoSchema } from '../mcp/index.ts';
+import { StopLossSettingsSchema } from '../questions/index.ts';
 import { RepoDescriptionSchema, RepoNameSchema, RepoVisibilitySchema, repoNameError } from '../repo/index.ts';
 import {
   BranchPrefixSchema,
@@ -173,6 +174,8 @@ export const ProjectDtoSchema = z.object({
   investigationLocation: z.enum(['repo', 'vault']).optional(),
   /** Optional cap on shifts running at once on this project; null: no cap (the default). */
   maxConcurrentShifts: z.number().int().nullable().optional(),
+  /** Stop-loss budget by card size: build passes, review rounds and shifts before a card is parked for its architect. */
+  stopLoss: StopLossSettingsSchema.optional(),
   /** The monthly budget and this month's spend (amounts hidden from guests); absent in lists that do not compute it. */
   budget: BudgetDtoSchema.optional(),
   /**
@@ -198,6 +201,10 @@ export const ProjectDtoSchema = z.object({
   myRole: z.enum(['owner', 'manager']),
 });
 export type ProjectDto = z.infer<typeof ProjectDtoSchema>;
+
+/** `PUT /api/projects/:id/stop-loss`: the budget by card size, or null for the defaults (small 2/2/10, medium 3/2/15, large 4/2/25). */
+export const SetStopLossRequestSchema = z.object({ settings: StopLossSettingsSchema.nullable() });
+export type SetStopLossRequest = z.infer<typeof SetStopLossRequestSchema>;
 
 /** `PUT /api/projects/:id/concurrency-cap`: a number of shifts, or null to remove the cap. */
 export const SetConcurrencyCapRequestSchema = z.object({ cap: z.number().int().min(1).max(50).nullable() });

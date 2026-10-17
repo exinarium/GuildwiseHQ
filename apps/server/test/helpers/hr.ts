@@ -29,6 +29,11 @@ export async function resetHr(): Promise<void> {
     `TRUNCATE cards, card_dependencies, card_handoffs, card_transitions, shifts, threads, thread_messages, agents,
        desk_items, card_blockers, ledger_entries, runner_commands, runner_inbox, hr_applied CASCADE`,
   );
+  // The HR suites bounce one card many times to build up a track record: the per-card stop-loss would park it.
+  const loose = { buildPasses: 50, reviewRounds: 50, shifts: 500 };
+  await q('UPDATE projects SET stop_loss=$1::jsonb', [
+    JSON.stringify({ small: loose, medium: loose, large: loose }),
+  ]);
 }
 
 export const recommendations = async (w: World, cookie = w.owner.cookie): Promise<any[]> =>

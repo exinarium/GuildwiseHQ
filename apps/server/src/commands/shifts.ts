@@ -42,10 +42,12 @@ import { workingBranchQuestionEvents } from './hygiene.ts';
 import { loopBreakerPlan, rejectionBackoffEvents } from './loop-breaker.ts';
 import { qaStepsEvents } from './qa.ts';
 import { QA_STEPS_STAGE } from './qa-flow.ts';
+import { affinityEvent } from './question-flow.ts';
 import { raiseQuestion } from './questions.ts';
 import { rebaseConflictEvents } from './rebase.ts';
 import { buildPublicationEvents } from './research.ts';
 import { riskFields } from './review-risk.ts';
+import { cardUsage, limitReached, stopLossBudget, stopLossEvents } from './stop-loss.ts';
 import {
   endTestEnvironmentIn,
   openSuitesOf,
@@ -341,6 +343,34 @@ export async function applyShiftReport(
           ...riskFields(payloadData),
         },
       });
+      // Stop-loss (design 11): a card that used its review rounds or build passes is parked for the architect;
+      // otherwise the findings go back to the builder, who keeps affinity to the card (and resumes its session).
+      const usage = await cardUsage(tx, cardId);
+      const budget = await stopLossBudget(tx, card);
+      const limit = limitReached(usage, budget, { reviewRound: true });
+      if (limit) {
+        followUps.push(
+          ...(await stopLossEvents(
+            ctx,
+            tx,
+            card,
+            limit,
+            { ...usage, reviewRounds: usage.reviewRounds + 1 },
+            budget,
+          )),
+        );
+      } else {
+        const builderId =
+          (
+            await one<{ agent_id: string }>(
+              tx,
+              `SELECT agent_id FROM card_handoffs WHERE card_id=$1 AND stage='build' AND agent_id IS NOT NULL
+                ORDER BY created_at DESC, event_seq DESC LIMIT 1`,
+              [cardId],
+            )
+          )?.agent_id ?? card.original_builder_agent_id;
+        if (builderId) followUps.push(affinityEvent(ctx, card, builderId, 'review'));
+      }
       break;
     }
     case 'TestPassed':

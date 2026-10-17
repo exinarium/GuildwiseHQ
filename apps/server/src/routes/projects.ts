@@ -17,6 +17,7 @@ import {
   SetMergePolicyRequestSchema,
   SetProjectMcpServersRequestSchema,
   SetReferenceReposRequestSchema,
+  SetStopLossRequestSchema,
   SetWorkingBranchRequestSchema,
 } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
@@ -42,6 +43,7 @@ import {
   setManualQa,
   setMergePolicy,
   setReferenceRepos,
+  setStopLoss,
   updateProject,
 } from '../commands/projects.ts';
 import { requestReleasePr } from '../commands/release-pr.ts';
@@ -228,6 +230,16 @@ export function projectRoutes(ctx: Ctx) {
       async (req) => {
         const s = await requireUser(ctx, req);
         await setReferenceRepos(ctx, s.user, req.params.id, req.body.repoIds, req.body.workstationRepos);
+        return getProjectDetail(ctx, s.user.id, req.params.id);
+      },
+    );
+
+    app.put(
+      '/api/projects/:id/stop-loss',
+      { schema: { params: IdParamsSchema, body: SetStopLossRequestSchema } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        await setStopLoss(ctx, s.user, req.params.id, req.body.settings);
         return getProjectDetail(ctx, s.user.id, req.params.id);
       },
     );

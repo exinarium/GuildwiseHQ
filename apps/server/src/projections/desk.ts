@@ -36,6 +36,7 @@ interface NewItem {
   data?: Record<string, unknown> | undefined;
   chatThreadId?: string | undefined;
   addresseeUserId?: string | undefined;
+  topic?: string | undefined;
 }
 
 async function insertItem(tx: Tx, e: StoredEvent, i: NewItem): Promise<void> {
@@ -44,8 +45,10 @@ async function insertItem(tx: Tx, e: StoredEvent, i: NewItem): Promise<void> {
     tx,
     `INSERT INTO desk_items (id, org_id, project_id, card_id, kind, subkind, status, routed_to, routed_agent_id, title, body,
        doing, options, recommendation, blocking, affected_card_ids, asked_by_kind, asked_by_agent_id, asked_by_user_id,
-       asked_by_role, shift_id, pinned, dedup_ledger_ids, triage, triage_deadline, data, chat_thread_id, created_at, updated_at, addressee_user_id)
-     VALUES ($1,$2,$3,$4,$5,$6,'open',$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$27,$28)`,
+       asked_by_role, shift_id, pinned, dedup_ledger_ids, triage, triage_deadline, data, chat_thread_id, created_at, updated_at, addressee_user_id,
+       topic, stage)
+     VALUES ($1,$2,$3,$4,$5,$6,'open',$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$27,$28,
+             $29, (SELECT stage FROM cards WHERE id = $4))`,
     [
       i.id,
       e.scope.orgId,
@@ -75,6 +78,7 @@ async function insertItem(tx: Tx, e: StoredEvent, i: NewItem): Promise<void> {
       i.chatThreadId ?? null,
       e.createdAt,
       i.addresseeUserId ?? null,
+      i.topic ?? null,
     ],
   );
   if (i.blocking && i.cardId) {
@@ -99,8 +103,22 @@ async function insertItem(tx: Tx, e: StoredEvent, i: NewItem): Promise<void> {
   }
 }
 
-/** Returns blocked cards of `itemId` to the queue unless another open item still blocks them. */
-async function unblock(tx: Tx, e: StoredEvent, itemId: string, only?: string[]): Promise<void> {
+/**
+ * Returns blocked cards of `itemId` to the queue unless another open item still blocks them. With `keep` (an answer
+ * that says "keep it parked until <condition>") the cards stay blocked and the blocker stays: the item is answered, but
+ * the card is released only by a person or by the condition (the owner resolves it on the card).
+ */
+async function unblock(
+  tx: Tx,
+  e: StoredEvent,
+  itemId: string,
+  only?: string[],
+  keep?: string,
+): Promise<void> {
+  if (keep) {
+    await exec(tx, 'UPDATE desk_items SET keep_blocked_until=$2 WHERE id=$1', [itemId, keep]);
+    return;
+  }
   const blocked = await rows<{ card_id: string }>(
     tx,
     'SELECT card_id FROM card_blockers WHERE desk_item_id=$1',
@@ -146,6 +164,7 @@ export const deskProjectors: Record<string, Projector> = {
       triageDeadline: p.triage?.deadline,
       data: p.data,
       addresseeUserId: p.addresseeUserId,
+      topic: p.topic,
     });
   },
 
@@ -190,7 +209,7 @@ export const deskProjectors: Record<string, Projector> = {
         WHERE id=$1`,
       [p.deskItemId, p.answer, p.answerOption ?? null, p.answeredBy.userId ?? null, e.createdAt],
     );
-    await unblock(tx, e, p.deskItemId, p.unblockedCardIds);
+    await unblock(tx, e, p.deskItemId, p.unblockedCardIds, p.keepBlockedUntil);
   },
 
   DeskItemResolved: async (tx, e) => {
@@ -223,9 +242,10 @@ export const deskProjectors: Record<string, Projector> = {
       [p.deskItemId],
     );
     if (!dup) return;
-    await exec(tx, `UPDATE desk_items SET status='superseded', updated_at=$2 WHERE id=$1`, [
+    await exec(tx, `UPDATE desk_items SET status='superseded', merged_into=$3, updated_at=$2 WHERE id=$1`, [
       p.deskItemId,
       e.createdAt,
+      p.intoDeskItemId,
     ]);
     await exec(
       tx,

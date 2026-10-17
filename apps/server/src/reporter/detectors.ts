@@ -4,6 +4,7 @@ import {
   formatMoney,
   HYGIENE_PROBLEM_LABEL,
   type HygieneProblemKind,
+  QUESTION_LOOP,
   REPORTER,
   type SignalKind,
   type SignalSubject,
@@ -42,7 +43,7 @@ export async function detectLoops(db: Queryable): Promise<Detected[]> {
         AND p.status = 'active'`,
     [REPORTER.loop.failures, DESK_SUBKIND.loopBackoff],
   );
-  return list.map((c) => ({
+  const failing: Detected[] = list.map((c) => ({
     orgId: c.org_id,
     projectId: c.project_id,
     kind: 'loop' as const,
@@ -59,6 +60,38 @@ export async function detectLoops(db: Queryable): Promise<Detected[]> {
     },
     evidence: { episodeId: c.retry_episode_id, cardTitle: c.title },
   }));
+  // Question shifts count too (Lean Team v3): a card that caused 5 question shifts within 2 hours is going round,
+  // whatever the questions said. One signal per card; it ends when the window has passed.
+  const asking = await rows(
+    db,
+    `SELECT c.id, c.ref, c.title, c.org_id, c.project_id, p.key, count(*)::int AS n, max(s.started_at) AS last_at
+       FROM shifts s JOIN desk_items d ON d.id = s.desk_item_id JOIN cards c ON c.id = d.card_id
+       JOIN projects p ON p.id = c.project_id
+      WHERE s.kind = 'question' AND s.started_at > now() - make_interval(hours => $1) AND c.status NOT IN ('done','cancelled')
+        AND p.status = 'active'
+      GROUP BY c.id, c.ref, c.title, c.org_id, c.project_id, p.key HAVING count(*) >= $2`,
+    [QUESTION_LOOP.windowHours, QUESTION_LOOP.shifts],
+  );
+  const failingIds = new Set(failing.map((f) => f.subject.cardId));
+  const questions: Detected[] = asking
+    .filter((c) => !failingIds.has(c.id))
+    .map((c) => ({
+      orgId: c.org_id,
+      projectId: c.project_id,
+      kind: 'loop' as const,
+      fingerprint: `loop:questions:${c.id}`,
+      urgency: 'urgent' as const,
+      count: c.n,
+      subject: {
+        title: `${c.ref} keeps asking questions`,
+        detail: `${c.n} question shifts in ${QUESTION_LOOP.windowHours} hours, whatever the wording`,
+        cardId: c.id,
+        cardRef: c.ref,
+        projectKey: c.key,
+      },
+      evidence: { cardTitle: c.title, questionShifts: c.n },
+    }));
+  return [...failing, ...questions];
 }
 
 /** The same DevOps or approval action asked 3 times in 24 h; urgent when the action was rejected before. */

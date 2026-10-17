@@ -33,6 +33,10 @@ export const DESK_SUBKIND = {
   repoCreate: 'repo_create',
   repoCreateFailed: 'repo_create_failed',
   loopBackoff: 'loop_backoff',
+  /** The same question asked again on the same card and stage with nothing changed: the card is parked (one item). */
+  repeatQuestion: 'repeat_question',
+  /** A card used its budget of passes, rounds or shifts: the architect arbitrates, then the owner. */
+  stopLoss: 'stop_loss',
   /** D5: a project environment needs access or failed on a workstation. */
   environmentAttention: 'environment_attention',
   /** G-Q2: DevOps is trying to resolve a rebase/merge conflict (a notice). */

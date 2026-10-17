@@ -163,6 +163,8 @@ export const AnswerDeskItemRequestSchema = z.object({
   ledger: DeskLedgerChoiceSchema.default({ scope: 'decision' }),
   /** "Remember this for the CEO": the answer is kept as an owner rule (only the organization Owner's answers count). */
   remember: z.boolean().optional(),
+  /** The answer keeps the card parked until this condition holds (the card is not returned to the queue). */
+  keepBlockedUntil: z.string().trim().min(1).max(500).optional(),
 });
 export type AnswerDeskItemRequest = z.infer<typeof AnswerDeskItemRequestSchema>;
 

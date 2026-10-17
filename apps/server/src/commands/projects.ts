@@ -11,6 +11,7 @@ import {
   type OrgRole,
   type PatchProjectRequest,
   type ProjectImpact,
+  type StopLossSettings,
   streamId,
 } from '@aom/shared';
 import type { AuthSession } from '../auth/sessions.ts';
@@ -273,6 +274,29 @@ export async function setConcurrencyCap(
         {
           streamId: streamId.project(projectId),
           event: { type: 'ProjectConcurrencyCapSet', payload: { projectId, cap, by: user.id } },
+          actor: userActor(user.id),
+          scope: projectScope(p.org_id, projectId),
+        },
+      ],
+      { tx },
+    );
+  });
+}
+
+/** Sets (or clears, with null: the defaults) the project's stop-loss budget by card size. Any project member may change it. */
+export async function setStopLoss(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  projectId: string,
+  settings: StopLossSettings | null,
+): Promise<void> {
+  await withAppendTx(ctx.pool, async (tx) => {
+    const p = await loadVisibleProject(tx, user.id, projectId);
+    await ctx.store.append(
+      [
+        {
+          streamId: streamId.project(projectId),
+          event: { type: 'ProjectStopLossSet', payload: { projectId, settings, by: user.id } },
           actor: userActor(user.id),
           scope: projectScope(p.org_id, projectId),
         },

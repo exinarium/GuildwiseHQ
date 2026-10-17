@@ -283,7 +283,9 @@ export const CardDetailResponseSchema = z.object({
   }),
   diffStats: DiffStats.nullable().optional(),
   /** Open desk items blocking this card (M2). */
-  blockers: z.array(z.object({ deskItemId: z.uuid(), title: z.string() })).default([]),
+  blockers: z
+    .array(z.object({ deskItemId: z.uuid(), title: z.string(), keepBlockedUntil: z.string().optional() }))
+    .default([]),
   /** M4: test runs (evidence), bug child / parent links and the finalize state. */
   testing: CardTestingSchema.optional(),
   /** Manual QA: the steps, the assignee, the decision and the held outgoing comment (absent: the card has no QA). */

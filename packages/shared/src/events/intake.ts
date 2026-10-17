@@ -6,7 +6,8 @@ export const ExternalSystem = z.enum(['jira', 'github']);
 export type ExternalSystem = z.infer<typeof ExternalSystem>;
 
 /** Steps of the escalation chain (docs/ARCHITECTURE.md section 15): a senior of the same role or the previous holder, then the BA, then the desk. */
-export const ChainLevel = z.enum(['peer', 'ba', 'desk']);
+/** `ceo`: the organization's CEO sits between the BA and the manager's desk (Lean Team v3). */
+export const ChainLevel = z.enum(['peer', 'ba', 'ceo', 'desk']);
 export type ChainLevel = z.infer<typeof ChainLevel>;
 
 export const intakeEvents = [

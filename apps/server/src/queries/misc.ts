@@ -1,6 +1,7 @@
 import {
   type BudgetDto,
   DEFAULT_MAX_RUN_ENVIRONMENTS,
+  DEFAULT_STOP_LOSS,
   detectForgeKind,
   isOrgOperational,
   McpServerInfoSchema,
@@ -8,6 +9,7 @@ import {
   type ProjectDto,
   type RoleCatalogueEntrySchema,
   SHIFT_LIMIT_CAPABILITY,
+  StopLossSettingsSchema,
   UNLIMITED_SHIFTS,
   type WorkstationDto,
 } from '@aom/shared';
@@ -69,6 +71,7 @@ export function toProjectDto(p: Row, myRole: 'owner' | 'manager'): ProjectDto {
       ? { byName: p.merge_large_changed_by_name ?? 'unknown', at: iso(p.merge_large_changed_at) as string }
       : null,
     maxConcurrentShifts: p.max_concurrent_shifts ?? null,
+    stopLoss: StopLossSettingsSchema.safeParse(p.stop_loss).data ?? DEFAULT_STOP_LOSS,
     fullSuiteAfterFinalize: p.full_suite_after_finalize ?? true,
     manualQa: p.manual_qa ?? true,
     designStep: p.design_step ?? false,

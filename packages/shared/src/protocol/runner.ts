@@ -1059,6 +1059,13 @@ export const ShiftStartSchema = msg('shift.start', {
   mcpServers: z.array(z.string()).optional(),
   /** The project's "Commit as" setting, used for every commit of this shift (absent: the clone's or the workstation's git identity). */
   commitAs: CommitAsSchema.nullable().optional(),
+  /**
+   * Lean Team v3: the agent's earlier Claude session on this card; the runner resumes it (when it can) instead of
+   * starting cold. Set for a card with affinity to this agent.
+   */
+  resumeSessionId: z.string().optional(),
+  /** Lean Team v3: the first message of a resumed session (the answer to its question, or the review findings). */
+  resumeMessage: z.string().max(40_000).optional(),
 });
 export const ShiftStopSchema = msg('shift.stop', { shiftId: z.uuid(), reason: ShiftStopReasonSchema });
 /** "Stop the running command": the runner kills the commands the agent runs (its tool process trees); the shift goes on. */

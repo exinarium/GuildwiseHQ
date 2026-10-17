@@ -17,6 +17,14 @@ export async function recordTransition(
 ): Promise<void> {
   if (!after) return;
   if (before && before.stage === after.stage && before.status === after.status) return;
+  // Lean Team v3: affinity belongs to one stage; a card that moved on is free for any agent again.
+  if (before && before.stage !== after.stage && before.affinity_agent_id)
+    await exec(
+      tx,
+      `UPDATE cards SET affinity_agent_id=NULL, affinity_session_id=NULL, affinity_until=NULL, affinity_reason=NULL,
+              affinity_desk_item_id=NULL WHERE id=$1`,
+      [after.id],
+    );
   const agentId =
     who.agentId !== undefined
       ? who.agentId

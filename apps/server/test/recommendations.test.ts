@@ -51,6 +51,8 @@ async function ask(text: string, fields: Record<string, unknown> = RICH) {
     options: [],
     doing: 'working',
     blocking: true,
+    // the ledger may already answer it: asking anyway is what these suites measure
+    force: true,
   })) as any;
   expect(res.accepted).toBe(true);
   r.ended(start.shiftId, 'reported');

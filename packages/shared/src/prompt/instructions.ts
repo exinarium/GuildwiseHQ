@@ -74,6 +74,8 @@ export function renderInstructions(brief: ShiftBrief): string {
       '- `aom comment --note "<text>"`: post a note on the card thread without ending the shift.',
       `- \`${QUESTION_COMMAND}\`: ask the manager when the card and ledger cannot answer; this ends the shift and parks the card as Blocked.`,
       '- `aom question ... --non-blocking`: ask the manager without ending the shift (add `--force` if the ledger already has a similar entry).',
+      '- `aom question ... --wait [10m]`: ask and keep working in this shift; the command prints the answer (or, with no answer in time, parks the card and you resume it later). Add `--topic environment|sandbox|tooling|dependency|order|requirements|design|code` so the right colleague gets it.',
+      '- `aom card facts [<REF>]`: environment status, whether dependencies have merged, branch, stage and blockers. The server answers these: look before you ask.',
       '',
       'If `aom` reports an error, read it, fix the cause and run the command again within this shift.',
       '',

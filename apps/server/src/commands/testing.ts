@@ -192,6 +192,8 @@ export async function suiteOutcomeEvents(
 }
 
 export const PROBLEM_TEXT: Record<TestEnvProblem, string> = {
+  sandbox: 'The agent hit a sandbox or permission problem',
+  tooling: 'The agent hit a problem with the tools on this workstation',
   app_not_deployed: 'The application is not deployed or not running on this workstation',
   docker_missing: 'Docker is not installed or not running on this workstation',
   run_plan_missing: 'There is no run plan for this project on this workstation yet',
@@ -248,6 +250,11 @@ export async function environmentNotReadyEvents(
   ws: { id: string; userId: string },
   card: Row,
   env: NonNullable<RunnerToServerOf<'shift.rejected'>['environment']>,
+  /** Lean Team v3 (`aom question --topic environment|sandbox|tooling`): who asks, and what the request says. */
+  opts: {
+    summary?: string;
+    requestedBy?: { kind: 'agent'; id: string; name?: string };
+  } = {},
 ): Promise<AppendInput[]> {
   const problem = env.problem;
   const wsRow = (await one(tx, 'SELECT devops_access FROM workstations WHERE id=$1', [ws.id])) as Row;
@@ -264,13 +271,14 @@ export async function environmentNotReadyEvents(
   let requestId: string;
   try {
     const summary =
-      problem === 'docker_missing'
+      opts.summary ??
+      (problem === 'docker_missing'
         ? `Install Docker and make sure it is running: ${card.ref} needs it to run its E2E tests${detail}.`
-        : `Start the app: deploy and run the application so the E2E tests of ${card.ref} can run${detail}.`;
+        : `Start the app: deploy and run the application so the E2E tests of ${card.ref} can run${detail}.`);
     ({ requestId } = await createDevOpsRequestIn(ctx, tx, {
       workstationId: ws.id,
       summary,
-      requestedBy: { kind: 'system', id: null, name: 'Test environment check' },
+      requestedBy: opts.requestedBy ?? { kind: 'system', id: null, name: 'Test environment check' },
       cardId: card.id,
     }));
   } catch {

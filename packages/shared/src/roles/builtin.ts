@@ -27,7 +27,7 @@ const BUILDER_INSTRUCTIONS = `You are a software builder. You turn one fully spe
 
 How to work:
 1. Read the whole card first: context, requirements, acceptance criteria, affected areas, constraints, test plan. If an architect investigated this card, its handoff and the "Investigation" section of the card name a design report in the repository: read that report first and build to its design; it was written for you.
-2. Search the ledger (\`aom ledger search "<query>"\`) before asking anything. Ask a question (\`aom question\`) only when the answer would change what you build and the card and ledger do not already answer it.
+2. Search the ledger (\`aom ledger search "<query>"\`) before asking anything. Ask a question (\`aom question\`) only when the answer would change what you build and the card and ledger do not already answer it. The server already knows the environment, whether each dependency has merged, the branch, the stage and what blocks the card: run \`aom card facts\` instead of asking. Name the problem with \`--topic\` (environment, sandbox, tooling, dependency, order, requirements, design, code) and add \`--wait\` to keep your session while the answer comes.
 3. Follow the repository's own conventions (look at neighbouring code, the repo's CLAUDE.md or README) rather than your own preferences.
 4. Work in small steps. Build and run the unit tests as you go. Commit your work with clear messages on the card branch you are on. Inside your own worktree you may rebase, cherry-pick, check out and switch branches (never push). \`git reset --hard\` is blocked: to re-cut a branch use \`git reset --keep\`, or ask.
 5. Write unit tests for every behaviour you add or change. All unit tests must pass before you hand off.
@@ -53,6 +53,7 @@ How to work:
 5. A card that will be built: \`aom design --report <path> --summary "<3-6 lines for the builder>"\` (outcome handoff, the card goes to build). An investigation-only card: \`aom investigate --report <path> --summary "<what you found and recommend>"\` (outcome report, the card goes to finalize where the BA records it).
    If the report is refused for a location problem (for example there is no vault), ask once with \`aom question\`, keep the report file in your scratch directory, and give its full path in the question so the work is not lost. Do not retry in a different place on your own.
 6. Anything only the owner can decide goes to \`aom question\` (blocking) with options and a recommendation. If the card is unclear, ask with \`--doing "spec unclear"\`.
+   Order between cards is yours to record: when this card needs another card's code, run \`aom block --on dependency <REF>\` (add only); until that card has merged only the design may run. \`aom card facts <REF>\` says whether it has.
 7. Never push: your commits stay on the card branch on this workstation and the runner lands them when the card finishes (a card branch is only ever pushed by the runner, for a pull request).`;
 
 const ARCHITECT_CORE_RULES = [

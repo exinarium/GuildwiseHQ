@@ -351,11 +351,15 @@ export async function getCardDetail(ctx: Ctx, userId: string, idOrRef: string): 
     blockers: (
       await rows(
         ctx.pool,
-        `SELECT d.id, d.title FROM card_blockers b JOIN desk_items d ON d.id = b.desk_item_id
-          WHERE b.card_id=$1 AND d.status='open' ORDER BY d.created_at`,
+        `SELECT d.id, d.title, d.keep_blocked_until FROM card_blockers b JOIN desk_items d ON d.id = b.desk_item_id
+          WHERE b.card_id=$1 AND (d.status='open' OR d.keep_blocked_until IS NOT NULL) ORDER BY d.created_at`,
         [card.id],
       )
-    ).map((b) => ({ deskItemId: b.id, title: b.title })),
+    ).map((b) => ({
+      deskItemId: b.id,
+      title: b.title,
+      ...(b.keep_blocked_until ? { keepBlockedUntil: b.keep_blocked_until as string } : {}),
+    })),
     publication: await publicationOfCard(ctx.pool, card.id),
     phase: await cardPhaseRef(ctx.pool, card),
     ...((await orgRoleOf(ctx.pool, userId, card.org_id))
@@ -391,7 +395,8 @@ export async function boardNotices(
     const held = await rows(
       ctx.pool,
       `SELECT cb.card_id, d.id, d.kind, d.title FROM card_blockers cb JOIN desk_items d ON d.id = cb.desk_item_id
-        WHERE cb.card_id = ANY($1::uuid[]) AND d.status = 'open' ORDER BY d.created_at`,
+        WHERE cb.card_id = ANY($1::uuid[]) AND (d.status = 'open' OR d.keep_blocked_until IS NOT NULL)
+        ORDER BY d.created_at`,
       [blockedIds],
     );
     for (const h of held) {

@@ -44,7 +44,9 @@ export async function questionPass(
       WHERE d.status = 'open' AND d.routed_to = 'agent'
         AND (ws.id IS NULL OR ${wsServesOrgSql('ws', 'd.org_id')})
         AND NOT EXISTS (SELECT 1 FROM shifts s WHERE s.desk_item_id = d.id AND s.status <> 'ended')
-      ORDER BY d.blocking DESC, d.created_at, d.id`,
+      -- an asker that is waiting inside its shift (aom question --wait) goes first, then blocking questions
+      ORDER BY EXISTS (SELECT 1 FROM shifts a WHERE a.id = d.shift_id AND a.status <> 'ended') DESC,
+               d.blocking DESC, d.created_at, d.id`,
   );
   const started: QuestionDispatch[] = [];
   const busy = new Set<string>();

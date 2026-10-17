@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { branchName, getStage, streamId } from '@aom/shared';
 import { loadWorkflowById } from '../catalogue/loader.ts';
 import { projectScope, SYSTEM_ACTOR } from '../commands/common.ts';
+import { cardUsage, limitReached, stopLossBudget, stopLossEvents } from '../commands/stop-loss.ts';
 import type { Ctx } from '../context.ts';
 import { one } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
@@ -74,6 +75,20 @@ export async function claim(ctx: Ctx, args: ClaimArgs): Promise<ClaimResult | nu
       if (Number(active?.n) >= a.capacity) return null;
     }
     if (!(await isCandidate(tx, view, args.cardId, ctx.clock.now()))) return null;
+    // Stop-loss on shifts: a card that used its shift budget is parked for its architect instead of going round again.
+    {
+      const row = await one(tx, 'SELECT * FROM cards WHERE id=$1', [args.cardId]);
+      if (row?.status === 'queued') {
+        const usage = await cardUsage(tx, row.id);
+        const budget = await stopLossBudget(tx, row);
+        const limit = limitReached(usage, budget);
+        if (limit) {
+          const parked = await stopLossEvents(ctx, tx, row, limit, usage, budget);
+          if (parked.length > 0) await ctx.store.append(parked, { tx });
+          return null;
+        }
+      }
+    }
 
     const now = ctx.clock.now();
     const claimId = randomUUID();

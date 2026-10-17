@@ -156,14 +156,22 @@ WHERE c.status = 'queued'
   AND (p.max_concurrent_shifts IS NULL OR (SELECT count(*) FROM cards pc
         WHERE pc.project_id = c.project_id AND pc.claim_id IS NOT NULL) < p.max_concurrent_shifts)
   AND (c.retry_after IS NULL OR c.retry_after <= $9::timestamptz)
+  -- Card affinity (a waiting question was converted, or review findings went back to the builder): while it is valid
+  -- only that agent may claim the card. It ends at its expiry, when the card moves on, or when the agent is gone.
+  AND (c.affinity_agent_id IS NULL OR c.affinity_until IS NULL OR c.affinity_until <= $9::timestamptz
+       OR c.affinity_agent_id = $1
+       OR NOT EXISTS (SELECT 1 FROM agents aa WHERE aa.id = c.affinity_agent_id AND aa.status = 'active'
+                       AND aa.paused_at IS NULL))
   -- A project over its monthly budget starts nothing new (running shifts finish): costs/index.ts budgetPausedSql.
   AND NOT ${budgetPausedSql('p', '$9')}
   AND NOT EXISTS (
         SELECT 1 FROM card_dependencies d JOIN cards dc ON dc.id = d.depends_on_card_id
          WHERE d.card_id = c.id
-           -- The first stage that creates the card branch waits for the dependencies to have LANDED (done, cancelled or
-           -- finalized with a merge: dependencies.ts), so a branch is never cut before they are in the working branch.
-           AND ((c.stage = 'build' AND c.rework_round = 0)
+           -- Order is a hard rule (Lean Team v3): at every stage except planning and design a card waits for its dependencies
+           -- to have LANDED (done, cancelled or finalized with a merge: dependencies.ts). The design stage waits only while
+           -- it would have to cut a card branch (no worktree yet), as before; the exception below keeps it going read-only.
+           AND c.stage <> 'planning'
+           AND (c.stage NOT LIKE 'investigate%'
                 OR (c.repo_id IS NOT NULL AND c.worktree_path IS NULL AND c.worktree_card_id IS NULL))
            AND NOT ${landedSql('dc')}
            -- Except the architect's design stage (backlog #80): it may start without a card branch, in a read-only
@@ -179,6 +187,8 @@ WHERE c.status = 'queued'
          WHERE d.card_id = c.id AND NOT ${landedSql('dc')}))
   ${cardFilter}
 ORDER BY
+  -- 0. cards this agent holds affinity to resume before any new work
+  (c.affinity_agent_id = $1 AND c.affinity_until > $9::timestamptz) DESC,
   -- 1. scheduled work first: schedules, interest scans and an on-demand "Research this" (they are scheduled cards)
   c.scheduled DESC,
   -- 2. the agent's own rework, then other rework

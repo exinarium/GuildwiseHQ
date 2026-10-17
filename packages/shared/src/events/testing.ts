@@ -18,6 +18,9 @@ export const TestEnvProblem = z.enum([
   'run_failed',
   /** Remote mode: the target does not answer. */
   'target_unreachable',
+  /** Lean Team v3: a card question about the sandbox or the tools, answered by the DevOps engineer (`aom question --topic`). */
+  'sandbox',
+  'tooling',
 ]);
 export type TestEnvProblem = z.infer<typeof TestEnvProblem>;
 

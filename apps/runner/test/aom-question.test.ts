@@ -74,6 +74,8 @@ describe('aom question', () => {
         doing: 'writing the formatter',
         blocking: true,
         force: false,
+        wait: false,
+        converts: false,
       },
     ]);
     expect(t.out.join('')).toContain('now Blocked');

@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { type ChainLevel, type DeskActor, streamId } from '@aom/shared';
+import { type ChainLevel, DESK_SUBKIND, type DeskActor, streamId } from '@aom/shared';
+import { ceoActive, ceoReachable } from '../ceo/state.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Queryable, type Row, rows } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
@@ -42,6 +43,10 @@ export interface RouteInput {
   tried: string[];
   /** BA routing (Part B, owner decision B2/B3): `ba` starts a non-blocking question at the BA instead of a peer. */
   via?: 'ba';
+  /** Lean Team v3: the topic the asker named (`aom question --topic`); it picks who is asked first. */
+  topic?: string | null;
+  /** The desk item's subkind: a stop-loss arbitration goes from the architect straight to the owner. */
+  subkind?: string | null;
 }
 
 /** Active, non-DevOps agents of the org on a connected workstation whose runtime is available, least recently busy first. */
@@ -51,6 +56,7 @@ async function onlineAgents(ctx: Ctx, db: Queryable, i: RouteInput): Promise<Row
     db,
     `SELECT a.*, ws.runtimes FROM agents a JOIN workstations ws ON ws.id = a.workstation_id
       WHERE a.org_id = $1 AND a.status = 'active' AND NOT a.is_devops AND ws.status = 'active' AND ws.connected
+        AND a.role_key <> 'ceo'
         AND ws.last_seen_at > $2 AND ($3::uuid IS NULL OR ((a.allowed_project_ids IS NULL OR $3::uuid = ANY (a.allowed_project_ids))
              AND EXISTS (SELECT 1 FROM project_members pm WHERE pm.project_id = $3::uuid AND pm.user_id = ws.user_id
                           AND pm.status = 'active')))
@@ -71,11 +77,101 @@ const asRoute = (a: Row, level: ChainLevel): Route => ({
   agentRole: a.role_key,
 });
 
-/** Who gets the question next (docs/ARCHITECTURE.md section 15). Pure of side effects. */
+/** The agent that made the card's design (latest architect handoff), or the card's builder, by role. */
+async function cardHolderOf(
+  db: Queryable,
+  cardId: string,
+  role: 'architect' | 'builder',
+): Promise<string | undefined> {
+  if (role === 'builder') {
+    const c = await one<{ original_builder_agent_id: string | null }>(
+      db,
+      'SELECT original_builder_agent_id FROM cards WHERE id=$1',
+      [cardId],
+    );
+    if (c?.original_builder_agent_id) return c.original_builder_agent_id;
+  }
+  return (
+    await one<{ agent_id: string }>(
+      db,
+      `SELECT h.agent_id FROM card_handoffs h JOIN agents a ON a.id = h.agent_id
+        WHERE h.card_id=$1 AND a.role_key=$2 ORDER BY h.created_at DESC, h.event_seq DESC LIMIT 1`,
+      [cardId, role],
+    )
+  )?.agent_id;
+}
+
+/**
+ * The agent a topic names, when it is online: dependency, order and design go to the card's architect, requirements
+ * to the BA, code to the card's builder. An architect or builder who is not reachable is replaced by another online
+ * agent of that role (a senior first); nobody online means the normal chain.
+ */
+async function topicRoute(db: Queryable, i: RouteInput, agents: Row[]): Promise<Route | undefined> {
+  const topic = i.topic;
+  if (!topic) return undefined;
+  if (topic === 'requirements') {
+    const ba = agents.find((a) => a.role_key === 'ba');
+    return ba ? asRoute(ba, 'ba') : undefined;
+  }
+  const role =
+    topic === 'dependency' || topic === 'order' || topic === 'design'
+      ? 'architect'
+      : topic === 'code'
+        ? 'builder'
+        : undefined;
+  if (!role) return undefined;
+  const own = i.cardId ? await cardHolderOf(db, i.cardId, role) : undefined;
+  const named = agents.find((a) => a.id === own && a.role_key === role);
+  const pick =
+    named ??
+    agents.find((a) => a.role_key === role && a.seniority === 'senior') ??
+    agents.find((a) => a.role_key === role);
+  return pick ? asRoute(pick, 'peer') : undefined;
+}
+
+/** The card's architect for a stop-loss arbitration (an online one), else the manager's desk. */
+export async function architectRoute(ctx: Ctx, db: Queryable, card: Row): Promise<Route> {
+  const input: RouteInput = {
+    orgId: card.org_id,
+    projectId: card.project_id,
+    cardId: card.id,
+    askerAgentId: null,
+    askerRole: null,
+    from: 'raise',
+    tried: [],
+    topic: 'design',
+  };
+  const agents = await onlineAgents(ctx, db, input);
+  return (await topicRoute(db, input, agents)) ?? { routedTo: 'manager', level: 'desk' };
+}
+
+/** The organization's CEO as a step before the desk, when it is active and a shift of it can run now. */
+async function ceoRoute(ctx: Ctx, db: Queryable, i: RouteInput): Promise<Route | undefined> {
+  if (i.askerRole === 'ceo') return undefined;
+  const ceo = await ceoActive(db, i.orgId);
+  if (!ceo?.agentId || ceo.agentId === i.askerAgentId || i.tried.includes(ceo.agentId)) return undefined;
+  if (!(await ceoReachable(db, i.orgId, ctx.clock.now())).ok) return undefined;
+  const a = await one(db, 'SELECT * FROM agents WHERE id=$1', [ceo.agentId]);
+  return a ? asRoute(a, 'ceo') : undefined;
+}
+
+/**
+ * Who gets the question next (docs/ARCHITECTURE.md section 15). Pure of side effects. A named topic is asked first
+ * (the card's architect, BA or builder); then the card's previous holder and the asker's seniors; then the BA, then the
+ * CEO when the organization has an active one, then the manager's desk. A stop-loss arbitration (the architect decides,
+ * else the owner) goes from the architect straight to the desk. Environment, sandbox and tooling questions are not
+ * routed here: they become a DevOps request (`commands/questions.ts`).
+ */
 export async function nextRoute(ctx: Ctx, db: Queryable, i: RouteInput): Promise<Route> {
   const desk: Route = { routedTo: 'manager', level: 'desk' };
-  if (i.from === 'ba' || i.askerRole === 'ba' || i.from === 'desk') return desk;
+  if (i.from === 'desk' || i.from === 'ceo' || i.askerRole === 'ceo') return desk;
+  if (i.subkind === DESK_SUBKIND.stopLoss && i.from !== 'raise') return desk;
   const agents = await onlineAgents(ctx, db, i);
+  if (i.from === 'ba' || i.askerRole === 'ba') return (await ceoRoute(ctx, db, i)) ?? desk;
+  if (i.from === 'raise') {
+    const topic = await topicRoute(db, i, agents);
+    if (topic) return topic;
+  }
   if (i.from === 'raise' && i.via !== 'ba') {
     // The card's previous holder (someone else's last handoff), then seniors of the asker's role.
     const prev = i.cardId
@@ -92,7 +188,7 @@ export async function nextRoute(ctx: Ctx, db: Queryable, i: RouteInput): Promise
     if (senior) return asRoute(senior, 'peer');
   }
   const ba = agents.find((a) => a.role_key === 'ba');
-  return ba ? asRoute(ba, 'ba') : desk;
+  return ba ? asRoute(ba, 'ba') : ((await ceoRoute(ctx, db, i)) ?? desk);
 }
 
 /** Ids of the agents already in the item's trail (they are not asked again). */
@@ -236,9 +332,11 @@ export async function escalateEvents(
   const at: ChainLevel =
     by?.role_key === 'ba'
       ? 'ba'
-      : item.routed_agent_id
-        ? await currentLevel(tx, item.routed_agent_id)
-        : 'desk';
+      : by?.role_key === 'ceo'
+        ? 'ceo'
+        : item.routed_agent_id
+          ? await currentLevel(tx, item.routed_agent_id)
+          : 'desk';
   const route = await nextRoute(ctx, tx, {
     orgId: item.org_id,
     projectId: item.project_id,
@@ -247,6 +345,8 @@ export async function escalateEvents(
     askerRole: item.asked_by_role,
     from: at,
     tried: triedAgents(item),
+    topic: item.topic ?? null,
+    subkind: item.subkind ?? null,
   });
   // A question reaching the BA or the desk that matches an open one is attached to it, not asked a second time.
   if (route.level !== 'peer') {
@@ -291,7 +391,7 @@ export async function escalateEvents(
 
 async function currentLevel(db: Queryable, agentId: string): Promise<ChainLevel> {
   const a = await one<{ role_key: string }>(db, 'SELECT role_key FROM agents WHERE id=$1', [agentId]);
-  return a?.role_key === 'ba' ? 'ba' : 'peer';
+  return a?.role_key === 'ba' ? 'ba' : a?.role_key === 'ceo' ? 'ceo' : 'peer';
 }
 
 /** The ShiftEnded of a question shift (the runner's `shift.ended`, a rejection, or the server giving up on it). */
@@ -363,6 +463,7 @@ export async function applyQuestionReport(
 
   if (report.kind === 'answer') {
     const optionId = report.optionId as string | undefined;
+    const keep = (report.keepBlockedUntil as string | undefined)?.trim() || undefined;
     if (optionId && !(item.options as Array<{ id: string }>).some((o) => o.id === optionId))
       return { accepted: false, error: `--option ${optionId} is not one of the item's options` };
     const blocked = await rows<{ card_id: string }>(
@@ -385,7 +486,8 @@ export async function applyQuestionReport(
             ...(optionId ? { answerOption: optionId } : {}),
             answeredBy: by,
             ledgerEntryId: entryId,
-            unblockedCardIds: blocked.map((b) => b.card_id),
+            unblockedCardIds: keep ? [] : blocked.map((b) => b.card_id),
+            ...(keep ? { keepBlockedUntil: keep } : {}),
           },
         },
         actor: agentActor(agent.id),
@@ -431,7 +533,9 @@ export async function applyQuestionReport(
     await ctx.store.append(events, { tx });
     return {
       accepted: true,
-      message: 'Recorded. The asker gets your answer; the card goes back to the queue. Finish now.',
+      message: keep
+        ? `Recorded. The asker gets your answer; the card stays parked until: ${keep}. Finish now.`
+        : 'Recorded. The asker gets your answer; the card goes back to the queue. Finish now.',
     };
   }
 

@@ -20,8 +20,12 @@ import {
   parseCommandLine,
   parseRunHealth,
   parseRunPort,
+  parseWaitDuration,
   QA_FOCUS_MAX,
+  QUESTION_TOPICS,
+  QUESTION_WAIT,
   type QuestionShift,
+  type QuestionTopic,
   ReviewRisk,
   RISK_ANALYSIS_MAX,
   type RpcMethod,
@@ -46,6 +50,9 @@ export interface AomContext {
   io: AomIo;
   fetch: typeof fetch;
   readFile: (path: string) => string;
+  /** Test hooks for `aom question --wait` (real timers when absent). */
+  sleep?: (ms: number) => Promise<void>;
+  now?: () => number;
 }
 
 interface Parsed {
@@ -96,7 +103,14 @@ export function parseArgs(argv: string[], verb?: string): Parsed {
       const key = eq === -1 ? a.slice(2) : a.slice(2, eq);
       let value: string;
       if (eq !== -1) value = a.slice(eq + 1);
-      else if (BOOLEAN_FLAGS.has(key) && !(inlineJson && key === 'json')) value = 'true';
+      // `aom question --wait [10m]`: the duration is optional.
+      else if (verb === 'question' && key === 'wait') {
+        const next = argv[i + 1];
+        if (next !== undefined && parseWaitDuration(next) !== null) {
+          value = next;
+          i++;
+        } else value = 'true';
+      } else if (BOOLEAN_FLAGS.has(key) && !(inlineJson && key === 'json')) value = 'true';
       else {
         const next = argv[i + 1];
         if (next === undefined) throw new UsageError(`--${key} needs a value`);
@@ -204,6 +218,79 @@ async function report(ctx: AomContext, rep: ShiftReport): Promise<number> {
   if (status === 409) ctx.io.err('Do not report again. Finish now.\n');
   else ctx.io.err('Fix the problem and run the command again within this shift.\n');
   return 1;
+}
+
+interface QuestionStatusReply {
+  state: 'open' | 'answered' | 'unattended' | 'parked' | 'none';
+  remainingMs: number;
+  answer?: string;
+  keepBlockedUntil?: string;
+}
+
+/**
+ * `aom question --wait [10m]` (Lean Team v3, design 6.2): raise the question without ending the shift, poll the server
+ * every ~15 s and print the answer so the agent continues in the same session. When nobody answers in time (or only the
+ * manager's desk could), the question becomes a blocking one: the card is parked on it, the claim is released, and the
+ * card stays with this agent, which resumes it when the answer arrives. The wait never outlasts the shift.
+ */
+async function questionWait(
+  ctx: AomContext,
+  base: Extract<ShiftReport, { kind: 'question' }>,
+  minutes: number,
+): Promise<number> {
+  if (minutes <= 0) throw new UsageError('--wait takes a duration like 10m, 90s or 1h');
+  const waitMs = Math.min(minutes, QUESTION_WAIT.maxMinutes) * 60_000;
+  const sleep = ctx.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const now = ctx.now ?? Date.now;
+  const raised = await post(ctx, IPC_REPORT_PATH, { report: { ...base, blocking: false, wait: true } });
+  if (raised.status === 401)
+    throw new Error('this shift is over (token no longer valid): nothing was recorded');
+  const r = raised.json as unknown as Partial<IpcReportResponse> & { error?: string };
+  if (!(raised.status === 200 && r.accepted)) {
+    ctx.io.err(`${r.message ?? `Rejected (HTTP ${raised.status})`}\n`);
+    if (r.error && !r.message?.includes(r.error)) ctx.io.err(`${r.error}\n`);
+    ctx.io.err('Fix the problem and run the command again within this shift.\n');
+    return 1;
+  }
+  const started = now();
+  const answered = (s: QuestionStatusReply): number => {
+    ctx.io.out(
+      `Answer: ${s.answer ?? ''}\n${s.keepBlockedUntil ? `The card stays parked until: ${s.keepBlockedUntil}. Finish now; do not make further changes.\n` : 'Continue with your work.\n'}`,
+    );
+    return 0;
+  };
+  const convert = async (): Promise<number> => {
+    const c = await post(ctx, IPC_REPORT_PATH, {
+      report: { ...base, blocking: true, wait: false, converts: true },
+    });
+    const cr = c.json as unknown as Partial<IpcReportResponse> & { error?: string };
+    if (c.status === 200 && cr.accepted) {
+      ctx.io.out(`${cr.message ?? 'Recorded.'}\n`);
+      return 0;
+    }
+    // Answered between the last poll and now: show the answer instead.
+    const s = (await rpc(ctx, 'question.status', {})) as QuestionStatusReply;
+    if (s.state === 'answered') return answered(s);
+    ctx.io.err(`${cr.message ?? cr.error ?? `Rejected (HTTP ${c.status})`}\n`);
+    return 1;
+  };
+  ctx.io.out('Question sent. Waiting for the answer (keep this command running; do not start other work).\n');
+  for (;;) {
+    const s = (await rpc(ctx, 'question.status', {})) as QuestionStatusReply;
+    if (s.state === 'answered') return answered(s);
+    if (s.state === 'parked') {
+      ctx.io.out('The card is parked on your question. Finish now; do not make further changes.\n');
+      return 0;
+    }
+    if (s.state === 'none') {
+      ctx.io.err('The server has no question of this shift: run the command again.\n');
+      return 1;
+    }
+    const left = Math.min(waitMs - (now() - started), s.remainingMs);
+    // Only the manager's desk can answer (nobody up the chain is available), or time is up: park the card on it.
+    if (s.state === 'unattended' || left <= 0) return convert();
+    await sleep(Math.min(QUESTION_WAIT.pollSeconds * 1000, left));
+  }
 }
 
 const outcome = (outcomeId: string, note: string, data: Record<string, unknown> = {}): ShiftReport => ({
@@ -824,6 +911,12 @@ const VERBS: Record<string, Verb> = {
   card: async (ctx, p) => {
     const sub = p.positionals[0];
     if (sub === 'create' || sub === 'update' || sub === 'specify') return cardDraft(ctx, p, sub);
+    // `aom card facts [REF]` (Lean Team v3): what the server knows (environment, dependencies merged, branch, stage, blockers).
+    if (sub === 'facts') {
+      const r = await rpc(ctx, 'card.facts', p.positionals[1] ? { ref: p.positionals[1] } : {});
+      ctx.io.out(`${JSON.stringify(r, null, 2)}\n`);
+      return 0;
+    }
     // `aom card show [REF]` / `aom card comment [REF] --note "<t>"` (a DevOps request filed for a card): that one card.
     if (sub === 'show') {
       const r = (await rpc(
@@ -908,8 +1001,16 @@ const VERBS: Record<string, Verb> = {
   comment: async (ctx, p) => report(ctx, { kind: 'comment', note: textFlag(ctx, p, 'note', true) as string }),
   question: async (ctx, p) => {
     const rec = one(p, 'recommend');
-    return report(ctx, {
-      kind: 'question',
+    const topic = one(p, 'topic');
+    if (topic !== undefined && !(QUESTION_TOPICS as readonly string[]).includes(topic))
+      throw new UsageError(`--topic must be one of ${QUESTION_TOPICS.join(', ')}`);
+    const wait = one(p, 'wait');
+    if (wait !== undefined && has(p, 'non-blocking'))
+      throw new UsageError(
+        '--wait and --non-blocking cannot be used together: --wait already keeps you working',
+      );
+    const base = {
+      kind: 'question' as const,
       text:
         one(p, 'text') ??
         ((): never => {
@@ -920,7 +1021,33 @@ const VERBS: Record<string, Verb> = {
       doing: one(p, 'doing') ?? '',
       blocking: !has(p, 'non-blocking'),
       force: has(p, 'force'),
-    });
+      ...(topic ? { topic: topic as QuestionTopic } : {}),
+      wait: false,
+      converts: false,
+    };
+    if (wait === undefined) return report(ctx, base);
+    return questionWait(
+      ctx,
+      base,
+      wait === 'true' ? QUESTION_WAIT.defaultMinutes : (parseWaitDuration(wait) ?? 0),
+    );
+  },
+  block: async (ctx, p) => {
+    const usage = 'usage: aom block --on dependency <card-ref> [--card <REF>]';
+    const on = one(p, 'on');
+    if (on === undefined) throw new UsageError(usage);
+    if (on !== 'dependency')
+      throw new NotAvailable(
+        `--on ${on} is not available yet: only \`--on dependency <card-ref>\` records a wait. For anything else ask with \`aom question --topic\``,
+      );
+    const ref = p.positionals[0];
+    if (!ref) throw new UsageError(usage);
+    const r = (await rpc(ctx, 'card.depend', {
+      on: ref,
+      ...(one(p, 'card') ? { card: one(p, 'card') } : {}),
+    })) as { message?: string } | undefined;
+    ctx.io.out(`${r?.message ?? 'Recorded.'}\n`);
+    return 0;
   },
   handoff: async (ctx, p) => {
     const dataFile = one(p, 'data-file');
@@ -1257,13 +1384,17 @@ const VERBS: Record<string, Verb> = {
   answer: async (ctx, p) => {
     const itemId = one(p, 'item');
     if (!itemId)
-      throw new UsageError('usage: aom answer --item <id> --text "<answer>" [--option <option id>]');
+      throw new UsageError(
+        'usage: aom answer --item <id> --text "<answer>" [--option <option id>] [--keep-blocked-until "<condition>"]',
+      );
     const optionId = one(p, 'option');
+    const keep = one(p, 'keep-blocked-until');
     return report(ctx, {
       kind: 'answer',
       itemId,
       text: textFlag(ctx, p, 'text', true) as string,
       ...(optionId ? { optionId } : {}),
+      ...(keep?.trim() ? { keepBlockedUntil: keep.trim() } : {}),
     });
   },
   escalate: async (ctx, p) => {
@@ -1540,7 +1671,9 @@ export const USAGE = `usage: aom <verb> [options]
   card [--json]                              print the card and brief
   ledger search "<query>" [--scope s]        search decisions and standing orders
   comment --note "<text>"                    post a note without ending the shift
-  question --text "<q>" [--option "<a>"]... [--recommend <n>] [--doing "<x>"] [--non-blocking] [--force]
+  question --text "<q>" [--option "<a>"]... [--recommend <n>] [--doing "<x>"] [--topic environment|sandbox|tooling|dependency|order|requirements|design|code] [--wait [10m]] [--non-blocking] [--force]   --wait: keep working in this shift until it is answered (default 10 minutes); no answer in time parks the card on the question and you resume it when it is answered
+  card facts [<REF>]                         what the server knows: environment, whether each dependency has merged, branch, stage, blockers (look here before you ask)
+  block --on dependency <REF> [--card <REF>]   architect/planner/BA: this card waits for another card (only its design may run until that one has merged)
   handoff --note "<text>" [--data-file <json>]   builder/scout/researcher: hand the card on (scout: candidates)
   publish --file <note.md> [--title "<t>"] [--citations-file <json>] [--path <p>]   checker: publish the verified note
   digest --file <json> [--note "<text>"] | --none   curator: post the digest (empty when nothing qualifies)
@@ -1552,7 +1685,7 @@ export const USAGE = `usage: aom <verb> [options]
   test fail --title "<bug>" --note "<text>" [--evidence "<text>"] [--command "<cmd>"]...
   outcome <id> --note "<text>" [--data-file <json>]
   batch done|ask|skip|fail ...   BA batch intake: end the shift for this ticket (done: cards created; ask: one question for the owner, who answers on the desk; skip; fail)
-  answer --item <id> --text "<answer>" [--option <id>]   answer a colleague's question (question shifts)
+  answer --item <id> --text "<answer>" [--option <id>] [--keep-blocked-until "<condition>"]   answer a colleague's question (question shifts); --keep-blocked-until keeps the asker's card parked
   escalate --item <id> --note "<what must be decided>"   pass the question on (peer -> BA -> manager's desk)
   finalize [--note "<note>"]   BA: run the card's own completion action (you never choose it; an investigation-only card with its report in the vault needs no git step)
   design --report <path> --summary "<text>" | investigate --report <path> --summary "<text>"   architect: hand the card on with its design (build), or end an investigation-only card (finalize); the runner checks the report is committed

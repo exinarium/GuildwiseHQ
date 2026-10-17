@@ -58,6 +58,8 @@ export const deskEvents = [
       subkind: z.string().optional(),
       /** M7: where in the escalation chain the question starts (default: the desk). */
       chainLevel: ChainLevelSchema.optional(),
+      /** Lean Team v3: the topic the asker named (`aom question --topic`), kept for routing on later steps. */
+      topic: z.string().optional(),
       /** Part B: held for the BA's triage until `deadline` (non-urgent questions of the DevOps engineer). */
       triage: z.object({ deadline: z.iso.datetime() }).optional(),
       /** Structured data the answer handler needs (the working-branch question: repo and reason). */
@@ -90,6 +92,11 @@ export const deskEvents = [
         ledgerEntryId: Id.optional(),
         /** Blocked cards that return to the queue (no other open blocker). */
         unblockedCardIds: z.array(Id).default([]),
+        /**
+         * Additive (Lean Team v3): the answer says the card must stay parked until this condition holds (free text);
+         * the blocked cards are not returned to the queue. Absent on every older event, which keeps its meaning.
+         */
+        keepBlockedUntil: z.string().min(1).max(500).optional(),
       })
       // The manager's answers always carry their ledger entry id (an agent's in the chain may predate it).
       .refine((p) => p.answeredBy.kind !== 'user' || p.ledgerEntryId !== undefined, {

@@ -415,7 +415,7 @@ describe('a duplicate question attaches to the open one', () => {
     expect(await q('SELECT 1 FROM ledger_entries')).toHaveLength(1);
   });
 
-  it('a question the BA receives by escalation attaches to the matching open one, and an agent answer unblocks every card', async () => {
+  it('a question that matches an open one is attached to it at once, whichever step it would start at, and an agent answer unblocks every card', async () => {
     await fresh([
       ['Sam', 'builder', 'senior'],
       ['Bea', 'builder', 'junior'],
@@ -424,15 +424,10 @@ describe('a duplicate question attaches to the open one', () => {
     // Sam's own question has no senior to go to: it is with the BA.
     const first = await asked({}, 'Sam');
     expect(await item(first.item.id)).toMatchObject({ routed_to: 'agent' });
-    // Bea's goes to Sam first; Sam cannot answer and passes it to the BA, where it matches the open one.
+    // Bea's would go to Sam (a peer) first, but it is the same question: the duplicate check runs on every route.
     const second = await asked({}, 'Bea');
-    expect(await trail(second.item.id)).toEqual(['asked', 'peer']);
-    const sam = await questionShift('Sam');
-    expect(sam.question.deskItemId).toBe(second.item.id);
-    const out = await escalate(sam.shiftId, second.item.id, 'ask the BA');
-    expect(out.message).toMatch(/already open/);
-    r.ended(sam.shiftId, 'reported');
-    expect(await item(second.item.id)).toMatchObject({ status: 'superseded' });
+    expect(second.res.message).toMatch(/already open/);
+    expect(await item(second.item.id)).toMatchObject({ status: 'superseded', merged_into: first.item.id });
     expect((await trail(second.item.id)).at(-1)).toBe('merged');
     expect((await trail(first.item.id)).at(-1)).toBe('merged');
     expect((await cardRow(second.card.id)).status).toBe('blocked');

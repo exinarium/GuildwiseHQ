@@ -23,6 +23,7 @@ import { phaseProjectors } from './phases.ts';
 import { platformAuditProjectors } from './platform-audit.ts';
 import { projectWorkflowProjectors } from './project-workflows.ts';
 import { projectProjectors } from './projects.ts';
+import { questionFlowProjectors } from './question-flow.ts';
 import { repoProjectors } from './repo.ts';
 import { reporterProjectors } from './reporter.ts';
 import { researchProjectors } from './research.ts';
@@ -81,6 +82,7 @@ const domains: Array<Record<string, Projector>> = [
   runProjectors,
   commitAsProjectors,
   ceoProjectors,
+  questionFlowProjectors,
 ];
 
 export function buildProjectors(): ProjectorMap {

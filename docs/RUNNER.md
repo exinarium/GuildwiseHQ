@@ -587,11 +587,22 @@ aom card [--json]                                      print the card and brief
 aom ledger search "<query>" [--scope all|feature|decision|standing_order]
                                                        search answers, decisions and standing orders
 aom comment --note "<text>"                            post a note without ending
-aom question --text "<q>" [--option "<a>"]... [--recommend <n>] [--doing "<x>"] [--non-blocking] [--force]
+aom question --text "<q>" [--option "<a>"]... [--recommend <n>] [--doing "<x>"] [--topic <topic>] [--wait [10m]] [--non-blocking] [--force]
+aom card facts [<REF>]                                 what the server knows: environment, dependencies merged, branch, stage, blockers
+aom block --on dependency <REF> [--card <REF>]         architect, planner, BA: this card waits for another card
 aom devops "<request>"                                 ask the DevOps engineer
 ```
 
-Agents must run `aom ledger search` before raising a question: every answer (from the manager, a senior or the BA) is recorded in the ledger once and should never be asked twice. `aom question` also runs a duplicate check and returns matching ledger entries; a non-blocking question that matches needs `--force`.
+Agents must run `aom ledger search` before raising a question: every answer (from the manager, a senior or the BA) is recorded in the ledger once and should never be asked twice. `aom question` also runs a duplicate check and returns matching ledger entries; a non-blocking question that matches needs `--force`, and a blocking one that is practically the same as a ledger entry is refused the same way.
+
+**Questions (Lean Team v3).**
+- `--topic environment|sandbox|tooling|dependency|order|requirements|design|code` names the problem; the server routes by topic, not by who touched the card last. Environment, sandbox and tooling become a request for the workstation's DevOps engineer (an open request of the card is attached to, not asked twice) and a blocking question parks the card on it; dependency, order and design go to the card's architect, requirements to the BA, code to the card's builder. Then the previous holder, a senior of the asker's role, the BA, the organization's CEO (when it has an active one) and the manager's desk. Routine topics (environment, sandbox, tooling, dependency, order, code) are answered on Sonnet; design and requirements keep the answerer's model. The answerer's brief is slim: the card summary, the question and the three best ledger matches.
+- `--wait [10m]` raises the question without ending the shift and polls the server every 15 seconds (the Bash call blocks, at most 10 minutes and never longer than the shift has left). The answer is printed and the agent carries on in the same session. If nobody answers in time, or only the manager's desk could, the question becomes a blocking one: the card is parked on it and the claim is released, and the card keeps **affinity** to the agent (4 hours): only that agent may claim it, it is offered before new work, and the shift start carries `resumeSessionId` and `resumeMessage` (the answer) so the runner resumes the session. Review findings that send a card back to its builder set the same affinity. Affinity ends at its expiry or when the card changes stage.
+- `aom answer --item <id> --text "<a>" --keep-blocked-until "<condition>"` answers a question but keeps the asker's card parked (no re-queue). The card page shows the condition; moving the card to the queue ends the park. The owner can do the same on the desk (`keepBlockedUntil`).
+- Repeat guard: the second similar question on the same card and stage with no handoff in between does not reach anybody. The card is parked with a back-off and exactly one desk item says so. Five question shifts about one card within two hours put it in loop back-off, whatever the wording.
+- `aom card facts` answers what the agent would otherwise ask: the environment status, whether each dependency has merged, the branch, the stage and the blockers. `aom card facts <REF>` does the same for another card of the project.
+- `aom block --on dependency <REF>` records that this card waits for another card (add only, any open card, no cycles, same project). Until the dependency has merged only the design stage may run; build, review and test wait.
+- Stop-loss: a card is parked and goes to its architect for arbitration (the owner gets one item if the architect cannot resolve it) when it reaches its budget of build passes, review rounds or shifts: small 2 / 2 / 10, medium 3 / 2 / 15, large 4 / 2 / 25. Size follows the risk tier (large is large; a card that needs a design is medium; the rest is small). The budget is a project setting (`PUT /api/projects/:id/stop-loss`); each arbitration the architect answers with "go on" adds one pass, one round and five shifts.
 
 **DevOps engineer of a "Run request" (run a branch), only for the environment of its own request:**
 ```sh
@@ -630,7 +641,7 @@ aom card create --json '<draft json>'      # or --file <draft.json>, or --file -
 aom card update <REF> --json '<patch json>' # or --file <patch.json> / --file -
 aom card specify <REF>
 aom finalize --note "<note>"                  # BA: runs the card's own completion action (never chosen by the agent; pr requires `gh`, without it the branch is pushed under the PR name and a desk notice asks for the pull request by hand)
-aom answer --item <id> --text "<answer>" [--option <id>]
+aom answer --item <id> --text "<answer>" [--option <id>] [--keep-blocked-until "<condition>"]
 aom escalate --item <id> --note "<what must be decided>"
 aom intake map --project <KEY> | aom intake unmapped --note "<why>"
 aom repo create [--provider github|gitlab|azure-devops|bitbucket-cloud] [--host <h>] --name <name> --private|--public --project <KEY> [--description "<text>"]   # BA chat and DevOps: asks the project owner; their runner creates it after approval

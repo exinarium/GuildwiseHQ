@@ -12,6 +12,7 @@ import { endCeoShift } from '../ceo/shift.ts';
 import type { ChatTerminal } from '../chat/relay.ts';
 import { baTaskRpc, endBaTaskShift } from '../commands/ba-tasks.ts';
 import { attachmentRpc } from '../commands/card-attachments.ts';
+import { cardDependRpc, cardFactsRpc } from '../commands/card-facts.ts';
 import { cardMessage, SYSTEM_ACTOR, userScope } from '../commands/common.ts';
 import { designRpc } from '../commands/design-rpc.ts';
 import { alignDevopsRuntime, createDevOpsRequestIn, endDevopsShift } from '../commands/devops.ts';
@@ -32,6 +33,7 @@ import { applyMcpServersReport, mcpCallsIn, mergeMcpCalls } from '../commands/mc
 import { applyOrgFolderResult, applyOrgFoldersReport } from '../commands/org-folders.ts';
 import { applyOutboundResult, finishOutboundCommand, queueApprovedFor } from '../commands/outbox.ts';
 import { applyBranchCheckResult } from '../commands/phases.ts';
+import { questionStatus } from '../commands/question-flow.ts';
 import { applyReleasePrResult } from '../commands/release-pr.ts';
 import { applyRepoCreateResult, repoCreateRpc } from '../commands/repo-create.ts';
 import { applyRepoSyncStatus, seedRepoSync } from '../commands/repo-sync.ts';
@@ -108,6 +110,12 @@ const DESIGN_METHODS = new Set([
   'org.submit',
   'org.department',
 ]);
+/** A question shift has no card of its own: the card of the question it answers is the one it may read facts about. */
+async function cardOfShift(ctx: Ctx, shift: Record<string, any>): Promise<Record<string, any>> {
+  if (shift.card_id || !shift.desk_item_id) return shift;
+  const item = await one(ctx.pool, 'SELECT card_id FROM desk_items WHERE id=$1', [shift.desk_item_id]);
+  return item?.card_id ? { ...shift, card_id: item.card_id } : shift;
+}
 const LOST_AFTER_MISSED_HEARTBEATS = 2;
 const STOP_RESEND_MS = 30_000;
 
@@ -988,6 +996,11 @@ export class RunnerHandlers {
         return reply(...(await this.devopsRequest(conn, shift, msg.params)));
       if (msg.method === 'outbound.draft') return reply(...(await outboundDraftRpc(ctx, shift, msg.params)));
       if (msg.method === 'card.risk') return reply(...(await riskTierRpc(ctx, shift, msg.params)));
+      // Lean Team v3: facts the server knows, recording a dependency, and the status of a waiting question.
+      if (msg.method === 'card.facts')
+        return reply(...(await cardFactsRpc(ctx, await cardOfShift(ctx, shift), msg.params)));
+      if (msg.method === 'card.depend') return reply(...(await cardDependRpc(ctx, shift, msg.params)));
+      if (msg.method === 'question.status') return reply(true, await questionStatus(ctx, shift));
       if (msg.method === 'test.suite') return reply(...(await recordSuiteResult(ctx, shift, msg.params)));
       if (msg.method === 'env.suites') return reply(...(await suitesFor(ctx.pool, shift)));
       if (msg.method === 'env.suites.propose') return reply(...(await proposeSuites(ctx, shift, msg.params)));

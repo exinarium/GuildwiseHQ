@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { DESK_SUBKIND, LOOP_BREAKER, loopBackoffMinutes, streamId } from '@aom/shared';
+import { DESK_SUBKIND, LOOP_BREAKER, loopBackoffMinutes, QUESTION_LOOP, streamId } from '@aom/shared';
 import type { Ctx } from '../context.ts';
-import { one, type Row } from '../db/sql.ts';
+import { one, type Queryable, type Row } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { projectScope, SYSTEM_ACTOR } from './common.ts';
@@ -135,4 +135,52 @@ export function rejectionBackoffEvents(ctx: Ctx, card: Row): AppendInput[] {
       scope: projectScope(card.org_id, card.project_id),
     },
   ];
+}
+
+/** Question shifts (answers given to the agents asked) about one card since `since`, whatever the wording of the questions. */
+export async function questionShiftCount(db: Queryable, cardId: string, since: Date): Promise<number> {
+  const r = await one<{ n: number }>(
+    db,
+    `SELECT count(*)::int AS n FROM shifts s JOIN desk_items d ON d.id = s.desk_item_id
+      WHERE s.kind='question' AND d.card_id=$1 AND s.started_at > $2`,
+    [cardId, since],
+  );
+  return Number(r?.n ?? 0);
+}
+
+/**
+ * The loop breaker also counts question shifts (a question counts as a report, so the failure count never saw them):
+ * `QUESTION_LOOP.shifts` question shifts about one card within `QUESTION_LOOP.windowHours` put the card in back-off
+ * with one desk alert per episode, whatever the questions said. Returns the events (none while an alert is open).
+ */
+export async function questionLoopEvents(ctx: Ctx, tx: Tx, card: Row): Promise<AppendInput[]> {
+  const since = new Date(ctx.clock.now().getTime() - QUESTION_LOOP.windowHours * 3600_000);
+  const n = await questionShiftCount(tx, card.id, since);
+  if (n < QUESTION_LOOP.shifts) return [];
+  if ((await openLoopAlerts(tx, card.id)).length > 0) return [];
+  const events = rejectionBackoffEvents(ctx, card);
+  const deskItemId = randomUUID();
+  events.push({
+    streamId: streamId.desk(deskItemId),
+    event: {
+      type: 'DeskItemCreated',
+      payload: {
+        deskItemId,
+        kind: 'alert',
+        subkind: DESK_SUBKIND.loopBackoff,
+        title: `${card.ref} keeps asking: ${n} question shifts in ${QUESTION_LOOP.windowHours} hours`,
+        body: `${card.ref} (${card.title}) caused ${n} question shifts in ${QUESTION_LOOP.windowHours} hours. The questions may differ in wording, but the card is going round: ask, answer, ask again. The dispatcher holds the card back with a growing back-off. Find what the agents are missing (a decision, a dependency, an environment) and say it on the card, or release the back-off on the card page to retry now.`,
+        options: [],
+        blocking: false,
+        pinned: false,
+        cardId: card.id,
+        projectId: card.project_id,
+        affectedCardIds: [card.id],
+        askedBy: { kind: 'system' },
+      },
+    },
+    actor: SYSTEM_ACTOR,
+    scope: projectScope(card.org_id, card.project_id),
+  });
+  return events;
 }

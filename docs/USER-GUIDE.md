@@ -551,6 +551,8 @@ The **Desk** is where every question and approval reaches you. Cards do not move
 
 ![The Desk](guide/assets/desk.jpg)
 
+An agent can wait for an answer without losing its work, and an agent's answer can say **keep this card parked until** something happens. If the same question is asked again on a card with nothing changed, the card is parked with a back-off and you get one item about it instead of another round of questions. A card that uses up its passes, review rounds or shifts (small 2 / 2 / 10, medium 3 / 2 / 15, large 4 / 2 / 25, adjustable per project) goes to its architect first and reaches you only if the architect cannot resolve it.
+
 Each desk item says **what kind it is** (Question, DevOps approval, Merge approval, Outbound update, Digest to rate, Alert, Floor report, and so on), **who asked and what they were doing**, the **question** with options and a **recommendation**, and **how many cards are waiting**. To answer, click an option or type your own answer, optionally add it to the ledger, and click **Answer**.
 
 ![A question with options and a recommendation](guide/assets/desk-question.jpg)
@@ -602,7 +604,7 @@ Setting a budget below what was already spent pauses the project at once. Member
 
 ### 4.7 The org chart, roles and workflows
 
-**Org chart** (sidebar, Organization) shows who works for you and who answers whom, as a tree: you at the top, then the BAs, then each department with its seniors above its juniors. The lines are the **escalation path**: a question goes to a senior of the same role, then to the BA, then to your desk. Each tile shows the agent's face, name, role, what it is doing and its workstation. Click an agent for its card. **List** shows the same as grouped lists (the default on a phone).
+**Org chart** (sidebar, Organization) shows who works for you and who answers whom, as a tree: you at the top, then the BAs, then each department with its seniors above its juniors. The lines are the **escalation path**: a question goes to the colleague its topic names (the card's architect for design questions, the BA for requirements, the builder for code, the DevOps engineer for environment problems), else to a senior of the same role, then to the BA, then to your CEO if you have one, then to your desk. Each tile shows the agent's face, name, role, what it is doing and its workstation. Click an agent for its card. **List** shows the same as grouped lists (the default on a phone).
 
 ![The org chart](guide/assets/org-chart.jpg)
 

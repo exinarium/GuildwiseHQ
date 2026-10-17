@@ -14,7 +14,16 @@ import type { AppendInput } from '../eventstore/types.ts';
 import { dedupMatches } from '../queries/ledger.ts';
 import { reportingOf } from '../reporter/settings.ts';
 import { agentActor, cardMessage, projectScope } from './common.ts';
-import { findOpenDuplicate, mergeEvents, nextRoute, routedMessage } from './escalation.ts';
+import {
+  DUPLICATE_SIMILARITY,
+  findOpenDuplicate,
+  mergeEvents,
+  nextRoute,
+  questionSimilarity,
+  routedMessage,
+} from './escalation.ts';
+import { questionLoopEvents } from './loop-breaker.ts';
+import { convertWaitingQuestion, devopsTopicQuestion, repeatGuard } from './question-flow.ts';
 import { releaseClaimEvents } from './shifts.ts';
 
 type QuestionReport = Extract<ShiftReport, { kind: 'question' }>;
@@ -52,8 +61,13 @@ export async function raiseQuestion(
   agent: Row,
   report: QuestionReport,
 ): Promise<QuestionResult> {
+  // A waiting question that ran out of time becomes a blocking one (no new item).
+  if (report.converts) return convertWaitingQuestion(ctx, tx, shift, card, agent);
   const matches = await dedupMatches(tx, card.org_id, card.project_id, report.text);
-  if (matches.length > 0 && !report.blocking && !report.force) {
+  // Every question gets the ledger duplicate check. A non-blocking one is refused on any match (--force overrides); a
+  // blocking or waiting one only when an entry is practically the same question, so a stuck agent is not sent round.
+  const nearDuplicate = matches.some((m) => questionSimilarity(report.text, m.title) >= DUPLICATE_SIMILARITY);
+  if (matches.length > 0 && !report.force && (nearDuplicate || (!report.blocking && !report.wait))) {
     return {
       accepted: false,
       error: `The ledger already has similar entries (below). If they do not answer your question, run the command again with --force.\n${formatLedgerMatches(matches)}`,
@@ -66,6 +80,10 @@ export async function raiseQuestion(
       error: `--recommend ${report.recommend} does not match an --option (you gave ${report.options.length}; the first option is 0)`,
     };
   }
+  const repeated = await repeatGuard(ctx, tx, card, agent, report);
+  if (repeated) return repeated;
+  const viaDevops = await devopsTopicQuestion(ctx, tx, shift, card, agent, report);
+  if (viaDevops) return viaDevops;
   const options: DeskOption[] = report.options.map((label, i) => ({ id: optionId(i), label }));
   const deskItemId = randomUUID();
   const affected = report.blocking ? await affectedCards(tx, card) : [card.id];
@@ -82,18 +100,16 @@ export async function raiseQuestion(
     askerRole: agent.role_key,
     from: 'raise',
     tried: [],
+    topic: report.topic ?? null,
     ...(viaBa ? { via: 'ba' as const } : {}),
   });
   const scope = projectScope(card.org_id, card.project_id);
-  // Going to the BA or the desk while the same question is already open: attach to it instead of a second item.
-  const duplicate =
-    route.level === 'peer'
-      ? undefined
-      : await findOpenDuplicate(tx, {
-          orgId: card.org_id,
-          projectId: card.project_id,
-          text: report.text,
-        });
+  // The same question is already open (whatever step it would start at): attach to it instead of a second item.
+  const duplicate = await findOpenDuplicate(tx, {
+    orgId: card.org_id,
+    projectId: card.project_id,
+    text: report.text,
+  });
   const raised: AppendInput = {
     streamId: streamId.desk(deskItemId),
     event: {
@@ -112,6 +128,7 @@ export async function raiseQuestion(
         routedTo: route.routedTo,
         ...(route.routedAgentId ? { routedAgentId: route.routedAgentId } : {}),
         chainLevel: route.level,
+        ...(report.topic ? { topic: report.topic } : {}),
         dedupLedgerIds: matches.map((m) => m.id),
         affectedCardIds: affected,
         pinned: report.blocking,
@@ -137,6 +154,8 @@ export async function raiseQuestion(
       )
     : [];
 
+  // Question shifts count for the loop breaker too (whatever the wording): a card going round gets a back-off.
+  const loop = await questionLoopEvents(ctx, tx, card);
   if (report.blocking) {
     await ctx.store.append(
       await releaseClaimEvents(
@@ -147,12 +166,12 @@ export async function raiseQuestion(
           ? 'Raised a question for the manager; the card is Blocked until it is answered.'
           : `Raised a question for ${route.agentName} (${route.agentRole}); the card is Blocked until it is answered.`,
         null,
-        [raised, thread, ...merged],
+        [raised, thread, ...merged, ...loop],
       ),
       { tx },
     );
   } else {
-    await ctx.store.append([raised, thread, ...merged], { tx });
+    await ctx.store.append([raised, thread, ...merged, ...loop], { tx });
   }
   const seen = matches.length
     ? `\nThe ledger has similar entries; the manager sees them next to your question:\n${formatLedgerMatches(matches)}`
