@@ -301,6 +301,7 @@ describe('claude code chat adapter', () => {
       '--strict-mcp-config',
       '--mcp-config',
       '/data/agents/a1/claude/mcp.json',
+      '--disable-slash-commands',
     ]);
     const resumed = buildClaudeChatCommand(input({ resumeSessionId: 'sess-1' }), cfg);
     expect(resumed.args.slice(-2)).toEqual(['--resume', 'sess-1']);

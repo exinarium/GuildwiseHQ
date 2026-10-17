@@ -103,6 +103,11 @@ export class RunnerHost {
     return [...this.running.values()][0]?.serverUrl ?? null;
   }
 
+  /** A runner error (already sanitised) goes to the server of every pairing. */
+  reportError(payload: import('./health/runner-error.ts').RunnerErrorPayload): void {
+    for (const r of this.running.values()) r.runner.reportRunnerError(payload);
+  }
+
   /** Records the self-update status and sends it to every pairing's server. */
   setUpdateStatus(s: UpdateStatus): void {
     this.updateStatus = s;

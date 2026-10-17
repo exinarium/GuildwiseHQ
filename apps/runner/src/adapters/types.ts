@@ -19,6 +19,15 @@ export interface RuntimeCapabilities {
   limitedLabel?: string;
 }
 
+export interface DevopsGuardInput {
+  /** Shift or chat id: names the session in the audit trail. */
+  sessionRef: string;
+  /** Branches (besides main/master) that may never be force-pushed: the project's working branches. */
+  protectedBranches?: string[];
+  /** Commands the manager approved for this shift: allowed although they leave the workstation. */
+  approvedCommands?: string[];
+}
+
 export interface ShiftStartInput {
   shiftId: string;
   /** Rendered card prompt (section 13.2). */
@@ -51,8 +60,14 @@ export interface ShiftStartInput {
    */
   extraAllowedDomains?: string[];
   maxShiftMinutes: number;
-  /** Chat only. */
+  /** Continue this session (`claude --resume`): a chat's earlier turns, or a card shift that resumes its agent's session. */
   resumeSessionId?: string;
+  /** The kind of shift (card shifts get the longer shell timeout for `aom question --wait`). */
+  kind?: 'card' | 'question' | 'devops' | 'ba_task' | 'ceo';
+  /** Short shifts (question, CEO, DevOps, QA steps) set the prompt cache to 5 minutes: a 1-hour write costs 2x. */
+  promptCacheTtl?: '5m';
+  /** The DevOps guard hook's inputs (a DevOps shift or chat only; see devops/guard.ts). */
+  devopsGuard?: DevopsGuardInput;
   /** Raw runtime stream is appended here (logs/shifts/<shiftId>.jsonl). */
   logFile?: string;
 }
@@ -82,6 +97,8 @@ export interface RuntimeSession {
   /** SIGTERM, then SIGKILL after 10 s (tree kill on Windows). Resolves once the process is gone. */
   stop(reason: string): Promise<void>;
   usage(): Usage;
+  /** The size of the session's context right now (last call's input + cache read + cache write); absent: not measured. */
+  contextTokens?(): number;
   /** Kills the commands the agent is running (its tool process trees) and lets the agent go on. Returns how many processes. */
   killTools?(): Promise<number>;
   /** When the runtime last wrote anything (epoch ms); the idle watchdog reads it. */
@@ -106,6 +123,8 @@ export interface ChatStartInput {
   toolchainReadDirs?: string[];
   /** Tools are limited to reading (and the chat-scoped `aom` verbs). */
   readOnly: boolean;
+  /** The DevOps engineer's chat: the guard hook's inputs (no approved commands: off-workstation work goes through a request). */
+  devopsGuard?: DevopsGuardInput;
   /** What the server told the agent about this conversation (card, project, M7: the intake). */
   context?: ChatContext;
   /** M7: the BA's intake chat: it may read the ticket with the user's Jira tool (MCP) configured on this workstation. */
@@ -123,6 +142,12 @@ export interface RuntimeAdapter {
     markdown: string,
   ): Promise<void>;
   start(input: ShiftStartInput): Promise<RuntimeSession>;
+  /**
+   * A cheap check that the runtime's login still works, made before a shift starts so the first shift after an expiry
+   * is put back (`auth_expired`, no penalty) instead of crashing. Claude Code: reads the login's expiry and only when it
+   * is near makes one minimal call (which also refreshes it). Absent: no login to check.
+   */
+  checkLogin?(): Promise<'ok' | 'expired' | 'unknown'>;
   /**
    * Chat (docs/ARCHITECTURE.md section 14): one headless call per user message, streaming `delta` events, ending with
    * `session` (to resume next time), `usage`, `final` and `exit`.

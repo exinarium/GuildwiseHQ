@@ -929,6 +929,69 @@ export const ShiftStartedSchema = msg('shift.started', {
     })
     .optional(),
 });
+/** What the runner did with the `resumeSessionId` of a `shift.start`. */
+export const RESUME_STATES = [
+  'resumed',
+  'fresh_unknown_session',
+  'fresh_too_large',
+  'fresh_too_old',
+  'fresh_other_agent',
+  'fresh_transcript_missing',
+] as const;
+export const ResumeStateSchema = z.enum(RESUME_STATES);
+export type ResumeState = z.infer<typeof ResumeStateSchema>;
+/**
+ * Claude's session id arrives after `shift.started` (it is in the first stream line, after the process starts): sent as
+ * a late update, again with the context size now and then. `resume` is set once, with the first update of a shift that
+ * was asked to resume a session.
+ */
+export const ShiftSessionSchema = msg('shift.session', {
+  shiftId: z.uuid(),
+  runtimeSessionId: z.string().min(1).max(200),
+  contextTokens: z.number().int().nonnegative().optional(),
+  resume: z.object({ state: ResumeStateSchema, detail: z.string().max(300).optional() }).optional(),
+});
+/**
+ * An unhandled error in the runner (`uncaughtException`, `unhandledRejection`, a failed self-check). Sanitised on the
+ * runner: no prompts, card text or client code, only the error, a stack with paths shortened, the version and a short
+ * context label. The server dedupes by `signature` and counts.
+ */
+export const RunnerErrorSchema = msg('runner.error', {
+  signature: z.string().min(1).max(200),
+  message: z.string().max(1000),
+  stack: z.string().max(6000).optional(),
+  version: z.string().max(40),
+  context: z.string().max(200).optional(),
+});
+/** One DevOps shell command seen by the guard hook (allowed or refused); batched. */
+export const DevopsAuditEntrySchema = z.object({
+  at: z.iso.datetime(),
+  /** The DevOps shift or chat the command ran in. */
+  sessionRef: z.string().max(100),
+  kind: z.enum(['shift', 'chat']),
+  decision: z.enum(['allowed', 'refused']),
+  /** The rule that refused it, or the class an allowed command fell in. */
+  rule: z.string().max(80),
+  command: z.string().max(2000),
+});
+export type DevopsAuditEntry = z.infer<typeof DevopsAuditEntrySchema>;
+export const DevopsAuditSchema = msg('devops.audit', { entries: z.array(DevopsAuditEntrySchema).max(200) });
+/**
+ * Result of the role smoke test (runner start and after an update): per enabled role, whether its handoff command path
+ * works in its real sandbox. A failed role gets no work on this workstation until a later run passes.
+ */
+export const RoleSmokeSchema = msg('role.smoke', {
+  runnerVersion: z.string().max(40),
+  results: z
+    .array(
+      z.object({
+        roleKey: z.string().max(80),
+        ok: z.boolean(),
+        detail: z.string().max(500).optional(),
+      }),
+    )
+    .max(100),
+});
 export const ShiftProgressSchema = msg('shift.progress', {
   shiftId: z.uuid(),
   items: z.array(ProgressItemSchema),
@@ -947,6 +1010,8 @@ export const ShiftEndedSchema = msg('shift.ended', {
   exitCode: z.number().int().nullable().optional(),
   durationMs: z.number().int().nonnegative(),
   usage: Usage,
+  /** Additive: the session's context size at the end (last call's input + cache read + cache write). */
+  contextTokens: z.number().int().nonnegative().optional(),
   finalText: z.string().max(4000).optional(),
   guardViolations: z.array(GuardViolation).default([]),
 });
@@ -1059,6 +1124,12 @@ export const ShiftStartSchema = msg('shift.start', {
   mcpServers: z.array(z.string()).optional(),
   /** The project's "Commit as" setting, used for every commit of this shift (absent: the clone's or the workstation's git identity). */
   commitAs: CommitAsSchema.nullable().optional(),
+  /**
+   * Continue this Claude Code session (the agent's own earlier session on this card, group or question) instead of
+   * starting cold. The runner refuses it and starts fresh when the stored session is over 120K context tokens, over
+   * 4 hours old, belongs to another agent or is unknown here; `shift.session.resume` says which happened.
+   */
+  resumeSessionId: z.string().optional(),
 });
 export const ShiftStopSchema = msg('shift.stop', { shiftId: z.uuid(), reason: ShiftStopReasonSchema });
 /** "Stop the running command": the runner kills the commands the agent runs (its tool process trees); the shift goes on. */
@@ -1122,6 +1193,10 @@ export const RunnerToServerSchema = z.discriminatedUnion('type', [
   ShiftAcceptedSchema,
   ShiftRejectedSchema,
   ShiftStartedSchema,
+  ShiftSessionSchema,
+  RunnerErrorSchema,
+  DevopsAuditSchema,
+  RoleSmokeSchema,
   ShiftProgressSchema,
   ShiftReportMsgSchema,
   ShiftEndedSchema,
@@ -1170,6 +1245,10 @@ export const RUNNER_ACKED_TYPES: ReadonlySet<string> = new Set<RunnerToServerTyp
   'shift.accepted',
   'shift.rejected',
   'shift.started',
+  'shift.session',
+  'runner.error',
+  'devops.audit',
+  'role.smoke',
   'shift.report',
   'shift.ended',
   'chat.done',

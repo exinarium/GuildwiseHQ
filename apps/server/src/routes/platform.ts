@@ -36,6 +36,7 @@ import {
   resetUserTwoFactor,
   setOrgStatus,
 } from '../commands/platform.ts';
+import { listDevopsAudit, listRunnerErrors } from '../commands/runner-telemetry.ts';
 import { setOrgSimulation, wipeSimulationOrg } from '../commands/simulation.ts';
 import type { Ctx } from '../context.ts';
 import { runnerUpdateSettings, setRunnerUpdatesPaused } from '../installer/release.ts';
@@ -54,6 +55,25 @@ const meta = (req: FastifyRequest) => ({
 export function platformRoutes(ctx: Ctx) {
   return async (fastify: FastifyInstance) => {
     const app = typed(fastify);
+
+    // What the runners report about themselves (the platform team's bug intake reads the same query).
+    app.get('/api/platform/runner-errors', async (req) => {
+      await requireSuperAdmin(ctx, req);
+      const limit = Number((req.query as { limit?: string }).limit ?? 100);
+      return { errors: await listRunnerErrors(ctx, Number.isFinite(limit) ? limit : 100) };
+    });
+    app.get('/api/platform/devops-audit', async (req) => {
+      await requireSuperAdmin(ctx, req);
+      const q = req.query as { limit?: string; refused?: string; workstationId?: string };
+      const limit = Number(q.limit ?? 100);
+      return {
+        entries: await listDevopsAudit(ctx, {
+          limit: Number.isFinite(limit) ? limit : 100,
+          refusedOnly: q.refused === 'true',
+          ...(q.workstationId ? { workstationId: q.workstationId } : {}),
+        }),
+      };
+    });
 
     app.get('/api/platform/orgs', { schema: { querystring: PlatformOrgsQuerySchema } }, async (req) => {
       await requireSuperAdmin(ctx, req);

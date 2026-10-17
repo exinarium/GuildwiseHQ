@@ -64,6 +64,11 @@ export interface ClaudePolicyContext {
   uid?: number;
   /** Names in `/tmp` (default: read from the disk), to mask ssh-agent directories. Injectable for tests. */
   tmpEntries?: string[];
+  /**
+   * The command of the DevOps guard hook (`aom devops-guard`): a PreToolUse hook on every Bash command of the DevOps
+   * engineer's shifts and chats (devops/guard.ts). Absent (unit tests without runner paths): no hook.
+   */
+  guardHookCommand?: string;
 }
 
 /** What a shift's sandbox is allowed, beyond what its tools imply. */
@@ -262,6 +267,13 @@ export interface ClaudeSettings {
       allowLocalBinding: boolean;
     };
   };
+  /** The DevOps engineer's guard (a PreToolUse hook on Bash); no other role has hooks. */
+  hooks?: {
+    PreToolUse: Array<{
+      matcher: string;
+      hooks: Array<{ type: 'command'; command: string; timeout: number }>;
+    }>;
+  };
   includeCoAuthoredBy: false;
   /** Claude Code's newer switch: no "Co-Authored-By" trailer and no "Generated with" line in commits and pull requests. */
   attribution: { commit: ''; pr: '' };
@@ -442,6 +454,18 @@ function buildDevopsSettings(
       defaultMode: 'dontAsk',
       additionalDirectories: [paths.scratch],
     },
+    ...(ctx.guardHookCommand
+      ? {
+          hooks: {
+            PreToolUse: [
+              {
+                matcher: 'Bash',
+                hooks: [{ type: 'command' as const, command: ctx.guardHookCommand, timeout: 20 }],
+              },
+            ],
+          },
+        }
+      : {}),
     includeCoAuthoredBy: false,
     attribution: { commit: '', pr: '' },
   };
@@ -476,7 +500,18 @@ export function buildShiftSettings(
   // Testers write QA steps and test notes in their own scratch folder (qa_steps has no worktree). The worktree
   // stays limited to the e2e globs above, so this widens nothing in the card's code.
   if (roleKey === 'tester') allow.push(`Edit(${ruleAbs(paths.scratch)}/**)`);
-  if (!tools.has('edit')) deny.push('Edit', 'Write', 'NotebookEdit');
+  if (!tools.has('edit')) {
+    // A bare `Edit`/`Write` deny also beats the scratch allow, so a reviewer, BA or CEO could not even write the file
+    // its `aom review approve --risk-file` / `aom outcome steps --note-file` reads. The deny is scoped to the worktree
+    // (when the cwd is the agent's own scratch folder there is none), the scratch folder is allowed, and everything else
+    // stays denied by `dontAsk` (nothing else is allowed). `Edit(...)` covers Write and NotebookEdit; both are named so
+    // the rule reads the same as the tool names in a transcript.
+    const scratch = ruleAbs(paths.scratch);
+    const cwdAbs = ruleAbs(ctx.cwd);
+    if (!inside(ctx.cwd, paths.scratch))
+      deny.push(`Edit(${cwdAbs}/**)`, `Write(${cwdAbs}/**)`, `NotebookEdit(${cwdAbs}/**)`);
+    for (const r of [`Edit(${scratch}/**)`, `Write(${scratch}/**)`]) if (!allow.includes(r)) allow.push(r);
+  }
   if (!tools.has('web')) deny.push('WebFetch', 'WebSearch');
   if (!tools.has('shell')) deny.push('Bash');
   deny.push(...commonDenies(ctx, paths.configDir), `Edit(${ruleAbs(join(ctx.cwd, '.git'))}/**)`);

@@ -6,6 +6,7 @@ import { CARD_ATTACHMENTS_DIR } from '@aom/shared';
 import { execa } from 'execa';
 import type { z } from 'zod';
 import type { ClaudeRuntimeConfigSchema } from '../config.ts';
+import { deleteRootsFor, type GuardConfig } from '../devops/guard.ts';
 import { holdSandboxRepo } from '../git/config-lock.ts';
 import { discoverPluginMcpServers, mcpConfigFor, type PluginMcpServer } from '../mcp/plugins.ts';
 import type { RunnerPaths } from '../paths.ts';
@@ -16,8 +17,12 @@ import {
   type CredentialPaths,
   harvestAgentCredentials,
   isAuthFailureText,
+  loginExpiresAt,
   prepareAgentCredentials,
   probeClaudeLogin,
+  REFRESH_WINDOW_MS,
+  readCredentials,
+  withLock,
 } from './claude-auth.ts';
 import {
   agentEnv,
@@ -44,6 +49,7 @@ import { spawnSession } from './process-session.ts';
 import { createSandboxPlaceholders } from './sandbox-placeholders.ts';
 import type {
   ChatStartInput,
+  DevopsGuardInput,
   RuntimeAdapter,
   RuntimeCapabilities,
   RuntimeSession,
@@ -61,6 +67,11 @@ export interface ClaudeCommand {
 }
 
 export const BASH_DEFAULT_TIMEOUT_MS = 300_000;
+/**
+ * A card shift's default shell timeout: `aom question --wait` waits up to 10 minutes for a peer's answer inside one
+ * Bash call, so the default must outlast it (11 minutes). The hard cap below stays 15 minutes.
+ */
+export const CARD_BASH_DEFAULT_TIMEOUT_MS = 660_000;
 export const BASH_MAX_TIMEOUT_MS = 900_000;
 
 /**
@@ -75,7 +86,11 @@ export const MAX_ARGV_PROMPT_BYTES = 64 * 1024;
  * harmless variables, the session's variables, and the one provider credential this runtime is configured with.
  */
 export function sessionEnv(
-  input: Pick<ShiftStartInput, 'env' | 'sandbox'> & { agent?: Pick<ShiftStartInput['agent'], 'isDevops'> },
+  input: Pick<ShiftStartInput, 'env' | 'sandbox'> & {
+    agent?: Pick<ShiftStartInput['agent'], 'isDevops'>;
+    kind?: ShiftStartInput['kind'];
+    promptCacheTtl?: ShiftStartInput['promptCacheTtl'];
+  },
   cfg: ClaudeConfig,
   parent: NodeJS.ProcessEnv = process.env,
 ): Record<string, string> {
@@ -91,8 +106,14 @@ export function sessionEnv(
     CLAUDE_CODE_TMPDIR: input.sandbox.tmp,
     // Per-command limits Claude Code honours: a default of 5 min and a hard cap of 15 min, so an agent cannot pass
     // timeout=3600000 (or a background task) to park a hanging test run for an hour.
-    BASH_DEFAULT_TIMEOUT_MS: String(BASH_DEFAULT_TIMEOUT_MS),
+    BASH_DEFAULT_TIMEOUT_MS: String(
+      input.kind === 'card' ? CARD_BASH_DEFAULT_TIMEOUT_MS : BASH_DEFAULT_TIMEOUT_MS,
+    ),
     BASH_MAX_TIMEOUT_MS: String(BASH_MAX_TIMEOUT_MS),
+    // Short shifts (a question, the CEO, DevOps, QA steps) make a few calls and end: the 1-hour cache write of a
+    // subscription costs twice the input price and is never read again. Verified against claude 2.1.302 (the variable
+    // is in its binary next to ENABLE_PROMPT_CACHING_1H / FORCE_PROMPT_CACHING_5M).
+    ...(input.promptCacheTtl ? { CLAUDE_CODE_PROMPT_CACHE_TTL: input.promptCacheTtl } : {}),
   };
   // Opt-in: Claude Code strips credentials from what Bash and MCP children see and isolates their PID namespace.
   // The DevOps engineer is unsandboxed and works as the user: their HOME (docker, ssh, kube configs) and the agent
@@ -144,10 +165,27 @@ export function buildClaudeCommand(input: ShiftStartInput, cfg: ClaudeConfig): C
     '--strict-mcp-config',
     '--mcp-config',
     join(input.sandbox.configDir, 'mcp.json'),
+    // No skills: the account's synced skills (anthropic-skills:*) and the bundled ones add ~10K tokens of descriptions
+    // to every first call and no agent uses them (verified with claude 2.1.302: the init message lists 0 skills).
+    '--disable-slash-commands',
   );
   for (const d of [...input.addDirs, ...(input.readDirs ?? [])]) args.push('--add-dir', d);
   if (input.resumeSessionId) args.push('--resume', input.resumeSessionId);
-  return { bin: cfg.bin, args, env: sessionEnv(input, cfg), ...(viaStdin ? { stdin: input.prompt } : {}) };
+  return {
+    bin: cfg.bin,
+    args,
+    env: sessionEnv(
+      {
+        env: input.env,
+        sandbox: input.sandbox,
+        agent: { isDevops: input.agent.isDevops },
+        ...(input.kind ? { kind: input.kind } : {}),
+        ...(input.promptCacheTtl ? { promptCacheTtl: input.promptCacheTtl } : {}),
+      },
+      cfg,
+    ),
+    ...(viaStdin ? { stdin: input.prompt } : {}),
+  };
 }
 
 /**
@@ -180,6 +218,7 @@ export function buildClaudeChatCommand(input: ChatStartInput, cfg: ClaudeConfig)
     '--strict-mcp-config',
     '--mcp-config',
     join(input.sandbox.configDir, 'mcp.json'),
+    '--disable-slash-commands',
   );
   for (const d of input.readDirs ?? []) args.push('--add-dir', d);
   if (input.resumeSessionId) args.push('--resume', input.resumeSessionId);
@@ -281,6 +320,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     cwd: string,
     /** A chat never writes: the repository metadata of its worktree is read-only there, not a writable dir. */
     chat = false,
+    guardHookCommand?: string,
   ): ClaudePolicyContext {
     const root = this.paths?.root ?? dirname(dirname(input.sandbox.home));
     const script = selfCommand('aom').at(-1);
@@ -305,7 +345,33 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       ...(nugetFallbackDir ? { nugetFallbackDir } : {}),
       ...(process.platform === 'linux' ? { dotnetShmDir: DOTNET_SHM_DIR } : {}),
       otherAgentTmps: this.paths ? otherAgentTmps(this.paths, dirname(input.sandbox.home)) : [],
+      ...(guardHookCommand ? { guardHookCommand } : {}),
     };
+  }
+
+  /**
+   * The DevOps guard (devops/guard.ts): writes the hook's configuration into the agent's config dir and returns the hook
+   * command and the file's path (the hook finds it through `AOM_DEVOPS_GUARD`). Nothing without runner paths (unit tests).
+   */
+  private devopsGuard(
+    configDir: string,
+    guard: DevopsGuardInput | undefined,
+    kind: 'shift' | 'chat',
+  ): { command: string; file: string } | undefined {
+    if (!guard || !this.paths) return undefined;
+    const cfg: GuardConfig = {
+      sessionRef: guard.sessionRef,
+      kind,
+      deleteRoots: deleteRootsFor(this.paths.root),
+      home: this.realHome(),
+      protectedBranches: guard.protectedBranches ?? [],
+      approvedCommands: guard.approvedCommands ?? [],
+      auditFile: join(this.paths.logs, 'devops-audit.jsonl'),
+    };
+    const file = join(configDir, 'devops-guard.json');
+    writeFileSync(file, `${JSON.stringify(cfg, null, 2)}\n`, { mode: 0o600 });
+    const quote = (w: string) => `'${w.replace(/'/g, `'\\''`)}'`;
+    return { command: `${[...selfCommand('aom'), 'devops-guard'].map(quote).join(' ')}`, file };
   }
 
   async capabilities(): Promise<RuntimeCapabilities> {
@@ -373,9 +439,11 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     if (!input.agent.isDevops) this.assertCanRun();
     const dir = input.sandbox.configDir;
     await mkdir(dir, { recursive: true });
+    const guard = input.agent.isDevops ? this.devopsGuard(dir, input.devopsGuard, 'shift') : undefined;
+    if (guard) input = { ...input, env: { ...input.env, AOM_DEVOPS_GUARD: guard.file } };
     const settings = buildShiftSettings(
       input.agent.permissions,
-      this.policy(input, input.cwd),
+      this.policy(input, input.cwd, false, guard?.command),
       input.sandbox,
       input.agent.roleKey,
       input.agent.isDevops,
@@ -383,7 +451,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     await writeFile(join(dir, 'settings.json'), `${JSON.stringify(settings, null, 2)}\n`);
     // A read-only worktree (reviewer): Claude Code's sandbox must find its protected dotfile names already there.
     const dropPlaceholders = settings.sandbox?.filesystem.denyWrite.includes(input.cwd)
-      ? createSandboxPlaceholders(input.cwd)
+      ? createSandboxPlaceholders(input.cwd, input.shiftId)
       : () => {};
     const used = this.writeMcpConfig(
       dir,
@@ -419,6 +487,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       ...(cmd.stdin !== undefined ? { input: cmd.stdin } : {}),
       parseLine: (l) => parser.parseLine(l),
       usage: () => parser.usage(),
+      contextTokens: () => parser.contextTokens(),
       logFile: input.logFile,
       exitError: () => (parser.resultError ? `claude result: ${parser.resultError}` : undefined),
       ...hooks,
@@ -453,6 +522,8 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     };
     const dir = input.sandbox.configDir;
     await mkdir(dir, { recursive: true });
+    const guard = devops ? this.devopsGuard(dir, input.devopsGuard, 'chat') : undefined;
+    if (guard) input = { ...input, env: { ...input.env, AOM_DEVOPS_GUARD: guard.file } };
     // Granted plugin MCP servers this role may call (the DevOps engineer's chat keeps its own behaviour).
     const intakeMcp = input.intake ? this.cfg.intake?.mcpConfig : undefined;
     const used = this.writeMcpConfig(
@@ -465,7 +536,11 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       join(dir, 'settings.json'),
       `${JSON.stringify(
         devops
-          ? buildDevopsChatSettings(input.agent.permissions, this.policy(input, input.cwd), input.sandbox)
+          ? buildDevopsChatSettings(
+              input.agent.permissions,
+              this.policy(input, input.cwd, false, guard?.command),
+              input.sandbox,
+            )
           : input.agent.roleKey === 'ceo'
             ? buildCeoSettings(this.policy(chatInput, input.cwd, true), input.sandbox)
             : buildChatSettings(
@@ -482,7 +557,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       )}\n`,
     );
     await this.linkCredentials(dir, used);
-    const cmd = buildClaudeChatCommand(chatInput, this.live);
+    const cmd = buildClaudeChatCommand(guard ? { ...chatInput, env: input.env } : chatInput, this.live);
     const parser = new ClaudeStreamParser();
     return spawnSession({
       bin: cmd.bin,
@@ -562,6 +637,31 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     if (r === 'ok') this.host.auth?.markOk();
     else if (r === 'expired') this.host.auth?.markExpired();
     return r;
+  }
+
+  /**
+   * Before a shift: is the login good? Nothing to check with a configured token or API key. With the shared login the
+   * access token's expiry is read from the credentials file (no call); only when it is within `REFRESH_WINDOW_MS` (or past)
+   * does one minimal probe run, under the runner-wide lock and re-checked inside it (another shift may have refreshed it
+   * meanwhile). The probe refreshes a token that can be refreshed and marks the runtime expired when it cannot.
+   * Network trouble is `unknown`: the shift goes ahead and reports a login that does not work itself.
+   */
+  async checkLogin(): Promise<'ok' | 'expired' | 'unknown'> {
+    if (realClaudeBlocked() || !this.usesSharedLogin()) return 'ok';
+    if (this.host.auth?.state === 'expired') return 'expired';
+    const src = join(this.realHome(), '.claude', '.credentials.json');
+    if (!existsSync(src)) return 'ok';
+    const now = () => this.nowDate().getTime();
+    const nearExpiry = () => {
+      const exp = loginExpiresAt(readCredentials(src));
+      return exp > 0 && exp - now() < REFRESH_WINDOW_MS;
+    };
+    if (!nearExpiry()) return 'ok';
+    const lock = join(this.paths?.root ?? dirname(this.realHome()), 'claude-credentials.lock');
+    return withLock(lock, async () => {
+      if (!nearExpiry()) return 'ok' as const;
+      return this.probeLogin();
+    });
   }
 
   private nowDate(): Date {

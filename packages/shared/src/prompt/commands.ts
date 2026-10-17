@@ -2,6 +2,14 @@ import type { ShiftBrief } from '../protocol/runner.ts';
 
 type BriefOutcome = ShiftBrief['shift']['outcomes'][number];
 
+/**
+ * `aom` talks to the runner through a socket the shell sandbox blocks: it only works as a command of its own. A pipe,
+ * redirect, `;`, `&&`, `cd` or `$(...)` around it keeps it inside the sandbox, where it fails. Said in every prompt
+ * that has the agent run `aom`.
+ */
+export const AOM_NO_PIPES_NOTE =
+  'Run every `aom` command on its own: no pipes, redirects, `;`, `&&`, `cd` or `$(...)` around it (for example `aom ledger search "tech stack"`, not `aom ledger search "tech stack" | head`), or it runs inside the shell sandbox and cannot reach the runner.';
+
 /** The exact `aom` command line an agent runs to report `outcome` (docs/ARCHITECTURE.md section 13.4). */
 export function commandForOutcome(outcome: BriefOutcome): string {
   switch (outcome.id) {
