@@ -158,7 +158,7 @@ function Entry({ e }: { e: LedgerEntry }) {
             <span data-testid="ledger-retired">Retired</span>
           </Badge>
         )}
-        {e.conflictsWith.length > 0 && !retired && (
+        {(e.conflictsWith ?? []).length > 0 && !retired && (
           <Badge tone="amber">
             <span data-testid="ledger-conflict">May contradict another order</span>
           </Badge>
