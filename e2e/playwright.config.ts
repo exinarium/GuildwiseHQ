@@ -58,6 +58,7 @@ export default defineConfig({
       dependencies: ['pairing'],
       use: mobileUse(),
     },
+    { name: 'mobile-board', testMatch: 'mobile-board.spec.ts', dependencies: ['pairing'], use: mobileUse() },
     // The screenshot run for docs/guide (never part of `pnpm e2e`): AOM_E2E_GUIDE=1 playwright test --project=guide
     ...(process.env.AOM_E2E_GUIDE === '1'
       ? [
