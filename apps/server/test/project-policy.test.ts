@@ -78,7 +78,7 @@ describe('decisions stay at project level', () => {
   });
 
   it('an approved HR or CEO proposal that came from a project stays at that project; a duplicate adds nothing', async () => {
-    const propose = async (title: string, body: string, projectId?: string) => {
+    const propose = async (title: string, body: string, projectId?: string, status = 200) => {
       const id = randomUUID();
       await seed(w, [
         {
@@ -105,7 +105,7 @@ describe('decisions stay at project level', () => {
             : { orgId: w.owner.id, projectId: null, audience: 'org' },
         },
       ]);
-      await call('POST', `/api/desk/${id}/resolve`, { resolution: 'approved' });
+      await call('POST', `/api/desk/${id}/resolve`, { resolution: 'approved' }, status);
     };
     await propose('Snake case', 'Name database tables in snake_case, never camelCase.', w.projectId);
     await until(
@@ -116,8 +116,13 @@ describe('decisions stay at project level', () => {
     expect((await q(`SELECT project_id FROM ledger_entries WHERE title='Snake case'`))[0]?.project_id).toBe(
       w.projectId,
     );
-    // the same proposal again: nothing new
-    await propose('Snake case tables', 'Name database tables in snake_case, never camelCase.', w.projectId);
+    // the same proposal again: nothing new, and the owner is told (409) instead of seeing a silent "Approved"
+    await propose(
+      'Snake case tables',
+      'Name database tables in snake_case, never camelCase.',
+      w.projectId,
+      409,
+    );
     await new Promise((r) => setTimeout(r, 300));
     expect(
       (await q(`SELECT count(*)::int AS n FROM ledger_entries WHERE body LIKE '%snake_case%'`))[0]?.n,

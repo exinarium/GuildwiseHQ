@@ -455,14 +455,17 @@ export async function resetRole(
 // ----------------------------------------------------------------------------------------------- hooks
 
 /**
- * An approved HR standing-order proposal becomes an org-wide standing order in the ledger (the existing M2 mechanism
- * every agent loads at shift start). The edited text of the approval wins.
+ * An approved standing-order proposal not resolved by a person becomes a standing order in the ledger (the existing M2
+ * mechanism every agent loads at shift start). A person's approval is handled in `closeItem`.
  */
 export function registerHrHook(ctx: Ctx): () => void {
   return ctx.store.subscribe(async (e: StoredEvent) => {
     try {
       const ev = e.event;
       if (ev.type !== 'DeskItemResolved' || ev.payload.resolution !== 'approved') return;
+      // An owner's approval writes the entry itself, in the same transaction (commands/desk.ts closeItem), and refuses a
+      // near-duplicate with a 409 instead of dropping it silently. This hook only covers approvals made by the system.
+      if (e.actor.kind === 'user') return;
       const d = await one(
         ctx.pool,
         `SELECT d.org_id, d.project_id, d.title, d.body, p.decisions_project_only

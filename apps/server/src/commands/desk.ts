@@ -4,6 +4,7 @@ import {
   BATCH_QUESTION_SUBKIND,
   type DeskActor,
   type DeskResolution,
+  HR_DESK_SUBKIND,
   isOrgManager,
   isPhaseDeskSubkind,
   PLATFORM_APPROVAL_SUBKINDS,
@@ -34,6 +35,8 @@ import { resolveLargeMergeIn } from './finalize.ts';
 import { runHygieneForConfirmedRepo, workingBranchAnsweredEvents } from './hygiene.ts';
 import { continueIntake, mappingAnsweredEvents } from './intake.ts';
 import { batchAnsweredEvents, batchDismissedEvents } from './intake-batch.ts';
+import { editLedgerEntry } from './ledger.ts';
+import { findNearDuplicate } from './ledger-checks.ts';
 import { resolveOutboundIn } from './outbox.ts';
 import { resolvePhaseDeskItemIn } from './phases.ts';
 import { resolveRepoCreateIn, retryRepoCreateIn } from './repo-create.ts';
@@ -257,7 +260,7 @@ export async function resolveDeskItem(
   id: string,
   req: ResolveDeskItemRequest,
 ): Promise<void> {
-  await closeItem(ctx, user, id, req.resolution, req.note, req.editedBody);
+  await closeItem(ctx, user, id, req.resolution, req.note, req.editedBody, req.onDuplicate);
 }
 
 export async function dismissDeskItem(
@@ -276,7 +279,9 @@ async function closeItem(
   resolution: DeskResolution,
   note?: string,
   editedBody?: string,
+  onDuplicate?: 'merge',
 ) {
+  let mergeInto: { id: string; body: string } | undefined;
   let workstationToDeliver: string | undefined;
   let devops = false;
   let partial = false;
@@ -363,6 +368,64 @@ async function closeItem(
       await resolveVaultConflictIn(ctx, tx, user, wv.vault_id, wv.workstation_id);
       workstationToDeliver = wv.workstation_id;
     }
+    // An approved standing-order proposal (HR, the CEO, a card's answer) becomes a ledger entry in the same transaction as
+    // the approval: a near-duplicate of a live order refuses the approval (409, the item stays open) unless the owner asks
+    // to merge it into that order, so "Approved" always means "it is in the ledger".
+    const orderEvents: AppendInput[] = [];
+    if (
+      item.kind === 'approval' &&
+      item.subkind === HR_DESK_SUBKIND.standingOrder &&
+      resolution === 'approved'
+    ) {
+      const body = (editedBody?.trim() || item.body || '').trim();
+      const projectId: string | undefined = item.project_id ?? undefined;
+      const title =
+        String(item.title)
+          .replace(/^Add a standing order: /, '')
+          .slice(0, 120) || 'Standing order';
+      const live = await rows<{ id: string; title: string; body: string }>(
+        tx,
+        `SELECT id, title, body FROM ledger_entries
+          WHERE org_id=$1 AND scope='standing_order' AND superseded_by IS NULL AND retired_at IS NULL
+            AND (project_id IS NULL OR project_id IS NOT DISTINCT FROM $2::uuid)
+          ORDER BY created_at DESC, id`,
+        [item.org_id, projectId ?? null],
+      );
+      const dup = findNearDuplicate({ title, body }, live);
+      if (dup && onDuplicate !== 'merge')
+        throw conflict(
+          'duplicate_order',
+          `a standing order that says the same already exists: "${dup.title}" (${dup.id}); merge this wording into it, or dismiss this proposal`,
+          { existingId: dup.id, existingTitle: dup.title },
+        );
+      if (dup) mergeInto = { id: dup.id, body };
+      else {
+        const entryId = randomUUID();
+        const vaultPath = await plannedVaultPath(tx, {
+          scope: 'standing_order',
+          orgId: item.org_id,
+          projectId,
+        });
+        orderEvents.push({
+          streamId: streamId.ledger(entryId),
+          event: {
+            type: 'LedgerEntryAdded',
+            payload: {
+              entryId,
+              scope: 'standing_order',
+              ...(projectId ? { projectId } : {}),
+              title,
+              body,
+              tags: ['hr'],
+              sourceDeskItemId: item.id,
+              ...(vaultPath ? { vaultPath } : {}),
+            },
+          },
+          actor: userActor(user.id),
+          scope: itemScope(item),
+        });
+      }
+    }
     const batchEvents =
       item.subkind === BATCH_QUESTION_SUBKIND && resolution === 'dismissed'
         ? await batchDismissedEvents(tx, item)
@@ -371,6 +434,7 @@ async function closeItem(
       await ctx.store.append(
         [
           ...batchEvents,
+          ...orderEvents,
           {
             streamId: streamId.desk(item.id),
             event: {
@@ -390,6 +454,8 @@ async function closeItem(
         { tx },
       );
   });
+  // Merge: the existing order takes the new wording (its permissions apply; the earlier wording stays in its history).
+  if (mergeInto) await editLedgerEntry(ctx, user, mergeInto.id, { body: mergeInto.body });
   if (devops || phases) ctx.services.dispatcher.trigger();
   if (ceoItem) {
     if (resolution === 'approved') await acceptRecommendation(ctx, user, ceoItem);
