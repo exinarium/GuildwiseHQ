@@ -415,6 +415,19 @@ describe('the owner approval after the review', () => {
     expect(row).toMatchObject({ stage: 'test_deploy', owner_approved_sha: SHA2 });
   });
 
+  it('an approval that names a commit other than the head is refused (409 approval_stale) and nothing is approved', async () => {
+    await team();
+    const card = await cardAtOwnerApproval();
+    const body = (sha: string) => ({ cookie: w.owner.cookie, body: { sha } });
+    const refused = await w.t.req('POST', `/api/cards/${card.id}/approval/approve`, body(SHA2));
+    expect(refused.status).toBe(409);
+    expect(refused.body.error?.code ?? refused.body.code).toBe('approval_stale');
+    expect(await cardRow(card.id)).toMatchObject({ stage: 'owner_approval', owner_approved_sha: null });
+    // the commit the owner read is the head: approved, for that commit
+    await call('POST', `/api/cards/${card.id}/approval/approve`, { sha: SHA1 });
+    expect(await cardRow(card.id)).toMatchObject({ stage: 'test_deploy', owner_approved_sha: SHA1 });
+  });
+
   it('a finalize after the head moved lapses the approval: nothing is merged and the card returns to the approval step', async () => {
     await team();
     const card = await cardAtOwnerApproval();

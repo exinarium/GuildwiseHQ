@@ -191,6 +191,20 @@ describe('the owner approval with the diff', () => {
     expect(fetchMock.mock.calls.some((c) => String(c[0]).includes('/diff'))).toBe(false);
   });
 
+  it('approving sends the commit whose diff is shown', async () => {
+    const user = userEvent.setup();
+    wrap(<ApprovalPanel cardId={CARD} approval={approval(review())} />);
+    await user.click(screen.getByTestId('approval-approve'));
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some((c) => String(c[0]).includes('/approval/approve'))).toBe(true),
+    );
+    const [, init] = fetchMock.mock.calls.find((c) => String(c[0]).includes('/approval/approve')) as [
+      string,
+      RequestInit,
+    ];
+    expect(JSON.parse(String(init.body))).toEqual({ sha: 'a1'.repeat(20) });
+  });
+
   it('an approval step of the older workflows has no review block', () => {
     wrap(<ApprovalPanel cardId={CARD} approval={approval(undefined)} />);
     expect(screen.queryByTestId('approval-review')).toBeNull();

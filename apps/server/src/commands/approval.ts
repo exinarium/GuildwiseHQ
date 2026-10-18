@@ -314,6 +314,7 @@ async function decide(
   idOrRef: string,
   kind: 'approved' | 'sent_back',
   text: string | undefined,
+  viewedSha?: string,
 ): Promise<'stale' | undefined> {
   const stale = await withAppendTx(ctx.pool, async (tx): Promise<'stale' | undefined> => {
     const { card, ap, stage, def } = await lockApprovalCard(tx, user, idOrRef);
@@ -350,6 +351,9 @@ async function decide(
       );
       return 'stale';
     }
+    // The approver says which commit they read, and it is not the one the card is at: nothing is approved (the approval
+    // already asks for the current commit, so there is nothing to re-ask).
+    if (kind === 'approved' && viewedSha && card.head_sha && viewedSha !== card.head_sha) return 'stale';
     const outcomeId = kind === 'approved' ? 'approve' : 'send_back';
     let toStage: string;
     try {
@@ -444,7 +448,7 @@ export async function approveStep(
   idOrRef: string,
   req: ApprovalApproveRequest,
 ): Promise<void> {
-  const r = await decide(ctx, user, idOrRef, 'approved', req.note?.trim() || undefined);
+  const r = await decide(ctx, user, idOrRef, 'approved', req.note?.trim() || undefined, req.sha);
   if (r === 'stale')
     throw conflict(
       'approval_stale',

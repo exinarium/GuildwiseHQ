@@ -84,7 +84,14 @@ export const CardApprovalSchema = z.object({
 export type CardApproval = z.infer<typeof CardApprovalSchema>;
 
 /** `POST /api/cards/:id/approval/approve` */
-export const ApprovalApproveRequestSchema = z.object({ note: z.string().trim().max(5000).optional() });
+export const ApprovalApproveRequestSchema = z.object({
+  note: z.string().trim().max(5000).optional(),
+  /**
+   * code-v6: the commit whose diff the approver was shown. When it is not the card's head commit the approval is refused
+   * (409 `approval_stale`) and nothing is approved. Absent: only the commit the approval was asked for is checked.
+   */
+  sha: z.string().trim().min(4).max(64).optional(),
+});
 export type ApprovalApproveRequest = z.infer<typeof ApprovalApproveRequestSchema>;
 /** `POST /api/cards/:id/approval/send-back`: the comment is required; the earlier step reads it as a review comment. */
 export const ApprovalSendBackRequestSchema = z.object({ comment: z.string().trim().min(1).max(10000) });

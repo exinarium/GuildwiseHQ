@@ -77,7 +77,13 @@ export function ApprovalPanel({ cardId, approval }: { cardId: string; approval: 
                     loading={approve.isPending}
                     disabled={busy}
                     data-testid="approval-approve"
-                    onClick={() => approve.mutate(note.trim() ? { note: note.trim() } : {})}
+                    onClick={() =>
+                      approve.mutate({
+                        ...(note.trim() ? { note: note.trim() } : {}),
+                        // the commit whose diff is shown: the server refuses when the branch has moved
+                        ...(approval.review?.sha ? { sha: approval.review.sha } : {}),
+                      })
+                    }
                   >
                     Approve
                   </Button>

@@ -52,7 +52,13 @@ export function ApprovalDeskItem({ item }: { item: DeskItemDto }) {
               loading={approve.isPending}
               disabled={busy}
               data-testid="approval-desk-approve"
-              onClick={() => approve.mutate(note.trim() ? { note: note.trim() } : {})}
+              onClick={() =>
+                approve.mutate({
+                  ...(note.trim() ? { note: note.trim() } : {}),
+                  // the commit whose diff was shown here (when the diff was opened)
+                  ...(showDiff && diff.data?.sha ? { sha: diff.data.sha } : {}),
+                })
+              }
             >
               Approve
             </Button>
