@@ -27,6 +27,7 @@ export function NewCardFiles({ files, onChange }: { files: File[]; onChange: (fi
         id={id}
         type="file"
         multiple
+        accept="image/*,application/*,text/*,audio/*,video/*"
         className="sr-only"
         aria-label="Add files to the new card"
         data-testid="new-card-file-input"

@@ -44,7 +44,7 @@ export function ApprovalDeskItem({ item }: { item: DeskItemDto }) {
         rows={failing ? 4 : 2}
         data-testid="approval-desk-note"
       />
-      <div className="flex flex-wrap gap-2">
+      <div className="sticky-actions flex flex-wrap gap-2 max-md:[&>button]:flex-1">
         {!failing ? (
           <>
             <Button

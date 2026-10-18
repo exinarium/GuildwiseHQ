@@ -9,7 +9,7 @@ import {
   workflowUsesRepos,
 } from '@aom/shared';
 import { MoreHorizontal } from 'lucide-react';
-import { type FormEvent, useState } from 'react';
+import { createContext, type FormEvent, type ReactNode, useContext, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import { useWorkflows } from '../api/queries/agents.ts';
 import { useMe } from '../api/queries/auth.ts';
@@ -62,6 +62,7 @@ import {
 import {
   Avatar,
   Badge,
+  BottomSheet,
   Button,
   Callout,
   ConfirmDialog,
@@ -76,15 +77,27 @@ import {
   Panel,
   Select,
   Stepper,
+  Tabs,
   TextArea,
   useToast,
 } from '../components/ui.tsx';
 import { WorkabilityWarning } from '../components/WorkabilityWarning.tsx';
+import { MoveToSheet } from '../components/cards/MoveToSheet.tsx';
+import { useIsMobile } from '../hooks/useIsMobile.ts';
 import { fieldLabel } from '../lib/cardForm.ts';
 import { landingText } from '../lib/outcomes.ts';
 import { priorityLabel } from '../lib/priority.ts';
 import { stageStyle } from '../lib/stages.ts';
 import { formatDateTime } from '../lib/time.ts';
+
+type CardTab = 'brief' | 'thread' | 'shifts' | 'activity' | 'files';
+const TabContext = createContext<{ mobile: boolean; active: CardTab }>({ mobile: false, active: 'brief' });
+/** A section of the card page: always shown on desktop; on a phone only inside its tab. */
+function Sec({ t, children }: { t: CardTab; children: ReactNode }) {
+  const c = useContext(TabContext);
+  if (c.mobile && c.active !== t) return null;
+  return <>{children}</>;
+}
 
 function renderValue(v: unknown) {
   if (Array.isArray(v)) {
@@ -197,8 +210,13 @@ export function CardDetailView({
   const rehome = useRehomeCard(card.id);
   const me = useMe();
   const expert = me.data?.user?.gitExpert === true;
-  const [dialog, setDialog] = useState<'move' | 'cancel' | 'edit' | 'risk' | 'reopen' | null>(null);
+  const [dialog, setDialog] = useState<'move' | 'moveto' | 'cancel' | 'edit' | 'risk' | 'reopen' | null>(
+    null,
+  );
   const [confirm, setConfirm] = useState<'release' | 'rehome' | null>(null);
+  const mobile = useIsMobile();
+  const [tab, setTab] = useState<CardTab>('brief');
+  const [actionsOpen, setActionsOpen] = useState(false);
   const toast = useToast();
   const mockUi = me.data?.features?.mockUi ?? false;
   const missing = missingFromError(specify.error);
@@ -269,86 +287,108 @@ export function CardDetailView({
           </span>
         }
         actions={
-          <>
-            {permissions.canSpecify && card.status === 'draft' && (
-              <Button variant="primary" loading={specify.isPending} onClick={() => specify.mutate(undefined)}>
-                Specify
+          mobile ? (
+            <>
+              {permissions.canSpecify && card.status === 'draft' && (
+                <Button
+                  variant="primary"
+                  loading={specify.isPending}
+                  onClick={() => specify.mutate(undefined)}
+                >
+                  Specify
+                </Button>
+              )}
+              <Button data-testid="card-actions" onClick={() => setActionsOpen(true)}>
+                <MoreHorizontal aria-hidden="true" className="size-4" />
+                Actions
               </Button>
-            )}
-            {permissions.canEdit && workflow && (
-              <Button data-testid="edit-card" onClick={() => setDialog('edit')}>
-                Edit
-              </Button>
-            )}
-            {permissions.canMove && <Button onClick={() => setDialog('move')}>Move</Button>}
-            {permissions.canReopen && workflow && (
-              <Button data-testid="reopen-card" onClick={() => setDialog('reopen')}>
-                Reopen
-              </Button>
-            )}
-            {card.repoId && card.homeWorkstationId && card.status !== 'cancelled' && (
-              <RunBranchDialog
-                projectId={card.projectId}
-                card={{
-                  id: card.id,
-                  ref: card.ref,
-                  repoId: card.repoId,
-                  homeWorkstationId: card.homeWorkstationId,
+            </>
+          ) : (
+            <>
+              {permissions.canSpecify && card.status === 'draft' && (
+                <Button
+                  variant="primary"
+                  loading={specify.isPending}
+                  onClick={() => specify.mutate(undefined)}
+                >
+                  Specify
+                </Button>
+              )}
+              {permissions.canEdit && workflow && (
+                <Button data-testid="edit-card" onClick={() => setDialog('edit')}>
+                  Edit
+                </Button>
+              )}
+              {permissions.canMove && <Button onClick={() => setDialog('move')}>Move</Button>}
+              {permissions.canReopen && workflow && (
+                <Button data-testid="reopen-card" onClick={() => setDialog('reopen')}>
+                  Reopen
+                </Button>
+              )}
+              {card.repoId && card.homeWorkstationId && card.status !== 'cancelled' && (
+                <RunBranchDialog
+                  projectId={card.projectId}
+                  card={{
+                    id: card.id,
+                    ref: card.ref,
+                    repoId: card.repoId,
+                    homeWorkstationId: card.homeWorkstationId,
+                  }}
+                />
+              )}
+              <AskDevOpsButton
+                variant="quiet"
+                label="Ask DevOps"
+                request={{
+                  origin: 'card',
+                  projectId: card.projectId,
+                  cardId: card.id,
+                  cardLabel: `${card.ref} ${card.title}`,
+                  ...(data.workability?.ok === false && data.workability.reason
+                    ? { errorText: data.workability.reason }
+                    : {}),
                 }}
               />
-            )}
-            <AskDevOpsButton
-              variant="quiet"
-              label="Ask DevOps"
-              request={{
-                origin: 'card',
-                projectId: card.projectId,
-                cardId: card.id,
-                cardLabel: `${card.ref} ${card.title}`,
-                ...(data.workability?.ok === false && data.workability.reason
-                  ? { errorText: data.workability.reason }
-                  : {}),
-              }}
-            />
-            {permissions.canReleaseBackoff && (
-              <Button
-                data-testid="release-backoff"
-                loading={releaseBackoff.isPending}
-                title="Retry the card now instead of waiting for the back-off to end"
-                onClick={() => releaseBackoff.mutate(undefined)}
-              >
-                Release back-off
-              </Button>
-            )}
-            {hasMore && (
-              <Menu label="More actions" trigger={<MoreHorizontal aria-hidden="true" className="size-4" />}>
-                {canRelease && (
-                  <MenuItem
-                    description="Let another agent claim it. The current attempt stops."
-                    onSelect={() => setConfirm('release')}
-                  >
-                    Release
-                  </MenuItem>
-                )}
-                {canRehome && (
-                  <MenuItem
-                    description="Forget its workstation and worktree: the stage restarts from the base branch."
-                    onSelect={() => setConfirm('rehome')}
-                  >
-                    Re-home
-                  </MenuItem>
-                )}
-                {canCancel && (
-                  <>
-                    {(canRelease || canRehome) && <MenuSeparator />}
-                    <MenuItem danger onSelect={() => setDialog('cancel')}>
-                      Cancel card
+              {permissions.canReleaseBackoff && (
+                <Button
+                  data-testid="release-backoff"
+                  loading={releaseBackoff.isPending}
+                  title="Retry the card now instead of waiting for the back-off to end"
+                  onClick={() => releaseBackoff.mutate(undefined)}
+                >
+                  Release back-off
+                </Button>
+              )}
+              {hasMore && (
+                <Menu label="More actions" trigger={<MoreHorizontal aria-hidden="true" className="size-4" />}>
+                  {canRelease && (
+                    <MenuItem
+                      description="Let another agent claim it. The current attempt stops."
+                      onSelect={() => setConfirm('release')}
+                    >
+                      Release
                     </MenuItem>
-                  </>
-                )}
-              </Menu>
-            )}
-          </>
+                  )}
+                  {canRehome && (
+                    <MenuItem
+                      description="Forget its workstation and worktree: the stage restarts from the base branch."
+                      onSelect={() => setConfirm('rehome')}
+                    >
+                      Re-home
+                    </MenuItem>
+                  )}
+                  {canCancel && (
+                    <>
+                      {(canRelease || canRehome) && <MenuSeparator />}
+                      <MenuItem danger onSelect={() => setDialog('cancel')}>
+                        Cancel card
+                      </MenuItem>
+                    </>
+                  )}
+                </Menu>
+              )}
+            </>
+          )
         }
       />
       {stages.length > 0 && card.status !== 'cancelled' && (
@@ -399,245 +439,409 @@ export function CardDetailView({
       )}
       <MainSyncNote card={card} />
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-        <div className="flex min-w-0 flex-col gap-4">
-          <DependenciesPanel card={card} />
-          <ReviewRiskPanel risk={card.reviewRisk} />
-          {data.qa && <QaPanel cardId={card.id} qa={data.qa} />}
-          {data.approval && <ApprovalPanel cardId={card.id} approval={data.approval} />}
-          {currentShift && currentShift.status !== 'ended' && (
-            <Panel
-              title={
-                <span className="flex items-center gap-2">
-                  <span
-                    aria-hidden="true"
-                    className="size-2 animate-pulse-soft rounded-full bg-accent ring-1 ring-fg/20"
-                  />
-                  Live shift{currentShift.agentName ? ` · ${currentShift.agentName}` : ''}
-                  <span className="text-sm font-normal text-subtle">{currentShift.stage}</span>
-                </span>
-              }
-            >
-              <div
-                className="mb-3 flex flex-wrap items-center justify-between gap-2"
-                data-testid="shift-controls"
-              >
-                <ShiftClock shift={currentShift} />
-                {permissions.canRelease && <ShiftStopControls shift={currentShift} />}
-              </div>
-              <ShiftLog key={currentShift.id} shift={currentShift} />
-            </Panel>
-          )}
-          <CardRuns cardId={card.id} />
-          <McpUsagePanel usage={data.mcpUsage ?? []} />
-          {data.publication && <PublicationPanel publication={data.publication} />}
-          <InvestigationPanel card={card} />
-          {keys.length > 0 && (
-            <Panel title="What to build" data-testid="card-spec">
-              <dl className="flex flex-col gap-4 text-base">
-                {keys.map((k) => (
-                  <div key={k}>
-                    <dt className="text-sm font-semibold text-fg">{catalogue[k]?.label ?? k}</dt>
-                    <dd className="mt-1 text-muted">{renderValue(card.fields[k])}</dd>
-                  </div>
-                ))}
-              </dl>
-            </Panel>
-          )}
-          <AttachmentsPanel
-            cardId={card.id}
-            attachments={data.attachments ?? []}
-            canAttach={permissions.canAttach ?? false}
-          />
-          <SubworkflowsPanel data={data.subworkflows} />
-          {card.origin === 'email' && <CardMailReply cardId={card.id} />}
-          <ThreadPanel cardId={card.id} thread={thread} canComment={permissions.canComment} />
-          {data.testing && (
-            <FinalizePanel
-              cardId={card.id}
-              finalize={data.testing.finalize}
-              completionAction={card.effectiveCompletionAction}
-              canAct={permissions.canMove}
-            />
-          )}
-          {data.testing && <SuiteResultsPanel cardId={card.id} testing={data.testing} />}
-          {data.testing && <EvidencePanel testing={data.testing} handoffs={handoffs} />}
-          <OutboundHistory
-            cardId={card.id}
-            cardRef={card.ref}
-            ticket={typeof card.fields.externalRef === 'string' ? card.fields.externalRef : undefined}
-            isOwner={me.data?.user.id === card.ownerUserId}
-            canDraft={permissions.canMove}
-          />
-          <Panel title={`Handoffs (${handoffs.length})`}>
-            {handoffs.length === 0 && <p className="text-sm text-subtle">No handoffs yet.</p>}
-            <ol className="flex flex-col gap-3" data-testid="handoffs">
-              {handoffs.map((h) => (
-                <li
-                  key={h.id}
-                  data-testid="handoff"
-                  data-stage={h.stage}
-                  data-outcome={h.outcome}
-                  className="rounded-control border border-line p-3 text-base"
-                >
-                  <div className="flex flex-wrap items-center gap-2 text-xs text-subtle">
-                    {h.agentName && <AgentAvatar agentId={h.agentId} name={h.agentName} size={18} />}
-                    <span className="font-medium text-muted">{h.agentName ?? 'system'}</span>
-                    <Badge tone={h.outcome === 'changes' || h.outcome === 'fail' ? 'red' : 'green'}>
-                      {h.stage}: {h.outcome}
-                    </Badge>
-                    <span>{formatDateTime(h.createdAt)}</span>
-                  </div>
-                  {h.note && <p className="mt-2 whitespace-pre-wrap text-fg">{h.note}</p>}
-                  <HandoffData data={h.data} />
-                </li>
-              ))}
-            </ol>
-          </Panel>
-        </div>
-
-        <div className="flex min-w-0 flex-col gap-4 lg:sticky lg:top-20 lg:self-start">
-          <Panel title="Details">
-            <dl className="grid gap-x-4 gap-y-3 text-sm sm:grid-cols-2 lg:grid-cols-1">
-              <Meta k="Stage" v={card.stage} />
-              {(!workflow || workflowUsesRepos(workflow)) && (
-                <div>
-                  <dt className="text-xs font-medium text-subtle">Risk tier</dt>
-                  <dd className="flex flex-wrap items-center gap-1.5 text-fg" data-testid="risk-tier">
-                    <span>{card.riskTier ?? 'not set'}</span>
-                    {card.riskTierOverridden && <Badge tone="violet">override</Badge>}
-                    {permissions.canSetRisk && (
-                      <button
-                        type="button"
-                        data-testid="set-risk"
-                        className="text-xs text-brand-text underline"
-                        onClick={() => setDialog('risk')}
-                      >
-                        Change
-                      </button>
-                    )}
-                  </dd>
-                </div>
-              )}
-              {(!workflow || workflowUsesRepos(workflow)) && (
-                <>
-                  {permissions.canEditCompletion ? (
-                    <CompletionControl card={card} />
-                  ) : expert ? (
-                    <Meta
-                      k="Completion action"
-                      v={
-                        card.effectiveCompletionAction
-                          ? `${COMPLETION_ACTION_LABELS[card.effectiveCompletionAction].label}${card.completionActionSource === 'project' ? ' (project default)' : ''}`
-                          : 'not set'
-                      }
-                    />
-                  ) : (
-                    <Meta k="Where it lands" v={landingText(card)} />
-                  )}
-                  <Meta k="Docs needed" v={card.docsNeeded ? 'yes' : 'no'} />
-                  {workflow &&
-                    workflowHasIntegrationGuard(workflow) &&
-                    typeof card.fields.integrationTests === 'boolean' && (
-                      <IntegrationTestsToggle
-                        cardId={card.id}
-                        value={card.fields.integrationTests}
-                        editable={permissions.canMove && !testStarted}
+      {mobile && (
+        <Tabs
+          label="Card sections"
+          prefix="card"
+          value={tab}
+          onChange={(id) => setTab(id as CardTab)}
+          tabs={[
+            { id: 'brief', label: 'Brief' },
+            {
+              id: 'thread',
+              label: 'Thread',
+              badge: <span className="text-xs text-subtle">{thread.length}</span>,
+            },
+            { id: 'shifts', label: 'Shifts' },
+            { id: 'activity', label: 'Activity' },
+            {
+              id: 'files',
+              label: 'Files',
+              badge: <span className="text-xs text-subtle">{(data.attachments ?? []).length}</span>,
+            },
+          ]}
+        />
+      )}
+      <TabContext.Provider value={{ mobile, active: tab }}>
+        <div
+          className="grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]"
+          {...(mobile
+            ? { role: 'tabpanel', id: `card-panel-${tab}`, 'aria-labelledby': `card-tab-${tab}` }
+            : {})}
+        >
+          <div className="flex min-w-0 flex-col gap-4">
+            <Sec t="brief">
+              <DependenciesPanel card={card} />
+              <ReviewRiskPanel risk={card.reviewRisk} />
+              {data.qa && <QaPanel cardId={card.id} qa={data.qa} />}
+              {data.approval && <ApprovalPanel cardId={card.id} approval={data.approval} />}
+            </Sec>
+            <Sec t="shifts">
+              {currentShift && currentShift.status !== 'ended' && (
+                <Panel
+                  title={
+                    <span className="flex items-center gap-2">
+                      <span
+                        aria-hidden="true"
+                        className="size-2 animate-pulse-soft rounded-full bg-accent ring-1 ring-fg/20"
                       />
-                    )}
-                  {card.designNeeded && (
-                    <Meta
-                      k="Investigate & design"
-                      v={card.investigationOnly ? 'investigation only' : 'yes'}
-                    />
-                  )}
-                </>
-              )}
-              {expert && card.branchName && <Meta k="Branch" v={card.branchName} mono />}
-              {permissions.canEditPriority ? (
-                <PriorityControl card={card} />
-              ) : (
-                <Meta k="Priority" v={priorityLabel(card.priority)} />
-              )}
-              {(data.phase || permissions.canSetPhase) && (
-                <div className="sm:col-span-2 lg:col-span-1">
-                  <dt className="sr-only">Phase</dt>
-                  <dd>
-                    <CardPhase
-                      cardId={card.id}
-                      projectId={card.projectId}
-                      phase={data.phase ?? null}
-                      canSet={!!permissions.canSetPhase}
-                      status={card.status}
-                    />
-                  </dd>
-                </div>
-              )}
-              <div>
-                <dt className="text-xs font-medium text-subtle">Who answers its questions</dt>
-                <dd className="text-fg">
-                  {permissions.canMove ? (
-                    <select
-                      aria-label="Decision policy"
-                      data-testid="decision-policy"
-                      className="mt-1 h-9 w-full rounded-control border border-control bg-surface px-2 text-sm text-fg"
-                      value={card.decisionPolicy}
-                      disabled={policy.isPending}
-                      onChange={(e) =>
-                        policy.mutate(
-                          { policy: e.target.value as 'owner_only' | 'any_manager' },
-                          { onSuccess: () => toast.success('Decision policy updated') },
-                        )
-                      }
-                    >
-                      <option value="owner_only">Only the card owner</option>
-                      <option value="any_manager">Any manager of the project</option>
-                    </select>
-                  ) : (
-                    <span data-testid="decision-policy">
-                      {card.decisionPolicy === 'any_manager'
-                        ? 'Any manager of the project'
-                        : 'Only the card owner'}
+                      Live shift{currentShift.agentName ? ` · ${currentShift.agentName}` : ''}
+                      <span className="text-sm font-normal text-subtle">{currentShift.stage}</span>
                     </span>
-                  )}
-                </dd>
-              </div>
-            </dl>
-          </Panel>
-          <Panel title="Timeline">
-            <ol className="flex flex-col gap-3 text-sm" data-testid="timeline">
-              {timeline.map((t) =>
-                t.entry === 'transition' ? (
-                  <li key={`t${t.id}`} className="flex flex-col border-l-2 border-line pl-3">
-                    <span className="text-fg">
-                      <span className="font-medium">{t.fromStage ?? 'new'}</span> →{' '}
-                      <span className="font-medium">{t.toStage}</span>{' '}
-                      <span className="text-xs text-subtle">({t.toStatus})</span>
-                    </span>
-                    <span className="text-xs text-subtle">
-                      {t.reason} · {formatDateTime(t.at)}
-                    </span>
-                  </li>
-                ) : (
-                  <li
-                    key={`a${t.id}`}
-                    className="flex flex-col border-l-2 border-brand/40 pl-3"
-                    data-testid="timeline-activity"
-                    data-kind={t.kind}
+                  }
+                >
+                  <div
+                    className="mb-3 flex flex-wrap items-center justify-between gap-2"
+                    data-testid="shift-controls"
                   >
-                    <span className="text-fg">{t.summary}</span>
-                    {t.reason && <span className="text-xs text-muted">Reason: {t.reason}</span>}
-                    <span className="text-xs text-subtle">
-                      {t.actorName ? `${t.actorName} · ` : ''}
-                      {formatDateTime(t.at)}
-                    </span>
-                  </li>
-                ),
+                    <ShiftClock shift={currentShift} />
+                    {permissions.canRelease && <ShiftStopControls shift={currentShift} />}
+                  </div>
+                  <ShiftLog key={currentShift.id} shift={currentShift} />
+                </Panel>
               )}
-            </ol>
-          </Panel>
+              <CardRuns cardId={card.id} />
+              <McpUsagePanel usage={data.mcpUsage ?? []} />
+            </Sec>
+            <Sec t="brief">
+              {data.publication && <PublicationPanel publication={data.publication} />}
+              <InvestigationPanel card={card} />
+              {keys.length > 0 && (
+                <Panel title="What to build" data-testid="card-spec">
+                  <dl className="flex flex-col gap-4 text-base">
+                    {keys.map((k) => (
+                      <div key={k}>
+                        <dt className="text-sm font-semibold text-fg">{catalogue[k]?.label ?? k}</dt>
+                        <dd className="mt-1 text-muted">{renderValue(card.fields[k])}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                </Panel>
+              )}
+            </Sec>
+            <Sec t="files">
+              <AttachmentsPanel
+                cardId={card.id}
+                attachments={data.attachments ?? []}
+                canAttach={permissions.canAttach ?? false}
+              />
+            </Sec>
+            <Sec t="shifts">
+              <SubworkflowsPanel data={data.subworkflows} />
+            </Sec>
+            <Sec t="thread">
+              {card.origin === 'email' && <CardMailReply cardId={card.id} />}
+              <ThreadPanel cardId={card.id} thread={thread} canComment={permissions.canComment} />
+            </Sec>
+            <Sec t="shifts">
+              {data.testing && (
+                <FinalizePanel
+                  cardId={card.id}
+                  finalize={data.testing.finalize}
+                  completionAction={card.effectiveCompletionAction}
+                  canAct={permissions.canMove}
+                />
+              )}
+              {data.testing && <SuiteResultsPanel cardId={card.id} testing={data.testing} />}
+              {data.testing && <EvidencePanel testing={data.testing} handoffs={handoffs} />}
+            </Sec>
+            <Sec t="activity">
+              <OutboundHistory
+                cardId={card.id}
+                cardRef={card.ref}
+                ticket={typeof card.fields.externalRef === 'string' ? card.fields.externalRef : undefined}
+                isOwner={me.data?.user.id === card.ownerUserId}
+                canDraft={permissions.canMove}
+              />
+            </Sec>
+            <Sec t="shifts">
+              <Panel title={`Handoffs (${handoffs.length})`}>
+                {handoffs.length === 0 && <p className="text-sm text-subtle">No handoffs yet.</p>}
+                <ol className="flex flex-col gap-3" data-testid="handoffs">
+                  {handoffs.map((h) => (
+                    <li
+                      key={h.id}
+                      data-testid="handoff"
+                      data-stage={h.stage}
+                      data-outcome={h.outcome}
+                      className="rounded-control border border-line p-3 text-base"
+                    >
+                      <div className="flex flex-wrap items-center gap-2 text-xs text-subtle">
+                        {h.agentName && <AgentAvatar agentId={h.agentId} name={h.agentName} size={18} />}
+                        <span className="font-medium text-muted">{h.agentName ?? 'system'}</span>
+                        <Badge tone={h.outcome === 'changes' || h.outcome === 'fail' ? 'red' : 'green'}>
+                          {h.stage}: {h.outcome}
+                        </Badge>
+                        <span>{formatDateTime(h.createdAt)}</span>
+                      </div>
+                      {h.note && <p className="mt-2 whitespace-pre-wrap text-fg">{h.note}</p>}
+                      <HandoffData data={h.data} />
+                    </li>
+                  ))}
+                </ol>
+              </Panel>
+            </Sec>
+          </div>
+
+          <div className="flex min-w-0 flex-col gap-4 lg:sticky lg:top-20 lg:self-start">
+            <Sec t="brief">
+              <Panel title="Details">
+                <dl className="grid gap-x-4 gap-y-3 text-sm sm:grid-cols-2 lg:grid-cols-1">
+                  <Meta k="Stage" v={card.stage} />
+                  {(!workflow || workflowUsesRepos(workflow)) && (
+                    <div>
+                      <dt className="text-xs font-medium text-subtle">Risk tier</dt>
+                      <dd className="flex flex-wrap items-center gap-1.5 text-fg" data-testid="risk-tier">
+                        <span>{card.riskTier ?? 'not set'}</span>
+                        {card.riskTierOverridden && <Badge tone="violet">override</Badge>}
+                        {permissions.canSetRisk && (
+                          <button
+                            type="button"
+                            data-testid="set-risk"
+                            className="text-xs text-brand-text underline"
+                            onClick={() => setDialog('risk')}
+                          >
+                            Change
+                          </button>
+                        )}
+                      </dd>
+                    </div>
+                  )}
+                  {(!workflow || workflowUsesRepos(workflow)) && (
+                    <>
+                      {permissions.canEditCompletion ? (
+                        <CompletionControl card={card} />
+                      ) : expert ? (
+                        <Meta
+                          k="Completion action"
+                          v={
+                            card.effectiveCompletionAction
+                              ? `${COMPLETION_ACTION_LABELS[card.effectiveCompletionAction].label}${card.completionActionSource === 'project' ? ' (project default)' : ''}`
+                              : 'not set'
+                          }
+                        />
+                      ) : (
+                        <Meta k="Where it lands" v={landingText(card)} />
+                      )}
+                      <Meta k="Docs needed" v={card.docsNeeded ? 'yes' : 'no'} />
+                      {workflow &&
+                        workflowHasIntegrationGuard(workflow) &&
+                        typeof card.fields.integrationTests === 'boolean' && (
+                          <IntegrationTestsToggle
+                            cardId={card.id}
+                            value={card.fields.integrationTests}
+                            editable={permissions.canMove && !testStarted}
+                          />
+                        )}
+                      {card.designNeeded && (
+                        <Meta
+                          k="Investigate & design"
+                          v={card.investigationOnly ? 'investigation only' : 'yes'}
+                        />
+                      )}
+                    </>
+                  )}
+                  {expert && card.branchName && <Meta k="Branch" v={card.branchName} mono />}
+                  {permissions.canEditPriority ? (
+                    <PriorityControl card={card} />
+                  ) : (
+                    <Meta k="Priority" v={priorityLabel(card.priority)} />
+                  )}
+                  {(data.phase || permissions.canSetPhase) && (
+                    <div className="sm:col-span-2 lg:col-span-1">
+                      <dt className="sr-only">Phase</dt>
+                      <dd>
+                        <CardPhase
+                          cardId={card.id}
+                          projectId={card.projectId}
+                          phase={data.phase ?? null}
+                          canSet={!!permissions.canSetPhase}
+                          status={card.status}
+                        />
+                      </dd>
+                    </div>
+                  )}
+                  <div>
+                    <dt className="text-xs font-medium text-subtle">Who answers its questions</dt>
+                    <dd className="text-fg">
+                      {permissions.canMove ? (
+                        <select
+                          aria-label="Decision policy"
+                          data-testid="decision-policy"
+                          className="mt-1 h-9 w-full rounded-control border border-control bg-surface px-2 text-sm text-fg"
+                          value={card.decisionPolicy}
+                          disabled={policy.isPending}
+                          onChange={(e) =>
+                            policy.mutate(
+                              { policy: e.target.value as 'owner_only' | 'any_manager' },
+                              { onSuccess: () => toast.success('Decision policy updated') },
+                            )
+                          }
+                        >
+                          <option value="owner_only">Only the card owner</option>
+                          <option value="any_manager">Any manager of the project</option>
+                        </select>
+                      ) : (
+                        <span data-testid="decision-policy">
+                          {card.decisionPolicy === 'any_manager'
+                            ? 'Any manager of the project'
+                            : 'Only the card owner'}
+                        </span>
+                      )}
+                    </dd>
+                  </div>
+                </dl>
+              </Panel>
+            </Sec>
+            <Sec t="activity">
+              <Panel title="Timeline">
+                <ol className="flex flex-col gap-3 text-sm" data-testid="timeline">
+                  {timeline.map((t) =>
+                    t.entry === 'transition' ? (
+                      <li key={`t${t.id}`} className="flex flex-col border-l-2 border-line pl-3">
+                        <span className="text-fg">
+                          <span className="font-medium">{t.fromStage ?? 'new'}</span> →{' '}
+                          <span className="font-medium">{t.toStage}</span>{' '}
+                          <span className="text-xs text-subtle">({t.toStatus})</span>
+                        </span>
+                        <span className="text-xs text-subtle">
+                          {t.reason} · {formatDateTime(t.at)}
+                        </span>
+                      </li>
+                    ) : (
+                      <li
+                        key={`a${t.id}`}
+                        className="flex flex-col border-l-2 border-brand/40 pl-3"
+                        data-testid="timeline-activity"
+                        data-kind={t.kind}
+                      >
+                        <span className="text-fg">{t.summary}</span>
+                        {t.reason && <span className="text-xs text-muted">Reason: {t.reason}</span>}
+                        <span className="text-xs text-subtle">
+                          {t.actorName ? `${t.actorName} · ` : ''}
+                          {formatDateTime(t.at)}
+                        </span>
+                      </li>
+                    ),
+                  )}
+                </ol>
+              </Panel>
+            </Sec>
+          </div>
         </div>
-      </div>
+      </TabContext.Provider>
+      {mobile && (
+        <BottomSheet
+          open={actionsOpen}
+          onOpenChange={setActionsOpen}
+          title="Card actions"
+          testId="card-actions-sheet"
+        >
+          <div className="flex flex-col gap-2 [&>button]:w-full [&>button]:justify-start">
+            {permissions.canEdit && workflow && (
+              <Button
+                data-testid="edit-card"
+                onClick={() => {
+                  setActionsOpen(false);
+                  setDialog('edit');
+                }}
+              >
+                Edit
+              </Button>
+            )}
+            {permissions.canMove && workflow && (
+              <Button
+                data-testid="move-to"
+                onClick={() => {
+                  setActionsOpen(false);
+                  setDialog('moveto');
+                }}
+              >
+                Move to...
+              </Button>
+            )}
+            {permissions.canReopen && workflow && (
+              <Button
+                data-testid="reopen-card"
+                onClick={() => {
+                  setActionsOpen(false);
+                  setDialog('reopen');
+                }}
+              >
+                Reopen
+              </Button>
+            )}
+            {permissions.canReleaseBackoff && (
+              <Button
+                data-testid="release-backoff"
+                loading={releaseBackoff.isPending}
+                onClick={() => {
+                  setActionsOpen(false);
+                  releaseBackoff.mutate(undefined);
+                }}
+              >
+                Release back-off
+              </Button>
+            )}
+            {canRelease && (
+              <Button
+                onClick={() => {
+                  setActionsOpen(false);
+                  setConfirm('release');
+                }}
+              >
+                Release
+              </Button>
+            )}
+            {canRehome && (
+              <Button
+                onClick={() => {
+                  setActionsOpen(false);
+                  setConfirm('rehome');
+                }}
+              >
+                Re-home
+              </Button>
+            )}
+            <AskDevOpsButton
+              variant="quiet"
+              label="Ask DevOps"
+              request={{
+                origin: 'card',
+                projectId: card.projectId,
+                cardId: card.id,
+                cardLabel: `${card.ref} ${card.title}`,
+              }}
+            />
+            {canCancel && (
+              <Button
+                variant="danger-ghost"
+                onClick={() => {
+                  setActionsOpen(false);
+                  setDialog('cancel');
+                }}
+              >
+                Cancel card
+              </Button>
+            )}
+          </div>
+        </BottomSheet>
+      )}
+      {mobile && workflow && permissions.canMove && (
+        <MoveToSheet
+          open={dialog === 'moveto'}
+          onClose={() => setDialog(null)}
+          workflow={workflow}
+          card={{
+            id: card.id,
+            ref: card.ref,
+            stage: card.stage,
+            projectId: card.projectId,
+            workflowKey: card.workflowKey,
+            workflowVersion: card.workflowVersion,
+          }}
+        />
+      )}
 
       <ConfirmDialog
         open={confirm === 'release'}

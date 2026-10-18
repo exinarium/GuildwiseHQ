@@ -2,6 +2,7 @@ import { DESK_SUBKIND, type DeskItemDto, isPhaseDeskSubkind, WORKING_BRANCH_SUBK
 import {
   Bell,
   CheckCheck,
+  ChevronRight,
   CircleHelp,
   CornerRightUp,
   type LucideIcon,
@@ -35,6 +36,7 @@ import { cx } from '../components/ui/cx.ts';
 import {
   Avatar,
   Badge,
+  BottomSheet,
   Button,
   ButtonLink,
   Callout,
@@ -61,6 +63,7 @@ import {
   type LedgerChoiceKey,
   sortDeskItems,
 } from '../lib/desk.ts';
+import { useIsMobile } from '../hooks/useIsMobile.ts';
 import { useExpertMode } from '../lib/expert-mode.ts';
 import { focusOf, integrationsLink } from '../lib/integrations.ts';
 import { ageLabel, formatDateTime } from '../lib/time.ts';
@@ -113,6 +116,8 @@ export function Desk() {
   const [params, setParams] = useSearchParams();
   const { hash } = useLocation();
   const nav = useNavigate();
+  const mobile = useIsMobile();
+  const [openId, setOpenId] = useState<string | null>(null);
   const filterKey = (FILTERS.find((f) => f.key === params.get('filter'))?.key ?? 'all') as FilterKey;
   const filter = FILTERS.find((f) => f.key === filterKey) ?? (FILTERS[0] as (typeof FILTERS)[number]);
   const [sort, setSort] = useState<'priority' | 'oldest' | 'newest'>('priority');
@@ -131,12 +136,14 @@ export function Desk() {
     if (!hash) return;
     const el = document.getElementById(hash.slice(1));
     if (!el) return;
+    if (mobile && hash.startsWith('#desk-item-')) setOpenId(hash.slice('#desk-item-'.length));
     el.scrollIntoView({ block: 'center' });
     el.classList.add('animate-flash');
     const t = setTimeout(() => el.classList.remove('animate-flash'), 2000);
     return () => clearTimeout(t);
-  }, [hash, items.length]);
+  }, [hash, items.length, mobile]);
 
+  const openItem = openId ? (items.find((i) => i.id === openId) ?? null) : null;
   const closedShown = (closed.data?.items ?? []).filter(filterKey === 'ceo' ? filter.test : () => true);
 
   if (open.isPending)
@@ -261,7 +268,7 @@ export function Desk() {
             <ol className="flex flex-col gap-3" aria-label={`${g.label} items`}>
               {g.items.map((item) => (
                 <li key={item.id}>
-                  <DeskItem item={item} />
+                  {mobile ? <DeskCard item={item} onOpen={() => setOpenId(item.id)} /> : <DeskItem item={item} />}
                 </li>
               ))}
             </ol>
@@ -319,7 +326,58 @@ export function Desk() {
         </details>
       )}
       <ChatDrawer open={chatOpen} onOpenChange={setChatOpen} />
+      {mobile && (
+        <BottomSheet
+          open={!!openItem}
+          onOpenChange={(o) => !o && setOpenId(null)}
+          size="full"
+          title={openItem ? deskKindLabel(openItem) : 'Item'}
+          testId="desk-sheet"
+        >
+          {openItem && <DeskItem item={openItem} bare />}
+        </BottomSheet>
+      )}
     </div>
+  );
+}
+
+/** Phone list row: priority, title, who and what it is about, and how long it waits. Tap opens the item full screen. */
+export function DeskCard({ item, now, onOpen }: { item: DeskItemDto; now?: number; onOpen: () => void }) {
+  const Icon = KIND_ICON[item.kind] ?? CircleHelp;
+  const project = item.card?.ref ? item.card.ref.slice(0, Math.max(0, item.card.ref.lastIndexOf('-'))) : null;
+  return (
+    <button
+      type="button"
+      id={`desk-item-${item.id}`}
+      data-testid={`desk-card-${item.id}`}
+      data-kind={item.kind}
+      data-blocking={item.blocking}
+      aria-label={item.title}
+      onClick={onOpen}
+      className={cx(
+        'flex min-h-14 w-full items-center gap-3 rounded-card border border-line border-l-[3px] bg-surface p-3 text-left shadow-sm active:bg-sunken',
+        item.urgent ? 'border-l-danger-fill' : item.blocking ? 'border-l-warning-fill' : 'border-l-line',
+      )}
+    >
+      <span className="min-w-0 flex-1">
+        <span className="flex flex-wrap items-center gap-1.5">
+          {item.urgent && <Badge tone="red">Urgent</Badge>}
+          {item.blocking && <Badge tone="amber">Blocking</Badge>}
+          <Badge tone="violet" icon={<Icon aria-hidden="true" />}>
+            {deskKindLabel(item)}
+          </Badge>
+        </span>
+        <span className="mt-1.5 line-clamp-2 block text-base font-semibold [overflow-wrap:anywhere] text-fg">
+          {item.title}
+        </span>
+        <span className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-subtle">
+          {project && <span className="font-mono">{project}</span>}
+          {item.card && <span className="font-mono">{item.card.ref}</span>}
+          <span className="tnum">{ageLabel(item.createdAt, now)} ago</span>
+        </span>
+      </span>
+      <ChevronRight aria-hidden="true" className="size-5 shrink-0 text-subtle" />
+    </button>
   );
 }
 
@@ -337,11 +395,11 @@ function usesAnswerForm(item: DeskItemDto): boolean {
 }
 
 /** One desk item: who asks, what they were doing, the question, options and the answer form. */
-export function DeskItem({ item, now }: { item: DeskItemDto; now?: number }) {
+export function DeskItem({ item, now, bare = false }: { item: DeskItemDto; now?: number; bare?: boolean }) {
   const Icon = KIND_ICON[item.kind] ?? CircleHelp;
   return (
     <article
-      id={`desk-item-${item.id}`}
+      {...(bare ? {} : { id: `desk-item-${item.id}` })}
       data-testid={`desk-item-${item.id}`}
       data-kind={item.kind}
       data-blocking={item.blocking}
@@ -349,6 +407,7 @@ export function DeskItem({ item, now }: { item: DeskItemDto; now?: number }) {
       aria-label={item.title}
       className={cx(
         'rounded-card border border-line border-l-[3px] bg-surface p-4 shadow-sm sm:p-5',
+        bare && 'max-md:-mx-4 max-md:-my-3 max-md:rounded-none max-md:border-0 max-md:border-l-[3px] max-md:shadow-none',
         item.urgent ? 'border-l-danger-fill' : item.blocking ? 'border-l-warning-fill' : 'border-l-line',
       )}
     >
@@ -678,7 +737,7 @@ function AnswerForm({ item }: { item: DeskItemDto }) {
             ))}
           </Select>
         </div>
-        <div className="flex flex-col-reverse gap-2 sm:flex-row [&>button]:max-sm:w-full">
+        <div className="sticky-actions flex flex-col-reverse gap-2 sm:flex-row [&>button]:max-sm:w-full">
           <DismissButton item={item} />
           <Button type="submit" variant="primary" loading={answer.isPending}>
             Answer
@@ -735,8 +794,40 @@ function ResolveButtons({ item }: { item: DeskItemDto }) {
     item.kind === 'approval' && (item.subkind === 'taste_rule' || item.subkind === 'standing_order');
   const edited = editable && rule.trim() && rule.trim() !== item.body.trim() ? rule.trim() : undefined;
   const done = (msg: string) => ({ onSuccess: () => toast.success(msg) });
+  const mobile = useIsMobile();
+  const [confirmApprove, setConfirmApprove] = useState(false);
+  const approveLabel =
+    item.subkind === 'ceo_recommendation'
+      ? 'Do it'
+      : item.subkind === 'large_merge'
+        ? 'Approve merge'
+        : item.subkind === 'repo_create'
+          ? 'Create repository'
+          : 'Approve';
+  const approve = () =>
+    resolve.mutate(
+      { id: item.id, body: { resolution: 'approved', ...(edited ? { editedBody: edited } : {}) } },
+      {
+        onSuccess: () => {
+          setConfirmApprove(false);
+          toast.success(item.subkind === 'ceo_recommendation' ? 'Done' : 'Approved');
+        },
+        onError: () => setConfirmApprove(false),
+      },
+    );
   return (
     <div className="mt-4 flex flex-col gap-3">
+      {/* On a phone an approval is two taps: the button, then a confirmation sheet (no accidental thumb approvals). */}
+      <ConfirmDialog
+        open={confirmApprove}
+        onOpenChange={setConfirmApprove}
+        title={`${approveLabel}?`}
+        description={item.title}
+        confirmLabel={approveLabel}
+        tone="primary"
+        pending={resolve.isPending}
+        onConfirm={approve}
+      />
       {editable && (
         <TextArea
           label={item.subkind === 'standing_order' ? 'Standing order (editable)' : 'Rule (editable)'}
@@ -745,7 +836,7 @@ function ResolveButtons({ item }: { item: DeskItemDto }) {
         />
       )}
       <ErrorBox error={resolve.error} />
-      <div className="flex flex-col-reverse gap-2 sm:flex-row sm:flex-wrap [&>button]:max-sm:w-full">
+      <div className="sticky-actions flex flex-col-reverse gap-2 sm:flex-row sm:flex-wrap [&>button]:max-sm:w-full">
         <DismissButton item={item} />
         {item.kind === 'approval' ? (
           <>
@@ -762,23 +853,10 @@ function ResolveButtons({ item }: { item: DeskItemDto }) {
             <Button
               variant="primary"
               loading={resolve.isPending}
-              onClick={() =>
-                resolve.mutate(
-                  {
-                    id: item.id,
-                    body: { resolution: 'approved', ...(edited ? { editedBody: edited } : {}) },
-                  },
-                  done(item.subkind === 'ceo_recommendation' ? 'Done' : 'Approved'),
-                )
-              }
+              data-testid="desk-approve"
+              onClick={() => (mobile ? setConfirmApprove(true) : approve())}
             >
-              {item.subkind === 'ceo_recommendation'
-                ? 'Do it'
-                : item.subkind === 'large_merge'
-                  ? 'Approve merge'
-                  : item.subkind === 'repo_create'
-                    ? 'Create repository'
-                    : 'Approve'}
+              {approveLabel}
             </Button>
           </>
         ) : item.subkind === 'budget_paused' && item.budgetProject ? (

@@ -1,6 +1,7 @@
 import type { ApprovalReviewInfo } from '@aom/shared';
 import { useState } from 'react';
 import { useCardDiff } from '../api/queries/approval.ts';
+import { useIsMobile } from '../hooks/useIsMobile.ts';
 import { DiffView } from './DiffView.tsx';
 import { Badge, Button, ErrorBox, Spinner } from './ui.tsx';
 
@@ -19,6 +20,7 @@ export function ApprovalReview({
   defaultOpen?: boolean;
 }) {
   const [open, setOpen] = useState(defaultOpen);
+  const mobile = useIsMobile();
   const diff = useCardDiff(cardId, open && !!review.diff, review.sha);
   const short = review.sha ? review.sha.slice(0, 10) : null;
   return (
@@ -88,13 +90,28 @@ export function ApprovalReview({
       {review.verdicts.length > 0 && (
         <div className="flex flex-col gap-1 text-sm" data-testid="approval-verdicts">
           <span className="font-medium text-fg">Review verdict{review.verdicts.length === 1 ? '' : 's'}</span>
-          {review.verdicts.map((v, i) => (
-            // biome-ignore lint/suspicious/noArrayIndexKey: the verdicts are a fixed list; one reviewer can approve twice
-            <p key={`${v.reviewerName}-${i}`} className="text-muted">
-              <span className="text-fg">{v.reviewerName}</span> approved (score {v.score}
-              {v.risk ? `, risk ${v.risk}` : ''}){v.comments ? `: ${v.comments}` : ''}
-            </p>
-          ))}
+          {mobile && (
+            <details className="text-muted" data-testid="approval-verdicts-fold">
+              <summary className="min-h-11 cursor-pointer py-2 text-fg">
+                {review.verdicts.length} reviewer{review.verdicts.length === 1 ? '' : 's'} approved
+              </summary>
+              {review.verdicts.map((v, i) => (
+                // biome-ignore lint/suspicious/noArrayIndexKey: fixed list
+                <p key={`${v.reviewerName}-${i}`}>
+                  <span className="text-fg">{v.reviewerName}</span> (score {v.score}
+                  {v.risk ? `, risk ${v.risk}` : ''}){v.comments ? `: ${v.comments}` : ''}
+                </p>
+              ))}
+            </details>
+          )}
+          {!mobile &&
+            review.verdicts.map((v, i) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: the verdicts are a fixed list; one reviewer can approve twice
+              <p key={`${v.reviewerName}-${i}`} className="text-muted">
+                <span className="text-fg">{v.reviewerName}</span> approved (score {v.score}
+                {v.risk ? `, risk ${v.risk}` : ''}){v.comments ? `: ${v.comments}` : ''}
+              </p>
+            ))}
         </div>
       )}
       {review.diff ? (

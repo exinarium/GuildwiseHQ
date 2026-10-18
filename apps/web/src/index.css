@@ -247,3 +247,22 @@ input[type="radio"] {
   transform-origin: center;
   animation: ring-out 4s ease-out infinite;
 }
+
+/* Mobile: a sticky action bar inside a scrolling sheet or page (Approve / Answer / Send back stay under the thumb). */
+@media (max-width: 767.98px) {
+  .sticky-actions {
+    position: sticky;
+    bottom: 0;
+    z-index: 5;
+    margin-inline: -1rem;
+    padding: 0.75rem 1rem max(0.75rem, env(safe-area-inset-bottom));
+    background: var(--surface);
+    border-top: 1px solid var(--line);
+  }
+}
+@media (max-width: 767.98px) {
+  /* The same bar on a page (not in a sheet): it floats above the bottom tab bar. */
+  .sticky-actions-page {
+    bottom: var(--app-bottom-inset, 0px);
+  }
+}

@@ -29,7 +29,7 @@ function setup(mockUi = true, expert = false, projectDefault?: 'merge' | 'pr') {
       </MemoryRouter>
     </QueryClientProvider>,
   );
-  return userEvent.setup();
+  return userEvent.setup({ applyAccept: false });
 }
 
 describe('CardNew mock fields', () => {
