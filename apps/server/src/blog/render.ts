@@ -34,7 +34,7 @@ main{padding:36px 0 64px}
 h1{font-size:2.1rem;line-height:1.2;margin:0 0 12px;letter-spacing:-.02em}
 h2{font-size:1.5rem;margin:2em 0 .5em;line-height:1.3}h3{font-size:1.2rem;margin:1.6em 0 .4em}h4{margin:1.4em 0 .3em}
 .lead{color:var(--muted);font-size:1.1rem;margin:0 0 24px}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:20px;margin-top:24px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,300px),1fr));gap:20px;margin-top:24px}
 .card{background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow:hidden;display:flex;flex-direction:column}
 .card img{width:100%;height:auto;aspect-ratio:1200/630;object-fit:cover;display:block;background:var(--sunken)}
 .card .body{padding:16px 18px 18px}
@@ -59,6 +59,19 @@ article blockquote{margin:1em 0;padding:2px 16px;border-left:4px solid var(--bra
 .cta-box a.btn{display:inline-block;background:var(--accent);color:#0d1220;font-weight:700;padding:10px 18px;border-radius:8px;text-decoration:none}
 footer.site{border-top:1px solid var(--line);background:var(--surface);padding:24px 0;font-size:.9rem;color:var(--muted)}
 footer.site a{color:var(--muted);margin-right:16px}
+img,video{max-width:100%}h1,h2,h3,p,li{overflow-wrap:anywhere;text-wrap:balance}p,li{text-wrap:pretty}
+@media (max-width:640px){
+.wrap{padding-left:max(16px,env(safe-area-inset-left));padding-right:max(16px,env(safe-area-inset-right))}
+body{font-size:16px}main{padding:24px 0 48px}h1{font-size:clamp(1.65rem,7.4vw,2.1rem)}h2{font-size:1.35rem}
+header.site .wrap{height:60px;gap:8px}.brand img{height:24px}
+nav.site{display:flex;align-items:center}nav.site a{margin-left:4px;padding:0 10px;min-height:44px;display:inline-flex;align-items:center}
+nav.site a.cta{margin-left:8px;padding:0 14px}
+.tags a{padding:12px 14px;font-size:.85rem}.tags{gap:8px}
+.pager a,.cta-box a.btn,button{display:inline-flex;align-items:center;min-height:44px}
+.cta-box{padding:20px 18px}
+footer.site{padding:20px 0 max(20px,env(safe-area-inset-bottom))}footer.site a{display:inline-flex;align-items:center;min-height:44px;margin-right:18px}
+article table{font-size:.9rem}
+}
 form.inline{display:inline}button{font:inherit;cursor:pointer;background:var(--brand);color:var(--brand-fg);border:0;border-radius:8px;padding:9px 16px}
 `;
 
@@ -80,7 +93,7 @@ const jsonLd = (o: unknown): string => JSON.stringify(o).replace(/</g, '\\u003c'
 function layout(origin: string, meta: PageMeta, content: string): string {
   const img = meta.image ?? `${origin}/og-image.png`;
   return `<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>${esc(meta.title)}</title>
 <meta name="description" content="${esc(meta.description)}">
 <link rel="canonical" href="${esc(meta.canonical)}">

@@ -247,3 +247,12 @@ input[type="radio"] {
   transform-origin: center;
   animation: ring-out 4s ease-out infinite;
 }
+
+/* Sign-in screens on a phone: text links get a 44px touch area without changing the layout (padding cancelled by margin). */
+@media (max-width: 767.98px) {
+  .auth-frame a:not([class*="btn"]) {
+    display: inline-block;
+    padding-block: 0.9rem;
+    margin-block: -0.9rem;
+  }
+}
