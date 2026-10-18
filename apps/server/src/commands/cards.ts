@@ -318,6 +318,7 @@ export async function createCardIn(
           scheduled: false,
           repoId,
           priority: req.priority ?? DEFAULT_CARD_PRIORITY,
+          priorityScale: 2,
           docsNeeded: req.docsNeeded ?? false,
           designNeeded,
           investigationOnly,

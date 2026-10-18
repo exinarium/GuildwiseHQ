@@ -169,6 +169,8 @@ describe('bug intake', () => {
     const cards = await platformCards();
     expect(cards).toHaveLength(1);
     expect((await bugRows())[0]?.card_id).toBe(cards[0]?.id);
+    // a bug card is High (3 on the Urgent 1, High 3, Normal 5, Low 8 scale), not the Normal a legacy 2 turned into
+    expect(cards[0]?.priority).toBe(3);
   });
 
   it('files one card per signature, with a counter, routed to the platform architect', async () => {

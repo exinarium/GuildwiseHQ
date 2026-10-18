@@ -264,7 +264,9 @@ export const cardProjectors: Record<string, Projector> = {
         p.origin,
         p.scheduled,
         p.scheduleId ?? null,
-        p.priority === LEGACY_DEFAULT_CARD_PRIORITY ? DEFAULT_CARD_PRIORITY : p.priority,
+        p.priority === LEGACY_DEFAULT_CARD_PRIORITY && p.priorityScale === undefined
+          ? DEFAULT_CARD_PRIORITY
+          : p.priority,
         p.requiredCapabilities,
         p.worktreeCardId ?? null,
         p.status === 'queued' ? e.createdAt : null,

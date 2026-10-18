@@ -74,6 +74,7 @@ export async function spawnCardEvent(
           scheduled: input.scheduled ?? false,
           repoId: from.repo_id ?? undefined,
           priority: from.priority,
+          priorityScale: 2,
           docsNeeded: false,
           designNeeded: false,
           investigationOnly: false,

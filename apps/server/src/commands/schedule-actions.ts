@@ -129,6 +129,7 @@ export async function scheduledCard(
           ...(extra.interestRunId ? { interestRunId: extra.interestRunId } : {}),
           ...(extra.preferredAgents ? { preferredAgents: extra.preferredAgents } : {}),
           priority: template.priority ?? DEFAULT_CARD_PRIORITY,
+          priorityScale: 2,
           docsNeeded: false,
           designNeeded: false,
           investigationOnly: false,

@@ -70,6 +70,11 @@ export const cardEvents = [
       preferredAgents: z.record(z.string(), Id).optional(),
       repoId: Id.optional(),
       priority: z.number().int().min(1).max(9).default(DEFAULT_CARD_PRIORITY),
+      /**
+       * `2` on every event written since priorities got labels (Urgent 1, High 3, Normal 5, Low 8): `priority` is taken as
+       * written, a 2 included. Absent on older events, where a 2 was the old default and the projection reads it as 5.
+       */
+      priorityScale: z.literal(2).optional(),
       docsNeeded: z.boolean().default(false),
       /** Run the investigate & design stage before build (default: the project's design step setting). */
       designNeeded: z.boolean().default(false),

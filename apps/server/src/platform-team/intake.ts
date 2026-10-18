@@ -227,7 +227,7 @@ async function fileBugCard(ctx: Ctx, tx: Tx, bug: Row, team: PlatformTeam): Prom
       affectedAreas: 'Guildwise server or runner (the architect finds the exact place).',
       constraints: 'Keep the change minimal; no unrelated clean-up.',
     },
-    priority: 2,
+    priority: 3, // High (the scale is Urgent 1, High 3, Normal 5, Low 8; a 2 on an old event meant the old default)
     designNeeded: true,
     specify: true,
   };
