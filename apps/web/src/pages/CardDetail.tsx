@@ -8,7 +8,7 @@ import {
   workflowHasIntegrationGuard,
   workflowUsesRepos,
 } from '@aom/shared';
-import { MoreHorizontal } from 'lucide-react';
+import { ArrowLeft, MoreHorizontal } from 'lucide-react';
 import { createContext, type FormEvent, type ReactNode, useContext, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import { useWorkflows } from '../api/queries/agents.ts';
@@ -249,12 +249,41 @@ export function CardDetailView({
 
   return (
     <div className="mx-auto max-w-6xl">
+      {mobile && (
+        <div className="mb-1 flex items-center justify-between gap-2">
+          <Link
+            to={`/p/${card.ref.slice(0, Math.max(0, card.ref.lastIndexOf('-')))}/board`}
+            className="inline-flex min-h-11 items-center gap-1 text-sm text-muted hover:text-fg"
+            aria-label="Back to the board"
+          >
+            <ArrowLeft aria-hidden="true" className="size-3.5" />
+            <span>Back to the board</span>
+          </Link>
+          <div className="flex items-center gap-2">
+            {permissions.canSpecify && card.status === 'draft' && (
+              <Button variant="primary" loading={specify.isPending} onClick={() => specify.mutate(undefined)}>
+                Specify
+              </Button>
+            )}
+            <Button data-testid="card-actions" onClick={() => setActionsOpen(true)}>
+              <MoreHorizontal aria-hidden="true" className="size-4" />
+              Actions
+            </Button>
+          </div>
+        </div>
+      )}
       <PageHeader
-        back={{
-          to: `/p/${card.ref.slice(0, Math.max(0, card.ref.lastIndexOf('-')))}/board`,
-          label: 'Back to the board',
-        }}
-        title={`${card.ref} ${card.title}`}
+        {...(mobile
+          ? {}
+          : {
+              back: {
+                to: `/p/${card.ref.slice(0, Math.max(0, card.ref.lastIndexOf('-')))}/board`,
+                label: 'Back to the board',
+              },
+            })}
+        // the ref chip below already shows the ref on a phone
+        title={mobile ? card.title : `${card.ref} ${card.title}`}
+        documentTitle={`${card.ref} ${card.title}`}
         eyebrow={
           <div className="mb-2 flex flex-wrap items-center gap-2">
             <span className="rounded-[6px] bg-sunken px-1.5 py-0.5 font-mono text-xs font-semibold text-muted">
@@ -287,23 +316,7 @@ export function CardDetailView({
           </span>
         }
         actions={
-          mobile ? (
-            <>
-              {permissions.canSpecify && card.status === 'draft' && (
-                <Button
-                  variant="primary"
-                  loading={specify.isPending}
-                  onClick={() => specify.mutate(undefined)}
-                >
-                  Specify
-                </Button>
-              )}
-              <Button data-testid="card-actions" onClick={() => setActionsOpen(true)}>
-                <MoreHorizontal aria-hidden="true" className="size-4" />
-                Actions
-              </Button>
-            </>
-          ) : (
+          mobile ? undefined : (
             <>
               {permissions.canSpecify && card.status === 'draft' && (
                 <Button
