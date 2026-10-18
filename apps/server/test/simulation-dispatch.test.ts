@@ -86,3 +86,33 @@ describe('real workstations in a simulation organization', () => {
     expect(hire.status).toBe(404);
   });
 });
+
+describe('hiring without a runtime', () => {
+  const hireOn = async (name: string, workstationId: string, extra: Record<string, unknown> = {}) => {
+    const res = await ok<any>(
+      w.t.req('POST', '/api/agents', {
+        cookie: w.owner.cookie,
+        body: { name, roleKey: 'builder', seniority: 'junior', workstationId, ...extra },
+      }),
+      201,
+    );
+    return (await q('SELECT runtime, model FROM agents WHERE id=$1', [res.agent?.id ?? res.id]))[0]!;
+  };
+
+  it('is a mock agent on the simulated workstation, and in a simulation organization', async () => {
+    const sim = await pairWorkstation(w.t, w.owner, 'Default sim');
+    await q('UPDATE workstations SET simulation_org_id=$2 WHERE id=$1', [sim.workstationId, w.owner.id]);
+    await q('UPDATE organizations SET simulation=false WHERE id=$1', [w.owner.id]);
+    // the simulated workstation alone is enough
+    expect(await hireOn('Sima', sim.workstationId)).toEqual({ runtime: 'mock', model: 'mock' });
+    // an explicit runtime is honoured
+    expect(
+      (await hireOn('Simb', sim.workstationId, { runtime: 'claude-code', model: 'sonnet' })).runtime,
+    ).toBe('claude-code');
+    // a real workstation of a normal organization still defaults to the role's own model
+    expect((await hireOn('Reala', w.workstationId)).runtime).toBe('claude-code');
+    // a simulation organization defaults to mock on any workstation
+    await q('UPDATE organizations SET simulation=true WHERE id=$1', [w.owner.id]);
+    expect(await hireOn('Realb', w.workstationId)).toEqual({ runtime: 'mock', model: 'mock' });
+  });
+});

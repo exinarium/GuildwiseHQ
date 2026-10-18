@@ -231,7 +231,7 @@ export async function hireAgent(
     // Own workstation; or the organization's simulated workstation (a simulation organization's agents run there).
     const ws = await one(
       tx,
-      `SELECT id FROM workstations WHERE id=$1 AND status='active' AND (user_id=$2 OR simulation_org_id=$3)`,
+      `SELECT id, simulation_org_id FROM workstations WHERE id=$1 AND status='active' AND (user_id=$2 OR simulation_org_id=$3)`,
       [req.workstationId, user.id, org.id],
     );
     if (!ws) throw notFound('workstation not found');
@@ -294,7 +294,15 @@ export async function hireAgent(
         `the name '${req.name}' is already used in this organization (retired agents keep their names)`,
       );
     }
-    const dm = roleDef.definition.defaultModel;
+    // Without an explicit runtime, an agent hired on the simulated workstation (or in a simulation organization) is a mock
+    // agent: the simulated runner has no model to call, and real model names there only produce failing shifts.
+    const simulated =
+      !!ws.simulation_org_id ||
+      !!(await one(tx, 'SELECT 1 FROM organizations WHERE id=$1 AND simulation', [orgId]));
+    const dm =
+      req.runtime === undefined && simulated
+        ? { ...roleDef.definition.defaultModel, runtime: 'mock' as const, model: 'mock' }
+        : roleDef.definition.defaultModel;
     const unsandboxedAck = await sandboxGate(
       ctx,
       tx,
