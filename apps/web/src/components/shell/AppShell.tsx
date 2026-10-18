@@ -15,6 +15,7 @@ import { AgentFacesSync } from '../AgentFacesSync.tsx';
 import { ChatDrawer } from '../ChatDrawer.tsx';
 import { AskCeoButton } from '../ceo/AskCeoButton.tsx';
 import { AskDevOpsProvider, useAskDevOps } from '../devops/AskDevOps.tsx';
+import { PushPrompt } from '../push/PushPrompt.tsx';
 import { PageHelpPanel } from '../help/PageHelpPanel.tsx';
 import { CommandPalette } from '../palette/CommandPalette.tsx';
 import { ShortcutsDialog } from '../palette/ShortcutsDialog.tsx';
@@ -387,6 +388,7 @@ function Shell({ name, live }: { name: string; live: string }) {
           />
           <PageHelpPanel open={pageHelp} onOpenChange={setPageHelp} />
           <WhatsNewHost />
+          <PushPrompt />
           <ShortcutsDialog open={help} onOpenChange={setHelp} />
           <ChatDrawer open={chat} onOpenChange={setChat} {...(project ? { projectId: project.id } : {})} />
         </Tooltip.Provider>

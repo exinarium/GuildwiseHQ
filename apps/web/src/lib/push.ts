@@ -30,7 +30,15 @@ function keyBytes(base64Url: string): Uint8Array<ArrayBuffer> {
 /** The service worker of this page (absent in dev and tests: the real one is registered by production builds only). */
 async function registration(): Promise<ServiceWorkerRegistration | null> {
   if (!('serviceWorker' in navigator)) return null;
-  return (await navigator.serviceWorker.getRegistration('/')) ?? null;
+  const sw = navigator.serviceWorker;
+  const existing = await sw.getRegistration('/');
+  if (existing) return existing;
+  // Registered a moment ago and still installing: wait for it to activate, but never hang (dev and tests have none).
+  if (!sw.ready) return null;
+  return await Promise.race([
+    sw.ready,
+    new Promise<null>((resolve) => setTimeout(() => resolve(null), 4000)),
+  ]);
 }
 
 export async function currentEndpoint(): Promise<string | null> {
@@ -44,11 +52,13 @@ export async function currentEndpoint(): Promise<string | null> {
 
 /** Asks for permission (call it from a tap), subscribes this browser and registers it with the server. */
 export async function enablePush(publicKey: string): Promise<{ id: string }> {
-  const reg = await registration();
-  if (!reg) throw new Error('The app is not installed as a service worker here. Use the production site.');
-  const permission = await Notification.requestPermission();
+  // First thing, before any await: browsers and iOS only show the permission dialog while the tap is still fresh.
+  const asked = Notification.requestPermission();
+  const permission = await asked;
   if (permission !== 'granted')
     throw new Error('Notifications were not allowed. Change it in the browser settings.');
+  const reg = await registration();
+  if (!reg) throw new Error('The app is not installed as a service worker here. Use the production site.');
   const sub =
     (await reg.pushManager.getSubscription()) ??
     (await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(publicKey) }));

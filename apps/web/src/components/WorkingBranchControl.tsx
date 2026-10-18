@@ -104,8 +104,8 @@ function MainBranchRow({
       <p className="text-xs text-subtle">{MAIN_BRANCH_EXPLAINER}</p>
       {!repo.mainBranch && (
         <p role="note" className="text-xs text-amber-700">
-          Main branch not set: the runner uses the host's default (its name is not known here). Set it if your main
-          branch is not the host's default.
+          Main branch not set: the runner uses the host's default (its name is not known here). Set it if your
+          main branch is not the host's default.
         </p>
       )}
       {editing && (

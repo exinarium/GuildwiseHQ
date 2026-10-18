@@ -1,5 +1,5 @@
 import { PUSH_CATEGORIES, PUSH_CATEGORY_INFO, type PushPreferences } from '@aom/shared';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { errorMessage } from '../../api/client.ts';
 import { useMe } from '../../api/queries/auth.ts';
 import {
@@ -10,7 +10,8 @@ import {
   useSavePushPreferences,
   useSendPushTest,
 } from '../../api/queries/push.ts';
-import { currentEndpoint, enablePush, pushSupport, removeDevice } from '../../lib/push.ts';
+import { usePushSubscription } from '../../hooks/usePushSubscription.ts';
+import { removeDevice } from '../../lib/push.ts';
 import { Button, Callout, ErrorBox, Panel, useToast } from '../ui.tsx';
 
 /** Settings: Web Push for this phone or computer. Permission is only asked from the button, never on load. */
@@ -23,47 +24,32 @@ export function NotificationSettings() {
   const refreshDevices = useInvalidatePushDevices();
   const test = useSendPushTest();
   const toast = useToast();
-  const [here, setHere] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const push = usePushSubscription();
+  const { here, busy, support } = push;
   const [removing, setRemoving] = useState<string | null>(null);
-  const [problem, setProblem] = useState<string | null>(null);
+  const [removeProblem, setRemoveProblem] = useState<string | null>(null);
   const [allOrgs, setAllOrgs] = useState(true);
-  const support = pushSupport();
+  const problem = removeProblem ?? push.problem;
   const manyOrgs = (me.data?.orgs?.length ?? 0) > 1;
-
-  useEffect(() => {
-    void currentEndpoint().then(setHere);
-  }, []);
 
   const list = Array.isArray(devices.data?.devices) ? devices.data.devices : [];
   const thisDevice = list.find((d) => d.endpoint === here);
 
   const enable = async () => {
-    if (!config.data?.publicKey) return;
-    setBusy(true);
-    setProblem(null);
-    try {
-      await enablePush(config.data.publicKey);
-      setHere(await currentEndpoint());
-      await refreshDevices();
-      toast.success('Notifications are on for this device');
-    } catch (e) {
-      setProblem(errorMessage(e));
-    } finally {
-      setBusy(false);
-    }
+    setRemoveProblem(null);
+    if (await push.enable()) toast.success('Notifications are on for this device');
   };
 
   const remove = async (id: string, endpoint: string) => {
     setRemoving(id);
-    setProblem(null);
+    setRemoveProblem(null);
     try {
       await removeDevice(id, endpoint);
-      setHere(await currentEndpoint());
+      await push.refresh();
       await refreshDevices();
       toast.success('Device removed');
     } catch (e) {
-      setProblem(errorMessage(e));
+      setRemoveProblem(errorMessage(e));
     } finally {
       setRemoving(null);
     }
@@ -119,8 +105,8 @@ export function NotificationSettings() {
       )}
       {config.data?.enabled && support === 'denied' && (
         <Callout tone="warning" className="mt-4" data-testid="push-denied">
-          Notifications are blocked for this site. Allow them in the browser or phone settings, then reload
-          this page.
+          Notifications are blocked for this site. Allow them in the browser's site settings (on an iPhone:
+          Settings, Notifications, Guildwise), then reload this page.
         </Callout>
       )}
 
