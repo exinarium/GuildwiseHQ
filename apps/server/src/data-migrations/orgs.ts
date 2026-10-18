@@ -8,6 +8,9 @@ import type { PgEventStore } from '../eventstore/pg-event-store.ts';
 
 export const ORGS_MIGRATION = 'orgs-2026-10';
 
+/** push_prefs.org_id sentinel for "all organizations" (see push/prefs.ts ALL_ORGS): never an organization or a user. */
+const NIL_ORG_ID = '00000000-0000-0000-0000-000000000000';
+
 export interface DataMigrationEnv {
   pool: Pool;
   store: PgEventStore;
@@ -52,7 +55,9 @@ async function orgDataTables(db: Queryable): Promise<string[]> {
     `SELECT c.table_name AS t FROM information_schema.columns c
        JOIN information_schema.tables t ON t.table_schema = c.table_schema AND t.table_name = c.table_name
       WHERE c.table_schema = current_schema() AND c.column_name = 'org_id' AND t.table_type = 'BASE TABLE'
-        AND c.table_name NOT IN ('organizations','platform_audit_log','invitations')
+        AND c.table_name NOT IN ('organizations','platform_audit_log','invitations',
+          -- push_prefs.org_id holds the ALL_ORGS nil-UUID sentinel ("every organization"), not an organization
+          'push_prefs')
       ORDER BY 1`,
   );
   return r.map((x) => `"${x.t}"`);
@@ -82,6 +87,7 @@ async function orgIdsInUse(db: Queryable, tables: string[]): Promise<Map<string,
   sources.push('SELECT org_id, count(*) AS n FROM events WHERE org_id IS NOT NULL GROUP BY org_id');
   for (const sql of sources) {
     for (const r of await rows<{ org_id: string; n: string }>(db, sql)) {
+      if (r.org_id === NIL_ORG_ID) continue; // the ALL_ORGS sentinel is not an org_id in use
       counts.set(r.org_id, (counts.get(r.org_id) ?? 0) + Number(r.n));
     }
   }

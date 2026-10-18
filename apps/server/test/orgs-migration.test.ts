@@ -169,6 +169,17 @@ describe('orgs-2026-10: the legacy database becomes organizations', () => {
     expect(await snapshot()).toEqual(before);
   });
 
+  it('ignores the ALL_ORGS sentinel in push_prefs (a boot must not crash-loop on saved all-org prefs)', async () => {
+    const [u] = await q<{ id: string }>(`SELECT id FROM users ORDER BY created_at, id LIMIT 1`);
+    await q(
+      `INSERT INTO push_prefs (user_id, org_id, categories, quiet, updated_at)
+       VALUES ($1, '00000000-0000-0000-0000-000000000000', '{}', '{}', now())`,
+      [u!.id],
+    );
+    await expect(planOrgMigration(t.app.ctx.pool)).resolves.toBeDefined();
+    await expect(migrateOrgs(env(), { dryRun: true })).resolves.toBeDefined();
+  });
+
   it('refuses to guess when an org_id is neither an organization nor a user', async () => {
     const stray = '00000000-0000-4000-8000-00000000dead';
     await q(
