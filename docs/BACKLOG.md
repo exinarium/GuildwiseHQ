@@ -2,6 +2,32 @@
 
 Logged fixes to pick up when development resumes. Newest first.
 
+## 2026-10-18
+
+### 82. Evaluate Graphify for project graphs and an organization graph
+
+**Owner request (2026-10-18):** "Take a look at https://github.com/Graphify-Labs/graphify. We can possibly rewrite this
+to enhance our ledger and context system and add a project graph for every project as well as adding an organizational
+project graph to map the relationships between projects. ... I think this can be a massive enhancement and also a very
+cool additional feature of the system."
+
+**Status: backlog, not started.** Nothing has been evaluated yet.
+
+**Ideas to explore.**
+- **Project graph** per project: a knowledge graph of the codebase and work (modules, services, cards, decisions, ledger
+  orders, owners), built and kept current by the agents, as richer context for shift briefs and chats than today's
+  ledger search and file reads.
+- **Organization graph**: the relationships between projects (shared services, APIs, repositories, dependencies, people
+  and agents working across them), so cross-project impact is visible to the CEO/BA and to reviewers.
+- **Ledger and context**: whether graph-based retrieval should complement or replace parts of the ledger search and the
+  context assembly for briefs (`apps/server/src/context.ts`, standing orders, ledger entries).
+- A visual graph view in the web app as a product feature, not only an agent tool.
+
+**First step.** Review the repository: licence (can it be rewritten or embedded commercially?), architecture, language
+and runtime, how graphs are built and stored, maturity and maintenance. Then a short design note in `docs/design/` on
+fit with the event-sourced model (graph as a projection rebuilt from events, never written directly), runner vs. server
+placement, cost per project, and a phased plan.
+
 ## 2026-10-15
 
 ### 70. Adversarial review and risk analysis by reviewers
