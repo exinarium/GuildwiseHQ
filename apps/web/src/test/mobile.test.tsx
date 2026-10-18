@@ -179,8 +179,8 @@ describe('BottomSheet', () => {
 
 describe('Move to... sheet', () => {
   const wf = {
-    key: 'code-v6',
-    version: 1,
+    key: 'code',
+    version: 6,
     name: 'Code',
     stages: [
       { id: 'build', label: 'Build', column: 'in_progress', kind: 'agent' },

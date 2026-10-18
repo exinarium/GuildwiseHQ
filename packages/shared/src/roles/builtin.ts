@@ -335,7 +335,7 @@ How to work:
 export const BUILTIN_ROLES: RoleDefinition[] = [
   role({
     key: 'ba',
-    version: 15,
+    version: 16,
     name: 'Business analyst',
     purpose: 'Specifies cards, runs intake and finalizes finished work.',
     department: 'delivery',
@@ -354,9 +354,6 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
       { workflowKey: 'code', stageId: 'finalize' },
       // Writes the manual QA steps when no tester is hired (docs/design/manual-qa.md).
       { workflowKey: 'code', stageId: 'qa_steps' },
-      { workflowKey: 'code-v6', stageId: 'spec' },
-      { workflowKey: 'code-v6', stageId: 'finalize' },
-      { workflowKey: 'code-v6', stageId: 'qa_steps' },
     ],
   }),
   role({
@@ -387,7 +384,7 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
   }),
   role({
     key: 'architect',
-    version: 4,
+    version: 5,
     name: 'Architect',
     purpose:
       'Investigates and designs cards before they are built: reads the code (any repository of the organization), compares, writes the design or investigation report and merges the main branch.',
@@ -408,8 +405,8 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
     skills: [],
     claimableStages: [
       { workflowKey: '*', stageId: 'investigate*' },
-      // plans the card itself when no planner is hired (code-v6)
-      { workflowKey: 'code-v6', stageId: 'planning' },
+      // plans the card itself when no planner is hired (lean team)
+      { workflowKey: 'code', stageId: 'planning' },
     ],
   }),
   role({
@@ -418,7 +415,7 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
     purpose: 'Implements specified cards with unit tests in a git worktree.',
     department: 'delivery',
     instructions: BUILDER_INSTRUCTIONS,
-    version: 5,
+    version: 6,
     coreRules: BUILDER_CORE_RULES,
     seniorityLevels: ['junior', 'senior'],
     defaultModel: { runtime: 'claude-code', model: 'sonnet', effort: 'medium' },
@@ -429,13 +426,12 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
     skills: [],
     claimableStages: [
       { workflowKey: 'code', stageId: 'build' },
-      { workflowKey: 'code-v6', stageId: 'build' },
       { workflowKey: 'code-bugfix', stageId: 'build' },
     ],
   }),
   role({
     key: 'reviewer',
-    version: 6,
+    version: 7,
     name: 'Reviewer',
     purpose: 'Reviews builder output against the card and the repository conventions.',
     department: 'delivery',
@@ -452,16 +448,15 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
     skills: [],
     claimableStages: [
       { workflowKey: 'code', stageId: 'review' },
-      { workflowKey: 'code-v6', stageId: 'review' },
-      { workflowKey: 'code-v6', stageId: 'merge_review' },
+      { workflowKey: 'code', stageId: 'merge_review' },
       // does the pre-review when no pre-reviewer is hired
-      { workflowKey: 'code-v6', stageId: 'pre_review' },
+      { workflowKey: 'code', stageId: 'pre_review' },
       { workflowKey: 'code-bugfix', stageId: 'review' },
     ],
   }),
   role({
     key: 'planner',
-    version: 1,
+    version: 2,
     name: 'Planner',
     purpose:
       'A short code-research pass after the spec: scans the docs and code areas a card touches, groups related cards, records their order and writes the Card Brief and a planning note for the architect.',
@@ -476,11 +471,11 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
       deniedShellPatterns: [...COMMON_DENIED_SHELL, 'git commit*', 'git add*'],
     }),
     skills: [],
-    claimableStages: [{ workflowKey: 'code-v6', stageId: 'planning' }],
+    claimableStages: [{ workflowKey: 'code', stageId: 'planning' }],
   }),
   role({
     key: 'pre_reviewer',
-    version: 1,
+    version: 2,
     name: 'Pre-reviewer',
     purpose:
       'Reads the builder diff for the basics (obvious bugs, rule and checklist violations, missing tests, smells) before the Opus review; sends findings straight back to the builder.',
@@ -495,11 +490,11 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
       deniedShellPatterns: [...COMMON_DENIED_SHELL, 'git commit*', 'git add*'],
     }),
     skills: [],
-    claimableStages: [{ workflowKey: 'code-v6', stageId: 'pre_review' }],
+    claimableStages: [{ workflowKey: 'code', stageId: 'pre_review' }],
   }),
   role({
     key: 'tester',
-    version: 8,
+    version: 9,
     name: 'Tester',
     purpose: 'Runs the test plan and owns end-to-end tests.',
     department: 'delivery',
@@ -513,15 +508,13 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
     claimableStages: [
       { workflowKey: 'code', stageId: 'test' },
       { workflowKey: 'code', stageId: 'qa_steps' },
-      { workflowKey: 'code-v6', stageId: 'test' },
-      { workflowKey: 'code-v6', stageId: 'qa_steps' },
       // a project's own test step against the running environment (variant template "Smoke test")
       { workflowKey: '*', stageId: 'smoke*' },
     ],
   }),
   role({
     key: 'writer',
-    version: 3,
+    version: 4,
     name: 'Technical writer',
     purpose: 'Updates documentation for finished changes.',
     department: 'delivery',
@@ -531,10 +524,7 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
     defaultModel: { runtime: 'claude-code', model: 'sonnet', effort: 'low' },
     permissions: perms({ writableGlobs: ['docs/**', '*.md', '**/*.md'] }),
     skills: [],
-    claimableStages: [
-      { workflowKey: 'code', stageId: 'docs' },
-      { workflowKey: 'code-v6', stageId: 'docs' },
-    ],
+    claimableStages: [{ workflowKey: 'code', stageId: 'docs' }],
   }),
   role({
     key: 'devops',

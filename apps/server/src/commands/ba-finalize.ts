@@ -118,7 +118,7 @@ export async function baFinalizeEvents(
       error: `${card.ref} has no completion action: ask the manager to set one on the card or in the project settings`,
     };
   const by = `${agent.name} (BA)`;
-  // code-v6: the owner's approval is for the reviewed commit; a branch that moved since goes back to the approval step.
+  // lean team: the owner's approval is for the reviewed commit; a branch that moved since goes back to the approval step.
   const lapse = await ownerApprovalLapse(tx, card);
   if (lapse)
     return {

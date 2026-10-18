@@ -5,6 +5,7 @@ import {
   type CompletionAction,
   type CreateCardRequest,
   canManageCard,
+  canonicalWorkflowKey,
   cardRef,
   DEFAULT_CARD_PRIORITY,
   emptyFields,
@@ -89,7 +90,7 @@ export function workflowView(c: Row): WorkflowCardView {
     ...c,
     ...cardView(c),
     ...(c.qa ? { manualQa: true, qaAgent: true } : {}),
-    // code-v6: decided by the last review approval; `mergeReview` is only ever moved to by the server.
+    // lean team: decided by the last review approval; `mergeReview` is only ever moved to by the server.
     ownerApproval: c.owner_approval_required === true,
   };
 }
@@ -654,7 +655,7 @@ export async function moveCard(
     if (
       stage.kind === 'human' ||
       stage.kind === 'server' ||
-      (stage.id === 'qa_steps' && (wf?.definition.key === 'code' || wf?.definition.key === 'code-v6'))
+      (stage.id === 'qa_steps' && canonicalWorkflowKey(wf?.definition.key ?? '') === 'code')
     )
       throw badRequest('invalid_stage', 'a step for a person starts by itself when the card reaches it');
     const missing = stage.kind === 'agent' ? requiredMissing(cardView(card), stage) : [];

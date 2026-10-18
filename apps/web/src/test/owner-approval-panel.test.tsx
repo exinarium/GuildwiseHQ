@@ -12,7 +12,8 @@ const json = (body: unknown, status = 200) =>
 const project = (over: Record<string, unknown> = {}) =>
   ({
     id: '0192f3a0-0000-7000-8000-0000000000b1',
-    workflowKey: 'code-v6',
+    workflowKey: 'code',
+    leanTeam: true,
     ownerApprovalPolicy: 'large_or_high_risk',
     fullSuiteAfterFinalize: false,
     ...over,
@@ -39,7 +40,7 @@ describe('lean team project settings', () => {
     const user = userEvent.setup();
     wrap(<OwnerApprovalPanel projectId="p1" project={project()} canChange />);
     expect(screen.getByTestId('owner-approval-state')).toHaveTextContent('Large and high-risk cards');
-    expect(screen.queryByTestId('upgrade-lean')).toBeNull();
+    expect(screen.queryByTestId('upgrade-lean-button')).toBeNull(); // no upgrade step: code v6 follows automatically
     await user.click(screen.getByTestId('owner-approval-always'));
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
     expect(last()).toMatchObject({
@@ -55,22 +56,10 @@ describe('lean team project settings', () => {
     expect(screen.getByTestId('owner-approval-readonly')).toBeInTheDocument();
   });
 
-  it('offers the opt-in switch to a project on an older workflow and reports what stays behind', async () => {
-    const user = userEvent.setup();
-    fetchMock.mockResolvedValue(
-      json({ workflowKey: 'code-v6', openCardsOnOlderVersion: 2, missingRoles: ['planner', 'pre_reviewer'] }),
-    );
-    wrap(<OwnerApprovalPanel projectId="p1" project={project({ workflowKey: 'code' })} canChange />);
-    await user.click(screen.getByTestId('upgrade-lean-button'));
-    await waitFor(() => expect(screen.getByTestId('upgrade-lean-result')).toBeInTheDocument());
-    expect(last()).toMatchObject({
-      url: expect.stringContaining('/projects/p1/upgrade-workflow'),
-      method: 'POST',
-    });
-    expect(screen.getByTestId('upgrade-lean-result')).toHaveTextContent(
-      '2 open card(s) stay on their version',
-    );
-    expect(screen.getByTestId('upgrade-lean-result')).toHaveTextContent('planner, pre_reviewer');
+  it('shows nothing for a project whose workflow is not the lean team flow (no upgrade button either)', () => {
+    wrap(<OwnerApprovalPanel projectId="p1" project={project({ leanTeam: false })} canChange />);
+    expect(screen.queryByTestId('owner-approval-always')).toBeNull();
+    expect(screen.queryByTestId('upgrade-lean-button')).toBeNull();
   });
 
   it('the full suite has a button that starts it by hand', async () => {

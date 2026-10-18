@@ -21,7 +21,7 @@ export function approvalRoutes(ctx: Ctx) {
       },
     );
 
-    /** The diff the runner uploaded at the review handoff (code-v6), for the owner approval's diff view. */
+    /** The diff the runner uploaded at the review handoff (lean team), for the owner approval's diff view. */
     app.get('/api/cards/:id/diff', { schema: { params: CardParamsSchema } }, async (req) => {
       const s = await requireUser(ctx, req);
       return cardDiff(ctx.pool, s.user, req.params.id);

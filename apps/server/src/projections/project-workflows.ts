@@ -1,6 +1,7 @@
 import type { EventOf } from '@aom/shared';
 import { exec, one } from '../db/sql.ts';
 import type { Projector } from '../eventstore/types.ts';
+import { mutateCard } from './util.ts';
 
 /**
  * `project_workflows` (migration 1660): the workflows a project has enabled. The primary row mirrors
@@ -53,5 +54,38 @@ export const projectWorkflowProjectors: Record<string, Projector> = {
         [p.projectId, x.workflowKey, x.workflowKey === project.workflow_key, x.defaultCardTypes, e.createdAt],
       );
     }
+  },
+  /** The fold of the legacy `lean team` key into `code` (lean-rollout step 5): the primary key moves, the old entry goes. */
+  ProjectPrimaryWorkflowChanged: async (tx, e) => {
+    const p = (e.event as EventOf<'ProjectPrimaryWorkflowChanged'>).payload;
+    await exec(tx, 'UPDATE projects SET workflow_key=$2 WHERE id=$1', [p.projectId, p.to]);
+    await exec(
+      tx,
+      'DELETE FROM project_workflows WHERE project_id=$1 AND is_primary AND workflow_key <> $2',
+      [p.projectId, p.to],
+    );
+    await exec(
+      tx,
+      `INSERT INTO project_workflows (project_id, workflow_key, is_primary, default_card_types, enabled_at)
+       VALUES ($1,$2,true,'{}',$3)
+       ON CONFLICT (project_id, workflow_key) DO UPDATE SET is_primary = true`,
+      [p.projectId, p.to, e.createdAt],
+    );
+  },
+  CardWorkflowVersionChanged: async (tx, e) => {
+    const p = (e.event as EventOf<'CardWorkflowVersionChanged'>).payload;
+    await mutateCard(tx, e, p.cardId, () =>
+      exec(tx, 'UPDATE cards SET workflow_version_id=$2 WHERE id=$1', [p.cardId, p.toVersionId]),
+    );
+  },
+  /** Removes the version row and its stages, but only while no card is pinned to it (replay order guarantees the repin came first). */
+  WorkflowVersionRetired: async (tx, e) => {
+    const p = (e.event as EventOf<'WorkflowVersionRetired'>).payload;
+    const pinned = await one(tx, 'SELECT 1 AS x FROM cards WHERE workflow_version_id=$1 LIMIT 1', [
+      p.workflowVersionId,
+    ]);
+    if (pinned) return;
+    await exec(tx, 'DELETE FROM workflow_stages WHERE workflow_version_id=$1', [p.workflowVersionId]);
+    await exec(tx, 'DELETE FROM workflow_versions WHERE id=$1', [p.workflowVersionId]);
   },
 };

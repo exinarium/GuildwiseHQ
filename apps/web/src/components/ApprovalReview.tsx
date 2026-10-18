@@ -6,7 +6,7 @@ import { DiffView } from './DiffView.tsx';
 import { Badge, Button, ErrorBox, Spinner } from './ui.tsx';
 
 /**
- * What the owner reads before approving in code-v6 (design 5.5): why approval is needed, the commit it is bound to, the
+ * What the owner reads before approving in lean team (design 5.5): why approval is needed, the commit it is bound to, the
  * builder's evidence, the review verdicts and the final diff (unified, per-file collapse). The approval is for this
  * commit: when the branch moves, the card asks again.
  */

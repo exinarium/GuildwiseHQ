@@ -1,5 +1,6 @@
 import {
   fieldCatalogue,
+  LEGACY_CODE_V6_KEY,
   requiredChildFields,
   type SubworkflowLookup,
   type SubworkflowTarget,
@@ -102,7 +103,7 @@ export async function subworkflowTargets(
   const versions = await rows(
     db,
     `SELECT DISTINCT ON (org_id, key) org_id, definition FROM workflow_versions
-      WHERE (org_id IS NULL OR org_id = $1) AND status = 'active' AND project_id IS NULL
+      WHERE (org_id IS NULL OR org_id = $1) AND status = 'active' AND project_id IS NULL AND key <> '${LEGACY_CODE_V6_KEY}'
       ORDER BY org_id NULLS FIRST, key, version DESC`,
     [orgId],
   );

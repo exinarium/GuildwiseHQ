@@ -394,7 +394,7 @@ export const ShiftBriefSchema = z.object({
    */
   testWithoutEnvironment: z.boolean().optional(),
   /**
-   * code-v6, the Card Brief and the group: the short summary the planner or architect wrote for the builder, and the other
+   * lean team, the Card Brief and the group: the short summary the planner or architect wrote for the builder, and the other
    * cards of the group (one builder works them in order, in one resumed session).
    */
   cardBrief: z.string().optional(),
@@ -404,7 +404,7 @@ export const ShiftBriefSchema = z.object({
       cards: z.array(z.object({ ref: z.string(), title: z.string(), stage: z.string(), status: z.string() })),
     })
     .optional(),
-  /** code-v6, the planning shift: the other open cards of the project (to group and to order), newest first. */
+  /** lean team, the planning shift: the other open cards of the project (to group and to order), newest first. */
   openCards: z
     .array(
       z.object({
@@ -416,7 +416,7 @@ export const ShiftBriefSchema = z.object({
       }),
     )
     .optional(),
-  /** code-v6: the build and unit test evidence of the card's handoff, bound to a commit (reviewers read it instead of building). */
+  /** lean team: the build and unit test evidence of the card's handoff, bound to a commit (reviewers read it instead of building). */
   buildEvidence: z
     .object({
       sha: z.string(),
@@ -432,9 +432,9 @@ export const ShiftBriefSchema = z.object({
       at: z.string(),
     })
     .optional(),
-  /** code-v6: the paths of the diff that make the change high risk (computed by the server, never lowered by an agent). */
+  /** lean team: the paths of the diff that make the change high risk (computed by the server, never lowered by an agent). */
   highRisk: z.object({ paths: z.array(z.string()), labels: z.array(z.string()) }).optional(),
-  /** code-v6, a merge review: the commit that was reviewed and the one DevOps resolved the conflict to. */
+  /** lean team, a merge review: the commit that was reviewed and the one DevOps resolved the conflict to. */
   mergeReview: z
     .object({
       oldHead: z.string().optional(),
@@ -443,7 +443,7 @@ export const ShiftBriefSchema = z.object({
     })
     .optional(),
   /**
-   * code-v6, a tester shift: the paths of the card diff and the project's E2E area mapping (absent: the default derived from
+   * lean team, a tester shift: the paths of the card diff and the project's E2E area mapping (absent: the default derived from
    * the E2E folders); the runner picks the specs that belong to the card.
    */
   e2e: z
@@ -984,7 +984,7 @@ export const ShiftStartedSchema = msg('shift.started', {
       baseBranch: z.string(),
       created: z.boolean(),
       headSha: z.string(),
-      /** code-v6: the runner rebased (or merged) the card branch onto its base before the shift; the commit moved with it. */
+      /** lean team: the runner rebased (or merged) the card branch onto its base before the shift; the commit moved with it. */
       rebased: z.boolean().optional(),
     })
     .optional(),
@@ -1084,7 +1084,7 @@ export const ShiftReportMsgSchema = msg('shift.report', {
   diffStats: DiffStats.optional(),
   riskTier: z.enum(['small', 'large']).optional(),
   /**
-   * code-v6, a build handoff: the commit the runner measured after the shift's autocommit (the build evidence is bound to
+   * lean team, a build handoff: the commit the runner measured after the shift's autocommit (the build evidence is bound to
    * it), the paths of the card diff (the server computes the high-risk flag from them) and the diff itself, capped at 2 MB.
    * Additive: an older runner sends none.
    */

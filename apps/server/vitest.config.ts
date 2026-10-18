@@ -19,7 +19,7 @@ export default defineConfig({
       AOM_RATE_LIMIT: 'false',
       // Most suites script the mock runtime through card fields; the flag-off behaviour has its own test.
       AOM_MOCK_UI: 'true',
-      // Suites written for the code workflow keep it as the default of a new project; code-v6 suites ask for it.
+      // Suites written for the code workflow keep it as the default of a new project; the lean team suites keep code v6 active (createTestApp lean: true).
       AOM_DEFAULT_WORKFLOW: 'code',
       LOG_LEVEL: process.env.TEST_LOG ? 'info' : 'silent',
     },

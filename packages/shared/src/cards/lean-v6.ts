@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { globToRegExp } from '../workflows/high-risk.ts';
 
 /**
- * Lean Team v3, workflow code-v6: pure rules shared by the server, the runner and the web app. Build evidence, the owner
+ * Lean Team v3, workflow lean team: pure rules shared by the server, the runner and the web app. Build evidence, the owner
  * approval policy, the size caps of the stored diff and the mapping of changed paths to E2E areas.
  */
 

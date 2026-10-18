@@ -1,5 +1,5 @@
 /**
- * A unified diff (`git diff` output) split into files and lines for the diff view of the owner approval (code-v6). No
+ * A unified diff (`git diff` output) split into files and lines for the diff view of the owner approval (lean team). No
  * dependency: the view only needs the file headers, the hunks and what each line is (added, removed, context, hunk header).
  */
 

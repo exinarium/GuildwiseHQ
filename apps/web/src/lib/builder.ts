@@ -77,7 +77,7 @@ export interface BuilderStep {
     /** Built-in steps only: a person's step (manual QA) and the role an agent step falls back to. */
     human?: NonNullable<StageIn['human']>;
     fallbackRole?: string;
-    /** Built-in code-v6 steps only: a step the server runs, one that starts only on a prepared environment, evidence. */
+    /** Built-in lean team steps only: a step the server runs, one that starts only on a prepared environment, evidence. */
     server?: NonNullable<StageIn['server']>;
     envStrict?: boolean;
     requireBuildEvidence?: boolean;
@@ -106,8 +106,10 @@ export interface BuilderModel {
   steps: BuilderStep[];
   /** uid of the first step. */
   initial: string;
-  /** Built-in code-v6 only: what a new card of the workflow starts with. */
+  /** Built-in lean team only: what a new card of the workflow starts with. */
   defaults?: NonNullable<WorkflowDefinitionInput['defaults']>;
+  /** Built-in lean team only (the capability flag of the definition); kept as it is. */
+  leanTeam?: boolean;
 }
 
 const DEFAULT_MAX_SHIFT = 60;
@@ -242,6 +244,7 @@ export function fromDefinition(
     steps,
     initial: stepRef(def.initialStage),
     ...(def.defaults ? { defaults: { ...def.defaults } } : {}),
+    ...(def.leanTeam ? { leanTeam: true } : {}),
   };
 }
 
@@ -333,6 +336,7 @@ export function toDefinition(model: BuilderModel, opts: { frozen?: FrozenIds } =
       ...(s.extra.requireBuildEvidence ? { requireBuildEvidence: true } : {}),
     })),
     ...(model.defaults ? { defaults: { ...model.defaults } } : {}),
+    ...(model.leanTeam ? { leanTeam: true } : {}),
     ...(model.extends ? { extends: { ...model.extends } } : {}),
   };
 }

@@ -1,6 +1,7 @@
 import {
   canConvertProject,
   insertedStageIds,
+  LEGACY_CODE_V6_KEY,
   type ProjectWorkflowDto,
   type ProjectWorkflowsResponse,
   type SetProjectWorkflowsRequest,
@@ -64,7 +65,7 @@ export async function projectWorkflowsView(
     `SELECT id, org_id, key, version, status, definition, project_id, desk_item_id, variant_spec, base_version
        FROM workflow_versions
       WHERE (org_id IS NULL OR org_id = $1) AND (project_id IS NULL OR project_id = $2)
-        AND status IN ('active','draft','pending_approval')
+        AND status IN ('active','draft','pending_approval') AND key <> '${LEGACY_CODE_V6_KEY}'
       ORDER BY (org_id IS NULL), key, version DESC`,
     [project.org_id, projectId],
   );

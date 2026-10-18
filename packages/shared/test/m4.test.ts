@@ -171,8 +171,8 @@ describe('M4 card fields and roles', () => {
   it('tester and writer have real instructions that state the test ownership rules (v2)', () => {
     const tester = BUILTIN_ROLES.find((r) => r.key === 'tester');
     const writer = BUILTIN_ROLES.find((r) => r.key === 'writer');
-    expect(tester?.version).toBe(8);
-    expect(writer?.version).toBe(3);
+    expect(tester?.version).toBe(9);
+    expect(writer?.version).toBe(4);
     expect(tester?.instructions).not.toContain('TODO');
     expect(writer?.instructions).not.toContain('TODO');
     expect(tester?.instructions).toContain('aom test fail');

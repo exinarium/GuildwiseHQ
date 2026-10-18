@@ -125,7 +125,7 @@ export async function claim(ctx: Ctx, args: ClaimArgs): Promise<ClaimResult | nu
 
     let worktree: WorktreeClaim | null = null;
     let syncMain: ClaimResult['syncMain'];
-    // Planning (code-v6) has no worktree of its own but reads the code: a read-only checkout of the working branch.
+    // Planning (lean team) has no worktree of its own but reads the code: a read-only checkout of the working branch.
     if (stage && (stage.worktree !== 'none' || stage.id === 'planning') && card.repo_id) {
       const wcard = card.worktree_card_id
         ? ((await one(tx, 'SELECT * FROM cards WHERE id=$1', [card.worktree_card_id])) as Record<string, any>)
@@ -206,7 +206,7 @@ export async function claim(ctx: Ctx, args: ClaimArgs): Promise<ClaimResult | nu
           actor: SYSTEM_ACTOR,
           scope: projectScope(card.org_id, card.project_id),
         },
-        // code-v6: the first builder of a group keeps the rest of the group (each build claim of a group card renews it).
+        // lean team: the first builder of a group keeps the rest of the group (each build claim of a group card renews it).
         ...(card.group_id && stage?.claimRole === 'builder'
           ? [
               {

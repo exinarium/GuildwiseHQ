@@ -77,7 +77,7 @@ export async function finalizeNext(db: Queryable, card: Row): Promise<FinalizeNe
   if (!wf) return { toStage: 'done', workflow: null };
   let upgraded: string | undefined;
   if (wf.definition.builtIn && wf.definition.key === 'code' && !getStage(wf.definition, QA_STAGE)) {
-    const latest = await resolveWorkflow(db, card.org_id, 'code', card.project_id);
+    const latest = await resolveWorkflow(db, card.org_id, 'code', card.project_id, { classic: true });
     if (
       latest &&
       latest.orgId === null &&

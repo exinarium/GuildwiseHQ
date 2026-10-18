@@ -25,10 +25,11 @@ let r: FakeRunner;
 let p: ReturnType<typeof leanPipeline>;
 let rpc: ReturnType<typeof rpcOf>;
 beforeAll(async () => {
-  // code-v6 is the default of a new project in production; the suites ask for it by name (tests run on `code`).
+  // `code` version 6 is the lean team flow; the lean suites keep it active (the classic suites run on v5).
   w = await createWorld({
     env: { AOM_FIRST_RUN_HIRE_CAP: 'false' },
-    project: { workflowKey: 'code-v6' },
+    project: { workflowKey: 'code' },
+    lean: true,
     integrationTests: 'off',
   });
   r = await w.connectRunner();
@@ -70,12 +71,17 @@ async function cardInPreReview(over: Record<string, unknown> = {}, paths?: strin
   return card;
 }
 
-describe('the code-v6 flow end to end', () => {
-  it('a new project on code-v6 runs a small card through every stage with the mock team', async () => {
+describe('the lean team flow (code v6) end to end', () => {
+  it('a new project on code (v6) runs a small card through every stage with the mock team', async () => {
     await team();
     const card = await w.card({ title: 'Lean card' });
     // Spec -> Planning; every card is designed (designNeeded defaults to true)
-    expect(card).toMatchObject({ stage: 'planning', designNeeded: true, workflowKey: 'code-v6' });
+    expect(card).toMatchObject({
+      stage: 'planning',
+      designNeeded: true,
+      workflowKey: 'code',
+      workflowVersion: 6,
+    });
 
     await p.run('Pia', planned());
     expect((await cardRow(card.id)).stage).toBe('investigate');
@@ -110,7 +116,7 @@ describe('the code-v6 flow end to end', () => {
     await p.runAt('Tess', testPass(), {}, SHA1);
     expect((await cardRow(card.id)).stage).toBe('finalize');
 
-    // even when the project flag is on (an old setting), a code-v6 card never auto-spawns the suite
+    // even when the project flag is on (an old setting), a lean team card never auto-spawns the suite
     await q('UPDATE projects SET full_suite_after_finalize=true WHERE id=$1', [w.projectId]);
     // the owner's approval step was skipped, so Finalize does not ask again
     const out = await call('POST', `/api/cards/${card.id}/finalize`, {});
@@ -127,7 +133,7 @@ describe('the code-v6 flow end to end', () => {
       result: { ok: true, action: 'merge', mergeCommit: 'abc1234567' },
     });
     await until(async () => (await cardRow(card.id)).status === 'done', 5000, 'card finalized');
-    // code-v6 turns the automatic full suite off: nothing was spawned after the merge
+    // the lean team flow turns the automatic full suite off: nothing was spawned after the merge
     expect(
       (await q('SELECT 1 FROM cards WHERE parent_card_id=$1 AND origin=$2', [card.id, 'full_suite'])).length,
     ).toBe(0);

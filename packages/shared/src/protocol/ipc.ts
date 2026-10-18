@@ -289,7 +289,7 @@ export const RpcMethodSchema = z.enum([
   'card.facts',
   /** Lean Team v3: record a dependency between open cards of a project, add only (`aom block --on dependency <ref>`). */
   'card.depend',
-  /** Lean Team v3 (code-v6): the planner or architect puts a card in a group (`aom group set <id>`) and writes its Card Brief (`aom brief`). */
+  /** Lean Team v3 (lean team): the planner or architect puts a card in a group (`aom group set <id>`) and writes its Card Brief (`aom brief`). */
   'card.group',
   'card.brief',
   /** Lean Team v3: has the question of this shift been answered yet (`aom question --wait` polls it). */

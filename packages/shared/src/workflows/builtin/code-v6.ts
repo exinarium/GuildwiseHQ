@@ -14,10 +14,10 @@ const BUILD_REQUIRED = [
 ];
 
 /**
- * code-v6, the lean team workflow (Lean Team v3, docs/design: card flow). A new built-in workflow of its own (key
- * `code-v6`), so every project, card and replayed event on `code` v1 to v5 keeps working unchanged: new projects start on
- * it and an existing project opts in (`POST /api/projects/:id/upgrade-workflow`); cards in flight keep the version they
- * are pinned to.
+ * `code` version 6, the lean team workflow (Lean Team v3, docs/design/lean-team-v3-decisions.md). Rolled out like v3 to v5:
+ * the resolver takes the newest active version of `code`, so every project on `code` starts its new cards on it; cards in
+ * flight keep the version they are pinned to (the classic upgrade at review approval and finalize never crosses into it).
+ * `leanTeam: true` is the capability flag the server and the web app read.
  *
  *   Spec -> Planning (planner, Haiku) -> Design (architect, Opus; on for every card) -> Build (builder; carries build and
  *   unit test evidence) -> Pre-review (Sonnet) -> Review (Opus, read-only; a second Opus approval for a high-risk change)
@@ -29,9 +29,10 @@ const BUILD_REQUIRED = [
  * touch reviewed lines (the earlier approvals stay; the reviewer looks at the resolution only).
  */
 export const codeWorkflowV6: WorkflowDefinition = WorkflowDefinitionSchema.parse({
-  key: 'code-v6',
-  version: 1,
-  name: 'Code (lean team)',
+  key: 'code',
+  version: 6,
+  name: 'Code',
+  leanTeam: true,
   department: 'delivery',
   builtIn: true,
   fieldSet: 'code',

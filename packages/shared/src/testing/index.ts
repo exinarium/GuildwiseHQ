@@ -103,7 +103,7 @@ export const FinalizeExecutePayloadSchema = z.object({
   /** The project's "Commit as" setting (absent: the clone's or the workstation's git identity). */
   commitAs: CommitAsSchema.nullable().optional(),
   /**
-   * code-v6: the commit the review and the owner approval were for. The runner refuses to land a branch that is at another
+   * lean team: the commit the review and the owner approval were for. The runner refuses to land a branch that is at another
    * commit (before its own rebase onto the working branch); absent: no check.
    */
   expectedSha: z.string().max(64).optional(),
@@ -123,7 +123,7 @@ export const FinalizeResultSchema = z.object({
   protectedBranch: z.boolean().optional(),
   /** The pre-finalize rebase conflicted (card goes to Rework, no agent resolves it). */
   conflict: z.boolean().optional(),
-  /** code-v6: the branch was at another commit than `expectedSha`; nothing was landed. */
+  /** lean team: the branch was at another commit than `expectedSha`; nothing was landed. */
   headMoved: z.boolean().optional(),
   headSha: z.string().optional(),
   conflictedFiles: z.array(z.string()).optional(),

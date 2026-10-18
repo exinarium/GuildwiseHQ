@@ -64,7 +64,7 @@ export type IssueCode =
   // rule 13 (environment stages)
   | 'environment_misplaced'
   | 'environment_role_no_shell'
-  // rule 14 (server stages and code-v6 flags)
+  // rule 14 (server stages and lean team flags)
   | 'server_missing_config'
   | 'server_config_misplaced'
   | 'server_has_role'
@@ -515,7 +515,7 @@ export function validateWorkflow(
       );
   }
 
-  // Rule 14: a server stage is run by the server (no role, a `server` block); the code-v6 flags sit on the right stages.
+  // Rule 14: a server stage is run by the server (no role, a `server` block); the lean team flags sit on the right stages.
   for (const s of def.stages) {
     if (s.kind !== 'server') {
       if (s.server)

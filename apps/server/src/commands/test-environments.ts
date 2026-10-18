@@ -341,7 +341,7 @@ export async function startTestRunIn(
     ttlAt: expiresAt.toISOString(),
     allowDocker: runSettings.allowDocker === true,
     ...(runSettings.buildGuides?.length ? { buildGuides: runSettings.buildGuides } : {}),
-    // code-v6: the commit under test is the reviewed commit, so the card branch is not rebased here.
+    // lean team: the commit under test is the reviewed commit, so the card branch is not rebased here.
     ...(opts.noRebase
       ? {}
       : {
@@ -412,7 +412,7 @@ async function provisionPass(ctx: Ctx): Promise<void> {
   if (wss.size) deliver(ctx, [...wss]);
 }
 
-// ------------------------------------------------------------------------------ test deploy (code-v6)
+// ------------------------------------------------------------------------------ test deploy (lean team)
 
 const TEST_DEPLOY_SQL = `
 SELECT c.id FROM cards c
@@ -435,7 +435,7 @@ export function testDeploySkipReason(card: Row, project: Row, settings: Integrat
 }
 
 /**
- * The server-run Test deploy stage (code-v6, design 5.6): no agent works here. For a card queued in a `server` stage with the
+ * The server-run Test deploy stage (lean team, design 5.6): no agent works here. For a card queued in a `server` stage with the
  * `test_deploy` action the server starts the project's test environment for the reviewed commit (never rebased), and moves
  * the card to the next stage when the environment is healthy at that commit. A project or card that needs none moves on at
  * once with the reason recorded. A failed start goes through `handleFailedEnvironments`: a DevOps request parks the card
@@ -1060,7 +1060,7 @@ export async function reviewApprovedPlan(
   let def = wf.definition;
   let upgraded: string | undefined;
   if (def.builtIn && def.key === 'code' && getStage(def, 'test')) {
-    const latest = await resolveWorkflow(tx, card.org_id, 'code', card.project_id);
+    const latest = await resolveWorkflow(tx, card.org_id, 'code', card.project_id, { classic: true });
     if (
       latest &&
       latest.orgId === null &&

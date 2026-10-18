@@ -3,7 +3,7 @@ import { E2eAreaMapSchema, OwnerApprovalPolicySchema } from '../cards/lean-v6.ts
 import { defineEvent, Id, IsoDate, Stage } from './define.ts';
 
 /**
- * Lean Team v3, workflow code-v6 (stream S3). All additive: events of other domains keep their meaning, and the optional
+ * Lean Team v3, workflow lean team (stream S3). All additive: events of other domains keep their meaning, and the optional
  * fields this stream added to `ReviewRequested`, `ReviewApproved`, `ChangesRequested`, `ApprovalRequested` and
  * `ApprovalDecided` are absent from older events.
  */

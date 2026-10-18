@@ -56,7 +56,7 @@ export interface ApprovalDoc {
   openedAt: string;
   deskItemId: string | null;
   entrySeq: string | null;
-  /** code-v6: the commit the approver is shown; the approval is for it and lapses when the branch moves. */
+  /** lean team: the commit the approver is shown; the approval is for it and lapses when the branch moves. */
   sha?: string | null;
   decision: { kind: 'approved' | 'sent_back'; by: string; note: string | null; at: string } | null;
   sentBackCount?: number;
@@ -318,7 +318,7 @@ async function decide(
 ): Promise<'stale' | undefined> {
   const stale = await withAppendTx(ctx.pool, async (tx): Promise<'stale' | undefined> => {
     const { card, ap, stage, def } = await lockApprovalCard(tx, user, idOrRef);
-    // code-v6: an approval is for the commit whose diff was shown. When the branch moved since, nothing is approved: the
+    // lean team: an approval is for the commit whose diff was shown. When the branch moved since, nothing is approved: the
     // card is asked again for the commit it is at now (the same desk item) and the approver reads the new diff first.
     if (kind === 'approved' && ap.sha && card.head_sha && ap.sha !== card.head_sha && ap.deskItemId) {
       await ctx.store.append(
@@ -527,7 +527,7 @@ export async function cardApprovalDto(
   };
 }
 
-/** code-v6: what the owner is shown at the approval step: the commit, why it is needed, the diff, the evidence and the verdicts. */
+/** lean team: what the owner is shown at the approval step: the commit, why it is needed, the diff, the evidence and the verdicts. */
 async function approvalReviewInfo(db: Queryable, card: Row, ap: ApprovalDoc): Promise<ApprovalReviewInfo> {
   const diff = await one(db, 'SELECT sha, bytes, truncated, files FROM card_diffs WHERE card_id=$1', [
     card.id,

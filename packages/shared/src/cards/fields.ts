@@ -42,9 +42,9 @@ export const CARD_COLUMN_FIELDS: Record<string, FieldMeta> = {
 export const DERIVED_BOOLEAN_FIELDS: Record<string, FieldMeta> = {
   manualQa: { label: 'Manual QA after Finalize', kind: 'boolean' },
   qaAgent: { label: 'An agent can write the QA steps', kind: 'boolean' },
-  /** code-v6: the owner approves the card after the review (decided when the last review approval comes in). */
+  /** lean team: the owner approves the card after the review (decided when the last review approval comes in). */
   ownerApproval: { label: 'The owner approves after the review', kind: 'boolean' },
-  /** code-v6: a merge conflict at Finalize was resolved and the resolution goes to a merge review (server-driven; never true for an agent's outcome). */
+  /** lean team: a merge conflict at Finalize was resolved and the resolution goes to a merge review (server-driven; never true for an agent's outcome). */
   mergeReview: { label: 'Merge conflict resolution under review', kind: 'boolean' },
 };
 

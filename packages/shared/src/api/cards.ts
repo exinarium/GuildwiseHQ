@@ -23,7 +23,7 @@ import { PublicationDtoSchema } from './research.ts';
 import { ShiftDtoSchema } from './shifts.ts';
 import { CardTestingSchema } from './testing.ts';
 
-/** code-v6 facts of a card (see `CardDto.lean`). */
+/** lean team facts of a card (see `CardDto.lean`). */
 export const LeanCardDtoSchema = z.object({
   groupId: z.string().nullable(),
   cardBrief: z.string().nullable(),
@@ -79,7 +79,7 @@ export const CardDtoSchema = z.object({
   riskTierOverridden: z.boolean(),
   /** The reviewer's risk call (null before any approval, or after a new review round starts). */
   reviewRisk: ReviewRiskDtoSchema.nullable().optional(),
-  /** code-v6: group, Card Brief, the commit the branch is at, build evidence, the high-risk flag and the owner approval decision. */
+  /** lean team: group, Card Brief, the commit the branch is at, build evidence, the high-risk flag and the owner approval decision. */
   lean: LeanCardDtoSchema.optional(),
   docsNeeded: z.boolean(),
   /** Architect: run Investigate & design before build. */

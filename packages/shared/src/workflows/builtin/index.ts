@@ -1,3 +1,4 @@
+import { canonicalWorkflowKey } from '../legacy.ts';
 import type { WorkflowDefinition } from '../schema.ts';
 import { codeWorkflowV1, codeWorkflowV2 } from './code.ts';
 import { codeBugfixWorkflowV1 } from './code-bugfix.ts';
@@ -35,7 +36,7 @@ export const BUILTIN_WORKFLOWS: readonly WorkflowDefinition[] = [
 
 export function getBuiltinWorkflow(key: string, version?: number): WorkflowDefinition | undefined {
   const matches = BUILTIN_WORKFLOWS.filter(
-    (w) => w.key === key && (version === undefined || w.version === version),
+    (w) => w.key === canonicalWorkflowKey(key) && (version === undefined || w.version === version),
   );
   return matches.sort((a, b) => b.version - a.version)[0];
 }

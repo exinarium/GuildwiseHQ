@@ -62,6 +62,11 @@ export async function createTestApp(
     env?: Record<string, string>;
     reset?: boolean;
     builtins?: boolean;
+    /**
+     * Register built-in `code` version 6 (the lean team flow) at boot, as in production. Off by default: the suites written
+     * for the classic code flow (v5) keep running on it, because the resolver takes the newest version of `code`.
+     */
+    lean?: boolean;
     listen?: boolean;
     /** The landing-page assistant's Anthropic client (a fake; the real API is never called in tests). */
     assistantClient?: AnthropicLike | null;
@@ -79,7 +84,10 @@ export async function createTestApp(
     assistantClient: opts.assistantClient ?? null,
     blogWriterClient: opts.blogWriterClient ?? null,
   });
-  if (opts.builtins !== false) await registerBuiltins(app.ctx);
+  // Without `lean` the release has no code v6 yet (not registered at all, so a projection rebuild agrees): the resolver
+  // takes v5 for `code`, as the suites written for the classic flow expect.
+  if (opts.builtins !== false)
+    await registerBuiltins(app.ctx, (d) => opts.lean === true || !(d.key === 'code' && d.version >= 6));
   if (opts.listen) await app.listen({ port: 0, host: '127.0.0.1' });
   await app.ready();
 

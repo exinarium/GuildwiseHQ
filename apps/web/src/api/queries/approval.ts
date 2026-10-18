@@ -7,7 +7,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { get, post } from '../client.ts';
 
-/** The diff stored at the review handoff (code-v6), loaded when the owner opens it. */
+/** The diff stored at the review handoff (lean team), loaded when the owner opens it. */
 export const useCardDiff = (cardId: string, enabled: boolean, sha?: string | null) =>
   useQuery({
     queryKey: ['card-diff', cardId, sha ?? null],

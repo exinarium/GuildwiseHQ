@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { registerBuiltins } from '../src/catalogue/boot.ts';
 import { closeAdminPool, q as rawQ } from './helpers/db.ts';
 import type { FakeRunner } from './helpers/fake-runner.ts';
 import {
@@ -30,7 +31,7 @@ let w: World;
 let r: FakeRunner;
 let l: ReturnType<typeof leanPipeline>;
 beforeAll(async () => {
-  // a project on the older `code` workflow (the test default) that later opts in to code-v6
+  // v6 is not registered yet (before the release); the tests below activate it
   w = await createWorld({ env: { AOM_FIRST_RUN_HIRE_CAP: 'false' }, integrationTests: 'off' });
   r = await w.connectRunner();
   l = leanPipeline(w, r);
@@ -45,7 +46,11 @@ const call = (method: string, url: string, body?: unknown, status = 200) =>
   ok<any>(w.t.req(method, url, { cookie: w.owner.cookie, ...(body !== undefined ? { body } : {}) }), status);
 const dispatcher = () => w.t.app.ctx.services.dispatcher;
 
-describe('older workflow versions are unchanged, and the upgrade is opt-in', () => {
+// Code v6 reaches the projects the way v3 to v5 did: the resolver takes the newest ACTIVE version of `code`. The world starts
+// without v6 (as before a release), so a card is created on v5; "activating" v6 is the release.
+const activateV6 = () => registerBuiltins(w.t.app.ctx); // the server registers the missing code v6 at boot
+
+describe('code v6 follows automatically, like v3 to v5: new cards take it, cards in flight keep their version', () => {
   it('a project on code v5 runs build, review and test as before, without evidence, a planner or a pre-review', async () => {
     await freshKeepDevops();
     const p = l;
@@ -62,59 +67,60 @@ describe('older workflow versions are unchanged, and the upgrade is opt-in', () 
     expect((await cardRow(card.id)).owner_approval_required).toBeNull();
   });
 
-  it('upgrading moves only new cards to code-v6; a card in flight keeps its version and finishes on it', async () => {
+  it('there is no upgrade step: the endpoint is gone (410), the project is not touched, and new cards run code v6', async () => {
     await freshKeepDevops();
     const p = l;
     await hireTeam(w);
-    const inFlight = await w.card({ title: 'In flight before the upgrade' });
+    const inFlight = await w.card({ title: 'In flight before the release' });
     await p.run('Bea', handoff(), DIFF_SMALL);
     expect((await cardRow(inFlight.id)).stage).toBe('review');
 
-    const up = await call('POST', `/api/projects/${w.projectId}/upgrade-workflow`);
-    expect(up).toMatchObject({ workflowKey: 'code-v6', openCardsOnOlderVersion: 1 });
-    // every role a code-v6 stage claims is checked: the reviewer covers the pre-review, nobody covers planning or design
-    expect(up.missingRoles).toEqual(expect.arrayContaining(['planner', 'architect', 'pre_reviewer']));
-    expect(up.missingRoles).not.toContain('builder');
-    expect(up.coveredByFallback).toEqual([{ role: 'pre_reviewer', fallbackRole: 'reviewer' }]);
-    expect(up.uncoveredRoles).toEqual(expect.arrayContaining(['planner', 'architect']));
-    expect(up.uncoveredRoles).not.toContain('pre_reviewer');
-    // the upgrade switches the automatic full suite off, and new cards start on code-v6
-    const detailUp = await call('GET', `/api/projects/${w.projectId}`);
-    expect(detailUp.project).toMatchObject({ fullSuiteAfterFinalize: false, newCardWorkflowKey: 'code-v6' });
-    // idempotent
-    expect((await call('POST', `/api/projects/${w.projectId}/upgrade-workflow`)).workflowKey).toBe('code-v6');
+    await activateV6(); // the release: code v6 is now the newest active version of `code`
+    const before = (await q('SELECT count(*)::int AS n FROM events'))[0].n;
+    const up = await w.t.req('POST', `/api/projects/${w.projectId}/upgrade-workflow`, {
+      cookie: w.owner.cookie,
+      body: {},
+    });
+    expect(up.status).toBe(410);
+    expect((await q('SELECT count(*)::int AS n FROM events'))[0].n).toBe(before);
 
-    const fresh = await w.card({ title: 'After the upgrade' });
-    expect(fresh).toMatchObject({ workflowKey: 'code-v6', stage: 'planning', designNeeded: true });
-    // the card in flight is untouched
+    // the project's detail says new cards are lean team; nothing was enabled next to its own workflow
+    const detail = await call('GET', `/api/projects/${w.projectId}`);
+    expect(detail.project).toMatchObject({ workflowKey: 'code', leanTeam: true });
+    expect(await q(`SELECT workflow_key FROM project_workflows WHERE project_id=$1`, [w.projectId])).toEqual([
+      { workflow_key: 'code' },
+    ]);
+
+    const fresh = await w.card({ title: 'After the release' });
+    expect(fresh).toMatchObject({
+      workflowKey: 'code',
+      workflowVersion: 6,
+      stage: 'planning',
+      designNeeded: true,
+    });
+    // the card in flight is untouched and finishes on v5 (the classic upgrade at review approval never enters v6)
     const row = await cardRow(inFlight.id);
     expect(row.stage).toBe('review');
     const wf = await q(`SELECT key, version FROM workflow_versions WHERE id=$1`, [row.workflow_version_id]);
     expect(wf[0]).toMatchObject({ key: 'code', version: 5 });
     await p.run('Rex', { kind: 'outcome', outcomeId: 'approve', note: 'ok', data: { score: 4 } });
     await p.run('Tess', testPass());
-    expect((await cardRow(inFlight.id)).stage).toBe('finalize');
-    // the project's own (primary) workflow is not rewritten
-    const detail = await call('GET', `/api/projects/${w.projectId}`);
-    expect(detail.project.workflowKey).toBe('code');
-    await q(`DELETE FROM project_workflows WHERE project_id=$1 AND workflow_key='code-v6'`, [w.projectId]);
-    await q(`UPDATE projects SET full_suite_after_finalize=true WHERE id=$1`, [w.projectId]);
+    const done = await cardRow(inFlight.id);
+    expect(done.stage).toBe('finalize');
+    expect(
+      (await q(`SELECT version FROM workflow_versions WHERE id=$1`, [done.workflow_version_id]))[0].version,
+    ).toBe(5);
   });
 });
 
 describe('a project created without a workflow takes the server default', () => {
-  it('uses AOM_DEFAULT_WORKFLOW, and code-v6 turns the automatic full suite off', async () => {
-    // the test config pins the default to `code`; a project may still ask for code-v6 by name
-    const proj = await call(
-      'POST',
-      '/api/projects',
-      { key: 'LEAN', name: 'Lean', workflowKey: 'code-v6' },
-      201,
-    );
-    expect(proj.project).toMatchObject({ workflowKey: 'code-v6', fullSuiteAfterFinalize: false });
-    const legacy = await call('POST', '/api/projects', { key: 'OLD', name: 'Old' }, 201);
-    expect(legacy.project).toMatchObject({ workflowKey: 'code', fullSuiteAfterFinalize: true });
+  it('uses AOM_DEFAULT_WORKFLOW (code), which is the lean team flow; the legacy key is not offered', async () => {
+    const proj = await call('POST', '/api/projects', { key: 'LEAN', name: 'Lean' }, 201);
+    expect(proj.project).toMatchObject({ workflowKey: 'code', leanTeam: true });
     expect(w.t.app.ctx.config.defaultWorkflow).toBe('code');
+    // the legacy key resolves to code, but a new project never ends up with a workflow of that name in the picker
+    const wfs = await call('GET', '/api/workflows');
+    expect(JSON.stringify(wfs)).not.toContain('code-v6');
   });
 
   it('the manual full suite starts one suite card at Test on the working branch', async () => {
@@ -132,11 +138,10 @@ describe('a project created without a workflow takes the server default', () => 
   });
 });
 
-describe('merge conflicts at Finalize in code-v6', () => {
+describe('merge conflicts at Finalize in the lean team flow', () => {
   async function cardAtFinalize() {
     await freshKeepDevops();
     dispatcher().cooldown.clear();
-    await call('POST', `/api/projects/${w.projectId}/upgrade-workflow`);
     await hireLeanTeam(w);
     const card = await w.card({ title: 'Conflicting card' });
     await l.run('Pia', planned());

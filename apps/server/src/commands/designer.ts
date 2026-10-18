@@ -13,6 +13,7 @@ import {
   type ExtendRoleRequest,
   isOrgManager,
   isOrgOwner,
+  LEGACY_CODE_V6_KEY,
   type OrgCatalogueResponse,
   type OrgRole,
   type RoleDefinition,
@@ -680,7 +681,7 @@ export async function orgCatalogue(
     ctx.pool,
     `SELECT w.*, (SELECT count(*)::int FROM cards c WHERE c.workflow_version_id = w.id
                    AND c.status NOT IN ('done','cancelled')) AS in_flight
-       FROM workflow_versions w WHERE (w.org_id IS NULL OR w.org_id = $1) AND w.project_id IS NULL AND ${visible.replaceAll('status', 'w.status')}
+       FROM workflow_versions w WHERE (w.org_id IS NULL OR w.org_id = $1) AND w.project_id IS NULL AND w.key <> '${LEGACY_CODE_V6_KEY}' AND ${visible.replaceAll('status', 'w.status')}
       ORDER BY (w.org_id IS NULL) DESC, w.key, w.version DESC`,
     [orgId],
   );
@@ -755,7 +756,7 @@ export async function listDepartments(db: Queryable, orgId: string): Promise<Dep
   const roleKeys = await rows<{ key: string; department: string | null }>(
     db,
     `SELECT DISTINCT ON (key, org_id) key, department FROM role_definitions
-      WHERE (org_id IS NULL OR org_id=$1) AND status='active' AND department IS NOT NULL
+      WHERE (org_id IS NULL OR org_id=$1) AND status='active' AND department IS NOT NULL AND key <> '${LEGACY_CODE_V6_KEY}'
       ORDER BY key, org_id, version DESC`,
     [orgId],
   );

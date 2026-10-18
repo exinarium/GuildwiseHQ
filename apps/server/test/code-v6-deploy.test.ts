@@ -24,7 +24,8 @@ let p: ReturnType<typeof leanPipeline>;
 beforeAll(async () => {
   w = await createWorld({
     env: { AOM_FIRST_RUN_HIRE_CAP: 'false' },
-    project: { workflowKey: 'code-v6' },
+    project: { workflowKey: 'code' },
+    lean: true,
     integrationTests: 'off',
   });
   r = await w.connectRunner({ capabilities: ['runs:1', 'runs:2', 'runs:3'] });
@@ -176,7 +177,7 @@ describe('the server-run Test deploy', () => {
   });
 });
 
-describe('the tester gate has no escapes in code-v6', () => {
+describe('the tester gate has no escapes in the lean team flow', () => {
   it('a card in Test without a healthy environment is not offered to a tester, however the project is set up', async () => {
     const card = await cardInTestDeploy();
     // somebody moved it on without the deploy (the escapes of the older gate would have let a tester start)

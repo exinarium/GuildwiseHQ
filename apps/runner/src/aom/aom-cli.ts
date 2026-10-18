@@ -350,7 +350,7 @@ function reviewRiskData(ctx: AomContext, p: Parsed): Record<string, unknown> {
 
 /**
  * `aom handoff --build-command ... --build-result ... --test-command ... --test-result ... [--lint-command ... --lint-result ...]`
- * or `--no-evidence "<why>"` (code-v6): the build and unit test evidence of the handoff. The commit it is bound to is measured
+ * or `--no-evidence "<why>"` (lean team): the build and unit test evidence of the handoff. The commit it is bound to is measured
  * by the runner, not stated by the agent. Nothing when no evidence flag is given (the older workflows).
  */
 function buildEvidenceFlags(p: Parsed): Record<string, unknown> | undefined {

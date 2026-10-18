@@ -30,12 +30,7 @@ import { setArchitectSettings } from '../commands/architect.ts';
 import { cancelConversion, convertPreview, convertProject } from '../commands/convert.ts';
 import { setRepoForge, setRepoMainBranch, setRepoProjectPath } from '../commands/forges.ts';
 import { setRepoWorkingBranch } from '../commands/hygiene.ts';
-import {
-  requestFullSuite,
-  setE2eAreas,
-  setOwnerApprovalPolicy,
-  upgradeProjectWorkflow,
-} from '../commands/lean-project.ts';
+import { requestFullSuite, setE2eAreas, setOwnerApprovalPolicy } from '../commands/lean-project.ts';
 import { mcpServerCandidates, setProjectMcpServers } from '../commands/mcp-servers.ts';
 import { pauseProject, resumeProject } from '../commands/project-pause.ts';
 import {
@@ -61,6 +56,7 @@ import {
 import { requestReleasePr } from '../commands/release-pr.ts';
 import { setRepoAccessMethod } from '../commands/repo-access.ts';
 import type { Ctx } from '../context.ts';
+import { gone } from '../errors.ts';
 import { getProjectDetail, listProjects } from '../queries/misc.ts';
 import { typed } from './util.ts';
 
@@ -196,7 +192,7 @@ export function projectRoutes(ctx: Ctx) {
       },
     );
 
-    /** code-v6: when the owner approves a card after the review; the mapping of changed paths to E2E specs. */
+    /** lean team: when the owner approves a card after the review; the mapping of changed paths to E2E specs. */
     app.put(
       '/api/projects/:id/owner-approval',
       { schema: { params: IdParamsSchema, body: SetOwnerApprovalRequestSchema } },
@@ -229,13 +225,19 @@ export function projectRoutes(ctx: Ctx) {
       },
     );
 
-    /** Opt-in upgrade of an existing project: new cards run on code-v6, cards in flight keep their version. */
+    /**
+     * Removed: the lean team flow is `code` version 6, which every project on `code` starts its new cards on (the newest
+     * version, like code v3 to v5), so there is nothing to opt in to. 410 so an old client sees why.
+     */
     app.post('/api/projects/:id/upgrade-workflow', { schema: { params: IdParamsSchema } }, async (req) => {
-      const a = await requireOrg(ctx, req);
-      return upgradeProjectWorkflow(ctx, a.session.user, { id: a.orgId, role: a.role }, req.params.id);
+      await requireOrg(ctx, req);
+      throw gone(
+        'workflow_upgrade_removed',
+        'new cards of a code project run the newest code workflow automatically',
+      );
     });
 
-    /** The manual full E2E suite run (the automatic run after every merge is off in code-v6). */
+    /** The manual full E2E suite run (the automatic run after every merge is off in the lean team flow). */
     app.post('/api/projects/:id/full-suite', { schema: { params: IdParamsSchema } }, async (req, reply) => {
       const s = await requireUser(ctx, req);
       const r = await requestFullSuite(ctx, s.user, req.params.id);

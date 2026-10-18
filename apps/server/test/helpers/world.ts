@@ -98,6 +98,8 @@ export async function createWorld(
      * through Finalize to Done switch it off here unless they test QA (`manualQa: true`).
      */
     manualQa?: boolean;
+    /** Keep built-in `code` v6 (the lean team flow) active: `code` projects then start new cards on it (see createTestApp). */
+    lean?: boolean;
     /**
      * The project's integration test setting (backlog #59, #71). Since code v5 the tester's `test` stage always runs; with
      * the setting off it is the plain tester stage (no environment). The suites that drive a card through Test with the
@@ -109,7 +111,7 @@ export async function createWorld(
     integrationTests?: 'plain' | 'off' | 'local';
   } = {},
 ): Promise<World> {
-  const t = await createTestApp({ env: opts.env, listen: opts.listen ?? true });
+  const t = await createTestApp({ env: opts.env, listen: opts.listen ?? true, lean: opts.lean });
   const owner = await t.userSession(uniqueEmail('owner'));
   const proj = await ok<any>(
     t.req('POST', '/api/projects', {

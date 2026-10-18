@@ -1,10 +1,10 @@
 import type { ProjectDetailResponse } from '@aom/shared';
-import { useSetOwnerApproval, useUpgradeWorkflow } from '../api/queries/projects.ts';
-import { Badge, Button, ErrorBox, Panel } from './ui.tsx';
+import { useSetOwnerApproval } from '../api/queries/projects.ts';
+import { Badge, ErrorBox, Panel } from './ui.tsx';
 
 /**
- * Lean team workflow (code-v6) settings of a project: when the project owner approves a card after the Opus review, and the
- * opt-in switch for a project that still runs an older workflow. A high-risk change always needs the owner's approval.
+ * Lean team workflow (`code` version 6) settings of a project: when the project owner approves a card after the Opus review.
+ * A high-risk change always needs the owner's approval. A project whose workflow has no such step shows nothing.
  */
 export function OwnerApprovalPanel({
   projectId,
@@ -16,10 +16,8 @@ export function OwnerApprovalPanel({
   canChange: boolean;
 }) {
   const set = useSetOwnerApproval(projectId);
-  const upgrade = useUpgradeWorkflow(projectId);
   const policy = project.ownerApprovalPolicy ?? 'large_or_high_risk';
-  const newWorkflow = project.newCardWorkflowKey ?? project.workflowKey;
-  const lean = newWorkflow === 'code-v6';
+  if (project.leanTeam !== true) return null;
   return (
     <Panel>
       <h2 className="mb-3 flex items-center gap-2 text-lg font-semibold text-fg">
@@ -53,42 +51,6 @@ export function OwnerApprovalPanel({
         </p>
       )}
       <ErrorBox error={set.error} />
-      {!lean && (
-        <div className="mt-4 border-t border-line pt-3" data-testid="upgrade-lean">
-          <p className="mb-2 text-sm text-muted">
-            This project runs the <code>{newWorkflow}</code> workflow. The lean team workflow adds planning, a
-            design for every card, a pre-review, a read-only Opus review, the owner approval with the diff, a
-            test deploy and area-scoped E2E tests. New cards use it from now on; cards in flight finish as
-            they are.
-          </p>
-          <Button
-            variant="secondary"
-            loading={upgrade.isPending}
-            disabled={!canChange || upgrade.isPending}
-            data-testid="upgrade-lean-button"
-            onClick={() => upgrade.mutate()}
-          >
-            Use the lean team workflow for new cards
-          </Button>
-          <ErrorBox error={upgrade.error} />
-        </div>
-      )}
-      {upgrade.data && (
-        <p className="mt-2 text-sm text-muted" data-testid="upgrade-lean-result">
-          Done. {upgrade.data.openCardsOnOlderVersion} open card(s) stay on their version.
-          {upgrade.data.missingRoles.length > 0
-            ? ` Missing roles: ${upgrade.data.missingRoles.join(', ')}.`
-            : ''}
-          {(upgrade.data.coveredByFallback ?? []).length > 0
-            ? ` Covered for now: ${(upgrade.data.coveredByFallback ?? [])
-                .map((c) => `${c.role} by the ${c.fallbackRole}`)
-                .join(', ')}.`
-            : ''}
-          {(upgrade.data.uncoveredRoles ?? []).length > 0
-            ? ` Hire a ${(upgrade.data.uncoveredRoles ?? []).join(' and a ')}: cards wait at their stage until you do.`
-            : ''}
-        </p>
-      )}
     </Panel>
   );
 }
