@@ -38,7 +38,7 @@ export const BLOG_LIMITS = {
   writesPerHour: 10,
 } as const;
 
-export const SOCIAL_NETWORKS = ['facebook', 'linkedin'] as const;
+export const SOCIAL_NETWORKS = ['facebook', 'linkedin', 'x', 'bluesky'] as const;
 export type SocialNetwork = (typeof SOCIAL_NETWORKS)[number];
 
 /** The server-side blog writer (docs/design/open-questions-2026-10-09.md, "Blog writer"). */

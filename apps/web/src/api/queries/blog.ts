@@ -162,14 +162,25 @@ export const useRevokeApiKey = () =>
 
 export const useConnectChannel = () =>
   useBlogMutation(
-    (v: {
-      network: string;
-      accountId: string;
-      accountName: string;
-      accessToken: string;
-      refreshToken?: string;
-      expiresAt?: string | null;
-    }) => {
+    (
+      v: { network: string } & (
+        | {
+            accountId: string;
+            accountName: string;
+            accessToken: string;
+            refreshToken?: string;
+            expiresAt?: string | null;
+          }
+        | {
+            apiKey: string;
+            apiSecret: string;
+            accessToken: string;
+            accessSecret: string;
+            accountName?: string;
+          }
+        | { handle: string; appPassword: string }
+      ),
+    ) => {
       const { network, ...body } = v;
       return put(`/platform/social/channels/${network}`, body);
     },

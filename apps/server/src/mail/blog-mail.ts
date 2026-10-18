@@ -58,7 +58,8 @@ export function socialAlertMail(opts: {
   reason: string;
   origin: string;
 }): MailMessage {
-  const name = opts.network === 'facebook' ? 'Facebook' : 'LinkedIn';
+  const name =
+    { facebook: 'Facebook', linkedin: 'LinkedIn', x: 'X', bluesky: 'Bluesky' }[opts.network] ?? opts.network;
   return brandedMail({
     to: opts.to,
     subject: `Blog sharing to ${name} needs attention`,

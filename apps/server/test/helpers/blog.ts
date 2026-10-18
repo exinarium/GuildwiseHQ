@@ -19,7 +19,12 @@ export function blogContent(slug: string, over: Partial<BlogContent> = {}): Blog
     tags: ['ai-agents'],
     sources: [{ title: 'Docs', url: 'https://example.com/docs' }],
     seo: {},
-    social: { facebookText: 'New on the blog', linkedinText: 'New on the blog: agents' },
+    social: {
+      facebookText: 'New on the blog',
+      linkedinText: 'New on the blog: agents',
+      xText: 'New on the blog: agents #AI',
+      blueskyText: 'New on the blog: agents',
+    },
     aiDisclosure: { model: 'test-model', agentName: 'Writer' },
     ...over,
   };

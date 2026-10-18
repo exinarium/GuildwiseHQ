@@ -12,6 +12,8 @@ seo:
 social:
   facebookText: "New on the blog: AI automation for small businesses in 2026. Where it helps, where it does not, and how to start with one small job."
   linkedinText: "Most small businesses do not need an AI strategy. They need one boring job done reliably. Our 2026 guide to where AI and agents help today, where they do not, and how to start small, with survey data from the US and South Africa."
+  xText: "Most small businesses do not need an AI strategy, they need one boring task automated well. Where to start in 2026."
+  blueskyText: "Most small businesses do not need an AI strategy, they need one boring task automated well. A practical guide to where to start in 2026."
 sources:
   - title: "US Census Bureau: AI use in U.S. businesses (Business Trends and Outlook Survey, May 2026)"
     url: https://www.census.gov/library/stories/2026/05/ai-use-businesses.html

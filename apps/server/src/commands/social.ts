@@ -1,6 +1,7 @@
 import {
   BLOG_AUTHOR,
   type BlogContent,
+  type ConnectSocialChannelRequest,
   SOCIAL_NETWORKS,
   type SocialChannel,
   type SocialNetwork,
@@ -16,7 +17,7 @@ import { blogEnabled } from './blog.ts';
 import { SYSTEM_ACTOR, userActor } from './common.ts';
 
 /**
- * Auto-share to the Facebook Page and the LinkedIn organization on publish (docs/design/blog-prd.md section 12).
+ * Auto-share to the Facebook Page, the LinkedIn organization, X and Bluesky on publish (docs/design/blog-prd.md section 12).
  *
  * - One `social_shares` row per post and network (primary key): a second post to the same network is impossible. The
  *   row is claimed (`posting`) before the call; a crash in between leaves it `posting`, which is turned into `failed`
@@ -60,18 +61,50 @@ export async function listChannels(ctx: Ctx): Promise<SocialChannel[]> {
   });
 }
 
+type TokenInput = {
+  accountId: string;
+  accountName: string;
+  accessToken: string;
+  refreshToken?: string | undefined;
+  expiresAt?: string | null | undefined;
+};
+
+/** X and Bluesky pastes become the same shape as a token: the secrets go into one JSON string, encrypted below. */
+function normalizeConnect(network: SocialNetwork, body: ConnectSocialChannelRequest): TokenInput {
+  if (network === 'x') {
+    if (!('apiKey' in body))
+      throw badRequest('bad_credentials', 'X needs apiKey, apiSecret, accessToken and accessSecret');
+    return {
+      accountId: 'x',
+      accountName: body.accountName,
+      accessToken: JSON.stringify({
+        apiKey: body.apiKey,
+        apiSecret: body.apiSecret,
+        accessToken: body.accessToken,
+        accessSecret: body.accessSecret,
+      }),
+    };
+  }
+  if (network === 'bluesky') {
+    if (!('handle' in body)) throw badRequest('bad_credentials', 'Bluesky needs handle and appPassword');
+    const handle = body.handle.replace(/^@/, '');
+    return {
+      accountId: handle,
+      accountName: handle,
+      accessToken: JSON.stringify({ handle, appPassword: body.appPassword }),
+    };
+  }
+  if (!('accountId' in body)) throw badRequest('bad_credentials', 'accountId and accessToken are required');
+  return body;
+}
+
 export async function connectChannel(
   ctx: Ctx,
   by: AuthSession['user'],
   network: SocialNetwork,
-  input: {
-    accountId: string;
-    accountName: string;
-    accessToken: string;
-    refreshToken?: string | undefined;
-    expiresAt?: string | null | undefined;
-  },
+  body: ConnectSocialChannelRequest,
 ): Promise<SocialChannel[]> {
+  const input = normalizeConnect(network, body);
   const access = await encryptSecret(ctx, input.accessToken);
   const refresh = input.refreshToken ? await encryptSecret(ctx, input.refreshToken) : null;
   await exec(
@@ -216,7 +249,13 @@ async function alertOnce(ctx: Ctx, network: SocialNetwork, reason: string): Prom
 }
 
 function captionFor(network: SocialNetwork, c: BlogContent): string {
-  return (network === 'facebook' ? c.social.facebookText : c.social.linkedinText) || c.summary;
+  const text = {
+    facebook: c.social.facebookText,
+    linkedin: c.social.linkedinText,
+    x: c.social.xText,
+    bluesky: c.social.blueskyText,
+  }[network];
+  return text || c.summary; // older posts have no X or Bluesky caption; the client cuts the summary to fit
 }
 
 async function runShare(ctx: Ctx, share: Record<string, any>): Promise<void> {

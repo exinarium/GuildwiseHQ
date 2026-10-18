@@ -1,7 +1,7 @@
 ---
 title: The blog and the weekly digest
 summary: Where to read the Guildwise HQ blog, how to get (or stop) the weekly digest, and how the platform administrator runs the blog.
-keywords: [blog, articles, digest, newsletter, unsubscribe, email, api key, blog writer, writer, monthly cap, kill switch, facebook, linkedin]
+keywords: [blog, articles, digest, newsletter, unsubscribe, email, api key, blog writer, writer, monthly cap, kill switch, facebook, linkedin, x, twitter, bluesky]
 order: 24
 ---
 
@@ -39,6 +39,6 @@ This part is for the platform administrator. The blog is managed under **Blog** 
 4. **Moderation.** You review every post for the first two weeks. After the date you set under *Auto-publish starts on*, a post that raised no warning publishes by itself once it has waited the *hold* (3 hours by default). Posts that were already waiting when that date arrives are released too, if they raised no warning: they publish after the same hold, counted from that date. Posts with a warning (for example links that are not in the sources) always wait for you.
 5. **Kill switch.** *Switch the blog off* stops the writer and API tools creating posts and stops all publishing, the digest and social posts. Public articles stay readable. Switch it on again to carry on.
 6. **Weekly digest.** Switch it on or off, send a test to yourself, and see what each week did.
-7. **Social sharing.** Connect the Facebook Page and the LinkedIn organization. Published articles are shared automatically, with retries. If a token is refused or about to expire you get an email, and sharing for that network pauses until you paste a new token. Unpublishing an article does not remove what was already shared.
+7. **Social sharing.** Connect the Facebook Page, the LinkedIn organization, X and Bluesky. Published articles are shared automatically, with retries, using a caption per network (the article summary when a caption is missing). For X you paste four values from a developer app with "Read and write" access (API key, API secret, access token, access token secret; X charges for API use, so keep credit on the account). For Bluesky you paste the handle and an app password from Settings, App passwords. If a credential is refused, credit runs out or a token is about to expire you get an email, and sharing for that network pauses until you paste new values. Unpublishing an article does not remove what was already shared.
 
 The blog API for outside tools is described in `docs/BLOG-API.md`.

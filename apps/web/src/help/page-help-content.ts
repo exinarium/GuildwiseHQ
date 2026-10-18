@@ -1550,7 +1550,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'Social sharing',
-        text: 'Connect the Facebook Page and the LinkedIn organization. A banner shows when a token needs replacing.',
+        text: 'Connect the Facebook Page, the LinkedIn organization, X and Bluesky. A banner shows when a token needs replacing.',
       },
     ],
     article: 'blog-and-digest#platform-blog',

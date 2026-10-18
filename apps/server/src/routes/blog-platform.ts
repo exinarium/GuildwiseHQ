@@ -8,6 +8,7 @@ import {
   PatchBlogWriterRequestSchema,
   PlatformBlogQuerySchema,
   RejectBlogPostRequestSchema,
+  SOCIAL_NETWORKS,
   SocialNetworkParamsSchema,
 } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
@@ -119,7 +120,7 @@ export function blogPlatformRoutes(ctx: Ctx) {
       await requireSuperAdmin(ctx, req);
       const p = await getPost(ctx, 'id', req.params.id);
       if (p.status !== 'published') throw badRequest('not_published', 'only a published post can be shared');
-      await requestShares(ctx, p.id, ['facebook', 'linkedin']);
+      await requestShares(ctx, p.id, [...SOCIAL_NETWORKS]);
       return getPost(ctx, 'id', p.id);
     });
 

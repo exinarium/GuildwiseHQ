@@ -72,6 +72,8 @@ describe('connecting channels', () => {
     expect(list.channels.map((c: any) => [c.network, c.status])).toEqual([
       ['facebook', 'ok'],
       ['linkedin', 'ok'],
+      ['x', 'disconnected'],
+      ['bluesky', 'disconnected'],
     ]);
     await socialTick(t.app.ctx);
     expect(await shares(before.id)).toHaveLength(0);
@@ -193,5 +195,104 @@ describe('sharing on publish', () => {
     expect(mail.to(sa.email)[0]?.text).toContain('expires on');
     await socialTick(t.app.ctx);
     expect(mail.to(sa.email)).toHaveLength(1);
+  });
+});
+
+describe('X and Bluesky', () => {
+  const X = {
+    apiKey: 'key-123456',
+    apiSecret: 'secret-123456',
+    accessToken: 'tok-123456',
+    accessSecret: 'toksecret-123456',
+  };
+  const BSKY = { handle: 'guildwise.bsky.social', appPassword: 'abcd-efgh-ijkl-mnop' };
+  const put = (network: string, body: Record<string, unknown>) =>
+    t.req('PUT', `/api/platform/social/channels/${network}`, { cookie: sa.cookie, body });
+  const only = async (network: 'x' | 'bluesky', body: Record<string, unknown>) => {
+    await q('DELETE FROM social_channels');
+    await ok(put(network, body));
+    await reset();
+  };
+
+  it('stores the credentials encrypted as JSON and never returns them', async () => {
+    await q('DELETE FROM social_channels');
+    const res = await ok(put('x', X));
+    await ok(put('bluesky', BSKY));
+    expect(JSON.stringify(res)).not.toContain('secret-123456');
+    const rows = await q(`SELECT network, access_token, account_name FROM social_channels ORDER BY network`);
+    expect(rows.map((r) => r.network)).toEqual(['bluesky', 'x']);
+    for (const r of rows) {
+      expect(r.access_token.startsWith('v1:')).toBe(true);
+      expect(r.access_token).not.toContain('secret');
+      expect(r.access_token).not.toContain('abcd-efgh');
+    }
+    expect(JSON.stringify(await q(`SELECT payload FROM events WHERE type LIKE 'Social%'`))).not.toContain(
+      'toksecret',
+    );
+    const list = await ok(t.req('GET', '/api/platform/social/channels', { cookie: sa.cookie }));
+    expect(list.channels.map((c: any) => c.network)).toEqual(['facebook', 'linkedin', 'x', 'bluesky']);
+    expect(list.channels.find((c: any) => c.network === 'bluesky').accountName).toBe('guildwise.bsky.social');
+  });
+
+  it('rejects the wrong credential shape for a network', async () => {
+    expect((await put('x', { accountId: '1', accessToken: 'token-123456' })).status).toBe(400);
+    expect((await put('bluesky', X)).status).toBe(400);
+    expect((await put('facebook', BSKY)).status).toBe(400);
+    expect((await put('x', { apiKey: 'a' })).status).toBe(400);
+  });
+
+  it('shares to X with the X caption and stores the url', async () => {
+    await only('x', X);
+    const post = await publish();
+    expect(await socialTick(t.app.ctx)).toBe(1);
+    const c = fake.calls[0];
+    expect(c?.network).toBe('x');
+    expect(c?.p.text).toBe('New on the blog: agents #AI');
+    expect(JSON.parse(c?.p.accessToken ?? '{}')).toEqual(X);
+    const rs = await shares(post.id);
+    expect(rs[0]).toMatchObject({ network: 'x', status: 'sent', url: 'https://social.test/x/1' });
+  });
+
+  it('falls back to the summary when a post has no caption for the network', async () => {
+    await only('bluesky', BSKY);
+    const slug = `nocap-${++n}`;
+    const { post } = await submitPost(
+      t.app.ctx,
+      blogContent(slug, { social: { facebookText: 'fb' } }),
+      { userId: sa.id },
+      'draft',
+    );
+    await publishPost(t.app.ctx, post.id, { userId: sa.id });
+    await socialTick(t.app.ctx);
+    expect(fake.calls[0]?.p.text).toBe(post.summary);
+  });
+
+  it.each(['x', 'bluesky'] as const)('retries %s on a 429 and pauses it on a 401', async (network) => {
+    await only(network, network === 'x' ? X : BSKY);
+    const post = await publish();
+    fake.script = ['retry'];
+    await socialTick(t.app.ctx);
+    const r = (await shares(post.id))[0];
+    expect(r).toMatchObject({ network, status: 'pending', attempts: 1 });
+    await q(`UPDATE social_shares SET next_attempt_at = now() - interval '1 second' WHERE status='pending'`);
+    fake.script = ['auth'];
+    await socialTick(t.app.ctx);
+    const ch = await ok(t.req('GET', '/api/platform/social/channels', { cookie: sa.cookie }));
+    expect(ch.channelsNeedingReconnect).toEqual([network]);
+    expect(mail.to(sa.email)).toHaveLength(1);
+    expect(mail.to(sa.email)[0]?.subject).toContain(network === 'x' ? 'X' : 'Bluesky');
+    await ok(put(network, network === 'x' ? X : BSKY));
+    await socialTick(t.app.ctx);
+    expect((await shares(post.id))[0]?.status).toBe('sent');
+  });
+
+  it('accepts the new networks in the share channels of the API and the manual share', async () => {
+    await only('bluesky', BSKY);
+    const post = await publish();
+    await socialTick(t.app.ctx);
+    const detail = await ok(
+      t.req('POST', `/api/platform/blog/posts/${post.id}/share`, { cookie: sa.cookie }),
+    );
+    expect(detail.shares.map((s: any) => s.network)).toEqual(['bluesky']);
   });
 });

@@ -1,7 +1,9 @@
 import type { SocialNetwork } from '@aom/shared';
+import { oauth1Header } from './oauth1.ts';
+import { blueskyPost, xTweetText } from './social-text.ts';
 
 /**
- * The only code that talks to Facebook and LinkedIn. Everything else (and every test) goes through the `SocialClient`
+ * The only code that talks to Facebook, LinkedIn, X and Bluesky. Everything else (and every test) goes through the `SocialClient`
  * interface, so no test ever reaches a real network. The versions below are pinned on purpose (docs/design/blog-prd.md
  * section 12): review them every 6 to 12 months.
  */
@@ -21,6 +23,10 @@ export class SocialError extends Error {
 
 export interface SharePayload {
   accountId: string;
+  /**
+   * Facebook and LinkedIn: the access token. X: JSON `{apiKey, apiSecret, accessToken, accessSecret}`. Bluesky: JSON
+   * `{handle, appPassword}`.
+   */
   accessToken: string;
   /** The caption. */
   text: string;
@@ -69,10 +75,118 @@ async function call(
   }
 }
 
+const parseCreds = <T extends string>(raw: string, keys: readonly T[]): Record<T, string> => {
+  try {
+    const j = JSON.parse(raw) as Record<string, unknown>;
+    if (keys.every((k) => typeof j[k] === 'string' && j[k])) return j as Record<T, string>;
+  } catch {
+    // falls through
+  }
+  throw new SocialError('auth', 'the stored credentials are incomplete; paste them again');
+};
+
+/** X: `POST /2/tweets`, OAuth 1.0a. A JSON body means only the oauth_* parameters are signed. */
+async function postToX(p: SharePayload): Promise<ShareResult> {
+  const c = parseCreds(p.accessToken, ['apiKey', 'apiSecret', 'accessToken', 'accessSecret'] as const);
+  const url = 'https://api.x.com/2/tweets';
+  const r = await call(url, {
+    method: 'POST',
+    headers: {
+      authorization: oauth1Header({
+        method: 'POST',
+        url,
+        consumerKey: c.apiKey,
+        consumerSecret: c.apiSecret,
+        token: c.accessToken,
+        tokenSecret: c.accessSecret,
+      }),
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({ text: xTweetText(p.text, p.link) }),
+  });
+  // 402: the pay-per-use credits are used up. That needs the super admin, so it pauses and alerts like an auth error.
+  if (r.status === 402) throw new SocialError('auth', `HTTP 402: ${r.body.slice(0, 300)}`);
+  if (r.status >= 300) throw classify(r.status, r.body);
+  const id = (JSON.parse(r.body) as { data?: { id?: string } }).data?.id;
+  if (!id) throw new SocialError('final', 'no post id in the answer');
+  return { externalId: id, url: `https://x.com/i/web/status/${id}` };
+}
+
+const BSKY = 'https://bsky.social/xrpc';
+const MAX_THUMB_BYTES = 1_000_000;
+
+/** Bluesky: a session per post, then the post record with a link facet and an external embed (card). */
+async function postToBluesky(p: SharePayload): Promise<ShareResult> {
+  const c = parseCreds(p.accessToken, ['handle', 'appPassword'] as const);
+  const handle = c.handle.replace(/^@/, '');
+  const s = await call(`${BSKY}/com.atproto.server.createSession`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ identifier: handle, password: c.appPassword }),
+  });
+  if (s.status === 400 || s.status === 401) throw new SocialError('auth', `HTTP ${s.status}: login refused`);
+  if (s.status >= 300) throw classify(s.status, s.body);
+  const session = JSON.parse(s.body) as { accessJwt?: string; did?: string };
+  if (!session.accessJwt || !session.did) throw new SocialError('final', 'no session in the answer');
+  const auth = { authorization: `Bearer ${session.accessJwt}` };
+
+  let thumb: unknown;
+  try {
+    const img = await fetch(p.imageUrl, { signal: AbortSignal.timeout(20_000) });
+    if (img.ok) {
+      const bytes = Buffer.from(await img.arrayBuffer());
+      if (bytes.length > 0 && bytes.length <= MAX_THUMB_BYTES) {
+        const up = await call(`${BSKY}/com.atproto.repo.uploadBlob`, {
+          method: 'POST',
+          headers: { ...auth, 'content-type': img.headers.get('content-type') ?? 'image/png' },
+          body: bytes,
+        });
+        if (up.status === 401) throw new SocialError('auth', 'HTTP 401 on upload');
+        if (up.status < 300) thumb = (JSON.parse(up.body) as { blob?: unknown }).blob;
+      }
+    }
+  } catch (err) {
+    if (err instanceof SocialError && err.kind === 'auth') throw err;
+    // a missing thumbnail does not stop the post
+  }
+
+  const { text, facets } = blueskyPost(p.text, p.link);
+  const r = await call(`${BSKY}/com.atproto.repo.createRecord`, {
+    method: 'POST',
+    headers: { ...auth, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      repo: session.did,
+      collection: 'app.bsky.feed.post',
+      record: {
+        $type: 'app.bsky.feed.post',
+        text,
+        createdAt: new Date().toISOString(),
+        facets,
+        embed: {
+          $type: 'app.bsky.embed.external',
+          external: {
+            uri: p.link,
+            title: p.title.slice(0, 300),
+            description: p.description.slice(0, 1000),
+            ...(thumb ? { thumb } : {}),
+          },
+        },
+      },
+    }),
+  });
+  if (r.status >= 300) throw classify(r.status, r.body);
+  const uri = (JSON.parse(r.body) as { uri?: string }).uri;
+  const rkey = uri?.split('/').pop();
+  if (!uri || !rkey) throw new SocialError('final', 'no post uri in the answer');
+  return { externalId: uri, url: `https://bsky.app/profile/${handle}/post/${rkey}` };
+}
+
 /** The real thing. Facebook: `POST /{page-id}/feed`. LinkedIn: image upload, then `POST /rest/posts` as the organization. */
 export function createSocialClient(): SocialClient {
   return {
     async post(network, p) {
+      if (network === 'x') return postToX(p);
+      if (network === 'bluesky') return postToBluesky(p);
       if (network === 'facebook') {
         const r = await call(
           `https://graph.facebook.com/${GRAPH_VERSION}/${encodeURIComponent(p.accountId)}/feed`,
