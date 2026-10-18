@@ -340,6 +340,19 @@ export async function listPublished(
   return { posts: rs.map((r) => publicDto(ctx, r)), total };
 }
 
+/** Newest published posts with body and sources (one query), for the RSS feed. */
+export async function listPublishedFull(ctx: Ctx, limit: number): Promise<PublicBlogPostFull[]> {
+  const rs = await rows(
+    ctx.pool,
+    `SELECT * FROM blog_posts WHERE status='published' ORDER BY published_at DESC, id DESC LIMIT $1`,
+    [limit],
+  );
+  return rs.map((r) => {
+    const c = r.content as BlogContent;
+    return { ...publicDto(ctx, r), bodyMarkdown: c.bodyMarkdown, sources: c.sources, author: BLOG_AUTHOR };
+  });
+}
+
 /** `gone` for a post that was published once and then taken down (410), `null` for an unknown slug (404). */
 export async function getPublished(
   ctx: Ctx,

@@ -16,6 +16,7 @@ import {
   getPublished,
   lastPublishedChange,
   listPublished,
+  listPublishedFull,
   postsCount,
   publishedTags,
 } from '../commands/blog.ts';
@@ -111,7 +112,7 @@ export function blogPublicRoutes(ctx: Ctx) {
 
     app.get('/blog/rss.xml', async (req, reply) =>
       serve(req, reply, 'rss', 'application/rss+xml; charset=utf-8', async () =>
-        rssFeed(origin, (await listPublished(ctx, { limit: 30 })).posts),
+        rssFeed(origin, await listPublishedFull(ctx, 30)),
       ),
     );
 

@@ -160,6 +160,11 @@ network is never shared to it twice.
 `/blog`, `/blog/<slug>`, `/blog/tag/<tag>`, `/blog/rss.xml`, `/sitemap.xml` (server-rendered, cached, with canonical
 and Open Graph tags and JSON-LD) and Help > Blog (`/help/blog`). An unpublished post answers `410 Gone`.
 
+The RSS feed (`/blog/rss.xml`, newest 30 posts) is built for syndication (Dev.to, Hashnode) and auto-posters (Buffer,
+dlvr.it). Each item carries `<content:encoded>` (the full rendered HTML body in CDATA, same renderer as the post page,
+cover image first, all relative URLs made absolute), the cover as `<enclosure>` and `<media:content>`, `<dc:creator>`
+(the post author) and `<category>` tags; the channel has `<atom:link rel="self">` and `<lastBuildDate>`.
+
 ## The blog writer (server-side platform job)
 
 The blog is written by the **blog writer**, a job that runs on the Guildwise server (owner decision of 2026-10-10, which

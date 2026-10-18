@@ -247,21 +247,50 @@ export function messagePage(origin: string, title: string, text: string, extra =
 
 const xml = (s: string) => esc(s);
 
-export function rssFeed(origin: string, posts: Array<PublicBlogPost>): string {
+const MIME: Record<string, string> = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  svg: 'image/svg+xml',
+  avif: 'image/avif',
+};
+const mimeOf = (url: string) =>
+  MIME[(url.split(/[?#]/)[0]?.match(/\.([a-z0-9]+)$/i)?.[1] ?? '').toLowerCase()] ?? 'image/png';
+
+/** Makes root-relative `href`/`src` attributes absolute so the body works outside our site. */
+export function absolutizeHtml(origin: string, html: string): string {
+  return html.replace(
+    /(\s(?:href|src)=)(["'])(\/(?!\/)[^"']*)\2/gi,
+    (_m, a, q, u) => `${a}${q}${origin}${u}${q}`,
+  );
+}
+
+export const cdata = (s: string) => `<![CDATA[${s.replaceAll(']]>', ']]]]><![CDATA[>')}]]>`;
+
+export function rssFeed(origin: string, posts: Array<PublicBlogPostFull>): string {
   const last = posts[0]?.updatedAt ?? new Date(0).toISOString();
   return `<?xml version="1.0" encoding="UTF-8"?>
-<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:media="http://search.yahoo.com/mrss/"><channel>
 <title>Guildwise HQ blog</title><link>${xml(origin)}/blog</link>
 <description>Practical articles on AI agents and AI automation from the Guildwise HQ team.</description>
 <language>en</language><lastBuildDate>${new Date(last).toUTCString()}</lastBuildDate>
 <atom:link href="${xml(origin)}/blog/rss.xml" rel="self" type="application/rss+xml"/>
 ${posts
-  .map(
-    (
-      p,
-    ) => `<item><title>${xml(p.title)}</title><link>${xml(p.url)}</link><guid isPermaLink="true">${xml(p.url)}</guid>
-<pubDate>${new Date(p.publishedAt).toUTCString()}</pubDate><description>${xml(p.summary)}</description>${p.tags.map((t) => `<category>${xml(blogTagLabel(t))}</category>`).join('')}</item>`,
-  )
+  .map((p) => {
+    const image = p.coverImage?.defaultKey ? coverUrl(origin, p.coverImage.defaultKey) : '';
+    const body = absolutizeHtml(
+      origin,
+      `${image ? `<img src="${esc(image)}" alt="${esc(p.coverImage.alt)}" width="1200" height="630">\n` : ''}${renderMarkdownHtml(p.bodyMarkdown)}`,
+    );
+    const media = image
+      ? `<enclosure url="${xml(image)}" type="${mimeOf(image)}" length="0"/><media:content url="${xml(image)}" medium="image"/>`
+      : '';
+    return `<item><title>${xml(p.title)}</title><link>${xml(p.url)}</link><guid isPermaLink="true">${xml(p.url)}</guid>
+<pubDate>${new Date(p.publishedAt).toUTCString()}</pubDate><dc:creator>${xml(p.author || 'Guildwise Research Desk')}</dc:creator><description>${xml(p.summary)}</description>${p.tags.map((t) => `<category>${xml(blogTagLabel(t))}</category>`).join('')}${media}
+<content:encoded>${cdata(body)}</content:encoded></item>`;
+  })
   .join('\n')}
 </channel></rss>`;
 }
