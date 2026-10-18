@@ -54,6 +54,7 @@ import {
   useToast,
 } from '../components/ui.tsx';
 import { WorkingBranchQuestion } from '../components/WorkingBranchQuestion.tsx';
+import { useIsMobile } from '../hooks/useIsMobile.ts';
 import {
   answerText,
   choiceFor,
@@ -63,7 +64,6 @@ import {
   type LedgerChoiceKey,
   sortDeskItems,
 } from '../lib/desk.ts';
-import { useIsMobile } from '../hooks/useIsMobile.ts';
 import { useExpertMode } from '../lib/expert-mode.ts';
 import { focusOf, integrationsLink } from '../lib/integrations.ts';
 import { ageLabel, formatDateTime } from '../lib/time.ts';
@@ -268,7 +268,11 @@ export function Desk() {
             <ol className="flex flex-col gap-3" aria-label={`${g.label} items`}>
               {g.items.map((item) => (
                 <li key={item.id}>
-                  {mobile ? <DeskCard item={item} onOpen={() => setOpenId(item.id)} /> : <DeskItem item={item} />}
+                  {mobile ? (
+                    <DeskCard item={item} onOpen={() => setOpenId(item.id)} />
+                  ) : (
+                    <DeskItem item={item} />
+                  )}
                 </li>
               ))}
             </ol>
@@ -407,7 +411,8 @@ export function DeskItem({ item, now, bare = false }: { item: DeskItemDto; now?:
       aria-label={item.title}
       className={cx(
         'rounded-card border border-line border-l-[3px] bg-surface p-4 shadow-sm sm:p-5',
-        bare && 'max-md:-mx-4 max-md:-my-3 max-md:rounded-none max-md:border-0 max-md:border-l-[3px] max-md:shadow-none',
+        bare &&
+          'max-md:-mx-4 max-md:-my-3 max-md:rounded-none max-md:border-0 max-md:border-l-[3px] max-md:shadow-none',
         item.urgent ? 'border-l-danger-fill' : item.blocking ? 'border-l-warning-fill' : 'border-l-line',
       )}
     >

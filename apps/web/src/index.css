@@ -266,3 +266,11 @@ input[type="radio"] {
     bottom: var(--app-bottom-inset, 0px);
   }
 }
+
+/* Mobile: a grid item may shrink below its content (a wide table inside a card scrolls in its own container instead of
+   widening the page). Desktop is untouched. */
+@media (max-width: 767.98px) {
+  .grid > * {
+    min-width: 0;
+  }
+}

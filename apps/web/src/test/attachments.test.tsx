@@ -103,7 +103,7 @@ describe('the attachments section of a card', () => {
   });
 
   it('uploads the chosen files one by one as raw bodies with their names', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ applyAccept: false });
     wrap(<AttachmentsPanel cardId={CARD} attachments={[]} canAttach />);
     expect(screen.getByText(/No files yet/)).toBeTruthy();
     await user.upload(screen.getByTestId('attachment-input'), [png('a.png'), png('b c.png')]);
@@ -124,7 +124,7 @@ describe('the attachments section of a card', () => {
   });
 
   it('refuses a file over 20 MB without sending it, and shows what the server refused', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ applyAccept: false });
     respond = () =>
       json(
         { error: { code: 'attachment_rejected', message: 'setup.exe: .exe files cannot be attached' } },
@@ -143,7 +143,7 @@ describe('the attachments section of a card', () => {
   });
 
   it('removes a file after a confirmation', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ applyAccept: false });
     wrap(<AttachmentsPanel cardId={CARD} attachments={[attachment(1), attachment(2)]} canAttach />);
     await user.click(screen.getByRole('button', { name: 'Remove file2.png' }));
     expect(calls).toHaveLength(0); // nothing yet
@@ -176,7 +176,7 @@ describe('the attachments section of a card', () => {
 
 describe('files on the New card form', () => {
   it('queues files, shows them, drops one, and refuses a file over 20 MB', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ applyAccept: false });
     const Harness = () => {
       const [files, setFiles] = React.useState<File[]>([]);
       return <NewCardFiles files={files} onChange={setFiles} />;

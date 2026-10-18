@@ -36,6 +36,7 @@ import {
   RiskTierDialog,
 } from '../components/CardEdit.tsx';
 import { CardPhase } from '../components/CardPhase.tsx';
+import { MoveToSheet } from '../components/cards/MoveToSheet.tsx';
 import { DependenciesPanel } from '../components/DependenciesPanel.tsx';
 import { AskDevOpsButton } from '../components/devops/AskDevOps.tsx';
 import { EvidencePanel, TestingLinks } from '../components/EvidencePanel.tsx';
@@ -82,7 +83,6 @@ import {
   useToast,
 } from '../components/ui.tsx';
 import { WorkabilityWarning } from '../components/WorkabilityWarning.tsx';
-import { MoveToSheet } from '../components/cards/MoveToSheet.tsx';
 import { useIsMobile } from '../hooks/useIsMobile.ts';
 import { fieldLabel } from '../lib/cardForm.ts';
 import { landingText } from '../lib/outcomes.ts';

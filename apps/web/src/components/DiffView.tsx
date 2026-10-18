@@ -50,7 +50,9 @@ function FileDiff({
           {file.oldPath ? `${file.oldPath} → ${file.path}` : file.path}
         </span>
         <span className="max-md:hidden">
-          <Badge tone={file.status === 'added' ? 'success' : file.status === 'deleted' ? 'danger' : 'neutral'}>
+          <Badge
+            tone={file.status === 'added' ? 'success' : file.status === 'deleted' ? 'danger' : 'neutral'}
+          >
             {STATUS_LABEL[file.status]}
           </Badge>
         </span>
@@ -64,14 +66,18 @@ function FileDiff({
               {file.lines.map((l, i) => (
                 // biome-ignore lint/suspicious/noArrayIndexKey: the lines of a diff are static and never reordered
                 <tr key={`${i}-${l.kind}`} className={LINE_CLS[l.kind]} data-kind={l.kind}>
-                  <td className="w-10 select-none px-2 text-right text-subtle max-md:hidden">{l.oldNo ?? ''}</td>
+                  <td className="w-10 select-none px-2 text-right text-subtle max-md:hidden">
+                    {l.oldNo ?? ''}
+                  </td>
                   <td className="w-10 select-none px-2 text-right text-subtle max-md:w-8 max-md:px-1">
                     {l.newNo ?? ''}
                   </td>
                   <td className="w-4 select-none text-center">{SIGN[l.kind]}</td>
                   <td
                     className={
-                      wrap ? 'pr-3 break-words whitespace-pre-wrap max-md:pr-2' : 'pr-3 whitespace-pre max-md:pr-2'
+                      wrap
+                        ? 'pr-3 break-words whitespace-pre-wrap max-md:pr-2'
+                        : 'pr-3 whitespace-pre max-md:pr-2'
                     }
                   >
                     {l.text}

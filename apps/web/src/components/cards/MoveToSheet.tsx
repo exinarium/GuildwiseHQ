@@ -5,8 +5,8 @@ import { useWorkflows } from '../../api/queries/agents.ts';
 import { useMoveCard } from '../../api/queries/cards.ts';
 import { stageStyle } from '../../lib/stages.ts';
 import { BottomSheet } from '../ui/BottomSheet.tsx';
-import { Button, ErrorBox, Spinner, TextArea, useToast } from '../ui.tsx';
 import { cx } from '../ui/cx.ts';
+import { Button, ErrorBox, Spinner, TextArea, useToast } from '../ui.tsx';
 
 /**
  * "Move to..." as a bottom sheet (phones have no drag and drop). Lists the stages of the card's workflow, asks for the
@@ -76,10 +76,31 @@ export function MoveToSheet({
       title="Move to..."
       description="Override the workflow and move this card to another stage."
       testId="move-to-sheet"
+      footer={
+        <>
+          <Button onClick={close}>Close</Button>
+          <Button
+            type="submit"
+            form="move-to-form"
+            variant="primary"
+            size="lg"
+            disabled={!toStage || move.isPending}
+            loading={move.isPending}
+          >
+            Move card
+          </Button>
+        </>
+      }
     >
       <WithWorkflow card={card} workflow={workflow}>
         {(resolved) => (
-          <form onSubmit={submit} className="flex flex-col gap-3" noValidate aria-label="Move card">
+          <form
+            id="move-to-form"
+            onSubmit={submit}
+            className="flex flex-col gap-3"
+            noValidate
+            aria-label="Move card"
+          >
             <ul className="flex flex-col gap-2" aria-label="Target stage">
               {resolved.stages.map((s) => {
                 const current = s.id === card.stage;
@@ -120,18 +141,6 @@ export function MoveToSheet({
               />
             )}
             <ErrorBox error={move.error} />
-            <div className="flex gap-2 [&>button]:flex-1">
-              <Button onClick={close}>Close</Button>
-              <Button
-                type="submit"
-                variant="primary"
-                size="lg"
-                disabled={!toStage || move.isPending}
-                loading={move.isPending}
-              >
-                Move card
-              </Button>
-            </div>
           </form>
         )}
       </WithWorkflow>
