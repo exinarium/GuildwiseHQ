@@ -93,7 +93,7 @@ function FileDiff({
 }
 
 /**
- * A unified diff for the owner approval (code-v6): one block per file with its counts, collapsible, added lines green,
+ * A unified diff for the owner approval (lean team): one block per file with its counts, collapsible, added lines green,
  * removed lines red, hunk headers blue. No dependency: the parser is `lib/diff.ts`.
  */
 export function DiffView({ diff, truncated = false }: { diff: string; truncated?: boolean }) {

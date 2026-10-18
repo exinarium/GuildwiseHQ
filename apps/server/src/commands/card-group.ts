@@ -6,7 +6,7 @@ import { agentActor, cardMessage, projectScope } from './common.ts';
 
 type RpcResult = [boolean, unknown?, string?];
 
-/** Roles that may group cards and write the Card Brief (code-v6: the planner and the architect; the BA when specifying). */
+/** Roles that may group cards and write the Card Brief (lean team: the planner and the architect; the BA when specifying). */
 export const GROUP_ROLES = new Set(['planner', 'architect', 'ba']);
 
 const CARD_BRIEF_MAX = 4000;
@@ -17,7 +17,7 @@ async function agentOf(ctx: Ctx, shift: Row): Promise<Row | undefined> {
 }
 
 /**
- * `aom group set <id> [--card <REF>]` / `aom group clear [--card <REF>]` (code-v6): puts an open card of the shift's project
+ * `aom group set <id> [--card <REF>]` / `aom group clear [--card <REF>]` (lean team): puts an open card of the shift's project
  * in a group, or takes it out. Cards of one group go to one builder (hard dispatch affinity), who works them in order in one
  * resumed session. Any open card of the project may be grouped, not only the shift's own card (the planner sees them all).
  */
@@ -92,7 +92,7 @@ export async function cardGroupRpc(
   });
 }
 
-/** `aom brief --text "<brief>"` (code-v6): the Card Brief of the shift's own card, kept as written and given to the builder. */
+/** `aom brief --text "<brief>"` (lean team): the Card Brief of the shift's own card, kept as written and given to the builder. */
 export async function cardBriefRpc(
   ctx: Ctx,
   shift: Row,

@@ -10,7 +10,7 @@ export interface CardDiff {
 }
 
 /**
- * What the server keeps from a build handoff (code-v6): the commit the branch is at (the build evidence is bound to it),
+ * What the server keeps from a build handoff (lean team): the commit the branch is at (the build evidence is bound to it),
  * the paths the card changes and the unified diff `<base>...HEAD`, capped at 2 MB with a note (`capDiff`). Taken after the
  * shift's autocommit, so what is measured is what the reviewers read.
  */

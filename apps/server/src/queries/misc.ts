@@ -4,6 +4,7 @@ import {
   DEFAULT_STOP_LOSS,
   detectForgeKind,
   isOrgOperational,
+  LEGACY_CODE_V6_KEY,
   McpServerInfoSchema,
   type ProjectDetailResponse,
   type ProjectDto,
@@ -37,9 +38,14 @@ export const PROJECT_DEPARTMENT_SQL = `(SELECT w.department FROM workflow_versio
     WHERE w.key = p.workflow_key AND w.status = 'active' AND (w.org_id = p.org_id OR w.org_id IS NULL)
     ORDER BY (w.org_id IS NULL), w.version DESC LIMIT 1) AS department`;
 
-/** The workflow new cards start on: code-v6 once the project enabled it as a default (the upgrade), else its own workflow. */
-const NEW_CARD_WORKFLOW_SQL = `(SELECT CASE WHEN EXISTS (SELECT 1 FROM project_workflows pw WHERE pw.project_id = p.id
-    AND pw.workflow_key = 'code-v6' AND cardinality(pw.default_card_types) > 0) THEN 'code-v6' ELSE p.workflow_key END) AS new_card_workflow_key`;
+/**
+ * Do new cards of the project run the lean team flow? The newest active version of the project's workflow key (the
+ * legacy key resolves as `code`) says so (`leanTeam`), the same version `resolveWorkflow` gives a new card.
+ */
+const LEAN_TEAM_SQL = `(SELECT COALESCE((w.definition->>'leanTeam')::boolean, false) FROM workflow_versions w
+    WHERE w.key = (CASE WHEN p.workflow_key = '${LEGACY_CODE_V6_KEY}' THEN 'code' ELSE p.workflow_key END)
+      AND w.status = 'active' AND w.project_id IS NULL AND (w.org_id = p.org_id OR w.org_id IS NULL)
+    ORDER BY (w.org_id IS NULL), w.version DESC LIMIT 1) AS lean_team`;
 
 /** Display name of whoever last changed the large-merge setting. */
 const MERGE_CHANGED_BY_SQL = `(SELECT u.display_name FROM users u WHERE u.id = p.merge_large_changed_by) AS merge_large_changed_by_name`;
@@ -61,7 +67,7 @@ export function toProjectDto(p: Row, myRole: 'owner' | 'manager'): ProjectDto {
     key: p.key,
     name: p.name,
     workflowKey: p.workflow_key,
-    newCardWorkflowKey: p.new_card_workflow_key ?? p.workflow_key,
+    leanTeam: p.lean_team === true,
     department: p.department ?? null,
     rank: p.rank ?? null,
     branchPrefix: p.branch_prefix,
@@ -116,7 +122,7 @@ export async function listProjects(
   const r = (
     await rows(
       ctx.pool,
-      `SELECT p.*, pm.role AS my_role, o.name AS org_name, ${PROJECT_DEPARTMENT_SQL}, ${NEW_CARD_WORKFLOW_SQL}, ${MERGE_CHANGED_BY_SQL}, ${PAUSED_BY_SQL}, ${PUBLISHED_NOTES_SQL}, ${HAS_VAULT_SQL}
+      `SELECT p.*, pm.role AS my_role, o.name AS org_name, ${PROJECT_DEPARTMENT_SQL}, ${LEAN_TEAM_SQL}, ${MERGE_CHANGED_BY_SQL}, ${PAUSED_BY_SQL}, ${PUBLISHED_NOTES_SQL}, ${HAS_VAULT_SQL}
          FROM projects p JOIN project_members pm
          ON pm.project_id = p.id AND pm.user_id = $1 AND pm.status = 'active'
          LEFT JOIN organizations o ON o.id = p.org_id
@@ -194,7 +200,7 @@ export async function getProjectDetail(
   const p = await one(
     ctx.pool,
     `SELECT p.*, pm.role AS my_role, o.name AS org_name, o.status AS org_status, o.owner_user_id AS org_owner,
-            ${PROJECT_DEPARTMENT_SQL}, ${NEW_CARD_WORKFLOW_SQL}, ${MERGE_CHANGED_BY_SQL}, ${PAUSED_BY_SQL}, ${PUBLISHED_NOTES_SQL}, ${HAS_VAULT_SQL} FROM projects p JOIN project_members pm
+            ${PROJECT_DEPARTMENT_SQL}, ${LEAN_TEAM_SQL}, ${MERGE_CHANGED_BY_SQL}, ${PAUSED_BY_SQL}, ${PUBLISHED_NOTES_SQL}, ${HAS_VAULT_SQL} FROM projects p JOIN project_members pm
        ON pm.project_id = p.id AND pm.user_id = $1 AND pm.status = 'active'
        LEFT JOIN organizations o ON o.id = p.org_id WHERE p.id = $2`,
     [userId, projectId],

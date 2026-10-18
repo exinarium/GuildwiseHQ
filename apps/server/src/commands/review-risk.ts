@@ -67,7 +67,7 @@ export const isHighRisk = (card: Row): boolean => riskOf(card)?.level === 'high'
 export const HIGH_RISK_MERGE_REASON =
   'the reviewer rated the change HIGH risk, so the merge needs the manager approval (the project setting that waives approval of large merges does not apply)';
 
-/** The code-v6 facts of a card for the web (group, Card Brief, head commit, evidence, high risk, owner approval decision). */
+/** The lean team facts of a card for the web (group, Card Brief, head commit, evidence, high risk, owner approval decision). */
 export function leanCardDto(card: Row): LeanCardDto {
   const ev = card.build_evidence as {
     sha: string;

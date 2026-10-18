@@ -110,7 +110,7 @@ export function limitReached(
   budget: StopLossBudget,
   next: { reviewRound?: boolean; preReview?: boolean } = {},
 ): 'review rounds' | 'build passes' | 'shifts' | null {
-  // code-v6 pre-review: a Sonnet pass, not an Opus round; only the build passes it causes are capped.
+  // lean team pre-review: a Sonnet pass, not an Opus round; only the build passes it causes are capped.
   if (next.preReview) return usage.buildPasses >= budget.buildPasses ? 'build passes' : null;
   const rounds = usage.reviewRounds + (next.reviewRound ? 1 : 0);
   if (next.reviewRound && rounds >= budget.reviewRounds) return 'review rounds';

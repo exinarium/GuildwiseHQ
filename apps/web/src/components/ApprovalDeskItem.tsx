@@ -24,7 +24,7 @@ export function ApprovalDeskItem({ item }: { item: DeskItemDto }) {
         </Link>{' '}
         to look at it first, or decide here.
       </p>
-      {/* code-v6: the owner reads the final diff of the reviewed commit before approving it (a card without one has none). */}
+      {/* lean team: the owner reads the final diff of the reviewed commit before approving it (a card without one has none). */}
       <div className="flex flex-col gap-2">
         <Button
           variant="secondary"

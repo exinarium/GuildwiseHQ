@@ -24,7 +24,7 @@ import { outboundEvents } from './outbound.ts';
 import { phaseEvents } from './phase.ts';
 import { platformEvents } from './platform.ts';
 import { projectEvents } from './project.ts';
-import { projectWorkflowEvents } from './project-workflows.ts';
+import { projectWorkflowEvents, workflowFoldEvents } from './project-workflows.ts';
 import { qaEvents } from './qa.ts';
 import { questionFlowEvents } from './question-flow.ts';
 import { repoEvents } from './repo.ts';
@@ -46,6 +46,7 @@ export const DomainEventSchema = z.discriminatedUnion('type', [
   ...workstationEvents,
   ...projectEvents,
   ...projectWorkflowEvents,
+  ...workflowFoldEvents,
   ...cardEvents,
   ...shiftEvents,
   ...agentEvents,

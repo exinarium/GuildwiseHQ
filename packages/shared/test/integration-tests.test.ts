@@ -129,7 +129,9 @@ describe('code v4', () => {
     expect(validateWorkflow(codeWorkflowV4, BUILTIN_ROLES)).toEqual([]);
     expect(codeWorkflowV4.version).toBe(4);
     expect(getBuiltinWorkflow('code', 4)).toBe(codeWorkflowV4);
-    expect(BUILTIN_WORKFLOWS.filter((w) => w.key === 'code').map((w) => w.version)).toEqual([1, 2, 3, 4, 5]);
+    expect(BUILTIN_WORKFLOWS.filter((w) => w.key === 'code').map((w) => w.version)).toEqual([
+      1, 2, 3, 4, 5, 6,
+    ]);
     const strip = (d: WorkflowDefinition) =>
       JSON.stringify(d.stages.filter((s) => s.id !== 'test').map((s) => s));
     expect(strip(codeWorkflowV4)).toBe(strip(codeWorkflowV3));
@@ -170,7 +172,7 @@ describe('code v5 (plain tester stage when integration tests are off, #71)', () 
   it('is v4 without the skip guard on the test stage, and v1 to v4 stay registered', () => {
     expect(validateWorkflow(codeWorkflowV5, BUILTIN_ROLES)).toEqual([]);
     expect(codeWorkflowV5.version).toBe(5);
-    expect(getBuiltinWorkflow('code')).toBe(codeWorkflowV5);
+    expect(getBuiltinWorkflow('code', 5)).toBe(codeWorkflowV5);
     const strip = (d: WorkflowDefinition) =>
       JSON.stringify(d.stages.filter((s) => s.id !== 'test').map((s) => s));
     expect(strip(codeWorkflowV5)).toBe(strip(codeWorkflowV4));

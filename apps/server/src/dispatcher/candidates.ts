@@ -115,7 +115,7 @@ export function eligibility(A: AgentRefs) {
     // D9). No wait when the project does not run local environments, the card opted out, it is a suite or regression
     // card (they use a target URL), or the workstation's runner cannot provision (an older runner: the tester works as before).
     //
-    // code-v6 (`st.env_strict`): the environment was prepared by the server-run Test deploy stage before this one, so the
+    // lean team (`st.env_strict`): the environment was prepared by the server-run Test deploy stage before this one, so the
     // escapes above do not apply. The tester starts only on a healthy environment of the card, after the server recorded
     // that none applies (`test_deploy_state = 'skipped'`), or when the project works without one (S1b's
     // `test_without_environment`). Suite and regression cards test a target and are not part of the card flow.
@@ -176,7 +176,7 @@ WHERE c.status = 'queued'
        OR c.affinity_agent_id = $1
        OR NOT EXISTS (SELECT 1 FROM agents aa WHERE aa.id = c.affinity_agent_id AND aa.status = 'active'
                        AND aa.paused_at IS NULL))
-  -- Group builder affinity (code-v6): the first builder of a group keeps the rest of its build cards, a hard clause, until it
+  -- Group builder affinity (lean team): the first builder of a group keeps the rest of its build cards, a hard clause, until it
   -- is gone or paused or the assignment expired. Review, test and the other roles are not held back.
   AND (c.group_id IS NULL OR st.claim_role IS DISTINCT FROM 'builder' OR NOT EXISTS (
         SELECT 1 FROM card_groups g JOIN agents ga ON ga.id = g.builder_agent_id AND ga.status = 'active' AND ga.paused_at IS NULL

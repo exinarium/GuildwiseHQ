@@ -117,7 +117,7 @@ describe('backward compatibility', () => {
       expect(parsed.extends).toBeUndefined();
       for (const s of parsed.stages) {
         // Only the code v2+ stages that create a worktree sync main; guards only exist on its investigate stage.
-        if (!(def.key.startsWith('code') && def.version >= 2) && def.key !== 'code-v6') {
+        if (!(def.key.startsWith('code') && def.version >= 2)) {
           expect(s.syncMainBefore).toBe(false);
           for (const o of s.outcomes) expect(o.when).toBeUndefined();
         }

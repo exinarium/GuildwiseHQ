@@ -339,7 +339,7 @@ export async function buildBrief(
 const REVIEW_SIDE = new Set(['pre_review', 'review', 'merge_review']);
 
 /**
- * code-v6 context, role-scoped by stage: the Card Brief (as written), the group, the build evidence and the high-risk paths
+ * lean team context, role-scoped by stage: the Card Brief (as written), the group, the build evidence and the high-risk paths
  * for the review side and the tester, a merge review's resolution, the card's changed paths for the tester's area E2E and
  * the open cards of the project for the planner. Absent for a card that has none of it (the older workflows).
  */
@@ -645,7 +645,7 @@ async function cardAffinityResume(
 
 /**
  * A claim of a card the agent holds affinity to resumes its session on the card; otherwise a group builder moving to the next
- * card of its group (code-v6) resumes the session of its last build shift in the group, with the next card as the first
+ * card of its group (lean team) resumes the session of its last build shift in the group, with the next card as the first
  * message. The runner decides whether it may (120K tokens, 4 hours) and copies the transcript into the new worktree's folder.
  */
 async function affinityResume(

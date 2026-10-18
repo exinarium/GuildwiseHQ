@@ -5,7 +5,7 @@ import { mutateCard } from './util.ts';
 
 const ev = <T extends EventType>(e: StoredEvent): EventOf<T> => e.event as EventOf<T>;
 
-/** Lean Team v3, workflow code-v6: groups, Card Brief, the commit a card is at, test deploy, owner approval policy. */
+/** Lean Team v3, workflow lean team: groups, Card Brief, the commit a card is at, test deploy, owner approval policy. */
 export const codeV6Projectors: Record<string, Projector> = {
   CardGroupSet: async (tx, e) => {
     const p = ev<'CardGroupSet'>(e).payload;

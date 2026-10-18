@@ -22,7 +22,7 @@ export const approvalEvents = [
       deskItemId: Id,
       /** The event that brought the card into the step: one request per entry. */
       entrySeq: z.string().optional(),
-      /** code-v6: the commit whose diff the approver is shown; the approval is bound to it. */
+      /** lean team: the commit whose diff the approver is shown; the approval is bound to it. */
       sha: z.string().max(64).optional(),
     }),
   ),
@@ -37,7 +37,7 @@ export const approvalEvents = [
       /** The stage the card moves to. */
       toStage: z.string().min(1),
       deskItemId: Id.optional(),
-      /** code-v6: the commit an approval is for. */
+      /** lean team: the commit an approval is for. */
       sha: z.string().max(64).optional(),
     }),
   ),

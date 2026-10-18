@@ -139,8 +139,8 @@ export const ProjectDtoSchema = z.object({
   key: z.string(),
   name: z.string(),
   workflowKey: z.string(),
-  /** The workflow new cards start on: `code-v6` after the upgrade (workflowKey stays the project's own primary workflow). */
-  newCardWorkflowKey: z.string().optional(),
+  /** New cards of the project run the lean team workflow (`code` version 6 and later): the owner approval and full suite settings apply. */
+  leanTeam: z.boolean().optional(),
   /** M10: the department of the project's workflow (its type). */
   department: z.string().nullable().optional(),
   /** The place in the organization's ranking (1 = most important); null for a project that is not ranked (archived ones keep theirs). */
@@ -166,9 +166,9 @@ export const ProjectDtoSchema = z.object({
   mergeLargeChanged: z.object({ byName: z.string(), at: IsoTime }).nullable().optional(),
   /** Whether finishing a card automatically starts a full end-to-end test run card (default true). */
   fullSuiteAfterFinalize: z.boolean().optional(),
-  /** code-v6: when the owner approves a card after the review (large and high-risk cards by default). */
+  /** lean team: when the owner approves a card after the review (large and high-risk cards by default). */
   ownerApprovalPolicy: OwnerApprovalPolicySchema.optional(),
-  /** code-v6: the project's mapping of changed paths to E2E specs; null: derived from the E2E folders. */
+  /** lean team: the project's mapping of changed paths to E2E specs; null: derived from the E2E folders. */
   e2eAreas: E2eAreaMapSchema.nullable().optional(),
   /** Answers and orders of this project stay at project scope (the platform project): no org-wide promotion (default off). */
   decisionsProjectOnly: z.boolean().optional(),
@@ -298,7 +298,7 @@ export type ProjectDetailResponse = z.infer<typeof ProjectDetailResponseSchema>;
 export const CreateProjectRequestSchema = z.object({
   key: ProjectKeySchema,
   name: z.string().min(1).max(120),
-  /** Absent: the server's default workflow (code-v6 for new projects). */
+  /** Absent: the server's default workflow (lean team for new projects). */
   workflowKey: z.string().min(1).optional(),
   branchPrefix: BranchPrefixSchema.default('aom/'),
   workingBranch: GitRefSchema.default('main'),

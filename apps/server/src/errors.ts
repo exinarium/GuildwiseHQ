@@ -19,5 +19,7 @@ export const forbidden = (message = 'forbidden') => new HttpError(403, 'forbidde
 export const notFound = (message = 'not found', code = 'not_found') => new HttpError(404, code, message);
 export const conflict = (code: string, message: string, details?: unknown) =>
   new HttpError(409, code, message, details);
+/** A route that was removed on purpose; the message says what replaced it. */
+export const gone = (code: string, message: string) => new HttpError(410, code, message);
 export const unprocessable = (code: string, message: string, details?: unknown) =>
   new HttpError(422, code, message, details);

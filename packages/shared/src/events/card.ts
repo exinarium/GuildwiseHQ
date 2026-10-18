@@ -179,10 +179,10 @@ export const cardEvents = [
       toStage: Stage,
       riskTier: RiskTier,
       diffStats: DiffStats,
-      /** code-v6: the commit the runner measured after the shift's autocommit, and the build evidence bound to it. */
+      /** lean team: the commit the runner measured after the shift's autocommit, and the build evidence bound to it. */
       headSha: z.string().min(7).max(64).optional(),
       evidence: StoredBuildEvidenceSchema.optional(),
-      /** code-v6: computed by the server from the paths of the diff (auth, data and migrations, tenancy and billing). */
+      /** lean team: computed by the server from the paths of the diff (auth, data and migrations, tenancy and billing). */
       highRisk: z.boolean().optional(),
       highRiskPaths: z.array(z.string().max(500)).max(50).optional(),
     }),
@@ -191,7 +191,7 @@ export const cardEvents = [
     'ChangesRequested',
     z.object({
       cardId: Id,
-      /** `pre_review` (code-v6): the Sonnet pre-review sent the card back; the cap counts only Opus review rounds. */
+      /** `pre_review` (lean team): the Sonnet pre-review sent the card back; the cap counts only Opus review rounds. */
       fromStage: z.enum(['review', 'pre_review', 'merge_review']),
       toStage: z.literal('build'),
       reviewerAgentId: Id,
@@ -227,11 +227,11 @@ export const cardEvents = [
       workflowVersionId: Id.optional(),
       integrationTests: z.boolean().optional(),
       /**
-       * code-v6: false when the second approval of a high-risk card may come from the same reviewer because no other
+       * lean team: false when the second approval of a high-risk card may come from the same reviewer because no other
        * reviewer is hired (default: the reviewer is not offered the card again).
        */
       excludeReviewer: z.boolean().optional(),
-      /** code-v6: the owner approval decision of the last review approval, recorded with its reason. */
+      /** lean team: the owner approval decision of the last review approval, recorded with its reason. */
       ownerApproval: z
         .object({
           required: z.boolean(),

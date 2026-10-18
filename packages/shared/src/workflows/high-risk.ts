@@ -1,7 +1,7 @@
 /**
  * High-risk paths (Lean Team v3, design 5.4 and 13): a change that touches authentication, permissions or secrets, data
  * and migrations, or tenancy and billing needs a second Opus review and, for a normal client project, the project owner's
- * approval. The list is one shared module so the card flow (code-v6) and the platform team's deploy policy (S4) agree on
+ * approval. The list is one shared module so the card flow (lean team) and the platform team's deploy policy (S4) agree on
  * what "high risk" means. Sandbox, policy and deploy code is deliberately not on the list (owner decision, design 13).
  *
  * The server computes the flag from the paths of the card diff at every handoff; an agent cannot lower it.

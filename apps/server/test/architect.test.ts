@@ -737,7 +737,7 @@ describe('the architect reads the whole organization (read-only), others do not'
       defaultModel: { model: 'opus', effort: 'high' },
       claimableStages: [
         { workflowKey: '*', stageId: 'investigate*' },
-        { workflowKey: 'code-v6', stageId: 'planning' },
+        { workflowKey: 'code', stageId: 'planning' },
       ],
     });
     expect(def.permissions).toMatchObject({

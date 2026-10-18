@@ -1,18 +1,24 @@
 import { describe, expect, it } from 'vitest';
 import {
   BUILTIN_ROLES,
+  BUILTIN_WORKFLOWS,
   buildEvidenceProblem,
+  canonicalWorkflowKey,
   capDiff,
   codeWorkflowV6,
   DIFF_MAX_BYTES,
   DIFF_TRUNCATED_NOTE,
+  DomainEventSchema,
   deriveE2eAreas,
+  getBuiltinWorkflow,
   getStage,
   HIGH_RISK_GLOBS,
   highRiskPaths,
   highRiskSummary,
   isHighRiskPath,
   isHighRiskPaths,
+  isLeanTeamWorkflow,
+  LEGACY_CODE_V6_KEY,
   ownerApprovalDecision,
   resolveOutcome,
   selectE2eSpecs,
@@ -197,7 +203,7 @@ describe('area E2E mapping', () => {
   });
 });
 
-describe('workflow code-v6', () => {
+describe('code version 6 (the lean team flow)', () => {
   const ids = codeWorkflowV6.stages.map((s) => s.id);
   it('validates and has the lean team stages in order', () => {
     expect(validateWorkflow(codeWorkflowV6, BUILTIN_ROLES)).toEqual([]);
@@ -262,8 +268,51 @@ describe('workflow code-v6', () => {
     expect(pre?.defaultModel.model).toBe('sonnet');
     for (const role of [planner, pre]) expect(role?.permissions.mayCommit).toBe(false);
     const reviewer = BUILTIN_ROLES.find((r) => r.key === 'reviewer');
-    expect(reviewer?.version).toBe(6);
+    expect(reviewer?.version).toBe(7);
     expect(reviewer?.coreRules.join(' ')).toMatch(/never build the project and never run its tests/i);
     expect(reviewer?.instructions).not.toMatch(/rsync|cp -a/);
+  });
+});
+
+describe('code v6 rolled out like v3 to v5 (no workflow of its own)', () => {
+  it('is the newest built-in version of `code`, flagged lean team, and no built-in has the legacy key', () => {
+    const codes = BUILTIN_WORKFLOWS.filter((w) => w.key === 'code').map((w) => w.version);
+    expect(Math.max(...codes)).toBe(6);
+    expect(getBuiltinWorkflow('code')).toBe(codeWorkflowV6);
+    expect(codeWorkflowV6).toMatchObject({ key: 'code', version: 6, leanTeam: true });
+    expect(BUILTIN_WORKFLOWS.some((w) => w.key === LEGACY_CODE_V6_KEY)).toBe(false);
+    // the classic versions are not lean team
+    for (const w of BUILTIN_WORKFLOWS.filter((x) => x.key === 'code' && x.version < 6))
+      expect(isLeanTeamWorkflow(w)).toBe(false);
+  });
+  it('the capability is true for code v6 and for the stored definition of the legacy key, false otherwise', () => {
+    expect(isLeanTeamWorkflow(codeWorkflowV6)).toBe(true);
+    // a definition stored before the flag existed (key code-v6, no leanTeam)
+    expect(isLeanTeamWorkflow({ key: LEGACY_CODE_V6_KEY })).toBe(true);
+    expect(isLeanTeamWorkflow({ key: 'code' })).toBe(false);
+    expect(isLeanTeamWorkflow({ key: 'research', leanTeam: undefined })).toBe(false);
+  });
+  it('the legacy key is an alias of code only', () => {
+    expect(canonicalWorkflowKey(LEGACY_CODE_V6_KEY)).toBe('code');
+    expect(canonicalWorkflowKey('code')).toBe('code');
+    expect(canonicalWorkflowKey('research')).toBe('research');
+  });
+  it('the fold events parse', () => {
+    const id = '11111111-1111-4111-8111-111111111111';
+    for (const e of [
+      {
+        type: 'ProjectPrimaryWorkflowChanged',
+        payload: { projectId: id, from: 'code-v6', to: 'code', by: id },
+      },
+      {
+        type: 'CardWorkflowVersionChanged',
+        payload: { cardId: id, fromVersionId: id, toVersionId: id, reason: 'x' },
+      },
+      {
+        type: 'WorkflowVersionRetired',
+        payload: { workflowVersionId: id, key: 'code-v6', version: 1, reason: 'x' },
+      },
+    ])
+      expect(DomainEventSchema.safeParse(e).success).toBe(true);
   });
 });

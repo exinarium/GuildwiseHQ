@@ -66,7 +66,7 @@ const CASES: Record<string, SmokeCase> = {
       r.outcomeId === 'approve' &&
       typeof (r.data as { riskAnalysis?: unknown }).riskAnalysis === 'string',
   },
-  // code-v6: the planner hands its planning note over from a file, the pre-reviewer approves without a risk analysis.
+  // lean team: the planner hands its planning note over from a file, the pre-reviewer approves without a risk analysis.
   planner: {
     files: { 'note.md': 'smoke test of the planning note\n' },
     argv: ['plan', '--note-file', '{scratch}/note.md'],

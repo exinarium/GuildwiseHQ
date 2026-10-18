@@ -32,7 +32,7 @@ export const OutcomeDataKindSchema = z.enum([
   /** Architect report: `{reportPath, summary, location, commit?}` (protocol/ipc.ts `InvestigationDataSchema`). */
   'investigation',
   /**
-   * Build handoff with evidence (code-v6): like `diffStats` (the runner attaches the diff, head SHA and changed paths) but the
+   * Build handoff with evidence (lean team): like `diffStats` (the runner attaches the diff, head SHA and changed paths) but the
    * builder also passes `buildEvidence`, which the server requires (`cards/lean-v6.ts`).
    */
   'buildHandoff',
@@ -121,7 +121,7 @@ export const HumanConfigSchema = z.object({
 export type HumanConfig = z.infer<typeof HumanConfigSchema>;
 
 /**
- * Configuration of a `server` stage: a stage the server runs itself, with no agent assigned (Lean Team v3, code-v6).
+ * Configuration of a `server` stage: a stage the server runs itself, with no agent assigned (Lean Team v3, lean team).
  * `test_deploy` starts the project's test environment for the reviewed commit and moves the card on when it is healthy at
  * that commit; on a failure the DevOps request path runs and the card stays.
  */
@@ -137,7 +137,7 @@ export const StageSchema = z.object({
    * manual = moved by a user/BA command, never dispatched. subworkflow = run by the server: starts a child card
    * (`subworkflow` holds the details); never dispatched to an agent. human = completed by a person (`human` holds the
    * details), e.g. manual QA; never dispatched to an agent. server = run by the server (`server` holds the action),
-   * e.g. the test deploy of code-v6; never dispatched to an agent.
+   * e.g. the test deploy of lean team; never dispatched to an agent.
    */
   kind: z.enum(['agent', 'manual', 'terminal', 'subworkflow', 'human', 'server']),
   /** Required for kind 'server', absent otherwise. */
@@ -178,7 +178,7 @@ export const StageSchema = z.object({
    */
   environment: z.enum(['none', 'project']).default('none'),
   /**
-   * With `environment: 'project'`: the environment is prepared by the server-run stage before this one (code-v6 `test_deploy`),
+   * With `environment: 'project'`: the environment is prepared by the server-run stage before this one (lean team `test_deploy`),
    * so there are no escapes: an agent starts here only on a healthy environment at the reviewed commit, after the server
    * recorded that none applies, or when the project works without one (`test_without_environment`).
    */
@@ -210,7 +210,12 @@ export const WorkflowDefinitionSchema = z.object({
   customFields: z.array(CustomFieldSchema).default([]),
   cardTypes: z.array(z.string()),
   initialStage: z.string(),
-  /** Defaults a card of this workflow starts with (code-v6: every card is designed). */
+  /**
+   * The lean team flow (built-in `code` from version 6): planning, a design for every card, pre-review, owner approval,
+   * server-run test deploy, area E2E, a manual full suite, card groups. Server and web read this flag, never the key.
+   */
+  leanTeam: z.boolean().optional(),
+  /** Defaults a card of this workflow starts with (lean team: every card is designed). */
   defaults: z.object({ designNeeded: z.boolean().optional() }).optional(),
   stages: z.array(StageSchema).min(2),
   /** Project variants only: the base workflow (key and version) this definition was materialised from. */

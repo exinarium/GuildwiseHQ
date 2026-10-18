@@ -46,14 +46,14 @@ describe('the architect role', () => {
   });
   it('is a senior Opus role that reads the organization and writes documentation only', () => {
     expect(architect).toMatchObject({
-      version: 4,
+      version: 5,
       builtIn: true,
       department: 'delivery',
       seniorityLevels: ['senior'],
       defaultModel: { runtime: 'claude-code', model: 'opus', effort: 'high' },
       claimableStages: [
         { workflowKey: '*', stageId: 'investigate*' },
-        { workflowKey: 'code-v6', stageId: 'planning' },
+        { workflowKey: 'code', stageId: 'planning' },
       ],
     });
     expect(architect?.permissions).toMatchObject({
@@ -110,7 +110,7 @@ describe('the architect role', () => {
 
   it('the BA v10 instructions cover the intake flags and the investigation-only finalize; the builder reads the design', () => {
     const ba = getBuiltinRole('ba');
-    expect(ba?.version).toBe(15);
+    expect(ba?.version).toBe(16);
     for (const s of [
       'designNeeded',
       'investigationOnly',
@@ -122,7 +122,7 @@ describe('the architect role', () => {
     // agents never choose the completion action (#52): not even `none` for an investigation-only card
     expect(ba?.instructions).not.toMatch(/--action (pr|merge|push_branch|none)/);
     const builder = getBuiltinRole('builder');
-    expect(builder?.version).toBe(5);
+    expect(builder?.version).toBe(6);
     expect(builder?.instructions).toMatch(/design report/i);
   });
 });

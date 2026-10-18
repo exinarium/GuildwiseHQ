@@ -36,7 +36,7 @@ export function readAreasFile(worktree: string, projectPath?: string): E2eAreaMa
 }
 
 /**
- * The tester's "E2E areas for this card" section (code-v6): the card's changed paths mapped to the specs that belong to them.
+ * The tester's "E2E areas for this card" section (lean team): the card's changed paths mapped to the specs that belong to them.
  * The repository's `e2e/areas.json` wins over the project's setting, which wins over the default derived from the E2E
  * folders. Undefined when the brief carries no changed paths (a card of the older workflows).
  */

@@ -36,7 +36,7 @@ export async function unparkPass(ctx: Ctx): Promise<number> {
         [c.id, c.parked_request_id],
       );
       if (cur.rowCount === 0) return;
-      // code-v6: a reviewed card held in Finalize for a merge conflict. A resolved conflict goes to a merge review (the
+      // lean team: a reviewed card held in Finalize for a merge conflict. A resolved conflict goes to a merge review (the
       // earlier approvals stand unless the reviewer finds the resolution touched more than the merge); an unresolved one
       // goes back to Build as the older flow does.
       if (c.park_problem === 'conflict' && c.has_merge_review && c.stage === 'finalize') {

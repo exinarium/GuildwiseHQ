@@ -1,4 +1,4 @@
-import { type EventOf, normalizeProjectPath, scrubRemoteUrl } from '@aom/shared';
+import { type EventOf, LEGACY_CODE_V6_KEY, normalizeProjectPath, scrubRemoteUrl } from '@aom/shared';
 import { exec } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
 import type { Projector } from '../eventstore/types.ts';
@@ -199,8 +199,8 @@ export const projectProjectors: Record<string, Projector> = {
         p.vaultDir ?? null,
       ],
     );
-    // code-v6: the full E2E suite is a manual trigger, not run after every merge.
-    if (p.workflowKey === 'code-v6')
+    // Legacy alias (workflows/legacy.ts): a project created on the old `lean team` key had the automatic full suite off.
+    if (p.workflowKey === LEGACY_CODE_V6_KEY)
       await exec(tx, 'UPDATE projects SET full_suite_after_finalize=false WHERE id=$1', [p.projectId]);
     if (p.createdByUserId) {
       // Organizations: the creator is an Owner or Admin; every active Owner and Admin gets an organization grant.

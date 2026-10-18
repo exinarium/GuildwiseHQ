@@ -6,6 +6,7 @@ import {
   expandMapping,
   fieldCatalogue,
   getStage,
+  LEGACY_CODE_V6_KEY,
   MAX_SUBWORKFLOW_DEPTH,
   type Outcome,
   outcomeApplies,
@@ -102,8 +103,9 @@ export async function sweepSubworkflows(ctx: Ctx): Promise<number> {
   const any = await one(
     ctx.pool,
     `SELECT 1 FROM workflow_stages s JOIN workflow_versions v ON v.id = s.workflow_version_id
-      WHERE s.kind = 'subworkflow' OR (s.kind = 'human' AND NOT (v.org_id IS NULL AND v.key IN ('code','code-v6') AND s.stage_id = 'manual_qa'))
+      WHERE s.kind = 'subworkflow' OR (s.kind = 'human' AND NOT (v.org_id IS NULL AND v.key = ANY($1::text[]) AND s.stage_id = 'manual_qa'))
       LIMIT 1`,
+    [['code', LEGACY_CODE_V6_KEY]],
   );
   let done = 0;
   let at = cursor;

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { BUILTIN_ROLES, BUILTIN_WORKFLOWS, streamId } from '@aom/shared';
+import { BUILTIN_ROLES, BUILTIN_WORKFLOWS, streamId, type WorkflowDefinition } from '@aom/shared';
 import type { Ctx } from '../context.ts';
 import { one } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
@@ -11,11 +11,15 @@ const SCOPE = { orgId: null, projectId: null, audience: 'system' } as const;
  * Registers every built-in workflow and role version that is missing (org_id NULL). Idempotent and safe to run
  * from several processes: the check and the append happen under the global append lock.
  */
-export async function registerBuiltins(ctx: Ctx): Promise<{ workflows: number; roles: number }> {
+export async function registerBuiltins(
+  ctx: Ctx,
+  /** Tests only: register just the workflows this accepts (a release that does not have the newest version yet). */
+  only: (def: WorkflowDefinition) => boolean = () => true,
+): Promise<{ workflows: number; roles: number }> {
   let workflows = 0;
   let roles = 0;
   await withAppendTx(ctx.pool, async (tx) => {
-    for (const def of BUILTIN_WORKFLOWS) {
+    for (const def of BUILTIN_WORKFLOWS.filter(only)) {
       const exists = await one(
         tx,
         'SELECT 1 FROM workflow_versions WHERE org_id IS NULL AND key=$1 AND version=$2',

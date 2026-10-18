@@ -8,6 +8,7 @@ import {
   type FinalizeResult,
   FinalizeResultSchema,
   getStage,
+  isLeanTeamWorkflow,
   isSafeGitRef,
   type StoredCompletionAction,
   streamId,
@@ -50,7 +51,7 @@ export async function mergeGate(
   card: Row,
   action: StoredCompletionAction,
 ): Promise<MergeGate> {
-  // code-v6: the owner approved (or the policy waived it) at the approval step after the review, bound to the reviewed
+  // lean team: the owner approved (or the policy waived it) at the approval step after the review, bound to the reviewed
   // commit; the merge does not ask again (the lapse check below guards the commit).
   if (await hasOwnerApprovalStep(db, card)) return 'none';
   if (isHighRiskMerge(card, action)) return 'approval'; // the project's waiver does not apply to a high risk
@@ -61,7 +62,7 @@ export async function mergeGate(
   return p?.waived ? 'waived' : 'approval';
 }
 
-/** Does the card's workflow have the owner approval step after the review (code-v6)? */
+/** Does the card's workflow have the owner approval step after the review (lean team)? */
 export async function hasOwnerApprovalStep(db: Queryable, card: Row): Promise<boolean> {
   return !!(await one(
     db,
@@ -157,7 +158,7 @@ export async function queueExecute(tx: Tx, card: Row, action: CompletionAction):
     prBody: card.title,
     ...(repo.forge_kind ? { forge: repo.forge_kind } : {}),
     commitAs: await loadCommitAs(tx, project.id),
-    // code-v6: the runner lands only the commit that was reviewed (and approved).
+    // lean team: the runner lands only the commit that was reviewed (and approved).
     ...(card.head_sha && card.build_evidence ? { expectedSha: card.head_sha as string } : {}),
   };
   await enqueueRunnerCommand(tx, card.home_workstation_id, 'finalize.execute', payload as never);
@@ -475,11 +476,9 @@ export async function applyFinalizeResult(
       const suiteOn = (
         await one(tx, 'SELECT full_suite_after_finalize AS on FROM projects WHERE id=$1', [card.project_id])
       )?.on;
-      // code-v6: the full suite is a manual trigger only; the flag is ignored for a card on that workflow.
-      const cardWorkflow = (
-        await one(tx, 'SELECT key FROM workflow_versions WHERE id=$1', [card.workflow_version_id])
-      )?.key;
-      if (suiteOn !== false && cardWorkflow !== 'code-v6') {
+      // Lean team: the full suite is a manual trigger only; the flag is ignored for a card on that workflow.
+      const cardWorkflow = await loadWorkflowById(tx, card.workflow_version_id);
+      if (suiteOn !== false && !(cardWorkflow && isLeanTeamWorkflow(cardWorkflow.definition))) {
         const branch =
           action === 'merge' ? (card.base_branch ?? 'main') : (result.pushedBranch ?? card.branch_name);
         const suite = await spawnCardEvent(tx, {
@@ -517,7 +516,7 @@ export async function applyFinalizeResult(
           deleteBranch: action === 'merge' && !!result.mergeCommit,
         });
     } else if (ok && result?.headMoved) {
-      // code-v6: the branch is not at the commit that was reviewed: nothing was landed.
+      // lean team: the branch is not at the commit that was reviewed: nothing was landed.
       const actualSha = result.headSha ?? (card.head_sha as string);
       if (card.owner_approval_required === true)
         events.push(
@@ -559,7 +558,7 @@ export async function applyFinalizeResult(
         card.base_branch ?? '',
         result.conflictedFiles ?? [],
       );
-      // code-v6: a card that was reviewed and approved is not sent back to Build for a merge conflict. DevOps resolves it in
+      // lean team: a card that was reviewed and approved is not sent back to Build for a merge conflict. DevOps resolves it in
       // a scratch worktree while the card waits in Finalize; the resolution then gets a merge review, which keeps the earlier
       // approvals when it only merged (dispatcher/bottleneck.ts `unparkPass`).
       const held =

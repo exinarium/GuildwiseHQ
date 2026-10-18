@@ -284,7 +284,7 @@ export async function applyShiftReport(
     scope,
   });
 
-  // code-v6: a review verdict is for the commit the build evidence is bound to; a verdict for another commit is refused.
+  // lean team: a review verdict is for the commit the build evidence is bound to; a verdict for another commit is refused.
   if (outcome.kind === 'success' && REVIEW_STAGES.has(card.stage) && card.build_evidence) {
     const problem = reviewShaProblem(card, shift);
     if (problem) return { accepted: false, error: problem };
@@ -309,7 +309,7 @@ export async function applyShiftReport(
       const riskTier =
         card.risk_tier_overridden && card.risk_tier ? card.risk_tier : (msg.riskTier ?? 'small');
       handoffData = { diffStats, riskTier };
-      // code-v6: the handoff carries build and unit test evidence bound to the commit the runner measured; the server
+      // lean team: the handoff carries build and unit test evidence bound to the commit the runner measured; the server
       // computes the high-risk flag from the paths of the diff (an agent cannot lower it) and keeps the diff for the owner.
       let lean: Extract<ReturnType<typeof leanHandoff>, { ok: true }> | undefined;
       if (stage.requireBuildEvidence) {
@@ -356,14 +356,14 @@ export async function applyShiftReport(
             'the builder changed unit tests outside the card scope (flagged on the diff): request changes with `--reason out_of_scope_test_change`; this cannot be approved',
         };
       const tier = (card.risk_tier ?? 'small') as 'small' | 'large';
-      // code-v6: a high-risk change (paths computed by the server) needs a second Opus approval.
+      // lean team: a high-risk change (paths computed by the server) needs a second Opus approval.
       const required = Math.max(stage.approvals?.[tier] ?? 1, card.high_risk === true ? 2 : 1);
       const soFar = Number(card.review_approvals) + 1;
       // The last approval: a card on an older `code` version moves to the one with the integration test guard, and a card
       // that never had `integrationTests` takes the project's setting now (docs/design/run-and-integration-tests.md D8).
       const plan = soFar >= required ? await reviewApprovedPlan(tx, card, wf, outcome.id) : null;
       let toStage = soFar >= required ? (plan?.toStage ?? resolved.toStage) : card.stage;
-      // code-v6: the owner approval decision of the last approval (policy, size, high risk), recorded with its reason.
+      // lean team: the owner approval decision of the last approval (policy, size, high risk), recorded with its reason.
       let ownerApproval: { required: boolean; reason: OwnerApprovalReason } | undefined;
       if (soFar >= required && getStage(wf.definition, 'owner_approval')) {
         const project = (await one(tx, 'SELECT * FROM projects WHERE id=$1', [card.project_id])) as Row;
@@ -445,7 +445,7 @@ export async function applyShiftReport(
       // otherwise the findings go back to the builder, who keeps affinity to the card (and resumes its session).
       const usage = await cardUsage(tx, cardId);
       const budget = await stopLossBudget(tx, card);
-      // The pre-review (code-v6) is not an Opus review round: only the build passes cap its loop.
+      // The pre-review (lean team) is not an Opus review round: only the build passes cap its loop.
       const limit = limitReached(
         usage,
         budget,
@@ -765,7 +765,7 @@ export function reviewShaProblem(card: Row, shift: Row): string | null {
   return null;
 }
 
-/** A code-v6 build handoff: the evidence the builder passed, bound to the commit the runner measured, and the high-risk flag. */
+/** A lean team build handoff: the evidence the builder passed, bound to the commit the runner measured, and the high-risk flag. */
 function leanHandoff(
   ctx: Ctx,
   agentId: string,
@@ -927,7 +927,7 @@ export async function applyShiftStarted(ctx: Ctx, tx: Tx, ws: WsRef, msg: Runner
 }
 
 /**
- * code-v6: the commit a card shift started at against the commit the server knows. A clean rebase, a documentation commit
+ * lean team: the commit a card shift started at against the commit the server knows. A clean rebase, a documentation commit
  * and a builder's own commits move the head and are recorded (the evidence and the approvals follow a rebase and a
  * documentation commit). A review shift that finds the branch at another commit than the build evidence is not for the
  * commit that will merge: the card goes back to Build for fresh evidence and the shift is released (the runner stops it).

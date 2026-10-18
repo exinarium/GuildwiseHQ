@@ -929,7 +929,7 @@ export class ShiftSupervisor {
       mkdirSync(attachDir, { recursive: true });
     }
     if (s.syncMain && msg.kind === 'card') texts.prompt += `\n${mainSyncNote(s.syncMain)}\n`;
-    // code-v6: the tester runs the E2E specs of the areas the card touches, not the whole suite.
+    // lean team: the tester runs the E2E specs of the areas the card touches, not the whole suite.
     if (msg.kind === 'card' && msg.brief.e2e) {
       const areas = await e2eAreasSection(msg.brief, s.worktree?.path ?? null).catch(() => undefined);
       if (areas) texts.prompt += `\n${areas.text}\n`;
@@ -2085,7 +2085,7 @@ export class ShiftSupervisor {
                 : '',
           });
           attach = { diffStats: stats, riskTier: riskTier(stats, msg.brief.card.cardType) };
-          // code-v6: the commit the evidence is bound to, the changed paths (the server computes the high-risk flag from
+          // lean team: the commit the evidence is bound to, the changed paths (the server computes the high-risk flag from
           // them) and the diff for the owner approval. Measured after the autocommit above, by the runner, never by the agent.
           if (outcome.data === 'buildHandoff') {
             const cd = await computeCardDiff(s.worktree.path, s.worktree.baseBranch);

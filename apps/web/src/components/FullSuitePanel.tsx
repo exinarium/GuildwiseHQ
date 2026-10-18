@@ -49,7 +49,7 @@ export function FullSuitePanel({
         </p>
       )}
       <ErrorBox error={set.error} />
-      {/* The lean team workflow (code-v6) turns the automatic run off: the full suite is a manual regression run. */}
+      {/* The lean team workflow (lean team) turns the automatic run off: the full suite is a manual regression run. */}
       <div className="mt-4 border-t border-line pt-3">
         <p className="mb-2 text-sm text-muted">
           Run the whole suite now, for example after several cards are merged. It takes 10 to 20 minutes and

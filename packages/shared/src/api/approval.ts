@@ -6,7 +6,7 @@ import { IsoTime } from './common.ts';
  * moved on, `sent_back` while it is back with the earlier step.
  */
 /**
- * What the owner approval step of code-v6 shows besides the buttons: the commit the approval is for, why it is needed, the
+ * What the owner approval step of lean team shows besides the buttons: the commit the approval is for, why it is needed, the
  * stored diff (the view loads it from `GET /api/cards/:id/diff`), the builder's evidence and the review verdicts.
  */
 export const ApprovalReviewInfoSchema = z.object({
@@ -78,7 +78,7 @@ export const CardApprovalSchema = z.object({
   /** The viewer may approve or send back (the approver, the organization's Owner and Admins, the project owner). */
   canAct: z.boolean(),
   deskItemId: z.uuid().nullable(),
-  /** code-v6: the owner approval's review information (absent for an approval step of the older workflows). */
+  /** lean team: the owner approval's review information (absent for an approval step of the older workflows). */
   review: ApprovalReviewInfoSchema.optional(),
 });
 export type CardApproval = z.infer<typeof CardApprovalSchema>;
@@ -87,7 +87,7 @@ export type CardApproval = z.infer<typeof CardApprovalSchema>;
 export const ApprovalApproveRequestSchema = z.object({
   note: z.string().trim().max(5000).optional(),
   /**
-   * code-v6: the commit whose diff the approver was shown. When it is not the card's head commit the approval is refused
+   * lean team: the commit whose diff the approver was shown. When it is not the card's head commit the approval is refused
    * (409 `approval_stale`) and nothing is approved. Absent: only the commit the approval was asked for is checked.
    */
   sha: z.string().trim().min(4).max(64).optional(),

@@ -8,6 +8,7 @@ import {
   codeWorkflowV3,
   codeWorkflowV4,
   codeWorkflowV5,
+  codeWorkflowV6,
   DomainEventSchema,
   feedWorkflowV1,
   getBuiltinWorkflow,
@@ -47,24 +48,27 @@ describe('built-in workflows', () => {
     },
   );
 
-  it('exposes the built-in definitions (code v1 to v5, the others v1)', () => {
+  it('exposes the built-in definitions (code v1 to v6, the others v1)', () => {
     expect(BUILTIN_WORKFLOWS.map((w) => `${w.key}@${w.version}`).sort()).toEqual([
       'code-bugfix@1',
-      'code-v6@1',
       'code@1',
       'code@2',
       'code@3',
       'code@4',
       'code@5',
+      'code@6',
       'feed@1',
       'research@1',
     ]);
-    expect(getBuiltinWorkflow('code')).toBe(codeWorkflowV5);
+    expect(getBuiltinWorkflow('code')).toBe(codeWorkflowV6);
+    expect(getBuiltinWorkflow('code', 5)).toBe(codeWorkflowV5);
+    // the legacy key resolves as code (workflows/legacy.ts)
+    expect(getBuiltinWorkflow('code-v6')).toBe(codeWorkflowV6);
     expect(getBuiltinWorkflow('code', 4)).toBe(codeWorkflowV4);
     expect(getBuiltinWorkflow('code', 3)).toBe(codeWorkflowV3);
     expect(getBuiltinWorkflow('code', 2)).toBe(codeWorkflowV2);
     expect(getBuiltinWorkflow('code', 1)).toBe(codeWorkflowV1);
-    expect(getBuiltinWorkflow('code', 6)).toBeUndefined();
+    expect(getBuiltinWorkflow('code', 7)).toBeUndefined();
     expect(getBuiltinWorkflow('nope')).toBeUndefined();
   });
 

@@ -103,7 +103,7 @@ describe('Investigate & design inserted after test in a variant of code v2', () 
     expect(arch).toBeTruthy();
     expect(arch.definition.claimableStages).toEqual([
       { workflowKey: '*', stageId: 'investigate*' },
-      { workflowKey: 'code-v6', stageId: 'planning' },
+      { workflowKey: 'code', stageId: 'planning' },
     ]);
   });
 

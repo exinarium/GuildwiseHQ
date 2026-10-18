@@ -15,7 +15,6 @@ import {
   type PublicationDto,
   PublicationsResponseSchema,
   type SetArchitectSettingsRequest,
-  type UpgradeWorkflowResponse,
 } from '@aom/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRef } from 'react';
@@ -192,7 +191,7 @@ export function useSetFullSuite(id: string) {
   });
 }
 
-/** code-v6: when the owner approves a card after the review. */
+/** lean team: when the owner approves a card after the review. */
 export function useSetOwnerApproval(id: string) {
   const qc = useQueryClient();
   return useMutation({
@@ -205,25 +204,12 @@ export function useSetOwnerApproval(id: string) {
   });
 }
 
-/** code-v6: the manual full E2E suite run on the working branch (the automatic run after every merge is off). */
+/** lean team: the manual full E2E suite run on the working branch (the automatic run after every merge is off). */
 export function useRunFullSuite(id: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: () => post<{ cardId: string; ref: string }>(`/projects/${id}/full-suite`, {}),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['board'] }),
-  });
-}
-
-/** Opt-in upgrade of an existing project to code-v6: new cards run on it, cards in flight keep their version. */
-export function useUpgradeWorkflow(id: string) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: () => post<UpgradeWorkflowResponse>(`/projects/${id}/upgrade-workflow`, {}),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['project', id] });
-      qc.invalidateQueries({ queryKey: ['projects'] });
-      qc.invalidateQueries({ queryKey: ['project-workflows', id] });
-    },
   });
 }
 

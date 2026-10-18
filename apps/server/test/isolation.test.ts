@@ -173,7 +173,6 @@ describe('two-user isolation', () => {
     expect(wfs.workflows.map((x: any) => x.definition.key).sort()).toEqual([
       'code',
       'code-bugfix',
-      'code-v6',
       'feed',
       'research',
     ]);
