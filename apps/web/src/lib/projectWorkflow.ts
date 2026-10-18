@@ -48,9 +48,12 @@ export function useFollowupAvailability(projectId: string | undefined): {
  * May the user convert this project? Owner and Admins of the organization that OWNS the project (a guest on a shared
  * project belongs to another organization, even when they own that one); the server enforces it regardless.
  */
-export function useCanConvert(project: { orgId: string } | null | undefined): boolean {
+export function useCanManageProject(project: { orgId: string } | null | undefined): boolean {
   const me = useMe();
   if (!project) return false;
   const role = me.data?.orgs?.find((o) => o.id === project.orgId)?.role;
   return role === 'owner' || role === 'admin';
 }
+
+/** Converting a project is for the same people as managing it. */
+export const useCanConvert = useCanManageProject;

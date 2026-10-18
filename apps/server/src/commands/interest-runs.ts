@@ -20,6 +20,7 @@ import type { Ctx } from '../context.ts';
 import { isBudgetPaused } from '../costs/index.ts';
 import { one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
+import { isProjectPaused } from '../dispatcher/project-hold.ts';
 import { badRequest, conflict, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { reportingOf } from '../reporter/settings.ts';
@@ -161,6 +162,11 @@ export async function runInterest(
         'budget_paused',
         "this interest's monthly budget is used up: raise it or override it for this month first",
       );
+    if (await isProjectPaused(tx, i.project_id))
+      throw conflict(
+        'project_paused',
+        "this interest's project is paused: an Owner or Admin must resume it first",
+      );
     if (req.kind === 'scan') {
       const open = await openRun(tx, interestId, 'scan');
       if (open)
@@ -254,6 +260,7 @@ export async function fireDueInterests(ctx: Ctx): Promise<Array<{ interestId: st
         if (org && !isOrgOperational(org.status)) return skip('org_suspended');
         if (org && !effectiveFeatures(org.plan, org.features).interests) return skip('feature_disabled');
         if (await isBudgetPaused(tx, i.project_id, now)) return skip('budget_paused');
+        if (await isProjectPaused(tx, i.project_id)) return skip('project_paused');
         if (await openRun(tx, i.id, 'scan')) return skip('previous_run_active');
         const run = await interestRunEvents(tx, i, 'scan', 'cron', now, { advance: true });
         await ctx.store.append([...run.events, ...(await resolveFailureNotice(tx, i))], { tx });

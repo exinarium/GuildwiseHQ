@@ -13,6 +13,7 @@ import type { AuthSession } from '../auth/sessions.ts';
 import { agentActor, orgScope } from '../commands/common.ts';
 import type { Ctx } from '../context.ts';
 import { one } from '../db/sql.ts';
+import { subjectProjectPaused } from '../dispatcher/project-hold.ts';
 import { HttpError } from '../errors.ts';
 import { withActingAgent } from '../eventstore/acting.ts';
 import type { AppendInput } from '../eventstore/types.ts';
@@ -314,6 +315,13 @@ export async function runAction(
     env.evidence = rpc.evidence;
     const prepared = await def.prepare(env, params);
     if (prepared.refuse) return { status: 'refused', message: prepared.refuse };
+    // A project an Owner or Admin paused is benched: the CEO takes no action on its cards, desk items or the project itself
+    // (a recommendation the owner accepts is refused too: resume the project first).
+    if (await subjectProjectPaused(ctx.pool, prepared.subjectKind, prepared.subjectId))
+      return {
+        status: 'refused',
+        message: 'this project is paused by an Owner or Admin: take no action on it until it is resumed.',
+      };
     const eff: ActionDef = prepared.classOverride ? { ...def, cls: prepared.classOverride } : def;
 
     const evidence =

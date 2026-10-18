@@ -348,7 +348,7 @@ export const scheduleEvents = [
       scheduleId: Id,
       firedFor: IsoDate,
       nextFireAt: IsoDate.nullable(),
-      reason: z.enum(['org_suspended', 'feature_disabled', 'rate_limited']),
+      reason: z.enum(['org_suspended', 'feature_disabled', 'rate_limited', 'project_paused']),
     }),
   ),
   /** The manager ran a feed (or schedule) right now; same card path as `ScheduleFired`. */

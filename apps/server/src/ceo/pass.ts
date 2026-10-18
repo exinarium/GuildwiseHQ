@@ -14,6 +14,7 @@ import { orgScope, runnerActor, SYSTEM_ACTOR } from '../commands/common.ts';
 import type { Ctx } from '../context.ts';
 import { exec, one, type Row, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
+import { subjectProjectPaused } from '../dispatcher/project-hold.ts';
 import { buildFloorDigest } from '../reporter/digest.ts';
 import { reportingOf } from '../reporter/settings.ts';
 import { carrierProject } from '../reporter/tasks.ts';
@@ -314,7 +315,12 @@ export async function ceoPass(ctx: Ctx): Promise<number> {
       `SELECT * FROM ceo_wakes WHERE org_id=$1 AND status='pending' ORDER BY created_at, id`,
       [orgId],
     );
-    const pending = minimal ? all.filter((w) => w.reason === 'daily_review') : all;
+    // A wake about a project an Owner or Admin paused waits (it is not taken, so it does not start a shift or burn the
+    // hourly limit); it is dropped as old when it outlives MISSED_DROP_MS, like any wake nobody took.
+    const live: Row[] = [];
+    for (const w of all)
+      if (!(await subjectProjectPaused(ctx.pool, w.subject_kind, w.subject_id))) live.push(w);
+    const pending = minimal ? live.filter((w) => w.reason === 'daily_review') : live;
     if (pending.length === 0) continue;
     const window = ceo.settings.wakeWindowMinutes * 60_000;
     const due = pending.some(

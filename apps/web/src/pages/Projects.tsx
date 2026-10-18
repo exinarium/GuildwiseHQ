@@ -15,6 +15,7 @@ import {
 } from '../api/queries/projects.ts';
 import { DeleteProjectDialog } from '../components/DeleteProjectDialog.tsx';
 import { ProjectInvitations } from '../components/ProjectInvitations.tsx';
+import { PausedBadge } from '../components/ProjectPause.tsx';
 import { ProjectRankList } from '../components/ProjectRankList.tsx';
 import { projectTypeLabel } from '../components/shell/ProjectSwitcher.tsx';
 import { cx } from '../components/ui/cx.ts';
@@ -68,6 +69,7 @@ function ProjectCard({ p, activeOrgId }: { p: ProjectDto; activeOrgId: string | 
         </Link>
       </div>
       <p className="mt-3 flex flex-wrap items-center gap-1.5">
+        <PausedBadge project={p} />
         <Badge>{p.workflowKey}</Badge>
         {p.department && <Badge tone="violet">{p.department}</Badge>}
         {guest ? (

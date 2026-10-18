@@ -197,6 +197,11 @@ export const ProjectDtoSchema = z.object({
     .object({ until: IsoTime, workstationName: z.string(), label: z.string().nullable() })
     .nullable()
     .optional(),
+  /** Manual pause by an organization Owner or Admin: nothing new starts until one resumes it. Null/absent: running. */
+  paused: z
+    .object({ at: IsoTime, byUserId: z.uuid().nullable(), byName: z.string(), reason: z.string().nullable() })
+    .nullable()
+    .optional(),
   createdAt: IsoTime,
   /** The workflow the project was created with (`research` for research-first projects). */
   startedAs: z.string().nullable().optional(),
@@ -212,6 +217,10 @@ export const ProjectDtoSchema = z.object({
   myRole: z.enum(['owner', 'manager']),
 });
 export type ProjectDto = z.infer<typeof ProjectDtoSchema>;
+
+/** `POST /api/projects/:id/pause` (organization Owner and Admins only). */
+export const PauseProjectRequestSchema = z.object({ reason: z.string().trim().max(500).optional() });
+export type PauseProjectRequest = z.infer<typeof PauseProjectRequestSchema>;
 
 /** `PUT /api/projects/:id/stop-loss`: the budget by card size, or null for the defaults (small 2/2/10, medium 3/2/15, large 4/2/25). */
 export const SetStopLossRequestSchema = z.object({ settings: StopLossSettingsSchema.nullable() });

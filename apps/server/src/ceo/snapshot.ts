@@ -59,7 +59,7 @@ export async function buildSnapshot(ctx: Ctx, orgId: string, section?: string): 
   if (want('projects')) {
     const ps = await rows(
       ctx.pool,
-      `SELECT p.id, p.key, p.name, p.budget_micros,
+      `SELECT p.id, p.key, p.name, p.budget_micros, p.paused_at,
               (SELECT COALESCE(sum(cost_usd_micros),0) FROM shift_costs s WHERE s.project_id = p.id AND s.ended_at >= $2) AS month_micros,
               (SELECT count(*) FROM cards c WHERE c.project_id=p.id AND c.status='queued') AS queued,
               (SELECT count(*) FROM cards c WHERE c.project_id=p.id AND c.status='blocked') AS blocked,
@@ -73,7 +73,7 @@ export async function buildSnapshot(ctx: Ctx, orgId: string, section?: string): 
         ps
           .map(
             (p) =>
-              `${p.key} id=${p.id} queued=${p.queued} blocked=${p.blocked} active=${p.active} spend=${money(p.month_micros)}${p.budget_micros ? ` of ${money(p.budget_micros)} (${Math.round((Number(p.month_micros) / Number(p.budget_micros)) * 100)}%)` : ' (no budget)'} last_activity=${ago(p.last_activity, now)}`,
+              `${p.key} id=${p.id} queued=${p.queued} blocked=${p.blocked} active=${p.active} spend=${money(p.month_micros)}${p.budget_micros ? ` of ${money(p.budget_micros)} (${Math.round((Number(p.month_micros) / Number(p.budget_micros)) * 100)}%)` : ' (no budget)'} last_activity=${ago(p.last_activity, now)}${p.paused_at ? ' PAUSED by an Owner/Admin (benched on purpose: do not nag, do not act)' : ''}`,
           )
           .join('\n') || 'none'
       }`,
@@ -92,7 +92,7 @@ export async function buildSnapshot(ctx: Ctx, orgId: string, section?: string): 
                    WHEN c.status='blocked' AND c.blocked_since < $2::timestamptz - make_interval(hours => $3) THEN 'blocked'
                    WHEN c.status='queued' AND c.claim_id IS NULL AND c.queued_at < $2::timestamptz - interval '30 minutes' THEN 'unclaimed'
                    WHEN c.rework_round >= 2 THEN 'rework' END AS why
-         FROM cards c JOIN projects p ON p.id=c.project_id AND p.status='active' LEFT JOIN agents a ON a.id = c.claimed_by_agent_id
+         FROM cards c JOIN projects p ON p.id=c.project_id AND p.status='active' AND p.paused_at IS NULL LEFT JOIN agents a ON a.id = c.claimed_by_agent_id
         WHERE c.org_id=$1 AND c.status NOT IN ('done','cancelled','draft')
           AND (c.retry_after > $2 OR (c.status='blocked' AND c.blocked_since < $2::timestamptz - make_interval(hours => $3))
                OR (c.status='queued' AND c.claim_id IS NULL AND c.queued_at < $2::timestamptz - interval '30 minutes')

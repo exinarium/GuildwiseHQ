@@ -1,6 +1,7 @@
 import { ROUTING_EXEMPT_SUBKINDS } from '@aom/shared';
 import type { Ctx } from '../context.ts';
 import { exec, one, type Queryable } from '../db/sql.ts';
+import { isProjectPaused } from '../dispatcher/project-hold.ts';
 import type { StoredEvent } from '../eventstore/types.ts';
 import { ceoActive } from './state.ts';
 
@@ -156,6 +157,8 @@ export function registerCeoWakes(ctx: Ctx): () => void {
     if (!interesting) return;
     const ceo = await ceoOf(orgId);
     if (!ceo.active) return;
+    // A project an Owner or Admin paused is benched on purpose: nothing about it wakes the CEO (no nagging).
+    if (e.scope.projectId && (await isProjectPaused(ctx.pool, e.scope.projectId))) return;
     // What the CEO itself caused does not wake it.
     if (e.actor.kind === 'agent' && e.actor.id === ceo.agentId) return;
     if (e.causationId && (await one(ctx.pool, 'SELECT 1 FROM ceo_actions WHERE id=$1', [e.causationId])))

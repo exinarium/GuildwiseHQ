@@ -18,6 +18,8 @@ export function chatErrorText(reason: string): string {
       return 'This is a simulation organization: this agent is not on its simulated workstation, and real workstations do not answer here. Hire the agent again on the simulated workstation.';
     case 'busy':
       return 'The agent is still answering your previous message.';
+    case 'project_paused':
+      return 'This project is paused by an Owner or Admin: nothing new starts on it until it is resumed.';
     case 'unknown_thread':
       return 'This conversation no longer exists.';
     case 'cancelled':

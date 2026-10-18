@@ -44,6 +44,9 @@ const NEW_CARD_WORKFLOW_SQL = `(SELECT CASE WHEN EXISTS (SELECT 1 FROM project_w
 /** Display name of whoever last changed the large-merge setting. */
 const MERGE_CHANGED_BY_SQL = `(SELECT u.display_name FROM users u WHERE u.id = p.merge_large_changed_by) AS merge_large_changed_by_name`;
 
+/** Display name of whoever paused the project by hand. */
+const PAUSED_BY_SQL = `(SELECT u.display_name FROM users u WHERE u.id = p.paused_by) AS paused_by_name`;
+
 const HAS_VAULT_SQL = `EXISTS (SELECT 1 FROM vaults v WHERE v.project_id = p.id
   OR (v.org_id = p.org_id AND v.kind = 'org' AND v.project_id IS NULL)) AS has_vault`;
 
@@ -88,6 +91,14 @@ export function toProjectDto(p: Row, myRole: 'owner' | 'manager'): ProjectDto {
     mergeMainFirst: p.merge_main_first ?? true,
     investigationPath: p.investigation_path ?? 'docs/investigations',
     investigationLocation: p.investigation_location ?? 'repo',
+    paused: p.paused_at
+      ? {
+          at: iso(p.paused_at) as string,
+          byUserId: p.paused_by ?? null,
+          byName: p.paused_by_name ?? 'an administrator',
+          reason: p.pause_reason ?? null,
+        }
+      : null,
     createdAt: iso(p.created_at) as string,
     startedAs: p.started_as ?? p.workflow_key,
     convertedAt: iso(p.converted_at),
@@ -105,7 +116,7 @@ export async function listProjects(
   const r = (
     await rows(
       ctx.pool,
-      `SELECT p.*, pm.role AS my_role, o.name AS org_name, ${PROJECT_DEPARTMENT_SQL}, ${NEW_CARD_WORKFLOW_SQL}, ${MERGE_CHANGED_BY_SQL}, ${PUBLISHED_NOTES_SQL}, ${HAS_VAULT_SQL}
+      `SELECT p.*, pm.role AS my_role, o.name AS org_name, ${PROJECT_DEPARTMENT_SQL}, ${NEW_CARD_WORKFLOW_SQL}, ${MERGE_CHANGED_BY_SQL}, ${PAUSED_BY_SQL}, ${PUBLISHED_NOTES_SQL}, ${HAS_VAULT_SQL}
          FROM projects p JOIN project_members pm
          ON pm.project_id = p.id AND pm.user_id = $1 AND pm.status = 'active'
          LEFT JOIN organizations o ON o.id = p.org_id
@@ -170,7 +181,7 @@ export async function getProjectDetail(
   const p = await one(
     ctx.pool,
     `SELECT p.*, pm.role AS my_role, o.name AS org_name, o.status AS org_status, o.owner_user_id AS org_owner,
-            ${PROJECT_DEPARTMENT_SQL}, ${NEW_CARD_WORKFLOW_SQL}, ${MERGE_CHANGED_BY_SQL}, ${PUBLISHED_NOTES_SQL}, ${HAS_VAULT_SQL} FROM projects p JOIN project_members pm
+            ${PROJECT_DEPARTMENT_SQL}, ${NEW_CARD_WORKFLOW_SQL}, ${MERGE_CHANGED_BY_SQL}, ${PAUSED_BY_SQL}, ${PUBLISHED_NOTES_SQL}, ${HAS_VAULT_SQL} FROM projects p JOIN project_members pm
        ON pm.project_id = p.id AND pm.user_id = $1 AND pm.status = 'active'
        LEFT JOIN organizations o ON o.id = p.org_id WHERE p.id = $2`,
     [userId, projectId],

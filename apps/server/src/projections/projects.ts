@@ -340,6 +340,20 @@ export const projectProjectors: Record<string, Projector> = {
     const p = (e.event as EventOf<'ProjectConcurrencyCapSet'>).payload;
     await exec(tx, 'UPDATE projects SET max_concurrent_shifts=$2 WHERE id=$1', [p.projectId, p.cap]);
   },
+  ProjectPaused: async (tx, e) => {
+    const p = (e.event as EventOf<'ProjectPaused'>).payload;
+    await exec(
+      tx,
+      'UPDATE projects SET paused_at=$2, paused_by=$3, pause_reason=$4 WHERE id=$1 AND paused_at IS NULL',
+      [p.projectId, e.createdAt, p.by, p.reason?.trim() || null],
+    );
+  },
+  ProjectResumed: async (tx, e) => {
+    const p = (e.event as EventOf<'ProjectResumed'>).payload;
+    await exec(tx, 'UPDATE projects SET paused_at=NULL, paused_by=NULL, pause_reason=NULL WHERE id=$1', [
+      p.projectId,
+    ]);
+  },
   ProjectMcpServersSet: async (tx, e) => {
     const p = (e.event as EventOf<'ProjectMcpServersSet'>).payload;
     await exec(tx, 'UPDATE projects SET mcp_servers=$2::text[] WHERE id=$1', [p.projectId, p.servers]);

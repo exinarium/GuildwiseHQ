@@ -15,6 +15,7 @@ export const CHAT_ERROR = {
   simulationWorkstation: 'simulation_workstation',
   unknownThread: 'unknown_thread',
   busy: 'busy',
+  projectPaused: 'project_paused',
   cancelled: 'cancelled',
   runnerError: 'runner_error',
 } as const;
