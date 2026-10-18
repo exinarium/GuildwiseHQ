@@ -6,8 +6,10 @@ import '@fontsource-variable/geist/wght.css';
 import '@fontsource-variable/geist-mono/wght.css';
 import './index.css';
 import { ApiError } from './api/client.ts';
+import { UpdateToast } from './components/pwa/UpdateToast.tsx';
 import { ToastProvider } from './components/ui.tsx';
 import { installClientErrorBuffer, recordClientError } from './lib/client-errors.ts';
+import { registerServiceWorker } from './lib/pwa.ts';
 import { createRouter } from './router.tsx';
 import { initSocket } from './ws/socket.ts';
 
@@ -41,9 +43,11 @@ async function boot() {
       <QueryClientProvider client={queryClient}>
         <ToastProvider>
           <RouterProvider router={createRouter()} />
+          <UpdateToast />
         </ToastProvider>
       </QueryClientProvider>
     </StrictMode>,
   );
 }
 void boot();
+registerServiceWorker();

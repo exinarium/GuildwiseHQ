@@ -1,12 +1,13 @@
 import { ORG_ROLE_LABEL } from '@aom/shared';
 import * as RadixDialog from '@radix-ui/react-dialog';
 import * as Tooltip from '@radix-ui/react-tooltip';
-import { CircleHelp, Inbox, Menu, MessageSquare, Plus, Search, Wrench, X } from 'lucide-react';
+import { ChevronLeft, CircleHelp, Menu, MessageSquare, Search, Wrench, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { Link, Outlet, useLocation, useNavigate } from 'react-router';
+import { Outlet, useLocation, useNavigate } from 'react-router';
 import { useLogout, useMe } from '../../api/queries/auth.ts';
 import { useDesk } from '../../api/queries/desk.ts';
 import { BRAND } from '../../brand.ts';
+import { setAppBadge } from '../../lib/pwa.ts';
 import { useGlobalShortcuts } from '../../lib/shortcuts.ts';
 import { useIsDesktop, useIsTabletUp } from '../../lib/useMediaQuery.ts';
 import { getSocket, useSocketState } from '../../ws/socket.ts';
@@ -24,6 +25,7 @@ import { useTour } from '../tour/TourContext.tsx';
 import { cx } from '../ui/cx.ts';
 import { WhatsNewHost } from '../whatsnew/WhatsNew.tsx';
 import { Breadcrumbs, crumbsFor } from './Breadcrumbs.tsx';
+import { MobileTabBar } from './MobileTabBar.tsx';
 import { buildNav } from './nav-config.ts';
 import { OrgBanner } from './OrgBanner.tsx';
 import { OrgSwitcher } from './OrgSwitcher.tsx';
@@ -55,6 +57,22 @@ function LiveIndicator({ live, compact = false }: { live: string; compact?: bool
       <span className={compact ? 'sr-only' : undefined}>{open ? 'Live' : 'Reconnecting'}</span>
     </span>
   );
+}
+
+/** Where "back" goes on a phone: the parent crumb, or the list a detail page belongs to. Null on top-level pages. */
+export function backTargetFor(
+  pathname: string,
+  crumbs: Array<{ label: string; to?: string }>,
+): string | null {
+  const parent = crumbs.length > 1 ? crumbs.at(-2)?.to : undefined;
+  if (parent) return parent;
+  if (pathname.startsWith('/chat/')) return '/desk';
+  if (pathname.startsWith('/intake/')) return '/intake';
+  if (pathname.startsWith('/help/')) return '/help';
+  if (pathname === '/settings/org' || pathname === '/settings/vaults') return '/settings';
+  if (pathname.startsWith('/interests/')) return '/interests';
+  if (pathname.startsWith('/workstations/')) return '/workstations';
+  return null;
 }
 
 /** The signed-in application frame: dark sidebar (rail on tablets, drawer on phones), top bar, `main`. */
@@ -100,6 +118,10 @@ function Shell({ name, live }: { name: string; live: string }) {
     canManage,
     features: org?.features ?? {},
   });
+  const intakeOn = canManage && org?.features?.integrations !== false;
+  const intake = intakeOn
+    ? { to: '/intake', label: 'Intake' }
+    : { to: project ? `/cards/new?project=${project.key}` : '/cards/new', label: 'New' };
   const roleLabel = org ? ORG_ROLE_LABEL[org.role] : 'Member';
   const orgSlot = me.data ? <OrgSwitcher me={me.data} collapsed={false} /> : null;
   const orgSlotCollapsed = me.data ? <OrgSwitcher me={me.data} collapsed /> : null;
@@ -163,9 +185,16 @@ function Shell({ name, live }: { name: string; live: string }) {
       ),
   });
 
+  // The number on the home-screen icon follows the open desk items (where the browser supports it).
+  const deskOpen = counts.open;
+  useEffect(() => {
+    if (desk.data) setAppBadge(deskOpen);
+  }, [desk.data, deskOpen]);
+
   const navIds = new Set([...sections.flatMap((s) => s.items), ...footer].map((e) => e.id));
   const crumbs = crumbsFor(pathname, search, projects);
   const pageName = crumbs.at(-1)?.label ?? BRAND.name;
+  const backTo = backTargetFor(pathname, crumbs);
 
   return (
     <SetupChecklistProvider>
@@ -251,53 +280,29 @@ function Shell({ name, live }: { name: string; live: string }) {
                   </div>
                 </header>
               ) : (
-                <header className="sticky top-0 z-20 flex min-h-14 items-center gap-1 border-b border-line bg-canvas/90 px-2 pt-[env(safe-area-inset-top)] backdrop-blur">
-                  <button
-                    type="button"
-                    onClick={() => setDrawer(true)}
-                    aria-label="Open menu"
-                    aria-expanded={drawer}
-                    aria-haspopup="dialog"
-                    className="relative inline-flex size-11 shrink-0 items-center justify-center rounded-control text-fg hover:bg-sunken"
-                  >
-                    <Menu aria-hidden="true" className="size-5" />
-                    {counts.blocking > 0 && (
-                      <span
-                        aria-hidden="true"
-                        className="absolute top-2.5 right-2.5 size-2 rounded-full bg-danger-fill"
-                      />
-                    )}
-                  </button>
+                <header
+                  data-testid="mobile-topbar"
+                  className="sticky top-0 z-20 flex min-h-14 items-center gap-1 border-b border-line bg-canvas/90 pr-2 pl-[max(0.5rem,env(safe-area-inset-left))] pt-[env(safe-area-inset-top)] backdrop-blur"
+                >
+                  {backTo ? (
+                    <button
+                      type="button"
+                      onClick={() => navigate(backTo)}
+                      aria-label="Back"
+                      data-testid="mobile-back"
+                      className="inline-flex size-11 shrink-0 items-center justify-center rounded-control text-fg hover:bg-sunken"
+                    >
+                      <ChevronLeft aria-hidden="true" className="size-6" />
+                    </button>
+                  ) : (
+                    <span aria-hidden="true" className="w-2 shrink-0" />
+                  )}
                   <div className="min-w-0 flex-1 px-1">
-                    <p className="truncate text-base font-semibold text-fg">{pageName}</p>
+                    <p className="truncate text-base font-semibold text-fg" data-testid="mobile-title">
+                      {pageName}
+                    </p>
                     {project && <p className="truncate text-xs text-subtle">{project.name}</p>}
                   </div>
-                  <Link
-                    to={project ? `/cards/new?project=${project.key}` : '/cards/new'}
-                    aria-label="New card"
-                    className="inline-flex size-11 shrink-0 items-center justify-center rounded-control text-fg hover:bg-sunken"
-                  >
-                    <Plus aria-hidden="true" className="size-5" />
-                  </Link>
-                  <Link
-                    to="/desk"
-                    aria-label="Desk"
-                    className="relative inline-flex size-11 shrink-0 items-center justify-center rounded-control text-fg hover:bg-sunken"
-                  >
-                    <Inbox aria-hidden="true" className="size-5" />
-                    {counts.open > 0 && (
-                      <span
-                        data-testid="desk-badge"
-                        title={`${counts.blocking} blocking, ${counts.open} open`}
-                        className={cx(
-                          'tnum absolute top-1 right-0.5 inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1 text-xs font-semibold',
-                          counts.blocking > 0 ? 'bg-danger-solid text-white' : 'bg-accent text-accent-fg',
-                        )}
-                      >
-                        {counts.open}
-                      </span>
-                    )}
-                  </Link>
                   <PageHelpButton onClick={() => setPageHelp(true)} mobile />
                   <span className="pr-2 pl-1">
                     <LiveIndicator live={live} compact />
@@ -306,7 +311,7 @@ function Shell({ name, live }: { name: string; live: string }) {
               )}
               <main id="main" ref={main} tabIndex={-1} className="mx-auto w-full min-w-0 flex-1 outline-none">
                 {me.data && <OrgBanner me={me.data} project={project} />}
-                <div className="px-4 py-5 sm:px-6 sm:py-6 lg:px-8">
+                <div className="px-4 py-5 pb-[calc(1.25rem+var(--app-bottom-inset,0px))] sm:px-6 sm:py-6 sm:pb-[calc(1.5rem+var(--app-bottom-inset,0px))] lg:px-8">
                   <Outlet />
                 </div>
               </main>
@@ -321,7 +326,7 @@ function Shell({ name, live }: { name: string; live: string }) {
                   aria-label="Main menu"
                   aria-describedby={undefined}
                   onInteractOutside={tourOn ? (e) => e.preventDefault() : undefined}
-                  className="fixed inset-y-0 left-0 z-50 w-[min(86vw,20rem)] animate-drawer bg-side pt-[env(safe-area-inset-top)] pl-[env(safe-area-inset-left)] shadow-lg"
+                  className="fixed inset-0 z-50 animate-fade bg-side pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)] pl-[env(safe-area-inset-left)]"
                 >
                   <RadixDialog.Title className="sr-only">Main menu</RadixDialog.Title>
                   <SidebarBody
@@ -349,6 +354,19 @@ function Shell({ name, live }: { name: string; live: string }) {
                 </RadixDialog.Content>
               </RadixDialog.Portal>
             </RadixDialog.Root>
+          )}
+          {!isTabletUp && (
+            <MobileTabBar
+              counts={counts}
+              intake={intake}
+              chatsOpen={chat}
+              moreOpen={drawer}
+              onChats={() => {
+                setDrawer(false);
+                setChat(true);
+              }}
+              onMore={() => setDrawer(true)}
+            />
           )}
           <AgentFacesSync />
           <CommandPalette

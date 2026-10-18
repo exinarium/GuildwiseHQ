@@ -15,7 +15,8 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     (async () => {
       const keep = new Set([SHELL, ASSETS]);
-      for (const key of await caches.keys()) if (key.startsWith('guildwise-') && !keep.has(key)) await caches.delete(key);
+      for (const key of await caches.keys())
+        if (key.startsWith('guildwise-') && !keep.has(key)) await caches.delete(key);
       await self.clients.claim();
     })(),
   );
@@ -35,9 +36,7 @@ self.addEventListener('fetch', (event) => {
 
   if (req.mode === 'navigate') {
     // Network first; a failed navigation shows the offline page.
-    event.respondWith(
-      fetch(req).catch(async () => (await caches.match(OFFLINE_URL)) || Response.error()),
-    );
+    event.respondWith(fetch(req).catch(async () => (await caches.match(OFFLINE_URL)) || Response.error()));
     return;
   }
   // Hashed build assets never change under their name: cache first.
@@ -83,7 +82,9 @@ self.addEventListener('push', (event) => {
   const tasks = [self.registration.showNotification(title, options)];
   if (typeof data.badge === 'number' && self.navigator && 'setAppBadge' in self.navigator) {
     tasks.push(
-      (data.badge > 0 ? self.navigator.setAppBadge(data.badge) : self.navigator.clearAppBadge()).catch(() => undefined),
+      (data.badge > 0 ? self.navigator.setAppBadge(data.badge) : self.navigator.clearAppBadge()).catch(
+        () => undefined,
+      ),
     );
   }
   event.waitUntil(Promise.all(tasks));
