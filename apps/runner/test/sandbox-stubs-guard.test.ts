@@ -51,7 +51,7 @@ const stubs = (path: string) => {
   mkdirSync(join(path, '.vscode'));
 };
 
-describe('sandbox dotfile stubs (hotfix #77)', () => {
+describe('regression #77 (89f77b67): sandbox dotfile stubs, the post-shift guard ignores them', () => {
   it('a read-only role with empty untracked stubs passes the guard', async () => {
     for (const r of ['reviewer', 'scout']) {
       const { path, guard } = await setup(r);

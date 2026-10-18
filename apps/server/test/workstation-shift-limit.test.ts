@@ -44,7 +44,7 @@ const hangUp = async (r: FakeRunner) => {
   await until(async () => !w.t.app.ctx.services.runners.isOnline(w.workstationId), 3000, 'runner offline');
 };
 
-describe('the shift limit of a workstation', () => {
+describe('regression #76: the shift limit of a workstation', () => {
   it('is the runner value until the owner sets one', async () => {
     const { r, welcome } = await connect();
     expect(welcome.limits).toMatchObject({ maxConcurrentShifts: 4, shiftLimit: null });
@@ -140,7 +140,7 @@ describe('the shift limit of a workstation', () => {
   });
 });
 
-describe('the dispatcher and the shift limit', () => {
+describe('regression #76: the dispatcher and the shift limit', () => {
   const starts = (r: FakeRunner, from = 0) => r.received.slice(from).filter((f) => f.type === 'shift.start');
 
   it('offers no more card shifts than the limit, and offers more once it is raised or unlimited', async () => {

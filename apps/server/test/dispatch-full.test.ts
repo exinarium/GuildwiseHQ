@@ -105,4 +105,47 @@ describe('a full workstation is offered no DevOps and no BA task shift', () => {
     await dispatcher().run();
     await r.waitFor('shift.start', (f) => f.kind === 'ba_task', 5000, from);
   });
+
+  it('question pass: the question waits while the workstation is at its shift limit and starts when there is room', async () => {
+    await q(`UPDATE shifts SET status='ended', ended_at=now(), outcome='reported' WHERE status <> 'ended'`);
+    const sam = await w.hire('Sam', 'builder', 'senior');
+    const card = await w.card({ title: 'Question when full' });
+    const itemId = randomUUID();
+    await seed(w, [
+      {
+        streamId: streamId.desk(itemId),
+        event: {
+          type: 'QuestionRaised',
+          payload: {
+            deskItemId: itemId,
+            cardId: card.id,
+            projectId: w.projectId,
+            askedBy: { kind: 'system' },
+            question: 'Should the retry delay be 5 or 10 seconds?',
+            options: [],
+            blocking: true,
+            routedTo: 'agent',
+            routedAgentId: sam.id,
+            pinned: false,
+            affectedCardIds: [card.id],
+          },
+        },
+        actor: { kind: 'system', id: null },
+        scope: { orgId: w.owner.id, projectId: w.projectId, audience: 'project' },
+      },
+    ]);
+    await setLoad(1, 1);
+    const from = r.received.length;
+    await dispatcher().run();
+    await r.barrier();
+    expect(startsOf('question', from)).toHaveLength(0);
+    expect((await q(`SELECT status FROM desk_items WHERE id=$1`, [itemId]))[0]?.status).toBe('open');
+    expect(await q(`SELECT 1 FROM shifts WHERE kind='question' AND desk_item_id=$1`, [itemId])).toHaveLength(
+      0,
+    );
+    await setLoad(0, 1);
+    await dispatcher().run();
+    await r.waitFor('shift.start', (f) => f.kind === 'question', 5000, from);
+    expect(startsOf('question', from)).toHaveLength(1);
+  });
 });

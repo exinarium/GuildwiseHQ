@@ -343,7 +343,7 @@ describe('the Claude adapter at the usage limit (fake claude)', () => {
     }));
 });
 
-describe('supervisor: a shift that dies of the usage limit', () => {
+describe('regression #73: supervisor: a shift that dies of the usage limit', () => {
   let h: Harness | undefined;
   afterEach(async () => {
     await h?.stop();
@@ -389,7 +389,7 @@ describe('supervisor: a shift that dies of the usage limit', () => {
   });
 });
 
-describe('runner: reporting the limit and resuming', () => {
+describe('regression #73: runner: reporting the limit and resuming', () => {
   let server: FakeServer | undefined;
   let runner: Runner | undefined;
   afterEach(async () => {

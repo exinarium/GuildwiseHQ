@@ -83,6 +83,32 @@ describe('a card whose worktree cannot be made', () => {
     expect(after[0]?.repeat_count).toBe(2);
   });
 
+  it('disk_full: every rejection backs off (no retry storm) and three identical ones raise exactly one coalesced desk item', async () => {
+    await freshState();
+    await w.hire('Bea', 'builder', 'junior');
+    const card = await w.card({ title: 'Disk full' });
+    const FULL = 'disk_full: No space left on device (os error 28) while checking out card/x';
+    for (let n = 1; n <= 3; n++) {
+      await q('UPDATE cards SET retry_after=NULL WHERE id=$1', [card.id]);
+      await reject('Bea', 'worktree_failed', { detail: FULL });
+      const c = await cardRow(card.id);
+      expect(c.retry_failures).toBe(n);
+      expect(c.last_rejection).toMatchObject({ reason: 'worktree_failed' });
+      expect(new Date(c.retry_after).getTime(), `back-off after rejection ${n}`).toBeGreaterThan(
+        w.t.clock.now().getTime(),
+      );
+      // while it backs off the dispatcher does not offer the card again
+      const starts = r.of('shift.start').length;
+      await dispatch();
+      expect(r.of('shift.start').length).toBe(starts);
+      expect(await items()).toHaveLength(n < 3 ? 0 : 1);
+    }
+    const open = await items();
+    expect(open).toHaveLength(1);
+    expect(open[0]?.repeat_count).toBe(1);
+    expect(open[0]?.status).toBe('open');
+  });
+
   it('different reasons do not add up to one storm', async () => {
     await freshState();
     await w.hire('Bea', 'builder', 'junior');

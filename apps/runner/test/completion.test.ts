@@ -128,6 +128,35 @@ describe('completion: merge', () => {
     expect(sh(repo.origin, 'git', ['rev-parse', 'main'])).toBe(before);
   });
 
+  it('a failed merge in the scratch (integration) worktree leaves the card branch and its worktree at the pre-merge commit, no half-merge, no stray branch', async () => {
+    const repo = makeRepo();
+    const { path } = await cardWorktree(repo, 'README.md');
+    const other = join(tmp(), 'other');
+    sh(repo.root, 'git', ['clone', repo.origin, other]);
+    writeFileSync(join(other, 'README.md'), 'conflicting\n');
+    sh(other, 'git', ['add', '-A']);
+    sh(other, 'git', ['commit', '-m', 'conflicting']);
+    sh(other, 'git', ['push', 'origin', 'main']);
+    const cardTip = sh(path, 'git', ['rev-parse', 'HEAD']);
+    const cloneHead = sh(repo.clone, 'git', ['rev-parse', '--abbrev-ref', 'HEAD']);
+    const res = await run(repo, payload(repo, path, 'merge'));
+    expect(res).toMatchObject({ ok: false, conflict: true });
+    // the card branch and its worktree are exactly where they were, clean, on the card branch
+    expect(sh(repo.clone, 'git', ['rev-parse', BRANCH])).toBe(cardTip);
+    expect(sh(path, 'git', ['rev-parse', 'HEAD'])).toBe(cardTip);
+    expect(sh(path, 'git', ['branch', '--show-current'])).toBe(BRANCH);
+    expect(sh(path, 'git', ['status', '--porcelain'])).toBe('');
+    expect(readFileSync(join(path, 'README.md'), 'utf8')).toBe('thing\n');
+    // no merge in progress anywhere (card worktree, clone), no leftover scratch worktree or branch
+    for (const dir of [path, repo.clone]) {
+      const gitDir = sh(dir, 'git', ['rev-parse', '--absolute-git-dir']);
+      expect(existsSync(join(gitDir, 'MERGE_HEAD')), `MERGE_HEAD for ${dir}`).toBe(false);
+    }
+    expect(sh(repo.clone, 'git', ['rev-parse', '--abbrev-ref', 'HEAD'])).toBe(cloneHead);
+    expect(sh(repo.clone, 'git', ['branch', '--list'])).not.toMatch(/aom-integration|conflict\//);
+    expect(sh(repo.clone, 'git', ['worktree', 'list', '--porcelain'])).not.toMatch(/integration/);
+  });
+
   it('refuses a worktree with uncommitted changes', async () => {
     const { repo, path } = await cardWorktree();
     writeFileSync(join(path, 'dirty.txt'), 'x');

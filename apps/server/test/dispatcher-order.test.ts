@@ -157,6 +157,51 @@ describe('dispatcher ordering', () => {
     expect(await drain()).toEqual(['TOY-2']);
   });
 
+  it('S1a: a card with an unmerged dependency is offered for design only, never for build or review, until it merges', async () => {
+    await reset();
+    await q(`UPDATE projects SET design_step=true, investigation_location='repo' WHERE id=$1`, [w.projectId]);
+    const builder = await w.hire('Gate Bld', 'builder', 'senior', { capacity: 8 });
+    await w.hire('Gate Rev', 'reviewer', 'senior', { capacity: 8 });
+    await w.hire('Gate Arch', 'architect', 'senior', { capacity: 8 });
+    const base = await w.card({ title: 'base' }); // TOY-1
+    await q(`UPDATE cards SET status='blocked' WHERE id=$1`, [base.id]); // never dispatched, never landed
+    const dep = await w.card({ title: 'dependent', designNeeded: true, dependencies: [base.id] }); // TOY-2
+    const release = (stage: string, extra = '') =>
+      q(
+        `UPDATE cards SET stage=$2, status='queued', claim_id=NULL, claimed_by_agent_id=NULL, claim_shift_id=NULL,
+           claim_workstation_id=NULL, worktree_path='/tmp/wt', queued_at=now() ${extra} WHERE id=$1`,
+        [dep.id, stage],
+      );
+    const claimedStage = async () => {
+      const made = await w.t.app.ctx.services.dispatcher.runPass();
+      return made.map((m) => m.stage);
+    };
+    // first build and review: nothing is offered
+    await release('build');
+    expect(await claimedStage()).toEqual([]);
+    await release('review');
+    expect(await claimedStage()).toEqual([]);
+    // a card that already had its first build and returns to build or review (rework) waits as well
+    await release(
+      'build',
+      `, rework_round=1, original_builder_agent_id='${builder.id}', last_agent_id='${builder.id}'`,
+    );
+    expect(await claimedStage()).toEqual([]);
+    await release(
+      'review',
+      `, rework_round=1, original_builder_agent_id='${builder.id}', last_agent_id='${builder.id}'`,
+    );
+    expect(await claimedStage()).toEqual([]);
+    // design is the one stage that is offered while the dependency is unmerged
+    await release('investigate');
+    expect(await claimedStage()).toEqual(['investigate']);
+    // once the dependency has merged, build is offered
+    await q(`UPDATE cards SET merged_into_working_at=now() WHERE id=$1`, [base.id]);
+    await release('build');
+    expect(await claimedStage()).toEqual(['build']);
+    await q(`UPDATE projects SET design_step=false WHERE id=$1`, [w.projectId]);
+  });
+
   it('orders by project rank, then card priority, then FIFO', async () => {
     await reset();
     await w.hire('Prio', 'builder', 'junior', { capacity: 8 });

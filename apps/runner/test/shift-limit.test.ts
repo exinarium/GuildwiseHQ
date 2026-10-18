@@ -28,7 +28,7 @@ const sendLimit = async (shiftLimit: unknown, max: number) => {
   return h!.server.waitFor('command.result', (m) => m.commandId === commandId);
 };
 
-describe('shift limit of the runner', () => {
+describe('regression #76: shift limit of the runner', () => {
   it('announces that it can apply the owner setting', async () => {
     h = await startHarness();
     expect(h.server.of('hello')[0]?.capabilities).toContain('shift-limit:1');

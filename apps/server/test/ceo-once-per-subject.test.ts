@@ -179,6 +179,42 @@ describe('"CEO offline" does not flap', () => {
   });
 });
 
+describe('"CEO offline" does not flap on workstation reconnects (S1b, production: 33 notices)', () => {
+  it('a brief reconnect without a CEO shift keeps the flag; five connect/disconnect cycles raise no second notice', async () => {
+    await clean();
+    const noticeItems = () => q(`SELECT id, repeat_count FROM desk_items WHERE subkind='ceo_notice'`);
+    const flag = () => q(`SELECT 1 FROM ceo_flags WHERE flag='offline_notice'`);
+    const shiftCount = async () => (await q(`SELECT 1 FROM shifts WHERE kind='ceo'`)).length;
+    const shiftsBefore = await shiftCount();
+    await q(`UPDATE workstations SET connected=false WHERE id=$1`, [w.workstationId]);
+    await wakeNow(w, 'signal:loop', 'urgent');
+    w.t.clock.advance(31 * 60_000);
+    await dispatcher().run();
+    await dispatcher().run();
+    expect(await flag()).toHaveLength(1);
+    expect(await noticeItems()).toHaveLength(1);
+
+    for (let cycle = 0; cycle < 5; cycle++) {
+      // The workstation reconnects for a moment; the urgent wake is gone (handled elsewhere): no CEO shift runs.
+      await q(`UPDATE ceo_wakes SET status='dropped'`);
+      await keepOnline(w);
+      await dispatcher().run();
+      expect(await flag(), `flag after reconnect ${cycle}`).toHaveLength(1);
+      // It drops again with a new urgent wake waiting.
+      await q(`UPDATE workstations SET connected=false WHERE id=$1`, [w.workstationId]);
+      await wakeNow(w, 'signal:loop', 'urgent');
+      w.t.clock.advance(31 * 60_000);
+      await dispatcher().run();
+      await dispatcher().run();
+      expect(await flag(), `flag after disconnect ${cycle}`).toHaveLength(1);
+    }
+    const items = await noticeItems();
+    expect(items).toHaveLength(1);
+    expect(items[0]?.repeat_count).toBe(1);
+    expect(await shiftCount()).toBe(shiftsBefore);
+  });
+});
+
 describe('CEO models', () => {
   it('defaults: Sonnet for wake, review and chat, Opus for the handover', () => {
     expect(DEFAULT_CEO_MODELS.wake.model).toBe('sonnet');

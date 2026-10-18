@@ -49,7 +49,7 @@ const LIMITED = (until: string) => ({
   limitedLabel: '18:00 (Africa/Johannesburg)',
 });
 
-describe('a hit usage limit', () => {
+describe('regression #73: a hit usage limit', () => {
   it('puts the shift back without penalty, pauses the project and raises one notice and one e-mail', async () => {
     await freshState();
     await q(`TRUNCATE desk_items, card_blockers CASCADE`);
