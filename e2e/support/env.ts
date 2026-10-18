@@ -204,3 +204,10 @@ export const ARCHITECT = {
   name: 'E2E Architect',
   password: 'architect-password-12345',
 };
+
+/** Mobile spec: an organization Owner on a phone (bottom tab bar, the More menu). */
+export const MOBILER = {
+  email: 'mobiler@e2e.test',
+  name: 'E2E Mobiler',
+  password: 'mobiler-password-12345',
+};

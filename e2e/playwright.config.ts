@@ -58,6 +58,12 @@ export default defineConfig({
       dependencies: ['pairing'],
       use: mobileUse(),
     },
+    // The phone shell (bottom tab bar, More menu, PWA files): needs no other spec.
+    {
+      name: 'mobile-shell',
+      testMatch: 'mobile-nav.spec.ts',
+      use: mobileUse(),
+    },
     // The screenshot run for docs/guide (never part of `pnpm e2e`): AOM_E2E_GUIDE=1 playwright test --project=guide
     ...(process.env.AOM_E2E_GUIDE === '1'
       ? [

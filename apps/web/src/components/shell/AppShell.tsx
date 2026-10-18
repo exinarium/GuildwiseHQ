@@ -330,6 +330,7 @@ function Shell({ name, live }: { name: string; live: string }) {
                 >
                   <RadixDialog.Title className="sr-only">Main menu</RadixDialog.Title>
                   <SidebarBody
+                    flowing
                     sections={sections}
                     footer={footer}
                     counts={counts}

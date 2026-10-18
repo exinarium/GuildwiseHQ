@@ -71,8 +71,26 @@ export function NotificationSettings() {
 
   const save = (update: Parameters<typeof savePrefs.mutate>[0]) =>
     savePrefs.mutate({ ...update, ...(manyOrgs ? { allOrgs } : { allOrgs: true }) });
+  const serverOn = config.data?.enabled === true;
   const p: PushPreferences | undefined =
     prefs.data?.categories && prefs.data.quietHours ? prefs.data : undefined;
+
+  if (!serverOn)
+    return (
+      <Panel>
+        <h2 className="text-lg font-semibold text-fg">Notifications</h2>
+        <p className="mt-1 text-sm text-muted">
+          Get a push notification on your phone or computer when something needs you.
+        </p>
+        {config.data && (
+          <Callout tone="info" className="mt-4" data-testid="push-disabled">
+            Push notifications are not set up on this server yet. An administrator has to add the push keys
+            first.
+          </Callout>
+        )}
+        <ErrorBox error={config.error} />
+      </Panel>
+    );
 
   return (
     <Panel>
@@ -81,13 +99,6 @@ export function NotificationSettings() {
         Get a push notification on your phone or computer when something needs you, even when the app is
         closed.
       </p>
-
-      {config.data && !config.data.enabled && (
-        <Callout tone="info" className="mt-4" data-testid="push-disabled">
-          Push notifications are not set up on this server yet. An administrator has to add the push keys
-          first.
-        </Callout>
-      )}
 
       {config.data?.enabled && support === 'needs-install' && (
         <Callout
