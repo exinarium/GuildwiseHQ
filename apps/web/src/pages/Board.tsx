@@ -1,4 +1,13 @@
-import { ArrowRightLeft, Plus, Search, Settings, SquareKanban } from 'lucide-react';
+import {
+  ArrowRightLeft,
+  MoreHorizontal,
+  Plus,
+  Search,
+  Settings,
+  SlidersHorizontal,
+  SquareKanban,
+  X,
+} from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Navigate, useParams } from 'react-router';
 import { useMe } from '../api/queries/auth.ts';
@@ -19,6 +28,7 @@ import { RunList } from '../components/runs/RunPanel.tsx';
 import { projectTypeLabel } from '../components/shell/ProjectSwitcher.tsx';
 import { UsageLimitBanner } from '../components/UsageLimitBanner.tsx';
 import {
+  BottomSheet,
   Button,
   ButtonLink,
   EmptyState,
@@ -31,6 +41,7 @@ import {
 import { useIsMobile } from '../hooks/useIsMobile.ts';
 import { setLastProjectKey } from '../lib/lastProject.ts';
 import { money } from '../lib/money.ts';
+import { priorityLabel } from '../lib/priority.ts';
 import { useCanConvert, useProjectWorkflowTraits } from '../lib/projectWorkflow.ts';
 import { stageStyle } from '../lib/stages.ts';
 
@@ -61,20 +72,22 @@ function BoardSkeleton() {
 
 /** Phones: how many cards each stage holds, as a strip under the title (the desktop board shows it in its column heads). */
 function StageStrip({ columns }: { columns: { name: string; cards: unknown[] }[] }) {
+  const filled = columns.filter((c) => c.cards.length > 0);
+  if (filled.length === 0) return null;
   return (
     <ul
       aria-label="Cards per stage"
       data-testid="stage-strip"
-      className="scroll-fade-x -mx-4 -mt-2 mb-3 flex gap-2 overflow-x-auto px-4 md:hidden"
+      className="scroll-fade-x -mx-4 -mt-3 mb-2 flex gap-1.5 overflow-x-auto px-4 md:hidden"
     >
-      {columns.map((c) => (
+      {filled.map((c) => (
         <li
           key={c.name}
-          className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-line bg-surface px-2.5 py-1 text-xs text-muted"
+          className="inline-flex shrink-0 items-center gap-1 rounded-full bg-sunken px-2 py-0.5 text-xs text-muted"
         >
           <span
             aria-hidden="true"
-            className="size-2 rounded-full"
+            className="size-1.5 rounded-full"
             style={{ background: stageStyle(c.name).color }}
           />
           {c.name}
@@ -101,6 +114,8 @@ export function Board() {
   const [filter, setFilter] = useState(NO_FILTER);
   const me = useMe();
   const isMobile = useIsMobile();
+  const [actionsOpen, setActionsOpen] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [converting, setConverting] = useState(false);
   const detail = useProject(project?.workflowKey === 'research' ? project.id : undefined);
   const canConvert = useCanConvert(project);
@@ -152,6 +167,81 @@ export function Board() {
     : null;
   const setF = (patch: Partial<typeof filter>) => setFilter((f) => ({ ...f, ...patch }));
 
+  const projectActions = (
+    <>
+      {traits.usesRepos && <RunBranchDialog projectId={project.id} />}
+      {traits.hasTestStage && <RegressionDialog projectId={project.id} />}
+      {project.workflowKey === 'research' && canConvert && detail.data && (
+        <Button data-testid="convert-board-open" onClick={() => setConverting(true)}>
+          <ArrowRightLeft aria-hidden="true" className="size-4" />
+          Convert to project
+        </Button>
+      )}
+      <PauseProjectButton project={project} />
+      <ButtonLink to={`/p/${project.key}/archive`} variant="ghost">
+        Archive
+      </ButtonLink>
+      <ButtonLink
+        to={`/projects/${project.id}/settings`}
+        variant="ghost"
+        aria-label={`Settings for ${project.key}`}
+        title="Project settings"
+      >
+        <Settings aria-hidden="true" className="size-4" />
+        <span className="md:hidden">Project settings</span>
+      </ButtonLink>
+    </>
+  );
+  const chips = (
+    <>
+      <FilterChip pressed={filter.blocked} onClick={() => setF({ blocked: !filter.blocked })}>
+        Blocked
+      </FilterChip>
+      <FilterChip pressed={filter.rework} onClick={() => setF({ rework: !filter.rework })}>
+        Rework
+      </FilterChip>
+      <FilterChip pressed={filter.unassigned} onClick={() => setF({ unassigned: !filter.unassigned })}>
+        Unassigned
+      </FilterChip>
+      {myId && cards.some((c) => c.qa) && (
+        <FilterChip
+          pressed={filter.qaFor !== null}
+          onClick={() => setF({ qaFor: filter.qaFor === null ? myId : null })}
+        >
+          Waiting for my QA ({cards.filter((c) => c.qa?.assigneeUserId === myId).length})
+        </FilterChip>
+      )}
+      {myId && cards.some((c) => c.approval) && (
+        <FilterChip
+          pressed={filter.approvalFor !== null}
+          onClick={() => setF({ approvalFor: filter.approvalFor === null ? myId : null })}
+        >
+          Waiting for my approval ({cards.filter((c) => c.approval?.approverUserId === myId).length})
+        </FilterChip>
+      )}
+    </>
+  );
+  const priorityPicker = (
+    <PriorityPicker
+      allowAny
+      inline
+      label="Priority"
+      value={filter.priority}
+      onChange={(n) => setF({ priority: n })}
+    />
+  );
+  const activeFilters: { key: string; label: string; clear: Partial<typeof filter> }[] = [
+    ...(filter.blocked ? [{ key: 'blocked', label: 'Blocked', clear: { blocked: false } }] : []),
+    ...(filter.rework ? [{ key: 'rework', label: 'Rework', clear: { rework: false } }] : []),
+    ...(filter.unassigned ? [{ key: 'unassigned', label: 'Unassigned', clear: { unassigned: false } }] : []),
+    ...(filter.qaFor !== null ? [{ key: 'qa', label: 'My QA', clear: { qaFor: null } }] : []),
+    ...(filter.approvalFor !== null
+      ? [{ key: 'approval', label: 'My approval', clear: { approvalFor: null } }]
+      : []),
+    ...(filter.priority !== null
+      ? [{ key: 'priority', label: `Priority: ${priorityLabel(filter.priority)}`, clear: { priority: null } }]
+      : []),
+  ];
   return (
     <div className="pb-20 md:pb-0">
       <PageHeader
@@ -174,32 +264,25 @@ export function Board() {
           </span>
         }
         actions={
-          <>
-            <PhaseFilter phases={phases.data ?? []} value={phaseId} onChange={setPhaseId} />
-            {traits.usesRepos && <RunBranchDialog projectId={project.id} />}
-            {traits.hasTestStage && <RegressionDialog projectId={project.id} />}
-            {project.workflowKey === 'research' && canConvert && detail.data && (
-              <Button data-testid="convert-board-open" onClick={() => setConverting(true)}>
-                <ArrowRightLeft aria-hidden="true" className="size-4" />
-                Convert to project
-              </Button>
-            )}
-            <PauseProjectButton project={project} />
-            <ButtonLink to={`/p/${project.key}/archive`} variant="ghost">
-              Archive
-            </ButtonLink>
-            <ButtonLink
-              to={`/projects/${project.id}/settings`}
-              variant="ghost"
-              aria-label={`Settings for ${project.key}`}
-              title="Project settings"
+          isMobile ? (
+            <button
+              type="button"
+              aria-label="Project actions"
+              data-testid="project-actions-open"
+              onClick={() => setActionsOpen(true)}
+              className="inline-flex size-11 items-center justify-center rounded-control border border-control bg-surface text-muted"
             >
-              <Settings aria-hidden="true" className="size-4" />
-            </ButtonLink>
-            <ButtonLink to={`/cards/new?project=${project.key}`} variant="primary" className="max-md:hidden">
-              New card
-            </ButtonLink>
-          </>
+              <MoreHorizontal aria-hidden="true" className="size-5" />
+            </button>
+          ) : (
+            <>
+              <PhaseFilter phases={phases.data ?? []} value={phaseId} onChange={setPhaseId} />
+              {projectActions}
+              <ButtonLink to={`/cards/new?project=${project.key}`} variant="primary">
+                New card
+              </ButtonLink>
+            </>
+          )
         }
       />
       {board.data && <StageStrip columns={board.data.columns} />}
@@ -225,61 +308,111 @@ export function Board() {
           <RunList envs={runs.data} />
         </div>
       )}
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        <div className="relative w-full sm:w-72">
-          <Search
-            aria-hidden="true"
-            className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-subtle"
-          />
-          <input
-            type="search"
-            aria-label="Search cards"
-            placeholder="Search cards"
-            value={filter.text}
-            onChange={(e) => setF({ text: e.target.value })}
-            onKeyDown={(e) => e.key === 'Escape' && setF({ text: '' })}
-            className="h-9 w-full rounded-control border border-control bg-surface pr-3 pl-9 text-base text-fg placeholder:text-subtle focus-visible:border-brand focus-visible:ring-2 focus-visible:ring-ring/25 focus-visible:outline-none [@media(pointer:coarse)]:h-11"
-          />
-        </div>
-        <div
-          className="flex gap-2 overflow-x-auto max-md:-mx-4 max-md:w-[calc(100%+2rem)] max-md:px-4"
-          role="group"
-          aria-label="Filters"
-        >
-          <FilterChip pressed={filter.blocked} onClick={() => setF({ blocked: !filter.blocked })}>
-            Blocked
-          </FilterChip>
-          <FilterChip pressed={filter.rework} onClick={() => setF({ rework: !filter.rework })}>
-            Rework
-          </FilterChip>
-          <FilterChip pressed={filter.unassigned} onClick={() => setF({ unassigned: !filter.unassigned })}>
-            Unassigned
-          </FilterChip>
-          {myId && cards.some((c) => c.qa) && (
-            <FilterChip
-              pressed={filter.qaFor !== null}
-              onClick={() => setF({ qaFor: filter.qaFor === null ? myId : null })}
+      {isMobile ? (
+        <div className="mb-3" data-testid="mobile-filters">
+          <div className="flex items-center gap-2">
+            <div className="relative min-w-0 flex-1">
+              <Search
+                aria-hidden="true"
+                className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-subtle"
+              />
+              <input
+                type="search"
+                aria-label="Search cards"
+                placeholder="Search cards"
+                value={filter.text}
+                onChange={(e) => setF({ text: e.target.value })}
+                className="h-11 w-full rounded-control border border-control bg-surface pr-3 pl-9 text-base text-fg placeholder:text-subtle focus-visible:border-brand focus-visible:ring-2 focus-visible:ring-ring/25 focus-visible:outline-none"
+              />
+            </div>
+            <button
+              type="button"
+              data-testid="filters-open"
+              onClick={() => setFiltersOpen(true)}
+              className="inline-flex h-11 shrink-0 items-center gap-1.5 rounded-control border border-control bg-surface px-3 text-sm font-medium text-fg"
             >
-              Waiting for my QA ({cards.filter((c) => c.qa?.assigneeUserId === myId).length})
-            </FilterChip>
+              <SlidersHorizontal aria-hidden="true" className="size-4" />
+              Filters
+              {(activeFilters.length > 0 || phaseId) && (
+                <span
+                  data-testid="filters-count"
+                  className="tnum inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-brand px-1.5 text-xs text-brand-fg"
+                >
+                  {activeFilters.length + (phaseId ? 1 : 0)}
+                </span>
+              )}
+            </button>
+          </div>
+          {activeFilters.length > 0 && (
+            <ul className="mt-2 flex flex-wrap gap-1.5" aria-label="Active filters">
+              {activeFilters.map((f) => (
+                <li key={f.key}>
+                  <button
+                    type="button"
+                    aria-label={`Remove filter ${f.label}`}
+                    onClick={() => setF(f.clear)}
+                    className="inline-flex h-7 items-center gap-1 rounded-full border border-brand bg-brand-soft pr-1.5 pl-2.5 text-xs font-medium text-brand-soft-fg"
+                  >
+                    {f.label}
+                    <X aria-hidden="true" className="size-3.5" />
+                  </button>
+                </li>
+              ))}
+            </ul>
           )}
-          {myId && cards.some((c) => c.approval) && (
-            <FilterChip
-              pressed={filter.approvalFor !== null}
-              onClick={() => setF({ approvalFor: filter.approvalFor === null ? myId : null })}
-            >
-              Waiting for my approval ({cards.filter((c) => c.approval?.approverUserId === myId).length})
-            </FilterChip>
-          )}
+          <BottomSheet
+            open={filtersOpen}
+            onOpenChange={setFiltersOpen}
+            title="Filters"
+            testId="filters-sheet"
+            footer={
+              <Button variant="primary" onClick={() => setFiltersOpen(false)}>
+                Done
+              </Button>
+            }
+          >
+            <div className="flex flex-col gap-4">
+              <PhaseFilter phases={phases.data ?? []} value={phaseId} onChange={setPhaseId} />
+              <div className="flex flex-wrap gap-2" role="group" aria-label="Filters">
+                {chips}
+              </div>
+              {priorityPicker}
+            </div>
+          </BottomSheet>
+          <BottomSheet
+            open={actionsOpen}
+            onOpenChange={setActionsOpen}
+            title="Project actions"
+            testId="project-actions-sheet"
+          >
+            <div className="flex flex-col items-stretch gap-2 [&>*]:w-full [&>*]:justify-start">
+              {projectActions}
+            </div>
+          </BottomSheet>
         </div>
-        <PriorityPicker
-          allowAny
-          inline
-          label="Priority"
-          value={filter.priority}
-          onChange={(n) => setF({ priority: n })}
-        />
-      </div>
+      ) : (
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <div className="relative w-full sm:w-72">
+            <Search
+              aria-hidden="true"
+              className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-subtle"
+            />
+            <input
+              type="search"
+              aria-label="Search cards"
+              placeholder="Search cards"
+              value={filter.text}
+              onChange={(e) => setF({ text: e.target.value })}
+              onKeyDown={(e) => e.key === 'Escape' && setF({ text: '' })}
+              className="h-9 w-full rounded-control border border-control bg-surface pr-3 pl-9 text-base text-fg placeholder:text-subtle focus-visible:border-brand focus-visible:ring-2 focus-visible:ring-ring/25 focus-visible:outline-none [@media(pointer:coarse)]:h-11"
+            />
+          </div>
+          <div className="flex gap-2 overflow-x-auto" role="group" aria-label="Filters">
+            {chips}
+          </div>
+          {priorityPicker}
+        </div>
+      )}
       {board.isPending && <BoardSkeleton />}
       {board.isError && <ErrorBox error={board.error} onRetry={() => board.refetch()} />}
       {board.data && cards.length === 0 && !phaseId && (

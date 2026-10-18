@@ -65,6 +65,9 @@ test('the board is an accordion: expand a stage, no sideways scroll, New card ab
   if ((await header.getAttribute('aria-expanded')) === 'false') await header.tap();
   await expect(tile).toBeVisible();
   expect(await noHorizontalScroll(page)).toBe(true);
+  // the first section and its first card are above the fold
+  await expect(page.getByRole('region').first().getByRole('button').first()).toBeInViewport({ ratio: 1 });
+  await expect(tile).toBeInViewport({ ratio: 1 });
   const fab = page.getByTestId('new-card-fab');
   await expect(fab).toBeInViewport();
   expect((await fab.boundingBox())?.height).toBeGreaterThanOrEqual(44);

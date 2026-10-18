@@ -218,26 +218,55 @@ function renderAt(path: string, route: string, el: React.ReactElement) {
 const boardPage = () => renderAt('/p/TOY/board', '/p/:projectKey/board', <Board />);
 
 describe('the phone board page', () => {
-  it('shows the stage strip, scrollable filters and a New card button above the tab bar', async () => {
+  it('shows a one-line stage strip of the filled stages and a New card button above the tab bar', async () => {
     stub('owner');
     boardPage();
     const strip = await screen.findByTestId('stage-strip');
     expect(within(strip).getByText('Blocked').closest('li')).toHaveTextContent('2');
+    expect(within(strip).queryByText('Done')).toBeNull();
     expect(screen.getByTestId('new-card-fab')).toHaveClass('bottom-[calc(var(--app-bottom-inset,0px)+1rem)]');
-    expect(screen.getByRole('group', { name: 'Filters' })).toHaveClass('overflow-x-auto');
   });
 
-  it.each(['owner', 'admin'] as const)('an %s still sees Pause project', async (role) => {
-    stub(role);
-    boardPage();
-    expect(await screen.findByTestId('pause-project-open')).toBeInTheDocument();
-  });
-
-  it('a Member does not see Pause project', async () => {
-    stub('member');
+  it('puts search and a Filters button in one row; the chips live in a sheet and active ones can be removed', async () => {
+    stub('owner');
     boardPage();
     await screen.findByTestId('stage-strip');
-    expect(screen.queryByTestId('pause-project-open')).toBeNull();
+    expect(screen.getByRole('searchbox', { name: 'Search cards' })).toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'Filters' })).toBeNull();
+    expect(screen.queryByTestId('filters-count')).toBeNull();
+    await userEvent.click(screen.getByTestId('filters-open'));
+    const sheet = await screen.findByTestId('filters-sheet');
+    await userEvent.click(within(sheet).getByRole('button', { name: 'Blocked' }));
+    await userEvent.click(within(sheet).getByRole('button', { name: 'Rework' }));
+    await userEvent.click(within(sheet).getByRole('button', { name: 'Done' }));
+    await waitFor(() => expect(screen.queryByTestId('filters-sheet')).toBeNull());
+    expect(screen.getByTestId('filters-count')).toHaveTextContent('2');
+    await userEvent.click(screen.getByRole('button', { name: 'Remove filter Rework' }));
+    expect(screen.getByTestId('filters-count')).toHaveTextContent('1');
+    expect(screen.queryByRole('button', { name: 'Remove filter Rework' })).toBeNull();
+  });
+
+  it.each(['owner', 'admin'] as const)(
+    'an %s finds Pause project in the project actions sheet',
+    async (role) => {
+      stub(role);
+      boardPage();
+      expect(screen.queryByTestId('pause-project-open')).toBeNull();
+      await userEvent.click(await screen.findByTestId('project-actions-open'));
+      const sheet = await screen.findByTestId('project-actions-sheet');
+      expect(within(sheet).getByTestId('pause-project-open')).toBeInTheDocument();
+      expect(within(sheet).getByRole('link', { name: /Archive/ })).toBeInTheDocument();
+      expect(within(sheet).getByRole('link', { name: /Settings for TOY/ })).toBeInTheDocument();
+    },
+  );
+
+  it('a Member does not get Pause project in the sheet', async () => {
+    stub('member');
+    boardPage();
+    await userEvent.click(await screen.findByTestId('project-actions-open'));
+    const sheet = await screen.findByTestId('project-actions-sheet');
+    expect(within(sheet).queryByTestId('pause-project-open')).toBeNull();
+    expect(within(sheet).getByRole('link', { name: /Archive/ })).toBeInTheDocument();
   });
 
   it('moves a card with Move to... through the same move call as the desktop dialog', async () => {
