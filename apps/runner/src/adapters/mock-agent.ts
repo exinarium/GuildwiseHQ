@@ -61,6 +61,9 @@ interface Brief {
     reportPath: string;
     location: string;
     investigationOnly?: boolean;
+    /** Designing before the dependencies landed: a read-only checkout, assumptions required. */
+    readOnly?: boolean;
+    unlandedDependencies?: Array<{ ref: string; title: string; status: string }>;
     report?: { reportPath: string; location: string; summary: string };
   };
 }
@@ -270,7 +273,10 @@ async function architectWork(
   }
   const inv = brief.investigation;
   const path = inv?.reportPath ?? `docs/investigations/${brief.card.ref}.md`;
-  const vault = inv?.location === 'vault';
+  // Read-only checkout (designing before a dependency lands): nothing is committed, the report is written in the scratch
+  // directory like a vault report, and the design records its assumptions about the unlanded dependencies.
+  const readOnly = inv?.readOnly === true;
+  const vault = inv?.location === 'vault' || readOnly;
   const body = (leak: boolean) =>
     [
       `# ${brief.card.ref}: ${brief.card.title}`,
@@ -295,7 +301,17 @@ async function architectWork(
   };
   const verb = brief.shift.outcomes.some((o) => o.id === 'report') ? 'investigate' : 'design';
   const summary = `Mock ${verb} summary for ${brief.card.ref}: follow ${path}.`;
-  const send = () => aom([verb, '--report', file, '--summary', summary]);
+  const deps = inv?.unlandedDependencies ?? [];
+  const assumptionArgs =
+    verb === 'design' && readOnly
+      ? deps.length
+        ? deps.flatMap((d) => [
+            '--assumption',
+            `Mock: ${d.ref} lands as its spec describes | ${d.ref} | the mock design would be revised`,
+          ])
+        : ['--no-assumptions', 'mock: no unlanded dependency is named']
+      : [];
+  const send = () => aom([verb, '--report', file, '--summary', summary, ...assumptionArgs]);
   write(action === 'secret');
   const first = send();
   if (action === 'secret' && first.code !== 0) {

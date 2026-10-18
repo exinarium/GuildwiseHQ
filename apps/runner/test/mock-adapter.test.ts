@@ -15,6 +15,33 @@ afterEach(async () => {
 const reports = (hh: Harness, shiftId: string) =>
   hh.server.of('shift.report').filter((r) => r.shiftId === shiftId);
 
+describe('mock architect before a dependency lands', () => {
+  it('designs in a read-only checkout: report in scratch, nothing committed, assumptions passed', async () => {
+    h = await startHarness();
+    const { shiftId, ended } = await h.runShift({
+      stage: 'investigate',
+      mode: 'readonly',
+      briefExtra: {
+        investigation: {
+          reportPath: 'docs/investigations/TOY-1-add-greeting.md',
+          location: 'repo',
+          investigationOnly: false,
+          mergeMainFirst: false,
+          readOnly: true,
+          unlandedDependencies: [{ ref: 'TOY-0', title: 'Base', status: 'queued' }],
+        },
+      },
+    });
+    expect(ended.outcome).toBe('reported');
+    const rep = reports(h, shiftId)[0]?.report as any;
+    expect(rep).toMatchObject({ kind: 'outcome', outcomeId: 'handoff' });
+    expect(rep.data.assumptions).toEqual([
+      expect.objectContaining({ dependency: 'TOY-0', assumption: expect.stringContaining('TOY-0') }),
+    ]);
+    expect(rep.data.body).toContain('Mock findings');
+  });
+});
+
 describe('mock adapter through the real aom CLI', () => {
   it('default script completes build -> review -> test', async () => {
     h = await startHarness();
