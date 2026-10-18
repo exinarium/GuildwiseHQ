@@ -72,13 +72,34 @@ const NEGATIVE =
 const POSITIVE =
   /\b(always|must|should|required|require|ensure|need to|needs to|do|ask|wait|run|start|create|use|check)\b/i;
 
-/** Lowercase content words (3+ characters), without stop words and negation cues. */
+/** Very small stemmer: plural, -ing, -ed, -ly and a trailing e go ("facing", "faced" and "faces" all become "fac"). */
+export function stem(word: string): string {
+  let w = word;
+  if (w.length > 4 && w.endsWith('ies')) w = `${w.slice(0, -3)}y`;
+  else if (w.length > 3 && w.endsWith('s') && !w.endsWith('ss')) w = w.slice(0, -1);
+  if (w.length > 5 && w.endsWith('ing')) w = w.slice(0, -3);
+  else if (w.length > 4 && w.endsWith('ed')) w = w.slice(0, -2);
+  else if (w.length > 4 && w.endsWith('ly')) w = w.slice(0, -2);
+  if (w.length > 3 && w.endsWith('e')) w = w.slice(0, -1);
+  return w;
+}
+
+/**
+ * Lowercase content words (3+ characters), without stop words (articles included) and negation cues. Hyphens, slashes
+ * and underscores separate words ("user-facing" is "user facing"), and words are stemmed, so trivial variants match.
+ */
 export function contentTokens(text: string): Set<string> {
-  const words = text.toLowerCase().match(/[a-z0-9][a-z0-9_-]{2,}/g) ?? [];
+  const words =
+    text
+      .toLowerCase()
+      .replace(/[-_/]+/g, ' ')
+      .match(/[a-z0-9]{3,}/g) ?? [];
   return new Set(
-    words.filter(
-      (w) => !STOP.has(w) && !['never', 'dont', 'avoid', 'without', 'stop', 'cannot', 'always'].includes(w),
-    ),
+    words
+      .filter(
+        (w) => !STOP.has(w) && !['never', 'dont', 'avoid', 'without', 'stop', 'cannot', 'always'].includes(w),
+      )
+      .map(stem),
   );
 }
 
@@ -103,11 +124,14 @@ export interface OrderText {
   body: string;
 }
 
+const ARTICLES = new Set(['a', 'an', 'the']);
 const norm = (s: string) =>
   s
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, ' ')
-    .trim();
+    .split(' ')
+    .filter((w) => w && !ARTICLES.has(w))
+    .join(' ');
 
 /** A near-duplicate: the same title once normalised, or nearly the same words in title and text together. */
 export function isNearDuplicate(

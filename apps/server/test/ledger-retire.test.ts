@@ -47,6 +47,37 @@ describe('the text checks', () => {
     expect(findNearDuplicate({ title: 'x', body: 'y' }, [])).toBeUndefined();
   });
 
+  it('trivial variants (hyphens, articles, plurals) are still near-duplicates; different orders are not', () => {
+    expect(
+      isNearDuplicate(
+        { title: 'User-facing copy', body: 'Write the user-facing error messages in plain language.' },
+        { title: 'User facing copy', body: 'Write user facing error message in a plain language.' },
+      ),
+    ).toBe(true);
+    expect(
+      isNearDuplicate(
+        { title: 'Check the tests', body: 'Run the unit tests before every handoff.' },
+        { title: 'Check tests', body: 'Run unit test before every hand_off.' },
+      ),
+    ).toBe(true);
+    expect(
+      isNearDuplicate({ title: 'The Working Branch', body: 'a' }, { title: 'working branch', body: 'b' }),
+    ).toBe(true);
+    // genuinely different orders about nearby subjects still pass
+    expect(
+      isNearDuplicate(
+        { title: 'User-facing copy', body: 'Write the user-facing error messages in plain language.' },
+        { title: 'Error logging', body: 'Log internal errors with the request id, never the user email.' },
+      ),
+    ).toBe(false);
+    expect(
+      isNearDuplicate(
+        { title: 'Branch naming', body: 'Name every branch after the card reference and a short slug.' },
+        { title: 'Branch cleanup', body: 'Delete merged branches once the card is finalized.' },
+      ),
+    ).toBe(false);
+  });
+
   it('a contradiction is the same subject with an opposing instruction', () => {
     const ask = {
       title: 'Test Environment',
