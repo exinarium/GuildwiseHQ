@@ -13,6 +13,7 @@ import type { Reaper } from './dispatcher/reaper.ts';
 import type { Notifier } from './eventstore/notifier.ts';
 import type { PgEventStore } from './eventstore/pg-event-store.ts';
 import type { Mailer } from './mail/mailer.ts';
+import type { PushService } from './push/notifier.ts';
 import type { Reporter } from './reporter/reporter.ts';
 import type { RunnerGateway } from './runner-gateway/gateway.ts';
 import type { RunnerRegistry } from './runner-gateway/registry.ts';
@@ -61,4 +62,6 @@ export interface Services {
   chat: ChatRelay;
   cloud: CloudServices;
   billing: BillingRuntime;
+  /** Web Push notifier (only when VAPID is configured). */
+  push?: PushService;
 }

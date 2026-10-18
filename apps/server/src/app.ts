@@ -47,6 +47,7 @@ import { withSimulationPrefix } from './mail/simulation.ts';
 import { createOrgStatusInterceptor } from './orgs/guard.ts';
 import { reportServerError } from './platform-team/detectors.ts';
 import { buildProjectors } from './projections/index.ts';
+import { registerPushNotifier } from './push/notifier.ts';
 import { Reporter } from './reporter/reporter.ts';
 import { createRoutingInterceptor } from './reporter/routing.ts';
 import { adminRoutes } from './routes/admin.ts';
@@ -88,6 +89,7 @@ import { platformRoutes } from './routes/platform.ts';
 import { platformTeamRoutes } from './routes/platform-team.ts';
 import { projectWorkflowRoutes } from './routes/project-workflows.ts';
 import { projectRoutes } from './routes/projects.ts';
+import { pushRoutes } from './routes/push.ts';
 import { qaRoutes } from './routes/qa.ts';
 import { reportingRoutes } from './routes/reporting.ts';
 import { researchRoutes } from './routes/research.ts';
@@ -397,6 +399,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   await app.register(phaseRoutes(ctx));
   await app.register(reportingRoutes(ctx));
   await app.register(setupChecklistRoutes(ctx));
+  await app.register(pushRoutes(ctx));
   await app.register(cardAttachmentRoutes(ctx));
   const assistantClient =
     opts.assistantClient !== undefined
@@ -462,7 +465,24 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
       // `/` is the app for a visitor with a valid session and the landing page for everyone else. A stale cookie (the
       // session ended by a sign-out elsewhere, a password reset or an expiry) gets the landing page and is cleared, so
       // nobody is bounced to /login just for opening the site. The page differs by cookie: never share it.
+      // The service worker must be revalidated on every load (an update has to reach the phone) and may control `/`; the
+      // manifest and the offline page change with a release. Hashed `/assets/*` keep the default caching. (Set in onSend:
+      // @fastify/static writes its own cache-control after `setHeaders`.)
       await app.register(fastifyStatic, { root, wildcard: false, index: false });
+      app.addHook('onSend', async (req, reply) => {
+        if (req.method !== 'GET' || reply.statusCode !== 200) return;
+        const path = req.url.split('?')[0];
+        if (path === '/sw.js') {
+          void reply
+            .header('cache-control', 'no-cache, no-store, must-revalidate')
+            .header('service-worker-allowed', '/')
+            .header('content-type', 'text/javascript; charset=utf-8');
+        } else if (path === '/manifest.webmanifest')
+          void reply
+            .header('cache-control', 'no-cache')
+            .header('content-type', 'application/manifest+json; charset=utf-8');
+        else if (path === '/offline.html') void reply.header('cache-control', 'no-cache');
+      });
       app.get('/', async (req, reply) => {
         void reply.header('cache-control', 'no-cache').header('vary', 'Cookie');
         const token = req.cookies[SESSION_COOKIE];
@@ -486,6 +506,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   const unhookCeoWakes = registerCeoWakes(ctx);
   const unhookDefinitions = registerDefinitionHook(ctx);
   const unhookDevops = registerDevopsMembershipHook(ctx);
+  if (config.push.enabled) ctx.services.push = registerPushNotifier(ctx);
   await notifier.start();
   // Simulation organizations: the simulated workstations come up with the server (not under tests unless asked for).
   const simulation = config.simulationHost ? new SimulationHostImpl(ctx) : undefined;
@@ -506,6 +527,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
     unhookCeoWakes();
     unhookDefinitions();
     unhookDevops();
+    ctx.services.push?.stop();
     await simulation?.stop();
     await reporter.stop();
     await scheduler.stop();

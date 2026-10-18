@@ -109,6 +109,12 @@ const EnvSchema = z.object({
   AOM_SIMULATION_RUNNER_BIN: z.string().optional(),
   /** How the simulated runner reaches this server. Unset: `http://127.0.0.1:<AOM_PORT>`. */
   AOM_SIMULATION_SERVER_URL: z.string().optional(),
+  /** Web Push (docs/DEPLOY.md "Web Push"): the VAPID key pair (`pnpm --filter @aom/server vapid:generate`) and a contact (`mailto:` or `https:`). All three must be set, else push is off. */
+  AOM_VAPID_PUBLIC_KEY: z.string().optional(),
+  AOM_VAPID_PRIVATE_KEY: z.string().optional(),
+  AOM_VAPID_SUBJECT: z.string().optional(),
+  /** A workstation must stay disconnected this long before its owner is notified (restarts and updates reconnect within it). */
+  AOM_PUSH_OFFLINE_GRACE_SECONDS: z.coerce.number().int().min(0).max(3600).default(120),
   LOG_LEVEL: z.string().default('info'),
 });
 
@@ -196,6 +202,14 @@ export interface Config {
   simulationServerUrl: string | undefined;
   /** Cookie `Secure` flag: true when the public origin is https. */
   secureCookies: boolean;
+  /** Web Push: `enabled` only with a complete, valid VAPID configuration. */
+  push: {
+    enabled: boolean;
+    publicKey: string | undefined;
+    privateKey: string | undefined;
+    subject: string | undefined;
+    offlineGraceSeconds: number;
+  };
 }
 
 export function loadConfig(env: Record<string, string | undefined> = process.env): Config {
@@ -268,5 +282,18 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     simulationRunnerBin: e.AOM_SIMULATION_RUNNER_BIN?.trim() || undefined,
     simulationServerUrl: e.AOM_SIMULATION_SERVER_URL?.trim() || undefined,
     secureCookies: publicOrigin.startsWith('https://'),
+    push: (() => {
+      const publicKey = e.AOM_VAPID_PUBLIC_KEY?.trim() || undefined;
+      const privateKey = e.AOM_VAPID_PRIVATE_KEY?.trim() || undefined;
+      const subject = e.AOM_VAPID_SUBJECT?.trim() || undefined;
+      const valid = !!subject && /^(mailto:[^@\s]+@[^@\s]+|https:\/\/\S+)$/.test(subject);
+      return {
+        enabled: !!publicKey && !!privateKey && valid,
+        publicKey,
+        privateKey,
+        subject,
+        offlineGraceSeconds: e.AOM_PUSH_OFFLINE_GRACE_SECONDS,
+      };
+    })(),
   };
 }
