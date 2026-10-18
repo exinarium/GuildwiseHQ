@@ -98,6 +98,7 @@ export function SidebarBody({
   headerSlot,
   orgSlot,
   setupSlot,
+  flowing = false,
 }: {
   sections: NavSection[];
   footer: NavEntry[];
@@ -113,9 +114,16 @@ export function SidebarBody({
   orgSlot?: React.ReactNode;
   /** The "Get started" checklist button, above the footer links. */
   setupSlot?: React.ReactNode;
+  /** The whole column scrolls as one (the phone's full-screen menu) instead of only the link list between a fixed top and bottom. */
+  flowing?: boolean;
 }) {
   return (
-    <div className="on-side flex h-full min-h-0 flex-col text-side-fg">
+    <div
+      className={cx(
+        'on-side flex h-full min-h-0 flex-col text-side-fg',
+        flowing && 'overflow-y-auto overscroll-contain',
+      )}
+    >
       <div
         className={cx(
           'flex h-14 shrink-0 items-center',
@@ -148,7 +156,7 @@ export function SidebarBody({
       </div>
       <nav
         aria-label="Main"
-        className={cx('min-h-0 flex-1 overflow-y-auto pb-3', collapsed ? 'px-3' : 'px-3')}
+        className={cx(flowing ? 'flex-none pb-3' : 'min-h-0 flex-1 overflow-y-auto pb-3', 'px-3')}
       >
         {sections.map((s, i) => (
           <div

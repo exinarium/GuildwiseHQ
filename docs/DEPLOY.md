@@ -196,6 +196,25 @@ Organisations receive e-mail at their own Guildwise addresses (`<name>-<random>@
 | `AOM_INBOUND_RATE_PER_SENDER_PER_HOUR` | `20` | Messages one sender address can send to an organisation per hour. Over it, messages are recorded as skipped (`sender_rate_limited`) and the Owner gets one desk notice per sender per day. `0` switches the limit off |
 | `AOM_INBOUND_SPAM_THRESHOLD` | `5` | Spam score (SpamAssassin scale, as SendGrid reports it) from which a message is skipped as spam |
 
+### Web Push (installed phone app)
+
+Push notifications reach people on the installed web app (iPhone: iOS 16.4 or later, Add to Home Screen first; Android Chrome and desktop browsers work in a tab). They need **https** (or `localhost`). Without the three variables push is off: `GET /api/push/config` answers `enabled: false` and Settings says it is not set up.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `AOM_VAPID_PUBLIC_KEY` | unset | Public VAPID key (base64url). Sent to the browser to subscribe with |
+| `AOM_VAPID_PRIVATE_KEY` | unset | Private VAPID key. A secret: keep it with your backups, never in the repository |
+| `AOM_VAPID_SUBJECT` | unset | A contact the push services can reach: `mailto:ops@example.com` or an `https://` URL. Anything else switches push off |
+| `AOM_PUSH_OFFLINE_GRACE_SECONDS` | `120` | How long a runner must stay disconnected before its owner is notified (restarts and updates reconnect within it) |
+
+Generate the pair once per environment (UAT and production each get their own) and add the three lines to the environment file:
+
+```bash
+pnpm --filter @aom/server vapid:generate
+```
+
+Changing the pair later invalidates every subscription: people enable notifications on their devices again (Settings > Notifications). What is sent, and to whom, is each person's choice there (categories, quiet hours); blocking questions and approvals ignore quiet hours. A notice for the same thing in the same state is sent once per 24 hours, and a newer one replaces the older on the lock screen. The service worker (`/sw.js`) and `/manifest.webmanifest` are served by the application itself and must not be cached by the reverse proxy (`/sw.js` carries `Cache-Control: no-cache`).
+
 ### Landing-page assistant ("Ask Guildwise")
 
 An optional chat widget on the public landing page, paid by Guildwise (Claude Haiku 4.5, no tools, English only). It answers questions about the product from a fixed knowledge pack and keeps no conversations, only counters. It is **off unless `ANTHROPIC_API_KEY` is set**.

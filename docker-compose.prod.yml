@@ -33,6 +33,10 @@ services:
       AOM_INBOUND_PROVIDER: ${AOM_INBOUND_PROVIDER:-}
       AOM_INBOUND_DOMAIN: ${AOM_INBOUND_DOMAIN:-}
       AOM_INBOUND_SECRET: ${AOM_INBOUND_SECRET:-}
+      # Web Push (docs/DEPLOY.md "Web Push"): all three, or push stays off.
+      AOM_VAPID_PUBLIC_KEY: ${AOM_VAPID_PUBLIC_KEY:-}
+      AOM_VAPID_PRIVATE_KEY: ${AOM_VAPID_PRIVATE_KEY:-}
+      AOM_VAPID_SUBJECT: ${AOM_VAPID_SUBJECT:-}
       # Encrypts two-factor seeds at rest; set it in .env (see docs/DEPLOY.md).
       AOM_SECRET_KEY: ${AOM_SECRET_KEY:-}
       LOG_LEVEL: ${LOG_LEVEL:-info}

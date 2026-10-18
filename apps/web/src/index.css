@@ -283,3 +283,18 @@ input[type="radio"] {
     min-width: 0;
   }
 }
+
+/* The phone's bottom tab bar (components/shell/MobileTabBar.tsx) is 3.5rem tall plus the home-indicator inset. Pages keep
+   clear of it with pb-[var(--app-bottom-inset,0px)] and fixed bottom bars sit at bottom: var(--app-bottom-inset, 0px).
+   0px from md up (the sidebar) and while the on-screen keyboard hides the bar. */
+:root {
+  --app-bottom-inset: 0px;
+}
+@media (max-width: 767.98px) {
+  :root {
+    --app-bottom-inset: calc(3.5rem + env(safe-area-inset-bottom, 0px));
+  }
+  :root[data-kbd] {
+    --app-bottom-inset: 0px;
+  }
+}

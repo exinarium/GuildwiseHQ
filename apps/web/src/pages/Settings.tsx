@@ -11,6 +11,7 @@ import { BriefingToggle } from '../components/BriefingToggle.tsx';
 import { UserAvatar } from '../components/Face.tsx';
 import { AvatarPicker } from '../components/profile/AvatarPicker.tsx';
 import { TwoFactorPanel } from '../components/security/TwoFactorPanel.tsx';
+import { NotificationSettings } from '../components/settings/NotificationSettings.tsx';
 import {
   Button,
   ErrorBox,
@@ -109,6 +110,7 @@ export function Settings() {
       </Panel>
 
       <BriefingToggle />
+      <NotificationSettings />
 
       <Panel>
         <h2 className="text-lg font-semibold text-fg">Weekly blog digest</h2>
