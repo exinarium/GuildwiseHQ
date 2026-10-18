@@ -1,6 +1,6 @@
 import { defineConfig } from 'tsup';
 
-// ESM bundles `dist/main.mjs` (server) and `dist/admin-create.mjs`, `dist/superadmin-create.mjs`, `dist/superadmin-reset-password.mjs` `dist/orgs-migrate.mjs`, `dist/restructure-migrate.mjs` and `dist/ranking-migrate.mjs` (the CLI scripts for the image); @aom/shared is TypeScript source and is bundled in.
+// ESM bundles `dist/main.mjs` (server) and `dist/admin-create.mjs`, `dist/superadmin-create.mjs`, `dist/superadmin-reset-password.mjs` `dist/orgs-migrate.mjs`, `dist/restructure-migrate.mjs` `dist/ranking-migrate.mjs`, `dist/ledger-cleanup.mjs` and `dist/lean-rollout.mjs` (the CLI scripts for the image); @aom/shared is TypeScript source and is bundled in.
 // SQL migrations are read at runtime from `../migrations` (or AOM_MIGRATIONS_DIR).
 export default defineConfig({
   entry: {
@@ -11,6 +11,8 @@ export default defineConfig({
     'orgs-migrate': 'scripts/orgs-migrate.ts',
     'restructure-migrate': 'scripts/restructure-migrate.ts',
     'ranking-migrate': 'scripts/ranking-migrate.ts',
+    'ledger-cleanup': 'scripts/ledger-cleanup-2026-10.ts',
+    'lean-rollout': 'scripts/lean-rollout-2026-10.ts',
   },
   format: ['esm'],
   outDir: 'dist',

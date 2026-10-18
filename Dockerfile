@@ -35,5 +35,5 @@ USER node
 EXPOSE 4600
 HEALTHCHECK --interval=10s --timeout=5s --start-period=20s --retries=6 \
   CMD node -e "fetch('http://127.0.0.1:'+process.env.AOM_PORT+'/api/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"
-# Migrations run on boot (AOM_MIGRATE_ON_BOOT). First owner: node dist/admin-create.mjs ...; platform account: node dist/superadmin-create.mjs ...; preview the data migrations: node dist/orgs-migrate.mjs --dry-run and node dist/restructure-migrate.mjs --dry-run and node dist/ranking-migrate.mjs --dry-run
+# Migrations run on boot (AOM_MIGRATE_ON_BOOT). First owner: node dist/admin-create.mjs ...; platform account: node dist/superadmin-create.mjs ...; preview the data migrations: node dist/orgs-migrate.mjs --dry-run and node dist/restructure-migrate.mjs --dry-run and node dist/ranking-migrate.mjs --dry-run; one-off Lean Team v3 rollout: node dist/ledger-cleanup.mjs and node dist/lean-rollout.mjs (both dry runs unless --apply)
 CMD ["node", "dist/main.mjs"]
