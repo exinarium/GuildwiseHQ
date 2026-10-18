@@ -236,6 +236,9 @@ interface ReportVerdict {
   matches?: LedgerMatch[];
 }
 
+/** Roles whose stages only read the code and record a verdict: they make no commits of their own. */
+const READ_ONLY_ROLES = new Set(['planner', 'pre_reviewer', 'reviewer']);
+
 /** The tracker ticket key the card came from (`DCPL-4276`), the only reference that may appear in a commit message. */
 const TICKET_KEY = /^[A-Za-z][A-Za-z0-9]*-\d+$/;
 const ticketOf = (msg: ShiftStartMsg): string | null => {
@@ -684,7 +687,10 @@ export class ShiftSupervisor {
     // a repository is refused, there is no fallback to an agent or product name.
     const identityRepo = msg.worktree ? await this.deps.findRepo(msg.worktree.remoteUrlNormalized) : null;
     const identity = await resolveCommitIdentity(identityRepo?.localPath ?? paths.root, msg.commitAs);
-    if (identityRepo && !identity) {
+    // Read-only work never commits: a read-only checkout (planning, design before a dependency lands) and the reviewing
+    // roles are not refused for a missing identity (a rebase they need still fails on its own, naming the identity).
+    const commits = msg.worktree?.mode !== 'readonly' && !READ_ONLY_ROLES.has(msg.agent.roleKey);
+    if (identityRepo && !identity && commits) {
       this.reject(msg.shiftId, 'internal', NO_IDENTITY_WIRE);
       return;
     }

@@ -23,6 +23,23 @@ import { createLocalOrigin } from './repos.ts';
 
 const run = promisify(execFile);
 
+/** The commit identity of the simulated workstation's owner: its runner has no personal git setup (backlog #65). */
+export const SIMULATION_GIT_IDENTITY = { name: 'Simulation Owner', email: 'owner@simulation.example.test' };
+
+/**
+ * Writes the simulated workstation's global git config (the identity above) and returns the environment that makes the
+ * runner and its git processes read it, instead of the server machine's own config. Without it a simulation project that
+ * has no Commit-as is refused `no_commit_identity`.
+ */
+export function simulationGitEnv(dir: string): Record<string, string> {
+  const file = join(dir, 'gitconfig');
+  writeFileSync(
+    file,
+    `[user]\n\tname = ${SIMULATION_GIT_IDENTITY.name}\n\temail = ${SIMULATION_GIT_IDENTITY.email}\n`,
+  );
+  return { GIT_CONFIG_GLOBAL: file };
+}
+
 export type SimulationPaceName = 'fast' | 'normal' | 'slow';
 /** How long each mock progress step and each chat word takes, per pace. */
 export const PACES: Record<SimulationPaceName, { stepMs: number; chatTokenMs: number }> = {
@@ -266,6 +283,7 @@ export class SimulationHostImpl implements SimulationHost {
         // The only remotes are the local throwaway repositories of this simulation.
         AOM_ALLOW_LOCAL_REMOTES: '1',
         AOM_RUNNER_HOME: home,
+        ...simulationGitEnv(this.orgDir(orgId)),
         AOM_MOCK_STEP_MS: String(pace.stepMs),
         AOM_MOCK_CHAT_TOKEN_MS: String(pace.chatTokenMs),
         AOM_MOCK_REPLIES_FILE: repliesFile,

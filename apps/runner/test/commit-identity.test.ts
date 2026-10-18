@@ -134,6 +134,23 @@ describe('shifts commit as the owner', () => {
     expect(rejected[rejected.length - 1]?.detail).toMatch(/^no_commit_identity:/);
     expect(ran).toBe(false);
   });
+
+  it('a read-only shift (a read-only checkout) is not refused for a missing identity', async () => {
+    noGlobalIdentity();
+    let ran = 0;
+    const adapter = new ScriptedAdapter(async (_i, ctl) => {
+      ran += 1;
+      await ctl.post('/v1/report', {
+        report: { kind: 'outcome', outcomeId: 'handoff', note: 'n', data: {} },
+      });
+    });
+    h = await startHarness({}, { adapters: new Map([['mock', adapter]]) });
+    await h.runShift({ stage: 'investigate', mode: 'readonly' });
+    expect(ran).toBe(1);
+    expect(h.server.of('shift.rejected').map((m) => m.detail)).not.toContainEqual(
+      expect.stringContaining('no_commit_identity'),
+    );
+  });
 });
 
 describe('runner-made git operations use the resolver', () => {
