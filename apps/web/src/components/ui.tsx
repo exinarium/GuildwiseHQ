@@ -7,6 +7,7 @@ import { useDelayedFlag } from '../lib/useDelayedFlag.ts';
 import { usePageTitle } from '../lib/usePageTitle.ts';
 import { cx } from './ui/cx.ts';
 
+export { BottomSheet } from './ui/BottomSheet.tsx';
 export { Callout } from './ui/Callout.tsx';
 export { FilterChip, PriorityPicker, Segmented } from './ui/Chips.tsx';
 export { ConfirmDialog } from './ui/ConfirmDialog.tsx';

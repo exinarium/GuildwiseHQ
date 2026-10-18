@@ -61,6 +61,7 @@ export function AttachmentsPanel({
               id={inputId}
               type="file"
               multiple
+              accept="image/*,application/*,text/*,audio/*,video/*"
               className="sr-only"
               data-testid="attachment-input"
               aria-label="Add files to this card"

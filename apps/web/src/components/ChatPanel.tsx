@@ -139,7 +139,7 @@ export function ChatPanel({
         ref={log}
         role="log"
         aria-label="Conversation"
-        className="min-h-40 flex-1 overflow-y-auto rounded-card border border-line bg-surface p-3"
+        className="min-h-40 flex-1 overflow-y-auto overscroll-contain rounded-card border border-line bg-surface p-3 max-md:rounded-none max-md:border-x-0"
       >
         {list.length === 0 && !showPending && streaming === null && (
           <p className="py-6 text-center text-sm text-subtle">Say hello to {name ?? 'the agent'}.</p>
@@ -205,7 +205,11 @@ export function ChatPanel({
         </Callout>
       )}
       <ErrorBox error={messages.error} />
-      <form onSubmit={send} aria-label="Compose" className="flex flex-col gap-2">
+      <form
+        onSubmit={send}
+        aria-label="Compose"
+        className="flex flex-col gap-2 max-md:sticky max-md:bottom-0 max-md:bg-canvas max-md:pb-2"
+      >
         <TextArea
           label="Message"
           rows={2}

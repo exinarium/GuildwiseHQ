@@ -1,4 +1,4 @@
-import { defineConfig } from '@playwright/test';
+import { defineConfig, devices } from '@playwright/test';
 import { BASE_URL } from './support/env.ts';
 
 // The specs share one stack (server on 4601 + aom_e2e database + a mock-adapter runner), so they run
@@ -50,6 +50,14 @@ export default defineConfig({
     { name: 'installer', testMatch: 'installer.spec.ts', dependencies: ['org-chart'] },
     { name: 'support', testMatch: 'support.spec.ts', dependencies: ['installer'] },
     { name: 'tour', testMatch: 'tour.spec.ts', dependencies: ['support'] },
+    // Mobile (PWA) flows at iPhone size: WebKit when the browser is installed (AOM_E2E_WEBKIT=1), else Chromium with the
+    // iPhone 15 viewport, touch and user agent. Needs only the paired workstation and project TOY (pairing); the spec hires its own builders and reviewer.
+    {
+      name: 'mobile',
+      testMatch: 'mobile.spec.ts',
+      dependencies: ['pairing'],
+      use: mobileUse(),
+    },
     // The screenshot run for docs/guide (never part of `pnpm e2e`): AOM_E2E_GUIDE=1 playwright test --project=guide
     ...(process.env.AOM_E2E_GUIDE === '1'
       ? [
@@ -63,3 +71,12 @@ export default defineConfig({
       : []),
   ],
 });
+
+/** The `iPhone 15` descriptor on WebKit, or on Chromium when WebKit is not installed (its Linux host libraries are optional). */
+function mobileUse() {
+  const { defaultBrowserType: _ignored, ...phone } = devices['iPhone 15'];
+  return {
+    ...phone,
+    browserName: process.env.AOM_E2E_WEBKIT === '1' ? ('webkit' as const) : ('chromium' as const),
+  };
+}

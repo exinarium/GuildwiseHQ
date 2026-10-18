@@ -69,7 +69,7 @@ export function ApprovalPanel({ cardId, approval }: { cardId: string; approval: 
               rows={failing ? 4 : 2}
               data-testid="approval-note"
             />
-            <div className="flex flex-wrap gap-2">
+            <div className="sticky-actions sticky-actions-page flex flex-wrap gap-2 max-md:[&>button]:flex-1">
               {!failing ? (
                 <>
                   <Button

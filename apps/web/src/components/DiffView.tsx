@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useIsMobile } from '../hooks/useIsMobile.ts';
 import { type DiffFile, type DiffLine, diffTotals, parseUnifiedDiff } from '../lib/diff.ts';
 import { Badge, Button } from './ui.tsx';
 
@@ -22,14 +23,24 @@ const STATUS_LABEL: Record<DiffFile['status'], string> = {
 /** Files with more lines than this start collapsed (a big generated file does not push the rest off the page). */
 const COLLAPSE_OVER = 400;
 
-function FileDiff({ file, open, onToggle }: { file: DiffFile; open: boolean; onToggle: () => void }) {
+function FileDiff({
+  file,
+  open,
+  onToggle,
+  wrap,
+}: {
+  file: DiffFile;
+  open: boolean;
+  onToggle: () => void;
+  wrap: boolean;
+}) {
   return (
     <section className="overflow-hidden rounded-md border border-line" data-testid="diff-file">
       <button
         type="button"
         onClick={onToggle}
         aria-expanded={open}
-        className="flex w-full items-center gap-2 bg-sunken px-3 py-1.5 text-left text-sm"
+        className="flex min-h-11 w-full items-center gap-2 bg-sunken px-3 py-1.5 text-left text-sm md:min-h-0"
         data-testid="diff-file-toggle"
       >
         <span aria-hidden="true" className="w-3 text-subtle">
@@ -38,23 +49,39 @@ function FileDiff({ file, open, onToggle }: { file: DiffFile; open: boolean; onT
         <span className="min-w-0 flex-1 truncate font-mono text-fg" title={file.path}>
           {file.oldPath ? `${file.oldPath} → ${file.path}` : file.path}
         </span>
-        <Badge tone={file.status === 'added' ? 'success' : file.status === 'deleted' ? 'danger' : 'neutral'}>
-          {STATUS_LABEL[file.status]}
-        </Badge>
+        <span className="max-md:hidden">
+          <Badge
+            tone={file.status === 'added' ? 'success' : file.status === 'deleted' ? 'danger' : 'neutral'}
+          >
+            {STATUS_LABEL[file.status]}
+          </Badge>
+        </span>
         <span className="font-mono text-xs text-success">+{file.added}</span>
         <span className="font-mono text-xs text-danger">-{file.removed}</span>
       </button>
       {open && (
         <div className="overflow-x-auto" data-testid="diff-file-body">
-          <table className="w-full border-collapse font-mono text-xs leading-5">
+          <table className="w-full border-collapse font-mono text-xs leading-5 max-md:text-[11px]">
             <tbody>
               {file.lines.map((l, i) => (
                 // biome-ignore lint/suspicious/noArrayIndexKey: the lines of a diff are static and never reordered
                 <tr key={`${i}-${l.kind}`} className={LINE_CLS[l.kind]} data-kind={l.kind}>
-                  <td className="w-10 select-none px-2 text-right text-subtle">{l.oldNo ?? ''}</td>
-                  <td className="w-10 select-none px-2 text-right text-subtle">{l.newNo ?? ''}</td>
+                  <td className="w-10 select-none px-2 text-right text-subtle max-md:hidden">
+                    {l.oldNo ?? ''}
+                  </td>
+                  <td className="w-10 select-none px-2 text-right text-subtle max-md:w-8 max-md:px-1">
+                    {l.newNo ?? ''}
+                  </td>
                   <td className="w-4 select-none text-center">{SIGN[l.kind]}</td>
-                  <td className="whitespace-pre pr-3">{l.text}</td>
+                  <td
+                    className={
+                      wrap
+                        ? 'pr-3 break-words whitespace-pre-wrap max-md:pr-2'
+                        : 'pr-3 whitespace-pre max-md:pr-2'
+                    }
+                  >
+                    {l.text}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -72,9 +99,16 @@ function FileDiff({ file, open, onToggle }: { file: DiffFile; open: boolean; onT
 export function DiffView({ diff, truncated = false }: { diff: string; truncated?: boolean }) {
   const files = useMemo(() => parseUnifiedDiff(diff), [diff]);
   const totals = diffTotals(files);
+  const mobile = useIsMobile();
+  // Phone: a file accordion (all closed unless it is the only file) and long lines wrap by default.
+  const [wrap, setWrap] = useState(true);
   const [closed, setClosed] = useState<Record<string, boolean>>({});
   const isOpen = (f: DiffFile) =>
-    closed[f.path] === undefined ? f.lines.length <= COLLAPSE_OVER : !closed[f.path];
+    closed[f.path] === undefined
+      ? mobile
+        ? files.length === 1 && f.lines.length <= COLLAPSE_OVER
+        : f.lines.length <= COLLAPSE_OVER
+      : !closed[f.path];
   const setAll = (open: boolean) => setClosed(Object.fromEntries(files.map((f) => [f.path, !open])));
   if (files.length === 0)
     return (
@@ -96,6 +130,17 @@ export function DiffView({ diff, truncated = false }: { diff: string; truncated?
         <Button variant="ghost" onClick={() => setAll(false)} data-testid="diff-collapse-all">
           Collapse all
         </Button>
+        {mobile && (
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={wrap}
+              onChange={(e) => setWrap(e.target.checked)}
+              data-testid="diff-wrap"
+            />
+            Wrap long lines
+          </label>
+        )}
       </div>
       {truncated && (
         <p
@@ -111,6 +156,7 @@ export function DiffView({ diff, truncated = false }: { diff: string; truncated?
           key={f.path}
           file={f}
           open={isOpen(f)}
+          wrap={mobile && wrap}
           onToggle={() => setClosed((c) => ({ ...c, [f.path]: isOpen(f) }))}
         />
       ))}

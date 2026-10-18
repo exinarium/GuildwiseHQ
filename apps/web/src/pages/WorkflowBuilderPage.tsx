@@ -25,6 +25,7 @@ import { TemplateGallery } from '../components/builder/TemplateGallery.tsx';
 import { VersionCompare } from '../components/builder/VersionCompare.tsx';
 import { WorkflowBuilder } from '../components/builder/WorkflowBuilder.tsx';
 import { WorkflowEditor } from '../components/org/WorkflowEditor.tsx';
+import { LargerScreenNote } from '../components/ui/LargerScreenNote.tsx';
 import { Badge, Button, Callout, Disclosure, ErrorBox, ListSkeleton, PageHeader } from '../components/ui.tsx';
 import {
   type BuilderModel,
@@ -368,6 +369,7 @@ function BuilderSession({
         </p>
       )}
       <div className="flex flex-col gap-4">
+        {!readOnly && <LargerScreenNote />}
         {!cat.canEdit && (
           <Callout tone="info" role="note" data-testid="read-only-note">
             Only the organization's Owner and Admins change workflows. You can look at this one.

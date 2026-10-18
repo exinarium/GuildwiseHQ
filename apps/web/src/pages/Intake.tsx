@@ -53,7 +53,7 @@ export function IntakeNew() {
             role="tab"
             aria-selected={mode === m}
             onClick={() => setMode(m)}
-            className={`rounded-card border px-3 py-1.5 text-sm font-medium ${mode === m ? 'border-brand bg-brand-soft text-brand-soft-fg' : 'border-line text-muted hover:border-control'}`}
+            className={`min-h-11 flex-1 rounded-card border px-3 py-1.5 text-sm font-medium md:min-h-0 md:flex-none ${mode === m ? 'border-brand bg-brand-soft text-brand-soft-fg' : 'border-line text-muted hover:border-control'}`}
           >
             {m === 'chat' ? 'One ticket (chat)' : 'Batch'}
           </button>
@@ -78,7 +78,14 @@ export function IntakeNew() {
             )}
             <ErrorBox error={create.error} />
             <div>
-              <Button type="submit" variant="primary" disabled={!note.trim()} loading={create.isPending}>
+              <Button
+                type="submit"
+                variant="primary"
+                size="lg"
+                className="max-md:w-full md:h-9 md:px-3.5 md:text-sm"
+                disabled={!note.trim()}
+                loading={create.isPending}
+              >
                 Start intake
               </Button>
             </div>
@@ -97,7 +104,7 @@ export function IntakeNew() {
               <li key={i.id}>
                 <Link
                   to={`/intake/${i.id}`}
-                  className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3 text-sm hover:bg-sunken"
+                  className="flex min-h-12 flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3 text-sm hover:bg-sunken"
                 >
                   <span className="min-w-0 flex-1 truncate font-medium text-fg">
                     {i.externalKey ?? 'No ticket'}
@@ -130,7 +137,7 @@ export function IntakeView() {
       />
     );
   return (
-    <div className="mx-auto flex h-[calc(100dvh-8.5rem)] min-h-[30rem] max-w-5xl flex-col">
+    <div className="mx-auto flex h-[calc(100dvh-8.5rem)] min-h-[30rem] max-w-5xl flex-col max-md:h-[calc(100dvh-5.5rem-var(--app-bottom-inset,0px))]">
       <PageHeader
         title={`Intake ${i.externalKey ?? ''}`.trim()}
         sub={

@@ -135,7 +135,14 @@ export function BatchForm() {
         />
         <ErrorBox error={create.error} />
         <div>
-          <Button type="submit" variant="primary" disabled={!ready} loading={create.isPending}>
+          <Button
+            type="submit"
+            variant="primary"
+            size="lg"
+            className="max-md:w-full md:h-9 md:px-3.5 md:text-sm"
+            disabled={!ready}
+            loading={create.isPending}
+          >
             Start batch
           </Button>
         </div>

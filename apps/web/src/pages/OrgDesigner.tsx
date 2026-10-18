@@ -23,6 +23,7 @@ import { useProjects } from '../api/queries/projects.ts';
 import { RoleBuilder } from '../components/builder/RoleBuilder.tsx';
 import { ChatPanel } from '../components/ChatPanel.tsx';
 import { WorkflowGraph } from '../components/org/WorkflowGraph.tsx';
+import { LargerScreenNote } from '../components/ui/LargerScreenNote.tsx';
 import { panelId, tabId } from '../components/ui/Tabs.tsx';
 import {
   Badge,
@@ -107,6 +108,7 @@ export function OrgDesigner() {
           </Select>
         </div>
       )}
+      <LargerScreenNote />
       {cat.data && !cat.data.canEdit && (
         <Callout tone="info" role="note" data-testid="read-only-note" className="mb-4">
           You are an additional manager here: this is the owner's catalogue. Their roles, workflows and

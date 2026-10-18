@@ -9,6 +9,8 @@ import {
   useDeleteChat,
   useRestoreChat,
 } from '../api/queries/chats.ts';
+import { useIsMobile } from '../hooks/useIsMobile.ts';
+import { useVisualViewportHeight } from '../hooks/useVisualViewportHeight.ts';
 import { ChatPanel } from './ChatPanel.tsx';
 import { AgentAvatar } from './Face.tsx';
 import {
@@ -38,6 +40,8 @@ export function ChatDrawer({
   projectId?: string;
 }) {
   const agents = useAgents();
+  const mobile = useIsMobile();
+  const vvh = useVisualViewportHeight(mobile && open);
   const chats = useChats();
   const create = useCreateChat();
   const [agentId, setAgentId] = useState('');
@@ -59,7 +63,8 @@ export function ChatDrawer({
         <RadixDialog.Overlay className="fixed inset-0 z-40 bg-black/40" />
         <RadixDialog.Content
           aria-label="Chat"
-          className="fixed inset-y-0 right-0 z-50 flex w-full flex-col gap-3 border-l border-line bg-surface p-4 shadow-xl sm:w-[28rem]"
+          style={mobile && vvh ? { height: vvh, bottom: 'auto' } : undefined}
+          className="fixed inset-y-0 right-0 z-50 flex w-full flex-col gap-3 border-l border-line bg-surface p-4 pt-[max(1rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))] shadow-xl sm:w-[28rem]"
         >
           <div className="flex items-center justify-between">
             <RadixDialog.Title className="text-base font-semibold">Chat</RadixDialog.Title>
@@ -130,7 +135,7 @@ export function ChatDrawer({
                         <button
                           type="button"
                           onClick={() => setThreadId(c.threadId)}
-                          className="flex min-w-0 flex-1 items-center gap-2 rounded-control border border-line px-2 py-1.5 text-left text-sm hover:bg-sunken"
+                          className="flex min-w-0 flex-1 items-center gap-2 min-h-11 rounded-control border border-line px-2 py-1.5 text-left text-sm hover:bg-sunken"
                         >
                           <AgentAvatar agentId={c.agentId} name={c.agentName} size={20} />
                           <span className="min-w-0 flex-1 truncate">
