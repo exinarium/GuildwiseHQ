@@ -13,8 +13,8 @@ const BULLETS = [
 /** Sign-in frame: the always-dark brand panel (side on desktop, band above on tablet and phone) and the form column. */
 export function AuthFrame({ children }: { children: ReactNode }) {
   return (
-    <div className="flex min-h-dvh flex-col bg-canvas lg:flex-row">
-      <aside className="relative isolate flex shrink-0 flex-col justify-between overflow-hidden bg-side px-6 pt-[max(1.5rem,env(safe-area-inset-top))] pb-8 text-white max-lg:h-44 max-lg:rounded-b-[24px] max-sm:h-40 sm:max-lg:h-56 lg:w-[55%] lg:p-10">
+    <div className="auth-frame flex min-h-dvh flex-col bg-canvas lg:flex-row">
+      <aside className="relative isolate flex shrink-0 flex-col justify-between overflow-hidden bg-side px-6 pt-[max(1.5rem,env(safe-area-inset-top))] pb-8 text-white max-lg:h-44 max-lg:rounded-b-[24px] max-sm:h-48 sm:max-lg:h-56 lg:w-[55%] lg:p-10">
         <LoginArt className="absolute inset-0 -z-10 opacity-90" />
         <div
           aria-hidden="true"

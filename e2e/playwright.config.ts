@@ -17,6 +17,7 @@ export default defineConfig({
   projects: [
     { name: 'auth', testMatch: 'auth.spec.ts' },
     { name: 'landing', testMatch: 'landing.spec.ts', dependencies: ['auth'] },
+    { name: 'mobile-public', testMatch: 'mobile-public.spec.ts', dependencies: ['auth'] },
     { name: 'pairing', testMatch: 'pairing.spec.ts', dependencies: ['auth'] },
     { name: 'core-loop', testMatch: 'core-loop.spec.ts', dependencies: ['pairing'] },
     { name: 'desk', testMatch: 'desk.spec.ts', dependencies: ['core-loop'] },
