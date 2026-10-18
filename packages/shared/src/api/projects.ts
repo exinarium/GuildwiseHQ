@@ -202,6 +202,8 @@ export const ProjectDtoSchema = z.object({
     .object({ at: IsoTime, byUserId: z.uuid().nullable(), byName: z.string(), reason: z.string().nullable() })
     .nullable()
     .optional(),
+  /** Cards that are not done or cancelled, and the blocked ones among them (the projects list; absent elsewhere). */
+  cardCounts: z.object({ open: z.number().int(), blocked: z.number().int() }).optional(),
   createdAt: IsoTime,
   /** The workflow the project was created with (`research` for research-first projects). */
   startedAs: z.string().nullable().optional(),

@@ -1,4 +1,4 @@
-import { ArrowRightLeft, Search, Settings, SquareKanban } from 'lucide-react';
+import { ArrowRightLeft, Plus, Search, Settings, SquareKanban } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Navigate, useParams } from 'react-router';
 import { useMe } from '../api/queries/auth.ts';
@@ -28,9 +28,11 @@ import {
   PriorityPicker,
   Skeleton,
 } from '../components/ui.tsx';
+import { useIsMobile } from '../hooks/useIsMobile.ts';
 import { setLastProjectKey } from '../lib/lastProject.ts';
 import { money } from '../lib/money.ts';
 import { useCanConvert, useProjectWorkflowTraits } from '../lib/projectWorkflow.ts';
+import { stageStyle } from '../lib/stages.ts';
 
 function BoardSkeleton() {
   return (
@@ -57,6 +59,32 @@ function BoardSkeleton() {
   );
 }
 
+/** Phones: how many cards each stage holds, as a strip under the title (the desktop board shows it in its column heads). */
+function StageStrip({ columns }: { columns: { name: string; cards: unknown[] }[] }) {
+  return (
+    <ul
+      aria-label="Cards per stage"
+      data-testid="stage-strip"
+      className="scroll-fade-x -mx-4 -mt-2 mb-3 flex gap-2 overflow-x-auto px-4 md:hidden"
+    >
+      {columns.map((c) => (
+        <li
+          key={c.name}
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-line bg-surface px-2.5 py-1 text-xs text-muted"
+        >
+          <span
+            aria-hidden="true"
+            className="size-2 rounded-full"
+            style={{ background: stageStyle(c.name).color }}
+          />
+          {c.name}
+          <span className="tnum font-semibold text-fg">{c.cards.length}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export function Board() {
   const { projectKey = '' } = useParams();
   const projects = useProjects();
@@ -72,6 +100,7 @@ export function Board() {
   const traits = useProjectWorkflowTraits(project?.id, project?.workflowKey);
   const [filter, setFilter] = useState(NO_FILTER);
   const me = useMe();
+  const isMobile = useIsMobile();
   const [converting, setConverting] = useState(false);
   const detail = useProject(project?.workflowKey === 'research' ? project.id : undefined);
   const canConvert = useCanConvert(project);
@@ -124,7 +153,7 @@ export function Board() {
   const setF = (patch: Partial<typeof filter>) => setFilter((f) => ({ ...f, ...patch }));
 
   return (
-    <div>
+    <div className="pb-20 md:pb-0">
       <PageHeader
         title={project.name}
         documentTitle={`${project.name} board`}
@@ -167,12 +196,13 @@ export function Board() {
             >
               <Settings aria-hidden="true" className="size-4" />
             </ButtonLink>
-            <ButtonLink to={`/cards/new?project=${project.key}`} variant="primary">
+            <ButtonLink to={`/cards/new?project=${project.key}`} variant="primary" className="max-md:hidden">
               New card
             </ButtonLink>
           </>
         }
       />
+      {board.data && <StageStrip columns={board.data.columns} />}
       <ProjectPausedBanner project={project} />
       <UsageLimitBanner limit={project.usageLimit} />
       <PlatformPauseBanner projectId={project.id} />
@@ -211,7 +241,11 @@ export function Board() {
             className="h-9 w-full rounded-control border border-control bg-surface pr-3 pl-9 text-base text-fg placeholder:text-subtle focus-visible:border-brand focus-visible:ring-2 focus-visible:ring-ring/25 focus-visible:outline-none [@media(pointer:coarse)]:h-11"
           />
         </div>
-        <div className="flex gap-2 overflow-x-auto" role="group" aria-label="Filters">
+        <div
+          className="flex gap-2 overflow-x-auto max-md:-mx-4 max-md:w-[calc(100%+2rem)] max-md:px-4"
+          role="group"
+          aria-label="Filters"
+        >
           <FilterChip pressed={filter.blocked} onClick={() => setF({ blocked: !filter.blocked })}>
             Blocked
           </FilterChip>
@@ -263,6 +297,18 @@ export function Board() {
         />
       )}
       {board.data && (cards.length > 0 || phaseId) && <BoardView board={board.data} filter={filter} />}
+      {isMobile && (
+        <ButtonLink
+          to={`/cards/new?project=${project.key}`}
+          variant="primary"
+          size="lg"
+          data-testid="new-card-fab"
+          className="fixed right-4 bottom-[calc(var(--app-bottom-inset,0px)+1rem)] z-20 shadow-lg md:hidden"
+        >
+          <Plus aria-hidden="true" className="size-5" />
+          New card
+        </ButtonLink>
+      )}
     </div>
   );
 }

@@ -10,8 +10,9 @@ import { useMediaQuery } from '../lib/useMediaQuery.ts';
 import { BackoffBadge } from './BackoffBadge.tsx';
 import { BlockedReasonNotice, BudgetNotice, HygieneNotice } from './BoardCardNotices.tsx';
 import { AgentAvatar } from './Face.tsx';
+import { MobileBoard } from './MobileBoard.tsx';
 import { cx } from './ui/cx.ts';
-import { Avatar, Badge, FilterChip } from './ui.tsx';
+import { Avatar, Badge } from './ui.tsx';
 import { WorkabilityWarning } from './WorkabilityWarning.tsx';
 
 const WAITING_LABEL = {
@@ -221,7 +222,7 @@ function readHide(): boolean {
 
 /**
  * Columns arrive from the server in display order (see `boardColumns`); we render them as given. Desktop: sideways
- * scroll with empty columns folded to a strip. Phones: a tab strip picks one column at a time (all stay in the DOM).
+ * scroll with empty columns folded to a strip. Phones: an accordion list (`MobileBoard`).
  */
 export function BoardView({
   board,
@@ -234,7 +235,6 @@ export function BoardView({
 }) {
   const wide = useMediaQuery('(min-width: 768px)', true);
   const [hideEmpty, setHideEmpty] = useState(readHide);
-  const [picked, setPicked] = useState<string | null>(null);
   // Empty columns folded into a pill can be opened one by one (until the page is left).
   const [opened, setOpened] = useState<Set<string>>(new Set());
   const setOpen = (name: string, open: boolean) =>
@@ -273,15 +273,6 @@ export function BoardView({
     }
   }, [board]);
 
-  const fallback =
-    cols.find((c) => c.name === 'Blocked' && c.cards.length)?.name ??
-    cols.find((c) => c.name === 'Review' && c.cards.length)?.name ??
-    cols.find((c) => c.name === 'In progress' && c.cards.length)?.name ??
-    cols.find((c) => c.cards.length)?.name ??
-    cols[0]?.name ??
-    '';
-  const current = picked && cols.some((c) => c.name === picked) ? picked : fallback;
-
   const toggleHide = (v: boolean) => {
     setHideEmpty(v);
     try {
@@ -291,33 +282,28 @@ export function BoardView({
     }
   };
 
+  if (!wide)
+    return (
+      <div>
+        <p role="status" aria-live="polite" className="sr-only">
+          {said}
+        </p>
+        <MobileBoard
+          projectId={board.projectId}
+          workflowKey={board.workflowKey}
+          columns={cols}
+          filtering={filter !== NO_FILTER}
+          now={now}
+          flash={flash}
+        />
+      </div>
+    );
+
   return (
     <div>
       <p role="status" aria-live="polite" className="sr-only">
         {said}
       </p>
-      {!wide && (
-        <div
-          role="group"
-          aria-label="Choose a column"
-          className="scroll-fade-x sticky top-14 z-10 -mx-4 mb-3 flex gap-2 overflow-x-auto bg-canvas/95 px-4 py-2 backdrop-blur"
-        >
-          {cols.map((c) => {
-            const s = stageStyle(c.name);
-            return (
-              <FilterChip
-                key={c.name}
-                pressed={c.name === current}
-                count={c.cards.length}
-                onClick={() => setPicked(c.name)}
-              >
-                <span aria-hidden="true" className="size-2 rounded-full" style={{ background: s.color }} />
-                {c.name}
-              </FilterChip>
-            );
-          })}
-        </div>
-      )}
       {wide && (
         <div className="mb-3 flex items-center justify-between gap-3 text-sm text-muted">
           <span className="tnum">{total} cards</span>
@@ -352,7 +338,6 @@ export function BoardView({
           const s = stageStyle(col.name);
           const Icon = s.icon;
           const folded = wide && hideEmpty && col.cards.length === 0 && !opened.has(col.name);
-          const hidden = !wide && col.name !== current;
           if (folded)
             return (
               <button
@@ -375,7 +360,6 @@ export function BoardView({
               key={col.name}
               aria-label={col.name}
               data-testid={`column-${col.name}`}
-              hidden={hidden}
               className={cx(
                 'relative flex shrink-0 snap-start flex-col overflow-hidden rounded-card bg-sunken',
                 wide ? 'w-[17rem] flex-1 basis-[17rem]' : 'w-full',

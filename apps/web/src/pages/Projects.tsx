@@ -14,6 +14,7 @@ import {
   useRestoreProject,
 } from '../api/queries/projects.ts';
 import { DeleteProjectDialog } from '../components/DeleteProjectDialog.tsx';
+import { ProjectCounts } from '../components/ProjectCounts.tsx';
 import { ProjectInvitations } from '../components/ProjectInvitations.tsx';
 import { PausedBadge } from '../components/ProjectPause.tsx';
 import { ProjectRankList } from '../components/ProjectRankList.tsx';
@@ -82,6 +83,7 @@ function ProjectCard({ p, activeOrgId }: { p: ProjectDto; activeOrgId: string | 
           </Badge>
         )}
       </p>
+      <ProjectCounts project={p} className="mt-2 md:hidden" />
     </li>
   );
 }

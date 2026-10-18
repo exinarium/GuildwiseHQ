@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { type DragEvent, type KeyboardEvent, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
+import { ProjectCounts } from './ProjectCounts.tsx';
 import { PausedBadge } from './ProjectPause.tsx';
 import { projectTypeLabel } from './shell/ProjectSwitcher.tsx';
 import { cx } from './ui/cx.ts';
@@ -155,7 +156,7 @@ export function ProjectRankList({
               }}
               onDrop={(e) => interactive && drop(e, i)}
               className={cx(
-                'group relative flex items-center gap-3 rounded-card border border-line bg-surface p-3 pr-2 transition-shadow hover:border-control hover:shadow-md',
+                'group relative flex flex-wrap items-center gap-3 rounded-card md:flex-nowrap border border-line bg-surface p-3 pr-2 transition-shadow hover:border-control hover:shadow-md',
                 dragging && 'opacity-50',
                 showLineBefore &&
                   'before:absolute before:inset-x-2 before:-top-[5px] before:h-[3px] before:rounded-full before:bg-brand',
@@ -187,7 +188,7 @@ export function ProjectRankList({
               <span className="hidden size-10 shrink-0 items-center justify-center rounded-control bg-brand-soft text-brand-soft-fg sm:flex">
                 <Icon aria-hidden="true" className="size-5" />
               </span>
-              <div className="min-w-0 flex-1">
+              <div className="min-w-0 flex-1 max-md:basis-40">
                 <Link
                   to={`/p/${p.key}/board`}
                   className="block truncate text-lg font-semibold text-fg hover:underline"
@@ -204,9 +205,10 @@ export function ProjectRankList({
                     {p.myRole === 'owner' ? 'owner' : 'shared with you'}
                   </Badge>
                 </p>
+                <ProjectCounts project={p} className="mt-1.5 md:hidden" />
               </div>
               {interactive && (
-                <div className="flex shrink-0 items-center">
+                <div className="flex shrink-0 items-center max-md:ml-auto">
                   <button
                     type="button"
                     data-control="up"

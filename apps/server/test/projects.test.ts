@@ -34,6 +34,7 @@ describe('projects', () => {
     expect(r.body.members).toHaveLength(1);
     const list = await ok<any>(t.req('GET', '/api/projects', { cookie: a.cookie }));
     expect(list.projects.map((p: any) => p.key)).toEqual(['WEB']);
+    expect(list.projects[0].cardCounts).toEqual({ open: 0, blocked: 0 });
     const me = await ok<any>(t.req('GET', '/api/auth/me', { cookie: a.cookie }));
     expect(me.visibleProjectIds).toEqual([r.body.project.id]);
   });

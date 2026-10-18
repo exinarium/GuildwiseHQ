@@ -128,9 +128,22 @@ export async function listProjects(
   ).filter((p) => !department || p.department === department);
   const budgets = await budgetsFor(ctx, userId, r);
   const limits = await usageLimitsFor(ctx, r);
+  const counts = new Map(
+    (
+      await rows(
+        ctx.pool,
+        `SELECT project_id,
+                count(*) FILTER (WHERE status NOT IN ('done','cancelled'))::int AS open,
+                count(*) FILTER (WHERE status = 'blocked')::int AS blocked
+           FROM cards WHERE project_id = ANY($1::uuid[]) GROUP BY project_id`,
+        [r.map((p) => p.id)],
+      )
+    ).map((c) => [c.project_id as string, { open: c.open as number, blocked: c.blocked as number }]),
+  );
   return r.map((p) => ({
     ...toProjectDto(p, p.my_role),
     budget: budgets.get(p.id) as BudgetDto,
+    cardCounts: counts.get(p.id) ?? { open: 0, blocked: 0 },
     ...(limits.has(p.id) ? { usageLimit: limits.get(p.id) } : {}),
   }));
 }
