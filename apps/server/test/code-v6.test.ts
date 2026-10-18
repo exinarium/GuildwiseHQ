@@ -180,6 +180,23 @@ describe('pre-review', () => {
       )[0]!.n,
     ).toBe(0);
   });
+
+  it('the pre-review does not rate the risk: a risk call it sends (the architect report text) is not stored', async () => {
+    await team();
+    const card = await cardInPreReview();
+    const architectText = '# Design\n\nThe architect investigated the importer and designs it so.';
+    await p.runAt('Pre', verdict('approve', { riskAnalysis: architectText, qaFocus: 'x' }), {}, SHA1);
+    const row = await cardRow(card.id);
+    expect(row.stage).toBe('review');
+    expect(row.review_risk).toBeNull();
+    const handoff = (
+      await q('SELECT data FROM card_handoffs WHERE card_id=$1 AND stage=$2', [card.id, 'pre_review'])
+    )[0]!;
+    expect(handoff.data).toEqual({ score: 4 });
+    // the Opus review's own risk call is what the card keeps
+    await p.runAt('Rex', verdict('approve', { riskAnalysis: 'Opus analysis' }), {}, SHA1);
+    expect((await cardRow(card.id)).review_risk).toMatchObject({ level: 'low', analysis: 'Opus analysis' });
+  });
 });
 
 describe('build evidence and the commit it is bound to', () => {

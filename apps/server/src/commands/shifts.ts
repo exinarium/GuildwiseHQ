@@ -58,7 +58,7 @@ import { affinityEvent } from './question-flow.ts';
 import { raiseQuestion } from './questions.ts';
 import { rebaseConflictEvents } from './rebase.ts';
 import { buildPublicationEvents } from './research.ts';
-import { mergeRisk, riskFields, type StoredRisk } from './review-risk.ts';
+import { mergeRisk, riskFields, type StoredRisk, withoutRisk } from './review-risk.ts';
 import { cardUsage, limitReached, stopLossBudget, stopLossEvents } from './stop-loss.ts';
 import {
   endTestEnvironmentIn,
@@ -290,7 +290,11 @@ export async function applyShiftReport(
     if (problem) return { accepted: false, error: problem };
   }
 
-  let handoffData: Record<string, unknown> = payloadData;
+  // The pre-review does not rate the risk (the Opus review does): whatever risk call it sent (a reviewer covering the
+  // pre-review has been seen to attach an existing document, the architect's report) is neither stored on the card nor
+  // kept on the handoff.
+  let handoffData: Record<string, unknown> =
+    card.stage === 'pre_review' ? withoutRisk(payloadData) : payloadData;
   let main: AppendInput | undefined;
   let mains: AppendInput[] | null = null;
   const after: AppendInput[] = [];
@@ -406,7 +410,7 @@ export async function applyShiftReport(
           reviewerAgentId: agent.id,
           score: payloadData.score,
           comments: report.note,
-          ...riskFields(payloadData),
+          ...(card.stage === 'pre_review' ? {} : riskFields(payloadData)),
           approvalsSoFar: soFar,
           approvalsRequired: required,
           toStage,
@@ -434,7 +438,7 @@ export async function applyShiftReport(
           score: payloadData.score,
           criteriaMissed: payloadData.criteriaMissed ?? [],
           comments: report.note,
-          ...riskFields(payloadData),
+          ...(card.stage === 'pre_review' ? {} : riskFields(payloadData)),
         },
       });
       // Stop-loss (design 11): a card that used its review rounds or build passes is parked for the architect;

@@ -2096,7 +2096,12 @@ export class ShiftSupervisor {
     }
 
     // Reviewers must report the adversarial review's risk call (backlog #70); other roles never send one.
-    if (report.kind === 'outcome' && msg.agent.roleKey === 'reviewer') {
+    // (The pre-review does not rate the risk, also when a reviewer covers it.)
+    if (
+      report.kind === 'outcome' &&
+      msg.agent.roleKey === 'reviewer' &&
+      msg.brief.shift.stage !== 'pre_review'
+    ) {
       const reviewOutcome = msg.brief.shift.outcomes.find((o) => o.id === report.outcomeId);
       const d = (toSend as { data: Record<string, unknown> }).data as {
         risk?: string;

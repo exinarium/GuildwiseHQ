@@ -54,7 +54,18 @@ export function cardRoutes(ctx: Ctx) {
       const { cardId, missing } = await createCard(ctx, s.user, req.body);
       const { card } = await loadVisibleCard(ctx.pool, s.user.id, cardId);
       reply.code(201);
-      return { card: await toCardDto(ctx, card), ...(missing ? { missing } : {}) };
+      return {
+        card: await toCardDto(ctx, card),
+        ...(missing
+          ? {
+              missing,
+              specified: false,
+              message: `Saved as a draft, not specified: required fields are missing (${missing.join(', ')}).`,
+            }
+          : req.body.specify
+            ? { specified: true }
+            : {}),
+      };
     });
 
     app.get('/api/cards/:id', { schema: { params: CardParamsSchema } }, async (req) => {

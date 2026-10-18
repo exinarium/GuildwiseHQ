@@ -50,6 +50,12 @@ export function riskFields(data: Record<string, any>): {
   };
 }
 
+/** A review report's data without the risk call (`risk`, `riskAnalysis`, `qaFocus`). */
+export function withoutRisk(data: Record<string, any>): Record<string, any> {
+  const { risk: _r, riskAnalysis: _a, qaFocus: _q, ...rest } = data;
+  return rest;
+}
+
 export const riskOf = (card: Row): StoredRisk | null => {
   const r = (card.review_risk as StoredRisk | null) ?? null;
   return r && (r.level !== 'unknown' || r.analysis) ? r : null;

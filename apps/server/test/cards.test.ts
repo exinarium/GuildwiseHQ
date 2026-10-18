@@ -92,6 +92,22 @@ describe('card creation', () => {
     expect([...r.body.missing].sort()).toEqual(
       ['acceptanceCriteria', 'affectedAreas', 'constraints', 'requirements', 'testPlan'].sort(),
     );
+    // the response says outright that nothing was specified, and why
+    expect(r.body.specified).toBe(false);
+    expect(r.body.message).toMatch(/draft.*requirements/);
+  });
+
+  it('create with specify:true and every field present says specified:true', async () => {
+    const r = await post({
+      projectId: w.projectId,
+      title: 'Complete',
+      cardType: 'feature',
+      fields: fullFields(),
+      specify: true,
+    });
+    expect(r.status).toBe(201);
+    expect(r.body).toMatchObject({ specified: true });
+    expect(r.body.missing).toBeUndefined();
   });
 
   it('specify returns 422 with the missing keys, then succeeds once complete: queued in build / To do', async () => {

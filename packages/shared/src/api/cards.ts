@@ -371,6 +371,10 @@ export const CreateCardResponseSchema = z.object({
   card: CardDtoSchema,
   /** Present when `specify` was requested but could not be done. */
   missing: z.array(z.string()).optional(),
+  /** Present when `specify` was requested: `false` means the card was saved as a draft, `missing` says why. */
+  specified: z.boolean().optional(),
+  /** Present with `missing`: a sentence to show, "Saved as a draft: it cannot be specified yet, missing ...". */
+  message: z.string().optional(),
 });
 
 /** `PATCH /api/cards/:id` (owner). */
