@@ -16,7 +16,7 @@ describe('price table', () => {
     expect(priceFor('claude-opus-4-5').label).toBe('Opus');
     expect(priceFor('SONNET').label).toBe('Sonnet');
     expect(priceFor('claude-fable-5-1').label).toBe('Fable');
-    expect(priceFor('claude-fable-5-1')).toMatchObject({
+    expect(priceFor('claude-fable-5')).toMatchObject({
       input: 10,
       output: 50,
       cacheRead: 1,
@@ -119,5 +119,16 @@ describe('money formatting', () => {
     expect(formatMoney(1_234_000_000, 'USD')).toBe('$1,234');
     expect(formatMoney(5_000_000, 'EUR')).toBe('€5.00');
     expect(formatMoney(5_000_000, 'XXQ')).toContain('5.00');
+  });
+
+  it('follows the published cache-read and older-version prices (checked 18 Oct 2026)', () => {
+    const read = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 1_000_000 };
+    expect(costUsdMicros('claude-sonnet-5-5', read)).toBe(100_000);
+    expect(costUsdMicros('claude-sonnet-5', read)).toBe(200_000);
+    expect(costUsdMicros('claude-fable-5-1', read)).toBe(250_000);
+    expect(costUsdMicros('claude-fable-5', read)).toBe(1_000_000);
+    expect(costUsdMicros('claude-opus-5-5', read)).toBe(200_000);
+    expect(costUsdMicros('claude-sonnet-4-6', { inputTokens: 1_000_000, outputTokens: 1_000_000 })).toBe(18_000_000);
+    expect(costUsdMicros('claude-haiku-5-5', { inputTokens: 1_000_000, outputTokens: 1_000_000 })).toBe(600_000);
   });
 });

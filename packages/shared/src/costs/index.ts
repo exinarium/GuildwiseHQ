@@ -23,7 +23,10 @@ export interface ModelPrice {
 /**
  * DEFAULT price table: Anthropic's list prices in USD per million tokens as of October 2026 (cache writes at the
  * 5-minute rate, 1.25x the input price, or at the 1-hour rate, 2x, when the usage says how many tokens were written with
- * the longer TTL; cache reads at 10% of the input price, 5% on Opus 5.5). These are DEFAULTS, not billing data:
+ * the longer TTL; cache reads at 10% of the input price, 5% on Opus 5.5, Sonnet 5.5 and Fable 5.1). Checked against
+ * platform.claude.com/docs/en/about-claude/pricing on 18 Oct 2026. Haiku 5.5 doubles its price ($0.50 / $2.50) for a
+ * request over 100K prompt tokens; usage arrives per shift, not per request, so the table uses the lower tier and can
+ * under-count Haiku shifts with very large prompts. These are DEFAULTS, not billing data:
  * verify them against anthropic.com/pricing, because the real invoice depends on the plan, discounts and
  * batch/priority tiers. The table is deliberately plain data in shared config so the super admin can edit it later (a
  * platform setting that stamps `costMicros` on new `ShiftEnded` events; history keeps the price it was recorded at).
@@ -31,12 +34,15 @@ export interface ModelPrice {
  * fallback for an unknown model. The SQL in migration 1318 mirrors this table.
  */
 export const DEFAULT_MODEL_PRICES: readonly ModelPrice[] = [
+  { match: 'fable-5-1', label: 'Fable', input: 10, output: 50, cacheRead: 0.25, cacheWrite: 12.5, cacheWrite1h: 20 },
   { match: 'fable', label: 'Fable', input: 10, output: 50, cacheRead: 1, cacheWrite: 12.5, cacheWrite1h: 20 },
   // Opus 5.5 is cheaper than the earlier Opus models ($4 / $20, cache reads $0.20); the plain `opus` alias stays at the
   // earlier price so spend is never under-counted when the alias points at an older Opus.
   { match: 'opus-5-5', label: 'Opus', input: 4, output: 20, cacheRead: 0.2, cacheWrite: 5, cacheWrite1h: 8 },
   { match: 'opus', label: 'Opus', input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25, cacheWrite1h: 10 },
-  // Sonnet is $2 / $10 (cache reads $0.20); older Sonnet versions are priced the same, as the table always did.
+  // Sonnet 5.5 and 5 are $2 / $10; cache reads are $0.10 on 5.5 and $0.20 on 5. Sonnet 4.x is $3 / $15.
+  { match: 'sonnet-5-5', label: 'Sonnet', input: 2, output: 10, cacheRead: 0.1, cacheWrite: 2.5, cacheWrite1h: 4 },
+  { match: 'sonnet-4', label: 'Sonnet', input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75, cacheWrite1h: 6 },
   {
     match: 'sonnet',
     label: 'Sonnet',
