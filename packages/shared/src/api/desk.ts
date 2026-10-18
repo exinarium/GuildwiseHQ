@@ -182,6 +182,8 @@ export const ResolveDeskItemRequestSchema = z.object({
   resolution: z.enum(['approved', 'rejected', 'acknowledged']),
   editedBody: z.string().max(20000).optional(),
   note: z.string().max(2000).optional(),
+  /** Approving a standing-order proposal that repeats a live order: `merge` puts its wording into that order. */
+  onDuplicate: z.literal('merge').optional(),
 });
 export type ResolveDeskItemRequest = z.infer<typeof ResolveDeskItemRequestSchema>;
 

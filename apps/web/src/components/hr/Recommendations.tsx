@@ -1,8 +1,14 @@
 import type { Recommendation, RoleUpdate } from '@aom/shared';
 import { useState } from 'react';
 import { Link } from 'react-router';
-import { useApplyRecommendation, useResetRole } from '../../api/queries/hr.ts';
-import { Badge, Button, Dialog, ErrorBox, Panel } from '../ui.tsx';
+import {
+  useApplyRecommendation,
+  useDismissAllRecommendations,
+  useDismissRecommendation,
+  useResetRole,
+} from '../../api/queries/hr.ts';
+import { ConfirmDialog } from '../ui/ConfirmDialog.tsx';
+import { Badge, Button, Dialog, ErrorBox, Panel, TextArea } from '../ui.tsx';
 
 const KIND_LABEL: Record<Recommendation['kind'], string> = {
   blocked_ledger: 'Blocked',
@@ -26,8 +32,21 @@ const APPLY_LABEL: Record<Recommendation['action']['type'], string> = {
 };
 
 /** Rule-based recommendations with the evidence that triggered them; applying one performs the change through events. */
-export function RecommendationList({ recommendations }: { recommendations: Recommendation[] }) {
+export function RecommendationList({
+  recommendations,
+  projectId,
+}: {
+  recommendations: Recommendation[];
+  projectId?: string | undefined;
+}) {
   const apply = useApplyRecommendation();
+  const dismiss = useDismissRecommendation();
+  const dismissAll = useDismissAllRecommendations();
+  const [askOne, setAskOne] = useState<Recommendation | null>(null);
+  const [askAll, setAskAll] = useState(false);
+  const [reason, setReason] = useState('');
+  // The apply that failed, so its message sits on its own card (a 409 says the order already exists).
+  const [failedId, setFailedId] = useState<string | null>(null);
   const [done, setDone] = useState<Record<string, { effect: string; deskItemId: string | null }>>({});
   // An applied recommendation disappears from the server's list at once: keep showing it with its outcome.
   const [applied, setApplied] = useState<Record<string, Recommendation>>({});
@@ -38,7 +57,21 @@ export function RecommendationList({ recommendations }: { recommendations: Recom
   if (shown.length === 0) return null;
   return (
     <section aria-label="Recommendations" data-testid="recommendations" className="mb-4">
-      <h2 className="mb-3 text-lg font-semibold text-fg">Recommendations</h2>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-lg font-semibold text-fg">Recommendations</h2>
+        {recommendations.length > 1 && (
+          <Button
+            variant="ghost"
+            data-testid="dismiss-all-recs"
+            onClick={() => {
+              setReason('');
+              setAskAll(true);
+            }}
+          >
+            Dismiss all ({recommendations.length})
+          </Button>
+        )}
+      </div>
       <ul className="flex flex-col gap-2">
         {shown.map((r) => (
           <li key={r.id} data-testid={`rec-${r.kind}`} data-rec-id={r.id}>
@@ -57,9 +90,11 @@ export function RecommendationList({ recommendations }: { recommendations: Recom
                     variant="primary"
                     data-testid={`apply-${r.kind}`}
                     disabled={apply.isPending}
-                    onClick={() =>
+                    onClick={() => {
+                      setFailedId(r.id);
                       apply.mutate(r.id, {
                         onSuccess: (res) => {
+                          setFailedId(null);
                           setDone((d) => ({ ...d, [r.id]: res }));
                           setApplied((a) => ({ ...a, [r.id]: r }));
                           // keep the outcome on screen for a moment, then let the server's list win
@@ -72,8 +107,8 @@ export function RecommendationList({ recommendations }: { recommendations: Recom
                             3000,
                           );
                         },
-                      })
-                    }
+                      });
+                    }}
                   >
                     {APPLY_LABEL[r.action.type]}
                   </Button>
@@ -82,7 +117,28 @@ export function RecommendationList({ recommendations }: { recommendations: Recom
                     Not yours to apply
                   </Badge>
                 )}
+                {!done[r.id] && (
+                  <Button
+                    variant="ghost"
+                    className="max-sm:border max-sm:border-control"
+                    data-testid={`dismiss-${r.kind}`}
+                    onClick={() => {
+                      setReason('');
+                      setAskOne(r);
+                    }}
+                  >
+                    Dismiss
+                  </Button>
+                )}
               </div>
+              {failedId === r.id && apply.error && (
+                <div data-testid="rec-apply-error">
+                  <ErrorBox error={apply.error} />
+                  <p className="mt-1 text-sm text-muted">
+                    Nothing was added. Dismiss this recommendation if it is already covered.
+                  </p>
+                </div>
+              )}
               <p className="text-sm text-muted">{r.summary}</p>
               {r.action.type === 'standing_order' && (
                 <p
@@ -128,7 +184,43 @@ export function RecommendationList({ recommendations }: { recommendations: Recom
           </li>
         ))}
       </ul>
-      <ErrorBox error={apply.error} />
+      <ConfirmDialog
+        open={!!askOne}
+        onOpenChange={(o) => !o && setAskOne(null)}
+        title="Dismiss this recommendation?"
+        description="HR will not suggest it again for the next 30 days. Nothing is changed."
+        confirmLabel="Dismiss"
+        cancelLabel="Keep"
+        pending={dismiss.isPending}
+        onConfirm={() =>
+          askOne &&
+          dismiss.mutate(
+            { id: askOne.id, reason },
+            { onSuccess: () => setAskOne(null), onError: () => undefined },
+          )
+        }
+      >
+        <TextArea label="Reason (optional)" value={reason} onChange={(e) => setReason(e.target.value)} />
+        <ErrorBox error={dismiss.error} />
+      </ConfirmDialog>
+      <ConfirmDialog
+        open={askAll}
+        onOpenChange={setAskAll}
+        title={`Dismiss all ${recommendations.length} recommendations?`}
+        description="HR will not suggest them again for the next 30 days. Nothing is changed."
+        confirmLabel="Dismiss all"
+        cancelLabel="Keep"
+        pending={dismissAll.isPending}
+        onConfirm={() =>
+          dismissAll.mutate(
+            { ...(projectId ? { projectId } : {}), ...(reason.trim() ? { reason: reason.trim() } : {}) },
+            { onSuccess: () => setAskAll(false) },
+          )
+        }
+      >
+        <TextArea label="Reason (optional)" value={reason} onChange={(e) => setReason(e.target.value)} />
+        <ErrorBox error={dismissAll.error} />
+      </ConfirmDialog>
     </section>
   );
 }

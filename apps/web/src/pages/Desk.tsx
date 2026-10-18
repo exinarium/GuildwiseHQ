@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { type FormEvent, useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router';
+import { ApiError } from '../api/client.ts';
 import { useOverrideBudget } from '../api/queries/costs.ts';
 import { useAnswerDeskItem, useDesk, useDismissDeskItem, useResolveDeskItem } from '../api/queries/desk.ts';
 import { ApprovalDeskItem } from '../components/ApprovalDeskItem.tsx';
@@ -613,7 +614,8 @@ function DismissButton({ item }: { item: DeskItemDto }) {
   const [ask, setAsk] = useState(false);
   return (
     <>
-      <Button variant="ghost" onClick={() => setAsk(true)}>
+      {/* A phone has no hover to hint at a bare text button: Dismiss gets an outline there. */}
+      <Button variant="ghost" className="max-sm:border max-sm:border-control" onClick={() => setAsk(true)}>
         Dismiss
       </Button>
       <ConfirmDialog
@@ -630,7 +632,10 @@ function DismissButton({ item }: { item: DeskItemDto }) {
               setAsk(false);
               toast.success('Dismissed');
             },
-            onError: () => setAsk(false),
+            onError: (err) => {
+              setAsk(false);
+              toast.error(err instanceof Error ? err.message : 'Could not dismiss this item');
+            },
           })
         }
       />
@@ -809,17 +814,33 @@ function ResolveButtons({ item }: { item: DeskItemDto }) {
         : item.subkind === 'repo_create'
           ? 'Create repository'
           : 'Approve';
-  const approve = () =>
+  const approve = (merge = false) =>
     resolve.mutate(
-      { id: item.id, body: { resolution: 'approved', ...(edited ? { editedBody: edited } : {}) } },
+      {
+        id: item.id,
+        body: {
+          resolution: 'approved',
+          ...(edited ? { editedBody: edited } : {}),
+          ...(merge ? { onDuplicate: 'merge' as const } : {}),
+        },
+      },
       {
         onSuccess: () => {
           setConfirmApprove(false);
-          toast.success(item.subkind === 'ceo_recommendation' ? 'Done' : 'Approved');
+          toast.success(
+            item.subkind === 'ceo_recommendation' ? 'Done' : merge ? 'Merged into the ledger' : 'Approved',
+          );
         },
-        onError: () => setConfirmApprove(false),
+        onError: (err) => {
+          setConfirmApprove(false);
+          // The sheet scrolls under the sticky bar: say it where the thumb is as well as above the buttons.
+          toast.error(err instanceof Error ? err.message : 'Could not approve this item');
+        },
       },
     );
+  // A standing order that repeats a live one is refused (409): offer to merge it into that order, or to dismiss it.
+  const duplicate =
+    resolve.error instanceof ApiError && resolve.error.code === 'duplicate_order' ? resolve.error : null;
   return (
     <div className="mt-4 flex flex-col gap-3">
       {/* On a phone an approval is two taps: the button, then a confirmation sheet (no accidental thumb approvals). */}
@@ -831,7 +852,7 @@ function ResolveButtons({ item }: { item: DeskItemDto }) {
         confirmLabel={approveLabel}
         tone="primary"
         pending={resolve.isPending}
-        onConfirm={approve}
+        onConfirm={() => approve()}
       />
       {editable && (
         <TextArea
@@ -840,8 +861,28 @@ function ResolveButtons({ item }: { item: DeskItemDto }) {
           onChange={(e) => setRule(e.target.value)}
         />
       )}
-      <ErrorBox error={resolve.error} />
-      <div className="sticky-actions flex flex-col-reverse gap-2 sm:flex-row sm:flex-wrap [&>button]:max-sm:w-full">
+      {duplicate ? (
+        <Callout tone="warning" role="alert" data-testid="desk-duplicate" title="Already in the ledger">
+          <p>{duplicate.message}</p>
+          <Button
+            className="mt-2"
+            data-testid="desk-merge"
+            loading={resolve.isPending}
+            onClick={() => approve(true)}
+          >
+            Merge into that order
+          </Button>
+        </Callout>
+      ) : (
+        <ErrorBox error={resolve.error} />
+      )}
+      {/* On a phone: the primary action on top, Dismiss and Reject side by side under it (a short bar, nothing below the fold). */}
+      <div
+        className={cx(
+          'sticky-actions gap-2 sm:flex sm:flex-row sm:flex-wrap [&>button]:max-sm:w-full',
+          item.kind === 'approval' ? 'max-sm:grid max-sm:grid-cols-2' : 'flex flex-col-reverse',
+        )}
+      >
         <DismissButton item={item} />
         {item.kind === 'approval' ? (
           <>
@@ -857,6 +898,7 @@ function ResolveButtons({ item }: { item: DeskItemDto }) {
             </Button>
             <Button
               variant="primary"
+              className="max-sm:order-first max-sm:col-span-2"
               loading={resolve.isPending}
               data-testid="desk-approve"
               onClick={() => (mobile ? setConfirmApprove(true) : approve())}

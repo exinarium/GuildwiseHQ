@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AgentStats, WorkQualityPanel } from '../components/hr/AgentStats.tsx';
 import { BarChart, CompareBar, Sparkline } from '../components/hr/Charts.tsx';
 import { RecommendationList, RoleUpdates } from '../components/hr/Recommendations.tsx';
@@ -299,5 +299,85 @@ describe('RoleUpdates', () => {
     await userEvent.click(screen.getByTestId('confirm-reset'));
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
     expect((fetchMock.mock.calls[0] as unknown as [string])[0]).toBe('/api/hr/roles/tester/reset');
+  });
+});
+
+describe.each([
+  ['desktop', false],
+  ['mobile', true],
+])('dismissing recommendations on %s', (_n, mobile) => {
+  const realMM = window.matchMedia;
+  beforeEach(() => {
+    window.matchMedia = ((query: string) => ({
+      matches: mobile ? /max-width:\s*767/.test(query) : /min-width:\s*(1024|768|640)px/.test(query),
+      media: query,
+      onchange: null,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+      addListener: () => undefined,
+      removeListener: () => undefined,
+      dispatchEvent: () => false,
+    })) as unknown as typeof window.matchMedia;
+  });
+  afterEach(() => {
+    window.matchMedia = realMM;
+  });
+  const two = [rec({}), rec({ id: 'model_down:y', kind: 'model_down' })];
+
+  it('Dismiss asks (with an optional reason) and posts it', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ dismissed: 1 }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    wrap(<RecommendationList recommendations={two} />);
+    await userEvent.click(screen.getByTestId('dismiss-model_up'));
+    const dialog = await screen.findByRole('dialog');
+    await userEvent.type(within(dialog).getByLabelText('Reason (optional)'), 'covered already');
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Dismiss' }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    const call = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(call[0]).toBe('/api/hr/recommendations/model_up%3Ax/dismiss');
+    expect(JSON.parse(String(call[1].body))).toEqual({ reason: 'covered already' });
+  });
+
+  it('Dismiss all asks first, then dismisses everything', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ dismissed: 2 }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    wrap(<RecommendationList recommendations={two} />);
+    await userEvent.click(screen.getByTestId('dismiss-all-recs'));
+    const dialog = await screen.findByRole('dialog');
+    expect(fetchMock).not.toHaveBeenCalled();
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Dismiss all' }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect((fetchMock.mock.calls[0] as unknown as [string])[0]).toBe('/api/hr/recommendations/dismiss-all');
+  });
+
+  it('a failed apply (409 duplicate) is explained on its own card, with Dismiss still there', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              error: { code: 'duplicate_order', message: 'the organization already has this standing order' },
+            }),
+            { status: 409 },
+          ),
+      ),
+    );
+    wrap(
+      <RecommendationList
+        recommendations={[
+          rec({
+            id: 'rework_reason:a:weak_tests',
+            kind: 'rework_reason',
+            action: { type: 'standing_order', text: 'Always ship tests.', topic: 'No or weak tests' },
+          }),
+        ]}
+      />,
+    );
+    await userEvent.click(screen.getByTestId('apply-rework_reason'));
+    expect((await screen.findByTestId('rec-apply-error')).textContent).toContain(
+      'already has this standing order',
+    );
+    expect(screen.getByTestId('dismiss-rework_reason')).toBeTruthy();
   });
 });

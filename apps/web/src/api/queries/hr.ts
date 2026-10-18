@@ -1,5 +1,7 @@
 import {
   type ApplyRecommendationResponse,
+  type DismissAllRecommendationsRequest,
+  type DismissRecommendationResponse,
   HrBoardResponseSchema,
   MetricsResponseSchema,
   type PatchAgentRequest,
@@ -41,6 +43,18 @@ function useHrMutation<V, R>(fn: (v: V) => Promise<R>) {
 export const useApplyRecommendation = () =>
   useHrMutation((id: string) =>
     post<ApplyRecommendationResponse>(`/hr/recommendations/${encodeURIComponent(id)}/apply`),
+  );
+
+export const useDismissRecommendation = () =>
+  useHrMutation((v: { id: string; reason?: string }) =>
+    post<DismissRecommendationResponse>(`/hr/recommendations/${encodeURIComponent(v.id)}/dismiss`, {
+      ...(v.reason?.trim() ? { reason: v.reason.trim() } : {}),
+    }),
+  );
+
+export const useDismissAllRecommendations = () =>
+  useHrMutation((v: DismissAllRecommendationsRequest) =>
+    post<DismissRecommendationResponse>('/hr/recommendations/dismiss-all', v),
   );
 
 export const usePatchAgent = () =>

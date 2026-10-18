@@ -84,6 +84,54 @@ async function team(model = 'sonnet') {
   await w.hire('Rex', 'reviewer', 'senior');
 }
 
+describe('dismissing recommendations', () => {
+  const dismiss = (id: string, body: Record<string, unknown> = {}, status = 200) =>
+    ok<any>(
+      w.t.req('POST', `/api/hr/recommendations/${encodeURIComponent(id)}/dismiss`, {
+        cookie: w.owner.cookie,
+        body,
+      }),
+      status,
+    );
+
+  it('a dismissed recommendation leaves the list, is not proposed again, and is an event (replay-safe)', async () => {
+    await resetHr();
+    await team();
+    for (let i = 0; i < 3; i++) await build({ bounceWith: bounce(2, ['weak_tests']) });
+    const rec = await recOf('rework_reason');
+    expect(rec).toBeTruthy();
+    expect(await dismiss(rec.id, { reason: 'we already do this' })).toEqual({ dismissed: 1 });
+    expect(await recOf('rework_reason')).toBeUndefined();
+    // more of the same evidence does not bring it back
+    await build({ bounceWith: bounce(2, ['weak_tests']) });
+    expect(await recOf('rework_reason')).toBeUndefined();
+    const ev = (await q(`SELECT payload FROM events WHERE type='RecommendationDismissed'`))[0]!.payload;
+    expect(ev).toMatchObject({
+      recommendationId: rec.id,
+      kind: 'rework_reason',
+      reason: 'we already do this',
+    });
+    // no desk item, no ledger entry, no CEO wake
+    expect((await q(`SELECT 1 FROM desk_items WHERE subkind='standing_order'`))[0]).toBeUndefined();
+    expect((await q(`SELECT 1 FROM ledger_entries WHERE scope='standing_order'`))[0]).toBeUndefined();
+    expect((await q('SELECT 1 FROM ceo_wakes'))[0]).toBeUndefined();
+    await dismiss(rec.id, {}, 404);
+  }, 120_000);
+
+  it('dismiss all clears the list for the caller', async () => {
+    await resetHr();
+    await team('sonnet');
+    for (let i = 0; i < 2; i++) await build({ large: true, bounceWith: bounce(2) });
+    for (let i = 0; i < 3; i++) await build({ bounceWith: bounce(2, ['weak_tests']) });
+    expect((await recommendations(w)).length).toBeGreaterThan(1);
+    const r = await ok<any>(
+      w.t.req('POST', '/api/hr/recommendations/dismiss-all', { cookie: w.owner.cookie, body: {} }),
+    );
+    expect(r.dismissed).toBeGreaterThan(1);
+    expect(await recommendations(w)).toEqual([]);
+  }, 180_000);
+});
+
 describe('blocked', () => {
   it('thin specs behind the questions are blamed on the spec author, not the builder', async () => {
     await resetHr();

@@ -156,3 +156,15 @@ export const ResetRoleResponseSchema = z.object({
   updatedAgentIds: z.array(z.uuid()),
 });
 export type ResetRoleResponse = z.infer<typeof ResetRoleResponseSchema>;
+
+/** `POST /api/hr/recommendations/:id/dismiss`: the owner turns a recommendation down (optional reason). */
+export const DismissRecommendationRequestSchema = z.object({ reason: z.string().max(2000).optional() });
+export type DismissRecommendationRequest = z.infer<typeof DismissRecommendationRequestSchema>;
+export const DismissRecommendationResponseSchema = z.object({ dismissed: z.number().int() });
+export type DismissRecommendationResponse = z.infer<typeof DismissRecommendationResponseSchema>;
+/** `POST /api/hr/recommendations/dismiss-all`: every recommendation the caller may dismiss in the list they see. */
+export const DismissAllRecommendationsRequestSchema = z.object({
+  projectId: z.uuid().optional(),
+  reason: z.string().max(2000).optional(),
+});
+export type DismissAllRecommendationsRequest = z.infer<typeof DismissAllRecommendationsRequestSchema>;

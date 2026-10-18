@@ -455,14 +455,17 @@ export async function resetRole(
 // ----------------------------------------------------------------------------------------------- hooks
 
 /**
- * An approved HR standing-order proposal becomes an org-wide standing order in the ledger (the existing M2 mechanism
- * every agent loads at shift start). The edited text of the approval wins.
+ * An approved standing-order proposal not resolved by a person becomes a standing order in the ledger (the existing M2
+ * mechanism every agent loads at shift start). A person's approval is handled in `closeItem`.
  */
 export function registerHrHook(ctx: Ctx): () => void {
   return ctx.store.subscribe(async (e: StoredEvent) => {
     try {
       const ev = e.event;
       if (ev.type !== 'DeskItemResolved' || ev.payload.resolution !== 'approved') return;
+      // An owner's approval writes the entry itself, in the same transaction (commands/desk.ts closeItem), and refuses a
+      // near-duplicate with a 409 instead of dropping it silently. This hook only covers approvals made by the system.
+      if (e.actor.kind === 'user') return;
       const d = await one(
         ctx.pool,
         `SELECT d.org_id, d.project_id, d.title, d.body, p.decisions_project_only
@@ -516,4 +519,46 @@ export function registerHrHook(ctx: Ctx): () => void {
       ctx.log.warn({ err }, 'standing order hook failed');
     }
   });
+}
+
+/**
+ * Turns recommendations down: each gets a `RecommendationDismissed` event and stays out of the list for the evidence window
+ * (HR does not propose it again). The caller may dismiss what they could apply, and an Owner or Admin any of the org's.
+ * `ids` omitted dismisses everything in the list the caller sees ("Dismiss all"). Returns how many were dismissed.
+ */
+export async function dismissRecommendations(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  who: Who,
+  opts: { ids?: string[]; projectId?: string; reason?: string },
+): Promise<number> {
+  const all = await listRecommendations(ctx, who, opts.projectId);
+  const mine = (l: Listed) =>
+    l.rec.canApply || (l.orgId === who.orgId && isOrgManager({ orgRole: who.role }));
+  const picked = opts.ids ? all.filter((l) => opts.ids?.includes(l.rec.id)) : all;
+  if (opts.ids && picked.length === 0)
+    throw notFound('that recommendation no longer applies (it may already be dismissed or applied)');
+  const allowed = picked.filter(mine);
+  if (opts.ids && allowed.length === 0)
+    throw forbidden('only the organization Owner and Admins or the hiring manager can dismiss this');
+  if (allowed.length === 0) return 0;
+  await ctx.store.append(
+    allowed.map(({ rec, orgId }) => ({
+      streamId: streamId.agent(rec.agentId ?? orgId),
+      event: {
+        type: 'RecommendationDismissed' as const,
+        payload: {
+          orgId,
+          recommendationId: rec.id,
+          kind: rec.kind,
+          ...(rec.agentId ? { agentId: rec.agentId } : {}),
+          dismissedBy: user.id,
+          ...(opts.reason?.trim() ? { reason: opts.reason.trim() } : {}),
+        },
+      },
+      actor: userActor(user.id),
+      scope: orgScope(orgId),
+    })),
+  );
+  return allowed.length;
 }
