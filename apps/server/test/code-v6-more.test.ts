@@ -72,7 +72,15 @@ describe('older workflow versions are unchanged, and the upgrade is opt-in', () 
 
     const up = await call('POST', `/api/projects/${w.projectId}/upgrade-workflow`);
     expect(up).toMatchObject({ workflowKey: 'code-v6', openCardsOnOlderVersion: 1 });
-    expect(up.missingRoles.sort()).toEqual(['pre_reviewer', 'planner'].sort());
+    // every role a code-v6 stage claims is checked: the reviewer covers the pre-review, nobody covers planning or design
+    expect(up.missingRoles).toEqual(expect.arrayContaining(['planner', 'architect', 'pre_reviewer']));
+    expect(up.missingRoles).not.toContain('builder');
+    expect(up.coveredByFallback).toEqual([{ role: 'pre_reviewer', fallbackRole: 'reviewer' }]);
+    expect(up.uncoveredRoles).toEqual(expect.arrayContaining(['planner', 'architect']));
+    expect(up.uncoveredRoles).not.toContain('pre_reviewer');
+    // the upgrade switches the automatic full suite off, and new cards start on code-v6
+    const detailUp = await call('GET', `/api/projects/${w.projectId}`);
+    expect(detailUp.project).toMatchObject({ fullSuiteAfterFinalize: false, newCardWorkflowKey: 'code-v6' });
     // idempotent
     expect((await call('POST', `/api/projects/${w.projectId}/upgrade-workflow`)).workflowKey).toBe('code-v6');
 
@@ -90,6 +98,7 @@ describe('older workflow versions are unchanged, and the upgrade is opt-in', () 
     const detail = await call('GET', `/api/projects/${w.projectId}`);
     expect(detail.project.workflowKey).toBe('code');
     await q(`DELETE FROM project_workflows WHERE project_id=$1 AND workflow_key='code-v6'`, [w.projectId]);
+    await q(`UPDATE projects SET full_suite_after_finalize=true WHERE id=$1`, [w.projectId]);
   });
 });
 

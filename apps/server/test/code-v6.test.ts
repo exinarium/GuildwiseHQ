@@ -110,6 +110,8 @@ describe('the code-v6 flow end to end', () => {
     await p.runAt('Tess', testPass(), {}, SHA1);
     expect((await cardRow(card.id)).stage).toBe('finalize');
 
+    // even when the project flag is on (an old setting), a code-v6 card never auto-spawns the suite
+    await q('UPDATE projects SET full_suite_after_finalize=true WHERE id=$1', [w.projectId]);
     // the owner's approval step was skipped, so Finalize does not ask again
     const out = await call('POST', `/api/cards/${card.id}/finalize`, {});
     expect(out).toMatchObject({ state: 'running', action: 'merge', deskItemId: null });

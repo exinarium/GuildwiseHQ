@@ -70,7 +70,7 @@ describe('lean team project settings', () => {
     expect(screen.getByTestId('upgrade-lean-result')).toHaveTextContent(
       '2 open card(s) stay on their version',
     );
-    expect(screen.getByTestId('upgrade-lean-result')).toHaveTextContent('planner and a pre_reviewer');
+    expect(screen.getByTestId('upgrade-lean-result')).toHaveTextContent('planner, pre_reviewer');
   });
 
   it('the full suite has a button that starts it by hand', async () => {

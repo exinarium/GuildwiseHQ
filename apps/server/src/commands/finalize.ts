@@ -475,7 +475,11 @@ export async function applyFinalizeResult(
       const suiteOn = (
         await one(tx, 'SELECT full_suite_after_finalize AS on FROM projects WHERE id=$1', [card.project_id])
       )?.on;
-      if (suiteOn !== false) {
+      // code-v6: the full suite is a manual trigger only; the flag is ignored for a card on that workflow.
+      const cardWorkflow = (
+        await one(tx, 'SELECT key FROM workflow_versions WHERE id=$1', [card.workflow_version_id])
+      )?.key;
+      if (suiteOn !== false && cardWorkflow !== 'code-v6') {
         const branch =
           action === 'merge' ? (card.base_branch ?? 'main') : (result.pushedBranch ?? card.branch_name);
         const suite = await spawnCardEvent(tx, {

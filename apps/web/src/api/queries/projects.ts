@@ -15,6 +15,7 @@ import {
   type PublicationDto,
   PublicationsResponseSchema,
   type SetArchitectSettingsRequest,
+  type UpgradeWorkflowResponse,
 } from '@aom/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRef } from 'react';
@@ -217,11 +218,7 @@ export function useRunFullSuite(id: string) {
 export function useUpgradeWorkflow(id: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: () =>
-      post<{ workflowKey: string; openCardsOnOlderVersion: number; missingRoles: string[] }>(
-        `/projects/${id}/upgrade-workflow`,
-        {},
-      ),
+    mutationFn: () => post<UpgradeWorkflowResponse>(`/projects/${id}/upgrade-workflow`, {}),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['project', id] });
       qc.invalidateQueries({ queryKey: ['projects'] });

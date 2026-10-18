@@ -18,7 +18,8 @@ export function OwnerApprovalPanel({
   const set = useSetOwnerApproval(projectId);
   const upgrade = useUpgradeWorkflow(projectId);
   const policy = project.ownerApprovalPolicy ?? 'large_or_high_risk';
-  const lean = project.workflowKey === 'code-v6';
+  const newWorkflow = project.newCardWorkflowKey ?? project.workflowKey;
+  const lean = newWorkflow === 'code-v6';
   return (
     <Panel>
       <h2 className="mb-3 flex items-center gap-2 text-lg font-semibold text-fg">
@@ -55,10 +56,10 @@ export function OwnerApprovalPanel({
       {!lean && (
         <div className="mt-4 border-t border-line pt-3" data-testid="upgrade-lean">
           <p className="mb-2 text-sm text-muted">
-            This project runs the <code>{project.workflowKey}</code> workflow. The lean team workflow adds
-            planning, a design for every card, a pre-review, a read-only Opus review, the owner approval with
-            the diff, a test deploy and area-scoped E2E tests. New cards use it from now on; cards in flight
-            finish as they are.
+            This project runs the <code>{newWorkflow}</code> workflow. The lean team workflow adds planning, a
+            design for every card, a pre-review, a read-only Opus review, the owner approval with the diff, a
+            test deploy and area-scoped E2E tests. New cards use it from now on; cards in flight finish as
+            they are.
           </p>
           <Button
             variant="secondary"
@@ -69,16 +70,24 @@ export function OwnerApprovalPanel({
           >
             Use the lean team workflow for new cards
           </Button>
-          {upgrade.data && (
-            <p className="mt-2 text-sm text-muted" data-testid="upgrade-lean-result">
-              Done. {upgrade.data.openCardsOnOlderVersion} open card(s) stay on their version.
-              {upgrade.data.missingRoles.length > 0
-                ? ` Hire a ${upgrade.data.missingRoles.join(' and a ')} for the best result (the architect and the reviewer cover them until then).`
-                : ''}
-            </p>
-          )}
           <ErrorBox error={upgrade.error} />
         </div>
+      )}
+      {upgrade.data && (
+        <p className="mt-2 text-sm text-muted" data-testid="upgrade-lean-result">
+          Done. {upgrade.data.openCardsOnOlderVersion} open card(s) stay on their version.
+          {upgrade.data.missingRoles.length > 0
+            ? ` Missing roles: ${upgrade.data.missingRoles.join(', ')}.`
+            : ''}
+          {(upgrade.data.coveredByFallback ?? []).length > 0
+            ? ` Covered for now: ${(upgrade.data.coveredByFallback ?? [])
+                .map((c) => `${c.role} by the ${c.fallbackRole}`)
+                .join(', ')}.`
+            : ''}
+          {(upgrade.data.uncoveredRoles ?? []).length > 0
+            ? ` Hire a ${(upgrade.data.uncoveredRoles ?? []).join(' and a ')}: cards wait at their stage until you do.`
+            : ''}
+        </p>
       )}
     </Panel>
   );

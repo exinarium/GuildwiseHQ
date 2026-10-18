@@ -121,22 +121,55 @@ export async function upgradeProjectWorkflow(
         ],
         { tx },
       );
+    // code-v6 makes the full E2E suite a manual trigger: switch the automatic run after each merge off.
+    if (p.full_suite_after_finalize !== false)
+      await ctx.store.append(
+        [
+          {
+            streamId: streamId.project(projectId),
+            event: { type: 'ProjectFullSuiteSet', payload: { projectId, enabled: false, by: user.id } },
+            actor: userActor(user.id),
+            scope: projectScope(p.org_id, projectId),
+          },
+        ],
+        { tx },
+      );
     const open = await rows<{ n: number }>(
       tx,
       `SELECT count(*)::int AS n FROM cards c JOIN workflow_versions w ON w.id = c.workflow_version_id
         WHERE c.project_id=$1 AND c.status NOT IN ('done','cancelled') AND w.key <> 'code-v6'`,
       [projectId],
     );
+    // Every agent role the code-v6 stages hand work to, checked for this project the way the dispatcher does: an active
+    // agent of the role whose project list is unrestricted or holds this project (eligibility `role` clause); a stage's
+    // `fallbackRole` covers the role only when such an agent of the fallback exists.
     const hired = await rows<{ role_key: string }>(
       tx,
-      `SELECT DISTINCT role_key FROM agents WHERE org_id=$1 AND status='active'`,
-      [p.org_id],
+      `SELECT DISTINCT role_key FROM agents
+        WHERE org_id=$1 AND status='active' AND (allowed_project_ids IS NULL OR $2 = ANY (allowed_project_ids))`,
+      [p.org_id, projectId],
     );
     const have = new Set(hired.map((h) => h.role_key));
+    const needs = new Map<string, string | null>();
+    for (const st of target.definition.stages) {
+      if (st.kind !== 'agent' || !st.claimRole) continue;
+      if (!needs.has(st.claimRole) || !st.fallbackRole) needs.set(st.claimRole, st.fallbackRole ?? null);
+    }
+    const missingRoles: string[] = [];
+    const coveredByFallback: { role: string; fallbackRole: string }[] = [];
+    const uncoveredRoles: string[] = [];
+    for (const [role, fallback] of needs) {
+      if (have.has(role)) continue;
+      missingRoles.push(role);
+      if (fallback && have.has(fallback)) coveredByFallback.push({ role, fallbackRole: fallback });
+      else uncoveredRoles.push(role);
+    }
     return {
       workflowKey: 'code-v6',
       openCardsOnOlderVersion: Number(open[0]?.n ?? 0),
-      missingRoles: ['planner', 'pre_reviewer'].filter((r) => !have.has(r)),
+      missingRoles,
+      coveredByFallback,
+      uncoveredRoles,
     };
   });
 }

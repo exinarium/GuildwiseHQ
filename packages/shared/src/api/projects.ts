@@ -139,6 +139,8 @@ export const ProjectDtoSchema = z.object({
   key: z.string(),
   name: z.string(),
   workflowKey: z.string(),
+  /** The workflow new cards start on: `code-v6` after the upgrade (workflowKey stays the project's own primary workflow). */
+  newCardWorkflowKey: z.string().optional(),
   /** M10: the department of the project's workflow (its type). */
   department: z.string().nullable().optional(),
   /** The place in the organization's ranking (1 = most important); null for a project that is not ranked (archived ones keep theirs). */

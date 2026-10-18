@@ -17,8 +17,12 @@ export const UpgradeWorkflowResponseSchema = z.object({
   workflowKey: z.string(),
   /** Open cards that stay on their older version until they finish. */
   openCardsOnOlderVersion: z.number().int(),
-  /** Roles the new workflow works best with that no agent is hired for (the planner and the pre-reviewer have fallbacks). */
+  /** Roles the new workflow works best with that no agent is hired for for this project (agents allowed on it), every role a code-v6 stage claims. */
   missingRoles: z.array(z.string()),
+  /** Missing roles another hired role covers (the stage's fallback), e.g. the architect plans until a planner is hired. */
+  coveredByFallback: z.array(z.object({ role: z.string(), fallbackRole: z.string() })).default([]),
+  /** Missing roles nobody covers: cards reaching their stage wait until one is hired. */
+  uncoveredRoles: z.array(z.string()).default([]),
 });
 export type UpgradeWorkflowResponse = z.infer<typeof UpgradeWorkflowResponseSchema>;
 
