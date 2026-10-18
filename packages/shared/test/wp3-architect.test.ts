@@ -40,9 +40,13 @@ const build = [
 
 describe('the architect role', () => {
   const architect = getBuiltinRole('architect');
+  it('says that design writes only the report, never code or tests', () => {
+    expect(architect?.instructions).toMatch(/Design writes one thing: the report/);
+    expect(architect?.instructions).toMatch(/Never create or edit source code or tests/);
+  });
   it('is a senior Opus role that reads the organization and writes documentation only', () => {
     expect(architect).toMatchObject({
-      version: 3,
+      version: 4,
       builtIn: true,
       department: 'delivery',
       seniorityLevels: ['senior'],

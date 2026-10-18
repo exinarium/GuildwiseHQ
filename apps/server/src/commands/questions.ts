@@ -62,7 +62,11 @@ export async function raiseQuestion(
   report: QuestionReport,
 ): Promise<QuestionResult> {
   // A waiting question that ran out of time becomes a blocking one (no new item).
-  if (report.converts) return convertWaitingQuestion(ctx, tx, shift, card, agent);
+  if (report.converts)
+    return convertWaitingQuestion(ctx, tx, shift, card, agent, {
+      reason: report.convertReason,
+      waitedMinutes: report.waitedMinutes,
+    });
   const matches = await dedupMatches(tx, card.org_id, card.project_id, report.text);
   // Every question gets the ledger duplicate check. A non-blocking one is refused on any match (--force overrides); a
   // blocking or waiting one only when an entry is practically the same question, so a stuck agent is not sent round.

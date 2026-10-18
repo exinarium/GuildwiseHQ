@@ -583,6 +583,29 @@ describe('waiting inside the shift and card affinity', () => {
     expect((await rpc(start.shiftId, 'question.status')).result.state).toBe('unattended');
   });
 
+  it('the conversion message says why: owner-only versus timeout', async () => {
+    await reset();
+    await w.hire('Bea', 'builder', 'junior');
+    await w.card({ title: 'Reason card' });
+    const start = await nextShift('Bea');
+    await p.startShift(r, start);
+    expect(await ask(start.shiftId, { blocking: false, wait: true })).toMatchObject({ accepted: true });
+    const owner = await ask(start.shiftId, { blocking: true, converts: true, convertReason: 'owner_only' });
+    expect(owner.message).toMatch(/Only the owner can answer this; the card waits on the desk/);
+    expect(owner.message).not.toMatch(/No answer/);
+    r.ended(start.shiftId, 'reported');
+
+    await reset();
+    await w.hire('Bea', 'builder', 'junior');
+    await w.card({ title: 'Reason card 2' });
+    const start2 = await nextShift('Bea');
+    await p.startShift(r, start2);
+    expect(await ask(start2.shiftId, { blocking: false, wait: true })).toMatchObject({ accepted: true });
+    const late = await ask(start2.shiftId, { blocking: true, converts: true, waitedMinutes: 10 });
+    expect(late.message).toMatch(/No answer within 10 minutes/);
+    r.ended(start2.shiftId, 'reported');
+  });
+
   it('when the wait runs out the card is parked, the agent keeps it, and the answer resumes its session first', async () => {
     await reset();
     await w.hire('Bea', 'builder', 'junior');

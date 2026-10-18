@@ -4,6 +4,7 @@ import {
   DESK_SUBKIND,
   DEVOPS_TOPICS,
   getStage,
+  QUESTION_WAIT,
   type QuestionTopic,
   type ShiftReport,
   streamId,
@@ -248,7 +249,9 @@ export async function convertWaitingQuestion(
   shift: Row,
   card: Row,
   agent: Row,
+  why: { reason?: 'timeout' | 'owner_only'; waitedMinutes?: number } = {},
 ): Promise<Result> {
+  const ownerOnly = why.reason === 'owner_only';
   const item = await one(
     tx,
     `SELECT * FROM desk_items WHERE shift_id=$1 AND kind='question' ORDER BY created_at DESC LIMIT 1 FOR UPDATE`,
@@ -269,7 +272,9 @@ export async function convertWaitingQuestion(
         tx,
         card,
         'question',
-        `${agent.name} waited for an answer and none came in time; ${card.ref} is Blocked on the question until it is answered, then ${agent.name} resumes it.`,
+        ownerOnly
+          ? `${agent.name} asked a question only the owner can answer; ${card.ref} is Blocked on it until it is answered, then ${agent.name} resumes it.`
+          : `${agent.name} waited for an answer and none came in time; ${card.ref} is Blocked on the question until it is answered, then ${agent.name} resumes it.`,
         null,
         [
           {
@@ -285,8 +290,9 @@ export async function convertWaitingQuestion(
     );
     return {
       accepted: true,
-      message:
-        'Recorded. No answer came in time, so the card is Blocked on your question and you keep it: the answer resumes this work. Finish now; do not make further changes.',
+      message: ownerOnly
+        ? 'Recorded. Only the owner can answer this; the card waits on the desk and your session resumes when they answer. Finish now; do not make further changes.'
+        : `Recorded. No answer within ${why.waitedMinutes ?? QUESTION_WAIT.defaultMinutes} minutes, so the card is Blocked on your question and you keep it: the answer resumes this work. Finish now; do not make further changes.`,
     };
   }
   // A waiting DevOps request of this shift: park the card on it.

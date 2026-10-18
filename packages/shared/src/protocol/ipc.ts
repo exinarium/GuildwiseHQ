@@ -47,6 +47,10 @@ export const QuestionReportSchema = z.object({
   wait: z.boolean().default(false),
   /** A waiting question ran out of time: this report turns the shift's open waiting question into a blocking one. */
   converts: z.boolean().default(false),
+  /** Why a converting report was sent: the wait ran out, or only the owner's desk can answer (state `unattended`). */
+  convertReason: z.enum(['timeout', 'owner_only']).optional(),
+  /** Minutes the asker waited (for the timeout message). */
+  waitedMinutes: z.number().positive().max(600).optional(),
 });
 
 /** Non-terminal thread message. */

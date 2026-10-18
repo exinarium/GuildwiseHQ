@@ -149,7 +149,13 @@ describe('aom question --wait', () => {
     // 15 s polls until the minute is used up, then one converting report
     expect(t.sleeps).toEqual([15_000, 15_000, 15_000, 15_000]);
     expect(t.reports.map((r) => (r as { converts?: boolean }).converts)).toEqual([false, true]);
-    expect(t.reports[1]).toMatchObject({ kind: 'question', blocking: true, converts: true });
+    expect(t.reports[1]).toMatchObject({
+      kind: 'question',
+      blocking: true,
+      converts: true,
+      convertReason: 'timeout',
+      waitedMinutes: 1,
+    });
   });
 
   it('never waits longer than the shift has left', async () => {
@@ -167,7 +173,7 @@ describe('aom question --wait', () => {
     const t = await setup([{ state: 'unattended', remainingMs: 600_000 }]);
     expect(await t.run('question', '--text', 'Tabs or spaces?', '--wait')).toBe(0);
     expect(t.sleeps).toEqual([]);
-    expect(t.reports[1]).toMatchObject({ converts: true, blocking: true });
+    expect(t.reports[1]).toMatchObject({ converts: true, blocking: true, convertReason: 'owner_only' });
   });
 
   it('stops when the card was parked by the server', async () => {

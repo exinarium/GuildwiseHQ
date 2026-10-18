@@ -261,9 +261,16 @@ async function questionWait(
     );
     return 0;
   };
-  const convert = async (): Promise<number> => {
+  const convert = async (reason: 'timeout' | 'owner_only'): Promise<number> => {
     const c = await post(ctx, IPC_REPORT_PATH, {
-      report: { ...base, blocking: true, wait: false, converts: true },
+      report: {
+        ...base,
+        blocking: true,
+        wait: false,
+        converts: true,
+        convertReason: reason,
+        waitedMinutes: Math.max(1, Math.round(waitMs / 60_000)),
+      },
     });
     const cr = c.json as unknown as Partial<IpcReportResponse> & { error?: string };
     if (c.status === 200 && cr.accepted) {
@@ -290,7 +297,8 @@ async function questionWait(
     }
     const left = Math.min(waitMs - (now() - started), s.remainingMs);
     // Only the manager's desk can answer (nobody up the chain is available), or time is up: park the card on it.
-    if (s.state === 'unattended' || left <= 0) return convert();
+    if (s.state === 'unattended') return convert('owner_only');
+    if (left <= 0) return convert('timeout');
     await sleep(Math.min(QUESTION_WAIT.pollSeconds * 1000, left));
   }
 }
