@@ -10,11 +10,11 @@ import { endBaTaskShift, runBaTaskFallback } from '../commands/ba-tasks.ts';
 import { withCommitAs } from '../commands/commit-as.ts';
 import { projectScope, SYSTEM_ACTOR } from '../commands/common.ts';
 import type { Ctx } from '../context.ts';
-import { budgetPausedSql } from '../costs/index.ts';
 import { one, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { buildBaTaskShiftStart } from '../runner-gateway/ba-task-brief.ts';
 import { wsServesOrgSql } from '../simulation/fit.ts';
+import { projectHeldSql } from './project-hold.ts';
 
 const ONLINE_WINDOW_MS = 45_000;
 const OVERRUN_SLACK_MS = 10 * 60_000;
@@ -46,7 +46,7 @@ export async function baTaskPass(
     ctx.pool,
     `SELECT t.* FROM ba_tasks t JOIN projects p ON p.id = t.project_id AND p.status = 'active'
        JOIN organizations po ON po.id = p.org_id AND po.status IN ('trial','active')
-      WHERE t.status = 'queued' AND NOT ${budgetPausedSql('p', '$1')}
+      WHERE t.status = 'queued' AND NOT ${projectHeldSql('p', '$1')}
       ORDER BY (t.kind = 'batch_intake'), t.created_at, t.id`,
     [now],
   );

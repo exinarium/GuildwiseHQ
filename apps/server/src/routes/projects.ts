@@ -7,6 +7,7 @@ import {
   IdParamsSchema,
   PatchProjectRequestSchema,
   PatchRepoRequestSchema,
+  PauseProjectRequestSchema,
   ProjectsQuerySchema,
   RankProjectsRequestSchema,
   RepoParamsSchema,
@@ -36,6 +37,7 @@ import {
   upgradeProjectWorkflow,
 } from '../commands/lean-project.ts';
 import { mcpServerCandidates, setProjectMcpServers } from '../commands/mcp-servers.ts';
+import { pauseProject, resumeProject } from '../commands/project-pause.ts';
 import {
   addRepo,
   archiveProject,
@@ -143,6 +145,23 @@ export function projectRoutes(ctx: Ctx) {
     app.post('/api/projects/:id/restore', { schema: { params: IdParamsSchema } }, async (req) => {
       const s = await requireUser(ctx, req);
       await restoreProject(ctx, s.user, req.params.id);
+      return getProjectDetail(ctx, s.user.id, req.params.id);
+    });
+
+    /** Manual pause (organization Owner and Admins): nothing new starts until one resumes it; idempotent. */
+    app.post(
+      '/api/projects/:id/pause',
+      { schema: { params: IdParamsSchema, body: PauseProjectRequestSchema } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        await pauseProject(ctx, s.user, req.params.id, req.body.reason);
+        return getProjectDetail(ctx, s.user.id, req.params.id);
+      },
+    );
+
+    app.post('/api/projects/:id/resume', { schema: { params: IdParamsSchema } }, async (req) => {
+      const s = await requireUser(ctx, req);
+      await resumeProject(ctx, s.user, req.params.id);
       return getProjectDetail(ctx, s.user.id, req.params.id);
     });
 

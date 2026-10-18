@@ -7,6 +7,7 @@ import { one, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { buildDevopsShiftStart } from '../runner-gateway/brief.ts';
 import { wsServesOrgSql } from '../simulation/fit.ts';
+import { projectPausedSql } from './project-hold.ts';
 
 const ONLINE_WINDOW_MS = 45_000;
 
@@ -38,6 +39,11 @@ export async function devopsPass(
        JOIN users wu ON wu.id = w.user_id AND wu.status = 'active'
        JOIN organizations po ON po.id = r.org_id AND po.status IN ('trial','active')
       WHERE r.status = 'queued' AND ${wsServesOrgSql('w', 'r.org_id')}
+        -- A request about a paused project (its card, or the project the user asked from) waits; one about neither is not held.
+        AND NOT EXISTS (SELECT 1 FROM projects rp
+                         WHERE ${projectPausedSql('rp')}
+                           AND rp.id = COALESCE((SELECT rc.project_id FROM cards rc WHERE rc.id = r.card_id),
+                                                (r.context->>'projectId')::uuid))
       ORDER BY r.created_at, r.id`,
     [onlineSince],
   );

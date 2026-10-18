@@ -163,6 +163,7 @@ export async function testerBottleneckCheck(ctx: Ctx): Promise<void> {
     `SELECT c.id, c.project_id, c.org_id, c.queued_at FROM cards c
        JOIN workflow_stages st ON st.workflow_version_id = c.workflow_version_id AND st.stage_id = c.stage
       WHERE c.status='queued' AND c.claim_id IS NULL AND st.kind='agent' AND st.claim_role='tester'
+        AND NOT EXISTS (SELECT 1 FROM projects pp WHERE pp.id = c.project_id AND pp.paused_at IS NOT NULL)
       ORDER BY c.queued_at`,
   );
   const byProject = new Map<string, typeof waiting>();

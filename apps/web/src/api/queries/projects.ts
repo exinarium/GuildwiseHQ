@@ -376,3 +376,22 @@ export function useProjectPublications(projectId: string | undefined) {
       (await get(`/research/publications?projectId=${projectId}`, PublicationsResponseSchema)).publications,
   });
 }
+
+/** Pauses the project by hand (organization Owner and Admins; the server enforces it). Idempotent. */
+export function usePauseProject(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (reason: string) =>
+      post(`/projects/${id}/pause`, reason.trim() ? { reason: reason.trim() } : {}),
+    onSuccess: () => invalidateAfterLifecycle(qc, id),
+  });
+}
+
+/** Lifts the manual pause; queued work continues where it left off. */
+export function useResumeProject(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => post(`/projects/${id}/resume`, {}),
+    onSuccess: () => invalidateAfterLifecycle(qc, id),
+  });
+}

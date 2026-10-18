@@ -21,6 +21,7 @@ import { vaultForConversation } from '../commands/vaults.ts';
 import type { Ctx } from '../context.ts';
 import { one, rows } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
+import { isProjectPaused } from '../dispatcher/project-hold.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { standingOrdersForProjects } from '../queries/ledger.ts';
 import { agentSpecFor } from '../runner-gateway/brief.ts';
@@ -105,6 +106,9 @@ export class ChatRelay {
     if (isCeo && (await orgRoleOf(ctx.pool, userId, row.org_id)) !== 'owner')
       return this.fail(userId, msg.threadId, CHAT_ERROR.unknownThread);
     if (this.byThread.has(msg.threadId)) return this.fail(userId, msg.threadId, CHAT_ERROR.busy);
+    // A chat that belongs to a project an Owner or Admin paused does not start (nothing is saved or queued).
+    if (row.thread_project_id && (await isProjectPaused(ctx.pool, row.thread_project_id)))
+      return this.fail(userId, msg.threadId, CHAT_ERROR.projectPaused);
     // Nothing is queued: an offline workstation is reported immediately and the message is not saved.
     if (row.status !== 'active' || !row.workstation_id || !ctx.services.runners.isOnline(row.workstation_id))
       return this.fail(userId, msg.threadId, CHAT_ERROR.workstationOffline);

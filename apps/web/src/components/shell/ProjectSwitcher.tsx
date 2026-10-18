@@ -82,6 +82,7 @@ export function ProjectSwitcher({
                   <span className="block text-xs text-subtle">
                     {projectTypeLabel(p.workflowKey)}
                     {p.myRole === 'manager' ? ' · shared with you' : ''}
+                    {p.paused ? ' · Paused' : ''}
                   </span>
                 </span>
                 {p.key === current?.key && (

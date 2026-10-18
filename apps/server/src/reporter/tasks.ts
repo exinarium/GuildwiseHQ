@@ -36,7 +36,10 @@ export async function baAvailable(
   );
 }
 
-/** The project a reporter task is filed under: the given one, else the oldest active project of the organization. */
+/**
+ * The project a reporter task is filed under: the given one, else the oldest active project of the organization (one an
+ * Owner or Admin paused only when every project is, so an organization-wide report does not wait behind one paused project).
+ */
 export async function carrierProject(
   db: Queryable,
   orgId: string,
@@ -45,7 +48,7 @@ export async function carrierProject(
   if (projectId) return projectId;
   const p = await one<{ id: string }>(
     db,
-    `SELECT id FROM projects WHERE org_id=$1 AND status='active' AND kind='project' ORDER BY created_at, id LIMIT 1`,
+    `SELECT id FROM projects WHERE org_id=$1 AND status='active' AND kind='project' ORDER BY (paused_at IS NOT NULL), created_at, id LIMIT 1`,
     [orgId],
   );
   return p?.id ?? null;

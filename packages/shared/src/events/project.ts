@@ -321,6 +321,14 @@ export const projectEvents = [
    * cause `project_archived`), disables the schedules and dismisses the open desk items.
    */
   defineEvent('ProjectArchived', z.object({ projectId: Id, archivedBy: Id.optional() })),
+  /**
+   * An organization Owner or Admin paused the project by hand: nothing new starts on it (no card claim, question, DevOps
+   * or BA shift, schedule fire, interest scan, CEO wake) until an Owner or Admin resumes it. Shifts already running
+   * finish. Indefinite; never raised by an agent, the CEO or the system. `reason` is shown on the banner.
+   */
+  defineEvent('ProjectPaused', z.object({ projectId: Id, by: Id, reason: z.string().max(500).optional() })),
+  /** An Owner or Admin lifted the manual pause: queued work continues where it left off. */
+  defineEvent('ProjectResumed', z.object({ projectId: Id, by: Id })),
   /** A member brought an archived project back. Closed cards stay closed and schedules stay disabled. */
   defineEvent('ProjectRestored', z.object({ projectId: Id, restoredBy: Id.optional() })),
   /**

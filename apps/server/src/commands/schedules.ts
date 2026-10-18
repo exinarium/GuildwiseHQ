@@ -1034,7 +1034,14 @@ export async function fireDueSchedules(ctx: Ctx): Promise<FiredSchedule[]> {
         // A suspended or cancelled organization starts nothing (docs/design/organizations.md section 7.2); a switched-off
         // feature stops its own schedules. The fire is skipped and recorded, the cron moves on.
         const org = await one(tx, 'SELECT status, plan, features FROM organizations WHERE id=$1', [s.org_id]);
-        const skip = org && !isOrgOperational(org.status) ? ('org_suspended' as const) : null;
+        // A project an Owner or Admin paused by hand starts nothing: the firing is skipped and recorded, the cron moves on
+        // (no catch-up when it is resumed).
+        const skip =
+          org && !isOrgOperational(org.status)
+            ? ('org_suspended' as const)
+            : project?.paused_at
+              ? ('project_paused' as const)
+              : null;
         if (skip) {
           await ctx.store.append(
             [

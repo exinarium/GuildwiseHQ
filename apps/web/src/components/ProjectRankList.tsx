@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { type DragEvent, type KeyboardEvent, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
+import { PausedBadge } from './ProjectPause.tsx';
 import { projectTypeLabel } from './shell/ProjectSwitcher.tsx';
 import { cx } from './ui/cx.ts';
 import { Badge } from './ui.tsx';
@@ -197,6 +198,7 @@ export function ProjectRankList({
                   <span className="font-mono font-semibold text-muted">{p.key}</span>
                   <span aria-hidden="true">·</span>
                   {projectTypeLabel(p.workflowKey)}
+                  <PausedBadge project={p} />
                   {p.department && <Badge tone="violet">{p.department}</Badge>}
                   <Badge tone={p.myRole === 'owner' ? 'blue' : 'neutral'}>
                     {p.myRole === 'owner' ? 'owner' : 'shared with you'}

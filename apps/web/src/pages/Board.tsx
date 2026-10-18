@@ -11,6 +11,7 @@ import { BoardView, NO_FILTER } from '../components/BoardView.tsx';
 import { BudgetBanner } from '../components/BudgetBanner.tsx';
 import { ConvertProjectDialog } from '../components/ConvertProjectDialog.tsx';
 import { PhaseFilter } from '../components/PhaseFilter.tsx';
+import { PauseProjectButton, ProjectPausedBanner } from '../components/ProjectPause.tsx';
 import { PlatformPauseBanner } from '../components/platform/PlatformPauseBanner.tsx';
 import { RegressionDialog } from '../components/RegressionDialog.tsx';
 import { RunBranchDialog } from '../components/runs/RunBranchDialog.tsx';
@@ -154,6 +155,7 @@ export function Board() {
                 Convert to project
               </Button>
             )}
+            <PauseProjectButton project={project} />
             <ButtonLink to={`/p/${project.key}/archive`} variant="ghost">
               Archive
             </ButtonLink>
@@ -171,6 +173,7 @@ export function Board() {
           </>
         }
       />
+      <ProjectPausedBanner project={project} />
       <UsageLimitBanner limit={project.usageLimit} />
       <PlatformPauseBanner projectId={project.id} />
       <BudgetBanner

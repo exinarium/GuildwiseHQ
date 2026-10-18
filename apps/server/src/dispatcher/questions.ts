@@ -8,6 +8,7 @@ import { one, type Row, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { buildQuestionShiftStart, QUESTION_MAX_SHIFT_MINUTES } from '../runner-gateway/question-brief.ts';
 import { wsServesOrgSql } from '../simulation/fit.ts';
+import { projectPausedSql } from './project-hold.ts';
 
 const ONLINE_WINDOW_MS = 45_000;
 const MAX_ATTEMPTS = 2;
@@ -46,6 +47,8 @@ export async function questionPass(
       WHERE d.status = 'open' AND d.routed_to = 'agent'
         AND (ws.id IS NULL OR ${wsServesOrgSql('ws', 'd.org_id')})
         AND NOT EXISTS (SELECT 1 FROM shifts s WHERE s.desk_item_id = d.id AND s.status <> 'ended')
+        -- A question of a paused project waits (and is not escalated as stalled): its answer is stored, the agent goes on at resume.
+        AND NOT EXISTS (SELECT 1 FROM projects dp WHERE dp.id = d.project_id AND ${projectPausedSql('dp')})
       -- an asker that is waiting inside its shift (aom question --wait) goes first, then blocking questions
       ORDER BY EXISTS (SELECT 1 FROM shifts a WHERE a.id = d.shift_id AND a.status <> 'ended') DESC,
                d.blocking DESC, d.created_at, d.id`,

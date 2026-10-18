@@ -97,7 +97,7 @@ async function mergeChecks(ctx: Ctx): Promise<void> {
 async function completionStep(ctx: Ctx): Promise<void> {
   const open = await rows(
     ctx.pool,
-    `SELECT ph.id FROM phases ph JOIN projects p ON p.id = ph.project_id AND p.status = 'active'
+    `SELECT ph.id FROM phases ph JOIN projects p ON p.id = ph.project_id AND p.status = 'active' AND p.paused_at IS NULL
        JOIN organizations po ON po.id = p.org_id AND po.status IN ('trial','active')
       WHERE ph.status = 'open' AND EXISTS (SELECT 1 FROM cards c WHERE c.phase_id = ph.id AND c.phase_assignment = 'confirmed')
       ORDER BY ph.created_at`,
@@ -179,7 +179,7 @@ async function resultsStep(ctx: Ctx): Promise<void> {
 async function sequenceStep(ctx: Ctx): Promise<void> {
   const active = await rows(
     ctx.pool,
-    `SELECT ph.id FROM phases ph JOIN projects p ON p.id = ph.project_id AND p.status = 'active'
+    `SELECT ph.id FROM phases ph JOIN projects p ON p.id = ph.project_id AND p.status = 'active' AND p.paused_at IS NULL
        JOIN organizations po ON po.id = p.org_id AND po.status IN ('trial','active')
       WHERE ph.status = 'running_followups' ORDER BY ph.approved_at`,
   );

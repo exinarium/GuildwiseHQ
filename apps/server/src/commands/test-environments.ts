@@ -372,7 +372,7 @@ export async function testEnvironmentPass(ctx: Ctx): Promise<void> {
 
 const NEEDS_ENV_SQL = `
 SELECT c.id, COALESCE(st.claim_role, 'tester') AS role, st.env_strict AS strict FROM cards c
-  JOIN projects p ON p.id = c.project_id AND p.status = 'active' AND p.integration_tests->>'mode' = 'local'
+  JOIN projects p ON p.id = c.project_id AND p.status = 'active' AND p.paused_at IS NULL AND p.integration_tests->>'mode' = 'local'
   JOIN workflow_stages st ON st.workflow_version_id = c.workflow_version_id AND st.stage_id = c.stage
  WHERE st.kind IN ('agent', 'server') AND st.environment = 'project'
    AND (st.kind = 'server' OR st.claim_role IS NOT NULL)
@@ -416,7 +416,7 @@ async function provisionPass(ctx: Ctx): Promise<void> {
 
 const TEST_DEPLOY_SQL = `
 SELECT c.id FROM cards c
-  JOIN projects p ON p.id = c.project_id AND p.status = 'active'
+  JOIN projects p ON p.id = c.project_id AND p.status = 'active' AND p.paused_at IS NULL
   JOIN workflow_stages st ON st.workflow_version_id = c.workflow_version_id AND st.stage_id = c.stage
  WHERE st.kind = 'server' AND c.status = 'queued' AND c.claim_id IS NULL
  ORDER BY c.queued_at NULLS LAST, c.created_at
