@@ -26,10 +26,13 @@ export interface ModelPrice {
  * the longer TTL; cache reads at 10% of the input price, 5% on Opus 5.5, Sonnet 5.5 and Fable 5.1). Checked against
  * platform.claude.com/docs/en/about-claude/pricing on 18 Oct 2026. Haiku 5.5 doubles its price ($0.50 / $2.50) for a
  * request over 100K prompt tokens; usage arrives per shift, not per request, so the table uses the lower tier and can
- * under-count Haiku shifts with very large prompts. These are DEFAULTS, not billing data:
- * verify them against anthropic.com/pricing, because the real invoice depends on the plan, discounts and
- * batch/priority tiers. The table is deliberately plain data in shared config so the super admin can edit it later (a
- * platform setting that stamps `costMicros` on new `ShiftEnded` events; history keeps the price it was recorded at).
+ * under-count Haiku shifts with very large prompts.
+ * These are DEFAULTS, not billing data: the real invoice depends on the plan, discounts and batch/priority tiers.
+ * The table is deliberately plain data in shared config so the super admin can edit it later. The server stamps
+ * `costMicros` (priced with the table as it is at that moment) on every `ShiftEnded` and `ShiftUsageRecorded` event it
+ * appends, and the projection uses a stamped price as is: changing this table reprices only shifts recorded afterwards.
+ * Events from before stamping existed carry no price and are priced from this table on every replay, so a change here
+ * moves their history.
  * Models are mapped by family (fable, opus, sonnet, haiku). Order matters: the first match wins; the last entry is the
  * fallback for an unknown model. The SQL in migration 1318 mirrors this table.
  */

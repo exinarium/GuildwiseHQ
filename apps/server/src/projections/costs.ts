@@ -76,7 +76,7 @@ export const costProjectors: Record<string, Projector> = {
         p.usage.outputTokens,
         p.usage.cacheReadTokens,
         p.usage.cacheWriteTokens,
-        costUsdMicros(model, { ...p.usage }),
+        p.costMicros ?? costUsdMicros(model, { ...p.usage }),
         p.usage.costUsd === undefined ? null : Math.round(p.usage.costUsd * 1_000_000),
       ],
     );

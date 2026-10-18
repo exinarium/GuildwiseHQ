@@ -32,6 +32,7 @@ import { registerDevopsMembershipHook } from './commands/devops.ts';
 import { registerTasteHook } from './commands/taste.ts';
 import type { Config } from './config.ts';
 import type { Ctx } from './context.ts';
+import { createCostStampInterceptor } from './costs/stamp.ts';
 import { createPool } from './db/pool.ts';
 import { rows } from './db/sql.ts';
 import { Dispatcher } from './dispatcher/dispatcher.ts';
@@ -260,6 +261,8 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   store.intercept(createRoutingInterceptor(ctx));
   // Suspended and cancelled organizations are read-only for their users, whichever route a write came through.
   store.intercept(createOrgStatusInterceptor(ctx));
+  // Prices are stamped on shift events when they are appended, so a price-table change never reprices history on rebuild.
+  store.intercept(createCostStampInterceptor());
   app.decorate('ctx', ctx);
   app.decorateRequest('auth', null);
 

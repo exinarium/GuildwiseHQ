@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { DEFAULT_MODEL_PRICES, type ModelPrice } from '@aom/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { evaluateAllBudgets, evaluateProjectBudget } from '../src/commands/budgets.ts';
 import { PROJECTION_TABLES } from '../src/projections/index.ts';
@@ -122,10 +123,10 @@ describe('usage capture and pricing', () => {
     expect(Number(row?.cost_usd_micros)).toBe(12_500_000);
     expect(row).toMatchObject({ model: 'claude-opus-4-5', kind: 'card', card_id: a.card.id });
     expect(row?.project_id).toBe(w.projectId);
-    // Without a reported model the agent's configured one prices it: Sonnet 1M x $2 + 1M cache read x $0.20
+    // Without a reported model the agent's configured one prices it: Sonnet 4.5 is $3, so 1M x $3 + 1M cache read x $0.30
     const b = await shiftWith({ inputTokens: 1_000_000, outputTokens: 0, cacheReadTokens: 1_000_000 });
     const rb = (await q('SELECT * FROM shift_costs WHERE shift_id=$1', [b.shiftId]))[0];
-    expect(Number(rb?.cost_usd_micros)).toBe(2_200_000);
+    expect(Number(rb?.cost_usd_micros)).toBe(3_300_000);
     expect(rb?.model).toBe('claude-sonnet-4-5');
     // The shift row itself keeps the tokens (the existing projection)
     const s = (await q('SELECT tokens_input, tokens_cache_read FROM shifts WHERE id=$1', [b.shiftId]))[0];
@@ -136,7 +137,8 @@ describe('usage capture and pricing', () => {
     const c = await shiftWith({ inputTokens: 1000, outputTokens: 1000, costUsd: 0.0123 });
     const row = (await q('SELECT * FROM shift_costs WHERE shift_id=$1', [c.shiftId]))[0];
     expect(Number(row?.reported_usd_micros)).toBe(12_300);
-    expect(Number(row?.cost_usd_micros)).toBe(1000 * 2 + 1000 * 10);
+    // Sonnet 4.5: $3 / $15 per million tokens
+    expect(Number(row?.cost_usd_micros)).toBe(1000 * 3 + 1000 * 15);
   });
 
   it('counts chats: to the card project when card-linked, else to the org overhead bucket', async () => {
@@ -232,14 +234,14 @@ describe('roll-ups', () => {
     // the card joins the phase afterwards: the roll-up follows the card
     await ok(owner('PUT', `/api/cards/${y.card.id}/phase`, { phaseId: phase.id }));
     const p = await ok<any>(owner('GET', `/api/phases/${phase.id}`));
-    expect(p.spend.totalMicros).toBe(2_000_000);
+    expect(p.spend.totalMicros).toBe(3_000_000); // 1M Sonnet 4.5 input tokens at $3
     // a BA task cost
     await q(
       `INSERT INTO shift_costs (shift_id, org_id, agent_id, project_id, phase_id, kind, model, cost_usd_micros, ended_at)
        VALUES ($1,$2,(SELECT id FROM agents WHERE name='Ben'),$3,$4,'ba_task','sonnet',500000,now())`,
       [randomUUID(), await orgId(), w.projectId, phase.id],
     );
-    expect((await ok<any>(owner('GET', `/api/phases/${phase.id}`))).spend.totalMicros).toBe(2_500_000);
+    expect((await ok<any>(owner('GET', `/api/phases/${phase.id}`))).spend.totalMicros).toBe(3_500_000);
     // an interest
     const i = await createFeedInterest(w, { name: 'Costs interest' });
     await addSpend(i.projectId, 2_000_000);
@@ -652,6 +654,24 @@ describe('the migration backfill prices history like the projector', () => {
     const { join } = await import('node:path');
     const { defaultMigrationsDir } = await import('../src/db/migrate.ts');
     const { costUsdMicros } = await import('@aom/shared');
+    // Migration 1318 is a one-off with the family prices of its day (every Sonnet $2 / $10, Fable cache read $1). The live
+    // table has since been corrected per version, so the comparison uses a frozen copy of the table as it was then.
+    const family = (match: string, input: number, output: number, cacheRead: number, cacheWrite: number) => ({
+      match,
+      label: match,
+      input,
+      output,
+      cacheRead,
+      cacheWrite,
+      cacheWrite1h: cacheWrite,
+    });
+    const TABLE_AT_1318 = [
+      family('fable', 10, 50, 1, 12.5),
+      family('opus', 5, 25, 0.5, 6.25),
+      family('sonnet', 2, 10, 0.2, 2.5),
+      family('haiku', 1, 5, 0.1, 1.25),
+      family('', 2, 10, 0.2, 2.5),
+    ];
     const sql1317 = await readFile(join(defaultMigrationsDir(), '1317_costs_budgets.sql'), 'utf8');
     const sql1318 = await readFile(join(defaultMigrationsDir(), '1318_reprice_shift_costs.sql'), 'utf8');
     // 1317 inserts the missing rows (at the prices of its day); 1318 reprices every table-priced row.
@@ -659,6 +679,8 @@ describe('the migration backfill prices history like the projector', () => {
     const backfill = `${insertRows}\n${sql1318.slice(sql1318.indexOf('UPDATE shift_costs'))}`;
     const base = await shiftWith({ inputTokens: 1, outputTokens: 1 });
     const shift = (await q('SELECT * FROM shifts WHERE id=$1', [base.shiftId]))[0] as Record<string, any>;
+    const original = (await q('SELECT to_jsonb(t) AS j FROM shift_costs t WHERE shift_id=$1', [shift.id]))[0]
+      ?.j;
     const cases = [
       'claude-fable-5-1',
       'claude-opus-4-5',
@@ -682,12 +704,11 @@ describe('the migration backfill prices history like the projector', () => {
         await q(backfill);
         const row = (await q('SELECT cost_usd_micros FROM shift_costs WHERE shift_id=$1', [shift.id]))[0];
         expect(Number(row?.cost_usd_micros), `${model} ${JSON.stringify(t)}`).toBe(
-          costUsdMicros(model, {
-            inputTokens: t.i,
-            outputTokens: t.o,
-            cacheReadTokens: t.cr,
-            cacheWriteTokens: t.cw,
-          }),
+          costUsdMicros(
+            model,
+            { inputTokens: t.i, outputTokens: t.o, cacheReadTokens: t.cr, cacheWriteTokens: t.cw },
+            TABLE_AT_1318,
+          ),
         );
       }
     // running it again changes nothing (idempotent)
@@ -699,8 +720,11 @@ describe('the migration backfill prices history like the projector', () => {
       `UPDATE shifts SET model=$2, tokens_input=1, tokens_output=1, tokens_cache_read=0, tokens_cache_write=0 WHERE id=$1`,
       [shift.id, shift.model],
     );
+    // (the row the projector wrote goes back as it was: the backfill would price it at the 1318 prices)
     await q('DELETE FROM shift_costs WHERE shift_id=$1', [shift.id]);
-    await q(backfill);
+    await q('INSERT INTO shift_costs SELECT * FROM jsonb_populate_record(NULL::shift_costs, $1::jsonb)', [
+      JSON.stringify(original),
+    ]);
   });
 });
 
@@ -761,5 +785,37 @@ describe('a rebuild reproduces the cost rows and the budget state', () => {
     await rebuildProjections(ctx().pool, ctx().store);
     expect(await snap()).toEqual(before);
     await ok(owner('PUT', '/api/costs/settings', { currency: 'USD', usdRate: 1 }));
+  });
+});
+
+describe('a price-table change after the fact', () => {
+  it('stamps the price on the shift event, so a rebuild keeps it when the table later changes', async () => {
+    await clearSpend();
+    const a = await shiftWith({ inputTokens: 1_000_000, outputTokens: 0 });
+    const stamped = (
+      await q(`SELECT payload FROM events WHERE type='ShiftEnded' AND stream_id LIKE $1`, [`%${a.shiftId}`])
+    )[0]?.payload as { costMicros?: number } | undefined;
+    expect(stamped?.costMicros).toBe(3_000_000); // Sonnet 4.5: $3 per million input tokens
+    const price = (DEFAULT_MODEL_PRICES as ModelPrice[]).find((p) => p.match === 'sonnet-4') as ModelPrice;
+    const was = price.input;
+    try {
+      price.input = 30; // a later correction of the table
+      await rebuildProjections(ctx().pool, ctx().store);
+      const row = (
+        await q('SELECT cost_usd_micros, cost_stamped FROM shift_costs WHERE shift_id=$1', [a.shiftId])
+      )[0];
+      expect(Number(row?.cost_usd_micros)).toBe(3_000_000);
+      expect(row?.cost_stamped).toBe(true);
+      // a shift ended after the change is priced (and stamped) at the new table
+      const b = await shiftWith({ inputTokens: 1_000_000, outputTokens: 0 });
+      expect(
+        Number(
+          (await q('SELECT cost_usd_micros FROM shift_costs WHERE shift_id=$1', [b.shiftId]))[0]
+            ?.cost_usd_micros,
+        ),
+      ).toBe(30_000_000);
+    } finally {
+      price.input = was;
+    }
   });
 });

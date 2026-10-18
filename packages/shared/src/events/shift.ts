@@ -51,7 +51,15 @@ export const shiftEvents = [
    * The runner reported the usage of a shift the server had already ended without it (crashed, lost, timed out): the
    * tokens and the price are filled in afterwards. Recorded once, only when the shift was priced at zero.
    */
-  defineEvent('ShiftUsageRecorded', z.object({ shiftId: Id, usage: Usage })),
+  defineEvent(
+    'ShiftUsageRecorded',
+    z.object({
+      shiftId: Id,
+      usage: Usage,
+      /** USD micro-units stamped by the server when it prices the usage; absent: the default table prices it. */
+      costMicros: z.number().int().nonnegative().optional(),
+    }),
+  ),
   /** The runner learned Claude's session id after `shift.started`, or re-measured the session's context size. */
   defineEvent(
     'ShiftSessionRecorded',
