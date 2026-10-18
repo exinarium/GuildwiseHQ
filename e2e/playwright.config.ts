@@ -50,11 +50,11 @@ export default defineConfig({
     { name: 'support', testMatch: 'support.spec.ts', dependencies: ['installer'] },
     { name: 'tour', testMatch: 'tour.spec.ts', dependencies: ['support'] },
     // Mobile (PWA) flows at iPhone size: WebKit when the browser is installed (AOM_E2E_WEBKIT=1), else Chromium with the
-    // iPhone 15 viewport, touch and user agent. Runs after the whole chain so the TOY project, agents and runner exist.
+    // iPhone 15 viewport, touch and user agent. Needs only the paired workstation and project TOY (pairing); the spec hires its own builders and reviewer.
     {
       name: 'mobile',
       testMatch: 'mobile.spec.ts',
-      dependencies: ['tour'],
+      dependencies: ['pairing'],
       use: mobileUse(),
     },
     // The screenshot run for docs/guide (never part of `pnpm e2e`): AOM_E2E_GUIDE=1 playwright test --project=guide

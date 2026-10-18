@@ -5,7 +5,7 @@ import { MEMBER } from '../support/env.ts';
 import { startRunner } from '../support/runner.ts';
 
 // Mobile (PWA) flows at iPhone size (project `mobile`: the iPhone 15 descriptor, WebKit with AOM_E2E_WEBKIT=1, else
-// Chromium). Runs after the whole chain: the TOY project, its builders and the member exist.
+// Chromium). Needs only the pairing spec (member, workstation, project TOY); it hires its own agents.
 test.describe.configure({ mode: 'serial' });
 test.use({ storageState: storagePath('member') });
 
@@ -31,6 +31,22 @@ test.beforeAll(async ({ browser }) => {
   const projects = (await (await api.get('/api/projects')).json()).projects;
   projectId = projects.find((p: { key: string }) => p.key === 'TOY').id;
   repoId = (await (await api.get(`/api/projects/${projectId}`)).json()).repos[0].id;
+  const have = (await (await api.get('/api/agents')).json()) as unknown;
+  const names = JSON.stringify(have);
+  const workstations = (await (await api.get('/api/workstations')).json()) as {
+    workstations: Array<{ id: string }>;
+  };
+  const workstationId = workstations.workstations[0]?.id;
+  for (const [name, roleKey, seniority] of [
+    ['Ada', 'builder', 'junior'],
+    ['Linus', 'reviewer', 'senior'],
+  ] as const) {
+    if (names.includes(`"${name}"`)) continue;
+    const hire = await api.post('/api/agents', {
+      data: { name, roleKey, seniority, workstationId, projectId, runtime: 'mock' },
+    });
+    expect(hire.status(), `${name}: ${await hire.text()}`).toBe(201);
+  }
   startRunner({ AOM_MOCK_CHAT_TOKEN_MS: '50' });
 });
 test.afterAll(async () => {
@@ -44,7 +60,7 @@ async function createCard(title: string, mock?: Record<string, string[]>, specif
       title,
       cardType: 'feature',
       repoId,
-      completionAction: 'push_branch',
+      completionAction: 'merge',
       fields: { ...SPEC, ...(mock ? { mock } : {}) },
       specify,
     },
@@ -132,7 +148,7 @@ test('approve an owner approval: unified diff accordion, approval binds to the s
   await page.route(`**/api/cards/${cardId}/diff*`, (route) =>
     route.fulfill({ json: { body: diff, truncated: false, sha } }),
   );
-  await page.route(`**/api/cards/${cardId}/approve`, async (route) => {
+  await page.route(`**/api/cards/${cardId}/approval/approve`, async (route) => {
     approveBody = route.request().postDataJSON();
     await route.fulfill({ json: { ok: true } });
   });
@@ -191,10 +207,7 @@ test('move a card with "Move to..." from the card detail actions sheet', async (
   await page.getByTestId('move-to').tap();
   const sheet = page.getByTestId('move-to-sheet');
   await expect(sheet).toBeVisible();
-  const target = sheet
-    .getByRole('button', { pressed: false })
-    .filter({ hasNotText: /Current|Close|Move card/ })
-    .first();
+  const target = sheet.locator('ul button:not([disabled])').first();
   const targetId = await target.getAttribute('data-testid');
   await target.tap();
   await sheet.getByLabel('Reason').fill('moved from my phone');
