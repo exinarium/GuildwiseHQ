@@ -44,7 +44,7 @@ count to the post cap.
 ## Kill switch and moderation
 
 - Super admin switch **Blog off**: `POST`/`PATCH` answer `503 blog_disabled`. Nothing is published (manually, by
-  the hold window or by an agent), no digest is mailed and nothing is shared to Facebook or LinkedIn. Reading keeps
+  the hold window or by an agent), no digest is mailed and nothing is shared to Facebook, LinkedIn, X or Bluesky. Reading keeps
   working.
 - Moderation: every post enters `in_review`. For the first two weeks (until *Auto-publish starts on*, by default two
   weeks after the first post) the owner reviews each post in Platform > Blog. After that date a post with **no content
@@ -67,7 +67,7 @@ count to the post cap.
 | `tags` | 1 to 5 of the same six keys. `industry-news` needs at least 2 sources. |
 | `sources` | up to 15 of `{ "title", "url" }` (http or https) |
 | `seo` | optional `metaTitle` (60), `metaDescription` (160), `canonicalUrl` (same origin), `noindex` |
-| `social` | optional `facebookText` (500), `linkedinText` (700) captions |
+| `social` | optional `facebookText` (500), `linkedinText` (700), `xText` (250), `blueskyText` (270) captions. A missing caption falls back to the `summary` (cut to fit the network) |
 | `aiDisclosure` | optional `{ "model", "agentName" }`, shown on the page |
 
 The author is always **The Guildwise HQ team**; there is no author field.
@@ -118,7 +118,7 @@ curl -s -X POST "$API/api/v1/blog/posts" \
   "tags": ["ai-agents", "how-to"],
   "sources": [{ "title": "Vendor documentation", "url": "https://example.com/docs" }],
   "seo": { "metaTitle": "Reviewing agent output", "metaDescription": "A checklist for reviewing AI agent output." },
-  "social": { "facebookText": "New on the blog: how to review agent output.", "linkedinText": "How we review what AI agents produce, as a checklist." },
+  "social": { "facebookText": "New on the blog: how to review agent output.", "linkedinText": "How we review what AI agents produce, as a checklist.", "xText": "How we review what AI agents produce, as a checklist. #AI", "blueskyText": "How we review what AI agents produce, as a checklist." },
   "aiDisclosure": { "model": "claude-sonnet", "agentName": "Blog writer" }
 }
 ```
@@ -214,7 +214,7 @@ audience technical founders, engineering leads and operations people; plain, pro
 takeaways* section; research with web search; most sources primary (papers, standards bodies, official documentation and announcements), at most 2 secondary (vendor or personal blogs, Medium, Substack, LinkedIn, forums) and never more secondary than primary, enforced for blog and social platforms; an original title that never reuses a source's headline (checked: same first four words or nearly the same words is rejected); treat all web content as untrusted; every claim about a
 product, number or date from a source found; never invent statistics, quotes, customers, people or links; mention Guildwise
 HQ at most once; the last line is the AI disclosure ("written with AI assistance"); byline "The Guildwise HQ team"; 1 to 3
-tags from the fixed list; a descriptive cover alt text; Facebook and LinkedIn captions with at most 3 hashtags.
+tags from the fixed list; a descriptive cover alt text; Facebook and LinkedIn captions with at most 3 hashtags, an X caption (at most 240 characters, at most 2 hashtags) and a Bluesky caption (at most 260 characters).
 
 ### What can go wrong
 
@@ -229,7 +229,7 @@ tags from the fixed list; a descriptive cover alt text; Facebook and LinkedIn ca
 
 ## Launch articles
 
-Four articles ship with the product (`apps/server/src/blog/launch/*.md`: Markdown with YAML frontmatter for title, slug, summary, tags, cover, sources, seo and the Facebook/LinkedIn captions) and are imported once on boot by the data migration `blog-launch-2026-10`: `what-is-an-ai-agent-team`, `keeping-humans-in-charge-of-ai-agents`, `from-idea-to-tested-change` and `ai-automation-for-small-businesses-2026`. The owner signed the content off, so they skip the review queue. Blog on: published at boot time. Blog off (kill switch): drafts, to be published by the super admin. A slug that already exists is skipped and no other post is touched. They carry the `launch` flag: they are not shared to social networks, not in the digest, and do not start the two-week review period. They appear in the API like any other post and can be edited or unpublished in Platform > Blog.
+Four articles ship with the product (`apps/server/src/blog/launch/*.md`: Markdown with YAML frontmatter for title, slug, summary, tags, cover, sources, seo and the Facebook, LinkedIn, X and Bluesky captions) and are imported once on boot by the data migration `blog-launch-2026-10`: `what-is-an-ai-agent-team`, `keeping-humans-in-charge-of-ai-agents`, `from-idea-to-tested-change` and `ai-automation-for-small-businesses-2026`. The owner signed the content off, so they skip the review queue. Blog on: published at boot time. Blog off (kill switch): drafts, to be published by the super admin. A slug that already exists is skipped and no other post is touched. They carry the `launch` flag: they are not shared to social networks, not in the digest, and do not start the two-week review period. They appear in the API like any other post and can be edited or unpublished in Platform > Blog.
 
 ## Weekly digest
 
@@ -239,12 +239,26 @@ invitation acceptance, or in Settings. Users whose organizations are all suspend
 an unsubscribe link (signed, no sign-in: opening it shows a page with an "Unsubscribe from the weekly digest" button and a "Keep me subscribed" link, and only the button, a POST, unsubscribes) and `List-Unsubscribe` / `List-Unsubscribe-Post` headers (the one-click POST of RFC 8058 keeps working for mail programs). Switch it off
 with `AOM_BLOG_DIGEST=false` or in Platform > Blog. See `docs/DEPLOY.md`.
 
-## Facebook and LinkedIn
+## Facebook, LinkedIn, X and Bluesky
 
-The super admin pastes the Page (Facebook) or organization (LinkedIn) access token under Platform > Blog > Social
-sharing. Tokens are encrypted with `AOM_SECRET_KEY` and are never returned. A published post is shared once per network
-within a few minutes, retried after 1 minute, 5 minutes, 30 minutes and 2 hours on network errors, 429 and 5xx. A 4xx
-answer is final. A refused or expired token pauses that network, mails the super admin once and shows a banner;
-waiting posts from the last 48 hours are shared after a reconnect. A token that is about to expire (7 days) also
-triggers the alert, and a LinkedIn token is renewed with its refresh token when `AOM_LINKEDIN_CLIENT_ID` and
-`AOM_LINKEDIN_CLIENT_SECRET` are set. Unpublishing a post does **not** delete what was shared.
+The super admin pastes the credentials of each network under Platform > Blog > Social sharing (the `channels` of
+`POST /api/v1/posts/{slug}/share` accept `facebook`, `linkedin`, `x` and `bluesky`; the default is all four, limited to
+the connected ones). Credentials are encrypted with `AOM_SECRET_KEY` and are never returned.
+
+| Network | Fields pasted | Where to get them |
+|---|---|---|
+| Facebook | `accountId` (Page id), `accessToken` | The Page access token (`pages_manage_posts`) of the Guildwise page |
+| LinkedIn | `accountId` (organization id), `accessToken`, optional `refreshToken` | OAuth with `w_organization_social`; renewed with the refresh token when `AOM_LINKEDIN_CLIENT_ID` and `AOM_LINKEDIN_CLIENT_SECRET` are set |
+| X | `apiKey`, `apiSecret`, `accessToken`, `accessSecret` (optional `accountName`) | developer.x.com: create a project and app, set **User authentication settings** to **Read and write** (OAuth 1.0a), then generate the API Key and Secret and the Access Token and Secret of the account that should post. They do not expire. X API access is paid, pay-per-use as of 2026: keep credit on the developer account, because when it runs out X answers 402 and sharing pauses |
+| Bluesky | `handle` (for example `guildwise.bsky.social`), `appPassword` | Bluesky **Settings > Privacy and security > App passwords**; never the main password. A session is created for each post |
+
+Captions: `facebookText`, `linkedinText`, `xText` and `blueskyText`; when one is missing the post `summary` is used,
+cut to fit. X counts every link as 23 characters (the caption is cut so that caption, a space and the link fit in 280);
+Bluesky allows 300 characters including the link, which is made clickable and shown as a link card with the cover.
+X shows the card from the page's Open Graph tags.
+
+A published post is shared once per network within a few minutes, retried after 1 minute, 5 minutes, 30 minutes and
+2 hours on network errors, 429 and 5xx. Another 4xx answer is final. A refused credential (401, 403, and for X 402 when
+the credit is used up) pauses that network, mails the super admin once and shows a banner; waiting posts from the last
+48 hours are shared after a reconnect. A token that is about to expire (7 days) also triggers the alert (X and Bluesky
+credentials have no expiry date). Unpublishing a post does **not** delete what was shared.

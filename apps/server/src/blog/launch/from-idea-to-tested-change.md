@@ -12,6 +12,8 @@ seo:
 social:
   facebookText: "New on the blog: follow one change from idea to release through an AI agent team, stage by stage, with the pitfalls to watch for."
   linkedinText: "What actually happens between 'we should add this' and 'it is live' when AI agents do the work? A stage-by-stage walkthrough of requirements, build, review, test and release, and where each stage tends to go wrong."
+  xText: "From idea to tested change: how an AI agent team takes a request through build, review and test gates."
+  blueskyText: "From idea to tested change: how an AI agent team takes a request through build, review and test gates, step by step."
 sources:
   - title: "Claude Code documentation: Best practices"
     url: https://code.claude.com/docs/en/best-practices

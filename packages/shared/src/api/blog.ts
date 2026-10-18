@@ -75,7 +75,7 @@ export const ApiPostsQuerySchema = z.object({
 export const ApiSlugParamsSchema = z.object({ slug: BlogSlugSchema });
 export const ApiPatchPostSchema = BlogContentSchema.omit({ slug: true }).partial();
 export const ApiShareRequestSchema = z.object({
-  channels: z.array(SocialNetworkSchema).min(1).default(['facebook', 'linkedin']),
+  channels: z.array(SocialNetworkSchema).min(1).default(['facebook', 'linkedin', 'x', 'bluesky']),
 });
 
 // ---- platform: keys, posts, settings
@@ -155,7 +155,8 @@ export const SocialChannelSchema = z.object({
   connectedAt: IsoTime.nullable(),
 });
 export type SocialChannel = z.infer<typeof SocialChannelSchema>;
-export const ConnectSocialChannelRequestSchema = z.object({
+/** Facebook and LinkedIn: one pasted token. */
+export const ConnectTokenChannelSchema = z.object({
   /** Facebook: the Page id; LinkedIn: the organization id. */
   accountId: z.string().trim().min(1).max(100),
   accountName: z.string().trim().max(200).default(''),
@@ -163,6 +164,25 @@ export const ConnectSocialChannelRequestSchema = z.object({
   refreshToken: z.string().trim().max(4000).optional(),
   expiresAt: z.iso.datetime().nullable().optional(),
 });
+/** X: OAuth 1.0a user context keys. They do not expire. */
+export const ConnectXChannelSchema = z.object({
+  apiKey: z.string().trim().min(5).max(200),
+  apiSecret: z.string().trim().min(5).max(200),
+  accessToken: z.string().trim().min(5).max(200),
+  accessSecret: z.string().trim().min(5).max(200),
+  accountName: z.string().trim().max(200).default(''),
+});
+/** Bluesky: the handle and an app password (a session is created per post). */
+export const ConnectBlueskyChannelSchema = z.object({
+  handle: z.string().trim().min(3).max(253),
+  appPassword: z.string().trim().min(8).max(100),
+});
+export const ConnectSocialChannelRequestSchema = z.union([
+  ConnectXChannelSchema,
+  ConnectBlueskyChannelSchema,
+  ConnectTokenChannelSchema,
+]);
+export type ConnectSocialChannelRequest = z.infer<typeof ConnectSocialChannelRequestSchema>;
 export const SocialNetworkParamsSchema = z.object({ network: SocialNetworkSchema });
 
 // ---- the server-side blog writer (platform job; super admin only)

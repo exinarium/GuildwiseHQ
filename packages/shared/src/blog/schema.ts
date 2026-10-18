@@ -49,6 +49,8 @@ export const BlogContentSchema = z.object({
     .object({
       facebookText: z.string().max(500).optional(),
       linkedinText: z.string().max(700).optional(),
+      xText: z.string().max(250).optional(),
+      blueskyText: z.string().max(270).optional(),
     })
     .default({}),
   aiDisclosure: z

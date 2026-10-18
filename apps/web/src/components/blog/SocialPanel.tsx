@@ -15,6 +15,16 @@ const NAMES: Record<string, { name: string; idLabel: string; help: string }> = {
     idLabel: 'Organization id',
     help: 'The access token with w_organization_social, and the refresh token so it can be renewed.',
   },
+  x: {
+    name: 'X account',
+    idLabel: '',
+    help: 'From a developer app with "Read and write" user authentication: the API key and secret, and the access token and secret of the account (OAuth 1.0a). They do not expire. X charges for API use, so keep credit on the account.',
+  },
+  bluesky: {
+    name: 'Bluesky account',
+    idLabel: '',
+    help: 'Your handle (for example guildwise.bsky.social) and an app password from Settings, App passwords. Never your main password.',
+  },
 };
 
 /** Platform > Blog > Social: connect the Facebook Page and the LinkedIn organization; status per network. */
@@ -72,21 +82,41 @@ function Channel({ channel }: { channel: SocialChannel }) {
   const [token, setToken] = useState('');
   const [refresh, setRefresh] = useState('');
   const [expires, setExpires] = useState('');
+  const [apiKey, setApiKey] = useState('');
+  const [apiSecret, setApiSecret] = useState('');
+  const [accessSecret, setAccessSecret] = useState('');
+  const [handle, setHandle] = useState('');
+  const [appPassword, setAppPassword] = useState('');
+  const body = () => {
+    if (channel.network === 'x')
+      return {
+        apiKey: apiKey.trim(),
+        apiSecret: apiSecret.trim(),
+        accessToken: token.trim(),
+        accessSecret: accessSecret.trim(),
+        accountName: name.trim(),
+      };
+    if (channel.network === 'bluesky') return { handle: handle.trim(), appPassword: appPassword.trim() };
+    return {
+      accountId: id.trim(),
+      accountName: name.trim(),
+      accessToken: token.trim(),
+      ...(refresh.trim() ? { refreshToken: refresh.trim() } : {}),
+      expiresAt: expires ? new Date(`${expires}T00:00:00Z`).toISOString() : null,
+    };
+  };
   const submit = (e: FormEvent) => {
     e.preventDefault();
     connect.mutate(
-      {
-        network: channel.network,
-        accountId: id.trim(),
-        accountName: name.trim(),
-        accessToken: token.trim(),
-        ...(refresh.trim() ? { refreshToken: refresh.trim() } : {}),
-        expiresAt: expires ? new Date(`${expires}T00:00:00Z`).toISOString() : null,
-      },
+      { network: channel.network, ...body() },
       {
         onSuccess: () => {
           setToken('');
           setRefresh('');
+          setApiKey('');
+          setApiSecret('');
+          setAccessSecret('');
+          setAppPassword('');
           setOpen(false);
           toast.success(`${meta.name} connected`);
         },
@@ -110,7 +140,7 @@ function Channel({ channel }: { channel: SocialChannel }) {
       <div className="mt-2 flex flex-wrap gap-2">
         {channel.connected && (
           <Button size="sm" onClick={() => setOpen((o) => !o)}>
-            {open ? 'Cancel' : 'Replace the token'}
+            {open ? 'Cancel' : 'Replace the credentials'}
           </Button>
         )}
         {channel.connected && (
@@ -127,32 +157,92 @@ function Channel({ channel }: { channel: SocialChannel }) {
       {open && (
         <form onSubmit={submit} className="mt-3 flex flex-col gap-3">
           <p className="text-xs text-subtle">{meta.help}</p>
-          <TextInput label={meta.idLabel} value={id} onChange={(e) => setId(e.target.value)} required />
-          <TextInput label="Name (for you)" value={name} onChange={(e) => setName(e.target.value)} />
-          <TextInput
-            label="Access token"
-            type="password"
-            autoComplete="off"
-            value={token}
-            onChange={(e) => setToken(e.target.value)}
-            required
-          />
-          {channel.network === 'linkedin' && (
-            <TextInput
-              label="Refresh token"
-              type="password"
-              autoComplete="off"
-              value={refresh}
-              onChange={(e) => setRefresh(e.target.value)}
-            />
+          {channel.network === 'x' && (
+            <>
+              <TextInput
+                label="API key"
+                type="password"
+                autoComplete="off"
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                required
+              />
+              <TextInput
+                label="API secret"
+                type="password"
+                autoComplete="off"
+                value={apiSecret}
+                onChange={(e) => setApiSecret(e.target.value)}
+                required
+              />
+              <TextInput
+                label="Access token"
+                type="password"
+                autoComplete="off"
+                value={token}
+                onChange={(e) => setToken(e.target.value)}
+                required
+              />
+              <TextInput
+                label="Access token secret"
+                type="password"
+                autoComplete="off"
+                value={accessSecret}
+                onChange={(e) => setAccessSecret(e.target.value)}
+                required
+              />
+              <TextInput label="Name (for you)" value={name} onChange={(e) => setName(e.target.value)} />
+            </>
           )}
-          <TextInput
-            label="Token expires on"
-            type="date"
-            value={expires}
-            onChange={(e) => setExpires(e.target.value)}
-            hint="You get an alert before it ends. Leave empty for a token that does not expire."
-          />
+          {channel.network === 'bluesky' && (
+            <>
+              <TextInput
+                label="Handle"
+                value={handle}
+                onChange={(e) => setHandle(e.target.value)}
+                placeholder="guildwise.bsky.social"
+                required
+              />
+              <TextInput
+                label="App password"
+                type="password"
+                autoComplete="off"
+                value={appPassword}
+                onChange={(e) => setAppPassword(e.target.value)}
+                required
+              />
+            </>
+          )}
+          {(channel.network === 'facebook' || channel.network === 'linkedin') && (
+            <>
+              <TextInput label={meta.idLabel} value={id} onChange={(e) => setId(e.target.value)} required />
+              <TextInput label="Name (for you)" value={name} onChange={(e) => setName(e.target.value)} />
+              <TextInput
+                label="Access token"
+                type="password"
+                autoComplete="off"
+                value={token}
+                onChange={(e) => setToken(e.target.value)}
+                required
+              />
+              {channel.network === 'linkedin' && (
+                <TextInput
+                  label="Refresh token"
+                  type="password"
+                  autoComplete="off"
+                  value={refresh}
+                  onChange={(e) => setRefresh(e.target.value)}
+                />
+              )}
+              <TextInput
+                label="Token expires on"
+                type="date"
+                value={expires}
+                onChange={(e) => setExpires(e.target.value)}
+                hint="You get an alert before it ends. Leave empty for a token that does not expire."
+              />
+            </>
+          )}
           <div>
             <Button type="submit" variant="primary" loading={connect.isPending}>
               Connect

@@ -152,6 +152,14 @@ beforeEach(() => {
                 expiresAt: null,
                 connectedAt: '2026-10-01T00:00:00.000Z',
               },
+              ...(['x', 'bluesky'] as const).map((network) => ({
+                network,
+                connected: false,
+                accountName: null,
+                status: 'disconnected',
+                expiresAt: null,
+                connectedAt: null,
+              })),
             ],
             failedShares: 0,
             channelsNeedingReconnect: ['linkedin'],
@@ -334,5 +342,18 @@ describe('platform blog', () => {
     expect(await screen.findByTestId('key-secret')).toHaveTextContent('gwk_SECRETSECRET');
     await user.click(screen.getByTestId('key-done'));
     expect(screen.queryByTestId('key-secret')).toBeNull();
+  });
+});
+
+describe('social panel networks', () => {
+  it('has cards for X and Bluesky with their own credential fields', async () => {
+    wrap(<PlatformBlog />, '/platform/blog');
+    const x = await screen.findByTestId('social-x');
+    expect(within(x).getByLabelText('API key')).toBeInTheDocument();
+    expect(within(x).getByLabelText('Access token secret')).toBeInTheDocument();
+    const b = screen.getByTestId('social-bluesky');
+    expect(within(b).getByLabelText('Handle')).toBeInTheDocument();
+    expect(within(b).getByLabelText('App password')).toBeInTheDocument();
+    expect(within(b).queryByLabelText('Access token')).toBeNull();
   });
 });

@@ -66,6 +66,8 @@ function Editor({ post }: { post: BlogPost }) {
   const [noindex, setNoindex] = useState(!!post.seo.noindex);
   const [fb, setFb] = useState(post.social.facebookText ?? '');
   const [li, setLi] = useState(post.social.linkedinText ?? '');
+  const [xt, setXt] = useState(post.social.xText ?? '');
+  const [bs, setBs] = useState(post.social.blueskyText ?? '');
   const [rejecting, setRejecting] = useState(false);
   const [reason, setReason] = useState('');
   // the server's copy changed (after a save or an action): show it
@@ -83,6 +85,8 @@ function Editor({ post }: { post: BlogPost }) {
     setNoindex(!!post.seo.noindex);
     setFb(post.social.facebookText ?? '');
     setLi(post.social.linkedinText ?? '');
+    setXt(post.social.xText ?? '');
+    setBs(post.social.blueskyText ?? '');
   }, [post.updatedAt]);
 
   const save = () =>
@@ -99,7 +103,12 @@ function Editor({ post }: { post: BlogPost }) {
           ...(metaDesc ? { metaDescription: metaDesc } : {}),
           ...(noindex ? { noindex: true } : {}),
         },
-        social: { ...(fb ? { facebookText: fb } : {}), ...(li ? { linkedinText: li } : {}) },
+        social: {
+          ...(fb ? { facebookText: fb } : {}),
+          ...(li ? { linkedinText: li } : {}),
+          ...(xt ? { xText: xt } : {}),
+          ...(bs ? { blueskyText: bs } : {}),
+        },
       },
       { onSuccess: () => toast.success('Saved') },
     );
@@ -269,6 +278,20 @@ function Editor({ post }: { post: BlogPost }) {
                 rows={2}
                 value={li}
                 onChange={(e) => setLi(e.target.value)}
+              />
+              <TextArea
+                label="X caption (max 250)"
+                rows={2}
+                maxLength={250}
+                value={xt}
+                onChange={(e) => setXt(e.target.value)}
+              />
+              <TextArea
+                label="Bluesky caption (max 270)"
+                rows={2}
+                maxLength={270}
+                value={bs}
+                onChange={(e) => setBs(e.target.value)}
               />
             </div>
             <label className="flex items-center gap-2 text-sm text-fg">

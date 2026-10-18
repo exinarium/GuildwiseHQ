@@ -235,8 +235,8 @@ Per visitor address (a salted hash, never the address): 20 messages an hour and 
 | `AOM_BLOG_DIGEST` | `true` | Send the weekly blog digest (Mondays 08:00 Africa/Johannesburg). `false` stops it; the super admin can also switch it off under Platform > Blog |
 | `AOM_LINKEDIN_CLIENT_ID`, `AOM_LINKEDIN_CLIENT_SECRET` | unset | The LinkedIn app credentials, only used to renew the organization token with its refresh token |
 
-The blog itself, the API keys, the kill switch and the Facebook and LinkedIn tokens are managed in the platform area, not
-in the environment. The social tokens are encrypted with `AOM_SECRET_KEY`: **set it in production** (and keep it, or the
+The blog itself, the API keys, the kill switch and the Facebook, LinkedIn, X and Bluesky credentials are managed in the platform area, not
+in the environment. The social credentials (X keys, Bluesky app password, Meta and LinkedIn tokens) are encrypted with `AOM_SECRET_KEY`: **set it in production** (and keep it, or the
 stored tokens cannot be read again). Prefer sending the digest from a dedicated address (SPF, DKIM and DMARC on the
 sending domain; see `docs/design/support-mail-from.md`). The public blog pages (`/blog`, `/sitemap.xml`, `/robots.txt`)
 are rendered by the server, so a reverse proxy must pass those paths to it, not only `/api`. Migrations 1450 to 1452, 1560 and 1580.

@@ -12,6 +12,8 @@ seo:
 social:
   facebookText: "New on the blog: what an AI agent team actually is, how roles and handoffs work, and when a single AI assistant is the better tool."
   linkedinText: "An AI agent team is more than several chatbots. Roles, handoffs and independent review and test gates are what make it work, and sometimes one assistant is simply enough. Our plain-language guide to telling the difference."
+  xText: "What an AI agent team is, how roles and handoffs work, and when one assistant is enough."
+  blueskyText: "What an AI agent team actually is, how roles and handoffs work, and when a single AI assistant is the better tool."
 sources:
   - title: "Anthropic: Building effective agents"
     url: https://www.anthropic.com/engineering/building-effective-agents
