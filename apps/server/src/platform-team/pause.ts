@@ -38,8 +38,13 @@ export const scopeKey = (s: PauseScope): string =>
 async function describeScope(ctx: Ctx, s: PauseScope): Promise<string> {
   const parts: string[] = [];
   if (s.projectId) {
-    const p = await one(ctx.pool, 'SELECT key FROM projects WHERE id=$1', [s.projectId]);
-    parts.push(`project ${p?.key ?? s.projectId}`);
+    // The notice lands on the platform desk, where projects of every organization look alike: name the organization too.
+    const p = await one(
+      ctx.pool,
+      'SELECT p.key, p.name, o.name AS org_name FROM projects p JOIN organizations o ON o.id = p.org_id WHERE p.id=$1',
+      [s.projectId],
+    );
+    parts.push(p ? `project ${p.name} (${p.key}) of ${p.org_name}` : `project ${s.projectId}`);
   }
   if (s.workflowKey) parts.push(`workflow ${s.workflowKey}`);
   if (s.stageId) parts.push(`stage ${s.stageId}`);

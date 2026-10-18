@@ -466,6 +466,16 @@ describe('scoped pauses', () => {
     // paused twice -> one open "Paused" item with a counter, one "Resumed" item
     expect(items.filter((i) => i.title.startsWith('Paused')).length).toBe(1);
     expect(items.find((i) => i.title.startsWith('Paused'))?.repeat_count).toBe(2);
+    // the notice names the project and its organization, not just the key
+    const names = (
+      await q(
+        `SELECT p.name, o.name AS org_name FROM projects p JOIN organizations o ON o.id=p.org_id WHERE p.id=$1`,
+        [toyId],
+      )
+    )[0]!;
+    expect(items.find((i) => i.title.startsWith('Paused'))?.title).toBe(
+      `Paused project ${names.name} (TOY) of ${names.org_name}`,
+    );
     // visible to the people of the affected project
     const mine = await ok<any>(api('GET', '/api/platform-team/my-pauses'));
     expect(mine.pauses).toHaveLength(1);

@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { resolveApprover } from '../src/commands/approval.ts';
 import { PROJECTION_TABLES } from '../src/projections/index.ts';
 import { rebuildProjections } from '../src/projections/rebuild.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
@@ -415,5 +416,35 @@ describe('a QA step in a custom workflow', () => {
     await tick();
     expect((await act(w.owner.cookie, card.id, 'qa/send-back', { comment: 'Broken' })).status).toBe(200);
     expect(await row(card.id)).toMatchObject({ stage: 'work', status: 'queued', rework_round: 1 });
+  });
+});
+
+describe('who the project_owner approver is', () => {
+  it('prefers the project creator, then organization Owners, then Admins, however long each has been a member', async () => {
+    const card = { id: randomUUID(), org_id: w.owner.id, project_id: w.projectId } as any;
+    const pick = async () =>
+      (await resolveApprover(w.t.app.ctx.pool, card, { kind: 'project_owner' } as any)).userId;
+    const admin = await w.t.userSession(`adm-${randomUUID().slice(0, 6)}@example.test`);
+    await w.t.addOrgMember(w.owner.id, admin.id, 'admin');
+    // the Admin holds an organization grant on the project and has been there longer than the creator
+    await q(
+      `UPDATE project_members SET joined_at = '2020-01-01', org_grant = true WHERE project_id=$1 AND user_id=$2`,
+      [w.projectId, admin.id],
+    );
+    await q(`UPDATE project_members SET joined_at = now() WHERE project_id=$1 AND user_id=$2`, [
+      w.projectId,
+      w.owner.id,
+    ]);
+    const adminRow = await q(`SELECT role FROM project_members WHERE project_id=$1 AND user_id=$2`, [
+      w.projectId,
+      admin.id,
+    ]);
+    expect(adminRow[0]?.role).toBe('owner');
+    // 1. the creator (an organization Owner) comes before the longer-standing Admin
+    expect(await pick()).toBe(w.owner.id);
+    // 2. when an Admin created the project, that Admin is asked first
+    await q('UPDATE projects SET created_by=$2 WHERE id=$1', [w.projectId, admin.id]);
+    expect(await pick()).toBe(admin.id);
+    await q('UPDATE projects SET created_by=$2 WHERE id=$1', [w.projectId, w.owner.id]);
   });
 });

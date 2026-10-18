@@ -88,8 +88,15 @@ export async function resolveApprover(
       await one(
         db,
         `SELECT pm.user_id FROM project_members pm JOIN users u ON u.id = pm.user_id
+          JOIN projects pr ON pr.id = pm.project_id
+          LEFT JOIN org_members om ON om.org_id = pr.org_id AND om.user_id = pm.user_id AND om.status = 'active'
           WHERE pm.project_id=$1 AND pm.role='owner' AND pm.status='active' AND u.status='active'
-          ORDER BY (pm.org_grant IS NOT TRUE) DESC, pm.joined_at NULLS LAST, pm.user_id LIMIT 1`,
+          -- the project's creator when still an Owner or Admin, then people made owner of this project by hand, then the
+          -- organization's Owners, then its Admins (oldest first)
+          ORDER BY (pm.user_id = pr.created_by AND om.role IN ('owner','admin')) DESC,
+                   (pm.org_grant IS NOT TRUE) DESC,
+                   (om.role = 'owner') DESC,
+                   pm.joined_at NULLS LAST, pm.user_id LIMIT 1`,
         [card.project_id],
       )
     )?.user_id as string | undefined;
