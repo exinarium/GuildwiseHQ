@@ -163,7 +163,12 @@ export function Agents() {
       {board.isError && <ErrorBox error={board.error} onRetry={() => board.refetch()} />}
       <ErrorBox error={reset.error ?? reroll.error} />
       {board.data && <RoleUpdates updates={board.data.roleUpdates} />}
-      {board.data && <RecommendationList recommendations={board.data.recommendations} />}
+      {board.data && (
+        <RecommendationList
+          recommendations={board.data.recommendations}
+          projectId={projectFilter || undefined}
+        />
+      )}
       {board.data && active.length === 0 && (
         <EmptyState
           icon={Users}

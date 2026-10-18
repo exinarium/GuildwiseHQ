@@ -32,6 +32,21 @@ export const hrEvents = [
     }),
   ),
   /**
+   * The owner dismissed an HR recommendation. It stays out of the list while the evidence window holds the cause (like an
+   * applied one), so HR does not propose the same thing again.
+   */
+  defineEvent(
+    'RecommendationDismissed',
+    z.object({
+      orgId: Id,
+      recommendationId: z.string().min(1),
+      kind: RecommendationKind,
+      agentId: Id.optional(),
+      dismissedBy: Id,
+      reason: z.string().max(2000).optional(),
+    }),
+  ),
+  /**
    * A due schedule could not emit its card (for example a regression schedule on a project without a repo). The
    * scheduler backs off instead of retrying every tick: `nextFireAt` is the retry time. The first failure of a streak
    * also raises one desk notice (`deskItemId`); it is resolved when the schedule next fires.

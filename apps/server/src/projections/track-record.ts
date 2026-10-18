@@ -271,4 +271,15 @@ export const trackRecordProjectors: Record<string, Projector> = {
       [p.orgId, p.recommendationId, e.createdAt, p.appliedBy],
     );
   },
+
+  // A dismissed recommendation is suppressed exactly like an applied one (same table, same evidence window).
+  RecommendationDismissed: async (tx, e) => {
+    const p = ev<'RecommendationDismissed'>(e).payload;
+    await exec(
+      tx,
+      `INSERT INTO hr_applied (org_id, recommendation_id, applied_at, applied_by) VALUES ($1,$2,$3,$4)
+       ON CONFLICT (org_id, recommendation_id) DO UPDATE SET applied_at = EXCLUDED.applied_at, applied_by = EXCLUDED.applied_by`,
+      [p.orgId, p.recommendationId, e.createdAt, p.dismissedBy],
+    );
+  },
 };

@@ -520,3 +520,45 @@ export function registerHrHook(ctx: Ctx): () => void {
     }
   });
 }
+
+/**
+ * Turns recommendations down: each gets a `RecommendationDismissed` event and stays out of the list for the evidence window
+ * (HR does not propose it again). The caller may dismiss what they could apply, and an Owner or Admin any of the org's.
+ * `ids` omitted dismisses everything in the list the caller sees ("Dismiss all"). Returns how many were dismissed.
+ */
+export async function dismissRecommendations(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  who: Who,
+  opts: { ids?: string[]; projectId?: string; reason?: string },
+): Promise<number> {
+  const all = await listRecommendations(ctx, who, opts.projectId);
+  const mine = (l: Listed) =>
+    l.rec.canApply || (l.orgId === who.orgId && isOrgManager({ orgRole: who.role }));
+  const picked = opts.ids ? all.filter((l) => opts.ids?.includes(l.rec.id)) : all;
+  if (opts.ids && picked.length === 0)
+    throw notFound('that recommendation no longer applies (it may already be dismissed or applied)');
+  const allowed = picked.filter(mine);
+  if (opts.ids && allowed.length === 0)
+    throw forbidden('only the organization Owner and Admins or the hiring manager can dismiss this');
+  if (allowed.length === 0) return 0;
+  await ctx.store.append(
+    allowed.map(({ rec, orgId }) => ({
+      streamId: streamId.agent(rec.agentId ?? orgId),
+      event: {
+        type: 'RecommendationDismissed' as const,
+        payload: {
+          orgId,
+          recommendationId: rec.id,
+          kind: rec.kind,
+          ...(rec.agentId ? { agentId: rec.agentId } : {}),
+          dismissedBy: user.id,
+          ...(opts.reason?.trim() ? { reason: opts.reason.trim() } : {}),
+        },
+      },
+      actor: userActor(user.id),
+      scope: orgScope(orgId),
+    })),
+  );
+  return allowed.length;
+}

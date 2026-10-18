@@ -1,5 +1,7 @@
 import {
   AgentStatsResponseSchema,
+  DismissAllRecommendationsRequestSchema,
+  DismissRecommendationRequestSchema,
   HrBoardQuerySchema,
   IdParamsSchema,
   MetricsQuerySchema,
@@ -13,6 +15,7 @@ import type { Ctx } from '../context.ts';
 import {
   agentStats,
   applyRecommendation,
+  dismissRecommendations,
   hrBoard,
   listRecommendations,
   resetRole,
@@ -47,6 +50,34 @@ export function hrRoutes(ctx: Ctx) {
       async (req) => {
         const a = await requireOrg(ctx, req);
         return applyRecommendation(ctx, a.session.user, whoOf(a), req.params.id);
+      },
+    );
+
+    app.post(
+      '/api/hr/recommendations/dismiss-all',
+      { schema: { body: DismissAllRecommendationsRequestSchema } },
+      async (req) => {
+        const a = await requireOrg(ctx, req);
+        return {
+          dismissed: await dismissRecommendations(ctx, a.session.user, whoOf(a), {
+            ...(req.body.projectId ? { projectId: req.body.projectId } : {}),
+            ...(req.body.reason ? { reason: req.body.reason } : {}),
+          }),
+        };
+      },
+    );
+
+    app.post(
+      '/api/hr/recommendations/:id/dismiss',
+      { schema: { params: RecommendationIdParamsSchema, body: DismissRecommendationRequestSchema } },
+      async (req) => {
+        const a = await requireOrg(ctx, req);
+        return {
+          dismissed: await dismissRecommendations(ctx, a.session.user, whoOf(a), {
+            ids: [req.params.id],
+            ...(req.body?.reason ? { reason: req.body.reason } : {}),
+          }),
+        };
       },
     );
 
