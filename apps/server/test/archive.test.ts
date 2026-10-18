@@ -82,7 +82,8 @@ describe('archive: done cards leave the board after a day (#51)', () => {
       'Cancelled long ago',
     ]);
     const day = (d: Date) => d.toISOString().slice(0, 10);
-    const inRange = await archive(`&from=${day(hoursAgo(50))}&to=${day(hoursAgo(46))}`);
+    // one calendar day (UTC) holding the card finished 48 h ago; the 72 h card is a day earlier at any time of day
+    const inRange = await archive(`&from=${day(hoursAgo(48))}&to=${day(hoursAgo(48))}`);
     expect(inRange.cards.map((x: any) => x.title)).toEqual(['Finished two days ago']);
     expect((await archive(`&from=${day(hoursAgo(1))}`)).cards).toEqual([]);
   });
