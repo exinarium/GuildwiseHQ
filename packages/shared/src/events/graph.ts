@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { GraphFailReasonSchema, GraphRepoKeySchema } from '../graph/index.ts';
+import { GraphFailReasonSchema, GraphRepoKeySchema, ShiftContextMetricsSchema } from '../graph/index.ts';
 import { defineEvent, Id } from './define.ts';
 
 /**
@@ -78,5 +78,23 @@ export const graphEvents = [
       reason: GraphFailReasonSchema,
       workstationId: Id.optional(),
     }),
+  ),
+  /**
+   * A card shift ended and the runner counted what it took to find its way in the code (section 11): numbers only, written
+   * with the billed tokens the server already holds. `graphArm: 'none'` shifts are not stored in the projection.
+   */
+  defineEvent(
+    'ShiftContextMeasured',
+    z
+      .object({
+        shiftId: Id,
+        cardId: Id,
+        projectId: Id,
+        orgId: Id,
+        /** `tokens_input + tokens_cache_read + tokens_cache_write` of the shift. */
+        billedInputTokens: z.number().int().nonnegative(),
+        outputTokens: z.number().int().nonnegative(),
+      })
+      .extend(ShiftContextMetricsSchema.shape),
   ),
 ] as const;

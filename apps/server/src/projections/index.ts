@@ -166,6 +166,7 @@ export const PROJECTION_TABLES = [
   'ledger_entry_versions',
   'vaults',
   'project_graphs',
+  'shift_context_metrics',
   'devops_requests',
   'run_plans',
   'repo_clones',

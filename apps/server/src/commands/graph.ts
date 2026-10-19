@@ -2,6 +2,7 @@ import {
   type GraphIndexPayload,
   GraphIndexResultSchema,
   type GraphScope,
+  graphArmOf,
   graphRepoKey,
   type ProjectGraphStatus,
   projectVaultFolder,
@@ -401,13 +402,19 @@ export async function graphScopeFor(
   };
 }
 
-/** `on` or `off` for a card's shifts. Always `on` until the holdout of the measurement phase (section 11) assigns arms. */
-export async function graphArmFor(
-  _ctx: Ctx,
-  _projectId: string,
-  _cardId: string | null,
-): Promise<'on' | 'off'> {
-  return 'on';
+/**
+ * `on` or `off` for a card's shifts (docs/design/project-graphs.md section 11): during the evaluation window (four weeks
+ * after the project's first index) one card in five, chosen by a hash of its id, runs without the graph. Stable per card.
+ * Chats and other shifts without a card are always `on`.
+ */
+export async function graphArmFor(ctx: Ctx, projectId: string, cardId: string | null): Promise<'on' | 'off'> {
+  if (!cardId) return 'on';
+  const first = await one<{ at: Date | null }>(
+    ctx.pool,
+    `SELECT min(indexed_at) AS at FROM project_graphs WHERE project_id=$1 AND indexed_at IS NOT NULL`,
+    [projectId],
+  );
+  return graphArmOf(cardId, first?.at ?? null, ctx.clock.now());
 }
 
 /**

@@ -96,4 +96,31 @@ export const graphProjectors: Record<string, Projector> = {
       [p.projectId, p.repoId, p.repoKey, p.orgId, p.reason, p.workstationId ?? null, e.createdAt],
     );
   },
+  // Numbers per measured card shift (docs/design/project-graphs.md section 11); a shift without a graph is not stored.
+  ShiftContextMeasured: async (tx, e) => {
+    const p = (e.event as EventOf<'ShiftContextMeasured'>).payload;
+    if (p.graphArm === 'none') return;
+    await exec(
+      tx,
+      `INSERT INTO shift_context_metrics (shift_id, org_id, project_id, card_id, graph_arm, billed_input_tokens,
+                                          output_tokens, discovery_bytes, discovery_calls, graph_bytes, graph_calls,
+                                          brief_bytes, measured_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) ON CONFLICT (shift_id) DO NOTHING`,
+      [
+        p.shiftId,
+        p.orgId,
+        p.projectId,
+        p.cardId,
+        p.graphArm,
+        p.billedInputTokens,
+        p.outputTokens,
+        p.discoveryBytes,
+        p.discoveryCalls,
+        p.graphBytes,
+        p.graphCalls,
+        p.briefBytes,
+        e.createdAt,
+      ],
+    );
+  },
 };

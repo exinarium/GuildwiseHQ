@@ -30,3 +30,46 @@ export const ProjectGraphStatusSchema = z.object({
   repos: z.array(ProjectGraphRepoStatusSchema),
 });
 export type ProjectGraphStatus = z.infer<typeof ProjectGraphStatusSchema>;
+
+/**
+ * `GET /api/value/graph`: the measured effect of the code graph (docs/design/project-graphs.md section 11): billed input
+ * tokens per accepted card for each arm, the ratio with its interval, the quality guards and whether the claim is allowed.
+ * Aggregates of numbers only.
+ */
+const ArmSummarySchema = z.object({
+  cards: z.number().int(),
+  median: z.number().nullable(),
+  p25: z.number().nullable(),
+  p75: z.number().nullable(),
+});
+const GuardsSchema = z.object({
+  reworkRounds: z.number(),
+  changesRequested: z.number(),
+  testerFailures: z.number(),
+  daysToDone: z.number(),
+  costPerCardUsd: z.number(),
+});
+const DiscoverySchema = z.object({
+  medianBytes: z.number().nullable(),
+  medianCalls: z.number().nullable(),
+  medianGraphCalls: z.number().nullable(),
+});
+export const GraphContextReportSchema = z.object({
+  /** A holdout window is running (the arms are still being filled). */
+  evaluating: z.boolean(),
+  windowEndsAt: IsoTime.nullable(),
+  on: ArmSummarySchema,
+  off: ArmSummarySchema,
+  interval: z.object({ ratio: z.number(), lo: z.number(), hi: z.number() }).nullable(),
+  guards: z.object({ on: GuardsSchema.nullable(), off: GuardsSchema.nullable() }),
+  discovery: z.object({ on: DiscoverySchema, off: DiscoverySchema }),
+  claim: z.object({
+    allowed: z.boolean(),
+    reason: z.enum(['ok', 'not_enough_cards', 'interval_includes_one', 'no_saving', 'guard_worse']),
+    savingPercent: z.number().int().nullable(),
+    worseGuards: z.array(
+      z.enum(['reworkRounds', 'changesRequested', 'testerFailures', 'daysToDone', 'costPerCardUsd']),
+    ),
+  }),
+});
+export type GraphContextReport = z.infer<typeof GraphContextReportSchema>;

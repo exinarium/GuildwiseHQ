@@ -91,6 +91,7 @@ import {
   WorktreeError,
   type WorktreeResult,
 } from '../git/worktrees.ts';
+import { ContextCounter } from '../graph/measure.ts';
 import type { GraphService } from '../graph/service.ts';
 import { diskProblem } from '../health/disk.ts';
 import type { IpcServer, ShiftIpcHandler } from '../ipc/server.ts';
@@ -280,6 +281,8 @@ interface ActiveShift {
   transcripts: Map<string, { ref: TranscriptRef; title: string }>;
   /** The brief the agent sees: the server's brief plus what the runner read from the vault (PROJECT.md, taste.md). */
   brief?: ShiftBrief;
+  /** What the shift took to find its way in the code (sent on `shift.ended` as numbers). */
+  counter?: ContextCounter;
   /** Resumed after a runner restart: the server already holds the claim and has seen accepted/started. */
   resumed?: boolean;
   /** The card branch was rebased (or merged) onto its base before the shift: the commit moved with it. */
@@ -420,6 +423,7 @@ export class ShiftSupervisor {
       progress: [],
       fetched: new FetchedUrls(),
       transcripts: new Map(),
+      counter: new ContextCounter(msg.graph?.arm ?? 'none'),
       env: {},
       mainShas: resume?.mainShas ? [...resume.mainShas] : [],
       ...(resume ? { resumed: true, startedSent: resume.startedSent } : {}),
@@ -937,7 +941,10 @@ export class ShiftSupervisor {
       const section = this.deps
         .graph?.()
         ?.briefSection(msg.graph, { title: card.title, fields: card.fields });
-      if (section) texts.instructions += `\n${section}\n`;
+      if (section) {
+        texts.instructions += `\n${section}\n`;
+        if (s.counter) s.counter.briefBytes = Buffer.byteLength(section);
+      }
     }
     if (s.syncMain && msg.kind === 'card') texts.prompt += `\n${mainSyncNote(s.syncMain)}\n`;
     // lean team: the tester runs the E2E specs of the areas the card touches, not the whole suite.
@@ -1282,6 +1289,7 @@ export class ShiftSupervisor {
       durationMs: Date.now() - s.startedAt.getTime(),
       usage: s.session.usage(),
       ...(contextTokens > 0 ? { contextTokens } : {}),
+      ...(s.counter && s.msg.kind === 'card' ? { context: s.counter.snapshot() } : {}),
       ...(s.finalText || exit.error ? { finalText: (s.finalText ?? exit.error ?? '').slice(0, 4000) } : {}),
       guardViolations: s.guardViolations,
     });
@@ -1305,8 +1313,10 @@ export class ShiftSupervisor {
     if (ev.kind === 'progress') this.addProgress(s, 'text', ev.text);
     else if (ev.kind === 'tool') {
       s.fetched.record(ev.name, ev.summary);
+      s.counter?.onTool(ev.id, ev.name, ev.summary);
       this.addProgress(s, 'tool', `${ev.name}: ${ev.summary}`);
-    } else if (ev.kind === 'final') s.finalText = ev.text;
+    } else if (ev.kind === 'toolresult') s.counter?.onResult(ev.id, ev.bytes);
+    else if (ev.kind === 'final') s.finalText = ev.text;
     else if (ev.kind === 'session') this.onSession(s, ev.runtimeSessionId);
   }
 
@@ -1390,9 +1400,17 @@ export class ShiftSupervisor {
         // `aom graph ...`: answered here from the vault's graph, never by the server (the holdout arm gets none).
         if (req.method.startsWith('graph.')) {
           const g = this.deps.graph?.();
-          return g
-            ? g.rpc(req.method, req.params, s.msg.graph)
-            : ({ ok: false, error: 'the code graph is not available on this workstation' } as IpcRpcResponse);
+          if (!g)
+            return {
+              ok: false,
+              error: 'the code graph is not available on this workstation',
+            } as IpcRpcResponse;
+          const r = g.rpc(req.method, req.params, s.msg.graph);
+          if (r.ok)
+            s.counter?.onGraphVerb(
+              Buffer.byteLength(String((r.result as { text?: string } | undefined)?.text ?? '')),
+            );
+          return r;
         }
         if (req.method === 'card.attachments') return this.cardAttachments(s, req.params);
         if (req.method === 'transcript.fetch') return this.transcriptFetch(s, req.params);

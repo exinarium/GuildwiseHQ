@@ -3,6 +3,7 @@ import { VaultStorage } from '../events/vault.ts';
 import { sha256Hex } from './sha256.ts';
 
 export { sha256Hex } from './sha256.ts';
+export * from './stats.ts';
 
 /**
  * Project graphs (docs/design/project-graphs.md). The graph is a derived index of the code, built on the workstation and
@@ -97,3 +98,43 @@ export const GraphIndexResultSchema = z.discriminatedUnion('ok', [
   z.object({ ok: z.literal(false), reason: GraphFailReasonSchema }),
 ]);
 export type GraphIndexResult = z.infer<typeof GraphIndexResultSchema>;
+
+// ------------------------------------------------------------------------------------------------ measurement
+
+/**
+ * What a shift took to find its way in the code (docs/design/project-graphs.md section 11): numbers only, counted by the
+ * runner from the runtime's tool stream and sent on `shift.ended`.
+ */
+export const ShiftContextMetricsSchema = z.object({
+  /** `on`: the shift had the graph; `off`: the holdout; `none`: the project has no graph (not measured). */
+  graphArm: z.enum(['on', 'off', 'none']),
+  discoveryBytes: z.number().int().nonnegative(),
+  discoveryCalls: z.number().int().nonnegative(),
+  graphBytes: z.number().int().nonnegative(),
+  graphCalls: z.number().int().nonnegative(),
+  briefBytes: z.number().int().nonnegative(),
+});
+export type ShiftContextMetrics = z.infer<typeof ShiftContextMetricsSchema>;
+
+/** How many weeks after the first index a project's cards are split into the two arms. */
+export const GRAPH_EVALUATION_WEEKS = 4;
+
+/**
+ * The holdout: during the evaluation window one card in five runs without the graph. Stable per card (a card keeps its arm
+ * over all its shifts and reworks), independent of the project and of the time.
+ */
+export function graphHoldout(cardId: string): boolean {
+  return Number.parseInt(sha256Hex(cardId).slice(0, 8), 16) % 5 === 0;
+}
+
+/** The arm of a card at `now`: the holdout applies inside the evaluation window that began at `windowStart`. */
+export function graphArmOf(
+  cardId: string,
+  windowStart: Date | null,
+  now: Date,
+  weeks: number = GRAPH_EVALUATION_WEEKS,
+): 'on' | 'off' {
+  if (!windowStart) return 'on';
+  const end = windowStart.getTime() + weeks * 7 * 24 * 3600_000;
+  return now.getTime() < end && graphHoldout(cardId) ? 'off' : 'on';
+}

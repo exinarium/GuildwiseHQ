@@ -5,6 +5,7 @@ import { Link } from 'react-router';
 import { costsCsvUrl, useCosts, useUpdateCostSettings } from '../api/queries/costs.ts';
 import { BudgetMeter } from '../components/BudgetMeter.tsx';
 import { DayBars, ShareBar } from '../components/CostCharts.tsx';
+import { GraphContextPanel } from '../components/GraphContextPanel.tsx';
 import {
   Badge,
   Button,
@@ -235,6 +236,7 @@ export function Costs() {
       </div>
 
       <ValuePanel />
+      <GraphContextPanel />
 
       {empty ? (
         <EmptyState

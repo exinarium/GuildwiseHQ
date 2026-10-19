@@ -2,6 +2,7 @@ import {
   CostByCauseSchema,
   CostsQuerySchema,
   CostsReportSchema,
+  GraphContextReportSchema,
   IdParamsSchema,
   SetBudgetRequestSchema,
   UpdateCostSettingsRequestSchema,
@@ -21,6 +22,7 @@ import {
 } from '../commands/budgets.ts';
 import type { Ctx } from '../context.ts';
 import { costByCause } from '../costs/causes.ts';
+import { graphContextReport } from '../costs/graph-context.ts';
 import { orgCostCtx } from '../costs/index.ts';
 import { costSettings, costsCsv, costsReport, csvField, rangeOf } from '../costs/report.ts';
 import { valueCsv, valueReport } from '../costs/value.ts';
@@ -80,6 +82,14 @@ export function costRoutes(ctx: Ctx) {
     app.get('/api/value', { schema: { querystring: ValueQuerySchema } }, async (req) => {
       const a = await requireOrg(ctx, req, { min: 'admin' });
       return ValueReportSchema.parse(await valueReport(ctx.pool, a.orgId, req.query, ctx.clock.now(), true));
+    });
+
+    // The measured effect of the project graphs (docs/design/project-graphs.md section 11), for Owner and Admin.
+    app.get('/api/value/graph', async (req) => {
+      const a = await requireOrg(ctx, req, { min: 'admin' });
+      return GraphContextReportSchema.parse(
+        await graphContextReport(ctx.pool, a.orgId, null, ctx.clock.now()),
+      );
     });
 
     app.get('/api/value/export.csv', { schema: { querystring: ValueQuerySchema } }, async (req, reply) => {

@@ -24,7 +24,7 @@ import {
   GitSshPayloadSchema,
   RepoAccessPayloadSchema,
 } from '../forge/index.ts';
-import { GraphIndexPayloadSchema } from '../graph/index.ts';
+import { GraphIndexPayloadSchema, ShiftContextMetricsSchema } from '../graph/index.ts';
 import { SWEEP_QUERY_MAX_PATHS, WorktreesSweepPayloadSchema } from '../hygiene/index.ts';
 import { PROTOCOL_VERSION, uuidv7 } from '../ids.ts';
 import { IntakeContextSchema, QuestionShiftSchema } from '../intake/index.ts';
@@ -1122,6 +1122,8 @@ export const ShiftEndedSchema = msg('shift.ended', {
   contextTokens: z.number().int().nonnegative().optional(),
   finalText: z.string().max(4000).optional(),
   guardViolations: z.array(GuardViolation).default([]),
+  /** Additive: how the shift found its way in the code (docs/design/project-graphs.md section 11); numbers only. */
+  context: ShiftContextMetricsSchema.optional(),
 });
 export const RpcRequestSchema = msg('rpc.request', {
   rpcId: z.string().min(1),

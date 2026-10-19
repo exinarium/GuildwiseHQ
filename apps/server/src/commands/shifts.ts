@@ -1363,6 +1363,35 @@ export async function applyShiftEnded(ctx: Ctx, tx: Tx, ws: WsRef, msg: RunnerTo
     return;
   }
   if (!s) return;
+  // What the shift took to find its way in the code (docs/design/project-graphs.md section 11): numbers beside the billed tokens.
+  if (msg.context && msg.context.graphArm !== 'none' && s.kind === 'card' && s.card_id) {
+    const c = await one(tx, 'SELECT project_id FROM cards WHERE id=$1', [s.card_id]);
+    const projectId = s.project_id ?? c?.project_id;
+    if (projectId)
+      await ctx.store.append(
+        [
+          {
+            streamId: streamId.shift(s.id),
+            event: {
+              type: 'ShiftContextMeasured',
+              payload: {
+                shiftId: s.id,
+                cardId: s.card_id,
+                projectId,
+                orgId: s.org_id,
+                billedInputTokens:
+                  msg.usage.inputTokens + msg.usage.cacheReadTokens + msg.usage.cacheWriteTokens,
+                outputTokens: msg.usage.outputTokens,
+                ...msg.context,
+              },
+            },
+            actor: runnerActor(ws.id),
+            scope: { orgId: s.org_id, projectId, audience: 'project' } as never,
+          },
+        ],
+        { tx },
+      );
+  }
   if (s.kind === 'devops') {
     await ctx.store.append(
       await endDevopsShift(tx, s, msg.outcome, {
