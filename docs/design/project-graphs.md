@@ -21,9 +21,11 @@ contract), 15 (ledger), 16 (vaults) and the Trust copy in `apps/web/src/landing/
    names.** The server keeps only status (indexed commit, counts, indexer version, timings) and the work layer it already
    owns (cards, decisions, merges).
 6. **The product is "a brain for your project".** Agents and the CEO get fast, cheap context: the indexed, grouped and
-   linked nodes answer "where is X, what touches Y, what does this area do" without broad file reads. The access surface
-   may be an MCP server on the workstation as well as `aom graph` verbs (section 7, open question 11 reopened: an MCP
-   server is now in scope where it is the simpler surface for Claude Code sessions, including the full-power CEO).
+   linked nodes answer "where is X, what touches Y, what does this area do" without broad file reads. **No MCP server**
+   (open question 11 closed): an MCP server's tool definitions sit in every session's context whether used or not. The
+   graph reaches agents in two cheap ways only: the runner puts a small, relevant slice of it into the brief and chat
+   context as work starts (section 7), and an agent that needs more calls the `aom graph` verbs on demand, which cost
+   nothing until used.
 
 Owner requests carried over: a graph for every project; an organization graph that is the CEO's navigation "brain"; agents
 use it to spend fewer tokens (briefs and chats pull a relevant subgraph); the token claim must be measured per shift.
