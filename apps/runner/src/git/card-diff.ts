@@ -1,5 +1,5 @@
 import { CHANGED_PATHS_MAX, capDiff, type DiffUpload } from '@aom/shared';
-import { baseRef } from './diffstat.ts';
+import { baseRef, ownChangedPaths, scoped } from './diffstat.ts';
 import { git, gitOk, revParse } from './git.ts';
 
 export interface CardDiff {
@@ -17,10 +17,19 @@ export interface CardDiff {
 export async function computeCardDiff(worktree: string, baseBranch: string): Promise<CardDiff> {
   const base = await baseRef(worktree, baseBranch);
   const headSha = await gitOk(worktree, ['rev-parse', 'HEAD']);
-  const names = await git(worktree, ['diff', '--name-only', '-z', `${base}...HEAD`]);
+  // A branch that merged `main` (or the working branch) in: only what the card itself changed, not what the merge brought.
+  const own = await ownChangedPaths(worktree, base);
+  const none = { exitCode: 0, stdout: '', stderr: '' };
+  const names =
+    own?.length === 0
+      ? none
+      : await git(worktree, scoped(['diff', '--name-only', '-z', `${base}...HEAD`], own));
   const changedPaths =
     names.exitCode === 0 ? names.stdout.split('\0').filter(Boolean).slice(0, CHANGED_PATHS_MAX) : [];
-  const d = await git(worktree, ['diff', '--no-color', '--no-ext-diff', '-M', `${base}...HEAD`]);
+  const d =
+    own?.length === 0
+      ? none
+      : await git(worktree, scoped(['diff', '--no-color', '--no-ext-diff', '-M', `${base}...HEAD`], own));
   const capped = capDiff(d.exitCode === 0 ? d.stdout : '');
   return {
     headSha,
