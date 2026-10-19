@@ -54,8 +54,26 @@ export const GraphIndexPayloadSchema = z.object({
   workingBranch: z.string().max(200).nullish(),
   vault: GraphVaultRefSchema,
   /** `graph.update`: the commit the manifest recorded, and the merge commit to bring the graph to. */
-  fromCommit: z.string().regex(/^[0-9a-f]{7,64}$/).optional(),
-  toCommit: z.string().regex(/^[0-9a-f]{7,64}$/).optional(),
+  fromCommit: z
+    .string()
+    .regex(/^[0-9a-f]{7,64}$/)
+    .optional(),
+  toCommit: z
+    .string()
+    .regex(/^[0-9a-f]{7,64}$/)
+    .optional(),
+  /**
+   * `graph.update`: the card that landed. The server owns these (the work layer); the runner records only the ref and the
+   * title next to the modules the merge touched.
+   */
+  merge: z
+    .object({
+      ref: z.string().min(1).max(40),
+      title: z.string().max(300),
+      /** ISO time of the merge. */
+      at: z.iso.datetime(),
+    })
+    .optional(),
 });
 export type GraphIndexPayload = z.infer<typeof GraphIndexPayloadSchema>;
 

@@ -384,6 +384,9 @@ export class Runner {
       log: this.log,
       transport: { send: (type, payload) => void this.client.send(type, payload) },
       secondMs: opts.vaultSecondMs,
+      // generated graph files that two workstations both wrote: the sync took one side, the indexer rebuilds them
+      onGraphResolved: (vaultId, folders) =>
+        void this.graph.regenerate(vaultId, folders).catch(() => undefined),
     });
     this.toolchains = new ToolchainRegistry(this.paths.toolchains, this.paths.root, () => ({
       toolchainPaths: opts.config.runtimes['claude-code'].toolchainPaths,
@@ -1319,7 +1322,8 @@ export class Runner {
         done(true, { repos: this.repos.length });
       } else if (command === 'graph.index' || command === 'graph.update') {
         // A repository that cannot be indexed is an answer (ok:true, result.ok:false with a fixed reason code).
-        done(true, await this.graph.index(CommandPayloadSchemas['graph.index'].parse(payload)));
+        const p = CommandPayloadSchemas[command].parse(payload);
+        done(true, await (command === 'graph.update' ? this.graph.update(p) : this.graph.index(p)));
       } else if (command === 'vault.configure') {
         this.vaults.configure(CommandPayloadSchemas['vault.configure'].parse(payload));
         done(true, { vaults: this.vaults.configured() });

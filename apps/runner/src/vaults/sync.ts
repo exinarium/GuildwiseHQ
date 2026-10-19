@@ -20,7 +20,15 @@ export interface VaultSyncInput {
 }
 
 export type VaultSyncResult =
-  | { status: 'ok'; cloned: boolean; committed: boolean; pulled: boolean; pushed: boolean }
+  | {
+      status: 'ok';
+      cloned: boolean;
+      committed: boolean;
+      pulled: boolean;
+      pushed: boolean;
+      /** Folders (`projects/<name>`) whose generated graph files had a conflict that the sync resolved itself. */
+      graphResolved?: string[];
+    }
   | { status: 'conflict'; files: string[] }
   | { status: 'error'; error: string };
 
@@ -73,13 +81,65 @@ async function unmergedFiles(dir: string, env: Record<string, string>): Promise<
     .filter(Boolean);
 }
 
+/**
+ * A file the project graph generates (docs/design/project-graphs.md section 4): `<folder>/graph/manifest.json`, `modules.md`,
+ * `work.md` and everything under `repos/`. Two workstations that indexed the same project write them; a conflict there is
+ * never a person's work and never a desk item.
+ */
+export const isGeneratedGraphFile = (path: string): boolean =>
+  /(^|\/)graph\/(manifest\.json|modules\.md|work\.md|repos\/.+)$/.test(path);
+
+const graphFolderOf = (path: string): string => path.slice(0, path.lastIndexOf('/graph/'));
+
+/**
+ * A rebase stopped on conflicts in generated graph files only: take the upstream side of each (the indexer rewrites them
+ * from the code afterwards), continue, and repeat for the next replayed commit. Returns the folders resolved, or null when
+ * a conflict that is not a generated file shows up (the caller then aborts and reports it as before).
+ */
+async function resolveGraphConflicts(
+  dir: string,
+  first: string[],
+  env: Record<string, string>,
+): Promise<string[] | null> {
+  const folders = new Set<string>();
+  let files = first;
+  for (let round = 0; round < 50; round++) {
+    if (files.length === 0 || !files.every(isGeneratedGraphFile)) return null;
+    for (const f of files) {
+      // during a rebase "ours" is the branch being rebased onto, i.e. the remote
+      const co = await git(dir, ['checkout', '--ours', '--', f], { env });
+      if (co.exitCode !== 0) await git(dir, ['rm', '-f', '--quiet', '--', f], { env });
+      else await gitOk(dir, ['add', '--', f], { env });
+      folders.add(graphFolderOf(f));
+    }
+    const cont = await git(
+      dir,
+      ['-c', 'core.editor=true', '-c', 'commit.gpgsign=false', 'rebase', '--continue'],
+      {
+        env: { ...env, GIT_EDITOR: 'true' },
+      },
+    );
+    if (cont.exitCode === 0) return [...folders].sort();
+    files = await unmergedFiles(dir, env);
+    if (files.length === 0) {
+      // an empty commit after the resolution: skip it
+      const skip = await git(dir, ['rebase', '--skip'], { env });
+      if (skip.exitCode === 0) return [...folders].sort();
+      return null;
+    }
+  }
+  return null;
+}
+
 /** Rebases local commits onto the remote branch. Conflict: files listed, rebase aborted, worktree left clean. */
 async function pullRebase(
   dir: string,
   branch: string,
   env: Record<string, string>,
 ): Promise<
-  { ok: true; changed: boolean } | { ok: false; conflict: string[] } | { ok: false; error: string }
+  | { ok: true; changed: boolean; graphResolved?: string[] }
+  | { ok: false; conflict: string[] }
+  | { ok: false; error: string }
 > {
   const fetch = await git(dir, ['fetch', 'origin'], { env });
   if (fetch.exitCode !== 0) return { ok: false, error: `git fetch failed: ${fetch.stderr.trim()}` };
@@ -91,6 +151,14 @@ async function pullRebase(
   const pull = await git(dir, ['pull', '--rebase', '--autostash', 'origin', branch], { env });
   if (pull.exitCode !== 0) {
     const files = await unmergedFiles(dir, env);
+    // only generated graph files: resolve them here, they are rebuilt from the code
+    if (files.length > 0 && files.every(isGeneratedGraphFile)) {
+      const resolved = await resolveGraphConflicts(dir, files, env);
+      if (resolved) {
+        const afterResolved = (await git(dir, ['rev-parse', 'HEAD'], { env })).stdout.trim();
+        return { ok: true, changed: before !== afterResolved, graphResolved: resolved };
+      }
+    }
     await git(dir, ['rebase', '--abort'], { env });
     if (files.length > 0) return { ok: false, conflict: files };
     return { ok: false, error: `git pull --rebase failed: ${pull.stderr.trim() || pull.stdout.trim()}` };
@@ -144,6 +212,8 @@ export async function syncVault(input: VaultSyncInput): Promise<VaultSyncResult>
     const branch = (await currentBranch(input.dir)) ?? 'main';
     let pulled = false;
     let pushed = false;
+    const graphResolved = new Set<string>();
+    const done = () => ({ ...(graphResolved.size ? { graphResolved: [...graphResolved].sort() } : {}) });
     for (let attempt = 0; attempt < 2; attempt++) {
       const pull = await pullRebase(input.dir, branch, env);
       if (!pull.ok) {
@@ -151,14 +221,15 @@ export async function syncVault(input: VaultSyncInput): Promise<VaultSyncResult>
         return { status: 'error', error: pull.error };
       }
       pulled ||= pull.changed;
+      for (const f of pull.graphResolved ?? []) graphResolved.add(f);
       if (!(await needsPush(input.dir, branch, env)))
-        return { status: 'ok', cloned, committed, pulled, pushed };
+        return { status: 'ok', cloned, committed, pulled, pushed, ...done() };
       const push = await git(input.dir, ['push', 'origin', `HEAD:refs/heads/${branch}`], { env });
       if (push.exitCode === 0) {
         pushed = true;
         // keep origin/<branch> current without another network round trip
         await git(input.dir, ['fetch', 'origin'], { env });
-        return { status: 'ok', cloned, committed, pulled, pushed };
+        return { status: 'ok', cloned, committed, pulled, pushed, ...done() };
       }
       if (attempt === 1) return { status: 'error', error: `git push failed: ${push.stderr.trim()}` };
     }

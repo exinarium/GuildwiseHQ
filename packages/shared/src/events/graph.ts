@@ -38,6 +38,35 @@ export const graphEvents = [
       vaultId: z.string().max(64),
     }),
   ),
+  /**
+   * A merge landed and the workstation brought the graph to its commit (docs/design/project-graphs.md section 6). Counts
+   * and commits only; the work layer's `touches` edges are kept in the vault, not here.
+   */
+  defineEvent(
+    'ProjectGraphUpdated',
+    z.object({
+      projectId: Id,
+      orgId: Id,
+      repoId: Id,
+      repoKey: GraphRepoKeySchema,
+      /** The commit the graph was at (absent: there was no graph, it was built from scratch). */
+      fromCommit: z.string().min(7).max(64).optional(),
+      toCommit: z.string().min(7).max(64),
+      /** Files added, changed or removed between the two commits. */
+      filesChanged: z.number().int().nonnegative(),
+      /** Files in the graph after the update. */
+      files: z.number().int().nonnegative(),
+      nodes: z.number().int().nonnegative(),
+      edges: z.number().int().nonnegative(),
+      modules: z.number().int().nonnegative(),
+      indexerVersion: z.string().max(40),
+      durationMs: z.number().int().nonnegative(),
+      workstationId: Id,
+      vaultId: z.string().max(64),
+      /** The update fell back to a full index (the old commit was no ancestor, or there was no graph). */
+      fullReindex: z.boolean().optional(),
+    }),
+  ),
   /** The workstation could not index (a fixed reason code); the server retries with a back-off. */
   defineEvent(
     'ProjectGraphFailed',

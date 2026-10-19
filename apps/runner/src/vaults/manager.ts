@@ -36,6 +36,8 @@ export interface VaultManagerOptions {
   log?: Logger;
   /** Test hook: milliseconds per configured second (default 1000). */
   secondMs?: number;
+  /** A sync resolved a conflict in generated project graph files by itself: rebuild the graph of these folders. */
+  onGraphResolved?: (vaultId: string, folders: string[]) => void;
 }
 
 interface PersistedState {
@@ -267,6 +269,12 @@ export class VaultManager {
       }
     } else this.failing.delete(vaultId);
     if (r.status === 'ok') {
+      if (r.graphResolved?.length) {
+        this.log.warn(
+          `vault ${vaultId}: conflicts in generated graph files were resolved by the sync; rebuilding the graph`,
+        );
+        this.opts.onGraphResolved?.(vaultId, r.graphResolved);
+      }
       this.lastPull.set(vaultId, now);
       if (r.pushed) this.lastPush.set(vaultId, now);
       this.opts.transport.send('vault.status', {

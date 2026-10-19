@@ -13,7 +13,7 @@ import type { WebSocket } from 'ws';
 import { confirmBranchOnEvent } from '../commands/branch-confirm.ts';
 import { SYSTEM_ACTOR, userScope } from '../commands/common.ts';
 import { writeResearchIndex } from '../commands/convert.ts';
-import { seedProjectGraphsOfProject } from '../commands/graph.ts';
+import { onMergeLanded, seedProjectGraphsOfProject } from '../commands/graph.ts';
 import { refreshVaultConfig, vaultAudience } from '../commands/vaults.ts';
 import type { Ctx } from '../context.ts';
 import { sha256Hex } from '../crypto.ts';
@@ -226,6 +226,15 @@ export class RunnerGateway {
           [p.cardId, p.agentId],
         );
         for (const s of open) this.stopShift(s.workstation_id, s.id, reason);
+        return;
+      }
+      case 'CardFinalized': {
+        // A merge landed: bring the project's code graph to the merge commit (workstation-side, docs/design/project-graphs.md 6).
+        const p = (e.event as EventOf<'CardFinalized'>).payload;
+        if (p.resultRef.mergeCommit)
+          await onMergeLanded(ctx, p.cardId, p.resultRef.mergeCommit).catch((err) =>
+            ctx.log.warn({ err }, 'could not queue the project graph update'),
+          );
         return;
       }
       case 'AgentRetired': {

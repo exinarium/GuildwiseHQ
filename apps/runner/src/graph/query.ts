@@ -75,7 +75,6 @@ export class GraphIndex {
       if (
         n.kind === 'repo' ||
         n.kind === 'project' ||
-        n.kind === 'card' ||
         n.kind === 'decision' ||
         n.kind === 'order' ||
         n.kind === 'merge'
@@ -116,6 +115,8 @@ export class GraphIndex {
         return n.sub === 'file' ? `doc ${n.path ?? n.name}` : `doc "${n.name}" (${loc})`;
       case 'package':
         return `package ${n.name}`;
+      case 'card':
+        return `card ${n.name}`;
       default:
         return `${n.kind} ${n.name}`;
     }

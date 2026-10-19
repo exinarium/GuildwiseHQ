@@ -444,7 +444,7 @@ export class RunnerHandlers {
         } else if (cmd?.type === 'graph.index' || cmd?.type === 'graph.update') {
           // Terminal: the answer becomes graph STATUS (an event with ids and counts); a failure is retried by the hello pass.
           await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
-          await applyGraphResult(this.ctx, conn.workstationId, cmd.payload, msg.ok, msg.result);
+          await applyGraphResult(this.ctx, conn.workstationId, cmd.payload, msg.ok, msg.result, cmd.type);
         } else if (cmd?.type === 'org.folder') {
           // Terminal: a refusal is an answer; its reason shows on the Workstations page until the next success.
           await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());

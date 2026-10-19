@@ -1,4 +1,4 @@
-import { statSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   type GraphIndexPayload,
@@ -15,6 +15,7 @@ import { GraphIndexError, indexRepository } from './indexer.ts';
 import { loadGraph } from './load.ts';
 import { GraphIndex } from './query.ts';
 import { manifestPath } from './store.ts';
+import { updateRepository } from './update.ts';
 
 export interface GraphServiceDeps {
   paths: RunnerPaths;
@@ -52,30 +53,60 @@ export class GraphService {
     return this.deps.paths.graphCache;
   }
 
-  async index(payload: GraphIndexPayload): Promise<GraphIndexResult> {
+  /** `graph.index`: a full index of one repository into the project vault. */
+  index(payload: GraphIndexPayload): Promise<GraphIndexResult> {
+    return this.execute(payload, false);
+  }
+
+  /**
+   * `graph.update`: the graph of one repository brought to a merge commit (section 6 of the design). Without a target
+   * commit it is a full index.
+   */
+  update(payload: GraphIndexPayload): Promise<GraphIndexResult> {
+    return this.execute(payload, !!payload.toCommit);
+  }
+
+  private async execute(payload: GraphIndexPayload, isUpdate: boolean): Promise<GraphIndexResult> {
     const { vaults } = this.deps;
     if (!isSafeVaultFolder(payload.vault.folder)) return { ok: false, reason: 'no_vault' };
     const repo = await this.deps.findRepo(payload.remoteUrlNormalized);
     if (!repo) return { ok: false, reason: 'no_clone' };
     const v = vaults.vault(payload.vault.vaultId);
     if (!v) return { ok: false, reason: 'no_vault' };
+    this.remember(payload);
     try {
-      const out = await vaults.exclusive(payload.vault.vaultId, (dir) =>
-        indexRepository({
-          repoPath: repo.localPath,
-          repoKey: payload.repoKey,
-          repoName: payload.repoName,
-          ref: payload.workingBranch,
-          graphDir: this.graphDir(dir, payload.vault.folder),
-          cacheDir: this.cacheDir,
-          indexerVersion: this.deps.version,
-          ...(this.deps.now ? { now: this.deps.now } : {}),
-        }),
-      );
+      const base = {
+        repoPath: repo.localPath,
+        repoKey: payload.repoKey,
+        repoName: payload.repoName,
+        ref: payload.workingBranch,
+        cacheDir: this.cacheDir,
+        indexerVersion: this.deps.version,
+        ...(this.deps.now ? { now: this.deps.now } : {}),
+      };
+      const out = await vaults.exclusive(payload.vault.vaultId, async (dir) => {
+        const graphDir = this.graphDir(dir, payload.vault.folder);
+        if (!isUpdate || !payload.toCommit)
+          return { ...(await indexRepository({ ...base, graphDir })), update: undefined };
+        const u = await updateRepository({
+          ...base,
+          graphDir,
+          toCommit: payload.toCommit,
+          ...(payload.merge
+            ? {
+                work: { ref: payload.merge.ref, title: payload.merge.title, at: payload.merge.at, paths: [] },
+              }
+            : {}),
+        });
+        return {
+          ...u,
+          update: { fromCommit: u.fromCommit, filesChanged: u.filesChanged, fullReindex: u.fullReindex },
+        };
+      });
       // the vault's own sync commits and pushes what changed (a repository vault); a local folder has nothing to sync
       if (v.storage !== 'local' && out.written + out.deleted > 0) void vaults.syncNow(payload.vault.vaultId);
       this.log.info(
-        `graph indexed ${payload.repoName}: ${out.files} files, ${out.nodes} nodes, ${out.edges} edges in ${out.durationMs} ms (${out.written} written, ${out.unchanged} unchanged)`,
+        `graph ${isUpdate ? 'updated' : 'indexed'} ${payload.repoName}: ${out.files} files, ${out.nodes} nodes, ${out.edges} edges in ${out.durationMs} ms (${out.written} written, ${out.unchanged} unchanged)`,
       );
       if (out.parseFailures > 0)
         this.log.warn(`graph: the parser failed on ${out.parseFailures} files: ${out.firstParseFailure}`);
@@ -88,6 +119,13 @@ export class GraphService {
         modules: out.modules,
         indexerVersion: this.deps.version,
         durationMs: out.durationMs,
+        ...(out.update
+          ? {
+              ...(out.update.fromCommit ? { fromCommit: out.update.fromCommit } : {}),
+              filesChanged: out.update.filesChanged,
+              fullReindex: out.update.fullReindex,
+            }
+          : {}),
       };
     } catch (err) {
       if (err instanceof GraphIndexError) return { ok: false, reason: err.code };
@@ -97,6 +135,53 @@ export class GraphService {
       );
       return { ok: false, reason: 'error' };
     }
+  }
+
+  // ------------------------------------------------------------------------------------------- regeneration
+
+  private get jobsFile(): string {
+    return join(this.cacheDir, 'jobs.json');
+  }
+
+  /** The last index request per repository, kept so a graph the vault sync had to discard can be rebuilt without the server. */
+  private remember(payload: GraphIndexPayload): void {
+    try {
+      const jobs = this.readJobs();
+      jobs[`${payload.vault.vaultId}|${payload.vault.folder}|${payload.repoKey}`] = {
+        ...payload,
+        fromCommit: undefined,
+        toCommit: undefined,
+        merge: undefined,
+      };
+      mkdirSync(this.cacheDir, { recursive: true });
+      writeFileSync(this.jobsFile, JSON.stringify(jobs));
+    } catch {
+      // regeneration then waits for the server's next request
+    }
+  }
+
+  private readJobs(): Record<string, GraphIndexPayload> {
+    try {
+      return existsSync(this.jobsFile)
+        ? (JSON.parse(readFileSync(this.jobsFile, 'utf8')) as Record<string, GraphIndexPayload>)
+        : {};
+    } catch {
+      return {};
+    }
+  }
+
+  /**
+   * A sync of the vault resolved a conflict in generated graph files by itself (design section 4: they are never a desk
+   * item): the graph of that folder is rebuilt from the clones, and the next sync commits the result.
+   */
+  async regenerate(vaultId: string, folders: string[]): Promise<number> {
+    let n = 0;
+    for (const job of Object.values(this.readJobs())) {
+      if (job.vault.vaultId !== vaultId || !folders.includes(job.vault.folder)) continue;
+      const r = await this.index(job);
+      if (r.ok) n++;
+    }
+    return n;
   }
 
   // ------------------------------------------------------------------------------------------------ queries

@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { readManifest, type Manifest } from './store.ts';
+import { type Manifest, readManifest } from './store.ts';
 import type { Confidence, EdgeKind, EdgeSource, GEdge, GNode, NodeKind } from './types.ts';
 
 /** A graph loaded from the vault's shards (docs/design/project-graphs.md section 4), ready for queries. */
@@ -39,7 +39,8 @@ function readLines(file: string): Raw[] {
   return out;
 }
 
-const full = (rk: string, id: unknown): string => (typeof id === 'string' ? (id.startsWith(`${rk}:`) ? id : `${rk}:${id}`) : '');
+const full = (rk: string, id: unknown): string =>
+  typeof id === 'string' ? (id.startsWith(`${rk}:`) ? id : `${rk}:${id}`) : '';
 
 /**
  * Loads every repository of a project's graph. A repository too big for the vault has its module shards in the runner's
@@ -92,6 +93,20 @@ export function loadGraph(graphDir: string, cacheDir?: string): LoadedGraph | nu
               ...(o.g ? { lang: String(o.g) } : {}),
             };
             nodes.set(id, n);
+          } else if (o.t === 'w') {
+            // the work layer: a card that landed, and the modules its merge touched (`touches`, from git)
+            const ref = String(o.ref ?? '');
+            if (!ref) continue;
+            const id = `${rk}:work#card:${ref}~${String(o.commit ?? '').slice(0, 7)}`;
+            nodes.set(id, { id, kind: 'card', name: `${ref} ${String(o.title ?? '')}`.trim() });
+            for (const dir of Array.isArray(o.mods) ? (o.mods as unknown[]) : [])
+              edges.push({
+                from: id,
+                to: `${rk}:${String(dir)}#module:${String(dir)}`,
+                kind: 'touches',
+                conf: 'EXTRACTED',
+                src: 'git',
+              });
           } else if (o.t === 'e') {
             const c = CONF.includes(o.c as Confidence) ? (o.c as Confidence) : 'INFERRED';
             edges.push({
@@ -110,8 +125,11 @@ export function loadGraph(graphDir: string, cacheDir?: string): LoadedGraph | nu
     try {
       const f = join(graphDir, 'repos', rk, 'communities.json');
       if (existsSync(f)) {
-        const j = JSON.parse(readFileSync(f, 'utf8')) as { communities?: Array<{ id: number; label: string; modules: string[] }> };
-        for (const c of j.communities ?? []) for (const m of c.modules) communityOf.set(m, { id: c.id, label: c.label });
+        const j = JSON.parse(readFileSync(f, 'utf8')) as {
+          communities?: Array<{ id: number; label: string; modules: string[] }>;
+        };
+        for (const c of j.communities ?? [])
+          for (const m of c.modules) communityOf.set(m, { id: c.id, label: c.label });
       }
     } catch {
       // communities are optional
@@ -119,9 +137,12 @@ export function loadGraph(graphDir: string, cacheDir?: string): LoadedGraph | nu
   }
   // `contains` is not stored: modules hold their nodes, files hold their symbols and headings, classes their members
   const byPathFile = new Map<string, string>();
-  for (const n of nodes.values()) if ((n.kind === 'file' || n.kind === 'test' || (n.kind === 'doc' && n.sub === 'file')) && n.path) byPathFile.set(n.path, n.id);
+  for (const n of nodes.values())
+    if ((n.kind === 'file' || n.kind === 'test' || (n.kind === 'doc' && n.sub === 'file')) && n.path)
+      byPathFile.set(n.path, n.id);
   const symbolByPathName = new Map<string, string>();
-  for (const n of nodes.values()) if (n.kind === 'symbol' && n.path) symbolByPathName.set(`${n.path}\u0000${n.name}`, n.id);
+  for (const n of nodes.values())
+    if (n.kind === 'symbol' && n.path) symbolByPathName.set(`${n.path}\u0000${n.name}`, n.id);
   for (const n of nodes.values()) {
     if (n.kind === 'repo' || n.kind === 'module') continue;
     let parent: string | undefined;
@@ -134,7 +155,8 @@ export function loadGraph(graphDir: string, cacheDir?: string): LoadedGraph | nu
     if (parent) parentOf.set(n.id, parent);
   }
   const repoByKey = new Map<string, string>();
-  for (const n of nodes.values()) if (n.kind === 'repo') repoByKey.set(n.id.slice(0, n.id.indexOf(':')), n.id);
+  for (const n of nodes.values())
+    if (n.kind === 'repo') repoByKey.set(n.id.slice(0, n.id.indexOf(':')), n.id);
   for (const n of nodes.values()) {
     if (n.kind !== 'module') continue;
     const repo = repoByKey.get(n.id.slice(0, n.id.indexOf(':')));

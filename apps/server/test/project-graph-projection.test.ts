@@ -1,4 +1,4 @@
-import { graphRepoKey } from '@aom/shared';
+import { graphRepoKey, streamId } from '@aom/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { migrateGraphBackfill } from '../src/data-migrations/graph-backfill.ts';
 import { rebuildProjections } from '../src/projections/rebuild.ts';
@@ -138,13 +138,107 @@ describe('project graph status (design sections 1, 5 and 13: status only, never 
     }
   });
 
+  it('a merge that lands queues graph.update from the indexed commit, with the card ref and title; the answer is status', async () => {
+    const card = await w.card({ title: 'Round the ledger total' });
+    const merge = 'b'.repeat(40);
+    const before = graphCommands().length;
+    await w.t.app.ctx.store.append([
+      {
+        streamId: streamId.card(card.id),
+        event: {
+          type: 'CardFinalized',
+          payload: { cardId: card.id, action: 'merge', resultRef: { mergeCommit: merge }, toStage: 'done' },
+        },
+        actor: { kind: 'system', id: null },
+        scope: { orgId: card.orgId ?? w.projectId, projectId: w.projectId, audience: 'project' } as never,
+      },
+    ]);
+    await until(async () => graphCommands().length === before + 1, 4000, 'graph.update');
+    const cmd = graphCommands().at(-1)!;
+    expect(cmd.name).toBe('graph.update');
+    expect(cmd.payload).toMatchObject({
+      repoId: w.repoId,
+      fromCommit: 'a'.repeat(40),
+      toCommit: merge,
+      merge: { ref: card.ref, title: 'Round the ledger total' },
+    });
+    expect(Object.keys(cmd.payload.merge).sort()).toEqual(['at', 'ref', 'title']);
+    r.send('command.result', {
+      commandId: cmd.id,
+      ok: true,
+      result: {
+        ok: true,
+        commit: merge,
+        fromCommit: 'a'.repeat(40),
+        filesChanged: 3,
+        files: 20,
+        nodes: 400,
+        edges: 900,
+        modules: 3,
+        indexerVersion: '0.1.32',
+        durationMs: 55,
+        fullReindex: false,
+      },
+    });
+    await until(async () => (await graphRow())?.commit_id === merge, 4000, 'updated');
+    expect(await graphRow()).toMatchObject({
+      status: 'indexed',
+      files: 20,
+      nodes: 400,
+      edges: 900,
+      modules: 3,
+    });
+    const ev = (await q(`SELECT payload FROM events WHERE type='ProjectGraphUpdated'`))[0]!.payload;
+    expect(ev).toMatchObject({ fromCommit: 'a'.repeat(40), toCommit: merge, filesChanged: 3, files: 20 });
+    expect(Object.keys(ev).sort()).toEqual(
+      [
+        'durationMs',
+        'edges',
+        'files',
+        'filesChanged',
+        'fromCommit',
+        'indexerVersion',
+        'modules',
+        'nodes',
+        'orgId',
+        'projectId',
+        'repoId',
+        'repoKey',
+        'toCommit',
+        'vaultId',
+        'workstationId',
+      ].sort(),
+    );
+    // a second finalize of the same merge queues nothing new while one waits, and a PR without a merge commit queues nothing
+    const card2 = await w.card({ title: 'Another card' });
+    await w.t.app.ctx.store.append([
+      {
+        streamId: streamId.card(card2.id),
+        event: {
+          type: 'CardFinalized',
+          payload: {
+            cardId: card2.id,
+            action: 'pr',
+            resultRef: { prUrl: 'https://example.test/pr/1' },
+            toStage: 'done',
+          },
+        },
+        actor: { kind: 'system', id: null },
+        scope: { orgId: card.orgId ?? w.projectId, projectId: w.projectId, audience: 'project' } as never,
+      },
+    ]);
+    await r.barrier();
+    expect(graphCommands().length).toBe(before + 1);
+  });
+
   it('a failure carries a fixed reason code; a later failure never hides an index that exists', async () => {
+    const n0 = graphCommands().length;
     const res = await owner(`/api/projects/${w.projectId}/graph/index`, 'POST');
     expect(res.status).toBe(202);
     expect(res.body.queued).toBe(1);
-    await until(async () => graphCommands().length === 2, 4000, 'second graph.index');
+    await until(async () => graphCommands().length === n0 + 1, 4000, 'next graph.index');
     r.send('command.result', {
-      commandId: graphCommands()[1]!.id,
+      commandId: graphCommands()[n0]!.id,
       ok: true,
       result: { ok: false, reason: 'no_clone' },
     });
@@ -157,9 +251,9 @@ describe('project graph status (design sections 1, 5 and 13: status only, never 
     expect(row).toMatchObject({ status: 'indexed', fail_reason: 'no_clone' });
     // free text from a runner is not accepted as a reason: it becomes the generic one
     await owner(`/api/projects/${w.projectId}/graph/index`, 'POST');
-    await until(async () => graphCommands().length === 3, 4000, 'third graph.index');
+    await until(async () => graphCommands().length === n0 + 2, 4000, 'one more graph.index');
     r.send('command.result', {
-      commandId: graphCommands()[2]!.id,
+      commandId: graphCommands()[n0 + 1]!.id,
       ok: true,
       result: { ok: false, reason: '/home/me/secret/path.ts' },
     });

@@ -119,7 +119,7 @@ export async function dispatchGraphCommand(
   ctx: Ctx,
   projectId: string,
   repoId: string,
-  update?: { fromCommit: string; toCommit: string },
+  update?: { fromCommit: string; toCommit: string; merge?: { ref: string; title: string; at: string } },
 ): Promise<boolean> {
   if (!graphsEnabled(ctx)) return false;
   const built = await graphIndexPayload(ctx.pool, projectId, repoId);
@@ -221,6 +221,8 @@ export async function applyGraphResult(
   payload: Record<string, unknown>,
   ok: boolean,
   result: unknown,
+  /** The command that was answered: `graph.update` records `ProjectGraphUpdated`, `graph.index` `ProjectGraphIndexed`. */
+  command: 'graph.index' | 'graph.update' = 'graph.index',
 ): Promise<void> {
   const projectId = String(payload.projectId ?? '');
   const repoId = String(payload.repoId ?? '');
@@ -232,6 +234,35 @@ export async function applyGraphResult(
   const base = { projectId, orgId: project.org_id, repoId, repoKey };
   const scope = projectScope(project.org_id, projectId);
   const actor = runnerActor(workstationId);
+  if (parsed?.success && parsed.data.ok && command === 'graph.update') {
+    const r = parsed.data;
+    await ctx.store.append([
+      {
+        streamId: streamId.project(projectId),
+        event: {
+          type: 'ProjectGraphUpdated',
+          payload: {
+            ...base,
+            ...(r.fromCommit ? { fromCommit: r.fromCommit } : {}),
+            toCommit: r.commit,
+            filesChanged: r.filesChanged ?? r.files,
+            files: r.files,
+            nodes: r.nodes,
+            edges: r.edges,
+            modules: r.modules,
+            indexerVersion: r.indexerVersion,
+            durationMs: r.durationMs,
+            workstationId,
+            vaultId,
+            ...(r.fullReindex ? { fullReindex: true } : {}),
+          },
+        },
+        actor,
+        scope,
+      },
+    ]);
+    return;
+  }
   if (parsed?.success && parsed.data.ok) {
     const r = parsed.data;
     await ctx.store.append([
@@ -377,4 +408,36 @@ export async function graphArmFor(
   _cardId: string | null,
 ): Promise<'on' | 'off'> {
   return 'on';
+}
+
+/**
+ * A card's merge landed (`CardFinalized` with a merge commit, docs/design/project-graphs.md section 6): the graph of the
+ * card's repository is brought to that commit by a workstation that holds the clone. The command carries the commits and
+ * the card's ref and title (the work layer); the runner works out which modules the merge touched from git. A project with
+ * no finished index waits for its index request instead. Never throws: a failed queue costs one stale graph, not a merge.
+ */
+export async function onMergeLanded(ctx: Ctx, cardId: string, mergeCommit: string): Promise<boolean> {
+  if (!graphsEnabled(ctx) || !/^[0-9a-f]{7,64}$/.test(mergeCommit)) return false;
+  const card = await one(
+    ctx.pool,
+    `SELECT c.ref, c.title, c.project_id, c.repo_id, p.org_id FROM cards c JOIN projects p ON p.id = c.project_id
+      WHERE c.id=$1 AND p.kind='project'`,
+    [cardId],
+  );
+  if (!card?.repo_id) return false;
+  const g = await one(
+    ctx.pool,
+    `SELECT commit_id FROM project_graphs WHERE project_id=$1 AND repo_id=$2 AND status='indexed'`,
+    [card.project_id, card.repo_id],
+  );
+  if (!g?.commit_id) return false;
+  return dispatchGraphCommand(ctx, card.project_id, card.repo_id, {
+    fromCommit: g.commit_id,
+    toCommit: mergeCommit,
+    merge: {
+      ref: card.ref,
+      title: String(card.title ?? '').slice(0, 300),
+      at: ctx.clock.now().toISOString(),
+    },
+  });
 }

@@ -74,6 +74,45 @@ describe('graph events and commands (nothing derived from code travels)', () => 
     ).toBe(false);
   });
 
+  it('ProjectGraphUpdated carries commits and counts; the update command carries the card ref and title only', () => {
+    const updated = {
+      ...ids,
+      fromCommit: 'a'.repeat(40),
+      toCommit: 'b'.repeat(40),
+      filesChanged: 3,
+      files: 20,
+      nodes: 400,
+      edges: 900,
+      modules: 3,
+      indexerVersion: '0.1.32',
+      durationMs: 5,
+      workstationId: ids.repoId,
+      vaultId: 'v1',
+    };
+    expect(DomainEventSchema.safeParse({ type: 'ProjectGraphUpdated', payload: updated }).success).toBe(true);
+    expect(
+      DomainEventSchema.safeParse({ type: 'ProjectGraphUpdated', payload: { ...updated, toCommit: 'x' } })
+        .success,
+    ).toBe(false);
+    const cmd = {
+      ...ids,
+      remoteUrlNormalized: 'github.com/acme/web',
+      repoName: 'web',
+      projectKey: 'WEB',
+      vault: { vaultId: 'v1', storage: 'git', kind: 'org', folder: 'projects/web' },
+      fromCommit: 'abc1234',
+      toCommit: 'def5678',
+      merge: { ref: 'WEB-12', title: 'Round the total', at: '2026-10-19T10:00:00.000Z' },
+    };
+    expect(CommandPayloadSchemas['graph.update'].safeParse(cmd).success).toBe(true);
+    expect(
+      CommandPayloadSchemas['graph.update'].safeParse({
+        ...cmd,
+        merge: { ref: 'WEB-12', title: 'x', at: 'yesterday' },
+      }).success,
+    ).toBe(false);
+  });
+
   it('graph.index and graph.update are runner commands with a payload of ids, a path inside the vault and a commit', () => {
     expect(RunnerCommandNameSchema.safeParse('graph.index').success).toBe(true);
     expect(RunnerCommandNameSchema.safeParse('graph.update').success).toBe(true);

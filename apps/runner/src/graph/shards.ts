@@ -1,6 +1,6 @@
 import { sha256Hex } from '@aom/shared';
-import { type Community, type Link, labelCommunities, louvain } from './communities.ts';
 import { type BuiltGraph, moduleNodeId } from './build.ts';
+import { type Community, type Link, labelCommunities, louvain } from './communities.ts';
 import { moduleFileName } from './modules.ts';
 import { sanitizeLabel } from './sanitize.ts';
 import type { GEdge, GNode } from './types.ts';
@@ -41,7 +41,13 @@ export function nodeLine(n: GNode, rk: string, inModuleShard: boolean): string {
 }
 
 export function edgeLine(e: GEdge, rk: string): string {
-  const o: Record<string, unknown> = { t: 'e', f: strip(rk, e.from), to: strip(rk, e.to), k: e.kind, c: e.conf };
+  const o: Record<string, unknown> = {
+    t: 'e',
+    f: strip(rk, e.from),
+    to: strip(rk, e.to),
+    k: e.kind,
+    c: e.conf,
+  };
   if (e.src !== 'ast') o.s = e.src;
   if (e.targets) o.ts = e.targets.map((t) => strip(rk, t));
   return JSON.stringify(o);
@@ -56,6 +62,7 @@ export interface RenderedRepo {
   nodeCount: number;
   edgeCount: number;
   moduleCount: number;
+  communitiesReused: boolean;
 }
 
 export interface RenderMeta {
@@ -69,7 +76,7 @@ export interface RenderMeta {
 const derived = (e: GEdge) => e.kind === 'contains';
 
 /** Groups the graph into shards and renders every file of the repository's folder. Deterministic. */
-export function renderRepo(g: BuiltGraph, meta: RenderMeta): RenderedRepo {
+export function renderRepo(g: BuiltGraph, meta: RenderMeta, reuse?: ReusedCommunities): RenderedRepo {
   const rk = meta.repoKey;
   const base = `repos/${rk}`;
   const files = new Map<string, string>();
@@ -143,8 +150,21 @@ export function renderRepo(g: BuiltGraph, meta: RenderMeta): RenderedRepo {
       const [a, b] = k.split('\u0000') as [string, string];
       return { a, b, w };
     });
-  const groups = louvain(modIds, links, 1);
-  const communities = labelCommunities(groups, links, (id) => sanitizeLabel(nodeById.get(id)?.name ?? id, 60));
+  // Clustering is global, so an update keeps the last result for a few merges (design section 6) and records its commit.
+  let groups: string[][];
+  let computedAt = meta.commit;
+  if (reuse) {
+    const known = new Set(modIds);
+    const placed = new Set<string>();
+    groups = reuse.groups.map((grp) => grp.filter((m) => known.has(m))).filter((grp) => grp.length > 0);
+    for (const grp of groups) for (const m of grp) placed.add(m);
+    const fresh = modIds.filter((m) => !placed.has(m));
+    if (fresh.length) groups.push(fresh);
+    computedAt = reuse.commit;
+  } else groups = louvain(modIds, links, 1);
+  const communities = labelCommunities(groups, links, (id) =>
+    sanitizeLabel(nodeById.get(id)?.name ?? id, 60),
+  );
   files.set(
     `${base}/communities.json`,
     `${JSON.stringify(
@@ -153,7 +173,7 @@ export function renderRepo(g: BuiltGraph, meta: RenderMeta): RenderedRepo {
         algorithm: 'louvain',
         seed: 1,
         repoKey: rk,
-        commit: meta.commit,
+        commit: computedAt,
         communities: communities.map((c) => ({ id: c.id, label: c.label, modules: c.members })),
       },
       null,
@@ -161,7 +181,22 @@ export function renderRepo(g: BuiltGraph, meta: RenderMeta): RenderedRepo {
     )}\n`,
   );
   files.set(`${base}/modules.md`, renderModulesMd(g, meta, communities, nodeById));
-  return { files, communities, nodeCount: g.nodes.length, edgeCount, moduleCount: g.modules.length };
+  return {
+    files,
+    communities,
+    nodeCount: g.nodes.length,
+    edgeCount,
+    moduleCount: g.modules.length,
+    communitiesReused: !!reuse,
+  };
+}
+
+/** The communities of the last full computation, kept by an update that does not recompute them. */
+export interface ReusedCommunities {
+  /** Commit the communities were computed at. */
+  commit: string;
+  /** Module ids (with their repo key) by group, in group order. */
+  groups: string[][];
 }
 
 /** The budgeted navigation summary: modules by size, their entry points, the busiest symbols, the surprising edges. */
@@ -173,14 +208,18 @@ export function renderModulesMd(
 ): string {
   const commOf = new Map<string, number>();
   for (const c of communities) for (const m of c.members) commOf.set(m, c.id);
-  const perModule = new Map<string, { files: number; symbols: number; entry: string[]; docs: number; tests: number }>();
+  const perModule = new Map<
+    string,
+    { files: number; symbols: number; entry: string[]; docs: number; tests: number }
+  >();
   for (const m of g.modules) perModule.set(m.id, { files: 0, symbols: 0, entry: [], docs: 0, tests: 0 });
   for (const n of g.nodes) {
     const pm = n.module ? perModule.get(n.module) : undefined;
     if (!pm) continue;
     if (n.kind === 'file') {
       pm.files++;
-      if (/^(index|main|program|app|server|cli|__main__|mod)\.[a-z]+$/i.test(n.name) && pm.entry.length < 3) pm.entry.push(n.path ?? n.name);
+      if (/^(index|main|program|app|server|cli|__main__|mod)\.[a-z]+$/i.test(n.name) && pm.entry.length < 3)
+        pm.entry.push(n.path ?? n.name);
     } else if (n.kind === 'symbol') pm.symbols++;
     else if (n.kind === 'test') pm.tests++;
     else if (n.kind === 'doc' && n.sub === 'file') pm.docs++;
@@ -193,7 +232,10 @@ export function renderModulesMd(
   }
   const mods = g.modules
     .map((m) => ({ m, pm: perModule.get(m.id) as NonNullable<ReturnType<typeof perModule.get>> }))
-    .sort((a, b) => b.pm.files + b.pm.symbols / 10 - (a.pm.files + a.pm.symbols / 10) || (a.m.dir < b.m.dir ? -1 : 1));
+    .sort(
+      (a, b) =>
+        b.pm.files + b.pm.symbols / 10 - (a.pm.files + a.pm.symbols / 10) || (a.m.dir < b.m.dir ? -1 : 1),
+    );
   const out: string[] = [];
   out.push(`# Code map: ${sanitizeLabel(meta.repoName, 80)}`);
   out.push('');
@@ -213,7 +255,8 @@ export function renderModulesMd(
   if (mods.length > 40) out.push('', `(${mods.length - 40} smaller modules not listed)`);
   if (communities.length > 1) {
     out.push('', '## Groups of modules', '');
-    for (const c of communities.slice(0, 12)) out.push(`- **${c.id}. ${c.label}**: ${c.members.length} modules`);
+    for (const c of communities.slice(0, 12))
+      out.push(`- **${c.id}. ${c.label}**: ${c.members.length} modules`);
   }
   const gods = [...nodeById.values()]
     .filter((n) => n.kind === 'symbol' && (degree.get(n.id) ?? 0) > 0)
@@ -221,7 +264,8 @@ export function renderModulesMd(
     .slice(0, 12);
   if (gods.length) {
     out.push('', '## Most connected symbols', '');
-    for (const n of gods) out.push(`- \`${n.name}\` (${n.sub}) in \`${n.path}:${n.line}\`, ${degree.get(n.id)} links`);
+    for (const n of gods)
+      out.push(`- \`${n.name}\` (${n.sub}) in \`${n.path}:${n.line}\`, ${degree.get(n.id)} links`);
   }
   const surprising: string[] = [];
   for (const e of g.edges) {
@@ -230,7 +274,8 @@ export function renderModulesMd(
     const b = nodeById.get(e.to);
     if (!a?.module || !b?.module || a.module === b.module) continue;
     if (commOf.get(a.module) === commOf.get(b.module)) continue;
-    if (surprising.length < 8) surprising.push(`- \`${a.path ?? a.name}\` -> \`${b.path ?? b.name}\` (${e.kind}, ${e.conf})`);
+    if (surprising.length < 8)
+      surprising.push(`- \`${a.path ?? a.name}\` -> \`${b.path ?? b.name}\` (${e.kind}, ${e.conf})`);
   }
   if (surprising.length) out.push('', '## Links between groups', '', ...surprising);
   out.push('');

@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { GRAPH_SCHEMA_VERSION, sha256Hex } from '@aom/shared';
 import { type BuildFile, buildGraph } from './build.ts';
@@ -6,11 +6,12 @@ import { FactsCache } from './cache.ts';
 import { GENERATED_MARKER, isManifest, langOf, selectFiles } from './discover.ts';
 import { BlobReader, listTree, looksBinary, resolveCommit } from './gitio.ts';
 import { parseManifest } from './manifests.ts';
-import type { Manifest as PkgManifest } from './modules.ts';
+import { manifestDir, moduleDirOf, type Manifest as PkgManifest } from './modules.ts';
 import { PARSER_PACKAGE, parseFile, parserFingerprint } from './parse.ts';
-import { renderRepo } from './shards.ts';
+import { type ReusedCommunities, renderRepo } from './shards.ts';
 import { type Manifest, type ManifestRepo, readManifest, renderManifest, writeFiles } from './store.ts';
 import type { FileFacts } from './types.ts';
+import { addWork, readWork, renderWork, renderWorkMd } from './work.ts';
 
 export const DEFAULT_MAX_EXPORT_NODES = 50_000;
 
@@ -31,8 +32,15 @@ export interface IndexOptions {
   indexedBy?: string;
   now?: () => Date;
   maxExportNodes?: number;
-  /** Merges applied since the communities were recomputed (an update passes the new count). */
-  mergesSinceCommunities?: number;
+  /**
+   * An update after a merge (docs/design/project-graphs.md section 6): the communities of the last full computation are
+   * kept until `communityEvery` merges have passed. Without it every run recomputes them.
+   */
+  update?: boolean;
+  /** Merges between two computations of the communities (default 10). */
+  communityEvery?: number;
+  /** The card that landed: its ref and title (from the server) and the paths the merge changed (from git). */
+  work?: { ref: string; title: string; at: string; paths: string[] };
 }
 
 export interface IndexOutcome {
@@ -51,6 +59,8 @@ export interface IndexOutcome {
   cacheHits: number;
   cacheMisses: number;
   symbolsInVault: boolean;
+  /** An update kept the last communities (they are recomputed every few merges). */
+  communitiesReused: boolean;
   durationMs: number;
 }
 
@@ -96,7 +106,13 @@ export async function indexRepository(opts: IndexOptions): Promise<IndexOutcome>
       let facts = cache.get(e.blob);
       if (!facts) {
         const blob = await reader.read(e.blob);
-        const none = (skip: 'generated' | 'binary'): FileFacts => ({ lang, symbols: [], imports: [], calls: [], skip });
+        const none = (skip: 'generated' | 'binary'): FileFacts => ({
+          lang,
+          symbols: [],
+          imports: [],
+          calls: [],
+          skip,
+        });
         if (!blob || looksBinary(blob)) {
           cache.set(e.blob, none('binary'));
           skipped.binary = (skipped.binary ?? 0) + 1;
@@ -129,13 +145,47 @@ export async function indexRepository(opts: IndexOptions): Promise<IndexOutcome>
   }
   cache.save();
 
-  const built = buildGraph({ repoKey: opts.repoKey, repoName: opts.repoName, files: buildFiles, manifests: pkgManifests });
-  const rendered = renderRepo(built, {
+  const built = buildGraph({
     repoKey: opts.repoKey,
     repoName: opts.repoName,
-    commit,
-    indexerVersion: opts.indexerVersion,
+    files: buildFiles,
+    manifests: pkgManifests,
   });
+  const prev = readManifest(opts.graphDir);
+  const prevRepo = prev?.repos.find((r) => r.repoKey === opts.repoKey);
+  const every = opts.communityEvery ?? 10;
+  let reuse: ReusedCommunities | undefined;
+  if (opts.update && prevRepo && prevRepo.mergesSinceCommunities + 1 < every) {
+    try {
+      const j = JSON.parse(
+        readFileSync(join(opts.graphDir, 'repos', opts.repoKey, 'communities.json'), 'utf8'),
+      ) as {
+        commit?: string;
+        communities?: Array<{ modules: string[] }>;
+      };
+      if (j.commit && Array.isArray(j.communities))
+        reuse = { commit: j.commit, groups: j.communities.map((c) => c.modules) };
+    } catch {
+      reuse = undefined; // nothing to keep: compute them
+    }
+  }
+  const rendered = renderRepo(
+    built,
+    { repoKey: opts.repoKey, repoName: opts.repoName, commit, indexerVersion: opts.indexerVersion },
+    reuse,
+  );
+  // the work layer: what landed where, kept across full indexes
+  let work = readWork(opts.graphDir, opts.repoKey);
+  if (opts.work) {
+    const manifestDirs = new Set(pkgManifests.map(manifestDir).filter((d) => d !== '.'));
+    const known = new Set(built.modules.map((m) => m.dir));
+    const mods = [...new Set(opts.work.paths.map((p) => moduleDirOf(p, manifestDirs)))].filter((d) =>
+      known.has(d),
+    );
+    work = addWork(work, { ref: opts.work.ref, title: opts.work.title, commit, at: opts.work.at, mods });
+  }
+  rendered.files.set(`repos/${opts.repoKey}/_work.jsonl`, renderWork(work));
+  if (work.length === 0) rendered.files.delete(`repos/${opts.repoKey}/_work.jsonl`);
 
   // Too big for the vault: modules, communities and the summary go there; the shards stay in the runner's own cache.
   const cap = opts.maxExportNodes ?? DEFAULT_MAX_EXPORT_NODES;
@@ -144,15 +194,17 @@ export async function indexRepository(opts: IndexOptions): Promise<IndexOutcome>
   const vaultFiles = new Map<string, string>();
   const localFiles = new Map<string, string>();
   for (const [rel, content] of rendered.files) {
-    const keep = symbolsInVault || /\/(_repo\.jsonl|communities\.json|modules\.md)$/.test(rel);
+    const keep = symbolsInVault || /\/(_repo\.jsonl|_work\.jsonl|communities\.json|modules\.md)$/.test(rel);
     (keep ? vaultFiles : localFiles).set(rel, content);
   }
-  const contentHash = sha256Hex([...rendered.files].map(([k, v]) => `${k}\n${sha256Hex(v)}`).join('\n')).slice(0, 16);
+  const contentHash = sha256Hex(
+    [...rendered.files].map(([k, v]) => `${k}\n${sha256Hex(v)}`).join('\n'),
+  ).slice(0, 16);
 
-  const prev = readManifest(opts.graphDir);
-  const prevRepo = prev?.repos.find((r) => r.repoKey === opts.repoKey);
   const unchangedRepo =
-    prevRepo?.contentHash === contentHash && prevRepo.commit === commit && prev?.indexerVersion === opts.indexerVersion;
+    prevRepo?.contentHash === contentHash &&
+    prevRepo.commit === commit &&
+    prev?.indexerVersion === opts.indexerVersion;
   const entry: ManifestRepo = {
     repoKey: opts.repoKey,
     name: opts.repoName,
@@ -167,7 +219,7 @@ export async function indexRepository(opts: IndexOptions): Promise<IndexOutcome>
     indexedAt: unchangedRepo && prevRepo ? prevRepo.indexedAt : now().toISOString(),
     indexedBy: unchangedRepo && prevRepo ? prevRepo.indexedBy : (opts.indexedBy ?? 'runner'),
     symbolsInVault,
-    mergesSinceCommunities: opts.mergesSinceCommunities ?? 0,
+    mergesSinceCommunities: rendered.communitiesReused ? (prevRepo?.mergesSinceCommunities ?? 0) + 1 : 0,
   };
   const manifest: Manifest = {
     schemaVersion: GRAPH_SCHEMA_VERSION,
@@ -179,7 +231,11 @@ export async function indexRepository(opts: IndexOptions): Promise<IndexOutcome>
   vaultFiles.set('manifest.json', renderManifest(manifest));
   const wr = writeFiles(opts.graphDir, vaultFiles, prefix.replace(/\/$/, ''));
   writeCombinedSummary(opts.graphDir, manifest);
-  const local = writeFiles(opts.cacheDir, new Map([...localFiles].map(([k, v]) => [`${opts.repoKey}/shards/${k}`, v])), `${opts.repoKey}/shards`);
+  const local = writeFiles(
+    opts.cacheDir,
+    new Map([...localFiles].map(([k, v]) => [`${opts.repoKey}/shards/${k}`, v])),
+    `${opts.repoKey}/shards`,
+  );
   return {
     commit,
     files: buildFiles.length,
@@ -195,6 +251,7 @@ export async function indexRepository(opts: IndexOptions): Promise<IndexOutcome>
     cacheHits: cache.hits,
     cacheMisses: cache.misses,
     symbolsInVault,
+    communitiesReused: rendered.communitiesReused,
     durationMs: Date.now() - t0,
   };
 }
@@ -206,7 +263,15 @@ function writeCombinedSummary(graphDir: string, manifest: Manifest): void {
     const f = join(graphDir, 'repos', r.repoKey, 'modules.md');
     if (existsSync(f)) parts.push(readFileSync(f, 'utf8'));
   }
-  writeFiles(graphDir, new Map([['modules.md', parts.join('\n---\n\n')]]));
+  const files = new Map([['modules.md', parts.join('\n---\n\n')]]);
+  const workMd = renderWorkMd(
+    [...manifest.repos]
+      .sort((a, b) => (a.repoKey < b.repoKey ? -1 : 1))
+      .map((r) => ({ repoName: r.name, entries: readWork(graphDir, r.repoKey) })),
+  );
+  if (workMd) files.set('work.md', workMd);
+  else rmSync(join(graphDir, 'work.md'), { force: true });
+  writeFiles(graphDir, files);
 }
 
 export class GraphIndexError extends Error {
