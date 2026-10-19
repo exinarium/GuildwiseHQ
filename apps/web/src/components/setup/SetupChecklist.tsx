@@ -157,9 +157,7 @@ function StepRow({ step, onGo }: { step: SetupStep; onGo: () => void }) {
               ? 'Hire'
               : step.id === 'ba'
                 ? 'Talk'
-                : step.id === 'ceo'
-                  ? 'Appoint'
-                  : 'Start'}
+                : 'Start'}
         </Link>
       )}
     </li>

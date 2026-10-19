@@ -387,7 +387,6 @@ export async function runAction(
         ? { verdict: 'recommend', reason: 'raised by the CEO as a recommendation', cause: 'mode' }
         : evaluatePolicy(env.ceo.policy, eff.cls, {
             confidence: rpc.confidence,
-            training: env.ceo.training.on,
             untrustedOrigin: origin.untrusted,
             reservedKey: prepared.reservedKey ?? null,
             evidenceMissing: !!prepared.needsEvidence && evidence === 0,

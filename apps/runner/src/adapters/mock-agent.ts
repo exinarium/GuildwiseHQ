@@ -697,7 +697,9 @@ interface BaTaskBrief extends Brief {
       | 'floor_report'
       | 'scheduled_brief'
       | 'batch_intake'
-      | 'mail_reply_draft';
+      | 'mail_reply_draft'
+      | 'spec_card';
+    specCard?: { ref: string; title: string; missing: string[]; listFields?: string[] };
     mailDraft?: {
       senderName: string;
       orgName: string;
@@ -1013,8 +1015,41 @@ async function mailDraftMain(m: NonNullable<BaTaskBrief['baTask']['mailDraft']>)
   );
 }
 
+/** Spec card, scripted: writes a placeholder for every missing field; `[spec_fail]` in the title reports that it cannot. */
+async function specCardMain(m: NonNullable<BaTaskBrief['baTask']['specCard']>): Promise<number> {
+  emit({ kind: 'progress', text: `mock BA specifies ${m.ref}` });
+  await sleep(stepMs);
+  emit({ kind: 'usage', usage: { inputTokens: 300, outputTokens: 80 } });
+  const r = m.title.includes('[spec_fail]')
+    ? aom(['report', 'spec-card-fail', '--note', 'mock: too vague to specify'])
+    : aom([
+        'report',
+        'spec-card',
+        '--file',
+        tmpText(
+          'fields.json',
+          JSON.stringify({
+            fields: Object.fromEntries(
+              m.missing.map((k) => [
+                k,
+                m.listFields?.includes(k)
+                  ? [`mock: ${k} for ${m.ref}`]
+                  : `mock: ${k} for ${m.ref} (${m.title})`,
+              ]),
+            ),
+          }),
+        ),
+      ]);
+  emit({
+    kind: 'final',
+    text: r.code === 0 ? 'mock spec card reported' : `mock spec card failed: ${(r.err || r.out).trim()}`,
+  });
+  return r.code === 0 ? 0 : 1;
+}
+
 async function baTaskMain(brief: BaTaskBrief): Promise<number> {
   const t = brief.baTask;
+  if (t.specCard) return specCardMain(t.specCard);
   if (t.mailDraft) return mailDraftMain(t.mailDraft);
   if (t.batch) return batchIntakeMain(t.batch);
   if (t.reporter)

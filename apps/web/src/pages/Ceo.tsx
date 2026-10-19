@@ -47,6 +47,7 @@ export function Ceo() {
       </div>
     );
   const s = status.data;
+  // The CEO is built in: its tabs are always there (before it exists, the overview says it is being set up).
   const tabs = s.hired
     ? [
         { id: 'overview', label: 'Overview' },
@@ -70,7 +71,7 @@ export function Ceo() {
         sub={
           s.hired
             ? 'Your chief executive: it handles the desk and the floor inside the limits you set.'
-            : 'An agent that handles the desk and the floor for you, inside limits you set.'
+            : 'Your CEO is being set up.'
         }
       />
       {tabs.length > 1 && (
@@ -83,9 +84,7 @@ export function Ceo() {
         />
       )}
       <div role="tabpanel" id={panelId('ceo', tab)} aria-labelledby={tabId('ceo', tab)}>
-        {tab === 'overview' && (
-          <OverviewTab status={s} owner={owner} appointOpen={params.get('appoint') === '1'} />
-        )}
+        {tab === 'overview' && <OverviewTab status={s} owner={owner} />}
         {tab === 'authority' && s.hired && <AuthorityTab status={s} />}
         {tab === 'reporting' && s.hired && <ReportingTab owner={owner} currency={s.spend.currency} />}
         {tab === 'persona' && s.hired && <PersonaTab owner={owner} />}

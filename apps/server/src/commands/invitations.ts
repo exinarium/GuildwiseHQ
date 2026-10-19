@@ -11,13 +11,14 @@ import {
 } from '@aom/shared';
 import { hashPassword } from '../auth/password.ts';
 import type { AuthSession } from '../auth/sessions.ts';
+import { ceoProvisionEvents } from '../ceo/provision.ts';
 import type { Ctx } from '../context.ts';
 import { randomToken, sha256Hex } from '../crypto.ts';
 import { iso, one, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import { conflict, forbidden, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
-import { senderName, TEAM } from '../mail/layout.ts';
+import { TEAM } from '../mail/layout.ts';
 import { newOrgInvitationMail } from '../mail/templates.ts';
 import { assertWithinLimit } from '../orgs/limits.ts';
 import { orgScope, userScope } from './common.ts';
@@ -431,6 +432,10 @@ async function acceptEvents(
       actor: { kind: 'user', id: userId },
       scope: orgScope(orgId),
     });
+    // The built-in CEO, in the same append as the organization.
+    events.push(
+      ...(await ceoProvisionEvents(tx, ctx, orgId, userId, { simulation: terms.simulation === true })),
+    );
   }
   if (inv.kind !== 'legacy')
     events.push({

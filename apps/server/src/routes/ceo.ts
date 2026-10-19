@@ -1,9 +1,7 @@
 import {
-  AppointCeoRequestSchema,
   CeoActionsQuerySchema,
   CeoChatResponseSchema,
   CeoIdParamsSchema,
-  CeoTrainingRequestSchema,
   CreateCeoMemoryRequestSchema,
   CreateCeoTaskRequestSchema,
   DEFAULT_CEO_POLICY,
@@ -17,9 +15,6 @@ import {
 import type { FastifyInstance } from 'fastify';
 import { requireOrg } from '../auth/guards.ts';
 import {
-  appointCeo,
-  changeTraining,
-  disableCeo,
   pauseCeo,
   resetCeoPolicy,
   resumeCeo,
@@ -98,13 +93,6 @@ export function ceoRoutes(ctx: Ctx) {
       };
     });
 
-    app.post('/api/ceo/appoint', { schema: { body: AppointCeoRequestSchema } }, async (req, reply) => {
-      const a = await owner(req);
-      const agentId = await appointCeo(ctx, a.session.user, { id: a.orgId }, req.body);
-      reply.code(201);
-      return { agentId };
-    });
-
     app.post('/api/ceo/pause', { schema: { body: PauseCeoRequestSchema.optional() } }, async (req) => {
       const a = await requireOrg(ctx, req, { min: 'admin' });
       await pauseCeo(ctx, a.session.user, a.orgId, req.body?.reason);
@@ -117,21 +105,10 @@ export function ceoRoutes(ctx: Ctx) {
       return { ok: true };
     });
 
-    app.post('/api/ceo/disable', async (req) => {
-      const a = await owner(req);
-      await disableCeo(ctx, a.session.user, a.orgId);
-      return { ok: true };
-    });
-
     app.post('/api/ceo/workstation', { schema: { body: MoveCeoRequestSchema } }, async (req) => {
       const a = await owner(req);
       await moveCeo(ctx, a.session.user, a.orgId, req.body);
       return { ok: true };
-    });
-
-    app.post('/api/ceo/training', { schema: { body: CeoTrainingRequestSchema } }, async (req) => {
-      const a = await owner(req);
-      return { training: await changeTraining(ctx, a.session.user, a.orgId, req.body.action) };
     });
 
     app.post('/api/ceo/chat', async (req) => {

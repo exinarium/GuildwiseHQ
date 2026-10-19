@@ -29,26 +29,13 @@ describe('the CEO authority tab', () => {
     expect(screen.queryByText(/billing/i)).toBeNull();
   });
 
-  it('marks the staffing rows as always a recommendation while the CEO is in training', async () => {
+  it('has no training lock: staffing rows are plain, editable rows', async () => {
     stubApi('owner', [['GET /api/ceo/status', () => ceoStatus()], policyRoute()]);
     renderCeoPage('?tab=authority');
-    expect(await screen.findByTestId('ceo-lock-agent.hire')).toHaveTextContent(
-      'Training: always a recommendation',
-    );
-    expect(screen.getByTestId('ceo-lock-agent.change_model')).toBeInTheDocument();
-    expect(screen.queryByTestId('ceo-lock-card.release')).toBeNull();
-    expect(screen.getByText(/Graduate on the Overview tab/)).toBeInTheDocument();
-  });
-
-  it('drops the lock hints and the training banner after graduation', async () => {
-    const t = ceoStatus().training;
-    stubApi('owner', [
-      ['GET /api/ceo/status', () => ceoStatus({ training: { ...t, on: false } })],
-      policyRoute(),
-    ]);
-    renderCeoPage('?tab=authority');
-    await screen.findByTestId('ceo-class-agent.hire');
+    const row = await screen.findByTestId('ceo-class-agent.hire');
+    expect(within(row).getByRole('radio', { name: 'Hire an agent: Decide' })).toBeEnabled();
     expect(screen.queryByTestId('ceo-lock-agent.hire')).toBeNull();
+    expect(screen.queryByText(/training/i)).toBeNull();
     expect(screen.queryByText(/Graduate on the Overview tab/)).toBeNull();
   });
 

@@ -106,7 +106,15 @@ describe('orgs-2026-10: the legacy database becomes organizations', () => {
 
   it('keeps the data where it was: no org_id column was rewritten, the admin owns the project, Sam is a guest', async () => {
     expect((await q('SELECT org_id FROM projects WHERE id=$1', [w.projectId]))[0]?.org_id).toBe(w.admin.id);
-    expect((await q('SELECT count(*)::int AS n FROM agents WHERE org_id=$1', [w.admin.id]))[0]?.n).toBe(2);
+    // the two hired agents and the organization's built-in CEO
+    expect((await q('SELECT count(*)::int AS n FROM agents WHERE org_id=$1', [w.admin.id]))[0]?.n).toBe(3);
+    expect(
+      (
+        await q(`SELECT count(*)::int AS n FROM agents WHERE org_id=$1 AND role_key='ceo' AND is_builtin`, [
+          w.admin.id,
+        ])
+      )[0]?.n,
+    ).toBe(1);
     expect((await q('SELECT org_id FROM vaults WHERE id=$1', [w.vaultId]))[0]?.org_id).toBe(w.admin.id);
     const pm = await q(
       'SELECT user_id, role, status, direct, org_grant FROM project_members WHERE project_id=$1 ORDER BY role',

@@ -1,10 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { streamId } from '@aom/shared';
+import { ceoProvisionEvents } from '../../src/ceo/provision.ts';
 import { enqueueWake } from '../../src/ceo/wakes.ts';
 import { q } from './db.ts';
 import type { FakeRunner } from './fake-runner.ts';
 import { seed } from './seed.ts';
-import { ok, until, type World } from './world.ts';
+import { until, type World } from './world.ts';
 
 /** The workstation is online (the fake runner sends no heartbeats) with the mock runtime and the `ceo:1` capability. */
 export async function keepOnline(w: World) {
@@ -19,22 +20,34 @@ export async function keepOnline(w: World) {
   );
 }
 
-/** Appoints the CEO on the world's workstation and points it at the mock runtime. */
+/**
+ * The organization's built-in CEO, moved onto the world's workstation, renamed and pointed at the mock runtime. Worlds are
+ * seeded straight through the event store, so the CEO that production creates with the organization is provisioned here
+ * (by the same function) when it is missing. There is no appoint any more.
+ */
 export async function appoint(w: World, name = 'Ada Prime') {
-  const res = await ok<any>(
-    w.t.req('POST', '/api/ceo/appoint', {
-      cookie: w.owner.cookie,
-      body: { workstationId: w.workstationId, name },
-    }),
-    201,
-  );
-  await q(`UPDATE agents SET runtime='mock', model='mock' WHERE id=$1`, [res.agentId]);
+  const org = (
+    await q(`SELECT id FROM organizations WHERE owner_user_id=$1 ORDER BY created_at LIMIT 1`, [w.owner.id])
+  )[0]?.id as string;
+  const find = async () =>
+    (await q(`SELECT id FROM agents WHERE org_id=$1 AND role_key='ceo' AND status <> 'retired'`, [org]))[0];
+  if (!(await find())) {
+    const events = await ceoProvisionEvents(w.t.app.ctx.pool, w.t.app.ctx, org, w.owner.id);
+    await w.t.app.ctx.store.append(events);
+  }
+  const a = await find();
+  if (!a) throw new Error('the CEO role is not available');
+  await q(`UPDATE agents SET runtime='mock', model='mock', workstation_id=$2, name=$3 WHERE id=$1`, [
+    a.id,
+    w.workstationId,
+    name,
+  ]);
   await keepOnline(w);
-  return res.agentId as string;
+  return a.id as string;
 }
 
-export const graduate = (w: World) =>
-  ok(w.t.req('POST', '/api/ceo/training', { cookie: w.owner.cookie, body: { action: 'graduate' } }));
+/** The CEO is built in and has no training period: nothing to graduate (kept so older tests read the same). */
+export const graduate = async (_w: World) => undefined;
 
 /** A blocking question on a card, routed to the manager's desk (an agent asked it). */
 export async function blockingQuestion(

@@ -62,6 +62,22 @@ describe('new-organization invitations (sent by the super admin)', () => {
       owner_user_id: accept.body.user.id,
       status: 'active',
     });
+    // the organization has its built-in CEO from the same append, with no home until the Owner pairs a workstation
+    const ceos = await q(`SELECT * FROM agents WHERE org_id=$1 AND role_key='ceo' AND status <> 'retired'`, [
+      org.id,
+    ]);
+    expect(ceos).toHaveLength(1);
+    expect(ceos[0]).toMatchObject({
+      is_builtin: true,
+      workstation_id: null,
+      hired_by_user_id: org.owner_user_id,
+    });
+    expect(
+      (await q('SELECT enabled, training FROM ceo_settings WHERE org_id=$1', [org.id]))[0],
+    ).toMatchObject({
+      enabled: true,
+      training: { on: false },
+    });
     const login = await t.req('POST', '/api/auth/login', { body: { email, password: PW } });
     expect(login.status).toBe(200);
 

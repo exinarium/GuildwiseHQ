@@ -533,3 +533,48 @@ describe('mail_reply_draft shifts (#67 D)', () => {
     expect(reports(h, msg.shiftId)[0]?.report).toMatchObject({ outcomeId: 'mail_draft_fail' });
   }, 60_000);
 });
+
+describe('spec_card shifts (docs/design/ceo-front-door.md 2.4)', () => {
+  const specShift = (hh: Harness, title = 'Password reset is blank') =>
+    taskShift(hh, 'spec_card', {
+      phase: undefined as never,
+      cards: [],
+      followups: [],
+      outstanding: [],
+      specCard: {
+        cardId: uuidv7(),
+        ref: 'TOY-7',
+        title,
+        cardType: 'bug',
+        projectKey: 'TOY',
+        fields: { context: 'The link opens a blank page.' },
+        missing: ['requirements', 'acceptanceCriteria'],
+        listFields: ['acceptanceCriteria'],
+      },
+    });
+
+  it('writes the missing fields (a list as an array) and reports them; the prompt names the fields and fences the card text', async () => {
+    h = await startHarness();
+    const msg = specShift(h);
+    const ended = await run(h, msg);
+    expect(ended.outcome).toBe('reported');
+    const rep = reports(h, msg.shiftId)[0]?.report as any;
+    expect(rep).toMatchObject({ kind: 'outcome', outcomeId: 'spec_card_done' });
+    expect(Object.keys(rep.data.fields).sort()).toEqual(['acceptanceCriteria', 'requirements']);
+    expect(Array.isArray(rep.data.fields.acceptanceCriteria)).toBe(true);
+    expect(typeof rep.data.fields.requirements).toBe('string');
+    const md = readFileSync(join(h.dataDir, 'agents', msg.agent.agentId, 'claude', 'CLAUDE.md'), 'utf8');
+    expect(md).toContain('TOY-7');
+    expect(md).toContain('aom report spec-card --file');
+    expect(md).toContain('aom report spec-card-fail');
+    expect(existsSync(worktreeOf(h))).toBe(false);
+    expect(h.server.invalid).toEqual([]);
+  }, 60_000);
+
+  it('can report that the card cannot be specified', async () => {
+    h = await startHarness();
+    const msg = specShift(h, 'Vague [spec_fail]');
+    await run(h, msg);
+    expect(reports(h, msg.shiftId)[0]?.report).toMatchObject({ outcomeId: 'spec_card_fail' });
+  }, 60_000);
+});

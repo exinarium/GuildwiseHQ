@@ -18,6 +18,7 @@ import {
 import { type OrgAccess, orgRoleOf } from '../auth/org-context.ts';
 import { hashPassword, verifyPassword } from '../auth/password.ts';
 import { disableTwoFactorIn } from '../auth/two-factor.ts';
+import { ceoOwnerChangeEvents } from '../ceo/provision.ts';
 import type { Ctx } from '../context.ts';
 import { randomToken, sha256Hex } from '../crypto.ts';
 import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
@@ -401,6 +402,7 @@ export async function transferOwnership(
           actor: userActor(a.session.user.id),
           scope: orgScope(a.orgId),
         },
+        ...(await ceoOwnerChangeEvents(tx, a.orgId, toUserId)),
       ],
       { tx },
     );

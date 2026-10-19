@@ -120,21 +120,4 @@ describe('setup checklist', () => {
     expect(await screen.findByTestId('help-setup')).toHaveTextContent('All five steps are done.');
     expect(screen.queryByTestId('setup-widget')).toBeNull();
   });
-
-  it('shows the optional CEO step with a tag and does not count it', async () => {
-    checklist = {
-      ...base(),
-      steps: [
-        ...base().steps,
-        step('ceo', 'Appoint your CEO', { optional: true, link: '/org/ceo?appoint=1' }),
-      ] as SetupChecklist['steps'],
-    };
-    mount();
-    expect(await screen.findByTestId('setup-widget-count')).toHaveTextContent('1/5');
-    await userEvent.click(screen.getByTestId('setup-widget'));
-    expect(screen.getByTestId('setup-optional-ceo')).toHaveTextContent('optional');
-    expect(screen.getByTestId('setup-go-ceo')).toHaveAttribute('href', '/org/ceo?appoint=1');
-    expect(screen.getByRole('progressbar', { name: 'Setup progress' })).toHaveAttribute('aria-valuemax', '5');
-    expect(screen.queryByTestId('setup-optional-project')).toBeNull();
-  });
 });

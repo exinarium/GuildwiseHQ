@@ -1256,6 +1256,31 @@ Noise (S1b): the reporter compares signals with `reporter/same-json.ts` (key-ord
 
 ### 9.11 The CEO agent
 
+**Built in (Step 0 of `docs/design/ceo-front-door.md`).** Every organisation has exactly one CEO from the moment it exists; there
+is no appoint, dismiss, disable or training period. `ceo/provision.ts ceoProvisionEvents` returns the `AgentHired{roleKey:'ceo',
+isBuiltin:true}` and `CeoEnabled` (no `training`: absent means graduated) events and is appended in the same write as
+`OrganizationCreated` (`billing/signup.ts`, `commands/invitations.ts`, `data-migrations/orgs.ts`); it is a no-op when a live CEO
+exists. `agents.is_builtin` (migration `2220_ceo_builtin.sql`, true for DevOps and the CEO) keeps it out of the plan limits
+(`orgs/limits.ts`), the partial unique index `agents_one_ceo` allows one live CEO per organisation, and `fireAgent` refuses it
+(409 `builtin_agent`). `AgentHired.workstationId` is nullable: a CEO whose Owner has no workstation is bound with `AgentRehomed`
+in the same append as the Owner's `WorkstationPaired` (`ceoBindEvents`), and re-homed when ownership moves
+(`ceoOwnerChangeEvents`); the CEO page then says "Pair a workstation". Pause and Resume stay as an emergency stop; settings,
+policy and the workstation picker stay. Data migration `ceo-builtin-2026-10` (run at every boot, idempotent) gives an
+organisation without a live CEO one (also after an old Disable: the retired agent keeps its history) and graduates a CEO still in
+training (`CeoTrainingChanged{reason}`); an organisation with an active CEO, paused or not, is left alone. `evaluatePolicy` has
+no training input any more: staffing classes follow the policy table from day one.
+
+**Flagged bugs reach the CEO.** A `CardCreated` of a bug in `draft` wakes the CEO (`bug_flagged`, subject the card, urgent when a
+suite, regression or test found it, keyed like its `bug_reported` desk alert so card and alert are one wake; the wake source
+handles events one at a time so events of one append do not race on that dedupe). The new class `card.specify` and verb
+`aom ceo act specify --card <REF>` call `specifyCardIn`; when required fields are empty and are all text or list fields, it
+queues a BA task `spec_card` (`commands/spec-card.ts`, migration `2221_ba_spec_card.sql`, `ba_tasks.card_id`): the BA reports
+`aom report spec-card --file <fields.json>`, the server patches the card as its owner and specifies it, or refuses a report that
+still leaves fields empty. A missing repository or other non-text key stays with a person (the verb says so); a task no BA takes
+becomes a pinned `spec_needed` alert. `intake` takes `cardType`, `ticket` (the card's `externalRef`) and `priority`, uses the
+same completion path, and without a BA reports "recommend hiring a BA" instead of refusing. The reporter sweep and routing use the
+same test for "the CEO owns the BA's reporter job" (`ceoActive` and `ceoReachable`).
+
 A built-in role `ceo` (one per organisation) takes over the BA's reporter job when it is active and reachable (`ceo/state.ts`
 `ceoActive`, `ceoReachable`): the routing interceptor holds non-urgent items for the CEO instead of queueing BA tasks, the
 reporter sweep queues the daily review wake instead of the floor report, and urgent signals become wakes instead of
@@ -1264,7 +1289,7 @@ dispatcher pass `ceoPass` (`ceo/pass.ts`) batches pending wakes into one `kind: 
 only through the rpc method `ceo` (`ceo/gateway.ts`, `ceo/engine.ts`): every write is checked by `evaluatePolicy`
 (`packages/shared/src/ceo/policy.ts`), limited, executed by the existing command functions under `withActingAgent` (events carry
 the CEO as actor and the action id as `causation_id`), and audited as `CeoActionTaken`. Owner responses to recommendations are
-the training signal (`ceo/learning.ts`). Full design: `docs/design/ceo-agent-v2.md`.
+learning signals (`ceo/learning.ts`). Full design: `docs/design/ceo-agent-v2.md`.
 
 Once per subject (S1b): `ceo_wakes.dedupe_key/dedupe_state` (`NewWake.dedupe`): while a wake with the same key and state is pending, taken or done (24 h), the same subject does not wake the CEO again; a desk item with a card is keyed by the card and the kind, its state is the card's stage and status. `notifyOwner({ once })` and the notify rpc use the subject (card, desk item or task) and its state, not the text, kept in `ceo_flags` (`once:<key>`); the notice's desk item is one per subject with a counter. The `offline_notice` flag is cleared only when a CEO shift has started since it was raised. Models: `settings.models` has `wake`, `review`, `chat` (Sonnet by default) and `handover` (Opus; used for a wake whose reason starts with `handover`); data migration `ceo-models-2026-10` moves only values that still equal the old defaults.
 

@@ -742,11 +742,11 @@ export const PAGE_HELP: Record<string, PageHelp> = {
   '/org/ceo': {
     title: 'CEO',
     intro:
-      'Appoint an optional CEO agent that works your desk and the floor inside limits you set. It starts in a training period and every decision can be undone.',
+      'Your organization has a built-in CEO agent that works your desk and the floor inside limits you set. It decides within your policy from day one, every decision can be undone, and Pause stops it at once.',
     controls: [
       {
         name: 'Overview',
-        text: 'The CEO state, spend, training progress and the Pause, Graduate and Disable buttons.',
+        text: 'The CEO state, where it runs, its spend and the Pause button (an emergency stop).',
       },
       {
         name: 'Authority',

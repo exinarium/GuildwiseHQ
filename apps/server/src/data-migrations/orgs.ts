@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { NO_LIMITS, streamId } from '@aom/shared';
+import { ceoProvisionEvents } from '../ceo/provision.ts';
 import type { Clock } from '../clock.ts';
 import type { Pool } from '../db/pool.ts';
 import { exec, one, type Queryable, rows } from '../db/sql.ts';
@@ -233,6 +234,8 @@ export async function migrateOrgs(
             actor,
             scope,
           },
+          // The built-in CEO, in the same append as the organization (ceo-builtin adds it to older organizations).
+          ...(await ceoProvisionEvents(tx, env, o.userId, o.userId)),
           {
             streamId: streamId.desk(deskItemId),
             event: {

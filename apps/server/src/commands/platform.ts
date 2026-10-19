@@ -12,6 +12,7 @@ import {
 } from '@aom/shared';
 import type { AuthSession } from '../auth/sessions.ts';
 import { disableTwoFactorIn } from '../auth/two-factor.ts';
+import { ceoOwnerChangeEvents } from '../ceo/provision.ts';
 import type { Ctx } from '../context.ts';
 import { exec, iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
@@ -372,6 +373,7 @@ export async function platformTransferOwnership(
           actor: actorOf(admin),
           scope: orgScope(orgId),
         },
+        ...(await ceoOwnerChangeEvents(tx, orgId, toUserId)),
       ],
       { tx },
     );

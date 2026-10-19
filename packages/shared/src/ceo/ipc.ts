@@ -32,6 +32,7 @@ export const CEO_ACTIONS = [
   'retire-entry',
   'message',
   'intake',
+  'specify',
 ] as const;
 export const CeoActionName = z.enum(CEO_ACTIONS);
 export type CeoActionName = z.infer<typeof CeoActionName>;

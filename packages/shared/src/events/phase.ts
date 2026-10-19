@@ -257,6 +257,8 @@ export const phaseEvents = [
       batchItemId: Id.optional(),
       /** `mail_reply_draft`: the draft request this task writes. */
       mailDraftId: Id.optional(),
+      /** `spec_card`: the draft card whose missing fields the BA writes. */
+      cardId: Id.optional(),
     }),
   ),
   /** A `ba_task` shift was dispatched to the runner (creates the shift row). */

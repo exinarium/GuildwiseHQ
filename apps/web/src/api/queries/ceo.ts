@@ -1,5 +1,4 @@
 import type {
-  AppointCeoRequest,
   CeoActionsResponse,
   CeoMemoryDtoApi,
   CeoPolicy,
@@ -85,19 +84,13 @@ function useCeoMutation<V, R>(fn: (v: V) => Promise<R>, extra: string[] = []) {
   });
 }
 
-export const useAppointCeo = () =>
-  useCeoMutation((b: AppointCeoRequest) => post('/ceo/appoint', b), ['agents', 'org-chart', 'hr', 'setup']);
 export const usePauseCeo = () =>
   useCeoMutation((v: { reason?: string }) => post('/ceo/pause', v), ['org-chart']);
 export const useResumeCeo = () => useCeoMutation(() => post('/ceo/resume', {}), ['org-chart']);
-export const useDisableCeo = () =>
-  useCeoMutation(() => post('/ceo/disable', {}), ['agents', 'org-chart', 'hr', 'setup']);
 export const useMoveCeo = () =>
   useCeoMutation((v: { workstationId: string; acknowledgeUnsandboxed?: boolean }) =>
     post('/ceo/workstation', v),
   );
-export const useCeoTraining = () =>
-  useCeoMutation((action: 'graduate' | 'extend' | 'restart') => post('/ceo/training', { action }));
 export const useSaveCeoSettings = () =>
   useCeoMutation((b: Partial<CeoSettings>) => put<CeoSettingsDto>('/ceo/settings', b));
 export const useSaveCeoPolicy = () =>

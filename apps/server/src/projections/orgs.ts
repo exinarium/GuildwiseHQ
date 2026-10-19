@@ -132,6 +132,12 @@ export const orgProjectors: Record<string, Projector> = {
     ]);
     await exec(tx, 'UPDATE organizations SET owner_user_id=$2 WHERE id=$1', [p.orgId, p.toUserId]);
     await grantOrgAccess(tx, p.orgId, p.toUserId, e.createdAt);
+    // The built-in CEO belongs to whoever is the Owner (its home is re-bound by the command, in the same append).
+    await exec(
+      tx,
+      `UPDATE agents SET manager_user_id=$2 WHERE org_id=$1 AND role_key='ceo' AND status <> 'retired'`,
+      [p.orgId, p.toUserId],
+    );
   },
   OrgStatusChanged: async (tx, e) => {
     const p = ev<EventOf<'OrgStatusChanged'>>(e).payload;

@@ -1,6 +1,7 @@
 import { migrateBlogCiteCleanup } from './blog-cite-cleanup.ts';
 import { migrateBlogLaunch } from './blog-launch.ts';
 import { migrateCardCompletionInherit } from './card-completion-inherit.ts';
+import { migrateCeoBuiltin } from './ceo-builtin.ts';
 import { migrateCeoModels } from './ceo-models.ts';
 import { migrateCeoWorkingBranch } from './ceo-working-branch.ts';
 import { migrateDesignHeldStatus } from './design-held-status.ts';
@@ -21,6 +22,7 @@ export {
   type CardCompletionInheritReport,
   migrateCardCompletionInherit,
 } from './card-completion-inherit.ts';
+export { CEO_BUILTIN_MIGRATION, type CeoBuiltinReport, migrateCeoBuiltin } from './ceo-builtin.ts';
 export { CEO_MODELS_MIGRATION, type CeoModelsReport, migrateCeoModels } from './ceo-models.ts';
 export { CEO_WORKING_BRANCH_MIGRATION, migrateCeoWorkingBranch } from './ceo-working-branch.ts';
 export {
@@ -64,6 +66,7 @@ export const DATA_MIGRATIONS: Array<{ name: string; run: (env: DataMigrationEnv)
   { name: 'ceo-models-2026-10', run: (env) => migrateCeoModels(env) },
   { name: 'design-held-status-2026-10', run: (env) => migrateDesignHeldStatus(env) },
   { name: 'ceo-working-branch-2026-10', run: (env) => migrateCeoWorkingBranch(env) },
+  { name: 'ceo-builtin-2026-10', run: (env) => migrateCeoBuiltin(env) },
 ];
 
 export async function runDataMigrations(env: DataMigrationEnv): Promise<void> {

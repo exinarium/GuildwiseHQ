@@ -126,19 +126,6 @@ export async function getSetupChecklist(
       link: talked ? null : manager && intakeOn ? '/intake' : '/desk',
     },
   ];
-  // The CEO (docs/design/ceo-agent-v2.md): an optional last step for Owners and Admins; it never holds the checklist open.
-  if (manager) {
-    const hasCeo = await one(ctx.pool, `SELECT 1 FROM ceo_settings WHERE org_id=$1 AND enabled`, [orgId]);
-    steps.push({
-      id: 'ceo',
-      title: 'Appoint your CEO',
-      hint: 'An agent that watches the floor for you: it unblocks work, recommends hires and answers routine questions, and tells you what it did every morning. It starts in a training period.',
-      done: !!hasCeo,
-      actionable: role === 'owner',
-      link: hasCeo || role !== 'owner' ? null : '/org/ceo?appoint=1',
-      optional: true,
-    });
-  }
   const required = steps.filter((s) => !s.optional);
   const doneCount = required.filter((s) => s.done).length;
   return { steps, doneCount, complete: doneCount === required.length, dismissed };

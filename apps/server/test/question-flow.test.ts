@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { detectLoops } from '../src/reporter/detectors.ts';
+import { appoint } from './helpers/ceo.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import type { FakeRunner } from './helpers/fake-runner.ts';
 import { approve, changes, DIFF_SMALL, handoff, pipeline } from './helpers/pipeline.ts';
@@ -498,15 +499,8 @@ describe('topic routing', () => {
   it('with no topic and nobody else to ask the CEO comes before the desk; a CEO question runs on Sonnet', async () => {
     await reset();
     await w.hire('Bea', 'builder', 'junior');
-    const appointed = await ok<any>(
-      w.t.req('POST', '/api/ceo/appoint', {
-        cookie: w.owner.cookie,
-        body: { workstationId: w.workstationId, name: 'Ada Prime' },
-      }),
-      201,
-    );
-    // The mock runner offers the `mock` runtime only.
-    await q(`UPDATE agents SET runtime='mock', model='mock' WHERE role_key='ceo'`);
+    const appointed = { agentId: await appoint(w, 'Ada Prime') };
+    // The mock runner offers the `mock` runtime only (the helper points the built-in CEO at it).
     const { card, res } = await buildAndAsk('Goes to the CEO');
     expect(res.message).toMatch(/Ada Prime/);
     const [it] = await itemsOf(card.id);
@@ -523,14 +517,7 @@ describe('topic routing', () => {
   it('a CEO answer is labelled a CEO decision on the desk item, the card thread and the ledger entry', async () => {
     await reset();
     await w.hire('Bea', 'builder', 'junior');
-    await ok<any>(
-      w.t.req('POST', '/api/ceo/appoint', {
-        cookie: w.owner.cookie,
-        body: { workstationId: w.workstationId, name: 'Ada Prime' },
-      }),
-      201,
-    );
-    await q(`UPDATE agents SET runtime='mock', model='mock' WHERE role_key='ceo'`);
+    await appoint(w, 'Ada Prime');
     const { card } = await buildAndAsk('CEO decides');
     const [it] = await itemsOf(card.id);
     const qs = await questionShift('Ada Prime');

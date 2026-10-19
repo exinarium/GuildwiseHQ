@@ -71,6 +71,10 @@ export function commandForOutcome(outcome: BriefOutcome): string {
       return 'aom report mail-draft --text-file <reply.txt> [--subject "<subject>"]';
     case 'mail_draft_fail':
       return 'aom report mail-draft-fail --note "<why no reply can be written>"';
+    case 'spec_card_done':
+      return 'aom report spec-card --file <fields.json>   # { "fields": { "<missing field key>": "<text>", ... } }';
+    case 'spec_card_fail':
+      return 'aom report spec-card-fail --note "<why the card cannot be specified and what the manager must say>"';
     case 'batch_done':
       return 'aom batch done --note "<the cards you created and why this split>"';
     case 'batch_ask':

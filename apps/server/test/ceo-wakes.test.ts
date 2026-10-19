@@ -325,7 +325,7 @@ describe('the daily review', () => {
     const start = await startCeoShift(w, r, r.received.length);
     expect(start.ceo.purpose).toBe('review');
     expect(start.brief.shift.outcomes.map((o: any) => o.id)).toEqual(['ceo_report']);
-    expect(start.ceo.brief).toContain('Training');
+    expect(start.ceo.brief).toContain('Feedback');
     const badId = r.report(start.shiftId, {
       kind: 'outcome',
       outcomeId: 'ceo_report',

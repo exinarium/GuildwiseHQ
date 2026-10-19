@@ -6,13 +6,11 @@ import {
   type CeoStatusDto,
   clonePolicy,
   isHardNever,
-  isStaffingClass,
   OWNER_RESERVED_KEYS,
   OWNER_RESERVED_LABEL,
   type OwnerReservedKey,
   withDelegation,
 } from '@aom/shared';
-import { Lock } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useCeoPolicy, useResetCeoPolicy, useSaveCeoPolicy } from '../../api/queries/ceo.ts';
 import { classLabel } from '../../lib/ceo.ts';
@@ -107,7 +105,6 @@ export function AuthorityTab({ status }: { status: CeoStatusDto }) {
   if (q.isPending) return <Spinner label="Loading the policy" />;
   if (!q.data || !draft) return <ErrorBox error={q.error} onRetry={() => q.refetch()} />;
   const canEdit = q.data.canEdit;
-  const training = status.training.on;
   const dirty = JSON.stringify(draft) !== JSON.stringify(q.data.policy);
   const setClass = (c: string, mode: CeoMode) =>
     setDraft((d) => {
@@ -124,12 +121,6 @@ export function AuthorityTab({ status }: { status: CeoStatusDto }) {
 
   return (
     <div className="flex flex-col gap-4" data-testid="ceo-authority">
-      {training && (
-        <Callout tone="info" role="note">
-          The CEO starts in training. This table applies in full once you graduate it: use Graduate on the
-          Overview tab.
-        </Callout>
-      )}
       {!canEdit && (
         <Callout tone="info" role="note" data-testid="ceo-authority-readonly">
           Only the Owner can change the CEO's authority. You can read it here.
@@ -155,9 +146,8 @@ export function AuthorityTab({ status }: { status: CeoStatusDto }) {
             </thead>
             <tbody className="divide-y divide-line">
               {rows.map((c) => {
-                const locked = training && isStaffingClass(c);
                 return (
-                  <tr key={c} data-testid={`ceo-class-${c}`} data-locked={locked || undefined}>
+                  <tr key={c} data-testid={`ceo-class-${c}`}>
                     <th scope="row" className="px-4 py-2 font-medium text-fg">
                       {classLabel(c)}
                     </th>
@@ -171,15 +161,6 @@ export function AuthorityTab({ status }: { status: CeoStatusDto }) {
                       />
                     </td>
                     <td className="px-4 py-2 text-xs text-muted">
-                      {locked && (
-                        <span
-                          className="inline-flex items-center gap-1 font-medium text-warning-soft-fg"
-                          data-testid={`ceo-lock-${c}`}
-                        >
-                          <Lock aria-hidden="true" className="size-3" />
-                          Training: always a recommendation
-                        </span>
-                      )}
                       {CLASS_NOTE[c] && <span className="block">{CLASS_NOTE[c]}</span>}
                     </td>
                   </tr>

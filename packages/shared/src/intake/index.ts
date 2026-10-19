@@ -159,3 +159,4 @@ export const EscalateReportSchema = z.object({
   note: z.string().min(1).max(20000),
 });
 export * from './batch.ts';
+export * from './spec-card.ts';

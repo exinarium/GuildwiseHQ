@@ -6,7 +6,6 @@ import {
   type CeoStatusDto,
   CLASS_LABEL,
   sumScores,
-  trainingDaysLeft,
 } from '@aom/shared';
 import { ceoGate } from '../ceo/gate.ts';
 import { ceoFailures } from '../ceo/shift.ts';
@@ -130,14 +129,6 @@ export async function ceoStatus(
     [orgId, dayStart, monthStart],
   );
   const cur = await one(ctx.pool, 'SELECT currency FROM organizations WHERE id=$1', [orgId]);
-  const emptyTraining = {
-    on: false,
-    startedAt: null,
-    until: null,
-    graduatedAt: null,
-    extensions: 0,
-    daysLeft: 0,
-  };
   const base = {
     isOwner: viewerRole === 'owner',
     canPause: viewerRole === 'owner' || viewerRole === 'admin',
@@ -162,7 +153,6 @@ export async function ceoStatus(
       state: 'none',
       offlineReason: null,
       agent: null,
-      training: emptyTraining,
       scores: [],
       totals: { agreed: 0, total: 0 },
       pendingWakes: 0,
@@ -254,7 +244,6 @@ export async function ceoStatus(
           workstationName: agent.ws_name ?? null,
         }
       : null,
-    training: { ...ceo.training, daysLeft: trainingDaysLeft(ceo.training, now) },
     scores,
     totals: sumScores(scores),
     pendingWakes: Number(pending?.n ?? 0),

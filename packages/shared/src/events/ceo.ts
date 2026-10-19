@@ -55,7 +55,7 @@ export const CeoMemorySource = z.enum([
 export type CeoMemorySource = z.infer<typeof CeoMemorySource>;
 
 export const ceoEvents = [
-  /** The CEO agent was hired: its settings, default policy and training period start. */
+  /** The built-in CEO of the organization was created: its settings and default policy (older events also start a training period). */
   defineEvent(
     'CeoEnabled',
     z.object({
@@ -64,7 +64,8 @@ export const ceoEvents = [
       by: Id,
       policy: CeoPolicySchema,
       settings: CeoSettingsSchema,
-      training: CeoTrainingSchema,
+      /** Built-in CEOs have no training period: absent means graduated. Older events carry it and replay unchanged. */
+      training: CeoTrainingSchema.optional(),
     }),
   ),
   /** The CEO was disabled (the agent is retired; a new one can be hired). */
@@ -91,6 +92,8 @@ export const ceoEvents = [
       action: z.enum(['graduate', 'extend', 'restart']),
       training: CeoTrainingSchema,
       by: Id,
+      /** Why (the built-in CEO migration graduates every CEO: "built-in CEO, no training"). */
+      reason: z.string().max(200).optional(),
       /** Agreement scores at that moment, shown in the confirmation (class, agreed, total). */
       scores: z
         .array(z.object({ class: z.string(), agreed: z.number().int(), total: z.number().int() }))

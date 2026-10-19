@@ -1,19 +1,16 @@
 import type { CeoStatusDto } from '@aom/shared';
-import { useState } from 'react';
-import { useDisableCeo, usePauseCeo, useResumeCeo } from '../../api/queries/ceo.ts';
+import { usePauseCeo, useResumeCeo } from '../../api/queries/ceo.ts';
 import { money } from '../../lib/money.ts';
 import { formatDateTime } from '../../lib/time.ts';
 import { AgentAvatar } from '../Face.tsx';
-import { Badge, Button, Callout, ConfirmDialog, ErrorBox, Panel } from '../ui.tsx';
-import { AppointForm } from './AppointForm.tsx';
-import { TrainingBlock } from './TrainingBlock.tsx';
+import { Badge, Button, Callout, ErrorBox, Panel } from '../ui.tsx';
 
 const STATE: Record<CeoStatusDto['state'], { label: string; tone: 'green' | 'amber' | 'red' | 'neutral' }> = {
-  none: { label: 'Not appointed', tone: 'neutral' },
+  none: { label: 'Being set up', tone: 'neutral' },
   active: { label: 'Active', tone: 'green' },
   paused: { label: 'Paused', tone: 'amber' },
   offline: { label: 'Offline', tone: 'red' },
-  disabled: { label: 'Disabled', tone: 'neutral' },
+  disabled: { label: 'Stopped', tone: 'neutral' },
 };
 
 function Stat({
@@ -39,38 +36,19 @@ function Stat({
   );
 }
 
-export function OverviewTab({
-  status: s,
-  owner,
-  appointOpen,
-}: {
-  status: CeoStatusDto;
-  owner: boolean;
-  appointOpen: boolean;
-}) {
+export function OverviewTab({ status: s, owner }: { status: CeoStatusDto; owner: boolean }) {
   const pause = usePauseCeo();
   const resume = useResumeCeo();
-  const disable = useDisableCeo();
-  const [confirmDisable, setConfirmDisable] = useState(false);
 
+  // Every organization has its CEO from the day it is created; this is only the moment between the two.
   if (!s.hired || !s.agent || s.state === 'none')
     return (
-      <div className="flex flex-col gap-4">
-        <Panel title="A chief executive for your agents">
-          <div className="flex flex-col gap-2 text-base text-muted">
-            <p>
-              The CEO is an agent that works the desk and the floor for you: it answers agent questions, keeps
-              cards moving, and writes you a daily report. It decides only what your policy allows, and every
-              decision can be undone.
-            </p>
-            <p>
-              It starts in a training period: it recommends, you decide, and it learns from the difference.
-              Hiring and other staffing changes stay recommendations until you graduate it.
-            </p>
-          </div>
-        </Panel>
-        <AppointForm status={s} owner={owner} open={appointOpen} />
-      </div>
+      <Panel title="Your CEO is being set up">
+        <p className="text-base text-muted">
+          Every organization has a chief executive agent. It is created with the organization: reload this
+          page in a moment.
+        </p>
+      </Panel>
     );
 
   const st = STATE[s.state];
@@ -111,7 +89,7 @@ export function OverviewTab({
             )}
           </div>
           <div className="flex flex-wrap gap-2">
-            {s.canPause && s.state !== 'disabled' && (
+            {s.canPause && (
               <Button
                 loading={pause.isPending || resume.isPending}
                 onClick={() => (paused ? resume.mutate() : pause.mutate({}))}
@@ -120,19 +98,18 @@ export function OverviewTab({
                 {paused ? 'Resume' : 'Pause'}
               </Button>
             )}
-            {owner && s.state !== 'disabled' && (
-              <Button
-                variant="danger-ghost"
-                onClick={() => setConfirmDisable(true)}
-                data-testid="ceo-disable"
-              >
-                Disable
-              </Button>
-            )}
           </div>
         </div>
-        <ErrorBox error={pause.error ?? resume.error ?? disable.error} />
+        <ErrorBox error={pause.error ?? resume.error} />
       </Panel>
+
+      {a.workstationId === null && (
+        <Callout tone="info" role="status" data-testid="ceo-pair-workstation">
+          {owner
+            ? `Pair a workstation to talk to ${a.name}: it runs on the Owner's own computer.`
+            : `${a.name} runs on the Owner's own computer and has none yet: the Owner pairs a workstation first.`}
+        </Callout>
+      )}
 
       {s.waiting && s.state === 'active' && (
         <Callout tone="warning" role="status" data-testid="ceo-waiting">
@@ -140,7 +117,7 @@ export function OverviewTab({
         </Callout>
       )}
 
-      {s.lastError && s.state !== 'disabled' && (
+      {s.lastError && (
         <Callout tone="warning" role="alert" data-testid="ceo-last-error">
           The CEO could not run its last{' '}
           {s.lastError.failures === 1 ? 'shift' : `${s.lastError.failures} shifts`}
@@ -149,15 +126,6 @@ export function OverviewTab({
           {'): '}
           {s.lastError.message}. It tries again by itself.
         </Callout>
-      )}
-
-      {s.state === 'disabled' && (
-        <>
-          <Callout tone="warning" role="note">
-            The CEO is disabled. Your memories, tasks and history are kept.
-          </Callout>
-          <AppointForm status={s} owner={owner} open={false} />
-        </>
       )}
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -190,18 +158,6 @@ export function OverviewTab({
           Authority tab.
         </Callout>
       )}
-
-      <TrainingBlock status={s} owner={owner} />
-
-      <ConfirmDialog
-        open={confirmDisable}
-        onOpenChange={setConfirmDisable}
-        title="Disable the CEO?"
-        description="It stops waking and handling the desk. Your memories, tasks and the activity log are kept."
-        confirmLabel="Disable"
-        pending={disable.isPending}
-        onConfirm={() => disable.mutate(undefined, { onSuccess: () => setConfirmDisable(false) })}
-      />
     </div>
   );
 }

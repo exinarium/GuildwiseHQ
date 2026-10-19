@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { appoint } from './helpers/ceo.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import type { FakeRunner } from './helpers/fake-runner.ts';
 import { createWorld, ok, type World } from './helpers/world.ts';
@@ -18,11 +19,10 @@ afterAll(async () => {
 const owner = (method: string, url: string, body?: unknown) =>
   w.t.req(method, url, { cookie: w.owner.cookie, body });
 
-describe('the CEO is appointed once per organization', () => {
-  it('has no CEO at first and the status says so', async () => {
-    const s = await ok<any>(owner('GET', '/api/ceo/status'));
-    expect(s).toMatchObject({ hired: false, state: 'none', isOwner: true });
-    expect(s.workstations.map((x: any) => x.id)).toContain(w.workstationId);
+describe('the CEO is built in, one per organization', () => {
+  it('the appoint, disable and training routes are gone', async () => {
+    for (const path of ['/api/ceo/appoint', '/api/ceo/disable', '/api/ceo/training'])
+      expect((await owner('POST', path, { workstationId: w.workstationId })).status, path).toBe(404);
   });
 
   it('cannot be hired through the normal hire form', async () => {
@@ -37,30 +37,40 @@ describe('the CEO is appointed once per organization', () => {
     expect(res.status).toBe(400);
   });
 
-  it('appoint creates the agent, the default policy and a training period', async () => {
-    const res = await ok<any>(
-      owner('POST', '/api/ceo/appoint', { workstationId: w.workstationId, name: 'Ada Prime' }),
-      201,
-    );
-    const a = (await q(`SELECT * FROM agents WHERE id=$1`, [res.agentId]))[0]!;
-    expect(a.role_key).toBe('ceo');
-    expect(a.seniority).toBe('senior');
+  it('is created with the default policy and no training period, and is free of limits', async () => {
+    const agentId = await appoint(w, 'Ada Prime');
+    const a = (await q(`SELECT * FROM agents WHERE id=$1`, [agentId]))[0]!;
+    expect(a).toMatchObject({ role_key: 'ceo', seniority: 'senior', is_builtin: true, is_devops: false });
     const s = await ok<any>(owner('GET', '/api/ceo/status'));
     expect(s.hired).toBe(true);
-    expect(s.training.on).toBe(true);
-    expect(s.training.daysLeft).toBe(14);
+    expect(s.training).toBeUndefined();
     expect(s.agent.name).toBe('Ada Prime');
     const pol = await ok<any>(owner('GET', '/api/ceo/policy'));
     expect(pol.policy.classes['agent.hire'].mode).toBe('decide');
     expect(pol.canEdit).toBe(true);
+    const { orgUsage } = await import('../src/orgs/limits.ts');
+    expect((await orgUsage(w.t.app.ctx.pool, w.owner.id)).agents).toBe(
+      Number(
+        (await q(`SELECT count(*) AS n FROM agents WHERE NOT is_builtin AND status <> 'retired'`))[0]!.n,
+      ),
+    );
   });
 
-  it('a second CEO is refused, and the CEO cannot be fired', async () => {
-    expect((await owner('POST', '/api/ceo/appoint', { workstationId: w.workstationId })).status).toBe(409);
+  it('a second CEO is not created, and the CEO cannot be fired', async () => {
+    const { ceoProvisionEvents } = await import('../src/ceo/provision.ts');
+    expect(await ceoProvisionEvents(w.t.app.ctx.pool, w.t.app.ctx, w.owner.id, w.owner.id)).toEqual([]);
     const id = (await q(`SELECT id FROM agents WHERE role_key='ceo'`))[0]!.id;
     const fire = await owner('POST', `/api/agents/${id}/fire`);
     expect(fire.status).toBe(409);
-    expect(fire.body.error?.code ?? fire.body.code).toBe('ceo_cannot_be_fired');
+    expect(fire.body.error?.code ?? fire.body.code).toBe('builtin_agent');
+    // the database holds the same rule: one live CEO per organization
+    await expect(
+      q(
+        `INSERT INTO agents (id, org_id, hired_by_user_id, manager_user_id, name, role_key, role_version, seniority, runtime, model, status, hired_at)
+         VALUES (gen_random_uuid(), $1, $1, $1, 'Second', 'ceo', 1, 'senior', 'mock', 'mock', 'active', now())`,
+        [w.owner.id],
+      ),
+    ).rejects.toThrow();
   });
 
   it('Admins read but only the Owner configures', async () => {

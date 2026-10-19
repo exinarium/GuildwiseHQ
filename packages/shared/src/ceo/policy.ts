@@ -24,6 +24,7 @@ export const ACTION_CLASSES = [
   'card.reprioritise',
   'card.cancel',
   'card.create_via_ba',
+  'card.specify',
   'shift.stop',
   'agent.pause',
   'agent.resume',
@@ -47,7 +48,7 @@ export const ACTION_CLASSES = [
 export const ActionClass = z.enum(ACTION_CLASSES);
 export type ActionClass = z.infer<typeof ActionClass>;
 
-/** Staffing and model changes: forced to `recommend` while the CEO is in its training period. */
+/** Staffing and model changes (formerly forced to `recommend` during the removed training period). */
 export const STAFFING_CLASSES: readonly ActionClass[] = [
   'agent.hire',
   'agent.bench',
@@ -69,6 +70,7 @@ export const CLASS_LABEL: Record<ActionClass, string> = {
   'card.reprioritise': 'Change card priority',
   'card.cancel': 'Cancel a card',
   'card.create_via_ba': 'Ask the BA to draft cards',
+  'card.specify': 'Specify a draft card (the BA completes what is missing)',
   'shift.stop': 'Stop a shift or its running command',
   'agent.pause': 'Pause an agent',
   'agent.resume': 'Resume an agent',
@@ -186,6 +188,7 @@ export const DEFAULT_CEO_POLICY: CeoPolicy = {
     'card.reprioritise': decide,
     'card.cancel': recommend,
     'card.create_via_ba': decide,
+    'card.specify': decide,
     'shift.stop': decide,
     'agent.pause': decide,
     'agent.resume': decide,
@@ -268,8 +271,6 @@ export function reservedKeyOfDesk(kind: string, subkind: string | null | undefin
 
 export interface PolicyInput {
   confidence: number;
-  /** Training period: staffing classes are recommend whatever the table says. */
-  training?: boolean;
   /** The wake that led to the action was triggered by outside text (card, mail, ticket, agent output). */
   untrustedOrigin?: boolean;
   /** The reserved key the subject belongs to (if any). */
@@ -285,16 +286,7 @@ export interface PolicyInput {
 export interface PolicyVerdict {
   verdict: 'allow' | 'recommend' | 'deny';
   reason: string;
-  cause?:
-    | 'training'
-    | 'mode'
-    | 'reserved'
-    | 'confidence'
-    | 'evidence'
-    | 'limit'
-    | 'untrusted'
-    | 'desk'
-    | 'never';
+  cause?: 'mode' | 'reserved' | 'confidence' | 'evidence' | 'limit' | 'untrusted' | 'desk' | 'never';
 }
 
 const UNTRUSTED_RECOMMEND: readonly string[] = [
@@ -319,13 +311,6 @@ export function evaluatePolicy(policy: CeoPolicy, cls: string, input: PolicyInpu
     return { verdict: 'deny', reason: 'the owner set this action to never', cause: 'never' };
   if (input.deskMode === 'never')
     return { verdict: 'deny', reason: 'the owner set this kind of item to never', cause: 'never' };
-  if (input.training && isStaffingClass(cls))
-    return {
-      verdict: 'recommend',
-      reason:
-        'training period: staffing and model changes are recommendations until the owner graduates the CEO',
-      cause: 'training',
-    };
   if (mode === 'recommend')
     return {
       verdict: 'recommend',

@@ -3,6 +3,7 @@ import { MockScriptSchema } from '../cards/fields.ts';
 import { StoredFinalizeAction } from '../cards/types.ts';
 import { RegressionPlatform } from '../events/testing.ts';
 import { BatchTaskSchema, batchBriefOutcomes } from '../intake/batch.ts';
+import { SpecCardTaskSchema, specCardBriefOutcomes } from '../intake/spec-card.ts';
 import { MailDraftTaskSchema, mailDraftBriefOutcomes } from '../mail/draft.ts';
 import type { ReporterTaskKind } from '../reporter/index.ts';
 import { isReporterTaskKind, ReporterTaskSchema, reporterBriefOutcomes } from '../reporter/index.ts';
@@ -311,6 +312,8 @@ export const BaTaskKind = z.enum([
   'batch_intake',
   // A reply draft for an e-mail conversation (#67 D): written for a person to review and send.
   'mail_reply_draft',
+  // A draft card with empty required fields, sent on by the CEO: the BA writes them (docs/design/ceo-front-door.md 2.4).
+  'spec_card',
 ]);
 export type BaTaskKind = z.infer<typeof BaTaskKind>;
 export const BaTaskStatus = z.enum(['queued', 'running', 'done', 'failed', 'fallback', 'cancelled']);
@@ -360,6 +363,8 @@ export const BaTaskShiftSchema = z.object({
   batch: BatchTaskSchema.optional(),
   /** `mail_reply_draft`: the conversation to answer. */
   mailDraft: MailDraftTaskSchema.optional(),
+  /** `spec_card`: the draft card whose missing fields to write. */
+  specCard: SpecCardTaskSchema.optional(),
   cards: z
     .array(
       PhaseCardOutcome.extend({
@@ -549,6 +554,7 @@ export type BranchCheckMergedResult = z.infer<typeof BranchCheckMergedResultSche
 export function baTaskBriefOutcomes(kind: BaTaskKind) {
   if (kind === 'batch_intake') return batchBriefOutcomes();
   if (kind === 'mail_reply_draft') return mailDraftBriefOutcomes();
+  if (kind === 'spec_card') return specCardBriefOutcomes();
   if (isReporterTaskKind(kind)) return reporterBriefOutcomes(kind as ReporterTaskKind);
   const o = (id: string, label: string, data: string) => ({ id, label, kind: 'success' as const, data });
   switch (kind) {

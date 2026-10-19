@@ -5,6 +5,9 @@ import type { Projector, StoredEvent } from '../eventstore/types.ts';
 const ev = <T extends EventType>(e: StoredEvent): EventOf<T> => e.event as EventOf<T>;
 const j = (v: unknown) => JSON.stringify(v);
 
+/** A CEO created without a training period (the built-in CEO) is graduated from the start. */
+const GRADUATED = { on: false, startedAt: null, until: null, graduatedAt: null, extensions: 0 };
+
 const DESK_CLASSES = ['desk.answer_question', 'desk.triage', 'desk.resolve_notice'];
 
 /** The CEO agent: settings, policy, the action audit, tasks and memory metadata (docs/design/ceo-agent-v2.md). */
@@ -112,7 +115,15 @@ export const ceoProjectors: Record<string, Projector> = {
        ON CONFLICT (org_id) DO UPDATE SET agent_id=EXCLUDED.agent_id, enabled=true, paused=false, paused_reason=NULL,
          settings=EXCLUDED.settings, policy=EXCLUDED.policy, policy_version=EXCLUDED.policy_version,
          training=EXCLUDED.training, enabled_at=EXCLUDED.enabled_at, updated_at=EXCLUDED.updated_at`,
-      [p.orgId, p.agentId, j(p.settings), j(p.policy), p.policy.version, j(p.training), e.createdAt],
+      [
+        p.orgId,
+        p.agentId,
+        j(p.settings),
+        j(p.policy),
+        p.policy.version,
+        j(p.training ?? GRADUATED),
+        e.createdAt,
+      ],
     );
   },
   CeoDisabled: async (tx, e) => {

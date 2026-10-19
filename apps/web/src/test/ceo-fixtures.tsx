@@ -115,14 +115,6 @@ export function ceoStatus(over: Partial<CeoStatusDto> = {}): CeoStatusDto {
       workstationId: U(90),
       workstationName: 'Pieter laptop',
     },
-    training: {
-      on: true,
-      startedAt: '2026-10-05T00:00:00.000Z',
-      until: '2026-10-19T00:00:00.000Z',
-      graduatedAt: null,
-      extensions: 0,
-      daysLeft: 9,
-    },
     scores: [
       { class: 'desk.answer_question', agreed: 12, total: 15 },
       { class: 'card.release', agreed: 6, total: 8 },

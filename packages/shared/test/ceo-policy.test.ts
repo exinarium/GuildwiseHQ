@@ -138,25 +138,28 @@ describe('the gate', () => {
   });
 });
 
-describe('the training period forces recommendations on staffing', () => {
-  it('whatever the table says, staffing and model changes are recommendations while training is on', () => {
+describe('there is no training period: the table decides staffing from the first day', () => {
+  it('staffing and model changes follow the table, whatever the CEO has done so far', () => {
     expect(STAFFING_CLASSES.length).toBeGreaterThan(5);
     const allDecide = clonePolicy(P);
     for (const c of STAFFING_CLASSES) allDecide.classes[c] = { mode: 'decide', delayMinutes: 0 };
-    for (const c of STAFFING_CLASSES) {
-      expect(evaluatePolicy(allDecide, c, { ...base, training: true }), c).toMatchObject({
-        verdict: 'recommend',
-        cause: 'training',
-      });
-      expect(evaluatePolicy(allDecide, c, { ...base, training: false }).verdict, c).toBe('allow');
-    }
+    for (const c of STAFFING_CLASSES) expect(evaluatePolicy(allDecide, c, base).verdict, c).toBe('allow');
+    const allRecommend = clonePolicy(P);
+    for (const c of STAFFING_CLASSES) allRecommend.classes[c] = { mode: 'recommend', delayMinutes: 0 };
+    for (const c of STAFFING_CLASSES)
+      expect(evaluatePolicy(allRecommend, c, base), c).toMatchObject({ verdict: 'recommend', cause: 'mode' });
     expect(isStaffingClass('agent.pause')).toBe(false);
-    expect(evaluatePolicy(P, 'agent.pause', { ...base, training: true }).verdict).toBe('allow');
-    expect(evaluatePolicy(P, 'card.release', { ...base, training: true }).verdict).toBe('allow');
+    expect(evaluatePolicy(P, 'agent.pause', base).verdict).toBe('allow');
   });
 
-  it('a hard never stays a denial during training', () => {
-    expect(evaluatePolicy(P, 'budget.raise', { ...base, training: true }).verdict).toBe('deny');
+  it('a hard never stays a denial', () => {
+    expect(evaluatePolicy(P, 'budget.raise', base).verdict).toBe('deny');
+  });
+
+  it('the new specify class is known, labelled, and decided by default', () => {
+    expect(ACTION_CLASSES).toContain('card.specify');
+    expect(P.classes['card.specify']?.mode).toBe('decide');
+    expect(evaluatePolicy(P, 'card.specify', base).verdict).toBe('allow');
   });
 });
 

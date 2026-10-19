@@ -1,4 +1,4 @@
-import { deskMode, renderCeoData, trainingDaysLeft } from '@aom/shared';
+import { deskMode, renderCeoData } from '@aom/shared';
 import type { Ctx } from '../context.ts';
 import { one, type Row, rows } from '../db/sql.ts';
 import { landedSql } from '../dispatcher/dependencies.ts';
@@ -254,7 +254,7 @@ export async function buildSnapshot(ctx: Ctx, orgId: string, section?: string): 
       [orgId, dayStart, monthStart],
     );
     out.push(
-      `## You (the CEO)\ntraining: ${ceo.training.on ? `ON (${trainingDaysLeft(ceo.training, now)} days left; staffing and model changes are recommendations only)` : 'off (graduated)'} | policy v${ceo.policyVersion} | spend today ${money(spend?.day)} month ${money(spend?.month)}\nopen tasks: ${tasks.map((t) => `${t.id} [${t.status}]`).join(', ') || 'none'}\nyour actions in the last 24h (do not repeat or flap):\n${acts.map((a) => `${a.id.slice(0, 8)} ${a.class} ${a.mode}${a.status === 'undone' ? ' UNDONE by the owner' : ''} ${ago(a.created_at, now)} ago`).join('\n') || 'none'}`,
+      `## You (the CEO)\npolicy v${ceo.policyVersion} | spend today ${money(spend?.day)} month ${money(spend?.month)}\nopen tasks: ${tasks.map((t) => `${t.id} [${t.status}]`).join(', ') || 'none'}\nyour actions in the last 24h (do not repeat or flap):\n${acts.map((a) => `${a.id.slice(0, 8)} ${a.class} ${a.mode}${a.status === 'undone' ? ' UNDONE by the owner' : ''} ${ago(a.created_at, now)} ago`).join('\n') || 'none'}`,
     );
     if (acts.length)
       out.push(

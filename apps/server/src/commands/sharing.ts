@@ -380,7 +380,7 @@ export async function rehomeAgent(
     // A workstation the organization does not use yet counts as one more (docs/design/organizations.md section 7.4).
     const used = await one(
       tx,
-      `SELECT 1 FROM agents WHERE org_id=$1 AND workstation_id=$2 AND status='active' AND NOT is_devops LIMIT 1`,
+      `SELECT 1 FROM agents WHERE org_id=$1 AND workstation_id=$2 AND status='active' AND NOT is_builtin LIMIT 1`,
       [a.org_id, req.workstationId],
     );
     if (!used) await assertWithinLimit(tx, a.org_id, 'workstations');

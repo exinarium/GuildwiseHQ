@@ -52,14 +52,99 @@ const hireParams = (over: Record<string, unknown> = {}) => ({
 const reviewer = (over: Record<string, unknown> = {}) =>
   hireParams({ role: 'reviewer', seniority: 'senior', ...over });
 
-describe('the training period', () => {
-  it('forces staffing and model changes to recommendations, whatever the policy table says', async () => {
-    expect((await status()).training).toMatchObject({ on: true, daysLeft: 14 });
-    // the table says decide for hiring: training wins
+const setStaffingMode = async (mode: 'decide' | 'recommend') => {
+  const pol = (await ok<any>(owner('GET', '/api/ceo/policy'))).policy;
+  for (const c of [
+    'agent.hire',
+    'agent.bench',
+    'agent.change_model',
+    'agent.change_seniority',
+    'agent.scale',
+  ])
+    pol.classes[c].mode = mode;
+  await ok(owner('PUT', '/api/ceo/policy', { policy: pol, confirmDelegation: true }));
+};
+
+describe('there is no training period', () => {
+  it('the built-in CEO has none, and the policy table decides from the first day', async () => {
+    const s = await status();
+    expect(s.training).toBeUndefined();
+    expect((await q(`SELECT training FROM ceo_settings`))[0]!.training).toMatchObject({ on: false });
+    // the table says decide for hiring and nothing overrides it
     expect((await ok<any>(owner('GET', '/api/ceo/policy'))).policy.classes['agent.hire'].mode).toBe('decide');
+    const noEv = result(await act(r, shiftId, 'hire', reviewer(), { key: 'no-evidence' }));
+    expect(noEv.status).toBe('refused');
+    expect(noEv.message).toContain('evidence');
+    const first = result(
+      await act(r, shiftId, 'hire', reviewer({ name: 'Cleo' }), { evidence: [`signal:${signalId}`] }),
+    );
+    expect(first, JSON.stringify(first)).toMatchObject({ status: 'executed' });
+    const cleo = (await q(`SELECT * FROM agents WHERE name='Cleo'`))[0]!;
+    expect(cleo).toMatchObject({ role_key: 'reviewer', seniority: 'senior' });
+    expect(cleo.allowed_project_ids).toEqual([w.projectId]);
+    // the model may not be above the role default
+    const dear = result(
+      await act(r, shiftId, 'hire', hireParams({ name: 'Dora', model: 'opus' }), {
+        evidence: [`signal:${signalId}`],
+      }),
+    );
+    expect(dear.status).toBe('refused');
+    expect(await q(`SELECT 1 FROM ceo_actions WHERE cause='training'`)).toHaveLength(0);
+  });
+
+  it('caps hires per day and agents per role per project, and holds a hire back when the forecast would pass the budget', async () => {
+    const second = result(
+      await act(r, shiftId, 'hire', reviewer({ name: 'Dan' }), { evidence: [`signal:${signalId}`] }),
+    );
+    expect(second, JSON.stringify(second)).toMatchObject({ status: 'executed' });
+    const third = result(
+      await act(r, shiftId, 'hire', reviewer({ name: 'Eve' }), { evidence: [`signal:${signalId}`] }),
+    );
+    expect(third.status).toBe('recommended');
+    expect(third.message).toContain('limit reached');
+    // raise the day limit: now the per-project cap (2 reviewers: Cleo, Dan) holds
+    const pol = (await ok<any>(owner('GET', '/api/ceo/policy'))).policy;
+    pol.limits.maxHiresPerDay = 10;
+    pol.limits.maxAgentsPerRolePerProject = 2;
+    await ok(owner('PUT', '/api/ceo/policy', { policy: pol }));
+    await declineOpen();
+    const capped = result(
+      await act(r, shiftId, 'hire', reviewer({ name: 'Fay' }), { evidence: [`signal:${signalId}`] }),
+    );
+    expect(capped.status).toBe('recommended');
+    expect(capped.message).toMatch(/reviewer agents per project/);
+    // room again, then the budget guard: spent a lot, tiny budget
+    pol.limits.maxAgentsPerRolePerProject = 5;
+    await ok(owner('PUT', '/api/ceo/policy', { policy: pol }));
+    await ok(owner('PUT', `/api/projects/${w.projectId}/budget`, { monthly: 1 }));
+    await q(
+      `INSERT INTO shift_costs (shift_id, org_id, agent_id, project_id, kind, model, tokens_input, tokens_output, tokens_cache_read, tokens_cache_write, cost_usd_micros, ended_at, cost_stamped)
+       VALUES (gen_random_uuid(), $1, (SELECT id FROM agents WHERE name='Bea'), $2, 'card', 'mock', 1,1,0,0, 900000, now(), true)`,
+      [w.owner.id, w.projectId],
+    );
+    await declineOpen();
+    const broke = result(
+      await act(r, shiftId, 'hire', reviewer({ name: 'Gil' }), { evidence: [`signal:${signalId}`] }),
+    );
+    expect(broke.status).toBe('recommended');
+    expect(broke.message).toContain('budget');
+    // back to a clean slate for the next group
+    await ok(owner('PUT', `/api/projects/${w.projectId}/budget`, { monthly: null }));
+    await q(`DELETE FROM shift_costs WHERE project_id=$1`, [w.projectId]);
+    await declineOpen();
+    await q(`DELETE FROM ceo_actions WHERE mode='recommended'`);
+    await q(`DELETE FROM ceo_memories WHERE status='candidate'`);
+  });
+});
+
+describe('recommend mode (the owner set the policy to recommend)', () => {
+  it('staffing and model changes become recommendations when the table says so', async () => {
+    await setStaffingMode('recommend');
+    const pol = (await ok<any>(owner('GET', '/api/ceo/policy'))).policy;
+    pol.limits.maxHiresPerDay = 10;
+    await ok(owner('PUT', '/api/ceo/policy', { policy: pol }));
     const hire = result(await act(r, shiftId, 'hire', hireParams(), { evidence: [`signal:${signalId}`] }));
     expect(hire.status).toBe('recommended');
-    expect(hire.message).toContain('training period');
     expect(await q(`SELECT 1 FROM agents WHERE role_key='builder' AND name <> 'Bea'`)).toHaveLength(0);
     const bea = result(await act(r, shiftId, 'model', { agent: 'Bea', to: 'opus' }));
     expect(bea.status).toBe('recommended');
@@ -67,36 +152,28 @@ describe('the training period', () => {
     expect(result(await act(r, shiftId, 'seniority', { agent: 'Bea', to: 'senior' })).status).toBe(
       'recommended',
     );
-    expect(
-      result(
-        await act(
-          r,
-          shiftId,
-          'scale',
-          { role: 'builder', project: 'TOY', to: 2 },
-          { evidence: [`signal:${signalId}`] },
-        ),
-      ).status,
-    ).toBe('recommended');
     // operational actions are not staffing: they still run
-    const card = await w.card({ title: 'During training' });
+    const card = await w.card({ title: 'Recommend mode' });
     expect(result(await act(r, shiftId, 'priority', { card: card.ref, to: 2 })).status).toBe('executed');
     expect(result(await act(r, shiftId, 'pause-agent', { agent: 'Bea' })).status).toBe('executed');
     result(await act(r, shiftId, 'resume-agent', { agent: 'Bea' }));
     const rows = await q(
-      `SELECT class, cause FROM ceo_actions WHERE mode='recommended' AND cause='training'`,
+      `SELECT class, cause FROM ceo_actions WHERE mode='recommended' AND cause='mode' AND class LIKE 'agent.%'`,
     );
     expect(rows.map((x) => x.class).sort()).toEqual([
       'agent.bench',
       'agent.change_model',
       'agent.change_seniority',
       'agent.hire',
-      'agent.scale',
     ]);
   });
 
   it('the recommendation is a desk item the owner can accept: it runs, and the response is recorded as agreement', async () => {
-    const rec = (await q(`SELECT * FROM ceo_actions WHERE class='agent.hire' AND mode='recommended'`))[0]!;
+    const rec = (
+      await q(
+        `SELECT * FROM ceo_actions WHERE class='agent.hire' AND mode='recommended' AND response IS NULL`,
+      )
+    )[0]!;
     const itemId = rec.desk_item_id;
     const desk = await ok<any>(owner('GET', '/api/desk'));
     const item = desk.items.find((i: any) => i.id === itemId);
@@ -191,117 +268,28 @@ describe('the training period', () => {
     );
   });
 
-  it('the daily review brief carries the training facts', async () => {
+  it('the daily review brief carries the recommendation feedback, and no training', async () => {
     const { buildCeoBrief } = await import('../src/ceo/brief.ts');
     const { loadCeo } = await import('../src/ceo/state.ts');
     const ceoState = (await loadCeo(w.t.app.ctx.pool, w.owner.id))!;
     const agent = (await q(`SELECT * FROM agents WHERE role_key='ceo'`))[0]!;
     const b = await buildCeoBrief(w.t.app.ctx, ceoState, agent, [], 'review', '2026-10-14');
-    expect(b.text).toContain('Training facts');
+    expect(b.text).toContain('Feedback facts');
     expect(b.text).toMatch(/Agreement so far: \d+ of \d+/);
-    expect(b.text).toContain('TRAINING: you are in your training period');
+    expect(b.text).not.toMatch(/training/i);
   });
 });
 
-describe('graduating', () => {
-  it('shows the scores, ends training and unlocks the policy table within the guard rails', async () => {
-    // the owner declines whatever the CEO still recommends
-    for (const row of await q(
-      `SELECT desk_item_id FROM ceo_actions WHERE mode='recommended' AND response IS NULL AND desk_item_id IN (SELECT id FROM desk_items WHERE subkind='ceo_recommendation' AND status='open')`,
-    ))
-      await ok(owner('POST', `/api/desk/${row.desk_item_id}/resolve`, { resolution: 'rejected' }));
-    const t = await ok<any>(owner('POST', '/api/ceo/training', { action: 'graduate' }));
-    expect(t.training).toMatchObject({ on: false });
-    expect(t.training.graduatedAt).not.toBeNull();
-    expect((await status()).training.on).toBe(false);
-    // no evidence: refused
-    const noEv = result(await act(r, shiftId, 'hire', reviewer(), { key: 'no-evidence' }));
-    expect(noEv.status).toBe('refused');
-    expect(noEv.message).toContain('evidence');
-    // with a cited signal: decided
-    const first = result(
-      await act(r, shiftId, 'hire', reviewer({ name: 'Cleo' }), { evidence: [`signal:${signalId}`] }),
-    );
-    expect(first, JSON.stringify(first)).toMatchObject({ status: 'executed' });
-    expect(first.message).toContain('Cleo');
-    const cleo = (await q(`SELECT * FROM agents WHERE name='Cleo'`))[0]!;
-    expect(cleo).toMatchObject({ role_key: 'reviewer', seniority: 'senior' });
-    expect(cleo.allowed_project_ids).toEqual([w.projectId]);
-    // the model may not be above the role default
-    const dear = result(
-      await act(r, shiftId, 'hire', hireParams({ name: 'Dora', model: 'opus' }), {
-        evidence: [`signal:${signalId}`],
-      }),
-    );
-    expect(dear.status).toBe('refused');
-  });
-
-  it('caps hires per day and agents per role per project, and holds a hire back when the forecast would pass the budget', async () => {
-    const second = result(
-      await act(r, shiftId, 'hire', reviewer({ name: 'Dan' }), { evidence: [`signal:${signalId}`] }),
-    );
-    expect(second, JSON.stringify(second)).toMatchObject({ status: 'executed' });
-    const third = result(
-      await act(r, shiftId, 'hire', reviewer({ name: 'Eve' }), { evidence: [`signal:${signalId}`] }),
-    );
-    expect(third.status).toBe('recommended');
-    expect(third.message).toContain('limit reached');
-    // raise the day limit: now the per-project cap (2 reviewers: Cleo, Dan) holds
-    const pol = (await ok<any>(owner('GET', '/api/ceo/policy'))).policy;
-    pol.limits.maxHiresPerDay = 10;
-    pol.limits.maxAgentsPerRolePerProject = 2;
-    await ok(owner('PUT', '/api/ceo/policy', { policy: pol }));
-    await declineOpen();
-    const capped = result(
-      await act(r, shiftId, 'hire', reviewer({ name: 'Fay' }), { evidence: [`signal:${signalId}`] }),
-    );
-    expect(capped.status).toBe('recommended');
-    expect(capped.message).toMatch(/reviewer agents per project/);
-    // room again, then the budget guard: spent a lot, tiny budget
-    pol.limits.maxAgentsPerRolePerProject = 5;
-    await ok(owner('PUT', '/api/ceo/policy', { policy: pol }));
-    await ok(owner('PUT', `/api/projects/${w.projectId}/budget`, { monthly: 1 }));
-    await q(
-      `INSERT INTO shift_costs (shift_id, org_id, agent_id, project_id, kind, model, tokens_input, tokens_output, tokens_cache_read, tokens_cache_write, cost_usd_micros, ended_at, cost_stamped)
-       VALUES (gen_random_uuid(), $1, (SELECT id FROM agents WHERE name='Bea'), $2, 'card', 'mock', 1,1,0,0, 900000, now(), true)`,
-      [w.owner.id, w.projectId],
-    );
-    await declineOpen();
-    const broke = result(
-      await act(r, shiftId, 'hire', reviewer({ name: 'Gil' }), { evidence: [`signal:${signalId}`] }),
-    );
-    expect(broke.status).toBe('recommended');
-    expect(broke.message).toContain('budget');
-  });
-
-  it('training can be restarted: the staffing gate is back', async () => {
-    const t = await ok<any>(owner('POST', '/api/ceo/training', { action: 'restart' }));
-    expect(t.training.on).toBe(true);
-    const res = result(await act(r, shiftId, 'bench', { agent: 'Bea' }, { key: 'bench-again' }));
-    expect(res.status).toBe('recommended');
-    expect(res.message).toContain('training');
-    const ext = await ok<any>(owner('POST', '/api/ceo/training', { action: 'extend' }));
-    expect(ext.training.extensions).toBeGreaterThan(0);
-  });
-});
-
-describe('only the Owner trains the CEO', () => {
-  it('an Admin cannot graduate it or accept a recommendation', async () => {
+describe('only the Owner answers recommendations', () => {
+  it('an Admin cannot accept a recommendation, and the training routes are gone', async () => {
     const admin = await w.t.userSession(`admin-${Date.now()}@example.test`);
     await q(
       `INSERT INTO org_members (org_id, user_id, role, status, joined_at) VALUES ($1,$2,'admin','active',now())`,
       [w.owner.id, admin.id],
     );
     const h = { 'x-aom-org': w.owner.id };
-    expect(
-      (
-        await w.t.req('POST', '/api/ceo/training', {
-          cookie: admin.cookie,
-          headers: h,
-          body: { action: 'graduate' },
-        })
-      ).status,
-    ).toBe(403);
+    for (const path of ['/api/ceo/training', '/api/ceo/appoint', '/api/ceo/disable'])
+      expect((await w.t.req('POST', path, { cookie: w.owner.cookie, body: {} })).status).toBe(404);
     const rec = (
       await q(
         `SELECT desk_item_id FROM ceo_actions WHERE mode='recommended' AND response IS NULL AND desk_item_id IS NOT NULL LIMIT 1`,

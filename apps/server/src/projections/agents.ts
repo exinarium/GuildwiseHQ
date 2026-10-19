@@ -20,9 +20,9 @@ export const agentProjectors: Record<string, Projector> = {
     await exec(
       tx,
       `INSERT INTO agents (id, org_id, hired_for_project_id, hired_by_user_id, manager_user_id, workstation_id, name, role_key,
-         role_version, seniority, runtime, model, effort, skills, permissions, capacity, is_devops, status, hired_at,
+         role_version, seniority, runtime, model, effort, skills, permissions, capacity, is_devops, is_builtin, status, hired_at,
          avatar_seed, avatar_style, allowed_project_ids, focus_project_ids)
-       VALUES ($1,$2,$3,$4,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'active',$17,COALESCE($18::text, $20::text),$19,
+       VALUES ($1,$2,$3,$4,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$23,'active',$17,COALESCE($18::text, $20::text),$19,
                $21::uuid[], $22::uuid[])`,
       [
         p.agentId,
@@ -48,6 +48,8 @@ export const agentProjectors: Record<string, Projector> = {
         // Hires from before allow-lists: project-scoped agents work their project only, the rest any project.
         p.allowedProjectIds !== undefined ? p.allowedProjectIds : p.projectId ? [p.projectId] : null,
         p.focusProjectIds ?? [],
+        // Older hires have no flag: the DevOps engineer and the CEO were the built-in agents.
+        p.isBuiltin ?? (p.isDevops || p.roleKey === 'ceo'),
       ],
     );
   },
@@ -101,11 +103,10 @@ export const agentProjectors: Record<string, Projector> = {
   },
   AgentRehomed: async (tx, e) => {
     const p = (e.event as EventOf<'AgentRehomed'>).payload;
-    await exec(tx, `UPDATE agents SET workstation_id=$2, runtime=$3, model=$4, status='active' WHERE id=$1`, [
-      p.agentId,
-      p.workstationId,
-      p.runtime,
-      p.model,
-    ]);
+    await exec(
+      tx,
+      `UPDATE agents SET workstation_id=$2::uuid, runtime=$3, model=$4, status='active' WHERE id=$1`,
+      [p.agentId, p.workstationId, p.runtime, p.model],
+    );
   },
 };

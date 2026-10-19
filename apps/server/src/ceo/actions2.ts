@@ -16,12 +16,19 @@ import {
   setAgentAllowedProjects,
   suggestNames,
 } from '../commands/agents.ts';
-import { cancelCard } from '../commands/cards.ts';
+import { cancelCard, specifyCardIn } from '../commands/cards.ts';
 import { cardMessage, orgScope, userActor } from '../commands/common.ts';
 import { isNearDuplicate } from '../commands/ledger-checks.ts';
 import { retireLedgerEntryAs } from '../commands/ledger-retire.ts';
-import type { Ctx } from '../context.ts';
+import {
+  cardMissing,
+  hasActiveBa,
+  missingText,
+  queueSpecCardTask,
+  splitMissing,
+} from '../commands/spec-card.ts';
 import { one, type Queryable, type Row, rows } from '../db/sql.ts';
+import { type Tx, withAppendTx } from '../db/tx.ts';
 import { landedSql } from '../dispatcher/dependencies.ts';
 import { conflict } from '../errors.ts';
 import { applyRecommendation, listRecommendations } from '../hr/hr.ts';
@@ -847,7 +854,39 @@ const IntakeP = z.object({
   text: z.string().trim().min(10).max(8000),
   title: z.string().trim().max(300).optional(),
   investigation: z.coerce.boolean().optional(),
+  /** What kind of card (default `feature`). An investigation is the `investigation` flag, not a card type. */
+  cardType: z.enum(['feature', 'bug', 'support', 'refactor', 'docs']).default('feature'),
+  /** The external reference (a Jira key, an issue URL): kept on the card as its `externalRef`. */
+  ticket: z.string().trim().max(200).optional(),
+  priority: z.coerce.number().int().min(1).max(9).optional(),
 });
+
+/**
+ * What became of a draft that `specify:true` could not specify: the BA completes it when it can (a `spec_card` task), and
+ * the CEO is told plainly when it cannot (a missing repository needs a person; no BA means "hire one").
+ */
+async function completeDraft(
+  env: ActionEnv,
+  tx: Tx,
+  cardId: string,
+  missing: string[],
+): Promise<{ queued: boolean; text: string }> {
+  const card = (await one(tx, 'SELECT * FROM cards WHERE id=$1', [cardId])) as Row;
+  const { other } = await splitMissing(tx, card, missing);
+  if (other.length)
+    return {
+      queued: false,
+      text: `it stays a draft: it needs ${missingText(other)}, which only a person can add (the BA cannot)`,
+    };
+  if (!(await hasActiveBa(tx, env.orgId)))
+    return {
+      queued: false,
+      text: `it stays a draft: missing ${missingText(missing)} and there is no BA to write it. Recommend hiring a BA`,
+    };
+  await queueSpecCardTask(env.ctx, tx, card, userActor(env.owner.id));
+  return { queued: true, text: `sent to the BA to complete: ${missingText(missing)}` };
+}
+
 const intake: ActionDef<z.infer<typeof IntakeP>> = {
   cls: 'card.create_via_ba',
   schema: IntakeP,
@@ -860,36 +899,90 @@ const intake: ActionDef<z.infer<typeof IntakeP>> = {
     };
     const ps = await projectsByKey(env.ctx.pool, env.orgId, [p.project]);
     if (typeof ps === 'string') return { ...base, refuse: ps };
-    const ba = await one(
-      env.ctx.pool,
-      `SELECT 1 FROM agents WHERE org_id=$1 AND role_key='ba' AND status='active' LIMIT 1`,
-      [env.orgId],
-    );
-    if (!ba) return { ...base, refuse: 'there is no BA to hand this to: hire one first' };
     return { ...base, subjectId: ps[0]!.id as string, data: { pid: ps[0]!.id } };
   },
   async execute(env, p, pr) {
-    const { createCard } = await import('../commands/cards.ts');
+    const { createCardIn } = await import('../commands/cards.ts');
     const title = p.title ?? truncate(p.text.split('\n')[0] ?? p.text, 120);
-    const r = await createCard(env.ctx, env.owner, {
-      projectId: pr.data?.pid as string,
-      title,
-      cardType: 'feature',
-      fields: { context: p.text },
-      specify: true,
-      ...(p.investigation ? { investigationOnly: true } : {}),
-    } as never);
-    const card = await one(env.ctx.pool, 'SELECT ref FROM cards WHERE id=$1', [r.cardId]);
+    const out = await withAppendTx(env.ctx.pool, async (tx) => {
+      const r = await createCardIn(env.ctx, tx, env.owner, {
+        projectId: pr.data?.pid as string,
+        title,
+        cardType: p.cardType,
+        fields: { context: p.text, ...(p.ticket ? { externalRef: p.ticket } : {}) },
+        specify: true,
+        ...(p.priority ? { priority: p.priority } : {}),
+        ...(p.investigation ? { investigationOnly: true } : {}),
+      } as never);
+      const next = r.missing?.length ? await completeDraft(env, tx, r.cardId, r.missing) : undefined;
+      return { r, next };
+    });
+    const card = await one(env.ctx.pool, 'SELECT ref FROM cards WHERE id=$1', [out.r.cardId]);
     return {
-      message: `${card?.ref ?? 'A card'} was drafted for the BA${r.missing?.length ? ` (still missing: ${r.missing.join(', ')}; the BA will complete it)` : ''}.`,
-      result: { cardId: r.cardId, ref: card?.ref },
+      message: `${card?.ref ?? 'A card'} was drafted${out.next ? `: ${out.next.text}` : ' and specified'}.`,
+      result: {
+        cardId: out.r.cardId,
+        ref: card?.ref,
+        specified: !out.next,
+        baQueued: out.next?.queued ?? false,
+      },
       inverse: {
         kind: 'inverse',
         action: 'cancel-draft',
-        params: { card: r.cardId },
+        params: { card: out.r.cardId },
         preconditions: {},
         label: `Cancel ${card?.ref ?? 'the draft'}`,
       },
+    };
+  },
+};
+
+// -------------------------------------------------------------------------------------------- specify
+
+const SpecifyP = z.object({ card: z.string().min(1).max(40) });
+const specify: ActionDef<z.infer<typeof SpecifyP>> = {
+  cls: 'card.specify',
+  schema: SpecifyP,
+  describe: (_p, pr) => `Specify ${pr.subjectLabel}`,
+  async prepare(env, p) {
+    const card = await cardOf(env.ctx.pool, env, p.card);
+    if (!card) return refuse(`card ${p.card} not found`);
+    const base = {
+      subjectKind: 'card',
+      subjectId: card.id as string,
+      subjectLabel: `${card.ref} ${truncate(card.title, 80)}`,
+    };
+    if (card.status !== 'draft')
+      return { ...base, refuse: `${card.ref} is ${card.status}: only a draft is specified` };
+    return { ...base, data: { card } };
+  },
+  async execute(env, _p, pr) {
+    const id = (pr.data as { card: Row }).card.id as string;
+    const out = await withAppendTx(env.ctx.pool, async (tx) => {
+      const card = (await one(tx, 'SELECT * FROM cards WHERE id=$1 FOR UPDATE', [id])) as Row;
+      if (card.status !== 'draft')
+        return { kind: 'moved' as const, ref: card.ref as string, status: card.status as string };
+      const missing = await cardMissing(tx, card);
+      if (missing.length === 0) {
+        await specifyCardIn(env.ctx, tx, env.owner, id);
+        return { kind: 'specified' as const, ref: card.ref as string };
+      }
+      return {
+        kind: 'missing' as const,
+        ref: card.ref as string,
+        ...(await completeDraft(env, tx, id, missing)),
+      };
+    });
+    if (out.kind === 'moved')
+      return { message: `${out.ref} is ${out.status} already.`, result: { cardId: id } };
+    if (out.kind === 'specified')
+      return {
+        message: `${out.ref} is specified: it is in the queue.`,
+        result: { cardId: id, specified: true },
+      };
+    return {
+      message: `${out.ref}: ${out.text}.`,
+      result: { cardId: id, specified: false, baQueued: out.queued },
     };
   },
 };
@@ -909,6 +1002,7 @@ export const ACTIONS2: Partial<Record<CeoActionName, ActionDef>> = {
   'activate-order': activateOrder,
   'retire-entry': retireEntry,
   intake,
+  specify,
 };
 
 void conflict;

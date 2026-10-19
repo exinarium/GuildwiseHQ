@@ -8,7 +8,6 @@ import {
   renderCeoData,
   renderFloorReportFallback,
   sumScores,
-  trainingDaysLeft,
 } from '@aom/shared';
 import type { Ctx } from '../context.ts';
 import { one, type Row, rows } from '../db/sql.ts';
@@ -18,17 +17,13 @@ import { relevantMemories } from './memory.ts';
 import { decisionReviewBrief } from './review.ts';
 import type { CeoState } from './state.ts';
 
-/** The policy as the CEO is told it: in plain words, with the training period said first. */
-export function policyInWords(policy: CeoPolicy, training: CeoState['training'], now: Date): string {
+/** The policy as the CEO is told it, in plain words. */
+export function policyInWords(policy: CeoPolicy): string {
   const by = (mode: string) =>
     ACTION_CLASSES.filter((c) => (policy.classes[c]?.mode ?? 'recommend') === mode).map(
       (c) => CLASS_LABEL[c as ActionClass],
     );
   const out: string[] = [];
-  if (training.on)
-    out.push(
-      `TRAINING: you are in your training period (${trainingDaysLeft(training, now)} days left; it ends when the owner graduates you). Hiring, benching, retiring, promoting, demoting, model changes and scaling are always recommendations now, whatever the table below says. Recommend them with a clear reason: how the owner answers teaches you.`,
-    );
   out.push(
     `You may decide (with a reason, a confidence of at least ${policy.minConfidence} and the evidence): ${by('decide').join('; ') || 'nothing'}.`,
   );
@@ -74,7 +69,7 @@ const REVIEW_HEADINGS = [
   '5. Delivered',
   '6. Tasks (the owner’s tasks and their state)',
   '7. Proposals (standing orders, staffing)',
-  '8. Training (what you recommended, what the owner chose, what you learned; leave out once graduated)',
+  '8. Feedback (what you recommended, what the owner chose, what you learned)',
   '9. I noted (rules you recorded from the owner)',
 ];
 
@@ -93,7 +88,7 @@ async function trainingSection(ctx: Ctx, ceo: CeoState): Promise<string> {
     [ceo.orgId],
   );
   return [
-    `## Training facts\nAgreement so far: ${t.agreed} of ${t.total} recommendations agreed${scores.length ? ` (${scores.map((s) => `${CLASS_LABEL[s.class as ActionClass] ?? s.class}: ${s.agreed}/${s.total}`).join('; ')})` : ''}.`,
+    `## Feedback facts\nAgreement so far: ${t.agreed} of ${t.total} recommendations agreed${scores.length ? ` (${scores.map((s) => `${CLASS_LABEL[s.class as ActionClass] ?? s.class}: ${s.agreed}/${s.total}`).join('; ')})` : ''}.`,
     recent.length
       ? `This week the owner responded to:\n${recent.map((r) => `- ${CLASS_LABEL[r.class as ActionClass] ?? r.class} "${String(r.subject_label).slice(0, 80)}": ${r.response}${r.response_choice ? ` (chose ${r.response_choice})` : ''}${r.response_note ? ` - ${String(r.response_note).slice(0, 120)}` : ''}`).join('\n')}`
       : 'No responses to your recommendations this week.',
@@ -186,7 +181,7 @@ export async function buildCeoBrief(
     '## The organisation\nRead it with `aom ceo snapshot` (all of it, or `--section desk|cards|agents|signals|...`) before you decide anything; it is not repeated here.',
   );
   parts.push(`## The owner's rules\n${await ownerRules(ctx, ceo, topic)}`);
-  parts.push(`## What you may do\n${policyInWords(ceo.policy, ceo.training, now)}`);
+  parts.push(`## What you may do\n${policyInWords(ceo.policy)}`);
   const tasks = await rows(
     ctx.pool,
     `SELECT id, title, request, status, due_at FROM ceo_tasks WHERE org_id=$1 AND status IN ('open','in_progress','waiting_owner','waiting_work') ORDER BY created_at LIMIT 10`,
@@ -234,7 +229,7 @@ export async function buildChatBrief(ctx: Ctx, ceo: CeoState, agent: Row): Promi
   const parts = [
     `You are ${agent.name}. ${personaText(ceo)}`,
     `## The owner's rules\n${await ownerRules(ctx, ceo, '')}`,
-    `## What you may do\n${policyInWords(ceo.policy, ceo.training, ctx.clock.now())}`,
+    `## What you may do\n${policyInWords(ceo.policy)}`,
     'Read the organisation with `aom ceo snapshot` before you answer questions about it. Say what you did and whether it can be undone.',
   ];
   return parts.join('\n\n');

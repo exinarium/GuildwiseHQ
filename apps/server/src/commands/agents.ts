@@ -162,7 +162,7 @@ const NAMES: Record<string, string[]> = {
 
 /** Names not used in the org (retired agents' names count as used, they are never reused). */
 export async function suggestNames(
-  ctx: Ctx,
+  ctx: Pick<Ctx, 'pool'>,
   orgId: string,
   theme: string | undefined,
   count: number,
@@ -269,7 +269,7 @@ export async function hireAgent(
     // A workstation the organization does not use yet counts as one more (the DevOps engineer does not count).
     const uses = await one(
       tx,
-      `SELECT 1 FROM agents WHERE org_id=$1 AND workstation_id=$2 AND status='active' AND NOT is_devops LIMIT 1`,
+      `SELECT 1 FROM agents WHERE org_id=$1 AND workstation_id=$2 AND status='active' AND NOT is_builtin LIMIT 1`,
       [orgId, req.workstationId],
     );
     if (!uses) await assertWithinLimit(tx, orgId, 'workstations');
@@ -280,7 +280,7 @@ export async function hireAgent(
     if (roleDef.definition.key === 'ceo')
       throw badRequest(
         'invalid_role',
-        'the CEO is appointed, not hired: use Appoint CEO (POST /api/ceo/appoint)',
+        'the CEO is built in: every organization has one, and it cannot be hired',
       );
     if (!roleDef.definition.seniorityLevels.includes(req.seniority)) {
       throw badRequest(
@@ -588,7 +588,7 @@ export async function fireAgent(
     if (a.is_devops)
       throw conflict('devops_cannot_be_fired', 'the DevOps engineer cannot be fired; reset it instead');
     if (a.role_key === 'ceo')
-      throw conflict('ceo_cannot_be_fired', 'the CEO cannot be fired: pause or disable it on the CEO page');
+      throw conflict('builtin_agent', 'the CEO is built in and cannot be fired: pause it on the CEO page');
     const cards = await rows(
       tx,
       `SELECT c.*, (SELECT h.id FROM card_handoffs h WHERE h.card_id = c.id ORDER BY h.created_at DESC, h.event_seq DESC LIMIT 1) AS last_handoff_id

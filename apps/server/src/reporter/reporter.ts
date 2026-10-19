@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { type FloorDigest, floorDigestIsEmpty, floorReportDue, streamId } from '@aom/shared';
 import { queueCeoReviews } from '../ceo/pass.ts';
+import { ceoActive, ceoReachable } from '../ceo/state.ts';
 import { orgScope, projectScope, SYSTEM_ACTOR } from '../commands/common.ts';
 import { releaseHeldEvents } from '../commands/reporter-tasks.ts';
 import type { Ctx } from '../context.ts';
@@ -191,16 +192,27 @@ async function reconcileSignals(ctx: Ctx, now: Date): Promise<{ raised: number; 
   });
 }
 
+/** The CEO is active (not paused) and can run now: it owns the BA reporter's job for this organization. */
+async function ceoHandles(db: Ctx['pool'], orgId: string, now: Date): Promise<boolean> {
+  return !!(await ceoActive(db, orgId)) && (await ceoReachable(db, orgId, now)).ok;
+}
+
 /** Step 3: urgent signals nobody was told about yet become a `floor_alert` task (one per org and project). */
 async function queueUrgentAlerts(ctx: Ctx): Promise<number> {
-  const pending = await rows(
+  const all = await rows(
     ctx.pool,
     `SELECT s.* FROM ba_signals s
       WHERE s.urgency='urgent' AND s.status='open'
-        AND NOT EXISTS (SELECT 1 FROM ceo_settings c WHERE c.org_id = s.org_id AND c.enabled AND NOT c.paused AND c.agent_id IS NOT NULL)
         AND NOT EXISTS (SELECT 1 FROM ba_tasks t WHERE t.kind='floor_alert' AND s.id = ANY(t.signal_ids))
       ORDER BY s.first_seen_at, s.id`,
   );
+  // The CEO takes the alerts of an organization it can look at; routing asks the same question (`ceoHandles`).
+  const handled = new Map<string, boolean>();
+  const pending: typeof all = [];
+  for (const s of all) {
+    if (!handled.has(s.org_id)) handled.set(s.org_id, await ceoHandles(ctx.pool, s.org_id, ctx.clock.now()));
+    if (!handled.get(s.org_id)) pending.push(s);
+  }
   if (pending.length === 0) return 0;
   return withAppendTx(ctx.pool, async (tx) => {
     const groups = new Map<string, { orgId: string; projectId: string | null; ids: string[] }>();
@@ -231,14 +243,16 @@ async function queueUrgentAlerts(ctx: Ctx): Promise<number> {
 
 /** Step 4: the daily floor report, at `dailyAt` on the manager's clock; skipped on days with nothing to say. */
 async function queueFloorReports(ctx: Ctx, now: Date): Promise<number> {
-  const orgs = await rows<{ id: string }>(
+  const candidates = await rows<{ id: string }>(
     ctx.pool,
     `SELECT o.id FROM organizations o JOIN users u ON u.id = o.owner_user_id AND u.status='active'
       WHERE o.status IN ('trial','active')
-        AND NOT EXISTS (SELECT 1 FROM ceo_settings c WHERE c.org_id = o.id AND c.enabled AND NOT c.paused AND c.agent_id IS NOT NULL)
         AND EXISTS (SELECT 1 FROM projects p WHERE p.org_id = o.id AND p.status='active' AND p.kind='project')`,
   );
   let n = await queueCeoReviews(ctx, now);
+  // The CEO's own report replaces the BA's floor report only where the CEO can run (the same test as routing).
+  const orgs: Array<{ id: string }> = [];
+  for (const o of candidates) if (!(await ceoHandles(ctx.pool, o.id, now))) orgs.push(o);
   for (const o of orgs) {
     const prefs = await reportingOf(ctx.pool, o.id);
     const due = floorReportDue(now, prefs.timezone, prefs.dailyAt, prefs.floorReportDay, prefs.createdAt);

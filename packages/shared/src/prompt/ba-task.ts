@@ -1,4 +1,5 @@
 import { renderBatchInstructions, renderBatchPrompt } from '../intake/batch.ts';
+import { renderSpecCardInstructions, renderSpecCardPrompt } from '../intake/spec-card.ts';
 import { renderMailDraftInstructions, renderMailDraftPrompt } from '../mail/draft.ts';
 import type { BaTaskShift } from '../phases/index.ts';
 import type { ShiftBrief } from '../protocol/runner.ts';
@@ -24,6 +25,8 @@ export function renderBaTaskInstructions(brief: ShiftBrief, task: BaTaskShift): 
   if (task.batch) return renderBatchInstructions(brief, brief.shift.outcomes, commandForOutcome);
   if (task.mailDraft)
     return renderMailDraftInstructions(brief, task.mailDraft, brief.shift.outcomes, commandForOutcome);
+  if (task.specCard)
+    return renderSpecCardInstructions(brief, task.specCard, brief.shift.outcomes, commandForOutcome);
   if (!task.phase) return renderReporterInstructions(brief, task);
   const phase = task.phase;
   const kind = task.kind as keyof typeof TASK_TITLE;
@@ -76,6 +79,7 @@ function followupLine(f: BaTaskShift['followups'][number]): string {
 export function renderBaTaskPrompt(task: BaTaskShift): string {
   if (task.batch) return renderBatchPrompt(task.batch);
   if (task.mailDraft) return renderMailDraftPrompt(task.mailDraft);
+  if (task.specCard) return renderSpecCardPrompt(task.specCard);
   if (!task.phase) return renderReporterPrompt(task);
   const phase = task.phase;
   const out: string[] = [];

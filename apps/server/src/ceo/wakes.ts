@@ -153,7 +153,11 @@ export function registerCeoWakes(ctx: Ctx): () => void {
       type === 'CardFinalized' ||
       type === 'CardCancelled' ||
       type === 'DevOpsRequestCompleted' ||
-      type === 'QuestionAnswered';
+      type === 'QuestionAnswered' ||
+      // A flagged bug waits as a draft until someone specifies it: the CEO decides (docs/design/ceo-front-door.md 2.4).
+      (type === 'CardCreated' &&
+        (e.event as any).payload.cardType === 'bug' &&
+        (e.event as any).payload.status === 'draft');
     if (!interesting) return;
     const ceo = await ceoOf(orgId);
     if (!ceo.active) return;
@@ -271,6 +275,28 @@ export function registerCeoWakes(ctx: Ctx): () => void {
         );
         break;
       }
+      case 'CardCreated': {
+        // The wake is keyed by the card like its `bug_reported` desk alert, so the card and the alert are one wake.
+        // A bug a suite or a test found blocks the work that is closing: urgent. Others (a flagged bug) are normal.
+        const closing = ['full_suite', 'regression', 'test_failure'].includes(p.origin);
+        await enqueueWake(
+          ctx.pool,
+          orgId,
+          {
+            reason: 'bug_flagged',
+            urgency: closing ? 'urgent' : 'normal',
+            subjectKind: 'card',
+            subjectId: p.cardId,
+            subjectLabel: `${p.ref}: ${p.title}`,
+            detail: { origin: p.origin, projectId: p.projectId },
+            eventSeq: e.seq,
+            untrusted: true,
+            dedupe: { key: `card:${p.cardId}:desk:bug_reported`, state: `${p.stage}/${p.status}` },
+          },
+          now,
+        );
+        break;
+      }
       case 'ProjectBudgetThresholdReached':
         await enqueueWake(
           ctx.pool,
@@ -319,7 +345,12 @@ export function registerCeoWakes(ctx: Ctx): () => void {
     }
   };
 
+  // One event at a time, in order: the events of one append (a bug card and its `bug_reported` alert) must not race on the
+  // subject dedupe, or the same subject would wake the CEO twice.
+  let chain: Promise<void> = Promise.resolve();
   return ctx.store.subscribe((e) => {
-    handle(e).catch((err) => ctx.log.error({ err, type: e.event.type }, 'ceo wake source failed'));
+    chain = chain
+      .then(() => handle(e))
+      .catch((err) => ctx.log.error({ err, type: e.event.type }, 'ceo wake source failed'));
   });
 }

@@ -149,6 +149,10 @@ export const userProjectors: Record<string, Projector> = {
     const p = (e.event as EventOf<'SignupAbandoned'>).payload;
     // Only ever an empty sign-up (the command checks): the organization, its single membership and the account go.
     await exec(tx, 'DELETE FROM org_members WHERE org_id=$1', [p.orgId]);
+    // The built-in CEO the sign-up created goes with the organization (nothing else was ever hired).
+    await exec(tx, 'DELETE FROM ceo_wakes WHERE org_id=$1', [p.orgId]);
+    await exec(tx, 'DELETE FROM ceo_settings WHERE org_id=$1', [p.orgId]);
+    await exec(tx, 'DELETE FROM agents WHERE org_id=$1 AND is_builtin', [p.orgId]);
     await exec(tx, 'DELETE FROM organizations WHERE id=$1', [p.orgId]);
     // The audit log is kept forever: its rows only lose the link to the account (target_user_id has no FK and stays).
     await exec(tx, 'UPDATE platform_audit_log SET actor_user_id=NULL WHERE actor_user_id=$1', [p.userId]);

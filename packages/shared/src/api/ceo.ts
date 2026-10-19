@@ -1,20 +1,9 @@
 import { z } from 'zod';
 import { CeoPolicySchema } from '../ceo/policy.ts';
-import {
-  type CeoSettingsSchema,
-  type CeoTrainingSchema,
-  UpdateCeoSettingsRequestSchema,
-} from '../ceo/settings.ts';
+import { type CeoSettingsSchema, UpdateCeoSettingsRequestSchema } from '../ceo/settings.ts';
 import { type CeoMemoryKind, CeoTaskStatus } from '../events/ceo.ts';
 
 /** The CEO page and its API (docs/design/ceo-agent-v2.md section 8). The Owner configures; Admins read. */
-
-export const AppointCeoRequestSchema = z.object({
-  workstationId: z.uuid(),
-  name: z.string().trim().min(1).max(60).optional(),
-  acknowledgeUnsandboxed: z.boolean().optional(),
-});
-export type AppointCeoRequest = z.infer<typeof AppointCeoRequestSchema>;
 
 export const PauseCeoRequestSchema = z.object({ reason: z.string().trim().max(500).optional() });
 
@@ -27,8 +16,6 @@ export const UpdateCeoPolicyRequestSchema = z.object({
 export type UpdateCeoPolicyRequest = z.infer<typeof UpdateCeoPolicyRequestSchema>;
 
 export { UpdateCeoSettingsRequestSchema };
-
-export const CeoTrainingRequestSchema = z.object({ action: z.enum(['graduate', 'extend', 'restart']) });
 
 export const MoveCeoRequestSchema = z.object({
   workstationId: z.uuid(),
@@ -90,7 +77,6 @@ export interface CeoStatusDto {
     workstationId: string | null;
     workstationName: string | null;
   } | null;
-  training: z.infer<typeof CeoTrainingSchema> & { daysLeft: number };
   scores: Array<{ class: string; agreed: number; total: number }>;
   totals: { agreed: number; total: number };
   pendingWakes: number;

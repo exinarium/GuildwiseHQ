@@ -41,7 +41,8 @@ export const agentEvents = [
       /** Projects the agent prefers inside its allow-list (soft preference for the dispatcher's ordering). */
       focusProjectIds: z.array(Id).max(MAX_FOCUS_PROJECTS).optional(),
       hiredByUserId: Id,
-      workstationId: Id,
+      /** Null for the built-in CEO of an organization whose Owner has no workstation yet (bound at his first pairing). */
+      workstationId: Id.nullable(),
       name: z.string().min(1),
       roleKey: z.string().min(1),
       roleVersion: z.number().int().min(1),
@@ -53,6 +54,8 @@ export const agentEvents = [
       permissions: AgentPermissionsSchema,
       capacity: z.number().int().min(1).max(8),
       isDevops: z.boolean(),
+      /** Built in, free of limits and not removable: the DevOps engineer and the CEO. Older hires derive it from `isDevops`/`roleKey`. */
+      isBuiltin: z.boolean().optional(),
       unsandboxedAck: UnsandboxedAckSchema.optional(),
       /** The generated face; an agent hired before faces existed gets one seeded from its id. */
       avatarSeed: AvatarSeedSchema.optional(),
@@ -114,7 +117,8 @@ export const agentEvents = [
     'AgentRehomed',
     z.object({
       agentId: Id,
-      workstationId: Id,
+      /** Null clears the home (the built-in CEO when the Owner changes and the new Owner has no workstation). */
+      workstationId: Id.nullable(),
       runtime: z.string(),
       model: z.string(),
       unsandboxedAck: UnsandboxedAckSchema.optional(),

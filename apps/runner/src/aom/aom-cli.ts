@@ -420,7 +420,9 @@ const REPORT_USAGE = `usage: aom report triage --file <decisions.json>      # { 
        aom report floor --summary-file <report.md>
        aom report brief --summary-file <report.md>
        aom report mail-draft --text-file <reply.txt> [--subject "<subject>"]
-       aom report mail-draft-fail --note "<why no reply can be written>"`;
+       aom report mail-draft-fail --note "<why no reply can be written>"
+       aom report spec-card --file <fields.json>      # { "fields": { "<missing field key>": "<text>" } }
+       aom report spec-card-fail --note "<why the card cannot be specified>"`;
 
 /** `aom report ...`: the BA's reporter tasks (held items, urgent notes, urgent signals, the daily floor report). */
 async function reportVerb(ctx: AomContext, p: Parsed): Promise<number> {
@@ -465,6 +467,13 @@ async function reportVerb(ctx: AomContext, p: Parsed): Promise<number> {
       return report(
         ctx,
         outcome('mail_draft_fail', (textFlag(ctx, p, 'note', true) as string).trim().slice(0, 500), {}),
+      );
+    case 'spec-card':
+      return report(ctx, outcome('spec_card_done', 'Card fields', data()));
+    case 'spec-card-fail':
+      return report(
+        ctx,
+        outcome('spec_card_fail', (textFlag(ctx, p, 'note', true) as string).trim().slice(0, 500), {}),
       );
     default:
       throw new UsageError(REPORT_USAGE);
@@ -1868,6 +1877,7 @@ export const USAGE = `usage: aom <verb> [options]
   phase results --summary-file <md>          BA task (follow-ups finished): report the results (terminal)
   report triage|notes|signals --file <json> | report floor --summary-file <md>   BA reporter task (held items, urgent notes, urgent signals, the daily floor report): report to the manager (terminal)
   report mail-draft --text-file <txt> [--subject "<s>"] | report mail-draft-fail --note "<why>"   BA mail reply draft: report the draft for a person to review and send (terminal; it is never sent by itself)
+  report spec-card --file <json> | report spec-card-fail --note "<why>"   BA card task: write the missing fields of a draft card so it can be specified (terminal)
   devops "<request>"                         ask this workstation's DevOps engineer (does not end your shift)
   devops-approval --action "<a>" --reason "<r>" [--command "<c>"]...   DevOps engineer: ask the manager
   devops-question --text "<q>" --reason "<r>"   DevOps engineer: ask a question (goes through the normal chain; you resume with the answer)

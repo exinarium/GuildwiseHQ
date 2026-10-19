@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { canUnlinkWorkstation, type ShiftLimitSetting, streamId } from '@aom/shared';
 import type { AuthSession } from '../auth/sessions.ts';
+import { ceoBindEvents } from '../ceo/provision.ts';
 import type { Ctx } from '../context.ts';
 import { generatePairingCode, normalizePairingCode, randomToken, sha256Hex } from '../crypto.ts';
 import { exec, one, rows } from '../db/sql.ts';
@@ -103,6 +104,8 @@ export async function pairRunner(
     // Every workstation gets its own DevOps engineer, hired in the same append (docs/ARCHITECTURE.md section 16.2).
     // One DevOps engineer per organization the user belongs to (owner decision 15), hired in the same append.
     const devopsHires = await devopsHireEventsNew(tx, c.user_id, workstationId, input.simulationOrgId);
+    // The CEO of an organization this user owns, with no home yet, lives on their first workstation.
+    const ceoBinds = await ceoBindEvents(tx, c.user_id, workstationId, input.simulationOrgId);
     await ctx.store.append(
       [
         {
@@ -124,6 +127,7 @@ export async function pairRunner(
           scope: userScope(c.user_id),
         },
         ...devopsHires,
+        ...ceoBinds,
       ],
       { tx },
     );
