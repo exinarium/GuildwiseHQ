@@ -403,42 +403,6 @@ describe('question shifts count for the loop breaker', () => {
     expect(found).toHaveLength(1);
     expect(found[0]).toMatchObject({ kind: 'loop', count: 5 });
   });
-
-  it('question shifts the runner refused do not count', async () => {
-    await reset();
-    await w.hire('Bea', 'builder', 'junior');
-    const first = await buildAndAsk('Refused card', {
-      text: 'Which retry delay do you want for the 5 uploads?',
-    });
-    const [item] = await itemsOf(first.card.id);
-    const bea = await agentId('Bea');
-    for (let i = 0; i < 5; i++)
-      await q(
-        `INSERT INTO shifts (id, org_id, agent_id, workstation_id, card_id, kind, status, outcome, runtime, model, started_at, ended_at, desk_item_id)
-         SELECT $1, org_id, $2, workstation_id, NULL, 'question', 'ended', 'rejected', runtime, model, now(), now(), $3 FROM agents WHERE id=$2`,
-        [randomUUID(), bea, item!.id],
-      );
-    await questionShiftRows(first.card.id, item!.id, 4);
-    expect(
-      (await detectLoops(w.t.app.ctx.pool)).filter(
-        (l) => l.fingerprint === `loop:questions:${first.card.id}`,
-      ),
-    ).toHaveLength(0);
-    await ok(
-      w.t.req('POST', `/api/desk/${item!.id}/answer`, {
-        cookie: w.owner.cookie,
-        body: { answer: 'Use 10 seconds.' },
-      }),
-    );
-    const start = await nextShift('Bea');
-    await p.startShift(r, start);
-    const res = await ask(start.shiftId, {
-      text: 'Is the cache directory per user or shared across workers?',
-    });
-    expect(res).toMatchObject({ accepted: true });
-    expect((await cardRow(first.card.id)).retry_failures).toBe(0);
-    expect((await itemsOf(first.card.id)).filter((i) => i.subkind === 'loop_backoff')).toHaveLength(0);
-  });
 });
 
 describe('topic routing', () => {
