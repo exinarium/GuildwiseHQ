@@ -27,6 +27,8 @@ export async function writeVaultFile(
   dir: string,
   cmd: VaultWriteCommand,
   identity: VaultIdentity,
+  /** `commit: false`: a local vault folder, there is no repository to commit to. */
+  opts: { commit?: boolean } = {},
 ): Promise<VaultWriteResult> {
   if (!isSafeVaultPath(cmd.path)) throw new VaultWriteError(`unsafe vault path: ${cmd.path}`);
   const file = join(dir, ...cmd.path.split('/'));
@@ -69,6 +71,7 @@ export async function writeVaultFile(
   }
   await mkdir(dirname(file), { recursive: true });
   await writeFile(file, next);
+  if (opts.commit === false) return { written: true, committed: false };
   const env = await vaultCommitEnv(dir);
   await gitOk(dir, ['add', '--', cmd.path], { env });
   const staged = await git(dir, ['diff', '--cached', '--quiet', '--', cmd.path], { env });

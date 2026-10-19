@@ -10,6 +10,7 @@ import {
   TASTE_FILE,
 } from '@aom/shared';
 import { confine } from '../fs-safe.ts';
+import { isLocalVaultDir } from './local.ts';
 
 export interface VaultShiftContext {
   /** The one directory passed to the runtime as `--add-dir`. */
@@ -46,7 +47,10 @@ export async function readVaultContext(
   } catch {
     return null;
   }
-  if ((vault.folder !== undefined && !isSafeVaultFolder(vault.folder)) || !existsSync(join(root, '.git')))
+  if (
+    (vault.folder !== undefined && !isSafeVaultFolder(vault.folder)) ||
+    !(existsSync(join(root, '.git')) || isLocalVaultDir(root))
+  )
     return null;
   const folder = vault.folder ? vault.folder.split('/') : undefined;
   const orders: Array<{ title: string; body: string }> = [];

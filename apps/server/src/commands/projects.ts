@@ -32,6 +32,7 @@ import { releaseEvents } from './cards.ts';
 import { assertRemoteUrl, cardMessage, orgScope, projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
 import { cancelConversionEvents } from './convert.ts';
 import { cancelPhasesEvents } from './phases.ts';
+import { ensureProjectVaultIn } from './vaults.ts';
 import {
   deliver,
   projectWorkstations,
@@ -73,6 +74,8 @@ export async function createProject(
       ],
       { tx },
     );
+    // Every project always has a vault (docs/design/project-graphs.md section 3): a local one if the owner gave none.
+    await ensureProjectVaultIn(ctx, tx, projectId, 'created');
   });
   return projectId;
 }

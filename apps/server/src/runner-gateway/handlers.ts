@@ -62,7 +62,12 @@ import { applyTargetSecretResult } from '../commands/target-secrets.ts';
 import { proposeSuites, recordSuiteResult, suitesFor } from '../commands/test-environments.ts';
 import { applyToolchainsReport } from '../commands/toolchains.ts';
 import { transcriptStoreRpc } from '../commands/transcripts.ts';
-import { applyVaultConflict, markVaultStatus, queueVaultConfigure } from '../commands/vaults.ts';
+import {
+  applyVaultConflict,
+  ensureProjectVaultsForWorkstation,
+  markVaultStatus,
+  queueVaultConfigure,
+} from '../commands/vaults.ts';
 import {
   syncClaudeAuthNotice,
   syncClaudeUsageNotice,
@@ -689,6 +694,8 @@ export class RunnerHandlers {
     await this.reconcileQuestions(conn, known, helloAt);
     await this.reconcileBaTasks(conn, known, helloAt);
     await this.reconcileCeo(conn, known, helloAt);
+    // The owner's first workstation holds the automatic local vaults of the projects that have none (graphs design 3).
+    await ensureProjectVaultsForWorkstation(ctx, conn.workstationId);
     await queueVaultConfigure(ctx, ctx.pool, conn.workstationId);
     await queueApprovedFor(ctx, conn.userId, conn.workstationId);
     await this.deliverPending(conn.workstationId);

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { VaultKind } from '../events/vault.ts';
+import { VaultKind, VaultStorage } from '../events/vault.ts';
 import { RemoteUrlSchema } from '../safe.ts';
 import { IsoTime } from './common.ts';
 
@@ -24,6 +24,8 @@ export const VaultDtoSchema = z.object({
   kind: VaultKind,
   name: z.string(),
   remoteUrl: z.string(),
+  /** `local`: a folder on one workstation, not synced; the Owner backs it up (project-graphs design section 3). */
+  storage: VaultStorage.default('git'),
   syncIntervalSec: z.number().int(),
   createdAt: IsoTime,
   /** The project owner / org owner may edit; project members only see it. */
