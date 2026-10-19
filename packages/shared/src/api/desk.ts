@@ -121,6 +121,32 @@ export const DeskItemDtoSchema = z.object({
     })
     .nullable()
     .optional(),
+  /** `ceo_decision` items: one decision the CEO took on its own, and where its review by the owner stands. */
+  ceoDecision: z
+    .object({
+      question: z.string(),
+      decision: z.string(),
+      reason: z.string(),
+      confidence: z.number().nullable(),
+      ceoName: z.string().nullable(),
+      class: z.string().nullable(),
+      source: z.enum(['act', 'chain']),
+      /** The question the CEO answered (when the decision answered one). */
+      questionItemId: z.uuid().nullable(),
+      correction: z
+        .object({
+          text: z.string(),
+          at: IsoTime,
+          applied: z.string().nullable(),
+          review: z.enum(['pending', 'analysed', 'done']),
+          analysis: z.string().nullable(),
+          lesson: z.string().nullable(),
+        })
+        .nullable(),
+      acknowledgedAt: IsoTime.nullable(),
+    })
+    .nullable()
+    .optional(),
   /** The CEO's daily report: the actions of the last 24 hours (for Undo) and the training scores. */
   ceoReport: z
     .object({
@@ -154,7 +180,13 @@ export type DeskQuery = z.infer<typeof DeskQuerySchema>;
 /** `GET /api/desk`: items ordered pinned DESC, blocking DESC, affected count DESC, age ASC. */
 export const DeskListResponseSchema = z.object({
   items: z.array(DeskItemDtoSchema),
-  counts: z.object({ open: z.number().int(), blocking: z.number().int(), urgent: z.number().int() }),
+  counts: z.object({
+    open: z.number().int(),
+    blocking: z.number().int(),
+    urgent: z.number().int(),
+    /** CEO decisions waiting for the owner's review: informational, not part of `open`. */
+    ceoDecisions: z.number().int().optional(),
+  }),
 });
 export type DeskListResponse = z.infer<typeof DeskListResponseSchema>;
 
@@ -190,3 +222,15 @@ export const ResolveDeskItemRequestSchema = z.object({
 export type ResolveDeskItemRequest = z.infer<typeof ResolveDeskItemRequestSchema>;
 
 export const DismissDeskItemRequestSchema = z.object({ note: z.string().max(2000).optional() });
+
+/** `POST /api/desk/:id/ceo-decision/correct` */
+export const CorrectCeoDecisionRequestSchema = z.object({
+  correction: z.string().trim().min(1).max(4000),
+  /** Also undo the decision now, where there is a clean way (re-open the question the CEO answered). */
+  applyNow: z.boolean().default(false),
+});
+export type CorrectCeoDecisionRequest = z.infer<typeof CorrectCeoDecisionRequestSchema>;
+
+/** `POST /api/desk/ceo-decisions/acknowledge-all` */
+export const AcknowledgeAllCeoDecisionsResponseSchema = z.object({ acknowledged: z.number().int() });
+export type AcknowledgeAllCeoDecisionsResponse = z.infer<typeof AcknowledgeAllCeoDecisionsResponseSchema>;

@@ -254,6 +254,53 @@ export const ceoEvents = [
   ),
   /** The memory is erased: the projection row stays as a tombstone id, the text is deleted from the operational table. */
   defineEvent('CeoMemoryForgotten', z.object({ memoryId: Id, orgId: Id, by: Id })),
+  /**
+   * The owner reviewed a decision of the CEO on the desk: acknowledged it (positive feedback) or corrected it. A correction
+   * starts the CEO-BA review (`reviewId`); the owner's words are kept as an owner-confirmed memory (`memoryId`).
+   */
+  defineEvent(
+    'CeoDecisionReviewed',
+    z.object({
+      orgId: Id,
+      deskItemId: Id,
+      actionId: Id.optional(),
+      outcome: z.enum(['acknowledged', 'corrected']),
+      by: Id,
+      correction: z.string().max(4000).optional(),
+      applyNow: z.boolean().optional(),
+      applied: z.string().max(500).optional(),
+      reviewId: Id.optional(),
+      memoryId: Id.optional(),
+      /** Acknowledge all: how many were closed in the same append. */
+      batch: z.boolean().optional(),
+    }),
+  ),
+  /** The BA's short analysis of a corrected decision: why the instinct was wrong, the missed signal, a proposed rule. */
+  defineEvent(
+    'CeoCorrectionAnalysed',
+    z.object({
+      orgId: Id,
+      deskItemId: Id,
+      reviewId: Id,
+      analysis: z.string().max(8000),
+      proposedRule: z.string().max(1000).optional(),
+      baAgentId: Id.optional(),
+      fallback: z.boolean().optional(),
+    }),
+  ),
+  /** The lesson the CEO recorded after the review: a memory linked to the correction, replacing what led to the mistake. */
+  defineEvent(
+    'CeoLessonRecorded',
+    z.object({
+      orgId: Id,
+      deskItemId: Id,
+      reviewId: Id,
+      memoryId: Id,
+      lesson: z.string().max(1000),
+      retiredMemoryIds: z.array(Id).default([]),
+      recordedBy: z.enum(['ceo', 'server']),
+    }),
+  ),
   /** A CEO shift (a wake batch or the daily review) was handed to the CEO's workstation. */
   defineEvent(
     'CeoShiftDispatched',

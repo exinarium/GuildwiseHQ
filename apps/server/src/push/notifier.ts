@@ -119,6 +119,7 @@ const NOT_A_DECISION = new Set<string>([
   PLATFORM_DESK_SUBKIND.runnerPin,
   'digest',
   'ceo_notice',
+  'ceo_decision',
   'ba_report',
   'floor_report',
 ]);

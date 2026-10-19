@@ -67,7 +67,21 @@ describe('the gate', () => {
         reservedKey: 'manual_qa',
       }).verdict,
     ).toBe('recommend');
-    expect(P.delegated).toEqual([]); // the default is untouched
+    expect(P.delegated).toEqual(['working_branch']); // the only default delegation
+  });
+
+  it("working-branch questions are the CEO's to decide by default, and the owner can take them back", () => {
+    const key = reservedKeyOfDesk('question', 'working_branch');
+    expect(key).toBe('working_branch');
+    expect(
+      evaluatePolicy(P, 'desk.answer_question', { ...base, reservedKey: key, deskMode: 'decide' }).verdict,
+    ).toBe('allow');
+    expect(
+      evaluatePolicy(withDelegation(P, 'working_branch', false), 'desk.answer_question', {
+        ...base,
+        reservedKey: key,
+      }),
+    ).toMatchObject({ verdict: 'recommend', cause: 'reserved' });
   });
 
   it('maps desk items to their reserved key', () => {

@@ -8,7 +8,66 @@ const j = (v: unknown) => JSON.stringify(v);
 const DESK_CLASSES = ['desk.answer_question', 'desk.triage', 'desk.resolve_notice'];
 
 /** The CEO agent: settings, policy, the action audit, tasks and memory metadata (docs/design/ceo-agent-v2.md). */
+
+/** Merges `patch` into the CEO-decision block of a desk item's data. */
+async function patchDecision(
+  tx: Parameters<Projector>[0],
+  deskItemId: string,
+  patch: (cur: Record<string, any>) => Record<string, any>,
+): Promise<void> {
+  const row = await one<{ data: Record<string, any> | null }>(tx, 'SELECT data FROM desk_items WHERE id=$1', [
+    deskItemId,
+  ]);
+  if (!row) return;
+  const data = row.data ?? {};
+  await exec(tx, 'UPDATE desk_items SET data=$2::jsonb WHERE id=$1', [deskItemId, j(patch(data))]);
+}
+
 export const ceoProjectors: Record<string, Projector> = {
+  // The owner's review of a CEO decision, shown on the desk item.
+  CeoDecisionReviewed: async (tx, e) => {
+    const p = ev<'CeoDecisionReviewed'>(e).payload;
+    await patchDecision(tx, p.deskItemId, (data) => {
+      if (p.outcome === 'acknowledged') return { ...data, acknowledgedAt: e.createdAt.toISOString() };
+      const cur = (data.correction ?? {}) as Record<string, any>;
+      return {
+        ...data,
+        correction: {
+          ...cur,
+          ...(p.correction ? { text: p.correction } : {}),
+          ...(cur.at ? {} : { at: e.createdAt.toISOString() }),
+          ...(p.applied ? { applied: p.applied } : {}),
+          ...(p.reviewId ? { reviewId: p.reviewId } : {}),
+          ...(p.memoryId ? { memoryId: p.memoryId } : {}),
+          review: cur.review ?? 'pending',
+        },
+      };
+    });
+  },
+  CeoCorrectionAnalysed: async (tx, e) => {
+    const p = ev<'CeoCorrectionAnalysed'>(e).payload;
+    await patchDecision(tx, p.deskItemId, (data) => ({
+      ...data,
+      correction: {
+        ...(data.correction ?? {}),
+        analysis: p.analysis,
+        ...(p.proposedRule ? { proposedRule: p.proposedRule } : {}),
+        review: data.correction?.review === 'done' ? 'done' : 'analysed',
+      },
+    }));
+  },
+  CeoLessonRecorded: async (tx, e) => {
+    const p = ev<'CeoLessonRecorded'>(e).payload;
+    await patchDecision(tx, p.deskItemId, (data) => ({
+      ...data,
+      correction: {
+        ...(data.correction ?? {}),
+        lesson: p.lesson,
+        lessonMemoryId: p.memoryId,
+        review: 'done',
+      },
+    }));
+  },
   CeoEnabled: async (tx, e) => {
     const p = ev<'CeoEnabled'>(e).payload;
     await exec(

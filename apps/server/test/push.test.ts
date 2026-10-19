@@ -264,6 +264,19 @@ describe('routing', () => {
     expect(send).not.toHaveBeenCalled();
   });
 
+  it('never pushes a CEO decision for review, blocking or not', async () => {
+    await subscribe(owner);
+    await raise({
+      kind: 'alert',
+      subkind: 'ceo_decision',
+      blocking: false,
+      pinned: false,
+      title: 'CEO decision: x',
+    });
+    await raise({ kind: 'alert', subkind: 'ceo_decision', title: 'CEO decision: y' });
+    expect(send).not.toHaveBeenCalled();
+  });
+
   it('does not push a question that is still with an agent; pushes once when it is escalated to the desk', async () => {
     await subscribe(member);
     const id = await raise({ addresseeUserId: member.id, routedTo: 'agent' });

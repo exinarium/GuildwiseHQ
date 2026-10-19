@@ -173,6 +173,7 @@ The DevOps engineer and Ask DevOps, approvals, conflicts, repository hygiene and
 ### The Decision desk
 Desk items and kinds, blocking, answering questions, standing orders and adding to the ledger.
 - Desk items: Each item shows:
+- CEO decisions: If you have a CEO, the things it decided for you appear under CEO decisions at the bottom of the desk (and under the CEO decisions filter). They are information: no notification, not blocking, and not counted in the open total. Each shows what was asked, the decision and the reason, the card and "CEO decision · name".
 - Blocking: An item is blocking when cards cannot move until you answer it. For example, a large merge waits for your approval, or an agent needs a decision before it can continue.
 - Answering a question: To answer a desk item:
 - Standing orders: Standing orders are recurring instructions that show up in every agent's shift. Use them for: - Team policies (e.g., "all PRs must have unit tests"). - Context (e.g., "we are migrating from X to Y"). - Decisions that affect multiple cards (e.g., "use the new auth system").
@@ -385,6 +386,7 @@ A safe sandbox for tests and demos: agents run on a simulated workstation, nothi
 An optional agent that handles the desk and the floor for you, starts in training, and can always be undone.
 - Training period: A new CEO starts in training. It recommends and you decide: during training, hiring, benching, retiring, promoting, model changes and scaling are only recommendations, and your answers on the desk teach it. The Overview tab shows how often you agreed with it.…
 - What it may decide: The Authority tab sets, for each kind of action, whether the CEO decides, recommends or never does it. Matters like production deploys, manual QA and budgets stay yours unless you delegate one (you confirm each). Billing, members, security and secrets are never delegated.…
+- Decisions you review: Every decision the CEO takes on its own that you would otherwise have been asked about (answers to questions routed to it, matters you delegated, such as which working branch a repository uses) is listed on the desk under CEO decisions.…
 - Activity log and Undo: Everything it decided, recommended or refused is in the Activity log, with its reason, its confidence and the evidence. Most decisions have an Undo, also on the desk item and in the daily report. The Owner can export the log.
 - Memory: It remembers rules you give it. Tick Remember this for the CEO when you answer, or add a rule on the Memory tab. Proposed rules wait for your Keep or Drop. Only the Owner can read the memory.
 - Talking to it: Press Ask in the top bar for your standing chat, or give it a task on the Tasks tab. Its spend shows as Management on the Costs page.

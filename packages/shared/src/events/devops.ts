@@ -99,6 +99,8 @@ export const devopsEvents = [
       action: z.string().min(1),
       reason: z.string().min(1),
       commands: z.array(z.string()).default([]),
+      /** The DevOps engineer asked a question (answered through the escalation chain), not for an approval. */
+      question: z.boolean().optional(),
     }),
   ),
   /** G-Q2: DevOps tries to resolve a card's rebase/merge conflict on a branch; the card waits on the request. */
@@ -131,7 +133,10 @@ export const devopsEvents = [
       requestId: Id,
       deskItemId: Id,
       resolution: z.enum(['approved', 'rejected']),
-      resolvedBy: Id,
+      /** Absent when the server approved by itself (`auto`). */
+      resolvedBy: Id.optional(),
+      /** The server approved it by itself (a merge-conflict resolution on a project that waives merge approval). */
+      auto: z.boolean().optional(),
       note: z.string().optional(),
     }),
   ),

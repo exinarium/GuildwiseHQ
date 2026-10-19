@@ -20,6 +20,7 @@ import { createBillingRuntime } from './billing/runtime.ts';
 import { createSocialClient, type SocialClient } from './blog/social-client.ts';
 import type { WriterClient } from './blog/writer/client.ts';
 import { BrowserGateway } from './browser-gateway/gateway.ts';
+import { registerCeoReviewHook } from './ceo/decisions.ts';
 import { registerCeoWakes } from './ceo/wakes.ts';
 import { ChatRelay } from './chat/relay.ts';
 import { type Clock, createClock } from './clock.ts';
@@ -29,6 +30,7 @@ import { registerBudgetHook } from './commands/budgets.ts';
 import { registerDecisionHook } from './commands/decisions.ts';
 import { registerDefinitionHook } from './commands/designer.ts';
 import { registerDevopsMembershipHook } from './commands/devops.ts';
+import { registerDevopsQuestionHook } from './commands/devops-routing.ts';
 import { registerTasteHook } from './commands/taste.ts';
 import type { Config } from './config.ts';
 import type { Ctx } from './context.ts';
@@ -506,6 +508,8 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   const unhookCeoWakes = registerCeoWakes(ctx);
   const unhookDefinitions = registerDefinitionHook(ctx);
   const unhookDevops = registerDevopsMembershipHook(ctx);
+  const unhookDevopsQuestions = registerDevopsQuestionHook(ctx);
+  const unhookCeoReview = registerCeoReviewHook(ctx);
   if (config.push.enabled) ctx.services.push = registerPushNotifier(ctx);
   await notifier.start();
   // Simulation organizations: the simulated workstations come up with the server (not under tests unless asked for).
@@ -527,6 +531,8 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
     unhookCeoWakes();
     unhookDefinitions();
     unhookDevops();
+    unhookDevopsQuestions();
+    unhookCeoReview();
     ctx.services.push?.stop();
     await simulation?.stop();
     await reporter.stop();

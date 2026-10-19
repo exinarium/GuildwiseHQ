@@ -15,6 +15,10 @@ A new CEO starts in training. It **recommends** and you decide: during training,
 
 The **Authority** tab sets, for each kind of action, whether the CEO decides, recommends or never does it. Matters like production deploys, manual QA and budgets stay yours unless you delegate one (you confirm each). Billing, members, security and secrets are never delegated. Below a minimum confidence it recommends instead.
 
+## Decisions you review {#decisions}
+
+Every decision the CEO takes on its own that you would otherwise have been asked about (answers to questions routed to it, matters you delegated, such as which **working branch** a repository uses) is listed on the desk under **CEO decisions**. **Acknowledge** it, or **Correct** it by writing the right decision: the CEO stores your correction as a memory, reviews it with the BA and records the lesson, so it does not repeat the mistake. **Acknowledge all** marks them all read. The working-branch delegation is on by default and can be switched off on the **Authority** tab.
+
 ## Activity log and Undo {#activity}
 
 Everything it decided, recommended or refused is in the **Activity log**, with its reason, its confidence and the evidence. Most decisions have an **Undo**, also on the desk item and in the daily report. The Owner can export the log.

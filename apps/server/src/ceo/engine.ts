@@ -18,9 +18,10 @@ import { HttpError } from '../errors.ts';
 import { withActingAgent } from '../eventstore/acting.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { ceoBy } from './actions.ts';
+import { ceoDecisionItemEvents, REVIEWED_CLASSES } from './decisions.ts';
 import { ACTIONS } from './registry.ts';
 import type { CeoState } from './state.ts';
-import type { ActionDef, ActionEnv, Prepared } from './types.ts';
+import type { ActionDef, ActionEnv, Executed, Prepared } from './types.ts';
 
 type ActRpc = Extract<CeoRpc, { op: 'act' }>;
 
@@ -267,6 +268,57 @@ async function recommendEvents(
 }
 
 /**
+ * A decision the owner would otherwise have been asked about (a question the CEO answered, a delegated owner-reserved
+ * matter, a cancellation, a firing...) goes on the desk as an informational item to acknowledge or correct. Nothing is
+ * raised when the owner accepted the recommendation themselves.
+ */
+async function reviewEvents(
+  env: ActionEnv,
+  def: ActionDef,
+  rpc: ActRpc,
+  prepared: Prepared,
+  executed: Executed,
+  origin: CallOrigin,
+): Promise<AppendInput[]> {
+  if (origin.acceptedFrom) return [];
+  if (!REVIEWED_CLASSES.has(def.cls) && !prepared.reservedKey) return [];
+  const ctx = env.ctx;
+  let projectId: string | null = null;
+  let cardId: string | null = null;
+  let question = prepared.subjectLabel;
+  let questionItemId: string | undefined;
+  if (prepared.subjectKind === 'desk') {
+    const it = prepared.data?.item as
+      | { id: string; project_id?: string; card_id?: string; title?: string }
+      | undefined;
+    projectId = it?.project_id ?? null;
+    cardId = it?.card_id ?? null;
+    question = it?.title ?? question;
+    questionItemId = it?.id;
+  } else if (prepared.subjectKind === 'card') {
+    const c = await one(ctx.pool, 'SELECT id, project_id FROM cards WHERE id=$1', [prepared.subjectId]);
+    projectId = c?.project_id ?? null;
+    cardId = c?.id ?? null;
+  }
+  const answer = (executed.result as { answer?: string }).answer;
+  return ceoDecisionItemEvents({
+    orgId: env.orgId,
+    projectId,
+    cardId,
+    ceoAgentId: env.agentId,
+    ceoName: env.agentName,
+    cls: def.cls,
+    source: 'act',
+    actionId: env.actionId,
+    question,
+    ...(questionItemId ? { questionItemId } : {}),
+    decision: answer ?? def.describe(rpc.params, prepared),
+    reason: rpc.reason,
+    confidence: rpc.confidence,
+  });
+}
+
+/**
  * The gateway for `aom ceo act` (docs/design/ceo-agent-v2.md section 4.2). Order: idempotency, validation, what the
  * subject is, evidence, limits, the policy verdict, then dry run / refuse / recommend / execute. The action runs inside
  * `withActingAgent`, so its events carry the CEO as actor and the action id as causation; the audit event follows.
@@ -391,6 +443,7 @@ export async function runAction(
         result: executed.result,
         inverse: executed.inverse,
       }),
+      ...(await reviewEvents(env, eff, call, prepared, executed, origin)),
     ]);
     return {
       status: 'executed',

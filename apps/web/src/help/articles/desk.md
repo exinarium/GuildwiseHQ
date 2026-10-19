@@ -21,6 +21,15 @@ Alerts, approvals and notices also have **Ask DevOps about this**, which opens a
 
 Some items are urgent: approval requests, blocking questions, pinned alerts and cards that keep failing. Everything else can wait up to 10 minutes while your BA reviews it first (if you have routing on).
 
+## CEO decisions {#ceo-decisions}
+
+If you have a CEO, the things it decided for you appear under **CEO decisions** at the bottom of the desk (and under the **CEO decisions** filter). They are information: no notification, not blocking, and not counted in the open total. Each shows what was asked, the decision and the reason, the card and "CEO decision · name".
+
+- **Acknowledge** marks it read; **Acknowledge all** marks every open one read at once.
+- **Correct** is for a wrong decision: write what the right decision is. The CEO remembers it (visible on the CEO's **Memory** tab), the BA reviews why it went wrong, and the CEO records the lesson, which the item then shows. Tick **Apply the correction now** (Owner) to also re-open the question where that is possible.
+
+Owners and Admins can acknowledge and correct. See [Your CEO](/help/your-ceo#decisions).
+
 ## Blocking {#blocking}
 
 An item is **blocking** when cards cannot move until you answer it. For example, a large merge waits for your approval, or an agent needs a decision before it can continue.

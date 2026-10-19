@@ -1,4 +1,5 @@
 import {
+  CEO_DECISION_SUBKIND,
   canAnswerCardDeskItem,
   type DeskItemDto,
   type DeskListResponse,
@@ -193,6 +194,31 @@ export function toDeskDto(
           },
         }
       : {}),
+    ...(r.subkind === CEO_DECISION_SUBKIND && r.data?.ceoDecision
+      ? {
+          ceoDecision: {
+            question: r.data.ceoDecision.question ?? '',
+            decision: r.data.ceoDecision.decision ?? '',
+            reason: r.data.ceoDecision.reason ?? '',
+            confidence: r.data.ceoDecision.confidence ?? null,
+            ceoName: r.data.ceoDecision.ceoName ?? null,
+            class: r.data.ceoDecision.class ?? null,
+            source: r.data.ceoDecision.source === 'chain' ? ('chain' as const) : ('act' as const),
+            questionItemId: r.data.ceoDecision.questionItemId ?? null,
+            correction: r.data.correction
+              ? {
+                  text: r.data.correction.text ?? '',
+                  at: r.data.correction.at ?? iso(r.updated_at),
+                  applied: r.data.correction.applied ?? null,
+                  review: (r.data.correction.review ?? 'pending') as 'pending' | 'analysed' | 'done',
+                  analysis: r.data.correction.analysis ?? null,
+                  lesson: r.data.correction.lesson ?? null,
+                }
+              : null,
+            acknowledgedAt: r.data.acknowledgedAt ?? null,
+          },
+        }
+      : {}),
     ...(r.subkind === 'ceo_report' && r.data?.ceo
       ? {
           ceoReport: {
@@ -276,10 +302,13 @@ export async function listDesk(
   for (const r of all)
     items.push(await withPhase(db, withDigest(toDeskDto(r, userId, roles, dedup, orgRoles), digests), r));
   const openItems = items.filter((i) => i.status === 'open');
+  // CEO decisions are for review, not decisions waiting on the user: they are not part of the open count.
+  const decisions = openItems.filter((i) => i.subkind === CEO_DECISION_SUBKIND).length;
   return {
     items,
     counts: {
-      open: openItems.length,
+      open: openItems.length - decisions,
+      ...(decisions > 0 ? { ceoDecisions: decisions } : {}),
       blocking: openItems.filter((i) => i.blocking).length,
       urgent: openItems.filter((i) => i.urgent).length,
     },

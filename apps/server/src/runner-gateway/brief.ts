@@ -23,6 +23,7 @@ import { loadRole, loadWorkflowById } from '../catalogue/loader.ts';
 import { briefAttachments } from '../commands/card-attachments.ts';
 import { workflowView } from '../commands/cards.ts';
 import { effectiveCompletionAction } from '../commands/completion.ts';
+import { projectWaivesMergeApproval } from '../commands/devops-routing.ts';
 import { scoutCandidates, seenUrls, tasteSeedFor } from '../commands/feeds.ts';
 import { grantedMcpServers } from '../commands/mcp-servers.ts';
 import { riskOf } from '../commands/review-risk.ts';
@@ -840,6 +841,16 @@ export async function devopsStandingOrders(
  * The `shift.start` for one DevOps request. A DevOps shift has no card, but the runner's shift machinery is brief
  * driven, so the brief carries a placeholder card ("DEVOPS") and the real request travels in `devops`.
  */
+async function mergeWaiver(ctx: Ctx, cardId: string | null): Promise<{ mergeApprovalWaived?: true }> {
+  if (!cardId) return {};
+  const p = await one(
+    ctx.pool,
+    'SELECT p.* FROM cards c JOIN projects p ON p.id = c.project_id WHERE c.id = $1',
+    [cardId],
+  );
+  return projectWaivesMergeApproval(p) ? { mergeApprovalWaived: true } : {};
+}
+
 export async function buildDevopsShiftStart(
   ctx: Ctx,
   requestId: string,
@@ -936,6 +947,7 @@ export async function buildDevopsShiftStart(
       card,
       workstationName: ws.name,
       access: DevOpsAccessSchema.parse(ws.devops_access ?? {}),
+      ...(await mergeWaiver(ctx, req.card_id)),
       hygiene: req.hygiene ?? undefined,
       run: (await runBriefFor(ctx, req)) ?? undefined,
       approval:

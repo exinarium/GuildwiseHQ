@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { type ChainLevel, DESK_SUBKIND, type DeskActor, streamId } from '@aom/shared';
+import { ceoDecisionItemEvents } from '../ceo/decisions.ts';
 import { ceoActive, ceoReachable } from '../ceo/state.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Queryable, type Row, rows } from '../db/sql.ts';
@@ -533,6 +534,23 @@ export async function applyQuestionReport(
         { answeredBy: `${agent.name} (${agent.role_key})` },
       )),
     );
+    // The CEO's answer shows on the owner's desk as a decision to acknowledge or correct (informational, no push).
+    if (isCeo)
+      events.push(
+        ...ceoDecisionItemEvents({
+          orgId: item.org_id,
+          projectId: item.project_id ?? null,
+          cardId: item.card_id ?? null,
+          ceoAgentId: agent.id,
+          ceoName: agent.name,
+          cls: 'desk.answer_question',
+          source: 'chain',
+          question: item.title,
+          questionItemId: item.id,
+          decision: report.text as string,
+          reason: 'The question was routed to the CEO, which answered it.',
+        }),
+      );
     await ctx.store.append(events, { tx });
     return {
       accepted: true,
