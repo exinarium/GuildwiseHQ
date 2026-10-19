@@ -21,34 +21,166 @@ const useMayReview = (): boolean => {
   return role === 'owner' || role === 'admin';
 };
 
-/** "Lesson recorded: ..." and the BA's analysis, once the owner corrected the decision. */
+type Correction = NonNullable<NonNullable<DeskItemDto['ceoDecision']>['correction']>;
+
+/** The status chip of a corrected decision: under review until the BA's final turn, then what came out of it. */
+export function reviewChip(c: Correction): { label: string; tone: 'warning' | 'success' } {
+  if (c.review !== 'done') return { label: 'Under review', tone: 'warning' };
+  const n = c.final?.cards.length ?? 0;
+  return {
+    label: `Lesson recorded · ${n === 0 ? 'no fix cards' : `${n} fix card${n === 1 ? '' : 's'}`}`,
+    tone: 'success',
+  };
+}
+
+const stripLesson = (lesson: string): string => lesson.replace(/^Lesson \([^)]*\):\s*/, '');
+
+function Step({
+  id,
+  title,
+  who,
+  waiting,
+  children,
+}: {
+  id: string;
+  title: string;
+  who?: string;
+  waiting?: boolean;
+  children?: React.ReactNode;
+}) {
+  return (
+    <li className="relative pb-3 pl-5 last:pb-0" data-testid={`ceo-review-step-${id}`}>
+      <span
+        aria-hidden="true"
+        className={cx(
+          'absolute top-1.5 left-0 size-2.5 rounded-full border',
+          waiting ? 'border-warning-fill bg-surface' : 'border-warning-fill bg-warning-fill',
+        )}
+      />
+      <p className="text-xs font-semibold">
+        {title}
+        {who && <span className="ml-1 font-normal text-warning-soft-fg/80">{who}</span>}
+      </p>
+      <div className="mt-0.5 space-y-1 text-sm [overflow-wrap:anywhere]">{children}</div>
+    </li>
+  );
+}
+
+/**
+ * What came of the owner's correction, as a small timeline: the correction, the BA's analysis (with the fix cards it
+ * proposes), the CEO's reply (agree or disagree, what it got wrong, the lesson) and the BA's final turn (the cards it
+ * created). The owner does not need to act on any of it.
+ */
 function CorrectionBlock({ item }: { item: DeskItemDto }) {
   const c = item.ceoDecision?.correction;
   if (!c) return null;
+  const chip = reviewChip(c);
+  const reply = c.ceoReply ?? null;
+  const ceoName = item.ceoDecision?.ceoName ?? 'the CEO';
+  const proposed = c.proposedCards ?? [];
   return (
     <div
       className="mt-3 rounded-control border border-warning-fill/40 bg-warning-soft p-3 text-sm text-warning-soft-fg"
       data-testid="ceo-correction"
     >
-      <p className="font-semibold">You corrected this: {c.text}</p>
-      {c.applied && <p className="mt-0.5">{c.applied}</p>}
-      {c.review === 'done' && c.lesson ? (
-        <p className="mt-1" data-testid="ceo-lesson">
-          Lesson recorded: {c.lesson.replace(/^Lesson \([^)]*\):\s*/, '')}
-        </p>
-      ) : (
-        <p className="mt-1 text-xs">
-          {c.review === 'analysed'
-            ? 'The BA reviewed it; the CEO is recording the lesson.'
-            : 'The CEO and the BA are reviewing it.'}
-        </p>
-      )}
-      {c.analysis && (
-        <details className="mt-1">
-          <summary className="cursor-pointer text-xs font-medium">The BA's analysis</summary>
-          <p className="mt-1 whitespace-pre-wrap">{c.analysis}</p>
-        </details>
-      )}
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="font-semibold">You corrected this</p>
+        <Badge tone={chip.tone} data-testid="ceo-review-chip">
+          {chip.label}
+        </Badge>
+      </div>
+      <ol
+        className="mt-2 border-l border-warning-fill/40"
+        aria-label="CEO and BA discussion"
+        data-testid="ceo-review-timeline"
+      >
+        <Step id="owner" title="Your correction">
+          <p>{c.text}</p>
+          {c.applied && <p className="text-xs">{c.applied}</p>}
+        </Step>
+        <Step id="ba" title="BA analysis" waiting={!c.analysis}>
+          {c.analysis ? (
+            <>
+              <p className="whitespace-pre-wrap">{c.analysis}</p>
+              {c.consequences && (
+                <p data-testid="ceo-review-consequences">
+                  <span className="font-medium">Consequences: </span>
+                  {c.consequences}
+                </p>
+              )}
+              {proposed.length > 0 ? (
+                <div data-testid="ceo-review-proposed">
+                  <p className="font-medium">Proposed fix cards</p>
+                  <ul className="list-disc pl-5">
+                    {proposed.map((p) => (
+                      <li key={`${p.project}-${p.title}`}>
+                        <span className="font-mono text-xs">{p.project}</span> {p.title}
+                        <span className="block text-xs">{p.change}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : (
+                <p data-testid="ceo-review-nofix">
+                  No fix work needed{c.noFixReason ? `: ${c.noFixReason}` : '.'}
+                </p>
+              )}
+            </>
+          ) : (
+            <p className="text-xs">The BA is looking at the consequences.</p>
+          )}
+        </Step>
+        {(c.analysis || reply) && (
+          <Step id="ceo" title="CEO reply" who={ceoName} waiting={!reply && !c.lesson}>
+            {reply?.withoutCeo ? (
+              <p data-testid="ceo-review-without">Recorded without the CEO: it did not reply in time.</p>
+            ) : reply ? (
+              <>
+                <p className="font-medium" data-testid="ceo-review-stance">
+                  {reply.stance === 'disagree'
+                    ? 'Disagrees, your correction stands'
+                    : 'Agrees with your correction'}
+                </p>
+                {reply.reflection && <p>{reply.reflection}</p>}
+                {reply.cardChanges && (
+                  <p>
+                    <span className="font-medium">On the proposed cards: </span>
+                    {reply.cardChanges}
+                  </p>
+                )}
+              </>
+            ) : c.lesson ? null : (
+              <p className="text-xs">Waiting for the CEO to reply.</p>
+            )}
+            {c.lesson && <p data-testid="ceo-lesson">Lesson recorded: {stripLesson(c.lesson)}</p>}
+          </Step>
+        )}
+        {(reply || c.final) && (
+          <Step id="final" title="BA final" waiting={!c.final}>
+            {c.final ? (
+              <>
+                <p className="whitespace-pre-wrap">{c.final.summary}</p>
+                {c.final.cards.length > 0 && (
+                  <ul className="list-disc pl-5" data-testid="ceo-review-cards">
+                    {c.final.cards.map((f) => (
+                      <li key={f.cardId}>
+                        <Link to={`/cards/${f.ref}`} className="text-brand-text hover:underline">
+                          <span className="font-mono text-xs">{f.ref}</span> {f.title}
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {c.final.skipped.length > 0 && (
+                  <p className="text-xs">Not created: {c.final.skipped.join('; ')}</p>
+                )}
+              </>
+            ) : (
+              <p className="text-xs">The BA is finalising the fix cards.</p>
+            )}
+          </Step>
+        )}
+      </ol>
     </div>
   );
 }

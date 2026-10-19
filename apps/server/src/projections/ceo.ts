@@ -39,6 +39,7 @@ export const ceoProjectors: Record<string, Projector> = {
           ...(p.applied ? { applied: p.applied } : {}),
           ...(p.reviewId ? { reviewId: p.reviewId } : {}),
           ...(p.memoryId ? { memoryId: p.memoryId } : {}),
+          by: p.by,
           review: cur.review ?? 'pending',
         },
       };
@@ -46,15 +47,23 @@ export const ceoProjectors: Record<string, Projector> = {
   },
   CeoCorrectionAnalysed: async (tx, e) => {
     const p = ev<'CeoCorrectionAnalysed'>(e).payload;
-    await patchDecision(tx, p.deskItemId, (data) => ({
-      ...data,
-      correction: {
-        ...(data.correction ?? {}),
-        analysis: p.analysis,
-        ...(p.proposedRule ? { proposedRule: p.proposedRule } : {}),
-        review: data.correction?.review === 'done' ? 'done' : 'analysed',
-      },
-    }));
+    await patchDecision(tx, p.deskItemId, (data) => {
+      const cur = (data.correction ?? {}) as Record<string, any>;
+      return {
+        ...data,
+        correction: {
+          ...cur,
+          analysis: p.analysis,
+          analysedAt: e.createdAt.toISOString(),
+          ...(p.baAgentId ? { baAgentId: p.baAgentId } : {}),
+          ...(p.proposedRule ? { proposedRule: p.proposedRule } : {}),
+          ...(p.proposedCards ? { proposedCards: p.proposedCards } : {}),
+          ...(p.noFixReason ? { noFixReason: p.noFixReason } : {}),
+          ...(p.consequences ? { consequences: p.consequences } : {}),
+          review: cur.review === 'done' || cur.review === 'lesson' ? cur.review : 'analysed',
+        },
+      };
+    });
   },
   CeoLessonRecorded: async (tx, e) => {
     const p = ev<'CeoLessonRecorded'>(e).payload;
@@ -64,7 +73,33 @@ export const ceoProjectors: Record<string, Projector> = {
         ...(data.correction ?? {}),
         lesson: p.lesson,
         lessonMemoryId: p.memoryId,
+        lessonAt: e.createdAt.toISOString(),
+        ceoReply: {
+          stance: p.stance ?? null,
+          reflection: p.reflection ?? null,
+          cardChanges: p.cardChanges ?? null,
+          withoutCeo: p.withoutCeo === true,
+          at: e.createdAt.toISOString(),
+        },
+        // Older lessons ended the review; with a final BA turn the review ends with `CeoReviewConcluded`.
+        review: p.finalTurn ? 'lesson' : 'done',
+      },
+    }));
+  },
+  CeoReviewConcluded: async (tx, e) => {
+    const p = ev<'CeoReviewConcluded'>(e).payload;
+    await patchDecision(tx, p.deskItemId, (data) => ({
+      ...data,
+      correction: {
+        ...(data.correction ?? {}),
         review: 'done',
+        final: {
+          summary: p.summary,
+          cards: p.cards,
+          skipped: p.skipped,
+          fallback: p.fallback === true,
+          at: e.createdAt.toISOString(),
+        },
       },
     }));
   },

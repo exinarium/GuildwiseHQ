@@ -79,6 +79,8 @@ const BOOLEAN_FLAGS = new Set([
   'dry-run',
   'keep-card',
   'investigation',
+  'agree',
+  'disagree',
 ]);
 
 /** Verbs whose JSON body can be passed inline (`--json '<json>'`): there `--json` takes a value instead of being a switch. */
@@ -774,6 +776,7 @@ const CEO_USAGE = `usage: aom ceo snapshot [--section <name>] | show card|agent|
        aom ceo notify --kind needs_you|urgent|task_done --text "..." [--title "..."] [--task <id>] [--item <id>]
        aom ceo task create --title "..." [--request "..."] [--due <iso>] | task update --id <id> [--status s] [--note "..."] [--watch card:<id>]... | task list
        aom ceo memory propose --text "..." --source owner_chat|desk:<item id> [--kind rule|preference|fact] [--quote "..."]
+       aom ceo review-reply --item <desk item id> --agree|--disagree --reflection "<what you got wrong and why>" --lesson "<rule for next time>" [--card-changes "<comments on the BA's proposed cards>"]   (a decision_review wake)
        aom ceo done --summary "..."   (a wake, terminal)   |   aom ceo report --summary-file <md>   (the daily review, terminal)`;
 
 function ceoPrint(ctx: AomContext, p: Parsed, r: unknown): void {
@@ -920,6 +923,25 @@ async function ceoVerb(ctx: AomContext, p: Parsed): Promise<number> {
         ...(one(p, 'source') ? { source: one(p, 'source') } : {}),
         ...(one(p, 'quote') ? { quote: one(p, 'quote') } : {}),
         ...(one(p, 'scope') ? { scope: one(p, 'scope') } : {}),
+      });
+      ceoPrint(ctx, p, r);
+      return (r as { status?: string }).status === 'refused' ? 1 : 0;
+    }
+    case 'review-reply': {
+      const item = one(p, 'item');
+      const agree = has(p, 'agree');
+      if (!item || agree === has(p, 'disagree'))
+        throw new UsageError('--item <id> and exactly one of --agree or --disagree are required');
+      const reflection = textFlag(ctx, p, 'reflection', true) as string;
+      const lesson = textFlag(ctx, p, 'lesson', true) as string;
+      const changes = textFlag(ctx, p, 'card-changes', false) as string | undefined;
+      const r = await rpc(ctx, 'ceo', {
+        op: 'review_reply',
+        item,
+        stance: agree ? 'agree' : 'disagree',
+        reflection,
+        lesson,
+        ...(changes ? { cardChanges: changes } : {}),
       });
       ceoPrint(ctx, p, r);
       return (r as { status?: string }).status === 'refused' ? 1 : 0;
@@ -1853,7 +1875,7 @@ export const USAGE = `usage: aom <verb> [options]
   sudo -- <command> [args...]                 DevOps engineer: run a command as administrator (only when the manager granted sudo; the password stays on the runner)
   toolchain list | add <name> --bin <dir>... [--read <dir>]... [--env KEY=VALUE]... | remove <name>   tools sandboxed agents may use; DevOps engineer: register what you installed so agents get it on PATH
   hygiene run [--note "<text>"]               DevOps engineer: repository hygiene request (commit to the working branch, pull, push, tidy), ends the request
-  ceo snapshot | show | search | act <action> ... | recommend | notify | task | memory | done | report   CEO agent only: manage the organisation within the policy (see your instructions)
+  ceo snapshot | show | search | act <action> ... | recommend | notify | task | memory | review-reply | done | report   CEO agent only: manage the organisation within the policy (see your instructions)
   run info | status | logs <svc> | step --name <n> -- <cmd> | service --name <n> --port http:5000:ENV_VAR --health <url> -- <cmd> | ready | fail --reason <t>   DevOps engineer of a "run this branch" request: the runner starts and supervises the services (see your instructions)
 `;
 

@@ -15,7 +15,13 @@ import {
   streamId,
   TriageDataSchema,
 } from '@aom/shared';
-import { ceoReviewItemOfTask, reviewAnalysisEvents } from '../ceo/decisions.ts';
+import { ceoReviewItemOfTask } from '../ceo/decisions.ts';
+import {
+  isFinalReviewTask,
+  reviewAnalysisEvents,
+  reviewConclusionEvents,
+  reviewFacts,
+} from '../ceo/review.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Queryable, type Row, rows } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
@@ -124,9 +130,12 @@ export async function buildReporterTask(ctx: Ctx, db: Queryable, task: Row): Pro
     const p = task.project_id
       ? await one(db, 'SELECT key FROM projects WHERE id=$1', [task.project_id])
       : undefined;
+    // The CEO-BA review adds the facts of the decision (and, in the final turn, the CEO's reply) at shift start.
+    const reviewItem = await ceoReviewItemOfTask(db, task);
+    const facts = reviewItem ? await reviewFacts(db, task, reviewItem) : '';
     base.brief = {
       scheduleName: task.schedule_name ?? 'Scheduled task',
-      instructions: task.instructions ?? '',
+      instructions: [task.instructions ?? '', facts].filter(Boolean).join('\n\n'),
       deliver: task.deliver === 'chat' ? 'chat' : 'desk_notice',
       projectKey: p?.key ?? null,
     };
@@ -291,10 +300,15 @@ export async function applyReporterReport(
     if (review) {
       await ctx.store.append(
         [
-          ...(await reviewAnalysisEvents(tx, review, {
-            analysis: data.data.report,
-            baAgentId: shift.agent_id,
-          })),
+          ...(isFinalReviewTask(task)
+            ? await reviewConclusionEvents(ctx, tx, review, {
+                report: data.data.report,
+                baAgentId: shift.agent_id,
+              })
+            : await reviewAnalysisEvents(tx, review, {
+                analysis: data.data.report,
+                baAgentId: shift.agent_id,
+              })),
           taskCompleted(task, 'done'),
         ],
         { tx },
@@ -363,7 +377,9 @@ export async function runReporterFallback(ctx: Ctx, tx: Tx, task: Row): Promise<
       );
   } else if (kind === 'scheduled_brief') {
     const review = await ceoReviewItemOfTask(tx, task);
-    if (review) {
+    if (review && isFinalReviewTask(task)) {
+      events.push(...(await reviewConclusionEvents(ctx, tx, review, { fallback: true })));
+    } else if (review) {
       const analysis = "No BA was available, so the review rests on the owner's correction alone.";
       events.push(...(await reviewAnalysisEvents(tx, review, { analysis, fallback: true })));
     } else

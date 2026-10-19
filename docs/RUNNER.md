@@ -1188,7 +1188,7 @@ other agents' directories stay unreadable. Even a role definition that grants mo
 `apps/runner/test/ceo-settings.test.ts`).
 
 **`aom ceo ...`** is one IPC rpc method, `ceo`, with an `op` (`snapshot`, `show`, `search`, `costs`, `act`, `recommend`,
-`notify`, `task`, `memory`); the runner forwards it unchanged as `rpc.request` under the shift or chat id, and refuses it
+`notify`, `task`, `memory`, `review_reply`); the runner forwards it unchanged as `rpc.request` under the shift or chat id, and refuses it
 unless the shift is a `ceo` shift (or a chat) of an agent whose role is `ceo`. The server checks the agent again, applies the
 policy, the limits and the audit, and answers `{ status: 'executed' | 'recommended' | 'refused' | 'dry_run' | 'duplicate', ... }`.
 A refusal is exit code 1; a recommendation is not an error. A wake shift ends with exactly one terminal report: `aom ceo done

@@ -16,6 +16,7 @@ export const CEO_CLI_HELP = [
   '  message --card <REF> --text "..."; intake --project <KEY> --text "<brief for the BA>" [--investigation].',
   '- `aom ceo recommend --item <desk id> [--option <o1>] --reason "..." --confidence 0.0-1.0` (no decision: puts your advice on the item). Without --item, `--action <name>` plus the same params as `act` raises a recommendation for the owner.',
   '- `aom ceo notify --kind needs_you|urgent|task_done --text "..." [--task <id>]`; `aom ceo task create|update|list`; `aom ceo memory propose --text "..." --source owner_chat`.',
+  '- `aom ceo review-reply --item <desk id> --agree|--disagree --reflection "<what you got wrong>" --lesson "<rule for next time>" [--card-changes "..."]` answers a `decision_review` wake (the owner corrected one of your decisions): once, honestly; the owner\'s correction stands either way.',
 ].join('\n');
 
 /**

@@ -138,9 +138,49 @@ export const DeskItemDtoSchema = z.object({
           text: z.string(),
           at: IsoTime,
           applied: z.string().nullable(),
-          review: z.enum(['pending', 'analysed', 'done']),
+          /** pending: the BA is analysing; analysed: the CEO's turn; lesson: the BA finalises; done: concluded. */
+          review: z.enum(['pending', 'analysed', 'lesson', 'done']),
           analysis: z.string().nullable(),
           lesson: z.string().nullable(),
+          /** The BA's assessment of what already happened because of the decision. */
+          consequences: z.string().nullable().optional(),
+          /** The fix cards the BA proposed in its analysis (not created yet). */
+          proposedCards: z
+            .array(
+              z.object({
+                title: z.string(),
+                project: z.string(),
+                change: z.string(),
+                acceptanceCriteria: z.array(z.string()),
+              }),
+            )
+            .optional(),
+          noFixReason: z.string().nullable().optional(),
+          /** The CEO's reply: its stance, what it got wrong, and comments on the proposed cards. */
+          ceoReply: z
+            .object({
+              stance: z.enum(['agree', 'disagree']).nullable(),
+              reflection: z.string().nullable(),
+              cardChanges: z.string().nullable(),
+              /** The lesson was recorded by the server because the CEO could not reply. */
+              withoutCeo: z.boolean(),
+              at: IsoTime.nullable(),
+            })
+            .nullable()
+            .optional(),
+          /** The BA's final turn: what it did and the fix cards it created. */
+          final: z
+            .object({
+              summary: z.string(),
+              cards: z.array(
+                z.object({ cardId: z.uuid(), ref: z.string(), title: z.string(), projectKey: z.string() }),
+              ),
+              skipped: z.array(z.string()),
+              fallback: z.boolean(),
+              at: IsoTime.nullable(),
+            })
+            .nullable()
+            .optional(),
         })
         .nullable(),
       acknowledgedAt: IsoTime.nullable(),

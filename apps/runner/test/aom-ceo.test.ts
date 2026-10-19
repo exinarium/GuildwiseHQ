@@ -202,4 +202,67 @@ describe('aom ceo', () => {
     ]);
     expect(await t.run('ceo', 'bogus')).toBe(1);
   });
+  it('review-reply sends the CEO reply to a decision review (agree or disagree, with card changes)', async () => {
+    const item = '11111111-1111-4111-8111-111111111111';
+    const t = await cli({}, { status: 'executed', message: 'Recorded as your lesson.' });
+    expect(
+      await t.run(
+        'ceo',
+        'review-reply',
+        '--item',
+        item,
+        '--agree',
+        '--reflection',
+        'I treated the default as the working branch',
+        '--lesson',
+        'Never keep a personal branch as the working branch',
+        '--card-changes',
+        'Drop the second card',
+      ),
+    ).toBe(0);
+    expect(t.calls[0]).toEqual({
+      method: 'ceo',
+      params: {
+        op: 'review_reply',
+        item,
+        stance: 'agree',
+        reflection: 'I treated the default as the working branch',
+        lesson: 'Never keep a personal branch as the working branch',
+        cardChanges: 'Drop the second card',
+      },
+    });
+    expect(t.out.join('')).toContain('executed: Recorded as your lesson.');
+    expect(
+      await t.run('ceo', 'review-reply', '--item', item, '--disagree', '--reflection', 'r', '--lesson', 'l'),
+    ).toBe(0);
+    expect((t.calls[1]!.params as { stance: string; cardChanges?: string }).stance).toBe('disagree');
+    expect((t.calls[1]!.params as { cardChanges?: string }).cardChanges).toBeUndefined();
+  });
+
+  it('review-reply needs the item, exactly one stance, a reflection and a lesson; a refusal is exit code 1', async () => {
+    const t = await cli({}, { status: 'refused', message: 'already recorded' });
+    const item = '11111111-1111-4111-8111-111111111111';
+    expect(await t.run('ceo', 'review-reply', '--agree', '--reflection', 'r', '--lesson', 'l')).toBe(1);
+    expect(await t.run('ceo', 'review-reply', '--item', item, '--reflection', 'r', '--lesson', 'l')).toBe(1);
+    expect(
+      await t.run(
+        'ceo',
+        'review-reply',
+        '--item',
+        item,
+        '--agree',
+        '--disagree',
+        '--reflection',
+        'r',
+        '--lesson',
+        'l',
+      ),
+    ).toBe(1);
+    expect(await t.run('ceo', 'review-reply', '--item', item, '--agree', '--lesson', 'l')).toBe(1);
+    expect(t.calls).toHaveLength(0);
+    expect(
+      await t.run('ceo', 'review-reply', '--item', item, '--agree', '--reflection', 'r', '--lesson', 'l'),
+    ).toBe(1);
+    expect(t.calls).toHaveLength(1);
+  });
 });

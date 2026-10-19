@@ -26,7 +26,7 @@ Some items are urgent: approval requests, blocking questions, pinned alerts and 
 If you have a CEO, the things it decided for you appear under **CEO decisions** at the bottom of the desk (and under the **CEO decisions** filter). They are information: no notification, not blocking, and not counted in the open total. Each shows what was asked, the decision and the reason, the card and "CEO decision · name".
 
 - **Acknowledge** marks it read; **Acknowledge all** marks every open one read at once.
-- **Correct** is for a wrong decision: write what the right decision is. The CEO remembers it (visible on the CEO's **Memory** tab), the BA reviews why it went wrong, and the CEO records the lesson, which the item then shows. Tick **Apply the correction now** (Owner) to also re-open the question where that is possible.
+- **Correct** is for a wrong decision: write what the right decision is. The CEO remembers it (visible on the CEO's **Memory** tab), then the CEO and the BA discuss it: the BA analyses why it went wrong, what already happened because of it, and proposes fix cards; the CEO replies (agrees or disagrees, what it got wrong, the lesson; your correction always stands); the BA creates the fix cards in the right projects. The item shows this as a timeline and a chip: **Under review**, then **Lesson recorded · N fix cards**. It needs nothing from you and sends no notification. Tick **Apply the correction now** (Owner) to also re-open the question where that is possible.
 
 Owners and Admins can acknowledge and correct. See [Your CEO](/help/your-ceo#decisions).
 

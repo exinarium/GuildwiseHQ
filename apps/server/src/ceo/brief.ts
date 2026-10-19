@@ -15,6 +15,7 @@ import { one, type Row, rows } from '../db/sql.ts';
 import { buildFloorDigest } from '../reporter/digest.ts';
 import { trainingScores } from './commands.ts';
 import { relevantMemories } from './memory.ts';
+import { decisionReviewBrief } from './review.ts';
 import type { CeoState } from './state.ts';
 
 /** The policy as the CEO is told it: in plain words, with the training period said first. */
@@ -218,6 +219,8 @@ export async function buildCeoBrief(
       `## Your task\nWrite the owner's daily report in markdown, with these headings in this order (say "none" under an empty one). Lead with what needs the owner. Be brief: it is read at breakfast. Do not invent facts, and do not repeat the facts digest (the server appends it).\n${REVIEW_HEADINGS.join('\n')}\nBefore you write, handle what you can with \`aom ceo act\`. Then write the file in your scratch directory and finish with \`aom ceo report --summary-file <file>\`.`,
     );
   } else {
+    const review = await decisionReviewBrief(ctx, wakes);
+    if (review) parts.push(review);
     parts.push(
       `## Your task\nFor each reason: decide the smallest fix, or recommend, or note that it needs nothing. Check what you did in the last 24 hours first so you do not flap. Then finish with \`aom ceo done --summary "..."\`.`,
     );

@@ -30,6 +30,8 @@ import { loadCeo } from './state.ts';
 
 /** The BA task name the review runs under (the report is intercepted instead of becoming a desk notice). */
 export const CEO_REVIEW_TASK_NAME = 'CEO decision review';
+/** The BA task name of its final turn (it creates the fix cards). */
+export const CEO_REVIEW_FINAL_TASK_NAME = 'CEO decision review (final)';
 
 /** Action classes whose decisions the owner reviews (the ones that would otherwise be a question or an approval). */
 export const REVIEWED_CLASSES = new Set([
@@ -41,7 +43,7 @@ export const REVIEWED_CLASSES = new Set([
   'standing_order.retire',
 ]);
 
-const clip = (s: string, n: number): string => {
+export const clip = (s: string, n: number): string => {
   const t = s.replace(/\s+/g, ' ').trim();
   return t.length > n ? `${t.slice(0, n - 1)}…` : t;
 };
@@ -120,7 +122,7 @@ type DecisionData = {
   questionItemId: string | null;
 };
 
-const decisionOf = (item: Row): DecisionData | undefined =>
+export const decisionOf = (item: Row): DecisionData | undefined =>
   (item.data as { ceoDecision?: DecisionData } | null)?.ceoDecision;
 
 const itemScope = (item: Row) =>
@@ -147,7 +149,7 @@ const citedMemoryIds = (evidence: unknown): string[] =>
     .map((e) => e.slice(7));
 
 /** The memory ids the decision's action cited as evidence. */
-async function citedBy(db: Queryable, orgId: string, actionId: string | null): Promise<string[]> {
+export async function citedBy(db: Queryable, orgId: string, actionId: string | null): Promise<string[]> {
   if (!actionId) return [];
   const a = await one(db, 'SELECT evidence FROM ceo_actions WHERE id=$1 AND org_id=$2', [actionId, orgId]);
   return citedMemoryIds(a?.evidence);
@@ -283,11 +285,11 @@ export function reviewInstructions(i: {
   return clip(
     [
       `CEO decision review${i.cardRef ? ` (card ${i.cardRef})` : ''}. The owner corrected a decision of the CEO.`,
-      `Situation: ${clip(i.question, 350)}`,
-      `The CEO decided: ${clip(i.decision, 350)}`,
-      `The CEO's reason: ${clip(i.reason, 300)}`,
-      `The owner's correction: ${clip(i.correction, 450)}`,
-      'Read-only, using the ledger and the card: write a short analysis (under 150 words): why the CEO instinct was wrong, which signal it missed, and a proposed rule. End with one line that starts with "Rule: " and states the rule in one sentence.',
+      `Situation: ${clip(i.question, 200)}`,
+      `The CEO decided: ${clip(i.decision, 200)}`,
+      `The CEO's reason: ${clip(i.reason, 200)}`,
+      `The owner's correction: ${clip(i.correction, 300)}`,
+      'Read-only, using the ledger, the card thread and the facts below. Write a short analysis (under 150 words): why the CEO instinct was wrong and which signal it missed. Then assess the CONSEQUENCES: what already happened because of the decision (cards built or merged on it, branches set, items closed, agents retired, orders changed). Then propose the FIX WORK as concrete cards (title, project key, what to change, acceptance criteria, dependencies), or say no fix work is needed and why. Do NOT create the cards: they are a proposal the CEO comments on first. End the analysis with one line \'Rule: \' (the rule in one sentence), then ONE fenced json block: {"consequences":"..","fixCards":[{"title","project","cardType","change","acceptanceCriteria":[],"dependsOn":[]}],"noFixNeeded":"reason, only when there are no cards"}.',
       'Post it with `aom report brief --summary-file <report.md>`.',
     ].join('\n'),
     1990,
@@ -439,7 +441,10 @@ export async function correctCeoDecision(
       ]);
   }
   // Nobody to file the review under (an organization without a project): the lesson is recorded straight away.
-  if (!base.queued) await recordLesson(ctx, id, reviewId, undefined, true);
+  if (!base.queued) {
+    const { recordLesson } = await import('./review.ts');
+    await recordLesson(ctx, id, reviewId, { by: 'server' });
+  }
   return { reviewId, memoryId: base.memoryId, applied };
 }
 
@@ -457,158 +462,9 @@ export const proposedRuleOf = (analysis: string): string | undefined =>
 
 /** True when a BA task is the CEO review of a decision (its report is not a desk notice). */
 export async function ceoReviewItemOfTask(db: Queryable, task: Row): Promise<Row | undefined> {
-  if (task.schedule_name !== CEO_REVIEW_TASK_NAME) return undefined;
+  if (task.schedule_name !== CEO_REVIEW_TASK_NAME && task.schedule_name !== CEO_REVIEW_FINAL_TASK_NAME)
+    return undefined;
   const id = (task.desk_item_ids as string[] | null)?.[0];
   if (!id) return undefined;
   return one(db, `SELECT * FROM desk_items WHERE id=$1 AND subkind=$2`, [id, CEO_DECISION_SUBKIND]);
-}
-
-/**
- * The BA's analysis arrived (or the BA never came, `fallback`): it goes on the item and the card thread, and the CEO records
- * the lesson. Returns the events; the caller appends them in its transaction, then calls `recordLesson`.
- */
-export async function reviewAnalysisEvents(
-  tx: Tx,
-  item: Row,
-  input: { analysis: string; baAgentId?: string | undefined; fallback?: boolean },
-): Promise<AppendInput[]> {
-  const reviewId = (item.data as { correction?: { reviewId?: string } } | null)?.correction?.reviewId;
-  if (!reviewId) return [];
-  const card = item.card_id ? await one(tx, 'SELECT * FROM cards WHERE id=$1', [item.card_id]) : undefined;
-  const rule = proposedRuleOf(input.analysis);
-  const events: AppendInput[] = [
-    {
-      streamId: streamId.ceo(item.org_id),
-      event: {
-        type: 'CeoCorrectionAnalysed',
-        payload: {
-          orgId: item.org_id,
-          deskItemId: item.id,
-          reviewId,
-          analysis: input.analysis.slice(0, 8000),
-          ...(rule ? { proposedRule: rule } : {}),
-          ...(input.baAgentId ? { baAgentId: input.baAgentId } : {}),
-          ...(input.fallback ? { fallback: true } : {}),
-        },
-      },
-      actor: input.baAgentId ? agentActor(input.baAgentId) : SYSTEM_ACTOR,
-      scope: orgScope(item.org_id),
-    },
-  ];
-  if (card)
-    events.push(
-      cardMessage(
-        card,
-        input.baAgentId ? { kind: 'agent', agentId: input.baAgentId } : { kind: 'system' },
-        'comment',
-        `BA review of the CEO decision after the owner's correction:\n\n${clip(input.analysis, 1500)}`,
-        { deskItemId: item.id, ceoReview: true },
-      ),
-    );
-  return events;
-}
-
-/**
- * The CEO records the lesson: an owner-confirmed rule linked to the correction (`desk:<item>`), replacing the memories the
- * decision cited that the CEO had learned itself (owner statements are never retired, only lowered). When the CEO is not
- * active the server records it on its behalf. Idempotent per review.
- */
-export async function recordLesson(
-  ctx: Ctx,
-  deskItemId: string,
-  reviewId: string,
-  analysis: string | undefined,
-  noBa = false,
-): Promise<void> {
-  await withAppendTx(ctx.pool, async (tx) => {
-    const item = await one(tx, 'SELECT * FROM desk_items WHERE id=$1 FOR UPDATE', [deskItemId]);
-    const d = item && decisionOf(item);
-    if (!item || !d) return;
-    const corr = (item.data as { correction?: { reviewId?: string; review?: string; text?: string } })
-      .correction;
-    if (!corr || corr.reviewId !== reviewId || corr.review === 'done') return;
-    const ceo = await loadCeo(tx, item.org_id);
-    const ceoId = ceo?.enabled && ceo.agentId ? ceo.agentId : null;
-    const rule =
-      (analysis ? proposedRuleOf(analysis) : undefined) ??
-      `When deciding "${clip(d.question, 160)}", the right decision is: ${clip(corr.text ?? '', 300)}`;
-    const lesson = `Lesson (owner correction${noBa ? '' : ' reviewed with the BA'}): ${rule}`;
-    const memoryId = await addMemoryIn(ctx, tx, {
-      orgId: item.org_id,
-      kind: 'rule',
-      scope: d.class ? `desk:${d.class}` : 'org',
-      source: 'owner_override',
-      sourceRef: `desk:${item.id}`,
-      confidence: 0.9,
-      status: 'active',
-      text: lesson,
-      quote: (corr.text ?? '').slice(0, 1000),
-      ...(ceoId ? { byAgentId: ceoId } : {}),
-    });
-    const retired: string[] = [];
-    const events: AppendInput[] = [];
-    for (const mid of await citedBy(tx, item.org_id, d.actionId)) {
-      const m = await one(tx, `SELECT status, source FROM ceo_memories WHERE id=$1 AND org_id=$2`, [
-        mid,
-        item.org_id,
-      ]);
-      if (!m || m.status === 'retired' || m.source === 'owner_statement') continue;
-      retired.push(mid);
-      events.push({
-        streamId: streamId.ceo(item.org_id),
-        event: {
-          type: 'CeoMemoryRetired',
-          payload: {
-            memoryId: mid,
-            orgId: item.org_id,
-            reason: 'replaced by a lesson from an owner correction',
-          },
-        },
-        actor: ceoId ? agentActor(ceoId) : SYSTEM_ACTOR,
-        scope: orgScope(item.org_id),
-      });
-    }
-    events.push({
-      streamId: streamId.ceo(item.org_id),
-      event: {
-        type: 'CeoLessonRecorded',
-        payload: {
-          orgId: item.org_id,
-          deskItemId: item.id,
-          reviewId,
-          memoryId,
-          lesson: lesson.slice(0, 1000),
-          retiredMemoryIds: retired,
-          recordedBy: ceoId ? 'ceo' : 'server',
-        },
-      },
-      actor: ceoId ? agentActor(ceoId) : SYSTEM_ACTOR,
-      scope: orgScope(item.org_id),
-    });
-    const card = item.card_id ? await one(tx, 'SELECT * FROM cards WHERE id=$1', [item.card_id]) : undefined;
-    if (card)
-      events.push(
-        cardMessage(
-          card,
-          ceoId ? { kind: 'agent', agentId: ceoId } : { kind: 'system' },
-          'comment',
-          `CEO lesson recorded after the owner's correction: ${rule}`,
-          { deskItemId: item.id, ceoReview: true },
-        ),
-      );
-    await ctx.store.append(events, { tx });
-  });
-}
-
-/** Store hook: once the BA's analysis is committed, the CEO records the lesson. */
-export function registerCeoReviewHook(ctx: Ctx): () => void {
-  return ctx.store.subscribe(async (e) => {
-    if (e.event.type !== 'CeoCorrectionAnalysed') return;
-    const p = e.event.payload;
-    try {
-      await recordLesson(ctx, p.deskItemId, p.reviewId, p.fallback ? undefined : p.analysis);
-    } catch (err) {
-      ctx.log.error({ err }, 'recording the CEO lesson failed');
-    }
-  });
 }

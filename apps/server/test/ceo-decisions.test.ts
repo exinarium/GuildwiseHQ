@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { streamId } from '@aom/shared';
+import { CEO_REVIEW_REPLY_TIMEOUT_MS, streamId } from '@aom/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { acknowledgeAllCeoDecisions } from '../src/ceo/decisions.ts';
 import { baTaskPass } from '../src/dispatcher/ba-tasks.ts';
@@ -8,6 +8,7 @@ import {
   act,
   appoint,
   blockingQuestion,
+  ceo,
   graduate,
   ledgerEntry,
   startCeoShift,
@@ -224,7 +225,7 @@ describe('CEO decisions on the desk', () => {
 });
 
 describe('correcting a decision', () => {
-  it('records an owner-confirmed memory and the BA reviews it; the CEO records the lesson', async () => {
+  it('records an owner-confirmed memory and the BA reviews it; the CEO replies and records the lesson', async () => {
     await w.hire('Ben', 'ba', 'senior');
     const id = await branchQuestion('Keep pieter/dev as the working branch of Flow-Web (P4)?');
     result(await act(r, shiftId, 'answer', { item: id, option: 'keep' }, { key: 'corr-1' }));
@@ -281,16 +282,28 @@ describe('correcting a decision', () => {
     await r.waitFor('shift.report.result', (f) => f.reportId === reportId);
     r.ended(start.shiftId, 'reported');
 
+    // the BA's analysis wakes the CEO; the lesson comes from the CEO's own reply, not from the BA's Rule line
     await until(
       async () =>
-        (
-          await q(`SELECT 1 FROM events WHERE type='CeoLessonRecorded' AND payload->>'deskItemId'=$1`, [
-            item.id,
-          ])
-        )[0],
+        (await q(`SELECT 1 FROM ceo_wakes WHERE reason='decision_review' AND subject_id=$1`, [item.id]))[0],
       5000,
-      'lesson recorded',
+      'ceo woken for the review',
     );
+    expect(
+      (
+        await q(`SELECT 1 FROM events WHERE type='CeoLessonRecorded' AND payload->>'deskItemId'=$1`, [
+          item.id,
+        ])
+      ).length,
+    ).toBe(0);
+    const reply = await ceo(r, shiftId, {
+      op: 'review_reply',
+      item: item.id,
+      stance: 'agree',
+      reflection: 'I took the intake default for the working branch.',
+      lesson: 'Never keep a personal branch as the working branch of a repository.',
+    });
+    expect(reply.result.status).toBe('executed');
     const lesson = (
       await q(
         `SELECT m.*, t.text FROM ceo_memories m JOIN ceo_memory_text t ON t.memory_id = m.id
@@ -298,7 +311,7 @@ describe('correcting a decision', () => {
         [`desk:${item.id}`],
       )
     )[0]!;
-    expect(lesson.text).toContain('never keep a personal branch');
+    expect(lesson.text).toContain('Never keep a personal branch');
     expect(lesson).toMatchObject({ status: 'active', source: 'owner_override' });
     const ev = (
       await q(
@@ -311,16 +324,17 @@ describe('correcting a decision', () => {
     const dto = (await ok<any>(owner('GET', '/api/desk?status=closed'))).items.find(
       (i: any) => i.id === item.id,
     );
+    // no cards were proposed and the CEO had no comments: the discussion ends with the lesson
     expect(dto.ceoDecision.correction).toMatchObject({ review: 'done' });
     expect(dto.ceoDecision.correction.analysis).toContain('personal branch');
-    expect(dto.ceoDecision.correction.lesson).toContain('never keep a personal branch');
+    expect(dto.ceoDecision.correction.lesson).toContain('Never keep a personal branch');
     expect(
       (await q(`SELECT 1 FROM desk_items WHERE subkind='ba_report' AND title LIKE 'CEO decision review%'`))
         .length,
     ).toBe(0);
   });
 
-  it('without a BA the review falls back and the lesson is still recorded from the owner words', async () => {
+  it('without a BA the review falls back, and without a CEO reply the lesson is recorded from the owner words', async () => {
     await q(`UPDATE agents SET status='retired' WHERE role_key='ba'`);
     const id = await branchQuestion('Which branch should the API repo use?');
     result(await act(r, shiftId, 'answer', { item: id, option: 'branch:dev' }, { key: 'corr-2' }));
@@ -329,6 +343,19 @@ describe('correcting a decision', () => {
       owner('POST', `/api/desk/${item.id}/ceo-decision/correct`, { correction: 'The release branch.' }),
     );
     await baTaskPass(w.t.app.ctx);
+    await until(
+      async () =>
+        (await q(`SELECT data FROM desk_items WHERE id=$1`, [item.id]))[0]?.data.correction.analysis,
+      5000,
+      'analysis fallback',
+    );
+    expect((await q(`SELECT data FROM desk_items WHERE id=$1`, [item.id]))[0]!.data.correction.review).toBe(
+      'analysed',
+    );
+    // the CEO never replies: after the timeout the server records the lesson, marked as such
+    w.t.clock.advance(CEO_REVIEW_REPLY_TIMEOUT_MS + 60_000);
+    await w.t.app.ctx.services.dispatcher.run();
+    w.t.clock.setOffset(0);
     await until(
       async () =>
         (
@@ -344,6 +371,8 @@ describe('correcting a decision', () => {
     );
     expect(dto.ceoDecision.correction.review).toBe('done');
     expect(dto.ceoDecision.correction.lesson).toContain('The release branch.');
+    expect(dto.ceoDecision.correction.lesson).toContain('recorded without the CEO');
+    expect(dto.ceoDecision.correction.ceoReply.withoutCeo).toBe(true);
   });
 
   it('apply now re-opens the question the CEO answered (Owner only)', async () => {

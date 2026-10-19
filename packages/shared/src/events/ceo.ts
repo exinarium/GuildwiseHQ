@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { CeoPolicySchema } from '../ceo/policy.ts';
+import { FixCardSchema } from '../ceo/review.ts';
 import { CeoSettingsSchema, CeoTrainingSchema, NotifyKind, RecommendationResponse } from '../ceo/settings.ts';
 import { defineEvent, Id, IsoDate } from './define.ts';
 
@@ -286,6 +287,10 @@ export const ceoEvents = [
       proposedRule: z.string().max(1000).optional(),
       baAgentId: Id.optional(),
       fallback: z.boolean().optional(),
+      /** The fix cards the BA proposes (not created yet), or why no fix work is needed. */
+      proposedCards: z.array(FixCardSchema).max(8).optional(),
+      noFixReason: z.string().max(1000).optional(),
+      consequences: z.string().max(4000).optional(),
     }),
   ),
   /** The lesson the CEO recorded after the review: a memory linked to the correction, replacing what led to the mistake. */
@@ -299,6 +304,32 @@ export const ceoEvents = [
       lesson: z.string().max(1000),
       retiredMemoryIds: z.array(Id).default([]),
       recordedBy: z.enum(['ceo', 'server']),
+      /** The CEO's reply in the discussion (absent when the server recorded the lesson without the CEO). */
+      stance: z.enum(['agree', 'disagree']).optional(),
+      reflection: z.string().max(2000).optional(),
+      cardChanges: z.string().max(2000).optional(),
+      /** The CEO did not reply in time (or is gone): the lesson was recorded without it. */
+      withoutCeo: z.boolean().optional(),
+      /** The BA's final turn follows (and ends with `CeoReviewConcluded`); absent: the review ends with the lesson. */
+      finalTurn: z.boolean().optional(),
+    }),
+  ),
+  /** The discussion ended: the BA's final turn (or the server in its place) created the fix cards, or none were needed. */
+  defineEvent(
+    'CeoReviewConcluded',
+    z.object({
+      orgId: Id,
+      deskItemId: Id,
+      reviewId: Id,
+      summary: z.string().max(4000),
+      cards: z
+        .array(z.object({ cardId: Id, ref: z.string(), title: z.string().max(300), projectKey: z.string() }))
+        .default([]),
+      /** Proposed cards that could not be created, with the reason. */
+      skipped: z.array(z.string().max(500)).default([]),
+      baAgentId: Id.optional(),
+      /** No BA took the final turn: the server concluded on its own. */
+      fallback: z.boolean().optional(),
     }),
   ),
   /** A CEO shift (a wake batch or the daily review) was handed to the CEO's workstation. */
