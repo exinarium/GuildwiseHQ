@@ -5,6 +5,9 @@ import {
   CeoActionsQuerySchema,
   CeoChatResponseSchema,
   CeoIdParamsSchema,
+  CeoTopicAcceptSchema,
+  CeoTopicCheckSchema,
+  CeoTopicRejectSchema,
   ConfirmTurnRequestSchema,
   CorrectCeoRequestSchema,
   CreateCeoMemoryRequestSchema,
@@ -48,6 +51,7 @@ import { listOrderTurns } from '../ceo/order-turns.ts';
 import { answerPermission } from '../ceo/permissions.ts';
 import { loadCeo } from '../ceo/state.ts';
 import { createTask, listTasks, updateTask } from '../ceo/tasks.ts';
+import { acceptTopic, checkTopic, listTopics, rejectTopic } from '../ceo/topics.ts';
 import { enqueueWake } from '../ceo/wakes.ts';
 import { orgScope, SYSTEM_ACTOR } from '../commands/common.ts';
 import { resolveDeskItem } from '../commands/desk.ts';
@@ -277,6 +281,39 @@ export function ceoRoutes(ctx: Ctx) {
             scope: orgScope(a.orgId),
           },
         ]);
+        return { ok: true };
+      },
+    );
+
+    // ------------------------------------------------------------------------- research topics for the Guildwise blog
+    // Reading is for Owners and Admins; deciding is the Owner's in a customer organization (his consent), the Owner's or an
+    // Admin's in the platform organization (the ceo/topics.ts checks say which).
+    app.get('/api/ceo/topics', async (req) => {
+      const a = await requireOrg(ctx, req, { min: 'admin' });
+      return listTopics(ctx, a.orgId);
+    });
+
+    app.post('/api/ceo/topics/check', { schema: { body: CeoTopicCheckSchema } }, async (req) => {
+      const a = await requireOrg(ctx, req, { min: 'admin' });
+      return checkTopic(ctx, a.orgId, req.body);
+    });
+
+    app.post(
+      '/api/ceo/topics/:id/accept',
+      { schema: { params: AskIdParamsSchema, body: CeoTopicAcceptSchema } },
+      async (req) => {
+        const a = await requireOrg(ctx, req, { min: 'admin' });
+        await acceptTopic(ctx, a.session.user.id, a.orgId, req.params.id, req.body);
+        return { ok: true };
+      },
+    );
+
+    app.post(
+      '/api/ceo/topics/:id/reject',
+      { schema: { params: AskIdParamsSchema, body: CeoTopicRejectSchema } },
+      async (req) => {
+        const a = await requireOrg(ctx, req, { min: 'admin' });
+        await rejectTopic(ctx, a.session.user.id, a.orgId, req.params.id, req.body.reason);
         return { ok: true };
       },
     );

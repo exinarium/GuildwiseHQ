@@ -11,6 +11,7 @@ import {
   PLATFORM_APPROVAL_SUBKINDS,
   type ResolveDeskItemRequest,
   streamId,
+  TOPICS_DESK_SUBKIND,
   UNMAPPED_TICKET_SUBKIND,
   WORKING_BRANCH_SUBKIND,
 } from '@aom/shared';
@@ -21,6 +22,7 @@ import { acceptRecommendation, rejectRecommendation } from '../ceo/accept.ts';
 import { onOwnerAnswer } from '../ceo/learning.ts';
 import { rememberFromDeskAnswer } from '../ceo/memory.ts';
 import { resolveCeoPermissionItem } from '../ceo/permissions.ts';
+import { mayReviewTopics, reviewAllProposed } from '../ceo/topics.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
@@ -289,6 +291,7 @@ async function closeItem(
   let partial = false;
   let phases = false;
   let ceoItem: Row | undefined;
+  let topicsItem: Row | undefined;
   await withAppendTx(ctx.pool, async (tx) => {
     const { item, mayAct } = await lockItem(tx, user, id);
     // Acknowledging a "repository not created" alert is not giving up on the request: Retry still works on it while
@@ -308,6 +311,12 @@ async function closeItem(
       if ((await orgRoleOf(tx, user.id, item.org_id)) !== 'owner')
         throw forbidden('only the organization Owner can accept or decline the CEO recommendations');
       ceoItem = item;
+    }
+    // The batch of research topics: only who may review them answers (in a customer organization, the Owner alone).
+    if (item.subkind === TOPICS_DESK_SUBKIND) {
+      if (!(await mayReviewTopics(tx, user.id, item.org_id)))
+        throw forbidden('only the organization Owner can decide what is sent to Guildwise');
+      topicsItem = item;
     }
     // M3 kinds: resolving the item acts on the DevOps request / paused vault in the same transaction.
     if (item.kind === 'approval' && item.subkind === 'devops') {
@@ -464,6 +473,13 @@ async function closeItem(
   // Merge: the existing order takes the new wording (its permissions apply; the earlier wording stays in its history).
   if (mergeInto) await editLedgerEntry(ctx, user, mergeInto.id, { body: mergeInto.body });
   if (devops || phases) ctx.services.dispatcher.trigger();
+  if (topicsItem && (resolution === 'approved' || resolution === 'rejected'))
+    await reviewAllProposed(
+      ctx,
+      user.id,
+      topicsItem.org_id,
+      resolution === 'approved' ? 'accepted' : 'rejected',
+    );
   if (ceoItem) {
     if (resolution === 'approved') await acceptRecommendation(ctx, user, ceoItem);
     else await rejectRecommendation(ctx, user, ceoItem, note);

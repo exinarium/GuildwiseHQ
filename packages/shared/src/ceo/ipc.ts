@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { TOPIC_AREAS, TOPIC_AUDIENCES } from '../blog/topic.ts';
 
 /**
  * `aom ceo ...` over the runner IPC (docs/design/ceo-agent-v2.md section 4): one rpc method `ceo` with an `op`. The runner
@@ -166,6 +167,19 @@ export const CeoRpcSchema = z.discriminatedUnion('op', [
     project: z.string().max(10).optional(),
     /** `log`: the main command the job was done with (its first word feeds the repeat rule: same command twice = automation). */
     command: z.string().max(200).optional(),
+  }),
+  /**
+   * Research topics for the Guildwise blog (`aom ceo topic propose|list`, docs/design/ceo-blog-topics.md). `propose` gives
+   * one generic question for problem notes (`from`: note ids), or for something the owner just said ("make that a blog
+   * topic": no `from`). The server scrubs it; the owner reviews it.
+   */
+  z.object({
+    op: z.literal('topic'),
+    sub: z.enum(['propose', 'list']),
+    question: z.string().trim().max(400).optional(),
+    area: z.enum(TOPIC_AREAS).optional(),
+    audience: z.enum(TOPIC_AUDIENCES).optional(),
+    from: z.array(z.string().trim().min(8).max(40)).max(20).default([]),
   }),
   /** Standing orders with full power (`aom ceo order invoke|decline|done`). */
   z.object({

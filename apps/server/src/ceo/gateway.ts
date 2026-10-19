@@ -22,6 +22,7 @@ import { ceoReviewReply } from './review.ts';
 import { buildSnapshot } from './snapshot.ts';
 import { loadCeo } from './state.ts';
 import { createTask, listTasks, updateTask } from './tasks.ts';
+import { listTopicsForCeo, proposeTopic } from './topics.ts';
 
 type Reply = [boolean, unknown?, string?];
 
@@ -35,6 +36,7 @@ const WRITE_OPS = new Set([
   'correction',
   'order',
   'dir',
+  'topic',
 ]);
 
 /** The durable subject of a notify call: the card (with its stage and status) behind a desk item, the desk item, or the task. */
@@ -160,6 +162,27 @@ export async function ceoRpc(ctx: Ctx, shift: Row, params: Record<string, unknow
         if (rpc.sub !== 'repeats' && kind === 'wake')
           return [false, undefined, 'the job log belongs to an owner or order turn'];
         return [true, await jobOp(ctx, turn, agent.id, orgId, rpc)];
+      }
+      case 'topic': {
+        if (rpc.sub === 'list') return [true, { text: await listTopicsForCeo(ctx.pool, orgId) }];
+        if (kind === 'order')
+          return [
+            false,
+            undefined,
+            "research topics are proposed in the daily review or in the owner's chat",
+          ];
+        if (origin.untrusted)
+          return [false, undefined, 'this wake carries text from outside: propose topics in a later review'];
+        if (!rpc.question) return [false, undefined, 'give --question "..." (one generic question)'];
+        // From the owner's chat, `from` may be empty ("make that a blog topic"); in a review it names the notes.
+        const r = await proposeTopic(
+          ctx,
+          orgId,
+          agent.id,
+          { question: rpc.question, area: rpc.area, audience: rpc.audience, from: rpc.from },
+          origin.scopeId,
+        );
+        return [true, r];
       }
       case 'order': {
         if (rpc.sub === 'invoke') {

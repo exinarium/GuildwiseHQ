@@ -43,7 +43,7 @@ const STATUS_TONE: Record<TopicStatus, 'neutral' | 'brand' | 'success' | 'danger
 };
 
 /** What each scrubber finding means, in words for the person typing the question. */
-const FINDING_TEXT: Record<string, string> = {
+export const FINDING_TEXT: Record<string, string> = {
   too_short: 'The question is too short (at least 30 characters).',
   too_long: 'The question is too long (at most 160 characters).',
   not_a_question: 'It must end with a question mark.',
@@ -70,7 +70,7 @@ const FINDING_TEXT: Record<string, string> = {
   first_person: 'Ask about the topic, not about "we", "our" or "I".',
 };
 
-interface Finding {
+export interface Finding {
   code: string;
   detail?: string;
   overridable?: boolean;
