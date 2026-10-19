@@ -26,6 +26,10 @@ contract), 15 (ledger), 16 (vaults) and the Trust copy in `apps/web/src/landing/
    graph reaches agents in two cheap ways only: the runner puts a small, relevant slice of it into the brief and chat
    context as work starts (section 7), and an agent that needs more calls the `aom graph` verbs on demand, which cost
    nothing until used.
+7. **Parser: tree-sitter (MIT) is approved (open question 1 closed).** It is used for the code layer if it proves itself
+   in Phase 0. No public mention or attribution in the product or marketing is needed; the MIT terms only require that
+   its copyright and licence text ship with the runner (a `THIRD_PARTY_NOTICES` file in the runner package, alongside
+   the grammars' own MIT notices).
 
 Owner requests carried over: a graph for every project; an organization graph that is the CEO's navigation "brain"; agents
 use it to spend fewer tokens (briefs and chats pull a relevant subgraph); the token claim must be measured per shift.
