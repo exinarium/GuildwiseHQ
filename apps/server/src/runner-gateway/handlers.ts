@@ -22,6 +22,7 @@ import { outboundDraftRpc } from '../commands/drafts.ts';
 import { endQuestionShift } from '../commands/escalation.ts';
 import { applyFinalizeResult } from '../commands/finalize.ts';
 import { applyForgeReposResult, applyGitReport, applyJiraReport } from '../commands/forges.ts';
+import { applyGraphResult, seedProjectGraphs } from '../commands/graph.ts';
 import { applyWorktreeSweepResult } from '../commands/hygiene.ts';
 import { intakeRpc } from '../commands/intake.ts';
 import {
@@ -440,6 +441,10 @@ export class RunnerHandlers {
           // Terminal: the answer is the branch's state; "could not move it" is an answer, not a failure.
           await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
           if (msg.ok) await applyRepoSyncStatus(this.ctx, conn.workstationId, msg.result);
+        } else if (cmd?.type === 'graph.index' || cmd?.type === 'graph.update') {
+          // Terminal: the answer becomes graph STATUS (an event with ids and counts); a failure is retried by the hello pass.
+          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+          await applyGraphResult(this.ctx, conn.workstationId, cmd.payload, msg.ok, msg.result);
         } else if (cmd?.type === 'org.folder') {
           // Terminal: a refusal is an answer; its reason shows on the Workstations page until the next success.
           await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
@@ -697,6 +702,10 @@ export class RunnerHandlers {
     // The owner's first workstation holds the automatic local vaults of the projects that have none (graphs design 3).
     await ensureProjectVaultsForWorkstation(ctx, conn.workstationId);
     await queueVaultConfigure(ctx, ctx.pool, conn.workstationId);
+    // after the vault configuration, so the runner knows the vault when it gets the index request
+    await seedProjectGraphs(ctx, conn.workstationId).catch((err) =>
+      ctx.log.warn({ err }, 'could not queue the project graph indexes'),
+    );
     await queueApprovedFor(ctx, conn.userId, conn.workstationId);
     await this.deliverPending(conn.workstationId);
     ctx.services.dispatcher.trigger();
@@ -945,6 +954,9 @@ export class RunnerHandlers {
       );
     await seedRepoSync(ctx, conn.workstationId).catch((err) =>
       ctx.log.warn({ err }, 'could not queue the working-branch checks'),
+    );
+    await seedProjectGraphs(ctx, conn.workstationId).catch((err) =>
+      ctx.log.warn({ err }, 'could not queue the project graph indexes'),
     );
     ctx.services.dispatcher.trigger();
   }

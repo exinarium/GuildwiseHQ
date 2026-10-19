@@ -24,6 +24,7 @@ import {
   GitSshPayloadSchema,
   RepoAccessPayloadSchema,
 } from '../forge/index.ts';
+import { GraphIndexPayloadSchema } from '../graph/index.ts';
 import { SWEEP_QUERY_MAX_PATHS, WorktreesSweepPayloadSchema } from '../hygiene/index.ts';
 import { PROTOCOL_VERSION, uuidv7 } from '../ids.ts';
 import { IntakeContextSchema, QuestionShiftSchema } from '../intake/index.ts';
@@ -718,6 +719,8 @@ export const RunnerCommandNameSchema = z.enum([
   'integration.remove',
   'shifts.limit',
   'runner.pin',
+  'graph.index',
+  'graph.update',
 ]);
 export type RunnerCommandName = z.infer<typeof RunnerCommandNameSchema>;
 
@@ -777,6 +780,9 @@ export const CommandPayloadSchemas = {
    * ignores both.
    */
   'runner.pin': z.object({ version: z.string().max(40).nullable() }),
+  /** Project graphs: index a repository into the project vault / bring the graph up to a merge commit (docs/design/project-graphs.md). */
+  'graph.index': GraphIndexPayloadSchema,
+  'graph.update': GraphIndexPayloadSchema,
 } as const;
 
 /** Announced in `hello.capabilities`-style lists by runners that apply a version pin (`runner.pin`, `welcome.runnerPin`). */

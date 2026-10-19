@@ -1,0 +1,89 @@
+Third-party software shipped with the Guildwise workstation runner
+=====================================================================
+
+The runner's project graph indexer (docs/design/project-graphs.md) parses source code with tree-sitter, in its WebAssembly
+build. The files below ship in the runner package under `dist/grammars/`. All of them are MIT licensed; the copyright and
+licence text each of them asks to be kept follows.
+
+Shipped files and their origin
+------------------------------
+
+  dist/grammars/tree-sitter.cjs, tree-sitter.wasm
+      tree-sitter (the incremental parsing library), WebAssembly build.
+      Obtained through the npm package @vscode/tree-sitter-wasm 0.3.1 (MIT, Copyright (c) Microsoft Corporation),
+      which packages tree-sitter 0.25 for the browser and Node.
+  dist/grammars/tree-sitter-typescript.wasm, tree-sitter-tsx.wasm
+      tree-sitter-typescript.
+  dist/grammars/tree-sitter-javascript.wasm
+      tree-sitter-javascript.
+  dist/grammars/tree-sitter-python.wasm
+      tree-sitter-python.
+  dist/grammars/tree-sitter-go.wasm
+      tree-sitter-go.
+  dist/grammars/tree-sitter-c-sharp.wasm
+      tree-sitter-c-sharp.
+
+Licences
+--------
+
+tree-sitter (and web-tree-sitter)
+
+  The MIT License (MIT)
+
+  Copyright (c) 2018 Max Brunsfeld
+
+tree-sitter-typescript
+
+  The MIT License (MIT)
+
+  Copyright (c) 2017 Max Brunsfeld
+
+tree-sitter-javascript
+
+  The MIT License (MIT)
+
+  Copyright (c) 2014 Max Brunsfeld
+
+tree-sitter-python
+
+  The MIT License (MIT)
+
+  Copyright (c) 2016 Max Brunsfeld
+
+tree-sitter-go
+
+  The MIT License (MIT)
+
+  Copyright (c) 2014 Max Brunsfeld
+
+tree-sitter-c-sharp
+
+  The MIT License (MIT)
+
+  Copyright (c) 2014-2023 Max Brunsfeld, Damien Guard, Amaan Qureshi, and contributors.
+
+@vscode/tree-sitter-wasm (the packaging of the files above)
+
+  MIT License
+
+  Copyright (c) Microsoft Corporation.
+
+The licence text of each of the components above:
+
+  Permission is hereby granted, free of charge, to any person obtaining a copy
+  of this software and associated documentation files (the "Software"), to deal
+  in the Software without restriction, including without limitation the rights
+  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+  copies of the Software, and to permit persons to whom the Software is
+  furnished to do so, subject to the following conditions:
+
+  The above copyright notice and this permission notice shall be included in all
+  copies or substantial portions of the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+  SOFTWARE.

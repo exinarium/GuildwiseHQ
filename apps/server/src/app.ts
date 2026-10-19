@@ -73,6 +73,7 @@ import { designerRoutes } from './routes/designer.ts';
 import { deskRoutes } from './routes/desk.ts';
 import { devopsRoutes } from './routes/devops.ts';
 import { digestRoutes } from './routes/digests.ts';
+import { graphRoutes } from './routes/graph.ts';
 import { hookRoutes } from './routes/hooks.ts';
 import { hrRoutes } from './routes/hr.ts';
 import { inboundRoutes } from './routes/inbound.ts';
@@ -381,6 +382,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   await app.register(ceoRoutes(ctx));
   await app.register(threadRoutes(ctx));
   await app.register(vaultRoutes(ctx));
+  await app.register(graphRoutes(ctx));
   await app.register(devopsRoutes(ctx));
   await app.register(runRoutes(ctx));
   await app.register(commitAsRoutes(ctx));

@@ -1,0 +1,81 @@
+import { z } from 'zod';
+import { VaultStorage } from '../events/vault.ts';
+import { sha256Hex } from './sha256.ts';
+
+export { sha256Hex } from './sha256.ts';
+
+/**
+ * Project graphs (docs/design/project-graphs.md). The graph is a derived index of the code, built on the workstation and
+ * kept in the project vault. Nothing code-derived is ever sent to the server: everything in this file that travels
+ * (commands, results, events) carries ids, counts, commit ids and fixed reason codes only.
+ */
+
+/** Written into every shard and the manifest; bumped when the on-disk format changes. */
+export const GRAPH_SCHEMA_VERSION = 1;
+
+/**
+ * The repository key of a graph: the first 12 hex digits of the SHA-256 of the normalized remote URL
+ * (`normalizeRemoteUrl`). Stable across machines, never an absolute path, and the prefix of every node id.
+ */
+export function graphRepoKey(remoteUrlNormalized: string): string {
+  return sha256Hex(remoteUrlNormalized.trim().toLowerCase()).slice(0, 12);
+}
+
+export const GraphRepoKeySchema = z.string().regex(/^[0-9a-f]{12}$/);
+
+/** Why an index run did not produce a graph: fixed codes, because free text could carry a path or a symbol name. */
+export const GraphFailReasonSchema = z.enum([
+  'no_clone',
+  'no_vault',
+  'vault_unavailable',
+  'no_commit',
+  'usage_limit',
+  'error',
+]);
+export type GraphFailReason = z.infer<typeof GraphFailReasonSchema>;
+
+export const GraphVaultRefSchema = z.object({
+  vaultId: z.string().min(1).max(64),
+  storage: VaultStorage,
+  kind: z.enum(['org', 'project']),
+  /** `projects/<name>` inside the vault; the graph lives in `<folder>/graph/`. */
+  folder: z.string().min(1).max(200),
+});
+export type GraphVaultRef = z.infer<typeof GraphVaultRefSchema>;
+
+/** `graph.index` (a full index of one repository) and `graph.update` (the changes of a merge). */
+export const GraphIndexPayloadSchema = z.object({
+  projectId: z.uuid(),
+  repoId: z.uuid(),
+  repoKey: GraphRepoKeySchema,
+  remoteUrlNormalized: z.string().min(1),
+  repoName: z.string().min(1).max(200),
+  projectKey: z.string().min(1).max(20),
+  workingBranch: z.string().max(200).nullish(),
+  vault: GraphVaultRefSchema,
+  /** `graph.update`: the commit the manifest recorded, and the merge commit to bring the graph to. */
+  fromCommit: z.string().regex(/^[0-9a-f]{7,64}$/).optional(),
+  toCommit: z.string().regex(/^[0-9a-f]{7,64}$/).optional(),
+});
+export type GraphIndexPayload = z.infer<typeof GraphIndexPayloadSchema>;
+
+/** What the runner answers to `graph.index` and `graph.update`. */
+export const GraphIndexResultSchema = z.discriminatedUnion('ok', [
+  z.object({
+    ok: z.literal(true),
+    commit: z.string(),
+    files: z.number().int().nonnegative(),
+    nodes: z.number().int().nonnegative(),
+    edges: z.number().int().nonnegative(),
+    modules: z.number().int().nonnegative(),
+    indexerVersion: z.string(),
+    durationMs: z.number().int().nonnegative(),
+    /** `graph.update` only. */
+    fromCommit: z.string().optional(),
+    filesChanged: z.number().int().nonnegative().optional(),
+    /** The update fell back to a full index (the old commit is not an ancestor, or there was no graph). */
+    fullReindex: z.boolean().optional(),
+  }),
+  z.object({ ok: z.literal(false), reason: GraphFailReasonSchema }),
+]);
+export type GraphIndexResult = z.infer<typeof GraphIndexResultSchema>;

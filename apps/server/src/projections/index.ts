@@ -12,6 +12,7 @@ import { deskProjectors } from './desk.ts';
 import { devopsProjectors } from './devops.ts';
 import { environmentProjectors } from './environment.ts';
 import { feedProjectors } from './feeds.ts';
+import { graphProjectors } from './graph.ts';
 import { hygieneProjectors } from './hygiene.ts';
 import { intakeProjectors } from './intake.ts';
 import { intakeBatchProjectors } from './intake-batch.ts';
@@ -65,6 +66,7 @@ const domains: Array<Record<string, Projector>> = [
   ledgerProjectors,
   chatProjectors,
   vaultProjectors,
+  graphProjectors,
   devopsProjectors,
   environmentProjectors,
   hygieneProjectors,
@@ -163,6 +165,7 @@ export const PROJECTION_TABLES = [
   'ledger_entries',
   'ledger_entry_versions',
   'vaults',
+  'project_graphs',
   'devops_requests',
   'run_plans',
   'repo_clones',

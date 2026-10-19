@@ -13,6 +13,7 @@ import type { WebSocket } from 'ws';
 import { confirmBranchOnEvent } from '../commands/branch-confirm.ts';
 import { SYSTEM_ACTOR, userScope } from '../commands/common.ts';
 import { writeResearchIndex } from '../commands/convert.ts';
+import { seedProjectGraphsOfProject } from '../commands/graph.ts';
 import { refreshVaultConfig, vaultAudience } from '../commands/vaults.ts';
 import type { Ctx } from '../context.ts';
 import { sha256Hex } from '../crypto.ts';
@@ -252,6 +253,7 @@ export class RunnerGateway {
           (e.event.payload as { vaultId: string }).vaultId,
         ]);
         if (v) await refreshVaultConfig(ctx, await vaultAudience(ctx.pool, v as never));
+        if (v?.project_id) await seedProjectGraphsOfProject(ctx, v.project_id).catch(() => undefined);
         return;
       }
       case 'ProjectShareAccepted':

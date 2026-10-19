@@ -4,6 +4,7 @@ import { migrateCardCompletionInherit } from './card-completion-inherit.ts';
 import { migrateCeoModels } from './ceo-models.ts';
 import { migrateCeoWorkingBranch } from './ceo-working-branch.ts';
 import { migrateDesignHeldStatus } from './design-held-status.ts';
+import { migrateGraphBackfill } from './graph-backfill.ts';
 import { migrateNoPersonal } from './no-personal.ts';
 import { migrateOrgInboxes } from './org-inboxes.ts';
 import { type DataMigrationEnv, migrateOrgs } from './orgs.ts';
@@ -29,6 +30,11 @@ export {
   type DesignHeldStatusReport,
   migrateDesignHeldStatus,
 } from './design-held-status.ts';
+export {
+  GRAPH_BACKFILL_MIGRATION,
+  type GraphBackfillReport,
+  migrateGraphBackfill,
+} from './graph-backfill.ts';
 export {
   formatNoPersonalPlan,
   migrateNoPersonal,
@@ -71,6 +77,7 @@ export const DATA_MIGRATIONS: Array<{ name: string; run: (env: DataMigrationEnv)
   { name: 'design-held-status-2026-10', run: (env) => migrateDesignHeldStatus(env) },
   { name: 'ceo-working-branch-2026-10', run: (env) => migrateCeoWorkingBranch(env) },
   { name: 'project-vaults-2026-10', run: (env) => migrateProjectVaults(env) },
+  { name: 'graph-backfill-2026-10', run: (env) => migrateGraphBackfill(env) },
 ];
 
 export async function runDataMigrations(env: DataMigrationEnv): Promise<void> {

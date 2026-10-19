@@ -117,6 +117,21 @@ export class VaultManager {
     return this.config?.vaults.find((v) => v.vaultId === vaultId);
   }
 
+  /**
+   * Runs `fn` with the vault's folder while no sync or write of that vault is running (the project graph writes many
+   * files at once). A repository vault is cloned first when it is not here yet.
+   */
+  async exclusive<T>(vaultId: string, fn: (dir: string) => Promise<T>): Promise<T> {
+    const v = this.vault(vaultId);
+    if (!v) throw new VaultWriteError(`vault ${vaultId} is not configured on this workstation`);
+    if (v.storage === 'local') return this.serialize(vaultId, () => fn(this.localDir(vaultId)));
+    if (!isCloned(this.dir(vaultId))) {
+      const r = await this.syncNow(vaultId);
+      if ('status' in r && r.status === 'error') throw new VaultWriteError(r.error);
+    }
+    return this.serialize(vaultId, () => fn(this.dir(vaultId)));
+  }
+
   /** A local vault: a folder on this workstation, never cloned, synced or pushed (docs/design/project-graphs.md section 3). */
   isLocal(vaultId: string): boolean {
     return this.vault(vaultId)?.storage === 'local';
