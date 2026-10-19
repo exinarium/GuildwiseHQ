@@ -8,6 +8,7 @@ import {
   type ShiftBrief,
 } from '@aom/shared';
 import { loadRole } from '../catalogue/loader.ts';
+import { graphScopeFor } from '../commands/graph.ts';
 import { buildBatchTask } from '../commands/intake-batch.ts';
 import { buildMailDraftTask } from '../commands/mail-draft.ts';
 import { cardOutcomes, computeOutstanding, followupRows, suiteOf } from '../commands/phase-events.ts';
@@ -188,5 +189,6 @@ export async function buildBaTaskShiftStart(
     maxShiftMinutes: BA_TASK_MAX_SHIFT_MINUTES,
     baTask,
     vault: await shiftVault(ctx, agent, project.id),
+    ...(await graphScopeFor(ctx, project.id).then((graph) => (graph ? { graph } : {}))),
   };
 }

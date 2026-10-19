@@ -1,6 +1,7 @@
 import {
   type GraphIndexPayload,
   GraphIndexResultSchema,
+  type GraphScope,
   graphRepoKey,
   type ProjectGraphStatus,
   projectVaultFolder,
@@ -340,4 +341,40 @@ export async function seedProjectGraphsOfProject(ctx: Ctx, projectId: string): P
     if (r.status === null) await requestProjectGraph(ctx, projectId, r.id, 'attached');
     else if (r.status === 'requested') await dispatchGraphCommand(ctx, projectId, r.id);
   }
+}
+
+/**
+ * Where a project's code graph is, for a shift or chat that works on it (docs/design/project-graphs.md section 7): the
+ * vault and folder the runner reads it from, and the measurement arm. Undefined when graphs are off or the project has no
+ * graph yet (no section and no verbs are offered, and nothing is measured).
+ */
+export async function graphScopeFor(
+  ctx: Ctx,
+  projectId: string,
+  cardId?: string | null,
+): Promise<GraphScope | undefined> {
+  if (!graphsEnabled(ctx)) return undefined;
+  const ready = await one(
+    ctx.pool,
+    `SELECT 1 FROM project_graphs WHERE project_id=$1 AND status='indexed' LIMIT 1`,
+    [projectId],
+  );
+  if (!ready) return undefined;
+  const gv = await graphVaultFor(ctx.pool, projectId);
+  const p = await one(ctx.pool, 'SELECT key, vault_folder, vault_dir FROM projects WHERE id=$1', [projectId]);
+  if (!gv || !p) return undefined;
+  return {
+    vaultId: gv.id,
+    folder: projectVaultFolder({ key: p.key, vaultFolder: p.vault_folder, vaultDir: p.vault_dir }),
+    arm: await graphArmFor(ctx, projectId, cardId ?? null),
+  };
+}
+
+/** `on` or `off` for a card's shifts. Always `on` until the holdout of the measurement phase (section 11) assigns arms. */
+export async function graphArmFor(
+  _ctx: Ctx,
+  _projectId: string,
+  _cardId: string | null,
+): Promise<'on' | 'off'> {
+  return 'on';
 }

@@ -499,6 +499,18 @@ export type ShiftVault = z.infer<typeof ShiftVaultSchema>;
 export const ChatVaultSchema = ShiftVaultSchema.extend({ folder: VaultFolderSchema.optional() });
 export type ChatVault = z.infer<typeof ChatVaultSchema>;
 
+/**
+ * Where the project's code graph is (docs/design/project-graphs.md section 7): the vault and folder the runner reads it
+ * from, and the measurement arm. `off` is the holdout (section 11): no "Graph context" section and no `aom graph` verbs.
+ */
+export const GraphScopeSchema = z.object({
+  vaultId: VaultIdSchema,
+  /** `projects/<name>` inside the vault; the graph is in `<folder>/graph/`. */
+  folder: VaultFolderSchema,
+  arm: z.enum(['on', 'off']),
+});
+export type GraphScope = z.infer<typeof GraphScopeSchema>;
+
 export const ChatContextSchema = z.object({
   /** The organization of the chat (the runner resolves the organization source folder with it). */
   orgId: z.uuid().optional(),
@@ -520,6 +532,8 @@ export const ChatContextSchema = z.object({
   mcpServers: z.array(z.string()).optional(),
   /** The knowledge vault this chat may read (read-only; absent: none for this workstation). */
   vault: ChatVaultSchema.optional(),
+  /** The project's code graph for this conversation (read-only `aom graph` verbs). Absent: none. */
+  graph: GraphScopeSchema.optional(),
   /** Set for the owner's chat with the CEO: persona, standing instructions, rules and the policy in words. */
   ceo: z.object({ brief: z.string() }).optional(),
   /**
@@ -1216,6 +1230,8 @@ export const ShiftStartSchema = msg('shift.start', {
   ceo: CeoShiftSchema.optional(),
   /** M3: the card's vault (its project vault or the organization vault); the runner reads only this vault and passes only it as `--add-dir`. */
   vault: ShiftVaultSchema.nullable().optional(),
+  /** The project's code graph (`arm: 'off'`: the measurement holdout, nothing is offered). Absent: none yet. */
+  graph: GraphScopeSchema.optional(),
   /** The project's reference repositories: read-only for this shift when the workstation has a clone. */
   readRepos: z.array(ReadRepoSchema).optional(),
   localReadRepos: z.array(LocalReadRepoSchema).optional(),

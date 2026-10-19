@@ -417,6 +417,7 @@ export class Runner {
       transport: { send: (type, payload) => this.client.send(type as never, payload) },
       findRepo: (norm) => this.findRepo(norm),
       findLocal: (k) => this.findLocal(k),
+      graph: () => this.graph,
       writeVault: (cmd) => this.vaults.write(cmd),
       http: this.serverHttp,
       rpc: (shiftId, method, params) =>
@@ -461,6 +462,7 @@ export class Runner {
       log: this.log,
       send: (type, payload) => void this.client.send(type, payload),
       rpc: (chatId, method, params) => this.rpc(chatId, method, params),
+      graph: () => this.graph,
       external: this.external,
       mcpSignInNote: (granted) => this.mcpSignInNote(granted),
       http: this.serverHttp,

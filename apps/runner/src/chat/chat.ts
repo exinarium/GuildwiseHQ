@@ -30,6 +30,8 @@ import { redactCommand } from '../devops/guard.ts';
 import { type ExternalAdapters, formatSource, readScopedJira } from '../external/index.ts';
 import { confine } from '../fs-safe.ts';
 import { resolveCommitIdentity } from '../git/identity.ts';
+import { CHAT_GRAPH_NOTE } from '../graph/brief.ts';
+import type { GraphService } from '../graph/service.ts';
 import type { IpcServer, ShiftIpcHandler } from '../ipc/server.ts';
 import { type Logger, nullLogger } from '../log.ts';
 import type { RunnerPaths } from '../paths.ts';
@@ -41,6 +43,8 @@ import { readVaultContext } from '../vaults/context.ts';
 type ChatStartMsg = ServerToRunnerOf<'chat.start'>;
 
 export interface ChatDeps {
+  /** The project graph (`aom graph query|explain` in a chat). Absent: none. */
+  graph?: () => GraphService | undefined;
   paths: RunnerPaths;
   adapters: Map<string, RuntimeAdapter>;
   ipc: IpcServer;
@@ -112,6 +116,8 @@ const CHAT_RPC = new Set([
   /** Approved repository setup: the BA asks, the project owner approves on the desk. */
   'repo.create',
 ]);
+/** Read-only verbs of the project graph in a chat (docs/design/project-graphs.md section 7). */
+const GRAPH_CHAT_RPC = new Set(['graph.query', 'graph.explain']);
 /** G-Q1: the DevOps agent's chat can also turn an instruction into a DevOps task (`aom devops "<text>"`). */
 const DEVOPS_CHAT_RPC = new Set(['devops.request']);
 
@@ -246,6 +252,14 @@ export class ChatManager {
           return chat.msg.agent.isDevops && this.deps.git
             ? this.deps.git.handle(req.method, req.params)
             : { ok: false, error: 'only the DevOps engineer can use `aom git`' };
+        if (req.method.startsWith('graph.')) {
+          if (!GRAPH_CHAT_RPC.has(req.method))
+            return { ok: false, error: `${req.method} is not available in a chat conversation` };
+          const g = this.deps.graph?.();
+          return g
+            ? g.rpc(req.method, req.params, chat.msg.context.graph)
+            : { ok: false, error: 'the code graph is not available on this workstation' };
+        }
         return CHAT_RPC.has(req.method) || (chat.msg.agent.isDevops && DEVOPS_CHAT_RPC.has(req.method))
           ? this.deps.rpc(chatId, req.method, req.params)
           : { ok: false, error: `${req.method} is not available in a chat conversation` };
@@ -439,9 +453,12 @@ export class ChatManager {
     const folders = mergeReadFolders(mergeReadFolders(registered, fromFolder), vaultFolder);
 
     const signIn = devops ? '' : (this.deps.mcpSignInNote?.(msg.context.mcpServers) ?? '');
+    // The project's code graph (read-only verbs): only when this workstation can read it and the chat is not the holdout.
+    const gs = msg.context.graph;
+    const graphNote = gs && gs.arm === 'on' && this.deps.graph?.()?.load(gs) ? `\n${CHAT_GRAPH_NOTE}\n` : '';
     await adapter.writeInstructions(
       sandbox,
-      `${signIn ? `${signIn}\n` : ''}${renderChatInstructions(msg.agent, msg.context, {
+      `${signIn ? `${signIn}\n` : ''}${graphNote}${renderChatInstructions(msg.agent, msg.context, {
         jiraSkill: await this.jiraSkill(msg),
         readFolders: folders,
         ...(!devops && msg.context.vault

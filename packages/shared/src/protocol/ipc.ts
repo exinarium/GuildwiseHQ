@@ -302,6 +302,11 @@ export const RpcMethodSchema = z.enum([
   'env.suites.propose',
   /** `aom test suite`: the runner parses the report, attaches the log and sends the result to the server. */
   'test.suite',
+  /** Project graphs (docs/design/project-graphs.md section 7): `aom graph query|path|explain|impact`, answered by the runner from the vault. */
+  'graph.query',
+  'graph.path',
+  'graph.explain',
+  'graph.impact',
 ]);
 export type RpcMethod = z.infer<typeof RpcMethodSchema>;
 

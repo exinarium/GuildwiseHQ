@@ -118,6 +118,26 @@ describe('project graph status (design sections 1, 5 and 13: status only, never 
     });
   });
 
+  it('a shift or chat of an indexed project is told where the graph is (vault, folder, arm); an unindexed one is not', async () => {
+    const { graphScopeFor } = await import('../src/commands/graph.ts');
+    const [vault] = await q('SELECT id FROM vaults WHERE project_id=$1', [w.projectId]);
+    expect(await graphScopeFor(w.t.app.ctx, w.projectId, null)).toEqual({
+      vaultId: vault!.id,
+      folder: 'projects/toy',
+      arm: 'on',
+    });
+    // nothing indexed yet for another project: no scope, so no section and no verbs
+    const p2 = await ok<any>(owner('/api/projects', 'POST', { key: 'TWO', name: 'Two' }), 201);
+    expect(await graphScopeFor(w.t.app.ctx, p2.project.id, null)).toBeUndefined();
+    const cfg = w.t.app.ctx.config;
+    cfg.projectGraphs.enabled = false;
+    try {
+      expect(await graphScopeFor(w.t.app.ctx, w.projectId, null)).toBeUndefined();
+    } finally {
+      cfg.projectGraphs.enabled = true;
+    }
+  });
+
   it('a failure carries a fixed reason code; a later failure never hides an index that exists', async () => {
     const res = await owner(`/api/projects/${w.projectId}/graph/index`, 'POST');
     expect(res.status).toBe(202);

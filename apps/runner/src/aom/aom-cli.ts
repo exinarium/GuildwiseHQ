@@ -1772,6 +1772,43 @@ const VERBS: Record<string, Verb> = {
     ctx.io.out(`${r.message ?? 'Registered.'}\n`);
     return 0;
   },
+  /**
+   * `aom graph query|path|explain|impact`: the map of the project's code (docs/design/project-graphs.md section 7). The
+   * runner answers from the project vault on this workstation; every answer is capped and tags each link.
+   */
+  graph: async (ctx, p) => {
+    const sub = p.positionals[0];
+    const usage =
+      'usage: aom graph query "<words>" [--budget <tokens>] | graph path <a> <b> | graph explain <node> | graph impact <file or symbol> [--depth <1-4>]';
+    const int = (name: string): number | undefined => {
+      const v = one(p, name);
+      if (v === undefined) return undefined;
+      const n = Number(v);
+      if (!Number.isInteger(n) || n < 1) throw new UsageError(`--${name} needs a whole number of at least 1`);
+      return n;
+    };
+    let method: string;
+    let params: Record<string, unknown>;
+    if (sub === 'query' && p.positionals[1]) {
+      method = 'graph.query';
+      params = {
+        text: p.positionals.slice(1).join(' '),
+        ...(int('budget') ? { budget: int('budget') } : {}),
+      };
+    } else if (sub === 'path' && p.positionals[1] && p.positionals[2]) {
+      method = 'graph.path';
+      params = { a: p.positionals[1], b: p.positionals[2] };
+    } else if (sub === 'explain' && p.positionals[1]) {
+      method = 'graph.explain';
+      params = { node: p.positionals[1] };
+    } else if (sub === 'impact' && p.positionals[1]) {
+      method = 'graph.impact';
+      params = { node: p.positionals[1], ...(int('depth') ? { depth: int('depth') } : {}) };
+    } else throw new UsageError(usage);
+    const r = (await rpc(ctx, method, params)) as { text?: string } | null;
+    ctx.io.out(`${r?.text ?? 'no answer'}\n`);
+    return 0;
+  },
   transcript: async (ctx, p) => {
     const url = one(p, 'url');
     if (!url) throw new UsageError('usage: aom transcript --url <video or podcast URL>');
@@ -1860,6 +1897,7 @@ export const USAGE = `usage: aom <verb> [options]
   card attach <path> [--card <REF>]          BA intake: attach a file from your scratch dir (for example a downloaded Jira attachment) to a card you drafted
   card attachments [<REF>]                   copy the card's attached files next to this shift (read-only) and print the paths; builders get them at the start of the shift
   org catalogue | org role draft --json '<json>' | --file <json|-> | org workflow draft (same) | org workflow variant --file <json|-> (a project's own version) | org validate <key> | org submit <key> | org department --name "<n>"   BA design chat: draft roles and workflows (the owner approves on the desk)
+  graph query "<words>" [--budget <tokens>] | graph path <a> <b> | graph explain <node> | graph impact <file or symbol> [--depth 2]   the map of this project's code, kept in the project vault: where a thing is, what touches it, the blast radius of a change; [I] and [A] links are leads, read the file
   transcript --url <url>                     fetch the transcript of a video or podcast (the runner saves it in the vault; prints a header and the text)
   phase list | propose --name "<n>" [--description "<t>"] [--followups-file <json>] | assign <REF> --phase <ref>|--none | submit <ref>   BA intake: propose a phase, put cards in it, ask the manager to confirm
   phase followup brief <n> --to devops|tester|ba --text "<t>" | phase ready   BA task (follow-ups approved): delegate each follow-up, then say all are briefed (terminal)

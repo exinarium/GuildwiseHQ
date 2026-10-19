@@ -15,6 +15,7 @@ import { buildChatBrief } from '../ceo/brief.ts';
 import { loadCeo } from '../ceo/state.ts';
 import { ownsDevopsMachine, sharesAllowedProject } from '../commands/chats.ts';
 import { agentActor, orgScope, projectScope, runnerActor, userActor } from '../commands/common.ts';
+import { graphScopeFor } from '../commands/graph.ts';
 import { intakeContext } from '../commands/intake.ts';
 import { grantedMcpServers, orgGrantedMcpServers } from '../commands/mcp-servers.ts';
 import { vaultForConversation } from '../commands/vaults.ts';
@@ -212,6 +213,10 @@ export class ChatRelay {
         projectId: row.thread_project_id,
         workstationId: row.workstation_id,
       });
+      // The project's code graph (read-only `aom graph` verbs), when it has one.
+      const graph = row.thread_project_id
+        ? await graphScopeFor(ctx, row.thread_project_id, row.thread_card_id)
+        : undefined;
       const ceoState = isCeo ? await loadCeo(ctx.pool, row.org_id) : undefined;
       // Standing orders bind every agent in a conversation (backlog #75). The DevOps engineer works across projects, so
       // without a project in context it gets those of every project of the organization.
@@ -244,6 +249,7 @@ export class ChatRelay {
         ...(localRepos.length > 0 ? { localReadRepos: localRepos } : {}),
         ...(mcpGranted.length > 0 ? { mcpServers: mcpGranted } : {}),
         ...(vault ? { vault } : {}),
+        ...(graph ? { graph } : {}),
         ...(intake ? { intake } : {}),
       };
       const sent = ctx.services.runners.send(

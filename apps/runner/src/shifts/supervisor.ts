@@ -91,6 +91,7 @@ import {
   WorktreeError,
   type WorktreeResult,
 } from '../git/worktrees.ts';
+import type { GraphService } from '../graph/service.ts';
 import { diskProblem } from '../health/disk.ts';
 import type { IpcServer, ShiftIpcHandler } from '../ipc/server.ts';
 import { type Logger, nullLogger } from '../log.ts';
@@ -166,6 +167,8 @@ export interface SupervisorDeps {
   http?: ServerHttp;
   /** Forwards an rpc to the server (`rpc.request`). */
   rpc: (shiftId: string, method: string, params: Record<string, unknown>) => Promise<IpcRpcResponse>;
+  /** The project graph (docs/design/project-graphs.md): `aom graph ...` and the "Graph context" section. Absent: none. */
+  graph?: () => GraphService | undefined;
   /** Writes (and commits, pushes) a file into a vault clone: `aom publish` puts research notes there (M6). */
   writeVault?: (
     cmd: VaultWriteCommand,
@@ -928,6 +931,14 @@ export class ShiftSupervisor {
         texts.instructions += `\n${renderCardAttachments(attachDir, synced.files)}\n`;
       mkdirSync(attachDir, { recursive: true });
     }
+    // The project's code graph: a short, fenced "Graph context" for the card's own words (the holdout arm gets none).
+    if (msg.kind === 'card') {
+      const card = (s.brief ?? msg.brief).card;
+      const section = this.deps
+        .graph?.()
+        ?.briefSection(msg.graph, { title: card.title, fields: card.fields });
+      if (section) texts.instructions += `\n${section}\n`;
+    }
     if (s.syncMain && msg.kind === 'card') texts.prompt += `\n${mainSyncNote(s.syncMain)}\n`;
     // lean team: the tester runs the E2E specs of the areas the card touches, not the whole suite.
     if (msg.kind === 'card' && msg.brief.e2e) {
@@ -1376,6 +1387,13 @@ export class ShiftSupervisor {
           return this.deps.rpc(s.msg.shiftId, req.method, req.params);
         if (req.method === 'card.get')
           return { ok: true, result: cardPayload({ ...s.msg, brief: s.brief ?? s.msg.brief }) };
+        // `aom graph ...`: answered here from the vault's graph, never by the server (the holdout arm gets none).
+        if (req.method.startsWith('graph.')) {
+          const g = this.deps.graph?.();
+          return g
+            ? g.rpc(req.method, req.params, s.msg.graph)
+            : ({ ok: false, error: 'the code graph is not available on this workstation' } as IpcRpcResponse);
+        }
         if (req.method === 'card.attachments') return this.cardAttachments(s, req.params);
         if (req.method === 'transcript.fetch') return this.transcriptFetch(s, req.params);
         if (req.method === 'sudo.run') return this.sudoRun(s, req.params);
