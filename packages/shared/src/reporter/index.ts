@@ -53,6 +53,8 @@ export const ROUTING_EXEMPT_SUBKINDS: readonly string[] = [
   'ceo_report',
   'ceo_recommendation',
   'ceo_notice',
+  /** A decision the CEO took within its authority, put on the desk for review: never held, never a wake. */
+  'ceo_decision',
 ];
 
 // ----------------------------------------------------------------------------------------------- prefs

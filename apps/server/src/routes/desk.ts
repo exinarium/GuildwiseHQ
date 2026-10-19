@@ -1,5 +1,7 @@
 import {
+  AcknowledgeAllCeoDecisionsResponseSchema,
   AnswerDeskItemRequestSchema,
+  CorrectCeoDecisionRequestSchema,
   DeskItemParamsSchema,
   DeskQuerySchema,
   DismissDeskItemRequestSchema,
@@ -8,6 +10,7 @@ import {
 import type { FastifyInstance } from 'fastify';
 import { requireUser } from '../auth/guards.ts';
 import { requestedOrgId, resolveOrgId } from '../auth/org-context.ts';
+import { acknowledgeAllCeoDecisions, acknowledgeCeoDecision, correctCeoDecision } from '../ceo/decisions.ts';
 import { answerDeskItem, dismissDeskItem, resolveDeskItem } from '../commands/desk.ts';
 import type { Ctx } from '../context.ts';
 import { notFound } from '../errors.ts';
@@ -29,6 +32,38 @@ export function deskRoutes(ctx: Ctx) {
       const orgId = await resolveOrgId(ctx, s, requestedOrgId(req));
       return listDesk(ctx.pool, s.user.id, orgId, req.query);
     });
+
+    // The CEO's own decisions, for the Owner and Admins to acknowledge or correct (informational items).
+    app.post(
+      '/api/desk/ceo-decisions/acknowledge-all',
+      { schema: { response: { 200: AcknowledgeAllCeoDecisionsResponseSchema } } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        const orgId = await resolveOrgId(ctx, s, requestedOrgId(req));
+        if (!orgId) throw notFound('organization not found');
+        return { acknowledged: await acknowledgeAllCeoDecisions(ctx, s.user, orgId) };
+      },
+    );
+
+    app.post(
+      '/api/desk/:id/ceo-decision/acknowledge',
+      { schema: { params: DeskItemParamsSchema } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        await acknowledgeCeoDecision(ctx, s.user, req.params.id);
+        return dto(s.user.id, req.params.id);
+      },
+    );
+
+    app.post(
+      '/api/desk/:id/ceo-decision/correct',
+      { schema: { params: DeskItemParamsSchema, body: CorrectCeoDecisionRequestSchema } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        const r = await correctCeoDecision(ctx, s.user, req.params.id, req.body);
+        return { item: await dto(s.user.id, req.params.id), applied: r.applied };
+      },
+    );
 
     app.post(
       '/api/desk/:id/answer',

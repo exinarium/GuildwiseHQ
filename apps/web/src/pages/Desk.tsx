@@ -18,6 +18,7 @@ import { useAnswerDeskItem, useDesk, useDismissDeskItem, useResolveDeskItem } fr
 import { ApprovalDeskItem } from '../components/ApprovalDeskItem.tsx';
 import { BaNote, FloorReport } from '../components/BaNote.tsx';
 import { ChatDrawer } from '../components/ChatDrawer.tsx';
+import { CeoDecisionItem, CeoDecisionsSection, isCeoDecision } from '../components/ceo/CeoDecisions.tsx';
 import {
   CeoAnswered,
   CeoRecommendation,
@@ -69,7 +70,7 @@ import { useExpertMode } from '../lib/expert-mode.ts';
 import { focusOf, integrationsLink } from '../lib/integrations.ts';
 import { ageLabel, formatDateTime } from '../lib/time.ts';
 
-type FilterKey = 'all' | 'blocking' | 'questions' | 'approvals' | 'notices' | 'ceo';
+type FilterKey = 'all' | 'blocking' | 'questions' | 'approvals' | 'notices' | 'ceo' | 'ceoDecisions';
 const FILTERS: Array<{ key: FilterKey; label: string; test: (i: DeskItemDto) => boolean }> = [
   { key: 'all', label: 'All', test: () => true },
   { key: 'blocking', label: 'Blocking', test: (i) => i.blocking },
@@ -77,6 +78,7 @@ const FILTERS: Array<{ key: FilterKey; label: string; test: (i: DeskItemDto) => 
   { key: 'approvals', label: 'Approvals', test: (i) => i.kind === 'approval' },
   { key: 'notices', label: 'Notices', test: (i) => i.kind === 'alert' || i.kind === 'rating' },
   { key: 'ceo', label: 'Handled by CEO', test: (i) => !!i.ceo?.actionId },
+  { key: 'ceoDecisions', label: 'CEO decisions', test: isCeoDecision },
 ];
 
 const GROUPS: Array<{ id: string; label: string; test: (i: DeskItemDto) => boolean }> = [
@@ -123,13 +125,20 @@ export function Desk() {
   const filter = FILTERS.find((f) => f.key === filterKey) ?? (FILTERS[0] as (typeof FILTERS)[number]);
   const [sort, setSort] = useState<'priority' | 'oldest' | 'newest'>('priority');
 
-  const items = useMemo(() => sortDeskItems(open.data?.items ?? []), [open.data]);
+  // CEO decisions are for review, not decisions waiting on you: they have their own section.
+  const decisions = useMemo(() => (open.data?.items ?? []).filter(isCeoDecision), [open.data]);
+  const items = useMemo(
+    () => sortDeskItems((open.data?.items ?? []).filter((i) => !isCeoDecision(i))),
+    [open.data],
+  );
+  const onlyDecisions = filterKey === 'ceoDecisions';
   const shown = useMemo(() => {
+    if (onlyDecisions) return [];
     const f = items.filter(filter.test);
     if (sort === 'oldest') return [...f].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     if (sort === 'newest') return [...f].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     return f;
-  }, [items, filter, sort]);
+  }, [items, filter, sort, onlyDecisions]);
 
   // `#desk-item-<id>` links (from a blocked card) scroll to the item once it is rendered, and flash it.
   // biome-ignore lint/correctness/useExhaustiveDependencies: run when the list or the hash changes
@@ -142,10 +151,12 @@ export function Desk() {
     el.classList.add('animate-flash');
     const t = setTimeout(() => el.classList.remove('animate-flash'), 2000);
     return () => clearTimeout(t);
-  }, [hash, items.length, mobile]);
+  }, [hash, items.length, decisions.length, mobile]);
 
-  const openItem = openId ? (items.find((i) => i.id === openId) ?? null) : null;
-  const closedShown = (closed.data?.items ?? []).filter(filterKey === 'ceo' ? filter.test : () => true);
+  const openItem = openId ? ([...items, ...decisions].find((i) => i.id === openId) ?? null) : null;
+  const closedShown = (closed.data?.items ?? []).filter(
+    filterKey === 'ceo' || onlyDecisions ? filter.test : () => true,
+  );
 
   if (open.isPending)
     return (
@@ -155,7 +166,8 @@ export function Desk() {
       </div>
     );
   const counts = open.data?.counts ?? { open: 0, blocking: 0, urgent: 0 };
-  const count = (f: (typeof FILTERS)[number]) => items.filter(f.test).length;
+  const count = (f: (typeof FILTERS)[number]) =>
+    f.key === 'ceoDecisions' ? decisions.length : items.filter(f.test).length;
   // group the (already ordered) items; the h2 order inside `desk-list` stays the API order
   const grouped =
     sort === 'priority'
@@ -197,7 +209,7 @@ export function Desk() {
         <LedgerForm onDone={() => setShowLedger(false)} />
       </Dialog>
 
-      {items.length > 0 && (
+      {items.length + decisions.length > 0 && (
         <div className="sticky top-14 z-10 -mx-4 mb-4 flex items-center gap-2 border-b border-line bg-canvas/95 px-4 py-2 backdrop-blur sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
           <div
             className="scroll-fade-x flex flex-1 gap-2 overflow-x-auto"
@@ -206,8 +218,8 @@ export function Desk() {
           >
             {FILTERS.filter(
               (f) =>
-                f.key !== 'ceo' ||
-                filterKey === 'ceo' ||
+                (f.key !== 'ceo' && f.key !== 'ceoDecisions') ||
+                filterKey === f.key ||
                 count(f) > 0 ||
                 (closed.data?.items ?? []).some(f.test),
             ).map((f) => (
@@ -241,7 +253,7 @@ export function Desk() {
         </div>
       )}
 
-      {items.length === 0 && (
+      {items.length === 0 && decisions.length === 0 && (
         <EmptyState
           data-testid="desk-empty"
           icon={CheckCheck}
@@ -251,7 +263,7 @@ export function Desk() {
           action={<ButtonLink to="/">Go to the board</ButtonLink>}
         />
       )}
-      {items.length > 0 && shown.length === 0 && (
+      {items.length > 0 && shown.length === 0 && !onlyDecisions && (
         <EmptyState
           icon={CheckCheck}
           tone="neutral"
@@ -281,6 +293,12 @@ export function Desk() {
         ))}
       </div>
 
+      {(filterKey === 'all' || onlyDecisions) && (
+        <div className={cx(grouped.length > 0 && 'mt-6')}>
+          <CeoDecisionsSection items={decisions} mobile={mobile} onOpen={setOpenId} />
+        </div>
+      )}
+
       {closedShown.length > 0 && (
         <details
           className="mt-8"
@@ -294,31 +312,35 @@ export function Desk() {
           <ul className="mt-3 flex flex-col gap-2">
             {closedShown.map((i) => (
               <li key={i.id} data-testid={`desk-closed-${i.id}`}>
-                <Panel padding="compact">
-                  <p className="text-base font-medium text-fg">{i.title}</p>
-                  <p className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-subtle">
-                    <span>{i.status}</span>
-                    {i.answeredByName && (
-                      <span className="inline-flex items-center gap-1.5" data-testid="answered-by">
-                        by
-                        <UserAvatar
-                          user={{
-                            id: i.answeredByUserId,
-                            displayName: i.answeredByName,
-                            avatar: i.answeredByAvatar,
-                          }}
-                          size={18}
-                        />
-                        {i.answeredByName}
-                      </span>
-                    )}
-                    <AgentAnsweredBy item={i} />
-                    <span>· {formatDateTime(i.answeredAt)}</span>
-                  </p>
-                  {i.answer && <p className="mt-1 text-sm whitespace-pre-wrap text-muted">{i.answer}</p>}
-                  <CeoAnswered item={i} />
-                  <EscalationTrail item={i} />
-                </Panel>
+                {isCeoDecision(i) ? (
+                  <CeoDecisionItem item={i} />
+                ) : (
+                  <Panel padding="compact">
+                    <p className="text-base font-medium text-fg">{i.title}</p>
+                    <p className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-subtle">
+                      <span>{i.status}</span>
+                      {i.answeredByName && (
+                        <span className="inline-flex items-center gap-1.5" data-testid="answered-by">
+                          by
+                          <UserAvatar
+                            user={{
+                              id: i.answeredByUserId,
+                              displayName: i.answeredByName,
+                              avatar: i.answeredByAvatar,
+                            }}
+                            size={18}
+                          />
+                          {i.answeredByName}
+                        </span>
+                      )}
+                      <AgentAnsweredBy item={i} />
+                      <span>· {formatDateTime(i.answeredAt)}</span>
+                    </p>
+                    {i.answer && <p className="mt-1 text-sm whitespace-pre-wrap text-muted">{i.answer}</p>}
+                    <CeoAnswered item={i} />
+                    <EscalationTrail item={i} />
+                  </Panel>
+                )}
               </li>
             ))}
           </ul>
@@ -333,7 +355,12 @@ export function Desk() {
           title={openItem ? deskKindLabel(openItem) : 'Item'}
           testId="desk-sheet"
         >
-          {openItem && <DeskItem item={openItem} bare />}
+          {openItem &&
+            (isCeoDecision(openItem) ? (
+              <CeoDecisionItem item={openItem} bare />
+            ) : (
+              <DeskItem item={openItem} bare />
+            ))}
         </BottomSheet>
       )}
     </div>

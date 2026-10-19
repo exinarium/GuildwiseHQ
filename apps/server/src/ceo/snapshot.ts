@@ -174,7 +174,7 @@ export async function buildSnapshot(ctx: Ctx, orgId: string, section?: string): 
     const ds = await rows(
       ctx.pool,
       `SELECT d.id, d.kind, d.subkind, d.title, d.blocking, d.pinned, d.created_at, d.triage, d.routed_to, d.ceo_recommendation IS NOT NULL AS recommended
-         FROM desk_items d WHERE d.org_id=$1 AND d.status='open' AND COALESCE(d.subkind,'') <> 'ceo_report'
+         FROM desk_items d WHERE d.org_id=$1 AND d.status='open' AND COALESCE(d.subkind,'') NOT IN ('ceo_report','ceo_decision')
         ORDER BY d.pinned DESC, d.blocking DESC, d.created_at LIMIT 30`,
       [orgId],
     );

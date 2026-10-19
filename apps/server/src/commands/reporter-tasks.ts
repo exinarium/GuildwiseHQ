@@ -15,6 +15,7 @@ import {
   streamId,
   TriageDataSchema,
 } from '@aom/shared';
+import { ceoReviewItemOfTask, reviewAnalysisEvents } from '../ceo/decisions.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Queryable, type Row, rows } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
@@ -285,6 +286,21 @@ export async function applyReporterReport(
   if (kind === 'scheduled_brief') {
     const data = ScheduledBriefDataSchema.safeParse(report.data);
     if (!data.success) return bad(`invalid report data: ${data.error.message}`);
+    // The CEO-BA review of a corrected decision: the analysis goes to the CEO's decision item, not to a desk notice.
+    const review = await ceoReviewItemOfTask(tx, task);
+    if (review) {
+      await ctx.store.append(
+        [
+          ...(await reviewAnalysisEvents(tx, review, {
+            analysis: data.data.report,
+            baAgentId: shift.agent_id,
+          })),
+          taskCompleted(task, 'done'),
+        ],
+        { tx },
+      );
+      return { accepted: true };
+    }
     await ctx.store.append(
       [
         ...(await scheduledBriefEvents(tx, task, {
@@ -346,13 +362,18 @@ export async function runReporterFallback(ctx: Ctx, tx: Tx, task: Row): Promise<
         })),
       );
   } else if (kind === 'scheduled_brief') {
-    events.push(
-      ...(await scheduledBriefEvents(tx, task, {
-        report: `No BA was available, so this task was not carried out.\n\nWhat the schedule asked for:\n\n${task.instructions ?? ''}`,
-        by: systemBy,
-        fallback: true,
-      })),
-    );
+    const review = await ceoReviewItemOfTask(tx, task);
+    if (review) {
+      const analysis = "No BA was available, so the review rests on the owner's correction alone.";
+      events.push(...(await reviewAnalysisEvents(tx, review, { analysis, fallback: true })));
+    } else
+      events.push(
+        ...(await scheduledBriefEvents(tx, task, {
+          report: `No BA was available, so this task was not carried out.\n\nWhat the schedule asked for:\n\n${task.instructions ?? ''}`,
+          by: systemBy,
+          fallback: true,
+        })),
+      );
   } else if (kind === 'floor_report') {
     const prefs = await reportingOf(tx, task.org_id);
     const digest = await buildFloorDigest(

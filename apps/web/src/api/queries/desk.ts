@@ -1,6 +1,8 @@
 import {
+  type AcknowledgeAllCeoDecisionsResponse,
   type AnswerDeskItemRequest,
   type AnswerDeskItemResponse,
+  type CorrectCeoDecisionRequest,
   type DeskListResponse,
   DeskListResponseSchema,
   type ResolveDeskItemRequest,
@@ -17,7 +19,7 @@ export function useDesk(opts: { projectId?: string; status?: 'open' | 'closed' |
   });
 }
 
-function useDeskAction<V>(fn: (v: V) => Promise<unknown>) {
+function useDeskAction<V, R = unknown>(fn: (v: V) => Promise<R>) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: fn,
@@ -34,3 +36,15 @@ export const useAnswerDeskItem = () =>
 export const useResolveDeskItem = () =>
   useDeskAction((v: { id: string; body: ResolveDeskItemRequest }) => post(`/desk/${v.id}/resolve`, v.body));
 export const useDismissDeskItem = () => useDeskAction((id: string) => post(`/desk/${id}/dismiss`, {}));
+
+/** CEO decisions: acknowledge one, acknowledge all, or correct one (the CEO learns from the correction). */
+export const useAcknowledgeCeoDecision = () =>
+  useDeskAction((id: string) => post(`/desk/${id}/ceo-decision/acknowledge`, {}));
+export const useAcknowledgeAllCeoDecisions = () =>
+  useDeskAction<void, AcknowledgeAllCeoDecisionsResponse>(() =>
+    post<AcknowledgeAllCeoDecisionsResponse>('/desk/ceo-decisions/acknowledge-all', {}),
+  );
+export const useCorrectCeoDecision = () =>
+  useDeskAction((v: { id: string; body: CorrectCeoDecisionRequest }) =>
+    post<{ applied: string | null }>(`/desk/${v.id}/ceo-decision/correct`, v.body),
+  );
