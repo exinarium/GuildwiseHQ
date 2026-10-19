@@ -147,6 +147,16 @@ export type EligibilityPart = keyof ReturnType<typeof eligibility>;
 
 const E = eligibility(PARAM_AGENT);
 
+/**
+ * A reservation (card affinity, group builder) only holds a card for an agent that may take it: the card's risk tier is
+ * one of the agent's tiers and the agent is not excluded from it. Otherwise nobody could claim it: a large card
+ * reserved for a junior (small only) waited until the reservation expired while every free builder was turned away.
+ */
+const reserveHolderCanTake = (a: string): string =>
+  `NOT (${a}.id = ANY (c.excluded_agent_ids))
+   AND (c.risk_tier IS NULL OR c.risk_tier = ANY (ARRAY(SELECT jsonb_array_elements_text(
+         COALESCE(${a}.permissions->'riskTiers', '["small","large"]'::jsonb)))))`;
+
 const CANDIDATES_SQL = (cardFilter: string) => `
 SELECT c.id, c.stage
 FROM cards c
@@ -175,12 +185,13 @@ WHERE c.status = 'queued'
   AND (c.affinity_agent_id IS NULL OR c.affinity_until IS NULL OR c.affinity_until <= $9::timestamptz
        OR c.affinity_agent_id = $1
        OR NOT EXISTS (SELECT 1 FROM agents aa WHERE aa.id = c.affinity_agent_id AND aa.status = 'active'
-                       AND aa.paused_at IS NULL))
+                       AND aa.paused_at IS NULL AND ${reserveHolderCanTake('aa')}))
   -- Group builder affinity (lean team): the first builder of a group keeps the rest of its build cards, a hard clause, until it
   -- is gone or paused or the assignment expired. Review, test and the other roles are not held back.
   AND (c.group_id IS NULL OR st.claim_role IS DISTINCT FROM 'builder' OR NOT EXISTS (
         SELECT 1 FROM card_groups g JOIN agents ga ON ga.id = g.builder_agent_id AND ga.status = 'active' AND ga.paused_at IS NULL
          WHERE g.project_id = c.project_id AND g.group_id = c.group_id AND g.until > $9::timestamptz
+           AND ${reserveHolderCanTake('ga')}
            AND g.builder_agent_id <> $1))
   -- A project over its monthly budget or paused by an Owner/Admin starts nothing new (running shifts finish):
   -- dispatcher/project-hold.ts. This one query also guards the claim (isCandidate), so a claim for a paused project is refused.

@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { sweepSubworkflows } from '../src/commands/subworkflows.ts';
+import { agentView, candidateCards } from '../src/dispatcher/candidates.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import type { FakeRunner } from './helpers/fake-runner.ts';
 import {
@@ -591,6 +592,58 @@ describe('groups and the Card Brief', () => {
     expect(res.ok).toBe(false);
     expect(card.id).toBeTruthy();
     expect((await rpc(start.shiftId, 'card.brief', { text: 'x' })).ok).toBe(false);
+  });
+});
+
+describe('a reservation only holds a card for an agent that may take it', () => {
+  // Production 2026-10-19: large build cards were reserved (group builder, card affinity) for a junior builder whose
+  // tiers are small only, and a small card for a senior whose tiers are large only, so every free builder was turned away.
+  async function builders() {
+    await team({ builders: ['Bea', 'Ben'] });
+    const rows = await q(`SELECT * FROM agents WHERE name IN ('Bea','Ben') AND status='active'`);
+    const bea = rows.find((a) => a.name === 'Bea')!;
+    const ben = rows.find((a) => a.name === 'Ben')!;
+    await q(`UPDATE agents SET permissions = permissions || '{"riskTiers":["small"]}'::jsonb WHERE id=$1`, [bea.id]);
+    await q(`UPDATE agents SET permissions = permissions || '{"riskTiers":["large"]}'::jsonb WHERE id=$1`, [ben.id]);
+    const caps = (await q(`SELECT capabilities FROM workstation_capabilities WHERE workstation_id=$1`, [ben.workstation_id]))[0]
+      ?.capabilities ?? [];
+    const fresh = async (id: string) => (await q(`SELECT * FROM agents WHERE id=$1`, [id]))[0]!;
+    const offered = async (id: string) =>
+      (await candidateCards(w.t.app.ctx.pool, agentView(await fresh(id), caps), new Date())).map((c) => c.id);
+    return { bea, ben, offered };
+  }
+
+  it('a large card in a group held by a small-only builder goes to a builder that may take it', async () => {
+    const { bea, ben, offered } = await builders();
+    const card = await cardInBuild();
+    await q(`UPDATE cards SET risk_tier='large', group_id='g-tier' WHERE id=$1`, [card.id]);
+    const project = (await cardRow(card.id)).project_id;
+    await q(
+      `INSERT INTO card_groups (project_id, group_id, builder_agent_id, until, assigned_at) VALUES ($1,'g-tier',$2, now() + interval '4 hours', now())
+       ON CONFLICT (project_id, group_id) DO UPDATE SET builder_agent_id=EXCLUDED.builder_agent_id, until=EXCLUDED.until`,
+      [project, bea.id],
+    );
+    expect(await offered(bea.id)).not.toContain(card.id);
+    expect(await offered(ben.id)).toContain(card.id);
+  });
+
+  it('card affinity to an agent excluded from the card or outside its tier does not block the others', async () => {
+    const { bea, ben, offered } = await builders();
+    const card = await cardInBuild();
+    await q(
+      `UPDATE cards SET risk_tier='small', affinity_agent_id=$2, affinity_until=now() + interval '4 hours' WHERE id=$1`,
+      [card.id, ben.id],
+    );
+    expect(await offered(ben.id)).not.toContain(card.id);
+    expect(await offered(bea.id)).toContain(card.id);
+    // a valid reservation still holds: affinity to the small builder keeps the card from everyone else
+    await q(`UPDATE cards SET affinity_agent_id=$2 WHERE id=$1`, [card.id, bea.id]);
+    await q(`UPDATE agents SET permissions = permissions || '{"riskTiers":["small","large"]}'::jsonb WHERE id=$1`, [ben.id]);
+    expect(await offered(ben.id)).not.toContain(card.id);
+    expect(await offered(bea.id)).toContain(card.id);
+    // excluded from the card: the reservation lapses
+    await q(`UPDATE cards SET excluded_agent_ids = ARRAY[$2::uuid] WHERE id=$1`, [card.id, bea.id]);
+    expect(await offered(ben.id)).toContain(card.id);
   });
 });
 
