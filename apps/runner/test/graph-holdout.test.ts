@@ -58,7 +58,13 @@ describe('the holdout arm of a card (design section 11)', () => {
     for (const [m, p] of verbs) {
       expect(svc.rpc(m, p, scope('off')), m).toMatchObject({ ok: false });
       expect(svc.rpc(m, p, undefined), m).toMatchObject({ ok: false });
-      expect(svc.rpc(m, p, scope('on')), m).toMatchObject({ ok: true });
+      const on = svc.rpc(m, p, scope('on'));
+      expect(on, m).toMatchObject({ ok: true });
+      // names come from the repository: the answer is data, fenced, and cannot close its own fence
+      const text = (on.result as { text: string }).text;
+      expect(text.startsWith('<untrusted-data source="code graph">\n'), m).toBe(true);
+      expect(text.endsWith('\n</untrusted-data>'), m).toBe(true);
+      expect(text.split('</untrusted-data>').length - 1, m).toBe(1);
     }
     expect(svc.briefSection(scope('off'), card)).toBeNull();
     expect(svc.briefSection(undefined, card)).toBeNull();

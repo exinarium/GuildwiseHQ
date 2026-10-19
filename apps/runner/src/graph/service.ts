@@ -25,6 +25,7 @@ import {
   writeOrgGraph,
 } from './org.ts';
 import { GraphIndex } from './query.ts';
+import { fenceUntrusted } from './sanitize.ts';
 import { manifestPath } from './store.ts';
 import { updateRepository } from './update.ts';
 
@@ -244,7 +245,10 @@ export class GraphService {
     if (!scope || !this.deps.vaults.vault(scope.vaultId)) return null;
     const data = readOrgGraph(this.deps.vaults.dir(scope.vaultId));
     if (!data) return null;
-    return opts.drafts ? describeDrafts(data) : routeRequest(data, request);
+    return fenceUntrusted(
+      'organization graph',
+      opts.drafts ? describeDrafts(data) : routeRequest(data, request),
+    );
   }
 
   // ------------------------------------------------------------------------------------------------ queries
@@ -310,7 +314,8 @@ export class GraphService {
       default:
         return { ok: false, error: `${method} is not a graph verb` };
     }
-    return { ok: true, result: { text } };
+    // names in the answer come from the repository: data for the agent, never instructions
+    return { ok: true, result: { text: fenceUntrusted('code graph', text) } };
   }
 
   /** The "Graph context" section of a shift's instructions (at most 1.5 KB), or null: off, nothing indexed, or nothing known. */
