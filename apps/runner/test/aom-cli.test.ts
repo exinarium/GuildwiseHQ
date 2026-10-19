@@ -402,6 +402,18 @@ describe('aom CLI', () => {
     expect(await t.run('devops-done')).toBe(1);
   });
 
+  it('devops-question reports a "Question:" approval', async () => {
+    const t = await setup();
+    expect(await t.run('devops-question', '--text', 'which branch?', '--reason', 'A) dev B) main')).toBe(0);
+    expect(t.reports.at(-1)).toEqual({
+      kind: 'outcome',
+      outcomeId: 'devops_approval',
+      note: 'Question: which branch?',
+      data: { action: 'Question: which branch?', reason: 'A) dev B) main', commands: [] },
+    });
+    expect(await t.run('devops-question', '--text', 'x')).toBe(1);
+  });
+
   it('an expired token says the shift is over', async () => {
     const t = await setup();
     t.ipc.revoke(t.token);

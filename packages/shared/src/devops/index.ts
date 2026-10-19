@@ -26,6 +26,10 @@ export const DevopsApprovalDataSchema = z.object({
   reason: z.string().min(1).max(20000),
   commands: z.array(z.string()).default([]),
 });
+/** A DevOps "approval" whose action starts with "Question:" is a question for the escalation chain, not an approval. */
+export const DEVOPS_QUESTION_PREFIX = 'Question:';
+export const isDevopsQuestion = (action: string): boolean => /^\s*question:/i.test(action);
+
 export type DevopsApprovalData = z.infer<typeof DevopsApprovalDataSchema>;
 
 /**
@@ -128,6 +132,8 @@ export const DevopsShiftSchema = z.object({
       note: z.string().optional(),
     })
     .optional(),
+  /** The card's project does not require the owner's approval for merges: merge conflicts in the card worktree are yours. */
+  mergeApprovalWaived: z.boolean().optional(),
   /** Repository hygiene: the repositories of this workstation to tidy (see `aom hygiene run`). */
   hygiene: HygieneSpecSchema.optional(),
   /** A `run` request: the environment to bring up (see `aom run`). */

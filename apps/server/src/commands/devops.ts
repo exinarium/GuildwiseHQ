@@ -15,6 +15,7 @@ import {
   DevopsApprovalDataSchema,
   DevopsDoneDataSchema,
   type HygieneSpec,
+  isDevopsQuestion,
   isOrgManager,
   type PatchDevOpsAccessRequest,
   type RunnerToServerOf,
@@ -34,6 +35,13 @@ import type { AppendInput } from '../eventstore/types.ts';
 import { DESK_VISIBLE } from '../queries/desk.ts';
 import { wsServesOrgSql } from '../simulation/fit.ts';
 import { agentActor, orgScope, SYSTEM_ACTOR, userActor, userScope } from './common.ts';
+import {
+  autoApprovalEvents,
+  devopsQuestionEvents,
+  isCardMergeConflictApproval,
+  projectWaivesMergeApproval,
+  requestProject,
+} from './devops-routing.ts';
 import { hygieneReportEvents } from './hygiene.ts';
 import type { ReportResult, WsRef } from './shifts.ts';
 import { afterAccessChangedIn, deliver } from './workstation-setup.ts';
@@ -567,6 +575,8 @@ export async function resolveDevOpsApprovalIn(
   } | null;
   if (r.status !== 'needs_approval' || !ap || ap.resolution)
     throw conflict('not_awaiting_approval', 'this request is not waiting for approval');
+  if ((ap as { question?: boolean }).question)
+    throw conflict('is_question', 'the DevOps engineer asked a question: answer it on the desk');
 
   const message = (text: string, data?: Record<string, unknown>) =>
     threadMessage(r.thread_id, r.org_id, { kind: 'user', userId: user.id }, 'answer', text, data);
@@ -708,6 +718,55 @@ export async function applyDevopsReport(
     const project = req.card_id
       ? await one<{ project_id: string }>(tx, 'SELECT project_id FROM cards WHERE id=$1', [req.card_id])
       : undefined;
+    // A question (not an approval): the normal escalation chain, the answer resumes the request.
+    if (isDevopsQuestion(data.data.action)) {
+      const agentRow = await one(tx, 'SELECT * FROM agents WHERE id=$1', [shift.agent_id]);
+      if (!agentRow) return { accepted: false, error: 'agent not found' };
+      const q = await devopsQuestionEvents(
+        ctx,
+        tx,
+        req as never,
+        ws,
+        agentRow,
+        data.data,
+        await requestProject(tx, req as never),
+      );
+      await ctx.store.append(
+        [
+          ...q.events,
+          threadMessage(
+            req.thread_id,
+            req.org_id,
+            agent,
+            'question',
+            `${data.data.action}\n\n${data.data.reason}`,
+            { deskItemId: q.deskItemId },
+          ),
+        ],
+        { tx },
+      );
+      return { accepted: true };
+    }
+    // A merge-conflict resolution in the card's own worktree of a project that does not require approval for merges.
+    if (req.card_id && isCardMergeConflictApproval(data.data)) {
+      const proj = await requestProject(tx, req as never);
+      if (projectWaivesMergeApproval(proj)) {
+        await ctx.store.append(
+          [
+            ...autoApprovalEvents(req as never, shift.agent_id as string, data.data),
+            threadMessage(
+              req.thread_id,
+              req.org_id,
+              { kind: 'system' },
+              'system',
+              `Auto-approved: the project does not require approval for merges.\n\n${data.data.action}`,
+            ),
+          ],
+          { tx },
+        );
+        return { accepted: true };
+      }
+    }
     const { deskItemId } = await raiseDeskItem(ctx, tx, {
       kind: 'approval',
       subkind: 'devops',

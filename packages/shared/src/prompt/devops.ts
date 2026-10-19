@@ -1,4 +1,4 @@
-import type { DevopsRun, DevopsShift } from '../devops/index.ts';
+import { type DevopsRun, type DevopsShift, isDevopsQuestion } from '../devops/index.ts';
 import type { ShiftBrief } from '../protocol/runner.ts';
 import { formatCommandLine } from '../runs/plan.ts';
 import { commandForOutcome } from './commands.ts';
@@ -184,7 +184,7 @@ export function renderRunSection(run: DevopsRun): string {
       '- Before you conclude that a dependency (a database, a queue, a service) is missing, read the configuration of the environment the guide implies: `appsettings.{Environment}.json` next to `appsettings.json` and `Properties/launchSettings.json`, `.env.development`, `application-dev.*`. The base file often holds a placeholder (`localhost`) while the development file points at the real server. Compose files are the last resort.',
       '- Start services in that environment (for .NET: `--env ASPNETCORE_ENVIRONMENT=Development` when the guide relies on `appsettings.Development.json`; without it ASP.NET Core runs as Production and ignores `appsettings.Development.json`; check what `Properties/launchSettings.json` sets). .NET user secrets (`~/.microsoft/usersecrets`) are readable by services.',
       '- A dependency on another host of the network (a private IP such as 192.168.x.x or 10.x.x.x) counts as available: services run with the host network. Check that it answers (`bash -lc "timeout 3 bash -c \'</dev/tcp/<host>/<port>\'"`) before you call it missing.',
-      '- If you are still blocked, do not just fail: ask the owner with `aom devops-approval --action "Question: <exactly what is missing>" --reason "<what you checked, and the options, e.g. A) use X, B) allow Docker, C) give me the connection string>"`. The environment then shows as waiting for the owner, who answers on the desk; you are called again with the answer. Use `aom run fail` only when the owner answered and it still cannot run.',
+      '- If you are still blocked, do not just fail: ask the owner with `aom devops-question --text "<exactly what is missing>" --reason "<what you checked, and the options, e.g. A) use X, B) allow Docker, C) give me the connection string>"`. The environment then shows as waiting for the owner, who answers on the desk; you are called again with the answer. Use `aom run fail` only when the owner answered and it still cannot run.',
     ].join('\n'),
   );
   if (run.declared.length) {
@@ -217,7 +217,7 @@ export function renderRunSection(run: DevopsRun): string {
       '2. Setup steps, in order: `aom run step --name "npm ci" --repo <name> --cwd . -- npm ci`.',
       '3. Each service: `aom run service --name api --repo <name> --cwd src/Api --port http:5000:ASPNETCORE_HTTP_PORTS --health http://localhost:${port}/health [--env-file <absolute path outside the repository>] [--env KEY=VALUE] [--after db] -- dotnet run`. It returns when the service is healthy or failed (`aom run logs <service>` shows why).',
       '4. `aom run status` to check; `aom run ready --notes "<what you learned>"` when every wanted service is healthy: the runner then saves the steps as the project\'s run plan. Never put secrets in --env; use an env file outside the repository.',
-      '5. Blocked after the checks above: ask the owner (`aom devops-approval --action "Question: ..." --reason "<what is missing, the options>"`). Give up with `aom run fail --reason "<why and what would fix it>"` only when asking cannot help (the environment ends as failed and stays visible with your reason). Either way end the request with `aom devops-done` (summarise the URLs and ports, or why it failed).',
+      '5. Blocked after the checks above: ask the owner (`aom devops-question --text "..." --reason "<what is missing, the options>"`). Give up with `aom run fail --reason "<why and what would fix it>"` only when asking cannot help (the environment ends as failed and stays visible with your reason). Either way end the request with `aom devops-done` (summarise the URLs and ports, or why it failed).',
     ].join('\n'),
   );
   return out.join('\n\n');
@@ -236,8 +236,23 @@ export function renderDevopsPrompt(devops: DevopsShift): string {
     out.push('## Card');
     out.push(cardSection(devops.card));
   }
+  if (devops.mergeApprovalWaived) {
+    out.push('## Merges');
+    out.push(
+      "This project does not require the owner's approval for merges: resolve merge conflicts in the card worktree yourself (merge the main or working branch into the card branch there, fix the conflicts, commit); do not ask for approval for that. Still ask (`aom devops-approval`) for anything destructive (deleting branches, force-push, reset of shared branches) or outside your granted access.",
+    );
+  }
   if (devops.run) out.push(renderRunSection(devops.run));
-  if (devops.approval) {
+  if (devops.approval && isDevopsQuestion(devops.approval.action)) {
+    out.push('## Answer to your question');
+    out.push(
+      [
+        `You asked: ${devops.approval.action.replace(/^\s*question:\s*/i, '')}`,
+        devops.approval.note ? `The answer: ${devops.approval.note}` : 'The answer: (none recorded)',
+        'Carry on with the request using this answer.',
+      ].join('\n'),
+    );
+  } else if (devops.approval) {
     out.push('## Approved by the manager');
     out.push(
       [
@@ -261,7 +276,7 @@ export function renderDevopsPrompt(devops: DevopsShift): string {
       ? 'This is a run request: bring the environment up with `aom run` as described above, then report with `aom devops-done`.'
       : devops.hygiene
         ? 'This is a repository hygiene request. Run `aom hygiene run`: it fetches, commits uncommitted changes to the confirmed working branch, pulls, pushes and deletes merged agent branches in the repositories above, tells you what it could not resolve and ends the request. Do not run the git commands yourself, and never commit or push to a repository whose working branch is not confirmed: the command already refuses and asks the manager.'
-        : 'Do the request within your granted access, then report with `aom devops-done` or `aom devops-approval`.',
+        : 'Do the request within your granted access, then report with `aom devops-done` or `aom devops-approval` (approval) / `aom devops-question` (a question).',
   );
   return `${out.join('\n\n')}\n`;
 }

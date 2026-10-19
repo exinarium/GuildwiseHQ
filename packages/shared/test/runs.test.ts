@@ -493,7 +493,7 @@ describe('the DevOps prompt of a run request', () => {
     expect(text).toContain('appsettings.{Environment}.json');
     expect(text).toContain('ASPNETCORE_ENVIRONMENT=Development');
     expect(text).toContain('private IP');
-    expect(text).toContain('aom devops-approval --action "Question:');
+    expect(text).toContain('aom devops-question --text "');
     // the repository's own BUILD.md is still there, and the "no BUILD.md" hint is not
     expect(text).toContain('### BUILD.md of web (BUILD.md)');
     expect(text).not.toContain('no BUILD.md and no run instructions');

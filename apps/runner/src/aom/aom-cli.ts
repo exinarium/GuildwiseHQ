@@ -1432,6 +1432,23 @@ const VERBS: Record<string, Verb> = {
       }),
     );
   },
+  'devops-question': async (ctx, p) => {
+    const text = one(p, 'text');
+    const reason = one(p, 'reason');
+    if (!text || !reason)
+      throw new UsageError(
+        'usage: aom devops-question --text "<question>" --reason "<what you checked, the options>"',
+      );
+    // The server tells a question from an approval by the "Question:" prefix of the action.
+    return report(
+      ctx,
+      outcome('devops_approval', `Question: ${text}`, {
+        action: `Question: ${text.replace(/^\s*question:\s*/i, '')}`,
+        reason,
+        commands: [],
+      }),
+    );
+  },
   /**
    * The DevOps guard hook (a Claude Code PreToolUse hook on Bash, see devops/guard.ts): reads the hook input on stdin,
    * records the command through the runner and prints the permission decision. Not listed in `aom help`: agents never call it.
@@ -1831,6 +1848,7 @@ export const USAGE = `usage: aom <verb> [options]
   report mail-draft --text-file <txt> [--subject "<s>"] | report mail-draft-fail --note "<why>"   BA mail reply draft: report the draft for a person to review and send (terminal; it is never sent by itself)
   devops "<request>"                         ask this workstation's DevOps engineer (does not end your shift)
   devops-approval --action "<a>" --reason "<r>" [--command "<c>"]...   DevOps engineer: ask the manager
+  devops-question --text "<q>" --reason "<r>"   DevOps engineer: ask a question (goes through the normal chain; you resume with the answer)
   devops-done --summary "<text>" [--command "<c>"]...                  DevOps engineer: request completed
   sudo -- <command> [args...]                 DevOps engineer: run a command as administrator (only when the manager granted sudo; the password stays on the runner)
   toolchain list | add <name> --bin <dir>... [--read <dir>]... [--env KEY=VALUE]... | remove <name>   tools sandboxed agents may use; DevOps engineer: register what you installed so agents get it on PATH
