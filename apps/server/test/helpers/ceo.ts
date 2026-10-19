@@ -14,8 +14,10 @@ export async function keepOnline(w: World) {
     w.t.clock.now(),
   ]);
   await q(
+    // `ceo:1` is added; other capabilities the runner announced (full power) stay
     `INSERT INTO workstation_capabilities (workstation_id, capabilities, max_run_environments, updated_at) VALUES ($1,'{ceo:1}',2,now())
-     ON CONFLICT (workstation_id) DO UPDATE SET capabilities='{ceo:1}'`,
+     ON CONFLICT (workstation_id) DO UPDATE SET capabilities = CASE WHEN 'ceo:1' = ANY(workstation_capabilities.capabilities)
+       THEN workstation_capabilities.capabilities ELSE array_append(workstation_capabilities.capabilities, 'ceo:1') END`,
     [w.workstationId],
   );
 }

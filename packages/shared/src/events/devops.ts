@@ -33,6 +33,8 @@ export const DevOpsRequestOrigin = z.enum([
   'workstation',
   'chat',
   'conflict',
+  /** Filed by the CEO (`aom ceo act devops`); DevOps works behind the CEO. */
+  'ceo',
 ]);
 export type DevOpsRequestOrigin = z.infer<typeof DevOpsRequestOrigin>;
 

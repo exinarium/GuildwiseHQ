@@ -2,10 +2,12 @@ import { ACTION_CLASSES, type CeoActionDto } from '@aom/shared';
 import { CheckCircle2, CircleSlash, Lightbulb } from 'lucide-react';
 import { useState } from 'react';
 import { type CeoActionFilters, ceoActionsCsvUrl, useCeoActions } from '../../api/queries/ceo.ts';
+import { useCeoOrderTurns } from '../../api/queries/ceo-chat.ts';
 import { getActiveOrgId } from '../../lib/activeOrg.ts';
 import { classLabel, MODE_LABEL, pct } from '../../lib/ceo.ts';
 import { formatDateTime } from '../../lib/time.ts';
 import { Badge, Button, ErrorBox, Panel, Select, Spinner, TextInput } from '../ui.tsx';
+import { CorrectButton } from './CorrectDialog.tsx';
 import { UndoButton } from './UndoButton.tsx';
 
 const RESPONSE: Record<string, string> = {
@@ -82,6 +84,31 @@ function ActionRow({ a, owner }: { a: CeoActionDto; owner: boolean }) {
             {a.undo.reason}
           </span>
         ) : null}
+        {a.order && (
+          <span className="block text-xs text-subtle" data-testid="ceo-action-order">
+            Standing order: {a.order.title ?? a.order.entryId.slice(0, 8)}
+          </span>
+        )}
+        {a.correction ? (
+          <span className="block text-xs text-muted" data-testid="ceo-action-corrected">
+            Corrected: {a.correction.rule}
+          </span>
+        ) : (
+          a.mode === 'decided' && (
+            <span className="mt-1 block">
+              <CorrectButton
+                testId={`correct-${a.id}`}
+                target={{
+                  actionId: a.id,
+                  label: `${a.classLabel || classLabel(a.class)}: ${a.subjectLabel}`,
+                  ...(owner && a.undo.available && a.status !== 'undone'
+                    ? { undoLabel: a.undo.label ?? '' }
+                    : {}),
+                }}
+              />
+            </span>
+          )
+        )}
       </td>
     </tr>
   );
@@ -259,6 +286,52 @@ export function ActivityTab({ owner }: { owner: boolean }) {
         </table>
       </div>
       {!owner && <p className="text-sm text-muted">Only the Owner can undo an action.</p>}
+      <OrderTurns enabled={owner} />
     </div>
+  );
+}
+
+/** Turns the CEO ran for an Owner-authorized standing order: what it did, the commands, and "I'd rather you didn't". */
+function OrderTurns({ enabled }: { enabled: boolean }) {
+  const q = useCeoOrderTurns(enabled);
+  const turns = q.data?.turns ?? [];
+  if (!enabled || turns.length === 0) return null;
+  return (
+    <Panel title="Standing order turns">
+      <ul className="divide-y divide-line" data-testid="ceo-order-turns">
+        {turns.map((t) => (
+          <li key={t.turnId} className="flex flex-wrap items-start justify-between gap-2 py-2 text-sm">
+            <div className="min-w-0">
+              <p className="font-medium text-fg">
+                {t.orderTitle} <Badge tone={t.outcome === 'failed' ? 'red' : 'blue'}>{t.outcome}</Badge>
+              </p>
+              <p className="text-muted">{t.summary || t.ask}</p>
+              {t.commands.length > 0 && (
+                <details className="text-xs text-subtle">
+                  <summary className="cursor-pointer">{t.commands.length} commands</summary>
+                  <ul className="mt-1 list-disc pl-4 font-mono">
+                    {t.commands.map((c) => (
+                      <li key={c} className="[overflow-wrap:anywhere]">
+                        {c}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+              <p className="text-xs text-subtle">{formatDateTime(t.at)}</p>
+            </div>
+            {t.corrected ? (
+              <span className="text-xs text-muted">Corrected</span>
+            ) : (
+              <CorrectButton
+                label="I'd rather you didn't"
+                testId={`correct-order-${t.turnId}`}
+                target={{ orderTurnId: t.turnId, label: `Standing order: ${t.orderTitle}` }}
+              />
+            )}
+          </li>
+        ))}
+      </ul>
+    </Panel>
   );
 }

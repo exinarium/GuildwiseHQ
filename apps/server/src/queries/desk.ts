@@ -130,11 +130,19 @@ export function toDeskDto(
         }
       : null,
     projectId: r.project_id,
-    ...(r.data && typeof r.data === 'object' && (r.data.workstationId || r.data.key)
+    ...(r.data && typeof r.data === 'object' && (r.data.workstationId || r.data.key || r.data.askId)
       ? {
           data: {
             ...(typeof r.data.workstationId === 'string' ? { workstationId: r.data.workstationId } : {}),
             ...(typeof r.data.key === 'string' ? { key: r.data.key } : {}),
+            // "Authorize this execution" (docs/design/ceo-front-door.md section 14.1)
+            ...(r.subkind === 'ceo_permission'
+              ? Object.fromEntries(
+                  (['askId', 'turnId', 'tool', 'input', 'reason', 'expiresAt'] as const)
+                    .filter((k) => typeof r.data[k] === 'string')
+                    .map((k) => [k, r.data[k]]),
+                )
+              : {}),
           },
         }
       : {}),
@@ -234,6 +242,8 @@ export function toDeskDto(
       ? {
           ceoReport: {
             actions: r.data.ceo.actions ?? [],
+            ...(r.data.ceo.repeats ? { repeats: r.data.ceo.repeats } : {}),
+            ...(r.data.ceo.orderTurns ? { orderTurns: r.data.ceo.orderTurns } : {}),
             scores: r.data.ceo.scores ?? [],
             fallback: r.data.fallback === true,
           },

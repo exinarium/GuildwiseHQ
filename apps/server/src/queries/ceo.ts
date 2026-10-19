@@ -1,6 +1,7 @@
 import {
   type ActionClass,
   agreementScores,
+  CEO_FULL_POWER_CAPABILITY,
   type CeoActionDto,
   type CeoActionsQuery,
   type CeoStatusDto,
@@ -54,6 +55,10 @@ export function toActionDto(r: Row): CeoActionDto {
     responseChoice: r.response_choice ?? null,
     undoneAt: iso(r.undone_at),
     acceptedFrom: r.accepted_from ?? null,
+    correction: r.correction_id
+      ? { id: r.correction_id, rule: r.correction_rule ?? '', at: iso(r.correction_at) as string }
+      : null,
+    order: r.order_entry_id ? { entryId: r.order_entry_id, title: r.order_title ?? null } : null,
   };
 }
 
@@ -64,12 +69,16 @@ export async function listActions(
 ): Promise<{ actions: CeoActionDto[]; next: string | null }> {
   const list = await rows(
     db,
-    `SELECT * FROM ceo_actions WHERE org_id=$1
-        AND ($2::text IS NULL OR class=$2) AND ($3::text IS NULL OR mode=$3)
-        AND ($4::text IS NULL OR subject_id=$4 OR subject_label ILIKE '%' || $4 || '%')
-        AND ($5::timestamptz IS NULL OR created_at >= $5) AND ($6::timestamptz IS NULL OR created_at <= $6)
-        AND ($7::timestamptz IS NULL OR created_at < $7)
-      ORDER BY created_at DESC, event_seq DESC LIMIT $8`,
+    `SELECT a.*, c.id AS correction_id, c.rule AS correction_rule, c.created_at AS correction_at, l.title AS order_title
+       FROM ceo_actions a
+       LEFT JOIN LATERAL (SELECT id, rule, created_at FROM ceo_corrections WHERE action_id = a.id ORDER BY created_at DESC LIMIT 1) c ON true
+       LEFT JOIN ledger_entries l ON l.id = a.order_entry_id
+      WHERE a.org_id=$1
+        AND ($2::text IS NULL OR a.class=$2) AND ($3::text IS NULL OR a.mode=$3)
+        AND ($4::text IS NULL OR a.subject_id=$4 OR a.subject_label ILIKE '%' || $4 || '%')
+        AND ($5::timestamptz IS NULL OR a.created_at >= $5) AND ($6::timestamptz IS NULL OR a.created_at <= $6)
+        AND ($7::timestamptz IS NULL OR a.created_at < $7)
+      ORDER BY a.created_at DESC, a.event_seq DESC LIMIT $8`,
     [
       orgId,
       q.class ?? null,
@@ -110,6 +119,23 @@ export function actionsCsv(list: CeoActionDto[]): string {
   ].join('\n');
 }
 
+/** Can the CEO's turns with the Owner run with full power on its workstation (docs/design/ceo-front-door.md section 3.2)? */
+export async function fullPowerOf(
+  ctx: Ctx,
+  agent: Row | undefined,
+): Promise<{ state: 'on' | 'off' | 'unknown' | 'unbound'; workstationName: string | null }> {
+  if (!agent?.workstation_id) return { state: 'unbound', workstationName: null };
+  const w = await one(
+    ctx.pool,
+    `SELECT w.name, w.user_id, (w.connected AND w.last_seen_at > $2) AS online,
+            COALESCE((SELECT $3 = ANY(c.capabilities) FROM workstation_capabilities c WHERE c.workstation_id = w.id), false) AS fp
+       FROM workstations w WHERE w.id=$1`,
+    [agent.workstation_id, new Date(ctx.clock.now().getTime() - 45_000), CEO_FULL_POWER_CAPABILITY],
+  );
+  if (!w) return { state: 'unbound', workstationName: null };
+  return { state: !w.online ? 'unknown' : w.fp ? 'on' : 'off', workstationName: w.name };
+}
+
 /** Everything the CEO page's Overview needs. */
 export async function ceoStatus(
   ctx: Ctx,
@@ -129,7 +155,13 @@ export async function ceoStatus(
     [orgId, dayStart, monthStart],
   );
   const cur = await one(ctx.pool, 'SELECT currency FROM organizations WHERE id=$1', [orgId]);
+  const openRepeats = await one<{ n: string }>(
+    ctx.pool,
+    `SELECT count(*)::text AS n FROM ceo_repeats WHERE org_id=$1 AND status='open'`,
+    [orgId],
+  );
   const base = {
+    openRepeats: Number(openRepeats?.n ?? 0),
     isOwner: viewerRole === 'owner',
     canPause: viewerRole === 'owner' || viewerRole === 'admin',
     spend: {
@@ -151,6 +183,7 @@ export async function ceoStatus(
     return {
       hired: false,
       state: 'none',
+      fullPower: { state: 'unbound' as const, workstationName: null },
       offlineReason: null,
       agent: null,
       scores: [],
@@ -228,9 +261,11 @@ export async function ceoStatus(
     }
   }
   const state = !ceo.enabled ? 'disabled' : ceo.paused ? 'paused' : reach.ok ? 'active' : 'offline';
+  const fullPower = await fullPowerOf(ctx, agent);
   return {
     hired: true,
     state,
+    fullPower,
     offlineReason: ceo.enabled && !reach.ok ? ((reach as { reason?: string }).reason ?? null) : null,
     agent: agent
       ? {

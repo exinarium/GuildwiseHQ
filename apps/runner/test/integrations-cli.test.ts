@@ -59,3 +59,26 @@ describe('aom-runner integrations and auth', () => {
     }
   }, 60_000);
 });
+
+describe('aom-runner ceo full-power', () => {
+  it('is off by default; on and off change only config.ceo.fullPower; status shows it; a bad value fails', async () => {
+    const server = await FakeServer.start();
+    const dir = tmp();
+    try {
+      await run(['pair', '--server', server.url, '--code', 'ABCD-EFGH', '--data-dir', dir, '--mock']);
+      expect(loadConfig(join(dir, 'config.json')).ceo.fullPower).toBe(false);
+      const on = await run(['ceo', 'full-power', 'on', '--data-dir', dir]);
+      expect(on.exitCode, on.stderr).toBe(0);
+      expect(on.stdout).toContain('CEO full power is ON');
+      expect(on.stdout).toContain('Restart the runner');
+      expect(loadConfig(join(dir, 'config.json')).ceo.fullPower).toBe(true);
+      expect((await run(['ceo', 'full-power', 'status', '--data-dir', dir])).stdout).toContain('is ON');
+      const off = await run(['ceo', 'full-power', 'off', '--data-dir', dir]);
+      expect(off.stdout).toContain('CEO full power is off');
+      expect(loadConfig(join(dir, 'config.json')).ceo.fullPower).toBe(false);
+      expect((await run(['ceo', 'full-power', 'maybe', '--data-dir', dir])).exitCode).not.toBe(0);
+    } finally {
+      await server.close();
+    }
+  });
+});

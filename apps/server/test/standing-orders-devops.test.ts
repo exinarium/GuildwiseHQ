@@ -190,13 +190,10 @@ describe('standing orders in chats', () => {
     expect(titles(start.context.standingOrders)).toEqual(EXPECTED.map((t) => t));
   });
 
-  it('a chat with the DevOps engineer, without a project, carries the orders of every project', async () => {
+  it('a chat with the DevOps engineer is retired: DevOps works through the CEO now', async () => {
     const devops = (await q(`SELECT id FROM agents WHERE is_devops AND status='active'`))[0]?.id as string;
-    const start = await startChat(devops, {});
-    expect(titles(start.context.standingOrders)).toEqual([
-      'OTH: Other rule',
-      'TOY: Toy rule',
-      'Working Branch',
-    ]);
+    const res = await w.t.req('POST', '/api/chats', { cookie: w.owner.cookie, body: { agentId: devops } });
+    expect(res.status).toBe(409);
+    expect(res.body.error.code).toBe('devops_via_ceo');
   });
 });

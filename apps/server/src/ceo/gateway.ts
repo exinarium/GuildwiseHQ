@@ -1,8 +1,9 @@
-import { CEO_ROLE_KEY, type CeoRpc, CeoRpcSchema, renderCeoData } from '@aom/shared';
-import { agentActor } from '../commands/common.ts';
+import { CEO_ROLE_KEY, type CeoRpc, CeoRpcSchema, renderCeoData, streamId } from '@aom/shared';
+import { agentActor, orgScope, runnerActor, userActor } from '../commands/common.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Row, rows } from '../db/sql.ts';
 import { HttpError } from '../errors.ts';
+import { recordCorrection } from './corrections.ts';
 import {
   type CallOrigin,
   defaultKey,
@@ -11,8 +12,12 @@ import {
   recommendOnItem,
   runAction,
 } from './engine.ts';
+import { jobOp } from './jobs.ts';
 import { addMemory, searchMemories } from './memory.ts';
 import { notifyOwner } from './notify.ts';
+import { orderTurnTerminal } from './order-turns.ts';
+import { currentAuthority } from './orders.ts';
+import { askPermission, pollPermission } from './permissions.ts';
 import { ceoReviewReply } from './review.ts';
 import { buildSnapshot } from './snapshot.ts';
 import { loadCeo } from './state.ts';
@@ -20,7 +25,17 @@ import { createTask, listTasks, updateTask } from './tasks.ts';
 
 type Reply = [boolean, unknown?, string?];
 
-const WRITE_OPS = new Set(['act', 'recommend', 'notify', 'task', 'memory', 'review_reply']);
+const WRITE_OPS = new Set([
+  'act',
+  'recommend',
+  'notify',
+  'task',
+  'memory',
+  'review_reply',
+  'correction',
+  'order',
+  'dir',
+]);
 
 /** The durable subject of a notify call: the card (with its stage and status) behind a desk item, the desk item, or the task. */
 async function noticeSubject(
@@ -76,11 +91,38 @@ export async function ceoRpc(ctx: Ctx, shift: Row, params: Record<string, unknow
     return [false, undefined, 'the CEO is paused: it may read but not act'];
 
   const orgId = agent.org_id as string;
-  // Where the call comes from: the owner's chat, or a wake whose reasons may carry outside text.
+  // Where the call comes from, from the server's OWN records (never a field the runner or the model supplies): the owner's
+  // chat turn, an order turn (`ceo_turns`), or a wake whose reasons may carry outside text (`ceo_batches`).
   let origin: CallOrigin;
+  let turn: Row | undefined;
   if (shift.kind === 'chat') {
-    const threadId = ctx.services.chat.threadOfChat(shift.id) ?? ceo.chatThreadId ?? undefined;
-    origin = { scopeId: shift.id, chatThreadId: threadId, untrusted: false };
+    turn = await one(ctx.pool, 'SELECT * FROM ceo_turns WHERE id=$1 AND org_id=$2', [shift.id, orgId]);
+    const threadId =
+      turn?.thread_id ?? ctx.services.chat.threadOfChat(shift.id) ?? ceo.chatThreadId ?? undefined;
+    if (turn?.mode === 'order') {
+      const auth = turn.order_entry_id ? await currentAuthority(ctx.pool, turn.order_entry_id) : undefined;
+      if (!auth || auth.versionHash !== turn.order_version_hash)
+        return [
+          false,
+          undefined,
+          'the authority of this order is no longer in force (it was edited, revoked or retired): stop, and say so in `aom ceo order done`',
+        ];
+      origin = {
+        kind: 'order',
+        scopeId: shift.id,
+        turnId: shift.id,
+        chatThreadId: threadId,
+        untrusted: false,
+        order: { entryId: auth.entryId, versionHash: auth.versionHash, covers: auth.covers },
+      };
+    } else
+      origin = {
+        kind: 'owner',
+        scopeId: shift.id,
+        chatThreadId: threadId,
+        ...(turn ? { turnId: shift.id } : {}),
+        untrusted: false,
+      };
   } else {
     const batch = await one(ctx.pool, 'SELECT id FROM ceo_batches WHERE shift_id=$1', [shift.id]);
     const u = batch
@@ -90,13 +132,120 @@ export async function ceoRpc(ctx: Ctx, shift: Row, params: Record<string, unknow
           [batch.id],
         )
       : undefined;
-    origin = { scopeId: batch?.id ?? shift.id, batchId: batch?.id, untrusted: u?.u === true };
+    origin = { kind: 'wake', scopeId: batch?.id ?? shift.id, batchId: batch?.id, untrusted: u?.u === true };
   }
+  const kind = origin.kind as 'owner' | 'order' | 'wake';
   const owner = await ownerPrincipal(ctx, orgId);
   const env = makeEnv(ctx, ceo, { id: agent.id, name: agent.name }, owner, origin);
 
   try {
     switch (rpc.op) {
+      case 'correction': {
+        // "You did X, I'd rather Y": the owner's words from his own turn (an order or a wake never records one).
+        if (kind !== 'owner' || !turn)
+          return [false, undefined, "corrections are recorded in the owner's chat turn only"];
+        const r = await recordCorrection(ctx, owner, orgId, {
+          ...(rpc.action ? { actionId: rpc.action } : {}),
+          ...(turn.message_id ? { chatMessageId: turn.message_id } : {}),
+          text: rpc.text,
+          rule: rpc.rule,
+          remedy: rpc.remedy === 'undo' ? 'undo' : 'none',
+          makeRule: true,
+          threadId: turn.thread_id,
+          viaCeo: true,
+        });
+        return [true, { status: 'executed', ...r }];
+      }
+      case 'job': {
+        if (rpc.sub !== 'repeats' && kind === 'wake')
+          return [false, undefined, 'the job log belongs to an owner or order turn'];
+        return [true, await jobOp(ctx, turn, agent.id, orgId, rpc)];
+      }
+      case 'order': {
+        if (rpc.sub === 'invoke') {
+          if (kind !== 'wake') return [false, undefined, 'only a wake may start an order turn'];
+          if (!rpc.entryId) return [false, undefined, 'give the order id'];
+          const r = await runAction(
+            env,
+            {
+              op: 'act',
+              action: 'invoke-order',
+              params: { entryId: rpc.entryId, ...(rpc.wake ? { wake: rpc.wake } : {}), why: rpc.why ?? '' },
+              reason:
+                (rpc.why ?? 'the event falls under this order').slice(0, 2000) ||
+                'the event falls under this order',
+              confidence: rpc.confidence ?? 0.8,
+              evidence: [],
+              dryRun: false,
+            },
+            origin,
+          );
+          return [true, r];
+        }
+        if (kind !== 'order' || !turn)
+          return [false, undefined, 'only an order turn declines or finishes an order'];
+        return [true, await orderTurnTerminal(ctx, turn, rpc)];
+      }
+      case 'permission': {
+        if (kind === 'wake' || !turn)
+          return [false, undefined, 'permission questions belong to an owner or order turn'];
+        if (rpc.sub === 'ask') return [true, await askPermission(ctx, turn, rpc)];
+        if (!rpc.askId) return [false, undefined, 'give the question id'];
+        return [true, await pollPermission(ctx, turn, rpc.askId)];
+      }
+      case 'devops_status':
+        return [true, await devopsStatus(ctx, orgId, rpc.requestId)];
+      case 'dir': {
+        if (kind !== 'owner' || !turn)
+          return [false, undefined, "working directories are added in the owner's turn"];
+        const cur =
+          (await one(ctx.pool, 'SELECT dirs FROM threads WHERE id=$1', [turn.thread_id]))?.dirs ?? [];
+        if (!cur.includes(rpc.path) && cur.length < 20)
+          await ctx.store.append([
+            {
+              streamId: streamId.thread(turn.thread_id),
+              event: {
+                type: 'ChatThreadDirsSet',
+                payload: { threadId: turn.thread_id, dirs: [...cur, rpc.path], by: owner.id },
+              },
+              actor: userActor(owner.id),
+              scope: orgScope(orgId),
+            },
+          ]);
+        return [
+          true,
+          {
+            status: 'executed',
+            message: `Added ${rpc.path}: it is part of this conversation from the next turn on.`,
+          },
+        ];
+      }
+      case 'restart': {
+        if (kind !== 'owner' || !turn || !shift.workstation_id)
+          return [false, undefined, "the runner restarts from the owner's turn only"];
+        await ctx.store.append([
+          {
+            streamId: streamId.ceo(orgId),
+            event: {
+              type: 'RunnerRestartRequested',
+              payload: {
+                workstationId: shift.workstation_id,
+                orgId,
+                by: `turn:${turn.id}`,
+                ...(rpc.reason ? { reason: rpc.reason } : {}),
+              },
+            },
+            actor: runnerActor(shift.workstation_id),
+            scope: orgScope(orgId),
+          },
+        ]);
+        await ctx.pool.query(
+          `INSERT INTO ceo_flags (org_id, flag, value, at) VALUES ($1,$2,$3,$4)
+           ON CONFLICT (org_id, flag) DO UPDATE SET value=EXCLUDED.value, at=EXCLUDED.at`,
+          [orgId, `restart:${shift.workstation_id}`, rpc.reason ?? '', ctx.clock.now()],
+        );
+        return [true, { status: 'executed', message: 'Restart scheduled after this reply.' }];
+      }
       case 'snapshot':
         return [true, { text: await buildSnapshot(ctx, orgId, rpc.section) }];
       case 'show':
@@ -187,6 +336,32 @@ export async function ceoRpc(ctx: Ctx, shift: Row, params: Record<string, unknow
     if (err instanceof HttpError) return [false, undefined, err.message];
     throw err;
   }
+}
+
+/** The state of a DevOps request the CEO filed (`aom ceo act devops --wait` polls it): status, summary and the last progress lines. */
+async function devopsStatus(ctx: Ctx, orgId: string, requestId: string): Promise<Record<string, unknown>> {
+  const r = await one(
+    ctx.pool,
+    'SELECT id, status, summary, result_summary, thread_id, updated_at FROM devops_requests WHERE id=$1 AND org_id=$2',
+    [requestId, orgId],
+  );
+  if (!r) return { status: 'unknown', message: 'no such DevOps request' };
+  const lines = await rows(
+    ctx.pool,
+    `SELECT author_kind, kind, body FROM thread_messages WHERE thread_id=$1 AND kind IN ('comment','system','handoff','chat')
+      ORDER BY created_at DESC, event_seq DESC LIMIT 6`,
+    [r.thread_id],
+  );
+  return {
+    requestId: r.id,
+    status: r.status,
+    done: r.status === 'done' || r.status === 'failed',
+    summary: r.result_summary ?? null,
+    progress: lines
+      .reverse()
+      .filter((l) => l.author_kind !== 'user')
+      .map((l) => String(l.body).slice(0, 300)),
+  };
 }
 
 async function show(ctx: Ctx, orgId: string, rpc: Extract<CeoRpc, { op: 'show' }>): Promise<string> {
@@ -321,8 +496,11 @@ async function taskOp(
   if (rpc.sub === 'list') return { tasks: await listTasks(ctx, orgId, true) };
   // Tasks come from the owner: only the owner's chat opens one.
   if (rpc.sub === 'create') {
-    if (!origin.chatThreadId || origin.untrusted)
-      return { status: 'refused', message: "tasks are opened from the owner's chat, not from a wake" };
+    if (!origin.chatThreadId || origin.untrusted || origin.kind === 'order')
+      return {
+        status: 'refused',
+        message: "tasks are opened from the owner's chat, not from a wake or an order",
+      };
     if (!rpc.title) return { status: 'refused', message: 'a title is required' };
     const id = await createTask(ctx, orgId, {
       title: rpc.title,
@@ -362,8 +540,8 @@ async function memoryOp(
     return { status: 'refused', message: 'only the owner confirms a memory (the Memory tab)' };
   if (!rpc.text) return { status: 'refused', message: 'give the rule with --text' };
   // Memories come from owner-authored sources only: the owner's chat, or the owner's own desk answer.
-  if (origin.untrusted || !origin.chatThreadId)
-    if (!(rpc.source?.startsWith('desk:') && !origin.untrusted))
+  if (origin.untrusted || !origin.chatThreadId || origin.kind === 'order')
+    if (!(rpc.source?.startsWith('desk:') && !origin.untrusted && origin.kind !== 'order'))
       return {
         status: 'refused',
         message: 'a memory may only come from what the owner said in the CEO chat or answered on the desk',

@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import {
   type ChatContext,
@@ -11,6 +12,7 @@ import {
   type ReadableFolder,
   renderChatInstructions,
   type ServerToRunnerOf,
+  type ToolCounts,
   type Usage,
 } from '@aom/shared';
 import { formatLimitTime } from '../adapters/claude-usage-limit.ts';
@@ -25,6 +27,9 @@ import {
   type ServerHttp,
   syncCardAttachments,
 } from '../attachments/index.ts';
+import { type GuardClone, markJobStarted } from '../ceo/guard-hook.ts';
+import { selectChatProfile } from '../ceo/profile.ts';
+import { composeOwnerMessage, removeTurnDir, turnDirOf, writeTurnFiles } from '../ceo/turn-files.ts';
 import { recordDevopsAudit } from '../devops/audit.ts';
 import { redactCommand } from '../devops/guard.ts';
 import { type ExternalAdapters, formatSource, readScopedJira } from '../external/index.ts';
@@ -34,6 +39,7 @@ import type { IpcServer, ShiftIpcHandler } from '../ipc/server.ts';
 import { type Logger, nullLogger } from '../log.ts';
 import type { RunnerPaths } from '../paths.ts';
 import { mergeReadFolders, resolveOrgFolderRepos, resolveReadRepos } from '../read-repos.ts';
+import type { RestartAfterReply } from '../restart-after-reply.ts';
 import { cleanAgentTmp, ensureSandbox, holdAgentTmp, type Sandbox, sandboxEnv } from '../sandbox/sandbox.ts';
 import { agentPath, type ToolchainRegistry, toolchainRpc } from '../toolchain/registry.ts';
 import { readVaultContext } from '../vaults/context.ts';
@@ -49,7 +55,13 @@ export interface ChatDeps {
   send(
     type: 'chat.delta' | 'chat.done' | 'chat.error' | 'devops.audit',
     payload: Record<string, unknown>,
-  ): void;
+  ): string | undefined;
+  /** The local opt-in `aom-runner ceo full-power on`, read fresh at each turn (default: off). */
+  ceoFullPower?: () => boolean;
+  /** The repository clones on this workstation (the use-the-system hook nudges edits inside them). */
+  guardClones?: () => GuardClone[];
+  /** `aom runner restart` in an owner turn: the restart that waits for the reply to be acknowledged. */
+  restart?: RestartAfterReply;
   /** `aom sudo` in the DevOps engineer's chat: runs a command with administrator rights (the stored password stays here). */
   sudoRun?: (cmd: string, args: string[]) => Promise<{ exitCode: number; stdout: string; stderr: string }>;
   /** M7: the ticket systems of this workstation (`aom source read`); credentials never leave it. */
@@ -80,7 +92,13 @@ interface ActiveChat {
   sandbox?: Sandbox;
   releaseTmp?: () => void;
   stopReason?: 'cancelled' | string;
+  /** A CEO owner or order turn in the full-power profile: it survives a dropped connection. */
+  fullPower?: 'owner' | 'order';
+  turnDir?: string;
 }
+
+/** How many finished chat ids are remembered to ignore a redelivered `chat.start`. */
+const RECENT_CHATS = 500;
 
 /**
  * Chat verbs a conversation may use (chat-scoped token): `ledger search`, `comment`, and reading the thread; the BA's
@@ -124,6 +142,8 @@ const zeroUsage = (): Usage => ({ inputTokens: 0, outputTokens: 0, cacheReadToke
  */
 export class ChatManager {
   private readonly active = new Map<string, ActiveChat>();
+  /** Chats that ran to an end in this process: a redelivered `chat.start` of one is ignored. */
+  private readonly recent = new Set<string>();
   private readonly log: Logger;
 
   constructor(readonly deps: ChatDeps) {
@@ -134,12 +154,45 @@ export class ChatManager {
     return this.active.size;
   }
 
+  /** The chats running right now (announced in `hello.activeChats`). */
+  activeIds(): string[] {
+    return [...this.active.keys()];
+  }
+
+  private remember(chatId: string): void {
+    this.recent.add(chatId);
+    if (this.recent.size > RECENT_CHATS) {
+      const first = this.recent.values().next().value;
+      if (first !== undefined) this.recent.delete(first);
+    }
+  }
+
+  /** The outbox frame of each chat's terminal message (`chat.done` or `chat.error`): the restart waits for its ack. */
+  private readonly terminalFrames = new Map<string, string>();
+
+  /** The id of the frame that ends chat `chatId`, once it was sent. */
+  terminalFrameId(chatId: string): string | undefined {
+    return this.terminalFrames.get(chatId);
+  }
+
+  private terminal(chatId: string, id: string | undefined): void {
+    if (typeof id !== 'string') return;
+    this.terminalFrames.set(chatId, id);
+    if (this.terminalFrames.size > RECENT_CHATS) {
+      const first = this.terminalFrames.keys().next().value;
+      if (first !== undefined) this.terminalFrames.delete(first);
+    }
+  }
+
   private error(msg: ChatStartMsg, error: string): void {
-    this.deps.send('chat.error', { chatId: msg.chatId, threadId: msg.threadId, error });
+    this.terminal(
+      msg.chatId,
+      this.deps.send('chat.error', { chatId: msg.chatId, threadId: msg.threadId, error }),
+    );
   }
 
   async handleStart(msg: ChatStartMsg): Promise<void> {
-    if (this.active.has(msg.chatId)) return; // redelivery
+    if (this.active.has(msg.chatId) || this.recent.has(msg.chatId)) return; // redelivery
     const chat: ActiveChat = { msg };
     this.active.set(msg.chatId, chat);
     try {
@@ -150,6 +203,9 @@ export class ChatManager {
     } finally {
       if (chat.token) this.deps.ipc.revoke(chat.token);
       this.active.delete(msg.chatId);
+      this.remember(msg.chatId);
+      if (chat.turnDir) removeTurnDir(chat.turnDir);
+      this.deps.restart?.turnFinished(msg.chatId, this.terminalFrames.get(msg.chatId));
       chat.releaseTmp?.();
       if (chat.sandbox) await cleanAgentTmp(chat.sandbox.tmp);
     }
@@ -162,13 +218,19 @@ export class ChatManager {
     await c.session?.stop('chat.cancel');
   }
 
-  /** The connection dropped: the server fails these chats too; the error reaches it through the outbox. */
-  async cancelAll(reason: string): Promise<void> {
+  /**
+   * The connection dropped (or the runner stops): the server fails these chats too; the error reaches it through the
+   * outbox. A CEO owner or order turn is kept when `keepFullPower` is set (a dropped connection): its `chat.done` goes
+   * through the durable outbox and is delivered on reconnect.
+   */
+  async cancelAll(reason: string, opts: { keepFullPower?: boolean } = {}): Promise<void> {
     await Promise.all(
-      [...this.active.values()].map(async (c) => {
-        c.stopReason ??= reason;
-        await c.session?.stop(`chat.${reason}`);
-      }),
+      [...this.active.values()]
+        .filter((c) => !(opts.keepFullPower && c.fullPower))
+        .map(async (c) => {
+          c.stopReason ??= reason;
+          await c.session?.stop(`chat.${reason}`);
+        }),
     );
   }
 
@@ -217,10 +279,16 @@ export class ChatManager {
       },
       rpc: async (req: IpcRpcRequest): Promise<IpcRpcResponse> => {
         // The owner's chat with the CEO: `aom ceo ...` (the server checks the agent and the owner again).
-        if (req.method === 'ceo')
-          return chat.msg.agent.roleKey === 'ceo'
-            ? this.deps.rpc(chatId, req.method, req.params)
-            : { ok: false, error: 'not_ceo: only the CEO may use `aom ceo`' };
+        if (req.method === 'ceo') {
+          if (chat.msg.agent.roleKey !== 'ceo')
+            return { ok: false, error: 'not_ceo: only the CEO may use `aom ceo`' };
+          // `aom ceo job start` also opens the use-the-system hook for the rest of this turn (a nudge, not a boundary).
+          if (chat.fullPower && chat.turnDir && req.params.op === 'job' && req.params.sub === 'start')
+            markJobStarted(chat.turnDir);
+          return this.deps.rpc(chatId, req.method, req.params);
+        }
+        // `aom runner restart`: only in a full-power owner turn; the restart waits for this turn's reply (design 5.6).
+        if (req.method === 'runner.restart') return this.runnerRestart(chat, req.params);
         if (req.method === 'source.read') return this.readSource(chat, req.params);
         if (
           req.method === 'source.attachments' ||
@@ -251,6 +319,18 @@ export class ChatManager {
           : { ok: false, error: `${req.method} is not available in a chat conversation` };
       },
     };
+  }
+
+  private async runnerRestart(chat: ActiveChat, params: Record<string, unknown>): Promise<IpcRpcResponse> {
+    if (chat.fullPower !== 'owner' || !this.deps.restart)
+      return {
+        ok: false,
+        error: "`aom runner restart` is available in the owner's CEO chat and in DevOps shifts only",
+      };
+    const reason = typeof params.reason === 'string' ? params.reason.slice(0, 500) : undefined;
+    this.deps.restart.request(chat.msg.chatId, reason);
+    await this.deps.rpc(chat.msg.chatId, 'ceo', { op: 'restart', ...(reason ? { reason } : {}) });
+    return { ok: true, result: { message: 'Restart scheduled after this reply. Finish your reply now.' } };
   }
 
   /**
@@ -373,9 +453,134 @@ export class ChatManager {
     }
   }
 
+  /** Tool use of a session, for `chat.done.toolCounts` and the audit of the Bash commands. */
+  private countTool(t: { name: string; summary: string }, counts: ToolCounts, commands: string[]): void {
+    if (t.name === 'Bash') {
+      counts.bash++;
+      if (commands.length < 200) commands.push(redactCommand(t.summary).slice(0, 500));
+    } else if (['Edit', 'Write', 'NotebookEdit', 'MultiEdit'].includes(t.name)) counts.edit++;
+    else if (t.name.startsWith('mcp__')) {
+      if (t.name !== 'mcp__aom_permission__ask') counts.mcp++;
+    } else counts.other++;
+  }
+
+  /**
+   * A CEO owner or order turn in the full-power profile (docs/design/ceo-front-door.md section 3.3): the Owner's own Claude
+   * Code, no sandbox. Only reached after `selectChatProfile` said `full` (server-decided mode, CEO agent, local opt-in,
+   * authorized order). The reply goes through the durable outbox, and the turn survives a dropped connection.
+   */
+  private async runOwnerTurn(chat: ActiveChat, mode: 'owner' | 'order'): Promise<void> {
+    const { msg } = chat;
+    const { paths } = this.deps;
+    const adapter = this.deps.adapters.get(msg.agent.runtime);
+    const caps = adapter ? await adapter.capabilities() : undefined;
+    if (!adapter?.startOwnerTurn || !caps?.available)
+      return this.error(
+        msg,
+        `runtime ${msg.agent.runtime} is not available for the CEO's full-power turns on this workstation`,
+      );
+    chat.fullPower = mode;
+    const turnDir = turnDirOf(paths.root, msg.chatId);
+    chat.turnDir = turnDir;
+    chat.token = this.deps.ipc.registerShift(this.handlerFor(chat));
+    const ipcEnv: Record<string, string> = {
+      AOM_IPC_URL: this.deps.ipc.url,
+      ...(this.deps.ipc.socketPath ? { AOM_IPC_SOCKET: this.deps.ipc.socketPath } : {}),
+      AOM_SHIFT_TOKEN: chat.token,
+    };
+    writeTurnFiles({
+      turnDir,
+      brief: msg.context.ceo?.brief ?? '',
+      mode,
+      ipcEnv,
+      runnerRoots: [paths.root],
+      pid: process.pid,
+      clones: this.deps.guardClones?.() ?? [],
+    });
+    const cwd = msg.cwd && existsSync(msg.cwd) ? msg.cwd : homedir();
+    chat.session = await adapter.startOwnerTurn({
+      chatId: msg.chatId,
+      mode,
+      message: composeOwnerMessage(msg),
+      cwd,
+      agent: msg.agent,
+      env: {
+        ...ipcEnv,
+        AOM_SHIFT_ID: msg.chatId,
+        AOM_CEO_TURN_DIR: turnDir,
+        PATH: `${paths.bin}${delimiter}${process.env.PATH ?? ''}`,
+      },
+      turnDir,
+      ...(msg.resumeSessionId ? { resumeSessionId: msg.resumeSessionId } : {}),
+      ...(msg.addDirs?.length ? { addDirs: msg.addDirs } : {}),
+      logFile: `${paths.shiftLogs}/chat-${msg.chatId}.jsonl`,
+    });
+    if (chat.stopReason) void chat.session.stop(`chat.${chat.stopReason}`);
+    await this.finishTurn(chat, { fullPower: true });
+  }
+
+  /** Reads a session to its end and reports it: `chat.done` (or `chat.error`). */
+  private async finishTurn(chat: ActiveChat, o: { fullPower: boolean; degraded?: string }): Promise<void> {
+    const { msg } = chat;
+    const session = chat.session;
+    if (!session) return;
+    let sessionId: string | undefined;
+    let streamed = '';
+    let finalText: string | undefined;
+    const counts: ToolCounts = { bash: 0, edit: 0, mcp: 0, other: 0 };
+    const commands: string[] = [];
+    let exit: {
+      code: number | null;
+      error?: string;
+      authFailed?: boolean;
+      usageLimit?: { until: string };
+    } = { code: null };
+    for await (const ev of session.events()) {
+      if (ev.kind === 'session') sessionId = ev.runtimeSessionId;
+      else if (ev.kind === 'delta') {
+        streamed += ev.text;
+        this.deps.send('chat.delta', { chatId: msg.chatId, threadId: msg.threadId, text: ev.text });
+      } else if (ev.kind === 'final') finalText = ev.text;
+      else if (ev.kind === 'tool') this.countTool(ev, counts, commands);
+      else if (ev.kind === 'exit') exit = ev;
+    }
+
+    if (chat.stopReason) return this.error(msg, chat.stopReason);
+    if (exit.code !== 0) {
+      if (exit.authFailed)
+        return this.error(
+          msg,
+          'The Claude login on this workstation has expired. On that machine run `claude`, then `/login`; this conversation works again once you have.',
+        );
+      if (exit.usageLimit)
+        return this.error(
+          msg,
+          `The Claude usage limit on this workstation has been reached. Conversations and agents work again at ${formatLimitTime(new Date(exit.usageLimit.until))}; nothing is lost, please try again then.`,
+        );
+      return this.error(msg, exit.error ?? `the ${msg.agent.runtime} process exited with code ${exit.code}`);
+    }
+    const usage = session.usage() ?? zeroUsage();
+    this.terminal(
+      msg.chatId,
+      this.deps.send('chat.done', {
+        chatId: msg.chatId,
+        threadId: msg.threadId,
+        messageText: finalText ?? streamed,
+        usage,
+        ...(sessionId ? { runtimeSessionId: sessionId } : {}),
+        ...(o.fullPower ? { toolCounts: counts, ...(commands.length ? { commands } : {}) } : {}),
+        ...(o.degraded ? { degraded: o.degraded } : {}),
+        ...(usage.model ? { model: usage.model } : {}),
+      }),
+    );
+  }
+
   private async run(chat: ActiveChat): Promise<void> {
     const { msg } = chat;
     const { paths } = this.deps;
+    const profile = selectChatProfile(msg, { fullPower: this.deps.ceoFullPower?.() ?? false });
+    if (profile.kind === 'refuse') return this.error(msg, profile.error);
+    if (profile.kind === 'full') return this.runOwnerTurn(chat, profile.mode);
     const adapter = this.deps.adapters.get(msg.agent.runtime);
     const caps = adapter ? await adapter.capabilities() : undefined;
     if (!adapter?.startChat || !caps?.available) {
@@ -465,7 +670,7 @@ export class ChatManager {
     };
     chat.session = await adapter.startChat({
       chatId: msg.chatId,
-      message: msg.message,
+      message: msg.ceoMode ? composeOwnerMessage(msg) : msg.message,
       cwd,
       sandbox,
       agent: msg.agent,
@@ -481,44 +686,9 @@ export class ChatManager {
     });
     if (chat.stopReason) void chat.session.stop(`chat.${chat.stopReason}`); // cancelled while starting
 
-    let sessionId: string | undefined;
-    let streamed = '';
-    let finalText: string | undefined;
-    let exit: {
-      code: number | null;
-      error?: string;
-      authFailed?: boolean;
-      usageLimit?: { until: string };
-    } = { code: null };
-    for await (const ev of chat.session.events()) {
-      if (ev.kind === 'session') sessionId = ev.runtimeSessionId;
-      else if (ev.kind === 'delta') {
-        streamed += ev.text;
-        this.deps.send('chat.delta', { chatId: msg.chatId, threadId: msg.threadId, text: ev.text });
-      } else if (ev.kind === 'final') finalText = ev.text;
-      else if (ev.kind === 'exit') exit = ev;
-    }
-
-    if (chat.stopReason) return this.error(msg, chat.stopReason);
-    if (exit.code !== 0) {
-      if (exit.authFailed)
-        return this.error(
-          msg,
-          'The Claude login on this workstation has expired. On that machine run `claude`, then `/login`; this conversation works again once you have.',
-        );
-      if (exit.usageLimit)
-        return this.error(
-          msg,
-          `The Claude usage limit on this workstation has been reached. Conversations and agents work again at ${formatLimitTime(new Date(exit.usageLimit.until))}; nothing is lost, please try again then.`,
-        );
-      return this.error(msg, exit.error ?? `the ${msg.agent.runtime} process exited with code ${exit.code}`);
-    }
-    this.deps.send('chat.done', {
-      chatId: msg.chatId,
-      threadId: msg.threadId,
-      messageText: finalText ?? streamed,
-      usage: chat.session.usage() ?? zeroUsage(),
-      ...(sessionId ? { runtimeSessionId: sessionId } : {}),
+    await this.finishTurn(chat, {
+      fullPower: false,
+      ...(profile.kind === 'degraded' ? { degraded: profile.degraded } : {}),
     });
   }
 }

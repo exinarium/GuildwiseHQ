@@ -91,6 +91,7 @@ const SUBKIND_LABEL: Record<string, string> = {
   ceo_report: 'CEO report',
   ceo_notice: 'CEO notice',
   ceo_decision: 'CEO decision',
+  ceo_permission: 'Authorize this execution',
   ledger_conflict: 'Ledger conflict',
   worktree_rejections: 'Card keeps being rejected',
 };

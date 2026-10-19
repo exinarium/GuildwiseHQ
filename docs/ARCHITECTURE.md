@@ -1281,6 +1281,76 @@ becomes a pinned `spec_needed` alert. `intake` takes `cardType`, `ticket` (the c
 same completion path, and without a BA reports "recommend hiring a BA" instead of refusing. The reporter sweep and routing use the
 same test for "the CEO owns the BA's reporter job" (`ceoActive` and `ceoReachable`).
 
+**The front door, step 1 (`docs/design/ceo-front-door.md` sections 3 to 8, with the owner decisions of section 14).**
+
+*Provenance.* Every `aom ceo` call has an origin the SERVER derives from its own records, never from a field the runner or the
+model supplies (`ceo/gateway.ts`): `owner` (a `chat` shift with a `ceo_turns` row of mode `owner`; no row means a legacy chat,
+still `owner`), `order` (a `ceo_turns` row of mode `order`) and `wake` (a `ceo_batches` row; untrusted when any of its wakes is).
+`evaluatePolicy` takes `origin: {kind, covers?}`: an `owner` turn turns a `recommend` verdict caused by mode, reserved key,
+confidence or desk mode into an inline confirmation (`verdict.inline`; the desk item `ceo_recommendation` carries
+`data.inlineTurnId`, the chat shows Approve / No, and `POST /api/ceo/turns/:id/confirm` resolves it through the Owner's session,
+never through text); an `order` turn may act on an owner-reserved key only when the authority's `covers` lists it; a wake keeps
+today's rules. New classes `card.specify` (step 0), `deploy.run` (reserved for step 2) and `order.invoke`; policies saved before a
+class existed take its default (`ceo/state.ts withNewClasses`). New verbs: `draft-cards` (up to ten draft cards), `devops` by
+`--project`, `--env` or `--workstation` (`actions.ts devopsWorkstation`: the target's workstation, else the Owner's DevOps
+workstation; origin `ceo`), `invoke-order` (`actions3.ts`), plus the rpc ops `correction`, `job`, `order`, `permission`,
+`devops_status`, `dir` and `restart` (`packages/shared/src/ceo/ipc.ts`).
+
+*The owner turn.* `ChatRelay.send` on the CEO thread (`chat/relay.ts sendCeo`, `chat/ceo-turns.ts`) resolves the model, persists
+the turn (`ceo_turns`: `CeoTurnQueued`, then `CeoTurnStarted` with `ShiftStarted.mode`, then `CeoTurnFinished`; the turn id is the
+chat id and the shift id), and sends `chat.start` with `ceoMode`, `cwd` (`settings.ownerTurn.cwd`), `addDirs` (the thread's
+`dirs`), `context.ceo.brief` (the static brief, every turn: a resumed session does not keep its system prompt) and `briefDelta` (a
+fenced context block: the full context on the first turn of a session, the changes since the last finished turn after that).
+`ceoMode` is sent only when the CEO's workstation belongs to the Owner; the runner additionally needs its local opt-in
+(`aom-runner ceo full-power on`, announced as the hello capability `ceo-full-power:1`) or it runs the restricted profile and
+reports `chat.done.degraded='full_power_off'`. Order turns are refused by the runner without the Owner's mark and a hash match.
+*Model switch*: message override, else `threads.model_override` (`ChatThreadModelSet`), else `settings.models.chat`, validated
+against `MODEL_CHOICES` (`packages/shared/src/models/choices.ts`); a reply stores `data.runtime`, `data.runtimeSessionId`,
+`data.cwd` and `data.sessionStartedAt`, and the next turn resumes the session of the chosen runtime unless the working directory
+changed, 24 hours or 120K context tokens passed (a new session then starts with a handover: the last 20 messages, open tasks and
+corrections). *Queueing*: an offline workstation (or an earlier queued message) queues the turn (`data.queued`, the browser gets
+`chat.queued`, a push says so); `reconcile` (after `hello`) drains one turn at a time through `ChatRelay.onReconnect`, and a turn
+older than 72 hours is not sent until the Owner presses Send or Drop (`POST /api/ceo/queue/:id`). A CEO owner or order turn
+is not failed when the runner's socket drops (`workstationLost` skips it); the runner reports the chats it still holds in
+`hello.activeChats` and `reconcileCeoTurns` fails the rest. State survives a server restart: `ChatRelay.hydrate` rebuilds the
+in-flight record from `ceo_turns`. `GET /api/ceo/chat/state` (`ceo/chat-state.ts`) gives the page the model, full power, the queue,
+pending permissions, inline confirmations and corrections. `aom runner restart` (rpc op `restart`, `RunnerRestartRequested`)
+restarts after the reply; the next `hello` posts "<workstation> restarted (runner <version>)" in the thread (`ceo/restart.ts`).
+
+*Permissions (section 14.1).* Turns run in auto mode; the runner's relay MCP server (`--permission-prompt-tool`) calls the rpc op
+`permission`: `ask` raises a desk approval `ceo_permission` (`ceo/permissions.ts`: options once / turn / deny, blocking for an owner
+turn and not for an order turn, never routed or woken for the CEO, pushed like any approval) and `poll` returns `pending | once |
+turn | deny | timeout`. Any Owner or Admin answers (`POST /api/ceo/permissions/:id`, or the generic desk resolve: approved is once);
+10 minutes without an answer is a `timeout` (closed lazily on the next poll, and with the turn at its end). Projection
+`ceo_permission_asks`; events `CeoPermissionAsked` / `CeoPermissionAnswered`.
+
+*Standing orders with full power (section 3.4, 14.4).* `ceo/orders.ts`: `POST /api/ledger/:id/authorize` (Owner only) appends
+`StandingOrderAuthorized {versionHash = sha256(title \n body), scope {projectIds, triggers}, covers}`; the entry must be eligible
+(written by the Owner in his own session with no CEO causation, or approved by him on the desk, or escalated by an Admin with
+`POST /api/ledger/:id/escalate`, which raises an `order_escalation` desk notice for the Owner); `LedgerEntryEdited` voids it in the
+same append (`StandingOrderAuthorityVoided`) unless the Owner edits with `keepFullPower` (a fresh authorization of the new hash),
+retiring and an ownership change void it too, and `/revoke` ends it. Projection `standing_order_authority`. The restricted wake
+brief lists the orders in force; `aom ceo order invoke` runs the action `invoke-order` through the engine (idempotency, policy:
+an untrusted wake only recommends unless the order's trigger pre-filter matched, audit): authority current, scope and trigger
+match, per-order limits (5 a day, one per subject per 6 hours, one running), the Owner's workstation online with full power. The
+server then creates the hidden per-order thread (`threads.kind='ceo_order'`) and an `order` turn whose prompt is the order text
+plus fenced event data; calls in it carry `CeoActionTaken.order` and the turn id, and the authority is checked on every call.
+`order done|decline` and `chat.done` end it (`CeoOrderTurnFinished` with the commands); the daily report lists order turns.
+
+*The job log and corrections (sections 4 and 7).* `ceo/jobs.ts` writes `CeoOffboardJobLogged`; the server backstop
+(`chat/ceo-turns.ts backstopJobEvents`) logs an `unlabelled` job for an owner turn that used tools, made no board object and
+logged nothing. `ceo/signals.ts` applies the repeat rule (4 in 7 days or 10 in 30; a dismissed key is quiet for 90 days) to each job
+and again when the report is written, appending `CeoRepeatDetected`; the report's `data.ceo.repeats` and `orderTurns` feed the web
+page. `ceo/corrections.ts` records `CeoCorrected` with an active `correction` memory (source `owner_correction`, confidence 1),
+lowers the cited memories, and offers Undo (`undoCeoAction`) or Redo (`runAction` with `force`, idempotency key `redo:<id>`);
+the desk path (`correctCeoDecision`) appends the same event. `relevantMemories` ranks corrections first and drops an inferred
+`decision_pattern` when a correction or rule of the same class exists. Admins record rule-only corrections.
+
+*DevOps behind the CEO (section 8).* `POST /api/chats` for a DevOps agent is 409 `devops_via_ceo`, a `chat.send` on an old DevOps
+thread fails with the same reason; the CEO files requests with `aom ceo act devops` and follows them with the rpc op
+`devops_status` (`--wait`). Migration `2222_ceo_front_door.sql`; operational flags use `ceo_flags` (`jobstart:<turn>`,
+`restart:<workstation>`).
+
 A built-in role `ceo` (one per organisation) takes over the BA's reporter job when it is active and reachable (`ceo/state.ts`
 `ceoActive`, `ceoReachable`): the routing interceptor holds non-urgent items for the CEO instead of queueing BA tasks, the
 reporter sweep queues the daily review wake instead of the floor report, and urgent signals become wakes instead of

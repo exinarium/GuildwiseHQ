@@ -14,7 +14,6 @@ import { useVisualViewportHeight } from '../hooks/useVisualViewportHeight.ts';
 import { ChatPanel } from './ChatPanel.tsx';
 import { AgentAvatar } from './Face.tsx';
 import {
-  Avatar,
   Button,
   ConfirmDialog,
   ConnectionDot,
@@ -52,7 +51,8 @@ export function ChatDrawer({
   const restore = useRestoreChat();
   const remove = useDeleteChat();
   const toast = useToast();
-  const available = (agents.data ?? []).filter((a) => a.status === 'active');
+  // DevOps works through the CEO now: it is not offered as someone to chat with (docs/design/ceo-front-door.md section 8).
+  const available = (agents.data ?? []).filter((a) => a.status === 'active' && !a.isDevops);
   const current = chats.data?.find((c) => c.threadId === threadId);
   const archivedCount = chats.data?.filter((c) => c.archived).length ?? 0;
   const listed = (chats.data ?? []).filter((c) => !!c.archived === (view === 'archived'));
@@ -96,8 +96,7 @@ export function ChatDrawer({
                   <option value="">Choose an agent</option>
                   {available.map((a) => (
                     <option key={a.id} value={a.id}>
-                      {a.name} ({a.roleKey}
-                      {a.isDevops ? ', DevOps' : ''})
+                      {a.name} ({a.roleKey})
                     </option>
                   ))}
                 </Select>

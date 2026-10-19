@@ -8,7 +8,7 @@ export const chatProjectors: Record<string, Projector> = {
     await exec(
       tx,
       `INSERT INTO threads (id, org_id, project_id, card_id, kind, agent_id, title, created_by, created_at)
-       VALUES ($1,$2,$3,$4,'chat',$5,$6,$7,$8)`,
+       VALUES ($1,$2,$3,$4,$9,$5,$6,$7,$8)`,
       [
         p.threadId,
         e.scope.orgId,
@@ -18,6 +18,7 @@ export const chatProjectors: Record<string, Projector> = {
         p.title,
         p.createdBy,
         e.createdAt,
+        p.kind ?? 'chat',
       ],
     );
   },

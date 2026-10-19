@@ -214,8 +214,8 @@ export const ceoProjectors: Record<string, Projector> = {
       tx,
       `INSERT INTO ceo_actions (id, org_id, class, action, mode, status, subject_kind, subject_id, subject_label, params,
          reason, confidence, evidence, policy_version, verdict_reason, cause, wake_batch_id, chat_thread_id, accepted_from,
-         untrusted, inverse, idem_key, result, created_at, event_seq)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)
+         untrusted, inverse, idem_key, result, created_at, event_seq, order_entry_id, order_version_hash, turn_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28)
        ON CONFLICT (id) DO NOTHING`,
       [
         p.actionId,
@@ -243,6 +243,9 @@ export const ceoProjectors: Record<string, Projector> = {
         j(p.result),
         e.createdAt,
         e.seq,
+        p.order?.entryId ?? null,
+        p.order?.versionHash ?? null,
+        p.turnId ?? null,
       ],
     );
     if (p.mode === 'decided' && DESK_CLASSES.includes(p.class) && p.subjectKind === 'desk' && p.subjectId)

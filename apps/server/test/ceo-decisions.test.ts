@@ -249,6 +249,10 @@ describe('correcting a decision', () => {
     )[0]!;
     expect(mem).toMatchObject({ status: 'active', source: 'owner_override' });
     expect(mem.text).toMatch(/^Owner corrected: .*→ Use develop.*\(was: Keep main\)$/);
+    // the desk path is one entry point of the front door's correction: the same event, linked to the item and the memory
+    const corrected = (await q(`SELECT * FROM ceo_corrections WHERE desk_item_id=$1`, [item.id]))[0]!;
+    expect(corrected).toMatchObject({ memory_id: mem.id, remedy: 'none' });
+    expect(corrected.text).toContain('Use develop');
 
     // a BA task carries the context
     const task = (await q(`SELECT * FROM ba_tasks WHERE schedule_name='CEO decision review'`))[0]!;

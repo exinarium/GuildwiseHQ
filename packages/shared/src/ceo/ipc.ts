@@ -33,6 +33,9 @@ export const CEO_ACTIONS = [
   'message',
   'intake',
   'specify',
+  'draft-cards',
+  /** `aom ceo order invoke`: the wake's CEO asks the server for a full-power turn that enforces one authorized order. */
+  'invoke-order',
 ] as const;
 export const CeoActionName = z.enum(CEO_ACTIONS);
 export type CeoActionName = z.infer<typeof CeoActionName>;
@@ -125,6 +128,62 @@ export const CeoRpcSchema = z.discriminatedUnion('op', [
     quote: z.string().max(1000).optional(),
     scope: z.string().max(100).default('org'),
   }),
+  /**
+   * `aom ceo correction record`: the owner said "you did X, I'd rather Y" in the chat (owner turns only; the server attaches the
+   * source message). Writes the active `correction` memory at once; `remedy: 'undo'` takes the action back.
+   */
+  z.object({
+    op: z.literal('correction'),
+    action: z.uuid().optional(),
+    text: z.string().trim().min(3).max(4000),
+    rule: z.string().trim().min(3).max(1000),
+    remedy: z.enum(['none', 'undo']).default('none'),
+  }),
+  /** The off-system job log (`aom ceo job start|log|repeats`). */
+  z.object({
+    op: z.literal('job'),
+    sub: z.enum(['start', 'log', 'repeats']),
+    kind: z.string().trim().min(1).max(60).optional(),
+    why: z.string().max(1000).optional(),
+    title: z.string().trim().min(1).max(200).optional(),
+    summary: z.string().max(2000).optional(),
+    project: z.string().max(10).optional(),
+    /** `log`: the main command the job was done with (its first word feeds the repeat rule: same command twice = automation). */
+    command: z.string().max(200).optional(),
+  }),
+  /** Standing orders with full power (`aom ceo order invoke|decline|done`). */
+  z.object({
+    op: z.literal('order'),
+    sub: z.enum(['invoke', 'decline', 'done']),
+    entryId: z.uuid().optional(),
+    wake: z.uuid().optional(),
+    why: z.string().max(2000).optional(),
+    confidence: z.number().min(0).max(1).optional(),
+    /** `decline`: the question for the owner. */
+    ask: z.string().max(2000).optional(),
+    /** `done`: what happened, and the shell commands the turn ran. */
+    summary: z.string().max(4000).optional(),
+    commands: z.array(z.string().max(500)).max(200).optional(),
+  }),
+  /**
+   * The runner's permission relay (docs section 14.1): `ask` raises the desk question "authorize this execution" and returns an
+   * id, `poll` returns the answer. Only the runner's relay calls it, from an owner or order turn.
+   */
+  z.object({
+    op: z.literal('permission'),
+    sub: z.enum(['ask', 'poll']),
+    askId: z.uuid().optional(),
+    tool: z.string().max(200).optional(),
+    /** The tool input, already redacted by the runner. */
+    input: z.string().max(4000).optional(),
+    reason: z.string().max(1000).optional(),
+  }),
+  /** `aom ceo devops --wait`: the state of a DevOps request the CEO filed. */
+  z.object({ op: z.literal('devops_status'), requestId: z.uuid() }),
+  /** `aom ceo dir add <path>`: an extra working directory of this conversation. */
+  z.object({ op: z.literal('dir'), sub: z.enum(['add']), path: z.string().min(1).max(500) }),
+  /** The runner reports that `aom runner restart` scheduled a restart (the server records and announces it). */
+  z.object({ op: z.literal('restart'), reason: z.string().max(500).optional() }),
 ]);
 export type CeoRpc = z.infer<typeof CeoRpcSchema>;
 

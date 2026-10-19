@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { VisibleEventSchema } from '../events/envelope.ts';
+import { ModelChoiceSchema } from '../models/choices.ts';
 import { ProgressItemSchema } from './runner.ts';
 
 /**
@@ -18,6 +19,9 @@ export const CHAT_ERROR = {
   projectPaused: 'project_paused',
   cancelled: 'cancelled',
   runnerError: 'runner_error',
+  /** The DevOps engineer works through the CEO now: its chats are read-only (docs/design/ceo-front-door.md section 8). */
+  devopsViaCeo: 'devops_via_ceo',
+  unknownModel: 'unknown_model',
 } as const;
 
 // client -> server
@@ -30,6 +34,9 @@ export const BrowserChatSendSchema = z.object({
   threadId: z.uuid(),
   body: z.string().min(1),
   clientMsgId: z.string().min(1),
+  /** The CEO chat's model switch: this choice applies to this message, or (modelScope 'thread') to the whole conversation. */
+  model: ModelChoiceSchema.optional(),
+  modelScope: z.enum(['message', 'thread']).optional(),
 });
 export const BrowserChatCancelSchema = z.object({ type: z.literal('chat.cancel'), threadId: z.uuid() });
 export const BrowserShiftWatchSchema = z.object({ type: z.literal('shift.watch'), shiftId: z.uuid() });
@@ -72,6 +79,13 @@ export const BrowserChatDoneSchema = z.object({
   threadId: z.uuid(),
   messageId: z.uuid(),
 });
+/** The CEO's workstation is offline: the message is saved and waits (it is sent when the workstation is back). */
+export const BrowserChatQueuedSchema = z.object({
+  type: z.literal('chat.queued'),
+  threadId: z.uuid(),
+  clientMsgId: z.string().optional(),
+  workstationName: z.string().optional(),
+});
 export const BrowserChatErrorSchema = z.object({
   type: z.literal('chat.error'),
   threadId: z.uuid(),
@@ -100,6 +114,7 @@ export const ServerToBrowserSchema = z.discriminatedUnion('type', [
   BrowserShiftProgressSchema,
   BrowserChatDeltaSchema,
   BrowserChatDoneSchema,
+  BrowserChatQueuedSchema,
   BrowserChatErrorSchema,
   PresenceSchema,
   BrowserRunChangedSchema,

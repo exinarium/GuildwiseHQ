@@ -50,6 +50,7 @@ import { createSandboxPlaceholders } from './sandbox-placeholders.ts';
 import type {
   ChatStartInput,
   DevopsGuardInput,
+  OwnerTurnInput,
   RuntimeAdapter,
   RuntimeCapabilities,
   RuntimeSession,
@@ -231,6 +232,63 @@ export function buildClaudeChatCommand(input: ChatStartInput, cfg: ClaudeConfig)
       cfg,
     ),
   };
+}
+
+export const OWNER_BRIEF_FILE = 'ceo-brief.md';
+export const OWNER_MCP_FILE = 'aom-permission.json';
+export const OWNER_FLOOR_FILE = 'floor.json';
+export const PERMISSION_TOOL = 'mcp__aom_permission__ask';
+
+/**
+ * The CEO's full-power turn (docs/design/ceo-front-door.md section 3.3, permissions per section 14.1): the Owner's own Claude
+ * Code. His real `~/.claude` loads (user, project and local settings, skills, plugins and his MCP servers), HOME is the real
+ * one, there is no sandbox, no `--strict-mcp-config`, no `--disable-slash-commands` and no `CLAUDE_CONFIG_DIR` override.
+ * The turn runs in auto mode; a permission it lacks goes to the permission relay (a desk question). `Bash(aom:*)` is always
+ * allowed; the deny floor (`floor.json`) protects the runner and its secrets. Pure; unit tested.
+ */
+export function buildClaudeOwnerTurnCommand(
+  input: OwnerTurnInput,
+  cfg: ClaudeConfig,
+  parent: NodeJS.ProcessEnv = process.env,
+): ClaudeCommand {
+  const viaStdin = Buffer.byteLength(input.message) > MAX_ARGV_PROMPT_BYTES;
+  const args = [
+    '-p',
+    ...(viaStdin ? [] : [input.message]),
+    '--output-format',
+    'stream-json',
+    '--verbose',
+    '--include-partial-messages',
+    '--model',
+    input.agent.model,
+  ];
+  if (input.agent.effort) args.push('--effort', input.agent.effort);
+  args.push(
+    '--setting-sources',
+    'user,project,local',
+    '--append-system-prompt-file',
+    join(input.turnDir, OWNER_BRIEF_FILE),
+    '--permission-mode',
+    'auto',
+    '--permission-prompt-tool',
+    PERMISSION_TOOL,
+    '--mcp-config',
+    join(input.turnDir, OWNER_MCP_FILE),
+    '--settings',
+    join(input.turnDir, OWNER_FLOOR_FILE),
+    '--allowedTools',
+    'Bash(aom:*)',
+  );
+  for (const d of input.addDirs ?? []) args.push('--add-dir', d);
+  if (input.resumeSessionId) args.push('--resume', input.resumeSessionId);
+  const provider: Record<string, string> = {};
+  if (cfg.authMode === 'oauth' && cfg.oauthToken) provider.CLAUDE_CODE_OAUTH_TOKEN = cfg.oauthToken;
+  else if (cfg.authMode === 'api_key' && cfg.apiKey) provider.ANTHROPIC_API_KEY = cfg.apiKey;
+  const env: Record<string, string> = {};
+  for (const [k, v] of Object.entries(parent)) if (v !== undefined) env[k] = v;
+  const home = homedir();
+  Object.assign(env, { HOME: home, USERPROFILE: home }, input.env, provider);
+  return { bin: cfg.bin, args, env, ...(viaStdin ? { stdin: input.message } : {}) };
 }
 
 /**
@@ -571,6 +629,44 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       exitError: () => (parser.resultError ? `claude result: ${parser.resultError}` : undefined),
       ...this.sessionHooks(dir, parser),
     });
+  }
+
+  /** The CEO's full-power turn (see `buildClaudeOwnerTurnCommand`). Needs no OS sandbox. */
+  async startOwnerTurn(input: OwnerTurnInput): Promise<RuntimeSession> {
+    if (realClaudeBlocked()) throw new RealClaudeBlockedError();
+    const cmd = buildClaudeOwnerTurnCommand(input, this.live);
+    const parser = new ClaudeStreamParser();
+    return spawnSession({
+      bin: cmd.bin,
+      args: cmd.args,
+      cwd: input.cwd,
+      env: cmd.env,
+      inheritEnv: false,
+      ...(cmd.stdin !== undefined ? { input: cmd.stdin } : {}),
+      parseLine: (l) => parser.parseLine(l),
+      usage: () => parser.usage(),
+      logFile: input.logFile,
+      exitError: () => (parser.resultError ? `claude result: ${parser.resultError}` : undefined),
+      ...this.ownerHooks(parser),
+    });
+  }
+
+  /** Auth and usage-limit bookkeeping of a turn on the Owner's own login (no private credentials copy to harvest). */
+  private ownerHooks(
+    parser: ClaudeStreamParser,
+  ): Pick<Parameters<typeof spawnSession>[0], 'authFailure' | 'usageLimit' | 'onExit'> {
+    return {
+      authFailure: (stderr) => parser.authFailure || isAuthFailureText(stderr),
+      usageLimit: (stderr) =>
+        detectUsageLimit(parser.usageLimitText, this.nowDate(), this.host.zone) ??
+        detectUsageLimit(stderr, this.nowDate(), this.host.zone),
+      onExit: async ({ code, authFailed, usageLimit }) => {
+        if (authFailed) this.host.auth?.markExpired();
+        else if (code === 0 && parser.usage().outputTokens > 0) this.host.auth?.markOk();
+        if (usageLimit) this.host.usage?.markLimited(usageLimit.until);
+        else if (code === 0 && parser.usage().outputTokens > 0) this.host.usage?.markOk();
+      },
+    };
   }
 
   /**

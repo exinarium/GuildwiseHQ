@@ -1,16 +1,18 @@
 import { MessageSquareOff } from 'lucide-react';
-import { useParams } from 'react-router';
+import { useLocation, useParams } from 'react-router';
 import { useChat } from '../api/queries/chats.ts';
 import { ChatPanel } from '../components/ChatPanel.tsx';
 import { AgentAvatar } from '../components/Face.tsx';
-import { Avatar, ConnectionDot, EmptyState, PageHeader, PageSkeleton } from '../components/ui.tsx';
+import { ConnectionDot, EmptyState, PageHeader, PageSkeleton } from '../components/ui.tsx';
 import { useIsMobile } from '../hooks/useIsMobile.ts';
 import { useVisualViewportHeight } from '../hooks/useVisualViewportHeight.ts';
+import type { CeoChatLocationState } from '../lib/openCeoChat.ts';
 
 /** A single conversation as a page (phone friendly). */
 export function Chat() {
   const { threadId = '' } = useParams();
   const chat = useChat(threadId);
+  const prefill = (useLocation().state as CeoChatLocationState | null)?.ceoPrefill;
   const mobile = useIsMobile();
   const vvh = useVisualViewportHeight(mobile);
   if (chat.isPending) return <PageSkeleton label="Loading chat" panels={1} />;
@@ -33,7 +35,7 @@ export function Chat() {
         }
       />
       {chat.data ? (
-        <ChatPanel threadId={threadId} />
+        <ChatPanel threadId={threadId} {...(prefill ? { initialDraft: prefill } : {})} />
       ) : (
         <EmptyState
           icon={MessageSquareOff}

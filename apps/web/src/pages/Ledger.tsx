@@ -8,6 +8,7 @@ import {
   useRetireLedgerEntry,
 } from '../api/queries/ledger.ts';
 import { useProjects } from '../api/queries/projects.ts';
+import { FullPowerControl } from '../components/ceo/FullPowerControl.tsx';
 import { LedgerForm } from '../components/LedgerForm.tsx';
 import {
   Badge,
@@ -23,6 +24,7 @@ import {
   TextInput,
   useToast,
 } from '../components/ui.tsx';
+import { useActiveOrgRole } from '../lib/orgRole.ts';
 import { formatDateTime } from '../lib/time.ts';
 
 const SCOPES = [
@@ -43,13 +45,20 @@ function EditForm({ e, onDone }: { e: LedgerEntry; onDone: () => void }) {
   const [title, setTitle] = useState(e.title);
   const [body, setBody] = useState(e.body);
   const [err, setErr] = useState('');
+  const [keep, setKeep] = useState(false);
+  const hasPower = e.fullPower?.state === 'authorized' && e.fullPower.current;
+  const isOwner = useActiveOrgRole() === 'owner';
   const submit = (ev: FormEvent) => {
     ev.preventDefault();
     if (!title.trim() || !body.trim()) return setErr('A title and the text are required');
     if (title.trim() === e.title && body.trim() === e.body) return onDone();
     setErr('');
     edit.mutate(
-      { title: title.trim(), body: body.trim() },
+      {
+        title: title.trim(),
+        body: body.trim(),
+        ...(hasPower && isOwner && keep ? { keepFullPower: true } : {}),
+      },
       {
         onSuccess: () => {
           toast.success('Standing order updated');
@@ -62,6 +71,25 @@ function EditForm({ e, onDone }: { e: LedgerEntry; onDone: () => void }) {
     <form onSubmit={submit} aria-label="Edit standing order" className="flex flex-col gap-4" noValidate>
       <TextInput label="Title" value={title} onChange={(ev) => setTitle(ev.target.value)} />
       <TextArea label="Text" value={body} onChange={(ev) => setBody(ev.target.value)} error={err} />
+      {hasPower && (
+        <div className="flex flex-col gap-1" data-testid="fp-edit-note">
+          <p className="text-sm text-muted">
+            The CEO enforces this order with full power. Changing the wording voids that, unless the Owner
+            keeps it.
+          </p>
+          {isOwner && (
+            <label className="flex items-center gap-2 text-sm text-fg">
+              <input
+                type="checkbox"
+                className="size-4"
+                checked={keep}
+                onChange={(ev) => setKeep(ev.target.checked)}
+              />
+              Keep full power for the new wording
+            </label>
+          )}
+        </div>
+      )}
       <ErrorBox error={edit.error} />
       <Button type="submit" variant="primary" loading={edit.isPending} className="self-start">
         Save changes
@@ -221,6 +249,7 @@ function Entry({ e }: { e: LedgerEntry }) {
           )}
         </div>
       )}
+      <FullPowerControl e={e} />
       {history && <History id={e.id} />}
       <Dialog
         open={retiring}

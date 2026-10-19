@@ -152,13 +152,29 @@ export async function ceoOwnerChangeEvents(
   orgId: string,
   newOwnerId: string,
 ): Promise<AppendInput[]> {
+  // The Owner's marks on standing orders were his; the new Owner marks them again (front door section 3.4).
+  const marked = await rows(
+    tx,
+    `SELECT entry_id FROM standing_order_authority
+      WHERE org_id=$1 AND version_hash IS NOT NULL AND voided_at IS NULL AND revoked_at IS NULL`,
+    [orgId],
+  );
+  const voids: AppendInput[] = marked.map((m) => ({
+    streamId: streamId.ledger(m.entry_id),
+    event: {
+      type: 'StandingOrderAuthorityVoided',
+      payload: { entryId: m.entry_id, reason: 'owner_changed' },
+    },
+    actor: SYSTEM_ACTOR,
+    scope: orgScope(orgId),
+  }));
   const a = await one<CeoAgentRow & { workstation_id: string | null }>(
     tx,
     `SELECT id, org_id, runtime, model, workstation_id FROM agents WHERE org_id=$1 AND role_key=$2 AND status <> 'retired'`,
     [orgId, CEO_ROLE_KEY],
   );
-  if (!a) return [];
+  if (!a) return voids;
   const next = await ownerWorkstation(tx, orgId, newOwnerId);
-  if (next === a.workstation_id) return [];
-  return [rehome(a, next)];
+  if (next === a.workstation_id) return voids;
+  return [...voids, rehome(a, next)];
 }

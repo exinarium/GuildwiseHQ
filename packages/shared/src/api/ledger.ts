@@ -33,6 +33,27 @@ export const LedgerEntryDtoSchema = z.object({
   canEdit: z.boolean().default(false),
   /** Full-text rank when a query was given. */
   rank: z.number().optional(),
+  /** Standing orders: whether the CEO may enforce this order with full power (docs/design/ceo-front-door.md section 3.4). */
+  fullPower: z
+    .object({
+      state: z.enum(['none', 'authorized', 'voided', 'revoked']),
+      /** The wording the Owner marked (sha256 of title and body); `current` tells whether it still equals the live text. */
+      versionHash: z.string().nullable(),
+      current: z.boolean(),
+      scope: z
+        .object({ projectIds: z.array(z.uuid()).nullable(), triggers: z.array(z.string()).optional() })
+        .nullable(),
+      covers: z.array(z.string()),
+      authorizedAt: IsoTime.nullable(),
+      voidReason: z.string().nullable(),
+      /** The Owner may mark this order (it is his, or an Admin escalated it, or he approved it on the desk). */
+      eligible: z.boolean(),
+      /** Why it is not eligible (an Admin's order: ask the Owner to take it over). */
+      ineligibleReason: z.string().nullable(),
+      /** An Admin escalated it to the Owner. */
+      escalated: z.boolean(),
+    })
+    .optional(),
 });
 export type LedgerEntryDto = z.infer<typeof LedgerEntryDtoSchema>;
 
@@ -90,6 +111,8 @@ export const EditLedgerEntryRequestSchema = z
     title: z.string().min(1).max(300).optional(),
     body: z.string().min(1).max(20000).optional(),
     tags: z.array(z.string().min(1).max(60)).max(20).optional(),
+    /** The Owner re-authorizes the new wording for full power in the same edit (any other edit voids the authority). */
+    keepFullPower: z.boolean().optional(),
   })
   .refine((v) => v.title !== undefined || v.body !== undefined || v.tags !== undefined, {
     message: 'give a new title, text or tags',
@@ -116,3 +139,21 @@ export const LedgerHistoryResponseSchema = z.object({
 export type LedgerHistoryResponse = z.infer<typeof LedgerHistoryResponseSchema>;
 
 export const EditLedgerEntryResponseSchema = z.object({ entry: LedgerEntryDtoSchema });
+
+/** `POST /api/ledger/:id/authorize` (Owner only): the CEO may enforce this order with full power. */
+export const AuthorizeStandingOrderRequestSchema = z.object({
+  /** The wording the Owner saw: refused when the live wording has changed since. */
+  versionHash: z.string().length(64),
+  scope: z
+    .object({
+      projectIds: z.array(z.uuid()).nullable().default(null),
+      triggers: z.array(z.string().max(60)).max(20).optional(),
+    })
+    .default({ projectIds: null }),
+  /** The owner-reserved keys the order may act on (ticked explicitly). */
+  covers: z.array(z.string().max(60)).max(20).default([]),
+});
+export type AuthorizeStandingOrderRequest = z.infer<typeof AuthorizeStandingOrderRequestSchema>;
+
+/** `POST /api/ledger/:id/escalate` (Admin): ask the Owner to take this order over as his own. */
+export const EscalateStandingOrderRequestSchema = z.object({ note: z.string().trim().max(1000).default('') });

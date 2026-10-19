@@ -5,6 +5,7 @@ import type { Ctx } from '../context.ts';
 import { exec, one, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import { conflict, notFound } from '../errors.ts';
+import type { AppendInput } from '../eventstore/types.ts';
 
 export const textHash = (t: string): string => createHash('sha256').update(t).digest('hex');
 
@@ -118,7 +119,11 @@ export async function listMemories(
   return list.map(toDto);
 }
 
-/** The memories a brief carries: active rules and preferences always (capped), plus text matches for the topic. */
+/**
+ * The memories a brief carries, in the order of docs/design/ceo-front-door.md section 7.3: active corrections first (newest
+ * first, at most 15), then the owner's rules, his preferences, and text matches for the topic. A decision pattern the CEO
+ * inferred is dropped when a correction or a rule about the same class contradicts it: the owner's word wins over the CEO's habit.
+ */
 export async function relevantMemories(
   ctx: Ctx,
   orgId: string,
@@ -134,12 +139,25 @@ export async function relevantMemories(
         .filter((w) => w.length >= 4),
     ),
   ].slice(0, 12);
-  const always = await rows(
+  const corrections = await rows(
     ctx.pool,
-    `${SELECT} WHERE m.org_id=$1 AND m.status='active' AND m.kind IN ('rule','preference') ORDER BY m.confidence DESC, m.created_at DESC LIMIT 10`,
+    `${SELECT} WHERE m.org_id=$1 AND m.status='active' AND m.kind='correction' ORDER BY m.created_at DESC, m.id LIMIT 15`,
     [orgId],
   );
+  const rules = await rows(
+    ctx.pool,
+    `${SELECT} WHERE m.org_id=$1 AND m.status='active' AND m.kind='rule' ORDER BY m.confidence DESC, m.created_at DESC LIMIT 10`,
+    [orgId],
+  );
+  const prefs = await rows(
+    ctx.pool,
+    `${SELECT} WHERE m.org_id=$1 AND m.status='active' AND m.kind='preference' ORDER BY m.confidence DESC, m.created_at DESC LIMIT 10`,
+    [orgId],
+  );
+  const always = [...corrections, ...rules, ...prefs];
   const seen = new Set(always.map((r) => r.id));
+  // Classes the owner has spoken about: inferred patterns of the same class are superseded.
+  const spoken = new Set(always.map((r) => r.class).filter((c): c is string => !!c));
   const matched = words.length
     ? await rows(
         ctx.pool,
@@ -148,7 +166,10 @@ export async function relevantMemories(
         [orgId, words.join(' | '), limit],
       )
     : [];
-  return [...always, ...matched.filter((r) => !seen.has(r.id))].slice(0, limit).map(toDto);
+  const rest = matched.filter(
+    (r) => !seen.has(r.id) && !(r.kind === 'decision_pattern' && r.class && spoken.has(r.class)),
+  );
+  return [...always, ...rest].slice(0, Math.max(limit, corrections.length + limit)).map(toDto);
 }
 
 export async function searchMemories(ctx: Ctx, orgId: string, q: string): Promise<MemoryDto[]> {
@@ -183,6 +204,24 @@ const ownerEvent = (orgId: string, userId: string, event: any) => ({
   actor: userActor(userId),
   scope: orgScope(orgId),
 });
+
+/** Replaces a memory's text (the owner edited the rule): the operational row changes, the event carries the new hash. */
+export async function editMemoryTextIn(
+  tx: Tx,
+  orgId: string,
+  userId: string,
+  memoryId: string,
+  text: string,
+): Promise<AppendInput[]> {
+  await lockMemory(tx, orgId, memoryId);
+  await exec(tx, 'UPDATE ceo_memory_text SET text=$2 WHERE memory_id=$1', [memoryId, text]);
+  return [
+    ownerEvent(orgId, userId, {
+      type: 'CeoMemoryEdited',
+      payload: { memoryId, orgId, textHash: textHash(text), by: userId },
+    }),
+  ];
+}
 
 export async function confirmMemory(ctx: Ctx, orgId: string, userId: string, id: string): Promise<void> {
   await withAppendTx(ctx.pool, async (tx) => {

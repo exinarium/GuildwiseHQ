@@ -132,6 +132,27 @@ export interface ChatStartInput {
   logFile?: string;
 }
 
+/**
+ * A CEO owner or order turn in the full-power profile (docs/design/ceo-front-door.md section 3.3): the Owner's own Claude
+ * Code on his workstation, with his `~/.claude`, his home directory and no Guildwise sandbox.
+ */
+export interface OwnerTurnInput {
+  chatId: string;
+  mode: 'owner' | 'order';
+  /** The full user message (context block, queue note and the message itself). */
+  message: string;
+  /** The conversation's fixed working directory (`--resume` keys sessions by it). */
+  cwd: string;
+  agent: AgentRuntimeSpec;
+  /** AOM_IPC_URL, AOM_IPC_SOCKET, AOM_SHIFT_TOKEN, AOM_SHIFT_ID, AOM_CEO_TURN_DIR, PATH (runner bin first). */
+  env: Record<string, string>;
+  /** `<runner root>/ceo-turns/<chatId>`: holds ceo-brief.md, aom-permission.json, floor.json, guard.json. */
+  turnDir: string;
+  resumeSessionId?: string;
+  addDirs?: string[];
+  logFile?: string;
+}
+
 export interface RuntimeAdapter {
   readonly id: string;
   /** Probed at start and every 10 min. */
@@ -153,4 +174,6 @@ export interface RuntimeAdapter {
    * `session` (to resume next time), `usage`, `final` and `exit`.
    */
   startChat?(input: ChatStartInput): Promise<RuntimeSession>;
+  /** The CEO's full-power turn (never used for a shift): only `ChatManager` calls it, after `selectChatProfile`. */
+  startOwnerTurn?(input: OwnerTurnInput): Promise<RuntimeSession>;
 }

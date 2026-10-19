@@ -1,4 +1,5 @@
 import {
+  type AuthorizeStandingOrderRequest,
   type CreateLedgerEntryRequest,
   type EditLedgerEntryRequest,
   type LedgerHistoryResponse,
@@ -64,5 +65,31 @@ export function useLedgerHistory(id: string, enabled: boolean) {
     queryKey: ['ledger', 'history', id],
     enabled,
     queryFn: () => get<LedgerHistoryResponse>(`/ledger/${id}/history`, LedgerHistoryResponseSchema),
+  });
+}
+
+/** The Owner marks a standing order "the CEO enforces this with full power" (pinned to the wording he saw). */
+export function useAuthorizeOrder(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (b: AuthorizeStandingOrderRequest) => post(`/ledger/${id}/authorize`, b),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['ledger'] }),
+  });
+}
+
+export function useRevokeOrderAuthority(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => post(`/ledger/${id}/revoke`, {}),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['ledger'] }),
+  });
+}
+
+/** An Admin asks the Owner to take an order over as his own. */
+export function useEscalateOrder(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (note: string) => post(`/ledger/${id}/escalate`, { note }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['ledger'] }),
   });
 }

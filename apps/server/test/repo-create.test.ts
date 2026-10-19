@@ -216,9 +216,9 @@ describe('approved repository setup', () => {
     expect(denied.error).toMatch(/only the BA and the DevOps engineer/);
   });
 
-  // Real use: the manager asked the DevOps engineer in a desk chat; the request was refused (chat allowed only the BA)
-  // and the DevOps chat instructions did not mention `aom repo create`, so the engineer tried gh and hit the sandbox.
-  it('the DevOps engineer can request a repository from a chat with its manager', async () => {
+  // Real use: the DevOps engineer is asked for a repository. Its chat is retired (it works through the CEO now), so the
+  // request reaches `aom repo create` from its shift; the chat itself is refused.
+  it('the DevOps engineer can request a repository from its shift; its chat is retired', async () => {
     await setup();
     // freshState() clears agents: hire the workstation's DevOps engineer the way pairing does, on the mock runtime.
     const ctx = w.t.app.ctx;
@@ -229,8 +229,22 @@ describe('approved repository setup', () => {
       await ctx.store.append([hire], { tx });
       return (hire.event.payload as { agentId: string }).agentId;
     });
-    const { start } = await openChat(r, devopsId, w.owner.id, w.owner.cookie);
-    const res = await request(r, start.chatId);
+    expect(
+      (await w.t.req('POST', '/api/chats', { cookie: w.owner.cookie, body: { agentId: devopsId } })).status,
+    ).toBe(409);
+    const from = r.received.length;
+    await ok(
+      w.t.req('POST', '/api/devops/requests', {
+        cookie: w.owner.cookie,
+        body: { workstationId: w.workstationId, summary: 'Create the repository acme/newrepo' },
+      }),
+      201,
+    );
+    await ctx.services.dispatcher.run();
+    const start = (await r.waitFor('shift.start', (f: any) => f.kind === 'devops', 8000, from)) as any;
+    r.accepted(start.shiftId);
+    r.started(start.shiftId);
+    const res = await request(r, start.shiftId);
     expect(res.ok, res.error).toBe(true);
     const items = await deskItems();
     expect(items).toHaveLength(1);

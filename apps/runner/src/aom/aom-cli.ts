@@ -37,6 +37,8 @@ import {
   type ShiftReport,
 } from '@aom/shared';
 import { z } from 'zod';
+import { runGuardHook as runCeoGuardHook } from '../ceo/guard-hook.ts';
+import { PermissionRelay } from '../ceo/permission-relay.ts';
 import type { ChangeStateLookup } from '../devops/branch-cleanup.ts';
 import { loadGuardConfig, runGuardHook } from '../devops/guard.ts';
 import { runHygiene } from '../devops/hygiene.ts';
@@ -81,6 +83,7 @@ const BOOLEAN_FLAGS = new Set([
   'investigation',
   'agree',
   'disagree',
+  'undo',
 ]);
 
 /** Verbs whose JSON body can be passed inline (`--json '<json>'`): there `--json` takes a value instead of being a switch. */
@@ -108,7 +111,7 @@ export function parseArgs(argv: string[], verb?: string): Parsed {
       let value: string;
       if (eq !== -1) value = a.slice(eq + 1);
       // `aom question --wait [10m]`: the duration is optional.
-      else if (verb === 'question' && key === 'wait') {
+      else if ((verb === 'question' || verb === 'ceo') && key === 'wait') {
         const next = argv[i + 1];
         if (next !== undefined && parseWaitDuration(next) !== null) {
           value = next;
@@ -786,6 +789,14 @@ const CEO_USAGE = `usage: aom ceo snapshot [--section <name>] | show card|agent|
        aom ceo task create --title "..." [--request "..."] [--due <iso>] | task update --id <id> [--status s] [--note "..."] [--watch card:<id>]... | task list
        aom ceo memory propose --text "..." --source owner_chat|desk:<item id> [--kind rule|preference|fact] [--quote "..."]
        aom ceo review-reply --item <desk item id> --agree|--disagree --reflection "<what you got wrong and why>" --lesson "<rule for next time>" [--card-changes "<comments on the BA's proposed cards>"]   (a decision_review wake)
+       aom ceo devops (--project KEY | --env NAME | --workstation <name>) --text "<what DevOps should do>" [--card <ref>] [--wait <seconds>] [--reason "..." --confidence ...]
+       aom ceo draft-cards --project KEY --file cards.json   (up to 10 draft cards from a JSON array; nothing is specified)
+       aom ceo correction record [--action <action id>] --text "<the owner's words>" --rule "<the rule, in his words>" [--undo]   (owner turns only)
+       aom ceo job start --kind <slug> [--why "<owner's words>"] | job log --kind <slug> --title "..." --summary "..." [--project KEY] [--command "<the main shell command it was done with>"] | job repeats   (work you did yourself instead of through the board)
+       aom ceo order invoke <order id> --wake <wake id> --why "<how this event falls under the order>" --confidence 0.0-1.0   (a wake)
+       aom ceo order decline --ask "<question for the owner>"  |  order done --summary "..." [--commands-file <file>]   (an order turn, terminal)
+       aom ceo dir add <path>   (an extra working directory of this conversation)
+       aom runner restart [--reason "..."]   (restarts the runner after your reply; never use systemctl or kill)
        aom ceo done --summary "..."   (a wake, terminal)   |   aom ceo report --summary-file <md>   (the daily review, terminal)`;
 
 function ceoPrint(ctx: AomContext, p: Parsed, r: unknown): void {
@@ -812,6 +823,88 @@ function ceoReasoned(p: Parsed): { reason: string; confidence: number; evidence:
   if (!reason || !Number.isFinite(conf) || conf < 0 || conf > 1)
     throw new UsageError('--reason "<why>" and --confidence <0.0-1.0> are required');
   return { reason, confidence: conf, evidence: many(p, 'evidence') };
+}
+
+/** `--reason`/`--confidence` when given; otherwise the defaults of the convenience verbs (`devops`, `draft-cards`). */
+function ceoReasonedOr(
+  p: Parsed,
+  reason: string,
+): { reason: string; confidence: number; evidence: string[] } {
+  if (one(p, 'reason') || one(p, 'confidence')) return ceoReasoned(p);
+  return { reason, confidence: 0.9, evidence: many(p, 'evidence') };
+}
+
+/** A command list: a JSON array of strings, or one command per line. */
+function readCommands(text: string): string[] {
+  try {
+    const v = JSON.parse(text) as unknown;
+    if (Array.isArray(v)) return v.map(String).slice(0, 200);
+  } catch {
+    // one command per line
+  }
+  return text
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .slice(0, 200);
+}
+
+const sleepOf = (ctx: AomContext) =>
+  ctx.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+
+/**
+ * `aom ceo devops ... [--wait <sec>]` (docs/design/ceo-front-door.md section 8): files the DevOps request through the `devops`
+ * action; with `--wait` it works like a subagent: it polls the request every 10 seconds, prints the progress, and returns
+ * the DevOps summary, or after the timeout "still running" (a task watch wakes the CEO when it finishes).
+ */
+async function ceoDevops(ctx: AomContext, p: Parsed): Promise<number> {
+  const text = textFlag(ctx, p, 'text', true) as string;
+  const params = ceoParams(p, new Set([...CEO_CONTROL_FLAGS, 'wait', 'text-file']));
+  params.text = text;
+  const r = (await rpc(ctx, 'ceo', {
+    op: 'act',
+    action: 'devops',
+    params,
+    ...ceoReasonedOr(p, `asking DevOps: ${text.slice(0, 120)}`),
+    ...(one(p, 'key') ? { key: one(p, 'key') } : {}),
+    dryRun: has(p, 'dry-run'),
+  })) as { status?: string; result?: { requestId?: string } };
+  ceoPrint(ctx, p, r);
+  if (r.status === 'refused') return 1;
+  const requestId = r.result?.requestId;
+  if (!has(p, 'wait') || !requestId || r.status !== 'executed') return 0;
+  const waitSec = Number(one(p, 'wait')) > 0 ? Number(one(p, 'wait')) : 600;
+  const now = ctx.now ?? Date.now;
+  const deadline = now() + waitSec * 1000;
+  let seen = 0;
+  let last = '';
+  for (;;) {
+    const s = (await rpc(ctx, 'ceo', { op: 'devops_status', requestId })) as {
+      status?: string;
+      summary?: string;
+      progress?: string[];
+    };
+    for (const line of (s.progress ?? []).slice(seen)) ctx.io.out(`DevOps: ${line}\n`);
+    seen = s.progress?.length ?? seen;
+    if (s.status && s.status !== last) {
+      last = s.status;
+      if (s.status !== 'done' && s.status !== 'failed')
+        ctx.io.out(`DevOps request ${requestId}: ${s.status}\n`);
+    }
+    if (s.status === 'done') {
+      ctx.io.out(`DevOps is done: ${s.summary ?? 'no summary'}\n`);
+      return 0;
+    }
+    if (s.status === 'failed') {
+      ctx.io.out(`DevOps failed: ${s.summary ?? 'no summary'}\n`);
+      return 1;
+    }
+    if (now() >= deadline) {
+      ctx.io.out(`still running: request ${requestId}; I'll follow up\n`);
+      return 0;
+    }
+    await sleepOf(ctx)(10_000);
+  }
 }
 
 /** `aom ceo ...`: the CEO agent's management verbs. The server decides what the CEO may do; a refusal is a normal answer. */
@@ -955,6 +1048,113 @@ async function ceoVerb(ctx: AomContext, p: Parsed): Promise<number> {
       ceoPrint(ctx, p, r);
       return (r as { status?: string }).status === 'refused' ? 1 : 0;
     }
+    case 'devops':
+      return ceoDevops(ctx, p);
+    case 'draft-cards': {
+      const project = one(p, 'project');
+      const file = one(p, 'file');
+      if (!project || !file) throw new UsageError('--project KEY and --file cards.json are required');
+      let cards: unknown;
+      try {
+        cards = JSON.parse(ctx.readFile(file));
+      } catch (err) {
+        throw new UsageError(
+          `cannot read ${file} as JSON: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+      if (!Array.isArray(cards)) throw new UsageError(`${file} must hold a JSON array of cards`);
+      const r = (await rpc(ctx, 'ceo', {
+        op: 'act',
+        action: 'draft-cards',
+        params: { project, cards },
+        ...ceoReasonedOr(p, `drafting ${cards.length} card(s) for ${project}`),
+        ...(one(p, 'key') ? { key: one(p, 'key') } : {}),
+        dryRun: has(p, 'dry-run'),
+      })) as { status?: string };
+      ceoPrint(ctx, p, r);
+      return r.status === 'refused' ? 1 : 0;
+    }
+    case 'correction': {
+      if (args[0] !== 'record') throw new UsageError(CEO_USAGE);
+      const r = await rpc(ctx, 'ceo', {
+        op: 'correction',
+        ...(one(p, 'action') ? { action: one(p, 'action') } : {}),
+        text: textFlag(ctx, p, 'text', true) as string,
+        rule: textFlag(ctx, p, 'rule', true) as string,
+        remedy: has(p, 'undo') ? 'undo' : 'none',
+      });
+      ceoPrint(ctx, p, r);
+      return (r as { status?: string }).status === 'refused' ? 1 : 0;
+    }
+    case 'job': {
+      const sub = args[0];
+      if (sub !== 'start' && sub !== 'log' && sub !== 'repeats') throw new UsageError(CEO_USAGE);
+      if ((sub === 'start' || sub === 'log') && !one(p, 'kind'))
+        throw new UsageError('--kind <slug> is required');
+      if (sub === 'log' && (!one(p, 'title') || !one(p, 'summary')))
+        throw new UsageError('--title "..." and --summary "..." are required');
+      const r = await rpc(ctx, 'ceo', {
+        op: 'job',
+        sub,
+        ...(one(p, 'kind') ? { kind: one(p, 'kind') } : {}),
+        ...(one(p, 'why') ? { why: one(p, 'why') } : {}),
+        ...(one(p, 'title') ? { title: one(p, 'title') } : {}),
+        ...(one(p, 'summary') ? { summary: one(p, 'summary') } : {}),
+        ...(one(p, 'project') ? { project: one(p, 'project') } : {}),
+        ...(one(p, 'command') ? { command: one(p, 'command') } : {}),
+      });
+      ceoPrint(ctx, p, r);
+      return (r as { status?: string }).status === 'refused' ? 1 : 0;
+    }
+    case 'order': {
+      const sub = args[0];
+      if (sub === 'invoke') {
+        const entryId = args[1];
+        const conf = Number(one(p, 'confidence'));
+        if (!entryId || !one(p, 'wake') || !one(p, 'why') || !Number.isFinite(conf))
+          throw new UsageError(
+            'usage: aom ceo order invoke <order id> --wake <wake id> --why "..." --confidence 0.0-1.0',
+          );
+        const r = await rpc(ctx, 'ceo', {
+          op: 'order',
+          sub,
+          entryId,
+          wake: one(p, 'wake'),
+          why: one(p, 'why'),
+          confidence: conf,
+        });
+        ceoPrint(ctx, p, r);
+        return (r as { status?: string }).status === 'refused' ? 1 : 0;
+      }
+      if (sub === 'decline') {
+        const r = await rpc(ctx, 'ceo', { op: 'order', sub, ask: textFlag(ctx, p, 'ask', true) as string });
+        ceoPrint(ctx, p, r);
+        return 0;
+      }
+      if (sub === 'done') {
+        const file = one(p, 'commands-file');
+        const r = await rpc(ctx, 'ceo', {
+          op: 'order',
+          sub,
+          summary: textFlag(ctx, p, 'summary', true) as string,
+          ...(file ? { commands: readCommands(ctx.readFile(file)) } : {}),
+        });
+        ceoPrint(ctx, p, r);
+        return 0;
+      }
+      throw new UsageError(CEO_USAGE);
+    }
+    case 'dir': {
+      if (args[0] !== 'add' || !args[1]) throw new UsageError('usage: aom ceo dir add <path>');
+      ceoPrint(ctx, p, await rpc(ctx, 'ceo', { op: 'dir', sub: 'add', path: args.slice(1).join(' ') }));
+      return 0;
+    }
+    // The use-the-system hook (PreToolUse on Edit|Write|NotebookEdit; see ceo/guard-hook.ts). Not for the model to call.
+    case 'guard': {
+      const r = runCeoGuardHook(ctx.readFile('-'), ctx.env.AOM_CEO_TURN_DIR);
+      if (r.stderr) ctx.io.err(r.stderr);
+      return r.exitCode;
+    }
     case 'done':
       return report(
         ctx,
@@ -971,6 +1171,31 @@ async function ceoVerb(ctx: AomContext, p: Parsed): Promise<number> {
 }
 
 const VERBS: Record<string, Verb> = {
+  /** `aom runner restart [--reason ".."]`: restarts the runner after this reply (owner turns and DevOps shifts only). */
+  runner: async (ctx, p) => {
+    if (p.positionals[0] !== 'restart') throw new UsageError('usage: aom runner restart [--reason "<why>"]');
+    const r = (await rpc(ctx, 'runner.restart', one(p, 'reason') ? { reason: one(p, 'reason') } : {})) as {
+      message?: string;
+    };
+    ctx.io.out(`${r?.message ?? 'Restart scheduled after this reply.'}\n`);
+    return 0;
+  },
+  /** The permission relay of a CEO owner turn: a stdio MCP server (see ceo/permission-relay.ts). Not for the model to call. */
+  'ceo-permission-mcp': async (ctx) => {
+    const relay = new PermissionRelay({
+      mode: ctx.env.AOM_PERMISSION_MODE === 'order' ? 'order' : 'owner',
+      rpc: async (params) => {
+        try {
+          return { ok: true, result: await rpc(ctx, 'ceo', params) };
+        } catch (err) {
+          return { ok: false, error: err instanceof Error ? err.message : String(err) };
+        }
+      },
+      ...(ctx.sleep ? { sleep: ctx.sleep } : {}),
+    });
+    await relay.serve(process.stdin, (l) => ctx.io.out(l));
+    return 0;
+  },
   card: async (ctx, p) => {
     const sub = p.positionals[0];
     if (sub === 'create' || sub === 'update' || sub === 'specify') return cardDraft(ctx, p, sub);
@@ -1885,7 +2110,8 @@ export const USAGE = `usage: aom <verb> [options]
   sudo -- <command> [args...]                 DevOps engineer: run a command as administrator (only when the manager granted sudo; the password stays on the runner)
   toolchain list | add <name> --bin <dir>... [--read <dir>]... [--env KEY=VALUE]... | remove <name>   tools sandboxed agents may use; DevOps engineer: register what you installed so agents get it on PATH
   hygiene run [--note "<text>"]               DevOps engineer: repository hygiene request (commit to the working branch, pull, push, tidy), ends the request
-  ceo snapshot | show | search | act <action> ... | recommend | notify | task | memory | review-reply | done | report   CEO agent only: manage the organisation within the policy (see your instructions)
+  ceo snapshot | show | search | act <action> ... | recommend | notify | task | memory | review-reply | devops | draft-cards | correction | job | order | dir | done | report   CEO agent only: manage the organisation within the policy (see your instructions)
+  runner restart [--reason "<why>"]          CEO owner turns and DevOps shifts: restart the runner after your reply
   run info | status | logs <svc> | step --name <n> -- <cmd> | service --name <n> --port http:5000:ENV_VAR --health <url> -- <cmd> | ready | fail --reason <t>   DevOps engineer of a "run this branch" request: the runner starts and supervises the services (see your instructions)
 `;
 

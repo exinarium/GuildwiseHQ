@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { type ChatDto, type CreateChatRequest, canDirectAgentInOrg, streamId } from '@aom/shared';
 import { orgRoleOf } from '../auth/org-context.ts';
 import type { AuthSession } from '../auth/sessions.ts';
-import { loadVisibleCard, projectRole, requireProjectMember } from '../authz/scope.ts';
+import { loadVisibleCard, requireProjectMember } from '../authz/scope.ts';
 import type { Ctx } from '../context.ts';
 import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
@@ -96,6 +96,12 @@ export async function createChat(
   return withAppendTx(ctx.pool, async (tx) => {
     const agent = await one(tx, `SELECT * FROM agents WHERE id=$1 AND status <> 'retired'`, [req.agentId]);
     if (!agent) throw notFound('agent not found');
+    // The DevOps engineer works through the CEO now (docs/design/ceo-front-door.md section 8): no new DevOps chats.
+    if (agent.is_devops)
+      throw conflict(
+        'devops_via_ceo',
+        'DevOps works through your CEO now: ask the CEO, who delegates to DevOps',
+      );
     const allowed =
       canDirectAgentInOrg({
         orgRole: await orgRoleOf(tx, user.id, agent.org_id),

@@ -9,6 +9,7 @@ import { selfCommand } from '../shims.ts';
 import { spawnSession } from './process-session.ts';
 import type {
   ChatStartInput,
+  OwnerTurnInput,
   RuntimeAdapter,
   RuntimeCapabilities,
   RuntimeEvent,
@@ -51,6 +52,25 @@ export class MockAdapter implements RuntimeAdapter {
    * Deterministic chat: echoes `[mock] <name> heard: <message> (turn <n>)` word by word. The runtime session id is
    * `mock-<agentId>-<n>`, so resuming counts turns. No process, no tokens.
    */
+  /** The CEO's full-power turn runs like a chat in the mock runtime (nothing real starts); tests see `ownerTurns`. */
+  ownerTurns: OwnerTurnInput[] = [];
+
+  async startOwnerTurn(input: OwnerTurnInput): Promise<RuntimeSession> {
+    this.ownerTurns.push(input);
+    const dir = input.turnDir;
+    return this.startChat({
+      chatId: input.chatId,
+      message: input.message,
+      cwd: input.cwd,
+      sandbox: { home: dir, configDir: dir, scratch: dir, tmp: dir },
+      agent: input.agent,
+      env: input.env,
+      readOnly: false,
+      ...(input.resumeSessionId ? { resumeSessionId: input.resumeSessionId } : {}),
+      ...(input.logFile ? { logFile: input.logFile } : {}),
+    });
+  }
+
   async startChat(input: ChatStartInput): Promise<RuntimeSession> {
     if (input.agent.roleKey === 'ba' && input.context?.intake && !input.context.intake.fromChat)
       return this.startIntakeChat(input);

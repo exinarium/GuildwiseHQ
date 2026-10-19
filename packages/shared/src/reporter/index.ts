@@ -55,6 +55,9 @@ export const ROUTING_EXEMPT_SUBKINDS: readonly string[] = [
   'ceo_notice',
   /** A decision the CEO took within its authority, put on the desk for review: never held, never a wake. */
   'ceo_decision',
+  /** "Authorize this execution" and the Owner-takeover notice go straight to the people who answer them. */
+  'ceo_permission',
+  'order_escalation',
 ];
 
 // ----------------------------------------------------------------------------------------------- prefs

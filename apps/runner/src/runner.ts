@@ -2,6 +2,7 @@ import { statSync, writeFileSync } from 'node:fs';
 import { homedir, hostname, platform } from 'node:os';
 import { basename, join } from 'node:path';
 import {
+  CEO_FULL_POWER_CAPABILITY,
   CommandPayloadSchemas,
   defaultHost,
   type EnvEnsurePayload,
@@ -77,6 +78,7 @@ import { forbiddenReadPath } from './read-repos.ts';
 import { RepoAccessUpdater } from './repo/access.ts';
 import { RepoCloner } from './repo/clone.ts';
 import { RepoCreator } from './repo/create.ts';
+import { RestartAfterReply } from './restart-after-reply.ts';
 import { RunManager } from './runs/manager.ts';
 import { sweepAgentTmps, wipeAgent } from './sandbox/sandbox.ts';
 import { RunnerKeys } from './secrets/keys.ts';
@@ -187,6 +189,16 @@ export interface RunnerOptions {
   /** Test hook: the roles the smoke test goes through and the `aom` command it runs. */
   roleSmokeRoles?: NonNullable<import('./health/role-smoke.ts').RoleSmokeDeps['roles']>;
   roleSmokeAom?: string[];
+  /**
+   * Ends this process so a service manager (or the detached helper) starts it again: `aom runner restart` calls it after the
+   * reply of the turn that asked was acknowledged (see `restart-after-reply.ts`). Absent: the request is accepted and ignored.
+   */
+  requestRestart?: () => void;
+  /** Test seam: timings of the restart after a reply. */
+  restartTiming?: Pick<
+    import('./restart-after-reply.ts').RestartDeps,
+    'pollMs' | 'maxWaitMs' | 'later' | 'now'
+  >;
   /** Test seam: replaces or adds supervisor dependencies (disk check, grace, context reporting, ...). */
   supervisorOverrides?: Partial<SupervisorDeps>;
 }
@@ -198,6 +210,7 @@ export class Runner {
   readonly ipc = new IpcServer();
   readonly supervisor: ShiftSupervisor;
   readonly chat: ChatManager;
+  readonly restartAfterReply: RestartAfterReply;
   readonly client: RunnerClient;
   readonly vaults: VaultManager;
   /** M8: posts approved drafts to Jira and the code host with this workstation's credentials. */
@@ -412,6 +425,8 @@ export class Runner {
       outbox: this.outbox,
       log: this.log,
       transport: { send: (type, payload) => this.client.send(type as never, payload) },
+      onRunnerRestart: (shiftId, reason) => this.restartAfterReply.request(shiftId, reason),
+      onShiftEnded: (shiftId, frameId) => this.restartAfterReply.turnFinished(shiftId, frameId),
       findRepo: (norm) => this.findRepo(norm),
       findLocal: (k) => this.findLocal(k),
       writeVault: (cmd) => this.vaults.write(cmd),
@@ -451,12 +466,23 @@ export class Runner {
         ...(process.env.AOM_GH_BIN ? { ghBin: process.env.AOM_GH_BIN } : {}),
         jira: () => this.jiraConfig(),
       });
+    this.restartAfterReply = new RestartAfterReply({
+      replyAcked: (frame) => !frame || !this.outbox.has(frame),
+      isIdle: () => this.isIdle(),
+      restart: () => opts.requestRestart?.(),
+      log: this.log,
+      ...(opts.restartTiming ?? {}),
+    });
     this.chat = new ChatManager({
+      restart: this.restartAfterReply,
+      ceoFullPower: () => this.freshConfig().ceo.fullPower,
+      guardClones: () =>
+        this.repos.map((r) => ({ path: r.localPath, name: basename(r.remoteUrl || r.localPath) })),
       paths: this.paths,
       adapters: this.adapters,
       ipc: this.ipc,
       log: this.log,
-      send: (type, payload) => void this.client.send(type, payload),
+      send: (type, payload) => this.client.send(type, payload),
       rpc: (chatId, method, params) => this.rpc(chatId, method, params),
       external: this.external,
       mcpSignInNote: (granted) => this.mcpSignInNote(granted),
@@ -514,7 +540,10 @@ export class Runner {
     });
     this.client.on('disconnected', () => {
       this.writeStatus(false);
-      void this.chat.cancelAll('workstation offline: the connection to the server dropped');
+      // A CEO owner or order turn keeps running: its reply goes through the durable outbox and arrives on reconnect.
+      void this.chat.cancelAll('workstation offline: the connection to the server dropped', {
+        keepFullPower: true,
+      });
     });
     this.client.on('fatal', (code, why) => {
       this.unpaired = why === UNPAIRED_MESSAGE;
@@ -889,31 +918,24 @@ export class Runner {
       repoCatalog: this.repoCatalog(),
       vaults: await this.vaults.report(),
       activeShifts: this.supervisor.activeShifts(),
+      activeChats: this.chat.activeIds(),
       maxConcurrentShifts: this.opts.config.maxConcurrentShifts,
       sudoKey: this.keys.publicKey,
       // Run a branch needs process groups and /proc or ps: not on native Windows. Test environments for cards (`runs:3`) are
       // for real testers: the mock runtime (CI, demos) runs no tests, so its cards keep the plain test step.
-      capabilities:
-        platform() === 'win32'
-          ? ['ceo:1', SHIFT_LIMIT_CAPABILITY, READONLY_DESIGN_CAPABILITY, RUNNER_PIN_CAPABILITY]
+      capabilities: [
+        ...(platform() === 'win32'
+          ? []
           : this.opts.config.runtimes.mock?.enabled
-            ? [
-                'runs:1',
-                'runs:2',
-                'ceo:1',
-                SHIFT_LIMIT_CAPABILITY,
-                READONLY_DESIGN_CAPABILITY,
-                RUNNER_PIN_CAPABILITY,
-              ]
-            : [
-                'runs:1',
-                'runs:2',
-                'runs:3',
-                'ceo:1',
-                SHIFT_LIMIT_CAPABILITY,
-                READONLY_DESIGN_CAPABILITY,
-                RUNNER_PIN_CAPABILITY,
-              ],
+            ? ['runs:1', 'runs:2']
+            : ['runs:1', 'runs:2', 'runs:3']),
+        'ceo:1',
+        SHIFT_LIMIT_CAPABILITY,
+        READONLY_DESIGN_CAPABILITY,
+        RUNNER_PIN_CAPABILITY,
+        // The local opt-in (`aom-runner ceo full-power on`), read fresh: the server shows "Full power is off" without it.
+        ...(this.freshConfig().ceo.fullPower ? [CEO_FULL_POWER_CAPABILITY] : []),
+      ],
       maxRunEnvironments: this.freshConfig().maxRunEnvironments,
       integrationsVersion: INTEGRATIONS_VERSION,
     };

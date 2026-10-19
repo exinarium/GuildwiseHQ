@@ -8,6 +8,7 @@ import {
   streamId,
 } from '@aom/shared';
 import { ceoRpc } from '../ceo/gateway.ts';
+import { announceRestart } from '../ceo/restart.ts';
 import { endCeoShift } from '../ceo/shift.ts';
 import type { ChatTerminal } from '../chat/relay.ts';
 import { baTaskRpc, endBaTaskShift } from '../commands/ba-tasks.ts';
@@ -575,6 +576,7 @@ export class RunnerHandlers {
     conn.maxShifts = effectiveShiftLimit(ctx, setting, msg.maxConcurrentShifts);
     conn.lastRepos = msg.repos;
     conn.helloShiftIds = msg.activeShifts.map((s) => s.shiftId);
+    conn.helloChatIds = msg.activeChats ?? [];
     await exec(
       ctx.pool,
       // runner_update is cleared: a runner that can update itself reports it again right after `welcome`.
@@ -689,6 +691,10 @@ export class RunnerHandlers {
     await this.reconcileQuestions(conn, known, helloAt);
     await this.reconcileBaTasks(conn, known, helloAt);
     await this.reconcileCeo(conn, known, helloAt);
+    // CEO owner and order turns the runner no longer holds are over; messages that queued meanwhile go out in order.
+    await ctx.services.chat.reconcileCeoTurns(conn.workstationId, conn.helloChatIds ?? [], helloAt);
+    await announceRestart(ctx, conn.workstationId);
+    await ctx.services.chat.onReconnect(conn.workstationId);
     await queueVaultConfigure(ctx, ctx.pool, conn.workstationId);
     await queueApprovedFor(ctx, conn.userId, conn.workstationId);
     await this.deliverPending(conn.workstationId);

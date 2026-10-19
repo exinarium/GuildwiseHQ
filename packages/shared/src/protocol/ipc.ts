@@ -302,6 +302,8 @@ export const RpcMethodSchema = z.enum([
   'env.suites.propose',
   /** `aom test suite`: the runner parses the report, attaches the log and sends the result to the server. */
   'test.suite',
+  /** `aom runner restart`: answered by the runner itself (owner turns and DevOps shifts); the restart waits for the reply. */
+  'runner.restart',
 ]);
 export type RpcMethod = z.infer<typeof RpcMethodSchema>;
 

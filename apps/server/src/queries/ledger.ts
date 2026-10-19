@@ -1,4 +1,6 @@
 import type { LedgerEntryDto, LedgerMatch, LedgerVersionDto } from '@aom/shared';
+import { orgOwnerId } from '../auth/org-context.ts';
+import { fullPowerDto } from '../ceo/orders.ts';
 import { iso, type Queryable, type Row, rows } from '../db/sql.ts';
 
 export type LedgerScopeFilter = 'all' | 'feature' | 'decision' | 'standing_order';
@@ -220,7 +222,7 @@ export async function withCanEdit(
   entries: LedgerEntryDto[],
 ): Promise<LedgerEntryDto[]> {
   const live = entries.filter((e) => !e.supersededBy && !e.retiredAt);
-  if (live.length === 0) return entries;
+  if (live.length === 0) return attachFullPower(db, entries);
   const projectIds = [...new Set(live.map((e) => e.projectId).filter((x): x is string => !!x))];
   const owned = new Set(
     (
@@ -249,14 +251,43 @@ export async function withCanEdit(
       )
     ).map((r) => [r.id, r.org_id]),
   );
-  return entries.map((e) =>
-    live.includes(e)
-      ? (() => {
-          const may = e.projectId ? owned.has(e.projectId) : managerOrgs.has(orgOf.get(e.id) ?? '');
-          return { ...e, canEdit: e.scope === 'standing_order' && may, canRetire: may };
-        })()
-      : e,
+  return attachFullPower(
+    db,
+    entries.map((e) =>
+      live.includes(e)
+        ? (() => {
+            const may = e.projectId ? owned.has(e.projectId) : managerOrgs.has(orgOf.get(e.id) ?? '');
+            return { ...e, canEdit: e.scope === 'standing_order' && may, canRetire: may };
+          })()
+        : e,
+    ),
   );
+}
+
+/** Standing orders carry the state of their full-power authorization (docs/design/ceo-front-door.md section 3.4). */
+async function attachFullPower(db: Queryable, entries: LedgerEntryDto[]): Promise<LedgerEntryDto[]> {
+  const orders = entries.filter((e) => e.scope === 'standing_order');
+  if (orders.length === 0) return entries;
+  const found = await rows(db, 'SELECT * FROM ledger_entries WHERE id = ANY($1::uuid[])', [
+    orders.map((e) => e.id),
+  ]);
+  const byId = new Map(found.map((r) => [r.id, r]));
+  const owners = new Map<string, string>();
+  const out: LedgerEntryDto[] = [];
+  for (const e of entries) {
+    const row = byId.get(e.id);
+    if (e.scope !== 'standing_order' || !row) {
+      out.push(e);
+      continue;
+    }
+    let owner = owners.get(row.org_id);
+    if (!owner) {
+      owner = (await orgOwnerId(db, row.org_id)) as string;
+      owners.set(row.org_id, owner);
+    }
+    out.push({ ...e, fullPower: await fullPowerDto(db, row, owner) });
+  }
+  return out;
 }
 
 export async function listLedger(

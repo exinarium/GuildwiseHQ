@@ -2,6 +2,8 @@ import { z } from 'zod';
 import { CeoPolicySchema } from '../ceo/policy.ts';
 import { FixCardSchema } from '../ceo/review.ts';
 import { CeoSettingsSchema, CeoTrainingSchema, NotifyKind, RecommendationResponse } from '../ceo/settings.ts';
+import { CeoPermissionDecision, CeoTurnMode, RepeatSuggestion, ToolCountsSchema } from '../ceo/turns.ts';
+import { ModelChoiceSchema } from '../models/choices.ts';
 import { defineEvent, Id, IsoDate } from './define.ts';
 
 /**
@@ -51,6 +53,8 @@ export const CeoMemorySource = z.enum([
   'owner_undo',
   'owner_edit',
   'owner_training',
+  /** "You did X, I'd rather Y" (front door, section 7). */
+  'owner_correction',
 ]);
 export type CeoMemorySource = z.infer<typeof CeoMemorySource>;
 
@@ -128,6 +132,10 @@ export const ceoEvents = [
       chatThreadId: Id.optional(),
       /** The owner pressed Accept on a recommendation of the CEO: the action ran with the owner's say-so. */
       acceptedFrom: Id.optional(),
+      /** Set when the call came from an `order` turn: the Owner-authorized standing order (and its pinned wording) it enforced. */
+      order: z.object({ entryId: Id, versionHash: z.string().length(64) }).optional(),
+      /** Set when the call came from an owner turn (the CEO chat turn the owner started). */
+      turnId: Id.optional(),
       origin: z
         .object({ untrusted: z.boolean().default(false), eventIds: z.array(z.string()).default([]) })
         .default({
@@ -380,6 +388,221 @@ export const ceoEvents = [
       by: z.object({ kind: z.enum(['user', 'agent', 'system']), id: Id.optional() }),
       note: z.string().max(1000).optional(),
       blockedCardIds: z.array(Id).default([]),
+    }),
+  ),
+  // ---------------------------------------------------------------------------- front door, step 1 (full-power turns)
+  /** An owner or order turn was accepted for a CEO thread (persisted before it is sent; a queued one waits for the workstation). */
+  defineEvent(
+    'CeoTurnQueued',
+    z.object({
+      turnId: Id,
+      orgId: Id,
+      threadId: Id,
+      /** The user message that started it (an order turn has none). */
+      messageId: Id.optional(),
+      mode: CeoTurnMode,
+      model: ModelChoiceSchema,
+      workstationId: Id.optional(),
+      /** The workstation was offline: the message waits (`data.queued` on the message). */
+      queued: z.boolean().default(false),
+      orderEntryId: Id.optional(),
+      orderVersionHash: z.string().length(64).optional(),
+    }),
+  ),
+  defineEvent(
+    'CeoTurnStarted',
+    z.object({ turnId: Id, orgId: Id, threadId: Id, workstationId: Id, model: ModelChoiceSchema }),
+  ),
+  defineEvent(
+    'CeoTurnFinished',
+    z.object({
+      turnId: Id,
+      orgId: Id,
+      threadId: Id,
+      status: z.enum(['done', 'failed', 'dropped']),
+      error: z.string().max(500).optional(),
+      /** The runner ran the turn in the restricted profile (`full_power_off`). */
+      degraded: z.string().max(40).optional(),
+      toolCounts: ToolCountsSchema.optional(),
+      model: ModelChoiceSchema.optional(),
+    }),
+  ),
+  /** The owner's model choice for the whole conversation (null: back to the default). */
+  defineEvent('ChatThreadModelSet', z.object({ threadId: Id, choice: ModelChoiceSchema.nullable(), by: Id })),
+  /** Extra working directories of a CEO conversation (`aom ceo dir add`); persisted on the thread. */
+  defineEvent(
+    'ChatThreadDirsSet',
+    z.object({ threadId: Id, dirs: z.array(z.string().max(500)).max(20), by: Id }),
+  ),
+  /** A job the CEO did itself instead of through the board (the off-system job log). */
+  defineEvent(
+    'CeoOffboardJobLogged',
+    z.object({
+      jobId: Id,
+      orgId: Id,
+      turnId: Id.optional(),
+      kind: z.string().min(1).max(60),
+      title: z.string().min(1).max(200),
+      summary: z.string().max(2000).default(''),
+      projectId: Id.optional(),
+      costMicros: z.number().int().min(0).default(0),
+      durationMs: z.number().int().min(0).default(0),
+      /** The server logged it (the CEO used tools, made no board object and logged nothing). */
+      auto: z.boolean().default(false),
+      /** The first word of the shell commands the turn ran, for the repeat rule (automation). */
+      firstToken: z.string().max(60).optional(),
+    }),
+  ),
+  /** The same kind of job came back often enough (4+ in 7 days or 10+ in 30): propose a feature, skill or automation. */
+  defineEvent(
+    'CeoRepeatDetected',
+    z.object({
+      repeatId: Id,
+      orgId: Id,
+      key: z.string().min(1).max(60),
+      jobIds: z.array(Id).min(1).max(100),
+      suggestion: RepeatSuggestion,
+      count7: z.number().int().min(0),
+      count30: z.number().int().min(0),
+      projectId: Id.optional(),
+    }),
+  ),
+  defineEvent(
+    'CeoRepeatResolved',
+    z.object({
+      repeatId: Id,
+      orgId: Id,
+      decision: z.enum(['dismissed', 'feature', 'skill', 'automation']),
+      by: Id,
+    }),
+  ),
+  /**
+   * The owner corrected something the CEO did ("you did X, I'd rather Y"). The same append writes the active `correction`
+   * memory (`CeoMemoryAdded`) and lowers the cited memories (`CeoMemoryAdjusted`).
+   */
+  defineEvent(
+    'CeoCorrected',
+    z.object({
+      correctionId: Id,
+      orgId: Id,
+      by: Id,
+      actionId: Id.optional(),
+      orderTurnId: Id.optional(),
+      chatMessageId: Id.optional(),
+      deskItemId: Id.optional(),
+      /** The owner's words, verbatim. */
+      text: z.string().max(4000),
+      /** The general rule (editable). */
+      rule: z.string().max(1000),
+      /** The active `correction` memory written in the same append (absent: the owner unticked "make it a rule"). */
+      memoryId: Id.optional(),
+      remedy: z.enum(['none', 'undo', 'redo']).default('none'),
+      redo: z.object({ action: z.string().min(1), params: z.record(z.string(), z.unknown()) }).optional(),
+      /** The class of the corrected action, when there is one. */
+      class: z.string().max(60).optional(),
+    }),
+  ),
+  /** The correction's rule was edited in the chat card ("Edit"). */
+  defineEvent(
+    'CeoCorrectionEdited',
+    z.object({ correctionId: Id, orgId: Id, rule: z.string().max(1000), by: Id }),
+  ),
+  /** The runtime needed a permission it lacks: "authorize this execution" is a question on the desk. */
+  defineEvent(
+    'CeoPermissionAsked',
+    z.object({
+      askId: Id,
+      orgId: Id,
+      turnId: Id,
+      threadId: Id.optional(),
+      mode: CeoTurnMode,
+      tool: z.string().max(200),
+      /** The tool input, redacted by the runner. */
+      input: z.string().max(4000).default(''),
+      reason: z.string().max(1000).default(''),
+      deskItemId: Id,
+    }),
+  ),
+  defineEvent(
+    'CeoPermissionAnswered',
+    z.object({
+      askId: Id,
+      orgId: Id,
+      turnId: Id,
+      tool: z.string().max(200),
+      decision: CeoPermissionDecision,
+      /** The Owner or Admin who pressed the button; absent for a timeout or a turn that ended. */
+      by: Id.optional(),
+    }),
+  ),
+  /** `aom runner restart`: a restart was scheduled for after the reply. */
+  defineEvent(
+    'RunnerRestartRequested',
+    z.object({
+      workstationId: Id,
+      orgId: Id.optional(),
+      by: z.string().max(100),
+      reason: z.string().max(500).optional(),
+    }),
+  ),
+  /** The Owner marked one of his standing orders "the CEO enforces this with full power", pinned to its wording. */
+  defineEvent(
+    'StandingOrderAuthorized',
+    z.object({
+      entryId: Id,
+      orgId: Id,
+      versionHash: z.string().length(64),
+      by: Id,
+      scope: z.object({
+        projectIds: z.array(Id).nullable().default(null),
+        triggers: z.array(z.string().max(60)).optional(),
+      }),
+      covers: z.array(z.string().max(60)).default([]),
+    }),
+  ),
+  /** The wording changed (or the entry was retired) without the Owner's re-authorization: the authority is void. */
+  defineEvent(
+    'StandingOrderAuthorityVoided',
+    z.object({ entryId: Id, reason: z.enum(['edited', 'retired', 'owner_changed']) }),
+  ),
+  defineEvent('StandingOrderAuthorityRevoked', z.object({ entryId: Id, by: Id })),
+  /** An Admin asks the Owner to take over a standing order as his own (the only way an Admin's order can carry full power). */
+  defineEvent(
+    'StandingOrderEscalated',
+    z.object({
+      entryId: Id,
+      orgId: Id,
+      by: Id,
+      note: z.string().max(1000).default(''),
+      deskItemId: Id.optional(),
+    }),
+  ),
+  /** The CEO (restricted) judged that a wake falls under an authorized order: the server starts an `order` turn. */
+  defineEvent(
+    'CeoOrderTurnRequested',
+    z.object({
+      turnId: Id,
+      orgId: Id,
+      entryId: Id,
+      versionHash: z.string().length(64),
+      wakeId: Id.optional(),
+      subject: z.string().max(200).default(''),
+      why: z.string().max(2000).default(''),
+      confidence: z.number().min(0).max(1).optional(),
+    }),
+  ),
+  defineEvent(
+    'CeoOrderTurnFinished',
+    z.object({
+      turnId: Id,
+      orgId: Id,
+      entryId: Id,
+      versionHash: z.string().length(64),
+      outcome: z.enum(['done', 'declined', 'failed']),
+      summary: z.string().max(4000).default(''),
+      commands: z.array(z.string().max(500)).max(200).default([]),
+      /** `decline --ask`: the question put to the owner. */
+      ask: z.string().max(2000).optional(),
     }),
   ),
 ] as const;

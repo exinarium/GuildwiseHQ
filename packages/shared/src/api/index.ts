@@ -11,6 +11,7 @@ export * from './briefing.ts';
 export * from './cards.ts';
 export * from './catalogue.ts';
 export * from './ceo.ts';
+export * from './ceo-front-door.ts';
 export * from './chats.ts';
 export * from './cloud.ts';
 export * from './common.ts';

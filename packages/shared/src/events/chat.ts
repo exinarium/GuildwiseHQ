@@ -12,6 +12,8 @@ export const chatEvents = [
       cardId: Id.optional(),
       title: z.string().min(1),
       createdBy: Id,
+      /** `ceo_order`: the hidden per-order thread of the turns that enforce an Owner-authorized standing order. Absent: `chat`. */
+      kind: z.enum(['chat', 'ceo_order']).optional(),
     }),
   ),
   /** Close: the user hides the chat from their list (per user; the conversation is kept). */

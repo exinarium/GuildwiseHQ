@@ -66,8 +66,8 @@ export function SetupChecklistProvider({ children }: { children: ReactNode }) {
   );
 }
 
-/** Optional steps (the CEO) are never counted in the progress. */
-export const requiredSteps = (c: SetupChecklist): SetupStep[] => c.steps.filter((s) => !s.optional);
+/** Every step is required (the optional "appoint a CEO" step is gone: the CEO is built in). */
+export const requiredSteps = (c: SetupChecklist): SetupStep[] => c.steps;
 
 /** Whether the sidebar button shows: there are steps, the user did not hide it, and the setup is not finished. */
 export const checklistVisible = (c: SetupChecklist | undefined): c is SetupChecklist =>
@@ -127,14 +127,6 @@ function StepRow({ step, onGo }: { step: SetupStep; onGo: () => void }) {
       <div className="min-w-0 flex-1">
         <p className={cx('text-sm font-medium', step.done ? 'text-muted line-through' : 'text-fg')}>
           {step.title}
-          {step.optional && (
-            <span
-              className="ml-2 rounded-full bg-sunken px-2 py-px text-xs font-normal text-muted"
-              data-testid={`setup-optional-${step.id}`}
-            >
-              optional
-            </span>
-          )}
         </p>
         <p className="text-sm text-muted">{step.hint}</p>
         {!step.done && missing && <p className="text-sm text-muted">{missing}</p>}

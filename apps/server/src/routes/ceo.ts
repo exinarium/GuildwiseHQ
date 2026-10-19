@@ -1,19 +1,30 @@
+import { randomUUID } from 'node:crypto';
 import {
+  AnswerPermissionRequestSchema,
+  AskIdParamsSchema,
   CeoActionsQuerySchema,
   CeoChatResponseSchema,
   CeoIdParamsSchema,
+  ConfirmTurnRequestSchema,
+  CorrectCeoRequestSchema,
   CreateCeoMemoryRequestSchema,
   CreateCeoTaskRequestSchema,
   DEFAULT_CEO_POLICY,
+  EditCorrectionRequestSchema,
   MoveCeoRequestSchema,
   PatchCeoMemoryRequestSchema,
   PatchCeoTaskRequestSchema,
   PauseCeoRequestSchema,
+  QueuedTurnDecisionSchema,
+  ResolveRepeatRequestSchema,
+  SetThreadModelRequestSchema,
+  streamId,
   UpdateCeoPolicyRequestSchema,
   UpdateCeoSettingsRequestSchema,
 } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
 import { requireOrg } from '../auth/guards.ts';
+import { ceoChatState, setThreadModel } from '../ceo/chat-state.ts';
 import {
   pauseCeo,
   resetCeoPolicy,
@@ -22,7 +33,9 @@ import {
   updateCeoPolicy,
   updateCeoSettings,
 } from '../ceo/commands.ts';
+import { editCorrection, listCorrections, recordCorrection, redoCorrection } from '../ceo/corrections.ts';
 import { ceoChatThread, moveCeo } from '../ceo/home.ts';
+import { listOpenRepeats } from '../ceo/jobs.ts';
 import {
   addOwnerRule,
   confirmMemory,
@@ -31,10 +44,15 @@ import {
   listMemories,
   retireMemory,
 } from '../ceo/memory.ts';
+import { listOrderTurns } from '../ceo/order-turns.ts';
+import { answerPermission } from '../ceo/permissions.ts';
 import { loadCeo } from '../ceo/state.ts';
 import { createTask, listTasks, updateTask } from '../ceo/tasks.ts';
 import { enqueueWake } from '../ceo/wakes.ts';
+import { orgScope, SYSTEM_ACTOR } from '../commands/common.ts';
+import { resolveDeskItem } from '../commands/desk.ts';
 import type { Ctx } from '../context.ts';
+import { one } from '../db/sql.ts';
 import { forbidden, notFound } from '../errors.ts';
 import { actionsCsv, ceoStatus, listActions } from '../queries/ceo.ts';
 import { typed } from './util.ts';
@@ -114,6 +132,158 @@ export function ceoRoutes(ctx: Ctx) {
     app.post('/api/ceo/chat', async (req) => {
       const a = await owner(req);
       return CeoChatResponseSchema.parse({ threadId: await ceoChatThread(ctx, a.session.user, a.orgId) });
+    });
+
+    // ------------------------------------------------------------------- the chat as a full session (step 1)
+    app.get('/api/ceo/chat/state', async (req) => {
+      const a = await owner(req);
+      return ceoChatState(ctx, a.orgId);
+    });
+
+    app.put('/api/ceo/chat/model', { schema: { body: SetThreadModelRequestSchema } }, async (req) => {
+      const a = await owner(req);
+      await setThreadModel(ctx, a.session.user, a.orgId, req.body.choice);
+      return { ok: true };
+    });
+
+    /** A stale queued message: send it anyway, or drop it. */
+    app.post(
+      '/api/ceo/queue/:id',
+      { schema: { params: AskIdParamsSchema, body: QueuedTurnDecisionSchema } },
+      async (req) => {
+        const a = await owner(req);
+        const t = await one(ctx.pool, 'SELECT org_id FROM ceo_turns WHERE id=$1', [req.params.id]);
+        if (!t || t.org_id !== a.orgId) throw notFound('queued message not found');
+        await ctx.services.chat.decideQueued(a.session.user.id, req.params.id, req.body.decision);
+        return { ok: true };
+      },
+    );
+
+    /** "Authorize this execution": any Owner or Admin (docs section 14.1). */
+    app.post(
+      '/api/ceo/permissions/:id',
+      { schema: { params: AskIdParamsSchema, body: AnswerPermissionRequestSchema } },
+      async (req) => {
+        const a = await requireOrg(ctx, req, { min: 'admin' });
+        await answerPermission(ctx, a.session.user, req.params.id, req.body.decision);
+        return { ok: true };
+      },
+    );
+
+    /**
+     * The Owner's own answer to an inline confirmation card of an owner turn (docs section 6.2): Approve runs the recommended
+     * action with his say-so, No declines it. Answered by his session, never by text the model relays.
+     */
+    app.post(
+      '/api/ceo/turns/:id/confirm',
+      { schema: { params: AskIdParamsSchema, body: ConfirmTurnRequestSchema } },
+      async (req) => {
+        const a = await owner(req);
+        const item = await one(
+          ctx.pool,
+          `SELECT d.id, d.title FROM desk_items d
+            WHERE d.org_id=$1 AND d.subkind='ceo_recommendation' AND d.status='open'
+              AND d.data->>'actionId'=$2 AND d.data->>'inlineTurnId'=$3`,
+          [a.orgId, req.body.actionId, req.params.id],
+        );
+        if (!item) throw notFound('that confirmation is not open any more');
+        await resolveDeskItem(ctx, a.session.user, item.id, {
+          resolution: req.body.approve ? 'approved' : 'rejected',
+        });
+        const turn = await one(ctx.pool, 'SELECT thread_id FROM ceo_turns WHERE id=$1', [req.params.id]);
+        if (turn)
+          await ctx.store.append([
+            {
+              streamId: streamId.thread(turn.thread_id),
+              event: {
+                type: 'ThreadMessagePosted',
+                payload: {
+                  threadId: turn.thread_id,
+                  messageId: randomUUID(),
+                  authorKind: 'system',
+                  kind: 'system',
+                  body: `${req.body.approve ? 'You approved' : 'You declined'}: ${String(item.title).slice(0, 200)}`,
+                  data: {
+                    confirmation: req.body.approve ? 'approved' : 'declined',
+                    actionId: req.body.actionId,
+                  },
+                },
+              },
+              actor: SYSTEM_ACTOR,
+              scope: orgScope(a.orgId),
+            },
+          ]);
+        return { ok: true };
+      },
+    );
+
+    // ----------------------------------------------------------------------------------------------- corrections
+    app.post('/api/ceo/corrections', { schema: { body: CorrectCeoRequestSchema } }, async (req) => {
+      const a = await requireOrg(ctx, req, { min: 'admin' });
+      return recordCorrection(ctx, a.session.user, a.orgId, req.body);
+    });
+
+    app.get('/api/ceo/corrections', async (req) => {
+      const a = await requireOrg(ctx, req, { min: 'admin' });
+      return { corrections: await listCorrections(ctx.pool, a.orgId, { limit: 50 }) };
+    });
+
+    app.patch(
+      '/api/ceo/corrections/:id',
+      { schema: { params: AskIdParamsSchema, body: EditCorrectionRequestSchema } },
+      async (req) => {
+        const a = await owner(req);
+        await editCorrection(ctx, a.session.user, a.orgId, req.params.id, req.body.rule);
+        return { ok: true };
+      },
+    );
+
+    /** "Redo it as ...": the corrected call (stored with the correction) runs with the Owner's say-so. */
+    app.post('/api/ceo/corrections/:id/redo', { schema: { params: AskIdParamsSchema } }, async (req) => {
+      const a = await owner(req);
+      return { message: await redoCorrection(ctx, a.session.user, a.orgId, req.params.id) };
+    });
+
+    // ------------------------------------------------------------------------------ the job log and its repeats
+    app.get('/api/ceo/repeats', async (req) => {
+      const a = await requireOrg(ctx, req, { min: 'admin' });
+      return { repeats: await listOpenRepeats(ctx.pool, a.orgId) };
+    });
+
+    app.post(
+      '/api/ceo/repeats/:id/resolve',
+      { schema: { params: AskIdParamsSchema, body: ResolveRepeatRequestSchema } },
+      async (req) => {
+        const a = await owner(req);
+        const r = await one(
+          ctx.pool,
+          `SELECT 1 FROM ceo_repeats WHERE id=$1 AND org_id=$2 AND status='open'`,
+          [req.params.id, a.orgId],
+        );
+        if (!r) throw notFound('that repeat is not open');
+        await ctx.store.append([
+          {
+            streamId: streamId.ceo(a.orgId),
+            event: {
+              type: 'CeoRepeatResolved',
+              payload: {
+                repeatId: req.params.id,
+                orgId: a.orgId,
+                decision: req.body.decision,
+                by: a.session.user.id,
+              },
+            },
+            actor: { kind: 'user', id: a.session.user.id },
+            scope: orgScope(a.orgId),
+          },
+        ]);
+        return { ok: true };
+      },
+    );
+
+    app.get('/api/ceo/order-turns', async (req) => {
+      const a = await requireOrg(ctx, req, { min: 'admin' });
+      return { turns: await listOrderTurns(ctx.pool, a.orgId) };
     });
 
     // ----------------------------------------------------------------------------------------- activity log

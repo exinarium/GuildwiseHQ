@@ -411,6 +411,7 @@ describe('browser protocol', () => {
     },
     'chat.delta': { type: 'chat.delta', threadId: U.c, text: 'hi' },
     'chat.done': { type: 'chat.done', threadId: U.c, messageId: U.d },
+    'chat.queued': { type: 'chat.queued', threadId: U.c, clientMsgId: 'm1', workstationName: 'Desk' },
     'chat.error': { type: 'chat.error', threadId: U.c, reason: 'workstation_offline' },
     'run.changed': { type: 'run.changed', envId: U.a },
     'run.log': { type: 'run.log', envId: U.a, service: 'web', lines: ['x'] },

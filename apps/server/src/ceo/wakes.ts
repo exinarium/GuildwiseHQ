@@ -37,6 +37,8 @@ const NO_WAKE_SUBKINDS = new Set([
   'ceo_recommendation',
   'ceo_notice',
   'ceo_report',
+  'ceo_permission',
+  'order_escalation',
 ]);
 
 /**

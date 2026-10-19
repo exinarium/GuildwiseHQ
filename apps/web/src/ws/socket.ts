@@ -1,5 +1,6 @@
 import {
   type BrowserToServer,
+  type ModelChoice,
   type ProgressItem,
   RESYNC_THRESHOLD,
   type ServerToBrowser,
@@ -21,6 +22,7 @@ export type RunLogListener = (service: string, lines: string[], history: boolean
 export type ChatEvent =
   | { type: 'delta'; text: string }
   | { type: 'done'; messageId: string }
+  | { type: 'queued'; clientMsgId?: string; workstationName?: string }
   | { type: 'error'; reason: string };
 type ChatListener = (ev: ChatEvent) => void;
 
@@ -171,6 +173,15 @@ export class LiveSocket {
       case 'chat.done':
         this.emitChat(msg.threadId, { type: 'done', messageId: msg.messageId });
         break;
+      case 'chat.queued':
+        void this.qc.invalidateQueries({ queryKey: ['ceo'] });
+        void this.qc.invalidateQueries({ queryKey: ['thread', msg.threadId] });
+        this.emitChat(msg.threadId, {
+          type: 'queued',
+          ...(msg.clientMsgId ? { clientMsgId: msg.clientMsgId } : {}),
+          ...(msg.workstationName ? { workstationName: msg.workstationName } : {}),
+        });
+        break;
       case 'chat.error':
         this.emitChat(msg.threadId, { type: 'error', reason: msg.reason });
         break;
@@ -198,9 +209,20 @@ export class LiveSocket {
   }
 
   /** Sends a chat message; false when the socket is not open (the panel then says the chat is unavailable). */
-  sendChat(threadId: string, body: string, clientMsgId: string): boolean {
+  sendChat(
+    threadId: string,
+    body: string,
+    clientMsgId: string,
+    model?: { choice: ModelChoice; scope: 'message' | 'thread' },
+  ): boolean {
     if (this.ws?.readyState !== WebSocket.OPEN && !this.mocked) return false;
-    this.send({ type: 'chat.send', threadId, body, clientMsgId });
+    this.send({
+      type: 'chat.send',
+      threadId,
+      body,
+      clientMsgId,
+      ...(model ? { model: model.choice, modelScope: model.scope } : {}),
+    });
     return true;
   }
 

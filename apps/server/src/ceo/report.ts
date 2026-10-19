@@ -25,6 +25,9 @@ import { ceoReportMail } from '../mail/ceo.ts';
 import { buildFloorDigest } from '../reporter/digest.ts';
 import { reportingOf } from '../reporter/settings.ts';
 import { ensureCeoThread } from './chat.ts';
+import { listOpenRepeats } from './jobs.ts';
+import { listOrderTurns } from './order-turns.ts';
+import { detectRepeats } from './signals.ts';
 import { loadCeo } from './state.ts';
 
 const systemBy: DeskActor = { kind: 'system' };
@@ -70,6 +73,16 @@ export async function renderCeoReportFallback(
     '',
     renderFloorReportFallback(digest).replace(/^# .*\n/, ''),
   ];
+  const repeats = await listOpenRepeats(db, orgId);
+  if (repeats.length)
+    out.push(
+      '',
+      '## Things you keep asking me',
+      ...repeats.map(
+        (r) =>
+          `- ${r.key}: ${r.count7} times in 7 days, ${r.count30} in 30 days. Suggestion: make it a ${r.suggestion}.`,
+      ),
+    );
   return out.join('\n');
 }
 
@@ -94,6 +107,11 @@ export async function postCeoReport(
   const digest = await buildFloorDigest(db, orgId, now, input.localDate);
   const thread = await ensureCeoThread(db, orgId);
   const acts = await actionsOfDay(db, orgId, now);
+  // Repeated off-board jobs (4+ in 7 days, 10+ in 30): found now if the job log has not raised them yet, listed in the report.
+  const found = await detectRepeats(db, orgId, now);
+  if (found.length) await ctx.store.append(found, input.tx ? { tx: input.tx } : {});
+  const repeats = await listOpenRepeats(db, orgId);
+  const orderTurns = await listOrderTurns(db, orgId, { since: new Date(now.getTime() - 86_400_000) });
   const scores = agreementScores(
     await rows<{ class: string; response: any }>(
       db,
@@ -104,7 +122,17 @@ export async function postCeoReport(
   const deskItemId = randomUUID();
   const by: DeskActor = input.agentId ? { kind: 'agent', agentId: input.agentId, role: 'ceo' } : systemBy;
   const facts = renderFloorReportFallback(digest).replace(/^# .*\n/, '## The facts behind this report\n');
-  const body = `${input.report.trim()}\n\n---\n${facts}`;
+  // What the CEO itself cost in the last day, by model (the model switch makes this worth a line).
+  const byModel = await rows(
+    db,
+    `SELECT model, round(sum(cost_usd_micros)/1e6, 2) AS usd, count(*)::int AS turns FROM shift_costs
+      WHERE org_id=$1 AND kind IN ('ceo','ceo_chat') AND ended_at > $2 GROUP BY model ORDER BY sum(cost_usd_micros) DESC`,
+    [orgId, new Date(now.getTime() - 86_400_000)],
+  );
+  const spendLine = byModel.length
+    ? `\n\n## What the CEO cost, by model (last 24 hours)\n${byModel.map((m) => `- ${m.model}: $${m.usd} (${m.turns} ${m.turns === 1 ? 'turn' : 'turns'})`).join('\n')}`
+    : '';
+  const body = `${input.report.trim()}\n\n---\n${facts}${spendLine}`;
   const open = digest.signals.filter((s) => s.status === 'open');
   const events: AppendInput[] = [
     ...thread.events,
@@ -135,7 +163,10 @@ export async function postCeoReport(
                 status: a.status,
                 subject: a.subject_label,
                 undoable: a.undoable,
+                correctable: a.mode === 'decided',
               })),
+              repeats,
+              orderTurns,
               scores,
               totals: sumScores(scores),
             },
@@ -263,6 +294,9 @@ export async function postFallbackReview(
   wakeIds: string[],
 ): Promise<void> {
   const now = ctx.clock.now();
+  // Repeats are found before the text is written, so the template lists them too.
+  const found = await detectRepeats(ctx.pool, orgId, now);
+  if (found.length) await ctx.store.append(found);
   const digest = await buildFloorDigest(ctx.pool, orgId, now, localDate);
   const text = await renderCeoReportFallback(ctx.pool, orgId, digest, now);
   await postCeoReport(ctx, ctx.pool, orgId, { report: text, localDate, fallback: true });

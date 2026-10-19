@@ -4,6 +4,7 @@ import { money } from '../../lib/money.ts';
 import { formatDateTime } from '../../lib/time.ts';
 import { AgentAvatar } from '../Face.tsx';
 import { Badge, Button, Callout, ErrorBox, Panel } from '../ui.tsx';
+import { fullPowerText } from './CeoChatExtras.tsx';
 
 const STATE: Record<CeoStatusDto['state'], { label: string; tone: 'green' | 'amber' | 'red' | 'neutral' }> = {
   none: { label: 'Being set up', tone: 'neutral' },
@@ -108,6 +109,16 @@ export function OverviewTab({ status: s, owner }: { status: CeoStatusDto; owner:
           {owner
             ? `Pair a workstation to talk to ${a.name}: it runs on the Owner's own computer.`
             : `${a.name} runs on the Owner's own computer and has none yet: the Owner pairs a workstation first.`}
+        </Callout>
+      )}
+
+      {s.fullPower && a.workstationId !== null && (
+        <Callout
+          tone={s.fullPower.state === 'on' ? 'success' : 'warning'}
+          role="status"
+          data-testid="ceo-full-power"
+        >
+          {fullPowerText(s.fullPower, a.name)}
         </Callout>
       )}
 

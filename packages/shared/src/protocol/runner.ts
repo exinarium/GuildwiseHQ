@@ -3,6 +3,7 @@ import { BriefAttachmentSchema } from '../attachments/index.ts';
 import { CHANGED_PATHS_MAX, DiffUploadSchema, E2eAreaMapSchema } from '../cards/lean-v6.ts';
 import { DiffStats, StoredCompletionAction } from '../cards/types.ts';
 import { CeoShiftSchema } from '../ceo/ipc.ts';
+import { CeoOrderSpecSchema, ToolCountsSchema } from '../ceo/turns.ts';
 import {
   EnvEnsurePayloadSchema,
   RepoClonePayloadSchema,
@@ -838,6 +839,8 @@ export const HelloSchema = msg('hello', {
       startedAt: z.iso.datetime(),
     }),
   ),
+  /** Chats (CEO owner and order turns among them) the runner is running right now: the server fails the turns it holds as running but are not listed. Absent from older runners. */
+  activeChats: z.array(z.string()).optional(),
   outboxPending: z.number().int().nonnegative(),
   /** The runner's configured `maxConcurrentShifts` (shown on the Workstations page; the server caps it). */
   maxConcurrentShifts: z.number().int().positive().optional(),
@@ -1137,6 +1140,14 @@ export const ChatDoneSchema = msg('chat.done', {
   usage: Usage,
   /** Runtime session to `--resume` on the next message of this conversation. */
   runtimeSessionId: z.string().optional(),
+  /** CEO owner and order turns: what the session used (the server's off-board job backstop reads it). */
+  toolCounts: ToolCountsSchema.optional(),
+  /** The turn ran in the restricted profile although it asked for full power (`full_power_off`). */
+  degraded: z.string().max(40).optional(),
+  /** Order turns: the Bash commands the session ran (redacted), for the audit. */
+  commands: z.array(z.string().max(500)).max(200).optional(),
+  /** The model that answered, when the runtime says. */
+  model: z.string().max(120).optional(),
 });
 export const ChatErrorSchema = msg('chat.error', {
   chatId: z.string(),
@@ -1256,6 +1267,26 @@ export const ChatStartSchema = msg('chat.start', {
   message: z.string(),
   resumeSessionId: z.string().optional(),
   context: ChatContextSchema,
+  /**
+   * The CEO's full-power profile (docs/design/ceo-front-door.md section 3.3): the SERVER sets it, only for a CEO chat turn the
+   * Owner sent (`owner`) or an Owner-authorized standing order (`order`). The runner honours it only for `agent.roleKey ===
+   * 'ceo'` and only with its local opt-in (`aom-runner ceo full-power on`); otherwise it runs the restricted profile and
+   * reports `chat.done.degraded`.
+   */
+  ceoMode: z.enum(['owner', 'order']).optional(),
+  /** The fixed working directory of the CEO session (`--resume` keys sessions by it); absent: the Owner's home directory. */
+  cwd: z.string().optional(),
+  /** Extra working directories (`aom ceo dir add`). */
+  addDirs: z.array(z.string()).optional(),
+  /** The message waited in the queue since this time (the reply says how long). */
+  queuedAt: z.iso.datetime().optional(),
+  /**
+   * Guildwise context put before the user's message (fenced): the first turn of a session carries the full dynamic context
+   * (corrections first, rules, preferences, tasks), later turns a short delta. `handover` starts a new session with a summary.
+   */
+  briefDelta: z.string().optional(),
+  /** Order turns: the authorization the runner checks again (mark and hash) before it starts. */
+  order: CeoOrderSpecSchema.optional(),
 });
 export const TokenRotatedSchema = msg('token.rotated', { token: z.string().min(1) });
 /** A browser started (or stopped) following the logs of a run environment: the runner sends `run.log` only meanwhile. */

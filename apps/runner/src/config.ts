@@ -76,6 +76,14 @@ export const IntegrationsPolicyConfigSchema = z.object({
   machineScopeFromWeb: z.enum(['primary', 'never']).default('primary'),
 });
 
+/**
+ * The CEO's full-power profile (docs/design/ceo-front-door.md section 3.2): a cap the machine owner holds against any server.
+ * `aom-runner ceo full-power on` lets the Owner's own CEO chat run as his real Claude Code session on this machine.
+ */
+export const CeoConfigSchema = z.object({
+  fullPower: z.boolean().default(false),
+});
+
 export const RunnerConfigSchema = z.object({
   serverUrl: z.string().min(1),
   workstationId: z.string().min(1),
@@ -96,6 +104,8 @@ export const RunnerConfigSchema = z.object({
     .default({ 'claude-code': ClaudeRuntimeConfigSchema.parse({}) }),
   /** M8: credentials for posting approved updates to Jira (GitHub uses this machine's `gh` login). */
   jira: JiraConfigSchema.optional(),
+  /** The CEO's full-power switch (see `CeoConfigSchema`). */
+  ceo: CeoConfigSchema.default(CeoConfigSchema.parse({})),
   /** Integrations page policy (see `IntegrationsPolicyConfigSchema`). */
   integrations: IntegrationsPolicyConfigSchema.default(IntegrationsPolicyConfigSchema.parse({})),
   /**

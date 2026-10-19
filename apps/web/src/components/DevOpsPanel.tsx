@@ -5,9 +5,10 @@ import {
   type WorkstationDto,
 } from '@aom/shared';
 import { type FormEvent, useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router';
+import { useCeoChat } from '../api/queries/ceo.ts';
 import {
   useClearSudoPassword,
-  useCreateDevOpsRequest,
   useDevOpsRequest,
   useDevOpsRequests,
   usePatchDevOpsAccess,
@@ -17,7 +18,9 @@ import {
   useSetSudoPassword,
   useVerifyRights,
 } from '../api/queries/devops.ts';
+import { openCeoChat } from '../lib/openCeoChat.ts';
 import { formatDateTime } from '../lib/time.ts';
+import { useCeoName } from './ceo/useCeoName.ts';
 import { AskDevOpsButton } from './devops/AskDevOps.tsx';
 import { FixWithDevOps } from './devops/FixWithDevOps.tsx';
 import { Badge, Button, ErrorBox, Select, TextArea, TextInput } from './ui.tsx';
@@ -333,14 +336,23 @@ function HygieneSettings({ w }: { w: WorkstationDto }) {
 }
 
 function AskDevOps({ workstationId, name }: { workstationId: string; name: string }) {
-  const create = useCreateDevOpsRequest();
+  // DevOps works through the CEO (docs/design/ceo-front-door.md section 8): the request opens the CEO chat, prefilled.
+  const openChat = useCeoChat();
+  const nav = useNavigate();
+  const ceoName = useCeoName();
   const [text, setText] = useState('');
   const [err, setErr] = useState<string | undefined>();
   const submit = (e: FormEvent) => {
     e.preventDefault();
     if (!text.trim()) return setErr('Describe what you need');
     setErr(undefined);
-    create.mutate({ workstationId, summary: text.trim() }, { onSuccess: () => setText('') });
+    openChat.mutate(undefined, {
+      onSuccess: (c) =>
+        openCeoChat(nav, c.threadId, {
+          prefill: `Ask DevOps on ${name}: ${text.trim()}`,
+          context: [`Workstation: ${name} (${workstationId})`],
+        }),
+    });
   };
   return (
     <form
@@ -358,10 +370,10 @@ function AskDevOps({ workstationId, name }: { workstationId: string; name: strin
           error={err}
         />
       </div>
-      <Button type="submit" variant="primary" disabled={create.isPending}>
-        Send request
+      <Button type="submit" variant="primary" disabled={openChat.isPending}>
+        Ask {ceoName}
       </Button>
-      <ErrorBox error={create.error} />
+      <ErrorBox error={openChat.error} />
     </form>
   );
 }

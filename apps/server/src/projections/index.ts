@@ -4,6 +4,7 @@ import { blogProjectors } from './blog.ts';
 import { cardProjectors, releaseHeldDesigns } from './cards.ts';
 import { catalogueProjectors } from './catalogue.ts';
 import { ceoProjectors } from './ceo.ts';
+import { ceoFrontDoorProjectors } from './ceo-front-door.ts';
 import { chatProjectors } from './chats.ts';
 import { codeV6Projectors } from './code-v6.ts';
 import { commitAsProjectors } from './commit-as.ts';
@@ -85,6 +86,7 @@ const domains: Array<Record<string, Projector>> = [
   runProjectors,
   commitAsProjectors,
   ceoProjectors,
+  ceoFrontDoorProjectors,
   questionFlowProjectors,
   codeV6Projectors,
 ];
@@ -146,6 +148,12 @@ export const PROJECTION_TABLES = [
   'ceo_actions',
   'ceo_tasks',
   'ceo_memories',
+  'ceo_turns',
+  'ceo_permission_asks',
+  'ceo_offboard_jobs',
+  'ceo_repeats',
+  'ceo_corrections',
+  'standing_order_authority',
   'cards',
   'card_dependencies',
   'card_groups',

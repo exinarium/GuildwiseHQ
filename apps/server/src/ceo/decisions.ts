@@ -381,6 +381,27 @@ export async function correctCeoDecision(
         memoryId,
       }),
       ...adjust,
+      // The desk path is one entry point of the correction (docs/design/ceo-front-door.md section 7.1): same event as the chat's.
+      {
+        streamId: streamId.ceo(item.org_id),
+        event: {
+          type: 'CeoCorrected',
+          payload: {
+            correctionId: randomUUID(),
+            orgId: item.org_id,
+            by: user.id,
+            ...(d.actionId ? { actionId: d.actionId } : {}),
+            deskItemId: item.id,
+            text: correction.slice(0, 4000),
+            rule: correction.slice(0, 1000),
+            memoryId,
+            remedy: req.applyNow ? ('undo' as const) : ('none' as const),
+            ...(d.class ? { class: d.class } : {}),
+          },
+        },
+        actor: userActor(user.id),
+        scope: orgScope(item.org_id),
+      },
     ];
     if (card)
       events.push(

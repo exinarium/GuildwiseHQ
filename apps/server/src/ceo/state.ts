@@ -5,6 +5,7 @@ import {
   CeoSettingsSchema,
   type CeoTraining,
   CeoTrainingSchema,
+  DEFAULT_CEO_POLICY,
   DEFAULT_CEO_SETTINGS,
 } from '@aom/shared';
 import { one, type Queryable } from '../db/sql.ts';
@@ -29,6 +30,12 @@ export interface CeoState {
   enabledAt: Date;
 }
 
+/** Action classes added after an organization's policy was saved take their default (not the blanket `recommend`). */
+export function withNewClasses(p: CeoPolicy): CeoPolicy {
+  const missing = Object.entries(DEFAULT_CEO_POLICY.classes).filter(([k]) => !(k in p.classes));
+  return missing.length ? { ...p, classes: { ...Object.fromEntries(missing), ...p.classes } } : p;
+}
+
 export function parseSettings(raw: unknown): CeoSettings {
   const r = CeoSettingsSchema.safeParse(raw);
   return r.success ? r.data : DEFAULT_CEO_SETTINGS;
@@ -45,7 +52,7 @@ export async function loadCeo(db: Queryable, orgId: string): Promise<CeoState | 
     paused: r.paused,
     pausedReason: r.paused_reason ?? null,
     settings: parseSettings(r.settings),
-    policy: CeoPolicySchema.parse(r.policy),
+    policy: withNewClasses(CeoPolicySchema.parse(r.policy)),
     policyVersion: r.policy_version,
     training: CeoTrainingSchema.parse(r.training),
     chatThreadId: r.chat_thread_id ?? null,

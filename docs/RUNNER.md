@@ -262,6 +262,33 @@ After a rollback the failed version is not tried again on this machine (`update-
 
 **Releasing.** The version is `RUNNER_VERSION` in `apps/runner/src/version.ts`, and nothing is "newer" until it is raised: bump it, run `pnpm package:runner`, publish `release/aom-runner-<version>.tgz` to the server's release directory (`AOM_RUNNER_RELEASE_DIR`). Runners pick it up within a day. Pause updates first if you are unsure about a release.
 
+## CEO full power
+
+The Owner's own chat with the CEO can run as a real Claude Code session on the Owner's workstation (docs/design/ceo-front-door.md
+sections 3 and 5). It is a cap the machine owner holds against any server:
+
+- **Opt in locally:** `aom-runner ceo full-power on` (`off`, `status`). It sets `ceo.fullPower` in `config.json`; restart the
+  runner so `hello` announces the `ceo-full-power:1` capability. Without it, an owner turn runs in the restricted CEO profile and
+  the reply says "Full power is off on this workstation" (`chat.done.degraded = full_power_off`); an order turn is refused.
+- **Who decides:** the server sets `ceoMode` (`owner` or `order`) on `chat.start`. The runner honours it only for the CEO agent, only
+  with the opt-in, and (order turns) only when the order carries the Owner's mark and its text hashes to `versionHash`. Shifts
+  (wakes) never get this profile, whatever their payload says.
+- **The profile:** `claude -p ... --setting-sources user,project,local --permission-mode auto --permission-prompt-tool
+  mcp__aom_permission__ask --allowedTools "Bash(aom:*)" --append-system-prompt-file <turn>/ceo-brief.md --settings <turn>/floor.json`.
+  Your real `~/.claude` (settings, skills, plugins, MCP), your home directory and no Guildwise sandbox. The working directory is
+  fixed per conversation (`ceo.settings.ownerTurn.cwd`, default your home) so `--resume` works. The turn directory
+  `<data dir>/ceo-turns/<chat id>/` is removed afterwards.
+- **Deny floor** (deny wins over your own rules): `systemctl ... aom-runner`, `pkill *aom*`, `kill <runner pid>`, and reading or
+  editing the runner's `secrets/` and `config.json`. A restart goes through `aom runner restart`.
+- **Permission relay:** when the session needs a permission it lacks, a small MCP server (`aom ceo-permission-mcp`) raises the desk
+  question "authorize this execution"; an Owner or Admin answers it on the desk (once, for the turn, or deny; ten minutes without
+  an answer is a deny). In order turns the question is raised and the step is denied at once (reported as waiting).
+- **Use the system first:** a PreToolUse hook (`aom ceo guard`) blocks the first edit inside a repository clone of this workstation
+  with the routing rule, once per turn; `aom ceo job start` opens it. A nudge, not a boundary.
+- **A dropped connection does not cancel an owner turn:** the reply goes through the outbox and is delivered after the reconnect.
+- **`aom runner restart [--reason ..]`** (owner turns and DevOps shifts): the restart waits until the reply is acknowledged by the
+  server and the runner is idle (at most ten minutes), then the runner exits for its service manager (or the detached helper).
+
 ## Cloud workstations (VPS over SSH, GitHub Codespaces)
 
 The user chooses where agents run (**Add a workstation**: My computer, A VPS (SSH), GitHub Codespaces). The runner makes outbound connections only, so a cloud machine needs no open port. Guide for a server you rent: `docs/BYO-VPS.md`. Design and server side: `docs/ARCHITECTURE.md` 11.4.

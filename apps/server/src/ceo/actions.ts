@@ -640,38 +640,105 @@ const resumeAgent: ActionDef<z.infer<typeof AgentP>> = {
 const DESTRUCTIVE =
   /\b(delete|drop|destroy|wipe|purge|truncate|rm -rf|force[- ]?push|reset --hard|production|prod\b|deploy|release|rollback|migrate|sudo|format)\b/i;
 
-const DevopsP = z.object({
-  workstation: z.string().min(1).max(120),
-  text: z.string().trim().min(3).max(4000),
-  card: z.string().max(40).optional(),
-});
+const DevopsP = z
+  .object({
+    /** The workstation by name; the CEO normally names a project or an environment instead. */
+    workstation: z.string().min(1).max(120).optional(),
+    /** A project key: its deploy target's workstation, else the Owner's DevOps-equipped workstation. */
+    project: z.string().min(2).max(10).optional(),
+    /** A deploy target (environment) name, within the project when one is given. */
+    env: z.string().min(1).max(80).optional(),
+    text: z.string().trim().min(3).max(4000),
+    card: z.string().max(40).optional(),
+  })
+  .refine((p) => p.workstation || p.project || p.env, {
+    message: 'name a --project, an --env or a --workstation',
+  });
+
+/**
+ * The workstation a DevOps request goes to (docs/design/ceo-front-door.md section 6.1): the named one, else the workstation
+ * of the project's (or the named environment's) remote deploy target, else the Owner's DevOps-equipped workstation.
+ */
+async function devopsWorkstation(
+  db: Queryable,
+  env: ActionEnv,
+  p: z.infer<typeof DevopsP>,
+): Promise<{ ws: Row; project?: Row; target?: Row } | string> {
+  const withDevops = `EXISTS (SELECT 1 FROM agents a WHERE a.workstation_id = w.id AND a.org_id=$1 AND a.is_devops AND a.status='active')`;
+  if (p.workstation) {
+    const ws = await one(
+      db,
+      `SELECT w.id, w.name FROM workstations w WHERE w.status='active' AND (lower(w.name)=lower($2) OR w.id::text=$2) AND ${withDevops}`,
+      [env.orgId, p.workstation],
+    );
+    return ws ? { ws } : `no workstation named ${p.workstation} with a DevOps engineer of this organization`;
+  }
+  let project: Row | undefined;
+  if (p.project) {
+    project = await one(db, `SELECT id, key FROM projects WHERE org_id=$1 AND key=upper($2)`, [
+      env.orgId,
+      p.project,
+    ]);
+    if (!project) return `project ${p.project.toUpperCase()} not found`;
+  }
+  let target: Row | undefined;
+  if (p.env || project) {
+    const targets = await rows(
+      db,
+      `SELECT t.id, t.name, t.kind, t.workstation_id, t.project_id FROM deploy_targets t
+        WHERE t.org_id=$1 AND t.removed_at IS NULL AND ($2::uuid IS NULL OR t.project_id=$2)
+          AND ($3::text IS NULL OR lower(t.name)=lower($3)) ORDER BY t.created_at`,
+      [env.orgId, project?.id ?? null, p.env ?? null],
+    );
+    if (p.env && targets.length === 0)
+      return `no environment named ${p.env}${project ? ` in ${project.key}` : ''}`;
+    if (p.env && targets.length > 1 && !project)
+      return `several projects have an environment named ${p.env}: add --project`;
+    target = targets.find((t) => t.workstation_id) ?? (p.env ? targets[0] : undefined);
+  }
+  if (target?.workstation_id) {
+    const ws = await one(
+      db,
+      `SELECT w.id, w.name FROM workstations w WHERE w.id=$2 AND w.status='active' AND ${withDevops}`,
+      [env.orgId, target.workstation_id],
+    );
+    if (ws) return { ws, ...(project ? { project } : {}), target };
+  }
+  // The Owner's own DevOps-equipped workstation (a local environment runs where its owner works).
+  const ws = await one(
+    db,
+    `SELECT w.id, w.name FROM workstations w
+      WHERE w.status='active' AND w.user_id=$2 AND ${withDevops}
+      ORDER BY w.connected DESC, w.last_seen_at DESC NULLS LAST LIMIT 1`,
+    [env.orgId, env.owner.id],
+  );
+  if (!ws) return 'no workstation with a DevOps engineer is available for this';
+  return { ws, ...(project ? { project } : {}), ...(target ? { target } : {}) };
+}
+
 const devops: ActionDef<z.infer<typeof DevopsP>> = {
   cls: 'devops.request',
   schema: DevopsP,
   describe: (p, pr) => `Ask DevOps on ${pr.subjectLabel}: "${truncate(p.text, 100)}"`,
   async prepare(env, p) {
     const tx = env.ctx.pool;
-    const ws = await one(
-      tx,
-      `SELECT w.id, w.name FROM workstations w WHERE w.status='active' AND (lower(w.name)=lower($2) OR w.id::text=$2)
-         AND EXISTS (SELECT 1 FROM agents a WHERE a.workstation_id = w.id AND a.org_id=$1 AND a.is_devops AND a.status='active')`,
-      [env.orgId, p.workstation],
-    );
-    if (!ws)
-      return refuse(`no workstation named ${p.workstation} with a DevOps engineer of this organization`);
+    const found = await devopsWorkstation(tx, env, p);
+    if (typeof found === 'string') return refuse(found);
     const card = p.card ? await cardOf(tx, env, p.card) : undefined;
     if (p.card && !card) return refuse(`card ${p.card} not found`);
     return {
       subjectKind: 'workstation',
-      subjectId: ws.id as string,
-      subjectLabel: ws.name as string,
+      subjectId: found.ws.id as string,
+      subjectLabel: found.ws.name as string,
       reservedKey: DESTRUCTIVE.test(p.text) ? 'devops_destructive' : null,
-      data: { ws, card },
+      data: { ws: found.ws, card, project: found.project, target: found.target },
     };
   },
   async execute(env, p, pr) {
     const ws = pr.data?.ws as Row;
     const card = pr.data?.card as Row | undefined;
+    const project = pr.data?.project as Row | undefined;
+    const target = pr.data?.target as Row | undefined;
     const agent = await devopsAgentOn(env.ctx.pool, ws.id, env.orgId);
     if (!agent) throw conflict('no_devops_agent', 'this workstation has no DevOps engineer');
     const r = await withAppendTx(env.ctx.pool, (tx) =>
@@ -680,11 +747,18 @@ const devops: ActionDef<z.infer<typeof DevopsP>> = {
         orgId: env.orgId,
         summary: p.text,
         requestedBy: { kind: 'agent', id: env.agentId, name: env.agentName },
+        origin: 'ceo',
         ...(card ? { cardId: card.id } : {}),
+        ...(project || target
+          ? { context: { ...(project ? { projectId: project.id } : {}), workstationId: ws.id } }
+          : {}),
       }),
     );
     env.ctx.services.dispatcher.trigger();
-    return { message: 'Request sent to the DevOps engineer.', result: { requestId: r.requestId } };
+    return {
+      message: 'Request sent to the DevOps engineer. Follow it with `--wait`, or it is watched for you.',
+      result: { requestId: r.requestId, workstation: ws.name },
+    };
   },
 };
 

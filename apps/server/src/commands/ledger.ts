@@ -8,6 +8,7 @@ import {
 import { orgRoleOf } from '../auth/org-context.ts';
 import type { AuthSession } from '../auth/sessions.ts';
 import { loadVisibleCard, loadVisibleProject } from '../authz/scope.ts';
+import { orderVersionHash, voidAuthorityEvents } from '../ceo/orders.ts';
 import type { Ctx } from '../context.ts';
 import { one, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
@@ -209,17 +210,47 @@ export async function editLedgerEntry(
     const body = req.body?.trim() ?? e.body;
     const tags = req.tags ?? e.tags;
     if (title === e.title && body === e.body && JSON.stringify(tags) === JSON.stringify(e.tags)) return false;
-    await ctx.store.append(
-      [
-        {
-          streamId: streamId.ledger(entryId),
-          event: { type: 'LedgerEntryEdited', payload: { entryId, title, body, tags } },
-          actor: userActor(user.id),
-          scope: e.project_id ? projectScope(e.org_id, e.project_id) : orgScope(e.org_id),
-        },
-      ],
-      { tx },
+    const scope = e.project_id ? projectScope(e.org_id, e.project_id) : orgScope(e.org_id);
+    const events: AppendInput[] = [
+      {
+        streamId: streamId.ledger(entryId),
+        event: { type: 'LedgerEntryEdited', payload: { entryId, title, body, tags } },
+        actor: userActor(user.id),
+        scope,
+      },
+    ];
+    // Any edit voids the order's full-power authority, in the same append (docs/design/ceo-front-door.md section 3.4); only
+    // the Owner, through the edit dialog with "keep full power" ticked, marks the new wording again.
+    const auth = await one(
+      tx,
+      `SELECT scope, covers FROM standing_order_authority
+        WHERE entry_id=$1 AND version_hash IS NOT NULL AND voided_at IS NULL AND revoked_at IS NULL`,
+      [entryId],
     );
+    if (auth) {
+      events.push(...(await voidAuthorityEvents(tx, entryId, 'edited', scope)));
+      if (req.keepFullPower) {
+        if ((await orgRoleOf(tx, user.id, e.org_id)) !== 'owner')
+          throw forbidden('only the organization Owner can keep full power on an edited order');
+        events.push({
+          streamId: streamId.ledger(entryId),
+          event: {
+            type: 'StandingOrderAuthorized',
+            payload: {
+              entryId,
+              orgId: e.org_id,
+              versionHash: orderVersionHash(title, body),
+              by: user.id,
+              scope: auth.scope ?? { projectIds: null },
+              covers: auth.covers ?? [],
+            },
+          },
+          actor: userActor(user.id),
+          scope,
+        });
+      }
+    }
+    await ctx.store.append(events, { tx });
     return true;
   });
 }

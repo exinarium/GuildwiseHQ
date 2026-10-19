@@ -28,6 +28,8 @@ export interface HostOptions {
   onConnected?: () => void;
   /** Safe mode: the server pinned the runner version (the self-updater follows it). */
   onRunnerPin?: (version: string | null) => void;
+  /** `aom runner restart`, after the reply was acknowledged: end the process so it is started again. */
+  requestRestart?: () => void;
 }
 
 interface Running {
@@ -212,6 +214,7 @@ export class RunnerHost {
       },
       onConnected: () => this.opts.onConnected?.(),
       onRunnerPin: (v) => this.opts.onRunnerPin?.(v),
+      requestRestart: () => this.opts.requestRestart?.(),
       ...this.opts.runnerOptions,
     });
     this.running.set(entry.id, { entry, runner, signature, log, serverUrl: config.serverUrl });

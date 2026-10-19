@@ -18,6 +18,7 @@ import { useAnswerDeskItem, useDesk, useDismissDeskItem, useResolveDeskItem } fr
 import { ApprovalDeskItem } from '../components/ApprovalDeskItem.tsx';
 import { BaNote, FloorReport } from '../components/BaNote.tsx';
 import { ChatDrawer } from '../components/ChatDrawer.tsx';
+import { PermissionDeskItem } from '../components/ceo/CeoChatExtras.tsx';
 import { CeoDecisionItem, CeoDecisionsSection, isCeoDecision } from '../components/ceo/CeoDecisions.tsx';
 import {
   CeoAnswered,
@@ -36,7 +37,6 @@ import { PhaseDeskItem } from '../components/PhaseDeskItem.tsx';
 import { QaDeskItem } from '../components/QaDeskItem.tsx';
 import { cx } from '../components/ui/cx.ts';
 import {
-  Avatar,
   Badge,
   BottomSheet,
   Button,
@@ -44,7 +44,6 @@ import {
   Callout,
   ConfirmDialog,
   Dialog,
-  Disclosure,
   EmptyState,
   ErrorBox,
   FilterChip,
@@ -569,6 +568,8 @@ export function DeskItem({ item, now, bare = false }: { item: DeskItemDto; now?:
                 ? 'only the card owner can answer this.'
                 : 'only the project owner can answer.'}
         </p>
+      ) : item.subkind === 'ceo_permission' ? (
+        <PermissionDeskItem item={item} />
       ) : item.subkind === 'manual_qa' ? (
         <QaDeskItem item={item} />
       ) : item.subkind === 'approval_step' ? (

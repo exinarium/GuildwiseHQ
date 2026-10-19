@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { CeoPolicySchema } from '../ceo/policy.ts';
 import { type CeoSettingsSchema, UpdateCeoSettingsRequestSchema } from '../ceo/settings.ts';
 import { type CeoMemoryKind, CeoTaskStatus } from '../events/ceo.ts';
+import type { CeoFullPowerState } from './ceo-front-door.ts';
 
 /** The CEO page and its API (docs/design/ceo-agent-v2.md section 8). The Owner configures; Admins read. */
 
@@ -91,6 +92,10 @@ export interface CeoStatusDto {
   policyVersion: number;
   /** Decisions undone in the last 7 days, of those decided. */
   undone7d: { undone: number; decided: number };
+  /** Whether the CEO's turns with the Owner can run with full power on its workstation (`aom-runner ceo full-power on`). */
+  fullPower: { state: CeoFullPowerState; workstationName: string | null };
+  /** Repeated off-board jobs waiting for a decision (the report's "Things you keep asking me"). */
+  openRepeats: number;
   /** The owner's workstations that could host the CEO (for the Workstations tab and the appoint dialog). */
   workstations: Array<{ id: string; name: string; online: boolean; capable: boolean; current: boolean }>;
 }
@@ -135,6 +140,10 @@ export interface CeoActionDto {
   responseChoice: string | null;
   undoneAt: string | null;
   acceptedFrom: string | null;
+  /** The owner corrected this action (the rule he gave), or null. */
+  correction: { id: string; rule: string; at: string } | null;
+  /** Set when the call was made inside an order turn: the Owner-authorized standing order it enforced. */
+  order: { entryId: string; title: string | null } | null;
 }
 export interface CeoActionsResponse {
   actions: CeoActionDto[];

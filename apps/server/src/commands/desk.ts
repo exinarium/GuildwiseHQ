@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import {
   type AnswerDeskItemRequest,
   BATCH_QUESTION_SUBKIND,
+  CEO_PERMISSION_SUBKIND,
   type DeskActor,
   type DeskResolution,
   HR_DESK_SUBKIND,
@@ -19,6 +20,7 @@ import { projectRole } from '../authz/scope.ts';
 import { acceptRecommendation, rejectRecommendation } from '../ceo/accept.ts';
 import { onOwnerAnswer } from '../ceo/learning.ts';
 import { rememberFromDeskAnswer } from '../ceo/memory.ts';
+import { resolveCeoPermissionItem } from '../ceo/permissions.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
@@ -326,6 +328,11 @@ async function closeItem(
       devops = true;
       // G-Q8: one of the two parties said yes; the item stays open for the other.
       partial = !r.final;
+    } else if (item.kind === 'approval' && item.subkind === CEO_PERMISSION_SUBKIND) {
+      // "Authorize this execution": approved = once, rejected = deny; the waiting turn reads the answer on its next poll.
+      if (resolution === 'acknowledged')
+        throw badRequest('wrong_resolution', 'an execution is authorized or denied');
+      await resolveCeoPermissionItem(ctx, tx, user, item, resolution);
     } else if (item.kind === 'approval' && item.subkind === 'large_merge' && resolution !== 'dismissed') {
       if (resolution === 'acknowledged')
         throw badRequest('wrong_resolution', 'a merge approval is approved or rejected');

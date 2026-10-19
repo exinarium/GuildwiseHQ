@@ -41,6 +41,10 @@ const canon = (v: unknown): string =>
       : x,
   );
 
+/** The provenance of a call; a call without one is a chat call (the owner) when it has a thread, else a wake. */
+export const originKind = (o: CallOrigin): 'owner' | 'order' | 'wake' =>
+  o.kind ?? (o.chatThreadId ? 'owner' : 'wake');
+
 export const defaultKey = (scopeId: string, action: string, params: unknown): string =>
   createHash('sha256')
     .update(`${scopeId}|${action}|${canon(params)}`)
@@ -59,9 +63,15 @@ export interface EngineResult {
 
 /** Where a call comes from: a wake shift (outside text may have caused it) or the owner's chat. */
 export interface CallOrigin {
+  /** Where the call comes from (docs/design/ceo-front-door.md section 3): decided by the server from its own records. */
+  kind?: 'owner' | 'order' | 'wake' | undefined;
   scopeId: string;
   batchId?: string | undefined;
   chatThreadId?: string | undefined;
+  /** The owner or order turn (`ceo_turns`) the call belongs to. */
+  turnId?: string | undefined;
+  /** An order turn: the Owner-authorized standing order it enforces, its pinned wording and what it covers. */
+  order?: { entryId: string; versionHash: string; covers: string[] } | undefined;
   untrusted: boolean;
   /** An owner-pressed Accept: the policy was the owner's own decision. */
   acceptedFrom?: string | undefined;
@@ -156,6 +166,10 @@ function auditEvent(
         ...(origin.batchId ? { wakeBatchId: origin.batchId } : {}),
         ...(origin.chatThreadId ? { chatThreadId: origin.chatThreadId } : {}),
         ...(origin.acceptedFrom ? { acceptedFrom: origin.acceptedFrom } : {}),
+        ...(origin.order
+          ? { order: { entryId: origin.order.entryId, versionHash: origin.order.versionHash } }
+          : {}),
+        ...(origin.turnId ? { turnId: origin.turnId } : {}),
         origin: { untrusted: origin.untrusted, eventIds: [] },
         ...(extra.inverse ? { inverse: extra.inverse } : {}),
         idemKey: key,
@@ -236,6 +250,8 @@ async function recommendEvents(
             action: rpc.action,
             params: rpc.params,
             subjectId: prepared.subjectId,
+            // An owner turn: the chat shows this as an inline Approve / No card (answered by the Owner's session).
+            ...(origin.turnId && originKind(origin) === 'owner' ? { inlineTurnId: origin.turnId } : {}),
           },
         },
       },
@@ -386,8 +402,13 @@ export async function runAction(
       : opts.recommendOnly
         ? { verdict: 'recommend', reason: 'raised by the CEO as a recommendation', cause: 'mode' }
         : evaluatePolicy(env.ceo.policy, eff.cls, {
+            origin: {
+              kind: originKind(origin),
+              ...(origin.order ? { covers: origin.order.covers } : {}),
+            },
             confidence: rpc.confidence,
-            untrustedOrigin: origin.untrusted,
+            // An order the wake's scope pre-filter already bounds is not "triggered by outside text".
+            untrustedOrigin: origin.untrusted && !prepared.trustedByScope,
             reservedKey: prepared.reservedKey ?? null,
             evidenceMissing: !!prepared.needsEvidence && evidence === 0,
             deskMode: prepared.deskMode,
@@ -414,6 +435,7 @@ export async function runAction(
 
     if (verdict.verdict === 'recommend') {
       const rec = await recommendEvents(env, eff, call, prepared, verdict, key, origin);
+      const inline = verdict.inline === true && !!origin.turnId;
       if (rec.duplicate)
         return {
           status: 'recommended',
@@ -429,7 +451,9 @@ export async function runAction(
         mode: 'recommended',
         actionId: env.actionId,
         ...(rec.deskItemId ? { deskItemId: rec.deskItemId } : {}),
-        message: `Recommended to the owner instead of done: ${verdict.reason}. This is a normal result; do not retry it another way.`,
+        message: inline
+          ? `Needs the owner's confirmation: ${verdict.reason}. The chat shows him an Approve / No card; tell him what you are asking and wait for his answer. Do not retry it another way.`
+          : `Recommended to the owner instead of done: ${verdict.reason}. This is a normal result; do not retry it another way.`,
       };
     }
 

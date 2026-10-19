@@ -1,6 +1,7 @@
 # The CEO as the owner's front door, and delivery recipes
 
-Status: design, 2026-10-19. Branch `lean-team-v3`. Nothing in this document is built yet.
+Status: design, 2026-10-19. Branch `lean-team-v3`. Steps 0 and 1 are built; steps 2 and 3 are not. Where step 1 differs from the text
+below (the owner decisions of section 14, and the choices listed in the step 1 commit), the code wins.
 
 Builds on `docs/design/ceo-agent-v3.md` (the v2 design is what the code implements; see section 0.3),
 `docs/design/phases.md` (deploy targets, phase follow-ups), `docs/design/git-free-and-devops-instructions.md`

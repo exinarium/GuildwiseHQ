@@ -1,6 +1,8 @@
 import {
+  AuthorizeStandingOrderRequestSchema,
   CreateLedgerEntryRequestSchema,
   EditLedgerEntryRequestSchema,
+  EscalateStandingOrderRequestSchema,
   LedgerQuerySchema,
   RetireLedgerEntryRequestSchema,
 } from '@aom/shared';
@@ -8,6 +10,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { requireUser } from '../auth/guards.ts';
 import { requestedOrgId, resolveOrgId } from '../auth/org-context.ts';
+import { authorizeOrder, escalateOrder, revokeOrder } from '../ceo/orders.ts';
 import { addLedgerEntryChecked, editLedgerEntry } from '../commands/ledger.ts';
 import { retireLedgerEntry } from '../commands/ledger-retire.ts';
 import type { Ctx } from '../context.ts';
@@ -61,6 +64,40 @@ export function ledgerRoutes(ctx: Ctx) {
         const s = await requireUser(ctx, req);
         await retireLedgerEntry(ctx, s.user, req.params.id, req.body);
         const entry = await getLedgerDto(ctx.pool, req.params.id, s.user.id);
+        if (!entry) throw notFound('ledger entry not found');
+        return { entry };
+      },
+    );
+
+    /** The Owner lets the CEO enforce this order with full power, pinned to the wording he read (docs front door 3.4). */
+    app.post(
+      '/api/ledger/:id/authorize',
+      { schema: { params: IdParams, body: AuthorizeStandingOrderRequestSchema } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        await authorizeOrder(ctx, s.user, req.params.id, req.body);
+        const entry = await getVisibleLedgerDto(ctx.pool, s.user.id, req.params.id);
+        if (!entry) throw notFound('ledger entry not found');
+        return { entry };
+      },
+    );
+
+    app.post('/api/ledger/:id/revoke', { schema: { params: IdParams } }, async (req) => {
+      const s = await requireUser(ctx, req);
+      await revokeOrder(ctx, s.user, req.params.id);
+      const entry = await getVisibleLedgerDto(ctx.pool, s.user.id, req.params.id);
+      if (!entry) throw notFound('ledger entry not found');
+      return { entry };
+    });
+
+    /** An Admin asks the Owner to take this order over as his own. */
+    app.post(
+      '/api/ledger/:id/escalate',
+      { schema: { params: IdParams, body: EscalateStandingOrderRequestSchema.optional() } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        await escalateOrder(ctx, s.user, req.params.id, req.body?.note ?? '');
+        const entry = await getVisibleLedgerDto(ctx.pool, s.user.id, req.params.id);
         if (!entry) throw notFound('ledger entry not found');
         return { entry };
       },

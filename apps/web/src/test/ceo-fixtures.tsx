@@ -129,6 +129,8 @@ export function ceoStatus(over: Partial<CeoStatusDto> = {}): CeoStatusDto {
     lastReportAt: '2026-10-13T07:00:00.000Z',
     policyVersion: 1,
     undone7d: { undone: 1, decided: 20 },
+    fullPower: { state: 'on', workstationName: 'Pieter laptop' },
+    openRepeats: 0,
     workstations: [
       { id: U(90), name: 'Pieter laptop', online: true, capable: true, current: true },
       { id: U(91), name: 'Studio PC', online: true, capable: true, current: false },
@@ -164,6 +166,8 @@ export function action(n: number, over: Partial<CeoActionDto> = {}): CeoActionDt
     responseChoice: null,
     undoneAt: null,
     acceptedFrom: null,
+    correction: null,
+    order: null,
     ...over,
   };
 }

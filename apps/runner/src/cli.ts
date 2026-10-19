@@ -18,13 +18,7 @@ import { loadConfig, type RunnerConfig, RunnerConfigSchema, saveConfig } from '.
 import { toWsUrl, UNPAIRED_MESSAGE } from './connection/client.ts';
 import { requestRotatedToken } from './connection/rotate.ts';
 import { JiraCredentialStore, jiraFile } from './external/jira-store.ts';
-import {
-  connectSteps,
-  describeConnection,
-  saveAndVerify,
-  sshUploadHelp,
-  touchRecheck,
-} from './forge/connect.ts';
+import { connectSteps, describeConnection, sshUploadHelp, touchRecheck } from './forge/connect.ts';
 import { AzureDevOpsForge, defaultHost, FileTokenStore, gitConnections } from './forge/index.ts';
 import { runSshAction, SshSettingsStore } from './forge/ssh.ts';
 import { gitVersion } from './git/git.ts';
@@ -53,7 +47,7 @@ import { RunnerKeys } from './secrets/keys.ts';
 import { detectStacks, viewOf } from './toolchain/detect.ts';
 import { realExecutor } from './toolchain/exec.ts';
 import { preparePairing } from './up.ts';
-import { detectServiceMode } from './update/apply.ts';
+import { detectServiceMode, scheduleRestart } from './update/apply.ts';
 import { detectLayout } from './update/layout.ts';
 import { Updater } from './update/updater.ts';
 import { RUNNER_VERSION } from './version.ts';
@@ -191,6 +185,9 @@ async function start(opts: { dataDir?: string; mock?: boolean }): Promise<void> 
     : undefined;
   const mock = mockEnabled(opts.mock);
   let updater: Updater | undefined;
+  let finish: (code: number) => void = () => undefined;
+  const layout = mock ? null : detectLayout(process.argv[1]);
+  const serviceMode = layout ? detectServiceMode(layout) : null;
   /** The safe-mode pin the server sent before the updater existed (welcome comes first). */
   let pendingPin: string | null = null;
   const host = new RunnerHost({
@@ -198,6 +195,18 @@ async function start(opts: { dataDir?: string; mock?: boolean }): Promise<void> 
     log,
     mock,
     maxShiftMsOverride: override,
+    // `aom runner restart` (after the reply was acknowledged): only where something starts the runner again.
+    requestRestart: () => {
+      if (!layout || !serviceMode) {
+        log.warn(
+          'a restart was requested, but nothing here would start the runner again (no service): ignored',
+        );
+        return;
+      }
+      log.info('restarting as asked from a conversation');
+      scheduleRestart(layout, serviceMode);
+      finish(0);
+    },
     onConnected: () => updater?.noteConnected(),
     onRunnerPin: (v) => {
       pendingPin = v;
@@ -215,13 +224,11 @@ async function start(opts: { dataDir?: string; mock?: boolean }): Promise<void> 
     `aom-runner ${RUNNER_VERSION} started (${host.running.size} pairing(s): ${[...host.running.keys()].join(', ')})`,
   );
 
-  let finish: (code: number) => void = () => undefined;
   const ended = new Promise<number>((done) => {
     finish = done;
   });
   // Self-update (docs/RUNNER.md "Updates"): never with the mock runtime (tests, demos) or with no pairing to ask.
   if (!mock && host.running.size > 0) {
-    const layout = detectLayout(process.argv[1]);
     updater = new Updater({
       layout,
       version: RUNNER_VERSION,
@@ -233,7 +240,7 @@ async function start(opts: { dataDir?: string; mock?: boolean }): Promise<void> 
       },
       report: (s) => host.setUpdateStatus(s),
       log,
-      mode: layout ? detectServiceMode(layout) : null,
+      mode: serviceMode,
       disabled: process.env.AOM_RUNNER_AUTO_UPDATE === '0',
     });
     host.setUpdateStatus(updater.current);
@@ -938,6 +945,31 @@ function integrationsAllowWeb(value: string, opts: { dataDir?: string; pairing?:
   );
 }
 
+/** `aom-runner ceo full-power on|off|status`: the local switch for the CEO's full-power turns (the Owner's own Claude Code). */
+function ceoFullPower(value: string, opts: { dataDir?: string; pairing?: string }): void {
+  if (value !== 'on' && value !== 'off' && value !== 'status')
+    throw new Error('use: aom-runner ceo full-power on|off|status');
+  const { root, entries } = selectPairings(opts);
+  for (const e of entries) {
+    const file = entryConfigPath(root, e);
+    const config = loadConfig(file);
+    if (value !== 'status')
+      saveConfig(file, { ...config, ceo: { ...config.ceo, fullPower: value === 'on' } });
+    const now = value === 'status' ? config.ceo.fullPower : value === 'on';
+    console.log(
+      `${entries.length > 1 ? `${e.id}: ` : ''}CEO full power is ${now ? 'ON' : 'off'}${
+        now
+          ? ': the CEO chat with the Owner runs as your own Claude Code (your ~/.claude, your home directory, no sandbox).'
+          : '.'
+      }`,
+    );
+  }
+  if (value !== 'status')
+    console.log(
+      'Restart the runner (`aom-runner start`, or restart its service) so the server learns the change; until then the old state is announced.',
+    );
+}
+
 /** `aom-runner integrations machine-admin <pairing>`: which pairing may change machine-wide logins from the web. */
 function integrationsMachineAdmin(selector: string, opts: { dataDir?: string }): void {
   const root = resolveDataDir(opts.dataDir);
@@ -1085,6 +1117,15 @@ export function buildProgram(): Command {
     .description('the pairing that may change machine-wide logins (~/.claude, gh, MCP) from the web')
     .option(...dataDirOpt)
     .action(integrationsMachineAdmin);
+  const ceo = program.command('ceo').description('the CEO on this workstation');
+  ceo
+    .command('full-power <on|off|status>')
+    .description(
+      "let the CEO's chat with the Owner run as your own Claude Code on this machine (on), refuse it (off), or show the state",
+    )
+    .option(...pairingOpt)
+    .option(...dataDirOpt)
+    .action(ceoFullPower);
   const repos = program.command('repos').description('manage the folders scanned for git repositories');
   repos
     .command('add <path>')

@@ -39,7 +39,6 @@ import {
   ShiftReportSchema,
   scanReportForSecrets,
   type TranscriptRef,
-  type Usage,
   uuidv7,
   type VaultWriteCommand,
 } from '@aom/shared';
@@ -178,6 +177,10 @@ export interface SupervisorDeps {
   /** Test/dev override of `maxShiftMinutes` (milliseconds). */
   maxShiftMsOverride?: number;
   /** How long a report waits for `shift.report.result` before being treated as queued. Default 120 s. */
+  /** `aom runner restart` in a DevOps shift: the restart waits for the shift's end to be acknowledged. */
+  onRunnerRestart?: (shiftId: string, reason: string | undefined) => void;
+  /** Called after `shift.ended` was queued (with its outbox frame id). */
+  onShiftEnded?: (shiftId: string, frameId: string | undefined) => void;
   reportWaitMs?: number;
   /** How long the session may linger after an accepted report. Default 2 min. */
   exitGraceMs?: number;
@@ -1264,7 +1267,7 @@ export class ShiftSupervisor {
     const contextTokens = s.session.contextTokens?.() ?? 0;
     if (s.runtimeSessionId && contextTokens > 0)
       this.sessions.updateContext(s.runtimeSessionId, contextTokens);
-    this.deps.transport.send('shift.ended', {
+    const endedFrame = this.deps.transport.send('shift.ended', {
       shiftId: msg.shiftId,
       outcome,
       exitCode: exit.code,
@@ -1274,6 +1277,7 @@ export class ShiftSupervisor {
       ...(s.finalText || exit.error ? { finalText: (s.finalText ?? exit.error ?? '').slice(0, 4000) } : {}),
       guardViolations: s.guardViolations,
     });
+    this.deps.onShiftEnded?.(msg.shiftId, typeof endedFrame === 'string' ? endedFrame : undefined);
   }
 
   /**
@@ -1364,6 +1368,20 @@ export class ShiftSupervisor {
           return s.msg.kind === 'ceo' && s.msg.agent.roleKey === 'ceo'
             ? this.deps.rpc(s.msg.shiftId, req.method, req.params)
             : ({ ok: false, error: 'not_ceo: only the CEO may use `aom ceo`' } as IpcRpcResponse);
+        // `aom runner restart` in a DevOps shift (design 5.6): the restart waits for this shift's end to be acknowledged.
+        if (req.method === 'runner.restart') {
+          if (s.msg.kind !== 'devops' || !this.deps.onRunnerRestart)
+            return {
+              ok: false,
+              error: '`aom runner restart` is available in the CEO chat and in DevOps shifts only',
+            };
+          const reason = typeof req.params.reason === 'string' ? req.params.reason.slice(0, 500) : undefined;
+          this.deps.onRunnerRestart(s.msg.shiftId, reason);
+          return {
+            ok: true,
+            result: { message: 'Restart scheduled after this shift. Finish your work now.' },
+          };
+        }
         // A BA task reads a member card of the phase by ref (`aom card <REF>`): the server answers that.
         // A DevOps shift reads its request's card (`aom card show`) through the server, which serves only that card.
         if (req.method === 'card.get' && s.msg.kind === 'devops' && (req.params.ref || req.params.linked))

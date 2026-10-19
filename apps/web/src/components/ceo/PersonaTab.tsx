@@ -10,7 +10,7 @@ const PURPOSES: Array<{ id: keyof CeoSettings['models']; label: string; hint: st
   { id: 'handover', label: 'Handover', hint: 'When it hands work over to the team.' },
 ];
 
-type Draft = Pick<CeoSettings, 'persona' | 'standingInstructions' | 'models'>;
+type Draft = Pick<CeoSettings, 'persona' | 'standingInstructions' | 'models' | 'ownerTurn'>;
 
 export function PersonaTab({ owner }: { owner: boolean }) {
   const q = useCeoSettings();
@@ -23,6 +23,7 @@ export function PersonaTab({ owner }: { owner: boolean }) {
         persona: q.data.settings.persona,
         standingInstructions: q.data.settings.standingInstructions,
         models: q.data.settings.models,
+        ownerTurn: q.data.settings.ownerTurn ?? { cwd: '' },
       });
   }, [q.data]);
   if (q.isPending) return <Spinner label="Loading the settings" />;
@@ -77,6 +78,17 @@ export function PersonaTab({ owner }: { owner: boolean }) {
           value={d.standingInstructions}
           onChange={(e) => setD({ ...d, standingInstructions: e.target.value })}
           hint={`${d.standingInstructions.length} of 2000. Added to every brief as an instruction from you, the owner, so keep it to things you mean.`}
+        />
+      </Panel>
+      <Panel title="Your chat session">
+        <TextInput
+          label="Working directory"
+          maxLength={500}
+          disabled={!edit}
+          value={d.ownerTurn.cwd}
+          placeholder="Your home directory"
+          onChange={(e) => setD({ ...d, ownerTurn: { cwd: e.target.value } })}
+          hint="Your chats with the CEO run as a real Claude Code session on your workstation, from this folder. Leave it empty for your home directory. Changing it starts a new session (the CEO keeps what it learned)."
         />
       </Panel>
       <Panel title="Models">

@@ -39,6 +39,8 @@ export interface Prepared {
   data?: Record<string, any> | undefined;
   /** The policy class this call really belongs to (applying an HR recommendation may be a hire, a model change or a firing). */
   classOverride?: ActionClass | undefined;
+  /** An order turn's call whose wake the order's scope pre-filter already bounded: not "triggered by outside text". */
+  trustedByScope?: boolean | undefined;
   /** The agent the action is about, for per-agent counters. */
   targetAgentId?: string | undefined;
 }

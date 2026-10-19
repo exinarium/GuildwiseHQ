@@ -4,6 +4,8 @@ import { useCeoStatus } from '../../api/queries/ceo.ts';
 import { agreementText, classLabel, MODE_LABEL, pct } from '../../lib/ceo.ts';
 import { useActiveOrgRole } from '../../lib/orgRole.ts';
 import { Badge, Button, Callout } from '../ui.tsx';
+import { CorrectButton } from './CorrectDialog.tsx';
+import { RepeatsSection } from './RepeatsSection.tsx';
 import { UndoButton } from './UndoButton.tsx';
 
 export const ceoName = (item: Pick<DeskItemDto, 'ceo'>): string => item.ceo?.agentName ?? 'The CEO';
@@ -133,14 +135,55 @@ function CeoReportBody({ report: r }: { report: NonNullable<DeskItemDto['ceoRepo
                     </Badge>
                   )}
                 </span>
-                {a.undoable && owner && a.status !== 'undone' && (
-                  <UndoButton actionId={a.id} what={a.subject} />
-                )}
+                <span className="flex flex-wrap items-center gap-2">
+                  {a.undoable && owner && a.status !== 'undone' && (
+                    <UndoButton actionId={a.id} what={a.subject} />
+                  )}
+                  {a.mode === 'decided' && a.correctable !== false && (
+                    <CorrectButton
+                      testId={`report-correct-${a.id}`}
+                      target={{
+                        actionId: a.id,
+                        label: `${classLabel(a.class)}: ${a.subject}`,
+                        ...(a.undoable && owner && a.status !== 'undone' ? { undoLabel: '' } : {}),
+                      }}
+                    />
+                  )}
+                </span>
               </li>
             ))}
           </ul>
         )}
       </div>
+      {r.orderTurns && r.orderTurns.length > 0 && (
+        <div data-testid="ceo-report-order-turns">
+          <h3 className="text-sm font-semibold text-fg">Standing order turns</h3>
+          <ul className="mt-1 divide-y divide-line">
+            {r.orderTurns.map((t) => (
+              <li key={t.turnId} className="flex flex-wrap items-start justify-between gap-2 py-1.5 text-sm">
+                <span className="min-w-0 text-fg">
+                  {t.orderTitle}: {t.summary || t.ask || t.outcome}
+                  {t.commands.length > 0 && (
+                    <span className="block text-xs text-subtle">{t.commands.length} commands run</span>
+                  )}
+                </span>
+                {t.corrected ? (
+                  <span className="text-xs text-muted">Corrected</span>
+                ) : (
+                  owner && (
+                    <CorrectButton
+                      label="I'd rather you didn't"
+                      testId={`report-correct-order-${t.turnId}`}
+                      target={{ orderTurnId: t.turnId, label: `Standing order: ${t.orderTitle}` }}
+                    />
+                  )
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {r.repeats && <RepeatsSection repeats={r.repeats} owner={owner} />}
     </div>
   );
 }

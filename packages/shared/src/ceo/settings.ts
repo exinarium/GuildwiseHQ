@@ -87,6 +87,11 @@ export const CeoSettingsSchema = z.object({
    * model-ups also stay under it. Projects keep their own budgets.
    */
   orgBudgetMonthlyMicros: z.number().int().min(0).default(0),
+  /**
+   * The owner's turns with the CEO run as a real Claude Code session on the Owner's workstation. `cwd` is the fixed
+   * working directory of that session (empty: the Owner's home directory); `--resume` only works from the same one.
+   */
+  ownerTurn: z.object({ cwd: z.string().max(500).default('') }).default({ cwd: '' }),
 });
 export type CeoSettings = z.infer<typeof CeoSettingsSchema>;
 
@@ -103,6 +108,7 @@ export const DEFAULT_CEO_SETTINGS: CeoSettings = {
   wakeWindowMinutes: 5,
   spendNoticeMicros: 5_000_000,
   orgBudgetMonthlyMicros: 0,
+  ownerTurn: { cwd: '' },
 };
 
 export const UpdateCeoSettingsRequestSchema = CeoSettingsSchema.partial();

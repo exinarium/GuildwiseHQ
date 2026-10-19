@@ -100,7 +100,19 @@ export const DeskItemDtoSchema = z.object({
     .nullable()
     .optional(),
   /** Workstation notices (`claude_auth_expired`, `mcp_needs_sign_in`): which workstation, for the Integrations deep link. */
-  data: z.object({ workstationId: z.string().optional(), key: z.string().optional() }).optional(),
+  data: z
+    .object({
+      workstationId: z.string().optional(),
+      key: z.string().optional(),
+      /** `ceo_permission` items ("authorize this execution"): what the runtime wants to run, and until when it waits. */
+      askId: z.string().optional(),
+      turnId: z.string().optional(),
+      tool: z.string().optional(),
+      input: z.string().optional(),
+      reason: z.string().optional(),
+      expiresAt: z.string().optional(),
+    })
+    .optional(),
   /** The CEO agent (docs/design/ceo-agent-v2.md section 6): the action that answered or handled the item (Undo), and its recommendation. */
   ceo: z
     .object({
@@ -198,8 +210,41 @@ export const DeskItemDtoSchema = z.object({
           status: z.string(),
           subject: z.string(),
           undoable: z.boolean(),
+          /** The owner may correct this decision ("I'd rather you hadn't"). */
+          correctable: z.boolean().optional(),
         }),
       ),
+      /** Off-board jobs that keep coming back ("Things you keep asking me"). */
+      repeats: z
+        .array(
+          z.object({
+            id: z.string(),
+            key: z.string(),
+            suggestion: z.enum(['feature', 'skill', 'automation']),
+            count7: z.number().int(),
+            count30: z.number().int(),
+            projectKey: z.string().nullable(),
+            jobs: z.array(z.object({ id: z.string(), title: z.string(), at: z.string() })),
+            detectedAt: z.string(),
+          }),
+        )
+        .optional(),
+      /** Order turns of the last 24 hours (full-power standing orders), each correctable. */
+      orderTurns: z
+        .array(
+          z.object({
+            turnId: z.string(),
+            at: z.string(),
+            entryId: z.string(),
+            orderTitle: z.string(),
+            outcome: z.enum(['running', 'done', 'declined', 'failed']),
+            summary: z.string(),
+            commands: z.array(z.string()),
+            ask: z.string().nullable(),
+            corrected: z.boolean(),
+          }),
+        )
+        .optional(),
       scores: z.array(z.object({ class: z.string(), agreed: z.number().int(), total: z.number().int() })),
       fallback: z.boolean(),
     })

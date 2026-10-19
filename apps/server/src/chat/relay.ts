@@ -4,30 +4,49 @@ import {
   CHAT_ERROR,
   type ChatContext,
   canDirectAgentInOrg,
+  type ModelChoice,
   type ReadRepo,
   type RunnerToServerOf,
   type ServerToBrowser,
   streamId,
+  type ToolCounts,
 } from '@aom/shared';
-import { orgRoleOf } from '../auth/org-context.ts';
+import { orgOwnerId, orgRoleOf } from '../auth/org-context.ts';
 import { projectRole } from '../authz/scope.ts';
-import { buildChatBrief } from '../ceo/brief.ts';
+import { closePendingForTurn } from '../ceo/permissions.ts';
 import { loadCeo } from '../ceo/state.ts';
 import { ownsDevopsMachine, sharesAllowedProject } from '../commands/chats.ts';
-import { agentActor, orgScope, projectScope, runnerActor, userActor } from '../commands/common.ts';
+import {
+  agentActor,
+  orgScope,
+  projectScope,
+  runnerActor,
+  SYSTEM_ACTOR,
+  userActor,
+} from '../commands/common.ts';
 import { intakeContext } from '../commands/intake.ts';
 import { grantedMcpServers, orgGrantedMcpServers } from '../commands/mcp-servers.ts';
 import { vaultForConversation } from '../commands/vaults.ts';
 import type { Ctx } from '../context.ts';
-import { one, rows } from '../db/sql.ts';
+import { one, type Row, rows } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
 import { isProjectPaused } from '../dispatcher/project-hold.ts';
 import type { AppendInput } from '../eventstore/types.ts';
+import { notifyUsers } from '../push/notifier.ts';
 import { standingOrdersForProjects } from '../queries/ledger.ts';
 import { agentSpecFor } from '../runner-gateway/brief.ts';
 import { orgReadRepos, projectReadRepos, referenceReadRepos } from '../runner-gateway/read-repos.ts';
 import { localReadRepos } from '../runner-gateway/workstation-repos.ts';
 import { workstationServesOrg } from '../simulation/fit.ts';
+import {
+  backstopJobEvents,
+  buildChatStart,
+  type CeoInflightInfo,
+  loadTurn,
+  replyData,
+  resolveTurnModel,
+  STALE_QUEUE_MS,
+} from './ceo-turns.ts';
 
 const ZERO_USAGE = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
 
@@ -41,6 +60,8 @@ interface Inflight {
   agentId: string;
   workstationId: string;
   startedAt: Date;
+  /** A CEO owner or order turn: its state is also persisted in `ceo_turns`, so it survives a restart of the server. */
+  ceo?: CeoInflightInfo;
 }
 
 /** What a terminal chat frame produced, for the notification after the transaction committed. */
@@ -49,6 +70,8 @@ export interface ChatTerminal {
   threadId: string;
   messageId?: string;
   reason?: string;
+  /** A CEO thread whose next queued message may start now. */
+  ceoThread?: string;
 }
 
 /**
@@ -77,11 +100,21 @@ export class ChatRelay {
   }
 
   /** `chat.send` from a browser. Errors are reported on the socket, never thrown. */
-  async send(userId: string, msg: { threadId: string; body: string; clientMsgId: string }): Promise<void> {
+  async send(
+    userId: string,
+    msg: {
+      threadId: string;
+      body: string;
+      clientMsgId: string;
+      model?: ModelChoice | undefined;
+      modelScope?: 'message' | 'thread' | undefined;
+    },
+  ): Promise<void> {
     const { ctx } = this;
     const row = await one(
       ctx.pool,
-      `SELECT a.*, t.kind AS thread_kind, t.project_id AS thread_project_id, t.card_id AS thread_card_id, p.key AS project_key, c.ref AS card_ref, c.worktree_path AS card_worktree_path, c.fields->>'externalRef' AS card_external_ref
+      `SELECT a.*, t.kind AS thread_kind, t.project_id AS thread_project_id, t.card_id AS thread_card_id, p.key AS project_key, c.ref AS card_ref, c.worktree_path AS card_worktree_path, c.fields->>'externalRef' AS card_external_ref,
+              t.model_override, t.dirs
          FROM threads t JOIN agents a ON a.id = t.agent_id
          LEFT JOIN projects p ON p.id = t.project_id LEFT JOIN cards c ON c.id = t.card_id
         WHERE t.id = $1 AND t.kind IN ('chat','intake') AND t.created_by = $2 AND t.deleted_at IS NULL`,
@@ -105,6 +138,9 @@ export class ChatRelay {
     const isCeo = row.role_key === 'ceo';
     if (isCeo && (await orgRoleOf(ctx.pool, userId, row.org_id)) !== 'owner')
       return this.fail(userId, msg.threadId, CHAT_ERROR.unknownThread);
+    // The DevOps engineer works through the CEO now (docs section 8): its old conversations are read-only.
+    if (row.is_devops) return this.fail(userId, msg.threadId, CHAT_ERROR.devopsViaCeo);
+    if (isCeo) return this.sendCeo(userId, row, msg);
     if (this.byThread.has(msg.threadId)) return this.fail(userId, msg.threadId, CHAT_ERROR.busy);
     // A chat that belongs to a project an Owner or Admin paused does not start (nothing is saved or queued).
     if (row.thread_project_id && (await isProjectPaused(ctx.pool, row.thread_project_id)))
@@ -212,26 +248,15 @@ export class ChatRelay {
         projectId: row.thread_project_id,
         workstationId: row.workstation_id,
       });
-      const ceoState = isCeo ? await loadCeo(ctx.pool, row.org_id) : undefined;
-      // Standing orders bind every agent in a conversation (backlog #75). The DevOps engineer works across projects, so
-      // without a project in context it gets those of every project of the organization.
-      const orders = isCeo
-        ? []
-        : await standingOrdersForProjects(
-            ctx.pool,
-            row.org_id,
-            row.thread_project_id
-              ? [row.thread_project_id]
-              : row.is_devops
-                ? (await rows(ctx.pool, 'SELECT id FROM projects WHERE org_id=$1', [row.org_id])).map(
-                    (p) => p.id,
-                  )
-                : [],
-          );
+      // Standing orders bind every agent in a conversation (backlog #75).
+      const orders = await standingOrdersForProjects(
+        ctx.pool,
+        row.org_id,
+        row.thread_project_id ? [row.thread_project_id] : [],
+      );
       const context: ChatContext = {
         ...(orders.length > 0 ? { standingOrders: orders } : {}),
         orgId: row.org_id,
-        ...(ceoState ? { ceo: { brief: await buildChatBrief(ctx, ceoState, row) } } : {}),
         ...(row.thread_project_id ? { projectId: row.thread_project_id, projectKey: row.project_key } : {}),
         ...(row.thread_card_id ? { cardId: row.thread_card_id, cardRef: row.card_ref } : {}),
         ...(row.thread_card_id && typeof row.card_external_ref === 'string' && row.card_external_ref
@@ -252,9 +277,7 @@ export class ChatRelay {
         {
           chatId,
           threadId: msg.threadId,
-          agent: ceoState
-            ? { ...(await agentSpecFor(ctx, row)), ...ceoState.settings.models.chat }
-            : await agentSpecFor(ctx, row),
+          agent: await agentSpecFor(ctx, row),
           message: msg.body,
           ...(prior?.sid ? { resumeSessionId: prior.sid as string } : {}),
           context,
@@ -265,6 +288,487 @@ export class ChatRelay {
     } catch (err) {
       ctx.log.error({ err }, 'chat.send failed');
       await this.finish(inflight, 'crashed', CHAT_ERROR.runnerError).catch(() => {});
+    }
+  }
+
+  // ------------------------------------------------------------------------------------------ the CEO's turns
+
+  /**
+   * The owner's message to the CEO (docs/design/ceo-front-door.md section 5). The turn is persisted (`ceo_turns`) before it is
+   * sent, so a restart of the server loses nothing; an offline workstation queues the message instead of failing it.
+   */
+  private async sendCeo(
+    userId: string,
+    row: Row,
+    msg: {
+      threadId: string;
+      body: string;
+      clientMsgId: string;
+      model?: ModelChoice | undefined;
+      modelScope?: 'message' | 'thread' | undefined;
+    },
+  ): Promise<void> {
+    const { ctx } = this;
+    const running = await one(
+      ctx.pool,
+      `SELECT * FROM ceo_turns WHERE thread_id=$1 AND status='running' LIMIT 1`,
+      [msg.threadId],
+    );
+    if (this.byThread.has(msg.threadId) || running) return this.fail(userId, msg.threadId, CHAT_ERROR.busy);
+    const ceo = await loadCeo(ctx.pool, row.org_id);
+    if (!ceo?.enabled || ceo.agentId !== row.id)
+      return this.fail(userId, msg.threadId, CHAT_ERROR.unknownThread);
+    if (row.status !== 'active' || !row.workstation_id)
+      return this.fail(userId, msg.threadId, CHAT_ERROR.workstationOffline);
+    if (!(await workstationServesOrg(ctx.pool, row.workstation_id, row.org_id)))
+      return this.fail(userId, msg.threadId, CHAT_ERROR.simulationWorkstation);
+    // The model: this message's choice, else the conversation's, else the default. `thread` scope makes the choice stick.
+    const threadChoice = msg.modelScope === 'thread' && msg.model ? msg.model : undefined;
+    const resolved = resolveTurnModel(
+      row,
+      threadChoice ? { ...row, model_override: threadChoice } : row,
+      ceo.settings.models.chat,
+      msg.modelScope === 'thread' ? undefined : msg.model,
+    );
+    if (!resolved) return this.fail(userId, msg.threadId, CHAT_ERROR.unknownModel);
+    const online = ctx.services.runners.isOnline(row.workstation_id);
+    const waiting = await one(
+      ctx.pool,
+      `SELECT 1 FROM ceo_turns WHERE thread_id=$1 AND status='queued' LIMIT 1`,
+      [msg.threadId],
+    );
+    const queued = !online || !!waiting;
+    const turnId = randomUUID();
+    const messageId = randomUUID();
+    const events: AppendInput[] = [
+      ...(threadChoice
+        ? [
+            {
+              streamId: streamId.thread(msg.threadId),
+              event: {
+                type: 'ChatThreadModelSet' as const,
+                payload: { threadId: msg.threadId, choice: threadChoice, by: userId },
+              },
+              actor: userActor(userId),
+              scope: orgScope(row.org_id),
+            },
+          ]
+        : []),
+      {
+        streamId: streamId.thread(msg.threadId),
+        event: {
+          type: 'ThreadMessagePosted',
+          payload: {
+            threadId: msg.threadId,
+            messageId,
+            authorKind: 'user',
+            authorUserId: userId,
+            kind: 'chat',
+            body: msg.body,
+            data: {
+              clientMsgId: msg.clientMsgId,
+              turnId,
+              ...(queued ? { queued: true } : {}),
+              ...(resolved.source === 'message' ? { model: resolved.choice } : {}),
+            },
+          },
+        },
+        actor: userActor(userId),
+        scope: orgScope(row.org_id),
+      },
+      {
+        streamId: streamId.ceo(row.org_id),
+        event: {
+          type: 'CeoTurnQueued',
+          payload: {
+            turnId,
+            orgId: row.org_id,
+            threadId: msg.threadId,
+            messageId,
+            mode: 'owner',
+            model: resolved.choice,
+            workstationId: row.workstation_id,
+            queued,
+          },
+        },
+        actor: userActor(userId),
+        scope: orgScope(row.org_id),
+      },
+    ];
+    try {
+      await ctx.store.append(events);
+    } catch (err) {
+      ctx.log.error({ err }, 'ceo chat.send failed');
+      return this.fail(userId, msg.threadId, CHAT_ERROR.runnerError);
+    }
+    if (queued) {
+      const ws = await one(ctx.pool, 'SELECT name FROM workstations WHERE id=$1', [row.workstation_id]);
+      this.tell(userId, {
+        type: 'chat.queued',
+        threadId: msg.threadId,
+        clientMsgId: msg.clientMsgId,
+        ...(ws?.name ? { workstationName: ws.name as string } : {}),
+      });
+      void notifyUsers(ctx, [userId], {
+        category: 'chat_replies',
+        subject: `ceo-queue:${msg.threadId}`,
+        state: turnId,
+        title: 'Queued',
+        body: `Queued: ${row.name} answers when ${ws?.name ?? 'the workstation'} is back`,
+        url: '/ceo',
+        priority: 'normal',
+        orgId: row.org_id,
+      }).catch(() => {});
+      return;
+    }
+    await this.startCeoTurn(turnId, userId, msg.body);
+  }
+
+  /** Sends one persisted turn to its workstation. A refusal ends the turn (the owner sees the error). */
+  async startCeoTurn(
+    turnId: string,
+    userId: string,
+    message: string,
+    order?: { entryId: string; hash: string },
+  ): Promise<boolean> {
+    const { ctx } = this;
+    const turn = await loadTurn(ctx.pool, turnId);
+    if (!turn || (turn.status !== 'queued' && turn.status !== 'running')) return false;
+    const agent = await one(
+      ctx.pool,
+      `SELECT a.* FROM agents a JOIN ceo_settings c ON c.agent_id = a.id WHERE c.org_id=$1`,
+      [turn.org_id],
+    );
+    const thread = await one(ctx.pool, 'SELECT * FROM threads WHERE id=$1', [turn.thread_id]);
+    const fail = async (reason: string, status: 'failed' = 'failed') => {
+      await ctx.store.append([this.turnFinished(turn, status, reason)]).catch(() => {});
+      this.fail(userId, turn.thread_id, reason);
+      return false;
+    };
+    if (!agent || !thread) return fail(CHAT_ERROR.unknownThread);
+    const plan = await buildChatStart(ctx, { turn, agent, thread }, { message, ...(order ? { order } : {}) });
+    if (!plan.ok)
+      return fail(plan.reason === 'offline' ? CHAT_ERROR.workstationOffline : CHAT_ERROR.runnerError);
+    const inflight: Inflight = {
+      chatId: turn.id,
+      threadId: turn.thread_id,
+      userId,
+      orgId: turn.org_id,
+      projectId: null,
+      agentId: agent.id,
+      workstationId: plan.workstationId,
+      startedAt: ctx.clock.now(),
+      ceo: plan.info,
+    };
+    this.inflight.set(turn.id, inflight);
+    this.byThread.set(turn.thread_id, turn.id);
+    try {
+      await ctx.store.append([
+        {
+          streamId: streamId.shift(turn.id),
+          event: {
+            type: 'ShiftStarted',
+            payload: {
+              shiftId: turn.id,
+              agentId: agent.id,
+              workstationId: plan.workstationId,
+              kind: 'chat',
+              runtime: plan.model.runtime,
+              model: plan.model.model,
+              overflow: false,
+              mode: turn.mode,
+            },
+          },
+          actor: runnerActor(plan.workstationId),
+          scope: orgScope(turn.org_id),
+        },
+        {
+          streamId: streamId.ceo(turn.org_id),
+          event: {
+            type: 'CeoTurnStarted',
+            payload: {
+              turnId: turn.id,
+              orgId: turn.org_id,
+              threadId: turn.thread_id,
+              workstationId: plan.workstationId,
+              model: plan.model,
+            },
+          },
+          actor: SYSTEM_ACTOR,
+          scope: orgScope(turn.org_id),
+        },
+      ]);
+      const sent = ctx.services.runners.send(
+        plan.workstationId,
+        'chat.start',
+        plan.payload as never,
+        ctx.clock.now(),
+      );
+      if (!sent) {
+        await this.finishCeo(inflight, 'rejected', CHAT_ERROR.workstationOffline);
+        return false;
+      }
+      return true;
+    } catch (err) {
+      ctx.log.error({ err }, 'ceo turn start failed');
+      await this.finishCeo(inflight, 'crashed', CHAT_ERROR.runnerError).catch(() => {});
+      return false;
+    }
+  }
+
+  private turnFinished(
+    turn: Row,
+    status: 'done' | 'failed' | 'dropped',
+    error?: string,
+    extra: { degraded?: string; toolCounts?: ToolCounts; model?: ModelChoice } = {},
+  ): AppendInput {
+    return {
+      streamId: streamId.ceo(turn.org_id),
+      event: {
+        type: 'CeoTurnFinished',
+        payload: {
+          turnId: turn.id,
+          orgId: turn.org_id,
+          threadId: turn.thread_id,
+          status,
+          ...(error ? { error: error.slice(0, 500) } : {}),
+          ...(extra.degraded ? { degraded: extra.degraded } : {}),
+          ...(extra.toolCounts ? { toolCounts: extra.toolCounts } : {}),
+          ...(extra.model ? { model: extra.model } : {}),
+        },
+      },
+      actor: SYSTEM_ACTOR,
+      scope: orgScope(turn.org_id),
+    };
+  }
+
+  /** A turn the server holds as running (after a restart): rebuilt from `ceo_turns`. */
+  private async hydrate(chatId: string, workstationId: string): Promise<Inflight | undefined> {
+    const turn = await loadTurn(this.ctx.pool, chatId);
+    if (!turn || turn.status !== 'running' || turn.workstation_id !== workstationId) return undefined;
+    const agent = await one(
+      this.ctx.pool,
+      `SELECT a.id FROM agents a JOIN ceo_settings c ON c.agent_id = a.id WHERE c.org_id=$1`,
+      [turn.org_id],
+    );
+    if (!agent) return undefined;
+    const owner = await orgOwnerId(this.ctx.pool, turn.org_id);
+    const c: Inflight = {
+      chatId,
+      threadId: turn.thread_id,
+      userId: owner,
+      orgId: turn.org_id,
+      projectId: null,
+      agentId: agent.id,
+      workstationId,
+      startedAt: new Date(turn.started_at ?? turn.queued_at),
+      ceo: {
+        mode: turn.mode,
+        model: turn.model,
+        queuedAt: new Date(turn.queued_at),
+        messageId: turn.message_id ?? null,
+        orderEntryId: turn.order_entry_id ?? null,
+        orderVersionHash: turn.order_version_hash ?? null,
+        runtimeSessionStartedAt: new Date(turn.started_at ?? turn.queued_at),
+        cwd: '',
+      },
+    };
+    this.inflight.set(chatId, c);
+    this.byThread.set(c.threadId, chatId);
+    return c;
+  }
+
+  private async applyCeoDone(
+    c: Inflight,
+    msg: RunnerToServerOf<'chat.done'>,
+    tx: Tx,
+  ): Promise<ChatTerminal | undefined> {
+    const info = c.ceo as CeoInflightInfo;
+    const turn = await loadTurn(tx, c.chatId);
+    if (!turn) return undefined;
+    const messageId = randomUUID();
+    const durationMs = Math.max(0, this.ctx.clock.now().getTime() - c.startedAt.getTime());
+    const waitedMs = turn.queued
+      ? Math.max(0, new Date(turn.started_at ?? c.startedAt).getTime() - new Date(turn.queued_at).getTime())
+      : undefined;
+    const events: AppendInput[] = [
+      {
+        streamId: streamId.thread(c.threadId),
+        event: {
+          type: 'ThreadMessagePosted',
+          payload: {
+            threadId: c.threadId,
+            messageId,
+            authorKind: 'agent',
+            authorAgentId: c.agentId,
+            kind: 'chat',
+            body: msg.messageText,
+            data: replyData(msg, info, waitedMs),
+          },
+        },
+        actor: agentActor(c.agentId),
+        scope: orgScope(c.orgId),
+      },
+      this.shiftEnded(c, 'reported', msg.usage),
+      this.turnFinished(turn, 'done', undefined, {
+        ...(msg.degraded ? { degraded: msg.degraded } : {}),
+        ...(msg.toolCounts ? { toolCounts: msg.toolCounts } : {}),
+        model: info.model,
+      }),
+      ...(await backstopJobEvents(this.ctx, turn, {
+        toolCounts: msg.toolCounts,
+        usage: msg.usage,
+        durationMs,
+        model: info.model.model,
+      })),
+      ...(await closePendingForTurn(tx, turn)),
+    ];
+    if (turn.mode === 'order' && turn.order_entry_id) {
+      const commands = [...new Set([...(turn.order_commands ?? []), ...(msg.commands ?? [])])].slice(0, 200);
+      events.push({
+        streamId: streamId.ceo(c.orgId),
+        event: {
+          type: 'CeoOrderTurnFinished',
+          payload: {
+            turnId: turn.id,
+            orgId: c.orgId,
+            entryId: turn.order_entry_id,
+            versionHash: turn.order_version_hash,
+            outcome: turn.order_outcome ?? 'done',
+            summary: turn.order_summary ?? msg.messageText.slice(0, 1500),
+            commands,
+            ...(turn.order_ask ? { ask: turn.order_ask } : {}),
+          },
+        },
+        actor: SYSTEM_ACTOR,
+        scope: orgScope(c.orgId),
+      });
+    }
+    await this.ctx.store.append(events, { tx });
+    this.release(c);
+    return { userId: c.userId, threadId: c.threadId, messageId, ceoThread: c.threadId };
+  }
+
+  private async applyCeoError(
+    c: Inflight,
+    msg: RunnerToServerOf<'chat.error'>,
+    tx: Tx,
+  ): Promise<ChatTerminal | undefined> {
+    const turn = await loadTurn(tx, c.chatId);
+    if (!turn) return undefined;
+    const events: AppendInput[] = [
+      this.shiftEnded(c, msg.error === 'cancelled' ? 'stopped' : 'crashed'),
+      this.turnFinished(turn, 'failed', msg.error),
+      ...(await closePendingForTurn(tx, turn)),
+    ];
+    if (turn.mode === 'order' && turn.order_entry_id)
+      events.push({
+        streamId: streamId.ceo(c.orgId),
+        event: {
+          type: 'CeoOrderTurnFinished',
+          payload: {
+            turnId: turn.id,
+            orgId: c.orgId,
+            entryId: turn.order_entry_id,
+            versionHash: turn.order_version_hash,
+            outcome: 'failed',
+            summary: msg.error.slice(0, 1000),
+            commands: turn.order_commands ?? [],
+          },
+        },
+        actor: SYSTEM_ACTOR,
+        scope: orgScope(c.orgId),
+      });
+    await this.ctx.store.append(events, { tx });
+    this.release(c);
+    return { userId: c.userId, threadId: c.threadId, reason: msg.error, ceoThread: c.threadId };
+  }
+
+  private async finishCeo(
+    c: Inflight,
+    outcome: 'rejected' | 'crashed' | 'lost',
+    reason: string,
+  ): Promise<void> {
+    this.release(c);
+    const turn = await loadTurn(this.ctx.pool, c.chatId);
+    await this.ctx.store.append([
+      this.shiftEnded(c, outcome),
+      ...(turn ? [this.turnFinished(turn, 'failed', reason)] : []),
+    ]);
+    this.fail(c.userId, c.threadId, reason);
+  }
+
+  /** The oldest queued message of a CEO conversation starts when nothing runs and its workstation is online. */
+  async drainThread(threadId: string): Promise<void> {
+    const { ctx } = this;
+    if (this.byThread.has(threadId)) return;
+    const running = await one(ctx.pool, `SELECT 1 FROM ceo_turns WHERE thread_id=$1 AND status='running'`, [
+      threadId,
+    ]);
+    if (running) return;
+    const next = await one(
+      ctx.pool,
+      `SELECT * FROM ceo_turns WHERE thread_id=$1 AND status='queued' AND mode='owner' AND queued_at > $2
+        ORDER BY queued_at LIMIT 1`,
+      [threadId, new Date(ctx.clock.now().getTime() - STALE_QUEUE_MS)],
+    );
+    if (!next) return;
+    const msg = next.message_id
+      ? await one(ctx.pool, 'SELECT body, author_user_id FROM thread_messages WHERE id=$1', [next.message_id])
+      : undefined;
+    if (!msg) {
+      await ctx.store.append([this.turnFinished(next, 'dropped', 'the message is gone')]);
+      return;
+    }
+    await this.startCeoTurn(next.id, msg.author_user_id as string, msg.body as string);
+  }
+
+  /** A workstation (re)connected: queued messages of the CEOs that live on it go out, in order. */
+  async onReconnect(workstationId: string): Promise<void> {
+    const threads = await rows(
+      this.ctx.pool,
+      `SELECT DISTINCT t.thread_id FROM ceo_turns t WHERE t.workstation_id=$1 AND t.status='queued' AND t.mode='owner'`,
+      [workstationId],
+    );
+    for (const t of threads) await this.drainThread(t.thread_id);
+  }
+
+  /** The owner's decision on a stale queued message: send it anyway, or drop it. */
+  async decideQueued(userId: string, turnId: string, decision: 'send' | 'drop'): Promise<void> {
+    const { ctx } = this;
+    const turn = await loadTurn(ctx.pool, turnId);
+    if (!turn || turn.status !== 'queued' || turn.mode !== 'owner') return;
+    if (decision === 'drop') {
+      await ctx.store.append([this.turnFinished(turn, 'dropped', 'dropped by the owner')]);
+      return;
+    }
+    if (this.byThread.has(turn.thread_id)) return;
+    const msg = turn.message_id
+      ? await one(ctx.pool, 'SELECT body FROM thread_messages WHERE id=$1', [turn.message_id])
+      : undefined;
+    if (msg) await this.startCeoTurn(turn.id, userId, msg.body as string);
+  }
+
+  /** Running CEO turns of a workstation that the runner no longer holds are over (it restarted without them). */
+  async reconcileCeoTurns(workstationId: string, held: string[], helloAt: Date): Promise<void> {
+    const lost = await rows(
+      this.ctx.pool,
+      `SELECT * FROM ceo_turns WHERE workstation_id=$1 AND status='running' AND started_at <= $2`,
+      [workstationId, helloAt],
+    );
+    for (const t of lost) {
+      if (held.includes(t.id)) continue;
+      const c = this.inflight.get(t.id);
+      if (c) this.release(c);
+      await this.ctx.store
+        .append([
+          ...(c ? [this.shiftEnded(c, 'lost')] : []),
+          this.turnFinished(t, 'failed', 'the runner restarted before the reply was ready'),
+          ...(await closePendingForTurn(this.ctx.pool, t)),
+        ])
+        .catch((err) => this.ctx.log.error({ err }, 'failed to end lost ceo turn'));
+      const owner = await orgOwnerId(this.ctx.pool, t.org_id);
+      this.fail(owner, t.thread_id, CHAT_ERROR.workstationOffline);
     }
   }
 
@@ -307,8 +811,9 @@ export class ChatRelay {
     msg: RunnerToServerOf<'chat.done'>,
     tx: Tx,
   ): Promise<ChatTerminal | undefined> {
-    const c = this.inflight.get(msg.chatId);
+    const c = this.inflight.get(msg.chatId) ?? (await this.hydrate(msg.chatId, workstationId));
     if (!c || c.workstationId !== workstationId) return undefined;
+    if (c.ceo) return this.applyCeoDone(c, msg, tx);
     const messageId = randomUUID();
     await this.ctx.store.append(
       [
@@ -345,8 +850,9 @@ export class ChatRelay {
     msg: RunnerToServerOf<'chat.error'>,
     tx: Tx,
   ): Promise<ChatTerminal | undefined> {
-    const c = this.inflight.get(msg.chatId);
+    const c = this.inflight.get(msg.chatId) ?? (await this.hydrate(msg.chatId, workstationId));
     if (!c || c.workstationId !== workstationId) return undefined;
+    if (c.ceo) return this.applyCeoError(c, msg, tx);
     await this.ctx.store.append([this.shiftEnded(c, msg.error === 'cancelled' ? 'stopped' : 'crashed')], {
       tx,
     });
@@ -358,12 +864,20 @@ export class ChatRelay {
     if (!t) return;
     if (t.messageId) this.tell(t.userId, { type: 'chat.done', threadId: t.threadId, messageId: t.messageId });
     else this.fail(t.userId, t.threadId, t.reason ?? CHAT_ERROR.runnerError);
+    // The reply is out: the next queued message of a CEO conversation may start.
+    if (t.ceoThread)
+      void this.drainThread(t.ceoThread).catch((err) =>
+        this.ctx.log.error({ err }, 'ceo queue drain failed'),
+      );
   }
 
   /** The runner's socket closed: its chats cannot finish (the runner kills them too). */
   async workstationLost(workstationId: string): Promise<void> {
     for (const c of [...this.inflight.values()]) {
       if (c.workstationId !== workstationId) continue;
+      // A CEO owner or order turn survives a dropped connection: the runner keeps it going and delivers the reply on
+      // reconnect (`reconcileCeoTurns` fails the turns the runner no longer holds).
+      if (c.ceo) continue;
       await this.finish(c, 'lost', CHAT_ERROR.workstationOffline).catch((err) =>
         this.ctx.log.error({ err }, 'failed to end lost chat'),
       );

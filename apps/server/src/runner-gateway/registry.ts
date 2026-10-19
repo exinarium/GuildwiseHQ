@@ -10,6 +10,8 @@ export interface RunnerConn {
   /** True once the post-reconnect reconciliation ran (docs/ARCHITECTURE.md section 11.2). */
   reconciled: boolean;
   helloShiftIds: string[];
+  /** Chats (CEO owner and order turns) the runner reported as running in `hello`. */
+  helloChatIds?: string[];
   lastRepos: RepoReport[];
   /** shiftId -> consecutive heartbeats that did not report it. */
   missing: Map<string, number>;

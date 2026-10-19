@@ -2,6 +2,7 @@ import { isOrgManager, streamId } from '@aom/shared';
 import { orgRoleOf } from '../auth/org-context.ts';
 import type { AuthSession } from '../auth/sessions.ts';
 import { loadVisibleProject } from '../authz/scope.ts';
+import { voidAuthorityEvents } from '../ceo/orders.ts';
 import type { Ctx } from '../context.ts';
 import { one } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
@@ -37,8 +38,11 @@ export async function retireLedgerEntryAs(
           'the replacing entry must be another entry of the same organization',
         );
     }
+    const scope = e.project_id ? projectScope(e.org_id, e.project_id) : orgScope(e.org_id);
     await ctx.store.append(
       [
+        // A retired order carries no full power (docs/design/ceo-front-door.md section 3.4).
+        ...(await voidAuthorityEvents(tx, entryId, 'retired', scope)),
         {
           streamId: streamId.ledger(entryId),
           event: {
@@ -51,7 +55,7 @@ export async function retireLedgerEntryAs(
             },
           },
           actor: by.actor,
-          scope: e.project_id ? projectScope(e.org_id, e.project_id) : orgScope(e.org_id),
+          scope,
         },
       ],
       { tx },

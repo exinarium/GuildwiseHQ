@@ -63,6 +63,41 @@ export async function baTaskPass(
       );
       if ((running?.n ?? 0) >= BATCH_MAX_IN_FLIGHT) continue;
     }
+    // A `spec_card` task for a card that was cancelled (or deleted) while it waited is dropped, never dispatched.
+    if (t.kind === 'spec_card') {
+      const card = t.card_id
+        ? await one(ctx.pool, 'SELECT status FROM cards WHERE id=$1', [t.card_id])
+        : undefined;
+      if (!card || card.status === 'cancelled') {
+        await withAppendTx(ctx.pool, async (tx) => {
+          const cur = await one(tx, `SELECT 1 FROM ba_tasks WHERE id=$1 AND status='queued' FOR UPDATE`, [
+            t.id,
+          ]);
+          if (!cur) return;
+          await ctx.store.append(
+            [
+              {
+                streamId: streamId.baTask(t.id),
+                event: {
+                  type: 'BaTaskCompleted',
+                  payload: {
+                    taskId: t.id,
+                    status: 'cancelled',
+                    note: 'the card was cancelled before the task started',
+                  },
+                },
+                actor: SYSTEM_ACTOR,
+                scope: t.project_id
+                  ? projectScope(t.org_id, t.project_id)
+                  : { orgId: t.org_id, projectId: null, audience: 'org' },
+              },
+            ],
+            { tx },
+          );
+        });
+        continue;
+      }
+    }
     const bas = await rows(
       ctx.pool,
       `SELECT a.*, ws.id AS ws_id, ws.runtimes, ws.connected, ws.last_seen_at

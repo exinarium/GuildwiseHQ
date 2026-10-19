@@ -38,6 +38,8 @@ export const ACTION_CLASSES = [
   'hr.apply_recommendation',
   'devops.request',
   'devops.approve',
+  'deploy.run',
+  'order.invoke',
   'standing_order.propose',
   'standing_order.activate',
   'standing_order.retire',
@@ -84,6 +86,8 @@ export const CLASS_LABEL: Record<ActionClass, string> = {
   'hr.apply_recommendation': 'Apply an HR recommendation',
   'devops.request': 'Ask DevOps (non-destructive)',
   'devops.approve': 'Approve DevOps actions',
+  'deploy.run': 'Run a deploy through a delivery recipe',
+  'order.invoke': 'Start a full-power turn for an owner-authorized standing order',
   'standing_order.propose': 'Propose a standing order',
   'standing_order.activate': 'Activate a standing order',
   'standing_order.retire': 'Retire a ledger entry',
@@ -202,6 +206,8 @@ export const DEFAULT_CEO_POLICY: CeoPolicy = {
     'hr.apply_recommendation': decide,
     'devops.request': decide,
     'devops.approve': recommend,
+    'deploy.run': decide,
+    'order.invoke': decide,
     'standing_order.propose': decide,
     'standing_order.activate': recommend,
     'standing_order.retire': recommend,
@@ -269,7 +275,16 @@ export function reservedKeyOfDesk(kind: string, subkind: string | null | undefin
   }
 }
 
+/** Where the call comes from (docs/design/ceo-front-door.md section 6.2). The server derives it, never the runner or the model. */
+export interface PolicyOrigin {
+  kind: 'owner' | 'order' | 'wake';
+  /** `order` turns: the owner-reserved keys the authorization covers. */
+  covers?: readonly string[];
+}
+
 export interface PolicyInput {
+  /** Absent: a wake. */
+  origin?: PolicyOrigin | undefined;
   confidence: number;
   /** The wake that led to the action was triggered by outside text (card, mail, ticket, agent output). */
   untrustedOrigin?: boolean;
@@ -287,7 +302,17 @@ export interface PolicyVerdict {
   verdict: 'allow' | 'recommend' | 'deny';
   reason: string;
   cause?: 'mode' | 'reserved' | 'confidence' | 'evidence' | 'limit' | 'untrusted' | 'desk' | 'never';
+  /** An owner turn: this recommendation is an inline confirmation card in the chat, answered by the Owner's session. */
+  inline?: boolean;
 }
+
+/** Causes that an owner turn turns into an inline confirmation (the owner is in the conversation). */
+const INLINE_CAUSES: ReadonlyArray<NonNullable<PolicyVerdict['cause']>> = [
+  'mode',
+  'reserved',
+  'confidence',
+  'desk',
+];
 
 const UNTRUSTED_RECOMMEND: readonly string[] = [
   'agent.hire',
@@ -299,9 +324,23 @@ const UNTRUSTED_RECOMMEND: readonly string[] = [
   'standing_order.activate',
   'standing_order.retire',
   'memory.write',
+  'deploy.run',
+  'order.invoke',
 ];
 
 export function evaluatePolicy(policy: CeoPolicy, cls: string, input: PolicyInput): PolicyVerdict {
+  const v = evaluateBase(policy, cls, input);
+  if (
+    input.origin?.kind === 'owner' &&
+    v.verdict === 'recommend' &&
+    v.cause &&
+    INLINE_CAUSES.includes(v.cause)
+  )
+    return { ...v, inline: true };
+  return v;
+}
+
+function evaluateBase(policy: CeoPolicy, cls: string, input: PolicyInput): PolicyVerdict {
   if (isHardNever(cls))
     return { verdict: 'deny', reason: `${cls} is never delegated to the CEO`, cause: 'never' };
   if (!(ACTION_CLASSES as readonly string[]).includes(cls))
@@ -323,7 +362,12 @@ export function evaluatePolicy(policy: CeoPolicy, cls: string, input: PolicyInpu
       reason: 'the policy asks for a recommendation on this kind of item',
       cause: 'desk',
     };
-  if (input.reservedKey && !policy.delegated.includes(input.reservedKey))
+  // An order turn may act on the owner-reserved keys its authorization covers (the owner ticked them when he marked it).
+  const coveredByOrder =
+    input.origin?.kind === 'order' &&
+    !!input.reservedKey &&
+    !!input.origin.covers?.includes(input.reservedKey);
+  if (input.reservedKey && !coveredByOrder && !policy.delegated.includes(input.reservedKey))
     return {
       verdict: 'recommend',
       reason: `owner-reserved: ${OWNER_RESERVED_LABEL[input.reservedKey]}`,
