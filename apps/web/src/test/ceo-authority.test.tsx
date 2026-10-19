@@ -85,6 +85,14 @@ describe('the CEO authority tab', () => {
     await waitFor(() => expect(screen.getByTestId('ceo-policy-version')).toHaveTextContent('version 2'));
   });
 
+  it('shows the working-branch delegation as on by default, so the owner can take it back', async () => {
+    stubApi('owner', [['GET /api/ceo/status', () => ceoStatus()], policyRoute()]);
+    renderCeoPage('?tab=authority');
+    expect(
+      await screen.findByRole('button', { name: /Take back: Choosing which branch a repository works on/ }),
+    ).toBeInTheDocument();
+  });
+
   it('delegating an owner-reserved matter names the risk and sends confirmDelegation', async () => {
     const calls = stubApi('owner', [['GET /api/ceo/status', () => ceoStatus()], policyRoute()]);
     renderCeoPage('?tab=authority');
@@ -97,7 +105,7 @@ describe('the CEO authority tab', () => {
     await userEvent.click(within(dialog).getByRole('button', { name: 'Delegate' }));
     await waitFor(() => {
       expect(putBody(calls)?.confirmDelegation).toBe(true);
-      expect(putBody(calls)?.policy.delegated).toEqual(['production_deploy']);
+      expect(putBody(calls)?.policy.delegated).toEqual(['working_branch', 'production_deploy']);
     });
   });
 

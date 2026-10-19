@@ -8,6 +8,8 @@ import { z } from 'zod';
 
 export const CEO_ROLE_KEY = 'ceo';
 export const CEO_DEPARTMENT = 'management';
+/** The desk item that shows an owner one decision the CEO took on its own, to acknowledge or correct. */
+export const CEO_DECISION_SUBKIND = 'ceo_decision';
 
 export const CeoMode = z.enum(['decide', 'recommend', 'never']);
 export type CeoMode = z.infer<typeof CeoMode>;
@@ -102,6 +104,7 @@ export const OWNER_RESERVED_KEYS = [
   'vault_conflict',
   'repo_create',
   'mass_cancel',
+  'working_branch',
 ] as const;
 export const OwnerReservedKey = z.enum(OWNER_RESERVED_KEYS);
 export type OwnerReservedKey = z.infer<typeof OwnerReservedKey>;
@@ -119,6 +122,7 @@ export const OWNER_RESERVED_LABEL: Record<OwnerReservedKey, string> = {
   vault_conflict: 'Resolving knowledge vault conflicts',
   repo_create: 'Creating repositories',
   mass_cancel: 'Cancelling more than 3 cards at once',
+  working_branch: 'Choosing which branch a repository works on (answering working-branch questions)',
 };
 
 /** Never delegable, whatever the policy says. The CEO has no action for them; a request for one is refused. */
@@ -218,7 +222,8 @@ export const DEFAULT_CEO_POLICY: CeoPolicy = {
     'question:manual_qa': 'recommend',
     'question:unmapped_ticket': 'recommend',
   },
-  delegated: [],
+  // Working-branch questions are routine; the CEO decides them (and each decision shows on the desk for review).
+  delegated: ['working_branch'],
   minConfidence: 0.75,
   limits: DEFAULT_CEO_LIMITS,
 };
@@ -252,6 +257,8 @@ export function reservedKeyOfDesk(kind: string, subkind: string | null | undefin
       return 'vault_conflict';
     case 'repo_create':
       return 'repo_create';
+    case 'working_branch':
+      return 'working_branch';
     case 'devops':
       return kind === 'approval' ? 'devops_destructive' : null;
     default:
