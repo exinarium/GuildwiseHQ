@@ -13,13 +13,14 @@ import {
 } from './engine.ts';
 import { addMemory, searchMemories } from './memory.ts';
 import { notifyOwner } from './notify.ts';
+import { ceoReviewReply } from './review.ts';
 import { buildSnapshot } from './snapshot.ts';
 import { loadCeo } from './state.ts';
 import { createTask, listTasks, updateTask } from './tasks.ts';
 
 type Reply = [boolean, unknown?, string?];
 
-const WRITE_OPS = new Set(['act', 'recommend', 'notify', 'task', 'memory']);
+const WRITE_OPS = new Set(['act', 'recommend', 'notify', 'task', 'memory', 'review_reply']);
 
 /** The durable subject of a notify call: the card (with its stage and status) behind a desk item, the desk item, or the task. */
 async function noticeSubject(
@@ -177,6 +178,8 @@ export async function ceoRpc(ctx: Ctx, shift: Row, params: Record<string, unknow
         return [true, await taskOp(ctx, env.agentId, orgId, rpc, origin)];
       case 'memory':
         return [true, await memoryOp(ctx, agent, orgId, rpc, origin)];
+      case 'review_reply':
+        return [true, await ceoReviewReply(ctx, agent, orgId, rpc)];
       default:
         return [false, undefined, 'unknown operation'];
     }

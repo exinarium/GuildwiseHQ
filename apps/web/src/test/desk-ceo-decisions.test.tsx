@@ -218,4 +218,144 @@ describe('the desk: CEO decisions', () => {
     expect(within(sheet).getByTestId('ceo-decision-ack')).toBeInTheDocument();
     expect(within(sheet).getByTestId('ceo-decision-correct')).toBeInTheDocument();
   });
+  const corrected = (n: number, correction: Record<string, unknown>) =>
+    decision(n, {
+      status: 'answered',
+      ceoDecision: {
+        ...(decision(n).ceoDecision as NonNullable<DeskItemDto['ceoDecision']>),
+        correction: {
+          text: 'Use develop',
+          at: '2026-10-19T10:00:00.000Z',
+          applied: null,
+          review: 'done',
+          analysis: 'It missed that dev is personal.',
+          lesson: 'Lesson (owner correction, discussed with the BA): never keep a personal branch.',
+          consequences: 'Two cards were built on dev.',
+          proposedCards: [
+            {
+              title: 'Move the cards to develop',
+              project: 'P4',
+              change: 'Re-point',
+              acceptanceCriteria: ['A'],
+            },
+          ],
+          ceoReply: {
+            stance: 'agree',
+            reflection: 'I trusted the intake default.',
+            cardChanges: null,
+            withoutCeo: false,
+            at: '2026-10-19T10:30:00.000Z',
+          },
+          final: {
+            summary: 'Created 1 fix card: P4-30.',
+            cards: [{ cardId: U(90), ref: 'P4-30', title: 'Move the cards to develop', projectKey: 'P4' }],
+            skipped: [],
+            fallback: false,
+            at: '2026-10-19T11:00:00.000Z',
+          },
+          ...correction,
+        } as never,
+      },
+    });
+
+  async function openClosed(item: DeskItemDto) {
+    stubApi('owner', [
+      ['GET /api/desk?', (c) => (c.url.includes('status=closed') ? list([item]) : list([]))],
+    ]);
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <ToastProvider>
+          <MemoryRouter>
+            <Desk />
+          </MemoryRouter>
+        </ToastProvider>
+      </QueryClientProvider>,
+    );
+    await userEvent.click(await screen.findByText(/Answered and closed/));
+  }
+
+  it('shows the whole discussion as a timeline with the fix cards and the final chip', async () => {
+    await openClosed(corrected(1, {}));
+    const tl = await screen.findByTestId('ceo-review-timeline');
+    expect(screen.getByTestId('ceo-review-chip')).toHaveTextContent('Lesson recorded · 1 fix card');
+    expect(within(tl).getByTestId('ceo-review-step-owner')).toHaveTextContent('Use develop');
+    const ba = within(tl).getByTestId('ceo-review-step-ba');
+    expect(ba).toHaveTextContent('It missed that dev is personal.');
+    expect(within(ba).getByTestId('ceo-review-consequences')).toHaveTextContent(
+      'Two cards were built on dev.',
+    );
+    expect(within(ba).getByTestId('ceo-review-proposed')).toHaveTextContent('Move the cards to develop');
+    const ceo = within(tl).getByTestId('ceo-review-step-ceo');
+    expect(within(ceo).getByTestId('ceo-review-stance')).toHaveTextContent('Agrees with your correction');
+    expect(ceo).toHaveTextContent('I trusted the intake default.');
+    expect(within(ceo).getByTestId('ceo-lesson')).toHaveTextContent(
+      'Lesson recorded: never keep a personal branch.',
+    );
+    const fin = within(tl).getByTestId('ceo-review-step-final');
+    expect(within(within(fin).getByTestId('ceo-review-cards')).getByRole('link')).toHaveAttribute(
+      'href',
+      '/cards/P4-30',
+    );
+  });
+
+  it('a disagreeing CEO says so, and your correction stands', async () => {
+    await openClosed(
+      corrected(1, {
+        ceoReply: {
+          stance: 'disagree',
+          reflection: 'The ledger said otherwise.',
+          cardChanges: 'Drop the second card',
+          withoutCeo: false,
+          at: null,
+        },
+      }),
+    );
+    expect(await screen.findByTestId('ceo-review-stance')).toHaveTextContent(
+      'Disagrees, your correction stands',
+    );
+    expect(screen.getByTestId('ceo-review-step-ceo')).toHaveTextContent('Drop the second card');
+  });
+
+  it('is "Under review" with waiting steps while the discussion runs, and says when no fix work is needed', async () => {
+    await openClosed(
+      corrected(1, {
+        review: 'analysed',
+        lesson: null,
+        ceoReply: null,
+        final: null,
+        proposedCards: undefined,
+        noFixReason: 'Nothing was built on it',
+      }),
+    );
+    expect(await screen.findByTestId('ceo-review-chip')).toHaveTextContent('Under review');
+    expect(screen.getByTestId('ceo-review-nofix')).toHaveTextContent('Nothing was built on it');
+    expect(screen.getByTestId('ceo-review-step-ceo')).toHaveTextContent('Waiting for the CEO');
+    expect(screen.queryByTestId('ceo-review-step-final')).toBeNull();
+  });
+
+  it('marks a lesson recorded without the CEO, and "no fix cards" in the chip', async () => {
+    await openClosed(
+      corrected(1, {
+        proposedCards: undefined,
+        ceoReply: { stance: null, reflection: null, cardChanges: null, withoutCeo: true, at: null },
+        final: { summary: 'No fix cards were created.', cards: [], skipped: [], fallback: true, at: null },
+        lesson: 'Lesson (owner correction, recorded without the CEO): use develop.',
+      }),
+    );
+    expect(await screen.findByTestId('ceo-review-without')).toHaveTextContent('Recorded without the CEO');
+    expect(screen.getByTestId('ceo-review-chip')).toHaveTextContent('Lesson recorded · no fix cards');
+  });
+
+  it('the timeline is also in the full-screen sheet on a phone', async () => {
+    setMobile(true);
+    show('owner', [{ ...corrected(1, { review: 'lesson', final: null }), status: 'open' }]);
+    await userEvent.click(await screen.findByTestId(`desk-card-${U(61)}`));
+    const sheet = await screen.findByTestId('desk-sheet');
+    expect(within(sheet).getByTestId('ceo-review-chip')).toHaveTextContent('Under review');
+    expect(within(sheet).getByTestId('ceo-review-step-ceo')).toHaveTextContent(
+      'I trusted the intake default.',
+    );
+    expect(within(sheet).getByTestId('ceo-review-step-final')).toHaveTextContent('The BA is finalising');
+  });
 });

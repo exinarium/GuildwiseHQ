@@ -20,7 +20,7 @@ import { createBillingRuntime } from './billing/runtime.ts';
 import { createSocialClient, type SocialClient } from './blog/social-client.ts';
 import type { WriterClient } from './blog/writer/client.ts';
 import { BrowserGateway } from './browser-gateway/gateway.ts';
-import { registerCeoReviewHook } from './ceo/decisions.ts';
+import { registerCeoReviewHook } from './ceo/review.ts';
 import { registerCeoWakes } from './ceo/wakes.ts';
 import { ChatRelay } from './chat/relay.ts';
 import { type Clock, createClock } from './clock.ts';

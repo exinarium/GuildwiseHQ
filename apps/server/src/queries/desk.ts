@@ -210,9 +210,20 @@ export function toDeskDto(
                   text: r.data.correction.text ?? '',
                   at: r.data.correction.at ?? iso(r.updated_at),
                   applied: r.data.correction.applied ?? null,
-                  review: (r.data.correction.review ?? 'pending') as 'pending' | 'analysed' | 'done',
+                  review: (r.data.correction.review ?? 'pending') as
+                    | 'pending'
+                    | 'analysed'
+                    | 'lesson'
+                    | 'done',
                   analysis: r.data.correction.analysis ?? null,
                   lesson: r.data.correction.lesson ?? null,
+                  consequences: r.data.correction.consequences ?? null,
+                  ...(r.data.correction.proposedCards
+                    ? { proposedCards: r.data.correction.proposedCards }
+                    : {}),
+                  noFixReason: r.data.correction.noFixReason ?? null,
+                  ceoReply: r.data.correction.ceoReply ?? null,
+                  final: r.data.correction.final ?? null,
                 }
               : null,
             acknowledgedAt: r.data.acknowledgedAt ?? null,

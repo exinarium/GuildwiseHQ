@@ -17,7 +17,7 @@ The **Authority** tab sets, for each kind of action, whether the CEO decides, re
 
 ## Decisions you review {#decisions}
 
-Every decision the CEO takes on its own that you would otherwise have been asked about (answers to questions routed to it, matters you delegated, such as which **working branch** a repository uses) is listed on the desk under **CEO decisions**. **Acknowledge** it, or **Correct** it by writing the right decision: the CEO stores your correction as a memory, reviews it with the BA and records the lesson, so it does not repeat the mistake. **Acknowledge all** marks them all read. The working-branch delegation is on by default and can be switched off on the **Authority** tab.
+Every decision the CEO takes on its own that you would otherwise have been asked about (answers to questions routed to it, matters you delegated, such as which **working branch** a repository uses) is listed on the desk under **CEO decisions**. **Acknowledge** it, or **Correct** it by writing the right decision: the CEO stores your correction as a memory and discusses it with the BA: the BA analyses what went wrong and what it caused and proposes fix cards, the CEO replies and records the lesson in its own words, and the BA creates the fix cards in the right projects. The Desk item shows the whole discussion. Your correction always stands, even if the CEO disagrees. **Acknowledge all** marks them all read. The working-branch delegation is on by default and can be switched off on the **Authority** tab.
 
 ## Activity log and Undo {#activity}
 

@@ -101,6 +101,18 @@ export const CeoRpcSchema = z.discriminatedUnion('op', [
       .array(z.object({ kind: z.enum(['card', 'devops', 'desk', 'agent']), id: z.string().min(1) }))
       .optional(),
   }),
+  /** The CEO's turn in the discussion after the owner corrected one of its decisions (`aom ceo review-reply`). */
+  z.object({
+    op: z.literal('review_reply'),
+    item: z.uuid(),
+    stance: z.enum(['agree', 'disagree']),
+    /** What it got wrong and why. */
+    reflection: z.string().trim().min(3).max(2000),
+    /** The rule for next time, in the CEO's own words. */
+    lesson: z.string().trim().min(3).max(1000),
+    /** Comments on the BA's proposed fix cards. */
+    cardChanges: z.string().trim().max(2000).optional(),
+  }),
   z.object({
     op: z.literal('memory'),
     sub: z.enum(['propose', 'confirm']),

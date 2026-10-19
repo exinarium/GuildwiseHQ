@@ -1,6 +1,7 @@
 import { UNLIMITED_SHIFTS } from '@aom/shared';
 import pg from 'pg';
 import { ceoPass } from '../ceo/pass.ts';
+import { sweepCeoReviews } from '../ceo/review.ts';
 import { withCommitAs } from '../commands/commit-as.ts';
 import { blockedRoles } from '../commands/runner-telemetry.ts';
 import { testEnvironmentPass } from '../commands/test-environments.ts';
@@ -281,6 +282,8 @@ export class Dispatcher {
     counted(await questionPass(this.ctx, cooling, full));
     counted(await baTaskPass(this.ctx, cooling, full));
     await ceoPass(this.ctx);
+    // A CEO decision review the CEO never answered continues without it after the timeout.
+    await sweepCeoReviews(this.ctx).catch((err) => this.ctx.log.error({ err }, 'ceo review sweep failed'));
     await testingPass(this.ctx);
     // Platform team: bug intake from the detectors, pauses of fixed bugs end, grants expire, fix stop-loss (never throws).
     await platformPass(this.ctx);
