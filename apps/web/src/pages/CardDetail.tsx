@@ -120,7 +120,7 @@ function statusTone(status: string) {
   if (status === 'blocked') return 'red' as const;
   if (status === 'claimed') return 'blue' as const;
   if (status === 'done') return 'green' as const;
-  if (status === 'waiting') return 'amber' as const;
+  if (status === 'waiting' || status === 'held') return 'amber' as const;
   return 'neutral' as const;
 }
 
@@ -130,6 +130,7 @@ const STATUS_WORD: Record<string, string> = {
   claimed: 'In progress',
   blocked: 'Blocked',
   waiting: 'Waiting',
+  held: 'Design ready, held',
   done: 'Done',
   cancelled: 'Cancelled',
 };

@@ -1,6 +1,7 @@
 import { deskMode, renderCeoData, trainingDaysLeft } from '@aom/shared';
 import type { Ctx } from '../context.ts';
 import { one, type Row, rows } from '../db/sql.ts';
+import { landedSql } from '../dispatcher/dependencies.ts';
 import { computeRecommendations } from '../hr/recommendations.ts';
 import { loadCeo } from './state.ts';
 
@@ -103,6 +104,20 @@ export async function buildSnapshot(ctx: Ctx, orgId: string, section?: string): 
     out.push(
       `## Cards needing attention\n${cs.map((c) => `${c.ref} id=${c.id} why=${c.why} status=${c.status} stage=${c.stage} prio=${c.priority} rework=${c.rework_round}${c.agent_name ? ` agent=${c.agent_name}` : ''}${c.retry_after ? ` backoff_until=${new Date(c.retry_after).toISOString()}` : ''}`).join('\n') || 'none'}`,
     );
+    const held = await rows(
+      ctx.pool,
+      `SELECT c.ref, c.id,
+              COALESCE((SELECT string_agg(dc.ref, ', ' ORDER BY dc.number) FROM card_dependencies d
+                          JOIN cards dc ON dc.id = d.depends_on_card_id
+                         WHERE d.card_id = c.id AND NOT ${landedSql('dc')}), '') AS waiting_for
+         FROM cards c JOIN projects p ON p.id=c.project_id AND p.status='active'
+        WHERE c.org_id=$1 AND c.status='held' ORDER BY c.number LIMIT 25`,
+      [orgId],
+    );
+    if (held.length)
+      out.push(
+        `## Designs held (not stuck: do not reassign or nudge)\n${held.map((c) => `${c.ref} id=${c.id} design ready, waiting for ${c.waiting_for || 'its dependencies'}; it queues again by itself when they landed`).join('\n')}`,
+      );
     if (cs.length)
       out.push(renderCeoData('Card titles', cs.map((c) => `${c.ref}: ${clip(c.title, 100)}`).join('\n')));
   }

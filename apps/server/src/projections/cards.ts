@@ -5,7 +5,7 @@ import {
   LEGACY_DEFAULT_CARD_PRIORITY,
 } from '@aom/shared';
 import { mergeRisk, type StoredRisk } from '../commands/review-risk.ts';
-import { exec, one, type Row } from '../db/sql.ts';
+import { exec, one, type Row, rows as selectRows } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
 import type { Projector, StoredEvent } from '../eventstore/types.ts';
 import { getCard, leaseExpiry, mutateCard, recordTransition } from './util.ts';
@@ -232,6 +232,31 @@ function approvalActivity(
 
 const DISTINCT_EXCLUDED = `ARRAY(SELECT DISTINCT x FROM unnest(ARRAY[original_builder_agent_id, last_agent_id]) AS x WHERE x IS NOT NULL)`;
 
+/**
+ * Returns every held design whose dependencies have all landed (done, cancelled, or merged into the working branch;
+ * a removed dependency counts as landed) to 'queued', keeping `design_review` so the architect's assumption review
+ * still runs. A pure function of projection state and `e.createdAt`, so a replay gives the same result. Runs after
+ * every event that can land or remove a dependency (see `releaseHeldAfter` in projections/index.ts).
+ */
+export async function releaseHeldDesigns(tx: Tx, e: StoredEvent): Promise<void> {
+  const held = await selectRows<{ id: string }>(
+    tx,
+    `SELECT c.id FROM cards c
+      WHERE c.status = 'held' AND c.claim_id IS NULL
+        AND NOT EXISTS (SELECT 1 FROM card_dependencies d JOIN cards dc ON dc.id = d.depends_on_card_id
+                         WHERE d.card_id = c.id AND NOT (dc.status IN ('done','cancelled') OR dc.merged_into_working_at IS NOT NULL))
+      ORDER BY c.number`,
+  );
+  for (const c of held)
+    await mutateCard(tx, e, c.id, () =>
+      exec(
+        tx,
+        `UPDATE cards SET status='queued', queued_at=$2, updated_at=$2 WHERE id=$1 AND status='held'`,
+        [c.id, e.createdAt],
+      ),
+    );
+}
+
 export const cardProjectors: Record<string, Projector> = {
   CardCreated: async (tx, e) => {
     const p = ev<'CardCreated'>(e).payload;
@@ -375,7 +400,9 @@ export const cardProjectors: Record<string, Projector> = {
 
   DesignHeld: async (tx, e) => {
     const p = ev<'DesignHeld'>(e).payload;
-    await exec(tx, 'UPDATE cards SET design_review=$2, updated_at=$3 WHERE id=$1', [
+    // Status 'held': the design is done, the card waits for its dependencies to land. It is not queued work (nothing
+    // for the dispatcher, the CEO or the stuck detectors); `releaseHeldDesigns` returns it to 'queued' on landing.
+    await exec(tx, `UPDATE cards SET design_review=$2, status='held', updated_at=$3 WHERE id=$1`, [
       p.cardId,
       JSON.stringify({ state: 'waiting', dependencies: p.dependencies, agentId: p.agentId ?? null }),
       e.createdAt,
@@ -385,6 +412,19 @@ export const cardProjectors: Record<string, Projector> = {
       e,
       p.cardId,
       `Design made before ${p.dependencies.join(', ')} landed: the assumptions are reviewed once they have`,
+    );
+  },
+
+  // Repair of a design held before the 'held' status existed (still projected as queued). No-op otherwise.
+  DesignHoldConfirmed: async (tx, e) => {
+    const p = ev<'DesignHoldConfirmed'>(e).payload;
+    await mutateCard(tx, e, p.cardId, () =>
+      exec(
+        tx,
+        `UPDATE cards SET status='held', updated_at=$2
+          WHERE id=$1 AND status='queued' AND claim_id IS NULL AND design_review->>'state' = 'waiting'`,
+        [p.cardId, e.createdAt],
+      ),
     );
   },
 

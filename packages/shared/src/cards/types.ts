@@ -12,7 +12,16 @@ export const CardType = z.enum([
 ]);
 export type CardType = z.infer<typeof CardType>;
 
-export const CardStatus = z.enum(['draft', 'queued', 'claimed', 'blocked', 'waiting', 'done', 'cancelled']);
+export const CardStatus = z.enum([
+  'draft',
+  'queued',
+  'claimed',
+  'blocked',
+  'waiting',
+  'held',
+  'done',
+  'cancelled',
+]);
 export type CardStatus = z.infer<typeof CardStatus>;
 
 /**

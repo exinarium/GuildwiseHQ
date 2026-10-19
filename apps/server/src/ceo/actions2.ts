@@ -22,6 +22,7 @@ import { isNearDuplicate } from '../commands/ledger-checks.ts';
 import { retireLedgerEntryAs } from '../commands/ledger-retire.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Queryable, type Row, rows } from '../db/sql.ts';
+import { landedSql } from '../dispatcher/dependencies.ts';
 import { conflict } from '../errors.ts';
 import { applyRecommendation, listRecommendations } from '../hr/hr.ts';
 import { agentByName, appendLocked, cardOf, ceoBy, deskItem, refuse, truncate } from './actions.ts';
@@ -65,6 +66,18 @@ const reassign: ActionDef<z.infer<typeof ReassignP>> = {
     if (a.paused_at) return { ...base, refuse: `${a.name} is paused` };
     if (['done', 'cancelled', 'draft'].includes(card.status))
       return { ...base, refuse: `the card is ${card.status}` };
+    if (card.status === 'held') {
+      const open = await rows(
+        env.ctx.pool,
+        `SELECT dc.ref FROM card_dependencies d JOIN cards dc ON dc.id = d.depends_on_card_id
+          WHERE d.card_id=$1 AND NOT ${landedSql('dc')} ORDER BY dc.number`,
+        [card.id],
+      );
+      return {
+        ...base,
+        refuse: `the design of ${card.ref} is ready and held on purpose until ${open.map((r) => r.ref).join(', ') || 'its dependencies'} landed; it returns to the queue by itself, nobody can take it before`,
+      };
+    }
     if (card.claimed_by_agent_id === a.id) return { ...base, refuse: `${a.name} has the card already` };
     return { ...base, targetAgentId: a.id, data: { card, agent: a } };
   },
