@@ -401,6 +401,8 @@ Open **Organization** at the bottom of the sidebar. The **General** tab shows th
 
 ![Organization settings: General](guide/assets/org-general.jpg)
 
+**Project links.** Owners and Admins find the **Project links** tab on the same page (Organization, then **Project links**). Here you tell Guildwise how your projects belong together: add a link between two projects, or between a project and something outside Guildwise (type its name). A link says that one **depends on**, **uses** or **is related to** the other, with an optional note. **Remove** takes a link away. The CEO reads these links, with the project names, to decide which project a request is for. The tab lists only the links you add. What the code suggests stays on your workstation: the CEO can show those suggestions in chat, and they count only after you add the link here.
+
 If you belong to several organizations, the **organization switcher** at the top of the sidebar shows which one this browser tab works in. A different tab can work in a different organization. Projects of an organization where you are only a guest carry a "Guest" label.
 
 ### 4.2 Members, invitations and guests
@@ -442,6 +444,7 @@ What you will find there:
 - **Repos:** the code the agents work on, with its git host, its **Main branch** and **Working branch** (4.4) and its **Project path**: the folder of the repository the app lives in (empty: the repository root). The owner can change the path with **Change**, and how the repository is reached (**Access**: the workstation default, an API token / CLI login, or an SSH key); the development environment check, the package installs and the agents' build and test commands then run from that folder. After changing it, click **Check again** under the development environment. Research projects need none.
 - **Reference repositories:** other repositories your agents may **read**, in card work and in chats, so they can compare code or look up how something is done elsewhere. The owner picks them under **Add a reference repository**: the repositories of the organization's other projects (organization Owners and Admins see every project's repositories, everyone else the projects they belong to, listed under **Projects**), or **any repository cloned on one of your workstations**, even one that is not in a project (listed under **On <workstation name>**; a clone without a remote shows as "no remote"). **Remove** takes one away. Nothing is added on its own: only what you pick is opened. The agents get them read-only on every workstation that has them cloned: they cannot change them, and secret files inside (`.env` files, keys, certificates) stay blocked. Every repository you do not pick stays blocked, and so does everything else on the workstation, including this platform's own code.
 - **MCP servers:** external tools such as Jira or Confluence for your agents, taken from the **Claude Code plugins** installed and enabled on your workstation (the runner reports them; nothing secret is sent). Only the **organization Owner** can grant a server to a project, under **Grant an MCP server**; **Remove** takes it away; everyone on the project can read the list. Two things are needed before an agent can use a server: the grant here **and** the server in the agent's tool permissions, either through a custom role (Organization, Roles, "What it may do", "External tools") or, for any hired agent including the built-in roles, the **External tools (MCP)** switches on its card on the Agents page (see "External tools (MCP)" under the Agents page; only the Owner can switch them on). Agents then work with the access your signed-in plugin has, so a server whose tools can write, send or delete lets an agent change data in that service as you. Each server carries a warning (judged from its tool names when they are known, otherwise a general one): prefer read-only use and grant such servers only to roles you trust with it. The tools an agent called are listed on the card under **External tools used**. The DevOps engineer is not affected. Claude.ai connectors and servers you added by hand are not offered yet.
+- **Code map for agents:** the status of the project's code map, and **Index again** (4.3a).
 - **Architect:** whether new cards are investigated and designed before they are built (off by default), whether the latest main branch is merged first (on by default) and where the architect's reports go (4.20).
 - **Commit as:** the name and e-mail every commit of the project carries, so the work reads as yours. Read-only work (planning, reviews) never needs one. Leave it empty to use the repository's own git setting, then your workstation's global one. The page shows which one each workstation uses; with none set, nothing is committed and the desk says so. Agents never commit under their own names.
 
@@ -460,11 +463,44 @@ What you will find there:
 
 > **Watch out:** removing a person from their last project hands their agents back to you (they need a new home on one of your workstations). Cards those agents held go back into the queue.
 
-**Vaults.** A vault is a git repository of notes that syncs to your workstations. Agents read it (never write it directly) in card work, chats, questions and the BA's tasks. There are two kinds: the **organization vault** (your organization's knowledge, including your interests under `interests/`, shared among Owners and Admins) and a **project vault** (shared with the project's members; a project without one reads the organization vault). Register them under **Vaults** in the sidebar. The address must not contain a password or token. Use an SSH key or a credential helper on the workstation instead.
+**Vaults.** A vault is a folder of notes. Most are git repositories that sync to your workstations; a project's vault can also be a local folder (see "Project vaults and the code map" below). Agents read it (never write it directly) in card work, chats, questions and the BA's tasks. There are two kinds: the **organization vault** (your organization's knowledge, including your interests under `interests/`, shared among Owners and Admins) and a **project vault** (shared with the project's members). Agents read a project's git vault first, then the organization vault, then the project's local folder. Register git vaults under **Vaults** in the sidebar. The address must not contain a password or token. Use an SSH key or a credential helper on the workstation instead.
 
 ![Vaults](guide/assets/vaults.jpg)
 
 > **In the app:** Help, "Projects" (`/help/projects`) and "Ledger and vaults" (`/help/ledger-and-vaults`).
+
+### 4.3a Project vaults and the code map
+
+**Every project has a vault.** It is created with the project. A vault is one of two kinds of storage:
+
+- **Git (recommended).** A git repository. The vault sync commits and pushes it, so a copy lives on your git host.
+- **Local folder.** A folder on the Owner's primary workstation (the first one you paired). Nothing syncs it and it has no
+  other copy. The Vaults page says so. Back it up yourself: copy it to a second disk or a private repository on a schedule.
+  A folder inside OneDrive, iCloud, Dropbox or Google Drive is only as safe as that sync tool.
+
+To move a local vault to git, register a git repository for the project. The folder is kept (renamed, not deleted) and the
+repository is cloned in its place. If the Owner has no workstation yet, the vault is created when the first one connects.
+
+> **Good to know:** Guildwise uses the git vault for knowledge first, then the organization vault, then the local folder.
+
+**The code map.** Each project can have a map of its code and docs (a project graph). A workstation that holds the
+repository builds it, and it is kept in the project vault under `graph/`. Agents use it to find where a thing is and what
+touches it, so they read fewer files. A card's brief gets a short "Graph context" section when the map knows the card's
+areas, and agents can ask the map with `aom graph` (where is it, what calls it, what does a change reach).
+
+The map is built when a workstation that holds the repository connects and the project has no map yet, after each merge, and when you press **Index again**
+in project settings (under **Code map for agents**). The panel shows, per repository, one of: *not indexed yet*,
+*indexing*, *indexed* (with the number of nodes and links, the modules, the commit and the time) or *could not index*. A
+failure names its cause: no workstation holds a clone, the vault is not reachable from the workstation, the working branch
+has no commit yet, the model usage limit was reached (it is tried again), or the indexer stopped (see the workstation's log).
+Building the map uses no model, so it costs no tokens.
+
+> **Trust:** Your code and its code map stay on your workstation and in your project vault. They never go to Guildwise HQ.
+> The server keeps only the status shown in the panel (counts, the commit, the time) and the work it already tracks (cards,
+> decisions, merges). Nothing derived from your code, not even a module name, is sent.
+
+To measure whether the map saves tokens, one card in five runs without it for four weeks after a project's first index. See
+"Code map: what it saved" under 4.6.
 
 ### 4.4 Agents, hiring and allow-lists
 
@@ -613,6 +649,22 @@ Setting a budget below what was already spent pauses the project at once. Member
 **Value report.** At the top of the Costs page: "This month: 42 cards, ~168 hours of work, $84 usage, ~80x return", the change against last month, and **Next best actions** (cards that have not moved for days, agents that fail often, projects with no work). The hours are an estimate of what a person would have needed, by card type; Owners and Admins can change them under **Adjust the estimates**. **Export value report (CSV)** downloads it.
 
 ![The value report at the top of the Costs page](guide/assets/value-report.jpg)
+
+**Code map: what it saved.** The Costs page has a panel with this name. It compares finished cards that ran with the code map
+against the one card in five that ran without it (the holdout, chosen by a hash of the card's id, for four weeks after a
+project's first index). For each group it shows the cards, the median billed input tokens with the middle half, and the
+median searching before the first edit and the median number of search calls. Only numbers are kept.
+
+The panel states a saving (for example "used 25% fewer billed input tokens", with the likely range) only when all of these
+hold:
+
+- at least 10 finished cards in each group;
+- the likely range of the difference lies entirely below zero, so chance does not explain it;
+- no quality measure is worse with the map: rework rounds, changes requested, tester failures, days to done, or cost per
+  card.
+
+Otherwise the panel says why no saving is claimed (for example "not enough finished cards yet", or "the cards with the
+map did worse on a quality measure"). Until then it shows the numbers only.
 
 **Monday briefing.** Every Monday at 08:00 (organization time) you get an e-mail with what was finished, what waits on you, what is blocked and the health of your agents and workstations; Owners and Admins also get spend against budget and the value report. Switch it off under **Settings, Monday briefing**.
 
@@ -1486,6 +1538,8 @@ Press **?** (when not typing in a field) for the list of shortcuts. **Ctrl+K** o
 | See how the team performs | **Metrics** |
 | See and control spend | **Costs** (Owners and Admins) |
 | Time zone, picture, two-factor, BA reporting, expert mode for code changes, weekly blog digest | **Settings** (your avatar menu, Your settings) |
+| Link projects to each other (for the CEO's routing) | **Organization**, Project links tab (Owners and Admins) |
+| See a project's code map | **Projects**, then the project's **Settings**, Code map for agents |
 | Members, invitations, plan, billing | **Organization** (bottom of the sidebar) |
 | Help, glossary, contact us | **Help** |
 

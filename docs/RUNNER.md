@@ -363,6 +363,8 @@ worktrees/
 runs/
   <envId>/                      one run environment ("Run a branch"): state.json, <service>.log (+ .1), steps/
 mock-state/                     per-card attempt counters for mock script (test only)
+vaults/<vaultId>/               local vault folders (storage "local"; not synced, see "Project graphs")
+graph-cache/<repoKey>/          the project graph indexer's per-file cache (rebuildable, see "Project graphs")
 sessions.json                   the Claude sessions this runner started (agent, folder, start, context size): what a resume request is checked against
 logs/
   runner.log                    JSON Lines log of runner events
@@ -645,6 +647,18 @@ aom run status | aom run logs <service|step> [--lines N]
 aom run ready [--notes "<text>"]                        every wanted service is healthy: save the plan
 aom run fail --reason "<why>"                           give up: the environment ends as failed
 ```
+
+**Code map (card shifts with a graph, and chats; see "Project graphs"):**
+```sh
+aom graph query "<words>" [--budget <tokens>]          subgraph for a question (default budget 1,500 tokens)
+aom graph path <a> <b>                                 shortest chain of links (at most 20 hops)
+aom graph explain <node>                               one node, its place and up to 40 links
+aom graph impact <file or symbol> [--depth <1-4>]      callers and callees (default depth 2, at most 60 nodes)
+```
+Answers come from the project vault on this workstation (no server round trip) and are fenced as untrusted data. Each
+link is tagged `[E]` (stated by the code), `[I]` (inferred by name) or `[A]` (ambiguous, several targets): read the file
+before you act on an `[I]` or `[A]` link. Chats get `graph query` and `graph explain` only. Shifts in the holdout arm
+get no "Graph context" section, and their `aom graph` calls answer "not available for this work".
 
 **Builder/researcher shifts (To do, Rework, Research):**
 ```sh
@@ -1222,6 +1236,12 @@ A refusal is exit code 1; a recommendation is not an error. A wake shift ends wi
 --summary "..."` (outcome `ceo_done`) or, for the daily review, `aom ceo report --summary-file <md>` (outcome `ceo_report`).
 The mock runtime has a scripted CEO (`mock-agent` in `ceo` mode, and a mock CEO chat) for the simulated workstation and the
 tests; it drives the same verbs.
+
+**`aom ceo route "<request>"` and `aom ceo route --drafts`** (read-only, organization scope, CEO shifts and the owner's CEO
+chat). The server only passes the request on; the runner answers from the organization graph (`org/graph/` in the
+organization vault on this workstation, see "Project graphs"). `route` lists candidate projects and areas for the request,
+each with its reason, in at most 800 bytes. `route --drafts` lists the links the code suggests that the owner has not
+confirmed yet, in at most 1.8 KB. Retired projects never appear. The CEO judges; the graph only ranks.
 
 ### Reference repositories and other read-only folders
 
@@ -2030,6 +2050,109 @@ Vault writes are staged and included in the next sync commit.
 - **Project vault**: shared with project members
 
 A builder on a work-domain card sees only the work vault; personal cards see only personal.
+
+## Project graphs (the code map)
+
+The project graph is a derived index of a repository's code and docs: the "code map" that agents query with `aom graph`.
+It is built on the workstation that holds the clone, kept in the project vault, and never sent to Guildwise HQ. Design:
+`docs/design/project-graphs.md`. Architecture: `docs/ARCHITECTURE.md` section 36. Code: `apps/runner/src/graph/`.
+
+### What the indexer reads and skips
+
+- It needs a clone with an `origin` remote on this workstation. It reads the commit through the git object store
+  (`git ls-tree`, `git cat-file --batch`), never the working tree. It calls no model and makes no network request.
+- Skipped before any file is read: sensitive names (`.env*` except templates, keys and certificates, credential-like data
+  files, `.ssh`, `.aws` and similar folders), vendored and build folders (`node_modules`, `vendor`, `dist`, `bin`, `obj`,
+  `.venv`, `venv`), binaries, generated files, and files over 1 MB.
+- Code: TypeScript and TSX, JavaScript, Python, Go and C# give symbols, imports and calls. Other languages give file and
+  module nodes only. Markdown gives headings and links.
+- Each link has a confidence: `EXTRACTED` (an import that resolves exactly), `INFERRED` (a call matched by name inside the
+  imported files), `AMBIGUOUS` (2 to 5 candidates, all listed). No candidate, or more than five, means no edge.
+- The same commit, indexer version and grammar versions give the same bytes. A file that fails to parse drops its symbols
+  and is counted in the manifest; the rest of the graph is kept.
+
+### Where the graph is stored
+
+The project graph is the `graph/` folder inside the project vault folder. The organization graph is `org/graph/` inside the
+organization vault.
+
+```
+graph/
+  manifest.json                       schema and indexer versions, repo keys, commits, counts
+  modules.md                          navigation summary: top modules, entry points, card counts
+  work.md                             card and merge references per module (no bodies)
+  repos/<repoKey>/<module>.jsonl      nodes and edges of one module, sorted by id
+  repos/<repoKey>/_edges.jsonl        links between modules
+  repos/<repoKey>/_work.jsonl         merge (card) links to modules
+  repos/<repoKey>/communities.json    module clusters and their labels
+```
+
+- `repoKey` is the first 12 hex characters of the SHA-256 of the normalised remote URL. Ids use paths relative to the repo
+  root, so they are the same on every machine.
+- The files are sorted and written only when their bytes change. An unchanged commit writes nothing, so it makes no vault
+  commit.
+- Above `maxExportNodes` (default 50,000) the vault keeps `modules.md`, the manifest and the module-level shards. Symbol
+  shards stay in the local cache.
+- Local cache: `<data dir>/graph-cache/<repoKey>/`. It holds per-file facts keyed by blob id and can be deleted; the next
+  index rebuilds it.
+
+### When it is (re)built
+
+- `graph.index` runs when a workstation that holds the clone connects and the project has no graph yet, when the server
+  requests one, and on **Index again** in project settings.
+- `graph.update` runs when a card merges. The runner diffs the indexed commit against the merge commit, parses only the
+  changed files and rewrites only the shards that changed. A force-push or rebase that removes the indexed commit from
+  history causes a full re-index.
+- Communities are recomputed every 10th merge. Between those, `communities.json` keeps the last result.
+- Conflicts in generated `graph/` files during vault sync are resolved by the runner (the remote side wins, then the graph
+  is rebuilt from the clones). They never raise a desk item.
+
+### Local vaults
+
+A vault with storage `local` is a plain folder at `<data dir>/vaults/<vaultId>`, marked by a `.aom-local-vault` file. It has
+no remote, no sync and no commits.
+
+- The runner logs one warning per folder: the folder is not synced, so the owner backs it up. If the folder sits under
+  OneDrive, iCloud Drive, Dropbox or Google Drive, the warning names that tool. The runner never runs `git init`.
+- Only the workstation that holds the folder can read the graph. Other workstations get no graph unless they hold the vault.
+- When a git repository is registered for the vault, the runner moves the folder aside as `<vaultId>.was-local-<timestamp>`
+  (kept, not deleted) and clones the repository in its place.
+
+### Organization graph
+
+Built by the runner on the workstation that holds the organization vault, as `org/graph/`: `projects.jsonl` (project names,
+area names and package names; no symbols, files or lines), `links.jsonl`, `drafts.md` and `manifest.json`. Links derived from
+code are drafts. They stay on the workstation and count for routing only after the owner asserts them (see the Project
+links tab in `docs/USER-GUIDE.md`). `aom ceo route` reads this graph (see "The CEO shift").
+
+### Turning it off
+
+Server setting `AOM_PROJECT_GRAPHS` (default on). When it is off, new projects get no vault from the graph code, nothing is
+indexed, no graph is offered to agents, and the organization graph is not built.
+
+### Parser and bundled grammars
+
+- Parser: `@vscode/tree-sitter-wasm` 0.3.1 (MIT), pinned exactly as a devDependency in `apps/runner/package.json`. It is the
+  tree-sitter runtime as WASM, so there is no native module and no install script.
+- Grammars: TypeScript, TSX, JavaScript, Python, Go and C# (all MIT).
+- `apps/runner/tsup.config.ts` runs `scripts/copy-grammars.mjs` after every build. It copies these into `dist/grammars/`:
+  `tree-sitter.cjs` (the runtime; `.cjs` because the runner package is `type: module`), `tree-sitter.wasm`,
+  `tree-sitter-typescript.wasm`, `tree-sitter-tsx.wasm`, `tree-sitter-javascript.wasm`, `tree-sitter-python.wasm`,
+  `tree-sitter-go.wasm` and `tree-sitter-c-sharp.wasm`. Nothing is fetched at install time.
+- Licences: `apps/runner/THIRD_PARTY_NOTICES` lists each shipped file with its origin, copyright and licence text. The copy
+  script also places it at `dist/THIRD_PARTY_NOTICES`, so the release tarball carries it at its root. Update it when a grammar
+  is added or changed.
+- Size: the packaged grammars add about 3.4 MB to the runner tarball.
+
+### Checking a packaged runner
+
+```
+aom-runner graph-check <repo> [--out <dir>]
+```
+
+Indexes a clone into a scratch folder (or `--out`) and prints the file, node, edge and module counts, the time and the commit.
+It writes no vault. It exits 1 when the parser fails on any file. On the reference laptop (2026-10-19) a cold index of this
+repository (2,176 files) took about 6 s and gave 12,300 nodes and 27,300 edges in 8 modules.
 
 ## Simulated workstation
 

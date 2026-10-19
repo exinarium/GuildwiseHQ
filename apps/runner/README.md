@@ -2,7 +2,7 @@
 
 The Guildwise HQ runner: a small Node process that runs on a workstation, connects out to the server over a WebSocket and runs agent shifts (Claude Code or the token-free mock runtime) inside git worktrees. It ships two binaries:
 
-- `aom-runner`: pair, start, status, doctor, repos.
+- `aom-runner`: pair, start, status, doctor, repos, graph-check.
 - `aom`: the command an agent runs inside a shift to read its card and report back (talks to the runner over a local, per-shift-token HTTP endpoint).
 
 Requires Node 22 and git >= 2.40. Design: `docs/ARCHITECTURE.md` sections 11 to 13.
@@ -29,9 +29,25 @@ outbox/              pending acked messages, one JSON file per message id
 bin/aom, bin/aom.cmd shims (prepended to PATH inside shifts)
 agents/<agentId>/    home/ (agent HOME + .gitconfig identity), claude/ (CLAUDE_CONFIG_DIR), scratch/
 worktrees/<KEY>/<REF>/   git worktrees on branch aom/<ref>-<slug>
+vaults/<vaultId>/    local vault folders (storage "local": not synced; the owner backs them up)
+graph-cache/<repoKey>/   project graph indexer cache (rebuildable)
 mock-state/          per card+stage attempt counters used by the mock script
 logs/runner.log, logs/shifts/<shiftId>.jsonl   raw runtime stream per shift
 ```
+
+## Project graph (code map)
+
+The runner indexes the repositories this workstation holds with tree-sitter (WASM, MIT), writes the graph into the
+project vault (`graph/`) and answers `aom graph` and `aom ceo route` from memory. Nothing from the code leaves the
+workstation. Design: `docs/design/project-graphs.md`. Operator notes: `docs/RUNNER.md`, "Project graphs (the code map)".
+
+- Grammars: `scripts/copy-grammars.mjs` runs after every build (`tsup.config.ts`, `onSuccess`) and copies the runtime and
+  the TypeScript (with TSX), JavaScript, Python, Go and C# grammars into `dist/grammars/`. The parser is pinned in
+  `package.json`.
+- Licences: `THIRD_PARTY_NOTICES` (here, and copied to `dist/` and the tarball root) carries the copyright and licence
+  text of each shipped file. Keep it in step with `copy-grammars.mjs`.
+- Check a build: `node dist/aom-runner.mjs graph-check <repo>` indexes a clone into a scratch folder, prints the counts
+  and writes no vault.
 
 ## Pairing and starting
 
