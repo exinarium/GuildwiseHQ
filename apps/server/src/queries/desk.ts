@@ -18,7 +18,7 @@ import { phaseDeskBlock } from './phases.ts';
 const SELECT = `
 SELECT d.*, c.ref AS card_ref, c.title AS card_title, c.stage AS card_stage, c.status AS card_status,
        c.owner_user_id AS card_owner, c.decision_policy AS card_policy, p.key AS project_key, p.merge_large_without_approval AS project_merge_large_ok,
-       a.name AS agent_name, u.display_name AS answered_by_name, aa.name AS answered_by_agent_name,
+       a.name AS agent_name, u.display_name AS answered_by_name, aa.name AS answered_by_agent_name, aa.role_key AS answered_by_agent_role,
        u.avatar_kind, u.avatar_seed, u.avatar_style, u.avatar_image_id,
        (SELECT i.id FROM intakes i WHERE i.mapping_desk_item_id = d.id) AS intake_id,
        (SELECT json_build_object('agentName', ca.name, 'reason', x.reason, 'confidence', x.confidence, 'undoable', (x.status = 'done' AND x.inverse IS NOT NULL))
@@ -150,6 +150,7 @@ export function toDeskDto(
     answeredByAvatar: r.answered_by ? userAvatarOf(r) : null,
     answeredByAgentId: r.answered_by_agent_id ?? null,
     answeredByAgentName: r.answered_by_agent_name ?? null,
+    answeredByAgentRole: r.answered_by_agent_role ?? null,
     escalationTrail: r.escalation_trail ?? [],
     hint:
       r.status === 'open' && r.subkind === 'large_merge' && r.project_merge_large_ok

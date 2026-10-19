@@ -8,6 +8,7 @@ import { stageStyle } from '../lib/stages.ts';
 import { ageLabel } from '../lib/time.ts';
 import { useMediaQuery } from '../lib/useMediaQuery.ts';
 import { BackoffBadge } from './BackoffBadge.tsx';
+import { DesignHeldBadge } from './DesignHeldBadge.tsx';
 import { BlockedReasonNotice, BudgetNotice, HygieneNotice } from './BoardCardNotices.tsx';
 import { AgentAvatar } from './Face.tsx';
 import { MobileBoard } from './MobileBoard.tsx';
@@ -192,6 +193,7 @@ export function CardTile({
           )}
         </div>
       </Link>
+      <DesignHeldBadge held={card.designHeld} />
       <BlockedReasonNotice reason={card.blockedReason} />
       <BudgetNotice budget={card.budget} projectId={projectId} />
       <HygieneNotice findings={card.hygiene} projectId={projectId} />

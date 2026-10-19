@@ -110,6 +110,8 @@ export const BoardCardSchema = z.object({
   workability: WorkabilitySchema.optional(),
   /** Loop breaker: the card is held back until `until` after `failures` failed shifts. */
   backoff: z.object({ until: IsoTime, failures: z.number().int() }).nullable().optional(),
+  /** The architect's design is done but the card waits for its dependencies (`waitingFor`: refs not landed yet; empty: re-check queued). */
+  designHeld: z.object({ waitingFor: z.array(z.string()) }).optional(),
   /** Present on a `blocked` card: the reason, so the card can say it. */
   blockedReason: BlockedReasonSchema.nullable().optional(),
   /** Open hygiene findings on this card's repository (absent when none). */

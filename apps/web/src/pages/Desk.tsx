@@ -312,13 +312,7 @@ export function Desk() {
                         {i.answeredByName}
                       </span>
                     )}
-                    {i.answeredByAgentName && (
-                      <span className="inline-flex items-center gap-1.5" data-testid="answered-by">
-                        by
-                        <AgentAvatar agentId={i.answeredByAgentId} name={i.answeredByAgentName} size={18} />
-                        {i.answeredByAgentName} (without reaching the desk)
-                      </span>
-                    )}
+                    <AgentAnsweredBy item={i} />
                     <span>· {formatDateTime(i.answeredAt)}</span>
                   </p>
                   {i.answer && <p className="mt-1 text-sm whitespace-pre-wrap text-muted">{i.answer}</p>}
@@ -950,5 +944,27 @@ function ResolveButtons({ item }: { item: DeskItemDto }) {
         </p>
       )}
     </div>
+  );
+}
+
+/** Who an agent (not the manager) answered a question as: a CEO answer is labelled a CEO decision. */
+export function agentAnswerLabel(
+  item: Pick<DeskItemDto, 'answeredByAgentName' | 'answeredByAgentRole'>,
+): string | null {
+  if (!item.answeredByAgentName) return null;
+  return item.answeredByAgentRole === 'ceo'
+    ? `CEO decision · ${item.answeredByAgentName}`
+    : `Answered by ${item.answeredByAgentName}${item.answeredByAgentRole ? ` (${item.answeredByAgentRole})` : ''}`;
+}
+
+export function AgentAnsweredBy({ item }: { item: DeskItemDto }) {
+  const label = agentAnswerLabel(item);
+  if (!label) return null;
+  return (
+    <span className="inline-flex items-center gap-1.5" data-testid="answered-by">
+      <AgentAvatar agentId={item.answeredByAgentId} name={item.answeredByAgentName ?? ''} size={18} />
+      <Badge tone={item.answeredByAgentRole === 'ceo' ? 'violet' : 'neutral'}>{label}</Badge>
+      <span>(without reaching the desk)</span>
+    </span>
   );
 }

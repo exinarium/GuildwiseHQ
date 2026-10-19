@@ -40,6 +40,7 @@ import {
   spendBriefs,
 } from '../costs/index.ts';
 import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
+import { landedSql } from '../dispatcher/dependencies.ts';
 import { dependencyStates } from '../dispatcher/dependencies.ts';
 import { notFound } from '../errors.ts';
 import { cardPhaseRef } from './phases.ts';
@@ -561,6 +562,19 @@ export async function getBoard(
   const columns = boardColumnsWith(wf.definition as WorkflowDefinition, others);
   const workability = await cardWorkability(ctx, cards);
   const notices = await boardNotices(ctx, userId, project, cards);
+  // Designs made before their dependencies landed: the refs still not landed (computed now, so a landed one drops out).
+  const heldIds = cards
+    .filter((c) => (c.design_review as { state?: string } | null)?.state === 'waiting')
+    .map((c) => c.id as string);
+  const heldRefs = new Map<string, string[]>();
+  if (heldIds.length > 0)
+    for (const d of await rows(
+      ctx.pool,
+      `SELECT d.card_id, dc.ref FROM card_dependencies d JOIN cards dc ON dc.id = d.depends_on_card_id
+        WHERE d.card_id = ANY($1::uuid[]) AND NOT ${landedSql('dc')} ORDER BY dc.number`,
+      [heldIds],
+    ))
+      heldRefs.set(d.card_id, [...(heldRefs.get(d.card_id) ?? []), d.ref]);
   // What each card has cost (members of the organization only; amounts are the organization's business).
   const spendOf = (await orgRoleOf(ctx.pool, userId, project.org_id))
     ? await spendBriefs(
@@ -674,6 +688,7 @@ export async function getBoard(
         : {}),
       origin: c.origin,
       backoff: backoffOf(c, ctx.clock.now()),
+      ...(heldIds.includes(c.id) ? { designHeld: { waitingFor: heldRefs.get(c.id) ?? [] } } : {}),
       phase: c.phase_id ? { id: c.phase_id, ref: c.phase_ref, assignment: c.phase_assignment } : null,
       ...(notices.blocked.has(c.id) ? { blockedReason: notices.blocked.get(c.id) as BlockedReason } : {}),
       ...(notices.hygiene.has(c.id) ? { hygiene: notices.hygiene.get(c.id) as CardHygiene[] } : {}),

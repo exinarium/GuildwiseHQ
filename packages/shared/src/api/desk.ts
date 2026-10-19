@@ -76,6 +76,8 @@ export const DeskItemDtoSchema = z.object({
   intakeId: z.uuid().nullable().optional(),
   /** M7: set when an agent (not the manager) answered the question. */
   answeredByAgentName: z.string().nullable().optional(),
+  /** The role of that agent (`ceo`: the item shows as a CEO decision). */
+  answeredByAgentRole: z.string().nullable().optional(),
   /** M5: the items of a digest rating item (`kind 'rating'`), for rating them in place. */
   digestItems: z.array(DigestItemDtoSchema).optional(),
   /** The interest a digest rating item belongs to (a link to its digest tab). */

@@ -212,6 +212,15 @@ describe('rule 2: the architect designs before the dependencies landed', () => {
     const dto = (await ok<any>(w.t.req('GET', `/api/cards/${dep.id}`, { cookie: cookie() }))).card;
     expect(dto.designReview).toMatchObject({ state: 'waiting', dependencies: [base.ref], result: null });
     expect(dto.designReview.assumptions).toHaveLength(2);
+    // the board names the dependencies still not landed; one that has landed drops out
+    const boardCard = async () =>
+      (await ok<any>(w.t.req('GET', `/api/board?projectId=${w.projectId}`, { cookie: cookie() }))).columns
+        .flatMap((c: any) => c.cards)
+        .find((c: any) => c.id === dep.id);
+    expect((await boardCard()).designHeld).toEqual({ waitingFor: [base.ref] });
+    await q(`UPDATE cards SET merged_into_working_at=now() WHERE id=$1`, [base.id]);
+    expect((await boardCard()).designHeld).toEqual({ waitingFor: [] });
+    await q(`UPDATE cards SET merged_into_working_at=NULL WHERE id=$1`, [base.id]);
     // neither the architect (review) nor the builder gets it while the dependency has not landed
     await idle();
     await idle();
