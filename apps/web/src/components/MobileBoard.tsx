@@ -7,6 +7,7 @@ import { DEFAULT_PRIORITY, priorityLabel, priorityLevel } from '../lib/priority.
 import { stageStyle } from '../lib/stages.ts';
 import { ageLabel } from '../lib/time.ts';
 import { BlockedReasonNotice } from './BoardCardNotices.tsx';
+import { DesignHeldBadge } from './DesignHeldBadge.tsx';
 import { MoveToSheet } from './cards/MoveToSheet.tsx';
 import { AgentAvatar } from './Face.tsx';
 import { cx } from './ui/cx.ts';
@@ -98,6 +99,7 @@ function CardRow({
             </span>
           )}
         </div>
+        <DesignHeldBadge held={card.designHeld} />
         <BlockedReasonNotice reason={card.blockedReason} />
       </Link>
       <button
