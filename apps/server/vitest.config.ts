@@ -21,6 +21,8 @@ export default defineConfig({
       AOM_MOCK_UI: 'true',
       // Suites written for the code workflow keep it as the default of a new project; the lean team suites keep code v6 active (createTestApp lean: true).
       AOM_DEFAULT_WORKFLOW: 'code',
+      // Project graphs are a feature of their own tests: the other suites keep projects without an automatic local vault.
+      AOM_PROJECT_GRAPHS: 'false',
       LOG_LEVEL: process.env.TEST_LOG ? 'info' : 'silent',
     },
   },

@@ -25,6 +25,7 @@ import { workflowView } from '../commands/cards.ts';
 import { effectiveCompletionAction } from '../commands/completion.ts';
 import { projectWaivesMergeApproval } from '../commands/devops-routing.ts';
 import { scoutCandidates, seenUrls, tasteSeedFor } from '../commands/feeds.ts';
+import { graphScopeFor } from '../commands/graph.ts';
 import { grantedMcpServers } from '../commands/mcp-servers.ts';
 import { riskOf } from '../commands/review-risk.ts';
 import { runBriefFor } from '../commands/runs.ts';
@@ -563,6 +564,7 @@ export async function buildShiftStart(ctx: Ctx, claim: ClaimResult): Promise<Shi
       brief;
   // plugin MCP servers the project's Owner granted (names only; the runner holds the configuration)
   const mcp = await grantedMcpServers(ctx.pool, brief.project.id);
+  const graph = await graphScopeFor(ctx, brief.project.id, brief.card.id);
   const resume = await affinityResume(ctx, claim, brief);
   return {
     shiftId: claim.shiftId,
@@ -575,6 +577,7 @@ export async function buildShiftStart(ctx: Ctx, claim: ClaimResult): Promise<Shi
     orgId: agent.org_id,
     maxShiftMinutes: claim.maxShiftMinutes,
     vault: vault ? { vaultId: vault.id, kind: vault.kind, folder: vault.folder } : null,
+    ...(graph ? { graph } : {}),
     // The card's own repository is its worktree; the project's reference repositories are opened besides, and every
     // repository of the organization for a role with `readOrgRepos` (the architect).
     readRepos: await shiftReadRepos(ctx, agent, brief.project.id, ws?.user_id, claim.worktree?.repoId),

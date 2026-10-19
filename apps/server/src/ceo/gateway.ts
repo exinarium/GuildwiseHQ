@@ -254,6 +254,15 @@ export async function ceoRpc(ctx: Ctx, shift: Row, params: Record<string, unknow
         return [true, { text: await search(ctx, orgId, rpc) }];
       case 'costs':
         return [true, { text: await costs(ctx, orgId, rpc.days) }];
+      case 'route':
+        // Read-only, and answered by the workstation from the organization graph in the organization vault: derived
+        // links never reach the server, so there is nothing to answer from here (docs/design/project-graphs.md section 8).
+        return [
+          true,
+          {
+            text: 'The organization graph is read on the workstation that holds the organization vault; it is not available from here.',
+          },
+        ];
       case 'act': {
         const r = await runAction(env, rpc, origin);
         return [true, r];

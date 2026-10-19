@@ -19,6 +19,7 @@ export * from './costs.ts';
 export * from './desk.ts';
 export * from './devops.ts';
 export * from './digest.ts';
+export * from './graph.ts';
 export * from './hr.ts';
 export * from './installer.ts';
 export * from './intake.ts';

@@ -25,6 +25,12 @@ import {
   GitSshPayloadSchema,
   RepoAccessPayloadSchema,
 } from '../forge/index.ts';
+import {
+  GraphIndexPayloadSchema,
+  GraphOrgPayloadSchema,
+  OrgGraphScopeSchema,
+  ShiftContextMetricsSchema,
+} from '../graph/index.ts';
 import { SWEEP_QUERY_MAX_PATHS, WorktreesSweepPayloadSchema } from '../hygiene/index.ts';
 import { PROTOCOL_VERSION, uuidv7 } from '../ids.ts';
 import { IntakeContextSchema, QuestionShiftSchema } from '../intake/index.ts';
@@ -499,6 +505,18 @@ export type ShiftVault = z.infer<typeof ShiftVaultSchema>;
 export const ChatVaultSchema = ShiftVaultSchema.extend({ folder: VaultFolderSchema.optional() });
 export type ChatVault = z.infer<typeof ChatVaultSchema>;
 
+/**
+ * Where the project's code graph is (docs/design/project-graphs.md section 7): the vault and folder the runner reads it
+ * from, and the measurement arm. `off` is the holdout (section 11): no "Graph context" section and no `aom graph` verbs.
+ */
+export const GraphScopeSchema = z.object({
+  vaultId: VaultIdSchema,
+  /** `projects/<name>` inside the vault; the graph is in `<folder>/graph/`. */
+  folder: VaultFolderSchema,
+  arm: z.enum(['on', 'off']),
+});
+export type GraphScope = z.infer<typeof GraphScopeSchema>;
+
 export const ChatContextSchema = z.object({
   /** The organization of the chat (the runner resolves the organization source folder with it). */
   orgId: z.uuid().optional(),
@@ -520,8 +538,12 @@ export const ChatContextSchema = z.object({
   mcpServers: z.array(z.string()).optional(),
   /** The knowledge vault this chat may read (read-only; absent: none for this workstation). */
   vault: ChatVaultSchema.optional(),
+  /** The project's code graph for this conversation (read-only `aom graph` verbs). Absent: none. */
+  graph: GraphScopeSchema.optional(),
   /** Set for the owner's chat with the CEO: persona, standing instructions, rules and the policy in words. */
   ceo: z.object({ brief: z.string() }).optional(),
+  /** The owner's chat with the CEO: where the organization graph is (`aom ceo route`). Absent: none. */
+  orgGraph: OrgGraphScopeSchema.optional(),
   /**
    * The standing orders that bind this conversation's agent: the organization's plus those of the project in
    * context (DevOps: every project of the organization). Additive; an older server sends none.
@@ -719,6 +741,9 @@ export const RunnerCommandNameSchema = z.enum([
   'integration.remove',
   'shifts.limit',
   'runner.pin',
+  'graph.index',
+  'graph.update',
+  'graph.org',
 ]);
 export type RunnerCommandName = z.infer<typeof RunnerCommandNameSchema>;
 
@@ -778,6 +803,11 @@ export const CommandPayloadSchemas = {
    * ignores both.
    */
   'runner.pin': z.object({ version: z.string().max(40).nullable() }),
+  /** Project graphs: index a repository into the project vault / bring the graph up to a merge commit (docs/design/project-graphs.md). */
+  'graph.index': GraphIndexPayloadSchema,
+  'graph.update': GraphIndexPayloadSchema,
+  /** Build the organization graph into `org/graph/` of the organization vault (docs/design/project-graphs.md section 8). */
+  'graph.org': GraphOrgPayloadSchema,
 } as const;
 
 /** Announced in `hello.capabilities`-style lists by runners that apply a version pin (`runner.pin`, `welcome.runnerPin`). */
@@ -1105,6 +1135,8 @@ export const ShiftEndedSchema = msg('shift.ended', {
   contextTokens: z.number().int().nonnegative().optional(),
   finalText: z.string().max(4000).optional(),
   guardViolations: z.array(GuardViolation).default([]),
+  /** Additive: how the shift found its way in the code (docs/design/project-graphs.md section 11); numbers only. */
+  context: ShiftContextMetricsSchema.optional(),
 });
 export const RpcRequestSchema = msg('rpc.request', {
   rpcId: z.string().min(1),
@@ -1219,8 +1251,12 @@ export const ShiftStartSchema = msg('shift.start', {
   baTask: BaTaskShiftSchema.optional(),
   /** The CEO agent's wake or daily review (no card, no worktree); the brief carries a placeholder card. */
   ceo: CeoShiftSchema.optional(),
+  /** A CEO shift: where the organization graph is (`aom ceo route`). Absent: none. */
+  orgGraph: OrgGraphScopeSchema.optional(),
   /** M3: the card's vault (its project vault or the organization vault); the runner reads only this vault and passes only it as `--add-dir`. */
   vault: ShiftVaultSchema.nullable().optional(),
+  /** The project's code graph (`arm: 'off'`: the measurement holdout, nothing is offered). Absent: none yet. */
+  graph: GraphScopeSchema.optional(),
   /** The project's reference repositories: read-only for this shift when the workstation has a clone. */
   readRepos: z.array(ReadRepoSchema).optional(),
   localReadRepos: z.array(LocalReadRepoSchema).optional(),

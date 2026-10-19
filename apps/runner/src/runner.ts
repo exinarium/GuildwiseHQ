@@ -57,6 +57,7 @@ import { type ScannedRepo, scanAllRepos, withRemote } from './git/repo-scan.ts';
 import { sweepWorktrees } from './git/sweep.ts';
 import { SyncService } from './git/sync-service.ts';
 import { removeWorktree } from './git/worktrees.ts';
+import { GraphService } from './graph/service.ts';
 import { runRoleSmoke } from './health/role-smoke.ts';
 import { sanitizeError } from './health/runner-error.ts';
 import { ClaudeCredentialStore, claudeFile, resolveClaudeCredential } from './integrations/claude-store.ts';
@@ -218,6 +219,8 @@ export class Runner {
   private readonly poller: IntegrationPoller;
   readonly repoCreator: RepoCreator;
   readonly repoCloner: RepoCloner;
+  /** The project graph: indexes repositories into the project vault and answers `aom graph` (docs/design/project-graphs.md). */
+  readonly graph: GraphService;
   private readonly repoAccess: RepoAccessUpdater;
   /** The key pair for secrets the manager sends (the sudo password) and the store that holds the password. */
   readonly keys: RunnerKeys;
@@ -394,6 +397,9 @@ export class Runner {
       log: this.log,
       transport: { send: (type, payload) => void this.client.send(type, payload) },
       secondMs: opts.vaultSecondMs,
+      // generated graph files that two workstations both wrote: the sync took one side, the indexer rebuilds them
+      onGraphResolved: (vaultId, folders) =>
+        void this.graph.regenerate(vaultId, folders).catch(() => undefined),
     });
     this.toolchains = new ToolchainRegistry(this.paths.toolchains, this.paths.root, () => ({
       toolchainPaths: opts.config.runtimes['claude-code'].toolchainPaths,
@@ -429,6 +435,7 @@ export class Runner {
       onShiftEnded: (shiftId, frameId) => this.restartAfterReply.turnFinished(shiftId, frameId),
       findRepo: (norm) => this.findRepo(norm),
       findLocal: (k) => this.findLocal(k),
+      graph: () => this.graph,
       writeVault: (cmd) => this.vaults.write(cmd),
       http: this.serverHttp,
       rpc: (shiftId, method, params) =>
@@ -484,6 +491,7 @@ export class Runner {
       log: this.log,
       send: (type, payload) => this.client.send(type, payload),
       rpc: (chatId, method, params) => this.rpc(chatId, method, params),
+      graph: () => this.graph,
       external: this.external,
       mcpSignInNote: (granted) => this.mcpSignInNote(granted),
       http: this.serverHttp,
@@ -501,6 +509,13 @@ export class Runner {
       repoRoots: () => this.opts.config.repoRoots,
       forge: () => this.forgeEnv,
       ...(process.env.AOM_GH_BIN ? { ghBin: process.env.AOM_GH_BIN } : {}),
+    });
+    this.graph = new GraphService({
+      paths: this.paths,
+      vaults: this.vaults,
+      findRepo: (n) => this.findRepo(n),
+      version: RUNNER_VERSION,
+      log: this.log,
     });
     this.repoCloner = new RepoCloner({
       repoRoots: () => this.opts.config.repoRoots,
@@ -1327,6 +1342,12 @@ export class Runner {
       } else if (command === 'repos.rescan') {
         await this.rescan();
         done(true, { repos: this.repos.length });
+      } else if (command === 'graph.org') {
+        done(true, await this.graph.buildOrg(CommandPayloadSchemas['graph.org'].parse(payload)));
+      } else if (command === 'graph.index' || command === 'graph.update') {
+        // A repository that cannot be indexed is an answer (ok:true, result.ok:false with a fixed reason code).
+        const p = CommandPayloadSchemas[command].parse(payload);
+        done(true, await (command === 'graph.update' ? this.graph.update(p) : this.graph.index(p)));
       } else if (command === 'vault.configure') {
         this.vaults.configure(CommandPayloadSchemas['vault.configure'].parse(payload));
         done(true, { vaults: this.vaults.configured() });

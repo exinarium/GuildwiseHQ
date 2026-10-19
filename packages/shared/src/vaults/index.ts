@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { VaultEventKind } from '../events/vault.ts';
+import { VaultEventKind, VaultStorage } from '../events/vault.ts';
 import { slugify } from '../ids.ts';
 
 /** `vault.configure`: the full set of vaults one workstation syncs (replace semantics) plus resume requests. */
@@ -12,8 +12,11 @@ export const VaultConfigSchema = z.object({
   kind: VaultEventKind,
   projectId: z.string().optional(),
   name: z.string(),
-  remoteUrl: z.string().min(1),
+  /** Empty for a `local` vault. */
+  remoteUrl: z.string(),
   syncIntervalSec: z.number().int().min(1).max(86_400),
+  /** Absent: a remote repository. A `local` vault is a folder on this workstation that is never cloned, synced or pushed. */
+  storage: VaultStorage.optional(),
 });
 export type VaultConfig = z.infer<typeof VaultConfigSchema>;
 

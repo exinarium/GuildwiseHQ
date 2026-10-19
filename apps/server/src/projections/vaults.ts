@@ -7,8 +7,9 @@ export const vaultProjectors: Record<string, Projector> = {
     const p = (e.event as EventOf<'VaultRegistered'>).payload;
     await exec(
       tx,
-      `INSERT INTO vaults (id, org_id, project_id, kind, name, remote_url, sync_interval_sec, created_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      `INSERT INTO vaults (id, org_id, project_id, kind, name, remote_url, sync_interval_sec, created_at, storage,
+                           local_workstation_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
       [
         p.vaultId,
         p.orgId,
@@ -19,8 +20,18 @@ export const vaultProjectors: Record<string, Projector> = {
         scrubRemoteUrl(p.remoteUrl),
         p.syncIntervalSec,
         e.createdAt,
+        p.storage ?? 'git',
+        p.storage === 'local' ? (p.localWorkstationId ?? null) : null,
       ],
     );
+  },
+  // A local vault's folder is held by one workstation (set when the Org Owner's first workstation claims it).
+  VaultLocalWorkstationSet: async (tx, e) => {
+    const p = (e.event as EventOf<'VaultLocalWorkstationSet'>).payload;
+    await exec(tx, `UPDATE vaults SET local_workstation_id=$2 WHERE id=$1 AND storage='local'`, [
+      p.vaultId,
+      p.workstationId,
+    ]);
   },
   VaultMerged: async (tx, e) => {
     const p = (e.event as EventOf<'VaultMerged'>).payload;
@@ -38,12 +49,22 @@ export const vaultProjectors: Record<string, Projector> = {
   },
   VaultUpdated: async (tx, e) => {
     const p = (e.event as EventOf<'VaultUpdated'>).payload;
-    await exec(tx, `UPDATE vaults SET name=$2, remote_url=$3, sync_interval_sec=$4 WHERE id=$1`, [
-      p.vaultId,
-      p.name,
-      scrubRemoteUrl(p.remoteUrl),
-      p.syncIntervalSec,
-    ]);
+    // `storage` absent: unchanged. A vault that stops being local (a repository was registered for it) loses its workstation.
+    await exec(
+      tx,
+      `UPDATE vaults SET name=$2, remote_url=$3, sync_interval_sec=$4, storage=COALESCE($5, storage),
+              local_workstation_id = CASE WHEN COALESCE($5, storage) = 'local'
+                                          THEN COALESCE($6::uuid, local_workstation_id) ELSE NULL END
+        WHERE id=$1`,
+      [
+        p.vaultId,
+        p.name,
+        scrubRemoteUrl(p.remoteUrl),
+        p.syncIntervalSec,
+        p.storage ?? null,
+        p.localWorkstationId ?? null,
+      ],
+    );
   },
   // workstation_vaults is operational (runner reports): the conflict flag is kept there so the UI can show it.
   VaultSyncConflict: async (tx, e) => {

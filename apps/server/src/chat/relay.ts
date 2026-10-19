@@ -24,6 +24,7 @@ import {
   SYSTEM_ACTOR,
   userActor,
 } from '../commands/common.ts';
+import { graphScopeFor } from '../commands/graph.ts';
 import { intakeContext } from '../commands/intake.ts';
 import { grantedMcpServers, orgGrantedMcpServers } from '../commands/mcp-servers.ts';
 import { vaultForConversation } from '../commands/vaults.ts';
@@ -254,6 +255,10 @@ export class ChatRelay {
         row.org_id,
         row.thread_project_id ? [row.thread_project_id] : [],
       );
+      // The project's code graph (read-only `aom graph` verbs), when it has one.
+      const graph = row.thread_project_id
+        ? await graphScopeFor(ctx, row.thread_project_id, row.thread_card_id)
+        : undefined;
       const context: ChatContext = {
         ...(orders.length > 0 ? { standingOrders: orders } : {}),
         orgId: row.org_id,
@@ -269,6 +274,7 @@ export class ChatRelay {
         ...(localRepos.length > 0 ? { localReadRepos: localRepos } : {}),
         ...(mcpGranted.length > 0 ? { mcpServers: mcpGranted } : {}),
         ...(vault ? { vault } : {}),
+        ...(graph ? { graph } : {}),
         ...(intake ? { intake } : {}),
       };
       const sent = ctx.services.runners.send(

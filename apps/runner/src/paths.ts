@@ -33,6 +33,8 @@ export interface RunnerPaths {
   activeShifts: string;
   /** Toolchains the DevOps engineer registered for the agents (`aom toolchain add`), mode 0600. */
   toolchains: string;
+  /** The project graph's runner-local cache: parsed facts per file, and the shards of a repository too big for the vault. */
+  graphCache: string;
   agentDir(agentId: string): string;
   /**
    * Default worktree location. Project keys are only unique per organization, so the project id (first 8 hex
@@ -61,6 +63,7 @@ export function runnerPaths(root: string): RunnerPaths {
     mockState: join(root, 'mock-state'),
     activeShifts: join(root, 'active-shifts'),
     toolchains: join(root, 'toolchains.json'),
+    graphCache: join(root, 'graph-cache'),
     agentDir: (agentId) => join(root, 'agents', agentId),
     worktreePath: (projectKey, cardRef, projectId) =>
       join(root, 'worktrees', projectId ? `${projectKey}-${projectId.slice(0, 8)}` : projectKey, cardRef),

@@ -8,6 +8,7 @@ import {
   type ShiftBrief,
 } from '@aom/shared';
 import { ceoActive } from '../ceo/state.ts';
+import { graphScopeFor } from '../commands/graph.ts';
 import type { Ctx } from '../context.ts';
 import { one } from '../db/sql.ts';
 import { dedupMatches } from '../queries/ledger.ts';
@@ -136,5 +137,6 @@ export async function buildQuestionShiftStart(
     question,
     // The project's vault (read-only), like a card shift of this project on this workstation.
     vault: await shiftVault(ctx, agent, base.project.id),
+    ...(await graphScopeFor(ctx, base.project.id, base.card.id).then((graph) => (graph ? { graph } : {}))),
   };
 }

@@ -5,9 +5,11 @@ import { migrateCeoBuiltin } from './ceo-builtin.ts';
 import { migrateCeoModels } from './ceo-models.ts';
 import { migrateCeoWorkingBranch } from './ceo-working-branch.ts';
 import { migrateDesignHeldStatus } from './design-held-status.ts';
+import { migrateGraphBackfill } from './graph-backfill.ts';
 import { migrateNoPersonal } from './no-personal.ts';
 import { migrateOrgInboxes } from './org-inboxes.ts';
 import { type DataMigrationEnv, migrateOrgs } from './orgs.ts';
+import { migrateProjectVaults } from './project-vaults.ts';
 import { migratePushBranchRetired } from './push-branch-retired.ts';
 import { migrateRestructure } from './restructure.ts';
 
@@ -31,6 +33,11 @@ export {
   migrateDesignHeldStatus,
 } from './design-held-status.ts';
 export {
+  GRAPH_BACKFILL_MIGRATION,
+  type GraphBackfillReport,
+  migrateGraphBackfill,
+} from './graph-backfill.ts';
+export {
   formatNoPersonalPlan,
   migrateNoPersonal,
   NO_PERSONAL_MIGRATION,
@@ -38,6 +45,11 @@ export {
 } from './no-personal.ts';
 export { migrateOrgInboxes, ORG_INBOXES_MIGRATION } from './org-inboxes.ts';
 export { type DataMigrationEnv, formatPlan, migrateOrgs, ORGS_MIGRATION, planOrgMigration } from './orgs.ts';
+export {
+  migrateProjectVaults,
+  PROJECT_VAULTS_MIGRATION,
+  type ProjectVaultsReport,
+} from './project-vaults.ts';
 export {
   migratePushBranchRetired,
   PUSH_BRANCH_RETIRED_MIGRATION,
@@ -67,6 +79,8 @@ export const DATA_MIGRATIONS: Array<{ name: string; run: (env: DataMigrationEnv)
   { name: 'design-held-status-2026-10', run: (env) => migrateDesignHeldStatus(env) },
   { name: 'ceo-working-branch-2026-10', run: (env) => migrateCeoWorkingBranch(env) },
   { name: 'ceo-builtin-2026-10', run: (env) => migrateCeoBuiltin(env) },
+  { name: 'project-vaults-2026-10', run: (env) => migrateProjectVaults(env) },
+  { name: 'graph-backfill-2026-10', run: (env) => migrateGraphBackfill(env) },
 ];
 
 export async function runDataMigrations(env: DataMigrationEnv): Promise<void> {

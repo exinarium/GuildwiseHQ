@@ -19,6 +19,8 @@ export interface DataMigrationEnv {
   log: (msg: string) => void;
   /** `AOM_INBOUND_DOMAIN`, for the data migration that gives every organisation an inbox. */
   inboundDomain?: string | undefined;
+  /** `projectGraphs.enabled`: false skips the project-vaults data migration (it runs once the setting is on). */
+  projectGraphs?: boolean | undefined;
 }
 
 export interface OrgMigrationPlan {

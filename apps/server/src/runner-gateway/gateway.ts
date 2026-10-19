@@ -13,6 +13,8 @@ import type { WebSocket } from 'ws';
 import { confirmBranchOnEvent } from '../commands/branch-confirm.ts';
 import { SYSTEM_ACTOR, userScope } from '../commands/common.ts';
 import { writeResearchIndex } from '../commands/convert.ts';
+import { onMergeLanded, seedProjectGraphsOfProject } from '../commands/graph.ts';
+import { dispatchOrgGraph } from '../commands/org-graph.ts';
 import { refreshVaultConfig, vaultAudience } from '../commands/vaults.ts';
 import type { Ctx } from '../context.ts';
 import { sha256Hex } from '../crypto.ts';
@@ -227,6 +229,29 @@ export class RunnerGateway {
         for (const s of open) this.stopShift(s.workstation_id, s.id, reason);
         return;
       }
+      case 'ProjectGraphIndexed':
+      case 'ProjectGraphUpdated':
+      case 'OrgGraphLinkAsserted':
+      case 'OrgGraphLinkRetracted':
+      case 'ProjectArchived':
+      case 'ProjectRestored': {
+        // The organization graph is rebuilt from the project graphs and the Owner's links (design section 8).
+        const orgId = (e.event.payload as { orgId?: string }).orgId ?? e.scope?.orgId;
+        if (orgId)
+          await dispatchOrgGraph(ctx, orgId).catch((err) =>
+            ctx.log.warn({ err }, 'could not queue the organization graph build'),
+          );
+        return;
+      }
+      case 'CardFinalized': {
+        // A merge landed: bring the project's code graph to the merge commit (workstation-side, docs/design/project-graphs.md 6).
+        const p = (e.event as EventOf<'CardFinalized'>).payload;
+        if (p.resultRef.mergeCommit)
+          await onMergeLanded(ctx, p.cardId, p.resultRef.mergeCommit).catch((err) =>
+            ctx.log.warn({ err }, 'could not queue the project graph update'),
+          );
+        return;
+      }
       case 'AgentRetired': {
         const p = (e.event as EventOf<'AgentRetired'>).payload;
         const a = await one(ctx.pool, 'SELECT workstation_id FROM agents WHERE id=$1', [p.agentId]);
@@ -252,6 +277,7 @@ export class RunnerGateway {
           (e.event.payload as { vaultId: string }).vaultId,
         ]);
         if (v) await refreshVaultConfig(ctx, await vaultAudience(ctx.pool, v as never));
+        if (v?.project_id) await seedProjectGraphsOfProject(ctx, v.project_id).catch(() => undefined);
         return;
       }
       case 'ProjectShareAccepted':

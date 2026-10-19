@@ -1126,6 +1126,34 @@ export function buildProgram(): Command {
     .option(...pairingOpt)
     .option(...dataDirOpt)
     .action(ceoFullPower);
+  program
+    .command('graph-check <repo>')
+    .description(
+      'index a clone into a scratch folder and print the counts (checks the bundled parser and grammars; writes nothing to a vault)',
+    )
+    .option('--out <dir>', 'write the graph here instead of a temporary folder')
+    .action(async (repo: string, opts: { out?: string }) => {
+      const { mkdtempSync } = await import('node:fs');
+      const { tmpdir } = await import('node:os');
+      const { graphRepoKey } = await import('@aom/shared');
+      const { indexRepository } = await import('./graph/indexer.ts');
+      const out = opts.out ? resolve(opts.out) : mkdtempSync(join(tmpdir(), 'aom-graph-check-'));
+      const r = await indexRepository({
+        repoPath: resolve(repo),
+        repoKey: graphRepoKey(resolve(repo)),
+        repoName: 'check',
+        graphDir: join(out, 'graph'),
+        cacheDir: join(out, 'cache'),
+        indexerVersion: RUNNER_VERSION,
+      });
+      console.log(
+        `indexed ${r.files} files into ${r.nodes} nodes and ${r.edges} edges (${r.modules} modules) in ${r.durationMs} ms at ${r.commit.slice(0, 12)}; output in ${out}`,
+      );
+      if (r.parseFailures > 0) {
+        console.error(`the parser failed on ${r.parseFailures} files: ${r.firstParseFailure}`);
+        process.exitCode = 1;
+      }
+    });
   const repos = program.command('repos').description('manage the folders scanned for git repositories');
   repos
     .command('add <path>')

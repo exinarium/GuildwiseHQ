@@ -76,7 +76,10 @@ export type RuntimeEvent =
   | { kind: 'delta'; text: string }
   | { kind: 'session'; runtimeSessionId: string }
   | { kind: 'progress'; text: string }
-  | { kind: 'tool'; name: string; summary: string }
+  /** `id`: the runtime's id of the call, to match its result (absent: the runtime does not give one). */
+  | { kind: 'tool'; name: string; summary: string; id?: string }
+  /** The result of a tool call: how many bytes of text it returned (counted, never kept). */
+  | { kind: 'toolresult'; id: string; bytes: number }
   | { kind: 'usage'; usage: Usage }
   | { kind: 'final'; text: string }
   | {

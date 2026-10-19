@@ -1,6 +1,8 @@
 # Project graphs and the organization graph
 
-Status: design, 2026-10-19. Branch `lean-team-v3`. Backlog #82. Nothing here is built. Not committed.
+Status: **built through Phase 6** (2026-10-19, branch `lean-team-v3`, backlog #82). Phases 7 (withdrawn) and 8 (needs four weeks of
+arm data) are not built. Section 16 lists where the build differs from the plan below; where the text above it disagrees with
+section 16, section 16 is what exists.
 Builds on `docs/design/ceo-front-door.md` (the CEO is the owner's front door; migrations 2220 to 2229 are reserved there,
 2226 included), `docs/design/ceo-agent-v3.md` section 0 (trust promise), ARCHITECTURE sections 3 (event store), 13 (shift
 contract), 15 (ledger), 16 (vaults) and the Trust copy in `apps/web/src/landing/Landing.tsx:482-488`.
@@ -89,7 +91,7 @@ Rules this design adds:
 | Coordinate: request an index, record status, record the work layer | server | event-sourced; no code |
 | Work-layer nodes for the indexer | server answers a runner rpc `graph.work` with refs and titles of cards, decisions and orders of the project | the server already holds these; the runner needs them to link modules to work |
 | Local query copy | runner memory, loaded from the vault's `graph/` shards at shift start (or from the clone's own index when the vault is not on this machine) | queries stay local and fast |
-| Visual view | see section 9 | the browser needs data the server does not store |
+| Visual view | none (withdrawn, owner decision 5) | showing the graph would pull code-derived data into the web app |
 
 Consequences:
 
@@ -105,18 +107,29 @@ Consequences:
 
 Today a project may have a project vault; otherwise its shifts use the org vault (ARCHITECTURE 16.1). Under this design:
 
-- **Kinds.** `VaultRegistered` gains a kind `local` (folder path on one workstation, no remote, no sync). The existing `git`
-  kind keeps the sync loop (ARCHITECTURE 16.3).
-- **Rule.** Creating a project ensures a vault. The product recommends a git vault (the setup step offers the remote URL).
-  If none is given, the runner creates `~/.aom-runner/project-vaults/<name>/` on the Org Owner's primary workstation and
-  registers it as `kind: local`. The UI shows "not synced; back it up yourself" until a git remote is added.
-- **Warnings.** A git repository inside a synced folder (OneDrive, iCloud) corrupts easily. The runner warns when a local
-  vault path sits under a known sync root and never runs `git init` inside one without the owner's confirmation.
-- **Existing projects** without a project vault get one through a data migration that only records the intent
-  (`ProjectVaultEnsureRequested`); the Owner's workstation then creates the folder. Until then their graph goes to the org
-  vault under `projects/<name>/graph/`, the current fallback.
-- **Read access.** A `local` vault is readable only on its workstation. Agents on other workstations still get a full
-  graph by indexing their own clone; they do not see the shared export. This is a known limit, not a bug.
+- **Storage.** A vault is stored either in a remote repository (`storage: 'git'`, every vault so far, with the sync loop of
+  ARCHITECTURE 16.3) or as a **local folder** on one workstation (`storage: 'local'`: no remote, no sync, no commits). The vault
+  `kind` (`org`, `project`) is unchanged; `VaultRegistered` and `VaultUpdated` carry the optional `storage` and, for a local
+  vault, the `localWorkstationId` that holds the folder. Migration `2230_project_vault_kind.sql` adds the two columns.
+- **Rule.** Every project always has a vault. Creating a project records `ProjectVaultEnsureRequested` and registers a local
+  vault on the Org Owner's primary workstation (the owner's earliest paired, active workstation). If the owner has no workstation
+  yet, nothing is registered and the request stays open: the owner's first workstation connecting answers it. The runner creates
+  the folder when `vault.configure` reaches it (`<runner data dir>/vaults/<vaultId>`, with a `.aom-local-vault` marker file; the
+  plan said `project-vaults/<name>`, one folder scheme for all vaults keeps every vault code path working). The UI shows "not
+  synced; back it up yourself" until a git repository is registered, which turns the same vault into a synced one (the runner
+  keeps the old folder aside as `<vaultId>.was-local-<time>` and clones the repository).
+- **Which vault the work uses.** Knowledge (shift vault context, reports) uses a project's git vault, else the organization vault,
+  else the project's local vault, so an organization vault that already holds the knowledge is not displaced. The graph uses the
+  project's own vault (any storage), else the organization vault.
+- **Warnings.** The runner logs a warning once per local vault ("not synced; back it up yourself") and names the sync tool when the
+  folder sits under a known sync root (OneDrive, iCloud, Dropbox, Google Drive); it never runs `git init` itself.
+- **Existing projects** get the vault through the data migration `project-vaults-2026-10`, which only records the intent
+  (`ProjectVaultEnsureRequested`); the owner's workstation connecting creates the vault. Until then their graph goes to the org
+  vault under `projects/<name>/graph/`, the old fallback.
+- **Read access.** A `local` vault is readable only on its workstation. Agents on other workstations get no graph unless they hold
+  the vault; this is a known limit, not a bug.
+- **Setting.** `projectGraphs.enabled` is a server setting (`AOM_PROJECT_GRAPHS`, on by default). Off, no vault is created for new
+  projects, nothing is indexed, and no graph is offered.
 
 ---
 
@@ -137,7 +150,11 @@ projects/<name>/graph/
 - **Node ids** = `<repoKey>:<relPath>#<kind>:<qualifiedName>` (for example `k3…:src/billing/invoice.ts#class:Invoice`). Paths
   are relative to the repo root, so ids are identical across machines. This is the lesson of Graphify's id-portability fixes
   (its `cache.py` rewrites absolute ids), applied from day one.
-- **Stable order and format** (sorted lines, fixed key order, LF endings) keep git diffs to the lines that changed.
+- **Stable order and format** (sorted lines, fixed key order, LF endings) keep git diffs to the lines that changed. As built,
+  ids are written without their `<repoKey>:` prefix (the folder name is the repo key), a module shard starts with a header line
+  naming its module (so its nodes do not repeat `m`), and `contains` edges are not stored: the loader derives them. `modules.md` and
+  `communities.json` are per repository (`repos/<repoKey>/`) and `graph/modules.md` is the repositories' summaries one after the
+  other. A merge writes `repos/<repoKey>/_work.jsonl` and `graph/work.md` (section 6).
 - **Size cap.** If the export would exceed `graph.maxExportNodes` (default 50,000), the vault keeps `modules.md`, the
   manifest and the module-level shards only. Symbol shards stay in the runner-local cache, rebuildable.
 - **Merge conflicts.** Files under `graph/` are generated. A rebase conflict there is never a desk item (ARCHITECTURE
@@ -174,13 +191,13 @@ Module `apps/runner/src/graph/` (new). Steps per repo at a commit:
    Output per file: symbols with ranges, imports with their binding names, call sites with the callee's written name.
 3. **Resolve.** Imports resolve exactly through the package manifest and the path rules (`EXTRACTED`). Calls resolve by name
    within the resolved import set (`INFERRED`); several candidates give `AMBIGUOUS`. **Prefer no edge to a wrong edge.**
-4. **Docs.** Markdown headings and links (deterministic, `doc` source). An optional semantic pass for docs above a word
-   threshold, through the workstation's own Claude account, with a prompt fingerprint and a per-file hash cache (section 10).
+4. **Docs.** Markdown headings and links (deterministic, `doc` source). The optional semantic pass for docs (a model reading
+   documents through the workstation's own Claude account) **is not built**; `docsPass.mode` is `off` in the manifest.
    Docs text is wrapped as untrusted data in the prompt and its output is schema-validated; a label is stripped of control
    characters and capped at 256 characters.
-5. **Work layer.** `graph.work` rpc from the server: refs and titles of the project's cards, decisions and orders, merges
-   with their commits. Attached to modules through `touches` and `decided` by the merge's changed paths (computed from git
-   on the runner) and by the card's affected areas.
+5. **Work layer.** As built there is no `graph.work` rpc: a `graph.update` command carries the card ref and title of the merge
+   (the server owns them), the runner computes the changed paths from git and attaches the card to the modules they belong to
+   (`touches`, derived on load from `_work.jsonl`). Decisions and orders are not attached yet.
 6. **Modules and communities.** Modules come from directories and package manifests. Communities are computed on the module
    graph (not on raw symbols, so labels stay readable) with a fixed-seed clustering (section 12, idea 6). Labels are the
    most-connected module names; no model call.
@@ -188,26 +205,32 @@ Module `apps/runner/src/graph/` (new). Steps per repo at a commit:
    through the existing `writeVaultFile` path (ARCHITECTURE 16.4), then committed by the vault sync loop. Writes are skipped
    when the bytes are unchanged, so an unchanged commit makes no commit.
 
-Trigger: a `graph.index` durable runner command (`runner_commands`, `commands-queue.ts`) is queued when a repo is attached to
-a project and at each `ProjectGraphRequested`. It runs at low priority, pauses while a shift holds the same clone
-(`git/repo-lock.ts`), and pauses on a model usage limit (backlog #73).
+Trigger: a `graph.index` durable runner command (`runner_commands`, `commands-queue.ts`) is queued when a workstation that holds
+a project's clone connects (and the project has no graph yet), at each `ProjectGraphRequested`, and by the owner's "Index again".
+It reads the clone's object store (`git ls-tree`, `git cat-file --batch`), never its working tree, so it needs no repo lock, and it
+uses no model, so a usage limit does not matter. The parser is synchronous WASM: the loop yields to the event loop every 25 files.
 
 ---
 
 ## 6. Incremental updates on merge
 
-- Trigger: `CardFinalized` with `resultRef.mergeCommit` (`packages/shared/src/events/card.ts:392-405`). The server's
-  projector for the project records the merge and queues `graph.update {repo, fromCommit: manifest.commit, toCommit:
-  mergeCommit}` to a workstation that holds the clone (durable command).
-- Runner: `git diff --name-status <from> <to>`. Re-parse the changed files (per-file cache keyed by blob id and grammar
-  fingerprint). For each removed or changed file: drop its nodes and edges. **Cross-file edges into changed files:** each
-  file's unresolved references are stored (`_refs` in its shard), so the resolver re-runs only the references whose written
-  name matches a symbol that changed. This avoids a whole-repo pass.
-- Module and community recomputation: at most once per N merges (default 10) or on a schedule, because clustering is global.
-  Between recomputations, `communities.json` keeps the last result and the manifest notes its commit.
+- Trigger: `CardFinalized` with `resultRef.mergeCommit` (`packages/shared/src/events/card.ts:392-405`). A **reaction of the
+  runner gateway** (not a projector: projectors do no I/O) queues `graph.update {fromCommit: indexed commit, toCommit: mergeCommit,
+  merge: {ref, title, at}}` to a workstation that holds the clone (durable command). Updates are never merged into one another.
+- Runner: `git diff --name-status <manifest commit> <to>` says which files changed. Their blobs are parsed again (the per-file
+  facts cache is keyed by blob id and parser fingerprint); every other file's facts come from the cache. The resolver then runs
+  over all facts, which gives exactly what a full index of that commit gives, **including links between changed and unchanged
+  files in both directions**, and only the shards whose bytes changed are written. (The plan stored unresolved references per file
+  to re-resolve only the changed names; that optimization was not needed: resolving the whole of this repository takes well under
+  a second.) The test `graph-update.test.ts` compares an update with a full index byte for byte.
+- Module and community recomputation: communities are recomputed every 10th merge (`communityEvery`); in between,
+  `communities.json` keeps the last result and records the commit it was computed at, new modules joining a group of their own.
 - Force-push or rebase where `fromCommit` is not an ancestor of `toCommit`: full re-index.
-- Event: `ProjectGraphUpdated {projectId, repoKey, fromCommit, toCommit, filesChanged, nodes, edges, indexerVersion,
-  durationMs}`. The work layer gets the new `touches` edges from the same event.
+- Event: `ProjectGraphUpdated {projectId, repoId, repoKey, fromCommit, toCommit, filesChanged, files, nodes, edges, modules,
+  indexerVersion, durationMs, workstationId, vaultId, fullReindex?}`: ids, commits and counts only. The work layer's `touches`
+  edges are in the vault (`_work.jsonl`), not in the event.
+- The vault sync resolves conflicts in generated graph files itself (the remote side wins, the runner rebuilds the graph from the
+  clones with the last request it kept) and never raises a desk item for them.
 - A new project starts from an empty graph and grows through merges, decisions and cards, as the owner asked.
 
 Failure: `ProjectGraphFailed {reason}` with a retry backoff (the CEO shift failure pattern, ARCHITECTURE 9.11). A parse error in one file
@@ -227,7 +250,7 @@ server round trip.
 | `aom graph path <a> <b>` | shortest path with edge tags | 20 hops |
 | `aom graph explain <node>` | a node with its edges, tags and file:line | 40 edges |
 | `aom graph impact <file or symbol> [--depth 2]` | callers and callees within depth 2: the blast radius of a change | 60 nodes |
-| `aom graph route "<request>"` (CEO and BA, org scope) | candidate projects, repos and areas for a request, with the reason for each | 800 bytes |
+| `aom ceo route "<request>"` (CEO only, org scope; `aom ceo route --drafts` lists what the code suggests) | candidate projects and areas for a request, with the reason for each | 800 bytes (drafts: 1.8 KB) |
 
 Brief integration: the runner, not the server, composes a short "Graph context" section for the shift instructions (the
 regenerated `CLAUDE.md` of ARCHITECTURE 13.2). It uses the card's title, affected areas and ledger one-liners as the query,
@@ -238,8 +261,10 @@ replace the card's own text. Chats get the same verbs (the chat allowlist, `apps
 Reviewers: `aom graph impact` feeds the adversarial pass of backlog #70 (callers and callees of every changed symbol). This
 replaces broad reads with a bounded list; the reviewer still reads the code.
 
-CEO: `aom graph route` reads the org graph from `org/graph/` (or the CEO's snapshot if the vault is unavailable) and returns
-ranked candidates. The CEO judges; the graph does not decide.
+CEO: `aom ceo route` is a read-only CEO verb. The server knows the verb (`CeoRpc` op `route`) but the **runner answers it** from
+`org/graph/` of the organization vault on its workstation, in the CEO's shift and in the owner's CEO chat, so nothing code-derived
+is read by the server. The CEO judges; the graph only ranks. Chats get `graph.query` and `graph.explain` only; the other verbs
+are refused there.
 
 MCP server: not in v1. Agents already talk through `aom` with a per-shift token scoped by verb allowlists (ARCHITECTURE
 13.4). An MCP server would be a second, separately scoped surface. Revisit when a full-power CEO session needs it
@@ -249,34 +274,30 @@ MCP server: not in v1. Agents already talk through `aom` with a per-shift token 
 
 ## 8. The organization graph
 
-- **Where it lives.** `org/graph/` in the organization vault (git, or the Owner's local folder when none). It is built on
-  the CEO's workstation (or another Owner or Admin workstation, the org vault's audience, ARCHITECTURE 16.1) from each
-  project's `graph/manifest.json` and `modules.md`, which the workstation reads from the project vaults it has cloned.
-- **Nodes:** `org`, `project`, `repo`, `module` (area), `board` (a project's card board), `person` and `agent` (owners, roles).
-- **Edges:** `contains`; `depends_on` (a repo's declared package matches another repo's package name, `EXTRACTED`); `touches`
-  (a project's areas with the areas of other projects by shared package or name, `INFERRED`); `links` (owner assertions).
-- **Owner assertions** are events (`OrgGraphLinkAsserted`, `OrgGraphLinkRetracted`), shown as solid edges.
-- **Derived edges start as drafts** ("drafts the graph"): drawn dashed, excluded from `aom graph route` until the Owner
-  accepts them, which appends `OrgGraphLinkAsserted` with `origin: 'accepted-draft'`. Default; section 15.
-- **Server holds** the org node list and the assertions (metadata), never the derived links' evidence. The derived links
-  live in the org vault.
+- **Where it lives.** `org/graph/` in the organization vault (git, or a local folder on the Owner's primary workstation, which the
+  server registers when the organization has no vault). It is built on the workstation that holds that vault, from the project
+  graphs it can read, when a project is indexed or updated, a link is asserted or retracted, or a project is archived or
+  restored (`graph.org` command; one build runs at a time, requests that arrive meanwhile mark it dirty and it runs again).
+- **Files.** `projects.jsonl` (projects, and each project's areas with their package names: names only, never a symbol, a file or
+  a line), `links.jsonl` (derived links with their status, and the Owner's assertions), `drafts.md`, `manifest.json`.
+- **Derived links are code-derived, so they never leave the workstation.** `depends_on` (EXTRACTED): a module of project A
+  declares a package that a module of project B is. `touches` (INFERRED): two to four projects have an area of the same specific
+  name. They are **drafts**: the CEO shows them in chat (`aom ceo route --drafts`), the owner confirms a link by adding it, and only
+  then does it count for routing. There is **no web page for derived drafts** and no server table for them.
+- **What the owner asserts is an event** (`OrgGraphLinkAsserted`, `OrgGraphLinkRetracted`, table `org_graph_links`, migration
+  2233) and uses only project ids and names the owner typed. The owner adds and removes links under Settings > Organization >
+  Project links. The server sends the assertions to the workstation inside `graph.org`; it never receives a derived link.
+- **Routing.** `aom ceo route` ranks projects by name, by area, by what the owner linked, and by links the owner confirmed; a
+  retired project is never a candidate.
+- **Not built:** `org_graph_nodes` (the projects table already is the node list), person and agent nodes, board nodes.
 
 ---
 
 ## 9. Visual graph view (web)
 
-- Pages: `/projects/:id/graph` (project) and `/graph` (organization). Three layers switchable: **Work** (from the server
-  projections, always available), **Code** (modules first, drill to files and symbols), **Org** (projects and their links).
-- **Data path.** Work data comes from the server. Code data comes from the workstation that holds the project's vault
-  export or the clone's index: the browser asks the server, which sends a `graph.view` rpc over the existing runner
-  WebSocket and relays the capped JSON it receives. The server does not persist the payload. This is the same transport
-  the chat uses (ARCHITECTURE 14). Section 15 asks the owner to confirm that relay is acceptable.
-- **Caps.** At most 1,500 nodes per view, module level first. A view over the cap shows the module graph and a
-  "drill in to see more" action.
-- **Overlays.** Active cards heat each module; drafts and AMBIGUOUS edges are dashed; each node links to its card page, its
-  decision file in the vault, or "open on workstation" for files (paths are not links to the server).
-- **Library.** Cytoscape.js, MIT (verified: `cytoscape/cytoscape.js`, licence MIT). Bundle size and layout performance are to
-  be measured in Phase 7.
+**Withdrawn (owner decision 5, 2026-10-19).** There is no graph page and no `graph.view` relay: showing the graph would make the
+browser the place where code-derived data is shown. What the web app shows about graphs is status (section 1): the indexed commit,
+counts, the indexer version and timings, the measured token saving (numbers), and the links the owner asserted.
 
 ---
 
@@ -291,6 +312,32 @@ Estimates are labelled as estimates; Phase 0 measures them on this repo and one 
 | Markdown, semantic pass (opt-in above 50k words; default off for code-only projects) | estimate: about 1.3 tokens per word of input, plus about 30% output, once per changed file. A 100k-word docs set is roughly 170k tokens for the first pass, then only changed files | runs in the background | the result is cached per file hash and prompt fingerprint |
 | Work layer | 0 | negligible (projectors) | server rows |
 | Org graph | 0 (deterministic); CEO judgement only per request | seconds per rebuild | org vault |
+
+**Phase 0 spike results (2026-10-19, measured).** Parser: `@vscode/tree-sitter-wasm` 0.3.1 (MIT; one package that holds the
+tree-sitter runtime as WASM plus the TypeScript, TSX, JavaScript, C#, Python and Go grammars, built by the VS Code team; no
+native module, no install script). Machine: WSL2 on a laptop, Node 22.23. Corpus: this repository at the base commit,
+`git ls-files` filtered to `.ts .tsx .js .cs .py .go`: 1,929 files, 16.1 MB of source (roughly 400k lines).
+
+| Measure | Result |
+|---|---|
+| Runtime and six grammars loaded | 28 ms |
+| Parse of all 1,929 files | 3.5 s (about 4.6 MB/s), 2.70 million syntax nodes, about 50,500 declaration-like nodes |
+| Extra resident memory while parsing (tree deleted after each file) | about 36 MB |
+| Grammar assets shipped | about 9.6 MB for the five needed grammars plus 0.4 MB runtime |
+
+The "a few minutes cold for 100k lines" estimate above was therefore pessimistic for the parse step: parsing takes seconds, and
+the resolve and write steps decide the cold time. The 20-card offline benchmark was
+**skipped**: it needs a fixture repository, a grader and paid model runs, far beyond the 30 minutes the Phase 0 budget allows.
+Section 11 keeps it as the only place the claim may be stated before live data exists, and the live holdout of Phase 5 is
+the measurement that ships.
+
+**Measured with the built indexer (2026-10-19, same laptop, this repository, 2,176 files):** a cold index takes 5.5 to 6.1 s
+(through the packaged runner as well: `aom-runner graph-check <repo>` runs it from the release tarball) and gives 12,300 nodes and
+27,300 edges in 8 modules; a warm cache with nothing changed takes 0.8 s and writes nothing; an update after a one-file merge
+takes 0.9 s (one file parsed) and changes 2 lines of one module shard, 6 lines of the manifest and 2 lines of each summary. The
+vault holds 7.3 MB uncompressed for that repository (about 190 bytes per line, about 600 bytes per node with its edges; the plan's
+"100 bytes per node" was too low) and 513 KB gzipped, which is what git stores. The 50,000-node export cap therefore means about
+30 MB of shards in the vault before git compresses them. The packaged grammars add about 3.4 MB to the runner tarball.
 
 Token cost is charged to the workstation's own Claude account and shows in `shift_costs` like any other shift (the docs pass
 is recorded as a `graph` kind shift, so the owner sees it). The owner sets a monthly cap for the docs pass in project settings.
@@ -387,7 +434,9 @@ Apache-2.0 would require notice for copied code; this rule avoids the question.
 
 ## 13. Phased plan
 
-Each phase ships behind the setting `projectGraphs.enabled` (default off until Phase 4). Tests named below are new files.
+Each phase ships behind the setting `projectGraphs.enabled` (as built: on by default from the start of the build, a server
+setting `AOM_PROJECT_GRAPHS`; the other test suites run with it off). Tests named below are new files. **Status: phases 0 to 6
+built; 7 withdrawn; 8 open (needs four weeks of arm data).**
 
 **Phase 0. Spikes (no product code).** Parse this repo and one larger customer-like repo with tree-sitter WASM in a
 scratch directory: time, node counts, memory. Measure the shard size and the diff size of a one-file change. Collect 20 past
@@ -426,11 +475,12 @@ event `ShiftContextMeasured`, migration `2232_shift_context.sql` (`shift_context
 `shift.start`, value-report section. Tests: `shift-context-metrics.test.ts`, `graph-holdout.test.ts` (assignment stable per
 card; off-arm carries no graph verbs).
 
-**Phase 6. Organization graph.** Files: `packages/shared/src/events/graph.ts` (`OrgGraphLinkAsserted`,
-`OrgGraphLinkRetracted`), migration `2233_org_graph.sql` (`org_graph_links`, `org_graph_nodes`), `apps/runner/src/graph/org.ts`
-(builds `org/graph/` from project exports), `aom graph route`, a read-only CEO verb `route` in the existing CEO gateway (`apps/server/src/ceo/gateway.ts`),
-Web: drafts and accept button. Tests: `org-graph.test.ts`, `graph-route.test.ts` (ranking
-deterministic; no route to a retired project).
+**Phase 6. Organization graph.** As built: `packages/shared/src/events/graph.ts` (`OrgGraphLinkAsserted`,
+`OrgGraphLinkRetracted`), migration `2233_org_graph.sql` (`org_graph_links` only), `apps/runner/src/graph/org.ts` (builds
+`org/graph/` from the project graphs), the read-only CEO verb `aom ceo route` (the server's CEO gateway knows the verb, the
+runner answers it from the vault), `apps/server/src/commands/org-graph.ts`, Settings > Organization > Project links (links the owner
+asserts; no page for derived drafts). Tests: `apps/runner/test/{org-graph,graph-route}.test.ts`,
+`apps/server/test/org-graph-links.test.ts`.
 
 **Phase 7. Visual view.** Files: `apps/web/src/pages/graph/*` (three layers, caps, overlays), server relay rpc `graph.view`
 (no persistence), runner `graph.view` local handler. Tests: web component tests (`apps/web`, vitest), relay test (payload
@@ -438,8 +488,8 @@ not stored: asserts no row written).
 
 **Phase 8. Claim.** Publish a percentage only after four weeks of arm data passes section 11.
 
-Migration numbers: this design uses 2230 to 2233, after 2226 (reserved by `ceo-front-door.md`) and after the highest existing
-migration `2212_card_status_held.sql`. Numbers 2220 to 2229 remain the front-door design's. If that design lands other
+Migration numbers: this design uses 2230 (`project_vault_kind`), 2231 (`project_graph`), 2232 (`shift_context`) and 2233
+(`org_graph`), after the highest existing migration `2212_card_status_held.sql`; 2220 to 2229 stay with the front-door build. Numbers 2220 to 2229 remain the front-door design's. If that design lands other
 migrations first, renumber these.
 
 ---
@@ -458,7 +508,7 @@ migrations first, renumber these.
 | Multi-workstation writes to one vault | Output is identical for the same commit; generated files are regenerated, not merged |
 | Org graph routes a request to the wrong project | Candidates with reasons, the CEO decides, owner sees the reason in the desk item |
 | Parser grammar licence or maintenance | Pin versions; check each grammar's licence before adding it (tree-sitter core is MIT) |
-| Visual view makes the browser the place code is shown | Capped payload, not persisted, module level first; open question 5 |
+| Visual view makes the browser the place code is shown | Withdrawn: there is no view (owner decision 5) |
 
 ---
 
@@ -560,4 +610,30 @@ indexers; it could sharpen the code layer after Phase 2, but its indexers need c
 
 ---
 
-*End of design note. Not committed. No code changed.*
+## 16. As built (phases 0 to 6): where the build differs from the plan
+
+- **Parser.** `@vscode/tree-sitter-wasm` 0.3.1 (MIT), pinned exactly as a runner dev dependency; the build copies the runtime (as
+  `tree-sitter.cjs`: the runner package is `type: module`) and the five grammars (TypeScript and TSX, JavaScript, Python, Go,
+  C#) to `dist/grammars/`, with `THIRD_PARTY_NOTICES` (also in the tarball root). `aom-runner graph-check <repo>` runs the bundled
+  indexer on a clone and checks the packaging.
+- **Local vault.** A storage (`git` or `local`) rather than a kind; the folder is `<runner data dir>/vaults/<vaultId>` (section 3).
+- **Indexer.** Facts per file are cached by blob id; resolution is one pass over all facts (the update is therefore exact);
+  modules come from package manifests, else the first folder (one level deeper under `src`, `lib`, `app`, ...). Test files are one
+  node each and give `tests` edges. Own package names are on module nodes (`pk`), which the organization graph needs.
+- **Server.** Status only: `project_graphs` (2231), `shift_context_metrics` (2232), `org_graph_links` (2233). Every graph command
+  answer is parsed by a schema that has numbers, a commit id and fixed reason codes only.
+- **Measurement.** The runner counts from the runtime's tool stream (Claude's `tool_result` blocks give sizes only), sends
+  `context` on `shift.ended`, and the server stores `ShiftContextMeasured` with the billed input tokens. The report
+  (`GET /api/value/graph`, shown on the Costs page) uses a stratified bootstrap ratio of medians (strata: card type and size) and
+  the guards (rework rounds, changes requested, tester failures, days to done, cost per accepted card). "Reopened cards" is not a
+  guard yet. The claim is offered only with at least ten accepted cards per arm, an interval below one and no worse guard.
+- **Holdout.** Server side at shift start: one card in five by a hash of its id, for four weeks after the project's first index.
+- **Not built:** the docs semantic pass, decisions and orders in the work layer, `org_graph_nodes`, person and agent nodes, the
+  20-card offline benchmark (Phase 0), the public claim (Phase 8), anything visual (Phase 7, withdrawn).
+- **Open questions closed:** 1 (tree-sitter approved), 3 and 4 (withdrawn with the view), 11 (no MCP). Question 6 (derived edges):
+  drafts stay on the workstation; accepting is the owner adding the link. Question 12 (Trust wording): the copy now says the code
+  graph is kept in the vault, on the customer's side, and that none of it is sent to Guildwise HQ.
+
+---
+
+*End of design note.*

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Builds the workstation runner as a self-contained tarball: release/aom-runner-<version>.tgz
-# Contents: aom-runner/{aom-runner, aom-runner.cmd, dist/, node_modules/, package.json, README.md}
+# Contents: aom-runner/{aom-runner, aom-runner.cmd, dist/ (with dist/grammars), node_modules/, package.json, README.md, THIRD_PARTY_NOTICES}
 # Requires: pnpm, node >= 22, npm and network access (to install production dependencies).
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -15,6 +15,8 @@ PKG="$STAGE/aom-runner"
 mkdir -p "$PKG"
 cp -r apps/runner/dist "$PKG/dist"
 cp apps/runner/README.md "$PKG/README.md"
+# Licences of the tree-sitter parser and grammars in dist/grammars (docs/design/project-graphs.md owner decision 7).
+cp apps/runner/THIRD_PARTY_NOTICES "$PKG/THIRD_PARTY_NOTICES"
 
 # package.json with only the real runtime dependencies (@aom/shared is bundled into dist/).
 node -e '

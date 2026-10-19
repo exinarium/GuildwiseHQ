@@ -6,6 +6,7 @@ import { commandForOutcome } from './commands.ts';
 export const CEO_CLI_HELP = [
   '- `aom ceo snapshot [--section <name>]`: the organisation now (projects, cards needing attention, agents, workstations, desk, signals, costs).',
   '- `aom ceo show card|agent|project|shift|desk-item|workstation <ref>` and `aom ceo search desk|cards|memory "<q>"`; `aom ledger search "<q>"`.',
+  '- `aom ceo route "<request>"`: which projects and areas a request belongs to, from the organization graph (a ranking with the reason for each; read-only; the CEO judges). `aom ceo route --drafts`: the links the code suggests between projects; they are drafts, so show them to the owner in chat and let them add the ones they confirm under Settings > Organization > Project links; until then they do not count.',
   '- `aom ceo act <action> --reason "<why>" --confidence 0.0-1.0 [--evidence ledger:<id>|memory:<id>|signal:<id>]... [--dry-run] [params]`.',
   '  actions: answer --item <id> (--option <o1> | --text "..."); triage --item <id> --do dismiss|annotate|merge --note "..." [--into <id>]; resolve-notice --item <id>;',
   '  release --card <REF>; release-backoff --card <REF>; reassign --card <REF> --agent <name>; priority --card <REF> --to 1-9; cancel-card --card <REF>;',

@@ -26,6 +26,7 @@ import {
   isValidReportPath,
   type LedgerMatch,
   normalizeUrl,
+  type OrgGraphScope,
   outcomeDataSchema,
   type PublishRequest,
   type ReadableFolder,
@@ -90,6 +91,8 @@ import {
   WorktreeError,
   type WorktreeResult,
 } from '../git/worktrees.ts';
+import { ContextCounter } from '../graph/measure.ts';
+import type { GraphService } from '../graph/service.ts';
 import { diskProblem } from '../health/disk.ts';
 import type { IpcServer, ShiftIpcHandler } from '../ipc/server.ts';
 import { type Logger, nullLogger } from '../log.ts';
@@ -165,6 +168,8 @@ export interface SupervisorDeps {
   http?: ServerHttp;
   /** Forwards an rpc to the server (`rpc.request`). */
   rpc: (shiftId: string, method: string, params: Record<string, unknown>) => Promise<IpcRpcResponse>;
+  /** The project graph (docs/design/project-graphs.md): `aom graph ...` and the "Graph context" section. Absent: none. */
+  graph?: () => GraphService | undefined;
   /** Writes (and commits, pushes) a file into a vault clone: `aom publish` puts research notes there (M6). */
   writeVault?: (
     cmd: VaultWriteCommand,
@@ -280,6 +285,8 @@ interface ActiveShift {
   transcripts: Map<string, { ref: TranscriptRef; title: string }>;
   /** The brief the agent sees: the server's brief plus what the runner read from the vault (PROJECT.md, taste.md). */
   brief?: ShiftBrief;
+  /** What the shift took to find its way in the code (sent on `shift.ended` as numbers). */
+  counter?: ContextCounter;
   /** Resumed after a runner restart: the server already holds the claim and has seen accepted/started. */
   resumed?: boolean;
   /** The card branch was rebased (or merged) onto its base before the shift: the commit moved with it. */
@@ -420,6 +427,7 @@ export class ShiftSupervisor {
       progress: [],
       fetched: new FetchedUrls(),
       transcripts: new Map(),
+      counter: new ContextCounter(msg.graph?.arm ?? 'none'),
       env: {},
       mainShas: resume?.mainShas ? [...resume.mainShas] : [],
       ...(resume ? { resumed: true, startedSent: resume.startedSent } : {}),
@@ -931,6 +939,17 @@ export class ShiftSupervisor {
         texts.instructions += `\n${renderCardAttachments(attachDir, synced.files)}\n`;
       mkdirSync(attachDir, { recursive: true });
     }
+    // The project's code graph: a short, fenced "Graph context" for the card's own words (the holdout arm gets none).
+    if (msg.kind === 'card') {
+      const card = (s.brief ?? msg.brief).card;
+      const section = this.deps
+        .graph?.()
+        ?.briefSection(msg.graph, { title: card.title, fields: card.fields });
+      if (section) {
+        texts.instructions += `\n${section}\n`;
+        if (s.counter) s.counter.briefBytes = Buffer.byteLength(section);
+      }
+    }
     if (s.syncMain && msg.kind === 'card') texts.prompt += `\n${mainSyncNote(s.syncMain)}\n`;
     // lean team: the tester runs the E2E specs of the areas the card touches, not the whole suite.
     if (msg.kind === 'card' && msg.brief.e2e) {
@@ -1274,6 +1293,7 @@ export class ShiftSupervisor {
       durationMs: Date.now() - s.startedAt.getTime(),
       usage: s.session.usage(),
       ...(contextTokens > 0 ? { contextTokens } : {}),
+      ...(s.counter && s.msg.kind === 'card' ? { context: s.counter.snapshot() } : {}),
       ...(s.finalText || exit.error ? { finalText: (s.finalText ?? exit.error ?? '').slice(0, 4000) } : {}),
       guardViolations: s.guardViolations,
     });
@@ -1298,8 +1318,10 @@ export class ShiftSupervisor {
     if (ev.kind === 'progress') this.addProgress(s, 'text', ev.text);
     else if (ev.kind === 'tool') {
       s.fetched.record(ev.name, ev.summary);
+      s.counter?.onTool(ev.id, ev.name, ev.summary);
       this.addProgress(s, 'tool', `${ev.name}: ${ev.summary}`);
-    } else if (ev.kind === 'final') s.finalText = ev.text;
+    } else if (ev.kind === 'toolresult') s.counter?.onResult(ev.id, ev.bytes);
+    else if (ev.kind === 'final') s.finalText = ev.text;
     else if (ev.kind === 'session') this.onSession(s, ev.runtimeSessionId);
   }
 
@@ -1364,10 +1386,13 @@ export class ShiftSupervisor {
       report: async (req: IpcReportRequest) => this.submit(s, req.report),
       rpc: async (req: IpcRpcRequest) => {
         // `aom ceo ...` belongs to the CEO's own shifts (the server checks the agent again).
-        if (req.method === 'ceo')
-          return s.msg.kind === 'ceo' && s.msg.agent.roleKey === 'ceo'
-            ? this.deps.rpc(s.msg.shiftId, req.method, req.params)
-            : ({ ok: false, error: 'not_ceo: only the CEO may use `aom ceo`' } as IpcRpcResponse);
+        if (req.method === 'ceo') {
+          if (!(s.msg.kind === 'ceo' && s.msg.agent.roleKey === 'ceo'))
+            return { ok: false, error: 'not_ceo: only the CEO may use `aom ceo`' } as IpcRpcResponse;
+          // `aom ceo route`: read-only, answered here from the organization graph in the organization vault
+          if (req.params.op === 'route') return this.orgRoute(s.msg.orgGraph, req.params);
+          return this.deps.rpc(s.msg.shiftId, req.method, req.params);
+        }
         // `aom runner restart` in a DevOps shift (design 5.6): the restart waits for this shift's end to be acknowledged.
         if (req.method === 'runner.restart') {
           if (s.msg.kind !== 'devops' || !this.deps.onRunnerRestart)
@@ -1394,6 +1419,21 @@ export class ShiftSupervisor {
           return this.deps.rpc(s.msg.shiftId, req.method, req.params);
         if (req.method === 'card.get')
           return { ok: true, result: cardPayload({ ...s.msg, brief: s.brief ?? s.msg.brief }) };
+        // `aom graph ...`: answered here from the vault's graph, never by the server (the holdout arm gets none).
+        if (req.method.startsWith('graph.')) {
+          const g = this.deps.graph?.();
+          if (!g)
+            return {
+              ok: false,
+              error: 'the code graph is not available on this workstation',
+            } as IpcRpcResponse;
+          const r = g.rpc(req.method, req.params, s.msg.graph);
+          if (r.ok)
+            s.counter?.onGraphVerb(
+              Buffer.byteLength(String((r.result as { text?: string } | undefined)?.text ?? '')),
+            );
+          return r;
+        }
         if (req.method === 'card.attachments') return this.cardAttachments(s, req.params);
         if (req.method === 'transcript.fetch') return this.transcriptFetch(s, req.params);
         if (req.method === 'sudo.run') return this.sudoRun(s, req.params);
@@ -1429,6 +1469,19 @@ export class ShiftSupervisor {
         return this.deps.rpc(s.msg.shiftId, req.method, req.params);
       },
     };
+  }
+
+  private orgRoute(scope: OrgGraphScope | undefined, params: Record<string, unknown>): IpcRpcResponse {
+    const q = typeof params.q === 'string' ? params.q : '';
+    const drafts = params.drafts === true;
+    const text = q.trim() || drafts ? this.deps.graph?.()?.route(scope, q, { drafts }) : null;
+    return text
+      ? { ok: true, result: { text } }
+      : {
+          ok: false,
+          error:
+            'the organization graph is not available on this workstation (it is read where the organization vault is kept)',
+        };
   }
 
   /**

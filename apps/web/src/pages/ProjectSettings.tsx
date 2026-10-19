@@ -11,6 +11,7 @@ import { ConcurrencyCapPanel } from '../components/ConcurrencyCapPanel.tsx';
 import { ConvertPanel } from '../components/ConvertPanel.tsx';
 import { DeployTargetsPanel } from '../components/DeployTargetsPanel.tsx';
 import { FullSuitePanel } from '../components/FullSuitePanel.tsx';
+import { GraphStatusPanel } from '../components/GraphStatusPanel.tsx';
 import { ManualQaPanel } from '../components/ManualQaPanel.tsx';
 import { McpServersPanel } from '../components/McpServersPanel.tsx';
 import { MembersPanel } from '../components/MembersPanel.tsx';
@@ -426,6 +427,11 @@ export function ProjectSettings() {
             project={project}
             canChange={project.myRole === 'owner' || canConvert}
           />
+        </div>
+      )}
+      {project && traits.usesRepos && (
+        <div id="code-map" className="scroll-mt-20">
+          <GraphStatusPanel projectId={id} canChange={project.myRole === 'owner' || canConvert} />
         </div>
       )}
       {project && traits.usesRepos && (

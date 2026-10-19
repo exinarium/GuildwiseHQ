@@ -20,6 +20,7 @@ import { buildOwnerBrief, buildOwnerContext } from '../ceo/brief.ts';
 import { authorizedOrders, currentAuthority, orderVersionHash } from '../ceo/orders.ts';
 import { loadCeo } from '../ceo/state.ts';
 import { agentActor, orgScope, runnerActor, SYSTEM_ACTOR, userActor } from '../commands/common.ts';
+import { orgGraphScopeFor } from '../commands/org-graph.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Queryable, type Row, rows } from '../db/sql.ts';
 import type { AppendInput } from '../eventstore/types.ts';
@@ -293,7 +294,8 @@ export async function buildChatStart(
   };
   if (model.effort) agentSpec.effort = model.effort;
   else delete agentSpec.effort;
-  const context: ChatContext = { orgId: turn.org_id, ceo: { brief } };
+  const orgGraph = await orgGraphScopeFor(ctx, turn.org_id);
+  const context: ChatContext = { orgId: turn.org_id, ceo: { brief }, ...(orgGraph ? { orgGraph } : {}) };
   const payload: Record<string, unknown> = {
     chatId: turn.id,
     threadId: turn.thread_id,

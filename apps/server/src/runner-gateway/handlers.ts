@@ -23,6 +23,7 @@ import { outboundDraftRpc } from '../commands/drafts.ts';
 import { endQuestionShift } from '../commands/escalation.ts';
 import { applyFinalizeResult } from '../commands/finalize.ts';
 import { applyForgeReposResult, applyGitReport, applyJiraReport } from '../commands/forges.ts';
+import { applyGraphResult, seedProjectGraphs } from '../commands/graph.ts';
 import { applyWorktreeSweepResult } from '../commands/hygiene.ts';
 import { intakeRpc } from '../commands/intake.ts';
 import {
@@ -33,6 +34,7 @@ import {
 import { investigationRecordRpc } from '../commands/investigation.ts';
 import { applyMcpServersReport, mcpCallsIn, mergeMcpCalls } from '../commands/mcp-servers.ts';
 import { applyOrgFolderResult, applyOrgFoldersReport } from '../commands/org-folders.ts';
+import { dispatchOrgGraph } from '../commands/org-graph.ts';
 import { applyOutboundResult, finishOutboundCommand, queueApprovedFor } from '../commands/outbox.ts';
 import { applyBranchCheckResult } from '../commands/phases.ts';
 import { questionStatus } from '../commands/question-flow.ts';
@@ -63,7 +65,12 @@ import { applyTargetSecretResult } from '../commands/target-secrets.ts';
 import { proposeSuites, recordSuiteResult, suitesFor } from '../commands/test-environments.ts';
 import { applyToolchainsReport } from '../commands/toolchains.ts';
 import { transcriptStoreRpc } from '../commands/transcripts.ts';
-import { applyVaultConflict, markVaultStatus, queueVaultConfigure } from '../commands/vaults.ts';
+import {
+  applyVaultConflict,
+  ensureProjectVaultsForWorkstation,
+  markVaultStatus,
+  queueVaultConfigure,
+} from '../commands/vaults.ts';
 import {
   syncClaudeAuthNotice,
   syncClaudeUsageNotice,
@@ -436,6 +443,18 @@ export class RunnerHandlers {
           // Terminal: the answer is the branch's state; "could not move it" is an answer, not a failure.
           await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
           if (msg.ok) await applyRepoSyncStatus(this.ctx, conn.workstationId, msg.result);
+        } else if (cmd?.type === 'graph.org') {
+          // Terminal: the organization graph is built in the vault; the answer is counts and is only logged. A request that
+          // came in while it ran built nothing yet: it is asked again now.
+          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+          if (cmd.payload.dirty === true && typeof cmd.payload.orgId === 'string')
+            await dispatchOrgGraph(this.ctx, cmd.payload.orgId).catch((err) =>
+              this.ctx.log.warn({ err }, 'could not queue the organization graph build'),
+            );
+        } else if (cmd?.type === 'graph.index' || cmd?.type === 'graph.update') {
+          // Terminal: the answer becomes graph STATUS (an event with ids and counts); a failure is retried by the hello pass.
+          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+          await applyGraphResult(this.ctx, conn.workstationId, cmd.payload, msg.ok, msg.result, cmd.type);
         } else if (cmd?.type === 'org.folder') {
           // Terminal: a refusal is an answer; its reason shows on the Workstations page until the next success.
           await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
@@ -695,7 +714,13 @@ export class RunnerHandlers {
     await ctx.services.chat.reconcileCeoTurns(conn.workstationId, conn.helloChatIds ?? [], helloAt);
     await announceRestart(ctx, conn.workstationId);
     await ctx.services.chat.onReconnect(conn.workstationId);
+    // The owner's first workstation holds the automatic local vaults of the projects that have none (graphs design 3).
+    await ensureProjectVaultsForWorkstation(ctx, conn.workstationId);
     await queueVaultConfigure(ctx, ctx.pool, conn.workstationId);
+    // after the vault configuration, so the runner knows the vault when it gets the index request
+    await seedProjectGraphs(ctx, conn.workstationId).catch((err) =>
+      ctx.log.warn({ err }, 'could not queue the project graph indexes'),
+    );
     await queueApprovedFor(ctx, conn.userId, conn.workstationId);
     await this.deliverPending(conn.workstationId);
     ctx.services.dispatcher.trigger();
@@ -944,6 +969,9 @@ export class RunnerHandlers {
       );
     await seedRepoSync(ctx, conn.workstationId).catch((err) =>
       ctx.log.warn({ err }, 'could not queue the working-branch checks'),
+    );
+    await seedProjectGraphs(ctx, conn.workstationId).catch((err) =>
+      ctx.log.warn({ err }, 'could not queue the project graph indexes'),
     );
     ctx.services.dispatcher.trigger();
   }

@@ -304,6 +304,11 @@ export const RpcMethodSchema = z.enum([
   'test.suite',
   /** `aom runner restart`: answered by the runner itself (owner turns and DevOps shifts); the restart waits for the reply. */
   'runner.restart',
+  /** Project graphs (docs/design/project-graphs.md section 7): `aom graph query|path|explain|impact`, answered by the runner from the vault. */
+  'graph.query',
+  'graph.path',
+  'graph.explain',
+  'graph.impact',
 ]);
 export type RpcMethod = z.infer<typeof RpcMethodSchema>;
 

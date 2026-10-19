@@ -21,8 +21,8 @@ describe('claude stream parser', () => {
       'Done. Handed off with aom handoff.',
     ]);
     expect(events.filter((e) => e.kind === 'tool')).toEqual([
-      { kind: 'tool', name: 'Bash', summary: 'aom card --json' },
-      { kind: 'tool', name: 'Write', summary: '/work/toy/src/greeting.ts' },
+      { kind: 'tool', name: 'Bash', summary: 'aom card --json', id: 'toolu_01' },
+      { kind: 'tool', name: 'Write', summary: '/work/toy/src/greeting.ts', id: 'toolu_02' },
     ]);
     expect(events.at(-2)).toEqual({
       kind: 'usage',

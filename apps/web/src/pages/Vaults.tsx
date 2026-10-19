@@ -37,7 +37,10 @@ export function Vaults() {
   const owned = (projects.data ?? []).filter((p) => p.myRole === 'owner');
   const vaults = q.data ?? [];
   const hasOrgVault = vaults.some((v) => v.kind === 'org');
-  const projectsWithoutVault = owned.filter((p) => !vaults.some((v) => v.projectId === p.id));
+  // A project with only a local folder vault may still be given a git repository (the same vault, now synced).
+  const projectsWithoutVault = owned.filter(
+    (p) => !vaults.some((v) => v.projectId === p.id && v.storage !== 'local'),
+  );
   const canOrgVault = manager && !hasOrgVault;
   const canRegister = canOrgVault || projectsWithoutVault.length > 0;
 
@@ -130,13 +133,14 @@ function VaultCard({ vault, projectKey }: { vault: VaultDto; projectKey?: string
           {projectKey && <span className="ml-1 font-normal text-subtle">({projectKey})</span>}
         </h2>
         <Badge>{vault.kind === 'org' ? 'organization' : vault.kind}</Badge>
+        {vault.storage === 'local' && <Badge tone="amber">local folder</Badge>}
         {!vault.canEdit && <Badge tone="blue">shared with you</Badge>}
         {vault.workstations.length > 0 && (
           <span className="text-sm text-muted">
             Synced on {synced} of {vault.workstations.length}
           </span>
         )}
-        {vault.canEdit && (
+        {vault.canEdit && vault.storage !== 'local' && (
           <Button
             className="ml-auto"
             size="sm"
@@ -147,9 +151,17 @@ function VaultCard({ vault, projectKey }: { vault: VaultDto; projectKey?: string
           </Button>
         )}
       </div>
-      <p className="font-mono text-xs break-all text-subtle">
-        {vault.remoteUrl} · every {vault.syncIntervalSec}s
-      </p>
+      {vault.storage === 'local' ? (
+        <Callout tone="warning">
+          This vault is a folder on one workstation. It is not synced and has no copy anywhere else: back it
+          up yourself (it may sit in OneDrive or iCloud), or register a git repository for the project to keep
+          it in sync. The map of your code that your agents use is kept here too, and can be rebuilt.
+        </Callout>
+      ) : (
+        <p className="font-mono text-xs break-all text-subtle">
+          {vault.remoteUrl} · every {vault.syncIntervalSec}s
+        </p>
+      )}
       <Dialog
         open={editing}
         onOpenChange={setEditing}
@@ -193,7 +205,11 @@ function VaultCard({ vault, projectKey }: { vault: VaultDto; projectKey?: string
         data-testid="vault-workstations"
       >
         {vault.workstations.length === 0 && (
-          <li className="pt-3 text-subtle">Pair a workstation to sync this vault.</li>
+          <li className="pt-3 text-subtle">
+            {vault.storage === 'local'
+              ? 'The folder is created on the workstation that holds it.'
+              : 'Pair a workstation to sync this vault.'}
+          </li>
         )}
         {vault.workstations.map((w) => (
           <li
@@ -211,7 +227,7 @@ function VaultCard({ vault, projectKey }: { vault: VaultDto; projectKey?: string
                   error
                 </Badge>
               ) : w.localPath ? (
-                <Badge tone="green">synced</Badge>
+                <Badge tone="green">{vault.storage === 'local' ? 'folder ready' : 'synced'}</Badge>
               ) : (
                 <Badge>waiting for first sync</Badge>
               )}

@@ -48,6 +48,16 @@ export function usageFromClaude(u: unknown): Usage {
   };
 }
 
+/** Bytes of text in a tool result's `content`: a string, or a list of text blocks. */
+export function toolResultBytes(content: unknown): number {
+  if (typeof content === 'string') return Buffer.byteLength(content);
+  if (!Array.isArray(content)) return 0;
+  let n = 0;
+  for (const b of content)
+    if (isObj(b) && b.type === 'text' && typeof b.text === 'string') n += Buffer.byteLength(b.text);
+  return n;
+}
+
 /** The text blocks of an assistant message, joined. */
 function assistantText(message: Record<string, unknown>): string {
   const c = message.content;
@@ -178,8 +188,15 @@ export class ClaudeStreamParser {
             kind: 'tool',
             name: block.name,
             summary: summarizeToolInput(block.name, block.input),
+            ...(typeof block.id === 'string' ? { id: block.id } : {}),
           });
         }
+      }
+    } else if (msg.type === 'user' && isObj(msg.message) && Array.isArray(msg.message.content)) {
+      // a tool's result: only its size is taken (the shift's context counters, docs/design/project-graphs.md section 11)
+      for (const block of msg.message.content) {
+        if (!isObj(block) || block.type !== 'tool_result' || typeof block.tool_use_id !== 'string') continue;
+        events.push({ kind: 'toolresult', id: block.tool_use_id, bytes: toolResultBytes(block.content) });
       }
     } else if (msg.type === 'result') {
       const model = dominantModel(msg.modelUsage) ?? this.lastModel;

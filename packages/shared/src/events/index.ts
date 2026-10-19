@@ -12,6 +12,7 @@ import { deskEvents } from './desk.ts';
 import { devopsEvents } from './devops.ts';
 import { environmentEvents } from './environment.ts';
 import { feedEvents } from './feed.ts';
+import { graphEvents } from './graph.ts';
 import { hrEvents } from './hr.ts';
 import { hygieneEvents } from './hygiene.ts';
 import { intakeEvents } from './intake.ts';
@@ -56,6 +57,7 @@ export const DomainEventSchema = z.discriminatedUnion('type', [
   ...ledgerEvents,
   ...chatEvents,
   ...vaultEvents,
+  ...graphEvents,
   ...devopsEvents,
   ...environmentEvents,
   ...sharingEvents,

@@ -18,6 +18,8 @@ export default defineConfig([
     entry: { 'aom-runner': 'src/cli.ts', 'mock-agent': 'src/adapters/mock-agent.ts' },
     clean: true,
     noExternal: ['@aom/shared'],
+    // The project graph indexer's tree-sitter runtime and grammars (WASM) ship next to the bundle, with their licences.
+    onSuccess: 'node scripts/copy-grammars.mjs',
     // Several deps (commander, ws, execa) are CJS/ESM mixes: keep them external, they are runtime dependencies.
   },
   {

@@ -37,6 +37,7 @@ if (config.dataMigrations) {
       clock,
       log: (m) => console.log(m),
       inboundDomain: config.inbound.domain,
+      projectGraphs: config.projectGraphs.enabled,
     });
   } finally {
     await pool.end();

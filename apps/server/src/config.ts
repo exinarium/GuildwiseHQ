@@ -121,6 +121,8 @@ const EnvSchema = z.object({
   AOM_VAPID_SUBJECT: z.string().optional(),
   /** A workstation must stay disconnected this long before its owner is notified (restarts and updates reconnect within it). */
   AOM_PUSH_OFFLINE_GRACE_SECONDS: z.coerce.number().int().min(0).max(3600).default(120),
+  /** Project graphs (docs/design/project-graphs.md): every project gets a vault and its code graph is indexed on the workstation. A kill switch, on by default. */
+  AOM_PROJECT_GRAPHS: bool(true),
   LOG_LEVEL: z.string().default('info'),
 });
 
@@ -200,6 +202,8 @@ export interface Config {
     sandbox: boolean;
     cardCheckZar: number;
   };
+  /** `projectGraphs.enabled` (docs/design/project-graphs.md section 13). */
+  projectGraphs: { enabled: boolean };
   fxUrl: string;
   fxFallbackZar: number;
   logLevel: string;
@@ -283,6 +287,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       sandbox: e.AOM_PAYFAST_SANDBOX,
       cardCheckZar: e.AOM_PAYFAST_CARD_CHECK_ZAR,
     },
+    projectGraphs: { enabled: e.AOM_PROJECT_GRAPHS },
     fxUrl: e.AOM_FX_URL,
     fxFallbackZar: e.AOM_FX_FALLBACK_ZAR,
     logLevel: e.LOG_LEVEL,

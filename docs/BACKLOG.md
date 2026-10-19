@@ -11,7 +11,22 @@ to enhance our ledger and context system and add a project graph for every proje
 project graph to map the relationships between projects. ... I think this can be a massive enhancement and also a very
 cool additional feature of the system."
 
-**Status: backlog, not started.** Nothing has been evaluated yet.
+**Status: built through phase 6 (2026-10-19); phase 8 open.** Design: `docs/design/project-graphs.md` (section 16 says where the
+build differs from the plan; owner decisions: no Graphify code, indexing on the workstation, the graph in the project vault, no
+visual view and nothing code-derived on the server, no MCP server, tree-sitter approved).
+- **Done.** Every project has a vault (a local folder on the owner's primary workstation when none is given; migration 2230, data
+  migration `project-vaults-2026-10`). The runner indexes a clone with the pinned WASM tree-sitter (TypeScript, JavaScript, C#,
+  Python, Go, markdown) into `<project vault>/projects/<name>/graph/` (sharded, sorted, deterministic; modules, files, symbols,
+  EXTRACTED / INFERRED / AMBIGUOUS edges, communities, work layer); the server keeps status only (`project_graphs`, migration 2231;
+  events `ProjectGraphRequested|Indexed|Updated|Failed`). Agents get a fenced "Graph context" section of at most 1.5 KB and the
+  `aom graph query|path|explain|impact` verbs (chats: query and explain); the CEO gets `aom ceo route` (and `--drafts`) answered by
+  the runner from `org/graph/` of the organization vault (migration 2233 keeps only the links the owner asserts). A merge updates
+  the graph incrementally and the vault sync resolves conflicts in generated graph files itself. Measurement: per-shift context
+  counters on `shift.ended`, `shift_context_metrics` (migration 2232), a holdout of one card in five for four weeks, and a report
+  with a stratified bootstrap interval and quality guards on the Costs page. Runner 0.1.32.
+- **Not done.** Phase 8: the public "X% fewer tokens" claim needs four weeks of arm data. Not built: the docs semantic pass, the
+  20-card offline benchmark, decisions and orders in the work layer, "reopened cards" as a quality guard. Phase 7 (the visual
+  view) is withdrawn by the owner.
 
 **Ideas to explore.**
 - **Project graph** per project: a knowledge graph of the codebase and work (modules, services, cards, decisions, ledger
@@ -21,7 +36,7 @@ cool additional feature of the system."
   and agents working across them), so cross-project impact is visible to the CEO/BA and to reviewers.
 - **Ledger and context**: whether graph-based retrieval should complement or replace parts of the ledger search and the
   context assembly for briefs (`apps/server/src/context.ts`, standing orders, ledger entries).
-- A visual graph view in the web app as a product feature, not only an agent tool.
+- ~~A visual graph view in the web app~~ (withdrawn by the owner, 2026-10-19: showing the graph would put code-derived data in the web app).
 
 **First step.** Review the repository: licence (can it be rewritten or embedded commercially?), architecture, language
 and runtime, how graphs are built and stored, maturity and maintenance. Then a short design note in `docs/design/` on

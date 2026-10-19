@@ -12,6 +12,7 @@ import {
 import { confine } from '../fs-safe.ts';
 import { type Logger, nullLogger } from '../log.ts';
 import type { RunnerPaths } from '../paths.ts';
+import { ensureLocalVault, isLocalVaultDir, localVaultWarning, setAsideLocalVault } from './local.ts';
 import { mergeVaultInto, SAME_REPOSITORY_MESSAGE, type VaultMergeResult } from './merge.ts';
 import {
   ensureClone,
@@ -35,6 +36,8 @@ export interface VaultManagerOptions {
   log?: Logger;
   /** Test hook: milliseconds per configured second (default 1000). */
   secondMs?: number;
+  /** A sync resolved a conflict in generated project graph files by itself: rebuild the graph of these folders. */
+  onGraphResolved?: (vaultId: string, folders: string[]) => void;
 }
 
 interface PersistedState {
@@ -67,6 +70,8 @@ export class VaultManager {
   /** Consecutive permanent failures per vault and the time before which the timer does not try again. */
   private failing = new Map<string, { count: number; until: number; error: string }>();
   private stopped = false;
+  /** Local vaults whose "not synced" warning was logged in this process. */
+  private warned = new Set<string>();
   private readonly log: Logger;
   private readonly file: string;
 
@@ -97,6 +102,7 @@ export class VaultManager {
     for (const v of this.config?.vaults ?? []) {
       const dir = this.dir(v.vaultId);
       if (isCloned(dir)) out.push({ vaultId: v.vaultId, localPath: dir, clean: await isClean(dir) });
+      else if (isLocalVaultDir(dir)) out.push({ vaultId: v.vaultId, localPath: dir, clean: true });
     }
     return out;
   }
@@ -111,6 +117,39 @@ export class VaultManager {
 
   vault(vaultId: string): VaultConfig | undefined {
     return this.config?.vaults.find((v) => v.vaultId === vaultId);
+  }
+
+  /**
+   * Runs `fn` with the vault's folder while no sync or write of that vault is running (the project graph writes many
+   * files at once). A repository vault is cloned first when it is not here yet.
+   */
+  async exclusive<T>(vaultId: string, fn: (dir: string) => Promise<T>): Promise<T> {
+    const v = this.vault(vaultId);
+    if (!v) throw new VaultWriteError(`vault ${vaultId} is not configured on this workstation`);
+    if (v.storage === 'local') return this.serialize(vaultId, () => fn(this.localDir(vaultId)));
+    if (!isCloned(this.dir(vaultId))) {
+      const r = await this.syncNow(vaultId);
+      if ('status' in r && r.status === 'error') throw new VaultWriteError(r.error);
+    }
+    return this.serialize(vaultId, () => fn(this.dir(vaultId)));
+  }
+
+  /** A local vault: a folder on this workstation, never cloned, synced or pushed (docs/design/project-graphs.md section 3). */
+  isLocal(vaultId: string): boolean {
+    return this.vault(vaultId)?.storage === 'local';
+  }
+
+  /** The vault's folder, created when it is a local vault (a repository vault is cloned by the sync pass). */
+  localDir(vaultId: string): string {
+    const dir = this.dir(vaultId);
+    ensureLocalVault(dir);
+    return dir;
+  }
+
+  /** A vault that was a local folder and now has a repository: the folder is set aside so the clone can take its place. */
+  private adoptRepository(vaultId: string): void {
+    const aside = setAsideLocalVault(this.dir(vaultId));
+    if (aside) this.log.warn(`vault ${vaultId} now has a repository: the local folder was kept at ${aside}`);
   }
 
   /** `vault.configure`: replaces the vault set, drops state of removed vaults, resumes the ones the manager resolved. */
@@ -133,6 +172,11 @@ export class VaultManager {
     }
     if (this.stopped || !this.config) return;
     for (const v of this.config.vaults) {
+      if (v.storage === 'local') {
+        // No timer, nothing to sync: the folder is created and its status reported once.
+        void this.syncNow(v.vaultId);
+        continue;
+      }
       const t = setInterval(
         () => void this.timerSync(v.vaultId),
         v.syncIntervalSec * (this.opts.secondMs ?? 1000),
@@ -175,7 +219,9 @@ export class VaultManager {
     const cfg = this.config;
     const v = this.vault(vaultId);
     if (!cfg || !v || this.stopped) return { status: 'error', error: 'vault is not configured' };
+    if (v.storage === 'local') return this.reportLocal(vaultId);
     if (this.paused.has(vaultId)) return { status: 'paused' };
+    this.adoptRepository(vaultId);
     const r = await syncVault({
       dir: this.dir(vaultId),
       remoteUrl: v.remoteUrl,
@@ -184,6 +230,26 @@ export class VaultManager {
     });
     this.afterSync(vaultId, r);
     return r;
+  }
+
+  /** The "sync" of a local vault: make sure the folder exists and say where it is. */
+  private reportLocal(vaultId: string): VaultSyncResult {
+    try {
+      const dir = this.localDir(vaultId);
+      if (!this.warned.has(vaultId)) {
+        this.warned.add(vaultId);
+        this.log.warn(localVaultWarning(dir));
+      }
+      this.opts.transport.send('vault.status', {
+        vaultId,
+        lastPullAt: null,
+        lastPushAt: null,
+        localPath: dir,
+      });
+      return { status: 'ok', cloned: false, committed: false, pulled: false, pushed: false };
+    } catch (err) {
+      return { status: 'error', error: err instanceof Error ? err.message : String(err) };
+    }
   }
 
   private afterSync(vaultId: string, r: VaultSyncResult): void {
@@ -203,6 +269,12 @@ export class VaultManager {
       }
     } else this.failing.delete(vaultId);
     if (r.status === 'ok') {
+      if (r.graphResolved?.length) {
+        this.log.warn(
+          `vault ${vaultId}: conflicts in generated graph files were resolved by the sync; rebuilding the graph`,
+        );
+        this.opts.onGraphResolved?.(vaultId, r.graphResolved);
+      }
       this.lastPull.set(vaultId, now);
       if (r.pushed) this.lastPush.set(vaultId, now);
       this.opts.transport.send('vault.status', {
@@ -250,7 +322,12 @@ export class VaultManager {
       const cfg = this.config;
       const v = this.vault(cmd.vaultId);
       if (!cfg || !v) throw new VaultWriteError(`vault ${cmd.vaultId} is not configured on this workstation`);
+      if (v.storage === 'local') {
+        const w = await writeVaultFile(this.localDir(cmd.vaultId), cmd, cfg.identity, { commit: false });
+        return { ...w, pushed: false, paused: false };
+      }
       const dir = this.dir(cmd.vaultId);
+      this.adoptRepository(cmd.vaultId);
       await ensureClone(dir, v.remoteUrl, {});
       const w = await writeVaultFile(dir, cmd, cfg.identity);
       if (this.paused.has(cmd.vaultId))
@@ -277,6 +354,7 @@ export class VaultManager {
       const cfg = this.config;
       const v = this.vault(cmd.vaultId);
       if (!cfg || !v) throw new VaultWriteError(`vault ${cmd.vaultId} is not configured on this workstation`);
+      if (v.storage === 'local') throw new VaultWriteError('a local vault cannot be moved or merged');
       const dir = this.dir(cmd.vaultId);
       await ensureClone(dir, v.remoteUrl, {});
       const w = await moveVaultFolder(dir, cmd, cfg.identity);
@@ -307,6 +385,7 @@ export class VaultManager {
       const cfg = this.config;
       const v = this.vault(cmd.vaultId);
       if (!cfg || !v) throw new VaultWriteError(`vault ${cmd.vaultId} is not configured on this workstation`);
+      if (v.storage === 'local') throw new VaultWriteError('a local vault cannot be moved or merged');
       const dir = this.dir(cmd.vaultId);
       const srcDir = this.dir(cmd.from.vaultId);
       const env = {};

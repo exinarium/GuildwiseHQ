@@ -11,7 +11,7 @@ import {
   type VaultDto,
   type VaultWriteCommand,
 } from '@aom/shared';
-import { orgRoleOf, type Who } from '../auth/org-context.ts';
+import { orgOwnerId, orgRoleOf, type Who } from '../auth/org-context.ts';
 import type { AuthSession } from '../auth/sessions.ts';
 import { loadVisibleProject } from '../authz/scope.ts';
 import type { Ctx } from '../context.ts';
@@ -19,8 +19,9 @@ import { exec, iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import { closeDeskItemIn, raiseDeskItem } from '../desk-port.ts';
 import { conflict, forbidden, notFound } from '../errors.ts';
+import type { AppendInput } from '../eventstore/types.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
-import { assertRemoteUrl, orgScope, projectScope, userActor, userScope } from './common.ts';
+import { assertRemoteUrl, orgScope, projectScope, SYSTEM_ACTOR, userActor, userScope } from './common.ts';
 
 const vaultScope = (v: Row) => (v.project_id ? projectScope(v.org_id, v.project_id) : orgScope(v.org_id));
 
@@ -58,6 +59,7 @@ export async function listVaults(ctx: Ctx, who: Who): Promise<VaultDto[]> {
     kind: v.kind,
     name: v.name,
     remoteUrl: v.remote_url,
+    storage: v.storage ?? 'git',
     syncIntervalSec: v.sync_interval_sec,
     createdAt: iso(v.created_at) as string,
     canEdit: v.can_edit,
@@ -86,6 +88,7 @@ export async function registerVault(
   req: RegisterVaultRequest,
 ): Promise<string> {
   const vaultId = randomUUID();
+  let convertedId: string | null = null;
   await withAppendTx(ctx.pool, async (tx) => {
     let orgId = org.id;
     if (req.kind !== 'project' && !isOrgManager({ orgRole: org.role }))
@@ -94,8 +97,42 @@ export async function registerVault(
       const p = await loadVisibleProject(tx, user.id, req.projectId as string);
       if (p.my_role !== 'owner') throw forbidden('only the project owner can register its vault');
       orgId = p.org_id;
-      if (await one(tx, 'SELECT 1 FROM vaults WHERE project_id=$1', [p.id]))
-        throw conflict('vault_exists', 'this project already has a vault');
+      const existing = await one(
+        tx,
+        'SELECT id, storage, name, sync_interval_sec FROM vaults WHERE project_id=$1',
+        [p.id],
+      );
+      if (existing?.storage === 'local') {
+        // The project's automatic local vault is given a remote repository (docs/design/project-graphs.md section 3):
+        // the same vault, now synced. The runner keeps the old folder aside and clones the repository.
+        assertRemoteUrl(ctx, req.remoteUrl.trim());
+        await ctx.store.append(
+          [
+            {
+              streamId: streamId.vault(existing.id),
+              event: {
+                type: 'VaultUpdated',
+                payload: {
+                  vaultId: existing.id,
+                  orgId: p.org_id,
+                  projectId: p.id,
+                  kind: 'project',
+                  name: req.name ?? existing.name,
+                  remoteUrl: req.remoteUrl.trim(),
+                  syncIntervalSec: req.syncIntervalSec,
+                  storage: 'git',
+                },
+              },
+              actor: userActor(user.id),
+              scope: projectScope(p.org_id, p.id),
+            },
+          ],
+          { tx },
+        );
+        convertedId = existing.id;
+        return;
+      }
+      if (existing) throw conflict('vault_exists', 'this project already has a vault');
     } else if (
       await one(tx, `SELECT 1 FROM vaults WHERE org_id=$1 AND kind='org' AND project_id IS NULL`, [orgId])
     ) {
@@ -123,7 +160,7 @@ export async function registerVault(
       { tx },
     );
   });
-  return vaultId;
+  return convertedId ?? vaultId;
 }
 
 async function editableVault(tx: Queryable, user: AuthSession['user'], vaultId: string): Promise<Row> {
@@ -158,6 +195,11 @@ export async function updateVault(
   await withAppendTx(ctx.pool, async (tx) => {
     const v = await editableVault(tx, user, vaultId);
     if (Object.keys(changes).length === 0) return;
+    if (v.storage === 'local' && changes.remoteUrl !== undefined)
+      throw conflict(
+        'vault_local',
+        'this vault is a local folder; register a repository for the project instead',
+      );
     if (changes.remoteUrl !== undefined) assertRemoteUrl(ctx, changes.remoteUrl.trim());
     await ctx.store.append(
       [
@@ -173,6 +215,9 @@ export async function updateVault(
               name: changes.name ?? v.name,
               remoteUrl: changes.remoteUrl?.trim() ?? v.remote_url,
               syncIntervalSec: changes.syncIntervalSec ?? v.sync_interval_sec,
+              ...(v.storage === 'local'
+                ? { storage: 'local' as const, localWorkstationId: v.local_workstation_id ?? undefined }
+                : {}),
             },
           },
           actor: userActor(user.id),
@@ -243,15 +288,21 @@ export async function resolveVaultConflictIn(
  * Vaults a workstation syncs: the organization-level vaults of the organizations where its user is Owner or Admin
  * (owner decision 12: Members' workstations do not get them) and the vaults of their member projects.
  */
-export async function vaultConfigsFor(db: Queryable, userId: string): Promise<VaultConfig[]> {
+export async function vaultConfigsFor(
+  db: Queryable,
+  userId: string,
+  workstationId?: string,
+): Promise<VaultConfig[]> {
+  // A local vault is a folder on one workstation: only the workstation that holds it gets it.
   const vs = await rows(
     db,
     `SELECT v.* FROM vaults v
-      WHERE (v.project_id IS NULL AND v.org_id IN (SELECT om.org_id FROM org_members om
+      WHERE ((v.project_id IS NULL AND v.org_id IN (SELECT om.org_id FROM org_members om
                WHERE om.user_id = $1 AND om.status = 'active' AND om.role IN ('owner','admin')))
-         OR v.project_id IN (SELECT project_id FROM project_members WHERE user_id = $1 AND status = 'active')
+         OR v.project_id IN (SELECT project_id FROM project_members WHERE user_id = $1 AND status = 'active'))
+        AND (v.storage = 'git' OR v.local_workstation_id = $2::uuid)
       ORDER BY v.created_at, v.id`,
-    [userId],
+    [userId, workstationId ?? null],
   );
   return vs.map((v) => ({
     vaultId: v.id,
@@ -260,6 +311,7 @@ export async function vaultConfigsFor(db: Queryable, userId: string): Promise<Va
     name: v.name,
     remoteUrl: v.remote_url,
     syncIntervalSec: v.sync_interval_sec,
+    ...(v.storage === 'local' ? { storage: 'local' as const } : {}),
   }));
 }
 
@@ -279,7 +331,7 @@ export async function configureCommand(
     [workstationId],
   );
   return {
-    vaults: await vaultConfigsFor(db, ws.user_id),
+    vaults: await vaultConfigsFor(db, ws.user_id, ws.id),
     identity: {
       name: `${devops?.name ?? 'DevOps'} (aom)`,
       email: `${devops?.id ?? ws.id}@agents.aom.invalid`,
@@ -381,13 +433,16 @@ export async function vaultForProject(
     projectId,
   ]);
   if (!p) return null;
+  // The project's own repository vault, else the organization vault, else the project's automatic local vault
+  // (docs/design/project-graphs.md section 3: an organization vault keeps the knowledge it already holds).
   const v =
-    (await one(db, 'SELECT id, kind FROM vaults WHERE project_id=$1', [projectId])) ??
+    (await one(db, `SELECT id, kind FROM vaults WHERE project_id=$1 AND storage='git'`, [projectId])) ??
     (isOrgManager({ orgRole: await orgRoleOf(db, workstationUserId, p.org_id) })
       ? await one(db, `SELECT id, kind FROM vaults WHERE org_id=$1 AND kind='org' AND project_id IS NULL`, [
           p.org_id,
         ])
-      : undefined);
+      : undefined) ??
+    (await one(db, 'SELECT id, kind FROM vaults WHERE project_id=$1', [projectId]));
   if (!v) return null;
   return {
     id: v.id,
@@ -455,8 +510,22 @@ export async function enqueueVaultWrite(
   vaultId: string,
   cmd: Omit<VaultWriteCommand, 'vaultId' | 'push'> & { push?: boolean },
 ): Promise<{ queued: boolean; workstationId?: string; commandId?: string; reason?: string }> {
-  const vault = await one(db, 'SELECT id, org_id, project_id FROM vaults WHERE id=$1', [vaultId]);
+  const vault = await one(
+    db,
+    'SELECT id, org_id, project_id, storage, local_workstation_id FROM vaults WHERE id=$1',
+    [vaultId],
+  );
   if (!vault) return { queued: false, reason: 'vault_not_found' };
+  if (vault.storage === 'local') {
+    // A local vault exists on one workstation only: the write goes there (queued until it connects).
+    if (!vault.local_workstation_id) return { queued: false, reason: 'no_workstation' };
+    const commandId = await enqueueRunnerCommand(db, vault.local_workstation_id, 'vault.write', {
+      vaultId,
+      push: false,
+      ...cmd,
+    });
+    return { queued: true, workstationId: vault.local_workstation_id, commandId };
+  }
   const workstationId = await chooseVaultWriteTarget(db, vault as never);
   if (!workstationId) return { queued: false, reason: 'no_workstation' };
   const commandId = await enqueueRunnerCommand(db, workstationId, 'vault.write', {
@@ -538,4 +607,176 @@ export async function markVaultStatus(
            local_path = COALESCE(EXCLUDED.local_path, workstation_vaults.local_path)`,
     [workstationId, s.vaultId, s.lastPullAt, s.lastPushAt, s.error ?? null, s.localPath ?? null],
   );
+}
+
+// ------------------------------------------------------------------ every project has a vault (graphs design 3)
+
+/** The Org Owner's primary workstation: the owner's earliest paired, active workstation. */
+export async function primaryWorkstationOf(db: Queryable, orgId: string): Promise<string | null> {
+  const ownerId = await orgOwnerId(db, orgId);
+  const r = await one<{ id: string }>(
+    db,
+    `SELECT id FROM workstations WHERE user_id=$1 AND status='active' ORDER BY paired_at, id LIMIT 1`,
+    [ownerId],
+  );
+  return r?.id ?? null;
+}
+
+/**
+ * Every project always has a vault (docs/design/project-graphs.md section 3). When `projectId` has none, a `local` vault is
+ * registered on the Org Owner's primary workstation (a folder, no remote, no sync; the owner backs it up). With no
+ * workstation yet nothing is registered and the request stays open: `ensureProjectVaultsForWorkstation` answers it when
+ * the owner's first workstation connects. Switched off by `projectGraphs.enabled`. Idempotent; returns the vault id when
+ * one was registered now.
+ */
+export async function ensureProjectVaultIn(
+  ctx: Ctx,
+  tx: Tx,
+  projectId: string,
+  reason: 'created' | 'migration' | 'workstation',
+): Promise<string | null> {
+  if (!ctx.config.projectGraphs.enabled) return null;
+  const p = await one(tx, `SELECT id, org_id FROM projects WHERE id=$1 AND kind='project'`, [projectId]);
+  if (!p) return null;
+  if (await one(tx, 'SELECT 1 FROM vaults WHERE project_id=$1', [projectId])) return null;
+  const workstationId = await primaryWorkstationOf(tx, p.org_id);
+  const events: AppendInput[] = [];
+  if (reason !== 'workstation')
+    events.push({
+      streamId: streamId.project(projectId),
+      event: { type: 'ProjectVaultEnsureRequested', payload: { projectId, orgId: p.org_id, reason } },
+      actor: SYSTEM_ACTOR,
+      scope: projectScope(p.org_id, projectId),
+    });
+  const vaultId = randomUUID();
+  if (workstationId)
+    events.push({
+      streamId: streamId.vault(vaultId),
+      event: {
+        type: 'VaultRegistered',
+        payload: {
+          vaultId,
+          orgId: p.org_id,
+          projectId,
+          kind: 'project',
+          name: 'Project vault',
+          remoteUrl: '',
+          syncIntervalSec: 300,
+          storage: 'local',
+          localWorkstationId: workstationId,
+        },
+      },
+      actor: SYSTEM_ACTOR,
+      scope: projectScope(p.org_id, projectId),
+    });
+  if (events.length) await ctx.store.append(events, { tx });
+  return workstationId ? vaultId : null;
+}
+
+/**
+ * A workstation connected: when its user owns an organization whose projects lack a vault, those vaults are created now
+ * on this workstation (if it is the owner's primary one). A local vault left without a live workstation is claimed here
+ * too. Returns the number of vaults registered.
+ */
+export async function ensureProjectVaultsForWorkstation(ctx: Ctx, workstationId: string): Promise<number> {
+  if (!ctx.config.projectGraphs.enabled) return 0;
+  const ws = await one(ctx.pool, `SELECT id, user_id FROM workstations WHERE id=$1 AND status='active'`, [
+    workstationId,
+  ]);
+  if (!ws) return 0;
+  const orgs = await rows<{ id: string }>(ctx.pool, `SELECT id FROM organizations WHERE owner_user_id=$1`, [
+    ws.user_id,
+  ]);
+  let made = 0;
+  for (const o of orgs) {
+    if ((await primaryWorkstationOf(ctx.pool, o.id)) !== workstationId) continue;
+    const missing = await rows<{ id: string }>(
+      ctx.pool,
+      `SELECT p.id FROM projects p WHERE p.org_id=$1 AND p.kind='project'
+          AND NOT EXISTS (SELECT 1 FROM vaults v WHERE v.project_id = p.id) ORDER BY p.created_at, p.id`,
+      [o.id],
+    );
+    for (const p of missing)
+      if (await withAppendTx(ctx.pool, (tx) => ensureProjectVaultIn(ctx, tx, p.id, 'workstation'))) made++;
+    const orphans = await rows<{ id: string }>(
+      ctx.pool,
+      `SELECT v.id FROM vaults v WHERE v.org_id=$1 AND v.storage='local'
+          AND (v.local_workstation_id IS NULL
+               OR NOT EXISTS (SELECT 1 FROM workstations w WHERE w.id = v.local_workstation_id AND w.status='active'))`,
+      [o.id],
+    );
+    for (const v of orphans)
+      await ctx.store.append([
+        {
+          streamId: streamId.vault(v.id),
+          event: { type: 'VaultLocalWorkstationSet', payload: { vaultId: v.id, orgId: o.id, workstationId } },
+          actor: SYSTEM_ACTOR,
+          scope: orgScope(o.id),
+        },
+      ]);
+  }
+  return made;
+}
+
+/** The vault that holds a project's graph: its own vault (any storage), else the organization vault. */
+export async function graphVaultFor(
+  db: Queryable,
+  projectId: string,
+): Promise<{
+  id: string;
+  storage: 'git' | 'local';
+  kind: 'org' | 'project';
+  workstationId: string | null;
+} | null> {
+  const p = await one(db, 'SELECT org_id FROM projects WHERE id=$1', [projectId]);
+  if (!p) return null;
+  const v =
+    (await one(db, 'SELECT id, kind, storage, local_workstation_id FROM vaults WHERE project_id=$1', [
+      projectId,
+    ])) ??
+    (await one(
+      db,
+      `SELECT id, kind, storage, local_workstation_id FROM vaults WHERE org_id=$1 AND kind='org' AND project_id IS NULL`,
+      [p.org_id],
+    ));
+  if (!v) return null;
+  return { id: v.id, storage: v.storage, kind: v.kind, workstationId: v.local_workstation_id ?? null };
+}
+
+/**
+ * The organization graph is kept in the organization vault (docs/design/project-graphs.md section 8). An organization that
+ * has none gets a local one (a folder on the Owner's primary workstation, no remote, no sync) when its graph is first built.
+ * Returns the vault id when one was registered now.
+ */
+export async function ensureOrgVaultIn(ctx: Ctx, tx: Tx, orgId: string): Promise<string | null> {
+  if (!ctx.config.projectGraphs.enabled) return null;
+  if (await one(tx, `SELECT 1 FROM vaults WHERE org_id=$1 AND kind='org' AND project_id IS NULL`, [orgId]))
+    return null;
+  const workstationId = await primaryWorkstationOf(tx, orgId);
+  if (!workstationId) return null;
+  const vaultId = randomUUID();
+  await ctx.store.append(
+    [
+      {
+        streamId: streamId.vault(vaultId),
+        event: {
+          type: 'VaultRegistered',
+          payload: {
+            vaultId,
+            orgId,
+            kind: 'org',
+            name: 'Organization vault',
+            remoteUrl: '',
+            syncIntervalSec: 300,
+            storage: 'local',
+            localWorkstationId: workstationId,
+          },
+        },
+        actor: SYSTEM_ACTOR,
+        scope: orgScope(orgId),
+      },
+    ],
+    { tx },
+  );
+  return vaultId;
 }
