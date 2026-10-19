@@ -23,6 +23,7 @@ import { type Tx, withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { assertWithinLimit } from '../orgs/limits.ts';
+import { specifyStuckBugCards } from '../platform-team/intake.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { eligibleProjectRepos } from '../runner-gateway/read-repos.ts';
 import { type StoredWorkstationRepo, validateWorkstationRepos } from '../runner-gateway/workstation-repos.ts';
@@ -528,6 +529,8 @@ export async function addRepoIn(
 ): Promise<string> {
   const { repoId, event } = await repoAddedEvent(ctx, tx, project, input, actor);
   await ctx.store.append([event], { tx });
+  // Platform bug cards that stayed drafts for want of a repository are specified now.
+  await specifyStuckBugCards(ctx, tx, project.id);
   return repoId;
 }
 

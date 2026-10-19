@@ -2,9 +2,14 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { classifyDeployRisk, maskText, topFrames } from '@aom/shared';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { agentView, candidateCards } from '../src/dispatcher/candidates.ts';
-import { platformPass, platformScan, reportServerError } from '../src/platform-team/detectors.ts';
+import {
+  platformHousekeeping,
+  platformPass,
+  platformScan,
+  reportServerError,
+} from '../src/platform-team/detectors.ts';
 import { drainBugs, reportBug } from '../src/platform-team/intake.ts';
 import { startPause } from '../src/platform-team/pause.ts';
 import { platformFixBudget } from '../src/platform-team/stop-loss.ts';
@@ -360,6 +365,71 @@ describe('bug intake', () => {
     expect(bugs[0]).toMatchObject({ source: 'role_smoke', occurrences: 1, severity: 'degraded' });
     // degraded: no scope, so nothing is paused
     expect(await q('SELECT 1 FROM platform_pauses')).toHaveLength(0);
+  });
+
+  describe('a platform project without a repository', () => {
+    let bare: string;
+    const report = (n: string) =>
+      reportBug(ctx, {
+        source: 'server_5xx',
+        signature: `5xx:GET /${n}:Error:${n}`,
+        title: `GET /${n} fails`,
+        description: 'x',
+        diagnostics: { summary: 'x' },
+      });
+    beforeEach(async () => {
+      const p = await ok<any>(
+        w.t.req('POST', '/api/projects', {
+          cookie: w.owner.cookie,
+          body: { key: `NR${Math.floor(Math.random() * 1e6)}`, name: 'Bare' },
+        }),
+        201,
+      );
+      bare = p.project.id;
+      await ok<any>(
+        w.t.req('PUT', '/api/platform/team', { cookie: root.cookie, body: { orgId, projectId: bare } }),
+      );
+    });
+    afterEach(async () => {
+      await designate();
+    });
+
+    it('(a) leaves a draft card and says so on a pinned desk item that names the missing repository', async () => {
+      const out = await report('nr1');
+      const card = (await q('SELECT * FROM cards WHERE id=$1', [out.cardId]))[0]!;
+      expect(card).toMatchObject({ status: 'draft', project_id: bare });
+      expect((await eventsOf('CardSpecified')).filter((e: any) => e.cardId === out.cardId)).toHaveLength(0);
+      const items = await q(`SELECT * FROM desk_items WHERE org_id=$1 AND subkind='platform_bug'`, [orgId]);
+      expect(items).toHaveLength(1);
+      expect(items[0]?.title).toMatch(/needs specifying: missing repository/);
+      expect(items[0]?.pinned).toBe(true);
+      expect(items[0]?.data).toMatchObject({ cardId: card.id, missing: ['repoId'] });
+    });
+
+    it('(b) specifies the draft by itself when a repository is added, with the events of a manual Specify', async () => {
+      const out = await report('nr2');
+      expect((await q('SELECT status FROM cards WHERE id=$1', [out.cardId]))[0]?.status).toBe('draft');
+      await ok(
+        w.t.req('POST', `/api/projects/${bare}/repos`, {
+          cookie: w.owner.cookie,
+          body: { name: 'toy2', remoteUrl: 'https://github.com/acme/toy2.git' },
+        }),
+        201,
+      );
+      const card = (await q('SELECT * FROM cards WHERE id=$1', [out.cardId]))[0]!;
+      expect(card.repo_id).toBeTruthy();
+      expect(card.status).not.toBe('draft');
+      expect(card.stage).toMatch(/investigate/);
+      const specified = (await eventsOf('CardSpecified')).filter((e: any) => e.cardId === out.cardId);
+      expect(specified).toHaveLength(1);
+      const item = (
+        await q(`SELECT status FROM desk_items WHERE org_id=$1 AND subkind='platform_bug'`, [orgId])
+      )[0];
+      expect(item?.status).not.toBe('open');
+      // idempotent: the housekeeping pass finds nothing more to do
+      await platformHousekeeping(ctx);
+      expect((await eventsOf('CardSpecified')).filter((e: any) => e.cardId === out.cardId)).toHaveLength(1);
+    });
   });
 
   it('rate-limits new cards per hour; the rest is recorded and filed later', async () => {

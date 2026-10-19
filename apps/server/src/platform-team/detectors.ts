@@ -3,9 +3,10 @@ import { DESK_SUBKIND, maskText, REJECTION_STORM, topFrames } from '@aom/shared'
 import type { FastifyRequest } from 'fastify';
 import type { Ctx } from '../context.ts';
 import { one, rows } from '../db/sql.ts';
+import { withAppendTx } from '../db/tx.ts';
 import { detectLoops } from '../reporter/detectors.ts';
 import { expireGrants } from './grants.ts';
-import { drainBugs, markFixedBugs, reportBug } from './intake.ts';
+import { drainBugs, markFixedBugs, reportBug, specifyStuckBugCards } from './intake.ts';
 import { resumeFixedPauses } from './pause.ts';
 import { getPlatformTeam } from './settings.ts';
 
@@ -301,6 +302,8 @@ export async function platformHousekeeping(ctx: Ctx): Promise<void> {
   await resumeFixedPauses(ctx);
   await markFixedBugs(ctx);
   await drainBugs(ctx);
+  const team = await getPlatformTeam(ctx.pool);
+  if (team) await withAppendTx(ctx.pool, (tx) => specifyStuckBugCards(ctx, tx, team.projectId));
   await expireGrants(ctx);
 }
 

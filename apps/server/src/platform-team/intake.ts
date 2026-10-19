@@ -5,12 +5,16 @@ import {
   CRITICAL_REPEATS,
   type FixSize,
   INTAKE_NEW_CARDS_PER_HOUR,
+  missingForSpecify,
   type PauseScope,
+  streamId,
   type TriageBugRequest,
 } from '@aom/shared';
 import type { AuthSession } from '../auth/sessions.ts';
-import { cancelCardIn, createCardIn } from '../commands/cards.ts';
-import { cardMessage } from '../commands/common.ts';
+import { loadWorkflowById } from '../catalogue/loader.ts';
+import { singleRepoDefault } from '../commands/card-repo.ts';
+import { cancelCardIn, cardView, createCardIn, patchCardIn, specifyCardIn } from '../commands/cards.ts';
+import { cardMessage, orgScope, SYSTEM_ACTOR } from '../commands/common.ts';
 import type { Ctx } from '../context.ts';
 import { exec, one, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
@@ -186,7 +190,12 @@ async function recordBug(
   return { bug: next, counted: true, isNew: false, reopened };
 }
 
-async function fileBugCard(ctx: Ctx, tx: Tx, bug: Row, team: PlatformTeam): Promise<Row | null> {
+async function fileBugCard(
+  ctx: Ctx,
+  tx: Tx,
+  bug: Row,
+  team: PlatformTeam,
+): Promise<(Row & { missing?: string[] }) | null> {
   const ownerId = await platformOwner(tx, team);
   if (!ownerId) return null;
   const user = { id: ownerId } as AuthSession['user'];
@@ -255,7 +264,106 @@ async function fileBugCard(ctx: Ctx, tx: Tx, bug: Row, team: PlatformTeam): Prom
       String(bug.signature).slice('runner:'.length),
       created.cardId,
     ]);
-  return { ...updated, ref: created.ref };
+  return { ...updated, ref: created.ref, ...(created.missing?.length ? { missing: created.missing } : {}) };
+}
+
+const MISSING_LABEL: Record<string, string> = { repoId: 'repository' };
+
+/**
+ * The desk item of a freshly filed bug card. A card that could not be specified (no repository in the platform
+ * project, or several) stays a draft: the item says so, and is pinned so the CEO wake is urgent, not informational.
+ */
+async function notifyNewBug(
+  ctx: Ctx,
+  tx: Tx,
+  bug: Row,
+  filed: Row & { missing?: string[] },
+  team: PlatformTeam,
+  triage: string,
+): Promise<void> {
+  const missing = filed.missing ?? [];
+  const stuck = missing.length > 0;
+  const source = SOURCE_LABEL[bug.source as BugSource] ?? 'Report';
+  await notifyPlatformDesk(
+    ctx,
+    {
+      subjectKey: `platform_bug:${bug.signature}`,
+      subkind: 'platform_bug',
+      title: stuck
+        ? `Bug ${filed.ref} needs specifying: missing ${missing.map((m) => MISSING_LABEL[m] ?? m).join(', ')}`
+        : `New bug ${filed.ref}: ${bug.title}`,
+      body: stuck
+        ? `${source}: ${bug.title}\n\n${filed.ref} stays a draft: the platform project cannot specify it (missing: ${missing.join(', ')}). ` +
+          `Add the platform project's only repository (or set the card's repository) and specify the card. ` +
+          `A bug card still in draft is specified automatically when a repository is added to the project.`
+        : `${source}: ${bug.title}\n\n${triage}`,
+      cardId: bug.card_id,
+      projectId: team.projectId,
+      ...(stuck ? { pinned: true } : {}),
+      data: { signature: bug.signature, ...(stuck ? { cardId: bug.card_id, missing } : {}) },
+    },
+    { tx },
+  );
+}
+
+/**
+ * Specifies the platform bug cards that stayed drafts for want of a repository, once the platform project has exactly
+ * one (the same rule a new card uses). The same events as a manual Specify (`CardUpdated` for the repository, then
+ * `CardSpecified`), by the system. Idempotent: a card that is no longer a draft in its first stage, or has a repository,
+ * is not touched. Called when a repository is added to the platform project and by the platform housekeeping pass.
+ */
+export async function specifyStuckBugCards(ctx: Ctx, tx: Tx, projectId: string): Promise<number> {
+  const team = await getPlatformTeam(tx);
+  if (!team || team.projectId !== projectId) return 0;
+  const ownerId = await platformOwner(tx, team);
+  if (!ownerId) return 0;
+  const user = { id: ownerId } as AuthSession['user'];
+  const cards = await rows(
+    tx,
+    `SELECT c.* FROM cards c
+      WHERE c.project_id=$1 AND c.status='draft' AND c.repo_id IS NULL
+        AND (c.id IN (SELECT card_id FROM platform_bugs WHERE card_id IS NOT NULL)
+             OR (c.origin='trigger' AND c.card_type='bug'))
+      ORDER BY c.number FOR UPDATE OF c`,
+    [projectId],
+  );
+  let n = 0;
+  for (const card of cards) {
+    const wf = await loadWorkflowById(tx, card.workflow_version_id);
+    if (!wf || card.stage !== wf.definition.initialStage) continue;
+    const repoId = await singleRepoDefault(tx, projectId, wf.definition);
+    if (!repoId) continue;
+    if (missingForSpecify(wf.definition, { ...cardView(card), repoId }).length > 0) continue;
+    await patchCardIn(ctx, tx, user, card.id, { repoId }, { actor: SYSTEM_ACTOR });
+    await specifyCardIn(ctx, tx, user, card.id, { actor: SYSTEM_ACTOR });
+    // The "needs specifying" item is settled with the problem (by the system, like other self-resolving alerts).
+    const open = await rows(
+      tx,
+      `SELECT id, org_id FROM desk_items WHERE org_id=$1 AND subkind='platform_bug' AND status='open'
+          AND data->>'cardId'=$2 AND data ? 'missing'`,
+      [team.orgId, card.id],
+    );
+    if (open.length > 0)
+      await ctx.store.append(
+        open.map((o) => ({
+          streamId: streamId.desk(o.id),
+          event: {
+            type: 'DeskItemResolved' as const,
+            payload: {
+              deskItemId: o.id,
+              resolution: 'acknowledged' as const,
+              note: 'Fixed: a repository was added and the card is specified.',
+              by: { kind: 'system' as const },
+            },
+          },
+          actor: SYSTEM_ACTOR,
+          scope: orgScope(o.org_id),
+        })),
+        { tx },
+      );
+    n++;
+  }
+  return n;
 }
 
 const newCardsLastHour = async (ctx: Ctx, tx: Tx): Promise<number> =>
@@ -378,18 +486,13 @@ export async function reportBug(ctx: Ctx, r: BugReport): Promise<BugOutcome> {
       if (filed) {
         bug = filed;
         fresh = true;
-        await notifyPlatformDesk(
+        await notifyNewBug(
           ctx,
-          {
-            subjectKey: `platform_bug:${bug.signature}`,
-            subkind: 'platform_bug',
-            title: `New bug ${filed.ref}: ${bug.title}`,
-            body: `${SOURCE_LABEL[bug.source as BugSource] ?? 'Report'}: ${bug.title}\n\nThe platform architect triages it: closes it as invalid, or sets a severity and designs the fix.`,
-            cardId: bug.card_id,
-            projectId: team.projectId,
-            data: { signature: bug.signature },
-          },
-          { tx },
+          tx,
+          bug,
+          filed,
+          team,
+          'The platform architect triages it: closes it as invalid, or sets a severity and designs the fix.',
         );
       }
     }
@@ -428,19 +531,7 @@ export async function drainBugs(ctx: Ctx): Promise<number> {
       if (!bug) return false;
       const filed = await fileBugCard(ctx, tx, bug, team);
       if (!filed) return false;
-      await notifyPlatformDesk(
-        ctx,
-        {
-          subjectKey: `platform_bug:${bug.signature}`,
-          subkind: 'platform_bug',
-          title: `New bug ${filed.ref}: ${bug.title}`,
-          body: `${SOURCE_LABEL[bug.source as BugSource] ?? 'Report'}: ${bug.title}\n\nThe platform architect triages it.`,
-          cardId: filed.card_id,
-          projectId: team.projectId,
-          data: { signature: bug.signature },
-        },
-        { tx },
-      );
+      await notifyNewBug(ctx, tx, bug, filed, team, 'The platform architect triages it.');
       await settleBug(ctx, tx, filed, team, { counted: false, fresh: true });
       return true;
     });
