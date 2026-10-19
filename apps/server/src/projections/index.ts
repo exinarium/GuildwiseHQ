@@ -1,7 +1,7 @@
 import type { Projector, ProjectorMap } from '../eventstore/types.ts';
 import { agentProjectors } from './agents.ts';
 import { blogProjectors } from './blog.ts';
-import { cardProjectors } from './cards.ts';
+import { cardProjectors, releaseHeldDesigns } from './cards.ts';
 import { catalogueProjectors } from './catalogue.ts';
 import { ceoProjectors } from './ceo.ts';
 import { chatProjectors } from './chats.ts';
@@ -89,6 +89,18 @@ const domains: Array<Record<string, Projector>> = [
   codeV6Projectors,
 ];
 
+/**
+ * Events after which a held design may be released: every card event (a dependency done, cancelled, its dependencies
+ * edited, the claim released) and the two merge events of the phase projector. The release runs last for its event.
+ */
+const RELEASES_HELD_DESIGNS = new Set([
+  ...Object.keys(cardProjectors),
+  ...Object.keys(subworkflowProjectors),
+  'CardFinalized',
+  'CardMergeVerified',
+  'ClaimReleased',
+]);
+
 export function buildProjectors(): ProjectorMap {
   const map: ProjectorMap = {};
   for (const d of domains) {
@@ -97,6 +109,11 @@ export function buildProjectors(): ProjectorMap {
       list.push(fn);
       map[type] = list;
     }
+  }
+  for (const type of RELEASES_HELD_DESIGNS) {
+    const list = map[type] ?? [];
+    list.push((tx, e) => releaseHeldDesigns(tx, e));
+    map[type] = list;
   }
   return map;
 }

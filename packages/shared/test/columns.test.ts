@@ -16,6 +16,8 @@ const col = (status: CardStatus, stage: string, reworkRound = 0, cardType = 'fea
 describe('columnFor', () => {
   it('draft is Spec', () => expect(col('draft', 'spec')).toBe('Spec'));
   it('blocked is Blocked whatever the stage', () => expect(col('blocked', 'build')).toBe('Blocked'));
+  it('a held design stays in its stage column, not in Blocked or To do', () =>
+    expect(col('held', 'spec')).toBe(stageOf('spec').column));
   it('waiting is Test (waiting on bug)', () => expect(col('waiting', 'test')).toBe('Test (waiting on bug)'));
   it('waiting on a Finalize merge approval stays in Finalize', () => {
     expect(

@@ -1,8 +1,11 @@
-import { READONLY_DESIGN_CAPABILITY } from '@aom/shared';
+import { READONLY_DESIGN_CAPABILITY, streamId } from '@aom/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { buildSnapshot } from '../src/ceo/snapshot.ts';
+import { projectScope, SYSTEM_ACTOR } from '../src/commands/common.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import type { FakeRunner } from './helpers/fake-runner.ts';
 import { cardRow, eventsOfType, pipeline } from './helpers/pipeline.ts';
+import { seed } from './helpers/seed.ts';
 import { freshState } from './helpers/shifts.ts';
 import { createWorld, fullFields, ok, until, type World } from './helpers/world.ts';
 
@@ -71,6 +74,19 @@ const landBase = (id: string, over = '') =>
     `UPDATE cards SET status='waiting', stage='qa_steps', finalized_at=now(), merged_into_working_at=now() ${over} WHERE id=$1`,
     [id],
   );
+/** The dependency lands the way production sees it: a merge verified event (the projection releases held designs). */
+const orgOf = async () => (await q('SELECT org_id FROM projects WHERE id=$1', [w.projectId]))[0]!.org_id;
+const appendCard = async (id: string, type: string, payload: Record<string, unknown>) =>
+  seed(w, [
+    {
+      streamId: streamId.card(id),
+      event: { type, payload: { cardId: id, ...payload } },
+      actor: SYSTEM_ACTOR,
+      scope: projectScope(await orgOf(), w.projectId),
+    },
+  ]);
+const landEvent = (id: string) =>
+  appendCard(id, 'CardMergeVerified', { workingBranch: 'main', manual: true });
 /** A dispatch pass hands out no new shift. */
 async function idle() {
   const before = r.of('shift.start').length;
@@ -202,7 +218,7 @@ describe('rule 2: the architect designs before the dependencies landed', () => {
     await finish(start.shiftId);
     const row = await cardRow(dep.id);
     expect(row.stage).toBe('investigate');
-    expect(row.status).toBe('queued');
+    expect(row.status).toBe('held');
     expect(row.design_review).toMatchObject({ state: 'waiting', dependencies: [base.ref] });
     expect(row.investigation).toMatchObject({
       location: 'repo',
@@ -233,7 +249,8 @@ describe('rule 2: the architect designs before the dependencies landed', () => {
     await startReadOnly(start);
     await p.report(r, start.shiftId, design({ body: '# design', assumptions: ASSUMPTIONS }));
     await finish(start.shiftId);
-    await landBase(base.id);
+    await landEvent(base.id);
+    expect((await cardRow(dep.id)).status).toBe('queued');
 
     const rev = await p.next('Aria');
     expect(rev.brief.card.ref).toBe(dep.ref);
@@ -271,7 +288,7 @@ describe('rule 2: the architect designs before the dependencies landed', () => {
     await startReadOnly(start);
     await p.report(r, start.shiftId, design({ body: '# design', assumptions: ASSUMPTIONS }));
     await finish(start.shiftId);
-    await landBase(base.id);
+    await landEvent(base.id);
     const rev = await p.next('Aria');
     await p.startShift(r, rev);
     expect(await p.report(r, rev.shiftId, review('revise', [3]))).toMatchObject({ accepted: false });
@@ -327,5 +344,83 @@ describe('rule 2: the architect designs before the dependencies landed', () => {
     await finish(start.shiftId);
     await until(async () => (await cardRow(dep.id)).stage === 'build', 3000, 'card moved to build');
     expect((await cardRow(dep.id)).design_review).toBeNull();
+  });
+});
+
+describe('a held design has its own status', () => {
+  /** TOY-2 designed against TOY-1 (and optionally a second base), held. */
+  async function held(extraBase = false) {
+    await team();
+    const { base, dep } = await pair();
+    let base2: any;
+    if (extraBase) {
+      base2 = await w.card({ title: 'Second base', designNeeded: false });
+      await q(`UPDATE cards SET status='blocked' WHERE id=$1`, [base2.id]);
+      await q(`INSERT INTO card_dependencies (card_id, depends_on_card_id) VALUES ($1,$2)`, [
+        dep.id,
+        base2.id,
+      ]);
+    }
+    const start = await p.next('Aria');
+    await startReadOnly(start);
+    await p.report(r, start.shiftId, design({ body: '# design', assumptions: ASSUMPTIONS }));
+    await finish(start.shiftId);
+    expect((await cardRow(dep.id)).status).toBe('held');
+    return { base, base2, dep };
+  }
+
+  it('is not a dispatch candidate, not queued work for the stuck detectors, and is shown in the CEO snapshot', async () => {
+    const { base, dep } = await held();
+    await idle();
+    await q(`UPDATE cards SET queued_at = now() - interval '3 hours' WHERE id=$1`, [dep.id]);
+    const snap = await buildSnapshot(w.t.app.ctx, await orgOf());
+    expect(snap).toContain(`${dep.ref} id=${dep.id} design ready, waiting for ${base.ref}`);
+    expect(snap).not.toMatch(new RegExp(`${dep.ref} id=\\S+ why=unclaimed`));
+    const { detectUnclaimed } = await import('../src/reporter/detectors.ts');
+    const found = await detectUnclaimed(w.t.app.ctx, new Date(Date.now() + 3 * 3600_000));
+    expect(found.filter((f) => f.subject.cardId === dep.id)).toHaveLength(0);
+    // the board lane is the stage's column and the status is not 'queued'
+    const dto = (await ok<any>(w.t.req('GET', `/api/cards/${dep.id}`, { cookie: cookie() }))).card;
+    expect(dto.status).toBe('held');
+  });
+
+  it('a dependency landing returns the card to queued with the design review kept; the architect gets it', async () => {
+    const { base, dep } = await held();
+    await landEvent(base.id);
+    const row = await cardRow(dep.id);
+    expect(row.status).toBe('queued');
+    expect(row.stage).toBe('investigate');
+    expect(row.design_review).toMatchObject({ state: 'waiting', dependencies: [base.ref] });
+    const rev = await p.next('Aria');
+    expect(rev.brief.card.ref).toBe(dep.ref);
+    expect(rev.brief.investigation).toMatchObject({ review: { dependencies: [base.ref] } });
+  });
+
+  it('stays held while one of several dependencies has not landed', async () => {
+    const { base, base2, dep } = await held(true);
+    await landEvent(base.id);
+    expect((await cardRow(dep.id)).status).toBe('held');
+    await idle();
+    await appendCard(base2.id, 'CardCancelled', { reason: 'dropped' });
+    expect((await cardRow(dep.id)).status).toBe('queued');
+  });
+
+  it('removing the unlanded dependency from the card releases it', async () => {
+    const { base2, dep } = await held(true);
+    const { base } = {
+      base: (
+        await q('SELECT depends_on_card_id AS id FROM card_dependencies WHERE card_id=$1', [dep.id])
+      ).map((r: any) => r.id),
+    };
+    await landEvent(base[0] === base2.id ? base[1] : base[0]);
+    expect((await cardRow(dep.id)).status).toBe('held');
+    await appendCard(dep.id, 'CardUpdated', { changes: { dependencies: [] }, reason: 'not needed' });
+    expect((await cardRow(dep.id)).status).toBe('queued');
+  });
+
+  it('a cancelled held card is cancelled', async () => {
+    const { dep } = await held();
+    await appendCard(dep.id, 'CardCancelled', { reason: 'dropped' });
+    expect((await cardRow(dep.id)).status).toBe('cancelled');
   });
 });

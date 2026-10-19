@@ -443,6 +443,11 @@ export const cardEvents = [
     'DesignHeld',
     z.object({ cardId: Id, dependencies: z.array(z.string()), agentId: Id.optional() }),
   ),
+  /**
+   * Repair (boot data migration `design-held-status-2026-10`): a card whose design is held but whose projected status
+   * still says `queued` (held before the `held` status existed) takes the `held` status. Idempotent in the projection.
+   */
+  defineEvent('DesignHoldConfirmed', z.object({ cardId: Id })),
   /** The assumption review is done: confirmed as they were, or the design revised; the card goes on to Build. */
   defineEvent(
     'DesignReviewed',

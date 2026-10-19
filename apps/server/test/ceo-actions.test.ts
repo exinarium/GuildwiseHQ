@@ -1,8 +1,11 @@
 import { randomUUID } from 'node:crypto';
+import { streamId } from '@aom/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { projectScope, SYSTEM_ACTOR } from '../src/commands/common.ts';
 import { act, appoint, ceo, graduate, startCeoShift, wakeNow } from './helpers/ceo.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import type { FakeRunner } from './helpers/fake-runner.ts';
+import { seed } from './helpers/seed.ts';
 import { createWorld, ok, type World } from './helpers/world.ts';
 
 let w: World;
@@ -56,6 +59,29 @@ describe('cards', () => {
     const same = result(await act(r, shiftId, 'reassign', { card: card.ref, agent: 'Nobody' }));
     expect(same.status).toBe('refused');
     expect(w.t.app.ctx.services.dispatcher.preferred.get(card.id)?.agentId).toBe((await agent('Sam')).id);
+  });
+
+  it('refuses to reassign a card whose design is held until its dependencies landed', async () => {
+    const base = await w.card({ title: 'Base for held' });
+    const card = await w.card({ title: 'Held design', dependencies: [base.id] });
+    const org = (await q('SELECT org_id FROM projects WHERE id=$1', [w.projectId]))[0]!.org_id;
+    await seed(w, [
+      {
+        streamId: streamId.card(card.id),
+        event: { type: 'DesignHeld', payload: { cardId: card.id, dependencies: [base.ref] } },
+        actor: SYSTEM_ACTOR,
+        scope: projectScope(org, w.projectId),
+      },
+    ]);
+    expect((await q(`SELECT status FROM cards WHERE id=$1`, [card.id]))[0]!.status).toBe('held');
+    const res = result(
+      await act(r, shiftId, 'reassign', { card: card.ref, agent: 'Sam' }, { key: 'held-1' }),
+    );
+    expect(res.status).toBe('refused');
+    expect(JSON.stringify(res)).toContain(`held on purpose until ${base.ref} landed`);
+    expect(
+      await q(`SELECT 1 FROM events WHERE type='CardReassigned' AND payload->>'cardId'=$1`, [card.id]),
+    ).toHaveLength(0);
   });
 
   it('cancelling a card is a recommendation by default; when delegated it runs and can be undone', async () => {
