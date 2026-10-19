@@ -136,9 +136,19 @@ export async function syncWorkingBranchUnlocked(input: SyncInput): Promise<SyncR
   if (busy.length > 0) return out('busy', `${busy.length} card shift(s) are running in this repository`);
 
   if (onBranch) {
-    if (dirty) return out('dirty', 'the checkout has uncommitted changes');
+    // Local changes (untracked files, a moved submodule pointer, edits to other files) do not block a fast-forward:
+    // git itself refuses, and changes nothing, when an incoming commit would overwrite one of them.
     const m = await git(repoPath, ['merge', '--ff-only', remote]);
-    if (m.exitCode !== 0) return out('behind', first(m.stderr) || first(m.stdout) || 'fast-forward failed');
+    if (m.exitCode !== 0) {
+      const why = `${m.stderr}\n${m.stdout}`;
+      const files = [...why.matchAll(/^\s+(\S.*)$/gm)].map((x) => x[1]?.trim()).filter(Boolean) as string[];
+      if (dirty && /would be overwritten|untracked working tree files/i.test(why))
+        return out(
+          'dirty',
+          `uncommitted changes would be overwritten${files.length ? `: ${files.slice(0, 5).join(', ')}${files.length > 5 ? ` and ${files.length - 5} more` : ''}` : ''}; commit, stash or discard them, then sync again`,
+        );
+      return out('behind', first(m.stderr) || first(m.stdout) || 'fast-forward failed');
+    }
   } else {
     if (wts.some((w) => w.branch === wb))
       return out('behind', `${wb} is checked out in another worktree; it is left alone`);

@@ -41,7 +41,7 @@ export function syncText(
       };
     case 'dirty':
       return {
-        text: `${b} is ${n(s.behind, 'commit')} behind origin and has uncommitted changes`,
+        text: `${b} is ${n(s.behind, 'commit')} behind origin and was not synced: ${s.detail ?? 'the checkout has uncommitted changes'}`,
         tone: 'warning',
       };
     case 'diverged':

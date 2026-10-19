@@ -52,14 +52,26 @@ describe('syncWorkingBranch', () => {
     expect(tip('HEAD')).toBe(tip('origin/work'));
   });
 
-  it('leaves a dirty checkout alone and reports it', async () => {
+  it('fast-forwards past unrelated local changes (an untracked file) and keeps them', async () => {
+    const { repo, pushWork, tip } = setup();
+    sh(repo.clone, 'git', ['checkout', 'work']);
+    pushWork('c.txt');
+    writeFileSync(join(repo.clone, 'mine.txt'), 'wip');
+    const r = await syncWorkingBranch({ repoPath: repo.clone, workingBranch: 'work' });
+    expect(r).toMatchObject({ state: 'updated', behind: 0, dirty: true, onBranch: true });
+    expect(tip('HEAD')).toBe(tip('origin/work'));
+    expect(sh(repo.clone, 'git', ['status', '--short'])).toContain('mine.txt');
+  });
+
+  it('leaves the checkout alone when a local change would be overwritten, and names the file', async () => {
     const { repo, pushWork, tip } = setup();
     sh(repo.clone, 'git', ['checkout', 'work']);
     const before = tip('HEAD');
     pushWork('c.txt');
-    writeFileSync(join(repo.clone, 'mine.txt'), 'wip');
+    writeFileSync(join(repo.clone, 'c.txt'), 'my own version');
     const r = await syncWorkingBranch({ repoPath: repo.clone, workingBranch: 'work' });
     expect(r).toMatchObject({ state: 'dirty', behind: 1, dirty: true, onBranch: true });
+    expect(r.detail).toContain('c.txt');
     expect(tip('HEAD')).toBe(before);
   });
 
