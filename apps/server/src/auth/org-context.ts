@@ -24,6 +24,7 @@ export interface OrgRow extends Row {
   plan: string;
   features: Record<string, boolean>;
   require_two_factor: boolean;
+  diagnostics_sharing: boolean;
 }
 
 /** A signed-in member acting in one organization. */

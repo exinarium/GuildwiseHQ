@@ -416,6 +416,40 @@ export const platformAuditProjectors: Record<string, Projector> = {
       details: { change: p.change },
     };
   }),
+  BlogTopicQueued: always(async (_tx, e) => {
+    const p = ev<'BlogTopicQueued'>(e).payload;
+    return {
+      action: e.event.type,
+      summary: `Blog topic queued (${p.origin}): ${p.question}`,
+      details: { topicId: p.topicId, area: p.area, origin: p.origin },
+    };
+  }),
+  BlogTopicRejected: always(async (_tx, e) => {
+    const p = ev<'BlogTopicRejected'>(e).payload;
+    return {
+      action: e.event.type,
+      summary: `Blog topic removed from the queue: ${p.reason}`,
+      details: { topicId: p.topicId, reason: p.reason },
+    };
+  }),
+  BlogTopicDeclined: always(async (_tx, e) => {
+    const p = ev<'BlogTopicDeclined'>(e).payload;
+    return {
+      action: e.event.type,
+      summary: `Blog topic declined by the writer: ${p.reason}`,
+      details: { topicId: p.topicId, runId: p.runId },
+    };
+  }),
+  OrgDiagnosticsSharingSet: always(async (tx, e) => {
+    const p = ev<'OrgDiagnosticsSharingSet'>(e).payload;
+    return {
+      action: e.event.type,
+      orgId: p.orgId,
+      targetUserId: p.by,
+      summary: `Diagnostic data sharing ${p.on ? 'switched on' : 'switched off'} for ${await orgName(tx, p.orgId)}`,
+      details: { on: p.on, consentVersion: p.consentVersion },
+    };
+  }),
   ApiKeyCreated: always(async (_tx, e) => {
     const p = ev<'ApiKeyCreated'>(e).payload;
     return {

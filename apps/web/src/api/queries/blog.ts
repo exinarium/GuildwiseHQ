@@ -6,10 +6,13 @@ import {
   BlogPostSchema,
   type BlogSettings,
   BlogSettingsSchema,
+  type BlogTopicList,
+  BlogTopicListSchema,
   type BlogWriter,
   BlogWriterRunResultSchema,
   BlogWriterSchema,
   type CreateApiKeyRequestSchema,
+  type CreateBlogTopicRequest,
   CreatedApiKeySchema,
   DigestPreferenceSchema,
   type PatchBlogSettingsRequestSchema,
@@ -204,3 +207,25 @@ export const usePatchBlogWriter = () =>
 /** Waits for the run (a minute or two) and answers with the run and the queued post. */
 export const useWriteNow = () =>
   useBlogMutation(() => post('/platform/blog/writer/run', undefined, BlogWriterRunResultSchema));
+
+// ---- the research-topic queue (Platform > Blog > Topics)
+
+export function useBlogTopics() {
+  return useQuery({
+    queryKey: ['platform', 'blog', 'topics'],
+    queryFn: () => get('/platform/blog/topics', BlogTopicListSchema),
+    refetchInterval: 30_000,
+  });
+}
+export const useAddBlogTopic = () =>
+  useBlogMutation((v: CreateBlogTopicRequest) =>
+    post<BlogTopicList & { status: 'queued' | 'duplicate'; topicId: string }>('/platform/blog/topics', v),
+  );
+export const useRejectBlogTopic = () =>
+  useBlogMutation((v: { id: string; reason: string }) =>
+    post<BlogTopicList>(`/platform/blog/topics/${v.id}/reject`, { reason: v.reason }, BlogTopicListSchema),
+  );
+export const useMoveBlogTopic = () =>
+  useBlogMutation((id: string) =>
+    post<BlogTopicList>(`/platform/blog/topics/${id}/move`, undefined, BlogTopicListSchema),
+  );

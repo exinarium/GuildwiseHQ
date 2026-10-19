@@ -39,6 +39,13 @@ export const ActiveOrgSchema = z.object({
   graceDays: z.number().int().optional(),
   /** The Owner requires two-factor login of every member. */
   requireTwoFactor: z.boolean().default(false),
+  /** The Owner's consent "Share diagnostic data with Guildwise" (off by default). */
+  diagnosticsSharing: z.boolean().default(false),
+  /**
+   * Whether the consent switch exists for this organization. False for customer organizations until the consent text
+   * has been reviewed (POPIA); true for the platform organization.
+   */
+  diagnosticsSharingAvailable: z.boolean().default(false),
   /** A simulation organization: shown with an always-visible banner; mock workstation, never billed. */
   simulation: z.boolean().default(false),
   banners: z.array(BannerSchema),
@@ -79,11 +86,17 @@ export const OrgDetailResponseSchema = ActiveOrgSchema.extend({
 export type OrgDetailResponse = z.infer<typeof OrgDetailResponseSchema>;
 
 export const PatchOrgRequestSchema = z
-  .object({ name: z.string().trim().min(1).max(120), requireTwoFactor: z.boolean() })
+  .object({
+    name: z.string().trim().min(1).max(120),
+    requireTwoFactor: z.boolean(),
+    /** Owner only. Switching it on needs `consentVersion`: the version of the consent text the Owner saw. */
+    diagnosticsSharing: z.boolean(),
+    consentVersion: z.string().min(1).max(40),
+  })
   .partial()
   .refine(
-    (v) => v.name !== undefined || v.requireTwoFactor !== undefined,
-    'name or requireTwoFactor is required',
+    (v) => v.name !== undefined || v.requireTwoFactor !== undefined || v.diagnosticsSharing !== undefined,
+    'name, requireTwoFactor or diagnosticsSharing is required',
   );
 export type PatchOrgRequest = z.infer<typeof PatchOrgRequestSchema>;
 

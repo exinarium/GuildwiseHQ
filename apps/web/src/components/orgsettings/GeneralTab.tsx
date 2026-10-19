@@ -1,5 +1,10 @@
-import type { OrgDetailResponse } from '@aom/shared';
-import { ArrowRightLeft, LogOut, ShieldCheck } from 'lucide-react';
+import {
+  DIAGNOSTICS_CONSENT_TEXT,
+  DIAGNOSTICS_CONSENT_TITLE,
+  DIAGNOSTICS_CONSENT_VERSION,
+  type OrgDetailResponse,
+} from '@aom/shared';
+import { ArrowRightLeft, LogOut, Share2, ShieldCheck } from 'lucide-react';
 import { type FormEvent, useEffect, useState } from 'react';
 import { useLeaveOrg, useOrgMembers, usePatchOrg, useTransferOwnership } from '../../api/queries/orgs.ts';
 import { PasswordInput } from '../auth/PasswordInput.tsx';
@@ -18,6 +23,7 @@ export function GeneralTab({ org, userId }: { org: OrgDetailResponse; userId: st
   const [target, setTarget] = useState('');
   const [password, setPassword] = useState('');
   const [leaving, setLeaving] = useState(false);
+  const [consenting, setConsenting] = useState(false);
   useEffect(() => setName(org.name), [org.name]);
   const manager = org.role === 'owner' || org.role === 'admin';
   const isOwner = org.role === 'owner';
@@ -127,6 +133,74 @@ export function GeneralTab({ org, userId }: { org: OrgDetailResponse; userId: st
         </div>
         {!isOwner && <p className="mt-2 text-xs text-subtle">Only the Owner changes this.</p>}
       </Panel>
+
+      {/*
+        The diagnostic-data consent. Customer organizations only get this panel once the consent text has been reviewed
+        under POPIA: the server answers `diagnosticsSharingAvailable: false` (flag AOM_DIAGNOSTICS_CONSENT_CUSTOMERS,
+        off by default) and refuses the change. The platform organization always has it.
+      */}
+      {org.diagnosticsSharingAvailable && (
+        <Panel data-testid="diagnostics-sharing">
+          <div className="flex flex-wrap items-start gap-4">
+            <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-brand-soft text-brand-soft-fg">
+              <Share2 aria-hidden="true" className="size-5" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <h2 className="text-lg font-semibold text-fg">{DIAGNOSTICS_CONSENT_TITLE}</h2>
+              <p className="mt-1 text-sm text-muted">
+                Your CEO may share generic, scrubbed records of the problems it notices, to improve Guildwise
+                HQ and as topics for the blog. You are asked before anything is sent.
+              </p>
+            </div>
+            <label className="flex items-center gap-2.5 text-sm font-medium text-fg">
+              <input
+                type="checkbox"
+                role="switch"
+                aria-checked={org.diagnosticsSharing}
+                data-testid="diagnostics-sharing-toggle"
+                className="size-5"
+                checked={org.diagnosticsSharing}
+                disabled={!isOwner || patch.isPending}
+                onChange={(e) => {
+                  if (e.target.checked) setConsenting(true);
+                  else
+                    patch.mutate(
+                      { diagnosticsSharing: false },
+                      { onSuccess: () => toast.success('Diagnostic data is no longer shared') },
+                    );
+                }}
+              />
+              {org.diagnosticsSharing ? 'On' : 'Off'}
+            </label>
+          </div>
+          {!isOwner && <p className="mt-2 text-xs text-subtle">Only the Owner changes this.</p>}
+          <ConfirmDialog
+            open={consenting}
+            onOpenChange={setConsenting}
+            title={`${DIAGNOSTICS_CONSENT_TITLE}?`}
+            confirmLabel="I agree, share"
+            tone="primary"
+            pending={patch.isPending}
+            onConfirm={() =>
+              patch.mutate(
+                { diagnosticsSharing: true, consentVersion: DIAGNOSTICS_CONSENT_VERSION },
+                {
+                  onSuccess: () => {
+                    setConsenting(false);
+                    toast.success('Diagnostic data sharing is on');
+                  },
+                },
+              )
+            }
+          >
+            <div className="flex flex-col gap-2 text-sm text-muted" data-testid="diagnostics-consent-text">
+              {DIAGNOSTICS_CONSENT_TEXT.map((line) => (
+                <p key={line}>{line}</p>
+              ))}
+            </div>
+          </ConfirmDialog>
+        </Panel>
+      )}
 
       {!isOwner && (
         <Panel>

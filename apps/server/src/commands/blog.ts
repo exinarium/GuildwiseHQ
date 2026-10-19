@@ -398,6 +398,8 @@ export async function submitPost(
   content: BlogContent,
   origin: Origin,
   status: 'draft' | 'in_review',
+  /** The queued research topic this article answers (the blog writer only). */
+  opts: { topicId?: string } = {},
 ): Promise<{ post: BlogPost; created: boolean }> {
   assertBlogEnabled(await blogEnabled(ctx));
   const errs = contentErrors(content);
@@ -418,7 +420,15 @@ export async function submitPost(
       streamId: blogStream(postId),
       event: {
         type: 'BlogPostSubmitted',
-        payload: { postId, content, contentHash: hash, origin, status, warnings: contentWarnings(content) },
+        payload: {
+          postId,
+          content,
+          contentHash: hash,
+          origin,
+          status,
+          warnings: contentWarnings(content),
+          ...(opts.topicId ? { topicId: opts.topicId } : {}),
+        },
       },
       actor: origin.userId ? userActor(origin.userId) : SYSTEM_ACTOR,
       scope: adminScope,

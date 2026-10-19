@@ -13,6 +13,7 @@ import {
 import type { OrgRow } from '../auth/org-context.ts';
 import type { Ctx } from '../context.ts';
 import { iso, one } from '../db/sql.ts';
+import { diagnosticsConsentAvailable } from './diagnostics.ts';
 import { limitState, orgLimits, orgUsage } from './limits.ts';
 
 const DAY = 24 * 3600_000;
@@ -171,6 +172,8 @@ export async function activeOrgDto(ctx: Ctx, org: OrgRow, role: OrgRole): Promis
         }
       : {}),
     requireTwoFactor: Boolean(org.require_two_factor),
+    diagnosticsSharing: Boolean(org.diagnostics_sharing),
+    diagnosticsSharingAvailable: await diagnosticsConsentAvailable(ctx, org.id),
     simulation: Boolean(org.simulation),
     // Members see "suspended" and "cancelled" only.
     banners: banners.filter((b) => manager || b.audience === 'all'),

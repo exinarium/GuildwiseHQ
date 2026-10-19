@@ -66,6 +66,12 @@ const EnvSchema = z.object({
   AOM_ASSISTANT_MODEL_PUBLIC: z.string().min(1).default('claude-haiku-4-5'),
   /** Weekly blog digest mail (Monday 08:00 Africa/Johannesburg). Switch off with AOM_BLOG_DIGEST=false (the platform setting can also stop it). */
   AOM_BLOG_DIGEST: bool(true),
+  /**
+   * Shows the "Share diagnostic data with Guildwise" consent switch to customer organizations (default off). Keep it off
+   * until the consent text (packages/shared/src/orgs/diagnostics-consent.ts) has been reviewed under POPIA. The platform
+   * organization (the owner's own) always has the switch.
+   */
+  AOM_DIAGNOSTICS_CONSENT_CUSTOMERS: bool(false),
   /** The Monday briefing mail per member (Monday 08:00 in the organization's time zone). Switch off with AOM_WEEKLY_BRIEFING=false. */
   AOM_WEEKLY_BRIEFING: bool(true),
   /** LinkedIn app credentials, only needed to renew the organization token with its refresh token. */
@@ -175,6 +181,8 @@ export interface Config {
   assistantModelPublic: string;
   /** Send the weekly blog digest (env switch; the super admin's blog settings are a second switch). */
   blogDigest: boolean;
+  /** Customer organizations may see and set the diagnostic-data consent (AOM_DIAGNOSTICS_CONSENT_CUSTOMERS). */
+  diagnosticsConsentForCustomers: boolean;
   /** Send the Monday briefing mails. */
   weeklyBriefing: boolean;
   linkedinClientId: string | undefined;
@@ -255,6 +263,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     assistantPublicDailyUsd: e.AOM_ASSISTANT_PUBLIC_DAILY_USD,
     assistantModelPublic: e.AOM_ASSISTANT_MODEL_PUBLIC,
     blogDigest: e.AOM_BLOG_DIGEST,
+    diagnosticsConsentForCustomers: e.AOM_DIAGNOSTICS_CONSENT_CUSTOMERS,
     weeklyBriefing: e.AOM_WEEKLY_BRIEFING,
     linkedinClientId: e.AOM_LINKEDIN_CLIENT_ID || undefined,
     linkedinClientSecret: e.AOM_LINKEDIN_CLIENT_SECRET || undefined,

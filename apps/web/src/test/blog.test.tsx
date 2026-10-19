@@ -69,6 +69,7 @@ let writer: Record<string, any> = {};
 const freshWriter = () => ({
   enabled: false,
   postsPerDay: 1,
+  queuedPerDay: 1,
   topics: ['Topic one about agents', 'Topic two about automation'],
   model: 'claude-haiku-4-5',
   models: ['claude-haiku-4-5', 'claude-haiku-5-5'],

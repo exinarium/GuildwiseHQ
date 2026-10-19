@@ -3,6 +3,7 @@ import { Newspaper } from 'lucide-react';
 import { Link, useSearchParams } from 'react-router';
 import { usePlatformBlog } from '../../api/queries/blog.ts';
 import { BlogSettingsPanel } from '../../components/blog/BlogSettingsPanel.tsx';
+import { BlogTopicsPanel } from '../../components/blog/BlogTopicsPanel.tsx';
 import { BlogWriterPanel } from '../../components/blog/BlogWriterPanel.tsx';
 import { SocialPanel } from '../../components/blog/SocialPanel.tsx';
 import {
@@ -13,6 +14,7 @@ import {
   ListSkeleton,
   PageHeader,
   Panel,
+  Tabs,
 } from '../../components/ui.tsx';
 import { formatDateTime } from '../../lib/time.ts';
 
@@ -44,12 +46,15 @@ export function PlatformBlog() {
     setParams(next, { replace: true });
   };
   const d = list.data;
-  return (
-    <div>
-      <PageHeader
-        title="Blog"
-        sub="The Guildwise HQ blog: articles from the blog writer (or an outside tool) wait here for your review."
-      />
+  const tab = params.get('tab') === 'topics' ? 'topics' : 'posts';
+  const setTab = (id: string) => {
+    const next = new URLSearchParams(params);
+    if (id === 'topics') next.set('tab', 'topics');
+    else next.delete('tab');
+    setParams(next, { replace: true });
+  };
+  const postsView = () => (
+    <>
       {list.isError && <ErrorBox error={list.error} onRetry={() => list.refetch()} />}
       {d && <BlogSettingsPanel settings={d.settings} />}
       <BlogWriterPanel />
@@ -129,6 +134,35 @@ export function PlatformBlog() {
             failedShares={d.social.failedShares}
             needReconnect={d.social.channelsNeedingReconnect}
           />
+        </div>
+      )}
+    </>
+  );
+  return (
+    <div>
+      <PageHeader
+        title="Blog"
+        sub="The Guildwise HQ blog: articles from the blog writer (or an outside tool) wait here for your review."
+      />
+      <Tabs
+        label="Blog sections"
+        prefix="blog"
+        className="mb-4"
+        value={tab}
+        onChange={setTab}
+        tabs={[
+          { id: 'posts', label: 'Posts', testId: 'blog-tab-posts' },
+          { id: 'topics', label: 'Topics', testId: 'blog-tab-topics' },
+        ]}
+      />
+      {tab === 'topics' && (
+        <div role="tabpanel" id="blog-panel-topics" aria-labelledby="blog-tab-topics">
+          <BlogTopicsPanel />
+        </div>
+      )}
+      {tab === 'posts' && (
+        <div role="tabpanel" id="blog-panel-posts" aria-labelledby="blog-tab-posts">
+          {postsView()}
         </div>
       )}
     </div>

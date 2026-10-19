@@ -213,4 +213,12 @@ export const orgProjectors: Record<string, Projector> = {
     const p = ev<EventOf<'OrgTwoFactorPolicySet'>>(e).payload;
     await exec(tx, 'UPDATE organizations SET require_two_factor=$2 WHERE id=$1', [p.orgId, p.required]);
   },
+  OrgDiagnosticsSharingSet: async (tx, e) => {
+    const p = ev<EventOf<'OrgDiagnosticsSharingSet'>>(e).payload;
+    await exec(
+      tx,
+      `UPDATE organizations SET diagnostics_sharing=$2, diagnostics_consent_version=$3, diagnostics_sharing_at=$4 WHERE id=$1`,
+      [p.orgId, p.on, p.consentVersion, e.createdAt],
+    );
+  },
 };

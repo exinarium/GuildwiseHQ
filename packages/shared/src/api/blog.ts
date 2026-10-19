@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { BLOG_API_SCOPES, BLOG_STATUSES, BLOG_WRITER, SOCIAL_NETWORKS } from '../blog/constants.ts';
 import { BlogContentSchema, BlogSlugSchema } from '../blog/schema.ts';
+import { TOPIC_LIMITS, TOPIC_ORIGINS, TOPIC_STATUSES, TopicAreaSchema } from '../blog/topic.ts';
 import { IsoTime } from './common.ts';
 
 /** The blog and its agent API (docs/design/blog-prd.md, docs/BLOG-API.md). */
@@ -217,6 +218,8 @@ export const BlogWriterSchema = z.object({
   enabled: z.boolean(),
   /** 0 = off, 1 or 2 posts a day. */
   postsPerDay: z.number().int().min(0).max(2),
+  /** How many of a day's articles may come from the topic queue before the rotation (default 1). */
+  queuedPerDay: z.number().int().min(0).max(10).default(1),
   topics: z.array(z.string()),
   model: z.string(),
   models: z.array(z.string()),
@@ -244,6 +247,7 @@ export type BlogWriter = z.infer<typeof BlogWriterSchema>;
 export const PatchBlogWriterRequestSchema = z.object({
   enabled: z.boolean().optional(),
   postsPerDay: z.number().int().min(0).max(2).optional(),
+  queuedPerDay: z.number().int().min(0).max(10).optional(),
   topics: z.array(z.string().trim().min(3).max(BLOG_WRITER.topicChars)).max(BLOG_WRITER.topicsMax).optional(),
   model: z.string().trim().min(1).max(100).optional(),
   capUsd: z.number().min(0).max(BLOG_WRITER.maxCapUsd).optional(),
@@ -259,3 +263,39 @@ export const BlogWriterRunResultSchema = z.object({
   run: BlogWriterRunSchema,
   post: BlogPostSchema.nullable(),
 });
+
+// ---- the research-topic queue (docs/design/ceo-blog-topics.md). No organization appears in any of it.
+
+export const BlogTopicSchema = z.object({
+  id: z.uuid(),
+  question: z.string(),
+  area: TopicAreaSchema,
+  origin: z.enum(TOPIC_ORIGINS),
+  status: z.enum(TOPIC_STATUSES),
+  reason: z.string().nullable(),
+  postId: z.uuid().nullable(),
+  slug: z.string().nullable(),
+  queuedAt: IsoTime,
+  updatedAt: IsoTime,
+});
+export type BlogTopic = z.infer<typeof BlogTopicSchema>;
+
+export const BlogTopicListSchema = z.object({
+  topics: z.array(BlogTopicSchema),
+  queued: z.number().int(),
+});
+export type BlogTopicList = z.infer<typeof BlogTopicListSchema>;
+
+export const CreateBlogTopicRequestSchema = z.object({
+  question: z
+    .string()
+    .trim()
+    .min(1)
+    .max(TOPIC_LIMITS.questionMax + 40),
+  area: TopicAreaSchema,
+  /** Proper nouns the super admin confirms are public (the scrubber's `unknown_proper_noun` override). */
+  allowTerms: z.array(z.string().trim().min(1).max(60)).max(10).optional(),
+});
+export type CreateBlogTopicRequest = z.infer<typeof CreateBlogTopicRequestSchema>;
+
+export const RejectBlogTopicRequestSchema = z.object({ reason: z.string().trim().min(1).max(500) });

@@ -130,6 +130,7 @@ export const PROJECTION_TABLES = [
   'platform_pauses',
   'invitations',
   'blog_posts',
+  'blog_topics',
   'workstations',
   'projects',
   'project_repos',

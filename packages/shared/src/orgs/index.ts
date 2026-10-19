@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+export * from './diagnostics-consent.ts';
 export * from './plans.ts';
 
 /** Org roles (`org_members.role`). A guest is not a member: it is derived from project access (D8). */
