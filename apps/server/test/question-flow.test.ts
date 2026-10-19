@@ -520,6 +520,32 @@ describe('topic routing', () => {
     expect(await itemRow(it!.id)).toMatchObject({ routed_to: 'manager' });
   });
 
+  it('a CEO answer is labelled a CEO decision on the desk item, the card thread and the ledger entry', async () => {
+    await reset();
+    await w.hire('Bea', 'builder', 'junior');
+    await ok<any>(
+      w.t.req('POST', '/api/ceo/appoint', {
+        cookie: w.owner.cookie,
+        body: { workstationId: w.workstationId, name: 'Ada Prime' },
+      }),
+      201,
+    );
+    await q(`UPDATE agents SET runtime='mock', model='mock' WHERE role_key='ceo'`);
+    const { card } = await buildAndAsk('CEO decides');
+    const [it] = await itemsOf(card.id);
+    const qs = await questionShift('Ada Prime');
+    await answer(qs.shiftId, it!.id, 'Take option 1.');
+    r.ended(qs.shiftId, 'reported');
+    const list = await ok<any>(w.t.req('GET', '/api/desk?status=closed', { cookie: w.owner.cookie }));
+    const dto = (list.items ?? list).find((x: any) => x.id === it!.id);
+    expect(dto).toMatchObject({ answeredByAgentName: 'Ada Prime', answeredByAgentRole: 'ceo' });
+    const msgs = await q(`SELECT body FROM thread_messages WHERE thread_id=$1 AND kind='answer'`, [card.id]);
+    expect(msgs.map((m) => m.body)).toEqual(['CEO decision: Take option 1.']);
+    const led = await q('SELECT tags, body FROM ledger_entries WHERE source_desk_item_id=$1', [it!.id]);
+    expect(led[0]!.tags).toEqual(['ceo-decision']);
+    expect(led[0]!.body).toContain('CEO decision, Ada Prime');
+  });
+
   it("routine topics are answered on Sonnet, design keeps the answerer's model", async () => {
     await reset();
     await w.hire('Bea', 'builder', 'junior');

@@ -5,7 +5,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { answerText, choiceFor, defaultOption, deskKindLabel, sortDeskItems } from '../lib/desk.ts';
-import { DeskItem } from '../pages/Desk.tsx';
+import { AgentAnsweredBy, agentAnswerLabel, DeskItem } from '../pages/Desk.tsx';
 
 const base: DeskItemDto = {
   id: '0192f3a0-0000-7000-8000-000000000001',
@@ -274,5 +274,21 @@ describe('DeskItem', () => {
     expect(screen.getByRole('button', { name: 'Approve merge' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Reject' })).toBeInTheDocument();
     expect(screen.queryByRole('form', { name: 'Answer' })).toBeNull();
+  });
+});
+
+describe('answers by agents', () => {
+  const answered = (role: string | null) =>
+    item({ status: 'answered', answeredByAgentName: 'Johnny', answeredByAgentRole: role });
+
+  it('labels a CEO answer as a CEO decision and other agents by name and role', () => {
+    expect(agentAnswerLabel(answered('ceo'))).toBe('CEO decision · Johnny');
+    expect(agentAnswerLabel(answered('ba'))).toBe('Answered by Johnny (ba)');
+    expect(agentAnswerLabel(item({}))).toBeNull();
+  });
+
+  it('shows the CEO badge on an answered item', () => {
+    render(<AgentAnsweredBy item={answered('ceo')} />);
+    expect(screen.getByTestId('answered-by').textContent).toContain('CEO decision · Johnny');
   });
 });

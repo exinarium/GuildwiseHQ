@@ -474,6 +474,9 @@ export async function applyQuestionReport(
       [item.id],
     );
     const by: DeskActor = { kind: 'agent', agentId: agent.id, role: agent.role_key };
+    // A CEO answer says so wherever it shows: the card thread, the ledger entry (tag) and the desk item.
+    const isCeo = agent.role_key === 'ceo';
+    const threadText = isCeo ? `CEO decision: ${report.text as string}` : (report.text as string);
     const entryId = randomUUID();
     const events: AppendInput[] = [
       {
@@ -503,8 +506,8 @@ export async function applyQuestionReport(
             ...(item.project_id ? { projectId: item.project_id } : {}),
             ...(item.card_id ? { cardId: item.card_id } : {}),
             title: truncate(item.title, 120),
-            body: `Question: ${String(item.title).trim()}\n\nAnswer: ${String(report.text).trim()}`,
-            tags: [],
+            body: `Question: ${String(item.title).trim()}\n\n${isCeo ? `Answer (CEO decision, ${agent.name})` : 'Answer'}: ${String(report.text).trim()}`,
+            tags: isCeo ? ['ceo-decision'] : [],
             sourceDeskItemId: item.id,
           },
         },
@@ -515,7 +518,7 @@ export async function applyQuestionReport(
     const card = item.card_id ? await one(tx, 'SELECT * FROM cards WHERE id=$1', [item.card_id]) : undefined;
     if (card)
       events.push(
-        cardMessage(card, { kind: 'agent', agentId: agent.id }, 'answer', report.text as string, {
+        cardMessage(card, { kind: 'agent', agentId: agent.id }, 'answer', threadText, {
           deskItemId: item.id,
           answeredBy: `${agent.name} (${agent.role_key})`,
         }),
@@ -526,7 +529,7 @@ export async function applyQuestionReport(
         item,
         blocked.map((b) => b.card_id),
         { kind: 'agent', agentId: agent.id },
-        report.text as string,
+        threadText,
         { answeredBy: `${agent.name} (${agent.role_key})` },
       )),
     );

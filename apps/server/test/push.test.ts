@@ -264,6 +264,39 @@ describe('routing', () => {
     expect(send).not.toHaveBeenCalled();
   });
 
+  it('does not push a question that is still with an agent; pushes once when it is escalated to the desk', async () => {
+    await subscribe(member);
+    const id = await raise({ addresseeUserId: member.id, routedTo: 'agent' });
+    expect(send).not.toHaveBeenCalled();
+    const escalate = async (routedTo: 'agent' | 'manager') => {
+      await ctx().store.append([
+        {
+          streamId: streamId.desk(id),
+          event: {
+            type: 'QuestionEscalated',
+            payload: { deskItemId: id, routedTo, note: 'passed on' },
+          } as never,
+          actor: { kind: 'system', id: null } as never,
+          scope: { orgId: owner.id, projectId: null, audience: 'org' },
+        },
+      ]);
+      await ctx().services.push?.flush();
+    };
+    await escalate('agent');
+    expect(send).not.toHaveBeenCalled();
+    await escalate('manager');
+    expect(sent()).toHaveLength(1);
+    expect(sent()[0]?.payload.url).toBe(`/desk#desk-item-${id}`);
+    await escalate('manager');
+    expect(sent()).toHaveLength(1); // deduped
+  });
+
+  it('still pushes an approval desk item', async () => {
+    await subscribe(member);
+    await raise({ addresseeUserId: member.id, kind: 'approval', title: 'Approve the merge' });
+    expect(sent()).toHaveLength(1);
+  });
+
   it('never notifies the person who caused it', async () => {
     await subscribe(member);
     await raise({ addresseeUserId: member.id }, { kind: 'user', id: member.id });

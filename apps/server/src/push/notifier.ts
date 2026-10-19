@@ -127,7 +127,7 @@ async function onDeskItem(ctx: Ctx, e: StoredEvent, deskItemId: string): Promise
   const d = await one(
     ctx.pool,
     `SELECT d.id, d.org_id, d.project_id, d.kind, d.subkind, d.blocking, d.title, d.body, d.addressee_user_id,
-            d.subject_key, d.status, d.triage, d.data, c.ref AS card_ref, c.owner_user_id AS card_owner
+            d.subject_key, d.status, d.triage, d.data, d.routed_to, c.ref AS card_ref, c.owner_user_id AS card_owner
        FROM desk_items d LEFT JOIN cards c ON c.id = d.card_id WHERE d.id=$1`,
     [deskItemId],
   );
@@ -175,6 +175,9 @@ async function onDeskItem(ctx: Ctx, e: StoredEvent, deskItemId: string): Promise
     return;
   }
   if (sub && NOT_A_DECISION.has(sub)) return;
+  // A question still with an agent (peer, BA, CEO) is not on the manager's desk yet: the person hears of it when it is
+  // escalated to the desk (QuestionEscalated), not now. Approvals and other kinds are always the manager's.
+  if (d.kind === 'question' && d.routed_to !== 'manager') return;
   // A decision for me: a blocking item, or a question or approval put to a person.
   const decision = d.blocking || d.kind === 'question' || d.kind === 'approval';
   if (!decision) return;
@@ -246,6 +249,7 @@ export function registerPushNotifier(ctx: Ctx): PushService {
     switch (ev.type as string) {
       case 'DeskItemCreated':
       case 'QuestionRaised':
+      case 'QuestionEscalated':
         return onDeskItem(ctx, e, (ev.payload as { deskItemId: string }).deskItemId);
       case 'ApprovalRequested': {
         const p = ev.payload as { cardId: string; approverUserId: string; sha?: string; deskItemId: string };
