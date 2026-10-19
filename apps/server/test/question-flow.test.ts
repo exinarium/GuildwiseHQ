@@ -324,13 +324,13 @@ describe('duplicate checks on every route', () => {
 });
 
 describe('question shifts count for the loop breaker', () => {
-  async function questionShiftRows(cardId: string, itemId: string, n: number, outcome = 'reported') {
+  async function questionShiftRows(cardId: string, itemId: string, n: number) {
     const bea = await agentId('Bea');
     for (let i = 0; i < n; i++)
       await q(
         `INSERT INTO shifts (id, org_id, agent_id, workstation_id, card_id, kind, status, outcome, runtime, model, started_at, ended_at, desk_item_id)
-         SELECT $1, org_id, $2, workstation_id, NULL, 'question', 'ended', $4, runtime, model, now(), now(), $3 FROM agents WHERE id=$2`,
-        [randomUUID(), bea, itemId, outcome],
+         SELECT $1, org_id, $2, workstation_id, NULL, 'question', 'ended', 'reported', runtime, model, now(), now(), $3 FROM agents WHERE id=$2`,
+        [randomUUID(), bea, itemId],
       );
     return cardId;
   }
@@ -411,7 +411,13 @@ describe('question shifts count for the loop breaker', () => {
       text: 'Which retry delay do you want for the 5 uploads?',
     });
     const [item] = await itemsOf(first.card.id);
-    await questionShiftRows(first.card.id, item!.id, 5, 'rejected');
+    const bea = await agentId('Bea');
+    for (let i = 0; i < 5; i++)
+      await q(
+        `INSERT INTO shifts (id, org_id, agent_id, workstation_id, card_id, kind, status, outcome, runtime, model, started_at, ended_at, desk_item_id)
+         SELECT $1, org_id, $2, workstation_id, NULL, 'question', 'ended', 'rejected', runtime, model, now(), now(), $3 FROM agents WHERE id=$2`,
+        [randomUUID(), bea, item!.id],
+      );
     await questionShiftRows(first.card.id, item!.id, 4);
     expect(
       (await detectLoops(w.t.app.ctx.pool)).filter(
