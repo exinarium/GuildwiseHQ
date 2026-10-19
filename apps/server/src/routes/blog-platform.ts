@@ -2,17 +2,21 @@ import {
   BlogContentSchema,
   ConnectSocialChannelRequestSchema,
   CreateApiKeyRequestSchema,
+  CreateBlogTopicRequestSchema,
   EditBlogPostRequestSchema,
   IdParamsSchema,
   PatchBlogSettingsRequestSchema,
   PatchBlogWriterRequestSchema,
   PlatformBlogQuerySchema,
   RejectBlogPostRequestSchema,
+  RejectBlogTopicRequestSchema,
   SOCIAL_NETWORKS,
   SocialNetworkParamsSchema,
+  scrubTopic,
 } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
 import { requireSuperAdmin } from '../auth/guards.ts';
+import { listTopics, moveTopicUp, queueBlogTopic, rejectTopic } from '../blog/topics.ts';
 import { patchWriter, writeNow, writerState } from '../blog/writer/index.ts';
 import {
   blogSettings,
@@ -142,6 +146,35 @@ export function blogPlatformRoutes(ctx: Ctx) {
     app.post('/api/platform/blog/writer/run', async (req) => {
       await requireSuperAdmin(ctx, req);
       return writeNow(ctx, ctx.blogWriter);
+    });
+
+    // ---- research topics (docs/design/ceo-blog-topics.md): the super admin's own questions and the queue
+    app.get('/api/platform/blog/topics', async (req) => {
+      await requireSuperAdmin(ctx, req);
+      return listTopics(ctx);
+    });
+    app.post('/api/platform/blog/topics', { schema: { body: CreateBlogTopicRequestSchema } }, async (req) => {
+      const s = await requireSuperAdmin(ctx, req);
+      // The same gate as every other source: a question that does not pass the scrubber never enters the queue.
+      const r = scrubTopic(req.body, { allowTerms: req.body.allowTerms ?? [] });
+      if (!r.ok)
+        throw badRequest('topic_rejected', 'the question does not pass the topic checks', r.findings);
+      const queued = await queueBlogTopic(ctx, r.topic, 'platform', { by: s.user.id });
+      return { ...queued, ...(await listTopics(ctx)) };
+    });
+    app.post(
+      '/api/platform/blog/topics/:id/reject',
+      { schema: { params: IdParamsSchema, body: RejectBlogTopicRequestSchema } },
+      async (req) => {
+        const s = await requireSuperAdmin(ctx, req);
+        await rejectTopic(ctx, req.params.id, req.body.reason, s.user.id);
+        return listTopics(ctx);
+      },
+    );
+    app.post('/api/platform/blog/topics/:id/move', { schema: { params: IdParamsSchema } }, async (req) => {
+      const s = await requireSuperAdmin(ctx, req);
+      await moveTopicUp(ctx, req.params.id, s.user.id);
+      return listTopics(ctx);
     });
 
     // ---- digests

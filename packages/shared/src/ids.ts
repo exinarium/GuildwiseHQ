@@ -23,6 +23,8 @@ export const streamId = {
   desk: (id: string) => `desk-${id}`,
   platformPause: (id: string) => `platform-pause-${id}`,
   platformTeam: () => 'platform-team',
+  /** The blog writer's topic queue: one stream for the platform, with no organization in it (ceo-blog-topics.md 3.2). */
+  blogTopics: () => 'blog-topics',
   ledger: (id: string) => `ledger-${id}`,
   intake: (id: string) => `intake-${id}`,
   outbound: (id: string) => `outbound-${id}`,

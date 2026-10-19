@@ -141,6 +141,14 @@ export const orgEvents = [
   /** Owner decision 7: the Owner can require two-factor login of every member of the organization. */
   defineEvent('OrgTwoFactorPolicySet', z.object({ orgId: Id, required: z.boolean(), by: Id })),
   /**
+   * The Owner switched the organization-level consent "Share diagnostic data with Guildwise" on or off
+   * (docs/design/ceo-blog-topics.md section 11). `consentVersion` is the version of the consent text that was shown.
+   */
+  defineEvent(
+    'OrgDiagnosticsSharingSet',
+    z.object({ orgId: Id, on: z.boolean(), consentVersion: z.string().min(1).max(40), by: Id }),
+  ),
+  /**
    * A super admin turned simulation mode on or off for an organization (also: changed its pace). A simulation
    * organization runs on the server's simulated workstation, is never billed and can be wiped completely.
    */

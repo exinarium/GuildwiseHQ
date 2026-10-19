@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { BLOG_API_SCOPES, SOCIAL_NETWORKS } from '../blog/constants.ts';
 import { BlogContentSchema } from '../blog/schema.ts';
+import { TOPIC_LIMITS, TopicAreaSchema } from '../blog/topic.ts';
 import { defineEvent, Id, IsoDate } from './define.ts';
 
 /** Who wrote a post: a platform API key, or a super admin typing in the platform UI. */
@@ -33,6 +34,8 @@ export const blogEvents = [
       warnings: z.array(z.string()).default([]),
       /** A launch-set article pre-loaded by the `blog-launch-2026-10` data migration: never shared to social networks, never in the digest. */
       launch: z.boolean().optional(),
+      /** The queued research topic this article answers (`blog_topics.id`); absent for the rotation and for hand-written posts. */
+      topicId: Id.optional(),
     }),
   ),
   defineEvent(
@@ -67,6 +70,41 @@ export const blogEvents = [
       by: Id,
     }),
   ),
+  // ---- the research-topic queue (docs/design/ceo-blog-topics.md). Stream `blog-topics`; no organization anywhere.
+  /**
+   * A research question joined the writer's queue. Strict on purpose: a question, an area and a bucket, and nowhere to
+   * put source material. Customer-origin topics are appended by the hand-off with the system actor and no causation id.
+   */
+  defineEvent(
+    'BlogTopicQueued',
+    z.strictObject({
+      topicId: Id,
+      question: z.string().min(TOPIC_LIMITS.questionMin).max(TOPIC_LIMITS.questionMax),
+      area: TopicAreaSchema,
+      origin: z.enum(['platform', 'customer']),
+    }),
+  ),
+  /** The writer took the topic for a run (a run takes it for one attempt). */
+  defineEvent('BlogTopicWriting', z.object({ topicId: Id, runId: Id })),
+  /** The run failed for a technical reason: the topic is queued again, or declined after the second attempt. */
+  defineEvent('BlogTopicReleased', z.object({ topicId: Id, runId: Id, reason: z.string().max(500) })),
+  /** The writer found no public sources for the question (its `problem` field). */
+  defineEvent(
+    'BlogTopicDeclined',
+    z.object({ topicId: Id, reason: z.string().max(500), runId: Id.nullable() }),
+  ),
+  /** A super admin removed the topic from the queue (or it was withdrawn with a customer's consent). */
+  defineEvent(
+    'BlogTopicRejected',
+    z.object({ topicId: Id, reason: z.string().min(1).max(500), by: Id.nullable() }),
+  ),
+  /** The question is already covered by a published post (`postId`) or by another queued topic (`ofTopicId`). */
+  defineEvent(
+    'BlogTopicDuplicate',
+    z.object({ topicId: Id, postId: Id.optional(), ofTopicId: Id.optional() }),
+  ),
+  /** A super admin moved a queued topic to the front of the queue. */
+  defineEvent('BlogTopicMoved', z.object({ topicId: Id, by: Id })),
   defineEvent('ApiKeyRevoked', z.object({ keyId: Id, by: Id })),
   defineEvent(
     'UserDigestPreferenceSet',

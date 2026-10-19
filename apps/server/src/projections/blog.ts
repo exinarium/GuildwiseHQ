@@ -39,6 +39,13 @@ export const blogProjectors: Record<string, Projector> = {
         p.origin.system ?? null,
       ],
     );
+    if (p.topicId)
+      await exec(
+        tx,
+        `UPDATE blog_topics SET status='drafted', post_id=$2, updated_at=$3
+          WHERE id=$1 AND status IN ('queued','writing')`,
+        [p.topicId, p.postId, e.createdAt],
+      );
   },
   BlogPostRevised: async (tx, e) => {
     const p = (e.event as EventOf<'BlogPostRevised'>).payload;
@@ -74,6 +81,11 @@ export const blogProjectors: Record<string, Projector> = {
          rejection_reason=NULL WHERE id=$1`,
       [p.postId, e.createdAt],
     );
+    await exec(
+      tx,
+      `UPDATE blog_topics SET status='published', updated_at=$2 WHERE post_id=$1 AND status IN ('drafted','published')`,
+      [p.postId, e.createdAt],
+    );
   },
   BlogPostRejected: async (tx, e) => {
     const p = (e.event as EventOf<'BlogPostRejected'>).payload;
@@ -82,6 +94,14 @@ export const blogProjectors: Record<string, Projector> = {
       `UPDATE blog_posts SET status='rejected', rejection_reason=$2, updated_at=$3 WHERE id=$1`,
       [p.postId, p.reason, e.createdAt],
     );
+    // The article for a queued topic was rejected: the topic gets one more attempt, then it is declined.
+    await exec(
+      tx,
+      `UPDATE blog_topics SET status = CASE WHEN attempts >= 2 THEN 'declined' ELSE 'queued' END,
+         reason = 'the article was rejected', post_id = NULL, updated_at=$2
+       WHERE post_id=$1 AND status='drafted'`,
+      [p.postId, e.createdAt],
+    );
   },
   BlogPostUnpublished: async (tx, e) => {
     const p = (e.event as EventOf<'BlogPostUnpublished'>).payload;
@@ -89,5 +109,74 @@ export const blogProjectors: Record<string, Projector> = {
       p.postId,
       e.createdAt,
     ]);
+  },
+  // ---- the research-topic queue (docs/design/ceo-blog-topics.md): no organization appears in any of these
+  BlogTopicQueued: async (tx, e) => {
+    const p = (e.event as EventOf<'BlogTopicQueued'>).payload;
+    await exec(
+      tx,
+      `INSERT INTO blog_topics (id, question, area, origin, status, queued_at, sort_at, updated_at)
+       VALUES ($1,$2,$3,$4,'queued',$5,$5,$5) ON CONFLICT (id) DO NOTHING`,
+      [p.topicId, p.question, p.area, p.origin, e.createdAt],
+    );
+  },
+  BlogTopicWriting: async (tx, e) => {
+    const p = (e.event as EventOf<'BlogTopicWriting'>).payload;
+    await exec(
+      tx,
+      `UPDATE blog_topics SET status='writing', attempts=attempts+1, run_id=$2, updated_at=$3
+        WHERE id=$1 AND status='queued'`,
+      [p.topicId, p.runId, e.createdAt],
+    );
+  },
+  BlogTopicReleased: async (tx, e) => {
+    const p = (e.event as EventOf<'BlogTopicReleased'>).payload;
+    await exec(
+      tx,
+      `UPDATE blog_topics SET status = CASE WHEN attempts >= 2 THEN 'declined' ELSE 'queued' END,
+         reason=$2, updated_at=$3
+       WHERE id=$1 AND status='writing'`,
+      [p.topicId, p.reason, e.createdAt],
+    );
+  },
+  BlogTopicDeclined: async (tx, e) => {
+    const p = (e.event as EventOf<'BlogTopicDeclined'>).payload;
+    await exec(
+      tx,
+      `UPDATE blog_topics SET status='declined', reason=$2, updated_at=$3
+        WHERE id=$1 AND status IN ('queued','writing')`,
+      [p.topicId, p.reason, e.createdAt],
+    );
+  },
+  BlogTopicRejected: async (tx, e) => {
+    const p = (e.event as EventOf<'BlogTopicRejected'>).payload;
+    await exec(
+      tx,
+      `UPDATE blog_topics SET status='rejected', reason=$2, updated_at=$3 WHERE id=$1 AND status='queued'`,
+      [p.topicId, p.reason, e.createdAt],
+    );
+  },
+  BlogTopicDuplicate: async (tx, e) => {
+    const p = (e.event as EventOf<'BlogTopicDuplicate'>).payload;
+    await exec(
+      tx,
+      `UPDATE blog_topics SET status='duplicate', post_id=$2, reason=$3, updated_at=$4 WHERE id=$1 AND status='queued'`,
+      [
+        p.topicId,
+        p.postId ?? null,
+        p.postId ? 'a published post already covers it' : 'a queued topic already covers it',
+        e.createdAt,
+      ],
+    );
+  },
+  BlogTopicMoved: async (tx, e) => {
+    const p = (e.event as EventOf<'BlogTopicMoved'>).payload;
+    await exec(
+      tx,
+      `UPDATE blog_topics SET sort_at = COALESCE((SELECT min(sort_at) FROM blog_topics WHERE status='queued'), $2) - interval '1 second',
+         updated_at=$2
+       WHERE id=$1 AND status='queued'`,
+      [p.topicId, e.createdAt],
+    );
   },
 };

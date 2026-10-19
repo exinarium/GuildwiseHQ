@@ -8,6 +8,7 @@ import {
   canRenameOrg,
   canSetOrgSecurity,
   canTransferOwnership,
+  DIAGNOSTICS_CONSENT_VERSION,
   type OrgGuestDto,
   type OrgInvitationDto,
   type OrgMemberDto,
@@ -27,6 +28,7 @@ import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { senderName } from '../mail/layout.ts';
 import { orgInvitationMail } from '../mail/templates.ts';
+import { diagnosticsConsentAvailable } from '../orgs/diagnostics.ts';
 import { assertWithinLimit } from '../orgs/limits.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { orgScope, projectScope, userActor } from './common.ts';
@@ -67,6 +69,46 @@ export async function setRequireTwoFactor(ctx: Ctx, a: OrgAccess, required: bool
     {
       streamId: streamId.org(a.orgId),
       event: { type: 'OrgTwoFactorPolicySet', payload: { orgId: a.orgId, required, by: a.session.user.id } },
+      actor: userActor(a.session.user.id),
+      scope: orgScope(a.orgId),
+    },
+  ]);
+}
+
+/**
+ * The Owner switches the organization-level consent "Share diagnostic data with Guildwise" on or off (docs/design/
+ * ceo-blog-topics.md section 11). Owner only. Customer organizations cannot set it until the consent text has been
+ * reviewed (POPIA): the server flag `AOM_DIAGNOSTICS_CONSENT_CUSTOMERS` stays off until then. Turning it on needs the
+ * version of the consent text the Owner saw, so the recorded consent names the words that were agreed to.
+ */
+export async function setDiagnosticsSharing(
+  ctx: Ctx,
+  a: OrgAccess,
+  on: boolean,
+  consentVersion: string | undefined,
+): Promise<void> {
+  if (!canSetOrgSecurity({ orgRole: a.role }))
+    throw forbidden('only the Owner can change the diagnostic data consent');
+  if (!(await diagnosticsConsentAvailable(ctx, a.orgId)))
+    throw forbidden('sharing diagnostic data is not available for this organization yet');
+  if (Boolean(a.org.diagnostics_sharing) === on) return;
+  if (on && consentVersion !== DIAGNOSTICS_CONSENT_VERSION)
+    throw conflict(
+      'consent_version',
+      'The consent text has changed. Read the current text and confirm again.',
+    );
+  await ctx.store.append([
+    {
+      streamId: streamId.org(a.orgId),
+      event: {
+        type: 'OrgDiagnosticsSharingSet',
+        payload: {
+          orgId: a.orgId,
+          on,
+          consentVersion: on ? DIAGNOSTICS_CONSENT_VERSION : (consentVersion ?? DIAGNOSTICS_CONSENT_VERSION),
+          by: a.session.user.id,
+        },
+      },
       actor: userActor(a.session.user.id),
       scope: orgScope(a.orgId),
     },

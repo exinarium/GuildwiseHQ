@@ -27,6 +27,7 @@ import {
   resetMemberPassword,
   resetMemberTwoFactor,
   revokeOrgInvitation,
+  setDiagnosticsSharing,
   setMemberProjects,
   setRequireTwoFactor,
   transferOwnership,
@@ -88,6 +89,8 @@ export function orgRoutes(ctx: Ctx) {
       if (req.body.name !== undefined) await renameOrg(ctx, a, req.body.name);
       if (req.body.requireTwoFactor !== undefined)
         await setRequireTwoFactor(ctx, a, req.body.requireTwoFactor);
+      if (req.body.diagnosticsSharing !== undefined)
+        await setDiagnosticsSharing(ctx, a, req.body.diagnosticsSharing, req.body.consentVersion);
       const fresh = await requireOrg(ctx, req, { min: 'admin' });
       const owner = await one<{ id: string; display_name: string; email: string }>(
         ctx.pool,
