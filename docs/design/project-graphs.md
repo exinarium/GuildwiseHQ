@@ -292,6 +292,24 @@ Estimates are labelled as estimates; Phase 0 measures them on this repo and one 
 | Work layer | 0 | negligible (projectors) | server rows |
 | Org graph | 0 (deterministic); CEO judgement only per request | seconds per rebuild | org vault |
 
+**Phase 0 spike results (2026-10-19, measured).** Parser: `@vscode/tree-sitter-wasm` 0.3.1 (MIT; one package that holds the
+tree-sitter runtime as WASM plus the TypeScript, TSX, JavaScript, C#, Python and Go grammars, built by the VS Code team; no
+native module, no install script). Machine: WSL2 on a laptop, Node 22.23. Corpus: this repository at the base commit,
+`git ls-files` filtered to `.ts .tsx .js .cs .py .go`: 1,929 files, 16.1 MB of source (roughly 400k lines).
+
+| Measure | Result |
+|---|---|
+| Runtime and six grammars loaded | 28 ms |
+| Parse of all 1,929 files | 3.5 s (about 4.6 MB/s), 2.70 million syntax nodes, about 50,500 declaration-like nodes |
+| Extra resident memory while parsing (tree deleted after each file) | about 36 MB |
+| Grammar assets shipped | about 9.6 MB for the five needed grammars plus 0.4 MB runtime |
+
+The "a few minutes cold for 100k lines" estimate above was therefore pessimistic for the parse step: parsing takes seconds, and
+the resolve and write steps decide the cold time (measured in the Phase 2 build, below). The 20-card offline benchmark was
+**skipped**: it needs a fixture repository, a grader and paid model runs, far beyond the 30 minutes the Phase 0 budget allows.
+Section 11 keeps it as the only place the claim may be stated before live data exists, and the live holdout of Phase 5 is
+the measurement that ships.
+
 Token cost is charged to the workstation's own Claude account and shows in `shift_costs` like any other shift (the docs pass
 is recorded as a `graph` kind shift, so the owner sees it). The owner sets a monthly cap for the docs pass in project settings.
 
