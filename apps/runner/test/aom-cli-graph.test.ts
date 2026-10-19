@@ -32,6 +32,22 @@ async function setup() {
   return { run: (...argv: string[]) => runAom(argv, ctx), rpcs, out, err };
 }
 
+describe('aom ceo route', () => {
+  it('sends the request, or --drafts; neither is a usage error', async () => {
+    const { run, rpcs, out } = await setup();
+    // the fake runner here answers any `ceo` call with a refusal; only what is sent matters
+    await run('ceo', 'route', 'fix', 'the', 'checkout', 'total').catch(() => undefined);
+    await run('ceo', 'route', '--drafts').catch(() => undefined);
+    expect(rpcs).toEqual([
+      { method: 'ceo', params: { op: 'route', q: 'fix the checkout total' } },
+      { method: 'ceo', params: { op: 'route', q: '', drafts: true } },
+    ]);
+    expect(await run('ceo', 'route')).not.toBe(0);
+    expect(rpcs).toHaveLength(2);
+    expect(out.join('')).toBe('');
+  });
+});
+
 describe('aom graph', () => {
   it('query joins the words, takes --budget, and prints the runner answer', async () => {
     const { run, rpcs, out } = await setup();

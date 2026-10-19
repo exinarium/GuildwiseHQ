@@ -91,6 +91,7 @@ export function loadGraph(graphDir: string, cacheDir?: string): LoadedGraph | nu
               ...(m ? { module: m } : {}),
               ...(o.x ? { exported: true } : {}),
               ...(o.g ? { lang: String(o.g) } : {}),
+              ...(o.pk ? { pkg: String(o.pk) } : {}),
             };
             nodes.set(id, n);
           } else if (o.t === 'w') {

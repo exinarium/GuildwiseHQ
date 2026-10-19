@@ -742,3 +742,41 @@ export async function graphVaultFor(
   if (!v) return null;
   return { id: v.id, storage: v.storage, kind: v.kind, workstationId: v.local_workstation_id ?? null };
 }
+
+/**
+ * The organization graph is kept in the organization vault (docs/design/project-graphs.md section 8). An organization that
+ * has none gets a local one (a folder on the Owner's primary workstation, no remote, no sync) when its graph is first built.
+ * Returns the vault id when one was registered now.
+ */
+export async function ensureOrgVaultIn(ctx: Ctx, tx: Tx, orgId: string): Promise<string | null> {
+  if (!ctx.config.projectGraphs.enabled) return null;
+  if (await one(tx, `SELECT 1 FROM vaults WHERE org_id=$1 AND kind='org' AND project_id IS NULL`, [orgId]))
+    return null;
+  const workstationId = await primaryWorkstationOf(tx, orgId);
+  if (!workstationId) return null;
+  const vaultId = randomUUID();
+  await ctx.store.append(
+    [
+      {
+        streamId: streamId.vault(vaultId),
+        event: {
+          type: 'VaultRegistered',
+          payload: {
+            vaultId,
+            orgId,
+            kind: 'org',
+            name: 'Organization vault',
+            remoteUrl: '',
+            syncIntervalSec: 300,
+            storage: 'local',
+            localWorkstationId: workstationId,
+          },
+        },
+        actor: SYSTEM_ACTOR,
+        scope: orgScope(orgId),
+      },
+    ],
+    { tx },
+  );
+  return vaultId;
+}

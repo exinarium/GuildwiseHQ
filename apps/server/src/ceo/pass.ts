@@ -11,6 +11,7 @@ import {
 } from '@aom/shared';
 import { loadRole } from '../catalogue/loader.ts';
 import { orgScope, runnerActor, SYSTEM_ACTOR } from '../commands/common.ts';
+import { orgGraphScopeFor } from '../commands/org-graph.ts';
 import type { Ctx } from '../context.ts';
 import { exec, one, type Row, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
@@ -141,6 +142,7 @@ async function buildCeoShiftStart(
     maxShiftMinutes: maxMinutes,
     ceo: ceoShift,
     vault,
+    ...(await orgGraphScopeFor(ctx, agent.org_id).then((orgGraph) => (orgGraph ? { orgGraph } : {}))),
   };
 }
 

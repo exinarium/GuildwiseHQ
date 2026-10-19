@@ -167,6 +167,7 @@ export const PROJECTION_TABLES = [
   'vaults',
   'project_graphs',
   'shift_context_metrics',
+  'org_graph_links',
   'devops_requests',
   'run_plans',
   'repo_clones',

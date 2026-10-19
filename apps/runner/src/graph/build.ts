@@ -1,5 +1,5 @@
-import { sha256Hex } from '@aom/shared';
 import { dirname, join, normalize } from 'node:path/posix';
+import { sha256Hex } from '@aom/shared';
 import { isTestPath, type Lang } from './discover.ts';
 import { slug } from './docs.ts';
 import { type Manifest, manifestDir, moduleDirOf } from './modules.ts';
@@ -38,8 +38,10 @@ const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
 export const repoNodeId = (rk: string, name: string) => `${rk}:#repo:${name}`;
 export const moduleNodeId = (rk: string, dir: string) => `${rk}:${dir}#module:${dir}`;
-export const fileNodeId = (rk: string, path: string, test = false) => `${rk}:${path}#${test ? 'test' : 'file'}:${path}`;
-export const symbolNodeId = (rk: string, path: string, sub: string, qname: string) => `${rk}:${path}#${sub}:${qname}`;
+export const fileNodeId = (rk: string, path: string, test = false) =>
+  `${rk}:${path}#${test ? 'test' : 'file'}:${path}`;
+export const symbolNodeId = (rk: string, path: string, sub: string, qname: string) =>
+  `${rk}:${path}#${sub}:${qname}`;
 
 interface SymEntry {
   fact: SymbolFact;
@@ -89,7 +91,14 @@ export function buildGraph(input: BuildInput): BuiltGraph {
   }
   for (const dir of [...moduleFiles.keys()].sort(cmp)) {
     const id = moduleNodeId(rk, dir);
-    addNode({ id, kind: 'module', name: dir === '.' ? '(root)' : sanitizeLabel(dir, 200), path: dir });
+    const own = manifests.find((m) => manifestDir(m) === dir && m.name);
+    addNode({
+      id,
+      kind: 'module',
+      name: dir === '.' ? '(root)' : sanitizeLabel(dir, 200),
+      path: dir,
+      ...(own?.name ? { pkg: own.name } : {}),
+    });
     addEdge({ from: repoId, to: id, kind: 'contains', conf: 'EXTRACTED', src: 'ast' });
   }
 
@@ -229,7 +238,10 @@ export function buildGraph(input: BuildInput): BuiltGraph {
       case 'python':
         return resolvePython(f.path, imp, byPath);
       case 'csharp':
-        return (namespaceFiles.get(imp.spec) ?? []).filter((p) => p !== f.path).sort(cmp).slice(0, MAX_IMPORT_TARGETS);
+        return (namespaceFiles.get(imp.spec) ?? [])
+          .filter((p) => p !== f.path)
+          .sort(cmp)
+          .slice(0, MAX_IMPORT_TARGETS);
       case 'go': {
         for (const gm of goModules) {
           const mod = gm.name as string;
@@ -273,7 +285,8 @@ export function buildGraph(input: BuildInput): BuiltGraph {
       for (const t of frontier) {
         const bf = byPath.get(t);
         if (!bf || bf.facts.symbols.length > 0) continue;
-        for (const r of resolved.get(t) ?? []) for (const x of r.targets) if (!out.has(x)) (out.add(x), next.push(x));
+        for (const r of resolved.get(t) ?? [])
+          for (const x of r.targets) if (!out.has(x)) out.add(x), next.push(x);
       }
       frontier = next;
     }
@@ -310,8 +323,7 @@ export function buildGraph(input: BuildInput): BuiltGraph {
         seenTargets.add(t);
         const tid = fileIds.get(t) as string;
         const tTest = tid.includes('#test:');
-        if (test && !tTest)
-          addEdge({ from: fid, to: tid, kind: 'tests', conf: 'EXTRACTED', src: 'ast' });
+        if (test && !tTest) addEdge({ from: fid, to: tid, kind: 'tests', conf: 'EXTRACTED', src: 'ast' });
         else addEdge({ from: fid, to: tid, kind: 'imports', conf: 'EXTRACTED', src: 'ast' });
       }
       for (const n of imp.names) {
@@ -325,7 +337,8 @@ export function buildGraph(input: BuildInput): BuiltGraph {
     }
     if (f.lang === 'csharp')
       for (const ns of f.facts.namespaces ?? []) for (const p of namespaceFiles.get(ns) ?? []) v.paths.add(p);
-    if (f.lang === 'go') for (const p of dirFiles.get(dirname(f.path)) ?? []) if (p.endsWith('.go')) v.paths.add(p);
+    if (f.lang === 'go')
+      for (const p of dirFiles.get(dirname(f.path)) ?? []) if (p.endsWith('.go')) v.paths.add(p);
     visible.set(f.path, v);
   }
 
@@ -336,7 +349,14 @@ export function buildGraph(input: BuildInput): BuiltGraph {
     for (const l of f.facts.links ?? []) {
       const target = normalize(join(dirname(f.path), decodeURIComponent(l.target).replace(/\/$/, '')));
       const hit = byPath.get(target) ? target : undefined;
-      if (hit) addEdge({ from: fid, to: fileIds.get(hit) as string, kind: 'references', conf: 'EXTRACTED', src: 'doc' });
+      if (hit)
+        addEdge({
+          from: fid,
+          to: fileIds.get(hit) as string,
+          kind: 'references',
+          conf: 'EXTRACTED',
+          src: 'doc',
+        });
     }
     const dir = moduleOfFile.get(f.path) as string;
     // a README documents its own module
@@ -384,7 +404,8 @@ export function buildGraph(input: BuildInput): BuiltGraph {
           if (cands.length === 0) continue;
           const sample = cands[0] as SymEntry;
           const kind: GEdge['kind'] =
-            forced ?? (sample.fact.sub === 'interface' && s.fact.sub !== 'interface' ? 'implements' : 'extends');
+            forced ??
+            (sample.fact.sub === 'interface' && s.fact.sub !== 'interface' ? 'implements' : 'extends');
           pickEdges(s.id, cands, kind);
         }
       }
@@ -407,9 +428,14 @@ export function buildGraph(input: BuildInput): BuiltGraph {
         }
       }
       let cands = (symsByName.get(callee) ?? []).filter((e) => (scope ? scope.has(e.file.path) : inV(v, e)));
-      const callerClass = callerSym?.fact.parent ?? (callerSym && classLike.has(callerSym.fact.sub) ? callerSym.fact.qname : undefined);
+      const callerClass =
+        callerSym?.fact.parent ??
+        (callerSym && classLike.has(callerSym.fact.sub) ? callerSym.fact.qname : undefined);
       const isSelf = c.recv === 'this' || c.recv === 'self' || c.recv === 'base';
-      if (c.isNew) cands = cands.filter((e) => e.fact.sub === 'class' || e.fact.sub === 'struct' || e.fact.sub === 'function');
+      if (c.isNew)
+        cands = cands.filter(
+          (e) => e.fact.sub === 'class' || e.fact.sub === 'struct' || e.fact.sub === 'function',
+        );
       else if (c.recv && !scope) {
         if (isSelf && callerClass) {
           const own = cands.filter((e) => e.file.path === f.path && e.fact.parent === callerClass);
@@ -420,9 +446,22 @@ export function buildGraph(input: BuildInput): BuiltGraph {
         }
       } else if (!c.recv) {
         // a bare call: a function, or (in a class) a method of the same class first
-        const own = callerClass ? cands.filter((e) => e.fact.sub === 'method' && e.fact.parent === callerClass) : [];
-        cands = own.length ? own : cands.filter((e) => e.fact.sub === 'function' || e.fact.sub === 'class' || e.fact.sub === 'struct' || (f.lang === 'csharp' && e.fact.sub === 'method'));
-      } else cands = cands.filter((e) => e.fact.sub === 'function' || e.fact.sub === 'method' || e.fact.sub === 'class');
+        const own = callerClass
+          ? cands.filter((e) => e.fact.sub === 'method' && e.fact.parent === callerClass)
+          : [];
+        cands = own.length
+          ? own
+          : cands.filter(
+              (e) =>
+                e.fact.sub === 'function' ||
+                e.fact.sub === 'class' ||
+                e.fact.sub === 'struct' ||
+                (f.lang === 'csharp' && e.fact.sub === 'method'),
+            );
+      } else
+        cands = cands.filter(
+          (e) => e.fact.sub === 'function' || e.fact.sub === 'method' || e.fact.sub === 'class',
+        );
       if (cands.length) pickEdges(from, cands, 'calls');
     }
   }
@@ -445,7 +484,8 @@ function tryJsFile(base: string, byPath: Map<string, unknown>): string | undefin
   const p = base.replace(/^\.\//, '');
   if (byPath.has(p)) return p;
   const stripped = p.replace(/\.(m|c)?jsx?$/, '');
-  if (stripped !== p) for (const e of ['.ts', '.tsx', '.mts', '.cts']) if (byPath.has(stripped + e)) return stripped + e;
+  if (stripped !== p)
+    for (const e of ['.ts', '.tsx', '.mts', '.cts']) if (byPath.has(stripped + e)) return stripped + e;
   for (const e of JS_EXT) if (byPath.has(p + e)) return p + e;
   for (const e of JS_EXT) if (byPath.has(`${p}/index${e}`)) return `${p}/index${e}`;
   return undefined;

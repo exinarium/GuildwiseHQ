@@ -18,6 +18,7 @@ import { agentActor, orgScope, projectScope, runnerActor, userActor } from '../c
 import { graphScopeFor } from '../commands/graph.ts';
 import { intakeContext } from '../commands/intake.ts';
 import { grantedMcpServers, orgGrantedMcpServers } from '../commands/mcp-servers.ts';
+import { orgGraphScopeFor } from '../commands/org-graph.ts';
 import { vaultForConversation } from '../commands/vaults.ts';
 import type { Ctx } from '../context.ts';
 import { one, rows } from '../db/sql.ts';
@@ -250,6 +251,9 @@ export class ChatRelay {
         ...(mcpGranted.length > 0 ? { mcpServers: mcpGranted } : {}),
         ...(vault ? { vault } : {}),
         ...(graph ? { graph } : {}),
+        ...(ceoState
+          ? await orgGraphScopeFor(ctx, row.org_id).then((orgGraph) => (orgGraph ? { orgGraph } : {}))
+          : {}),
         ...(intake ? { intake } : {}),
       };
       const sent = ctx.services.runners.send(

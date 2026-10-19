@@ -33,6 +33,7 @@ import {
 import { investigationRecordRpc } from '../commands/investigation.ts';
 import { applyMcpServersReport, mcpCallsIn, mergeMcpCalls } from '../commands/mcp-servers.ts';
 import { applyOrgFolderResult, applyOrgFoldersReport } from '../commands/org-folders.ts';
+import { dispatchOrgGraph } from '../commands/org-graph.ts';
 import { applyOutboundResult, finishOutboundCommand, queueApprovedFor } from '../commands/outbox.ts';
 import { applyBranchCheckResult } from '../commands/phases.ts';
 import { questionStatus } from '../commands/question-flow.ts';
@@ -441,6 +442,14 @@ export class RunnerHandlers {
           // Terminal: the answer is the branch's state; "could not move it" is an answer, not a failure.
           await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
           if (msg.ok) await applyRepoSyncStatus(this.ctx, conn.workstationId, msg.result);
+        } else if (cmd?.type === 'graph.org') {
+          // Terminal: the organization graph is built in the vault; the answer is counts and is only logged. A request that
+          // came in while it ran built nothing yet: it is asked again now.
+          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+          if (cmd.payload.dirty === true && typeof cmd.payload.orgId === 'string')
+            await dispatchOrgGraph(this.ctx, cmd.payload.orgId).catch((err) =>
+              this.ctx.log.warn({ err }, 'could not queue the organization graph build'),
+            );
         } else if (cmd?.type === 'graph.index' || cmd?.type === 'graph.update') {
           // Terminal: the answer becomes graph STATUS (an event with ids and counts); a failure is retried by the hello pass.
           await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());

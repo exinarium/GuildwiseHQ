@@ -26,6 +26,7 @@ import {
   isValidReportPath,
   type LedgerMatch,
   normalizeUrl,
+  type OrgGraphScope,
   outcomeDataSchema,
   type PublishRequest,
   type ReadableFolder,
@@ -1381,10 +1382,13 @@ export class ShiftSupervisor {
       report: async (req: IpcReportRequest) => this.submit(s, req.report),
       rpc: async (req: IpcRpcRequest) => {
         // `aom ceo ...` belongs to the CEO's own shifts (the server checks the agent again).
-        if (req.method === 'ceo')
-          return s.msg.kind === 'ceo' && s.msg.agent.roleKey === 'ceo'
-            ? this.deps.rpc(s.msg.shiftId, req.method, req.params)
-            : ({ ok: false, error: 'not_ceo: only the CEO may use `aom ceo`' } as IpcRpcResponse);
+        if (req.method === 'ceo') {
+          if (!(s.msg.kind === 'ceo' && s.msg.agent.roleKey === 'ceo'))
+            return { ok: false, error: 'not_ceo: only the CEO may use `aom ceo`' } as IpcRpcResponse;
+          // `aom ceo route`: read-only, answered here from the organization graph in the organization vault
+          if (req.params.op === 'route') return this.orgRoute(s.msg.orgGraph, req.params);
+          return this.deps.rpc(s.msg.shiftId, req.method, req.params);
+        }
         // A BA task reads a member card of the phase by ref (`aom card <REF>`): the server answers that.
         // A DevOps shift reads its request's card (`aom card show`) through the server, which serves only that card.
         if (req.method === 'card.get' && s.msg.kind === 'devops' && (req.params.ref || req.params.linked))
@@ -1447,6 +1451,19 @@ export class ShiftSupervisor {
         return this.deps.rpc(s.msg.shiftId, req.method, req.params);
       },
     };
+  }
+
+  private orgRoute(scope: OrgGraphScope | undefined, params: Record<string, unknown>): IpcRpcResponse {
+    const q = typeof params.q === 'string' ? params.q : '';
+    const drafts = params.drafts === true;
+    const text = q.trim() || drafts ? this.deps.graph?.()?.route(scope, q, { drafts }) : null;
+    return text
+      ? { ok: true, result: { text } }
+      : {
+          ok: false,
+          error:
+            'the organization graph is not available on this workstation (it is read where the organization vault is kept)',
+        };
   }
 
   /**

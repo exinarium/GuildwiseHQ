@@ -24,7 +24,12 @@ import {
   GitSshPayloadSchema,
   RepoAccessPayloadSchema,
 } from '../forge/index.ts';
-import { GraphIndexPayloadSchema, ShiftContextMetricsSchema } from '../graph/index.ts';
+import {
+  GraphIndexPayloadSchema,
+  GraphOrgPayloadSchema,
+  OrgGraphScopeSchema,
+  ShiftContextMetricsSchema,
+} from '../graph/index.ts';
 import { SWEEP_QUERY_MAX_PATHS, WorktreesSweepPayloadSchema } from '../hygiene/index.ts';
 import { PROTOCOL_VERSION, uuidv7 } from '../ids.ts';
 import { IntakeContextSchema, QuestionShiftSchema } from '../intake/index.ts';
@@ -536,6 +541,8 @@ export const ChatContextSchema = z.object({
   graph: GraphScopeSchema.optional(),
   /** Set for the owner's chat with the CEO: persona, standing instructions, rules and the policy in words. */
   ceo: z.object({ brief: z.string() }).optional(),
+  /** The owner's chat with the CEO: where the organization graph is (`aom ceo route`). Absent: none. */
+  orgGraph: OrgGraphScopeSchema.optional(),
   /**
    * The standing orders that bind this conversation's agent: the organization's plus those of the project in
    * context (DevOps: every project of the organization). Additive; an older server sends none.
@@ -735,6 +742,7 @@ export const RunnerCommandNameSchema = z.enum([
   'runner.pin',
   'graph.index',
   'graph.update',
+  'graph.org',
 ]);
 export type RunnerCommandName = z.infer<typeof RunnerCommandNameSchema>;
 
@@ -797,6 +805,8 @@ export const CommandPayloadSchemas = {
   /** Project graphs: index a repository into the project vault / bring the graph up to a merge commit (docs/design/project-graphs.md). */
   'graph.index': GraphIndexPayloadSchema,
   'graph.update': GraphIndexPayloadSchema,
+  /** Build the organization graph into `org/graph/` of the organization vault (docs/design/project-graphs.md section 8). */
+  'graph.org': GraphOrgPayloadSchema,
 } as const;
 
 /** Announced in `hello.capabilities`-style lists by runners that apply a version pin (`runner.pin`, `welcome.runnerPin`). */
@@ -1230,6 +1240,8 @@ export const ShiftStartSchema = msg('shift.start', {
   baTask: BaTaskShiftSchema.optional(),
   /** The CEO agent's wake or daily review (no card, no worktree); the brief carries a placeholder card. */
   ceo: CeoShiftSchema.optional(),
+  /** A CEO shift: where the organization graph is (`aom ceo route`). Absent: none. */
+  orgGraph: OrgGraphScopeSchema.optional(),
   /** M3: the card's vault (its project vault or the organization vault); the runner reads only this vault and passes only it as `--add-dir`. */
   vault: ShiftVaultSchema.nullable().optional(),
   /** The project's code graph (`arm: 'off'`: the measurement holdout, nothing is offered). Absent: none yet. */

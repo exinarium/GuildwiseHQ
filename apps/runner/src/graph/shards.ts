@@ -22,7 +22,7 @@ import type { GEdge, GNode } from './types.ts';
  * line `{"t":"h","module":"<module id>"}` and its nodes do not repeat `m`.
  *
  * Header line:     t=h module=<id without repo key>
- * Node line keys:  t=n id k=kind s=sub n=name p=path l=line e=endLine m=module x=exported(1) g=lang
+ * Node line keys:  t=n id k=kind s=sub n=name p=path l=line e=endLine m=module x=exported(1) g=lang pk=own package name
  * Edge line keys:  t=e f=from to k=kind c=confidence s=source (omitted: ast) ts=targets (ambiguous)
  */
 const strip = (rk: string, id: string): string => (id.startsWith(`${rk}:`) ? id.slice(rk.length + 1) : id);
@@ -37,6 +37,7 @@ export function nodeLine(n: GNode, rk: string, inModuleShard: boolean): string {
   if (n.module && !inModuleShard) o.m = strip(rk, n.module);
   if (n.exported) o.x = 1;
   if (n.lang) o.g = n.lang;
+  if (n.pkg) o.pk = n.pkg;
   return JSON.stringify(o);
 }
 

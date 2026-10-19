@@ -149,3 +149,66 @@ describe('graph events and commands (nothing derived from code travels)', () => 
     ).toBe(false);
   });
 });
+
+describe('the organization graph: what the Owner asserts and what the workstation is sent', () => {
+  const org = '0192f3a0-0000-7000-8000-000000000002';
+  const link = '0192f3a0-0000-7000-8000-0000000000c1';
+  const p1 = '0192f3a0-0000-7000-8000-0000000000a1';
+  const p2 = '0192f3a0-0000-7000-8000-0000000000a2';
+
+  it('an asserted link ends in project ids or in names the person typed, and nothing else', () => {
+    const base = { linkId: link, orgId: org, kind: 'depends_on', by: p1 };
+    for (const [from, to] of [
+      [{ projectId: p1 }, { projectId: p2 }],
+      [{ projectId: p1 }, { name: 'billing-api' }],
+    ])
+      expect(
+        DomainEventSchema.safeParse({ type: 'OrgGraphLinkAsserted', payload: { ...base, from, to } }).success,
+      ).toBe(true);
+    // a module path or a symbol is not an endpoint; neither is an empty name
+    for (const bad of [{ module: 'apps/web' }, { name: '' }, { projectId: 'not-an-id' }, {}])
+      expect(
+        DomainEventSchema.safeParse({
+          type: 'OrgGraphLinkAsserted',
+          payload: { ...base, from: { projectId: p1 }, to: bad },
+        }).success,
+      ).toBe(false);
+    expect(
+      DomainEventSchema.safeParse({
+        type: 'OrgGraphLinkRetracted',
+        payload: { linkId: link, orgId: org, by: p1 },
+      }).success,
+    ).toBe(true);
+  });
+
+  it('graph.org carries the projects (ids, keys, names, retired), where their graphs are, and the assertions', () => {
+    const payload = {
+      orgId: org,
+      vault: { vaultId: 'v1', storage: 'local' },
+      projects: [
+        {
+          projectId: p1,
+          key: 'SHOP',
+          name: 'Web shop',
+          retired: false,
+          graph: { vaultId: 'v2', folder: 'projects/shop' },
+        },
+        { projectId: p2, key: 'BILL', name: 'Billing', retired: true },
+      ],
+      assertions: [{ linkId: link, from: { projectId: p1 }, to: { name: 'billing-api' }, kind: 'uses' }],
+    };
+    expect(CommandPayloadSchemas['graph.org'].safeParse(payload).success).toBe(true);
+    expect(
+      CommandPayloadSchemas['graph.org'].safeParse({
+        ...payload,
+        projects: [{ ...payload.projects[0], retired: 'no' }],
+      }).success,
+    ).toBe(false);
+  });
+
+  it('the CEO verb route is part of the CEO protocol: read-only, one request text', async () => {
+    const { CeoRpcSchema } = await import('../src/index.ts');
+    expect(CeoRpcSchema.safeParse({ op: 'route', q: 'fix the checkout total' }).success).toBe(true);
+    expect(CeoRpcSchema.safeParse({ op: 'route', q: '' }).success).toBe(false);
+  });
+});

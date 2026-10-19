@@ -1320,6 +1320,8 @@ export class Runner {
       } else if (command === 'repos.rescan') {
         await this.rescan();
         done(true, { repos: this.repos.length });
+      } else if (command === 'graph.org') {
+        done(true, await this.graph.buildOrg(CommandPayloadSchemas['graph.org'].parse(payload)));
       } else if (command === 'graph.index' || command === 'graph.update') {
         // A repository that cannot be indexed is an answer (ok:true, result.ok:false with a fixed reason code).
         const p = CommandPayloadSchemas[command].parse(payload);

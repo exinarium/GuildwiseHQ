@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { GraphFailReasonSchema } from '../graph/index.ts';
+import { GraphFailReasonSchema, OrgLinkEndpointSchema, OrgLinkKindSchema } from '../graph/index.ts';
 import { IsoTime } from './common.ts';
 
 /**
@@ -73,3 +73,38 @@ export const GraphContextReportSchema = z.object({
   }),
 });
 export type GraphContextReport = z.infer<typeof GraphContextReportSchema>;
+
+// ---------------------------------------------------------------------------------- links the Owner asserted
+
+/**
+ * Links between projects that the Owner (or an Admin) asserted: project ids, or names they typed. The derived links (from
+ * code) are not here and not on any server table: they stay in the organization vault on the workstation, and the CEO shows
+ * them in chat (docs/design/project-graphs.md section 8).
+ */
+export const CreateOrgGraphLinkRequestSchema = z.object({
+  from: OrgLinkEndpointSchema,
+  to: OrgLinkEndpointSchema,
+  kind: OrgLinkKindSchema.default('related'),
+  note: z.string().trim().max(300).optional(),
+  /** `accepted-draft`: the person confirmed a link the CEO showed them (both ends are then projects). */
+  origin: z.enum(['owner', 'accepted-draft']).optional(),
+});
+export type CreateOrgGraphLinkRequest = z.infer<typeof CreateOrgGraphLinkRequestSchema>;
+
+const LinkEndSchema = z.object({
+  projectId: z.uuid().nullable(),
+  /** The project key, or the name the person typed. */
+  label: z.string(),
+});
+export const OrgGraphLinkDtoSchema = z.object({
+  id: z.uuid(),
+  from: LinkEndSchema,
+  to: LinkEndSchema,
+  kind: OrgLinkKindSchema,
+  note: z.string().nullable(),
+  origin: z.enum(['owner', 'accepted-draft']),
+  assertedAt: IsoTime,
+});
+export type OrgGraphLinkDto = z.infer<typeof OrgGraphLinkDtoSchema>;
+export const OrgGraphLinksResponseSchema = z.object({ links: z.array(OrgGraphLinkDtoSchema) });
+export type OrgGraphLinksResponse = z.infer<typeof OrgGraphLinksResponseSchema>;

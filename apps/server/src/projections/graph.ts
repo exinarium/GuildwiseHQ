@@ -123,4 +123,25 @@ export const graphProjectors: Record<string, Projector> = {
       ],
     );
   },
+  // Links the Owner asserted (docs/design/project-graphs.md section 8): ids and names they typed, never derived from code.
+  OrgGraphLinkAsserted: async (tx, e) => {
+    const p = (e.event as EventOf<'OrgGraphLinkAsserted'>).payload;
+    const end = (x: (typeof p)['from']) => ('projectId' in x ? [x.projectId, null] : [null, x.name.trim()]);
+    const [fp, fn] = end(p.from);
+    const [tp, tn] = end(p.to);
+    await exec(
+      tx,
+      `INSERT INTO org_graph_links (link_id, org_id, kind, from_project_id, from_name, to_project_id, to_name, note, origin,
+                                    asserted_by, asserted_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT (link_id) DO NOTHING`,
+      [p.linkId, p.orgId, p.kind, fp, fn, tp, tn, p.note ?? null, p.origin, p.by, e.createdAt],
+    );
+  },
+  OrgGraphLinkRetracted: async (tx, e) => {
+    const p = (e.event as EventOf<'OrgGraphLinkRetracted'>).payload;
+    await exec(tx, 'UPDATE org_graph_links SET retracted_at=$2 WHERE link_id=$1 AND retracted_at IS NULL', [
+      p.linkId,
+      e.createdAt,
+    ]);
+  },
 };

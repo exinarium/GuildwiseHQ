@@ -125,13 +125,17 @@ export async function dispatchGraphCommand(
   if (!graphsEnabled(ctx)) return false;
   const built = await graphIndexPayload(ctx.pool, projectId, repoId);
   if (!built) return false;
-  const pending = await one(
-    ctx.pool,
-    `SELECT 1 FROM runner_commands WHERE type IN ('graph.index','graph.update') AND status IN ('pending','sent')
-        AND payload->>'repoId' = $1 AND workstation_id = $2`,
-    [repoId, built.workstationId],
-  );
-  if (pending) return true;
+  // An update is never merged into another request: each merge brings its own card ref and title for the work layer, and
+  // updates are cheap (changed files only). A full index is only asked once while one waits.
+  if (!update) {
+    const pending = await one(
+      ctx.pool,
+      `SELECT 1 FROM runner_commands WHERE type='graph.index' AND status IN ('pending','sent')
+          AND payload->>'repoId' = $1 AND workstation_id = $2`,
+      [repoId, built.workstationId],
+    );
+    if (pending) return true;
+  }
   await enqueueRunnerCommand(ctx.pool, built.workstationId, update ? 'graph.update' : 'graph.index', {
     ...built.payload,
     ...(update ?? {}),

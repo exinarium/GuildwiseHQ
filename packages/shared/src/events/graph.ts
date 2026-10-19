@@ -1,5 +1,11 @@
 import { z } from 'zod';
-import { GraphFailReasonSchema, GraphRepoKeySchema, ShiftContextMetricsSchema } from '../graph/index.ts';
+import {
+  GraphFailReasonSchema,
+  GraphRepoKeySchema,
+  OrgLinkEndpointSchema,
+  OrgLinkKindSchema,
+  ShiftContextMetricsSchema,
+} from '../graph/index.ts';
 import { defineEvent, Id } from './define.ts';
 
 /**
@@ -97,4 +103,24 @@ export const graphEvents = [
       })
       .extend(ShiftContextMetricsSchema.shape),
   ),
+  /**
+   * The Owner (or an Admin) asserted a link between two projects, or between a project and something they named
+   * (docs/design/project-graphs.md section 8). Endpoints are project ids or names the person typed: never anything derived
+   * from code. `origin: 'accepted-draft'`: the person accepted a draft the CEO showed them in chat (the endpoints are then
+   * project ids only).
+   */
+  defineEvent(
+    'OrgGraphLinkAsserted',
+    z.object({
+      linkId: Id,
+      orgId: Id,
+      from: OrgLinkEndpointSchema,
+      to: OrgLinkEndpointSchema,
+      kind: OrgLinkKindSchema,
+      note: z.string().max(300).optional(),
+      origin: z.enum(['owner', 'accepted-draft']).default('owner'),
+      by: Id,
+    }),
+  ),
+  defineEvent('OrgGraphLinkRetracted', z.object({ linkId: Id, orgId: Id, by: Id })),
 ] as const;

@@ -3,9 +3,12 @@ import { join } from 'node:path';
 import {
   type GraphIndexPayload,
   type GraphIndexResult,
+  type GraphOrgPayload,
+  type GraphOrgResult,
   type GraphScope,
   type IpcRpcResponse,
   isSafeVaultFolder,
+  type OrgGraphScope,
 } from '@aom/shared';
 import { type Logger, nullLogger } from '../log.ts';
 import type { RunnerPaths } from '../paths.ts';
@@ -13,6 +16,14 @@ import type { VaultManager } from '../vaults/manager.ts';
 import { briefQueryText, cardHints, graphBriefSection } from './brief.ts';
 import { GraphIndexError, indexRepository } from './indexer.ts';
 import { loadGraph } from './load.ts';
+import {
+  assembleOrgGraph,
+  describeDrafts,
+  type OrgProject,
+  readOrgGraph,
+  routeRequest,
+  writeOrgGraph,
+} from './org.ts';
 import { GraphIndex } from './query.ts';
 import { manifestPath } from './store.ts';
 import { updateRepository } from './update.ts';
@@ -182,6 +193,58 @@ export class GraphService {
       if (r.ok) n++;
     }
     return n;
+  }
+
+  // ---------------------------------------------------------------------------------- the organization graph
+
+  /**
+   * `graph.org`: builds the organization graph from the project graphs this workstation can read and writes it to
+   * `org/graph/` of the organization vault (docs/design/project-graphs.md section 8). The answer to the server is counts.
+   */
+  async buildOrg(payload: GraphOrgPayload): Promise<GraphOrgResult> {
+    const { vaults } = this.deps;
+    const v = vaults.vault(payload.vault.vaultId);
+    if (!v) return { ok: false, reason: 'no_vault' };
+    try {
+      const projects: OrgProject[] = payload.projects.map((p) => ({
+        projectId: p.projectId,
+        key: p.key,
+        name: p.name,
+        retired: p.retired,
+        graph: p.graph
+          ? (this.load({ vaultId: p.graph.vaultId, folder: p.graph.folder, arm: 'on' })?.g ?? null)
+          : null,
+      }));
+      const g = assembleOrgGraph(projects, payload.assertions);
+      const wr = await vaults.exclusive(payload.vault.vaultId, async (dir) =>
+        writeOrgGraph(dir, g, this.deps.version),
+      );
+      if (v.storage !== 'local' && wr.written + wr.deleted > 0) void vaults.syncNow(payload.vault.vaultId);
+      this.log.info(
+        `organization graph: ${projects.length} projects (${projects.filter((p) => p.graph).length} with a graph), ${g.derived.length} derived links, ${wr.written} files written`,
+      );
+      return {
+        ok: true,
+        projects: projects.length,
+        withGraph: projects.filter((p) => p.graph).length,
+        drafts: g.derived.filter((d) => d.status === 'draft').length,
+        links: g.derived.length + g.assertions.length,
+      };
+    } catch (err) {
+      this.log.warn(`organization graph failed: ${err instanceof Error ? err.message : String(err)}`);
+      return { ok: false, reason: 'error' };
+    }
+  }
+
+  /**
+   * `aom ceo route "<request>"`: the projects and areas a request belongs to, from `org/graph/` of the organization vault
+   * on this workstation. Read-only; null when the graph is not here.
+   */
+  route(scope: OrgGraphScope | undefined, request: string, opts: { drafts?: boolean } = {}): string | null {
+    if (!scope || !this.deps.vaults.vault(scope.vaultId)) return null;
+    const data = readOrgGraph(this.deps.vaults.dir(scope.vaultId));
+    if (!data) return null;
+    return opts.drafts ? describeDrafts(data) : routeRequest(data, request);
   }
 
   // ------------------------------------------------------------------------------------------------ queries

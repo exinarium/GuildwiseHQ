@@ -81,6 +81,7 @@ const BOOLEAN_FLAGS = new Set([
   'investigation',
   'agree',
   'disagree',
+  'drafts',
 ]);
 
 /** Verbs whose JSON body can be passed inline (`--json '<json>'`): there `--json` takes a value instead of being a switch. */
@@ -770,7 +771,7 @@ async function investigationReport(
 const CEO_CONTROL_FLAGS = new Set(['reason', 'confidence', 'evidence', 'dry-run', 'key', 'json']);
 const camel = (k: string): string => k.replace(/-([a-z])/g, (_m, c: string) => c.toUpperCase());
 
-const CEO_USAGE = `usage: aom ceo snapshot [--section <name>] | show card|agent|project|shift|desk-item|workstation <ref> | search desk|cards|memory "<q>" | costs [--days n]
+const CEO_USAGE = `usage: aom ceo snapshot [--section <name>] | show card|agent|project|shift|desk-item|workstation <ref> | search desk|cards|memory "<q>" | route "<request>" | route --drafts | costs [--days n]
        aom ceo act <action> [--<param> <value>]... --reason "<why>" --confidence 0.0-1.0 [--evidence ledger:<id>|memory:<id>|signal:<id>|hr:<id>]... [--dry-run] [--key <k>]
        aom ceo recommend --item <desk id> [--option <o1>|--text "..."] --reason "..." --confidence 0.0-1.0  |  --action <name> [--<param> <value>]... --reason "..." --confidence ...
        aom ceo notify --kind needs_you|urgent|task_done --text "..." [--title "..."] [--task <id>] [--item <id>]
@@ -827,6 +828,19 @@ async function ceoVerb(ctx: AomContext, p: Parsed): Promise<number> {
     case 'search':
       if (!args[0] || !args[1]) throw new UsageError(CEO_USAGE);
       ceoPrint(ctx, p, await rpc(ctx, 'ceo', { op: 'search', in: args[0], q: args.slice(1).join(' ') }));
+      return 0;
+    case 'route':
+      // which projects and areas a request belongs to; the workstation answers from the organization graph (read-only)
+      if (!args[0] && one(p, 'drafts') === undefined) throw new UsageError(CEO_USAGE);
+      ceoPrint(
+        ctx,
+        p,
+        await rpc(ctx, 'ceo', {
+          op: 'route',
+          q: args.join(' '),
+          ...(one(p, 'drafts') !== undefined ? { drafts: true } : {}),
+        }),
+      );
       return 0;
     case 'costs':
       ceoPrint(

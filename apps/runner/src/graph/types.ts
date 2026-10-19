@@ -20,7 +20,16 @@ export type NodeKind =
   | 'order'
   | 'merge';
 
-export type SymbolSub = 'class' | 'interface' | 'function' | 'method' | 'type' | 'enum' | 'struct' | 'route' | 'config';
+export type SymbolSub =
+  | 'class'
+  | 'interface'
+  | 'function'
+  | 'method'
+  | 'type'
+  | 'enum'
+  | 'struct'
+  | 'route'
+  | 'config';
 
 export type EdgeKind =
   | 'contains'
@@ -50,6 +59,8 @@ export interface GNode {
   module?: string;
   exported?: boolean;
   lang?: string;
+  /** A module's own package name, from its manifest (npm name, Go module path, .NET project): what other modules declare. */
+  pkg?: string;
 }
 
 export interface GEdge {

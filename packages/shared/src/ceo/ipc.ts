@@ -65,6 +65,22 @@ export const CeoRpcSchema = z.discriminatedUnion('op', [
     q: z.string().min(1).max(300),
   }),
   z.object({ op: z.literal('costs'), days: z.number().int().min(1).max(90).default(30) }),
+  /**
+   * Which projects, repositories and areas a request belongs to (`aom ceo route "<request>"`, docs/design/project-graphs.md
+   * section 8). Read-only. The workstation answers it from the organization graph in the organization vault; the server
+   * only knows the verb.
+   */
+  z
+    .object({
+      op: z.literal('route'),
+      q: z.string().trim().max(500).default(''),
+      /** The links the code suggests (drafts) instead of a ranking: for the CEO to show the owner in chat. */
+      drafts: z.boolean().default(false),
+    })
+    .refine((r) => r.drafts || r.q.length > 0, {
+      message: 'give a request to route, or --drafts',
+      path: ['q'],
+    }),
   CeoActRpc,
   z.object({
     op: z.literal('recommend'),

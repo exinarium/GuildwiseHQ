@@ -223,6 +223,16 @@ export class ChatManager {
       },
       rpc: async (req: IpcRpcRequest): Promise<IpcRpcResponse> => {
         // The owner's chat with the CEO: `aom ceo ...` (the server checks the agent and the owner again).
+        if (req.method === 'ceo' && chat.msg.agent.roleKey === 'ceo' && req.params.op === 'route') {
+          // read-only, answered here from the organization graph in the organization vault
+          const q = typeof req.params.q === 'string' ? req.params.q.trim() : '';
+          const drafts = req.params.drafts === true;
+          const text =
+            q || drafts ? this.deps.graph?.()?.route(chat.msg.context.orgGraph, q, { drafts }) : null;
+          return text
+            ? { ok: true, result: { text } }
+            : { ok: false, error: 'the organization graph is not available on this workstation' };
+        }
         if (req.method === 'ceo')
           return chat.msg.agent.roleKey === 'ceo'
             ? this.deps.rpc(chatId, req.method, req.params)

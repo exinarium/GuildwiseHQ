@@ -138,3 +138,68 @@ export function graphArmOf(
   const end = windowStart.getTime() + weeks * 7 * 24 * 3600_000;
   return now.getTime() < end && graphHoldout(cardId) ? 'off' : 'on';
 }
+
+// -------------------------------------------------------------------------------------------- organization graph
+
+/**
+ * One end of a link the Owner asserted: a project of the organization (its id), or a name the Owner typed ("billing-api",
+ * a system outside Guildwise). Never anything derived from code (docs/design/project-graphs.md section 8).
+ */
+export const OrgLinkEndpointSchema = z.union([
+  z.object({ projectId: z.uuid() }),
+  z.object({ name: z.string().trim().min(1).max(120) }),
+]);
+export type OrgLinkEndpoint = z.infer<typeof OrgLinkEndpointSchema>;
+
+/** What a link says: one depends on the other, one uses the other's data or API, or they are related. */
+export const OrgLinkKindSchema = z.enum(['depends_on', 'uses', 'related']);
+export type OrgLinkKind = z.infer<typeof OrgLinkKindSchema>;
+
+/** A link the Owner asserted, as the server sends it to the workstation that builds the organization graph. */
+export const OrgLinkAssertionSchema = z.object({
+  linkId: z.uuid(),
+  from: OrgLinkEndpointSchema,
+  to: OrgLinkEndpointSchema,
+  kind: OrgLinkKindSchema,
+  note: z.string().max(300).optional(),
+});
+export type OrgLinkAssertion = z.infer<typeof OrgLinkAssertionSchema>;
+
+/**
+ * `graph.org`: build the organization graph from the project graphs this workstation can read (docs/design/project-graphs.md
+ * section 8). The graph is written to `org/graph/` of the organization vault; the answer to the server is counts only.
+ */
+export const GraphOrgPayloadSchema = z.object({
+  orgId: z.uuid(),
+  /** The organization vault (git, or the local folder of the Owner's workstation). */
+  vault: z.object({ vaultId: z.string().min(1).max(64), storage: VaultStorage }),
+  projects: z.array(
+    z.object({
+      projectId: z.uuid(),
+      key: z.string().min(1).max(20),
+      name: z.string().min(1).max(200),
+      /** Archived or deleted projects are never routed to. */
+      retired: z.boolean(),
+      /** Where the project's own graph is: the vault and folder; absent when it has none. */
+      graph: z.object({ vaultId: z.string().min(1).max(64), folder: z.string().min(1).max(200) }).optional(),
+    }),
+  ),
+  assertions: z.array(OrgLinkAssertionSchema).max(2000),
+});
+export type GraphOrgPayload = z.infer<typeof GraphOrgPayloadSchema>;
+
+export const GraphOrgResultSchema = z.discriminatedUnion('ok', [
+  z.object({
+    ok: z.literal(true),
+    projects: z.number().int().nonnegative(),
+    withGraph: z.number().int().nonnegative(),
+    drafts: z.number().int().nonnegative(),
+    links: z.number().int().nonnegative(),
+  }),
+  z.object({ ok: z.literal(false), reason: GraphFailReasonSchema }),
+]);
+export type GraphOrgResult = z.infer<typeof GraphOrgResultSchema>;
+
+/** Where the CEO's shift or chat finds the organization graph: the organization vault (`org/graph/`). */
+export const OrgGraphScopeSchema = z.object({ vaultId: z.string().min(1).max(64) });
+export type OrgGraphScope = z.infer<typeof OrgGraphScopeSchema>;
