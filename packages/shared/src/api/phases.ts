@@ -24,7 +24,7 @@ export const DeployTargetDtoSchema = z.object({
   projectId: z.uuid(),
   name: z.string(),
   kind: DeployTargetKind,
-  /** `remote_ssh`: whose DevOps engineer deploys; `local_docker`: null (every project member's workstation deploys). */
+  /** The workstation that deploys: always set for `remote_ssh`; for `local_docker` "on this computer", or null (every project member's workstation deploys). */
   workstationId: z.uuid().nullable(),
   workstationName: z.string().nullable(),
   host: z.string().nullable(),

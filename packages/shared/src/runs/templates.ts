@@ -641,6 +641,16 @@ export function describeStep(s: RunSetupStep): string {
 export function describeService(s: RunService): string {
   const where = s.cwd && s.cwd !== '.' ? ` in ${s.cwd}` : '';
   const port = s.ports[0];
+  if (s.template === 'docker_service') {
+    const image = s.cmd[s.cmd.length - 1] ?? 'a container';
+    return `Starts a throwaway ${image} in Docker for testing${port ? `, on port ${port.default}` : ''}.`;
+  }
+  if (s.template === 'compose_stack') {
+    const f = s.cmd.indexOf('-f');
+    const up = s.cmd.indexOf('up');
+    const parts = up >= 0 ? s.cmd.slice(up + 1) : [];
+    return `Starts ${parts.length ? parts.join(', ') : 'everything'} from ${f >= 0 ? (s.cmd[f + 1] ?? 'the compose file') : 'the compose file'} in Docker.`;
+  }
   const ready = healthToReady(s.health);
   return `Runs ${formatCommandLine(s.cmd)}${where}${port ? `, on port ${port.default}` : ''}. Ready when ${describeReady(ready)}.`;
 }

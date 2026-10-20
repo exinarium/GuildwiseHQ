@@ -98,7 +98,7 @@ If an agent seems stuck, open the card: the live shift shows how long it has run
 
 ## Run a branch {#run-a-branch}
 
-**Run this branch** (card) or **Run branch...** (board) has the workstation's DevOps engineer start the project so you can try it; it stops by itself after the time in **Project settings > Run and test**, or when you click **Stop**. The first start is worked out by the engineer and saved as a plan; later starts replay it with no DevOps run. **Restart** and **Update & restart** (fast-forward to the branch head) are on the panel.
+**Run this branch** (card) or **Run branch...** (board) has the workstation's DevOps engineer start the project so you can try it; it stops by itself after the time in **Project settings > Run and test**, or when you click **Stop**. Set the steps up once under **Project settings > Run and test**: press **Scan with DevOps** (DevOps reads the project and suggests the steps; you answer its questions and confirm) or **Set up myself** (short forms in plain words). Starts then replay the steps in seconds with no DevOps run; without steps, the first start is worked out by the engineer and saved as a plan. **Restart** and **Update & restart** (fast-forward to the branch head) are on the panel.
 
 ## Integration tests {#integration-tests}
 

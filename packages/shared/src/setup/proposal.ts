@@ -26,6 +26,7 @@ export const ProposalEvidenceSchema = z.object({
   line: z.number().int().min(1).max(10_000_000).optional(),
   probe: z.string().max(300).optional(),
 });
+export type ProposalEvidence = z.infer<typeof ProposalEvidenceSchema>;
 
 /** One judgement about a part of the proposal: where it is (a JSON pointer into `run`/`deploy`), how sure DevOps is, why. */
 export const ProposalItemSchema = z.object({

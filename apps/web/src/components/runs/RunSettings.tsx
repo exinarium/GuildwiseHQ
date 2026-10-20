@@ -13,7 +13,19 @@ import {
 import { Plus, Trash2 } from 'lucide-react';
 import { type FormEvent, useEffect, useState } from 'react';
 import { useRunSettings, useSaveRunSettings } from '../../api/queries/runs.ts';
-import { Badge, Button, Callout, ErrorBox, Panel, Select, TextArea, TextInput, useToast } from '../ui.tsx';
+import {
+  Badge,
+  Button,
+  Callout,
+  Disclosure,
+  ErrorBox,
+  Panel,
+  Select,
+  TextArea,
+  TextInput,
+  useToast,
+} from '../ui.tsx';
+import { RunStepsCard } from './RunStepsCard.tsx';
 
 interface Row {
   key: number;
@@ -63,11 +75,27 @@ function fromRow(r: Row): RunDeclaredService {
 }
 
 /**
- * Project settings > Run and test (backlog #58): run instructions for the project and for each repository, the stop
- * time and Docker opt-in, the services the project declares (they pre-fill the plan, DevOps may not contradict them)
- * and, read-only, the plan the DevOps engineer saved for each workstation.
+ * Project settings > Run and test. The top is the guided run steps (`RunStepsCard`: scan with DevOps, templates, test).
+ * "Show technical details" keeps what developers set (backlog #58): run instructions for the project and for each
+ * repository, the build guides, the stop time and Docker opt-in, the services the project declares (they pre-fill the plan,
+ * DevOps may not contradict them) and, read-only, the plan DevOps saved for each workstation.
  */
 export function RunSettings({ projectId, canEdit }: { projectId: string; canEdit: boolean }) {
+  return (
+    <Panel title="Run and test">
+      <RunStepsCard projectId={projectId} canEdit={canEdit} />
+      <Disclosure
+        summary="Show technical details"
+        className="mt-6 border-t border-line pt-4"
+        data-testid="run-technical"
+      >
+        <RunSettingsTechnical projectId={projectId} canEdit={canEdit} />
+      </Disclosure>
+    </Panel>
+  );
+}
+
+function RunSettingsTechnical({ projectId, canEdit }: { projectId: string; canEdit: boolean }) {
   const q = useRunSettings(projectId);
   const save = useSaveRunSettings(projectId);
   const toast = useToast();
@@ -90,13 +118,8 @@ export function RunSettings({ projectId, canEdit }: { projectId: string; canEdit
     setRows(data.settings.services.map((s, i) => toRow(s, i)));
   }, [data]);
 
-  if (q.isPending) return <Panel title="Run and test">Loading...</Panel>;
-  if (q.isError)
-    return (
-      <Panel title="Run and test">
-        <ErrorBox error={q.error} onRetry={() => q.refetch()} />
-      </Panel>
-    );
+  if (q.isPending) return <p className="text-sm text-muted">Loading...</p>;
+  if (q.isError) return <ErrorBox error={q.error} onRetry={() => q.refetch()} />;
   const repos = q.data.repos;
 
   const submit = (e: FormEvent) => {
@@ -133,7 +156,7 @@ export function RunSettings({ projectId, canEdit }: { projectId: string; canEdit
     setRows((cur) => cur.map((r) => (r.key === key ? { ...r, ...over } : r)));
 
   return (
-    <Panel title="Run and test">
+    <div>
       <form
         onSubmit={submit}
         className="flex flex-col gap-4"
@@ -141,10 +164,10 @@ export function RunSettings({ projectId, canEdit }: { projectId: string; canEdit
         data-testid="run-settings"
       >
         <p className="text-sm text-muted">
-          Tell the DevOps engineer how to run this project. It reads this and the repository's BUILD.md the
-          first time someone starts a branch, works out the steps and saves them as a plan for the
-          workstation. Later starts replay that plan with no DevOps run; changing these settings or BUILD.md
-          makes the plan stale and the DevOps engineer works it out again. Nothing is added to your
+          For developers. Tell the DevOps engineer how to run this project. It reads this and the repository's
+          BUILD.md the first time someone starts a branch, works out the steps and saves them as a plan for
+          the workstation. Later starts replay that plan with no DevOps run; changing these settings or
+          BUILD.md makes the plan stale and the DevOps engineer works it out again. Nothing is added to your
           repositories.
         </p>
         <TextArea
@@ -343,7 +366,7 @@ export function RunSettings({ projectId, canEdit }: { projectId: string; canEdit
         )}
       </form>
       <PlanView plans={q.data.plans} />
-    </Panel>
+    </div>
   );
 }
 

@@ -272,3 +272,34 @@ describe('plain words', () => {
     expect(uniqueServiceName('web', ['web', 'web-2'])).toBe('web-3');
   });
 });
+
+describe('describeService for docker templates', () => {
+  it('says what a database container or a compose file does, without the docker command', () => {
+    const pg = DOCKER_IMAGE_PRESETS[0]!;
+    const db = buildFromTemplate({
+      template: 'docker_service',
+      params: {
+        name: 'db',
+        repoId,
+        image: pg.image,
+        containerPort: pg.containerPort,
+        env: pg.env,
+        after: [],
+      },
+    });
+    expect(describeService(db.item as never)).toBe(
+      'Starts a throwaway postgres:16 in Docker for testing, on port 5432.',
+    );
+    const stack = buildFromTemplate({
+      template: 'compose_stack',
+      params: {
+        name: 'stack',
+        repoId,
+        folder: '.',
+        composeFile: 'docker-compose.yml',
+        services: ['db', 'cache'],
+      },
+    });
+    expect(describeService(stack.item as never)).toBe('Starts db, cache from docker-compose.yml in Docker.');
+  });
+});
