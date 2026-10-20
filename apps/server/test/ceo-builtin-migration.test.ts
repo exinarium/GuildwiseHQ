@@ -108,6 +108,15 @@ describe('ceo-builtin data migration', () => {
       )[0]!.payload,
     ).toMatchObject({ action: 'graduate', reason: 'built-in CEO, no training' });
 
+    // the Owner is told once that the CEO graduated (one notice, not for the organizations that were not in training)
+    const notices = await q(
+      `SELECT org_id, kind, subkind, status FROM desk_items WHERE subkind='ceo_graduated'`,
+    );
+    expect(notices.filter((n) => n.org_id === b)).toEqual([
+      { org_id: b, kind: 'alert', subkind: 'ceo_graduated', status: 'open' },
+    ]);
+    expect(notices.some((n) => n.org_id === a || n.org_id === c)).toBe(false);
+
     // production: an active (here paused) CEO is untouched: no event at all
     expect((await liveCeos(c))[0]!.id).toBe(cBefore);
     expect(Number((await q(`SELECT count(*) AS n FROM events WHERE org_id=$1`, [c]))[0]!.n)).toBe(
@@ -120,6 +129,7 @@ describe('ceo-builtin data migration', () => {
     const before = await eventCount();
     const again = await migrateCeoBuiltin(env());
     expect(again).toEqual({ provisioned: [], graduated: [] });
+    expect(await q(`SELECT 1 FROM desk_items WHERE subkind='ceo_graduated'`)).toHaveLength(1);
     expect(await eventCount()).toBe(before);
     expect(
       (await q(`SELECT count(*) AS n FROM data_migrations WHERE name=$1`, [CEO_BUILTIN_MIGRATION]))[0]!.n,
@@ -167,5 +177,30 @@ describe('ceo-builtin data migration', () => {
     const ws = (await q(`SELECT id FROM workstations WHERE user_id=$1`, [e]))[0]!.id;
     await migrateCeoBuiltin(env());
     expect((await liveCeos(e))[0]!.workstation_id).toBe(ws);
+  });
+});
+
+describe('ceo-builtin never blocks the boot (S5)', () => {
+  it('one organization that throws is logged and skipped; the others are still migrated', async () => {
+    const bad = await t.createUser(uniqueEmail('badorg'), 'member');
+    const good = await t.createUser(uniqueEmail('goodorg'), 'member');
+    await q(`DELETE FROM agents WHERE org_id=$1 AND role_key='ceo'`, [bad]).catch(() => undefined);
+    await q(`DELETE FROM agents WHERE org_id=$1 AND role_key='ceo'`, [good]).catch(() => undefined);
+    const logs: string[] = [];
+    const store = t.app.ctx.store;
+    const failing = Object.create(store, {
+      append: {
+        value: async (events: any[], opts: any) => {
+          if (events.some((e) => e.scope?.orgId === bad)) throw new Error('boom for one org');
+          return store.append(events, opts);
+        },
+      },
+    });
+    const report = await migrateCeoBuiltin({ ...env(), store: failing, log: (m) => logs.push(m) });
+    expect(report.failed).toEqual([bad]);
+    expect(report.provisioned).toContain(good);
+    expect(report.provisioned).not.toContain(bad);
+    expect(logs.join('\n')).toContain(`ERROR organization ${bad}`);
+    expect(await liveCeos(good)).toHaveLength(1);
   });
 });
