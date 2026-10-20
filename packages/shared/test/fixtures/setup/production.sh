@@ -138,7 +138,7 @@ if ! docker compose -f "$file" exec -T "$svc" sh -c 'pg_dump -U "${1:-$POSTGRES_
   echo "AOM: the database backup failed" >&2
   exit 31
 fi
-if [ "$(wc -c < "$out.part")" -lt 1024 ]; then
+if [ "$(gzip -dc "$out.part" | wc -c)" -lt 1024 ]; then
   rm -f -- "$out.part"
   echo "AOM: the database backup is too small to be real" >&2
   exit 32

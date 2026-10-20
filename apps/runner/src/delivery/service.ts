@@ -1,12 +1,19 @@
+import { createHash } from 'node:crypto';
 import { lstatSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import {
+  type BundleEntry,
+  bundleHash,
   DELIVERY_DIR,
+  DeployProbeParamsSchema,
   findSecret,
   type IpcRpcResponse,
+  isSafeVaultPath,
   RECIPE_FILE,
   type RecipeInspectPayload,
   type RecipeInspectResult,
+  type RecipeWritePayload,
+  type RecipeWriteResult,
 } from '@aom/shared';
 import { type Logger, nullLogger } from '../log.ts';
 import type { DeliveryFile } from '../vaults/delivery.ts';
@@ -19,6 +26,7 @@ import {
   readBundleAtCommit,
   readBundleFromDir,
 } from './bundle.ts';
+import { runDeployProbe } from './probe.ts';
 
 export interface DeliveryVaults {
   exclusive<T>(vaultId: string, fn: (dir: string) => Promise<T>): Promise<T>;
@@ -70,6 +78,114 @@ export class DeliveryService {
         ).slice(0, 400),
       };
     }
+  }
+
+  /**
+   * `recipe.write` (guided deploy setup): replaces `<folder>/delivery/` with the generated files (and the `keep` files of the
+   * current folder) in one commit and reports what is there now. Refuses a path outside `delivery/`, a file the secret scan
+   * flags, files that do not hash to what the preview showed, and a kept file that is not there. Never throws.
+   */
+  async write(p: RecipeWritePayload): Promise<RecipeWriteResult> {
+    const fail = (error: string): RecipeWriteResult => ({ ok: false, error: error.slice(0, 480) });
+    try {
+      const seen = new Set<string>();
+      const entries: BundleEntry[] = [];
+      let total = 0;
+      for (const f of p.files) {
+        if (
+          f.path.startsWith('/') ||
+          f.path.includes('\\') ||
+          f.path.split('/').some((x) => x === '' || x === '.' || x === '..')
+        )
+          return fail(`refusing the path ${f.path}: files go inside delivery/`);
+        if (!isSafeVaultPath(`${p.vault.folder}/${DELIVERY_DIR}/${f.path}`))
+          return fail(`refusing the path ${f.path}`);
+        if (seen.has(f.path)) return fail(`${f.path} is listed twice`);
+        seen.add(f.path);
+        const secret = findSecret(f.content);
+        if (secret)
+          return fail(`${f.path} contains ${secret}: a recipe names its secrets and never holds them`);
+        total += Buffer.byteLength(f.content);
+        entries.push({
+          path: f.path,
+          mode: f.mode,
+          sha256: createHash('sha256').update(f.content).digest('hex'),
+        });
+      }
+      if (total > MAX_BUNDLE_BYTES) return fail('the generated files are too big');
+      if (bundleHash(entries) !== p.expectedHash)
+        return fail('the files do not match what you previewed: preview again');
+      const files: DeliveryFile[] = p.files.map((f) => ({
+        path: f.path,
+        mode: f.mode,
+        content: Buffer.from(f.content, 'utf8'),
+      }));
+      // files of the current folder that stay as they are (hand-written scripts)
+      if (p.keep.length) {
+        const current = await this.deps.vaults.exclusive(p.vault.vaultId, async (dir) =>
+          p.vault.storage === 'local'
+            ? readBundleFromDir(join(dir, ...p.vault.folder.split('/'), DELIVERY_DIR))
+            : readBundleAtCommit(dir, p.vault.folder, (await headCommit(dir)) ?? 'HEAD'),
+        );
+        for (const k of p.keep) {
+          if (seen.has(k)) continue;
+          const found = current.files.find((f) => f.path === k);
+          if (!found)
+            return fail(
+              `the hand-written script ${k} is not in delivery/ any more: switch that environment back to guided`,
+            );
+          files.push({ path: found.path, mode: found.mode, content: found.content });
+          seen.add(k);
+        }
+      }
+      const saved = await this.deps.vaults.saveDelivery({
+        vaultId: p.vault.vaultId,
+        folder: p.vault.folder,
+        files,
+        message: p.commitMessage,
+      });
+      const inspected = await this.inspect({
+        projectId: p.projectId,
+        vault: p.vault,
+        ...(saved.commit ? { commit: saved.commit } : {}),
+      });
+      return {
+        ok: true,
+        committed: saved.committed,
+        pushed: saved.pushed,
+        vaultCommit: saved.commit,
+        inspected,
+      };
+    } catch (err) {
+      this.log.warn(`recipe.write failed: ${err instanceof Error ? err.message : String(err)}`);
+      return fail(
+        `could not write the recipe into the vault: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  /** `aom deploy probe` (DevOps in a scan): the same fixed probe, answered here and returned as JSON. */
+  async probeFor(params: Record<string, unknown>): Promise<IpcRpcResponse> {
+    const p = DeployProbeParamsSchema.safeParse(params);
+    if (!p.success)
+      return {
+        ok: false,
+        error:
+          'usage: aom deploy probe --local | --ssh-hosts | --host <alias> [--compose-file F] [--dir D] [--url U]',
+      };
+    const v = p.data;
+    const scope = v.host ? 'ssh_target' : v.sshHosts ? 'ssh_hosts' : 'local';
+    const r = await runDeployProbe({
+      projectId: '00000000-0000-4000-8000-000000000000',
+      scope,
+      ...(v.host ? { host: v.host } : {}),
+      hints: {
+        ...(v.composeFile ? { composeFiles: v.composeFile } : {}),
+        ...(v.dir ? { dirs: v.dir } : {}),
+        ...(v.url ? { urls: v.url } : {}),
+      },
+    });
+    return { ok: true, result: r };
   }
 
   /** Reads a scratch folder into files, refusing symlinks, secrets and oversize. */

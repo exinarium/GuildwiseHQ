@@ -7,6 +7,7 @@ import {
   CLAUDE_ACCOUNTS_CAPABILITY,
   CommandPayloadSchemas,
   DELIVERY_CAPABILITY,
+  DEPLOY_SETUP_CAPABILITY,
   defaultHost,
   type EnvEnsurePayload,
   INTEGRATIONS_VERSION,
@@ -43,6 +44,7 @@ import { loadConfig, type RunnerConfig, saveConfig } from './config.ts';
 import { type BackoffOptions, RunnerClient, toWsUrl, UNPAIRED_MESSAGE } from './connection/client.ts';
 import { Outbox } from './connection/outbox.ts';
 import { DeployExecutor } from './delivery/exec.ts';
+import { runDeployProbe } from './delivery/probe.ts';
 import { DeliveryService } from './delivery/service.ts';
 import { verifyRights } from './devops/rights.ts';
 import { ExternalAdapters } from './external/index.ts';
@@ -481,6 +483,7 @@ export class Runner {
       findLocal: (k) => this.findLocal(k),
       graph: () => this.graph,
       recipeSave: (shiftId, params) => this.delivery.save(shiftId, params),
+      deployProbe: (params) => this.delivery.probeFor(params),
       writeVault: (cmd) => this.vaults.write(cmd),
       http: this.serverHttp,
       rpc: (shiftId, method, params) =>
@@ -1040,6 +1043,8 @@ export class Runner {
         RUNNER_PIN_CAPABILITY,
         RUNNER_UPDATE_CHECK_CAPABILITY,
         DELIVERY_CAPABILITY,
+        // Guided deploy setup: `deploy.probe` and `recipe.write` (docs/design/deploy-run-ux-design.md section 6)
+        DEPLOY_SETUP_CAPABILITY,
         // "Scan with DevOps": `aom setup propose` and a read-only scan brief (docs/design/deploy-run-ux-design.md section 5).
         SETUP_SCAN_CAPABILITY,
         LOCAL_VAULT_CAPABILITY,
@@ -1483,6 +1488,12 @@ export class Runner {
       } else if (command === 'recipe.inspect') {
         // What `delivery/` of the project vault holds, with its hash; a failure is an answer (ok:true, result.ok:false).
         done(true, await this.delivery.inspect(CommandPayloadSchemas['recipe.inspect'].parse(payload)));
+      } else if (command === 'recipe.write') {
+        // Writes the generated delivery/ files into the project vault; a refusal is an answer (ok:true, result.ok:false).
+        done(true, await this.delivery.write(CommandPayloadSchemas['recipe.write'].parse(payload)));
+      } else if (command === 'deploy.probe') {
+        // Read-only questions to Docker / a server; a failure is an answer, never an exception.
+        done(true, await runDeployProbe(CommandPayloadSchemas['deploy.probe'].parse(payload)));
       } else if (command === 'deploy.exec') {
         // Runs an approved deploy outside any model. A refusal or a failed deploy is an ANSWER: the server never retries it.
         done(true, await this.deployExec.run(CommandPayloadSchemas['deploy.exec'].parse(payload)));

@@ -19,8 +19,10 @@ import {
   type LintItem,
   lintRecipe,
   parseRecipe,
+  parseSetupText,
   RECIPE_FILE,
   type RecipeInspectResult,
+  SETUP_FILE,
 } from '@aom/shared';
 import { execa } from 'execa';
 import { git } from '../git/git.ts';
@@ -177,6 +179,9 @@ export function inspectBundle(bundle: Bundle, vaultCommit: string | null): Recip
         : [],
     };
   const parsed = parseRecipe(recipeFile.content.toString('utf8'));
+  // The guided setup, when the bundle has a valid one: the server compiles it to find scripts that were edited by hand.
+  const setupFile = bundle.files.find((f) => f.path === SETUP_FILE);
+  const setup = setupFile ? parseSetupText(setupFile.content.toString('utf8')) : null;
   const lint = lintRecipe({
     recipe: parsed.ok ? parsed.recipe : null,
     ...(parsed.ok ? {} : { parseError: parsed.error }),
@@ -191,5 +196,6 @@ export function inspectBundle(bundle: Bundle, vaultCommit: string | null): Recip
     recipe: parsed.ok ? parsed.recipe : null,
     ...(parsed.ok ? {} : { parseError: parsed.error }),
     lint,
+    ...(setup?.ok ? { setup: setup.setup } : {}),
   };
 }

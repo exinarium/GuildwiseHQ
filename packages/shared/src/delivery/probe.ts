@@ -1,3 +1,4 @@
+import { parse as parseYaml } from 'yaml';
 import { z } from 'zod';
 import { SshAliasSchema } from './setup.ts';
 
@@ -104,6 +105,7 @@ export const ProbeFolderSchema = z.object({
 });
 export type ProbeFolder = z.infer<typeof ProbeFolderSchema>;
 
+export type ProbeBackups = z.infer<typeof ProbeBackupsSchema>;
 export const ProbeBackupsSchema = z.object({
   dir: z.string().max(300),
   count: z.number().int(),
@@ -210,3 +212,7 @@ export function probeErrorText(error: ProbeError, host?: string): string {
       return 'That check could not be started.';
   }
 }
+
+/** YAML text to data with an alias limit (no expansion bombs). Throws on invalid YAML. */
+export const parseYamlLimited = (text: string, maxAliasCount = 50): unknown =>
+  parseYaml(text, { maxAliasCount });
