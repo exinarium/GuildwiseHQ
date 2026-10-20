@@ -28,11 +28,15 @@ export function AgentToolchains({ w }: { w: WorkstationDto }) {
       {checkedAt && items.length === 0 && <p className="text-subtle">None detected or registered.</p>}
       <ul className="flex flex-col gap-1.5">
         {items.map((t) => (
-          <li key={t.name} className="flex flex-wrap items-center gap-2" data-testid={`toolchain-${t.name}`}>
+          <li
+            key={t.name}
+            className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-control max-md:border max-md:border-line max-md:bg-canvas max-md:p-2.5"
+            data-testid={`toolchain-${t.name}`}
+          >
             <span className="font-medium text-fg">{t.name}</span>
             {t.version && <span className="text-muted">{t.version}</span>}
             <Badge tone={t.source === 'devops' ? 'blue' : 'neutral'}>{SOURCE_LABEL[t.source]}</Badge>
-            <span className="font-mono text-xs break-all text-subtle">
+            <span className="w-full min-w-0 font-mono text-xs break-all text-subtle md:w-auto">
               {[...t.binDirs, ...t.readDirs.filter((r) => !t.binDirs.includes(r))].join(', ')}
             </span>
             {t.addedAt && (

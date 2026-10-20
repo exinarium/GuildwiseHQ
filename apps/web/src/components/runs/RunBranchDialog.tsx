@@ -187,7 +187,7 @@ function RunBranchForm({
             <legend className="mb-1 text-sm font-medium">Repositories and branches</legend>
             {repos.map((r) => (
               <div key={r.id} className="flex flex-wrap items-end gap-3">
-                <label className="flex min-h-9 items-center gap-2 text-sm">
+                <label className="flex min-h-9 items-center gap-2 text-sm [@media(pointer:coarse)]:min-h-11">
                   <input
                     type="checkbox"
                     data-testid={`run-repo-${r.name}`}
