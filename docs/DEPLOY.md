@@ -104,6 +104,15 @@ curl https://aom.example.com/api/health
 # Should return: {"ok":true,"db":true}
 ```
 
+## Deploying your own app with Guildwise
+
+This page deploys Guildwise itself. To deploy the apps of your projects, use **Project settings, Phases and deploys, Set up deploys**
+in the app (user guide 4.27): the wizard adopts a Docker Compose stack on a workstation, or a server the workstation can already
+sign in to, backs up the database, rebuilds only the app service and puts the previous image back when the site is not healthy.
+For a server whose deploys are set up this way, the release procedure for Guildwise HQ is the same (build the image on the
+workstation, ship it over ssh, switch `GUILDWISE_IMAGE`, restart only `app`); the generated script reproduces it step by step.
+The runner on the deploying computer needs the `deploy-setup:1` capability (a current runner).
+
 ## Upgrades
 
 Pull the latest code and rebuild:

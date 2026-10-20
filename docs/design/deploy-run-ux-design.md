@@ -804,3 +804,57 @@ slot); the run body is `RunStepsEditor` in `review` mode. `SetupProposalSchema.d
 already validated. The e2e project `run-steps` depends only on `auth` (the core-loop chain is broken on main for another
 reason); the mock DevOps agent submits a fixed run proposal for a scan request and none when the request text has
 `[no_proposal]` (see `mock-agent.ts`).
+
+### v1a code-review fixes (decided by the coordinator, owner asleep)
+
+- **M1 scan guard** is now an allowlist (read commands only; shells, interpreters, wrappers, `./x`, package scripts and every redirect
+  to a file are refused; `git -c` is rejected; `find` without `-delete|-exec|...`; docker read verbs; `npm ls|view|outdated`,
+  `pnpm ls|why`; `aom setup propose|deploy probe|deploy status|devops-done`). Edit/Write/NotebookEdit work only in the shift's scratch
+  folder (scan profile of `buildDevopsSettings`). The shift carries `devops.scanKind`; the runner keys read-only on it, and the server
+  fails the request when a scan brief cannot be built. A scan writes its proposal with the Write tool (redirects are refused).
+- **M2** a project-wide plan runs on someone else's computer only after that computer's owner pressed "Allow on my computer"
+  (`run_plan_consents`, event `RunPlanConsentGiven`, per plan version; `409 plan_needs_consent` on a start; the steps and commands are
+  shown inline on Run and test). Tests and steps for a computer are limited to its owner (403 otherwise, also DELETE and resolve);
+  `source` is derived on the server, `docker` from the template (`normalizePlanDocker`), settings files in secret places
+  (`.ssh`, `.aws`, `/etc`, ...) are refused (`planSafetyProblems`).
+- **M3** compose projects are `aom-run-<name>-${envId}`; the server fills `${envId}` (first 8 characters of the environment id) in the
+  replayed plan, so no runner change or capability is needed. **M4** a failed test replay also queues `run.stop`.
+- **Minor:** m1 throwaway database ports bind to 127.0.0.1; m2 save and test answers name the plan version and the computers that keep
+  their own steps; m3 `RunPlanFailureCleared` when an environment that replayed the plan becomes healthy; m4 `startScan` shares
+  `scanBlockedReason` with the overview; m5 "already running" offers "Stop the running copy"; m6 marking a target production, testable or
+  destructive-ok needs the project owner; m7 compose file and part names starting with `-` are refused.
+
+### v1b (built 2026-10-21, branch `deploy-run-setup`)
+
+Built as designed: `delivery/setup.json` and the pure generator (`setup.ts`, `setup-compile.ts`, `setup-templates.ts`; golden files in
+`packages/shared/test/fixtures/setup/` for the first adopter's UAT and production), `recipe.write`, read-only `deploy.probe` and
+`aom deploy probe`, `planChanges`, the wizard for "On this computer" and "On my own server (existing sign-in)", the overview, the
+developer view with custom marking, `deploy_scan` on the shared scan infrastructure, gates defaults, the dry run before approval.
+Migration `2282_guided_deploy_setup.sql`; runner capability `deploy-setup:1` (`RUNNER_VERSION` not bumped).
+
+Deviations and additions:
+
+1. **The required dry run gates Approve, not Save.** A dry run executes the saved (observed) files through the existing trial path, so
+   the files must be in the vault first. Save writes them (a vault commit; nothing runs, nothing is approved); `approveRecipe` refuses
+   with `422 dry_run_required` until every guided environment has a successful dry run of exactly the observed hash, and "Try it without
+   changing anything" forces `AOM_DEPLOY_DRY_RUN=1` (`requestDeployRun {dryRun}`).
+2. **`gate.approvers` does not exist** in this codebase's `GateSchema` (who releases is `releasedBy`); the production default is
+   `releasedBy: owner` plus the gate `[{envHealthy: <test env>, sameCommit, forMinutes: 10}]`.
+3. **UAT script:** tag `<imageName>:<first 12 of the commit>`, an override file in a scratch folder, `--no-deps`, rollback with
+   `--no-build`, pruning keeps the newest 5 sha tags (`docker image rm` of single tags, never the running or previous one), backups keep
+   20 and are checked decompressed (>= 1 KB). Production health needs an http check for automatic rollback (validated).
+4. **No "Start a new copy", no host-key confirmation UI, no new sign-in** (v2). With nothing running the wizard offers a DevOps look or the
+   developer view. `aom deploy probe` results from DevOps are returned to it, not stored as `DeployTargetProbed`.
+5. **Hand edits** are detected by recompiling the observed `setup.json` (same generator only); the runner's `recipe.inspect` result gained
+   an optional `setup`. A custom environment keeps its script through `recipe.write.keep`.
+6. **Wizard:** at the end of "Where" the target is created or patched (needs to exist for the lint); the production checkbox is the
+   target's. A health address is optional (empty means no check and no rollback). The wizard edits one environment at a time.
+7. **Scan:** a deploy scan needs both `setup-scan:1` and `deploy-setup:1`; the mock DevOps adopts the first running compose stack.
+8. **E2E:** project `deploy-setup` runs on the e2e harness's own stack (port, database and folder are chosen by `AOM_E2E_PORT|DB|DIR`)
+   with its own user, runner and repository, against a REAL throwaway Compose stack (project `aomv1b-e2e`, port 14711) that it removes
+   at the end. No sshd container: the ssh path is covered by the runner tests with fake docker/ssh.
+9. **`DeployTargetDto` has no reachability field**; the setup state and the overview carry it (`targets[].connection`).
+
+For v2: reconnect/connect flows and a dedicated key (`AOM_DEPLOY_SSH` is already honoured by the generated scripts), `deploy.prepare`,
+`compose_run` for migrations, "Start a new copy", an sshd test container, storing DevOps' probes, an "improved steps available" nudge
+when `SETUP_GENERATOR` changes, and showing the reachability chip on the deploy target card.

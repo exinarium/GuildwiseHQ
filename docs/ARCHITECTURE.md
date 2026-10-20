@@ -2367,6 +2367,18 @@ runs the script outside any model session.
   `${commit}` `${branch}` `${env}` `${appUrl}` `${target}` `${host}`), `trigger` (`after_merge|phase_done|on_request`), `timeoutSec`,
   `health` (`RunHealthSchema`: http, tcp, log, none), `smoke`, `secrets` (names), `envFile` (a path on the workstation), `docker`,
   **`releasedBy: owner|ceo|auto`** (default `owner`) and `gate` (`none`, a preset name, or an inline gate).
+- **Guided setup (v1b).** `delivery/setup.json` (`DeliverySetup`, strict character sets per value) is compiled by the pure
+  `compileSetup` (shared, golden-file tests for the first adopter's UAT and production) into `recipe.yaml` and one script per
+  environment, all inside the approved bundle, so hashes, drift and `deploy.exec` are unchanged. The server never writes the vault:
+  `POST /api/projects/:id/delivery/setup/preview|publish` compile, lint (`serverLint`), plan the change list (`planChanges`) and send
+  the durable `recipe.write`; the workstation's `recipe.inspected` answer (with `setup`) is recorded as `DeliveryRecipeObserved` with
+  `handEdited` (scripts that differ from the compiled ones, lint `hand_edited`). `approveRecipe` requires a successful dry run
+  (`requestDeployRun` `trial` + `dryRun`) of the observed hash for every guided environment. Events: `DeliverySetupDraftSaved`,
+  `DeliverySetupPublished`, `DeliverySetupPublishResult`, `DeployTargetProbed`, `DeployTargetConnectionChecked` (tables
+  `delivery_setup_drafts`, `deploy_probes`, `deploy_target_connections`, `delivery_recipes.setup|hand_edited`, migration 2282); probes are
+  durable `deploy.probe` commands. A deploy scan (`deploy_scan`) reuses the run-scan machinery: `SetupProposalSchema.deploy` is a typed
+  `DeliverySetup` and `setup.propose` also checks the targets and hosting. Capability `deploy-setup:1`; an older runner gets a 409
+  `runner_outdated` and the developer view keeps working.
 - **Content hash and approval.** `bundleHash` is a sha256 over the sorted listing `path\0mode\0sha256(content)\n` of `delivery/**`
   (mode is the executable bit only). The runner reads a git vault AT A COMMIT (`git ls-tree` + `git cat-file`, `delivery/bundle.ts`),
   never the working tree; a local folder is read once and the copy is what runs. `recipe.inspect` (durable command) returns the

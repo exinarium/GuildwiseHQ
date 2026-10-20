@@ -565,7 +565,11 @@ interface DevopsBrief extends Brief {
     approval?: { action: string };
     hygiene?: { repos: unknown[] };
     /** A "Scan with DevOps" request: the mock submits a fixed proposal (`[no_proposal]` in the request text skips it). */
-    scan?: { area: string; repos: Array<{ repoId: string; name: string }> };
+    scan?: {
+      area: string;
+      repos: Array<{ repoId: string; name: string }>;
+      deploy?: { targets: Array<{ name: string; kind: string; host: string | null }> };
+    };
   };
 }
 
@@ -600,6 +604,72 @@ async function devopsMain(brief: DevopsBrief): Promise<number> {
     return 0;
   }
   // "Scan with DevOps": read-only; the mock proposes one install step and one website part, with a question about readiness.
+  if (d.scan?.area === 'deploy') {
+    // A deploy scan: look at Docker here with the fixed probe, adopt the first compose stack for the first local target.
+    let note = 'no proposal';
+    const target = d.scan.deploy?.targets.find((t) => t.kind === 'local_docker');
+    if (target && !d.summary.includes('[no_proposal]')) {
+      const probed = aom(['deploy', 'probe', '--local']);
+      let stack:
+        | {
+            path: string;
+            project?: string;
+            services: Array<{ name: string; build?: string; database?: string }>;
+          }
+        | undefined;
+      try {
+        const r = JSON.parse(probed.out) as { result?: { report?: { composeFiles: Array<any> } } };
+        stack = r.result?.report?.composeFiles.find((c) => !c.unreadable && c.services.length > 0);
+      } catch {
+        stack = undefined;
+      }
+      if (stack) {
+        const app = stack.services.find((x) => x.build) ?? stack.services[0];
+        const db = stack.services.find((x) => x.database === 'postgres');
+        const { localAdoptEnv } = await import('@aom/shared');
+        const env = localAdoptEnv({
+          name: 'uat',
+          label: 'Test copy',
+          target: target.name,
+          composeFile: stack.path,
+          ...(stack.project ? { composeProject: stack.project } : {}),
+          service: app?.name ?? 'app',
+          imageName: `${stack.project ?? 'app'}-${app?.name ?? 'app'}`,
+          ...(db
+            ? {
+                database: {
+                  service: db.name,
+                  dir: `${stack.path.slice(0, stack.path.lastIndexOf('/'))}/backups`,
+                },
+              }
+            : {}),
+        });
+        const file = tmpJson('proposal.json', {
+          area: 'deploy',
+          deploy: { environments: [env] },
+          items: [
+            {
+              path: '/environments/0',
+              confidence: 'found',
+              evidence: [{ probe: 'aom deploy probe --local' }],
+            },
+          ],
+          questions: [],
+          secretsNeeded: [],
+          notes: 'Mock DevOps adopted the compose stack that is already running.',
+          filesRead: ['docker-compose.yml'],
+        });
+        const sub = aom(['setup', 'propose', '--area', 'deploy', '--file', file]);
+        note = sub.code === 0 ? 'proposal submitted' : `proposal refused: ${(sub.err || sub.out).trim()}`;
+      } else note = 'no compose stack found';
+    }
+    const r = aom(['devops-done', '--summary', `mock deploy scan: ${note}`]);
+    emit({
+      kind: 'final',
+      text: `mock devops deploy scan (${note}): ${r.code === 0 ? r.out.trim() : (r.err || r.out).trim()}`,
+    });
+    return 0;
+  }
   if (d.scan) {
     const repo = d.scan.repos[0];
     let note = 'no proposal';

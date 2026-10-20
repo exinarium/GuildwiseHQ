@@ -2239,6 +2239,26 @@ with a recipe"). The runner announces the `delivery:1` capability and does three
 - **`recipe.inspect`**: reads `delivery/` of the project vault at a commit (`git ls-tree` and `git cat-file`, never the working tree;
   a local vault folder is read as it is), computes the content hash, parses `recipe.yaml`, lints it (a secret in a file, a missing or
   non-executable script) and reports the result. It reports kinds ("a private key"), never the secret.
+- **Guided deploy setup (`deploy-setup:1`).** Two more durable commands and one `aom` verb (design: `docs/design/deploy-run-ux-design.md`
+  sections 4 and 6). **`recipe.write`** replaces `<folder>/delivery/` with the files the server compiled from `setup.json`
+  (`packages/shared/src/delivery/setup-compile.ts`) in one commit (a local vault is rewritten in place), carrying over the
+  hand-written scripts named in `keep`; it refuses a path outside `delivery/`, a file the secret scan flags, and files that
+  do not hash to `expectedHash` (what the preview showed), then reports what `delivery/` holds now like `recipe.inspect` (which
+  also returns the parsed `setup.json`, so the server can find scripts edited by hand). **`deploy.probe`** (`delivery/probe.ts`)
+  answers fixed read-only questions, never a free command: scope `local` (`docker version`, `docker compose version|ls`,
+  `docker ps` with compose labels, `docker volume ls`, each compose file reduced to structure, backups next to it, a GET of the
+  hinted addresses), `ssh_hosts` (the non-wildcard `Host` aliases of `~/.ssh/config`, text only, each tested with
+  `ssh -o BatchMode=yes -o StrictHostKeyChecking=yes`) and `ssh_target` (one `ssh` running the bundled read-only script
+  `probe-remote.ts`, with only key names of `.env` files and the value of keys that name an image). Results are names and shapes:
+  never a secret value, a private key or a compose `environment:` value; a changed host key is a hard stop (`ssh_host_key_changed`)
+  with no override; the whole probe has a 60 s budget and a 64 KB report. **`aom deploy probe --local | --ssh-hosts | --host
+  <alias> [--dir D] [--compose-file F] [--url U]`** (DevOps, in a scan) runs the same probe through IPC. The scripts `compileSetup`
+  generates run unchanged through `deploy.exec`; `generated-scripts.test.ts` runs them against fake docker/ssh/curl.
+- **Read-only scans are an allowlist (v1a review).** In a `run_scan` or `deploy_scan` shift the guard allows only listed read
+  commands (`ls`, `cat`, `grep`, `git log|show|status|diff|ls-files|rev-parse`, docker read verbs, `npm ls|view|outdated`,
+  `aom setup propose`, `aom deploy probe`, ...), refuses shells, interpreters, wrappers and every redirect to a file, and limits
+  Edit/Write to the shift's scratch folder; the shift carries `devops.scanKind` so a scan whose brief cannot be built fails instead
+  of running unrestricted.
 - **`deploy.exec`**: runs an approved deploy. It re-exports `delivery/` at the approved commit into `<data dir>/deploys/<run id>/recipe`
   and **recomputes the hash; a mismatch refuses** (`hash_mismatch`). It resolves the secrets the recipe names from
   `<data dir>/secrets/deploy.json` (mode 0600; sealed by the browser to this runner's key, the same way as the test accounts of a
