@@ -4,6 +4,7 @@ import {
   type GraphScope,
   graphArmOf,
   graphRepoKey,
+  LOCAL_VAULT_CAPABILITY,
   type ProjectGraphStatus,
   projectVaultFolder,
   streamId,
@@ -15,7 +16,7 @@ import { iso, one, type Queryable, rows } from '../db/sql.ts';
 import { forbidden } from '../errors.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { projectScope, runnerActor, SYSTEM_ACTOR, userActor } from './common.ts';
-import { graphVaultFor, vaultAudience } from './vaults.ts';
+import { graphVaultFor, vaultAudience, workstationHasLocalVault } from './vaults.ts';
 
 /**
  * Project graphs, server side (docs/design/project-graphs.md sections 5 and 6): the server asks a workstation to index,
@@ -56,9 +57,11 @@ async function chooseIndexWorkstation(
        JOIN workstation_repos wr ON wr.workstation_id = w.id AND wr.project_repo_id = $1
       WHERE w.status = 'active' AND w.user_id = ANY($2::uuid[])
         AND ($3::uuid IS NULL OR w.id = $3::uuid)
+        AND EXISTS (SELECT 1 FROM workstation_capabilities wc
+                     WHERE wc.workstation_id = w.id AND $4 = ANY(wc.capabilities))
       ORDER BY w.connected DESC, w.last_seen_at DESC NULLS LAST, w.paired_at
       LIMIT 1`,
-    [repoId, audience, vault.storage === 'local' ? vault.workstationId : null],
+    [repoId, audience, vault.storage === 'local' ? vault.workstationId : null, LOCAL_VAULT_CAPABILITY],
   );
   return r?.id ?? null;
 }
@@ -188,6 +191,8 @@ export async function requestProjectGraph(
  */
 export async function seedProjectGraphs(ctx: Ctx, workstationId: string): Promise<number> {
   if (!graphsEnabled(ctx)) return 0;
+  // A runner without `local-vault:1` cannot index: requests stay pending until a capable runner connects.
+  if (!(await workstationHasLocalVault(ctx.pool, workstationId))) return 0;
   const repos = await rows<{
     project_id: string;
     repo_id: string;
@@ -229,6 +234,8 @@ export async function applyGraphResult(
   /** The command that was answered: `graph.update` records `ProjectGraphUpdated`, `graph.index` `ProjectGraphIndexed`. */
   command: 'graph.index' | 'graph.update' = 'graph.index',
 ): Promise<void> {
+  // An answer from a runner that does not know the graph commands (an error, never an index) is not a failed index.
+  if (!(await workstationHasLocalVault(ctx.pool, workstationId))) return;
   const projectId = String(payload.projectId ?? '');
   const repoId = String(payload.repoId ?? '');
   const repoKey = String(payload.repoKey ?? '');

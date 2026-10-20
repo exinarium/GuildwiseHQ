@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
+  LOCAL_VAULT_CAPABILITY,
   makeEnvelope,
   RUNNER_SUBPROTOCOL,
   type RunnerToServer,
@@ -19,6 +20,8 @@ export interface HelloOptions {
   maxConcurrentShifts?: number;
   sudoKey?: { keyId: string; publicKey: string };
   capabilities?: string[];
+  /** A 0.1.31 runner: does not announce `local-vault:1` (the default announces it, like 0.1.32). */
+  legacyVaults?: boolean;
   maxRunEnvironments?: number;
   integrationsVersion?: number;
 }
@@ -99,7 +102,9 @@ export class FakeRunner {
       outboxPending: o.outboxPending ?? 0,
       ...(o.maxConcurrentShifts ? { maxConcurrentShifts: o.maxConcurrentShifts } : {}),
       ...(o.sudoKey ? { sudoKey: o.sudoKey } : {}),
-      ...(o.capabilities ? { capabilities: o.capabilities } : {}),
+      ...(o.capabilities || !o.legacyVaults
+        ? { capabilities: [...(o.capabilities ?? []), ...(o.legacyVaults ? [] : [LOCAL_VAULT_CAPABILITY])] }
+        : {}),
       ...(o.maxRunEnvironments ? { maxRunEnvironments: o.maxRunEnvironments } : {}),
       ...(o.integrationsVersion ? { integrationsVersion: o.integrationsVersion } : {}),
     });

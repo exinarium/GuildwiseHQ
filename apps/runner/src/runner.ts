@@ -10,6 +10,7 @@ import {
   INTEGRATIONS_VERSION,
   type IntegrationKindId,
   type IpcRpcResponse,
+  LOCAL_VAULT_CAPABILITY,
   type McpAuthState,
   normalizeRemoteUrl,
   READONLY_DESIGN_CAPABILITY,
@@ -974,6 +975,7 @@ export class Runner {
         READONLY_DESIGN_CAPABILITY,
         RUNNER_PIN_CAPABILITY,
         DELIVERY_CAPABILITY,
+        LOCAL_VAULT_CAPABILITY,
         // The local opt-in (`aom-runner ceo full-power on`), read fresh: the server shows "Full power is off" without it.
         ...(this.freshConfig().ceo.fullPower ? [CEO_FULL_POWER_CAPABILITY] : []),
       ],

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   isOrgManager,
+  LOCAL_VAULT_CAPABILITY,
   type OrgRole,
   type PatchVaultRequest,
   projectVaultFolder,
@@ -293,16 +294,19 @@ export async function vaultConfigsFor(
   userId: string,
   workstationId?: string,
 ): Promise<VaultConfig[]> {
-  // A local vault is a folder on one workstation: only the workstation that holds it gets it.
+  // A local vault is a folder on one workstation: only the workstation that holds it gets it, and only when that runner
+  // announced `local-vault:1` (a 0.1.31 runner rejects the whole command over the empty remoteUrl).
   const vs = await rows(
     db,
     `SELECT v.* FROM vaults v
       WHERE ((v.project_id IS NULL AND v.org_id IN (SELECT om.org_id FROM org_members om
                WHERE om.user_id = $1 AND om.status = 'active' AND om.role IN ('owner','admin')))
          OR v.project_id IN (SELECT project_id FROM project_members WHERE user_id = $1 AND status = 'active'))
-        AND (v.storage = 'git' OR v.local_workstation_id = $2::uuid)
+        AND (v.storage = 'git' OR (v.local_workstation_id = $2::uuid AND EXISTS (
+               SELECT 1 FROM workstation_capabilities wc
+                WHERE wc.workstation_id = $2::uuid AND $3 = ANY(wc.capabilities))))
       ORDER BY v.created_at, v.id`,
-    [userId, workstationId ?? null],
+    [userId, workstationId ?? null, LOCAL_VAULT_CAPABILITY],
   );
   return vs.map((v) => ({
     vaultId: v.id,
@@ -611,6 +615,16 @@ export async function markVaultStatus(
 
 // ------------------------------------------------------------------ every project has a vault (graphs design 3)
 
+/** Does the workstation's runner announce `local-vault:1` (local vaults and the graph commands)? */
+export async function workstationHasLocalVault(db: Queryable, workstationId: string): Promise<boolean> {
+  const r = await one(
+    db,
+    'SELECT $2 = ANY(capabilities) AS on FROM workstation_capabilities WHERE workstation_id=$1',
+    [workstationId, LOCAL_VAULT_CAPABILITY],
+  );
+  return r?.on === true;
+}
+
 /** The Org Owner's primary workstation: the owner's earliest paired, active workstation. */
 export async function primaryWorkstationOf(db: Queryable, orgId: string): Promise<string | null> {
   const ownerId = await orgOwnerId(db, orgId);
@@ -639,7 +653,9 @@ export async function ensureProjectVaultIn(
   const p = await one(tx, `SELECT id, org_id FROM projects WHERE id=$1 AND kind='project'`, [projectId]);
   if (!p) return null;
   if (await one(tx, 'SELECT 1 FROM vaults WHERE project_id=$1', [projectId])) return null;
-  const workstationId = await primaryWorkstationOf(tx, p.org_id);
+  // Only a runner that announced `local-vault:1` may hold the folder; otherwise the request stays open.
+  const primary = await primaryWorkstationOf(tx, p.org_id);
+  const workstationId = primary && (await workstationHasLocalVault(tx, primary)) ? primary : null;
   const events: AppendInput[] = [];
   if (reason !== 'workstation')
     events.push({
@@ -684,6 +700,7 @@ export async function ensureProjectVaultsForWorkstation(ctx: Ctx, workstationId:
     workstationId,
   ]);
   if (!ws) return 0;
+  if (!(await workstationHasLocalVault(ctx.pool, workstationId))) return 0;
   const orgs = await rows<{ id: string }>(ctx.pool, `SELECT id FROM organizations WHERE owner_user_id=$1`, [
     ws.user_id,
   ]);
@@ -753,7 +770,7 @@ export async function ensureOrgVaultIn(ctx: Ctx, tx: Tx, orgId: string): Promise
   if (await one(tx, `SELECT 1 FROM vaults WHERE org_id=$1 AND kind='org' AND project_id IS NULL`, [orgId]))
     return null;
   const workstationId = await primaryWorkstationOf(tx, orgId);
-  if (!workstationId) return null;
+  if (!workstationId || !(await workstationHasLocalVault(tx, workstationId))) return null;
   const vaultId = randomUUID();
   await ctx.store.append(
     [
