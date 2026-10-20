@@ -77,7 +77,8 @@ export function ChatDrawer({
       .sort((a, b) => recency(b).localeCompare(recency(a)));
   }, [chats.data, view, query]);
   /** The live CEO chat is never archived by Archive all (the server skips it too). */
-  const archivable = listed.filter((c) => c.agentRole !== 'ceo');
+  /** Every open chat, whatever the search shows: Archive all is not scoped to the search, so it is only offered without one. */
+  const archivable = (chats.data ?? []).filter((c) => !c.archived && c.agentRole !== 'ceo');
   const keep = (chats.data ?? []).filter((c) => c.agentRole === 'ceo' && !c.archived).map((c) => c.threadId);
 
   const openChat = (c: ChatDto) => {
@@ -198,7 +199,7 @@ export function ChatDrawer({
                           },
                         ]}
                       />
-                      {view === 'active' && archivable.length > 1 && (
+                      {view === 'active' && !query.trim() && archivable.length > 1 && (
                         <Button
                           variant="ghost"
                           size="sm"

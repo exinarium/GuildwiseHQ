@@ -141,6 +141,16 @@ describe('chat list: archive all', () => {
     await waitFor(() => expect(screen.queryByTestId('chat-row-Ada')).toBeNull());
   });
 
+  it('is not offered while a search is active (it would archive more than the list shows)', async () => {
+    const user = userEvent.setup();
+    setup();
+    await screen.findByTestId('archive-all-chats');
+    await user.type(screen.getByLabelText('Search chats'), 'Ada');
+    expect(screen.queryByTestId('archive-all-chats')).toBeNull();
+    await user.clear(screen.getByLabelText('Search chats'));
+    expect(await screen.findByTestId('archive-all-chats')).toHaveTextContent('Archive all (2)');
+  });
+
   it('never offers to archive the live CEO chat, and sends it as an exception', async () => {
     list.push(chat(9, 'Cora', { agentRole: 'ceo' }));
     const user = userEvent.setup();
