@@ -191,6 +191,30 @@ describe('wake sources', () => {
     expect(await wakes()).toHaveLength(0);
   });
 
+  it('a Claude account sign-in notice does not wake the CEO (the system notice already tells the owner); a login-expired one does', async () => {
+    await clean();
+    const raise = async (subkind: string, title: string) => {
+      const id = randomUUID();
+      await seed(w, [
+        {
+          streamId: streamId.desk(id),
+          event: {
+            type: 'DeskItemCreated',
+            payload: { deskItemId: id, kind: 'alert', subkind, title, askedBy: { kind: 'system' } },
+          },
+          actor: { kind: 'system', id: null },
+          scope: { orgId: w.owner.id, projectId: null, audience: 'org' },
+        },
+      ]);
+    };
+    await raise('claude_account_login', 'Claude account test1 needs a sign-in');
+    await r.barrier();
+    await new Promise((x) => setTimeout(x, 200));
+    expect(await wakes()).toHaveLength(0);
+    await raise('claude_auth_expired', 'Claude login expired');
+    await until(async () => (await wakes()).length === 1, 3000, 'wake');
+  });
+
   it('a subject the CEO just acted on is not woken again for a normal reason', async () => {
     await clean();
     const card = await w.card({ title: 'Cooldown' });

@@ -633,6 +633,7 @@ export class Runner {
       forge: this.forgeEnv,
       exec: this.exec,
       fetch: globalThis.fetch,
+      log: this.log,
       config: () => this.freshConfig(),
       now: () => new Date(),
       home: homedir(),
@@ -1384,21 +1385,27 @@ export class Runner {
         // Provision an additional Claude account (folder, config entry, alias); an unexpected error is ok:false only.
         const p = CommandPayloadSchemas['claude.account.ensure'].parse(payload);
         const claude = this.adapters.get('claude-code');
-        done(
-          true,
-          await ensureClaudeAccount(p, {
-            home: homedir(),
-            root: this.paths.root,
-            configPath: this.paths.config,
-            machineScopeAllowed:
-              this.freshConfig().integrations.machineScopeFromWeb === 'primary' &&
-              (this.opts.isPrimaryPairing?.() ?? true),
-            registry: this.claudeAccounts,
-            probeLogin: async (key) =>
-              claude instanceof ClaudeCodeAdapter ? await claude.probeLogin(key) : 'unknown',
-            afterRegister: () => this.reportRuntimes(),
-          }),
-        );
+        this.log.info(`claude account ${p.key}: provisioning requested`);
+        const answer = await ensureClaudeAccount(p, {
+          home: homedir(),
+          root: this.paths.root,
+          configPath: this.paths.config,
+          machineScopeAllowed:
+            this.freshConfig().integrations.machineScopeFromWeb === 'primary' &&
+            (this.opts.isPrimaryPairing?.() ?? true),
+          registry: this.claudeAccounts,
+          probeLogin: async (key) =>
+            claude instanceof ClaudeCodeAdapter ? await claude.probeLogin(key) : 'unknown',
+          afterRegister: () => this.reportRuntimes(),
+        });
+        this.log.info(`claude account ${p.key}: provisioning ${answer.state}`, {
+          configDir: answer.configDir,
+          aliasAdded: answer.aliasAdded,
+          aliasExisting: answer.aliasExisting !== undefined,
+          aliasConflict: answer.aliasConflict === true,
+          ...(answer.detail ? { detail: answer.detail.slice(0, 200) } : {}),
+        });
+        done(true, answer);
       } else if (command === 'shifts.limit') {
         // The owner changed the limit on the Workstations page: it applies to the next shift offered, no restart.
         const p = CommandPayloadSchemas['shifts.limit'].parse(payload);

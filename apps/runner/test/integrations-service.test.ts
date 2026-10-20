@@ -86,7 +86,11 @@ function setup(over: {
   const ex = fakeExec(over.exec);
   const claudeStore = new ClaudeCredentialStore(claudeFile(paths.secrets));
   const afterChange: number[] = [];
+  const logLines: string[] = [];
+  const rec = (l: string) => (m: string, e?: unknown) =>
+    void logLines.push(`${l} ${m}${e === undefined ? '' : ` ${JSON.stringify(e)}`}`);
   const env: AdapterEnv = {
+    log: { info: rec('INFO'), warn: rec('WARN'), error: rec('ERROR') },
     paths,
     forge: {
       exec: ex.exec,
@@ -166,6 +170,7 @@ function setup(over: {
     });
   const everything = () => JSON.stringify(sent) + readLog(paths.logs);
   return {
+    logLines,
     dir,
     paths,
     keys,
@@ -503,6 +508,10 @@ describe('Claude accounts: claude_login for an account instance', () => {
       account: 'w@x.test',
     });
     expect(reg?.get('work')?.auth.state).toBe('ok');
+    // the sign-in is in the runner log, with the account and folder but no URL, code or state
+    expect(t.logLines.some((l) => l.includes('claude account work: sign-in started'))).toBe(true);
+    expect(t.logLines.some((l) => l.includes('claude account work: sign-in finished'))).toBe(true);
+    expect(t.logLines.join('\n')).not.toMatch(/https?:|CODE|STATE/);
     expect(t.afterChange.length).toBeGreaterThan(0);
     // the CLI was asked in the account's folder, with no stray token
     expect(t.ex.calls.some((c) => c.args[0] === 'auth' && c.args[1] === 'status')).toBe(true);
@@ -529,6 +538,11 @@ describe('Claude accounts: claude_login for an account instance', () => {
     expect(t.sessions().find((s) => s.state === 'failed')?.error).toContain(
       'CLAUDE_CONFIG_DIR=~/.claude-gw-work claude auth login',
     );
+    expect(
+      t.logLines.some(
+        (l) => l.startsWith('WARN') && l.includes('claude account work: sign-in did not finish'),
+      ),
+    ).toBe(true);
   });
 
   it('refuses claude_login for the main account', async () => {

@@ -10,6 +10,7 @@ import type { ClaudeAccountRegistry } from '../adapters/claude-accounts.ts';
 import type { ProbeResult } from '../adapters/claude-auth.ts';
 import type { RunnerConfig } from '../config.ts';
 import type { ForgeEnv } from '../forge/types.ts';
+import type { Logger } from '../log.ts';
 import type { PluginMcpServer } from '../mcp/plugins.ts';
 import type { RunnerPaths } from '../paths.ts';
 import type { Executor } from '../toolchain/exec.ts';
@@ -29,6 +30,8 @@ export const isFailure = (o: Outcome): o is IntegrationFailure => 'error' in o;
 
 /** Everything an adapter needs from the machine. Tests inject fakes: nothing here reaches a real provider from a test. */
 export interface AdapterEnv {
+  /** Runner log (INFO lines about account sign-ins); absent in tests. */
+  log?: Logger;
   paths: RunnerPaths;
   forge: ForgeEnv;
   exec: Executor;

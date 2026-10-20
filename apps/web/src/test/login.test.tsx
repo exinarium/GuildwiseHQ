@@ -42,6 +42,35 @@ describe('login screen', () => {
     expect(document.title).toBe(`Sign in · ${BRAND.name}`);
   });
 
+  it('a 403 bad_origin gets its own message, not "deactivated"', async () => {
+    fetchMock.mockImplementation(async (url: string) =>
+      String(url).includes('/auth/me')
+        ? res(401, { error: { code: 'unauthorized', message: 'no' } })
+        : res(403, { error: { code: 'bad_origin', message: 'Origin header missing or not allowed' } }),
+    );
+    const user = userEvent.setup();
+    renderLogin();
+    await user.type(await screen.findByLabelText('Email'), 'a@b.co');
+    await user.type(screen.getByLabelText('Password'), 'Password-12345');
+    await user.click(screen.getByRole('button', { name: 'Sign in' }));
+    expect(await screen.findByText(/This address isn't allowed to sign in/)).toBeInTheDocument();
+    expect(screen.queryByText(/deactivated/)).toBeNull();
+  });
+
+  it('any other 403 names its code', async () => {
+    fetchMock.mockImplementation(async (url: string) =>
+      String(url).includes('/auth/me')
+        ? res(401, { error: { code: 'unauthorized', message: 'no' } })
+        : res(403, { error: { code: 'weird', message: 'x' } }),
+    );
+    const user = userEvent.setup();
+    renderLogin();
+    await user.type(await screen.findByLabelText('Email'), 'a@b.co');
+    await user.type(screen.getByLabelText('Password'), 'Password-12345');
+    await user.click(screen.getByRole('button', { name: 'Sign in' }));
+    expect(await screen.findByText(/refused by the server \(weird\)/)).toBeInTheDocument();
+  });
+
   it('validates on submit and reveals the characters without a second "password" label', async () => {
     const user = userEvent.setup();
     renderLogin();

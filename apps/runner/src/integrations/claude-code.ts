@@ -317,8 +317,10 @@ export class ClaudeCodeIntegration implements IntegrationAdapter {
       return { error: 'Sign in needs an account key.', code: 'unsupported' };
     const registry = this.env.claudeAccounts;
     if (!registry) return { error: 'This runner cannot manage additional accounts.', code: 'unsupported' };
+    const log = this.env.log;
     let account = registry.get(instance);
     if (!account) {
+      log?.info(`claude account ${instance}: not set up yet, provisioning before sign-in`);
       const r = await ensureClaudeAccount(
         { key: instance },
         {
@@ -331,6 +333,7 @@ export class ClaudeCodeIntegration implements IntegrationAdapter {
           probeLogin: (k) => this.env.claude.probeLogin(k),
         },
       );
+      log?.info(`claude account ${instance}: provisioning ${r.state}`, { configDir: r.configDir });
       if (r.state === 'failed' || r.state === 'needs_owner')
         return { error: r.detail ?? 'The account could not be set up.', code: 'failed' };
       account = registry.get(instance);
@@ -348,6 +351,7 @@ export class ClaudeCodeIntegration implements IntegrationAdapter {
     const bin = this.env.claude.bin();
     const key = account.key;
     const hint = account.terminalLogin();
+    log?.info(`claude account ${key}: sign-in started`, { configDir: dir });
     return {
       cmd: bin,
       args: ['auth', 'login', '--claudeai'],
@@ -370,7 +374,11 @@ export class ClaudeCodeIntegration implements IntegrationAdapter {
         } catch {
           // not JSON: not signed in
         }
-        if (!loggedIn) return { error: `Sign-in did not finish. Run ${hint} on the workstation.` };
+        if (!loggedIn) {
+          log?.warn(`claude account ${key}: sign-in did not finish`, { configDir: dir });
+          return { error: `Sign-in did not finish. Run ${hint} on the workstation.` };
+        }
+        log?.info(`claude account ${key}: sign-in finished`, { configDir: dir });
         const acct = registry.get(key);
         acct?.auth.markOk();
         await this.env.claude.afterChange(key);

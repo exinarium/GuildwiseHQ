@@ -232,6 +232,32 @@ describe('answers and sign-in notices', () => {
   });
 });
 
+describe('notice wording follows the project setting', () => {
+  it('turning fallback on rewrites "paused" to "runs on the main account"; off turns it back; clearing closes it', async () => {
+    await reset();
+    await helloWith([acct('main')]);
+    await setAccount('work', false);
+    await report([acct('main'), acct('work', { login: 'none' })]);
+    let open = await notices('claude_account_login');
+    expect(open).toHaveLength(1);
+    expect(open[0]?.body).toContain('are paused');
+
+    await setAccount('work', true);
+    open = await notices('claude_account_login');
+    expect(open).toHaveLength(1);
+    expect(open[0]?.body).toContain('run on the main account meanwhile');
+    expect(open[0]?.body).not.toContain('paused');
+
+    await setAccount('work', false);
+    open = await notices('claude_account_login');
+    expect(open).toHaveLength(1);
+    expect(open[0]?.body).toContain('are paused');
+
+    await setAccount(null);
+    expect(await notices('claude_account_login')).toHaveLength(0);
+  });
+});
+
 describe('usage notices per account and the project banner', () => {
   const projectDto = async () =>
     (await w.t.req('GET', '/api/projects', { cookie: w.owner.cookie })).body.projects.find(

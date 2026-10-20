@@ -44,7 +44,11 @@ export async function agentOrgs(tx: Tx, workstationId: string): Promise<string[]
   return r.map((x) => x.org_id);
 }
 
-/** Raises `wanted` notices that are not open yet; closes the open ones of `subkind` + `keyPrefix` not in `wanted`. */
+/**
+ * Raises `wanted` notices that are not open yet; closes the open ones of `subkind` + `keyPrefix` not in `wanted`. An open
+ * notice whose wording no longer matches (a project's account or fallback changed, so "paused" became "runs on the main
+ * account") is closed and replaced by a new one, without a second mail.
+ */
 export async function reconcile(
   ctx: Ctx,
   tx: Tx,
@@ -53,19 +57,24 @@ export async function reconcile(
   keyPrefix: string,
   wanted: Notice[],
 ): Promise<Mail[]> {
-  const open = await rows<{ id: string; org_id: string; key: string }>(
+  const open = await rows<{ id: string; org_id: string; key: string; title: string; body: string }>(
     tx,
-    `SELECT id, org_id, data->>'key' AS key FROM desk_items
+    `SELECT id, org_id, data->>'key' AS key, title, body FROM desk_items
       WHERE subkind=$1 AND status='open' AND addressee_user_id=$2 AND starts_with(data->>'key', $3)`,
     [subkind, ws.userId, keyPrefix],
   );
   const events: AppendInput[] = [];
   const mails: Mail[] = [];
   const wantedKeys = new Set<string>();
+  const replaced = new Set<string>();
   for (const n of wanted) {
     for (const orgId of n.orgIds) {
       wantedKeys.add(`${n.key}|${orgId}`);
-      if (open.some((o) => o.key === n.key && o.org_id === orgId)) continue;
+      const current = open.filter((o) => o.key === n.key && o.org_id === orgId);
+      const fresh = current.some((o) => o.title === n.title && o.body === n.body);
+      if (fresh) continue;
+      const stale = current.length > 0;
+      for (const o of current) replaced.add(o.id);
       const deskItemId = randomUUID();
       events.push({
         streamId: streamId.desk(deskItemId),
@@ -89,11 +98,11 @@ export async function reconcile(
         actor: SYSTEM_ACTOR,
         scope: orgScope(orgId),
       });
-      if (n.mail && !mails.includes(n.mail)) mails.push(n.mail);
+      if (!stale && n.mail && !mails.includes(n.mail)) mails.push(n.mail);
     }
   }
   for (const o of open) {
-    if (wantedKeys.has(`${o.key}|${o.org_id}`)) continue;
+    if (wantedKeys.has(`${o.key}|${o.org_id}`) && !replaced.has(o.id)) continue;
     events.push({
       streamId: streamId.desk(o.id),
       event: {
@@ -101,7 +110,9 @@ export async function reconcile(
         payload: {
           deskItemId: o.id,
           resolution: 'acknowledged',
-          note: 'Fixed: this no longer needs attention.',
+          note: replaced.has(o.id)
+            ? 'Replaced by an up-to-date notice.'
+            : 'Fixed: this no longer needs attention.',
           by: { kind: 'system' },
         },
       },
