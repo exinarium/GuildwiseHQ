@@ -1,5 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import { type ChatDto, type CreateChatRequest, canDirectAgentInOrg, streamId } from '@aom/shared';
+import {
+  type ChatDto,
+  type CreateChatRequest,
+  canDirectAgentInOrg,
+  chatPreviewText,
+  streamId,
+} from '@aom/shared';
 import { orgRoleOf } from '../auth/org-context.ts';
 import type { AuthSession } from '../auth/sessions.ts';
 import { loadVisibleCard, requireProjectMember } from '../authz/scope.ts';
@@ -48,6 +54,13 @@ export function toChatDto(ctx: Ctx, r: Row, viewerId: string): ChatDto {
       r.agent_status === 'active' && !!r.workstation_id && ctx.services.runners.isOnline(r.workstation_id),
     createdAt: iso(r.created_at) as string,
     lastMessageAt: iso(r.last_message_at),
+    lastMessage: r.last_message_at
+      ? {
+          authorKind: r.last_author_kind,
+          body: chatPreviewText(r.last_body ?? ''),
+          at: iso(r.last_message_at) as string,
+        }
+      : null,
     archived: !!r.archived,
     mine: r.created_by === viewerId,
   };
@@ -58,15 +71,19 @@ const CHAT_SELECT = `
 SELECT t.*, a.name AS agent_name, a.role_key AS agent_role, a.status AS agent_status, a.workstation_id,
        c.ref AS card_ref,
        EXISTS (SELECT 1 FROM chat_archives x WHERE x.thread_id = t.id AND x.user_id = $1) AS archived,
-       (SELECT max(m.created_at) FROM thread_messages m WHERE m.thread_id = t.id) AS last_message_at
-  FROM threads t JOIN agents a ON a.id = t.agent_id LEFT JOIN cards c ON c.id = t.card_id`;
+       lm.created_at AS last_message_at, lm.author_kind AS last_author_kind, lm.body AS last_body
+  FROM threads t JOIN agents a ON a.id = t.agent_id LEFT JOIN cards c ON c.id = t.card_id
+  LEFT JOIN LATERAL (
+    SELECT m.created_at, m.author_kind, left(m.body, 1200) AS body FROM thread_messages m
+     WHERE m.thread_id = t.id ORDER BY m.created_at DESC, m.id DESC LIMIT 1
+  ) lm ON true`;
 
 /** The user's chat threads plus chats tied to projects they are an active member of, most recently active first. */
 export async function listChats(ctx: Ctx, userId: string): Promise<ChatDto[]> {
   const list = await rows(
     ctx.pool,
     `${CHAT_SELECT} WHERE t.kind = 'chat' AND t.deleted_at IS NULL AND (t.created_by = $1 OR t.project_id IN (SELECT project_id FROM project_members WHERE user_id = $1 AND status = 'active')) AND a.status <> 'retired'
-      ORDER BY COALESCE((SELECT max(m.created_at) FROM thread_messages m WHERE m.thread_id = t.id), t.created_at) DESC, t.id`,
+      ORDER BY COALESCE(lm.created_at, t.created_at) DESC, t.id`,
     [userId],
   );
   return list.map((r) => toChatDto(ctx, r, userId));

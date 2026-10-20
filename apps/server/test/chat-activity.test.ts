@@ -130,4 +130,30 @@ describe('POST /api/chats/archive-all', () => {
     ).toEqual({ archived: 0 });
     expect((await w.t.req('POST', '/api/chats/archive-all', { body: {} })).status).toBe(401);
   });
+
+  it('lists chats with the newest message as a plain-text preview', async () => {
+    await freshState();
+    const r = await w.connectRunner();
+    const agent = await w.hire('Prev', 'builder', 'senior');
+    const chat = await newChat(agent.id);
+    const list = async () =>
+      (await ok<any>(w.t.req('GET', '/api/chats', { cookie: w.owner.cookie }))).chats.find(
+        (c: any) => c.threadId === chat.threadId,
+      );
+    expect((await list()).lastMessage).toBeNull();
+    const b = await Browser.open(w.baseUrl, w.owner.cookie);
+    await b.hello();
+    b.send({ type: 'chat.send', threadId: chat.threadId, body: 'hello', clientMsgId: 'p1' });
+    const start = await r.waitFor('chat.start');
+    r.send('chat.done', {
+      chatId: start.chatId,
+      threadId: start.threadId,
+      messageText: '**Toy app**: 3 cards\n\n- one',
+      usage,
+    });
+    await b.until(() => b.of('chat.done').length === 1);
+    const c = await list();
+    expect(c.lastMessage).toMatchObject({ authorKind: 'agent', body: 'Toy app: 3 cards one' });
+    expect(c.lastMessage.at).toBe(c.lastMessageAt);
+  });
 });
