@@ -6,6 +6,7 @@ import {
   DeployExecResultSchema,
   type Gate,
   type GateEvidence,
+  maskText,
   type Recipe,
   type RecipeEnv,
   streamId,
@@ -913,7 +914,8 @@ export async function applyDeployResult(
           ...('deployed' in r && r.deployed?.url ? { url: r.deployed.url } : {}),
           deployedCommit: ('deployedCommit' in r ? r.deployedCommit : null) ?? run.commit ?? null,
           summary,
-          logTail: r.logTail ?? '',
+          // The tail is output of the customer's own script: it is stored masked (secrets, paths, e-mail addresses).
+          logTail: maskText(r.logTail ?? '').slice(0, 6000),
           exitCode: 'exitCode' in r ? (r.exitCode ?? null) : null,
         },
       },

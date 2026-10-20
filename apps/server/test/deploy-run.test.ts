@@ -627,6 +627,37 @@ describe('the workstation refuses or fails: answers, never retries', () => {
     ).toBe('urgent');
   });
 
+  it('stores the log tail masked: secrets, paths and e-mail addresses never reach the server as written', async () => {
+    await mergeLanded(d, 'd'.repeat(40));
+    const res = await ask('local', { requester: trigger, commit: 'd'.repeat(40) });
+    const id = res.runs[0]!.runId;
+    await until(async () => execs().some((c) => (c.payload as { runId: string }).runId === id), 4000, 'exec');
+    const cmd = execs().find((c) => (c.payload as { runId: string }).runId === id)!;
+    r.send('command.result', {
+      commandId: cmd.commandId,
+      ok: true,
+      result: {
+        outcome: 'failed',
+        exitCode: 1,
+        health: null,
+        smoke: null,
+        logTail:
+          'token=ghp_abcdefghijklmnopqrstuvwxyz0123456789\nDB_PASSWORD=correct-horse-battery\ncat ~/.config/guildwise/p5/local.env\nmail ada@example.com',
+        durationMs: 5,
+        summary: 'the script exited with 1',
+      },
+    });
+    await until(async () => (await run(id)).status === 'failed', 4000, 'failed');
+    const stored = String((await run(id)).log_tail);
+    for (const leak of ['ghp_abc', 'correct-horse', '/home/user/.config', 'ada@example.com'])
+      expect(stored).not.toContain(leak);
+    const [e] = await q(
+      `SELECT payload FROM events WHERE type='DeployRunFinished' AND payload->>'runId'=$1`,
+      [id],
+    );
+    expect(JSON.stringify(e!.payload)).not.toContain('correct-horse');
+  });
+
   it('an unreadable answer ends the run as failed, not as a retry', async () => {
     await mergeLanded(d, 'c'.repeat(40));
     const res = await ask('local', { requester: trigger, commit: 'c'.repeat(40) });
