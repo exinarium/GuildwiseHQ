@@ -107,7 +107,7 @@ export const INTEGRATION_KINDS: readonly IntegrationKind[] = [
           { text: 'Open the sign-in link and sign in to the Claude account for this key.' },
           { text: 'Copy the code the page shows and paste it here.' },
           {
-            text: "The login is stored in this account's own Claude folder on the workstation (e.g. ~/.claude-work).",
+            text: "The login is stored in this account's own Claude folder on the workstation (e.g. ~/.claude-gw-work).",
           },
         ],
       },
