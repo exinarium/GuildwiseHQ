@@ -1247,9 +1247,7 @@ export function capChatSegments(segments: readonly ChatSegment[]): ChatSegment[]
 
 /** The text of a turn: its text segments joined with a blank line (empty ones skipped). */
 export function chatSegmentsText(segments: readonly ChatSegment[]): string {
-  return segments
-    .flatMap((s) => (s.type === 'text' && s.text.trim() ? [s.text.trim()] : []))
-    .join('\n\n');
+  return segments.flatMap((s) => (s.type === 'text' && s.text.trim() ? [s.text.trim()] : [])).join('\n\n');
 }
 
 /**

@@ -3,6 +3,7 @@ import { homedir, hostname, platform } from 'node:os';
 import { basename, join } from 'node:path';
 import {
   CEO_FULL_POWER_CAPABILITY,
+  CHAT_ACTIVITY_FEATURE,
   CLAUDE_ACCOUNTS_CAPABILITY,
   CommandPayloadSchemas,
   DELIVERY_CAPABILITY,
@@ -17,7 +18,6 @@ import {
   READONLY_DESIGN_CAPABILITY,
   type RepoReport,
   RUNNER_PIN_CAPABILITY,
-  CHAT_ACTIVITY_FEATURE,
   RUNNER_UPDATE_CHECK_CAPABILITY,
   type RunnerCommandName,
   type RunnerUpdateCheckResult,

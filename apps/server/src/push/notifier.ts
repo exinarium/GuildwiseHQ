@@ -337,8 +337,11 @@ export function registerPushNotifier(ctx: Ctx): PushService {
           authorKind: string;
           kind: string;
           body: string;
+          data?: { segments?: Array<{ type: string; text?: string }> };
         };
         if (p.authorKind !== 'agent' || p.kind !== 'chat') return;
+        // the body holds the whole turn: the notification shows the final answer (the last text block)
+        const finalText = p.data?.segments?.findLast((x) => x.type === 'text' && x.text?.trim())?.text;
         const t = await one(
           ctx.pool,
           `SELECT t.created_by, t.org_id, t.title, a.name AS agent FROM threads t LEFT JOIN agents a ON a.id = t.agent_id WHERE t.id=$1 AND t.kind='chat'`,
@@ -350,7 +353,7 @@ export function registerPushNotifier(ctx: Ctx): PushService {
           subject: `chat:${p.threadId}`,
           state: p.messageId,
           title: t.agent ? `${t.agent} replied` : 'New chat reply',
-          body: p.body,
+          body: finalText?.trim() || p.body,
           url: `/chat/${p.threadId}`,
           priority: 'normal',
           orgId: t.org_id,

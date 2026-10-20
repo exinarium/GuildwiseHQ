@@ -3,13 +3,17 @@ import {
   BA_ROLE_KEY,
   CHAT_ERROR,
   type ChatContext,
+  type ChatSegment,
   canDirectAgentInOrg,
+  capChatSegments,
+  chatSegmentsText,
   type ModelChoice,
   type ReadRepo,
   type RunnerToServerOf,
   type ServerToBrowser,
   streamId,
   summarizeCommandTexts,
+  type ThreadMessageDto,
   type ToolCounts,
 } from '@aom/shared';
 import { orgOwnerId, orgRoleOf } from '../auth/org-context.ts';
@@ -36,6 +40,7 @@ import { isProjectPaused } from '../dispatcher/project-hold.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { notifyUsers } from '../push/notifier.ts';
 import { standingOrdersForProjects } from '../queries/ledger.ts';
+import { threadMessageById } from '../queries/threads.ts';
 import { agentSpecFor } from '../runner-gateway/brief.ts';
 import { orgReadRepos, projectReadRepos, referenceReadRepos } from '../runner-gateway/read-repos.ts';
 import { localReadRepos } from '../runner-gateway/workstation-repos.ts';
@@ -49,6 +54,16 @@ import {
   resolveTurnModel,
   STALE_QUEUE_MS,
 } from './ceo-turns.ts';
+
+/** The stored body of a turn: all its text blocks, joined (the text before a tool call is not lost); else the final answer. */
+function turnBody(msg: RunnerToServerOf<'chat.done'>): string {
+  return (msg.segments && chatSegmentsText(msg.segments)) || msg.messageText;
+}
+
+/** `data.segments` of the agent message (absent from an older runner). */
+function segmentData(msg: RunnerToServerOf<'chat.done'>): { segments?: ChatSegment[] } {
+  return msg.segments?.length ? { segments: capChatSegments(msg.segments) } : {};
+}
 
 const ZERO_USAGE = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
 
@@ -71,6 +86,8 @@ export interface ChatTerminal {
   userId: string;
   threadId: string;
   messageId?: string;
+  /** The stored agent message, for the browser's `chat.done` (absent if it could not be read back). */
+  message?: ThreadMessageDto;
   reason?: string;
   /** A CEO thread whose next queued message may start now. */
   ceoThread?: string;
@@ -627,8 +644,8 @@ export class ChatRelay {
             authorKind: 'agent',
             authorAgentId: c.agentId,
             kind: 'chat',
-            body: msg.messageText,
-            data: replyData(msg, info, waitedMs),
+            body: turnBody(msg),
+            data: { ...replyData(msg, info, waitedMs), ...segmentData(msg) },
           },
         },
         actor: agentActor(c.agentId),
@@ -672,7 +689,14 @@ export class ChatRelay {
     }
     await this.ctx.store.append(events, { tx });
     this.release(c);
-    return { userId: c.userId, threadId: c.threadId, messageId, ceoThread: c.threadId };
+    const message = await threadMessageById(tx, messageId);
+    return {
+      userId: c.userId,
+      threadId: c.threadId,
+      messageId,
+      ...(message ? { message } : {}),
+      ceoThread: c.threadId,
+    };
   }
 
   private async applyCeoError(
@@ -833,6 +857,19 @@ export class ChatRelay {
       this.tell(c.userId, { type: 'chat.delta', threadId: c.threadId, text: msg.text });
   }
 
+  /** Tool activity of the running turn: forwarded to the browser as it is (not stored; the segments arrive in `chat.done`). */
+  onActivity(workstationId: string, msg: RunnerToServerOf<'chat.activity'>): void {
+    const c = this.inflight.get(msg.chatId);
+    if (c && c.workstationId === workstationId)
+      this.tell(c.userId, {
+        type: 'chat.activity',
+        threadId: c.threadId,
+        seq: msg.seq,
+        segment: msg.segment,
+        ...(msg.replace ? { replace: true } : {}),
+      });
+  }
+
   /** The runner finished one reply. Runs inside the runner-inbox transaction; notify afterwards. */
   async applyDone(
     workstationId: string,
@@ -855,10 +892,11 @@ export class ChatRelay {
               authorKind: 'agent',
               authorAgentId: c.agentId,
               kind: 'chat',
-              body: msg.messageText,
+              body: turnBody(msg),
               data: {
                 ...(msg.runtimeSessionId ? { runtimeSessionId: msg.runtimeSessionId } : {}),
                 usage: msg.usage,
+                ...segmentData(msg),
               },
             },
           },
@@ -870,7 +908,8 @@ export class ChatRelay {
       { tx },
     );
     this.release(c);
-    return { userId: c.userId, threadId: c.threadId, messageId };
+    const message = await threadMessageById(tx, messageId);
+    return { userId: c.userId, threadId: c.threadId, messageId, ...(message ? { message } : {}) };
   }
 
   async applyError(
@@ -890,7 +929,13 @@ export class ChatRelay {
 
   notify(t: ChatTerminal | undefined): void {
     if (!t) return;
-    if (t.messageId) this.tell(t.userId, { type: 'chat.done', threadId: t.threadId, messageId: t.messageId });
+    if (t.messageId)
+      this.tell(t.userId, {
+        type: 'chat.done',
+        threadId: t.threadId,
+        messageId: t.messageId,
+        ...(t.message ? { message: t.message } : {}),
+      });
     else this.fail(t.userId, t.threadId, t.reason ?? CHAT_ERROR.runnerError);
     // The reply is out: the next queued message of a CEO conversation may start.
     if (t.ceoThread)

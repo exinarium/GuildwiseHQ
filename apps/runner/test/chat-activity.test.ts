@@ -1,4 +1,4 @@
-import { CHAT_ACTIVITY_FEATURE, BUILTIN_ROLES, uuidv7 } from '@aom/shared';
+import { BUILTIN_ROLES, CHAT_ACTIVITY_FEATURE, uuidv7 } from '@aom/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { RuntimeEvent } from '../src/adapters/types.ts';
 import { type Harness, startHarness } from './harness.ts';

@@ -3,9 +3,9 @@ import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import {
-  capChatSegments,
   type ChatContext,
   type ChatSegment,
+  capChatSegments,
   chatSegmentsText,
   type IpcReportRequest,
   type IpcReportResponse,

@@ -1,4 +1,5 @@
 import {
+  CHAT_ACTIVITY_FEATURE,
   HEARTBEAT_SEC,
   LOCAL_VAULT_CAPABILITY,
   type McpCall,
@@ -549,6 +550,8 @@ export class RunnerHandlers {
       }
       case 'chat.delta':
         return this.ctx.services.chat.onDelta(conn.workstationId, msg);
+      case 'chat.activity':
+        return this.ctx.services.chat.onActivity(conn.workstationId, msg);
       case 'chat.done':
       case 'chat.error': {
         const chat = this.ctx.services.chat;
@@ -753,6 +756,7 @@ export class RunnerHandlers {
       limits: { maxConcurrentShifts: conn.maxShifts, shiftLimit: setting },
       // Safe mode: the runner version this workstation is pinned to (the runner's updater follows it, not the latest).
       runnerPin: await pinForWelcome(ctx.pool, conn.workstationId),
+      features: [CHAT_ACTIVITY_FEATURE],
     });
     // With nothing in the runner's outbox there is nothing to wait for; otherwise reconcile on outbox.flushed.
     if (msg.outboxPending === 0) await this.reconcile(conn);

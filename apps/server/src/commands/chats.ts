@@ -186,6 +186,38 @@ export async function setChatArchived(
 }
 
 /**
+ * Closes every open chat of the user in one transaction (one `ChatArchived` per chat, like the single close). Chats in
+ * `except` stay, and so does the live CEO standing chat of any organization (it is cleared with "Clear", not archived).
+ */
+export async function archiveAllChats(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  except: readonly string[] = [],
+): Promise<number> {
+  return withAppendTx(ctx.pool, async (tx) => {
+    const open = await rows(
+      tx,
+      `${CHAT_SELECT} WHERE t.kind = 'chat' AND t.deleted_at IS NULL AND (t.created_by = $1 OR t.project_id IN (SELECT project_id FROM project_members WHERE user_id = $1 AND status = 'active')) AND a.status <> 'retired'
+          AND NOT EXISTS (SELECT 1 FROM chat_archives x WHERE x.thread_id = t.id AND x.user_id = $1)
+          AND NOT (t.id = ANY ($2::uuid[]))
+          AND NOT EXISTS (SELECT 1 FROM ceo_settings cs WHERE cs.chat_thread_id = t.id)`,
+      [user.id, [...except]],
+    );
+    if (open.length === 0) return 0;
+    await ctx.store.append(
+      open.map((r) => ({
+        streamId: streamId.thread(r.id),
+        event: { type: 'ChatArchived' as const, payload: { threadId: r.id, userId: user.id } },
+        actor: userActor(user.id),
+        scope: chatScope(r),
+      })),
+      { tx },
+    );
+    return open.length;
+  });
+}
+
+/**
  * Delete a chat for good (its messages are removed). Only the person who started it may. A chat linked to a card is
  * refused (409 `chat_in_card_history`): its messages are part of that card's history, so the answer there is Close.
  */

@@ -32,3 +32,11 @@ export type ChatDto = z.infer<typeof ChatDtoSchema>;
 export const CreateChatResponseSchema = z.object({ chat: ChatDtoSchema });
 export const ChatsResponseSchema = z.object({ chats: z.array(ChatDtoSchema) });
 export const ChatParamsSchema = z.object({ id: z.uuid() });
+
+/** `POST /api/chats/archive-all`: closes every open chat of the caller (never their live CEO standing chat). */
+export const ArchiveAllChatsRequestSchema = z.object({
+  exceptThreadIds: z.array(z.uuid()).max(500).optional(),
+});
+export type ArchiveAllChatsRequest = z.infer<typeof ArchiveAllChatsRequestSchema>;
+export const ArchiveAllChatsResponseSchema = z.object({ archived: z.number().int().nonnegative() });
+export type ArchiveAllChatsResponse = z.infer<typeof ArchiveAllChatsResponseSchema>;
