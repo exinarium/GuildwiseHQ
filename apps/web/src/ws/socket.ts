@@ -10,7 +10,7 @@ import {
 import type { QueryClient } from '@tanstack/react-query';
 import { useSyncExternalStore } from 'react';
 import { getActiveOrgId } from '../lib/activeOrg.ts';
-import { type ChatActivityMessage, parseActivity } from '../lib/chatSegments.ts';
+import type { ChatActivityMessage } from '../lib/chatSegments.ts';
 import { InvalidationBatcher } from './invalidate.ts';
 
 export type SocketState = 'connecting' | 'open' | 'closed';
@@ -137,12 +137,6 @@ export class LiveSocket {
 
   /** Feeds a server message in (also used by the MSW mock transport). */
   handle(raw: unknown): void {
-    // `chat.activity` (tool use, thinking) is newer than the shared schema: parse it on its own so it is not dropped.
-    const activity = parseActivity(raw);
-    if (activity) {
-      this.emitChat(activity.threadId, { type: 'activity', activity });
-      return;
-    }
     const parsed = ServerToBrowserSchema.safeParse(raw);
     if (!parsed.success) return;
     const msg: ServerToBrowser = parsed.data;
@@ -179,11 +173,14 @@ export class LiveSocket {
       case 'chat.delta':
         this.emitChat(msg.threadId, { type: 'delta', text: msg.text });
         break;
+      case 'chat.activity':
+        this.emitChat(msg.threadId, { type: 'activity', activity: msg });
+        break;
       case 'chat.done':
         this.emitChat(msg.threadId, {
           type: 'done',
           messageId: msg.messageId,
-          ...doneMessage(raw),
+          ...(msg.message ? { message: msg.message } : {}),
         });
         break;
       case 'chat.queued':
@@ -300,30 +297,6 @@ export class LiveSocket {
       }
     };
   }
-}
-
-/** The stored agent message a newer server sends with `chat.done` (so the streamed bubble can be swapped without a gap). */
-function doneMessage(raw: unknown): { message?: ThreadMessageDto } {
-  const m = raw && typeof raw === 'object' ? (raw as Record<string, unknown>).message : undefined;
-  if (!m || typeof m !== 'object') return {};
-  const r = m as Record<string, unknown>;
-  const ok =
-    typeof r.id === 'string' &&
-    typeof r.threadId === 'string' &&
-    typeof r.body === 'string' &&
-    typeof r.createdAt === 'string' &&
-    (r.authorKind === 'user' || r.authorKind === 'agent' || r.authorKind === 'system');
-  if (!ok) return {};
-  return {
-    message: {
-      authorUserId: null,
-      authorAgentId: null,
-      authorName: null,
-      kind: 'comment',
-      data: {},
-      ...r,
-    } as unknown as ThreadMessageDto,
-  };
 }
 
 function defaultUrl(): string {

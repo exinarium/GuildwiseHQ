@@ -1,4 +1,4 @@
-import type { ChatDto } from '@aom/shared';
+import { type ChatDto, ServerToBrowserSchema } from '@aom/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -15,11 +15,12 @@ import {
   type ChatSegment,
   groupSegments,
   liveStatus,
-  parseActivity,
   parseSegments,
   toolKind,
 } from '../lib/chatSegments.ts';
 import { initSocket, type LiveSocket } from '../ws/socket.ts';
+
+const T = '11111111-1111-4111-8111-111111111111';
 
 describe('segment parsing and building', () => {
   it('parses segments tolerantly and drops junk', () => {
@@ -40,36 +41,58 @@ describe('segment parsing and building', () => {
     expect(parseSegments({ segments: [] })).toBeNull();
   });
 
-  it('parses a chat.activity message and rejects others', () => {
+  it('the shared schema knows chat.activity and rejects bad segments', () => {
+    const ok = ServerToBrowserSchema.safeParse({
+      type: 'chat.activity',
+      threadId: '11111111-1111-4111-8111-111111111111',
+      seq: 2,
+      segment: { type: 'tool', id: 'a', name: 'Read', status: 'running' },
+      replace: true,
+    });
+    expect(ok.success).toBe(true);
+    const bad = ServerToBrowserSchema.safeParse({
+      type: 'chat.activity',
+      threadId: '11111111-1111-4111-8111-111111111111',
+      seq: 2,
+      segment: { type: 'tool', name: 'Read', status: 'weird' },
+    });
+    expect(bad.success).toBe(false);
+  });
+
+  it('a bad stored segment is skipped, the message keeps the rest', () => {
     expect(
-      parseActivity({
-        type: 'chat.activity',
-        threadId: 't',
-        seq: 2,
-        segment: { type: 'thinking' },
-        replace: true,
+      parseSegments({
+        segments: [
+          { type: 'tool', name: 'Read', status: 'weird' },
+          { type: 'bogus' },
+          { type: 'text', text: 'x' },
+        ],
       }),
-    ).toEqual({ threadId: 't', seq: 2, segment: { type: 'thinking' }, replace: true });
-    expect(parseActivity({ type: 'chat.delta', threadId: 't' })).toBeNull();
+    ).toEqual([
+      { type: 'tool', name: 'Read', status: 'ok' },
+      { type: 'text', text: 'x' },
+    ]);
   });
 
   it('builds a turn: tool, replace by id, empty text placeholder then deltas', () => {
     let s: ChatSegment[] = [];
     s = applyDelta(s, 'Let me look. ');
     s = applyActivity(s, {
-      threadId: 't',
+      type: 'chat.activity',
+      threadId: T,
       seq: 1,
       segment: { type: 'tool', id: 'a', name: 'Bash', summary: 'pnpm test', status: 'running' },
     });
     expect(liveStatus(s)).toBe('Running pnpm test…');
     s = applyActivity(s, {
-      threadId: 't',
+      type: 'chat.activity',
+      threadId: T,
       seq: 1,
       replace: true,
       segment: { type: 'tool', id: 'a', name: 'Bash', status: 'ok' },
     });
     expect(s[1]).toMatchObject({ status: 'ok', summary: 'pnpm test' });
-    s = applyActivity(s, { threadId: 't', seq: 2, segment: { type: 'text', text: '' } });
+    s = applyActivity(s, { type: 'chat.activity', threadId: T, seq: 2, segment: { type: 'text', text: '' } });
     s = applyDelta(s, 'Done');
     expect(s).toHaveLength(3);
     expect(s[2]).toEqual({ type: 'text', text: 'Done' });

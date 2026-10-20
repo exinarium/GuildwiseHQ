@@ -1,3 +1,4 @@
+import { chatPreviewText } from '@aom/shared';
 import { HttpResponse, http } from 'msw';
 import { db, ME, ORG_ID } from './db.ts';
 
@@ -331,7 +332,19 @@ export const chatHandlers = [
     return HttpResponse.json({ threadId: standing });
   }),
   http.post(`${A}/ceo/chat`, () => HttpResponse.json({ threadId: standing })),
-  http.get(`${A}/chats`, () => HttpResponse.json({ chats })),
+  http.get(`${A}/chats`, () =>
+    HttpResponse.json({
+      chats: chats.map((c) => {
+        const last = (threads.get(c.threadId) ?? []).at(-1);
+        return {
+          ...c,
+          lastMessage: last
+            ? { authorKind: last.authorKind, body: chatPreviewText(last.body), at: last.createdAt }
+            : null,
+        };
+      }),
+    }),
+  ),
   http.post(`${A}/chats/archive-all`, async ({ request }) => {
     const b = (await request.json().catch(() => ({}))) as { exceptThreadIds?: string[] };
     let archived = 0;

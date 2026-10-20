@@ -1,7 +1,5 @@
 import type { ChatDto } from '@aom/shared';
-import { useThreadPreview } from '../../api/queries/chats.ts';
 import { formatDateTime } from '../../lib/time.ts';
-import { previewText } from '../chats/ChatRow.tsx';
 import { cx } from '../ui/cx.ts';
 
 function HistoryRow({
@@ -15,7 +13,6 @@ function HistoryRow({
   standing: boolean;
   onOpen: () => void;
 }) {
-  const preview = useThreadPreview(chat.threadId, chat.lastMessageAt !== null).data;
   return (
     <button
       type="button"
@@ -36,7 +33,7 @@ function HistoryRow({
         </span>
       </span>
       <span className="w-full truncate text-xs text-muted">
-        {preview ? previewText(preview.body) : chat.lastMessageAt ? '' : 'No messages yet'}
+        {chat.lastMessage?.body ?? (chat.lastMessageAt ? '' : 'No messages yet')}
       </span>
     </button>
   );

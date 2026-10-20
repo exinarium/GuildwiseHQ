@@ -1,38 +1,25 @@
 import type { ChatDto } from '@aom/shared';
 import { Loader2 } from 'lucide-react';
-import { useThreadPreview } from '../../api/queries/chats.ts';
 import { isUnread } from '../../lib/chatSeen.ts';
 import { ageLabel } from '../../lib/time.ts';
 import { AgentAvatar } from '../Face.tsx';
 import { cx } from '../ui/cx.ts';
 
-/** First line of a message, markdown noise stripped, for the one-line preview. */
-export function previewText(body: string): string {
-  return body
-    .replace(/```[\s\S]*?```/g, ' code ')
-    .replace(/[#>*_`~|-]+/g, ' ')
-    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
 /** One conversation in the Chats list: avatar, agent, last message, when, and whether it needs a look. */
 export function ChatRow({
   chat,
   working,
-  loadPreview,
   onOpen,
   ceo,
 }: {
   chat: ChatDto;
   working: boolean;
-  loadPreview: boolean;
   onOpen: () => void;
   ceo?: boolean;
 }) {
-  const preview = useThreadPreview(chat.threadId, loadPreview && chat.lastMessageAt !== null).data;
+  const preview = chat.lastMessage ?? null;
   const unread = isUnread(chat.threadId, chat.lastMessageAt, preview?.authorKind);
-  const text = preview ? previewText(preview.body) : '';
+  const text = preview?.body ?? '';
   return (
     <button
       type="button"

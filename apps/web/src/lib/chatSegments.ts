@@ -1,30 +1,21 @@
-/**
- * Chat activity contract (docs: .claude/worktrees/chat-contract.md).
- *
- * TEMPORARY LOCAL COPY: the backend work adds `ChatSegment` and the `chat.activity` message to `@aom/shared`. After the two
- * branches are merged, replace the types below with the shared imports and keep the tolerant parsers (they accept
- * older/newer shapes and never throw).
- */
+import { type ChatSegment, ChatSegmentSchema, type ServerToBrowser } from '@aom/shared';
 
-export type ToolStatus = 'running' | 'ok' | 'error' | 'refused';
+export type { ChatSegment };
+export type ToolStatus = Extract<ChatSegment, { type: 'tool' }>['status'];
 
-export type ChatSegment =
-  | { type: 'text'; text: string }
-  | { type: 'tool'; id?: string; name: string; summary?: string; status: ToolStatus }
-  | { type: 'thinking' };
-
-/** Server -> browser `chat.activity` (forwarded, never stored). */
-export interface ChatActivityMessage {
-  threadId: string;
-  seq: number;
-  segment: ChatSegment;
-  replace?: boolean;
-}
+/** Server -> browser `chat.activity` (forwarded, never stored): `seq` is the segment index, `replace` updates it. */
+export type ChatActivityMessage = Extract<ServerToBrowser, { type: 'chat.activity' }>;
 
 const STATUSES: readonly ToolStatus[] = ['running', 'ok', 'error', 'refused'];
 
-/** One segment from unknown JSON, or null when it is not a segment we understand. */
+/**
+ * One segment from unknown JSON (stored data may be older or from another runner version): the shared schema first,
+ * then a tolerant reading (unknown tool status counts as `ok`). Null when it is not a segment, so the caller can skip
+ * just that segment and keep the message.
+ */
 export function parseSegment(raw: unknown): ChatSegment | null {
+  const strict = ChatSegmentSchema.safeParse(raw);
+  if (strict.success) return strict.data;
   if (!raw || typeof raw !== 'object') return null;
   const r = raw as Record<string, unknown>;
   if (r.type === 'text') return typeof r.text === 'string' ? { type: 'text', text: r.text } : null;
@@ -49,17 +40,6 @@ export function parseSegments(data: unknown): ChatSegment[] | null {
   if (!Array.isArray(raw)) return null;
   const out = raw.map(parseSegment).filter((s): s is ChatSegment => s !== null);
   return out.length > 0 ? out : null;
-}
-
-/** A `chat.activity` ws message from unknown JSON, or null. */
-export function parseActivity(raw: unknown): ChatActivityMessage | null {
-  if (!raw || typeof raw !== 'object') return null;
-  const r = raw as Record<string, unknown>;
-  if (r.type !== 'chat.activity' || typeof r.threadId !== 'string') return null;
-  const segment = parseSegment(r.segment);
-  if (!segment) return null;
-  const seq = typeof r.seq === 'number' && Number.isFinite(r.seq) && r.seq >= 0 ? Math.floor(r.seq) : 0;
-  return { threadId: r.threadId, seq, segment, ...(r.replace === true ? { replace: true } : {}) };
 }
 
 /**

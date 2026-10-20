@@ -84,16 +84,3 @@ export function useArchiveAllChats() {
     onSettled: () => refreshChats(qc),
   });
 }
-
-/** The newest message of a chat (list preview). Lives under the thread's key so new messages refresh it. */
-export function useThreadPreview(threadId: string, enabled = true) {
-  return useQuery({
-    queryKey: ['thread', threadId, 'preview'],
-    enabled,
-    staleTime: 30_000,
-    queryFn: async () => {
-      const r = await get<Partial<ThreadMessagesResponse>>(`/threads/${threadId}/messages?limit=1`);
-      return r.messages?.[r.messages.length - 1] ?? null;
-    },
-  });
-}

@@ -31,9 +31,6 @@ import {
   useToast,
 } from './ui.tsx';
 
-/** Rows whose last message is fetched for the preview (the list scrolls; the rest show it once they are near the top). */
-const PREVIEW_ROWS = 40;
-
 const recency = (c: ChatDto) => c.lastMessageAt ?? c.createdAt;
 
 /**
@@ -220,7 +217,7 @@ export function ChatDrawer({
                 className="flex min-h-0 flex-1 flex-col divide-y divide-line overflow-y-auto overscroll-contain px-1 py-1"
                 data-testid="chat-list"
               >
-                {listed.map((c, i) => (
+                {listed.map((c) => (
                   <li
                     key={c.threadId}
                     className="flex items-center gap-1"
@@ -230,7 +227,6 @@ export function ChatDrawer({
                       chat={c}
                       ceo={c.agentRole === 'ceo'}
                       working={working.has(c.threadId)}
-                      loadPreview={i < PREVIEW_ROWS}
                       onOpen={() => openChat(c)}
                     />
                     <ChatMenu
