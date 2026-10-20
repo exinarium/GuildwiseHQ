@@ -9,6 +9,8 @@ import {
   PairingCodeResponseSchema,
   type PatchUserRequest,
   type SetShiftLimitRequest,
+  type UpdateCheckResponse,
+  UpdateCheckResponseSchema,
   WorkstationsResponseSchema,
 } from '@aom/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -102,5 +104,19 @@ export function useSetShiftLimit(id: string) {
   return useMutation({
     mutationFn: (limit: SetShiftLimitRequest['limit']) => put(`/workstations/${id}/shift-limit`, { limit }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['workstations'] }),
+  });
+}
+
+/** "Check for updates": the runner runs its updater's check now. The answer arrives on the workstation (`updateCheck`). */
+export function useCheckForUpdates(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      post<UpdateCheckResponse>(`/workstations/${id}/update-check`, {}, UpdateCheckResponseSchema),
+    onSuccess: () => {
+      // The runner answers within seconds (a download takes longer; the list polls anyway).
+      for (const ms of [0, 1500, 4000])
+        setTimeout(() => qc.invalidateQueries({ queryKey: ['workstations'] }), ms);
+    },
   });
 }
