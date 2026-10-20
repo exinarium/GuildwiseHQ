@@ -8,8 +8,9 @@ import {
   sealForRunner,
 } from '@aom/shared';
 import { afterEach, describe, expect, it } from 'vitest';
+import { ClaudeAccountRegistry } from '../src/adapters/claude-accounts.ts';
 import { ClaudeCodeAdapter } from '../src/adapters/claude-code.ts';
-import { RunnerConfigSchema } from '../src/config.ts';
+import { loadConfig, RunnerConfigSchema, saveConfig } from '../src/config.ts';
 import { MemoryTokenStore } from '../src/forge/index.ts';
 import {
   ClaudeCredentialStore,
@@ -47,6 +48,8 @@ function setup(over: {
   isPrimary?: () => boolean;
   spawn?: ReturnType<typeof scriptedSpawner>['spawn'];
   now?: () => number;
+  /** Additional Claude accounts: writes config.json and gives the env an account registry. */
+  accounts?: Array<{ key: string; configDir?: string; source?: 'config_dir' | 'token' }>;
 }) {
   const dir = tmp('aom-int-');
   const paths = runnerPaths(dir);
@@ -59,6 +62,27 @@ function setup(over: {
     ...over.config,
   });
   const keys = new RunnerKeys(join(paths.secrets, 'runner-key.pem'));
+  saveConfig(paths.config, config);
+  const claudeAccounts = over.accounts
+    ? new ClaudeAccountRegistry({
+        home: dir,
+        root: dir,
+        secretsDir: paths.secrets,
+        accounts: () => loadConfig(paths.config).runtimes['claude-code'].accounts,
+        mainCredential: () => ({ authMode: 'default' }),
+      })
+    : undefined;
+  if (over.accounts)
+    saveConfig(paths.config, {
+      ...config,
+      runtimes: {
+        ...config.runtimes,
+        'claude-code': {
+          ...config.runtimes['claude-code'],
+          accounts: over.accounts.map((a) => ({ source: 'config_dir' as const, ...a })),
+        },
+      },
+    });
   const ex = fakeExec(over.exec);
   const claudeStore = new ClaudeCredentialStore(claudeFile(paths.secrets));
   const afterChange: number[] = [];
@@ -79,9 +103,10 @@ function setup(over: {
       bin: () => over.claudeBin ?? 'claude',
       probe: over.probe ?? (async () => 'ok'),
       probeLogin: async () => 'ok',
-      authState: () => 'ok',
+      authState: (k) => claudeAccounts?.get(k ?? 'main')?.auth.state ?? 'ok',
       afterChange: async () => void afterChange.push(Date.now()),
     },
+    ...(claudeAccounts ? { claudeAccounts } : {}),
     mcp: {
       discover: () => over.servers ?? [],
       authOf: () => () => over.mcpAuth?.() ?? 'needs_sign_in',
@@ -417,6 +442,117 @@ describe('local policy (D8)', () => {
     expect(await never.connect('github', 'github.com', 'token', { token: 'ghp_abcdefghijkl' })).toMatchObject(
       { code: 'machine_scope' },
     );
+  });
+});
+
+describe('Claude accounts: claude_login for an account instance', () => {
+  const AUTH_STATUS = (loggedIn: boolean) => ({
+    match: (cmd: string, args: string[]) => cmd === 'claude' && args[0] === 'auth' && args[1] === 'status',
+    result: { stdout: JSON.stringify({ loggedIn, email: 'w@x.test' }) },
+  });
+
+  it('runs `claude auth login --claudeai` in the account folder; the pasted code goes in; finish marks the account ok', async () => {
+    const sp = scriptedSpawner();
+    const t = setup({
+      spawn: sp.spawn,
+      accounts: [{ key: 'work', configDir: '~/.claude-gw-work' }],
+      exec: [AUTH_STATUS(true)],
+    });
+    const reg = t.env.claudeAccounts;
+    expect(reg?.get('work')?.auth.state).toBe('none');
+    const begun = await t.service.handle('integration.begin', {
+      sessionId: 'sess-acct',
+      kind: 'claude-code',
+      instance: 'work',
+      method: 'claude_login',
+    });
+    expect(begun).toEqual({ accepted: true });
+    const proc = sp.procs[0];
+    if (!proc) throw new Error('no process');
+    expect(proc.spec).toMatchObject({ cmd: 'claude', args: ['auth', 'login', '--claudeai'], pty: true });
+    expect(proc.spec.env?.CLAUDE_CONFIG_DIR).toBe(join(t.dir, '.claude-gw-work'));
+    expect(proc.spec.env?.CLAUDE_CODE_OAUTH_TOKEN).toBe('');
+    proc.feed(fixture('claude-auth-login.txt'));
+    await until(() => t.sessions().some((s) => s.state === 'awaiting_code'), 'awaiting_code');
+    expect(t.sessions().find((s) => s.state === 'awaiting_code')?.prompt?.urlHost).toBe('claude.com');
+    const input = await t.seal(
+      'claude-code',
+      'work',
+      'input',
+      { value: 'CODE#STATE' },
+      { ref: 'sess-acct:1' },
+    );
+    expect(
+      await t.service.handle('integration.input', {
+        sessionId: 'sess-acct',
+        kind: 'claude-code',
+        instance: 'work',
+        envelope: input,
+      }),
+    ).toEqual({ accepted: true });
+    expect(proc.writes[0]).toBe('CODE#STATE');
+    proc.feed('\r\nLogin successful\r\n');
+    proc.exit(0);
+    await until(() => t.sessions().some((s) => s.state === 'connected'), 'connected');
+    const done = t.sessions().find((s) => s.state === 'connected');
+    expect(done?.instance).toBe('work');
+    expect(done?.status).toMatchObject({
+      kind: 'claude-code',
+      instance: 'work',
+      state: 'connected',
+      account: 'w@x.test',
+    });
+    expect(reg?.get('work')?.auth.state).toBe('ok');
+    expect(t.afterChange.length).toBeGreaterThan(0);
+    // the CLI was asked in the account's folder, with no stray token
+    expect(t.ex.calls.some((c) => c.args[0] === 'auth' && c.args[1] === 'status')).toBe(true);
+  });
+
+  it('finish without a login is an error with the terminal command', async () => {
+    const sp = scriptedSpawner();
+    const t = setup({
+      spawn: sp.spawn,
+      accounts: [{ key: 'work', configDir: '~/.claude-gw-work' }],
+      exec: [AUTH_STATUS(false)],
+    });
+    await t.service.handle('integration.begin', {
+      sessionId: 'sess-no',
+      kind: 'claude-code',
+      instance: 'work',
+      method: 'claude_login',
+    });
+    const proc = sp.procs[0];
+    if (!proc) throw new Error('no process');
+    proc.feed(fixture('claude-auth-login.txt'));
+    proc.exit(1);
+    await until(() => t.sessions().some((s) => s.state === 'failed'), 'failed');
+    expect(t.sessions().find((s) => s.state === 'failed')?.error).toContain(
+      'CLAUDE_CONFIG_DIR=~/.claude-gw-work claude auth login',
+    );
+  });
+
+  it('refuses claude_login for the main account', async () => {
+    const t = setup({ accounts: [{ key: 'work' }] });
+    const r = await t.service.handle('integration.begin', {
+      sessionId: 's',
+      kind: 'claude-code',
+      instance: '',
+      method: 'claude_login',
+    });
+    expect(r).toMatchObject({ error: expect.stringMatching(/account key/) });
+  });
+
+  it('instances: main plus each account; status of an account; remove unregisters but keeps the folder', async () => {
+    const t = setup({ accounts: [{ key: 'work', configDir: '~/.claude-gw-work' }] });
+    mkdirSync(join(t.dir, '.claude-gw-work'), { recursive: true });
+    const adapters = buildIntegrationAdapters(t.env);
+    const a = adapters.get('claude-code');
+    expect(await a?.instances()).toEqual(['', 'work']);
+    expect((await a?.status('work'))?.state).toBe('not_connected');
+    await a?.remove('work');
+    expect(await a?.instances()).toEqual(['']);
+    expect(loadConfig(t.paths.config).runtimes['claude-code'].accounts).toEqual([]);
+    expect(existsSync(join(t.dir, '.claude-gw-work'))).toBe(true);
   });
 });
 

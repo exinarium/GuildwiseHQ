@@ -147,13 +147,21 @@ export function agentTmpDir(paths: RunnerPaths, agentId: string): string {
   return `/tmp/aom-${h.slice(0, 10)}`;
 }
 
-export function sandboxFor(paths: RunnerPaths, agentId: string): Sandbox {
+/**
+ * The Claude Code config dir of an agent on an account: `claude` for main (so nothing on disk moves), `claude-acct-<key>`
+ * for any other. One per account per agent, so concurrent shifts of one agent on different accounts never share (or write
+ * back) a credentials file.
+ */
+export const accountConfigDirName = (account?: string): string =>
+  account && account !== 'main' ? `claude-acct-${account}` : 'claude';
+
+export function sandboxFor(paths: RunnerPaths, agentId: string, account?: string): Sandbox {
   const root = paths.agentDir(agentId);
   return {
     agentId,
     root,
     home: join(root, 'home'),
-    configDir: join(root, 'claude'),
+    configDir: join(root, accountConfigDirName(account)),
     scratch: join(root, 'scratch'),
     tmp: agentTmpDir(paths, agentId),
     cacheRoot: sharedCacheRoot(paths),
@@ -171,8 +179,10 @@ export async function ensureSandbox(
   agentId: string,
   _agentName: string,
   identity?: { name: string; email: string } | null,
+  /** The Claude account of the shift (absent: main). */
+  account?: string,
 ): Promise<Sandbox> {
-  const sb = sandboxFor(paths, agentId);
+  const sb = sandboxFor(paths, agentId, account);
   await Promise.all([sb.home, sb.configDir, sb.scratch].map((d) => mkdir(d, { recursive: true })));
   await mkdir(sb.tmp, { recursive: true, mode: 0o700 });
   if (sb.cacheRoot) await ensureSharedCaches(sb.cacheRoot);

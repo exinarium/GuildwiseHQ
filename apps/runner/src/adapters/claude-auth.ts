@@ -41,7 +41,8 @@ export function isAuthFailureText(text: string | undefined | null): boolean {
   return AUTH_FAILURE_PATTERNS.some((re) => re.test(text));
 }
 
-export type ClaudeAuthState = 'ok' | 'expired';
+/** `none`: never signed in (a config-dir account whose folder holds no login yet). `expired` and `none` both make the login unusable. */
+export type ClaudeAuthState = 'ok' | 'expired' | 'none';
 
 /** The Claude login state of this runner: `expired` pauses the runtime until a probe (or a later session) succeeds. */
 export class ClaudeAuthMonitor {
@@ -61,7 +62,7 @@ export class ClaudeAuthMonitor {
   private set(next: ClaudeAuthState): boolean {
     if (this.current === next) return false;
     this.current = next;
-    this.expiredSince = next === 'expired' ? new Date().toISOString() : undefined;
+    this.expiredSince = next === 'expired' || next === 'none' ? new Date().toISOString() : undefined;
     for (const l of this.listeners) {
       try {
         l(next);
@@ -76,8 +77,17 @@ export class ClaudeAuthMonitor {
     return this.set('expired');
   }
 
+  markNone(): boolean {
+    return this.set('none');
+  }
+
   markOk(): boolean {
     return this.set('ok');
+  }
+
+  /** The login does not work (expired, or never completed): the account is treated like one that hit its limit. */
+  get unusable(): boolean {
+    return this.current !== 'ok';
   }
 }
 

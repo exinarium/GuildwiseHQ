@@ -1,6 +1,17 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { ClaudeAccountKeySchema } from '@aom/shared';
 import { z } from 'zod';
+
+/** An additional Claude account of this workstation (docs/design/claude-accounts.md section 2.1). */
+export const ClaudeAccountConfigSchema = z.object({
+  key: ClaudeAccountKeySchema,
+  /** Claude Code config dir; '~' allowed. Default '~/.claude-gw-<key>' (created when missing). */
+  configDir: z.string().optional(),
+  /** 'config_dir' (default) or 'token' (`secrets/claude-accounts/<key>.json` holds an oauth token or API key). */
+  source: z.enum(['config_dir', 'token']).default('config_dir'),
+});
+export type ClaudeAccountConfig = z.infer<typeof ClaudeAccountConfigSchema>;
 
 export const ClaudeRuntimeConfigSchema = z.object({
   bin: z.string().default('claude'),
@@ -40,6 +51,8 @@ export const ClaudeRuntimeConfigSchema = z.object({
    * shift token the `aom` CLI needs; try it on one workstation first (docs/RUNNER.md).
    */
   scrubSubprocessEnv: z.boolean().default(false),
+  /** Additional accounts besides the main one (today's credential); named by the key a project uses. */
+  accounts: z.array(ClaudeAccountConfigSchema).default([]),
   intake: z
     .object({ mcpConfig: z.string().optional(), allowedTools: z.array(z.string()).default([]) })
     .optional(),

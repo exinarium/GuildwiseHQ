@@ -17,7 +17,7 @@ export const ClaudeAccountInfoSchema = z.object({
   key: AccountKeySchema,
   main: z.boolean(),
   source: z.enum(['config_dir', 'token', 'api_key', 'default']),
-  /** Display only, home-relative ('~/.claude-work'). Never a token. */
+  /** Display only, home-relative ('~/.claude-gw-work'). Never a token. */
   configDir: z.string().max(400).optional(),
   email: z.string().max(200).optional(),
   /** oauthAccount.organizationType, e.g. 'claude_max', 'claude_team'. */
@@ -32,7 +32,7 @@ export type ClaudeAccountInfo = z.infer<typeof ClaudeAccountInfoSchema>;
 
 export const ClaudeAccountEnsurePayloadSchema = z.object({
   key: ClaudeAccountKeySchema,
-  /** Optional preferred dir ('~' allowed); default: an existing claude-<key> alias's dir, else '~/.claude-<key>'. */
+  /** Optional preferred dir ('~' allowed); default: the runner-owned '~/.claude-gw-<key>' (never a dir or alias the runner did not create). */
   configDir: z.string().max(400).optional(),
 });
 export type ClaudeAccountEnsurePayload = z.infer<typeof ClaudeAccountEnsurePayloadSchema>;
@@ -41,7 +41,7 @@ export const ClaudeAccountEnsureResultSchema = z.object({
   state: z.enum(['ready', 'awaiting_login', 'needs_owner', 'failed']),
   configDir: z.string().max(400).optional(), // display, home-relative
   aliasAdded: z.boolean(),
-  /** The alias that was already there and was reused (e.g. "claude-work -> ~/.claude-work"). */
+  /** Unused by this runner: provisioning never reuses an alias it did not create. */
   aliasExisting: z.string().max(300).optional(),
   aliasConflict: z.boolean().optional(),
   /** Exact commands for the owner when state is needs_owner | failed | awaiting_login. */

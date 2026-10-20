@@ -2,7 +2,7 @@ import { chmodSync, existsSync, readdirSync, readFileSync, rmSync, writeFileSync
 import { mkdir, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { CARD_ATTACHMENTS_DIR } from '@aom/shared';
+import { CARD_ATTACHMENTS_DIR, MAIN_ACCOUNT } from '@aom/shared';
 import { execa } from 'execa';
 import type { z } from 'zod';
 import type { ClaudeRuntimeConfigSchema } from '../config.ts';
@@ -12,6 +12,7 @@ import { discoverPluginMcpServers, mcpConfigFor, type PluginMcpServer } from '..
 import type { RunnerPaths } from '../paths.ts';
 import { agentTmpDir, CACHE_ENV_KEYS, DOTNET_SHM_DIR, userNugetPackages } from '../sandbox/sandbox.ts';
 import { selfCommand } from '../shims.ts';
+import { type AccountCredential, type ClaudeAccount, ClaudeAccountRegistry } from './claude-accounts.ts';
 import {
   type ClaudeAuthMonitor,
   type CredentialPaths,
@@ -49,6 +50,7 @@ import {
 import { spawnSession } from './process-session.ts';
 import { createSandboxPlaceholders } from './sandbox-placeholders.ts';
 import type {
+  AccountGate,
   ChatStartInput,
   DevopsGuardInput,
   OwnerTurnInput,
@@ -311,6 +313,20 @@ export class RealClaudeBlockedError extends Error {
   }
 }
 
+/**
+ * The runtime configuration for one account: `base` with the account's own credential laid over it. A config-dir account
+ * has none (`authMode: 'default'`), so no token variable reaches its sessions; the main account's token never leaks into it.
+ */
+export function accountClaudeConfig(base: ClaudeConfig, credential: AccountCredential): ClaudeConfig {
+  const { oauthToken: _o, apiKey: _k, ...rest } = base;
+  return {
+    ...rest,
+    authMode: credential.authMode,
+    ...(credential.oauthToken ? { oauthToken: credential.oauthToken } : {}),
+    ...(credential.apiKey ? { apiKey: credential.apiKey } : {}),
+  };
+}
+
 export class ClaudeCodeAdapter implements RuntimeAdapter {
   readonly id = 'claude-code';
 
@@ -338,8 +354,58 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       zone?: string;
       /** The credential in force (secrets/claude.json over config.json); read at every session start. */
       credentials?: () => Pick<ClaudeConfig, 'authMode' | 'oauthToken' | 'apiKey'> | undefined;
+      /** The Claude accounts of this workstation (main + additional); without it only `main` exists. */
+      accounts?: ClaudeAccountRegistry;
     } = {},
-  ) {}
+  ) {
+    this.registry =
+      host.accounts ??
+      new ClaudeAccountRegistry({
+        home: host.home ?? homedir(),
+        ...(paths ? { root: paths.root } : {}),
+        accounts: () => [],
+        mainCredential: () => this.live,
+        ...(host.auth ? { mainAuth: host.auth } : {}),
+        ...(host.usage ? { mainUsage: host.usage } : {}),
+        ...(host.now ? { now: host.now } : {}),
+        ...(host.zone ? { zone: host.zone } : {}),
+      });
+  }
+
+  /** The accounts (main first). Built here when the runner did not hand one in (unit tests, the CLI). */
+  readonly registry: ClaudeAccountRegistry;
+
+  /** The account a session runs on (`main` when none is named); throws for a key this workstation does not know. */
+  private account(key: string | undefined): ClaudeAccount {
+    const a = this.registry.get(key ?? MAIN_ACCOUNT);
+    if (!a) throw new Error(`account_missing:${key}`);
+    return a;
+  }
+
+  /** The runtime configuration an account's sessions run with (see `accountClaudeConfig`). */
+  private liveFor(a: ClaudeAccount): ClaudeConfig {
+    return a.main ? this.live : accountClaudeConfig(this.cfg, a.credential());
+  }
+
+  /**
+   * Before a shift: may it run on this account? Says why not otherwise. The runner's supervisor turns the answer into
+   * `runtime_unavailable` (account_missing), `usage_limited` or `auth_expired`, each with the account key.
+   */
+  accountGate(key: string): AccountGate {
+    const a = this.registry.get(key);
+    if (!a) return { state: 'missing' };
+    if (a.auth.state !== 'ok') return { state: 'login', login: a.auth.state === 'none' ? 'none' : 'expired' };
+    if (a.usage.state === 'limited') {
+      const until = a.usage.limitedUntil;
+      return {
+        state: 'limited',
+        ...(until
+          ? { limitedUntil: until, label: formatLimitTime(new Date(until), this.nowDate(), this.host.zone) }
+          : {}),
+      };
+    }
+    return { state: 'ok' };
+  }
 
   /**
    * The configuration in force right now: `cfg` with the credential a provider supplies (`secrets/claude.json`, written
@@ -395,6 +461,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       aomReadPaths: [this.paths?.bin ?? join(root, 'bin'), ...(script ? [dirname(script)] : [])],
       ...(input.env.AOM_IPC_SOCKET ? { ipcSocket: input.env.AOM_IPC_SOCKET } : {}),
       realHome: this.realHome(),
+      accountDirs: this.registry.list().flatMap((a) => (a.configDir ? [a.configDir] : [])),
       mode: this.cfg.sandbox,
       extraAllowedDomains: [...this.cfg.extraAllowedDomains, ...(input.extraAllowedDomains ?? [])],
       toolchainReadPaths: toolchainReadPaths([
@@ -440,20 +507,26 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     if (realClaudeBlocked())
       return { runtime: this.id, version: 'blocked', available: false, capabilities: [] };
     const sb = this.sandboxStatus();
-    const expired = this.host.auth?.state === 'expired';
-    const limited = this.host.usage?.state === 'limited';
+    // The top-level fields describe the main account (older servers read only these); `available` below asks whether
+    // ANY account can take a shift, and the server picks per account from `accounts`.
+    const main = this.registry.main;
+    const expired = main.auth.state === 'expired';
+    const limited = main.usage.state === 'limited';
+    const reportsMonitors = this.host.auth !== undefined || this.host.accounts !== undefined;
+    const reportsUsage = this.host.usage !== undefined || this.host.accounts !== undefined;
+    const anyUsable = this.registry.anyUsable();
     const sandbox = {
       sandbox: sb.state,
       sandboxReason: sb.reason,
-      ...(this.host.auth ? { auth: expired ? ('expired' as const) : ('ok' as const) } : {}),
-      ...(this.host.usage
+      ...(reportsMonitors ? { auth: expired ? ('expired' as const) : ('ok' as const) } : {}),
+      ...(reportsUsage
         ? {
             usage: limited ? ('limited' as const) : ('ok' as const),
-            ...(limited && this.host.usage.limitedUntil
+            ...(limited && main.usage.limitedUntil
               ? {
-                  limitedUntil: this.host.usage.limitedUntil,
+                  limitedUntil: main.usage.limitedUntil,
                   limitedLabel: formatLimitTime(
-                    new Date(this.host.usage.limitedUntil),
+                    new Date(main.usage.limitedUntil),
                     this.nowDate(),
                     this.host.zone,
                   ),
@@ -461,6 +534,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
               : {}),
           }
         : {}),
+      ...(this.host.accounts ? { accounts: this.registry.infos() } : {}),
     };
     try {
       const r = await execa(this.cfg.bin, ['--version'], { reject: false, timeout: 10_000, stdin: 'ignore' });
@@ -478,10 +552,9 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
         ok = false;
       // `unavailable`: required and missing, or best_effort without the allowUnsandboxed acknowledgement.
       if (sb.state === 'unavailable') ok = false;
-      // An expired login pauses the runtime: nothing is dispatched to it until the login works again.
-      if (expired) ok = false;
-      // So does a hit usage limit, until it resets and a probe works (backlog #73).
-      if (limited) ok = false;
+      // No account can take a shift (every login expired or never completed, or every usage limit hit): the runtime is
+      // paused until a probe works (backlog #73). One usable account keeps it available.
+      if (!anyUsable) ok = false;
       return { runtime: this.id, version: m[0], available: ok, capabilities: ok ? caps : [], ...sandbox };
     } catch {
       return { runtime: this.id, version: 'unknown', available: false, capabilities: [], ...sandbox };
@@ -497,6 +570,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     if (realClaudeBlocked()) throw new RealClaudeBlockedError();
     // The DevOps engineer runs without the OS sandbox, so a missing bwrap/socat does not stop it.
     if (!input.agent.isDevops) this.assertCanRun();
+    const account = this.account(input.account);
     const dir = input.sandbox.configDir;
     await mkdir(dir, { recursive: true });
     const guard = input.agent.isDevops ? this.devopsGuard(dir, input.devopsGuard, 'shift') : undefined;
@@ -518,7 +592,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       input.agent.permissions.allowedTools,
       input.agent.isDevops ? undefined : input.mcpServers,
     );
-    await this.linkCredentials(dir, used);
+    await this.linkCredentials(dir, used, account.key);
 
     const cmd = buildClaudeCommand(
       // the card repository metadata is readable (never through a rule that makes it read-only for the commit)
@@ -532,10 +606,10 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
           ]),
         ],
       },
-      this.live,
+      this.liveFor(account),
     );
     const parser = new ClaudeStreamParser();
-    const hooks = this.sessionHooks(dir, parser);
+    const hooks = this.sessionHooks(dir, parser, account);
     // The sandbox leaves an empty read-only .git/config.lock behind on the host: removed when the clone's last shift ends.
     const releaseRepo = holdSandboxRepo(gitDirsOf(input.cwd));
     return spawnSession({
@@ -580,6 +654,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
             ]),
           ],
     };
+    const account = this.account(input.account);
     const dir = input.sandbox.configDir;
     await mkdir(dir, { recursive: true });
     const guard = devops ? this.devopsGuard(dir, input.devopsGuard, 'chat') : undefined;
@@ -616,8 +691,11 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
         2,
       )}\n`,
     );
-    await this.linkCredentials(dir, used);
-    const cmd = buildClaudeChatCommand(guard ? { ...chatInput, env: input.env } : chatInput, this.live);
+    await this.linkCredentials(dir, used, account.key);
+    const cmd = buildClaudeChatCommand(
+      guard ? { ...chatInput, env: input.env } : chatInput,
+      this.liveFor(account),
+    );
     const parser = new ClaudeStreamParser();
     return spawnSession({
       bin: cmd.bin,
@@ -629,7 +707,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       usage: () => parser.usage(),
       logFile: input.logFile,
       exitError: () => (parser.resultError ? `claude result: ${parser.resultError}` : undefined),
-      ...this.sessionHooks(dir, parser),
+      ...this.sessionHooks(dir, parser, account),
     });
   }
 
@@ -662,11 +740,13 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       usageLimit: (stderr) =>
         detectUsageLimit(parser.usageLimitText, this.nowDate(), this.host.zone) ??
         detectUsageLimit(stderr, this.nowDate(), this.host.zone),
+      // the CEO's owner turn runs on the Owner's own login: the main account
       onExit: async ({ code, authFailed, usageLimit }) => {
-        if (authFailed) this.host.auth?.markExpired();
-        else if (code === 0 && parser.usage().outputTokens > 0) this.host.auth?.markOk();
-        if (usageLimit) this.host.usage?.markLimited(usageLimit.until);
-        else if (code === 0 && parser.usage().outputTokens > 0) this.host.usage?.markOk();
+        const main = this.registry.main;
+        if (authFailed) main.auth.markExpired();
+        else if (code === 0 && parser.usage().outputTokens > 0) main.auth.markOk();
+        if (usageLimit) main.usage.markLimited(usageLimit.until);
+        else if (code === 0 && parser.usage().outputTokens > 0) main.usage.markOk();
       },
     };
   }
@@ -705,60 +785,59 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     return want?.used ?? [];
   }
 
-  private credentialPaths(configDir: string): CredentialPaths {
-    return {
-      canonical: join(this.realHome(), '.claude', '.credentials.json'),
-      copy: join(configDir, '.credentials.json'),
-      lock: join(this.paths?.root ?? dirname(dirname(configDir)), 'claude-credentials.lock'),
-    };
-  }
-
-  /** The environment a login probe runs with: the runner's own, plus the configured provider credential. */
-  private probeEnv(): NodeJS.ProcessEnv {
-    const env: NodeJS.ProcessEnv = { ...process.env };
-    const c = this.live;
-    if (c.authMode === 'oauth' && c.oauthToken) env.CLAUDE_CODE_OAUTH_TOKEN = c.oauthToken;
-    else if (c.authMode === 'api_key' && c.apiKey) env.ANTHROPIC_API_KEY = c.apiKey;
-    return env;
+  /** The environment a probe of an account (default main) runs with. */
+  probeEnv(accountKey: string = MAIN_ACCOUNT): NodeJS.ProcessEnv {
+    return this.account(accountKey).probeEnv();
   }
 
   /**
-   * Checks that the Claude login works (`claude auth status`, then one minimal `claude -p`) and updates the auth state:
-   * `ok` flips an expired runtime back, `expired` pauses it. Called every few minutes while expired, and before a
-   * session when the access token is about to expire (that call also refreshes it). Nothing here prints a token.
+   * Checks that an account's login works (`claude auth status`, then one minimal `claude -p`, in that account's own
+   * environment) and updates its auth state: `ok` flips an expired or never-completed login back, `expired` marks it
+   * unusable. Called every few minutes while expired, when a credentials file changed, and before a session when the access
+   * token is about to expire (that call also refreshes it). Nothing here prints a token.
    */
-  async probeLogin(): Promise<'ok' | 'expired' | 'unknown'> {
+  async probeLogin(accountKey: string = MAIN_ACCOUNT): Promise<'ok' | 'expired' | 'unknown'> {
     if (realClaudeBlocked()) return 'unknown';
+    const account = this.registry.get(accountKey);
+    if (!account) return 'unknown';
     const r = await (
-      this.host.probe ?? (() => probeClaudeLogin({ bin: this.cfg.bin, env: this.probeEnv() }))
+      (accountKey === MAIN_ACCOUNT ? this.host.probe : undefined) ??
+      (() => probeClaudeLogin({ bin: this.cfg.bin, env: account.probeEnv() }))
     )();
-    if (r === 'ok') this.host.auth?.markOk();
-    else if (r === 'expired') this.host.auth?.markExpired();
+    if (r === 'ok') account.auth.markOk();
+    else if (r === 'expired') {
+      // a config-dir account that holds no login at all was never signed in: `none`, not `expired`
+      if (account.hasLogin()) account.auth.markExpired();
+      else account.auth.markNone();
+    }
     return r;
   }
 
   /**
-   * Before a shift: is the login good? Nothing to check with a configured token or API key. With the shared login the
-   * access token's expiry is read from the credentials file (no call); only when it is within `REFRESH_WINDOW_MS` (or past)
-   * does one minimal probe run, under the runner-wide lock and re-checked inside it (another shift may have refreshed it
-   * meanwhile). The probe refreshes a token that can be refreshed and marks the runtime expired when it cannot.
+   * Before a shift: is the account's login good? Nothing to check with a configured token or API key. With a shared login
+   * the access token's expiry is read from the credentials file (no call); only when it is within `REFRESH_WINDOW_MS` (or
+   * past) does one minimal probe run, under the account's lock and re-checked inside it (another shift may have refreshed it
+   * meanwhile). The probe refreshes a token that can be refreshed and marks the account expired when it cannot.
    * Network trouble is `unknown`: the shift goes ahead and reports a login that does not work itself.
    */
-  async checkLogin(): Promise<'ok' | 'expired' | 'unknown'> {
-    if (realClaudeBlocked() || !this.usesSharedLogin()) return 'ok';
-    if (this.host.auth?.state === 'expired') return 'expired';
-    const src = join(this.realHome(), '.claude', '.credentials.json');
-    if (!existsSync(src)) return 'ok';
+  async checkLogin(accountKey: string = MAIN_ACCOUNT): Promise<'ok' | 'expired' | 'unknown'> {
+    const account = this.registry.get(accountKey);
+    if (realClaudeBlocked() || !account || !account.usesSharedLogin()) return 'ok';
+    if (account.auth.state !== 'ok') return 'expired';
+    const src = account.canonicalFile();
+    if (!src || !existsSync(src)) return 'ok';
     const now = () => this.nowDate().getTime();
     const nearExpiry = () => {
       const exp = loginExpiresAt(readCredentials(src));
       return exp > 0 && exp - now() < REFRESH_WINDOW_MS;
     };
     if (!nearExpiry()) return 'ok';
-    const lock = join(this.paths?.root ?? dirname(this.realHome()), 'claude-credentials.lock');
+    const lock = account.main
+      ? join(this.paths?.root ?? dirname(this.realHome()), 'claude-credentials.lock')
+      : (account.credentialPaths(dirname(src))?.lock as string);
     return withLock(lock, async () => {
       if (!nearExpiry()) return 'ok' as const;
-      return this.probeLogin();
+      return this.probeLogin(accountKey);
     });
   }
 
@@ -767,19 +846,20 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
   }
 
   /**
-   * While the usage limit is in force and its reset time has passed: one minimal call (cheapest model, one turn). Clean:
-   * the runtime is available again. Still limited: the new reset time is read and the pause extended (an hour when
-   * the text has none). Nothing readable (network): the state stays and the caller retries later.
+   * While an account's usage limit is in force and its reset time has passed: one minimal call (cheapest model, one turn,
+   * in that account's environment). Clean: the account is usable again. Still limited: the new reset time is read and the
+   * pause extended (an hour when the text has none). Nothing readable (network): the state stays and the caller retries.
    */
-  async probeUsage(): Promise<UsageProbeResult['state']> {
-    const mon = this.host.usage;
-    if (!mon || mon.state !== 'limited' || realClaudeBlocked()) return 'unknown';
+  async probeUsage(accountKey: string = MAIN_ACCOUNT): Promise<UsageProbeResult['state']> {
+    const account = this.registry.get(accountKey);
+    const mon = account?.usage;
+    if (!account || !mon || mon.state !== 'limited' || realClaudeBlocked()) return 'unknown';
     const r = await (
-      this.host.usageProbe ??
+      (accountKey === MAIN_ACCOUNT ? this.host.usageProbe : undefined) ??
       (() =>
         probeClaudeUsage({
           bin: this.cfg.bin,
-          env: this.probeEnv(),
+          env: account.probeEnv(),
           now: () => this.nowDate(),
           ...(this.host.zone ? { tz: this.host.zone } : {}),
         }))
@@ -789,50 +869,57 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     return r.state;
   }
 
-  /** What the process session needs to notice a dead login and to hand back refreshed tokens. */
+  /**
+   * What the process session needs to notice a dead login and to hand back refreshed tokens. The account and its credential
+   * paths are bound HERE, at session start, and never re-resolved: the write-back can only reach this account's own file.
+   */
   private sessionHooks(
     configDir: string,
     parser: ClaudeStreamParser,
+    account: ClaudeAccount,
   ): Pick<Parameters<typeof spawnSession>[0], 'authFailure' | 'usageLimit' | 'onExit'> {
+    const paths = account.usesSharedLogin() ? account.credentialPaths(configDir) : undefined;
     return {
       authFailure: (stderr) => parser.authFailure || isAuthFailureText(stderr),
       usageLimit: (stderr) =>
         detectUsageLimit(parser.usageLimitText, this.nowDate(), this.host.zone) ??
         detectUsageLimit(stderr, this.nowDate(), this.host.zone),
       onExit: async ({ code, authFailed, usageLimit }) => {
-        if (authFailed) this.host.auth?.markExpired();
-        else if (code === 0 && parser.usage().outputTokens > 0) this.host.auth?.markOk();
-        if (usageLimit) this.host.usage?.markLimited(usageLimit.until);
+        if (authFailed) account.auth.markExpired();
+        else if (code === 0 && parser.usage().outputTokens > 0) account.auth.markOk();
+        if (usageLimit) account.usage.markLimited(usageLimit.until);
         // a real session that worked proves the limit is gone: resume without waiting for the probe
-        else if (code === 0 && parser.usage().outputTokens > 0) this.host.usage?.markOk();
-        if (this.usesSharedLogin()) await harvestAgentCredentials(this.credentialPaths(configDir));
+        else if (code === 0 && parser.usage().outputTokens > 0) account.usage.markOk();
+        if (paths) await harvestAgentCredentials(paths);
       },
     };
   }
 
-  /** The user's own `claude` login is shared with the agents (no token or key configured). */
-  private usesSharedLogin(): boolean {
-    const c = this.live;
-    return !((c.authMode === 'oauth' && c.oauthToken) || (c.authMode === 'api_key' && c.apiKey));
-  }
-
   /**
    * Credentials of the agent's config dir.
-   * - No token configured (the user's own login is reused): the agent gets a private COPY of
-   *   `~/.claude/.credentials.json` (it holds the plugin servers' OAuth tokens, `mcpOAuth`, too). A symlink let one
-   *   agent's token refresh replace the file under the others and rotate the refresh token out from under them. The
-   *   copy is made under a runner-wide lock, after one refresh probe when the access token expires within 10 minutes,
-   *   and a newer login in the copy is written back after the session (`harvestAgentCredentials`).
+   * - No token configured (the account's own login is reused: the user's `~/.claude`, or the account's config dir): the agent
+   *   gets a private COPY of that account's `.credentials.json` (it holds the plugin servers' OAuth tokens, `mcpOAuth`, too).
+   *   A symlink let one agent's token refresh replace the file under the others and rotate the refresh token out from under
+   *   them. The copy is made under the account's lock, after one refresh probe when the access token expires within 10
+   *   minutes, and a newer login in the copy is written back after the session (`harvestAgentCredentials`).
    * - A token (`oauth` / `api_key`) is configured: the file is not shared. When servers are in use, a private copy with
    *   only the `mcpOAuth` entries of those servers is written (the model login is the token, so nothing else is
    *   needed); without servers there is no file.
    */
-  async linkCredentials(configDir: string, servers: PluginMcpServer[] = []): Promise<void> {
-    const src = join(this.realHome(), '.claude', '.credentials.json');
+  async linkCredentials(
+    configDir: string,
+    servers: PluginMcpServer[] = [],
+    accountKey: string = MAIN_ACCOUNT,
+  ): Promise<void> {
+    const account = this.account(accountKey);
+    // plugin sign-ins of a token account come from the account's own dir (none for a pure token account)
+    const src = account.main
+      ? join(this.realHome(), '.claude', '.credentials.json')
+      : account.canonicalFile();
     const dest = join(configDir, '.credentials.json');
-    if (!this.usesSharedLogin()) {
+    if (!account.usesSharedLogin()) {
       rmSync(dest, { force: true });
-      if (servers.length === 0 || !existsSync(src)) return;
+      if (servers.length === 0 || !src || !existsSync(src)) return;
       try {
         const all = JSON.parse(readFileSync(src, 'utf8')) as { mcpOAuth?: Record<string, unknown> };
         const keys = servers.map((s) => s.key);
@@ -848,14 +935,15 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       }
       return;
     }
-    if (!existsSync(src)) {
+    const paths = account.credentialPaths(configDir);
+    if (!paths || !existsSync(paths.canonical)) {
       rmSync(dest, { force: true });
       return;
     }
     try {
-      await prepareAgentCredentials(this.credentialPaths(configDir), {
+      await prepareAgentCredentials(paths, {
         refresh: async () => {
-          await this.probeLogin();
+          await this.probeLogin(account.key);
         },
       });
     } catch {

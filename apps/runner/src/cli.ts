@@ -1,8 +1,9 @@
 #!/usr/bin/env node
-import { existsSync, readFileSync } from 'node:fs';
-import { hostname, platform } from 'node:os';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { homedir, hostname, platform } from 'node:os';
 import { join, resolve } from 'node:path';
 import {
+  ClaudeAccountKeySchema,
   CONNECTABLE_FORGES,
   type ConnectableForge,
   devcontainerText,
@@ -13,6 +14,14 @@ import {
 } from '@aom/shared';
 import { Command } from 'commander';
 import { execa } from 'execa';
+import {
+  checkAccountDir,
+  ensureClaudeAccount,
+  registerAccount,
+  setAccountSource,
+  unregisterAccount,
+} from './adapters/claude-account-provision.ts';
+import { displayDir, expandHome } from './adapters/claude-accounts.ts';
 import { sandboxDoctorLines, sandboxState } from './adapters/claude-policy.ts';
 import { loadConfig, type RunnerConfig, RunnerConfigSchema, saveConfig } from './config.ts';
 import { toWsUrl, UNPAIRED_MESSAGE } from './connection/client.ts';
@@ -25,7 +34,7 @@ import { gitVersion } from './git/git.ts';
 import { scanRepos } from './git/repo-scan.ts';
 import { installErrorHandlers } from './health/runner-error.ts';
 import { RunnerHost } from './host.ts';
-import { ClaudeCredentialStore, claudeFile } from './integrations/claude-store.ts';
+import { ClaudeCredentialStore, claudeAccountFile, claudeFile } from './integrations/claude-store.ts';
 import { headlessAdapters, headlessEnv } from './integrations/headless.ts';
 import { JiraIntegration } from './integrations/jira.ts';
 import { isFailure, type Outcome } from './integrations/types.ts';
@@ -928,6 +937,100 @@ async function integrationsList(opts: { dataDir?: string; pairing?: string }): P
   }
 }
 
+/** `aom-runner accounts list`: the Claude accounts of this machine, as the runner reports them. */
+function accountsList(opts: { dataDir?: string; pairing?: string }): void {
+  const { env } = headlessAdapters(pairingPaths(opts));
+  for (const a of env.claudeAccounts?.list() ?? []) {
+    const i = a.info();
+    console.log(
+      `${i.key}${i.main ? ' (main)' : ''}: login ${i.login}, usage ${i.usage}${i.limitedLabel ? ` until ${i.limitedLabel}` : ''}, source ${i.source}${i.configDir ? `, ${i.configDir}` : ''}${i.email ? `, ${i.email}` : ''}${i.plan ? ` (${i.plan})` : ''}`,
+    );
+  }
+}
+
+/** `aom-runner accounts add <key>`: provisions the account (folder, config entry, alias), or saves a token for it. */
+async function accountsAdd(
+  key: string,
+  opts: { dataDir?: string; pairing?: string; configDir?: string; oauthToken?: boolean; apiKey?: boolean },
+): Promise<void> {
+  const parsed = ClaudeAccountKeySchema.safeParse(key);
+  if (!parsed.success)
+    throw new Error(
+      'The account key is lowercase letters, digits and dashes, starts with a letter, and is not "main".',
+    );
+  const paths = pairingPaths(opts);
+  const home = homedir();
+  if (opts.oauthToken || opts.apiKey) {
+    let value = '';
+    for await (const chunk of process.stdin) value += String(chunk);
+    value = value.trim();
+    if (!value) throw new Error('Pipe the token or key in on stdin.');
+    new ClaudeCredentialStore(claudeAccountFile(paths.secrets, key)).save(
+      opts.apiKey
+        ? { authMode: 'api_key', apiKey: value, via: 'cli', method: 'api_key' }
+        : { authMode: 'oauth', oauthToken: value, via: 'cli', method: 'oauth_token' },
+    );
+    if (!registerAccount(paths.config, { key, source: 'token' }))
+      setAccountSource(paths.config, key, 'token');
+    console.log(`Saved the credential of account ${key} on this machine only (mode 0600).`);
+    return;
+  }
+  if (opts.configDir) {
+    // a folder the owner names on purpose is used as it is (it may be an existing sign-in)
+    const dir = expandHome(opts.configDir, home);
+    const bad = checkAccountDir(dir, home, paths.root);
+    if (bad) throw new Error(`Folder refused: ${bad}.`);
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    registerAccount(paths.config, { key, configDir: displayDir(dir, home), source: 'config_dir' });
+  }
+  const { env } = headlessAdapters(paths);
+  const r = await ensureClaudeAccount(
+    { key },
+    {
+      home,
+      root: paths.root,
+      configPath: paths.config,
+      machineScopeAllowed: true,
+      registry: env.claudeAccounts as NonNullable<typeof env.claudeAccounts>,
+      probeLogin: (k) => env.claude.probeLogin(k),
+    },
+  );
+  console.log(
+    `${key}: ${r.state}${r.configDir ? ` (${r.configDir})` : ''}${r.aliasAdded ? '; alias added to your shell rc file' : ''}${r.detail ? `. ${r.detail}` : ''}`,
+  );
+  touchRecheck(paths.secrets);
+  if (r.state === 'failed') process.exitCode = 1;
+}
+
+/** `aom-runner accounts login <key>`: `claude auth login` in this terminal, in the account's own folder. */
+async function accountsLogin(key: string, opts: { dataDir?: string; pairing?: string }): Promise<void> {
+  const paths = pairingPaths(opts);
+  const { env } = headlessAdapters(paths);
+  const account = env.claudeAccounts?.get(key);
+  if (!account?.configDir)
+    throw new Error(`No config-dir account "${key}" here. Run \`aom-runner accounts add ${key}\` first.`);
+  const clean: NodeJS.ProcessEnv = { ...process.env, CLAUDE_CONFIG_DIR: account.configDir };
+  delete clean.CLAUDE_CODE_OAUTH_TOKEN;
+  delete clean.ANTHROPIC_API_KEY;
+  const r = await execa(env.claude.bin(), ['auth', 'login', '--claudeai'], {
+    stdio: 'inherit',
+    reject: false,
+    env: clean,
+    extendEnv: false,
+  });
+  touchRecheck(paths.secrets);
+  process.exitCode = r.exitCode ?? 1;
+}
+
+/** `aom-runner accounts remove <key>`: unregisters it; the folder, the alias and any sign-in stay. */
+function accountsRemove(key: string, opts: { dataDir?: string; pairing?: string }): void {
+  const paths = pairingPaths(opts);
+  const had = unregisterAccount(paths.config, key);
+  console.log(
+    had ? `Account ${key} unregistered (its folder and alias were not touched).` : `No account ${key}.`,
+  );
+}
+
 /** `aom-runner integrations allow-web on|off`: the local switch for credentials and sign-ins submitted from the web. */
 function integrationsAllowWeb(value: string, opts: { dataDir?: string; pairing?: string }): void {
   if (value !== 'on' && value !== 'off') throw new Error('use: aom-runner integrations allow-web on|off');
@@ -1117,6 +1220,39 @@ export function buildProgram(): Command {
     .description('the pairing that may change machine-wide logins (~/.claude, gh, MCP) from the web')
     .option(...dataDirOpt)
     .action(integrationsMachineAdmin);
+  const accounts = program
+    .command('accounts')
+    .description(
+      'the Claude accounts of this machine (a project can name one; the main account is the default)',
+    );
+  accounts
+    .command('list', { isDefault: true })
+    .option(...pairingOpt)
+    .option(...dataDirOpt)
+    .action(accountsList);
+  accounts
+    .command('add <key>')
+    .description(
+      'set up an account: its own folder (~/.claude-gw-<key>) and shell alias, or --config-dir <dir> to use a folder you name',
+    )
+    .option('--config-dir <dir>', 'use this Claude Code config folder as it is')
+    .option('--oauth-token', 'save a token (read from stdin) instead of a config folder')
+    .option('--api-key', 'save an API key (read from stdin) instead of a config folder')
+    .option(...pairingOpt)
+    .option(...dataDirOpt)
+    .action(accountsAdd);
+  accounts
+    .command('login <key>')
+    .description('sign in to the account in this terminal (claude auth login)')
+    .option(...pairingOpt)
+    .option(...dataDirOpt)
+    .action(accountsLogin);
+  accounts
+    .command('remove <key>')
+    .description('unregister an account (its folder and alias are kept)')
+    .option(...pairingOpt)
+    .option(...dataDirOpt)
+    .action(accountsRemove);
   const ceo = program.command('ceo').description('the CEO on this workstation');
   ceo
     .command('full-power <on|off|status>')
