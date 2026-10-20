@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { runnerPaths } from '../src/paths.ts';
 import { VaultManager } from '../src/vaults/manager.ts';
-import { isGeneratedGraphFile, syncVault } from '../src/vaults/sync.ts';
+import { isGeneratedGraphFile, scrubGraphPaths, syncVault } from '../src/vaults/sync.ts';
 import { cleanupTmp, sh, tmp } from './helpers.ts';
 import { IDENTITY, makeVault, originFile, pushFromOther } from './vault-fixtures.ts';
 
@@ -89,6 +89,8 @@ describe('generated graph files never stop the vault (design section 4)', () => 
     const r = await syncVault(input(v));
     expect(r.status).toBe('conflict');
     expect(r.status === 'conflict' && r.files).toContain('projects/toy/notes.md');
+    // S8: the generated graph file that conflicted too is not named: its name comes from the customer's code
+    expect(r.status === 'conflict' && r.files).toEqual(['projects/toy/notes.md']);
     expect(sh(v.origin, 'git', ['rev-parse', 'main'])).toBe(before);
     expect(readFileSync(join(v.mine, 'projects/toy/notes.md'), 'utf8')).toBe('line one\nlocal two\n');
   });
@@ -119,5 +121,48 @@ describe('generated graph files never stop the vault (design section 4)', () => 
     expect(sent.some((s) => s.type === 'vault.conflict')).toBe(false);
     expect(resolved).toEqual([{ vaultId: 'v1', folders: ['projects/toy'] }]);
     m.stop();
+  });
+});
+
+describe('graph file names never leave the runner in a mixed conflict (S8)', () => {
+  it('the manager reports and pauses on the notes only: vault.conflict, the status error and the log', async () => {
+    const v = makeVault(SEED);
+    const root = tmp('aom-graph-mixed-');
+    const sent: Array<{ type: string; payload: Record<string, unknown> }> = [];
+    const m = new VaultManager({
+      paths: runnerPaths(root),
+      secondMs: 60_000,
+      transport: { send: (type, payload) => void sent.push({ type, payload }) },
+    });
+    m.configure({
+      vaults: [{ vaultId: 'v1', kind: 'project', name: 'P', remoteUrl: v.origin, syncIntervalSec: 60 }],
+      identity: IDENTITY,
+      workstationName: 'Desk',
+      resume: [],
+    });
+    await m.syncNow('v1');
+    const dir = join(runnerPaths(root).vaults, 'v1');
+    const shard = `${GRAPH}/repos/abc123abc123/packages__core.jsonl`;
+    write(dir, shard, '{"t":"n","id":"mine"}\n');
+    write(dir, 'projects/toy/notes.md', 'line one\nlocal two\n');
+    pushFromOther(v, shard, '{"t":"n","id":"theirs"}\n');
+    sh(v.other, 'git', ['pull', '--rebase', 'origin', 'main']);
+    pushFromOther(v, 'projects/toy/notes.md', 'line one\nremote two\n');
+    await m.syncNow('v1');
+    expect(m.isPaused('v1')).toBe(true);
+    const wire = JSON.stringify(sent);
+    expect(wire).toContain('projects/toy/notes.md');
+    expect(wire).not.toMatch(/graph\/|packages__core|abc123abc123/);
+  });
+
+  it('scrubGraphPaths removes generated graph file names from git error text', () => {
+    const text =
+      "CONFLICT (content): Merge conflict in projects/toy/graph/repos/abc123/packages__core.jsonl\nerror: could not apply 1a2b3c... 'projects/toy/graph/manifest.json'";
+    const out = scrubGraphPaths(text);
+    expect(out).not.toMatch(/graph\/|packages__core|manifest/);
+    expect(out).toContain('<generated graph file>');
+    expect(scrubGraphPaths('Merge conflict in projects/toy/notes.md')).toBe(
+      'Merge conflict in projects/toy/notes.md',
+    );
   });
 });
