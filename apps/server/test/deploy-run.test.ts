@@ -10,6 +10,7 @@ import {
   type DeliveryWorld,
   deliveryWorld,
   healthyRun,
+  mergeLanded,
   parseFixture,
   passedRegression,
   setWeekday,
@@ -32,6 +33,7 @@ beforeAll(async () => {
   r = await d.w.connectRunner({ capabilities: ['ceo:1', 'delivery:1'] });
   await keepOnline(d.w);
   await setWeekday(d);
+  await mergeLanded(d, COMMIT); // the commit the tests deploy was really merged
   const o = await d.observe(parseFixture(), { commit: '9999999aaaaaaa' });
   approvedHash = o.hash;
   await ok(d.approve(o.hash));
@@ -523,6 +525,7 @@ describe('coalescing, running runs and expiry', () => {
     ).toHaveLength(1);
     const newer = 'fedcba9876543210fedcba9876543210fedcba98';
     await healthyRun(d, 'local', newer, 45);
+    await mergeLanded(d, newer); // the newest merge: the regression run (no commit named) vouches for it
     const c = await ask('production', { requester: ceoReq('wake'), commit: newer, targets: ['p5-prod'] });
     expect(c.runs[0]!.runId).not.toBe(a.runs[0]!.runId);
     expect((await run(a.runs[0]!.runId)).status).toBe('cancelled');
@@ -532,6 +535,7 @@ describe('coalescing, running runs and expiry', () => {
     const d2 = await ask('production', { commit: newer, targets: ['p5-prod'] });
     expect(d2.runs[0]).toMatchObject({ status: 'refused', refusal: 'run_in_progress' });
     await q(`UPDATE deploy_runs SET status='cancelled' WHERE id=$1`, [c.runs[0]!.runId]);
+    await mergeLanded(d, COMMIT); // COMMIT is the newest merge again for the tests that follow
   });
 
   it('a deploy nobody collected in two hours expires instead of firing late', async () => {
@@ -597,6 +601,7 @@ describe('the workstation refuses or fails: answers, never retries', () => {
   });
 
   it('a failed deploy keeps its tail and wakes the CEO urgently', async () => {
+    await mergeLanded(d, 'b'.repeat(40));
     const res = await ask('local', { requester: trigger, commit: 'b'.repeat(40) });
     const id = res.runs[0]!.runId;
     await until(async () => execs().some((c) => (c.payload as { runId: string }).runId === id), 4000, 'exec');
@@ -623,6 +628,7 @@ describe('the workstation refuses or fails: answers, never retries', () => {
   });
 
   it('an unreadable answer ends the run as failed, not as a retry', async () => {
+    await mergeLanded(d, 'c'.repeat(40));
     const res = await ask('local', { requester: trigger, commit: 'c'.repeat(40) });
     const id = res.runs[0]!.runId;
     await until(async () => execs().some((c) => (c.payload as { runId: string }).runId === id), 4000, 'exec');
@@ -637,6 +643,8 @@ describe('after merge: a burst deploys once', () => {
   it('merges wait two minutes; the newest commit wins; the trigger asks for the environments that list it', async () => {
     const { queueMergeTrigger } = await import('../src/delivery/triggers.ts');
     const card = await d.w.card({ title: 'A merged card' });
+    await mergeLanded(d, '1'.repeat(40), card.id);
+    await mergeLanded(d, '2'.repeat(40), card.id);
     const before = execs().length;
     expect(await queueMergeTrigger(ctx(), card.id, '1'.repeat(40))).toBe(true);
     await advance(d, 60_000);

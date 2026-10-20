@@ -5,9 +5,11 @@ import { rebuildProjections } from '../src/projections/rebuild.ts';
 import { keepOnline } from './helpers/ceo.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import {
+  advance,
   type DeliveryWorld,
   deliveryWorld,
   healthyRun,
+  mergeLanded,
   parseFixture,
   passedRegression,
   setWeekday,
@@ -28,6 +30,8 @@ beforeAll(async () => {
   r = await d.w.connectRunner({ capabilities: ['ceo:1', 'delivery:1'] });
   await keepOnline(d.w);
   await setWeekday(d);
+  await mergeLanded(d, COMMIT);
+  await advance(d, 5 * 60_000); // the regression run below is newer than the merge
   const o = await d.observe(parseFixture(), { commit: '9999999aaaaaaa' });
   await ok(d.approve(o.hash));
   await ok(

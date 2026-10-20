@@ -196,7 +196,8 @@ export interface LintItem {
     | 'unknown_template'
     | 'unknown_env_in_gate'
     | 'unknown_repo'
-    | 'dry_run_missing';
+    | 'dry_run_missing'
+    | 'ci_unsatisfiable';
   message: string;
   env?: string;
   path?: string;
@@ -314,7 +315,14 @@ export function lintRecipe(i: LintInput): LintItem[] {
       });
     const inline = typeof e.gate === 'object' ? e.gate : null;
     for (const r of inline?.requires ?? [])
-      if ('envHealthy' in r && !envNames.has(r.envHealthy))
+      if ('checksPassed' in r && r.checksPassed === 'ci')
+        out.push({
+          level: 'warn',
+          code: 'ci_unsatisfiable',
+          env: e.name,
+          message: `${e.name}: the gate needs ci checks, but CI results are not collected yet: this environment cannot be released while it holds`,
+        });
+      else if ('envHealthy' in r && !envNames.has(r.envHealthy))
         out.push({
           level: 'error',
           code: 'unknown_env_in_gate',
