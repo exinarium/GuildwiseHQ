@@ -1,4 +1,13 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import type { ClaudeAccountEnsurePayload, ClaudeAccountEnsureResult } from '@aom/shared';
 import { type ClaudeAccountConfig, loadConfig, type RunnerConfig, saveConfig } from '../config.ts';
@@ -9,7 +18,8 @@ import { type ClaudeAccountRegistry, displayDir, expandHome } from './claude-acc
  * decisions D1 and D6). Idempotent. The runner only ever uses folders and aliases it created itself: it never adopts the
  * user's own `~/.claude-work` or `claude-work` alias (the owner uses those interactively). For a key it:
  *   1. picks the folder: the config.json entry's `configDir` (the owner chose it), else the runner-owned default
- *      `~/.claude-gw-<key>`; refuses folders inside the runner data dir, inside `~/.claude` (main) or outside the home;
+ *      `~/.claude-gw-<key>` (the web command's `configDir` is ignored unless it is one of those two: it ends up in a shell
+ *      alias, so the server never chooses it); refuses folders inside the runner data dir, inside `~/.claude` (main) or outside the home;
  *   2. creates the folder (0700) with an ownership marker file (`.aom-runner-owned`), or recognises one it created earlier;
  *      a default folder that exists WITHOUT the marker is not touched and not adopted: the answer is `failed`;
  *   3. registers `{key, configDir, source:'config_dir'}` in this pairing's config.json;
@@ -107,8 +117,24 @@ export function checkAccountDir(dir: string, home: string, root: string): string
   return undefined;
 }
 
+/** Characters an account folder may contain: it is written into a shell alias. No quotes, `$`, backticks, backslashes or control characters. */
+const SAFE_DIR = /^[A-Za-z0-9 _.\-+@%:,=~/]+$/;
+export const safeAccountDir = (dir: string): boolean => SAFE_DIR.test(dir) && !dir.includes('\n');
+
+/**
+ * The folder as it appears in the alias value (which sits in single quotes): bare when it has no space, else in double
+ * quotes with a leading `~/` as `$HOME/` (a `~` is not expanded inside quotes). The charset excludes everything that is
+ * special inside double quotes.
+ */
+export function shellQuoteDir(dir: string): string {
+  if (!safeAccountDir(dir))
+    throw new Error('the account folder has characters that cannot go into a shell alias');
+  if (!dir.includes(' ')) return dir;
+  return `"${dir.startsWith('~/') ? `$HOME/${dir.slice(2)}` : dir}"`;
+}
+
 const aliasLine = (key: string, dirDisplay: string) =>
-  `alias ${ownedAliasName(key)}='CLAUDE_CONFIG_DIR=${dirDisplay} claude'`;
+  `alias ${ownedAliasName(key)}='CLAUDE_CONFIG_DIR=${shellQuoteDir(dirDisplay)} claude'`;
 
 /** The text of a shell file with `key`'s alias inside the marked block (the block is created once; keys are sorted). */
 export function withAliasBlock(text: string, key: string, dirDisplay: string): string {
@@ -138,7 +164,14 @@ export function withAliasBlock(text: string, key: string, dirDisplay: string): s
   return `${text}${sep}${text.length === 0 ? '' : '\n'}${block}\n`;
 }
 
-function writeAtomic(file: string, body: string, fallbackMode = 0o644): void {
+function writeAtomic(path: string, body: string, fallbackMode = 0o644): void {
+  // a symlinked rc file (dotfiles managers) is written through: the temp file goes next to the real file
+  let file = path;
+  try {
+    file = realpathSync(path);
+  } catch {
+    // missing or dangling: the path itself
+  }
   let mode = fallbackMode;
   try {
     mode = statSync(file).mode & 0o777;
@@ -182,6 +215,34 @@ export function registerAccount(configPath: string, entry: ClaudeAccountConfig):
   };
   saveConfig(configPath, next);
   return true;
+}
+
+/**
+ * Points an existing account at another folder (and the folder source). Returns the entry as it was, or undefined when
+ * the key is unknown or nothing changes.
+ */
+export function setAccountDir(
+  configPath: string,
+  key: string,
+  configDir: string,
+): ClaudeAccountConfig | undefined {
+  const cfg = loadConfig(configPath);
+  const cc = cfg.runtimes['claude-code'];
+  const old = cc.accounts.find((a) => a.key === key);
+  if (!old || (old.source === 'config_dir' && old.configDir === configDir)) return undefined;
+  saveConfig(configPath, {
+    ...cfg,
+    runtimes: {
+      ...cfg.runtimes,
+      'claude-code': {
+        ...cc,
+        accounts: cc.accounts.map((a) =>
+          a.key === key ? { key, configDir, source: 'config_dir' as const } : a,
+        ),
+      },
+    },
+  });
+  return old;
 }
 
 /** Switches an existing account to another source (a token is the secondary one); the folder on disk is untouched. */
@@ -237,8 +298,14 @@ export async function ensureClaudeAccount(
   const cfg = loadConfig(deps.configPath);
   const entry = cfg.runtimes['claude-code'].accounts.find((a) => a.key === key);
   const explicit = entry?.configDir;
-  const dir = expandHome(explicit ?? payload.configDir ?? `~/${ownedDirName(key)}`, home);
-  const bad = checkAccountDir(dir, home, root);
+  // payload.configDir is ignored: it comes from the web and would be written into a shell alias. Only the default and the
+  // folder already configured here are acceptable, and `explicit ?? default` already covers both.
+  const dir = expandHome(explicit ?? `~/${ownedDirName(key)}`, home);
+  const bad =
+    checkAccountDir(dir, home, root) ??
+    (safeAccountDir(displayDir(dir, home))
+      ? undefined
+      : 'the folder name has characters that cannot go safely into a shell alias (use letters, digits, space and . _ - + @ % : , = ~ /)');
   if (bad)
     return result({
       state: 'failed',
@@ -284,10 +351,10 @@ export async function ensureClaudeAccount(
       } catch {
         // not supported everywhere
       }
-      if (!explicit)
-        writeFileSync(join(dir, OWNER_MARKER), `created by the Guildwise runner for account ${key}\n`, {
-          mode: 0o600,
-        });
+      // whoever chose the path, a folder the runner just created is runner-owned
+      writeFileSync(join(dir, OWNER_MARKER), `created by the Guildwise runner for account ${key}\n`, {
+        mode: 0o600,
+      });
     }
     if (!entry) registerAccount(deps.configPath, { key, configDir: shown, source: 'config_dir' });
     let aliasAdded = false;

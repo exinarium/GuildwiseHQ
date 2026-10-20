@@ -1,4 +1,13 @@
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
@@ -7,6 +16,7 @@ import {
   ensureClaudeAccount,
   OWNER_MARKER,
   type ProvisionDeps,
+  setAccountDir,
 } from '../src/adapters/claude-account-provision.ts';
 import { ClaudeAccountRegistry } from '../src/adapters/claude-accounts.ts';
 import { loadConfig, saveConfig } from '../src/config.ts';
@@ -188,15 +198,111 @@ describe('claude.account.ensure: runner-owned folders only', () => {
     expect(existsSync(join(e.home, '.claude-gw-work'))).toBe(true);
   });
 
+  const withEntry = (e: ReturnType<typeof env>, configDir: string) => {
+    const cfg = loadConfig(e.configPath);
+    const cc = cfg.runtimes['claude-code'];
+    saveConfig(e.configPath, {
+      ...cfg,
+      runtimes: {
+        ...cfg.runtimes,
+        'claude-code': { ...cc, accounts: [{ key: 'work', configDir, source: 'config_dir' }] },
+      },
+    });
+  };
+
   it('refuses folders in the runner data dir, in ~/.claude, or outside the home', async () => {
-    const e = env();
-    for (const dir of [join(e.root, 'x'), '~/.claude', '~/.claude/sub', '/etc/claude-x', '~']) {
-      const r = await ensureClaudeAccount({ key: 'work', configDir: dir }, e.deps);
+    for (const dir of [join(tmp('aom-prov-x-'), 'x'), '~/.claude', '~/.claude/sub', '/etc/claude-x', '~']) {
+      const e = env();
+      withEntry(e, dir === '~' || dir.startsWith('~/') || dir.startsWith('/etc') ? dir : join(e.root, 'x'));
+      const r = await ensureClaudeAccount({ key: 'work' }, e.deps);
       expect(r.state, dir).toBe('failed');
       expect(r.detail, dir).toMatch(/refused/);
     }
+    const e = env();
+    withEntry(e, join(e.root, 'x'));
+    expect((await ensureClaudeAccount({ key: 'work' }, e.deps)).state).toBe('failed');
     expect(existsSync(join(e.root, 'x'))).toBe(false);
-    expect(loadConfig(e.configPath).runtimes['claude-code'].accounts).toEqual([]);
+  });
+
+  it('ignores the folder the web command names: the default is used and no alias carries the payload', async () => {
+    const e = env();
+    const r = await ensureClaudeAccount({ key: 'work', configDir: "~/x'; rm -rf ~; '" }, e.deps);
+    expect(r.configDir).toBe('~/.claude-gw-work');
+    expect(e.bashrc()).toContain("alias claude-gw-work='CLAUDE_CONFIG_DIR=~/.claude-gw-work claude'");
+    expect(e.bashrc()).not.toContain('rm -rf');
+    const e2 = env();
+    const r2 = await ensureClaudeAccount({ key: 'work', configDir: '~/elsewhere' }, e2.deps);
+    expect(r2.configDir).toBe('~/.claude-gw-work');
+    expect(existsSync(join(e2.home, 'elsewhere'))).toBe(false);
+  });
+
+  it.each([
+    ['a quote', "~/it's"],
+    ['a newline', '~/a\nalias evil=1'],
+    ['a command substitution', '~/$(touch pwned)'],
+    ['a backtick', '~/`id`'],
+    ['a double quote', '~/a"b'],
+  ])('refuses a configured folder with %s and writes nothing to the rc file', async (_n, dir) => {
+    const e = env();
+    withEntry(e, dir);
+    const before = e.bashrc();
+    const r = await ensureClaudeAccount({ key: 'work' }, e.deps);
+    expect(r.state).toBe('failed');
+    expect(r.detail).toMatch(/refused/);
+    expect(e.bashrc()).toBe(before);
+    expect(existsSync(join(e.home, 'pwned'))).toBe(false);
+  });
+
+  it('a folder with a space works: the alias quotes it', async () => {
+    const e = env();
+    withEntry(e, '~/my claude');
+    const r = await ensureClaudeAccount({ key: 'work' }, e.deps);
+    expect(r.aliasAdded).toBe(true);
+    expect(e.bashrc()).toContain(`alias claude-gw-work='CLAUDE_CONFIG_DIR="$HOME/my claude" claude'`);
+    expect(existsSync(join(e.home, 'my claude'))).toBe(true);
+    // run for real: the alias is valid shell and the variable holds the whole path
+    const line = e
+      .bashrc()
+      .split('\n')
+      .find((l) => l.startsWith('alias claude-gw-work')) as string;
+    const bin = tmp('aom-prov-bin-');
+    writeFileSync(join(bin, 'claude'), '#!/bin/sh\nprintf "%s" "$CLAUDE_CONFIG_DIR"\n', { mode: 0o755 });
+    const out = spawnSync('bash', ['-c', `shopt -s expand_aliases\n${line}\nclaude-gw-work\n`], {
+      env: { ...process.env, HOME: e.home, PATH: `${bin}:${process.env.PATH}` },
+      encoding: 'utf8',
+    });
+    expect(out.stdout).toBe(join(e.home, 'my claude'));
+  });
+
+  it('writes through a symlinked rc file and leaves the link in place', async () => {
+    const e = env({}, null);
+    const real = tmp('aom-prov-dotfiles-');
+    writeFileSync(join(real, 'bashrc'), '# managed\n');
+    symlinkSync(join(real, 'bashrc'), join(e.home, '.bashrc'));
+    const r = await ensureClaudeAccount({ key: 'work' }, e.deps);
+    expect(r.aliasAdded).toBe(true);
+    expect(lstatSync(join(e.home, '.bashrc')).isSymbolicLink()).toBe(true);
+    expect(readFileSync(join(real, 'bashrc'), 'utf8')).toContain('alias claude-gw-work=');
+    expect(readFileSync(join(real, 'bashrc'), 'utf8').startsWith('# managed\n')).toBe(true);
+  });
+
+  it('always marks a folder the runner created, also an owner-chosen path that was deleted since', async () => {
+    const e = env();
+    withEntry(e, '~/gone-folder');
+    const r = await ensureClaudeAccount({ key: 'work' }, e.deps);
+    expect(r.state).toBe('awaiting_login');
+    expect(existsSync(join(e.home, 'gone-folder', OWNER_MARKER))).toBe(true);
+  });
+
+  it('setAccountDir updates an existing entry and reports the old one', () => {
+    const e = env();
+    withEntry(e, '~/old');
+    expect(setAccountDir(e.configPath, 'work', '~/old')).toBeUndefined();
+    expect(setAccountDir(e.configPath, 'work', '~/new')?.configDir).toBe('~/old');
+    expect(loadConfig(e.configPath).runtimes['claude-code'].accounts).toEqual([
+      { key: 'work', configDir: '~/new', source: 'config_dir' },
+    ]);
+    expect(setAccountDir(e.configPath, 'nope', '~/x')).toBeUndefined();
   });
 
   it('a non-primary pairing answers needs_owner with the exact commands and writes nothing', async () => {

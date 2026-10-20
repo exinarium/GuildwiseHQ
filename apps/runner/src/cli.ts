@@ -18,6 +18,8 @@ import {
   checkAccountDir,
   ensureClaudeAccount,
   registerAccount,
+  safeAccountDir,
+  setAccountDir,
   setAccountSource,
   unregisterAccount,
 } from './adapters/claude-account-provision.ts';
@@ -980,8 +982,20 @@ async function accountsAdd(
     const dir = expandHome(opts.configDir, home);
     const bad = checkAccountDir(dir, home, paths.root);
     if (bad) throw new Error(`Folder refused: ${bad}.`);
+    const shown = displayDir(dir, home);
+    if (!safeAccountDir(shown))
+      throw new Error(
+        'Folder refused: use only letters, digits, space and . _ - + @ % : , = ~ / in the folder name (it goes into a shell alias).',
+      );
     mkdirSync(dir, { recursive: true, mode: 0o700 });
-    registerAccount(paths.config, { key, configDir: displayDir(dir, home), source: 'config_dir' });
+    if (!registerAccount(paths.config, { key, configDir: shown, source: 'config_dir' })) {
+      // the key exists: the folder named on purpose wins, and the owner is told what changed
+      const old = setAccountDir(paths.config, key, shown);
+      if (old)
+        console.log(
+          `Account ${key} now uses ${shown} (was ${old.source === 'token' ? 'a saved token' : (old.configDir ?? `~/.claude-gw-${key}`)}).`,
+        );
+    }
   }
   const { env } = headlessAdapters(paths);
   const r = await ensureClaudeAccount(
