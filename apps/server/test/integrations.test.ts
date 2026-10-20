@@ -472,6 +472,58 @@ describe('test and remove', () => {
   });
 });
 
+describe('a named Claude account needs a runner that knows accounts', () => {
+  const named = { kind: 'claude-code', instance: 'work' };
+  const code = (res: { status: number; body: any }) => res.body.code ?? res.body.error?.code;
+  const sent = () => r.received.filter((f) => f.type === 'command').length;
+
+  it('begin, connect, test and remove are refused for an old runner (a remove would hit the main credential); other kinds are not', async () => {
+    const before = sent();
+    const refused = [
+      await owner('POST', `${base()}/sessions`, { ...named, method: 'claude_login' }),
+      await owner('POST', `${base()}/connect`, {
+        requestId: randomUUID(),
+        ...named,
+        method: 'api_key',
+        envelope: envelope(),
+      }),
+      await owner('POST', `${base()}/test`, { requestId: randomUUID(), ...named }),
+      await owner('POST', `${base()}/remove`, { requestId: randomUUID(), ...named }),
+    ];
+    for (const res of refused) {
+      expect(res.status).toBe(409);
+      expect(code(res)).toBe('runner_too_old');
+    }
+    await r.barrier();
+    expect(sent()).toBe(before);
+    expect(await qa(`SELECT 1 FROM integration_requests WHERE instance='work'`)).toHaveLength(0);
+  });
+
+  it('with the claude-accounts:1 capability the same requests are accepted; the main instance never needed it', async () => {
+    const had = (
+      await qa('SELECT capabilities FROM workstation_capabilities WHERE workstation_id=$1', [w.workstationId])
+    )[0]?.capabilities as string[] | undefined;
+    await q(
+      `INSERT INTO workstation_capabilities (workstation_id, capabilities, updated_at) VALUES ($1, ARRAY['claude-accounts:1'], now())
+       ON CONFLICT (workstation_id) DO UPDATE SET capabilities = ARRAY['claude-accounts:1']`,
+      [w.workstationId],
+    );
+    try {
+      const f = r.received.length;
+      const res = await owner('POST', `${base()}/remove`, { requestId: randomUUID(), ...named });
+      expect(res.status).toBe(202);
+      await nextCommand('integration.remove', f);
+    } finally {
+      if (had)
+        await q('UPDATE workstation_capabilities SET capabilities=$2::text[] WHERE workstation_id=$1', [
+          w.workstationId,
+          had,
+        ]);
+      else await q('DELETE FROM workstation_capabilities WHERE workstation_id=$1', [w.workstationId]);
+    }
+  });
+});
+
 describe('expiry', () => {
   it('a sealed command nobody collected is failed and emptied by the sweep, and its request expires', async () => {
     const requestId = randomUUID();
