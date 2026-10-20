@@ -5,6 +5,7 @@ import {
   RunPlanOverviewSchema,
   type SaveRunPlanRequest,
   type SetupScanRequest,
+  type TestRan,
   type TestRunPlanRequest,
 } from '@aom/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -31,6 +32,7 @@ export function useRunPlanOverview(projectId: string | undefined) {
         scan: d.scan ?? null,
         scanProblem: d.scanProblem ?? null,
         proposal: d.proposal ?? null,
+        consents: d.consents ?? [],
         lastStart: d.lastStart ?? null,
       };
     },
@@ -67,7 +69,7 @@ export function useTestRunPlan(projectId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (v: TestRunPlanRequest) =>
-      (await post<{ environment: RunEnvironmentDto }>(`/projects/${projectId}/run-plan/test`, v)).environment,
+      post<{ environment: RunEnvironmentDto; ran?: TestRan }>(`/projects/${projectId}/run-plan/test`, v),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['runs'] });
       qc.invalidateQueries({ queryKey: ['run-plan', projectId] });
@@ -90,5 +92,17 @@ export function useDismissProposal(projectId: string) {
     mutationFn: (p: ProposalDto) =>
       post(`/setup-proposals/${p.id}/resolve`, { outcome: 'dismissed' as const }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['run-plan', projectId] }),
+  });
+}
+
+/** "Allow on my computer": the owner of a computer allows a project plan version to run there. */
+export function useAllowPlan(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { planId: string; workstationId: string }) =>
+      post<RunPlanOverview>(`/projects/${projectId}/run-plan/${v.planId}/consent`, {
+        workstationId: v.workstationId,
+      }),
+    onSuccess: (data) => qc.setQueryData(['run-plan', projectId], data),
   });
 }

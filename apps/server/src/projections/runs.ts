@@ -131,6 +131,19 @@ export const runProjectors: Record<string, Projector> = {
       JSON.stringify({ reason: p.reason, at: e.createdAt.toISOString() }),
     ]);
   },
+  RunPlanFailureCleared: async (tx, e) => {
+    const p = (e.event as EventOf<'RunPlanFailureCleared'>).payload;
+    await exec(tx, `UPDATE run_plans SET last_failure=NULL WHERE id=$1`, [p.planId]);
+  },
+  RunPlanConsentGiven: async (tx, e) => {
+    const p = (e.event as EventOf<'RunPlanConsentGiven'>).payload;
+    await exec(
+      tx,
+      `INSERT INTO run_plan_consents (plan_id, workstation_id, project_id, allowed_by, allowed_at) VALUES ($1,$2,$3,$4,$5)
+       ON CONFLICT (plan_id, workstation_id) DO NOTHING`,
+      [p.planId, p.workstationId, p.projectId, p.by, e.createdAt],
+    );
+  },
   RunPlanDiscarded: async (tx, e) => {
     const p = (e.event as EventOf<'RunPlanDiscarded'>).payload;
     await exec(tx, `UPDATE run_plans SET status='superseded' WHERE id=$1`, [p.planId]);

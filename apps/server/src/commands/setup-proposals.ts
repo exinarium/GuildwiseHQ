@@ -123,6 +123,35 @@ export async function listProposals(
 
 // --------------------------------------------------------------------------------------------------- starting
 
+export interface ScanCandidate {
+  name: string;
+  connected: boolean;
+  capabilities: string[] | null;
+  has_devops: boolean;
+  clones: number;
+}
+
+/**
+ * Why a computer cannot run a scan now (null: it can), in one sentence for the page; the same rule starts a scan and
+ * fills the "Scan with DevOps" button's tooltip.
+ */
+export function scanBlockedReason(w: ScanCandidate): { code: string; message: string } | null {
+  if (!w.connected)
+    return {
+      code: 'workstation_offline',
+      message: `${w.name} is offline. Scans run on a computer that has the project's code.`,
+    };
+  if (!(w.capabilities ?? []).includes(SETUP_SCAN_CAPABILITY))
+    return {
+      code: 'scan_not_supported',
+      message: `Guildwise on ${w.name} is too old for scans: update the runner on that computer`,
+    };
+  if (!w.has_devops) return { code: 'no_devops', message: `${w.name} has no DevOps engineer.` };
+  if (w.clones === 0)
+    return { code: 'no_workstation', message: `${w.name} has no copy of the project's code.` };
+  return null;
+}
+
 /** `POST /api/projects/:id/scan`: files the read-only DevOps request on a workstation that has the project's code. */
 export async function startScan(
   ctx: Ctx,
@@ -143,31 +172,28 @@ export async function startScan(
 
     const candidates = await rows(
       tx,
-      `SELECT w.id, w.name, w.connected, c.capabilities
+      `SELECT w.id, w.name, w.connected, c.capabilities,
+              EXISTS (SELECT 1 FROM agents a WHERE a.workstation_id = w.id AND a.is_devops AND a.status='active') AS has_devops,
+              (SELECT count(*)::int FROM workstation_repos wr JOIN project_repos pr ON pr.id = wr.project_repo_id
+                WHERE wr.workstation_id = w.id AND pr.project_id=$3 AND pr.removed_at IS NULL) AS clones
          FROM workstations w LEFT JOIN workstation_capabilities c ON c.workstation_id = w.id
         WHERE w.user_id=$1 AND w.status='active' AND ($2::uuid IS NULL OR w.id=$2)
-          AND EXISTS (SELECT 1 FROM workstation_repos wr JOIN project_repos pr ON pr.id = wr.project_repo_id
-                       WHERE wr.workstation_id = w.id AND pr.project_id=$3 AND pr.removed_at IS NULL)
         ORDER BY w.connected DESC, w.paired_at, w.id`,
       [user.id, req.workstationId ?? null, projectId],
     );
     if (candidates.length === 0)
       throw conflict(
         'no_workstation',
-        req.workstationId
-          ? 'that computer has no copy of the project code'
-          : 'none of your computers has a copy of the project code',
+        req.workstationId ? 'that computer is not yours' : 'you have no computer paired yet',
       );
-    const ws =
-      candidates.find((c) => c.connected && (c.capabilities ?? []).includes(SETUP_SCAN_CAPABILITY)) ??
-      candidates[0];
-    if (!ws) throw conflict('no_workstation', 'none of your computers has a copy of the project code');
-    if (!ws.connected) throw conflict('workstation_offline', `${ws.name} is offline`);
-    if (!(ws.capabilities ?? []).includes(SETUP_SCAN_CAPABILITY))
-      throw conflict(
-        'scan_not_supported',
-        `Guildwise on ${ws.name} is too old for scans: update the runner on that computer`,
-      );
+    const ws = candidates.find((c) => !scanBlockedReason(c as unknown as ScanCandidate));
+    if (!ws) {
+      const why = scanBlockedReason(candidates[0] as unknown as ScanCandidate) as {
+        code: string;
+        message: string;
+      };
+      throw conflict(why.code, why.message);
+    }
     const { requestId } = await createDevOpsRequestIn(ctx, tx, {
       workstationId: ws.id,
       orgId: p.org_id,
@@ -337,6 +363,9 @@ export async function resolveProposal(
         'use_save',
         'a proposal is accepted by saving its steps (PUT run-plan with the proposalId)',
       );
+    const ws = await one(tx, 'SELECT user_id FROM workstations WHERE id=$1', [sp.workstation_id]);
+    if (ws && ws.user_id !== user.id)
+      throw forbidden('only the owner of the computer that scanned can put this proposal away');
     if (sp.status !== 'open') return;
     await ctx.store.append(
       [

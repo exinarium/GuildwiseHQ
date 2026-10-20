@@ -421,7 +421,16 @@ export function buildFromTemplate(t: RunTemplateParams): RunPlanItem {
           template: 'docker_service',
           repoId: p.repoId,
           cwd: '.',
-          cmd: ['docker', 'run', '--rm', '-p', `\${port}:${p.containerPort}`, ...envArgs, p.image],
+          cmd: [
+            'docker',
+            'run',
+            '--rm',
+            '-p',
+            // only this computer can reach a throwaway database
+            `127.0.0.1:\${port}:${p.containerPort}`,
+            ...envArgs,
+            p.image,
+          ],
           ports: [{ name: 'tcp', default: p.containerPort }],
           health: { kind: 'tcp', port: 'tcp' },
           after: p.after,
@@ -433,7 +442,10 @@ export function buildFromTemplate(t: RunTemplateParams): RunPlanItem {
       const p = t.params;
       if (!p.composeFile.trim()) throw new Error('Pick the docker-compose file.');
       const file = p.composeFile.trim();
-      const project = `aom-run-${nameFromLabel(p.name)}`;
+      if (file.startsWith('-') || p.services.some((x) => x.trim().startsWith('-')))
+        throw new Error('The compose file and the part names cannot start with a dash.');
+      // `${envId}` is filled in per environment when the plan is replayed, so two test copies never share a stack
+      const project = `aom-run-${nameFromLabel(p.name)}-\${envId}`;
       const base = ['docker', 'compose', '-p', project, '-f', file];
       return {
         kind: 'service',
@@ -702,4 +714,65 @@ export function uniqueServiceName(base: string, taken: string[]): string {
   const root = nameFromLabel(base);
   if (!set.has(root)) return root;
   for (let i = 2; ; i++) if (!set.has(`${root}-${i}`)) return `${root}-${i}`;
+}
+
+// ------------------------------------------------------------------------------------------------- safety on the server
+
+const DOCKER_TEMPLATES = new Set(['docker_service', 'compose_stack']);
+const SENSITIVE_DIRS =
+  /(^|\/)(\.ssh|\.aws|\.gnupg|\.kube|\.docker|\.aom-runner|\.claude[^/]*|\.config\/gcloud|\.config\/gh)(\/|$)|^\/(etc|proc|sys|root|boot|dev|var\/run)(\/|$)/;
+
+/**
+ * Normalizes what the client may not decide: a part that came from a Docker template runs in Docker, one from any other
+ * known template does not (only a hand-written "custom" part keeps its own flag). Returns a copy.
+ */
+export function normalizePlanDocker(plan: RunPlan): RunPlan {
+  return {
+    ...plan,
+    services: plan.services.map((sv) =>
+      sv.template && DOCKER_TEMPLATES.has(sv.template)
+        ? { ...sv, docker: true }
+        : sv.template && sv.template !== 'custom_service'
+          ? { ...sv, docker: false }
+          : sv,
+    ),
+  };
+}
+
+/** Problems that make a plan unsafe to share with other computers (plain words). Empty: fine. */
+export function planSafetyProblems(plan: RunPlan): string[] {
+  const out: string[] = [];
+  for (const sv of plan.services) {
+    if (sv.envFile && (sv.envFile.split('/').includes('..') || SENSITIVE_DIRS.test(sv.envFile)))
+      out.push(
+        `The settings file of "${sv.name}" (${sv.envFile}) is in a place Guildwise does not read from.`,
+      );
+    if (sv.template === 'compose_stack') {
+      const f = sv.cmd.indexOf('-f');
+      const up = sv.cmd.indexOf('up');
+      if (
+        (f >= 0 && (sv.cmd[f + 1] ?? '').startsWith('-')) ||
+        (up >= 0 && sv.cmd.slice(up + 1).some((x) => x.startsWith('-')))
+      )
+        out.push(`"${sv.name}": the compose file and part names cannot start with a dash.`);
+    }
+  }
+  return out;
+}
+
+/** Fills `${envId}` (the first 8 characters of the environment id) so every test copy has its own names. */
+export function expandEnvId(plan: RunPlan, envId: string): RunPlan {
+  const id = envId.replace(/-/g, '').slice(0, 8);
+  const f = (t: string) => t.replaceAll('${envId}', id);
+  return {
+    ...plan,
+    setup: plan.setup.map((st) => ({ ...st, cmd: st.cmd.map(f) })),
+    services: plan.services.map((sv) => ({
+      ...sv,
+      cmd: sv.cmd.map(f),
+      ...(sv.stopCmd ? { stopCmd: sv.stopCmd.map(f) } : {}),
+      env: Object.fromEntries(Object.entries(sv.env).map(([k, v]) => [k, f(v)])),
+      health: sv.health.kind === 'http' ? { ...sv.health, url: f(sv.health.url) } : sv.health,
+    })),
+  };
 }

@@ -66,6 +66,29 @@ export const RunWorkstationDtoSchema = z.object({
 });
 export type RunWorkstationDto = z.infer<typeof RunWorkstationDtoSchema>;
 
+/**
+ * A project-wide plan someone else wrote that waits for the owner of one of the viewer's computers ("Allow on my
+ * computer"): the steps in plain words and the commands, so the owner knows exactly what will run there.
+ */
+export const PlanConsentDtoSchema = z.object({
+  planId: z.uuid(),
+  version: z.number().int(),
+  workstationId: z.uuid(),
+  workstationName: z.string(),
+  savedByName: z.string().nullable(),
+  steps: z.array(
+    z.object({
+      kind: z.enum(['step', 'part']),
+      label: z.string(),
+      command: z.string(),
+      folder: z.string(),
+      docker: z.boolean(),
+      envFile: z.string().nullable(),
+    }),
+  ),
+});
+export type PlanConsentDto = z.infer<typeof PlanConsentDtoSchema>;
+
 export const RunPlanOverviewSchema = z.object({
   canEdit: z.boolean(),
   repos: z.array(z.object({ repoId: z.uuid(), name: z.string() })),
@@ -77,6 +100,16 @@ export const RunPlanOverviewSchema = z.object({
   scan: ScanStateDtoSchema.nullable(),
   /** Why the last scan ended without a proposal (a failed DevOps request), when it did and nothing newer exists. */
   scanProblem: z.string().nullable(),
+  /** Project plan versions that wait for the viewer's OK before they may run on one of the viewer's computers. */
+  consents: z.array(PlanConsentDtoSchema).default([]),
+  /** Only in the answer to a save: which version was saved and which computers keep their own steps. */
+  saved: z
+    .object({
+      version: z.number().int(),
+      scope: z.enum(['project', 'workstation']),
+      computersWithOwnSteps: z.array(z.string()),
+    })
+    .optional(),
   /** The newest proposal that waits for a decision. */
   proposal: ProposalDtoSchema.nullable(),
   /** The newest start of the project (manual or test environment): "Last start: OK 2 h ago". */
@@ -95,7 +128,8 @@ export type RunPlanOverview = z.infer<typeof RunPlanOverviewSchema>;
 export const SaveRunPlanRequestSchema = z.object({
   plan: RunPlanSchema,
   scope: z.union([z.literal('project'), z.object({ workstationId: z.uuid() })]).default('project'),
-  source: z.enum(['owner', 'scan']).default('owner'),
+  /** Ignored by the server (it says `scan` when a proposal is confirmed, else `owner`); kept so older pages still validate. */
+  source: z.enum(['owner', 'scan']).optional(),
   proposalId: z.uuid().optional(),
 });
 export type SaveRunPlanRequest = z.infer<typeof SaveRunPlanRequestSchema>;
@@ -122,3 +156,14 @@ export const ProposalsResponseSchema = z.object({ proposals: z.array(ProposalDto
 
 export const ResolveProposalRequestSchema = z.object({ outcome: z.enum(['accepted', 'dismissed']) });
 export type ResolveProposalRequest = z.infer<typeof ResolveProposalRequestSchema>;
+
+/** `POST /api/projects/:id/run-plan/:planId/consent`: the owner of a computer allows a project plan version on it. */
+export const PlanConsentRequestSchema = z.object({ workstationId: z.uuid() });
+export type PlanConsentRequest = z.infer<typeof PlanConsentRequestSchema>;
+
+/** What a test start says about the steps it ran. */
+export const TestRanSchema = z.object({
+  source: z.enum(['unsaved', 'project', 'workstation']),
+  version: z.number().int().nullable(),
+});
+export type TestRan = z.infer<typeof TestRanSchema>;

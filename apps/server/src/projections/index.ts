@@ -186,6 +186,7 @@ export const PROJECTION_TABLES = [
   'devops_requests',
   'run_plans',
   'setup_proposals',
+  'run_plan_consents',
   'repo_clones',
   'project_environments',
   'environment_changes',

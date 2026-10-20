@@ -11,7 +11,7 @@ import { loadVisibleProject } from '../authz/scope.ts';
 import type { Ctx } from '../context.ts';
 import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
-import { conflict, notFound, unprocessable } from '../errors.ts';
+import { conflict, forbidden, notFound, unprocessable } from '../errors.ts';
 import { projectScope, userActor } from './common.ts';
 
 export function toTargetDto(t: Row): DeployTargetDto {
@@ -151,6 +151,9 @@ export async function addDeployTarget(
   return withAppendTx(ctx.pool, async (tx) => {
     const p = await loadVisibleProject(tx, user.id, projectId);
     if (p.status !== 'active') throw conflict('project_archived', 'project is archived');
+    // Marking a target production, testable or destructive-ok is the project owner's call.
+    if ((req.production || req.testEnabled || req.destructiveOk) && p.my_role !== 'owner')
+      throw forbidden('only the project owner can mark a target as production or open it to testing');
     checkShape(req);
     checkTesting({
       testEnabled: req.testEnabled ?? false,
@@ -206,6 +209,12 @@ export async function updateDeployTarget(
     ]);
     if (!t) throw notFound('deploy target not found');
     const p = await loadVisibleProject(tx, user.id, t.project_id);
+    const flips =
+      (patch.production !== undefined && patch.production !== !!t.production) ||
+      (patch.testEnabled !== undefined && patch.testEnabled !== !!t.test_enabled) ||
+      (patch.destructiveOk !== undefined && patch.destructiveOk !== !!t.destructive_ok);
+    if (flips && p.my_role !== 'owner')
+      throw forbidden('only the project owner can mark a target as production or open it to testing');
     const merged = {
       kind: patch.kind ?? t.kind,
       workstationId: patch.workstationId !== undefined ? patch.workstationId : t.workstation_id,

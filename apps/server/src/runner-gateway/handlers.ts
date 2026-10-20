@@ -245,6 +245,10 @@ export class RunnerHandlers {
         await this.withInbox(conn, msg.id, (tx) =>
           applyRunReplayFailed(this.ctx, tx, conn.workstationId, msg),
         );
+        // a failed replay queues a run.stop for what it had started
+        void Promise.resolve(this.ctx.services.gateway.deliverPending(conn.workstationId)).catch(
+          () => undefined,
+        );
         return this.ack(conn, msg);
       case 'jira.report':
         await applyJiraReport(this.ctx, conn.workstationId, msg.status);

@@ -80,6 +80,10 @@ export const runEvents = [
   ),
   /** A start from a saved plan failed. An owner or scan plan stays active and is flagged (DevOps repairs it per workstation). */
   defineEvent('RunPlanFailureNoted', z.object({ planId: Id, projectId: Id, reason: z.string().max(4000) })),
+  /** An environment that replayed the plan became healthy: the flagged failure is history. */
+  defineEvent('RunPlanFailureCleared', z.object({ planId: Id, projectId: Id })),
+  /** The owner of a workstation allowed this version of a project-wide plan to run on their computer. */
+  defineEvent('RunPlanConsentGiven', z.object({ planId: Id, projectId: Id, workstationId: Id, by: Id })),
   /** The owner dropped a workstation's own plan ("Use the project version here"). */
   defineEvent('RunPlanDiscarded', z.object({ planId: Id, projectId: Id, by: Id })),
   /** The plan no longer matches BUILD.md or the Run & test settings: the next start goes through the DevOps engineer. */

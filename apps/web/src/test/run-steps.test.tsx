@@ -285,7 +285,16 @@ describe('RunStepsEditor', () => {
     expect(latest?.services[0]).toMatchObject({
       name: 'postgres',
       docker: true,
-      cmd: ['docker', 'run', '--rm', '-p', '${port}:5432', '-e', 'POSTGRES_PASSWORD=postgres', 'postgres:16'],
+      cmd: [
+        'docker',
+        'run',
+        '--rm',
+        '-p',
+        '127.0.0.1:${port}:5432',
+        '-e',
+        'POSTGRES_PASSWORD=postgres',
+        'postgres:16',
+      ],
     });
   });
 });
@@ -414,7 +423,7 @@ describe('RunStepsCard', () => {
       expect(calls.find((c) => c.method === 'PUT' && c.url.endsWith('/run-plan'))).toBeTruthy(),
     );
     const put = calls.find((c) => c.method === 'PUT' && c.url.endsWith('/run-plan'));
-    expect(put?.body).toMatchObject({ scope: 'project', source: 'owner' });
+    expect(put?.body).toMatchObject({ scope: 'project' });
     expect(put?.body.plan.services[0]).toMatchObject({ name: 'web', cmd: ['npm', 'start'] });
     expect(put?.body.plan.setup[0]).toMatchObject({ name: 'Install packages' });
   });
@@ -506,7 +515,7 @@ describe('RunStepsCard', () => {
     const box = await screen.findByTestId('own-plan-Office PC');
     await user.click(within(box).getByRole('button', { name: 'Make this the project version' }));
     await waitFor(() => expect(calls.find((c) => c.method === 'PUT')?.body.plan.notes).toBe('repair'));
-    expect(calls.find((c) => c.method === 'PUT')?.body).toMatchObject({ scope: 'project', source: 'owner' });
+    expect(calls.find((c) => c.method === 'PUT')?.body).toMatchObject({ scope: 'project' });
   });
 
   it('Docker steps with Docker off: a hint with a button that allows it', async () => {
@@ -526,6 +535,98 @@ describe('RunStepsCard', () => {
 });
 
 // ---------------------------------------------------------------------------------------- review
+
+describe('consent and the review fixes', () => {
+  it('a project plan someone else saved waits for "Allow on my computer" and shows exactly what would run', async () => {
+    const user = userEvent.setup();
+    serve(
+      overview({
+        projectPlan: version(),
+        consents: [
+          {
+            planId: ID(30),
+            version: 2,
+            workstationId: WS,
+            workstationName: 'Office PC',
+            savedByName: 'Mia',
+            steps: [
+              {
+                kind: 'step',
+                label: 'Install packages',
+                command: 'npm ci',
+                folder: '.',
+                docker: false,
+                envFile: null,
+              },
+              {
+                kind: 'part',
+                label: 'The website',
+                command: 'npm run dev',
+                folder: 'web',
+                docker: false,
+                envFile: '/home/u/web.env',
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    routes[`POST /api/projects/${PROJECT}/run-plan/${ID(30)}/consent`] = () =>
+      json(overview({ projectPlan: version(), consents: [] }));
+    wrap(<RunStepsCard projectId={PROJECT} canEdit={false} />);
+    const card = await screen.findByTestId('plan-consent');
+    expect(card).toHaveTextContent('Mia saved version 2');
+    expect(card).toHaveTextContent('npm run dev');
+    expect(card).toHaveTextContent('/home/u/web.env');
+    await user.click(screen.getByTestId('plan-consent-allow'));
+    await waitFor(() => expect(screen.queryByTestId('plan-consent')).toBeNull());
+    expect(calls.find((c) => c.url.endsWith('/consent'))?.body).toEqual({ workstationId: WS });
+  });
+
+  it('a save names the version and the computers that keep their own steps; a test says which steps ran', async () => {
+    const user = userEvent.setup();
+    serve(overview({ projectPlan: version() }));
+    const env = {
+      id: ID(50),
+      state: 'starting',
+      workstationName: 'Office PC',
+      activity: null,
+      canStop: true,
+      servicesStatus: [],
+      failureReason: null,
+      lastError: null,
+    };
+    routes[`POST /api/projects/${PROJECT}/run-plan/test`] = () =>
+      json({ environment: env, ran: { source: 'project', version: 2 } }, 201);
+    routes[`GET /api/runs/${ID(50)}`] = () => json({ environment: env });
+    wrap(<RunStepsCard projectId={PROJECT} canEdit />);
+    await user.click(await screen.findByTestId('run-test-button'));
+    expect(await screen.findByTestId('run-test-ran')).toHaveTextContent('the project steps, version 2');
+  });
+
+  it('"already running" offers to stop the running copy', async () => {
+    const user = userEvent.setup();
+    serve(overview({ projectPlan: version() }));
+    routes[`POST /api/projects/${PROJECT}/run-plan/test`] = () =>
+      json(
+        {
+          error: {
+            code: 'already_running',
+            message: 'this branch is already running on that workstation',
+            details: { envId: ID(51) },
+          },
+        },
+        409,
+      );
+    routes[`POST /api/runs/${ID(51)}/stop`] = () => json({ environment: { id: ID(51), state: 'stopping' } });
+    wrap(<RunStepsCard projectId={PROJECT} canEdit />);
+    await user.click(await screen.findByTestId('run-test-button'));
+    const c = await screen.findByTestId('run-test-running');
+    expect(c).toHaveTextContent('Stop the running copy first');
+    await user.click(within(c).getByRole('button', { name: /Stop the running copy/ }));
+    await waitFor(() => expect(calls.some((x) => x.url.endsWith(`/runs/${ID(51)}/stop`))).toBe(true));
+  });
+});
 
 describe('reviewing a scan', () => {
   const open = async (user: ReturnType<typeof userEvent.setup>, o: Record<string, unknown> = {}) => {
@@ -589,7 +690,7 @@ describe('reviewing a scan', () => {
       expect(calls.find((c) => c.method === 'PUT' && c.url.endsWith('/run-plan'))).toBeTruthy(),
     );
     const put = calls.find((c) => c.method === 'PUT' && c.url.endsWith('/run-plan'));
-    expect(put?.body).toMatchObject({ scope: 'project', source: 'scan', proposalId: ID(40) });
+    expect(put?.body).toMatchObject({ scope: 'project', proposalId: ID(40) });
     expect(put?.body.plan.notes).toBe('Looks like a Vite app.');
   });
 

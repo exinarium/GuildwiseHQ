@@ -2,6 +2,7 @@ import {
   ConfirmSuiteRequestSchema,
   ExtendRunRequestSchema,
   IdParamsSchema,
+  PlanConsentRequestSchema,
   ProposalsQuerySchema,
   ResolveProposalRequestSchema,
   RestartRunRequestSchema,
@@ -19,6 +20,7 @@ import { z } from 'zod';
 import { requireUser } from '../auth/guards.ts';
 import { confirmSuite, getIntegrationTests, setIntegrationTests } from '../commands/integration-tests.ts';
 import {
+  allowPlanOnWorkstation,
   discardWorkstationPlan,
   getRunPlanOverview,
   saveRunPlan,
@@ -136,8 +138,19 @@ export function runRoutes(ctx: Ctx) {
       { schema: { params: IdParamsSchema, body: SaveRunPlanRequestSchema } },
       async (req) => {
         const s = await requireUser(ctx, req);
-        await saveRunPlan(ctx, s.user, req.params.id, req.body);
-        return getRunPlanOverview(ctx, s.user, req.params.id);
+        const saved = await saveRunPlan(ctx, s.user, req.params.id, req.body);
+        const overview = await getRunPlanOverview(ctx, s.user, req.params.id);
+        return {
+          ...overview,
+          saved: {
+            version: saved.version,
+            scope: saved.workstationId ? ('workstation' as const) : ('project' as const),
+            // computers whose own steps still win over the project's
+            computersWithOwnSteps: saved.workstationId
+              ? []
+              : overview.workstationPlans.map((w) => w.workstationName ?? 'a computer'),
+          },
+        };
       },
     );
 
@@ -156,9 +169,24 @@ export function runRoutes(ctx: Ctx) {
       { schema: { params: IdParamsSchema, body: TestRunPlanRequestSchema } },
       async (req, reply) => {
         const s = await requireUser(ctx, req);
-        const environment = await testRunPlan(ctx, s.user, req.params.id, req.body);
+        const { environment, ran } = await testRunPlan(ctx, s.user, req.params.id, req.body);
         reply.code(201);
-        return { environment };
+        return { environment, ran };
+      },
+    );
+
+    app.post(
+      '/api/projects/:id/run-plan/:planId/consent',
+      {
+        schema: {
+          params: z.object({ id: z.uuid(), planId: z.uuid() }),
+          body: PlanConsentRequestSchema,
+        },
+      },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        await allowPlanOnWorkstation(ctx, s.user, req.params.id, req.params.planId, req.body.workstationId);
+        return getRunPlanOverview(ctx, s.user, req.params.id);
       },
     );
 

@@ -1,13 +1,18 @@
 import { createHash, randomUUID } from 'node:crypto';
 import {
+  formatCommandLine,
+  itemLabel,
+  normalizePlanDocker,
+  type PlanConsentDto,
+  planSafetyProblems,
   type RunEnvironmentDto,
   type RunPlan,
   type RunPlanOverview,
   RunPlanSchema,
   type RunPlanVersionDto,
   type SaveRunPlanRequest,
-  SETUP_SCAN_CAPABILITY,
   streamId,
+  type TestRan,
   type TestRunPlanRequest,
   validateRunPlan,
 } from '@aom/shared';
@@ -19,7 +24,7 @@ import { withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import { projectScope, userActor } from './common.ts';
 import { capsOf, startRun } from './runs.ts';
-import { listProposalDtos, openScan, scanProblemFor } from './setup-proposals.ts';
+import { listProposalDtos, openScan, scanBlockedReason, scanProblemFor } from './setup-proposals.ts';
 
 /**
  * The project's run plan as the guided editor sees it (docs/design/deploy-run-ux-design.md sections 3.1 and 7.2): one
@@ -82,16 +87,14 @@ export async function getRunPlanOverview(
         [w.id],
       )
     )?.capabilities;
-    const hasScan = (capList ?? []).includes(SETUP_SCAN_CAPABILITY);
-    const scanBlocked = !w.connected
-      ? `${w.name} is offline. Scans run on a computer that has the project's code.`
-      : !hasScan
-        ? `Guildwise on ${w.name} is too old for scans: update it.`
-        : !w.has_devops
-          ? `${w.name} has no DevOps engineer.`
-          : w.clones === 0
-            ? `${w.name} has no copy of the project's code.`
-            : null;
+    const blocked = scanBlockedReason({
+      name: w.name,
+      connected: !!w.connected,
+      capabilities: capList ?? null,
+      has_devops: !!w.has_devops,
+      clones: w.clones,
+    });
+    const scanBlocked = blocked?.message ?? null;
     workstations.push({
       id: w.id as string,
       name: w.name as string,
@@ -110,6 +113,7 @@ export async function getRunPlanOverview(
       WHERE e.project_id=$1 AND e.purpose IN ('manual','test') ORDER BY e.created_at DESC LIMIT 1`,
     [projectId],
   );
+  const consents = await consentsFor(ctx.pool, user.id, projectId, projectPlan);
   const scan = await openScan(ctx.pool, projectId, 'run', ctx.clock.now());
   const proposals = await listProposalDtos(ctx.pool, projectId, 'run', true);
   return {
@@ -118,6 +122,7 @@ export async function getRunPlanOverview(
     workstations,
     projectPlan,
     workstationPlans: dtos.filter((d) => d.workstationId !== null),
+    consents,
     scan,
     scanProblem: scan || proposals[0] ? null : await scanProblemFor(ctx.pool, projectId, 'run'),
     proposal: proposals[0] ?? null,
@@ -130,6 +135,93 @@ export async function getRunPlanOverview(
         }
       : null,
   };
+}
+
+/** The commands of a plan, in plain words, for the owner of a computer who is asked to allow it. */
+function consentSteps(plan: RunPlan): PlanConsentDto['steps'] {
+  return [
+    ...plan.setup.map((st) => ({
+      kind: 'step' as const,
+      label: itemLabel(st),
+      command: formatCommandLine(st.cmd),
+      folder: st.cwd,
+      docker: false,
+      envFile: null,
+    })),
+    ...plan.services.map((sv) => ({
+      kind: 'part' as const,
+      label: itemLabel(sv),
+      command: formatCommandLine(sv.cmd),
+      folder: sv.cwd,
+      docker: sv.docker,
+      envFile: sv.envFile ?? null,
+    })),
+  ];
+}
+
+/** Project plan versions waiting for the viewer's OK on one of the viewer's own computers. */
+async function consentsFor(
+  db: Queryable,
+  userId: string,
+  projectId: string,
+  projectPlan: RunPlanVersionDto | null,
+): Promise<PlanConsentDto[]> {
+  if (!projectPlan || projectPlan.source === 'devops') return [];
+  const mine = await rows(
+    db,
+    `SELECT w.id, w.name FROM workstations w
+      WHERE w.user_id=$1 AND w.status='active'
+        AND EXISTS (SELECT 1 FROM workstation_repos wr JOIN project_repos pr ON pr.id = wr.project_repo_id
+                     WHERE wr.workstation_id = w.id AND pr.project_id=$2 AND pr.removed_at IS NULL)
+        AND NOT EXISTS (SELECT 1 FROM run_plan_consents c WHERE c.plan_id=$3 AND c.workstation_id = w.id)
+        AND NOT EXISTS (SELECT 1 FROM run_plans rp WHERE rp.id=$3 AND rp.saved_by = w.user_id)
+      ORDER BY w.name, w.id`,
+    [userId, projectId, projectPlan.id],
+  );
+  return mine.map((w) => ({
+    planId: projectPlan.id,
+    version: projectPlan.version,
+    workstationId: w.id as string,
+    workstationName: w.name as string,
+    savedByName: projectPlan.savedByName,
+    steps: consentSteps(projectPlan.plan),
+  }));
+}
+
+/** "Allow on my computer": the owner of a workstation allows this version of the project plan to run there. */
+export async function allowPlanOnWorkstation(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  projectId: string,
+  planId: string,
+  workstationId: string,
+): Promise<void> {
+  await withAppendTx(ctx.pool, async (tx) => {
+    const p = await loadVisibleProject(tx, user.id, projectId);
+    const ws = await one(tx, `SELECT user_id FROM workstations WHERE id=$1 AND status='active'`, [
+      workstationId,
+    ]);
+    if (!ws) throw notFound('workstation not found');
+    if (ws.user_id !== user.id) throw forbidden('only the owner of a computer can allow steps to run on it');
+    const plan = await one(
+      tx,
+      `SELECT id FROM run_plans WHERE id=$1 AND project_id=$2 AND workstation_id IS NULL AND status='active'`,
+      [planId, projectId],
+    );
+    if (!plan)
+      throw conflict('plan_changed', 'these steps were replaced by a newer version: reload the page');
+    await ctx.store.append(
+      [
+        {
+          streamId: streamId.project(projectId),
+          event: { type: 'RunPlanConsentGiven', payload: { planId, projectId, workstationId, by: user.id } },
+          actor: userActor(user.id),
+          scope: projectScope(p.org_id, projectId),
+        },
+      ],
+      { tx },
+    );
+  });
 }
 
 /** What a plan may name: repositories of the project. */
@@ -155,8 +247,9 @@ export async function saveRunPlan(
   projectId: string,
   req: SaveRunPlanRequest,
 ): Promise<RunPlanVersionDto> {
-  const plan = RunPlanSchema.parse(req.plan);
-  const problems = validateRunPlan(plan);
+  // Docker is decided by the template, never by what the page sent
+  const plan = normalizePlanDocker(RunPlanSchema.parse(req.plan));
+  const problems = [...validateRunPlan(plan), ...planSafetyProblems(plan)];
   if (problems.length) throw badRequest('invalid_run_plan', problems.join('; '));
   if (plan.services.length === 0)
     throw badRequest('invalid_run_plan', 'a plan needs at least one part that keeps running');
@@ -170,11 +263,13 @@ export async function saveRunPlan(
       // a workstation of an active member of the project (the same rule as a deploy target's)
       const ws = await one(
         tx,
-        `SELECT 1 AS x FROM workstations w JOIN project_members pm ON pm.user_id = w.user_id AND pm.project_id = $2 AND pm.status = 'active'
+        `SELECT w.user_id FROM workstations w JOIN project_members pm ON pm.user_id = w.user_id AND pm.project_id = $2 AND pm.status = 'active'
           WHERE w.id=$1 AND w.status='active'`,
         [workstationId, projectId],
       );
       if (!ws) throw notFound('workstation not found');
+      // steps for one computer are that computer's owner's call
+      if (ws.user_id !== user.id) throw forbidden('only the owner of a computer can save steps for it');
     }
     let proposalId: string | undefined;
     if (req.proposalId) {
@@ -208,7 +303,8 @@ export async function saveRunPlan(
               plan,
               fingerprint,
               requestId: null,
-              source: proposalId ? 'scan' : req.source,
+              // decided here, never taken from the page
+              source: proposalId ? 'scan' : 'owner',
               savedBy: user.id,
               ...(proposalId ? { proposalId } : {}),
             },
@@ -250,10 +346,12 @@ export async function discardWorkstationPlan(
     if (p.my_role !== 'owner') throw forbidden('only the project owner can do this');
     const plan = await one(
       tx,
-      `SELECT id FROM run_plans WHERE id=$1 AND project_id=$2 AND workstation_id IS NOT NULL AND status <> 'superseded'`,
+      `SELECT rp.id, w.user_id FROM run_plans rp JOIN workstations w ON w.id = rp.workstation_id
+        WHERE rp.id=$1 AND rp.project_id=$2 AND rp.workstation_id IS NOT NULL AND rp.status <> 'superseded'`,
       [planId, projectId],
     );
     if (!plan) throw notFound('plan not found');
+    if (plan.user_id !== user.id) throw forbidden('only the owner of that computer can drop its steps');
     await ctx.store.append(
       [
         {
@@ -274,26 +372,35 @@ export async function testRunPlan(
   user: AuthSession['user'],
   projectId: string,
   req: TestRunPlanRequest,
-): Promise<RunEnvironmentDto> {
+): Promise<{ environment: RunEnvironmentDto; ran: TestRan }> {
   const p = await loadVisibleProject(ctx.pool, user.id, projectId);
   if (p.my_role !== 'owner') throw forbidden('only the project owner can do this');
+  // A test starts processes: only on a computer of the person who presses the button.
+  const mine = await one(
+    ctx.pool,
+    `SELECT 1 AS x FROM workstations WHERE id=$1 AND user_id=$2 AND status='active'`,
+    [req.workstationId, user.id],
+  );
+  if (!mine) throw forbidden('you can test steps only on your own computers');
   let plan: RunPlan | undefined;
+  let ran: TestRan = { source: 'unsaved', version: null };
   if (req.plan) {
-    plan = RunPlanSchema.parse(req.plan);
-    const problems = validateRunPlan(plan);
+    plan = normalizePlanDocker(RunPlanSchema.parse(req.plan));
+    const problems = [...validateRunPlan(plan), ...planSafetyProblems(plan)];
     if (problems.length) throw badRequest('invalid_run_plan', problems.join('; '));
     await assertPlanRepos(ctx.pool, projectId, plan);
   } else {
     const saved = await one(
       ctx.pool,
-      `SELECT plan FROM run_plans WHERE project_id=$1 AND status='active' AND (workstation_id=$2 OR workstation_id IS NULL)
+      `SELECT plan, version, workstation_id FROM run_plans WHERE project_id=$1 AND status='active' AND (workstation_id=$2 OR workstation_id IS NULL)
         ORDER BY (workstation_id IS NULL) LIMIT 1`,
       [projectId, req.workstationId],
     );
     if (!saved) throw conflict('no_plan', 'there are no run steps to test yet');
-    plan = RunPlanSchema.parse(saved.plan);
+    plan = normalizePlanDocker(RunPlanSchema.parse(saved.plan));
+    ran = { source: saved.workstation_id ? 'workstation' : 'project', version: saved.version };
   }
-  return startRun(
+  const environment = await startRun(
     ctx,
     user,
     {
@@ -303,4 +410,5 @@ export async function testRunPlan(
     },
     { testPlan: plan },
   );
+  return { environment, ran };
 }

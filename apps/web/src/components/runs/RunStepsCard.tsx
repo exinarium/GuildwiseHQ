@@ -2,8 +2,10 @@ import {
   describeService,
   describeStep,
   itemLabel,
+  type PlanConsentDto,
   type ProposalDto,
   type RunPlan,
+  type RunPlanOverview,
   RunPlanSchema,
   type RunPlanVersionDto,
   validateRunPlanPlain,
@@ -11,6 +13,7 @@ import {
 import { Pencil, ScanSearch } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import {
+  useAllowPlan,
   useDiscardWorkstationPlan,
   useDismissProposal,
   useRunPlanOverview,
@@ -67,11 +70,11 @@ export function RunStepsCard({ projectId, canEdit }: { projectId: string; canEdi
   if (draft && draftPlan) {
     const doSave = () =>
       save.mutate(
-        { plan: draftPlan, scope: 'project', source: 'owner' },
+        { plan: draftPlan, scope: 'project' },
         {
-          onSuccess: () => {
+          onSuccess: (d) => {
             setDraft(null);
-            toast.success('Run steps saved');
+            toast.success(savedText(d));
           },
         },
       );
@@ -129,11 +132,11 @@ export function RunStepsCard({ projectId, canEdit }: { projectId: string; canEdi
         onUse={() => {
           const plan = entriesToPlan(o.proposal?.proposal.run ?? base, reviewing);
           save.mutate(
-            { plan, scope: 'project', source: 'scan', proposalId: (o.proposal as ProposalDto).id },
+            { plan, scope: 'project', proposalId: (o.proposal as ProposalDto).id },
             {
-              onSuccess: () => {
+              onSuccess: (d) => {
                 setReviewing(null);
-                toast.success('Run steps saved');
+                toast.success(savedText(d));
               },
             },
           );
@@ -181,6 +184,9 @@ export function RunStepsCard({ projectId, canEdit }: { projectId: string; canEdi
         )}
       </div>
 
+      {(o.consents ?? []).map((c) => (
+        <ConsentCard key={`${c.planId}-${c.workstationId}`} projectId={projectId} consent={c} />
+      ))}
       {o.scan && (
         <Callout tone="info" title="DevOps is reading the project" data-testid="scan-progress">
           <div className="flex items-center gap-2">
@@ -306,7 +312,7 @@ export function RunStepsCard({ projectId, canEdit }: { projectId: string; canEdi
                     size="sm"
                     onClick={() =>
                       save.mutate(
-                        { plan: p.plan, scope: 'project', source: 'owner' },
+                        { plan: p.plan, scope: 'project' },
                         { onSuccess: () => toast.success('Now the project version') },
                       )
                     }
@@ -333,6 +339,54 @@ export function RunStepsCard({ projectId, canEdit }: { projectId: string; canEdi
 }
 
 // ---------------------------------------------------------------------------------------------- pieces
+
+/** What a save did, in a sentence: the version, and the computers that keep their own steps. */
+function savedText(d: RunPlanOverview): string {
+  if (!d.saved) return 'Run steps saved';
+  const own = d.saved.computersWithOwnSteps;
+  return `Run steps saved as version ${d.saved.version}.${own.length ? ` ${own.length} ${own.length === 1 ? 'computer keeps' : 'computers keep'} its own steps (${own.join(', ')}).` : ''}`;
+}
+
+/** Someone else saved new steps for the project; they run on this computer only after its owner says so. */
+function ConsentCard({ projectId, consent }: { projectId: string; consent: PlanConsentDto }) {
+  const allow = useAllowPlan(projectId);
+  return (
+    <Callout
+      tone="warning"
+      title={`New run steps want to run on ${consent.workstationName}`}
+      data-testid="plan-consent"
+      actions={
+        <Button
+          size="sm"
+          variant="primary"
+          loading={allow.isPending}
+          onClick={() => allow.mutate({ planId: consent.planId, workstationId: consent.workstationId })}
+          data-testid="plan-consent-allow"
+        >
+          Allow on my computer
+        </Button>
+      }
+    >
+      <p>
+        {consent.savedByName ?? 'Someone'} saved version {consent.version} of the project's run steps. They
+        will not run on {consent.workstationName} until you allow it. This is exactly what would run:
+      </p>
+      <ol className="mt-2 flex flex-col gap-1">
+        {consent.steps.map((st) => (
+          <li key={`${st.kind}-${st.label}-${st.command}`} className="text-xs">
+            <strong>{st.label}</strong> {st.docker && <Badge tone="info">Docker</Badge>}
+            <code className="block [overflow-wrap:anywhere]">
+              {st.command}
+              {st.folder && st.folder !== '.' ? `  (in ${st.folder})` : ''}
+            </code>
+            {st.envFile && <span className="block text-subtle">Reads settings from {st.envFile}</span>}
+          </li>
+        ))}
+      </ol>
+      <ErrorBox error={allow.error} />
+    </Callout>
+  );
+}
 
 function PlanSummary({ plan, version }: { plan: RunPlan; version: RunPlanVersionDto }) {
   return (

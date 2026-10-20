@@ -1,6 +1,7 @@
-import { isLiveRunState, type RunPlan, type RunWorkstationDto } from '@aom/shared';
+import { isLiveRunState, type RunPlan, type RunWorkstationDto, type TestRan } from '@aom/shared';
 import { Play, Square } from 'lucide-react';
 import { useState } from 'react';
+import { ApiError } from '../../api/client.ts';
 import { useTestRunPlan } from '../../api/queries/run-plan.ts';
 import { useRun, useStopRun } from '../../api/queries/runs.ts';
 import { Button, Callout, ErrorBox, Select, Spinner } from '../ui.tsx';
@@ -31,6 +32,7 @@ export function RunTestPanel({
   const usable = workstations.filter((w) => w.canRun);
   const [wsId, setWsId] = useState('');
   const [envId, setEnvId] = useState<string | undefined>();
+  const [ran, setRan] = useState<TestRan | null>(null);
   const env = useRun(envId);
   const chosen = wsId || (usable.find((w) => w.connected) ?? usable[0])?.id || '';
   const ws = workstations.find((w) => w.id === chosen);
@@ -38,7 +40,15 @@ export function RunTestPanel({
 
   const run = () => {
     if (!chosen) return;
-    test.mutate({ workstationId: chosen, ...(plan ? { plan } : {}) }, { onSuccess: (r) => setEnvId(r.id) });
+    test.mutate(
+      { workstationId: chosen, ...(plan ? { plan } : {}) },
+      {
+        onSuccess: (r) => {
+          setEnvId(r.environment.id);
+          setRan(r.ran ?? null);
+        },
+      },
+    );
   };
   const busy = test.isPending || (!!e && isLiveRunState(e.state) && e.state !== 'healthy');
 
@@ -75,7 +85,41 @@ export function RunTestPanel({
       )}
       {ws && !ws.connected && <p className="text-xs text-subtle">{ws.name} is offline.</p>}
       {disabledReason && <p className="text-xs text-subtle">{disabledReason}</p>}
-      <ErrorBox error={test.error} />
+      {test.error instanceof ApiError && test.error.code === 'already_running' ? (
+        <Callout
+          tone="warning"
+          title="A test copy is already running there"
+          data-testid="run-test-running"
+          actions={
+            <Button
+              size="sm"
+              loading={stop.isPending}
+              onClick={() => {
+                const id = (test.error as ApiError).details as { envId?: string } | undefined;
+                if (id?.envId) stop.mutate(id.envId, { onSuccess: () => test.reset() });
+              }}
+            >
+              <Square aria-hidden="true" className="size-4" />
+              Stop the running copy
+            </Button>
+          }
+        >
+          Stop the running copy first, then test again.
+        </Callout>
+      ) : (
+        <ErrorBox error={test.error} />
+      )}
+      {ran && e && (
+        <p className="text-xs text-subtle" data-testid="run-test-ran">
+          Tested:{' '}
+          {ran.source === 'unsaved'
+            ? 'the steps on this screen (not saved yet)'
+            : ran.source === 'project'
+              ? `the project steps, version ${ran.version}`
+              : `this computer's own steps, version ${ran.version}`}
+          .
+        </p>
+      )}
       {e && (e.state === 'requested' || e.state === 'preparing' || e.state === 'starting') && (
         <div
           className="flex items-center gap-2 text-sm text-muted"

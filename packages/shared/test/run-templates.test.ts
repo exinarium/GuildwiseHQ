@@ -4,8 +4,12 @@ import {
   DOCKER_IMAGE_PRESETS,
   describeService,
   describeStep,
+  expandEnvId,
   healthToReady,
+  normalizePlanDocker,
+  planSafetyProblems,
   RunPlanSchema,
+  RunServiceSchema,
   readyToHealth,
   templateParams,
   uniqueServiceName,
@@ -113,7 +117,16 @@ describe('run step templates', () => {
     });
     expect(r.item).toMatchObject({
       docker: true,
-      cmd: ['docker', 'run', '--rm', '-p', '${port}:5432', '-e', 'POSTGRES_PASSWORD=postgres', 'postgres:16'],
+      cmd: [
+        'docker',
+        'run',
+        '--rm',
+        '-p',
+        '127.0.0.1:${port}:5432',
+        '-e',
+        'POSTGRES_PASSWORD=postgres',
+        'postgres:16',
+      ],
       health: { kind: 'tcp', port: 'tcp' },
     });
     expect(() =>
@@ -131,8 +144,8 @@ describe('run step templates', () => {
     });
     expect(r.item).toMatchObject({
       docker: true,
-      cmd: ['docker', 'compose', '-p', 'aom-run-stack', '-f', 'docker-compose.yml', 'up', 'db'],
-      stopCmd: ['docker', 'compose', '-p', 'aom-run-stack', '-f', 'docker-compose.yml', 'down'],
+      cmd: ['docker', 'compose', '-p', 'aom-run-stack-${envId}', '-f', 'docker-compose.yml', 'up', 'db'],
+      stopCmd: ['docker', 'compose', '-p', 'aom-run-stack-${envId}', '-f', 'docker-compose.yml', 'down'],
     });
     expect((r.item as { stopCmd: string[] }).stopCmd).not.toContain('-v');
   });
@@ -301,5 +314,64 @@ describe('describeService for docker templates', () => {
       },
     });
     expect(describeService(stack.item as never)).toBe('Starts db, cache from docker-compose.yml in Docker.');
+  });
+});
+
+describe('what the server decides, not the client (v1a review)', () => {
+  const svc = (over: Record<string, unknown>) =>
+    RunServiceSchema.parse({
+      name: 'web',
+      repoId,
+      cmd: ['npm', 'start'],
+      ...over,
+    });
+  const plan = (services: unknown[]) => RunPlanSchema.parse({ services });
+
+  it('derives docker from the template: a web app cannot claim to run in Docker, a compose stack always does', () => {
+    const p = normalizePlanDocker(
+      plan([
+        svc({ template: 'web_app', docker: true }),
+        svc({ name: 'db', template: 'compose_stack', docker: false }),
+        svc({ name: 'mine', template: 'custom_service', docker: true }),
+      ]),
+    );
+    expect(p.services.map((s) => s.docker)).toEqual([false, true, true]);
+  });
+
+  it('refuses a settings file in a secret place and compose names that start with a dash', () => {
+    expect(planSafetyProblems(plan([svc({ envFile: '/home/u/.ssh/id_rsa' })]))).toHaveLength(1);
+    expect(planSafetyProblems(plan([svc({ envFile: '/home/u/app/../../etc/x' })]))).toHaveLength(1);
+    expect(planSafetyProblems(plan([svc({ envFile: '/home/u/app/web.env' })]))).toEqual([]);
+    const compose = svc({
+      template: 'compose_stack',
+      cmd: ['docker', 'compose', '-f', 'a.yml', 'up', '--build'],
+    });
+    expect(planSafetyProblems(plan([compose]))).toHaveLength(1);
+    expect(() =>
+      buildFromTemplate({
+        template: 'compose_stack',
+        params: { name: 's', repoId, folder: '.', composeFile: '-f', services: [] },
+      }),
+    ).toThrow(/dash/);
+  });
+
+  it('gives every environment its own compose project name', () => {
+    const built = buildFromTemplate({
+      template: 'compose_stack',
+      params: { name: 'stack', repoId, folder: '.', composeFile: 'c.yml', services: ['db'] },
+    });
+    const p = plan([built.item]);
+    const a = expandEnvId(p, 'aaaaaaaa-1111-4111-8111-111111111111').services[0] as {
+      cmd: string[];
+      stopCmd: string[];
+    };
+    const b = expandEnvId(p, 'bbbbbbbb-1111-4111-8111-111111111111').services[0] as {
+      cmd: string[];
+      stopCmd: string[];
+    };
+    expect(a.cmd[3]).toBe('aom-run-stack-aaaaaaaa');
+    expect(a.stopCmd[3]).toBe('aom-run-stack-aaaaaaaa');
+    expect(b.cmd[3]).toBe('aom-run-stack-bbbbbbbb');
+    expect(a.cmd[3]).not.toBe(b.cmd[3]);
   });
 });

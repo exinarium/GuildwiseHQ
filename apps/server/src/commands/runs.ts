@@ -6,6 +6,7 @@ import {
   DEFAULT_RUN_TTL_HOURS,
   type DevopsRun,
   type ExtendRunRequest,
+  expandEnvId,
   isLiveRunState,
   isOrgManager,
   isSafeGitRef,
@@ -444,8 +445,12 @@ export async function findReplay(
   runnerReplays: boolean,
   repoIds: string[],
   services: string[],
-): Promise<{ replay?: NonNullable<RunStartPayload['replay']>; planRow?: Row }> {
+): Promise<{ replay?: NonNullable<RunStartPayload['replay']>; planRow?: Row; consentNeeded?: Row }> {
   if (!runnerReplays) return {};
+  const owner = await one<{ user_id: string }>(tx, 'SELECT user_id FROM workstations WHERE id=$1', [
+    workstationId,
+  ]);
+  let consentNeeded: Row | undefined;
   // The workstation's own plan first, then the project-wide one (owner or scan), as design section 7.2 says.
   const candidates = await rows(
     tx,
@@ -464,6 +469,18 @@ export async function findReplay(
     }
     const plan = RunPlanSchema.safeParse(planRow.plan);
     if (!plan.success || !planCovers(plan.data, repoIds, services)) continue;
+    // A project-wide plan written by someone else runs on this computer only after its owner allowed this version.
+    if (planRow.workstation_id === null && fromOwner && planRow.saved_by !== owner?.user_id) {
+      const ok = await one(
+        tx,
+        'SELECT 1 AS x FROM run_plan_consents WHERE plan_id=$1 AND workstation_id=$2',
+        [planRow.id, workstationId],
+      );
+      if (!ok) {
+        consentNeeded ??= planRow;
+        continue;
+      }
+    }
     return {
       planRow,
       replay: {
@@ -475,7 +492,7 @@ export async function findReplay(
       },
     };
   }
-  return {};
+  return consentNeeded ? { consentNeeded } : {};
 }
 
 /** Starts a branch on a workstation: the environment row, `run.start` for the runner and a DevOps `run` request. */
@@ -598,7 +615,7 @@ export async function startRun(
         'runs_not_supported',
         `the runner on ${ws.name} is too old to test steps: update the runner on that machine`,
       );
-    const { replay, planRow: replayPlanRow } = opts.testPlan
+    const found = opts.testPlan
       ? {
           replay: {
             planId: randomUUID(),
@@ -607,6 +624,7 @@ export async function startRun(
             buildHash: null,
           } as NonNullable<RunStartPayload['replay']>,
           planRow: undefined,
+          consentNeeded: undefined,
         }
       : await findReplay(
           ctx,
@@ -617,6 +635,17 @@ export async function startRun(
           chosen.map((c) => c.repo.id),
           req.services ?? [],
         );
+    if (found.consentNeeded && !found.replay)
+      throw conflict(
+        'plan_needs_consent',
+        `The run steps (version ${found.consentNeeded.version}) were written by someone else. The owner of ${ws.name} has to allow them on that computer first.`,
+        { planId: found.consentNeeded.id, workstationId: ws.id },
+      );
+    const replayPlanRow = found.planRow;
+    // every environment gets its own names (compose project, ...)
+    const replay = found.replay
+      ? { ...found.replay, plan: expandEnvId(found.replay.plan, envId) }
+      : undefined;
     await exec(
       tx,
       `INSERT INTO run_environments (id, org_id, project_id, workstation_id, purpose, card_id, sources, services, state,
@@ -973,6 +1002,8 @@ export async function applyRunReplayFailed(
       ],
       { tx },
     );
+    // whatever the runner started before the replay failed must not keep running
+    await enqueueRunnerCommand(tx, workstationId, 'run.stop', { envId: r.id, reason: 'failed' });
     return;
   }
   if (r.plan_id) {
@@ -1090,6 +1121,19 @@ export async function applyRunStatus(ctx: Ctx, workstationId: string, raw: RunSt
     );
     const events: AppendInput[] = [];
     const scope = projectScope(r.org_id, r.project_id);
+    // The plan this environment replayed started the app: a failure flagged on it earlier is history.
+    if (state === 'healthy' && r.plan_id) {
+      const flagged = await one(tx, 'SELECT 1 AS x FROM run_plans WHERE id=$1 AND last_failure IS NOT NULL', [
+        r.plan_id,
+      ]);
+      if (flagged)
+        events.push({
+          streamId: streamId.project(r.project_id),
+          event: { type: 'RunPlanFailureCleared', payload: { planId: r.plan_id, projectId: r.project_id } },
+          actor: runnerActor(workstationId),
+          scope,
+        });
+    }
     const note = (text: string) =>
       r.devops_request_id
         ? events.push(threadMessage(r.devops_request_id, r.org_id, { kind: 'system' }, 'system', text))
