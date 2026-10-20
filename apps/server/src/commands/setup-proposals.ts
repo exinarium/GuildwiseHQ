@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
+  compileSetup,
+  DEPLOY_SETUP_CAPABILITY,
   type DevopsScan,
   type ProposalDto,
   RunPlanSchema,
@@ -135,7 +137,10 @@ export interface ScanCandidate {
  * Why a computer cannot run a scan now (null: it can), in one sentence for the page; the same rule starts a scan and
  * fills the "Scan with DevOps" button's tooltip.
  */
-export function scanBlockedReason(w: ScanCandidate): { code: string; message: string } | null {
+export function scanBlockedReason(
+  w: ScanCandidate,
+  area: SetupArea = 'run',
+): { code: string; message: string } | null {
   if (!w.connected)
     return {
       code: 'workstation_offline',
@@ -145,6 +150,11 @@ export function scanBlockedReason(w: ScanCandidate): { code: string; message: st
     return {
       code: 'scan_not_supported',
       message: `Guildwise on ${w.name} is too old for scans: update the runner on that computer`,
+    };
+  if (area === 'deploy' && !(w.capabilities ?? []).includes(DEPLOY_SETUP_CAPABILITY))
+    return {
+      code: 'scan_not_supported',
+      message: `Guildwise on ${w.name} is too old for deploy scans: update the runner on that computer`,
     };
   if (!w.has_devops) return { code: 'no_devops', message: `${w.name} has no DevOps engineer.` };
   if (w.clones === 0)
@@ -159,8 +169,6 @@ export async function startScan(
   projectId: string,
   req: SetupScanRequest,
 ): Promise<{ requestId: string }> {
-  if (req.area !== 'run')
-    throw badRequest('scan_not_available', 'scanning the deploy setup is not available yet');
   const now = ctx.clock.now();
   const out = await withAppendTx(ctx.pool, async (tx) => {
     const p = await loadVisibleProject(tx, user.id, projectId);
@@ -186,9 +194,9 @@ export async function startScan(
         'no_workstation',
         req.workstationId ? 'that computer is not yours' : 'you have no computer paired yet',
       );
-    const ws = candidates.find((c) => !scanBlockedReason(c as unknown as ScanCandidate));
+    const ws = candidates.find((c) => !scanBlockedReason(c as unknown as ScanCandidate, req.area));
     if (!ws) {
-      const why = scanBlockedReason(candidates[0] as unknown as ScanCandidate) as {
+      const why = scanBlockedReason(candidates[0] as unknown as ScanCandidate, req.area) as {
         code: string;
         message: string;
       };
@@ -197,7 +205,10 @@ export async function startScan(
     const { requestId } = await createDevOpsRequestIn(ctx, tx, {
       workstationId: ws.id,
       orgId: p.org_id,
-      summary: `Scan ${p.name} to find out how to run it (read-only). Suggest the steps for the user to review.${req.note ? `\n\nThe user says: ${req.note}` : ''}`,
+      summary:
+        req.area === 'deploy'
+          ? `Scan ${p.name} to find out how it is deployed (read-only). Suggest the deploy setup for the user to review.${req.note ? `\n\nThe user says: ${req.note}` : ''}`
+          : `Scan ${p.name} to find out how to run it (read-only). Suggest the steps for the user to review.${req.note ? `\n\nThe user says: ${req.note}` : ''}`,
       requestedBy: { kind: 'user', id: user.id, name: user.displayName },
       origin: 'app',
       context: {
@@ -239,8 +250,10 @@ export async function scanBriefFor(ctx: Ctx, req: Row): Promise<DevopsScan | und
     `SELECT plan FROM run_plans WHERE project_id=$1 AND workstation_id IS NULL AND status <> 'superseded'`,
     [c.projectId],
   );
+  const deploy = area === 'deploy' ? await deployScanSection(ctx, c.projectId) : undefined;
   return {
     area,
+    ...(deploy ? { deploy } : {}),
     projectKey: project.key,
     projectName: project.name,
     repos: repos.map((r) => ({
@@ -256,6 +269,45 @@ export async function scanBriefFor(ctx: Ctx, req: Row): Promise<DevopsScan | und
       .map((r) => ({ repoId: r.id, name: r.name, text: r.run_instructions })),
     currentPlan: plan ? RunPlanSchema.parse(plan.plan) : null,
     ...(c.scanNote ? { note: c.scanNote } : {}),
+  };
+}
+
+/** What a deploy scan starts from: the targets, the setup or recipe in force, and the latest probes (shapes only). */
+async function deployScanSection(ctx: Ctx, projectId: string): Promise<NonNullable<DevopsScan['deploy']>> {
+  const targets = await rows(
+    ctx.pool,
+    `SELECT t.name, t.kind, t.host, t.app_url, t.production, w.name AS workstation_name
+       FROM deploy_targets t LEFT JOIN workstations w ON w.id = t.workstation_id
+      WHERE t.project_id=$1 AND t.removed_at IS NULL ORDER BY lower(t.name)`,
+    [projectId],
+  );
+  const recipe = await one(
+    ctx.pool,
+    'SELECT setup, parsed, present FROM delivery_recipes WHERE project_id=$1',
+    [projectId],
+  );
+  const probes = await rows(
+    ctx.pool,
+    `SELECT p.scope, p.host, p.report, w.name AS workstation_name FROM deploy_probes p JOIN workstations w ON w.id = p.workstation_id
+      WHERE p.project_id=$1 AND p.report IS NOT NULL ORDER BY p.at DESC LIMIT 4`,
+    [projectId],
+  );
+  return {
+    targets: targets.map((t) => ({
+      name: t.name,
+      kind: t.kind,
+      host: t.host ?? null,
+      appUrl: t.app_url ?? null,
+      production: !!t.production,
+      workstationName: t.workstation_name ?? null,
+    })),
+    currentSetup: recipe?.setup ? JSON.stringify(recipe.setup, null, 2) : null,
+    currentRecipe:
+      recipe?.present && !recipe.setup && recipe.parsed ? JSON.stringify(recipe.parsed, null, 2) : null,
+    probes: probes.map((p) => ({
+      label: `${p.scope}${p.host ? ` ${p.host}` : ''} (from ${p.workstation_name})`,
+      json: JSON.stringify(p.report),
+    })),
   };
 }
 
@@ -308,6 +360,43 @@ export async function setupProposeRpc(ctx: Ctx, shift: Row, params: Record<strin
           undefined,
           `"${x.name}" has repoId ${x.repoId}, which is not a repository of this project (use the repo ids listed in the request)`,
         ];
+  }
+  if (area === 'deploy' && proposal.deploy) {
+    const compiled = compileSetup(proposal.deploy);
+    if (!compiled.ok)
+      return [false, undefined, `invalid deploy setup: ${compiled.issues.slice(0, 8).join('; ')}`];
+    const targets = await rows(
+      ctx.pool,
+      'SELECT name, kind, host FROM deploy_targets WHERE project_id=$1 AND removed_at IS NULL',
+      [c.projectId],
+    );
+    for (const e of proposal.deploy.environments) {
+      const t = targets.find((x) => x.name.toLowerCase() === e.target.toLowerCase());
+      if (!t)
+        return [
+          false,
+          undefined,
+          `environment "${e.name}" names the target "${e.target}", which is not a deploy target of this project (targets: ${targets.map((x) => x.name).join(', ') || 'none'})`,
+        ];
+      if (e.mode !== 'guided')
+        return [
+          false,
+          undefined,
+          `environment "${e.name}": a proposal is always guided (the scripts are generated)`,
+        ];
+      if (e.hosting === 'ssh' && (t.kind !== 'remote_ssh' || t.host !== e.host))
+        return [
+          false,
+          undefined,
+          `environment "${e.name}": "${e.target}" is not a server target with the ssh alias "${e.host}"`,
+        ];
+      if (e.hosting === 'this_computer' && t.kind !== 'local_docker')
+        return [
+          false,
+          undefined,
+          `environment "${e.name}": "${e.target}" is a server target, so hosting must be "ssh"`,
+        ];
+    }
   }
   const project = await one(ctx.pool, 'SELECT org_id FROM projects WHERE id=$1', [c.projectId]);
   if (!project) return [false, undefined, 'project not found'];

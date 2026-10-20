@@ -187,6 +187,7 @@ export const CONNECTION_STATES = [
   'host_key_changed',
   'unchecked',
 ] as const;
+export const ConnectionStateSchema = z.enum(CONNECTION_STATES);
 export type ConnectionState = (typeof CONNECTION_STATES)[number];
 
 /** A short sentence for an error, in plain words (the probe error codes of section 6.1). */

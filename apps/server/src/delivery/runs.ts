@@ -63,6 +63,8 @@ export interface RequestDeployInput {
   trigger: Trigger | 'request';
   requester: DeployRequester;
   trial?: boolean;
+  /** A trial that only checks (AOM_DEPLOY_DRY_RUN=1): the guided setup's "Try it without changing anything". */
+  dryRun?: boolean;
   phaseFollowupId?: string | undefined;
   reason?: string | undefined;
 }
@@ -479,7 +481,7 @@ export async function requestDeployRun(ctx: Ctx, input: RequestDeployInput): Pro
       continue;
     }
     // Trials of an unapproved recipe never touch production: only a dry run (AOM_DEPLOY_DRY_RUN=1) may.
-    const runDry = dryRun || (trial && production);
+    const runDry = dryRun || (trial && (production || input.dryRun === true));
     if (runDry) dryRuns = true;
     // The commit may come from the gate itself (promote what the earlier environment runs), so the gates are read first.
     let commit: string | null;

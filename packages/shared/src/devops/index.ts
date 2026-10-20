@@ -117,6 +117,27 @@ export const DevopsScanSchema = z.object({
   currentPlan: RunPlanSchema.nullable().default(null),
   /** Anything the user wrote in the scan dialog. */
   note: z.string().max(2000).optional(),
+  /** `area: deploy`: the targets, what is set up today and the latest probes. */
+  deploy: z
+    .object({
+      targets: z.array(
+        z.object({
+          name: z.string(),
+          kind: z.enum(['local_docker', 'remote_ssh']),
+          host: z.string().nullable(),
+          appUrl: z.string().nullable(),
+          production: z.boolean(),
+          workstationName: z.string().nullable(),
+        }),
+      ),
+      /** The guided setup in `delivery/setup.json` today (text), or null. */
+      currentSetup: z.string().nullable(),
+      /** The hand-written recipe summary when the recipe is not a guided one. */
+      currentRecipe: z.string().nullable(),
+      /** Latest probe reports, as JSON text each (names and shapes only). */
+      probes: z.array(z.object({ label: z.string(), json: z.string() })),
+    })
+    .optional(),
 });
 export type DevopsScan = z.infer<typeof DevopsScanSchema>;
 

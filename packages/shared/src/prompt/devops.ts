@@ -223,6 +223,41 @@ export function renderRunSection(run: DevopsRun): string {
   return out.join('\n\n');
 }
 
+/** The deploy part of a scan brief: the targets, what is set up today and the schema in words. */
+function renderDeployScan(d: NonNullable<DevopsScan['deploy']>): string[] {
+  const out: string[] = [];
+  out.push('### Deploy targets of the project');
+  out.push(
+    d.targets.length
+      ? d.targets
+          .map(
+            (t) =>
+              `- ${t.name}: ${t.kind === 'remote_ssh' ? `a server over ssh (alias ${t.host})` : 'Docker on a computer'}${t.workstationName ? `, deployed from ${t.workstationName}` : ''}${t.appUrl ? `, address ${t.appUrl}` : ''}${t.production ? ', PRODUCTION (the live site)' : ''}`,
+          )
+          .join('\n')
+      : 'There are no deploy targets yet: the user adds them first.',
+  );
+  if (d.currentSetup) out.push('### The guided deploy setup saved today', clip(d.currentSetup, 8000));
+  if (d.currentRecipe)
+    out.push(
+      '### The hand-written delivery recipe today (convert it, keep what works)',
+      clip(d.currentRecipe, 6000),
+    );
+  for (const p of d.probes) out.push(`### Probe: ${p.label}`, clip(p.json, 6000));
+  out.push('### What to produce');
+  out.push(
+    [
+      '- Adopt, never replace: find the compose file, the project name, the service that is the app (the one built from this code or pinned by an image variable), the database service, the image name, and where backups and the .env live. Reuse what exists; never propose to create a second stack beside a running one.',
+      '- The proposal has `"area": "deploy"` and `"deploy": {"environments": [...]}`. Each environment: `name` ([a-z0-9-], for example "uat" or "production"), `label` ("Test copy"), `target` (one of the targets above), `hosting` ("this_computer" for a local_docker target, "ssh" with `host` = the alias for a server), `app` (`composeFile` full path, `composeProject`, `service`, `imageName`, `imageVar` for a server, `appUrl`), `steps`, `health` (`{"kind":"http","url":"${appUrl}/api/health","expect":"2xx"}` or a full https address), `rollback` (true needs an http health check), `trigger`, `releasedBy`, `gate`.',
+      '- Steps for this computer: `db_backup` (`service`, `dir`, `keep` 20) then `compose_up_local`. Steps for a server, in this order: `db_backup`, `env_backup`, `build_image_local`, `ship_image_ssh`, `set_image_var`, `compose_up_remote`. Do not invent other step kinds. Guildwise writes the scripts itself; you never write a script.',
+      '- Safe defaults: a test copy has `"trigger":["after_merge"]`, `"releasedBy":"auto"`, `"gate":"none"`; production has `"trigger":["on_request"]`, `"releasedBy":"owner"` and a gate `{"requires":[{"envHealthy":"<test env>","sameCommit":true,"forMinutes":10}]}`.',
+      '- Values are checked against strict character sets (paths, names, images): no spaces, quotes or shell characters. Secret VALUES never go in the proposal; list the names a deploy needs in `secretsNeeded` and `secrets`.',
+      '- `items` and `questions` use JSON pointers into `deploy` (for example `/environments/0/app/service`): found (read in a file or a probe, give `evidence`), guessed, or unknown (also a question in plain words, for example "Which part is your app?").',
+    ].join('\n'),
+  );
+  return out;
+}
+
 /**
  * The "Scan with DevOps" request as plain text. READ-ONLY by instruction and by the runner's guard: the answer is a proposal
  * (`aom setup propose`) that the user reviews, never a change.
@@ -232,9 +267,12 @@ export function renderScanSection(scan: DevopsScan): string {
   out.push(`## Scan request (${scan.area}): ${scan.projectName} (${scan.projectKey})`);
   out.push(
     [
-      'This is a READ-ONLY scan. Do not start, stop, build, install, download or edit anything, do not use ssh, and write nothing into the repositories: the runner refuses those commands. Read files and run harmless read commands (`ls`, `cat`, `git log`, `docker version`, `jq`).',
+      'This is a READ-ONLY scan. Do not start, stop, build, install, download or edit anything, do not use ssh, and write nothing into the repositories: the runner refuses those commands. Read files and run harmless read commands (`ls`, `cat`, `git log`, `docker version`, `jq`).' +
+        (scan.area === 'deploy'
+          ? ' To look at Docker on this computer or at a server use only `aom deploy probe --local`, `aom deploy probe --ssh-hosts` or `aom deploy probe --host <alias> --dir <folder>`: they are fixed read-only probes that answer with names and shapes.'
+          : ''),
       'You are writing a proposal for a person with no coding experience, who will review it field by field and confirm it. Say what you found, say honestly what you guessed, and ask about what you cannot tell.',
-      'The proposal is JSON checked by a schema. Write it to a file in your scratch directory with the Write tool (shell redirects are refused in a scan) and submit it with `aom setup propose --area run --file <path>`. If it is refused, the message says what is wrong: fix the file and submit again in this shift. Then end the request with `aom devops-done` (one or two plain sentences).',
+      `The proposal is JSON checked by a schema. Write it to a file in your scratch directory with the Write tool (shell redirects are refused in a scan) and submit it with \`aom setup propose --area ${scan.area} --file <path>\`. If it is refused, the message says what is wrong: fix the file and submit again in this shift. Then end the request with \`aom devops-done\` (one or two plain sentences).`,
     ].join('\n'),
   );
   out.push("### Repositories (the user's own checkouts; read them, never change them)");
@@ -262,6 +300,7 @@ export function renderScanSection(scan: DevopsScan): string {
     out.push('### The run steps saved today (improve on them only where the code says they are wrong)');
     out.push(clip(JSON.stringify(scan.currentPlan, null, 2), 8000));
   }
+  if (scan.area === 'deploy' && scan.deploy) out.push(...renderDeployScan(scan.deploy));
   if (scan.area === 'run') {
     out.push('### What to look for');
     out.push(

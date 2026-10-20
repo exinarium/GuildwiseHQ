@@ -95,9 +95,11 @@ import type { Ctx } from '../context.ts';
 import { exec, one, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import { applyDeploySecretResult } from '../delivery/admin.ts';
+import { applyProbeResult } from '../delivery/probes.ts';
 import { applyInspectResult, onProjectVaultSynced } from '../delivery/recipes.ts';
 import { deployRpc } from '../delivery/rpc.ts';
 import { applyDeployProgress, applyDeployResult } from '../delivery/runs.ts';
+import { applyWriteResult } from '../delivery/setup.ts';
 import { pinForWelcome } from '../platform-team/pins.ts';
 import { platformTriageRpc } from '../platform-team/rpc.ts';
 import { buildBrief } from './brief.ts';
@@ -511,6 +513,22 @@ export class RunnerHandlers {
           // Terminal: what the workstation found in `delivery/` is recorded as an observation.
           await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
           await applyInspectResult(this.ctx, conn.workstationId, cmd.payload, msg.ok, msg.result);
+        } else if (cmd?.type === 'recipe.write') {
+          // Terminal: the files were written (and are observed so the Owner can approve them) or refused with a reason.
+          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+          await applyWriteResult(
+            this.ctx,
+            conn.workstationId,
+            cmd.payload,
+            msg.ok,
+            msg.result,
+            msg.commandId,
+            msg.error,
+          );
+        } else if (cmd?.type === 'deploy.probe') {
+          // Terminal: a probe is read-only and cheap, the wizard asks again with "Check again".
+          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+          await applyProbeResult(this.ctx, conn.workstationId, cmd.payload, msg.ok, msg.result, msg.error);
         } else if (cmd?.type === 'deploy.exec') {
           // Terminal whatever the answer: a refusal or a failed deploy is an ANSWER, never a blind retry of a deploy.
           await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());

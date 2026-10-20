@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { SETUP_SCAN_CAPABILITY } from '@aom/shared';
+import { localAdoptEnv, SETUP_SCAN_CAPABILITY } from '@aom/shared';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { rebuildProjections } from '../src/projections/rebuild.ts';
 import { uniqueEmail } from './helpers/app.ts';
@@ -419,7 +419,7 @@ describe('Scan with DevOps', () => {
     expect(s.devops.summary).toContain('Scan');
   });
 
-  it('is refused on an old runner, an offline workstation, a stranger workstation and for non-owners; deploy scans are not available yet', async () => {
+  it('is refused on an old runner, an offline workstation, a stranger workstation and for non-owners; a deploy scan needs a runner with deploy-setup', async () => {
     await q(`UPDATE workstation_capabilities SET capabilities='{runs:1,runs:2}' WHERE workstation_id=$1`, [
       w.workstationId,
     ]);
@@ -438,7 +438,9 @@ describe('Scan with DevOps', () => {
     expect(
       (await raw('POST', `/api/projects/${w.projectId}/scan`, { area: 'run' }, member.cookie)).status,
     ).toBe(403);
-    expect((await raw('POST', `/api/projects/${w.projectId}/scan`, { area: 'deploy' })).status).toBe(400);
+    const deployOld = await raw('POST', `/api/projects/${w.projectId}/scan`, { area: 'deploy' });
+    expect(deployOld.status).toBe(409);
+    expect(deployOld.body.error.code).toBe('scan_not_supported');
     expect(
       (
         await raw('POST', `/api/projects/${w.projectId}/scan`, {
@@ -465,7 +467,23 @@ describe('Scan with DevOps', () => {
     });
     expect(bad.ok).toBe(false);
     expect(bad.error).toContain('/services/9');
-    const wrongArea = await rpc(s.shiftId, 'setup.propose', { proposal: { area: 'deploy', deploy: {} } });
+    const wrongArea = await rpc(s.shiftId, 'setup.propose', {
+      proposal: {
+        area: 'deploy',
+        deploy: {
+          environments: [
+            localAdoptEnv({
+              name: 'uat',
+              label: 'Test',
+              target: 't',
+              composeFile: '~/a/c.yml',
+              service: 'app',
+              imageName: 'a',
+            }),
+          ],
+        },
+      },
+    });
     expect(wrongArea.error).toContain('run scan');
     const foreign = PLAN();
     foreign.services[0]!.repoId = randomUUID();

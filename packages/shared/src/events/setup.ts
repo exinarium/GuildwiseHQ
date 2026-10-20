@@ -60,6 +60,17 @@ export const setupEvents = [
       by: Id,
     }),
   ),
+  /** The workstation answered the `recipe.write` of a publish: written (`ok`) or refused with a reason. */
+  defineEvent(
+    'DeliverySetupPublishResult',
+    z.object({
+      projectId: Id,
+      commandId: Id,
+      ok: z.boolean(),
+      error: z.string().max(500).nullable().default(null),
+      vaultCommit: z.string().max(64).nullable().default(null),
+    }),
+  ),
   /** The workstation's read-only probe of Docker or a server (names and shapes only). */
   defineEvent(
     'DeployTargetProbed',

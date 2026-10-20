@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import type { ProbeComposeFile, ProbeReport } from './probe.ts';
 import { type DeliverySetup, describeSetupStep, implicitStepText, type SetupEnv } from './setup.ts';
 
@@ -7,7 +8,8 @@ import { type DeliverySetup, describeSetupStep, implicitStepText, type SetupEnv 
  * not change is listed as untouched by name.
  */
 
-export type ChangeGroup = 'reuse' | 'each_deploy' | 'untouched' | 'setup_once' | 'question';
+export const ChangeGroupSchema = z.enum(['reuse', 'each_deploy', 'untouched', 'setup_once', 'question']);
+export type ChangeGroup = z.infer<typeof ChangeGroupSchema>;
 
 export interface ChangeItem {
   group: ChangeGroup;

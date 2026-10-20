@@ -29,11 +29,12 @@ export const deliveryProjectors: Record<string, Projector> = {
     await exec(
       tx,
       `INSERT INTO delivery_recipes (id, org_id, project_id, vault_id, path, status, present, observed_hash, observed_commit,
-         parsed, lint, file_count, files, observed_at, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11::jsonb,$12,$14::jsonb,$13,$13,$13)
+         parsed, lint, file_count, files, observed_at, created_at, updated_at, setup, hand_edited)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11::jsonb,$12,$14::jsonb,$13,$13,$13,$15::jsonb,$16::text[])
        ON CONFLICT (project_id) DO UPDATE SET vault_id=EXCLUDED.vault_id, path=EXCLUDED.path, status=$6, present=EXCLUDED.present,
          observed_hash=EXCLUDED.observed_hash, observed_commit=EXCLUDED.observed_commit, parsed=EXCLUDED.parsed,
-         lint=EXCLUDED.lint, file_count=EXCLUDED.file_count, files=EXCLUDED.files, observed_at=EXCLUDED.observed_at, updated_at=EXCLUDED.updated_at`,
+         lint=EXCLUDED.lint, file_count=EXCLUDED.file_count, files=EXCLUDED.files, observed_at=EXCLUDED.observed_at, updated_at=EXCLUDED.updated_at,
+         setup=EXCLUDED.setup, hand_edited=EXCLUDED.hand_edited`,
       [
         p.recipeId,
         p.orgId,
@@ -49,7 +50,95 @@ export const deliveryProjectors: Record<string, Projector> = {
         p.fileCount,
         e.createdAt,
         j(p.files),
+        p.setup === undefined ? null : j(p.setup),
+        p.handEdited ?? [],
       ],
+    );
+  },
+
+  DeliverySetupDraftSaved: async (tx, e) => {
+    const p = ev<'DeliverySetupDraftSaved'>(e).payload;
+    await exec(
+      tx,
+      `INSERT INTO delivery_setup_drafts (project_id, org_id, setup, custom_scripts, proposal_id, updated_by, updated_at)
+       VALUES ($1,$2,$3::jsonb,$4::jsonb,$5,$6,$7)
+       ON CONFLICT (project_id) DO UPDATE SET setup=EXCLUDED.setup, custom_scripts=EXCLUDED.custom_scripts,
+         proposal_id=EXCLUDED.proposal_id, updated_by=EXCLUDED.updated_by, updated_at=EXCLUDED.updated_at`,
+      [
+        p.projectId,
+        e.scope.orgId,
+        j(p.setup),
+        j(p.customScripts ?? {}),
+        p.proposalId ?? null,
+        p.by,
+        e.createdAt,
+      ],
+    );
+  },
+  DeliverySetupPublished: async (tx, e) => {
+    const p = ev<'DeliverySetupPublished'>(e).payload;
+    await exec(tx, `UPDATE delivery_setup_drafts SET last_publish=$2::jsonb WHERE project_id=$1`, [
+      p.projectId,
+      j({
+        setupHash: p.setupHash,
+        commandId: p.commandId,
+        generator: p.generator,
+        at: e.createdAt,
+        by: p.by,
+        status: 'pending',
+      }),
+    ]);
+  },
+  DeliverySetupPublishResult: async (tx, e) => {
+    const p = ev<'DeliverySetupPublishResult'>(e).payload;
+    await exec(
+      tx,
+      `UPDATE delivery_setup_drafts SET last_publish = last_publish || $3::jsonb
+        WHERE project_id=$1 AND last_publish->>'commandId' = $2`,
+      [
+        p.projectId,
+        p.commandId,
+        j({
+          status: p.ok ? 'written' : 'failed',
+          error: p.error,
+          vaultCommit: p.vaultCommit,
+          finishedAt: e.createdAt,
+        }),
+      ],
+    );
+  },
+  DeployTargetProbed: async (tx, e) => {
+    const p = ev<'DeployTargetProbed'>(e).payload;
+    await exec(
+      tx,
+      `INSERT INTO deploy_probes (id, org_id, project_id, target_id, workstation_id, scope, host, report, error, detail, at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11)
+       ON CONFLICT (project_id, COALESCE(target_id, '00000000-0000-0000-0000-000000000000'::uuid), workstation_id, scope, COALESCE(host, ''))
+       DO UPDATE SET id=EXCLUDED.id, report=EXCLUDED.report, error=EXCLUDED.error, detail=EXCLUDED.detail, at=EXCLUDED.at`,
+      [
+        p.probeId,
+        e.scope.orgId,
+        p.projectId,
+        p.targetId,
+        p.workstationId,
+        p.scope,
+        p.host,
+        j(p.report),
+        p.error,
+        p.detail,
+        p.at,
+      ],
+    );
+  },
+  DeployTargetConnectionChecked: async (tx, e) => {
+    const p = ev<'DeployTargetConnectionChecked'>(e).payload;
+    await exec(
+      tx,
+      `INSERT INTO deploy_target_connections (target_id, workstation_id, project_id, state, method, host, detail, at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+       ON CONFLICT (target_id, workstation_id) DO UPDATE SET state=EXCLUDED.state, method=EXCLUDED.method, host=EXCLUDED.host,
+         detail=EXCLUDED.detail, at=EXCLUDED.at`,
+      [p.targetId, p.workstationId, p.projectId, p.state, p.method, p.host, p.detail, p.at],
     );
   },
 

@@ -2,12 +2,18 @@ import {
   ApproveRecipeRequestSchema,
   DeployRequestSchema,
   IdParamsSchema,
+  PreviewSetupRequestSchema,
+  ProbeRequestSchema,
+  PublishSetupRequestSchema,
   RejectRecipeRequestSchema,
   ReleaseRequestSchema,
+  SaveSetupDraftRequestSchema,
   SetDeliveryModeRequestSchema,
   SetDeploySecretRequestSchema,
   SetGateBindingRequestSchema,
   SetGatePresetRequestSchema,
+  SetupDryRunRequestSchema,
+  UseProposalRequestSchema,
 } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -16,9 +22,18 @@ import { orgRoleOf } from '../auth/org-context.ts';
 import { loadVisibleProject } from '../authz/scope.ts';
 import type { Ctx } from '../context.ts';
 import { removeGatePreset, setDeploySecret, setGateBinding, setGatePreset } from '../delivery/admin.ts';
+import { listProbeDtos, requestProbe } from '../delivery/probes.ts';
 import { deliverySettings, listBindings, listPresets, releaseQueue, toRunDto } from '../delivery/queries.ts';
 import { approveRecipe, rejectRecipe, requestRecipeInspect, setDeliveryMode } from '../delivery/recipes.ts';
 import { cancelRun, listDeployRuns, releaseFromQueue, requestDeployRun } from '../delivery/runs.ts';
+import {
+  getSetupState,
+  previewSetup,
+  publishSetup,
+  requestSetupDryRun,
+  saveSetupDraft,
+  useDeployProposal,
+} from '../delivery/setup.ts';
 import { forbidden } from '../errors.ts';
 import { typed } from './util.ts';
 
@@ -77,6 +92,80 @@ export function deliveryRoutes(ctx: Ctx) {
         return deliverySettings(ctx, s.user, req.params.id);
       },
     );
+
+    // ------------------------------------------------------------------------------ the guided deploy setup
+    app.get('/api/projects/:id/delivery/setup', { schema: { params: IdParamsSchema } }, async (req) => {
+      const s = await requireUser(ctx, req);
+      return getSetupState(ctx, s.user, req.params.id);
+    });
+
+    app.put(
+      '/api/projects/:id/delivery/setup',
+      { schema: { params: IdParamsSchema, body: SaveSetupDraftRequestSchema } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        await saveSetupDraft(ctx, s.user, req.params.id, req.body);
+        return getSetupState(ctx, s.user, req.params.id);
+      },
+    );
+
+    app.post(
+      '/api/projects/:id/delivery/setup/preview',
+      { schema: { params: IdParamsSchema, body: PreviewSetupRequestSchema } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        return previewSetup(ctx, s.user, req.params.id, req.body);
+      },
+    );
+
+    app.post(
+      '/api/projects/:id/delivery/setup/publish',
+      { schema: { params: IdParamsSchema, body: PublishSetupRequestSchema } },
+      async (req, reply) => {
+        const s = await requireUser(ctx, req);
+        const r = await publishSetup(ctx, s.user, req.params.id, req.body);
+        reply.code(202);
+        return r;
+      },
+    );
+
+    /** "Try it without changing anything": a dry run of the saved version (the Owner's approval needs one). */
+    app.post(
+      '/api/projects/:id/delivery/setup/dry-run',
+      { schema: { params: IdParamsSchema, body: SetupDryRunRequestSchema } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        return requestSetupDryRun(ctx, s.user, req.params.id, req.body.env);
+      },
+    );
+
+    app.post(
+      '/api/projects/:id/delivery/setup/use-proposal',
+      { schema: { params: IdParamsSchema, body: UseProposalRequestSchema } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        await useDeployProposal(ctx, s.user, req.params.id, req.body.proposalId);
+        return getSetupState(ctx, s.user, req.params.id);
+      },
+    );
+
+    /** The read-only look at Docker here, the servers this computer can reach, or one server (a durable command). */
+    app.post(
+      '/api/projects/:id/delivery/probe',
+      { schema: { params: IdParamsSchema, body: ProbeRequestSchema } },
+      async (req, reply) => {
+        const s = await requireUser(ctx, req);
+        const r = await requestProbe(ctx, s.user, req.params.id, req.body);
+        reply.code(202);
+        return r;
+      },
+    );
+
+    app.get('/api/projects/:id/delivery/probes', { schema: { params: IdParamsSchema } }, async (req) => {
+      const s = await requireUser(ctx, req);
+      await loadVisibleProject(ctx.pool, s.user.id, req.params.id);
+      return { probes: await listProbeDtos(ctx.pool, req.params.id) };
+    });
 
     /**
      * The Deploy button (and the fallback for a CEO whose `aom deploy run` call was blocked): the same server path, from the
