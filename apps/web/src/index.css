@@ -180,6 +180,10 @@ h3 {
   outline-offset: 2px;
   border-radius: 4px;
 }
+/* The composer's container shows focus (focus-within); its textarea must not add a second ring. */
+.composer-field:focus-visible {
+  outline: none;
+}
 .on-side :focus-visible {
   outline-color: var(--accent);
 }

@@ -85,7 +85,7 @@ export function Composer({
             if (canSend) onSend();
           }
         }}
-        className="max-h-none w-full resize-none border-0 bg-transparent px-2 py-1.5 text-base leading-6 text-fg shadow-none outline-none placeholder:text-subtle focus:outline-none focus-visible:outline-none focus-visible:ring-0"
+        className="composer-field max-h-none w-full resize-none border-0 bg-transparent px-2 py-1.5 text-base leading-6 text-fg shadow-none outline-none placeholder:text-subtle focus:outline-none focus-visible:outline-none focus-visible:ring-0"
       />
       <div className="flex items-center gap-2">
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">{tools}</div>
