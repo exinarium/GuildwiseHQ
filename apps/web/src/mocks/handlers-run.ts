@@ -7,7 +7,8 @@ import { db } from './db.ts';
  * `localStorage['aom-mock-targets'] = 'on'` lists sample deploy targets.
  */
 const A = '/api';
-const scenario = () => (typeof localStorage !== 'undefined' && localStorage.getItem('aom-mock-run')) || 'empty';
+const scenario = () =>
+  (typeof localStorage !== 'undefined' && localStorage.getItem('aom-mock-run')) || 'empty';
 const setScenario = (s: string) => localStorage.setItem('aom-mock-run', s);
 const ago = (min: number) => new Date(Date.now() - min * 60_000).toISOString();
 const WS = '00000000-0000-4000-8000-0000000000a1';
@@ -49,7 +50,16 @@ function plan(projectId: string) {
         template: 'docker_service',
         repoId: r,
         cwd: '.',
-        cmd: ['docker', 'run', '--rm', '-p', '${port}:5432', '-e', 'POSTGRES_PASSWORD=postgres', 'postgres:16'],
+        cmd: [
+          'docker',
+          'run',
+          '--rm',
+          '-p',
+          '${port}:5432',
+          '-e',
+          'POSTGRES_PASSWORD=postgres',
+          'postgres:16',
+        ],
         env: {},
         ports: [{ name: 'tcp', default: 5432 }],
         health: { kind: 'tcp', port: 'tcp' },
@@ -104,10 +114,23 @@ function proposal(projectId: string) {
       area: 'run',
       run: p,
       items: [
-        { path: '/setup/0', confidence: 'found', evidence: [{ file: 'web/package.json', line: 6 }], note: 'package-lock.json is in web/' },
-        { path: '/setup/1', confidence: 'guessed', note: 'a migrate script exists, DevOps did not read what it does' },
+        {
+          path: '/setup/0',
+          confidence: 'found',
+          evidence: [{ file: 'web/package.json', line: 6 }],
+          note: 'package-lock.json is in web/',
+        },
+        {
+          path: '/setup/1',
+          confidence: 'guessed',
+          note: 'a migrate script exists, DevOps did not read what it does',
+        },
         { path: '/services/0', confidence: 'found', evidence: [{ file: 'docker-compose.yml', line: 3 }] },
-        { path: '/services/1/ports/0/default', confidence: 'found', evidence: [{ file: 'web/vite.config.ts', line: 12 }] },
+        {
+          path: '/services/1/ports/0/default',
+          confidence: 'found',
+          evidence: [{ file: 'web/vite.config.ts', line: 12 }],
+        },
         { path: '/services/1/health', confidence: 'unknown' },
       ],
       questions: [
@@ -119,15 +142,30 @@ function proposal(projectId: string) {
         },
       ],
       secretsNeeded: [],
-      notes: 'This looks like a Vite website with a PostgreSQL database. The database password in the test container is only for testing.',
-      filesRead: ['README.md', 'web/package.json', 'web/vite.config.ts', 'docker-compose.yml', '.env.example'],
+      notes:
+        'This looks like a Vite website with a PostgreSQL database. The database password in the test container is only for testing.',
+      filesRead: [
+        'README.md',
+        'web/package.json',
+        'web/vite.config.ts',
+        'docker-compose.yml',
+        '.env.example',
+      ],
     },
   };
 }
 
 const stations = [
   { id: WS, name: 'Office PC', connected: true, mine: true, canRun: true, canScan: true, scanBlocked: null },
-  { id: WS2, name: 'Old laptop', connected: false, mine: true, canRun: true, canScan: false, scanBlocked: 'Old laptop is offline. Scans run on a computer that has the project\'s code.' },
+  {
+    id: WS2,
+    name: 'Old laptop',
+    connected: false,
+    mine: true,
+    canRun: true,
+    canScan: false,
+    scanBlocked: "Old laptop is offline. Scans run on a computer that has the project's code.",
+  },
 ];
 
 function overview(projectId: string) {
@@ -154,12 +192,25 @@ function overview(projectId: string) {
     };
   if (s === 'proposal') base.proposal = proposal(projectId);
   if (s === 'ready' || s === 'failure' || s === 'own') {
-    base.projectPlan = version(projectId, s === 'failure' ? { lastFailure: { reason: 'step "Install packages" failed (exit 1): npm could not find package-lock.json', at: ago(30) } } : {});
+    base.projectPlan = version(
+      projectId,
+      s === 'failure'
+        ? {
+            lastFailure: {
+              reason: 'step "Install packages" failed (exit 1): npm could not find package-lock.json',
+              at: ago(30),
+            },
+          }
+        : {},
+    );
     base.lastStart = {
       state: s === 'failure' ? 'failed' : 'ok',
       at: ago(s === 'failure' ? 30 : 120),
       workstationName: 'Office PC',
-      failure: s === 'failure' ? 'step "Install packages" failed (exit 1): npm could not find package-lock.json' : null,
+      failure:
+        s === 'failure'
+          ? 'step "Install packages" failed (exit 1): npm could not find package-lock.json'
+          : null,
     };
   }
   if (s === 'own')
@@ -182,7 +233,16 @@ const env = (state: string) => ({
   workstationName: 'Office PC',
   activity: 'running npm ci',
   canStop: true,
-  servicesStatus: [{ name: 'web', state: 'healthy', ports: [], urls: ['http://localhost:5173/'], health: 'passing', restarts: 0 }],
+  servicesStatus: [
+    {
+      name: 'web',
+      state: 'healthy',
+      ports: [],
+      urls: ['http://localhost:5173/'],
+      health: 'passing',
+      restarts: 0,
+    },
+  ],
   failureReason: null,
   lastError: null,
 });
@@ -199,7 +259,9 @@ export const runHandlers = [
     setScenario('ready');
     return HttpResponse.json(overview(String(params.id)));
   }),
-  http.post(`${A}/projects/:id/run-plan/test`, () => HttpResponse.json({ environment: env('starting') }, { status: 201 })),
+  http.post(`${A}/projects/:id/run-plan/test`, () =>
+    HttpResponse.json({ environment: env('starting') }, { status: 201 }),
+  ),
   http.get(`${A}/runs/00000000-0000-4000-8000-0000000000e1`, () =>
     HttpResponse.json({ environment: env(localStorage.getItem('aom-mock-env') || 'healthy') }),
   ),
@@ -259,8 +321,24 @@ export const runHandlers = [
   http.get(`${A}/projects/:id/workstations`, () =>
     HttpResponse.json({
       workstations: [
-        { id: WS, name: 'Office PC', ownerId: db.users[0]?.id, ownerName: 'Ada Admin', mine: true, connected: true, hasDevops: true },
-        { id: WS2, name: 'Old laptop', ownerId: db.users[0]?.id, ownerName: 'Ada Admin', mine: true, connected: false, hasDevops: true },
+        {
+          id: WS,
+          name: 'Office PC',
+          ownerId: db.users[0]?.id,
+          ownerName: 'Ada Admin',
+          mine: true,
+          connected: true,
+          hasDevops: true,
+        },
+        {
+          id: WS2,
+          name: 'Old laptop',
+          ownerId: db.users[0]?.id,
+          ownerName: 'Ada Admin',
+          mine: true,
+          connected: false,
+          hasDevops: true,
+        },
       ],
     }),
   ),

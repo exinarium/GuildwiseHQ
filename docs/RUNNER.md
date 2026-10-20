@@ -1810,7 +1810,11 @@ and the DevOps engineer split the work:
   fields from the server). The runner keeps the plan on the environment (it is what Restart starts again). `aom run fail`
   ends the environment as `failed`.
 - **Plan replay (phase 2, `runs:2`).** When a plan for the project on this workstation is `active` and both halves of its
-  fingerprint match, the server sends `run.start` with the plan (`replay`) and files **no DevOps request**: the runner prepares
+  fingerprint match (or, with no plan of its own, an active **project-wide** plan that the owner saved or confirmed from a
+  scan: `workstationId` null, `source` `owner|scan`, sent with `replay.buildHash: null`, which means "do not compare with
+  `BUILD.md`"; an owner plan never goes stale by itself, a failed start only flags it and files the DevOps repair, whose fix
+  is a plan of this workstation; "Test these steps" replays an unsaved plan the same way, a failure ends the environment
+  instead of filing a request), the server sends `run.start` with the plan (`replay`) and files **no DevOps request**: the runner prepares
   the worktrees, compares the plan's `BUILD.md` hash with the one it computes from the run worktrees, then replays the plan
   with no model call. Setup steps run in order and honour `when`: `always` (default), `first` (only in a fresh worktree) and
   `changed:<glob>` (in a fresh worktree, and after Update & restart when a changed file matches; the glob is matched against
@@ -1824,6 +1828,17 @@ and the DevOps engineer split the work:
   from that request adopts the environment. A `BUILD.md` that differs from the plan's hash is the same path with `stale: true`:
   the server marks the plan `stale` (`RunPlanMarkedStale`); a change to the run instructions or the declared services marks it
   stale as soon as it is saved. Plans saved before phase 2 have no hashes and are not replayed.
+- **Scan with DevOps (`setup-scan:1`).** The server files a DevOps request of kind `run_scan` (design:
+  `docs/design/deploy-run-ux-design.md` section 5); the shift's `devops.scan` carries the project's repositories, the run
+  instructions and the current plan, and the supervisor fills each repository's `clonePath` (the user's checkout, passed as
+  `--add-dir` so the DevOps settings deny editing it). The guard (`devops/guard.ts`, `readOnlyScan`) refuses every command that
+  starts, builds, installs, connects (ssh, curl) or writes (redirects outside the scratch directory, `rm`, `git` verbs that
+  change anything, `docker` verbs other than the read-only ones); it is defence in depth on top of the brief. The shift ends
+  with **`aom setup propose --area run --file <json>`** (IPC `setup.propose`, forwarded to the server): the file is a
+  `SetupProposal` (`packages/shared/src/setup/proposal.ts`: the proposed `run` plan, `items` with `found|guessed|unknown`,
+  evidence and JSON pointers, `questions`, `secretsNeeded`, `notes`); the server validates it (schema, pointers, run plan,
+  repository ids) and answers with the error so the engineer can fix and resubmit in the same shift. The proposal is data:
+  nothing it names runs or is saved until the user confirms it in the app.
 - **Service sandbox (D10, phase 2).** Steps and services run under the runner's own bubblewrap profile
   (`apps/runner/src/runs/sandbox.ts`), not the DevOps session's: `--ro-bind / /` (read-only), `--unshare-pid`, `--cap-drop ALL`,
   the **host network** (no `--unshare-net`: a dev server must listen where a browser can reach it), and the same unreadable
