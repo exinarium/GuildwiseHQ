@@ -33,7 +33,12 @@ export function scanMarkdown(content: string): MarkdownFacts {
     if (atx && headings.length < MAX_HEADINGS) {
       const text = sanitizeLabel((atx[2] as string).replace(/[*_`[\]]/g, ''));
       if (text) headings.push({ level: (atx[1] as string).length, text, line: i + 1 });
-    } else if (/^\s{0,3}(=+|-+)\s*$/.test(raw) && prev.trim() && !/^\s*([-*+]|\d+\.)\s/.test(prev) && headings.length < MAX_HEADINGS) {
+    } else if (
+      /^\s{0,3}(=+|-+)\s*$/.test(raw) &&
+      prev.trim() &&
+      !/^\s*([-*+]|\d+\.)\s/.test(prev) &&
+      headings.length < MAX_HEADINGS
+    ) {
       const text = sanitizeLabel(prev.replace(/[*_`[\]]/g, ''));
       if (text) headings.push({ level: raw.trim().startsWith('=') ? 1 : 2, text, line: i });
     }

@@ -65,7 +65,13 @@ export function renderManifest(m: Manifest): string {
       mergesSinceCommunities: r.mergesSinceCommunities,
     }));
   return `${JSON.stringify(
-    { schemaVersion: m.schemaVersion, indexerVersion: m.indexerVersion, parser: m.parser, repos, docsPass: m.docsPass },
+    {
+      schemaVersion: m.schemaVersion,
+      indexerVersion: m.indexerVersion,
+      parser: m.parser,
+      repos,
+      docsPass: m.docsPass,
+    },
     null,
     1,
   )}\n`;

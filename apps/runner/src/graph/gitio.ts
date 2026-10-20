@@ -7,7 +7,10 @@ import type { TreeEntry } from './types.ts';
  * store through `git ls-tree` and `git cat-file --batch` (docs/design/project-graphs.md section 5, step 1).
  */
 
-export async function resolveCommit(repoPath: string, ref: string | null | undefined): Promise<string | null> {
+export async function resolveCommit(
+  repoPath: string,
+  ref: string | null | undefined,
+): Promise<string | null> {
   for (const r of [ref, 'HEAD']) {
     if (!r) continue;
     const out = await git(repoPath, ['rev-parse', '--verify', '--quiet', `${r}^{commit}`]);
@@ -15,7 +18,8 @@ export async function resolveCommit(repoPath: string, ref: string | null | undef
     // a remote-tracking working branch when the local branch does not exist
     if (r === ref) {
       const remote = await git(repoPath, ['rev-parse', '--verify', '--quiet', `origin/${r}^{commit}`]);
-      if (remote.exitCode === 0 && /^[0-9a-f]{40,64}$/.test(remote.stdout.trim())) return remote.stdout.trim();
+      if (remote.exitCode === 0 && /^[0-9a-f]{40,64}$/.test(remote.stdout.trim()))
+        return remote.stdout.trim();
     }
   }
   return null;

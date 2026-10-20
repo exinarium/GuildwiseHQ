@@ -18,12 +18,17 @@ const CAP = { symbols: 3000, imports: 1000, calls: 8000 };
 const nodeRequire = createRequire(import.meta.url);
 /** The runtime next to the bundle is a `.cjs` copy (the runner package is `type: module`); the package's own file is CommonJS. */
 const RUNTIME_FILE = 'tree-sitter.cjs';
-const runtimeFile = (dir: string): string => join(dir, existsSync(join(dir, RUNTIME_FILE)) ? RUNTIME_FILE : 'tree-sitter.js');
+const runtimeFile = (dir: string): string =>
+  join(dir, existsSync(join(dir, RUNTIME_FILE)) ? RUNTIME_FILE : 'tree-sitter.js');
 
 /** Where the runtime and the grammars are: next to the bundle (`dist/grammars`, shipped in the tarball), else the package. */
 export function grammarDir(): string {
   const here = dirname(fileURLToPath(import.meta.url));
-  for (const c of [join(here, 'grammars'), join(here, '..', 'grammars'), join(here, '..', '..', 'dist', 'grammars')]) {
+  for (const c of [
+    join(here, 'grammars'),
+    join(here, '..', 'grammars'),
+    join(here, '..', '..', 'dist', 'grammars'),
+  ]) {
     if (existsSync(join(c, RUNTIME_FILE))) return c;
   }
   const pkg = nodeRequire.resolve('@vscode/tree-sitter-wasm/package.json');
@@ -184,7 +189,8 @@ function tsVisit(root: TsNode, sink: Sink): void {
         if (clause)
           for (const c of named(clause)) {
             if (c.type === 'identifier') names.push({ name: 'default', alias: c.text });
-            else if (c.type === 'namespace_import') names.push({ name: '*', alias: text(c.namedChildren[0]) });
+            else if (c.type === 'namespace_import')
+              names.push({ name: '*', alias: text(c.namedChildren[0]) });
             else if (c.type === 'named_imports')
               for (const s of named(c)) {
                 const nm = text(field(s, 'name') ?? s.namedChildren[0]);
@@ -306,7 +312,13 @@ function tsVisit(root: TsNode, sink: Sink): void {
       case 'field_definition': {
         const name = text(field(n, 'name'));
         const value = field(n, 'value');
-        if (name && value && !ctx.inFn && ctx.cls && /^(arrow_function|function_expression|function)$/.test(value.type)) {
+        if (
+          name &&
+          value &&
+          !ctx.inFn &&
+          ctx.cls &&
+          /^(arrow_function|function_expression|function)$/.test(value.type)
+        ) {
           const q = qual(ctx.cls, name);
           sink.symbol({
             name,
@@ -329,7 +341,12 @@ function tsVisit(root: TsNode, sink: Sink): void {
           const nameNode = field(d, 'name');
           const value = field(d, 'value');
           const name = nameNode?.type === 'identifier' ? nameNode.text : '';
-          if (name && value && !ctx.inFn && /^(arrow_function|function_expression|function)$/.test(value.type)) {
+          if (
+            name &&
+            value &&
+            !ctx.inFn &&
+            /^(arrow_function|function_expression|function)$/.test(value.type)
+          ) {
             sink.symbol({
               name,
               qname: qual(ctx.cls, name),
@@ -355,7 +372,8 @@ function tsVisit(root: TsNode, sink: Sink): void {
           }
         }
         if (fn) {
-          if (fn.type === 'identifier') sink.call({ callee: fn.text, ...(ctx.fn ? { from: ctx.fn } : {}), line: line(n) });
+          if (fn.type === 'identifier')
+            sink.call({ callee: fn.text, ...(ctx.fn ? { from: ctx.fn } : {}), line: line(n) });
           else if (fn.type === 'member_expression') {
             const prop = text(field(fn, 'property'));
             const obj = field(fn, 'object');
@@ -375,7 +393,12 @@ function tsVisit(root: TsNode, sink: Sink): void {
       case 'new_expression': {
         const c = field(n, 'constructor');
         if (c) {
-          const callee = c.type === 'member_expression' ? text(field(c, 'property')) : c.type === 'identifier' ? c.text : '';
+          const callee =
+            c.type === 'member_expression'
+              ? text(field(c, 'property'))
+              : c.type === 'identifier'
+                ? c.text
+                : '';
           if (callee) sink.call({ callee, isNew: true, ...(ctx.fn ? { from: ctx.fn } : {}), line: line(n) });
         }
         pushChildren(n, { ...ctx, exported: false });
@@ -384,7 +407,13 @@ function tsVisit(root: TsNode, sink: Sink): void {
       case 'jsx_opening_element':
       case 'jsx_self_closing_element': {
         const nm = text(field(n, 'name'));
-        if (/^[A-Z]/.test(nm)) sink.call({ callee: lastSegment(nm), isNew: true, ...(ctx.fn ? { from: ctx.fn } : {}), line: line(n) });
+        if (/^[A-Z]/.test(nm))
+          sink.call({
+            callee: lastSegment(nm),
+            isNew: true,
+            ...(ctx.fn ? { from: ctx.fn } : {}),
+            line: line(n),
+          });
         pushChildren(n, ctx);
         break;
       }
@@ -421,7 +450,11 @@ function pyVisit(root: TsNode, sink: Sink): void {
           } else if (c.type === 'aliased_import') {
             const spec = text(field(c, 'name'));
             const alias = text(field(c, 'alias'));
-            sink.imp({ spec, names: [{ name: '*', alias: alias || (spec.split('.')[0] ?? spec) }], line: line(n) });
+            sink.imp({
+              spec,
+              names: [{ name: '*', alias: alias || (spec.split('.')[0] ?? spec) }],
+              line: line(n),
+            });
           }
         }
         break;
@@ -513,7 +546,13 @@ function pyVisit(root: TsNode, sink: Sink): void {
           const obj = field(fn, 'object');
           const callee = text(field(fn, 'attribute'));
           const recv = obj?.type === 'identifier' ? obj.text : undefined;
-          if (callee) sink.call({ callee, ...(recv ? { recv } : {}), ...(ctx.fn ? { from: ctx.fn } : {}), line: line(n) });
+          if (callee)
+            sink.call({
+              callee,
+              ...(recv ? { recv } : {}),
+              ...(ctx.fn ? { from: ctx.fn } : {}),
+              line: line(n),
+            });
         }
         pushChildren(n, ctx);
         break;
@@ -542,12 +581,18 @@ function goVisit(root: TsNode, sink: Sink): void {
         sink.namespaces.add(text(n.namedChildren[0]));
         break;
       case 'import_spec': {
-        const path = n.descendantsOfType('interpreted_string_literal_content')[0]?.text ?? stringValue(field(n, 'path'));
+        const path =
+          n.descendantsOfType('interpreted_string_literal_content')[0]?.text ?? stringValue(field(n, 'path'));
         const alias = text(field(n, 'name'));
         if (path)
           sink.imp({
             spec: path,
-            names: [{ name: '*', alias: alias && alias !== '_' && alias !== '.' ? alias : (path.split('/').pop() ?? path) }],
+            names: [
+              {
+                name: '*',
+                alias: alias && alias !== '_' && alias !== '.' ? alias : (path.split('/').pop() ?? path),
+              },
+            ],
             line: line(n),
           });
         break;
@@ -557,15 +602,30 @@ function goVisit(root: TsNode, sink: Sink): void {
         const name = text(field(n, 'name'));
         if (!name) break;
         const t = field(n, 'type');
-        const sub: SymbolSub = t?.type === 'struct_type' ? 'struct' : t?.type === 'interface_type' ? 'interface' : 'type';
-        sink.symbol({ name, qname: name, sub, line: line(n), endLine: endLine(n), exported: goExported(name) });
+        const sub: SymbolSub =
+          t?.type === 'struct_type' ? 'struct' : t?.type === 'interface_type' ? 'interface' : 'type';
+        sink.symbol({
+          name,
+          qname: name,
+          sub,
+          line: line(n),
+          endLine: endLine(n),
+          exported: goExported(name),
+        });
         break;
       }
       case 'function_declaration': {
         const name = text(field(n, 'name'));
         const body = field(n, 'body');
         if (!name) break;
-        sink.symbol({ name, qname: name, sub: 'function', line: line(n), endLine: endLine(n), exported: goExported(name) });
+        sink.symbol({
+          name,
+          qname: name,
+          sub: 'function',
+          line: line(n),
+          endLine: endLine(n),
+          exported: goExported(name),
+        });
         if (body) push(body, { fn: name, inFn: true, exported: false });
         break;
       }
@@ -590,19 +650,27 @@ function goVisit(root: TsNode, sink: Sink): void {
       }
       case 'call_expression': {
         const fn = field(n, 'function');
-        if (fn?.type === 'identifier') sink.call({ callee: fn.text, ...(ctx.fn ? { from: ctx.fn } : {}), line: line(n) });
+        if (fn?.type === 'identifier')
+          sink.call({ callee: fn.text, ...(ctx.fn ? { from: ctx.fn } : {}), line: line(n) });
         else if (fn?.type === 'selector_expression') {
           const operand = field(fn, 'operand');
           const callee = text(field(fn, 'field'));
           const recv = operand?.type === 'identifier' ? operand.text : undefined;
-          if (callee) sink.call({ callee, ...(recv ? { recv } : {}), ...(ctx.fn ? { from: ctx.fn } : {}), line: line(n) });
+          if (callee)
+            sink.call({
+              callee,
+              ...(recv ? { recv } : {}),
+              ...(ctx.fn ? { from: ctx.fn } : {}),
+              line: line(n),
+            });
         }
         pushChildren(n, ctx);
         break;
       }
       case 'composite_literal': {
         const t = field(n, 'type');
-        if (t?.type === 'type_identifier') sink.call({ callee: t.text, isNew: true, ...(ctx.fn ? { from: ctx.fn } : {}), line: line(n) });
+        if (t?.type === 'type_identifier')
+          sink.call({ callee: t.text, isNew: true, ...(ctx.fn ? { from: ctx.fn } : {}), line: line(n) });
         pushChildren(n, ctx);
         break;
       }
@@ -618,7 +686,8 @@ const csTypeName = (n: TsNode | null): string => {
   if (!n) return '';
   if (n.type === 'identifier') return n.text;
   if (n.type === 'generic_name') return text(n.namedChildren[0]);
-  if (n.type === 'qualified_name') return csTypeName(field(n, 'name') ?? n.namedChildren[n.namedChildren.length - 1] ?? null);
+  if (n.type === 'qualified_name')
+    return csTypeName(field(n, 'name') ?? n.namedChildren[n.namedChildren.length - 1] ?? null);
   return lastSegment(n.text);
 };
 
@@ -678,8 +747,11 @@ function csVisit(root: TsNode, sink: Sink): void {
         }
         const q = qual(ctx.cls, name);
         const bases: string[] = [];
-        for (const c of named(n)) if (c.type === 'base_list') for (const b of named(c)) bases.push(csTypeName(b));
-        const mods = named(n).filter((c) => c.type === 'modifier').map((c) => c.text);
+        for (const c of named(n))
+          if (c.type === 'base_list') for (const b of named(c)) bases.push(csTypeName(b));
+        const mods = named(n)
+          .filter((c) => c.type === 'modifier')
+          .map((c) => c.text);
         sink.symbol({
           name,
           qname: q,
@@ -690,14 +762,17 @@ function csVisit(root: TsNode, sink: Sink): void {
           ...(ctx.cls ? { parent: ctx.cls } : {}),
           ...(bases.filter(Boolean).length ? { extends: bases.filter(Boolean) } : {}),
         });
-        if (body) push(body, { cls: q, fn: q, inFn: false, exported: false, ...(ctx.ns ? { ns: ctx.ns } : {}) });
+        if (body)
+          push(body, { cls: q, fn: q, inFn: false, exported: false, ...(ctx.ns ? { ns: ctx.ns } : {}) });
         else pushChildren(n, { cls: q, fn: q, inFn: false, exported: false });
         break;
       }
       case 'method_declaration': {
         const name = text(field(n, 'name'));
         const body = field(n, 'body');
-        const mods = named(n).filter((c) => c.type === 'modifier').map((c) => c.text);
+        const mods = named(n)
+          .filter((c) => c.type === 'modifier')
+          .map((c) => c.text);
         if (name && ctx.cls && !ctx.inFn) {
           const q = `${ctx.cls}.${name}`;
           sink.symbol({
@@ -720,8 +795,20 @@ function csVisit(root: TsNode, sink: Sink): void {
         else if (fn?.type === 'member_access_expression') {
           const callee = csTypeName(field(fn, 'name'));
           const expr = field(fn, 'expression');
-          const recv = expr && (expr.type === 'identifier' || expr.type === 'this_expression' || expr.type === 'base_expression') ? (expr.type === 'identifier' ? expr.text : 'this') : undefined;
-          if (callee) sink.call({ callee, ...(recv ? { recv } : {}), ...(ctx.fn ? { from: ctx.fn } : {}), line: line(n) });
+          const recv =
+            expr &&
+            (expr.type === 'identifier' || expr.type === 'this_expression' || expr.type === 'base_expression')
+              ? expr.type === 'identifier'
+                ? expr.text
+                : 'this'
+              : undefined;
+          if (callee)
+            sink.call({
+              callee,
+              ...(recv ? { recv } : {}),
+              ...(ctx.fn ? { from: ctx.fn } : {}),
+              line: line(n),
+            });
         }
         pushChildren(n, ctx);
         break;

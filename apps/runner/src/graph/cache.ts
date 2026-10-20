@@ -22,7 +22,10 @@ export class FactsCache {
     this.file = join(cacheDir, repoKey, `facts-${sha256Hex(fingerprint).slice(0, 12)}.json`);
     try {
       if (existsSync(this.file)) {
-        const j = JSON.parse(readFileSync(this.file, 'utf8')) as { fingerprint?: string; entries?: Record<string, FileFacts> };
+        const j = JSON.parse(readFileSync(this.file, 'utf8')) as {
+          fingerprint?: string;
+          entries?: Record<string, FileFacts>;
+        };
         if (j.fingerprint === fingerprint) this.entries = new Map(Object.entries(j.entries ?? {}));
       }
     } catch {

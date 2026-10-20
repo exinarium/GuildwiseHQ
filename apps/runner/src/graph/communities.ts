@@ -104,7 +104,8 @@ export function louvain(ids: string[], links: Link[], seed = 1): string[][] {
         // each undirected edge is stored twice; a self loop once
         const add = i === j ? w : w / 2;
         (next[ci] as Map<number, number>).set(cj, ((next[ci] as Map<number, number>).get(cj) ?? 0) + add);
-        if (ci !== cj) (next[cj] as Map<number, number>).set(ci, ((next[cj] as Map<number, number>).get(ci) ?? 0) + add);
+        if (ci !== cj)
+          (next[cj] as Map<number, number>).set(ci, ((next[cj] as Map<number, number>).get(ci) ?? 0) + add);
       }
     }
     adj = next;
