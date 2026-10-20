@@ -30,6 +30,7 @@ import {
   workflows,
 } from './db.ts';
 import { chatHandlers } from './handlers-chat.ts';
+import { deploySetupHandlers } from './handlers-deploy-setup.ts';
 import { extraHandlers } from './handlers-extra.ts';
 import { runHandlers } from './handlers-run.ts';
 
@@ -80,6 +81,7 @@ async function body<T>(
 }
 
 export const handlers = [
+  ...deploySetupHandlers,
   ...runHandlers,
   ...chatHandlers,
   http.get(`${A}/health`, () => HttpResponse.json({ ok: true, db: true })),

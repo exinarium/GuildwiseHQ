@@ -307,7 +307,7 @@ export function implicitStepText(env: Pick<SetupEnv, 'rollback' | 'health' | 'ap
   const after: string[] = [];
   if (env.health.kind === 'http')
     after.push(
-      `Check the site answers (${env.health.url})${env.rollback ? ', and put the previous version back if it does not. The database is never rolled back automatically' : ''}.`,
+      `Check the site answers (${env.health.url.replace('${appUrl}', env.app.appUrl ?? 'the app address')})${env.rollback ? ', and put the previous version back if it does not. The database is never rolled back automatically' : ''}.`,
     );
   return { before, after };
 }

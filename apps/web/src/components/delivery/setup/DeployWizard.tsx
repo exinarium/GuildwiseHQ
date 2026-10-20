@@ -588,7 +588,7 @@ export function DeployWizard({
       {/* the sticky bar (mobile: always in reach of the thumb) */}
       {step !== 'review' && (
         <div
-          className="sticky bottom-0 -mx-4 flex gap-2 border-t border-line bg-surface px-4 py-3 sm:mx-0 sm:rounded-control sm:border"
+          className="sticky bottom-[var(--app-bottom-inset,0px)] z-10 -mx-4 flex gap-2 border-t border-line bg-surface px-4 py-3 sm:mx-0 sm:rounded-control sm:border"
           data-testid="wizard-bar"
         >
           <Button onClick={back}>{step === steps[0] ? 'Cancel' : 'Back'}</Button>
@@ -1124,7 +1124,7 @@ function Review({
           <ErrorBox error={publishError} />
         </>
       )}
-      <div className="sticky bottom-0 -mx-4 flex flex-wrap gap-2 border-t border-line bg-surface px-4 py-3 sm:mx-0">
+      <div className="sticky bottom-[var(--app-bottom-inset,0px)] z-10 -mx-4 flex flex-wrap gap-2 border-t border-line bg-surface px-4 py-3 sm:mx-0">
         {written ? (
           <Button
             variant="primary"
