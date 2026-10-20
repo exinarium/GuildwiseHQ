@@ -29,6 +29,7 @@ import { eligibleProjectRepos } from '../runner-gateway/read-repos.ts';
 import { type StoredWorkstationRepo, validateWorkstationRepos } from '../runner-gateway/workstation-repos.ts';
 import { createLocalOrigin } from '../simulation/repos.ts';
 import { releaseEvents } from './cards.ts';
+import { queueAccountEnsure } from './claude-accounts.ts';
 import { assertRemoteUrl, cardMessage, orgScope, projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
 import { cancelConversionEvents } from './convert.ts';
 import { cancelPhasesEvents } from './phases.ts';
@@ -277,6 +278,52 @@ export async function setFullSuite(
       { tx },
     );
   });
+}
+
+/**
+ * Names the Claude account the project's tickets run on (docs/design/claude-accounts.md): a key such as `work`, or null
+ * for each workstation's main account, plus the switch "use the main account when this one is out" (off by default).
+ * Only the project's Owner or an organization Owner/Admin. The key is queued for provisioning on the workstations
+ * that serve the project (setting the same key again asks again: the owner's way to retry).
+ */
+export async function setClaudeAccount(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  org: { id: string; role: OrgRole | null },
+  projectId: string,
+  setting: { accountKey: string | null; fallbackToMain: boolean },
+) {
+  const asked = await withAppendTx(ctx.pool, async (tx) => {
+    const p = await loadVisibleProject(tx, user.id, projectId);
+    const orgAdmin = isOrgManager({ orgRole: org.role }) && org.id === p.org_id;
+    if (p.my_role !== 'owner' && !orgAdmin)
+      throw forbidden('only the project Owner or an organization Owner or Admin can do this');
+    // A project on the main account has nothing to fall back from: the switch is stored off.
+    const fallbackToMain = setting.accountKey ? setting.fallbackToMain : false;
+    const same =
+      (p.claude_account_key ?? null) === setting.accountKey &&
+      (p.claude_account_fallback ?? false) === fallbackToMain;
+    if (!same)
+      await ctx.store.append(
+        [
+          {
+            streamId: streamId.project(projectId),
+            event: {
+              type: 'ProjectClaudeAccountSet',
+              payload: { projectId, accountKey: setting.accountKey, fallbackToMain, changedBy: user.id },
+            },
+            actor: userActor(user.id),
+            scope: projectScope(p.org_id, projectId),
+          },
+        ],
+        { tx },
+      );
+    return setting.accountKey
+      ? queueAccountEnsure(tx, { id: p.id, org_id: p.org_id }, setting.accountKey)
+      : [];
+  });
+  for (const id of asked)
+    void Promise.resolve(ctx.services.gateway.deliverPending(id)).catch(() => undefined);
 }
 
 /**
