@@ -1,6 +1,6 @@
 ---
 title: Deploys you approve once, that run without a model
-date: 2026-10-21
+date: 2026-10-20
 audience: admin
 help: /help/phases#delivery-recipes
 ---

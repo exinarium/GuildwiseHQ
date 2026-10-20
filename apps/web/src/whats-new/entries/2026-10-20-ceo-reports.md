@@ -1,6 +1,6 @@
 ---
 title: Your CEO now does the reporting; the BA only writes specs
-date: 2026-10-22
+date: 2026-10-20
 audience: all
 help: /help/ba-reporter
 ---
