@@ -167,9 +167,13 @@ export async function saveRunPlan(
     await assertPlanRepos(tx, projectId, plan);
     const workstationId = req.scope === 'project' ? null : req.scope.workstationId;
     if (workstationId) {
-      const ws = await one(tx, `SELECT 1 AS x FROM workstations WHERE id=$1 AND status='active'`, [
-        workstationId,
-      ]);
+      // a workstation of an active member of the project (the same rule as a deploy target's)
+      const ws = await one(
+        tx,
+        `SELECT 1 AS x FROM workstations w JOIN project_members pm ON pm.user_id = w.user_id AND pm.project_id = $2 AND pm.status = 'active'
+          WHERE w.id=$1 AND w.status='active'`,
+        [workstationId, projectId],
+      );
       if (!ws) throw notFound('workstation not found');
     }
     let proposalId: string | undefined;

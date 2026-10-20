@@ -6,7 +6,7 @@ import { uniqueEmail } from './helpers/app.ts';
 import { closeAdminPool, q as rawQ } from './helpers/db.ts';
 import type { FakeRunner } from './helpers/fake-runner.ts';
 import { addMember, type Member } from './helpers/members.ts';
-import { createWorld, ok, until, type World } from './helpers/world.ts';
+import { createWorld, ok, pairWorkstation, until, type World } from './helpers/world.ts';
 
 // Guided run steps and "Scan with DevOps" (docs/design/deploy-run-ux-design.md, v1a): the project-wide plan with its
 // replay fallback, the owner's word winning over staleness, "Test these steps", the scan request, the proposal and its
@@ -125,6 +125,19 @@ describe('the project-wide plan', () => {
     const again = await saveProject(PLAN('second'));
     expect(again.projectPlan).toMatchObject({ version: 2, plan: { notes: 'second' } });
     expect((await plans()).filter((p: any) => p.status !== 'superseded')).toHaveLength(1);
+  });
+
+  it('a plan for one workstation needs a workstation of a project member', async () => {
+    const stranger = await w.t.userSession(uniqueEmail('stranger-ws'));
+    const other = await pairWorkstation(w.t, stranger, 'foreign');
+    const bad = await raw('PUT', planUrl(), { plan: PLAN(), scope: { workstationId: other.workstationId } });
+    expect(bad.status).toBe(404);
+    const good = await call('PUT', planUrl(), {
+      plan: PLAN('mine'),
+      scope: { workstationId: w.workstationId },
+    });
+    expect(good.workstationPlans).toHaveLength(1);
+    expect(good.workstationPlans[0]).toMatchObject({ workstationId: w.workstationId, source: 'owner' });
   });
 
   it('refuses a plan with problems, no running part, unknown repositories, and non-owners', async () => {
