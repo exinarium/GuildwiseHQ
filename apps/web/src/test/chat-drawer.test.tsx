@@ -116,3 +116,17 @@ describe('chat list: close and delete', () => {
     expect(del).toHaveTextContent("stays in the card's history");
   });
 });
+
+describe('chat list: archive all', () => {
+  it('asks first, then closes every open chat and keeps them under Archived', async () => {
+    const user = userEvent.setup();
+    setup();
+    await user.click(await screen.findByTestId('archive-all-chats'));
+    expect(calls.some((c) => c.endsWith('/close'))).toBe(false);
+    await user.click(await screen.findByRole('button', { name: 'Archive all' }));
+    await waitFor(() =>
+      expect(calls.filter((c) => c.startsWith('POST') && c.endsWith('/close'))).toHaveLength(2),
+    );
+    await waitFor(() => expect(screen.queryByTestId('chat-row-Ada')).toBeNull());
+  });
+});

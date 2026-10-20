@@ -4,13 +4,14 @@ import { useState } from 'react';
 import { useAgents } from '../api/queries/agents.ts';
 import {
   useChats,
+  useCloseAllChats,
   useCloseChat,
   useCreateChat,
   useDeleteChat,
   useRestoreChat,
 } from '../api/queries/chats.ts';
 import { useIsMobile } from '../hooks/useIsMobile.ts';
-import { useVisualViewportHeight } from '../hooks/useVisualViewportHeight.ts';
+import { useViewportBottomGap } from '../hooks/useViewportBottomGap.ts';
 import { ChatPanel } from './ChatPanel.tsx';
 import { AgentAvatar } from './Face.tsx';
 import {
@@ -40,7 +41,7 @@ export function ChatDrawer({
 }) {
   const agents = useAgents();
   const mobile = useIsMobile();
-  const vvh = useVisualViewportHeight(mobile && open);
+  const gap = useViewportBottomGap(mobile && open);
   const chats = useChats();
   const create = useCreateChat();
   const [agentId, setAgentId] = useState('');
@@ -48,6 +49,8 @@ export function ChatDrawer({
   const [view, setView] = useState<'active' | 'archived'>('active');
   const [deleting, setDeleting] = useState<ChatDto | null>(null);
   const close = useCloseChat();
+  const closeAll = useCloseAllChats();
+  const [archivingAll, setArchivingAll] = useState(false);
   const restore = useRestoreChat();
   const remove = useDeleteChat();
   const toast = useToast();
@@ -63,8 +66,8 @@ export function ChatDrawer({
         <RadixDialog.Overlay className="fixed inset-0 z-40 bg-black/40" />
         <RadixDialog.Content
           aria-label="Chat"
-          style={mobile && vvh ? { height: vvh, bottom: 'auto' } : undefined}
-          className="fixed inset-y-0 right-0 z-50 flex w-full flex-col gap-3 border-l border-line bg-surface p-4 pt-[max(1rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))] shadow-xl sm:w-[28rem]"
+          style={mobile && gap > 0 ? { bottom: gap } : undefined}
+          className="fixed inset-y-0 right-0 z-50 flex w-full flex-col gap-3 overflow-hidden border-l border-line bg-surface p-4 pt-[max(1rem,env(safe-area-inset-top))] pr-[max(1rem,env(safe-area-inset-right))] pb-[max(1rem,env(safe-area-inset-bottom))] pl-[max(1rem,env(safe-area-inset-left))] shadow-xl sm:w-[28rem]"
         >
           <div className="flex items-center justify-between">
             <RadixDialog.Title className="text-base font-semibold">Chat</RadixDialog.Title>
@@ -79,7 +82,7 @@ export function ChatDrawer({
           </RadixDialog.Description>
 
           {!threadId ? (
-            <div className="flex flex-col gap-3">
+            <div className="flex min-h-0 flex-1 flex-col gap-3">
               <form
                 className="flex flex-col gap-2"
                 aria-label="Start a chat"
@@ -106,8 +109,8 @@ export function ChatDrawer({
                 </Button>
               </form>
               {(chats.data?.length ?? 0) > 0 && (
-                <div>
-                  <div className="mb-1 flex items-center justify-between gap-2">
+                <div className="flex min-h-0 flex-1 flex-col">
+                  <div className="mb-1 flex shrink-0 flex-wrap items-center justify-between gap-2">
                     <h3 className="text-sm font-semibold text-muted">Earlier conversations</h3>
                     {(archivedCount > 0 || view === 'archived') && (
                       <Segmented
@@ -124,7 +127,21 @@ export function ChatDrawer({
                       />
                     )}
                   </div>
-                  <ul className="flex flex-col gap-1" data-testid="chat-list">
+                  {view === 'active' && listed.length > 1 && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="mb-1 min-h-11 shrink-0 self-start"
+                      data-testid="archive-all-chats"
+                      onClick={() => setArchivingAll(true)}
+                    >
+                      Archive all ({listed.length})
+                    </Button>
+                  )}
+                  <ul
+                    className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto overscroll-contain"
+                    data-testid="chat-list"
+                  >
                     {listed.map((c) => (
                       <li
                         key={c.threadId}
@@ -134,7 +151,7 @@ export function ChatDrawer({
                         <button
                           type="button"
                           onClick={() => setThreadId(c.threadId)}
-                          className="flex min-w-0 flex-1 items-center gap-2 min-h-11 rounded-control border border-line px-2 py-1.5 text-left text-sm hover:bg-sunken"
+                          className="flex min-w-0 flex-1 items-center gap-2 min-h-12 rounded-control border border-line bg-canvas px-3 py-2 text-left text-sm hover:bg-sunken"
                         >
                           <AgentAvatar agentId={c.agentId} name={c.agentName} size={20} />
                           <span className="min-w-0 flex-1 truncate">
@@ -199,6 +216,27 @@ export function ChatDrawer({
           )}
         </RadixDialog.Content>
       </RadixDialog.Portal>
+      <ConfirmDialog
+        open={archivingAll}
+        onOpenChange={setArchivingAll}
+        title={`Archive all ${listed.length} chats?`}
+        description="They leave this list and move to Archived. Nothing is deleted; restore any of them from there."
+        confirmLabel="Archive all"
+        pending={closeAll.isPending}
+        onConfirm={() =>
+          closeAll.mutate(
+            listed.map((c) => c.threadId),
+            {
+              onSuccess: (n) => {
+                setArchivingAll(false);
+                toast.success(`${n} chats archived`);
+              },
+            },
+          )
+        }
+      >
+        <ErrorBox error={closeAll.error} />
+      </ConfirmDialog>
       <ConfirmDialog
         open={!!deleting}
         onOpenChange={(o) => !o && setDeleting(null)}

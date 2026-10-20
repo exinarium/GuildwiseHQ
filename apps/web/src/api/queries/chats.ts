@@ -66,3 +66,18 @@ export function useThreadMessages(threadId: string | undefined) {
       get<ThreadMessagesResponse>(`/threads/${threadId}/messages?limit=200`, ThreadMessagesResponseSchema),
   });
 }
+
+/** Archive all: closes every chat in the list with the existing per-chat close (nothing is deleted; Restore undoes it). */
+export function useCloseAllChats() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (threadIds: string[]) => {
+      const results = await Promise.allSettled(threadIds.map((id) => post(`/chats/${id}/close`, {})));
+      const failed = results.filter((r) => r.status === 'rejected').length;
+      if (failed > 0)
+        throw new Error(`${failed} of ${threadIds.length} chats could not be archived. Try again.`);
+      return threadIds.length;
+    },
+    onSettled: () => refreshChats(qc),
+  });
+}
