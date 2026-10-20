@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Browser } from './helpers/browser.ts';
 import { act, keepOnline, startCeoShift, wakeNow } from './helpers/ceo.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
-import { type DeliveryWorld, deliveryWorld, parseFixture } from './helpers/delivery.ts';
+import { type DeliveryWorld, deliveryWorld, mergeLanded, parseFixture } from './helpers/delivery.ts';
 import type { FakeRunner } from './helpers/fake-runner.ts';
 import { ok, until } from './helpers/world.ts';
 
@@ -29,6 +29,9 @@ beforeAll(async () => {
     d.w.workstationId,
     FULL_POWER,
   ]);
+  // the commits the tests deploy were really merged (an automated requester may deploy only those)
+  await mergeLanded(d, 'a'.repeat(40));
+  await mergeLanded(d, 'b'.repeat(40));
   threadId = (await d.w.t.req('POST', '/api/ceo/chat', { cookie: d.w.owner.cookie })).body.threadId;
   b = await Browser.open(d.w.baseUrl, d.w.owner.cookie);
   await b.hello();
