@@ -3,8 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { MessagesSquare } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useCeoChatState } from '../api/queries/ceo-chat.ts';
-import { useChat, useThreadMessages } from '../api/queries/chats.ts';
-import { markChatSeen } from '../lib/chatSeen.ts';
+import { useChat, useMarkChatRead, useThreadMessages } from '../api/queries/chats.ts';
 import { applyActivity, applyDelta } from '../lib/chatSegments.ts';
 import { newId } from '../lib/secure.ts';
 import { getSocket } from '../ws/socket.ts';
@@ -173,11 +172,8 @@ export function ChatPanel({
   const offline = online !== undefined ? !online : chat ? !chat.workstationOnline : false;
   const busy = stream !== null && !stream.finished;
   const ceoState = useCeoChatState(threadId, isCeo, busy).data;
-  // Opening a chat (and every new message while it is open) marks it as read for the unread dot in the chat list.
-  const newest = list[list.length - 1]?.createdAt;
-  useEffect(() => {
-    markChatSeen(threadId, newest ?? new Date().toISOString());
-  }, [threadId, newest]);
+  // New agent messages in the open, visible chat are marked read on the server (synced to the user's other devices).
+  useMarkChatRead(threadId, chat?.unreadCount ?? 0, list[list.length - 1]?.createdAt);
   const doneStored = !!stream?.doneId && list.some((m) => m.id === stream.doneId);
   const shownStream = stream && !doneStored ? stream : null;
 

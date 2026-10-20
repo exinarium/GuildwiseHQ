@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
+  CHAT_UNREAD_MAX,
   type ChatDto,
   type CreateChatRequest,
   canDirectAgentInOrg,
@@ -13,7 +14,7 @@ import type { Ctx } from '../context.ts';
 import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { conflict, notFound } from '../errors.ts';
-import { orgScope, projectScope, userActor } from './common.ts';
+import { orgScope, projectScope, userActor, userScope } from './common.ts';
 
 /** The user talking to the DevOps engineer that lives on their own workstation (workstation-targeted work is theirs). */
 /** Is the agent allowed on a project of its organization that the user is on? (Members and Guests direct such agents.) */
@@ -61,16 +62,26 @@ export function toChatDto(ctx: Ctx, r: Row, viewerId: string): ChatDto {
           at: iso(r.last_message_at) as string,
         }
       : null,
+    ...(Number(r.unread_count) > 0 ? { unreadCount: Math.min(Number(r.unread_count), CHAT_UNREAD_MAX) } : {}),
     archived: !!r.archived,
     mine: r.created_by === viewerId,
   };
 }
 
-/** `$1` is the viewing user: `archived` is whether they closed the chat. */
+/** `$1` is the viewing user: `archived` is whether they closed the chat, `unread_count` the agent messages after their read marker. */
 const CHAT_SELECT = `
 SELECT t.*, a.name AS agent_name, a.role_key AS agent_role, a.status AS agent_status, a.workstation_id,
        c.ref AS card_ref,
        EXISTS (SELECT 1 FROM chat_archives x WHERE x.thread_id = t.id AND x.user_id = $1) AS archived,
+       (SELECT count(*) FROM (
+          SELECT 1 FROM thread_messages u
+           WHERE u.thread_id = t.id AND u.author_kind = 'agent'
+             AND u.created_at > COALESCE(
+               (SELECT r.read_up_to FROM chat_reads r WHERE r.thread_id = t.id AND r.user_id = $1),
+               (SELECT max(w.created_at) FROM thread_messages w
+                 WHERE w.thread_id = t.id AND w.author_kind = 'user' AND w.author_user_id = $1),
+               '-infinity'::timestamptz)
+           LIMIT ${CHAT_UNREAD_MAX}) capped) AS unread_count,
        lm.created_at AS last_message_at, lm.author_kind AS last_author_kind, lm.body AS last_body
   FROM threads t JOIN agents a ON a.id = t.agent_id LEFT JOIN cards c ON c.id = t.card_id
   LEFT JOIN LATERAL (
@@ -194,6 +205,44 @@ export async function setChatArchived(
           },
           actor: userActor(user.id),
           scope: chatScope(r),
+        },
+      ],
+      { tx },
+    );
+  });
+  return getChat(ctx, user.id, threadId);
+}
+
+/**
+ * Marks the chat read for the user up to `upTo` (default and ceiling: its newest message). Idempotent, and the marker
+ * never moves back, so nothing is appended when it is already there. The event is user-audience: it reaches only that
+ * user's browser sockets (their other devices refetch the list), nobody else's.
+ */
+export async function markChatRead(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  threadId: string,
+  upTo?: string,
+): Promise<ChatDto> {
+  await withAppendTx(ctx.pool, async (tx) => {
+    const r = await getChatRow(tx, user.id, threadId);
+    if (!r) throw notFound('chat not found');
+    const newest = r.last_message_at ? iso(r.last_message_at) : null;
+    if (!newest) return;
+    const target = upTo && upTo < newest ? upTo : newest;
+    const marker = await one(tx, 'SELECT read_up_to FROM chat_reads WHERE thread_id=$1 AND user_id=$2', [
+      threadId,
+      user.id,
+    ]);
+    const current = marker ? iso(marker.read_up_to) : null;
+    if (current && current >= target) return;
+    await ctx.store.append(
+      [
+        {
+          streamId: streamId.thread(threadId),
+          event: { type: 'ChatRead', payload: { threadId, userId: user.id, readUpTo: target } },
+          actor: userActor(user.id),
+          scope: userScope(user.id),
         },
       ],
       { tx },

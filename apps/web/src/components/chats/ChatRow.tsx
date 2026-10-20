@@ -1,6 +1,5 @@
 import type { ChatDto } from '@aom/shared';
 import { Loader2 } from 'lucide-react';
-import { isUnread } from '../../lib/chatSeen.ts';
 import { ageLabel } from '../../lib/time.ts';
 import { AgentAvatar } from '../Face.tsx';
 import { cx } from '../ui/cx.ts';
@@ -18,7 +17,8 @@ export function ChatRow({
   ceo?: boolean;
 }) {
   const preview = chat.lastMessage ?? null;
-  const unread = isUnread(chat.threadId, chat.lastMessageAt, preview?.authorKind);
+  const count = chat.unreadCount ?? 0;
+  const unread = count > 0;
   const text = preview?.body ?? '';
   return (
     <button
@@ -70,10 +70,12 @@ export function ChatRow({
           {unread && (
             <span
               role="img"
-              aria-label="Unread"
-              className="size-2.5 shrink-0 rounded-full bg-brand"
+              aria-label={`${count >= 99 ? '99+' : count} unread`}
+              className="tnum inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-brand px-1.5 text-xs font-semibold text-white"
               data-testid="chat-unread"
-            />
+            >
+              {count >= 99 ? '99+' : count}
+            </span>
           )}
         </span>
       </span>

@@ -2,6 +2,7 @@ import { Ellipsis, FolderKanban, Inbox, MessageSquare, MessagesSquare, Plus, Squ
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
 import { isTurnInFlight, TURN_IN_FLIGHT_TEXT, useCeoStatus, useStartCeoChat } from '../../api/queries/ceo.ts';
+import { useUnreadChatTotal } from '../../api/queries/chats.ts';
 import { ceoChatPath } from '../../lib/openCeoChat.ts';
 import { useActiveOrgRole } from '../../lib/orgRole.ts';
 import { BottomSheet } from '../ui/BottomSheet.tsx';
@@ -36,6 +37,32 @@ const tabClass = (active: boolean) =>
     'relative flex min-h-14 flex-col items-center justify-center gap-0.5 px-1 text-[11px] font-medium leading-none transition-colors',
     active ? 'text-brand-text' : 'text-muted',
   );
+
+/** The unread chat total on the Chats tab and the desktop Chat button. */
+export function UnreadBadge({
+  count,
+  testId,
+  className,
+}: {
+  count: number;
+  testId: string;
+  className?: string;
+}) {
+  if (count <= 0) return null;
+  return (
+    <span
+      data-testid={testId}
+      role="img"
+      aria-label={`${count > 99 ? '99+' : count} unread`}
+      className={cx(
+        'tnum absolute -top-1.5 left-full -ml-2.5 inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-brand px-1 text-xs font-semibold text-white',
+        className,
+      )}
+    >
+      {count > 99 ? '99+' : count}
+    </span>
+  );
+}
 
 function Badge({ counts }: { counts: DeskCounts }) {
   if (counts.open <= 0) return null;
@@ -85,6 +112,7 @@ export function MobileTabBar({
     owner && cs?.hired && cs.agent && cs.state !== 'disabled' && cs.state !== 'none' ? cs.agent.name : null;
   /** Intake is only there with integrations on; otherwise the button writes a card. */
   const isIntake = intake.to.startsWith('/intake');
+  const unreadChats = useUnreadChatTotal();
   const keyboard = useKeyboardOpen();
   useEffect(() => {
     const root = document.documentElement;
@@ -131,7 +159,10 @@ export function MobileTabBar({
             data-testid="tab-chats"
             className={tabClass(chatsOpen)}
           >
-            <MessageSquare aria-hidden="true" className="size-6" strokeWidth={chatsOpen ? 2.25 : 1.75} />
+            <span className="relative">
+              <MessageSquare aria-hidden="true" className="size-6" strokeWidth={chatsOpen ? 2.25 : 1.75} />
+              <UnreadBadge count={unreadChats} testId="tab-chats-badge" />
+            </span>
             Chats
           </button>
         </li>

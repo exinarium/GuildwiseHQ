@@ -31,6 +31,8 @@ export const ChatDtoSchema = z.object({
     })
     .nullable()
     .optional(),
+  /** Agent messages the viewer has not read yet (capped at `CHAT_UNREAD_MAX`); absent or 0 when none. */
+  unreadCount: z.number().int().nonnegative().max(99).optional(),
   /** Closed by the viewer: hidden from the default list, shown under Archived. */
   archived: z.boolean().optional(),
   /** The viewer created it, so may delete it (unless it is linked to a card). */
@@ -49,6 +51,13 @@ export const ArchiveAllChatsRequestSchema = z.object({
 export type ArchiveAllChatsRequest = z.infer<typeof ArchiveAllChatsRequestSchema>;
 export const ArchiveAllChatsResponseSchema = z.object({ archived: z.number().int().nonnegative() });
 export type ArchiveAllChatsResponse = z.infer<typeof ArchiveAllChatsResponseSchema>;
+
+/** `POST /api/chats/:id/read`: marks the chat read up to `upTo` (default: its newest message). Never moves back. */
+export const MarkChatReadRequestSchema = z.object({ upTo: IsoTime.optional() });
+export type MarkChatReadRequest = z.infer<typeof MarkChatReadRequestSchema>;
+
+/** The unread count stops here (the badge shows "99+" beyond it). */
+export const CHAT_UNREAD_MAX = 99;
 
 /** Longest list preview, in characters. */
 export const CHAT_PREVIEW_MAX = 140;

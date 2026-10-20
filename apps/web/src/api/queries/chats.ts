@@ -7,6 +7,7 @@ import {
   ThreadMessagesResponseSchema,
 } from '@aom/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useEffect, useRef } from 'react';
 import { del, get, post } from '../client.ts';
 
 export function useChats() {
@@ -83,4 +84,48 @@ export function useArchiveAllChats() {
       ).archived,
     onSettled: () => refreshChats(qc),
   });
+}
+
+/** Total unread agent messages over the chats in the user's list (closed chats do not count), for the tab and top bar badges. */
+export function useUnreadChatTotal(): number {
+  const chats = useChats().data;
+  return (chats ?? []).reduce((n, c) => (c.archived ? n : n + (c.unreadCount ?? 0)), 0);
+}
+
+/** Quiet time before an open chat is marked read, so a burst of messages makes one request. */
+export const MARK_READ_DEBOUNCE_MS = 1000;
+
+/**
+ * Marks the open chat read on the server (`POST /chats/:id/read`, which also clears it on the user's other devices) while
+ * it has unread agent messages AND the page is visible: debounced, and again when the tab becomes visible. A hidden tab
+ * never marks anything read.
+ */
+export function useMarkChatRead(threadId: string, unreadCount: number, newestAt: string | undefined) {
+  const qc = useQueryClient();
+  const inflight = useRef(false);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `newestAt` re-arms the timer when a message arrives
+  useEffect(() => {
+    if (!unreadCount) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const run = () => {
+      if (document.visibilityState !== 'visible' || inflight.current) return;
+      inflight.current = true;
+      post(`/chats/${threadId}/read`, {})
+        .catch(() => undefined)
+        .finally(() => {
+          inflight.current = false;
+          void qc.invalidateQueries({ queryKey: ['chats'] });
+        });
+    };
+    const arm = () => {
+      clearTimeout(timer);
+      if (document.visibilityState === 'visible') timer = setTimeout(run, MARK_READ_DEBOUNCE_MS);
+    };
+    arm();
+    document.addEventListener('visibilitychange', arm);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener('visibilitychange', arm);
+    };
+  }, [threadId, unreadCount, newestAt, qc]);
 }

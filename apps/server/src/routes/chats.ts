@@ -1,4 +1,9 @@
-import { ArchiveAllChatsRequestSchema, ChatParamsSchema, CreateChatRequestSchema } from '@aom/shared';
+import {
+  ArchiveAllChatsRequestSchema,
+  ChatParamsSchema,
+  CreateChatRequestSchema,
+  MarkChatReadRequestSchema,
+} from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
 import { requireUser } from '../auth/guards.ts';
 import {
@@ -7,6 +12,7 @@ import {
   deleteChat,
   getChat,
   listChats,
+  markChatRead,
   setChatArchived,
 } from '../commands/chats.ts';
 import type { Ctx } from '../context.ts';
@@ -48,6 +54,15 @@ export function chatRoutes(ctx: Ctx) {
       const s = await requireUser(ctx, req);
       return { chat: await setChatArchived(ctx, s.user, req.params.id, false) };
     });
+
+    app.post(
+      '/api/chats/:id/read',
+      { schema: { params: ChatParamsSchema, body: MarkChatReadRequestSchema.nullish() } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        return { chat: await markChatRead(ctx, s.user, req.params.id, req.body?.upTo) };
+      },
+    );
 
     app.delete('/api/chats/:id', { schema: { params: ChatParamsSchema } }, async (req, reply) => {
       const s = await requireUser(ctx, req);

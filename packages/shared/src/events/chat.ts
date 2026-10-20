@@ -20,6 +20,11 @@ export const chatEvents = [
   defineEvent('ChatArchived', z.object({ threadId: Id, userId: Id })),
   /** Restore a closed chat to the user's list. */
   defineEvent('ChatRestored', z.object({ threadId: Id, userId: Id })),
+  /**
+   * The user has read the chat up to `readUpTo` (the creation time of the newest message they saw). Per user, synced
+   * across their devices, monotonic (the projection never moves the marker back). Audience `user`: only they see it.
+   */
+  defineEvent('ChatRead', z.object({ threadId: Id, userId: Id, readUpTo: z.iso.datetime() })),
   /** Delete: permanent. Only the creator, and not for a chat linked to a card (its messages are card history). */
   defineEvent('ChatDeleted', z.object({ threadId: Id, deletedBy: Id })),
 ] as const;
