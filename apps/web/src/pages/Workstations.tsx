@@ -96,14 +96,19 @@ export function Workstations() {
         title="Workstations"
         sub="The machines that run your agents."
         actions={
-          <>
-            <Button variant="secondary" onClick={() => setPairOpen(true)}>
+          <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto">
+            <Button variant="secondary" className="max-sm:min-h-11" onClick={() => setPairOpen(true)}>
               Pair workstation
             </Button>
-            <Button variant="primary" data-testid="add-workstation-button" onClick={() => setAddOpen(true)}>
+            <Button
+              variant="primary"
+              className="max-sm:min-h-11"
+              data-testid="add-workstation-button"
+              onClick={() => setAddOpen(true)}
+            >
               Add a workstation
             </Button>
-          </>
+          </div>
         }
       />
       {me.data?.activeOrg?.simulation && (
@@ -219,7 +224,7 @@ export function WorkstationCard({
   return (
     <li data-testid={`workstation-${w.name}`}>
       <Panel>
-        <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-3">
           <button
             type="button"
             data-testid="workstation-toggle"
@@ -227,7 +232,7 @@ export function WorkstationCard({
             aria-controls={bodyId}
             aria-label={`${expanded ? 'Hide' : 'Show'} details of ${w.name}`}
             onClick={() => setExpanded(!expanded)}
-            className="group -m-1 flex min-w-0 flex-1 items-center gap-2 rounded-control p-1 text-left focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:outline-none"
+            className="group -m-1 flex min-h-11 min-w-0 flex-1 basis-full items-center gap-2 rounded-control p-1 text-left sm:basis-0 focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:outline-none"
           >
             <ChevronRight
               aria-hidden="true"
@@ -235,7 +240,7 @@ export function WorkstationCard({
             />
             <span className="min-w-0">
               <span className="block text-lg font-semibold text-fg">{w.name}</span>
-              <span className="block text-sm text-muted">
+              <span className="block text-sm break-words text-muted">
                 {[w.platform, w.hostname, w.runnerVersion && `runner ${w.runnerVersion}`]
                   .filter(Boolean)
                   .join(' · ')}
@@ -243,7 +248,7 @@ export function WorkstationCard({
               </span>
             </span>
           </button>
-          <div className="flex items-center gap-3">
+          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:gap-3 [&_a]:max-sm:min-h-11 [&_button]:max-sm:min-h-11">
             {!admin && <CheckForUpdates w={w} />}
             <RunnerUpdateBadge update={w.runnerUpdate} />
             {w.runnerPin && (
