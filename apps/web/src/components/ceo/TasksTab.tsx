@@ -2,6 +2,7 @@ import type { CeoTaskDtoApi } from '@aom/shared';
 import { type FormEvent, useState } from 'react';
 import { Link } from 'react-router';
 import { useCeoTasks, useCreateCeoTask, usePatchCeoTask } from '../../api/queries/ceo.ts';
+import { ceoChatPath } from '../../lib/openCeoChat.ts';
 import { formatDateTime } from '../../lib/time.ts';
 import { Badge, Button, ErrorBox, Panel, Spinner, TextArea, TextInput } from '../ui.tsx';
 
@@ -36,7 +37,7 @@ function TaskRow({ t }: { t: CeoTaskDtoApi }) {
         {t.threadId && (
           <>
             {' · '}
-            <Link to={`/chat/${t.threadId}`} className="text-brand-text hover:underline">
+            <Link to={ceoChatPath(t.threadId)} className="text-brand-text hover:underline">
               Open the chat
             </Link>
           </>

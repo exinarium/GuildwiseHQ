@@ -8,8 +8,9 @@ import type {
   CeoStatusDto,
   CeoTaskDtoApi,
 } from '@aom/shared';
+import { ChatsResponseSchema } from '@aom/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { del, get, patch, post, put, qs } from '../client.ts';
+import { ApiError, del, get, patch, post, put, qs } from '../client.ts';
 
 export const ceoKey = ['ceo'] as const;
 
@@ -132,11 +133,44 @@ export const usePatchCeoTask = () =>
 export const useCeoChat = () =>
   useMutation({ mutationFn: () => post<{ threadId: string }>('/ceo/chat', {}) });
 
-/** "New chat": the CEO's standing chat becomes a fresh thread; earlier ones stay in the chat list. */
+/**
+ * "Clear" / "New chat": the CEO's standing chat is archived (it stays under Earlier) and a fresh one starts. 409
+ * `turn_in_flight` while the CEO is still answering (see `isTurnInFlight`).
+ */
 export const useNewCeoChat = () => {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: () => post<{ threadId: string }>('/ceo/chat/new', {}),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['chats'] }),
+  });
+};
+
+/** The server refused a new CEO chat because a turn is running or queued. */
+export const isTurnInFlight = (e: unknown): boolean =>
+  e instanceof ApiError && (e.code === 'turn_in_flight' || e.status === 409);
+
+export const TURN_IN_FLIGHT_TEXT =
+  'The CEO is still answering. Wait for the reply, or press Stop, then try again.';
+
+/**
+ * "New chat" from the plus button or the page: reuses the standing chat when it is still empty (no thread piles up on
+ * every tap), else starts a fresh one (which archives the old one).
+ */
+export const useStartCeoChat = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (): Promise<{ threadId: string; reused: boolean }> => {
+      const { threadId } = await post<{ threadId: string }>('/ceo/chat', {});
+      const chats = await qc.fetchQuery({
+        queryKey: ['chats'],
+        queryFn: async () => (await get('/chats', ChatsResponseSchema)).chats,
+        staleTime: 0,
+      });
+      const cur = chats.find((c) => c.threadId === threadId);
+      if (cur && cur.lastMessageAt === null) return { threadId, reused: true };
+      const fresh = await post<{ threadId: string }>('/ceo/chat/new', {});
+      return { threadId: fresh.threadId, reused: false };
+    },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['chats'] }),
   });
 };

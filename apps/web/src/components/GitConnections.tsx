@@ -175,7 +175,7 @@ export function SshPanel({
           Default for new clones
           <select
             aria-label={`Default access method for ${FORGE_LABELS[provider]}`}
-            className="h-9 rounded-control border border-control bg-surface px-2 text-sm text-fg"
+            className="h-9 rounded-control border border-control bg-surface px-2 text-sm text-fg [@media(pointer:coarse)]:h-11"
             value={method}
             onChange={(e) => setMethod(e.target.value as GitAccessMethod)}
           >
@@ -187,7 +187,7 @@ export function SshPanel({
           Key
           <select
             aria-label={`SSH key of ${FORGE_LABELS[provider]}`}
-            className="h-9 rounded-control border border-control bg-surface px-2 text-sm text-fg"
+            className="h-9 rounded-control border border-control bg-surface px-2 text-sm text-fg [@media(pointer:coarse)]:h-11"
             value={key}
             onChange={(e) => setKey(e.target.value as SshKeyMode)}
           >
@@ -323,7 +323,7 @@ export function GitConnectionsPanel({ w }: { w: WorkstationDto }) {
           return (
             <li key={p} data-testid={`git-${p}`}>
               <div className="flex flex-wrap items-center gap-2">
-                <span className="w-40 font-medium text-fg">{FORGE_LABELS[p]}</span>
+                <span className="font-medium text-fg max-sm:min-w-28 sm:w-40">{FORGE_LABELS[p]}</span>
                 <ConnectionBadge c={c} />
                 {c?.host &&
                   c.host !== 'github.com' &&

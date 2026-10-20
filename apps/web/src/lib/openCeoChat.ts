@@ -20,6 +20,9 @@ export function prefillMessage(o: OpenCeoChatOptions): string {
   return `${text}\n\nContext (from the page I was on):\n${o.context.map((c) => `- ${c}`).join('\n')}`;
 }
 
+/** Every CEO thread lives on the CEO chat page (`/chat/:id` redirects CEO threads here). */
+export const ceoChatPath = (threadId: string) => `/ceo-chat/${threadId}`;
+
 /** Navigates to the CEO thread with the prefill in the router state. */
 export function openCeoChat(
   nav: (to: string, opts?: { state?: CeoChatLocationState }) => void,
@@ -27,5 +30,5 @@ export function openCeoChat(
   o: OpenCeoChatOptions = {},
 ): void {
   const msg = prefillMessage(o);
-  nav(`/chat/${threadId}`, msg ? { state: { ceoPrefill: msg } } : {});
+  nav(ceoChatPath(threadId), msg ? { state: { ceoPrefill: msg } } : {});
 }

@@ -1,19 +1,38 @@
-import { History, MessageSquareOff, Plus, Trash2 } from 'lucide-react';
+import { History, MessageSquareOff, Plus } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router';
-import { useCeoChat, useCeoStatus, useNewCeoChat } from '../api/queries/ceo.ts';
-import { useChats, useDeleteChat } from '../api/queries/chats.ts';
+import {
+  isTurnInFlight,
+  TURN_IN_FLIGHT_TEXT,
+  useCeoChat,
+  useCeoStatus,
+  useNewCeoChat,
+  useStartCeoChat,
+} from '../api/queries/ceo.ts';
+import { useChats } from '../api/queries/chats.ts';
 import { ChatPanel } from '../components/ChatPanel.tsx';
+import { CeoChatHistory } from '../components/ceo/CeoChatHistory.tsx';
+import { AgentAvatar } from '../components/Face.tsx';
 import { PinnedScreen } from '../components/PinnedScreen.tsx';
 import { BottomSheet } from '../components/ui/BottomSheet.tsx';
-import { Button, ConfirmDialog, EmptyState, ErrorBox, PageSkeleton, useToast } from '../components/ui.tsx';
-import type { CeoChatLocationState } from '../lib/openCeoChat.ts';
+import {
+  Button,
+  Callout,
+  ConfirmDialog,
+  EmptyState,
+  ErrorBox,
+  Menu,
+  MenuItem,
+  PageSkeleton,
+  useToast,
+} from '../components/ui.tsx';
+import { type CeoChatLocationState, ceoChatPath } from '../lib/openCeoChat.ts';
 import { useActiveOrgRole } from '../lib/orgRole.ts';
-import { formatDateTime } from '../lib/time.ts';
+import { usePageTitle } from '../lib/usePageTitle.ts';
 
 /**
- * The CEO chat as a page (not an overlay): the conversation, "New chat", "Clear chat" and the earlier CEO chats.
- * `/ceo-chat` opens the standing chat; `/ceo-chat/:threadId` an earlier one.
+ * The CEO chat as a page (not an overlay): the conversation, "New chat", "Clear chat" and the earlier chats (a side list on
+ * desktop, a sheet on phones). `/ceo-chat` opens the standing chat; `/ceo-chat/:threadId` an earlier one.
  */
 export function CeoChat() {
   const { threadId } = useParams();
@@ -22,16 +41,18 @@ export function CeoChat() {
   const owner = useActiveOrgRole() === 'owner';
   const status = useCeoStatus(owner);
   const standing = useCeoChat();
-  const fresh = useNewCeoChat();
-  const remove = useDeleteChat();
+  const startNew = useStartCeoChat();
+  const clearChat = useNewCeoChat();
   const chats = useChats();
   const prefill = (useLocation().state as CeoChatLocationState | null)?.ceoPrefill;
   const [standingId, setStandingId] = useState<string | null>(null);
   const [history, setHistory] = useState(false);
   const [clearing, setClearing] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
   const asked = useRef(false);
   const hired = !!status.data?.hired && !!status.data.agent;
   const ceoName = status.data?.agent?.name ?? 'your CEO';
+  usePageTitle(`Chat with ${ceoName}`);
 
   // Find (or create) the standing chat once; `/ceo-chat` then goes to it.
   const { mutate: openStanding } = standing;
@@ -42,7 +63,7 @@ export function CeoChat() {
       onSuccess: (r) => {
         setStandingId(r.threadId);
         if (!threadId)
-          nav(`/ceo-chat/${r.threadId}`, { replace: true, state: prefill ? { ceoPrefill: prefill } : null });
+          nav(ceoChatPath(r.threadId), { replace: true, state: prefill ? { ceoPrefill: prefill } : null });
       },
     });
   }, [owner, hired, threadId, nav, openStanding, prefill]);
@@ -61,78 +82,114 @@ export function CeoChat() {
   if (standing.isError) return <ErrorBox error={standing.error} onRetry={() => standing.reset()} />;
   if (!threadId) return <PageSkeleton label="Opening the chat" panels={1} />;
 
-  const ceoChats = (chats.data ?? []).filter((c) => c.agentRole === 'ceo' && !c.archived);
+  const ceoChats = (chats.data ?? []).filter((c) => c.agentRole === 'ceo');
   const isStanding = threadId === standingId;
-
+  const agent = status.data?.agent;
   const goStanding = () => nav('/ceo-chat', { replace: true });
-  const newChat = () =>
-    fresh.mutate(undefined, {
+  const fail = (e: unknown) => setNotice(isTurnInFlight(e) ? TURN_IN_FLIGHT_TEXT : null);
+
+  const newChat = () => {
+    setNotice(null);
+    startNew.mutate(undefined, {
       onSuccess: (r) => {
         setStandingId(r.threadId);
         setHistory(false);
-        nav(`/ceo-chat/${r.threadId}`);
+        if (r.reused) toast.info('This chat is still empty, so you can start here.');
+        if (r.threadId !== threadId) nav(ceoChatPath(r.threadId));
       },
+      onError: fail,
     });
-  const clear = () =>
-    remove.mutate(threadId, {
-      onSuccess: () => {
+  };
+  const clear = () => {
+    setNotice(null);
+    clearChat.mutate(undefined, {
+      onSuccess: (r) => {
         setClearing(false);
-        toast.success('Chat cleared');
-        // The standing chat is gone: opening it again creates a clean one.
-        asked.current = false;
-        setStandingId(null);
-        goStanding();
+        setStandingId(r.threadId);
+        toast.success('Chat cleared. The old one is under Earlier chats.');
+        nav(ceoChatPath(r.threadId));
+      },
+      onError: (e) => {
+        setClearing(false);
+        fail(e);
       },
     });
+  };
+  const open = (id: string) => {
+    setHistory(false);
+    nav(ceoChatPath(id));
+  };
 
   return (
     <PinnedScreen
-      desktopClassName="mx-auto h-[calc(100dvh-8.5rem)] min-h-[26rem] max-w-3xl"
+      desktopClassName="mx-auto h-[calc(100dvh-8.5rem)] min-h-[26rem] max-w-5xl"
       testId="ceo-chat-screen"
     >
-      <div className="mb-2 flex shrink-0 flex-wrap items-center gap-2">
-        <h1 className="mr-auto min-w-0 truncate text-lg font-semibold text-fg">Chat with {ceoName}</h1>
-        <Button
-          size="sm"
-          className="min-h-11 md:min-h-0"
-          data-testid="ceo-chat-history"
-          onClick={() => setHistory(true)}
+      <div className="flex min-h-0 flex-1 gap-5">
+        <aside
           aria-label="Earlier chats"
+          className="hidden w-64 shrink-0 flex-col gap-2 overflow-y-auto overscroll-contain border-r border-line pr-4 md:flex"
+          data-testid="ceo-chat-side"
         >
-          <History aria-hidden="true" className="size-4" />
-          <span className="max-sm:sr-only">Earlier</span>
-        </Button>
-        <Button
-          size="sm"
-          className="min-h-11 md:min-h-0"
-          data-testid="ceo-chat-new"
-          disabled={fresh.isPending}
-          onClick={newChat}
-        >
-          <Plus aria-hidden="true" className="size-4" />
-          <span>New chat</span>
-        </Button>
-        <Button
-          size="sm"
-          variant="danger-ghost"
-          className="min-h-11 md:min-h-0"
-          data-testid="ceo-chat-clear"
-          onClick={() => setClearing(true)}
-        >
-          <Trash2 aria-hidden="true" className="size-4" />
-          <span>Clear chat</span>
-        </Button>
+          <h2 className="text-sm font-semibold text-muted">Chats</h2>
+          <CeoChatHistory chats={ceoChats} threadId={threadId} standingId={standingId} onOpen={open} />
+        </aside>
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <div className="mb-2 flex shrink-0 items-center gap-2 border-b border-line pb-2">
+            {agent && <AgentAvatar agentId={agent.id} name={agent.name} size={32} />}
+            <h1
+              aria-label={`Chat with ${ceoName}`}
+              className="mr-auto min-w-0 truncate text-lg font-semibold text-fg"
+            >
+              <span className="max-sm:hidden">Chat with </span>
+              {ceoName}
+            </h1>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="min-h-11 min-w-11 md:hidden"
+              data-testid="ceo-chat-history"
+              onClick={() => setHistory(true)}
+              aria-label="Earlier chats"
+            >
+              <History aria-hidden="true" className="size-5" />
+            </Button>
+            <Button
+              size="sm"
+              variant="primary"
+              data-testid="ceo-chat-new"
+              loading={startNew.isPending}
+              onClick={newChat}
+            >
+              <Plus aria-hidden="true" className="size-4" />
+              <span>New chat</span>
+            </Button>
+            <Menu label="More chat actions">
+              <MenuItem
+                onSelect={() => setClearing(true)}
+                description="Archive this chat and start a clean one"
+              >
+                Clear chat
+              </MenuItem>
+            </Menu>
+          </div>
+          {notice && (
+            <Callout tone="warning" role="alert" data-testid="ceo-chat-busy">
+              {notice}
+            </Callout>
+          )}
+          <ErrorBox error={isTurnInFlight(startNew.error) ? null : startNew.error} />
+          {!isStanding && standingId && (
+            <p className="mb-2 shrink-0 text-xs text-subtle" data-testid="ceo-chat-earlier-note">
+              An earlier chat.{' '}
+              <button type="button" className="underline" onClick={goStanding}>
+                Go to the current chat
+              </button>
+            </p>
+          )}
+          <ChatPanel key={threadId} threadId={threadId} {...(prefill ? { initialDraft: prefill } : {})} />
+        </div>
       </div>
-      <ErrorBox error={fresh.error} />
-      {!isStanding && standingId && (
-        <p className="mb-2 shrink-0 text-xs text-subtle" data-testid="ceo-chat-earlier-note">
-          An earlier chat.{' '}
-          <button type="button" className="underline" onClick={goStanding}>
-            Go to the current chat
-          </button>
-        </p>
-      )}
-      <ChatPanel key={threadId} threadId={threadId} {...(prefill ? { initialDraft: prefill } : {})} />
 
       <BottomSheet
         open={history}
@@ -140,43 +197,17 @@ export function CeoChat() {
         title="Earlier chats with the CEO"
         testId="ceo-chat-history-sheet"
       >
-        <ul className="flex flex-col gap-2" data-testid="ceo-chat-list">
-          {ceoChats.length === 0 && <li className="text-sm text-subtle">No chats yet.</li>}
-          {ceoChats.map((c) => (
-            <li key={c.threadId}>
-              <button
-                type="button"
-                aria-current={c.threadId === threadId ? 'page' : undefined}
-                onClick={() => {
-                  setHistory(false);
-                  nav(`/ceo-chat/${c.threadId}`);
-                }}
-                className="flex min-h-12 w-full items-center justify-between gap-2 rounded-control border border-line px-3 py-2 text-left text-sm hover:bg-sunken aria-[current=page]:border-brand"
-              >
-                <span className="truncate">
-                  {c.threadId === standingId
-                    ? 'Current chat'
-                    : formatDateTime(c.lastMessageAt ?? c.createdAt)}
-                </span>
-                <span className="shrink-0 text-xs text-subtle">
-                  {c.lastMessageAt ? formatDateTime(c.lastMessageAt) : 'No messages'}
-                </span>
-              </button>
-            </li>
-          ))}
-        </ul>
+        <CeoChatHistory chats={ceoChats} threadId={threadId} standingId={standingId} onOpen={open} />
       </BottomSheet>
       <ConfirmDialog
         open={clearing}
         onOpenChange={setClearing}
         title="Clear this chat?"
-        description={`The whole conversation is removed for good and ${ceoName} starts a clean one. This cannot be undone. Use New chat to keep it.`}
+        description={`${ceoName} starts a clean chat. This one is archived, not deleted: find it under Earlier chats.`}
         confirmLabel="Clear chat"
-        pending={remove.isPending}
+        pending={clearChat.isPending}
         onConfirm={clear}
-      >
-        <ErrorBox error={remove.error} />
-      </ConfirmDialog>
+      />
     </PinnedScreen>
   );
 }
