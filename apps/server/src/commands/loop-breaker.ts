@@ -235,12 +235,12 @@ export function rejectionBackoffEvents(ctx: Ctx, card: Row): AppendInput[] {
   ];
 }
 
-/** Question shifts (answers given to the agents asked) about one card since `since`, whatever the wording of the questions. */
+/** Question shifts (answers given to the agents asked) about one card since `since`, whatever the wording of the questions; shifts the runner refused (outcome 'rejected', no agent ran) do not count. */
 export async function questionShiftCount(db: Queryable, cardId: string, since: Date): Promise<number> {
   const r = await one<{ n: number }>(
     db,
     `SELECT count(*)::int AS n FROM shifts s JOIN desk_items d ON d.id = s.desk_item_id
-      WHERE s.kind='question' AND d.card_id=$1 AND s.started_at > $2`,
+      WHERE s.kind='question' AND s.outcome IS DISTINCT FROM 'rejected' AND d.card_id=$1 AND s.started_at > $2`,
     [cardId, since],
   );
   return Number(r?.n ?? 0);

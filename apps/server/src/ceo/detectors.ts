@@ -69,7 +69,7 @@ export async function detectLoops(db: Queryable): Promise<Detected[]> {
     `SELECT c.id, c.ref, c.title, c.org_id, c.project_id, p.key, count(*)::int AS n, max(s.started_at) AS last_at
        FROM shifts s JOIN desk_items d ON d.id = s.desk_item_id JOIN cards c ON c.id = d.card_id
        JOIN projects p ON p.id = c.project_id
-      WHERE s.kind = 'question' AND s.started_at > now() - make_interval(hours => $1) AND c.status NOT IN ('done','cancelled')
+      WHERE s.kind = 'question' AND s.outcome IS DISTINCT FROM 'rejected' AND s.started_at > now() - make_interval(hours => $1) AND c.status NOT IN ('done','cancelled')
         AND p.status = 'active'
       GROUP BY c.id, c.ref, c.title, c.org_id, c.project_id, p.key HAVING count(*) >= $2`,
     [QUESTION_LOOP.windowHours, QUESTION_LOOP.shifts],
