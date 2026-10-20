@@ -234,7 +234,7 @@ describe('mobile chat composer', () => {
     );
     wrap(<ChatPanel threadId="t1" agentName="Ada" online />);
     const form = await screen.findByRole('form', { name: 'Compose' });
-    expect(form.className).toContain('max-md:sticky');
+    expect(form.className).toContain('shrink-0');
     await userEvent.type(screen.getByLabelText('Message'), 'hi there');
     await userEvent.click(screen.getByRole('button', { name: 'Send' }));
     expect(sendChat).toHaveBeenCalledWith('t1', 'hi there', expect.any(String));

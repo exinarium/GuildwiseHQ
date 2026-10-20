@@ -45,7 +45,7 @@ const setup = (request?: Parameters<typeof AskDevOpsButton>[0]['request']) =>
       <MemoryRouter initialEntries={['/p/TOY/board?x=1']}>
         <AskDevOpsProvider>
           <Routes>
-            <Route path="/chat/:id" element={<Where />} />
+            <Route path="/ceo-chat/:id" element={<Where />} />
             <Route path="*" element={<AskDevOpsButton {...(request ? { request } : {})} />} />
           </Routes>
         </AskDevOpsProvider>
@@ -83,7 +83,7 @@ describe('Ask DevOps goes through the CEO', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Ask Cora' }));
     await waitFor(() => expect(screen.getByTestId('where')).toBeInTheDocument());
     const where = screen.getByTestId('where').textContent ?? '';
-    expect(where).toContain(`/chat/${ID(77)}`);
+    expect(where).toContain(`/ceo-chat/${ID(77)}`);
     expect(where).toContain('Ask DevOps: install docker');
     expect(where).toContain('Card: TOY-7 Login');
     expect(where).toContain('Last error: docker: command not found');

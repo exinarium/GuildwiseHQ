@@ -1,4 +1,4 @@
-import type { ThreadMessagesQuery, ThreadMessagesResponse } from '@aom/shared';
+import type { ThreadMessageDto, ThreadMessagesQuery, ThreadMessagesResponse } from '@aom/shared';
 import { iso, one, type Queryable, rows } from '../db/sql.ts';
 import { notFound } from '../errors.ts';
 
@@ -29,26 +29,51 @@ export async function threadMessages(
     db,
     `SELECT m.*, u.display_name AS user_name, a.name AS agent_name FROM thread_messages m
        LEFT JOIN users u ON u.id = m.author_user_id LEFT JOIN agents a ON a.id = m.author_agent_id
-      WHERE m.thread_id = $1 AND ($2::timestamptz IS NULL OR m.created_at < $2)
-      ORDER BY m.created_at DESC, m.event_seq DESC LIMIT $3`,
-    [threadId, q.before ?? null, q.limit + 1],
+      WHERE m.thread_id = $1
+        AND CASE
+              WHEN $4::uuid IS NOT NULL THEN (m.created_at, m.event_seq, m.id) < (
+                SELECT c.created_at, c.event_seq, c.id FROM thread_messages c WHERE c.id = $4 AND c.thread_id = $1)
+              ELSE ($2::timestamptz IS NULL OR m.created_at < $2)
+            END
+      ORDER BY m.created_at DESC, m.event_seq DESC, m.id DESC LIMIT $3`,
+    [threadId, q.before ?? null, q.limit + 1, q.beforeId ?? null],
   );
   const page = list.slice(0, q.limit).reverse();
   return {
     threadId,
     kind: t.kind,
     hasMore: list.length > q.limit,
-    messages: page.map((m) => ({
-      id: m.id,
-      threadId,
-      authorKind: m.author_kind,
-      authorUserId: m.author_user_id,
-      authorAgentId: m.author_agent_id,
-      authorName: m.user_name ?? m.agent_name ?? null,
-      kind: m.kind,
-      body: m.body,
-      data: m.data,
-      createdAt: iso(m.created_at) as string,
-    })),
+    messages: page.map(messageDto),
   };
+}
+
+// biome-ignore lint/suspicious/noExplicitAny: a raw row
+function messageDto(m: any): ThreadMessageDto {
+  return {
+    id: m.id,
+    threadId: m.thread_id,
+    authorKind: m.author_kind,
+    authorUserId: m.author_user_id,
+    authorAgentId: m.author_agent_id,
+    authorName: m.user_name ?? m.agent_name ?? null,
+    kind: m.kind,
+    body: m.body,
+    data: m.data,
+    createdAt: iso(m.created_at) as string,
+  };
+}
+
+/** One stored message as `threadMessages` returns it (no access check: the caller just wrote it). */
+export async function threadMessageById(
+  db: Queryable,
+  messageId: string,
+): Promise<ThreadMessageDto | undefined> {
+  const m = await one(
+    db,
+    `SELECT m.*, u.display_name AS user_name, a.name AS agent_name FROM thread_messages m
+       LEFT JOIN users u ON u.id = m.author_user_id LEFT JOIN agents a ON a.id = m.author_agent_id
+      WHERE m.id = $1`,
+    [messageId],
+  );
+  return m ? messageDto(m) : undefined;
 }

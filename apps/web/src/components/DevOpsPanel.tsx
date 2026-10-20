@@ -78,7 +78,7 @@ export function DevOpsPanel({ w }: { w: WorkstationDto }) {
             ['sudo', 'Elevated privileges (sudo)'],
           ] as const
         ).map(([key, label]) => (
-          <label key={key} className="flex items-center gap-2">
+          <label key={key} className="flex items-center gap-3 [@media(pointer:coarse)]:min-h-11">
             <input
               type="checkbox"
               checked={access[key]}

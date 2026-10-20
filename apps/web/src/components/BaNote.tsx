@@ -1,5 +1,6 @@
 import { type DeskItemDto, type FloorDigest, formatMoney, SIGNAL_LABEL } from '@aom/shared';
 import { Link } from 'react-router';
+import { ceoChatPath } from '../lib/openCeoChat.ts';
 import { Badge } from './ui.tsx';
 
 /** Part B: the BA's context on an item, how the routing handled it, and the link to the standing BA chat. */
@@ -30,7 +31,7 @@ export function BaNote({ item }: { item: DeskItemDto }) {
       {item.chatThreadId && (
         <p className="mt-2 text-xs">
           <Link
-            to={`/chat/${item.chatThreadId}`}
+            to={item.subkind === 'ceo_report' ? ceoChatPath(item.chatThreadId) : `/chat/${item.chatThreadId}`}
             className="font-medium text-brand-text hover:underline"
             data-testid="ba-chat-link"
           >

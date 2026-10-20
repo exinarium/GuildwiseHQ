@@ -50,7 +50,7 @@ export function ShiftLimit({ w }: { w: WorkstationDto }) {
       data-testid="shift-limit"
     >
       <div className="flex flex-wrap items-end gap-2">
-        <div className="w-56">
+        <div className="w-full sm:w-56">
           <Select
             label="Shifts at once"
             value={mode}

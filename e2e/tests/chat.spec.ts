@@ -39,7 +39,7 @@ test('AC1: chat with an agent streams tokens to the browser and saves the conver
   await expect(drawer.getByTestId('chat-panel')).toBeVisible();
   await expect(drawer.getByTestId('chat-offline')).toHaveCount(0);
 
-  await drawer.getByLabel('Message').fill('hello there');
+  await drawer.getByLabel('Message', { exact: true }).fill('hello there');
   await drawer.getByRole('button', { name: 'Send' }).click();
   // Tokens arrive one at a time: a partial reply is visible before the final message lands.
   const streaming = drawer.getByTestId('chat-streaming');
@@ -77,7 +77,7 @@ test('AC1b: the saved conversation reappears after a reload and continues in the
   const drawer = await openChat();
   await drawer.getByTestId(`chat-row-${reviewerName}`).getByRole('button').first().click();
   await expect(drawer.getByTestId('chat-message')).toHaveCount(2);
-  await drawer.getByLabel('Message').fill('and again');
+  await drawer.getByLabel('Message', { exact: true }).fill('and again');
   await drawer.getByRole('button', { name: 'Send' }).click();
   await expect(drawer.getByTestId('chat-message').last()).toContainText('(turn 2)', { timeout: 30_000 });
   expect(await messages(threadId)).toHaveLength(4);
@@ -96,7 +96,7 @@ test('AC2: with the workstation offline the chat says so and nothing is queued',
   const drawer = await openChat();
   await drawer.getByTestId(`chat-row-${reviewerName}`).getByRole('button').first().click();
   await expect(drawer.getByTestId('chat-offline')).toContainText('offline');
-  await drawer.getByLabel('Message').fill('are you there?');
+  await drawer.getByLabel('Message', { exact: true }).fill('are you there?');
   await drawer.getByRole('button', { name: 'Send' }).click();
   await expect(drawer.getByTestId('chat-error')).toContainText('Nothing is queued');
   await page.screenshot({ path: '/tmp/aom-e2e-chat-offline.png' });
@@ -111,7 +111,7 @@ test('AC2: with the workstation offline the chat says so and nothing is queued',
   // Back online: the banner clears and the same message now goes through.
   startRunner({ AOM_MOCK_CHAT_TOKEN_MS: '150' });
   await expect(drawer.getByTestId('chat-offline')).toHaveCount(0, { timeout: 30_000 });
-  await drawer.getByLabel('Message').fill('welcome back');
+  await drawer.getByLabel('Message', { exact: true }).fill('welcome back');
   await drawer.getByRole('button', { name: 'Send' }).click();
   await expect(drawer.getByTestId('chat-message').last()).toContainText('welcome back', { timeout: 30_000 });
   await expect(drawer.getByTestId('chat-message').last()).toContainText('(turn 3)', { timeout: 30_000 });
@@ -126,7 +126,7 @@ test('AC3: a conversation opens as a page on a phone-sized screen', async ({ bro
   await p.goto(`/chat/${threadId}`);
   await expect(p.getByRole('heading', { name: 'Chat with Linus' })).toBeVisible();
   await expect(p.getByTestId('chat-message')).toHaveCount(6);
-  await expect(p.getByLabel('Message')).toBeVisible();
+  await expect(p.getByLabel('Message', { exact: true })).toBeVisible();
   await p.screenshot({ path: '/tmp/aom-e2e-chat-phone.png' });
   await ctx.close();
 });

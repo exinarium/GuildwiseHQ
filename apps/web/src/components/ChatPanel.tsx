@@ -1,8 +1,10 @@
-import { type ModelChoice, modelChoiceLabel } from '@aom/shared';
+import type { ModelChoice, ThreadMessagesResponse } from '@aom/shared';
 import { useQueryClient } from '@tanstack/react-query';
-import { type FormEvent, useEffect, useRef, useState } from 'react';
+import { MessagesSquare } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 import { useCeoChatState } from '../api/queries/ceo-chat.ts';
-import { useChat, useThreadMessages } from '../api/queries/chats.ts';
+import { useChat, useMarkChatRead, useThreadMessages } from '../api/queries/chats.ts';
+import { applyActivity, applyDelta } from '../lib/chatSegments.ts';
 import { newId } from '../lib/secure.ts';
 import { getSocket } from '../ws/socket.ts';
 import {
@@ -15,19 +17,14 @@ import {
 } from './ceo/CeoChatExtras.tsx';
 import { ModelChip } from './ceo/ModelChip.tsx';
 import { useCeoName } from './ceo/useCeoName.ts';
-import { AgentAvatar } from './Face.tsx';
-import { Button, Callout, ErrorBox, Spinner, TextArea } from './ui.tsx';
+import { Composer } from './chat/Composer.tsx';
+import { MessageList, type StreamTurn } from './chat/MessageList.tsx';
+import { useDraft } from './chat/useDraft.ts';
+import { useOlderMessages } from './chat/useOlderMessages.ts';
+import { Callout, ErrorBox, Spinner } from './ui.tsx';
 
 const OFFLINE_TEXT =
   'This agent is offline: its workstation is not connected. Nothing is queued, so send your message again once it is back.';
-
-/** The model that answered, from the message data (a name, or a `{runtime, model, effort}` choice). */
-function answeredWith(data: Record<string, unknown>): string | null {
-  const m = data.model;
-  if (typeof m === 'string') return m;
-  if (m && typeof m === 'object' && 'model' in m && 'runtime' in m) return modelChoiceLabel(m as ModelChoice);
-  return null;
-}
 
 /** Human text for the `chat.error` reasons the server sends (docs/ARCHITECTURE.md section 14). */
 export function chatErrorText(reason: string): string {
@@ -51,7 +48,17 @@ export function chatErrorText(reason: string): string {
   }
 }
 
-/** One conversation: saved history, streamed reply, offline banner, send/stop. */
+const CEO_SUGGESTIONS = [
+  "What's the status of my projects?",
+  'What needs my decision?',
+  'Plan a new feature',
+  'What did the team ship this week?',
+];
+
+/** The turn being streamed: `finished` once chat.done arrived and the stored message is on its way. */
+type Stream = StreamTurn & { finished?: boolean; doneId?: string };
+
+/** One conversation: saved history, streamed turn with tool activity, offline banner, composer. */
 export function ChatPanel({
   threadId,
   agentName,
@@ -78,39 +85,68 @@ export function ChatPanel({
   const ceoName = useCeoName(retiredDevops || retiredBaReports);
   const messages = useThreadMessages(threadId);
   const qc = useQueryClient();
-  const [draft, setDraft] = useState(initialDraft ?? '');
-  /** null = idle; '' = sent, waiting for the first token; otherwise the reply so far. */
-  const [streaming, setStreaming] = useState<string | null>(null);
+  const [draft, setDraft] = useDraft(threadId, initialDraft);
+  /** null = idle; otherwise the turn being answered (no segments yet = waiting for the first token). */
+  const [stream, setStream] = useState<Stream | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState<{ id: string; body: string } | null>(null);
   /** The CEO chat: a model chosen for the next message only. */
   const [messageModel, setMessageModel] = useState<ModelChoice | null>(null);
   /** The CEO's workstation is offline and the last message was queued. */
   const [queuedNotice, setQueuedNotice] = useState<{ workstationName?: string } | null>(null);
-  const log = useRef<HTMLDivElement>(null);
   const pendingRef = useRef(pending);
   pendingRef.current = pending;
 
   useEffect(() => {
-    setStreaming(null);
+    setStream(null);
     setError(null);
     setPending(null);
     return getSocket()?.listenChat(threadId, (ev) => {
-      if (ev.type === 'delta') setStreaming((s) => (s ?? '') + ev.text);
-      else if (ev.type === 'queued') {
+      if (ev.type === 'delta') {
+        setStream((s) => {
+          if (s?.finished) return s;
+          const cur = s ?? { segments: [], startedAt: Date.now() };
+          return { ...cur, segments: applyDelta(cur.segments, ev.text) };
+        });
+      } else if (ev.type === 'activity') {
+        setStream((s) => {
+          if (s?.finished) return s;
+          const cur = s ?? { segments: [], startedAt: Date.now() };
+          return { ...cur, segments: applyActivity(cur.segments, ev.activity) };
+        });
+      } else if (ev.type === 'disconnected') {
+        // Stop waiting on a reply that may never come; the stored history is refetched on reconnect. The user's sent
+        // message stays shown (the refetch confirms it).
+        setStream(null);
+      } else if (ev.type === 'queued') {
         // Saved, not running: the reply comes when the workstation is back.
-        setStreaming(null);
+        setStream(null);
         setQueuedNotice({ ...(ev.workstationName ? { workstationName: ev.workstationName } : {}) });
         void qc.invalidateQueries({ queryKey: ['thread', threadId] });
       } else if (ev.type === 'done') {
-        setStreaming(null);
         setQueuedNotice(null);
-        void qc.invalidateQueries({ queryKey: ['thread', threadId] });
+        const msg = ev.message;
+        if (msg) {
+          // The stored message came with it: swap in one step, no gap and no refetch flicker.
+          qc.setQueryData<ThreadMessagesResponse>(['thread', threadId], (old) =>
+            old && !old.messages.some((m) => m.id === msg.id)
+              ? { ...old, messages: [...old.messages, msg] }
+              : old,
+          );
+          setStream(null);
+          void qc.invalidateQueries({ queryKey: ['thread', threadId] });
+        } else {
+          // Keep the streamed turn on screen until the stored one is in the list (or the refetch finished).
+          setStream((s) => (s ? { ...s, finished: true, doneId: ev.messageId } : s));
+          void qc
+            .invalidateQueries({ queryKey: ['thread', threadId] })
+            .finally(() => setStream((s) => (s?.finished ? null : s)));
+        }
         void qc.invalidateQueries({ queryKey: ['chats'] });
       } else {
         // The message was not delivered (offline, busy...): take it back out of the thread and keep the text.
         const lost = pendingRef.current;
-        setStreaming(null);
+        setStream(null);
         setError(ev.reason);
         if (lost && ev.reason !== 'cancelled') {
           setPending(null);
@@ -118,7 +154,7 @@ export function ChatPanel({
         }
       }
     });
-  }, [threadId, qc]);
+  }, [threadId, qc, setDraft]);
 
   const initialSent = useRef(false);
   // biome-ignore lint/correctness/useExhaustiveDependencies: once, on open
@@ -132,24 +168,21 @@ export function ChatPanel({
       return;
     }
     setPending({ id, body: initialMessage });
-    setStreaming('');
+    setStream({ segments: [], startedAt: Date.now() });
   }, []);
 
-  const list = messages.data?.messages ?? [];
-  const showPending = pending && !list.some((m) => m.data.clientMsgId === pending.id);
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: scroll when the content changes
-  useEffect(() => {
-    if (log.current) log.current.scrollTop = log.current.scrollHeight;
-  }, [list.length, streaming, pending]);
-
+  const older = useOlderMessages(threadId, messages.data?.messages ?? [], messages.data?.hasMore ?? false);
+  const list = older.messages;
   const offline = online !== undefined ? !online : chat ? !chat.workstationOnline : false;
-  const busy = streaming !== null;
+  const busy = stream !== null && !stream.finished;
   const ceoState = useCeoChatState(threadId, isCeo, busy).data;
+  // New agent messages in the open, visible chat are marked read on the server (synced to the user's other devices).
+  useMarkChatRead(threadId, chat?.unreadCount ?? 0, list[list.length - 1]?.createdAt);
+  const doneStored = !!stream?.doneId && list.some((m) => m.id === stream.doneId);
+  const shownStream = stream && !doneStored ? stream : null;
 
-  const send = (e: FormEvent) => {
-    e.preventDefault();
-    const body = draft.trim();
+  const send = (text?: string) => {
+    const body = (text ?? draft).trim();
     if (!body || busy) return;
     const id = newId();
     const sock = getSocket();
@@ -163,11 +196,41 @@ export function ChatPanel({
     }
     setMessageModel(null);
     setPending({ id, body });
-    setStreaming('');
-    setDraft('');
+    setStream({ segments: [], startedAt: Date.now() });
+    if (text === undefined) setDraft('');
   };
 
   if (messages.isPending) return <Spinner label="Loading conversation" />;
+
+  const who = name ?? 'the agent';
+  const empty = isCeo ? (
+    <div className="mx-auto flex h-full max-w-xl flex-col items-center justify-center gap-4 px-2 py-8 text-center">
+      <span className="inline-flex size-12 items-center justify-center rounded-full bg-brand-soft text-brand-soft-fg">
+        <MessagesSquare aria-hidden="true" className="size-6" />
+      </span>
+      <div>
+        <h2 className="text-lg font-semibold text-fg">Ask {who} anything</h2>
+        <p className="mt-1 text-sm text-muted">
+          Your CEO knows your projects, cards and team. Ask for a status, a decision or a plan.
+        </p>
+      </div>
+      <ul className="flex w-full flex-col gap-2" data-testid="chat-suggestions">
+        {CEO_SUGGESTIONS.map((s) => (
+          <li key={s}>
+            <button
+              type="button"
+              onClick={() => send(s)}
+              className="flex min-h-11 w-full items-center rounded-card border border-line bg-surface px-4 py-2 text-left text-sm text-fg hover:bg-sunken"
+            >
+              {s}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  ) : (
+    <p className="py-6 text-center text-sm text-subtle">Say hello to {who}.</p>
+  );
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2" data-testid="chat-panel">
@@ -183,78 +246,19 @@ export function ChatPanel({
           This conversation is visible to this project's managers.
         </p>
       )}
-      <div
-        ref={log}
-        role="log"
-        aria-label="Conversation"
-        className="min-h-40 flex-1 overflow-y-auto overscroll-contain rounded-card border border-line bg-surface p-3 max-md:rounded-none max-md:border-x-0"
-      >
-        {list.length === 0 && !showPending && streaming === null && (
-          <p className="py-6 text-center text-sm text-subtle">Say hello to {name ?? 'the agent'}.</p>
-        )}
-        <ul className="flex flex-col gap-2">
-          {list.map((m) => (
-            <li
-              key={m.id}
-              data-testid="chat-message"
-              data-author-kind={m.authorKind}
-              className={`max-w-[88%] rounded-[14px] px-3.5 py-2 text-base ${
-                m.authorKind === 'user'
-                  ? 'self-end rounded-br-[4px] bg-brand text-brand-fg'
-                  : 'self-start rounded-bl-[4px] bg-sunken text-fg'
-              }`}
-            >
-              {m.authorKind === 'agent' && (
-                <span className="mb-1 flex items-center gap-1.5 text-xs font-medium text-muted">
-                  <AgentAvatar agentId={m.authorAgentId} name={m.authorName ?? 'agent'} size={16} />
-                  {m.authorName}
-                </span>
-              )}
-              <p className="whitespace-pre-wrap">{m.body}</p>
-              {m.authorKind === 'agent' && isCeo && answeredWith(m.data) && (
-                <span className="mt-1 block text-[11px] text-subtle" data-testid="answered-with">
-                  {answeredWith(m.data)}
-                </span>
-              )}
-              {m.authorKind === 'user' && m.data.queued === true && (
-                <span className="mt-1 block text-[11px] opacity-80">Queued</span>
-              )}
-            </li>
-          ))}
-          {showPending && pending && (
-            <li
-              data-testid="chat-message"
-              data-author-kind="user"
-              className="max-w-[88%] self-end rounded-[14px] rounded-br-[4px] bg-brand px-3.5 py-2 text-base text-brand-fg"
-            >
-              <p className="whitespace-pre-wrap">{pending.body}</p>
-            </li>
-          )}
-          {streaming !== null && (
-            <li
-              data-testid="chat-streaming"
-              aria-live="polite"
-              className="max-w-[88%] self-start rounded-[14px] rounded-bl-[4px] bg-sunken px-3.5 py-2 text-base text-fg"
-            >
-              {streaming ? (
-                <p className="whitespace-pre-wrap">{streaming}</p>
-              ) : (
-                <p className="flex items-center gap-1 py-1" role="status">
-                  <span className="sr-only">{name ?? 'The agent'} is typing</span>
-                  {[0, 1, 2].map((d) => (
-                    <span
-                      key={d}
-                      aria-hidden="true"
-                      className="size-1.5 animate-pulse-soft rounded-full bg-subtle"
-                      style={{ animationDelay: `${d * 0.25}s` }}
-                    />
-                  ))}
-                </p>
-              )}
-            </li>
-          )}
-        </ul>
-      </div>
+      <MessageList
+        messages={list}
+        agentName={name ?? 'agent'}
+        agentId={chat?.agentId}
+        showModel={isCeo}
+        pending={pending}
+        stream={shownStream}
+        empty={empty}
+        hasOlder={older.hasMore}
+        loadingOlder={older.loading}
+        olderError={older.error}
+        onLoadOlder={older.loadOlder}
+      />
       {isCeo && ceoState && (
         <div className="flex flex-col gap-2" data-testid="ceo-cards">
           {ceoState.permissions.map((p) => (
@@ -284,41 +288,26 @@ export function ChatPanel({
           {ceoName} writes your daily report now. This conversation is read-only: ask {ceoName} instead.
         </Callout>
       ) : (
-        <form
-          onSubmit={send}
-          aria-label="Compose"
-          className="flex flex-col gap-2 max-md:sticky max-md:bottom-0 max-md:bg-canvas max-md:pb-2"
-        >
-          <TextArea
-            label="Message"
-            rows={2}
+        <div className="shrink-0 pb-2 md:pb-0">
+          <Composer
             value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
-                e.preventDefault();
-                send(e);
-              }
-            }}
-            disabled={busy}
+            onChange={setDraft}
+            onSend={() => send()}
+            onStop={() => getSocket()?.cancelChat(threadId)}
+            busy={busy}
+            placeholder={name ? `Message ${name}` : 'Message'}
+            autoFocus
+            tools={
+              isCeo && ceoState ? (
+                <ModelChip
+                  model={ceoState.model}
+                  messageChoice={messageModel}
+                  onMessageChoice={setMessageModel}
+                />
+              ) : undefined
+            }
           />
-          <div className="flex flex-wrap items-center gap-2">
-            {isCeo && ceoState && (
-              <ModelChip
-                model={ceoState.model}
-                messageChoice={messageModel}
-                onMessageChoice={setMessageModel}
-              />
-            )}
-            <Button type="submit" variant="primary" disabled={busy || !draft.trim()}>
-              Send
-            </Button>
-            {busy && <Button onClick={() => getSocket()?.cancelChat(threadId)}>Stop</Button>}
-            <span className="ml-auto hidden text-xs text-subtle sm:block">
-              Enter to send, Shift+Enter for a new line
-            </span>
-          </div>
-        </form>
+        </div>
       )}
     </div>
   );

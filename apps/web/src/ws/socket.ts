@@ -5,10 +5,12 @@ import {
   RESYNC_THRESHOLD,
   type ServerToBrowser,
   ServerToBrowserSchema,
+  type ThreadMessageDto,
 } from '@aom/shared';
 import type { QueryClient } from '@tanstack/react-query';
 import { useSyncExternalStore } from 'react';
 import { getActiveOrgId } from '../lib/activeOrg.ts';
+import type { ChatActivityMessage } from '../lib/chatSegments.ts';
 import { InvalidationBatcher } from './invalidate.ts';
 
 export type SocketState = 'connecting' | 'open' | 'closed';
@@ -21,9 +23,12 @@ export type RunLogListener = (service: string, lines: string[], history: boolean
 /** What a chat panel hears about its conversation (docs/ARCHITECTURE.md section 20). */
 export type ChatEvent =
   | { type: 'delta'; text: string }
-  | { type: 'done'; messageId: string }
+  | { type: 'done'; messageId: string; message?: ThreadMessageDto }
+  | { type: 'activity'; activity: ChatActivityMessage }
   | { type: 'queued'; clientMsgId?: string; workstationName?: string }
-  | { type: 'error'; reason: string };
+  | { type: 'error'; reason: string }
+  /** The connection dropped: any reply in flight may be lost, so the panel stops waiting (the history is refetched on reconnect). */
+  | { type: 'disconnected' };
 type ChatListener = (ev: ChatEvent) => void;
 
 /** Single browser WebSocket to `/api/ws` with reconnect, `hello {lastSeq}` resume and shift watch bookkeeping. */
@@ -121,6 +126,7 @@ export class LiveSocket {
       clearInterval(this.pingTimer);
       this.ws = null;
       this.setState('closed');
+      this.dropStreams();
       if (this.stopped) return;
       const delay = Math.min(15_000, 500 * 2 ** this.retry++);
       this.timer = setTimeout(() => this.open(), delay);
@@ -140,6 +146,13 @@ export class LiveSocket {
     switch (msg.type) {
       case 'ready':
         this.setState('open');
+        // After a drop, a reply may have finished (or failed) while we were away: refetch the chats and threads.
+        if (this.droppedWhileChatting) {
+          this.droppedWhileChatting = false;
+          void this.qc.invalidateQueries({ queryKey: ['chats'] });
+          void this.qc.invalidateQueries({ queryKey: ['thread'] });
+          void this.qc.invalidateQueries({ queryKey: ['ceo'] });
+        }
         // The first `ready` (nothing seen yet) is just the page loading: its queries are fetching already, so
         // invalidating all of them fetched everything twice. Only a reconnect that missed a lot refetches everything.
         if (this.lastSeq !== undefined && msg.seq - this.lastSeq > RESYNC_THRESHOLD) this.invalidateAll();
@@ -170,8 +183,15 @@ export class LiveSocket {
       case 'chat.delta':
         this.emitChat(msg.threadId, { type: 'delta', text: msg.text });
         break;
+      case 'chat.activity':
+        this.emitChat(msg.threadId, { type: 'activity', activity: msg });
+        break;
       case 'chat.done':
-        this.emitChat(msg.threadId, { type: 'done', messageId: msg.messageId });
+        this.emitChat(msg.threadId, {
+          type: 'done',
+          messageId: msg.messageId,
+          ...(msg.message ? { message: msg.message } : {}),
+        });
         break;
       case 'chat.queued':
         void this.qc.invalidateQueries({ queryKey: ['ceo'] });
@@ -190,7 +210,33 @@ export class LiveSocket {
     }
   }
 
+  /** Threads whose agent is answering right now (from the live stream, whether or not a panel is open). */
+  private working: ReadonlySet<string> = new Set();
+  private workingListeners = new Set<() => void>();
+  getWorking = (): ReadonlySet<string> => this.working;
+  subscribeWorking = (cb: () => void) => {
+    this.workingListeners.add(cb);
+    return () => this.workingListeners.delete(cb);
+  };
+  private setWorking(threadId: string, on: boolean): void {
+    if (this.working.has(threadId) === on) return;
+    const next = new Set(this.working);
+    if (on) next.add(threadId);
+    else next.delete(threadId);
+    this.working = next;
+    for (const cb of this.workingListeners) cb();
+  }
+
+  private droppedWhileChatting = false;
+  /** The socket closed: nobody is "working" any more as far as this page can tell, and open panels stop waiting. */
+  private dropStreams(): void {
+    if (this.working.size > 0 || this.chatListeners.size > 0) this.droppedWhileChatting = true;
+    for (const id of [...this.working]) this.setWorking(id, false);
+    for (const set of this.chatListeners.values()) for (const cb of [...set]) cb({ type: 'disconnected' });
+  }
+
   private emitChat(threadId: string, ev: ChatEvent): void {
+    this.setWorking(threadId, ev.type === 'delta' || ev.type === 'activity');
     for (const cb of this.chatListeners.get(threadId) ?? []) cb(ev);
   }
 
@@ -284,6 +330,15 @@ export function initSocket(qc: QueryClient): LiveSocket {
 }
 export function getSocket(): LiveSocket | null {
   return instance;
+}
+
+const NO_THREADS: ReadonlySet<string> = new Set();
+/** The chats whose agent is answering right now. */
+export function useWorkingThreads(): ReadonlySet<string> {
+  return useSyncExternalStore(
+    (cb) => instance?.subscribeWorking(cb) ?? (() => {}),
+    () => instance?.getWorking() ?? NO_THREADS,
+  );
 }
 
 export function useSocketState(): SocketState {

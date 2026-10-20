@@ -3,6 +3,7 @@ import { homedir, hostname, platform } from 'node:os';
 import { basename, join } from 'node:path';
 import {
   CEO_FULL_POWER_CAPABILITY,
+  CHAT_ACTIVITY_FEATURE,
   CLAUDE_ACCOUNTS_CAPABILITY,
   CommandPayloadSchemas,
   DELIVERY_CAPABILITY,
@@ -533,6 +534,7 @@ export class Runner {
       ipc: this.ipc,
       log: this.log,
       send: (type, payload) => this.client.send(type, payload),
+      chatActivity: () => this.serverFeatures.has(CHAT_ACTIVITY_FEATURE),
       rpc: (chatId, method, params) => this.rpc(chatId, method, params),
       graph: () => this.graph,
       external: this.external,
@@ -596,6 +598,7 @@ export class Runner {
     });
     this.client.on('message', (m) => this.onMessage(m));
     this.client.on('welcome', (w) => {
+      this.serverFeatures = new Set(w.features ?? []);
       void this.reportGit(true);
       void this.reportIntegrations(true);
       void this.reportOrgFolders();
@@ -798,6 +801,8 @@ export class Runner {
   }
 
   private smokeStarted = false;
+  /** What the server announced in its last `welcome` (`features`). */
+  private serverFeatures = new Set<string>();
 
   /**
    * The role smoke test, once per process (so on every runner start, which includes the start after an update): each

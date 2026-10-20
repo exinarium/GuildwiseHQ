@@ -4,6 +4,9 @@ import { homedir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import {
   type ChatContext,
+  type ChatSegment,
+  capChatSegments,
+  chatSegmentsText,
   type IpcReportRequest,
   type IpcReportResponse,
   type IpcRpcRequest,
@@ -58,9 +61,11 @@ export interface ChatDeps {
   log?: Logger;
   /** Acked types (`chat.done`, `chat.error`) go through the outbox; `chat.delta` is dropped while offline. */
   send(
-    type: 'chat.delta' | 'chat.done' | 'chat.error' | 'devops.audit',
+    type: 'chat.delta' | 'chat.activity' | 'chat.done' | 'chat.error' | 'devops.audit',
     payload: Record<string, unknown>,
   ): string | undefined;
+  /** The server accepts `chat.activity` (it announced `CHAT_ACTIVITY_FEATURE` in `welcome`); absent: yes. */
+  chatActivity?: () => boolean;
   /** The local opt-in `aom-runner ceo full-power on`, read fresh at each turn (default: off). */
   ceoFullPower?: () => boolean;
   /** The repository clones on this workstation (the use-the-system hook nudges edits inside them). */
@@ -579,6 +584,27 @@ export class ChatManager {
     let finalText: string | undefined;
     const counts: ToolCounts = { bash: 0, edit: 0, mcp: 0, other: 0 };
     const commands: string[] = [];
+    // The turn as the browser shows it: text blocks, tool calls and thinking, in order (`chat.activity`, `chat.done.segments`).
+    const segments: ChatSegment[] = [];
+    const toolAt = new Map<string, number>();
+    const activityOn = this.deps.chatActivity?.() ?? true;
+    const activity = (seq: number, segment: ChatSegment, replace?: boolean): void => {
+      if (!activityOn) return;
+      this.deps.send('chat.activity', {
+        chatId: msg.chatId,
+        threadId: msg.threadId,
+        seq,
+        segment,
+        ...(replace ? { replace: true } : {}),
+      });
+    };
+    /** A new, empty text segment (the browser starts a new paragraph); not announced for the first step of a turn. */
+    const startText = (): void => {
+      const last = segments[segments.length - 1];
+      if (last?.type === 'text' && !last.text) return;
+      segments.push({ type: 'text', text: '' });
+      if (segments.length > 1) activity(segments.length - 1, { type: 'text', text: '' });
+    };
     let exit: {
       code: number | null;
       error?: string;
@@ -589,10 +615,37 @@ export class ChatManager {
       if (ev.kind === 'session') sessionId = ev.runtimeSessionId;
       else if (ev.kind === 'delta') {
         streamed += ev.text;
+        if (segments[segments.length - 1]?.type !== 'text') startText();
+        const last = segments[segments.length - 1];
+        if (last?.type === 'text') last.text += ev.text;
         this.deps.send('chat.delta', { chatId: msg.chatId, threadId: msg.threadId, text: ev.text });
+      } else if (ev.kind === 'textstart') startText();
+      else if (ev.kind === 'thinking') {
+        segments.push({ type: 'thinking' });
+        activity(segments.length - 1, { type: 'thinking' });
       } else if (ev.kind === 'final') finalText = ev.text;
-      else if (ev.kind === 'tool') this.countTool(ev, counts, commands);
-      else if (ev.kind === 'exit') exit = ev;
+      else if (ev.kind === 'tool') {
+        this.countTool(ev, counts, commands);
+        // the segment is stored and shown: every tool summary goes through the same redaction as the audit
+        const summary = redactCommand(ev.summary).slice(0, 500);
+        const seg: ChatSegment = {
+          type: 'tool',
+          ...(ev.id ? { id: ev.id } : {}),
+          name: ev.name,
+          ...(summary ? { summary } : {}),
+          status: 'running',
+        };
+        segments.push(seg);
+        if (ev.id) toolAt.set(ev.id, segments.length - 1);
+        activity(segments.length - 1, seg);
+      } else if (ev.kind === 'toolresult') {
+        const i = toolAt.get(ev.id);
+        const seg = i === undefined ? undefined : segments[i];
+        if (i !== undefined && seg?.type === 'tool') {
+          seg.status = ev.refused ? 'refused' : ev.isError ? 'error' : 'ok';
+          activity(i, seg, true);
+        }
+      } else if (ev.kind === 'exit') exit = ev;
     }
 
     if (chat.stopReason) return this.error(msg, chat.stopReason);
@@ -609,6 +662,10 @@ export class ChatManager {
         );
       return this.error(msg, exit.error ?? `the ${msg.agent.runtime} process exited with code ${exit.code}`);
     }
+    for (const seg of segments) if (seg.type === 'tool' && seg.status === 'running') seg.status = 'ok';
+    const turn = segments.filter((x) => x.type !== 'text' || x.text.trim());
+    if (!turn.some((x) => x.type === 'text') && (finalText ?? streamed).trim())
+      turn.push({ type: 'text', text: finalText ?? streamed });
     const usage = session.usage() ?? zeroUsage();
     if (o.fullPower && commands.length) this.auditCommands(msg.chatId, commands);
     this.terminal(
@@ -616,7 +673,9 @@ export class ChatManager {
       this.deps.send('chat.done', {
         chatId: msg.chatId,
         threadId: msg.threadId,
-        messageText: finalText ?? streamed,
+        messageText: finalText ?? (chatSegmentsText(turn) || streamed),
+        // Additive: the whole turn in order (older servers ignore it).
+        ...(turn.length ? { segments: capChatSegments(turn) } : {}),
         usage,
         ...(sessionId ? { runtimeSessionId: sessionId } : {}),
         // The server gets each command's first word and counts only; the full (redacted) text stays in a local audit file.

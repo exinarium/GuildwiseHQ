@@ -5,6 +5,7 @@ import { ChevronLeft, CircleHelp, Menu, MessageSquare, Search, Wrench, X } from 
 import { useEffect, useRef, useState } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router';
 import { useLogout, useMe } from '../../api/queries/auth.ts';
+import { useUnreadChatTotal } from '../../api/queries/chats.ts';
 import { useDesk } from '../../api/queries/desk.ts';
 import { BRAND } from '../../brand.ts';
 import { setAppBadge } from '../../lib/pwa.ts';
@@ -15,10 +16,10 @@ import { AgentFacesSync } from '../AgentFacesSync.tsx';
 import { ChatDrawer } from '../ChatDrawer.tsx';
 import { AskCeoButton } from '../ceo/AskCeoButton.tsx';
 import { AskDevOpsProvider, useAskDevOps } from '../devops/AskDevOps.tsx';
-import { PushPrompt } from '../push/PushPrompt.tsx';
 import { PageHelpPanel } from '../help/PageHelpPanel.tsx';
 import { CommandPalette } from '../palette/CommandPalette.tsx';
 import { ShortcutsDialog } from '../palette/ShortcutsDialog.tsx';
+import { PushPrompt } from '../push/PushPrompt.tsx';
 import { SetupChecklistProvider, SetupWidget } from '../setup/SetupChecklist.tsx';
 import { ContactProvider, useContact } from '../support/ContactDialog.tsx';
 import { TourProvider } from '../tour/Tour.tsx';
@@ -26,7 +27,7 @@ import { useTour } from '../tour/TourContext.tsx';
 import { cx } from '../ui/cx.ts';
 import { WhatsNewHost } from '../whatsnew/WhatsNew.tsx';
 import { Breadcrumbs, crumbsFor } from './Breadcrumbs.tsx';
-import { MobileTabBar } from './MobileTabBar.tsx';
+import { MobileTabBar, UnreadBadge } from './MobileTabBar.tsx';
 import { buildNav } from './nav-config.ts';
 import { OrgBanner } from './OrgBanner.tsx';
 import { OrgSwitcher } from './OrgSwitcher.tsx';
@@ -67,7 +68,7 @@ export function backTargetFor(
 ): string | null {
   const parent = crumbs.length > 1 ? crumbs.at(-2)?.to : undefined;
   if (parent) return parent;
-  if (pathname.startsWith('/chat/')) return '/desk';
+  if (pathname.startsWith('/chat/') || pathname.startsWith('/ceo-chat')) return '/desk';
   if (pathname.startsWith('/intake/')) return '/intake';
   if (pathname.startsWith('/help/')) return '/help';
   if (pathname === '/settings/org' || pathname === '/settings/vaults') return '/settings';
@@ -100,6 +101,7 @@ function Shell({ name, live }: { name: string; live: string }) {
   const [pref, setPref] = useState(readCollapsed);
   const [drawer, setDrawer] = useState(false);
   const [chat, setChat] = useState(false);
+  const unreadChats = useUnreadChatTotal();
   const [palette, setPalette] = useState(false);
   const [help, setHelp] = useState(false);
   const [pageHelp, setPageHelp] = useState(false);
@@ -275,7 +277,10 @@ function Shell({ name, live }: { name: string; live: string }) {
                       aria-label="Chat with an agent"
                       className="inline-flex h-9 items-center gap-2 rounded-control border border-control bg-surface px-3 text-sm font-medium text-fg hover:bg-sunken"
                     >
-                      <MessageSquare aria-hidden="true" className="size-4" />
+                      <span className="relative inline-flex">
+                        <MessageSquare aria-hidden="true" className="size-4" />
+                        <UnreadBadge count={unreadChats} testId="chat-button-badge" className="-ml-2" />
+                      </span>
                       Chat
                     </button>
                   </div>
@@ -304,6 +309,7 @@ function Shell({ name, live }: { name: string; live: string }) {
                     </p>
                     {project && <p className="truncate text-xs text-subtle">{project.name}</p>}
                   </div>
+                  {!pathname.startsWith('/ceo-chat') && <AskCeoButton mobile />}
                   <PageHelpButton onClick={() => setPageHelp(true)} mobile />
                   <span className="pr-2 pl-1">
                     <LiveIndicator live={live} compact />

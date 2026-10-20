@@ -21,6 +21,8 @@ export interface FakeServerOptions {
   maxConcurrentShifts?: number;
   /** The owner's shift limit choice sent in `welcome.limits.shiftLimit` (undefined: an older server that sends none). */
   shiftLimit?: number | 'unlimited' | null;
+  /** `welcome.features` (undefined: an older server that announces none). */
+  features?: string[];
   /** Ack runner messages that require an ack (default true). */
   autoAck?: boolean;
   /** Verdict for each `shift.report` (default: accept). */
@@ -164,6 +166,7 @@ export class FakeServer {
           maxConcurrentShifts: this.opts.maxConcurrentShifts ?? 4,
           ...(this.opts.shiftLimit !== undefined ? { shiftLimit: this.opts.shiftLimit } : {}),
         },
+        ...(this.opts.features ? { features: this.opts.features } : {}),
       });
       return;
     }

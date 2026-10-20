@@ -2,6 +2,7 @@ import { appendFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import type { DevopsAuditEntry } from '@aom/shared';
+import { redactSecrets } from '../redact.ts';
 
 /**
  * Guardrails of the DevOps engineer (the one agent that runs outside the OS sandbox, as the user). Enforced by a Claude
@@ -724,18 +725,7 @@ export function classifyCommand(
 
 /** Secrets a command line may carry, masked before the line is stored or sent. */
 export function redactCommand(command: string): string {
-  return command
-    .replace(/\b(Bearer|Basic|token)\s+[A-Za-z0-9._~+/=-]{8,}/gi, '$1 ***')
-    .replace(
-      /((?:pass(?:word|wd)?|pwd|secret|token|api[_-]?key|access[_-]?key|auth)[\w-]*[=:]\s*)(?:"[^"]*"|'[^']*'|\S+)/gi,
-      '$1***',
-    )
-    .replace(/(--?(?:p|pass(?:word)?)\s+)\S+/gi, '$1***')
-    .replace(
-      /\b(sk-[A-Za-z0-9_-]{10,}|gh[pousr]_[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{12,}|xox[abp]-[A-Za-z0-9-]{10,})\b/g,
-      '***',
-    )
-    .slice(0, 2000);
+  return redactSecrets(command).slice(0, 2000);
 }
 
 export function auditEntry(

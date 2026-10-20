@@ -1,7 +1,20 @@
-import { ChatParamsSchema, CreateChatRequestSchema } from '@aom/shared';
+import {
+  ArchiveAllChatsRequestSchema,
+  ChatParamsSchema,
+  CreateChatRequestSchema,
+  MarkChatReadRequestSchema,
+} from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
 import { requireUser } from '../auth/guards.ts';
-import { createChat, deleteChat, getChat, listChats, setChatArchived } from '../commands/chats.ts';
+import {
+  archiveAllChats,
+  createChat,
+  deleteChat,
+  getChat,
+  listChats,
+  markChatRead,
+  setChatArchived,
+} from '../commands/chats.ts';
 import type { Ctx } from '../context.ts';
 import { typed } from './util.ts';
 
@@ -22,6 +35,16 @@ export function chatRoutes(ctx: Ctx) {
     });
 
     // Close (archive) and restore are per user; delete is permanent and only for the creator of a chat not linked to a card.
+    // Registered before `/:id/...` routes: "archive-all" is a fixed path.
+    app.post(
+      '/api/chats/archive-all',
+      { schema: { body: ArchiveAllChatsRequestSchema.nullish() } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        return { archived: await archiveAllChats(ctx, s.user, req.body?.exceptThreadIds) };
+      },
+    );
+
     app.post('/api/chats/:id/close', { schema: { params: ChatParamsSchema } }, async (req) => {
       const s = await requireUser(ctx, req);
       return { chat: await setChatArchived(ctx, s.user, req.params.id, true) };
@@ -31,6 +54,15 @@ export function chatRoutes(ctx: Ctx) {
       const s = await requireUser(ctx, req);
       return { chat: await setChatArchived(ctx, s.user, req.params.id, false) };
     });
+
+    app.post(
+      '/api/chats/:id/read',
+      { schema: { params: ChatParamsSchema, body: MarkChatReadRequestSchema.nullish() } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        return { chat: await markChatRead(ctx, s.user, req.params.id, req.body?.upTo) };
+      },
+    );
 
     app.delete('/api/chats/:id', { schema: { params: ChatParamsSchema } }, async (req, reply) => {
       const s = await requireUser(ctx, req);

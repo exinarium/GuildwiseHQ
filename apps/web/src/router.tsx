@@ -15,6 +15,7 @@ import { Board } from './pages/Board.tsx';
 import { CardDetail } from './pages/CardDetail.tsx';
 import { CardNew } from './pages/CardNew.tsx';
 import { Ceo } from './pages/Ceo.tsx';
+import { CeoChat } from './pages/CeoChat.tsx';
 import { Chat } from './pages/Chat.tsx';
 import { ContactPublic } from './pages/ContactPublic.tsx';
 import { Costs } from './pages/Costs.tsx';
@@ -138,6 +139,8 @@ export const routes = [
       { path: '/help/:slug', element: <Help /> },
       { path: '/ledger', element: <Ledger /> },
       { path: '/chat/:threadId', element: <Chat /> },
+      { path: '/ceo-chat', element: <CeoChat /> },
+      { path: '/ceo-chat/:threadId', element: <CeoChat /> },
       { path: '/intake', element: <IntakeNew /> },
       { path: '/intake/batches/:id', element: <BatchView /> },
       { path: '/intake/:id', element: <IntakeView /> },

@@ -35,7 +35,7 @@ function Shell() {
   return (
     <Routes>
       <Route path="/" element={<AskCeoButton />} />
-      <Route path="/chat/:id" element={<p data-testid="chat-page">chat</p>} />
+      <Route path="/ceo-chat/:id" element={<p data-testid="chat-page">chat</p>} />
     </Routes>
   );
 }

@@ -84,6 +84,8 @@ export function crumbsFor(pathname: string, search: string, projects: ProjectDto
     ['/help', () => [{ label: 'Help' }]],
     ['/intake/:id', () => [{ label: 'Intake', to: '/intake' }, { label: 'Conversation' }]],
     ['/intake', () => [{ label: 'Work' }, { label: 'Intake' }]],
+    ['/ceo-chat', () => [{ label: 'Desk', to: '/desk' }, { label: 'CEO chat' }]],
+    ['/ceo-chat/:threadId', () => [{ label: 'Desk', to: '/desk' }, { label: 'CEO chat' }]],
     ['/chat/:threadId', () => [{ label: 'Desk', to: '/desk' }, { label: 'Chat' }]],
     ['/desk', () => [{ label: 'Desk' }]],
     ['/automations', () => [{ label: 'Work' }, { label: 'Automations' }]],

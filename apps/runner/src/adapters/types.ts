@@ -90,7 +90,19 @@ export type RuntimeEvent =
   /** `id`: the runtime's id of the call, to match its result (absent: the runtime does not give one). */
   | { kind: 'tool'; name: string; summary: string; id?: string }
   /** The result of a tool call: how many bytes of text it returned (counted, never kept). */
-  | { kind: 'toolresult'; id: string; bytes: number }
+  | {
+      kind: 'toolresult';
+      id: string;
+      bytes: number;
+      /** The result was flagged `is_error`. */
+      isError?: boolean;
+      /** The call was denied by the permission mode (a headless `dontAsk` run): an error that is a refusal. */
+      refused?: boolean;
+    }
+  /** A thinking block started (its content is never forwarded). Chat activity only. */
+  | { kind: 'thinking' }
+  /** A new assistant text block started (`--include-partial-messages`): the deltas that follow belong to it. Chat only. */
+  | { kind: 'textstart' }
   | { kind: 'usage'; usage: Usage }
   | { kind: 'final'; text: string }
   | {

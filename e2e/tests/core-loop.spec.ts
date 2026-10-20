@@ -123,7 +123,6 @@ test('AC4: create TOY-1 with all required fields and a mock script, then specify
   const form = page.getByRole('form', { name: 'New card' });
   await form.getByLabel('Title', { exact: true }).fill('Add the thing');
   await form.getByLabel('Repository').selectOption({ label: 'toy' });
-  await form.getByLabel('Completion action').selectOption('push_branch');
   await form.getByLabel('Context', { exact: true }).fill(SPEC.context);
   await form.getByLabel('Requirements').fill(SPEC.requirements);
   await form.getByLabel('Acceptance criteria').fill(SPEC.acceptanceCriteria.join('\n'));

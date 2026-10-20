@@ -14,10 +14,12 @@ import { loadCeo } from './state.ts';
 export async function ensureCeoThread(
   db: Queryable,
   orgId: string,
+  /** Start a new standing thread even though the current one is alive (the owner's "New chat"). */
+  opts: { fresh?: boolean } = {},
 ): Promise<{ threadId: string | null; events: AppendInput[] }> {
   const ceo = await loadCeo(db, orgId);
   if (!ceo?.enabled || !ceo.agentId) return { threadId: null, events: [] };
-  if (ceo.chatThreadId) {
+  if (ceo.chatThreadId && !opts.fresh) {
     const alive = await one(
       db,
       `SELECT 1 FROM threads t WHERE t.id=$1 AND t.agent_id=$2 AND t.deleted_at IS NULL`,

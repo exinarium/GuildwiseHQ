@@ -14,7 +14,31 @@ export function ClaudeAccountsTable({ runtimes }: { runtimes: WorkstationDto['ru
   return (
     <div className="mt-3" data-testid="claude-accounts-table">
       <p className="mb-1 text-xs font-medium text-subtle">Claude accounts</p>
-      <div className="overflow-x-auto">
+      <ul className="flex flex-col gap-2 md:hidden" data-testid="claude-accounts-cards">
+        {accounts.map((a) => (
+          <li key={a.key} className="rounded-control border border-line bg-canvas p-3 text-sm">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="font-medium text-fg">{a.main ? 'Main account' : a.key}</span>
+              <Badge tone={a.login === 'ok' ? 'green' : 'neutral'}>{LOGIN[a.login] ?? a.login}</Badge>
+            </div>
+            <dl className="mt-1.5 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs">
+              <dt className="text-subtle">Signed in as</dt>
+              <dd className="min-w-0 text-muted [overflow-wrap:anywhere]">
+                {a.email ? `${a.email}${a.plan ? ` (${a.plan})` : ''}` : (a.plan ?? '-')}
+              </dd>
+              <dt className="text-subtle">Folder</dt>
+              <dd className="min-w-0 font-mono text-muted [overflow-wrap:anywhere]">{a.configDir ?? '-'}</dd>
+              <dt className="text-subtle">Usage</dt>
+              <dd className="text-muted">
+                {a.usage === 'limited'
+                  ? `Limited${a.limitedUntil ? ` until ${formatUntil(a.limitedUntil)}` : ''}`
+                  : 'Available'}
+              </dd>
+            </dl>
+          </li>
+        ))}
+      </ul>
+      <div className="overflow-x-auto max-md:hidden">
         <table className="w-full text-left text-xs">
           <thead className="text-subtle">
             <tr>

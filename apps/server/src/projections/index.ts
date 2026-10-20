@@ -173,6 +173,7 @@ export const PROJECTION_TABLES = [
   'shift_costs',
   'threads',
   'chat_archives',
+  'chat_reads',
   'thread_messages',
   'desk_items',
   'card_blockers',
