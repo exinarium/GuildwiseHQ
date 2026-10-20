@@ -105,6 +105,8 @@ export const SANDBOXER = {
 export const WORKER = { email: 'worker@e2e.test', name: 'E2E Worker', password: 'worker-password-12345' };
 
 /** Phases spec: own user, own runner (mock), project PHS on the toy repo, a BA, a builder, a reviewer and a tester. */
+/** Run-steps spec: an owner who sets up how to start the project and scans it with the mock DevOps engineer. */
+export const STEPPER = { email: 'stepper@e2e.test', name: 'E2E Stepper', password: 'stepper-password-12345' };
 export const PHASER = { email: 'phaser@e2e.test', name: 'E2E Phaser', password: 'phaser-password-12345' };
 
 /** BA reporter spec (docs/design/phases.md Part B): own user, own runner (mock), project RPT, a BA and a builder. */

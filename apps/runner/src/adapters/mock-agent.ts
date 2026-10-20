@@ -564,6 +564,8 @@ interface DevopsBrief extends Brief {
     access: { allowInstall: boolean; allowDocker: boolean; allowedPaths: string[]; sudo: boolean };
     approval?: { action: string };
     hygiene?: { repos: unknown[] };
+    /** A "Scan with DevOps" request: the mock submits a fixed proposal (`[no_proposal]` in the request text skips it). */
+    scan?: { area: string; repos: Array<{ repoId: string; name: string }> };
   };
 }
 
@@ -595,6 +597,65 @@ async function devopsMain(brief: DevopsBrief): Promise<number> {
   }
   if (d.summary.includes('[no_report]')) {
     emit({ kind: 'final', text: 'mock devops finished without reporting' });
+    return 0;
+  }
+  // "Scan with DevOps": read-only; the mock proposes one install step and one website part, with a question about readiness.
+  if (d.scan) {
+    const repo = d.scan.repos[0];
+    let note = 'no proposal';
+    if (repo && !d.summary.includes('[no_proposal]')) {
+      const file = tmpJson('proposal.json', {
+        area: 'run',
+        run: {
+          setup: [
+            {
+              name: 'Install packages',
+              label: 'Install packages',
+              template: 'install_packages',
+              repoId: repo.repoId,
+              cwd: '.',
+              cmd: ['npm', 'ci'],
+              when: 'changed:package-lock.json',
+            },
+          ],
+          services: [
+            {
+              name: 'web',
+              label: 'The website',
+              template: 'web_app',
+              repoId: repo.repoId,
+              cwd: '.',
+              cmd: ['node', 'index.js'],
+              ports: [{ name: 'http', default: 3000, envVar: 'PORT', url: 'http://localhost:${port}/' }],
+              health: { kind: 'none', graceSec: 3 },
+              after: [],
+            },
+          ],
+          notes: 'mock scan',
+        },
+        items: [
+          { path: '/setup/0', confidence: 'found', evidence: [{ file: 'package.json', line: 1 }] },
+          { path: '/services/0/ports/0/default', confidence: 'guessed', note: 'the usual port' },
+          { path: '/services/0/health', confidence: 'unknown' },
+        ],
+        questions: [
+          {
+            path: '/services/0/health',
+            question: 'Which page shows that the website is ready?',
+            default: '/',
+          },
+        ],
+        notes: 'Mock DevOps read index.js.',
+        filesRead: ['index.js', 'README.md'],
+      });
+      const p = aom(['setup', 'propose', '--area', 'run', '--file', file]);
+      note = p.code === 0 ? 'proposal submitted' : `proposal refused: ${(p.err || p.out).trim()}`;
+    }
+    const r = aom(['devops-done', '--summary', `mock scan: ${note}`]);
+    emit({
+      kind: 'final',
+      text: `mock devops scan (${note}): ${r.code === 0 ? r.out.trim() : (r.err || r.out).trim()}`,
+    });
     return 0;
   }
   // Repository hygiene: the deterministic `aom hygiene run` does the git work (and ends the request).
