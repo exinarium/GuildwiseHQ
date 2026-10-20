@@ -42,13 +42,13 @@ const mount = (path: string) =>
   );
 
 const routes = (extra: Array<[string, () => unknown]> = []): Array<[string, () => unknown]> => [
+  ...extra,
   ['GET /api/ceo/status', () => ceoStatus()],
   ['POST /api/ceo/chat/new', () => ({ threadId: U(2) })],
   ['POST /api/ceo/chat', () => ({ threadId: U(1) })],
   ['GET /api/chats', () => ({ chats: [ceoChat(1), ceoChat(2)] })],
   ['GET /api/ceo/chat/state', () => new Fail(404, 'none', 'not_found')],
   ['GET /api/threads', () => ({ threadId: U(1), kind: 'chat', hasMore: false, messages: [] })],
-  ...extra,
 ];
 
 describe('CEO chat page', () => {
@@ -59,18 +59,57 @@ describe('CEO chat page', () => {
     expect(await screen.findByRole('heading', { name: /Chat with Cora/ })).toBeInTheDocument();
   });
 
-  it('New chat starts a fresh thread and Clear chat asks before deleting', async () => {
-    const del = vi.fn(() => null);
-    const calls = stubApi('owner', routes([['DELETE /api/chats', del]]) as never);
+  const withMessages = (n: number): ChatDto => ({ ...ceoChat(n), lastMessageAt: '2026-10-03T11:00:00.000Z' });
+
+  it('New chat reuses the current chat while it is still empty', async () => {
+    const calls = stubApi('owner', routes() as never);
+    const user = userEvent.setup();
+    mount(`/ceo-chat/${U(1)}`);
+    await user.click(await screen.findByTestId('ceo-chat-new'));
+    await waitFor(() => expect(calls.some((c) => c.url === '/api/ceo/chat')).toBe(true));
+    expect(calls.some((c) => c.url === '/api/ceo/chat/new')).toBe(false);
+    expect(screen.getByTestId('where')).toHaveTextContent(`/ceo-chat/${U(1)}`);
+  });
+
+  it('New chat starts a fresh thread when the current one has messages', async () => {
+    const calls = stubApi(
+      'owner',
+      routes([['GET /api/chats', () => ({ chats: [withMessages(1), ceoChat(2)] })]]) as never,
+    );
     const user = userEvent.setup();
     mount(`/ceo-chat/${U(1)}`);
     await user.click(await screen.findByTestId('ceo-chat-new'));
     await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent(`/ceo-chat/${U(2)}`));
     expect(calls.some((c) => c.method === 'POST' && c.url === '/api/ceo/chat/new')).toBe(true);
-    await user.click(screen.getByTestId('ceo-chat-clear'));
+  });
+
+  it('Clear chat asks first, then archives the chat (POST new, never DELETE)', async () => {
+    const del = vi.fn(() => null);
+    const calls = stubApi('owner', routes([['DELETE /api/chats', del]]) as never);
+    const user = userEvent.setup();
+    mount(`/ceo-chat/${U(1)}`);
+    await user.click(await screen.findByRole('button', { name: 'More chat actions' }));
+    await user.click(await screen.findByRole('menuitem', { name: /Clear chat/ }));
+    expect(calls.some((c) => c.url === '/api/ceo/chat/new')).toBe(false);
+    await user.click(await screen.findByRole('button', { name: 'Clear chat' }));
+    await waitFor(() =>
+      expect(calls.some((c) => c.method === 'POST' && c.url === '/api/ceo/chat/new')).toBe(true),
+    );
     expect(del).not.toHaveBeenCalled();
-    await user.click(await screen.findByRole('button', { name: 'Clear chat', hidden: false }));
-    await waitFor(() => expect(del).toHaveBeenCalled());
+    await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent(`/ceo-chat/${U(2)}`));
+  });
+
+  it('tells the user to wait when the CEO is mid-turn (409 turn_in_flight)', async () => {
+    stubApi(
+      'owner',
+      routes([['POST /api/ceo/chat/new', () => new Fail(409, 'turn in flight', 'turn_in_flight')]]) as never,
+    );
+    const user = userEvent.setup();
+    mount(`/ceo-chat/${U(1)}`);
+    await user.click(await screen.findByRole('button', { name: 'More chat actions' }));
+    await user.click(await screen.findByRole('menuitem', { name: /Clear chat/ }));
+    await user.click(await screen.findByRole('button', { name: 'Clear chat' }));
+    expect(await screen.findByTestId('ceo-chat-busy')).toHaveTextContent(/still answering/);
   });
 
   it('shows nothing to chat with for a non-owner', async () => {

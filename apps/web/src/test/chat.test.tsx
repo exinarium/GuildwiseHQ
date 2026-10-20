@@ -1,6 +1,6 @@
 import type { ChatDto } from '@aom/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { act, render, screen } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -79,8 +79,11 @@ describe('ChatPanel', () => {
     expect(sent).toEqual([
       { type: 'chat.send', threadId: THREAD, body: 'Hello Ada', clientMsgId: expect.any(String) },
     ]);
-    expect(screen.getByTestId('chat-streaming')).toHaveTextContent(/is typing/);
-    expect(screen.getByLabelText('Message')).toBeDisabled();
+    expect(screen.getByTestId('chat-streaming')).toHaveTextContent(/Thinking/);
+    // The textarea stays enabled while streaming (disabling it closes the keyboard on iOS); only Send is off.
+    expect(screen.getByLabelText('Message')).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Stop' })).toBeEnabled();
 
     act(() => socket.handle({ type: 'chat.delta', threadId: THREAD, text: '[mock] Ada ' }));
     act(() => socket.handle({ type: 'chat.delta', threadId: THREAD, text: 'heard: Hello Ada' }));
@@ -93,7 +96,9 @@ describe('ChatPanel', () => {
         messageId: '0192f3a0-0000-7000-8000-0000000000f1',
       }),
     );
-    expect(screen.queryByTestId('chat-streaming')).toBeNull();
+    // The streamed turn stays until the stored message is there (no flicker); the composer is free again at once.
+    expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull();
+    await waitFor(() => expect(screen.queryByTestId('chat-streaming')).toBeNull());
     expect(screen.getByLabelText('Message')).toBeEnabled();
   });
 

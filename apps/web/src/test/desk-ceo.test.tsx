@@ -248,7 +248,7 @@ describe('the desk: the CEO daily report', () => {
     expect(rows[0]).toHaveTextContent('Release or re-queue a card: TOY-1');
     expect(rows[2]).toHaveTextContent('Undone');
     expect(screen.getByTestId('ba-chat-link')).toHaveTextContent('Discuss this with your CEO');
-    expect(screen.getByTestId('ba-chat-link')).toHaveAttribute('href', `/chat/${U(80)}`);
+    expect(screen.getByTestId('ba-chat-link')).toHaveAttribute('href', `/ceo-chat/${U(80)}`);
     const undo = await within(rows[0] as HTMLElement).findByRole('button', { name: 'Undo' });
     expect(screen.getAllByRole('button', { name: 'Undo' })).toHaveLength(1);
     await userEvent.click(undo);

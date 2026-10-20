@@ -1,7 +1,8 @@
 import { Ellipsis, FolderKanban, Inbox, MessageSquare, MessagesSquare, Plus, SquarePen } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
-import { useCeoStatus, useNewCeoChat } from '../../api/queries/ceo.ts';
+import { isTurnInFlight, TURN_IN_FLIGHT_TEXT, useCeoStatus, useStartCeoChat } from '../../api/queries/ceo.ts';
+import { ceoChatPath } from '../../lib/openCeoChat.ts';
 import { useActiveOrgRole } from '../../lib/orgRole.ts';
 import { BottomSheet } from '../ui/BottomSheet.tsx';
 import { cx } from '../ui/cx.ts';
@@ -76,12 +77,14 @@ export function MobileTabBar({
   const nav = useNavigate();
   const owner = useActiveOrgRole() === 'owner';
   const ceoStatus = useCeoStatus(owner);
-  const newCeoChat = useNewCeoChat();
+  const newCeoChat = useStartCeoChat();
   const [chooser, setChooser] = useState(false);
   const cs = ceoStatus.data;
   /** The CEO's name when the Owner has an active CEO: the middle button then offers a choice (Intake or a new CEO chat). */
   const ceoName =
     owner && cs?.hired && cs.agent && cs.state !== 'disabled' && cs.state !== 'none' ? cs.agent.name : null;
+  /** Intake is only there with integrations on; otherwise the button writes a card. */
+  const isIntake = intake.to.startsWith('/intake');
   const keyboard = useKeyboardOpen();
   useEffect(() => {
     const root = document.documentElement;
@@ -202,8 +205,14 @@ export function MobileTabBar({
             >
               <SquarePen aria-hidden="true" className="size-5 shrink-0 text-muted" />
               <span>
-                <span className="block text-base font-medium text-fg">{intake.label}</span>
-                <span className="block text-sm text-muted">Describe the work and let the team plan it.</span>
+                <span className="block text-base font-medium text-fg">
+                  {isIntake ? 'Intake' : 'New card'}
+                </span>
+                <span className="block text-sm text-muted">
+                  {isIntake
+                    ? 'Describe the work and let the team plan it.'
+                    : 'Write up a piece of work for the team.'}
+                </span>
               </span>
             </Link>
           </li>
@@ -216,7 +225,7 @@ export function MobileTabBar({
                 newCeoChat.mutate(undefined, {
                   onSuccess: (r) => {
                     setChooser(false);
-                    nav(`/ceo-chat/${r.threadId}`);
+                    nav(ceoChatPath(r.threadId));
                   },
                 })
               }
@@ -229,6 +238,11 @@ export function MobileTabBar({
               </span>
             </button>
           </li>
+          {newCeoChat.error && (
+            <li role="alert" className="px-1 text-sm text-danger" data-testid="chooser-error">
+              {isTurnInFlight(newCeoChat.error) ? TURN_IN_FLIGHT_TEXT : 'Could not start a chat. Try again.'}
+            </li>
+          )}
         </ul>
       </BottomSheet>
     </nav>

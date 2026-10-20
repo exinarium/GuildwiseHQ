@@ -2,7 +2,7 @@ import type { ChatDto } from '@aom/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router';
+import { MemoryRouter, useLocation } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatDrawer } from '../components/ChatDrawer.tsx';
 
@@ -46,6 +46,16 @@ beforeEach(() => {
         if (c) c.archived = m[2] === 'close';
         return new Response(JSON.stringify({ chat: c }), { status: 200 });
       }
+      if (method === 'POST' && url === '/api/chats/archive-all') {
+        const except = (JSON.parse(String(init.body ?? '{}')).exceptThreadIds ?? []) as string[];
+        let n = 0;
+        for (const c of list)
+          if (!c.archived && !except.includes(c.threadId)) {
+            c.archived = true;
+            n++;
+          }
+        return new Response(JSON.stringify({ archived: n }), { status: 200 });
+      }
       if (method === 'DELETE') {
         list = list.filter((x) => !url.endsWith(x.threadId));
         return new Response(null, { status: 204 });
@@ -57,11 +67,13 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
+const Where = () => <p data-testid="where">{useLocation().pathname}</p>;
 const setup = () =>
   render(
     <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
       <MemoryRouter>
         <ChatDrawer open onOpenChange={() => {}} />
+        <Where />
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -118,15 +130,36 @@ describe('chat list: close and delete', () => {
 });
 
 describe('chat list: archive all', () => {
-  it('asks first, then closes every open chat and keeps them under Archived', async () => {
+  it('asks first, then archives every open chat with one request and keeps them under Archived', async () => {
     const user = userEvent.setup();
     setup();
     await user.click(await screen.findByTestId('archive-all-chats'));
-    expect(calls.some((c) => c.endsWith('/close'))).toBe(false);
+    expect(calls.some((c) => c.endsWith('/archive-all'))).toBe(false);
     await user.click(await screen.findByRole('button', { name: 'Archive all' }));
-    await waitFor(() =>
-      expect(calls.filter((c) => c.startsWith('POST') && c.endsWith('/close'))).toHaveLength(2),
-    );
+    await waitFor(() => expect(calls).toContain('POST /api/chats/archive-all'));
+    expect(calls.filter((c) => c.endsWith('/close'))).toHaveLength(0);
     await waitFor(() => expect(screen.queryByTestId('chat-row-Ada')).toBeNull());
+  });
+
+  it('never offers to archive the live CEO chat, and sends it as an exception', async () => {
+    list.push(chat(9, 'Cora', { agentRole: 'ceo' }));
+    const user = userEvent.setup();
+    setup();
+    await user.click(await screen.findByTestId('archive-all-chats'));
+    expect(await screen.findByRole('dialog', { name: 'Archive all 2 chats?' })).toBeInTheDocument();
+    await user.click(await screen.findByRole('button', { name: 'Archive all' }));
+    await waitFor(() => expect(calls).toContain('POST /api/chats/archive-all'));
+    expect(screen.getByTestId('chat-row-Cora')).toBeInTheDocument();
+  });
+
+  it('opens a CEO chat on the CEO chat page, not inline', async () => {
+    list.push(chat(9, 'Cora', { agentRole: 'ceo' }));
+    const user = userEvent.setup();
+    setup();
+    await user.click(
+      within(await screen.findByTestId('chat-row-Cora')).getAllByRole('button')[0] as HTMLElement,
+    );
+    expect(screen.queryByTestId('chat-panel')).toBeNull();
+    expect(screen.getByTestId('where')).toHaveTextContent(`/ceo-chat/${ID(9)}`);
   });
 });

@@ -304,6 +304,7 @@ function Shell({ name, live }: { name: string; live: string }) {
                     </p>
                     {project && <p className="truncate text-xs text-subtle">{project.name}</p>}
                   </div>
+                  {!pathname.startsWith('/ceo-chat') && <AskCeoButton mobile />}
                   <PageHelpButton onClick={() => setPageHelp(true)} mobile />
                   <span className="pr-2 pl-1">
                     <LiveIndicator live={live} compact />

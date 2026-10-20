@@ -336,7 +336,8 @@ describe('the CEO chat: full power, queue, permissions, confirmations', () => {
   it('opens an old DevOps conversation read-only', async () => {
     stubApi('owner', chatRoutes(state(), ceoChat({ agentRole: 'devops', agentName: 'Atlas' })));
     wrap(<ChatPanel threadId={THREAD} />);
-    expect(await screen.findByTestId('devops-read-only')).toHaveTextContent('DevOps now works through Cora');
+    const note = await screen.findByTestId('devops-read-only');
+    await waitFor(() => expect(note).toHaveTextContent('DevOps now works through Cora'));
     expect(screen.queryByLabelText('Message')).toBeNull();
   });
 
@@ -346,9 +347,8 @@ describe('the CEO chat: full power, queue, permissions, confirmations', () => {
       chatRoutes(state(), ceoChat({ agentRole: 'ba', agentName: 'Bea', title: 'BA reports' })),
     );
     wrap(<ChatPanel threadId={THREAD} />);
-    expect(await screen.findByTestId('ba-reports-read-only')).toHaveTextContent(
-      'Cora writes your daily report now',
-    );
+    const note = await screen.findByTestId('ba-reports-read-only');
+    await waitFor(() => expect(note).toHaveTextContent('Cora writes your daily report now'));
     expect(screen.queryByLabelText('Message')).toBeNull();
   });
 });

@@ -67,17 +67,33 @@ export function useThreadMessages(threadId: string | undefined) {
   });
 }
 
-/** Archive all: closes every chat in the list with the existing per-chat close (nothing is deleted; Restore undoes it). */
-export function useCloseAllChats() {
+/**
+ * Archive all: one request (`POST /chats/archive-all`). The server never archives the live CEO chat; `exceptThreadIds`
+ * keeps any other chat the caller wants to leave open. Nothing is deleted; Restore undoes it per chat.
+ */
+export function useArchiveAllChats() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (threadIds: string[]) => {
-      const results = await Promise.allSettled(threadIds.map((id) => post(`/chats/${id}/close`, {})));
-      const failed = results.filter((r) => r.status === 'rejected').length;
-      if (failed > 0)
-        throw new Error(`${failed} of ${threadIds.length} chats could not be archived. Try again.`);
-      return threadIds.length;
-    },
+    mutationFn: async (exceptThreadIds: string[] = []) =>
+      (
+        await post<{ archived: number }>(
+          '/chats/archive-all',
+          exceptThreadIds.length > 0 ? { exceptThreadIds } : {},
+        )
+      ).archived,
     onSettled: () => refreshChats(qc),
+  });
+}
+
+/** The newest message of a chat (list preview). Lives under the thread's key so new messages refresh it. */
+export function useThreadPreview(threadId: string, enabled = true) {
+  return useQuery({
+    queryKey: ['thread', threadId, 'preview'],
+    enabled,
+    staleTime: 30_000,
+    queryFn: async () => {
+      const r = await get<Partial<ThreadMessagesResponse>>(`/threads/${threadId}/messages?limit=1`);
+      return r.messages?.[r.messages.length - 1] ?? null;
+    },
   });
 }

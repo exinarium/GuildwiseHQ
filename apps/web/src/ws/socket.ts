@@ -5,10 +5,12 @@ import {
   RESYNC_THRESHOLD,
   type ServerToBrowser,
   ServerToBrowserSchema,
+  type ThreadMessageDto,
 } from '@aom/shared';
 import type { QueryClient } from '@tanstack/react-query';
 import { useSyncExternalStore } from 'react';
 import { getActiveOrgId } from '../lib/activeOrg.ts';
+import { type ChatActivityMessage, parseActivity } from '../lib/chatSegments.ts';
 import { InvalidationBatcher } from './invalidate.ts';
 
 export type SocketState = 'connecting' | 'open' | 'closed';
@@ -21,7 +23,8 @@ export type RunLogListener = (service: string, lines: string[], history: boolean
 /** What a chat panel hears about its conversation (docs/ARCHITECTURE.md section 20). */
 export type ChatEvent =
   | { type: 'delta'; text: string }
-  | { type: 'done'; messageId: string }
+  | { type: 'done'; messageId: string; message?: ThreadMessageDto }
+  | { type: 'activity'; activity: ChatActivityMessage }
   | { type: 'queued'; clientMsgId?: string; workstationName?: string }
   | { type: 'error'; reason: string };
 type ChatListener = (ev: ChatEvent) => void;
@@ -134,6 +137,12 @@ export class LiveSocket {
 
   /** Feeds a server message in (also used by the MSW mock transport). */
   handle(raw: unknown): void {
+    // `chat.activity` (tool use, thinking) is newer than the shared schema: parse it on its own so it is not dropped.
+    const activity = parseActivity(raw);
+    if (activity) {
+      this.emitChat(activity.threadId, { type: 'activity', activity });
+      return;
+    }
     const parsed = ServerToBrowserSchema.safeParse(raw);
     if (!parsed.success) return;
     const msg: ServerToBrowser = parsed.data;
@@ -171,7 +180,11 @@ export class LiveSocket {
         this.emitChat(msg.threadId, { type: 'delta', text: msg.text });
         break;
       case 'chat.done':
-        this.emitChat(msg.threadId, { type: 'done', messageId: msg.messageId });
+        this.emitChat(msg.threadId, {
+          type: 'done',
+          messageId: msg.messageId,
+          ...doneMessage(raw),
+        });
         break;
       case 'chat.queued':
         void this.qc.invalidateQueries({ queryKey: ['ceo'] });
@@ -190,7 +203,25 @@ export class LiveSocket {
     }
   }
 
+  /** Threads whose agent is answering right now (from the live stream, whether or not a panel is open). */
+  private working: ReadonlySet<string> = new Set();
+  private workingListeners = new Set<() => void>();
+  getWorking = (): ReadonlySet<string> => this.working;
+  subscribeWorking = (cb: () => void) => {
+    this.workingListeners.add(cb);
+    return () => this.workingListeners.delete(cb);
+  };
+  private setWorking(threadId: string, on: boolean): void {
+    if (this.working.has(threadId) === on) return;
+    const next = new Set(this.working);
+    if (on) next.add(threadId);
+    else next.delete(threadId);
+    this.working = next;
+    for (const cb of this.workingListeners) cb();
+  }
+
   private emitChat(threadId: string, ev: ChatEvent): void {
+    this.setWorking(threadId, ev.type === 'delta' || ev.type === 'activity');
     for (const cb of this.chatListeners.get(threadId) ?? []) cb(ev);
   }
 
@@ -271,6 +302,30 @@ export class LiveSocket {
   }
 }
 
+/** The stored agent message a newer server sends with `chat.done` (so the streamed bubble can be swapped without a gap). */
+function doneMessage(raw: unknown): { message?: ThreadMessageDto } {
+  const m = raw && typeof raw === 'object' ? (raw as Record<string, unknown>).message : undefined;
+  if (!m || typeof m !== 'object') return {};
+  const r = m as Record<string, unknown>;
+  const ok =
+    typeof r.id === 'string' &&
+    typeof r.threadId === 'string' &&
+    typeof r.body === 'string' &&
+    typeof r.createdAt === 'string' &&
+    (r.authorKind === 'user' || r.authorKind === 'agent' || r.authorKind === 'system');
+  if (!ok) return {};
+  return {
+    message: {
+      authorUserId: null,
+      authorAgentId: null,
+      authorName: null,
+      kind: 'comment',
+      data: {},
+      ...r,
+    } as unknown as ThreadMessageDto,
+  };
+}
+
 function defaultUrl(): string {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   const org = getActiveOrgId();
@@ -284,6 +339,15 @@ export function initSocket(qc: QueryClient): LiveSocket {
 }
 export function getSocket(): LiveSocket | null {
   return instance;
+}
+
+const NO_THREADS: ReadonlySet<string> = new Set();
+/** The chats whose agent is answering right now. */
+export function useWorkingThreads(): ReadonlySet<string> {
+  return useSyncExternalStore(
+    (cb) => instance?.subscribeWorking(cb) ?? (() => {}),
+    () => instance?.getWorking() ?? NO_THREADS,
+  );
 }
 
 export function useSocketState(): SocketState {
