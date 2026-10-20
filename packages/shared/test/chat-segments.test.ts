@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   BrowserChatActivitySchema,
   CHAT_SEGMENTS_MAX,
+  CHAT_TURN_TEXT_MAX,
   ChatActivitySchema,
   ChatDoneSchema,
   type ChatSegment,
@@ -90,6 +91,21 @@ describe('chat segments', () => {
     expect(capped.at(-1)).toEqual({ type: 'text', text: 't399' });
     const [clipped] = capChatSegments([{ type: 'text', text: 'x'.repeat(70_000) }]);
     expect(clipped?.type === 'text' && clipped.text.length).toBe(64_000);
+  });
+
+  it('caps the total text of a turn, keeping the head and the tail', () => {
+    const big: ChatSegment[] = Array.from({ length: 60 }, (_, i) => ({
+      type: 'text',
+      text: `${i}:`.padEnd(60_000, 'x'),
+    }));
+    const capped = capChatSegments(big);
+    const total = capped.reduce((n, s) => n + (s.type === 'text' ? s.text.length : 0), 0);
+    expect(total).toBeLessThanOrEqual(CHAT_TURN_TEXT_MAX + 1);
+    expect(capped.some((s) => s.type === 'text' && s.text === '…')).toBe(true);
+    expect(capped[0]).toEqual(big[0]);
+    expect(capped.at(-1)).toEqual(big.at(-1));
+    // a turn under the cap is untouched
+    expect(capChatSegments(big.slice(0, 5))).toEqual(big.slice(0, 5));
   });
 
   it('joins the text segments with a blank line', () => {

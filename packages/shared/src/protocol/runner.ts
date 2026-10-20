@@ -1217,6 +1217,8 @@ export const RunReplayFailedMsgSchemaWire = msg('run.replay.failed', RunReplayFa
 export const CHAT_SEGMENT_TEXT_MAX = 64_000;
 /** Max segments of one turn; over it, `capChatSegments` keeps the first 50 and the last 249 with a `…` between. */
 export const CHAT_SEGMENTS_MAX = 300;
+/** Max text of a whole turn (characters, all text segments together); over it the middle is elided. */
+export const CHAT_TURN_TEXT_MAX = 512_000;
 /**
  * One step of an agent's turn, in order (docs/ARCHITECTURE.md, chat section): an assistant text block, a tool call
  * (`refused` = the permission mode denied it) or a thinking block (its content is never shown or sent).
@@ -1234,15 +1236,36 @@ export const ChatSegmentSchema = z.discriminatedUnion('type', [
 ]);
 export type ChatSegment = z.infer<typeof ChatSegmentSchema>;
 
-/** Bounds a turn's segments: text segments cut to the limit, and over `CHAT_SEGMENTS_MAX` the middle is elided. */
+/**
+ * Bounds a turn's segments: text segments cut to the limit, over `CHAT_SEGMENTS_MAX` segments the middle is elided, and
+ * over `CHAT_TURN_TEXT_MAX` characters of text in total the middle is elided too (the head and tail keep half each).
+ */
 export function capChatSegments(segments: readonly ChatSegment[]): ChatSegment[] {
   const clipped = segments.map((s) =>
     s.type === 'text' && s.text.length > CHAT_SEGMENT_TEXT_MAX
       ? { ...s, text: s.text.slice(0, CHAT_SEGMENT_TEXT_MAX) }
       : s,
   );
-  if (clipped.length <= CHAT_SEGMENTS_MAX) return clipped;
-  return [...clipped.slice(0, 50), { type: 'text', text: '…' }, ...clipped.slice(-(CHAT_SEGMENTS_MAX - 51))];
+  const bounded: ChatSegment[] =
+    clipped.length <= CHAT_SEGMENTS_MAX
+      ? clipped
+      : [...clipped.slice(0, 50), { type: 'text', text: '…' }, ...clipped.slice(-(CHAT_SEGMENTS_MAX - 51))];
+  const size = (s: ChatSegment) => (s.type === 'text' ? s.text.length : 0);
+  if (bounded.reduce((n, s) => n + size(s), 0) <= CHAT_TURN_TEXT_MAX) return bounded;
+  const half = CHAT_TURN_TEXT_MAX / 2;
+  let head = 0;
+  let used = 0;
+  while (head < bounded.length && used + size(bounded[head] as ChatSegment) <= half) {
+    used += size(bounded[head] as ChatSegment);
+    head++;
+  }
+  let tail = bounded.length;
+  used = 0;
+  while (tail > head && used + size(bounded[tail - 1] as ChatSegment) <= half) {
+    used += size(bounded[tail - 1] as ChatSegment);
+    tail--;
+  }
+  return [...bounded.slice(0, head), { type: 'text', text: '…' }, ...bounded.slice(tail)];
 }
 
 /** The text of a turn: its text segments joined with a blank line (empty ones skipped). */
