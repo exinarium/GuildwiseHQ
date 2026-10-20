@@ -185,6 +185,7 @@ export const PROJECTION_TABLES = [
   'org_graph_links',
   'devops_requests',
   'run_plans',
+  'setup_proposals',
   'repo_clones',
   'project_environments',
   'environment_changes',

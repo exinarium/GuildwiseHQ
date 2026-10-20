@@ -496,6 +496,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       home: this.realHome(),
       protectedBranches: guard.protectedBranches ?? [],
       approvedCommands: guard.approvedCommands ?? [],
+      ...(guard.readOnlyScan ? { readOnlyScan: true } : {}),
       auditFile: join(this.paths.logs, 'devops-audit.jsonl'),
     };
     const file = join(configDir, 'devops-guard.json');

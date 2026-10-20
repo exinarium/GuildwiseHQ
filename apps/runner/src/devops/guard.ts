@@ -31,6 +31,8 @@ export interface GuardConfig {
   approvedCommands: string[];
   /** Local copy of the audit log, appended by the hook itself when the runner cannot be reached. */
   auditFile?: string;
+  /** A "Scan with DevOps" shift: read-only. Commands that start, build, install, connect or write are refused (`scanVerdict`). */
+  readOnlyScan?: boolean;
 }
 
 export interface GuardVerdict {
@@ -708,6 +710,10 @@ export function classifyCommand(
   cfg: GuardConfig,
   cwd: string = process.cwd(),
 ): GuardVerdict {
+  if (cfg.readOnlyScan) {
+    const scan = scanVerdict(command, cfg, cwd);
+    if (scan) return scan;
+  }
   // a whole-command approval matches however the line is built
   const c: Ctx = { cfg, cwd, viaAomSudo: false, usedApproval: false };
   const whole = normWs(command);
@@ -719,6 +725,264 @@ export function classifyCommand(
   )
     return ok('off_workstation_approved');
   return v;
+}
+
+// ------------------------------------------------------------------------------------- read-only scans
+
+/** Commands a read-only scan never needs: they start, change or reach out. */
+const SCAN_DENIED = new Set([
+  'rm',
+  'rmdir',
+  'mv',
+  'cp',
+  'ln',
+  'mkdir',
+  'touch',
+  'chmod',
+  'chown',
+  'chgrp',
+  'truncate',
+  'dd',
+  'install',
+  'patch',
+  'kill',
+  'pkill',
+  'killall',
+  'systemctl',
+  'service',
+  'launchctl',
+  'crontab',
+  'at',
+  'curl',
+  'wget',
+  'nc',
+  'ncat',
+  'telnet',
+  'ftp',
+  'apt',
+  'apt-get',
+  'dpkg',
+  'dnf',
+  'yum',
+  'rpm',
+  'pacman',
+  'zypper',
+  'apk',
+  'brew',
+  'snap',
+  'flatpak',
+  'nix',
+  'nix-env',
+  'pip',
+  'pip3',
+  'pipx',
+  'uv',
+  'poetry',
+  'conda',
+  'gem',
+  'bundle',
+  'composer',
+  'cargo',
+  'go',
+  'dotnet',
+  'nuget',
+  'mvn',
+  'gradle',
+  'gradlew',
+  'ant',
+  'make',
+  'cmake',
+  'ninja',
+  'npx',
+  'pnpx',
+  'bunx',
+  'corepack',
+  'nvm',
+  'fnm',
+  'volta',
+  'sudo',
+  'su',
+  'doas',
+  'pkexec',
+  'run0',
+  'sed-i',
+]);
+/** Package managers: only the commands that read. */
+const SCAN_PKG = new Set(['npm', 'pnpm', 'yarn', 'bun']);
+const SCAN_PKG_READ = new Set([
+  'ls',
+  'list',
+  'view',
+  'info',
+  'why',
+  'outdated',
+  'root',
+  'bin',
+  'version',
+  '--version',
+  '-v',
+  'pkg',
+]);
+const SCAN_DOCKER_READ = new Set([
+  'version',
+  'info',
+  'ps',
+  'images',
+  'inspect',
+  'logs',
+  'ls',
+  'config',
+  'ls-remote',
+  'stats',
+  'top',
+  'port',
+  'diff',
+  'history',
+]);
+const SCAN_GIT_READ = new Set([
+  'status',
+  'log',
+  'show',
+  'diff',
+  'ls-files',
+  'ls-tree',
+  'rev-parse',
+  'rev-list',
+  'describe',
+  'shortlog',
+  'blame',
+  'cat-file',
+  'grep',
+  'remote',
+  'config',
+  'branch',
+  'tag',
+  'for-each-ref',
+  'show-ref',
+  'name-rev',
+  'ls-remote',
+  'version',
+]);
+
+const refuseScan = (what: string): GuardVerdict =>
+  refuse(
+    'scan_read_only',
+    `${what} is not allowed in a scan: this is a READ-ONLY look at the project. Read files instead (cat, ls, grep, git log), then submit your findings with \`aom setup propose\`.`,
+  );
+
+function scanSegment(seg: Segment, cfg: GuardConfig, cwd: string, depth: number): GuardVerdict | null {
+  const words = [...seg.words];
+  // look through wrappers (env FOO=1 nohup timeout 5 ...)
+  while (words.length > 0) {
+    const w = baseName(words[0] as string);
+    if (isAssign(words[0] as string)) words.shift();
+    else if (WRAPPERS.has(w)) {
+      words.shift();
+      while (
+        words[0]?.startsWith('-') ||
+        (w === 'timeout' && /^\d/.test(words[0] ?? '')) ||
+        isAssign(words[0] ?? '')
+      )
+        words.shift();
+    } else break;
+  }
+  const first = baseName(words[0] ?? '');
+  if (!first) return null;
+  const args = words.slice(1);
+  const sub = args.find((a) => !a.startsWith('-'));
+  if (SHELLS.has(first)) {
+    const c = args.indexOf('-c');
+    if (c >= 0 && args[c + 1] !== undefined) {
+      if (depth > 3) return refuseScan('A deeply nested shell command');
+      return scanVerdict(args[c + 1] as string, cfg, cwd, depth + 1);
+    }
+    return null;
+  }
+  if (first === 'eval') return refuseScan('eval');
+  if (SCAN_DENIED.has(first)) return refuseScan(`\`${first}\``);
+  if (first === 'sed' && args.some((a) => a === '-i' || a.startsWith('-i') || a === '--in-place'))
+    return refuseScan('Editing a file with sed -i');
+  if (REMOTE_TOOLS.has(first) || first === 'rsync')
+    return refuseScan(`\`${first}\` (it reaches another machine)`);
+  if (SCAN_PKG.has(first) && !(sub && SCAN_PKG_READ.has(sub)) && !args.includes('--version'))
+    return refuseScan(`\`${first} ${sub ?? ''}\``.trim());
+  if (DOCKER_LIKE.has(first)) {
+    // `docker compose ls|ps|config`, `docker image ls`, `docker volume ls`, `docker ps`: look, never change
+    const rest: string[] = [];
+    for (let i = 0; i < args.length; i++) {
+      const a = args[i] as string;
+      if (
+        /^(-f|--file|-p|--project-name|-H|--host|--context|--env-file|--profile|--project-directory)$/.test(a)
+      )
+        i++;
+      else if (!a.startsWith('-')) rest.push(a);
+    }
+    const sub1 = rest[0];
+    const verb =
+      sub1 === 'compose' ||
+      sub1 === 'image' ||
+      sub1 === 'volume' ||
+      sub1 === 'network' ||
+      sub1 === 'container' ||
+      sub1 === 'context'
+        ? rest[1]
+        : sub1;
+    if (!verb || !SCAN_DOCKER_READ.has(verb))
+      return refuseScan(`\`${first} ${rest.slice(0, 2).join(' ')}\``.trim());
+  }
+  if (first === 'git') {
+    let i = 0;
+    let verb: string | undefined;
+    while (i < args.length) {
+      const a = args[i] as string;
+      if (a === '-C' || a === '-c' || a === '--git-dir' || a === '--work-tree') i += 2;
+      else if (a.startsWith('-')) i++;
+      else {
+        verb = a;
+        break;
+      }
+    }
+    if (!verb || !SCAN_GIT_READ.has(verb)) return refuseScan(`\`git ${verb ?? ''}\``.trim());
+    const rest = args.slice(i + 1);
+    if (
+      verb === 'branch' &&
+      rest.some((a) => /^-[a-zA-Z]*[dDmMcCu]|^--(delete|move|copy|set-upstream)/.test(a))
+    )
+      return refuseScan('Changing branches');
+    if (verb === 'tag' && rest.some((a) => /^-[a-zA-Z]*[dfas]|^--(delete|force)/.test(a)))
+      return refuseScan('Changing tags');
+    if (
+      verb === 'config' &&
+      !rest.some((a) => a === '--get' || a === '--list' || a === '-l' || a === '--get-all')
+    )
+      return refuseScan('Changing git config');
+    if (
+      verb === 'remote' &&
+      rest.some((a) => ['add', 'remove', 'rm', 'rename', 'set-url', 'prune', 'update'].includes(a))
+    )
+      return refuseScan('Changing remotes');
+  }
+  // writes: redirects may only target files inside the working directory (the scratch) or the OS temp dir
+  for (const target of seg.redirects) {
+    if (target === '/dev/null' || /^&?\d$/.test(target)) continue;
+    const abs = resolveArg(target, cwd, cfg.home);
+    const ok =
+      abs !== null &&
+      [cwd, tmpdir(), '/tmp', '/var/tmp'].some((root) => abs === resolve(root) || inside(abs, resolve(root)));
+    if (!ok) return refuseScan(`Writing to ${target}`);
+  }
+  return null;
+}
+
+/** The verdict of a read-only scan on a command line, or null when the scan guard has no objection. */
+export function scanVerdict(command: string, cfg: GuardConfig, cwd: string, depth = 0): GuardVerdict | null {
+  for (const line of [command, ...substitutions(command)]) {
+    for (const seg of splitSegments(line)) {
+      const v = scanSegment(seg, cfg, cwd, depth);
+      if (v) return v;
+    }
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------------------------- audit

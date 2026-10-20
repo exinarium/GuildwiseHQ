@@ -116,10 +116,10 @@ function checkShape(input: {
         'a remote host needs the workstation whose DevOps engineer deploys',
       );
     if (!input.host) throw unprocessable('host_required', 'a remote host needs an SSH host alias');
-  } else if (input.workstationId || input.host) {
+  } else if (input.host) {
     throw unprocessable(
       'local_target_shape',
-      'a local Docker target has no workstation or host: it deploys on every workstation of every project member',
+      'a local Docker target has no host: it runs Docker on a workstation (or, with none named, on every workstation of every project member)',
     );
   }
 }
@@ -211,11 +211,8 @@ export async function updateDeployTarget(
       workstationId: patch.workstationId !== undefined ? patch.workstationId : t.workstation_id,
       host: patch.host !== undefined ? patch.host : t.host,
     };
-    // Switching kind clears what no longer applies.
-    if (merged.kind === 'local_docker') {
-      merged.workstationId = null;
-      merged.host = null;
-    }
+    // Switching kind clears what no longer applies. A local Docker target may keep a workstation ("on this computer").
+    if (merged.kind === 'local_docker') merged.host = null;
     checkShape(merged);
     checkTesting({
       testEnabled: patch.testEnabled ?? t.test_enabled ?? false,

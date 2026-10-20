@@ -107,3 +107,59 @@ describe('aom recipe save', () => {
     expect(await run('recipe', 'save', '--dir', '/tmp/s', '--project', 'P5')).toBe(1);
   });
 });
+
+describe('aom setup propose ("Scan with DevOps")', () => {
+  it('reads the file, sends it as the proposal with the chosen area, and prints the answer', async () => {
+    const rpcs: Array<{ method: string; params: Record<string, unknown> }> = [];
+    const ipc = new IpcServer();
+    servers.push(ipc);
+    await ipc.start();
+    const token = ipc.registerShift({
+      report: async () => ({ accepted: true, message: 'ok' }) as never,
+      rpc: async (r) => {
+        rpcs.push({ method: r.method, params: r.params });
+        return { ok: true, result: { message: 'Proposal saved (3 items, 1 questions).' } };
+      },
+    });
+    const out: string[] = [];
+    const err: string[] = [];
+    const ctx: AomContext = {
+      env: { AOM_IPC_URL: ipc.url, AOM_SHIFT_TOKEN: token },
+      io: { out: (s) => out.push(s), err: (s) => err.push(s) },
+      fetch,
+      readFile: (p) =>
+        p === '/tmp/p.json' ? JSON.stringify({ run: { services: [] }, items: [] }) : 'not json',
+    };
+    expect(await runAom(['setup', 'propose', '--area', 'run', '--file', '/tmp/p.json'], ctx)).toBe(0);
+    expect(rpcs).toEqual([
+      { method: 'setup.propose', params: { proposal: { area: 'run', run: { services: [] }, items: [] } } },
+    ]);
+    expect(out.join('')).toContain('Proposal saved');
+    expect(await runAom(['setup', 'propose', '--file', '/tmp/bad.json'], ctx)).toBe(1);
+    expect(err.join('')).toContain('not valid JSON');
+    expect(await runAom(['setup', 'propose'], ctx)).toBe(1);
+    expect(err.join('')).toContain('usage: aom setup propose');
+  });
+
+  it('a refusal from the server is printed so the proposal can be fixed', async () => {
+    const ipc = new IpcServer();
+    servers.push(ipc);
+    await ipc.start();
+    const token = ipc.registerShift({
+      report: async () => ({ accepted: true, message: 'ok' }) as never,
+      rpc: async () => ({
+        ok: false,
+        error: 'invalid proposal: items.0.path "/services/9" does not name anything',
+      }),
+    });
+    const err: string[] = [];
+    const ctx: AomContext = {
+      env: { AOM_IPC_URL: ipc.url, AOM_SHIFT_TOKEN: token },
+      io: { out: () => {}, err: (s) => err.push(s) },
+      fetch,
+      readFile: () => '{"area":"run"}',
+    };
+    expect(await runAom(['setup', 'propose', '--file', 'p.json'], ctx)).toBe(1);
+    expect(err.join('')).toContain('does not name anything');
+  });
+});

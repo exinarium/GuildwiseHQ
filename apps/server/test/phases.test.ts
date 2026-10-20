@@ -71,9 +71,8 @@ describe('deploy targets', () => {
       ).status,
     ).toBe(400);
     expect((await owner('POST', base, { name: 'x', kind: 'remote_ssh', host: 'h' })).status).toBe(422);
-    expect(
-      (await owner('POST', base, { name: 'x', kind: 'local_docker', workstationId: w.workstationId })).status,
-    ).toBe(422);
+    // a local Docker target runs on no host; it may name a workstation ("on this computer"), see run-steps.test.ts
+    expect((await owner('POST', base, { name: 'x', kind: 'local_docker', host: 'h' })).status).toBe(422);
     // a workstation of somebody who is not a member of the project
     const stranger = await w.t.userSession(uniqueEmail('stranger'));
     const other = await pairWorkstation(w.t, stranger, 'other-box');

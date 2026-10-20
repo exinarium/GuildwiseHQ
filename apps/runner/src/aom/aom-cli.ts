@@ -1253,6 +1253,28 @@ const VERBS: Record<string, Verb> = {
     for (const l of r.lint ?? []) ctx.io.out(`lint ${l.level}: ${l.message}\n`);
     return (r.lint ?? []).some((l) => l.level === 'error') ? 1 : 0;
   },
+  /**
+   * `aom setup propose --area run --file <proposal.json>` (DevOps, in a "Scan with DevOps" request): submit what the scan found.
+   * The server checks the proposal against its schema and answers with what is wrong, so it can be fixed and sent again.
+   */
+  setup: async (ctx, p) => {
+    if (p.positionals[0] !== 'propose' || !one(p, 'file'))
+      throw new UsageError('usage: aom setup propose --area run|deploy --file <proposal.json>');
+    let proposal: unknown;
+    try {
+      proposal = JSON.parse(ctx.readFile(one(p, 'file') as string));
+    } catch (err) {
+      throw new UsageError(
+        `the proposal file is not valid JSON: ${err instanceof Error ? err.message : err}`,
+      );
+    }
+    const area = one(p, 'area');
+    if (area !== undefined && proposal && typeof proposal === 'object')
+      (proposal as Record<string, unknown>).area = area;
+    const r = (await rpc(ctx, 'setup.propose', { proposal })) as { message?: string };
+    ctx.io.out(`${r?.message ?? 'Proposal saved.'}\n`);
+    return 0;
+  },
   /** `aom runner restart [--reason ".."]`: restarts the runner after this reply (owner turns and DevOps shifts only). */
   runner: async (ctx, p) => {
     if (p.positionals[0] !== 'restart') throw new UsageError('usage: aom runner restart [--reason "<why>"]');
@@ -2233,6 +2255,7 @@ export const USAGE = `usage: aom <verb> [options]
   toolchain list | add <name> --bin <dir>... [--read <dir>]... [--env KEY=VALUE]... | remove <name>   tools sandboxed agents may use; DevOps engineer: register what you installed so agents get it on PATH
   hygiene run [--note "<text>"]               DevOps engineer: repository hygiene request (commit to the working branch, pull, push, tidy), ends the request
   ceo snapshot | show | search | act <action> ... | recommend | notify | task | memory | review-reply | devops | draft-cards | correction | job | order | dir | done | report   CEO agent only: manage the organisation within the policy (see your instructions)
+  setup propose --area run|deploy --file <proposal.json>   DevOps, in a "Scan with DevOps" request: submit the proposal (read-only scan; the user reviews it)
   runner restart [--reason "<why>"]          CEO owner turns and DevOps shifts: restart the runner after your reply
   run info | status | logs <svc> | step --name <n> -- <cmd> | service --name <n> --port http:5000:ENV_VAR --health <url> -- <cmd> | ready | fail --reason <t>   DevOps engineer of a "run this branch" request: the runner starts and supervises the services (see your instructions)
 `;

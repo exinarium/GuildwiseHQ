@@ -314,6 +314,8 @@ export const RpcMethodSchema = z.enum([
   'deploy.trial',
   'deploy.status',
   'recipe.save',
+  /** "Scan with DevOps": the DevOps engineer submits its proposal (docs/design/deploy-run-ux-design.md section 5). */
+  'setup.propose',
 ]);
 export type RpcMethod = z.infer<typeof RpcMethodSchema>;
 

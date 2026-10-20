@@ -35,6 +35,7 @@ import { reporterEvents } from './reporter.ts';
 import { researchEvents } from './research.ts';
 import { runEvents } from './run.ts';
 import { scheduleEvents } from './schedule.ts';
+import { setupEvents } from './setup.ts';
 import { sharingEvents } from './sharing.ts';
 import { shiftEvents } from './shift.ts';
 import { testingEvents } from './testing.ts';
@@ -78,6 +79,7 @@ export const DomainEventSchema = z.discriminatedUnion('type', [
   ...phaseEvents,
   ...reporterEvents,
   ...hygieneEvents,
+  ...setupEvents,
   ...interestEvents,
   ...costEvents,
   ...blogEvents,

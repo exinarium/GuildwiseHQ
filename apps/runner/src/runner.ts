@@ -23,6 +23,7 @@ import {
   type RunnerUpdateCheckResult,
   type RunnerUpdateState,
   type RuntimeInfo,
+  SETUP_SCAN_CAPABILITY,
   type ServerToRunner,
   SHIFT_LIMIT_CAPABILITY,
   type ShiftLimitSetting,
@@ -1039,6 +1040,8 @@ export class Runner {
         RUNNER_PIN_CAPABILITY,
         RUNNER_UPDATE_CHECK_CAPABILITY,
         DELIVERY_CAPABILITY,
+        // "Scan with DevOps": `aom setup propose` and a read-only scan brief (docs/design/deploy-run-ux-design.md section 5).
+        SETUP_SCAN_CAPABILITY,
         LOCAL_VAULT_CAPABILITY,
         CLAUDE_ACCOUNTS_CAPABILITY,
         // The local opt-in (`aom-runner ceo full-power on`), read fresh: the server shows "Full power is off" without it.

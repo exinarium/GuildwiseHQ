@@ -55,6 +55,7 @@ import {
   applyRunStatus,
 } from '../commands/runs.ts';
 import { applyIntegrationResult } from '../commands/schedule-triggers.ts';
+import { setupProposeRpc } from '../commands/setup-proposals.ts';
 import {
   applyShiftEnded,
   applyShiftRejected,
@@ -1152,6 +1153,8 @@ export class RunnerHandlers {
         msg.method === 'recipe.save'
       )
         return reply(...(await deployRpc(ctx, shift, msg.method, msg.params)));
+      // "Scan with DevOps": the DevOps engineer submits its proposal.
+      if (msg.method === 'setup.propose') return reply(...(await setupProposeRpc(ctx, shift, msg.params)));
       // The CEO's management verbs (a CEO shift or the owner's chat with the CEO); the gateway checks the agent.
       if (msg.method === 'ceo') return reply(...(await ceoRpc(ctx, shift, msg.params)));
       if (shift.kind === 'ceo')

@@ -35,6 +35,8 @@ export interface DevopsGuardInput {
   protectedBranches?: string[];
   /** Commands the manager approved for this shift: allowed although they leave the workstation. */
   approvedCommands?: string[];
+  /** A "Scan with DevOps" shift: read-only. The guard refuses commands that start, build, install, connect or write (devops/guard.ts). */
+  readOnlyScan?: boolean;
 }
 
 export interface ShiftStartInput {

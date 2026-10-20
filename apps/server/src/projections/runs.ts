@@ -89,16 +89,18 @@ export const runProjectors: Record<string, Projector> = {
           [p.requestId],
         )
       : undefined;
+    // One live plan per (project, workstation); workstation null is the project-wide plan.
     await exec(
       tx,
-      `UPDATE run_plans SET status='superseded' WHERE project_id=$1 AND workstation_id=$2 AND status <> 'superseded'`,
+      `UPDATE run_plans SET status='superseded' WHERE project_id=$1 AND workstation_id IS NOT DISTINCT FROM $2::uuid AND status <> 'superseded'`,
       [p.projectId, p.workstationId],
     );
     await exec(
       tx,
       `INSERT INTO run_plans (id, org_id, project_id, workstation_id, version, status, plan, fingerprint,
-                              devops_request_id, saved_by_agent_id, created_at, build_hash, settings_hash)
-       VALUES ($1,$2,$3,$4,$5,'active',$6::jsonb,$7,$8,$9,$10,$11,$12)`,
+                              devops_request_id, saved_by_agent_id, created_at, build_hash, settings_hash,
+                              source, saved_by, proposal_id)
+       VALUES ($1,$2,$3,$4,$5,'active',$6::jsonb,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
       [
         p.planId,
         e.scope.orgId,
@@ -112,11 +114,57 @@ export const runProjectors: Record<string, Projector> = {
         e.createdAt,
         p.buildHash ?? null,
         p.settingsHash ?? null,
+        p.source ?? 'devops',
+        p.savedBy ?? null,
+        p.proposalId ?? null,
       ],
     );
   },
   RunPlanMarkedStale: async (tx, e) => {
     const p = (e.event as EventOf<'RunPlanMarkedStale'>).payload;
     await exec(tx, `UPDATE run_plans SET status='stale' WHERE id=$1 AND status='active'`, [p.planId]);
+  },
+  RunPlanFailureNoted: async (tx, e) => {
+    const p = (e.event as EventOf<'RunPlanFailureNoted'>).payload;
+    await exec(tx, `UPDATE run_plans SET last_failure=$2::jsonb WHERE id=$1 AND status <> 'superseded'`, [
+      p.planId,
+      JSON.stringify({ reason: p.reason, at: e.createdAt.toISOString() }),
+    ]);
+  },
+  RunPlanDiscarded: async (tx, e) => {
+    const p = (e.event as EventOf<'RunPlanDiscarded'>).payload;
+    await exec(tx, `UPDATE run_plans SET status='superseded' WHERE id=$1`, [p.planId]);
+  },
+  SetupProposalSubmitted: async (tx, e) => {
+    const p = (e.event as EventOf<'SetupProposalSubmitted'>).payload;
+    // A newer proposal replaces the older open one of the same area.
+    await exec(
+      tx,
+      `UPDATE setup_proposals SET status='superseded', resolved_at=$3 WHERE project_id=$1 AND area=$2 AND status='open'`,
+      [p.projectId, p.area, e.createdAt],
+    );
+    await exec(
+      tx,
+      `INSERT INTO setup_proposals (id, org_id, project_id, area, request_id, workstation_id, proposal, status, submitted_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,'open',$8)`,
+      [
+        p.proposalId,
+        e.scope.orgId,
+        p.projectId,
+        p.area,
+        p.requestId,
+        p.workstationId,
+        JSON.stringify(p.proposal),
+        e.createdAt,
+      ],
+    );
+  },
+  SetupProposalResolved: async (tx, e) => {
+    const p = (e.event as EventOf<'SetupProposalResolved'>).payload;
+    await exec(
+      tx,
+      `UPDATE setup_proposals SET status=$2, resolved_at=$3, resolved_by=$4 WHERE id=$1 AND status='open'`,
+      [p.proposalId, p.outcome, e.createdAt, p.by],
+    );
   },
 };

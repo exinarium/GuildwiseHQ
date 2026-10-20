@@ -957,6 +957,17 @@ export class ShiftSupervisor {
         commit: commits.find((c) => c.repoId === r.repoId)?.commit ?? r.commit ?? null,
       }));
     }
+    // A "Scan with DevOps" request: tell it where the user's checkouts are. They are read-only for it (see `scanDirs`).
+    const scanDirs: string[] = [];
+    if (msg.kind === 'devops' && msg.devops?.scan) {
+      for (const r of msg.devops.scan.repos) {
+        const found = await this.deps.findRepo(r.remoteUrlNormalized).catch(() => undefined);
+        if (found) {
+          r.clonePath = found.localPath;
+          scanDirs.push(found.localPath);
+        }
+      }
+    }
     const texts = shiftTexts(msg, s.brief);
     // The project's reference repositories (read-only), for a card shift only; only clones this runner found itself.
     const registeredFolders =
@@ -1144,6 +1155,7 @@ export class ShiftSupervisor {
                   (b): b is string => !!b,
                 ),
                 approvedCommands: msg.devops?.approval?.commands ?? [],
+                ...(msg.devops?.scan ? { readOnlyScan: true } : {}),
               },
             }
           : {}),
@@ -1151,7 +1163,7 @@ export class ShiftSupervisor {
         sandbox,
         agent: msg.agent as AgentRuntimeSpec,
         env: s.env,
-        addDirs: vaultCtx && msg.kind === 'card' ? [vaultCtx.addDir] : [],
+        addDirs: vaultCtx && msg.kind === 'card' ? [vaultCtx.addDir] : scanDirs,
         readDirs: [...readFolders, ...vaultReadFolder].map((f) => f.path),
         ...(tc ? { toolchainReadDirs: tc.readDirs } : {}),
         // plugin MCP servers: card shifts only (the DevOps engineer, questions and BA tasks keep their behaviour)

@@ -1,4 +1,4 @@
-import { type DevopsRun, type DevopsShift, isDevopsQuestion } from '../devops/index.ts';
+import { type DevopsRun, type DevopsScan, type DevopsShift, isDevopsQuestion } from '../devops/index.ts';
 import type { ShiftBrief } from '../protocol/runner.ts';
 import { formatCommandLine } from '../runs/plan.ts';
 import { commandForOutcome } from './commands.ts';
@@ -223,6 +223,61 @@ export function renderRunSection(run: DevopsRun): string {
   return out.join('\n\n');
 }
 
+/**
+ * The "Scan with DevOps" request as plain text. READ-ONLY by instruction and by the runner's guard: the answer is a proposal
+ * (`aom setup propose`) that the user reviews, never a change.
+ */
+export function renderScanSection(scan: DevopsScan): string {
+  const out: string[] = [];
+  out.push(`## Scan request (${scan.area}): ${scan.projectName} (${scan.projectKey})`);
+  out.push(
+    [
+      'This is a READ-ONLY scan. Do not start, stop, build, install, download or edit anything, do not use ssh, and write nothing into the repositories: the runner refuses those commands. Read files and run harmless read commands (`ls`, `cat`, `git log`, `docker version`, `jq`).',
+      'You are writing a proposal for a person with no coding experience, who will review it field by field and confirm it. Say what you found, say honestly what you guessed, and ask about what you cannot tell.',
+      'The proposal is JSON checked by a schema. Write it to a file in your scratch directory and submit it with `aom setup propose --area run --file <path>`. If it is refused, the message says what is wrong: fix the file and submit again in this shift. Then end the request with `aom devops-done` (one or two plain sentences).',
+    ].join('\n'),
+  );
+  out.push("### Repositories (the user's own checkouts; read them, never change them)");
+  out.push(
+    scan.repos
+      .map(
+        (r) =>
+          `- ${r.name} (repo id ${r.repoId})${r.clonePath ? `: ${r.clonePath}` : ''}${r.projectPath ? `, project folder ${r.projectPath}` : ''}${r.workingBranch ? `, working branch ${r.workingBranch}` : ''}`,
+      )
+      .join('\n'),
+  );
+  if (scan.note?.trim()) {
+    out.push('### The user says');
+    out.push(clip(scan.note.trim(), 2000));
+  }
+  if (scan.runInstructions.trim()) {
+    out.push('### Run instructions already written for the project');
+    out.push(clip(scan.runInstructions.trim(), 8000));
+  }
+  for (const r of scan.repoInstructions.filter((x) => x.text.trim())) {
+    out.push(`### Run instructions for ${r.name}`);
+    out.push(clip(r.text.trim(), 8000));
+  }
+  if (scan.currentPlan) {
+    out.push('### The run steps saved today (improve on them only where the code says they are wrong)');
+    out.push(clip(JSON.stringify(scan.currentPlan, null, 2), 8000));
+  }
+  if (scan.area === 'run') {
+    out.push('### What to look for');
+    out.push(
+      [
+        '- BUILD.md, README, package manifests and lockfiles (package.json scripts, pyproject, Gemfile, go.mod, *.csproj), Dockerfile, docker-compose files, Procfile, Makefile, .env.example, CI config.',
+        '- Which steps must run before the app starts (install packages, build, prepare the database) and which parts keep running (the website, an API, a database in Docker). Setup steps run in the order listed; a part lists in `after` the parts it waits for.',
+        '- Per part: the folder, the command, the port (and the environment variable the app reads its port from), and how to tell it is ready (an http health path, a tcp port, a log line).',
+        '- Commands are argv arrays, no shell: `["npm","ci"]`. A step gets `label` (plain words: "Install packages") and `template` when it fits one of: install_packages, build, prepare_db, web_app, docker_service, compose_stack, custom_step, custom_service. Use `${port}` in a part\'s health url and command for its own port. No secrets anywhere; point `envFile` at an absolute path outside the repository only if the user told you one.',
+        '- `items`: one entry per decision, with a JSON pointer into `run` (for example `/services/0/ports/0/default`), `confidence` found (you read it in a file; give `evidence` with file and line), guessed (a convention, please check), or unknown (you could not tell; also add a `questions` entry in plain words with options and a default). Questions have the same kind of `path`.',
+        '- `notes`: what the user should know, in plain words (not commands to run).',
+      ].join('\n'),
+    );
+  }
+  return out.join('\n\n');
+}
+
 /** The prompt of a DevOps shift: the request, who asked, earlier thread messages and any granted approval. */
 export function renderDevopsPrompt(devops: DevopsShift): string {
   const out: string[] = [];
@@ -243,6 +298,7 @@ export function renderDevopsPrompt(devops: DevopsShift): string {
     );
   }
   if (devops.run) out.push(renderRunSection(devops.run));
+  if (devops.scan) out.push(renderScanSection(devops.scan));
   if (devops.approval && isDevopsQuestion(devops.approval.action)) {
     out.push('## Answer to your question');
     out.push(
@@ -272,11 +328,13 @@ export function renderDevopsPrompt(devops: DevopsShift): string {
   }
   out.push('## Your job in this shift');
   out.push(
-    devops.run
-      ? 'This is a run request: bring the environment up with `aom run` as described above, then report with `aom devops-done`.'
-      : devops.hygiene
-        ? 'This is a repository hygiene request. Run `aom hygiene run`: it fetches, commits uncommitted changes to the confirmed working branch, pulls, pushes and deletes merged agent branches in the repositories above, tells you what it could not resolve and ends the request. Do not run the git commands yourself, and never commit or push to a repository whose working branch is not confirmed: the command already refuses and asks the manager.'
-        : 'Do the request within your granted access, then report with `aom devops-done` or `aom devops-approval` (approval) / `aom devops-question` (a question).',
+    devops.scan
+      ? 'This is a scan request: read the project as described above (read-only), submit the proposal with `aom setup propose`, then report with `aom devops-done`.'
+      : devops.run
+        ? 'This is a run request: bring the environment up with `aom run` as described above, then report with `aom devops-done`.'
+        : devops.hygiene
+          ? 'This is a repository hygiene request. Run `aom hygiene run`: it fetches, commits uncommitted changes to the confirmed working branch, pulls, pushes and deletes merged agent branches in the repositories above, tells you what it could not resolve and ends the request. Do not run the git commands yourself, and never commit or push to a repository whose working branch is not confirmed: the command already refuses and asks the manager.'
+          : 'Do the request within your granted access, then report with `aom devops-done` or `aom devops-approval` (approval) / `aom devops-question` (a question).',
   );
   return `${out.join('\n\n')}\n`;
 }

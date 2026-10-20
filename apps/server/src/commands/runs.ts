@@ -262,7 +262,7 @@ export async function getRunSettings(
   const plans = await rows(
     ctx.pool,
     `SELECT rp.*, w.name AS workstation_name FROM run_plans rp JOIN workstations w ON w.id = rp.workstation_id
-      WHERE rp.project_id=$1 AND rp.status <> 'superseded' AND w.status='active' ORDER BY w.name`,
+      WHERE rp.project_id=$1 AND rp.status <> 'superseded' AND w.status='active' ORDER BY w.name`, // project-wide plans: run-plans.ts
     [projectId],
   );
   return {
@@ -371,6 +371,8 @@ function planCovers(plan: RunPlan, repoIds: string[], wanted: string[]): boolean
 /** Marks a plan stale (an event: `RunPlanMarkedStale`); the next start goes through the DevOps engineer. */
 async function markPlanStale(ctx: Ctx, tx: Tx, plan: Row, reason: 'settings' | 'build_doc'): Promise<void> {
   if (plan.status !== 'active') return;
+  // The owner's word wins: a plan the owner saved (or confirmed from a scan) never goes stale by itself, only a failed start flags it.
+  if (plan.source && plan.source !== 'devops') return;
   await ctx.store.append(
     [
       {
@@ -444,27 +446,36 @@ export async function findReplay(
   services: string[],
 ): Promise<{ replay?: NonNullable<RunStartPayload['replay']>; planRow?: Row }> {
   if (!runnerReplays) return {};
-  const planRow = await one(
+  // The workstation's own plan first, then the project-wide one (owner or scan), as design section 7.2 says.
+  const candidates = await rows(
     tx,
-    `SELECT * FROM run_plans WHERE project_id=$1 AND workstation_id=$2 AND status='active'`,
+    `SELECT * FROM run_plans WHERE project_id=$1 AND status='active' AND (workstation_id=$2 OR workstation_id IS NULL)
+      ORDER BY (workstation_id IS NULL)`,
     [projectId, workstationId],
   );
-  if (!planRow || planRow.settings_hash === null || planRow.build_hash === null) return {};
-  if (planRow.settings_hash !== (await settingsHashOf(tx, projectId))) {
-    await markPlanStale(ctx, tx, planRow, 'settings');
-    return {};
+  for (const planRow of candidates) {
+    const fromOwner = planRow.source !== 'devops';
+    if (!fromOwner) {
+      if (planRow.settings_hash === null || planRow.build_hash === null) continue;
+      if (planRow.settings_hash !== (await settingsHashOf(tx, projectId))) {
+        await markPlanStale(ctx, tx, planRow, 'settings');
+        continue;
+      }
+    }
+    const plan = RunPlanSchema.safeParse(planRow.plan);
+    if (!plan.success || !planCovers(plan.data, repoIds, services)) continue;
+    return {
+      planRow,
+      replay: {
+        planId: planRow.id,
+        version: planRow.version,
+        plan: plan.data,
+        // null: do not compare with BUILD.md (an owner's plan is not made from it)
+        buildHash: fromOwner ? null : planRow.build_hash,
+      },
+    };
   }
-  const plan = RunPlanSchema.safeParse(planRow.plan);
-  if (!plan.success || !planCovers(plan.data, repoIds, services)) return {};
-  return {
-    planRow,
-    replay: {
-      planId: planRow.id,
-      version: planRow.version,
-      plan: plan.data,
-      buildHash: planRow.build_hash,
-    },
-  };
+  return {};
 }
 
 /** Starts a branch on a workstation: the environment row, `run.start` for the runner and a DevOps `run` request. */
@@ -472,6 +483,10 @@ export async function startRun(
   ctx: Ctx,
   user: AuthSession['user'],
   req: StartRunRequest,
+  opts: {
+    /** "Test these steps": replay this (maybe unsaved) plan instead of the saved one; a failure is reported, never repaired by DevOps. */
+    testPlan?: RunPlan;
+  } = {},
 ): Promise<RunEnvironmentDto> {
   const now = ctx.clock.now();
   const envId = randomUUID();
@@ -578,15 +593,30 @@ export async function startRun(
     const summary = `Run ${chosen.map((s) => `${s.repo.name}@${s.branch}`).join(', ')} of ${project.name}${card ? ` (card ${card.ref})` : ''}`;
 
     // A current saved plan is replayed by the runner with no model call; anything else goes through the DevOps engineer.
-    const { replay, planRow: replayPlanRow } = await findReplay(
-      ctx,
-      tx,
-      project.id,
-      ws.id,
-      caps.replay,
-      chosen.map((c) => c.repo.id),
-      req.services ?? [],
-    );
+    if (opts.testPlan && !caps.replay)
+      throw conflict(
+        'runs_not_supported',
+        `the runner on ${ws.name} is too old to test steps: update the runner on that machine`,
+      );
+    const { replay, planRow: replayPlanRow } = opts.testPlan
+      ? {
+          replay: {
+            planId: randomUUID(),
+            version: 1,
+            plan: opts.testPlan,
+            buildHash: null,
+          } as NonNullable<RunStartPayload['replay']>,
+          planRow: undefined,
+        }
+      : await findReplay(
+          ctx,
+          tx,
+          project.id,
+          ws.id,
+          caps.replay,
+          chosen.map((c) => c.repo.id),
+          req.services ?? [],
+        );
     await exec(
       tx,
       `INSERT INTO run_environments (id, org_id, project_id, workstation_id, purpose, card_id, sources, services, state,
@@ -920,9 +950,50 @@ export async function applyRunReplayFailed(
     workstationId,
   ]);
   if (!r || !isLiveRunState(r.state) || r.state === 'stopping' || r.stop_requested_at) return;
-  if (msg.stale && r.plan_id) {
+  // "Test these steps" replayed a plan nobody saved yet: say what failed, never file a DevOps repair for it.
+  if (r.replayed && !r.plan_id) {
+    const reason = `${msg.reason}${msg.logTail ? `\n\nLast output:\n${msg.logTail}` : ''}`.slice(0, 4000);
+    const now = ctx.clock.now();
+    await exec(
+      tx,
+      `UPDATE run_environments SET state='failed', last_error=$2, activity=$3, updated_at=$4, stopped_at=$4, stop_reason='failed' WHERE id=$1`,
+      [r.id, reason, 'the steps did not start the app', now],
+    );
+    await ctx.store.append(
+      [
+        {
+          streamId: streamId.run(r.id),
+          event: {
+            type: 'RunEnvironmentEnded',
+            payload: { envId: r.id, reason: 'failed', detail: msg.reason.slice(0, 4000) },
+          },
+          actor: runnerActor(workstationId),
+          scope: projectScope(r.org_id, r.project_id),
+        },
+      ],
+      { tx },
+    );
+    return;
+  }
+  if (r.plan_id) {
     const plan = await one(tx, 'SELECT * FROM run_plans WHERE id=$1', [r.plan_id]);
-    if (plan) await markPlanStale(ctx, tx, plan, 'build_doc');
+    if (plan && msg.stale) await markPlanStale(ctx, tx, plan, 'build_doc');
+    // An owner or scan plan stays in force; the failure is flagged on it and DevOps repairs it for this workstation.
+    if (plan && plan.status === 'active' && plan.source !== 'devops')
+      await ctx.store.append(
+        [
+          {
+            streamId: streamId.project(plan.project_id),
+            event: {
+              type: 'RunPlanFailureNoted',
+              payload: { planId: plan.id, projectId: plan.project_id, reason: msg.reason.slice(0, 4000) },
+            },
+            actor: runnerActor(workstationId),
+            scope: projectScope(plan.org_id, plan.project_id),
+          },
+        ],
+        { tx },
+      );
   }
   // One DevOps request at a time: a repair already queued or running for this environment is enough.
   if (r.devops_request_id) {
@@ -1251,7 +1322,8 @@ export async function runBriefFor(ctx: Ctx, req: Row): Promise<DevopsRun | null>
   const settings = RunSettingsSchema.parse(project.run_settings ?? {});
   const plan = await one(
     ctx.pool,
-    `SELECT plan, status FROM run_plans WHERE project_id=$1 AND workstation_id=$2 AND status <> 'superseded'`,
+    `SELECT plan, status FROM run_plans WHERE project_id=$1 AND (workstation_id=$2 OR workstation_id IS NULL) AND status <> 'superseded'
+      ORDER BY (workstation_id IS NULL) LIMIT 1`,
     [env.project_id, env.workstation_id],
   );
   const sources = (env.sources ?? []) as Array<{ repoId: string; branch: string; commit?: string | null }>;

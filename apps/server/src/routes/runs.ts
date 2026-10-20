@@ -2,17 +2,28 @@ import {
   ConfirmSuiteRequestSchema,
   ExtendRunRequestSchema,
   IdParamsSchema,
+  ProposalsQuerySchema,
+  ResolveProposalRequestSchema,
   RestartRunRequestSchema,
   RunsQuerySchema,
+  SaveRunPlanRequestSchema,
   SetIntegrationTestsRequestSchema,
   SetRunSettingsRequestSchema,
   SetTargetSecretRequestSchema,
+  SetupScanRequestSchema,
   StartRunRequestSchema,
+  TestRunPlanRequestSchema,
 } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { requireUser } from '../auth/guards.ts';
 import { confirmSuite, getIntegrationTests, setIntegrationTests } from '../commands/integration-tests.ts';
+import {
+  discardWorkstationPlan,
+  getRunPlanOverview,
+  saveRunPlan,
+  testRunPlan,
+} from '../commands/run-plans.ts';
 import {
   dismissRun,
   extendRun,
@@ -25,6 +36,7 @@ import {
   startRun,
   stopRun,
 } from '../commands/runs.ts';
+import { listProposals, resolveProposal, startScan } from '../commands/setup-proposals.ts';
 import { setTargetSecret, targetSecretStatuses } from '../commands/target-secrets.ts';
 import type { Ctx } from '../context.ts';
 import { typed } from './util.ts';
@@ -110,6 +122,73 @@ export function runRoutes(ctx: Ctx) {
         const s = await requireUser(ctx, req);
         await setRunSettings(ctx, s.user, req.params.id, req.body);
         return getRunSettings(ctx, s.user, req.params.id);
+      },
+    );
+
+    // Guided run steps (docs/design/deploy-run-ux-design.md): the project-wide plan, the scan and its proposals.
+    app.get('/api/projects/:id/run-plan', { schema: { params: IdParamsSchema } }, async (req) => {
+      const s = await requireUser(ctx, req);
+      return getRunPlanOverview(ctx, s.user, req.params.id);
+    });
+
+    app.put(
+      '/api/projects/:id/run-plan',
+      { schema: { params: IdParamsSchema, body: SaveRunPlanRequestSchema } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        await saveRunPlan(ctx, s.user, req.params.id, req.body);
+        return getRunPlanOverview(ctx, s.user, req.params.id);
+      },
+    );
+
+    app.delete(
+      '/api/projects/:id/run-plan/:planId',
+      { schema: { params: z.object({ id: z.uuid(), planId: z.uuid() }) } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        await discardWorkstationPlan(ctx, s.user, req.params.id, req.params.planId);
+        return getRunPlanOverview(ctx, s.user, req.params.id);
+      },
+    );
+
+    app.post(
+      '/api/projects/:id/run-plan/test',
+      { schema: { params: IdParamsSchema, body: TestRunPlanRequestSchema } },
+      async (req, reply) => {
+        const s = await requireUser(ctx, req);
+        const environment = await testRunPlan(ctx, s.user, req.params.id, req.body);
+        reply.code(201);
+        return { environment };
+      },
+    );
+
+    app.post(
+      '/api/projects/:id/scan',
+      { schema: { params: IdParamsSchema, body: SetupScanRequestSchema } },
+      async (req, reply) => {
+        const s = await requireUser(ctx, req);
+        const r = await startScan(ctx, s.user, req.params.id, req.body);
+        reply.code(202);
+        return r;
+      },
+    );
+
+    app.get(
+      '/api/projects/:id/proposals',
+      { schema: { params: IdParamsSchema, querystring: ProposalsQuerySchema } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        return { proposals: await listProposals(ctx, s.user, req.params.id, req.query.area) };
+      },
+    );
+
+    app.post(
+      '/api/setup-proposals/:id/resolve',
+      { schema: { params: IdParamsSchema, body: ResolveProposalRequestSchema } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        await resolveProposal(ctx, s.user, req.params.id, req.body.outcome);
+        return { ok: true };
       },
     );
 

@@ -29,6 +29,7 @@ import { graphScopeFor } from '../commands/graph.ts';
 import { grantedMcpServers } from '../commands/mcp-servers.ts';
 import { riskOf } from '../commands/review-risk.ts';
 import { runBriefFor } from '../commands/runs.ts';
+import { scanBriefFor } from '../commands/setup-proposals.ts';
 import { shiftEnvironmentFor } from '../commands/test-environments.ts';
 import { projectHasVault, vaultForProject } from '../commands/vaults.ts';
 import type { Ctx } from '../context.ts';
@@ -958,6 +959,7 @@ export async function buildDevopsShiftStart(
       ...(await mergeWaiver(ctx, req.card_id)),
       hygiene: req.hygiene ?? undefined,
       run: (await runBriefFor(ctx, req)) ?? undefined,
+      scan: (await scanBriefFor(ctx, req)) ?? undefined,
       approval:
         ap?.resolution === 'approved'
           ? { action: ap.action, reason: ap.reason, commands: ap.commands ?? [], note: ap.note ?? undefined }
