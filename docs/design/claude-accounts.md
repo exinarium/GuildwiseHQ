@@ -9,12 +9,12 @@ Implementers work from this file plus the code. Every path is relative to the re
 
 | # | Decision |
 |---|---|
-| D1 | A project names its account by a **key** (e.g. `work`). If the account does not exist on a workstation, that workstation's runner **provisions** it (section 2.3). |
+| D1 | A project names its account by a **key** (e.g. `work`). If the account does not exist on a workstation, that workstation's runner **provisions** its own dedicated config dir for it (section 2.3). |
 | D2 | **Every shift that works on one ticket of the project** uses the project's account: `card` shifts, `question` shifts whose desk item has a `card_id` in the project, and `ba_task` shifts whose task has a `card_id` (`spec_card`). If the project has no account, the shift uses the main account. Out of scope, always main: CEO shifts, DevOps shifts (even when the request names a card), BA tasks without a card, and all chats (including the CEO full-power owner turn). |
 | D3 | The fallback checkbox ("use the main account when this one is out") is **off by default**. Off means pause. |
 | D4 | An **expired login, or a login that was never completed, counts exactly like a hit usage limit** (fallback or pause), and raises a desk notification. |
 | D5 | **Shifts already running finish on the account they started with.** Every new shift (next stage, another agent, a retry) picks its account again. |
-| D6 | **The primary source of an account is a Claude Code config dir.** If none is given, the default is `~/.claude-<key>`, created when missing. Token or API-key accounts are a secondary option. |
+| D6 | **The primary source of an account is a Claude Code config dir, and the runner only ever uses a dir it created itself.** The default is `~/.claude-gw-<key>` (alias `claude-gw-<key>`), created when missing and marked with a file `.aom-runner-owned`. The runner never adopts the user's own dirs or aliases: the owner uses `~/.claude-work` and the `claude-work` alias interactively, so provisioning for the key `work` makes `~/.claude-gw-work`, not `~/.claude-work`. A `configDir` the owner writes into `config.json` is honoured (they chose it). A default dir that exists without the marker is left alone and reported as an error. Token or API-key accounts are a secondary option. |
 
 Rejected alternatives (one line each):
 - Naming accounts by Anthropic `accountUuid`: token accounts have no readable profile, and a key is what people type.
@@ -125,7 +125,7 @@ Agents belong to the organization (`agents.allowed_project_ids`), so **the accou
 // apps/runner/src/config.ts, inside ClaudeRuntimeConfigSchema
 accounts: z.array(z.object({
   key: ClaudeAccountKeySchema,                 // from @aom/shared, never 'main'
-  /** Claude Code config dir; '~' allowed. Default '~/.claude-<key>' (created when missing). */
+  /** Claude Code config dir; '~' allowed. Default '~/.claude-gw-<key>' (created when missing). */
   configDir: z.string().optional(),
   /** 'config_dir' (default, D6) or 'token' (secrets/claude-accounts/<key>.json holds an oauth token or API key). */
   source: z.enum(['config_dir', 'token']).default('config_dir'),
@@ -143,7 +143,7 @@ accounts: z.array(z.object({
     - Extend `ClaudeAuthMonitor` with a `none` state, or keep a separate flag.
     - `none` and `expired` both make the account unusable.
   - State is persisted to `<dataDir>/claude-accounts-state.json`: `{ [key]: { limitedUntil?: string, login?: 'expired' } }`. It is written on every change and loaded at start, so a restart no longer forgets a limit. Main is included, which replaces the in-memory-only `Runner.claudeUsage` / `claudeAuth`.
-  - It watches the mtime of `<dir>/.credentials.json` for `config_dir` accounts (checked in the existing runner tick). A change while `none` or `expired` triggers an immediate `probeLogin` for that account, so a login made in a terminal (`claude-work`, then `/login`) is picked up within seconds.
+  - It watches the mtime of `<dir>/.credentials.json` for `config_dir` accounts (checked in the existing runner tick). A change while `none` or `expired` triggers an immediate `probeLogin` for that account, so a login made in a terminal (`claude-gw-work`, then `/login`) is picked up within seconds.
 - **`Runner`** (`apps/runner/src/runner.ts`):
   - It owns the registry.
   - `probeUsage()` and `probeAuth()` loop over the accounts, with the same timing rules per account and the account's own `probeEnv()`.
@@ -196,20 +196,18 @@ accounts: z.array(z.object({
 - A runner without the capability never gets the command. Its accounts count as missing, and a desk notice says "update the runner" (section 2.5).
 
 **Handler (runner)**, new file `apps/runner/src/adapters/claude-account-provision.ts`, wired as a command handler in `runner.ts`. It is idempotent. For `{ key, configDir? }`:
-1. **Find an existing alias.** Scan `~/.bashrc`, `~/.bash_aliases`, `~/.zshrc` and `~/.profile` (those that exist) for `^\s*alias\s+claude-<key>=(['"]?)(.*)\1\s*$`.
-   - If one is found and its body matches `CLAUDE_CONFIG_DIR=(\S+)\s+claude\b`, **reuse that dir** (expand `~` and `$HOME`). Example: the existing `claude-work` gives `~/.claude-work`.
-   - If one is found but no dir can be parsed, do not touch it; use `configDir ?? ~/.claude-<key>`, and put `aliasConflict: true` in the result.
-2. **Pick the dir:** the existing config entry, else the alias dir, else the payload `configDir`, else `~/.claude-<key>` (on Windows, `%USERPROFILE%\.claude-<key>`).
+1. **Pick the dir, never adopting the user's own.** The runner uses, in order: the `configDir` of an existing `config.json` entry for the key (the owner chose it, so it is honoured), the payload's `configDir`, else the runner-owned default `~/.claude-gw-<key>` (on Windows `%USERPROFILE%\.claude-gw-<key>`). It does **not** scan the shell files for `claude-<key>` aliases and never reuses `~/.claude-work` or the `claude-work` alias.
+   - A dir that is not from the `config.json` entry must either not exist yet or carry the ownership marker `.aom-runner-owned`. A default dir that exists **without** the marker is not touched and not adopted: result `failed`, with a detail that says so and names `aom-runner accounts add <key> --config-dir <dir>` as the deliberate way to register it.
    - Refuse paths inside the runner data dir, `~/.claude` (that is main), or outside the home directory: result `failed`.
-   - Create the dir with `mkdir -p` and mode `0700`.
+2. **Create the dir** with `mkdir -p` and mode `0700`, and write the marker file `.aom-runner-owned` (not for a dir named in `config.json`).
 3. **Register** `{key, configDir, source:'config_dir'}` in this pairing's `config.json`, using `saveConfig` (atomic, `0600`).
-4. **Add the alias** (POSIX only, and only when step 1 found no alias of that name). The target file is `~/.zshrc` when `$SHELL` ends in `zsh`, else `~/.bashrc` (created if missing). Edit only inside a marked block, rewriting the whole block atomically:
+4. **Add the alias `claude-gw-<key>`** (POSIX only). The target file is `~/.zshrc` when `$SHELL` ends in `zsh`, else `~/.bashrc` (created if missing). Edit only inside a marked block, rewriting the whole block atomically:
    ```
    # >>> guildwise claude accounts >>>
-   alias claude-work2='CLAUDE_CONFIG_DIR=~/.claude-work2 claude'
+   alias claude-gw-work2='CLAUDE_CONFIG_DIR=~/.claude-gw-work2 claude'
    # <<< guildwise claude accounts <<<
    ```
-   The block is created once; later keys are added inside it, sorted, never duplicated. Lines outside the block are never edited. Report `aliasAdded: true` or `false`.
+   The block is created once; later keys are added inside it, sorted, never duplicated. Lines outside the block are never edited. An alias of that name that sits outside the block is not ours: it is left alone and reported as `aliasConflict: true`. Report `aliasAdded: true` or `false`.
 5. **Login state:** if `<dir>/.credentials.json` has `claudeAiOauth`, run `probeLogin` for the account and answer `ready` (or `awaiting_login` if the probe says expired). Otherwise answer `awaiting_login`. The account is reported with `login: 'none'`, which makes it unusable (fallback or pause).
 6. **Machine-scope gate:** steps 2 to 4 touch the user's home directory, so they run only when `config.integrations.machineScopeFromWeb === 'primary'` and this is the primary pairing (the same rule as the machine login on the Integrations page). Otherwise answer `needs_owner` with the exact commands in `detail`: `aom-runner accounts add <key>`, then `aom-runner accounts login <key>`.
 
@@ -313,7 +311,7 @@ The runner is authoritative on `usage`, so `limitedUntil` is not compared to the
   - Addressed to the workstation owner (as `claude_auth_expired` is).
   - The body contains:
     - a button or link to the Integrations page, with `?focus=claude-code:<key>` and the workstation selected ("Sign in from the browser");
-    - the exact terminal fallback: `claude-<key>` then `/login`, or `CLAUDE_CONFIG_DIR=<dir> claude auth login`;
+    - the exact terminal fallback: `claude-gw-<key>` then `/login`, or `CLAUDE_CONFIG_DIR=<dir> claude auth login`;
     - for `needs_owner`: `aom-runner accounts add <key>` and `aom-runner accounts login <key>`;
     - for an old runner: "update the runner to 0.1.33 or later".
   - It closes when the account reports `login: 'ok'`.
@@ -362,7 +360,7 @@ export const ClaudeAccountInfoSchema = z.object({
   key: AccountKeySchema,
   main: z.boolean(),
   source: z.enum(['config_dir', 'token', 'api_key', 'default']),
-  /** Display only, home-relative ('~/.claude-work'). Never a token. */
+  /** Display only, home-relative ('~/.claude-gw-work'). Never a token. */
   configDir: z.string().max(400).optional(),
   email: z.string().max(200).optional(),
   /** oauthAccount.organizationType, e.g. 'claude_max', 'claude_team'. */
@@ -427,7 +425,7 @@ And in `packages/shared/src/claude/accounts.ts`:
 ```ts
 export const ClaudeAccountEnsurePayloadSchema = z.object({
   key: ClaudeAccountKeySchema,
-  /** Optional preferred dir ('~' allowed); default: an existing claude-<key> alias's dir, else '~/.claude-<key>'. */
+  /** Optional preferred dir ('~' allowed); default: the runner-owned '~/.claude-gw-<key>'. The runner never adopts a dir or alias it did not create. */
   configDir: z.string().max(400).optional(),
 });
 export const ClaudeAccountEnsureResultSchema = z.object({
@@ -435,7 +433,7 @@ export const ClaudeAccountEnsureResultSchema = z.object({
   state: z.enum(['ready', 'awaiting_login', 'needs_owner', 'failed']),
   configDir: z.string().max(400).optional(),   // display, home-relative
   aliasAdded: z.boolean(),
-  /** The alias that was already there and was reused (e.g. "claude-work -> ~/.claude-work"). */
+  /** Unused by this runner: provisioning never reuses an alias it did not create. */
   aliasExisting: z.string().max(300).optional(),
   aliasConflict: z.boolean().optional(),
   /** Exact commands for the owner when state is needs_owner | failed | awaiting_login. */
@@ -501,7 +499,7 @@ export const ProjectClaudeAccountsViewSchema = z.object({
   { id: 'claude_login', label: 'Sign in with your Claude subscription', flow: 'interactive', paste: 'code',
     steps: [{ text: 'Open the sign-in link and sign in to the Claude account for this key.' },
             { text: 'Copy the code the page shows and paste it here.' },
-            { text: "The login is stored in this account's own Claude folder on the workstation (e.g. ~/.claude-work)." }] }
+            { text: "The login is stored in this account's own Claude folder on the workstation (e.g. ~/.claude-gw-work)." }] }
   ```
   - Only for a non-empty instance. The web hides it for `''` and the runner refuses it there.
   - Its scope is `machine` (add it to `machineMethods`).
@@ -521,9 +519,9 @@ export const ProjectClaudeAccountsViewSchema = z.object({
 - **The main account itself is out:** every ticket of projects without an account pauses, as do projects with fallback whose own account is also out. DevOps, CEO and question shifts on main pause too, as today.
 - **A limit hit mid-shift:** the existing `usage_limited` put-back (no penalty), now carrying `accountKey`. The next pass falls back or pauses.
 - **Restart during a limit:** state comes from `claude-accounts-state.json`, so there is no wasted spawn.
-- **Login completed in a terminal** (`claude-work`, then `/login`): the `.credentials.json` mtime watch triggers a probe, the account turns `ok` and dispatch resumes.
+- **Login completed in a terminal** (`claude-gw-work`, then `/login`): the `.credentials.json` mtime watch triggers a probe, the account turns `ok` and dispatch resumes.
 - **Removing a project's account** (set to `null`): new shifts use main. Nothing is deleted on the workstations.
-- **Windows:** no alias step. The dir defaults to `%USERPROFILE%\.claude-<key>`, and the login flow is the same (pseudo-terminal through the existing `integrations/pty.ts`).
+- **Windows:** no alias step. The dir defaults to `%USERPROFILE%\.claude-gw-<key>`, and the login flow is the same (pseudo-terminal through the existing `integrations/pty.ts`).
 
 ---
 
@@ -572,14 +570,15 @@ export const ProjectClaudeAccountsViewSchema = z.object({
   - Files: `apps/runner/src/config.ts` (`accounts`); new `apps/runner/src/adapters/claude-accounts.ts` (`ClaudeAccountRegistry`, persisted state, mtime watch); `apps/runner/src/adapters/claude-auth.ts` (`none` state); `apps/runner/src/integrations/claude-store.ts` (`claudeAccountFile`); `apps/runner/src/runner.ts` (registry replaces `claudeUsage` / `claudeAuth`, per-account probe loops, `runtimeInfos().accounts`, capability in `hello`); `apps/runner/src/adapters/claude-code.ts` (`capabilities()` computes `available` as "any account usable", top-level fields = main); `apps/runner/src/cli.ts` (`accounts list|add|login|remove`).
   - Tests: new `apps/runner/test/claude-accounts.test.ts` (load and save state, login `none` detection, `probeEnv` per source sets `CLAUDE_CONFIG_DIR` or the token, mtime change triggers a probe); extend `claude-usage-limit.test.ts`, `claude-auth.test.ts`, `config.test.ts`, `cli.test.ts`.
 - **B2. Provisioning and web login**
-  - Files: new `apps/runner/src/adapters/claude-account-provision.ts` (alias scan and reuse, marked-block writer, dir rules, machine-scope gate, result); command handler wiring in `runner.ts`; `apps/runner/src/integrations/claude-code.ts` (`instances()`, per-instance `status/test/connect/remove`, `begin(instance,'claude_login')` with `parseClaudeAuthLogin`, `begin(instance,'setup_token')` saving per key).
+  - Files: new `apps/runner/src/adapters/claude-account-provision.ts` (ownership marker, marked-block alias writer, dir rules, machine-scope gate, result); command handler wiring in `runner.ts`; `apps/runner/src/integrations/claude-code.ts` (`instances()`, per-instance `status/test/connect/remove`, `begin(instance,'claude_login')` with `parseClaudeAuthLogin`, `begin(instance,'setup_token')` saving per key).
   - Fixture: record `apps/runner/test/fixtures/integrations/claude-auth-login.txt` first.
   - Tests: new `apps/runner/test/claude-account-provision.test.ts`, run against a temp HOME:
-    - the existing `alias claude-work='CLAUDE_CONFIG_DIR=~/.claude-work claude'` is reused with no write;
-    - a new key creates `~/.claude-<key>` and the block once;
+    - the owner's own `~/.claude-work` and `alias claude-work=...` are never adopted or touched: ensure for `work` creates `~/.claude-gw-work` and `claude-gw-work`;
+    - a default dir that exists without the marker gives `failed` and is not touched; a dir the runner marked is reused; a `config.json` `configDir` is honoured;
+    - a new key creates `~/.claude-gw-<key>` and the block once;
     - a second ensure is a no-op;
     - a second key is added inside the block, sorted;
-    - an unparseable alias gives `aliasConflict`;
+    - an alias of our name outside the block gives `aliasConflict`;
     - paths in the data dir or in `~/.claude` are refused;
     - a non-primary pairing gives `needs_owner`;
     - an existing `.credentials.json` gives `ready`.
@@ -592,7 +591,7 @@ export const ProjectClaudeAccountsViewSchema = z.object({
 ### S9: Docs and end-to-end check (after both tracks)
 - `docs/ARCHITECTURE.md`: §5 (new event and optional fields); §11.1 (data dir: `claude-accounts-state.json`, `secrets/claude-accounts/`, `agents/<id>/claude-acct-<key>`); §11.2 (`shift.start.account`, `shift.rejected.accountKey`, `claude.account.ensure`, `RuntimeInfo.accounts`, capability); §12.2 (accounts; correct "symlink" to "copy"); §9 (account selection rule). Also `docs/RUNNER.md` (accounts, alias block, login flow).
 - Manual check on this machine:
-  - set project X to `work`; confirm `~/.claude-work` and `claude-work` are reused and `~/.bashrc` is unchanged;
+  - set project X to `work`; confirm `~/.claude-gw-work` and `claude-gw-work` are created, `~/.claude-work` and the `claude-work` alias are untouched, and `~/.bashrc` changed only inside the marked block;
   - confirm a card shift runs with `CLAUDE_CONFIG_DIR=agents/<id>/claude-acct-work`;
   - simulate a limit (stub the probe) and check fallback and pause;
   - complete the web login for a new key `test1`.
