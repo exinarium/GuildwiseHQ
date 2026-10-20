@@ -10,6 +10,7 @@ import { CommitAsPanel } from '../components/CommitAsPanel.tsx';
 import { ConcurrencyCapPanel } from '../components/ConcurrencyCapPanel.tsx';
 import { ConvertPanel } from '../components/ConvertPanel.tsx';
 import { DeployTargetsPanel } from '../components/DeployTargetsPanel.tsx';
+import { DeliveryPanel } from '../components/delivery/DeliveryPanel.tsx';
 import { FullSuitePanel } from '../components/FullSuitePanel.tsx';
 import { GraphStatusPanel } from '../components/GraphStatusPanel.tsx';
 import { ManualQaPanel } from '../components/ManualQaPanel.tsx';
@@ -357,6 +358,7 @@ export function ProjectSettings() {
         <div id="phases" className="flex scroll-mt-20 flex-col gap-5">
           <PhasesPanel projectId={id} />
           <DeployTargetsPanel projectId={id} />
+          <DeliveryPanel projectId={id} />
           <FollowupDefaultsPanel projectId={id} />
         </div>
       )}

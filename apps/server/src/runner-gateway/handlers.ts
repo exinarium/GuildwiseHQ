@@ -88,6 +88,10 @@ import { liveWorktreePaths } from '../commands/worktree-sweep.ts';
 import type { Ctx } from '../context.ts';
 import { exec, one, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
+import { applyDeploySecretResult } from '../delivery/admin.ts';
+import { applyInspectResult, onProjectVaultSynced } from '../delivery/recipes.ts';
+import { deployRpc } from '../delivery/rpc.ts';
+import { applyDeployProgress, applyDeployResult } from '../delivery/runs.ts';
 import { pinForWelcome } from '../platform-team/pins.ts';
 import { platformTriageRpc } from '../platform-team/rpc.ts';
 import { buildBrief } from './brief.ts';
@@ -478,6 +482,25 @@ export class RunnerHandlers {
             msg.result,
             msg.error,
           );
+        } else if (cmd?.type === 'recipe.inspect') {
+          // Terminal: what the workstation found in `delivery/` is recorded as an observation.
+          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+          await applyInspectResult(this.ctx, conn.workstationId, cmd.payload, msg.ok, msg.result);
+        } else if (cmd?.type === 'deploy.exec') {
+          // Terminal whatever the answer: a refusal or a failed deploy is an ANSWER, never a blind retry of a deploy.
+          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+          await applyDeployResult(this.ctx, conn.workstationId, cmd.payload, msg.ok, msg.result, msg.error);
+        } else if (cmd?.type === 'deploy.secret.set') {
+          // Like the sudo password: the ciphertext is forgotten whatever the answer was.
+          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+          await applyDeploySecretResult(
+            this.ctx,
+            conn.workstationId,
+            msg.commandId,
+            cmd.payload,
+            msg.ok,
+            msg.result,
+          );
         } else if (cmd?.type === 'sudo.set') {
           // The ciphertext is forgotten here (applySudoSetResult empties the payload) whatever the answer was.
           await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
@@ -523,6 +546,14 @@ export class RunnerHandlers {
         return;
       case 'vault.status':
         await markVaultStatus(this.ctx, conn.workstationId, msg);
+        // A project vault that pulled may carry a changed recipe: have it read again (only projects that have one).
+        if (msg.lastPullAt && !msg.error)
+          await onProjectVaultSynced(this.ctx, msg.vaultId).catch((err) =>
+            this.ctx.log.warn({ err }, 'could not queue the recipe inspection'),
+          );
+        return;
+      case 'deploy.progress':
+        await applyDeployProgress(this.ctx, conn.workstationId, msg);
         return;
       case 'vault.conflict':
         await this.withInbox(conn, msg.id, (tx) => applyVaultConflict(this.ctx, tx, ws, msg));
@@ -1053,6 +1084,14 @@ export class RunnerHandlers {
         return reply(...(await platformTriageRpc(ctx, shift, msg.params)));
       if (msg.method === 'card.attachments' || msg.method === 'card.attach.begin')
         return reply(...(await attachmentRpc(ctx, shift, msg.method, msg.params)));
+      // Delivery recipes: `aom deploy run|trial|status`, `aom recipe save` (the CEO's verb, or DevOps in a recipe request).
+      if (
+        msg.method === 'deploy.run' ||
+        msg.method === 'deploy.trial' ||
+        msg.method === 'deploy.status' ||
+        msg.method === 'recipe.save'
+      )
+        return reply(...(await deployRpc(ctx, shift, msg.method, msg.params)));
       // The CEO's management verbs (a CEO shift or the owner's chat with the CEO); the gateway checks the agent.
       if (msg.method === 'ceo') return reply(...(await ceoRpc(ctx, shift, msg.params)));
       if (shift.kind === 'ceo')

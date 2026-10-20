@@ -4,6 +4,7 @@ import { basename, join } from 'node:path';
 import {
   CEO_FULL_POWER_CAPABILITY,
   CommandPayloadSchemas,
+  DELIVERY_CAPABILITY,
   defaultHost,
   type EnvEnsurePayload,
   INTEGRATIONS_VERSION,
@@ -33,6 +34,8 @@ import { ChatManager } from './chat/chat.ts';
 import { loadConfig, type RunnerConfig, saveConfig } from './config.ts';
 import { type BackoffOptions, RunnerClient, toWsUrl, UNPAIRED_MESSAGE } from './connection/client.ts';
 import { Outbox } from './connection/outbox.ts';
+import { DeployExecutor } from './delivery/exec.ts';
+import { DeliveryService } from './delivery/service.ts';
 import { verifyRights } from './devops/rights.ts';
 import { ExternalAdapters } from './external/index.ts';
 import { resolveJira } from './external/jira-store.ts';
@@ -82,6 +85,7 @@ import { RepoCreator } from './repo/create.ts';
 import { RestartAfterReply } from './restart-after-reply.ts';
 import { RunManager } from './runs/manager.ts';
 import { sweepAgentTmps, wipeAgent } from './sandbox/sandbox.ts';
+import { DeploySecrets } from './secrets/deploy.ts';
 import { RunnerKeys } from './secrets/keys.ts';
 import { SudoVault } from './secrets/sudo.ts';
 import { TargetSecrets } from './secrets/targets.ts';
@@ -182,6 +186,8 @@ export interface RunnerOptions {
   onRunnerPin?: (version: string | null) => void;
   /** Test seam: timings of the run supervision (see `runs/manager.ts`). */
   runTiming?: Partial<import('./runs/manager.ts').RunTiming>;
+  /** Tests shorten the health polling of a deploy. */
+  deployTiming?: NonNullable<import('./delivery/exec.ts').DeployExecDeps['timing']>;
   /**
    * Run the role smoke test after the first welcome of this process (a runner start, and so after every update) and send
    * `role.smoke`. Default on, off with the mock runtime and under tests.
@@ -227,6 +233,9 @@ export class Runner {
   readonly sudo: SudoVault;
   /** Test accounts for deploy targets (docs/design/run-and-integration-tests.md D11): ciphertext only on disk. */
   readonly targetSecrets: TargetSecrets;
+  readonly deploySecrets: DeploySecrets;
+  readonly delivery: DeliveryService;
+  readonly deployExec: DeployExecutor;
   /** The integrations of this workstation: status, connect from the web, interactive sign-ins (docs/design/integrations-page.md). */
   readonly integrations: IntegrationService;
   readonly claudeStore: ClaudeCredentialStore;
@@ -309,6 +318,7 @@ export class Runner {
       file: join(this.paths.secrets, 'targets.json'),
       keys: this.keys,
     });
+    this.deploySecrets = new DeploySecrets({ secretsDir: this.paths.secrets, keys: this.keys });
     this.serverLimitFile = join(this.paths.root, 'server-limits.json');
     // Until the server says otherwise: the owner's saved choice, else this runner's own configured value.
     this.maxConcurrent =
@@ -436,6 +446,7 @@ export class Runner {
       findRepo: (norm) => this.findRepo(norm),
       findLocal: (k) => this.findLocal(k),
       graph: () => this.graph,
+      recipeSave: (shiftId, params) => this.delivery.save(shiftId, params),
       writeVault: (cmd) => this.vaults.write(cmd),
       http: this.serverHttp,
       rpc: (shiftId, method, params) =>
@@ -516,6 +527,20 @@ export class Runner {
       findRepo: (n) => this.findRepo(n),
       version: RUNNER_VERSION,
       log: this.log,
+    });
+    this.delivery = new DeliveryService({
+      vaults: this.vaults,
+      rpc: (shiftId, method, params) => this.rpc(shiftId, method, params),
+      log: this.log,
+    });
+    this.deployExec = new DeployExecutor({
+      paths: this.paths,
+      vaults: this.vaults,
+      secrets: this.deploySecrets,
+      findRepo: (n) => this.findRepo(n),
+      send: (type, payload) => void this.client.send(type as never, payload as never),
+      log: this.log,
+      ...(opts.deployTiming ? { timing: opts.deployTiming } : {}),
     });
     this.repoCloner = new RepoCloner({
       repoRoots: () => this.opts.config.repoRoots,
@@ -948,6 +973,7 @@ export class Runner {
         SHIFT_LIMIT_CAPABILITY,
         READONLY_DESIGN_CAPABILITY,
         RUNNER_PIN_CAPABILITY,
+        DELIVERY_CAPABILITY,
         // The local opt-in (`aom-runner ceo full-power on`), read fresh: the server shows "Full power is off" without it.
         ...(this.freshConfig().ceo.fullPower ? [CEO_FULL_POWER_CAPABILITY] : []),
       ],
@@ -1348,6 +1374,15 @@ export class Runner {
         // A repository that cannot be indexed is an answer (ok:true, result.ok:false with a fixed reason code).
         const p = CommandPayloadSchemas[command].parse(payload);
         done(true, await (command === 'graph.update' ? this.graph.update(p) : this.graph.index(p)));
+      } else if (command === 'recipe.inspect') {
+        // What `delivery/` of the project vault holds, with its hash; a failure is an answer (ok:true, result.ok:false).
+        done(true, await this.delivery.inspect(CommandPayloadSchemas['recipe.inspect'].parse(payload)));
+      } else if (command === 'deploy.exec') {
+        // Runs an approved deploy outside any model. A refusal or a failed deploy is an ANSWER: the server never retries it.
+        done(true, await this.deployExec.run(CommandPayloadSchemas['deploy.exec'].parse(payload)));
+      } else if (command === 'deploy.secret.set') {
+        // Ciphertext in, a fact out: the value is never in an answer, a log line or an event.
+        done(true, this.deploySecrets.setFor(CommandPayloadSchemas['deploy.secret.set'].parse(payload)));
       } else if (command === 'vault.configure') {
         this.vaults.configure(CommandPayloadSchemas['vault.configure'].parse(payload));
         done(true, { vaults: this.vaults.configured() });

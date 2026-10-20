@@ -70,29 +70,35 @@ async function noticeSubject(
  * must belong to a shift of the organization's CEO agent; anything else is refused. Reads are free; writes go through the
  * engine (idempotency, policy, limits, audit) or the small owner-facing helpers (notify, tasks, memory).
  */
-export async function ceoRpc(ctx: Ctx, shift: Row, params: Record<string, unknown>): Promise<Reply> {
+export interface CeoCall {
+  agent: Row;
+  ceo: NonNullable<Awaited<ReturnType<typeof loadCeo>>>;
+  orgId: string;
+  origin: CallOrigin;
+  turn: Row | undefined;
+  kind: 'owner' | 'order' | 'wake';
+  owner: Awaited<ReturnType<typeof ownerPrincipal>>;
+  env: ReturnType<typeof makeEnv>;
+}
+
+/**
+ * Who is calling, from the server's OWN records (never a field the runner or the model supplies): the owner's chat turn, an
+ * order turn (`ceo_turns`), or a wake whose reasons may carry outside text (`ceo_batches`). A string is the refusal.
+ */
+export async function ceoCallContext(
+  ctx: Ctx,
+  shift: Row,
+  opts: { writes: boolean },
+): Promise<CeoCall | string> {
   const agent = await one(ctx.pool, 'SELECT id, name, org_id, role_key, status FROM agents WHERE id=$1', [
     shift.agent_id,
   ]);
-  if (!agent || agent.role_key !== CEO_ROLE_KEY)
-    return [false, undefined, 'not_ceo: only the CEO may use `aom ceo`'];
-  if (shift.kind !== 'ceo' && shift.kind !== 'chat') return [false, undefined, 'not_ceo: not a CEO shift'];
+  if (!agent || agent.role_key !== CEO_ROLE_KEY) return 'not_ceo: only the CEO may use `aom ceo`';
+  if (shift.kind !== 'ceo' && shift.kind !== 'chat') return 'not_ceo: not a CEO shift';
   const ceo = await loadCeo(ctx.pool, agent.org_id);
-  if (!ceo || !ceo.enabled || ceo.agentId !== agent.id) return [false, undefined, 'the CEO is disabled'];
-  const parsed = CeoRpcSchema.safeParse(params);
-  if (!parsed.success)
-    return [
-      false,
-      undefined,
-      `invalid request: ${parsed.error.issues.map((i) => `${i.path.join('.') || 'request'} ${i.message}`).join('; ')}`,
-    ];
-  const rpc = parsed.data;
-  if (ceo.paused && WRITE_OPS.has(rpc.op))
-    return [false, undefined, 'the CEO is paused: it may read but not act'];
-
+  if (!ceo || !ceo.enabled || ceo.agentId !== agent.id) return 'the CEO is disabled';
+  if (ceo.paused && opts.writes) return 'the CEO is paused: it may read but not act';
   const orgId = agent.org_id as string;
-  // Where the call comes from, from the server's OWN records (never a field the runner or the model supplies): the owner's
-  // chat turn, an order turn (`ceo_turns`), or a wake whose reasons may carry outside text (`ceo_batches`).
   let origin: CallOrigin;
   let turn: Row | undefined;
   if (shift.kind === 'chat') {
@@ -102,11 +108,7 @@ export async function ceoRpc(ctx: Ctx, shift: Row, params: Record<string, unknow
     if (turn?.mode === 'order') {
       const auth = turn.order_entry_id ? await currentAuthority(ctx.pool, turn.order_entry_id) : undefined;
       if (!auth || auth.versionHash !== turn.order_version_hash)
-        return [
-          false,
-          undefined,
-          'the authority of this order is no longer in force (it was edited, revoked or retired): stop, and say so in `aom ceo order done`',
-        ];
+        return 'the authority of this order is no longer in force (it was edited, revoked or retired): stop, and say so in `aom ceo order done`';
       origin = {
         kind: 'order',
         scopeId: shift.id,
@@ -137,6 +139,25 @@ export async function ceoRpc(ctx: Ctx, shift: Row, params: Record<string, unknow
   const kind = origin.kind as 'owner' | 'order' | 'wake';
   const owner = await ownerPrincipal(ctx, orgId);
   const env = makeEnv(ctx, ceo, { id: agent.id, name: agent.name }, owner, origin);
+  return { agent, ceo, orgId, origin, turn, kind, owner, env };
+}
+
+export async function ceoRpc(ctx: Ctx, shift: Row, params: Record<string, unknown>): Promise<Reply> {
+  const parsed = CeoRpcSchema.safeParse(params);
+  if (!parsed.success) {
+    const agent = await one(ctx.pool, 'SELECT role_key FROM agents WHERE id=$1', [shift.agent_id]);
+    if (!agent || agent.role_key !== CEO_ROLE_KEY)
+      return [false, undefined, 'not_ceo: only the CEO may use `aom ceo`'];
+    return [
+      false,
+      undefined,
+      `invalid request: ${parsed.error.issues.map((i) => `${i.path.join('.') || 'request'} ${i.message}`).join('; ')}`,
+    ];
+  }
+  const rpc = parsed.data;
+  const call = await ceoCallContext(ctx, shift, { writes: WRITE_OPS.has(rpc.op) });
+  if (typeof call === 'string') return [false, undefined, call];
+  const { agent, orgId, origin, turn, kind, owner, env } = call;
 
   try {
     switch (rpc.op) {

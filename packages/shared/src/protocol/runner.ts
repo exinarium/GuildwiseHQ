@@ -5,6 +5,11 @@ import { DiffStats, StoredCompletionAction } from '../cards/types.ts';
 import { CeoShiftSchema } from '../ceo/ipc.ts';
 import { CeoOrderSpecSchema, ToolCountsSchema } from '../ceo/turns.ts';
 import {
+  DeployExecPayloadSchema,
+  DeploySecretSetPayloadSchema,
+  RecipeInspectPayloadSchema,
+} from '../delivery/protocol.ts';
+import {
   EnvEnsurePayloadSchema,
   RepoClonePayloadSchema,
   RightsVerifyPayloadSchema,
@@ -744,6 +749,9 @@ export const RunnerCommandNameSchema = z.enum([
   'graph.index',
   'graph.update',
   'graph.org',
+  'recipe.inspect',
+  'deploy.exec',
+  'deploy.secret.set',
 ]);
 export type RunnerCommandName = z.infer<typeof RunnerCommandNameSchema>;
 
@@ -808,6 +816,10 @@ export const CommandPayloadSchemas = {
   'graph.update': GraphIndexPayloadSchema,
   /** Build the organization graph into `org/graph/` of the organization vault (docs/design/project-graphs.md section 8). */
   'graph.org': GraphOrgPayloadSchema,
+  /** Delivery recipes (docs/design/ceo-front-door.md section 9): inspect `delivery/` of a project vault, run an approved deploy, keep a sealed secret. */
+  'recipe.inspect': RecipeInspectPayloadSchema,
+  'deploy.exec': DeployExecPayloadSchema,
+  'deploy.secret.set': DeploySecretSetPayloadSchema,
 } as const;
 
 /** Announced in `hello.capabilities`-style lists by runners that apply a version pin (`runner.pin`, `welcome.runnerPin`). */
@@ -818,6 +830,7 @@ export const ENVELOPE_COMMANDS: ReadonlySet<string> = new Set([
   'integration.connect',
   'integration.input',
   'env.secret.set',
+  'deploy.secret.set',
 ]);
 
 export const ShiftRejectReasonSchema = z.enum([
@@ -1202,6 +1215,15 @@ export const VaultStatusSchema = msg('vault.status', {
   /** Additive: where the clone lives on the workstation (also reported by `hello.vaults`). */
   localPath: z.string().optional(),
 });
+/**
+ * A deploy run reached a stage on the workstation (docs/design/ceo-front-door.md 9.5). Best effort and not acked: the
+ * terminal answer is the durable `command.result` of `deploy.exec`.
+ */
+export const DeployProgressSchema = msg('deploy.progress', {
+  runId: z.uuid(),
+  phase: z.enum(['started', 'health', 'smoke']),
+  detail: z.string().max(300).optional(),
+});
 export const VaultConflictSchema = msg('vault.conflict', { vaultId: z.string(), files: z.array(z.string()) });
 
 // ----------------------------------------------------------------- server -> runner
@@ -1375,6 +1397,7 @@ export const RunnerToServerSchema = z.discriminatedUnion('type', [
   CommandResultSchema,
   VaultStatusSchema,
   VaultConflictSchema,
+  DeployProgressSchema,
   TokenRotateSchema,
   AckSchema,
 ]);

@@ -146,7 +146,12 @@ describe('integration status and protocol', () => {
       'integration.remove',
     ] as const)
       expect(CommandPayloadSchemas[c]).toBeDefined();
-    expect([...ENVELOPE_COMMANDS].sort()).toEqual(['env.secret.set', 'integration.connect', 'integration.input']);
+    expect([...ENVELOPE_COMMANDS].sort()).toEqual([
+      'deploy.secret.set',
+      'env.secret.set',
+      'integration.connect',
+      'integration.input',
+    ]);
     expect(CommandPayloadSchemas['integration.begin'].safeParse({}).success).toBe(false);
   });
 });

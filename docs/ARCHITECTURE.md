@@ -2268,3 +2268,73 @@ the project vault (`<folder>/graph/`). It is a brain for agents and the CEO, not
 - **Vault sync.** A conflict in generated graph files (`<folder>/graph/manifest.json`, `modules.md`, `work.md`, `repos/**`) is resolved
   by the sync itself (the remote side wins) and the graph is rebuilt from the clones; it is never a desk item.
 
+
+## 37. Delivery recipes, gates and the release queue (built; design: `docs/design/ceo-front-door.md` section 9, step 2, with the owner decisions of section 14)
+
+A project delivers by **instructions** (the phase follow-up becomes a prose DevOps request, unchanged) or by a **recipe**
+(`projects.delivery_mode`, event `DeliveryModeSet`). A recipe is **authorization**, not a convenience: the model never runs a deploy
+command; it asks, the server checks deterministically, a durable command carries the approval to a workstation, and runner code
+runs the script outside any model session.
+
+- **Where.** `<folder>/delivery/` of the PROJECT vault (`vaults.project_id`; never the organization vault; a local vault, `storage:
+  local`, is a folder on `local_workstation_id`). `recipe.yaml` (`packages/shared/src/delivery/recipe.ts`, zod; parsed with `yaml`)
+  plus the scripts. Per environment: `target`/`targets` (deploy targets of the project), `script`, `args` (templates `${checkout}`
+  `${commit}` `${branch}` `${env}` `${appUrl}` `${target}` `${host}`), `trigger` (`after_merge|phase_done|on_request`), `timeoutSec`,
+  `health` (`RunHealthSchema`: http, tcp, log, none), `smoke`, `secrets` (names), `envFile` (a path on the workstation), `docker`,
+  **`releasedBy: owner|ceo|auto`** (default `owner`) and `gate` (`none`, a preset name, or an inline gate).
+- **Content hash and approval.** `bundleHash` is a sha256 over the sorted listing `path\0mode\0sha256(content)\n` of `delivery/**`
+  (mode is the executable bit only). The runner reads a git vault AT A COMMIT (`git ls-tree` + `git cat-file`, `delivery/bundle.ts`),
+  never the working tree; a local folder is read once and the copy is what runs. `recipe.inspect` (durable command) returns the
+  hash, the parsed recipe, the file listing and the runner's lint; the server adds the checks it can make (targets, presets,
+  repositories, automatic production without a gate) and records `DeliveryRecipeObserved` (and `DeliveryRecipeDrifted` when the hash
+  differs from the approved one) into `delivery_recipes` (migration 2224). The Owner's button, `POST
+  /api/projects/:id/delivery/approve {hash}`, must equal the observed hash; it records `DeliveryRecipeApproved {hash, vaultCommit,
+  version, by}` and keeps the parsed approved recipe: **runs use the approved recipe at the approved commit**, so an edit nobody
+  approved changes nothing that runs. Lint errors block approval. The vault sync (`vault.status` after a pull) re-inspects projects
+  that have a recipe; "Check for changes" does too.
+- **The one door: `requestDeployRun`** (`apps/server/src/delivery/runs.ts`). `aom deploy run`, the CEO verb `deploy` (`ceo/actions4.ts`,
+  class `deploy.run`), the Deploy button, the release queue, `after_merge` triggers and phase follow-ups all call it. It checks, in
+  order: recipe mode and an approved recipe at the observed hash (`recipe_not_approved`, `recipe_changed`), the environment and
+  trigger, the targets, a workstation (`delivery:1` capability), then `evaluateEnvGate` (`gate.ts`). Gates are pure
+  (`packages/shared/src/delivery/gate.ts`, `evaluateGate`) over facts the server holds: healthy `deploy_runs` of an earlier
+  environment on the same commit, the latest passed `test_runs` (`regression`, `e2e`; a run that names no commit counts only if it
+  finished after the newest merge), done phases, the organization time zone, and a freeze. A gate names no releaser. Org **presets** and
+  **bindings** (`gate_presets`, `gate_bindings`, events `GatePresetSet|Removed`, `GateBindingSet`) are added on top of the recipe's
+  gate (a binding cannot be loosened by a recipe). An unsatisfied gate writes a refused run with everything that is missing.
+- **Who releases (`releaseDecision`).** The Owner or an Admin always (the Deploy button, the queue's Release). `auto`: a trigger,
+  DevOps or the CEO. `ceo`: only the CEO verb releases, except on an untrusted wake (`ceo_wakes.untrusted`) for a production target,
+  which waits for the Owner; a trigger or DevOps with `ceo` wakes the CEO (`deploy_ready`). Everything else (`owner`) is
+  `DeployRunQueued`: the run waits in the **release queue** (`deploy_runs.status = waiting_release`) with a desk alert
+  (`deploy_release`). The CEO is never the releaser unless the approved recipe says so, in every provenance (owner turn, order turn,
+  wake). An accepted CEO recommendation counts as the Owner pressing the button. One run exists per (project, environment, target):
+  a request for the same commit releases the waiting run, a newer one cancels it, a running one refuses `run_in_progress`.
+- **The run.** `DeployRunRequested` then `DeployGateSatisfied {gate, evidence[] (ids of facts), releasedBy, recipeHash}` (the audit
+  with `DeliveryRecipeApproved`), and a durable **`deploy.exec`** (in `runner_commands`, expiring after two hours; `sweepExpiredDeploys`
+  ends an uncollected one as refused) carrying `{runId, vault, vaultCommit, hash, env, target, commit, repo, trial, dryRun}`. The runner
+  (`delivery/exec.ts`, `DeployExecutor`) re-exports `delivery/` at the commit and **recomputes the hash (a mismatch refuses
+  `hash_mismatch`)**, resolves the secrets by name (the runner's `secrets/deploy.json`, sealed by the browser to the runner key like
+  `targets.json`, then the recipe's `envFile`; a missing one refuses `missing_secret:NAME`), prepares a clean checkout (`git worktree
+  add --detach`), spawns the script in its own process group with a deadline (output redacted by `secrets/redact.ts`, an `AOM-DEPLOY
+  {json}` line parsed), then the health check and the smoke script, and answers with `command.result`. `deploy.progress` (best effort)
+  marks `DeployRunStarted`. A refusal or failure is an ANSWER (`ok:true`), the command is `done` and never retried; a command delivered
+  twice runs once (a `result.json` per run id). The server records `DeployRunFinished` (or `DeployRunRefused`), wakes the CEO
+  (`deploy_finished`) and names a missing secret on the desk. Projections: `deploy_runs` (unique open run per project, environment and
+  target), replay-safe; operational tables `deploy_secret_status`, `deploy_trigger_queue` (migration 2225).
+- **Triggers and phases.** `CardFinalized` with a merge commit queues `after_merge` for two minutes (the newest commit wins,
+  `deploy_trigger_queue`, `deliveryPass` in the dispatcher). A recipe project's phase `deploy` follow-up starts without a DevOps
+  request; the dispatcher's `deployStep` asks for the run of the environment whose target the follow-up names (outside the phase
+  transaction) and `followupVerdict` finishes the follow-up with the run.
+- **Conversation (section 10).** `aom ceo devops --project KEY --kind recipe` (owner turns only) files a DevOps request whose context
+  is `{requestKind: 'recipe', ownerTurn: true, projectKey}` and whose text carries the script contract. DevOps may then
+  `aom recipe save --dir <scratch> --project KEY` (the runner writes `delivery/` into the vault, one commit, pushed:
+  `vaults/delivery.ts`, `VaultManager.saveDelivery`; a file holding a secret is refused) and `aom deploy trial --env NAME` (a real trial
+  of a non-production environment of a recipe that is not approved yet; production and approved recipes get `AOM_DEPLOY_DRY_RUN=1`;
+  trials are `deploy_runs.trial`, never count for a gate). All of this is `rpc` (`deploy.run|trial|status`, `recipe.save`, handled by
+  `delivery/rpc.ts`; the CEO's `deploy.run` goes through `runAction`, so policy, audit and inline confirmations apply).
+- **Allow rules.** `Bash(aom deploy run:*)` and `Bash(aom deploy status:*)` (`DEPLOY_ASK_ALLOW`) are named in the CEO's restricted
+  profile, DevOps settings and the owner turn's `--allowedTools`; the model's call carries no credential and runs no deploy command.
+  Whether `auto` mode honours a narrow allow rule is risk R3: the chat's release card and the Deploy button call the same server path
+  from the Owner's session.
+- **UI.** Project settings, Delivery (`DeliveryPanel`: mode, vault backup note, environments and releasers, lint, changes, Approve, Deploy
+  buttons, secrets per workstation); the Deploys page (`ReleaseQueue` with the per-server choice, `DeployRuns` with the audit,
+  `GatesPanel`); release cards in the CEO chat.

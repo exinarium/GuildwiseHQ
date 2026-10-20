@@ -1,7 +1,7 @@
 # The CEO as the owner's front door, and delivery recipes
 
-Status: design, 2026-10-19. Branch `lean-team-v3`. Steps 0 and 1 are built; steps 2 and 3 are not. Where step 1 differs from the text
-below (the owner decisions of section 14, and the choices listed in the step 1 commit), the code wins.
+Status: design, 2026-10-19. Branch `lean-team-v3`. Steps 0, 1 and 2 are built; step 3 is not. Where steps 1 and 2 differ from the text
+below (the owner decisions of section 14, and the choices listed in the step commits and under "Step 2 as built"), the code wins.
 
 Builds on `docs/design/ceo-agent-v3.md` (the v2 design is what the code implements; see section 0.3),
 `docs/design/phases.md` (deploy targets, phase follow-ups), `docs/design/git-free-and-devops-instructions.md`
@@ -982,6 +982,25 @@ projected).
     - `deploy-audit.test.ts`: `DeployGateSatisfied` evidence ids exist.
   - **E2E:** a mock recipe on the e2e runner: local env after merge, production with an owner tap.
 - **Rollout:** a CEO-led recipe conversation for P5, then GWP, then P4. Each switches to `recipe` on approval.
+
+**Step 2 as built (where the code differs from the text above; the owner decisions of section 14 won):**
+- **Who releases is the recipe's, not the gate's.** `Gate` has `requires`, `window` and `freeze` only; the `approvers` list is gone. Each
+  environment says `releasedBy: owner | ceo | auto` (default `owner`: the release queue). The CEO is the releaser only where the approved
+  recipe says `ceo`, and never for production on an untrusted wake; an Owner or Admin always may. Org gate bindings are added to the
+  recipe's own gate.
+- **Project vault only.** No fallback to the organization vault (14.3). Migrations `2224_delivery.sql` and `2225_delivery_operational.sql`.
+- **Several servers.** An environment names `target` or `targets`; there is one `deploy_runs` row per (environment, target), and the queue's
+  Release takes the runs the person ticked.
+- **Wire.** `recipe.inspected` and `deploy.result` are the `command.result` of `recipe.inspect` and `deploy.exec` (a refusal or a failed
+  deploy is an answer, never retried); `deploy.progress` is a best-effort message (started, health, smoke).
+- **Runs use the approved recipe at the approved vault commit** (`delivery_recipes.approved_parsed`), not whatever the vault holds now.
+- **Desk.** `recipe_approval` and `deploy_release` are alerts (the buttons are on the Delivery section, the Deploys page and the CEO
+  chat), never answerable text. A phase follow-up is linked to its run by `deploy_runs.phase_followup_id`, not by a field on
+  `PhaseFollowupStarted`. `phase_done` as a recipe trigger is satisfied by the phase's deploy follow-up; only `after_merge` is queued.
+- **Gate facts.** Phases store no merge commit, so `phaseDone` holds for the latest completed phase while nothing merged after it;
+  test runs name no commit, so a passed `regression` or `e2e` run counts when it finished after the newest merge; there are no CI facts,
+  so `ci` never holds. The change summary shown for approval is structured (environment fields, files added, removed or changed), not a
+  `git diff`.
 
 ### Step 3: retire the BA reporter and the BA report
 

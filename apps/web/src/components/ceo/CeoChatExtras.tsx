@@ -1,6 +1,7 @@
 import type { CeoChatStateDto, CeoCorrectionDto, CeoPermissionDto, DeskItemDto } from '@aom/shared';
 import { ShieldQuestion } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router';
 import {
   useAnswerPermission,
   useCeoRedo,
@@ -8,6 +9,8 @@ import {
   useDecideQueuedTurn,
   useEditCorrection,
 } from '../../api/queries/ceo-chat.ts';
+import { useRelease, useReleaseQueue } from '../../api/queries/delivery.ts';
+import { useCanManageOrg } from '../../lib/orgRole.ts';
 import { Button, Callout, ErrorBox, TextInput } from '../ui.tsx';
 import { UndoButton } from './UndoButton.tsx';
 
@@ -289,6 +292,61 @@ export function PermissionDeskItem({ item }: { item: DeskItemDto }) {
           expiresAt: d.expiresAt ?? new Date(Date.parse(item.createdAt) + 600_000).toISOString(),
         }}
       />
+    </div>
+  );
+}
+
+/**
+ * The Deploy button of the CEO chat (docs/design/ceo-front-door.md 9.6): when the CEO asked for a release, or its call was
+ * blocked, the release waits here for the Owner or an Admin. Release calls the same server path from YOUR session, with no
+ * model involved; an environment with several servers asks which ones on the Deploys page.
+ */
+export function ReleaseCards() {
+  const canManage = useCanManageOrg();
+  const q = useReleaseQueue(canManage);
+  const release = useRelease();
+  const items = canManage ? (q.data ?? []) : [];
+  if (items.length === 0) return null;
+  return (
+    <div className="flex flex-col gap-2" data-testid="ceo-releases">
+      {items.map((i) => (
+        <div
+          key={`${i.projectId}|${i.env}|${i.commit ?? ''}`}
+          className="rounded-control border border-brand/25 bg-brand-soft p-3 text-sm text-brand-soft-fg"
+          role="group"
+          aria-label="Release"
+          data-testid="ceo-release"
+        >
+          <p className="font-semibold">
+            {i.projectKey} {i.env} is ready to release{i.commit ? ` (${i.commit.slice(0, 8)})` : ''}
+          </p>
+          <p className="mt-1">
+            To {i.targets.map((t) => t.targetName).join(', ')}. The recipe is approved and the gate holds;
+            nothing runs until you release it.
+          </p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {i.targets.length === 1 ? (
+              <Button
+                size="sm"
+                variant="primary"
+                loading={release.isPending}
+                disabled={!i.gateNow.satisfied}
+                onClick={() => release.mutate(i.targets.map((t) => t.runId))}
+              >
+                Release
+              </Button>
+            ) : (
+              <Link
+                to="/deploys"
+                className="inline-flex h-8 items-center rounded-control bg-brand px-3 text-sm font-medium text-brand-fg"
+              >
+                Choose servers
+              </Link>
+            )}
+          </div>
+        </div>
+      ))}
+      <ErrorBox error={release.error} />
     </div>
   );
 }

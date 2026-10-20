@@ -11,6 +11,7 @@ import {
   FullPowerLine,
   PermissionCard,
   QueuedBanner,
+  ReleaseCards,
 } from './ceo/CeoChatExtras.tsx';
 import { ModelChip } from './ceo/ModelChip.tsx';
 import { useCeoName } from './ceo/useCeoName.ts';
@@ -258,6 +259,7 @@ export function ChatPanel({
           {ceoState.confirmations.map((c) => (
             <ConfirmationCard key={c.actionId} c={c} />
           ))}
+          <ReleaseCards />
           {ceoState.corrections.slice(0, 3).map((c) => (
             <CorrectionCard key={c.id} c={c} />
           ))}

@@ -8,6 +8,7 @@ import { testEnvironmentPass } from '../commands/test-environments.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Row, rows } from '../db/sql.ts';
 import { DISPATCH_LOCK_ID } from '../db/tx.ts';
+import { deliveryPass } from '../delivery/triggers.ts';
 import type { StoredEvent } from '../eventstore/types.ts';
 import { platformPass } from '../platform-team/detectors.ts';
 import { activeUsageLimit } from '../queries/usage-limit.ts';
@@ -282,6 +283,8 @@ export class Dispatcher {
     counted(await questionPass(this.ctx, cooling, full));
     counted(await baTaskPass(this.ctx, cooling, full));
     await ceoPass(this.ctx);
+    // Delivery: merge triggers that are due become deploy requests; deploys nobody collected expire (never throws).
+    await deliveryPass(this.ctx).catch((err) => this.ctx.log.error({ err }, 'delivery pass failed'));
     // A CEO decision review the CEO never answered continues without it after the timeout.
     await sweepCeoReviews(this.ctx).catch((err) => this.ctx.log.error({ err }, 'ceo review sweep failed'));
     await testingPass(this.ctx);

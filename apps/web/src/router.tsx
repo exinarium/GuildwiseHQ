@@ -18,6 +18,7 @@ import { Ceo } from './pages/Ceo.tsx';
 import { Chat } from './pages/Chat.tsx';
 import { ContactPublic } from './pages/ContactPublic.tsx';
 import { Costs } from './pages/Costs.tsx';
+import { Deploys } from './pages/Deploys.tsx';
 import { Desk } from './pages/Desk.tsx';
 import { ForgotPassword } from './pages/ForgotPassword.tsx';
 import { Help, PlatformHelp } from './pages/Help.tsx';
@@ -125,6 +126,7 @@ export const routes = [
       { path: '/settings/org', element: <OrgSettings /> },
       { path: '/admin', element: <Navigate to="/settings/org" replace /> },
       { path: '/desk', element: <Desk /> },
+      { path: '/deploys', element: <Deploys /> },
       { path: '/platform-team', element: <PlatformTeamDesk /> },
       { path: '/help', element: <Help /> },
       { path: '/help/glossary', element: <Help /> },

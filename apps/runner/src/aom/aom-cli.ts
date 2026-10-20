@@ -1185,6 +1185,59 @@ async function ceoVerb(ctx: AomContext, p: Parsed): Promise<number> {
 }
 
 const VERBS: Record<string, Verb> = {
+  /**
+   * `aom deploy run <env> | trial --env <env> | status` (docs/design/ceo-front-door.md 9.6): the model's only deploy action is
+   * to ASK Guildwise. It carries no credential and runs no deploy command: the server checks the approved recipe and the gate,
+   * the recipe says who releases, and the workstation runs the script outside any model.
+   */
+  deploy: async (ctx, p) => {
+    const sub = p.positionals[0];
+    if (sub !== 'run' && sub !== 'trial' && sub !== 'status')
+      throw new UsageError(
+        'usage: aom deploy run <env> [--project KEY] [--commit SHA] [--target NAME] | aom deploy trial --env <env> [--project KEY] | aom deploy status [--project KEY] [--run ID]',
+      );
+    const env = p.positionals[1] ?? one(p, 'env');
+    if (sub !== 'status' && !env) throw new UsageError(`aom deploy ${sub}: name the environment`);
+    const params: Record<string, unknown> = {
+      ...(env ? { env } : {}),
+      ...(one(p, 'project') ? { project: one(p, 'project') } : {}),
+      ...(one(p, 'commit') ? { commit: one(p, 'commit') } : {}),
+      ...(one(p, 'target') ? { target: one(p, 'target') } : {}),
+      ...(one(p, 'reason') ? { reason: one(p, 'reason') } : {}),
+      ...(one(p, 'run') ? { run: one(p, 'run') } : {}),
+    };
+    const r = (await rpc(ctx, `deploy.${sub}`, params)) as {
+      message?: string;
+      status?: string;
+      runs?: Array<{ status?: string }>;
+      result?: { runs?: Array<{ status?: string }> };
+    };
+    if (sub === 'status') {
+      ctx.io.out(`${JSON.stringify(r, null, 2)}\n`);
+      return 0;
+    }
+    ctx.io.out(`${r.message ?? JSON.stringify(r)}\n`);
+    const runs = r.runs ?? r.result?.runs ?? [];
+    return r.status === 'refused' || (runs.length > 0 && runs.every((x) => x.status === 'refused')) ? 1 : 0;
+  },
+  /** `aom recipe save --dir <scratch> --project KEY` (DevOps, in a recipe request): copy the drafted recipe into the project vault. */
+  recipe: async (ctx, p) => {
+    if (p.positionals[0] !== 'save' || !one(p, 'dir') || !one(p, 'project'))
+      throw new UsageError('usage: aom recipe save --dir <scratch folder> --project KEY');
+    const r = (await rpc(ctx, 'recipe.save', {
+      dir: resolvePath(one(p, 'dir') as string),
+      project: one(p, 'project'),
+    })) as {
+      message?: string;
+      hash?: string;
+      status?: string;
+      lint?: Array<{ level: string; message: string }>;
+    };
+    ctx.io.out(`${r.message ?? 'Saved.'}\n`);
+    if (r.hash) ctx.io.out(`recipe hash: ${r.hash} (${r.status ?? 'observed'})\n`);
+    for (const l of r.lint ?? []) ctx.io.out(`lint ${l.level}: ${l.message}\n`);
+    return (r.lint ?? []).some((l) => l.level === 'error') ? 1 : 0;
+  },
   /** `aom runner restart [--reason ".."]`: restarts the runner after this reply (owner turns and DevOps shifts only). */
   runner: async (ctx, p) => {
     if (p.positionals[0] !== 'restart') throw new UsageError('usage: aom runner restart [--reason "<why>"]');
@@ -2155,6 +2208,8 @@ export const USAGE = `usage: aom <verb> [options]
   report triage|notes|signals --file <json> | report floor --summary-file <md>   BA reporter task (held items, urgent notes, urgent signals, the daily floor report): report to the manager (terminal)
   report mail-draft --text-file <txt> [--subject "<s>"] | report mail-draft-fail --note "<why>"   BA mail reply draft: report the draft for a person to review and send (terminal; it is never sent by itself)
   report spec-card --file <json> | report spec-card-fail --note "<why>"   BA card task: write the missing fields of a draft card so it can be specified (terminal)
+  deploy run <env> [--project KEY] [--commit SHA] [--target NAME] | deploy status [--project KEY]   ask for a deploy through the project's approved delivery recipe (the server decides who releases it; nothing runs here)
+  deploy trial --env <env> [--project KEY] | recipe save --dir <scratch> --project KEY   DevOps, in a recipe request: trial a drafted recipe, save it into the project vault
   devops "<request>"                         ask this workstation's DevOps engineer (does not end your shift)
   devops-approval --action "<a>" --reason "<r>" [--command "<c>"]...   DevOps engineer: ask the manager
   devops-question --text "<q>" --reason "<r>"   DevOps engineer: ask a question (goes through the normal chain; you resume with the answer)

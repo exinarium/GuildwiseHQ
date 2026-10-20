@@ -31,6 +31,7 @@ import {
   buildDevopsChatSettings,
   buildShiftSettings,
   type ClaudePolicyContext,
+  DEPLOY_ASK_ALLOW,
   DEVOPS_INHERITED_ENV,
   gitDirsOf,
   type SandboxState,
@@ -278,6 +279,7 @@ export function buildClaudeOwnerTurnCommand(
     join(input.turnDir, OWNER_FLOOR_FILE),
     '--allowedTools',
     'Bash(aom:*)',
+    ...DEPLOY_ASK_ALLOW,
   );
   for (const d of input.addDirs ?? []) args.push('--add-dir', d);
   if (input.resumeSessionId) args.push('--resume', input.resumeSessionId);

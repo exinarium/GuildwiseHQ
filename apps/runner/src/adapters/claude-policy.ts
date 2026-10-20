@@ -416,6 +416,14 @@ function readOnlyDenies(ctx: Pick<ClaudePolicyContext, 'readDirs'>): string[] {
   ];
 }
 
+/**
+ * The model's only deploy action is to ASK Guildwise (`aom deploy run <env>`, docs/design/ceo-front-door.md 9.6): a local
+ * call that carries no credential and runs no deploy command, so a permission classifier never sees a production write.
+ * Allowed by NAME in every profile that may deploy (the CEO's restricted and owner profiles, DevOps), so the narrow rule
+ * holds even where a broader one is later tightened. The server, not this rule, decides whether a deploy happens.
+ */
+export const DEPLOY_ASK_ALLOW: readonly string[] = ['Bash(aom deploy run:*)', 'Bash(aom deploy status:*)'];
+
 /** The built-in tester always runs browsers (agents hired before the flag existed carry none); custom roles opt in. */
 export const runsBrowsers = (p: Pick<AgentPermissions, 'browser'>, roleKey?: string): boolean =>
   p.browser === true || roleKey === 'tester';
@@ -449,7 +457,7 @@ function buildDevopsSettings(
   ];
   return {
     permissions: {
-      allow: ['Bash', 'Read', 'Glob', 'Grep', 'Edit', 'WebFetch', 'WebSearch'],
+      allow: ['Bash', 'Read', 'Glob', 'Grep', 'Edit', 'WebFetch', 'WebSearch', ...DEPLOY_ASK_ALLOW],
       deny: [...new Set(deny)],
       defaultMode: 'dontAsk',
       additionalDirectories: [paths.scratch],
@@ -560,6 +568,8 @@ export function buildCeoSettings(
   s.permissions.deny = [
     ...new Set([...s.permissions.deny, 'WebFetch', 'WebSearch', 'mcp__*', 'NotebookEdit']),
   ];
+  // The one deploy action the CEO has: ask Guildwise (named, so the narrow rule stands on its own).
+  s.permissions.allow = [...s.permissions.allow, ...DEPLOY_ASK_ALLOW];
   return s;
 }
 

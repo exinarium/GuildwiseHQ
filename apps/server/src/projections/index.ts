@@ -9,6 +9,7 @@ import { chatProjectors } from './chats.ts';
 import { codeV6Projectors } from './code-v6.ts';
 import { commitAsProjectors } from './commit-as.ts';
 import { costProjectors } from './costs.ts';
+import { deliveryProjectors } from './delivery.ts';
 import { deskProjectors } from './desk.ts';
 import { devopsProjectors } from './devops.ts';
 import { environmentProjectors } from './environment.ts';
@@ -89,6 +90,7 @@ const domains: Array<Record<string, Projector>> = [
   commitAsProjectors,
   ceoProjectors,
   ceoFrontDoorProjectors,
+  deliveryProjectors,
   questionFlowProjectors,
   codeV6Projectors,
 ];
@@ -211,4 +213,8 @@ export const PROJECTION_TABLES = [
   'hygiene_findings',
   'interests',
   'taste_seeds',
+  'delivery_recipes',
+  'gate_presets',
+  'gate_bindings',
+  'deploy_runs',
 ];

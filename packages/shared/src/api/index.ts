@@ -16,6 +16,7 @@ export * from './chats.ts';
 export * from './cloud.ts';
 export * from './common.ts';
 export * from './costs.ts';
+export * from './delivery.ts';
 export * from './desk.ts';
 export * from './devops.ts';
 export * from './digest.ts';

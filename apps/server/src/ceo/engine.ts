@@ -200,6 +200,10 @@ export function makeEnv(
     evidence: [],
     batchId: origin.batchId,
     chatThreadId: origin.chatThreadId,
+    originKind: originKind(origin),
+    untrusted: origin.untrusted,
+    turnId: origin.turnId,
+    acceptedFrom: origin.acceptedFrom,
   };
 }
 

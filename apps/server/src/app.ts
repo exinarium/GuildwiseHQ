@@ -69,6 +69,7 @@ import { chatRoutes } from './routes/chats.ts';
 import { cloudRoutes } from './routes/cloud.ts';
 import { commitAsRoutes } from './routes/commit-as.ts';
 import { costRoutes } from './routes/costs.ts';
+import { deliveryRoutes } from './routes/delivery.ts';
 import { designerRoutes } from './routes/designer.ts';
 import { deskRoutes } from './routes/desk.ts';
 import { devopsRoutes } from './routes/devops.ts';
@@ -383,6 +384,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   await app.register(threadRoutes(ctx));
   await app.register(vaultRoutes(ctx));
   await app.register(graphRoutes(ctx));
+  await app.register(deliveryRoutes(ctx));
   await app.register(devopsRoutes(ctx));
   await app.register(runRoutes(ctx));
   await app.register(commitAsRoutes(ctx));

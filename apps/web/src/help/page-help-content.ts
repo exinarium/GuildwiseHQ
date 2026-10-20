@@ -819,6 +819,22 @@ export const PAGE_HELP: Record<string, PageHelp> = {
     ],
     article: 'budgets-and-costs#monthly-budgets',
   },
+  '/deploys': {
+    title: 'Deploys',
+    intro:
+      'Releases that are ready and waiting for you, what was deployed and why it was allowed, and the rules that gate a release. A deploy runs the recipe you approved, on your workstation, outside any model.',
+    controls: [
+      {
+        name: 'Release',
+        text: 'Runs the approved recipe for that commit and environment. When the environment has several servers, tick the ones to release to. The gate is checked again at the moment you press it.',
+      },
+      {
+        name: 'Gate presets',
+        text: 'The rules an environment must meet first: an earlier environment healthy on the same commit, tests passed, a time window, a freeze. Who releases is decided in the recipe, not here.',
+      },
+    ],
+    article: 'phases#delivery-recipes',
+  },
   '/workstations': {
     title: 'Workstations',
     intro:

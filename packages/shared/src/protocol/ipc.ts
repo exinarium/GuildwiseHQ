@@ -309,6 +309,11 @@ export const RpcMethodSchema = z.enum([
   'graph.path',
   'graph.explain',
   'graph.impact',
+  /** Delivery recipes: ask for a deploy (the server decides, the workstation runs it), a trial run, the status, and save a drafted recipe into the vault. */
+  'deploy.run',
+  'deploy.trial',
+  'deploy.status',
+  'recipe.save',
 ]);
 export type RpcMethod = z.infer<typeof RpcMethodSchema>;
 

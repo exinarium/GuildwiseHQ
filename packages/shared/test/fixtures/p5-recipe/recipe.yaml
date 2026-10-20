@@ -1,0 +1,30 @@
+# A recipe shaped like the P5 local deploy (~/.config/guildwise/p5/p5-local-deploy.sh): a local Docker target,
+# a long-running script that waits for readiness, and a LOG health check ("P5 DEPLOY READY"). The production environment
+# is a stand-in with a gate: UAT healthy on the same commit, the regression run passed, released by the Owner.
+version: 1
+environments:
+  - name: local
+    target: p5-local
+    script: scripts/local.sh
+    args: ["${checkout}"]
+    trigger: after_merge
+    timeoutSec: 3600
+    health: { kind: log, regex: "P5 DEPLOY READY" }
+    smoke: scripts/smoke-local.sh
+    secrets: [P5_ADMIN_PASSWORD]
+    envFile: ~/.config/guildwise/p5/local.env
+    docker: true
+    releasedBy: auto
+    gate: none
+  - name: production
+    targets: [p5-prod]
+    script: scripts/production.sh
+    trigger: on_request
+    health: { kind: http, url: "${appUrl}/ready", expect: 2xx }
+    secrets: [P5_PROD_DEPLOY_KEY]
+    releasedBy: owner
+    gate:
+      requires:
+        - { envHealthy: local, sameCommit: true, forMinutes: 30 }
+        - { checksPassed: regression, sameCommit: true }
+      window: { days: mon-fri, hours: "08-16", tz: org }

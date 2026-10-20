@@ -170,6 +170,8 @@ export interface SupervisorDeps {
   rpc: (shiftId: string, method: string, params: Record<string, unknown>) => Promise<IpcRpcResponse>;
   /** The project graph (docs/design/project-graphs.md): `aom graph ...` and the "Graph context" section. Absent: none. */
   graph?: () => GraphService | undefined;
+  /** `aom recipe save`: write a drafted delivery recipe into the project vault (docs/design/ceo-front-door.md 10). */
+  recipeSave?: (shiftId: string, params: Record<string, unknown>) => Promise<IpcRpcResponse>;
   /** Writes (and commits, pushes) a file into a vault clone: `aom publish` puts research notes there (M6). */
   writeVault?: (
     cmd: VaultWriteCommand,
@@ -1434,6 +1436,11 @@ export class ShiftSupervisor {
             );
           return r;
         }
+        // `aom recipe save` (DevOps): the workstation writes the drafted recipe into the project vault and reports its hash.
+        if (req.method === 'recipe.save')
+          return s.msg.kind === 'devops' && s.msg.agent.isDevops === true && this.deps.recipeSave
+            ? this.deps.recipeSave(s.msg.shiftId, req.params)
+            : ({ ok: false, error: 'only the DevOps engineer saves a recipe' } as IpcRpcResponse);
         if (req.method === 'card.attachments') return this.cardAttachments(s, req.params);
         if (req.method === 'transcript.fetch') return this.transcriptFetch(s, req.params);
         if (req.method === 'sudo.run') return this.sudoRun(s, req.params);

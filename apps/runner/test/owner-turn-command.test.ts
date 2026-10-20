@@ -51,7 +51,11 @@ describe('buildClaudeOwnerTurnCommand (the full-power profile)', () => {
     expect(a[a.indexOf('--setting-sources') + 1]).toBe('user,project,local');
     expect(a[a.indexOf('--permission-mode') + 1]).toBe('auto');
     expect(a[a.indexOf('--permission-prompt-tool') + 1]).toBe('mcp__aom_permission__ask');
-    expect(a[a.indexOf('--allowedTools') + 1]).toBe('Bash(aom:*)');
+    expect(a.slice(a.indexOf('--allowedTools') + 1, a.indexOf('--allowedTools') + 4)).toEqual([
+      'Bash(aom:*)',
+      'Bash(aom deploy run:*)',
+      'Bash(aom deploy status:*)',
+    ]);
     expect(a[a.indexOf('--append-system-prompt-file') + 1]).toBe('/runner/ceo-turns/chat-1/ceo-brief.md');
     expect(a[a.indexOf('--mcp-config') + 1]).toBe('/runner/ceo-turns/chat-1/aom-permission.json');
     expect(a[a.indexOf('--settings') + 1]).toBe('/runner/ceo-turns/chat-1/floor.json');

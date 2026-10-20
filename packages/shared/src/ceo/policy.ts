@@ -228,6 +228,9 @@ export const DEFAULT_CEO_POLICY: CeoPolicy = {
     'alert:repo_create': 'recommend',
     'alert:standing_order': 'recommend',
     'alert:ceo_recommendation': 'recommend',
+    // The Owner's own buttons: a recipe waiting for his approval, a release waiting in the queue.
+    'alert:recipe_approval': 'recommend',
+    'alert:deploy_release': 'recommend',
     'question:manual_qa': 'recommend',
     'question:unmapped_ticket': 'recommend',
   },

@@ -34,6 +34,8 @@ export const CEO_ACTIONS = [
   'intake',
   'specify',
   'draft-cards',
+  /** `aom deploy run <env>`: ask the server for a release through the project's approved delivery recipe. */
+  'deploy',
   /** `aom ceo order invoke`: the wake's CEO asks the server for a full-power turn that enforces one authorized order. */
   'invoke-order',
 ] as const;

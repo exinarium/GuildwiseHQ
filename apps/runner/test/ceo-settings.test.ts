@@ -25,6 +25,9 @@ describe('the CEO sandbox profile', () => {
       'Grep',
       'Bash(aom:*)',
       'Edit(//data/agents/a1/scratch/**)',
+      // the one deploy action: ask Guildwise (docs/design/ceo-front-door.md 9.6)
+      'Bash(aom deploy run:*)',
+      'Bash(aom deploy status:*)',
     ]);
     expect(s.permissions.defaultMode).toBe('dontAsk');
     expect(s.permissions.blockReadsOutsideWorkingDirectories).toBe(true);

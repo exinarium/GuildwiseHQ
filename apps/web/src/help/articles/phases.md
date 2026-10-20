@@ -69,3 +69,14 @@ Once you approve, the follow-ups are locked and run one at a time in order:
 If any follow-up fails, the ones after it are skipped. At the end, a **Phase results** notice lists each result with evidence (pinned when something failed); click **Acknowledge** to close it.
 
 The phase page shows live progress, the DevOps requests, regression cards and the full results thread.
+
+## Deploying with a recipe {#delivery-recipes}
+
+A project can deploy in two ways, chosen under **Delivery** in the project settings: **Instructions** (a DevOps request written in words, as before) or **Recipe**. A recipe is a small script kept in the project's vault, in a `delivery/` folder, that always does the same steps: deploy, wait until the app is healthy, run a smoke check. It names its environments, where each one goes, when it runs (after a merge, after a phase, or on request) and **who releases it**: you (the release queue), the CEO, or automatically once its gate holds.
+
+- **Set it up by talking to the CEO**: "set up deploys for this project". The CEO asks about the environments, targets, gate and secrets, and DevOps writes the scripts and tries them. You then see the recipe under Delivery, with what it will do and what changed since the last version.
+- **You approve one exact version** with the **Approve this version** button (only the Owner). If anyone edits the recipe afterwards, it needs a new approval and nothing deploys from it meanwhile.
+- **A model never runs a deploy command.** It can only ask Guildwise; Guildwise checks the approved version and the gate (an earlier environment healthy on the same commit, tests passed, a time window, a freeze), and your workstation runs the script itself. Secrets are named in the recipe, set on your workstation from the Delivery section and never stored on the server or in the vault.
+- **The release queue** (under **Deploys**) lists releases that are ready: the commit, the environment and the servers. An Owner or an Admin presses **Release** and, when an environment has several servers, ticks the ones to release to. The CEO releases by itself only where the recipe names it.
+
+The recipe lives in the project vault. A git vault is backed up with its repository; a local vault is a folder on the Owner's workstation that you back up yourself (put it in OneDrive, iCloud or another backed-up folder).

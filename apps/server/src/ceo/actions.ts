@@ -18,6 +18,7 @@ import { mergedAnswerNotes } from '../commands/escalation.ts';
 import { runHygieneForConfirmedRepo, workingBranchAnsweredEvents } from '../commands/hygiene.ts';
 import { one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
+import { NO_PROJECT_VAULT, projectVault } from '../delivery/recipes.ts';
 import { conflict, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import type { ActionDef, ActionEnv, Prepared } from './types.ts';
@@ -637,6 +638,17 @@ const resumeAgent: ActionDef<z.infer<typeof AgentP>> = {
 
 // ---------------------------------------------------------------------------------------------- devops
 
+/** What DevOps is told about a recipe request, ahead of the CEO's own words (docs/design/ceo-front-door.md sections 9.2 and 10). */
+export const recipeRequestPreamble = (projectKey: string): string =>
+  [
+    `This is a DELIVERY RECIPE request for project ${projectKey.toUpperCase()}. You draft the recipe; you never run a production deploy.`,
+    '1. Write the files in a scratch folder: recipe.yaml (environments, targets, script, args, trigger, health, smoke, secrets BY NAME, envFile PATH, docker, releasedBy owner|ceo|auto, gate) and one executable script per environment.',
+    '2. Script contract: the same steps every time; set -euo pipefail; wait for readiness with a deadline and exit non-zero with the reason; safe to run again (lock, detect "already deployed"); honour AOM_DEPLOY_DRY_RUN=1 (check inputs and access, print the plan, change nothing); optionally print one line `AOM-DEPLOY {"commit":"..","url":"..","version":".."}`. Inputs: AOM_DEPLOY_COMMIT, AOM_DEPLOY_CHECKOUT, AOM_DEPLOY_ENV, AOM_DEPLOY_TARGET, AOM_DEPLOY_DRY_RUN and the declared secrets as environment variables. No secret value ever goes in a file.',
+    `3. Save it: \`aom recipe save --dir <scratch> --project ${projectKey.toUpperCase()}\` (the workstation copies it into the project vault and commits it).`,
+    `4. Trial it: \`aom deploy trial --env <name> --project ${projectKey.toUpperCase()}\` then poll \`aom deploy status --project ${projectKey.toUpperCase()}\`. A trial of a non-production environment really runs; production only gets a dry run. Repair the scripts and save again until it passes.`,
+    '5. Finish with `aom devops-done --summary` naming the recipe hash (from `aom deploy status`), what the trial showed and what is still open. The Owner approves the exact version with a button; until then nothing deploys from it.',
+  ].join('\n');
+
 const DESTRUCTIVE =
   /\b(delete|drop|destroy|wipe|purge|truncate|rm -rf|force[- ]?push|reset --hard|production|prod\b|deploy|release|rollback|migrate|sudo|format)\b/i;
 
@@ -650,6 +662,8 @@ const DevopsP = z
     env: z.string().min(1).max(80).optional(),
     text: z.string().trim().min(3).max(4000),
     card: z.string().max(40).optional(),
+    /** `recipe`: DevOps drafts the project's delivery recipe (scripts, a trial run) with the Owner (section 10). */
+    kind: z.enum(['recipe']).optional(),
   })
   .refine((p) => p.workstation || p.project || p.env, {
     message: 'name a --project, an --env or a --workstation',
@@ -722,15 +736,37 @@ const devops: ActionDef<z.infer<typeof DevopsP>> = {
   describe: (p, pr) => `Ask DevOps on ${pr.subjectLabel}: "${truncate(p.text, 100)}"`,
   async prepare(env, p) {
     const tx = env.ctx.pool;
-    const found = await devopsWorkstation(tx, env, p);
+    if (p.kind === 'recipe') {
+      if (env.originKind !== 'owner')
+        return refuse('a delivery recipe is drafted in a conversation with the Owner: ask him in the chat');
+      if (!p.project) return refuse('a recipe request names its --project');
+    }
+    let found = await devopsWorkstation(tx, env, p);
     if (typeof found === 'string') return refuse(found);
+    if (p.kind === 'recipe' && found.project) {
+      // The recipe is saved into the project vault: a local vault is a folder on one workstation, and DevOps must be there.
+      const vault = await projectVault(tx, found.project.id);
+      if (!vault) return refuse(NO_PROJECT_VAULT);
+      if (vault.storage === 'local' && vault.workstationId !== found.ws.id) {
+        const ws = await one(
+          tx,
+          `SELECT w.id, w.name FROM workstations w WHERE w.id=$2 AND w.status='active'
+              AND EXISTS (SELECT 1 FROM agents a WHERE a.workstation_id = w.id AND a.org_id=$1 AND a.is_devops AND a.status='active')`,
+          [env.orgId, vault.workstationId],
+        );
+        if (!ws)
+          return refuse('the project vault is a local folder on a workstation that has no DevOps engineer');
+        found = { ...found, ws };
+      }
+    }
     const card = p.card ? await cardOf(tx, env, p.card) : undefined;
     if (p.card && !card) return refuse(`card ${p.card} not found`);
     return {
       subjectKind: 'workstation',
       subjectId: found.ws.id as string,
       subjectLabel: found.ws.name as string,
-      reservedKey: DESTRUCTIVE.test(p.text) ? 'devops_destructive' : null,
+      // A recipe draft changes a scratch folder and the project vault only; running it takes the Owner's approval.
+      reservedKey: p.kind !== 'recipe' && DESTRUCTIVE.test(p.text) ? 'devops_destructive' : null,
       data: { ws: found.ws, card, project: found.project, target: found.target },
     };
   },
@@ -745,12 +781,27 @@ const devops: ActionDef<z.infer<typeof DevopsP>> = {
       createDevOpsRequestIn(env.ctx, tx, {
         workstationId: ws.id,
         orgId: env.orgId,
-        summary: p.text,
+        summary:
+          p.kind === 'recipe'
+            ? `${recipeRequestPreamble(String(project?.key ?? p.project))}\n\n${p.text}`
+            : p.text,
         requestedBy: { kind: 'agent', id: env.agentId, name: env.agentName },
         origin: 'ceo',
         ...(card ? { cardId: card.id } : {}),
         ...(project || target
-          ? { context: { ...(project ? { projectId: project.id } : {}), workstationId: ws.id } }
+          ? {
+              context: {
+                ...(project ? { projectId: project.id } : {}),
+                workstationId: ws.id,
+                ...(p.kind === 'recipe'
+                  ? {
+                      requestKind: 'recipe' as const,
+                      projectKey: String(project?.key ?? p.project).toUpperCase(),
+                      ...(env.originKind === 'owner' ? { ownerTurn: true } : {}),
+                    }
+                  : {}),
+              },
+            }
           : {}),
       }),
     );

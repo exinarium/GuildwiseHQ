@@ -19,6 +19,14 @@ export interface ActionEnv {
   /** The wake batch or chat thread the action belongs to. */
   batchId?: string | undefined;
   chatThreadId?: string | undefined;
+  /** Where the call comes from (the server derived it): the owner's turn, a standing order's turn, or a wake. */
+  originKind?: 'owner' | 'order' | 'wake' | undefined;
+  /** The wake that led to the call may carry outside text. */
+  untrusted?: boolean | undefined;
+  /** The owner turn the call belongs to. */
+  turnId?: string | undefined;
+  /** The Owner pressed Accept on the recommendation that made this call: it is his own decision. */
+  acceptedFrom?: string | undefined;
 }
 
 /** What `prepare` found out about the subject: it feeds the policy gate and the audit row. */

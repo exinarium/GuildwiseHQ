@@ -223,6 +223,7 @@ Creating phases, adding cards, when a phase is done, follow-ups, deploy and regr
 - Phase done: A phase is done when:
 - The "phase done" desk item: When all cards are done, your BA writes a report and the desk shows a Phase done item titled like "PH-1 Autosave is done: approve 2 follow-ups?".
 - What runs after you approve: Once you approve, the follow-ups are locked and run one at a time in order:
+- Deploying with a recipe: A project can deploy in two ways, chosen under Delivery in the project settings: Instructions (a DevOps request written in words, as before) or Recipe. A recipe is a small script kept in the project's vault, in a delivery/ folder, that always does the same steps: deploy, wait until the app is healthy, run a smoke…
 
 ### Your BA reporter
 What goes through the BA, signals the server watches for, daily floor report and time zone.

@@ -134,6 +134,8 @@ const CHAT_RPC = new Set([
   /** Approved repository setup: the BA asks, the project owner approves on the desk. */
   'repo.create',
 ]);
+/** The CEO's chat asks for a deploy and reads the status; it never trials or saves a recipe (that is DevOps work). */
+const DEPLOY_CHAT_RPC = new Set(['deploy.run', 'deploy.status']);
 /** Read-only verbs of the project graph in a chat (docs/design/project-graphs.md section 7). */
 const GRAPH_CHAT_RPC = new Set(['graph.query', 'graph.explain']);
 /** G-Q1: the DevOps agent's chat can also turn an instruction into a DevOps task (`aom devops "<text>"`). */
@@ -338,7 +340,9 @@ export class ChatManager {
             ? g.rpc(req.method, req.params, chat.msg.context.graph)
             : { ok: false, error: 'the code graph is not available on this workstation' };
         }
-        return CHAT_RPC.has(req.method) || (chat.msg.agent.isDevops && DEVOPS_CHAT_RPC.has(req.method))
+        return CHAT_RPC.has(req.method) ||
+          (chat.msg.agent.roleKey === 'ceo' && DEPLOY_CHAT_RPC.has(req.method)) ||
+          (chat.msg.agent.isDevops && DEVOPS_CHAT_RPC.has(req.method))
           ? this.deps.rpc(chatId, req.method, req.params)
           : { ok: false, error: `${req.method} is not available in a chat conversation` };
       },

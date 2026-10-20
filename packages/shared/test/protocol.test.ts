@@ -269,6 +269,7 @@ const runnerToServer: Record<string, Record<string, unknown>> = {
   'command.result': { ...env('command.result'), commandId: 'k1', ok: true, result: { removed: true } },
   'vault.status': { ...env('vault.status'), vaultId: 'v1', lastPullAt: TS, lastPushAt: null, error: 'x' },
   'vault.conflict': { ...env('vault.conflict'), vaultId: 'v1', files: ['standing-orders.md'] },
+  'deploy.progress': { ...env('deploy.progress'), runId: U.d, phase: 'started' },
   'token.rotate': { ...env('token.rotate') },
   ack: { ...env('ack'), ackOf: U.d },
 };

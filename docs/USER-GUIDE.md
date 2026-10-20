@@ -60,6 +60,8 @@ This guide is for people who have never worked with AI agents before. You do not
   - [4.23 Integration tests run by the tester](#423-integration-tests-run-by-the-tester)
   - [4.24 When the Claude usage limit is reached](#424-when-the-claude-usage-limit-is-reached)
   - [4.25 How many shifts a workstation runs at once](#425-how-many-shifts-a-workstation-runs-at-once)
+  - [4.26 The lean team workflow (code version 6)](#426-the-lean-team-workflow-code-version-6)
+  - [4.27 Deploying with a recipe](#427-deploying-with-a-recipe)
 - [5. For Members](#5-for-members)
   - [5.1 What you can do](#51-what-you-can-do)
   - [5.2 Your first day](#52-your-first-day)
@@ -1131,6 +1133,36 @@ New projects start on the **lean team** workflow; a project made earlier keeps i
 
 **Who approves.** The owner approval is asked of the project's creator when they are an organization Owner or Admin, else of the organization's Owner, else an Admin (a person made owner of that one project by hand comes before the organization's Owners). The approval can name the commit you read: the web sends the commit of the diff it shows, and the server refuses with "the code changed after the diff was shown" (409 `approval_stale`) when the branch is at another commit.
 
+### 4.27 Deploying with a recipe
+
+A project deploys in one of two ways, chosen under **Project settings, Delivery**: **Instructions** (today's way: a follow-up becomes a DevOps request written in words, which an agent carries out) or **Recipe**. A recipe turns "how we deploy" into something you approve once and that then runs the same way every time, **without a model running any deploy command**.
+
+**What a recipe is.** A folder `delivery/` in the **project vault** (never the organization vault), holding `recipe.yaml` and one script per environment. The recipe lists its **environments** in order (for example `local`, then `production`). Each one names where it goes (one or several of the project's **deploy targets**), the script and its arguments, **when** it runs (after a merge, after a phase, or only on request), how long it may take, the **health check** that says it worked (a web address, a port, or a line the script prints, such as `P5 DEPLOY READY`), an optional **smoke check**, the **names** of the secrets it needs, and the **gate**. It also says **who releases it** (below). A script must do the same steps every time, check itself and exit with a reason when something is wrong, be safe to run twice, and honour a dry run (`AOM_DEPLOY_DRY_RUN=1`: check inputs and access, print the plan, change nothing).
+
+**Where the vault is.** Every project has a vault. A **git** vault is recommended: it is backed up with its repository. Without one, the project's vault is a **folder on the Owner's workstation**. Guildwise does not back it up: keep that folder somewhere that is (OneDrive, iCloud or another backed-up folder). The Delivery section says which one you have.
+
+**Setting one up: talk to the CEO.** Say "set up deploys for this project: local first, then production". The CEO asks about the environments and their order, which deploy targets (it asks you to confirm before creating a missing one), the triggers, who releases each environment, the gate ("use your standard rule: the test environment healthy for 30 minutes, regression passed, weekdays 08 to 16?") and the secrets, by name. Then it asks **DevOps** to write the scripts (modelled on the ones you already use), save them into the vault and **try them**: a trial of a local environment really runs; production only gets a dry run. The CEO shows you the result and the recipe's **hash** (a fingerprint of the folder).
+
+**Approving.** Under **Project settings, Delivery** you see the environments, who releases each, the gate, the lint (a secret in a file, a missing or non-executable script, an unknown target, an automatic production environment with no gate must be fixed first) and, once a version was approved, **what changed since**. Only the **Owner** presses **Approve this version**, and the button approves the exact hash on screen. Nobody can approve by typing a message to the CEO. When anyone edits the recipe afterwards, Guildwise notices (it re-reads the vault when it syncs, or press **Check for changes**), shows it as "changed: needs a new approval", puts a notice on your desk and **refuses every deploy from the recipe** until you approve the new version. Switch the project to **Recipe** mode once it has an approved recipe (and back to Instructions at any time).
+
+**Who releases an environment.** The recipe decides, and you approved it:
+- **The Owner or an Admin** (the default): a ready release waits in the **release queue**. Nothing runs until one of you presses **Release**.
+- **The CEO**: only where the recipe names the CEO, it releases by itself once the gate holds. Where text from outside (a card, a ticket, an e-mail) may have caused the request, production still waits for you.
+- **Automatic**: a trigger (such as "after a merge") releases it once the gate holds. A production environment may not be automatic without a gate.
+The CEO is never the releaser unless the recipe says so, and an Owner or Admin can always release.
+
+**The release queue and the Deploys page.** **Deploys** (Owner and Admins) lists the releases that are ready: the commit, the environment and the targets. When an environment has several servers, tick the ones to release to and press **Release**; the others keep waiting. The gate is checked again at that moment, and a release it no longer allows says why. The page also shows every recent deploy with its audit: which approved recipe version, which gate and which facts it rested on, who asked and who released. Below it are the organization's **gate presets** and the standard rule you can bind to a project.
+
+**Gates.** A gate lists what must be true before an environment is released: an earlier environment healthy on the same commit (for some minutes), regression, end-to-end or CI checks passed, the commit being a done phase, a time window, a freeze you can switch on. A recipe names a preset (such as `standard`) or carries its own gate; a rule you bind to a project always applies on top and a recipe cannot loosen it. An unsatisfied gate refuses the release and lists everything that is missing.
+
+**How a deploy runs.** Asking (the CEO's `aom deploy run`, a trigger, a phase follow-up, the **Deploy** button in the project's Delivery section or in the CEO chat) only asks Guildwise. Guildwise checks that the Owner approved this exact version and that the gate holds, then sends your workstation a command pinned to the approved hash. The workstation takes the files from the approved vault version, recomputes the hash (a mismatch refuses), reads the secrets it holds by name, prepares a clean checkout of the commit, runs the script outside any model with a time limit, then the health and smoke checks. The log has secrets hidden. A refusal or failure is an answer, never a blind retry, and the CEO is told. A missing secret refuses the run and puts a notice naming it on your desk; set it under **Project settings, Delivery**: the value is encrypted in your browser for the workstation you choose and kept only there (like a test account of a deploy target), never on the server, in the vault or in a prompt.
+
+**Phases.** For a project in Recipe mode, a phase's **deploy** follow-up asks for the environment of its target instead of creating a DevOps request: it finishes with the deploy run (a release waiting in the queue holds the phase until you release or cancel it). Projects in Instructions mode work exactly as in 4.10.
+
+> **Good to know:** a model only ever asks. The CEO's rights to deploy follow the recipe you approved and your CEO settings (Authority tab); in the chat, if its call to Guildwise is ever blocked, release from the card in the chat or the **Deploys** page: it is the same server path from your session.
+
+> **In the app:** Help, "Phases and follow-ups", section "Deploying with a recipe" (`/help/phases#delivery-recipes`).
+
 ## 5. For Members
 
 A **Member** works inside the projects an Owner or Admin has added them to. You do the day-to-day work: write cards, answer questions, hire your own agents and follow the board. You do not manage the organization.
@@ -1539,6 +1571,8 @@ Press **?** (when not typing in a field) for the list of shortcuts. **Ctrl+K** o
 | See and control spend | **Costs** (Owners and Admins) |
 | Time zone, picture, two-factor, BA reporting, expert mode for code changes, weekly blog digest | **Settings** (your avatar menu, Your settings) |
 | Link projects to each other (for the CEO's routing) | **Organization**, Project links tab (Owners and Admins) |
+| Release a deploy that is ready, see what was deployed and why it was allowed, edit gate presets | **Deploys** (Organization; Owners and Admins) |
+| Approve a project's delivery recipe, set its secrets, switch Instructions or Recipe | **Projects**, then the project's **Settings**, Delivery |
 | See a project's code map | **Projects**, then the project's **Settings**, Code map for agents |
 | Members, invitations, plan, billing | **Organization** (bottom of the sidebar) |
 | Help, glossary, contact us | **Help** |

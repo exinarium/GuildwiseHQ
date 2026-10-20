@@ -12,6 +12,7 @@ import {
 import { confine } from '../fs-safe.ts';
 import { type Logger, nullLogger } from '../log.ts';
 import type { RunnerPaths } from '../paths.ts';
+import { type DeliveryFile, type DeliverySaveResult, saveDeliveryDir } from './delivery.ts';
 import { ensureLocalVault, isLocalVaultDir, localVaultWarning, setAsideLocalVault } from './local.ts';
 import { mergeVaultInto, SAME_REPOSITORY_MESSAGE, type VaultMergeResult } from './merge.ts';
 import {
@@ -341,6 +342,49 @@ export class VaultManager {
       });
       this.afterSync(cmd.vaultId, r);
       if (r.status === 'conflict') return { ...w, pushed: false, paused: true, conflict: r.files };
+      if (r.status === 'error') throw new VaultWriteError(r.error);
+      return { ...w, pushed: r.pushed, paused: false };
+    });
+  }
+
+  /**
+   * `aom recipe save`: writes the project's `delivery/` folder into the vault. A git vault commits it and pushes through a
+   * sync pass (the commit is what the Owner approves, and another workstation must be able to fetch it); a local vault
+   * is rewritten in place.
+   */
+  saveDelivery(cmd: {
+    vaultId: string;
+    folder: string;
+    files: DeliveryFile[];
+    message: string;
+  }): Promise<DeliverySaveResult & { pushed: boolean; paused: boolean }> {
+    return this.serialize(cmd.vaultId, async () => {
+      const cfg = this.config;
+      const v = this.vault(cmd.vaultId);
+      if (!cfg || !v) throw new VaultWriteError(`vault ${cmd.vaultId} is not configured on this workstation`);
+      if (v.storage === 'local') {
+        const w = await saveDeliveryDir(this.localDir(cmd.vaultId), cmd.folder, cmd.files, cfg.identity, {
+          commit: false,
+          message: cmd.message,
+        });
+        return { ...w, pushed: false, paused: false };
+      }
+      const dir = this.dir(cmd.vaultId);
+      this.adoptRepository(cmd.vaultId);
+      await ensureClone(dir, v.remoteUrl, {});
+      const w = await saveDeliveryDir(dir, cmd.folder, cmd.files, cfg.identity, {
+        commit: true,
+        message: cmd.message,
+      });
+      if (this.paused.has(cmd.vaultId)) return { ...w, pushed: false, paused: true };
+      const r = await syncVault({
+        dir,
+        remoteUrl: v.remoteUrl,
+        identity: cfg.identity,
+        workstationName: cfg.workstationName,
+      });
+      this.afterSync(cmd.vaultId, r);
+      if (r.status === 'conflict') return { ...w, pushed: false, paused: true };
       if (r.status === 'error') throw new VaultWriteError(r.error);
       return { ...w, pushed: r.pushed, paused: false };
     });

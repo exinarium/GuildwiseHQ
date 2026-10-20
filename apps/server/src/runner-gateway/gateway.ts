@@ -19,6 +19,7 @@ import { refreshVaultConfig, vaultAudience } from '../commands/vaults.ts';
 import type { Ctx } from '../context.ts';
 import { sha256Hex } from '../crypto.ts';
 import { one, rows } from '../db/sql.ts';
+import { queueMergeTrigger } from '../delivery/triggers.ts';
 import type { StoredEvent } from '../eventstore/types.ts';
 import { enqueueRunnerCommand } from './commands-queue.ts';
 import { RunnerHandlers } from './handlers.ts';
@@ -246,10 +247,15 @@ export class RunnerGateway {
       case 'CardFinalized': {
         // A merge landed: bring the project's code graph to the merge commit (workstation-side, docs/design/project-graphs.md 6).
         const p = (e.event as EventOf<'CardFinalized'>).payload;
-        if (p.resultRef.mergeCommit)
+        if (p.resultRef.mergeCommit) {
           await onMergeLanded(ctx, p.cardId, p.resultRef.mergeCommit).catch((err) =>
             ctx.log.warn({ err }, 'could not queue the project graph update'),
           );
+          // Delivery recipes: an `after_merge` environment deploys once the burst of merges settles.
+          await queueMergeTrigger(ctx, p.cardId, p.resultRef.mergeCommit).catch((err) =>
+            ctx.log.warn({ err }, 'could not queue the deploy trigger'),
+          );
+        }
         return;
       }
       case 'AgentRetired': {

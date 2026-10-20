@@ -48,7 +48,11 @@ export const DevOpsRequestContextSchema = z.object({
   repoId: z.uuid().optional(),
   errorText: z.string().max(4000).optional(),
   /** A `run` request ("Run this branch"): the run environment the DevOps engineer sets up. */
-  requestKind: z.literal('run').optional(),
+  requestKind: z.enum(['run', 'recipe']).optional(),
+  /** A `recipe` request the CEO filed from the Owner's own turn: a trial of the unapproved recipe is allowed (section 10). */
+  ownerTurn: z.boolean().optional(),
+  /** A `recipe` request: the project key the recipe is for. */
+  projectKey: z.string().max(10).optional(),
   envId: z.uuid().optional(),
   /** The saved run plan was replayed first and failed: why, with the tail of the failing log (for the DevOps brief). */
   replayFailure: z.string().max(12000).optional(),

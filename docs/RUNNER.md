@@ -2154,6 +2154,32 @@ Indexes a clone into a scratch folder (or `--out`) and prints the file, node, ed
 It writes no vault. It exits 1 when the parser fails on any file. On the reference laptop (2026-10-19) a cold index of this
 repository (2,176 files) took about 6 s and gave 12,300 nodes and 27,300 edges in 8 modules.
 
+## Deploys from a delivery recipe
+
+A project in **Recipe** delivery mode deploys by a script in its project vault (`<folder>/delivery/`, see the user guide, "Deploying
+with a recipe"). The runner announces the `delivery:1` capability and does three things for it, all as deterministic code (no model):
+
+- **`recipe.inspect`**: reads `delivery/` of the project vault at a commit (`git ls-tree` and `git cat-file`, never the working tree;
+  a local vault folder is read as it is), computes the content hash, parses `recipe.yaml`, lints it (a secret in a file, a missing or
+  non-executable script) and reports the result. It reports kinds ("a private key"), never the secret.
+- **`deploy.exec`**: runs an approved deploy. It re-exports `delivery/` at the approved commit into `<data dir>/deploys/<run id>/recipe`
+  and **recomputes the hash; a mismatch refuses** (`hash_mismatch`). It resolves the secrets the recipe names from
+  `<data dir>/secrets/deploy.json` (mode 0600; sealed by the browser to this runner's key, the same way as the test accounts of a
+  target), else from the recipe's `envFile` (a `KEY=value` file you keep on this machine); a missing one refuses the run
+  (`missing_secret:NAME`). It prepares a clean checkout of the commit (a detached git worktree of the repository clone, removed
+  afterwards), runs the script in its own process group with the recipe's timeout, with your own environment minus the runner's
+  `AOM_*` settings plus `AOM_DEPLOY_COMMIT`, `AOM_DEPLOY_CHECKOUT`, `AOM_DEPLOY_ENV`, `AOM_DEPLOY_TARGET`, `AOM_DEPLOY_HOST`,
+  `AOM_DEPLOY_APP_URL`, `AOM_DEPLOY_DRY_RUN` and the secrets. Then the health check (a web address polled until it answers, a port,
+  or a line in the script's output) and the smoke script. The log is `<data dir>/logs/deploys/<run id>.log` with secrets hidden. A
+  refusal or a failed deploy is an answer, never a retry; the same command delivered twice runs once.
+- **`aom recipe save`** (the DevOps engineer, in a recipe request): copies a scratch folder into `<folder>/delivery/` of the vault
+  (a git vault: one commit, pushed; a local vault: rewritten in place) and reports the new hash. A folder that holds a secret, a
+  symlink or no `recipe.yaml` is refused.
+
+The script runs as you, on your machine, outside the Claude sandbox: that is the point of a recipe (Docker, ssh, a remote host).
+What protects you is that it only runs the exact version you approved, only when its gate holds and only when the recipe's releaser
+(you, an Admin, or the CEO where the recipe names it) says so. `aom deploy run|trial|status` only ask the server.
+
 ## Simulated workstation
 
 A simulation organization (see `docs/ARCHITECTURE.md` section 33) has no workstation of yours. The server pairs one for the Owner and runs a normal runner process on the server itself: mock runtime only (`--mock`, `AOM_RUNNER_MOCK=1`), its own data directory `AOM_SIMULATION_DIR/<org id>/runner`, repo root `.../repos`, and local bare "origin" repositories `.../origin`. The pace is `AOM_MOCK_STEP_MS` (100, 1500 or 5000 ms for fast, normal and slow) and `AOM_MOCK_CHAT_TOKEN_MS`. Chat replies come from `AOM_MOCK_REPLIES_FILE`, a JSON map whose keys are an exact message, a `/regular expression/flags`, or `*` for the default; a value is a reply or a list of replies (`{name}` is the agent, `{message}` the user's text). The same file format is used for the training video. `ANTHROPIC_API_KEY`, `GH_TOKEN` and `GITHUB_TOKEN` are blanked in its environment. It needs `git` and the built runner on the server (`AOM_SIMULATION_RUNNER_BIN`, or the packaged release in `AOM_RUNNER_RELEASE_DIR`, which the server unpacks once).

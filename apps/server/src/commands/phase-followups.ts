@@ -3,6 +3,7 @@ import {
   type FollowupDelegate,
   followupLabel,
   type PhaseCardOutcome,
+  type Recipe,
   streamId,
 } from '@aom/shared';
 import { orgOwnerId } from '../auth/org-context.ts';
@@ -188,6 +189,50 @@ export async function startFollowup(ctx: Ctx, tx: Tx, phase: Row, project: Row, 
       { tx },
     );
 
+  // A recipe project deploys through its approved recipe: no prose request. The deploy run is requested outside this
+  // transaction by the dispatcher (`deployStep`); the follow-up finishes with the run (`followupVerdict`).
+  if (f.kind === 'deploy' && project.delivery_mode === 'recipe') {
+    if (!target) return void (await fail('the deploy target no longer exists'));
+    const rec = await one(tx, `SELECT approved_parsed, status FROM delivery_recipes WHERE project_id=$1`, [
+      project.id,
+    ]);
+    const env = (rec?.approved_parsed as Recipe | null)?.environments.find((e) =>
+      e.targets.some((t) => t.toLowerCase() === String(target.name).toLowerCase()),
+    );
+    if (rec?.status !== 'approved' || !env)
+      return void (await fail(
+        rec?.status !== 'approved'
+          ? 'the delivery recipe is not approved (or changed since): approve it, then deploy'
+          : `the delivery recipe has no environment for ${target.name}`,
+      ));
+    await ctx.store.append(
+      [
+        {
+          streamId: streamId.phase(phase.id),
+          event: {
+            type: 'PhaseFollowupStarted',
+            payload: {
+              phaseId: phase.id,
+              followupId: f.id,
+              delegate: 'devops',
+              devopsRequestIds: [],
+              regressionCardIds: [],
+            },
+          },
+          actor: SYSTEM_ACTOR,
+          scope: phaseScope(phase),
+        },
+        phaseMessage(
+          phase,
+          { kind: 'system' },
+          `${prefix}: deploying ${env.name} through the delivery recipe (${env.releasedBy === 'owner' ? 'it waits in the release queue for the Owner or an Admin' : env.releasedBy === 'ceo' ? 'the CEO releases it' : 'it is released automatically once the gate holds'}).`,
+        ),
+      ],
+      { tx },
+    );
+    return;
+  }
+
   if (delegate === 'devops') {
     let stations: Workstation[];
     let skipped: Workstation[] = [];
@@ -352,6 +397,23 @@ export interface FollowupVerdict {
 
 /** What a running DevOps or regression follow-up has come to, or null while it is still going. */
 export async function followupVerdict(db: Queryable, f: Row): Promise<FollowupVerdict | null> {
+  if (f.kind === 'deploy' && !f.devops_request_ids?.length) {
+    const runs = await rows(
+      db,
+      `SELECT id, status, target_name, env, summary, refusal, refusal_detail FROM deploy_runs
+        WHERE phase_followup_id=$1 AND NOT trial ORDER BY created_at, id`,
+      [f.id],
+    );
+    if (runs.length === 0) return null;
+    const open = runs.some((r) => ['requested', 'waiting_release', 'queued', 'running'].includes(r.status));
+    const evidence = { deployRunIds: runs.map((r) => r.id) };
+    const say = (r: Row) =>
+      `${r.target_name}: ${r.status === 'succeeded' ? (r.summary ?? 'deployed') : (r.refusal_detail ?? r.summary ?? r.status)}`;
+    const bad = runs.filter((r) => ['failed', 'refused', 'cancelled'].includes(r.status));
+    if (bad.length) return open ? null : { status: 'failed', summary: runs.map(say).join('\n'), evidence };
+    if (open) return null;
+    return { status: 'succeeded', summary: runs.map(say).join('\n'), evidence };
+  }
   if (f.devops_request_ids?.length) {
     const reqs = await rows(
       db,

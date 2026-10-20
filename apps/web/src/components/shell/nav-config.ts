@@ -13,6 +13,7 @@ import {
   type LucideIcon,
   Network,
   Plug,
+  Rocket,
   Server,
   Settings,
   Timer,
@@ -121,6 +122,9 @@ export function buildNav(opts: {
           match: (p) => p === '/org' || p.startsWith('/org/workflows'),
         },
         { id: 'workstations', label: 'Workstations', to: '/workstations', icon: Server },
+        ...(canManage
+          ? [{ id: 'deploys', label: 'Deploys', to: '/deploys', icon: Rocket, testId: 'nav-deploys' }]
+          : []),
         {
           id: 'integrations',
           label: 'Integrations',

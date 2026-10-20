@@ -1,4 +1,4 @@
-import { isFollowupTerminal, nextFollowup, phaseCompletion, streamId } from '@aom/shared';
+import { isFollowupTerminal, nextFollowup, phaseCompletion, type Recipe, streamId } from '@aom/shared';
 import { SYSTEM_ACTOR } from '../commands/common.ts';
 import {
   cardOutcomes,
@@ -14,6 +14,7 @@ import { workingBranchOf } from '../commands/phases.ts';
 import type { Ctx } from '../context.ts';
 import { one, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
+import { requestDeployRun } from '../delivery/runs.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 
 /** One phase's transaction: a failure is logged and does not starve the phases after it. */
@@ -42,6 +43,8 @@ export async function phasePass(ctx: Ctx): Promise<void> {
   await step('completion', () => completionStep(ctx));
   await step('results', () => resultsStep(ctx));
   await step('sequencing', () => sequenceStep(ctx));
+  // a recipe project's deploy follow-up that just started asks for its run in the same pass
+  await step('deploys', () => deployStep(ctx));
 }
 
 // ------------------------------------------------------------------------------ merge checks (A2)
@@ -131,6 +134,43 @@ async function completionStep(ctx: Ctx): Promise<void> {
         ],
         { tx },
       );
+    });
+  }
+}
+
+// ------------------------------------------------------------------------------------------ recipe deploys
+
+/**
+ * A running deploy follow-up of a recipe project asks for its deploy run (outside the phase transaction: the request takes
+ * its own). Once a run row exists for the follow-up, even a refused one, it is never asked for again; `followupVerdict` reads
+ * the runs.
+ */
+async function deployStep(ctx: Ctx): Promise<void> {
+  const waiting = await rows(
+    ctx.pool,
+    `SELECT f.id, f.phase_id, f.target_id, ph.project_id, t.name AS target_name FROM phase_followups f
+       JOIN phases ph ON ph.id = f.phase_id AND ph.status = 'running_followups'
+       JOIN projects p ON p.id = ph.project_id AND p.status = 'active' AND p.delivery_mode = 'recipe'
+       JOIN deploy_targets t ON t.id = f.target_id
+      WHERE f.status = 'running' AND f.kind = 'deploy' AND f.devops_request_ids = '{}'
+        AND NOT EXISTS (SELECT 1 FROM deploy_runs r WHERE r.phase_followup_id = f.id AND NOT r.trial)
+      ORDER BY f.phase_id, f.position`,
+  );
+  for (const f of waiting) {
+    const rec = await one(ctx.pool, `SELECT approved_parsed FROM delivery_recipes WHERE project_id=$1`, [
+      f.project_id,
+    ]);
+    const env = (rec?.approved_parsed as Recipe | null)?.environments.find((e) =>
+      e.targets.some((t) => t.toLowerCase() === String(f.target_name).toLowerCase()),
+    );
+    if (!env) continue;
+    await requestDeployRun(ctx, {
+      projectId: f.project_id,
+      env: env.name,
+      targets: [f.target_name],
+      trigger: 'request',
+      requester: { kind: 'trigger', id: null, name: 'phase follow-up', provenance: 'trigger' },
+      phaseFollowupId: f.id,
     });
   }
 }
