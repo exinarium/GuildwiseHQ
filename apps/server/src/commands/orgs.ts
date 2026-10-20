@@ -20,6 +20,7 @@ import { type OrgAccess, orgRoleOf } from '../auth/org-context.ts';
 import { hashPassword, verifyPassword } from '../auth/password.ts';
 import { disableTwoFactorIn } from '../auth/two-factor.ts';
 import { ceoOwnerChangeEvents } from '../ceo/provision.ts';
+import { withdrawTopicsOfOrgs } from '../ceo/topics-handoff.ts';
 import type { Ctx } from '../context.ts';
 import { randomToken, sha256Hex } from '../crypto.ts';
 import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
@@ -114,6 +115,8 @@ export async function setDiagnosticsSharing(
       scope: orgScope(a.orgId),
     },
   ]);
+  // Withdrawal: topics that were handed on but not yet written are taken out of the blog queue now, not at the next sweep.
+  if (!on) await withdrawTopicsOfOrgs(ctx, a.orgId);
 }
 
 // ---------------------------------------------------------------------------------------------- members

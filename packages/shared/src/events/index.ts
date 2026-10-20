@@ -5,6 +5,7 @@ import { blogEvents } from './blog.ts';
 import { cardEvents } from './card.ts';
 import { catalogueEvents } from './catalogue.ts';
 import { ceoEvents } from './ceo.ts';
+import { ceoTopicEvents } from './ceo-topics.ts';
 import { chatEvents } from './chat.ts';
 import { codeV6Events } from './code-v6.ts';
 import { costEvents } from './cost.ts';
@@ -54,6 +55,7 @@ export const DomainEventSchema = z.discriminatedUnion('type', [
   ...agentEvents,
   ...catalogueEvents,
   ...ceoEvents,
+  ...ceoTopicEvents,
   ...deskEvents,
   ...ledgerEvents,
   ...chatEvents,

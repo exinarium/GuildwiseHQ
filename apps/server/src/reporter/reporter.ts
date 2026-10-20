@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { type FloorDigest, floorDigestIsEmpty, floorReportDue, streamId } from '@aom/shared';
 import { queueCeoReviews } from '../ceo/pass.ts';
 import { ceoActive, ceoReachable } from '../ceo/state.ts';
+import { sweepTopics } from '../ceo/topics-handoff.ts';
 import { orgScope, projectScope, SYSTEM_ACTOR } from '../commands/common.ts';
 import { releaseHeldEvents } from '../commands/reporter-tasks.ts';
 import type { Ctx } from '../context.ts';
@@ -71,6 +72,8 @@ export async function sweep(ctx: Ctx): Promise<ReporterRun> {
   out.resolved = sig.resolved;
   out.alerts = await queueUrgentAlerts(ctx);
   out.floorReports = await queueFloorReports(ctx, now);
+  // Research topics (problem notes, expiry, the one-way hand-off to the blog queue): never blocks the reporter.
+  await sweepTopics(ctx, now).catch((err) => ctx.log.error({ err }, 'ceo topics sweep failed'));
   if (out.released + out.alerts + out.floorReports > 0) ctx.services.dispatcher.trigger();
   return out;
 }

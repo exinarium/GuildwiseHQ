@@ -794,6 +794,7 @@ const CEO_USAGE = `usage: aom ceo snapshot [--section <name>] | show card|agent|
        aom ceo draft-cards --project KEY --file cards.json   (up to 10 draft cards from a JSON array; nothing is specified)
        aom ceo correction record [--action <action id>] --text "<the owner's words>" --rule "<the rule, in his words>" [--undo]   (owner turns only)
        aom ceo job start --kind <slug> [--why "<owner's words>"] | job log --kind <slug> --title "..." --summary "..." [--project KEY] [--command "<the main shell command it was done with>"] | job repeats   (work you did yourself instead of through the board)
+       aom ceo topic list | topic propose [--from <note id>[,<note id>]] --area deploy|sandbox|auth|secrets|agent-loops|context-limits|cost|testing|review|integrations|other --question "<one generic question>" [--audience developer|ops|founder]   (a research topic for the Guildwise blog; the owner decides what is sent)
        aom ceo order invoke <order id> --wake <wake id> --why "<how this event falls under the order>" --confidence 0.0-1.0   (a wake)
        aom ceo order decline --ask "<question for the owner>"  |  order done --summary "..." [--commands-file <file>]   (an order turn, terminal)
        aom ceo dir add <path>   (an extra working directory of this conversation)
@@ -1116,6 +1117,26 @@ async function ceoVerb(ctx: AomContext, p: Parsed): Promise<number> {
         ...(one(p, 'summary') ? { summary: one(p, 'summary') } : {}),
         ...(one(p, 'project') ? { project: one(p, 'project') } : {}),
         ...(one(p, 'command') ? { command: one(p, 'command') } : {}),
+      });
+      ceoPrint(ctx, p, r);
+      return (r as { status?: string }).status === 'refused' ? 1 : 0;
+    }
+    case 'topic': {
+      const sub = args[0];
+      if (sub !== 'propose' && sub !== 'list') throw new UsageError(CEO_USAGE);
+      if (sub === 'propose' && (!one(p, 'question') || !one(p, 'area')))
+        throw new UsageError('--area <area> and --question "<one generic question>" are required');
+      const from = (one(p, 'from') ?? '')
+        .split(/[\s,]+/)
+        .map((x) => x.trim())
+        .filter(Boolean);
+      const r = await rpc(ctx, 'ceo', {
+        op: 'topic',
+        sub,
+        ...(one(p, 'question') ? { question: textFlag(ctx, p, 'question', true) as string } : {}),
+        ...(one(p, 'area') ? { area: one(p, 'area') } : {}),
+        ...(one(p, 'audience') ? { audience: one(p, 'audience') } : {}),
+        from,
       });
       ceoPrint(ctx, p, r);
       return (r as { status?: string }).status === 'refused' ? 1 : 0;

@@ -6,6 +6,7 @@ import { useActiveOrgRole } from '../../lib/orgRole.ts';
 import { Badge, Button, Callout } from '../ui.tsx';
 import { CorrectButton } from './CorrectDialog.tsx';
 import { RepeatsSection } from './RepeatsSection.tsx';
+import { TopicsReportSection } from './TopicReview.tsx';
 import { UndoButton } from './UndoButton.tsx';
 
 export const ceoName = (item: Pick<DeskItemDto, 'ceo'>): string => item.ceo?.agentName ?? 'The CEO';
@@ -184,6 +185,7 @@ function CeoReportBody({ report: r }: { report: NonNullable<DeskItemDto['ceoRepo
         </div>
       )}
       {r.repeats && <RepeatsSection repeats={r.repeats} owner={owner} />}
+      <TopicsReportSection />
     </div>
   );
 }

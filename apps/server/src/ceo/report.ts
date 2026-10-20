@@ -29,6 +29,7 @@ import { listOpenRepeats } from './jobs.ts';
 import { listOrderTurns } from './order-turns.ts';
 import { detectRepeats } from './signals.ts';
 import { loadCeo } from './state.ts';
+import { topicsReportLines } from './topics.ts';
 
 const systemBy: DeskActor = { kind: 'system' };
 
@@ -83,6 +84,7 @@ export async function renderCeoReportFallback(
           `- ${r.key}: ${r.count7} times in 7 days, ${r.count30} in 30 days. Suggestion: make it a ${r.suggestion}.`,
       ),
     );
+  out.push(...(await topicsReportLines(db, orgId, now)));
   return out.join('\n');
 }
 
@@ -132,7 +134,10 @@ export async function postCeoReport(
   const spendLine = byModel.length
     ? `\n\n## What the CEO cost, by model (last 24 hours)\n${byModel.map((m) => `- ${m.model}: $${m.usd} (${m.turns} ${m.turns === 1 ? 'turn' : 'turns'})`).join('\n')}`
     : '';
-  const body = `${input.report.trim()}\n\n---\n${facts}${spendLine}`;
+  // Research topics: the proposals waiting for the owner and what was published from his topics (the web page shows them live
+  // with Accept / Edit / Reject; the fallback report already carries the text).
+  const topicsText = input.fallback ? '' : (await topicsReportLines(db, orgId, now)).join('\n');
+  const body = `${input.report.trim()}${topicsText ? `\n${topicsText}` : ''}\n\n---\n${facts}${spendLine}`;
   const open = digest.signals.filter((s) => s.status === 'open');
   const events: AppendInput[] = [
     ...thread.events,

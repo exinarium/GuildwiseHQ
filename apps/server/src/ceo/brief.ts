@@ -17,6 +17,7 @@ import { relevantMemories } from './memory.ts';
 import { ordersBriefSection } from './orders.ts';
 import { decisionReviewBrief } from './review.ts';
 import type { CeoState } from './state.ts';
+import { topicsBriefSection } from './topics.ts';
 
 /** The policy as the CEO is told it, in plain words. */
 export function policyInWords(policy: CeoPolicy): string {
@@ -214,6 +215,8 @@ export async function buildCeoBrief(
         ),
       );
     parts.push(await trainingSection(ctx, ceo));
+    const topics = await topicsBriefSection(ctx, ceo.orgId);
+    if (topics) parts.push(topics);
     parts.push(
       `## Your task\nWrite the owner's daily report in markdown, with these headings in this order (say "none" under an empty one). Lead with what needs the owner. Be brief: it is read at breakfast. Do not invent facts, and do not repeat the facts digest (the server appends it).\n${REVIEW_HEADINGS.join('\n')}\nBefore you write, handle what you can with \`aom ceo act\`. Then write the file in your scratch directory and finish with \`aom ceo report --summary-file <file>\`.`,
     );
@@ -247,6 +250,7 @@ export const VERBS_HELP = [
   '- act (the server decides within the policy; a recommendation or refusal is a normal answer): `aom ceo act <action> --<param> ... --reason "..." --confidence 0.0-1.0 [--evidence ...]`. When the policy only recommends an action, the owner sees an Approve / No card in this chat; do not retry it another way.',
   "- `aom ceo notify`, `aom ceo task create|update|list`, `aom ceo memory propose` (the owner's own words only).",
   '- corrections: when the owner says "you did X, I\'d rather Y", record it: `aom ceo correction record [--action <id>] --text "<his words>" --rule "<the rule, in his words>" [--undo]`. It is remembered at once and ranks first in every brief.',
+  '- research topics: `aom ceo topic list|propose [--from <note id>] --area <area> --question "<one generic question>"`. When the owner says "make that a blog topic", propose it from the conversation (no --from) with the problem asked generically; the server scrubs it and the owner decides what is sent. If it answers `sharing_off`, tell him the organization has not switched on diagnostic sharing.',
   '- jobs: `aom ceo job start|log|repeats`. When the owner has asked the same kind of thing again and again (`aom ceo job repeats`), offer once to make it a feature, a skill or an automation.',
   '- deploys: a project with a delivery recipe deploys ONLY through it. `aom deploy run <env> --project KEY [--commit SHA] [--target NAME]` asks Guildwise: it runs no deploy command, the server checks the owner-approved recipe and the gate, and the RECIPE says who releases. Unless the recipe names you as the releaser the release waits in the release queue for the owner or an admin: say so and point him to Deploys. `aom deploy status --project KEY` shows the runs. Never run a deploy script, docker or ssh against a production host yourself. If the deploy call is blocked, tell the owner: the chat has a Deploy button that does the same.',
   '- recipes: to set up deploys for a project, interview the owner (environments and their order, the deploy targets, the triggers, who releases each environment, the gate, the secrets BY NAME), then `aom ceo devops --project KEY --kind recipe --text "<the spec>" --wait 1800`. DevOps writes the scripts, saves them into the project vault and trials them. Show the owner the result and the recipe hash; only his Approve button on the project\'s Delivery settings approves it, and any change needs a new approval.',

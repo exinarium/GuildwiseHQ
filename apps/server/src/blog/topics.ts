@@ -95,9 +95,14 @@ export async function queueBlogTopic(
   ctx: Ctx,
   topic: ScrubbedTopic,
   origin: TopicOrigin,
-  opts: { by?: string } = {},
+  opts: { by?: string; topicId?: string } = {},
 ): Promise<{ topicId: string; status: 'queued' | 'duplicate' }> {
-  const topicId = randomUUID();
+  // A hand-off passes the id the organization side chose at accept: a retry after a crash finds the topic and does nothing.
+  const topicId = opts.topicId ?? randomUUID();
+  if (opts.topicId) {
+    const had = await one(ctx.pool, 'SELECT status FROM blog_topics WHERE id=$1', [topicId]);
+    if (had) return { topicId, status: had.status === 'duplicate' ? 'duplicate' : 'queued' };
+  }
   const dup = await findDuplicate(ctx, topic.question);
   const actor = opts.by ? userActor(opts.by) : SYSTEM_ACTOR;
   const events = [
