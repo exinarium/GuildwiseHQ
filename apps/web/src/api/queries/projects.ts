@@ -6,6 +6,7 @@ import {
   type ConvertResult,
   type CreateProjectRequest,
   type PatchProjectRequest,
+  ProjectClaudeAccountsViewSchema,
   type ProjectDetailResponse,
   ProjectDetailResponseSchema,
   type ProjectDto,
@@ -15,6 +16,7 @@ import {
   type PublicationDto,
   PublicationsResponseSchema,
   type SetArchitectSettingsRequest,
+  type SetClaudeAccountRequest,
 } from '@aom/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRef } from 'react';
@@ -187,6 +189,30 @@ export function useSetFullSuite(id: string) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['project', id] });
       qc.invalidateQueries({ queryKey: ['projects'] });
+    },
+  });
+}
+
+/**
+ * The project's Claude account setting and, per workstation that can serve it, how the project's account and the main
+ * account stand (docs/design/claude-accounts.md). Refreshed while the panel is open: provisioning and sign-in take minutes.
+ */
+export function useClaudeAccount(id: string) {
+  return useQuery({
+    queryKey: ['claude-accounts', id],
+    queryFn: () => get(`/projects/${id}/claude-accounts`, ProjectClaudeAccountsViewSchema),
+    refetchInterval: 15_000,
+  });
+}
+
+export function useSetClaudeAccount(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (b: SetClaudeAccountRequest) => put(`/projects/${id}/claude-account`, b),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['project', id] });
+      qc.invalidateQueries({ queryKey: ['projects'] });
+      qc.invalidateQueries({ queryKey: ['claude-accounts', id] });
     },
   });
 }

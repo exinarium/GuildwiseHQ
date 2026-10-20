@@ -93,8 +93,10 @@ export function ConnectDialog({
   resumeSessionId?: string | undefined;
 }) {
   const defaultInstance = typeof kind.instances === 'object' ? (kind.instances.defaultInstance ?? '') : '';
-  const first = kind.methods.find((m) => !m.phase) ?? kind.methods[0];
   const [instanceInput, setInstanceInput] = useState(presetInstance ?? defaultInstance);
+  // "Sign in with your Claude subscription" needs an account key: it is not offered for the main account.
+  const methods = kind.methods.filter((m) => m.id !== 'claude_login' || instanceInput.trim() !== '');
+  const first = methods.find((m) => !m.phase) ?? methods[0];
   const [methodId, setMethodId] = useState(initialMethod ?? first?.id ?? '');
   const [values, setValues] = useState<Record<string, string>>({});
   const [stage, setStage] = useState<'form' | 'sealing' | 'checking'>('form');
@@ -117,14 +119,17 @@ export function ConnectDialog({
     }
   }, [open, resumeSessionId]);
 
-  const method = kind.methods.find((m) => m.id === methodId) ?? first;
+  const method = methods.find((m) => m.id === methodId) ?? first;
   if (!method) return null;
   const instance = instanceInput.trim();
   const multi = kind.instances !== 'single';
   const askInstance = multi && presetInstance === null;
   const scope = integrationScope(kind, method.id);
   const block = blockReason(ctx, kind, scope, instance);
-  const instanceOk = validIntegrationInstance(kind, multi ? instance : '');
+  // A named Claude account is a key; leaving it empty would mean the main account, which has its own tile.
+  const instanceOk =
+    validIntegrationInstance(kind, multi ? instance : '') &&
+    !(askInstance && kind.id === 'claude-code' && instance === '');
   const missing = (method.fields ?? []).some((f) => f.required && !(values[f.key] ?? '').trim());
   const rState = result.data?.state;
   const checking = stage === 'checking' && !isRequestTerminal(rState);
@@ -223,10 +228,10 @@ export function ConnectDialog({
           </>
         ) : (
           <>
-            {kind.methods.length > 1 && (
+            {methods.length > 1 && (
               <fieldset className="flex flex-col gap-2" disabled={!editable}>
                 <legend className="mb-1 text-sm font-medium text-fg">How do you want to connect?</legend>
-                {kind.methods.map((m, i) => (
+                {methods.map((m, i) => (
                   <label
                     key={m.id}
                     className={`flex items-start gap-2 text-sm ${m.phase ? 'text-disabled-fg' : 'text-fg'}`}

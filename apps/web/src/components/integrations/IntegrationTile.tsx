@@ -69,7 +69,9 @@ export function IntegrationTile({
   const connected = state === 'connected';
   const signedIn = isMcp && connected;
   const interactiveMethod = kind.methods.find((m) => m.flow === 'interactive' && !m.phase);
-  const hasConnect = kind.methods.some((m) => m.flow !== 'local_only' && !m.phase);
+  const hasConnect = kind.methods.some(
+    (m) => m.flow !== 'local_only' && !m.phase && (m.id !== 'claude_login' || instance !== ''),
+  );
   const pending = ctx.page.activeSessions.find(
     (s) => s.kind === kind.id && s.instance === instance && !isRequestTerminal(s.state),
   );
@@ -128,6 +130,11 @@ export function IntegrationTile({
     >
       <div className="flex flex-wrap items-center gap-2">
         <h3 className="text-base font-semibold text-fg">{heading}</h3>
+        {kind.id === 'claude-code' && instance === '' && (
+          <span className="text-xs text-subtle" data-testid="tile-main-account">
+            Main account
+          </span>
+        )}
         <Badge tone={TONE[state]} data-testid="tile-badge">
           {signedIn ? 'Signed in' : INTEGRATION_STATE_LABELS[state]}
         </Badge>
@@ -275,16 +282,18 @@ export function IntegrationTile({
         <summary className="cursor-pointer font-medium text-muted hover:text-fg">How to set it up</summary>
         <div className="mt-2 flex flex-col gap-3">
           <p className="text-muted">{kind.help.summary}</p>
-          {kind.methods.map((m) => (
-            <div key={m.id}>
-              <p className="mb-1 font-medium text-fg">
-                {m.label}
-                {m.phase ? ' (later)' : ''}
-              </p>
-              <MethodSteps method={m} />
-              {m.warning && <p className="mt-1 text-xs text-subtle">{m.warning}</p>}
-            </div>
-          ))}
+          {kind.methods
+            .filter((m) => m.id !== 'claude_login' || instance !== '')
+            .map((m) => (
+              <div key={m.id}>
+                <p className="mb-1 font-medium text-fg">
+                  {m.label}
+                  {m.phase ? ' (later)' : ''}
+                </p>
+                <MethodSteps method={m} />
+                {m.warning && <p className="mt-1 text-xs text-subtle">{m.warning}</p>}
+              </div>
+            ))}
           <p className="text-xs text-subtle">
             Test: {kind.test.what} Stored: {kind.storage}
           </p>
@@ -319,7 +328,9 @@ export function IntegrationTile({
           onOpenChange={setConnectOpen}
           ctx={ctx}
           kind={kind}
-          instance={kind.instances !== 'single' && instance === '' ? null : instance}
+          instance={
+            kind.instances !== 'single' && instance === '' && kind.id !== 'claude-code' ? null : instance
+          }
           initialMethod={isMcp ? interactiveMethod?.id : undefined}
           resumeSessionId={pending?.id}
         />
