@@ -152,3 +152,23 @@ describe('archive-all and visibility', () => {
     expect((await get(w.owner.cookie, hidden)).archived).toBe(false);
   });
 });
+
+describe('message paging', () => {
+  it('beforeId pages without skipping or repeating messages that share a timestamp', async () => {
+    const t = await newChat(w.owner.cookie);
+    // five messages, three of them in the very same millisecond
+    for (const n of [1, 2, 2, 2, 3]) await msg(t, 'agent', n);
+    const page = async (qs: string) =>
+      await ok<any>(w.t.req('GET', `/api/threads/${t}/messages?${qs}`, { cookie: w.owner.cookie }));
+    const seen: string[] = [];
+    let p = await page('limit=2');
+    seen.unshift(...p.messages.map((m: any) => m.id));
+    while (p.hasMore) {
+      const oldest = p.messages[0];
+      p = await page(`limit=2&before=${encodeURIComponent(oldest.createdAt)}&beforeId=${oldest.id}`);
+      seen.unshift(...p.messages.map((m: any) => m.id));
+    }
+    expect(seen).toHaveLength(5);
+    expect(new Set(seen).size).toBe(5);
+  });
+});

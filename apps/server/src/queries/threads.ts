@@ -29,9 +29,14 @@ export async function threadMessages(
     db,
     `SELECT m.*, u.display_name AS user_name, a.name AS agent_name FROM thread_messages m
        LEFT JOIN users u ON u.id = m.author_user_id LEFT JOIN agents a ON a.id = m.author_agent_id
-      WHERE m.thread_id = $1 AND ($2::timestamptz IS NULL OR m.created_at < $2)
-      ORDER BY m.created_at DESC, m.event_seq DESC LIMIT $3`,
-    [threadId, q.before ?? null, q.limit + 1],
+      WHERE m.thread_id = $1
+        AND CASE
+              WHEN $4::uuid IS NOT NULL THEN (m.created_at, m.event_seq, m.id) < (
+                SELECT c.created_at, c.event_seq, c.id FROM thread_messages c WHERE c.id = $4 AND c.thread_id = $1)
+              ELSE ($2::timestamptz IS NULL OR m.created_at < $2)
+            END
+      ORDER BY m.created_at DESC, m.event_seq DESC, m.id DESC LIMIT $3`,
+    [threadId, q.before ?? null, q.limit + 1, q.beforeId ?? null],
   );
   const page = list.slice(0, q.limit).reverse();
   return {

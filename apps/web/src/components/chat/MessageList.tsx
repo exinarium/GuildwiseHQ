@@ -78,7 +78,10 @@ export function MessageList({
   const loadOlder = () => {
     const el = log.current;
     if (el) anchor.current = { h: el.scrollHeight, first };
-    void onLoadOlder();
+    // A failed page load must not leave a stale anchor that would jump the scroll on the next unrelated prepend.
+    void Promise.resolve(onLoadOlder()).then((ok) => {
+      if (ok === false) anchor.current = null;
+    });
   };
 
   const showPending = pending && !messages.some((m) => m.data.clientMsgId === pending.id);
