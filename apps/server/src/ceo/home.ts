@@ -68,3 +68,18 @@ export async function ceoChatThread(ctx: Ctx, user: AuthSession['user'], orgId: 
     return t.threadId;
   });
 }
+
+/**
+ * "New chat": the standing chat becomes a fresh thread. The earlier one is untouched (it stays in the owner's chat list and
+ * can still be read and continued); the daily report and the Ask CEO button follow the new one.
+ */
+export async function newCeoChatThread(ctx: Ctx, user: AuthSession['user'], orgId: string): Promise<string> {
+  if (!(await isOrgOwner(ctx.pool, user.id, orgId)))
+    throw forbidden('only the organization Owner can talk to the CEO');
+  return withAppendTx(ctx.pool, async (tx) => {
+    const t = await ensureCeoThread(tx, orgId, { fresh: true });
+    if (!t.threadId) throw conflict('no_ceo', 'there is no CEO');
+    await ctx.store.append(t.events, { tx });
+    return t.threadId;
+  });
+}

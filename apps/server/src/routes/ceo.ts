@@ -37,7 +37,7 @@ import {
   updateCeoSettings,
 } from '../ceo/commands.ts';
 import { editCorrection, listCorrections, recordCorrection, redoCorrection } from '../ceo/corrections.ts';
-import { ceoChatThread, moveCeo } from '../ceo/home.ts';
+import { ceoChatThread, moveCeo, newCeoChatThread } from '../ceo/home.ts';
 import { listOpenRepeats } from '../ceo/jobs.ts';
 import {
   addOwnerRule,
@@ -136,6 +136,11 @@ export function ceoRoutes(ctx: Ctx) {
     app.post('/api/ceo/chat', async (req) => {
       const a = await owner(req);
       return CeoChatResponseSchema.parse({ threadId: await ceoChatThread(ctx, a.session.user, a.orgId) });
+    });
+
+    app.post('/api/ceo/chat/new', async (req) => {
+      const a = await owner(req);
+      return CeoChatResponseSchema.parse({ threadId: await newCeoChatThread(ctx, a.session.user, a.orgId) });
     });
 
     // ------------------------------------------------------------------- the chat as a full session (step 1)
