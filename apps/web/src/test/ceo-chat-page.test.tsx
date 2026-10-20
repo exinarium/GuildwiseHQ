@@ -61,13 +61,12 @@ describe('CEO chat page', () => {
 
   const withMessages = (n: number): ChatDto => ({ ...ceoChat(n), lastMessageAt: '2026-10-03T11:00:00.000Z' });
 
-  it('New chat reuses the current chat while it is still empty', async () => {
-    const calls = stubApi('owner', routes() as never);
+  it('New chat stays on the current chat when the server returns it (still empty)', async () => {
+    const calls = stubApi('owner', routes([['POST /api/ceo/chat/new', () => ({ threadId: U(1) })]]) as never);
     const user = userEvent.setup();
     mount(`/ceo-chat/${U(1)}`);
     await user.click(await screen.findByTestId('ceo-chat-new'));
-    await waitFor(() => expect(calls.some((c) => c.url === '/api/ceo/chat')).toBe(true));
-    expect(calls.some((c) => c.url === '/api/ceo/chat/new')).toBe(false);
+    await waitFor(() => expect(calls.some((c) => c.url === '/api/ceo/chat/new')).toBe(true));
     expect(screen.getByTestId('where')).toHaveTextContent(`/ceo-chat/${U(1)}`);
   });
 
@@ -102,6 +101,21 @@ describe('CEO chat page', () => {
     mount(`/ceo-chat/${U(1)}`);
     await user.click(await screen.findByTestId('ceo-chat-new'));
     expect(await screen.findByTestId('ceo-chat-busy')).toHaveTextContent(/still answering/);
+  });
+
+  it('does not call another 409 "still answering"', async () => {
+    stubApi(
+      'owner',
+      routes([
+        ['GET /api/chats', () => ({ chats: [withMessages(1)] })],
+        ['POST /api/ceo/chat/new', () => new Fail(409, 'something else', 'no_ceo')],
+      ]) as never,
+    );
+    const user = userEvent.setup();
+    mount(`/ceo-chat/${U(1)}`);
+    await user.click(await screen.findByTestId('ceo-chat-new'));
+    await waitFor(() => expect(screen.getByText(/something else/)).toBeInTheDocument());
+    expect(screen.queryByTestId('ceo-chat-busy')).toBeNull();
   });
 
   it('shows nothing to chat with for a non-owner', async () => {

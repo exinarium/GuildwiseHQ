@@ -14,14 +14,7 @@ import { CeoChatHistory } from '../components/ceo/CeoChatHistory.tsx';
 import { AgentAvatar } from '../components/Face.tsx';
 import { PinnedScreen } from '../components/PinnedScreen.tsx';
 import { BottomSheet } from '../components/ui/BottomSheet.tsx';
-import {
-  Button,
-  Callout,
-  EmptyState,
-  ErrorBox,
-  PageSkeleton,
-  useToast,
-} from '../components/ui.tsx';
+import { Button, Callout, EmptyState, ErrorBox, PageSkeleton, useToast } from '../components/ui.tsx';
 import { type CeoChatLocationState, ceoChatPath } from '../lib/openCeoChat.ts';
 import { useActiveOrgRole } from '../lib/orgRole.ts';
 import { usePageTitle } from '../lib/usePageTitle.ts';
@@ -88,7 +81,6 @@ export function CeoChat() {
       onSuccess: (r) => {
         setStandingId(r.threadId);
         setHistory(false);
-        if (r.reused) toast.info('This chat is still empty, so you can start here.');
         if (r.threadId !== threadId) nav(ceoChatPath(r.threadId));
       },
       onError: fail,

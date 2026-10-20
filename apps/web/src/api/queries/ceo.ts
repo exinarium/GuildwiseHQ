@@ -8,7 +8,6 @@ import type {
   CeoStatusDto,
   CeoTaskDtoApi,
 } from '@aom/shared';
-import { ChatsResponseSchema } from '@aom/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiError, del, get, patch, post, put, qs } from '../client.ts';
 
@@ -146,31 +145,13 @@ export const useNewCeoChat = () => {
 };
 
 /** The server refused a new CEO chat because a turn is running or queued. */
-export const isTurnInFlight = (e: unknown): boolean =>
-  e instanceof ApiError && (e.code === 'turn_in_flight' || e.status === 409);
+export const isTurnInFlight = (e: unknown): boolean => e instanceof ApiError && e.code === 'turn_in_flight';
 
 export const TURN_IN_FLIGHT_TEXT =
   'The CEO is still answering. Wait for the reply, or press Stop, then try again.';
 
 /**
- * "New chat" from the plus button or the page: reuses the standing chat when it is still empty (no thread piles up on
- * every tap), else starts a fresh one (which archives the old one).
+ * "New chat" from the plus button or the page. The server returns the standing chat itself while it is still empty (no
+ * thread piles up on every tap), else starts a fresh one (which archives the old one).
  */
-export const useStartCeoChat = () => {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (): Promise<{ threadId: string; reused: boolean }> => {
-      const { threadId } = await post<{ threadId: string }>('/ceo/chat', {});
-      const chats = await qc.fetchQuery({
-        queryKey: ['chats'],
-        queryFn: async () => (await get('/chats', ChatsResponseSchema)).chats,
-        staleTime: 0,
-      });
-      const cur = chats.find((c) => c.threadId === threadId);
-      if (cur && cur.lastMessageAt === null) return { threadId, reused: true };
-      const fresh = await post<{ threadId: string }>('/ceo/chat/new', {});
-      return { threadId: fresh.threadId, reused: false };
-    },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['chats'] }),
-  });
-};
+export const useStartCeoChat = useNewCeoChat;

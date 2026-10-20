@@ -72,7 +72,8 @@ export async function ceoChatThread(ctx: Ctx, user: AuthSession['user'], orgId: 
 /**
  * "Clear" (the owner's new chat): the standing chat becomes a fresh thread and the earlier one is archived for the owner,
  * so it moves under "Earlier" (nothing is deleted; it can still be read, restored and continued). Refused with 409
- * `turn_in_flight` while a turn of the current thread is running or queued: clearing then would orphan its reply.
+ * `turn_in_flight` while a turn of the current thread is running (a queued one does not block). Idempotent while the
+ * current thread has no messages: that thread is returned.
  */
 export async function newCeoChatThread(ctx: Ctx, user: AuthSession['user'], orgId: string): Promise<string> {
   if (!(await isOrgOwner(ctx.pool, user.id, orgId)))
@@ -81,13 +82,16 @@ export async function newCeoChatThread(ctx: Ctx, user: AuthSession['user'], orgI
     const ceo = await loadCeo(tx, orgId);
     const previous = ceo?.chatThreadId ?? null;
     if (previous) {
-      const turn = await one(
-        tx,
-        `SELECT 1 FROM ceo_turns WHERE thread_id=$1 AND status IN ('queued','running') LIMIT 1`,
-        [previous],
-      );
+      // Nothing said yet: the standing chat already is a fresh one (double taps and two tabs do not pile up threads).
+      const used = await one(tx, 'SELECT 1 FROM thread_messages WHERE thread_id=$1 LIMIT 1', [previous]);
+      if (!used) return previous;
+      // A reply being produced would be orphaned by the switch. A QUEUED turn (the workstation is offline) does not
+      // block: it stays in the earlier thread and is delivered there when the workstation is back.
+      const turn = await one(tx, `SELECT 1 FROM ceo_turns WHERE thread_id=$1 AND status='running' LIMIT 1`, [
+        previous,
+      ]);
       if (turn || ctx.services.chat.isBusy(previous))
-        throw conflict('turn_in_flight', 'the CEO is answering: wait for the reply, then clear the chat');
+        throw conflict('turn_in_flight', 'the CEO is answering: wait for the reply, then start a new chat');
     }
     const t = await ensureCeoThread(tx, orgId, { fresh: true });
     if (!t.threadId) throw conflict('no_ceo', 'there is no CEO');

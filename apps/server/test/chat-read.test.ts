@@ -139,3 +139,16 @@ describe('chat read marker', () => {
     for (const b of [phone, desktop, stranger]) b.close();
   });
 });
+
+describe('archive-all and visibility', () => {
+  it('never emits ChatArchived for a chat the caller cannot see', async () => {
+    const other = await w.t.userSession(uniqueEmail('stranger'));
+    const hidden = await newChat(w.owner.cookie);
+    await ok(w.t.req('POST', '/api/chats/archive-all', { cookie: other.cookie, body: {} }));
+    const archived = await q(`SELECT 1 FROM events WHERE type='ChatArchived' AND stream_id=$1`, [
+      `thread-${hidden}`,
+    ]);
+    expect(archived).toHaveLength(0);
+    expect((await get(w.owner.cookie, hidden)).archived).toBe(false);
+  });
+});
