@@ -341,11 +341,20 @@ case "$1" in
 esac`,
     });
     const before = readFileSync(join(app, '.env'), 'utf8');
+    const asked: string[] = [];
     const r = await runDeployProbe(
-      payload({ scope: 'ssh_target', host: 'prod-server', hints: { dirs: [app] } }),
+      payload({
+        scope: 'ssh_target',
+        host: 'prod-server',
+        hints: { dirs: [app], urls: ['https://hq.example.com/ready'] },
+      }),
       {
         env: fake.env,
         home: server,
+        fetchImpl: (async (u: string) => {
+          asked.push(u);
+          return new Response('ok', { status: 200 });
+        }) as unknown as typeof fetch,
       },
     );
     expect(r.ok, JSON.stringify(r)).toBe(true);
@@ -371,6 +380,9 @@ esac`,
     expect(rep.proxies).toEqual([
       expect.objectContaining({ kind: 'caddy', via: 'container', name: 'caddy', sites: ['hq.example.com'] }),
     ]);
+    // the public address is asked from this computer, status only
+    expect(rep.urls).toEqual([{ url: 'https://hq.example.com/ready', status: 200 }]);
+    expect(asked).toEqual(['https://hq.example.com/ready']);
     // values of .env and compose never leave the server, and the probe changed nothing there
     expect(JSON.stringify(r)).not.toContain(SECRET);
     expect(readFileSync(join(app, '.env'), 'utf8')).toBe(before);

@@ -588,7 +588,13 @@ async function probeSshTarget(
             : 'ssh_unreachable';
     return { ok: false, error, ...(c.detail ? { detail: c.detail } : {}) };
   }
-  return { ok: true, report: fit(parseRemoteOutput(r.stdout, host, o)) };
+  const report = parseRemoteOutput(r.stdout, host, o);
+  // The public addresses are asked from THIS computer (status only): the way a person's browser would reach the site.
+  for (const u of (p.hints?.urls ?? [])
+    .filter((x) => /^https?:\/\/[A-Za-z0-9._~:/?#@%&=+,-]+$/.test(x))
+    .slice(0, 9))
+    report.urls.push({ url: u, status: await status(u, o) });
+  return { ok: true, report: fit(report) };
 }
 
 /** The line protocol of `REMOTE_PROBE_SCRIPT` as a report. Compose text is reduced to structure and dropped. */

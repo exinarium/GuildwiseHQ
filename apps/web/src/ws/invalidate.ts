@@ -117,6 +117,8 @@ export function keysForEvent(event: Pick<VisibleEvent, 'type' | 'streamId' | 'pr
         ['card'],
         // run settings and saved run plans (ProjectRunSettingsSet, RunPlanSaved)
         ['run-settings'],
+        // guided deploy setup: drafts, probes, ssh reachability, observed setup
+        ['deploy-setup'],
         // RunPlanSaved / SetupProposalSubmitted / SetupProposalResolved: the guided run steps
         ['run-plan'],
         ['commit-as'],
