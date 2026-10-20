@@ -29,7 +29,7 @@ import { eligibleProjectRepos } from '../runner-gateway/read-repos.ts';
 import { type StoredWorkstationRepo, validateWorkstationRepos } from '../runner-gateway/workstation-repos.ts';
 import { createLocalOrigin } from '../simulation/repos.ts';
 import { releaseEvents } from './cards.ts';
-import { queueAccountEnsure } from './claude-accounts.ts';
+import { queueAccountEnsure, resyncAccountNotices } from './claude-accounts.ts';
 import { assertRemoteUrl, cardMessage, orgScope, projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
 import { cancelConversionEvents } from './convert.ts';
 import { cancelPhasesEvents } from './phases.ts';
@@ -318,11 +318,13 @@ export async function setClaudeAccount(
         ],
         { tx },
       );
-    return setting.accountKey
-      ? queueAccountEnsure(tx, { id: p.id, org_id: p.org_id }, setting.accountKey)
+    const ids = setting.accountKey
+      ? await queueAccountEnsure(tx, { id: p.id, org_id: p.org_id }, setting.accountKey)
       : [];
+    return { ids, orgId: p.org_id as string };
   });
-  for (const id of asked)
+  await resyncAccountNotices(ctx, asked.orgId);
+  for (const id of asked.ids)
     void Promise.resolve(ctx.services.gateway.deliverPending(id)).catch(() => undefined);
 }
 

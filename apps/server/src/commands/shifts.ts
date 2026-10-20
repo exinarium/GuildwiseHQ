@@ -44,6 +44,7 @@ import type { AppendInput } from '../eventstore/types.ts';
 import { baFinalizeEvents } from './ba-finalize.ts';
 import { applyBaTaskReport, endBaTaskShift } from './ba-tasks.ts';
 import { cardView, workflowView } from './cards.ts';
+import { markAccountOut } from './claude-accounts.ts';
 import { agentActor, cardMessage, orgScope, projectScope, runnerActor, SYSTEM_ACTOR } from './common.ts';
 import { cardConflictAttemptEvents } from './conflict-attempts.ts';
 import { raiseOrCoalesce } from './desk-coalesce.ts';
@@ -1163,6 +1164,21 @@ export async function applyShiftRejected(
 ) {
   const s = await one(tx, 'SELECT * FROM shifts WHERE id=$1 AND workstation_id=$2', [msg.shiftId, ws.id]);
   if (!s || s.status === 'ended') return;
+  // An account that is out (or missing) is known to the dispatcher at once (docs/design/claude-accounts.md 2.4).
+  const accountKey = msg.accountKey ?? s.account_key ?? undefined;
+  if (accountKey && msg.reason === 'usage_limited')
+    await markAccountOut(tx, ws.id, accountKey, {
+      usage: 'limited',
+      limitedUntil: msg.limitedUntil ?? new Date(ctx.clock.now().getTime() + 3_600_000).toISOString(),
+    });
+  else if (accountKey && msg.reason === 'auth_expired')
+    await markAccountOut(tx, ws.id, accountKey, { login: 'expired' });
+  else if (
+    accountKey &&
+    msg.reason === 'runtime_unavailable' &&
+    (msg.detail ?? '').startsWith('account_missing:')
+  )
+    await markAccountOut(tx, ws.id, accountKey, { login: 'none' });
   if (s.kind === 'devops') {
     await ctx.store.append(await endDevopsShift(tx, s, 'rejected', { finalText: msg.detail }), { tx });
     return;
@@ -1217,7 +1233,11 @@ export async function applyShiftRejected(
     const branch = await branchProblemEvents(ctx, tx, card, msg.branchProblem);
     extra.push(...branch.events);
     rejection = branch.rejection;
-  } else if (['repo_missing', 'worktree_failed', 'runtime_unavailable', 'internal'].includes(msg.reason)) {
+  } else if (
+    ['repo_missing', 'worktree_failed', 'runtime_unavailable', 'internal'].includes(msg.reason) &&
+    // An account the runner does not have is a race the next pass settles (the account is marked out above): no penalty.
+    !(msg.reason === 'runtime_unavailable' && (msg.detail ?? '').startsWith('account_missing:'))
+  ) {
     rejection = { reason: msg.reason, detail: msg.detail ?? msg.reason.replaceAll('_', ' ') };
     // Every kind of rejection that will not fix itself holds the card back (1 min, doubling, up to 1 h), not only a
     // missing branch: 958 rejections in 10 hours came from a card that was claimed again every tick.
@@ -1239,11 +1259,15 @@ export async function applyShiftRejected(
   if (noIdentity) extra.push(...(await noCommitIdentityNotice(tx, ws, card)));
   const text = noIdentity
     ? NO_COMMIT_IDENTITY_MESSAGE
-    : msg.reason === 'usage_limited'
-      ? `Paused: the model usage limit resets at ${(msg.detail ?? '').trim().slice(0, 100) || (msg.limitedUntil ? `${new Date(msg.limitedUntil).toISOString().slice(11, 16)} UTC` : 'a later time')}. The card is back in the queue without penalty and work resumes by itself.`
-      : msg.reason === 'auth_expired'
-        ? 'The Claude login on this workstation has expired, so the shift could not run. The card is back in the queue without penalty and resumes once the login works again.'
-        : `Shift rejected by the runner (${msg.reason}${msg.detail ? `: ${msg.detail}` : ''}); the card is back in the queue.`;
+    : accountKey && accountKey !== 'main' && msg.reason === 'usage_limited'
+      ? `Paused: account \`${accountKey}\` reached its usage limit (resets ${(msg.detail ?? '').trim().slice(0, 100) || (msg.limitedUntil ? `${new Date(msg.limitedUntil).toISOString().slice(11, 16)} UTC` : 'at a later time')}). The card is back in the queue without penalty and goes on by itself once the account works again.`
+      : accountKey && accountKey !== 'main' && msg.reason === 'auth_expired'
+        ? `Paused: the login on account \`${accountKey}\` does not work, so the shift could not run. The card is back in the queue without penalty and resumes once the account is signed in again.`
+        : msg.reason === 'usage_limited'
+          ? `Paused: the model usage limit resets at ${(msg.detail ?? '').trim().slice(0, 100) || (msg.limitedUntil ? `${new Date(msg.limitedUntil).toISOString().slice(11, 16)} UTC` : 'a later time')}. The card is back in the queue without penalty and work resumes by itself.`
+          : msg.reason === 'auth_expired'
+            ? 'The Claude login on this workstation has expired, so the shift could not run. The card is back in the queue without penalty and resumes once the login works again.'
+            : `Shift rejected by the runner (${msg.reason}${msg.detail ? `: ${msg.detail}` : ''}); the card is back in the queue.`;
   const released = await releaseClaimEvents(tx, card, 'runner_rejected', text, 'rejected', extra, rejection);
   // The reason is stored on the shift itself (measurement): what the runner said, not only that it said no.
   for (const ev of released)

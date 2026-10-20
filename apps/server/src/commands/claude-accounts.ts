@@ -1,8 +1,10 @@
-import { CLAUDE_ACCOUNTS_CAPABILITY, MAIN_ACCOUNT } from '@aom/shared';
+import { CLAUDE_ACCOUNTS_CAPABILITY, ClaudeAccountEnsureResultSchema, MAIN_ACCOUNT } from '@aom/shared';
 import type { Ctx } from '../context.ts';
 import { exec, one, type Queryable, rows } from '../db/sql.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { wsServesOrgSql } from '../simulation/fit.ts';
+import { syncClaudeAccountNotices } from './claude-account-notices.ts';
+import { syncClaudeUsageNotice } from './workstation-notices.ts';
 
 /**
  * Per-project Claude accounts (docs/design/claude-accounts.md section 2.3): asking a workstation's runner to provision
@@ -121,4 +123,100 @@ export async function recordEnsureResult(
     `UPDATE workstations SET claude_account_ensure = claude_account_ensure || jsonb_build_object($2::text, $3::jsonb) WHERE id=$1`,
     [workstationId, key, JSON.stringify(record)],
   );
+}
+
+/**
+ * The runner answered `claude.account.ensure`: keep the answer (the project settings show it) and raise or close the
+ * sign-in notice (`awaiting_login`, `needs_owner` and `failed` need the owner; `ready` closes it).
+ */
+export async function applyAccountEnsureResult(
+  ctx: Ctx,
+  workstationId: string,
+  payload: { key?: string },
+  ok: boolean,
+  result: unknown,
+  error: string | undefined,
+): Promise<void> {
+  const key = payload.key;
+  if (!key) return;
+  const parsed = ClaudeAccountEnsureResultSchema.safeParse(result);
+  const answer = ok && parsed.success ? parsed.data : undefined;
+  await recordEnsureResult(ctx.pool, workstationId, key, {
+    state: answer?.state ?? 'failed',
+    ...(answer?.configDir ? { configDir: answer.configDir } : {}),
+    ...(answer?.aliasAdded !== undefined ? { aliasAdded: answer.aliasAdded } : {}),
+    ...((answer?.detail ?? error) ? { detail: (answer?.detail ?? error) as string } : {}),
+    at: ctx.clock.now().toISOString(),
+  });
+  const ws = await one<{ user_id: string; runtimes: unknown }>(
+    ctx.pool,
+    'SELECT user_id, runtimes FROM workstations WHERE id=$1',
+    [workstationId],
+  );
+  if (!ws) return;
+  await syncClaudeAccountNotices(
+    ctx,
+    { id: workstationId, userId: ws.user_id },
+    Array.isArray(ws.runtimes) ? (ws.runtimes as never) : [],
+  ).catch(() => {});
+}
+
+/**
+ * The runner turned a shift away because its account is out (`usage_limited`, `auth_expired`, or an account it does not
+ * have): patch the stored runtime now so the next dispatch pass already knows, before `runtimes.report` arrives
+ * (docs/design/claude-accounts.md 2.4). Operational data, the same way the report writes it.
+ */
+export async function markAccountOut(
+  db: Queryable,
+  workstationId: string,
+  accountKey: string,
+  how: { usage: 'limited'; limitedUntil: string } | { login: 'expired' | 'none' },
+): Promise<void> {
+  const ws = await one<{ runtimes: unknown }>(
+    db,
+    'SELECT runtimes FROM workstations WHERE id=$1 FOR UPDATE',
+    [workstationId],
+  );
+  if (!Array.isArray(ws?.runtimes)) return;
+  const runtimes = ws.runtimes as Array<Record<string, any>>;
+  const rt = runtimes.find((r) => r.id === 'claude-code');
+  if (!rt) return;
+  const patch = (o: Record<string, any>) => {
+    if ('usage' in how) Object.assign(o, { usage: 'limited', limitedUntil: how.limitedUntil });
+  };
+  const entry = (rt.accounts as Array<Record<string, any>> | undefined)?.find((a) => a.key === accountKey);
+  if (entry) {
+    patch(entry);
+    if ('login' in how) entry.login = how.login;
+  }
+  // The top-level fields describe main.
+  if (accountKey === MAIN_ACCOUNT) {
+    patch(rt);
+    if ('login' in how) rt.auth = 'expired';
+  }
+  if (!entry && accountKey !== MAIN_ACCOUNT) return;
+  await exec(db, 'UPDATE workstations SET runtimes=$2 WHERE id=$1', [
+    workstationId,
+    JSON.stringify(runtimes),
+  ]);
+}
+
+/**
+ * A project's account setting changed: the sign-in and usage notices depend on which accounts projects name, so they are
+ * worked out again for the organization's workstations from what the runners last reported.
+ */
+export async function resyncAccountNotices(ctx: Ctx, orgId: string): Promise<void> {
+  const list = await rows<{ id: string; user_id: string; runtimes: unknown }>(
+    ctx.pool,
+    `SELECT DISTINCT ws.id, ws.user_id, ws.runtimes FROM workstations ws
+       JOIN agents a ON a.workstation_id = ws.id AND a.org_id = $1 AND a.status = 'active'
+      WHERE ws.status = 'active'`,
+    [orgId],
+  );
+  for (const w of list) {
+    const runtimes = Array.isArray(w.runtimes) ? (w.runtimes as never[]) : [];
+    const ref = { id: w.id, userId: w.user_id };
+    await syncClaudeAccountNotices(ctx, ref, runtimes).catch(() => {});
+    await syncClaudeUsageNotice(ctx, ref, runtimes).catch(() => {});
+  }
 }

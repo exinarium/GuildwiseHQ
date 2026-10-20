@@ -177,7 +177,8 @@ export function registerCeoWakes(ctx: Ctx): () => void {
         const sub = p.subkind ?? '';
         if (NO_WAKE_SUBKINDS.has(sub) || p.kind === 'rating') return;
         if (p.askedBy?.agentId === ceo.agentId) return;
-        const auth = sub === 'claude_auth_expired' || sub === 'mcp_needs_sign_in';
+        const auth =
+          sub === 'claude_auth_expired' || sub === 'claude_account_login' || sub === 'mcp_needs_sign_in';
         // The same subject (a card and what is asked about it, or an alert of one title) is handled once until it changes.
         const dedupe = await deskSubject(ctx.pool, p);
         // A reached model usage limit is information (work resumes by itself), never an incident.
