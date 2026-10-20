@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { detectLoops } from '../src/reporter/detectors.ts';
+import { detectLoops } from '../src/ceo/detectors.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import type { FakeRunner } from './helpers/fake-runner.ts';
 import { pipeline } from './helpers/pipeline.ts';
