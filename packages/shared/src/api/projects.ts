@@ -1,6 +1,12 @@
 import { z } from 'zod';
 import { isValidReportPath } from '../cards/fields.ts';
 import { E2eAreaMapSchema, OwnerApprovalPolicySchema } from '../cards/lean-v6.ts';
+import {
+  AccountKeySchema,
+  ClaudeAccountEnsureResultSchema,
+  ClaudeAccountInfoSchema,
+  ClaudeAccountKeySchema,
+} from '../claude/accounts.ts';
 import { EnvironmentReportSchema, EnvStateSchema, RepoCloneStateSchema } from '../devops/environment.ts';
 import { ConvertCardDecision, ProjectChangesSchema } from '../events/project.ts';
 import {
@@ -194,9 +200,19 @@ export const ProjectDtoSchema = z.object({
    * work resumes at `until`. Absent when nothing is paused.
    */
   usageLimit: z
-    .object({ until: IsoTime, workstationName: z.string(), label: z.string().nullable() })
+    .object({
+      until: IsoTime,
+      workstationName: z.string(),
+      label: z.string().nullable(),
+      /** The account concerned (the project's, or main). Absent on legacy values. */
+      accountKey: AccountKeySchema.optional(),
+      /** `paused`: nothing runs until `until`. `fallback`: the project's account is out and shifts use main. Absent = paused. */
+      mode: z.enum(['paused', 'fallback']).optional(),
+    })
     .nullable()
     .optional(),
+  /** The project's Claude account (docs/design/claude-accounts.md). Absent = main, no fallback. */
+  claudeAccount: z.object({ key: ClaudeAccountKeySchema.nullable(), fallbackToMain: z.boolean() }).optional(),
   /** Manual pause by an organization Owner or Admin: nothing new starts until one resumes it. Null/absent: running. */
   paused: z
     .object({ at: IsoTime, byUserId: z.uuid().nullable(), byName: z.string(), reason: z.string().nullable() })
@@ -230,6 +246,31 @@ export type SetStopLossRequest = z.infer<typeof SetStopLossRequestSchema>;
 
 /** `PUT /api/projects/:id/concurrency-cap`: a number of shifts, or null to remove the cap. */
 export const SetConcurrencyCapRequestSchema = z.object({ cap: z.number().int().min(1).max(50).nullable() });
+export const SetClaudeAccountRequestSchema = z.object({
+  accountKey: ClaudeAccountKeySchema.nullable(),
+  fallbackToMain: z.boolean().default(false),
+});
+export type SetClaudeAccountRequest = z.infer<typeof SetClaudeAccountRequestSchema>;
+export const ProjectClaudeAccountsViewSchema = z.object({
+  setting: z.object({ key: ClaudeAccountKeySchema.nullable(), fallbackToMain: z.boolean() }),
+  /** Keys reported by any workstation serving the org (for the picker). */
+  knownKeys: z.array(ClaudeAccountKeySchema),
+  workstations: z.array(
+    z.object({
+      workstationId: z.uuid(),
+      name: z.string(),
+      connected: z.boolean(),
+      /** The runner announced CLAUDE_ACCOUNTS_CAPABILITY. */
+      supportsAccounts: z.boolean(),
+      main: ClaudeAccountInfoSchema.optional(),
+      /** The project's key on this workstation; absent = missing. */
+      account: ClaudeAccountInfoSchema.optional(),
+      /** Last ensure result. */
+      provisioning: ClaudeAccountEnsureResultSchema.shape.state.optional(),
+    }),
+  ),
+});
+export type ProjectClaudeAccountsView = z.infer<typeof ProjectClaudeAccountsViewSchema>;
 export type SetConcurrencyCapRequest = z.infer<typeof SetConcurrencyCapRequestSchema>;
 
 export const ProjectMemberDtoSchema = z.object({

@@ -16,6 +16,7 @@ import {
   TestEvidence,
   ThreadMessageKind,
 } from '../cards/types.ts';
+import { AccountKeySchema } from '../claude/accounts.ts';
 import { defineEvent, Id, Note, Stage } from './define.ts';
 
 const Fields = z.record(z.string(), z.unknown());
@@ -113,6 +114,8 @@ export const cardEvents = [
       shiftId: Id,
       stage: Stage,
       overflow: z.boolean(),
+      /** The Claude account the shift runs on; absent = main. */
+      accountKey: AccountKeySchema.optional(),
       worktree: z
         .object({
           repoId: Id,

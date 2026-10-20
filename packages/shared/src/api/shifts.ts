@@ -18,6 +18,8 @@ export const ShiftDtoSchema = z.object({
   runtime: z.string(),
   model: z.string(),
   overflow: z.boolean(),
+  /** The Claude account the shift ran on; absent = main. */
+  accountKey: z.string().optional(),
   startedAt: IsoTime,
   endedAt: IsoTime.nullable(),
   durationMs: z.number().int().nullable(),

@@ -5,6 +5,11 @@ import { DiffStats, StoredCompletionAction } from '../cards/types.ts';
 import { CeoShiftSchema } from '../ceo/ipc.ts';
 import { CeoOrderSpecSchema, ToolCountsSchema } from '../ceo/turns.ts';
 import {
+  AccountKeySchema,
+  ClaudeAccountEnsurePayloadSchema,
+  ClaudeAccountInfoSchema,
+} from '../claude/accounts.ts';
+import {
   DeployExecPayloadSchema,
   DeploySecretSetPayloadSchema,
   RecipeInspectPayloadSchema,
@@ -132,6 +137,11 @@ export const RuntimeInfoSchema = z.object({
   usage: z.enum(['ok', 'limited']).optional(),
   limitedUntil: z.iso.datetime().optional(),
   limitedLabel: z.string().max(100).optional(),
+  /**
+   * Claude Code only: every account on the workstation (main and additional). When present the top-level `auth`,
+   * `usage` and `limitedUntil` describe main, and `available` is false only when no account is usable.
+   */
+  accounts: z.array(ClaudeAccountInfoSchema).max(20).optional(),
 });
 export type RuntimeInfo = z.infer<typeof RuntimeInfoSchema>;
 
@@ -752,11 +762,13 @@ export const RunnerCommandNameSchema = z.enum([
   'recipe.inspect',
   'deploy.exec',
   'deploy.secret.set',
+  'claude.account.ensure',
 ]);
 export type RunnerCommandName = z.infer<typeof RunnerCommandNameSchema>;
 
 /** Typed payloads for the commands; `command.payload` is the loose record on the wire. */
 export const CommandPayloadSchemas = {
+  'claude.account.ensure': ClaudeAccountEnsurePayloadSchema,
   'vault.configure': VaultConfigureCommandSchema,
   'vault.write': VaultWriteCommandSchema,
   'vault.move': VaultMoveCommandSchema,
@@ -1005,6 +1017,8 @@ export const ShiftRejectedSchema = msg('shift.rejected', {
   detail: z.string().optional(),
   /** Set with `reason: 'usage_limited'`: when the usage limit resets (ISO); `detail` is that time as the workstation reads it. */
   limitedUntil: z.iso.datetime().optional(),
+  /** With reason usage_limited | auth_expired | runtime_unavailable (account_missing): the account concerned. */
+  accountKey: AccountKeySchema.optional(),
   conflictedFiles: z.array(z.string()).optional(),
   /** Set with `reason: 'environment_not_ready'`. */
   environment: z.object({ problem: TestEnvProblem, detail: z.string().optional() }).optional(),
@@ -1063,6 +1077,7 @@ export const RESUME_STATES = [
   'fresh_too_old',
   'fresh_other_agent',
   'fresh_transcript_missing',
+  'fresh_other_account',
 ] as const;
 export const ResumeStateSchema = z.enum(RESUME_STATES);
 export type ResumeState = z.infer<typeof ResumeStateSchema>;
@@ -1251,6 +1266,8 @@ export const ShiftStartSchema = msg('shift.start', {
   shiftId: z.uuid(),
   claimId: z.uuid(),
   kind: z.enum(['card', 'question', 'devops', 'ba_task', 'ceo']),
+  /** The Claude account this shift runs on; absent = 'main'. Only sent to runners with CLAUDE_ACCOUNTS_CAPABILITY. */
+  account: z.object({ key: AccountKeySchema }).optional(),
   agent: AgentRuntimeSpecSchema,
   brief: ShiftBriefSchema,
   worktree: WorktreeSpecSchema.nullable(),

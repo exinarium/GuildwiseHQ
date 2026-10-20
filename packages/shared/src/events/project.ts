@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ClaudeAccountKeySchema } from '../claude/accounts.ts';
 import { ForgeKindSchema, GitAccessMethodSchema } from '../forge/index.ts';
 import { WorkingBranchReason } from '../hygiene/index.ts';
 import { ProjectKeySchema } from '../ids.ts';
@@ -284,6 +285,19 @@ export const projectEvents = [
       decisionsProjectOnly: z.boolean().optional(),
       testWithoutEnvironment: z.boolean().optional(),
       by: Id.optional(),
+    }),
+  ),
+  /**
+   * The project's Claude account (docs/design/claude-accounts.md): `accountKey` null = the main account. With
+   * `fallbackToMain`, shifts use the main account while the project's account is out (usage limit or expired login).
+   */
+  defineEvent(
+    'ProjectClaudeAccountSet',
+    z.object({
+      projectId: Id,
+      accountKey: ClaudeAccountKeySchema.nullable(),
+      fallbackToMain: z.boolean(),
+      changedBy: Id,
     }),
   ),
   defineEvent('ProjectFullSuiteSet', z.object({ projectId: Id, enabled: z.boolean(), by: Id })),

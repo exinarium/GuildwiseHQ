@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { AccountKeySchema } from '../claude/accounts.ts';
 import {
   BaTaskKind,
   BaTaskStatus,
@@ -262,7 +263,17 @@ export const phaseEvents = [
     }),
   ),
   /** A `ba_task` shift was dispatched to the runner (creates the shift row). */
-  defineEvent('BaTaskDispatched', z.object({ taskId: Id, shiftId: Id, agentId: Id, workstationId: Id })),
+  defineEvent(
+    'BaTaskDispatched',
+    z.object({
+      taskId: Id,
+      shiftId: Id,
+      agentId: Id,
+      workstationId: Id,
+      /** The Claude account the shift runs on; absent = main. */
+      accountKey: AccountKeySchema.optional(),
+    }),
+  ),
   /** `attempt`: the shift failed (crash, timeout, no report) and counts toward the retry limit. */
   defineEvent(
     'BaTaskRequeued',
