@@ -94,10 +94,20 @@ export const intakeProjectors: Record<string, Projector> = {
     if (!a) return;
     await exec(
       tx,
-      `INSERT INTO shifts (id, org_id, agent_id, workstation_id, card_id, kind, stage, status, runtime, model, overflow, started_at, desk_item_id)
-       VALUES ($1,$2,$3,$4,NULL,'question',NULL,'starting',$5,$6,false,$7,$8)
+      `INSERT INTO shifts (id, org_id, agent_id, workstation_id, card_id, kind, stage, status, runtime, model, overflow, started_at, desk_item_id, account_key)
+       VALUES ($1,$2,$3,$4,NULL,'question',NULL,'starting',$5,$6,false,$7,$8,$9)
        ON CONFLICT (id) DO NOTHING`,
-      [p.shiftId, a.org_id, p.agentId, p.workstationId, a.runtime, a.model, e.createdAt, p.deskItemId],
+      [
+        p.shiftId,
+        a.org_id,
+        p.agentId,
+        p.workstationId,
+        a.runtime,
+        a.model,
+        e.createdAt,
+        p.deskItemId,
+        p.accountKey ?? null,
+      ],
     );
   },
 

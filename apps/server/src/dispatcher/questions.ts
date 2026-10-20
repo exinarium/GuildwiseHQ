@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { streamId } from '@aom/shared';
+import { MAIN_ACCOUNT, streamId } from '@aom/shared';
 import { withCommitAs } from '../commands/commit-as.ts';
 import { orgScope, SYSTEM_ACTOR } from '../commands/common.ts';
 import { endQuestionShift, escalateEvents, QUESTION_STALL_MS } from '../commands/escalation.ts';
@@ -8,6 +8,7 @@ import { one, type Row, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { buildQuestionShiftStart, QUESTION_MAX_SHIFT_MINUTES } from '../runner-gateway/question-brief.ts';
 import { wsServesOrgSql } from '../simulation/fit.ts';
+import { accountFor } from './accounts.ts';
 import { projectPausedSql } from './project-hold.ts';
 
 const ONLINE_WINDOW_MS = 45_000;
@@ -38,11 +39,13 @@ export async function questionPass(
   const onlineSince = new Date(now.getTime() - ONLINE_WINDOW_MS);
   const queued = await rows(
     ctx.pool,
-    `SELECT d.id, d.routed_agent_id, d.updated_at, d.created_at,
+    `SELECT d.id, d.routed_agent_id, d.updated_at, d.created_at, d.card_id,
+            cp.claude_account_key, cp.claude_account_fallback,
             a.status AS agent_status, a.runtime, ws.id AS ws_id, ws.runtimes, ws.connected, ws.last_seen_at, ws.status AS ws_status,
             (SELECT count(*)::int FROM shifts s WHERE s.desk_item_id = d.id AND s.agent_id = d.routed_agent_id
                AND s.status = 'ended' AND s.outcome IS DISTINCT FROM 'rejected' AND s.outcome IS DISTINCT FROM 'reported') AS failed
        FROM desk_items d JOIN agents a ON a.id = d.routed_agent_id LEFT JOIN workstations ws ON ws.id = a.workstation_id
+       LEFT JOIN cards dc ON dc.id = d.card_id LEFT JOIN projects cp ON cp.id = dc.project_id
        JOIN organizations po ON po.id = d.org_id AND po.status IN ('trial','active')
       WHERE d.status = 'open' AND d.routed_to = 'agent'
         AND (ws.id IS NULL OR ${wsServesOrgSql('ws', 'd.org_id')})
@@ -56,8 +59,16 @@ export async function questionPass(
   const started: QuestionDispatch[] = [];
   const busy = new Set<string>();
   for (const r of queued) {
-    const rt = (r.runtimes as Array<{ id: string; available: boolean }> | null)?.find(
-      (x) => x.id === r.runtime,
+    // The account: the card's project's, when the question is about one of its tickets; else main. No usable account
+    // (the project's is out and it does not fall back, or main is out) counts as not reachable: the item waits, and
+    // goes on along its chain if that lasts (as with a limited runtime before accounts).
+    const account = accountFor(
+      r.card_id && r.claude_account_key
+        ? { accountKey: r.claude_account_key, fallbackToMain: r.claude_account_fallback === true }
+        : null,
+      r.runtimes,
+      r.runtime,
+      now,
     );
     const reachable =
       r.agent_status === 'active' &&
@@ -65,7 +76,7 @@ export async function questionPass(
       r.connected &&
       r.last_seen_at &&
       new Date(r.last_seen_at) > onlineSince &&
-      rt?.available;
+      account !== null;
     const stalled = now.getTime() - new Date(r.updated_at).getTime() > QUESTION_STALL_MS;
     if (r.agent_status !== 'active' || r.failed >= MAX_ATTEMPTS || (!reachable && stalled)) {
       await escalateStalled(
@@ -99,7 +110,13 @@ export async function questionPass(
             streamId: streamId.desk(r.id),
             event: {
               type: 'QuestionShiftDispatched',
-              payload: { deskItemId: r.id, shiftId, agentId: r.routed_agent_id, workstationId: r.ws_id },
+              payload: {
+                deskItemId: r.id,
+                shiftId,
+                agentId: r.routed_agent_id,
+                workstationId: r.ws_id,
+                ...(account && account.key !== MAIN_ACCOUNT ? { accountKey: account.key } : {}),
+              },
             },
             actor: SYSTEM_ACTOR,
             scope: orgScope(item.org_id),

@@ -65,7 +65,7 @@ export function blockReason(
 ): string | null {
   const { runner } = ctx.page;
   if (!runnerCanWeb(ctx.page, kind))
-    return `Update to runner >= ${kind.minRunner} to connect from here; until then run ${integrationCli(kind, instance)}`;
+    return `Update to runner >= ${instance !== '' && kind.minRunnerForInstance ? kind.minRunnerForInstance : kind.minRunner} to connect from here; until then run ${integrationCli(kind, instance)}`;
   if (!runner.connected) return `${ctx.workstationName} is offline.`;
   const p = runner.policy;
   if (p && !p.allowWeb) return 'Turned off on this workstation (aom-runner integrations allow-web on)';

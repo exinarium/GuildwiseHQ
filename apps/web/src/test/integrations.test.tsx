@@ -269,6 +269,67 @@ describe('Integrations page: tiles', () => {
   });
 });
 
+describe('Integrations page: several Claude accounts', () => {
+  beforeEach(() => {
+    server.page = makePage({
+      integrations: [
+        status({ kind: 'claude-code', account: 'me@x.io', method: 'oauth_token' }),
+        status({
+          kind: 'claude-code',
+          instance: 'work',
+          account: 'a@x.io',
+          method: 'claude_login',
+          scope: 'machine',
+        }),
+      ],
+    });
+  });
+
+  it('shows one tile per account: the main account and one per key', async () => {
+    page();
+    const main = await screen.findByTestId('tile-claude-code');
+    expect(main).toHaveTextContent('Main account');
+    const work = screen.getByTestId('tile-claude-code:work');
+    expect(work).toHaveTextContent('Claude Code (work)');
+    expect(work).toHaveTextContent('Sign in with your Claude subscription');
+    expect(screen.getByTestId('connect-another-claude-code')).toHaveTextContent('Connect another account');
+  });
+
+  it('"Sign in with your Claude subscription" is offered first for a key and never for the main account', async () => {
+    const user = userEvent.setup();
+    page();
+    const main = await screen.findByTestId('tile-claude-code');
+    expect(main).not.toHaveTextContent('own Claude folder');
+    await user.click(within(main).getByRole('button', { name: 'Replace' }));
+    const dlg = await screen.findByRole('dialog');
+    expect(within(dlg).queryByText(/own Claude folder/)).toBeNull();
+    await user.click(within(dlg).getByRole('button', { name: 'Close dialog' }));
+
+    const work = screen.getByTestId('tile-claude-code:work');
+    await user.click(within(work).getByRole('button', { name: 'Replace' }));
+    const dlg2 = await screen.findByRole('dialog');
+    const radios = within(dlg2).getAllByRole('radio');
+    expect(radios[0]).toHaveAccessibleName(/^Sign in with your Claude subscription\(recommended\)/);
+    expect(radios[0]).toBeChecked();
+  });
+
+  it('an account key needs the newer runner: the reason names 0.1.33, the main account keeps 0.1.11', async () => {
+    server.page = makePage({
+      runner: { integrationsVersion: null },
+      legacy: true,
+      integrations: [
+        status({ kind: 'claude-code', account: 'me@x.io', method: 'oauth_token' }),
+        status({ kind: 'claude-code', instance: 'work', method: 'claude_login', scope: 'machine' }),
+      ],
+    });
+    page();
+    const work = await screen.findByTestId('tile-claude-code:work');
+    expect(work.querySelector('button[disabled]')?.getAttribute('title')).toContain('0.1.33');
+    const main = screen.getByTestId('tile-claude-code');
+    expect(main.querySelector('button[disabled]')?.getAttribute('title')).toContain('0.1.11');
+  });
+});
+
 describe('Integrations page: disabled reasons', () => {
   it('an old runner shows a banner and a read-only reason with the CLI line', async () => {
     server.page = makePage({
@@ -624,6 +685,23 @@ describe('Chooser and deep links', () => {
     );
     expect(screen.getByTestId('desk-sign-in-web').getAttribute('href')).toBe(
       `/workstations/${WS}/integrations?focus=mcp%3Aplugin_atlassian_atlassian&connect=1`,
+    );
+  });
+
+  it("the notice for a project account points at that account's tile", () => {
+    wrap(
+      <DeskItem
+        item={
+          {
+            ...deskBase,
+            subkind: 'claude_account_login',
+            data: { workstationId: WS, key: `claude_account:${WS}:work` },
+          } as never
+        }
+      />,
+    );
+    expect(screen.getByTestId('desk-sign-in-web').getAttribute('href')).toBe(
+      `/workstations/${WS}/integrations?focus=claude-code%3Awork&connect=1`,
     );
   });
 

@@ -33,6 +33,7 @@ import {
 import { signInProblems, WorkstationSignIns } from '../components/WorkstationSignIns.tsx';
 import { AddWorkstationWizard } from '../components/workstations/AddWorkstationWizard.tsx';
 import { AgentToolchains } from '../components/workstations/AgentToolchains.tsx';
+import { ClaudeAccountsTable } from '../components/workstations/ClaudeAccountsTable.tsx';
 import { CloudWorkstations } from '../components/workstations/CloudWorkstations.tsx';
 import { OrgSourceFolder } from '../components/workstations/OrgSourceFolder.tsx';
 import { RunnerUpdateBadge } from '../components/workstations/RunnerUpdateBadge.tsx';
@@ -328,6 +329,7 @@ export function WorkstationCard({
                     </Badge>
                   ))}
                 </p>
+                <ClaudeAccountsTable runtimes={w.runtimes} />
               </div>
               <div>
                 <p className="mb-1 text-xs font-medium text-subtle">Shifts running</p>

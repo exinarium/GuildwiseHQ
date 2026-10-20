@@ -158,7 +158,7 @@ const reserveHolderCanTake = (a: string): string =>
          COALESCE(${a}.permissions->'riskTiers', '["small","large"]'::jsonb)))))`;
 
 const CANDIDATES_SQL = (cardFilter: string) => `
-SELECT c.id, c.stage
+SELECT c.id, c.stage, c.project_id
 FROM cards c
 JOIN projects p          ON p.id = c.project_id AND p.status = 'active'
 JOIN organizations po   ON po.id = c.org_id AND po.status IN ('trial','active')
@@ -266,8 +266,24 @@ export async function candidateCards(
   db: Queryable,
   agent: AgentView,
   now: Date = new Date(),
-): Promise<Array<{ id: string; stage: string }>> {
-  return rows(db, CANDIDATES_SQL(''), params(agent, now));
+  /**
+   * Projects whose tickets must not be offered to this agent now (their Claude account is out and the project does not
+   * fall back to main), and/or the only projects that may be (when the main account is out, only projects on their own
+   * account can run). Keeps the 5-card window from filling with cards that cannot start.
+   */
+  accounts?: { excludeProjectIds?: string[]; onlyProjectIds?: string[] },
+): Promise<Array<{ id: string; stage: string; project_id: string }>> {
+  const extra: unknown[] = [];
+  let filter = '';
+  if (accounts?.excludeProjectIds?.length) {
+    extra.push(accounts.excludeProjectIds);
+    filter += ` AND NOT (c.project_id = ANY ($${10 + extra.length}::uuid[]))`;
+  }
+  if (accounts?.onlyProjectIds) {
+    extra.push(accounts.onlyProjectIds);
+    filter += ` AND c.project_id = ANY ($${10 + extra.length}::uuid[])`;
+  }
+  return rows(db, CANDIDATES_SQL(filter), [...params(agent, now), ...extra]);
 }
 
 /** Is this specific card currently claimable by this agent? (used inside the claim transaction) */

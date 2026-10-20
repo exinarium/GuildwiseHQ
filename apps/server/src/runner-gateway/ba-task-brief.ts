@@ -18,7 +18,7 @@ import { buildSpecCardTask } from '../commands/spec-card.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Queryable, type Row } from '../db/sql.ts';
 import { standingOrdersFor } from '../queries/ledger.ts';
-import { agentSpecFor, shiftVault } from './brief.ts';
+import { accountOf, agentSpecFor, shiftVault } from './brief.ts';
 
 type ShiftStartPayload = Omit<ServerToRunnerOf<'shift.start'>, 'v' | 'id' | 'type' | 'ts'>;
 
@@ -200,6 +200,9 @@ export async function buildBaTaskShiftStart(
     worktree: null,
     prepare: { rebase: false },
     maxShiftMinutes: BA_TASK_MAX_SHIFT_MINUTES,
+    ...accountOf(
+      await one(ctx.pool, 'SELECT account_key FROM shifts WHERE id=$1', [shiftId]).then((s) => s ?? {}),
+    ),
     baTask,
     vault: await shiftVault(ctx, agent, project.id),
     ...(await graphScopeFor(ctx, project.id).then((graph) => (graph ? { graph } : {}))),

@@ -512,9 +512,9 @@ export function DeskItem({ item, now, bare = false }: { item: DeskItemDto; now?:
           to see the stage table, graph and validation. Nothing is available until you approve.
         </p>
       )}
-      {(item.subkind === DESK_SUBKIND.claudeAuthExpired || item.subkind === DESK_SUBKIND.mcpNeedsSignIn) && (
-        <SignInFromWeb item={item} />
-      )}
+      {(item.subkind === DESK_SUBKIND.claudeAuthExpired ||
+        item.subkind === DESK_SUBKIND.mcpNeedsSignIn ||
+        item.subkind === 'claude_account_login') && <SignInFromWeb item={item} />}
       {item.kind === 'rating' && item.interest && (
         <p className="mt-1 text-sm text-muted">
           From the interest{' '}
@@ -616,7 +616,16 @@ function SignInFromWeb({ item }: { item: DeskItemDto }) {
   const data = (item as { data?: { workstationId?: string; key?: string } }).data;
   const mcp = item.subkind === DESK_SUBKIND.mcpNeedsSignIn;
   const server = mcp ? data?.key?.split(':').slice(2).join(':') : undefined;
-  const focus = mcp ? (server ? focusOf('mcp', server) : 'mcp') : 'claude-code';
+  // A project's Claude account: the key is the last part of `claude_account:<workstation>:<key>`.
+  const account =
+    item.subkind === 'claude_account_login' ? data?.key?.split(':').slice(2).join(':') : undefined;
+  const focus = mcp
+    ? server
+      ? focusOf('mcp', server)
+      : 'mcp'
+    : account
+      ? focusOf('claude-code', account)
+      : 'claude-code';
   return (
     <p className="mt-2 text-sm">
       <Link

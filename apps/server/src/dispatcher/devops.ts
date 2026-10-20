@@ -7,6 +7,7 @@ import { one, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { buildDevopsShiftStart } from '../runner-gateway/brief.ts';
 import { wsServesOrgSql } from '../simulation/fit.ts';
+import { mainUsable } from './accounts.ts';
 import { projectPausedSql } from './project-hold.ts';
 
 const ONLINE_WINDOW_MS = 45_000;
@@ -52,8 +53,8 @@ export async function devopsPass(
   for (const r of queued) {
     if (busy.has(r.devops_agent_id) || skipAgent(r.devops_agent_id) || workstationFull(r.workstation_id))
       continue;
-    const rt = (r.runtimes as Array<{ id: string; available: boolean }>).find((x) => x.id === r.runtime);
-    if (!rt?.available) continue;
+    // DevOps always runs on the workstation's main account (docs/design/claude-accounts.md D2).
+    if (!mainUsable(r.runtimes, r.runtime, ctx.clock.now())) continue;
     const conn = ctx.services.runners.get(r.workstation_id);
     if (!conn || !conn.reconciled) continue;
     const shiftId = randomUUID();

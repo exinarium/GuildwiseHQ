@@ -14,8 +14,8 @@ export const shiftProjectors: Record<string, Projector> = {
     if (!a) return;
     await exec(
       tx,
-      `INSERT INTO shifts (id, org_id, agent_id, workstation_id, card_id, kind, stage, status, runtime, model, overflow, started_at)
-       VALUES ($1,$2,$3,$4,$5,'card',$6,'starting',$7,$8,$9,$10)
+      `INSERT INTO shifts (id, org_id, agent_id, workstation_id, card_id, kind, stage, status, runtime, model, overflow, started_at, account_key)
+       VALUES ($1,$2,$3,$4,$5,'card',$6,'starting',$7,$8,$9,$10,$11)
        ON CONFLICT (id) DO NOTHING`,
       [
         p.shiftId,
@@ -28,6 +28,7 @@ export const shiftProjectors: Record<string, Projector> = {
         a.model,
         p.overflow,
         e.createdAt,
+        p.accountKey ?? null,
       ],
     );
   },
