@@ -42,6 +42,9 @@ export class FakeChatAdapter implements RuntimeAdapter {
   chats: ChatStartInput[] = [];
   ownerTurns: OwnerTurnInput[] = [];
   tools: Array<{ name: string; summary: string }> = [];
+  /** When set, a session emits exactly these events (then usage, final if `final` is set, exit 0) instead of tools + delta. */
+  script?: RuntimeEvent[];
+  scriptFinal?: string;
   hold = false;
   private gate: Promise<void> = Promise.resolve();
   private open: () => void = () => {};
@@ -68,9 +71,17 @@ export class FakeChatAdapter implements RuntimeAdapter {
   private session(text: string): RuntimeSession {
     const stopped = { v: false };
     const tools = this.tools;
+    const script = this.script;
+    const scriptFinal = this.scriptFinal;
     const gate = () => (this.hold ? this.gate : Promise.resolve());
     async function* gen(): AsyncGenerator<RuntimeEvent> {
       yield { kind: 'session', runtimeSessionId: 'sess-1' };
+      if (script) {
+        for (const e of script) yield e;
+        if (scriptFinal !== undefined) yield { kind: 'final', text: scriptFinal };
+        yield { kind: 'exit', code: 0 };
+        return;
+      }
       for (const t of tools) yield { kind: 'tool', ...t };
       await gate();
       if (stopped.v) {

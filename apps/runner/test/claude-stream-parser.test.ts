@@ -152,4 +152,44 @@ describe('claude stream parser', () => {
     expect(p.parseLine('{"type":"mystery"}')).toEqual([]);
     expect(p.parseLine('{broken')).toEqual([]);
   });
+
+  describe('chat activity events', () => {
+    const run = (...lines: object[]): RuntimeEvent[] => {
+      const p = new ClaudeStreamParser();
+      return lines.flatMap((l) => p.parseLine(JSON.stringify(l)));
+    };
+    const start = (type: string, extra: object = {}, parent: string | null = null) => ({
+      type: 'stream_event',
+      parent_tool_use_id: parent,
+      event: { type: 'content_block_start', index: 0, content_block: { type, ...extra } },
+    });
+
+    it('marks the start of text and thinking blocks, not those of a sub-agent', () => {
+      expect(run(start('thinking'), start('text'), start('tool_use', { id: 'x', name: 'Read' }))).toEqual([
+        { kind: 'thinking' },
+        { kind: 'textstart' },
+      ]);
+      expect(run(start('text', {}, 'toolu_parent'))).toEqual([]);
+    });
+
+    it('reads a thinking block of an assistant message only when no stream events are on', () => {
+      const assistant = { type: 'assistant', message: { content: [{ type: 'thinking', thinking: 'hm' }] } };
+      expect(run(assistant)).toEqual([{ kind: 'thinking' }]);
+      expect(run(start('thinking'), assistant)).toEqual([{ kind: 'thinking' }]);
+    });
+
+    it('flags an error result and recognises a permission refusal', () => {
+      const result = (content: string, is_error: boolean) => ({
+        type: 'user',
+        message: { content: [{ type: 'tool_result', tool_use_id: 't', content, is_error }] },
+      });
+      expect(run(result('ok', false))).toEqual([{ kind: 'toolresult', id: 't', bytes: 2 }]);
+      expect(run(result('exit code 1', true))).toEqual([
+        { kind: 'toolresult', id: 't', bytes: 11, isError: true },
+      ]);
+      expect(
+        run(result("Claude requested permissions to use Bash, but you haven't granted it yet.", true)),
+      ).toMatchObject([{ kind: 'toolresult', isError: true, refused: true }]);
+    });
+  });
 });

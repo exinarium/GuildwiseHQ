@@ -1213,6 +1213,59 @@ export const RunLogMsgSchema = msg('run.log', RunLogLinesSchema.shape);
 export const RunPlanSavedMsgSchemaWire = msg('run.plan.saved', RunPlanSavedMsgSchema.shape);
 /** The saved plan failed or is out of date: the server files a DevOps `run` request to repair it. Acked. */
 export const RunReplayFailedMsgSchemaWire = msg('run.replay.failed', RunReplayFailedMsgSchema.shape);
+/** Max text of one `text` segment (characters). */
+export const CHAT_SEGMENT_TEXT_MAX = 64_000;
+/** Max segments of one turn; over it, `capChatSegments` keeps the first 50 and the last 249 with a `…` between. */
+export const CHAT_SEGMENTS_MAX = 300;
+/**
+ * One step of an agent's turn, in order (docs/ARCHITECTURE.md, chat section): an assistant text block, a tool call
+ * (`refused` = the permission mode denied it) or a thinking block (its content is never shown or sent).
+ */
+export const ChatSegmentSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('text'), text: z.string().max(CHAT_SEGMENT_TEXT_MAX) }),
+  z.object({
+    type: z.literal('tool'),
+    id: z.string().max(200).optional(),
+    name: z.string().max(200),
+    summary: z.string().max(500).optional(),
+    status: z.enum(['running', 'ok', 'error', 'refused']),
+  }),
+  z.object({ type: z.literal('thinking') }),
+]);
+export type ChatSegment = z.infer<typeof ChatSegmentSchema>;
+
+/** Bounds a turn's segments: text segments cut to the limit, and over `CHAT_SEGMENTS_MAX` the middle is elided. */
+export function capChatSegments(segments: readonly ChatSegment[]): ChatSegment[] {
+  const clipped = segments.map((s) =>
+    s.type === 'text' && s.text.length > CHAT_SEGMENT_TEXT_MAX
+      ? { ...s, text: s.text.slice(0, CHAT_SEGMENT_TEXT_MAX) }
+      : s,
+  );
+  if (clipped.length <= CHAT_SEGMENTS_MAX) return clipped;
+  return [...clipped.slice(0, 50), { type: 'text', text: '…' }, ...clipped.slice(-(CHAT_SEGMENTS_MAX - 51))];
+}
+
+/** The text of a turn: its text segments joined with a blank line (empty ones skipped). */
+export function chatSegmentsText(segments: readonly ChatSegment[]): string {
+  return segments
+    .flatMap((s) => (s.type === 'text' && s.text.trim() ? [s.text.trim()] : []))
+    .join('\n\n');
+}
+
+/**
+ * Tool activity of a running turn (best effort, not acked). Sent when a tool call starts (`running`), when its result
+ * arrives (same `id`, `replace: true`), when a thinking block starts and when a new text block starts after a tool
+ * (`{ type: 'text', text: '' }`). `seq` is the segment index within the turn; text itself streams in `chat.delta`.
+ */
+export const ChatActivitySchema = msg('chat.activity', {
+  chatId: z.string(),
+  threadId: z.uuid(),
+  seq: z.number().int().nonnegative(),
+  segment: ChatSegmentSchema,
+  replace: z.boolean().optional(),
+});
+/** Announced in `welcome.features` by servers that accept `chat.activity` (an older server would log and drop it). */
+export const CHAT_ACTIVITY_FEATURE = 'chat-activity:1';
 export const ChatDeltaSchema = msg('chat.delta', {
   chatId: z.string(),
   threadId: z.uuid(),
@@ -1233,6 +1286,8 @@ export const ChatDoneSchema = msg('chat.done', {
   commands: z.array(z.string().max(500)).max(200).optional(),
   /** The model that answered, when the runtime says. */
   model: z.string().max(120).optional(),
+  /** Additive: the full ordered turn (text, tool calls, thinking). `messageText` stays the final answer. */
+  segments: z.array(ChatSegmentSchema).max(CHAT_SEGMENTS_MAX).optional(),
 });
 export const ChatErrorSchema = msg('chat.error', {
   chatId: z.string(),
@@ -1286,6 +1341,8 @@ export const WelcomeSchema = msg('welcome', {
     .object({ version: z.string().max(40) })
     .nullable()
     .optional(),
+  /** Additive: what this server understands beyond the base protocol (`CHAT_ACTIVITY_FEATURE`). */
+  features: z.array(z.string()).optional(),
 });
 export const ShiftStartSchema = msg('shift.start', {
   shiftId: z.uuid(),
@@ -1434,6 +1491,7 @@ export const RunnerToServerSchema = z.discriminatedUnion('type', [
   RunPlanSavedMsgSchemaWire,
   RunReplayFailedMsgSchemaWire,
   ChatDeltaSchema,
+  ChatActivitySchema,
   ChatDoneSchema,
   ChatErrorSchema,
   CommandResultSchema,

@@ -9,6 +9,23 @@ const isObj = (v: unknown): v is Json => typeof v === 'object' && v !== null && 
 const num = (v: unknown): number =>
   typeof v === 'number' && Number.isFinite(v) ? Math.max(0, Math.floor(v)) : 0;
 
+/** Text of a tool result's `content` (a string or text blocks), for recognising a permission refusal; capped. */
+function toolResultText(content: unknown): string {
+  if (typeof content === 'string') return content.slice(0, 2000);
+  if (!Array.isArray(content)) return '';
+  return content
+    .map((b) => (isObj(b) && b.type === 'text' && typeof b.text === 'string' ? b.text : ''))
+    .join('\n')
+    .slice(0, 2000);
+}
+
+/** A tool result that says the permission mode refused the call (Claude Code's wording in a headless `dontAsk` run). */
+export function isPermissionRefusal(text: string): boolean {
+  return /requested permissions? to use|haven't granted it yet|permission to use .{1,80} has been denied|permission denied by (?:the )?(?:user|settings|permission)|was denied by .{0,40}permission|not allowed by .{0,40}permission/i.test(
+    text,
+  );
+}
+
 export function summarizeToolInput(name: string, input: unknown): string {
   let s: string;
   if (isObj(input) && name === 'Bash' && typeof input.command === 'string') s = input.command;
@@ -81,6 +98,8 @@ export class ClaudeStreamParser {
   private errorSubtype: string | undefined;
   sessionId: string | undefined;
   private authFailed = false;
+  /** `--include-partial-messages` is on: thinking and text starts come from the stream, not the assistant message. */
+  private sawStreamEvents = false;
   private limitText: string | undefined;
 
   /**
@@ -163,6 +182,17 @@ export class ClaudeStreamParser {
       if (d?.type === 'text_delta' && typeof d.text === 'string' && d.text) {
         events.push({ kind: 'delta', text: d.text });
       }
+      this.sawStreamEvents = true;
+      const start =
+        msg.event.type === 'content_block_start' && isObj(msg.event.content_block)
+          ? msg.event.content_block
+          : undefined;
+      // sub-agent blocks (`parent_tool_use_id`) are not steps of this conversation's turn
+      if (start && msg.parent_tool_use_id == null) {
+        if (start.type === 'text') events.push({ kind: 'textstart' });
+        else if (start.type === 'thinking' || start.type === 'redacted_thinking')
+          events.push({ kind: 'thinking' });
+      }
     } else if (msg.type === 'assistant' && isObj(msg.message)) {
       if (msg.error === 'authentication_failed') this.authFailed = true;
       if (typeof msg.error === 'string' && msg.error) {
@@ -183,6 +213,12 @@ export class ClaudeStreamParser {
         if (!isObj(block)) continue;
         if (block.type === 'text' && typeof block.text === 'string' && block.text.trim()) {
           events.push({ kind: 'progress', text: block.text.trim() });
+        } else if (
+          (block.type === 'thinking' || block.type === 'redacted_thinking') &&
+          !this.sawStreamEvents &&
+          msg.parent_tool_use_id == null
+        ) {
+          events.push({ kind: 'thinking' });
         } else if (block.type === 'tool_use' && typeof block.name === 'string') {
           events.push({
             kind: 'tool',
@@ -196,7 +232,14 @@ export class ClaudeStreamParser {
       // a tool's result: only its size is taken (the shift's context counters, docs/design/project-graphs.md section 11)
       for (const block of msg.message.content) {
         if (!isObj(block) || block.type !== 'tool_result' || typeof block.tool_use_id !== 'string') continue;
-        events.push({ kind: 'toolresult', id: block.tool_use_id, bytes: toolResultBytes(block.content) });
+        const isError = block.is_error === true;
+        events.push({
+          kind: 'toolresult',
+          id: block.tool_use_id,
+          bytes: toolResultBytes(block.content),
+          ...(isError ? { isError: true } : {}),
+          ...(isError && isPermissionRefusal(toolResultText(block.content)) ? { refused: true } : {}),
+        });
       }
     } else if (msg.type === 'result') {
       const model = dominantModel(msg.modelUsage) ?? this.lastModel;

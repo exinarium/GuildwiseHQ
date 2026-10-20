@@ -1,7 +1,8 @@
 import { z } from 'zod';
+import { ThreadMessageDtoSchema } from '../api/cards.ts';
 import { VisibleEventSchema } from '../events/envelope.ts';
 import { ModelChoiceSchema } from '../models/choices.ts';
-import { ProgressItemSchema } from './runner.ts';
+import { ChatSegmentSchema, ProgressItemSchema } from './runner.ts';
 
 /**
  * Browser WebSocket (`/api/ws`, docs/ARCHITECTURE.md section 20). Authenticated by the session cookie at upgrade
@@ -80,6 +81,16 @@ export const BrowserChatDoneSchema = z.object({
   type: z.literal('chat.done'),
   threadId: z.uuid(),
   messageId: z.uuid(),
+  /** Additive: the stored agent message (what `GET /api/threads/:id/messages` returns), to swap the streamed bubble for. */
+  message: ThreadMessageDtoSchema.optional(),
+});
+/** Tool activity of the running turn (forwarded from the runner, not stored): see `ChatActivitySchema`. */
+export const BrowserChatActivitySchema = z.object({
+  type: z.literal('chat.activity'),
+  threadId: z.uuid(),
+  seq: z.number().int().nonnegative(),
+  segment: ChatSegmentSchema,
+  replace: z.boolean().optional(),
 });
 /** The CEO's workstation is offline: the message is saved and waits (it is sent when the workstation is back). */
 export const BrowserChatQueuedSchema = z.object({
@@ -115,6 +126,7 @@ export const ServerToBrowserSchema = z.discriminatedUnion('type', [
   ResyncSchema,
   BrowserShiftProgressSchema,
   BrowserChatDeltaSchema,
+  BrowserChatActivitySchema,
   BrowserChatDoneSchema,
   BrowserChatQueuedSchema,
   BrowserChatErrorSchema,
