@@ -1273,7 +1273,7 @@ step(
         await drawer.getByRole('button', { name: 'Start chat' }).click();
       }
       await expect(drawer.getByTestId('chat-panel')).toBeVisible();
-      await drawer.getByLabel('Message').fill(message);
+      await drawer.getByLabel('Message', { exact: true }).fill(message);
       await drawer.getByRole('button', { name: 'Send' }).click();
       await expect(drawer.getByTestId('chat-message').last()).toContainText('heard', { timeout: 60_000 });
       await expect(drawer.getByTestId('chat-streaming')).toHaveCount(0);
@@ -1464,10 +1464,9 @@ step('test stage: bug loop, conflict, review queue, large merge, busy agents, to
   await waitFor(
     'DevOps request for the conflict',
     () =>
-      q<any>(
-        `SELECT status FROM devops_requests WHERE card_id=(SELECT id FROM cards WHERE ref=$1)`,
-        [cc.ref],
-      ),
+      q<any>(`SELECT status FROM devops_requests WHERE card_id=(SELECT id FROM cards WHERE ref=$1)`, [
+        cc.ref,
+      ]),
     (r) => r.length > 0,
     120_000,
   );
@@ -1846,9 +1845,21 @@ step('batch intake: tickets pasted in a list, one already has a card, one waits 
   await q(`ALTER TABLE intake_batches DROP CONSTRAINT IF EXISTS intake_batches_org_id_fkey`);
   const srcDir = join(A, 'mock-sources');
   const tickets: Array<[string, string, string]> = [
-    ['SUP-240', 'Show the delivery estimate on the order confirmation page', 'Customers ask when the parcel arrives.'],
-    ['SUP-241', 'Add a "reorder" button to past orders', 'Returning customers want to repeat an order in one click.'],
-    ['SUP-242', 'Let customers change the delivery address until the order ships', 'Support gets this request every week.'],
+    [
+      'SUP-240',
+      'Show the delivery estimate on the order confirmation page',
+      'Customers ask when the parcel arrives.',
+    ],
+    [
+      'SUP-241',
+      'Add a "reorder" button to past orders',
+      'Returning customers want to repeat an order in one click.',
+    ],
+    [
+      'SUP-242',
+      'Let customers change the delivery address until the order ships',
+      'Support gets this request every week.',
+    ],
   ];
   for (const [key, title, body] of tickets)
     writeFileSync(join(srcDir, `${key}.json`), JSON.stringify({ title, body, project: 'WEB' }));
@@ -1884,7 +1895,8 @@ step('batch intake: tickets pasted in a list, one already has a card, one waits 
   S.ids.batchAsk = await start({ tickets: ['SUP-250'], note: '[ask] check which shop this is for' });
   await waitFor(
     'the batch question',
-    async () => ((await (await p.get(`/api/intake/batches/${S.ids.batchAsk}`)).json()) as any).batch.items as any[],
+    async () =>
+      ((await (await p.get(`/api/intake/batches/${S.ids.batchAsk}`)).json()) as any).batch.items as any[],
     (items) => items.some((i) => i.status === 'waiting'),
     240_000,
   );
@@ -2334,76 +2346,89 @@ cap('the platform area', async () => {
   await ctx.close();
 });
 
-cap('the newer features: integrations, batch intake, run a branch, manual QA, commit as, archive, value report', async () => {
-  await pPage.setViewportSize({ width: 1280, height: 1200 });
-  // Integrations of the first workstation
-  await open(pPage, '/integrations');
-  await snap(pPage, 'integrations-index', { maxH: 700, content: true });
-  await open(pPage, `/workstations/${S.ids.wsA}/integrations`);
-  await snap(pPage, 'integrations', { maxH: 1000, content: true });
-  // batch intake: the form with a pasted list, then a finished batch and one with a question
-  await open(pPage, '/intake');
-  await pPage.getByRole('tab', { name: 'Batch' }).click();
-  await pPage.getByLabel('Tickets, one per line').fill('SUP-251\nSUP-252\nacme/web#12\nhttps://example.atlassian.net/browse/SUP-253');
-  await snap(pPage, 'intake-batch-form', { sel: pPage.getByRole('form', { name: 'Start a batch intake' }) });
-  await open(pPage, `/intake/batches/${S.ids.batch}`);
-  await snap(pPage, 'intake-batch', { maxH: 1100, content: true });
-  await open(pPage, `/intake/batches/${S.ids.batchAsk}`);
-  await snap(pPage, 'intake-batch-question', { maxH: 900, content: true });
-  // run a branch: the dialog on the board and the panel of a started environment. The mock DevOps engineer cannot
-  // start real services, so the environment it left behind is shown as a running one (demo data, the way the
-  // seed rewords the mock agents' questions).
-  const svc = (name: string, port: number) => ({
-    name,
-    state: 'healthy',
-    ports: [{ name: 'http', port, url: `http://localhost:${port}/` }],
-    urls: [`http://localhost:${port}/`],
-    health: 'passing',
-    restarts: 0,
-    sandbox: 'sandboxed',
-  });
-  await q(
-    `UPDATE run_environments SET state='healthy', services_status=$2::jsonb, last_error=NULL, stop_reason=NULL,
+cap(
+  'the newer features: integrations, batch intake, run a branch, manual QA, commit as, archive, value report',
+  async () => {
+    await pPage.setViewportSize({ width: 1280, height: 1200 });
+    // Integrations of the first workstation
+    await open(pPage, '/integrations');
+    await snap(pPage, 'integrations-index', { maxH: 700, content: true });
+    await open(pPage, `/workstations/${S.ids.wsA}/integrations`);
+    await snap(pPage, 'integrations', { maxH: 1000, content: true });
+    // batch intake: the form with a pasted list, then a finished batch and one with a question
+    await open(pPage, '/intake');
+    await pPage.getByRole('tab', { name: 'Batch' }).click();
+    await pPage
+      .getByLabel('Tickets, one per line')
+      .fill('SUP-251\nSUP-252\nacme/web#12\nhttps://example.atlassian.net/browse/SUP-253');
+    await snap(pPage, 'intake-batch-form', {
+      sel: pPage.getByRole('form', { name: 'Start a batch intake' }),
+    });
+    await open(pPage, `/intake/batches/${S.ids.batch}`);
+    await snap(pPage, 'intake-batch', { maxH: 1100, content: true });
+    await open(pPage, `/intake/batches/${S.ids.batchAsk}`);
+    await snap(pPage, 'intake-batch-question', { maxH: 900, content: true });
+    // run a branch: the dialog on the board and the panel of a started environment. The mock DevOps engineer cannot
+    // start real services, so the environment it left behind is shown as a running one (demo data, the way the
+    // seed rewords the mock agents' questions).
+    const svc = (name: string, port: number) => ({
+      name,
+      state: 'healthy',
+      ports: [{ name: 'http', port, url: `http://localhost:${port}/` }],
+      urls: [`http://localhost:${port}/`],
+      health: 'passing',
+      restarts: 0,
+      sandbox: 'sandboxed',
+    });
+    await q(
+      `UPDATE run_environments SET state='healthy', services_status=$2::jsonb, last_error=NULL, stop_reason=NULL,
        stop_requested_at=NULL, stopped_at=NULL, healthy_at=now(), activity=NULL WHERE id=$1`,
-    [S.ids.runEnv, JSON.stringify([svc('web', 20001), svc('api', 20002)])],
-  );
-  await open(pPage, '/p/WEB/board');
-  await expect(pPage.getByTestId('board-runs')).toBeVisible({ timeout: 30_000 });
-  await snap(pPage, 'run-panel', { sel: pPage.getByTestId('board-runs') });
-  await pPage.getByTestId('run-branch-open').click();
-  await expect(pPage.getByRole('dialog')).toBeVisible();
-  await snap(pPage, 'dlg-run-branch', { sel: pPage.getByRole('dialog') });
-  await pPage.keyboard.press('Escape');
-  // the other board shots do not show an environment: put it back to what the mock DevOps engineer left
-  await q(
-    `UPDATE run_environments SET state='failed', services_status='[]'::jsonb, stop_reason='failed', stopped_at=now(),
+      [S.ids.runEnv, JSON.stringify([svc('web', 20001), svc('api', 20002)])],
+    );
+    await open(pPage, '/p/WEB/board');
+    await expect(pPage.getByTestId('board-runs')).toBeVisible({ timeout: 30_000 });
+    await snap(pPage, 'run-panel', { sel: pPage.getByTestId('board-runs') });
+    await pPage.getByTestId('run-branch-open').click();
+    await expect(pPage.getByRole('dialog')).toBeVisible();
+    await snap(pPage, 'dlg-run-branch', { sel: pPage.getByRole('dialog') });
+    await pPage.keyboard.press('Escape');
+    // the other board shots do not show an environment: put it back to what the mock DevOps engineer left
+    await q(
+      `UPDATE run_environments SET state='failed', services_status='[]'::jsonb, stop_reason='failed', stopped_at=now(),
        last_error='The DevOps engineer finished without making the environment ready.' WHERE id=$1`,
-    [S.ids.runEnv],
-  );
-  // manual QA: the card, the desk item and the setting
-  await open(pPage, `/cards/${S.ids['card:qa']}`);
-  await expect(pPage.getByTestId('qa-panel')).toBeVisible();
-  await snap(pPage, 'qa-panel', { sel: pPage.getByTestId('qa-panel') });
-  await open(pPage, '/desk');
-  const qaItem = pPage.getByTestId('qa-desk-item').first().locator('xpath=ancestor::article[1]');
-  await snap(pPage, 'desk-qa', { sel: qaItem });
-  await open(pPage, '/p/WEB/board');
-  await snap(pPage, 'board-qa', { maxH: 1000, content: true });
-  await open(pPage, `/projects/${S.ids['project:WEB']}/settings`);
-  // the form's own placeholders are the product's example; show the demo owner (nothing is saved)
-  const commitAs = pPage.getByTestId('commit-as');
-  await commitAs.getByLabel('Name').fill('Pieter Demo');
-  await commitAs.getByLabel('E-mail').fill('pieter@demo.local');
-  await snap(pPage, 'commit-as', { sel: commitAs });
-  await snap(pPage, 'manual-qa-setting', { sel: pPage.getByTestId('manual-qa-toggle').locator('xpath=ancestor::section[1]') });
-  await snap(pPage, 'run-settings', { sel: pPage.getByTestId('run-settings').locator('xpath=ancestor::section[1]') });
-  // the archive of finished cards
-  await open(pPage, '/p/WEB/archive');
-  await snap(pPage, 'archive', { maxH: 900, content: true });
-  // the value report on the Costs page
-  await open(pPage, '/costs');
-  await snap(pPage, 'value-report', { sel: pPage.getByTestId('value-panel').locator('xpath=ancestor::section[1]') });
-});
+      [S.ids.runEnv],
+    );
+    // manual QA: the card, the desk item and the setting
+    await open(pPage, `/cards/${S.ids['card:qa']}`);
+    await expect(pPage.getByTestId('qa-panel')).toBeVisible();
+    await snap(pPage, 'qa-panel', { sel: pPage.getByTestId('qa-panel') });
+    await open(pPage, '/desk');
+    const qaItem = pPage.getByTestId('qa-desk-item').first().locator('xpath=ancestor::article[1]');
+    await snap(pPage, 'desk-qa', { sel: qaItem });
+    await open(pPage, '/p/WEB/board');
+    await snap(pPage, 'board-qa', { maxH: 1000, content: true });
+    await open(pPage, `/projects/${S.ids['project:WEB']}/settings`);
+    // the form's own placeholders are the product's example; show the demo owner (nothing is saved)
+    const commitAs = pPage.getByTestId('commit-as');
+    await commitAs.getByLabel('Name').fill('Pieter Demo');
+    await commitAs.getByLabel('E-mail').fill('pieter@demo.local');
+    await snap(pPage, 'commit-as', { sel: commitAs });
+    await snap(pPage, 'manual-qa-setting', {
+      sel: pPage.getByTestId('manual-qa-toggle').locator('xpath=ancestor::section[1]'),
+    });
+    await snap(pPage, 'run-settings', {
+      sel: pPage.getByTestId('run-settings').locator('xpath=ancestor::section[1]'),
+    });
+    // the archive of finished cards
+    await open(pPage, '/p/WEB/archive');
+    await snap(pPage, 'archive', { maxH: 900, content: true });
+    // the value report on the Costs page
+    await open(pPage, '/costs');
+    await snap(pPage, 'value-report', {
+      sel: pPage.getByTestId('value-panel').locator('xpath=ancestor::section[1]'),
+    });
+  },
+);
 
 cap('on a phone', async () => {
   for (const [name, path] of [

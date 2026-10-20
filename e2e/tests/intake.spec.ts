@@ -433,7 +433,7 @@ test('AC desk chat: the BA in a plain chat from the desk creates and specifies a
   await drawer.getByLabel('Agent').selectOption({ label: 'Ben (ba)' });
   await drawer.getByRole('button', { name: 'Start chat' }).click();
   await expect(drawer.getByTestId('chat-panel')).toBeVisible();
-  await drawer.getByLabel('Message').fill('create card INT: Add a settings page');
+  await drawer.getByLabel('Message', { exact: true }).fill('create card INT: Add a settings page');
   await drawer.getByRole('button', { name: 'Send' }).click();
   await expect(drawer.getByTestId('chat-message').last()).toContainText('from this chat', {
     timeout: 60_000,
@@ -465,7 +465,7 @@ test('AC repository setup: the BA asks for a repository, the owner approves on t
   };
   await page.goto(`/chat/${chat.threadId}`);
   const send = async (text: string, expected: RegExp) => {
-    await page.getByLabel('Message').fill(text);
+    await page.getByLabel('Message', { exact: true }).fill(text);
     await page.getByRole('button', { name: 'Send' }).click();
     await expect(
       page.locator('[data-testid="chat-message"][data-author-kind="agent"]').filter({ hasText: expected }),

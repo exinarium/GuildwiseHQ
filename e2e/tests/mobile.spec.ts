@@ -177,7 +177,7 @@ test('send a chat message from the desk chat screen', async () => {
   const box = await drawer.getByRole('form', { name: 'Compose' }).boundingBox();
   const vp = page.viewportSize();
   expect(box && vp && box.y + box.height <= vp.height + 1).toBe(true);
-  await drawer.getByLabel('Message').fill('hello from the phone');
+  await drawer.getByLabel('Message', { exact: true }).fill('hello from the phone');
   await drawer.getByRole('button', { name: 'Send' }).tap();
   await expect(drawer.getByTestId('chat-message').last()).toContainText('hello from the phone', {
     timeout: 30_000,
