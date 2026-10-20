@@ -83,32 +83,24 @@ describe('CEO chat page', () => {
     expect(calls.some((c) => c.method === 'POST' && c.url === '/api/ceo/chat/new')).toBe(true);
   });
 
-  it('Clear chat asks first, then archives the chat (POST new, never DELETE)', async () => {
-    const del = vi.fn(() => null);
-    const calls = stubApi('owner', routes([['DELETE /api/chats', del]]) as never);
-    const user = userEvent.setup();
+  it('has no separate Clear chat action', async () => {
+    stubApi('owner', routes() as never);
     mount(`/ceo-chat/${U(1)}`);
-    await user.click(await screen.findByRole('button', { name: 'More chat actions' }));
-    await user.click(await screen.findByRole('menuitem', { name: /Clear chat/ }));
-    expect(calls.some((c) => c.url === '/api/ceo/chat/new')).toBe(false);
-    await user.click(await screen.findByRole('button', { name: 'Clear chat' }));
-    await waitFor(() =>
-      expect(calls.some((c) => c.method === 'POST' && c.url === '/api/ceo/chat/new')).toBe(true),
-    );
-    expect(del).not.toHaveBeenCalled();
-    await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent(`/ceo-chat/${U(2)}`));
+    await screen.findByTestId('ceo-chat-new');
+    expect(screen.queryByRole('button', { name: 'More chat actions' })).toBeNull();
   });
 
   it('tells the user to wait when the CEO is mid-turn (409 turn_in_flight)', async () => {
     stubApi(
       'owner',
-      routes([['POST /api/ceo/chat/new', () => new Fail(409, 'turn in flight', 'turn_in_flight')]]) as never,
+      routes([
+        ['GET /api/chats', () => ({ chats: [withMessages(1)] })],
+        ['POST /api/ceo/chat/new', () => new Fail(409, 'turn in flight', 'turn_in_flight')],
+      ]) as never,
     );
     const user = userEvent.setup();
     mount(`/ceo-chat/${U(1)}`);
-    await user.click(await screen.findByRole('button', { name: 'More chat actions' }));
-    await user.click(await screen.findByRole('menuitem', { name: /Clear chat/ }));
-    await user.click(await screen.findByRole('button', { name: 'Clear chat' }));
+    await user.click(await screen.findByTestId('ceo-chat-new'));
     expect(await screen.findByTestId('ceo-chat-busy')).toHaveTextContent(/still answering/);
   });
 

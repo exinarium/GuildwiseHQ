@@ -4,8 +4,8 @@ import { apiAs } from '../support/api.ts';
 import { pool } from '../support/db.ts';
 import { ADMIN, DATABASE_URL, ROOT } from '../support/env.ts';
 
-// The CEO chat page (/ceo-chat): the standing chat, New chat (reuses an empty one), Clear chat (archives the old one and
-// opens a clean one), the earlier-chats list, and "Archive all" in the chat drawer (never touches the live CEO chat).
+// The CEO chat page (/ceo-chat): the standing chat, New chat (reuses an empty one, else archives the old one and opens a
+// clean one), the earlier-chats list, and "Archive all" in the chat drawer (never touches the live CEO chat).
 // Runs after chat.spec, which leaves the runner online and a chat with Linus.
 test.describe.configure({ mode: 'serial' });
 
@@ -43,7 +43,7 @@ test('the CEO chat opens as a page on the standing chat', async () => {
   await page.screenshot({ path: '/tmp/aom-e2e-ceo-chat.png' });
 });
 
-test('New chat and Clear chat on an empty chat keep the one standing chat and show it in the list', async () => {
+test('New chat on an empty chat keeps the one standing chat and show it in the list', async () => {
   // The e2e CEO has no workstation (the paired one belongs to the member), so no message can be sent here: the
   // archive-with-history path is covered by the server tests (ceo-new-chat) and the web tests.
   const standing = (await ceoChats()).filter((c) => !c.archived);
@@ -55,12 +55,7 @@ test('New chat and Clear chat on an empty chat keep the one standing chat and sh
   await expect(page.getByTestId('ceo-chat-row')).toHaveCount(1);
   await expect(page.getByTestId('ceo-chat-list')).toContainText('Current chat');
 
-  await page.getByRole('button', { name: 'More chat actions' }).click();
-  await page.getByRole('menuitem', { name: /Clear chat/ }).click();
-  await expect(page.getByRole('dialog', { name: 'Clear this chat?' })).toBeVisible();
-  await page.getByRole('button', { name: 'Clear chat', exact: true }).last().click();
-  await expect(page.getByRole('dialog', { name: 'Clear this chat?' })).toHaveCount(0);
-  await expect(page.getByTestId('ceo-chat-busy')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'More chat actions' })).toHaveCount(0);
   expect((await ceoChats()).filter((c) => !c.archived)).toHaveLength(1);
 });
 

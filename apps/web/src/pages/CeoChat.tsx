@@ -6,7 +6,6 @@ import {
   TURN_IN_FLIGHT_TEXT,
   useCeoChat,
   useCeoStatus,
-  useNewCeoChat,
   useStartCeoChat,
 } from '../api/queries/ceo.ts';
 import { useChats } from '../api/queries/chats.ts';
@@ -18,11 +17,8 @@ import { BottomSheet } from '../components/ui/BottomSheet.tsx';
 import {
   Button,
   Callout,
-  ConfirmDialog,
   EmptyState,
   ErrorBox,
-  Menu,
-  MenuItem,
   PageSkeleton,
   useToast,
 } from '../components/ui.tsx';
@@ -31,7 +27,7 @@ import { useActiveOrgRole } from '../lib/orgRole.ts';
 import { usePageTitle } from '../lib/usePageTitle.ts';
 
 /**
- * The CEO chat as a page (not an overlay): the conversation, "New chat", "Clear chat" and the earlier chats (a side list on
+ * The CEO chat as a page (not an overlay): the conversation, "New chat" (archives the old chat) and the earlier chats (a side list on
  * desktop, a sheet on phones). `/ceo-chat` opens the standing chat; `/ceo-chat/:threadId` an earlier one.
  */
 export function CeoChat() {
@@ -42,12 +38,10 @@ export function CeoChat() {
   const status = useCeoStatus(owner);
   const standing = useCeoChat();
   const startNew = useStartCeoChat();
-  const clearChat = useNewCeoChat();
   const chats = useChats();
   const prefill = (useLocation().state as CeoChatLocationState | null)?.ceoPrefill;
   const [standingId, setStandingId] = useState<string | null>(null);
   const [history, setHistory] = useState(false);
-  const [clearing, setClearing] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const asked = useRef(false);
   const hired = !!status.data?.hired && !!status.data.agent;
@@ -100,21 +94,6 @@ export function CeoChat() {
       onError: fail,
     });
   };
-  const clear = () => {
-    setNotice(null);
-    clearChat.mutate(undefined, {
-      onSuccess: (r) => {
-        setClearing(false);
-        setStandingId(r.threadId);
-        toast.success('Chat cleared. The old one is under Earlier chats.');
-        nav(ceoChatPath(r.threadId));
-      },
-      onError: (e) => {
-        setClearing(false);
-        fail(e);
-      },
-    });
-  };
   const open = (id: string) => {
     setHistory(false);
     nav(ceoChatPath(id));
@@ -164,14 +143,6 @@ export function CeoChat() {
               <Plus aria-hidden="true" className="size-4" />
               <span>New chat</span>
             </Button>
-            <Menu label="More chat actions">
-              <MenuItem
-                onSelect={() => setClearing(true)}
-                description="Archive this chat and start a clean one"
-              >
-                Clear chat
-              </MenuItem>
-            </Menu>
           </div>
           {notice && (
             <Callout tone="warning" role="alert" data-testid="ceo-chat-busy">
@@ -199,15 +170,6 @@ export function CeoChat() {
       >
         <CeoChatHistory chats={ceoChats} threadId={threadId} standingId={standingId} onOpen={open} />
       </BottomSheet>
-      <ConfirmDialog
-        open={clearing}
-        onOpenChange={setClearing}
-        title="Clear this chat?"
-        description={`${ceoName} starts a clean chat. This one is archived, not deleted: find it under Earlier chats.`}
-        confirmLabel="Clear chat"
-        pending={clearChat.isPending}
-        onConfirm={clear}
-      />
     </PinnedScreen>
   );
 }
