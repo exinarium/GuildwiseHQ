@@ -73,7 +73,12 @@ export interface GateFacts {
   envRuns: Record<string, Array<{ id: string; commit: string | null; healthyAt: Date }>>;
   /** The latest finished check of each kind: `commit` null when the test run does not name one. */
   checks: Partial<Record<'regression' | 'e2e' | 'ci', { id: string; passedAt: Date; commit: string | null }>>;
-  /** Merge commits of phases that are done. */
+  /**
+   * The newest merge into the project. A test run that names no commit counts only for this one (it tested what was
+   * there when it ran): without it such a run satisfies nothing.
+   */
+  latestMergeCommit?: string | null | undefined;
+  /** Real merge commits of phases that are done (never the commit that was asked for). */
   phaseDoneCommits: Array<{ id: string; commit: string }>;
 }
 
@@ -162,10 +167,21 @@ export function evaluateGate(gate: Gate, facts: GateFacts): GateVerdict {
       else missing.push(label);
     } else if ('checksPassed' in r) {
       const c = facts.checks[r.checksPassed];
-      // A test run that names no commit counts only when it is the latest one: the server passes `commit: null` for those.
-      if (c && (c.commit === null ? !!facts.commit : sameCommit(c.commit, facts.commit)))
+      // A test run that names no commit counts only for the latest merge (the server passes `commit: null` for those): it
+      // never vouches for an older or arbitrary commit. `ci` has no facts yet (nothing collects CI results): it fails closed.
+      if (
+        c &&
+        (c.commit === null
+          ? sameCommit(facts.commit, facts.latestMergeCommit)
+          : sameCommit(c.commit, facts.commit))
+      )
         evidence.push({ requirement: label, ref: c.id, detail: `passed at ${c.passedAt.toISOString()}` });
-      else missing.push(label);
+      else
+        missing.push(
+          r.checksPassed === 'ci' && !c
+            ? `${label} (CI results are not collected yet, so this cannot hold)`
+            : label,
+        );
     } else {
       const p = facts.phaseDoneCommits.find((x) => sameCommit(x.commit, facts.commit));
       if (p) evidence.push({ requirement: label, ref: p.id, detail: `phase merge ${p.commit.slice(0, 10)}` });

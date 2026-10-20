@@ -6,6 +6,7 @@ import {
   DeployExecResultSchema,
   type Gate,
   type GateEvidence,
+  maskText,
   type Recipe,
   type RecipeEnv,
   streamId,
@@ -42,6 +43,8 @@ import {
  */
 
 export const DEPLOY_EXEC_TTL_MS = 2 * 3_600_000;
+const COMMIT_NOT_ALLOWED =
+  'this commit is not a merge of the project (the latest merge, a finished card merge, or what an earlier environment runs): ask the Owner to deploy it';
 export const DEPLOY_RELEASE_SUBKIND = 'deploy_release';
 
 export interface DeployRequester extends DeployActor {
@@ -155,6 +158,49 @@ async function resolveCommit(
   return (await latestMerge(db, projectId))?.commit ?? null;
 }
 
+const samePrefix = (a: string, b: string) => a === b || a.startsWith(b) || b.startsWith(a);
+
+/**
+ * May an automated requester (the CEO, DevOps, a trigger) deploy this explicit commit? Only a commit the project really
+ * merged: the latest merge, any `CardFinalized` merge commit of the project, or the commit an `envHealthy` requirement of
+ * the gate points at. Any other hex string (a commit that was never merged here) is refused. Humans choose freely.
+ */
+export async function automatedCommitAllowed(
+  db: Queryable,
+  projectId: string,
+  commit: string,
+  gates: Array<{ gate: Gate }>,
+): Promise<boolean> {
+  if (!/^[0-9a-f]{7,64}$/.test(commit)) return false;
+  const latest = await latestMerge(db, projectId);
+  if (latest && samePrefix(latest.commit, commit)) return true;
+  if (
+    await one(
+      db,
+      `SELECT 1 FROM events WHERE project_id=$1 AND type='CardFinalized'
+          AND payload->'resultRef'->>'mergeCommit' IS NOT NULL
+          AND (payload->'resultRef'->>'mergeCommit' = $2 OR starts_with(payload->'resultRef'->>'mergeCommit', $2)
+               OR starts_with($2, payload->'resultRef'->>'mergeCommit'))
+        LIMIT 1`,
+      [projectId, commit],
+    )
+  )
+    return true;
+  for (const g of gates)
+    for (const r of g.gate.requires)
+      if ('envHealthy' in r) {
+        const prev = await one(
+          db,
+          `SELECT COALESCE(deployed_commit, commit) AS commit FROM deploy_runs
+            WHERE project_id=$1 AND env=$2 AND status='succeeded' AND NOT trial AND NOT dry_run
+            ORDER BY finished_at DESC LIMIT 1`,
+          [projectId, r.envHealthy],
+        );
+        if (prev?.commit && samePrefix(prev.commit, commit)) return true;
+      }
+  return false;
+}
+
 /** Who may release this run now. The CEO is the releaser only when the recipe says so. */
 export function releaseDecision(
   env: Pick<RecipeEnv, 'releasedBy'>,
@@ -165,8 +211,11 @@ export function releaseDecision(
   if (requester.kind === 'owner' || requester.kind === 'admin') return { release: true, by };
   if (env.releasedBy === 'auto' && requester.kind !== 'ceo')
     return { release: true, by: { ...by, kind: requester.kind === 'trigger' ? 'trigger' : requester.kind } };
-  if (env.releasedBy === 'auto')
+  if (env.releasedBy === 'auto') {
+    // `auto` is a rule, not a licence for the CEO: a CEO woken by outside text never releases production through it.
+    if (production && requester.untrusted) return { release: false, waitingFor: 'owner' };
     return { release: true, by: { kind: 'trigger', id: null, name: 'automatic' } };
+  }
   if (env.releasedBy === 'ceo') {
     // An untrusted wake (outside text may have caused it) never releases production, even where the recipe names the CEO.
     if (requester.kind === 'ceo' && !(production && requester.untrusted)) return { release: true, by };
@@ -435,8 +484,18 @@ export async function requestDeployRun(ctx: Ctx, input: RequestDeployInput): Pro
     // The commit may come from the gate itself (promote what the earlier environment runs), so the gates are read first.
     let commit: string | null;
     let finalVerdict: EnvGateVerdict | null = null;
-    if (trial) commit = input.commit ?? (await latestMerge(ctx.pool, project.id))?.commit ?? null;
-    else {
+    const automated = input.requester.kind !== 'owner' && input.requester.kind !== 'admin';
+    if (trial) {
+      if (
+        automated &&
+        input.commit &&
+        !(await automatedCommitAllowed(ctx.pool, project.id, input.commit, []))
+      ) {
+        refuse('commit_not_allowed', COMMIT_NOT_ALLOWED);
+        continue;
+      }
+      commit = input.commit ?? (await latestMerge(ctx.pool, project.id))?.commit ?? null;
+    } else {
       const gateInput = {
         orgId: project.org_id as string,
         projectId: project.id as string,
@@ -446,6 +505,14 @@ export async function requestDeployRun(ctx: Ctx, input: RequestDeployInput): Pro
         repoId: (repoRow?.id as string | undefined) ?? null,
       };
       const { gates } = await effectiveGates(ctx.pool, gateInput);
+      if (
+        automated &&
+        input.commit &&
+        !(await automatedCommitAllowed(ctx.pool, project.id, input.commit, gates))
+      ) {
+        refuse('commit_not_allowed', COMMIT_NOT_ALLOWED);
+        continue;
+      }
       commit = await resolveCommit(ctx.pool, project.id, input.commit, gates);
       finalVerdict = await evaluateEnvGate(ctx.pool, { ...gateInput, commit });
     }
@@ -847,7 +914,8 @@ export async function applyDeployResult(
           ...('deployed' in r && r.deployed?.url ? { url: r.deployed.url } : {}),
           deployedCommit: ('deployedCommit' in r ? r.deployedCommit : null) ?? run.commit ?? null,
           summary,
-          logTail: r.logTail ?? '',
+          // The tail is output of the customer's own script: it is stored masked (secrets, paths, e-mail addresses).
+          logTail: maskText(r.logTail ?? '').slice(0, 6000),
           exitCode: 'exitCode' in r ? (r.exitCode ?? null) : null,
         },
       },

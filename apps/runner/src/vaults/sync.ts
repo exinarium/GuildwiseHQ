@@ -89,6 +89,23 @@ async function unmergedFiles(dir: string, env: Record<string, string>): Promise<
 export const isGeneratedGraphFile = (path: string): boolean =>
   /(^|\/)graph\/(manifest\.json|modules\.md|work\.md|repos\/.+)$/.test(path);
 
+/** Placeholder for a generated graph file in text that leaves the runner. */
+export const GRAPH_FILE_PLACEHOLDER = '<generated graph file>';
+
+/**
+ * A generated graph file's name is derived from the customer's code (`graph/repos/<repo>/<module>.jsonl`): it never reaches
+ * the server. Names of such files in git's error text are replaced.
+ */
+export const scrubGraphPaths = (text: string): string =>
+  text.replace(
+    /[^\s'"`:]*graph\/(?:manifest\.json|modules\.md|work\.md|repos\/[^\s'"`:]+)/g,
+    GRAPH_FILE_PLACEHOLDER,
+  );
+
+/** The conflicted files the server may hear about: real notes, never the generated graph. */
+export const reportableConflicts = (files: readonly string[]): string[] =>
+  files.filter((f) => !isGeneratedGraphFile(f));
+
 const graphFolderOf = (path: string): string => path.slice(0, path.lastIndexOf('/graph/'));
 
 /**
@@ -160,8 +177,15 @@ async function pullRebase(
       }
     }
     await git(dir, ['rebase', '--abort'], { env });
-    if (files.length > 0) return { ok: false, conflict: files };
-    return { ok: false, error: `git pull --rebase failed: ${pull.stderr.trim() || pull.stdout.trim()}` };
+    // A mixed conflict (a note and generated graph files) names the notes only; graph files are not the person's work.
+    const reportable = reportableConflicts(files);
+    if (reportable.length > 0) return { ok: false, conflict: reportable };
+    if (files.length > 0)
+      return { ok: false, error: 'git pull --rebase failed: generated graph files could not be merged' };
+    return {
+      ok: false,
+      error: scrubGraphPaths(`git pull --rebase failed: ${pull.stderr.trim() || pull.stdout.trim()}`),
+    };
   }
   const after = (await git(dir, ['rev-parse', 'HEAD'], { env })).stdout.trim();
   return { ok: true, changed: before !== after };
@@ -231,11 +255,12 @@ export async function syncVault(input: VaultSyncInput): Promise<VaultSyncResult>
         await git(input.dir, ['fetch', 'origin'], { env });
         return { status: 'ok', cloned, committed, pulled, pushed, ...done() };
       }
-      if (attempt === 1) return { status: 'error', error: `git push failed: ${push.stderr.trim()}` };
+      if (attempt === 1)
+        return { status: 'error', error: scrubGraphPaths(`git push failed: ${push.stderr.trim()}`) };
     }
     return { status: 'error', error: 'sync did not converge' };
   } catch (err) {
-    return { status: 'error', error: err instanceof Error ? err.message : String(err) };
+    return { status: 'error', error: scrubGraphPaths(err instanceof Error ? err.message : String(err)) };
   }
 }
 

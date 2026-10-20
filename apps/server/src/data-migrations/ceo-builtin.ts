@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { CEO_ROLE_KEY, streamId } from '@aom/shared';
 import { ceoProvisionEvents } from '../ceo/provision.ts';
 import { loadCeo } from '../ceo/state.ts';
@@ -23,6 +24,8 @@ export const CEO_BUILTIN_MIGRATION = 'ceo-builtin-2026-10';
 export interface CeoBuiltinReport {
   provisioned: string[];
   graduated: string[];
+  /** Organizations whose step threw (logged, skipped; the next boot tries again). Absent when none. */
+  failed?: string[];
 }
 
 export async function migrateCeoBuiltin(env: DataMigrationEnv): Promise<CeoBuiltinReport> {
@@ -33,45 +36,85 @@ export async function migrateCeoBuiltin(env: DataMigrationEnv): Promise<CeoBuilt
     'SELECT id, owner_user_id, simulation FROM organizations ORDER BY created_at, id',
   );
   for (const o of orgs) {
-    await withAppendTx(pool, async (tx) => {
-      const events: AppendInput[] = [];
-      const live = await one<{ id: string }>(
-        tx,
-        `SELECT id FROM agents WHERE org_id=$1 AND role_key=$2 AND status <> 'retired'`,
-        [o.id, CEO_ROLE_KEY],
-      );
-      if (!live) {
-        const provision = await ceoProvisionEvents(tx, { pool }, o.id, o.owner_user_id, {
-          simulation: o.simulation,
-        });
-        if (provision.length) {
-          events.push(...provision);
-          report.provisioned.push(o.id);
-        }
-      } else {
-        const ceo = await loadCeo(tx, o.id);
-        if (ceo?.training.on) {
-          events.push({
-            streamId: streamId.ceo(o.id),
-            event: {
-              type: 'CeoTrainingChanged',
-              payload: {
-                orgId: o.id,
-                action: 'graduate',
-                training: { ...ceo.training, on: false, graduatedAt: clock.now().toISOString() },
-                by: o.owner_user_id,
-                reason: 'built-in CEO, no training',
-                scores: [],
-              },
-            },
-            actor: SYSTEM_ACTOR,
-            scope: orgScope(o.id),
+    // One organization's failure must never block the boot of the server: log it, go on with the next one.
+    const before = { provisioned: report.provisioned.length, graduated: report.graduated.length };
+    try {
+      await withAppendTx(pool, async (tx) => {
+        const events: AppendInput[] = [];
+        const live = await one<{ id: string }>(
+          tx,
+          `SELECT id FROM agents WHERE org_id=$1 AND role_key=$2 AND status <> 'retired'`,
+          [o.id, CEO_ROLE_KEY],
+        );
+        if (!live) {
+          const provision = await ceoProvisionEvents(tx, { pool }, o.id, o.owner_user_id, {
+            simulation: o.simulation,
           });
-          report.graduated.push(o.id);
+          if (provision.length) {
+            events.push(...provision);
+            report.provisioned.push(o.id);
+          }
+        } else {
+          const ceo = await loadCeo(tx, o.id);
+          if (ceo?.training.on) {
+            events.push({
+              streamId: streamId.ceo(o.id),
+              event: {
+                type: 'CeoTrainingChanged',
+                payload: {
+                  orgId: o.id,
+                  action: 'graduate',
+                  training: { ...ceo.training, on: false, graduatedAt: clock.now().toISOString() },
+                  by: o.owner_user_id,
+                  reason: 'built-in CEO, no training',
+                  scores: [],
+                },
+              },
+              actor: SYSTEM_ACTOR,
+              scope: orgScope(o.id),
+            });
+            // The Owner is told once: the CEO was in training and now works without it (the same append: it cannot repeat).
+            const noticeId = randomUUID();
+            const told = await one(tx, 'SELECT 1 FROM desk_items WHERE org_id=$1 AND subject_key=$2', [
+              o.id,
+              `ceo_graduated:${o.id}`,
+            ]);
+            if (!told)
+              events.push({
+                streamId: streamId.desk(noticeId),
+                event: {
+                  type: 'DeskItemCreated',
+                  payload: {
+                    deskItemId: noticeId,
+                    kind: 'alert',
+                    subkind: 'ceo_graduated',
+                    title: 'Your CEO finished training',
+                    body: 'The CEO is built into Guildwise now, so its training period is over and it works with its full permissions. Nothing else changed: its memories, policy and settings are as you left them.',
+                    options: [],
+                    blocking: false,
+                    pinned: false,
+                    affectedCardIds: [],
+                    askedBy: { kind: 'system' },
+                    addresseeUserId: o.owner_user_id,
+                    subjectKey: `ceo_graduated:${o.id}`,
+                  },
+                },
+                actor: SYSTEM_ACTOR,
+                scope: orgScope(o.id),
+              });
+            report.graduated.push(o.id);
+          }
         }
-      }
-      if (events.length) await store.append(events, { tx });
-    });
+        if (events.length) await store.append(events, { tx });
+      });
+    } catch (err) {
+      report.provisioned.length = before.provisioned;
+      report.graduated.length = before.graduated;
+      report.failed = [...(report.failed ?? []), o.id];
+      log(
+        `${CEO_BUILTIN_MIGRATION}: ERROR organization ${o.id} skipped: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
   if (report.provisioned.length || report.graduated.length)
     log(

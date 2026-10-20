@@ -9,6 +9,7 @@ import {
   type RunnerToServerOf,
   type ServerToBrowser,
   streamId,
+  summarizeCommandTexts,
   type ToolCounts,
 } from '@aom/shared';
 import { orgOwnerId, orgRoleOf } from '../auth/org-context.ts';
@@ -455,6 +456,21 @@ export class ChatRelay {
       return false;
     };
     if (!agent || !thread) return fail(CHAT_ERROR.unknownThread);
+    // Full power is the Owner's: a message whose author is not the Owner NOW (he transferred the organization while it
+    // waited in the queue) is dropped, never run on the new Owner's machine.
+    if (turn.mode === 'owner' && userId !== (await orgOwnerId(ctx.pool, turn.org_id))) {
+      await ctx.store
+        .append([
+          this.turnFinished(turn, 'dropped', 'the author is no longer the Owner of this organization'),
+        ])
+        .catch(() => {});
+      this.fail(
+        userId,
+        turn.thread_id,
+        'This message was not sent: you are no longer the Owner of this organization.',
+      );
+      return false;
+    }
     const plan = await buildChatStart(ctx, { turn, agent, thread }, { message, ...(order ? { order } : {}) });
     if (!plan.ok)
       return fail(plan.reason === 'offline' ? CHAT_ERROR.workstationOffline : CHAT_ERROR.runnerError);
@@ -633,7 +649,8 @@ export class ChatRelay {
       ...(await closePendingForTurn(tx, turn)),
     ];
     if (turn.mode === 'order' && turn.order_entry_id) {
-      const commands = [...new Set([...(turn.order_commands ?? []), ...(msg.commands ?? [])])].slice(0, 200);
+      // Only first words and counts are kept (an older runner sends the full text; it is reduced here).
+      const commands = summarizeCommandTexts([...(turn.order_commands ?? []), ...(msg.commands ?? [])]);
       events.push({
         streamId: streamId.ceo(c.orgId),
         event: {
@@ -753,9 +770,11 @@ export class ChatRelay {
     }
     if (this.byThread.has(turn.thread_id)) return;
     const msg = turn.message_id
-      ? await one(ctx.pool, 'SELECT body FROM thread_messages WHERE id=$1', [turn.message_id])
+      ? await one(ctx.pool, 'SELECT body, author_user_id FROM thread_messages WHERE id=$1', [turn.message_id])
       : undefined;
-    if (msg) await this.startCeoTurn(turn.id, userId, msg.body as string);
+    // the message keeps its author's authority: the one who decides "send" does not lend his
+    if (msg)
+      await this.startCeoTurn(turn.id, (msg.author_user_id as string | null) ?? userId, msg.body as string);
   }
 
   /** Running CEO turns of a workstation that the runner no longer holds are over (it restarted without them). */

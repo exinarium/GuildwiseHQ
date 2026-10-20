@@ -3,6 +3,7 @@ import {
   type CreateOrgGraphLinkRequest,
   type GraphOrgPayload,
   isOrgManager,
+  LOCAL_VAULT_CAPABILITY,
   type OrgGraphLinkDto,
   type OrgGraphScope,
   type OrgLinkEndpoint,
@@ -17,7 +18,13 @@ import { withAppendTx } from '../db/tx.ts';
 import { badRequest, forbidden, notFound } from '../errors.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { orgScope, userActor } from './common.ts';
-import { ensureOrgVaultIn, graphVaultFor, primaryWorkstationOf, vaultAudience } from './vaults.ts';
+import {
+  ensureOrgVaultIn,
+  graphVaultFor,
+  primaryWorkstationOf,
+  vaultAudience,
+  workstationHasLocalVault,
+} from './vaults.ts';
 
 /**
  * The organization graph, server side (docs/design/project-graphs.md section 8). The graph itself is built on the CEO's
@@ -226,12 +233,14 @@ export async function dispatchOrgGraph(ctx: Ctx, orgId: string): Promise<boolean
     const r = await one<{ id: string }>(
       ctx.pool,
       `SELECT w.id FROM workstations w WHERE w.user_id = ANY($1::uuid[]) AND w.status='active'
+          AND EXISTS (SELECT 1 FROM workstation_capabilities wc
+                       WHERE wc.workstation_id = w.id AND $3 = ANY(wc.capabilities))
         ORDER BY (w.id = $2::uuid) DESC, w.connected DESC, w.last_seen_at DESC NULLS LAST, w.paired_at LIMIT 1`,
-      [audience, await primaryWorkstationOf(ctx.pool, orgId)],
+      [audience, await primaryWorkstationOf(ctx.pool, orgId), LOCAL_VAULT_CAPABILITY],
     );
     workstationId = r?.id ?? null;
   }
-  if (!workstationId) return false;
+  if (!workstationId || !(await workstationHasLocalVault(ctx.pool, workstationId))) return false;
   // One build runs at a time. A request that arrives meanwhile marks the running one dirty (it builds again when it is
   // done, from the state of that moment), so a burst of indexed projects is two builds, not one per project.
   const running = await one<{ id: string }>(

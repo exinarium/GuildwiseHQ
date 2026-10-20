@@ -10,6 +10,7 @@ import {
   INTEGRATIONS_VERSION,
   type IntegrationKindId,
   type IpcRpcResponse,
+  LOCAL_VAULT_CAPABILITY,
   type McpAuthState,
   normalizeRemoteUrl,
   READONLY_DESIGN_CAPABILITY,
@@ -749,7 +750,7 @@ export class Runner {
 
   /** True when no agent job and no chat is running: the moment it is safe to restart into a new version. */
   isIdle(): boolean {
-    return this.supervisor.size === 0 && this.chat.size === 0;
+    return this.supervisor.size === 0 && this.chat.size === 0 && this.deployExec.inFlight() === 0;
   }
 
   /** Tells the server how this runner's self-update stands (best effort: dropped while offline, resent on welcome). */
@@ -974,6 +975,7 @@ export class Runner {
         READONLY_DESIGN_CAPABILITY,
         RUNNER_PIN_CAPABILITY,
         DELIVERY_CAPABILITY,
+        LOCAL_VAULT_CAPABILITY,
         // The local opt-in (`aom-runner ceo full-power on`), read fresh: the server shows "Full power is off" without it.
         ...(this.freshConfig().ceo.fullPower ? [CEO_FULL_POWER_CAPABILITY] : []),
       ],

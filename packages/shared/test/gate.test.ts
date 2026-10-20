@@ -10,6 +10,7 @@ const facts = (over: Partial<GateFacts> = {}): GateFacts => ({
   envRuns: {},
   checks: {},
   phaseDoneCommits: [],
+  latestMergeCommit: 'abc1234def',
   ...over,
 });
 const min = (n: number) => new Date(wed10.getTime() - n * 60_000);
@@ -63,6 +64,19 @@ describe('evaluateGate (docs/design/ceo-front-door.md 9.3)', () => {
         facts({ commit: null, checks: { regression: { id: 't1', passedAt: min(5), commit: null } } }),
       ).satisfied,
     ).toBe(false);
+  });
+
+  it('checksPassed: a test run that names no commit never vouches for another commit; ci fails closed', () => {
+    const gate: Gate = { requires: [{ checksPassed: 'regression', sameCommit: true }] };
+    const run = { regression: { id: 't1', passedAt: min(5), commit: null } };
+    // the requested commit is not the latest merge: the commit-less run says nothing about it
+    expect(evaluateGate(gate, facts({ commit: 'deadbeef00', checks: run })).satisfied).toBe(false);
+    // no latest merge known: fails closed
+    expect(evaluateGate(gate, facts({ latestMergeCommit: null, checks: run })).satisfied).toBe(false);
+    const ci: Gate = { requires: [{ checksPassed: 'ci', sameCommit: true }] };
+    const v = evaluateGate(ci, facts());
+    expect(v.satisfied).toBe(false);
+    expect(v.missing[0]).toContain('CI results are not collected');
   });
 
   it('phaseDone: the commit is the merge of a done phase', () => {

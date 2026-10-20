@@ -11,10 +11,33 @@ const quote = (w: string): string => `'${w.replace(/'/g, `'\\''`)}'`;
 export const turnDirOf = (runnerRoot: string, chatId: string): string =>
   join(runnerRoot, 'ceo-turns', chatId);
 
+/** What lives in a runner's data dir that a model must never read through a shell: keys, tokens, queued payloads, logs. */
+const PRIVATE_ENTRIES = [
+  'secrets',
+  'config.json',
+  'config.json.bak',
+  'deploy.json',
+  'keys',
+  'pairings.json',
+  'sessions.json',
+  'sync-targets.json',
+  'toolchains.json',
+  'vaults.json',
+  'status.json',
+  'outbox',
+  'outbound',
+  'active-shifts',
+  'deploys',
+  'logs',
+];
+
 /**
  * The deny floor of a full-power turn (docs/design/ceo-front-door.md section 3.3). Deny wins over the owner's own rules:
- * the runner restarts only through `aom runner restart` (a restart from inside a turn would kill it before its reply), and
- * the runner's secrets and config stay out of the model's reach.
+ * the runner restarts only through `aom runner restart` (a restart from inside a turn would kill it before its reply).
+ * The runner's secrets and config are denied to Read and Edit, and to Bash commands that NAME them (the root, the data dir,
+ * `~` and `$HOME` forms). That is a pattern floor, not a sandbox: a full-power turn runs unsandboxed as the Owner, so a
+ * command that builds the path some other way (a variable, a glob, a script) is not caught here. The protection against
+ * that is the Owner's own permission relay and the order turns' authorization, not these rules.
  */
 export function floorDenies(opts: { runnerRoots: readonly string[]; pid: number; home?: string }): string[] {
   const out = [
@@ -25,13 +48,25 @@ export function floorDenies(opts: { runnerRoots: readonly string[]; pid: number;
     `Bash(kill ${opts.pid})`,
     `Bash(kill * ${opts.pid})`,
   ];
-  const roots = new Set([...opts.runnerRoots, join(opts.home ?? homedir(), '.aom-runner')]);
-  for (const root of roots)
+  const home = opts.home ?? homedir();
+  const roots = new Set([...opts.runnerRoots, join(home, '.aom-runner')]);
+  for (const root of roots) {
     for (const tool of ['Read', 'Edit'])
       out.push(
         `${tool}(${ruleAbs(join(root, 'secrets'))}/**)`,
         `${tool}(${ruleAbs(join(root, 'config.json'))})`,
       );
+    // The same places as spelled in a shell command: absolute, `~/...` and `$HOME/...`.
+    const spellings = new Set([root]);
+    if (home.length > 1 && root.startsWith(`${home}/`)) {
+      const rest = root.slice(home.length);
+      spellings.add(`~${rest}`);
+      spellings.add(`$HOME${rest}`);
+      spellings.add(`\${HOME}${rest}`);
+    }
+    for (const spelling of spellings)
+      for (const entry of PRIVATE_ENTRIES) out.push(`Bash(*${spelling}/${entry}*)`);
+  }
   return out;
 }
 

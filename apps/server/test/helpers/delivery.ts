@@ -190,3 +190,20 @@ export async function advance(dw: DeliveryWorld, ms: number): Promise<void> {
   dw.w.t.clock.advance(ms);
   await q(`UPDATE auth_sessions SET last_seen_at=$1, expires_at='2099-01-01'`, [dw.w.t.clock.now()]);
 }
+
+/** A card of the project was merged at `commit` (a `CardFinalized` event, as the finalize flow leaves it). */
+export async function mergeLanded(dw: DeliveryWorld, commit: string, cardId?: string): Promise<string> {
+  const id = cardId ?? (await dw.w.card({ title: `Merged ${commit.slice(0, 6)}` })).id;
+  await dw.w.t.app.ctx.store.append([
+    {
+      streamId: streamId.card(id),
+      event: {
+        type: 'CardFinalized',
+        payload: { cardId: id, action: 'merge', resultRef: { mergeCommit: commit }, toStage: 'done' },
+      },
+      actor: { kind: 'system', id: null },
+      scope: { orgId: dw.orgId, projectId: dw.w.projectId, audience: 'project' } as never,
+    },
+  ]);
+  return id;
+}

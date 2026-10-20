@@ -1,5 +1,6 @@
 import {
   HEARTBEAT_SEC,
+  LOCAL_VAULT_CAPABILITY,
   type McpCall,
   normalizeRemoteUrl,
   type RunnerToServer,
@@ -667,6 +668,15 @@ export class RunnerHandlers {
         WHERE workstation_id=$1 AND type='runner.pin' AND status IN ('pending','sent')`,
       [conn.workstationId],
     );
+    // A runner without `local-vault:1` (0.1.31) does not know the graph commands: none waits for it (a capable one is asked
+    // again by the hello pass).
+    if (!(msg.capabilities ?? []).includes(LOCAL_VAULT_CAPABILITY))
+      await exec(
+        ctx.pool,
+        `UPDATE runner_commands SET status='failed', last_error='superseded'
+          WHERE workstation_id=$1 AND type IN ('graph.index','graph.update','graph.org') AND status IN ('pending','sent')`,
+        [conn.workstationId],
+      );
     // Whatever the previous connection was sent may not have arrived: it is due again on this one.
     await requeueSentCommands(ctx.pool, conn.workstationId);
     await this.matchRepos(conn);

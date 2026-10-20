@@ -114,3 +114,33 @@ export const normalizeJobKind = (kind: string): string =>
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, 40) || 'unlabelled';
+
+const COMMAND_WORD = /^[A-Za-z0-9._+-]{1,40}$/;
+const COUNTED = /^([A-Za-z0-9._+-]{1,40})\*(\d{1,6})$/;
+
+/**
+ * What an order turn reports about the Bash commands its session ran (the server never receives code-derived text): each
+ * command is reduced to its first word (a path to its last segment, leading `NAME=value` assignments skipped, anything
+ * odd to `other`) and the list becomes `word*count` entries, in the order the words first appeared. Entries that are
+ * already `word*count` are added up, so the runner and the server can both apply it. Arguments (`aom graph ...` queries,
+ * file paths) are dropped here and kept only in the runner's local audit file.
+ */
+export function summarizeCommandTexts(commands: readonly string[], maxEntries = 50): string[] {
+  const counts = new Map<string, number>();
+  const add = (word: string, n: number) => counts.set(word, (counts.get(word) ?? 0) + n);
+  for (const raw of commands) {
+    const text = String(raw ?? '').trim();
+    const counted = COUNTED.exec(text);
+    if (counted) {
+      add(counted[1] as string, Number(counted[2]));
+      continue;
+    }
+    const words = text.split(/\s+/).filter(Boolean);
+    while (words.length > 1 && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[0] as string)) words.shift();
+    let word = (words[0] ?? '').replace(/^["'(]+|["')]+$/g, '');
+    if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(word)) word = '';
+    if (word.includes('/')) word = word.split('/').filter(Boolean).pop() ?? '';
+    add(COMMAND_WORD.test(word) ? word : 'other', 1);
+  }
+  return [...counts].slice(0, maxEntries).map(([w, n]) => `${w}*${n}`);
+}

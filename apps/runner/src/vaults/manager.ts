@@ -20,6 +20,8 @@ import {
   isClean,
   isCloned,
   isPermanentSyncError,
+  reportableConflicts,
+  scrubGraphPaths,
   syncBackoffMs,
   syncVault,
   type VaultSyncResult,
@@ -287,15 +289,17 @@ export class VaultManager {
       return;
     }
     if (r.status === 'conflict') {
-      this.paused.set(vaultId, r.files);
+      // never a generated graph file name (they come from the customer's code): the sync already left them out
+      const files = reportableConflicts(r.files);
+      this.paused.set(vaultId, files);
       this.persist();
-      this.log.warn(`vault ${vaultId} has a sync conflict; syncing paused`, r.files);
-      this.opts.transport.send('vault.conflict', { vaultId, files: r.files });
+      this.log.warn(`vault ${vaultId} has a sync conflict; syncing paused`, files);
+      this.opts.transport.send('vault.conflict', { vaultId, files });
       this.opts.transport.send('vault.status', {
         vaultId,
         lastPullAt: this.lastPull.get(vaultId) ?? null,
         lastPushAt: this.lastPush.get(vaultId) ?? null,
-        error: `sync conflict in ${r.files.join(', ')}`,
+        error: `sync conflict in ${files.join(', ')}`,
         ...this.pathField(vaultId),
       });
       return;
@@ -305,7 +309,7 @@ export class VaultManager {
       vaultId,
       lastPullAt: null,
       lastPushAt: null,
-      error: r.error.slice(0, 500),
+      error: scrubGraphPaths(r.error).slice(0, 500),
       ...this.pathField(vaultId),
     });
   }

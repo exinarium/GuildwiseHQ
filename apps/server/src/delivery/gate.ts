@@ -108,27 +108,37 @@ export async function collectGateFacts(
     if (!t.commit && merge && t.created_at < merge.at) continue;
     checks[kind] = { id: t.id, passedAt: t.created_at, commit: t.commit ?? null };
   }
-  // "The commit is the merge of a done phase": the latest completed phase counts while nothing merged after it.
+  // "The commit is the merge of a done phase": the latest completed phase counts with ITS merge commit (the last merge of
+  // one of its cards, else the newest merge before it completed); the commit that was asked for never stands in for it.
   const phaseDoneCommits: GateFacts['phaseDoneCommits'] = [];
-  if (p.commit) {
-    const ph = await one(
+  const ph = await one(
+    db,
+    `SELECT ph.id, ph.completed_at FROM phases ph
+      WHERE ph.project_id=$1 AND ph.completed_at IS NOT NULL AND ph.status NOT IN ('discarded','cancelled')
+      ORDER BY ph.completed_at DESC LIMIT 1`,
+    [p.projectId],
+  );
+  if (ph) {
+    const m = await one(
       db,
-      `SELECT ph.id, ph.completed_at FROM phases ph
-        WHERE ph.project_id=$1 AND ph.completed_at IS NOT NULL AND ph.status NOT IN ('discarded','cancelled')
-        ORDER BY ph.completed_at DESC LIMIT 1`,
-      [p.projectId],
+      `SELECT payload->'resultRef'->>'mergeCommit' AS commit FROM events
+        WHERE project_id=$1 AND type='CardFinalized' AND payload->'resultRef'->>'mergeCommit' IS NOT NULL
+          AND (payload->>'cardId' IN (SELECT id::text FROM cards WHERE phase_id=$2) OR created_at <= $3)
+        ORDER BY (payload->>'cardId' IN (SELECT id::text FROM cards WHERE phase_id=$2)) DESC, seq DESC LIMIT 1`,
+      [p.projectId, ph.id, ph.completed_at],
     );
-    if (
-      ph &&
-      (!merge ||
-        merge.at <= ph.completed_at ||
-        merge.commit.startsWith(p.commit) ||
-        p.commit.startsWith(merge.commit))
-    )
-      phaseDoneCommits.push({ id: ph.id, commit: p.commit });
+    if (m?.commit) phaseDoneCommits.push({ id: ph.id, commit: m.commit });
   }
   const tz = await one(db, 'SELECT timezone FROM users WHERE id=$1', [await orgOwnerId(db, p.orgId)]);
-  return { now: p.now, timezone: tz?.timezone ?? null, commit: p.commit, envRuns, checks, phaseDoneCommits };
+  return {
+    now: p.now,
+    timezone: tz?.timezone ?? null,
+    commit: p.commit,
+    envRuns,
+    checks,
+    phaseDoneCommits,
+    latestMergeCommit: merge?.commit ?? null,
+  };
 }
 
 export interface EnvGateVerdict extends GateVerdict {

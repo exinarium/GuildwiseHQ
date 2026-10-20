@@ -67,6 +67,7 @@ export interface World {
   connectRunner(opts?: {
     hello?: boolean;
     capabilities?: string[];
+    legacyVaults?: boolean;
     maxRunEnvironments?: number;
   }): Promise<FakeRunner>;
   hire(
@@ -160,6 +161,7 @@ export async function createWorld(
           repos: [{ remoteUrl: REPO_SSH, localPath: '/tmp/toy', headBranch: 'main' }],
           runtimes: MOCK_RUNTIME,
           ...(o.capabilities ? { capabilities: o.capabilities } : {}),
+          ...(o.legacyVaults ? { legacyVaults: true } : {}),
           ...(o.maxRunEnvironments ? { maxRunEnvironments: o.maxRunEnvironments } : {}),
         });
         await r.waitFor('welcome');

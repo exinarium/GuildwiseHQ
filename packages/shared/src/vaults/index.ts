@@ -2,6 +2,13 @@ import { z } from 'zod';
 import { VaultEventKind, VaultStorage } from '../events/vault.ts';
 import { slugify } from '../ids.ts';
 
+/**
+ * Announced in `hello.capabilities` by a runner that understands local vaults (`storage: 'local'`, an empty `remoteUrl`) and
+ * the project graph commands (`graph.index`, `graph.update`, `graph.org`). The server sends neither to a runner without it:
+ * 0.1.31 rejects a `vault.configure` whose `remoteUrl` is empty, which would fail the whole command.
+ */
+export const LOCAL_VAULT_CAPABILITY = 'local-vault:1';
+
 /** `vault.configure`: the full set of vaults one workstation syncs (replace semantics) plus resume requests. */
 /** Vault ids name a directory on the runner: plain ids only. */
 export const VaultIdSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/, 'invalid vault id');

@@ -179,6 +179,21 @@ describe('the recipe lint (docs section 9.4)', () => {
     expect(mk(', releasedBy: ceo')).toEqual([]);
   });
 
+  it('warns that a ci gate cannot be satisfied yet (nothing collects CI results)', () => {
+    const r = parseRecipe(
+      'version: 1\nenvironments:\n  - { name: p, target: prod, script: scripts/p.sh, gate: { requires: [{ checksPassed: ci }] } }\n',
+    );
+    if (!r.ok) throw new Error(r.error);
+    const l = lintRecipe({
+      recipe: r.recipe,
+      files: [{ path: 'scripts/p.sh', mode: '755' }],
+      targets: [{ name: 'prod', production: true }],
+      presets: [],
+    });
+    expect(l).toEqual([expect.objectContaining({ level: 'warn', code: 'ci_unsatisfiable', env: 'p' })]);
+    expect(lintHasErrors(l)).toBe(false);
+  });
+
   it('finds secrets in content without returning them', () => {
     expect(findSecret('-----BEGIN OPENSSH PRIVATE KEY-----\nabc')).toBe('a private key');
     expect(findSecret('export TOKEN=ghp_abcdefghijklmnopqrstuvwxyz0123456789')).toBe('a GitHub token');

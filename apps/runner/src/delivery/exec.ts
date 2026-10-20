@@ -16,7 +16,7 @@ import { type Logger, nullLogger } from '../log.ts';
 import type { RunnerPaths } from '../paths.ts';
 import { probeHttp, probeTcp } from '../runs/health.ts';
 import { signalGroup } from '../runs/proc.ts';
-import { redact, registerSecret } from '../secrets/redact.ts';
+import { redactSecrets, registerSecret } from '../secrets/redact.ts';
 import {
   type Bundle,
   BundleError,
@@ -105,6 +105,11 @@ export class DeployExecutor {
     this.log = deps.log ?? nullLogger;
   }
 
+  /** Deploys running in this process: the runner does not restart into a new version while one is in flight. */
+  inFlight(): number {
+    return this.inflight.size;
+  }
+
   private dir(runId: string): string {
     return join(this.deps.paths.root, 'deploys', runId);
   }
@@ -126,6 +131,22 @@ export class DeployExecutor {
           summary: 'this deploy ran before; its result file is unreadable',
         });
       }
+    }
+    // A marker without a result: an earlier process started this deploy and died with it. The script may have changed things
+    // halfway, so it is never run again on a redelivery: the answer is `failed: interrupted` (the Owner decides what next).
+    if (existsSync(join(this.dir(p.runId), 'started.json'))) {
+      const r: DeployExecResult = {
+        outcome: 'failed',
+        logTail: '',
+        durationMs: 0,
+        summary: 'interrupted: the runner restarted while this deploy was running; it was not run again',
+      };
+      try {
+        writeFileSync(result, JSON.stringify(r), { mode: 0o600 });
+      } catch {
+        // the answer still goes to the server
+      }
+      return Promise.resolve(r);
     }
     const t = this.execute(p)
       .catch(
@@ -280,6 +301,16 @@ export class DeployExecutor {
       host: p.target.host ?? '',
     };
     try {
+      // Before anything is spawned: a restart from here on must not run the script a second time.
+      writeFileSync(
+        join(work, 'started.json'),
+        JSON.stringify({
+          runId: p.runId,
+          startedAt: (this.deps.now?.() ?? new Date()).toISOString(),
+          pid: process.pid,
+        }),
+        { mode: 0o600 },
+      );
       this.deps.send('deploy.progress', { runId: p.runId, phase: 'started' });
       const logFile = join(this.deps.paths.logs, 'deploys', `${p.runId}.log`);
       mkdirSync(join(this.deps.paths.logs, 'deploys'), { recursive: true });
@@ -418,7 +449,7 @@ export class DeployExecutor {
         stdio: ['ignore', 'pipe', 'pipe'],
       });
       const line = (raw: string): void => {
-        const text = redact(raw);
+        const text = redactSecrets(raw);
         const m = /^AOM-DEPLOY\s+(\{.*\})\s*$/.exec(text);
         if (m) {
           try {
