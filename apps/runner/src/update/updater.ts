@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import type { RunnerUpdateState } from '@aom/shared';
+import type { RunnerUpdateCheckResult, RunnerUpdateState } from '@aom/shared';
 import type { Logger } from '../log.ts';
 import {
   type Fetcher,
@@ -90,6 +90,8 @@ export class Updater {
   private connected = false;
   private checking: Promise<UpdateStatus> | null = null;
   private waitingFor: string | null = null;
+  /** Why the last check could not read the release (null: it could). */
+  private lastCheckError: string | null = null;
   /** Safe mode: the version the platform team pinned this workstation to (null: follow the latest release). */
   private pin: string | null = null;
   private status: UpdateStatus = {
@@ -163,6 +165,53 @@ export class Updater {
       this.checking = null;
     });
     return this.checking;
+  }
+
+  /**
+   * "Check for updates" (the `runner.update.check` command): the same check as the daily timer, now. It goes through the
+   * same pipeline (download, verify, wait for idle, switch), never restarts a busy runner, and respects the kill switches.
+   * A check or download already running is joined, not repeated. The answer says what was found.
+   */
+  async checkNow(): Promise<RunnerUpdateCheckResult> {
+    const { log } = this.opts;
+    const result = await this.runCheckNow();
+    log.info(
+      `update check on request: ${result.outcome}${result.version ? ` ${result.version}` : ''}${result.detail ? ` (${result.detail})` : ''}`,
+    );
+    return result;
+  }
+
+  private async runCheckNow(): Promise<RunnerUpdateCheckResult> {
+    const out = (
+      outcome: RunnerUpdateCheckResult['outcome'],
+      version: string | null,
+      detail: string | null,
+    ): RunnerUpdateCheckResult => ({ outcome, version, detail: detail ? detail.slice(0, 300) : null });
+    if (this.stopped || this.status.state === 'unmanaged' || !this.opts.layout)
+      return out('disabled', null, this.status.detail ?? this.unmanagedReason());
+    if (!this.opts.serverUrl()) return out('failed', null, 'this runner has no server to ask');
+    let status: UpdateStatus;
+    try {
+      status = await this.check();
+    } catch (err) {
+      return out('failed', null, String(err));
+    }
+    if (this.lastCheckError) return out('failed', null, this.lastCheckError);
+    const version = status.latestVersion;
+    switch (status.state) {
+      case 'up_to_date':
+        return out('up_to_date', version ?? this.opts.version, status.detail);
+      case 'pending':
+      case 'updating':
+        return out('update_found', version, status.detail);
+      case 'paused':
+        return out('paused', version, status.detail);
+      case 'unmanaged':
+        return out('disabled', null, status.detail);
+      case 'failed':
+      case 'rolled_back':
+        return out('failed', version, status.detail);
+    }
   }
 
   private unmanagedReason(): string | null {
@@ -295,12 +344,14 @@ export class Updater {
   private async doCheck(): Promise<UpdateStatus> {
     const { layout, version, log } = this.opts;
     const server = this.opts.serverUrl();
+    this.lastCheckError = null;
     if (!layout || this.status.state === 'unmanaged' || !server) return this.status;
     let release: Awaited<ReturnType<typeof fetchRelease>>;
     try {
       release = await fetchRelease(server, this.f, undefined, this.pin ?? undefined);
     } catch (err) {
       log.warn(`update check: could not read the release from ${server}: ${String(err)}`);
+      this.lastCheckError = `could not read the release from the server: ${err instanceof Error ? err.message : String(err)}`;
       return this.status;
     }
     const checkedAt = new Date(this.now()).toISOString();

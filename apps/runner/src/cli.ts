@@ -223,6 +223,10 @@ async function start(opts: { dataDir?: string; mock?: boolean }): Promise<void> 
       pendingPin = v;
       updater?.setPin(v);
     },
+    onUpdateCheck: async () =>
+      updater
+        ? updater.checkNow()
+        : { outcome: 'disabled', version: null, detail: 'self-update is off in this process' },
   });
   // Unhandled errors go to the server (sanitised) so the platform team can see them; see health/runner-error.ts.
   const removeErrorHandlers = installErrorHandlers({

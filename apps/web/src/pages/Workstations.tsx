@@ -33,6 +33,7 @@ import {
 import { signInProblems, WorkstationSignIns } from '../components/WorkstationSignIns.tsx';
 import { AddWorkstationWizard } from '../components/workstations/AddWorkstationWizard.tsx';
 import { AgentToolchains } from '../components/workstations/AgentToolchains.tsx';
+import { CheckForUpdates } from '../components/workstations/CheckForUpdates.tsx';
 import { ClaudeAccountsTable } from '../components/workstations/ClaudeAccountsTable.tsx';
 import { CloudWorkstations } from '../components/workstations/CloudWorkstations.tsx';
 import { OrgSourceFolder } from '../components/workstations/OrgSourceFolder.tsx';
@@ -243,6 +244,7 @@ export function WorkstationCard({
             </span>
           </button>
           <div className="flex items-center gap-3">
+            {!admin && <CheckForUpdates w={w} />}
             <RunnerUpdateBadge update={w.runnerUpdate} />
             {w.runnerPin && (
               <Badge

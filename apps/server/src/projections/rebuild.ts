@@ -127,7 +127,7 @@ export async function rebuildProjections(
     );
     await exec(
       tx,
-      'CREATE TEMP TABLE _save_ws ON COMMIT DROP AS SELECT id, connected, last_seen_at, runtimes, hostname, platform, runner_version, runner_update, org_folders, org_folder_errors, org_folder_candidates, org_folders_checked_at, mcp_servers, mcp_servers_checked_at, toolchains, toolchains_checked_at, jira_status, jira_checked_at, claude_account_ensure FROM workstations',
+      'CREATE TEMP TABLE _save_ws ON COMMIT DROP AS SELECT id, connected, last_seen_at, runtimes, hostname, platform, runner_version, runner_update, runner_update_check, org_folders, org_folder_errors, org_folder_candidates, org_folders_checked_at, mcp_servers, mcp_servers_checked_at, toolchains, toolchains_checked_at, jira_status, jira_checked_at, claude_account_ensure FROM workstations',
     );
     // Live claims keep the lease the heartbeats extended: replay alone would reset it to `claimed_at + 1h`, which
     // for a long shift is already in the past and would make the reaper release a claim that is still working.
@@ -170,7 +170,7 @@ export async function rebuildProjections(
     await exec(
       tx,
       `UPDATE workstations w SET connected = s.connected, last_seen_at = s.last_seen_at, runtimes = s.runtimes,
-            hostname = s.hostname, platform = s.platform, runner_version = s.runner_version, runner_update = s.runner_update,
+            hostname = s.hostname, platform = s.platform, runner_version = s.runner_version, runner_update = s.runner_update, runner_update_check = s.runner_update_check,
             org_folders = s.org_folders, org_folder_errors = s.org_folder_errors,
             org_folder_candidates = s.org_folder_candidates, org_folders_checked_at = s.org_folders_checked_at,
             mcp_servers = s.mcp_servers, mcp_servers_checked_at = s.mcp_servers_checked_at,

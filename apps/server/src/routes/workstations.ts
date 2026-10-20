@@ -17,6 +17,7 @@ import { requestOrgFolder } from '../commands/org-folders.ts';
 import { requestGitSsh } from '../commands/repo-access.ts';
 import { requestRepoSync } from '../commands/repo-sync.ts';
 import { requestToolchainRemove } from '../commands/toolchains.ts';
+import { requestUpdateCheck } from '../commands/update-check.ts';
 import {
   createPairingCode,
   pairRunner,
@@ -108,6 +109,17 @@ export function workstationRoutes(ctx: Ctx) {
         await requestToolchainRemove(ctx, s.user, req.params.id, req.body);
         reply.code(202);
         return { ok: true };
+      },
+    );
+
+    /** "Check for updates": the runner runs its updater's check now (once a minute per workstation; the answer shows on the workstation). */
+    app.post(
+      '/api/workstations/:id/update-check',
+      { schema: { params: IdParamsSchema } },
+      async (req, reply) => {
+        const s = await requireUser(ctx, req);
+        reply.code(202);
+        return requestUpdateCheck(ctx, s.user, req.params.id);
       },
     );
 

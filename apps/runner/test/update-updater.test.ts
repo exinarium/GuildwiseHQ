@@ -334,3 +334,91 @@ describe('safe mode: a runner version pin from the platform team', () => {
     expect(readPending(u.layout)).toMatchObject({ from: '0.1.3', to: '0.1.5' });
   });
 });
+
+describe('checkNow ("Check for updates" in the web app)', () => {
+  it('says up to date when the server offers the same version', async () => {
+    const t = setup({ server: { version: '0.1.0' } });
+    expect(await t.updater.checkNow()).toMatchObject({ outcome: 'up_to_date', version: '0.1.0' });
+    expect(t.stage).not.toHaveBeenCalled();
+    expect(quiet.info).toHaveBeenCalledWith(expect.stringContaining('update check on request: up_to_date'));
+  });
+
+  it('finds a newer version and reuses the download path, then waits for idle before switching', async () => {
+    let idle = false;
+    const t = setup({ idle: () => idle });
+    expect(await t.updater.checkNow()).toMatchObject({ outcome: 'update_found', version: '0.1.1' });
+    expect(t.stage).toHaveBeenCalledOnce();
+    expect(t.updater.current.state).toBe('pending');
+    await new Promise((r) => setTimeout(r, 40));
+    expect(t.restart).not.toHaveBeenCalled(); // busy: no forced restart
+    idle = true;
+    await until(() => t.restart.mock.calls.length > 0);
+    expect(readPending(t.layout)).toMatchObject({ from: '0.1.0', to: '0.1.1' });
+  });
+
+  it('joins a check or download already running instead of starting another', async () => {
+    let release: (() => void) | undefined;
+    let installRoot = '';
+    const t = setup({
+      stage: vi.fn(async (_layout, r: { version: string }) => {
+        await new Promise<void>((done) => {
+          release = done;
+        });
+        return addVersion(installRoot, r.version);
+      }) as UpdaterOptions['stage'],
+      idle: () => false,
+    });
+    installRoot = t.root;
+    const a = t.updater.checkNow();
+    const b = t.updater.checkNow();
+    await until(() => release !== undefined);
+    expect(t.stage).toHaveBeenCalledOnce();
+    release?.();
+    const [ra, rb] = await Promise.all([a, b]);
+    expect(ra).toEqual(rb);
+    expect(ra.outcome).toBe('update_found');
+    expect(t.stage).toHaveBeenCalledOnce();
+  });
+
+  it('reports paused and downloads nothing while the platform kill switch is on', async () => {
+    const t = setup({ server: { version: '0.1.1', paused: true } });
+    expect(await t.updater.checkNow()).toMatchObject({ outcome: 'paused', version: '0.1.1' });
+    expect(t.stage).not.toHaveBeenCalled();
+  });
+
+  it('reports disabled when AOM_RUNNER_AUTO_UPDATE=0 or the install is not managed', async () => {
+    const { layout } = makeInstall('0.1.0');
+    const off = new Updater({
+      layout,
+      version: '0.1.0',
+      serverUrl: () => 'http://server.test',
+      isIdle: () => true,
+      restart: vi.fn(),
+      report: vi.fn(),
+      log: quiet,
+      mode: 'systemd',
+      disabled: true,
+    });
+    off.start();
+    expect(await off.checkNow()).toMatchObject({
+      outcome: 'disabled',
+      detail: expect.stringMatching(/AOM_RUNNER_AUTO_UPDATE/),
+    });
+    const hand = setup({ mode: null });
+    hand.updater.start();
+    expect((await hand.updater.checkNow()).outcome).toBe('disabled');
+  });
+
+  it('reports failed when the server cannot be reached or the download fails', async () => {
+    const down = setup({ server: 'down' });
+    expect(await down.updater.checkNow()).toMatchObject({ outcome: 'failed' });
+    const bad = setup({
+      stage: vi.fn(async () => {
+        throw new ChecksumMismatchError('a'.repeat(64), 'b'.repeat(64));
+      }),
+    });
+    const r = await bad.updater.checkNow();
+    expect(r.outcome).toBe('failed');
+    expect(r.detail).toMatch(/checksum/);
+  });
+});
