@@ -9,6 +9,8 @@ import {
   type ProjectDetailResponse,
   type ProjectDto,
   type RoleCatalogueEntrySchema,
+  RUNNER_UPDATE_CHECK_CAPABILITY,
+  RunnerUpdateCheckResultSchema,
   SHIFT_LIMIT_CAPABILITY,
   StopLossSettingsSchema,
   UNLIMITED_SHIFTS,
@@ -19,6 +21,7 @@ import { orgRoleOf, orgSuspended } from '../auth/org-context.ts';
 import { pendingConversionOf } from '../commands/convert.ts';
 import { hygieneDtos } from '../commands/hygiene.ts';
 import { mcpServerCandidates } from '../commands/mcp-servers.ts';
+import { UPDATE_CHECK_MIN_INTERVAL_MS, UPDATE_CHECK_TIMEOUT_MS } from '../commands/update-check.ts';
 import type { Ctx } from '../context.ts';
 import { budgetDto, canEditBudget, monthSpendByProject, orgCostCtx, seesAmounts } from '../costs/index.ts';
 import { iso, one, type Row, rows } from '../db/sql.ts';
@@ -393,6 +396,28 @@ function shiftsDto(
   };
 }
 
+function updateCheckDto(
+  stored: { requestedAt?: string; result?: { at?: string } & Record<string, unknown> } | null,
+  supported: boolean | null,
+  now: Date,
+): NonNullable<WorkstationDto['updateCheck']> {
+  const requestedAt = stored?.requestedAt ?? null;
+  const parsed = stored?.result ? RunnerUpdateCheckResultSchema.safeParse(stored.result) : null;
+  const at = typeof stored?.result?.at === 'string' ? stored.result.at : null;
+  const result = parsed?.success && at ? { ...parsed.data, at } : null;
+  const answered = !!result && !!requestedAt && result.at >= requestedAt;
+  const age = requestedAt ? now.getTime() - Date.parse(requestedAt) : 0;
+  return {
+    supported,
+    state: !requestedAt || answered ? 'idle' : age > UPDATE_CHECK_TIMEOUT_MS ? 'timed_out' : 'checking',
+    requestedAt,
+    nextAllowedAt: requestedAt
+      ? new Date(Date.parse(requestedAt) + UPDATE_CHECK_MIN_INTERVAL_MS).toISOString()
+      : null,
+    result,
+  };
+}
+
 export async function workstationDtos(
   ctx: Ctx,
   where: string,
@@ -497,6 +522,13 @@ export async function workstationDtos(
     hostname: w.hostname,
     runnerVersion: w.runner_version,
     runnerUpdate: w.runner_update ?? null,
+    updateCheck: updateCheckDto(
+      w.runner_update_check,
+      caps.get(w.id)
+        ? ((caps.get(w.id)?.capabilities ?? []) as string[]).includes(RUNNER_UPDATE_CHECK_CAPABILITY)
+        : null,
+      ctx.clock.now(),
+    ),
     runnerPin: pins.get(w.id) ?? null,
     platformPauses: paused.get(w.id) ?? 0,
     status: w.status,

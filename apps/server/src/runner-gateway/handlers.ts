@@ -68,6 +68,7 @@ import { applyTargetSecretResult } from '../commands/target-secrets.ts';
 import { proposeSuites, recordSuiteResult, suitesFor } from '../commands/test-environments.ts';
 import { applyToolchainsReport } from '../commands/toolchains.ts';
 import { transcriptStoreRpc } from '../commands/transcripts.ts';
+import { applyUpdateCheckResult } from '../commands/update-check.ts';
 import {
   applyVaultConflict,
   ensureProjectVaultsForWorkstation,
@@ -426,6 +427,10 @@ export class RunnerHandlers {
             msg.result,
             msg.error,
           );
+        } else if (cmd?.type === 'runner.update.check') {
+          // Terminal: the outcome (up to date, found, paused, disabled, failed) is stored for the Workstations page.
+          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+          await applyUpdateCheckResult(this.ctx, conn.workstationId, msg.ok, msg.result, msg.error);
         } else if (cmd?.type === 'rights.verify') {
           // Terminal. A failed or unreadable answer is kept on the command so the Workstations page can show it.
           const problem = await applyRightsResult(
