@@ -9,10 +9,12 @@ import {
   ClaudeAccountEnsurePayloadSchema,
   ClaudeAccountInfoSchema,
 } from '../claude/accounts.ts';
+import { DeployProbePayloadSchema } from '../delivery/probe.ts';
 import {
   DeployExecPayloadSchema,
   DeploySecretSetPayloadSchema,
   RecipeInspectPayloadSchema,
+  RecipeWritePayloadSchema,
 } from '../delivery/protocol.ts';
 import {
   EnvEnsurePayloadSchema,
@@ -763,6 +765,8 @@ export const RunnerCommandNameSchema = z.enum([
   'recipe.inspect',
   'deploy.exec',
   'deploy.secret.set',
+  'deploy.probe',
+  'recipe.write',
   'claude.account.ensure',
 ]);
 export type RunnerCommandName = z.infer<typeof RunnerCommandNameSchema>;
@@ -835,6 +839,9 @@ export const CommandPayloadSchemas = {
   'recipe.inspect': RecipeInspectPayloadSchema,
   'deploy.exec': DeployExecPayloadSchema,
   'deploy.secret.set': DeploySecretSetPayloadSchema,
+  /** Guided deploy setup (docs/design/deploy-run-ux-design.md): a read-only probe of Docker / a server, and writing the generated `delivery/` files. */
+  'deploy.probe': DeployProbePayloadSchema,
+  'recipe.write': RecipeWritePayloadSchema,
 } as const;
 
 /** Announced in `hello.capabilities`-style lists by runners that apply a version pin (`runner.pin`, `welcome.runnerPin`). */

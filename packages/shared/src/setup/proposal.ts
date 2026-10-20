@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { DeliverySetupSchema } from '../delivery/setup.ts';
 import { RunPlanSchema } from '../runs/plan.ts';
 
 /**
@@ -53,8 +54,8 @@ export const SetupProposalSchema = z
     area: SetupAreaSchema,
     /** `area: run`: the whole proposed run plan. */
     run: RunPlanSchema.optional(),
-    /** `area: deploy` (v1b): the proposed delivery setup. Typed there; opaque to the envelope. */
-    deploy: z.record(z.string(), z.unknown()).optional(),
+    /** `area: deploy`: the proposed delivery setup (checked like any setup: strict values, plain-words shape problems). */
+    deploy: DeliverySetupSchema.optional(),
     items: z.array(ProposalItemSchema).max(300).default([]),
     questions: z.array(ProposalQuestionSchema).max(30).default([]),
     secretsNeeded: z.array(z.string().regex(SECRET_NAME_RE)).max(30).default([]),

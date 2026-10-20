@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   checkPointer,
   itemConfidence,
+  localAdoptEnv,
   parsePointer,
   resolvePointer,
   SetupProposalSchema,
@@ -84,8 +85,39 @@ describe('SetupProposalSchema', () => {
     ).toBe(false);
   });
 
-  it('a deploy proposal carries an opaque setup (typed in v1b)', () => {
-    expect(SetupProposalSchema.safeParse({ area: 'deploy', deploy: { version: 1 } }).success).toBe(true);
+  it('a deploy proposal carries a typed delivery setup; pointers into it are checked', () => {
+    const env = localAdoptEnv({
+      name: 'uat',
+      label: 'Test copy',
+      target: 'aom-uat',
+      composeFile: '~/app/docker-compose.yml',
+      service: 'app',
+      imageName: 'app',
+    });
+    const ok = SetupProposalSchema.safeParse({
+      area: 'deploy',
+      deploy: { environments: [env] },
+      items: [{ path: '/environments/0/app/service', confidence: 'guessed' }],
+      questions: [
+        { path: '/environments/0/app/service', question: 'Which part is your app?', options: ['app', 'web'] },
+      ],
+    });
+    expect(ok.success).toBe(true);
+    expect(SetupProposalSchema.safeParse({ area: 'deploy', deploy: { version: 1 } }).success).toBe(false);
+    expect(
+      SetupProposalSchema.safeParse({
+        area: 'deploy',
+        deploy: { environments: [env] },
+        items: [{ path: '/environments/3/app', confidence: 'found' }],
+      }).success,
+    ).toBe(false);
+    // a value that breaks the strict character sets never gets that far
+    expect(
+      SetupProposalSchema.safeParse({
+        area: 'deploy',
+        deploy: { environments: [{ ...env, app: { ...env.app, service: 'a; rm -rf /' } }] },
+      }).success,
+    ).toBe(false);
   });
 });
 

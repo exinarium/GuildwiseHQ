@@ -11,7 +11,11 @@ import { isSafeGitRef } from '../safe.ts';
 // ------------------------------------------------------------------------------------------- runner-owned branches
 
 /** Branch name prefixes the runner creates for itself (saved work, conflict attempts, integration branches). */
-export const RUNNER_OWNED_BRANCH_PREFIXES = ['guildwise/saved-work/', 'conflict/', 'aom-integration/'] as const;
+export const RUNNER_OWNED_BRANCH_PREFIXES = [
+  'guildwise/saved-work/',
+  'conflict/',
+  'aom-integration/',
+] as const;
 /** Agent card branches (the default branch prefix; a project can choose another one). */
 export const CARD_BRANCH_PREFIX = 'aom/';
 

@@ -51,10 +51,57 @@ export const RecipeInspectResultSchema = z.union([
     parseError: z.string().max(1000).optional(),
     /** The runner's own findings: secrets, a missing or non-executable script. The server adds the checks it can make. */
     lint: z.array(z.unknown()).max(100),
+    /** `delivery/setup.json` when the bundle has a valid one (the guided setup): the server compiles it to find hand-edited scripts. */
+    setup: z.unknown().optional(),
   }),
   z.object({ ok: z.literal(false), error: z.string().max(500) }),
 ]);
 export type RecipeInspectResult = z.infer<typeof RecipeInspectResultSchema>;
+
+/**
+ * `recipe.write` (guided deploy setup): replace `<folder>/delivery/` of the project vault with generated files in one commit.
+ * Not an envelope command: nothing in it is secret (the runner refuses a file the secret scan flags). `keep` names files of the
+ * current `delivery/` that stay as they are (scripts of environments in custom mode). `expectedHash` is the content hash of
+ * `files` that the preview showed; a mismatch refuses the write.
+ */
+export const RecipeWriteFileSchema = z.object({
+  path: z.string().min(1).max(200),
+  mode: z.enum(['755', '644']),
+  content: z.string().max(200_000),
+});
+export const RecipeWritePayloadSchema = z.object({
+  projectId: z.uuid(),
+  vault: DeployVaultRefSchema,
+  files: z.array(RecipeWriteFileSchema).min(1).max(40),
+  keep: z.array(z.string().min(1).max(200)).max(20).default([]),
+  commitMessage: z.string().min(1).max(200),
+  expectedHash: z.string().length(64),
+  setupHash: z.string().length(64),
+});
+export type RecipeWritePayload = z.infer<typeof RecipeWritePayloadSchema>;
+
+export const RecipeWriteResultSchema = z.union([
+  z.object({
+    ok: z.literal(true),
+    committed: z.boolean(),
+    pushed: z.boolean(),
+    vaultCommit: z.string().nullable(),
+    /** What `delivery/` holds now (inspected after the write). */
+    inspected: RecipeInspectResultSchema,
+  }),
+  z.object({ ok: z.literal(false), error: z.string().max(500) }),
+]);
+export type RecipeWriteResult = z.infer<typeof RecipeWriteResultSchema>;
+
+/** `aom deploy probe` (DevOps in a scan): the same fixed probe, answered on the workstation. */
+export const DeployProbeParamsSchema = z.object({
+  local: z.boolean().optional(),
+  sshHosts: z.boolean().optional(),
+  host: z.string().max(64).optional(),
+  composeFile: z.array(z.string().max(300)).max(10).optional(),
+  dir: z.array(z.string().max(300)).max(10).optional(),
+  url: z.array(z.string().max(300)).max(10).optional(),
+});
 
 export const DeployExecPayloadSchema = z.object({
   runId: z.uuid(),

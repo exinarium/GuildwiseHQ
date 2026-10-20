@@ -197,7 +197,8 @@ export interface LintItem {
     | 'unknown_env_in_gate'
     | 'unknown_repo'
     | 'dry_run_missing'
-    | 'ci_unsatisfiable';
+    | 'ci_unsatisfiable'
+    | 'hand_edited';
   message: string;
   env?: string;
   path?: string;

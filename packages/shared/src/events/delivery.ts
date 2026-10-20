@@ -47,6 +47,9 @@ export const deliveryEvents = [
         .max(500)
         .default([]),
       workstationId: Id.optional(),
+      /** The guided setup in `delivery/setup.json` (when valid) and the environments whose script differs from what it compiles to. */
+      setup: z.unknown().optional(),
+      handEdited: z.array(z.string().max(40)).max(12).optional(),
     }),
   ),
   /** What was observed differs from what the Owner approved: runs are refused until it is approved again. */
