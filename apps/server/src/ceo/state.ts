@@ -9,6 +9,7 @@ import {
   DEFAULT_CEO_SETTINGS,
 } from '@aom/shared';
 import { one, type Queryable } from '../db/sql.ts';
+import { mainUsable } from '../dispatcher/accounts.ts';
 import { wsServesOrgSql } from '../simulation/fit.ts';
 
 export const ONLINE_WINDOW_MS = 45_000;
@@ -106,7 +107,8 @@ export async function ceoReachable(db: Queryable, orgId: string, now: Date): Pro
   const rt = (a.runtimes as Array<{ id: string; available: boolean; sandbox?: string }> | null)?.find(
     (x) => x.id === a.runtime,
   );
-  if (!rt?.available)
+  // The CEO always runs on the workstation's main Claude account.
+  if (!rt || !mainUsable(a.runtimes, a.runtime, now))
     return {
       ok: false,
       reason: `the ${a.runtime} runtime on ${a.ws_name} is not available (sign-in?)`,

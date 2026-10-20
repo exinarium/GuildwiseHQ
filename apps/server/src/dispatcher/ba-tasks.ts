@@ -4,6 +4,7 @@ import {
   BA_TASK_MAX_SHIFT_MINUTES,
   BA_TASK_STALL_MS,
   BATCH_MAX_IN_FLIGHT,
+  MAIN_ACCOUNT,
   streamId,
 } from '@aom/shared';
 import { endBaTaskShift, runBaTaskFallback } from '../commands/ba-tasks.ts';
@@ -14,6 +15,7 @@ import { one, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { buildBaTaskShiftStart } from '../runner-gateway/ba-task-brief.ts';
 import { wsServesOrgSql } from '../simulation/fit.ts';
+import { accountFor, loadProjectAccounts } from './accounts.ts';
 import { projectHeldSql } from './project-hold.ts';
 
 const ONLINE_WINDOW_MS = 45_000;
@@ -122,12 +124,16 @@ export async function baTaskPass(
       });
       continue;
     }
+    // Claude account: a task about one ticket runs on its project's account; a task without a card uses main.
+    let setting = null;
+    if (t.card_id) {
+      const pid = await cardProject(ctx, t.card_id, t.project_id);
+      setting = (await loadProjectAccounts(ctx.pool, [pid])).get(pid) ?? null;
+    }
     for (const a of bas) {
-      const rt = (a.runtimes as Array<{ id: string; available: boolean }> | null)?.find(
-        (x) => x.id === a.runtime,
-      );
+      const account = accountFor(setting, a.runtimes, a.runtime, now);
       const reachable =
-        a.connected && a.last_seen_at && new Date(a.last_seen_at) > onlineSince && rt?.available === true;
+        a.connected && a.last_seen_at && new Date(a.last_seen_at) > onlineSince && account !== null;
       if (!reachable || busy.has(a.id) || skipAgent(a.id) || workstationFull(a.ws_id)) continue;
       const conn = ctx.services.runners.get(a.ws_id);
       if (!conn || !conn.reconciled) continue;
@@ -149,7 +155,13 @@ export async function baTaskPass(
               streamId: streamId.baTask(t.id),
               event: {
                 type: 'BaTaskDispatched',
-                payload: { taskId: t.id, shiftId, agentId: a.id, workstationId: a.ws_id },
+                payload: {
+                  taskId: t.id,
+                  shiftId,
+                  agentId: a.id,
+                  workstationId: a.ws_id,
+                  ...(account && account.key !== MAIN_ACCOUNT ? { accountKey: account.key } : {}),
+                },
               },
               actor: SYSTEM_ACTOR,
               scope: t.project_id
@@ -171,6 +183,12 @@ export async function baTaskPass(
     }
   }
   return started;
+}
+
+/** The project of the ticket a BA task is about (the task's own project when the card is gone). */
+async function cardProject(ctx: Ctx, cardId: string, fallback: string): Promise<string> {
+  const c = await one(ctx.pool, 'SELECT project_id FROM cards WHERE id=$1', [cardId]);
+  return c?.project_id ?? fallback;
 }
 
 /** BA task shifts the runner never reported on (a lost connection) end after their maximum duration plus slack. */

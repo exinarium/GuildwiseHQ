@@ -1,4 +1,4 @@
-import type { ProjectDto } from '@aom/shared';
+import { accountUsable, MAIN_ACCOUNT, type ProjectDto } from '@aom/shared';
 import type { Ctx } from '../context.ts';
 import { type Row, rows } from '../db/sql.ts';
 import { wsServesOrgSql } from '../simulation/fit.ts';
@@ -15,8 +15,15 @@ interface RuntimeRow {
 /** The workstation's Claude runtime is limited right now (`limitedUntil` still ahead), else null. */
 export function activeUsageLimit(runtimes: unknown, runtime: string, now: Date): RuntimeRow | null {
   const rt = (Array.isArray(runtimes) ? (runtimes as RuntimeRow[]) : []).find((r) => r?.id === runtime);
-  if (!rt || rt.usage !== 'limited' || !rt.limitedUntil) return null;
-  return new Date(rt.limitedUntil).getTime() > now.getTime() ? rt : null;
+  if (!rt) return null;
+  // The rule lives in the shared resolver (docs/design/claude-accounts.md): the runtime's top-level fields describe main.
+  const view = {
+    available: true,
+    auth: 'ok' as const,
+    usage: rt.usage as 'ok' | 'limited' | undefined,
+    limitedUntil: rt.limitedUntil,
+  };
+  return accountUsable(view, MAIN_ACCOUNT, now) ? null : rt;
 }
 
 /**

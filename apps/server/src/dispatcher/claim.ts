@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { branchName, getStage, streamId } from '@aom/shared';
+import { branchName, getStage, MAIN_ACCOUNT, streamId } from '@aom/shared';
 import { loadWorkflowById } from '../catalogue/loader.ts';
 import { projectScope, SYSTEM_ACTOR } from '../commands/common.ts';
 import { cardUsage, limitReached, stopLossBudget, stopLossEvents } from '../commands/stop-loss.ts';
@@ -40,6 +40,8 @@ export interface ClaimResult {
   /** Merge the latest main branch first (before the worktree is created): see `ShiftStart.prepare.syncMain`. */
   syncMain?: { mainBranch?: string; workingBranch: string };
   maxShiftMinutes: number;
+  /** The Claude account the shift runs on; absent = main (docs/design/claude-accounts.md). */
+  accountKey?: string;
 }
 
 export interface ClaimArgs {
@@ -47,6 +49,8 @@ export interface ClaimArgs {
   agentId: string;
   expectedStage: string;
   overflow?: boolean;
+  /** The Claude account chosen for this shift (`main` or absent: the workstation's main account). */
+  accountKey?: string;
 }
 
 /**
@@ -56,6 +60,7 @@ export interface ClaimArgs {
  */
 export async function claim(ctx: Ctx, args: ClaimArgs): Promise<ClaimResult | null> {
   const overflow = args.overflow ?? false;
+  const accountKey = args.accountKey && args.accountKey !== MAIN_ACCOUNT ? args.accountKey : undefined;
   return withAppendTx(ctx.pool, async (tx): Promise<ClaimResult | null> => {
     const a = await one(
       tx,
@@ -190,6 +195,7 @@ export async function claim(ctx: Ctx, args: ClaimArgs): Promise<ClaimResult | nu
               shiftId,
               stage: card.stage,
               overflow,
+              ...(accountKey ? { accountKey } : {}),
               worktree:
                 worktree && !worktree.readOnly
                   ? {
@@ -241,6 +247,7 @@ export async function claim(ctx: Ctx, args: ClaimArgs): Promise<ClaimResult | nu
       rebase: stage?.rebaseBefore ?? false,
       ...(syncMain ? { syncMain } : {}),
       maxShiftMinutes: stage?.maxShiftMinutes ?? 60,
+      ...(accountKey ? { accountKey } : {}),
     };
   });
 }

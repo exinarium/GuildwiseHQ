@@ -11,9 +11,9 @@ import { DISPATCH_LOCK_ID } from '../db/tx.ts';
 import { deliveryPass } from '../delivery/triggers.ts';
 import type { StoredEvent } from '../eventstore/types.ts';
 import { platformPass } from '../platform-team/detectors.ts';
-import { activeUsageLimit } from '../queries/usage-limit.ts';
 import { buildShiftStart } from '../runner-gateway/brief.ts';
 import { wsServesOrgSql } from '../simulation/fit.ts';
+import { accountFor, loadProjectAccounts, mainUsable, runtimeUsable } from './accounts.ts';
 import { baTaskPass } from './ba-tasks.ts';
 import { testingPass } from './bottleneck.ts';
 import { agentView, candidateCards, isCandidate, ONLINE_WINDOW_MS } from './candidates.ts';
@@ -196,10 +196,10 @@ export class Dispatcher {
       const rt = (
         a.runtimes as Array<{ id: string; available: boolean; capabilities: string[]; auth?: string }>
       ).find((r) => r.id === a.runtime);
-      // An expired login (Claude Code `/login`) pauses the workstation's work; it resumes when the runner reports ok.
-      if (!rt?.available || rt.auth === 'expired') continue;
-      // A hit model usage limit (backlog #73) pauses the workstation's Claude runtime until it resets.
-      if (activeUsageLimit(a.runtimes, a.runtime, now)) continue;
+      // An expired login (Claude Code `/login`) or a hit model usage limit (backlog #73) pauses an account; the
+      // workstation is offered work while any account of the runtime is usable (which account a card runs on is
+      // decided per card: docs/design/claude-accounts.md).
+      if (!rt || !runtimeUsable(a.runtimes, a.runtime, now)) continue;
       out.push({ row: a, caps: rt.capabilities, active: Number(a.active) });
     }
     return out;
@@ -229,6 +229,22 @@ export class Dispatcher {
     await phasePass(this.ctx);
     const made: ClaimResult[] = [];
     const agents = await this.freeAgents();
+    // The Claude account each project names (docs/design/claude-accounts.md): chosen again for every claim.
+    const settings = await loadProjectAccounts(this.ctx.pool);
+    const at = new Date(nowMs);
+    const accountOf = (row: Row, projectId: string) =>
+      accountFor(settings.get(projectId), row.runtimes, row.runtime, at);
+    // The projects an agent's workstation cannot run now: their account is out (and no fallback), or main is out.
+    const accountScope = (
+      row: Row,
+    ): { excludeProjectIds?: string[]; onlyProjectIds?: string[] } | undefined => {
+      if (row.runtime !== 'claude-code') return undefined;
+      const keyed = [...settings.keys()];
+      const usable = keyed.filter((id) => accountOf(row, id));
+      if (!mainUsable(row.runtimes, row.runtime, at)) return { onlyProjectIds: usable };
+      const blocked = keyed.filter((id) => !usable.includes(id));
+      return blocked.length > 0 ? { excludeProjectIds: blocked } : undefined;
+    };
     // Shifts each workstation runs now against the limit its owner set (backlog #76): a full workstation is not offered more.
     const load = await this.shiftLoad();
     const full = (workstationId: string): boolean => {
@@ -251,7 +267,15 @@ export class Dispatcher {
         full(a.row.workstation_id)
       )
         continue;
-      const r = await claim(this.ctx, { cardId, agentId: a.row.id, expectedStage: card.stage });
+      const pcard = await one(this.ctx.pool, 'SELECT project_id FROM cards WHERE id=$1', [cardId]);
+      const acct = accountOf(a.row, pcard?.project_id);
+      if (!acct) continue;
+      const r = await claim(this.ctx, {
+        cardId,
+        agentId: a.row.id,
+        expectedStage: card.stage,
+        accountKey: acct.key,
+      });
       this.preferred.delete(cardId);
       if (r) {
         made.push(r);
@@ -262,9 +286,16 @@ export class Dispatcher {
     for (const { row, caps, active } of agents) {
       if (active >= row.capacity || this.skip(row, nowMs) || full(row.workstation_id)) continue;
       const view = agentView(row, caps);
-      const cands = await candidateCards(this.ctx.pool, view, new Date(nowMs));
+      const cands = await candidateCards(this.ctx.pool, view, new Date(nowMs), accountScope(row));
       for (const c of cands) {
-        const r = await claim(this.ctx, { cardId: c.id, agentId: row.id, expectedStage: c.stage });
+        const acct = accountOf(row, c.project_id);
+        if (!acct) continue;
+        const r = await claim(this.ctx, {
+          cardId: c.id,
+          agentId: row.id,
+          expectedStage: c.stage,
+          accountKey: acct.key,
+        });
         if (r) {
           made.push(r);
           load.set(row.workstation_id, (load.get(row.workstation_id) ?? 0) + 1);
@@ -272,7 +303,7 @@ export class Dispatcher {
         }
       }
     }
-    made.push(...(await this.overflowPass(agents, nowMs, full)));
+    made.push(...(await this.overflowPass(agents, nowMs, full, accountOf)));
     // The DevOps, question and BA passes respect the workstation's shift limit like the card passes do (each shift they
     // start counts, so the next pass sees it).
     const cooling = (agentId: string) => (this.cooldown.get(agentId) ?? 0) > nowMs;
@@ -301,10 +332,11 @@ export class Dispatcher {
     agents: Array<{ row: Row; caps: string[]; active: number }>,
     nowMs: number,
     full: (workstationId: string) => boolean = () => false,
+    accountOf: (row: Row, projectId: string) => { key: string } | null = () => ({ key: 'main' }),
   ): Promise<ClaimResult[]> {
     const late = await rows(
       this.ctx.pool,
-      `SELECT id, org_id, stage FROM cards WHERE status='queued' AND scheduled AND claim_id IS NULL AND queued_at < $1
+      `SELECT id, org_id, stage, project_id FROM cards WHERE status='queued' AND scheduled AND claim_id IS NULL AND queued_at < $1
         ORDER BY queued_at, created_at, number`,
       [new Date(nowMs - LATE_SCHEDULED_MS)],
     );
@@ -327,10 +359,13 @@ export class Dispatcher {
         .sort((x, y) => x.active - y.active);
       for (const a of atCapacity) {
         if (!(await isCandidate(this.ctx.pool, agentView(a.row, a.caps), card.id, new Date(nowMs)))) continue;
+        const acct = accountOf(a.row, card.project_id);
+        if (!acct) continue;
         const r = await claim(this.ctx, {
           cardId: card.id,
           agentId: a.row.id,
           expectedStage: card.stage,
+          accountKey: acct.key,
           overflow: true,
         });
         if (r) {
