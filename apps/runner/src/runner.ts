@@ -979,7 +979,8 @@ export class Runner {
       const until = account.usage.limitedUntilMs;
       if (account.usage.state !== 'limited' || until === undefined || Date.now() < until) continue;
       const last = this.lastUsageProbe.get(account.key) ?? 0;
-      if (Date.now() - last < (this.opts.usageProbeMs ?? 180_000)) continue;
+      // the first probe after a (new) reset time is never throttled; only a retry after "could not tell" waits
+      if (last >= until && Date.now() - last < (this.opts.usageProbeMs ?? 180_000)) continue;
       this.lastUsageProbe.set(account.key, Date.now());
       await a.probeUsage(account.key);
     }

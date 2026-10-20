@@ -2,7 +2,7 @@ import { chmodSync, existsSync, readdirSync, readFileSync, rmSync, writeFileSync
 import { mkdir, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { CARD_ATTACHMENTS_DIR, MAIN_ACCOUNT } from '@aom/shared';
+import { CARD_ATTACHMENTS_DIR, type ClaudeAccountInfo, MAIN_ACCOUNT } from '@aom/shared';
 import { execa } from 'execa';
 import type { z } from 'zod';
 import type { ClaudeRuntimeConfigSchema } from '../config.ts';
@@ -327,6 +327,9 @@ export function accountClaudeConfig(base: ClaudeConfig, credential: AccountCrede
   };
 }
 
+/** `RuntimeInfoSchema.accounts` allows 20. */
+const MAX_REPORTED_ACCOUNTS = 20;
+
 export class ClaudeCodeAdapter implements RuntimeAdapter {
   readonly id = 'claude-code';
 
@@ -501,6 +504,21 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     return { command: `${[...selfCommand('aom'), 'devops-guard'].map(quote).join(' ')}`, file };
   }
 
+  private warnedTruncated = false;
+
+  /** The accounts as reported in hello / runtimes.report: at most `MAX_REPORTED_ACCOUNTS` (main first), so validation never fails. */
+  private accountInfos(): ClaudeAccountInfo[] {
+    const all = this.registry.infos();
+    if (all.length <= MAX_REPORTED_ACCOUNTS) return all;
+    if (!this.warnedTruncated) {
+      this.warnedTruncated = true;
+      process.stderr.write(
+        `claude-code: ${all.length} accounts are configured; only the first ${MAX_REPORTED_ACCOUNTS} (main first, then by key) are reported to the server\n`,
+      );
+    }
+    return all.slice(0, MAX_REPORTED_ACCOUNTS);
+  }
+
   async capabilities(): Promise<RuntimeCapabilities> {
     const caps = ['shell', 'edit', 'web', 'mcp', 'skills', 'sandbox_config', 'resume'];
     // Reported unavailable in mock/test mode so the server never picks it for an agent (it also refuses to start).
@@ -534,7 +552,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
               : {}),
           }
         : {}),
-      ...(this.host.accounts ? { accounts: this.registry.infos() } : {}),
+      ...(this.host.accounts ? { accounts: this.accountInfos() } : {}),
     };
     try {
       const r = await execa(this.cfg.bin, ['--version'], { reject: false, timeout: 10_000, stdin: 'ignore' });

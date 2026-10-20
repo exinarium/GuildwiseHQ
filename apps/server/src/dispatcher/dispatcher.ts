@@ -13,7 +13,7 @@ import type { StoredEvent } from '../eventstore/types.ts';
 import { platformPass } from '../platform-team/detectors.ts';
 import { buildShiftStart } from '../runner-gateway/brief.ts';
 import { wsServesOrgSql } from '../simulation/fit.ts';
-import { accountFor, loadProjectAccounts, mainUsable, runtimeUsable } from './accounts.ts';
+import { accountFor, loadProjectAccounts, runtimeUsable, accountScope as scopeOf } from './accounts.ts';
 import { baTaskPass } from './ba-tasks.ts';
 import { testingPass } from './bottleneck.ts';
 import { agentView, candidateCards, isCandidate, ONLINE_WINDOW_MS } from './candidates.ts';
@@ -234,17 +234,7 @@ export class Dispatcher {
     const at = new Date(nowMs);
     const accountOf = (row: Row, projectId: string) =>
       accountFor(settings.get(projectId), row.runtimes, row.runtime, at);
-    // The projects an agent's workstation cannot run now: their account is out (and no fallback), or main is out.
-    const accountScope = (
-      row: Row,
-    ): { excludeProjectIds?: string[]; onlyProjectIds?: string[] } | undefined => {
-      if (row.runtime !== 'claude-code') return undefined;
-      const keyed = [...settings.keys()];
-      const usable = keyed.filter((id) => accountOf(row, id));
-      if (!mainUsable(row.runtimes, row.runtime, at)) return { onlyProjectIds: usable };
-      const blocked = keyed.filter((id) => !usable.includes(id));
-      return blocked.length > 0 ? { excludeProjectIds: blocked } : undefined;
-    };
+    const accountScope = (row: Row) => scopeOf(settings, row.runtimes, row.runtime, at);
     // Shifts each workstation runs now against the limit its owner set (backlog #76): a full workstation is not offered more.
     const load = await this.shiftLoad();
     const full = (workstationId: string): boolean => {

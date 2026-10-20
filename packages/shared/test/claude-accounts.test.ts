@@ -81,15 +81,23 @@ describe('resolveShiftAccount truth table', () => {
     expect(resolveShiftAccount(null, { available: false }, now)).toBeNull();
   });
 
-  it('a limit whose reset time has passed no longer counts', () => {
+  it('an account entry reported limited stays out even when its limitedUntil has passed (the runner clears it)', () => {
     const rt: AccountRuntimeView = {
       available: true,
       accounts: [acct('main', 'ok'), { ...acct('work', 'limited'), limitedUntil: past }],
     };
-    expect(resolveShiftAccount({ accountKey: 'work', fallbackToMain: false }, rt, now)).toEqual({
-      key: 'work',
-      viaFallback: false,
+    expect(accountUsable(rt, 'work', now)).toBe(false);
+    expect(resolveShiftAccount({ accountKey: 'work', fallbackToMain: false }, rt, now)).toBeNull();
+    expect(resolveShiftAccount({ accountKey: 'work', fallbackToMain: true }, rt, now)).toEqual({
+      key: 'main',
+      viaFallback: true,
     });
+  });
+
+  it('an account entry reported limited with no limitedUntil is out', () => {
+    const { limitedUntil: _drop, ...noUntil } = acct('work', 'limited');
+    const rt: AccountRuntimeView = { available: true, accounts: [acct('main', 'ok'), noUntil] };
+    expect(accountUsable(rt, 'work', now)).toBe(false);
   });
 
   describe('shift kinds tied to a ticket (D2)', () => {

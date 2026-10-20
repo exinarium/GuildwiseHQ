@@ -368,7 +368,9 @@ export class ClaudeAccountRegistry {
 
   private add(a: ClaudeAccount): void {
     // restore what the last run knew, before any listener is attached
+    // (each startup entry is consumed once: a later rebuild of the account object starts from what the monitors know)
     const p = this.persisted[a.key];
+    delete this.persisted[a.key];
     if (p?.limitedUntil) a.usage.markLimited(new Date(p.limitedUntil));
     if (p?.login === 'expired') a.auth.markExpired();
     a.refreshPresence();

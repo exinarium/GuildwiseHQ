@@ -130,6 +130,38 @@ describe('card shifts', () => {
     expect(await pass(r.received.length)).toHaveLength(0);
   });
 
+  it('claim, reject, no re-claim: an account the runner still reports limited stays out after its limitedUntil passed', async () => {
+    await reset();
+    await setAccount('work', false);
+    await report([acct('main'), acct('work')]);
+    await hireClaude('Ada');
+    const card = await w.card({ title: 'Reject loop' });
+    const starts = await pass(r.received.length);
+    expect(starts).toHaveLength(1);
+    expect(starts[0].account).toEqual({ key: 'work' });
+
+    // the runner rejects: the account is limited and its reset time has already passed (its probe has not cleared it yet)
+    const past = hours(-1);
+    r.rejected(starts[0].shiftId, 'usage_limited', { accountKey: 'work', limitedUntil: past });
+    for (let i = 0; i < 100; i++) {
+      await r.barrier();
+      if ((await q('SELECT claim_id FROM cards WHERE id=$1', [card.id]))[0]?.claim_id === null) break;
+      await new Promise((res) => setTimeout(res, 30));
+    }
+    expect((await q('SELECT claim_id FROM cards WHERE id=$1', [card.id]))[0]?.claim_id).toBeNull();
+
+    // still reported limited, with the past time: no claim on it (twice, to be sure), however the stored row was patched
+    await report([acct('main'), acct('work', { usage: 'limited', limitedUntil: past })]);
+    expect(await pass(r.received.length)).toHaveLength(0);
+    expect(await pass(r.received.length)).toHaveLength(0);
+
+    // another account is still usable: with fallback on the card runs on main
+    await setAccount('work', true);
+    const next = await pass(r.received.length);
+    expect(next).toHaveLength(1);
+    expect(next[0].account).toBeUndefined();
+  });
+
   it('main also out: fallback finds nothing and the ticket waits; the runtime is not offered work at all', async () => {
     await reset();
     await setAccount('work', true);

@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { BUILTIN_ROLES } from '@aom/shared';
+import { BUILTIN_ROLES, RuntimeInfoSchema } from '@aom/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { ClaudeAccountRegistry } from '../src/adapters/claude-accounts.ts';
 import { ClaudeAuthMonitor, readCredentials } from '../src/adapters/claude-auth.ts';
@@ -309,6 +309,56 @@ describe('B3: credential write-back never crosses accounts', () => {
     } finally {
       delete process.env.AOM_CLAUDE_SMOKE;
     }
+  });
+
+  it('capabilities: at most 20 accounts are reported (main first) so the hello always validates', async () => {
+    const t = setup([], false);
+    const many: ClaudeAccountConfig[] = Array.from({ length: 25 }, (_, i) => ({
+      key: `a${String(i).padStart(2, '0')}`,
+      source: 'config_dir' as const,
+    }));
+    const reg = new ClaudeAccountRegistry({
+      home: t.home,
+      root: t.root,
+      accounts: () => many,
+      mainCredential: () => ({ authMode: 'default' }),
+      mainAuth: new ClaudeAuthMonitor(),
+    });
+    const bin = join(t.root, 'fake-claude');
+    writeFileSync(bin, '#!/bin/sh\necho "2.1.304 (Claude Code)"\n', { mode: 0o755 });
+    const adapter = new ClaudeCodeAdapter(
+      ClaudeRuntimeConfigSchema.parse({ bin, sandbox: 'off' }),
+      runnerPaths(t.root),
+      { accounts: reg, home: t.home },
+    );
+    process.env.AOM_CLAUDE_SMOKE = '1';
+    try {
+      const caps = await adapter.capabilities();
+      expect(caps.accounts).toHaveLength(20);
+      expect(caps.accounts?.[0]?.key).toBe('main');
+      expect(RuntimeInfoSchema.safeParse({ id: 'claude-code', ...caps }).success).toBe(true);
+    } finally {
+      delete process.env.AOM_CLAUDE_SMOKE;
+    }
+  });
+
+  it('a persisted limit is restored once; a rebuilt account object does not get it again', () => {
+    const t = setup([{ key: 'work', source: 'config_dir' }]);
+    writeFileSync(t.stateFile, JSON.stringify({ work: { limitedUntil: '2026-10-15T18:00:00.000Z' } }));
+    const accounts: ClaudeAccountConfig[] = [{ key: 'work', configDir: '~/dir-a', source: 'config_dir' }];
+    const reg = new ClaudeAccountRegistry({
+      home: t.home,
+      root: t.root,
+      stateFile: t.stateFile,
+      accounts: () => accounts,
+      mainCredential: () => ({ authMode: 'default' }),
+    });
+    expect(reg.get('work')?.usage.state).toBe('limited');
+    // the owner points the key at another folder: a new object, which starts clean
+    accounts[0] = { key: 'work', configDir: '~/dir-b', source: 'config_dir' };
+    reg.refresh();
+    expect(reg.get('work')?.configDir).toBe(join(t.home, 'dir-b'));
+    expect(reg.get('work')?.usage.state).toBe('ok');
   });
 });
 

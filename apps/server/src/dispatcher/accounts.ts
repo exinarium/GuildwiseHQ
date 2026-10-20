@@ -73,3 +73,22 @@ export function mainUsable(runtimes: unknown, runtime: string, now: Date): boole
 export function runtimeUsable(runtimes: unknown, runtime: string, now: Date): boolean {
   return anyAccountUsable(viewOf(runtimes, runtime), now);
 }
+
+/**
+ * The projects a workstation's agent of `runtime` cannot run now, as `candidateCards` takes them: their account is out
+ * (and no fallback), or main is out so only projects on their own account can run. Keeps the 5-card window from filling
+ * with cards that cannot start.
+ */
+export function accountScope(
+  settings: Map<string, ProjectAccountSetting>,
+  runtimes: unknown,
+  runtime: string,
+  now: Date,
+): { excludeProjectIds?: string[]; onlyProjectIds?: string[] } | undefined {
+  if (runtime !== CLAUDE_RUNTIME) return undefined;
+  const keyed = [...settings.keys()];
+  const usable = keyed.filter((id) => accountFor(settings.get(id), runtimes, runtime, now));
+  if (!mainUsable(runtimes, runtime, now)) return { onlyProjectIds: usable };
+  const blocked = keyed.filter((id) => !usable.includes(id));
+  return blocked.length > 0 ? { excludeProjectIds: blocked } : undefined;
+}

@@ -2,7 +2,7 @@ import { inOfficeHours, type OfficeHours } from '@aom/shared';
 import { decryptSecret } from '../auth/secrets.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Row, rows } from '../db/sql.ts';
-import { accountFor, loadProjectAccounts } from '../dispatcher/accounts.ts';
+import { accountFor, accountScope, loadProjectAccounts } from '../dispatcher/accounts.ts';
 import { agentView, candidateCards } from '../dispatcher/candidates.ts';
 import { GithubError } from './github.ts';
 import { problem, stopRow, wakeRow } from './service.ts';
@@ -22,7 +22,12 @@ async function hasQueuedWork(ctx: Ctx, workstationId: string): Promise<boolean> 
   const settings = await loadProjectAccounts(ctx.pool);
   for (const a of agents) {
     const rt = (a.runtimes as Array<{ id: string; capabilities: string[] }>).find((r) => r.id === a.runtime);
-    const cands = await candidateCards(ctx.pool, agentView(a, rt?.capabilities ?? []), now);
+    const cands = await candidateCards(
+      ctx.pool,
+      agentView(a, rt?.capabilities ?? []),
+      now,
+      accountScope(settings, a.runtimes, a.runtime, now),
+    );
     // A card whose Claude account is out on this workstation (as last reported) does not justify waking it.
     if (cands.some((c) => accountFor(settings.get(c.project_id), a.runtimes, a.runtime, now))) return true;
   }

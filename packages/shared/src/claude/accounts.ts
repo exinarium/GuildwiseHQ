@@ -63,8 +63,11 @@ export interface AccountRuntimeView {
   accounts?: ClaudeAccountInfo[];
 }
 
-/** A usage limit counts only while `limitedUntil` is still ahead (a limit without a time is not in force). */
-function limitActive(usage: string | undefined, limitedUntil: string | undefined, now: Date): boolean {
+/**
+ * Legacy top-level fields (runners without accounts[]): a limit counts only while `limitedUntil` is still ahead (a limit
+ * without a time is not in force).
+ */
+function legacyLimitActive(usage: string | undefined, limitedUntil: string | undefined, now: Date): boolean {
   return usage === 'limited' && !!limitedUntil && Date.parse(limitedUntil) > now.getTime();
 }
 
@@ -72,10 +75,12 @@ function limitActive(usage: string | undefined, limitedUntil: string | undefined
 export function accountUsable(rt: AccountRuntimeView | undefined, key: string, now: Date): boolean {
   if (!rt?.available) return false;
   const entry = rt.accounts?.find((a) => a.key === key);
-  if (entry) return entry.login === 'ok' && !limitActive(entry.usage, entry.limitedUntil, now);
+  // The runner is authoritative for accounts[]: it keeps an account `limited` until its own probe clears it, so a
+  // `limitedUntil` in the past does not make the account usable (it would only be claimed and rejected again).
+  if (entry) return entry.login === 'ok' && entry.usage !== 'limited';
   // No entry: a legacy runtime (or one that does not list main) knows only the main account.
   if (key !== MAIN_ACCOUNT) return false;
-  return rt.auth !== 'expired' && !limitActive(rt.usage, rt.limitedUntil, now);
+  return rt.auth !== 'expired' && !legacyLimitActive(rt.usage, rt.limitedUntil, now);
 }
 
 /** Any account usable (freeAgents gate). */
