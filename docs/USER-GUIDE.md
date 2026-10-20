@@ -1107,6 +1107,25 @@ Unit tests are run by builders and reviewers. **Integration and end-to-end tests
 
 A Claude subscription has a session limit and a weekly limit. When it is reached, Guildwise **pauses the work** instead of letting every card fail and retry. The board and the project settings show **Paused until 18:00 (usage limit on <workstation>)** in your time zone. Cards stay in their queue with a note ("Paused: the model usage limit resets at 18:00"), no shift is counted as failed, and nothing needs doing: when the limit resets the workstation checks with one tiny request and work continues by itself. Your desk gets one notice (and one e-mail) *Claude usage limit reached on <workstation>*, which closes by itself. Projects that also have agents on another workstation keep working there. A chat started meanwhile says when it can be used again.
 
+### 4.24a Claude accounts per project
+
+By default every project's tickets run on each workstation's main Claude account. On the project's settings page, under
+**Claude account**, you can name a second Claude subscription for the project (a short key such as `work`). Each workstation
+that works on the project then needs to sign in to that account once. The status line under the setting shows *ready*,
+*sign-in needed* (a link opens that workstation's Integrations page) or *provisioning*.
+
+- **The fallback checkbox.** "If this account is out (usage limit or login), use the workstation's main account." It is
+  **off by default**. Off means the project's tickets **pause** while its account is out. On means they run on the main
+  account until the project's account works again.
+- **Usage limit.** The board and the project settings show the project as paused, or on the main account, with the time the
+  limit resets. The card goes back into the queue without penalty.
+- **Expired or unfinished login.** Treated exactly like a usage limit: the project pauses or falls back, and you get a desk
+  notice with the sign-in link.
+- **Recovery is automatic.** When the limit resets or the login works, new ticket work goes back to the project's account
+  by itself. Shifts already running finish on the account they started with.
+- **What always uses the main account.** CEO, DevOps and chat work, and BA work that is not about a ticket. Questions and BA
+  work on a ticket follow the project's account.
+
 ### 4.25 How many shifts a workstation runs at once
 
 Each workstation runs a limited number of agent shifts at the same time; further cards wait in the queue. Open the workstation on the **Workstations** page and set **Shifts at once**: **Runner's own value** (what is in the runner's config file, normally 4), **A number**, or **Unlimited**. Only the workstation's owner can change it. It takes effect at once, with no restart, and the runner remembers it. **Unlimited** means Guildwise sets no limit; the computer's memory and CPU and your model's usage limit still apply, so watch the machine the first time. The platform administrator can also set a ceiling for the whole platform: when it is lower than your choice the page says which number applies. A runner from before this feature (0.1.20 and older) keeps using its own value and the page tells you to update it.

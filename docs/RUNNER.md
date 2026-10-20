@@ -353,6 +353,7 @@ agents/
   <agentId>/
     home/                       HOME for the agent (contains the .gitconfig with the commit identity)
     claude/                     CLAUDE_CONFIG_DIR (credentials, memory, cache)
+    claude-acct-<key>/          the same agent's CLAUDE_CONFIG_DIR on an additional Claude account (see "Claude accounts")
     scratch/                    working directory for the agent's own files
 cache/                          package caches shared by all agents of this runner (nuget, npm, pnpm, pip, gradle, maven, ...)
 worktrees/
@@ -366,6 +367,9 @@ mock-state/                     per-card attempt counters for mock script (test 
 vaults/<vaultId>/               local vault folders (storage "local"; not synced, see "Project graphs")
 graph-cache/<repoKey>/          the project graph indexer's per-file cache (rebuildable, see "Project graphs")
 sessions.json                   the Claude sessions this runner started (agent, folder, start, context size): what a resume request is checked against
+claude-accounts-state.json      the usage limit and expired logins of each Claude account (kept across restarts)
+claude-credentials.lock         lock for the main account's credential copies (additional accounts lock inside their own folder)
+secrets/claude-accounts/        token accounts only: <key>.json (mode 0600)
 logs/
   runner.log                    JSON Lines log of runner events
   devops-audit.jsonl            every shell command of the DevOps engineer, allowed or refused (see "DevOps guardrails")
@@ -438,7 +442,7 @@ aom-runner doctor             # checks node, git, claude, docker, yt-dlp, repos,
 - **authMode** (default `"default"`):
   - `"oauth"`: use `oauthToken` (from `claude setup-token`)
   - `"api_key"`: use `apiKey` (Jira Data Center, self-hosted)
-  - `"default"`: symlink to your `~/.claude/.credentials.json`
+  - `"default"`: each agent gets a private copy of your `~/.claude/.credentials.json` (not a symlink)
 - **oauthToken** (optional): from `claude setup-token` (when authMode is `"oauth"`)
 - **apiKey** (optional): API key (when authMode is `"api_key"`)
 - **intake** (optional, M7): MCP integration for BA intake
@@ -536,6 +540,62 @@ Without a login for the repository's host (or on plain git) finalize with action
 aom-runner rotate-token    # runner must be stopped
 aom-runner start           # restart with new token
 ```
+
+### Claude accounts (more than one subscription)
+
+A project can run its tickets on its own Claude subscription, for example `work`, while the workstation's main account
+(`~/.claude`) keeps running everything else. Set it on the project's settings page (Claude account). The runner side is
+below. Org work (CEO, DevOps, chats) always uses the main account.
+
+```
+aom-runner accounts list                                # every account: login and usage state, folder, e-mail
+aom-runner accounts add work                            # create (or check) ~/.claude-gw-work, register it, add the alias
+aom-runner accounts add work --config-dir ~/work-claude # use a folder you name, as it is
+printf %s "$TOKEN" | aom-runner accounts add work --oauth-token   # a token instead of a folder (also --api-key)
+aom-runner accounts login work                          # claude auth login in this terminal, in the account's folder
+aom-runner accounts remove work                         # unregister only; folder, alias and sign-in are kept
+```
+
+**The default folder and alias.** `accounts add <key>` uses `~/.claude-gw-<key>` (Windows: `%USERPROFILE%\.claude-gw-<key>`),
+created with mode 0700 and a marker file `.aom-runner-owned`. On Linux and macOS it also adds the alias `claude-gw-<key>`
+inside a marked block of `~/.zshrc` (when `$SHELL` ends in `zsh`) or `~/.bashrc`:
+
+```sh
+# >>> guildwise claude accounts >>>
+alias claude-gw-work='CLAUDE_CONFIG_DIR=~/.claude-gw-work claude'
+# <<< guildwise claude accounts <<<
+```
+
+Keys are added inside the block, sorted, and never duplicated. Lines outside the block are never edited. An alias of the same
+name outside the block is not the runner's: it is left alone and the answer reports an alias conflict. Remove the block by
+hand to remove the aliases.
+
+**The runner never adopts what it did not create.** Your own `~/.claude-work` and its `claude-work` alias are never used,
+changed or read as an account. `accounts add work` makes `~/.claude-gw-work` and `claude-gw-work` next to them. A default
+folder that already exists without the marker is left alone: the account reports `failed`, and the message names
+`aom-runner accounts add <key> --config-dir <dir>` as the deliberate way to register it. Folders inside the runner data
+directory, inside `~/.claude` (main) or outside your home directory are refused.
+
+**An explicit folder.** `--config-dir <dir>` (or a `configDir` you write in `config.json`) is used as it is and may already
+hold a sign-in. The runner adds no marker to a folder you name. Registration in `config.json` looks like this:
+
+```json
+{ "runtimes": { "claude-code": { "accounts": [ { "key": "work", "configDir": "~/.claude-gw-work", "source": "config_dir" } ] } } }
+```
+
+**Signing in from the web.** On the Integrations page of the workstation (`/workstations/<id>/integrations`, or
+`?focus=claude-code:<key>`), the Claude Code tile has one entry per account, and "Sign in with your Claude subscription"
+(method `claude_login`) is offered for each account key. The runner runs `claude auth login --claudeai` in its own terminal
+session with `CLAUDE_CONFIG_DIR` set to that account's folder: open the link, sign in, paste the code back. An unknown key is
+set up first, as `accounts add` does. This needs runner 0.1.33 or newer, and machine-wide changes from the web only on the
+primary pairing with `integrations.machineScopeFromWeb: "primary"` (the default). Otherwise the page shows the terminal
+commands. A sign-in made in a terminal (`claude-gw-work`, then `/login`) is picked up on the runner's next check of that
+folder.
+
+**Limits and login per account.** Each account has its own usage-limit and login state, probed on the same rules as the main
+account (every 3 minutes, one tiny request). When an account is out, the project's tickets pause or fall back to main, as
+set on the project; see the [user guide](USER-GUIDE.md). A login that does not work, or was never completed, raises a desk
+notice for the workstation owner with the sign-in link and the terminal command. The notice closes when the account signs in.
 
 ## Running and connecting
 
@@ -1106,7 +1166,7 @@ cannot loosen anything.
 | `permissions.deny` | `ListAgents`, `SendMessage`, `RemoteTrigger`, `Cron*`, `ScheduleWakeup`, `PushNotification`, `EnterWorktree`/`ExitWorktree` (tools that reach other Claude sessions on the machine or outside the shift; `dontAsk` would otherwise still run them); `Edit, Write, NotebookEdit` when the role has no `edit` tool; `WebFetch, WebSearch` without `web`; `Bash` without `shell`; the role's `deniedShellPatterns` and `git push/reset --hard` (and, for every role except the builder, `git rebase/checkout/switch`: see "Builders may rebase" below); `Edit` on the vault, the agent's config dir and the worktree `.git`; `Read` on the runner's `config.json`, `outbox`, `outbound`, `active-shifts`, `vaults.json`, `status.json`, `logs` and on `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.config/gh`, `~/.claude`, ... | deny wins over allow in every scope |
 | `permissions.blockReadsOutsideWorkingDirectories` | `true` | the Read/Grep/Glob tools only see the worktree (or scratch dir), the agent's scratch dir, the vault and the project's read-only folders (`--add-dir`; see "Reference repositories and other read-only folders" below); other agents' sandboxes and other cards' worktrees are out of reach |
 | `sandbox.enabled`, `failIfUnavailable`, `allowUnsandboxedCommands` | `true`, `true` (`sandbox: "required"`), `false` | Bash runs inside bubblewrap (Linux/WSL2) or Seatbelt (macOS); no `dangerouslyDisableSandbox` retry; no silent fallback to unsandboxed |
-| `sandbox.filesystem.denyRead` | the runner data dir, `~/.ssh`, `~/.aws`, `~/.azure`, `~/.gnupg`, `~/.kube`, `~/.docker`, `~/.netrc`, `~/.npmrc`, `~/.pypirc`, `~/.git-credentials`, `~/.config/gh`, `~/.config/gcloud`, `~/.claude`, `~/.claude.json` | runner token, Jira and provider credentials, the linked `.credentials.json` |
+| `sandbox.filesystem.denyRead` | the runner data dir, `~/.ssh`, `~/.aws`, `~/.azure`, `~/.gnupg`, `~/.kube`, `~/.docker`, `~/.netrc`, `~/.npmrc`, `~/.pypirc`, `~/.git-credentials`, `~/.config/gh`, `~/.config/gcloud`, `~/.claude`, `~/.claude.json` | runner token, Jira and provider credentials, the copied `.credentials.json` |
 | `sandbox.filesystem.allowRead` | its worktree, the vault, the `aom` shim and script, the Node install the runner runs on, and `runtimes.claude-code.toolchainPaths` | with the read block on, sandboxed commands lose read access to all of `/home`; this re-opens only what the shift needs (toolchains such as `~/.nvm/...` included) |
 | `sandbox.excludedCommands` | `aom`, `aom *`, `<runner>/bin/aom`, `<runner>/bin/aom *` | entries use `Bash(...)` rule syntax, so a bare `aom` would only match `aom` with no arguments; `aom` must run outside because Linux sandboxes cannot connect Unix sockets |
 | `sandbox.filesystem.allowWrite` / `denyWrite` | agent `home` + `scratch` + `tmp` + the main repository's `.git` (a linked worktree commits into it) + the runner's shared package caches (`<data dir>/cache`) + `/tmp/.dotnet` on Linux (see "Shared package caches and .NET") / the repository's `.git/hooks` and `.git/config`, the vault, the runner's private files, and the worktree itself for roles with no `edit` tool that may not commit | hooks and git config run outside the sandbox the next time the user uses git |
@@ -1441,11 +1501,11 @@ servers in `~/.claude/.credentials.json` under `mcpOAuth`, keyed `<server key>|<
 `plugin:atlassian:atlassian|60c89fc9e49f37c7`), next to the model login (`claudeAiOauth`). Stdio servers get their
 `env` from their config entry.
 
-- With the default login (`authMode: default`) the file is already linked into the agent's config dir (a symlink; a copy
-  on Windows), so the entry is found as long as the server key and connection are unchanged. The link is kept, not
-  narrowed: the file holds the model login whose refresh token Claude Code rotates, and a copy would lose the rotated
-  token and sign the owner out. Refreshed MCP tokens are written back through the link as well. (This is the same
-  exposure agents already had; the file stays unreadable to the agent's shell by the `~/.claude` read deny.)
+- With the default login (`authMode: default`) the agent's config dir holds a copy of the file, so the entry is found as long
+  as the server key and connection are unchanged. The whole file is copied, not narrowed: it holds the model login whose
+  refresh token Claude Code rotates, and a narrowed copy would lose the rotated token. Refreshed MCP tokens are written back
+  to the owner's file after the session. (This is the same exposure agents already had; the file stays unreadable to the
+  agent's shell by the `~/.claude` read deny.)
 - With a configured token (`authMode: oauth` or `api_key`) nothing was linked before and nothing broader is linked now:
   when servers are in use the runner writes a private copy (mode 0600) containing **only** the `mcpOAuth` entries whose key
   is, or starts with `<server key>|`, for the servers in use. No model login, no other server's token. Without servers there
@@ -2240,7 +2300,7 @@ one place each (`claude-code.ts`, `mcp.ts`, `github.ts`) and a version bump shou
 **Credentials stay on the machine:**
 - Runner token: stored in `config.json` (mode 0600); agents are denied the data directory (see the threat model)
 - Claude token or API key: `secrets/claude.json` (mode 0600; written by the Integrations page and `aom-runner auth`; `config.json` is the fallback)
-- Claude credentials: stored in agent's `CLAUDE_CONFIG_DIR` (mode 0700) or symlinked to your `~/.claude/.credentials.json` (the sandbox denies reading the real file to shell commands; Claude Code itself reads it)
+- Claude credentials: stored in the agent's `CLAUDE_CONFIG_DIR` (mode 0700) as a copy of your `~/.claude/.credentials.json` (or of an additional account's `<configDir>/.credentials.json`; the sandbox denies reading the real file to shell commands; Claude Code itself reads it). Token accounts keep their token in `secrets/claude-accounts/<key>.json` (mode 0600)
 - Jira token: stored by `aom-runner jira-connect` in `secrets/jira.json` (mode 0600, directory 0700; an older `jira` block in `config.json` is still read); agents are denied `secrets/` and never see it; only connected / not connected / refused is reported to the server
 - Git hosts: the `gh` / `glab` logins, or tokens saved by `aom-runner git-connect` in `secrets/git-tokens.json` (0600); only connected / not connected is reported to the server
 - Vault SSH keys: used from machine's SSH agent or keyfiles
@@ -2310,8 +2370,9 @@ shift log: `Failed to authenticate: OAuth session expired and could not be refre
 
 - **Detection.** The runner recognises such a failure in the stream result, an assistant message flagged as an
   authentication failure, or the stderr of a failed session ("Please run /login", "OAuth refresh token is no longer
-  valid", `authentication_error`, 401 `invalid_api_key`). It marks the Claude runtime `auth: expired` and reports it
-  (`runtimes.report`, additive `auth` field) as **unavailable**, so nothing is dispatched to the workstation.
+  valid", `authentication_error`, 401 `invalid_api_key`). It marks that account `expired` (main, or the additional account
+  the shift ran on) and reports it (`runtimes.report`, `accounts[]`; main also in the top-level `auth` field). An expired
+  account is unusable: the project's tickets fall back to main or pause, and main-only work pauses only if main itself is out.
 - **The failing shift** is returned as `shift.rejected` with the reason `auth_expired`, not as a crash: the card goes back
   to the queue without penalty (not counted by the loop breaker, back-off or the digests), with a note on the card.
 - **Notice.** The server raises one desk notice for the workstation's owner and e-mails once: *Claude login expired on
@@ -2319,8 +2380,8 @@ shift log: `Failed to authenticate: OAuth session expired and could not be refre
   (There is no push-notification channel yet; the e-mail is the out-of-app notification.)
 - **Probe and resume.** While expired, every 3 minutes (`authProbeMs`) the runner runs `claude auth status --json` and then
   one minimal `claude -p` call (one turn, the smallest model). When it works the runtime is reported available again,
-  dispatching resumes and the server closes its notice by itself. A restart of the runner forgets the state; the first shift
-  then finds it out again (and is put back the same way).
+  dispatching resumes and the server closes its notice by itself. The state is kept in `claude-accounts-state.json`, so a
+  restart does not forget it. For an additional account (see "Claude accounts") only that account is paused.
 - **Why it expired so often, and the fix.** Agents used to get `.credentials.json` as a **symlink** to the machine's file.
   Every agent's Claude Code refreshes the access token on its own and the refresh token rotates, so concurrent agents
   raced each other: an atomic rename by one replaced the link, leaving its refreshed token in an agent directory and the
@@ -2359,7 +2420,8 @@ A Claude subscription has a session limit (5 hours) and a weekly limit. When one
   runtime is available again and the server resumes. Still limited: the freshly read time extends the pause. Network trouble: the
   state stays and the probe is tried again. A real session that succeeds (a chat, for example) also ends the pause at once.
 - **Chats** that hit the limit answer *The Claude usage limit on this workstation has been reached ... work again at ...* instead
-  of an error. A restart of the runner forgets the state; the first shift finds it out again and is put back the same way.
+  of an error. The limit is kept in `claude-accounts-state.json` across a restart. Additional accounts have their own limit:
+  `aom-runner accounts list` shows each one (see "Claude accounts").
 
 
 ### Shift did not complete
