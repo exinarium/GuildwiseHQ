@@ -29,6 +29,7 @@ import {
   transition,
   workflows,
 } from './db.ts';
+import { chatHandlers } from './handlers-chat.ts';
 import { extraHandlers } from './handlers-extra.ts';
 
 const err = (status: number, code: string, message: string, details?: unknown) =>
@@ -78,6 +79,7 @@ async function body<T>(
 }
 
 export const handlers = [
+  ...chatHandlers,
   http.get(`${A}/health`, () => HttpResponse.json({ ok: true, db: true })),
   http.post(`${A}/auth/login`, async ({ request }) => {
     const b = await body(request, LoginRequestSchema);

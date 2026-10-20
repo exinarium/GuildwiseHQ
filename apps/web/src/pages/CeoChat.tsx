@@ -137,7 +137,13 @@ export function CeoChat() {
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <div className="mb-2 flex shrink-0 items-center gap-2 border-b border-line pb-2">
             {agent && <AgentAvatar agentId={agent.id} name={agent.name} size={32} />}
-            <h1 className="mr-auto min-w-0 truncate text-lg font-semibold text-fg">Chat with {ceoName}</h1>
+            <h1
+              aria-label={`Chat with ${ceoName}`}
+              className="mr-auto min-w-0 truncate text-lg font-semibold text-fg"
+            >
+              <span className="max-sm:hidden">Chat with </span>
+              {ceoName}
+            </h1>
             <Button
               size="sm"
               variant="ghost"
