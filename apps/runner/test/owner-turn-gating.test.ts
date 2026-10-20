@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { orderVersionHash, selectChatProfile, shiftProfile } from '../src/ceo/profile.ts';
@@ -103,6 +103,7 @@ describe('the runner picks the profile', () => {
     adapter.tools = [
       { name: 'Bash', summary: 'ls -la' },
       { name: 'Bash', summary: 'curl -H "Authorization: Bearer abcdefghijkl" x' },
+      { name: 'Bash', summary: 'aom graph find PaymentGateway --in /srv/customers/acme/src/ledger.ts' },
       { name: 'Edit', summary: '/x' },
       { name: 'mcp__github__list', summary: '{}' },
       { name: 'mcp__aom_permission__ask', summary: '{}' },
@@ -124,9 +125,14 @@ describe('the runner picks the profile', () => {
     expect(t.message).toContain('<guildwise-context>');
     expect(t.message).toContain('install the thing');
     expect(t.env.AOM_SHIFT_TOKEN).toBeTruthy();
-    expect(done.toolCounts).toEqual({ bash: 2, edit: 1, mcp: 1, other: 0 });
-    expect(done.commands).toHaveLength(2);
-    expect(done.commands?.join(' ')).not.toContain('abcdefghijkl');
+    expect(done.toolCounts).toEqual({ bash: 3, edit: 1, mcp: 1, other: 0 });
+    // S4: the server gets each command's first word and counts, never arguments, queries or paths
+    expect(done.commands).toEqual(['ls*1', 'curl*1', 'aom*1']);
+    expect(done.commands?.join(' ')).not.toMatch(/abcdefghijkl|PaymentGateway|customers|ledger/);
+    // the full (redacted) text stays in a local audit file
+    const audit = readFileSync(join(h!.dataDir, 'logs', 'ceo-turns', `${msg.chatId}.commands.log`), 'utf8');
+    expect(audit).toContain('aom graph find PaymentGateway --in /srv/customers/acme/src/ledger.ts');
+    expect(audit).not.toContain('abcdefghijkl');
     expect(done.degraded).toBeUndefined();
     expect(done.model).toBe('claude-sonnet-x');
     expect(done.runtimeSessionId).toBe('sess-1');

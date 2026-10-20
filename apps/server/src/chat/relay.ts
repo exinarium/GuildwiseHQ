@@ -9,6 +9,7 @@ import {
   type RunnerToServerOf,
   type ServerToBrowser,
   streamId,
+  summarizeCommandTexts,
   type ToolCounts,
 } from '@aom/shared';
 import { orgOwnerId, orgRoleOf } from '../auth/org-context.ts';
@@ -630,7 +631,8 @@ export class ChatRelay {
       ...(await closePendingForTurn(tx, turn)),
     ];
     if (turn.mode === 'order' && turn.order_entry_id) {
-      const commands = [...new Set([...(turn.order_commands ?? []), ...(msg.commands ?? [])])].slice(0, 200);
+      // Only first words and counts are kept (an older runner sends the full text; it is reduced here).
+      const commands = summarizeCommandTexts([...(turn.order_commands ?? []), ...(msg.commands ?? [])]);
       events.push({
         streamId: streamId.ceo(c.orgId),
         event: {

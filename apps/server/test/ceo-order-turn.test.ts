@@ -277,7 +277,9 @@ describe('invoking an order', () => {
       )
     )[0]!;
     expect(finished.payload).toMatchObject({ outcome: 'done', entryId: o.id, versionHash: o.hash });
-    expect(finished.payload.commands).toEqual(['docker compose up', 'git status']);
+    // S4: first words and counts only; arguments (and paths) never reach the server, even from an older runner
+    expect(finished.payload.commands).toEqual(['docker*2', 'git*1']);
+    expect(JSON.stringify(finished.payload)).not.toMatch(/compose|status/);
     // the backstop job log is for owner turns only
     expect(await q(`SELECT 1 FROM ceo_offboard_jobs WHERE turn_id=$1`, [start.chatId])).toHaveLength(0);
     // the Activity tab and the report list it; the Owner may correct it, an Admin may not
@@ -288,7 +290,7 @@ describe('invoking an order', () => {
       outcome: 'done',
       corrected: false,
     });
-    expect(turns[0].commands).toEqual(['docker compose up', 'git status']);
+    expect(turns[0].commands).toEqual(['docker*2', 'git*1']);
     const admin = await w.t.userSession(uniqueEmail('admin'));
     await w.t.addOrgMember(orgId, admin.id, 'admin');
     expect(

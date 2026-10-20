@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { delimiter, join } from 'node:path';
@@ -12,6 +12,7 @@ import {
   type ReadableFolder,
   renderChatInstructions,
   type ServerToRunnerOf,
+  summarizeCommandTexts,
   type ToolCounts,
   type Usage,
 } from '@aom/shared';
@@ -481,6 +482,23 @@ export class ChatManager {
     }
   }
 
+  /** The full text of the Bash commands of a CEO turn (redacted), kept on this machine only. */
+  private auditCommands(chatId: string, commands: string[]): void {
+    try {
+      const dir = join(this.deps.paths.logs, 'ceo-turns');
+      mkdirSync(dir, { recursive: true, mode: 0o700 });
+      appendFileSync(
+        join(dir, `${chatId.replace(/[^A-Za-z0-9_-]/g, '_')}.commands.log`),
+        `${commands.join('\n')}\n`,
+        {
+          mode: 0o600,
+        },
+      );
+    } catch {
+      // the audit is best effort
+    }
+  }
+
   /** Tool use of a session, for `chat.done.toolCounts` and the audit of the Bash commands. */
   private countTool(t: { name: string; summary: string }, counts: ToolCounts, commands: string[]): void {
     if (t.name === 'Bash') {
@@ -588,6 +606,7 @@ export class ChatManager {
       return this.error(msg, exit.error ?? `the ${msg.agent.runtime} process exited with code ${exit.code}`);
     }
     const usage = session.usage() ?? zeroUsage();
+    if (o.fullPower && commands.length) this.auditCommands(msg.chatId, commands);
     this.terminal(
       msg.chatId,
       this.deps.send('chat.done', {
@@ -596,7 +615,13 @@ export class ChatManager {
         messageText: finalText ?? streamed,
         usage,
         ...(sessionId ? { runtimeSessionId: sessionId } : {}),
-        ...(o.fullPower ? { toolCounts: counts, ...(commands.length ? { commands } : {}) } : {}),
+        // The server gets each command's first word and counts only; the full (redacted) text stays in a local audit file.
+        ...(o.fullPower
+          ? {
+              toolCounts: counts,
+              ...(commands.length ? { commands: summarizeCommandTexts(commands) } : {}),
+            }
+          : {}),
         ...(o.degraded ? { degraded: o.degraded } : {}),
         ...(usage.model ? { model: usage.model } : {}),
       }),

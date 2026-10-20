@@ -10,6 +10,7 @@ import {
   normalizeJobKind,
   resolveModelChoice,
   suggestForRepeat,
+  summarizeCommandTexts,
 } from '../src/index.ts';
 
 const DAY = 86_400_000;
@@ -147,5 +148,21 @@ describe('the new rpc operations', () => {
       true,
     );
     expect(CeoRpcSchema.safeParse({ op: 'devops_status', requestId: 'nope' }).success).toBe(false);
+  });
+});
+
+describe('summarizeCommandTexts (pre-production review S4)', () => {
+  it('keeps first words and counts only: no arguments, paths, queries or assigned values', () => {
+    const out = summarizeCommandTexts([
+      'aom graph find PaymentGateway --in /srv/acme/src/ledger.ts',
+      'aom ceo route ledger/payments',
+      'API_TOKEN=abc123 /usr/local/bin/deploy.sh --force',
+      'git status',
+      '"quoted" arg',
+      '$(weird)',
+      'git*2',
+    ]);
+    expect(out).toEqual(['aom*2', 'deploy.sh*1', 'git*3', 'quoted*1', 'other*1']);
+    expect(out.join(' ')).not.toMatch(/PaymentGateway|ledger|abc123|srv|payments/);
   });
 });

@@ -1,5 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import { type CeoOrderTurnDto, type CeoRpc, renderCeoData, streamId } from '@aom/shared';
+import {
+  type CeoOrderTurnDto,
+  type CeoRpc,
+  renderCeoData,
+  streamId,
+  summarizeCommandTexts,
+} from '@aom/shared';
 import { orgOwnerId } from '../auth/org-context.ts';
 import { agentActor, orgScope, SYSTEM_ACTOR, userActor } from '../commands/common.ts';
 import type { Ctx } from '../context.ts';
@@ -193,7 +199,7 @@ export async function orderTurnTerminal(
           versionHash: turn.order_version_hash,
           outcome: declined ? 'declined' : 'done',
           summary: summary.slice(0, 4000),
-          commands: (rpc.commands ?? []).slice(0, 200),
+          commands: summarizeCommandTexts(rpc.commands ?? []),
           ...(ask ? { ask: ask.slice(0, 2000) } : {}),
         },
       },
