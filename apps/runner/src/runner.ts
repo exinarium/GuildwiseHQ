@@ -17,7 +17,9 @@ import {
   READONLY_DESIGN_CAPABILITY,
   type RepoReport,
   RUNNER_PIN_CAPABILITY,
+  RUNNER_UPDATE_CHECK_CAPABILITY,
   type RunnerCommandName,
+  type RunnerUpdateCheckResult,
   type RunnerUpdateState,
   type RuntimeInfo,
   type ServerToRunner,
@@ -188,6 +190,8 @@ export interface RunnerOptions {
   onConnected?: () => void;
   /** Safe mode: the server pinned this workstation to a runner version (null: follow the latest release again). */
   onRunnerPin?: (version: string | null) => void;
+  /** "Check for updates" from the web: the self-updater checks now (one updater per process, whichever pairing asked). */
+  onUpdateCheck?: () => Promise<RunnerUpdateCheckResult>;
   /** Test seam: timings of the run supervision (see `runs/manager.ts`). */
   runTiming?: Partial<import('./runs/manager.ts').RunTiming>;
   /** Tests shorten the health polling of a deploy. */
@@ -1028,6 +1032,7 @@ export class Runner {
         SHIFT_LIMIT_CAPABILITY,
         READONLY_DESIGN_CAPABILITY,
         RUNNER_PIN_CAPABILITY,
+        RUNNER_UPDATE_CHECK_CAPABILITY,
         DELIVERY_CAPABILITY,
         LOCAL_VAULT_CAPABILITY,
         CLAUDE_ACCOUNTS_CAPABILITY,
@@ -1381,6 +1386,17 @@ export class Runner {
         const p = CommandPayloadSchemas['runner.pin'].parse(payload);
         this.opts.onRunnerPin?.(p.version);
         done(true, { version: p.version });
+      } else if (command === 'runner.update.check') {
+        // "Check for updates": the answer is ok:true whatever the outcome (up to date, found, paused, disabled, failed).
+        CommandPayloadSchemas['runner.update.check'].parse(payload);
+        done(
+          true,
+          (await this.opts.onUpdateCheck?.()) ?? {
+            outcome: 'disabled',
+            version: null,
+            detail: 'this runner has no updater',
+          },
+        );
       } else if (command === 'claude.account.ensure') {
         // Provision an additional Claude account (folder, config entry, alias); an unexpected error is ok:false only.
         const p = CommandPayloadSchemas['claude.account.ensure'].parse(payload);

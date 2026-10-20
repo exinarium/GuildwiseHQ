@@ -756,6 +756,7 @@ export const RunnerCommandNameSchema = z.enum([
   'integration.remove',
   'shifts.limit',
   'runner.pin',
+  'runner.update.check',
   'graph.index',
   'graph.update',
   'graph.org',
@@ -823,6 +824,8 @@ export const CommandPayloadSchemas = {
    * ignores both.
    */
   'runner.pin': z.object({ version: z.string().max(40).nullable() }),
+  /** "Check for updates" on the Workstations page: run the updater's check now instead of at the next timer. */
+  'runner.update.check': z.object({}),
   /** Project graphs: index a repository into the project vault / bring the graph up to a merge commit (docs/design/project-graphs.md). */
   'graph.index': GraphIndexPayloadSchema,
   'graph.update': GraphIndexPayloadSchema,
@@ -836,6 +839,28 @@ export const CommandPayloadSchemas = {
 
 /** Announced in `hello.capabilities`-style lists by runners that apply a version pin (`runner.pin`, `welcome.runnerPin`). */
 export const RUNNER_PIN_CAPABILITY = 'runner-pin:1';
+
+/** Announced by runners that answer the `runner.update.check` command ("Check for updates" on the Workstations page). */
+export const RUNNER_UPDATE_CHECK_CAPABILITY = 'update-check:1';
+
+/**
+ * The outcome of a `runner.update.check` (the command's result): `up_to_date`, `update_found` (`version` is downloaded or
+ * downloading and installs when the runner is idle), `paused` (the platform kill switch), `disabled` (`AOM_RUNNER_AUTO_UPDATE=0`
+ * or not an installer-managed install), `failed` (`detail` says why).
+ */
+export const RUNNER_UPDATE_CHECK_OUTCOMES = [
+  'up_to_date',
+  'update_found',
+  'paused',
+  'disabled',
+  'failed',
+] as const;
+export const RunnerUpdateCheckResultSchema = z.object({
+  outcome: z.enum(RUNNER_UPDATE_CHECK_OUTCOMES),
+  version: z.string().max(40).nullable(),
+  detail: z.string().max(300).nullable(),
+});
+export type RunnerUpdateCheckResult = z.infer<typeof RunnerUpdateCheckResultSchema>;
 
 /** The commands that carry a sealed envelope: their payload is emptied once answered, and they expire. */
 export const ENVELOPE_COMMANDS: ReadonlySet<string> = new Set([

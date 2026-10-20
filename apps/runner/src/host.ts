@@ -28,6 +28,8 @@ export interface HostOptions {
   onConnected?: () => void;
   /** Safe mode: the server pinned the runner version (the self-updater follows it). */
   onRunnerPin?: (version: string | null) => void;
+  /** "Check for updates" from the web, via any pairing: the self-updater checks now. */
+  onUpdateCheck?: () => Promise<import('@aom/shared').RunnerUpdateCheckResult>;
   /** `aom runner restart`, after the reply was acknowledged: end the process so it is started again. */
   requestRestart?: () => void;
 }
@@ -214,6 +216,13 @@ export class RunnerHost {
       },
       onConnected: () => this.opts.onConnected?.(),
       onRunnerPin: (v) => this.opts.onRunnerPin?.(v),
+      onUpdateCheck: () =>
+        this.opts.onUpdateCheck?.() ??
+        Promise.resolve({
+          outcome: 'disabled' as const,
+          version: null,
+          detail: 'this runner has no updater',
+        }),
       requestRestart: () => this.opts.requestRestart?.(),
       ...this.opts.runnerOptions,
     });

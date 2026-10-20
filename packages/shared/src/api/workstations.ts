@@ -7,6 +7,7 @@ import {
   JiraStatusSchema,
   OrgFolderStateSchema,
   RepoSyncStatusSchema,
+  RunnerUpdateCheckResultSchema,
   RunnerUpdateStateSchema,
   RuntimeInfoSchema,
   ShiftLimitSettingSchema,
@@ -46,6 +47,20 @@ export const WorkstationDtoSchema = z.object({
       reportedAt: IsoTime,
     })
     .nullable()
+    .optional(),
+  /**
+   * "Check for updates": whether the runner answers it (`supported` null: capabilities not reported yet), the state of the
+   * latest request (`checking`: asked, no answer yet; `timed_out`: no answer in 5 minutes; `idle`: nothing asked or answered)
+   * and the runner's last answer. A new request is accepted from `nextAllowedAt` (one a minute).
+   */
+  updateCheck: z
+    .object({
+      supported: z.boolean().nullable(),
+      state: z.enum(['idle', 'checking', 'timed_out']),
+      requestedAt: IsoTime.nullable(),
+      nextAllowedAt: IsoTime.nullable(),
+      result: RunnerUpdateCheckResultSchema.extend({ at: IsoTime }).nullable(),
+    })
     .optional(),
   /** Safe mode: the runner version the platform team pinned this workstation to (its own pin, else the all-workstations one). */
   runnerPin: z
@@ -218,3 +233,7 @@ export const ForgeRepoListSchema = z.object({
   error: z.string().nullable(),
 });
 export type ForgeRepoList = z.infer<typeof ForgeRepoListSchema>;
+
+/** `POST /api/workstations/:id/update-check`: the check was queued (the answer shows in `updateCheck` of the workstation). */
+export const UpdateCheckResponseSchema = z.object({ ok: z.literal(true), requestedAt: IsoTime });
+export type UpdateCheckResponse = z.infer<typeof UpdateCheckResponseSchema>;
