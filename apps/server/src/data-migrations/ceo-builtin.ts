@@ -90,6 +90,7 @@ export async function migrateCeoBuiltin(env: DataMigrationEnv): Promise<CeoBuilt
                     subkind: 'ceo_graduated',
                     title: 'Your CEO finished training',
                     body: 'The CEO is built into Guildwise now, so its training period is over and it works with its full permissions. Nothing else changed: its memories, policy and settings are as you left them.',
+                    options: [],
                     blocking: false,
                     pinned: false,
                     affectedCardIds: [],
