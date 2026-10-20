@@ -14,7 +14,7 @@ import { ReleasedBySchema, SECRET_NAME, TriggerSchema } from './recipe.ts';
 export const SETUP_FILE = 'setup.json';
 export const SETUP_VERSION = 1;
 /** The compiler version recorded in `setup.json`: a newer compiler never silently rewrites approved scripts. */
-export const SETUP_GENERATOR = 'setup-1.0';
+export const SETUP_GENERATOR = 'setup-1.1';
 
 /** `/abs/path` or `~/path`: letters, digits and `._/+@=-` only, no `..`. */
 const PATH_RE = /^(?:~\/|\/)[A-Za-z0-9._/+@=-]*$/;

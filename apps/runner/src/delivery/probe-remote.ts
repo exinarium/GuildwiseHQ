@@ -10,7 +10,8 @@ echo "UID $(id -u 2>/dev/null)"
 if command -v docker >/dev/null 2>&1; then
   echo "DOCKER_VERSION $(docker version --format '{{.Server.Version}}' 2>/dev/null)"
   if docker info >/dev/null 2>&1; then echo "DOCKER_USABLE 1"; else echo "DOCKER_USABLE 0"; fi
-  echo "COMPOSE_VERSION $(docker compose version --short 2>/dev/null)"
+  cv=$(docker compose version --short 2>/dev/null) || cv=$(docker-compose version --short 2>/dev/null) || cv=
+  echo "COMPOSE_VERSION $cv"
   docker ps --all --format 'CONTAINER	{{.Names}}	{{.Image}}	{{.State}}	{{.Status}}	{{.Ports}}	{{.Label "com.docker.compose.project"}}	{{.Label "com.docker.compose.service"}}	{{.Label "com.docker.compose.project.config_files"}}	{{.Label "com.docker.compose.project.working_dir"}}' 2>/dev/null
   docker volume ls --format 'VOLUME {{.Name}}' 2>/dev/null
 else

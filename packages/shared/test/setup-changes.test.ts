@@ -19,7 +19,7 @@ const report = (over: Partial<z.input<typeof ProbeReportSchema>> = {}): ProbeRep
   ProbeReportSchema.parse({
     scope: 'local',
     at,
-    docker: { installed: true, usable: true, version: '29.1' },
+    docker: { installed: true, usable: true, version: '29.1', composeVersion: '2.40.0' },
     ...over,
   });
 
@@ -250,5 +250,24 @@ describe('paths and probe schemas', () => {
     expect(DeployProbeResultSchema.safeParse({ ok: false, error: 'whatever' }).success).toBe(false);
     expect(probeErrorText('ssh_host_key_changed', 'srv')).toContain('ssh-keygen -R srv');
     expect(probeErrorText('docker_permission')).toContain('docker group');
+  });
+});
+
+describe('docker compose on the server (version 1 or 2)', () => {
+  const run = (docker: object) => {
+    const items = planChanges(
+      { version: 1, generator: 'x', environments: [FIRST_ADOPTER().environments[1] as never] } as never,
+      { production: report({ docker } as never) },
+    );
+    return items;
+  };
+  it('blocks when neither docker compose nor docker-compose exists', () => {
+    const items = run({ installed: true, usable: true, version: '24' });
+    expect(items.some((i) => i.group === 'setup_once' && i.ref === 'compose_tool')).toBe(true);
+  });
+  it('accepts the older docker-compose program and says so', () => {
+    const items = run({ installed: true, usable: true, version: '24', composeVersion: '1.29.2' });
+    expect(items.some((i) => i.group === 'setup_once' && i.ref === 'compose_tool')).toBe(false);
+    expect(items.some((i) => i.ref === 'compose_tool' && i.text.includes('older docker-compose'))).toBe(true);
   });
 });

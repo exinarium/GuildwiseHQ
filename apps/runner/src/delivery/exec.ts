@@ -413,6 +413,7 @@ export class DeployExecutor {
       AOM_DEPLOY_COMMIT: commit,
       AOM_DEPLOY_CHECKOUT: vars.checkout ?? '',
       AOM_DEPLOY_ENV: p.env,
+      AOM_DEPLOY_PROJECT_ID: p.projectId,
       AOM_DEPLOY_TARGET: p.target.name,
       AOM_DEPLOY_HOST: p.target.host ?? '',
       AOM_DEPLOY_APP_URL: p.target.appUrl ?? '',

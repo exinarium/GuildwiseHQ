@@ -93,6 +93,8 @@ function commonFunctions(): string[] {
     `say() { printf '%s\\n' "$*"; }`,
     `die() { printf 'AOM: %s\\n' "$*" >&2; exit 1; }`,
     `would() { say "would: $*"; }`,
+    '# the deploy lock (fd 9) is never inherited by what this script starts',
+    'docker() { command docker "$@" 9>&-; }',
     '',
   ];
 }
@@ -147,7 +149,10 @@ function commitChecks(): string[] {
 
 const lockBlock = (name: string): string[] => [
   'if command -v flock >/dev/null 2>&1; then',
-  sh`  exec 9>"@{XDG_RUNTIME_DIR:-/tmp}/aom-deploy-${name}.lock"`,
+  sh`  LOCK_DIR="@{XDG_RUNTIME_DIR:-$HOME/.cache}"`,
+  '  mkdir -p -- "$LOCK_DIR" 2>/dev/null || LOCK_DIR=/tmp',
+  sh`  LOCK_PROJECT="@{AOM_DEPLOY_PROJECT_ID:-x}"`,
+  sh`  exec 9>"$LOCK_DIR/aom-deploy-@{LOCK_PROJECT//[^A-Za-z0-9-]/}-${name}.lock"`,
   '  flock -n 9 || die "another deploy of $ENV_NAME is running"',
   'fi',
 ];
@@ -185,7 +190,7 @@ function localScript(setup: DeliverySetup, env: SetupEnv): string {
     '',
     ...lockBlock(`${a.composeProject ?? a.service}-${env.name}`),
     '',
-    'command -v docker >/dev/null 2>&1 || die "docker is not installed on this computer"',
+    'type -P docker >/dev/null 2>&1 || die "docker is not installed on this computer"',
     ...curlCheck(env),
     'docker compose version >/dev/null 2>&1 || die "docker compose (version 2) is not available"',
     '[ -f "$COMPOSE_FILE" ] || die "the compose file $COMPOSE_FILE does not exist"',
@@ -207,6 +212,8 @@ function localScript(setup: DeliverySetup, env: SetupEnv): string {
     sh`case "$PREVIOUS" in *[!A-Za-z0-9._/:@-]*) PREVIOUS="" ;; esac`,
     'say "running now: ${PREVIOUS:-nothing}"',
     '',
+    ...localGuard(env),
+    '',
     'if [ "$PREVIOUS" = "$TAG" ] && healthy; then',
     '  say "already deployed: $TAG is running and healthy"',
     '  done_line',
@@ -220,6 +227,43 @@ function localScript(setup: DeliverySetup, env: SetupEnv): string {
   });
   out.push(...localTail(env));
   return lines(out);
+}
+
+/** Everything after the switch is undone when the script ends early (any failure, TERM, INT), unless it finished. */
+function localGuard(env: SetupEnv): string[] {
+  return [
+    '# if anything ends this script after the app was switched, put the previous version back',
+    'SWITCHED=0',
+    'FINISHED=0',
+    'on_exit() {',
+    '  local rc=$?',
+    '  trap - EXIT',
+    '  if [ "$SWITCHED" = 1 ] && [ "$FINISHED" != 1 ]; then',
+    ...(env.rollback
+      ? [
+          '    if [ -n "$PREVIOUS" ] && [ "$PREVIOUS" != "$TAG" ]; then',
+          '      say "putting the previous version back: $PREVIOUS"',
+          `      printf 'services:\\n  %s:\\n    image: "%s"\\n' "$SERVICE" "$PREVIOUS" > "$WORK/rollback.yml"`,
+          '      if dc -f "$WORK/rollback.yml" up -d --no-build --no-deps "$SERVICE"; then',
+          '        if wait_healthy 60; then say "rolled back to $PREVIOUS"; else say "still not healthy after going back to $PREVIOUS"; fi',
+          '      else',
+          '        say "ROLLBACK FAILED: $SERVICE may still be running $TAG. Put $PREVIOUS back by hand."',
+          '      fi',
+          '      [ -z "$BACKUP_FILE" ] || say "the database was NOT rolled back; the backup made before this update is $BACKUP_FILE"',
+          '    else',
+          '      say "there is no previous version to go back to; $SERVICE may be running $TAG"',
+          '    fi',
+        ]
+      : ['    say "automatic rollback is switched off; $SERVICE may be running $TAG"']),
+    '  fi',
+    '  rm -rf -- "$WORK"',
+    '  if [ "$rc" -eq 0 ] && [ "$SWITCHED" = 1 ] && [ "$FINISHED" != 1 ]; then rc=1; fi',
+    '  exit "$rc"',
+    '}',
+    'trap on_exit EXIT',
+    "trap 'exit 143' TERM",
+    "trap 'exit 130' INT",
+  ];
 }
 
 function localStep(s: DeployStep, i: number, env: SetupEnv): string[] {
@@ -237,9 +281,9 @@ function localStep(s: DeployStep, i: number, env: SetupEnv): string[] {
         '  would "back up the database ($DB_SERVICE) to $BACKUP_DIR, keeping the newest $KEEP_BACKUPS"',
         '  [ -n "$(dc ps -q "$DB_SERVICE")" ] || die "the database service $DB_SERVICE is not running"',
         'else',
-        '  mkdir -p -- "$BACKUP_DIR"',
+        '  (umask 077; mkdir -p -- "$BACKUP_DIR")',
         '  BACKUP_FILE="$BACKUP_DIR/$ENV_NAME-before-$SHORT-$(date +%Y%m%d-%H%M%S).sql.gz"',
-        `  if ! dc exec -T "$DB_SERVICE" sh -c ${shq('pg_dump -U "${1:-$POSTGRES_USER}" -d "${2:-$POSTGRES_DB}"')} sh "$DB_USER" "$DB_NAME" | gzip > "$BACKUP_FILE.part"; then`,
+        `  if ! (umask 077; dc exec -T "$DB_SERVICE" sh -c ${shq('pg_dump -U "${1:-$POSTGRES_USER}" -d "${2:-$POSTGRES_DB}"')} sh "$DB_USER" "$DB_NAME" </dev/null | gzip > "$BACKUP_FILE.part"); then`,
         '    rm -f -- "$BACKUP_FILE.part"',
         '    die "the database backup failed; nothing was changed"',
         '  fi',
@@ -248,6 +292,7 @@ function localStep(s: DeployStep, i: number, env: SetupEnv): string[] {
         '    die "the database backup is too small to be real; nothing was changed"',
         '  fi',
         '  mv -- "$BACKUP_FILE.part" "$BACKUP_FILE"',
+        '  [ -s "$BACKUP_FILE" ] || die "the database backup file is missing after it was saved; nothing was changed"',
         '  say "backup saved: $BACKUP_FILE"',
         '  if [ "$KEEP_BACKUPS" -gt 0 ]; then',
         sh`    ls -1t -- "$BACKUP_DIR"/"$ENV_NAME"-before-*.sql.gz 2>/dev/null | tail -n +$((KEEP_BACKUPS + 1)) | while IFS= read -r old; do rm -f -- "$old"; done || true`,
@@ -263,6 +308,7 @@ function localStep(s: DeployStep, i: number, env: SetupEnv): string[] {
         'else',
         '  OVERRIDE="$WORK/override.yml"',
         `  printf 'services:\\n  %s:\\n    build: "%s"\\n    image: "%s"\\n' "$SERVICE" "$CHECKOUT" "$TAG" > "$OVERRIDE"`,
+        '  SWITCHED=1',
         '  dc -f "$OVERRIDE" up -d --build --no-deps "$SERVICE"',
         'fi',
       ];
@@ -294,26 +340,14 @@ function localTail(env: SetupEnv): string[] {
     '  exit 0',
     'fi',
   );
-  if (env.health.kind === 'http') {
+  if (env.health.kind === 'http')
     out.push(
       'if ! wait_healthy "$HEALTH_TIMEOUT"; then',
       '  say "the site did not become healthy within ${HEALTH_TIMEOUT}s"',
+      '  die "the update failed (the previous version is put back when it can be)"',
+      'fi',
     );
-    if (env.rollback)
-      out.push(
-        '  if [ -n "$PREVIOUS" ] && [ "$PREVIOUS" != "$TAG" ]; then',
-        '    say "putting the previous version back: $PREVIOUS"',
-        `    printf 'services:\\n  %s:\\n    image: "%s"\\n' "$SERVICE" "$PREVIOUS" > "$WORK/rollback.yml"`,
-        '    dc -f "$WORK/rollback.yml" up -d --no-build --no-deps "$SERVICE"',
-        '    if wait_healthy 60; then say "rolled back to $PREVIOUS"; else say "still not healthy after going back to $PREVIOUS"; fi',
-        '    [ -z "$BACKUP_FILE" ] || say "the database was NOT rolled back; the backup made before this update is $BACKUP_FILE"',
-        '    die "the update failed and was rolled back to $PREVIOUS"',
-        '  fi',
-        '  die "the update failed and there is no previous version to go back to"',
-      );
-    else out.push('  die "the update failed; automatic rollback is switched off"');
-    out.push('fi');
-  }
+  out.push('FINISHED=1');
   out.push(
     '',
     '# remove old copies of the image (never the one that runs or the one before it)',
@@ -341,14 +375,27 @@ function sshHelpers(): string[] {
     sh`read -r -a SSH_CMD <<< "@{AOM_DEPLOY_SSH:-ssh}"`,
     'SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=yes)',
     '# one command string on the server',
-    sh`rsh() { "@{SSH_CMD[@]}" "@{SSH_OPTS[@]}" -- "$HOST" "$1"; }`,
+    sh`rsh() { "@{SSH_CMD[@]}" "@{SSH_OPTS[@]}" -- "$HOST" "$1" 9>&-; }`,
     '# arguments for a remote command line, quoted',
     `rquote() { local a out=''; for a in "$@"; do out+=" $(printf '%q' "$a")"; done; printf '%s' "$out"; }`,
-    '# a script on stdin, run on the server with these arguments as $1 $2 ...',
-    'remote() { rsh "bash -s --$(rquote "$@")"; }',
+    '# "docker compose" (version 2) or "docker-compose" (version 1): whichever the server has',
+    `REMOTE_PRE='dc() { if docker compose version >/dev/null 2>&1; then docker compose "$@"; elif docker-compose version >/dev/null 2>&1; then docker-compose "$@"; else echo "AOM: the server has neither docker compose nor docker-compose" >&2; return 127; fi; }'`,
+    '# a script, run on the server with these arguments as $1 $2 ... The script travels as an ARGUMENT (base64, so there is nothing',
+    '# to quote), never on stdin: a docker command that reads stdin cannot swallow the rest of it. The remote stdin is empty.',
+    'remote() {',
+    '  local b64',
+    `  b64="$({ printf '%s\\n' "$REMOTE_PRE"; cat; } | base64 | tr -d '\\n')"`,
+    '  rsh "bash -c \\"\\$(printf %s $b64 | base64 -d)\\" aom-remote$(rquote "$@")" </dev/null',
+    '}',
     '',
   ];
 }
+
+/**
+ * awk program: the value of `VAR` in a dotenv file. Handles `export VAR=...`, double and single quotes, a trailing `# comment`
+ * (unquoted values) and CRLF line ends; the last assignment wins, as in dotenv loaders.
+ */
+export const ENV_VALUE_AWK = String.raw`BEGIN { v = ENVIRON["VAR"] } { sub(/\r$/, ""); l = $0; sub(/^[ \t]*(export[ \t]+)?/, "", l); if (index(l, v "=") != 1) next; val = substr(l, length(v) + 2); sub(/^[ \t]+/, "", val); if (val ~ /^"/) { sub(/^"/, "", val); sub(/".*$/, "", val) } else if (val ~ /^\047/) { sub(/^\047/, "", val); sub(/\047.*$/, "", val) } else { sub(/[ \t]+#.*$/, "", val); sub(/[ \t]+$/, "", val) } last = val } END { print last }`;
 
 function remoteState(): string[] {
   return [
@@ -359,9 +406,9 @@ function remoteState(): string[] {
     '[ -f "$file" ] || { echo "AOM: there is no compose file $file on the server" >&2; exit 22; }',
     'docker info >/dev/null 2>&1 || { echo "AOM: docker is not usable by this user on the server" >&2; exit 23; }',
     'cur=',
-    'if [ -f "$dir/.env" ]; then cur=$(sed -n "s/^$var=//p" "$dir/.env" | tail -n 1); fi',
+    "if [ -f \"$dir/.env\" ]; then cur=$(VAR=\"$var\" awk '" + ENV_VALUE_AWK + "' \"$dir/.env\"); fi",
     'run=',
-    'id=$(cd "$dir" && docker compose -f "$file" ps -q "$svc" 2>/dev/null | head -n 1) || id=',
+    'id=$(cd "$dir" && dc -f "$file" ps -q "$svc" 2>/dev/null | head -n 1) || id=',
     `if [ -n "$id" ]; then run=$(docker inspect --format '{{.Config.Image}}' "$id" 2>/dev/null) || run=; fi`,
     `printf 'image=%s\\nrunning=%s\\n' "$cur" "$run"`,
     'AOM_REMOTE',
@@ -369,6 +416,7 @@ function remoteState(): string[] {
     `CURRENT_IMAGE="$(printf '%s\\n' "$STATE" | sed -n 's/^image=//p' | head -n 1)"`,
     `RUNNING_IMAGE="$(printf '%s\\n' "$STATE" | sed -n 's/^running=//p' | head -n 1)"`,
     sh`case "$CURRENT_IMAGE" in *[!A-Za-z0-9._/:@-]*) CURRENT_IMAGE="" ;; esac`,
+    sh`case "$RUNNING_IMAGE" in *[!A-Za-z0-9._/:@-]*) RUNNING_IMAGE="" ;; esac`,
     'say "server runs: ${RUNNING_IMAGE:-nothing}; settings point at: ${CURRENT_IMAGE:-nothing}"',
   ];
 }
@@ -384,9 +432,11 @@ function sshFunctions(env: SetupEnv): string[] {
     'envf="$dir/.env"',
     '[ -f "$envf" ] || { echo "AOM: there is no .env in $dir" >&2; exit 51; }',
     'tmp="$envf.aom-tmp.$$"',
+    `trap 'rm -f -- "$tmp"' EXIT`,
     'cp -p -- "$envf" "$tmp"',
     `VAR="$var" VAL="$val" awk 'BEGIN { v = ENVIRON["VAR"]; n = ENVIRON["VAL"]; done = 0 }`,
-    '  index($0, v "=") == 1 { if (!done) print v "=" n; done = 1; next }',
+    '  { l = $0; sub(/\r$/, "", l); sub(/^[ \t]*(export[ \t]+)?/, "", l) }',
+    '  index(l, v "=") == 1 { if (!done) print v "=" n; done = 1; next }',
     '  { print }',
     `  END { if (!done) print v "=" n }' "$envf" > "$tmp"`,
     'mv -- "$tmp" "$envf"',
@@ -400,8 +450,8 @@ function sshFunctions(env: SetupEnv): string[] {
     'dir=$1; file=$2; svc=$3; dry=$4; proj=$5',
     'cd "$dir"',
     'if [ -n "$proj" ]; then set -- -p "$proj" -f "$file"; else set -- -f "$file"; fi',
-    'if [ "$dry" = 1 ]; then docker compose "$@" config -q; echo "would restart only $svc" >&2; exit 0; fi',
-    'docker compose "$@" up -d --no-deps "$svc"',
+    'if [ "$dry" = 1 ]; then dc "$@" config -q; echo "would restart only $svc" >&2; exit 0; fi',
+    'dc "$@" up -d --no-deps "$svc"',
     'AOM_REMOTE',
     '}',
     '',
@@ -444,12 +494,50 @@ function sshScript(setup: DeliverySetup, env: SetupEnv): string {
     'fi',
     '[ "$DRY_RUN" = 1 ] && say "dry run: only checking, nothing will be changed"',
     'BACKUP_FILE=""',
+    '',
+    ...sshGuard(env),
   );
   env.steps.forEach((s, i) => {
     out.push(...sshStep(s, i, env));
   });
   out.push(...sshTail(env));
   return lines(out);
+}
+
+/** Everything after the image switch is undone when the script ends early (any failure, TERM, INT), unless it finished. */
+function sshGuard(env: SetupEnv): string[] {
+  return [
+    '# the image to go back to: the settings file\'s value, else what runs now',
+    'PREVIOUS="${CURRENT_IMAGE:-$RUNNING_IMAGE}"',
+    'SWITCHED=0',
+    'FINISHED=0',
+    'on_exit() {',
+    '  local rc=$?',
+    '  trap - EXIT',
+    '  if [ "$SWITCHED" = 1 ] && [ "$FINISHED" != 1 ]; then',
+    ...(env.rollback
+      ? [
+          '    if [ -n "$PREVIOUS" ] && [ "$PREVIOUS" != "$TAG" ]; then',
+          '      say "putting the previous version back: $PREVIOUS"',
+          '      if set_image_var "$PREVIOUS" && compose_up_remote 0; then',
+          '        if wait_healthy 60; then say "rolled back to $PREVIOUS"; else say "still not healthy after going back to $PREVIOUS"; fi',
+          '      else',
+          '        say "ROLLBACK FAILED: the server may still be running $TAG. Settings copy: $APP_DIR/.env.bak-before-$SHORT. Put $PREVIOUS back by hand."',
+          '      fi',
+          '      [ -z "$BACKUP_FILE" ] || say "the database was NOT rolled back; the backup made before this update is $BACKUP_FILE"',
+          '    else',
+          '      say "there is no previous version to go back to; the server may be running $TAG"',
+          '    fi',
+        ]
+      : ['    say "automatic rollback is switched off; the server may be running $TAG"']),
+    '  fi',
+    '  if [ "$rc" -eq 0 ] && [ "$SWITCHED" = 1 ] && [ "$FINISHED" != 1 ]; then rc=1; fi',
+    '  exit "$rc"',
+    '}',
+    'trap on_exit EXIT',
+    "trap 'exit 143' TERM",
+    "trap 'exit 130' INT",
+  ];
 }
 
 function sshStep(s: DeployStep, i: number, env: SetupEnv): string[] {
@@ -467,13 +555,14 @@ function sshStep(s: DeployStep, i: number, env: SetupEnv): string[] {
         'dir=$1; file=$2; svc=$3; bdir=$4; env=$5; short=$6; keep=$7; dbuser=$8; dbname=$9; dry=${10}',
         'cd "$dir"',
         'if [ "$dry" = 1 ]; then',
-        '  [ -n "$(docker compose -f "$file" ps -q "$svc")" ] || { echo "AOM: the database service $svc is not running" >&2; exit 30; }',
+        '  [ -n "$(dc -f "$file" ps -q "$svc")" ] || { echo "AOM: the database service $svc is not running" >&2; exit 30; }',
         '  echo "would: back up the database ($svc) to $bdir, keeping the newest $keep" >&2',
         '  exit 0',
         'fi',
+        'umask 077',
         'mkdir -p -- "$bdir"',
         'out="$bdir/$env-before-$short-$(date +%Y%m%d-%H%M%S).sql.gz"',
-        `if ! docker compose -f "$file" exec -T "$svc" sh -c ${shq('pg_dump -U "${1:-$POSTGRES_USER}" -d "${2:-$POSTGRES_DB}"')} sh "$dbuser" "$dbname" | gzip > "$out.part"; then`,
+        `if ! dc -f "$file" exec -T "$svc" sh -c ${shq('pg_dump -U "${1:-$POSTGRES_USER}" -d "${2:-$POSTGRES_DB}"')} sh "$dbuser" "$dbname" </dev/null | gzip > "$out.part"; then`,
         '  rm -f -- "$out.part"',
         '  echo "AOM: the database backup failed" >&2',
         '  exit 31',
@@ -484,12 +573,14 @@ function sshStep(s: DeployStep, i: number, env: SetupEnv): string[] {
         '  exit 32',
         'fi',
         'mv -- "$out.part" "$out"',
+        '[ -s "$out" ] || { echo "AOM: the database backup file is missing after it was saved" >&2; exit 33; }',
         'if [ "$keep" -gt 0 ]; then',
         sh`  ls -1t -- "$bdir"/"$env"-before-*.sql.gz 2>/dev/null | tail -n +$((keep + 1)) | while IFS= read -r old; do rm -f -- "$old"; done || true`,
         'fi',
         `printf '%s\\n' "$out"`,
         `AOM_REMOTE`,
         `)" || die "the database backup failed; nothing was changed"`,
+        '[ "$DRY_RUN" = 1 ] || [ -n "$BACKUP_FILE" ] || die "the database backup did not report a file; nothing was changed"',
         '[ "$DRY_RUN" = 1 ] || say "backup saved: $BACKUP_FILE"',
       ];
     case 'env_backup':
@@ -507,7 +598,7 @@ function sshStep(s: DeployStep, i: number, env: SetupEnv): string[] {
     case 'build_image_local':
       return [
         ...stepNumberComment(i, 'build the app image from the approved version'),
-        'command -v docker >/dev/null 2>&1 || die "docker is not installed on this computer"',
+        'type -P docker >/dev/null 2>&1 || die "docker is not installed on this computer"',
         sh`case "$CHECKOUT" in /*) ;; *) die "AOM_DEPLOY_CHECKOUT must be a full path" ;; esac`,
         'if docker image inspect "$TAG" >/dev/null 2>&1; then',
         '  say "image $TAG already exists here"',
@@ -534,6 +625,7 @@ function sshStep(s: DeployStep, i: number, env: SetupEnv): string[] {
         'if [ "$DRY_RUN" = 1 ]; then',
         '  would "set $IMAGE_VAR=$TAG in $APP_DIR/.env (now: ${CURRENT_IMAGE:-not set})"',
         'else',
+        '  SWITCHED=1',
         '  set_image_var "$TAG"',
         'fi',
       ];
@@ -574,26 +666,14 @@ function sshTail(env: SetupEnv): string[] {
     '  exit 0',
     'fi',
   );
-  if (env.health.kind === 'http') {
+  if (env.health.kind === 'http')
     out.push(
       'if ! wait_healthy "$HEALTH_TIMEOUT"; then',
       '  say "the site did not become healthy within ${HEALTH_TIMEOUT}s"',
+      '  die "the update failed (the previous version is put back when it can be)"',
+      'fi',
     );
-    if (env.rollback)
-      out.push(
-        '  if [ -n "$CURRENT_IMAGE" ] && [ "$CURRENT_IMAGE" != "$TAG" ]; then',
-        '    say "putting the previous version back: $CURRENT_IMAGE"',
-        '    set_image_var "$CURRENT_IMAGE"',
-        '    compose_up_remote 0',
-        '    if wait_healthy 60; then say "rolled back to $CURRENT_IMAGE"; else say "still not healthy after going back to $CURRENT_IMAGE"; fi',
-        '    [ -z "$BACKUP_FILE" ] || say "the database was NOT rolled back; the backup made before this update is $BACKUP_FILE"',
-        '    die "the update failed and was rolled back to $CURRENT_IMAGE"',
-        '  fi',
-        '  die "the update failed and there is no previous version to go back to"',
-      );
-    else out.push('  die "the update failed; automatic rollback is switched off"');
-    out.push('fi');
-  }
+  out.push('FINISHED=1');
   out.push('', 'done_line');
   return out;
 }

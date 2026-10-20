@@ -1,5 +1,5 @@
-import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { spawn, spawnSync } from 'node:child_process';
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { compileSetup, localAdoptEnv, sshShipEnv } from '@aom/shared';
@@ -44,6 +44,10 @@ function world(): World {
     chmodSync(join(bin, name), 0o755);
   };
   put('docker', FAKE_DOCKER);
+  put(
+    'docker-compose',
+    readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'fake-docker-compose.sh'), 'utf8'),
+  );
   put(
     'curl',
     `#!/bin/bash\necho "curl $*" >> "$FAKE_ROOT/calls.log"\nif [ -f "$FAKE_ROOT/unhealthy" ] && [ ! -f "$FAKE_ROOT/healed" ]; then printf 500; else printf 200; fi\n`,
@@ -95,6 +99,40 @@ function run(w: World, content: string, over: Record<string, string> = {}) {
     timeout: 60_000,
   });
   return { code: r.status, out: `${r.stdout}${r.stderr}`, stdout: r.stdout };
+}
+
+/** Starts the script in its own process group, waits for a file to appear, then sends TERM to the group (the runner's timeout). */
+async function runThenTerm(w: World, content: string, waitFor: string, over: Record<string, string> = {}) {
+  const file = join(w.root, 'deploy-term.sh');
+  writeFileSync(file, content, { mode: 0o755 });
+  const child = spawn('bash', [file], {
+    detached: true,
+    env: {
+      ...w.env,
+      AOM_DEPLOY_COMMIT: COMMIT,
+      AOM_DEPLOY_CHECKOUT: w.checkout,
+      AOM_DEPLOY_ENV: 'x',
+      AOM_DEPLOY_APP_URL: 'http://localhost:4700',
+      AOM_DEPLOY_DRY_RUN: '0',
+      ...over,
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let out = '';
+  child.stdout.on('data', (d) => {
+    out += d;
+  });
+  child.stderr.on('data', (d) => {
+    out += d;
+  });
+  const closed = new Promise<number | null>((resolve) => child.on('close', (c) => resolve(c)));
+  const t0 = Date.now();
+  while (!existsSync(join(w.root, waitFor)) && Date.now() - t0 < 20_000)
+    await new Promise((r) => setTimeout(r, 50));
+  expect(existsSync(join(w.root, waitFor)), 'the script never got to the step').toBe(true);
+  process.kill(-(child.pid as number), 'SIGTERM');
+  const code = await closed;
+  return { code, out };
 }
 
 // ----------------------------------------------------------------------------------------------- this computer (UAT)
@@ -216,6 +254,42 @@ describe('the generated UAT script, against a fake docker', () => {
     const ups = readFileSync(join(w.root, 'up.log'), 'utf8');
     expect(ups).toContain('--no-build --no-deps app');
     expect(w.forbidden()).toEqual([]);
+  });
+
+  it('a start that fails after the switch puts the previous image back and says so', () => {
+    const w = uatWorld();
+    writeFileSync(join(w.root, 'up-fails-once'), '');
+    const r = run(w, uat());
+    expect(r.code).toBe(1);
+    expect(r.out).toContain('putting the previous version back: aom-uat-app');
+    expect(r.out).toContain('the database was NOT rolled back');
+    const imgs = readFileSync(join(w.root, 'up-images.log'), 'utf8').split('\n').filter(Boolean);
+    expect(imgs).toEqual(['aom-uat-app']);
+    expect(w.forbidden()).toEqual([]);
+  });
+
+  it('when even the rollback fails it says so out loud', () => {
+    const w = uatWorld();
+    writeFileSync(join(w.root, 'up-fails'), '');
+    const r = run(w, uat());
+    expect(r.code).toBe(1);
+    expect(r.out).toContain('ROLLBACK FAILED');
+  });
+
+  it('a TERM in the middle of the start (the runner timeout) rolls back too', async () => {
+    const w = uatWorld();
+    writeFileSync(join(w.root, 'up-hangs-once'), '');
+    const r = await runThenTerm(w, uat(), 'up-hanging');
+    expect(r.code).not.toBe(0);
+    expect(r.out).toContain('putting the previous version back: aom-uat-app');
+    const imgs = readFileSync(join(w.root, 'up-images.log'), 'utf8').split('\n').filter(Boolean);
+    expect(imgs.at(-1)).toBe('aom-uat-app');
+  }, 40_000);
+
+  it('the backup is checked after it is saved (a vanished file stops the deploy)', () => {
+    const w = uatWorld();
+    // the fake gzip target is real: an empty dump is refused before it is moved; the file check is in the script
+    expect(uat()).toContain('[ -s "$BACKUP_FILE" ] || die');
   });
 
   it('the same version, healthy: nothing is done', () => {
@@ -344,6 +418,105 @@ describe('the generated production script, against a fake docker and ssh', () =>
     const imgs = readFileSync(join(w.root, 'up-images.log'), 'utf8').split('\n').filter(Boolean);
     expect(imgs).toEqual([`guildwise-hq:${SHORT}`, 'guildwise-hq:0ldc0mmit000']);
     expect(w.forbidden()).toEqual([]);
+  });
+
+  it('the database backup really runs even though docker reads standard input (the script is not on stdin)', () => {
+    const { w, app, setup } = prodWorld();
+    const r = run(w, script(setup, 'production'), env());
+    expect(r.code, r.out).toBe(0);
+    const backups = readdirSync(join(app, 'backups')).filter((f) => f.startsWith('production-before-'));
+    expect(backups).toHaveLength(1);
+    expect(r.out).toContain('backup saved:');
+    // a too-small dump still stops it, and keeps the rotation: 25 old backups leave the newest 20 plus the new one
+    const w2 = prodWorld();
+    const r2 = run(w2.w, script(w2.setup, 'production'), env({ FAKE_DUMP_BYTES: '10' }));
+    expect(r2.code).toBe(1);
+    expect(r2.out).toContain('the database backup failed; nothing was changed');
+    const w3 = prodWorld();
+    for (let i = 0; i < 25; i++) {
+      const f = join(w3.app, 'backups', `production-before-old${String(i).padStart(2, '0')}-2026.sql.gz`);
+      writeFileSync(f, 'old');
+      spawnSync('touch', ['-d', new Date(Date.now() - (30 - i) * 86_400_000).toISOString(), f]);
+    }
+    const r3 = run(w3.w, script(w3.setup, 'production'), env());
+    expect(r3.code, r3.out).toBe(0);
+    expect(readdirSync(join(w3.app, 'backups')).filter((f) => f.startsWith('production-before-'))).toHaveLength(
+      20,
+    );
+  });
+
+  it('works on a server that only has the old docker-compose program', () => {
+    const { w, app, setup } = prodWorld();
+    writeFileSync(join(w.root, 'v1only'), '');
+    const r = run(w, script(setup, 'production'), env());
+    expect(r.code, r.out).toBe(0);
+    expect(w.calls().some((c) => c.startsWith('docker-compose '))).toBe(true);
+    expect(readFileSync(join(app, '.env'), 'utf8')).toContain(`GUILDWISE_IMAGE=guildwise-hq:${SHORT}`);
+    expect(readFileSync(join(w.root, 'up.log'), 'utf8')).toContain('up -d --no-deps app');
+    // and nothing runs when neither exists
+    const none = prodWorld();
+    writeFileSync(join(none.w.root, 'v1only'), '');
+    rmSync(join(none.w.bin, 'docker-compose'));
+    const r2 = run(none.w, script(none.setup, 'production'), env());
+    expect(r2.code).toBe(1);
+    expect(existsSync(join(none.w.root, 'up.log'))).toBe(false);
+  });
+
+  it('a restart that fails after the .env was switched puts the .env and the app back', () => {
+    const { w, app, setup } = prodWorld();
+    const before = readFileSync(join(app, '.env'), 'utf8');
+    writeFileSync(join(w.root, 'up-fails-once'), '');
+    const r = run(w, script(setup, 'production'), env());
+    expect(r.code).toBe(1);
+    expect(r.out).toContain('putting the previous version back: guildwise-hq:0ldc0mmit000');
+    expect(readFileSync(join(app, '.env'), 'utf8')).toBe(before);
+    const imgs = readFileSync(join(w.root, 'up-images.log'), 'utf8').split('\n').filter(Boolean);
+    expect(imgs).toEqual(['guildwise-hq:0ldc0mmit000']);
+  });
+
+  it('prints ROLLBACK FAILED when the rollback itself cannot restart the app', () => {
+    const { w, setup } = prodWorld();
+    writeFileSync(join(w.root, 'up-fails'), '');
+    const r = run(w, script(setup, 'production'), env());
+    expect(r.code).toBe(1);
+    expect(r.out).toContain('ROLLBACK FAILED');
+    expect(r.out).toContain(`.env.bak-before-${SHORT}`);
+  });
+
+  it('a TERM while the app restarts (the runner timeout) rolls back', async () => {
+    const { w, app, setup } = prodWorld();
+    const before = readFileSync(join(app, '.env'), 'utf8');
+    writeFileSync(join(w.root, 'up-hangs-once'), '');
+    const r = await runThenTerm(w, script(setup, 'production'), 'up-hanging', env());
+    expect(r.code).not.toBe(0);
+    expect(r.out).toContain('putting the previous version back: guildwise-hq:0ldc0mmit000');
+    expect(readFileSync(join(app, '.env'), 'utf8')).toBe(before);
+  }, 40_000);
+
+  it('reads the image line of a .env with export, quotes, a comment and CRLF, and switches only that line', () => {
+    const { w, app, setup } = prodWorld();
+    writeFileSync(
+      join(app, '.env'),
+      'A=1\r\nexport GUILDWISE_IMAGE="guildwise-hq:0ldc0mmit000"  # pinned\r\nB=2\r\n',
+    );
+    const r = run(w, script(setup, 'production'), env());
+    expect(r.code, r.out).toBe(0);
+    expect(r.out).toContain('settings point at: guildwise-hq:0ldc0mmit000');
+    const text = readFileSync(join(app, '.env'), 'utf8');
+    expect(text.match(/GUILDWISE_IMAGE=/g)).toHaveLength(1);
+    expect(text).toContain(`GUILDWISE_IMAGE=guildwise-hq:${SHORT}`);
+    expect(text).toContain('A=1');
+    expect(text).toContain('B=2');
+  });
+
+  it('rolls back to the running image when the .env has no image line', () => {
+    const { w, app, setup } = prodWorld();
+    writeFileSync(join(app, '.env'), 'A=1\n');
+    writeFileSync(join(w.root, 'unhealthy'), '');
+    const r = run(w, script(setup, 'production'), env());
+    expect(r.code).toBe(1);
+    expect(r.out).toContain('putting the previous version back: guildwise-hq:0ldc0mmit000');
+    expect(readFileSync(join(app, '.env'), 'utf8')).toContain('GUILDWISE_IMAGE=guildwise-hq:0ldc0mmit000');
   });
 
   it('refuses a host name that could be an ssh option', () => {

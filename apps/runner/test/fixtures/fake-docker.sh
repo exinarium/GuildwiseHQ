@@ -24,19 +24,27 @@ if [ "$1" = compose ]; then
     fi
   done
   case "$1" in
-    version) echo 2.40.0 ;;
+    version)
+      # a server with only the old docker-compose program: `docker compose` is not there, `docker-compose` (via the wrapper) is
+      if [ -f "$FAKE_ROOT/v1only" ] && [ -z "${FAKE_VIA_V1:-}" ] && [ "$side" = remote ]; then echo "docker: 'compose' is not a docker command." >&2; exit 1; fi
+      echo 2.40.0 ;;
     config) if [ "${2:-}" = --services ]; then printf 'postgres\napp\nmailpit\n'; fi ;;
     ps) [ "${2:-}" = -q ] && { case "$3" in app) [ -f "$S/running" ] && echo cid-app ;; postgres) echo cid-pg ;; esac; } ;;
     exec)
+      # like the real thing, `exec -T` reads standard input: anything it finds there is gone
+      cat >/dev/null
       [ -f "$FAKE_ROOT/backup-fails" ] && { echo "pg_dump: error" >&2; exit 1; }
       head -c "${FAKE_DUMP_BYTES:-4000}" /dev/zero | tr '\0' 'x' ;;
     up)
+      if [ -f "$FAKE_ROOT/up-fails" ]; then echo "up failed" >&2; exit 1; fi
+      if [ -f "$FAKE_ROOT/up-fails-once" ]; then rm -f "$FAKE_ROOT/up-fails-once"; echo "up failed" >&2; exit 1; fi
+      if [ -f "$FAKE_ROOT/up-hangs-once" ]; then rm -f "$FAKE_ROOT/up-hangs-once"; touch "$FAKE_ROOT/up-hanging"; /bin/sleep 30; fi
       echo "$*" >> "$FAKE_ROOT/up.log"
       if [[ "$*" == *rollback* ]]; then :; fi
       # the new image is the one in the override file, if any
       img=$(sed -n 's/.*image: "\(.*\)"/\1/p' "$FAKE_ROOT/override.yml" 2>/dev/null | tail -n 1)
       if [ -f "$FAKE_ROOT/rollback.yml" ] && [[ "$*" == *--no-build* ]]; then img=$(sed -n 's/.*image: "\(.*\)"/\1/p' "$FAKE_ROOT/rollback.yml" | tail -n 1); fi
-      if [ -z "$img" ]; then img=$(sed -n 's/^GUILDWISE_IMAGE=//p' "$PWD/.env" 2>/dev/null | tail -n 1); fi
+      if [ -z "$img" ]; then img=$(sed -n 's/^\(export \)\{0,1\}GUILDWISE_IMAGE=//p' "$PWD/.env" 2>/dev/null | tail -n 1 | tr -d '\r"' | sed 's/ *#.*//'); fi
       echo "$img" > "$S/running"
       echo "$img" >> "$FAKE_ROOT/up-images.log" ;;
     *) ;;

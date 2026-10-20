@@ -54,7 +54,18 @@ function envChanges(env: SetupEnv, r: ProbeReport | null | undefined): ChangeIte
         `Your user on ${where} cannot use Docker (on Linux an admin adds it to the docker group).`,
         'docker',
       );
-    else add('reuse', `Docker${r.docker.version ? ` ${r.docker.version}` : ''} on ${where}`, 'docker');
+    else {
+      add('reuse', `Docker${r.docker.version ? ` ${r.docker.version}` : ''} on ${where}`, 'docker');
+      // Compose is how the app is restarted: version 2 (`docker compose`) or version 1 (`docker-compose`), either works
+      if (!r.docker.composeVersion)
+        add(
+          'setup_once',
+          `Docker Compose is not installed on ${where} (neither “docker compose” nor “docker-compose”). Install it, then check again.`,
+          'compose_tool',
+        );
+      else if (/^1\./.test(r.docker.composeVersion))
+        add('reuse', `Docker Compose ${r.docker.composeVersion} (the older docker-compose program) on ${where}`, 'compose_tool');
+    }
 
     const cf = composeFor(env, r);
     if (cf) {
