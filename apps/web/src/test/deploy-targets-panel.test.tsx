@@ -6,8 +6,8 @@ import { DeployTargetsPanel, deploysFrom } from '../components/DeployTargetsPane
 import { ToastProvider } from '../components/ui.tsx';
 
 const U = (n: number) => `0192f3a0-0000-7000-8000-${String(n).padStart(12, '0')}`;
-const json = (body: unknown) =>
-  new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
+const json = (body: unknown, status = 200) =>
+  new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 const fetchMock = vi.fn();
 beforeEach(() => {
   fetchMock.mockReset();
