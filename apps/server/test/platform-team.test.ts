@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { classifyDeployRisk, maskText, topFrames } from '@aom/shared';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { detectLoops } from '../src/ceo/detectors.ts';
 import { agentView, candidateCards } from '../src/dispatcher/candidates.ts';
 import {
   platformHousekeeping,
@@ -13,7 +14,6 @@ import {
 import { drainBugs, reportBug } from '../src/platform-team/intake.ts';
 import { startPause } from '../src/platform-team/pause.ts';
 import { platformFixBudget } from '../src/platform-team/stop-loss.ts';
-import { detectLoops } from '../src/reporter/detectors.ts';
 import { uniqueEmail } from './helpers/app.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import type { FakeRunner } from './helpers/fake-runner.ts';

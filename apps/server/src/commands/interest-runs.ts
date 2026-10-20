@@ -16,6 +16,7 @@ import {
   streamId,
 } from '@aom/shared';
 import type { AuthSession } from '../auth/sessions.ts';
+import { reportingOf } from '../ceo/prefs.ts';
 import type { Ctx } from '../context.ts';
 import { isBudgetPaused } from '../costs/index.ts';
 import { one, type Queryable, type Row, rows } from '../db/sql.ts';
@@ -23,7 +24,6 @@ import { type Tx, withAppendTx } from '../db/tx.ts';
 import { isProjectPaused } from '../dispatcher/project-hold.ts';
 import { badRequest, conflict, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
-import { reportingOf } from '../reporter/settings.ts';
 import { projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
 import { interestBody, lockInterest } from './interests.ts';
 import { dayIn, scheduledCard } from './schedule-actions.ts';

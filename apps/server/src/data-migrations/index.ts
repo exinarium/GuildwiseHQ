@@ -11,6 +11,7 @@ import { migrateOrgInboxes } from './org-inboxes.ts';
 import { type DataMigrationEnv, migrateOrgs } from './orgs.ts';
 import { migrateProjectVaults } from './project-vaults.ts';
 import { migratePushBranchRetired } from './push-branch-retired.ts';
+import { migrateReporterRetired } from './reporter-retired.ts';
 import { migrateRestructure } from './restructure.ts';
 
 export {
@@ -56,6 +57,11 @@ export {
   type PushBranchRetiredReport,
 } from './push-branch-retired.ts';
 export {
+  migrateReporterRetired,
+  REPORTER_RETIRED_MIGRATION,
+  type ReporterRetiredReport,
+} from './reporter-retired.ts';
+export {
   formatRestructurePlan,
   migrateRestructure,
   planRestructure,
@@ -81,6 +87,7 @@ export const DATA_MIGRATIONS: Array<{ name: string; run: (env: DataMigrationEnv)
   { name: 'ceo-builtin-2026-10', run: (env) => migrateCeoBuiltin(env) },
   { name: 'project-vaults-2026-10', run: (env) => migrateProjectVaults(env) },
   { name: 'graph-backfill-2026-10', run: (env) => migrateGraphBackfill(env) },
+  { name: 'reporter-retired-2026-10', run: (env) => migrateReporterRetired(env) },
 ];
 
 export async function runDataMigrations(env: DataMigrationEnv): Promise<void> {

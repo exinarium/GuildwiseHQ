@@ -40,7 +40,7 @@ An action is what happens:
 - **Create a card** from a template (title, type, fields). Queued ahead of normal work, or as a **draft** that waits to be specified. An automation that reacts to an event can **fill the card from the event**: each line sets a field (the title, the context, or any card field) to a text with tokens such as `{card.ref}`, `{card.title}`, `{issue.title}`, `{issue.key}`, `{event}`, `{date}` or `{card.fields.<name>}`. Values are copied as they are and never expanded again. Cards made this way are marked as made by an automation. By default at most 20 cards per hour are made; more are skipped, with one notice on your desk. **Repeats** can stop a second card for the same source card or ticket, or with the same title.
 - **Run a regression**: one regression card per platform (web, mobile, or both), queued at Test.
 - **Ask DevOps**: a request to a workstation's DevOps engineer, or a repository hygiene run.
-- **Ask the BA**: free-text instructions for the BA (read-only; it reads ledger, desk, vault, repositories).
+- **Ask the CEO**: free-text instructions for your CEO (read-only; it reads the ledger, desk, vault and its snapshot) and the answer arrives as a notice on your desk. Older schedules that said "Ask the BA" now ask the CEO.
 - **Poll GitHub issues** or **Poll Jira issues**: new issues go into intake with the BA, one conversation each.
 - **Send a webhook**: POST JSON to a URL. Supports generic JSON, Slack incoming webhooks, Microsoft Teams. Signed and retried on failure.
 - **E-mail a digest**: the floor report (whole organization) or a project summary, sent at the time you set.

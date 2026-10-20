@@ -18,7 +18,7 @@ const notFound = () =>
     { status: 404 },
   );
 
-let reporting = { routeViaBa: true, dailyAt: '08:00', timezone: 'UTC' as string | null };
+let reporting = { dailyAt: '08:00', timezone: 'UTC' as string | null };
 const reportingBody = () => ({
   ...reporting,
   effectiveTimezone: reporting.timezone ?? 'UTC',
@@ -26,7 +26,7 @@ const reportingBody = () => ({
 });
 
 export const extraHandlers = [
-  // Part B: the BA as the manager's reporter (preferences and the manager's time zone).
+  // The daily report time and the manager's time zone.
   http.get(`${A}/reporting`, () => HttpResponse.json(reportingBody())),
   http.put(`${A}/auth/timezone`, async ({ request }) => {
     const { timezone } = (await request.json()) as { timezone: string };

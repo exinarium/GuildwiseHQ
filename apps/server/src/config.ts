@@ -150,7 +150,7 @@ export interface Config {
   defaultWorkflow: string;
   /** A user who has never seen the first-login tour gets it on their first visit (off in the e2e suite, which switches it on per user). */
   tourAutostart: boolean;
-  /** How often the reporter sweeps for signals, expired triage holds and the daily floor report (docs/design/phases.md B4). */
+  /** How often the signal sweep (ceo/signals.ts) releases expired holds, runs the signal detectors, queues the CEO's daily review and the topics sweep. */
   reporterSeconds: number;
   /** Run the workstations' scheduled repository hygiene (each workstation's own cadence). "Run hygiene now" always works. */
   hygieneSchedule: boolean;

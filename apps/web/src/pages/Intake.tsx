@@ -1,6 +1,7 @@
 import { BriefcaseBusiness } from 'lucide-react';
 import { type FormEvent, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
+import { useCeoChat } from '../api/queries/ceo.ts';
 import { useCreateIntake, useIntake, useIntakes } from '../api/queries/intake.ts';
 import { ChatPanel } from '../components/ChatPanel.tsx';
 import { AgentAvatar } from '../components/Face.tsx';
@@ -19,6 +20,8 @@ import {
   TextArea,
 } from '../components/ui.tsx';
 import { describeSource, intakeStatusText } from '../lib/intake.ts';
+import { openCeoChat } from '../lib/openCeoChat.ts';
+import { useActiveOrgRole } from '../lib/orgRole.ts';
 import { ageLabel } from '../lib/time.ts';
 import { BatchForm, BatchList } from './IntakeBatch.tsx';
 
@@ -30,6 +33,8 @@ export function IntakeNew() {
   const [note, setNote] = useState('');
   const [mode, setMode] = useState<'chat' | 'batch'>('chat');
   const source = describeSource(note);
+  const isOwner = useActiveOrgRole() === 'owner';
+  const ceoChat = useCeoChat();
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -76,17 +81,36 @@ export function IntakeNew() {
                 {source.label}
               </p>
             )}
-            <ErrorBox error={create.error} />
-            <div>
+            <ErrorBox error={create.error ?? ceoChat.error} />
+            <div className="flex flex-wrap gap-2">
+              {isOwner && (
+                <Button
+                  type="button"
+                  variant="primary"
+                  size="lg"
+                  className="max-md:w-full md:h-9 md:px-3.5 md:text-sm"
+                  data-testid="intake-via-ceo"
+                  disabled={!note.trim()}
+                  loading={ceoChat.isPending}
+                  onClick={() =>
+                    ceoChat.mutate(undefined, {
+                      onSuccess: (c) =>
+                        openCeoChat(nav, c.threadId, { prefill: `New intake: ${note.trim()}` }),
+                    })
+                  }
+                >
+                  Tell your CEO
+                </Button>
+              )}
               <Button
                 type="submit"
-                variant="primary"
+                variant={isOwner ? 'secondary' : 'primary'}
                 size="lg"
                 className="max-md:w-full md:h-9 md:px-3.5 md:text-sm"
                 disabled={!note.trim()}
                 loading={create.isPending}
               >
-                Start intake
+                {isOwner ? 'Work with the BA directly' : 'Start intake'}
               </Button>
             </div>
           </form>

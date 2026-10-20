@@ -3,7 +3,6 @@ import {
   BA_TASK_MAX_SHIFT_MINUTES,
   type BaTaskShift,
   baTaskBriefOutcomes,
-  isReporterTaskKind,
   type ServerToRunnerOf,
   type ShiftBrief,
 } from '@aom/shared';
@@ -14,7 +13,7 @@ import { buildMailDraftTask } from '../commands/mail-draft.ts';
 import { cardOutcomes, computeOutstanding, followupRows, suiteOf } from '../commands/phase-events.ts';
 import { toTargetBrief } from '../commands/phase-followups.ts';
 import { workingBranchOf } from '../commands/phases.ts';
-import { buildReporterTask } from '../commands/reporter-tasks.ts';
+import { buildReviewTask } from '../commands/review-tasks.ts';
 import { buildSpecCardTask } from '../commands/spec-card.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Queryable, type Row } from '../db/sql.ts';
@@ -93,7 +92,8 @@ export async function buildBaTaskShiftStart(
 ): Promise<ShiftStartPayload | null> {
   const task = await one(ctx.pool, 'SELECT * FROM ba_tasks WHERE id=$1', [taskId]);
   if (!task) return null;
-  const reporter = isReporterTaskKind(task.kind);
+  // Only the CEO-BA review still travels as a reporter task (kind `scheduled_brief`); the other kinds are retired.
+  const reporter = task.kind === 'scheduled_brief';
   const batch = task.kind === 'batch_intake';
   const mailDraft = task.kind === 'mail_reply_draft';
   const specCard = task.kind === 'spec_card';
@@ -123,7 +123,7 @@ export async function buildBaTaskShiftStart(
               cards: [],
               followups: [],
               outstanding: [],
-              reporter: await buildReporterTask(ctx, ctx.pool, task),
+              reporter: await buildReviewTask(ctx, ctx.pool, task),
             }
           : await buildBaTask(ctx.pool, task);
   const project = await one(ctx.pool, 'SELECT * FROM projects WHERE id=$1', [task.project_id]);

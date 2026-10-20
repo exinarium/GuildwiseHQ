@@ -26,7 +26,6 @@ beforeAll(async () => {
   r = await w.connectRunner({ capabilities: ['ceo:1'] });
   await appoint(w);
   await graduate(w);
-  await ok(w.t.req('PUT', '/api/reporting', { cookie: w.owner.cookie, body: { routeViaBa: true } }));
 });
 afterAll(async () => {
   r.close();

@@ -28,12 +28,12 @@ import {
 import { orgOwnerId } from '../auth/org-context.ts';
 import { decryptSecret } from '../auth/secrets.ts';
 import { resolveWorkflow } from '../catalogue/loader.ts';
+import { enqueueWake } from '../ceo/wakes.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Row } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
 import { badRequest, conflict } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
-import { carrierProject } from '../reporter/tasks.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { singleRepoDefault } from './card-repo.ts';
 import { resolveCardWorkflow, specifyTarget } from './cards.ts';
@@ -429,38 +429,35 @@ export async function executeAction(ctx: Ctx, tx: Tx, s: Row, spec: RunSpec): Pr
   }
 
   if (action.kind === 'ba_task') {
-    const projectId = await carrierProject(tx, s.org_id, action.projectId);
-    if (!projectId)
-      throw conflict('no_project', 'the organization has no active project to file the task under');
-    const taskId = randomUUID();
-    await ctx.store.append(
-      [
-        {
-          streamId: streamId.baTask(taskId),
-          event: {
-            type: 'BaTaskQueued',
-            payload: {
-              taskId,
-              projectId,
-              kind: 'scheduled_brief',
-              instructions: expandText(action.prompt, text),
-              deliver: action.deliver,
-              scheduleId: s.id,
-              scheduleName: s.name,
-              ...(action.projectId ? {} : { orgLevel: true }),
-            },
-          },
-          actor: SYSTEM_ACTOR,
-          scope: projectScope(s.org_id, projectId),
+    // The BA reporter is retired (docs/design/ceo-front-door.md step 3): a schedule's `ba_task` action (the name stays so
+    // old schedules keep working) is a `scheduled_brief` wake of the CEO, which does what the instructions ask.
+    const instructions = expandText(action.prompt, text);
+    const project = action.projectId
+      ? await one(tx, 'SELECT key FROM projects WHERE id=$1', [action.projectId])
+      : undefined;
+    const woke = await enqueueWake(
+      tx,
+      s.org_id,
+      {
+        reason: 'scheduled_brief',
+        urgency: 'scheduled',
+        subjectKind: 'schedule',
+        subjectId: `${s.id}:${runId}`,
+        subjectLabel: s.name,
+        detail: {
+          scheduleId: s.id,
+          scheduleName: s.name,
+          instructions,
+          deliver: action.deliver,
+          ...(project ? { projectKey: project.key } : {}),
         },
-      ],
-      { tx },
+      },
+      ctx.clock.now(),
     );
     return {
       ...base,
       status: 'ok',
-      summary: 'Asked the BA',
-      result: { baTaskId: taskId },
+      summary: woke ? 'Asked the CEO' : 'The CEO already has this task',
       after: [async () => ctx.services.dispatcher.trigger()],
     };
   }

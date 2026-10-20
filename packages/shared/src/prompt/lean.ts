@@ -52,7 +52,7 @@ const BA_FINALIZE = ['Finalize (background)'];
 const BA_OUTBOUND = ['Outbound updates'];
 const BA_ANSWERING = ['Answering questions'];
 const BA_PHASES = ['Phases (background)'];
-const BA_REPORTING = ['Reporting to the manager'];
+const BA_REPORTING = ['Reviews for the CEO'];
 const BA_NEW_REPOS = ['New repositories'];
 
 export type ShiftKindName = 'card' | 'question' | 'devops' | 'ba_task' | 'ceo';

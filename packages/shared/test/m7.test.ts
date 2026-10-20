@@ -138,7 +138,7 @@ describe('M7 reports and rpc', () => {
 describe('BA instructions and prompts', () => {
   it('ships real BA instructions: intake, answering, finalize', () => {
     const ba = getBuiltinRole('ba');
-    expect(ba?.version).toBe(17); // 17: the CEO decision review turns; 16: the lean team stages are claimed through `code` (the legacy key is gone); 14: claims the manual QA steps stage; 13: no code reading, no completion action, Jira through the runner; 12: cards inherit the project completion action; 11: Jira attachments and card attachments; 10: Investigate & design flags and investigation-only finalize; 9: two named branches and the commit-and-push completion; 8: repo create on every git host; 3: M8 outbound updates; 4: M10 organization designer; 5: chat cards, inline JSON, repo create; 6: phases; 7: BA reporter
+    expect(ba?.version).toBe(18); // 18: a spec writer only, the BA reporter is retired (the CEO triages, analyses signals and writes the daily report); 17: the CEO decision review turns; 16: the lean team stages are claimed through `code` (the legacy key is gone); 14: claims the manual QA steps stage; 13: no code reading, no completion action, Jira through the runner; 12: cards inherit the project completion action; 11: Jira attachments and card attachments; 10: Investigate & design flags and investigation-only finalize; 9: two named branches and the commit-and-push completion; 8: repo create on every git host; 3: M8 outbound updates; 4: M10 organization designer; 5: chat cards, inline JSON, repo create; 6: phases; 7: BA reporter
     expect(ba?.instructions).not.toMatch(/TODO/);
     for (const w of [
       'aom intake map',

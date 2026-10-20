@@ -376,7 +376,7 @@ describe('a held design has its own status', () => {
     const snap = await buildSnapshot(w.t.app.ctx, await orgOf());
     expect(snap).toContain(`${dep.ref} id=${dep.id} design ready, waiting for ${base.ref}`);
     expect(snap).not.toMatch(new RegExp(`${dep.ref} id=\\S+ why=unclaimed`));
-    const { detectUnclaimed } = await import('../src/reporter/detectors.ts');
+    const { detectUnclaimed } = await import('../src/ceo/detectors.ts');
     const found = await detectUnclaimed(w.t.app.ctx, new Date(Date.now() + 3 * 3600_000));
     expect(found.filter((f) => f.subject.cardId === dep.id)).toHaveLength(0);
     // the board lane is the stage's column and the status is not 'queued'

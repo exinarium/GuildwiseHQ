@@ -207,7 +207,7 @@ describe('calling a hook', () => {
     );
     const res = await call(`/api/hooks/${ba.id}/${ba.webhookSecret}`, PAYLOAD);
     expect(res.statusCode).toBe(202);
-    expect(res.json().summary).toBe('Asked the BA');
+    expect(res.json().summary).toBe('Asked the CEO');
   });
 });
 

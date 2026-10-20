@@ -16,7 +16,6 @@ beforeAll(async () => {
   r = await w.connectRunner({ capabilities: ['ceo:1'] });
   agentId = await appoint(w);
   await graduate(w);
-  await ok(w.t.req('PUT', '/api/reporting', { cookie: w.owner.cookie, body: { routeViaBa: true } }));
 });
 afterAll(async () => {
   r.close();
@@ -25,7 +24,7 @@ afterAll(async () => {
 });
 
 const dispatcher = () => w.t.app.ctx.services.dispatcher;
-const reporter = () => w.t.app.ctx.services.reporter;
+const reporter = () => w.t.app.ctx.services.signals;
 const owner = (method: string, url: string, body?: unknown) =>
   w.t.req(method, url, { cookie: w.owner.cookie, body });
 const wakes = (status?: string) =>
@@ -218,7 +217,7 @@ describe('wake sources', () => {
   });
 });
 
-describe('routing: the CEO replaces the BA reporter', () => {
+describe('routing: the CEO holds the non-urgent items', () => {
   const alert = async (title: string) => {
     const id = randomUUID();
     await seed(w, [
@@ -277,7 +276,7 @@ describe('routing: the CEO replaces the BA reporter', () => {
     await finish(s.shiftId);
   });
 
-  it('with the CEO unreachable the item reaches the desk unchanged and the BA path is untouched', async () => {
+  it('with the CEO unreachable the item reaches the desk unchanged (there is no BA fallback any more)', async () => {
     await clean();
     await q(`UPDATE workstations SET connected=false WHERE id=$1`, [w.workstationId]);
     const id = await alert('direct');
@@ -285,14 +284,16 @@ describe('routing: the CEO replaces the BA reporter', () => {
     await keepOnline(w);
   });
 
-  it('a paused CEO hands the job back to the BA, and the owner can resume it', async () => {
+  it('a paused CEO holds nothing (the owner sees everything, and no BA looks at it), and the owner can resume it', async () => {
     await clean();
     await ok(owner('POST', '/api/ceo/pause', {}));
     await keepOnline(w);
-    const id = await alert('for the BA');
-    expect((await q(`SELECT triage FROM desk_items WHERE id=$1`, [id]))[0]!.triage).toBe('pending');
-    expect((await q(`SELECT 1 FROM ba_tasks WHERE kind='desk_triage'`)).length).toBe(1);
+    const id = await alert('while paused');
+    expect((await q(`SELECT triage FROM desk_items WHERE id=$1`, [id]))[0]!.triage).toBe('none');
+    expect(await q(`SELECT 1 FROM ba_tasks`)).toHaveLength(0);
     await ok(owner('POST', '/api/ceo/resume', {}));
+    const held = await alert('after resume');
+    expect((await q(`SELECT triage FROM desk_items WHERE id=$1`, [held]))[0]!.triage).toBe('pending');
   });
 });
 

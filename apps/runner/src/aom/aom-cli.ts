@@ -418,17 +418,16 @@ async function cardDraft(ctx: AomContext, p: Parsed, sub: 'create' | 'update' | 
   return 0;
 }
 
-const REPORT_USAGE = `usage: aom report triage --file <decisions.json>      # { "decisions": [ { "itemId", "action": "pass|dismiss|merge", "note"?, "into"? } ] }
-       aom report notes --file <notes.json>          # { "notes": [ { "itemId", "note", "related"? } ] }
-       aom report signals --file <reports.json>     # { "reports": [ { "signalId", "summary", "annotateItemId"? } ] }
-       aom report floor --summary-file <report.md>
-       aom report brief --summary-file <report.md>
+const REPORT_USAGE = `usage: aom report brief --summary-file <report.md>   # the CEO's analysis request (read-only)
        aom report mail-draft --text-file <reply.txt> [--subject "<subject>"]
        aom report mail-draft-fail --note "<why no reply can be written>"
        aom report spec-card --file <fields.json>      # { "fields": { "<missing field key>": "<text>" } }
        aom report spec-card-fail --note "<why the card cannot be specified>"`;
 
-/** `aom report ...`: the BA's reporter tasks (held items, urgent notes, urgent signals, the daily floor report). */
+/**
+ * `aom report ...`: the BA's task reports. The BA reporter is retired (docs/design/ceo-front-door.md step 3): `triage`,
+ * `notes`, `signals` and `floor` answer "retired" for one runner version, then go.
+ */
 async function reportVerb(ctx: AomContext, p: Parsed): Promise<number> {
   const sub = p.positionals[0];
   const data = (): Record<string, unknown> => {
@@ -438,18 +437,13 @@ async function reportVerb(ctx: AomContext, p: Parsed): Promise<number> {
   };
   switch (sub) {
     case 'triage':
-      return report(ctx, outcome('triage_done', 'Triage decisions', data()));
     case 'notes':
-      return report(ctx, outcome('notes_done', 'Notes on urgent items', data()));
     case 'signals':
-      return report(ctx, outcome('signal_report', 'Urgent signal reports', data()));
     case 'floor':
-      return report(
-        ctx,
-        outcome('floor_report', 'Daily floor report', {
-          report: textFlag(ctx, p, 'summary', true) as string,
-        }),
+      ctx.io.err(
+        `aom report ${sub} is retired: the BA no longer triages, notes, analyses signals or writes the floor report (the CEO does). Finish without reporting.\n`,
       );
+      return 1;
     case 'brief':
       return report(
         ctx,
@@ -2226,7 +2220,7 @@ export const USAGE = `usage: aom <verb> [options]
   phase report --summary-file <md> [--outstanding "<item>"]...   BA task (phase done): report it to the manager (terminal)
   phase followup done|fail <n> --summary "<t>" [--link <url>]...   BA task (custom follow-up): you did it, or could not (terminal)
   phase results --summary-file <md>          BA task (follow-ups finished): report the results (terminal)
-  report triage|notes|signals --file <json> | report floor --summary-file <md>   BA reporter task (held items, urgent notes, urgent signals, the daily floor report): report to the manager (terminal)
+  report brief --summary-file <md>   the CEO's analysis request (report triage|notes|signals|floor are retired)
   report mail-draft --text-file <txt> [--subject "<s>"] | report mail-draft-fail --note "<why>"   BA mail reply draft: report the draft for a person to review and send (terminal; it is never sent by itself)
   report spec-card --file <json> | report spec-card-fail --note "<why>"   BA card task: write the missing fields of a draft card so it can be specified (terminal)
   deploy run <env> [--project KEY] [--commit SHA] [--target NAME] | deploy status [--project KEY]   ask for a deploy through the project's approved delivery recipe (the server decides who releases it; nothing runs here)

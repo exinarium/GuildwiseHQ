@@ -116,7 +116,7 @@ export class PgEventStore implements EventStore {
     return opts.tx ? run(opts.tx) : withTx(this.pool, run);
   }
 
-  /** Registers a hook that runs inside every append transaction (the BA routing, `reporter/routing.ts`). */
+  /** Registers a hook that runs inside every append transaction (desk routing, `ceo/routing.ts`). */
   intercept(fn: Interceptor): void {
     this.interceptors.push(fn);
   }

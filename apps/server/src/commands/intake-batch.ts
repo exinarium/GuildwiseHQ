@@ -22,12 +22,12 @@ import {
   streamId,
 } from '@aom/shared';
 import type { AuthSession } from '../auth/sessions.ts';
+import { carrierProject } from '../ceo/carrier.ts';
 import type { Ctx } from '../context.ts';
 import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
-import { carrierProject } from '../reporter/tasks.ts';
 import { agentActor, orgScope, projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
 import { type Responder, visibleProjects } from './intake.ts';
 import { agentBy, systemBy } from './phase-events.ts';

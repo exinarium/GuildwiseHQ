@@ -109,7 +109,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'Report and thread',
-        text: 'The BA report, the follow-up results and the conversation about this phase.',
+        text: 'The phase report, the follow-up results and the conversation about this phase.',
       },
     ],
     article: 'phases#phase-done',
@@ -906,7 +906,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
   '/settings': {
     title: 'Settings',
     intro:
-      'Your personal preferences: picture, expert mode for code changes, the weekly blog digest, time zone, two-factor security and how the BA reports to you.',
+      'Your personal preferences: picture, expert mode for code changes, the weekly blog digest, time zone and two-factor security.',
     controls: [
       {
         name: 'Your picture',
@@ -926,19 +926,11 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'Your time zone',
-        text: "Set your time zone. The daily floor report follows the Owner's time zone.",
+        text: "Set your time zone. The CEO's daily report follows the Owner's time zone.",
       },
       {
         name: 'Use this browser zone',
         text: 'Auto-detect and save your browser time zone. Suggested if it differs from your saved zone.',
-      },
-      {
-        name: 'Route via BA',
-        text: 'If on, items agents raise go to your BA first. Urgent blocking questions and approvals still reach you at once. Owner and Admins can change it; it applies to the whole organization.',
-      },
-      {
-        name: 'Daily floor report at',
-        text: 'The time of day the BA posts its floor report (default 08:00). Click Save time.',
       },
       {
         name: 'Weekly blog digest',
@@ -947,7 +939,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
     ],
     article: 'getting-started#the-tour',
     tips: [
-      'Your picture, time zone and two-factor login are personal to your account. Routing through the BA and the report time apply to the whole organization.',
+      "Your picture, time zone and two-factor login are personal to your account. The CEO's report time (on the CEO page) applies to the whole organization.",
     ],
   },
   '/settings/vaults': {

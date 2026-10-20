@@ -22,7 +22,7 @@ const setNow = (at: Date) => ctx().clock.setOffset(at.getTime() - Date.now());
 const hygieneRequests = () =>
   q(`SELECT * FROM devops_requests WHERE hygiene IS NOT NULL ORDER BY created_at, id`);
 const wsRow = async () => (await q('SELECT * FROM workstations WHERE id=$1', [w.workstationId]))[0]!;
-const reporter = () => ctx().services.reporter;
+const reporter = () => ctx().services.signals;
 
 describe('scheduled hygiene', () => {
   it('is daily by default and one request is created when the day is up, not before', async () => {

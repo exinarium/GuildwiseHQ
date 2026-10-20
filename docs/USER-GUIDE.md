@@ -45,7 +45,7 @@ This guide is for people who have never worked with AI agents before. You do not
   - [4.8 Automations and integrations](#48-automations-and-integrations)
   - [4.9 Interests](#49-interests)
   - [4.10 Phases and follow-ups](#410-phases-and-follow-ups)
-  - [4.11 Your BA reports to you](#411-your-ba-reports-to-you)
+  - [4.11 Your CEO reports to you](#411-your-ceo-reports-to-you)
   - [4.12 Testing, finalizing and risk](#412-testing-finalizing-and-risk)
   - [4.13 Conversion, the Research tab and research cards](#413-conversion-the-research-tab-and-research-cards)
   - [4.14 Archive and delete](#414-archive-and-delete)
@@ -162,7 +162,7 @@ Read this chapter once. Everything else builds on these words.
 | **Desk** | Your inbox of decisions. |
 | **Ledger** | The shared memory: decisions, standing orders and requirements, searchable. |
 | **Standing order** | A rule every agent reads at the start of every shift, such as "write a unit test for every change". |
-| **BA** | The business analyst agent. It drafts cards from your requests and tickets, answers what it can from the ledger, and writes your daily floor report. |
+| **BA** | The business analyst agent, a spec writer. It drafts and specifies cards from your requests and tickets, answers what it can from the ledger and finishes finished work. It does not report to you: your CEO does. |
 | **Architect** | An optional senior agent that investigates and designs a card before the builder starts, or answers a question in a written report. Off until a project turns the design step on (4.20). |
 | **DevOps engineer** | A free agent that looks after one workstation: installs tools, keeps your repositories tidy, starts and stops things. |
 | **Vault** | A folder of notes (a git repository) that is synced to your workstations: your organization's knowledge base, or one project's own notes. |
@@ -581,7 +581,7 @@ Once a day per workstation the DevOps engineer tidies the project repositories o
 
 Card branches only go to the git host when the card needs them (a pull request, or "push the branch"). A pull request goes out as `<prefix>/<ticket>`, for example `pieter/DCPL-4276`: the prefix is the project setting **Pull request branch prefix** (empty: `feature`), the ticket is the Jira key the card came from, else the card reference (`-2`, `-3` if the name is taken). Rework pushes to the same branch and pull request. Your local card branch keeps its name; with "Commit and push to the working branch" only the working branch is pushed. Hygiene also deletes the branch of a **done or cancelled** card, on the host, on the workstation and its worktree, once its work is in the working branch (merged, rebased or cherry-picked) or its pull request is merged (a declined pull request alone does not delete a branch that holds unmerged commits). Open pull requests, branches with work found nowhere else and branches of open or reopened cards are never touched. The card records each deletion and your desk gets one notice per run. Turn it off with **Remove finished card branches** in the project settings.
 
-What hygiene cannot resolve, it does not force. For a conflict while pulling, the DevOps engineer first tries to resolve it on a temporary branch and runs the tests (you get a notice; after two attempts it goes to your desk). Changes on the wrong branch, a failed login, a missing clone, or a leftover worktree with uncommitted work are not forced either. These appear under Failures in your BA's daily report until a later run finds the repository in order.
+What hygiene cannot resolve, it does not force. For a conflict while pulling, the DevOps engineer first tries to resolve it on a temporary branch and runs the tests (you get a notice; after two attempts it goes to your desk). Changes on the wrong branch, a failed login, a missing clone, or a leftover worktree with uncommitted work are not forced either. These appear under Failures in your CEO's daily report until a later run finds the repository in order.
 
 > **In the app:** Help, "DevOps and repository hygiene" (`/help/devops-and-hygiene`).
 
@@ -628,7 +628,7 @@ Every shift records what it used (input, output and cache tokens and the model).
 - the **Costs** page (Owners and Admins): spend by project, agent, model and day for any date range, with an **Export CSV** button;
 - the **project settings** and the **board header** ("$9.00 of $10.00 this month");
 - each **agent card**, each **card** and each **phase**;
-- the **BA's floor report**.
+- the **CEO's daily report** (older floor reports stay on the desk).
 
 ![The Costs page](guide/assets/costs.jpg)
 
@@ -742,10 +742,10 @@ An **automation** (called a schedule before October 2026) is *a trigger and one 
 - **Create a card** from a template, with the date or the issue title in the name if you like. For automations that react to an event you can also **fill the card from the event**: each line sets the title, the context or any card field to a text with tokens such as `{card.ref}`, `{card.title}`, `{issue.title}`, `{issue.key}`, `{event}` and `{date}` (the editor lists them). What a token stands for is copied as it is and never read as a token again. Choose whether the card **starts as a draft** (it waits for the BA or you to specify it) or **queued** for the agents. Cards made this way are marked as made by an automation. An automation makes at most 20 cards an hour unless you set another limit; more are skipped and one notice on your desk tells you. **Repeats** can prevent a second card for the same source card or ticket, or with the same title.
 - **Run a regression** (a full test run).
 - **Ask DevOps** to do something on a workstation, or run repository hygiene.
-- **Ask the BA** to look at something and write a report on your desk.
+- **Ask the CEO** to look at something and put the answer on your desk as a notice (schedules that were made with "Ask the BA" now ask the CEO).
 - **Poll GitHub or Jira issues** and send each new one into **intake**.
 - **Send a webhook** to Slack, Microsoft Teams, n8n, Zapier or your own code. Every request is signed so the receiver can check it came from you. Failed deliveries are retried a few times.
-- **E-mail a digest**: the floor report, a project summary or an interests digest, at a time you choose.
+- **E-mail a digest**: the daily report's facts, a project summary or an interests digest, at a time you choose.
 
 ![The automation wizard](guide/assets/schedule-wizard.jpg)
 
@@ -761,7 +761,7 @@ Then add an automation **When an e-mail arrives** and choose the inbox. **Fill t
 
 **Reply to a mail from Guildwise, and Draft with BA.** On a card made from an e-mail (panel *E-mail conversation*) and on **Conversation** in the inbox page you can read the thread and **reply as your organization**; the reply goes to the sender of the latest accepted message and their answer comes back to the same card. Owners, Admins and the owner or managers of the card's project may reply. A reply that names an agent of the organization, "AI agent" or Guildwise is refused so you can take it out: your customers see your organization only. **Draft with BA** next to *Send reply* asks a business analyst to write a reply from the conversation and the card, as your organization's own person in plain professional mail. It takes a minute or so; the draft then appears in the reply box for you to read, change and send. Nothing is ever sent by itself, and the sent reply records that it started from a draft. You need a BA hired under Agents; without one the button says so.
 
-**Intake and the outbox.** The **Intake** page (sidebar, Owners and Admins) is where you hand the BA a ticket: paste a Jira key or a GitHub issue address and the BA reads it, asks you about anything unclear, maps it to a project and drafts the cards. Updates the agents want to post back to the ticket (a comment, a resolution) wait on your desk as **Outbound update** items. You can edit them, approve or reject. Nothing is posted without your approval, and agent names and internal details are scrubbed from the text. Jira and GitHub logins stay on your workstation.
+**Intake and the outbox.** The **Intake** page (sidebar, Owners and Admins) is where you bring a ticket in. As the Owner you can press **Tell your CEO** (it opens the CEO chat with your request waiting, and the CEO has the BA write the spec), or **Work with the BA directly**: paste a Jira key or a GitHub issue address and the BA reads it, asks you about anything unclear, maps it to a project and drafts the cards. Updates the agents want to post back to the ticket (a comment, a resolution) wait on your desk as **Outbound update** items. You can edit them, approve or reject. Nothing is posted without your approval, and agent names and internal details are scrubbed from the text. Jira and GitHub logins stay on your workstation.
 
 **Batch intake.** To bring in many tickets without a chat per ticket, open **Intake**, switch to **Batch**, paste one ticket per line (Jira keys or URLs, GitHub issues; up to 50), optionally pick a project for all of them and add a note, then **Start batch**. The BA works through the tickets in the background, two at a time, doing what it does in a chat: it reads the ticket, maps it to a project, writes the spec and creates the cards. Tickets that already have a card are skipped ("skipped: already P4-12"). When the BA cannot go on with a ticket (unclear, no project fits, missing access) it asks one question on your desk that names the ticket; your answer resumes that ticket and the others carry on. The batch page shows each ticket's status, its cards and the question, with **Retry** for failed tickets and **Cancel batch** (tickets the BA is already working on finish).
 
@@ -831,11 +831,11 @@ A **phase** is a named slice of a project's work, the cards you want to ship and
 
 > **In the app:** Help, "Phases and follow-ups" (`/help/phases`).
 
-### 4.11 Your BA reports to you
+### 4.11 Your CEO reports to you
 
-The BA is your eyes and ears on the floor. It reports in three ways, and it never slows an agent down.
+Your CEO is your eyes and ears on the floor, and it never slows an agent down. (Until now your BA did this; the BA is a spec writer only and no longer reports. Reports it wrote earlier stay on your desk, and its "BA reports" chat is read-only.)
 
-**What goes through the BA.** With **routing** on (the default), urgent items such as blocking questions and approvals reach your desk **at once**, unchanged, and the BA adds a note a little later (how often this was asked, what the ledger says). Less urgent items wait up to **10 minutes** for the BA, which passes them on, folds duplicates together, or dismisses noise it can show is covered. If the BA is slow or offline, items reach you unchanged. Switch routing off in **Settings, Your BA reports to you** to see everything as it is raised.
+**What goes through the CEO.** Urgent items such as blocking questions and approvals reach your desk **at once**, unchanged, and the CEO is woken for them too. Less urgent items wait up to **10 minutes** for the CEO, which passes them on, folds duplicates together, or dismisses noise it can show is covered. If the CEO is slow, **paused**, or its workstation is offline, items reach you unchanged: nothing waits for a CEO that cannot look, and if something urgent waits more than 30 minutes you get a notice and an e-mail. There is no switch for this any more; the CEO is always there, and **Pause** on the CEO page is the emergency stop.
 
 **Signals the server watches** (every minute, without spending tokens):
 
@@ -849,13 +849,15 @@ The BA is your eyes and ears on the floor. It reports in three ways, and it neve
 | Repository hygiene problem | A conflict, wrong branch, login failure or missing clone | In the daily report |
 | Budget | 80% of a monthly budget, or 100% (paused) | 80% in the report, 100% at once |
 
-**The daily floor report.** At **08:00 your time** (change it under Settings) the BA posts one **Floor report** on your desk, on days with something to say. It lists phases waiting, stuck and backing-off cards, repeated approvals, failures, open DevOps requests, what the BA resolved itself, **spend** and highlights from your interests. Open **The facts behind this report** for the same lists straight from the server, and use the **BA reports** chat to ask "why?".
+**The daily report.** At **08:00 your time** (change it on the CEO page, **Reporting**) the CEO writes one report on your desk, on days with something to say. It lists what needs you, what the CEO decided (with Undo), phases waiting, stuck and backing-off cards, repeated approvals, failures, open DevOps requests, **spend** and highlights from your interests. Open **The facts behind this report** for the same lists straight from the server, and talk to the CEO about anything in it. When the CEO cannot run for two hours the server posts a plain template report with the same facts.
+
+**Scheduled tasks.** A schedule that asks "the BA" for a report (older schedules) or "the CEO" now goes to the CEO: it does what the instructions say, read-only, and puts the answer on your desk as a notice. If the CEO could not run for two hours you get a notice that the task was skipped.
 
 ![The floor report](guide/assets/desk-floor-report.jpg)
 
-![Settings: time zone and how your BA reports to you](guide/assets/settings.jpg)
+![Settings: time zone](guide/assets/settings.jpg)
 
-> **In the app:** Help, "Your BA reporter" (`/help/ba-reporter`).
+> **In the app:** Help, "The daily report and what is watched" (`/help/ba-reporter`).
 
 ### 4.12 Testing, finalizing and risk
 
@@ -1037,7 +1039,7 @@ You can start a project on any branch of any repository to try it, without leavi
 
 ### 4.22 Your CEO
 
-The **CEO** is the agent you talk to first. It runs the floor for you: it watches every project, agent, workstation and budget, unblocks what is stuck, answers the routine questions it is allowed to answer, recommends the rest, keeps the team the right size, hands work to the BA, the team and DevOps, and writes you one report every morning. It replaces the BA's daily floor report and the BA's triage of held desk items; the BA keeps intake, specs, finalizing, phases and design chats. **Every organization has exactly one CEO, built in:** there is nothing to appoint, hire or dismiss, and it does not count against your plan's agent or workstation limits. Only the **Owner** configures and talks to it. Admins can read its page and activity log and can pause it.
+The **CEO** is the agent you talk to first. It runs the floor for you: it watches every project, agent, workstation and budget, unblocks what is stuck, answers the routine questions it is allowed to answer, recommends the rest, keeps the team the right size, hands work to the BA, the team and DevOps, and writes you one report every morning. It replaced the BA's daily floor report, the BA's triage of held desk items and the BA's urgent notes (the BA reporter is gone: the BA is a spec writer only and keeps intake, specs, finalizing, phases and design chats). **Every organization has exactly one CEO, built in:** there is nothing to appoint, hire or dismiss, and it does not count against your plan's agent or workstation limits. Only the **Owner** configures and talks to it. Admins can read its page and activity log and can pause it.
 
 **Where it runs.** Open **Organization, CEO** (`/org/ceo`). The CEO lives on the Owner's own workstation (the first one he pairs; pick another on the Overview, from your own workstations only). Until a workstation is paired the page says "Pair a workstation to talk to <name>". Its background work (wakes and the daily report) is restricted: read-only, no web, one command, `aom`. **Pause** is an emergency stop: it may read but not act.
 
@@ -1401,9 +1403,9 @@ If an interest cannot run (for example its workstation is offline), it shows a r
 1. **Look at what things cost.** Open **Costs** for the breakdown by project, agent, model and day, and the **Agents** page for each agent's monthly and total cost.
 2. **Set budgets.** For every project, set a **Monthly budget** in its settings. Start with a number you would be comfortable losing and raise it when you trust it.
 3. **Use the right model for the job.** A smaller model for reviewers and testers, a stronger one for builders and the BA. Change an agent's model any time (**Change model**).
-4. **Let the 80% notice work for you.** When it arrives, check the **Floor report's Spend section** for which projects and agents cost the most.
+4. **Let the 80% notice work for you.** When it arrives, check the **daily report's Spend section** for which projects and agents cost the most.
 5. **At 100%** the project pauses by itself. Decide on the desk: **Raise budget** or **Override for this month**. Declining to act is also a decision: the project stays paused until the 1st.
-6. **Stop loops early.** If a card keeps failing, the loop breaker already backs it off (see 9.3) and your BA warns you. Do not keep feeding a card that cannot succeed. Cancel it or fix what it cannot do.
+6. **Stop loops early.** If a card keeps failing, the loop breaker already backs it off (see 9.3) and your CEO warns you. Do not keep feeding a card that cannot succeed. Cancel it or fix what it cannot do.
 7. **Review monthly.** Export the Costs CSV and look for agents that cost more than they deliver.
 
 ![The budget panel and the month's progress](guide/assets/budget-panel.jpg)
@@ -1571,7 +1573,7 @@ Press **?** (when not typing in a field) for the list of shortcuts. **Ctrl+K** o
 | Add a computer, a VPS or a Codespace | **Workstations** |
 | See how the team performs | **Metrics** |
 | See and control spend | **Costs** (Owners and Admins) |
-| Time zone, picture, two-factor, BA reporting, expert mode for code changes, weekly blog digest | **Settings** (your avatar menu, Your settings) |
+| Time zone, picture, two-factor, expert mode for code changes, weekly blog digest | **Settings** (your avatar menu, Your settings) |
 | Link projects to each other (for the CEO's routing) | **Organization**, Project links tab (Owners and Admins) |
 | Release a deploy that is ready, see what was deployed and why it was allowed, edit gate presets | **Deploys** (Organization; Owners and Admins) |
 | Approve a project's delivery recipe, set its secrets, switch Instructions or Recipe | **Projects**, then the project's **Settings**, Delivery |

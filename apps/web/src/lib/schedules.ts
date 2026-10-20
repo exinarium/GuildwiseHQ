@@ -112,8 +112,8 @@ export const ACTION_TILES: Array<{
   },
   {
     id: 'ba_task',
-    label: 'Ask the BA',
-    description: 'The BA does a task you describe (read-only) and reports to your desk.',
+    label: 'Ask the CEO',
+    description: 'The CEO does a task you describe (read-only) and reports to your desk.',
   },
   {
     id: 'github',
@@ -146,7 +146,7 @@ export const actionTileOf = (a: ScheduleAction): ActionTile => {
   return a.integration;
 };
 
-/** A short noun for the list ("Webhook", "BA task"). */
+/** A short noun for the list ("Webhook", "CEO task"). */
 export const actionLabel = (a: ScheduleAction): string =>
   ACTION_TILES.find((t) => t.id === actionTileOf(a))?.label ?? a.kind;
 
@@ -154,7 +154,7 @@ export const SCHEDULE_ACTION_NOUN: Record<ActionTile, string> = {
   create_card: 'Card',
   regression_run: 'Regression',
   devops_request: 'DevOps request',
-  ba_task: 'BA task',
+  ba_task: 'CEO task',
   github: 'GitHub poll',
   jira: 'Jira poll',
   webhook: 'Webhook',
@@ -210,7 +210,7 @@ export function describeAction(a: ScheduleAction): string {
     case 'devops_request':
       return a.hygiene ? 'Repository hygiene run' : `Ask DevOps: ${a.text}`;
     case 'ba_task':
-      return `Ask the BA: ${a.prompt}`;
+      return `Ask the CEO: ${a.prompt}`;
     case 'integration':
       if (isPollAction(a))
         return `Take new ${a.integration === 'github' ? 'GitHub' : 'Jira'} issues of ${a.query} into intake`;

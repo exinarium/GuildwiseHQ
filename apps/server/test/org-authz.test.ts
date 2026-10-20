@@ -322,8 +322,8 @@ describe('org roles', () => {
     ['owner', 200],
     ['admin', 200],
     ['member', 403],
-  ] as const)('change how the BA reports: %s -> %s', async (role, status) => {
-    expect((await call(role, 'PUT', '/api/reporting', { routeViaBa: false })).status).toBe(status);
+  ] as const)('change the report settings: %s -> %s', async (role, status) => {
+    expect((await call(role, 'PUT', '/api/reporting', { dailyAt: '07:30' })).status).toBe(status);
     // everyone in the organization can read the settings
     expect((await call(role, 'GET', '/api/reporting')).status).toBe(200);
   });

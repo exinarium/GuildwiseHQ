@@ -231,173 +231,31 @@ describe('ba_task shifts on the mock runtime', () => {
     }
     const id = () => uuidv7();
 
-    it('desk_triage: dismisses, merges, passes; the instructions are the reporter ones', async () => {
+    it('scheduled_brief (the CEO-BA review): one report; the instructions are the review ones, not the retired reporter ones', async () => {
       h = await startHarness();
-      const [a, b, c, open] = [id(), id(), id(), id()];
-      const item = (itemId: string, title: string) => ({
-        id: itemId,
-        kind: 'alert',
-        subkind: 'bug_reported',
-        title,
-        body: '',
-        projectKey: 'TOY',
-        cardRef: null,
-        blocking: false,
-        askedBy: 'system',
-        createdAt: new Date().toISOString(),
-        held: true,
-      });
-      const msg = reporterShift(h, 'desk_triage', {
-        items: [item(a, 'Bug [dismiss] noise'), item(b, 'Bug [merge] same'), item(c, 'Real bug')],
-        openItems: [{ id: open, title: 'Existing' }],
+      const msg = reporterShift(h, 'scheduled_brief', {
+        brief: {
+          scheduleName: 'CEO decision review',
+          instructions: 'Analyse the correction.',
+          deliver: 'desk_notice',
+          projectKey: 'TOY',
+        },
       });
       const ended = await run(h, msg);
       expect(ended.outcome).toBe('reported');
       const rep = reports(h, msg.shiftId)[0]?.report as any;
-      expect(rep).toMatchObject({ kind: 'outcome', outcomeId: 'triage_done' });
-      expect(rep.data.decisions).toEqual([
-        expect.objectContaining({ itemId: a, action: 'dismiss' }),
-        expect.objectContaining({ itemId: b, action: 'merge', into: open }),
-        expect.objectContaining({ itemId: c, action: 'pass' }),
-      ]);
+      expect(rep).toMatchObject({ kind: 'outcome', outcomeId: 'scheduled_brief' });
+      expect(rep.data.report).toContain('Analyse the correction.');
       const md = readFileSync(join(h.dataDir, 'agents', msg.agent.agentId, 'claude', 'CLAUDE.md'), 'utf8');
-      expect(md).toContain('reporting to the manager in the background');
-      expect(md).toContain('aom report triage');
+      expect(md).toContain('The CEO asks you for an analysis');
+      expect(md).not.toContain('aom report triage');
       expect(h.server.invalid).toEqual([]);
     }, 60_000);
 
-    it("urgent_note and floor_alert: a note per item, an analysis per signal (on the signal's own item)", async () => {
+    it('[ba_no_report] in the instructions ends the shift without a report', async () => {
       h = await startHarness();
-      const [i1, s1, alert] = [id(), id(), id()];
-      const notes = reporterShift(h, 'urgent_note', {
-        items: [
-          {
-            id: i1,
-            kind: 'approval',
-            subkind: 'devops',
-            title: 'Approve docker',
-            body: '',
-            projectKey: 'TOY',
-            cardRef: null,
-            blocking: true,
-            askedBy: 'Atlas',
-            createdAt: new Date().toISOString(),
-            held: false,
-          },
-        ],
-      });
-      await run(h, notes);
-      expect(reports(h, notes.shiftId)[0]?.report).toMatchObject({
-        outcomeId: 'notes_done',
-        data: { notes: [{ itemId: i1, note: expect.stringContaining('Approve docker') }] },
-      });
-      const sig = reporterShift(h, 'floor_alert', {
-        signals: [
-          {
-            id: s1,
-            kind: 'loop',
-            urgency: 'urgent',
-            fingerprint: 'loop:card:x',
-            count: 3,
-            status: 'open',
-            firstSeenAt: 'a',
-            lastSeenAt: 'b',
-            subject: { title: 'TOY-1 keeps failing', detail: '3 shifts', deskItemId: alert },
-            evidence: {},
-          },
-        ],
-      });
-      await run(h, sig);
-      expect(reports(h, sig.shiftId)[0]?.report).toMatchObject({
-        outcomeId: 'signal_report',
-        data: { reports: [{ signalId: s1, annotateItemId: alert }] },
-      });
-    }, 60_000);
-
-    it('floor_report: the eight sections from the digest (spend included)', async () => {
-      h = await startHarness();
-      const msg = reporterShift(h, 'floor_report', {
-        digest: {
-          generatedAt: new Date().toISOString(),
-          localDate: '2026-11-10',
-          since: null,
-          phases: [
-            { ref: 'TOY-P1', name: 'Autosave', status: 'open', projectKey: 'TOY', lateBugs: ['TOY-9'] },
-          ],
-          signals: [],
-          backingOff: [{ ref: 'TOY-2', title: 'x', failures: 4, until: 'later' }],
-          devopsOpen: [{ id: id(), summary: 'Deploy staging', status: 'needs_approval', workstation: 'WS' }],
-          resolvedByBa: [{ id: id(), title: 'Noise', how: 'dismissed', note: null }],
-          failures: [],
-          interests: {
-            count: 2,
-            active: 2,
-            runs: 3,
-            delivered: 2,
-            unrated: 1,
-            highlights: [
-              {
-                interest: 'Rust async',
-                items: [
-                  { title: 'Tokio 2.0', kind: 'article', source: 'tokio.rs', url: 'https://tokio.rs/x' },
-                ],
-                more: 0,
-              },
-            ],
-            failing: [],
-          },
-          spend: {
-            currency: 'USD',
-            sinceMicros: 1_000_000,
-            monthMicros: 12_340_000,
-            overheadMonthMicros: 0,
-            projects: [
-              {
-                key: 'TOY',
-                name: 'Toy',
-                monthMicros: 12_340_000,
-                budgetMicros: 20_000_000,
-                percent: 61,
-                state: 'ok',
-              },
-            ],
-          },
-        },
-      });
-      await run(h, msg);
-      const rep = reports(h, msg.shiftId)[0]?.report as any;
-      const text = rep.data.report as string;
-      expect((text.match(/^## /gm) ?? []).length).toBe(8);
-      expect(text).toContain('## Spend');
-      expect(text).toContain('This month USD 12.34');
-      expect(text).toContain('- TOY: 12.34 of 20.00 (ok)');
-      expect(text).toContain('## Interests highlights');
-      expect(text).toContain('Interests: 2 active of 2, 2 items delivered, 1 unrated');
-      expect(text).toContain('Tokio 2.0 (article)');
-      expect(text).toContain('TOY-P1 Autosave: open (late bugs TOY-9)');
-      expect(text).toContain('TOY-2 backing off after 4 failed shifts');
-      expect(text).toContain('Deploy staging: needs_approval');
-      expect(text).toContain('Noise (dismissed)');
-    }, 60_000);
-
-    it('[ba_no_report] in an item ends the shift without a report', async () => {
-      h = await startHarness();
-      const msg = reporterShift(h, 'desk_triage', {
-        items: [
-          {
-            id: id(),
-            kind: 'alert',
-            subkind: null,
-            title: 'Slow [ba_no_report]',
-            body: '',
-            projectKey: null,
-            cardRef: null,
-            blocking: false,
-            askedBy: 'system',
-            createdAt: new Date().toISOString(),
-            held: true,
-          },
-        ],
+      const msg = reporterShift(h, 'scheduled_brief', {
+        brief: { scheduleName: 'Review', instructions: 'Slow [ba_no_report]', deliver: 'desk_notice' },
       });
       const ended = await run(h, msg);
       expect(ended.outcome).toBe('no_report');

@@ -44,6 +44,8 @@ export function chatErrorText(reason: string): string {
       return 'This conversation no longer exists.';
     case 'cancelled':
       return 'Stopped.';
+    case 'ba_reports_retired':
+      return 'The daily report is written by your CEO now. This conversation is read-only: ask your CEO instead.';
     default:
       return reason;
   }
@@ -71,7 +73,9 @@ export function ChatPanel({
   const isCeo = chat?.agentRole === 'ceo';
   /** Old DevOps conversations are read-only: DevOps works through the CEO now. */
   const retiredDevops = chat?.agentRole === 'devops';
-  const ceoName = useCeoName(retiredDevops);
+  /** The standing "BA reports" conversation is read-only too: the CEO writes the daily report now. */
+  const retiredBaReports = chat?.title === 'BA reports';
+  const ceoName = useCeoName(retiredDevops || retiredBaReports);
   const messages = useThreadMessages(threadId);
   const qc = useQueryClient();
   const [draft, setDraft] = useState(initialDraft ?? '');
@@ -274,6 +278,10 @@ export function ChatPanel({
       {retiredDevops ? (
         <Callout tone="info" role="note" data-testid="devops-read-only">
           DevOps now works through {ceoName}. This conversation is read-only: ask {ceoName} instead.
+        </Callout>
+      ) : retiredBaReports ? (
+        <Callout tone="info" role="note" data-testid="ba-reports-read-only">
+          {ceoName} writes your daily report now. This conversation is read-only: ask {ceoName} instead.
         </Callout>
       ) : (
         <form

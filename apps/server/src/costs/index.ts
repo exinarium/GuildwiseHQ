@@ -10,8 +10,8 @@ import {
   type OrgRole,
   type SpendBrief,
 } from '@aom/shared';
+import { reportingOf } from '../ceo/prefs.ts';
 import { one, type Queryable, type Row, rows } from '../db/sql.ts';
-import { reportingOf } from '../reporter/settings.ts';
 
 /** How an organization shows money and cuts months: its currency, the USD rate and its time zone (the Owner's). */
 export interface OrgCostCtx {

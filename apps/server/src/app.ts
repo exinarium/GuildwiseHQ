@@ -21,6 +21,8 @@ import { createSocialClient, type SocialClient } from './blog/social-client.ts';
 import type { WriterClient } from './blog/writer/client.ts';
 import { BrowserGateway } from './browser-gateway/gateway.ts';
 import { registerCeoReviewHook } from './ceo/review.ts';
+import { createRoutingInterceptor } from './ceo/routing.ts';
+import { SignalSweep } from './ceo/signals.ts';
 import { registerCeoWakes } from './ceo/wakes.ts';
 import { ChatRelay } from './chat/relay.ts';
 import { type Clock, createClock } from './clock.ts';
@@ -50,8 +52,6 @@ import { createOrgStatusInterceptor } from './orgs/guard.ts';
 import { reportServerError } from './platform-team/detectors.ts';
 import { buildProjectors } from './projections/index.ts';
 import { registerPushNotifier } from './push/notifier.ts';
-import { Reporter } from './reporter/reporter.ts';
-import { createRoutingInterceptor } from './reporter/routing.ts';
 import { adminRoutes } from './routes/admin.ts';
 import { agentRoutes } from './routes/agents.ts';
 import { approvalRoutes } from './routes/approval.ts';
@@ -432,8 +432,8 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   const dispatcher = new Dispatcher(ctx);
   const reaper = new Reaper(ctx);
   const scheduler = new Scheduler(ctx);
-  const reporter = new Reporter(ctx);
-  Object.assign(ctx.services, { runners, gateway, browser, dispatcher, reaper, scheduler, reporter });
+  const signals = new SignalSweep(ctx);
+  Object.assign(ctx.services, { runners, gateway, browser, dispatcher, reaper, scheduler, signals });
   ctx.services.cloud = { ssh: realSshConnector, github: createGithubApi(), pending: new Set() };
   ctx.services.chat = new ChatRelay(ctx);
   ctx.services.billing = createBillingRuntime(config);
@@ -459,7 +459,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
       await ctx.services.scheduler.run();
       await ctx.services.scheduler.runLicensing();
       await ctx.services.scheduler.runBilling();
-      await ctx.services.reporter.run();
+      await ctx.services.signals.run();
       ctx.services.dispatcher.trigger();
       return { now: clock.now().toISOString(), offsetMs: clock.offsetMs };
     });
@@ -524,7 +524,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
     dispatcher.start();
     reaper.start();
     scheduler.start();
-    reporter.start();
+    signals.start();
   }
 
   app.addHook('onClose', async () => {
@@ -539,7 +539,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
     unhookCeoReview();
     ctx.services.push?.stop();
     await simulation?.stop();
-    await reporter.stop();
+    await signals.stop();
     await scheduler.stop();
     await dispatcher.stop();
     await reaper.stop();

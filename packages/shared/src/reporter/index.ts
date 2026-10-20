@@ -64,11 +64,13 @@ export const ROUTING_EXEMPT_SUBKINDS: readonly string[] = [
 
 const HHMM = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'time of day as HH:MM');
 
-/** Organization setting (stored on the owner). `routeViaBa` defaults to on. */
+/**
+ * Organization setting (stored on the owner). The report time is the CEO's `reportAt` when that is set, else `dailyAt`.
+ * The old `routeViaBa` key stays in the stored data and the `ReportingPrefsChanged` event for replay; nothing reads it
+ * for routing any more (the BA reporter is retired) and the API no longer shows it.
+ */
 export const ReportingPrefsSchema = z.object({
-  /** Route every agent-raised desk item through the BA first (owner decision B2/B3). */
-  routeViaBa: z.boolean(),
-  /** Local time of the daily floor report. */
+  /** Local time of the daily report (the CEO's `reportAt` overrides it). */
   dailyAt: HHMM,
   /**
    * The quiet cap (docs/design/restructure.md): at most this many interest digest items reach the desk per day across all
@@ -78,18 +80,16 @@ export const ReportingPrefsSchema = z.object({
 });
 export type ReportingPrefs = z.infer<typeof ReportingPrefsSchema>;
 export const DEFAULT_REPORTING: ReportingPrefs = {
-  routeViaBa: true,
   dailyAt: REPORTER.defaultDailyAt,
   interestDigestCap: null,
 };
 
 export const UpdateReportingRequestSchema = z
   .object({
-    routeViaBa: z.boolean().optional(),
     dailyAt: HHMM.optional(),
     interestDigestCap: z.number().int().min(1).max(1000).nullable().optional(),
   })
-  .refine((v) => v.routeViaBa !== undefined || v.dailyAt !== undefined || v.interestDigestCap !== undefined, {
+  .refine((v) => v.dailyAt !== undefined || v.interestDigestCap !== undefined, {
     message: 'nothing to change',
   });
 export type UpdateReportingRequest = z.infer<typeof UpdateReportingRequestSchema>;
@@ -323,72 +323,32 @@ export const floorDigestIsEmpty = (d: FloorDigest): boolean =>
 // (spend alone does not make a day worth a report: it rides along when there is one, and a project near or over its
 // budget is a signal, which does.)
 
-// ------------------------------------------------------------------------------------ BA reporter tasks
+// ------------------------------------------------------------------------------------ BA reporter tasks (retired)
 
+/**
+ * The BA reporter is retired (docs/design/ceo-front-door.md step 3). The kinds stay in the schema because old
+ * `BaTaskQueued` events carry them and must replay. Only `scheduled_brief` still runs, and only as the CEO-BA review of a
+ * corrected decision (`ceo/review.ts`); a schedule's `ba_task` action is now a CEO wake with the reason `scheduled_brief`.
+ */
 export const ReporterTaskKind = z.enum([
+  /** Retired: held items are triaged by the CEO. */
   'desk_triage',
+  /** Retired. */
   'urgent_note',
+  /** Retired: an urgent signal wakes the CEO. */
   'floor_alert',
+  /** Retired: the CEO writes the daily report. */
   'floor_report',
-  /** A schedule's `ba_task` action: free-text instructions from the manager, answered with one report. */
+  /** The CEO-BA review analysis (formerly also a schedule's `ba_task` action). */
   'scheduled_brief',
 ]);
 export type ReporterTaskKind = z.infer<typeof ReporterTaskKind>;
 export const isReporterTaskKind = (k: string): k is ReporterTaskKind => ReporterTaskKind.safeParse(k).success;
 
 export const REPORTER_OUTCOME = {
-  triage: 'triage_done',
-  notes: 'notes_done',
-  signals: 'signal_report',
-  floor: 'floor_report',
   brief: 'scheduled_brief',
 } as const;
 
-/** `desk_triage`: what to do with each held item. Items without a decision reach the manager unchanged. */
-export const TriageDecisionSchema = z.object({
-  itemId: z.uuid(),
-  /** pass: the manager sees it (with the note); dismiss: noise or already covered; merge: fold into `into`. */
-  action: z.enum(['pass', 'dismiss', 'merge']),
-  note: z.string().max(4000).optional(),
-  into: z.uuid().optional(),
-});
-export const TriageDataSchema = z.object({
-  decisions: z.array(TriageDecisionSchema).min(1).max(100),
-});
-export type TriageData = z.infer<typeof TriageDataSchema>;
-
-/** `urgent_note`: context added to items that already reached the manager. */
-export const NotesDataSchema = z.object({
-  notes: z
-    .array(
-      z.object({
-        itemId: z.uuid(),
-        note: z.string().min(1).max(4000),
-        related: z.array(z.uuid()).optional(),
-      }),
-    )
-    .min(1)
-    .max(100),
-});
-export type NotesData = z.infer<typeof NotesDataSchema>;
-
-/** `floor_alert`: the BA's analysis of each urgent signal. */
-export const SignalReportsDataSchema = z.object({
-  reports: z
-    .array(
-      z.object({
-        signalId: z.uuid(),
-        summary: z.string().min(1).max(20000),
-        /** Put the analysis on this existing desk item (the loop breaker's alert) instead of a new one. */
-        annotateItemId: z.uuid().optional(),
-      }),
-    )
-    .min(1)
-    .max(50),
-});
-export type SignalReportsData = z.infer<typeof SignalReportsDataSchema>;
-
-export const FloorReportDataSchema = z.object({ report: z.string().min(1).max(40000) });
 export const ScheduledBriefDataSchema = z.object({ report: z.string().min(1).max(40000) });
 
 export const ReporterItemBriefSchema = z.object({
@@ -429,19 +389,15 @@ export const ReporterTaskSchema = z.object({
 export type ReporterTask = z.infer<typeof ReporterTaskSchema>;
 
 export function reporterBriefOutcomes(kind: ReporterTaskKind) {
-  const o = (id: string, label: string, data: string) => ({ id, label, kind: 'success' as const, data });
-  switch (kind) {
-    case 'desk_triage':
-      return [o(REPORTER_OUTCOME.triage, 'Decide what happens to each held item', 'triageDone')];
-    case 'urgent_note':
-      return [o(REPORTER_OUTCOME.notes, 'Add context to the items', 'notesDone')];
-    case 'floor_alert':
-      return [o(REPORTER_OUTCOME.signals, 'Report each urgent signal to the manager', 'signalReport')];
-    case 'floor_report':
-      return [o(REPORTER_OUTCOME.floor, 'Write the daily floor report', 'floorReport')];
-    case 'scheduled_brief':
-      return [o(REPORTER_OUTCOME.brief, 'Report on the scheduled task', 'scheduledBrief')];
-  }
+  if (kind !== 'scheduled_brief') return [];
+  return [
+    {
+      id: REPORTER_OUTCOME.brief,
+      label: 'Report the analysis',
+      kind: 'success' as const,
+      data: 'scheduledBrief',
+    },
+  ];
 }
 
 // ------------------------------------------------------------------------------------ template texts
@@ -478,7 +434,7 @@ export function renderSpendLines(sp: FloorDigest['spend']): string[] {
 
 const list = (xs: string[]): string => (xs.length ? xs.map((x) => `- ${x}`).join('\n') : '- none');
 
-/** The daily floor report the server posts when no BA is available (and the base the BA starts from). */
+/** The daily report as a template: the facts the CEO starts from, and the whole report when the CEO cannot run. */
 export function renderFloorReportFallback(d: FloorDigest): string {
   const out: string[] = [`# Floor report ${d.localDate}`, ''];
   out.push('## Phases');
@@ -525,18 +481,7 @@ export function renderFloorReportFallback(d: FloorDigest): string {
   out.push(...renderInterestHighlights(d.interests));
   out.push('', '## DevOps requests that are open');
   out.push(list(d.devopsOpen.map((r) => `${r.summary} on ${r.workstation}: ${r.status}`)));
-  out.push('', '## Resolved by the BA without bothering you');
+  out.push('', '## Resolved without bothering you');
   out.push(list(d.resolvedByBa.map((r) => `${r.title} (${r.how}${r.note ? `: ${r.note}` : ''})`)));
   return `${out.join('\n')}\n`;
-}
-
-/** The urgent notice for a signal when no BA is available. */
-export function renderSignalFallback(s: SignalBrief): string {
-  return [
-    `${SIGNAL_LABEL[s.kind]}: ${s.subject.title}`,
-    '',
-    s.subject.detail || 'The server detected this on its own.',
-    '',
-    `Seen ${s.count} time${s.count === 1 ? '' : 's'} since ${s.firstSeenAt}. No BA was available to analyse it, so this is the plain finding.`,
-  ].join('\n');
 }

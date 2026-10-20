@@ -4,7 +4,6 @@ import type { AddressInfo } from 'node:net';
 import { streamId } from '@aom/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { assertWebhookUrl, isPrivateAddress } from '../src/commands/schedule-delivery.ts';
-import { baTaskPass } from '../src/dispatcher/ba-tasks.ts';
 import { phasePass } from '../src/dispatcher/phases.ts';
 import { PROJECTION_TABLES } from '../src/projections/index.ts';
 import { rebuildProjections } from '../src/projections/rebuild.ts';
@@ -131,7 +130,7 @@ describe('a schedule is a trigger and one action', () => {
     expect(feed.body.error.code).toBe('use_interests');
   });
 
-  it('a BA task has free-text instructions; with no BA the server answers from a template', async () => {
+  it('a BA task action is a CEO wake now: free-text instructions, no BA task (more in scheduled-brief-ceo.test.ts)', async () => {
     const s = await ok<any>(
       create({
         name: 'Friday review',
@@ -147,22 +146,13 @@ describe('a schedule is a trigger and one action', () => {
     );
     expect(s).toMatchObject({ kind: 'ba_task', orgLevel: true });
     await ok(owner('POST', `/api/schedules/${s.id}/run`), 201);
-    const task = (await q(`SELECT * FROM ba_tasks WHERE schedule_id=$1`, [s.id]))[0];
-    expect(task).toMatchObject({
-      kind: 'scheduled_brief',
-      status: 'queued',
-      org_level: true,
-      deliver: 'chat',
-    });
-    expect(task?.instructions).toMatch(/^List the open phases on \d{4}-/);
-    await baTaskPass(ctx()); // no BA is hired: the fallback posts the notice
-    expect((await q('SELECT status FROM ba_tasks WHERE id=$1', [task?.id]))[0]?.status).toBe('fallback');
-    const item = (
-      await q(`SELECT title, body, project_id FROM desk_items WHERE data->>'scheduleId' = $1`, [s.id])
+    expect(await q(`SELECT 1 FROM ba_tasks WHERE schedule_id=$1`, [s.id])).toHaveLength(0);
+    const wake = (
+      await q(`SELECT * FROM ceo_wakes WHERE reason='scheduled_brief' AND detail->>'scheduleId' = $1`, [s.id])
     )[0];
-    expect(item?.title).toBe('Friday review: BA report');
-    expect(item?.project_id).toBeNull();
-    expect(item?.body).toContain('List the open phases');
+    expect(wake).toMatchObject({ urgency: 'scheduled', status: 'pending', subject_label: 'Friday review' });
+    expect(wake?.detail.instructions).toMatch(/^List the open phases on \d{4}-/);
+    expect(wake?.detail.deliver).toBe('chat');
   });
 
   it('a DevOps request goes to the engineer of the owner workstation, hygiene included', async () => {

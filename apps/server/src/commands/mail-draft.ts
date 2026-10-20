@@ -9,11 +9,11 @@ import {
   streamId,
 } from '@aom/shared';
 import type { AuthSession } from '../auth/sessions.ts';
+import { carrierProject } from '../ceo/carrier.ts';
 import type { Ctx } from '../context.ts';
 import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import { conflict, forbidden } from '../errors.ts';
-import { carrierProject } from '../reporter/tasks.ts';
 import { orgScope, projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
 import { replyAddress, resolveThread, revealedMarkers, type ThreadRef } from './mail-reply.ts';
 import type { ReportResult } from './shifts.ts';

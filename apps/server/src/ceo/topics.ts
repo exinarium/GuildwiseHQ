@@ -81,7 +81,10 @@ const clip = (s: unknown, n = 300) =>
     .trim()
     .slice(0, n) || '(untitled)';
 
-/** What went wrong or took long since `since`, from the job log, repeats, corrections, loop breaker, DevOps and the desk. */
+/**
+ * What went wrong or took long since `since`, from the job log, repeats, corrections, loop breaker, DevOps, failed recipe
+ * deploys and the desk.
+ */
 async function signalsSince(db: Queryable, orgId: string, since: Date): Promise<NoteDraft[]> {
   const out: NoteDraft[] = [];
   for (const j of await rows(
@@ -141,6 +144,21 @@ async function signalsSince(db: Queryable, orgId: string, since: Date): Promise<
       subject: `devops:${r.id}`,
       evidence: [{ kind: 'devops', id: r.id }],
       note: clip(r.summary),
+    });
+  // A deploy that ran and failed (`DeployRunFinished` outcome failed). A refused run never ran, and a trial or a dry run is
+  // practice: neither is a problem worth a generic question.
+  for (const r of await rows(
+    db,
+    `SELECT id, env, summary FROM deploy_runs
+      WHERE org_id=$1 AND status='failed' AND NOT trial AND NOT dry_run AND finished_at > $2
+      ORDER BY finished_at LIMIT 50`,
+    [orgId, since],
+  ))
+    out.push({
+      sourceKind: 'deploy',
+      subject: `deploy_run:${r.id}`,
+      evidence: [{ kind: 'deploy_run', id: r.id }],
+      note: clip(`Deploy to ${r.env} failed${r.summary ? `: ${r.summary}` : ''}`),
     });
   for (const d of await rows(
     db,

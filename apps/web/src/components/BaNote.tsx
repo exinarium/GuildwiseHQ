@@ -55,7 +55,7 @@ const Section = ({ title, children, count }: { title: string; children: React.Re
   </section>
 );
 
-/** The structured facts behind a daily floor report: the six sections of owner decision B6. */
+/** The structured facts behind a floor report. The BA reporter is retired: this renders historical items only (the CEO report has its own card). */
 export function FloorReport({ digest }: { digest: FloorDigest }) {
   const stuck = digest.signals.filter((s) => ['blocked', 'unclaimed', 'loop'].includes(s.kind));
   const approvals = digest.signals.filter((s) => s.kind === 'repeated_approval');

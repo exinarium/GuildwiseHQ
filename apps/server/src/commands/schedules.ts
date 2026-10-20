@@ -222,26 +222,28 @@ export async function listSystemSchedules(ctx: Ctx, userId: string): Promise<Sys
   const orgs = await rows(
     ctx.pool,
     `SELECT om.org_id, o.name, u.timezone, u.reporting,
-            (SELECT max(created_at) FROM desk_items d WHERE d.org_id = om.org_id AND d.subkind='floor_report') AS last_at
+            (SELECT cs.settings->>'reportAt' FROM ceo_settings cs WHERE cs.org_id = om.org_id) AS ceo_report_at,
+            (SELECT max(created_at) FROM desk_items d WHERE d.org_id = om.org_id AND d.subkind IN ('floor_report','ceo_report')) AS last_at
        FROM org_members om JOIN organizations o ON o.id = om.org_id AND o.status IN ('trial','active')
        JOIN users u ON u.id = o.owner_user_id
       WHERE om.user_id=$1 AND om.status='active' AND om.role IN ('owner','admin') ORDER BY o.name`,
     [userId],
   );
   for (const o of orgs) {
-    const dailyAt: string = (o.reporting as { dailyAt?: string } | null)?.dailyAt ?? '08:00';
+    const dailyAt: string =
+      o.ceo_report_at ?? (o.reporting as { dailyAt?: string } | null)?.dailyAt ?? '08:00';
     const [hh = '8', mm = '0'] = dailyAt.split(':');
     const tz: string = o.timezone ?? 'UTC';
     out.push({
       id: `system:floor_report:${o.org_id}`,
       kind: 'floor_report',
-      name: orgs.length > 1 ? `BA floor report (${o.name})` : 'BA floor report',
+      name: orgs.length > 1 ? `CEO daily report (${o.name})` : 'CEO daily report',
       description:
-        'The business analyst writes one report a day: phases, stuck work, failures, open DevOps requests and what it settled itself.',
+        'The CEO writes one report a day: what it handled, what needs you, phases, stuck work, failures, spend and open DevOps requests.',
       when: `Daily at ${dailyAt} (${tz})`,
       lastRunAt: iso(o.last_at),
       nextRunAt: nextFireAfter(`${Number(mm)} ${Number(hh)} * * *`, tz, now)?.toISOString() ?? null,
-      configureAt: '/settings',
+      configureAt: '/ceo',
     });
   }
   return out;

@@ -795,7 +795,7 @@ function MailTriggerFields({
       {s.triggerKind === 'email_reply' && (
         <p className="text-sm text-muted sm:col-span-2">
           A reply to a mail that became a card is added to that card as a comment, whether or not an
-          automation listens. This automation also runs for each reply, for example to ask the BA to look at
+          automation listens. This automation also runs for each reply, for example to ask the CEO to look at
           it.
         </p>
       )}

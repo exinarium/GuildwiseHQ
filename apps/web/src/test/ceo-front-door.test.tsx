@@ -7,6 +7,7 @@ import { ChatDrawer } from '../components/ChatDrawer.tsx';
 import { ChatPanel } from '../components/ChatPanel.tsx';
 import { CorrectButton } from '../components/ceo/CorrectDialog.tsx';
 import { DeskItem } from '../pages/Desk.tsx';
+import { IntakeNew } from '../pages/Intake.tsx';
 import { Ledger } from '../pages/Ledger.tsx';
 import { initSocket, type LiveSocket } from '../ws/socket.ts';
 import { ceoStatus, deskItem, Fail, stubApi, U, wrap } from './ceo-fixtures.tsx';
@@ -336,6 +337,18 @@ describe('the CEO chat: full power, queue, permissions, confirmations', () => {
     stubApi('owner', chatRoutes(state(), ceoChat({ agentRole: 'devops', agentName: 'Atlas' })));
     wrap(<ChatPanel threadId={THREAD} />);
     expect(await screen.findByTestId('devops-read-only')).toHaveTextContent('DevOps now works through Cora');
+    expect(screen.queryByLabelText('Message')).toBeNull();
+  });
+
+  it('opens the standing "BA reports" conversation read-only: the CEO writes the daily report now', async () => {
+    stubApi(
+      'owner',
+      chatRoutes(state(), ceoChat({ agentRole: 'ba', agentName: 'Bea', title: 'BA reports' })),
+    );
+    wrap(<ChatPanel threadId={THREAD} />);
+    expect(await screen.findByTestId('ba-reports-read-only')).toHaveTextContent(
+      'Cora writes your daily report now',
+    );
     expect(screen.queryByLabelText('Message')).toBeNull();
   });
 });
@@ -672,5 +685,30 @@ describe('the chat drawer: DevOps works through the CEO', () => {
     const select = await screen.findByLabelText('Agent');
     await waitFor(() => expect(within(select).queryByRole('option', { name: /Ada/ })).toBeInTheDocument());
     expect(within(select).queryByRole('option', { name: /Atlas/ })).toBeNull();
+  });
+});
+
+describe('New intake: the CEO is the front door', () => {
+  it('the Owner can tell the CEO: it opens the CEO chat with the request waiting, and the BA stays a direct path', async () => {
+    const calls = stubApi('owner', [
+      ['GET /api/intakes', () => ({ intakes: [] })],
+      ['POST /api/ceo/chat', () => ({ threadId: THREAD })],
+    ]);
+    wrap(<IntakeNew />);
+    await userEvent.type(await screen.findByLabelText('Ticket or need'), 'Add dark mode to the settings');
+    expect(screen.getByRole('button', { name: 'Work with the BA directly' })).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId('intake-via-ceo'));
+    await waitFor(() =>
+      expect(calls.some((c) => c.method === 'POST' && c.url === '/api/ceo/chat')).toBe(true),
+    );
+    // the router moved on to the chat page (the wrapper's catch-all route)
+    expect(await screen.findByTestId('elsewhere')).toBeInTheDocument();
+  });
+
+  it('an Admin has no CEO button (only the Owner talks to the CEO): the plain Start intake stays', async () => {
+    stubApi('admin', [['GET /api/intakes', () => ({ intakes: [] })]]);
+    wrap(<IntakeNew />);
+    expect(await screen.findByRole('button', { name: 'Start intake' })).toBeInTheDocument();
+    expect(screen.queryByTestId('intake-via-ceo')).toBeNull();
   });
 });

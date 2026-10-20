@@ -143,7 +143,6 @@ describe('Settings: expert mode switch', () => {
       if (String(url).endsWith('/auth/me')) return json(meBody(false));
       if (String(url).endsWith('/reporting'))
         return json({
-          routeViaBa: true,
           dailyAt: '08:00',
           timezone: 'UTC',
           canEdit: true,

@@ -8,13 +8,14 @@ import {
 } from '@aom/shared';
 import { orgOwnerId } from '../auth/org-context.ts';
 import type { AuthSession } from '../auth/sessions.ts';
+import { reportingOf } from '../ceo/prefs.ts';
+import { loadCeo } from '../ceo/state.ts';
 import type { Ctx } from '../context.ts';
 import { badRequest, forbidden } from '../errors.ts';
-import { reportingOf } from '../reporter/settings.ts';
 import { orgScope, userActor, userScope } from './common.ts';
 
 /**
- * How the BA reports for an organization: the Owner's and the Admins' to read and set. The preferences live on the
+ * How the daily report is scheduled for an organization: the Owner's and the Admins' to read and set. The preferences live on the
  * Owner's user row (the daily report runs on the Owner's clock); everyone else sees the organization's own settings.
  */
 export async function getReporting(
@@ -22,9 +23,10 @@ export async function getReporting(
   org: { id: string; role: OrgRole | null },
 ): Promise<ReportingResponse> {
   const r = await reportingOf(ctx.pool, org.id);
+  // The CEO's own report time wins when it is set (Settings > CEO); `dailyAt` is the default.
+  const ceo = await loadCeo(ctx.pool, org.id);
   return {
-    routeViaBa: r.routeViaBa,
-    dailyAt: r.dailyAt,
+    dailyAt: ceo?.settings.reportAt ?? r.dailyAt,
     interestDigestCap: r.interestDigestCap,
     timezone: r.timezone,
     effectiveTimezone: r.timezone ?? 'UTC',
@@ -39,7 +41,7 @@ export async function updateReporting(
   req: UpdateReportingRequest,
 ): Promise<ReportingResponse> {
   if (!isOrgManager({ orgRole: org.role }))
-    throw forbidden('only the organization Owner and Admins can change how the BA reports');
+    throw forbidden('only the organization Owner and Admins can change the report settings');
   const ownerId = await orgOwnerId(ctx.pool, org.id);
   await ctx.store.append([
     {
@@ -48,7 +50,6 @@ export async function updateReporting(
         type: 'ReportingPrefsChanged',
         payload: {
           userId: ownerId,
-          ...(req.routeViaBa !== undefined ? { routeViaBa: req.routeViaBa } : {}),
           ...(req.dailyAt !== undefined ? { dailyAt: req.dailyAt } : {}),
           ...(req.interestDigestCap !== undefined ? { interestDigestCap: req.interestDigestCap } : {}),
         },

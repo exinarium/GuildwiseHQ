@@ -7,12 +7,12 @@ import {
   type ShiftReport,
   streamId,
 } from '@aom/shared';
+import { reportingOf } from '../ceo/prefs.ts';
 import type { Ctx } from '../context.ts';
 import { type Row, rows } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { dedupMatches } from '../queries/ledger.ts';
-import { reportingOf } from '../reporter/settings.ts';
 import { agentActor, cardMessage, projectScope } from './common.ts';
 import {
   DUPLICATE_SIMILARITY,

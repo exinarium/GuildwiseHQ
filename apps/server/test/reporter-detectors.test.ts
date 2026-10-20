@@ -16,7 +16,7 @@ afterAll(async () => {
 
 const scope = () => ({ orgId: w.owner.id, projectId: w.projectId, audience: 'project' as const });
 const SYSTEM = { kind: 'system' as const, id: null };
-const reporter = () => w.t.app.ctx.services.reporter;
+const reporter = () => w.t.app.ctx.services.signals;
 const dispatcher = () => w.t.app.ctx.services.dispatcher;
 const signals = (kind?: string) =>
   q(`SELECT * FROM ba_signals WHERE ($1::text IS NULL OR kind=$1) ORDER BY first_seen_at`, [kind ?? null]);
@@ -111,9 +111,9 @@ describe('detectors: one fixture per threshold, plus a control', () => {
       status: 'open',
     });
     expect(s!.subject).toMatchObject({ cardRef: card.ref, deskItemId: alertId });
-    // dedup: a second sweep raises nothing new and queues no second alert task
+    // dedup: a second sweep raises nothing new; the BA reporter is retired, so no BA task is queued either
     expect((await reporter().run()).raised).toBe(0);
-    expect(await q(`SELECT 1 FROM ba_tasks WHERE kind='floor_alert'`)).toHaveLength(1);
+    expect(await q(`SELECT 1 FROM ba_tasks`)).toHaveLength(0);
 
     // the failures go on: the same signal is updated, not duplicated
     await seed(w, [
@@ -170,15 +170,13 @@ describe('detectors: one fixture per threshold, plus a control', () => {
     const [s] = await open('repeated_approval');
     expect(s).toMatchObject({ urgency: 'normal', count: 3 });
     expect(s!.subject.deskItemIds).toHaveLength(3);
-    // normal urgency: no immediate alert task
-    expect(await q(`SELECT 1 FROM ba_tasks WHERE kind='floor_alert'`)).toHaveLength(0);
 
     // asked again after the manager rejected it: urgent
     const asked = s!.subject.deskItemIds[0] as string;
     await q(`UPDATE desk_items SET status='answered', answer_option='rejected' WHERE id=$1`, [asked]);
     await reporter().run();
     expect((await open('repeated_approval'))[0]).toMatchObject({ urgency: 'urgent' });
-    expect(await q(`SELECT 1 FROM ba_tasks WHERE kind='floor_alert'`)).toHaveLength(1);
+    expect(await q(`SELECT 1 FROM ba_tasks`)).toHaveLength(0);
   });
 
   it('repeated approval: asks older than 24 hours do not count', async () => {
@@ -242,57 +240,8 @@ describe('detectors: one fixture per threshold, plus a control', () => {
   });
 });
 
-describe('no BA: the server posts the notice itself', () => {
-  it('an urgent signal becomes a template alert; the loop alert gets a note instead of a second item', async () => {
-    await clean();
-    const card = await w.card({ title: 'Looping without a BA' });
-    const alertId = randomUUID();
-    const episodeId = randomUUID();
-    await seed(w, [
-      {
-        streamId: streamId.card(card.id),
-        event: {
-          type: 'CardRetryDeferred',
-          payload: {
-            cardId: card.id,
-            until: new Date(w.t.clock.now().getTime() + 60_000).toISOString(),
-            failures: 3,
-            episodeId,
-            newEpisode: true,
-          },
-        },
-        actor: SYSTEM,
-        scope: scope(),
-      },
-      {
-        streamId: streamId.desk(alertId),
-        event: {
-          type: 'DeskItemCreated',
-          payload: {
-            deskItemId: alertId,
-            kind: 'alert',
-            subkind: DESK_SUBKIND.loopBackoff,
-            title: 'keeps failing',
-            cardId: card.id,
-            projectId: w.projectId,
-            askedBy: { kind: 'system' },
-          },
-        },
-        actor: SYSTEM,
-        scope: scope(),
-      },
-    ]);
-    await reporter().run();
-    await dispatcher().run(); // no BA is hired: the task is done by the server at once
-    const task = (await q(`SELECT * FROM ba_tasks WHERE kind='floor_alert'`))[0]!;
-    expect(task.status).toBe('fallback');
-    const item = (await q('SELECT ba_note FROM desk_items WHERE id=$1', [alertId]))[0]!;
-    expect(item.ba_note).toContain('No BA was available');
-    expect((await signals('loop'))[0]!.status).toBe('reported');
-    expect(await q(`SELECT 1 FROM desk_items WHERE subkind='ba_report'`)).toHaveLength(0);
-  });
-
-  it('a signal with no alert of its own gets an alert/ba_report item', async () => {
+describe("the BA reporter is retired: signals are the CEO's to hear about", () => {
+  it('an urgent signal queues no BA task and no desk report; a signal that clears acknowledges the old BA report item', async () => {
     await clean();
     const asked = [
       await approval('DevOps needs approval: wipe the docker volumes'),
@@ -302,13 +251,40 @@ describe('no BA: the server posts the notice itself', () => {
     await q(`UPDATE desk_items SET status='answered', answer_option='rejected' WHERE id=$1`, [asked[0]]);
     await reporter().run();
     await dispatcher().run();
-    const item = (await q(`SELECT * FROM desk_items WHERE subkind='ba_report'`))[0]!;
-    expect(item).toMatchObject({ kind: 'alert', status: 'open', asked_by_kind: 'system', pinned: false });
-    expect(item.title).toContain('Repeated approval');
-    expect(item.body).toContain('No BA was available');
-    // the signal clears: the report is acknowledged on its own
+    const [s] = await open('repeated_approval');
+    expect(s).toMatchObject({ urgency: 'urgent', status: 'open' });
+    expect(await q(`SELECT 1 FROM ba_tasks`)).toHaveLength(0);
+    expect(await q(`SELECT 1 FROM desk_items WHERE subkind='ba_report'`)).toHaveLength(0);
+
+    // an old BA report item that points at the signal (written before the reporter was retired) is acknowledged on clear
+    const old = randomUUID();
+    await seed(w, [
+      {
+        streamId: streamId.desk(old),
+        event: {
+          type: 'DeskItemCreated',
+          payload: {
+            deskItemId: old,
+            kind: 'alert',
+            subkind: 'ba_report',
+            title: 'Repeated approval: wipe the docker volumes',
+            body: 'old BA analysis',
+            projectId: w.projectId,
+            askedBy: { kind: 'system' },
+          },
+        },
+        actor: SYSTEM,
+        scope: scope(),
+      },
+      {
+        streamId: streamId.baSignal(s!.id),
+        event: { type: 'BaSignalReported', payload: { signalId: s!.id, deskItemId: old } },
+        actor: SYSTEM,
+        scope: scope(),
+      },
+    ]);
     await q(`UPDATE desk_items SET created_at = created_at - interval '2 days' WHERE subkind='devops'`);
     await reporter().run();
-    expect((await q('SELECT status FROM desk_items WHERE id=$1', [item.id]))[0]?.status).toBe('answered');
+    expect((await q('SELECT status FROM desk_items WHERE id=$1', [old]))[0]?.status).toBe('answered');
   });
 });

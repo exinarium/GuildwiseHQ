@@ -778,10 +778,9 @@ interface BaTaskBrief extends Brief {
 }
 
 /**
- * A BA reporter task (Part B), scripted and deterministic. Triage: `[dismiss]` in an item title dismisses it, `[merge]`
- * merges it into the first open item, anything else is passed with a note; `[ba_no_report]` ends the shift without
- * reporting (the held items then reach the manager unchanged). Notes: one note per item. Signals: one analysis per
- * signal, written onto the signal's own desk item when it has one. Floor: the six sections from the digest.
+ * The BA's one remaining reporter-shaped task (the CEO-BA review, kind `scheduled_brief`), scripted and deterministic.
+ * The old triage, notes, signals and floor tasks are retired. `[ba_no_report]` in the instructions ends the shift without
+ * reporting.
  */
 async function reporterTaskMain(
   t: BaTaskBrief['baTask'] & { reporter: NonNullable<BaTaskBrief['baTask']['reporter']> },
@@ -792,119 +791,22 @@ async function reporterTaskMain(
     await sleep(stepMs);
   }
   emit({ kind: 'usage', usage: { inputTokens: 500, outputTokens: 120 } });
-  const silent = [...r.items.map((i) => i.title), ...r.signals.map((s) => s.subject.title)].some((x) =>
-    x.includes('[ba_no_report]'),
-  );
-  if (silent) {
+  if ((r.brief?.instructions ?? '').includes('[ba_no_report]')) {
     emit({ kind: 'final', text: 'mock BA finished without reporting' });
     return 0;
   }
-  let res: { code: number; out: string; err: string };
-  if (t.kind === 'desk_triage') {
-    const decisions = r.items.map((i) => {
-      if (i.title.includes('[dismiss]'))
-        return { itemId: i.id, action: 'dismiss', note: 'mock: duplicate of something already known' };
-      const into = i.title.includes('[merge]') ? r.openItems[0]?.id : undefined;
-      if (into) return { itemId: i.id, action: 'merge', into, note: 'mock: same as the open item' };
-      return { itemId: i.id, action: 'pass', note: `mock: looked at "${i.title}"` };
-    });
-    res = aom(['report', 'triage', '--file', tmpJson('decisions.json', { decisions })]);
-  } else if (t.kind === 'urgent_note') {
-    const notes = r.items.map((i) => ({ itemId: i.id, note: `mock note: the BA saw "${i.title}"` }));
-    res = aom(['report', 'notes', '--file', tmpJson('notes.json', { notes })]);
-  } else if (t.kind === 'floor_alert') {
-    const reports = r.signals.map((s) => ({
-      signalId: s.id,
-      summary: `mock analysis of ${s.kind}: ${s.subject.title}\n\n${s.subject.detail}`,
-      ...(s.subject.deskItemId ? { annotateItemId: s.subject.deskItemId } : {}),
-    }));
-    res = aom(['report', 'signals', '--file', tmpJson('reports.json', { reports })]);
-  } else if (t.kind === 'scheduled_brief') {
-    const b = r.brief;
-    const md = [
-      `# ${b?.scheduleName ?? 'Scheduled task'} (mock BA)`,
-      '',
-      `Instructions: ${b?.instructions ?? ''}`,
-      '',
-      'The mock BA read the instructions and has nothing to add.',
-    ].join('\n');
-    res = aom(['report', 'brief', '--summary-file', tmpText('brief.md', md)]);
-  } else {
-    const d = r.digest;
-    const list = (xs: string[]) => (xs.length ? xs.map((x) => `- ${x}`) : ['- none']);
-    const md = [
-      `# Floor report ${d?.localDate ?? ''} (mock BA)`,
-      '',
-      '## Phases waiting or open',
-      ...list(
-        (d?.phases ?? []).map(
-          (p) =>
-            `${p.ref} ${p.name}: ${p.status}${p.lateBugs.length ? ` (late bugs ${p.lateBugs.join(', ')})` : ''}`,
-        ),
-      ),
-      '',
-      '## Stuck, blocked and backing-off cards',
-      ...list([
-        ...(d?.signals ?? [])
-          .filter((s) => ['blocked', 'unclaimed', 'loop'].includes(s.kind))
-          .map((s) => s.subject.title),
-        ...(d?.backingOff ?? []).map((b) => `${b.ref} backing off after ${b.failures} failed shifts`),
-      ]),
-      '',
-      '## Repeated approvals',
-      ...list(
-        (d?.signals ?? [])
-          .filter((s) => s.kind === 'repeated_approval')
-          .map((s) => `${s.subject.title} (${s.count}x)`),
-      ),
-      '',
-      '## Failures',
-      ...list([
-        ...(d?.signals ?? [])
-          .filter((s) => ['rework', 'finalize_failures', 'repo_hygiene', 'budget'].includes(s.kind))
-          .map((s) => s.subject.title),
-        ...(d?.failures ?? []).map((f) => `${f.ref}: ${f.failedShifts} failed shifts`),
-        ...(d?.interests?.failing ?? []).map(
-          (f) => `Interest ${f.interest} cannot run (${f.failCount} tries)`,
-        ),
-      ]),
-      '',
-      '## DevOps requests that are open',
-      ...list((d?.devopsOpen ?? []).map((x) => `${x.summary}: ${x.status}`)),
-      '',
-      '## Resolved without bothering you',
-      ...list((d?.resolvedByBa ?? []).map((x) => `${x.title} (${x.how})`)),
-      '',
-      '## Spend',
-      ...(d?.spend
-        ? [
-            `This month ${d.spend.currency} ${(d.spend.monthMicros / 1_000_000).toFixed(2)}; since the last report ${(d.spend.sinceMicros / 1_000_000).toFixed(2)}`,
-            ...d.spend.projects.map(
-              (p) =>
-                `- ${p.key}: ${(p.monthMicros / 1_000_000).toFixed(2)}${p.budgetMicros ? ` of ${(p.budgetMicros / 1_000_000).toFixed(2)} (${p.state})` : ''}`,
-            ),
-          ]
-        : ['- none']),
-      '',
-      '## Interests highlights',
-      ...(d?.interests
-        ? [
-            `Interests: ${d.interests.active} active of ${d.interests.count}, ${d.interests.delivered} items delivered, ${d.interests.unrated} unrated`,
-            ...d.interests.highlights.flatMap((h) => [
-              `- ${h.interest}`,
-              ...h.items.map((x) => `  - ${x.title} (${x.kind})`),
-            ]),
-          ]
-        : ['- none']),
-    ].join('\n');
-    res = aom(['report', 'floor', '--summary-file', tmpText('floor.md', md)]);
-  }
+  const b = r.brief;
+  const md = [
+    `# ${b?.scheduleName ?? 'Analysis'} (mock BA)`,
+    '',
+    `Instructions: ${b?.instructions ?? ''}`,
+    '',
+    'The mock BA read the instructions and has nothing to add.',
+  ].join('\n');
+  const res = aom(['report', 'brief', '--summary-file', tmpText('brief.md', md)]);
   emit({
     kind: 'final',
-    text:
-      res.code === 0
-        ? `mock reporter ${t.kind}: ${res.out.trim()}`
-        : `mock reporter ${t.kind} failed: ${(res.err || res.out).trim()}`,
+    text: res.code === 0 ? 'mock BA reported' : `mock BA report failed: ${(res.err || res.out).trim()}`,
   });
   return res.code === 0 ? 0 : 1;
 }

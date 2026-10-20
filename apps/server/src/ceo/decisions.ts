@@ -16,7 +16,7 @@ import { type Tx, withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { DESK_VISIBLE } from '../queries/desk.ts';
-import { carrierProject } from '../reporter/tasks.ts';
+import { carrierProject } from './carrier.ts';
 import { addMemoryIn } from './memory.ts';
 import { loadCeo } from './state.ts';
 

@@ -63,10 +63,10 @@ function renderWith(ui: React.ReactNode, path = '/') {
   );
 }
 
-describe('Settings: how your BA reports to you', () => {
-  let prefs = { routeViaBa: true, dailyAt: '08:00', timezone: 'Africa/Johannesburg' as string | null };
+describe('Settings: time zone (the BA no longer reports to you)', () => {
+  let prefs = { dailyAt: '08:00', timezone: 'Africa/Johannesburg' as string | null };
   beforeEach(() => {
-    prefs = { routeViaBa: true, dailyAt: '08:00', timezone: 'Africa/Johannesburg' };
+    prefs = { dailyAt: '08:00', timezone: 'Africa/Johannesburg' };
     fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
       const m = init?.method ?? 'GET';
       const body = init?.body ? JSON.parse(String(init.body)) : {};
@@ -79,30 +79,21 @@ describe('Settings: how your BA reports to you', () => {
     });
   });
 
-  it('shows the routing switch (on by default) and turns it off', async () => {
+  it('has no BA routing switch and no report time field: the CEO writes the report', async () => {
     renderWith(<Settings />);
-    const box = (await screen.findByTestId('route-via-ba')) as HTMLInputElement;
-    expect(box.checked).toBe(true);
-    await userEvent.click(box);
-    await waitFor(() => expect(bodyOf('PUT', '/reporting')).toEqual({ routeViaBa: false }));
-    await waitFor(() => expect((screen.getByTestId('route-via-ba') as HTMLInputElement).checked).toBe(false));
+    await screen.findByTestId('timezone');
+    expect(screen.queryByTestId('route-via-ba')).toBeNull();
+    expect(screen.queryByTestId('daily-at')).toBeNull();
+    expect(screen.queryByText(/Your BA reports to you/)).toBeNull();
   });
 
-  it('edits the time zone and the time of the daily report', async () => {
+  it('edits the time zone; the text names the CEO daily report time', async () => {
     renderWith(<Settings />);
     const zone = (await screen.findByTestId('timezone')) as HTMLSelectElement;
     expect(zone.value).toBe('Africa/Johannesburg');
-    expect(screen.getByText(/posted at 08:00 on your clock/)).toBeTruthy();
+    expect(screen.getByText(/daily report is written at 08:00 on your clock/)).toBeTruthy();
     await userEvent.selectOptions(zone, 'UTC');
     await waitFor(() => expect(bodyOf('PUT', '/auth/timezone')).toEqual({ timezone: 'UTC' }));
-
-    const time = screen.getByTestId('daily-at') as HTMLInputElement;
-    const save = screen.getByRole('button', { name: 'Save time' }) as HTMLButtonElement;
-    expect(save.disabled).toBe(true);
-    await userEvent.clear(time);
-    await userEvent.type(time, '07:30');
-    await userEvent.click(save);
-    await waitFor(() => expect(bodyOf('PUT', '/reporting')).toEqual({ dailyAt: '07:30' }));
   });
 
   it('offers the browser zone when it differs', async () => {

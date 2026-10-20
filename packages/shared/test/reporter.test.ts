@@ -4,14 +4,13 @@ import {
   FloorDigestSchema,
   floorDigestIsEmpty,
   floorReportDue,
+  isReporterTaskKind,
   isValidTimeZone,
   localParts,
   REPORTER,
   ReportingPrefsSchema,
   renderFloorReportFallback,
-  renderSignalFallback,
   reporterBriefOutcomes,
-  TriageDataSchema,
 } from '../src/index.ts';
 
 describe('local time', () => {
@@ -84,10 +83,12 @@ describe('reporter contract', () => {
   });
 
   it('prefs and decisions validate', () => {
-    expect(ReportingPrefsSchema.safeParse({ routeViaBa: true, dailyAt: '08:00' }).success).toBe(true);
-    expect(ReportingPrefsSchema.safeParse({ routeViaBa: true, dailyAt: '8am' }).success).toBe(false);
-    expect(TriageDataSchema.safeParse({ decisions: [] }).success).toBe(false);
-    expect(reporterBriefOutcomes('floor_report')[0]?.id).toBe('floor_report');
+    expect(ReportingPrefsSchema.safeParse({ dailyAt: '08:00' }).success).toBe(true);
+    expect(ReportingPrefsSchema.safeParse({ dailyAt: '8am' }).success).toBe(false);
+    // Retired reporter kinds stay valid for replay but have no outcome any more; only the CEO-BA review runs.
+    expect(isReporterTaskKind('floor_report')).toBe(true);
+    expect(reporterBriefOutcomes('floor_report')).toEqual([]);
+    expect(reporterBriefOutcomes('scheduled_brief')[0]?.id).toBe('scheduled_brief');
   });
 
   it('the template report has the eight sections the manager expects (spend included)', () => {
@@ -146,19 +147,5 @@ describe('reporter contract', () => {
     expect(text).toContain('Tokio 2.0 (article, tokio.rs)');
     expect(text).toContain('and 1 more on the desk');
     expect(text).toContain('Interest AI weekly cannot run (3 tries): no curator online');
-    expect(
-      renderSignalFallback({
-        id: '8a8d0b0e-0c3b-4c6c-9a5b-0f2d2b3b2a11',
-        kind: 'loop',
-        urgency: 'urgent',
-        fingerprint: 'x',
-        count: 3,
-        status: 'open',
-        firstSeenAt: 'a',
-        lastSeenAt: 'b',
-        subject: { title: 'TOY-1 keeps failing', detail: '' },
-        evidence: {},
-      }),
-    ).toContain('Shift loop: TOY-1 keeps failing');
   });
 });

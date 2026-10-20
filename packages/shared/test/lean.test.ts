@@ -86,7 +86,7 @@ describe('dropSections and the BA role text', () => {
     expect(question).not.toContain('## Finalize (background)');
     const task = dropSections(ba, roleSectionsToDrop('ba', 'ba_task'));
     expect(task).toContain('## Phases (background)');
-    expect(task).toContain('## Reporting to the manager (background)');
+    expect(task).toContain('## Reviews for the CEO (background)');
   });
 
   it('a batch intake task keeps the intake section (it reads the ticket and drafts cards)', () => {

@@ -9,7 +9,7 @@ import { buildDenyList } from './topic-denylist.ts';
 import { expireTopics, monthStart, noteSignals, sharingMode, syncTopicsDeskItem } from './topics.ts';
 
 /**
- * The one-way hand-off (docs/design/ceo-blog-topics.md sections 2 and 3.2). Runs from the reporter sweep, after the
+ * The one-way hand-off (docs/design/ceo-blog-topics.md sections 2 and 3.2). Runs from the signal sweep (`ceo/signals.ts`), after the
  * Owner's Accept has committed. It lives outside `blog/**` because it reads organization data (the candidates and the
  * organization's names): the blog side only ever receives a scrubbed question, an area and a bucket.
  *

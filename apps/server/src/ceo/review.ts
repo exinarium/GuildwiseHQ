@@ -15,7 +15,7 @@ import type { Ctx } from '../context.ts';
 import { exec, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import type { AppendInput } from '../eventstore/types.ts';
-import { carrierProject } from '../reporter/tasks.ts';
+import { carrierProject } from './carrier.ts';
 import { CEO_REVIEW_FINAL_TASK_NAME, citedBy, clip, decisionOf, proposedRuleOf } from './decisions.ts';
 import { addMemoryIn } from './memory.ts';
 import { loadCeo } from './state.ts';

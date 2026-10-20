@@ -16,14 +16,14 @@ import type { Ctx } from '../context.ts';
 import { exec, one, type Row, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { subjectProjectPaused } from '../dispatcher/project-hold.ts';
-import { buildFloorDigest } from '../reporter/digest.ts';
-import { reportingOf } from '../reporter/settings.ts';
-import { carrierProject } from '../reporter/tasks.ts';
 import { agentSpecFor, shiftVault } from '../runner-gateway/brief.ts';
 import { buildCeoBrief } from './brief.ts';
+import { carrierProject } from './carrier.ts';
+import { buildFloorDigest } from './digest.ts';
 import { ceoGate } from './gate.ts';
 import { notifyOwner } from './notify.ts';
 import { checkOrgBudget } from './orgbudget.ts';
+import { reportingOf } from './prefs.ts';
 import { postFallbackReview } from './report.ts';
 import { ceoFailures, FAILURE_NOTICE_AT, releaseBatch, releaseStuckBatches } from './shift.ts';
 import { type CeoState, ceoReachable, loadCeo } from './state.ts';
@@ -232,6 +232,25 @@ async function failureNotice(
   });
 }
 
+/** The deterministic fallback of a `scheduled_brief` wake nobody took in time: a notice, and the wake is closed. */
+async function postMissedScheduledBriefs(ctx: Ctx, orgId: string, now: Date): Promise<void> {
+  const late = await rows(
+    ctx.pool,
+    `SELECT id, subject_label, detail FROM ceo_wakes WHERE org_id=$1 AND status='pending' AND reason='scheduled_brief' AND created_at < $2`,
+    [orgId, new Date(now.getTime() - FALLBACK_REVIEW_MS)],
+  );
+  for (const w of late) {
+    const d = (w.detail ?? {}) as { instructions?: string };
+    await notifyOwner(ctx, orgId, {
+      kind: 'needs_you',
+      title: `${w.subject_label || 'A scheduled task'} was not carried out`.slice(0, 200),
+      text: `Your CEO could not run for two hours, so this scheduled task was skipped.\n\nWhat the schedule asked for:\n\n${d.instructions ?? ''}`,
+      subject: `scheduled_brief:${w.id}`,
+    });
+    await exec(ctx.pool, `UPDATE ceo_wakes SET status='done', done_at=$2 WHERE id=$1`, [w.id, now]);
+  }
+}
+
 /** Ends CEO shifts the runner never reported on (a lost connection). */
 async function endStale(ctx: Ctx, now: Date): Promise<void> {
   const cutoff = new Date(now.getTime() - CEO_REVIEW_MAX_MINUTES * 60_000 - OVERRUN_SLACK_MS);
@@ -291,6 +310,10 @@ export async function ceoPass(ctx: Ctx): Promise<number> {
       await postFallbackReview(ctx, orgId, r.local_date ?? '', [r.id]).catch((err) =>
         ctx.log.error({ err }, 'ceo fallback report failed'),
       );
+    // A schedule's task the CEO did not take for two hours (it cannot run): the owner is told it was not carried out.
+    await postMissedScheduledBriefs(ctx, orgId, now).catch((err) =>
+      ctx.log.error({ err }, 'ceo missed scheduled briefs failed'),
+    );
     // A batch that can never finish must not hold its wakes (backlog #79).
     await releaseStuckBatches(ctx, orgId).catch((err) => ctx.log.error({ err }, 'ceo stuck batches failed'));
     // The CEO's shifts keep failing: tell the owner once, with the reason; the Overview shows it too.
@@ -414,7 +437,7 @@ export async function ceoPass(ctx: Ctx): Promise<number> {
   return started;
 }
 
-/** Queues the day's review wake once the owner's clock passes the report time. Called from the reporter sweep. */
+/** Queues the day's review wake once the owner's clock passes the report time. Called from the signal sweep (`ceo/signals.ts`). */
 export async function queueCeoReviews(ctx: Ctx, now: Date): Promise<number> {
   const orgs = await rows<{ org_id: string }>(
     ctx.pool,

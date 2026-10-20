@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { sameJson } from '../src/reporter/same-json.ts';
+import { sameJson } from '../src/ceo/same-json.ts';
 import { pruneRunnerInbox, RUNNER_INBOX_RETENTION_DAYS } from '../src/runner-gateway/inbox-prune.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import { createWorld, type World } from './helpers/world.ts';
@@ -39,7 +39,7 @@ describe('BaSignalUpdated', () => {
       new Date(w.t.clock.now().getTime() + 600_000),
       randomUUID(),
     ]);
-    const reporter = w.t.app.ctx.services.reporter;
+    const reporter = w.t.app.ctx.services.signals;
     const count = async (type: string) =>
       Number((await q(`SELECT count(*)::int AS n FROM events WHERE type=$1`, [type]))[0]?.n);
     await reporter.run();

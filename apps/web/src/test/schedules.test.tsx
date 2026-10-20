@@ -97,7 +97,7 @@ const system: SystemScheduleDto[] = [
   {
     id: 'system:floor_report:1',
     kind: 'floor_report',
-    name: 'BA floor report',
+    name: 'CEO daily report',
     description: 'One report a day.',
     when: 'Daily at 08:00 (UTC)',
     lastRunAt: null,
@@ -206,7 +206,7 @@ describe('describing a schedule', () => {
     expect(describeTrigger(hook.trigger)).toBe('When a card is finalized');
     expect(describeTrigger({ kind: 'manual' })).toBe('Only when run by hand');
     expect(describeAction(hook.action)).toBe('POST to hooks.slack.com');
-    expect(describeAction(baSchedule.action)).toBe('Ask the BA: List what is open');
+    expect(describeAction(baSchedule.action)).toBe('Ask the CEO: List what is open');
   });
 });
 
@@ -276,14 +276,14 @@ describe('Automations page', () => {
       'Fridays at 16:00 (Africa/Johannesburg)',
     );
     expect(within(ba).getByText('Organization')).toBeInTheDocument();
-    expect(within(ba).getByTestId('schedule-action')).toHaveTextContent('Ask the BA: List what is open');
+    expect(within(ba).getByTestId('schedule-action')).toHaveTextContent('Ask the CEO: List what is open');
     expect(within(ba).getByText('Last run done')).toBeInTheDocument();
     const slack = screen.getByTestId('schedule-Tell Slack');
     expect(within(slack).getByTestId('schedule-next')).toHaveTextContent('on the event');
     expect(screen.getByRole('region', { name: 'Whole organization' })).toBeInTheDocument();
     expect(screen.getByRole('region', { name: 'WEB Web' })).toBeInTheDocument();
     const sys = screen.getByTestId('system-schedules');
-    expect(within(sys).getByText('BA floor report')).toBeInTheDocument();
+    expect(within(sys).getByText('CEO daily report')).toBeInTheDocument();
     expect(within(sys).getByText('Repository hygiene on Desk')).toBeInTheDocument();
     expect(within(sys).queryByRole('button')).toBeNull();
     expect(within(sys).getAllByRole('link', { name: 'Configure' })).toHaveLength(2);

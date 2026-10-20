@@ -41,7 +41,7 @@ import {
 } from './phase-events.ts';
 import { followupFinishedEvent, outcomesOf, toTargetBrief } from './phase-followups.ts';
 import { workingBranchOf } from './phases.ts';
-import { applyReporterReport, runReporterFallback } from './reporter-tasks.ts';
+import { applyReviewReport, runReviewFallback } from './review-tasks.ts';
 import type { ReportResult, WsRef } from './shifts.ts';
 import { applySpecCardReport, runSpecCardFallback } from './spec-card.ts';
 
@@ -122,7 +122,7 @@ export async function applyBaTaskReport(
   if (task.kind === 'batch_intake') return applyBatchReport(ctx, tx, shift, task, msg.report);
   if (task.kind === 'mail_reply_draft') return applyMailDraftReport(ctx, tx, task, msg);
   if (task.kind === 'spec_card') return applySpecCardReport(ctx, tx, task, shift, msg);
-  if (isReporterTaskKind(task.kind)) return applyReporterReport(ctx, tx, _ws, msg, shift, task);
+  if (isReporterTaskKind(task.kind)) return applyReviewReport(ctx, tx, _ws, msg, shift, task);
   const phase = await one(tx, 'SELECT * FROM phases WHERE id=$1 FOR UPDATE', [task.phase_id]);
   if (!phase) return { accepted: false, error: 'the phase is gone. Finish now.' };
   const by = agentBy(shift.agent_id);
@@ -488,7 +488,7 @@ export async function runBaTaskFallback(ctx: Ctx, tx: Tx, task: Row): Promise<vo
   }
   if (task.kind === 'mail_reply_draft') return runMailDraftFallback(ctx, tx, task);
   if (task.kind === 'spec_card') return runSpecCardFallback(ctx, tx, task);
-  if (isReporterTaskKind(task.kind)) return runReporterFallback(ctx, tx, task);
+  if (isReporterTaskKind(task.kind)) return runReviewFallback(ctx, tx, task);
   const phase = await one(tx, 'SELECT * FROM phases WHERE id=$1 FOR UPDATE', [task.phase_id]);
   const done = (note: string) =>
     baTaskCompleted(

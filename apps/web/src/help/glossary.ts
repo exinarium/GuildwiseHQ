@@ -18,10 +18,10 @@ export const GLOSSARY: GlossaryEntry[] = [
   },
   {
     term: 'BA',
-    aka: ['business analyst', 'reporter'],
+    aka: ['business analyst'],
     definition:
-      'The business analyst agent. It turns your requests and tickets into cards, asks you what it cannot decide, and writes your daily floor report.',
-    article: 'ba-reporter#what-goes-through-the-ba',
+      'The business analyst agent. It turns your requests and tickets into specified cards and finishes finished work. Your CEO, not the BA, reports to you.',
+    article: 'ba-reporter#what-goes-through-the-ceo',
   },
   {
     term: 'Board',

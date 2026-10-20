@@ -61,7 +61,7 @@ export async function loadCeo(db: Queryable, orgId: string): Promise<CeoState | 
   };
 }
 
-/** An enabled, unpaused CEO with an active agent: it owns the BA's reporter job. */
+/** An enabled, unpaused CEO with an active agent: the one who looks at held items and urgent signals. */
 export async function ceoActive(db: Queryable, orgId: string): Promise<CeoState | undefined> {
   const c = await loadCeo(db, orgId);
   if (!c || !c.enabled || c.paused || !c.agentId) return undefined;

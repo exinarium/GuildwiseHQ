@@ -21,6 +21,8 @@ export const CHAT_ERROR = {
   runnerError: 'runner_error',
   /** The DevOps engineer works through the CEO now: its chats are read-only (docs/design/ceo-front-door.md section 8). */
   devopsViaCeo: 'devops_via_ceo',
+  /** The standing "BA reports" chat is read-only: the BA no longer reports, the CEO does (docs/design/ceo-front-door.md step 3). */
+  baReportsRetired: 'ba_reports_retired',
   unknownModel: 'unknown_model',
 } as const;
 

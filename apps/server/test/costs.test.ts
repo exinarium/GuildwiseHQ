@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { DEFAULT_MODEL_PRICES, type ModelPrice } from '@aom/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { detectBudgets } from '../src/ceo/detectors.ts';
 import { evaluateAllBudgets, evaluateProjectBudget } from '../src/commands/budgets.ts';
 import { PROJECTION_TABLES } from '../src/projections/index.ts';
 import { rebuildProjections } from '../src/projections/rebuild.ts';
-import { detectBudgets } from '../src/reporter/detectors.ts';
 import { uniqueEmail } from './helpers/app.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import type { FakeRunner } from './helpers/fake-runner.ts';
@@ -571,7 +571,7 @@ describe('guests', () => {
 
 describe('the floor report spend section and the CSV export', () => {
   it('the digest carries spend and budgets (the BA and the template render them)', async () => {
-    const { buildFloorDigest } = await import('../src/reporter/digest.ts');
+    const { buildFloorDigest } = await import('../src/ceo/digest.ts');
     await q(`UPDATE projects SET budget_micros=$2 WHERE id=$1`, [w.projectId, 10_000_000]);
     await addSpend(w.projectId, 3_000_000);
     const d = await buildFloorDigest(ctx().pool, await orgId(), ctx().clock.now(), '2026-10-07');

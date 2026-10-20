@@ -1,10 +1,10 @@
 import { createHash } from 'node:crypto';
 import { DESK_SUBKIND, maskText, REJECTION_STORM, topFrames } from '@aom/shared';
 import type { FastifyRequest } from 'fastify';
+import { detectLoops } from '../ceo/detectors.ts';
 import type { Ctx } from '../context.ts';
 import { one, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
-import { detectLoops } from '../reporter/detectors.ts';
 import { expireGrants } from './grants.ts';
 import { drainBugs, markFixedBugs, reportBug, specifyStuckBugCards } from './intake.ts';
 import { resumeFixedPauses } from './pause.ts';
@@ -77,7 +77,7 @@ async function scanRunnerErrors(ctx: Ctx): Promise<number> {
 
 async function scanLoops(ctx: Ctx): Promise<number> {
   const platform = await platformOrg(ctx);
-  // The existing detector (reporter/detectors.ts): the loop breaker's open back-off episodes (3+ failed shifts or
+  // The existing detector (ceo/detectors.ts): the loop breaker's open back-off episodes (3+ failed shifts or
   // rejections of one card) and cards that cause 5+ question shifts in 2 hours (`loop:questions:<card>`).
   const found = await detectLoops(ctx.pool);
   // Cards the loop breaker PARKED (10 crash-loop failures, blocking `loop_parked` desk item): the reporter leaves them to

@@ -225,12 +225,13 @@ Creating phases, adding cards, when a phase is done, follow-ups, deploy and regr
 - What runs after you approve: Once you approve, the follow-ups are locked and run one at a time in order:
 - Deploying with a recipe: A project can deploy in two ways, chosen under Delivery in the project settings: Instructions (a DevOps request written in words, as before) or Recipe. A recipe is a small script kept in the project's vault, in a delivery/ folder, that always does the same steps: deploy, wait until the app is healthy, run a smoke…
 
-### Your BA reporter
-What goes through the BA, signals the server watches for, daily floor report and time zone.
-- What goes through the BA: With routing on (the default; the Owner and Admins can turn it off in Settings):
-- Signals the server watches for: The server checks the floor every minute without using tokens. The BA only works when something fires. Here are the signals it watches:
-- Floor report: At 08:00 on your clock, the BA posts one Floor report on your desk (only on days with something to say; urgent notices never wait).
-- Time zone and report time: Under Settings, Your time zone sets the clock for your own account (the app takes it from your browser the first time you sign in; until one is set, reports use UTC). The daily floor report follows the Owner's time zone.
+### The daily report and what is watched
+What your CEO triages, the signals the server watches for, the daily report, scheduled tasks and the time zone.
+- What goes through the CEO: - Urgent items reach your desk at once, unchanged: blocking questions, approvals (DevOps, merges, outbound updates), pinned alerts and cards that keep failing. The CEO is woken for them too and acts within the rules you gave it.…
+- Signals the server watches for: The server checks the floor every minute without using tokens. The CEO only works when something fires. Here are the signals it watches:
+- The daily report: At 08:00 on your clock (change it on the CEO page, Reporting), the CEO writes your daily report (only on days with something to say; urgent notices never wait).
+- Scheduled tasks: A schedule's Ask the BA action (the name stays so old schedules keep working) now asks your CEO: it does what the instructions say, read-only, and delivers the answer as a notice on your desk. If the CEO could not run for two hours you get a notice that the task was skipped.
+- Time zone and report time: Under Settings, Your time zone sets the clock for your own account (the app takes it from your browser the first time you sign in; until one is set, reports use UTC). The daily report follows the Owner's time zone. The report time itself is on the CEO page.
 
 ### Interests
 Topics you watch, who can see them, creating and editing, run and delivery schedules, taste rules.

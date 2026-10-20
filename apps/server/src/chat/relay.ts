@@ -141,6 +141,9 @@ export class ChatRelay {
       return this.fail(userId, msg.threadId, CHAT_ERROR.unknownThread);
     // The DevOps engineer works through the CEO now (docs section 8): its old conversations are read-only.
     if (row.is_devops) return this.fail(userId, msg.threadId, CHAT_ERROR.devopsViaCeo);
+    // The standing "BA reports" chat (the BA's floor reports) is read-only now: the CEO writes the report.
+    if (await one(ctx.pool, 'SELECT 1 FROM users WHERE ba_chat_thread_id=$1', [msg.threadId]))
+      return this.fail(userId, msg.threadId, CHAT_ERROR.baReportsRetired);
     if (isCeo) return this.sendCeo(userId, row, msg);
     if (this.byThread.has(msg.threadId)) return this.fail(userId, msg.threadId, CHAT_ERROR.busy);
     // A chat that belongs to a project an Owner or Admin paused does not start (nothing is saved or queued).

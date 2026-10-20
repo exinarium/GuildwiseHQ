@@ -35,40 +35,28 @@ async function cli(files: Record<string, string> = {}) {
   return { run: (...a: string[]) => runAom(a, ctx), reports, out, err };
 }
 
-describe('aom report: the BA reports to the manager', () => {
-  it('triage, notes and signals send their JSON file as the outcome data', async () => {
-    const decisions = { decisions: [{ itemId: 'a', action: 'pass', note: 'n' }] };
-    const notes = { notes: [{ itemId: 'a', note: 'asked 3 times' }] };
-    const reports = { reports: [{ signalId: 's', summary: '# analysis' }] };
-    const t = await cli({
-      'd.json': JSON.stringify(decisions),
-      'n.json': JSON.stringify(notes),
-      'r.json': JSON.stringify(reports),
-    });
-    expect(await t.run('report', 'triage', '--file', 'd.json')).toBe(0);
-    expect(await t.run('report', 'notes', '--file', 'n.json')).toBe(0);
-    expect(await t.run('report', 'signals', '--file', 'r.json')).toBe(0);
-    expect(t.reports.map((r) => (r as { outcomeId: string }).outcomeId)).toEqual([
-      'triage_done',
-      'notes_done',
-      'signal_report',
-    ]);
-    expect((t.reports[0] as { data: unknown }).data).toEqual(decisions);
-    expect((t.reports[2] as { data: unknown }).data).toEqual(reports);
+describe('aom report: the BA reporter is retired', () => {
+  it('triage, notes, signals and floor answer "retired" and send nothing', async () => {
+    const t = await cli({ 'd.json': '{}', 'f.md': '# x' });
+    expect(await t.run('report', 'triage', '--file', 'd.json')).toBe(1);
+    expect(await t.run('report', 'notes', '--file', 'd.json')).toBe(1);
+    expect(await t.run('report', 'signals', '--file', 'd.json')).toBe(1);
+    expect(await t.run('report', 'floor', '--summary-file', 'f.md')).toBe(1);
+    expect(t.err.join('')).toContain('aom report triage is retired');
+    expect(t.reports).toHaveLength(0);
   });
 
-  it('floor sends the markdown; a missing file or an unknown subcommand prints the usage', async () => {
-    const t = await cli({ 'f.md': '# Floor report\n\nAll quiet.' });
-    expect(await t.run('report', 'floor', '--summary-file', 'f.md')).toBe(0);
+  it('brief sends the markdown; a missing file or an unknown subcommand prints the usage', async () => {
+    const t = await cli({ 'f.md': '# Analysis\n\nAll quiet.' });
+    expect(await t.run('report', 'brief', '--summary-file', 'f.md')).toBe(0);
     expect(t.reports[0]).toMatchObject({
       kind: 'outcome',
-      outcomeId: 'floor_report',
-      data: { report: '# Floor report\n\nAll quiet.' },
+      outcomeId: 'scheduled_brief',
+      data: { report: '# Analysis\n\nAll quiet.' },
     });
-    expect(await t.run('report', 'floor')).toBe(1);
-    expect(await t.run('report', 'triage')).toBe(1);
+    expect(await t.run('report', 'brief')).toBe(1);
     expect(await t.run('report', 'bogus')).toBe(1);
-    expect(t.err.join('')).toContain('aom report triage --file');
+    expect(t.err.join('')).toContain('aom report brief --summary-file');
     expect(t.reports).toHaveLength(1);
   });
 });

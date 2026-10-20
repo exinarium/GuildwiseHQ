@@ -32,6 +32,7 @@ import {
   requireFeature,
   resolveOrgId,
 } from '../auth/org-context.ts';
+import { reportingOf } from '../ceo/prefs.ts';
 import { deliveredInLastDay, deliverInterestNow, runInterest } from '../commands/interest-runs.ts';
 import {
   archiveInterest,
@@ -57,7 +58,6 @@ import {
   interestRuns,
   listInterests,
 } from '../queries/interests.ts';
-import { reportingOf } from '../reporter/settings.ts';
 import { typed } from './util.ts';
 
 const RunParamsSchema = z.object({ id: z.uuid(), runId: z.uuid() });

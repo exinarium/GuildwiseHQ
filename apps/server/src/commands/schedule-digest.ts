@@ -4,11 +4,11 @@ import {
   renderFloorReportFallback,
   renderInterestHighlights,
 } from '@aom/shared';
+import { buildFloorDigest, interestsDigest } from '../ceo/digest.ts';
+import { reportingOf } from '../ceo/prefs.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Queryable, rows } from '../db/sql.ts';
 import { badRequest } from '../errors.ts';
-import { buildFloorDigest, interestsDigest } from '../reporter/digest.ts';
-import { reportingOf } from '../reporter/settings.ts';
 
 export interface DigestArgs {
   orgId: string;

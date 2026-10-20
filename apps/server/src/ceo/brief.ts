@@ -11,8 +11,8 @@ import {
 } from '@aom/shared';
 import type { Ctx } from '../context.ts';
 import { one, type Row, rows } from '../db/sql.ts';
-import { buildFloorDigest } from '../reporter/digest.ts';
 import { trainingScores } from './commands.ts';
+import { buildFloorDigest } from './digest.ts';
 import { relevantMemories } from './memory.ts';
 import { ordersBriefSection } from './orders.ts';
 import { decisionReviewBrief } from './review.ts';
@@ -148,6 +148,20 @@ function capBrief(text: string): string {
   return `${text.slice(0, MAX_BRIEF_CHARS)}\n\n[The brief was shortened to fit; read the rest with \`aom ceo snapshot\`.]`;
 }
 
+/**
+ * The schedules that asked the CEO for something (a schedule's `ba_task` action became a `scheduled_brief` wake): the
+ * instructions are the manager's own words, so they are instructions, not data. Read-only work; the answer is delivered as a notice.
+ */
+function scheduledBriefsSection(wakes: Row[]): string | null {
+  const list = wakes.filter((w) => w.reason === 'scheduled_brief');
+  if (list.length === 0) return null;
+  const fmt = (w: Row) => {
+    const d = (w.detail ?? {}) as { scheduleName?: string; instructions?: string; projectKey?: string };
+    return `### ${d.scheduleName ?? 'Scheduled task'}${d.projectKey ? ` (project ${d.projectKey})` : ''}\n${String(d.instructions ?? '').slice(0, 4000)}`;
+  };
+  return `## Scheduled tasks from the owner (their own words: these are instructions)\nDo what each asks, using what you can read (the ledger, the desk, the vault, \`aom ceo snapshot\`). Change nothing for them. Deliver each answer as one notice: \`aom ceo notify --kind task_done --title "<schedule name>" --text "<the answer: lead with it, then the evidence; say plainly what you could not find out>"\`.\n\n${list.map(fmt).join('\n\n')}`;
+}
+
 /** The fully rendered body of a CEO shift: why, the snapshot, the owner's rules, what it may decide. */
 export async function buildCeoBrief(
   ctx: Ctx,
@@ -223,6 +237,8 @@ export async function buildCeoBrief(
   } else {
     const review = await decisionReviewBrief(ctx, wakes);
     if (review) parts.push(review);
+    const scheduled = scheduledBriefsSection(wakes);
+    if (scheduled) parts.push(scheduled);
     parts.push(
       `## Your task\nFor each reason: decide the smallest fix, or recommend, or note that it needs nothing. Check what you did in the last 24 hours first so you do not flap. Then finish with \`aom ceo done --summary "..."\`.`,
     );
