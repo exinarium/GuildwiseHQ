@@ -1,4 +1,5 @@
 import type { Usage } from '@aom/shared';
+import { redactSecrets } from '../redact.ts';
 import { isAuthFailureText } from './claude-auth.ts';
 import { isUsageLimitText } from './claude-usage-limit.ts';
 import type { RuntimeEvent } from './types.ts';
@@ -38,7 +39,8 @@ export function summarizeToolInput(name: string, input: unknown): string {
       s = String(input);
     }
   }
-  return s.slice(0, 200);
+  // redact first, cut second: a secret straddling the 200-character cut must not leave its head behind
+  return redactSecrets(s).slice(0, 200);
 }
 
 /** The model with the most output tokens in a result's `modelUsage` map (`{ <model>: { outputTokens, ... } }`). */

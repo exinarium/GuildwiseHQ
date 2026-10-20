@@ -626,8 +626,8 @@ export class ChatManager {
       } else if (ev.kind === 'final') finalText = ev.text;
       else if (ev.kind === 'tool') {
         this.countTool(ev, counts, commands);
-        // the segment is stored and shown: a Bash command goes through the same redaction as the audit
-        const summary = (ev.name === 'Bash' ? redactCommand(ev.summary) : ev.summary).slice(0, 500);
+        // the segment is stored and shown: every tool summary goes through the same redaction as the audit
+        const summary = redactCommand(ev.summary).slice(0, 500);
         const seg: ChatSegment = {
           type: 'tool',
           ...(ev.id ? { id: ev.id } : {}),
