@@ -168,13 +168,33 @@ export async function ceoOwnerChangeEvents(
     actor: SYSTEM_ACTOR,
     scope: orgScope(orgId),
   }));
+  // Messages the former Owner queued (while his workstation was offline) were sent with HIS authority: they must not run
+  // with full power on the new Owner's machine. They are dropped here, and `startCeoTurn` re-checks the author as well.
+  const queued = await rows(tx, `SELECT id, thread_id FROM ceo_turns WHERE org_id=$1 AND status='queued'`, [
+    orgId,
+  ]);
+  const drops: AppendInput[] = queued.map((t) => ({
+    streamId: streamId.ceo(orgId),
+    event: {
+      type: 'CeoTurnFinished',
+      payload: {
+        turnId: t.id,
+        orgId,
+        threadId: t.thread_id,
+        status: 'dropped' as const,
+        error: 'the organization changed owner before this message was sent',
+      },
+    },
+    actor: SYSTEM_ACTOR,
+    scope: orgScope(orgId),
+  }));
   const a = await one<CeoAgentRow & { workstation_id: string | null }>(
     tx,
     `SELECT id, org_id, runtime, model, workstation_id FROM agents WHERE org_id=$1 AND role_key=$2 AND status <> 'retired'`,
     [orgId, CEO_ROLE_KEY],
   );
-  if (!a) return voids;
+  if (!a) return [...voids, ...drops];
   const next = await ownerWorkstation(tx, orgId, newOwnerId);
-  if (next === a.workstation_id) return voids;
-  return [...voids, rehome(a, next)];
+  if (next === a.workstation_id) return [...voids, ...drops];
+  return [...voids, ...drops, rehome(a, next)];
 }
