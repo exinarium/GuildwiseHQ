@@ -24,11 +24,23 @@ const STACK = join(DIR, 'stack');
 const ORIGIN = join(DIR, 'origin.git');
 const CLONE = join(DIR, 'repos', 'app');
 
-const docker = (...args: string[]) => execFileSync('docker', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
-const compose = (...args: string[]) => docker('compose', '-p', PROJECT_NAME, '-f', join(STACK, 'docker-compose.yml'), ...args);
+const docker = (...args: string[]) =>
+  execFileSync('docker', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+const compose = (...args: string[]) =>
+  docker('compose', '-p', PROJECT_NAME, '-f', join(STACK, 'docker-compose.yml'), ...args);
 const ids = () =>
   Object.fromEntries(
-    ['db', 'other', 'app'].map((s) => [s, docker('ps', '-q', '--filter', `label=com.docker.compose.project=${PROJECT_NAME}`, '--filter', `label=com.docker.compose.service=${s}`)]),
+    ['db', 'other', 'app'].map((s) => [
+      s,
+      docker(
+        'ps',
+        '-q',
+        '--filter',
+        `label=com.docker.compose.project=${PROJECT_NAME}`,
+        '--filter',
+        `label=com.docker.compose.service=${s}`,
+      ),
+    ]),
   );
 const commit = (msg: string, files: Record<string, string>): string => {
   for (const [f, c] of Object.entries(files)) {
@@ -40,6 +52,18 @@ const commit = (msg: string, files: Record<string, string>): string => {
   git(CLONE, 'push', 'origin', 'main');
   return git(CLONE, 'rev-parse', 'HEAD').trim();
 };
+
+/** A tiny HTTP server for the throwaway app: a file under /www answers 200 with its content, anything else 404. */
+const HANDLER = `#!/bin/sh
+read -r line
+p=$(echo "$line" | cut -d' ' -f2)
+if [ -f "/www$p" ]; then
+  body=$(cat "/www$p")
+  printf 'HTTP/1.1 200 OK\\r\\nContent-Length: %s\\r\\nConnection: close\\r\\n\\r\\n%s' "\${#body}" "$body"
+else
+  printf 'HTTP/1.1 404 Not Found\\r\\nContent-Length: 0\\r\\nConnection: close\\r\\n\\r\\n'
+fi
+`;
 
 let page: Page;
 let api: APIRequestContext;
@@ -60,7 +84,10 @@ test.afterAll(() => {
     // never started
   }
   try {
-    for (const t of docker('image', 'ls', '--format', '{{.Repository}}:{{.Tag}}', `${PROJECT_NAME}-app`).split('\n').filter(Boolean)) docker('image', 'rm', t);
+    for (const t of docker('image', 'ls', '--format', '{{.Repository}}:{{.Tag}}', `${PROJECT_NAME}-app`)
+      .split('\n')
+      .filter(Boolean))
+      docker('image', 'rm', t);
   } catch {
     // already gone
   }
@@ -75,7 +102,9 @@ test('setup: a throwaway Compose stack, a repository with a tiny app, a paired r
   git(join(DIR, 'repos'), 'clone', ORIGIN, CLONE);
   git(CLONE, 'checkout', '-b', 'main');
   commit('first version', {
-    Dockerfile: 'FROM alpine:latest\nCOPY www /www\nCMD ["httpd","-f","-p","8080","-h","/www"]\n',
+    Dockerfile:
+      'FROM alpine:latest\nCOPY www /www\nCOPY handler.sh /handler.sh\nRUN chmod +x /handler.sh\nCMD ["sh","-c","while true; do nc -l -p 8080 -e /handler.sh; done"]\n',
+    'handler.sh': HANDLER,
     'www/api/health': 'ok v1\n',
   });
   writeFileSync(
@@ -102,22 +131,47 @@ volumes:
 `,
   );
   compose('up', '-d', '--build');
-  await waitFor('postgres accepts connections', async () => { try { compose('exec', '-T', 'db', 'pg_isready', '-U', 'app'); return true; } catch { return false; } }, (ok) => ok, 60_000);
+  await waitFor(
+    'postgres accepts connections',
+    async () => {
+      try {
+        compose('exec', '-T', 'db', 'pg_isready', '-U', 'app');
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    (ok) => ok,
+    60_000,
+  );
   before = ids();
   volume = docker('volume', 'ls', '-q', '--filter', `label=com.docker.compose.project=${PROJECT_NAME}`);
   expect(volume).toContain('dbdata');
 
-  const code = (await (await api.post('/api/workstations/pairing-codes', { data: {} })).json()).code as string;
+  const code = (await (await api.post('/api/workstations/pairing-codes', { data: {} })).json())
+    .code as string;
   pairRunner(BASE_URL, code, 'Office PC', HOME);
   addRepoRoot(join(DIR, 'repos'), HOME);
   startRunner({ AOM_MOCK_STEP_MS: '100' }, HOME);
-  await waitFor('runner connected', async () => (await (await api.get('/api/workstations')).json()).workstations as any[], (w) => w[0]?.connected === true, 30_000);
+  await waitFor(
+    'runner connected',
+    async () => (await (await api.get('/api/workstations')).json()).workstations as any[],
+    (w) => w[0]?.connected === true,
+    30_000,
+  );
   const proj = await api.post('/api/projects', { data: { key: 'DPS', name: 'Deploy setup project' } });
   expect(proj.status(), await proj.text()).toBe(201);
   projectId = (await proj.json()).project.id;
-  const add = await api.post(`/api/projects/${projectId}/repos`, { data: { name: 'app', remoteUrl: ORIGIN, workingBranch: 'main' } });
+  const add = await api.post(`/api/projects/${projectId}/repos`, {
+    data: { name: 'app', remoteUrl: ORIGIN, workingBranch: 'main' },
+  });
   expect(add.status()).toBe(201);
-  await waitFor('the workstation holds the repo', async () => (await (await api.get('/api/workstations')).json()).workstations[0].repos.length, (n) => n === 1, 30_000);
+  await waitFor(
+    'the workstation holds the repo',
+    async () => (await (await api.get('/api/workstations')).json()).workstations[0].repos.length,
+    (n) => n === 1,
+    30_000,
+  );
   const caps = await q<{ capabilities: string[] }>('SELECT capabilities FROM workstation_capabilities');
   expect(caps.some((c) => c.capabilities.includes('deploy-setup:1'))).toBe(true);
 });
@@ -152,9 +206,19 @@ test('Save writes the generated files; nothing is approved and nothing runs yet'
   await page.getByTestId('review-save').click();
   await expect(page.getByTestId('review-saved')).toBeVisible({ timeout: 60_000 });
   await page.getByTestId('review-done').click();
-  const row = (await q<{ status: string; setup: any; hand_edited: string[] }>('SELECT status, setup, hand_edited FROM delivery_recipes WHERE project_id=$1', [projectId]))[0];
+  const row = (
+    await q<{ status: string; setup: any; hand_edited: string[] }>(
+      'SELECT status, setup, hand_edited FROM delivery_recipes WHERE project_id=$1',
+      [projectId],
+    )
+  )[0];
   expect(row).toMatchObject({ status: 'observed', hand_edited: [] });
-  expect(row?.setup.environments[0]).toMatchObject({ name: 'uat', trigger: ['after_merge'], releasedBy: 'auto', hosting: 'this_computer' });
+  expect(row?.setup.environments[0]).toMatchObject({
+    name: 'uat',
+    trigger: ['after_merge'],
+    releasedBy: 'auto',
+    hosting: 'this_computer',
+  });
   expect(row?.setup.environments[0].app.composeFile).toContain('docker-compose.yml');
   expect(ids()).toEqual(before);
 });
@@ -167,19 +231,34 @@ test('approval waits for a dry run; the dry run changes nothing', async () => {
   expect(readdirSync(STACK)).toEqual(['docker-compose.yml']); // no backup folder: a dry run writes nothing
   await expect(page.getByTestId('setup-approve')).toBeEnabled();
   await page.getByTestId('setup-approve').click();
-  await waitFor('approved', async () => (await q<{ status: string }>('SELECT status FROM delivery_recipes WHERE project_id=$1', [projectId]))[0]?.status, (s) => s === 'approved', 30_000);
+  await waitFor(
+    'approved',
+    async () =>
+      (await q<{ status: string }>('SELECT status FROM delivery_recipes WHERE project_id=$1', [projectId]))[0]
+        ?.status,
+    (s) => s === 'approved',
+    30_000,
+  );
   const set = await api.put(`/api/projects/${projectId}/delivery/mode`, { data: { mode: 'recipe' } });
   expect(set.ok(), await set.text()).toBeTruthy();
 });
 
 type DeployRow = { status: string; summary: string; log_tail: string };
 const release = async (sha: string): Promise<DeployRow> => {
-  const res = await api.post(`/api/projects/${projectId}/delivery/deploy`, { data: { env: 'uat', commit: sha } });
+  const res = await api.post(`/api/projects/${projectId}/delivery/deploy`, {
+    data: { env: 'uat', commit: sha },
+  });
   expect(res.ok(), await res.text()).toBeTruthy();
   const run = (await res.json()).runs[0];
   return (await waitFor(
     'the deploy finished',
-    async () => (await q<{ status: string; summary: string; log_tail: string }>('SELECT status, summary, log_tail FROM deploy_runs WHERE id=$1', [run.runId]))[0],
+    async () =>
+      (
+        await q<{ status: string; summary: string; log_tail: string }>(
+          'SELECT status, summary, log_tail FROM deploy_runs WHERE id=$1',
+          [run.runId],
+        )
+      )[0],
     (r) => r?.status === 'succeeded' || r?.status === 'failed' || r?.status === 'refused',
     240_000,
   )) as DeployRow;
@@ -193,8 +272,12 @@ test('a real release rebuilds ONLY the app from the approved commit; the databas
   expect(after.db).toBe(before.db);
   expect(after.other).toBe(before.other);
   expect(after.app).not.toBe(before.app);
-  expect(docker('volume', 'ls', '-q', '--filter', `label=com.docker.compose.project=${PROJECT_NAME}`)).toBe(volume);
-  expect(docker('inspect', '--format', '{{.Config.Image}}', after.app as string)).toBe(`${PROJECT_NAME}-app:${sha.slice(0, 12)}`);
+  expect(docker('volume', 'ls', '-q', '--filter', `label=com.docker.compose.project=${PROJECT_NAME}`)).toBe(
+    volume,
+  );
+  expect(docker('inspect', '--format', '{{.Config.Image}}', after.app as string)).toBe(
+    `${PROJECT_NAME}-app:${sha.slice(0, 12)}`,
+  );
   const body = await (await fetch(`http://127.0.0.1:${PORT}/api/health`)).text();
   expect(body.trim()).toBe('ok v2');
   // the backup was taken first, in the stack's own backups folder
@@ -204,8 +287,9 @@ test('a real release rebuilds ONLY the app from the approved commit; the databas
 });
 
 test('an unhealthy release is rolled back to the previous image; the database is left alone', async () => {
+  test.setTimeout(420_000); // the health check waits up to 120 s, then the rollback waits again
   const previous = docker('inspect', '--format', '{{.Config.Image}}', before.app as string);
-  const sha = commit('broken version', { 'www/api/health': 'x' });
+  const sha = commit('broken version', { 'www/index.html': 'a page, but no health file' });
   // remove the health file: the site answers 404 and the script puts the previous image back
   git(CLONE, 'rm', '-q', 'www/api/health');
   git(CLONE, 'commit', '-m', 'drop health');
@@ -226,14 +310,30 @@ test('Scan with DevOps for deploys: the mock DevOps adopts the same stack; the p
   await page.goto(`/projects/${projectId}/settings`);
   await page.getByTestId('setup-advanced').click();
   await page.getByText('Back to the simple view').click();
-  const scan = await api.post(`/api/projects/${projectId}/scan`, { data: { area: 'deploy' } });
+  const scan = await api.post(`/api/projects/${projectId}/scan`, {
+    data: { area: 'deploy', note: `the stack is called ${PROJECT_NAME}` },
+  });
   expect(scan.status(), await scan.text()).toBe(202);
   await expect(page.getByTestId('deploy-proposal-waiting')).toBeVisible({ timeout: 120_000 });
   await page.getByTestId('deploy-proposal-open').click();
   await expect(page.getByTestId('proposal-review')).toContainText('DevOps has a suggestion');
   await expect(page.getByTestId('deploy-proposal-envs')).toContainText('Updates app part "app"');
   await page.getByTestId('proposal-use').click();
-  await waitFor('the proposal is the draft', async () => (await q<{ proposal_id: string | null }>('SELECT proposal_id FROM delivery_setup_drafts WHERE project_id=$1', [projectId]))[0]?.proposal_id, (id) => !!id, 30_000);
+  await waitFor(
+    'the proposal is the draft',
+    async () =>
+      (
+        await q<{ proposal_id: string | null }>(
+          'SELECT proposal_id FROM delivery_setup_drafts WHERE project_id=$1',
+          [projectId],
+        )
+      )[0]?.proposal_id,
+    (id) => !!id,
+    30_000,
+  );
   // using a proposal wrote nothing to the project files and changed nothing running
-  expect((await q<{ status: string }>('SELECT status FROM delivery_recipes WHERE project_id=$1', [projectId]))[0]?.status).toBe('approved');
+  expect(
+    (await q<{ status: string }>('SELECT status FROM delivery_recipes WHERE project_id=$1', [projectId]))[0]
+      ?.status,
+  ).toBe('approved');
 });

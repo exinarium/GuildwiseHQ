@@ -618,8 +618,17 @@ async function devopsMain(brief: DevopsBrief): Promise<number> {
           }
         | undefined;
       try {
-        const r = JSON.parse(probed.out) as { result?: { report?: { composeFiles: Array<any> } } };
-        stack = r.result?.report?.composeFiles.find((c) => !c.unreadable && c.services.length > 0);
+        const r = JSON.parse(probed.out) as {
+          report?: { composeFiles: Array<any> };
+          result?: { report?: { composeFiles: Array<any> } };
+        };
+        const files = ((r.report ?? r.result?.report)?.composeFiles ?? []).filter(
+          (c) => !c.unreadable && c.services.length > 0,
+        );
+        stack =
+          files.find((c) => c.project && d.summary.includes(c.project)) ?? // the user named it in the scan dialog
+          files.find((c) => c.services.some((x: { build?: string }) => x.build)) ?? // the app is built from code
+          files[0];
       } catch {
         stack = undefined;
       }

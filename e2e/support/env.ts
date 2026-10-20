@@ -108,7 +108,11 @@ export const WORKER = { email: 'worker@e2e.test', name: 'E2E Worker', password: 
 /** Run-steps spec: an owner who sets up how to start the project and scans it with the mock DevOps engineer. */
 export const STEPPER = { email: 'stepper@e2e.test', name: 'E2E Stepper', password: 'stepper-password-12345' };
 /** Deploy-setup spec (v1b): an owner who adopts a throwaway Docker Compose stack through the guided wizard. */
-export const DEPLOYER = { email: 'deployer@e2e.test', name: 'E2E Deployer', password: 'deployer-password-12345' };
+export const DEPLOYER = {
+  email: 'deployer@e2e.test',
+  name: 'E2E Deployer',
+  password: 'deployer-password-12345',
+};
 export const PHASER = { email: 'phaser@e2e.test', name: 'E2E Phaser', password: 'phaser-password-12345' };
 
 /** BA reporter spec (docs/design/phases.md Part B): own user, own runner (mock), project RPT, a BA and a builder. */

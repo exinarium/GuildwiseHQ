@@ -94,7 +94,7 @@ else
     rm -f -- "$BACKUP_FILE.part"
     die "the database backup failed; nothing was changed"
   fi
-  if [ "$(gzip -dc "$BACKUP_FILE.part" | wc -c)" -lt 1024 ]; then
+  if [ "$(gzip -dc "$BACKUP_FILE.part" | wc -c)" -lt 512 ]; then
     rm -f -- "$BACKUP_FILE.part"
     die "the database backup is too small to be real; nothing was changed"
   fi

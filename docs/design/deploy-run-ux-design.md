@@ -842,7 +842,7 @@ Deviations and additions:
    `releasedBy: owner` plus the gate `[{envHealthy: <test env>, sameCommit, forMinutes: 10}]`.
 3. **UAT script:** tag `<imageName>:<first 12 of the commit>`, an override file in a scratch folder, `--no-deps`, rollback with
    `--no-build`, pruning keeps the newest 5 sha tags (`docker image rm` of single tags, never the running or previous one), backups keep
-   20 and are checked decompressed (>= 1 KB). Production health needs an http check for automatic rollback (validated).
+   20 and are checked decompressed (>= 512 bytes: an empty postgres dump is about 700). Production health needs an http check for automatic rollback (validated).
 4. **No "Start a new copy", no host-key confirmation UI, no new sign-in** (v2). With nothing running the wizard offers a DevOps look or the
    developer view. `aom deploy probe` results from DevOps are returned to it, not stored as `DeployTargetProbed`.
 5. **Hand edits** are detected by recompiling the observed `setup.json` (same generator only); the runner's `recipe.inspect` result gained
