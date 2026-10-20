@@ -136,6 +136,21 @@ describe('turn files', () => {
     for (const root of ['/a', '/b', '/h/.aom-runner']) expect(d).toContain(`Read(/${root}/secrets/**)`);
   });
 
+  it('floorDenies stops Bash from naming the runner secrets, config and keys (S6): root, data dir, ~ and $HOME', () => {
+    const d = floorDenies({ runnerRoots: ['/data/runner'], pid: 1, home: '/home/owner' });
+    for (const p of [
+      'Bash(*/data/runner/secrets*)',
+      'Bash(*/data/runner/config.json*)',
+      'Bash(*/data/runner/deploy.json*)',
+      'Bash(*/data/runner/keys*)',
+      'Bash(*/home/owner/.aom-runner/secrets*)',
+      'Bash(*~/.aom-runner/secrets*)',
+      'Bash(*$HOME/.aom-runner/config.json*)',
+      'Bash(*${HOME}/.aom-runner/keys*)',
+    ])
+      expect(d).toContain(p);
+  });
+
   it('composeOwnerMessage fences the context and says how long a queued message waited', () => {
     const m = composeOwnerMessage(
       { message: 'do it', briefDelta: 'new rule X', queuedAt: '2026-10-19T10:00:00.000Z' },
