@@ -537,6 +537,10 @@ export async function shiftVault(
 }
 
 /** The `shift.start` payload for a fresh claim. */
+/** The Claude account the shift was dispatched on (absent = main: docs/design/claude-accounts.md). */
+export const accountOf = (shift: { account_key?: string | null }): { account?: { key: string } } =>
+  shift.account_key ? { account: { key: shift.account_key } } : {};
+
 export async function buildShiftStart(ctx: Ctx, claim: ClaimResult): Promise<ShiftStartPayload | null> {
   const shift = await one(ctx.pool, 'SELECT * FROM shifts WHERE id=$1', [claim.shiftId]);
   const agent = await one(ctx.pool, 'SELECT * FROM agents WHERE id=$1', [claim.agentId]);
@@ -576,6 +580,7 @@ export async function buildShiftStart(ctx: Ctx, claim: ClaimResult): Promise<Shi
     prepare: { rebase: claim.rebase, ...(claim.syncMain ? { syncMain: claim.syncMain } : {}) },
     orgId: agent.org_id,
     maxShiftMinutes: claim.maxShiftMinutes,
+    ...accountOf(shift),
     vault: vault ? { vaultId: vault.id, kind: vault.kind, folder: vault.folder } : null,
     ...(graph ? { graph } : {}),
     // The card's own repository is its worktree; the project's reference repositories are opened besides, and every

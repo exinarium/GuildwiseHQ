@@ -30,6 +30,8 @@ export interface SessionRecord {
   startedAt: string;
   updatedAt: string;
   contextTokens: number;
+  /** The Claude account the session ran on (absent: `main`). A session is never resumed on another account. */
+  accountKey?: string;
 }
 
 export interface ResumeDecision {
@@ -93,6 +95,8 @@ export class SessionRegistry {
     cwd: string;
     contextTokens?: number;
     inheritFrom?: string;
+    /** Absent or `main`: the main account. */
+    accountKey?: string;
   }): void {
     this.load();
     const nowIso = new Date(this.now()).toISOString();
@@ -105,6 +109,7 @@ export class SessionRegistry {
       startedAt: prior?.startedAt ?? nowIso,
       updatedAt: nowIso,
       contextTokens: r.contextTokens ?? prior?.contextTokens ?? 0,
+      ...(r.accountKey && r.accountKey !== 'main' ? { accountKey: r.accountKey } : {}),
     });
     this.save();
   }
@@ -118,7 +123,7 @@ export class SessionRegistry {
   }
 
   /** May this agent resume this session? Says why not (and which limit) otherwise. */
-  decide(sessionId: string, agentId: string, configDir: string): ResumeDecision {
+  decide(sessionId: string, agentId: string, configDir: string, accountKey = 'main'): ResumeDecision {
     const r = this.get(sessionId);
     if (!r)
       return { state: 'fresh_unknown_session', detail: 'this workstation has no record of that session' };
@@ -126,6 +131,13 @@ export class SessionRegistry {
       return {
         state: 'fresh_other_agent',
         detail: 'the session belongs to another agent: sessions are per agent',
+      };
+    // Prompt caches belong to one organization and thinking-block signatures may not cross accounts: never resume across.
+    const ranOn = r.accountKey ?? 'main';
+    if (ranOn !== accountKey)
+      return {
+        state: 'fresh_other_account',
+        detail: `the session ran on account ${ranOn}; this shift runs on ${accountKey}`,
       };
     if (r.contextTokens > RESUME_MAX_CONTEXT_TOKENS)
       return {

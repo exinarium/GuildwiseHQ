@@ -22,6 +22,8 @@ import { sandboxReadEntries, secretReadDenies } from './read-only-dirs.ts';
 export type SandboxMode = 'required' | 'best_effort' | 'off';
 
 export interface ClaudePolicyContext {
+  /** Config dirs of the additional Claude accounts (`~/.claude-work`): credential stores no agent may read. */
+  accountDirs?: string[];
   /** The runner data dir (`~/.aom-runner`): config (runner token, provider credentials), outbox, all agents. */
   runnerRoot: string;
   /** This agent's own sandbox root (`<runnerRoot>/agents/<id>`: HOME, CLAUDE_CONFIG_DIR, scratch). */
@@ -305,6 +307,7 @@ function sandboxBlock(
       : [ctx.runnerRoot]),
     ...(ctx.otherAgentTmps ?? []),
     ...HOME_SECRETS.map((p) => join(ctx.realHome, p)),
+    ...(ctx.accountDirs ?? []),
     ...(profile.browser ? browserMask(ctx) : []),
   ];
   const readDirs = ctx.readDirs ?? [];
@@ -401,6 +404,7 @@ function commonDenies(ctx: ClaudePolicyContext, configDir: string): string[] {
       `Read(${ruleAbs(join(ctx.realHome, p))}/**)`,
       `Read(${ruleAbs(join(ctx.realHome, p))})`,
     ]),
+    ...(ctx.accountDirs ?? []).flatMap((d) => [`Read(${ruleAbs(d)}/**)`, `Read(${ruleAbs(d)})`]),
     `Edit(${ruleAbs(configDir)}/**)`,
     ...ctx.addDirs.map((d) => `Edit(${ruleAbs(d)}/**)`),
     ...readOnlyDenies(ctx),
@@ -441,7 +445,10 @@ function buildDevopsSettings(
   ctx: ClaudePolicyContext,
   paths: { home: string; configDir: string; scratch: string; tmp: string },
 ): ClaudeSettings {
-  const claudeLogin = ['.claude', '.claude.json'].map((f) => ruleAbs(join(ctx.realHome, f)));
+  const claudeLogin = [
+    ...['.claude', '.claude.json'].map((f) => ruleAbs(join(ctx.realHome, f))),
+    ...(ctx.accountDirs ?? []).map((d) => ruleAbs(d)),
+  ];
   const deny = [
     ...SESSION_TOOLS_DENIED,
     // git push is allowed (owner decision): it keeps the vaults in sync across workstations with the user's git

@@ -38,6 +38,8 @@ const NO_WAKE_SUBKINDS = new Set([
   'ceo_notice',
   'ceo_report',
   'ceo_permission',
+  // The system notice already tells the owner (desk and mail); a CEO relay would be a second notice for the same cause.
+  'claude_account_login',
   'order_escalation',
 ]);
 

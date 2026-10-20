@@ -4,6 +4,7 @@ import type { Ctx } from '../context.ts';
 import { one, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import type { AppendInput } from '../eventstore/types.ts';
+import { accountUsageNotices, type ClaudeRuntimeReport } from './claude-account-notices.ts';
 import { orgScope, SYSTEM_ACTOR } from './common.ts';
 
 /**
@@ -12,7 +13,7 @@ import { orgScope, SYSTEM_ACTOR } from './common.ts';
  * `key` lives in the item's `data`. A notice is raised once (and e-mailed once) and closed when the condition clears.
  */
 
-interface WsRef {
+export interface WsRef {
   id: string;
   userId: string;
 }
@@ -22,7 +23,7 @@ interface Mail {
   text: string;
 }
 
-interface Notice {
+export interface Notice {
   key: string;
   subkind: string;
   title: string;
@@ -34,7 +35,7 @@ interface Notice {
 }
 
 /** Organizations that have an active agent on the workstation. */
-async function agentOrgs(tx: Tx, workstationId: string): Promise<string[]> {
+export async function agentOrgs(tx: Tx, workstationId: string): Promise<string[]> {
   const r = await rows<{ org_id: string }>(
     tx,
     `SELECT DISTINCT org_id FROM agents WHERE workstation_id=$1 AND status='active'`,
@@ -43,8 +44,12 @@ async function agentOrgs(tx: Tx, workstationId: string): Promise<string[]> {
   return r.map((x) => x.org_id);
 }
 
-/** Raises `wanted` notices that are not open yet; closes the open ones of `subkind` + `keyPrefix` not in `wanted`. */
-async function reconcile(
+/**
+ * Raises `wanted` notices that are not open yet; closes the open ones of `subkind` + `keyPrefix` not in `wanted`. An open
+ * notice whose wording no longer matches (a project's account or fallback changed, so "paused" became "runs on the main
+ * account") is closed and replaced by a new one, without a second mail.
+ */
+export async function reconcile(
   ctx: Ctx,
   tx: Tx,
   ws: WsRef,
@@ -52,19 +57,24 @@ async function reconcile(
   keyPrefix: string,
   wanted: Notice[],
 ): Promise<Mail[]> {
-  const open = await rows<{ id: string; org_id: string; key: string }>(
+  const open = await rows<{ id: string; org_id: string; key: string; title: string; body: string }>(
     tx,
-    `SELECT id, org_id, data->>'key' AS key FROM desk_items
+    `SELECT id, org_id, data->>'key' AS key, title, body FROM desk_items
       WHERE subkind=$1 AND status='open' AND addressee_user_id=$2 AND starts_with(data->>'key', $3)`,
     [subkind, ws.userId, keyPrefix],
   );
   const events: AppendInput[] = [];
   const mails: Mail[] = [];
   const wantedKeys = new Set<string>();
+  const replaced = new Set<string>();
   for (const n of wanted) {
     for (const orgId of n.orgIds) {
       wantedKeys.add(`${n.key}|${orgId}`);
-      if (open.some((o) => o.key === n.key && o.org_id === orgId)) continue;
+      const current = open.filter((o) => o.key === n.key && o.org_id === orgId);
+      const fresh = current.some((o) => o.title === n.title && o.body === n.body);
+      if (fresh) continue;
+      const stale = current.length > 0;
+      for (const o of current) replaced.add(o.id);
       const deskItemId = randomUUID();
       events.push({
         streamId: streamId.desk(deskItemId),
@@ -88,11 +98,11 @@ async function reconcile(
         actor: SYSTEM_ACTOR,
         scope: orgScope(orgId),
       });
-      if (n.mail && !mails.includes(n.mail)) mails.push(n.mail);
+      if (!stale && n.mail && !mails.includes(n.mail)) mails.push(n.mail);
     }
   }
   for (const o of open) {
-    if (wantedKeys.has(`${o.key}|${o.org_id}`)) continue;
+    if (wantedKeys.has(`${o.key}|${o.org_id}`) && !replaced.has(o.id)) continue;
     events.push({
       streamId: streamId.desk(o.id),
       event: {
@@ -100,7 +110,9 @@ async function reconcile(
         payload: {
           deskItemId: o.id,
           resolution: 'acknowledged',
-          note: 'Fixed: this no longer needs attention.',
+          note: replaced.has(o.id)
+            ? 'Replaced by an up-to-date notice.'
+            : 'Fixed: this no longer needs attention.',
           by: { kind: 'system' },
         },
       },
@@ -112,7 +124,7 @@ async function reconcile(
   return mails;
 }
 
-async function sendMails(ctx: Ctx, ws: WsRef, mails: Mail[]): Promise<void> {
+export async function sendMails(ctx: Ctx, ws: WsRef, mails: Mail[]): Promise<void> {
   if (mails.length === 0) return;
   const user = await one<{ email: string }>(ctx.pool, 'SELECT email FROM users WHERE id=$1', [ws.userId]);
   if (!user) return;
@@ -179,45 +191,48 @@ const utcLabel = (iso: string): string => `${new Date(iso).toISOString().slice(1
 export async function syncClaudeUsageNotice(
   ctx: Ctx,
   ws: WsRef,
-  runtimes: Array<{
-    id: string;
-    usage?: string | undefined;
-    limitedUntil?: string | undefined;
-    limitedLabel?: string | undefined;
-  }>,
+  runtimes: ClaudeRuntimeReport[],
 ): Promise<void> {
+  const now = ctx.clock.now();
   const lim = runtimes.find(
     (r) =>
       r.id === 'claude-code' &&
       r.usage === 'limited' &&
       r.limitedUntil &&
-      new Date(r.limitedUntil).getTime() > ctx.clock.now().getTime(),
+      new Date(r.limitedUntil).getTime() > now.getTime(),
   );
   const w = await one<{ name: string }>(ctx.pool, 'SELECT name FROM workstations WHERE id=$1', [ws.id]);
   if (!w) return;
   const key = `claude_usage:${ws.id}`;
   const mails = await withAppendTx(ctx.pool, async (tx) => {
+    const orgs = await agentOrgs(tx, ws.id);
     const text = lim?.limitedUntil
       ? claudeUsageText(w.name, lim.limitedLabel ?? utcLabel(lim.limitedUntil))
       : undefined;
-    return reconcile(
-      ctx,
-      tx,
-      ws,
-      DESK_SUBKIND.claudeUsageLimit,
-      key,
-      text
-        ? [
-            {
-              key,
-              subkind: DESK_SUBKIND.claudeUsageLimit,
-              ...text,
-              orgIds: await agentOrgs(tx, ws.id),
-              mail: { subject: text.title, text: `${text.body}\n` },
-            },
-          ]
-        : [],
+    // The main account's notice (as before), plus one per limited project account (docs/design/claude-accounts.md 2.5).
+    const wanted: Notice[] = text
+      ? [
+          {
+            key,
+            subkind: DESK_SUBKIND.claudeUsageLimit,
+            ...text,
+            orgIds: orgs,
+            mail: { subject: text.title, text: `${text.body}\n` },
+          },
+        ]
+      : [];
+    wanted.push(
+      ...(await accountUsageNotices(
+        tx,
+        w.name,
+        runtimes.find((r) => r.id === 'claude-code'),
+        orgs,
+        now,
+        key,
+        utcLabel,
+      )),
     );
+    return reconcile(ctx, tx, ws, DESK_SUBKIND.claudeUsageLimit, key, wanted);
   });
   await sendMails(ctx, ws, mails);
 }

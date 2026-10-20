@@ -149,6 +149,10 @@ const zeroUsage = (): Usage => ({ inputTokens: 0, outputTokens: 0, cacheReadToke
  * message in the agent's sandbox, streamed back as `chat.delta` and finished with `chat.done` (or `chat.error`).
  * Chats never claim cards and do not count against the shift capacity.
  */
+/** Chats and the CEO owner turn always run on the main account: `available` only says some account is usable. */
+const mainOk = (adapter: { accountGate?(account: string): { state: string } }): boolean =>
+  (adapter.accountGate?.('main') ?? { state: 'ok' }).state === 'ok';
+
 export class ChatManager {
   private readonly active = new Map<string, ActiveChat>();
   /** Chats that ran to an end in this process: a redelivered `chat.start` of one is ignored. */
@@ -520,7 +524,7 @@ export class ChatManager {
     const { paths } = this.deps;
     const adapter = this.deps.adapters.get(msg.agent.runtime);
     const caps = adapter ? await adapter.capabilities() : undefined;
-    if (!adapter?.startOwnerTurn || !caps?.available)
+    if (!adapter?.startOwnerTurn || !caps?.available || !mainOk(adapter))
       return this.error(
         msg,
         `runtime ${msg.agent.runtime} is not available for the CEO's full-power turns on this workstation`,
@@ -636,7 +640,7 @@ export class ChatManager {
     if (profile.kind === 'full') return this.runOwnerTurn(chat, profile.mode);
     const adapter = this.deps.adapters.get(msg.agent.runtime);
     const caps = adapter ? await adapter.capabilities() : undefined;
-    if (!adapter?.startChat || !caps?.available) {
+    if (!adapter?.startChat || !caps?.available || !mainOk(adapter)) {
       this.error(msg, `runtime ${msg.agent.runtime} is not available for chat on this workstation`);
       return;
     }

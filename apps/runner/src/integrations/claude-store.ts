@@ -12,6 +12,10 @@ import { registerSecret } from '../secrets/redact.ts';
  */
 export const claudeFile = (secretsDir: string): string => join(secretsDir, 'claude.json');
 
+/** The credential of an additional token account (`secrets/claude-accounts/<key>.json`, same format as `claude.json`). */
+export const claudeAccountFile = (secretsDir: string, key: string): string =>
+  join(secretsDir, 'claude-accounts', `${key}.json`);
+
 export const ClaudeCredentialSchema = z.object({
   authMode: z.enum(['oauth', 'api_key']),
   oauthToken: z.string().min(1).optional(),

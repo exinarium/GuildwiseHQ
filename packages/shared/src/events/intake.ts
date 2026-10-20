@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { AccountKeySchema } from '../claude/accounts.ts';
 import { defineEvent, Id } from './define.ts';
 
 /** Where an intake's ticket lives. Inbound access is read-only (docs/SPEC.md "External systems boundary"). */
@@ -61,6 +62,13 @@ export const intakeEvents = [
   /** A `question` shift for the agent a desk item is routed to (no card claim, no worktree). */
   defineEvent(
     'QuestionShiftDispatched',
-    z.object({ deskItemId: Id, shiftId: Id, agentId: Id, workstationId: Id }),
+    z.object({
+      deskItemId: Id,
+      shiftId: Id,
+      agentId: Id,
+      workstationId: Id,
+      /** The Claude account the shift runs on; absent = main. */
+      accountKey: AccountKeySchema.optional(),
+    }),
   ),
 ] as const;

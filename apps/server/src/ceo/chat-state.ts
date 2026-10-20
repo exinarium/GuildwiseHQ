@@ -5,6 +5,7 @@ import { orgScope, userActor } from '../commands/common.ts';
 import type { Ctx } from '../context.ts';
 import { one, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
+import { CLAUDE_RUNTIME, mainUsable } from '../dispatcher/accounts.ts';
 import { conflict, notFound } from '../errors.ts';
 import { fullPowerOf } from '../queries/ceo.ts';
 import { ensureCeoThread } from './chat.ts';
@@ -57,7 +58,14 @@ export async function ceoChatState(ctx: Ctx, orgId: string): Promise<CeoChatStat
     model: {
       default: defaultChoiceOf(agent, ceo.settings.models.chat) as ModelChoice,
       thread: (thread?.model_override as ModelChoice | null) ?? null,
-      runtimes: runtimes.filter((r) => r.available !== false).map((r) => r.id),
+      runtimes: // chats and the CEO run on the workstation's main Claude account: `available` only says some account works
+        runtimes
+          .filter(
+            (r) =>
+              r.available !== false &&
+              (r.id !== CLAUDE_RUNTIME || mainUsable(runtimes, r.id, ctx.clock.now())),
+          )
+          .map((r) => r.id),
     },
     cwd: ceo.settings.ownerTurn.cwd,
     busy: !!running || ctx.services.chat.isBusy(threadId),

@@ -16,6 +16,8 @@ import { baTaskRpc, endBaTaskShift } from '../commands/ba-tasks.ts';
 import { attachmentRpc } from '../commands/card-attachments.ts';
 import { cardDependRpc, cardFactsRpc } from '../commands/card-facts.ts';
 import { cardBriefRpc, cardGroupRpc } from '../commands/card-group.ts';
+import { syncClaudeAccountNotices } from '../commands/claude-account-notices.ts';
+import { applyAccountEnsureResult, queueMissingAccountEnsures } from '../commands/claude-accounts.ts';
 import { cardMessage, SYSTEM_ACTOR, userScope } from '../commands/common.ts';
 import { designRpc } from '../commands/design-rpc.ts';
 import { alignDevopsRuntime, createDevOpsRequestIn, endDevopsShift } from '../commands/devops.ts';
@@ -413,6 +415,17 @@ export class RunnerHandlers {
           // Terminal: the answer (pull request URL, nothing to do, or why not) is stored for the project settings.
           await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
           await applyReleasePrResult(this.ctx, cmd.payload, msg.ok, msg.result, msg.error);
+        } else if (cmd?.type === 'claude.account.ensure') {
+          // Terminal: provisioning answered (ready, awaiting login, needs the owner, failed); never retried blindly.
+          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+          await applyAccountEnsureResult(
+            this.ctx,
+            conn.workstationId,
+            cmd.payload,
+            msg.ok,
+            msg.result,
+            msg.error,
+          );
         } else if (cmd?.type === 'rights.verify') {
           // Terminal. A failed or unreadable answer is kept on the command so the Workstations page can show it.
           const problem = await applyRightsResult(
@@ -579,6 +592,9 @@ export class RunnerHandlers {
     await syncClaudeUsageNotice(ctx, { id: conn.workstationId, userId: conn.userId }, runtimes).catch(
       () => {},
     );
+    await syncClaudeAccountNotices(ctx, { id: conn.workstationId, userId: conn.userId }, runtimes).catch(
+      () => {},
+    );
     const brief = (
       rs: Array<{
         id: string;
@@ -587,6 +603,7 @@ export class RunnerHandlers {
         auth?: string;
         usage?: string;
         limitedUntil?: string;
+        accounts?: Array<{ key: string; login: string; usage: string; limitedUntil?: string }>;
       }>,
     ) =>
       rs.map((r) => ({
@@ -595,6 +612,17 @@ export class RunnerHandlers {
         ...(r.sandbox ? { sandbox: r.sandbox } : {}),
         ...(r.auth ? { auth: r.auth } : {}),
         ...(r.usage === 'limited' ? { usage: r.usage, limitedUntil: r.limitedUntil } : {}),
+        // Per Claude account (docs/design/claude-accounts.md 2.6): a live refresh of the Workstations page.
+        ...(r.accounts
+          ? {
+              accounts: r.accounts.map((a) => ({
+                key: a.key,
+                login: a.login,
+                usage: a.usage,
+                ...(a.usage === 'limited' && a.limitedUntil ? { limitedUntil: a.limitedUntil } : {}),
+              })),
+            }
+          : {}),
       }));
     const now = brief(runtimes);
     if (JSON.stringify(brief(before?.runtimes ?? [])) === JSON.stringify(now)) return;
@@ -687,6 +715,19 @@ export class RunnerHandlers {
       () => {},
     );
     await syncClaudeUsageNotice(ctx, { id: conn.workstationId, userId: conn.userId }, msg.runtimes).catch(
+      () => {},
+    );
+    // Accounts that projects name but this runner does not report are asked for (at most once a day per key); they
+    // are delivered with the other pending commands once the connection is reconciled.
+    await queueMissingAccountEnsures(
+      ctx,
+      conn.workstationId,
+      new Set(
+        (msg.runtimes.find((r) => r.id === 'claude-code')?.accounts ?? []).map((a: { key: string }) => a.key),
+      ),
+      msg.capabilities ?? [],
+    ).catch((err) => ctx.log.warn({ err }, 'claude.account.ensure not queued'));
+    await syncClaudeAccountNotices(ctx, { id: conn.workstationId, userId: conn.userId }, msg.runtimes).catch(
       () => {},
     );
     await ctx.store.append([

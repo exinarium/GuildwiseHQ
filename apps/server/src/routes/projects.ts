@@ -12,6 +12,7 @@ import {
   RankProjectsRequestSchema,
   RepoParamsSchema,
   SetArchitectSettingsRequestSchema,
+  SetClaudeAccountRequestSchema,
   SetConcurrencyCapRequestSchema,
   SetE2eAreasRequestSchema,
   SetFullSuiteRequestSchema,
@@ -44,6 +45,7 @@ import {
   removeRepo,
   restoreProject,
   retryRepoClone,
+  setClaudeAccount,
   setConcurrencyCap,
   setFullSuite,
   setManualQa,
@@ -57,6 +59,7 @@ import { requestReleasePr } from '../commands/release-pr.ts';
 import { setRepoAccessMethod } from '../commands/repo-access.ts';
 import type { Ctx } from '../context.ts';
 import { gone } from '../errors.ts';
+import { getProjectClaudeAccounts } from '../queries/claude-accounts.ts';
 import { getProjectDetail, listProjects } from '../queries/misc.ts';
 import { typed } from './util.ts';
 
@@ -261,6 +264,22 @@ export function projectRoutes(ctx: Ctx) {
         return getProjectDetail(ctx, a.session.user.id, req.params.id);
       },
     );
+
+    /** The Claude account the project's tickets run on (docs/design/claude-accounts.md). */
+    app.put(
+      '/api/projects/:id/claude-account',
+      { schema: { params: IdParamsSchema, body: SetClaudeAccountRequestSchema } },
+      async (req) => {
+        const a = await requireOrg(ctx, req);
+        await setClaudeAccount(ctx, a.session.user, { id: a.orgId, role: a.role }, req.params.id, req.body);
+        return getProjectDetail(ctx, a.session.user.id, req.params.id);
+      },
+    );
+
+    app.get('/api/projects/:id/claude-accounts', { schema: { params: IdParamsSchema } }, async (req) => {
+      const s = await requireUser(ctx, req);
+      return getProjectClaudeAccounts(ctx, s.user.id, req.params.id);
+    });
 
     /** Manual QA after Finalize (default on): the person who started a card tests it before it is done. */
     app.put(

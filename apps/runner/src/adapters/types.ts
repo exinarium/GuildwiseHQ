@@ -1,4 +1,4 @@
-import type { AgentRuntimeSpec, ChatContext, Usage } from '@aom/shared';
+import type { AgentRuntimeSpec, ChatContext, ClaudeAccountInfo, Usage } from '@aom/shared';
 import type { Sandbox } from '../sandbox/sandbox.ts';
 
 export interface RuntimeCapabilities {
@@ -17,7 +17,16 @@ export interface RuntimeCapabilities {
   limitedUntil?: string;
   /** `limitedUntil` as the owner of this machine reads it ("18:00 (Africa/Johannesburg)"). */
   limitedLabel?: string;
+  /** Claude Code: every account of this workstation (main first) with its own login and usage state. */
+  accounts?: ClaudeAccountInfo[];
 }
+
+/** May a shift run on this account now? (`ClaudeCodeAdapter.accountGate`) */
+export type AccountGate =
+  | { state: 'ok' }
+  | { state: 'missing' }
+  | { state: 'limited'; limitedUntil?: string; label?: string }
+  | { state: 'login'; login: 'expired' | 'none' };
 
 export interface DevopsGuardInput {
   /** Shift or chat id: names the session in the audit trail. */
@@ -68,6 +77,8 @@ export interface ShiftStartInput {
   promptCacheTtl?: '5m';
   /** The DevOps guard hook's inputs (a DevOps shift or chat only; see devops/guard.ts). */
   devopsGuard?: DevopsGuardInput;
+  /** The Claude account this shift runs on (absent: `main`). Its config dir is `sandbox.configDir`, one per account per agent. */
+  account?: string;
   /** Raw runtime stream is appended here (logs/shifts/<shiftId>.jsonl). */
   logFile?: string;
 }
@@ -132,6 +143,8 @@ export interface ChatStartInput {
   context?: ChatContext;
   /** M7: the BA's intake chat: it may read the ticket with the user's Jira tool (MCP) configured on this workstation. */
   intake?: boolean;
+  /** The Claude account of this chat (absent: `main`; chats always use main today). */
+  account?: string;
   logFile?: string;
 }
 
@@ -171,7 +184,9 @@ export interface RuntimeAdapter {
    * is put back (`auth_expired`, no penalty) instead of crashing. Claude Code: reads the login's expiry and only when it
    * is near makes one minimal call (which also refreshes it). Absent: no login to check.
    */
-  checkLogin?(): Promise<'ok' | 'expired' | 'unknown'>;
+  checkLogin?(account?: string): Promise<'ok' | 'expired' | 'unknown'>;
+  /** May a shift run on this account now: known, signed in and not over its usage limit? (Claude Code.) Absent: always. */
+  accountGate?(account: string): AccountGate;
   /**
    * Chat (docs/ARCHITECTURE.md section 14): one headless call per user message, streaming `delta` events, ending with
    * `session` (to resume next time), `usage`, `final` and `exit`.

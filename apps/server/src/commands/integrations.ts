@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
+  CLAUDE_ACCOUNTS_CAPABILITY,
   checkIntegrationRequest,
   ENVELOPE_COMMANDS,
   ENVELOPE_TTL_MS,
@@ -499,6 +500,29 @@ export async function readIntegrationRequest(
 
 // ------------------------------------------------------------------------------------------------ requests from the page
 
+/**
+ * A named Claude Code account (an `instance`) needs a runner that knows accounts. An older one ignores the instance: its
+ * `remove` would delete the MAIN credential and its sign-in would write to main, so every op is refused up front.
+ */
+async function requireAccountsRunner(
+  ctx: Ctx,
+  workstationId: string,
+  kindId: string,
+  instance: string,
+): Promise<void> {
+  if (kindId !== 'claude-code' || instance === '') return;
+  const c = await one(
+    ctx.pool,
+    'SELECT $2 = ANY(capabilities) AS ok FROM workstation_capabilities WHERE workstation_id=$1',
+    [workstationId, CLAUDE_ACCOUNTS_CAPABILITY],
+  );
+  if (!c?.ok)
+    throw conflict(
+      'runner_too_old',
+      `update the runner to ${integrationKind(kindId)?.minRunnerForInstance ?? 'the latest version'} or newer to use a named Claude account from here`,
+    );
+}
+
 async function gate(
   ctx: Ctx,
   user: AuthSession['user'],
@@ -521,6 +545,7 @@ async function gate(
       'runner_too_old',
       `update the runner to ${kind.minRunner} or newer to connect this from here; until then run: ${kind.cli}`,
     );
+  await requireAccountsRunner(ctx, workstationId, kindId, instance);
   if (keyId !== undefined) {
     const k = await keyOf(ctx, workstationId);
     if (!k || k.keyId !== keyId)
@@ -762,6 +787,7 @@ async function requestAction(
     throw conflict('workstation_offline', 'this workstation is offline: start its runner and try again');
   if (!integrationsSupportedBy(w.integrations_version, kind))
     throw conflict('runner_too_old', `update the runner to ${kind.minRunner} or newer to do this from here`);
+  await requireAccountsRunner(ctx, workstationId, body.kind, body.instance);
   await withAppendTx(ctx.pool, async (tx) => {
     if (await one(tx, 'SELECT 1 AS x FROM integration_requests WHERE id=$1', [body.requestId]))
       throw conflict('request_exists', 'this request was already sent');

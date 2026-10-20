@@ -12,7 +12,7 @@ import { graphScopeFor } from '../commands/graph.ts';
 import type { Ctx } from '../context.ts';
 import { one } from '../db/sql.ts';
 import { dedupMatches } from '../queries/ledger.ts';
-import { agentSpecFor, buildBrief, shiftVault } from './brief.ts';
+import { accountOf, agentSpecFor, buildBrief, shiftVault } from './brief.ts';
 
 type ShiftStartPayload = Omit<ServerToRunnerOf<'shift.start'>, 'v' | 'id' | 'type' | 'ts'>;
 
@@ -134,6 +134,7 @@ export async function buildQuestionShiftStart(
     worktree: null,
     prepare: { rebase: false },
     maxShiftMinutes: QUESTION_MAX_SHIFT_MINUTES,
+    ...accountOf(shift),
     question,
     // The project's vault (read-only), like a card shift of this project on this workstation.
     vault: await shiftVault(ctx, agent, base.project.id),

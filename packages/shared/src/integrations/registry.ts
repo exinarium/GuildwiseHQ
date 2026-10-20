@@ -1,3 +1,4 @@
+import { ACCOUNT_KEY_RE } from '../claude/accounts.ts';
 import { INTEGRATION_INSTANCE_RE, type IntegrationKindId, type IntegrationScope } from './schema.ts';
 
 /**
@@ -49,7 +50,7 @@ export interface IntegrationKind {
   instances:
     | 'single'
     | {
-        by: 'host' | 'organization' | 'server' | 'provider-host';
+        by: 'host' | 'organization' | 'server' | 'provider-host' | 'account';
         label: string;
         placeholder: string;
         defaultInstance?: string;
@@ -67,6 +68,11 @@ export interface IntegrationKind {
   cli: string;
   /** The runner version that supports web connect for this kind (shown in the "update your runner" banner). */
   minRunner: string;
+  /**
+   * Set when a named instance needs a newer runner than the default one (claude-code: an account key needs 0.1.33).
+   * Applies to every non-empty instance; `minRunner` stays the bar for the default instance.
+   */
+  minRunnerForInstance?: string;
   /** The `integrationsVersion` a runner must announce. */
   minIntegrationsVersion: number;
 }
@@ -88,10 +94,23 @@ export const INTEGRATION_KINDS: readonly IntegrationKind[] = [
     id: 'claude-code',
     label: 'Claude Code',
     group: 'ai',
-    instances: 'single',
+    instances: { by: 'account', label: 'Account', placeholder: 'work', defaultInstance: '' },
     scope: 'mixed',
-    machineMethods: ['default_login'],
+    machineMethods: ['default_login', 'claude_login'],
     methods: [
+      {
+        id: 'claude_login',
+        label: 'Sign in with your Claude subscription',
+        flow: 'interactive',
+        paste: 'code',
+        steps: [
+          { text: 'Open the sign-in link and sign in to the Claude account for this key.' },
+          { text: 'Copy the code the page shows and paste it here.' },
+          {
+            text: "The login is stored in this account's own Claude folder on the workstation (e.g. ~/.claude-gw-work).",
+          },
+        ],
+      },
       {
         id: 'setup_token',
         label: 'Sign in with your Claude subscription (1-year token)',
@@ -154,6 +173,7 @@ export const INTEGRATION_KINDS: readonly IntegrationKind[] = [
       'secrets/claude.json (mode 0600), this workstation only. The default login is ~/.claude/.credentials.json.',
     cli: 'aom-runner auth oauth-token',
     minRunner: MIN_RUNNER,
+    minRunnerForInstance: '0.1.33',
     minIntegrationsVersion: 1,
   },
   {
@@ -493,6 +513,7 @@ export function integrationScope(kind: IntegrationKind, method?: string): Integr
 /** Is this instance name valid for the kind? ('' only for single-instance kinds.) */
 export function validIntegrationInstance(kind: IntegrationKind, instance: string): boolean {
   if (kind.instances === 'single') return instance === '';
+  if (kind.instances.by === 'account') return instance === '' || ACCOUNT_KEY_RE.test(instance);
   return INTEGRATION_INSTANCE_RE.test(instance);
 }
 
@@ -521,6 +542,7 @@ export function checkIntegrationRequest(
   const method = integrationMethod(kind, methodId);
   if (!method) return 'unknown method';
   if (method.phase) return 'this method is not available yet';
+  if (methodId === 'claude_login' && instance === '') return 'sign in needs an account key';
   if (method.flow !== flow) return `this method is not a ${flow} method`;
   return null;
 }

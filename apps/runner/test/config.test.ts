@@ -26,6 +26,15 @@ describe('config', () => {
     expect(loadConfig(path).repoRoots).toEqual(['/a']);
   });
 
+  it('accounts default to none; a key is validated and never `main`', () => {
+    const base = { serverUrl: 'http://x', workstationId: 'w', runnerToken: 'aomr_t' };
+    expect(RunnerConfigSchema.parse(base).runtimes['claude-code'].accounts).toEqual([]);
+    const ok = ClaudeRuntimeConfigSchema.parse({ accounts: [{ key: 'work' }] });
+    expect(ok.accounts).toEqual([{ key: 'work', source: 'config_dir' }]);
+    expect(() => ClaudeRuntimeConfigSchema.parse({ accounts: [{ key: 'main' }] })).toThrow();
+    expect(() => ClaudeRuntimeConfigSchema.parse({ accounts: [{ key: 'Bad Key' }] })).toThrow();
+  });
+
   it('applies defaults', () => {
     const c = RunnerConfigSchema.parse({ serverUrl: 'http://x', workstationId: 'w', runnerToken: 'aomr_t' });
     expect(c.maxConcurrentShifts).toBe(4);

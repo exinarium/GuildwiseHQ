@@ -3,6 +3,7 @@ import { homedir, hostname, platform } from 'node:os';
 import { basename, join } from 'node:path';
 import {
   CEO_FULL_POWER_CAPABILITY,
+  CLAUDE_ACCOUNTS_CAPABILITY,
   CommandPayloadSchemas,
   DELIVERY_CAPABILITY,
   defaultHost,
@@ -25,9 +26,11 @@ import {
   uuidv7,
   type WorktreeSweepResult,
 } from '@aom/shared';
-import { ClaudeAuthMonitor, probeClaudeLogin } from './adapters/claude-auth.ts';
+import { ensureClaudeAccount } from './adapters/claude-account-provision.ts';
+import { ClaudeAccountRegistry } from './adapters/claude-accounts.ts';
+import { probeClaudeLogin } from './adapters/claude-auth.ts';
 import { ClaudeCodeAdapter, realClaudeBlocked } from './adapters/claude-code.ts';
-import { ClaudeUsageMonitor, formatLimitTime } from './adapters/claude-usage-limit.ts';
+import { formatLimitTime } from './adapters/claude-usage-limit.ts';
 import { buildAdapters } from './adapters/registry.ts';
 import type { RuntimeAdapter } from './adapters/types.ts';
 import { ServerHttp } from './attachments/index.ts';
@@ -258,12 +261,21 @@ export class Runner {
   /** The plugin MCP servers last reported, to send a new report only on change. */
   private lastMcp: string | undefined;
   private lastToolchains: string | undefined;
-  /** The Claude login of this machine: expired pauses the runtime (reported unavailable) until a probe succeeds. */
-  readonly claudeAuth = new ClaudeAuthMonitor();
-  private lastAuthProbe = 0;
-  /** The Claude subscription's usage limit: limited pauses the runtime until it resets and a probe works (backlog #73). */
-  readonly claudeUsage = new ClaudeUsageMonitor();
-  private lastUsageProbe = 0;
+  /**
+   * The Claude accounts of this workstation: main (today's credential) and the additional ones. Each has its own login and
+   * usage-limit state (persisted in `claude-accounts-state.json`) and its own recovery probes.
+   */
+  readonly claudeAccounts: ClaudeAccountRegistry;
+  /** The main account's login: expired pauses it until a probe succeeds. */
+  get claudeAuth() {
+    return this.claudeAccounts.main.auth;
+  }
+  /** The main account's usage limit (backlog #73). */
+  get claudeUsage() {
+    return this.claudeAccounts.main.usage;
+  }
+  private readonly lastAuthProbe = new Map<string, number>();
+  private readonly lastUsageProbe = new Map<string, number>();
   private maxConcurrent: number;
   /** The shift limit the owner chose on the Workstations page, saved so it holds after a restart (backlog #76). */
   private readonly serverLimitFile: string;
@@ -347,22 +359,32 @@ export class Runner {
       log: this.log,
     });
     this.claudeStore = new ClaudeCredentialStore(claudeFile(this.paths.secrets));
+    const mainCredential = () => {
+      // secrets/claude.json over config.json, read at every session start: a new token needs no restart
+      const c = resolveClaudeCredential(this.claudeStore, this.freshConfig().runtimes['claude-code']);
+      return {
+        authMode: c.authMode,
+        ...(c.oauthToken ? { oauthToken: c.oauthToken } : {}),
+        ...(c.apiKey ? { apiKey: c.apiKey } : {}),
+      };
+    };
+    this.claudeAccounts = new ClaudeAccountRegistry({
+      home: homedir(),
+      root: this.paths.root,
+      secretsDir: this.paths.secrets,
+      stateFile: join(this.paths.root, 'claude-accounts-state.json'),
+      accounts: () => this.freshConfig().runtimes['claude-code'].accounts,
+      mainCredential,
+    });
     this.adapters =
       opts.adapters ??
       buildAdapters(
         opts.config,
         this.paths,
         this.claudeAuth,
-        () => {
-          // secrets/claude.json over config.json, read at every session start: a new token needs no restart
-          const c = resolveClaudeCredential(this.claudeStore, this.freshConfig().runtimes['claude-code']);
-          return {
-            authMode: c.authMode,
-            ...(c.oauthToken ? { oauthToken: c.oauthToken } : {}),
-            ...(c.apiKey ? { apiKey: c.apiKey } : {}),
-          };
-        },
+        mainCredential,
         this.claudeUsage,
+        this.claudeAccounts,
       );
     this.integrations = new IntegrationService({
       workstationId: opts.config.workstationId,
@@ -374,20 +396,25 @@ export class Runner {
       log: this.log,
       send: (type, payload) => void this.client.send(type as 'integrations.report', payload as never),
     });
-    this.claudeAuth.onChange((state) => {
-      this.log.warn(
-        state === 'expired'
-          ? 'the Claude login does not work: work on this workstation is paused until you run `claude` and `/login` here'
-          : 'the Claude login works again: work resumes',
-      );
-      void this.reportRuntimes();
-    });
-    this.claudeUsage.onChange((state) => {
-      this.log.warn(
-        state === 'limited' && this.claudeUsage.limitedUntil
-          ? `the Claude usage limit was reached: work on this workstation is paused until ${formatLimitTime(new Date(this.claudeUsage.limitedUntil))}`
-          : 'the Claude usage limit is gone: work resumes',
-      );
+    // Any account's login or usage state changing is logged (tagged with the account) and reported to the server.
+    this.claudeAccounts.onChange((a) => {
+      const tag = a.main ? 'the Claude' : `account=${a.key}: the Claude`;
+      const where = a.main ? 'work on this workstation' : `work on account ${a.key}`;
+      const login = a.auth.state;
+      if (login !== 'ok')
+        this.log.warn(
+          login === 'none'
+            ? `${tag} login was never completed: ${where} is paused until you sign in (${a.terminalLogin()})`
+            : a.main
+              ? `${tag} login does not work: ${where} is paused until you run \`claude\` and \`/login\` here`
+              : `${tag} login does not work: ${where} is paused until you sign in (${a.terminalLogin()})`,
+        );
+      if (a.usage.state === 'limited' && a.usage.limitedUntil)
+        this.log.warn(
+          `${tag} usage limit was reached: ${where} is paused until ${formatLimitTime(new Date(a.usage.limitedUntil))}`,
+        );
+      if (login === 'ok' && a.usage.state === 'ok')
+        this.log.info(`${tag} account works again: ${where} resumes`);
       void this.reportRuntimes();
     });
     this.client = new RunnerClient({
@@ -606,6 +633,7 @@ export class Runner {
       forge: this.forgeEnv,
       exec: this.exec,
       fetch: globalThis.fetch,
+      log: this.log,
       config: () => this.freshConfig(),
       now: () => new Date(),
       home: homedir(),
@@ -617,13 +645,14 @@ export class Runner {
           realClaudeBlocked()
             ? 'unknown'
             : probeClaudeLogin({ bin: this.freshConfig().runtimes['claude-code'].bin, env }),
-        probeLogin: async () => (await claude()?.probeLogin()) ?? 'unknown',
-        authState: () => this.claudeAuth.state,
-        afterChange: async () => {
-          await claude()?.probeLogin();
+        probeLogin: async (key) => (await claude()?.probeLogin(key)) ?? 'unknown',
+        authState: (key) => this.claudeAccounts.get(key ?? 'main')?.auth.state ?? 'ok',
+        afterChange: async (key) => {
+          await claude()?.probeLogin(key);
           await this.reportRuntimes();
         },
       },
+      claudeAccounts: this.claudeAccounts,
       mcp: {
         discover: () => (this.opts.mcpDiscover ?? (() => discoverPluginMcpServers()))(),
         authOf: () => (this.opts.mcpAuth ?? mcpAuthStates)(),
@@ -821,6 +850,7 @@ export class Runner {
     // Every minute: the sign-in state of the plugin MCP servers, and (while the Claude login is expired) the login probe.
     const m = setInterval(() => {
       this.reportMcpServers(false);
+      void this.probeAccountLogins();
       void this.probeAuth();
       void this.probeUsage();
     }, this.opts.minuteMs ?? 60_000);
@@ -890,6 +920,7 @@ export class Runner {
         ...(c.usage ? { usage: c.usage } : {}),
         ...(c.limitedUntil ? { limitedUntil: c.limitedUntil } : {}),
         ...(c.limitedLabel ? { limitedLabel: c.limitedLabel } : {}),
+        ...(c.accounts ? { accounts: c.accounts } : {}),
       });
     }
     return out;
@@ -908,29 +939,52 @@ export class Runner {
   }
 
   /**
-   * While the Claude login is expired: every 3 minutes a cheap probe (`claude auth status`, then one minimal call); when
-   * it works the runtime is reported available again and the server resumes dispatching and clears its notice.
+   * A credentials file of an account changed (someone signed in from a terminal: `claude-work`, then `/login`) while the
+   * account was `none` or `expired`: probe it at once, so work resumes within a minute instead of after the next 3-minute probe.
    */
-  private async probeAuth(): Promise<void> {
-    if (this.claudeAuth.state !== 'expired') return;
-    if (Date.now() - this.lastAuthProbe < (this.opts.authProbeMs ?? 180_000)) return;
-    this.lastAuthProbe = Date.now();
+  private async probeAccountLogins(): Promise<void> {
     const a = this.adapters.get('claude-code');
-    if (a instanceof ClaudeCodeAdapter) await a.probeLogin();
+    if (!(a instanceof ClaudeCodeAdapter)) return;
+    for (const account of this.claudeAccounts.poll()) {
+      this.lastAuthProbe.set(account.key, Date.now());
+      await a.probeLogin(account.key);
+    }
   }
 
   /**
-   * While the usage limit is in force: once its reset time has passed, a cheap probe (one minimal call); when it works
-   * the runtime is reported available again and the server resumes dispatching and closes its notice; when the limit is
-   * still there the new reset time extends the pause. A probe that could not tell is retried after 3 minutes.
+   * While an account's Claude login is expired: every 3 minutes a cheap probe (`claude auth status`, then one minimal call)
+   * in that account's own environment; when it works the account is reported usable again and the server resumes
+   * dispatching to it and clears its notice. Accounts are probed independently.
+   */
+  private async probeAuth(): Promise<void> {
+    const a = this.adapters.get('claude-code');
+    if (!(a instanceof ClaudeCodeAdapter)) return;
+    for (const account of this.claudeAccounts.list()) {
+      if (account.auth.state !== 'expired') continue;
+      const last = this.lastAuthProbe.get(account.key) ?? 0;
+      if (Date.now() - last < (this.opts.authProbeMs ?? 180_000)) continue;
+      this.lastAuthProbe.set(account.key, Date.now());
+      await a.probeLogin(account.key);
+    }
+  }
+
+  /**
+   * While an account's usage limit is in force: once its reset time has passed, a cheap probe (one minimal call) in that
+   * account's environment; when it works the account is usable again and the server resumes dispatching to it; when the
+   * limit is still there the new reset time extends the pause. A probe that could not tell is retried after 3 minutes.
    */
   private async probeUsage(): Promise<void> {
-    const until = this.claudeUsage.limitedUntilMs;
-    if (this.claudeUsage.state !== 'limited' || until === undefined || Date.now() < until) return;
-    if (Date.now() - this.lastUsageProbe < (this.opts.usageProbeMs ?? 180_000)) return;
-    this.lastUsageProbe = Date.now();
     const a = this.adapters.get('claude-code');
-    if (a instanceof ClaudeCodeAdapter) await a.probeUsage();
+    if (!(a instanceof ClaudeCodeAdapter)) return;
+    for (const account of this.claudeAccounts.list()) {
+      const until = account.usage.limitedUntilMs;
+      if (account.usage.state !== 'limited' || until === undefined || Date.now() < until) continue;
+      const last = this.lastUsageProbe.get(account.key) ?? 0;
+      // the first probe after a (new) reset time is never throttled; only a retry after "could not tell" waits
+      if (last >= until && Date.now() - last < (this.opts.usageProbeMs ?? 180_000)) continue;
+      this.lastUsageProbe.set(account.key, Date.now());
+      await a.probeUsage(account.key);
+    }
   }
 
   /** The instructions note for granted plugin MCP servers that are not signed in on this workstation. */
@@ -976,6 +1030,7 @@ export class Runner {
         RUNNER_PIN_CAPABILITY,
         DELIVERY_CAPABILITY,
         LOCAL_VAULT_CAPABILITY,
+        CLAUDE_ACCOUNTS_CAPABILITY,
         // The local opt-in (`aom-runner ceo full-power on`), read fresh: the server shows "Full power is off" without it.
         ...(this.freshConfig().ceo.fullPower ? [CEO_FULL_POWER_CAPABILITY] : []),
       ],
@@ -1326,6 +1381,31 @@ export class Runner {
         const p = CommandPayloadSchemas['runner.pin'].parse(payload);
         this.opts.onRunnerPin?.(p.version);
         done(true, { version: p.version });
+      } else if (command === 'claude.account.ensure') {
+        // Provision an additional Claude account (folder, config entry, alias); an unexpected error is ok:false only.
+        const p = CommandPayloadSchemas['claude.account.ensure'].parse(payload);
+        const claude = this.adapters.get('claude-code');
+        this.log.info(`claude account ${p.key}: provisioning requested`);
+        const answer = await ensureClaudeAccount(p, {
+          home: homedir(),
+          root: this.paths.root,
+          configPath: this.paths.config,
+          machineScopeAllowed:
+            this.freshConfig().integrations.machineScopeFromWeb === 'primary' &&
+            (this.opts.isPrimaryPairing?.() ?? true),
+          registry: this.claudeAccounts,
+          probeLogin: async (key) =>
+            claude instanceof ClaudeCodeAdapter ? await claude.probeLogin(key) : 'unknown',
+          afterRegister: () => this.reportRuntimes(),
+        });
+        this.log.info(`claude account ${p.key}: provisioning ${answer.state}`, {
+          configDir: answer.configDir,
+          aliasAdded: answer.aliasAdded,
+          aliasExisting: answer.aliasExisting !== undefined,
+          aliasConflict: answer.aliasConflict === true,
+          ...(answer.detail ? { detail: answer.detail.slice(0, 200) } : {}),
+        });
+        done(true, answer);
       } else if (command === 'shifts.limit') {
         // The owner changed the limit on the Workstations page: it applies to the next shift offered, no restart.
         const p = CommandPayloadSchemas['shifts.limit'].parse(payload);

@@ -22,7 +22,10 @@ function failureText(err: unknown): string | null {
     if (err.status === 429) return 'Too many attempts. Wait a minute and try again.';
     if (err.status === 403 && (err.code === 'org_suspended' || err.code === 'email_not_verified'))
       return err.message;
-    if (err.status === 403) return 'This account is deactivated. Ask your admin.';
+    // The server answers 401 for a deactivated account (same as a wrong password), so no 403 means "deactivated".
+    if (err.status === 403 && err.code === 'bad_origin')
+      return "This address isn't allowed to sign in. Open the app at the address your admin gave you (its configured address) and try again.";
+    if (err.status === 403) return `Sign-in was refused by the server (${err.code || 'forbidden'}).`;
     if (err.status >= 500) return 'Cannot reach the server. Check your connection and try again.';
   }
   return 'Cannot reach the server. Check your connection and try again.';

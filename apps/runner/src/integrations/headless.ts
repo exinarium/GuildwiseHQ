@@ -1,5 +1,6 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { ClaudeAccountRegistry } from '../adapters/claude-accounts.ts';
 import { probeClaudeLogin } from '../adapters/claude-auth.ts';
 import { realClaudeBlocked } from '../adapters/claude-code.ts';
 import { loadConfig } from '../config.ts';
@@ -21,6 +22,13 @@ import type { AdapterEnv, IntegrationAdapter } from './types.ts';
 export function headlessEnv(paths: RunnerPaths, overrides: Partial<AdapterEnv> = {}): AdapterEnv {
   const config = () => loadConfig(paths.config);
   const claudeStore = new ClaudeCredentialStore(claudeFile(paths.secrets));
+  const claudeAccounts = new ClaudeAccountRegistry({
+    home: homedir(),
+    root: paths.root,
+    secretsDir: paths.secrets,
+    accounts: () => config().runtimes['claude-code'].accounts,
+    mainCredential: () => resolveClaudeCredential(claudeStore, config().runtimes['claude-code']),
+  });
   return {
     paths,
     forge: {
@@ -46,18 +54,19 @@ export function headlessEnv(paths: RunnerPaths, overrides: Partial<AdapterEnv> =
         realClaudeBlocked()
           ? 'unknown'
           : probeClaudeLogin({ bin: config().runtimes['claude-code'].bin, env }),
-      probeLogin: async () => {
+      probeLogin: async (key) => {
         if (realClaudeBlocked()) return 'unknown';
         const cc = config().runtimes['claude-code'];
-        const c = resolveClaudeCredential(claudeStore, cc);
-        const env: NodeJS.ProcessEnv = { ...process.env };
-        if (c.authMode === 'oauth' && c.oauthToken) env.CLAUDE_CODE_OAUTH_TOKEN = c.oauthToken;
-        if (c.authMode === 'api_key' && c.apiKey) env.ANTHROPIC_API_KEY = c.apiKey;
-        return probeClaudeLogin({ bin: cc.bin, env });
+        const account = claudeAccounts.get(key ?? 'main');
+        if (!account) return 'unknown';
+        const r = await probeClaudeLogin({ bin: cc.bin, env: account.probeEnv() });
+        if (r === 'ok') account.auth.markOk();
+        return r;
       },
-      authState: () => 'ok',
+      authState: (key) => claudeAccounts.get(key ?? 'main')?.auth.state ?? 'ok',
       afterChange: async () => undefined,
     },
+    claudeAccounts,
     mcp: { discover: () => discoverPluginMcpServers(), authOf: () => mcpAuthStates() },
     repoHosts: () => ({}),
     sessionCwd: join(paths.root, 'tmp', 'integrations'),

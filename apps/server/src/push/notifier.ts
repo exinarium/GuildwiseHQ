@@ -110,7 +110,12 @@ const orgManagers = async (ctx: Ctx, orgId: string): Promise<string[]> =>
     )
   ).map((r) => r.user_id);
 
-const RUNNER_SUBKINDS = new Set(['claude_auth_expired', 'claude_usage_limit', 'role_smoke_failed']);
+const RUNNER_SUBKINDS = new Set([
+  'claude_auth_expired',
+  'claude_usage_limit',
+  'claude_account_login',
+  'role_smoke_failed',
+]);
 /** Desk items that have their own event, their own category or are only reports: not a "decision for me". */
 const NOT_A_DECISION = new Set<string>([
   'approval_step',

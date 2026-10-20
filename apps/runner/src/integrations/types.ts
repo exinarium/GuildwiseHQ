@@ -6,9 +6,11 @@ import type {
   IntegrationStatus,
   McpAuthState,
 } from '@aom/shared';
+import type { ClaudeAccountRegistry } from '../adapters/claude-accounts.ts';
 import type { ProbeResult } from '../adapters/claude-auth.ts';
 import type { RunnerConfig } from '../config.ts';
 import type { ForgeEnv } from '../forge/types.ts';
+import type { Logger } from '../log.ts';
 import type { PluginMcpServer } from '../mcp/plugins.ts';
 import type { RunnerPaths } from '../paths.ts';
 import type { Executor } from '../toolchain/exec.ts';
@@ -28,6 +30,8 @@ export const isFailure = (o: Outcome): o is IntegrationFailure => 'error' in o;
 
 /** Everything an adapter needs from the machine. Tests inject fakes: nothing here reaches a real provider from a test. */
 export interface AdapterEnv {
+  /** Runner log (INFO lines about account sign-ins); absent in tests. */
+  log?: Logger;
   paths: RunnerPaths;
   forge: ForgeEnv;
   exec: Executor;
@@ -44,13 +48,15 @@ export interface AdapterEnv {
     blocked?(): boolean;
     /** Probes a candidate credential without saving it (an env overlay). */
     probe(env: NodeJS.ProcessEnv): Promise<ProbeResult>;
-    /** Probes the login in force, updating the runtime's login state. */
-    probeLogin(): Promise<ProbeResult>;
-    /** The runtime login state the runner tracks (`expired` pauses work). */
-    authState(): 'ok' | 'expired';
-    /** After the credential changed: re-probe, mark the runtime available again and report it. */
-    afterChange(): Promise<void>;
+    /** Probes the login in force (of an account; default main), updating that account's login state. */
+    probeLogin(account?: string): Promise<ProbeResult>;
+    /** The login state the runner tracks for an account (default main); `expired` and `none` pause work on it. */
+    authState(account?: string): 'ok' | 'expired' | 'none';
+    /** After the credential changed: re-probe, mark the account usable again and report it. */
+    afterChange(account?: string): Promise<void>;
   };
+  /** The Claude accounts of this workstation (main + additional); absent: only the main account exists. */
+  claudeAccounts?: ClaudeAccountRegistry;
   mcp: {
     discover(): PluginMcpServer[];
     authOf(): (s: PluginMcpServer) => McpAuthState;

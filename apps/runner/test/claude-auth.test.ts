@@ -393,7 +393,7 @@ describe('supervisor: a shift that dies of an expired login', () => {
         version: 'x',
         available: auth.state === 'ok',
         capabilities: [],
-        auth: auth.state,
+        auth: auth.state === 'ok' ? 'ok' : 'expired',
       }),
       writeInstructions: async () => {},
       start: async () => ({

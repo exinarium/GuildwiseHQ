@@ -41,6 +41,17 @@ export const workstationEvents = [
           auth: z.string().optional(),
           usage: z.string().optional(),
           limitedUntil: z.string().optional(),
+          /** Claude Code accounts (main and additional); absent from older runners. */
+          accounts: z
+            .array(
+              z.object({
+                key: z.string(),
+                login: z.string(),
+                usage: z.string(),
+                limitedUntil: z.string().optional(),
+              }),
+            )
+            .optional(),
         }),
       ),
     }),

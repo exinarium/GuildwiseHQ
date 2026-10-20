@@ -868,6 +868,23 @@ Streams `user-<id>`, `desk-<id>`, `ba-signal-<id>`, `ba-task-<id>`; audience `or
 | `WorktreeSweepReported` | `{workstationId, requestId?, removed, kept, dirty:[{path, branch, files[]}]}` | `hygiene_findings` kind `dirty_worktree` (those no longer reported close) |
 | `QuestionRaised` (extended) | `…, triage?:{deadline}, data?` | `desk_items.triage / triage_deadline / data` (the working-branch question carries `{repoId, reason, current?, phaseId?}`) |
 
+#### Claude accounts (`events/project.ts`, `card.ts`, `intake.ts`, `phase.ts`, `workstation.ts`; design: `docs/design/claude-accounts.md`)
+
+| Event | Payload | Projection effect |
+| --- | --- | --- |
+| `ProjectClaudeAccountSet` | `{projectId, accountKey: string \| null, fallbackToMain: boolean, changedBy}` (`accountKey` null = each workstation's main account) | `projects.claude_account_key`, `projects.claude_account_fallback` (migration `2250_claude_accounts.sql`). Project Owner or org Owner/Admin (`setClaudeAccount`, `PUT /api/projects/:id/claude-account`). Appends nothing when the value is unchanged; always queues `claude.account.ensure` (§11.2) for the key on eligible workstations, so setting the same key again asks again |
+
+Optional fields added to existing events. An absent field means **main**, so old events replay unchanged:
+
+| Event | Added field | Projection effect |
+| --- | --- | --- |
+| `CardClaimed` | `accountKey?` (omitted for main) | `shifts.account_key` |
+| `QuestionShiftDispatched` | `accountKey?` (non-main only; a question with a `card_id`) | `shifts.account_key` |
+| `BaTaskDispatched` | `accountKey?` (non-main only; a task with a `card_id`) | `shifts.account_key` |
+| `WorkstationRuntimesChanged` | `runtimes[].accounts?: {key, login, usage, limitedUntil?}[]` | operational live view only (no projection) |
+
+`shifts.account_key` (NULL = main) and `workstations.claude_account_ensure` (the last `claude.account.ensure` answer per key, operational) are the only new columns. How the account is chosen: §9.12.
+
 ---
 
 ## 6. Workflows as data and the card lifecycle
@@ -1408,6 +1425,37 @@ Owner decisions of 2026-10-05 (docs/design/phases.md, addendum "DevOps repositor
 
 **The stale-worktree sweep (runner `git/sweep.ts`, server `commands/worktree-sweep.ts`).** At start-up (15 s after the first connection, once per process), and for each hygiene run (`worktrees.sweep`), the runner lists `worktrees/<KEY>-<id>/<REF>`, asks the server `worktrees.query`, and removes the worktrees the server does not call live, removes empty project folders and runs `git worktree prune` in the known clones. The server answers with the paths of cards of this workstation that are not done or cancelled, or are done with a finalize still pending (`finalize_state` set, `finalized_at` null), or whose worktree a live card shares. Conservative: no answer, or messages still in the outbox: nothing is removed; a running shift's worktree is never touched; a worktree with uncommitted changes is never deleted: for a dead card it is reported (`WorktreeSweepReported`, a `dirty_worktree` finding); branches are never deleted by the sweep.
 
+### 9.12 Claude accounts: which account a shift runs on
+
+Each project may name a Claude account (a key such as `work`). The account is chosen **per shift**, not per agent, so an agent may work on several accounts over time. Code: `apps/server/src/dispatcher/accounts.ts`, the resolver `resolveShiftAccount` / `accountUsable` in `packages/shared/src/claude/accounts.ts`.
+
+| Shift | Account |
+| --- | --- |
+| `card` (claim, preferred and overflow passes) | the card's project account |
+| `question` | the project account when the desk item has a `card_id`, else main |
+| `ba_task` | the project account when the task has a `card_id` (`spec_card`), else main |
+| `devops`, `ceo`, chats (including the CEO owner turn) | always main |
+
+**Resolution** (pure function, run for every candidate):
+
+```
+key = project.accountKey ?? 'main'
+if usable(workstation, key)                                   -> key
+else if key != 'main' && project.fallbackToMain && usable(ws, 'main') -> main   (fallback)
+else                                                          -> null          (pause)
+usable(ws, k): runtime available, and the runner's accounts[] entry k has login 'ok' and usage 'ok'.
+               A runtime without accounts[] (old runner) knows only main, with the legacy rule
+               (available, auth not expired, no usage limit in force).
+```
+
+- **Gating.** `freeAgents()` offers a workstation while **any** account of its runtime is usable (`runtimeUsable`). Before the card loops, `accountScope()` removes from the candidate query the projects whose account is out (no fallback), or, when main is out, offers only projects that have a usable account. DevOps, CEO, chat and question/BA passes gate on main (`mainUsable`) or on their own resolution, not on the old `available` flag.
+- **Claim.** `claim(…, {accountKey})` writes the key into `CardClaimed`. `buildShiftStart` sends `shift.start.account: {key}` only for a non-main key. A card that resolves to null is skipped for that agent (the ticket waits; no penalty).
+- **Running shifts keep their account** (the runner pins it in the persisted `active-shifts` file). The next claim, question or BA task resolves again, so a project returns to its account by itself as soon as the runner reports the account usable (no manual step).
+- **Limit or expired login mid-shift.** The runner rejects with `usage_limited` or `auth_expired` plus `accountKey` (§11.2). `commands/shifts.ts` patches that account in `workstations.runtimes` at once (`markAccountOut`, so the next pass already knows) and puts the card back **without penalty**. These reasons do not count toward the rejection desk item or the back-off. `runtime_unavailable` with `account_missing:<key>` also marks the account `login: 'none'` and has no penalty.
+- **Notices** (`commands/workstation-notices.ts`, `commands/claude-account-notices.ts`): one `claude_usage_limit` notice per (workstation, account), closed on recovery; a `claude_account_login` notice when a referenced account is `none` or `expired`, or when provisioning needs the owner. `usageLimitsFor()` (`queries/usage-limit.ts`) reports each project as `mode: 'paused'` or `mode: 'fallback'`.
+- **Provisioning.** Setting a key queues `claude.account.ensure` on every active workstation that serves the org, hosts an active Claude agent allowed on the project, and reports `claude-accounts:1`. On `hello`, a key the runner does not report is asked for at most once per 24 hours (`commands/claude-accounts.ts`). Until the account has a login it is unusable, so its project pauses or falls back.
+- **Recovery.** The runner probes each account on its own clock (`probeUsage` / `probeLogin`, every 3 minutes, state in `claude-accounts-state.json`). When the probe clears the account and reports it, the next dispatch pass resolves to the project account again.
+
 ## 10. Scheduler and generic schedules (M5, restructure Part B)
 
 A schedule is **a trigger and one action** (`schedules.trigger`, `schedules.action`, both jsonb; `kind` is the denormalized action kind, `cron`/`timezone` the cadence of a cron or polling trigger). The shapes are `ScheduleTriggerSchema` and `ScheduleActionSchema` in `packages/shared/src/events/schedule.ts`; migration `1314_generic_schedules.sql` adds the columns, `schedule_runs`, `schedule_attempts`, `schedule_issues`, the operational `schedule_trigger_cursor` and the `scheduled_brief` BA task kind. Events written before it (no `trigger`, no `action`) read as a cron trigger with `create_card` (`feed`, `card`) or `regression_run` (`legacyAction`), in the projector and in the migration backfill, so a rebuild equals the migrated data (`schedules-generic.test.ts`).
@@ -1492,12 +1540,16 @@ Project-bound actions: any active member of the project (guests on shared projec
 - Data dir `AOM_RUNNER_HOME` (default `~/.aom-runner`; Windows `%LOCALAPPDATA%\aom-runner`):
 
 ```
-config.json            # 0600: serverUrl, workstationId, runnerToken, repoRoots[], runtimes{claude-code:{bin, authMode, oauthToken?}}, maxConcurrentShifts, vaultSyncIntervalSec
+config.json            # 0600: serverUrl, workstationId, runnerToken, repoRoots[], runtimes{claude-code:{bin, authMode, oauthToken?, accounts?[{key, configDir?, source}]}}, maxConcurrentShifts, vaultSyncIntervalSec
+claude-accounts-state.json  # 0600: per Claude account (main included) limitedUntil and login 'expired'; restored on start
+claude-credentials.lock # runner-wide lock for the main account's credentials copy (additional accounts: <configDir>/.aom-credentials.lock)
+secrets/claude-accounts/<key>.json  # token accounts only (0600, same format as secrets/claude.json)
 outbox/                # pending acked messages, one JSON file per message id
 bin/aom, bin/aom.cmd   # shims to the bundled aom.mjs (prepended to PATH in sessions)
 agents/<agentId>/
   home/                # agent HOME/USERPROFILE (.gitconfig with agent identity, tool caches)
-  claude/              # CLAUDE_CONFIG_DIR: CLAUDE.md (regenerated each shift), settings.json, transcripts, memory
+  claude/              # CLAUDE_CONFIG_DIR of the main account: CLAUDE.md (regenerated each shift), settings.json, transcripts, memory
+  claude-acct-<key>/   # the same agent on an additional account (one per account; `sandbox.ts accountConfigDirName`)
   scratch/
 worktrees/<PROJECTKEY>-<project id[:8]>/<CARD-REF>/   # git worktrees (legacy: <PROJECTKEY>/<CARD-REF>, still reused)
 integration/<repoId>/                # worktree on the working branch used for merges (M4)
@@ -1560,7 +1612,7 @@ Server → runner:
 | `worktrees.live` | `{queryId, live: string[]}`: the subset of the queried paths that belongs to a live card (not done-and-finalized, not cancelled, known to the server, on this workstation) | — |
 | `chat.start` | `{chatId, threadId, agent: AgentRuntimeSpec, message:string, resumeSessionId?, context: ChatContext}` | runner replies with chat.* |
 | `chat.cancel` | `{chatId}` | — |
-| `command` | `{commandId, command: 'agent.wipe'|'worktree.remove'|'repos.rescan'|'vault.configure'|'vault.write'|'finalize.execute'|'outbound.post'|'repo.create'|'branch.check_merged'|'worktrees.sweep'|'integration.run'|'repo.clone'|'env.ensure'|'rights.verify'|'sudo.set'|'sudo.clear', payload}` | runner replies `command.result`. The DevOps setup commands (docs/RUNNER.md "Repository setup, toolchain and rights"): `repo.clone {requestId, repoId, projectId, projectKey, projectName, name, remoteUrl, workingBranch?, create?:{name, visibility, description?}}` answers `{ok, state:'cloned'|'created'|'failed'|'needs_manager', localPath?, detail?, error?}`; `env.ensure {requestId, projectId, repos:[{repoId, name, remoteUrlNormalized}], access}` answers an `EnvironmentReport {state:'ready'|'failed'|'needs_access', stacks, tools:[{stack, tool, status, version?, detail?, fix?}], summary, logTail}`; `rights.verify {access}` answers a `RightsReport {checkedAt, platform, checks:{docker?, sudo?, install?, paths?: {status:'verified'\|'failed', reason, fix?}}, sudoPasswordStored}`; `sudo.set {ciphertext, keyId}` (RSA-OAEP ciphertext; the server empties the payload when answered) answers `{stored, works?, error?}`; `sudo.clear {}` |
+| `command` | `{commandId, command: 'agent.wipe'|'worktree.remove'|'repos.rescan'|'vault.configure'|'vault.write'|'finalize.execute'|'outbound.post'|'repo.create'|'branch.check_merged'|'worktrees.sweep'|'integration.run'|'repo.clone'|'env.ensure'|'rights.verify'|'sudo.set'|'sudo.clear'|'claude.account.ensure', payload}` | runner replies `command.result`. The DevOps setup commands (docs/RUNNER.md "Repository setup, toolchain and rights"): `repo.clone {requestId, repoId, projectId, projectKey, projectName, name, remoteUrl, workingBranch?, create?:{name, visibility, description?}}` answers `{ok, state:'cloned'|'created'|'failed'|'needs_manager', localPath?, detail?, error?}`; `env.ensure {requestId, projectId, repos:[{repoId, name, remoteUrlNormalized}], access}` answers an `EnvironmentReport {state:'ready'|'failed'|'needs_access', stacks, tools:[{stack, tool, status, version?, detail?, fix?}], summary, logTail}`; `rights.verify {access}` answers a `RightsReport {checkedAt, platform, checks:{docker?, sudo?, install?, paths?: {status:'verified'\|'failed', reason, fix?}}, sudoPasswordStored}`; `sudo.set {ciphertext, keyId}` (RSA-OAEP ciphertext; the server empties the payload when answered) answers `{stored, works?, error?}`; `sudo.clear {}` |
 | `ack` | `{ackOf}` | — |
 
 ```ts
@@ -1578,6 +1630,14 @@ type ShiftBrief = {
   ledger: [{id, scope, title, body}];                           // entries linked to the card
 };
 ```
+
+**Claude accounts (capability `claude-accounts:1`, `CLAUDE_ACCOUNTS_CAPABILITY`).** Runners that announce it in `hello.capabilities` understand the following. Older runners are never sent `claude.account.ensure`, and their project accounts count as missing (fallback or pause). A non-main `shift.start.account` only arises for a key a runner reported in `accounts[]`, so it is never sent to a legacy runner in practice:
+
+- `hello` and `runtimes.report` `runtimes[]` for `claude-code` carry `accounts: ClaudeAccountInfo[]` (max 20): `{key, main, source: config_dir|token|api_key|default, configDir? (home-relative, display only), email?, plan?, login: ok|expired|none, usage: ok|limited, limitedUntil?, limitedLabel?, detail?}`. The top-level `auth`, `usage`, `limitedUntil`, `limitedLabel` still describe **main**; `available` is true when any account is usable.
+- `shift.start` carries `account?: {key}`. Absent = main. Sent only for a non-main key; `ShiftSupervisor` uses it for the whole shift, including a shift resumed after a restart.
+- `shift.rejected` carries `accountKey?`. Reasons: `usage_limited` (with `limitedUntil`), `auth_expired`, and `runtime_unavailable` with `detail: 'account_missing:<key>'` (the runner does not have the key; a race guard).
+- `RESUME_STATES` gains `fresh_other_account`: the session ran on another account, so the shift starts fresh (`SessionRegistry.decide`, file `<dataDir>/sessions.json` records `accountKey`).
+- Command `claude.account.ensure {key, configDir?}` (server → runner; answered with `command.result {ok, result: {key, state: ready|awaiting_login|needs_owner|failed, configDir?, aliasAdded, aliasConflict?, detail?}}`). Idempotent; the runner never adopts a folder or alias it did not create (`apps/runner/src/adapters/claude-account-provision.ts`, §9.12). The server keeps the last answer per key in `workstations.claude_account_ensure`.
 
 Reconnection (runner): exponential backoff with full jitter, base 1 s, cap 30 s; reset after 60 s connected. On connect: send `hello`, wait for `welcome`, resend outbox entries in creation order, send `outbox.flushed`. Running agent sessions continue while disconnected; their `shift.report`/`shift.ended` are queued in the outbox. `shift.progress` and `chat.delta` produced while offline are dropped (chat is cancelled on disconnect: the runner kills the chat process and emits `chat.error` via outbox).
 
@@ -1669,7 +1729,14 @@ env (not inherited from the runner: an allow-list of PATH/LANG/TERM/TZ/proxy and
 
   In print mode tool calls not covered by `allow` are denied rather than prompted, so the shift never blocks on a permission prompt.
 - Stream parsing (`claude-stream-parser.ts`, line-delimited JSON): `system/init` → `session` (session_id); `assistant` content `text` → `progress`, `tool_use` → `tool` (name + first 200 chars of input); `result` → `usage` (`usage.input_tokens`, `output_tokens`, `cache_read_input_tokens`, `cache_creation_input_tokens`) and `final` (`result`); process exit → `exit`. Unknown lines are ignored. Parser is unit-tested against recorded fixtures in `apps/runner/test/fixtures/claude-stream/*.jsonl`.
-- Auth fallback: if no token is configured and `~/.claude/.credentials.json` exists, symlink (copy on Windows) it into each agent's `configDir` at shift start. Credentials never leave the workstation.
+- Auth fallback (main account, no token configured): if `~/.claude/.credentials.json` exists, the runner **copies** it into each agent's `configDir` at shift start (`adapters/claude-auth.ts` `prepareAgentCredentials`). It is a copy on every platform, never a symlink: a symlink let one agent's token refresh replace the file under the others. The copy is made under the account's lock, after one refresh probe when the access token expires within 10 minutes. After the session `harvestAgentCredentials` writes a newer `claudeAiOauth` or `mcpOAuth` entry back to the account's canonical file. Credentials never leave the workstation.
+- Accounts (`adapters/claude-accounts.ts`, `ClaudeAccountRegistry`): `main` plus the additional accounts of `config.json` `runtimes['claude-code'].accounts`. Each account has its own `ClaudeAuthMonitor` and `ClaudeUsageMonitor`, persisted to `claude-accounts-state.json`, and its own credential paths, bound when the session starts:
+  - a `config_dir` account (default, `~/.claude-gw-<key>`) has canonical file `<configDir>/.credentials.json`, lock `<configDir>/.aom-credentials.lock`, and probes with `CLAUDE_CONFIG_DIR=<configDir>`. Its agent copy is `agents/<id>/claude-acct-<key>/.credentials.json`. No token variable is set; the login is the copied file.
+  - a `token` account (`secrets/claude-accounts/<key>.json`) passes `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`, like main's token.
+  - Write-back goes only to the session's own account file, even if the config changed mid-session.
+  - Login state is `ok`, `expired` or `none`. `none` means no `claudeAiOauth` in the file (or no token): the account is unusable, as an expired one is. The runner watches each config dir's `.credentials.json` mtime on its tick and probes at once when a login appears.
+  - `ShiftSupervisor` checks the account before spawning (`adapter.accountGate`): unknown key → `runtime_unavailable` (`account_missing:<key>`), limited → `usage_limited`, `expired` or `none` → `auth_expired`. All carry `accountKey`, and the card goes back without penalty.
+  - The CEO owner turn (`buildClaudeOwnerTurnCommand`) and chats use main only. Provisioning refuses `~/.claude` as an account folder.
 
 ### 12.3 Mock adapter (`mock.ts` + `mock-agent.ts`)
 

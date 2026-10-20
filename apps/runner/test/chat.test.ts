@@ -12,6 +12,7 @@ import { ClaudeRuntimeConfigSchema, MockRuntimeConfigSchema } from '../src/confi
 import { runnerPaths } from '../src/paths.ts';
 import { type Harness, startHarness } from './harness.ts';
 import { cleanupTmp, tmp, waitUntil } from './helpers.ts';
+import { ceoChatStart, FakeChatAdapter } from './owner-helpers.ts';
 import { POLICY_PATHS, policyCtx } from './policy-fixtures.ts';
 import { ScriptedAdapter } from './scripted-adapter.ts';
 
@@ -135,6 +136,30 @@ describe('chat on the runner (mock adapter)', () => {
     h.server.send('chat.start', msg);
     const err = await h.server.waitFor('chat.error', (e) => e.chatId === msg.chatId, 20_000);
     expect(err.error).toMatch(/not available for chat/);
+  });
+
+  it('refuses a chat and a CEO owner turn while the main account is out, even though another account is usable', async () => {
+    h = await startHarness();
+    const adapter = Object.assign(new FakeChatAdapter(), {
+      accountGate: (key: string) =>
+        key === 'main'
+          ? { state: 'limited' as const, limitedUntil: new Date(Date.now() + 3_600_000).toISOString() }
+          : { state: 'ok' as const },
+    });
+    h.runner.chat.deps.adapters.set('mock', adapter);
+    (h.runner as unknown as { opts: { config: { ceo: { fullPower: boolean } } } }).opts.config.ceo = {
+      fullPower: true,
+    };
+    const plain = chatStart('hello');
+    h.server.send('chat.start', plain);
+    const e1 = await h.server.waitFor('chat.error', (e) => e.chatId === plain.chatId);
+    expect(e1.error).toMatch(/not available for chat/);
+    const owner = ceoChatStart('owner turn', { ceoMode: 'owner' });
+    h.server.send('chat.start', owner);
+    const e2 = await h.server.waitFor('chat.error', (e) => e.chatId === owner.chatId);
+    expect(e2.error).toMatch(/not available/);
+    expect(adapter.chats).toHaveLength(0);
+    expect(adapter.ownerTurns).toHaveLength(0);
   });
 
   it('a dropped connection cancels running chats; the error reaches the server from the outbox after reconnect', async () => {

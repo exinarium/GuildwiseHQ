@@ -97,3 +97,33 @@ describe('paused by the model usage limit (#73)', () => {
     expect(container).toBeEmptyDOMElement();
   });
 });
+
+describe('per-project Claude accounts', () => {
+  const limit = (over: object) => ({ until: UNTIL, workstationName: 'Pieter laptop', label: null, ...over });
+
+  it('a paused project names the account', () => {
+    render(<UsageLimitBanner limit={limit({ accountKey: 'work', mode: 'paused' }) as never} />);
+    const banner = screen.getByTestId('usage-limit-banner');
+    expect(banner).toHaveTextContent(
+      `Paused until ${formatUntil(UNTIL)} (account work: usage limit on Pieter laptop)`,
+    );
+    expect(banner).toHaveTextContent('The Claude account work behind this project hit its usage limit');
+  });
+
+  it('a project on fallback says it runs on the main account meanwhile', () => {
+    render(<UsageLimitBanner limit={limit({ accountKey: 'work', mode: 'fallback' }) as never} />);
+    const banner = screen.getByTestId('usage-limit-banner');
+    expect(banner).toHaveTextContent(
+      `Running on the main account while work is out until ${formatUntil(UNTIL)}`,
+    );
+    expect(banner).toHaveTextContent('go back by themselves');
+    expect(banner).not.toHaveTextContent('Paused');
+  });
+
+  it('a value without account or mode reads as before', () => {
+    render(<UsageLimitBanner limit={limit({}) as never} />);
+    expect(screen.getByTestId('usage-limit-banner')).toHaveTextContent(
+      `Paused until ${formatUntil(UNTIL)} (usage limit on Pieter laptop)`,
+    );
+  });
+});

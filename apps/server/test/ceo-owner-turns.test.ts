@@ -367,4 +367,38 @@ describe('the chat state the page reads', () => {
       (await ok<any>(owner('GET', '/api/ceo/chat/status'.replace('chat/status', 'status')))).fullPower.state,
     ).toBe('off');
   });
+
+  it('offers a Claude Code model only while the main account is usable (another account being fine is not enough)', async () => {
+    await connect();
+    const acct = (key: string, over: Record<string, unknown> = {}) => ({
+      key,
+      main: key === 'main',
+      source: key === 'main' ? 'default' : 'config_dir',
+      login: 'ok',
+      usage: 'ok',
+      ...over,
+    });
+    const setRuntimes = (accounts: unknown[]) =>
+      q('UPDATE workstations SET runtimes=$2::jsonb WHERE id=$1', [
+        w.workstationId,
+        JSON.stringify([{ id: 'claude-code', version: '2', available: true, capabilities: [], accounts }]),
+      ]);
+    const runtimes = async () =>
+      (await ok<any>(owner('GET', '/api/ceo/chat/state'))).model.runtimes as string[];
+    const before = (await q('SELECT runtimes FROM workstations WHERE id=$1', [w.workstationId]))[0]!.runtimes;
+    try {
+      await setRuntimes([
+        acct('main', { usage: 'limited', limitedUntil: new Date(Date.now() + 3_600_000).toISOString() }),
+        acct('work'),
+      ]);
+      expect(await runtimes()).not.toContain('claude-code');
+      await setRuntimes([acct('main'), acct('work', { usage: 'limited' })]);
+      expect(await runtimes()).toContain('claude-code');
+    } finally {
+      await q('UPDATE workstations SET runtimes=$2::jsonb WHERE id=$1', [
+        w.workstationId,
+        JSON.stringify(before),
+      ]);
+    }
+  });
 });

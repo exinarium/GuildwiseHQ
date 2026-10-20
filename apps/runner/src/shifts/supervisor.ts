@@ -640,6 +640,7 @@ export class ShiftSupervisor {
     environment?: { problem: string; detail?: string },
     branchProblem?: { base: string; defaultBranch?: string; branches: string[] },
     limitedUntil?: string,
+    accountKey?: string,
   ): void {
     // Every rejection leaves a line here and a reason on the wire: "the runner refused" without either cost a day of
     // searching (backlog #79).
@@ -653,6 +654,7 @@ export class ShiftSupervisor {
       ...(environment ? { environment } : {}),
       ...(branchProblem ? { branchProblem } : {}),
       ...(limitedUntil ? { limitedUntil } : {}),
+      ...(accountKey ? { accountKey } : {}),
     });
   }
 
@@ -660,6 +662,62 @@ export class ShiftSupervisor {
     const { msg } = s;
     const { paths } = this.deps;
     const adapter = this.deps.adapters.get(msg.agent.runtime);
+    // The Claude account this shift runs on (absent: main). It was chosen by the server for this shift; a shift that is
+    // already running finishes on it, and a resumed one (after a runner restart) stays on it.
+    const accountKey = msg.account?.key ?? 'main';
+    const gate = adapter?.accountGate?.(accountKey);
+    if (gate && gate.state !== 'ok') {
+      // Checked before the runtime as a whole: the server learns WHICH account is out. All of these put the card back
+      // without penalty. A shift resumed after a restart is not turned away for a limit that appeared meanwhile.
+      if (gate.state === 'missing') {
+        this.reject(
+          msg.shiftId,
+          'runtime_unavailable',
+          `account_missing:${accountKey}`,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          accountKey,
+        );
+        return;
+      }
+      if (!s.resumed) {
+        await this.deps.beforeAuthReject?.().catch(() => undefined);
+        if (gate.state === 'limited') {
+          this.log.warn(
+            `shift ${msg.shiftId}: account ${accountKey} is over its usage limit; the shift is put back`,
+          );
+          this.reject(
+            msg.shiftId,
+            'usage_limited',
+            gate.label,
+            undefined,
+            undefined,
+            undefined,
+            gate.limitedUntil,
+            accountKey,
+          );
+        } else {
+          this.log.warn(
+            `shift ${msg.shiftId}: the login of account ${accountKey} does not work; the shift is put back`,
+          );
+          this.reject(
+            msg.shiftId,
+            'auth_expired',
+            gate.login === 'none'
+              ? `The Claude account ${accountKey} is not signed in on this workstation.`
+              : `The Claude login of account ${accountKey} on this workstation has expired.`,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            accountKey,
+          );
+        }
+        return;
+      }
+    }
     const caps = adapter ? await adapter.capabilities() : undefined;
     if (!adapter || !caps?.available) {
       this.reject(msg.shiftId, 'runtime_unavailable', `runtime ${msg.agent.runtime} is not available`);
@@ -685,13 +743,22 @@ export class ShiftSupervisor {
     if (
       !s.resumed &&
       adapter.checkLogin &&
-      (await adapter.checkLogin().catch(() => 'unknown')) === 'expired'
+      (await adapter.checkLogin(accountKey).catch(() => 'unknown')) === 'expired'
     ) {
       this.log.warn(
         `shift ${msg.shiftId}: the ${msg.agent.runtime} login has expired; the shift is put back`,
       );
       await this.deps.beforeAuthReject?.().catch(() => undefined);
-      this.reject(msg.shiftId, 'auth_expired', 'The Claude login on this workstation has expired.');
+      this.reject(
+        msg.shiftId,
+        'auth_expired',
+        'The Claude login on this workstation has expired.',
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        accountKey,
+      );
       return;
     }
 
@@ -708,7 +775,13 @@ export class ShiftSupervisor {
       return;
     }
     s.identity = identity;
-    const sandbox = await ensureSandbox(paths, msg.agent.agentId, msg.agent.name, identity);
+    const sandbox = await ensureSandbox(
+      paths,
+      msg.agent.agentId,
+      msg.agent.name,
+      identity,
+      accountKey === 'main' ? undefined : accountKey,
+    );
     s.sandbox = sandbox;
     s.releaseTmp = holdAgentTmp(sandbox);
     let cwd = sandbox.scratch;
@@ -1027,7 +1100,7 @@ export class ShiftSupervisor {
     // Resume the agent's own earlier session when it may (same agent, under 120K context tokens and 4 hours old).
     let resumeSessionId: string | undefined;
     if (msg.resumeSessionId && !s.resumed) {
-      const d = this.sessions.decide(msg.resumeSessionId, msg.agent.agentId, sandbox.configDir);
+      const d = this.sessions.decide(msg.resumeSessionId, msg.agent.agentId, sandbox.configDir, accountKey);
       s.resumeAsked = { sessionId: msg.resumeSessionId, ...d, cwd };
       if (d.state === 'resumed') {
         // a group builder moves from one card worktree to the next: its transcript follows it into the new folder
@@ -1062,6 +1135,7 @@ export class ShiftSupervisor {
         kind: msg.kind,
         ...(shortShift ? { promptCacheTtl: '5m' as const } : {}),
         ...(resumeSessionId ? { resumeSessionId } : {}),
+        ...(accountKey !== 'main' ? { account: accountKey } : {}),
         ...(msg.kind === 'devops' && msg.agent.isDevops
           ? {
               devopsGuard: {
@@ -1130,7 +1204,13 @@ export class ShiftSupervisor {
       s.startedSent = true;
       this.persist(s);
     }
-    this.addProgress(s, 'status', `shift started on ${msg.agent.runtime}`);
+    this.addProgress(
+      s,
+      'status',
+      msg.account && msg.account.key !== 'main'
+        ? `shift started on ${msg.agent.runtime}, account ${msg.account.key}`
+        : `shift started on ${msg.agent.runtime}`,
+    );
 
     const maxMs = this.deps.maxShiftMsOverride ?? msg.maxShiftMinutes * 60_000;
     const timeout = setTimeout(() => {
@@ -1254,7 +1334,16 @@ export class ShiftSupervisor {
         `shift ${msg.shiftId}: the ${msg.agent.runtime} login does not work; the shift is put back`,
       );
       await this.deps.beforeAuthReject?.().catch(() => undefined);
-      this.reject(msg.shiftId, 'auth_expired', 'The Claude login on this workstation has expired.');
+      this.reject(
+        msg.shiftId,
+        'auth_expired',
+        'The Claude login on this workstation has expired.',
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        msg.account?.key ?? 'main',
+      );
       return;
     }
 
@@ -1274,6 +1363,7 @@ export class ShiftSupervisor {
         undefined,
         undefined,
         until.toISOString(),
+        msg.account?.key ?? 'main',
       );
       return;
     }
@@ -1340,6 +1430,7 @@ export class ShiftSupervisor {
       sessionId: runtimeSessionId,
       agentId: s.msg.agent.agentId,
       cwd,
+      ...(s.msg.account && s.msg.account.key !== 'main' ? { accountKey: s.msg.account.key } : {}),
       ...(s.resumeAsked?.state === 'resumed' ? { inheritFrom: s.resumeAsked.sessionId } : {}),
     });
     const contextTokens = s.session?.contextTokens?.() ?? 0;

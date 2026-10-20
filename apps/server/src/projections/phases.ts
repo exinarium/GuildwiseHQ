@@ -498,10 +498,20 @@ export const phaseProjectors: Record<string, Projector> = {
       await exec(
         tx,
         `INSERT INTO shifts (id, org_id, agent_id, workstation_id, card_id, kind, stage, status, runtime, model, overflow,
-           started_at, ba_task_id)
-         VALUES ($1,$2,$3,$4,NULL,'ba_task',NULL,'starting',$5,$6,false,$7,$8)
+           started_at, ba_task_id, account_key)
+         VALUES ($1,$2,$3,$4,NULL,'ba_task',NULL,'starting',$5,$6,false,$7,$8,$9)
          ON CONFLICT (id) DO NOTHING`,
-        [p.shiftId, a.org_id, p.agentId, p.workstationId, a.runtime, a.model, e.createdAt, p.taskId],
+        [
+          p.shiftId,
+          a.org_id,
+          p.agentId,
+          p.workstationId,
+          a.runtime,
+          a.model,
+          e.createdAt,
+          p.taskId,
+          p.accountKey ?? null,
+        ],
       );
     await exec(
       tx,

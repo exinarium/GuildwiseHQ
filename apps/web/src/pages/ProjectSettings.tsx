@@ -6,6 +6,7 @@ import { AddRepoForm } from '../components/AddRepoForm.tsx';
 import { ArchitectPanel } from '../components/ArchitectPanel.tsx';
 import { BudgetBanner } from '../components/BudgetBanner.tsx';
 import { BudgetPanel } from '../components/BudgetPanel.tsx';
+import { ClaudeAccountPanel } from '../components/ClaudeAccountPanel.tsx';
 import { CommitAsPanel } from '../components/CommitAsPanel.tsx';
 import { ConcurrencyCapPanel } from '../components/ConcurrencyCapPanel.tsx';
 import { ConvertPanel } from '../components/ConvertPanel.tsx';
@@ -416,6 +417,15 @@ export function ProjectSettings() {
       {project && traits.usesRepos && (
         <div id="owner-approval" className="scroll-mt-20">
           <OwnerApprovalPanel
+            projectId={id}
+            project={project}
+            canChange={project.myRole === 'owner' || canConvert}
+          />
+        </div>
+      )}
+      {project && traits.usesRepos && (
+        <div id="claude-account" className="scroll-mt-20">
+          <ClaudeAccountPanel
             projectId={id}
             project={project}
             canChange={project.myRole === 'owner' || canConvert}
