@@ -16,12 +16,14 @@ import {
   resolveReportTarget,
   type ServerToRunnerOf,
   type ShiftBrief,
+  streamId,
   VAULT_UNAVAILABLE_NOTE,
   type WorktreeSpec,
 } from '@aom/shared';
 import { loadRole, loadWorkflowById } from '../catalogue/loader.ts';
 import { briefAttachments } from '../commands/card-attachments.ts';
 import { workflowView } from '../commands/cards.ts';
+import { SYSTEM_ACTOR } from '../commands/common.ts';
 import { effectiveCompletionAction } from '../commands/completion.ts';
 import { projectWaivesMergeApproval } from '../commands/devops-routing.ts';
 import { scoutCandidates, seenUrls, tasteSeedFor } from '../commands/feeds.ts';
@@ -875,6 +877,28 @@ export async function buildDevopsShiftStart(
   const role = await loadRole(ctx.pool, agent.org_id, agent.role_key, agent.role_version);
   if (!role) return null;
   const card = req.card_id ? await devopsCardBrief(ctx, req.card_id, req.org_id) : undefined;
+  // A scan is read-only. If its brief cannot be built the request fails here instead of running as an ordinary DevOps shift.
+  const reqKind = ((req.context ?? {}) as { requestKind?: string }).requestKind;
+  const scanKind = reqKind === 'run_scan' || reqKind === 'deploy_scan' ? reqKind : undefined;
+  const scan = scanKind ? ((await scanBriefFor(ctx, req)) ?? undefined) : undefined;
+  if (scanKind && !scan) {
+    await ctx.store.append([
+      {
+        streamId: streamId.thread(requestId),
+        event: {
+          type: 'DevOpsRequestCompleted',
+          payload: {
+            requestId,
+            status: 'failed',
+            summary: 'The scan could not be prepared (the project or its repositories are gone).',
+          },
+        },
+        actor: SYSTEM_ACTOR,
+        scope: { orgId: req.org_id, projectId: null, audience: 'org' },
+      },
+    ]);
+    return null;
+  }
   const history = await rows(
     ctx.pool,
     `SELECT m.kind, m.body, m.created_at, u.display_name AS user_name, a.name AS agent_name FROM thread_messages m
@@ -959,7 +983,8 @@ export async function buildDevopsShiftStart(
       ...(await mergeWaiver(ctx, req.card_id)),
       hygiene: req.hygiene ?? undefined,
       run: (await runBriefFor(ctx, req)) ?? undefined,
-      scan: (await scanBriefFor(ctx, req)) ?? undefined,
+      ...(scan ? { scan } : {}),
+      ...(scanKind ? { scanKind } : {}),
       approval:
         ap?.resolution === 'approved'
           ? { action: ap.action, reason: ap.reason, commands: ap.commands ?? [], note: ap.note ?? undefined }

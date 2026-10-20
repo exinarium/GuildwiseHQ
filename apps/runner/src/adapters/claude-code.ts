@@ -450,6 +450,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     /** A chat never writes: the repository metadata of its worktree is read-only there, not a writable dir. */
     chat = false,
     guardHookCommand?: string,
+    readOnlyScan = false,
   ): ClaudePolicyContext {
     const root = this.paths?.root ?? dirname(dirname(input.sandbox.home));
     const script = selfCommand('aom').at(-1);
@@ -476,6 +477,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       ...(process.platform === 'linux' ? { dotnetShmDir: DOTNET_SHM_DIR } : {}),
       otherAgentTmps: this.paths ? otherAgentTmps(this.paths, dirname(input.sandbox.home)) : [],
       ...(guardHookCommand ? { guardHookCommand } : {}),
+      ...(readOnlyScan ? { readOnlyScan: true } : {}),
     };
   }
 
@@ -596,7 +598,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     if (guard) input = { ...input, env: { ...input.env, AOM_DEVOPS_GUARD: guard.file } };
     const settings = buildShiftSettings(
       input.agent.permissions,
-      this.policy(input, input.cwd, false, guard?.command),
+      this.policy(input, input.cwd, false, guard?.command, input.devopsGuard?.readOnlyScan === true),
       input.sandbox,
       input.agent.roleKey,
       input.agent.isDevops,

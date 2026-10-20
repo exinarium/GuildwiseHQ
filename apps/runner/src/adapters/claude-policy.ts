@@ -22,6 +22,8 @@ import { sandboxReadEntries, secretReadDenies } from './read-only-dirs.ts';
 export type SandboxMode = 'required' | 'best_effort' | 'off';
 
 export interface ClaudePolicyContext {
+  /** A "Scan with DevOps" shift: Edit, Write and NotebookEdit work only inside the shift's scratch folder. */
+  readOnlyScan?: boolean;
   /** Config dirs of the additional Claude accounts (`~/.claude-work`): credential stores no agent may read. */
   accountDirs?: string[];
   /** The runner data dir (`~/.aom-runner`): config (runner token, provider credentials), outbox, all agents. */
@@ -464,8 +466,20 @@ function buildDevopsSettings(
   ];
   return {
     permissions: {
-      allow: ['Bash', 'Read', 'Glob', 'Grep', 'Edit', 'WebFetch', 'WebSearch', ...DEPLOY_ASK_ALLOW],
-      deny: [...new Set(deny)],
+      allow: [
+        'Bash',
+        'Read',
+        'Glob',
+        'Grep',
+        // a scan writes only its proposal, in the scratch folder
+        ...(ctx.readOnlyScan
+          ? [`Edit(${ruleAbs(paths.scratch)}/**)`, `Write(${ruleAbs(paths.scratch)}/**)`]
+          : ['Edit']),
+        'WebFetch',
+        'WebSearch',
+        ...DEPLOY_ASK_ALLOW,
+      ],
+      deny: [...new Set([...deny, ...(ctx.readOnlyScan ? ['NotebookEdit'] : [])])],
       defaultMode: 'dontAsk',
       additionalDirectories: [paths.scratch],
     },

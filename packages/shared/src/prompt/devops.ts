@@ -234,7 +234,7 @@ export function renderScanSection(scan: DevopsScan): string {
     [
       'This is a READ-ONLY scan. Do not start, stop, build, install, download or edit anything, do not use ssh, and write nothing into the repositories: the runner refuses those commands. Read files and run harmless read commands (`ls`, `cat`, `git log`, `docker version`, `jq`).',
       'You are writing a proposal for a person with no coding experience, who will review it field by field and confirm it. Say what you found, say honestly what you guessed, and ask about what you cannot tell.',
-      'The proposal is JSON checked by a schema. Write it to a file in your scratch directory and submit it with `aom setup propose --area run --file <path>`. If it is refused, the message says what is wrong: fix the file and submit again in this shift. Then end the request with `aom devops-done` (one or two plain sentences).',
+      'The proposal is JSON checked by a schema. Write it to a file in your scratch directory with the Write tool (shell redirects are refused in a scan) and submit it with `aom setup propose --area run --file <path>`. If it is refused, the message says what is wrong: fix the file and submit again in this shift. Then end the request with `aom devops-done` (one or two plain sentences).',
     ].join('\n'),
   );
   out.push("### Repositories (the user's own checkouts; read them, never change them)");

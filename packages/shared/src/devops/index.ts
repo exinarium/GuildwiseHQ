@@ -168,6 +168,11 @@ export const DevopsShiftSchema = z.object({
   run: DevopsRunSchema.optional(),
   /** A scan request (`run_scan`, `deploy_scan`): read-only, ends with `aom setup propose`. */
   scan: DevopsScanSchema.optional(),
+  /**
+   * The kind of a scan request, set by the server whatever the brief holds. The runner makes the shift read-only from this
+   * (fail closed: a scan whose brief could not be built is still read-only).
+   */
+  scanKind: z.enum(['run_scan', 'deploy_scan']).optional(),
   /** Earlier messages of the request thread, oldest first. */
   history: z
     .array(z.object({ authorName: z.string(), kind: z.string(), body: z.string(), at: z.iso.datetime() }))

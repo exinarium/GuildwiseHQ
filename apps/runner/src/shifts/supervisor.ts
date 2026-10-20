@@ -1155,7 +1155,7 @@ export class ShiftSupervisor {
                   (b): b is string => !!b,
                 ),
                 approvedCommands: msg.devops?.approval?.commands ?? [],
-                ...(msg.devops?.scan ? { readOnlyScan: true } : {}),
+                ...(msg.devops?.scan || msg.devops?.scanKind ? { readOnlyScan: true } : {}),
               },
             }
           : {}),
