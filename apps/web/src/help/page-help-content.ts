@@ -1292,6 +1292,21 @@ export const PAGE_HELP: Record<string, PageHelp> = {
     ],
     article: 'chat-with-agents',
   },
+  '/ceo-chat': {
+    title: 'Chat with the CEO',
+    intro:
+      'Your conversation with the CEO as a full page: the history, the message box, and your earlier CEO chats.',
+    controls: [
+      {
+        name: 'Message thread',
+        text: 'Back-and-forth conversation with the CEO. You can see the full history.',
+      },
+      { name: 'New chat', text: 'Start a fresh conversation. The earlier one stays under Earlier.' },
+      { name: 'Clear chat', text: 'Remove this conversation for good and start a clean one.' },
+      { name: 'Earlier', text: 'Open one of your previous chats with the CEO.' },
+    ],
+    article: 'chat-with-agents',
+  },
   '/intake': {
     title: 'New intake',
     intro:

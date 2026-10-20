@@ -131,3 +131,12 @@ export const usePatchCeoTask = () =>
 /** Opens the Owner's standing chat with the CEO. */
 export const useCeoChat = () =>
   useMutation({ mutationFn: () => post<{ threadId: string }>('/ceo/chat', {}) });
+
+/** "New chat": the CEO's standing chat becomes a fresh thread; earlier ones stay in the chat list. */
+export const useNewCeoChat = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => post<{ threadId: string }>('/ceo/chat/new', {}),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['chats'] }),
+  });
+};

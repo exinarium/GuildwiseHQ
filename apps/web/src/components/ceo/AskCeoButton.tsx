@@ -21,7 +21,7 @@ export function AskCeoButton() {
       disabled={chat.isPending}
       data-testid="ask-ceo-button"
       aria-label={`Ask ${name}`}
-      onClick={() => chat.mutate(undefined, { onSuccess: (r) => nav(`/chat/${r.threadId}`) })}
+      onClick={() => chat.mutate(undefined, { onSuccess: (r) => nav(`/ceo-chat/${r.threadId}`) })}
       className="inline-flex h-9 items-center gap-2 rounded-control border border-control bg-surface px-3 text-sm font-medium text-fg hover:bg-sunken disabled:text-disabled-fg"
     >
       <MessagesSquare aria-hidden="true" className="size-4" />

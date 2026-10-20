@@ -15,10 +15,10 @@ import { AgentFacesSync } from '../AgentFacesSync.tsx';
 import { ChatDrawer } from '../ChatDrawer.tsx';
 import { AskCeoButton } from '../ceo/AskCeoButton.tsx';
 import { AskDevOpsProvider, useAskDevOps } from '../devops/AskDevOps.tsx';
-import { PushPrompt } from '../push/PushPrompt.tsx';
 import { PageHelpPanel } from '../help/PageHelpPanel.tsx';
 import { CommandPalette } from '../palette/CommandPalette.tsx';
 import { ShortcutsDialog } from '../palette/ShortcutsDialog.tsx';
+import { PushPrompt } from '../push/PushPrompt.tsx';
 import { SetupChecklistProvider, SetupWidget } from '../setup/SetupChecklist.tsx';
 import { ContactProvider, useContact } from '../support/ContactDialog.tsx';
 import { TourProvider } from '../tour/Tour.tsx';
@@ -67,7 +67,7 @@ export function backTargetFor(
 ): string | null {
   const parent = crumbs.length > 1 ? crumbs.at(-2)?.to : undefined;
   if (parent) return parent;
-  if (pathname.startsWith('/chat/')) return '/desk';
+  if (pathname.startsWith('/chat/') || pathname.startsWith('/ceo-chat')) return '/desk';
   if (pathname.startsWith('/intake/')) return '/intake';
   if (pathname.startsWith('/help/')) return '/help';
   if (pathname === '/settings/org' || pathname === '/settings/vaults') return '/settings';
