@@ -114,6 +114,10 @@ export function ChatPanel({
           const cur = s ?? { segments: [], startedAt: Date.now() };
           return { ...cur, segments: applyActivity(cur.segments, ev.activity) };
         });
+      } else if (ev.type === 'disconnected') {
+        // Stop waiting on a reply that may never come; the stored history is refetched on reconnect. The user's sent
+        // message stays shown (the refetch confirms it).
+        setStream(null);
       } else if (ev.type === 'queued') {
         // Saved, not running: the reply comes when the workstation is back.
         setStream(null);

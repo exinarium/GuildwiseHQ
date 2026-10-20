@@ -102,6 +102,21 @@ describe('ChatPanel', () => {
     expect(screen.getByLabelText('Message')).toBeEnabled();
   });
 
+  it('stops waiting when the connection drops mid-stream, and the composer is free again', async () => {
+    renderPanel(true);
+    await screen.findByRole('log', { name: 'Conversation' });
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText('Message'), 'Hello Ada');
+    await user.click(screen.getByRole('button', { name: 'Send' }));
+    act(() => socket.handle({ type: 'chat.delta', threadId: THREAD, text: 'partial' }));
+    expect(screen.getByTestId('chat-streaming')).toBeInTheDocument();
+    act(() => (socket as unknown as { dropStreams(): void }).dropStreams());
+    expect(screen.queryByTestId('chat-streaming')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull();
+    expect(screen.getByLabelText('Message')).toBeEnabled();
+    expect(socket.getWorking().size).toBe(0);
+  });
+
   it('shows the offline banner when the agent workstation is not connected', async () => {
     renderPanel(false);
     expect(await screen.findByTestId('chat-offline')).toHaveTextContent('Ada is offline');

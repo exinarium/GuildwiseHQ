@@ -26,7 +26,9 @@ export type ChatEvent =
   | { type: 'done'; messageId: string; message?: ThreadMessageDto }
   | { type: 'activity'; activity: ChatActivityMessage }
   | { type: 'queued'; clientMsgId?: string; workstationName?: string }
-  | { type: 'error'; reason: string };
+  | { type: 'error'; reason: string }
+  /** The connection dropped: any reply in flight may be lost, so the panel stops waiting (the history is refetched on reconnect). */
+  | { type: 'disconnected' };
 type ChatListener = (ev: ChatEvent) => void;
 
 /** Single browser WebSocket to `/api/ws` with reconnect, `hello {lastSeq}` resume and shift watch bookkeeping. */
@@ -124,6 +126,7 @@ export class LiveSocket {
       clearInterval(this.pingTimer);
       this.ws = null;
       this.setState('closed');
+      this.dropStreams();
       if (this.stopped) return;
       const delay = Math.min(15_000, 500 * 2 ** this.retry++);
       this.timer = setTimeout(() => this.open(), delay);
@@ -143,6 +146,13 @@ export class LiveSocket {
     switch (msg.type) {
       case 'ready':
         this.setState('open');
+        // After a drop, a reply may have finished (or failed) while we were away: refetch the chats and threads.
+        if (this.droppedWhileChatting) {
+          this.droppedWhileChatting = false;
+          void this.qc.invalidateQueries({ queryKey: ['chats'] });
+          void this.qc.invalidateQueries({ queryKey: ['thread'] });
+          void this.qc.invalidateQueries({ queryKey: ['ceo'] });
+        }
         // The first `ready` (nothing seen yet) is just the page loading: its queries are fetching already, so
         // invalidating all of them fetched everything twice. Only a reconnect that missed a lot refetches everything.
         if (this.lastSeq !== undefined && msg.seq - this.lastSeq > RESYNC_THRESHOLD) this.invalidateAll();
@@ -215,6 +225,14 @@ export class LiveSocket {
     else next.delete(threadId);
     this.working = next;
     for (const cb of this.workingListeners) cb();
+  }
+
+  private droppedWhileChatting = false;
+  /** The socket closed: nobody is "working" any more as far as this page can tell, and open panels stop waiting. */
+  private dropStreams(): void {
+    if (this.working.size > 0 || this.chatListeners.size > 0) this.droppedWhileChatting = true;
+    for (const id of [...this.working]) this.setWorking(id, false);
+    for (const set of this.chatListeners.values()) for (const cb of [...set]) cb({ type: 'disconnected' });
   }
 
   private emitChat(threadId: string, ev: ChatEvent): void {
