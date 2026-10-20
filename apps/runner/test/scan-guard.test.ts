@@ -31,7 +31,8 @@ describe('a read-only scan', () => {
     'git branch --list',
     'docker version --format json',
     'docker compose ls --all',
-    'docker compose -f docker-compose.yml config',
+    'docker compose -f docker-compose.yml ps',
+    'docker compose ls --format json',
     'docker ps -a',
     'docker image ls',
     'npm ls --depth=0',
@@ -40,7 +41,14 @@ describe('a read-only scan', () => {
     'find . -name "*.csproj" -not -path "./node_modules/*"',
     'git tag --list',
     'git remote -v',
-    'docker inspect web',
+    "docker inspect --format '{{.State.Status}}' web",
+    'grep -rn "TODO" src',
+    "grep -n 'foo$' README.md",
+    'git log --oneline --max-count=5 -- src',
+    'git show HEAD:README.md',
+    'cat .env.example',
+    'sort -u names.txt | uniq -c',
+    'rg -n "listen" --glob "*.ts"',
     'pnpm ls --depth 0',
     'aom deploy probe --local',
     'echo hi 2>/dev/null',
@@ -136,6 +144,118 @@ describe('a read-only scan', () => {
     expect(v.reason).toContain('READ-ONLY');
   });
 
+  // the review's second round: every one of these is a way to write, run, or read a secret in a read-only scan
+  const bypasses = [
+    // a command hidden in an argument
+    'cat <(rm x)',
+    'cat >(tee /tmp/x)',
+    'ls $(rm x)',
+    'ls `rm x`',
+    'echo "$(id)"',
+    'echo $HOME',
+    'echo ${AWS_SECRET_ACCESS_KEY}',
+    'jq -n env',
+    "jq -n '$ENV'",
+    "jq -n '[env]'",
+    // flags that write or run
+    'sort --out=x a',
+    'sort -Ro x a',
+    'sort --compress-program=sh a',
+    'sort -T /tmp a',
+    'uniq in OUT',
+    'uniq a b',
+    'docker compose config -o /tmp/x',
+    'docker compose config',
+    'docker -Hssh://h ps',
+    'docker --host=tcp://h ps',
+    'docker -c prod ps',
+    'rg --hostname-bin=x foo',
+    'rg --pre=x foo',
+    'rg --pre x foo',
+    'rg -z foo',
+    'rg --search-zip foo',
+    'git log --out=/tmp/x',
+    'git diff --ext=x',
+    'git diff --no-index ~/.ssh/id_rsa /dev/null',
+    'git log --exec-path=/tmp',
+    'git -C /tmp log --output=/tmp/x',
+    'git grep foo',
+    'git show --textconv HEAD',
+    'ls --color=always --block-size=1',
+    'cat --bogus',
+    'head -f x',
+    'tail -f x',
+    'find . -fprint x',
+    'find . -ok rm {} ;',
+    'find . -newer /tmp -delete',
+    'du --files0-from=x',
+    'grep --exclude-from=x foo',
+    'tr -d a --bogus',
+    // secrets
+    'cat ~/.ssh/id_ed25519',
+    'cat /home/u/.ssh/config',
+    'ls /home/u/.ssh',
+    'cat ~/.aws/credentials',
+    'cat ~/.config/gcloud/application_default_credentials.json',
+    'cat .env',
+    'cat web/.env.production',
+    'cat apps/server/.env.local',
+    'head -3 /home/u/.config/aom-uat/secret.env',
+    'cat /home/u/.aom-runner/secrets/deploy.json',
+    'cat /home/u/.aom-runner/keys/deploy/abc/id_ed25519',
+    'cat /proc/self/environ',
+    'cat /proc/1234/environ',
+    'grep -r password /home/u',
+    'grep -r password ~',
+    'grep -r password /',
+    'rg password /home/u',
+    'find /home/u -name "*.pem"',
+    'find / -name id_rsa',
+    'git show HEAD:.env',
+    'git log -p -- .env',
+    'git -C /home/u/.ssh status',
+    'docker inspect web',
+    "docker inspect --format '{{.Config.Env}}' web",
+    "docker inspect -f '{{json .Config}}' web",
+    'docker image inspect img',
+    'cat id_rsa',
+    'cat server.pem',
+    'wc -l /home/u/.netrc',
+    'ls ~/.docker',
+    'cat ~/.docker/config.json',
+    'cat ~/.npmrc',
+    'cat ~/.git-credentials',
+    'aom setup propose --file ~/.ssh/id_rsa',
+    'aom setup propose --area run --bogus x',
+    'aom deploy probe --local --bogus',
+    'aom deploy run --env production',
+    'aom sudo run x',
+    'npm view left-pad',
+    'npm outdated',
+    'npm ls --prefix /tmp',
+    'cat a | tee b',
+  ];
+  it.each(bypasses)('refuses the bypass %s', (command) => {
+    const v = run(command, cfg({ secretRoots: ['/home/u/.aom-runner/secrets', '/home/u/.aom-runner/keys'] }));
+    expect(v.decision, command).toBe('refused');
+    expect(v.rule).toBe('scan_read_only');
+  });
+
+  it('still reads the project: templates, manifests, logs and its own scratch folder', () => {
+    const c = cfg({ secretRoots: ['/home/u/.aom-runner/secrets', '/home/u/.aom-runner/keys'] });
+    for (const command of [
+      'cat package.json',
+      'cat .env.example',
+      'cat .env.sample',
+      'ls /home/u/src/toy',
+      'grep -rn listen /home/u/src/toy/src',
+      'find /home/u/src/toy -name "*.yml" -not -path "*/node_modules/*"',
+      'git -C /home/u/src/toy log --oneline -5',
+      'cat /home/u/.aom-runner/agents/devops/scratch/notes.txt',
+    ])
+      expect(run(command, c).decision, command).toBe('allowed');
+  });
+
   it('is only on for scan shifts: the same commands pass the ordinary DevOps guard', () => {
     expect(run('npm ci', cfg({ readOnlyScan: false })).decision).toBe('allowed');
     expect(run('docker compose up -d', cfg({ readOnlyScan: false })).decision).toBe('allowed');
@@ -170,6 +290,19 @@ describe('the scan profile of the DevOps settings', () => {
     expect(s.permissions.allow).toContain('Write(//data/agents/a1/scratch/**)');
     expect(s.permissions.deny).toContain('NotebookEdit');
     expect(s.permissions.defaultMode).toBe('dontAsk');
+  });
+
+  it('has no web tools (nothing to send a secret to) and cannot Read credential folders', () => {
+    const s = settings(true);
+    expect(s.permissions.deny).toEqual(expect.arrayContaining(['WebFetch', 'WebSearch']));
+    expect(s.permissions.allow).not.toContain('WebFetch');
+    expect(s.permissions.allow).not.toContain('WebSearch');
+    const reads = s.permissions.deny.filter((d) => d.startsWith('Read('));
+    for (const dir of ['.ssh', '.aws', '.config/gcloud', '.kube', '.gnupg', '.docker'])
+      expect(reads.some((d) => d.includes(`/${dir}/`) || d.includes(`/${dir})`))).toBe(true);
+    expect(reads.some((d) => d.includes('.env'))).toBe(true);
+    // an ordinary DevOps shift keeps the web
+    expect(settings(false).permissions.allow).toContain('WebFetch');
   });
 
   it('an ordinary DevOps shift keeps its full Edit', () => {

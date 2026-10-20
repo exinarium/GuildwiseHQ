@@ -172,6 +172,7 @@ export const RUNNER_PRIVATE = [
   'logs',
   'mock-state',
   'secrets',
+  'keys',
 ];
 
 /**
@@ -442,6 +443,22 @@ export const runsBrowsers = (p: Pick<AgentPermissions, 'browser'>, roleKey?: str
  * given action is within its granted access is guidance in its prompt plus `aom devops-approval`, not enforced here.
  * Everything else about the DevOps agent is decided by this one flag, so the other roles' settings do not change.
  */
+/** `Read(...)` rules for the places a scan must not see (the Bash guard has the same list for shell commands). */
+export function scanSecretReadDenies(home: string): string[] {
+  const dirs = ['.ssh', '.aws', '.azure', '.kube', '.gnupg', '.docker', '.config/gcloud', '.config/gh'];
+  const files = ['.netrc', '.npmrc', '.pypirc', '.git-credentials', '.pgpass'];
+  return [
+    ...dirs.flatMap((d) => [`Read(${ruleAbs(join(home, d))}/**)`, `Read(${ruleAbs(join(home, d))})`]),
+    ...files.map((f) => `Read(${ruleAbs(join(home, f))})`),
+    'Read(**/.env)',
+    'Read(**/.env.*)',
+    'Read(**/*.pem)',
+    'Read(**/id_rsa*)',
+    'Read(**/id_ed25519*)',
+    'Read(**/secret.env)',
+  ];
+}
+
 function buildDevopsSettings(
   p: AgentPermissions,
   ctx: ClaudePolicyContext,
@@ -475,11 +492,18 @@ function buildDevopsSettings(
         ...(ctx.readOnlyScan
           ? [`Edit(${ruleAbs(paths.scratch)}/**)`, `Write(${ruleAbs(paths.scratch)}/**)`]
           : ['Edit']),
-        'WebFetch',
-        'WebSearch',
+        // a read-only scan has no web: nothing to send a secret to
+        ...(ctx.readOnlyScan ? [] : ['WebFetch', 'WebSearch']),
         ...DEPLOY_ASK_ALLOW,
       ],
-      deny: [...new Set([...deny, ...(ctx.readOnlyScan ? ['NotebookEdit'] : [])])],
+      deny: [
+        ...new Set([
+          ...deny,
+          ...(ctx.readOnlyScan
+            ? ['NotebookEdit', 'WebFetch', 'WebSearch', ...scanSecretReadDenies(ctx.realHome)]
+            : []),
+        ]),
+      ],
       defaultMode: 'dontAsk',
       additionalDirectories: [paths.scratch],
     },

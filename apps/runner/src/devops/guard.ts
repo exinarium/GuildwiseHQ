@@ -33,6 +33,8 @@ export interface GuardConfig {
   auditFile?: string;
   /** A "Scan with DevOps" shift: read-only. Commands that start, build, install, connect or write are refused (`scanVerdict`). */
   readOnlyScan?: boolean;
+  /** Folders a scan may not read at all (the runner's secrets and keys), besides the user's own credential folders. */
+  secretRoots?: string[];
 }
 
 export interface GuardVerdict {
@@ -730,126 +732,685 @@ export function classifyCommand(
 // ------------------------------------------------------------------------------------- read-only scans
 
 /**
- * A scan is an ALLOWLIST: a segment is allowed only when its command is one of these read-only ones (with the flag checks
- * below). Everything else is refused: shells and interpreters, wrappers (env, xargs, nohup, timeout), scripts (`./x`),
- * package scripts, anything that builds, starts, installs, connects or writes. Pipes are fine between allowed commands;
- * redirections to files are not (the proposal is written with the Write tool, which is limited to the scratch folder).
+ * A scan is an ALLOWLIST at the level of single flags: a segment is allowed only when its command is one of these and EVERY
+ * flag is on that command's list (an unknown flag is refused, so an abbreviation such as `--out=` or a flag added by a
+ * newer version never slips through). Everything else is refused: shells and interpreters, wrappers (env, xargs, nohup,
+ * timeout), scripts (`./x`), package scripts, anything that builds, starts, installs, connects or writes.
+ *
+ * Also refused, wherever they appear outside single quotes: `$` (variables, `$( )`), backticks, `<( )` and `>( )` (a command
+ * hidden in an argument). Pipes are fine between allowed commands; redirections to files are not (the proposal is written
+ * with the Write tool, which is limited to the scratch folder). And secrets cannot be read: ssh, cloud and git credentials,
+ * `.env` files (not `.env.example`), key files, the runner's private folders, process environments.
  */
-const SCAN_PLAIN = new Set([
-  'ls',
-  'cat',
-  'head',
-  'tail',
-  'wc',
-  'grep',
-  'egrep',
-  'fgrep',
-  'rg',
-  'jq',
-  'echo',
-  'pwd',
-  'stat',
-  'file',
-  'du',
-  'sort',
-  'uniq',
-  'cut',
-  'tr',
-  'basename',
-  'dirname',
-  'realpath',
-  'readlink',
-  'which',
-  'true',
-]);
-const SCAN_DOCKER_READ = new Set(['version', 'info', 'ps', 'images', 'inspect']);
-const SCAN_DOCKER_GROUP_READ = new Set(['ls', 'inspect']);
-const SCAN_COMPOSE_READ = new Set(['ls', 'ps', 'config', 'version']);
-const SCAN_GIT_VERBS = new Set([
-  'log',
-  'show',
-  'status',
-  'diff',
-  'ls-files',
-  'rev-parse',
-  'remote',
-  'branch',
-  'tag',
-]);
-const SCAN_AOM = [
-  ['setup', 'propose'],
-  ['deploy', 'probe'],
-  ['deploy', 'status'],
-  ['devops-done'],
-  ['devops-question'],
+interface FlagSpec {
+  /** Boolean short flags, as one string of letters. */
+  shorts?: string;
+  /** Short flags that take a value. */
+  valueShorts?: string;
+  /** Boolean long flags (without `--`). */
+  longs?: string[];
+  /** Long flags that take a value (`--name value` or `--name=value`). */
+  valueLongs?: string[];
+  /** Long flags that take a value only as `--name=value`. */
+  optionalValueLongs?: string[];
+  /** `-5` style count flags. */
+  numeric?: boolean;
+  /** At most this many positionals (after the command). */
+  maxPositionals?: number;
+  /** The command searches folders below its path arguments (or the current folder). */
+  recursiveShorts?: string;
+  recursiveLongs?: string[];
+  alwaysRecursive?: boolean;
+}
+
+interface ParsedFlags {
+  positionals: string[];
+  values: string[];
+  flags: string[];
+  bad?: string;
+}
+
+function parseFlags(args: string[], spec: FlagSpec): ParsedFlags {
+  const out: ParsedFlags = { positionals: [], values: [], flags: [] };
+  let done = false;
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i] as string;
+    if (done || a === '-' || !a.startsWith('-')) {
+      out.positionals.push(a);
+      continue;
+    }
+    if (a === '--') {
+      done = true;
+      continue;
+    }
+    if (a.startsWith('--')) {
+      const eq = a.indexOf('=');
+      const name = eq < 0 ? a.slice(2) : a.slice(2, eq);
+      if (spec.valueLongs?.includes(name)) {
+        out.flags.push(name);
+        if (eq >= 0) out.values.push(a.slice(eq + 1));
+        else if (i + 1 < args.length) out.values.push(args[++i] as string);
+        else return { ...out, bad: a };
+      } else if (spec.optionalValueLongs?.includes(name)) {
+        out.flags.push(name);
+        if (eq >= 0) out.values.push(a.slice(eq + 1));
+      } else if (spec.longs?.includes(name) && eq < 0) out.flags.push(name);
+      else return { ...out, bad: a };
+      continue;
+    }
+    // a cluster of short flags: -la, -n5, -A3
+    const cluster = a.slice(1);
+    if (spec.numeric && /^\d+$/.test(cluster)) continue;
+    for (let k = 0; k < cluster.length; k++) {
+      const ch = cluster[k] as string;
+      if (spec.valueShorts?.includes(ch)) {
+        out.flags.push(ch);
+        const rest = cluster.slice(k + 1);
+        if (rest) out.values.push(rest);
+        else if (i + 1 < args.length) out.values.push(args[++i] as string);
+        else return { ...out, bad: a };
+        break;
+      }
+      if (spec.shorts?.includes(ch)) {
+        out.flags.push(ch);
+        continue;
+      }
+      if (spec.numeric && /\d/.test(ch)) continue;
+      return { ...out, bad: `-${ch}` };
+    }
+  }
+  if (spec.maxPositionals !== undefined && out.positionals.length > spec.maxPositionals)
+    return { ...out, bad: out.positionals[spec.maxPositionals] as string };
+  return out;
+}
+
+const SCAN_SPECS: Record<string, FlagSpec> = {
+  ls: {
+    shorts: 'aAlh1RtrSdFipsLCx',
+    longs: ['all', 'almost-all', 'human-readable', 'recursive', 'directory', 'classify', 'reverse', 'size'],
+    recursiveShorts: 'R',
+    recursiveLongs: ['recursive'],
+  },
+  cat: { shorts: 'nbsAETv', longs: ['number', 'number-nonblank', 'squeeze-blank', 'show-all'] },
+  head: {
+    shorts: 'qv',
+    valueShorts: 'nc',
+    longs: ['quiet', 'verbose'],
+    valueLongs: ['lines', 'bytes'],
+    numeric: true,
+  },
+  tail: {
+    shorts: 'qv',
+    valueShorts: 'nc',
+    longs: ['quiet', 'verbose'],
+    valueLongs: ['lines', 'bytes'],
+    numeric: true,
+  },
+  wc: { shorts: 'lwcmL', longs: ['lines', 'words', 'bytes', 'chars'] },
+  grep: {
+    shorts: 'ivwxclLnhHrRoqsEFPaIzZT',
+    valueShorts: 'ABCmefd',
+    longs: [
+      'ignore-case',
+      'invert-match',
+      'word-regexp',
+      'line-regexp',
+      'count',
+      'files-with-matches',
+      'files-without-match',
+      'line-number',
+      'no-filename',
+      'with-filename',
+      'recursive',
+      'dereference-recursive',
+      'only-matching',
+      'quiet',
+      'no-messages',
+      'extended-regexp',
+      'fixed-strings',
+      'perl-regexp',
+      'text',
+      'binary',
+      'null',
+      'initial-tab',
+      'no-color',
+    ],
+    optionalValueLongs: ['color'],
+    valueLongs: [
+      'after-context',
+      'before-context',
+      'context',
+      'max-count',
+      'regexp',
+      'include',
+      'exclude',
+      'exclude-dir',
+      'binary-files',
+      'directories',
+    ],
+    recursiveShorts: 'rR',
+    recursiveLongs: ['recursive', 'dereference-recursive'],
+  },
+  rg: {
+    shorts: 'inlcwvFsuUaHhoqNI',
+    valueShorts: 'egtTABCmdf',
+    longs: [
+      'ignore-case',
+      'smart-case',
+      'case-sensitive',
+      'line-number',
+      'no-line-number',
+      'files-with-matches',
+      'files-without-match',
+      'count',
+      'word-regexp',
+      'invert-match',
+      'fixed-strings',
+      'hidden',
+      'no-ignore',
+      'unrestricted',
+      'files',
+      'json',
+      'heading',
+      'no-heading',
+      'only-matching',
+      'no-filename',
+      'with-filename',
+      'quiet',
+      'no-messages',
+      'text',
+      'no-config',
+      'follow',
+      'multiline',
+      'pcre2',
+      'stats',
+      'type-list',
+    ],
+    optionalValueLongs: ['color'],
+    valueLongs: [
+      'regexp',
+      'glob',
+      'type',
+      'type-not',
+      'after-context',
+      'before-context',
+      'context',
+      'max-count',
+      'max-depth',
+      'max-filesize',
+      'file',
+    ],
+    alwaysRecursive: true,
+  },
+  echo: { shorts: 'n' },
+  pwd: { maxPositionals: 0 },
+  true: { maxPositionals: 0 },
+  stat: { shorts: 'L', valueShorts: 'c', longs: ['dereference'], valueLongs: ['format'] },
+  file: { shorts: 'biL', longs: ['brief', 'mime', 'dereference'] },
+  du: {
+    shorts: 'hsackx',
+    valueShorts: 'd',
+    longs: ['human-readable', 'summarize', 'all', 'total', 'apparent-size'],
+    valueLongs: ['max-depth'],
+    alwaysRecursive: true,
+  },
+  sort: {
+    shorts: 'nrufbdghVsc',
+    valueShorts: 'kt',
+    longs: ['numeric-sort', 'reverse', 'unique', 'ignore-case'],
+  },
+  uniq: { shorts: 'cduiD', valueShorts: 'fsw', maxPositionals: 1 },
+  cut: { shorts: 's', valueShorts: 'dfcb', longs: ['complement'], valueLongs: ['output-delimiter'] },
+  tr: { shorts: 'dsct' },
+  basename: { shorts: 'as', maxPositionals: 2 },
+  dirname: { maxPositionals: 20 },
+  realpath: { shorts: 'sme' },
+  readlink: { shorts: 'fme' },
+  which: { shorts: 'a' },
+  jq: {
+    shorts: 'rceMSsajRnC',
+    longs: [
+      'raw-output',
+      'compact-output',
+      'exit-status',
+      'monochrome-output',
+      'sort-keys',
+      'slurp',
+      'ascii-output',
+      'join-output',
+      'raw-input',
+      'null-input',
+      'tab',
+    ],
+    valueLongs: ['indent'],
+  },
+};
+
+/** Reads that would leak a credential, as path rules. */
+const SECRET_HOME_DIRS = [
+  '.ssh',
+  '.aws',
+  '.azure',
+  '.kube',
+  '.gnupg',
+  '.docker',
+  '.config/gcloud',
+  '.config/gh',
+  '.config/helm',
+  '.config/doctl',
+  '.config/rclone',
+  '.terraform.d',
+  '.vault-token',
+  '.netrc',
+  '.npmrc',
+  '.pypirc',
+  '.git-credentials',
+  '.gem/credentials',
+  '.config/git/credentials',
+  '.pgpass',
+  '.my.cnf',
+  '.claude',
+  '.claude.json',
 ];
+const SECRET_FILE_NAMES =
+  /(^|\/)(\.env(\.[^/]*)?|id_(rsa|dsa|ecdsa|ed25519)[^/]*|[^/]*\.(pem|key|p12|pfx|keystore|jks|kdbx)|credentials(\.json)?|secrets?\.(env|json|ya?ml)|secret\.env|\.netrc|\.pgpass|\.htpasswd|known_hosts|authorized_keys|service-?account[^/]*\.json)$/i;
+const ENV_TEMPLATES = /(^|\/)\.env\.(example|sample|template|dist|defaults)$/i;
+
+function secretDirs(cfg: GuardConfig): string[] {
+  return [
+    ...SECRET_HOME_DIRS.map((d) => join(cfg.home, d)),
+    ...(cfg.secretRoots ?? []),
+    '/proc/self/environ',
+    '/etc/shadow',
+    '/etc/sudoers',
+    '/etc/ssh',
+    '/root/.ssh',
+  ];
+}
+
+/** A word that names (or sits below) a credential, or - when `recursive` - a folder that contains one. */
+function secretPath(word: string, cwd: string, cfg: GuardConfig, recursive: boolean): string | null {
+  const parts = word.includes(':') && !word.includes('://') ? word.split(':') : [word];
+  for (const part of parts) {
+    if (!part) continue;
+    const eq = part.startsWith('-') ? part.indexOf('=') : -1;
+    const w = eq >= 0 ? part.slice(eq + 1) : part;
+    if (!w || w.startsWith('-')) continue;
+    const abs = resolveArg(w, cwd, cfg.home);
+    if (abs === null) continue;
+    const p = abs.replace(/\/+$/, '') || '/';
+    if (/^\/proc\/[^/]+\/environ$/.test(p) || /^\/proc\/[^/]+\/(cmdline|fd)(\/|$)/.test(p)) return p;
+    if (SECRET_FILE_NAMES.test(p) && !ENV_TEMPLATES.test(p)) return p;
+    for (const d of secretDirs(cfg)) {
+      if (p === d || p.startsWith(`${d}/`)) return p;
+      // searching a folder that contains a credential folder
+      if (recursive && (d.startsWith(`${p}/`) || p === '/')) return p;
+    }
+    if (/(^|\/)\.env(\.[^/]*)?$/.test(p) && !ENV_TEMPLATES.test(p)) return p;
+    // /proc/<pid>/environ below a recursive search of /proc
+    if (recursive && (p === '/proc' || p === '/')) return p;
+  }
+  return null;
+}
+
+/** `$`, backticks, `<( )` and `>( )` outside single quotes: a command or a secret hidden in an argument. */
+export function hiddenExpansion(command: string): string | null {
+  let q: '"' | "'" | null = null;
+  for (let i = 0; i < command.length; i++) {
+    const c = command[i] as string;
+    if (q === "'") {
+      if (c === "'") q = null;
+      continue;
+    }
+    if (c === '\\' && i + 1 < command.length) {
+      i++;
+      continue;
+    }
+    if (q === '"') {
+      if (c === '"') q = null;
+      else if (c === '$' || c === '`') return c === '$' ? '`$`' : 'a backtick';
+      continue;
+    }
+    if (c === "'" || c === '"') {
+      q = c;
+      continue;
+    }
+    if (c === '$') return '`$` (a variable or a command substitution)';
+    if (c === '`') return 'a backtick (a command substitution)';
+    if ((c === '<' || c === '>') && command[i + 1] === '(') return `\`${c}(\` (a process substitution)`;
+  }
+  return null;
+}
 
 const refuseScan = (what: string): GuardVerdict =>
   refuse(
     'scan_read_only',
     `${what} is not allowed in a scan: this is a READ-ONLY look at the project. Read files instead (cat, ls, grep, git log), then submit your findings with \`aom setup propose\`.`,
   );
+const refuseSecret = (p: string): GuardVerdict =>
+  refuse(
+    'scan_read_only',
+    `Reading ${p} is not allowed in a scan: credentials and settings files stay private (read .env.example for the names a project needs). This is a READ-ONLY look at the project.`,
+  );
 
-function scanGit(args: string[]): GuardVerdict | null {
+const GIT_FLAGS: Record<string, FlagSpec> = {
+  log: {
+    shorts: 'p',
+    valueShorts: 'nSG',
+    numeric: true,
+    longs: [
+      'oneline',
+      'stat',
+      'shortstat',
+      'numstat',
+      'graph',
+      'decorate',
+      'all',
+      'no-merges',
+      'merges',
+      'first-parent',
+      'reverse',
+      'name-only',
+      'name-status',
+      'patch',
+      'no-color',
+      'abbrev-commit',
+      'follow',
+      'no-patch',
+      'date-order',
+      'topo-order',
+      'branches',
+      'tags',
+      'remotes',
+      'full-history',
+      'simplify-by-decoration',
+    ],
+    valueLongs: [
+      'max-count',
+      'since',
+      'until',
+      'author',
+      'committer',
+      'grep',
+      'date',
+      'format',
+      'pretty',
+      'skip',
+    ],
+  },
+  show: {
+    shorts: 's',
+    longs: [
+      'stat',
+      'shortstat',
+      'numstat',
+      'name-only',
+      'name-status',
+      'no-color',
+      'oneline',
+      'patch',
+      'no-patch',
+      'abbrev-commit',
+    ],
+    valueLongs: ['format', 'pretty', 'date'],
+  },
+  status: {
+    shorts: 'sb',
+    longs: ['short', 'branch'],
+    optionalValueLongs: ['porcelain', 'untracked-files', 'ignored'],
+  },
+  diff: {
+    shorts: 'w',
+    valueShorts: 'U',
+    longs: [
+      'stat',
+      'shortstat',
+      'numstat',
+      'name-only',
+      'name-status',
+      'cached',
+      'staged',
+      'no-color',
+      'ignore-all-space',
+      'ignore-space-change',
+      'summary',
+      'patch',
+      'no-patch',
+      'check',
+    ],
+    valueLongs: ['unified', 'diff-filter'],
+  },
+  'ls-files': {
+    shorts: 'comd',
+    longs: ['cached', 'others', 'modified', 'deleted', 'exclude-standard', 'full-name'],
+  },
+  'rev-parse': {
+    longs: [
+      'show-toplevel',
+      'abbrev-ref',
+      'show-prefix',
+      'git-dir',
+      'is-inside-work-tree',
+      'verify',
+      'symbolic-full-name',
+    ],
+    optionalValueLongs: ['short'],
+  },
+  remote: { shorts: 'v', longs: ['verbose'], maxPositionals: 0 },
+  branch: {
+    shorts: 'lavr',
+    longs: ['list', 'all', 'remotes', 'verbose', 'show-current'],
+    maxPositionals: 0,
+  },
+  tag: { shorts: 'l', valueShorts: 'n', longs: ['list'] },
+};
+
+function scanGit(args: string[], cwd: string, cfg: GuardConfig): GuardVerdict | null {
   let i = 0;
+  let dir = cwd;
   while (i < args.length) {
     const a = args[i] as string;
-    if (a === '-C') i += 2;
+    if (a === '-C') {
+      const p = args[i + 1];
+      if (p === undefined) return refuseScan('`git -C`');
+      const bad = secretPath(p, dir, cfg, false);
+      if (bad) return refuseSecret(bad);
+      dir = resolveArg(p, dir, cfg.home) ?? dir;
+      i += 2;
+    } else if (a === '--no-pager' || a === '--no-optional-locks') i++;
     else if (a.startsWith('-')) return refuseScan(`\`git ${a}\``);
     else break;
   }
   const verb = args[i];
-  if (!verb || !SCAN_GIT_VERBS.has(verb)) return refuseScan(`\`git ${verb ?? ''}\``.trim());
-  const rest = args.slice(i + 1);
-  if (rest.some((a) => /^(--output|--ext-diff|--textconv|--open-files-in-pager|-O)/.test(a)))
-    return refuseScan(`\`git ${verb} ${rest.find((a) => a.startsWith('-O') || a.startsWith('--')) ?? ''}\``);
-  if (
-    verb === 'remote' &&
-    !(rest.length === 0 || (rest.length === 1 && /^(-v|--verbose)$/.test(rest[0] as string)))
+  const spec = verb ? GIT_FLAGS[verb] : undefined;
+  if (!verb || !spec) return refuseScan(`\`git ${verb ?? ''}\``.trim());
+  const p = parseFlags(args.slice(i + 1), spec);
+  if (p.bad) return refuseScan(`\`git ${verb} ${p.bad}\``);
+  if (verb === 'tag' && p.positionals.length > 0 && !p.flags.includes('l') && !p.flags.includes('list'))
+    return refuseScan('Changing tags');
+  if (verb === 'tag' && p.flags.includes('n') === false && p.positionals.length > 1)
+    return refuseScan('Changing tags');
+  for (const w of [...p.positionals, ...p.values]) {
+    const bad = secretPath(w, dir, cfg, false);
+    if (bad) return refuseSecret(bad);
+  }
+  return null;
+}
+
+/** `docker inspect` prints the environment of a container; only named, harmless fields are allowed. */
+const INSPECT_FORMAT =
+  /^\{\{\s*(json\s+)?\.(Name|Id|Image|Created|State(\.[A-Za-z]+)?|Config\.Image|Config\.Labels|NetworkSettings\.Ports|HostConfig\.PortBindings|Mounts|RepoTags|Size|Os|Architecture)\s*\}\}$/;
+
+function scanDocker(first: string, args: string[], cwd: string, cfg: GuardConfig): GuardVerdict | null {
+  // global options before the verb: only the compose file / project name, and only for compose
+  let i = 0;
+  const composeOpts: string[] = [];
+  const isCompose = first === 'docker-compose';
+  let words = args;
+  if (first === 'docker' && words[0] === 'compose') {
+    words = words.slice(1);
+    i = 0;
+  } else if (first === 'docker') {
+    // `docker -H x ps`, `docker --context x ps`, `docker -c x ps`: refused with every other leading option
+    if (words[0]?.startsWith('-')) return refuseScan(`\`docker ${words[0]}\` (another host or option)`);
+  }
+  const compose = isCompose || args[0] === 'compose';
+  if (compose) {
+    while (i < words.length && words[i]?.startsWith('-')) {
+      const a = words[i] as string;
+      if (/^(-f|--file|-p|--project-name|--project-directory)$/.test(a) && i + 1 < words.length) {
+        composeOpts.push(words[i + 1] as string);
+        i += 2;
+      } else return refuseScan(`\`${first} compose ${a}\``);
+    }
+    const sub = words[i];
+    if (!sub || !['ls', 'ps', 'version'].includes(sub))
+      return refuseScan(`\`${first} compose ${sub ?? ''}\``.trim());
+    const p = parseFlags(words.slice(i + 1), {
+      shorts: 'aq',
+      longs: ['all', 'quiet', 'short', 'services'],
+      valueLongs: ['format', 'filter'],
+      valueShorts: 'f',
+      maxPositionals: 3,
+    });
+    if (p.bad) return refuseScan(`\`${first} compose ${sub} ${p.bad}\``);
+    for (const w of [...composeOpts, ...p.positionals]) {
+      const bad = secretPath(w, cwd, cfg, false);
+      if (bad) return refuseSecret(bad);
+    }
+    return null;
+  }
+  const verb = words[0];
+  if (!verb) return refuseScan(`\`${first}\``);
+  let group: string | undefined;
+  let rest = words.slice(1);
+  if (['image', 'volume', 'network', 'container'].includes(verb)) {
+    group = rest[0];
+    if (!group || !['ls', 'inspect'].includes(group))
+      return refuseScan(`\`${first} ${verb} ${group ?? ''}\``.trim());
+    rest = rest.slice(1);
+  } else if (!['version', 'info', 'ps', 'images', 'inspect'].includes(verb))
+    return refuseScan(`\`${first} ${verb}\``);
+  const sub = group ?? verb;
+  const p = parseFlags(rest, {
+    shorts: 'aqs',
+    valueShorts: 'f',
+    longs: ['all', 'quiet', 'no-trunc', 'size', 'digests'],
+    valueLongs: ['format', 'filter', 'last'],
+    maxPositionals: 10,
+  });
+  if (p.bad) return refuseScan(`\`${first} ${verb} ${p.bad}\``);
+  if (sub === 'inspect') {
+    // `-f`/`--format` is the only way to see a container, and only the harmless fields
+    const fmt = p.values[0];
+    if (!fmt || !INSPECT_FORMAT.test(fmt))
+      return refuseScan(
+        `\`${first} inspect\` without a --format naming a harmless field (a container's settings include its secrets)`,
+      );
+  }
+  return null;
+}
+
+/** Everything `find` may be asked: names, types, sizes and times. Never an action. */
+const FIND_TESTS_WITH_VALUE = new Set([
+  '-name',
+  '-iname',
+  '-path',
+  '-ipath',
+  '-wholename',
+  '-regex',
+  '-iregex',
+  '-type',
+  '-maxdepth',
+  '-mindepth',
+  '-size',
+  '-mtime',
+  '-mmin',
+  '-atime',
+  '-newer',
+  '-user',
+  '-group',
+  '-perm',
+]);
+const FIND_PLAIN = new Set([
+  '-empty',
+  '-not',
+  '!',
+  '-and',
+  '-or',
+  '-a',
+  '-o',
+  '-prune',
+  '-print',
+  '-print0',
+  '-true',
+  '-false',
+  '(',
+  ')',
+  '-readable',
+  '-writable',
+  '-executable',
+  '-xdev',
+  '-depth',
+  '-mount',
+]);
+
+function scanFind(args: string[], cwd: string, cfg: GuardConfig): GuardVerdict | null {
+  let i = 0;
+  while (i < args.length && /^-[HLP]$/.test(args[i] as string)) i++;
+  const paths: string[] = [];
+  while (
+    i < args.length &&
+    !(args[i] as string).startsWith('-') &&
+    !['!', '(', ')'].includes(args[i] as string)
   )
-    return refuseScan('`git remote` with arguments');
-  if (verb === 'branch') {
-    const flags = rest.filter((a) => a.startsWith('-'));
-    if (
-      rest.some((a) => !a.startsWith('-')) ||
-      flags.some((a) => !/^(--list|-l|-a|--all|-r|--remotes|-v|-vv|--verbose|--show-current)$/.test(a))
-    )
-      return refuseScan('Changing branches');
+    paths.push(args[i++] as string);
+  for (const p of paths.length ? paths : ['.']) {
+    const bad = secretPath(p, cwd, cfg, true);
+    if (bad) return refuseSecret(bad);
   }
-  if (verb === 'tag') {
-    const flags = rest.filter((a) => a.startsWith('-'));
-    if (!flags.includes('--list') && !flags.includes('-l') && rest.length > 0)
-      return refuseScan('Changing tags');
-    if (rest.some((a) => !a.startsWith('-')) || flags.some((a) => !/^(--list|-l|-n\d*)$/.test(a)))
-      return refuseScan('Changing tags');
-  }
-  return null;
-}
-
-function scanDocker(first: string, args: string[]): GuardVerdict | null {
-  const rest: string[] = [];
-  for (let i = 0; i < args.length; i++) {
+  while (i < args.length) {
     const a = args[i] as string;
-    if (/^(-H|--host|--context|-c)(=|$)/.test(a)) return refuseScan(`\`${first} ${a}\` (another host)`);
-    if (/^(-f|--file|-p|--project-name|--env-file|--profile|--project-directory)$/.test(a)) i++;
-    else if (!a.startsWith('-')) rest.push(a);
+    if (FIND_PLAIN.has(a)) i++;
+    else if (FIND_TESTS_WITH_VALUE.has(a) && i + 1 < args.length) {
+      if (a === '-newer') {
+        const bad = secretPath(args[i + 1] as string, cwd, cfg, false);
+        if (bad) return refuseSecret(bad);
+      }
+      i += 2;
+    } else return refuseScan(`\`find ${a}\``);
   }
-  const g = rest[0];
-  if (g === 'compose') {
-    if (!rest[1] || !SCAN_COMPOSE_READ.has(rest[1]))
-      return refuseScan(`\`${first} ${rest.slice(0, 2).join(' ')}\``.trim());
-    return null;
-  }
-  if (g && ['image', 'volume', 'network', 'container'].includes(g)) {
-    if (!rest[1] || !SCAN_DOCKER_GROUP_READ.has(rest[1]))
-      return refuseScan(`\`${first} ${rest.slice(0, 2).join(' ')}\``.trim());
-    return null;
-  }
-  if (!g || !SCAN_DOCKER_READ.has(g)) return refuseScan(`\`${first} ${g ?? ''}\``.trim());
   return null;
 }
 
-function scanSegment(seg: Segment): GuardVerdict | null {
+const AOM_SPECS: Array<{ path: string[]; spec: FlagSpec }> = [
+  { path: ['setup', 'propose'], spec: { valueLongs: ['area', 'file'], maxPositionals: 0 } },
+  {
+    path: ['deploy', 'probe'],
+    spec: {
+      longs: ['local', 'ssh-hosts'],
+      valueLongs: ['host', 'compose-file', 'dir', 'url'],
+      maxPositionals: 0,
+    },
+  },
+  { path: ['deploy', 'status'], spec: { valueLongs: ['project', 'run'], maxPositionals: 0 } },
+  { path: ['devops-done'], spec: { valueLongs: ['summary', 'message', 'note'], maxPositionals: 6 } },
+  { path: ['devops-question'], spec: { valueLongs: ['question', 'message'], maxPositionals: 6 } },
+];
+
+function scanAom(args: string[], cwd: string, cfg: GuardConfig): GuardVerdict | null {
+  const m = AOM_SPECS.find((s) => s.path.every((x, i) => args[i] === x));
+  if (!m) return refuseScan(`\`aom ${args[0] ?? ''}\``.trim());
+  const p = parseFlags(args.slice(m.path.length), m.spec);
+  if (p.bad) return refuseScan(`\`aom ${m.path.join(' ')} ${p.bad}\``);
+  for (const w of p.values) {
+    const bad = secretPath(w, cwd, cfg, false);
+    if (bad) return refuseSecret(bad);
+  }
+  return null;
+}
+
+function scanSegment(seg: Segment, cwd: string, cfg: GuardConfig): GuardVerdict | null {
   const words = seg.words;
   const w0 = words[0];
   if (w0 === undefined) return null;
@@ -862,49 +1423,76 @@ function scanSegment(seg: Segment): GuardVerdict | null {
         ? `\`${first} -c\` (a shell inside a shell)`
         : `\`${first}\``,
     );
-  if (SCAN_PLAIN.has(first)) {
-    if (first === 'rg' && args.some((a) => /^--pre/.test(a))) return refuseScan('`rg --pre`');
-    if (first === 'sort' && args.some((a) => a === '-o' || /^--output/.test(a) || /^-[a-z]*o/.test(a)))
-      return refuseScan('`sort -o`');
+  const spec = SCAN_SPECS[first];
+  if (spec) {
+    const p = parseFlags(args, spec);
+    if (p.bad) return refuseScan(`\`${first} ${p.bad}\``);
+    const recursive =
+      !!spec.alwaysRecursive ||
+      p.flags.some((f) =>
+        f.length === 1 ? !!spec.recursiveShorts?.includes(f) : !!spec.recursiveLongs?.includes(f),
+      );
+    // the first positional of grep/rg/jq is the pattern or program, not a path; checking it too only costs false alarms
+    const checked = [...p.positionals, ...p.values];
+    for (const w of checked) {
+      const bad = secretPath(w, cwd, cfg, recursive);
+      if (bad) return refuseSecret(bad);
+    }
+    if (
+      recursive &&
+      checked.length === p.values.length + p.positionals.length &&
+      (first === 'rg' || first === 'du')
+    ) {
+      const bad = secretPath('.', cwd, cfg, true);
+      if (bad) return refuseSecret(bad);
+    }
+    if (
+      first === 'jq' &&
+      /\benv\b|\$ENV|\bENV\b|input_filename|\$__|get_search_list|\binput\b|\bdebug\b|\bstderr\b|\bhalt_error\b/.test(
+        p.positionals[0] ?? '',
+      )
+    )
+      return refuseScan('`jq` reading the environment or other input');
+    if (first === 'grep' && p.flags.includes('f')) {
+      // a pattern FILE is read: its path was checked above like any other
+    }
     return null;
   }
-  if (first === 'find') {
-    const bad = args.find((a) => /^-(delete|exec|execdir|ok|okdir|fprint|fprint0|fprintf|fls)$/.test(a));
-    return bad ? refuseScan(`\`find ${bad}\``) : null;
-  }
-  if (first === 'git') return scanGit(args);
-  if (DOCKER_LIKE.has(first)) return scanDocker(first, args);
+  if (first === 'find') return scanFind(args, cwd, cfg);
+  if (first === 'git') return scanGit(args, cwd, cfg);
+  if (DOCKER_LIKE.has(first) && first !== 'podman' && first !== 'nerdctl')
+    return scanDocker(first, args, cwd, cfg);
   if (first === 'npm' || first === 'pnpm') {
     const sub = args[0];
-    const ok =
-      (first === 'npm' && sub !== undefined && ['ls', 'view', 'outdated'].includes(sub)) ||
-      (first === 'pnpm' && sub !== undefined && ['ls', 'why'].includes(sub)) ||
-      (args.length === 1 && (sub === '--version' || sub === '-v'));
-    return ok ? null : refuseScan(`\`${first} ${sub ?? ''}\``.trim());
+    if (args.length === 1 && (sub === '--version' || sub === '-v')) return null;
+    if ((first === 'npm' && sub === 'ls') || (first === 'pnpm' && (sub === 'ls' || sub === 'why'))) {
+      const p = parseFlags(args.slice(1), {
+        shorts: 'arlpg',
+        longs: ['all', 'json', 'long', 'production', 'prod', 'dev', 'global', 'parseable', 'recursive'],
+        valueLongs: ['depth'],
+        maxPositionals: 3,
+      });
+      return p.bad ? refuseScan(`\`${first} ${sub} ${p.bad}\``) : null;
+    }
+    return refuseScan(`\`${first} ${sub ?? ''}\``.trim());
   }
-  if (first === 'aom') {
-    const ok = SCAN_AOM.some((p) => p.every((x, i) => args[i] === x));
-    return ok ? null : refuseScan(`\`aom ${args[0] ?? ''}\``.trim());
-  }
+  if (first === 'aom') return scanAom(args, cwd, cfg);
   return refuseScan(`\`${w0}\``);
 }
 
 /**
  * The verdict of a read-only scan on a command line, or null when it is fine. Not a security boundary against an agent that
- * is trying to get around it, but it fails closed: only the commands above pass.
+ * is trying hard to get around it, but it fails closed: only the commands and flags above pass.
  */
-export function scanVerdict(command: string, cfg: GuardConfig, cwd: string, depth = 0): GuardVerdict | null {
-  void cfg;
-  void cwd;
-  void depth;
-  for (const line of [command, ...substitutions(command)]) {
-    for (const seg of splitSegments(line)) {
-      const v = scanSegment(seg);
-      if (v) return v;
-      for (const target of seg.redirects) {
-        if (target === '/dev/null' || /^&\d$/.test(target)) continue;
-        return refuseScan(`Writing to ${target}`);
-      }
+export function scanVerdict(command: string, cfg: GuardConfig, cwd: string, _depth = 0): GuardVerdict | null {
+  const hidden = hiddenExpansion(command);
+  if (hidden) return refuseScan(`${hidden}`);
+  for (const seg of splitSegments(command)) {
+    const v = scanSegment(seg, cwd, cfg);
+    if (v) return v;
+    for (const target of seg.redirects) {
+      if (target === '/dev/null' || /^&\d$/.test(target)) continue;
+      return refuseScan(`Writing to ${target}`);
     }
   }
   return null;
