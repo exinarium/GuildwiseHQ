@@ -7,7 +7,7 @@ Audited against the working branch (`main` at 38ff083d). Artefacts:
 - **help (follow-up)**: other Help articles and per-page help. Not part of the tutorial; recorded here, not fixed.
 - **app issue**: the app is wrong, not the documentation. Raised as a backlog suggestion, not fixed.
 
-Types: outdated, missing, wrong. "Fix made" is the change in this delivery; `figure` means a screenshot re-taken from the current app (see "Figures").
+Types: outdated, missing, wrong. "Fix made" is the change in this delivery; `figure` means a screenshot that must be re-taken from the current app; none is re-taken yet (see "Figures").
 
 ## Section inventory
 
@@ -44,10 +44,10 @@ Taken from `buildNav` in `apps/web/src/components/shell/nav-config.ts` (Owner, e
 
 | Artefact | Type | Documentation says | App does | Fix made |
 |---|---|---|---|---|
-| guide | outdated | 2.2 and 4.12 do not mention Pause project, the Board/Backlog tabs, cost header or held badges | the board has all of these | 2.2 "Around the board" paragraph; figures `board-hero`, `board-left`, `board-qa` re-taken |
+| guide | outdated | 2.2 and 4.12 do not mention Pause project, the Board/Backlog tabs, cost header or held badges | the board has all of these | 2.2 "Around the board" paragraph; figures `board-hero`, `board-left`, `board-qa` to be re-taken in the capture run (not yet done) |
 | guide | missing | 4.12 lists the QA chip only | a "Waiting for my approval (n)" chip exists | chips "Waiting for my QA (n)" and "Waiting for my approval (n)" |
-| guide | outdated | FAQ phone answer lacks phone controls | Filters, Project actions, Move to… | FAQ answer rewritten; figures `m-board`, `m-card` re-taken |
-| guide | outdated | figures `phase`, `run-panel`, `card-detail` | follow-ups pick environments; "Test copy"; reviewer risk panel | figures re-taken |
+| guide | outdated | FAQ phone answer lacks phone controls | Filters, Project actions, Move to… | FAQ answer rewritten; figures `m-board`, `m-card` to be re-taken in the capture run (not yet done) |
+| guide | outdated | figures `phase`, `run-panel`, `card-detail` | follow-ups pick environments; "Test copy"; reviewer risk panel | figures to be re-taken in the capture run (not yet done) |
 | tutorial | no gaps | | | |
 | help (follow-up) | outdated | `board-and-cards.md` reading-the-board lacks the filter chips and Pause project; page help board and card detail | | follow-up |
 
@@ -88,7 +88,7 @@ Taken from `buildNav` in `apps/web/src/components/shell/nav-config.ts` (Owner, e
 |---|---|---|---|---|
 | guide | missing | 4.5 | Accept recommendation, the chips Handled by CEO and CEO decisions, groups | added |
 | guide | outdated | "Floor report" kind | retired: the CEO's "Daily report <date>" | replaced; figure `desk-floor-report` replaced by `desk-daily-report` |
-| guide | outdated | figures `desk`, `desk-question`, `m-desk` | changed | figures re-taken |
+| guide | outdated | figures `desk`, `desk-question`, `m-desk` | changed | figures to be re-taken in the capture run (not yet done) |
 | tutorial | no gaps | tour step; *tour Read more* `desk#desk-items` was outdated | CEO handling, chips, Accept recommendation | `desk#desk-items` updated |
 | help (follow-up) | outdated | `desk.md` BA routing, "Remember this for the CEO", kind list; page help desk | | follow-up |
 | app issue | wrong | | the Intake button shows for every role and with the integrations feature off (`Desk.tsx:191-193`) | backlog suggestion |
@@ -116,7 +116,7 @@ Taken from `buildNav` in `apps/web/src/components/shell/nav-config.ts` (Owner, e
 | Artefact | Type | Documentation says | App does | Fix made |
 |---|---|---|---|---|
 | guide | wrong | 4.3: "Invite" | "Invite by email" and "Send invitation" | corrected |
-| guide | missing | 4.3 | Workflows, Claude account, Owner approval, Manual QA, Full suite, Testing and decisions, PR branch prefix, Remove finished card branches, jump chips | added; figure `project-settings` re-taken |
+| guide | missing | 4.3 | Workflows, Claude account, Owner approval, Manual QA, Full suite, Testing and decisions, PR branch prefix, Remove finished card branches, jump chips | added; figure `project-settings` to be re-taken in the capture run (not yet done) |
 | guide | wrong | Appendix A: Delivery | none | corrected |
 | tutorial | no gaps | | | |
 | help (follow-up) | outdated | page help settings and projects (Paused badge; ordering disabled under a department filter) | | follow-up |
@@ -129,7 +129,7 @@ Taken from `buildNav` in `apps/web/src/components/shell/nav-config.ts` (Owner, e
 | guide | wrong | 4.4: an empty list benches the agent | hiring refuses an empty list; benching is in the Projects dialog | corrected |
 | guide | missing | 4.4 | Pause/Resume, Re-home, face re-roll | added |
 | guide | outdated | "ignore" recommendations | Dismiss and Dismiss all (N) | corrected |
-| guide | removed | "Start chat", "Send as a task" | button "Ask <CEO>" | replaced; figures `hr`, `hr-recs` re-taken |
+| guide | removed | "Start chat", "Send as a task" | button "Ask <CEO>" | replaced; figures `hr`, `hr-recs` to be re-taken in the capture run (not yet done) |
 | tutorial | no gaps | *tour Read more* `agents#hiring` lacked Planner/Pre-reviewer | | updated (`agents.md` lists the roles) |
 | help (follow-up) | wrong | `agents.md` Allow-lists: an empty list benches the agent; Pause/Resume, Re-home, Dismiss missing; page help agents | | follow-up |
 
@@ -137,7 +137,7 @@ Taken from `buildNav` in `apps/web/src/components/shell/nav-config.ts` (Owner, e
 
 | Artefact | Type | Documentation says | App does | Fix made |
 |---|---|---|---|---|
-| guide | outdated | 4.7: you, then the BAs | you, the CEO (always there), then the BAs; filter "Allowed on project"; panel "Workstations and DevOps"; "Hire a BA" | corrected; figure `org-chart` re-taken |
+| guide | outdated | 4.7: you, then the BAs | you, the CEO (always there), then the BAs; filter "Allowed on project"; panel "Workstations and DevOps"; "Hire a BA" | corrected; figure `org-chart` to be re-taken in the capture run (not yet done) |
 | tutorial | no gaps | *tour Read more* `org-chart-and-design#org-chart` lacked the CEO tier | | updated |
 | help (follow-up) | outdated | `org-chart-and-design.md` escalation; page help | | follow-up |
 
@@ -160,7 +160,7 @@ Taken from `buildNav` in `apps/web/src/components/shell/nav-config.ts` (Owner, e
 | Artefact | Type | Documentation says | App does | Fix made |
 |---|---|---|---|---|
 | guide | wrong | 4.7: "Start a design chat" | on the "Design with the BA" tab, needs a BA allowed on any project; the page is titled "Organization" | corrected |
-| guide | outdated | 4.26 and 4.20: "Design" stage | "Investigate & design"; "Merge review" stage | corrected; figure `org-workflows` re-taken |
+| guide | outdated | 4.26 and 4.20: "Design" stage | "Investigate & design"; "Merge review" stage | corrected; figure `org-workflows` to be re-taken in the capture run (not yet done) |
 | tutorial | missing | no tour step | sidebar entry Roles & workflows | step `org` (title "Roles & workflows") |
 | help (follow-up) | outdated | `org-chart-and-design.md` current version, Code v6 stages, "Create department"; page help builder | | follow-up |
 | app issue | outdated | | `OrgDesigner.tsx:696` "Only the organization owner designs with the BA" (Admins can); `:652,707` "HR board" | backlog suggestion (stale UI copy) |
@@ -172,7 +172,7 @@ Taken from `buildNav` in `apps/web/src/components/shell/nav-config.ts` (Owner, e
 | guide | missing | 3.4 | Pair workstation, Pair with a code, Pair it with a code instead | added |
 | guide | missing | 4.24a | Claude accounts table | added |
 | guide | wrong | 9.1 wizard wording | "Waiting for you to run the command" | corrected |
-| guide | outdated | 9.2 "Disconnected" | no such state | removed; figure `ws-offline` re-taken |
+| guide | outdated | 9.2 "Disconnected" | no such state | removed; figure `ws-offline` to be re-taken in the capture run (not yet done) |
 | tutorial | no gaps | | | |
 | help (follow-up) | outdated | `workstations-and-installer.md` (Check for updates, card contents); page help | | follow-up |
 | app issue | wrong | | three labels for pairing (minor) | backlog suggestion (stale UI copy) |
@@ -190,7 +190,7 @@ Taken from `buildNav` in `apps/web/src/components/shell/nav-config.ts` (Owner, e
 
 | Artefact | Type | Documentation says | App does | Fix made |
 |---|---|---|---|---|
-| guide | outdated | 3.4a | one Claude tile per account, Connect another account, MCP Sign in / Sign out | corrected; figure `integrations` re-taken |
+| guide | outdated | 3.4a | one Claude tile per account, Connect another account, MCP Sign in / Sign out | corrected; figure `integrations` to be re-taken in the capture run (not yet done) |
 | guide | wrong | Appendix A puts integrations under Automations | own sidebar entry | corrected |
 | tutorial | missing | no tour step | sidebar entry Integrations | step `integrations`; *tour Read more* `integrations#connect` brought up to date |
 | help (follow-up) | missing | page help integrations | | follow-up |
@@ -225,7 +225,7 @@ Taken from `buildNav` in `apps/web/src/components/shell/nav-config.ts` (Owner, e
 
 | Artefact | Type | Documentation says | App does | Fix made |
 |---|---|---|---|---|
-| guide | missing | 4.5 | Project filter | added; figure `ledger` re-taken |
+| guide | missing | 4.5 | Project filter | added; figure `ledger` to be re-taken in the capture run (not yet done) |
 | tutorial | outdated | *tour Read more* `ledger-and-vaults#ledger` | Retire, Show retired, the "May contradict another order" badge | updated |
 | help (follow-up) | outdated | "Editing a standing order", "Which vault an agent reads"; page help | | follow-up |
 
@@ -233,7 +233,7 @@ Taken from `buildNav` in `apps/web/src/components/shell/nav-config.ts` (Owner, e
 
 | Artefact | Type | Documentation says | App does | Fix made |
 |---|---|---|---|---|
-| guide | no gaps | local folders already covered | | figure `vaults` re-taken |
+| guide | no gaps | local folders already covered | | figure `vaults` to be re-taken in the capture run (not yet done) |
 | tutorial | outdated | step: "sync to your workstations … Secrets stay on the machines you choose" | git vaults sync; a project vault can be a local folder | step text; *tour Read more* `ledger-and-vaults#vaults` |
 | help (follow-up) | outdated | the article does not say how a local-folder vault is created; page help | | follow-up |
 | app issue | wrong | | the empty state shows "Register a vault" to users who cannot register; the dialog opens empty (`Vaults.tsx:74-77,293`) | backlog suggestion (stale UI copy) |
@@ -242,7 +242,7 @@ Taken from `buildNav` in `apps/web/src/components/shell/nav-config.ts` (Owner, e
 
 | Artefact | Type | Documentation says | App does | Fix made |
 |---|---|---|---|---|
-| guide | missing | no section | Notifications (devices, quiet hours), Monday briefing, two-factor, blog digest, expert mode | new 4.30 Your settings; figure `settings` re-taken |
+| guide | missing | no section | Notifications (devices, quiet hours), Monday briefing, two-factor, blog digest, expert mode | new 4.30 Your settings; figure `settings` to be re-taken in the capture run (not yet done) |
 | guide | wrong | 3.2 button name | "Set up" | corrected |
 | guide | wrong | 4.15 "Account, Security" | "Forgot your password?" | corrected |
 | tutorial | wrong | step: "when your daily report arrives"; Read more `getting-started#first-login` | the time is set on the CEO's Reporting & alerts tab; Notifications and Monday briefing exist | step text; new Help section `getting-started#your-settings` |
@@ -288,7 +288,7 @@ Taken from `buildNav` in `apps/web/src/components/shell/nav-config.ts` (Owner, e
 
 ## Figures
 
-Not yet taken. The guide already references the new figures `backlog`, `environments`, `releases`, `ceo`, `ceo-reporting`, `ceo-chat`, `metrics`, `org-project-links` and `desk-daily-report`. The capture spec (`e2e/tests/guide-screenshots.spec.ts`) needs these changes, which belong to the testers: the `run-settings` capture must photograph the Environments page ("Your app"), because the panel it used is gone; the Desk capture must select the CEO's "Daily report <date>" item instead of "Floor report"; and the new pages above need captures. Then rebuild with `prepare-assets.mjs`, `assemble-guide.mjs` and `build-guide.mjs`. The figures of changed screens listed in the sections above are re-taken in the same run.
+Not yet taken. The guide already references the new figures `backlog`, `environments`, `releases`, `ceo`, `ceo-reporting`, `ceo-chat`, `metrics`, `org-project-links` and `desk-daily-report`. The capture spec (`e2e/tests/guide-screenshots.spec.ts`) needs these changes, which belong to the testers: the `run-settings` capture must photograph the Environments page ("Your app"), because the panel it used is gone; the Desk capture must select the CEO's "Daily report <date>" item instead of "Floor report"; and the new pages above need captures. Then rebuild with `prepare-assets.mjs`, `assemble-guide.mjs` and `build-guide.mjs`. The figures of changed screens listed in the sections above are to be re-taken in the same run.
 
 ## Intro video: what is outdated (no fix; input for the video plan)
 

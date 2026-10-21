@@ -44,7 +44,7 @@ Members who are not Owner or Admin see the progress but cannot change the budget
 To change how costs appear:
 
 1. Go to **Costs** (sidebar: Organization; Owner and Admin).
-2. Open the **Currency** panel (the prices used for the estimates are listed under it).
+2. Open the **Currency and prices** panel (the prices used for the estimates are listed under it).
 3. Enter the **Currency** code (e.g., `EUR`) and the rate ("units per 1 USD"; e.g., `0.92` for euros), then save.
 
 Budgets and every amount you see use the currency you set. Changing the rate changes how all history is shown, not what was recorded.
