@@ -383,6 +383,10 @@ describe('environment place, removal, discard and stop', () => {
     const stopped = await call('POST', `${base()}/delivery/setup/stop-guided`, { confirm: true });
     expect(stopped.deliveryMode).toBe('instructions');
     expect(stopped.targets.map((t: any) => t.name).sort()).toEqual(['p5-local', 'p5-prod']);
+    // the saved setup is forgotten by the page, so no place is used by it any more (the history stays in the log)
+    expect(stopped.current.setup).toBeNull();
+    expect((await call('GET', `${base()}/places`)).places.every((p: any) => p.canRemove)).toBe(true);
+    expect((await q(`SELECT 1 FROM events WHERE type='DeliveryRecipeApproved'`)).length).toBeGreaterThan(0);
     // only the project owner
     const m = await d.member();
     expect(
@@ -662,7 +666,7 @@ describe('phase follow-ups can name an environment', () => {
     expect(bad.status).toBe(422);
     expect(bad.body.error.code).toBe('unknown_environment');
     const none = await mk('Phase C', [{ kind: 'deploy' }]);
-    expect(none.status).toBe(422);
+    expect(none.status).toBe(400);
     const old = await mk('Phase D', [{ kind: 'deploy', targetId: d.targets.local }]);
     expect(old.status).toBe(201);
     expect(

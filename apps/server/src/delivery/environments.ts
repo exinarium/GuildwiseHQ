@@ -540,6 +540,24 @@ export async function stopGuided(ctx: Ctx, user: AuthSession['user'], projectId:
     actor: userActor(user.id),
     scope: projectScope(p.org_id, projectId),
   });
+  // the saved setup is forgotten by the page (its files stay in the vault and its history in the log), so no place is "used" by it
+  const recipe = await loadRecipeRow(ctx.pool, projectId);
+  if (recipe && (recipe.present || recipe.approved_hash))
+    events.push({
+      streamId: streamId.project(projectId),
+      event: {
+        type: 'DeliveryRecipeReset' as const,
+        payload: {
+          recipeId: recipe.id,
+          orgId: p.org_id,
+          projectId,
+          hash: recipe.approved_hash ?? recipe.observed_hash ?? null,
+          reason: 'stopped using guided deploys',
+        },
+      },
+      actor: userActor(user.id),
+      scope: projectScope(p.org_id, projectId),
+    });
   await ctx.store.append(events as never);
 }
 

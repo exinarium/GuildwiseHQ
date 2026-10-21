@@ -15,6 +15,7 @@ S="${FAKE_STATE:-/var/fakedocker}"
 mkdir -p "$S/images" "$S/c" "$S/www"
 echo "docker $*" >> "$S/calls.log"
 
+[ -z "${FAKE_REGISTRY_MAP:-}" ] && [ -f "$S/registry-map" ] && FAKE_REGISTRY_MAP=$(cat "$S/registry-map")
 real_docker() { PATH="${FAKE_REAL_PATH:-/usr/bin:/bin}" exec docker "$@"; }
 if [ -n "${FAKE_REAL_REGISTRY:-}" ]; then
   for a in "$@"; do
@@ -68,14 +69,24 @@ effective_image() { # $1 service: the last file that names an image wins (an ove
   printf %s "$out"
 }
 
-serve() { # the app answers /ready on its published port, from a tiny web server
+serve() { # the app answers /ready on its published port, from a tiny web server (busybox httpd, else python)
   local port=$1
   [ -n "$port" ] || return 0
-  command -v busybox >/dev/null 2>&1 || return 0
-  pkill -f "httpd -p $port " 2>/dev/null
+  if [ -f "$S/www.$port.pid" ]; then kill "$(cat "$S/www.$port.pid")" 2>/dev/null; rm -f "$S/www.$port.pid"; fi
   rm -f "$S/www/ready"
   [ -f "$S/unhealthy" ] || echo ok > "$S/www/ready"
-  busybox httpd -p "$port" -h "$S/www" 2>/dev/null || true
+  if command -v httpd >/dev/null 2>&1; then
+    httpd -f -p "$port" -h "$S/www" </dev/null >/dev/null 2>&1 &
+    echo $! > "$S/www.$port.pid"
+  elif command -v busybox >/dev/null 2>&1 && busybox --list 2>/dev/null | grep -qx httpd; then
+    busybox httpd -f -p "$port" -h "$S/www" </dev/null >/dev/null 2>&1 &
+    echo $! > "$S/www.$port.pid"
+  elif command -v python3 >/dev/null 2>&1; then
+    python3 -m http.server "$port" --bind 0.0.0.0 --directory "$S/www" </dev/null >/dev/null 2>&1 &
+    echo $! > "$S/www.$port.pid"
+  fi
+  sleep 1
+  return 0
 }
 
 cmd=${1:-}; shift
@@ -125,7 +136,7 @@ case "$cmd" in
       grep -qx -- "$name" "$FAKE_REGISTRY_FILE" 2>/dev/null || { echo "Error response from daemon: manifest for $name not found" >&2; exit 1; }
       printf %s "$name" > "$(img_file "$name")"; echo "Status: Downloaded newer image for $name"; exit 0
     fi
-    wget -q -O /dev/null --header 'Accept: application/vnd.docker.distribution.manifest.v2+json' "http://$to/v2/$repo/manifests/$tag" 2>/dev/null \
+    wget -q -O /dev/null --header 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.docker.distribution.manifest.v2+json' "http://$to/v2/$repo/manifests/$tag" 2>/dev/null \
       || { echo "Error response from daemon: manifest for $name not found" >&2; exit 1; }
     printf %s "$name" > "$(img_file "$name")"; echo "Status: Downloaded newer image for $name"; exit 0 ;;
   volume) [ "$1" = ls ] && { for f in "$S"/c/*; do [ -f "$f" ] && echo "VOLUME $(basename "$f")_data"; done; }; exit 0 ;;
@@ -146,7 +157,11 @@ case "$cmd" in
     action=${1:-}; shift
     first=${COMPOSE_FILES[0]:-}
     case "$action" in
-      config) for f in "${COMPOSE_FILES[@]}"; do [ -f "$f" ] || { echo "no such file: $f" >&2; exit 1; }; done; exit 0 ;;
+      config)
+        if [ "${1:-}" = --services ]; then
+          awk '/^services:/ { ins = 1; next } ins && /^[^ #]/ { ins = 0 } ins && match($0, /^  [A-Za-z0-9._-]+:/) { print substr($0, 3, RLENGTH - 3) }' "${COMPOSE_FILES[@]}"; exit 0
+        fi
+        for f in "${COMPOSE_FILES[@]}"; do [ -f "$f" ] || { echo "no such file: $f" >&2; exit 1; }; done; exit 0 ;;
       ps) [ "${1:-}" = -q ] && shift; svc=${1:-}; [ -f "$S/c/$svc" ] && sed -n 1p "$S/c/$svc"; exit 0 ;;
       build)
         svc=${*: -1}
