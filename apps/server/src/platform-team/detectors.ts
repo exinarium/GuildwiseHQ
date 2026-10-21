@@ -110,7 +110,8 @@ async function scanLoops(ctx: Ctx): Promise<number> {
     if (!c) continue;
     const questions = d.fingerprint.startsWith('loop:questions:');
     // A question loop belongs to the stage its questions were asked in: the card moves on while they stay in the window.
-    const stage = (questions && typeof d.evidence.stage === 'string' ? d.evidence.stage : null) ?? c.stage;
+    const askedStage = (d.evidence as Record<string, unknown>).stage;
+    const stage = (questions && typeof askedStage === 'string' ? askedStage : null) ?? c.stage;
     const episode = questions
       ? `q:${Math.floor(ctx.clock.now().getTime() / (2 * 3_600_000))}`
       : String(d.evidence.episodeId ?? '');
