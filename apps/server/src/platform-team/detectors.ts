@@ -109,27 +109,29 @@ async function scanLoops(ctx: Ctx): Promise<number> {
     );
     if (!c) continue;
     const questions = d.fingerprint.startsWith('loop:questions:');
+    // A question loop belongs to the stage its questions were asked in: the card moves on while they stay in the window.
+    const stage = (questions && typeof d.evidence.stage === 'string' ? d.evidence.stage : null) ?? c.stage;
     const episode = questions
       ? `q:${Math.floor(ctx.clock.now().getTime() / (2 * 3_600_000))}`
       : String(d.evidence.episodeId ?? '');
     await reportBug(ctx, {
       source: 'loop',
-      signature: `loop:${c.project_id}:${c.workflow_key}:${c.stage}${questions ? ':questions' : ''}`,
+      signature: `loop:${c.project_id}:${c.workflow_key}:${stage}${questions ? ':questions' : ''}`,
       title: questions
-        ? `Cards loop in stage ${c.stage} (${c.workflow_key}): question after question`
-        : `Cards loop in stage ${c.stage} (${c.workflow_key}): shifts keep ending without a result`,
-      description: `A card went round in stage ${c.stage} (${d.count}).`,
+        ? `Cards loop in stage ${stage} (${c.workflow_key}): question after question`
+        : `Cards loop in stage ${stage} (${c.workflow_key}): shifts keep ending without a result`,
+      description: `A card went round in stage ${stage} (${d.count}).`,
       evidenceKey: `${c.id}:${episode}`,
       severityHint: 'critical',
-      scope: { projectId: c.project_id, workflowKey: c.workflow_key, stageId: c.stage },
+      scope: { projectId: c.project_id, workflowKey: c.workflow_key, stageId: stage },
       clientOrgId: clientOf(c.org_id, platform),
       diagnostics: {
         kind: questions ? 'loop_questions' : 'loop',
         summary: questions
-          ? `A card keeps asking questions in stage ${c.stage} of workflow ${c.workflow_key} (${d.count} question shifts).`
-          : `A card keeps failing in stage ${c.stage} of workflow ${c.workflow_key}: ${d.count} failures in one episode.`,
+          ? `A card keeps asking questions in stage ${stage} of workflow ${c.workflow_key} (${d.count} question shifts).`
+          : `A card keeps failing in stage ${stage} of workflow ${c.workflow_key}: ${d.count} failures in one episode.`,
         workflow: c.workflow_key,
-        stage: c.stage,
+        stage,
         count: d.count,
       },
       extended: { cardRef: c.ref },
