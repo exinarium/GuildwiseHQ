@@ -184,6 +184,8 @@ export const PhaseFollowupDtoSchema = z.object({
   label: z.string(),
   targetId: z.uuid().nullable(),
   targetName: z.string().nullable(),
+  /** A deploy follow-up that names an environment of the guided setup ("release to the live site"). Absent from an older server. */
+  environment: z.string().nullable().optional(),
   platform: z.string().nullable(),
   instruction: z.string(),
   note: z.string(),
