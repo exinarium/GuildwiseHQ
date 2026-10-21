@@ -1,16 +1,11 @@
 import {
   ApproveRecipeRequestSchema,
-  MergePlacesRequestSchema,
-  RemoveEnvironmentRequestSchema,
-  RemovePlaceRequestSchema,
-  RollbackRequestSchema,
-  SetEnvironmentPlaceRequestSchema,
-  StopGuidedRequestSchema,
   ConnectRequestSchema,
   DeployRequestSchema,
   HostKeyScanRequestSchema,
   IdParamsSchema,
   KeyCreateRequestSchema,
+  MergePlacesRequestSchema,
   MoveCompleteRequestSchema,
   MoveStartRequestSchema,
   MoveSwitchRequestSchema,
@@ -20,14 +15,19 @@ import {
   PublishSetupRequestSchema,
   RejectRecipeRequestSchema,
   ReleaseRequestSchema,
+  RemoveEnvironmentRequestSchema,
+  RemovePlaceRequestSchema,
   RetireRequestSchema,
   RevokeKeyRequestSchema,
+  RollbackRequestSchema,
   SaveSetupDraftRequestSchema,
   SetDeliveryModeRequestSchema,
   SetDeploySecretRequestSchema,
+  SetEnvironmentPlaceRequestSchema,
   SetGateBindingRequestSchema,
   SetGatePresetRequestSchema,
   SetupDryRunRequestSchema,
+  StopGuidedRequestSchema,
   UseProposalRequestSchema,
 } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
@@ -37,6 +37,16 @@ import { orgRoleOf } from '../auth/org-context.ts';
 import { loadVisibleProject } from '../authz/scope.ts';
 import type { Ctx } from '../context.ts';
 import { one } from '../db/sql.ts';
+import { removeGatePreset, setDeploySecret, setGateBinding, setGatePreset } from '../delivery/admin.ts';
+import {
+  connectBlockedReason,
+  getOp,
+  requestConnect,
+  requestHostKeyScan,
+  requestKey,
+  requestPrepare,
+  requestRevoke,
+} from '../delivery/connect.ts';
 import {
   discardDraft,
   earlierReleases,
@@ -50,16 +60,6 @@ import {
   setEnvironmentPlace,
   stopGuided,
 } from '../delivery/environments.ts';
-import { removeGatePreset, setDeploySecret, setGateBinding, setGatePreset } from '../delivery/admin.ts';
-import {
-  connectBlockedReason,
-  getOp,
-  requestConnect,
-  requestHostKeyScan,
-  requestKey,
-  requestPrepare,
-  requestRevoke,
-} from '../delivery/connect.ts';
 import {
   cancelMove,
   completeMove,

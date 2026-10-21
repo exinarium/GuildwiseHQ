@@ -1,13 +1,13 @@
 import { z } from 'zod';
 import { ChangeGroupSchema } from '../delivery/changes.ts';
 import { DeployKeyDtoSchema } from '../delivery/connect.ts';
+import { ProposalMergeInfoSchema } from '../delivery/environments.ts';
 import {
   ConnectionStateSchema,
   ProbeErrorSchema,
   ProbeReportSchema,
   ProbeScopeSchema,
 } from '../delivery/probe.ts';
-import { ProposalMergeInfoSchema } from '../delivery/environments.ts';
 import { DeliverySetupSchema } from '../delivery/setup.ts';
 import { ProposalDtoSchema, ScanStateDtoSchema } from './api.ts';
 

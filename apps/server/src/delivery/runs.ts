@@ -532,7 +532,12 @@ export async function requestDeployRun(ctx: Ctx, input: RequestDeployInput): Pro
       if (input.rollback) {
         commit = input.rollback.commit;
         if (gates.some((g) => g.gate.freeze)) {
-          refuse('frozen', 'releases are frozen: nothing goes out, not even an earlier version', ['releases are frozen'], commit);
+          refuse(
+            'frozen',
+            'releases are frozen: nothing goes out, not even an earlier version',
+            ['releases are frozen'],
+            commit,
+          );
           continue;
         }
         finalVerdict = {

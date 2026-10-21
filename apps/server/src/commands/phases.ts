@@ -108,7 +108,10 @@ export async function normalizeFollowups(
       continue;
     }
     if (f.kind === 'deploy' && !f.targetId)
-      throw unprocessable('followup_needs_target', 'a deploy follow-up names an environment or a deploy target');
+      throw unprocessable(
+        'followup_needs_target',
+        'a deploy follow-up names an environment or a deploy target',
+      );
     if (f.kind === 'deploy' || (f.kind === 'regression' && f.targetId))
       await liveTarget(db, projectId, f.targetId as string);
     if (f.kind === 'regression' && f.mock && !(await mockFieldsAllowed(ctx, db, projectId)))

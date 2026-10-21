@@ -1,10 +1,10 @@
 import {
+  AnswerProposalRequestSchema,
   ConfirmSuiteRequestSchema,
   ExtendRunRequestSchema,
   IdParamsSchema,
   PlanConsentRequestSchema,
   ProposalsQuerySchema,
-  AnswerProposalRequestSchema,
   ResolveProposalRequestSchema,
   RestartRunRequestSchema,
   RunsQuerySchema,

@@ -671,7 +671,9 @@ describe('Scan with DevOps for the deploy setup', () => {
     expect(state.scan).not.toBeNull();
 
     // a question without an answer blocks it; the answer is stored and applied to the proposal itself
-    const early = await req('POST', `${base()}/delivery/setup/use-proposal`, { proposalId: state.proposal.id });
+    const early = await req('POST', `${base()}/delivery/setup/use-proposal`, {
+      proposalId: state.proposal.id,
+    });
     expect(early.status).toBe(409);
     expect(early.body.error.code).toBe('questions_open');
     const wrong = await req('POST', `/api/setup-proposals/${state.proposal.id}/answers`, {

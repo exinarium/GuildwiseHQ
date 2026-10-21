@@ -1,3 +1,4 @@
+import type { DeliverySetup, DeployStep, SetupEnv } from './setup.ts';
 import {
   commitChecks,
   commonFunctions,
@@ -15,7 +16,6 @@ import {
   stepNumberComment,
   urlWord,
 } from './setup-compile.ts';
-import type { DeliverySetup, DeployStep, SetupEnv } from './setup.ts';
 
 /**
  * The script of an environment that runs DIRECTLY on a machine (no Docker): `<appDir>/releases/<12 characters of the commit>`
@@ -173,7 +173,7 @@ function directStep(s: DeployStep, i: number, env: SetupEnv): string[] {
         '  # shared files (settings, uploads) live in $APP_DIR/shared and are linked into every release; a missing one is copied once from the running release',
         d.shared.length
           ? `  remote "$APP_DIR" "$RELEASE" "$CURRENT_LINK" ${d.shared.map(shq).join(' ')} <<'${QUIET}'`
-          : "  remote \"$APP_DIR\" \"$RELEASE\" \"$CURRENT_LINK\" <<'AOM_REMOTE'",
+          : '  remote "$APP_DIR" "$RELEASE" "$CURRENT_LINK" <<\'AOM_REMOTE\'',
         'set -eu',
         'app=$1; rel=$2; cur=$3; shift 3',
         'for p in "$@"; do',
@@ -292,7 +292,7 @@ export function directScript(setup: DeliverySetup, env: SetupEnv): string {
   }
   out.push(
     ...managerFunctions(env),
-    '# what runs now: where the link points, or what is at the link\'s place',
+    "# what runs now: where the link points, or what is at the link's place",
     `STATE="$(remote "$APP_DIR" "$CURRENT_LINK" <<'${QUIET}'`,
     'set -eu',
     'dir=$1; link=$2',

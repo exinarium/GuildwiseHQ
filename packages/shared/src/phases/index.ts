@@ -87,14 +87,18 @@ const specBase = <I extends z.ZodType>(id: I) => ({ id, note: z.string().max(400
  */
 const makeSpec = <I extends z.ZodType>(id: I) =>
   z.discriminatedUnion('kind', [
-    z.object({
-      ...specBase(id),
-      kind: z.literal('deploy'),
-      /** The old way: a place (deploy target). Kept working. */
-      targetId: z.uuid().optional(),
-      /** The new way: an environment name of the guided setup ("release to the live site"). One of the two is required. */
-      environment: EnvNameSchema.optional(),
-    }),
+    z
+      .object({
+        ...specBase(id),
+        kind: z.literal('deploy'),
+        /** The old way: a place (deploy target). Kept working. */
+        targetId: z.uuid().optional(),
+        /** The new way: an environment name of the guided setup ("release to the live site"). One of the two is required. */
+        environment: EnvNameSchema.optional(),
+      })
+      .refine((x) => !!x.targetId || !!x.environment, {
+        message: 'a deploy follow-up names an environment or a deploy target',
+      }),
     z.object({
       ...specBase(id),
       kind: z.literal('regression'),

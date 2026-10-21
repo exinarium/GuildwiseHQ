@@ -127,7 +127,8 @@ esac`;
       systemctl: FAKE_SYSTEMCTL,
       ss: FAKE_SS,
       pm2: FAKE_PM2,
-      readlink: 'case "$1" in /proc/777/cwd) echo "$FAKE_ROOT_HOME/worker-dir" ;; /proc/4242/cwd) echo "$FAKE_APP/current" ;; *) /usr/bin/readlink "$@" ;; esac',
+      readlink:
+        'case "$1" in /proc/777/cwd) echo "$FAKE_ROOT_HOME/worker-dir" ;; /proc/4242/cwd) echo "$FAKE_APP/current" ;; *) /usr/bin/readlink "$@" ;; esac',
     });
     mkdirSync(join(root, 'worker-dir'), { recursive: true });
     const env = {
@@ -146,7 +147,12 @@ esac`;
       expect.arrayContaining(['systemd:shop.service', 'pm2:api', 'process:worker']),
     );
     const shop = svc.find((s) => s.name === 'shop.service');
-    expect(shop).toMatchObject({ workingDir: `${app}/current`, user: 'shop', ports: [3000], releaseLayout: true });
+    expect(shop).toMatchObject({
+      workingDir: `${app}/current`,
+      user: 'shop',
+      ports: [3000],
+      releaseLayout: true,
+    });
     // the command is shortened and nothing that looks like a value survives
     expect(shop?.command).toBe('/usr/bin/node server.js --port 3000');
     expect(JSON.stringify(r)).not.toContain('abc123');
@@ -548,10 +554,10 @@ case "$1" in
   ps) printf '%s\\n' "${container('dcode-flow5-remote-dcode-server-1', 'dcode-server:remote29-showcase-abc', 'running', '0.0.0.0:5500->500/tcp', 'dcode-flow5-remote', 'dcode-server', join(flow, 'compose.yaml'), flow)}" "${container('portainer', 'portainer/portainer-ce', 'running', '9000/tcp')}" ;;
 esac`,
     });
-    const r = await runDeployProbe(
-      payload({ scope: 'ssh_target', host: 'srv' }),
-      { env: { ...fake.env, HOME: server }, home: server },
-    );
+    const r = await runDeployProbe(payload({ scope: 'ssh_target', host: 'srv' }), {
+      env: { ...fake.env, HOME: server },
+      home: server,
+    });
     expect(r.ok, JSON.stringify(r)).toBe(true);
     if (!r.ok) return;
     const files = r.report.composeFiles.map((c) => c.path);

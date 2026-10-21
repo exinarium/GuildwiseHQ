@@ -31,10 +31,7 @@ export const setupEvents = [
    * The user answered questions of an open proposal. The event carries the whole updated proposal (the answers stored on the
    * questions and applied to the proposed run plan or setup), so a replay needs nothing else.
    */
-  defineEvent(
-    'SetupProposalAnswered',
-    z.object({ proposalId: Id, proposal: SetupProposalSchema, by: Id }),
-  ),
+  defineEvent('SetupProposalAnswered', z.object({ proposalId: Id, proposal: SetupProposalSchema, by: Id })),
   /** The user used the proposal (`accepted`), or put it away (`dismissed`). Also `superseded` by a newer one. */
   defineEvent(
     'SetupProposalResolved',

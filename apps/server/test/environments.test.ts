@@ -89,7 +89,12 @@ const setup = () => ({
 });
 
 function inspected(c: Extract<ReturnType<typeof compileSetup>, { ok: true }>): RecipeInspectResult {
-  const files = c.files.map((f) => ({ path: f.path, mode: f.mode, sha256: sha256Hex(f.content), secret: null }));
+  const files = c.files.map((f) => ({
+    path: f.path,
+    mode: f.mode,
+    sha256: sha256Hex(f.content),
+    secret: null,
+  }));
   const rec = parseRecipe(c.files.find((f) => f.path === 'recipe.yaml')?.content as string);
   if (!rec.ok) throw new Error(rec.error);
   return {
@@ -136,7 +141,9 @@ beforeEach(async () => {
   await q(`DELETE FROM deploy_runs WHERE project_id=$1`, [d.w.projectId]);
   await q(`DELETE FROM setup_proposals WHERE project_id=$1`, [d.w.projectId]);
   await q(`DELETE FROM deploy_target_keys WHERE project_id=$1`, [d.w.projectId]);
-  await q(`DELETE FROM deploy_targets WHERE project_id=$1 AND name NOT IN ('p5-local','p5-prod')`, [d.w.projectId]);
+  await q(`DELETE FROM deploy_targets WHERE project_id=$1 AND name NOT IN ('p5-local','p5-prod')`, [
+    d.w.projectId,
+  ]);
   await q(`DELETE FROM runner_commands WHERE type IN ('recipe.write','deploy.revoke','deploy.exec')`);
   await q(`UPDATE projects SET delivery_mode='instructions' WHERE id=$1`, [d.w.projectId]);
   await q(`UPDATE workstation_capabilities SET capabilities=$2::text[] WHERE workstation_id=$1`, [
@@ -170,7 +177,12 @@ describe('places', () => {
     await saved();
     const dup = await addTarget('p5-prod-again', { at: new Date(Date.now() + 60_000) });
     await call('PUT', `${base()}/delivery/setup`, {
-      setup: { environments: [setup().environments[0], { ...setup().environments[1], name: 'demo', label: 'Demo', target: 'p5-prod-again' }] },
+      setup: {
+        environments: [
+          setup().environments[0],
+          { ...setup().environments[1], name: 'demo', label: 'Demo', target: 'p5-prod-again' },
+        ],
+      },
     });
     const list = (await call('GET', `${base()}/places`)).places;
     const prod = list.find((p: any) => p.name === 'p5-prod');
@@ -262,7 +274,14 @@ describe('places', () => {
     const res = await call(
       'POST',
       `${base()}/deploy-targets`,
-      { name: 'another-name', kind: 'remote_ssh', workstationId: d.w.workstationId, host: 'prod', notes: '', reuseExisting: true },
+      {
+        name: 'another-name',
+        kind: 'remote_ssh',
+        workstationId: d.w.workstationId,
+        host: 'prod',
+        notes: '',
+        reuseExisting: true,
+      },
       200,
     );
     expect(res).toMatchObject({ id: d.targets.prod, reused: true });
@@ -303,10 +322,16 @@ describe('environment place, removal, discard and stop', () => {
     await saved();
     const second = await addTarget('second-server', { host: 'second' });
     const st = await call('PUT', `${base()}/delivery/setup/environments/live/place`, { placeId: second });
-    expect(st.draft.setup.environments[1]).toMatchObject({ target: 'second-server', host: 'second', name: 'live' });
+    expect(st.draft.setup.environments[1]).toMatchObject({
+      target: 'second-server',
+      host: 'second',
+      name: 'live',
+    });
     // the other environment is not touched
     expect(st.draft.setup.environments[0].target).toBe('p5-local');
-    const wrong = await req('PUT', `${base()}/delivery/setup/environments/live/place`, { placeId: d.targets.local });
+    const wrong = await req('PUT', `${base()}/delivery/setup/environments/live/place`, {
+      placeId: d.targets.local,
+    });
     expect(wrong.status).toBe(422);
     expect(wrong.body.error.code).toBe('kind_mismatch');
   });
@@ -335,7 +360,11 @@ describe('environment place, removal, discard and stop', () => {
     expect(prev.files.map((f: any) => f.path)).not.toContain('scripts/live.sh');
     // the workstation writes it; the Owner approves without a new try, because the environment that is left is exactly as it was
     await observeRecipe(d.w.t.app.ctx, d.w.projectId, inspected(compiled(draft)), d.w.workstationId);
-    const row = (await q('SELECT observed_hash, approved_hash FROM delivery_recipes WHERE project_id=$1', [d.w.projectId]))[0];
+    const row = (
+      await q('SELECT observed_hash, approved_hash FROM delivery_recipes WHERE project_id=$1', [
+        d.w.projectId,
+      ])
+    )[0];
     expect(row.observed_hash).not.toBe(row.approved_hash);
     const st = await call('GET', `${base()}/delivery/setup`);
     expect(st.current.dryRunMissing).toEqual([]);
@@ -356,7 +385,9 @@ describe('environment place, removal, discard and stop', () => {
     expect(stopped.targets.map((t: any) => t.name).sort()).toEqual(['p5-local', 'p5-prod']);
     // only the project owner
     const m = await d.member();
-    expect((await req('POST', `${base()}/delivery/setup/discard-draft`, {}, m.cookie)).status).toBeGreaterThanOrEqual(403);
+    expect(
+      (await req('POST', `${base()}/delivery/setup/discard-draft`, {}, m.cookie)).status,
+    ).toBeGreaterThanOrEqual(403);
   });
 });
 
@@ -418,7 +449,12 @@ describe('what is live, status and rollback', () => {
     expect(byName.test).toMatchObject({ role: 'test', state: 'healthy', placeName: 'p5-local' });
     expect(byName.test.current.version).toBe('a1b2c3d');
     expect(byName.test.updates).toBe('Updates by itself after each merge');
-    expect(byName.live).toMatchObject({ role: 'live', releasedBy: 'owner', placeName: 'p5-prod', approvalState: 'approved' });
+    expect(byName.live).toMatchObject({
+      role: 'live',
+      releasedBy: 'owner',
+      placeName: 'p5-prod',
+      approvalState: 'approved',
+    });
     expect(byName.live.current.runId).toBe(live);
     expect(byName.live.rules.join(' ')).toContain('Test site is healthy on the same version for 10 minutes');
     expect(s.deliveryMode).toBe('instructions');
@@ -430,8 +466,11 @@ describe('what is live, status and rollback', () => {
     await run('test', 'ffffffffffff0000', 1, { status: 'failed', health: '{"ok":false}' });
     let s = await call('GET', `${base()}/environments/status`);
     expect(s.environments.find((e: any) => e.env === 'test').state).toBe('failed');
-    await q(`INSERT INTO deploy_runs (id, org_id, project_id, recipe_id, env, target_name, hash, commit, trigger, requested_by, status,
-       released_by_policy, created_at, updated_at) VALUES ($1,$2,$3,$4,'live','p5-prod',$5,'abc1234','request','{"kind":"owner","id":null}','running','owner',now(),now())`, [randomUUID(), d.orgId, d.w.projectId, randomUUID(), 'c'.repeat(64)]);
+    await q(
+      `INSERT INTO deploy_runs (id, org_id, project_id, recipe_id, env, target_name, hash, commit, trigger, requested_by, status,
+       released_by_policy, created_at, updated_at) VALUES ($1,$2,$3,$4,'live','p5-prod',$5,'abc1234','request','{"kind":"owner","id":null}','running','owner',now(),now())`,
+      [randomUUID(), d.orgId, d.w.projectId, randomUUID(), 'c'.repeat(64)],
+    );
     s = await call('GET', `${base()}/environments/status`);
     expect(s.environments.find((e: any) => e.env === 'live').state).toBe('updating');
   });
@@ -439,10 +478,15 @@ describe('what is live, status and rollback', () => {
   it('an environment that is only in the draft is a draft; an open question counts for the page', async () => {
     await saved();
     await call('PUT', `${base()}/delivery/setup`, {
-      setup: { environments: [...setup().environments, { ...setup().environments[0], name: 'demo', label: 'Demo' }] },
+      setup: {
+        environments: [...setup().environments, { ...setup().environments[0], name: 'demo', label: 'Demo' }],
+      },
     });
     const s = await call('GET', `${base()}/environments/status`);
-    expect(s.environments.find((e: any) => e.env === 'demo')).toMatchObject({ state: 'draft', savedState: 'none' });
+    expect(s.environments.find((e: any) => e.env === 'demo')).toMatchObject({
+      state: 'draft',
+      savedState: 'none',
+    });
   });
 
   it('what is live: one row per project and environment, for any member who can see the project', async () => {
@@ -467,15 +511,23 @@ describe('what is live, status and rollback', () => {
     // not the running one, not a failed one, not another environment
     expect((await req('POST', `${base()}/releases/rollback`, { env: 'live', runId: cur })).status).toBe(422);
     const failed = await run('live', '4444444444444444', 10, { status: 'failed' });
-    expect((await req('POST', `${base()}/releases/rollback`, { env: 'live', runId: failed })).status).toBe(422);
+    expect((await req('POST', `${base()}/releases/rollback`, { env: 'live', runId: failed })).status).toBe(
+      422,
+    );
     // a member cannot
     const m = await d.member();
-    expect((await req('POST', `${base()}/releases/rollback`, { env: 'live', runId: mid }, m.cookie)).status).toBeGreaterThanOrEqual(403);
-    expect((await req('GET', `${base()}/environments/live/releases`, undefined, m.cookie)).status).toBeGreaterThanOrEqual(403);
+    expect(
+      (await req('POST', `${base()}/releases/rollback`, { env: 'live', runId: mid }, m.cookie)).status,
+    ).toBeGreaterThanOrEqual(403);
+    expect(
+      (await req('GET', `${base()}/environments/live/releases`, undefined, m.cookie)).status,
+    ).toBeGreaterThanOrEqual(403);
     // the gate (the test site must be healthy on the same version) does not apply to a rollback; the audit says so
     const res = await call('POST', `${base()}/releases/rollback`, { env: 'live', runId: mid });
     expect(res.runs[0].status, JSON.stringify(res)).toBe('queued');
-    const row = (await q(`SELECT trigger, commit, evidence FROM deploy_runs WHERE id=$1`, [res.runs[0].runId]))[0];
+    const row = (
+      await q(`SELECT trigger, commit, evidence FROM deploy_runs WHERE id=$1`, [res.runs[0].runId])
+    )[0];
     expect(row).toMatchObject({ trigger: 'rollback', commit: '2222222222222222' });
     expect(JSON.stringify(row.evidence)).toContain('going back to 2222222222');
     await until(async () => r.of('command').some((c) => c.command === 'deploy.exec'), 5000, 'exec sent');
@@ -507,7 +559,15 @@ describe('proposals merge into the draft and answers are stored', () => {
             area: 'deploy',
             requestId: randomUUID(),
             workstationId: d.w.workstationId,
-            proposal: { area: 'deploy', deploy, items: [], questions, notes: '', secretsNeeded: [], filesRead: [] },
+            proposal: {
+              area: 'deploy',
+              deploy,
+              items: [],
+              questions,
+              notes: '',
+              secretsNeeded: [],
+              filesRead: [],
+            },
           },
         },
         actor: { kind: 'system', id: null },
@@ -562,14 +622,27 @@ describe('proposals merge into the draft and answers are stored', () => {
   });
 
   it('only the project owner answers, and a used proposal cannot be answered', async () => {
-    const id = await propose(setup(), [{ path: '/environments/0/app/service', question: 'Which?', options: ['app'] }]);
+    const id = await propose(setup(), [
+      { path: '/environments/0/app/service', question: 'Which?', options: ['app'] },
+    ]);
     const m = await d.member();
     expect(
-      (await req('POST', `/api/setup-proposals/${id}/answers`, { answers: [{ path: '/environments/0/app/service', value: 'app' }] }, m.cookie)).status,
+      (
+        await req(
+          'POST',
+          `/api/setup-proposals/${id}/answers`,
+          { answers: [{ path: '/environments/0/app/service', value: 'app' }] },
+          m.cookie,
+        )
+      ).status,
     ).toBeGreaterThanOrEqual(403);
-    await call('POST', `/api/setup-proposals/${id}/answers`, { answers: [{ path: '/environments/0/app/service', value: 'app' }] });
+    await call('POST', `/api/setup-proposals/${id}/answers`, {
+      answers: [{ path: '/environments/0/app/service', value: 'app' }],
+    });
     await call('POST', `${base()}/delivery/setup/use-proposal`, { proposalId: id });
-    const late = await req('POST', `/api/setup-proposals/${id}/answers`, { answers: [{ path: '/environments/0/app/service', value: 'app' }] });
+    const late = await req('POST', `/api/setup-proposals/${id}/answers`, {
+      answers: [{ path: '/environments/0/app/service', value: 'app' }],
+    });
     expect(late.status).toBe(409);
   });
 });
@@ -577,11 +650,12 @@ describe('proposals merge into the draft and answers are stored', () => {
 describe('phase follow-ups can name an environment', () => {
   it('a deploy follow-up by environment is stored with its place; an unknown environment is refused; the old targetId way still works', async () => {
     await approved();
-    const mk = (name: string, followups: unknown[]) =>
-      req('POST', `${base()}/phases`, { name, followups });
+    const mk = (name: string, followups: unknown[]) => req('POST', `${base()}/phases`, { name, followups });
     const good = await mk('Phase A', [{ kind: 'deploy', environment: 'live' }]);
     expect(good.status, JSON.stringify(good.body)).toBe(201);
-    const row = (await q('SELECT environment, target_id FROM phase_followups WHERE phase_id=$1', [good.body.id]))[0];
+    const row = (
+      await q('SELECT environment, target_id FROM phase_followups WHERE phase_id=$1', [good.body.id])
+    )[0];
     expect(row).toMatchObject({ environment: 'live', target_id: d.targets.prod });
     expect(good.body.followups[0].label).toBe('Deploy to live');
     const bad = await mk('Phase B', [{ kind: 'deploy', environment: 'nope' }]);
@@ -591,6 +665,8 @@ describe('phase follow-ups can name an environment', () => {
     expect(none.status).toBe(422);
     const old = await mk('Phase D', [{ kind: 'deploy', targetId: d.targets.local }]);
     expect(old.status).toBe(201);
-    expect((await q('SELECT environment FROM phase_followups WHERE phase_id=$1', [old.body.id]))[0].environment).toBeNull();
+    expect(
+      (await q('SELECT environment FROM phase_followups WHERE phase_id=$1', [old.body.id]))[0].environment,
+    ).toBeNull();
   });
 });

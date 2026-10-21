@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { compileSetup, directEnv, parseSetup, planChanges, type ProbeReport } from '../src/index.ts';
+import { compileSetup, directEnv, type ProbeReport, parseSetup, planChanges } from '../src/index.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const GOLDEN = join(here, 'fixtures', 'setup', 'direct');
@@ -25,34 +25,43 @@ const cases = {
       ...common,
       appDir: '~/app',
       manager: { kind: 'systemd', unit: 'shop.service', scope: 'system', sudo: true },
-      build: [{ label: 'Install', argv: ['npm', 'ci'] }, { label: 'Build', argv: ['npm', 'run', 'build'] }],
+      build: [
+        { label: 'Install', argv: ['npm', 'ci'] },
+        { label: 'Build', argv: ['npm', 'run', 'build'] },
+      ],
       shared: ['.env', 'uploads'],
       database: { engine: 'postgres', database: 'shop', dir: '~/app/backups' },
       healthUrl: 'http://127.0.0.1:3000/health',
     }),
   'systemd-user-ssh-adopt': () =>
-    directEnv({
-      ...common,
-      host: 'shop-box',
-      currentLink: '/home/shop/shop',
-      appDir: '/home/shop/shop-app',
-      adoptFolder: true,
-      manager: { kind: 'systemd', unit: 'shop', scope: 'user', sudo: false },
-      build: [{ label: 'Install', argv: ['pip', 'install', '-r', 'requirements.txt'] }],
-      shared: ['.env'],
-      database: { engine: 'sqlite', sqliteFile: '/home/shop/shop/db.sqlite3', dir: '/home/shop/backups' },
-      live: true,
-      healthUrl: 'http://192.168.1.14:8000/ready',
-    }, 'test'),
+    directEnv(
+      {
+        ...common,
+        host: 'shop-box',
+        currentLink: '/home/shop/shop',
+        appDir: '/home/shop/shop-app',
+        adoptFolder: true,
+        manager: { kind: 'systemd', unit: 'shop', scope: 'user', sudo: false },
+        build: [{ label: 'Install', argv: ['pip', 'install', '-r', 'requirements.txt'] }],
+        shared: ['.env'],
+        database: { engine: 'sqlite', sqliteFile: '/home/shop/shop/db.sqlite3', dir: '/home/shop/backups' },
+        live: true,
+        healthUrl: 'http://192.168.1.14:8000/ready',
+      },
+      'test',
+    ),
   'pm2-ssh': () =>
-    directEnv({
-      ...common,
-      host: 'shop-box',
-      manager: { kind: 'pm2', name: 'shop-api' },
-      build: [{ label: 'Install', argv: ['npm', 'ci', '--omit=dev'] }],
-      appUrl: 'http://shop.example.com',
-      live: true,
-    }, 'test'),
+    directEnv(
+      {
+        ...common,
+        host: 'shop-box',
+        manager: { kind: 'pm2', name: 'shop-api' },
+        build: [{ label: 'Install', argv: ['npm', 'ci', '--omit=dev'] }],
+        appUrl: 'http://shop.example.com',
+        live: true,
+      },
+      'test',
+    ),
   'command-local': () =>
     directEnv({
       ...common,
@@ -69,21 +78,26 @@ const compile = (env: unknown) => {
 };
 
 describe('apps that run directly on the machine (golden files)', () => {
-  it.each(Object.keys(cases))('%s: byte-exact, valid bash, only the app is restarted, nothing is deleted but old releases', (k) => {
-    const c = compile(cases[k as keyof typeof cases]());
-    golden(`${k}.sh`, c);
-    expect(spawnSync('bash', ['-n'], { input: c, encoding: 'utf8' }).status).toBe(0);
-    expect(c).not.toMatch(/\b(systemctl|pm2)\b[^\n]*\b(stop|kill|delete|disable|mask)\b|--remove-orphans|docker (rm|stop|kill)\b/);
-    // every deletion: the temporary link, a failed backup's partial file, old backups, old releases
-    for (const line of c.split('\n').filter((l) => /\brm\b/.test(l)))
-      expect(line).toMatch(
-        /rm -f -- "\$tmp"|rm -f -- "\$out\.part"|rm -f -- "\$old"|rm -rf -- "\$p"|rm -rf -- "\$\{rel:\?\}\/\$p"/,
+  it.each(Object.keys(cases))(
+    '%s: byte-exact, valid bash, only the app is restarted, nothing is deleted but old releases',
+    (k) => {
+      const c = compile(cases[k as keyof typeof cases]());
+      golden(`${k}.sh`, c);
+      expect(spawnSync('bash', ['-n'], { input: c, encoding: 'utf8' }).status).toBe(0);
+      expect(c).not.toMatch(
+        /\b(systemctl|pm2)\b[^\n]*\b(stop|kill|delete|disable|mask)\b|--remove-orphans|docker (rm|stop|kill)\b/,
       );
-    expect(c).toContain('trap on_exit EXIT');
-    expect(c).toContain('AOM_DEPLOY_DRY_RUN');
-    for (const part of c.split(/\n# step \d+: /).slice(1))
-      expect(part.split('\n# the end')[0], part.slice(0, 60)).toMatch(/DRY_RUN|dry/);
-  });
+      // every deletion: the temporary link, a failed backup's partial file, old backups, old releases
+      for (const line of c.split('\n').filter((l) => /\brm\b/.test(l)))
+        expect(line).toMatch(
+          /rm -f -- "\$tmp"|rm -f -- "\$out\.part"|rm -f -- "\$old"|rm -rf -- "\$p"|rm -rf -- "\$\{rel:\?\}\/\$p"/,
+        );
+      expect(c).toContain('trap on_exit EXIT');
+      expect(c).toContain('AOM_DEPLOY_DRY_RUN');
+      for (const part of c.split(/\n# step \d+: /).slice(1))
+        expect(part.split('\n# the end')[0], part.slice(0, 60)).toMatch(/DRY_RUN|dry/);
+    },
+  );
 
   it('sudo is used only when confirmed, and only without a prompt', () => {
     const sudo = compile(cases['systemd-sudo-local']());
@@ -133,7 +147,13 @@ describe('apps that run directly on the machine (golden files)', () => {
       urls: [],
       listeners: [],
       services: [
-        { manager: 'systemd_user', name: 'shop.service', state: 'running', workingDir: '/home/shop/shop', ports: [8000] },
+        {
+          manager: 'systemd_user',
+          name: 'shop.service',
+          state: 'running',
+          workingDir: '/home/shop/shop',
+          ports: [8000],
+        },
         { manager: 'systemd', name: 'nginx.service', state: 'running', ports: [80] },
       ],
     } as unknown as ProbeReport;

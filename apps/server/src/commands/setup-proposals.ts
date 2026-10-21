@@ -4,16 +4,16 @@ import {
   DEPLOY_SETUP_CAPABILITY,
   type DevopsScan,
   type ProposalDto,
-  resolvePointer,
   RunPlanSchema,
+  resolvePointer,
   SCAN_REQUEST_KIND,
   type ScanStateDto,
   SETUP_SCAN_CAPABILITY,
   type SetupArea,
   type SetupProposal,
   SetupProposalSchema,
-  setPointer,
   type SetupScanRequest,
+  setPointer,
   streamId,
   validateRunPlan,
 } from '@aom/shared';
@@ -479,10 +479,15 @@ export const openQuestionsOf = (p: SetupProposal): SetupProposal['questions'] =>
   p.questions.filter((q) => q.answer === undefined && q.default === undefined && !q.optional);
 
 /** The value to store at the question's path: a number where a number is, yes/no where a boolean is. */
-function coerceAnswer(current: unknown, raw: string): { ok: true; value: unknown } | { ok: false; why: string } {
+function coerceAnswer(
+  current: unknown,
+  raw: string,
+): { ok: true; value: unknown } | { ok: false; why: string } {
   if (typeof current === 'number') {
     const n = Number(raw);
-    return raw.trim() !== '' && Number.isFinite(n) ? { ok: true, value: n } : { ok: false, why: 'a number is needed' };
+    return raw.trim() !== '' && Number.isFinite(n)
+      ? { ok: true, value: n }
+      : { ok: false, why: 'a number is needed' };
   }
   if (typeof current === 'boolean') {
     if (/^(yes|true|y)$/i.test(raw.trim())) return { ok: true, value: true };
@@ -508,7 +513,8 @@ export async function answerProposal(
     if (!sp) throw notFound('proposal not found');
     const p = await loadVisibleProject(tx, user.id, sp.project_id);
     if (p.my_role !== 'owner') throw forbidden('only the project owner can answer');
-    if (sp.status !== 'open') throw conflict('proposal_resolved', 'this proposal was already used or dismissed');
+    if (sp.status !== 'open')
+      throw conflict('proposal_resolved', 'this proposal was already used or dismissed');
     const ws = await one(tx, 'SELECT user_id FROM workstations WHERE id=$1', [sp.workstation_id]);
     if (ws && ws.user_id !== user.id)
       throw forbidden('only the owner of the computer that scanned can answer this proposal');
@@ -518,8 +524,7 @@ export async function answerProposal(
       const q = proposal.questions[qi];
       if (!q) throw badRequest('unknown_question', `there is no question about ${a.path}`);
       const text = a.value.trim();
-      const fail = (why: string) =>
-        unprocessable('bad_answer', `"${q.question}": ${why}`);
+      const fail = (why: string) => unprocessable('bad_answer', `"${q.question}": ${why}`);
       if (!text && !q.optional && q.default === undefined) throw fail('an answer is needed');
       const kind = q.kind ?? (q.options?.length ? 'choice' : 'text');
       if (kind === 'choice' && q.options?.length && text && !q.options.includes(text))
@@ -543,17 +548,25 @@ export async function answerProposal(
       throw unprocessable('bad_answer', `that answer does not fit: ${issuesText(checked.error)}`);
     if (proposal.area === 'deploy' && proposal.deploy) {
       const compiled = compileSetup(proposal.deploy);
-      if (!compiled.ok) throw unprocessable('bad_answer', `that answer does not fit: ${compiled.issues.slice(0, 4).join('; ')}`);
+      if (!compiled.ok)
+        throw unprocessable(
+          'bad_answer',
+          `that answer does not fit: ${compiled.issues.slice(0, 4).join('; ')}`,
+        );
     }
     if (proposal.area === 'run' && proposal.run) {
       const problems = validateRunPlan(proposal.run);
-      if (problems.length) throw unprocessable('bad_answer', `that answer does not fit: ${problems.slice(0, 4).join('; ')}`);
+      if (problems.length)
+        throw unprocessable('bad_answer', `that answer does not fit: ${problems.slice(0, 4).join('; ')}`);
     }
     await ctx.store.append(
       [
         {
           streamId: streamId.project(sp.project_id),
-          event: { type: 'SetupProposalAnswered', payload: { proposalId, proposal: checked.data, by: user.id } },
+          event: {
+            type: 'SetupProposalAnswered',
+            payload: { proposalId, proposal: checked.data, by: user.id },
+          },
           actor: userActor(user.id),
           scope: projectScope(p.org_id, sp.project_id),
         },

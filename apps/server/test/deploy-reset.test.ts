@@ -10,11 +10,7 @@ import {
   sshShipEnv,
 } from '@aom/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import {
-  applyDeployReset,
-  formatResetPlan,
-  planDeployReset,
-} from '../src/data-migrations/deploy-reset.ts';
+import { applyDeployReset, formatResetPlan, planDeployReset } from '../src/data-migrations/deploy-reset.ts';
 import { observeRecipe } from '../src/delivery/recipes.ts';
 import { rebuildProjections } from '../src/projections/rebuild.ts';
 import { keepOnline } from './helpers/ceo.ts';
@@ -80,7 +76,12 @@ const setup = () => ({
 function inspected(s: unknown): RecipeInspectResult {
   const c = compileSetup(s);
   if (!c.ok) throw new Error(c.issues.join('; '));
-  const files = c.files.map((f) => ({ path: f.path, mode: f.mode, sha256: sha256Hex(f.content), secret: null }));
+  const files = c.files.map((f) => ({
+    path: f.path,
+    mode: f.mode,
+    sha256: sha256Hex(f.content),
+    secret: null,
+  }));
   const rec = parseRecipe(c.files.find((f) => f.path === 'recipe.yaml')?.content as string);
   if (!rec.ok) throw new Error(rec.error);
   return {
@@ -100,9 +101,10 @@ describe('deploy reset', () => {
     const ins = inspected(setup());
     await call('PUT', `${base()}/delivery/setup`, { setup: setup() });
     await observeRecipe(d.w.t.app.ctx, d.w.projectId, ins, d.w.workstationId);
-    await q(`UPDATE delivery_recipes SET approved_hash=observed_hash, status='approved' WHERE project_id=$1`, [
-      d.w.projectId,
-    ]);
+    await q(
+      `UPDATE delivery_recipes SET approved_hash=observed_hash, status='approved' WHERE project_id=$1`,
+      [d.w.projectId],
+    );
     await q(`UPDATE projects SET delivery_mode='recipe' WHERE id=$1`, [d.w.projectId]);
     const waiting = randomUUID();
     await q(
@@ -113,7 +115,14 @@ describe('deploy reset', () => {
     await q(
       `INSERT INTO deploy_target_keys (target_id, workstation_id, project_id, org_id, fingerprint, public_key, alias, method, state, added_at)
        VALUES ($1,$2,$3,$4,$5,$6,'prod','password','active',now())`,
-      [d.targets.prod, d.w.workstationId, d.w.projectId, d.orgId, `SHA256:${'k'.repeat(43)}`, `ssh-ed25519 ${'A'.repeat(68)} guildwise-deploy:x`],
+      [
+        d.targets.prod,
+        d.w.workstationId,
+        d.w.projectId,
+        d.orgId,
+        `SHA256:${'k'.repeat(43)}`,
+        `ssh-ed25519 ${'A'.repeat(68)} guildwise-deploy:x`,
+      ],
     );
     const commandsBefore = (await q('SELECT count(*)::int AS n FROM runner_commands'))[0].n;
     const sent = r.received.length;
@@ -126,30 +135,62 @@ describe('deploy reset', () => {
     expect(text).toContain('Servers where a Guildwise key may remain');
     expect(text).toContain(`server prod, key SHA256:${'k'.repeat(43)}`);
     // a dry run (plan only) changed nothing
-    expect((await q('SELECT count(*)::int AS n FROM deploy_targets WHERE removed_at IS NULL'))[0].n).toBeGreaterThan(1);
+    expect(
+      (await q('SELECT count(*)::int AS n FROM deploy_targets WHERE removed_at IS NULL'))[0].n,
+    ).toBeGreaterThan(1);
 
     const n = await applyDeployReset(
-      { pool: d.w.t.app.ctx.pool, store: d.w.t.app.ctx.store, clock: d.w.t.clock as never, log: () => undefined },
+      {
+        pool: d.w.t.app.ctx.pool,
+        store: d.w.t.app.ctx.store,
+        clock: d.w.t.clock as never,
+        log: () => undefined,
+      },
       plan,
     );
     expect(n).toBeGreaterThanOrEqual(1);
     const after = async () => ({
-      targets: await q('SELECT name, removed_at IS NOT NULL AS removed FROM deploy_targets WHERE project_id=$1 ORDER BY name', [d.w.projectId]),
-      recipe: (await q('SELECT status, present, setup, approved_hash, observed_hash, reset_hash FROM delivery_recipes WHERE project_id=$1', [d.w.projectId]))[0],
+      targets: await q(
+        'SELECT name, removed_at IS NOT NULL AS removed FROM deploy_targets WHERE project_id=$1 ORDER BY name',
+        [d.w.projectId],
+      ),
+      recipe: (
+        await q(
+          'SELECT status, present, setup, approved_hash, observed_hash, reset_hash FROM delivery_recipes WHERE project_id=$1',
+          [d.w.projectId],
+        )
+      )[0],
       draft: await q('SELECT setup FROM delivery_setup_drafts WHERE project_id=$1', [d.w.projectId]),
       mode: (await q('SELECT delivery_mode FROM projects WHERE id=$1', [d.w.projectId]))[0].delivery_mode,
       run: (await q('SELECT status FROM deploy_runs WHERE id=$1', [waiting]))[0]?.status ?? 'rebuilt-away',
     });
     const a = await after();
     expect(a.targets.every((t: any) => t.removed)).toBe(true);
-    expect(a.recipe).toMatchObject({ status: 'absent', present: false, setup: null, approved_hash: null, observed_hash: null });
+    expect(a.recipe).toMatchObject({
+      status: 'absent',
+      present: false,
+      setup: null,
+      approved_hash: null,
+      observed_hash: null,
+    });
     expect(a.recipe.reset_hash).toBeTruthy();
-    expect(a.draft.every((x: any) => x.setup === null || x.setup === 'null' || typeof x.setup !== 'object')).toBe(true);
+    expect(
+      a.draft.every((x: any) => x.setup === null || x.setup === 'null' || typeof x.setup !== 'object'),
+    ).toBe(true);
     expect(a.mode).toBe('instructions');
     expect(a.run).toBe('cancelled');
     // the history stays in the log
-    expect((await q(`SELECT 1 FROM events WHERE type='DeployTargetRemoved' AND payload->>'reason'='reset for new environments'`)).length).toBeGreaterThanOrEqual(2);
-    expect((await q(`SELECT 1 FROM events WHERE type='DeliveryRecipeApproved' OR type='DeliveryRecipeObserved'`)).length).toBeGreaterThanOrEqual(1);
+    expect(
+      (
+        await q(
+          `SELECT 1 FROM events WHERE type='DeployTargetRemoved' AND payload->>'reason'='reset for new environments'`,
+        )
+      ).length,
+    ).toBeGreaterThanOrEqual(2);
+    expect(
+      (await q(`SELECT 1 FROM events WHERE type='DeliveryRecipeApproved' OR type='DeliveryRecipeObserved'`))
+        .length,
+    ).toBeGreaterThanOrEqual(1);
     // no runner was asked anything, no key was revoked
     expect((await q('SELECT count(*)::int AS n FROM runner_commands'))[0].n).toBe(commandsBefore);
     expect(r.received.length).toBe(sent);

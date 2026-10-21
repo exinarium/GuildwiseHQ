@@ -11,7 +11,6 @@ import {
   type ProbeReport,
   type ProposalMergeInfo,
   type PublishSetupRequest,
-  SetupProposalSchema,
   parseRecipe,
   planChanges,
   type RecipeWritePayload,
@@ -19,6 +18,7 @@ import {
   type SaveSetupDraftRequest,
   SETUP_GENERATOR,
   type SetupPreviewDto,
+  SetupProposalSchema,
   type SetupStateDto,
   type SetupTargetDto,
   type SetupWorkstationDto,
@@ -28,19 +28,14 @@ import { orgRoleOf } from '../auth/org-context.ts';
 import type { AuthSession } from '../auth/sessions.ts';
 import { loadVisibleProject } from '../authz/scope.ts';
 import { projectScope, runnerActor, SYSTEM_ACTOR, userActor } from '../commands/common.ts';
-import {
-  listProposalDtos,
-  openQuestionsOf,
-  openScan,
-  scanProblemFor,
-} from '../commands/setup-proposals.ts';
+import { listProposalDtos, openQuestionsOf, openScan, scanProblemFor } from '../commands/setup-proposals.ts';
 import type { Ctx } from '../context.ts';
 import { exec, iso, one, type Queryable, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, notFound, unprocessable } from '../errors.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
-import { workingSetup } from './environments.ts';
 import { connectBlockedReason, listKeyDtos } from './connect.ts';
+import { workingSetup } from './environments.ts';
 import { moveBlockedReason } from './move.ts';
 import { listProbeDtos, setupBlockedReason } from './probes.ts';
 import {
@@ -411,8 +406,7 @@ export async function previewSetup(
       ? ((needsV2(c.setup) ? await v2BlockedReason(ctx.pool, wsId) : null) ??
         (needsDirect(c.setup) ? await directBlockedReason(ctx.pool, wsId) : null))
       : null;
-    if (why)
-      lint.push({ level: 'error', code: 'runner_update_needed', message: why });
+    if (why) lint.push({ level: 'error', code: 'runner_update_needed', message: why });
   }
   const reports = await reportsFor(ctx.pool, projectId, c.setup);
   const changes: ChangeItem[] = planChanges(c.setup, reports);

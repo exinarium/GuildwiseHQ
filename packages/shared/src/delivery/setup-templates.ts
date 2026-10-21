@@ -215,7 +215,13 @@ export interface DirectAnswers {
   shared?: string[];
   keep?: number;
   /** Back up this database first (uses the signed-in user's own access to it). */
-  database?: { engine: 'postgres' | 'mysql' | 'sqlite'; database?: string; sqliteFile?: string; dir: string; keep?: number };
+  database?: {
+    engine: 'postgres' | 'mysql' | 'sqlite';
+    database?: string;
+    sqliteFile?: string;
+    dir: string;
+    keep?: number;
+  };
   healthUrl?: string;
   appUrl?: string;
   /** A live site (owner releases, gated) rather than a test site (updates after each merge). */
@@ -243,8 +249,17 @@ export function directEnv(a: DirectAnswers, testEnv: string | null = null): Setu
     { kind: 'direct_prepare' as const },
     { kind: 'direct_switch' as const },
   ];
-  const unit = a.manager.kind === 'systemd' ? a.manager.unit.replace(/\.service$/, '') : a.manager.kind === 'pm2' ? a.manager.name : 'app';
-  const name = (a.appName ?? unit).toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+/, '') || 'app';
+  const unit =
+    a.manager.kind === 'systemd'
+      ? a.manager.unit.replace(/\.service$/, '')
+      : a.manager.kind === 'pm2'
+        ? a.manager.name
+        : 'app';
+  const name =
+    (a.appName ?? unit)
+      .toLowerCase()
+      .replace(/[^a-z0-9._-]+/g, '-')
+      .replace(/^-+/, '') || 'app';
   return {
     name: a.name,
     label: a.label,
@@ -264,7 +279,8 @@ export function directEnv(a: DirectAnswers, testEnv: string | null = null): Setu
     },
     app: {
       composeFile: a.appDir,
-      service: a.manager.kind === 'systemd' ? a.manager.unit : a.manager.kind === 'pm2' ? a.manager.name : unit,
+      service:
+        a.manager.kind === 'systemd' ? a.manager.unit : a.manager.kind === 'pm2' ? a.manager.name : unit,
       imageName: name,
       imageKeep: 5,
       ...(a.appUrl ? { appUrl: a.appUrl } : {}),

@@ -81,7 +81,11 @@ export async function planDeployReset(
       )
     )[0];
     const draft = (
-      await rows(pool, `SELECT 1 AS x FROM delivery_setup_drafts WHERE project_id=$1 AND jsonb_typeof(setup) = 'object'`, [p.id])
+      await rows(
+        pool,
+        `SELECT 1 AS x FROM delivery_setup_drafts WHERE project_id=$1 AND jsonb_typeof(setup) = 'object'`,
+        [p.id],
+      )
     )[0];
     const runs = await rows(
       pool,
@@ -122,7 +126,9 @@ export async function planDeployReset(
       recipe: recipe ? { id: recipe.id, hash: recipe.approved_hash ?? recipe.observed_hash ?? null } : null,
       draft: !!draft,
       deliveryMode: p.delivery_mode,
-      openRuns: runs.filter((r) => r.status !== 'running').map((r) => ({ id: r.id, env: r.env, status: r.status })),
+      openRuns: runs
+        .filter((r) => r.status !== 'running')
+        .map((r) => ({ id: r.id, env: r.env, status: r.status })),
       runningRuns: runs.filter((r) => r.status === 'running').length,
       followups: followups.map((f) => ({ id: f.id, phaseId: f.phase_id, status: f.status })),
       notices: notices.map((n) => n.id),
@@ -132,7 +138,8 @@ export async function planDeployReset(
 }
 
 export function formatResetPlan(plan: ResetPlan): string {
-  if (plan.projects.length === 0) return 'Nothing to reset: no project has deploy places or a delivery setup.';
+  if (plan.projects.length === 0)
+    return 'Nothing to reset: no project has deploy places or a delivery setup.';
   const lines: string[] = [];
   let org = '';
   const keyLines: string[] = [];
@@ -145,14 +152,20 @@ export function formatResetPlan(plan: ResetPlan): string {
       `  ${p.key} ${p.name}: ${p.targets.length} place${p.targets.length === 1 ? '' : 's'} removed${
         p.recipe ? ', delivery setup cleared' : ''
       }${p.draft ? ', draft discarded' : ''}${p.deliveryMode === 'recipe' ? ', delivery back to instructions' : ''}${
-        p.openRuns.length ? `, ${p.openRuns.length} waiting/queued release${p.openRuns.length === 1 ? '' : 's'} cancelled` : ''
+        p.openRuns.length
+          ? `, ${p.openRuns.length} waiting/queued release${p.openRuns.length === 1 ? '' : 's'} cancelled`
+          : ''
       }${p.followups.length ? `, ${p.followups.length} phase follow-up${p.followups.length === 1 ? '' : 's'} skipped` : ''}`,
     );
     if (p.runningRuns) lines.push(`    ${p.runningRuns} release is running right now and is NOT stopped`);
     for (const t of p.targets) {
-      lines.push(`    - ${t.name} (${t.kind}${t.host ? `, ssh alias ${t.host}` : ''}${t.workstation ? `, via ${t.workstation}` : ''})`);
+      lines.push(
+        `    - ${t.name} (${t.kind}${t.host ? `, ssh alias ${t.host}` : ''}${t.workstation ? `, via ${t.workstation}` : ''})`,
+      );
       for (const k of t.keys)
-        keyLines.push(`${p.key} ${t.name}: server ${k.alias}, key ${k.fingerprint}, installed from ${k.workstation}`);
+        keyLines.push(
+          `${p.key} ${t.name}: server ${k.alias}, key ${k.fingerprint}, installed from ${k.workstation}`,
+        );
     }
   }
   lines.push(
@@ -174,7 +187,10 @@ export async function applyDeployReset(env: DataMigrationEnv, plan: ResetPlan): 
       for (const r of p.openRuns)
         events.push({
           streamId: streamId.project(p.projectId),
-          event: { type: 'DeployRunCancelled', payload: { runId: r.id, orgId: p.orgId, projectId: p.projectId, by: null } },
+          event: {
+            type: 'DeployRunCancelled',
+            payload: { runId: r.id, orgId: p.orgId, projectId: p.projectId, by: null },
+          },
           actor: SYSTEM_ACTOR,
           scope,
         });
@@ -187,7 +203,8 @@ export async function applyDeployReset(env: DataMigrationEnv, plan: ResetPlan): 
               phaseId: f.phaseId,
               followupId: f.id,
               status: 'skipped',
-              summary: 'The deploy places were cleared for the new Environments page. Choose the environment again.',
+              summary:
+                'The deploy places were cleared for the new Environments page. Choose the environment again.',
               evidence: {},
             },
           },
@@ -197,7 +214,10 @@ export async function applyDeployReset(env: DataMigrationEnv, plan: ResetPlan): 
       if (p.draft && by)
         events.push({
           streamId: streamId.project(p.projectId),
-          event: { type: 'DeliverySetupDraftSaved', payload: { projectId: p.projectId, setup: null, customScripts: {}, by } },
+          event: {
+            type: 'DeliverySetupDraftSaved',
+            payload: { projectId: p.projectId, setup: null, customScripts: {}, by },
+          },
           actor: SYSTEM_ACTOR,
           scope,
         });
@@ -220,7 +240,10 @@ export async function applyDeployReset(env: DataMigrationEnv, plan: ResetPlan): 
       if (p.deliveryMode === 'recipe')
         events.push({
           streamId: streamId.project(p.projectId),
-          event: { type: 'DeliveryModeSet', payload: { projectId: p.projectId, orgId: p.orgId, mode: 'instructions', by: null } },
+          event: {
+            type: 'DeliveryModeSet',
+            payload: { projectId: p.projectId, orgId: p.orgId, mode: 'instructions', by: null },
+          },
           actor: SYSTEM_ACTOR,
           scope,
         });
@@ -234,7 +257,10 @@ export async function applyDeployReset(env: DataMigrationEnv, plan: ResetPlan): 
       for (const id of p.notices)
         events.push({
           streamId: streamId.desk(id),
-          event: { type: 'DeskItemResolved', payload: { deskItemId: id, resolution: 'acknowledged', by: { kind: 'system' } } },
+          event: {
+            type: 'DeskItemResolved',
+            payload: { deskItemId: id, resolution: 'acknowledged', by: { kind: 'system' } },
+          },
           actor: SYSTEM_ACTOR,
           scope,
         });

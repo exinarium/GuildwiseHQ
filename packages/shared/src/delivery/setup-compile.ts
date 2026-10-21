@@ -1,6 +1,5 @@
 import { stringify as stringifyYaml } from 'yaml';
 import { sha256Hex } from '../graph/sha256.ts';
-import { directScript } from './setup-compile-direct.ts';
 import { type BundleEntry, bundleHash, DELIVERY_DIR, RECIPE_FILE, RECIPE_VERSION } from './recipe.ts';
 import {
   type DeliverySetup,
@@ -11,6 +10,7 @@ import {
   type SetupEnv,
   updateMethodOf,
 } from './setup.ts';
+import { directScript } from './setup-compile-direct.ts';
 
 /**
  * `compileSetup`: the pure, deterministic compiler from `setup.json` to the files of `delivery/` (design section 4.2).
@@ -478,42 +478,42 @@ function sshFunctions(env: SetupEnv): string[] {
   return [
     ...(ov
       ? [
-    '# name the new image in an override file next to the compose file (the compose file and .env are never edited)',
-    'write_override() {',
-    '  remote "$APP_DIR" "$SERVICE" "$1" "$SHORT" <<\'AOM_REMOTE\'',
-    'set -eu',
-    'dir=$1; svc=$2; tag=$3; short=$4',
-    `ov="$dir/${OVERRIDE_NAME}"`,
-    'tmp="$ov.aom-tmp.$$"',
-    `trap 'rm -f -- "$tmp"' EXIT`,
-    'if [ -f "$ov" ] && [ ! -e "$ov.bak-before-$short" ]; then cp -p -- "$ov" "$ov.bak-before-$short"; fi',
-    `printf '# Written by Guildwise. It names the version that runs; your own compose file is not changed.\\nservices:\\n  %s:\\n    image: "%s"\\n' "$svc" "$tag" > "$tmp"`,
-    'mv -- "$tmp" "$ov"',
-    'echo "set the image of $svc to $tag in $ov" >&2',
-    'AOM_REMOTE',
-    '}',
-      ]
+          '# name the new image in an override file next to the compose file (the compose file and .env are never edited)',
+          'write_override() {',
+          '  remote "$APP_DIR" "$SERVICE" "$1" "$SHORT" <<\'AOM_REMOTE\'',
+          'set -eu',
+          'dir=$1; svc=$2; tag=$3; short=$4',
+          `ov="$dir/${OVERRIDE_NAME}"`,
+          'tmp="$ov.aom-tmp.$$"',
+          `trap 'rm -f -- "$tmp"' EXIT`,
+          'if [ -f "$ov" ] && [ ! -e "$ov.bak-before-$short" ]; then cp -p -- "$ov" "$ov.bak-before-$short"; fi',
+          `printf '# Written by Guildwise. It names the version that runs; your own compose file is not changed.\\nservices:\\n  %s:\\n    image: "%s"\\n' "$svc" "$tag" > "$tmp"`,
+          'mv -- "$tmp" "$ov"',
+          'echo "set the image of $svc to $tag in $ov" >&2',
+          'AOM_REMOTE',
+          '}',
+        ]
       : [
-    "# switch exactly one line of the server's .env (a temporary copy is moved over it)",
-    'set_image_var() {',
-    '  remote "$APP_DIR" "$IMAGE_VAR" "$1" <<\'AOM_REMOTE\'',
-    'set -eu',
-    'dir=$1; var=$2; val=$3',
-    'envf="$dir/.env"',
-    '[ -f "$envf" ] || { echo "AOM: there is no .env in $dir" >&2; exit 51; }',
-    'tmp="$envf.aom-tmp.$$"',
-    `trap 'rm -f -- "$tmp"' EXIT`,
-    'cp -p -- "$envf" "$tmp"',
-    `VAR="$var" VAL="$val" awk 'BEGIN { v = ENVIRON["VAR"]; n = ENVIRON["VAL"]; done = 0 }`,
-    '  { cr = ($0 ~ /\r$/ ? "\r" : ""); l = $0; sub(/\r$/, "", l); sub(/^[ \t]*(export[ \t]+)?/, "", l) }',
-    '  index(l, v "=") == 1 { if (!done) print v "=" n cr; done = 1; next }',
-    '  { print }',
-    `  END { if (!done) print v "=" n cr }' "$envf" > "$tmp"`,
-    'mv -- "$tmp" "$envf"',
-    'echo "set $var in $envf" >&2',
-    'AOM_REMOTE',
-    '}',
-      ]),
+          "# switch exactly one line of the server's .env (a temporary copy is moved over it)",
+          'set_image_var() {',
+          '  remote "$APP_DIR" "$IMAGE_VAR" "$1" <<\'AOM_REMOTE\'',
+          'set -eu',
+          'dir=$1; var=$2; val=$3',
+          'envf="$dir/.env"',
+          '[ -f "$envf" ] || { echo "AOM: there is no .env in $dir" >&2; exit 51; }',
+          'tmp="$envf.aom-tmp.$$"',
+          `trap 'rm -f -- "$tmp"' EXIT`,
+          'cp -p -- "$envf" "$tmp"',
+          `VAR="$var" VAL="$val" awk 'BEGIN { v = ENVIRON["VAR"]; n = ENVIRON["VAL"]; done = 0 }`,
+          '  { cr = ($0 ~ /\r$/ ? "\r" : ""); l = $0; sub(/\r$/, "", l); sub(/^[ \t]*(export[ \t]+)?/, "", l) }',
+          '  index(l, v "=") == 1 { if (!done) print v "=" n cr; done = 1; next }',
+          '  { print }',
+          `  END { if (!done) print v "=" n cr }' "$envf" > "$tmp"`,
+          'mv -- "$tmp" "$envf"',
+          'echo "set $var in $envf" >&2',
+          'AOM_REMOTE',
+          '}',
+        ]),
     '# restart only the app service (never down, never other services)',
     'compose_up_remote() {',
     `  remote "$APP_DIR" "$COMPOSE_FILE" "$SERVICE" "$1" ${proj} <<'AOM_REMOTE'`,
@@ -740,7 +740,10 @@ function sshStep(s: DeployStep, i: number, env: SetupEnv): string[] {
       ];
     case 'write_override':
       return [
-        ...stepNumberComment(i, `switch the server to the new version (${OVERRIDE_NAME}, your compose file is not edited)`),
+        ...stepNumberComment(
+          i,
+          `switch the server to the new version (${OVERRIDE_NAME}, your compose file is not edited)`,
+        ),
         'if [ "$DRY_RUN" = 1 ]; then',
         `  would "name $TAG as the image of $SERVICE in $APP_DIR/${OVERRIDE_NAME} (now: \${RUNNING_IMAGE:-nothing}); your compose file is not changed"`,
         'else',

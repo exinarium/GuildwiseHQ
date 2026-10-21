@@ -185,14 +185,19 @@ function directChanges(
 ): void {
   const d = env.direct;
   if (!r) {
-    add('question', `${where} has not been checked yet. Check it first, so Guildwise can show what it found.`);
+    add(
+      'question',
+      `${where} has not been checked yet. Check it first, so Guildwise can show what it found.`,
+    );
   } else if (d) {
     const m = d.manager;
     const name = m.kind === 'systemd' ? m.unit : m.kind === 'pm2' ? m.name : null;
     const norm = (n: string) => n.replace(/\.service$/, '');
     const svc = r.services?.find(
       (x) =>
-        (m.kind === 'systemd' && (x.manager === 'systemd' || x.manager === 'systemd_user') && norm(x.name) === norm(m.unit)) ||
+        (m.kind === 'systemd' &&
+          (x.manager === 'systemd' || x.manager === 'systemd_user') &&
+          norm(x.name) === norm(m.unit)) ||
         (m.kind === 'pm2' && x.manager === 'pm2' && x.name === m.name),
     );
     if (name)
@@ -202,18 +207,27 @@ function directChanges(
           `${m.kind === 'pm2' ? 'The pm2 process' : 'The service'} "${name}" is ${svc.state}${svc.workingDir ? ` and runs from ${svc.workingDir}` : ''}${svc.ports.length ? ` (port ${svc.ports.join(', ')})` : ''}`,
           'service',
         );
-      else
-        add('question', `"${name}" was not found running on ${where}. Is it the right name?`, 'service');
+      else add('question', `"${name}" was not found running on ${where}. Is it the right name?`, 'service');
     else add('reuse', 'A restart command of your own', 'service');
     if (m.kind === 'systemd' && m.scope === 'system' && m.sudo)
-      add('question', `Restarting ${m.unit} needs administrator rights (sudo). Guildwise only uses sudo without a password prompt; check passes first with “Try it”.`, 'sudo');
+      add(
+        'question',
+        `Restarting ${m.unit} needs administrator rights (sudo). Guildwise only uses sudo without a password prompt; check passes first with “Try it”.`,
+        'sudo',
+      );
     const folder = r.folders.find((f) => f.path === d.appDir);
     if (folder) {
       add('reuse', `The app folder ${d.appDir}`, 'folder');
       const entries = new Set(folder.entries);
-      if (entries.has('releases')) add('reuse', 'It already keeps one folder per version (releases)', 'folder');
+      if (entries.has('releases'))
+        add('reuse', 'It already keeps one folder per version (releases)', 'folder');
     } else if (r.appDirs?.includes(d.appDir)) add('reuse', `The app folder ${d.appDir}`, 'folder');
-    else add('question', `The app folder ${d.appDir} was not seen on ${where}. It must exist and belong to the signed-in user.`, 'folder');
+    else
+      add(
+        'question',
+        `The app folder ${d.appDir} was not seen on ${where}. It must exist and belong to the signed-in user.`,
+        'folder',
+      );
     if (d.adoptFolder && d.currentLink)
       add(
         'setup_once',
@@ -224,7 +238,11 @@ function directChanges(
       add('reuse', `${u.url} answers${u.status ? ` (${u.status})` : ' (no answer now)'}`, 'url');
     for (const o of r.services ?? []) {
       if (o === svc) continue;
-      add('untouched', `${o.name} (${o.manager === 'pm2' ? 'pm2' : o.manager === 'process' ? 'program' : 'service'}) keeps running, untouched`, 'service');
+      add(
+        'untouched',
+        `${o.name} (${o.manager === 'pm2' ? 'pm2' : o.manager === 'process' ? 'program' : 'service'}) keeps running, untouched`,
+        'service',
+      );
     }
     for (const c of r.containers.filter((x) => x.state === 'running'))
       add('untouched', `Container ${c.name} (${c.image}) keeps running, untouched`, 'container');

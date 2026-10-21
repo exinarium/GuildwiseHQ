@@ -492,10 +492,7 @@ describe.skipIf(!can)('guided connect against a real sshd', () => {
       const dead = b.keys.sshConfigFor(T, 'aom-shop');
       expect(dead).toBeTruthy();
       // the server stops answering: the alias now points at a port nobody listens on
-      writeFileSync(
-        dead as string,
-        readFileSync(dead as string, 'utf8').replace(/^(\s*Port\s+)\d+/m, '$11'),
-      );
+      writeFileSync(dead as string, readFileSync(dead as string, 'utf8').replace(/^(\s*Port\s+)\d+/m, '$11'));
       const gone = await b.c.revoke({
         projectId: P,
         targetId: T,

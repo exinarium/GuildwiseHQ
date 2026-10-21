@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { IsoTime } from '../api/common.ts';
-import { ConnectionStateSchema } from './probe.ts';
 import { EnvNameSchema } from './gate.ts';
+import { ConnectionStateSchema } from './probe.ts';
 
 /**
  * API of the Environments page (docs/design/environments-ux.md section 13, "API contract (as built)"). Everything here is
@@ -45,7 +45,9 @@ export const PlaceDtoSchema = z.object({
   /** Phase follow-ups that are not finished and name this place. */
   usedByFollowups: z.number().int(),
   /** Looks like another place of the project: same server alias on the same computer, or the same computer. */
-  duplicateOf: z.object({ id: z.uuid(), name: z.string(), reason: z.enum(['same_server', 'same_computer']) }).nullable(),
+  duplicateOf: z
+    .object({ id: z.uuid(), name: z.string(), reason: z.enum(['same_server', 'same_computer']) })
+    .nullable(),
   /** Number of dedicated Guildwise keys this place has (public parts are in the setup state). */
   keyCount: z.number().int(),
   canRemove: z.boolean(),
@@ -142,7 +144,11 @@ export const EnvironmentStatusDtoSchema = z.object({
       kind: z.enum(['release', 'rollback']),
     })
     .nullable(),
-  health: z.object({ state: z.enum(['healthy', 'unhealthy', 'unknown']), at: IsoTime.nullable(), detail: z.string().nullable() }),
+  health: z.object({
+    state: z.enum(['healthy', 'unhealthy', 'unknown']),
+    at: IsoTime.nullable(),
+    detail: z.string().nullable(),
+  }),
   lastRun: z
     .object({
       runId: z.uuid(),
@@ -152,7 +158,9 @@ export const EnvironmentStatusDtoSchema = z.object({
       rolledBack: z.boolean(),
     })
     .nullable(),
-  waitingRelease: z.object({ runId: z.uuid(), commit: z.string().nullable(), waitingFor: z.enum(['owner', 'ceo']) }).nullable(),
+  waitingRelease: z
+    .object({ runId: z.uuid(), commit: z.string().nullable(), waitingFor: z.enum(['owner', 'ceo']) })
+    .nullable(),
   /** Why a release cannot go yet ("the test site is healthy for 3 more minutes"); empty when nothing blocks it. */
   blockedBy: z.array(z.string()),
   /** Saved > Tried > Approved, for the three-dot strip. */
@@ -216,7 +224,10 @@ export const EarlierReleaseDtoSchema = z.object({
 });
 export type EarlierReleaseDto = z.infer<typeof EarlierReleaseDtoSchema>;
 /** `GET /api/projects/:id/environments/:env/releases?limit=5` (Owner and Admin). */
-export const EarlierReleasesResponseSchema = z.object({ releases: z.array(EarlierReleaseDtoSchema), canRollback: z.boolean() });
+export const EarlierReleasesResponseSchema = z.object({
+  releases: z.array(EarlierReleaseDtoSchema),
+  canRollback: z.boolean(),
+});
 export type EarlierReleasesResponse = z.infer<typeof EarlierReleasesResponseSchema>;
 
 /**
@@ -259,7 +270,9 @@ export const ProposalAnswerSchema = z.object({
   value: z.string().max(500),
 });
 export type ProposalAnswer = z.infer<typeof ProposalAnswerSchema>;
-export const AnswerProposalRequestSchema = z.object({ answers: z.array(ProposalAnswerSchema).min(1).max(30) });
+export const AnswerProposalRequestSchema = z.object({
+  answers: z.array(ProposalAnswerSchema).min(1).max(30),
+});
 export type AnswerProposalRequest = z.infer<typeof AnswerProposalRequestSchema>;
 
 /** The answer of `POST .../use-proposal`: the whole `SetupStateDto` plus what the merge did. */

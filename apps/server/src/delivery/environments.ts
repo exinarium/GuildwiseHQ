@@ -1,5 +1,6 @@
 import {
   DeliverySetupSchema,
+  describeGate,
   type EarlierReleaseDto,
   type EarlierReleasesResponse,
   type EnvCardState,
@@ -7,19 +8,18 @@ import {
   type EnvironmentsStatusResponse,
   type Gate,
   type LiveRowDto,
-  MOVE_OPEN_STATES,
   type MergePlacesRequest,
   type MergePlacesResult,
+  MOVE_OPEN_STATES,
   type OrgLiveResponse,
   type PlaceDto,
   type PlacesResponse,
+  type ProposalDtoSchema,
   type RemoveEnvironmentResult,
   type RemovePlaceRequest,
   type RemovePlaceResult,
   type RollbackRequest,
   type SetupEnv,
-  describeGate,
-  ProposalDtoSchema,
   streamId,
 } from '@aom/shared';
 import { orgRoleOf } from '../auth/org-context.ts';
@@ -27,16 +27,16 @@ import type { AuthSession } from '../auth/sessions.ts';
 import { loadVisibleProject, visibleProjectIds } from '../authz/scope.ts';
 import { projectScope, userActor } from '../commands/common.ts';
 import { targetInUse } from '../commands/deploy-targets.ts';
+import { listProposalDtos } from '../commands/setup-proposals.ts';
 import type { Ctx } from '../context.ts';
 import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { conflict, forbidden, notFound, unprocessable } from '../errors.ts';
-import { listProposalDtos } from '../commands/setup-proposals.ts';
+import { revokeKeyOnRemoval } from './connect.ts';
 import { evaluateEnvGate } from './gate.ts';
 import { guidedEnvsWithoutDryRun, loadRecipeRow } from './recipes.ts';
-import { requestDeployRun, type RequestDeployResult } from './runs.ts';
+import { type RequestDeployResult, requestDeployRun } from './runs.ts';
 import { projectOwnerOrThrow } from './setup.ts';
-import { revokeKeyOnRemoval } from './connect.ts';
 
 /**
  * The Environments page, server side (docs/design/environments-ux.md section 13): places (deploy targets seen as the page
@@ -87,7 +87,8 @@ async function usageOf(db: Queryable, projectId: string): Promise<Usage> {
   const draft = await one(db, 'SELECT setup FROM delivery_setup_drafts WHERE project_id=$1', [projectId]);
   const saved: Usage['saved'] = new Map();
   for (const e of savedEnvUsage(recipe))
-    for (const t of e.targets) saved.set(lc(t), [...(saved.get(lc(t)) ?? []), { env: e.name, label: e.label }]);
+    for (const t of e.targets)
+      saved.set(lc(t), [...(saved.get(lc(t)) ?? []), { env: e.name, label: e.label }]);
   const dr: Usage['draft'] = new Map();
   const savedKey = (name: string, target: string) =>
     (saved.get(lc(target)) ?? []).some((x) => x.env === name);
@@ -137,8 +138,7 @@ export function placeBlock(
   const parts: string[] = [];
   if (saved.length) parts.push(`the environment ${nameList(saved.map((s) => `"${s.label}"`))}`);
   if (draft.length) parts.push(`the unfinished change to ${nameList(draft.map((d) => `"${d}"`))}`);
-  if (followups > 0)
-    parts.push(`${followups} unfinished phase follow-up${followups === 1 ? '' : 's'}`);
+  if (followups > 0) parts.push(`${followups} unfinished phase follow-up${followups === 1 ? '' : 's'}`);
   if (parts.length === 0) return null;
   return {
     code: 'place_in_use',
@@ -172,7 +172,13 @@ export function duplicateOfPlace(t: Row, all: Row[]): PlaceDto['duplicateOf'] {
     if (o.id === t.id || o.kind !== t.kind) continue;
     const older = +o.created_at < +t.created_at || (+o.created_at === +t.created_at && o.id < t.id);
     if (!older) continue;
-    if (t.kind === 'remote_ssh' && o.host && t.host && lc(o.host) === lc(t.host) && o.workstation_id === t.workstation_id)
+    if (
+      t.kind === 'remote_ssh' &&
+      o.host &&
+      t.host &&
+      lc(o.host) === lc(t.host) &&
+      o.workstation_id === t.workstation_id
+    )
       return { id: o.id, name: o.name, reason: 'same_server' };
     if (t.kind === 'local_docker' && o.workstation_id && o.workstation_id === t.workstation_id)
       return { id: o.id, name: o.name, reason: 'same_computer' };
@@ -188,7 +194,9 @@ export async function listPlaces(
   const p = await loadVisibleProject(ctx.pool, user.id, projectId);
   const targets = await targetRows(ctx.pool, projectId);
   const usage = await usageOf(ctx.pool, projectId);
-  const conns = await rows(ctx.pool, 'SELECT * FROM deploy_target_connections WHERE project_id=$1', [projectId]);
+  const conns = await rows(ctx.pool, 'SELECT * FROM deploy_target_connections WHERE project_id=$1', [
+    projectId,
+  ]);
   const keys = await rows(
     ctx.pool,
     `SELECT target_id, count(*)::int AS n FROM deploy_target_keys WHERE project_id=$1 AND state='active' GROUP BY target_id`,
@@ -204,7 +212,12 @@ export async function listPlaces(
     const c = conns
       .filter((x) => x.target_id === t.id && (!t.workstation_id || x.workstation_id === t.workstation_id))
       .sort((a, b) => +b.at - +a.at)[0];
-    const block = placeBlock(t, usage, await followupsUsing(ctx.pool, t.id), await inOpenMove(ctx.pool, t.id));
+    const block = placeBlock(
+      t,
+      usage,
+      await followupsUsing(ctx.pool, t.id),
+      await inOpenMove(ctx.pool, t.id),
+    );
     places.push({
       id: t.id,
       name: t.name,
@@ -304,9 +317,11 @@ async function saveDraft(
   projectId: string,
   setup: unknown,
 ): Promise<void> {
-  const draft = await one(ctx.pool, 'SELECT custom_scripts, proposal_id FROM delivery_setup_drafts WHERE project_id=$1', [
-    projectId,
-  ]);
+  const draft = await one(
+    ctx.pool,
+    'SELECT custom_scripts, proposal_id FROM delivery_setup_drafts WHERE project_id=$1',
+    [projectId],
+  );
   await ctx.store.append([
     {
       streamId: streamId.project(projectId),
@@ -344,7 +359,9 @@ export async function setEnvironmentPlace(
   );
   if (!place) throw notFound('place not found');
   const { setup } = await workingSetup(ctx.pool, projectId);
-  const env = (setup?.environments as Array<Record<string, any>> | undefined)?.find((e) => e.name === envName);
+  const env = (setup?.environments as Array<Record<string, any>> | undefined)?.find(
+    (e) => e.name === envName,
+  );
   if (!setup || !env) throw notFound('that environment is not in the setup');
   const server = place.kind === 'remote_ssh';
   if ((env.hosting === 'ssh') !== server)
@@ -355,10 +372,14 @@ export async function setEnvironmentPlace(
         : 'this environment runs on a server; pick a server',
     );
   if (place.role !== 'active')
-    throw unprocessable('place_not_active', `${place.name} is not an active place (it is a standby or retired server)`);
+    throw unprocessable(
+      'place_not_active',
+      `${place.name} is not an active place (it is a standby or retired server)`,
+    );
   env.target = place.name;
   if (server) env.host = place.host;
-  if (place.app_url && env.app && typeof env.app === 'object' && !env.app.appUrl) env.app.appUrl = place.app_url;
+  if (place.app_url && env.app && typeof env.app === 'object' && !env.app.appUrl)
+    env.app.appUrl = place.app_url;
   await saveDraft(ctx, user, p, projectId, setup);
 }
 
@@ -471,7 +492,9 @@ export async function removeEnvironment(
     [projectId, envName],
   );
   if ((queued?.n ?? 0) > 0)
-    impact.push(`${queued?.n} release waiting for ${env.label ?? envName} will be cancelled when this is approved.`);
+    impact.push(
+      `${queued?.n} release waiting for ${env.label ?? envName} will be cancelled when this is approved.`,
+    );
   await saveDraft(ctx, user, p, projectId, setup);
   return { impact, lastEnvironment: false };
 }
@@ -548,7 +571,13 @@ function viewsOf(recipe: Row | undefined, targets: Row[]): EnvView[] {
     return guided.data.environments.map((e: SetupEnv) => ({
       name: e.name,
       label: e.label,
-      role: e.role ?? (targets.find((t) => lc(t.name) === lc(e.target))?.production ? 'live' : e.trigger.includes('after_merge') ? 'test' : 'other'),
+      role:
+        e.role ??
+        (targets.find((t) => lc(t.name) === lc(e.target))?.production
+          ? 'live'
+          : e.trigger.includes('after_merge')
+            ? 'test'
+            : 'other'),
       hosting: e.hosting,
       runtime: e.runtime ?? 'docker',
       target: e.target,
@@ -559,7 +588,13 @@ function viewsOf(recipe: Row | undefined, targets: Row[]): EnvView[] {
       custom: e.mode === 'custom',
     }));
   const parsed = (recipe?.parsed ?? null) as {
-    environments?: Array<{ name: string; targets: string[]; releasedBy: 'owner' | 'ceo' | 'auto'; triggers: string[]; gate: unknown }>;
+    environments?: Array<{
+      name: string;
+      targets: string[];
+      releasedBy: 'owner' | 'ceo' | 'auto';
+      triggers: string[];
+      gate: unknown;
+    }>;
   } | null;
   return (parsed?.environments ?? []).map((e) => {
     const t = targets.find((x) => lc(x.name) === lc(e.targets[0] ?? ''));
@@ -612,22 +647,24 @@ export async function buildStatus(ctx: Ctx, project: Row): Promise<EnvironmentsS
   const now = ctx.clock.now();
   const recipe = await loadRecipeRow(ctx.pool, projectId);
   const targets = await targetRows(ctx.pool, projectId);
-  const draftRow = await one(ctx.pool, 'SELECT * FROM delivery_setup_drafts WHERE project_id=$1', [projectId]);
+  const draftRow = await one(ctx.pool, 'SELECT * FROM delivery_setup_drafts WHERE project_id=$1', [
+    projectId,
+  ]);
   const views = viewsOf(recipe, targets);
   const draftEnvs = rawEnvs(draftRow?.setup);
   const draftByName = new Map(
-    ((draftRow?.setup as { environments?: Array<Record<string, unknown>> } | null)?.environments ?? []).map((e) => [
-      String(e.name),
-      e,
-    ]),
+    ((draftRow?.setup as { environments?: Array<Record<string, unknown>> } | null)?.environments ?? []).map(
+      (e) => [String(e.name), e],
+    ),
   );
   const savedByName = new Map(
-    ((recipe?.setup as { environments?: Array<Record<string, unknown>> } | null)?.environments ?? []).map((e) => [
-      String(e.name),
-      e,
-    ]),
+    ((recipe?.setup as { environments?: Array<Record<string, unknown>> } | null)?.environments ?? []).map(
+      (e) => [String(e.name), e],
+    ),
   );
-  const conns = await rows(ctx.pool, 'SELECT * FROM deploy_target_connections WHERE project_id=$1', [projectId]);
+  const conns = await rows(ctx.pool, 'SELECT * FROM deploy_target_connections WHERE project_id=$1', [
+    projectId,
+  ]);
   const proposals = await listProposalDtos(ctx.pool, projectId, 'deploy', true);
   const q = openQuestionsByEnv(proposals);
   const runs = await rows(
@@ -638,7 +675,9 @@ export async function buildStatus(ctx: Ctx, project: Row): Promise<EnvironmentsS
     [projectId, new Date(now.getTime() - 120 * 86_400_000)],
   );
   const presets = new Map<string, Gate>();
-  for (const r of await rows(ctx.pool, 'SELECT name, gate FROM gate_presets WHERE org_id=$1', [project.org_id]))
+  for (const r of await rows(ctx.pool, 'SELECT name, gate FROM gate_presets WHERE org_id=$1', [
+    project.org_id,
+  ]))
     presets.set(r.name, r.gate as Gate);
   const lp = draftRow?.last_publish as { setupHash?: string } | null | undefined;
   const approvalBase: 'none' | 'unapproved' | 'approved' | 'changed' = !recipe?.present
@@ -651,11 +690,13 @@ export async function buildStatus(ctx: Ctx, project: Row): Promise<EnvironmentsS
           ? 'unapproved'
           : 'changed';
   const dryMissing: string[] =
-    recipe?.observed_hash && recipe.present
-      ? await guidedEnvsWithoutDryRun(ctx.pool, projectId, recipe)
-      : [];
-  const labelOf = (n: string) => views.find((v) => v.name === n)?.label ?? draftEnvs.find((d) => d.name === n)?.label ?? n;
-  const names = [...views.map((v) => v.name), ...draftEnvs.map((d) => d.name).filter((n) => !views.some((v) => v.name === n))];
+    recipe?.observed_hash && recipe.present ? await guidedEnvsWithoutDryRun(ctx.pool, projectId, recipe) : [];
+  const labelOf = (n: string) =>
+    views.find((v) => v.name === n)?.label ?? draftEnvs.find((d) => d.name === n)?.label ?? n;
+  const names = [
+    ...views.map((v) => v.name),
+    ...draftEnvs.map((d) => d.name).filter((n) => !views.some((v) => v.name === n)),
+  ];
   const out: EnvironmentStatusDto[] = [];
   for (const name of names) {
     const v = views.find((x) => x.name === name);
@@ -664,7 +705,13 @@ export async function buildStatus(ctx: Ctx, project: Row): Promise<EnvironmentsS
     const envRuns = runs.filter((r) => r.env === name && !r.trial && !r.dry_run);
     const done = envRuns.filter((r) => r.status === 'succeeded');
     const cur = done[0];
-    const last = envRuns.find((r) => !['requested', 'waiting_release'].includes(r.status) && r.status !== 'cancelled' && r.status !== 'refused') ?? envRuns[0];
+    const last =
+      envRuns.find(
+        (r) =>
+          !['requested', 'waiting_release'].includes(r.status) &&
+          r.status !== 'cancelled' &&
+          r.status !== 'refused',
+      ) ?? envRuns[0];
     const waiting = envRuns.find((r) => r.status === 'waiting_release');
     const updating = envRuns.some((r) => r.status === 'queued' || r.status === 'running');
     const conn = t
@@ -683,11 +730,14 @@ export async function buildStatus(ctx: Ctx, project: Row): Promise<EnvironmentsS
     // the gate in sentences
     let gateObj: Gate | 'none' | string = 'none';
     if (v) gateObj = (v.gate as Gate | 'none' | string) ?? 'none';
-    const resolved = typeof gateObj === 'string' && gateObj !== 'none' ? presets.get(gateObj) ?? gateObj : gateObj;
+    const resolved =
+      typeof gateObj === 'string' && gateObj !== 'none' ? (presets.get(gateObj) ?? gateObj) : gateObj;
     const rules = describeGate(resolved as Gate | 'none' | string, labelOf);
     let blockedBy: string[] = [];
     if (waiting && v) {
-      const rec = (recipe?.approved_parsed ?? recipe?.parsed) as { environments?: Array<{ name: string; gate: any }> } | null;
+      const rec = (recipe?.approved_parsed ?? recipe?.parsed) as {
+        environments?: Array<{ name: string; gate: any }>;
+      } | null;
       const renv = rec?.environments?.find((e) => e.name === name);
       if (renv) {
         const verdict = await evaluateEnvGate(ctx.pool, {
@@ -705,12 +755,16 @@ export async function buildStatus(ctx: Ctx, project: Row): Promise<EnvironmentsS
     const healthOk = cur?.health ? (cur.health as { ok?: boolean }).ok : undefined;
     const health: EnvironmentStatusDto['health'] = cur
       ? healthOk === false
-        ? { state: 'unhealthy', at: iso(cur.finished_at), detail: (cur.health as { detail?: string }).detail ?? null }
+        ? {
+            state: 'unhealthy',
+            at: iso(cur.finished_at),
+            detail: (cur.health as { detail?: string }).detail ?? null,
+          }
         : healthOk === true
           ? { state: 'healthy', at: iso(cur.finished_at), detail: null }
           : { state: 'unknown', at: iso(cur.finished_at), detail: null }
       : { state: 'unknown', at: null, detail: null };
-    const failed = last && (last.status === 'failed') && (!cur || +last.created_at > +cur.created_at);
+    const failed = last && last.status === 'failed' && (!cur || +last.created_at > +cur.created_at);
     let state: EnvCardState;
     let text: string;
     const place = t?.name ?? v?.target ?? d?.target ?? '';
@@ -728,11 +782,14 @@ export async function buildStatus(ctx: Ctx, project: Row): Promise<EnvironmentsS
       text = `DevOps asks ${openQ} question${openQ === 1 ? '' : 's'} about this.`;
     } else if (failed) {
       state = 'failed';
-      const rolled = /rolled back|went back/i.test(`${last.summary ?? ''} ${JSON.stringify(last.result ?? '')}`);
+      const rolled = /rolled back|went back/i.test(
+        `${last.summary ?? ''} ${JSON.stringify(last.result ?? '')}`,
+      );
       text = `The last update did not work${rolled ? ' and went back to the earlier version by itself' : ''}${last.summary ? `: ${String(last.summary).slice(0, 200)}` : '.'}`;
     } else if (inSaved && approvalBase === 'changed') {
       state = 'changed';
-      text = 'The deploy files changed outside Guildwise since you approved them. Review them and approve, or go back.';
+      text =
+        'The deploy files changed outside Guildwise since you approved them. Review them and approve, or go back.';
     } else if (v?.custom) {
       state = 'custom';
       text = 'This is a script that was written or edited by hand.';
@@ -761,7 +818,10 @@ export async function buildStatus(ctx: Ctx, project: Row): Promise<EnvironmentsS
     out.push({
       env: name,
       label: v?.label ?? d?.label ?? name,
-      role: (v?.role ?? (d?.role as 'test' | 'live' | 'other' | undefined) ?? 'other') as 'test' | 'live' | 'other',
+      role: (v?.role ?? (d?.role as 'test' | 'live' | 'other' | undefined) ?? 'other') as
+        | 'test'
+        | 'live'
+        | 'other',
       hosting: v?.hosting ?? 'this_computer',
       runtime: v?.runtime ?? 'docker',
       placeId: t?.id ?? null,
@@ -863,7 +923,8 @@ export async function earlierReleases(
 ): Promise<EarlierReleasesResponse> {
   const p = await loadVisibleProject(ctx.pool, user.id, projectId);
   const role = await orgRoleOf(ctx.pool, user.id, p.org_id);
-  if (role !== 'owner' && role !== 'admin') throw forbidden('only an Owner or an Admin can see earlier releases');
+  if (role !== 'owner' && role !== 'admin')
+    throw forbidden('only an Owner or an Admin can see earlier releases');
   const list = await rows(
     ctx.pool,
     `SELECT id, commit, deployed_commit, trigger, target_name, released_by, finished_at, result, summary
@@ -902,7 +963,8 @@ export async function requestRollback(
 ): Promise<RequestDeployResult> {
   const p = await loadVisibleProject(ctx.pool, user.id, projectId);
   const role = await orgRoleOf(ctx.pool, user.id, p.org_id);
-  if (role !== 'owner' && role !== 'admin') throw forbidden('only an Owner or an Admin can go back to an earlier version');
+  if (role !== 'owner' && role !== 'admin')
+    throw forbidden('only an Owner or an Admin can go back to an earlier version');
   const run = await one(
     ctx.pool,
     `SELECT id, env, target_name, commit, deployed_commit, status, trial, dry_run FROM deploy_runs WHERE id=$1 AND project_id=$2`,
@@ -910,7 +972,10 @@ export async function requestRollback(
   );
   const commit = (run?.deployed_commit ?? run?.commit ?? null) as string | null;
   if (!run || run.env !== req.env || run.status !== 'succeeded' || run.trial || run.dry_run || !commit)
-    throw unprocessable('not_a_previous_release', 'that is not an earlier release of this environment that worked');
+    throw unprocessable(
+      'not_a_previous_release',
+      'that is not an earlier release of this environment that worked',
+    );
   const newest = await one(
     ctx.pool,
     `SELECT id FROM deploy_runs WHERE project_id=$1 AND env=$2 AND target_name=$3 AND status='succeeded' AND NOT trial AND NOT dry_run

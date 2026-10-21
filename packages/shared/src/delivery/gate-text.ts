@@ -41,7 +41,12 @@ export function describeGateRequire(r: GateRequire, label: (env: string) => stri
       : `${who} is running the same version and is healthy`;
   }
   if ('checksPassed' in r) {
-    const name = r.checksPassed === 'regression' ? 'Regression tests' : r.checksPassed === 'e2e' ? 'End-to-end tests' : 'CI checks';
+    const name =
+      r.checksPassed === 'regression'
+        ? 'Regression tests'
+        : r.checksPassed === 'e2e'
+          ? 'End-to-end tests'
+          : 'CI checks';
     return `${name} passed for this version`;
   }
   return 'The version is the result of a finished phase';

@@ -106,7 +106,9 @@ for i in $(seq 1 40); do echo "-- fake dump line $i of the database $1 padding p
 }
 
 const restarts = (w: World) =>
-  existsSync(join(w.root, 'restarts.log')) ? readFileSync(join(w.root, 'restarts.log'), 'utf8').split('\n').filter(Boolean) : [];
+  existsSync(join(w.root, 'restarts.log'))
+    ? readFileSync(join(w.root, 'restarts.log'), 'utf8').split('\n').filter(Boolean)
+    : [];
 const forbidden = (w: World) =>
   existsSync(join(w.root, 'forbidden.log')) ? readFileSync(join(w.root, 'forbidden.log'), 'utf8') : '';
 
@@ -302,7 +304,9 @@ describe('adopting a plain folder', () => {
     expect(lstatSync(dir).isSymbolicLink()).toBe(false);
     expect(restarts(w)).toEqual([]);
     // a dry run says the same
-    const d = run(w, script(w, { currentLink: dir, shared: [], database: undefined }), { AOM_DEPLOY_DRY_RUN: '1' });
+    const d = run(w, script(w, { currentLink: dir, shared: [], database: undefined }), {
+      AOM_DEPLOY_DRY_RUN: '1',
+    });
     expect(d.code).not.toBe(0);
   });
 
@@ -344,7 +348,10 @@ describe('other managers, and a server over ssh', () => {
   it('pm2 restarts only the named process', () => {
     const w = world();
     running(w);
-    const r = run(w, script(w, { manager: { kind: 'pm2', name: 'shop-api' }, shared: [], database: undefined }));
+    const r = run(
+      w,
+      script(w, { manager: { kind: 'pm2', name: 'shop-api' }, shared: [], database: undefined }),
+    );
     expect(r.code, r.out).toBe(0);
     expect(restarts(w)).toEqual(['shop-api']);
     expect(w.calls().filter((c) => c.startsWith('pm2'))).toEqual(['pm2 restart shop-api']);
@@ -354,9 +361,19 @@ describe('other managers, and a server over ssh', () => {
     const w = world();
     running(w);
     const mine = join(w.root, 'bin', 'restart-shop');
-    writeFileSync(mine, '#!/bin/bash\necho "restart-shop $*" >> "$FAKE_ROOT/calls.log"\necho mine >> "$FAKE_ROOT/restarts.log"\n');
+    writeFileSync(
+      mine,
+      '#!/bin/bash\necho "restart-shop $*" >> "$FAKE_ROOT/calls.log"\necho mine >> "$FAKE_ROOT/restarts.log"\n',
+    );
     chmodSync(mine, 0o755);
-    const r = run(w, script(w, { manager: { kind: 'command', restart: [mine, '--quick'], sudo: false }, shared: [], database: undefined }));
+    const r = run(
+      w,
+      script(w, {
+        manager: { kind: 'command', restart: [mine, '--quick'], sudo: false },
+        shared: [],
+        database: undefined,
+      }),
+    );
     expect(r.code, r.out).toBe(0);
     expect(w.calls()).toContain('restart-shop --quick');
   });
@@ -364,7 +381,10 @@ describe('other managers, and a server over ssh', () => {
   it('over ssh the same steps run on the server through ssh (scripts travel as an argument, the files as a tar stream)', () => {
     const w = world();
     running(w);
-    const r = run(w, script(w, { manager: systemd({ scope: 'user' }), shared: ['.env'], database: undefined }, true));
+    const r = run(
+      w,
+      script(w, { manager: systemd({ scope: 'user' }), shared: ['.env'], database: undefined }, true),
+    );
     expect(r.code, r.out).toBe(0);
     expect(readlinkSync(join(w.app, 'current'))).toBe(join(w.app, 'releases', SHORT));
     expect(readFileSync(join(w.app, 'releases', SHORT, 'server.js'), 'utf8')).toContain('hi');

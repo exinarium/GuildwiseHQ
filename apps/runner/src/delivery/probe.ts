@@ -10,8 +10,8 @@ import {
   type ProbeContainer,
   type ProbeError,
   type ProbeReport,
-  type ProbeService,
   ProbeReportSchema,
+  type ProbeService,
   type ProbeSshHost,
   parseYamlLimited,
 } from '@aom/shared';
@@ -271,7 +271,11 @@ export interface ServiceLines {
 /** The `SERVICE`, `PM2JSON`, `PROCESS` and `APPDIR` lines of the services probe as a report part. */
 export function buildServices(l: ServiceLines): { services: ProbeService[]; appDirs: string[] } {
   const services: ProbeService[] = [];
-  const num = (x: string) => x.split(',').map(Number).filter((n) => Number.isInteger(n) && n > 0 && n < 65536);
+  const num = (x: string) =>
+    x
+      .split(',')
+      .map(Number)
+      .filter((n) => Number.isInteger(n) && n > 0 && n < 65536);
   for (const row of l.services) {
     const [manager, name, state, wd, user, ports, layout, argv] = row.split('\t');
     if (!name || (manager !== 'systemd' && manager !== 'systemd_user')) continue;
@@ -291,12 +295,21 @@ export function buildServices(l: ServiceLines): { services: ProbeService[]; appD
     try {
       const list = JSON.parse(text) as Array<{
         name?: string;
-        pm2_env?: { status?: string; pm_cwd?: string; pm_exec_path?: string; username?: string; args?: unknown };
+        pm2_env?: {
+          status?: string;
+          pm_cwd?: string;
+          pm_exec_path?: string;
+          username?: string;
+          args?: unknown;
+        };
       }>;
       for (const p of Array.isArray(list) ? list.slice(0, 20) : []) {
         if (!p.name || !/^[A-Za-z0-9._-]+$/.test(p.name)) continue;
         const wd = p.pm2_env?.pm_cwd;
-        const exec = [p.pm2_env?.pm_exec_path, ...(Array.isArray(p.pm2_env?.args) ? (p.pm2_env?.args as unknown[]).map(String) : [])]
+        const exec = [
+          p.pm2_env?.pm_exec_path,
+          ...(Array.isArray(p.pm2_env?.args) ? (p.pm2_env.args as unknown[]).map(String) : []),
+        ]
           .filter(Boolean)
           .join(' ');
         const cmd = safeCommand(exec);
@@ -483,7 +496,10 @@ async function probeLocal(p: DeployProbePayload, o: ProbeOptions): Promise<Deplo
     ...(o.env ? { env: o.env } : {}),
   });
   // apps that run without Docker: a machine with none of Docker still has a report when it has such apps
-  const svc = await run('sh', ['-c', SERVICES_PROBE_SCRIPT], { timeoutMs: t, ...(o.env ? { env: o.env } : {}) });
+  const svc = await run('sh', ['-c', SERVICES_PROBE_SCRIPT], {
+    timeoutMs: t,
+    ...(o.env ? { env: o.env } : {}),
+  });
   const direct = buildServices(splitServiceLines(svc.stdout));
   const hasDirect = direct.services.length > 0 || direct.appDirs.length > 0;
   if (ver.missing && !hasDirect) return { ok: false, error: 'docker_missing' };
@@ -959,7 +975,11 @@ export function parseRemoteOutput(out: string, host: string, o: ProbeOptions = {
         svcLines.appDirs.push(rest);
         break;
       case 'CHECKED':
-        if (/^\/[A-Za-z0-9._/+@=*-]*$/.test(rest.trim()) && !checked.includes(rest.trim()) && checked.length < 60)
+        if (
+          /^\/[A-Za-z0-9._/+@=*-]*$/.test(rest.trim()) &&
+          !checked.includes(rest.trim()) &&
+          checked.length < 60
+        )
           checked.push(rest.trim());
         break;
       case 'NODIR':
