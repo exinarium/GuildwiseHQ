@@ -49,6 +49,7 @@ Each repository can be on GitHub, GitLab, Bitbucket Cloud, Azure DevOps or a pla
 - Standing orders and automations (formerly schedules): recurring instructions and work that starts by itself, on a time or when something happens in a workflow.
 - Vaults: knowledge repositories (git) for the organization and per project that sync to your workstations.
 - A DevOps engineer agent on every workstation, free: it installs tools and the project's packages, keeps repositories tidy (unsaved edits are kept in a local git stash, never pushed), tries to fix conflicting changes itself, and runs commands, Docker builds and deploys you ask for in a chat. It works as you, outside the sandbox the other agents use; privileged actions on a team member's machine need an Owner or Admin and the machine's user to agree.
+- A project backlog: a Backlog tab next to the board for work you want but have not started. Items (title, description, priority, tags, star) stay out of development until you send them to the BA; sending creates a normal intake and card and marks the item done. Agents can suggest follow-ups there, and the CEO's daily report lists the new suggestions.
 - Cards explain themselves on the board: why they are blocked, a repository problem, or a budget that is nearly used up, each with a link to fix it.
 - A What's new window after updates, and in-app help with articles, a glossary and a page-by-page help panel.
 - Shared projects: invite people as additional managers on a single project.

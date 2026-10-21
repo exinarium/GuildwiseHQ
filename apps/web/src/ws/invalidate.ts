@@ -62,6 +62,8 @@ export function keysForEvent(event: Pick<VisibleEvent, 'type' | 'streamId' | 'pr
         ['digest'],
         ['desk'],
       ];
+    case 'backlog':
+      return [['backlog']];
     case 'thread':
       // Card threads show on the card; chat threads have their own message list and the chat list.
       return [

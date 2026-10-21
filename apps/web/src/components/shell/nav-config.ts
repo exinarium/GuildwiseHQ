@@ -9,6 +9,7 @@ import {
   FolderKanban,
   Inbox,
   KanbanSquare,
+  ListTodo,
   LifeBuoy,
   Lightbulb,
   type LucideIcon,
@@ -66,9 +67,18 @@ export function buildNav(opts: {
       label: 'Board',
       to: projectKey ? `/p/${projectKey}/board` : '/projects',
       icon: KanbanSquare,
-      match: (p) => p.startsWith('/p/') || p.startsWith('/cards/'),
+      match: (p) => (p.startsWith('/p/') && !p.endsWith('/backlog')) || p.startsWith('/cards/'),
     },
   ];
+  if (projectKey)
+    work.push({
+      id: 'backlog',
+      label: 'Backlog',
+      to: `/p/${projectKey}/backlog`,
+      icon: ListTodo,
+      testId: 'nav-backlog',
+      match: (p) => p.endsWith('/backlog'),
+    });
   if (projectKey && hasEnvironments)
     work.push({
       id: 'environments',

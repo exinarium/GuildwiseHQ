@@ -20,6 +20,7 @@ import { BoardView, NO_FILTER } from '../components/BoardView.tsx';
 import { BudgetBanner } from '../components/BudgetBanner.tsx';
 import { ConvertProjectDialog } from '../components/ConvertProjectDialog.tsx';
 import { PhaseFilter } from '../components/PhaseFilter.tsx';
+import { ProjectTabs } from '../components/ProjectTabs.tsx';
 import { PauseProjectButton, ProjectPausedBanner } from '../components/ProjectPause.tsx';
 import { PlatformPauseBanner } from '../components/platform/PlatformPauseBanner.tsx';
 import { RegressionDialog } from '../components/RegressionDialog.tsx';
@@ -285,6 +286,7 @@ export function Board() {
           )
         }
       />
+      <ProjectTabs projectKey={project.key} active="board" />
       {board.data && <StageStrip columns={board.data.columns} />}
       <ProjectPausedBanner project={project} />
       <UsageLimitBanner limit={project.usageLimit} />

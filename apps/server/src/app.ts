@@ -57,6 +57,7 @@ import { agentRoutes } from './routes/agents.ts';
 import { approvalRoutes } from './routes/approval.ts';
 import { assistantRoutes } from './routes/assistant.ts';
 import { authRoutes } from './routes/auth.ts';
+import { backlogRoutes } from './routes/backlog.ts';
 import { billingRoutes } from './routes/billing.ts';
 import { blogApiRoutes } from './routes/blog-api.ts';
 import { blogPlatformRoutes } from './routes/blog-platform.ts';
@@ -398,6 +399,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   await app.register(digestRoutes(ctx));
   await app.register(researchRoutes(ctx));
   await app.register(intakeRoutes(ctx));
+  await app.register(backlogRoutes(ctx));
   await app.register(intakeBatchRoutes(ctx));
   await app.register(hrRoutes(ctx));
   await app.register(designerRoutes(ctx));

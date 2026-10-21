@@ -1,4 +1,11 @@
-import { CEO_ROLE_KEY, type CeoRpc, CeoRpcSchema, renderCeoData, streamId } from '@aom/shared';
+import {
+  BacklogFilter,
+  CEO_ROLE_KEY,
+  type CeoRpc,
+  CeoRpcSchema,
+  renderCeoData,
+  streamId,
+} from '@aom/shared';
 import { agentActor, orgScope, runnerActor, userActor } from '../commands/common.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Row, rows } from '../db/sql.ts';
@@ -12,6 +19,7 @@ import {
   recommendOnItem,
   runAction,
 } from './engine.ts';
+import { backlogLine, findBacklogItems } from './actions5.ts';
 import { jobOp } from './jobs.ts';
 import { addMemory, searchMemories } from './memory.ts';
 import { notifyOwner } from './notify.ts';
@@ -183,6 +191,21 @@ export async function ceoRpc(ctx: Ctx, shift: Row, params: Record<string, unknow
         if (rpc.sub !== 'repeats' && kind === 'wake')
           return [false, undefined, 'the job log belongs to an owner or order turn'];
         return [true, await jobOp(ctx, turn, agent.id, orgId, rpc)];
+      }
+      case 'backlog': {
+        const filter = BacklogFilter.parse({
+          status: rpc.status?.length ? rpc.status : ['open'],
+          ...(rpc.tag?.length ? { tag: rpc.tag } : {}),
+          ...(rpc.priority?.length ? { priority: rpc.priority } : {}),
+          ...(rpc.flagged !== undefined ? { flagged: rpc.flagged } : {}),
+          ...(rpc.q ? { q: rpc.q } : {}),
+          ...(rpc.sort ? { sort: rpc.sort } : {}),
+        });
+        const items = await findBacklogItems(ctx, env.owner, orgId, rpc.project, filter);
+        return [
+          true,
+          { items, text: items.length ? items.map(backlogLine).join('\n') : 'No backlog items match.' },
+        ];
       }
       case 'topic': {
         if (rpc.sub === 'list') return [true, { text: await listTopicsForCeo(ctx.pool, orgId) }];

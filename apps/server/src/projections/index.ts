@@ -1,5 +1,6 @@
 import type { Projector, ProjectorMap } from '../eventstore/types.ts';
 import { agentProjectors } from './agents.ts';
+import { backlogProjectors } from './backlog.ts';
 import { blogProjectors } from './blog.ts';
 import { cardProjectors, releaseHeldDesigns } from './cards.ts';
 import { catalogueProjectors } from './catalogue.ts';
@@ -80,6 +81,7 @@ const domains: Array<Record<string, Projector>> = [
   researchProjectors,
   intakeProjectors,
   intakeBatchProjectors,
+  backlogProjectors,
   trackRecordProjectors,
   outboundProjectors,
   repoProjectors,
@@ -211,6 +213,7 @@ export const PROJECTION_TABLES = [
   'intake_cards',
   'intake_batches',
   'intake_batch_items',
+  'backlog_items',
   'agent_card_stats',
   'agent_review_log',
   'agent_stats_daily',
