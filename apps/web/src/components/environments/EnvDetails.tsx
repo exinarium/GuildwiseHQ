@@ -1,7 +1,7 @@
 import type { ProbeReport, planChanges } from '@aom/shared';
 import { FoundChanges } from '../delivery/setup/FoundChanges.tsx';
-import { Button, Select, TextArea, TextInput } from '../ui.tsx';
-import { type Answers, type NativeAnswers, restartWords, type Stack } from './answers.ts';
+import { Button, Callout, Select, TextArea, TextInput } from '../ui.tsx';
+import { type Answers, missingShared, type NativeAnswers, restartWords, type Stack } from './answers.ts';
 import { Choice } from './Choice.tsx';
 
 /** "What we found" for a Docker app: which part is the app, the database, the version setting, the address to check. */
@@ -255,6 +255,37 @@ export function NativeDetails({
               </span>
             </label>
           </div>
+        )}
+        {missingShared(n).length > 0 && (
+          <Callout
+            tone="warning"
+            title="Some files look like data the app writes itself"
+            data-testid="native-state-paths"
+          >
+            <p>
+              A new version starts in a fresh folder, so these would be left behind. Mark them as kept between
+              versions first:
+            </p>
+            <ul className="mt-1 list-disc pl-5 font-mono text-xs">
+              {missingShared(n).map((p) => (
+                <li key={p}>{p}</li>
+              ))}
+            </ul>
+            <div className="mt-2">
+              <Button
+                size="sm"
+                variant="primary"
+                data-testid="native-keep-state"
+                onClick={() =>
+                  setNative({
+                    shared: [...n.shared.split(/[\s,]+/).filter(Boolean), ...missingShared(n)].join(' '),
+                  })
+                }
+              >
+                Keep these between versions
+              </Button>
+            </div>
+          </Callout>
         )}
         {n.releaseLayout && n.workingDir && (
           <p className="text-xs text-muted">

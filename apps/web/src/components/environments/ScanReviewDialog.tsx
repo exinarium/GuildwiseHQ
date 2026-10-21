@@ -1,7 +1,12 @@
 import { describeSetupStep, type ProposalDto, type SetupEnv } from '@aom/shared';
 import { useQueryClient } from '@tanstack/react-query';
+import { useState } from 'react';
 import { useUseDeployProposal } from '../../api/queries/deploy-setup.ts';
-import { useAnswerProposal } from '../../api/queries/environments.ts';
+import {
+  type NeedsConfirmation,
+  type QuestionAnswer,
+  useAnswerProposal,
+} from '../../api/queries/environments.ts';
 import { useDismissProposal, useRunPlanOverview, useSaveRunPlan } from '../../api/queries/run-plan.ts';
 import { Badge, Button, Callout, Dialog, Disclosure, ErrorBox, useToast } from '../ui.tsx';
 import { AnswerFields, blockingQuestions } from './AnswerFields.tsx';
@@ -31,6 +36,20 @@ export function ScanReviewDialog({
   const dismiss = useDismissProposal(projectId);
   const runOverview = useRunPlanOverview(projectId);
   const saveRun = useSaveRunPlan(projectId);
+  const [confirming, setConfirming] = useState<{
+    answers: QuestionAnswer[];
+    items: NeedsConfirmation[];
+  } | null>(null);
+  const send = (answers: QuestionAnswer[], confirmed?: string[]) =>
+    answer.mutate(
+      { proposalId: proposal.id, answers, ...(confirmed ? { confirmed } : {}) },
+      {
+        onSuccess: (r) => {
+          const items = r.needsConfirmation ?? [];
+          setConfirming(items.length > 0 ? { answers, items } : null);
+        },
+      },
+    );
   const p = proposal.proposal;
   const questions = p.questions;
   const blocking = blockingQuestions(questions);
@@ -106,7 +125,7 @@ export function ScanReviewDialog({
             questions={questions}
             pending={answer.isPending}
             error={answer.error}
-            onSubmit={(a) => answer.mutate({ proposalId: proposal.id, answers: a })}
+            onSubmit={(a) => send(a)}
           />
         )}
         {blocking.length > 0 && (
@@ -177,6 +196,42 @@ export function ScanReviewDialog({
         )}
         <ErrorBox error={use.error ?? dismiss.error ?? saveRun.error} />
       </div>
+      {confirming && (
+        <Dialog
+          open
+          onOpenChange={(o) => !o && setConfirming(null)}
+          title="Please confirm"
+          description="This answer changes what Guildwise does on your machine, so it asks once more."
+          footer={
+            <>
+              <Button variant="ghost" autoFocus onClick={() => setConfirming(null)}>
+                No, go back
+              </Button>
+              <Button
+                variant="primary"
+                loading={answer.isPending}
+                data-testid="answers-confirm"
+                onClick={() =>
+                  send(
+                    confirming.answers,
+                    confirming.items.map((i) => i.path),
+                  )
+                }
+              >
+                Yes, that is right
+              </Button>
+            </>
+          }
+        >
+          <ul className="flex flex-col gap-2 text-sm text-fg" data-testid="answers-confirm-list">
+            {confirming.items.map((i) => (
+              <li key={i.path} className="rounded-control bg-warning-soft p-3 text-warning-soft-fg">
+                {i.text}
+              </li>
+            ))}
+          </ul>
+        </Dialog>
+      )}
     </Dialog>
   );
 }

@@ -389,6 +389,56 @@ test.describe('Environments: user journeys (mocked world)', () => {
     await expect(tid(page, 'place-shop-live')).toContainText('Can sign in');
   });
 
+  test('14. an answer that turns on sudo is confirmed in words before it is kept', async ({ browser }) => {
+    const page = await openAs(browser, { scenario: 'confirm' });
+    await goEnv(page);
+    await tid(page, 'needs-answer-open').click();
+    await tid(page, 'answer-0-yes').click();
+    await tid(page, 'answers-submit').click();
+    await expect(tid(page, 'answers-confirm-list')).toContainText('Guildwise will use sudo');
+    await tid(page, 'answers-confirm').click();
+    await expect(tid(page, 'proposal-questions')).toContainText('Your answers');
+  });
+
+  test('15. a key that could not be taken off the server is forgotten here only when the person says so', async ({
+    browser,
+  }) => {
+    const page = await openAs(browser, { scenario: 'approved', extra: { 'aom-mock-revoke': 'fail' } });
+    await goEnv(page, '#places');
+    await tid(page, 'places-add-server').click();
+    await tid(page, 'host-use-flow5-server').click();
+    await tid(page, 'server-done').click();
+    await page.getByRole('button', { name: 'More for flow5-server' }).click();
+    await page.getByRole('menuitem', { name: 'Remove' }).click();
+    await tid(page, 'remove-key').check();
+    await tid(page, 'remove-place-confirm').click();
+    await expect(tid(page, 'key-cleanup')).toContainText('could not take its key off');
+    await tid(page, 'forget-key-anyway').click();
+    await expect(tid(page, 'key-cleanup')).toHaveCount(0);
+  });
+
+  test('16. a stack that cannot be updated yet says why, and files an app writes itself must be marked as kept first', async ({
+    browser,
+  }) => {
+    const page = await openAs(browser, { scenario: 'unsupported' });
+    await goEnv(page);
+    await tid(page, 'setup-add').click();
+    await tid(page, 'place-choice-Office PC').click();
+    await expect(tid(page, 'stack-unsupported')).toContainText('Not supported yet');
+    await page.keyboard.press('Escape');
+    const native = await openAs(browser, { scenario: 'nativeempty' });
+    await goEnv(native);
+    await tid(native, 'setup-add').click();
+    await tid(native, 'place-choice-Office PC').click();
+    await tid(native, 'native-choice').first().click();
+    await tid(native, 'env-next').click();
+    await expect(tid(native, 'native-state-paths')).toContainText('uploads');
+    await tid(native, 'native-adopt-confirm').check();
+    await expect(tid(native, 'env-to-review')).toBeDisabled();
+    await tid(native, 'native-keep-state').click();
+    await expect(tid(native, 'env-to-review')).toBeEnabled();
+  });
+
   test('10. card test copies: the Test copies card says where they run and what is running; without start steps it says so', async ({
     browser,
   }) => {

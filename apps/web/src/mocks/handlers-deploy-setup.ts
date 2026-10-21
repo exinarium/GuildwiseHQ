@@ -490,7 +490,8 @@ export const deploySetupHandlers = [
     return HttpResponse.json(state());
   }),
   http.get(`${A}/projects/:id/places`, () => HttpResponse.json(placesDto())),
-  http.post(`${A}/projects/:id/places/:placeId/remove`, ({ params }) => {
+  http.post(`${A}/projects/:id/places/:placeId/remove`, async ({ params, request }) => {
+    const b = (await request.json().catch(() => ({}))) as { removeKey?: boolean };
     const p = placesDto().places.find((x) => x.id === params.placeId);
     if (p && !p.canRemove)
       return HttpResponse.json(
@@ -500,7 +501,29 @@ export const deploySetupHandlers = [
     update((x) => {
       x.targets = x.targets.filter((t) => t.id !== params.placeId);
     });
+    if (b.removeKey && p?.kind === 'server') {
+      const fail = localStorage.getItem('aom-mock-revoke') === 'fail';
+      const id = op(
+        'revoke',
+        !fail,
+        { ok: !fail },
+        fail ? 'The server did not answer, so Guildwise could not take its key off it.' : null,
+      );
+      if (fail) (ops.get(id) as Record<string, unknown>).localKeyKept = true;
+      return HttpResponse.json({
+        removed: true,
+        keyCleanup: { state: 'started', commandId: id, reason: null },
+      });
+    }
     return HttpResponse.json({ removed: true, keyCleanup: { state: 'none', commandId: null, reason: null } });
+  }),
+  http.post(`${A}/projects/:id/delivery/ops/:commandId/forget-key`, ({ params }) => {
+    const o = ops.get(String(params.commandId));
+    if (o) {
+      o.localKeyKept = false;
+      o.errorText = null;
+    }
+    return HttpResponse.json({ ok: true });
   }),
   http.post(`${A}/projects/:id/places/merge`, async ({ request }) => {
     const b = (await request.json()) as { fromId: string; toId: string };
@@ -667,11 +690,22 @@ export const deploySetupHandlers = [
     });
   }),
   http.post(`${A}/setup-proposals/:id/answers`, async ({ request }) => {
-    const b = (await request.json()) as { answers: Array<{ path: string; value: string }> };
+    const b = (await request.json()) as {
+      answers: Array<{ path: string; value: string }>;
+      confirmed?: string[];
+    };
+    const needs = b.answers
+      .filter((a) => /sudo$/.test(a.path) && a.value === 'yes' && !(b.confirmed ?? []).includes(a.path))
+      .map((a) => ({
+        path: a.path,
+        kind: 'sudo',
+        text: 'Guildwise will use sudo to restart invoice-web.service on billing-vps. It only does this for that one command, and only if the server allows sudo without a password.',
+      }));
     const st = update((s) => {
-      for (const a of b.answers) s.proposal.answers[a.path] = a.value;
+      for (const a of b.answers)
+        if (!needs.some((n) => n.path === a.path)) s.proposal.answers[a.path] = a.value;
     });
-    return HttpResponse.json(proposal(st));
+    return HttpResponse.json({ ...proposal(st), needsConfirmation: needs });
   }),
   http.post(`${A}/projects/:id/scan`, async ({ request }) => {
     const b = (await request.json()) as { area?: string };

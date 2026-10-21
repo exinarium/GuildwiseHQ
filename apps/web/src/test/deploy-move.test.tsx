@@ -136,7 +136,7 @@ const state = (over: Partial<SetupStateDto> = {}): SetupStateDto =>
     scan: null,
     scanProblem: null,
     proposal: null,
-    generator: 'setup-1.3',
+    generator: 'setup-1.4',
     improvedAvailable: false,
     ...over,
   }) as SetupStateDto;

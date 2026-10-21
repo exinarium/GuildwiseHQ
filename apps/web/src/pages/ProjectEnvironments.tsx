@@ -1,3 +1,4 @@
+import { isOlderGenerator } from '@aom/shared';
 import { useQueryClient } from '@tanstack/react-query';
 import { Cloud, Plus, ScanSearch } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
@@ -298,7 +299,8 @@ function EnvironmentsBody({
           </div>
         </Callout>
       )}
-      {s.improvedAvailable && s.current.setup && <ImprovedSteps projectId={projectId} s={s} />}
+      {(s.improvedAvailable || (s.current.setup && isOlderGenerator(s.current.setup.generator))) &&
+        s.current.setup && <ImprovedSteps projectId={projectId} s={s} />}
       {approvedWaiting.length > 0 && (
         <Callout tone="info" data-testid="release-waiting-note">
           Waiting for you: {approvedWaiting.length} {approvedWaiting.length === 1 ? 'release' : 'releases'}.{' '}

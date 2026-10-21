@@ -435,4 +435,73 @@ export const journeys = [
       await shot(name('2-empty-again'));
     },
   },
+
+  {
+    id: 'v1-confirm',
+    scenario: 'confirm',
+    run: async ({ p, name, shot }) => {
+      await goEnv(p);
+      await click(p, 'needs-answer-open');
+      await tid(p, 'answer-0-yes').click();
+      await dialogShot(p, shot, name('1-question'));
+      await click(p, 'answers-submit');
+      await tid(p, 'answers-confirm-list').waitFor();
+      await dialogShot(p, shot, name('2-confirm'));
+      await click(p, 'answers-confirm');
+      await p.waitForTimeout(600);
+      await dialogShot(p, shot, name('3-kept'));
+    },
+  },
+  {
+    id: 'v2-forget-key',
+    scenario: 'approved',
+    extra: { 'aom-mock-revoke': 'fail' },
+    run: async ({ p, name, shot }) => {
+      await goEnv(p, 'P5', '#places');
+      await click(p, 'places-add-server');
+      await click(p, 'host-use-flow5-server');
+      await tid(p, 'server-done').click();
+      await p.getByRole('button', { name: 'More for flow5-server' }).click();
+      await p.getByRole('menuitem', { name: 'Remove' }).click();
+      await tid(p, 'remove-key').check();
+      await dialogShot(p, shot, name('1-remove'));
+      await click(p, 'remove-place-confirm');
+      await tid(p, 'key-cleanup').waitFor();
+      await p.waitForTimeout(1500);
+      await dialogShot(p, shot, name('2-key-kept'));
+      await click(p, 'forget-key-anyway');
+      await p.waitForTimeout(600);
+      await shot(name('3-forgotten'), { full: false });
+    },
+  },
+  {
+    id: 'v3-unsupported',
+    scenario: 'unsupported',
+    run: async ({ p, name, shot }) => {
+      await goEnv(p);
+      await click(p, 'setup-add');
+      await click(p, 'place-choice-Office PC');
+      await tid(p, 'stack-unsupported').waitFor();
+      await tid(p, 'stack-unsupported').scrollIntoViewIfNeeded();
+      await dialogShot(p, shot, name('1-unsupported'));
+    },
+  },
+  {
+    id: 'v4-state-paths',
+    scenario: 'nativeempty',
+    run: async ({ p, name, shot }) => {
+      await goEnv(p);
+      await click(p, 'setup-add');
+      await click(p, 'place-choice-Office PC');
+      await tid(p, 'native-choice').first().waitFor();
+      await click(p, 'native-choice');
+      await click(p, 'env-next');
+      await tid(p, 'native-state-paths').waitFor();
+      await tid(p, 'native-state-paths').scrollIntoViewIfNeeded();
+      await dialogShot(p, shot, name('1-state-paths'));
+      await click(p, 'native-keep-state');
+      await tid(p, 'native-shared').scrollIntoViewIfNeeded();
+      await dialogShot(p, shot, name('2-kept'));
+    },
+  },
 ];

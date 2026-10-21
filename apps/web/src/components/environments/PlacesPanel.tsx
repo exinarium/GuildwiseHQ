@@ -1,10 +1,10 @@
 import { RETIRE_EXPLAINER, type SetupStateDto } from '@aom/shared';
 import { Monitor, Plus, RefreshCw, Server } from 'lucide-react';
-import { useState } from 'react';
-import { useCheckTarget } from '../../api/queries/deploy-connect.ts';
+import { useEffect, useState } from 'react';
+import { useCheckTarget, useOp } from '../../api/queries/deploy-connect.ts';
 import { useRetire } from '../../api/queries/deploy-move.ts';
 import { useProbe } from '../../api/queries/deploy-setup.ts';
-import { useMergePlaces, useRemovePlace } from '../../api/queries/environments.ts';
+import { useForgetKey, useMergePlaces, useRemovePlace } from '../../api/queries/environments.ts';
 import { ConnectServer } from '../delivery/connect/ConnectServer.tsx';
 import { KeysList } from '../delivery/connect/KeysList.tsx';
 import { needsReconnect, ReachabilityChip } from '../delivery/connect/ReachabilityChip.tsx';
@@ -50,6 +50,7 @@ export function PlacesPanel({
   const [merging, setMerging] = useState<PlaceVm | null>(null);
   const [reconnect, setReconnect] = useState<PlaceVm | null>(null);
   const [alsoKey, setAlsoKey] = useState(false);
+  const [cleanup, setCleanup] = useState<{ id: string; name: string } | null>(null);
 
   return (
     <div className="flex flex-col gap-3" data-testid="places-list">
@@ -203,8 +204,12 @@ export function PlacesPanel({
                   remove.mutate(
                     { id: removing.id, ...(alsoKey ? { revokeKey: true } : {}) },
                     {
-                      onSuccess: () => {
+                      onSuccess: (r) => {
                         toast.success(`${removing.name} removed`);
+                        if (r.keyCleanup.state === 'started' && r.keyCleanup.commandId)
+                          setCleanup({ id: r.keyCleanup.commandId, name: removing.name });
+                        else if (r.keyCleanup.state === 'skipped' && r.keyCleanup.reason)
+                          toast.success(`The key was not removed: ${r.keyCleanup.reason}`);
                         setRemoving(null);
                         setAlsoKey(false);
                       },
@@ -250,6 +255,14 @@ export function PlacesPanel({
             <ErrorBox error={remove.error} />
           </div>
         </Dialog>
+      )}
+      {cleanup && (
+        <KeyCleanup
+          projectId={projectId}
+          commandId={cleanup.id}
+          name={cleanup.name}
+          onClose={() => setCleanup(null)}
+        />
       )}
       {merging && (
         <ConfirmDialog
@@ -400,4 +413,79 @@ function blockedBy(p: PlaceVm): string | null {
   if (p.canRemove === false) return 'Something still uses it: change that first.';
   const names = [...p.usedBy.map((u) => u.label), ...p.usedByDraft];
   return names.length > 0 ? `Used by ${names.join(', ')}: change that first.` : null;
+}
+
+/**
+ * After a place was removed with "also remove Guildwise's key": follows the operation. If the server could not be asked to drop
+ * the key, this computer kept its own key; the person may forget it anyway (the key on the server then stays there).
+ */
+function KeyCleanup({
+  projectId,
+  commandId,
+  name,
+  onClose,
+}: {
+  projectId: string;
+  commandId: string;
+  name: string;
+  onClose: () => void;
+}) {
+  const op = useOp(projectId, commandId);
+  const forget = useForgetKey(projectId);
+  const toast = useToast();
+  const d = op.data;
+  const failed = d && d.state !== 'pending' && d.ok === false;
+  const done = !!d && d.state === 'done' && !!d.ok;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: once, when the operation is done
+  useEffect(() => {
+    if (!done) return;
+    toast.success(`Guildwise's key was taken off ${name}`);
+    onClose();
+  }, [done]);
+  if (done) return null;
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()} title={`The key on ${name}`}>
+      <div className="flex flex-col gap-3 text-sm" data-testid="key-cleanup" role="status">
+        {!d || d.state === 'pending' ? (
+          <p className="text-muted">Taking Guildwise's key off the server...</p>
+        ) : (
+          <>
+            <Callout
+              tone={failed ? 'danger' : 'info'}
+              title={failed ? 'The key could not be removed from the server' : 'Done'}
+            >
+              {d.errorText ?? 'The server did not answer.'}
+            </Callout>
+            {d.localKeyKept && (
+              <>
+                <p className="text-muted">
+                  This computer kept its own copy of the key, so you can try again. If you will never use this
+                  server again, forget the key on this computer anyway. The key stays on the server until you
+                  remove it there.
+                </p>
+                <div>
+                  <Button
+                    variant="danger"
+                    loading={forget.isPending}
+                    data-testid="forget-key-anyway"
+                    onClick={() =>
+                      forget.mutate(commandId, {
+                        onSuccess: () => {
+                          toast.success('The key was forgotten on this computer');
+                          onClose();
+                        },
+                      })
+                    }
+                  >
+                    Forget the key on this computer anyway
+                  </Button>
+                </div>
+              </>
+            )}
+          </>
+        )}
+        <ErrorBox error={forget.error} />
+      </div>
+    </Dialog>
+  );
 }

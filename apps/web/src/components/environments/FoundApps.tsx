@@ -103,6 +103,7 @@ export function FoundApps({
           )}
           {stacks.map((st) => (
             <Choice
+              disabled={!!st.unsupported}
               key={st.path}
               name={group}
               checked={selected?.kind === 'stack' && selected.path === st.path}
@@ -117,6 +118,11 @@ export function FoundApps({
               }
               testId="stack-choice"
             >
+              {st.unsupported && (
+                <span className="mb-1 block font-medium text-warning" data-testid="stack-unsupported">
+                  Not supported yet: {st.unsupported}
+                </span>
+              )}
               {st.services.length} {st.services.length === 1 ? 'part' : 'parts'} (
               {st.services.map((x) => x.name).join(', ')}).{' '}
               {st.running

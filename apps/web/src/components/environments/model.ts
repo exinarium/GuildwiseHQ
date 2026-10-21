@@ -269,7 +269,7 @@ const SERVER_CHIP: Record<string, { label: string; tone: Tone }> = {
   unhealthy: { label: 'Not answering', tone: 'red' },
   updating: { label: 'Updating', tone: 'blue' },
   needs_answer: { label: 'Needs your answer', tone: 'amber' },
-  blocked: { label: 'Blocked', tone: 'amber' },
+  blocked: { label: 'Waiting', tone: 'amber' },
   cannot_reach: { label: 'Cannot reach', tone: 'red' },
   failed: { label: 'Failed', tone: 'red' },
   changed: { label: 'Changed', tone: 'amber' },
@@ -415,7 +415,7 @@ function cardInfoLocal(args: {
     return {
       ...base,
       state: 'blocked',
-      chip: { label: 'Blocked', tone: 'amber' },
+      chip: { label: 'Waiting', tone: 'amber' },
       sentence: `Waiting for: ${waiting.waitingFor.join('; ') || 'the rules'}.`,
       action: null,
     };

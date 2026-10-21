@@ -250,11 +250,24 @@ export interface QuestionAnswer {
 }
 
 /** `POST /api/setup-proposals/:id/answers`: the server stores each answer on its question and applies it to the suggestion. */
+export interface NeedsConfirmation {
+  path: string;
+  kind: 'sudo' | 'adopt_folder';
+  /** What will happen, in a sentence: shown before the answer is kept. */
+  text: string;
+}
+
 export function useAnswerProposal(projectId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (v: { proposalId: string; answers: QuestionAnswer[] }) =>
-      post<ProposalDto>(`/setup-proposals/${v.proposalId}/answers`, { answers: v.answers }),
+    mutationFn: (v: { proposalId: string; answers: QuestionAnswer[]; confirmed?: string[] }) =>
+      post<ProposalDto & { needsConfirmation?: NeedsConfirmation[] }>(
+        `/setup-proposals/${v.proposalId}/answers`,
+        {
+          answers: v.answers,
+          ...(v.confirmed ? { confirmed: v.confirmed } : {}),
+        },
+      ),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: setupKey(projectId) });
       void qc.invalidateQueries({ queryKey: ['run-plan', projectId] });
@@ -286,10 +299,14 @@ export function useRemovePlace(projectId: string) {
   const done = useInvalidateEnvs(projectId);
   return useMutation({
     mutationFn: (v: { id: string; revokeKey?: boolean }) =>
-      post<{ removed: true; keyCleanup: { state: string; reason: string | null } }>(
-        `/projects/${projectId}/places/${v.id}/remove`,
-        { removeKey: !!v.revokeKey },
-      ),
+      post<{
+        removed: true;
+        keyCleanup: {
+          state: 'none' | 'started' | 'skipped';
+          commandId: string | null;
+          reason: string | null;
+        };
+      }>(`/projects/${projectId}/places/${v.id}/remove`, { removeKey: !!v.revokeKey }),
     onSuccess: done,
   });
 }
@@ -391,5 +408,15 @@ export function usePublishDraft(projectId: string) {
       return { ok: true };
     },
     onSuccess: done,
+  });
+}
+
+/** "Forget the key on this computer anyway": the server could not be asked to drop it, and the person said to forget it. */
+export function useForgetKey(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (commandId: string) =>
+      post<{ ok?: boolean }>(`/projects/${projectId}/delivery/ops/${commandId}/forget-key`, {}),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['deploy-op', projectId] }),
   });
 }

@@ -237,6 +237,7 @@ function seed(scenario: string): Store {
   });
   switch (scenario) {
     case 'proposal':
+    case 'confirm':
       return { ...base, proposal: { open: true, answers: {} } };
     case 'waiting':
     case 'improved':
@@ -723,6 +724,7 @@ export function reportFor(
             command: 'node dist/server.js',
             ports: [3100],
             user: 'pieter',
+            statePaths: ['uploads', '.env'],
           },
           {
             manager: 'process',
@@ -761,6 +763,12 @@ export function reportFor(
         ],
         appDirs: ['/srv/invoice'],
       } as unknown as ProbeReport;
+  }
+  if (scenario === 'unsupported' && scope === 'local') {
+    const r = localReport();
+    (r.composeFiles[0] as unknown as { unsupported?: string }).unsupported =
+      'it is started from two compose files (docker-compose.yml and docker-compose.prod.yml)';
+    return r as unknown as ProbeReport;
   }
   if (scope === 'local') {
     if (localStorage.getItem('aom-mock-local') === 'bare')
@@ -816,34 +824,46 @@ export function proposal(s: Store) {
         },
         { path: '/environments/1/app/appUrl', confidence: 'found', evidence: [{ probe: 'caddy site' }] },
       ],
-      questions: [
-        {
-          path: '/environments/0/app/service',
-          question: 'Which part is your app?',
-          options: ['app', 'worker', 'web'],
-          kind: 'choice',
-          ...(answers['/environments/0/app/service'] !== undefined
-            ? { answer: String(answers['/environments/0/app/service']) }
-            : {}),
-        },
-        {
-          path: '/environments/0/app/appUrl',
-          question: 'Which port does the website use?',
-          default: '3000',
-          kind: 'text',
-          ...(answers['/environments/0/app/appUrl'] !== undefined
-            ? { answer: String(answers['/environments/0/app/appUrl']) }
-            : {}),
-        },
-        {
-          path: '/environments/1/production',
-          question: 'Is this server the live site?',
-          kind: 'confirm',
-          ...(answers['/environments/1/production'] !== undefined
-            ? { answer: String(answers['/environments/1/production']) }
-            : {}),
-        },
-      ],
+      questions:
+        s.scenario === 'confirm'
+          ? [
+              {
+                path: '/environments/1/direct/manager/sudo',
+                question: 'Does restarting the app need administrator rights (sudo)?',
+                kind: 'confirm',
+                ...(answers['/environments/1/direct/manager/sudo'] !== undefined
+                  ? { answer: String(answers['/environments/1/direct/manager/sudo']) }
+                  : {}),
+              },
+            ]
+          : [
+              {
+                path: '/environments/0/app/service',
+                question: 'Which part is your app?',
+                options: ['app', 'worker', 'web'],
+                kind: 'choice',
+                ...(answers['/environments/0/app/service'] !== undefined
+                  ? { answer: String(answers['/environments/0/app/service']) }
+                  : {}),
+              },
+              {
+                path: '/environments/0/app/appUrl',
+                question: 'Which port does the website use?',
+                default: '3000',
+                kind: 'text',
+                ...(answers['/environments/0/app/appUrl'] !== undefined
+                  ? { answer: String(answers['/environments/0/app/appUrl']) }
+                  : {}),
+              },
+              {
+                path: '/environments/1/production',
+                question: 'Is this server the live site?',
+                kind: 'confirm',
+                ...(answers['/environments/1/production'] !== undefined
+                  ? { answer: String(answers['/environments/1/production']) }
+                  : {}),
+              },
+            ],
       secretsNeeded: [],
       notes:
         'The test site is a Docker Compose project called shop-uat on Office PC. The live site is built here and shipped over ssh.',

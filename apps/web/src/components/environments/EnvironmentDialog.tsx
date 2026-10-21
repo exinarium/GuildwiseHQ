@@ -41,6 +41,7 @@ import {
   healthProbeUrls,
   healthyUrls,
   imageVarOf,
+  missingShared,
   type NativeAnswers,
   nativeFromApp,
   type Stack,
@@ -409,7 +410,8 @@ export function EnvironmentDialog({
       ? !!answers.native.name.trim() &&
         /^\//.test(answers.native.appDir) &&
         !!answers.native.restartTarget.trim() &&
-        (answers.native.releaseLayout || !answers.native.workingDir || answers.native.adoptFolder)
+        (answers.native.releaseLayout || !answers.native.workingDir || answers.native.adoptFolder) &&
+        missingShared(answers.native).length === 0
       : !!answers.appService && !!answers.imageName && !blockers;
 
   // the computer that writes the setup must be new enough for the way of updating that was chosen (section 13.2)

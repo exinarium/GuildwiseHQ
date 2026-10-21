@@ -69,6 +69,8 @@ export interface NativeAnswers {
   build: string;
   /** Files and folders kept in `shared/` and linked into every release. */
   shared: string;
+  /** Files and folders that look like data the app writes itself (found by the look): they must be kept between versions. */
+  statePaths: string[];
   /** Back up a database first (empty: none). */
   dbEngine: '' | 'postgres' | 'mysql' | 'sqlite';
   dbName: string;
@@ -91,6 +93,7 @@ export const emptyNative = (): NativeAnswers => ({
   keepReleases: 5,
   build: '',
   shared: '',
+  statePaths: [],
   dbEngine: '',
   dbName: '',
   dbFile: '',
@@ -118,6 +121,7 @@ export function nativeFromApp(app: NativeApp, buildHint = ''): NativeAnswers {
     keepReleases: 5,
     build: buildHint,
     shared: '',
+    statePaths: app.statePaths ?? [],
     dbEngine: '',
     dbName: '',
     dbFile: '',
@@ -154,6 +158,8 @@ export interface Stack {
   volumes: string[];
   /** Something of it runs now. */
   running: boolean;
+  /** Guildwise cannot update it yet (several compose files, --env-file, another project folder): why, in words. */
+  unsupported?: string | undefined;
 }
 
 /** The compose stacks a report found, running ones first. */
@@ -172,6 +178,7 @@ export function stacksFromReport(report: ProbeReport | null | undefined): Stack[
         containers,
         volumes: c.volumes,
         running: containers.some((k) => k.state === 'running'),
+        unsupported: c.unsupported ?? containers.find((k) => k.unsupported)?.unsupported,
       };
     });
   return out.sort((a, b) => Number(b.running) - Number(a.running) || (a.path < b.path ? -1 : 1));
@@ -584,4 +591,13 @@ const dbFrom = (env: SetupEnv): Pick<NativeAnswers, 'dbEngine' | 'dbName' | 'dbF
   return b?.kind === 'direct_db_backup'
     ? { dbEngine: b.engine, dbName: b.database ?? '', dbFile: b.sqliteFile ?? '', dbDir: b.dir }
     : { dbEngine: '', dbName: '', dbFile: '', dbDir: '' };
+};
+
+/** The state paths of a folder that is adopted and that are not in the shared list yet. */
+export const missingShared = (
+  n: Pick<NativeAnswers, 'statePaths' | 'shared' | 'releaseLayout' | 'workingDir'>,
+): string[] => {
+  if (n.releaseLayout || !n.workingDir) return [];
+  const have = new Set(n.shared.split(/[\s,]+/).filter(Boolean));
+  return n.statePaths.filter((p) => !have.has(p));
 };
