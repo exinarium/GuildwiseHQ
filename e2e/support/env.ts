@@ -113,6 +113,12 @@ export const DEPLOYER = {
   name: 'E2E Deployer',
   password: 'deployer-password-12345',
 };
+/** Deploy-setup journey spec: an owner who sets up deploys for a stack on their own server (a throwaway sshd container). */
+export const JOURNEYER = {
+  email: 'journeyer@e2e.test',
+  name: 'E2E Journeyer',
+  password: 'journeyer-password-12345',
+};
 export const PHASER = { email: 'phaser@e2e.test', name: 'E2E Phaser', password: 'phaser-password-12345' };
 
 /** BA reporter spec (docs/design/phases.md Part B): own user, own runner (mock), project RPT, a BA and a builder. */

@@ -5,7 +5,7 @@ import { type APIRequestContext, expect, type Page, test } from '@playwright/tes
 import { apiAs, inviteAndAccept } from '../support/api.ts';
 import { q, waitFor } from '../support/db.ts';
 import { ADMIN, BASE_URL, DEPLOYER, E2E_DIR, paths } from '../support/env.ts';
-import { addRepoRoot, pairRunner, startRunner } from '../support/runner.ts';
+import { addRepoRoot, killRunner, pairRunner, startRunner } from '../support/runner.ts';
 import { git } from '../support/vault.ts';
 
 // Guided deploy setup (docs/design/deploy-run-ux-design.md, v1b), against REAL Docker: a throwaway Compose stack (project
@@ -78,6 +78,8 @@ test.beforeAll(async ({ browser }) => {
 });
 
 test.afterAll(() => {
+  // stop this spec's runner: a runner left behind is another computer of the same person and gets picked by the next spec
+  killRunner('SIGTERM', HOME);
   try {
     compose('down', '-v', '--remove-orphans');
   } catch {

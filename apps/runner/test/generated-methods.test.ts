@@ -51,7 +51,18 @@ function world(): W {
   const bin = join(root, 'bin');
   const server = join(root, 'state-server');
   const local = join(root, 'state-local');
-  for (const d of [home, appDir, checkout, bin, server, local, join(server, 'c'), join(server, 'images'), join(local, 'images')]) mkdirSync(d, { recursive: true });
+  for (const d of [
+    home,
+    appDir,
+    checkout,
+    bin,
+    server,
+    local,
+    join(server, 'c'),
+    join(server, 'images'),
+    join(local, 'images'),
+  ])
+    mkdirSync(d, { recursive: true });
   writeFileSync(join(checkout, 'Dockerfile'), 'FROM scratch\n');
   const put = (name: string, from: string) => {
     writeFileSync(join(bin, name), readFileSync(join(here, 'fixtures', from), 'utf8'));
@@ -59,7 +70,10 @@ function world(): W {
   };
   put('docker', 'fake-flow-docker.sh');
   put('ssh', 'fake-ssh.sh');
-  writeFileSync(join(bin, 'curl'), `#!/bin/bash\necho "curl $*" >> "$FAKE_ROOT/curl.log"\nif [ -f "$FAKE_ROOT/unhealthy" ] && [ "$(sed -n 2p "$FAKE_STATE_REMOTE/c/dcode-server")" = "$(cat "$FAKE_ROOT/unhealthy")" ]; then printf 500; else printf 200; fi\n`);
+  writeFileSync(
+    join(bin, 'curl'),
+    `#!/bin/bash\necho "curl $*" >> "$FAKE_ROOT/curl.log"\nif [ -f "$FAKE_ROOT/unhealthy" ] && [ "$(sed -n 2p "$FAKE_STATE_REMOTE/c/dcode-server")" = "$(cat "$FAKE_ROOT/unhealthy")" ]; then printf 500; else printf 200; fi\n`,
+  );
   chmodSync(join(bin, 'curl'), 0o755);
   // the running stack (as `docker compose up` left it): its compose file has a LITERAL tag, a published port, no .env variable
   writeFileSync(
@@ -160,7 +174,11 @@ describe('copy from this computer, a literal tag and no .env variable (the owner
     expect(readdirSync(join(w.appDir, 'backups'))).toHaveLength(1);
     // the stack's own project name is used for everything on the server, never the folder name
     const server = w.calls('server');
-    expect(server.filter((c) => c.startsWith('docker compose') && !c.includes('version')).every((c) => c.includes('-p dcode-flow5-remote'))).toBe(true);
+    expect(
+      server
+        .filter((c) => c.startsWith('docker compose') && !c.includes('version'))
+        .every((c) => c.includes('-p dcode-flow5-remote')),
+    ).toBe(true);
     expect(server.some((c) => /up -d --no-deps --no-build dcode-server/.test(c))).toBe(true);
     expect(server.some((c) => /\b(down|rm|stop|kill)\b/.test(c))).toBe(false);
     expect(w.calls('local').some((c) => c.startsWith('docker build -t dcode-server:'))).toBe(true);
@@ -214,15 +232,23 @@ describe('pull from a registry', () => {
     // CI already pushed a later commit: no build, no push
     const w2 = world();
     writeFileSync(join(w2.root, 'registry.txt'), `192.168.1.11:5000/dcode-server:${SHORT}\n`);
-    const ci = run(w2, script(flow(w2, { method: 'registry', registry: '192.168.1.11:5000', registryPush: false })));
+    const ci = run(
+      w2,
+      script(flow(w2, { method: 'registry', registry: '192.168.1.11:5000', registryPush: false })),
+    );
     expect(ci.code, ci.out).toBe(0);
-    expect(w2.calls('local').some((c) => c.startsWith('docker build') || c.startsWith('docker push'))).toBe(false);
+    expect(w2.calls('local').some((c) => c.startsWith('docker build') || c.startsWith('docker push'))).toBe(
+      false,
+    );
   });
 
   it('an image the registry does not have stops before anything is switched, with a plain reason', () => {
     const w = world();
     writeFileSync(join(w.root, 'registry.txt'), '');
-    const r = run(w, script(flow(w, { method: 'registry', registry: '192.168.1.11:5000', registryPush: false })));
+    const r = run(
+      w,
+      script(flow(w, { method: 'registry', registry: '192.168.1.11:5000', registryPush: false })),
+    );
     expect(r.code).not.toBe(0);
     expect(r.out).toContain('the server could not download');
     expect(existsSync(override(w))).toBe(false);

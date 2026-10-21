@@ -88,6 +88,8 @@ export const deliveryProjectors: Record<string, Projector> = {
   },
   DeliverySetupPublished: async (tx, e) => {
     const p = ev<'DeliverySetupPublished'>(e).payload;
+    // saving again (even the same files) starts fresh after an operator reset
+    await exec(tx, `UPDATE delivery_recipes SET reset_hash=NULL WHERE project_id=$1`, [p.projectId]);
     await exec(tx, `UPDATE delivery_setup_drafts SET last_publish=$2::jsonb WHERE project_id=$1`, [
       p.projectId,
       j({
