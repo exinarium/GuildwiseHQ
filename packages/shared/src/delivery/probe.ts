@@ -72,6 +72,8 @@ export const ProbeContainerSchema = z.object({
   ports: z.array(ProbePortSchema).max(20).default([]),
   composeFile: z.string().max(300).optional(),
   workingDir: z.string().max(300).optional(),
+  /** Why Guildwise cannot restart this stack safely yet: started from several compose files, with --env-file or --project-directory. */
+  unsupported: z.string().max(200).optional(),
 });
 export type ProbeContainer = z.infer<typeof ProbeContainerSchema>;
 
@@ -97,6 +99,8 @@ export const ProbeComposeFileSchema = z.object({
   volumes: z.array(Name).max(40).default([]),
   /** The file could not be read as a compose file. */
   unreadable: z.string().max(200).optional(),
+  /** The running stack of this file was started in a way Guildwise does not support yet (the reason, in plain words). */
+  unsupported: z.string().max(200).optional(),
 });
 export type ProbeComposeFile = z.infer<typeof ProbeComposeFileSchema>;
 
@@ -146,6 +150,11 @@ export const ProbeServiceSchema = z.object({
   user: z.string().max(60).optional(),
   /** `<dir>/releases` and `<dir>/current` exist: it already deploys the way Guildwise does. */
   releaseLayout: z.boolean().optional(),
+  /**
+   * Paths in its folder (names only, at most 20) that look like data the app keeps itself: sqlite files, uploads, storage, data
+   * and log folders, `.env` files. A plain folder can only be adopted when these are marked as shared files.
+   */
+  statePaths: z.array(z.string().max(200)).max(20).optional(),
 });
 export type ProbeService = z.infer<typeof ProbeServiceSchema>;
 

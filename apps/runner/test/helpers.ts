@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -92,3 +92,27 @@ export const waitUntil = async (
     await new Promise((r) => setTimeout(r, 25));
   }
 };
+
+/** Make `dir` a git repository with one commit of everything in it. Same files, author and dates always give the same commit id. */
+export function gitCommit(dir: string): void {
+  const env = {
+    PATH: process.env.PATH,
+    HOME: dir,
+    GIT_CONFIG_GLOBAL: '/dev/null',
+    GIT_CONFIG_SYSTEM: '/dev/null',
+    GIT_AUTHOR_NAME: 't',
+    GIT_AUTHOR_EMAIL: 't@example.com',
+    GIT_AUTHOR_DATE: '2020-01-01T00:00:00Z',
+    GIT_COMMITTER_NAME: 't',
+    GIT_COMMITTER_EMAIL: 't@example.com',
+    GIT_COMMITTER_DATE: '2020-01-01T00:00:00Z',
+  };
+  for (const args of [
+    ['init', '-q', '-b', 'main'],
+    ['add', '-A'],
+    ['commit', '-q', '-m', 'init'],
+  ]) {
+    const r = spawnSync('git', args, { cwd: dir, env, encoding: 'utf8' });
+    if (r.status !== 0) throw new Error(`git ${args.join(' ')}: ${r.stderr}`);
+  }
+}

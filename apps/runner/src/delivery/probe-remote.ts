@@ -1,3 +1,5 @@
+import { STATE_PATHS_FN } from '@aom/shared';
+
 /**
  * The fixed, read-only probe script sent to a server over `ssh <alias> sh -s -- <dirs>` (docs/design/deploy-run-ux-design.md
  * section 6.2). It only reads: no temporary files, nothing is written, started or stopped. Output is a line protocol the runner
@@ -11,6 +13,14 @@
  * Read-only; it prints names, folders, states and ports (the runner shortens and masks the command lines).
  */
 export const SERVICES_PROBE_SCRIPT = `
+${STATE_PATHS_FN}
+state_line() {
+  d=$1; [ -d "$d" ] || return 0
+  case "$d" in */current) return 0 ;; esac
+  l=$(aom_state_paths "$d" | tr '\\n' ',' | sed 's/,$//')
+  [ -n "$l" ] && printf 'STATEPATHS\\t%s\\t%s\\n' "$d" "$l"
+  return 0
+}
 allowed() { case "$1" in "$HOME"/*|/opt/*|/srv/*|/var/www/*|/home/*) return 0 ;; esac; return 1; }
 ports_of() { command -v ss >/dev/null 2>&1 || return 0; ss -ltnpH 2>/dev/null | grep "pid=$1," | awk '{print $4}' | sed 's/.*://' | sort -un | tr '\\n' ',' | sed 's/,$//'; }
 sd_units() {
@@ -25,6 +35,7 @@ sd_units() {
     argv=$(printf '%s\\n' "$info" | sed -n 's/^ExecStart=.*argv\\[\\]=\\([^;]*\\);.*/\\1/p' | head -n 1)
     layout=0; [ -d "$(dirname -- "$wd")/releases" ] && layout=1
     printf 'SERVICE\\t%s\\t%s\\trunning\\t%s\\t%s\\t%s\\t%s\\t%s\\n' "$tag" "$u" "$wd" "$usr" "$(ports_of "$pid")" "$layout" "$argv"
+    state_line "$wd"
   done
 }
 sd_units "" systemd
@@ -33,7 +44,9 @@ if [ -n "\${XDG_RUNTIME_DIR:-}" ] || [ -d "/run/user/$(id -u)" ]; then
   sd_units "--user" systemd_user
 fi
 if command -v pm2 >/dev/null 2>&1; then
-  printf 'PM2JSON\\t%s\\n' "$(pm2 jlist 2>/dev/null | head -c 30000 | tr -d '\\n')"
+  pm2out=$(pm2 jlist 2>/dev/null | head -c 30000 | tr -d '\\n')
+  printf 'PM2JSON\\t%s\\n' "$pm2out"
+  printf '%s' "$pm2out" | grep -o '"pm_cwd":"[^"]*"' | sed 's/^"pm_cwd":"//; s/"$//' | sort -u | head -n 20 | while IFS= read -r d; do allowed "$d" && state_line "$d"; done
 fi
 if command -v ss >/dev/null 2>&1; then
   ss -ltnpH 2>/dev/null | head -n 60 | while read -r st rq sq la pa rest; do
@@ -45,6 +58,7 @@ if command -v ss >/dev/null 2>&1; then
     cmd=$(tr '\\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | cut -c1-200)
     [ -n "$cmd" ] || cmd=$(printf '%s' "$rest" | sed -n 's/.*(("\\([^"]*\\)".*/\\1/p')
     printf 'PROCESS\\t%s\\t%s\\t%s\\t%s\\n' "$port" "$pid" "$cwd" "$cmd"
+    state_line "$cwd"
   done
 fi
 roots="\${AOM_PROBE_APP_ROOTS:-}"; [ -n "$roots" ] || roots="/var/www /srv /opt $HOME/apps $HOME"
@@ -67,7 +81,7 @@ if command -v docker >/dev/null 2>&1; then
   if docker info >/dev/null 2>&1; then echo "DOCKER_USABLE 1"; else echo "DOCKER_USABLE 0"; fi
   cv=$(docker compose version --short 2>/dev/null) || cv=$(docker-compose version --short 2>/dev/null) || cv=
   echo "COMPOSE_VERSION $cv"
-  docker ps --all --format 'CONTAINER	{{.Names}}	{{.Image}}	{{.State}}	{{.Status}}	{{.Ports}}	{{.Label "com.docker.compose.project"}}	{{.Label "com.docker.compose.service"}}	{{.Label "com.docker.compose.project.config_files"}}	{{.Label "com.docker.compose.project.working_dir"}}' 2>/dev/null
+  docker ps --all --format 'CONTAINER	{{.Names}}	{{.Image}}	{{.State}}	{{.Status}}	{{.Ports}}	{{.Label "com.docker.compose.project"}}	{{.Label "com.docker.compose.service"}}	{{.Label "com.docker.compose.project.config_files"}}	{{.Label "com.docker.compose.project.working_dir"}}	{{.Label "com.docker.compose.project.environment_file"}}' 2>/dev/null
   docker volume ls --format 'VOLUME {{.Name}}' 2>/dev/null
 else
   echo "DOCKER_MISSING"

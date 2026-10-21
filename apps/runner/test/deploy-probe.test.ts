@@ -1,8 +1,11 @@
+import { spawnSync } from 'node:child_process';
 import { chmodSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { type DeployProbePayload, ProbeReportSchema } from '@aom/shared';
+import { type DeployProbePayload, ProbeReportSchema, STATE_PATHS_FN } from '@aom/shared';
 import { describe, expect, it } from 'vitest';
 import {
+  buildServices,
+  markUnsupportedStacks,
   parseContainerLine,
   parsePorts,
   parseSshConfigHosts,
@@ -624,5 +627,58 @@ describe('parsers', () => {
       state: 'running',
     });
     expect(parseContainerLine('CONTAINER\tonly')).toBeNull();
+  });
+
+  it('M3: stacks started from several compose files, with --env-file or --project-directory are marked "not supported yet"', () => {
+    const line = (files: string, wd: string, envFile = '') =>
+      `${container('app', 'img', 'running', '80/tcp', 'shop', 'app', files, wd)}${TAB}${envFile}`;
+    expect(parseContainerLine(line('/srv/shop/compose.yaml', '/srv/shop'))?.unsupported).toBeUndefined();
+    // the override file Guildwise writes itself is the normal case
+    expect(
+      parseContainerLine(line('/srv/shop/compose.yaml,/srv/shop/docker-compose.guildwise.yml', '/srv/shop'))
+        ?.unsupported,
+    ).toBeUndefined();
+    expect(parseContainerLine(line('/srv/shop/a.yaml,/srv/shop/b.yaml', '/srv/shop'))?.unsupported).toContain(
+      'several compose files',
+    );
+    expect(
+      parseContainerLine(line('/srv/shop/compose.yaml', '/srv/shop', '/srv/shop/x.env'))?.unsupported,
+    ).toContain('--env-file');
+    expect(parseContainerLine(line('/srv/shop/compose.yaml', '/srv/other'))?.unsupported).toContain(
+      '--project-directory',
+    );
+    const report = {
+      containers: [parseContainerLine(line('/srv/shop/a.yaml,/srv/shop/b.yaml', '/srv/shop'))],
+      composeFiles: [{ path: '/srv/shop/a.yaml', services: [], volumes: [] }],
+    } as never as Parameters<typeof markUnsupportedStacks>[0];
+    markUnsupportedStacks(report);
+    expect(report.composeFiles[0]?.unsupported).toContain('not supported yet');
+  });
+
+  it('M2a: the probe flags data the app keeps in its folder (names only), and not the example settings file', () => {
+    const dir = tmp('aom-state-');
+    mkdirSync(join(dir, 'uploads'));
+    writeFileSync(join(dir, 'uploads', 'a.png'), 'x');
+    writeFileSync(join(dir, 'shop.sqlite'), 'x');
+    writeFileSync(join(dir, '.env'), 'A=1');
+    writeFileSync(join(dir, '.env.example'), 'A=');
+    writeFileSync(join(dir, 'app.js'), 'x');
+    mkdirSync(join(dir, 'node_modules', 'x'), { recursive: true });
+    writeFileSync(join(dir, 'node_modules', 'x', 'big.db'), 'x');
+    writeFileSync(join(dir, 'logs.log'), 'x');
+    const r = spawnSync('sh', ['-c', `${STATE_PATHS_FN}\naom_state_paths "$1"`, 'sh', dir], {
+      encoding: 'utf8',
+    });
+    expect(r.stdout.split('\n').filter(Boolean)).toEqual(['.env', 'logs.log', 'shop.sqlite', 'uploads']);
+    const built = buildServices({
+      services: [
+        ['systemd', 'shop.service', 'running', dir, 'me', '8000', '0', '/usr/bin/node app.js'].join(TAB),
+      ],
+      pm2: [],
+      processes: [],
+      appDirs: [],
+      statePaths: [`${dir}${TAB}.env,logs.log,shop.sqlite,uploads`],
+    });
+    expect(built.services[0]?.statePaths).toEqual(['.env', 'logs.log', 'shop.sqlite', 'uploads']);
   });
 });

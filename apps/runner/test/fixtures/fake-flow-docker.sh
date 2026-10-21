@@ -97,7 +97,16 @@ case "$cmd" in
     fmt=; [ "$1" = --format ] && { fmt=$2; shift 2; }
     id=$1
     for f in "$S"/c/*; do
-      [ -f "$f" ] && [ "$(sed -n 1p "$f")" = "$id" ] && { sed -n 2p "$f"; exit 0; }
+      if [ -f "$f" ] && [ "$(sed -n 1p "$f")" = "$id" ]; then
+        case "$fmt" in
+          # config_files|working_dir|project|environment_file (the labels `docker compose` writes)
+          *Labels*)
+            if [ -f "$S/labels" ]; then cat "$S/labels"
+            else files=$(sed -n 4p "$f"); echo "$files|$(dirname -- "${files%%,*}")|$(sed -n 3p "$f")|"; fi ;;
+          *) sed -n 2p "$f" ;;
+        esac
+        exit 0
+      fi
     done
     exit 1 ;;
   image)

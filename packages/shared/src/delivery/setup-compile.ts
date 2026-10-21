@@ -220,6 +220,15 @@ function localScript(setup: DeliverySetup, env: SetupEnv): string {
     '  [ -n "$id" ] || return 0',
     sh`  docker inspect --format '{{.Config.Image}}' "$id" 2>/dev/null || true`,
     '}',
+    '# the running app must have been started from the compose file named in the setup (not several files or another project folder)',
+    'fail() { die "$1"; }',
+    'check_origin() {',
+    '  local id lab l_cfg l_rest l_wd l_proj l_env l_first l_more file dir proj',
+    '  file="$COMPOSE_FILE"; dir="$(dirname -- "$COMPOSE_FILE")"; proj="${COMPOSE_PROJECT:-}"',
+    sh`  id="$(dc ps -q "$SERVICE" 2>/dev/null | head -n 1)" || id=`,
+    ...originCheck('  ', 'temporary_override'),
+    '}',
+    'check_origin',
     'PREVIOUS="$(running_image)"',
     sh`case "$PREVIOUS" in *[!A-Za-z0-9._/:@-]*) PREVIOUS="" ;; esac`,
     'say "running now: ${PREVIOUS:-nothing}"',
@@ -425,6 +434,51 @@ export function sshHelpers(): string[] {
  */
 export const ENV_VALUE_AWK = String.raw`BEGIN { v = ENVIRON["VAR"] } { sub(/\r$/, ""); l = $0; sub(/^[ \t]*(export[ \t]+)?/, "", l); if (index(l, v "=") != 1) next; val = substr(l, length(v) + 2); sub(/^[ \t]+/, "", val); if (val ~ /^"/) { sub(/^"/, "", val); sub(/".*$/, "", val) } else if (val ~ /^\047/) { sub(/^\047/, "", val); sub(/\047.*$/, "", val) } else { sub(/[ \t]+#.*$/, "", val); sub(/[ \t]+$/, "", val) } last = val } END { print last }`;
 
+/**
+ * The running app container says how it was started (labels written by `docker compose`). Guildwise restarts it with
+ * `-f <the compose file> [-p project]` in that folder; if the stack was really started another way (several files, another
+ * project folder, an --env-file) a restart would recreate it differently, so it stops first with a plain message. Needs the shell
+ * variables `id` (container), `file`, `dir`, optional `proj`, and a `fail "message"` function.
+ */
+function originCheck(indent: string, extra: 'none' | 'guildwise_override' | 'temporary_override'): string[] {
+  const fmt = [
+    'com.docker.compose.project.config_files',
+    'com.docker.compose.project.working_dir',
+    'com.docker.compose.project',
+    'com.docker.compose.project.environment_file',
+  ]
+    .map((l) => `{{index .Config.Labels "${l}"}}`)
+    .join('|');
+  return [
+    `if [ -n "$id" ]; then`,
+    `  lab=$(docker inspect --format '${fmt}' "$id" 2>/dev/null) || lab=`,
+    '  if [ -n "$lab" ]; then',
+    '    l_cfg=${lab%%|*}; l_rest=${lab#*|}; l_wd=${l_rest%%|*}; l_rest=${l_rest#*|}; l_proj=${l_rest%%|*}; l_env=${l_rest#*|}',
+    '    rl() { readlink -f -- "$1" 2>/dev/null || printf \'%s\\n\' "$1"; }',
+    '    # the files: the one in the setup, and at most the override file that Guildwise itself writes next to it',
+    '    l_first=${l_cfg%%,*}; l_more=${l_cfg#"$l_first"}; l_more=${l_more#,}',
+    '    [ -z "$l_cfg" ] || [ "$(rl "$l_first")" = "$(rl "$file")" ] || fail "the app was started from $l_first, not from $file. Guildwise only updates an app that runs from the one compose file named in the setup: point the setup at $l_first, or restart the app from $file yourself first. Nothing was changed"',
+    ...(extra === 'none'
+      ? [
+          '    [ -z "$l_more" ] || fail "the app was started from several compose files ($l_cfg). Guildwise does not support that yet, so it will not restart it: nothing was changed"',
+        ]
+      : [
+          `    case "$l_more" in`,
+          '      *,*) fail "the app was started from several compose files ($l_cfg). Guildwise does not support that yet, so it will not restart it: nothing was changed" ;;',
+          '      "") ;;',
+          extra === 'guildwise_override'
+            ? `      *) [ "$(rl "$l_more")" = "$(rl "$dir/${OVERRIDE_NAME}")" ] || fail "the app was started from several compose files ($l_cfg). Guildwise does not support that yet, so it will not restart it: nothing was changed" ;;`
+            : '      */aom-deploy.??????/override.yml|*/aom-deploy.??????/rollback.yml) ;; *) fail "the app was started from several compose files ($l_cfg). Guildwise does not support that yet, so it will not restart it: nothing was changed" ;;',
+          '    esac',
+        ]),
+    '    [ -z "$l_wd" ] || [ "$(rl "$l_wd")" = "$(rl "$dir")" ] || fail "the app was started with another project folder ($l_wd) than the folder of its compose file ($dir). Guildwise does not support that yet: nothing was changed"',
+    '    [ -z "$l_env" ] || fail "the app was started with its own settings file option (--env-file $l_env). Guildwise does not support that yet: nothing was changed"',
+    '    [ -z "${proj:-}" ] || [ -z "$l_proj" ] || [ "$l_proj" = "$proj" ] || fail "the app runs in the compose project $l_proj, not $proj as the setup says: nothing was changed"',
+    '  fi',
+    'fi',
+  ].map((l) => (l ? indent + l : l));
+}
+
 function remoteState(env: SetupEnv): string[] {
   const p = !!env.app.composeProject;
   return [
@@ -440,16 +494,20 @@ function remoteState(env: SetupEnv): string[] {
     p
       ? 'id=$(cd "$dir" && dc -p "$proj" -f "$file" ps -q "$svc" 2>/dev/null | head -n 1) || id='
       : 'id=$(cd "$dir" && dc -f "$file" ps -q "$svc" 2>/dev/null | head -n 1) || id=',
+    'fail() { echo "AOM: $1" >&2; exit 24; }',
+    ...originCheck('', usesOverride(env) ? 'guildwise_override' : 'none'),
     `if [ -n "$id" ]; then run=$(docker inspect --format '{{.Config.Image}}' "$id" 2>/dev/null) || run=; fi`,
+    ...(usesOverride(env) ? ['ovr=0; [ -f "$dir/' + OVERRIDE_NAME + '" ] && ovr=1'] : ['ovr=0']),
     `engine=$(docker version --format '{{.Server.Version}}' 2>/dev/null) || engine=`,
     'comp=',
     'if docker compose version >/dev/null 2>&1; then comp="v2 $(docker compose version --short 2>/dev/null)"',
     'elif docker-compose version >/dev/null 2>&1; then comp="v1 $(docker-compose version --short 2>/dev/null)"; fi',
-    `printf 'image=%s\\nrunning=%s\\nengine=%s\\ncompose=%s\\n' "$cur" "$run" "$engine" "$comp"`,
+    `printf 'image=%s\\nrunning=%s\\nengine=%s\\ncompose=%s\\noverride=%s\\n' "$cur" "$run" "$engine" "$comp" "$ovr"`,
     'AOM_REMOTE',
     ')" || die "could not look at the server"',
     `CURRENT_IMAGE="$(printf '%s\\n' "$STATE" | sed -n 's/^image=//p' | head -n 1)"`,
     `RUNNING_IMAGE="$(printf '%s\\n' "$STATE" | sed -n 's/^running=//p' | head -n 1)"`,
+    `OVERRIDE_BEFORE="$(printf '%s\\n' "$STATE" | sed -n 's/^override=//p' | head -n 1 | tr -cd '01')"`,
     sh`case "$CURRENT_IMAGE" in *[!A-Za-z0-9._/:@-]*) CURRENT_IMAGE="" ;; esac`,
     sh`case "$RUNNING_IMAGE" in *[!A-Za-z0-9._/:@-]*) RUNNING_IMAGE="" ;; esac`,
     'say "server runs: ${RUNNING_IMAGE:-nothing}; settings point at: ${CURRENT_IMAGE:-nothing}"',
@@ -471,6 +529,8 @@ export const OVERRIDE_NAME = 'docker-compose.guildwise.yml';
 const usesOverride = (env: SetupEnv): boolean => !env.app.imageVar;
 /** The shell function that switches the server to image "$1" (and back, on rollback). */
 const switchFn = (env: SetupEnv): string => (usesOverride(env) ? 'write_override' : 'set_image_var');
+/** The function that puts the previous image back on a rollback. */
+const rollbackFn = (env: SetupEnv): string => (usesOverride(env) ? 'rollback_override' : 'set_image_var');
 
 function sshFunctions(env: SetupEnv): string[] {
   const proj = env.app.composeProject ? '"$COMPOSE_PROJECT"' : '""';
@@ -492,6 +552,16 @@ function sshFunctions(env: SetupEnv): string[] {
           'echo "set the image of $svc to $tag in $ov" >&2',
           'AOM_REMOTE',
           '}',
+          '# going back when there was no override file before this update: remove the one this update made (the compose file names its own image)',
+          'remove_override() {',
+          '  remote "$APP_DIR" <<\'AOM_REMOTE\'',
+          'set -eu',
+          `ov="$1/${OVERRIDE_NAME}"`,
+          'rm -f -- "$ov"',
+          'echo "removed $ov: the compose file names the image again" >&2',
+          'AOM_REMOTE',
+          '}',
+          'rollback_override() { if [ "${OVERRIDE_BEFORE:-0}" = 1 ]; then write_override "$1"; else remove_override; fi; }',
         ]
       : [
           "# switch exactly one line of the server's .env (a temporary copy is moved over it)",
@@ -624,7 +694,7 @@ function sshGuard(env: SetupEnv): string[] {
       ? [
           '    if [ -n "$PREVIOUS" ] && [ "$PREVIOUS" != "$TAG" ]; then',
           '      say "putting the previous version back: $PREVIOUS"',
-          `      if ${switchFn(env)} "$PREVIOUS" && compose_up_remote 0; then`,
+          `      if ${rollbackFn(env)} "$PREVIOUS" && compose_up_remote 0; then`,
           '        if wait_healthy 60; then say "rolled back to $PREVIOUS"; else say "still not healthy after going back to $PREVIOUS"; fi',
           '      else',
           usesOverride(env)
@@ -781,12 +851,9 @@ function sshStep(s: DeployStep, i: number, env: SetupEnv): string[] {
         '  would "copy the approved version’s files to $SRC_DEST on the server"',
         'else',
         '  [ -d "$CHECKOUT" ] || die "AOM_DEPLOY_CHECKOUT is not a folder"',
+        '  git -C "$CHECKOUT" rev-parse --git-dir >/dev/null 2>&1 || die "the approved files are not a git checkout, so they cannot be sent safely (a plain folder can hold settings and secrets that are not part of the version); nothing was changed"',
         '  rsh "mkdir -p --$(rquote "$SRC_DEST")" </dev/null || die "could not create $SRC_DEST on the server"',
-        '  if git -C "$CHECKOUT" rev-parse --git-dir >/dev/null 2>&1; then',
-        '    git -C "$CHECKOUT" archive --format=tar "$COMMIT" | rsh "tar -x -f - -C$(rquote "$SRC_DEST")"',
-        '  else',
-        '    (cd "$CHECKOUT" && tar -c -f - --exclude=.git .) | rsh "tar -x -f - -C$(rquote "$SRC_DEST")"',
-        '  fi',
+        '  git -C "$CHECKOUT" archive --format=tar "$COMMIT" | rsh "tar -x -f - -C$(rquote "$SRC_DEST")"',
         '  rsh "touch$(rquote "$SRC_DEST/.aom-complete")" </dev/null',
         '  # keep the newest 3 copies of the files; nothing else in the folder is touched',
         '  remote "$SRC_DIR" "$SHORT" <<\'AOM_REMOTE\' || true',

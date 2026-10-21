@@ -18,9 +18,9 @@ const script = (r: ReturnType<typeof compile>, name: string) =>
 describe('generated scripts, v2 review', () => {
   const r = compile();
   const prod = script(r, 'production');
-  it('is generator 1.3, so older stored setups show "improved steps available"', () => {
-    expect(SETUP_GENERATOR).toBe('setup-1.3');
-    expect(prod).toContain('setup-1.3');
+  it('is generator 1.4, so older stored setups show "improved steps available"', () => {
+    expect(SETUP_GENERATOR).toBe('setup-1.4');
+    expect(prod).toContain('setup-1.4');
   });
   it('M4: the health address must be a web address before anything changes', () => {
     const at = prod.indexOf('[[ "$HEALTH_URL" =~ ^https?:// ]] || die');

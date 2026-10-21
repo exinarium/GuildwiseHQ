@@ -115,6 +115,24 @@ The runner on the deploying computer needs the `deploy-setup:1` capability (a cu
 server with a password, a key file or a pasted key (**Connect a different server**), to set a server up (Docker, folders, HTTPS with
 Caddy) and to keep a dedicated key per computer so that a replacement computer can **Reconnect**. See user guide 4.27 and RUNNER.md. **Moving to a new server** needs `deploy-move:1` (both servers must be reachable from the same computer); the server keeps a move per environment, deploys of that environment wait while it is open, and `AOM_DNS_OVERRIDE_FILE` (a JSON map of names to addresses) exists only for tests.
 
+**Things to know about deploys of your own app** (the generated scripts):
+
+- *The override file.* An app whose compose file names its image directly is switched to a new version through
+  `docker-compose.guildwise.yml` next to the compose file; your own compose file and `.env` are never edited. The file stays after
+  the update and keeps the app on the version Guildwise last released. To hand the version back to your compose file, delete it
+  and restart the app yourself. A rollback restores the earlier content of that file, or removes it when it did not exist before
+  the failed update. A stack that was started from several compose files, with `--env-file` or with `--project-directory` is not
+  updated (the probe marks it "not supported yet").
+- *Apps that run directly on the machine.* The first update of a plain folder moves it once to `releases/initial`; it is refused
+  when the folder holds data the app writes itself (sqlite files, `uploads`, `storage`, `data`, `.env`, logs) that is not marked as
+  a shared file, or when the folder is on another disk than the app folder. Shared files are copied from the running version right
+  before the switch (sqlite files with `sqlite3 .backup`; without `sqlite3` the update is refused). Writes made after that copy and
+  before the restart stay in the old release folder. If the move is interrupted the folder is put back where it was.
+- *Health after the restart.* Guildwise judges the new version by the health check only. A restart command that returns before the
+  app is ready (it starts the app in the background) is not waited for; keep the health check on so that the previous version is put
+  back when the app does not come up. A restart command that fails is always undone, with or without a health check.
+- *Files that are not a git checkout* are never sent to a server or into a release folder (they could include secrets).
+
 ## Upgrades
 
 Pull the latest code and rebuild:

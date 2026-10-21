@@ -76,6 +76,12 @@ function envChanges(env: SetupEnv, r: ProbeReport | null | undefined): ChangeIte
     }
 
     const cf = composeFor(env, r);
+    if (cf?.unsupported)
+      add(
+        'setup_once',
+        `The app on ${where} that uses ${env.app.composeFile} cannot be updated by Guildwise yet. ${cf.unsupported} Start it again from that one compose file, or leave it as it is.`,
+        'compose',
+      );
     if (cf) {
       add(
         'reuse',
@@ -228,12 +234,28 @@ function directChanges(
         `The app folder ${d.appDir} was not seen on ${where}. It must exist and belong to the signed-in user.`,
         'folder',
       );
+    if (m.kind === 'command')
+      add(
+        'each_deploy',
+        'Note: Guildwise judges the new version by the health check only. A restart command that returns before the app is ready (it starts it in the background) is not waited for, so keep the health check on.',
+        'restart_note',
+      );
     if (d.adoptFolder && d.currentLink)
       add(
         'each_deploy',
         `${d.currentLink} is a plain folder today. The first update moves it to ${d.appDir}/releases/initial and puts a link with the same name in its place. Nothing is deleted or copied.`,
         'adopt',
       );
+    if (d.adoptFolder && svc?.statePaths?.length) {
+      const covered = (p: string) => d.shared.some((s) => p === s || p.startsWith(`${s}/`));
+      const left = svc.statePaths.filter((p) => !covered(p));
+      if (left.length)
+        add(
+          'setup_once',
+          `These look like data the app keeps itself in ${d.currentLink ?? svc.workingDir ?? 'its folder'}: ${left.join(', ')}. Mark them as shared files first, otherwise the new version would start with empty copies.`,
+          'shared',
+        );
+    }
     for (const u of r.urls)
       add('reuse', `${u.url} answers${u.status ? ` (${u.status})` : ' (no answer now)'}`, 'url');
     for (const o of r.services ?? []) {
