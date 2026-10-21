@@ -7,7 +7,7 @@ import type { FakeRunner } from './helpers/fake-runner.ts';
 import { pipeline } from './helpers/pipeline.ts';
 import { createWorld, type World } from './helpers/world.ts';
 
-/** The stop-loss arbitration (asked by the system, answered by the architect) is not the card asking: it does not count toward the question loop. */
+/** A question the system asked (here routed to the architect, with no stop_loss subkind so only the asked-by condition excludes it) is not the card asking: it does not count toward the question loop. */
 
 let w: World;
 let r: FakeRunner;
@@ -85,20 +85,20 @@ async function shiftRows(itemId: string, n: number, agent: string) {
     );
 }
 
-describe('the stop-loss arbitration', () => {
+describe('a question the system asked', () => {
   it('does not count for the loop breaker or the detector, and an agent question still does', async () => {
     await reset();
     await w.hire('Bea', 'builder', 'junior');
     await w.hire('Arch', 'architect', 'senior');
-    const card = await w.card({ title: 'Stop-loss card' });
+    const card = await w.card({ title: 'System question card' });
     const arch = await agentId('Arch');
 
-    // an answered arbitration, asked by the system (asked_by_kind defaults to 'system'), routed to the architect
+    // an answered question asked by the system (asked_by_kind defaults to 'system'), no subkind, routed to the architect
     const stopId = randomUUID();
     await q(
       `INSERT INTO desk_items (id, org_id, project_id, card_id, kind, subkind, status, routed_to, routed_agent_id, title, created_at, updated_at)
-       SELECT $1, c.org_id, c.project_id, c.id, 'question', 'stop_loss', 'answered', 'agent', $3,
-              'used its review rounds budget', now(), now() FROM cards c WHERE c.id = $2`,
+       SELECT $1, c.org_id, c.project_id, c.id, 'question', NULL, 'answered', 'agent', $3,
+              'a question the system asked the architect', now(), now() FROM cards c WHERE c.id = $2`,
       [stopId, card.id, arch],
     );
     await shiftRows(stopId, 5, arch);
