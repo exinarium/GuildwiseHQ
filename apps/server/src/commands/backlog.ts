@@ -349,7 +349,8 @@ export async function addBacklogSuggestionRpc(
       undefined,
       'a suggestion is recorded against the card you are working on; this conversation has no card',
     ];
-  const card = (await one(ctx.pool, 'SELECT id, ref, org_id, project_id FROM cards WHERE id=$1', [cardId])) as Row;
+  const card = (await one(ctx.pool, 'SELECT id, ref, org_id, project_id FROM cards WHERE id=$1', [cardId])) as Row | null;
+  if (!card) return [false, undefined, 'the card you are working on no longer exists'];
   const agent = await one(ctx.pool, 'SELECT id, name FROM agents WHERE id=$1', [shift.agent_id]);
   if (!agent) return [false, undefined, 'unknown agent'];
   let projectId = card.project_id as string;
