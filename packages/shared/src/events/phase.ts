@@ -234,7 +234,7 @@ export const phaseEvents = [
       }),
     }),
   ),
-  defineEvent('DeployTargetRemoved', z.object({ targetId: Id })),
+  defineEvent('DeployTargetRemoved', z.object({ targetId: Id, reason: z.string().max(200).optional() })),
   defineEvent(
     'BaTaskQueued',
     z.object({

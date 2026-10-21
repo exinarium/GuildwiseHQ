@@ -218,6 +218,8 @@ export async function observeRecipe(
     cur.present === inspected.present
   )
     return { recorded: false, status: cur.status };
+  // files that an operator reset away are not brought back by the vault still holding them
+  if (cur?.reset_hash && inspected.present && inspected.hash === cur.reset_hash) return { recorded: false, status: cur.status };
   const recipe = (inspected.present ? inspected.recipe : null) as Recipe | null;
   const guided = inspected.present
     ? guidedState((inspected as { setup?: unknown }).setup, inspected.files)
