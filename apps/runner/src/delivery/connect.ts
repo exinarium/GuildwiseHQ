@@ -16,7 +16,7 @@ import {
 } from '@aom/shared';
 import { type Logger, nullLogger } from '../log.ts';
 import { registerSecret, unregisterSecret } from '../secrets/redact.ts';
-import { type DeployKeys, KeyError } from './deploy-keys.ts';
+import { type DeployKeys, KeyError, userSshArgs } from './deploy-keys.ts';
 import { classifySsh, type Ran, run } from './probe.ts';
 
 /**
@@ -471,7 +471,9 @@ export class DeployConnector {
     const r = await run(
       'ssh',
       [
-        ...(this.deps.userSshConfig ? ['-F', this.deps.userSshConfig] : []),
+        ...(this.deps.userSshConfig
+          ? userSshArgs(this.home, this.deps.userSshConfig)
+          : this.deps.keys.userSshArgs()),
         ...this.base(),
         '-o',
         'BatchMode=yes',
@@ -504,11 +506,10 @@ export class DeployConnector {
     if (!(pubParts[2] ?? '').startsWith(DEPLOY_KEY_COMMENT_PREFIX)) return { ok: false, error: 'not_ours' };
     const own = await this.deps.keys.publicOf(p.targetId);
     if (own && own.fingerprint === p.fingerprint) return { ok: false, error: 'own_key' };
-    const cfg = this.deps.keys.sshConfigFor(p.targetId, p.alias);
     const r = await run(
       'ssh',
       [
-        ...(cfg ? ['-F', cfg] : []),
+        ...this.deps.keys.sshArgsFor(p.targetId, p.alias),
         ...this.base(),
         '-o',
         'BatchMode=yes',
@@ -533,11 +534,10 @@ export class DeployConnector {
 
   /** Does this computer's key for the target still work? `ssh <alias> true`, non-interactive (the daily check). */
   async check(targetId: string | undefined, alias: string): Promise<Ran> {
-    const cfg = this.deps.keys.sshConfigFor(targetId, alias);
     return run(
       'ssh',
       [
-        ...(cfg ? ['-F', cfg] : []),
+        ...this.deps.keys.sshArgsFor(targetId, alias),
         ...this.base(),
         '-o',
         'BatchMode=yes',

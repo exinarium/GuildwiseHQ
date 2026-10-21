@@ -16,6 +16,7 @@ import {
 } from '@aom/shared';
 import { execa } from 'execa';
 import type { DeployKeys } from './deploy-keys.ts';
+import { userSshArgs } from './deploy-keys.ts';
 import { REMOTE_PROBE_SCRIPT } from './probe-remote.ts';
 
 /**
@@ -40,6 +41,8 @@ export interface ProbeOptions {
   connectSec?: number;
   /** This computer's dedicated deploy keys: a target that has one is reached with it (`ssh -F`), not with the person's own ssh. */
   keys?: DeployKeys;
+  /** The person's ssh config, named explicitly (default `<home>/.ssh/config`). */
+  userSshConfig?: string;
   /** Where hinted folders on a server may be (default /opt and /srv; tests use a temp folder). */
   hintRoots?: string[];
 }
@@ -517,7 +520,7 @@ async function probeSshHosts(o: ProbeOptions): Promise<DeployProbeResult> {
   const home = o.home ?? homedir();
   let text = '';
   try {
-    text = readFileSync(join(home, '.ssh', 'config'), 'utf8');
+    text = readFileSync(o.userSshConfig ?? join(home, '.ssh', 'config'), 'utf8');
   } catch {
     // no config: no aliases
   }
@@ -527,13 +530,14 @@ async function probeSshHosts(o: ProbeOptions): Promise<DeployProbeResult> {
   const sshHosts: ProbeSshHost[] = await Promise.all(
     hosts.map(async (h, i): Promise<ProbeSshHost> => {
       if (i >= 10) return { alias: h.alias, hasIdentity: h.hasIdentity, state: 'unchecked' };
-      const g = await run('ssh', ['-G', '--', h.alias], { timeoutMs: t, ...env });
+      const own = userSshArgs(home, o.userSshConfig);
+      const g = await run('ssh', [...own, '-G', '--', h.alias], { timeoutMs: t, ...env });
       const kv = new Map<string, string>();
       for (const l of g.stdout.split('\n')) {
         const m = /^(\w+)\s+(.*)$/.exec(l);
         if (m && !kv.has(m[1] as string)) kv.set(m[1] as string, (m[2] as string).trim());
       }
-      const c = await run('ssh', [...SSH_BASE(o.connectSec ?? 8), '--', h.alias, 'true'], {
+      const c = await run('ssh', [...own, ...SSH_BASE(o.connectSec ?? 8), '--', h.alias, 'true'], {
         timeoutMs: t + 3000,
         ...env,
       });
@@ -573,7 +577,7 @@ const shq = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
 /** `-F <config>` when this computer holds a dedicated key for the target (else the person's own ssh decides). */
 function managedArgs(p: DeployProbePayload, host: string, o: ProbeOptions): string[] {
   const cfg = o.keys?.sshConfigFor(p.targetId, host);
-  return cfg ? ['-F', cfg] : [];
+  return cfg ? ['-F', cfg] : userSshArgs(o.home ?? homedir(), o.userSshConfig);
 }
 
 /** `ssh_check`: can this computer sign in to the target's server without a prompt? Reads nothing from the server. */

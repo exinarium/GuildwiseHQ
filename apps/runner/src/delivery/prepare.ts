@@ -192,9 +192,8 @@ export class DeployPreparer {
   // ----------------------------------------------------------------------------------------------- a server
 
   private sshArgs(p: DeployPreparePayload): string[] {
-    const cfg = this.deps.keys.sshConfigFor(p.targetId, p.alias);
     return [
-      ...(cfg ? ['-F', cfg] : []),
+      ...this.deps.keys.sshArgsFor(p.targetId, p.alias),
       '-o',
       `ConnectTimeout=${this.deps.connectSec ?? 10}`,
       '-o',

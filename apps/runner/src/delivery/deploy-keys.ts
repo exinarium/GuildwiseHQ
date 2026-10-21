@@ -57,6 +57,21 @@ export interface DeployKeysOptions {
   now?: () => Date;
 }
 
+/**
+ * ssh arguments that name the person's own config and known_hosts EXPLICITLY. OpenSSH finds `~/.ssh/config` and `known_hosts`
+ * through the account database, not `$HOME`, so a temporary HOME does not isolate it: every ssh call that is not made with a
+ * managed config therefore passes these (tests point `home` at a temp folder). A missing config is `/dev/null`.
+ */
+export function userSshArgs(home: string, userConfig?: string): string[] {
+  const cfg = userConfig ?? join(home, '.ssh', 'config');
+  return [
+    '-F',
+    existsSync(cfg) ? cfg : '/dev/null',
+    '-o',
+    `UserKnownHostsFile=${join(home, '.ssh', 'known_hosts')}`,
+  ];
+}
+
 const PENDING = 'pending';
 const KEY_FILE = 'id_ed25519';
 const WEEK_MS = 7 * 24 * 3600_000;
@@ -104,6 +119,16 @@ export class DeployKeys {
     if (!m || m.alias !== alias) return null;
     const cfg = join(this.dir, targetId, 'ssh_config');
     return existsSync(cfg) ? cfg : null;
+  }
+
+  /** The ssh arguments for a target: its managed config, else the person's own config named explicitly (see `userSshArgs`). */
+  sshArgsFor(targetId: string | undefined, alias: string | undefined): string[] {
+    const cfg = this.sshConfigFor(targetId, alias);
+    return cfg ? ['-F', cfg] : this.userSshArgs();
+  }
+
+  userSshArgs(): string[] {
+    return userSshArgs(this.home, this.userConfig);
   }
 
   /** `AOM_DEPLOY_SSH` for a deploy script, or null (then the script uses plain `ssh` as the person does). */

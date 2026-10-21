@@ -215,9 +215,12 @@ Host *
   ServerAliveInterval 30
 `;
   const SSH = `
-if [ "$1" = "-G" ]; then
-  shift; [ "$1" = "--" ] && shift
-  echo "hostname host-$1.example.net"; echo "user deploy"; echo "port 22"; echo "identityfile ~/.ssh/id_ed25519"
+# OpenSSH reads ~/.ssh/config through the account database, not $HOME: every call must name its config with -F
+[ "$1" = "-F" ] || { echo "ssh called without an explicit -F" >&2; exit 99; }
+g=""; for a in "$@"; do [ "$a" = "-G" ] && g=1; done
+if [ -n "$g" ]; then
+  last=""; for a in "$@"; do last="$a"; done
+  echo "hostname host-$last.example.net"; echo "user deploy"; echo "port 22"; echo "identityfile ~/.ssh/id_ed25519"
   exit 0
 fi
 # the connect test: ssh <opts> -- <alias> true
