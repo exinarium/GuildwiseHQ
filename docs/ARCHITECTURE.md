@@ -2446,3 +2446,20 @@ runs the script outside any model session.
 - **UI.** Project settings, Delivery (`DeliveryPanel`: mode, vault backup note, environments and releasers, lint, changes, Approve, Deploy
   buttons, secrets per workstation); the Deploys page (`ReleaseQueue` with the per-server choice, `DeployRuns` with the audit,
   `GatesPanel`); release cards in the CEO chat.
+- **Moving to a new server (v3).** Command `deploy.move` (capability `deploy-move:1`), one step per command. The server (`delivery/move.ts`)
+  builds a `MoveSpec` from the approved guided setup (`buildMoveSpec` in shared), appends `DeployTargetMoveStarted`, enqueues `check`, and on each
+  answer (`applyMoveResult`, from the gateway) appends `DeployTargetMoveStepDone` (stating the resulting state, so a replay needs no logic) and
+  chains the next step: the preparation (`check`, `copy_config`, `copy_image`, `start_database`) runs by itself and stops in state `ready`; the
+  downtime step (`stop_and_backup`, `restore`, `start_app`) starts only after the person's `POST .../moves/:id/switch`. States
+  `preparing | ready | moving | app_ready | completed | failed | cancelled`; `DeployTargetMoveResumed` (agree, try again, undo),
+  `DeployTargetMoveCancelled`. `deploy_targets.role` (`active | standby | retired`) and `deploy_target_moves` (migration 2300, no unique
+  index on open moves: a rebuild replays old ones; the command keeps one open per project). The Owner's `complete` (the server checks the
+  domain itself through `delivery/dns.ts`: a public lookup, injectable; `AOM_DNS_OVERRIDE_FILE` is a test hook) appends
+  `DeployTargetMoveCompleted` carrying the final names: the new server takes the old one's NAME, production mark and address (the approved
+  recipe and its hash name a target, so nothing needs re-approval) and the old one is renamed `<name> (old server)` and becomes `standby`;
+  unfinished phase follow-ups of the old target are re-pointed. Deploys of the environment are refused while a move is open
+  (`move_in_progress`) and never pick a non-active target. `retire` (Owner only) runs `retire_keys` on the standby and appends
+  `DeployKeyRevoked` per key and `DeployTargetRetired`. Routes under `/api/projects/:id/delivery/moves` and `.../targets/:targetId/retire`.
+- **Sealed sign-ins are bound (`deploy-seal-aad:1`).** The browser seals a password or key file with AES-GCM additional data
+  `aom-connect|project|address|port|user` (`h2.` format); a runner that announces the capability opens only a sign-in meant for that
+  server (older pages still send `h1.`). Expired `deploy.connect` payloads are emptied by the reachability tick.

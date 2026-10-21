@@ -923,7 +923,61 @@ Deviations and decisions:
 8. **Not done:** the scan brief does not yet mention `aom deploy probe` results being stored (they are, silently); `imageKeep` stays
    hidden; no push notification for a failed check (the chip is the signal).
 
-For v3 (move to a new server): the connect and prepare flows are reusable as they are (`ConnectServer` with `newTarget`, `PrepareServer`
+For v3 (done, see below): the connect and prepare flows are reusable as they are (`ConnectServer` with `newTarget`, `PrepareServer`
 with a target); a move needs the database dump/restore step kinds, the `.env` carry-over through the workstation, a DNS check, the standby
 role on `deploy_targets`, and revoke of the old target's keys on retire. `deploy_target_keys` already holds public parts per computer and
 `DeployTargetPrepared` records what was done on a server.
+
+### v2 review fixes (decided by the coordinator, 2026-10-21)
+
+- **S1 ssh isolation.** OpenSSH reads `~/.ssh/config` and `known_hosts` through the account database, not `$HOME`, so a temporary HOME does
+  not isolate a test or the e2e run. Every ssh call of the deploy code now names its config (`-F <managed config>` or the person's own file,
+  `/dev/null` when it does not exist) and `UserKnownHostsFile` explicitly (`userSshArgs`); tests give a temp config and run with an empty
+  `SSH_AUTH_SOCK`; the fake `ssh` of the probe test refuses a call without `-F`.
+- **Scan sandbox.** Scan shifts (`run_scan`, `deploy_scan`) run inside the OS sandbox of the claude-policy machinery and fail closed when it is
+  missing (see RUNNER.md). Guard second layer: `>&file` is a write, no globs or braces in path words, `rg` without `-u/--hidden/--no-ignore/
+  --follow`, `rg --glob` naming settings files and a recursive `grep` without `--exclude=.env*` are refused, every `docker inspect` format is
+  checked, and `aom deploy probe --host` is gone (`--target <name>`, resolved to the project's own targets). No docker in a scan: probes only.
+- **Scripts (generator `setup-1.3`).** M3 kill grace 180 s for an http-health script, M4 the health address must be a web address before the
+  first change (and `${appUrl}` needs an app address), M5 engine and compose versions are printed with a warning for compose v1 on engine 25+
+  (never worked around by removing or recreating anything), m8 `</dev/null`, m9 `PREVIOUS` prefers the running image, m10 CRLF kept.
+- **Server preparation.** M6 the page sends `inputs` and the server computes the actions from them and its own stored look at the server; a list
+  from an older page is checked (a compose file only with a compose file name, in the app folder, never in a hidden folder of this computer).
+  m2 atomic revoke, m3 modes only tightened when group/others can write, m4 compose v1 project detection by label, m5 Caddy upstream warning
+  and a port guard without `ss`, m6 every ssh_check answer is a state, Check connection is owner-only and rate limited (one a minute),
+  m7 sign-ins bound by AAD and expired ones emptied, m11 a new server that did not connect is removed (copy-paste keeps it), m12 a reconnect is
+  staged and promoted only after the new connection works.
+- **Leftovers.** A server the computer can no longer reach raises a desk notice `deploy_unreachable` (pushed as a runner alert, closed when it
+  answers); the DevOps scan brief says stored probe results exist and shows their age.
+
+### v3 (built 2026-10-21, branch `deploy-run-setup`)
+
+Built: **Move to a new server** (J6) on the environment card: choose or connect the new server (reusing `ConnectServer`), look and prepare
+(reusing `PrepareServer` with a fixed folder), the preparation runs by itself, the person agrees to the downtime, the old app is stopped and
+a last backup is taken, the data is restored into an empty database in one transaction, the new app starts and is checked by its own address
+on the server, HTTPS for the domain (Caddy) and a live DNS check, and the Owner makes the new server live. The old server becomes a
+standby; the Owner may retire it. Migration `2300_deploy_move.sql`; runner capability `deploy-move:1` (`RUNNER_VERSION` not bumped).
+Tests: shared, runner (fake servers and two real sshd containers), server (replay safety), web, and e2e project `deploy-move` (own port,
+database and folder, two sshd containers, removed afterwards).
+
+Deviations and decisions:
+
+1. **The new server takes the old one's name.** The approved recipe and the setup name a target; renaming (old: `<name> (old server)`,
+   standby; new: the old name, production mark and address) keeps the approved hash valid and needs no re-approval. `setup.json`'s
+   `host` stays the old alias (display only; the script reads `AOM_DEPLOY_HOST` from the target).
+2. **Same layout on both servers.** The compose folder, file and backup folder are those of the approved setup; the move copies the compose
+   file, `.env` and the `env_file` files next to it (never over a different file), the image by `docker save | load`, and the data from the
+   last backup. Postgres only (the setup's `db_backup` step), as everywhere else. A setup without a `db_backup` step, a hand-edited
+   environment or a local one cannot be moved (plain-words blockers).
+3. **Downtime is explicit.** Preparation steps change nothing on the old server; the downtime starts only after "A short downtime is fine".
+   A failed backup or restore restarts the old app by itself; a failed start leaves it stopped and the person chooses (owner decision 12).
+4. **Both servers from one computer.** The same computer has to sign in to both (the server refuses otherwise); the move needs the
+   project owner, "Make it live" and "Retire" need the Owner.
+5. **Retire removes keys only.** No delete of data on the old server exists; "Retire" is the removal of every `guildwise-deploy:` key. A
+   data wipe would need its own explicit, separate confirmation and is not built.
+6. **Go back is not a data sync.** "Go back to the old server" restarts the old app and stops the new one; anything written on the new
+   server meanwhile is not copied back (the confirmation says so). After "Make it live" the way back is manual (standby, DNS).
+7. **DNS** is looked up by the server (public view); `AOM_DNS_OVERRIDE_FILE` is only for tests. A name that points elsewhere (a proxy) can be
+   confirmed with "I handle the web address another way".
+8. **Not done:** a restore into a database that already has data (refused), non-Postgres databases, IPv6 servers, moving a local (this
+   computer) target, copying files the compose file does not name (other bind-mounted folders), a data sync back.

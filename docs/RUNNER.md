@@ -2293,6 +2293,26 @@ with a recipe"). The runner announces the `delivery:1` capability and does three
   (a git vault: one commit, pushed; a local vault: rewritten in place) and reports the new hash. A folder that holds a secret, a
   symlink or no `recipe.yaml` is refused.
 
+- **Moving to a new server (`deploy-move:1`, v3).** One durable command `deploy.move` with a step per command (design J6): `check`, `copy_config`,
+  `copy_image`, `start_database`, `stop_and_backup`, `restore`, `start_app`, `restart_old`, `retire_keys`. The server builds the payload from the
+  approved guided setup (compose file, app and database services, backup folder, health path) and chains the steps; the computer is stateless
+  between steps. It signs in to BOTH servers with the sign-ins it has (a target's managed `ssh_config`, else the person's own config named with
+  an explicit `-F` and `UserKnownHostsFile`: OpenSSH reads `~/.ssh/config` through the account database, not `$HOME`, so every ssh call
+  names its config) and moves data as streams through itself, never to disk: the compose file and `.env`/`env_file` files (written 0600 on the
+  new server, never over a different file: `config_differs`), the image (`docker save | gzip` to `gunzip | docker load`, skipped when present),
+  and the database (the last backup is made on the old server with the app stopped, dated in the backup folder and kept; it is streamed into
+  an EMPTY database in one `--single-transaction` psql, `new_database_not_empty` otherwise, and the table counts of both databases must match).
+  A step that stops the old app puts it back by itself when its own work fails (`oldAppRunning` in the answer); a failed `start_app` leaves the
+  old app stopped (the data is on the new server) and the person chooses Try again or `restart_old`. `retire_keys` removes every line whose
+  comment starts `guildwise-deploy:` after a dated copy (atomic: copy, filter, rename) and nothing else. Nothing is ever `down`, removed,
+  pruned or deleted on either server. Answers carry plain-words checks and counts, never a value. Tests: `deploy-move.test.ts` (fake ssh and
+  docker, hermetic: a fake `ssh` first on PATH) and `deploy-move.sshd.test.ts` (two real sshd containers with a fake docker and a real httpd).
+- **Scan shifts run in the OS sandbox.** A "Scan with DevOps" shift is the one DevOps session that is sandboxed: the clones are read-only with
+  their settings files (`.env*`, keys) left out of what the shell sees, the scratch folder is the only writable place, credential folders,
+  the runner's data, Windows user folders and the Docker sockets are masked, and the shell has no network. It is refused (fail closed) when
+  bubblewrap is not available, whatever the runner's sandbox mode says. The command guard stays as a second layer. A scan probes only its
+  project's own servers (`aom deploy probe --target <name>`).
+
 The script runs as you, on your machine, outside the Claude sandbox: that is the point of a recipe (Docker, ssh, a remote host).
 What protects you is that it only runs the exact version you approved, only when its gate holds and only when the recipe's releaser
 (you, an Admin, or the CEO where the recipe names it) says so. `aom deploy run|trial|status` only ask the server.

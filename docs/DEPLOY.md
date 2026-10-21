@@ -113,7 +113,7 @@ For a server whose deploys are set up this way, the release procedure for Guildw
 workstation, ship it over ssh, switch `GUILDWISE_IMAGE`, restart only `app`); the generated script reproduces it step by step.
 The runner on the deploying computer needs the `deploy-setup:1` capability (a current runner), and `deploy-connect:1` to connect a
 server with a password, a key file or a pasted key (**Connect a different server**), to set a server up (Docker, folders, HTTPS with
-Caddy) and to keep a dedicated key per computer so that a replacement computer can **Reconnect**. See user guide 4.27 and RUNNER.md.
+Caddy) and to keep a dedicated key per computer so that a replacement computer can **Reconnect**. See user guide 4.27 and RUNNER.md. **Moving to a new server** needs `deploy-move:1` (both servers must be reachable from the same computer); the server keeps a move per environment, deploys of that environment wait while it is open, and `AOM_DNS_OVERRIDE_FILE` (a JSON map of names to addresses) exists only for tests.
 
 ## Upgrades
 
