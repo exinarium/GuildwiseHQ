@@ -13,6 +13,7 @@ import { ceoRpc } from '../ceo/gateway.ts';
 import { announceRestart } from '../ceo/restart.ts';
 import { endCeoShift } from '../ceo/shift.ts';
 import type { ChatTerminal } from '../chat/relay.ts';
+import { addBacklogSuggestionRpc } from '../commands/backlog.ts';
 import { baTaskRpc, endBaTaskShift } from '../commands/ba-tasks.ts';
 import { attachmentRpc } from '../commands/card-attachments.ts';
 import { cardDependRpc, cardFactsRpc } from '../commands/card-facts.ts';
@@ -1213,6 +1214,9 @@ export class RunnerHandlers {
       if (msg.method === 'ceo') return reply(...(await ceoRpc(ctx, shift, msg.params)));
       if (shift.kind === 'ceo')
         return reply(false, undefined, `${msg.method} is not available in a CEO shift: use \`aom ceo\``);
+      // A follow-up an agent found: a backlog suggestion, never a card or a desk item.
+      if (msg.method === 'backlog.suggest')
+        return reply(...(await addBacklogSuggestionRpc(ctx, shift, msg.params)));
       // A BA task shift is read-only and has no card: only the phase verbs and reading are available.
       if (shift.kind === 'ba_task') return reply(...(await baTaskRpc(ctx, shift, msg.method, msg.params)));
       // A DevOps shift reaches only the card its request was filed for (`aom card show|comment|update`).

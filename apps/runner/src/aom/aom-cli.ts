@@ -87,6 +87,10 @@ const BOOLEAN_FLAGS = new Set([
   'disagree',
   'undo',
   'drafts',
+  'flag',
+  'unflag',
+  'flagged',
+  'drop',
 ]);
 
 /** Verbs whose JSON body can be passed inline (`--json '<json>'`): there `--json` takes a value instead of being a switch. */
@@ -793,6 +797,7 @@ const CEO_USAGE = `usage: aom ceo snapshot [--section <name>] | show card|agent|
        aom ceo topic list | topic propose [--from <note id>[,<note id>]] --area deploy|sandbox|auth|secrets|agent-loops|context-limits|cost|testing|review|integrations|other --question "<one generic question>" [--audience developer|ops|founder]   (a research topic for the Guildwise blog; the owner decides what is sent)
        aom ceo order invoke <order id> --wake <wake id> --why "<how this event falls under the order>" --confidence 0.0-1.0   (a wake)
        aom ceo order decline --ask "<question for the owner>"  |  order done --summary "..." [--commands-file <file>]   (an order turn, terminal)
+       aom ceo backlog add|list|update|send ...   (the project backlog: wanted work outside development; send hands items to the BA)
        aom ceo dir add <path>   (an extra working directory of this conversation)
        aom runner restart [--reason "..."]   (restarts the runner after your reply; never use systemctl or kill)
        aom ceo done --summary "..."   (a wake, terminal)   |   aom ceo report --summary-file <md>   (the daily review, terminal)`;
@@ -903,6 +908,124 @@ async function ceoDevops(ctx: AomContext, p: Parsed): Promise<number> {
     }
     await sleepOf(ctx)(10_000);
   }
+}
+
+const BACKLOG_USAGE = `usage: aom ceo backlog add --project KEY --title "..." [--description "..."] [--priority critical|high|normal|low] [--tag <t>]... [--flag]
+       aom ceo backlog list [--project KEY] [--tag <t>]... [--priority <p>]... [--flagged] [--status open|done|dropped|all]... [--search "..."] [--sort priority|created] [--json]
+       aom ceo backlog update <id> [--title "..."] [--description "..."] [--priority <p>] [--tag <t>]... [--flag|--unflag]   (--tag replaces the whole tag list)  |  update <id> --drop
+       aom ceo backlog send <id>  |  send [--project KEY] [--tag <t>]... [--priority <p>]... [--flagged]   (Open items only; each becomes its own card)`;
+
+/** Priority in any case ("High"); the server refuses an unknown one. */
+const backlogPriority = (v: string): string => v.trim().toLowerCase();
+
+/** `aom ceo backlog add|list|update|send`: the project backlog. The server applies the rules; this builds the call. */
+export async function ceoBacklog(ctx: AomContext, p: Parsed, args: string[]): Promise<number> {
+  const sub = args[0];
+  const tags = many(p, 'tag');
+  const priorities = many(p, 'priority').map(backlogPriority);
+  const act = async (action: string, params: Record<string, unknown>, reason: string): Promise<number> => {
+    const r = await rpc(ctx, 'ceo', {
+      op: 'act',
+      action,
+      params,
+      ...ceoReasonedOr(p, reason),
+      ...(one(p, 'key') ? { key: one(p, 'key') } : {}),
+      dryRun: has(p, 'dry-run'),
+    });
+    ceoPrint(ctx, p, r);
+    return (r as { status?: string }).status === 'refused' ? 1 : 0;
+  };
+  switch (sub) {
+    case 'add': {
+      const project = one(p, 'project');
+      const title = one(p, 'title');
+      if (!project || !title?.trim()) throw new UsageError(BACKLOG_USAGE);
+      return act(
+        'backlog-add',
+        {
+          project,
+          title,
+          ...(one(p, 'description') !== undefined ? { description: one(p, 'description') } : {}),
+          ...(priorities.length ? { priority: priorities.at(-1) } : {}),
+          ...(tags.length ? { tags } : {}),
+          ...(has(p, 'flag') ? { flagged: true } : {}),
+        },
+        `the owner asked: backlog add ${title}`,
+      );
+    }
+    case 'list': {
+      const statuses = many(p, 'status').flatMap((s) => s.split(',').map((x) => x.trim().toLowerCase()));
+      const status = statuses.includes('all') ? ['open', 'done', 'dropped'] : statuses;
+      const r = await rpc(ctx, 'ceo', {
+        op: 'backlog',
+        sub: 'list',
+        ...(one(p, 'project') ? { project: one(p, 'project') } : {}),
+        ...(tags.length ? { tag: tags } : {}),
+        ...(priorities.length ? { priority: priorities } : {}),
+        ...(has(p, 'flagged') ? { flagged: true } : {}),
+        ...(status.length ? { status } : {}),
+        ...(one(p, 'search') ? { q: one(p, 'search') } : {}),
+        ...(one(p, 'sort') ? { sort: one(p, 'sort') } : {}),
+      });
+      ceoPrint(ctx, p, r);
+      return 0;
+    }
+    case 'update': {
+      const item = args[1];
+      if (!item) throw new UsageError(BACKLOG_USAGE);
+      if (has(p, 'flag') && has(p, 'unflag')) throw new UsageError('use either --flag or --unflag');
+      return act(
+        'backlog-update',
+        {
+          item,
+          ...(one(p, 'title') !== undefined ? { title: one(p, 'title') } : {}),
+          ...(one(p, 'description') !== undefined ? { description: one(p, 'description') } : {}),
+          ...(priorities.length ? { priority: priorities.at(-1) } : {}),
+          ...(tags.length ? { tags } : {}),
+          ...(has(p, 'flag') ? { flagged: true } : has(p, 'unflag') ? { flagged: false } : {}),
+          ...(has(p, 'drop') ? { drop: true } : {}),
+        },
+        `the owner asked: backlog update ${item}`,
+      );
+    }
+    case 'send': {
+      const item = args[1];
+      return act(
+        'backlog-send',
+        {
+          ...(item ? { item } : {}),
+          ...(one(p, 'project') ? { project: one(p, 'project') } : {}),
+          ...(tags.length ? { tag: tags } : {}),
+          ...(priorities.length ? { priority: priorities } : {}),
+          ...(has(p, 'flagged') ? { flagged: true } : {}),
+        },
+        item ? `the owner asked: send backlog item ${item} to the BA` : 'the owner asked: send backlog items to the BA',
+      );
+    }
+    default:
+      throw new UsageError(BACKLOG_USAGE);
+  }
+}
+
+/** `aom backlog suggest`: an agent adds a follow-up it found. The server records the agent and card from the shift. */
+async function backlogVerb(ctx: AomContext, p: Parsed): Promise<number> {
+  if (p.positionals[0] !== 'suggest')
+    throw new UsageError(
+      'usage: aom backlog suggest --title "<title>" [--description "<what and why>" | --description-file <f>] [--priority critical|high|normal|low] [--tag <t>]... [--project KEY]   (only `suggest` exists for agents: the owner decides)',
+    );
+  const title = one(p, 'title');
+  if (!title?.trim()) throw new UsageError('--title "<title>" is required');
+  const description = textFlag(ctx, p, 'description', false);
+  const tags = many(p, 'tag');
+  const r = (await rpc(ctx, 'backlog.suggest', {
+    title,
+    ...(description !== undefined ? { description } : {}),
+    ...(one(p, 'priority') ? { priority: backlogPriority(one(p, 'priority') as string) } : {}),
+    ...(tags.length ? { tags } : {}),
+    ...(one(p, 'project') ? { project: one(p, 'project') } : {}),
+  })) as { message?: string };
+  ctx.io.out(`${r?.message ?? 'Added to the backlog as a suggestion. The owner decides; continue your work.'}\n`);
+  return 0;
 }
 
 /** `aom ceo ...`: the CEO agent's management verbs. The server decides what the CEO may do; a refusal is a normal answer. */
@@ -1117,6 +1240,8 @@ async function ceoVerb(ctx: AomContext, p: Parsed): Promise<number> {
       ceoPrint(ctx, p, r);
       return (r as { status?: string }).status === 'refused' ? 1 : 0;
     }
+    case 'backlog':
+      return ceoBacklog(ctx, p, args);
     case 'topic': {
       const sub = args[0];
       if (sub !== 'propose' && sub !== 'list') throw new UsageError(CEO_USAGE);
@@ -2201,6 +2326,7 @@ const VERBS: Record<string, Verb> = {
     return 0;
   },
   ceo: ceoVerb,
+  backlog: backlogVerb,
   outcome: async (ctx, p) => {
     const id = p.positionals[0];
     if (!id) throw new UsageError('usage: aom outcome <outcomeId> --note "<text>" [--data-file <json>]');
@@ -2270,6 +2396,8 @@ export const USAGE = `usage: aom <verb> [options]
   sudo -- <command> [args...]                 DevOps engineer: run a command as administrator (only when the manager granted sudo; the password stays on the runner)
   toolchain list | add <name> --bin <dir>... [--read <dir>]... [--env KEY=VALUE]... | remove <name>   tools sandboxed agents may use; DevOps engineer: register what you installed so agents get it on PATH
   hygiene run [--note "<text>"]               DevOps engineer: repository hygiene request (commit to the working branch, pull, push, tidy), ends the request
+  backlog suggest --title "<title>" [--description "<what and why>"] [--priority critical|high|normal|low] [--tag <t>]... [--project KEY]   a follow-up you found that is outside this card goes on the project backlog as a suggestion (never on the board); the owner decides
+  ceo backlog add|list|update|send ...   CEO agent only: the project backlog (see your instructions)
   ceo snapshot | show | search | act <action> ... | recommend | notify | task | memory | review-reply | devops | draft-cards | correction | job | order | dir | done | report   CEO agent only: manage the organisation within the policy (see your instructions)
   deploy probe --local | --ssh-hosts | --target <name> [--dir D] [--compose-file F] [--url U]   DevOps, in a scan: fixed read-only look at Docker here or a server (names and shapes only)
   setup propose --area run|deploy --file <proposal.json>   DevOps, in a "Scan with DevOps" request: submit the proposal (read-only scan; the user reviews it)

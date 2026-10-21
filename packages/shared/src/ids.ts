@@ -35,6 +35,7 @@ export const streamId = {
   phase: (id: string) => `phase-${id}`,
   baTask: (id: string) => `ba-task-${id}`,
   intakeBatch: (id: string) => `intake-batch-${id}`,
+  backlog: (id: string) => `backlog-${id}`,
   baSignal: (id: string) => `ba-signal-${id}`,
   shift: (id: string) => `shift-${id}`,
   ceo: (orgId: string) => `ceo-${orgId}`,

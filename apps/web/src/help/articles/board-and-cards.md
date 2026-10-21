@@ -128,3 +128,14 @@ You can override it:
 4. Give a reason and click **Set risk tier**.
 
 The override shows as a badge on the card and the reason is recorded. Once overridden, the diff no longer changes it.
+
+## The project backlog
+
+Each project has a **Backlog** tab next to its board. It holds wanted work that is not in development: nothing on it is worked by an agent until you send it to the BA.
+
+- **Add:** type a title in "Add to the backlog" and press Enter (or tap **Add**). Open the item later to add a description, a priority (Critical, High, Normal, Low) and tags.
+- **Find:** search the title, description and tags, and filter by flagged, agent suggestions, status, priority and tag. The list shows Open items only until you add the Done or Dropped filter. Sort by priority or by newest.
+- **Flag** an item with the star when you want to look at it soon. **Drop** it to take it off the backlog.
+- **Send to BA** turns an item into a card on the board, with its priority and tags carried over. The item becomes Done and links to the card. Tick several items and use **Send N to the BA** to send them together; each becomes its own card, and any that fail stay on the backlog with the reason shown.
+- Agents can add follow-ups they discover as **suggestions** (shown with the agent and the card they were working on). They are never put on the board, and the CEO's daily report lists the new ones.
+- Through the CEO you can say, for example, "send the flagged ui items to the BA" (`aom ceo backlog send --flagged --tag ui`).

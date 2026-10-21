@@ -14,6 +14,25 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
     ],
   },
+  '/p/:projectKey/backlog': {
+    title: 'Backlog',
+    article: 'board-and-cards',
+    intro:
+      'Wanted work for this project that is not in development. Nothing here is worked by an agent until you send it to the BA. Agents may add follow-ups they find as suggestions; you decide what happens to them.',
+    controls: [
+      { name: 'Add to the backlog', text: 'Type a title and press Enter (or tap Add). Fill in the details later with Edit.' },
+      {
+        name: 'Search and filters',
+        text: 'Search title, description and tags. Filter by flagged, agent suggestions, status, priority and tag. Open items are shown by default.',
+      },
+      { name: 'Star', text: 'Flag an item you want to look at soon.' },
+      {
+        name: 'Send to BA',
+        text: 'Hands the item to the BA as a new card on the board. The item becomes Done and links to the card. Select several items to send them together.',
+      },
+      { name: 'Drop', text: 'Takes an item off the backlog. Find it again with the Dropped filter.' },
+    ],
+  },
   '/p/:projectKey/board': {
     title: 'Board',
     intro:

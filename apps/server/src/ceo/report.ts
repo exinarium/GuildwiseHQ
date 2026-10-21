@@ -22,6 +22,7 @@ import { exec, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { ceoReportMail } from '../mail/ceo.ts';
+import { backlogNoticeLines, unreportedSuggestions } from './backlog-report.ts';
 import { ensureCeoThread } from './chat.ts';
 import { buildFloorDigest } from './digest.ts';
 import { listOpenRepeats } from './jobs.ts';
@@ -137,7 +138,10 @@ export async function postCeoReport(
   // Research topics: the proposals waiting for the owner and what was published from his topics (the web page shows them live
   // with Accept / Edit / Reject; the fallback report already carries the text).
   const topicsText = input.fallback ? '' : (await topicsReportLines(db, orgId, now)).join('\n');
-  const body = `${input.report.trim()}${topicsText ? `\n${topicsText}` : ''}\n\n---\n${facts}${spendLine}`;
+  // Agent suggestions added to project backlogs since the last report: a notice section, left out when there are none.
+  const suggestions = await unreportedSuggestions(db, orgId);
+  const backlogText = backlogNoticeLines(suggestions.rows, suggestions.more).join('\n');
+  const body = `${input.report.trim()}${topicsText ? `\n${topicsText}` : ''}${backlogText}\n\n---\n${facts}${spendLine}`;
   const open = digest.signals.filter((s) => s.status === 'open');
   const events: AppendInput[] = [
     ...thread.events,
@@ -160,6 +164,18 @@ export async function postCeoReport(
           data: {
             digest,
             fallback: input.fallback,
+            ...(suggestions.rows.length
+              ? {
+                  backlogSuggestions: suggestions.rows.map((s) => ({
+                    itemId: s.id,
+                    projectKey: s.projectKey,
+                    title: s.title,
+                    priority: s.priority,
+                    agentName: s.agentName,
+                    cardRef: s.cardRef,
+                  })),
+                }
+              : {}),
             ceo: {
               actions: acts.map((a) => ({
                 id: a.id,
@@ -196,6 +212,19 @@ export async function postCeoReport(
       actor: input.agentId ? agentActor(input.agentId) : SYSTEM_ACTOR,
       scope: orgScope(orgId),
     },
+    ...(suggestions.rows.length
+      ? [
+          {
+            streamId: streamId.ceo(orgId),
+            event: {
+              type: 'BacklogSuggestionsReported',
+              payload: { orgId, deskItemId, itemIds: suggestions.rows.map((s) => s.id) },
+            },
+            actor: SYSTEM_ACTOR,
+            scope: orgScope(orgId),
+          } satisfies AppendInput,
+        ]
+      : []),
     ...open.map(
       (s): AppendInput => ({
         streamId: streamId.baSignal(s.id),
@@ -207,7 +236,13 @@ export async function postCeoReport(
   ];
   await ctx.store.append(events, input.tx ? { tx: input.tx } : {});
   // The mail goes out after the append (a failing mail never blocks the report).
-  void sendReportMail(ctx, orgId, input.report, input.localDate, input.fallback).catch((err) =>
+  void sendReportMail(
+    ctx,
+    orgId,
+    `${input.report}${backlogText ? `\n${backlogText}` : ''}`,
+    input.localDate,
+    input.fallback,
+  ).catch((err) =>
     ctx.log.error({ err }, 'ceo report mail failed'),
   );
 }

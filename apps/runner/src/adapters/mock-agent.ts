@@ -21,6 +21,8 @@ type Action =
   | 'uncited'
   | 'answer'
   | 'escalate'
+  /** Adds a follow-up to the project backlog (`aom backlog suggest`), then carries on with the stage as usual. */
+  | 'suggest'
   /** Architect: the first report contains a (fake) secret, the runner refuses it, the report is rewritten clean. */
   | 'secret';
 
@@ -1700,6 +1702,24 @@ async function main(): Promise<number> {
     emit({
       kind: 'progress',
       text: `mock asked DevOps: ${(asked.code === 0 ? asked.out : asked.err).trim()}`,
+    });
+  }
+  if (action === 'suggest') {
+    const asked = aom([
+      'backlog',
+      'suggest',
+      '--title',
+      `Mock follow-up from ${brief.card.ref}`,
+      '--description',
+      `Found while working on ${brief.card.ref}.`,
+      '--priority',
+      'high',
+      '--tag',
+      'mock',
+    ]);
+    emit({
+      kind: 'progress',
+      text: `mock suggested a backlog item: ${(asked.code === 0 ? asked.out : asked.err).trim()}`,
     });
   }
   if (stage === 'build') buildWork(brief);
