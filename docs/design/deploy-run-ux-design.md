@@ -1012,3 +1012,65 @@ Deviations and decisions:
   guided flow (managed `ssh_config`: `IdentitiesOnly`, `IdentityAgent none`). A target on the person's own alias (including "also add a
   dedicated key" to it) is checked only by Check connection or as part of a deploy. The managed config now says `IdentityAgent none`.
 - **Update the steps without a web address** shows which environment lacks it and which field to fill in (instead of doing nothing).
+
+
+## 15. Usability fixes (branch `deploy-setup-ux`, 2026-10-21)
+
+The owner could not set up a production deploy for project P5 with the guided setup ("not very user friendly"). The root causes and the
+decisions taken. The page redesign is `docs/design/environments-ux.md` (the API contract that the new Environments page uses is its
+section 13); this section records the backend and runner decisions.
+
+1. **The probe finds stacks wherever they are.** The remote probe only looked in `/opt` and `/srv` and dropped hinted folders elsewhere, so a stack
+   in `/home/administrator/dcode/flow5-full` had empty `composeFiles`, `folders`, `imageVars` and `urls`. The remote script now reads the compose
+   labels of every container (`working_dir`, `config_files`), the compose files of the usual names in those folders and in `$HOME/*/` and
+   `$HOME/*/*/`, the key names of the `.env` next to each (never values, except the value of a key that names an image), and reports where it
+   looked (`ProbeReport.checked`). Every path still passes `SAFE_PATH`; a folder the person typed (a hint) may now also be under `/home`, never a
+   hidden folder. The local probe scans the same places. Runner capability `deploy-setup:2`. The DevOps scan uses the same probe.
+2. **Update methods; no `.env` variable needed.** A server environment can get its new version by: copy from this computer (the original method),
+   pull from a registry (`registry`; build here, push, the server pulls; or only pull when CI pushes: no build/push steps), or build on the server
+   (the approved files are streamed with `git archive` into `<sourceDir>/<sha>`: no git sign-in is needed on the server; `compose build` of the app
+   service only). The tag is named by the `.env` variable when the setup has one, else by **`docker-compose.guildwise.yml`** next to the compose file
+   (`image:` for the app service; the person's compose file and `.env` are never edited; a dated copy of an earlier override is kept). Rollback
+   writes the previous image through the same file. All methods keep: the database backup first (a failed one blocks), `up -d --no-deps` of the app
+   service only, never `down`, the health check, automatic rollback, the dry run branch in every step. Golden files per method in
+   `packages/shared/test/fixtures/setup/methods/`; the generator version is unchanged (`setup-1.3`: scripts of the original method are byte
+   for byte what they were). The method is derived from the steps (`updateMethodOf`), not stored.
+3. **The compose project name is used everywhere.** The database backup and the state look of a server script ran `docker compose -f <file>`
+   without `-p`, so for a stack whose project name is not its folder's name (P5: `dcode-flow5-remote` in `flow5-full`) they would have looked at
+   the wrong project. Both now pass `-p` when the setup names a project (scripts without a project name are unchanged).
+4. **Apps that run without Docker.** `SetupEnv.runtime = 'direct'`: one folder per version (`releases/<12 characters of the commit>`), a symlink
+   switched in one step (`mv -T`, else `ln -sfn`), a restart by what was detected (systemd system or `--user`, pm2, or a command of the person's
+   own; `sudo -n` only on explicit confirmation), shared files linked into every release, the build steps run in the new folder, health check,
+   rollback = the link back at the previous folder and a restart. A plain folder is only turned into the first release when the person said so
+   (`adoptFolder`; one `mv`, nothing deleted). Old release folders are pruned (never the running one, the previous one, or anything that is not a
+   Guildwise release). Probe: `ProbeReport.services` (systemd, systemd `--user`, pm2, listening programs; command lines shortened and masked) and
+   `appDirs`; a machine with no Docker but with apps now gives a report. Runner capability `deploy-direct:1`. Tests: goldens, fake
+   systemctl/pm2/sudo/curl/ssh, probe tests.
+5. **Server API for the new page** (contract in environments-ux.md section 13): places with "used by" and duplicate hints, remove (naming the
+   environments that use a place; optional removal of Guildwise's key from the server through a durable `deploy.revoke {forget}` that also deletes
+   this computer's key material and never blocks the removal) and merge of duplicates; environments of any name and role (`SetupEnv.role`);
+   pointing an environment at a place; removal of an environment (out of the draft; its script goes with it on publish; approval needs no new
+   try when nothing else changed; waiting releases of a removed environment are cancelled on approval); discard draft; "Stop using guided deploys"
+   (back to instructions mode, the saved setup is forgotten by the page, history stays in the log); per-environment status and an org-wide "what
+   is live" (readable by project members); earlier releases and a rollback that goes through the same release path (Owner or Admin, no
+   test-site rule, a freeze still blocks, audited as `trigger: rollback`); proposal questions with kinds, optional answers and stored answers
+   (`SetupProposalAnswered`), proposals that MERGE into the draft by environment name instead of replacing it, phase follow-ups that name an
+   environment (migration `2310`, old `targetId` follow-ups keep working), `reuseExisting` on target creation, `describeGate`.
+6. **Decisions.** (a) A rollback is released at once by the Owner or Admin who asks (their confirmation is the approval), not queued: the same rule as
+   the Release button. (b) Duplicate detection is a hint plus an explicit merge, never an automatic merge; creating a target keeps its old behaviour
+   unless the caller sets `reuseExisting`. (c) `place_in_use` also protects a place that only the unfinished draft uses. (d) An environment that
+   names a place is still stored by the place's name (`target`); the page picks places by id and the server writes the name. (e) Version skew: a
+   setup that needs `deploy-setup:2` or `deploy-direct:1` is refused with 409 `runner_outdated` and a lint error `runner_update_needed` on a computer
+   without it; the state tells the page beforehand (`workstations[].canNewMethods`, `canDirect`). (f) The Docker-less path cannot move to another
+   server (`move` is for Compose stacks).
+7. **One-off reset for the release.** `node dist/deploy-reset.mjs --dry-run | --confirm` (docs/DEPLOY.md release notes) clears every place and
+   delivery setup of every project through events (`DeployTargetRemoved{reason}`, `DeliveryRecipeReset`, a discarded draft, instructions mode,
+   cancelled waiting releases, skipped follow-ups), never contacts a runner or a server, and lists the servers where Guildwise keys remain. It is a
+   script, not a boot migration, so UAT is unaffected.
+8. **Verification.** Runner: `generated-methods` (copy/registry/build-on-server on a literal-tag stack outside `/opt` against a fake docker),
+   `generated-direct` (fake systemctl/pm2/sudo), probe tests, a real sshd test for key removal. Server: `environments`, `deploy-reset`, `delivery-setup`.
+   Shared: goldens. E2E project `deploy-setup-journey` (real server, real runner, a throwaway sshd + fake docker container whose stack is in
+   `/home/deploy/app/flow`, a throwaway `registry:2` container; removes everything it made). Its steps are driven through the API the page uses; the
+   page's own screens are covered by the web specs of the Environments page.
+9. **Not done here.** The wizard items that the redesign replaces (inline "enter the folder yourself", probe spam, ensureTarget matching, the Answer
+   button, the Add surface, Change server, the merged "Deploys" section) are in the new Environments page, not in the old components.
