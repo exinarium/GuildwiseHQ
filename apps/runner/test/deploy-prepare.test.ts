@@ -347,6 +347,7 @@ exit 0
 echo "docker $*" >> "$FAKE_ROOT/calls.log"
 case "$*" in
   *"version"*) echo 2.40.0 ;;
+  *"ps -a -q"*) [ -f "$FAKE_ROOT/exists" ] && echo abc123 ;;
   *" ls "*) [ -f "$FAKE_ROOT/exists" ] && echo '[{"Name":"aom-shop-uat","Status":"running(2)"}]' || echo '[]' ;;
   *"config --services"*) printf 'postgres\\napp\\nmailpit\\n' ;;
 esac

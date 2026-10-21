@@ -1,6 +1,7 @@
 import {
   describePrepareAction,
   type PrepareAction,
+  type PrepareInputs,
   type PrepareStepResult,
   type ProbeReport,
   planPrepare,
@@ -61,19 +62,17 @@ export function PrepareServer({
   const prepare = usePrepare(projectId);
   const op = useOp(projectId, opId);
 
-  const plan = useMemo(
-    () =>
-      planPrepare(report, {
-        hosting,
-        appDir: dir.trim(),
-        ...(server && domain.trim()
-          ? { domain: domain.trim().toLowerCase(), upstreamPort: Number(port) }
-          : {}),
-        composeFromRepo: { repoPath: composePath.trim() },
-        ...(server ? {} : { project: `aom-${base}`, appService: 'app' }),
-      }),
-    [report, hosting, dir, domain, port, composePath, server, base],
+  const inputs: PrepareInputs = useMemo(
+    () => ({
+      hosting,
+      appDir: dir.trim(),
+      ...(server && domain.trim() ? { domain: domain.trim().toLowerCase(), upstreamPort: Number(port) } : {}),
+      composeFromRepo: { repoPath: composePath.trim() },
+      ...(server ? {} : { project: `aom-${base}`, appService: 'app' }),
+    }),
+    [hosting, dir, domain, port, composePath, server, base],
   );
+  const plan = useMemo(() => planPrepare(report, inputs), [report, inputs]);
   const actions = plan.actions;
   const dirOk = server
     ? /^\/[A-Za-z0-9._/+@=-]+$/.test(dir.trim())
@@ -92,6 +91,8 @@ export function PrepareServer({
         workstationId,
         ...(targetId ? { targetId } : {}),
         hosting,
+        // the server computes the list again from these (and its own look at the server); `actions` is for an older server
+        inputs,
         actions: actions as PrepareAction[],
         dryRun,
         confirmed: true,

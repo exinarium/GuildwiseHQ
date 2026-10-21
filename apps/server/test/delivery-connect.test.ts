@@ -668,10 +668,18 @@ describe('reachability', () => {
     expect(await q(`SELECT 1 FROM deploy_probes WHERE scope='ssh_check'`)).toHaveLength(0);
     // fresh answers are left alone for a day
     expect(await reachabilityTick(d.w.t.app.ctx)).toBe(0);
+    // the button is rate limited (one a minute per server): an answer a moment ago, and 429
+    await call('POST', `${base()}/delivery/targets/${d.targets.prod}/check`, undefined, 429);
+    await q(`UPDATE deploy_target_connections SET at = at - interval '5 minutes' WHERE target_id=$1`, [
+      d.targets.prod,
+    ]);
     // the button: the cheap check when the computer knows it, else the full look
     const n2 = commands('deploy.probe').length;
     await call('POST', `${base()}/delivery/targets/${d.targets.prod}/check`, undefined, 202);
     expect((await lastCommand('deploy.probe', n2)).payload.scope).toBe('ssh_check');
+    // and one is already on its way
+    await call('POST', `${base()}/delivery/targets/${d.targets.prod}/check`, undefined, 429);
+    await q(`DELETE FROM runner_commands WHERE type='deploy.probe' AND status IN ('pending','sent')`);
     await q(`UPDATE workstation_capabilities SET capabilities=$2::text[] WHERE workstation_id=$1`, [
       d.w.workstationId,
       ['ceo:1', 'delivery:1', DEPLOY_SETUP_CAPABILITY],
@@ -766,6 +774,308 @@ describe('what a DevOps scan saw is kept', () => {
       (await q(`SELECT error FROM deploy_probes WHERE scope='local' AND project_id=$1`, [d.w.projectId]))[0]
         .error,
     ).toBe('docker_missing');
+  });
+});
+
+// ------------------------------------------------------------------------------------------ v2 review
+
+describe('v2 review: the server decides what a preparation does', () => {
+  const prep = (body: Record<string, unknown>, status = 202) =>
+    call(
+      'POST',
+      `${base()}/delivery/prepare`,
+      {
+        workstationId: d.w.workstationId,
+        targetId: d.targets.prod,
+        hosting: 'ssh',
+        confirmed: true,
+        ...body,
+      },
+      status,
+    );
+  const report = (over: Record<string, unknown> = {}) => ({
+    scope: 'ssh_target',
+    at: new Date().toISOString(),
+    host: 'prod',
+    docker: { installed: true, usable: true, version: '26.0.0' },
+    containers: [],
+    composeFiles: [],
+    volumes: [],
+    folders: [],
+    backups: [],
+    proxies: [],
+    urls: [],
+    listeners: [],
+    ...over,
+  });
+  const storeReport = async (rep: unknown) => {
+    await q(`DELETE FROM deploy_probes WHERE project_id=$1 AND target_id=$2`, [
+      d.w.projectId,
+      d.targets.prod,
+    ]);
+    await q(
+      `INSERT INTO deploy_probes (id, org_id, project_id, target_id, workstation_id, scope, host, report, at)
+       VALUES ($1,$2,$3,$4,$5,'ssh_target','prod',$6::jsonb,now())`,
+      [randomUUID(), d.orgId, d.w.projectId, d.targets.prod, d.w.workstationId, JSON.stringify(rep)],
+    );
+  };
+
+  it('computes the actions from the inputs and its own look at the server; the list the page sends is not used', async () => {
+    await q(`DELETE FROM deploy_probes WHERE project_id=$1 AND target_id=$2`, [
+      d.w.projectId,
+      d.targets.prod,
+    ]);
+    const inputs = {
+      hosting: 'ssh',
+      appDir: '/opt/shop',
+      composeFromRepo: { repoPath: 'docker-compose.yml' },
+    };
+    // nothing looked at yet: refused in words
+    const blocked = await req('POST', `${base()}/delivery/prepare`, {
+      workstationId: d.w.workstationId,
+      targetId: d.targets.prod,
+      hosting: 'ssh',
+      confirmed: true,
+      inputs,
+    });
+    expect(blocked.status).toBe(422);
+    expect(blocked.body.error.code).toBe('prepare_blocked');
+    await storeReport(report());
+    const n = commands('deploy.prepare').length;
+    await prep({
+      inputs,
+      // a page (or someone) that sends another list: ignored
+      actions: [{ kind: 'create_dir', path: '/etc/evil' }],
+    });
+    const cmd = await lastCommand('deploy.prepare', n);
+    const paths = cmd.payload.actions.map((a: any) => a.path ?? a.kind);
+    expect(paths).toEqual(['/opt/shop', '/opt/shop/backups', '/opt/shop/docker-compose.yml']);
+    expect(JSON.stringify(cmd.payload)).not.toContain('/etc/evil');
+  });
+
+  it('nothing to do is an answer, not a command', async () => {
+    await storeReport(
+      report({
+        folders: [{ path: '/opt/shop', exists: true, entries: ['backups'] }],
+        composeFiles: [
+          {
+            path: '/opt/shop/docker-compose.yml',
+            services: [{ name: 'app', ports: [], volumes: [], envFiles: [], vars: [] }],
+            volumes: [],
+          },
+        ],
+      }),
+    );
+    const out = await req('POST', `${base()}/delivery/prepare`, {
+      workstationId: d.w.workstationId,
+      targetId: d.targets.prod,
+      hosting: 'ssh',
+      confirmed: true,
+      inputs: { hosting: 'ssh', appDir: '/opt/shop', composeFromRepo: { repoPath: 'docker-compose.yml' } },
+    });
+    expect(out.status).toBe(422);
+    expect(out.body.error.code).toBe('nothing_to_do');
+  });
+
+  it('an older page’s list is checked: a compose file only under the app folder and with a compose file name', async () => {
+    // not a compose file name: the schema refuses
+    expect(
+      (
+        await req('POST', `${base()}/delivery/prepare`, {
+          workstationId: d.w.workstationId,
+          targetId: d.targets.prod,
+          hosting: 'ssh',
+          confirmed: true,
+          actions: [
+            { kind: 'write_compose', path: '/opt/shop/authorized_keys', repoPath: 'docker-compose.yml' },
+          ],
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await req('POST', `${base()}/delivery/prepare`, {
+          workstationId: d.w.workstationId,
+          targetId: d.targets.prod,
+          hosting: 'ssh',
+          confirmed: true,
+          actions: [
+            { kind: 'write_compose', path: '/opt/shop/docker-compose.yml', repoPath: 'deploy/run.sh' },
+          ],
+        })
+      ).status,
+    ).toBe(400);
+    // a compose file name, but in a folder that is not being set up
+    const bad = await req('POST', `${base()}/delivery/prepare`, {
+      workstationId: d.w.workstationId,
+      targetId: d.targets.prod,
+      hosting: 'ssh',
+      confirmed: true,
+      actions: [{ kind: 'write_compose', path: '/etc/docker-compose.yml', repoPath: 'docker-compose.yml' }],
+    });
+    expect(bad.status).toBe(422);
+    expect(bad.body.error.code).toBe('unsafe_prepare');
+    // next to a folder the same list creates: fine
+    await prep({
+      actions: [
+        { kind: 'create_dir', path: '/opt/shop' },
+        { kind: 'write_compose', path: '/opt/shop/docker-compose.yml', repoPath: 'docker-compose.yml' },
+      ],
+    });
+  });
+
+  it('this computer: not into a hidden folder', async () => {
+    const bad = await req('POST', `${base()}/delivery/prepare`, {
+      workstationId: d.w.workstationId,
+      hosting: 'this_computer',
+      confirmed: true,
+      actions: [
+        { kind: 'create_dir', path: '~/.ssh/shop' },
+        { kind: 'write_compose', path: '~/.ssh/shop/docker-compose.yml', repoPath: 'docker-compose.yml' },
+      ],
+    });
+    expect(bad.status).toBe(422);
+    expect(bad.body.error.code).toBe('unsafe_prepare');
+  });
+});
+
+const report0 = () => ({
+  scope: 'ssh_check',
+  at: new Date().toISOString(),
+  host: 'prod',
+  containers: [],
+  composeFiles: [],
+  volumes: [],
+  folders: [],
+  backups: [],
+  proxies: [],
+  urls: [],
+  listeners: [],
+});
+
+describe('v2 review: reachability answers, connect clean-up, expired sign-ins', () => {
+  it('m6: every failed check is a state (an error the page does not know is "cannot reach")', async () => {
+    await q(`DELETE FROM deploy_target_connections WHERE target_id=$1`, [d.targets.prod]);
+    await q(`DELETE FROM runner_commands WHERE type='deploy.probe'`);
+    const n = commands('deploy.probe').length;
+    const { queueReachabilityCheck } = await import('../src/delivery/reachability.ts');
+    expect(await queueReachabilityCheck(d.w.t.app.ctx, d.targets.prod)).toBe(true);
+    const cmd = await lastCommand('deploy.probe', n);
+    answer(cmd.commandId, { ok: false, error: 'docker_missing', detail: 'odd' });
+    await until(
+      async () =>
+        (await q(`SELECT 1 FROM deploy_target_connections WHERE target_id=$1`, [d.targets.prod])).length > 0,
+      5000,
+      'chip',
+    );
+    expect(
+      (await q(`SELECT state FROM deploy_target_connections WHERE target_id=$1`, [d.targets.prod]))[0].state,
+    ).toBe('unreachable');
+  });
+
+  it('a server the computer can no longer reach is put on the desk (and pushed as a runner alert); answering again closes it', async () => {
+    const { queueReachabilityCheck } = await import('../src/delivery/reachability.ts');
+    await q(`DELETE FROM runner_commands WHERE type='deploy.probe'`);
+    const subject = `deploy_unreachable:${d.targets.prod}`;
+    await q(`DELETE FROM desk_items WHERE subject_key=$1`, [subject]);
+    const n = commands('deploy.probe').length;
+    expect(await queueReachabilityCheck(d.w.t.app.ctx, d.targets.prod)).toBe(true);
+    answer((await lastCommand('deploy.probe', n)).commandId, {
+      ok: false,
+      error: 'ssh_unreachable',
+      detail: 'connection refused',
+    });
+    await until(
+      async () =>
+        (await q(`SELECT 1 FROM desk_items WHERE subject_key=$1 AND status='open'`, [subject])).length === 1,
+      5000,
+      'desk notice',
+    );
+    const item = (
+      await q(`SELECT subkind, kind, title, body FROM desk_items WHERE subject_key=$1`, [subject])
+    )[0];
+    expect(item).toMatchObject({ subkind: 'deploy_unreachable', kind: 'alert' });
+    expect(item.body).toContain('Reconnect');
+    // a second failure does not add a second notice
+    await q(`DELETE FROM runner_commands WHERE type='deploy.probe'`);
+    const n2 = commands('deploy.probe').length;
+    expect(await queueReachabilityCheck(d.w.t.app.ctx, d.targets.prod)).toBe(true);
+    answer((await lastCommand('deploy.probe', n2)).commandId, { ok: false, error: 'ssh_unreachable' });
+    await new Promise((r) => setTimeout(r, 300));
+    expect(await q(`SELECT 1 FROM desk_items WHERE subject_key=$1`, [subject])).toHaveLength(1);
+    // it answers again: the notice closes
+    await q(`DELETE FROM runner_commands WHERE type='deploy.probe'`);
+    const n3 = commands('deploy.probe').length;
+    expect(await queueReachabilityCheck(d.w.t.app.ctx, d.targets.prod)).toBe(true);
+    answer((await lastCommand('deploy.probe', n3)).commandId, { ok: true, report: report0() });
+    await until(
+      async () =>
+        (await q(`SELECT 1 FROM desk_items WHERE subject_key=$1 AND status='open'`, [subject])).length === 0,
+      5000,
+      'notice closed',
+    );
+  });
+
+  it('m6: only the project owner presses Check connection', async () => {
+    const m = await d.member();
+    const out = await req('POST', `${base()}/delivery/targets/${d.targets.prod}/check`, undefined, m.cookie);
+    expect([403, 404]).toContain(out.status);
+  });
+
+  const asNew = async (method: 'password' | 'panel', name: string) => {
+    await q(
+      `INSERT INTO workstation_keys (workstation_id, key_id, public_key, updated_at) VALUES ($1,'k1','pk',now()) ON CONFLICT (workstation_id) DO UPDATE SET key_id='k1'`,
+      [d.w.workstationId],
+    );
+    const n = commands('deploy.connect').length;
+    const started = await call(
+      'POST',
+      `${base()}/delivery/connect`,
+      {
+        workstationId: d.w.workstationId,
+        newTarget: { name },
+        method,
+        address: `${name.toLowerCase().replace(/ /g, '-')}.example.com`,
+        user: 'root',
+        port: 22,
+        hostKeyFingerprint: FP,
+        ...(method === 'password'
+          ? { keyId: 'k1', ciphertext: 'h1.SEALED.SEALED.SEALED' }
+          : { keyRef: randomUUID() }),
+      },
+      202,
+    );
+    return { started, cmd: await lastCommand('deploy.connect', n) };
+  };
+  const exists = async (id: string) =>
+    (await q(`SELECT 1 FROM deploy_targets WHERE id=$1 AND removed_at IS NULL`, [id])).length === 1;
+
+  it('m11: a new server that did not connect is not left on the list; the copy-paste flow keeps it to try again', async () => {
+    const a = await asNew('password', 'Failing box');
+    expect(await exists(a.started.targetId)).toBe(true);
+    answer(a.cmd.commandId, { ok: false, error: 'bad_password' });
+    await opDone(a.started.commandId);
+    expect(await exists(a.started.targetId)).toBe(false);
+    const b = await asNew('panel', 'Pasting box');
+    answer(b.cmd.commandId, { ok: false, error: 'key_not_accepted' });
+    await opDone(b.started.commandId);
+    expect(await exists(b.started.targetId)).toBe(true);
+    const c = await asNew('password', 'Working box');
+    answer(c.cmd.commandId, { ok: true, publicKey: PUB('22222222'), fingerprint: FP, installed: 'added' });
+    await opDone(c.started.commandId);
+    expect(await exists(c.started.targetId)).toBe(true);
+  });
+
+  it('m7: a sealed sign-in nobody picked up before it expired is emptied', async () => {
+    const { purgeExpiredConnects } = await import('../src/delivery/reachability.ts');
+    const a = await asNew('password', 'Expiring box');
+    await q(`UPDATE runner_commands SET expires_at = now() - interval '1 minute' WHERE id=$1`, [
+      a.cmd.commandId,
+    ]);
+    expect(await purgeExpiredConnects(d.w.t.app.ctx)).toBeGreaterThanOrEqual(1);
+    const row = (await q(`SELECT payload, status FROM runner_commands WHERE id=$1`, [a.cmd.commandId]))[0];
+    expect(row.payload).toEqual({});
+    expect(row.status).toBe('failed');
   });
 });
 

@@ -2,6 +2,7 @@ import {
   type ConnectRequest,
   type ConnectSecret,
   type ConnectStartedDto,
+  connectSealAad,
   type HostKeyScanRequest,
   type KeyCreateRequest,
   type OpStartedDto,
@@ -59,10 +60,18 @@ export function useConnect(projectId: string) {
       const { secret, ...rest } = v;
       let sealed: { keyId: string; ciphertext: string } | undefined;
       if (secret) {
-        const key = await get<{ keyId: string; publicKey: string }>(
+        const key = await get<{ keyId: string; publicKey: string; sealAad?: boolean }>(
           `/workstations/${v.workstationId}/sudo-key`,
         );
-        sealed = { keyId: key.keyId, ciphertext: await sealLarge(key.publicKey, JSON.stringify(secret)) };
+        // bound to the project and the server it was typed for (a computer that can open that; an older one gets the plain form)
+        const aad =
+          key.sealAad && v.address && v.user
+            ? connectSealAad({ projectId, address: v.address, port: v.port ?? 22, user: v.user })
+            : undefined;
+        sealed = {
+          keyId: key.keyId,
+          ciphertext: await sealLarge(key.publicKey, JSON.stringify(secret), aad),
+        };
       }
       return post<ConnectStartedDto>(`/projects/${projectId}/delivery/connect`, {
         ...rest,

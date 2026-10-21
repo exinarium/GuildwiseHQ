@@ -25,6 +25,7 @@ import {
   type RunnerUpdateCheckResult,
   type RunnerUpdateState,
   type RuntimeInfo,
+  SEAL_AAD_CAPABILITY,
   SETUP_SCAN_CAPABILITY,
   type ServerToRunner,
   SHIFT_LIMIT_CAPABILITY,
@@ -577,7 +578,7 @@ export class Runner {
     this.deployKeys = new DeployKeys({ dir: join(this.paths.root, 'keys', 'deploy') });
     this.deployConnector = new DeployConnector({
       keys: this.deployKeys,
-      decrypt: (c) => this.keys.decryptAny(c),
+      decrypt: (c, aad) => this.keys.decryptAny(c, aad),
       keyId: () => this.keys.publicKey.keyId,
       log: this.log,
     });
@@ -1067,7 +1068,7 @@ export class Runner {
         // Guided deploy setup: `deploy.probe` and `recipe.write` (docs/design/deploy-run-ux-design.md section 6)
         DEPLOY_SETUP_CAPABILITY,
         // Guided connect, dedicated deploy keys and server preparation (design v2)
-        ...(platform() === 'win32' ? [] : [DEPLOY_CONNECT_CAPABILITY]),
+        ...(platform() === 'win32' ? [] : [DEPLOY_CONNECT_CAPABILITY, SEAL_AAD_CAPABILITY]),
         // "Scan with DevOps": `aom setup propose` and a read-only scan brief (docs/design/deploy-run-ux-design.md section 5).
         SETUP_SCAN_CAPABILITY,
         LOCAL_VAULT_CAPABILITY,

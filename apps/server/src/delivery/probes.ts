@@ -6,6 +6,7 @@ import {
   DeployProbeResultSchema,
   type ProbeRequest,
   probeErrorText,
+  REACHABILITY_TEXT,
   type SetupProbeDto,
   streamId,
 } from '@aom/shared';
@@ -18,6 +19,7 @@ import { conflict, forbidden, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { connectBlockedReason } from './connect.ts';
+import { closeDeskNotice, raiseDeskNotice } from './notices.ts';
 
 /**
  * Deploy probes (docs/design/deploy-run-ux-design.md section 6): the server asks a workstation to look at Docker or a server
@@ -203,11 +205,13 @@ export async function applyProbeResult(
     }
   } else if ((scope === 'ssh_target' || scope === 'ssh_check') && targetId && host) {
     if (res.ok) checks.push({ targetId, host, state: 'reachable', detail: null });
-    else if (ERROR_STATE[res.error])
+    // every answer is a state (an unknown error is "cannot reach" with its words): a check that records nothing is due again
+    // at the next tick and the chip keeps saying "Can sign in" for a server that is gone
+    else
       checks.push({
         targetId,
         host,
-        state: ERROR_STATE[res.error] as ConnectionState,
+        state: (ERROR_STATE[res.error] ?? 'unreachable') as ConnectionState,
         detail: probeErrorText(res.error, host).slice(0, 290),
       });
   }
@@ -240,7 +244,29 @@ export async function applyProbeResult(
       scope: projectScope(project.org_id, projectId),
     });
   await ctx.store.append(events);
+  // A server that cannot be reached any more is something the owner has to hear about (a desk notice, and a push to the
+  // managers through the runner-alert category); one that answers again closes the notice.
+  for (const c of checks) {
+    const t = await one(ctx.pool, 'SELECT name FROM deploy_targets WHERE id=$1', [c.targetId]);
+    if (!t) continue;
+    const subjectKey = unreachableSubject(c.targetId);
+    if (c.state === 'reachable') await closeDeskNotice(ctx, subjectKey);
+    else if (c.state !== 'unchecked')
+      await raiseDeskNotice(ctx, {
+        orgId: project.org_id,
+        projectId,
+        subkind: DEPLOY_UNREACHABLE_SUBKIND,
+        subjectKey,
+        title: `${t.name} cannot be reached`,
+        body: `The computer that deploys ${t.name} cannot sign in to its server any more (${REACHABILITY_TEXT[c.state].text.toLowerCase()}${c.detail ? `: ${c.detail}` : ''}). The next deploy would fail. Open Deploys and use Check connection or Reconnect.`,
+        data: { projectId, targetId: c.targetId, state: c.state },
+      });
+  }
 }
+
+/** The desk notice of a server that cannot be reached; one open per target, closed when it answers again. */
+export const DEPLOY_UNREACHABLE_SUBKIND = 'deploy_unreachable';
+export const unreachableSubject = (targetId: string): string => `deploy_unreachable:${targetId}`;
 
 /** The latest probes of a project, newest first, with plain-words errors. */
 export async function listProbeDtos(

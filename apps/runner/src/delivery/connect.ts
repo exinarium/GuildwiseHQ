@@ -3,6 +3,7 @@ import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   ConnectSecretSchema,
+  connectSealAad,
   DEPLOY_KEY_COMMENT_PREFIX,
   type DeployConnectPayload,
   type DeployConnectResult,
@@ -37,7 +38,7 @@ import { classifySsh, type Ran, run } from './probe.ts';
 export interface ConnectorDeps {
   keys: DeployKeys;
   /** Opens a sealed value (the runner's private key). */
-  decrypt: (ciphertext: string) => string;
+  decrypt: (ciphertext: string, aad?: string) => string;
   /** The key id the browser sealed to. */
   keyId: () => string;
   env?: NodeJS.ProcessEnv;
@@ -59,8 +60,10 @@ const SAFE_CMD = /^[A-Za-z0-9._-]+$/;
 export const INSTALL_KEY_SCRIPT = `set -eu
 umask 077
 pub=$1
+# only a folder or file that group or others can WRITE to is tightened (sshd refuses those); a mode that is fine stays as it is
+loose() { m=$(ls -ld "$1" | cut -c1-10); case "$m" in ?????w????|????????w?) return 0 ;; esac; return 1; }
 mkdir -p "$HOME/.ssh"
-chmod 700 "$HOME/.ssh"
+if loose "$HOME/.ssh"; then chmod go-w "$HOME/.ssh"; fi
 f="$HOME/.ssh/authorized_keys"
 if [ -f "$f" ] && grep -qxF -- "$pub" "$f"; then echo "AOM_RESULT already"; exit 0; fi
 bak=
@@ -70,7 +73,7 @@ if [ -s "$f" ]; then
   if [ "$(tail -c 1 "$f" | wc -l)" -eq 0 ]; then echo >> "$f"; fi
 fi
 printf '%s\\n' "$pub" >> "$f"
-chmod 600 "$f"
+if loose "$f"; then chmod go-w "$f"; fi
 echo "AOM_RESULT added $bak"
 `;
 
@@ -86,8 +89,9 @@ bak="$f.guildwise-bak-$(date +%Y%m%d%H%M%S)"
 cp -p -- "$f" "$bak"
 tmp="$f.aom-tmp.$$"
 trap 'rm -f -- "$tmp"' EXIT
+cp -p -- "$f" "$tmp"
 awk -v k="$key" -v p="$p" '{ if ($1 " " $2 == k && index($3, p) == 1) next; print }' "$f" > "$tmp"
-cat "$tmp" > "$f"
+mv -- "$tmp" "$f"
 echo "AOM_RESULT $n $bak"
 `;
 
@@ -207,7 +211,19 @@ export class DeployConnector {
       if (p.method === 'password' || p.method === 'keyfile') {
         if (p.keyId !== this.deps.keyId()) return fail('key_changed');
         try {
-          secret = ConnectSecretSchema.parse(JSON.parse(this.deps.decrypt(p.ciphertext as string)));
+          secret = ConnectSecretSchema.parse(
+            JSON.parse(
+              this.deps.decrypt(
+                p.ciphertext as string,
+                connectSealAad({
+                  projectId: p.projectId,
+                  address: p.address as string,
+                  port: p.port,
+                  user: p.user as string,
+                }),
+              ),
+            ),
+          );
         } catch {
           return fail('sealed_unreadable');
         }
@@ -249,7 +265,14 @@ export class DeployConnector {
         ...(p.hostKeyFingerprint ? { hostKeyFingerprint: p.hostKeyFingerprint } : {}),
         fingerprint: key.fingerprint,
       };
-      const cfg = this.deps.keys.write(dir, meta, hostLine);
+      // A reconnect (a config is there already) is staged: the old config and pinned host key stay until the new connection works.
+      const staging = existsSync(join(dir, 'ssh_config')) ? join(dir, 'staging') : undefined;
+      if (staging) rmSync(staging, { recursive: true, force: true });
+      const confDir = staging ?? dir;
+      const cfg = this.deps.keys.write(dir, meta, hostLine, confDir);
+      const dropStaging = () => {
+        if (staging) rmSync(staging, { recursive: true, force: true });
+      };
 
       // 5. put our public key on the server (once), by the way the person chose
       let installed: 'added' | 'already' | 'pasted' = 'pasted';
@@ -257,11 +280,17 @@ export class DeployConnector {
       if (p.method === 'password' || p.method === 'keyfile' || p.method === 'alias') {
         const r =
           p.method === 'password'
-            ? await this.installWithPassword(p, (secret as { password: string }).password, pub)
+            ? await this.installWithPassword(p, (secret as { password: string }).password, pub, confDir)
             : p.method === 'keyfile'
-              ? await this.installWithKeyFile(p, secret as { privateKey: string; passphrase?: string }, pub)
+              ? await this.installWithKeyFile(
+                  p,
+                  secret as { privateKey: string; passphrase?: string },
+                  pub,
+                  confDir,
+                )
               : await this.installViaAlias(p.alias, pub);
         if (!r.ok) {
+          dropStaging();
           if (!key.existed && !this.keepKeyAfterFailure(p)) this.deps.keys.forget(p.targetId);
           return fail(r.error, r.detail);
         }
@@ -276,11 +305,13 @@ export class DeployConnector {
         { timeoutMs: (this.deps.commandMs ?? 25_000) + 5000, env: this.env },
       );
       if (test.code !== 0) {
+        dropStaging();
         const c = classifySsh(test);
         if (c.state === 'host_key_changed') return fail('host_key_changed');
         if (c.state === 'unreachable') return fail(test.timedOut ? 'timeout' : 'unreachable', c.detail);
         return fail('key_not_accepted');
       }
+      if (staging) this.deps.keys.promote(dir, staging);
       return {
         ok: true,
         publicKey: pub,
@@ -358,7 +389,7 @@ export class DeployConnector {
   }
 
   /** `ssh` asks for the password through SSH_ASKPASS (OpenSSH 8.4+, `SSH_ASKPASS_REQUIRE=force`); one attempt. */
-  private async installWithPassword(p: DeployConnectPayload, password: string, pub: string) {
+  private async installWithPassword(p: DeployConnectPayload, password: string, pub: string, confDir: string) {
     return this.withTemp(async (tmp) => {
       const askpass = join(tmp, 'askpass.sh');
       writeFileSync(askpass, '#!/bin/sh\nprintf \'%s\\n\' "$AOM_ASKPASS_SECRET"\n', { mode: 0o700 });
@@ -369,7 +400,7 @@ export class DeployConnector {
           '/dev/null',
           ...this.base(),
           '-o',
-          `UserKnownHostsFile=${join(this.deps.keys.folder({ targetId: p.targetId }), 'known_hosts')}`,
+          `UserKnownHostsFile=${join(confDir, 'known_hosts')}`,
           '-o',
           'GlobalKnownHostsFile=/dev/null',
           '-o',
@@ -410,6 +441,7 @@ export class DeployConnector {
     p: DeployConnectPayload,
     s: { privateKey: string; passphrase?: string },
     pub: string,
+    confDir: string,
   ) {
     return this.withTemp(async (tmp) => {
       const file = join(tmp, 'host-key');
@@ -423,7 +455,7 @@ export class DeployConnector {
           '/dev/null',
           ...this.base(),
           '-o',
-          `UserKnownHostsFile=${join(this.deps.keys.folder({ targetId: p.targetId }), 'known_hosts')}`,
+          `UserKnownHostsFile=${join(confDir, 'known_hosts')}`,
           '-o',
           'GlobalKnownHostsFile=/dev/null',
           '-o',

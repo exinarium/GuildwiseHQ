@@ -154,8 +154,12 @@ export function ConnectServer({
   // the connection test answers
   const finished = result.data && result.data.state !== 'pending' ? result.data : null;
   useEffect(() => {
-    if (step === 'working' && finished) setStep(finished.ok ? 'done' : 'how');
-  }, [step, finished]);
+    if (step === 'working' && finished) {
+      setStep(finished.ok ? 'done' : 'how');
+      // a server that did not connect was not kept on the list (the copy-paste flow keeps it): the next try makes it again
+      if (!finished.ok && !target && method !== 'panel') setCreated(null);
+    }
+  }, [step, finished, target, method]);
 
   const done = step === 'done' && created;
   const patched = useRef(false);

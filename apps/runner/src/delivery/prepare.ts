@@ -8,8 +8,9 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import {
+  COMPOSE_FILE_NAME,
   type DeployPreparePayload,
   type DeployPrepareResult,
   describePrepareAction,
@@ -93,6 +94,23 @@ step done "wrote $file"
 
 const CADDY_SITE = `${REMOTE_HEADER}
 domain=$1; port=$2; dry=$3
+# listening TCP sockets as address:port, from ss, else netstat, else /proc/net/tcp
+listeners() {
+  if command -v ss >/dev/null 2>&1; then ss -ltn 2>/dev/null | awk 'NR>1 {print $4}'
+  elif command -v netstat >/dev/null 2>&1; then netstat -ltn 2>/dev/null | awk 'NR>2 {print $4}'
+  elif [ -r /proc/net/tcp ]; then
+    cat /proc/net/tcp /proc/net/tcp6 2>/dev/null | while read -r sl local rem st rest; do
+      [ "$st" = 0A ] || continue
+      hp=\${local##*:}; ip=\${local%:*}
+      case "$ip" in 0100007F|00000000000000000000000001000000) a=127.0.0.1 ;; *) a=0.0.0.0 ;; esac
+      echo "$a:$((0x$hp))"
+    done
+  fi
+}
+# Caddy in a container reaches the host through the bridge address, never through 127.0.0.1: an app that listens on 127.0.0.1 only is out of reach
+loopback_only() {
+  listeners | grep -q "^127\\.0\\.0\\.1:$port$" && ! listeners | grep -Eq "^(0\\.0\\.0\\.0|\\*|\\[::\\]|::):$port$"
+}
 site_in() { [ -f "$1" ] && grep -Eq "^[[:space:]]*$domain[[:space:]]*(,|\\\\{|\\$)" "$1"; }
 caddy_cmd() { if command -v caddy >/dev/null 2>&1; then echo caddy; fi; }
 block() {
@@ -129,10 +147,12 @@ if [ -n "$mode" ]; then
     if [ -n "$(caddy_cmd)" ] && ! $SUDO caddy validate --config "$file" >/dev/null 2>&1; then $SUDO cp -p -- "$bak" "$file"; die failed "Caddy did not accept the new site; the Caddyfile was put back"; fi
     $SUDO systemctl reload caddy >/dev/null 2>&1 || die failed "Caddy could not reload"
   fi
-  step done "added $domain to $file (copy: $bak)"; exit 0
+  warn=
+  if [ "$upstream_ip" != 127.0.0.1 ] && loopback_only; then warn=" WARNING: the app listens on 127.0.0.1:$port only, which Caddy in a container cannot reach. Publish the port on all addresses (ports: "$port:...") or run Caddy on the host network."; fi
+  step done "added $domain to $file (copy: $bak).$warn"; exit 0
 fi
 # no Caddy: start our own, only when nothing else answers on 80 and 443
-if command -v ss >/dev/null 2>&1 && ss -ltn 2>/dev/null | awk '{print $4}' | grep -Eq ':(80|443)$'; then die port_in_use "something else already uses port 80 or 443"; fi
+if listeners | grep -Eq ':(80|443)$'; then die port_in_use "something else already uses port 80 or 443"; fi
 command -v docker >/dev/null 2>&1 || die failed "Docker is needed to start Caddy"
 if [ "$dry" = 1 ]; then step would "start Caddy in a container for $domain (folder \${AOM_CADDY_DIR:-/opt/caddy})"; exit 0; fi
 cdir="\${AOM_CADDY_DIR:-/opt/caddy}"
@@ -146,7 +166,7 @@ const START_SERVICES = `${REMOTE_HEADER}
 file=$1; project=$2; dry=$3; shift 3
 dc() { if docker compose version >/dev/null 2>&1; then docker compose "$@"; else docker-compose "$@"; fi; }
 command -v docker >/dev/null 2>&1 || die failed "Docker is not installed"
-if dc ls --all --format json 2>/dev/null | grep -q "\\"Name\\":\\"$project\\""; then step skipped "the project $project already exists and is not touched"; exit 0; fi
+if [ -n "$(docker ps -a -q --filter "label=com.docker.compose.project=$project" 2>/dev/null | head -n 1)" ]; then step skipped "the project $project already exists and is not touched"; exit 0; fi
 svcs=$(dc -p "$project" -f "$file" config --services 2>/dev/null) || die failed "the compose file $file is not valid"
 want=
 for s in $svcs; do skip=0; for e in "$@"; do [ "$s" = "$e" ] && skip=1; done; [ "$skip" = 1 ] || want="$want $s"; done
@@ -242,6 +262,8 @@ export class DeployPreparer {
       case 'write_compose': {
         const text = await this.repoFile(a);
         if ('error' in text) return this.fail(a, 'repo_file_missing', text.error);
+        if (!COMPOSE_FILE_NAME.test(basename(a.path)))
+          return this.fail(a, 'bad_request', 'only a compose file is written');
         script = WRITE_FILE;
         args = [a.path, d];
         input = text.content;
@@ -291,6 +313,17 @@ export class DeployPreparer {
     };
   }
 
+  /** A place on this computer a preparation may write to: below the home folder, never in a hidden folder (`~/.ssh`). */
+  private localPathProblem(home: string, path: string, compose: boolean): string | null {
+    const rel = relative(home, path);
+    if (rel === '' || rel.startsWith('..') || isAbsolute(rel))
+      return 'Guildwise only prepares folders inside your home folder on this computer';
+    if (rel.split('/').some((c) => c.startsWith('.')))
+      return 'Guildwise does not write into hidden folders of this computer';
+    if (compose && !COMPOSE_FILE_NAME.test(basename(path))) return 'only a compose file is written there';
+    return null;
+  }
+
   /** The file from the project's checkout on this computer: inside the repository, small, no secrets. */
   private async repoFile(
     a: Extract<PrepareAction, { kind: 'write_compose' }>,
@@ -334,6 +367,8 @@ export class DeployPreparer {
         return this.fail(a, 'bad_request', 'this is only done on a server');
       case 'create_dir': {
         const dir = abs(a.path);
+        const why = this.localPathProblem(home, dir, false);
+        if (why) return this.fail(a, 'bad_request', why);
         if (existsSync(dir))
           return { result: { kind: a.kind, outcome: 'skipped', detail: `${dir} already exists` } };
         if (dry) return { result: { kind: a.kind, outcome: 'would', detail: `create ${dir}` } };
@@ -346,6 +381,8 @@ export class DeployPreparer {
       }
       case 'write_compose': {
         const dest = abs(a.path);
+        const why = this.localPathProblem(home, dest, true);
+        if (why) return this.fail(a, 'bad_request', why);
         if (existsSync(dest))
           return {
             result: { kind: a.kind, outcome: 'skipped', detail: `${dest} already exists and is kept` },

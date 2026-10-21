@@ -7,6 +7,7 @@ import {
   type RepoCloneResult,
   RepoCloneResultSchema,
   RightsReportSchema,
+  SEAL_AAD_CAPABILITY,
   type SetSudoPasswordRequest,
   type SudoSetResult,
   SudoSetResultSchema,
@@ -534,7 +535,16 @@ export async function sudoKeyOf(ctx: Ctx, user: AuthSession['user'], workstation
       'no_sudo_key',
       'this runner has not announced a key yet: connect it (a runner of this version or newer) and try again',
     );
-  return { keyId: k.key_id as string, publicKey: k.public_key as string };
+  const caps = await one(
+    ctx.pool,
+    'SELECT capabilities FROM workstation_capabilities WHERE workstation_id=$1',
+    [workstationId],
+  );
+  return {
+    keyId: k.key_id as string,
+    publicKey: k.public_key as string,
+    ...((caps?.capabilities ?? []).includes(SEAL_AAD_CAPABILITY) ? { sealAad: true } : {}),
+  };
 }
 
 /**

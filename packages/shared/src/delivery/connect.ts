@@ -16,6 +16,21 @@ import { LocalPathSchema, RemotePathSchema, ServiceNameSchema, SshAliasSchema } 
 /** Announced by a runner that answers `deploy.hostkey`, `deploy.key`, `deploy.connect`, `deploy.revoke` and `deploy.prepare`. */
 export const DEPLOY_CONNECT_CAPABILITY = 'deploy-connect:1';
 
+/** Announced by a runner that opens `h2` sealed sign-ins (bound to the project and the server they were typed for). */
+export const SEAL_AAD_CAPABILITY = 'deploy-seal-aad:1';
+
+/**
+ * What a sealed password or key file is bound to (AES-GCM additional data): the project and the server address, port and user it
+ * was typed for. A sealed sign-in that is replayed against another address (by anything between the browser and the computer)
+ * does not open.
+ */
+export const connectSealAad = (p: {
+  projectId: string;
+  address: string;
+  port: number;
+  user: string;
+}): string => `aom-connect|${p.projectId}|${p.address.toLowerCase()}|${p.port}|${p.user}`;
+
 /** Every comment of a key Guildwise installs starts with this: the only keys Guildwise ever removes from a server. */
 export const DEPLOY_KEY_COMMENT_PREFIX = 'guildwise-deploy:';
 
@@ -173,6 +188,8 @@ export const DeployConnectPayloadSchema = z
     /** The fingerprint the person confirmed (every method except `alias`). */
     hostKeyFingerprint: FingerprintSchema.optional(),
     label: z.string().min(1).max(80),
+    /** The server made the target for this very request: a failed connect removes it again (the panel flow keeps it to try again). */
+    fresh: z.boolean().optional(),
     /** Sealed secret (`password` and `keyfile`); the payload is emptied once the runner answered. */
     keyId: z.string().min(1).max(100).optional(),
     ciphertext: z.string().min(1).max(40_000).optional(),
@@ -306,6 +323,19 @@ export function revokeErrorText(error: (typeof REVOKE_ERRORS)[number], detail?: 
 
 // ------------------------------------------------------------------------------------------------ prepare
 
+/** The only files `write_compose` handles: `docker-compose.yml`, `compose.yaml`, `docker-compose.prod.yml`... */
+export const COMPOSE_FILE_NAME = /^(?:docker-)?compose(?:[._-][A-Za-z0-9_-]+)*\.ya?ml$/;
+const baseName = (p: string) => p.slice(p.lastIndexOf('/') + 1);
+const dirName = (p: string) => p.slice(0, Math.max(p.lastIndexOf('/'), 0));
+
+const RepoComposePathSchema = z
+  .string()
+  .min(1)
+  .max(200)
+  .regex(/^[A-Za-z0-9._][A-Za-z0-9._/-]*$/, 'a path inside the project like deploy/docker-compose.yml')
+  .refine((p) => !p.split('/').includes('..'), 'a path cannot contain ..')
+  .refine((p) => COMPOSE_FILE_NAME.test(baseName(p)), 'a compose file like deploy/docker-compose.yml');
+
 const PrepareDir = z.object({
   kind: z.literal('create_dir'),
   path: z.union([RemotePathSchema, LocalPathSchema]),
@@ -319,15 +349,12 @@ export const PrepareActionSchema = z.discriminatedUnion('kind', [
   /** Write a compose file taken from the project's repository; never over an existing file. */
   z.object({
     kind: z.literal('write_compose'),
-    /** Where it goes (absolute on the server; absolute or `~/` on this computer). */
-    path: z.union([RemotePathSchema, LocalPathSchema]),
+    /** Where it goes (absolute on the server; absolute or `~/` on this computer). Always a compose file name. */
+    path: z
+      .union([RemotePathSchema, LocalPathSchema])
+      .refine((p) => COMPOSE_FILE_NAME.test(baseName(p)), 'a compose file like docker-compose.yml'),
     /** The file inside the project's repository on the computer, relative (no `..`). */
-    repoPath: z
-      .string()
-      .min(1)
-      .max(200)
-      .regex(/^[A-Za-z0-9._][A-Za-z0-9._/-]*$/, 'a path inside the project like deploy/docker-compose.yml')
-      .refine((p) => !p.split('/').includes('..'), 'a path cannot contain ..'),
+    repoPath: RepoComposePathSchema,
     repoName: z.string().min(1).max(120).optional(),
     /** The repository's normalized remote address: filled in by the server (the computer looks the folder up by it). */
     remote: z.string().min(1).max(500).optional(),
@@ -418,6 +445,46 @@ export interface PrepareInputs {
   /** A new copy on this computer: the compose project name and the app service (started by the first deploy). */
   project?: string | undefined;
   appService?: string | undefined;
+}
+
+/**
+ * Problems that make a list of actions unsafe whatever produced it: a compose file written anywhere but the app folder, a folder
+ * of this computer's own dot-folders (`~/.ssh`), a compose project that is not the app's.
+ */
+export function prepareActionProblems(
+  actions: readonly PrepareAction[],
+  hosting: 'ssh' | 'this_computer',
+  /** The app folder being set up (from the inputs, or the target's folder in the setup). */
+  appDir?: string,
+): string[] {
+  const out: string[] = [];
+  const dirs = [
+    ...(appDir ? [appDir] : []),
+    ...actions.filter((a) => a.kind === 'create_dir').map((a) => (a as { path: string }).path),
+  ];
+  for (const a of actions) {
+    if (a.kind === 'write_compose') {
+      const dir = dirName(a.path);
+      if (!COMPOSE_FILE_NAME.test(baseName(a.path))) out.push(`${a.path} is not a compose file name`);
+      if (
+        !dirs.includes(dir) &&
+        !actions.some((x) => x.kind === 'start_services' && dirName(x.composeFile) === dir)
+      )
+        out.push(`the compose file goes to ${dir}, which is not the app folder being set up`);
+    }
+    if (hosting === 'this_computer') {
+      const paths = [
+        ...(a.kind === 'create_dir' ? [a.path] : []),
+        ...(a.kind === 'write_compose' ? [a.path] : []),
+        ...(a.kind === 'start_services' ? [a.composeFile] : []),
+      ];
+      for (const p of paths) {
+        if (p.startsWith('~/') && p.slice(2).split('/')[0]?.startsWith('.'))
+          out.push(`${p} is in a hidden folder of this computer`);
+      }
+    }
+  }
+  return out;
 }
 
 export interface PreparePlan {
@@ -601,15 +668,40 @@ export const RevokeKeyRequestSchema = z.object({
 });
 export type RevokeKeyRequest = z.infer<typeof RevokeKeyRequestSchema>;
 
-export const PrepareRequestSchema = z.object({
-  workstationId: z.uuid(),
-  targetId: z.uuid().optional(),
+export const PrepareInputsSchema = z.object({
   hosting: z.enum(['ssh', 'this_computer']),
-  actions: z.array(PrepareActionSchema).min(1).max(12),
-  dryRun: z.boolean().default(false),
-  /** The person saw the list and pressed the button. */
-  confirmed: z.boolean(),
+  appDir: z.union([RemotePathSchema, LocalPathSchema]).optional(),
+  domain: DomainSchema.optional(),
+  upstreamPort: z.number().int().min(1).max(65535).optional(),
+  composeFromRepo: z
+    .object({
+      repoPath: RepoComposePathSchema,
+      repoName: z.string().max(120).optional(),
+    })
+    .optional(),
+  project: z
+    .string()
+    .regex(/^[a-z0-9][a-z0-9_-]{0,62}$/)
+    .optional(),
+  appService: ServiceNameSchema.optional(),
 });
+
+export const PrepareRequestSchema = z
+  .object({
+    workstationId: z.uuid(),
+    targetId: z.uuid().optional(),
+    hosting: z.enum(['ssh', 'this_computer']),
+    /**
+     * What the person chose. The server computes the actions from these and the latest look at the server (the list below is
+     * what an older page sends, and what the page showed): a server that knows `inputs` ignores `actions`.
+     */
+    inputs: PrepareInputsSchema.optional(),
+    actions: z.array(PrepareActionSchema).min(1).max(12).optional(),
+    dryRun: z.boolean().default(false),
+    /** The person saw the list and pressed the button. */
+    confirmed: z.boolean(),
+  })
+  .refine((r) => !!r.inputs || !!r.actions, 'name what to set up');
 export type PrepareRequest = z.infer<typeof PrepareRequestSchema>;
 
 /** The reachability chip of a target card. */
@@ -643,7 +735,7 @@ export const REACHABILITY_TEXT: Record<
  * text and RSA-OAEP (SHA-256) with the runner's public key wraps that key. Format `h1.<wrapped key>.<iv>.<ciphertext+tag>`, all
  * base64. Works in the browser and in Node (WebCrypto). The runner opens it with `RunnerKeys.decryptAny`.
  */
-export async function sealLarge(publicKeyB64: string, text: string): Promise<string> {
+export async function sealLarge(publicKeyB64: string, text: string, aad?: string): Promise<string> {
   const subtle = globalThis.crypto.subtle;
   const b64 = (u: Uint8Array) => {
     let bin = '';
@@ -655,9 +747,13 @@ export async function sealLarge(publicKeyB64: string, text: string): Promise<str
   const aes = await subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt']);
   const iv = globalThis.crypto.getRandomValues(new Uint8Array(12));
   const ct = new Uint8Array(
-    await subtle.encrypt({ name: 'AES-GCM', iv }, aes, new TextEncoder().encode(text)),
+    await subtle.encrypt(
+      aad ? { name: 'AES-GCM', iv, additionalData: new TextEncoder().encode(aad) } : { name: 'AES-GCM', iv },
+      aes,
+      new TextEncoder().encode(text),
+    ),
   );
   const raw = new Uint8Array(await subtle.exportKey('raw', aes));
   const wrapped = new Uint8Array(await subtle.encrypt({ name: 'RSA-OAEP' }, rsa, raw));
-  return `h1.${b64(wrapped)}.${b64(iv)}.${b64(ct)}`;
+  return `${aad ? 'h2' : 'h1'}.${b64(wrapped)}.${b64(iv)}.${b64(ct)}`;
 }

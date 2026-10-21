@@ -44,6 +44,7 @@ export async function queueReachabilityCheck(ctx: Ctx, targetId: string): Promis
 
 /** The scheduler's pass: server targets whose answer is older than a day (or missing), a few at a time. */
 export async function reachabilityTick(ctx: Ctx): Promise<number> {
+  await purgeExpiredConnects(ctx);
   const due = await rows(
     ctx.pool,
     `SELECT t.id FROM deploy_targets t
@@ -58,4 +59,18 @@ export async function reachabilityTick(ctx: Ctx): Promise<number> {
   let n = 0;
   for (const d of due) if (await queueReachabilityCheck(ctx, d.id).catch(() => false)) n++;
   return n;
+}
+
+/**
+ * A sealed sign-in (`deploy.connect`) that nobody picked up before it expired is useless and should not sit in the queue: its
+ * payload is emptied and the command ends as expired.
+ */
+export async function purgeExpiredConnects(ctx: Ctx): Promise<number> {
+  const r = await ctx.pool.query(
+    `UPDATE runner_commands SET payload='{}'::jsonb, status='failed', last_error='expired'
+      WHERE type='deploy.connect' AND payload <> '{}'::jsonb AND expires_at IS NOT NULL AND expires_at < $1
+        AND status IN ('pending','sent')`,
+    [ctx.clock.now()],
+  );
+  return r.rowCount ?? 0;
 }

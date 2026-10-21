@@ -44,12 +44,13 @@ import { cancelRun, listDeployRuns, releaseFromQueue, requestDeployRun } from '.
 import {
   getSetupState,
   previewSetup,
+  projectOwnerOrThrow,
   publishSetup,
   requestSetupDryRun,
   saveSetupDraft,
   useDeployProposal,
 } from '../delivery/setup.ts';
-import { forbidden } from '../errors.ts';
+import { forbidden, HttpError } from '../errors.ts';
 import { typed } from './util.ts';
 
 /**
@@ -251,11 +252,26 @@ export function deliveryRoutes(ctx: Ctx) {
       { schema: { params: TargetParams } },
       async (req, reply) => {
         const s = await requireUser(ctx, req);
+        await projectOwnerOrThrow(ctx, s.user, req.params.id);
         const t = await one(
           ctx.pool,
           'SELECT workstation_id FROM deploy_targets WHERE id=$1 AND project_id=$2',
           [req.params.targetId, req.params.id],
         );
+        // one check a minute per server: the button cannot be used to hammer a customer's server
+        const last = await one(
+          ctx.pool,
+          `SELECT max(at) AS at FROM deploy_target_connections WHERE target_id=$1`,
+          [req.params.targetId],
+        );
+        const pending = await one(
+          ctx.pool,
+          `SELECT 1 AS x FROM runner_commands WHERE type='deploy.probe' AND status IN ('pending','sent')
+              AND payload->>'targetId'=$1 AND created_at > $2`,
+          [req.params.targetId, new Date(ctx.clock.now().getTime() - 120_000)],
+        );
+        if (pending || (last?.at && ctx.clock.now().getTime() - new Date(last.at).getTime() < 60_000))
+          throw new HttpError(429, 'too_soon', 'a check was done a moment ago: wait a minute');
         const cheap = t?.workstation_id && (await connectBlockedReason(ctx.pool, t.workstation_id)) === null;
         const r = await requestProbe(ctx, s.user, req.params.id, {
           scope: cheap ? 'ssh_check' : 'ssh_target',

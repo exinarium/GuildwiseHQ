@@ -207,12 +207,15 @@ export class DeployKeys {
     dir: string,
     m: Omit<DeployKeyMeta, 'createdAt'> & { createdAt?: string },
     hostKeyLine?: string,
+    /** Where the config, known_hosts and metadata go (default `dir`; a reconnect stages them in a folder of their own). */
+    confDir: string = dir,
   ): string {
-    const cfg = join(dir, 'ssh_config');
+    mkdirSync(confDir, { recursive: true, mode: 0o700 });
+    const cfg = join(confDir, 'ssh_config');
     const key = join(dir, KEY_FILE);
     const lines: string[] = [`# Written by Guildwise for ${m.alias}. Used as: ssh -F <this file>`];
     if (m.mode === 'managed') {
-      if (hostKeyLine) writeFileSync(join(dir, 'known_hosts'), `${hostKeyLine}\n`, { mode: 0o600 });
+      if (hostKeyLine) writeFileSync(join(confDir, 'known_hosts'), `${hostKeyLine}\n`, { mode: 0o600 });
       lines.push(
         `Host ${m.alias}`,
         `  HostName ${m.address}`,
@@ -220,7 +223,7 @@ export class DeployKeys {
         `  Port ${m.port ?? 22}`,
         `  IdentityFile ${key}`,
         '  IdentitiesOnly yes',
-        `  UserKnownHostsFile ${join(dir, 'known_hosts')}`,
+        `  UserKnownHostsFile ${join(confDir, 'known_hosts')}`,
         '  GlobalKnownHostsFile /dev/null',
         '  StrictHostKeyChecking yes',
         '  BatchMode yes',
@@ -236,11 +239,30 @@ export class DeployKeys {
     }
     writeFileSync(cfg, `${lines.join('\n')}\n`, { mode: 0o600 });
     writeFileSync(
-      join(dir, 'meta.json'),
+      join(confDir, 'meta.json'),
       JSON.stringify({ ...m, createdAt: m.createdAt ?? this.now().toISOString() }, null, 2),
       { mode: 0o600 },
     );
     return cfg;
+  }
+
+  /**
+   * A reconnect verified its new settings: they replace the old ones (each file in one rename). The staging folder is removed.
+   * The new config names the staging folder's known_hosts, so it is rewritten for the final place.
+   */
+  promote(dir: string, confDir: string): string {
+    for (const f of ['known_hosts', 'meta.json']) {
+      if (existsSync(join(confDir, f))) renameSync(join(confDir, f), join(dir, f));
+    }
+    const cfgText = readFileSync(join(confDir, 'ssh_config'), 'utf8').replaceAll(
+      join(confDir, 'known_hosts'),
+      join(dir, 'known_hosts'),
+    );
+    const tmp = join(dir, 'ssh_config.new');
+    writeFileSync(tmp, cfgText, { mode: 0o600 });
+    renameSync(tmp, join(dir, 'ssh_config'));
+    rmSync(confDir, { recursive: true, force: true });
+    return join(dir, 'ssh_config');
   }
 
   /** Deletes this computer's key for a target (the server's copy of it is removed separately, by another computer). */

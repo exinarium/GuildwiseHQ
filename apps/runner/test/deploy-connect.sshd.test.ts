@@ -541,6 +541,66 @@ describe.skipIf(!can)('guided connect against a real sshd', () => {
     },
     120_000,
   );
+  ti(
+    'a reconnect that fails leaves the working config and the pinned host key exactly as they were; one that works replaces them',
+    async () => {
+      const r = rig();
+      const fp = sshd.hostFingerprint();
+      sshd.sh('rm -rf /home/deploy/.ssh');
+      const first = await r.c.connect({
+        ...base(),
+        method: 'password',
+        hostKeyFingerprint: fp,
+        keyId: r.runner.publicKey.keyId,
+        ciphertext: await r.seal({ password: DEPLOY_PASSWORD }),
+      } as never);
+      expect(first, JSON.stringify(first)).toMatchObject({ ok: true });
+      const dir = join(r.root, 'keys', 'deploy', T);
+      const before = {
+        cfg: readFileSync(join(dir, 'ssh_config'), 'utf8'),
+        kh: readFileSync(join(dir, 'known_hosts'), 'utf8'),
+        meta: readFileSync(join(dir, 'meta.json'), 'utf8'),
+      };
+      // a wrong password for another user: fails after the new settings were written to the staging folder
+      const bad = await r.c.connect({
+        ...base({ user: 'nobody-here' }),
+        method: 'password',
+        hostKeyFingerprint: fp,
+        keyId: r.runner.publicKey.keyId,
+        ciphertext: await r.seal({ password: 'nope' }),
+      } as never);
+      expect(bad).toMatchObject({ ok: false });
+      expect(readFileSync(join(dir, 'ssh_config'), 'utf8')).toBe(before.cfg);
+      expect(readFileSync(join(dir, 'known_hosts'), 'utf8')).toBe(before.kh);
+      expect(readFileSync(join(dir, 'meta.json'), 'utf8')).toBe(before.meta);
+      expect(existsSync(join(dir, 'staging'))).toBe(false);
+      // the old settings still sign in
+      expect(
+        spawnSync(
+          'ssh',
+          ['-F', join(dir, 'ssh_config'), '-o', 'BatchMode=yes', '--', 'aom-shop', 'echo', 'ok'],
+          {
+            encoding: 'utf8',
+            env: r.env,
+          },
+        ).stdout.trim(),
+      ).toBe('ok');
+      // a reconnect that works (the key is installed already) promotes the staged settings
+      const again = await r.c.connect({
+        ...base({ port: sshd.port }),
+        method: 'password',
+        hostKeyFingerprint: fp,
+        keyId: r.runner.publicKey.keyId,
+        ciphertext: await r.seal({ password: DEPLOY_PASSWORD }),
+      } as never);
+      expect(again).toMatchObject({ ok: true, installed: 'already' });
+      expect(existsSync(join(dir, 'staging'))).toBe(false);
+      expect(readFileSync(join(dir, 'ssh_config'), 'utf8')).toContain(
+        `UserKnownHostsFile ${join(dir, 'known_hosts')}`,
+      );
+    },
+    90_000,
+  );
 });
 
 function walk(dir: string): string[] {

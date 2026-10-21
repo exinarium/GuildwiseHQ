@@ -84,9 +84,12 @@ export class RunnerKeys {
   }
 
   /** Opens `sealLarge` output (`h1.<wrapped key>.<iv>.<ciphertext+tag>`: AES-256-GCM under an RSA-OAEP wrapped key). */
-  decryptHybrid(sealed: string): string {
+  decryptHybrid(sealed: string, aad?: string): string {
     const [v, wrapped, iv, ct] = sealed.split('.');
-    if (v !== 'h1' || !wrapped || !iv || !ct) throw new Error('not a sealed value');
+    if ((v !== 'h1' && v !== 'h2') || !wrapped || !iv || !ct) throw new Error('not a sealed value');
+    // `h2` is bound to what the person typed it for: without that binding it does not open (and `h1` has none)
+    if (v === 'h2' && !aad)
+      throw new Error('this sealed value is bound to a server and cannot be opened without it');
     const aes = privateDecrypt(
       {
         key: createPrivateKey(this.privatePem),
@@ -98,12 +101,15 @@ export class RunnerKeys {
     const buf = Buffer.from(ct, 'base64');
     const d = createDecipheriv('aes-256-gcm', aes, Buffer.from(iv, 'base64'));
     d.setAuthTag(buf.subarray(buf.length - 16));
+    if (v === 'h2') d.setAAD(Buffer.from(aad as string, 'utf8'));
     return Buffer.concat([d.update(buf.subarray(0, buf.length - 16)), d.final()]).toString('utf8');
   }
 
   /** `decrypt` for a short value, `decryptHybrid` for a sealed one of any length. */
-  decryptAny(value: string): string {
-    return value.startsWith('h1.') ? this.decryptHybrid(value) : this.decrypt(value);
+  decryptAny(value: string, aad?: string): string {
+    return value.startsWith('h1.') || value.startsWith('h2.')
+      ? this.decryptHybrid(value, aad)
+      : this.decrypt(value);
   }
 
   /**

@@ -91,7 +91,7 @@ const setupState = (workstations = [ws(WS, 'Office PC')]) => ({
   scan: null,
   scanProblem: null,
   proposal: null,
-  generator: 'setup-1.2',
+  generator: 'setup-1.3',
 });
 const op = (id: string, body: Record<string, unknown>) => {
   routes[`GET ${base}/delivery/ops/${id}`] = () => json({ id, at: '2026-10-20T10:00:00.000Z', ...body });
@@ -587,6 +587,13 @@ describe('preparing a server', () => {
     await waitFor(() => expect(calls.filter((c) => c.url.endsWith('/delivery/prepare'))).toHaveLength(2));
     const real = calls.filter((c) => c.url.endsWith('/delivery/prepare'))[1]?.body;
     expect(real).toMatchObject({ dryRun: false, confirmed: true });
+    // the server computes the list again from what was chosen (the actions are for an older server)
+    expect(real.inputs).toMatchObject({
+      hosting: 'ssh',
+      appDir: '/opt/shop-live',
+      domain: 'shop.example.com',
+      composeFromRepo: { repoPath: 'docker-compose.yml' },
+    });
     expect(real.actions.map((a: any) => a.kind)).toEqual([
       'install_docker',
       'create_dir',

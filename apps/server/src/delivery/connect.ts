@@ -22,7 +22,11 @@ import {
   type OpStartedDto,
   type OpStatusDto,
   type PrepareAction,
+  type PrepareInputs,
   type PrepareRequest,
+  type ProbeReport,
+  planPrepare,
+  prepareActionProblems,
   type ReachabilityDto,
   type RevokeKeyRequest,
   revokeErrorText,
@@ -162,6 +166,7 @@ export async function requestConnect(
   }
   let targetId = req.targetId;
   let alias: string;
+  const fresh = !req.targetId;
   if (!targetId) {
     const taken = (
       await rows(ctx.pool, `SELECT host FROM deploy_targets WHERE project_id=$1 AND removed_at IS NULL`, [
@@ -200,6 +205,7 @@ export async function requestConnect(
     port: req.port,
     ...(req.hostKeyFingerprint ? { hostKeyFingerprint: req.hostKeyFingerprint } : {}),
     label: ws.name,
+    ...(fresh ? { fresh: true } : {}),
     ...(req.keyId ? { keyId: req.keyId } : {}),
     ...(req.ciphertext ? { ciphertext: req.ciphertext } : {}),
   };
@@ -258,6 +264,49 @@ export async function requestRevoke(
   return { commandId: await enqueueOp(ctx, ws.id, 'deploy.revoke', payload), workstationId: ws.id };
 }
 
+/** The latest look at a server (or at this computer) by this computer, or null. */
+async function latestReport(
+  db: Queryable,
+  projectId: string,
+  workstationId: string,
+  hosting: 'ssh' | 'this_computer',
+  targetId?: string,
+): Promise<ProbeReport | null> {
+  const r =
+    hosting === 'ssh'
+      ? await one(
+          db,
+          `SELECT report FROM deploy_probes WHERE project_id=$1 AND target_id=$2 AND scope='ssh_target' AND report IS NOT NULL
+            ORDER BY at DESC LIMIT 1`,
+          [projectId, targetId],
+        )
+      : await one(
+          db,
+          `SELECT report FROM deploy_probes WHERE project_id=$1 AND workstation_id=$2 AND scope='local' AND report IS NOT NULL
+            ORDER BY at DESC LIMIT 1`,
+          [projectId, workstationId],
+        );
+  return (r?.report as ProbeReport | undefined) ?? null;
+}
+
+/** The app folder the guided setup uses on a target (the folder of its environment's compose file), if there is one. */
+async function setupFolderOf(
+  db: Queryable,
+  projectId: string,
+  targetId: string,
+): Promise<string | undefined> {
+  const t = await one(db, 'SELECT name FROM deploy_targets WHERE id=$1 AND project_id=$2', [
+    targetId,
+    projectId,
+  ]);
+  const rec = await one(db, 'SELECT setup FROM delivery_recipes WHERE project_id=$1', [projectId]);
+  const envs = ((
+    rec?.setup as { environments?: Array<{ target?: string; app?: { composeFile?: string } }> } | null
+  )?.environments ?? []) as Array<{ target?: string; app?: { composeFile?: string } }>;
+  const f = envs.find((e) => e.target === t?.name)?.app?.composeFile;
+  return f ? f.slice(0, f.lastIndexOf('/')) || '/' : undefined;
+}
+
 export async function requestPrepare(
   ctx: Ctx,
   user: AuthSession['user'],
@@ -279,7 +328,25 @@ export async function requestPrepare(
     `SELECT name, remote_url_normalized FROM project_repos WHERE project_id=$1 AND removed_at IS NULL ORDER BY name LIMIT 1`,
     [projectId],
   );
-  const actions: PrepareAction[] = req.actions.map((a) =>
+  // The server decides what is done: from what the person chose (`inputs`) and the latest look at the server it computes the
+  // list itself; a list sent by an older page is checked against the target's own folder.
+  let chosen: PrepareAction[];
+  let appDir: string | undefined;
+  if (req.inputs) {
+    const report = await latestReport(ctx.pool, projectId, ws.id, req.hosting, req.targetId);
+    const plan = planPrepare(report, req.inputs as PrepareInputs);
+    if (plan.blockers.length) throw unprocessable('prepare_blocked', plan.blockers[0] as string);
+    if (!plan.actions.length)
+      throw unprocessable('nothing_to_do', 'everything is already in place: there is nothing to set up');
+    chosen = plan.actions;
+    appDir = req.inputs.appDir;
+  } else {
+    chosen = req.actions ?? [];
+    appDir = req.targetId ? await setupFolderOf(ctx.pool, projectId, req.targetId) : undefined;
+  }
+  const problems = prepareActionProblems(chosen, req.hosting, appDir);
+  if (problems.length) throw unprocessable('unsafe_prepare', problems[0] as string);
+  const actions: PrepareAction[] = chosen.map((a) =>
     a.kind === 'write_compose' && repo
       ? { ...a, repoName: a.repoName ?? repo.name, remote: repo.remote_url_normalized }
       : a,
@@ -476,6 +543,21 @@ export async function applyConnectResult(
         scope,
       },
     );
+  }
+  // A target the server made for this connect and that did not connect is removed again: no half-made server stays on the list.
+  // (The copy-paste flow keeps it: the person pastes the key and tests again.)
+  if (kind === 'connect' && !success && payload.fresh === true && payload.method !== 'panel' && targetId) {
+    const t = await one(ctx.pool, 'SELECT 1 AS x FROM deploy_targets WHERE id=$1 AND removed_at IS NULL', [
+      targetId,
+    ]);
+    const k = await one(ctx.pool, 'SELECT 1 AS x FROM deploy_target_keys WHERE target_id=$1', [targetId]);
+    if (t && !k)
+      events.push({
+        streamId: streamId.project(projectId),
+        event: { type: 'DeployTargetRemoved', payload: { targetId } },
+        actor,
+        scope,
+      });
   }
   if (kind === 'revoke' && res?.ok && targetId) {
     const key = await one(
