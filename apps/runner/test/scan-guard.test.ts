@@ -1,8 +1,9 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { buildShiftSettings } from '../src/adapters/claude-policy.ts';
+import { scanCloneEntries, scanMasksFor } from '../src/adapters/read-only-dirs.ts';
 import { classifyCommand, deleteRootsFor, type GuardConfig } from '../src/devops/guard.ts';
 import { POLICY_PATHS, policyCtx } from './policy-fixtures.ts';
 
@@ -369,6 +370,16 @@ describe('the scan runs inside the OS sandbox (v2 review)', () => {
   writeFileSync(join(dir, 'api', '.env.production'), 'SECRET=2');
   writeFileSync(join(dir, 'src', 'a.ts'), 'x');
   writeFileSync(join(dir, 'README.md'), 'x');
+  mkdirSync(join(dir, 'build'));
+  mkdirSync(join(dir, 'dist', 'deep'), { recursive: true });
+  mkdirSync(join(dir, 'conf'));
+  mkdirSync(join(dir, '.git'));
+  writeFileSync(join(dir, 'build', '.env'), 'SECRET=3');
+  writeFileSync(join(dir, 'dist', 'deep', 'prod.pem'), 'k');
+  writeFileSync(join(dir, 'conf', 'secret.env'), 'SECRET=4');
+  writeFileSync(join(dir, '.git', 'HEAD'), 'ref: refs/heads/main');
+  writeFileSync(join(dir, '.git', 'config'), '[remote "origin"] url = https://u:tok@h/r.git');
+  symlinkSync('/etc/hostname', join(dir, 'link-to-outside'));
   const build = (scan: boolean) =>
     buildShiftSettings(
       {
@@ -412,5 +423,48 @@ describe('the scan runs inside the OS sandbox (v2 review)', () => {
     expect(allow.some((p) => p.endsWith('.env') || p.endsWith('.env.production'))).toBe(false);
     expect(allow).not.toContain(dir);
   });
+  it('is an allowlist: the whole real home and /run/WSL are unreadable, only the scratch folder and the clones are opened', () => {
+    const sb = build(true).sandbox;
+    const deny = sb?.filesystem.denyRead ?? [];
+    expect(deny).toEqual(expect.arrayContaining(['/home/me', '/run/WSL', '/data']));
+    const allow = sb?.filesystem.allowRead ?? [];
+    expect(allow).toContain(POLICY_PATHS.scratch);
+    expect(allow).not.toContain('/home/me');
+    for (const p of allow) expect(p.startsWith('/home/me'), p).toBe(false);
+  });
+  it('masks secret files by path, including inside build/ and dist/, and never opens them as an entry', () => {
+    const sb = build(true).sandbox;
+    const deny = sb?.filesystem.denyRead ?? [];
+    expect(deny).toContain(join(dir, '.env'));
+    expect(deny).toContain(join(dir, 'api', '.env.production'));
+    expect(deny).toContain(join(dir, 'build', '.env'));
+    expect(deny).toContain(join(dir, 'dist', 'deep', 'prod.pem'));
+    expect(deny).toContain(join(dir, 'conf', 'secret.env'));
+    expect(sb?.filesystem.allowRead).not.toContain(join(dir, '.env'));
+    expect(sb?.filesystem.allowRead).not.toContain(join(dir, 'build', '.env'));
+  });
+  it('opens .git without its config, and no symlink as an entry (a bind would expose the target)', () => {
+    const allow = build(true).sandbox?.filesystem.allowRead ?? [];
+    expect(allow).toContain(join(dir, '.git', 'HEAD'));
+    expect(allow).not.toContain(join(dir, '.git', 'config'));
+    expect(allow).not.toContain(join(dir, '.git'));
+    expect(allow).not.toContain(join(dir, 'link-to-outside'));
+  });
+  it('does not open a clone that is too large to check, and hides a dependency folder that is', () => {
+    const big = mkdtempSync(join(tmpdir(), 'aom-scan-big-'));
+    mkdirSync(join(big, 'node_modules'));
+    for (let i = 0; i < 61; i++) {
+      mkdirSync(join(big, 'node_modules', `p${i}`));
+      for (let j = 0; j < 1000; j++) writeFileSync(join(big, 'node_modules', `p${i}`, `f${j}`), '');
+    }
+    writeFileSync(join(big, 'a.txt'), 'x');
+    try {
+      const m = scanMasksFor(big);
+      expect(m?.dirs).toEqual([join(big, 'node_modules')]);
+      expect(scanCloneEntries(big)).toContain(join(big, 'a.txt'));
+    } finally {
+      rmSync(big, { recursive: true, force: true });
+    }
+  }, 60_000);
   afterAll(() => rmSync(dir, { recursive: true, force: true }));
 });

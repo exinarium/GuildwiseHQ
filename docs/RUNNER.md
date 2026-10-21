@@ -1839,6 +1839,17 @@ and the DevOps engineer split the work:
   evidence and JSON pointers, `questions`, `secretsNeeded`, `notes`); the server validates it (schema, pointers, run plan,
   repository ids) and answers with the error so the engineer can fix and resubmit in the same shift. The proposal is data:
   nothing it names runs or is saved until the user confirms it in the app.
+  **The scan's shell is an allowlist** (final review; `scanSandboxBlock`): the whole real home, `/run/WSL`, `/run/user/<uid>`,
+  `/mnt/*/Users` and the Docker sockets are unreadable (so `~/.config` including `aom-uat`, browser profiles, shell history and
+  every other project are gone without being listed), and only the scratch folder, the `aom` shim, the toolchain and each clone
+  are opened again, read-only. Secret files (`.env*`, `*.env`, `*.pem`, `*.key`, `id_*`, `.npmrc`, `.pypirc`, `.netrc`, ...) are
+  masked by path wherever the walk finds them, `build/` and `dist/` included (a clone over 400,000 entries is not opened at all;
+  a dependency folder over 60,000 entries is hidden). `.git` is opened without its `config` (remote URLs may carry tokens, so
+  `git remote -v` prints nothing during a scan). Links in a clone's top level are not opened (bubblewrap would bind their target).
+  A scan passes no `--add-dir` (Claude Code would open the whole clone to the sandbox and undo the masks), and gets no
+  `SSH_AUTH_SOCK`, `DOCKER_HOST` or `XDG_RUNTIME_DIR` and the agent's private `HOME`. Claude Code itself runs outside this
+  sandbox (only its Bash commands run in it), so it needs no part of the home; `scan-sandbox-real.test.ts` runs the real
+  `claude` binary and bubblewrap against a fake API to prove a normal file reads, bash runs and the secrets do not.
 - **Service sandbox (D10, phase 2).** Steps and services run under the runner's own bubblewrap profile
   (`apps/runner/src/runs/sandbox.ts`), not the DevOps session's: `--ro-bind / /` (read-only), `--unshare-pid`, `--cap-drop ALL`,
   the **host network** (no `--unshare-net`: a dev server must listen where a browser can reach it), and the same unreadable

@@ -2,7 +2,7 @@ import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { delimiter, dirname, join, relative, resolve, sep } from 'node:path';
 import type { AgentPermissions } from '@aom/shared';
-import { sandboxReadEntries, secretReadDenies } from './read-only-dirs.ts';
+import { sandboxReadEntries, scanCloneEntries, scanMasksFor, secretReadDenies } from './read-only-dirs.ts';
 
 /**
  * What an agent session may touch, expressed in Claude Code's own settings (verified against
@@ -470,18 +470,6 @@ export function windowsUserDirs(mnt = '/mnt'): string[] {
   }
 }
 
-/** More credential places than `HOME_SECRETS` that a scan never needs. */
-const SCAN_HOME_EXTRA = [
-  '.config/helm',
-  '.config/doctl',
-  '.config/rclone',
-  '.terraform.d',
-  '.vault-token',
-  '.gem/credentials',
-  '.pgpass',
-  '.my.cnf',
-];
-
 /**
  * A "Scan with DevOps" shift runs inside the OS sandbox (bubblewrap), unlike the rest of the DevOps engineer's work
  * (docs/design/deploy-run-ux-design.md section 14, v2 review). The checkouts of the project are read-only and their settings files
@@ -512,16 +500,41 @@ export function scanSandboxBlock(
   ) as NonNullable<ClaudeSettings['sandbox']>;
   base.failIfUnavailable = true;
   base.filesystem.allowWrite = [paths.home, paths.scratch, paths.tmp];
+  // An allowlist: the whole real home is unreadable (credentials, `~/.config`, browser profiles, shell history, other
+  // projects, the Windows user folders), and only what the scan needs is opened again, read-only: the scratch folder, the
+  // runner's `aom` shim, the toolchain, and each clone. A secret file inside a clone is masked by path (bubblewrap
+  // binds /dev/null over it), wherever it is, including `build/` and `dist/`.
+  const clones = [...new Set([...(ctx.readDirs ?? []), ...ctx.addDirs])].map((d) => resolve(d));
+  const masks = clones.map((d) => ({ dir: d, masks: scanMasksFor(d) }));
+  // an allowed path beats a mask on the very same path, so a masked top-level entry is not offered
+  const masked = new Set(masks.flatMap((m) => [...(m.masks?.files ?? []), ...(m.masks?.dirs ?? [])]));
   base.filesystem.denyRead = [
     ...new Set([
-      ...base.filesystem.denyRead,
-      ...SCAN_HOME_EXTRA.map((p) => join(ctx.realHome, p)),
+      ctx.realHome,
+      ctx.runnerRoot,
+      ...(ctx.otherAgentTmps ?? []),
+      ...(ctx.accountDirs ?? []),
+      ...HOME_SECRETS.map((p) => join(ctx.realHome, p)),
       '/var/run/docker.sock',
       '/run/docker.sock',
       '/run/containerd',
       '/run/podman',
+      '/run/WSL', // WSL2 interop: launches Windows binaries
       ...windowsUserDirs(),
       ...(ctx.uid !== undefined || process.getuid ? [`/run/user/${ctx.uid ?? process.getuid?.()}`] : []),
+      ...masks.flatMap((m) => [...(m.masks?.files ?? []), ...(m.masks?.dirs ?? [])]),
+    ]),
+  ];
+  base.filesystem.allowRead = [
+    ...new Set([
+      paths.scratch,
+      ...ctx.aomReadPaths,
+      ...(ctx.toolchainReadPaths ?? []),
+      // a clone too large to check is not opened at all
+      ...masks
+        .filter((m) => m.masks !== null)
+        .flatMap((m) => scanCloneEntries(m.dir))
+        .filter((e) => !masked.has(e)),
     ]),
   ];
   base.network = {

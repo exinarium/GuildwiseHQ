@@ -93,13 +93,16 @@ export const MAX_ARGV_PROMPT_BYTES = 64 * 1024;
 export function sessionEnv(
   input: Pick<ShiftStartInput, 'env' | 'sandbox'> & {
     agent?: Pick<ShiftStartInput['agent'], 'isDevops'>;
+    devopsGuard?: Pick<NonNullable<ShiftStartInput['devopsGuard']>, 'readOnlyScan'>;
     kind?: ShiftStartInput['kind'];
     promptCacheTtl?: ShiftStartInput['promptCacheTtl'];
   },
   cfg: ClaudeConfig,
   parent: NodeJS.ProcessEnv = process.env,
 ): Record<string, string> {
-  const devops = input.agent?.isDevops === true;
+  // A scan is a DevOps shift but works inside the OS sandbox with the agent's private HOME: no ssh agent, Docker
+  // socket or user runtime dir is handed to it (SSH_AUTH_SOCK would let the shell sign in to a server).
+  const devops = input.agent?.isDevops === true && input.devopsGuard?.readOnlyScan !== true;
   const provider: Record<string, string> = {};
   if (cfg.authMode === 'oauth' && cfg.oauthToken) provider.CLAUDE_CODE_OAUTH_TOKEN = cfg.oauthToken;
   else if (cfg.authMode === 'api_key' && cfg.apiKey) provider.ANTHROPIC_API_KEY = cfg.apiKey;
@@ -174,7 +177,11 @@ export function buildClaudeCommand(input: ShiftStartInput, cfg: ClaudeConfig): C
     // to every first call and no agent uses them (verified with claude 2.1.302: the init message lists 0 skills).
     '--disable-slash-commands',
   );
-  for (const d of [...input.addDirs, ...(input.readDirs ?? [])]) args.push('--add-dir', d);
+  // A scan's clones are NOT `--add-dir`s: Claude Code opens every added directory whole to the sandbox, which would
+  // undo the per-file masks (`.git/config`, `.env`) of the scan sandbox. The Read tool reads them anyway (no
+  // working-directory block in the DevOps settings; the secret rules deny the settings files).
+  if (input.devopsGuard?.readOnlyScan !== true)
+    for (const d of [...input.addDirs, ...(input.readDirs ?? [])]) args.push('--add-dir', d);
   if (input.resumeSessionId) args.push('--resume', input.resumeSessionId);
   return {
     bin: cfg.bin,
@@ -184,6 +191,7 @@ export function buildClaudeCommand(input: ShiftStartInput, cfg: ClaudeConfig): C
         env: input.env,
         sandbox: input.sandbox,
         agent: { isDevops: input.agent.isDevops },
+        ...(input.devopsGuard?.readOnlyScan ? { devopsGuard: { readOnlyScan: true } } : {}),
         ...(input.kind ? { kind: input.kind } : {}),
         ...(input.promptCacheTtl ? { promptCacheTtl: input.promptCacheTtl } : {}),
       },
