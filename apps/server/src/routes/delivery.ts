@@ -1,12 +1,17 @@
 import {
   ApproveRecipeRequestSchema,
+  ConnectRequestSchema,
   DeployRequestSchema,
+  HostKeyScanRequestSchema,
   IdParamsSchema,
+  KeyCreateRequestSchema,
+  PrepareRequestSchema,
   PreviewSetupRequestSchema,
   ProbeRequestSchema,
   PublishSetupRequestSchema,
   RejectRecipeRequestSchema,
   ReleaseRequestSchema,
+  RevokeKeyRequestSchema,
   SaveSetupDraftRequestSchema,
   SetDeliveryModeRequestSchema,
   SetDeploySecretRequestSchema,
@@ -21,7 +26,17 @@ import { requireOrg, requireUser } from '../auth/guards.ts';
 import { orgRoleOf } from '../auth/org-context.ts';
 import { loadVisibleProject } from '../authz/scope.ts';
 import type { Ctx } from '../context.ts';
+import { one } from '../db/sql.ts';
 import { removeGatePreset, setDeploySecret, setGateBinding, setGatePreset } from '../delivery/admin.ts';
+import {
+  connectBlockedReason,
+  getOp,
+  requestConnect,
+  requestHostKeyScan,
+  requestKey,
+  requestPrepare,
+  requestRevoke,
+} from '../delivery/connect.ts';
 import { listProbeDtos, requestProbe } from '../delivery/probes.ts';
 import { deliverySettings, listBindings, listPresets, releaseQueue, toRunDto } from '../delivery/queries.ts';
 import { approveRecipe, rejectRecipe, requestRecipeInspect, setDeliveryMode } from '../delivery/recipes.ts';
@@ -156,6 +171,96 @@ export function deliveryRoutes(ctx: Ctx) {
       async (req, reply) => {
         const s = await requireUser(ctx, req);
         const r = await requestProbe(ctx, s.user, req.params.id, req.body);
+        reply.code(202);
+        return r;
+      },
+    );
+
+    // ------------------------------------------------------------------------------ guided connect (design v2)
+    const OpParams = z.object({ id: z.uuid(), commandId: z.uuid() });
+    const TargetParams = z.object({ id: z.uuid(), targetId: z.uuid() });
+
+    /** The server's fingerprint, as seen from the chosen computer (nothing is trusted or written). */
+    app.post(
+      '/api/projects/:id/delivery/hostkey',
+      { schema: { params: IdParamsSchema, body: HostKeyScanRequestSchema } },
+      async (req, reply) => {
+        const s = await requireUser(ctx, req);
+        const r = await requestHostKeyScan(ctx, s.user, req.params.id, req.body);
+        reply.code(202);
+        return r;
+      },
+    );
+
+    /** This computer's dedicated key for a server (the panel's copy-paste text); the private key stays on the computer. */
+    app.post(
+      '/api/projects/:id/delivery/key',
+      { schema: { params: IdParamsSchema, body: KeyCreateRequestSchema } },
+      async (req, reply) => {
+        const s = await requireUser(ctx, req);
+        const r = await requestKey(ctx, s.user, req.params.id, req.body);
+        reply.code(202);
+        return r;
+      },
+    );
+
+    /** Connect: a password or key file (sealed in the browser), a pasted key, or an existing sign-in; then the test. */
+    app.post(
+      '/api/projects/:id/delivery/connect',
+      { schema: { params: IdParamsSchema, body: ConnectRequestSchema } },
+      async (req, reply) => {
+        const s = await requireUser(ctx, req);
+        const r = await requestConnect(ctx, s.user, req.params.id, req.body);
+        reply.code(202);
+        return r;
+      },
+    );
+
+    /** Removes one key that Guildwise added (by its fingerprint), signing in from the chosen computer. */
+    app.post(
+      '/api/projects/:id/delivery/targets/:targetId/revoke-key',
+      { schema: { params: TargetParams, body: RevokeKeyRequestSchema } },
+      async (req, reply) => {
+        const s = await requireUser(ctx, req);
+        const r = await requestRevoke(ctx, s.user, req.params.id, req.params.targetId, req.body);
+        reply.code(202);
+        return r;
+      },
+    );
+
+    /** Prepare a server (or a folder on a computer): the confirmed list of actions. */
+    app.post(
+      '/api/projects/:id/delivery/prepare',
+      { schema: { params: IdParamsSchema, body: PrepareRequestSchema } },
+      async (req, reply) => {
+        const s = await requireUser(ctx, req);
+        const r = await requestPrepare(ctx, s.user, req.params.id, req.body);
+        reply.code(202);
+        return r;
+      },
+    );
+
+    app.get('/api/projects/:id/delivery/ops/:commandId', { schema: { params: OpParams } }, async (req) => {
+      const s = await requireUser(ctx, req);
+      return getOp(ctx, s.user, req.params.id, req.params.commandId);
+    });
+
+    /** "Check connection": can the computer that deploys this server sign in to it now? */
+    app.post(
+      '/api/projects/:id/delivery/targets/:targetId/check',
+      { schema: { params: TargetParams } },
+      async (req, reply) => {
+        const s = await requireUser(ctx, req);
+        const t = await one(
+          ctx.pool,
+          'SELECT workstation_id FROM deploy_targets WHERE id=$1 AND project_id=$2',
+          [req.params.targetId, req.params.id],
+        );
+        const cheap = t?.workstation_id && (await connectBlockedReason(ctx.pool, t.workstation_id)) === null;
+        const r = await requestProbe(ctx, s.user, req.params.id, {
+          scope: cheap ? 'ssh_check' : 'ssh_target',
+          targetId: req.params.targetId,
+        });
         reply.code(202);
         return r;
       },

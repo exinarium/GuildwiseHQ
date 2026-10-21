@@ -17,6 +17,7 @@ import { iso, one, type Queryable, rows } from '../db/sql.ts';
 import { conflict, forbidden, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
+import { connectBlockedReason } from './connect.ts';
 
 /**
  * Deploy probes (docs/design/deploy-run-ux-design.md section 6): the server asks a workstation to look at Docker or a server
@@ -77,12 +78,17 @@ export async function requestProbe(
   const targetsOwn = !!target && target.workstation_id === ws.id;
   const mine = ws.user_id === user.id;
   if (!mine && !targetsOwn) throw forbidden('you can only check your own computers');
-  if (!mine && req.scope !== 'ssh_target')
+  if (!mine && req.scope !== 'ssh_target' && req.scope !== 'ssh_check')
     throw forbidden('only the owner of a computer can look at its Docker or list its servers');
+  // `ssh_check` is a newer runner's cheap look: an older runner would refuse the word, so it needs the capability
+  if (req.scope === 'ssh_check') {
+    const cb = await connectBlockedReason(ctx.pool, ws.id);
+    if (cb) throw conflict(cb.includes('update') ? 'runner_outdated' : 'workstation_offline', cb);
+  }
   const blocked = await setupBlockedReason(ctx.pool, ws.id);
   if (blocked)
     throw conflict(blocked.includes('update') ? 'runner_outdated' : 'workstation_offline', blocked);
-  const wantsHost = req.scope === 'ssh_target';
+  const wantsHost = req.scope === 'ssh_target' || req.scope === 'ssh_check';
   // a member who does not own the computer gets the target's own host and address, never a name or a path of their choosing
   const host = wantsHost
     ? mine
@@ -143,32 +149,36 @@ export async function applyProbeResult(
   const res = parsed?.success
     ? parsed.data
     : ({ ok: false, error: 'bad_request', detail: error ?? 'the computer could not run the check' } as const);
-  const scope = payload.scope as 'local' | 'ssh_hosts' | 'ssh_target';
+  const scope = payload.scope as 'local' | 'ssh_hosts' | 'ssh_target' | 'ssh_check';
   const host = typeof payload.host === 'string' ? payload.host : null;
   const targetId = typeof payload.targetId === 'string' ? payload.targetId : null;
   const at = (res.ok ? res.report.at : ctx.clock.now().toISOString()) as string;
-  const events: AppendInput[] = [
-    {
-      streamId: streamId.project(projectId),
-      event: {
-        type: 'DeployTargetProbed',
-        payload: {
-          probeId: randomUUID(),
-          projectId,
-          targetId,
-          workstationId,
-          scope,
-          host,
-          report: res.ok ? res.report : null,
-          error: res.ok ? null : res.error,
-          detail: res.ok ? null : (res.detail ?? null),
-          at,
-        },
-      },
-      actor: runnerActor(workstationId),
-      scope: projectScope(project.org_id, projectId),
-    },
-  ];
+  // a reachability check is not a look at the server: only its connection state is a fact worth keeping
+  const events: AppendInput[] =
+    scope === 'ssh_check'
+      ? []
+      : [
+          {
+            streamId: streamId.project(projectId),
+            event: {
+              type: 'DeployTargetProbed',
+              payload: {
+                probeId: randomUUID(),
+                projectId,
+                targetId,
+                workstationId,
+                scope,
+                host,
+                report: res.ok ? res.report : null,
+                error: res.ok ? null : res.error,
+                detail: res.ok ? null : (res.detail ?? null),
+                at,
+              },
+            },
+            actor: runnerActor(workstationId),
+            scope: projectScope(project.org_id, projectId),
+          },
+        ];
   // Reachability: a probe of the ssh hosts says it for every target of this workstation, a probe of one server for that target.
   const checks: Array<{ targetId: string; host: string; state: ConnectionState; detail: string | null }> = [];
   if (scope === 'ssh_hosts' && res.ok) {
@@ -182,7 +192,7 @@ export async function applyProbeResult(
       if (h && h.state !== 'unchecked')
         checks.push({ targetId: t.id, host: h.alias, state: h.state, detail: h.detail ?? null });
     }
-  } else if (scope === 'ssh_target' && targetId && host) {
+  } else if ((scope === 'ssh_target' || scope === 'ssh_check') && targetId && host) {
     if (res.ok) checks.push({ targetId, host, state: 'reachable', detail: null });
     else if (ERROR_STATE[res.error])
       checks.push({
@@ -192,6 +202,15 @@ export async function applyProbeResult(
         detail: probeErrorText(res.error, host).slice(0, 290),
       });
   }
+  const keyed = new Set(
+    (
+      await rows(
+        ctx.pool,
+        `SELECT target_id FROM deploy_target_keys WHERE workstation_id=$1 AND state='active'`,
+        [workstationId],
+      )
+    ).map((r) => r.target_id as string),
+  );
   for (const c of checks)
     events.push({
       streamId: streamId.project(projectId),
@@ -202,7 +221,7 @@ export async function applyProbeResult(
           projectId,
           workstationId,
           state: c.state,
-          method: 'existing_alias',
+          method: keyed.has(c.targetId) ? 'deploy_key' : 'existing_alias',
           host: c.host,
           detail: c.detail,
           at,

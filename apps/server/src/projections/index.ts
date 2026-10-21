@@ -190,6 +190,8 @@ export const PROJECTION_TABLES = [
   'delivery_setup_drafts',
   'deploy_probes',
   'deploy_target_connections',
+  'deploy_target_keys',
+  'deploy_ops',
   'repo_clones',
   'project_environments',
   'environment_changes',

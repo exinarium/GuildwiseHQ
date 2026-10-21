@@ -334,6 +334,7 @@ describe('hand-edited scripts and the dry run before approval', () => {
     expect(st.current.lint.find((l: any) => l.code === 'generator_outdated')).toMatchObject({
       level: 'warn',
     });
+    expect(st.improvedAvailable).toBe(true);
   });
 
   it('a guided setup is approved only after a successful dry run of exactly that version', async () => {

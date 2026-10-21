@@ -95,6 +95,7 @@ import type { Ctx } from '../context.ts';
 import { exec, one, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import { applyDeploySecretResult } from '../delivery/admin.ts';
+import { applyConnectResult } from '../delivery/connect.ts';
 import { applyProbeResult } from '../delivery/probes.ts';
 import { applyInspectResult, onProjectVaultSynced } from '../delivery/recipes.ts';
 import { deployRpc } from '../delivery/rpc.ts';
@@ -529,6 +530,24 @@ export class RunnerHandlers {
           // Terminal: a probe is read-only and cheap, the wizard asks again with "Check again".
           await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
           await applyProbeResult(this.ctx, conn.workstationId, cmd.payload, msg.ok, msg.result, msg.error);
+        } else if (
+          cmd?.type === 'deploy.hostkey' ||
+          cmd?.type === 'deploy.key' ||
+          cmd?.type === 'deploy.connect' ||
+          cmd?.type === 'deploy.revoke' ||
+          cmd?.type === 'deploy.prepare'
+        ) {
+          // Terminal: an answer (a refusal, a wrong password) is shown to the person, never retried blindly. The sealed
+          // sign-in of deploy.connect is forgotten here whatever the answer was.
+          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+          await applyConnectResult(
+            this.ctx,
+            conn.workstationId,
+            { id: msg.commandId, type: cmd.type, payload: cmd.payload },
+            msg.ok,
+            msg.result,
+            msg.error,
+          );
         } else if (cmd?.type === 'deploy.exec') {
           // Terminal whatever the answer: a refusal or a failed deploy is an ANSWER, never a blind retry of a deploy.
           await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
@@ -1172,7 +1191,8 @@ export class RunnerHandlers {
         msg.method === 'deploy.run' ||
         msg.method === 'deploy.trial' ||
         msg.method === 'deploy.status' ||
-        msg.method === 'recipe.save'
+        msg.method === 'recipe.save' ||
+        msg.method === 'deploy.probe.record'
       )
         return reply(...(await deployRpc(ctx, shift, msg.method, msg.params)));
       // "Scan with DevOps": the DevOps engineer submits its proposal.

@@ -29,6 +29,7 @@ import { exec, iso, one, type Queryable, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, notFound, unprocessable } from '../errors.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
+import { connectBlockedReason, listKeyDtos } from './connect.ts';
 import { listProbeDtos, setupBlockedReason } from './probes.ts';
 import {
   guidedEnvsWithoutDryRun,
@@ -59,7 +60,7 @@ const asLint = (l: LintItem[]) =>
     ...(x.path ? { path: x.path } : {}),
   }));
 
-async function projectOwnerOrThrow(ctx: Ctx, user: AuthSession['user'], projectId: string) {
+export async function projectOwnerOrThrow(ctx: Ctx, user: AuthSession['user'], projectId: string) {
   const p = await loadVisibleProject(ctx.pool, user.id, projectId);
   if (p.my_role !== 'owner') throw forbidden('only the project owner can set up deploys');
   if (p.status !== 'active') throw conflict('project_archived', 'this project is archived');
@@ -92,6 +93,7 @@ export async function getSetupState(
   const conns = await rows(ctx.pool, 'SELECT * FROM deploy_target_connections WHERE project_id=$1', [
     projectId,
   ]);
+  const keys = await listKeyDtos(ctx.pool, projectId);
   const targetDtos: SetupTargetDto[] = targets.map((t) => {
     // the deploying workstation's own answer; for a target with none, the newest answer
     const c = conns
@@ -107,7 +109,10 @@ export async function getSetupState(
       workstationOnline: t.workstation_id ? !!t.workstation_connected : null,
       host: t.host ?? null,
       appUrl: t.app_url ?? null,
-      connection: c ? { state: c.state, at: iso(c.at) as string, detail: c.detail ?? null } : null,
+      connection: c
+        ? { state: c.state, at: iso(c.at) as string, detail: c.detail ?? null, method: c.method }
+        : null,
+      keys: keys.filter((k) => k.targetId === t.id),
     };
   });
   const stations = await rows(
@@ -121,7 +126,9 @@ export async function getSetupState(
   const workstations: SetupWorkstationDto[] = [];
   for (const w of stations) {
     const blocked = await setupBlockedReason(ctx.pool, w.id);
+    const connectBlocked = await connectBlockedReason(ctx.pool, w.id);
     workstations.push({
+      canConnect: connectBlocked === null,
       id: w.id,
       name: w.name,
       connected: !!w.connected,
@@ -198,6 +205,7 @@ export async function getSetupState(
     scanProblem: scan || proposals[0] ? null : await scanProblemFor(ctx.pool, projectId, 'deploy'),
     proposal: proposals[0] ?? null,
     generator: SETUP_GENERATOR,
+    improvedAvailable: parsedSetup.success && parsedSetup.data.generator !== SETUP_GENERATOR,
   };
 }
 

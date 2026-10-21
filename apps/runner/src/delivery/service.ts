@@ -167,7 +167,7 @@ export class DeliveryService {
   }
 
   /** `aom deploy probe` (DevOps in a scan): the same fixed probe, answered here and returned as JSON. */
-  async probeFor(params: Record<string, unknown>): Promise<IpcRpcResponse> {
+  async probeFor(params: Record<string, unknown>, shiftId?: string): Promise<IpcRpcResponse> {
     const p = DeployProbeParamsSchema.safeParse(params);
     if (!p.success)
       return {
@@ -190,6 +190,11 @@ export class DeliveryService {
       },
       this.deps.keys ? { keys: this.deps.keys } : {},
     );
+    // The server keeps what the scan saw (the wizard shows the same facts); a failure to tell it changes nothing for DevOps.
+    if (shiftId)
+      void this.deps
+        .rpc(shiftId, 'deploy.probe.record', { scope, ...(v.host ? { host: v.host } : {}), result: r })
+        .catch(() => undefined);
     return { ok: true, result: r };
   }
 

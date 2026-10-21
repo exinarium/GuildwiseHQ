@@ -16,6 +16,7 @@ import { socialTick } from '../commands/social.ts';
 import { sweepSubworkflows } from '../commands/subworkflows.ts';
 import { weeklyBriefingTick } from '../commands/weekly-briefing.ts';
 import type { Ctx } from '../context.ts';
+import { reachabilityTick } from '../delivery/reachability.ts';
 import { pruneMail } from '../mail/inbound/prune.ts';
 import { licensingTick } from '../orgs/licensing.ts';
 
@@ -116,6 +117,9 @@ export class Scheduler {
       await this.triggers();
       await auditMailTick(this.ctx).catch((err) => this.ctx.log.error({ err }, 'audit mail failed'));
       await cloudTick(this.ctx).catch((err) => this.ctx.log.error({ err }, 'cloud workstations failed'));
+      await reachabilityTick(this.ctx).catch((err) =>
+        this.ctx.log.error({ err }, 'reachability checks failed'),
+      );
       await expireRuns(this.ctx).catch((err) => this.ctx.log.error({ err }, 'run environment expiry failed'));
       await this.blog();
       await weeklyBriefingTick(this.ctx).catch((err) =>

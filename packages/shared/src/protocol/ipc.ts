@@ -318,6 +318,8 @@ export const RpcMethodSchema = z.enum([
   'setup.propose',
   /** `aom deploy probe`: answered on the workstation by the fixed read-only probe. */
   'deploy.probe',
+  /** The workstation tells the server what a DevOps scan's probe found, so the wizard shows the same facts (design v2). */
+  'deploy.probe.record',
 ]);
 export type RpcMethod = z.infer<typeof RpcMethodSchema>;
 

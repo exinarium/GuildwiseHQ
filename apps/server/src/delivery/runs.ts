@@ -24,6 +24,7 @@ import type { AppendInput } from '../eventstore/types.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { type EnvGateVerdict, effectiveGates, evaluateEnvGate, latestMerge } from './gate.ts';
 import { closeDeskNotice, raiseDeskNotice } from './notices.ts';
+import { queueReachabilityCheck } from './reachability.ts';
 import {
   loadRecipeRow,
   NO_PROJECT_VAULT,
@@ -925,6 +926,15 @@ export async function applyDeployResult(
       scope: projectScope(run.org_id, run.project_id),
     },
   ]);
+  // A deploy that did not get through may mean the server cannot be reached any more: look, so the card says so.
+  if (outcome !== 'succeeded' && run.target_name)
+    await one(
+      ctx.pool,
+      `SELECT id FROM deploy_targets WHERE project_id=$1 AND lower(name)=lower($2) AND kind='remote_ssh' AND removed_at IS NULL`,
+      [run.project_id, run.target_name],
+    )
+      .then((t) => (t ? queueReachabilityCheck(ctx, t.id) : false))
+      .catch(() => false);
   const project = await one(ctx.pool, 'SELECT key FROM projects WHERE id=$1', [run.project_id]);
   // A refusal for a missing secret names it on the desk (section 9.6).
   if (outcome === 'refused' && r.refused?.startsWith('missing_secret:'))

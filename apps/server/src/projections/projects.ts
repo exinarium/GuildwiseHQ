@@ -49,6 +49,8 @@ export async function deleteProjectRows(tx: Tx, projectId: string): Promise<void
   await exec(tx, 'DELETE FROM delivery_setup_drafts WHERE project_id=$1', P);
   await exec(tx, 'DELETE FROM deploy_probes WHERE project_id=$1', P);
   await exec(tx, 'DELETE FROM deploy_target_connections WHERE project_id=$1', P);
+  await exec(tx, 'DELETE FROM deploy_target_keys WHERE project_id=$1', P);
+  await exec(tx, 'DELETE FROM deploy_ops WHERE project_id=$1', P);
   await exec(tx, 'UPDATE intakes SET mapped_project_id = NULL WHERE mapped_project_id=$1', P);
   await exec(
     tx,

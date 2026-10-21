@@ -142,6 +142,68 @@ export const deliveryProjectors: Record<string, Projector> = {
     );
   },
 
+  DeployOpFinished: async (tx, e) => {
+    const p = ev<'DeployOpFinished'>(e).payload;
+    await exec(
+      tx,
+      `INSERT INTO deploy_ops (command_id, org_id, project_id, target_id, workstation_id, kind, ok, result, error, at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10)
+       ON CONFLICT (command_id) DO UPDATE SET ok=EXCLUDED.ok, result=EXCLUDED.result, error=EXCLUDED.error, at=EXCLUDED.at`,
+      [
+        p.opId,
+        e.scope.orgId,
+        p.projectId,
+        p.targetId,
+        p.workstationId,
+        p.kind,
+        p.ok,
+        j(p.result),
+        p.error,
+        p.at,
+      ],
+    );
+  },
+  DeployTargetConnected: async (tx, e) => {
+    const p = ev<'DeployTargetConnected'>(e).payload;
+    await exec(
+      tx,
+      `INSERT INTO deploy_target_keys (target_id, workstation_id, project_id, org_id, fingerprint, public_key, alias, method, address,
+         ssh_user, port, host_key_fingerprint, state, added_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'active',$13)
+       ON CONFLICT (target_id, workstation_id) DO UPDATE SET fingerprint=EXCLUDED.fingerprint, public_key=EXCLUDED.public_key,
+         alias=EXCLUDED.alias, method=EXCLUDED.method, address=EXCLUDED.address, ssh_user=EXCLUDED.ssh_user, port=EXCLUDED.port,
+         host_key_fingerprint=EXCLUDED.host_key_fingerprint, state='active', added_at=EXCLUDED.added_at, revoked_at=NULL,
+         revoked_by_workstation=NULL`,
+      [
+        p.targetId,
+        p.workstationId,
+        p.projectId,
+        e.scope.orgId,
+        p.fingerprint,
+        p.publicKey,
+        p.alias,
+        p.method,
+        p.address,
+        p.user,
+        p.port,
+        p.hostKeyFingerprint,
+        p.at,
+      ],
+    );
+  },
+  DeployKeyRevoked: async (tx, e) => {
+    const p = ev<'DeployKeyRevoked'>(e).payload;
+    await exec(
+      tx,
+      `UPDATE deploy_target_keys SET state='revoked', revoked_at=$4, revoked_by_workstation=$5
+        WHERE target_id=$1 AND workstation_id=$2 AND fingerprint=$3`,
+      [p.targetId, p.workstationId, p.fingerprint, p.at, p.byWorkstationId],
+    );
+  },
+  DeployTargetPrepared: async () => {
+    // audit only: the event is the record
+  },
+
   DeliveryRecipeDrifted: async (tx, e) => {
     const p = ev<'DeliveryRecipeDrifted'>(e).payload;
     await exec(
