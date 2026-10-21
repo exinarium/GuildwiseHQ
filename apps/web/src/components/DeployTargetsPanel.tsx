@@ -123,6 +123,12 @@ export function DeployTargetsPanel({ projectId }: { projectId: string }) {
                     </Badge>
                   )}
                   <Badge>{t.kind === 'local_docker' ? 'Docker on a computer' : `Server ${t.host}`}</Badge>
+                  {t.role === 'standby' && (
+                    <Badge tone="warning" data-testid="target-standby-badge">
+                      Standby (fallback)
+                    </Badge>
+                  )}
+                  {t.role === 'retired' && <Badge data-testid="target-retired-badge">Retired</Badge>}
                 </span>
                 <span className="mt-1 block text-xs text-muted" data-testid="target-deploys-from">
                   Deploys from: <span className="font-medium text-fg">{from.text}</span>

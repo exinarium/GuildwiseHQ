@@ -261,9 +261,160 @@ const bareLocalReport = () => ({
 
 let probes: Array<Record<string, unknown>> = [];
 let published: Record<string, unknown> | null = null;
-const probeDto = (scope: string, host: string | null, report: unknown) => ({
+// ---- moving to a new server (v3): `localStorage['aom-mock-move']` is none | connected | preparing | failed | ready | moving | domain | done | standby | retired
+const T3 = '00000000-0000-4000-8000-0000000000f3';
+const MOVE_ID = '00000000-0000-4000-8000-0000000000e1';
+const moveScenario = () =>
+  (typeof localStorage !== 'undefined' && localStorage.getItem('aom-mock-move')) || 'none';
+const setMove = (s: string) => {
+  localStorage.setItem('aom-mock-move', s);
+  localStorage.setItem('aom-mock-move-polls', '0');
+};
+const polls = () => Number(localStorage.getItem('aom-mock-move-polls') ?? '0');
+const poll = () => localStorage.setItem('aom-mock-move-polls', String(polls() + 1));
+const moveTargets = () => {
+  const m = moveScenario();
+  if (m === 'none') return [];
+  const live = m === 'standby' || m === 'retired';
+  return [
+    {
+      id: T3,
+      name: live ? 'shop-live' : 'shop-new',
+      kind: 'remote_ssh',
+      production: live,
+      workstationId: WS,
+      workstationName: 'Office PC',
+      workstationOnline: true,
+      host: 'aom-shop-new',
+      appUrl: live ? 'https://shop.example.com' : null,
+      connection: { state: 'reachable', at: ago(2), detail: null, method: 'deploy_key' },
+      keys: [],
+      role: 'active',
+    },
+    ...(live
+      ? [
+          {
+            id: T2,
+            name: 'shop-live (old server)',
+            kind: 'remote_ssh',
+            production: true,
+            workstationId: WS,
+            workstationName: 'Office PC',
+            workstationOnline: true,
+            host: 'prod-server',
+            appUrl: 'https://shop.example.com',
+            connection: { state: 'reachable', at: ago(2), detail: null, method: 'existing_alias' },
+            keys: [],
+            role: m === 'retired' ? 'retired' : 'standby',
+          },
+        ]
+      : []),
+  ];
+};
+const stepDone = (step: string, text: string) => ({
+  step,
+  ok: true,
+  detail: text,
+  checks: [{ id: step, ok: true, text }],
+  at: ago(1),
+});
+const moveDto = () => {
+  const m = moveScenario();
+  const waitedPrep = polls() >= 3;
+  const waitedMove = polls() >= 3;
+  const state =
+    m === 'preparing'
+      ? waitedPrep
+        ? 'ready'
+        : 'preparing'
+      : m === 'moving'
+        ? waitedMove
+          ? 'app_ready'
+          : 'moving'
+        : m === 'domain'
+          ? 'app_ready'
+          : m === 'failed'
+            ? 'failed'
+            : m === 'ready'
+              ? 'ready'
+              : m;
+  const prep = [
+    stepDone('check', 'Docker works on both servers'),
+    stepDone(
+      'copy_config',
+      '3 files (the compose file and 2 settings files, 14 settings) copied; nothing is shown',
+    ),
+    stepDone('copy_image', 'The app (shop:3f9c1ab0d2e4) was copied to the new server'),
+    stepDone('start_database', 'The database on the new server is running and ready (still empty)'),
+  ];
+  const moved = [
+    stepDone(
+      'stop_and_backup',
+      'A last backup is saved on the old server (/opt/shop/backups/move-20261021-120000.sql.gz)',
+    ),
+    stepDone('restore', 'The data is on the new server (24 tables, like the old database)'),
+    stepDone('start_app', 'The app on the new server answers (/ready)'),
+  ];
+  const steps =
+    state === 'preparing'
+      ? prep.slice(0, Math.min(polls() + 1, 3))
+      : state === 'ready'
+        ? prep
+        : state === 'moving'
+          ? [...prep, moved[0]]
+          : state === 'app_ready'
+            ? [...prep, ...moved]
+            : state === 'failed'
+              ? [prep[0]]
+              : [...prep, ...moved];
+  return {
+    id: MOVE_ID,
+    projectId: '00000000-0000-4000-8000-000000000001',
+    envName: 'production',
+    fromTargetId: T2,
+    fromName: m === 'standby' || m === 'retired' ? 'shop-live (old server)' : 'shop-live',
+    toTargetId: T3,
+    toName: m === 'standby' || m === 'retired' ? 'shop-live' : 'shop-new',
+    workstationId: WS,
+    workstationName: 'Office PC',
+    state: m === 'standby' || m === 'retired' ? 'completed' : state,
+    currentStep:
+      state === 'preparing'
+        ? (['check', 'copy_config', 'copy_image'][Math.min(polls(), 2)] ?? 'check')
+        : state === 'moving'
+          ? 'restore'
+          : state === 'failed'
+            ? 'check'
+            : null,
+    steps,
+    error: state === 'failed' ? 'The database (postgres) is not running on the old server' : null,
+    oldAppStopped: state === 'moving' || state === 'app_ready',
+    facts: { image: 'shop:3f9c1ab0d2e4', appPort: 4600 },
+    domain: 'shop.example.com',
+    newAddresses: ['203.0.113.9'],
+    startedAt: ago(8),
+    finishedAt: m === 'standby' || m === 'retired' ? ago(1) : null,
+  };
+};
+const newServerReport = () => ({
+  scope: 'ssh_target',
+  at: ago(0),
+  host: 'aom-shop-new',
+  os: 'Linux x86_64',
+  docker: { installed: true, usable: true, version: '27.3.1', composeVersion: '2.29.7' },
+  containers: [],
+  composeFiles: [],
+  volumes: [],
+  folders: [{ path: '/opt/shop', exists: false, entries: [] }],
+  backups: [],
+  proxies: [],
+  urls: [],
+  listeners: [],
+});
+
+const probeDto = (scope: string, host: string | null, report: unknown, targetId: string | null = null) => ({
   id: crypto.randomUUID(),
-  targetId: null,
+  targetId,
   workstationId: WS,
   workstationName: 'Office PC',
   scope,
@@ -332,6 +483,7 @@ function state() {
     },
     publish: published,
     targets: [
+      ...moveTargets(),
       {
         id: T1,
         name: 'shop-uat',
@@ -344,19 +496,26 @@ function state() {
         appUrl: 'http://localhost:8080',
         connection: null,
       },
-      {
-        id: T2,
-        name: 'shop-live',
-        kind: 'remote_ssh',
-        production: true,
-        workstationId: WS,
-        workstationName: 'Office PC',
-        workstationOnline: true,
-        host: 'prod-server',
-        appUrl: 'https://shop.example.com',
-        connection: saved ? { state: 'reachable', at: ago(5), detail: null, method: 'existing_alias' } : null,
-        keys: [],
-      },
+      ...(moveScenario() === 'standby' || moveScenario() === 'retired'
+        ? []
+        : [
+            {
+              id: T2,
+              name: 'shop-live',
+              kind: 'remote_ssh',
+              production: true,
+              workstationId: WS,
+              workstationName: 'Office PC',
+              workstationOnline: true,
+              host: 'prod-server',
+              appUrl: 'https://shop.example.com',
+              connection: saved
+                ? { state: 'reachable', at: ago(5), detail: null, method: 'existing_alias' }
+                : null,
+              keys: [],
+              role: 'active',
+            },
+          ]),
     ],
     workstations: [
       {
@@ -367,6 +526,7 @@ function state() {
         canProbe: s !== 'old',
         blocked: s === 'old' ? 'Guildwise on Office PC needs an update for guided setup.' : null,
         canConnect: s !== 'old',
+        canMove: s !== 'old',
       },
       {
         id: WS2,
@@ -389,23 +549,74 @@ function state() {
 }
 
 export const deploySetupHandlers = [
+  http.get(`${A}/projects/:id/delivery/moves`, () => {
+    const m = moveScenario();
+    if (m === 'preparing' || m === 'moving') poll();
+    return HttpResponse.json({ moves: m === 'none' || m === 'connected' ? [] : [moveDto()] });
+  }),
+  http.post(`${A}/projects/:id/delivery/moves`, () => {
+    setMove('preparing');
+    return HttpResponse.json(moveDto(), { status: 201 });
+  }),
+  http.get(`${A}/projects/:id/delivery/moves/:moveId`, () => HttpResponse.json(moveDto())),
+  http.post(`${A}/projects/:id/delivery/moves/:moveId/switch`, () => {
+    setMove('moving');
+    return HttpResponse.json(moveDto(), { status: 202 });
+  }),
+  http.post(`${A}/projects/:id/delivery/moves/:moveId/retry`, () => {
+    setMove('preparing');
+    return HttpResponse.json(moveDto(), { status: 202 });
+  }),
+  http.post(`${A}/projects/:id/delivery/moves/:moveId/cancel`, () => {
+    setMove('none');
+    return HttpResponse.json(moveDto(), { status: 202 });
+  }),
+  http.get(`${A}/projects/:id/delivery/moves/:moveId/dns`, () => {
+    const n = Number(localStorage.getItem('aom-mock-dns') ?? '0');
+    localStorage.setItem('aom-mock-dns', String(n + 1));
+    const pointed = n >= 2 || localStorage.getItem('aom-mock-dns-new') === '1';
+    return HttpResponse.json({
+      domain: 'shop.example.com',
+      state: pointed ? 'new' : 'old',
+      expected: ['203.0.113.9'],
+      found: [pointed ? '203.0.113.9' : '198.51.100.7'],
+      oldAddresses: ['198.51.100.7'],
+      at: ago(0),
+      text: pointed
+        ? 'shop.example.com points to the new server. Visitors reach it from now on.'
+        : 'shop.example.com still points to the old server. Change it to 203.0.113.9 where your domain is managed; it can take a few minutes (sometimes hours) to spread.',
+    });
+  }),
+  http.post(`${A}/projects/:id/delivery/moves/:moveId/complete`, () => {
+    setMove('standby');
+    return HttpResponse.json(moveDto());
+  }),
+  http.post(`${A}/projects/:id/delivery/targets/:targetId/retire`, () => {
+    setMove('retired');
+    return HttpResponse.json({ commandId: crypto.randomUUID() }, { status: 202 });
+  }),
   http.get(`${A}/projects/:id/delivery/setup`, () => HttpResponse.json(state())),
   http.put(`${A}/projects/:id/delivery/setup`, () => HttpResponse.json(state())),
   http.post(`${A}/projects/:id/delivery/probe`, async ({ request }) => {
     const b = (await request.json()) as { scope: string; host?: string };
     const report =
-      b.scope === 'local'
-        ? localStorage.getItem('aom-mock-local') === 'bare'
-          ? bareLocalReport()
-          : localReport()
-        : b.scope === 'ssh_hosts'
-          ? hostsReport()
-          : b.host === 'fresh-vps'
-            ? bareServerReport()
-            : serverReport();
+      b.scope === 'ssh_target' && (b as { targetId?: string }).targetId === T3
+        ? newServerReport()
+        : b.scope === 'local'
+          ? localStorage.getItem('aom-mock-local') === 'bare'
+            ? bareLocalReport()
+            : localReport()
+          : b.scope === 'ssh_hosts'
+            ? hostsReport()
+            : b.host === 'fresh-vps'
+              ? bareServerReport()
+              : serverReport();
+    const tid = (b as { targetId?: string }).targetId ?? null;
     probes = [
-      ...probes.filter((p) => !(p.scope === b.scope && (p.host ?? null) === (b.host ?? null))),
-      probeDto(b.scope, b.host ?? null, report),
+      ...probes.filter(
+        (p) => !(p.scope === b.scope && (p.host ?? null) === (b.host ?? null) && p.targetId === tid),
+      ),
+      probeDto(b.scope, b.host ?? null, report, tid),
     ];
     return HttpResponse.json({ commandId: crypto.randomUUID(), workstationId: WS }, { status: 202 });
   }),

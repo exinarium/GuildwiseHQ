@@ -39,6 +39,9 @@ export function PrepareServer({
   report,
   suggestedName,
   onPrepared,
+  fixed,
+  title,
+  intro,
 }: {
   projectId: string;
   hosting: 'ssh' | 'this_computer';
@@ -50,12 +53,20 @@ export function PrepareServer({
   suggestedName: string;
   /** A real run finished without a failure: look again (with the compose file now in the folder). */
   onPrepared: (info: { dir: string; composeFile: string }) => void;
+  /**
+   * A move to a new server decides these itself (the same folder as on the old server, the compose file and the settings
+   * are copied from it): nothing to type, only the list and the buttons. `domain` + `port` add HTTPS for that address.
+   */
+  fixed?: { dir: string; domain?: string; port?: number };
+  /** Replace the heading and the first sentence (a move sets up HTTPS for its own address). */
+  title?: string;
+  intro?: string;
 }) {
   const server = hosting === 'ssh';
   const base = slug(suggestedName);
-  const [dir, setDir] = useState(server ? `/opt/${base}` : `~/guildwise/${base}`);
-  const [domain, setDomain] = useState('');
-  const [port, setPort] = useState('4600');
+  const [dir, setDir] = useState(fixed?.dir ?? (server ? `/opt/${base}` : `~/guildwise/${base}`));
+  const [domain, setDomain] = useState(fixed?.domain ?? '');
+  const [port, setPort] = useState(String(fixed?.port ?? 4600));
   const [composePath, setComposePath] = useState('docker-compose.yml');
   const [opId, setOpId] = useState<string | null>(null);
   const [wasDry, setWasDry] = useState(false);
@@ -67,10 +78,11 @@ export function PrepareServer({
       hosting,
       appDir: dir.trim(),
       ...(server && domain.trim() ? { domain: domain.trim().toLowerCase(), upstreamPort: Number(port) } : {}),
-      composeFromRepo: { repoPath: composePath.trim() },
+      // a move copies the compose file from the old server; otherwise the project's own file is used when the folder has none
+      ...(fixed ? {} : { composeFromRepo: { repoPath: composePath.trim() } }),
       ...(server ? {} : { project: `aom-${base}`, appService: 'app' }),
     }),
-    [hosting, dir, domain, port, composePath, server, base],
+    [hosting, dir, domain, port, composePath, server, base, fixed],
   );
   const plan = useMemo(() => planPrepare(report, inputs), [report, inputs]);
   const actions = plan.actions;
@@ -115,31 +127,48 @@ export function PrepareServer({
       data-testid="prepare-server"
     >
       <h4 className="text-base font-semibold text-fg">
-        {server ? 'Set up this server' : 'Start a new copy on this computer'}
+        {title ?? (server ? 'Set up this server' : 'Start a new copy on this computer')}
       </h4>
       <p className="text-sm text-muted">
-        {server
-          ? 'Guildwise looked at the server first. It only adds what is missing and keeps everything that is already there.'
-          : 'Guildwise puts the project’s compose file in a folder of its own and starts the supporting parts (such as the database). Nothing that is already running is touched.'}
+        {intro ??
+          (server
+            ? 'Guildwise looked at the server first. It only adds what is missing and keeps everything that is already there.'
+            : 'Guildwise puts the project’s compose file in a folder of its own and starts the supporting parts (such as the database). Nothing that is already running is touched.')}
       </p>
-      <TextInput
-        label={server ? 'App folder on the server' : 'Folder for the new copy'}
-        value={dir}
-        onChange={(e) => setDir(e.target.value)}
-        autoCapitalize="none"
-        spellCheck={false}
-        data-testid="prepare-dir"
-      />
-      <TextInput
-        label="Compose file in the project"
-        hint="Used only when the folder has none yet."
-        value={composePath}
-        onChange={(e) => setComposePath(e.target.value)}
-        autoCapitalize="none"
-        spellCheck={false}
-        data-testid="prepare-compose"
-      />
-      {server && (
+      {fixed && (
+        <p className="text-sm text-muted" data-testid="prepare-fixed">
+          Folder on the server: <code>{fixed.dir}</code> (the same as on the old server)
+          {fixed.domain ? (
+            <>
+              . HTTPS for <strong>{fixed.domain}</strong>.
+            </>
+          ) : (
+            '.'
+          )}
+        </p>
+      )}
+      {!fixed && (
+        <TextInput
+          label={server ? 'App folder on the server' : 'Folder for the new copy'}
+          value={dir}
+          onChange={(e) => setDir(e.target.value)}
+          autoCapitalize="none"
+          spellCheck={false}
+          data-testid="prepare-dir"
+        />
+      )}
+      {!fixed && (
+        <TextInput
+          label="Compose file in the project"
+          hint="Used only when the folder has none yet."
+          value={composePath}
+          onChange={(e) => setComposePath(e.target.value)}
+          autoCapitalize="none"
+          spellCheck={false}
+          data-testid="prepare-compose"
+        />
+      )}
+      {server && !fixed && (
         <>
           <TextInput
             label="Web address for the site (optional)"

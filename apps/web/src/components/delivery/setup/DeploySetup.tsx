@@ -1,8 +1,19 @@
 import type { ProposalDto, SetupEnv, SetupStateDto } from '@aom/shared';
-import { describeSetupStep } from '@aom/shared';
-import { Eye, Monitor, Pencil, Plus, RefreshCw, ScanSearch, Server, ShieldCheck } from 'lucide-react';
+import { describeSetupStep, RETIRE_EXPLAINER } from '@aom/shared';
+import {
+  ArrowRightLeft,
+  Eye,
+  Monitor,
+  Pencil,
+  Plus,
+  RefreshCw,
+  ScanSearch,
+  Server,
+  ShieldCheck,
+} from 'lucide-react';
 import { useState } from 'react';
 import { useApproveRecipe } from '../../../api/queries/delivery.ts';
+import { openMove, useMoves, useRetire } from '../../../api/queries/deploy-move.ts';
 import {
   usePreviewSetup,
   useProbe,
@@ -17,6 +28,7 @@ import { ProposalReview, type ReviewQuestion } from '../../setup/ProposalReview.
 import { Badge, Button, Callout, Dialog, ErrorBox, Panel, Spinner, useToast } from '../../ui.tsx';
 import { ConnectServer } from '../connect/ConnectServer.tsx';
 import { needsReconnect, ReachabilityChip } from '../connect/ReachabilityChip.tsx';
+import { MoveWizard } from '../move/MoveWizard.tsx';
 import { AdvancedSetup } from './AdvancedSetup.tsx';
 import { DeployWizard } from './DeployWizard.tsx';
 import { whenText } from './model.ts';
@@ -223,6 +235,7 @@ function Overview({
           ))}
         </ul>
       )}
+      <OldServers projectId={projectId} s={s} />
 
       {s.current.custom && (
         <Callout tone="info" title="This recipe is a script" data-testid="setup-custom">
@@ -343,6 +356,18 @@ function EnvCard({
       }
     : null;
   const [reconnect, setReconnect] = useState(false);
+  const [moving, setMoving] = useState(false);
+  const movesQ = useMoves(projectId);
+  const moveOpen = openMove(movesQ.data)?.envName === env.name ? openMove(movesQ.data) : undefined;
+  const mover = s.workstations.find((w) => w.id === target?.workstationId);
+  // an older server does not tell the role of a target: then there are no moves either
+  const canMove =
+    env.hosting === 'ssh' &&
+    env.mode === 'guided' &&
+    !!target &&
+    target.role === 'active' &&
+    target.kind === 'remote_ssh' &&
+    !!mover?.canMove;
   const status = s.current.recipeStatus;
   const approvalText = !s.current.recipePresent
     ? 'Not saved yet'
@@ -422,6 +447,17 @@ function EnvCard({
               Check connection
             </Button>
           )}
+          {(canMove || moveOpen) && (
+            <Button
+              size="sm"
+              variant={moveOpen ? 'primary' : 'secondary'}
+              onClick={() => setMoving(true)}
+              data-testid={`env-move-${env.name}`}
+            >
+              <ArrowRightLeft aria-hidden="true" className="size-4" />
+              {moveOpen ? 'Continue the move' : 'Move to a new server'}
+            </Button>
+          )}
           {env.hosting === 'ssh' && target && needsReconnect(reach) && (
             <Button
               size="sm"
@@ -435,6 +471,24 @@ function EnvCard({
         </div>
       )}
       <ErrorBox error={probe.error} />
+      {moving && target && (
+        <Dialog
+          open
+          onOpenChange={(o) => !o && setMoving(false)}
+          title={`Move ${env.label} to a new server`}
+          size="lg"
+        >
+          <MoveWizard
+            projectId={projectId}
+            s={s}
+            env={env}
+            from={target}
+            move={moveOpen}
+            moves={movesQ.data ?? []}
+            onClose={() => setMoving(false)}
+          />
+        </Dialog>
+      )}
       {reconnect && target && (
         <Dialog
           open
@@ -611,5 +665,91 @@ function DeployScanReview({
         })}
       </section>
     </ProposalReview>
+  );
+}
+
+/**
+ * The old servers of finished moves: a standby is a fallback that nothing deploys to; the Owner can retire it, which only
+ * removes the keys Guildwise added to it (nothing on the server is deleted, ever).
+ */
+export function OldServers({ projectId, s }: { projectId: string; s: SetupStateDto }) {
+  const old = s.targets.filter((t) => t.role === 'standby' || t.role === 'retired');
+  const retire = useRetire(projectId);
+  const [asking, setAsking] = useState<string | null>(null);
+  const toast = useToast();
+  if (old.length === 0) return null;
+  const target = old.find((t) => t.id === asking);
+  return (
+    <section className="flex flex-col gap-2" data-testid="old-servers">
+      <h3 className="text-base font-semibold text-fg">Old servers</h3>
+      <ul className="flex flex-col gap-2">
+        {old.map((t) => (
+          <li
+            key={t.id}
+            className="flex flex-col gap-1.5 rounded-control border border-line p-3"
+            data-testid={`old-server-${t.id}`}
+          >
+            <div className="flex flex-wrap items-center gap-2">
+              <Server aria-hidden="true" className="size-4 text-muted" />
+              <span className="font-medium text-fg">{t.name}</span>
+              <Badge tone={t.role === 'standby' ? 'amber' : 'neutral'} data-testid="old-server-role">
+                {t.role === 'standby' ? 'Standby (fallback)' : 'Retired'}
+              </Badge>
+            </div>
+            <p className="text-sm text-muted">
+              {t.role === 'standby'
+                ? 'Nothing deploys here any more. Its data, app and backup from the move are untouched, so you can fall back to it. Retire it when you are sure.'
+                : 'Guildwise can no longer sign in to this server. Nothing on it was deleted.'}
+            </p>
+            {t.role === 'standby' && (
+              <div>
+                {s.canApprove ? (
+                  <Button size="sm" onClick={() => setAsking(t.id)} data-testid={`retire-${t.id}`}>
+                    Retire
+                  </Button>
+                ) : (
+                  <p className="text-xs text-subtle">Only the Owner retires a server.</p>
+                )}
+              </div>
+            )}
+          </li>
+        ))}
+      </ul>
+      <ErrorBox error={retire.error} />
+      <Dialog
+        open={!!target}
+        onOpenChange={(o) => !o && setAsking(null)}
+        title={`Retire ${target?.name ?? ''}?`}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setAsking(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="danger"
+              loading={retire.isPending}
+              onClick={() =>
+                target &&
+                retire.mutate(target.id, {
+                  onSuccess: () => {
+                    setAsking(null);
+                    toast.success('Removing the Guildwise keys from the old server');
+                  },
+                })
+              }
+              data-testid="retire-confirm"
+            >
+              Retire the old server
+            </Button>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-2 text-sm text-muted" data-testid="retire-explainer">
+          {RETIRE_EXPLAINER.map((t) => (
+            <p key={t}>{t}</p>
+          ))}
+        </div>
+      </Dialog>
+    </section>
   );
 }
