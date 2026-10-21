@@ -506,6 +506,43 @@ export const localReportP5 = () => ({
   urls: [{ url: 'http://localhost:4700/api/health', status: 200 }],
 });
 
+/**
+ * Two checkouts of one repo on this computer, both with deploy/local/docker-compose.yml and the same compose project name; the app runs
+ * from `p5-run-trial` (a registry image with a port in its address).
+ */
+export const localReportCopies = () => {
+  const dir = (n: string) => `/home/user/projects/${n}/deploy/local`;
+  const file = (n: string) => ({
+    path: `${dir(n)}/docker-compose.yml`,
+    project: 'dcode-flow-local',
+    services: [
+      part('dcode-server', {
+        image: '192.168.1.11:5000/dcode-server:showcase-cd30f7bb33',
+        ports: ['5500:500'],
+      }),
+    ],
+    volumes: [],
+  });
+  return {
+    ...bareLocalReport(),
+    containers: [
+      {
+        name: 'dcode-flow-local-dcode-server-1',
+        project: 'dcode-flow-local',
+        service: 'dcode-server',
+        image: '192.168.1.11:5000/dcode-server:showcase-cd30f7bb33',
+        state: 'running',
+        status: 'Up 2 days',
+        ports: [{ host: 5500, container: 500, bind: '0.0.0.0' }],
+        composeFile: `${dir('p5-run-trial')}/docker-compose.yml`,
+        workingDir: dir('p5-run-trial'),
+      },
+    ],
+    composeFiles: [file('mm-fixes-wt'), file('p5-run-trial')],
+    urls: [{ url: 'http://localhost:5500/api/health', status: 200 }],
+  };
+};
+
 /** A computer with Docker and nothing running: the "usual places" are listed so the page can say what it checked. */
 export const bareLocalReport = (homeStack = false) =>
   emptyReport('local', {
@@ -771,6 +808,8 @@ export function reportFor(
     return r as unknown as ProbeReport;
   }
   if (scope === 'local') {
+    if (localStorage.getItem('aom-mock-local') === 'copies')
+      return localReportCopies() as unknown as ProbeReport;
     if (localStorage.getItem('aom-mock-local') === 'bare')
       return bareLocalReport(typed) as unknown as ProbeReport;
     return (scenario === 'p5' ? localReportP5() : localReport()) as unknown as ProbeReport;

@@ -1,6 +1,6 @@
 import type { ProbeReport } from '@aom/shared';
 import { Box, Cog, FolderSearch, PlayCircle, Search, Terminal } from 'lucide-react';
-import { type ReactNode, useState } from 'react';
+import { Fragment, type ReactNode, useState } from 'react';
 import { Button, Callout, ErrorBox, Spinner, TextInput } from '../ui.tsx';
 import {
   MANAGER_WORDS,
@@ -101,37 +101,50 @@ export function FoundApps({
               Found on {placeName}. Guildwise uses the one you pick and leaves everything else as it is.
             </p>
           )}
-          {stacks.map((st) => (
-            <Choice
-              disabled={!!st.unsupported}
-              key={st.path}
-              name={group}
-              checked={selected?.kind === 'stack' && selected.path === st.path}
-              onSelect={() => onSelect({ kind: 'stack', path: st.path })}
-              icon={<Box className="size-5" />}
-              title={
-                <>
-                  The app that is already running here:{' '}
-                  {st.project ?? st.path.split('/').slice(-2, -1)[0] ?? 'app'}{' '}
-                  <span className="font-normal text-muted">(found)</span>
-                </>
-              }
-              testId="stack-choice"
-            >
-              {st.unsupported && (
-                <span className="mb-1 block font-medium text-warning" data-testid="stack-unsupported">
-                  Not supported yet: {st.unsupported}
-                </span>
+          {[...stacks.filter((x) => !x.copyOf), ...stacks.filter((x) => x.copyOf)].map((st, i, all) => (
+            <Fragment key={st.path}>
+              {st.copyOf && !all[i - 1]?.copyOf && (
+                <p className="text-sm font-medium text-muted" data-testid="other-copies">
+                  Other copies of this file (not running). The app runs from {st.copyOf}.
+                </p>
               )}
-              {st.services.length} {st.services.length === 1 ? 'part' : 'parts'} (
-              {st.services.map((x) => x.name).join(', ')}).{' '}
-              {st.running
-                ? `Running now (${st.containers.filter((c) => c.state === 'running').length} of ${st.containers.length}).`
-                : 'Not running.'}
-              <span className="mt-0.5 block font-mono text-xs text-subtle [overflow-wrap:anywhere]">
-                {st.path}
-              </span>
-            </Choice>
+              {st.mustPick && !all.slice(0, i).some((x) => x.project === st.project) && (
+                <p className="text-sm font-medium text-warning" data-testid="must-pick">
+                  {st.project ? `Several copies of ${st.project}` : 'Several copies'} were found and none is
+                  running. Pick the one you use.
+                </p>
+              )}
+
+              <Choice
+                disabled={!!st.unsupported}
+                name={group}
+                checked={selected?.kind === 'stack' && selected.path === st.path}
+                onSelect={() => onSelect({ kind: 'stack', path: st.path })}
+                icon={<Box className="size-5" />}
+                title={
+                  <>
+                    The app that is already running here:{' '}
+                    {st.project ?? st.path.split('/').slice(-2, -1)[0] ?? 'app'}{' '}
+                    <span className="font-normal text-muted">(found)</span>
+                  </>
+                }
+                testId="stack-choice"
+              >
+                {st.unsupported && (
+                  <span className="mb-1 block font-medium text-warning" data-testid="stack-unsupported">
+                    Not supported yet: {st.unsupported}
+                  </span>
+                )}
+                {st.services.length} {st.services.length === 1 ? 'part' : 'parts'} (
+                {st.services.map((x) => x.name).join(', ')}).{' '}
+                {st.running
+                  ? `Running now (${st.containers.filter((c) => c.state === 'running').length} of ${st.containers.length}).`
+                  : 'Not running.'}
+                <span className="mt-0.5 block font-mono text-xs text-subtle [overflow-wrap:anywhere]">
+                  {st.path}
+                </span>
+              </Choice>
+            </Fragment>
           ))}
           {natives.map((app) => (
             <Choice

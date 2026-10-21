@@ -215,7 +215,8 @@ describe('publish through recipe.write, then observe', () => {
     ).toHaveLength(1);
     let st = await call('GET', `${base()}/delivery/setup`);
     expect(st.publish).toMatchObject({ status: 'pending', setupHash: c.hash });
-    expect(st.draft.setup).toBeTruthy();
+    // nothing was changed since the save: there is no unfinished draft to show
+    expect(st.draft).toBeNull();
 
     // the workstation wrote the files and reports what is in delivery/ now
     r.send('command.result', {
@@ -247,6 +248,52 @@ describe('publish through recipe.write, then observe', () => {
     const row = (await q('SELECT * FROM delivery_recipes WHERE project_id=$1', [d.w.projectId]))[0];
     expect(row.parsed.environments.map((e: any) => e.name)).toEqual(['uat', 'production']);
     expect(row.setup.generator).toBe(SETUP_GENERATOR);
+  });
+
+  it('no "unfinished changes" after a save; an edit after it brings the draft back; a failed publish keeps it', async () => {
+    const c = compiled();
+    await call('POST', `${base()}/delivery/setup/publish`, { setup: setup(), setupHash: c.hash }, 202);
+    const cmd = await sinceCommands('recipe.write', 1);
+    r.send('command.result', {
+      commandId: cmd.commandId,
+      ok: true,
+      result: {
+        ok: true,
+        committed: true,
+        pushed: true,
+        vaultCommit: 'a'.repeat(40),
+        inspected: inspected(c),
+      },
+    });
+    await until(
+      async () => (await call('GET', `${base()}/delivery/setup`)).publish?.status === 'written',
+      5000,
+      'written',
+    );
+    expect((await call('GET', `${base()}/delivery/setup`)).draft).toBeNull();
+    // an edit after the save is unfinished work
+    await new Promise((res) => setTimeout(res, 20));
+    const edited = setup();
+    (edited.environments[0] as { label: string }).label = 'Test copy 2';
+    await call('PUT', `${base()}/delivery/setup`, { setup: edited });
+    expect((await call('GET', `${base()}/delivery/setup`)).draft?.setup).toBeTruthy();
+  });
+
+  it('a failed publish keeps the draft as unfinished', async () => {
+    const c = compiled();
+    await call('POST', `${base()}/delivery/setup/publish`, { setup: setup(), setupHash: c.hash }, 202);
+    const cmd = await sinceCommands('recipe.write', 1);
+    r.send('command.result', {
+      commandId: cmd.commandId,
+      ok: true,
+      result: { ok: false, error: 'scripts/uat.sh contains a hard-coded credential' },
+    });
+    await until(
+      async () => (await call('GET', `${base()}/delivery/setup`)).publish?.status === 'failed',
+      5000,
+      'failed',
+    );
+    expect((await call('GET', `${base()}/delivery/setup`)).draft?.setup).toBeTruthy();
   });
 
   it('a refusal by the workstation is shown, and nothing is observed', async () => {

@@ -119,6 +119,16 @@ function envChanges(env: SetupEnv, r: ProbeReport | null | undefined): ChangeIte
 
     const project = cf?.project ?? env.app.composeProject;
     const mine = (c: ProbeReport['containers'][number]) => !!project && c.project === project;
+    // The same compose project can exist in several checkouts of one repo: the running app was started from ONE of them.
+    const runningApp = r.containers.find(
+      (c) => mine(c) && c.service === env.app.service && c.state === 'running' && !!c.composeFile,
+    );
+    if (runningApp?.composeFile && !samePath(runningApp.composeFile, env.app.composeFile))
+      add(
+        'question',
+        `The app is running from ${runningApp.composeFile}, but the setup points at ${env.app.composeFile}, another copy of the file with the same project name${project ? ` (${project})` : ''}. An update would stop before anything changes. Point the setup at ${runningApp.composeFile}.`,
+        'compose',
+      );
     for (const c of r.containers) {
       if (mine(c) && c.service === env.app.service) {
         add('reuse', `Running now: ${c.name} (${c.image}, ${c.status ?? c.state})`, 'container');

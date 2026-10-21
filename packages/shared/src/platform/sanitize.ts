@@ -25,10 +25,30 @@ export function maskText(text: string, home?: string): string {
     .replace(KEYED_SECRET, '$1***')
     .replace(EMAIL, '<email>')
     .replace(UUID, '<id>')
-    .replace(ABS_PATH, (p) => {
-      const parts = p.split(/[\\/]/).filter(Boolean);
-      return `…/${parts.slice(-2).join('/')}`;
-    });
+    .split('\n')
+    .map(shortenPaths)
+    .join('\n');
+}
+
+/**
+ * Shortens the absolute paths of one line. A lone path keeps its last two segments. When a line holds several different paths
+ * (a message that compares two files) only the leading segments they SHARE are dropped, so the part that differs always shows:
+ * `/home/u/src/a/deploy/local/f.yml` vs `/home/u/src/b/deploy/local/f.yml` -> `…/a/deploy/local/f.yml`, `…/b/deploy/local/f.yml`.
+ */
+function shortenPaths(line: string): string {
+  const found = [...line.matchAll(ABS_PATH)].map((m) => m[0].split(/[\\/]/).filter(Boolean));
+  const distinct = new Set(found.map((p) => p.join('/')));
+  let common = 0;
+  if (distinct.size > 1) {
+    const first = found[0] ?? [];
+    while (found.every((p) => p.length > common + 1 && p[common] === first[common])) common++;
+    // always show the last two segments, and never drop the segment that differs
+    common = Math.min(common, ...found.map((p) => Math.max(0, p.length - 2)));
+  }
+  return line.replace(ABS_PATH, (p) => {
+    const parts = p.split(/[\\/]/).filter(Boolean);
+    return `…/${(distinct.size > 1 ? parts.slice(common) : parts.slice(-2)).join('/')}`;
+  });
 }
 
 const baseName = (p: string): string => p.split(/[\\/]/).pop() ?? p;

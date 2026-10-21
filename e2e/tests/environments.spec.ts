@@ -439,6 +439,39 @@ test.describe('Environments: user journeys (mocked world)', () => {
     await expect(tid(native, 'env-to-review')).toBeEnabled();
   });
 
+  test('17. two checkouts of one repo share a compose project: the running one is preselected, the other is "not running", and a registry image keeps its name', async ({
+    browser,
+  }) => {
+    const running = '/home/user/projects/p5-run-trial/deploy/local/docker-compose.yml';
+    const other = '/home/user/projects/mm-fixes-wt/deploy/local/docker-compose.yml';
+    const page = await openAs(browser, { scenario: 'empty', extra: { 'aom-mock-local': 'copies' } });
+    await goEnv(page);
+    await tid(page, 'setup-add').click();
+    await tid(page, 'place-choice-Office PC').click();
+    // the running copy is chosen without a click; the other copy is listed apart and is not chosen
+    const choices = tid(page, 'stack-choice');
+    await expect(choices).toHaveCount(2);
+    await expect(choices.first()).toContainText(running);
+    await expect(choices.first().locator('input[type="radio"]')).toBeChecked();
+    await expect(tid(page, 'other-copies')).toContainText('not running');
+    await expect(choices.nth(1)).toContainText(other);
+    await expect(choices.nth(1).locator('input[type="radio"]')).not.toBeChecked();
+    await tid(page, 'env-next').click();
+    // the setup keeps the home folder as ~
+    const tilde = running.replace('/home/user', '~');
+    await expect(tid(page, 'env-details')).toContainText(tilde);
+    await expect(tid(page, 'env-details')).not.toContainText('mm-fixes-wt');
+    await tid(page, 'env-to-review').click();
+    await tid(page, 'review-save').click();
+    await expect(tid(page, 'review-saved')).toBeVisible();
+    // what was saved: the running file, and the image name without the registry address
+    const saved = await page.evaluate(() => localStorage.getItem('aom-mock-env') ?? '');
+    expect(saved).toContain(tilde);
+    expect(saved).not.toContain('mm-fixes-wt/deploy/local/docker-compose.yml"');
+    expect(saved).toContain('"imageName":"dcode-server"');
+    expect(saved).not.toContain('"imageName":"192.168.1.11"');
+  });
+
   test('10. card test copies: the Test copies card says where they run and what is running; without start steps it says so', async ({
     browser,
   }) => {

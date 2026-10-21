@@ -4,6 +4,7 @@ export * from './connect.ts';
 export * from './environments.ts';
 export * from './gate.ts';
 export * from './gate-text.ts';
+export * from './image-ref.ts';
 export * from './move.ts';
 export * from './probe.ts';
 export * from './protocol.ts';
