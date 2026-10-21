@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { BacklogPriority, BacklogSort, BacklogStatus } from '../backlog/index.ts';
 import { TOPIC_AREAS, TOPIC_AUDIENCES } from '../blog/topic.ts';
 
 /**
@@ -35,6 +36,10 @@ export const CEO_ACTIONS = [
   'intake',
   'specify',
   'draft-cards',
+  /** The project backlog (`aom ceo backlog add|update|send`): wanted work outside development. */
+  'backlog-add',
+  'backlog-update',
+  'backlog-send',
   /** `aom deploy run <env>`: ask the server for a release through the project's approved delivery recipe. */
   'deploy',
   /** `aom ceo order invoke`: the wake's CEO asks the server for a full-power turn that enforces one authorized order. */
@@ -182,6 +187,18 @@ export const CeoRpcSchema = z.discriminatedUnion('op', [
     area: z.enum(TOPIC_AREAS).optional(),
     audience: z.enum(TOPIC_AUDIENCES).optional(),
     from: z.array(z.string().trim().min(8).max(40)).max(20).default([]),
+  }),
+  /** The project backlog list (`aom ceo backlog list`), read-only; the writes are the `backlog-*` actions. */
+  z.object({
+    op: z.literal('backlog'),
+    sub: z.literal('list'),
+    project: z.string().max(10).optional(),
+    tag: z.array(z.string().max(40)).max(20).optional(),
+    priority: z.array(BacklogPriority).optional(),
+    flagged: z.boolean().optional(),
+    status: z.array(BacklogStatus).optional(),
+    q: z.string().max(200).optional(),
+    sort: BacklogSort.optional(),
   }),
   /** Standing orders with full power (`aom ceo order invoke|decline|done`). */
   z.object({
