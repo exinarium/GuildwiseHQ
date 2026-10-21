@@ -162,7 +162,7 @@ describe('apps that run directly on the machine (golden files)', () => {
     expect(text).toContain('reuse: The service "shop" is running');
     expect(text).toContain('untouched: nginx.service');
     expect(text).toContain('untouched: Container portainer');
-    expect(text).toContain('setup_once: /home/shop/shop is a plain folder');
+    expect(text).toContain('each_deploy: /home/shop/shop is a plain folder');
     expect(text).toContain('each_deploy: Point "current" at the new folder');
   });
 });

@@ -122,7 +122,8 @@ AOM_REMOTE
 STATE="$(remote "$APP_DIR" "$CURRENT_LINK" <<'AOM_REMOTE'
 set -eu
 dir=$1; link=$2
-[ -d "$dir" ] || { echo "AOM: there is no folder $dir on this machine" >&2; exit 21; }
+# the app folder is made by the first update when only its parent exists (one new folder next to the person's own)
+[ -d "$dir" ] || [ -d "$(dirname -- "$dir")" ] || { echo "AOM: there is no folder $(dirname -- "$dir") on this machine" >&2; exit 21; }
 kind=none
 if [ -L "$link" ]; then kind=link; elif [ -d "$link" ]; then kind=folder; elif [ -e "$link" ]; then kind=file; fi
 target=

@@ -230,7 +230,7 @@ function directChanges(
       );
     if (d.adoptFolder && d.currentLink)
       add(
-        'setup_once',
+        'each_deploy',
         `${d.currentLink} is a plain folder today. The first update moves it to ${d.appDir}/releases/initial and puts a link with the same name in its place. Nothing is deleted or copied.`,
         'adopt',
       );
