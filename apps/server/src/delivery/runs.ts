@@ -24,6 +24,7 @@ import { forbidden, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { type EnvGateVerdict, effectiveGates, evaluateEnvGate, latestMerge } from './gate.ts';
+import { releasesPaused } from './mode.ts';
 import { closeDeskNotice, raiseDeskNotice } from './notices.ts';
 import { queueReachabilityCheck } from './reachability.ts';
 import {
@@ -333,7 +334,9 @@ export async function requestDeployRun(ctx: Ctx, input: RequestDeployInput): Pro
       project,
       input,
       'not_recipe_mode',
-      `${project.key} delivers by instructions, not by a recipe`,
+      (await releasesPaused(ctx.pool, project.id))
+        ? 'Releases are paused for this project. Turn them back on in Environments, then try again.'
+        : 'Guided deploys are not turned on for this project yet. Open Environments and turn them on, then press Release again.',
       {
         recipeId: recipeRow?.id ?? null,
       },

@@ -13,7 +13,13 @@ import {
   sshShipEnv,
 } from '@aom/shared';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import {
+  GUIDED_MODE_MIGRATION,
+  GUIDED_MODE_REASON,
+  migrateGuidedMode,
+} from '../src/data-migrations/guided-mode.ts';
 import { observeRecipe } from '../src/delivery/recipes.ts';
+import { requestDeployRun } from '../src/delivery/runs.ts';
 import { keepOnline } from './helpers/ceo.ts';
 import { closeAdminPool, q as rawQ } from './helpers/db.ts';
 import { type DeliveryWorld, deliveryWorld, mergeLanded, setWeekday } from './helpers/delivery.ts';
@@ -558,7 +564,146 @@ describe('what is live, status and rollback', () => {
     });
     expect(byName.live.current.runId).toBe(live);
     expect(byName.live.rules.join(' ')).toContain('Test site is healthy on the same version for 10 minutes');
-    expect(s.deliveryMode).toBe('instructions');
+    // approving the setup turned guided deploys on by itself
+    expect(s.deliveryMode).toBe('recipe');
+  });
+
+  it('approving a guided setup switches the project to recipe mode (as the approver), and a release is then allowed', async () => {
+    const hash = await saved().then(async (x) => {
+      for (const e of setup().environments)
+        await q(
+          `INSERT INTO deploy_runs (id, org_id, project_id, recipe_id, env, target_name, hash, trigger, requested_by, status, trial, dry_run,
+             released_by_policy, created_at, finished_at, updated_at)
+           VALUES ($1,$2,$3,$4,$5,'x',$6,'request','{"kind":"owner","id":null}','succeeded',true,true,'owner',now(),now(),now())`,
+          [randomUUID(), d.orgId, d.w.projectId, randomUUID(), e.name, x.hash],
+        );
+      return x.hash;
+    });
+    const before = (await call('GET', `${base()}/environments/status`)).deliveryMode;
+    expect(before).toBe('instructions');
+    const refused = await requestDeployRun(d.w.t.app.ctx, {
+      projectId: d.w.projectId,
+      env: 'test',
+      trigger: 'request',
+      requester: { kind: 'owner', id: d.w.owner.id, provenance: 'session' },
+    });
+    expect(refused.runs[0]).toMatchObject({ status: 'refused', refusal: 'not_recipe_mode' });
+    expect(refused.message).not.toMatch(/instructions, not by a recipe/);
+    expect((await d.approve(hash)).status).toBe(200);
+    expect(
+      (await q(`SELECT delivery_mode FROM projects WHERE id=$1`, [d.w.projectId]))[0].delivery_mode,
+    ).toBe('recipe');
+    const ev = (
+      await q(`SELECT payload FROM events WHERE type='DeliveryModeSet' ORDER BY seq DESC LIMIT 1`)
+    )[0];
+    expect(ev.payload).toMatchObject({ mode: 'recipe', by: d.w.owner.id });
+    const allowed = await requestDeployRun(d.w.t.app.ctx, {
+      projectId: d.w.projectId,
+      env: 'test',
+      trigger: 'request',
+      requester: { kind: 'owner', id: d.w.owner.id, provenance: 'session' },
+    });
+    expect(allowed.runs[0]?.refusal).not.toBe('not_recipe_mode');
+  });
+
+  it('an environment that is saved and approved but never released is "ready", with text by its triggers', async () => {
+    await approved();
+    const s = await call('GET', `${base()}/environments/status`);
+    const byName = Object.fromEntries(s.environments.map((e: any) => [e.env, e]));
+    expect(byName.test).toMatchObject({
+      state: 'ready',
+      stateText: 'Approved. It updates after the next merge, or press Update now.',
+    });
+    expect(byName.live).toMatchObject({
+      state: 'ready',
+      stateText: 'Approved. Nothing is live here yet: press Release when you are ready.',
+    });
+  });
+
+  it('the Releases switch: pausing is audited with who and why, approving while paused keeps it paused, turning on needs no new approval', async () => {
+    const hash = await approved();
+    expect((await call('GET', `${base()}/delivery/setup`)).releasesPaused).toBe(false);
+    await call('PUT', `/api/projects/${d.w.projectId}/delivery/mode`, { mode: 'instructions' });
+    let st = await call('GET', `${base()}/delivery/setup`);
+    expect(st).toMatchObject({ deliveryMode: 'instructions', releasesPaused: true });
+    expect(st.modeHistory[0]).toMatchObject({ mode: 'instructions', reason: 'releases paused by the owner' });
+    expect(st.modeHistory[0].by).toBeTruthy();
+    const refused = await requestDeployRun(d.w.t.app.ctx, {
+      projectId: d.w.projectId,
+      env: 'test',
+      trigger: 'request',
+      requester: { kind: 'owner', id: d.w.owner.id, provenance: 'session' },
+    });
+    expect(refused.message).toMatch(/paused/);
+    const live = (await call('GET', `/api/org/live`)).rows;
+    expect(live.length).toBeGreaterThan(0);
+    expect(live.every((r: any) => r.releasesPaused === true)).toBe(true);
+    // a new version approved while paused stays paused
+    await saved({
+      environments: [...setup().environments.slice(0, 1), { ...setup().environments[1], label: 'Live' }],
+    });
+    const row = (
+      await q('SELECT observed_hash FROM delivery_recipes WHERE project_id=$1', [d.w.projectId])
+    )[0];
+    expect(row.observed_hash).not.toBe(hash);
+    for (const e of ['test', 'live'])
+      await q(
+        `INSERT INTO deploy_runs (id, org_id, project_id, recipe_id, env, target_name, hash, trigger, requested_by, status, trial, dry_run,
+           released_by_policy, created_at, finished_at, updated_at)
+         VALUES ($1,$2,$3,$4,$5,'x',$6,'request','{"kind":"owner","id":null}','succeeded',true,true,'owner',now(),now(),now())`,
+        [randomUUID(), d.orgId, d.w.projectId, randomUUID(), e, row.observed_hash],
+      );
+    expect((await d.approve(row.observed_hash)).status).toBe(200);
+    st = await call('GET', `${base()}/delivery/setup`);
+    expect(st).toMatchObject({ deliveryMode: 'instructions', releasesPaused: true });
+    // turning it on again needs nothing else
+    await call('PUT', `/api/projects/${d.w.projectId}/delivery/mode`, { mode: 'recipe' });
+    st = await call('GET', `${base()}/delivery/setup`);
+    expect(st).toMatchObject({ deliveryMode: 'recipe', releasesPaused: false });
+    expect(st.modeHistory.map((m: any) => m.mode).slice(0, 2)).toEqual(['recipe', 'instructions']);
+    // only an owner or admin flips it
+    const m = await d.member();
+    expect(
+      (await req('PUT', `/api/projects/${d.w.projectId}/delivery/mode`, { mode: 'instructions' }, m.cookie))
+        .status,
+    ).toBeGreaterThanOrEqual(403);
+  });
+
+  it('guided-mode migration: switches only a project with an approved guided setup, once, and a second run changes nothing', async () => {
+    const env = () => ({
+      pool: d.w.t.app.ctx.pool,
+      store: d.w.t.app.ctx.store,
+      clock: d.w.t.app.ctx.clock,
+      log: () => {},
+    });
+    const modeEvents = async () =>
+      (await q(`SELECT payload, actor_kind FROM events WHERE type='DeliveryModeSet' ORDER BY seq`)).length;
+    const mode = async () =>
+      (await q(`SELECT delivery_mode FROM projects WHERE id=$1`, [d.w.projectId]))[0].delivery_mode;
+    // no approved guided setup: untouched
+    await q(`DELETE FROM data_migrations WHERE name=$1`, [GUIDED_MODE_MIGRATION]);
+    let n = await modeEvents();
+    expect(await migrateGuidedMode(env())).toEqual([]);
+    expect(await modeEvents()).toBe(n);
+    expect(await mode()).toBe('instructions');
+    // approved guided setup, still on instructions (as production was)
+    await approved();
+    await q(`UPDATE projects SET delivery_mode='instructions' WHERE id=$1`, [d.w.projectId]);
+    await q(`DELETE FROM data_migrations WHERE name=$1`, [GUIDED_MODE_MIGRATION]);
+    n = await modeEvents();
+    expect(await migrateGuidedMode(env())).toEqual(['TOY']);
+    expect(await mode()).toBe('recipe');
+    expect(await modeEvents()).toBe(n + 1);
+    const last = (
+      await q(`SELECT payload, actor_kind FROM events WHERE type='DeliveryModeSet' ORDER BY seq DESC LIMIT 1`)
+    )[0];
+    expect(last.payload).toMatchObject({ mode: 'recipe', by: null, reason: GUIDED_MODE_REASON });
+    expect(last.actor_kind).toBe('system');
+    // idempotent: recorded, and also by state when the record is gone
+    expect(await migrateGuidedMode(env())).toBeNull();
+    await q(`DELETE FROM data_migrations WHERE name=$1`, [GUIDED_MODE_MIGRATION]);
+    expect(await migrateGuidedMode(env())).toEqual([]);
+    expect(await modeEvents()).toBe(n + 1);
   });
 
   it('a failed run, an update that is running and a place that cannot be reached each get their own state', async () => {

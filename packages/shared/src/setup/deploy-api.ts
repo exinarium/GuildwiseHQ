@@ -145,6 +145,19 @@ export const SetupStateDtoSchema = z.object({
   generator: z.string(),
   /** Servers whose steps use a compiler older than this server's: an improved version is available. */
   improvedAvailable: z.boolean().optional(),
+  /** The owner paused releases on purpose (the Releases switch): approving keeps them paused. */
+  releasesPaused: z.boolean().optional(),
+  /** The newest changes of the Releases switch, newest first, for the History of the page. */
+  modeHistory: z
+    .array(
+      z.object({
+        at: z.string(),
+        mode: z.enum(['instructions', 'recipe']),
+        by: z.string().nullable(),
+        reason: z.string().nullable(),
+      }),
+    )
+    .optional(),
   /** `recipe` once guided deploys are on, `instructions` after "Stop using guided deploys". Absent from an older server. */
   deliveryMode: z.enum(['instructions', 'recipe']).optional(),
 });

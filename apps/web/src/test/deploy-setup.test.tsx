@@ -621,6 +621,28 @@ describe('the server status and places', () => {
     });
   });
 
+  it('a saved and approved environment that was never released is Ready, with Update now (after a merge) or Release (by hand)', () => {
+    const s = savedState({}, { dryRunMissing: [], recipeStatus: 'approved' });
+    const text = {
+      uat: 'Approved. It updates after the next merge, or press Update now.',
+      production: 'Approved. Nothing is live here yet: press Release when you are ready.',
+    };
+    for (const [i, name] of ['uat', 'production'].entries()) {
+      const status = adaptStatus(
+        serverStatus({ env: name, state: 'ready', stateText: text[name as 'uat'], current: null }) as never,
+        [],
+        PROJECT,
+      );
+      const env = s.current.setup.environments[i];
+      expect(cardInfo({ s, env, draft: false, place: placesOf(s)[i], status })).toMatchObject({
+        state: 'ready',
+        chip: { label: 'Ready', tone: 'green' },
+        sentence: text[name as 'uat'],
+        action: 'update',
+      });
+    }
+  });
+
   it('places come from the server when it lists them: its reason a place cannot go is what is shown', async () => {
     const user = userEvent.setup();
     serveProject();
@@ -815,6 +837,93 @@ describe('the Environments page', () => {
     expect(within(card).queryByTestId('env-approve-uat')).toBeNull();
     expect(within(card).queryByTestId('setup-add')).toBeNull();
     expect(screen.queryByTestId('setup-add')).toBeNull();
+  });
+
+  it('an approved guided setup in instructions mode shows a callout whose button turns the deploys on', async () => {
+    const user = userEvent.setup();
+    serveProject();
+    serve(savedState({ deliveryMode: 'instructions' }, { dryRunMissing: [], recipeStatus: 'approved' }));
+    let body: unknown = null;
+    routes[`PUT /api/projects/${PROJECT}/delivery/mode`] = (init) => {
+      body = JSON.parse(String(init.body));
+      return json({});
+    };
+    mountPage();
+    const callout = await screen.findByTestId('env-mode-off');
+    expect(callout).toHaveTextContent('are off');
+    await user.click(within(callout).getByTestId('env-mode-on'));
+    await waitFor(() => expect(body).toEqual({ mode: 'recipe' }));
+  });
+
+  it('the Releases switch: owner pauses after a plain confirm, the cards say paused and cannot update, history shows who', async () => {
+    const user = userEvent.setup();
+    serveProject();
+    const on = savedState(
+      {
+        deliveryMode: 'recipe',
+        modeHistory: [{ at: new Date().toISOString(), mode: 'instructions', by: 'Pieter', reason: 'x' }],
+      },
+      { dryRunMissing: [], recipeStatus: 'approved', approvedHash: 'a'.repeat(64) },
+    );
+    serve(on);
+    let body: unknown = null;
+    routes[`PUT /api/projects/${PROJECT}/delivery/mode`] = (init) => {
+      body = JSON.parse(String(init.body));
+      return json({});
+    };
+    mountPage();
+    const toggle = await screen.findByTestId('releases-toggle');
+    expect(toggle).toHaveTextContent('On');
+    expect(await screen.findByTestId('history-mode')).toHaveTextContent(/Releases paused.*by Pieter/);
+    await user.click(toggle);
+    const dlg = await screen.findByTestId('releases-pause-dialog');
+    expect(dlg).toHaveTextContent('automatic updates after a merge');
+    expect(dlg).toHaveTextContent('Turning Releases back on needs no new approval');
+    await user.click(screen.getByTestId('releases-pause-confirm'));
+    await waitFor(() => expect(body).toEqual({ mode: 'instructions' }));
+  });
+
+  it('paused: cards show Releases paused, Update now is disabled with the reason, and the switch turns it on', async () => {
+    const user = userEvent.setup();
+    serveProject();
+    serve(
+      savedState(
+        { deliveryMode: 'instructions', releasesPaused: true },
+        { dryRunMissing: [], recipeStatus: 'approved', approvedHash: 'a'.repeat(64) },
+      ),
+    );
+    let body: unknown = null;
+    routes[`PUT /api/projects/${PROJECT}/delivery/mode`] = (init) => {
+      body = JSON.parse(String(init.body));
+      return json({});
+    };
+    mountPage();
+    const card = await screen.findByTestId('env-card-uat');
+    expect(within(card).getByTestId('env-chip-uat')).toHaveTextContent('Releases paused');
+    expect(within(card).getByTestId('env-paused-uat')).toBeInTheDocument();
+    expect(screen.getByTestId('releases-toggle')).toHaveTextContent('Paused');
+    // an explicit pause is not the "off" prompt
+    expect(screen.queryByTestId('env-mode-off')).toBeNull();
+    await user.click(screen.getByTestId('releases-toggle'));
+    await waitFor(() => expect(body).toEqual({ mode: 'recipe' }));
+  });
+
+  it('without an approved recipe the switch is off and explains why; a member sees it read-only', async () => {
+    serveProject();
+    serve(savedState({ deliveryMode: 'instructions', canEdit: false, canApprove: false }));
+    mountPage();
+    expect(await screen.findByTestId('releases-needs-approval')).toHaveTextContent(
+      'Approve an environment first',
+    );
+    expect(screen.getByTestId('releases-toggle')).toBeDisabled();
+  });
+
+  it('no callout when deploys are already on', async () => {
+    serveProject();
+    serve(savedState({ deliveryMode: 'recipe' }, { dryRunMissing: [], recipeStatus: 'approved' }));
+    mountPage();
+    await screen.findByTestId('env-card-uat');
+    expect(screen.queryByTestId('env-mode-off')).toBeNull();
   });
 
   it('a runner that is too old is a plain warning, the cards stay', async () => {

@@ -64,6 +64,11 @@ export function LiveMatrix({ canRelease = false }: { canRelease?: boolean }) {
               </Link>
               <span className="text-sm text-fg">{r.label}</span>
               <Badge tone={HEALTH[r.health].tone}>{HEALTH[r.health].text}</Badge>
+              {r.releasesPaused && (
+                <Badge tone="amber" data-testid={`live-paused-${r.projectKey}-${r.env}`}>
+                  Releases paused
+                </Badge>
+              )}
             </div>
             <p className="text-sm text-muted">
               Version <span className="font-mono text-fg">{r.version ?? 'none yet'}</span>, {since(r.since)}
@@ -113,6 +118,11 @@ export function LiveMatrix({ canRelease = false }: { canRelease?: boolean }) {
                 <td className="px-3 py-2 text-muted">{since(r.since)}</td>
                 <td className="px-3 py-2">
                   <Badge tone={HEALTH[r.health].tone}>{HEALTH[r.health].text}</Badge>
+                  {r.releasesPaused && (
+                    <Badge tone="amber" data-testid={`live-paused-row-${r.projectKey}-${r.env}`}>
+                      Releases paused
+                    </Badge>
+                  )}
                 </td>
                 <td className="px-3 py-2 text-muted">{r.placeName ?? ''}</td>
                 <td className="px-3 py-2">{waiting(r, 'live-waiting')}</td>

@@ -116,6 +116,7 @@ export const ENV_CARD_STATES = [
   'changed',
   'custom',
   'not_set_up',
+  'ready',
 ] as const;
 export const EnvCardStateSchema = z.enum(ENV_CARD_STATES);
 export type EnvCardState = z.infer<typeof EnvCardStateSchema>;
@@ -203,6 +204,8 @@ export const LiveRowDtoSchema = z.object({
   since: IsoTime.nullable(),
   health: z.enum(['healthy', 'unhealthy', 'unknown']),
   waitingReleases: z.number().int(),
+  /** The owner paused releases of this project (the Releases switch). */
+  releasesPaused: z.boolean().optional(),
 });
 export type LiveRowDto = z.infer<typeof LiveRowDtoSchema>;
 export const OrgLiveResponseSchema = z.object({ rows: z.array(LiveRowDtoSchema), generatedAt: IsoTime });

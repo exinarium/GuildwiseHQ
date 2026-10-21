@@ -6,6 +6,7 @@ import { migrateCeoModels } from './ceo-models.ts';
 import { migrateCeoWorkingBranch } from './ceo-working-branch.ts';
 import { migrateDesignHeldStatus } from './design-held-status.ts';
 import { migrateGraphBackfill } from './graph-backfill.ts';
+import { migrateGuidedMode } from './guided-mode.ts';
 import { migrateNoPersonal } from './no-personal.ts';
 import { migrateOrgInboxes } from './org-inboxes.ts';
 import { type DataMigrationEnv, migrateOrgs } from './orgs.ts';
@@ -88,6 +89,7 @@ export const DATA_MIGRATIONS: Array<{ name: string; run: (env: DataMigrationEnv)
   { name: 'project-vaults-2026-10', run: (env) => migrateProjectVaults(env) },
   { name: 'graph-backfill-2026-10', run: (env) => migrateGraphBackfill(env) },
   { name: 'reporter-retired-2026-10', run: (env) => migrateReporterRetired(env) },
+  { name: 'guided-mode-2026-10', run: (env) => migrateGuidedMode(env) },
 ];
 
 export async function runDataMigrations(env: DataMigrationEnv): Promise<void> {
