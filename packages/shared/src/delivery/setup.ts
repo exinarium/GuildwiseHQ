@@ -60,6 +60,11 @@ export const SshAliasSchema = z
 export const ComposeProjectSchema = z
   .string()
   .regex(/^[a-z0-9][a-z0-9_-]{0,62}$/, 'a compose project name has lowercase letters, digits, - and _ only');
+/** A registry host with an optional port: `registry.example.com`, `192.168.1.11:5000`. */
+export const RegistryHostSchema = z
+  .string()
+  .max(120)
+  .regex(/^[A-Za-z0-9][A-Za-z0-9.-]*(:[0-9]{1,5})?$/, 'a registry address like registry.example.com or 192.168.1.5:5000');
 export const SetupUrlSchema = z
   .string()
   .max(500)
@@ -82,8 +87,15 @@ export const SetupAppSchema = z.object({
   /** The only service that is rebuilt or restarted. */
   service: ServiceNameSchema,
   imageName: ImageNameSchema,
-  /** On a server: the `.env` key that pins the image (`GUILDWISE_IMAGE`). */
+  /**
+   * On a server: the `.env` key that pins the image (`GUILDWISE_IMAGE`). Absent: the new version is named in an override file
+   * (`docker-compose.guildwise.yml`) next to the compose file, so neither the compose file nor `.env` needs a variable.
+   */
   imageVar: EnvVarNameSchema.optional(),
+  /** "Pull the new version from a registry": the registry address; the image is `<registry>/<imageName>:<commit>`. */
+  registry: RegistryHostSchema.optional(),
+  /** "Build on the server": where the approved version's files are put on the server (default next to the compose file). */
+  sourceDir: RemotePathSchema.optional(),
   /**
    * How many `<imageName>:<commit>` tags to keep on this computer (older ones are removed, never the running or previous).
    * Only used when the app runs on this computer: a server's images are not pruned.
@@ -122,6 +134,16 @@ export const DeployStepSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('ship_image_ssh') }),
   /** Point the server's `.env` at the new image. */
   z.object({ kind: z.literal('set_image_var') }),
+  /** Name the new image in `docker-compose.guildwise.yml` next to the compose file (the compose file itself is never edited). */
+  z.object({ kind: z.literal('write_override') }),
+  /** Upload the image to the registry (after `build_image_local`). */
+  z.object({ kind: z.literal('push_image_registry') }),
+  /** The server downloads the new image from the registry. */
+  z.object({ kind: z.literal('pull_image_ssh') }),
+  /** Put the approved version's files on the server (no git sign-in is needed there). */
+  z.object({ kind: z.literal('ship_source_ssh') }),
+  /** The server builds the image from those files with `compose build` (only the app service). */
+  z.object({ kind: z.literal('build_image_server') }),
   /** This computer: rebuild and restart only the app service. */
   z.object({ kind: z.literal('compose_up_local') }),
   /** The server: restart only the app service. */
@@ -208,11 +230,30 @@ const ALLOWED: Record<SetupEnv['hosting'], DeployStepKind[]> = {
     'build_image_local',
     'ship_image_ssh',
     'set_image_var',
+    'write_override',
+    'push_image_registry',
+    'pull_image_ssh',
+    'ship_source_ssh',
+    'build_image_server',
     'compose_run',
     'compose_up_remote',
     'custom_command',
   ],
 };
+
+export type UpdateMethod = 'ship' | 'registry' | 'build_on_server';
+
+/** Which way a server environment gets its new version (derived from its steps; absent steps mean the original copy method). */
+export function updateMethodOf(e: Pick<SetupEnv, 'steps'>): UpdateMethod {
+  const kinds = e.steps.map((s) => s.kind);
+  if (kinds.includes('build_image_server') || kinds.includes('ship_source_ssh')) return 'build_on_server';
+  if (kinds.includes('pull_image_ssh')) return 'registry';
+  return 'ship';
+}
+
+/** The full image name of an environment, registry included. */
+export const fullImageName = (a: Pick<SetupApp, 'imageName' | 'registry'>): string =>
+  a.registry ? `${a.registry}/${a.imageName}` : a.imageName;
 
 /** Plain-words problems with the shape of one environment (not with single values: the schema reports those). */
 export function validateEnvShape(
@@ -240,24 +281,50 @@ export function validateEnvShape(
   } else {
     if (e.app.composeFile.startsWith('~'))
       out.push('On a server the compose file needs a full path like /opt/app/docker-compose.yml.');
-    if (!e.app.imageVar)
-      out.push('A server deploy needs the name of the setting that holds the image (for example APP_IMAGE).');
     if (!e.host) out.push('A server deploy needs the name of the server.');
-    for (const need of ['build_image_local', 'ship_image_ssh', 'set_image_var', 'compose_up_remote'] as const)
+    const method = updateMethodOf({ steps: e.steps });
+    const switchStep: DeployStepKind = e.app.imageVar ? 'set_image_var' : 'write_override';
+    const wrongSwitch: DeployStepKind = e.app.imageVar ? 'write_override' : 'set_image_var';
+    if (kinds.includes(wrongSwitch))
+      out.push(
+        e.app.imageVar
+          ? 'The version is named in the settings file (.env), so the override file step does not belong here.'
+          : 'No settings line is named for the image, so the step that edits .env does not belong here: the new version is named in an override file.',
+      );
+    const chain: DeployStepKind[] =
+      method === 'build_on_server'
+        ? ['ship_source_ssh', 'build_image_server', switchStep, 'compose_up_remote']
+        : method === 'registry'
+          ? [
+              ...(kinds.includes('build_image_local') || kinds.includes('push_image_registry')
+                ? (['build_image_local', 'push_image_registry'] as DeployStepKind[])
+                : []),
+              'pull_image_ssh',
+              switchStep,
+              'compose_up_remote',
+            ]
+          : ['build_image_local', 'ship_image_ssh', switchStep, 'compose_up_remote'];
+    for (const need of chain)
       if (!kinds.includes(need)) out.push(`A server deploy needs the step "${need}".`);
+    if (method === 'registry' && !e.app.registry)
+      out.push('Name the registry the new version is pulled from.');
+    if (method !== 'registry' && e.app.registry)
+      out.push('A registry address only belongs to the registry method.');
     const order = (k: DeployStepKind) => kinds.indexOf(k);
     if (
-      kinds.includes('build_image_local') &&
-      !(
-        order('build_image_local') < order('ship_image_ssh') &&
-        order('ship_image_ssh') < order('set_image_var') &&
-        order('set_image_var') < order('compose_up_remote')
-      )
+      chain.every((k) => kinds.includes(k)) &&
+      chain.some((k, i) => i > 0 && order(chain[i - 1] as DeployStepKind) > order(k))
     )
       out.push(
-        'The steps must run in this order: build, copy to the server, switch the image, restart the app.',
+        method === 'build_on_server'
+          ? 'The steps must run in this order: copy the files, build, switch the image, restart the app.'
+          : method === 'registry'
+            ? 'The steps must run in this order: build, upload, download on the server, switch the image, restart the app.'
+            : 'The steps must run in this order: build, copy to the server, switch the image, restart the app.',
       );
-    if (kinds.includes('env_backup') && order('env_backup') > order('set_image_var'))
+    if (kinds.includes('env_backup') && !e.app.imageVar)
+      out.push('There is no settings line to save a copy of: the settings-file backup does not belong here.');
+    if (kinds.includes('env_backup') && order('env_backup') > order(switchStep))
       out.push('The settings file must be saved before the image is switched.');
   }
   const bk = kinds.indexOf('db_backup');
@@ -268,7 +335,10 @@ export function validateEnvShape(
     if (up >= 0 && runs > up) out.push('The database updates must run before the app is restarted.');
     if (bk >= 0 && runs < bk) out.push('The database backup must come before the database updates.');
     if (bk < 0) out.push('Back up the database before running database updates.');
-    if (e.hosting === 'ssh' && kinds.includes('ship_image_ssh') && runs < kinds.indexOf('ship_image_ssh'))
+    const arrive = ['ship_image_ssh', 'pull_image_ssh', 'build_image_server'].find((k) =>
+      kinds.includes(k as DeployStepKind),
+    );
+    if (e.hosting === 'ssh' && arrive && runs < kinds.indexOf(arrive as DeployStepKind))
       out.push('The new app must be on the server before the database updates run.');
   }
   if (e.rollback && e.health.kind !== 'http')
@@ -318,6 +388,16 @@ export function describeSetupStep(s: DeployStep, env: Pick<SetupEnv, 'app' | 'ho
       return 'Copy the new app image to the server (skipped if it is already there).';
     case 'set_image_var':
       return `Switch the server to the new version (only the ${env.app.imageVar ?? 'image'} line of its settings file changes).`;
+    case 'write_override':
+      return `Switch the server to the new version by naming it in docker-compose.guildwise.yml next to your compose file (your own compose file is not edited).`;
+    case 'push_image_registry':
+      return `Upload the new image to the registry (${env.app.registry ?? 'registry'}).`;
+    case 'pull_image_ssh':
+      return 'The server downloads the new image from the registry (skipped if it is already there).';
+    case 'ship_source_ssh':
+      return 'Put the approved version’s files on the server (in their own folder; nothing there is overwritten).';
+    case 'build_image_server':
+      return `The server builds the new image from those files (only "${env.app.service}" is built).`;
     case 'compose_up_local':
       return `Rebuild and restart only "${env.app.service}" on this computer, from the approved version (nothing else is stopped).`;
     case 'compose_up_remote':

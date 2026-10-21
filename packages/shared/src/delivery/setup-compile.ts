@@ -8,6 +8,7 @@ import {
   SETUP_FILE,
   SETUP_GENERATOR,
   type SetupEnv,
+  updateMethodOf,
 } from './setup.ts';
 
 /**
@@ -423,18 +424,21 @@ function sshHelpers(): string[] {
  */
 export const ENV_VALUE_AWK = String.raw`BEGIN { v = ENVIRON["VAR"] } { sub(/\r$/, ""); l = $0; sub(/^[ \t]*(export[ \t]+)?/, "", l); if (index(l, v "=") != 1) next; val = substr(l, length(v) + 2); sub(/^[ \t]+/, "", val); if (val ~ /^"/) { sub(/^"/, "", val); sub(/".*$/, "", val) } else if (val ~ /^\047/) { sub(/^\047/, "", val); sub(/\047.*$/, "", val) } else { sub(/[ \t]+#.*$/, "", val); sub(/[ \t]+$/, "", val) } last = val } END { print last }`;
 
-function remoteState(): string[] {
+function remoteState(env: SetupEnv): string[] {
+  const p = !!env.app.composeProject;
   return [
-    'STATE="$(remote "$APP_DIR" "$COMPOSE_FILE" "$IMAGE_VAR" "$SERVICE" <<\'AOM_REMOTE\'',
+    `STATE="$(remote "$APP_DIR" "$COMPOSE_FILE" "$IMAGE_VAR" "$SERVICE"${p ? ' "$COMPOSE_PROJECT"' : ''} <<'AOM_REMOTE'`,
     'set -eu',
-    'dir=$1; file=$2; var=$3; svc=$4',
+    p ? 'dir=$1; file=$2; var=$3; svc=$4; proj=$5' : 'dir=$1; file=$2; var=$3; svc=$4',
     '[ -d "$dir" ] || { echo "AOM: there is no folder $dir on the server" >&2; exit 21; }',
     '[ -f "$file" ] || { echo "AOM: there is no compose file $file on the server" >&2; exit 22; }',
     'docker info >/dev/null 2>&1 || { echo "AOM: docker is not usable by this user on the server" >&2; exit 23; }',
     'cur=',
     'if [ -f "$dir/.env" ]; then cur=$(VAR="$var" awk \'' + ENV_VALUE_AWK + '\' "$dir/.env"); fi',
     'run=',
-    'id=$(cd "$dir" && dc -f "$file" ps -q "$svc" 2>/dev/null | head -n 1) || id=',
+    p
+      ? 'id=$(cd "$dir" && dc -p "$proj" -f "$file" ps -q "$svc" 2>/dev/null | head -n 1) || id='
+      : 'id=$(cd "$dir" && dc -f "$file" ps -q "$svc" 2>/dev/null | head -n 1) || id=',
     `if [ -n "$id" ]; then run=$(docker inspect --format '{{.Config.Image}}' "$id" 2>/dev/null) || run=; fi`,
     `engine=$(docker version --format '{{.Server.Version}}' 2>/dev/null) || engine=`,
     'comp=',
@@ -461,9 +465,34 @@ function remoteState(): string[] {
   ];
 }
 
+/** The override file next to the compose file that names the new image when there is no `.env` variable. */
+export const OVERRIDE_NAME = 'docker-compose.guildwise.yml';
+const usesOverride = (env: SetupEnv): boolean => !env.app.imageVar;
+/** The shell function that switches the server to image "$1" (and back, on rollback). */
+const switchFn = (env: SetupEnv): string => (usesOverride(env) ? 'write_override' : 'set_image_var');
+
 function sshFunctions(env: SetupEnv): string[] {
   const proj = env.app.composeProject ? '"$COMPOSE_PROJECT"' : '""';
+  const ov = usesOverride(env);
   return [
+    ...(ov
+      ? [
+    '# name the new image in an override file next to the compose file (the compose file and .env are never edited)',
+    'write_override() {',
+    '  remote "$APP_DIR" "$SERVICE" "$1" "$SHORT" <<\'AOM_REMOTE\'',
+    'set -eu',
+    'dir=$1; svc=$2; tag=$3; short=$4',
+    `ov="$dir/${OVERRIDE_NAME}"`,
+    'tmp="$ov.aom-tmp.$$"',
+    `trap 'rm -f -- "$tmp"' EXIT`,
+    'if [ -f "$ov" ] && [ ! -e "$ov.bak-before-$short" ]; then cp -p -- "$ov" "$ov.bak-before-$short"; fi',
+    `printf '# Written by Guildwise. It names the version that runs; your own compose file is not changed.\\nservices:\\n  %s:\\n    image: "%s"\\n' "$svc" "$tag" > "$tmp"`,
+    'mv -- "$tmp" "$ov"',
+    'echo "set the image of $svc to $tag in $ov" >&2',
+    'AOM_REMOTE',
+    '}',
+      ]
+      : [
     "# switch exactly one line of the server's .env (a temporary copy is moved over it)",
     'set_image_var() {',
     '  remote "$APP_DIR" "$IMAGE_VAR" "$1" <<\'AOM_REMOTE\'',
@@ -483,6 +512,7 @@ function sshFunctions(env: SetupEnv): string[] {
     'echo "set $var in $envf" >&2',
     'AOM_REMOTE',
     '}',
+      ]),
     '# restart only the app service (never down, never other services)',
     'compose_up_remote() {',
     `  remote "$APP_DIR" "$COMPOSE_FILE" "$SERVICE" "$1" ${proj} <<'AOM_REMOTE'`,
@@ -490,8 +520,9 @@ function sshFunctions(env: SetupEnv): string[] {
     'dir=$1; file=$2; svc=$3; dry=$4; proj=$5',
     'cd "$dir"',
     'if [ -n "$proj" ]; then set -- -p "$proj" -f "$file"; else set -- -f "$file"; fi',
+    ...(ov ? [`[ ! -f "$dir/${OVERRIDE_NAME}" ] || set -- "$@" -f "$dir/${OVERRIDE_NAME}"`] : []),
     'if [ "$dry" = 1 ]; then dc "$@" config -q; echo "would restart only $svc" >&2; exit 0; fi',
-    'dc "$@" up -d --no-deps "$svc"',
+    ov ? 'dc "$@" up -d --no-deps --no-build "$svc"' : 'dc "$@" up -d --no-deps "$svc"',
     'AOM_REMOTE',
     '}',
     ...(env.steps.some((x) => x.kind === 'compose_run')
@@ -505,7 +536,14 @@ function sshFunctions(env: SetupEnv): string[] {
           'cd "$dir"',
           'pa=(-f "$file"); [ -z "$proj" ] || pa=(-p "$proj" -f "$file")',
           'if [ "$dry" = 1 ]; then dc "${pa[@]}" config -q; echo "would run the database updates in $svc" >&2; exit 0; fi',
-          'export "$var=$tag"',
+          ...(ov
+            ? [
+                `[ ! -f "$dir/${OVERRIDE_NAME}" ] || pa+=(-f "$dir/${OVERRIDE_NAME}")`,
+                'tmpd=$(mktemp -d); trap \'rm -rf -- "$tmpd"\' EXIT',
+                `printf 'services:\\n  %s:\\n    image: "%s"\\n' "$svc" "$tag" > "$tmpd/run.yml"`,
+                'pa+=(-f "$tmpd/run.yml")',
+              ]
+            : ['export "$var=$tag"']),
           'dc "${pa[@]}" run --rm -T "$svc" "$@" </dev/null',
           'AOM_REMOTE',
           '}',
@@ -518,12 +556,17 @@ function sshFunctions(env: SetupEnv): string[] {
 function sshScript(setup: DeliverySetup, env: SetupEnv): string {
   const a = env.app;
   const dir = a.composeFile.slice(0, a.composeFile.lastIndexOf('/')) || '/';
+  const method = updateMethodOf(env);
   const out: Array<string | null> = [...header(setup, env)];
   out.push(
     `ENV_NAME=${shq(env.name)}`,
     `SERVICE=${shq(a.service)}`,
     `IMAGE=${shq(a.imageName)}`,
     `IMAGE_VAR=${shq(a.imageVar ?? '')}`,
+    ...(a.registry ? [`REGISTRY=${shq(a.registry)}`] : []),
+    ...(method === 'build_on_server'
+      ? [`SRC_DIR=${shq(a.sourceDir ?? `${dir === '/' ? '' : dir}/guildwise-src`)}`]
+      : []),
     `APP_DIR=${shq(dir)}`,
     `COMPOSE_FILE=${shq(a.composeFile)}`,
     a.composeProject ? `COMPOSE_PROJECT=${shq(a.composeProject)}` : null,
@@ -536,6 +579,7 @@ function sshScript(setup: DeliverySetup, env: SetupEnv): string {
   out.push(...doneFunction());
   out.push(
     ...commitChecks(),
+    ...(a.registry ? ['TAG="$REGISTRY/$TAG"'] : []),
     ...healthUrlCheck(env),
     ...lockBlock(`${a.composeProject ?? a.service}-${env.name}`),
     '',
@@ -543,9 +587,11 @@ function sshScript(setup: DeliverySetup, env: SetupEnv): string {
     ...sshHelpers(),
     ...sshFunctions(env),
     `rsh 'true' </dev/null || die "cannot sign in to $HOST without a password: check the sign-in of this computer"`,
-    ...remoteState(),
+    ...remoteState(env),
     '',
-    'if [ "$CURRENT_IMAGE" = "$TAG" ] && [ "$RUNNING_IMAGE" = "$TAG" ] && healthy; then',
+    usesOverride(env)
+      ? 'if [ "$RUNNING_IMAGE" = "$TAG" ] && healthy; then'
+      : 'if [ "$CURRENT_IMAGE" = "$TAG" ] && [ "$RUNNING_IMAGE" = "$TAG" ] && healthy; then',
     '  say "already deployed: $TAG is running and healthy"',
     '  done_line',
     '  exit 0',
@@ -577,10 +623,12 @@ function sshGuard(env: SetupEnv): string[] {
       ? [
           '    if [ -n "$PREVIOUS" ] && [ "$PREVIOUS" != "$TAG" ]; then',
           '      say "putting the previous version back: $PREVIOUS"',
-          '      if set_image_var "$PREVIOUS" && compose_up_remote 0; then',
+          `      if ${switchFn(env)} "$PREVIOUS" && compose_up_remote 0; then`,
           '        if wait_healthy 60; then say "rolled back to $PREVIOUS"; else say "still not healthy after going back to $PREVIOUS"; fi',
           '      else',
-          '        say "ROLLBACK FAILED: the server may still be running $TAG. Settings copy: $APP_DIR/.env.bak-before-$SHORT. Put $PREVIOUS back by hand."',
+          usesOverride(env)
+            ? `        say "ROLLBACK FAILED: the server may still be running $TAG. Put $PREVIOUS back by hand (the image line in ${OVERRIDE_NAME} in $APP_DIR)."`
+            : '        say "ROLLBACK FAILED: the server may still be running $TAG. Settings copy: $APP_DIR/.env.bak-before-$SHORT. Put $PREVIOUS back by hand."',
           '      fi',
           '      [ -z "$BACKUP_FILE" ] || say "the database was NOT rolled back; the backup made before this update is $BACKUP_FILE"',
           '    else',
@@ -599,6 +647,7 @@ function sshGuard(env: SetupEnv): string[] {
 }
 
 function sshStep(s: DeployStep, i: number, env: SetupEnv): string[] {
+  const DCF = env.app.composeProject ? 'dc -p "$proj" -f "$file"' : 'dc -f "$file"';
   switch (s.kind) {
     case 'db_backup':
       return [
@@ -608,19 +657,20 @@ function sshStep(s: DeployStep, i: number, env: SetupEnv): string[] {
         `DB_USER=${shq(s.dbUser ?? '')}`,
         `DB_NAME=${shq(s.dbName ?? '')}`,
         `KEEP_BACKUPS=${s.keep}`,
-        `BACKUP_FILE="$(remote "$APP_DIR" "$COMPOSE_FILE" "$DB_SERVICE" "$BACKUP_DIR" "$ENV_NAME" "$SHORT" "$KEEP_BACKUPS" "$DB_USER" "$DB_NAME" "$DRY_RUN" <<'AOM_REMOTE'`,
+        `BACKUP_FILE="$(remote "$APP_DIR" "$COMPOSE_FILE" "$DB_SERVICE" "$BACKUP_DIR" "$ENV_NAME" "$SHORT" "$KEEP_BACKUPS" "$DB_USER" "$DB_NAME" "$DRY_RUN"${env.app.composeProject ? ' "$COMPOSE_PROJECT"' : ''} <<'AOM_REMOTE'`,
         'set -euo pipefail',
         'dir=$1; file=$2; svc=$3; bdir=$4; env=$5; short=$6; keep=$7; dbuser=$8; dbname=$9; dry=${10}',
+        ...(env.app.composeProject ? ['proj=${11}'] : []),
         'cd "$dir"',
         'if [ "$dry" = 1 ]; then',
-        '  [ -n "$(dc -f "$file" ps -q "$svc")" ] || { echo "AOM: the database service $svc is not running" >&2; exit 30; }',
+        `  [ -n "$(${DCF} ps -q "$svc")" ] || { echo "AOM: the database service $svc is not running" >&2; exit 30; }`,
         '  echo "would: back up the database ($svc) to $bdir, keeping the newest $keep" >&2',
         '  exit 0',
         'fi',
         'umask 077',
         'mkdir -p -- "$bdir"',
         'out="$bdir/$env-before-$short-$(date +%Y%m%d-%H%M%S).sql.gz"',
-        `if ! dc -f "$file" exec -T "$svc" sh -c ${shq('pg_dump -U "${1:-$POSTGRES_USER}" -d "${2:-$POSTGRES_DB}"')} sh "$dbuser" "$dbname" </dev/null | gzip > "$out.part"; then`,
+        `if ! ${DCF} exec -T "$svc" sh -c ${shq('pg_dump -U "${1:-$POSTGRES_USER}" -d "${2:-$POSTGRES_DB}"')} sh "$dbuser" "$dbname" </dev/null | gzip > "$out.part"; then`,
         '  rm -f -- "$out.part"',
         '  echo "AOM: the database backup failed" >&2',
         '  exit 31',
@@ -686,6 +736,78 @@ function sshStep(s: DeployStep, i: number, env: SetupEnv): string[] {
         '  SWITCHED=1',
         '  set_image_var "$TAG"',
         'fi',
+      ];
+    case 'write_override':
+      return [
+        ...stepNumberComment(i, `switch the server to the new version (${OVERRIDE_NAME}, your compose file is not edited)`),
+        'if [ "$DRY_RUN" = 1 ]; then',
+        `  would "name $TAG as the image of $SERVICE in $APP_DIR/${OVERRIDE_NAME} (now: \${RUNNING_IMAGE:-nothing}); your compose file is not changed"`,
+        'else',
+        '  SWITCHED=1',
+        '  write_override "$TAG"',
+        'fi',
+      ];
+    case 'push_image_registry':
+      return [
+        ...stepNumberComment(i, 'upload the image to the registry'),
+        'if [ "$DRY_RUN" = 1 ]; then',
+        '  would "upload $TAG to the registry $REGISTRY"',
+        'else',
+        '  docker push "$TAG" || die "could not upload $TAG to the registry $REGISTRY (is it reachable from this computer, and are you signed in to it?)"',
+        'fi',
+      ];
+    case 'pull_image_ssh':
+      return [
+        ...stepNumberComment(i, 'the server downloads the image from the registry'),
+        'if rsh "docker image inspect$(rquote "$TAG")" </dev/null >/dev/null 2>&1; then',
+        '  say "image $TAG is already on the server"',
+        'elif [ "$DRY_RUN" = 1 ]; then',
+        '  would "let the server download $TAG from the registry $REGISTRY"',
+        'else',
+        '  rsh "docker pull$(rquote "$TAG")" </dev/null || die "the server could not download $TAG from the registry $REGISTRY (is the registry reachable from the server, and does its Docker trust it?)"',
+        'fi',
+      ];
+    case 'ship_source_ssh':
+      return [
+        ...stepNumberComment(i, 'put the approved version’s files on the server'),
+        sh`SRC_DEST="$SRC_DIR/$SHORT"`,
+        'if rsh "test -f$(rquote "$SRC_DEST/.aom-complete")" </dev/null >/dev/null 2>&1; then',
+        '  say "the files of $SHORT are already on the server"',
+        'elif [ "$DRY_RUN" = 1 ]; then',
+        '  would "copy the approved version’s files to $SRC_DEST on the server"',
+        'else',
+        '  [ -d "$CHECKOUT" ] || die "AOM_DEPLOY_CHECKOUT is not a folder"',
+        '  rsh "mkdir -p --$(rquote "$SRC_DEST")" </dev/null || die "could not create $SRC_DEST on the server"',
+        '  if git -C "$CHECKOUT" rev-parse --git-dir >/dev/null 2>&1; then',
+        '    git -C "$CHECKOUT" archive --format=tar "$COMMIT" | rsh "tar -x -f - -C$(rquote "$SRC_DEST")"',
+        '  else',
+        '    (cd "$CHECKOUT" && tar -c -f - --exclude=.git .) | rsh "tar -x -f - -C$(rquote "$SRC_DEST")"',
+        '  fi',
+        '  rsh "touch$(rquote "$SRC_DEST/.aom-complete")" </dev/null',
+        '  # keep the newest 3 copies of the files; nothing else in the folder is touched',
+        '  remote "$SRC_DIR" "$SHORT" <<\'AOM_REMOTE\' || true',
+        'set -eu',
+        'd=$1; cur=$2',
+        `ls -1t -- "$d" 2>/dev/null | grep -E '^[0-9a-f]{12}$' | tail -n +4 | while IFS= read -r old; do [ "$old" = "$cur" ] || rm -rf -- "$d/$old"; done`,
+        'AOM_REMOTE',
+        'fi',
+      ];
+    case 'build_image_server':
+      return [
+        ...stepNumberComment(i, `the server builds ${env.app.service}`),
+        'remote "$APP_DIR" "$COMPOSE_FILE" "$SERVICE" "$TAG" "$SRC_DEST" "$DRY_RUN" ' +
+          (env.app.composeProject ? '"$COMPOSE_PROJECT"' : '""') +
+          " <<'AOM_REMOTE'",
+        'set -eu',
+        'dir=$1; file=$2; svc=$3; tag=$4; ctx=$5; dry=$6; proj=$7',
+        'cd "$dir"',
+        'pa=(-f "$file"); [ -z "$proj" ] || pa=(-p "$proj" -f "$file")',
+        'if [ "$dry" = 1 ]; then dc "${pa[@]}" config -q; echo "would build $tag on the server from the copied files" >&2; exit 0; fi',
+        'if docker image inspect "$tag" >/dev/null 2>&1; then echo "image $tag already exists on the server" >&2; exit 0; fi',
+        'tmpd=$(mktemp -d); trap \'rm -rf -- "$tmpd"\' EXIT',
+        `printf 'services:\\n  %s:\\n    image: "%s"\\n    build:\\n      context: "%s"\\n' "$svc" "$tag" "$ctx" > "$tmpd/build.yml"`,
+        'dc "${pa[@]}" -f "$tmpd/build.yml" build "$svc" </dev/null',
+        'AOM_REMOTE',
       ];
     case 'compose_up_remote':
       return [

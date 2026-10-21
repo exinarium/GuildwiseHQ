@@ -1,5 +1,5 @@
 import type { Gate } from './gate.ts';
-import type { DeployStep, SetupEnv } from './setup.ts';
+import type { DeployStep, SetupEnv, UpdateMethod } from './setup.ts';
 
 /**
  * The deploy templates the wizard fills from the probe and the person's answers (design sections 2 and 4.2): "this computer,
@@ -116,8 +116,15 @@ export interface SshShipAnswers {
   composeProject?: string;
   service: string;
   imageName: string;
-  /** The `.env` key that pins the image. */
-  imageVar: string;
+  /** The `.env` key that pins the image. Absent: the new version is named in `docker-compose.guildwise.yml` next to the compose file. */
+  imageVar?: string;
+  /** How the new version reaches the server (default: built here and copied over ssh). */
+  method?: UpdateMethod;
+  /** `registry`: the registry address, and whether this computer builds and uploads (default) or CI already did. */
+  registry?: string;
+  registryPush?: boolean;
+  /** `build_on_server`: where the files are put on the server. */
+  sourceDir?: string;
   healthUrl?: string;
   /** The address of the site: its home page is checked when there is no health address of its own. */
   appUrl?: string;
@@ -129,6 +136,7 @@ export interface SshShipAnswers {
 /** "A server: build here, ship over ssh". Reproduces the manual release procedure step by step. */
 export function sshShipEnv(a: SshShipAnswers, testEnv: string | null = null): SetupEnv {
   const d = productionDefaults(testEnv);
+  const method = a.method ?? 'ship';
   const steps: DeployStep[] = [
     ...(a.database
       ? [
@@ -140,10 +148,18 @@ export function sshShipEnv(a: SshShipAnswers, testEnv: string | null = null): Se
           },
         ]
       : []),
-    { kind: 'env_backup' as const },
-    { kind: 'build_image_local' as const },
-    { kind: 'ship_image_ssh' as const },
-    { kind: 'set_image_var' as const },
+    ...(a.imageVar ? [{ kind: 'env_backup' as const }] : []),
+    ...(method === 'ship'
+      ? [{ kind: 'build_image_local' as const }, { kind: 'ship_image_ssh' as const }]
+      : method === 'registry'
+        ? [
+            ...(a.registryPush === false
+              ? []
+              : [{ kind: 'build_image_local' as const }, { kind: 'push_image_registry' as const }]),
+            { kind: 'pull_image_ssh' as const },
+          ]
+        : [{ kind: 'ship_source_ssh' as const }, { kind: 'build_image_server' as const }]),
+    a.imageVar ? { kind: 'set_image_var' as const } : { kind: 'write_override' as const },
     { kind: 'compose_up_remote' as const },
   ];
   return {
@@ -158,7 +174,9 @@ export function sshShipEnv(a: SshShipAnswers, testEnv: string | null = null): Se
       ...(a.composeProject ? { composeProject: a.composeProject } : {}),
       service: a.service,
       imageName: a.imageName,
-      imageVar: a.imageVar,
+      ...(a.imageVar ? { imageVar: a.imageVar } : {}),
+      ...(method === 'registry' && a.registry ? { registry: a.registry } : {}),
+      ...(method === 'build_on_server' && a.sourceDir ? { sourceDir: a.sourceDir } : {}),
       // only used when deploying on this computer (a server is not pruned)
       imageKeep: 5,
       ...(a.appUrl ? { appUrl: a.appUrl } : {}),
