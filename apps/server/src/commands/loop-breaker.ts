@@ -239,12 +239,14 @@ export function rejectionBackoffEvents(ctx: Ctx, card: Row): AppendInput[] {
  * The question shifts that count toward the question loop (aliases: shift `s`, its desk item `d`). A shift counts when it
  * ran an agent that answered the item (outcome open or 'reported'), the item was not superseded, and the item was not
  * passed on after the shift started: each routing step (peer, BA, CEO, desk) of one question is its own shift, and the
- * hop is not a second question. Refused shifts (outcome 'rejected', no agent ran) do not count.
+ * hop is not a second question. Refused shifts (outcome 'rejected', no agent ran) do not count. Stop-loss arbitrations
+ * (`stop_loss`, raised by the system when the card used its budget) do not count: the stop-loss is its own guard for that loop.
  */
 export const COUNTED_QUESTION_SHIFT_SQL = `s.kind='question' AND (s.outcome IS NULL OR s.outcome='reported')
   AND d.status <> 'superseded'
   AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(d.escalation_trail,'[]'::jsonb)) t
-                   WHERE t->>'step' IN ('peer','ba','ceo','desk') AND (t->>'at')::timestamptz >= s.started_at)`;
+                   WHERE t->>'step' IN ('peer','ba','ceo','desk') AND (t->>'at')::timestamptz >= s.started_at)
+  AND d.subkind IS DISTINCT FROM '${DESK_SUBKIND.stopLoss}'`;
 
 /** Question shifts (answers given to the agents asked) about one card since `since`, whatever the wording of the questions; see `COUNTED_QUESTION_SHIFT_SQL` for what counts. */
 export async function questionShiftCount(db: Queryable, cardId: string, since: Date): Promise<number> {

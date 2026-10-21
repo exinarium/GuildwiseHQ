@@ -67,7 +67,8 @@ export async function detectLoops(db: Queryable): Promise<Detected[]> {
   // whatever the questions said. One signal per card; it ends when the window has passed.
   const asking = await rows(
     db,
-    `SELECT c.id, c.ref, c.title, c.org_id, c.project_id, p.key, count(*)::int AS n, max(s.started_at) AS last_at
+    `SELECT c.id, c.ref, c.title, c.org_id, c.project_id, p.key, count(*)::int AS n, max(s.started_at) AS last_at,
+       (array_agg(d.stage ORDER BY s.started_at DESC) FILTER (WHERE d.stage IS NOT NULL))[1] AS asked_stage
        FROM shifts s JOIN desk_items d ON d.id = s.desk_item_id JOIN cards c ON c.id = d.card_id
        JOIN projects p ON p.id = c.project_id
       WHERE ${COUNTED_QUESTION_SHIFT_SQL} AND s.started_at > now() - make_interval(hours => $1) AND c.status NOT IN ('done','cancelled')
@@ -92,7 +93,7 @@ export async function detectLoops(db: Queryable): Promise<Detected[]> {
         cardRef: c.ref,
         projectKey: c.key,
       },
-      evidence: { cardTitle: c.title, questionShifts: c.n },
+      evidence: { cardTitle: c.title, questionShifts: c.n, ...(c.asked_stage ? { stage: c.asked_stage } : {}) },
     }));
   return [...failing, ...questions];
 }
