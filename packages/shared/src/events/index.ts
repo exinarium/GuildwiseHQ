@@ -19,6 +19,7 @@ import { hrEvents } from './hr.ts';
 import { hygieneEvents } from './hygiene.ts';
 import { intakeEvents } from './intake.ts';
 import { intakeBatchEvents } from './intake-batch.ts';
+import { backlogEvents } from './backlog.ts';
 import { interestEvents } from './interest.ts';
 import { ledgerEvents } from './ledger.ts';
 import { mailEvents } from './mail.ts';
@@ -72,6 +73,7 @@ export const DomainEventSchema = z.discriminatedUnion('type', [
   ...researchEvents,
   ...intakeEvents,
   ...intakeBatchEvents,
+  ...backlogEvents,
   ...mailEvents,
   ...hrEvents,
   ...outboundEvents,
@@ -97,6 +99,7 @@ export type EventPayload<T extends EventType> = EventOf<T>['payload'];
 
 export * from './agent.ts';
 export * from './approval.ts';
+export * from './backlog.ts';
 export * from './blog.ts';
 export * from './card.ts';
 export * from './catalogue.ts';
