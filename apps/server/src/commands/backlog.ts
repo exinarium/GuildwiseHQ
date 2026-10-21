@@ -50,8 +50,8 @@ export function backlogItemDto(r: Row): BacklogItemDto {
         : { kind: 'owner' },
     cardRef: r.card_ref ?? null,
     cardId: r.card_id ?? null,
-    createdAt: iso(r.created_at),
-    updatedAt: iso(r.updated_at),
+    createdAt: iso(r.created_at) as string,
+    updatedAt: iso(r.updated_at) as string,
   };
 }
 

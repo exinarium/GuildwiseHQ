@@ -9,6 +9,7 @@ import { getLastProjectKey } from './lib/lastProject.ts';
 import { AcceptInvite } from './pages/AcceptInvite.tsx';
 import { Agents } from './pages/Agents.tsx';
 import { Archive } from './pages/Archive.tsx';
+import { Backlog } from './pages/Backlog.tsx';
 import { Automations } from './pages/Automations.tsx';
 import { BILLING_GATE_PATH } from './pages/BillingGate.tsx';
 import { Board } from './pages/Board.tsx';
@@ -101,6 +102,7 @@ export const routes = [
       { path: BILLING_GATE_PATH, element: null },
       { path: '/p/:projectKey/board', element: <Board /> },
       { path: '/p/:projectKey/archive', element: <Archive /> },
+      { path: '/p/:projectKey/backlog', element: <Backlog /> },
       { path: '/p/:projectKey/feed', element: <InterestRedirect tab="digest" /> },
       { path: '/p/:projectKey/research', element: <ResearchTab /> },
       { path: '/p/:projectKey/phases/:number', element: <Phase /> },
