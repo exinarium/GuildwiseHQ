@@ -312,6 +312,22 @@ function localStep(s: DeployStep, i: number, env: SetupEnv): string[] {
         '  dc -f "$OVERRIDE" up -d --build --no-deps "$SERVICE"',
         'fi',
       ];
+    case 'compose_run':
+      return [
+        ...stepNumberComment(i, s.label),
+        `RUN_SERVICE=${shq(s.service ?? a.service)}`,
+        'if [ "$DRY_RUN" = 1 ]; then',
+        `  would ${shq(`${s.label}: run ${s.argv.join(' ')} in the new version of the app (the database is backed up first)`)}`,
+        '  dc config -q || die "the compose file does not validate"',
+        'else',
+        '  OVERRIDE="$WORK/override.yml"',
+        `  printf 'services:\\n  %s:\\n    build: "%s"\\n    image: "%s"\\n' "$RUN_SERVICE" "$CHECKOUT" "$TAG" > "$OVERRIDE"`,
+        '  dc -f "$OVERRIDE" build "$RUN_SERVICE"',
+        `  if ! dc -f "$OVERRIDE" run --rm -T "$RUN_SERVICE" ${s.argv.map(shq).join(' ')} </dev/null; then`,
+        '    die "the database updates failed; the app was not restarted"',
+        '  fi',
+        'fi',
+      ];
     case 'custom_command':
       return [
         ...stepNumberComment(i, s.label),
@@ -454,6 +470,23 @@ function sshFunctions(env: SetupEnv): string[] {
     'dc "$@" up -d --no-deps "$svc"',
     'AOM_REMOTE',
     '}',
+    ...(env.steps.some((x) => x.kind === 'compose_run')
+      ? [
+          '# run a command in the new image on the server (the .env keeps the old image until the switch)',
+          'compose_run_remote() {',
+          '  local dry="$1" svc="$2"; shift 2',
+          `  remote "$APP_DIR" "$COMPOSE_FILE" "$svc" "$IMAGE_VAR" "$TAG" "$dry" ${proj} "$@" <<'AOM_REMOTE'`,
+          'set -eu',
+          'dir=$1; file=$2; svc=$3; var=$4; tag=$5; dry=$6; proj=$7; shift 7',
+          'cd "$dir"',
+          'pa=(-f "$file"); [ -z "$proj" ] || pa=(-p "$proj" -f "$file")',
+          'if [ "$dry" = 1 ]; then dc "${pa[@]}" config -q; echo "would run the database updates in $svc" >&2; exit 0; fi',
+          'export "$var=$tag"',
+          'dc "${pa[@]}" run --rm -T "$svc" "$@" </dev/null',
+          'AOM_REMOTE',
+          '}',
+        ]
+      : []),
     '',
   ];
 }
@@ -636,6 +669,16 @@ function sshStep(s: DeployStep, i: number, env: SetupEnv): string[] {
         '  compose_up_remote 1',
         'else',
         '  compose_up_remote 0',
+        'fi',
+      ];
+    case 'compose_run':
+      return [
+        ...stepNumberComment(i, s.label),
+        `RUN_SERVICE=${shq(s.service ?? env.app.service)}`,
+        'if [ "$DRY_RUN" = 1 ]; then',
+        `  compose_run_remote 1 "$RUN_SERVICE" ${s.argv.map(shq).join(' ')}`,
+        'else',
+        `  compose_run_remote 0 "$RUN_SERVICE" ${s.argv.map(shq).join(' ')} || die "the database updates failed; the app was not restarted"`,
         'fi',
       ];
     case 'custom_command':

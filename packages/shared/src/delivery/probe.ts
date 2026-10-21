@@ -11,7 +11,8 @@ import { SshAliasSchema } from './setup.ts';
 /** Announced by a runner that answers `deploy.probe` and `recipe.write` (guided deploy setup). */
 export const DEPLOY_SETUP_CAPABILITY = 'deploy-setup:1';
 
-export const PROBE_SCOPES = ['local', 'ssh_hosts', 'ssh_target'] as const;
+/** `ssh_check`: one non-interactive connect to a target's server (reachability only; nothing is read from it). */
+export const PROBE_SCOPES = ['local', 'ssh_hosts', 'ssh_target', 'ssh_check'] as const;
 export const ProbeScopeSchema = z.enum(PROBE_SCOPES);
 export type ProbeScope = z.infer<typeof ProbeScopeSchema>;
 

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { StoredCompletionAction } from '../cards/types.ts';
+import { DeployKeyDtoSchema, ReachabilityDtoSchema } from '../delivery/connect.ts';
 import {
   BaTaskKind,
   BaTaskStatus,
@@ -37,6 +38,10 @@ export const DeployTargetDtoSchema = z.object({
   destructiveOk: z.boolean().optional(),
   testHosts: z.array(z.string()).optional(),
   secretNames: z.array(z.string()).optional(),
+  /** Can the deploying computer sign in to the server? Absent for "on a computer" targets and from an older server. */
+  reachability: ReachabilityDtoSchema.nullable().optional(),
+  /** The dedicated Guildwise keys of this target, public parts only. */
+  keys: z.array(DeployKeyDtoSchema).optional(),
 });
 export type DeployTargetDto = z.infer<typeof DeployTargetDtoSchema>;
 

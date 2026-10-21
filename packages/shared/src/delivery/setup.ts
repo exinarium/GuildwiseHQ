@@ -14,7 +14,9 @@ import { ReleasedBySchema, SECRET_NAME, TriggerSchema } from './recipe.ts';
 export const SETUP_FILE = 'setup.json';
 export const SETUP_VERSION = 1;
 /** The compiler version recorded in `setup.json`: a newer compiler never silently rewrites approved scripts. */
-export const SETUP_GENERATOR = 'setup-1.1';
+export const SETUP_GENERATOR = 'setup-1.2';
+/** Did an older compiler write these scripts? (The "improved steps are available" nudge.) */
+export const isOlderGenerator = (g: string): boolean => g !== SETUP_GENERATOR;
 
 /** `/abs/path` or `~/path`: letters, digits and `._/+@=-` only, no `..`. */
 const PATH_RE = /^(?:~\/|\/)[A-Za-z0-9._/+@=-]*$/;
@@ -124,6 +126,17 @@ export const DeployStepSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('compose_up_local') }),
   /** The server: restart only the app service. */
   z.object({ kind: z.literal('compose_up_remote') }),
+  /**
+   * Run a command in the app's image before the app is restarted, for example the database migrations
+   * (`docker compose run --rm <service> <argv>`, the way the app itself runs). Needs the database backup before it.
+   */
+  z.object({
+    kind: z.literal('compose_run'),
+    label: z.string().min(1).max(120).default('Run database updates'),
+    argv: z.array(z.string().max(500)).min(1).max(40),
+    /** Default: the app service. */
+    service: ServiceNameSchema.optional(),
+  }),
   /** Developer: a command of your own (argv, no shell). Runs where the script runs, after the steps above it. */
   z.object({
     kind: z.literal('custom_command'),
@@ -188,13 +201,14 @@ export type DeliverySetup = z.infer<typeof DeliverySetupSchema>;
 
 /** The steps each kind of hosting may contain. */
 const ALLOWED: Record<SetupEnv['hosting'], DeployStepKind[]> = {
-  this_computer: ['db_backup', 'compose_up_local', 'custom_command'],
+  this_computer: ['db_backup', 'compose_run', 'compose_up_local', 'custom_command'],
   ssh: [
     'db_backup',
     'env_backup',
     'build_image_local',
     'ship_image_ssh',
     'set_image_var',
+    'compose_run',
     'compose_up_remote',
     'custom_command',
   ],
@@ -249,6 +263,14 @@ export function validateEnvShape(
   const bk = kinds.indexOf('db_backup');
   const up = kinds.findIndex((k) => k === 'compose_up_local' || k === 'compose_up_remote');
   if (bk >= 0 && up >= 0 && bk > up) out.push('The database backup must come before the app is restarted.');
+  const runs = kinds.indexOf('compose_run');
+  if (runs >= 0) {
+    if (up >= 0 && runs > up) out.push('The database updates must run before the app is restarted.');
+    if (bk >= 0 && runs < bk) out.push('The database backup must come before the database updates.');
+    if (bk < 0) out.push('Back up the database before running database updates.');
+    if (e.hosting === 'ssh' && kinds.includes('ship_image_ssh') && runs < kinds.indexOf('ship_image_ssh'))
+      out.push('The new app must be on the server before the database updates run.');
+  }
   if (e.rollback && e.health.kind !== 'http')
     out.push(
       'Automatic rollback needs a web address (http) health check, so the script can see the site is healthy.',
@@ -300,6 +322,8 @@ export function describeSetupStep(s: DeployStep, env: Pick<SetupEnv, 'app' | 'ho
       return `Rebuild and restart only "${env.app.service}" on this computer, from the approved version (nothing else is stopped).`;
     case 'compose_up_remote':
       return `Restart only "${env.app.service}" on the server (nothing else is stopped).`;
+    case 'compose_run':
+      return `${s.label}: run ${s.argv.join(' ')} with the new version of the app, before it is restarted. The database is not rolled back if a later step fails.`;
     case 'custom_command':
       return `${s.label} (your own command: ${s.argv.join(' ')}).`;
   }

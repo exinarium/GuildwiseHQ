@@ -9,6 +9,13 @@ import {
   ClaudeAccountEnsurePayloadSchema,
   ClaudeAccountInfoSchema,
 } from '../claude/accounts.ts';
+import {
+  DeployConnectPayloadSchema,
+  DeployKeyPayloadSchema,
+  DeployPreparePayloadSchema,
+  DeployRevokePayloadSchema,
+  HostKeyScanPayloadSchema,
+} from '../delivery/connect.ts';
 import { DeployProbePayloadSchema } from '../delivery/probe.ts';
 import {
   DeployExecPayloadSchema,
@@ -767,6 +774,11 @@ export const RunnerCommandNameSchema = z.enum([
   'deploy.secret.set',
   'deploy.probe',
   'recipe.write',
+  'deploy.hostkey',
+  'deploy.key',
+  'deploy.connect',
+  'deploy.revoke',
+  'deploy.prepare',
   'claude.account.ensure',
 ]);
 export type RunnerCommandName = z.infer<typeof RunnerCommandNameSchema>;
@@ -842,6 +854,12 @@ export const CommandPayloadSchemas = {
   /** Guided deploy setup (docs/design/deploy-run-ux-design.md): a read-only probe of Docker / a server, and writing the generated `delivery/` files. */
   'deploy.probe': DeployProbePayloadSchema,
   'recipe.write': RecipeWritePayloadSchema,
+  /** Guided connect, dedicated deploy keys and server preparation (docs/design/deploy-run-ux-design.md v2). */
+  'deploy.hostkey': HostKeyScanPayloadSchema,
+  'deploy.key': DeployKeyPayloadSchema,
+  'deploy.connect': DeployConnectPayloadSchema,
+  'deploy.revoke': DeployRevokePayloadSchema,
+  'deploy.prepare': DeployPreparePayloadSchema,
 } as const;
 
 /** Announced in `hello.capabilities`-style lists by runners that apply a version pin (`runner.pin`, `welcome.runnerPin`). */
@@ -875,6 +893,7 @@ export const ENVELOPE_COMMANDS: ReadonlySet<string> = new Set([
   'integration.input',
   'env.secret.set',
   'deploy.secret.set',
+  'deploy.connect',
 ]);
 
 export const ShiftRejectReasonSchema = z.enum([

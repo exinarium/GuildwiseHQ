@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { ChangeGroupSchema } from '../delivery/changes.ts';
+import { DeployKeyDtoSchema } from '../delivery/connect.ts';
 import {
   ConnectionStateSchema,
   ProbeErrorSchema,
@@ -41,8 +42,15 @@ export const SetupTargetDtoSchema = z.object({
   appUrl: z.string().nullable(),
   /** Can the deploying workstation sign in to the server? (`null`: never checked / not a server target.) */
   connection: z
-    .object({ state: ConnectionStateSchema, at: z.iso.datetime(), detail: z.string().nullable() })
+    .object({
+      state: ConnectionStateSchema,
+      at: z.iso.datetime(),
+      detail: z.string().nullable(),
+      method: z.enum(['existing_alias', 'deploy_key']).optional(),
+    })
     .nullable(),
+  /** The dedicated Guildwise keys of this target (one per computer that connected), public parts only. */
+  keys: z.array(DeployKeyDtoSchema).optional(),
 });
 export type SetupTargetDto = z.infer<typeof SetupTargetDtoSchema>;
 
@@ -55,6 +63,8 @@ export const SetupWorkstationDtoSchema = z.object({
   canProbe: z.boolean(),
   /** Why not, in a sentence; null when it can. */
   blocked: z.string().nullable(),
+  /** Answers the guided-connect commands (capability `deploy-connect:1`). Absent from an older server. */
+  canConnect: z.boolean().optional(),
 });
 export type SetupWorkstationDto = z.infer<typeof SetupWorkstationDtoSchema>;
 
@@ -120,6 +130,8 @@ export const SetupStateDtoSchema = z.object({
   scanProblem: z.string().nullable(),
   proposal: ProposalDtoSchema.nullable(),
   generator: z.string(),
+  /** Servers whose steps use a compiler older than this server's: an improved version is available. */
+  improvedAvailable: z.boolean().optional(),
 });
 export type SetupStateDto = z.infer<typeof SetupStateDtoSchema>;
 
