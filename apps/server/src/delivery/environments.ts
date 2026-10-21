@@ -147,8 +147,13 @@ export function placeBlock(
 }
 
 /** `placeBlock` for a target row, with its own lookups (the plain DELETE of a target uses it). */
-export async function placeBlockFor(db: Queryable, t: Row) {
-  return placeBlock(t, await usageOf(db, t.project_id), await followupsUsing(db, t.id), await inOpenMove(db, t.id));
+export async function placeBlockFor(db: Queryable, t: Row, withFollowups = true) {
+  return placeBlock(
+    t,
+    await usageOf(db, t.project_id),
+    withFollowups ? await followupsUsing(db, t.id) : 0,
+    await inOpenMove(db, t.id),
+  );
 }
 
 async function inOpenMove(db: Queryable, targetId: string): Promise<boolean> {
@@ -785,7 +790,7 @@ export async function buildStatus(ctx: Ctx, project: Row): Promise<EnvironmentsS
         ? { runId: waiting.id, commit: waiting.commit ?? null, waitingFor: waiting.waiting_for ?? 'owner' }
         : null,
       blockedBy,
-      savedState: changedInDraft ? 'draft' : inSaved ? 'saved' : 'none',
+      savedState: !inSaved ? 'none' : changedInDraft ? 'draft' : 'saved',
       triedState: !inSaved ? 'none' : tried ? 'tried' : 'needs_try',
       approvalState: !inSaved ? 'none' : approvalBase,
       openQuestions: openQ,

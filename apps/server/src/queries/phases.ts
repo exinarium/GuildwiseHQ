@@ -82,7 +82,7 @@ async function summaries(
           kind: f.kind,
           label: followupLabel(
             { kind: f.kind, platform: f.platform, instruction: f.instruction },
-            f.target_id ? names.get(f.target_id) : null,
+            f.environment ?? (f.target_id ? names.get(f.target_id) : null),
           ),
           status: f.status,
         })),

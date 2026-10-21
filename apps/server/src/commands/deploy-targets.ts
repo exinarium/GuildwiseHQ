@@ -342,7 +342,7 @@ export async function removeDeployTarget(
     ]);
     if (!t) throw notFound('deploy target not found');
     const p = await loadVisibleProject(tx, user.id, t.project_id);
-    const block = await placeBlockFor(tx, t);
+    const block = await placeBlockFor(tx, t, false);
     if (block) throw conflict(block.code, block.message);
     if (await targetInUse(tx, targetId))
       throw conflict('target_in_use', 'a phase follow-up that is not finished yet uses this deploy target');
