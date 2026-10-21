@@ -32,6 +32,31 @@ export interface Detected {
 
 const hours = (ms: number) => Math.floor(ms / 3600_000);
 
+/**
+ * The stage a question loop belongs to: the stage with the most counted question shifts (`stages` lists the stage of each
+ * counted shift, oldest first); a tie goes to the latest. Shifts without a stage are skipped; null when none has one.
+ */
+export function questionLoopStage(stages: readonly (string | null)[]): string | null {
+  const count = new Map<string, number>();
+  const last = new Map<string, number>();
+  stages.forEach((s, i) => {
+    if (!s) return;
+    count.set(s, (count.get(s) ?? 0) + 1);
+    last.set(s, i);
+  });
+  let best: string | null = null;
+  for (const [s, n] of count) {
+    const b = best === null ? null : count.get(best)!;
+    if (b === null || n > b || (n === b && last.get(s)! > last.get(best!)!)) best = s;
+  }
+  return best;
+}
+
+const stageEvidence = (stages: readonly (string | null)[]) => {
+  const stage = questionLoopStage(stages);
+  return stage ? { stage } : {};
+};
+
 /** Shift loop (B1): consumes the loop breaker's open episodes (`cards.retry_episode_id`). */
 export async function detectLoops(db: Queryable): Promise<Detected[]> {
   const list = await rows(
@@ -68,7 +93,7 @@ export async function detectLoops(db: Queryable): Promise<Detected[]> {
   const asking = await rows(
     db,
     `SELECT c.id, c.ref, c.title, c.org_id, c.project_id, p.key, count(*)::int AS n, max(s.started_at) AS last_at,
-       (array_agg(d.stage ORDER BY s.started_at DESC) FILTER (WHERE d.stage IS NOT NULL))[1] AS asked_stage
+       array_agg(d.stage ORDER BY s.started_at) AS stages
        FROM shifts s JOIN desk_items d ON d.id = s.desk_item_id JOIN cards c ON c.id = d.card_id
        JOIN projects p ON p.id = c.project_id
       WHERE ${COUNTED_QUESTION_SHIFT_SQL} AND s.started_at > now() - make_interval(hours => $1) AND c.status NOT IN ('done','cancelled')
@@ -93,7 +118,7 @@ export async function detectLoops(db: Queryable): Promise<Detected[]> {
         cardRef: c.ref,
         projectKey: c.key,
       },
-      evidence: { cardTitle: c.title, questionShifts: c.n, ...(c.asked_stage ? { stage: c.asked_stage } : {}) },
+      evidence: { cardTitle: c.title, questionShifts: c.n, ...stageEvidence(c.stages) },
     }));
   return [...failing, ...questions];
 }

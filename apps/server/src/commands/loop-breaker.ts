@@ -241,7 +241,8 @@ export function rejectionBackoffEvents(ctx: Ctx, card: Row): AppendInput[] {
  * passed on after the shift started: each routing step (peer, BA, CEO, desk) of one question is its own shift, and the
  * hop is not a second question. Refused shifts (outcome 'rejected', no agent ran) do not count. Only questions an agent
  * asked count: the system's own questions about the card (the stop-loss arbitration, routed to the architect) are not the
- * card asking, and the stop-loss is its own guard for that loop (`stop_loss` items do not count either).
+ * card asking, and the stop-loss already holds the card. Stop-loss arbitrations (`stop_loss`, raised by the system when the
+ * card used its budget) do not count either: the stop-loss is its own guard for that loop.
  */
 export const COUNTED_QUESTION_SHIFT_SQL = `s.kind='question' AND (s.outcome IS NULL OR s.outcome='reported')
   AND d.asked_by_kind = 'agent'
