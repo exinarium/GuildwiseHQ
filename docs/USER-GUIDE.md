@@ -427,8 +427,6 @@ Open **Organization** at the bottom of the sidebar. The tabs are **General**, **
 
 **Project links.** Owners and Admins find the **Project links** tab on the same page (Organization, then **Project links**). Here you tell Guildwise how your projects belong together: add a link between two projects, or between a project and something outside Guildwise (type its name). A link says that one **depends on**, **uses** or **is related to** the other, with an optional note. **Remove** takes a link away. The CEO reads these links, with the project names, to decide which project a request is for. The tab lists only the links you add. What the code suggests stays on your workstation: the CEO can show those suggestions in chat, and they count only after you add the link here.
 
-![The Project links tab](guide/assets/org-project-links.jpg)
-
 If you belong to several organizations, the **organization switcher** at the top of the sidebar shows which one this browser tab works in. A different tab can work in a different organization. Projects of an organization where you are only a guest carry a "Guest" label.
 
 ### 4.2 Members, invitations and guests
@@ -539,8 +537,6 @@ To measure whether the map saves tokens, one card in five runs without it for fo
 Every project has a **Backlog** tab next to its **Board**. It is your list of wanted work that is **not in development yet**: nothing on the backlog is worked on by an agent, becomes a card, appears on the board or creates a desk item until you send it to the BA.
 
 **Add and edit.** Type a title in the quick-add field and press **Enter** (or **Add**, which is there for touch screens). The item is **Open**, priority **Normal**, with no tags, not starred, and its source is you. **Edit** opens the title, description (what you want), priority (Critical, High, Normal, Low) and tags. The **star** marks an item to look at soon. **Drop** sets the item to **Dropped**. Done is set only by sending; reopening a dropped item is not possible. Only **Owners and Admins** of the organization manage the backlog (add, edit, star, drop, send); every member of the project, guests included, can read it.
-
-![The project backlog](guide/assets/backlog.jpg)
 
 **Find things.** Search looks in the title, description and tags. Filter by tag, priority, flagged, source (you or an agent) and status; the filters combine. The list shows **Open** items only until the status filter includes Done or Dropped. Sort by priority (Critical first, newest first within a priority) or by **Newest** (newest first). Items an agent suggested show the agent's name and the card it was working on.
 
@@ -903,10 +899,6 @@ Your CEO is your eyes and ears on the floor, and it never slows an agent down. T
 
 **The daily report.** At the report time you set on the CEO page, **Reporting & alerts** tab (08:00 by default, in your time zone, 4.30), the CEO puts one report on your desk, titled "Daily report <date>", on days with something to say. It lists what needs you, what the CEO decided (with Undo), phases waiting, stuck and backing-off cards, repeated approvals, failures, open DevOps requests, **spend**, the new backlog suggestions from agents and highlights from your interests. Open **The facts behind this report** for the same lists straight from the server, and talk to the CEO about anything in it. When the CEO cannot run for two hours the server posts a plain template report with the same facts. Scheduled tasks that ask the CEO for something are in 4.8.
 
-![The daily report on the desk](guide/assets/desk-daily-report.jpg)
-
-![The CEO page, Reporting & alerts tab](guide/assets/ceo-reporting.jpg)
-
 > **In the app:** Help, "The daily report and what is watched" (`/help/ba-reporter`) and "Your CEO" (`/help/ceo`).
 
 ### 4.12 Testing, finalizing and risk
@@ -1084,8 +1076,6 @@ You can start a project on any branch of any repository to try it, without leavi
 
 **Show technical details** keeps what developers set: free-text run instructions for the project and for each repository (they win over `BUILD.md`), the build guide, the stop time, whether the branch's code may use Docker (off by default; with it on, Docker steps run outside any sandbox, so only for projects you trust), the declared **services** (name, repository, folder, command, ports as `name:default:ENV_VAR`, health check, what it starts after, the path of an env file on the workstation), the saved plans of each computer, and, on every step, its real command, settings and stop command. Put secrets in an env file on the computer, never in the settings: only its path is stored.
 
-![Environments, Your app](guide/assets/run-settings.jpg)
-
 **Build guides above the repositories.** If your repositories sit side by side in one folder (for example `src/dcode/sources/`) with a `BUILD.md` in that folder, the workstation finds it too (it looks in the folders above each repository, up to your code folder, never in your home folder) and gives it to the DevOps engineer with the repository's own `BUILD.md`. The **Build guide** field under Your app, Notes for DevOps (technical details) takes the full path(s) of the guide(s) on the workstation instead, if you would rather name them. Git submodules are fetched into the run copy. Services can read your .NET user secrets (`~/.microsoft/usersecrets`), read-only.
 
 **When it cannot run.** A failed environment stays on the board, the card and the Workstations page with its reason (the DevOps engineer's report) and a link to the DevOps request; press **Try again** (same repositories and branches) or **Dismiss**. When the DevOps engineer is stuck on something only you know, the panel says **Waiting for you** with its question and the options; answer on the DevOps request (Workstations page) or the desk and it carries on.
@@ -1095,8 +1085,6 @@ You can start a project on any branch of any repository to try it, without leavi
 > **In the app:** Help, "Run a branch" (`/help/board-and-cards#run-a-branch`).
 
 ### 4.22 Your CEO
-
-![The CEO page: Overview](guide/assets/ceo.jpg)
 
 The **CEO** is the agent you talk to first. It runs the floor for you: it watches every project, agent, workstation and budget, unblocks what is stuck, answers the routine questions it is allowed to answer, recommends the rest, keeps the team the right size, hands work to the BA, the team and DevOps, and writes you one report every morning. It replaced the BA's daily floor report, the BA's triage of held desk items and the BA's urgent notes (the BA reporter is gone: the BA is a spec writer only and keeps intake, specs, finalizing, phases and design chats). **Every organization has exactly one CEO, built in:** there is nothing to appoint, hire or dismiss, and it does not count against your plan's agent or workstation limits. Only the **Owner** configures and talks to it. Admins can read its page and activity log and can pause it.
 
@@ -1133,8 +1121,6 @@ The **CEO** is the agent you talk to first. It runs the floor for you: it watche
 **The activity log** (the **Activity log** tab) lists everything it decided, recommended or was refused, with the reason, confidence, the evidence and the policy version in force, and an **Undo** where one exists: pausing and resuming, priorities, models and seniority, benching, hires (retired if the agent never worked, benched otherwise), cancelled cards, drafted cards, proposed standing orders and answers to questions (the question opens again if no card it released has been taken since; otherwise a correction is posted on the card and on your desk). An undo is recorded as a correction: the rules the decision cited lose confidence and the CEO does not repeat the same action on the same subject for a day. Releasing a claim, ending a back-off, stopping a shift, DevOps requests, messages and retiring cannot be undone and say so.
 
 **Talking to it.** Press **Ask <name>** in the top bar. The chat has its own page (\`/ceo-chat\`): **New chat** starts a conversation, **Chats** lists the earlier ones, and **Go to the current chat** brings you back to the one that is running. It is your single entry point: ask what is going on, give it a task ("find out why builds are slow"), or state a rule ("never touch the billing project without asking me"). Rules you state are kept as **memories**; you see, edit, retire or really delete them on the **Memory** tab, and the "Remember this for the CEO" box on a desk answer keeps your own answer as a rule. Only you can read them; they go only to your workstation. Tasks you give it appear on the Tasks tab; when one is done you get a notification.
-
-![The CEO chat page](guide/assets/ceo-chat.jpg)
 
 **Reports and alerts.** The daily report arrives on your desk and by e-mail at your report time: what needs you, the decisions it took (with Undo and Correct), issues and risks, budget, tasks, proposals, what it learned from your answers and corrections, the order turns of the last day and **Things you keep asking me**. When no CEO is available the server writes the report from a template and says so. The CEO notifies you immediately only when it cannot decide, when something is urgent, and when a task is done: on the desk (pinned for urgent), by e-mail (one per subject per hour; non-urgent mail waits out your quiet hours) and as an event an automation can forward to Slack or Teams ("The CEO notifies you" trigger). Set the report time, quiet hours and an optional **organization monthly budget** on the **Reporting & alerts** tab: at 80% you are told, at 100% the CEO only writes the report and answers in chat until next month.
 
@@ -1223,8 +1209,6 @@ New projects start on the **lean team** workflow; a project made earlier keeps i
 
 The **Environments** page (sidebar, under the board, for projects that deliver code) is where you say how your app starts and where it runs: **Your app: how to start it**, **Test copies** (one temporary copy per card), the **environments** (the **test site**, the **live site** and any extra site such as a demo), **Places** (the computers and servers), **Rules** and **History**. When an environment is set up and approved, a **Releases** switch at the top (**On** or **Paused**) turns the project's releases on or off: pausing asks "Pause releases?", and while releases are paused the environment cards show **Releases paused** and **Update now** is off. Only the project owner changes the switch, and it needs an approved environment first. Where the releases go once they are ready (the queue, what is live, the rules) is on the **Releases** page (4.28).
 
-![The Environments page](guide/assets/environments.jpg)
-
 An approved setup turns "how we deploy" into something you approve once and that then runs the same way every time, **without a model running any deploy command**.
 
 **What the setup is made of.** Behind the page is a folder `delivery/` in the **project vault** (never the organization vault), holding `recipe.yaml` and one script per environment. The recipe lists its **environments** in order (for example `local`, then `production`). Each one names where it goes (one or several of the project's **deploy targets**), the script and its arguments, **when** it runs (after a merge, after a phase, or only on request), how long it may take, the **health check** that says it worked (a web address, a port, or a line the script prints, such as `P5 DEPLOY READY`), an optional **smoke check**, the **names** of the secrets it needs, and the **gate**. It also says **who releases it** (below). A script must do the same steps every time, check itself and exit with a reason when something is wrong, be safe to run twice, and honour a dry run (`AOM_DEPLOY_DRY_RUN=1`: check inputs and access, print the plan, change nothing).
@@ -1259,8 +1243,6 @@ An approved setup turns "how we deploy" into something you approve once and that
 
 ### 4.28 Releases
 
-![The Releases page](guide/assets/releases.jpg)
-
 The **Releases** page (sidebar, Organization group; the old address `/deploys` leads here) shows, across all projects, which version is live on each site, what is waiting for you and what was released. Setting up where an app runs happens on the project's Environments page (4.27). A project whose releases are **Paused** shows a **Releases paused** badge here and on its environment cards.
 
 **Who releases an environment.** The recipe decides, and you approved it:
@@ -1284,8 +1266,6 @@ The CEO is never the releaser unless the recipe says so, and an Owner or Admin c
 ### 4.29 Metrics
 
 **Metrics** (sidebar, Organization group) shows what the team delivered, where it waited on you and where quality slipped. Everybody who can see the organization can open it.
-
-![The Metrics page](guide/assets/metrics.jpg)
 
 At the top, the **Project** filter (shown when you have more than one project; **All projects** is the default) and the range chips **7 days**, **14 days**, **30 days** and **90 days** decide what the panels count. The panels are:
 
