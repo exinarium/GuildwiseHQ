@@ -220,6 +220,34 @@ describe('the app shell on a phone', () => {
     await user.click(await screen.findByTestId('mobile-back'));
     expect(screen.getByTestId('where')).toHaveTextContent('/p/TOY/board');
   });
+
+  it("goes back to the card's own board when the card is opened by id", async () => {
+    const CARD_ID = '0b8f3c1e-5a7d-4e29-9c41-7d2a6e8f1b30';
+    const base = vi.mocked(fetch).getMockImplementation() as (u: string) => Promise<Response>;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.startsWith('/api/projects'))
+          return json({
+            projects: [
+              { id: '11111111-1111-4111-8111-111111111111', key: 'TOY', name: 'Toy' },
+              { id: '22222222-2222-4222-8222-222222222222', key: 'B2X9', name: 'Other' },
+            ],
+          });
+        if (url === `/api/cards/${CARD_ID}`)
+          return json({
+            card: { id: CARD_ID, ref: 'B2X9-7', projectId: '22222222-2222-4222-8222-222222222222' },
+          });
+        return base(url);
+      }),
+    );
+    const user = userEvent.setup();
+    mount(`/cards/${CARD_ID}`);
+    await waitFor(() => expect(screen.getByTestId('mobile-back')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId('mobile-title')).toHaveTextContent('B2X9-7'));
+    await user.click(screen.getByTestId('mobile-back'));
+    expect(screen.getByTestId('where')).toHaveTextContent('/p/B2X9/board');
+  });
 });
 
 describe('backTargetFor', () => {

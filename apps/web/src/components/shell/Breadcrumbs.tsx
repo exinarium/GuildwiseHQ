@@ -1,4 +1,4 @@
-import type { ProjectDto } from '@aom/shared';
+import { type ProjectDto, parseCardRef } from '@aom/shared';
 import { ChevronRight } from 'lucide-react';
 import { Fragment } from 'react';
 import { Link, matchPath, useLocation } from 'react-router';
@@ -9,7 +9,12 @@ interface Crumb {
 }
 
 /** Crumbs for a route. Group names are plain text; the last crumb is the current page. */
-export function crumbsFor(pathname: string, search: string, projects: ProjectDto[]): Crumb[] {
+export function crumbsFor(
+  pathname: string,
+  search: string,
+  projects: ProjectDto[],
+  card?: { ref: string; projectId: string },
+): Crumb[] {
   const name = (k?: string) => projects.find((p) => p.key === k)?.name ?? k ?? '';
   const table: Array<[string, (p: Record<string, string | undefined>) => Crumb[]]> = [
     ['/p/:key/board', (p) => [{ label: name(p.key) }, { label: 'Board' }]],
@@ -37,9 +42,13 @@ export function crumbsFor(pathname: string, search: string, projects: ProjectDto
     [
       '/cards/:ref',
       (p) => {
-        const ref = p.ref ?? '';
-        const key = ref.slice(0, Math.max(0, ref.lastIndexOf('-')));
-        return [{ label: name(key), to: `/p/${key}/board` }, { label: ref }];
+        const param = p.ref ?? '';
+        // The URL carries a card id (board tiles) or a ref (WEB-12): never cut a project key out of an id.
+        const key =
+          (card && projects.find((x) => x.id === card.projectId)?.key) ??
+          (card ? parseCardRef(card.ref)?.projectKey : parseCardRef(param)?.projectKey);
+        const label = card?.ref ?? param;
+        return [key ? { label: name(key), to: `/p/${key}/board` } : { label: 'Home', to: '/' }, { label }];
       },
     ],
     ['/projects', () => [{ label: 'Projects' }]],
@@ -106,9 +115,15 @@ export function crumbsFor(pathname: string, search: string, projects: ProjectDto
   return [];
 }
 
-export function Breadcrumbs({ projects }: { projects: ProjectDto[] }) {
+export function Breadcrumbs({
+  projects,
+  card,
+}: {
+  projects: ProjectDto[];
+  card?: { ref: string; projectId: string };
+}) {
   const { pathname, search } = useLocation();
-  const crumbs = crumbsFor(pathname, search, projects);
+  const crumbs = crumbsFor(pathname, search, projects, card);
   if (crumbs.length === 0) return <div />;
   return (
     <nav aria-label="Breadcrumb" className="min-w-0">
