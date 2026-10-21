@@ -981,3 +981,34 @@ Deviations and decisions:
    confirmed with "I handle the web address another way".
 8. **Not done:** a restore into a database that already has data (refused), non-Postgres databases, IPv6 servers, moving a local (this
    computer) target, copying files the compose file does not name (other bind-mounted folders), a data sync back.
+
+
+### Final pre-release review fixes (decided by the coordinator, 2026-10-21)
+
+- **Scan sandbox is an allowlist.** The whole real home (and `/run/WSL`, `/run/user/<uid>`, `/mnt/*/Users`, the Docker sockets, the runner
+  folder) is unreadable; only the scratch folder, the `aom` shim, the toolchain and each clone, read-only, are opened again. That
+  covers `~/.config` (`aom-uat`, `*.env`), browser profiles and shell history without listing them. Secret files in a clone
+  (`.env*`, `*.env`, `*.pem`, `*.key`, `id_*`, `.npmrc`, `.pypirc`, `.netrc`, `*.tfvars`, ...) are masked by path wherever a bounded walk
+  finds them, `build/`, `dist/` and dependency folders included. Learned against the real bubblewrap: a mask beats an allow of a parent but
+  an allow of the very same path beats the mask (masked entries are never offered); a symlink offered as an entry exposes its target
+  (links are not offered; a link to a secret in the denied home simply dangles); a mask on `.git/config` makes git fail (EACCES), so `.git`
+  is opened entry by entry without `config` (`git remote -v` prints nothing during a scan); and Claude Code opens every `--add-dir` whole to
+  its sandbox, so a scan passes none (the Read tool still reads the clones, the settings files are denied by rule). A clone over 400,000
+  entries is not opened; a dependency folder over 60,000 is hidden. Scans get no `SSH_AUTH_SOCK`, `DOCKER_HOST`, `XDG_RUNTIME_DIR` and the
+  agent's private `HOME`. Claude Code itself runs outside the sandbox (only its Bash commands run in it), so it needs nothing from the home;
+  `scan-sandbox-real.test.ts` proves it with the real `claude` binary and bubblewrap against a fake API (a normal file reads, bash runs,
+  every secret and symlink to a secret fails). Not covered: a symlink inside a subfolder to another place inside the same clone reads
+  normally (it is the clone); a secret that does not match a name in the list.
+- **Move restore.** The dump is written to a temp file on the new server, `gzip -t` and the `-- PostgreSQL database dump complete` trailer
+  are checked, and only then it is restored from the file with `--single-transaction`; a stream cut at a statement boundary applies nothing.
+  The remote shell may be dash, so nothing depends on `pipefail` (each step is its own command). `tables()` counts every non-system schema
+  and a psql failure is an error (`database_not_ready` before, `restore_failed` after), never "0 tables"; a count that cannot be read after
+  the restore is a failure said as such (the data is there, unverified).
+- **Cancel after a timed-out stop.** The server records `facts.oldAppUnknown` when "stop and back up" fails without saying the app is
+  running; a cancel then runs `restart_old` (idempotent). A step that knows clears it.
+- **Targets in a move.** `PATCH` of name, host, kind, computer or web address is refused (`409 target_in_move`) for either server of an
+  open move; host, kind and computer changes on a production target need the project owner.
+- **Reachability decision.** The automatic daily and after-failure `ssh true` check runs only for targets with an active key made by the
+  guided flow (managed `ssh_config`: `IdentitiesOnly`, `IdentityAgent none`). A target on the person's own alias (including "also add a
+  dedicated key" to it) is checked only by Check connection or as part of a deploy. The managed config now says `IdentityAgent none`.
+- **Update the steps without a web address** shows which environment lacks it and which field to fill in (instead of doing nothing).

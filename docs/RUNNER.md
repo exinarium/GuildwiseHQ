@@ -2282,7 +2282,7 @@ with a recipe"). The runner announces the `delivery:1` capability and does three
   `write_compose` from the project's checkout, `caddy_site`, `start_services`), every action idempotent, `dryRun` changes nothing, each
   reports `done|skipped|would|failed`; the server scripts are fixed POSIX shell passed to ssh as a base64 argument with quoted
   positional arguments. `deploy.exec` exports `AOM_DEPLOY_SSH="ssh -F <config>"` for a target this computer holds a key for (the
-  generated scripts use it), `deploy.probe` scope `ssh_check` is the cheap daily reachability look, and a DevOps scan's `aom deploy
+  generated scripts use it), `deploy.probe` scope `ssh_check` is the cheap reachability look (the server asks for it by itself daily and after a failed deploy only for targets connected through the guided flow, i.e. with a managed `ssh_config`: `IdentitiesOnly yes`, `IdentityAgent none`; a target on the person's own alias is checked only by the Check connection button or by a deploy), and a DevOps scan's `aom deploy
   probe` result is also reported to the server (`deploy.probe.record`). Tests: `deploy-connect.sshd.test.ts` runs all of it against a
   real sshd container (skipped without Docker), `deploy-prepare.test.ts` against fake docker/systemctl/caddy.
 - **Read-only scans are an allowlist (v1a review).** In a `run_scan` or `deploy_scan` shift the guard allows only listed read
