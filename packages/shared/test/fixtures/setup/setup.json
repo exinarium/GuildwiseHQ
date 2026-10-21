@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generator": "setup-1.3",
+  "generator": "setup-1.4",
   "environments": [
     {
       "name": "uat",

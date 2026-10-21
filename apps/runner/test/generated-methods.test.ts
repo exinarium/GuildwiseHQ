@@ -5,6 +5,7 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from 'node:fs';
@@ -12,7 +13,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { compileSetup, sshShipEnv } from '@aom/shared';
 import { describe, expect, it } from 'vitest';
-import { cleanupTmp, tmp } from './helpers.ts';
+import { cleanupTmp, gitCommit, tmp } from './helpers.ts';
 
 cleanupTmp();
 
@@ -25,7 +26,8 @@ cleanupTmp();
  */
 
 const here = dirname(fileURLToPath(import.meta.url));
-const COMMIT = '4f2c1ab9d0e84c7aa1b2c3d4e5f60718293a4b5c';
+// the checkout is a real git repository with one fixed commit (the id never changes while its files do not)
+const COMMIT = 'bcd474e3c3c4ae5f1b2aa1fdd0d39f4c55b90b36';
 const SHORT = COMMIT.slice(0, 12);
 const COMMIT2 = '9e8d7c6b5a4f3e2d1c0b9a8f7e6d5c4b3a291807';
 const SHORT2 = COMMIT2.slice(0, 12);
@@ -64,6 +66,8 @@ function world(): W {
   ])
     mkdirSync(d, { recursive: true });
   writeFileSync(join(checkout, 'Dockerfile'), 'FROM scratch\n');
+  writeFileSync(join(checkout, 'app.js'), 'console.log(1)\n');
+  gitCommit(checkout);
   const put = (name: string, from: string) => {
     writeFileSync(join(bin, name), readFileSync(join(here, 'fixtures', from), 'utf8'));
     chmodSync(join(bin, name), 0o755);
@@ -185,16 +189,28 @@ describe('copy from this computer, a literal tag and no .env variable (the owner
     expect(r.out).toContain('AOM-DEPLOY');
   });
 
-  it('an unhealthy release goes back to the earlier image through the same override file; the database is untouched', () => {
+  it('an unhealthy release goes back to the earlier image; with no override file before, the override is removed (not pinned); the database is untouched', () => {
     const w = world();
     writeFileSync(join(w.root, 'unhealthy'), `dcode-server:${SHORT}`);
     const r = run(w, script(flow(w)));
     expect(r.code, r.out).not.toBe(0);
     expect(r.out).toContain('putting the previous version back');
     expect(r.out).toContain('the database was NOT rolled back');
-    expect(readFileSync(override(w), 'utf8')).toContain(`image: "${OLD_IMAGE}"`);
+    expect(r.out).toContain('the compose file names the image again');
+    expect(existsSync(override(w))).toBe(false);
     expect(w.image('dcode-server')).toBe(OLD_IMAGE);
     expect(w.cid('postgres')).toBe('db-cid-1');
+  });
+
+  it('an unhealthy release after an earlier one goes back to the earlier image through the same override file', () => {
+    const w = world();
+    expect(run(w, script(flow(w))).code).toBe(0);
+    writeFileSync(join(w.root, 'unhealthy'), `dcode-server:${SHORT2}`);
+    const r = run(w, script(flow(w)), { AOM_DEPLOY_COMMIT: COMMIT2 });
+    expect(r.code, r.out).not.toBe(0);
+    expect(r.out).toContain('putting the previous version back');
+    expect(readFileSync(override(w), 'utf8')).toContain(`image: "dcode-server:${SHORT}"`);
+    expect(w.image('dcode-server')).toBe(`dcode-server:${SHORT}`);
   });
 
   it('a second release replaces the first; the earlier override is kept as a copy', () => {
@@ -259,7 +275,8 @@ describe('pull from a registry', () => {
 describe('build on the server', () => {
   it('the approved files are copied to a folder of their own, the server builds only the app, nothing else is built or replaced', () => {
     const w = world();
-    writeFileSync(join(w.checkout, 'app.js'), 'console.log(1)\n');
+    // an untracked file (a settings file with a secret) is not part of the approved version and is not sent
+    writeFileSync(join(w.checkout, '.env'), 'SECRET=1\n');
     // the compose file builds the app (a build: line), as many stacks do
     writeFileSync(
       join(w.appDir, 'compose.yaml'),
@@ -269,11 +286,79 @@ describe('build on the server', () => {
     expect(r.code, r.out).toBe(0);
     const src = join(w.appDir, 'guildwise-src', SHORT);
     expect(readFileSync(join(src, 'app.js'), 'utf8')).toContain('console.log(1)');
+    expect(existsSync(join(src, '.env'))).toBe(false);
     expect(existsSync(join(src, '.aom-complete'))).toBe(true);
     expect(w.image('dcode-server')).toBe(`dcode-server:${SHORT}`);
     expect(readFileSync(override(w), 'utf8')).toContain(`dcode-server:${SHORT}`);
     expect(w.cid('postgres')).toBe('db-cid-1');
     expect(statSync(src).isDirectory()).toBe(true);
     expect(w.calls('server').filter((c) => / build /.test(c))).toHaveLength(1);
+  });
+});
+
+describe('a stack that was started another way is not restarted (M3), and a source that is not git is not sent (m11)', () => {
+  const labels = (w: W, line: string) => writeFileSync(join(w.server, 'labels'), `${line}\n`);
+  const cases: Array<[string, (w: W) => string, string]> = [
+    [
+      'several compose files',
+      (w) =>
+        `${join(w.appDir, 'compose.yaml')},${join(w.appDir, 'extra.yaml')}|${w.appDir}|dcode-flow5-remote|`,
+      'several compose files',
+    ],
+    [
+      'another compose file',
+      (w) => `${join(w.root, 'elsewhere', 'compose.yaml')}|${join(w.root, 'elsewhere')}|dcode-flow5-remote|`,
+      'not from',
+    ],
+    [
+      'another project folder',
+      (w) => `${join(w.appDir, 'compose.yaml')}|${join(w.root, 'other')}|dcode-flow5-remote|`,
+      'another project folder',
+    ],
+    [
+      'an --env-file',
+      (w) => `${join(w.appDir, 'compose.yaml')}|${w.appDir}|dcode-flow5-remote|${join(w.root, 'x.env')}`,
+      '--env-file',
+    ],
+  ];
+  it.each(cases)(
+    '%s: a plain stop, in the dry run and the real run, before anything changes',
+    (_n, line, text) => {
+      const w = world();
+      labels(w, line(w));
+      for (const dry of ['1', '0']) {
+        const r = run(w, script(flow(w)), { AOM_DEPLOY_DRY_RUN: dry });
+        expect(r.code).not.toBe(0);
+        expect(r.out).toContain(text);
+        expect(r.out).toMatch(/nothing was changed/i);
+        expect(existsSync(override(w))).toBe(false);
+        expect(w.cid('dcode-server')).toBe('app-old-cid');
+        expect(existsSync(join(w.appDir, 'backups'))).toBe(false);
+      }
+    },
+  );
+
+  it('the compose file plus the override file that Guildwise itself writes is the normal case', () => {
+    const w = world();
+    labels(
+      w,
+      `${join(w.appDir, 'compose.yaml')},${join(w.appDir, 'docker-compose.guildwise.yml')}|${w.appDir}|dcode-flow5-remote|`,
+    );
+    const r = run(w, script(flow(w)));
+    expect(r.code, r.out).toBe(0);
+  });
+
+  it('files that are not a git checkout are refused before anything is copied to the server', () => {
+    const w = world();
+    rmSync(join(w.checkout, '.git'), { recursive: true, force: true });
+    writeFileSync(
+      join(w.appDir, 'compose.yaml'),
+      `services:\n  dcode-server:\n    build: ./src\n    image: ${OLD_IMAGE}\n    ports:\n      - "5500:500"\n  postgres:\n    image: postgres:18\n`,
+    );
+    const r = run(w, script(flow(w, { method: 'build_on_server' })));
+    expect(r.code).not.toBe(0);
+    expect(r.out).toContain('not a git checkout');
+    expect(existsSync(join(w.appDir, 'guildwise-src'))).toBe(false);
+    expect(existsSync(override(w))).toBe(false);
   });
 });

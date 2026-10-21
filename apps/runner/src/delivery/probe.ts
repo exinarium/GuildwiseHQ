@@ -122,11 +122,37 @@ export function parsePorts(s: string): ProbeContainer['ports'] {
   return out.slice(0, 20);
 }
 
-/** One `CONTAINER\tname\timage\tstate\tstatus\tports\tproject\tservice\tconfig_files\tworking_dir` line. */
+/** Where Guildwise itself writes the new version of the app next to the compose file. */
+const GUILDWISE_OVERRIDE = 'docker-compose.guildwise.yml';
+
+/**
+ * Why a stack cannot be restarted by Guildwise yet, from the labels `docker compose` wrote: several compose files (the override
+ * file Guildwise writes itself does not count), an --env-file, or a project folder other than the one of the compose file.
+ */
+export function unsupportedStack(
+  configFiles: string,
+  workingDir: string,
+  envFile: string,
+): string | undefined {
+  const files = configFiles
+    .split(',')
+    .map((x) => x.trim())
+    .filter(Boolean);
+  const own = files.filter((f) => f.split('/').pop() !== GUILDWISE_OVERRIDE);
+  if (own.length > 1) return 'It was started from several compose files. This is not supported yet.';
+  if (envFile.trim()) return 'It was started with its own --env-file. This is not supported yet.';
+  const first = own[0];
+  if (first && workingDir && (first.slice(0, first.lastIndexOf('/')) || '/') !== workingDir)
+    return 'It was started with another project folder (--project-directory). This is not supported yet.';
+  return undefined;
+}
+
+/** One `CONTAINER\tname\timage\tstate\tstatus\tports\tproject\tservice\tconfig_files\tworking_dir\tenvironment_file` line. */
 export function parseContainerLine(line: string): ProbeContainer | null {
   const f = line.replace(/^CONTAINER\t/, '').split('\t');
   if (f.length < 4 || !f[0]) return null;
   const configFile = (f[7] ?? '').split(',')[0]?.trim();
+  const unsupported = unsupportedStack(f[7] ?? '', f[8] ?? '', f[9] ?? '');
   return {
     name: (f[0] ?? '').slice(0, 200),
     image: (f[1] ?? '').slice(0, 200),
@@ -137,7 +163,16 @@ export function parseContainerLine(line: string): ProbeContainer | null {
     ...(f[6] ? { service: f[6].slice(0, 200) } : {}),
     ...(configFile ? { composeFile: configFile.slice(0, 300) } : {}),
     ...(f[8] ? { workingDir: f[8].slice(0, 300) } : {}),
+    ...(unsupported ? { unsupported } : {}),
   };
+}
+
+/** A compose file inherits the "not supported yet" reason of a running stack that was started from it. */
+export function markUnsupportedStacks(report: ProbeReport): void {
+  for (const cf of report.composeFiles) {
+    const c = report.containers.find((x) => x.unsupported && x.composeFile === cf.path);
+    if (c?.unsupported) cf.unsupported = c.unsupported;
+  }
 }
 
 const DB_IMAGES: Array<[RegExp, NonNullable<ProbeComposeService['database']>]> = [
@@ -266,6 +301,8 @@ export interface ServiceLines {
   pm2: string[];
   processes: string[];
   appDirs: string[];
+  /** `dir<TAB>path,path,...` rows of folders that hold data the app keeps itself. */
+  statePaths: string[];
 }
 
 /** The `SERVICE`, `PM2JSON`, `PROCESS` and `APPDIR` lines of the services probe as a report part. */
@@ -352,12 +389,28 @@ export function buildServices(l: ServiceLines): { services: ProbeService[]; appD
   }
   for (const s of services)
     if (!s.releaseLayout && s.workingDir && s.workingDir.endsWith('/current')) s.releaseLayout = true;
+  const state = new Map<string, string[]>();
+  for (const row of l.statePaths) {
+    const [dir, list] = row.split('\t');
+    if (!dir || !list) continue;
+    state.set(
+      dir,
+      list
+        .split(',')
+        .filter((x) => x && /^[A-Za-z0-9._][A-Za-z0-9._/+@=-]*$/.test(x))
+        .slice(0, 20),
+    );
+  }
+  for (const s of services) {
+    const sp = s.workingDir ? state.get(s.workingDir) : undefined;
+    if (sp?.length) s.statePaths = sp;
+  }
   const appDirs = [...new Set(l.appDirs.filter((d) => SAFE_PATH.test(d)))].slice(0, 30);
   return { services: services.slice(0, 40), appDirs };
 }
 
 const splitServiceLines = (out: string): ServiceLines => {
-  const l: ServiceLines = { services: [], pm2: [], processes: [], appDirs: [] };
+  const l: ServiceLines = { services: [], pm2: [], processes: [], appDirs: [], statePaths: [] };
   for (const line of out.split('\n')) {
     const i = line.indexOf('\t');
     if (i < 0) continue;
@@ -367,6 +420,7 @@ const splitServiceLines = (out: string): ServiceLines => {
     else if (tag === 'PM2JSON') l.pm2.push(rest);
     else if (tag === 'PROCESS') l.processes.push(rest);
     else if (tag === 'APPDIR') l.appDirs.push(rest);
+    else if (tag === 'STATEPATHS') l.statePaths.push(rest);
   }
   return l;
 };
@@ -535,7 +589,7 @@ async function probeLocal(p: DeployProbePayload, o: ProbeOptions): Promise<Deplo
         'ps',
         '--all',
         '--format',
-        'CONTAINER\t{{.Names}}\t{{.Image}}\t{{.State}}\t{{.Status}}\t{{.Ports}}\t{{.Label "com.docker.compose.project"}}\t{{.Label "com.docker.compose.service"}}\t{{.Label "com.docker.compose.project.config_files"}}\t{{.Label "com.docker.compose.project.working_dir"}}',
+        'CONTAINER\t{{.Names}}\t{{.Image}}\t{{.State}}\t{{.Status}}\t{{.Ports}}\t{{.Label "com.docker.compose.project"}}\t{{.Label "com.docker.compose.service"}}\t{{.Label "com.docker.compose.project.config_files"}}\t{{.Label "com.docker.compose.project.working_dir"}}\t{{.Label "com.docker.compose.project.environment_file"}}',
       ],
       { timeoutMs: t, ...env },
     );
@@ -651,6 +705,7 @@ async function probeLocal(p: DeployProbePayload, o: ProbeOptions): Promise<Deplo
   const df = await run('df', ['-Pm', home], { timeoutMs: t, ...env });
   const mb = Number(df.stdout.trim().split('\n').pop()?.trim().split(/\s+/)[3]);
   if (Number.isFinite(mb)) report.freeDiskMb = mb;
+  markUnsupportedStacks(report);
   return { ok: true, report: fit(report) };
 }
 
@@ -912,7 +967,7 @@ export function parseRemoteOutput(out: string, host: string, o: ProbeOptions = {
     }
     return f;
   };
-  const svcLines: ServiceLines = { services: [], pm2: [], processes: [], appDirs: [] };
+  const svcLines: ServiceLines = { services: [], pm2: [], processes: [], appDirs: [], statePaths: [] };
   const composePaths: string[] = [];
   const checked: string[] = [];
   const sites = new Map<string, Set<string>>();
@@ -973,6 +1028,9 @@ export function parseRemoteOutput(out: string, host: string, o: ProbeOptions = {
         break;
       case 'APPDIR':
         svcLines.appDirs.push(rest);
+        break;
+      case 'STATEPATHS':
+        svcLines.statePaths.push(rest);
         break;
       case 'CHECKED':
         if (
@@ -1070,6 +1128,7 @@ export function parseRemoteOutput(out: string, host: string, o: ProbeOptions = {
           },
     );
   }
+  markUnsupportedStacks(report);
   // Only an image variable that a compose file of that folder really refers to is reported (not any `*IMAGE*` line of a .env)
   for (const f of report.folders) {
     if (!f.imageVars) continue;

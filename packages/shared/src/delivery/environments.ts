@@ -233,8 +233,9 @@ export type EarlierReleasesResponse = z.infer<typeof EarlierReleasesResponseSche
 /**
  * `POST /api/projects/:id/releases/rollback` (org Owner or Admin). `runId` must be an earlier SUCCESSFUL release of that
  * environment. Answers like `POST .../deploy` (`DeployResult`). The run has `trigger: "rollback"`: the gate's test-site and
- * window rules do not apply (the audit says so), a freeze still blocks, and who releases follows the recipe (`owner` waits in
- * the release queue for the Owner's OK every time, even when the requester is the Owner).
+ * window rules do not apply (the audit says so), a freeze still blocks, and it is released at once: the Owner or Admin who asks
+ * IS the one who releases (the same rule as the Release button), so the confirm sheet is the approval and nothing waits in the
+ * release queue (design section 13.1).
  */
 export const RollbackRequestSchema = z.object({
   env: EnvNameSchema,

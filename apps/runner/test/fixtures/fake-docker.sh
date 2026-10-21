@@ -9,6 +9,10 @@ case "$*" in
 esac
 # strip global compose options
 if [ "$1" = compose ]; then
+  # like the real labels: the first -f file is the one the stack was started from
+  for ((i=0;i<${#args[@]};i++)); do
+    if [ "${args[$i]}" = "-f" ]; then echo "${args[$((i+1))]}" > "$S/first-file"; break; fi
+  done
   shift
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -54,7 +58,14 @@ fi
 case "$1" in
   version) echo 29.1.2 ;;
   info) exit 0 ;;
-  inspect) cat "$S/running" 2>/dev/null ;;
+  inspect)
+    case "$*" in
+      *Labels*)
+        # config_files|working_dir|project|environment_file; a test can write its own line to $FAKE_ROOT/labels
+        if [ -f "$FAKE_ROOT/labels" ]; then cat "$FAKE_ROOT/labels"
+        else f=$(cat "$S/first-file" 2>/dev/null); echo "$f|$(dirname -- "$f")||"; fi ;;
+      *) cat "$S/running" 2>/dev/null ;;
+    esac ;;
   image)
     case "$2" in
       inspect) if [ -f "$S/image-$3" ]; then exit 0; else exit 1; fi ;;

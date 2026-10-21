@@ -35,6 +35,7 @@ case "$cmd" in
   inspect)
     fmt=; [ "$1" = --format ] && { fmt=$2; shift 2; }
     case "$fmt" in
+      *Labels*) f=$(cat "$S/last-file" 2>/dev/null); echo "$f|$(dirname -- "$f")||" ;;
       *Config.Image*) app_image; echo ;;
       *HostPort*) echo "$(cat "$S/port") " ;;
     esac

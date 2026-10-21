@@ -4,9 +4,12 @@ import {
   existsSync,
   lstatSync,
   mkdirSync,
+  mkdtempSync,
   readdirSync,
   readFileSync,
   readlinkSync,
+  rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
@@ -14,7 +17,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { compileSetup, type DirectManager, directEnv } from '@aom/shared';
 import { describe, expect, it } from 'vitest';
-import { cleanupTmp, tmp } from './helpers.ts';
+import { cleanupTmp, gitCommit, tmp } from './helpers.ts';
 
 cleanupTmp();
 
@@ -25,7 +28,8 @@ cleanupTmp();
  * back to the previous folder, a plain folder is only adopted when the person said so, and old folders are pruned safely.
  */
 
-const COMMIT = '4f2c1ab9d0e84c7aa1b2c3d4e5f60718293a4b5c';
+/** The checkout is a real git repository with one fixed commit (same files, author and dates: the id is always the same). */
+const COMMIT = 'ccc882384f960d462ce4b64798c78dd2b53f6025';
 const SHORT = COMMIT.slice(0, 12);
 const OLD = 'a'.repeat(12);
 const here = dirname(fileURLToPath(import.meta.url));
@@ -48,6 +52,7 @@ function world(): World {
   for (const d of [home, app, checkout, bin]) mkdirSync(d, { recursive: true });
   writeFileSync(join(checkout, 'server.js'), 'console.log("hi")\n');
   writeFileSync(join(checkout, 'package.json'), '{}\n');
+  gitCommit(checkout);
   const put = (name: string, body: string) => {
     writeFileSync(join(bin, name), `#!/bin/bash\n${body}\n`);
     chmodSync(join(bin, name), 0o755);
@@ -57,8 +62,9 @@ function world(): World {
     `echo "systemctl $*" >> "$FAKE_ROOT/calls.log"
 args=("$@"); [ "\${args[0]:-}" = "--user" ] && args=("\${args[@]:1}")
 case "\${args[0]:-}" in
+  show-environment) [ -f "$FAKE_ROOT/no-user-session" ] && exit 1; echo "XDG_RUNTIME_DIR=/run/user/1000" ;;
   show) [ -f "$FAKE_ROOT/unknown-unit" ] && echo not-found || echo loaded ;;
-  restart) [ -f "$FAKE_ROOT/restart-fails" ] && exit 1; echo "\${args[1]}" >> "$FAKE_ROOT/restarts.log" ;;
+  restart) [ -f "$FAKE_ROOT/restart-fails" ] && exit 1; if [ -f "$FAKE_ROOT/restart-fails-once" ]; then rm -f "$FAKE_ROOT/restart-fails-once"; exit 1; fi; echo "\${args[1]}" >> "$FAKE_ROOT/restarts.log" ;;
   *) echo "fake systemctl: unexpected $*" >&2; exit 2 ;;
 esac`,
   );
@@ -72,6 +78,7 @@ case "$1" in describe) exit 0 ;; restart) echo "$2" >> "$FAKE_ROOT/restarts.log"
     `echo "sudo $*" >> "$FAKE_ROOT/calls.log"
 if [ "$1" = -n ]; then shift; else echo "sudo asked for a password" >> "$FAKE_ROOT/forbidden.log"; exit 1; fi
 if [ -f "$FAKE_ROOT/sudo-asks" ]; then echo "sudo: a password is required" >&2; exit 1; fi
+if [ "$1" = -l ]; then [ -f "$FAKE_ROOT/sudo-denies-command" ] && { echo "Sorry, user may not run sudo" >&2; exit 1; }; exit 0; fi
 exec "$@"`,
   );
   put(
@@ -84,6 +91,12 @@ if [ -f "$FAKE_ROOT/unhealthy" ] && [ "$n" -lt "$(cat "$FAKE_ROOT/unhealthy")" ]
     'pg_dump',
     `[ -f "$FAKE_ROOT/dump-fails" ] && exit 1
 for i in $(seq 1 40); do echo "-- fake dump line $i of the database $1 padding padding"; done`,
+  );
+  // `ln` that can be told to fail when it makes the link of a folder that is being adopted
+  put(
+    'ln',
+    `case "$*" in *releases/initial*) [ -f "$FAKE_ROOT/ln-fails" ] && { echo "ln: failed" >&2; exit 1; } ;; esac
+exec /usr/bin/ln "$@"`,
   );
   writeFileSync(join(bin, 'ssh'), readFileSync(join(here, 'fixtures', 'fake-ssh.sh'), 'utf8'));
   chmodSync(join(bin, 'ssh'), 0o755);
@@ -390,5 +403,277 @@ describe('other managers, and a server over ssh', () => {
     expect(readFileSync(join(w.app, 'releases', SHORT, 'server.js'), 'utf8')).toContain('hi');
     expect(w.calls().filter((c) => c.startsWith('ssh ')).length).toBeGreaterThan(5);
     expect(restarts(w)).toEqual(['shop.service']);
+  });
+});
+
+describe('review fixes: the lock, shared data, adopting a folder, restarts', () => {
+  const plainWith = (w: World, root = w.home) => {
+    const dir = join(root, 'shop');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'app.js'), 'running now');
+    return dir;
+  };
+
+  it('B1: a restart that leaves a process running in the background does not keep the deploy lock', () => {
+    const w = world();
+    running(w);
+    const mine = join(w.root, 'bin', 'restart-bg');
+    writeFileSync(
+      mine,
+      '#!/bin/bash\n/bin/sleep 25 >/dev/null 2>&1 &\necho $! > "$FAKE_ROOT/bg.pid"\necho mine >> "$FAKE_ROOT/restarts.log"\n',
+    );
+    chmodSync(mine, 0o755);
+    try {
+      const r = run(
+        w,
+        script(w, {
+          manager: { kind: 'command', restart: [mine], sudo: false },
+          shared: [],
+          database: undefined,
+        }),
+      );
+      expect(r.code, r.out).toBe(0);
+      const pid = Number(readFileSync(join(w.root, 'bg.pid'), 'utf8'));
+      expect(() => process.kill(pid, 0)).not.toThrow(); // it is still running
+      const lock = readdirSync(w.root).find((f) => f.endsWith('.lock'));
+      expect(lock).toBeTruthy();
+      // the next deploy can take the lock
+      const f = spawnSync('flock', ['-n', join(w.root, lock as string), 'true']);
+      expect(f.status).toBe(0);
+    } finally {
+      if (existsSync(join(w.root, 'bg.pid')))
+        try {
+          process.kill(Number(readFileSync(join(w.root, 'bg.pid'), 'utf8')));
+        } catch {
+          // already gone
+        }
+    }
+  });
+
+  it('M2a: a plain folder with data that is not marked as shared is refused, with a list, and nothing moves', () => {
+    const w = world();
+    const dir = plainWith(w);
+    mkdirSync(join(dir, 'uploads'));
+    writeFileSync(join(dir, 'uploads', 'a.png'), 'x');
+    writeFileSync(join(dir, 'shop.sqlite'), 'x');
+    writeFileSync(join(dir, '.env'), 'A=1\n');
+    const over = { currentLink: dir, adoptFolder: true, shared: ['.env'], database: undefined };
+    for (const dry of ['0', '1']) {
+      const r = run(w, script(w, over), { AOM_DEPLOY_DRY_RUN: dry });
+      expect(r.code).not.toBe(0);
+      expect(r.out).toContain('look like data the app keeps itself');
+      expect(r.out).toContain('uploads');
+      expect(r.out).toContain('shop.sqlite');
+      expect(r.out).not.toMatch(/: [^\n]*\.env /);
+      expect(lstatSync(dir).isDirectory()).toBe(true);
+      expect(lstatSync(dir).isSymbolicLink()).toBe(false);
+      expect(existsSync(join(w.app, 'releases', 'initial'))).toBe(false);
+    }
+    expect(restarts(w)).toEqual([]);
+    // marked as shared: it goes ahead (the database through sqlite3 .backup)
+    spawnSync('sqlite3', [join(dir, 'shop.sqlite'), 'create table t(a); insert into t values (1),(2);']);
+    const ok = run(w, script(w, { ...over, shared: ['.env', 'uploads', 'shop.sqlite'] }));
+    expect(ok.code, ok.out).toBe(0);
+    expect(readFileSync(join(w.app, 'shared', 'uploads', 'a.png'), 'utf8')).toBe('x');
+    const n = spawnSync('sqlite3', [join(w.app, 'shared', 'shop.sqlite'), 'select count(*) from t;'], {
+      encoding: 'utf8',
+    });
+    expect(n.stdout.trim()).toBe('2');
+  });
+
+  it('M2b: shared files are copied at the switch (from what runs then), not when the files are prepared', () => {
+    const w = world();
+    running(w);
+    // the build step (after the files are prepared) writes a file into the RUNNING version; only a copy made later sees it
+    const r = run(
+      w,
+      script(w, {
+        shared: ['.env', 'late.txt'],
+        database: undefined,
+        build: [
+          { label: 'Late', argv: ['sh', '-c', `echo late > ${join(w.app, 'releases', OLD, 'late.txt')}`] },
+        ],
+      }),
+    );
+    expect(r.code, r.out).toBe(0);
+    expect(readFileSync(join(w.app, 'shared', 'late.txt'), 'utf8')).toBe('late\n');
+    expect(lstatSync(join(w.app, 'releases', SHORT, 'late.txt')).isSymbolicLink()).toBe(true);
+  });
+
+  it('M2b: a sqlite database is copied with sqlite3 .backup (consistent), and refused when sqlite3 is not installed', () => {
+    const w = world();
+    const old = running(w);
+    spawnSync('sqlite3', [join(old, 'app.db'), 'create table t(a); insert into t values (1),(2),(3);']);
+    const sh = script(w, { shared: ['.env', 'app.db'], database: undefined });
+    const r = run(w, sh);
+    expect(r.code, r.out).toBe(0);
+    const n = spawnSync('sqlite3', [join(w.app, 'shared', 'app.db'), 'select count(*) from t;'], {
+      encoding: 'utf8',
+    });
+    expect(n.stdout.trim()).toBe('3');
+    // without sqlite3: refused before anything is switched
+    const w2 = world();
+    const old2 = running(w2);
+    spawnSync('sqlite3', [join(old2, 'app.db'), 'create table t(a); insert into t values (1);']);
+    const tools = join(w2.root, 'tools');
+    mkdirSync(tools);
+    for (const f of readdirSync('/usr/bin'))
+      if (f !== 'sqlite3') symlinkSync(join('/usr/bin', f), join(tools, f));
+    const r2 = run(w2, script(w2, { shared: ['.env', 'app.db'], database: undefined }), {
+      PATH: `${join(w2.root, 'bin')}:${tools}`,
+    });
+    expect(r2.code).not.toBe(0);
+    expect(r2.out).toContain('sqlite3 is not installed');
+    expect(readlinkSync(join(w2.app, 'current'))).toBe(old2);
+    expect(restarts(w2)).toEqual([]);
+    expect(existsSync(join(w2.app, 'shared', 'app.db'))).toBe(false);
+  });
+
+  it('M2c: a folder on another disk is not moved (the check comes before the move)', () => {
+    const other = (() => {
+      try {
+        return mkdtempSync('/dev/shm/aom-direct-');
+      } catch {
+        return null;
+      }
+    })();
+    const w = world();
+    if (!other || statSync(other).dev === statSync(w.app).dev) {
+      if (other) rmSync(other, { recursive: true, force: true });
+      return; // this machine has no second disk to test with
+    }
+    try {
+      const dir = plainWith(w, other);
+      const over = { currentLink: dir, adoptFolder: true, shared: [], database: undefined };
+      for (const dry of ['0', '1']) {
+        const r = run(w, script(w, over), { AOM_DEPLOY_DRY_RUN: dry });
+        expect(r.code).not.toBe(0);
+        expect(r.out).toContain('different disk');
+        expect(lstatSync(dir).isDirectory()).toBe(true);
+        expect(existsSync(join(w.app, 'releases', 'initial'))).toBe(false);
+      }
+      expect(restarts(w)).toEqual([]);
+    } finally {
+      rmSync(other, { recursive: true, force: true });
+    }
+  });
+
+  it('M2d: a move that is interrupted after the folder was moved puts the folder back where it was', () => {
+    const w = world();
+    const dir = plainWith(w);
+    writeFileSync(join(w.root, 'ln-fails'), '1');
+    const r = run(w, script(w, { currentLink: dir, adoptFolder: true, shared: [], database: undefined }));
+    expect(r.code).not.toBe(0);
+    expect(r.out).toContain('putting the previous version back');
+    expect(lstatSync(dir).isDirectory()).toBe(true);
+    expect(lstatSync(dir).isSymbolicLink()).toBe(false);
+    expect(readFileSync(join(dir, 'app.js'), 'utf8')).toBe('running now');
+    expect(existsSync(join(w.app, 'releases', 'initial'))).toBe(false);
+    expect(restarts(w)).toEqual([]);
+  });
+
+  it('M2d: the same happens when automatic rollback is switched off (a moved folder is always put back)', () => {
+    const w = world();
+    const dir = plainWith(w);
+    writeFileSync(join(w.root, 'ln-fails'), '1');
+    const r = run(
+      w,
+      script(w, {
+        currentLink: dir,
+        adoptFolder: true,
+        shared: [],
+        database: undefined,
+        healthUrl: undefined,
+      }),
+    );
+    expect(r.code).not.toBe(0);
+    expect(lstatSync(dir).isDirectory()).toBe(true);
+    expect(readFileSync(join(dir, 'app.js'), 'utf8')).toBe('running now');
+  });
+
+  it('m3: when the restart itself fails the link goes back, even with no health check and no automatic rollback', () => {
+    const w = world();
+    const old = running(w);
+    writeFileSync(join(w.root, 'restart-fails-once'), '1');
+    const r = run(w, script(w, { shared: [], database: undefined, healthUrl: undefined }));
+    expect(r.code).not.toBe(0);
+    expect(r.out).toContain('restarting shop.service failed');
+    expect(r.out).toContain('putting the previous version back');
+    expect(readlinkSync(join(w.app, 'current'))).toBe(old);
+    expect(restarts(w)).toEqual(['shop.service']); // the previous version was started again
+  });
+
+  it('m3: without a restart failure and with rollback off, a failed health check leaves the new version (as before)', () => {
+    const w = world();
+    running(w);
+    const r = run(w, script(w, { shared: [], database: undefined, healthUrl: undefined }));
+    expect(r.code, r.out).toBe(0);
+    expect(readlinkSync(join(w.app, 'current'))).toBe(join(w.app, 'releases', SHORT));
+  });
+
+  it('m5: an app folder spelled through a symlink is resolved, and the previous version is never pruned', () => {
+    const w = world();
+    const old = running(w);
+    const alias = join(w.home, 'applink');
+    symlinkSync(w.app, alias);
+    for (let i = 0; i < 4; i++) {
+      const name = `${i}`.repeat(12);
+      mkdirSync(join(w.app, 'releases', name), { recursive: true });
+      spawnSync('touch', ['-d', `${i + 2} days ago`, join(w.app, 'releases', name)]);
+    }
+    spawnSync('touch', ['-d', '30 days ago', old]); // the oldest folder is the one that runs now (and then the previous one)
+    const r = run(w, script(w, { appDir: alias, keep: 2, shared: [], database: undefined }));
+    expect(r.code, r.out).toBe(0);
+    expect(existsSync(old)).toBe(true);
+    expect(readdirSync(join(w.app, 'releases')).includes(SHORT)).toBe(true);
+    expect(readlinkSync(join(w.app, 'current'))).toBe(join(w.app, 'releases', SHORT));
+  });
+
+  it('m5: over ssh the server resolves the app folder itself (a symlinked folder works and the link lands in the real one)', () => {
+    const w = world();
+    const alias = join(w.home, 'applink');
+    symlinkSync(w.app, alias);
+    const r = run(
+      w,
+      script(
+        w,
+        { appDir: alias, manager: systemd({ scope: 'user' }), shared: [], database: undefined },
+        true,
+      ),
+    );
+    expect(r.code, r.out).toBe(0);
+    expect(readlinkSync(join(w.app, 'current'))).toBe(join(w.app, 'releases', SHORT));
+  });
+
+  it('m6: the dry run asks sudo whether this very command is allowed without a password', () => {
+    const w = world();
+    running(w);
+    writeFileSync(join(w.root, 'sudo-denies-command'), '1');
+    const r = run(w, script(w), { AOM_DEPLOY_DRY_RUN: '1' });
+    expect(r.code).not.toBe(0);
+    expect(r.out).toContain('does not allow this command');
+    expect(w.calls()).toContain('sudo -n -l systemctl restart shop.service');
+    expect(restarts(w)).toEqual([]);
+  });
+
+  it('m6: the dry run of a user service says when there is no user session', () => {
+    const w = world();
+    running(w);
+    writeFileSync(join(w.root, 'no-user-session'), '1');
+    const r = run(w, script(w, { manager: systemd({ scope: 'user' }) }), { AOM_DEPLOY_DRY_RUN: '1' });
+    expect(r.code).not.toBe(0);
+    expect(r.out).toContain('systemctl --user does not work');
+  });
+
+  it('m11: files that are not a git checkout are not sent (they could hold secrets)', () => {
+    const w = world();
+    running(w);
+    rmSync(join(w.checkout, '.git'), { recursive: true, force: true });
+    writeFileSync(join(w.checkout, '.env'), 'SECRET=1\n');
+    const r = run(w, script(w, { shared: [], database: undefined }));
+    expect(r.code).not.toBe(0);
+    expect(r.out).toContain('not a git checkout');
+    expect(readlinkSync(join(w.app, 'current'))).toBe(join(w.app, 'releases', OLD));
+    expect(existsSync(join(w.app, 'releases', SHORT, '.env'))).toBe(false);
   });
 });

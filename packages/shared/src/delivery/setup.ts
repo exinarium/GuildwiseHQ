@@ -14,7 +14,7 @@ import { ReleasedBySchema, SECRET_NAME, TriggerSchema } from './recipe.ts';
 export const SETUP_FILE = 'setup.json';
 export const SETUP_VERSION = 1;
 /** The compiler version recorded in `setup.json`: a newer compiler never silently rewrites approved scripts. */
-export const SETUP_GENERATOR = 'setup-1.3';
+export const SETUP_GENERATOR = 'setup-1.4';
 /** Did an older compiler write these scripts? (The "improved steps are available" nudge.) */
 export const isOlderGenerator = (g: string): boolean => g !== SETUP_GENERATOR;
 
@@ -84,14 +84,38 @@ export const HealthUrlSchema = z
 
 // ------------------------------------------------------------------------------ apps that run without Docker
 
+/** Unit types that are not an app (restarting them can take other things down) and the machine's own services. */
+const UNIT_TYPE_DENIED = /\.(target|slice|socket|mount|device)$/i;
+const UNIT_NAME_DENIED = /^(docker|containerd|sshd?|systemd-.*)(\.service)?$/i;
 export const UnitNameSchema = z
   .string()
   .max(100)
-  .regex(/^[A-Za-z0-9][A-Za-z0-9:_.@-]*$/, 'a service name like myapp or myapp.service');
+  .regex(/^[A-Za-z0-9][A-Za-z0-9:_.@-]*$/, 'a service name like myapp or myapp.service')
+  .refine(
+    (u) => !UNIT_TYPE_DENIED.test(u),
+    'only a service can be restarted (not a target, slice, socket, mount or device)',
+  )
+  .refine(
+    (u) => !UNIT_NAME_DENIED.test(u),
+    'this is a service of the machine itself (docker, containerd, ssh or systemd); Guildwise never restarts it',
+  );
 export const ProcessNameSchema = z
   .string()
   .max(80)
-  .regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/, 'a process name has letters, digits and . _ - only');
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/, 'a process name has letters, digits and . _ - only')
+  .refine((n) => !/^all$/i.test(n), 'the name "all" would restart every pm2 process; name the app itself')
+  .refine((n) => !/^\d+$/.test(n), 'a pm2 name cannot be only digits (pm2 reads that as a process number)');
+
+/** The program of a command is never an option: `-x` would be read as a flag by the tools that start it. */
+const ProgramArgv = (max: number, maxItems: number, min = 1) =>
+  z
+    .array(z.string().max(max))
+    .min(min)
+    .max(maxItems)
+    .refine(
+      (a) => !(a[0] ?? '').startsWith('-'),
+      'the first word must be a program, not an option (it cannot start with -)',
+    );
 
 /** How the running app is restarted. Detected, then confirmed by the person; `sudo` only with their explicit yes. */
 export const DirectManagerSchema = z.discriminatedUnion('kind', [
@@ -106,7 +130,7 @@ export const DirectManagerSchema = z.discriminatedUnion('kind', [
   /** A restart command of the person's own (argv, no shell). */
   z.object({
     kind: z.literal('command'),
-    restart: z.array(z.string().max(300)).min(1).max(20),
+    restart: ProgramArgv(300, 20),
     sudo: z.boolean().default(false),
   }),
 ]);
@@ -115,7 +139,7 @@ export type DirectManager = z.infer<typeof DirectManagerSchema>;
 export const DirectBuildStepSchema = z.object({
   label: z.string().min(1).max(120),
   /** Run in the new release folder (argv, no shell). */
-  argv: z.array(z.string().max(300)).min(1).max(30),
+  argv: ProgramArgv(300, 30),
 });
 
 /**
@@ -180,19 +204,24 @@ const Keep = z.number().int().min(0).max(500).default(20);
 
 export const DeployStepSchema = z.discriminatedUnion('kind', [
   /** No Docker: back up pg/mysql/sqlite before anything changes; a failed backup stops the deploy. */
-  z.object({
-    kind: z.literal('direct_db_backup'),
-    engine: z.enum(['postgres', 'mysql', 'sqlite']),
-    /** postgres/mysql: the database name; sqlite: unused. */
-    database: z
-      .string()
-      .regex(/^[A-Za-z0-9_]{1,63}$/)
-      .optional(),
-    /** sqlite: the database file. */
-    sqliteFile: LocalPathSchema.optional(),
-    dir: LocalPathSchema,
-    keep: Keep,
-  }),
+  z
+    .object({
+      kind: z.literal('direct_db_backup'),
+      engine: z.enum(['postgres', 'mysql', 'sqlite']),
+      /** postgres/mysql: the database name; sqlite: unused. */
+      database: z
+        .string()
+        .regex(/^[A-Za-z0-9_]{1,63}$/)
+        .optional(),
+      /** sqlite: the database file. */
+      sqliteFile: LocalPathSchema.optional(),
+      dir: LocalPathSchema,
+      keep: Keep,
+    })
+    .refine(
+      (s) => s.engine === 'sqlite' || !!s.database,
+      'A postgres or mysql backup needs the name of the database (without it the backup could be of the wrong one, or of nothing).',
+    ),
   /** No Docker: put the approved version in `releases/<sha>`, link the shared files, run the build steps there. */
   z.object({ kind: z.literal('direct_prepare') }),
   /** No Docker: point `current` at the new release (atomic) and restart the app the way it was found. */
@@ -550,7 +579,7 @@ export function describeSetupStep(s: DeployStep, env: Pick<SetupEnv, 'app' | 'ho
     case 'direct_switch':
       return 'Point "current" at the new folder in one step and restart the app the way it was found. If it does not answer, "current" goes back to the earlier folder and the app is restarted again.';
     case 'write_override':
-      return `Switch the server to the new version by naming it in docker-compose.guildwise.yml next to your compose file (your own compose file is not edited).`;
+      return `Switch the server to the new version by naming it in docker-compose.guildwise.yml next to your compose file (your own compose file is not edited). That file stays on the server and keeps the app on the version Guildwise last released; delete it to hand the version back to your compose file. If an update has to go back and the file did not exist before, it is removed again.`;
     case 'push_image_registry':
       return `Upload the new image to the registry (${env.app.registry ?? 'registry'}).`;
     case 'pull_image_ssh':

@@ -10,4 +10,5 @@ export * from './protocol.ts';
 export * from './recipe.ts';
 export * from './setup.ts';
 export * from './setup-compile.ts';
+export { STATE_PATHS_FN } from './setup-compile-direct.ts';
 export * from './setup-templates.ts';

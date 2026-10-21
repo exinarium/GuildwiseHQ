@@ -71,7 +71,8 @@ describe('update methods for a server (golden files)', () => {
     expect(c).toContain('docker-compose.guildwise.yml');
     expect(c).not.toContain('set_image_var');
     expect(c).not.toContain('.env.bak');
-    expect(c).toContain('write_override "$PREVIOUS"');
+    expect(c).toContain('rollback_override "$PREVIOUS"');
+    expect(c).toContain('remove_override()');
     expect(c).toContain('--no-build');
     expect(c).toContain('if [ "$RUNNING_IMAGE" = "$TAG" ] && healthy; then');
   });
