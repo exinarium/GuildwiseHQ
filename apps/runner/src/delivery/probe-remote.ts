@@ -57,6 +57,8 @@ $f"; DIRS="$DIRS
 done
 DIRS=$(printf '%s\n' "$DIRS" | awk 'NF && !seen[$0]++' | head -n 16)
 FILES=$(printf '%s\n' "$FILES" | awk 'NF && !seen[$0]++' | head -n 16)
+for r in "/opt/*" "/srv/*" "$HOME/*" "$HOME/*/*"; do echo "CHECKED $r"; done
+for d in $DIRS; do echo "CHECKED $d"; done
 for f in $FILES; do echo "COMPOSEFILE $f"; done
 for d in $DIRS; do
   if [ -d "$d" ]; then

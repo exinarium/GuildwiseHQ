@@ -52,8 +52,9 @@ const SAFE_ALIAS = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 /** Hints are looked at, not trusted: a compose file by its name, a folder only where apps live. */
 const COMPOSE_NAME = /(^|\/)(docker-compose|compose)(\.[A-Za-z0-9_-]+)?\.ya?ml$/;
 const under = (p: string, root: string) => p === root || p.startsWith(`${root}/`);
-const serverHintDir = (d: string, roots: readonly string[] = ['/opt', '/srv']) =>
-  roots.some((r) => under(d, r));
+/** A folder the person typed or a hint named: under where apps live (and a user's home on a server), never a hidden folder. */
+const serverHintDir = (d: string, roots: readonly string[] = ['/opt', '/srv', '/home']) =>
+  roots.some((r) => under(d, r)) && !d.split('/').some((c) => c.startsWith('.'));
 const MAX_REPORT_BYTES = 64 * 1024;
 const MAX_COMPOSE_BYTES = 1_000_000;
 
@@ -424,7 +425,24 @@ async function probeLocal(p: DeployProbePayload, o: ProbeOptions): Promise<Deplo
       if (COMPOSE_NAME.test(abs) && (under(abs, home) || serverHintDir(abs, o.hintRoots)) && !files.has(abs))
         files.set(abs, undefined);
     }
-    for (const [path, project] of [...files].slice(0, 10)) {
+    // compose files in the usual places: one and two levels under the home folder, and under /opt and /srv
+    const checked: string[] = [];
+    const note = (x: string) => {
+      if (!checked.includes(x) && checked.length < 60) checked.push(x);
+    };
+    for (const c of report.containers) if (c.workingDir) note(c.workingDir);
+    for (const d of p.hints?.dirs ?? []) note(d.startsWith('~/') ? join(home, d.slice(2)) : d);
+    const roots: Array<[string, number]> = [
+      [home, 2],
+      ...((o.hintRoots ?? ['/opt', '/srv']).map((r) => [r, 1]) as Array<[string, number]>),
+    ];
+    for (const [root, depth] of roots) note(`${root}/*${depth > 1 ? '/*' : ''}`);
+    const found = scanComposeFiles(roots, [
+      ...(p.hints?.dirs ?? []).map((d) => (d.startsWith('~/') ? join(home, d.slice(2)) : d)),
+    ]);
+    for (const f of found) if (!files.has(f)) files.set(f, undefined);
+    if (checked.length) report.checked = checked;
+    for (const [path, project] of [...files].slice(0, 16)) {
       if (!path.startsWith('/') || !SAFE_PATH.test(path)) continue;
       try {
         if (statSync(path).size > MAX_COMPOSE_BYTES) {
@@ -486,6 +504,48 @@ async function probeLocal(p: DeployProbePayload, o: ProbeOptions): Promise<Deplo
   const mb = Number(df.stdout.trim().split('\n').pop()?.trim().split(/\s+/)[3]);
   if (Number.isFinite(mb)) report.freeDiskMb = mb;
   return { ok: true, report: fit(report) };
+}
+
+const COMPOSE_FILENAMES = ['docker-compose.yml', 'docker-compose.yaml', 'compose.yaml', 'compose.yml'];
+
+/** Compose files directly in the given folders, and one or two levels under the roots (hidden and dependency folders skipped). */
+function scanComposeFiles(roots: Array<[string, number]>, folders: string[]): string[] {
+  const out: string[] = [];
+  const add = (dir: string) => {
+    for (const n of COMPOSE_FILENAMES) {
+      const f = `${dir}/${n}`;
+      try {
+        if (statSync(f).isFile() && SAFE_PATH.test(f) && !out.includes(f)) out.push(f);
+      } catch {
+        // not there
+      }
+    }
+  };
+  const kids = (dir: string): string[] => {
+    try {
+      return readdirSync(dir)
+        .filter((n) => !n.startsWith('.') && n !== 'node_modules' && n !== 'snap')
+        .slice(0, 200)
+        .map((n) => join(dir, n))
+        .filter((c) => {
+          try {
+            return statSync(c).isDirectory();
+          } catch {
+            return false;
+          }
+        });
+    } catch {
+      return [];
+    }
+  };
+  for (const f of folders) if (SAFE_PATH.test(f)) add(f);
+  for (const [root, depth] of roots) {
+    for (const d1 of kids(root)) {
+      add(d1);
+      if (depth > 1) for (const d2 of kids(d1)) add(d2);
+    }
+  }
+  return out.slice(0, 16);
 }
 
 function backupsIn(dir: string): ProbeBackups | null {
@@ -705,6 +765,7 @@ export function parseRemoteOutput(out: string, host: string, o: ProbeOptions = {
     return f;
   };
   const composePaths: string[] = [];
+  const checked: string[] = [];
   const sites = new Map<string, Set<string>>();
   const systemd = new Set<string>();
   let compose: { path: string; text: string[] } | null = null;
@@ -751,6 +812,10 @@ export function parseRemoteOutput(out: string, host: string, o: ProbeOptions = {
       case 'COMPOSEFILE':
         if (SAFE_PATH.test(rest.trim()) && !composePaths.includes(rest.trim()))
           composePaths.push(rest.trim());
+        break;
+      case 'CHECKED':
+        if (/^\/[A-Za-z0-9._/+@=*-]*$/.test(rest.trim()) && !checked.includes(rest.trim()) && checked.length < 60)
+          checked.push(rest.trim());
         break;
       case 'NODIR':
         folders.set(rest.trim(), { path: rest.trim(), exists: false, entries: [] });
@@ -820,6 +885,7 @@ export function parseRemoteOutput(out: string, host: string, o: ProbeOptions = {
     }
   }
   report.docker = docker;
+  if (checked.length) report.checked = checked;
   report.folders = [...folders.values()].slice(0, 20);
   for (const path of composePaths.slice(0, 16)) {
     const text = composeTexts.get(path);

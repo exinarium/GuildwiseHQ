@@ -10,6 +10,7 @@ import {
   DEPLOY_CONNECT_CAPABILITY,
   DEPLOY_MOVE_CAPABILITY,
   DEPLOY_SETUP_CAPABILITY,
+  DEPLOY_SETUP_V2_CAPABILITY,
   defaultHost,
   type EnvEnsurePayload,
   INTEGRATIONS_VERSION,
@@ -1071,6 +1072,8 @@ export class Runner {
         DELIVERY_CAPABILITY,
         // Guided deploy setup: `deploy.probe` and `recipe.write` (docs/design/deploy-run-ux-design.md section 6)
         DEPLOY_SETUP_CAPABILITY,
+        // Finds stacks from container labels and home folders, reports where it looked, new update methods, key forget on remove
+        DEPLOY_SETUP_V2_CAPABILITY,
         // Guided connect, dedicated deploy keys and server preparation (design v2)
         ...(platform() === 'win32'
           ? []

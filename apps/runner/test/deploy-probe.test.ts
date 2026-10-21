@@ -102,6 +102,32 @@ const payload = (over: Partial<DeployProbePayload> = {}): DeployProbePayload => 
 });
 
 describe('deploy.probe: local Docker', () => {
+  it('finds a stack in a folder under the home folder without labels, and lists where it looked', async () => {
+    const root = tmp('aom-probe-home-');
+    const mine = join(root, 'projects', 'shop');
+    mkdirSync(mine, { recursive: true });
+    writeFileSync(join(mine, 'compose.yaml'), 'services:\n  web:\n    image: nginx:1\n');
+    mkdirSync(join(root, '.ssh'), { recursive: true });
+    writeFileSync(join(root, '.ssh', 'compose.yaml'), 'services: {}\n');
+    const fake = fakeBin({ docker: 'case "$1" in version) echo 29;; info) exit 0;; esac' });
+    const r = await runDeployProbe(payload(), { env: fake.env, home: root, hintRoots: [] });
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    if (!r.ok) return;
+    expect(r.report.composeFiles.map((c) => c.path)).toEqual([join(mine, 'compose.yaml')]);
+    expect(r.report.checked).toContain(`${root}/*/*`);
+    // a folder the person typed is looked at as well
+    const typed = join(root, 'elsewhere');
+    mkdirSync(typed, { recursive: true });
+    writeFileSync(join(typed, 'docker-compose.yml'), 'services:\n  api:\n    image: api:1\n');
+    const r2 = await runDeployProbe(payload({ hints: { dirs: [typed] } }), {
+      env: fake.env,
+      home: root,
+      hintRoots: [],
+    });
+    expect(r2.ok && r2.report.composeFiles.map((c) => c.path)).toContain(join(typed, 'docker-compose.yml'));
+    expect(r2.ok && r2.report.checked).toContain(typed);
+  });
+
   it('reports containers, volumes, compose structure and backups, and never a secret value', async () => {
     const root = tmp('aom-probe-home-');
     const dir = join(root, 'uat');
@@ -470,6 +496,8 @@ esac`,
     expect(cf?.project).toBe('dcode-flow5-remote');
     expect(cf?.services.map((x) => x.name)).toEqual(['dcode-server', 'postgres']);
     expect(JSON.stringify(r)).not.toContain(SECRET);
+    // where it looked is part of the answer, so "nothing found" can say so
+    expect(r.report.checked).toEqual(expect.arrayContaining(['/opt/*', '/srv/*', flow]));
   });
 
   it('each ssh failure has its own error; a changed host key is a hard stop', async () => {

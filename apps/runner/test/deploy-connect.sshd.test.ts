@@ -447,6 +447,70 @@ describe.skipIf(!can)('guided connect against a real sshd', () => {
   );
 
   ti(
+    'removing a server: the computer takes its own key off the server and forgets it; an unreachable server does not stop it',
+    async () => {
+      const a = rig('Office PC');
+      sshd.sh('rm -f /home/deploy/.ssh/authorized_keys');
+      const ra = await a.c.connect({
+        ...base(),
+        method: 'password',
+        hostKeyFingerprint: sshd.hostFingerprint(),
+        keyId: a.runner.publicKey.keyId,
+        ciphertext: await a.seal({ password: DEPLOY_PASSWORD }),
+      } as never);
+      expect(ra.ok).toBe(true);
+      if (!ra.ok) return;
+      expect(a.keys.has(T)).toBe(true);
+      const payload = {
+        projectId: P,
+        targetId: T,
+        alias: 'aom-shop',
+        publicKey: ra.publicKey,
+        fingerprint: ra.fingerprint,
+      };
+      // without forget its own key is still refused
+      expect(await a.c.revoke(payload as never)).toMatchObject({ ok: false, error: 'own_key' });
+      expect(a.keys.has(T)).toBe(true);
+      const out = await a.c.revoke({ ...payload, forget: true } as never);
+      expect(out, JSON.stringify(out)).toMatchObject({ ok: true, removed: 1, forgotten: true });
+      expect(a.keys.has(T)).toBe(false);
+      expect(sshd.sh('cat /home/deploy/.ssh/authorized_keys 2>/dev/null || true')).not.toContain(
+        'guildwise-deploy:',
+      );
+      // the server is gone: the key material still goes, and the answer says why the server was not cleaned
+      const b = rig('Second PC');
+      sshd.sh('rm -f /home/deploy/.ssh/authorized_keys');
+      const rb = await b.c.connect({
+        ...base(),
+        method: 'password',
+        hostKeyFingerprint: sshd.hostFingerprint(),
+        keyId: b.runner.publicKey.keyId,
+        ciphertext: await b.seal({ password: DEPLOY_PASSWORD }),
+      } as never);
+      expect(rb.ok).toBe(true);
+      if (!rb.ok) return;
+      const dead = b.keys.sshConfigFor(T, 'aom-shop');
+      expect(dead).toBeTruthy();
+      // the server stops answering: the alias now points at a port nobody listens on
+      writeFileSync(
+        dead as string,
+        readFileSync(dead as string, 'utf8').replace(/^(\s*Port\s+)\d+/m, '$11'),
+      );
+      const gone = await b.c.revoke({
+        projectId: P,
+        targetId: T,
+        alias: 'aom-shop',
+        publicKey: rb.publicKey,
+        fingerprint: rb.fingerprint,
+        forget: true,
+      } as never);
+      expect(gone).toMatchObject({ ok: false, forgotten: true });
+      expect(b.keys.has(T)).toBe(false);
+    },
+    120_000,
+  );
+
+  ti(
     'prepares a real server through the dedicated key: folders, a compose file from the project, nothing overwritten; Docker is not guessed at on an unsupported system',
     async () => {
       const r = rig();
