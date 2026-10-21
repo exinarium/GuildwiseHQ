@@ -11,6 +11,7 @@ import {
   type SignalUrgency,
   topicWords,
 } from '@aom/shared';
+import { COUNTED_QUESTION_SHIFT_SQL } from '../commands/loop-breaker.ts';
 import type { Ctx } from '../context.ts';
 import { monthOf, monthSpendByProject, orgCostCtx } from '../costs/index.ts';
 import { iso, type Queryable, type Row, rows } from '../db/sql.ts';
@@ -69,7 +70,7 @@ export async function detectLoops(db: Queryable): Promise<Detected[]> {
     `SELECT c.id, c.ref, c.title, c.org_id, c.project_id, p.key, count(*)::int AS n, max(s.started_at) AS last_at
        FROM shifts s JOIN desk_items d ON d.id = s.desk_item_id JOIN cards c ON c.id = d.card_id
        JOIN projects p ON p.id = c.project_id
-      WHERE s.kind = 'question' AND s.outcome IS DISTINCT FROM 'rejected' AND s.started_at > now() - make_interval(hours => $1) AND c.status NOT IN ('done','cancelled')
+      WHERE ${COUNTED_QUESTION_SHIFT_SQL} AND s.started_at > now() - make_interval(hours => $1) AND c.status NOT IN ('done','cancelled')
         AND p.status = 'active'
       GROUP BY c.id, c.ref, c.title, c.org_id, c.project_id, p.key HAVING count(*) >= $2`,
     [QUESTION_LOOP.windowHours, QUESTION_LOOP.shifts],
