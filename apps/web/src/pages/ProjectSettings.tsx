@@ -1,6 +1,6 @@
 import { COMPLETION_ACTION_LABELS, isSafePrBranchPrefix } from '@aom/shared';
 import { type FormEvent, useEffect, useState } from 'react';
-import { useParams } from 'react-router';
+import { Navigate, useLocation, useParams } from 'react-router';
 import { usePatchProject, useProject, useRemoveRepo } from '../api/queries/projects.ts';
 import { AddRepoForm } from '../components/AddRepoForm.tsx';
 import { ArchitectPanel } from '../components/ArchitectPanel.tsx';
@@ -10,9 +10,7 @@ import { ClaudeAccountPanel } from '../components/ClaudeAccountPanel.tsx';
 import { CommitAsPanel } from '../components/CommitAsPanel.tsx';
 import { ConcurrencyCapPanel } from '../components/ConcurrencyCapPanel.tsx';
 import { ConvertPanel } from '../components/ConvertPanel.tsx';
-import { DeployTargetsPanel } from '../components/DeployTargetsPanel.tsx';
-import { DeliveryPanel } from '../components/delivery/DeliveryPanel.tsx';
-import { DeploySetup } from '../components/delivery/setup/DeploySetup.tsx';
+import { EnvironmentsPointer } from '../components/environments/Pointer.tsx';
 import { FullSuitePanel } from '../components/FullSuitePanel.tsx';
 import { GraphStatusPanel } from '../components/GraphStatusPanel.tsx';
 import { ManualQaPanel } from '../components/ManualQaPanel.tsx';
@@ -20,7 +18,7 @@ import { McpServersPanel } from '../components/McpServersPanel.tsx';
 import { MembersPanel } from '../components/MembersPanel.tsx';
 import { MergePolicyPanel } from '../components/MergePolicyPanel.tsx';
 import { OwnerApprovalPanel } from '../components/OwnerApprovalPanel.tsx';
-import { FollowupDefaultsPanel, PhasesPanel } from '../components/PhasesPanel.tsx';
+import { PhasesPanel } from '../components/PhasesPanel.tsx';
 import { ProjectDangerZone } from '../components/ProjectDangerZone.tsx';
 import { ProjectPolicyPanel } from '../components/ProjectPolicyPanel.tsx';
 import { ProjectWorkflows } from '../components/ProjectWorkflows.tsx';
@@ -30,8 +28,6 @@ import { RepoProjectPathControl } from '../components/RepoProjectPathControl.tsx
 import { RepoProviderControl } from '../components/RepoProviderControl.tsx';
 import { EnvironmentPanel, RepoSetupStatus } from '../components/RepoSetupStatus.tsx';
 import { RepoSyncLine } from '../components/RepoSync.tsx';
-import { IntegrationTestsSettings } from '../components/runs/IntegrationTestsSettings.tsx';
-import { RunSettings } from '../components/runs/RunSettings.tsx';
 import { UsageLimitBanner } from '../components/UsageLimitBanner.tsx';
 import {
   Badge,
@@ -74,6 +70,7 @@ export function ProjectSettings() {
   const [arch, setArch] = useState('');
   const [e2e, setE2e] = useState('');
   const project = q.data?.project;
+  const { hash } = useLocation();
   const traits = useProjectWorkflowTraits(project?.id, project?.workflowKey);
   const canConvert = useCanConvert(project);
 
@@ -88,6 +85,14 @@ export function ProjectSettings() {
     setE2e(project.e2eGlobs.join('\n'));
   }, [project]);
 
+  // the old anchors moved: the start steps and the deploy setup live on the Environments page now
+  if (project && (hash === '#run' || hash === '#phases'))
+    return (
+      <Navigate
+        to={`/p/${project.key}/environments#${hash === '#run' ? 'start-steps' : 'environments'}`}
+        replace
+      />
+    );
   if (q.isPending)
     return (
       <div className="mx-auto max-w-3xl">
@@ -132,8 +137,8 @@ export function ProjectSettings() {
     ...(traits.usesRepos || activeRepos.length > 0 ? [{ id: 'repos', label: 'Repos' }] : []),
     ...(project && traits.usesRepos
       ? [
-          { id: 'phases', label: 'Phases and deploys' },
-          { id: 'run', label: 'Run and test' },
+          { id: 'phase-list', label: 'Phases' },
+          { id: 'environments', label: 'Environments' },
           { id: 'reference-repos', label: 'Reference repos' },
           { id: 'merge', label: 'Merging' },
         ]
@@ -357,18 +362,13 @@ export function ProjectSettings() {
         </div>
       )}
       {project && traits.usesRepos && (
-        <div id="phases" className="flex scroll-mt-20 flex-col gap-5">
+        <div id="phase-list" className="scroll-mt-20">
           <PhasesPanel projectId={id} />
-          <DeployTargetsPanel projectId={id} />
-          <DeploySetup projectId={id} />
-          <DeliveryPanel projectId={id} />
-          <FollowupDefaultsPanel projectId={id} />
         </div>
       )}
       {project && traits.usesRepos && (
-        <div id="run" className="flex scroll-mt-20 flex-col gap-5">
-          <RunSettings projectId={id} canEdit={project.myRole === 'owner'} />
-          <IntegrationTestsSettings projectId={id} canEdit={project.myRole === 'owner'} />
+        <div id="environments" className="scroll-mt-20">
+          <EnvironmentsPointer projectId={id} projectKey={project.key} />
         </div>
       )}
       {project && traits.usesRepos && (

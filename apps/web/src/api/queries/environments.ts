@@ -99,7 +99,12 @@ export function statusFromRuns(
   queue: ReleaseQueueItem[],
 ): EnvStatusDto[] {
   const mine = runs.filter((r) => r.projectId === projectId && !r.dryRun && !r.trial);
-  const names = [...new Set([...mine.map((r) => r.env), ...queue.filter((q) => q.projectId === projectId).map((q) => q.env)])];
+  const names = [
+    ...new Set([
+      ...mine.map((r) => r.env),
+      ...queue.filter((q) => q.projectId === projectId).map((q) => q.env),
+    ]),
+  ];
   return names.map((env) => {
     const list = mine.filter((r) => r.env === env).sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
     const ok = list.find((r) => r.status === 'succeeded');
@@ -209,5 +214,30 @@ export function useDiscardDraft(projectId: string) {
   return useMutation({
     mutationFn: () => del<{ ok: boolean }>(`/projects/${projectId}/delivery/setup/draft`),
     onSuccess: done,
+  });
+}
+
+/** Takes one environment out of the setup (`DELETE .../delivery/environments/:name`): the steps are made again and need approving. */
+export function useRemoveEnvironment(projectId: string) {
+  const done = useInvalidateEnvs(projectId);
+  return useMutation({
+    mutationFn: (name: string) =>
+      del<{ ok?: boolean }>(`/projects/${projectId}/delivery/environments/${encodeURIComponent(name)}`),
+    onSuccess: done,
+  });
+}
+
+/** The files of `delivery/` that Guildwise does not make (a smoke test, an old script), read from a preview of what is saved. */
+export function useUnmodelledFiles(projectId: string | undefined, setup: unknown, key: string) {
+  return useQuery({
+    enabled: !!projectId && !!setup,
+    queryKey: ['env-unmodelled', projectId, key],
+    retry: false,
+    queryFn: async (): Promise<string[]> => {
+      const p = await post<{ unmodelled?: string[] }>(`/projects/${projectId}/delivery/setup/preview`, {
+        setup,
+      });
+      return p.unmodelled ?? [];
+    },
   });
 }

@@ -17,7 +17,11 @@ export function crumbsFor(pathname: string, search: string, projects: ProjectDto
     ['/p/:key/feed', (p) => [{ label: name(p.key), to: `/p/${p.key}/board` }, { label: 'Feed' }]],
     [
       '/p/:key/environments',
-      (p) => [{ label: 'Projects', to: '/projects' }, { label: name(p.key), to: `/p/${p.key}/board` }, { label: 'Environments' }],
+      (p) => [
+        { label: 'Projects', to: '/projects' },
+        { label: name(p.key), to: `/p/${p.key}/board` },
+        { label: 'Environments' },
+      ],
     ],
     [
       '/p/:key/phases/:number',
