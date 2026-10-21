@@ -15,6 +15,7 @@ import {
   parseYamlLimited,
 } from '@aom/shared';
 import { execa } from 'execa';
+import type { DeployKeys } from './deploy-keys.ts';
 import { REMOTE_PROBE_SCRIPT } from './probe-remote.ts';
 
 /**
@@ -37,6 +38,8 @@ export interface ProbeOptions {
   commandMs?: number;
   /** ssh connect timeout in seconds (tests use 2). */
   connectSec?: number;
+  /** This computer's dedicated deploy keys: a target that has one is reached with it (`ssh -F`), not with the person's own ssh. */
+  keys?: DeployKeys;
   /** Where hinted folders on a server may be (default /opt and /srv; tests use a temp folder). */
   hintRoots?: string[];
 }
@@ -51,7 +54,7 @@ const serverHintDir = (d: string, roots: readonly string[] = ['/opt', '/srv']) =
 const MAX_REPORT_BYTES = 64 * 1024;
 const MAX_COMPOSE_BYTES = 1_000_000;
 
-interface Ran {
+export interface Ran {
   code: number | null;
   stdout: string;
   stderr: string;
@@ -59,7 +62,7 @@ interface Ran {
   timedOut: boolean;
 }
 
-async function run(
+export async function run(
   cmd: string,
   args: string[],
   o: { timeoutMs: number; input?: string; env?: NodeJS.ProcessEnv },
@@ -228,7 +231,7 @@ export function parseComposeStructure(path: string, text: string, project?: stri
   };
 }
 
-function classifySsh(r: Ran): { state: ProbeSshHost['state']; detail?: string } {
+export function classifySsh(r: Ran): { state: ProbeSshHost['state']; detail?: string } {
   if (r.code === 0) return { state: 'reachable' };
   const e = r.stderr;
   if (/REMOTE HOST IDENTIFICATION HAS CHANGED|host key for .* has changed/i.test(e))
@@ -315,6 +318,7 @@ export async function runDeployProbe(
       if (p.scope === 'ssh_hosts') return await probeSshHosts(opts);
       if (!p.host || !SAFE_ALIAS.test(p.host))
         return { ok: false, error: 'bad_request', detail: 'a server name is needed' };
+      if (p.scope === 'ssh_check') return await probeSshCheck(p, p.host, opts);
       return await probeSshTarget(p, p.host, opts);
     })();
     return await Promise.race([work, timeout]);
@@ -565,6 +569,57 @@ async function probeSshHosts(o: ProbeOptions): Promise<DeployProbeResult> {
 }
 
 const shq = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
+
+/** `-F <config>` when this computer holds a dedicated key for the target (else the person's own ssh decides). */
+function managedArgs(p: DeployProbePayload, host: string, o: ProbeOptions): string[] {
+  const cfg = o.keys?.sshConfigFor(p.targetId, host);
+  return cfg ? ['-F', cfg] : [];
+}
+
+/** `ssh_check`: can this computer sign in to the target's server without a prompt? Reads nothing from the server. */
+async function probeSshCheck(
+  p: DeployProbePayload,
+  host: string,
+  o: ProbeOptions,
+): Promise<DeployProbeResult> {
+  const r = await run(
+    'ssh',
+    [...managedArgs(p, host, o), ...SSH_BASE(o.connectSec ?? 8), '--', host, 'true'],
+    { timeoutMs: (o.commandMs ?? 10_000) + 3000, ...(o.env ? { env: o.env } : {}) },
+  );
+  if (r.missing)
+    return { ok: false, error: 'ssh_unreachable', detail: 'ssh is not installed on this computer' };
+  if (r.code === 0)
+    return {
+      ok: true,
+      report: ProbeReportSchema.parse({
+        scope: 'ssh_check',
+        at: now(o),
+        host,
+        containers: [],
+        composeFiles: [],
+        volumes: [],
+        folders: [],
+        backups: [],
+        proxies: [],
+        urls: [],
+        listeners: [],
+      }),
+    };
+  const c = classifySsh(r);
+  const error: ProbeError =
+    c.state === 'host_key_changed'
+      ? 'ssh_host_key_changed'
+      : c.state === 'host_key_unknown'
+        ? 'ssh_host_key_unknown'
+        : c.state === 'asks_password'
+          ? 'ssh_auth'
+          : r.timedOut
+            ? 'timeout'
+            : 'ssh_unreachable';
+  return { ok: false, error, ...(c.detail ? { detail: c.detail } : {}) };
+}
+
 const IMAGE_VALUE = /^[A-Za-z0-9._/:@-]{1,200}$/;
 
 async function probeSshTarget(
@@ -582,7 +637,13 @@ async function probeSshTarget(
     }
   const r = await run(
     'ssh',
-    [...SSH_BASE(o.connectSec ?? 10), '--', host, `sh -s -- ${dirs.map(shq).join(' ')}`.trimEnd()],
+    [
+      ...managedArgs(p, host, o),
+      ...SSH_BASE(o.connectSec ?? 10),
+      '--',
+      host,
+      `sh -s -- ${dirs.map(shq).join(' ')}`.trimEnd(),
+    ],
     { timeoutMs: o.commandMs ?? 45_000, input: REMOTE_PROBE_SCRIPT, ...(o.env ? { env: o.env } : {}) },
   );
   if (r.missing)

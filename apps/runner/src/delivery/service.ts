@@ -26,6 +26,7 @@ import {
   readBundleAtCommit,
   readBundleFromDir,
 } from './bundle.ts';
+import type { DeployKeys } from './deploy-keys.ts';
 import { runDeployProbe } from './probe.ts';
 
 export interface DeliveryVaults {
@@ -46,6 +47,7 @@ export class DeliveryService {
     private readonly deps: {
       vaults: DeliveryVaults;
       rpc: (shiftId: string, method: string, params: Record<string, unknown>) => Promise<IpcRpcResponse>;
+      keys?: DeployKeys;
       log?: Logger;
     },
   ) {
@@ -175,16 +177,19 @@ export class DeliveryService {
       };
     const v = p.data;
     const scope = v.host ? 'ssh_target' : v.sshHosts ? 'ssh_hosts' : 'local';
-    const r = await runDeployProbe({
-      projectId: '00000000-0000-4000-8000-000000000000',
-      scope,
-      ...(v.host ? { host: v.host } : {}),
-      hints: {
-        ...(v.composeFile ? { composeFiles: v.composeFile } : {}),
-        ...(v.dir ? { dirs: v.dir } : {}),
-        ...(v.url ? { urls: v.url } : {}),
+    const r = await runDeployProbe(
+      {
+        projectId: '00000000-0000-4000-8000-000000000000',
+        scope,
+        ...(v.host ? { host: v.host } : {}),
+        hints: {
+          ...(v.composeFile ? { composeFiles: v.composeFile } : {}),
+          ...(v.dir ? { dirs: v.dir } : {}),
+          ...(v.url ? { urls: v.url } : {}),
+        },
       },
-    });
+      this.deps.keys ? { keys: this.deps.keys } : {},
+    );
     return { ok: true, result: r };
   }
 

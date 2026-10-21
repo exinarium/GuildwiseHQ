@@ -329,6 +329,8 @@ export const PrepareActionSchema = z.discriminatedUnion('kind', [
       .regex(/^[A-Za-z0-9._][A-Za-z0-9._/-]*$/, 'a path inside the project like deploy/docker-compose.yml')
       .refine((p) => !p.split('/').includes('..'), 'a path cannot contain ..'),
     repoName: z.string().min(1).max(120).optional(),
+    /** The repository's normalized remote address: filled in by the server (the computer looks the folder up by it). */
+    remote: z.string().min(1).max(500).optional(),
   }),
   /** HTTPS for one domain with Caddy: append a site to the Caddyfile that is there (dated backup, validated), or start Caddy. */
   z.object({
@@ -633,3 +635,27 @@ export const REACHABILITY_TEXT: Record<
   unchecked: { text: 'Not checked', tone: 'neutral' },
   never: { text: 'Never checked', tone: 'neutral' },
 };
+
+// ------------------------------------------------------------------------------------------------ sealing (browser -> runner)
+
+/**
+ * Seals a value of any length for the runner (a password, or a key file the host gave): a fresh AES-256-GCM key encrypts the
+ * text and RSA-OAEP (SHA-256) with the runner's public key wraps that key. Format `h1.<wrapped key>.<iv>.<ciphertext+tag>`, all
+ * base64. Works in the browser and in Node (WebCrypto). The runner opens it with `RunnerKeys.decryptAny`.
+ */
+export async function sealLarge(publicKeyB64: string, text: string): Promise<string> {
+  const subtle = globalThis.crypto.subtle;
+  const b64 = (u: Uint8Array) => {
+    let bin = '';
+    for (const b of u) bin += String.fromCharCode(b);
+    return btoa(bin);
+  };
+  const der = Uint8Array.from(atob(publicKeyB64), (c) => c.charCodeAt(0));
+  const rsa = await subtle.importKey('spki', der, { name: 'RSA-OAEP', hash: 'SHA-256' }, false, ['encrypt']);
+  const aes = await subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt']);
+  const iv = globalThis.crypto.getRandomValues(new Uint8Array(12));
+  const ct = new Uint8Array(await subtle.encrypt({ name: 'AES-GCM', iv }, aes, new TextEncoder().encode(text)));
+  const raw = new Uint8Array(await subtle.exportKey('raw', aes));
+  const wrapped = new Uint8Array(await subtle.encrypt({ name: 'RSA-OAEP' }, rsa, raw));
+  return `h1.${b64(wrapped)}.${b64(iv)}.${b64(ct)}`;
+}

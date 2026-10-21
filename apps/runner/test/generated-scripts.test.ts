@@ -440,9 +440,9 @@ describe('the generated production script, against a fake docker and ssh', () =>
     }
     const r3 = run(w3.w, script(w3.setup, 'production'), env());
     expect(r3.code, r3.out).toBe(0);
-    expect(readdirSync(join(w3.app, 'backups')).filter((f) => f.startsWith('production-before-'))).toHaveLength(
-      20,
-    );
+    expect(
+      readdirSync(join(w3.app, 'backups')).filter((f) => f.startsWith('production-before-')),
+    ).toHaveLength(20);
   });
 
   it('works on a server that only has the old docker-compose program', () => {

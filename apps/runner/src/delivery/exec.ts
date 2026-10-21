@@ -25,6 +25,7 @@ import {
   readBundleAtCommit,
   readBundleFromDir,
 } from './bundle.ts';
+import type { DeployKeys } from './deploy-keys.ts';
 
 /**
  * Runs an approved deploy (docs/design/ceo-front-door.md 9.5). Everything here is deterministic code: no model, no prompt.
@@ -58,6 +59,8 @@ export interface DeployExecDeps {
   baseEnv?: NodeJS.ProcessEnv;
   /** The user's home directory for `~/` in an env file path (tests point it at a temp folder). */
   home?: string;
+  /** This computer's dedicated deploy keys: a target that has one is reached with it (`AOM_DEPLOY_SSH`). */
+  keys?: DeployKeys;
   fetchImpl?: typeof fetch;
   /** Tests shorten these. */
   timing?: {
@@ -416,6 +419,9 @@ export class DeployExecutor {
       AOM_DEPLOY_PROJECT_ID: p.projectId,
       AOM_DEPLOY_TARGET: p.target.name,
       AOM_DEPLOY_HOST: p.target.host ?? '',
+      ...(this.deps.keys?.deploySsh(p.target.id, p.target.host)
+        ? { AOM_DEPLOY_SSH: this.deps.keys.deploySsh(p.target.id, p.target.host) as string }
+        : {}),
       AOM_DEPLOY_APP_URL: p.target.appUrl ?? '',
       AOM_DEPLOY_DRY_RUN: p.dryRun ? '1' : '0',
       ...(env.envFile ? { AOM_DEPLOY_ENV_FILE: expandHome(env.envFile, this.deps.home) } : {}),

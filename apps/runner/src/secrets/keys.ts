@@ -83,6 +83,29 @@ export class RunnerKeys {
     ).toString('utf8');
   }
 
+  /** Opens `sealLarge` output (`h1.<wrapped key>.<iv>.<ciphertext+tag>`: AES-256-GCM under an RSA-OAEP wrapped key). */
+  decryptHybrid(sealed: string): string {
+    const [v, wrapped, iv, ct] = sealed.split('.');
+    if (v !== 'h1' || !wrapped || !iv || !ct) throw new Error('not a sealed value');
+    const aes = privateDecrypt(
+      {
+        key: createPrivateKey(this.privatePem),
+        padding: constants.RSA_PKCS1_OAEP_PADDING,
+        oaepHash: 'sha256',
+      },
+      Buffer.from(wrapped, 'base64'),
+    );
+    const buf = Buffer.from(ct, 'base64');
+    const d = createDecipheriv('aes-256-gcm', aes, Buffer.from(iv, 'base64'));
+    d.setAuthTag(buf.subarray(buf.length - 16));
+    return Buffer.concat([d.update(buf.subarray(0, buf.length - 16)), d.final()]).toString('utf8');
+  }
+
+  /** `decrypt` for a short value, `decryptHybrid` for a sealed one of any length. */
+  decryptAny(value: string): string {
+    return value.startsWith('h1.') ? this.decryptHybrid(value) : this.decrypt(value);
+  }
+
   /**
    * Opens a hybrid envelope (RSA-OAEP-256 wraps an AES-256-GCM key; the AAD binds workstation, request, kind, instance and
    * op). Refuses another key id, a ciphertext moved to another request (the AAD is rebuilt from the command's outer
