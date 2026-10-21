@@ -44,6 +44,8 @@ export const DeployTargetDtoSchema = z.object({
   keys: z.array(DeployKeyDtoSchema).optional(),
   /** `active` (absent from an older server), `standby` (the old server after a move) or `retired`. */
   role: z.enum(['active', 'standby', 'retired']).optional(),
+  /** Only in the answer to a create with `reuseExisting`: an existing place was returned, none was made. */
+  reused: z.boolean().optional(),
 });
 export type DeployTargetDto = z.infer<typeof DeployTargetDtoSchema>;
 
@@ -81,7 +83,13 @@ const DeployTargetBodySchema = z.object({
   testHosts: z.array(TestHostSchema).max(10).optional(),
   secretNames: z.array(SecretNameSchema).max(20).optional(),
 });
-export const CreateDeployTargetRequestSchema = DeployTargetBodySchema;
+export const CreateDeployTargetRequestSchema = DeployTargetBodySchema.extend({
+  /**
+   * When a place of the project already matches (a server with the same alias on the same computer, or a computer target of
+   * the same computer), answer with that one instead of making a second (`reused: true` in the answer's `DeployTargetDto`).
+   */
+  reuseExisting: z.boolean().optional(),
+});
 export type CreateDeployTargetRequest = z.infer<typeof CreateDeployTargetRequestSchema>;
 export const PatchDeployTargetRequestSchema = DeployTargetBodySchema.partial();
 export type PatchDeployTargetRequest = z.infer<typeof PatchDeployTargetRequestSchema>;

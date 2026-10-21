@@ -176,8 +176,10 @@ export const SetupEnvSchema = z
     name: EnvNameSchema,
     /** "Test copy", "Live site". */
     label: z.string().min(1).max(60),
-    /** `deploy_targets.name` of the project. */
+    /** `deploy_targets.name` of the project (the "place"). */
     target: z.string().min(1).max(80),
+    /** What the environment is for. Only drives defaults and badges; any number of environments of any role is allowed. */
+    role: z.enum(['test', 'live', 'other']).optional(),
     /** `custom`: the script is hand-written; the compiler leaves its file alone. */
     mode: z.enum(['guided', 'custom']).default('guided'),
     hosting: z.enum(['this_computer', 'ssh']),

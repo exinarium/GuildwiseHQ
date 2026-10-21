@@ -10,6 +10,12 @@ import { SshAliasSchema } from './setup.ts';
 
 /** Announced by a runner that answers `deploy.probe` and `recipe.write` (guided deploy setup). */
 export const DEPLOY_SETUP_CAPABILITY = 'deploy-setup:1';
+/**
+ * Announced by a runner that also finds stacks from container labels and home folders, reports the places it looked at
+ * (`ProbeReport.checked`), and can write the new update methods (override file, registry pull, build on the server) and
+ * remove its own key on `deploy.revoke {forget}`.
+ */
+export const DEPLOY_SETUP_V2_CAPABILITY = 'deploy-setup:2';
 
 /** `ssh_check`: one non-interactive connect to a target's server (reachability only; nothing is read from it). */
 export const PROBE_SCOPES = ['local', 'ssh_hosts', 'ssh_target', 'ssh_check'] as const;
@@ -160,7 +166,7 @@ export const ProbeReportSchema = z.object({
     })
     .optional(),
   containers: z.array(ProbeContainerSchema).max(100).default([]),
-  composeFiles: z.array(ProbeComposeFileSchema).max(10).default([]),
+  composeFiles: z.array(ProbeComposeFileSchema).max(16).default([]),
   volumes: z.array(Name).max(100).default([]),
   folders: z.array(ProbeFolderSchema).max(20).default([]),
   backups: z.array(ProbeBackupsSchema).max(10).default([]),
@@ -169,6 +175,8 @@ export const ProbeReportSchema = z.object({
   /** Ports 80 and 443 that something listens on. */
   listeners: z.array(z.number().int()).max(10).default([]),
   freeDiskMb: z.number().int().optional(),
+  /** The places that were looked at (folders and compose files), so "nothing found" can say where it looked. Absent from an older runner. */
+  checked: z.array(z.string().max(300)).max(60).optional(),
   sshHosts: z.array(ProbeSshHostSchema).max(30).optional(),
 });
 export type ProbeReport = z.infer<typeof ProbeReportSchema>;

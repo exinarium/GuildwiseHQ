@@ -7,6 +7,7 @@ import {
   ProbeReportSchema,
   ProbeScopeSchema,
 } from '../delivery/probe.ts';
+import { ProposalMergeInfoSchema } from '../delivery/environments.ts';
 import { DeliverySetupSchema } from '../delivery/setup.ts';
 import { ProposalDtoSchema, ScanStateDtoSchema } from './api.ts';
 
@@ -69,6 +70,8 @@ export const SetupWorkstationDtoSchema = z.object({
   canConnect: z.boolean().optional(),
   /** Answers `deploy.move` (capability `deploy-move:1`). Absent from an older server. */
   canMove: z.boolean().optional(),
+  /** Writes the update methods "override file", "registry" and "build on the server" (capability `deploy-setup:2`). */
+  canNewMethods: z.boolean().optional(),
 });
 export type SetupWorkstationDto = z.infer<typeof SetupWorkstationDtoSchema>;
 
@@ -140,6 +143,8 @@ export const SetupStateDtoSchema = z.object({
   generator: z.string(),
   /** Servers whose steps use a compiler older than this server's: an improved version is available. */
   improvedAvailable: z.boolean().optional(),
+  /** `recipe` once guided deploys are on, `instructions` after "Stop using guided deploys". Absent from an older server. */
+  deliveryMode: z.enum(['instructions', 'recipe']).optional(),
 });
 export type SetupStateDto = z.infer<typeof SetupStateDtoSchema>;
 
@@ -192,6 +197,9 @@ export const SetupDryRunRequestSchema = z.object({ env: z.string().min(1).max(40
 export type SetupDryRunRequest = z.infer<typeof SetupDryRunRequestSchema>;
 
 export const UseProposalRequestSchema = z.object({ proposalId: z.uuid() });
+/** `POST .../setup/use-proposal`: the state plus what the merge did (`merge`). */
+export const UseProposalResultSchema = SetupStateDtoSchema.extend({ merge: ProposalMergeInfoSchema });
+export type UseProposalResult = z.infer<typeof UseProposalResultSchema>;
 
 export const ProbeRequestSchema = z.object({
   scope: ProbeScopeSchema,
