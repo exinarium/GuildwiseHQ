@@ -108,6 +108,14 @@ describe('items', () => {
 });
 
 describe('Send to BA', () => {
+  it('bulk send of an item the user cannot see names the id, never its title', async () => {
+    const item = await add('Secret title of another org');
+    const other = await w.t.userSession('stranger-bulk@example.com', 'member');
+    const r = await w.t.req('POST', '/api/backlog/send', { cookie: other.cookie, body: { itemIds: [item.id] } });
+    expect(JSON.stringify(r.body)).not.toContain('Secret title');
+    expect((await list()).find((i) => i.id === item.id)).toMatchObject({ status: 'open', cardRef: null });
+  });
+
   it('without a BA it is refused (409 no_ba) and the item stays Open and unlinked', async () => {
     const item = await add('Needs a BA');
     const before = await counts();

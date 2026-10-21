@@ -303,7 +303,11 @@ export async function sendBacklogItems(
     try {
       results.push((await sendBacklogItem(ctx, user, id)).result);
     } catch (err) {
-      const title = (await one(ctx.pool, 'SELECT title FROM backlog_items WHERE id=$1', [id]))?.title ?? id;
+      // A 404 means the item is missing or not visible to this user: never read its title then.
+      const hidden = err instanceof HttpError && err.status === 404;
+      const title = hidden
+        ? id
+        : ((await one(ctx.pool, 'SELECT title FROM backlog_items WHERE id=$1', [id]))?.title ?? id);
       results.push({
         itemId: id,
         title,
