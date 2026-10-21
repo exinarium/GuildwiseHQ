@@ -473,6 +473,39 @@ describe('the way through', () => {
     expect(commands()).toHaveLength(n0 + 1);
   });
 
+  it('final review: the name, address, computer and web address of a server in an open move cannot be changed', async () => {
+    const m = await start();
+    const patch = (target: string, body: unknown, cookie = d.w.owner.cookie) =>
+      req('PATCH', `/api/deploy-targets/${target}`, body, cookie);
+    for (const target of [d.targets.prod, newTarget]) {
+      for (const body of [{ name: 'renamed' }, { host: 'other' }, { appUrl: 'https://x.example.com' }]) {
+        const out = await patch(target, body);
+        expect(out.status, JSON.stringify(body)).toBe(409);
+        expect(out.body.error.code).toBe('target_in_move');
+      }
+      // notes and the same value are not a change
+      expect((await patch(target, { notes: 'still fine' })).status).toBe(200);
+    }
+    // once the move is over the server can be edited again
+    await call('POST', `${base()}/delivery/moves/${m.id}/cancel`, undefined, 202).catch(() => undefined);
+    await q(`UPDATE deploy_target_moves SET state='cancelled', finished_at=now() WHERE id=$1`, [m.id]);
+    expect((await patch(newTarget, { notes: 'after' })).status).toBe(200);
+  });
+
+  it('final review: a member cannot point a production target at another server or computer; the owner can', async () => {
+    const member = await d.member();
+    await q(`UPDATE deploy_targets SET production=true WHERE id=$1`, [newTarget]);
+    try {
+      const out = await req('PATCH', `/api/deploy-targets/${newTarget}`, { host: 'elsewhere' }, member.cookie);
+      expect([403, 404]).toContain(out.status);
+      const host = (await q(`SELECT host FROM deploy_targets WHERE id=$1`, [newTarget]))[0].host;
+      expect(host).toBe('aom-p5-new');
+      expect((await req('PATCH', `/api/deploy-targets/${newTarget}`, { host: 'elsewhere' })).status).toBe(200);
+    } finally {
+      await q(`UPDATE deploy_targets SET production=false, host='aom-p5-new' WHERE id=$1`, [newTarget]);
+    }
+  });
+
   it('cannot be cancelled or switched while a step is running', async () => {
     const m = await start();
     const out = await req('POST', `${base()}/delivery/moves/${m.id}/cancel`);

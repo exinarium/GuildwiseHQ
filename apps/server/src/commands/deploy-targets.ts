@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import {
   type CreateDeployTargetRequest,
   type DeployTargetDto,
+  MOVE_OPEN_STATES,
   type PatchDeployTargetRequest,
   type ProjectWorkstation,
   streamId,
@@ -216,6 +217,33 @@ export async function updateDeployTarget(
       (patch.destructiveOk !== undefined && patch.destructiveOk !== !!t.destructive_ok);
     if (flips && p.my_role !== 'owner')
       throw forbidden('only the project owner can mark a target as production or open it to testing');
+    // What a move relies on (the name the approved files use, the server it reaches, the computer that signs in, the address it
+    // is checked at) stays as it is while a move for this target is open (final review).
+    const changesIdentity =
+      (patch.name !== undefined && patch.name !== t.name) ||
+      (patch.host !== undefined && patch.host !== t.host) ||
+      (patch.workstationId !== undefined && patch.workstationId !== t.workstation_id) ||
+      (patch.appUrl !== undefined && patch.appUrl !== t.app_url) ||
+      (patch.kind !== undefined && patch.kind !== t.kind);
+    if (changesIdentity) {
+      const inMove = await one(
+        tx,
+        `SELECT 1 AS x FROM deploy_target_moves WHERE (from_target_id=$1 OR to_target_id=$1) AND state = ANY($2::text[]) LIMIT 1`,
+        [t.id, [...MOVE_OPEN_STATES]],
+      );
+      if (inMove)
+        throw conflict(
+          'target_in_move',
+          'this server is part of a move that is not finished: finish or cancel the move before changing its name, address or computer',
+        );
+    }
+    // Pointing a live server at another address or computer redirects the real deploys: the project owner only.
+    const movesServer =
+      (patch.host !== undefined && patch.host !== t.host) ||
+      (patch.workstationId !== undefined && patch.workstationId !== t.workstation_id) ||
+      (patch.kind !== undefined && patch.kind !== t.kind);
+    if (t.production && movesServer && p.my_role !== 'owner')
+      throw forbidden('only the project owner can change the server or the computer of a production target');
     const merged = {
       kind: patch.kind ?? t.kind,
       workstationId: patch.workstationId !== undefined ? patch.workstationId : t.workstation_id,
