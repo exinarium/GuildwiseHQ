@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generator": "setup-1.2",
+  "generator": "setup-1.3",
   "environments": [
     {
       "name": "uat",
@@ -34,9 +34,7 @@
       },
       "healthTimeoutSec": 120,
       "rollback": true,
-      "trigger": [
-        "after_merge"
-      ],
+      "trigger": ["after_merge"],
       "releasedBy": "auto",
       "gate": "none",
       "secrets": [],
@@ -86,9 +84,7 @@
       },
       "healthTimeoutSec": 120,
       "rollback": true,
-      "trigger": [
-        "on_request"
-      ],
+      "trigger": ["on_request"],
       "releasedBy": "owner",
       "gate": {
         "requires": [

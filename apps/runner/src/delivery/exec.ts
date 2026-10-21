@@ -100,6 +100,9 @@ export function parseEnvFile(text: string): Record<string, string> {
 const expandHome = (p: string, home: string = homedir()): string =>
   p === '~' || p.startsWith('~/') ? join(home, p.slice(1)) : p;
 
+/** How long a script that ran out of time gets after SIGTERM: a script with an http health check may be rolling back. */
+export const killGraceSec = (healthKind: string): number => (healthKind === 'http' ? 180 : 10);
+
 export class DeployExecutor {
   private readonly log: Logger;
   private readonly inflight = new Map<string, Promise<DeployExecResult>>();
@@ -328,6 +331,8 @@ export class DeployExecutor {
         cwd: checkout?.path ?? recipeDir,
         env: this.scriptEnv(p, env, vars, sec.values, commit),
         timeoutSec: env.timeoutSec,
+        // a script with an http health check may be rolling back when the time is up: give it time to finish the rollback
+        killGraceSec: killGraceSec(env.health.kind),
         logFile,
       });
       const summaryBase = out.timedOut
@@ -435,6 +440,7 @@ export class DeployExecutor {
     cwd: string;
     env: NodeJS.ProcessEnv;
     timeoutSec: number;
+    killGraceSec?: number;
     logFile: string;
   }): Promise<{
     exitCode: number | null;
@@ -499,7 +505,7 @@ export class DeployExecutor {
           if (child.pid) signalGroup(child.pid, 'SIGTERM');
           setTimeout(
             () => child.pid && signalGroup(child.pid, 'SIGKILL'),
-            this.deps.timing?.killGraceMs ?? 10_000,
+            this.deps.timing?.killGraceMs ?? (o.killGraceSec ?? 10) * 1000,
           ).unref?.();
         },
         this.deps.timing?.timeoutMs ?? o.timeoutSec * 1000,

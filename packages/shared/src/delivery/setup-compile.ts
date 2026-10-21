@@ -139,6 +139,14 @@ const doneFunction = (): string[] => [
   '',
 ];
 
+/** The health address must be a web address before anything changes (an empty `AOM_DEPLOY_APP_URL` would make a bad address). */
+const healthUrlCheck = (env: SetupEnv): string[] =>
+  env.health.kind === 'http'
+    ? [
+        sh`[[ "$HEALTH_URL" =~ ^https?:// ]] || die "the health address ($HEALTH_URL) is not a web address: set the address of the app on its deploy target"`,
+      ]
+    : [];
+
 function commitChecks(): string[] {
   return [
     sh`[[ "$COMMIT" =~ ^[0-9a-f]{7,64}$ ]] || die "AOM_DEPLOY_COMMIT must be a commit id"`,
@@ -184,6 +192,7 @@ function localScript(setup: DeliverySetup, env: SetupEnv): string {
   out.push(...doneFunction());
   out.push(
     ...commitChecks(),
+    ...healthUrlCheck(env),
     '[ -d "$CHECKOUT" ] || die "AOM_DEPLOY_CHECKOUT is not a folder"',
     sh`case "$CHECKOUT" in /*) ;; *) die "AOM_DEPLOY_CHECKOUT must be a full path" ;; esac`,
     sh`case "$CHECKOUT" in *[!A-Za-z0-9._/+@=-]*) die "the checkout path has unusual characters" ;; esac`,
@@ -193,6 +202,7 @@ function localScript(setup: DeliverySetup, env: SetupEnv): string {
     'type -P docker >/dev/null 2>&1 || die "docker is not installed on this computer"',
     ...curlCheck(env),
     'docker compose version >/dev/null 2>&1 || die "docker compose (version 2) is not available"',
+    sh`say "tools: docker engine $(docker version --format '{{.Server.Version}}' 2>/dev/null || echo unknown), docker compose $(docker compose version --short 2>/dev/null || echo unknown)"`,
     '[ -f "$COMPOSE_FILE" ] || die "the compose file $COMPOSE_FILE does not exist"',
     a.composeProject
       ? sh`dc() { docker compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" "$@"; }`
@@ -426,7 +436,11 @@ function remoteState(): string[] {
     'run=',
     'id=$(cd "$dir" && dc -f "$file" ps -q "$svc" 2>/dev/null | head -n 1) || id=',
     `if [ -n "$id" ]; then run=$(docker inspect --format '{{.Config.Image}}' "$id" 2>/dev/null) || run=; fi`,
-    `printf 'image=%s\\nrunning=%s\\n' "$cur" "$run"`,
+    `engine=$(docker version --format '{{.Server.Version}}' 2>/dev/null) || engine=`,
+    'comp=',
+    'if docker compose version >/dev/null 2>&1; then comp="v2 $(docker compose version --short 2>/dev/null)"',
+    'elif docker-compose version >/dev/null 2>&1; then comp="v1 $(docker-compose version --short 2>/dev/null)"; fi',
+    `printf 'image=%s\\nrunning=%s\\nengine=%s\\ncompose=%s\\n' "$cur" "$run" "$engine" "$comp"`,
     'AOM_REMOTE',
     ')" || die "could not look at the server"',
     `CURRENT_IMAGE="$(printf '%s\\n' "$STATE" | sed -n 's/^image=//p' | head -n 1)"`,
@@ -434,6 +448,16 @@ function remoteState(): string[] {
     sh`case "$CURRENT_IMAGE" in *[!A-Za-z0-9._/:@-]*) CURRENT_IMAGE="" ;; esac`,
     sh`case "$RUNNING_IMAGE" in *[!A-Za-z0-9._/:@-]*) RUNNING_IMAGE="" ;; esac`,
     'say "server runs: ${RUNNING_IMAGE:-nothing}; settings point at: ${CURRENT_IMAGE:-nothing}"',
+    `ENGINE_VERSION="$(printf '%s\\n' "$STATE" | sed -n 's/^engine=//p' | head -n 1 | tr -cd '0-9A-Za-z._+-')"`,
+    `COMPOSE_VERSION="$(printf '%s\\n' "$STATE" | sed -n 's/^compose=//p' | head -n 1 | tr -cd '0-9A-Za-z._+ -')"`,
+    'say "server tools: docker engine ${ENGINE_VERSION:-unknown}, docker compose ${COMPOSE_VERSION:-unknown}"',
+    sh`case "$COMPOSE_VERSION" in`,
+    '  v1*)',
+    '    if [[ "${ENGINE_VERSION%%.*}" =~ ^[0-9]+$ ]] && [ "${ENGINE_VERSION%%.*}" -ge 25 ]; then',
+    '      say "WARNING: this server uses docker-compose version 1 with Docker engine ${ENGINE_VERSION}. Restarting a service can then fail with a \'ContainerConfig\' KeyError."',
+    '      say "WARNING: Guildwise will not remove or recreate other parts to work around it. Install Docker Compose version 2 (the \'docker compose\' command); stopping the app by hand first is a downtime you decide."',
+    '    fi ;;',
+    'esac',
   ];
 }
 
@@ -451,10 +475,10 @@ function sshFunctions(env: SetupEnv): string[] {
     `trap 'rm -f -- "$tmp"' EXIT`,
     'cp -p -- "$envf" "$tmp"',
     `VAR="$var" VAL="$val" awk 'BEGIN { v = ENVIRON["VAR"]; n = ENVIRON["VAL"]; done = 0 }`,
-    '  { l = $0; sub(/\r$/, "", l); sub(/^[ \t]*(export[ \t]+)?/, "", l) }',
-    '  index(l, v "=") == 1 { if (!done) print v "=" n; done = 1; next }',
+    '  { cr = ($0 ~ /\r$/ ? "\r" : ""); l = $0; sub(/\r$/, "", l); sub(/^[ \t]*(export[ \t]+)?/, "", l) }',
+    '  index(l, v "=") == 1 { if (!done) print v "=" n cr; done = 1; next }',
     '  { print }',
-    `  END { if (!done) print v "=" n }' "$envf" > "$tmp"`,
+    `  END { if (!done) print v "=" n cr }' "$envf" > "$tmp"`,
     'mv -- "$tmp" "$envf"',
     'echo "set $var in $envf" >&2',
     'AOM_REMOTE',
@@ -512,12 +536,13 @@ function sshScript(setup: DeliverySetup, env: SetupEnv): string {
   out.push(...doneFunction());
   out.push(
     ...commitChecks(),
+    ...healthUrlCheck(env),
     ...lockBlock(`${a.composeProject ?? a.service}-${env.name}`),
     '',
     ...curlCheck(env),
     ...sshHelpers(),
     ...sshFunctions(env),
-    `rsh 'true' || die "cannot sign in to $HOST without a password: check the sign-in of this computer"`,
+    `rsh 'true' </dev/null || die "cannot sign in to $HOST without a password: check the sign-in of this computer"`,
     ...remoteState(),
     '',
     'if [ "$CURRENT_IMAGE" = "$TAG" ] && [ "$RUNNING_IMAGE" = "$TAG" ] && healthy; then',
@@ -540,8 +565,8 @@ function sshScript(setup: DeliverySetup, env: SetupEnv): string {
 /** Everything after the image switch is undone when the script ends early (any failure, TERM, INT), unless it finished. */
 function sshGuard(env: SetupEnv): string[] {
   return [
-    "# the image to go back to: the settings file's value, else what runs now",
-    'PREVIOUS="${CURRENT_IMAGE:-$RUNNING_IMAGE}"',
+    "# the image to go back to: what runs now (it is the last one that worked), else the settings file's value",
+    'PREVIOUS="${RUNNING_IMAGE:-$CURRENT_IMAGE}"',
     'SWITCHED=0',
     'FINISHED=0',
     'on_exit() {',
@@ -644,7 +669,7 @@ function sshStep(s: DeployStep, i: number, env: SetupEnv): string[] {
     case 'ship_image_ssh':
       return [
         ...stepNumberComment(i, 'copy the image to the server'),
-        'if rsh "docker image inspect$(rquote "$TAG")" >/dev/null 2>&1; then',
+        'if rsh "docker image inspect$(rquote "$TAG")" </dev/null >/dev/null 2>&1; then',
         '  say "image $TAG is already on the server"',
         'elif [ "$DRY_RUN" = 1 ]; then',
         '  would "copy $TAG to the server"',
@@ -687,7 +712,9 @@ function sshStep(s: DeployStep, i: number, env: SetupEnv): string[] {
         'if [ "$DRY_RUN" = 1 ]; then',
         `  would ${shq(s.label)}`,
         'else',
-        s.where === 'server' ? `  rsh "$(rquote ${s.argv.map(shq).join(' ')})"` : `  ${customArgv(s)}`,
+        s.where === 'server'
+          ? `  rsh "$(rquote ${s.argv.map(shq).join(' ')})" </dev/null`
+          : `  ${customArgv(s)}`,
         'fi',
       ];
     default:
@@ -780,6 +807,11 @@ export function compileSetup(
   for (const e of setup.environments)
     if (e.health.kind === 'http' && /\$\{(?!appUrl\})/.test(e.health.url))
       issues.push(`${e.name}: only \${appUrl} can be used in the health address`);
+  for (const e of setup.environments)
+    if (e.mode === 'guided' && e.health.kind === 'http' && e.health.url.includes('${appUrl}')) {
+      if (!e.app.appUrl)
+        issues.push(`${e.name}: the health check uses the app address, but no app address is set`);
+    }
   if (issues.length) return { ok: false, issues };
 
   const files: CompiledFile[] = [];

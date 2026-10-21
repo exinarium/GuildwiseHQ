@@ -14,7 +14,7 @@ import { ReleasedBySchema, SECRET_NAME, TriggerSchema } from './recipe.ts';
 export const SETUP_FILE = 'setup.json';
 export const SETUP_VERSION = 1;
 /** The compiler version recorded in `setup.json`: a newer compiler never silently rewrites approved scripts. */
-export const SETUP_GENERATOR = 'setup-1.2';
+export const SETUP_GENERATOR = 'setup-1.3';
 /** Did an older compiler write these scripts? (The "improved steps are available" nudge.) */
 export const isOlderGenerator = (g: string): boolean => g !== SETUP_GENERATOR;
 
