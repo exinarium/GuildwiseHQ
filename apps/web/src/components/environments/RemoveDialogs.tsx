@@ -113,6 +113,7 @@ export function ChangePlaceDialog({
   onClose,
   onAddServer,
   onMove,
+  moveBlocked,
 }: {
   projectId: string;
   s: SetupStateDto;
@@ -122,6 +123,8 @@ export function ChangePlaceDialog({
   onAddServer: () => void;
   /** Open the move wizard (a server with its data). */
   onMove?: (() => void) | undefined;
+  /** Why moving is not offered, in a sentence. */
+  moveBlocked?: string | null | undefined;
 }) {
   const places = placesOf(s);
   const current = placeOfEnv(places, env);
@@ -217,6 +220,11 @@ export function ChangePlaceDialog({
               </Button>
             </div>
           </div>
+        )}
+        {kind === 'server' && !onMove && moveBlocked && (
+          <p className="border-t border-line pt-3 text-sm text-muted" data-testid="move-blocked">
+            {moveBlocked}
+          </p>
         )}
         <ErrorBox error={setPlace.error ?? publish.error} />
         {publish.data && !publish.data.ok && (

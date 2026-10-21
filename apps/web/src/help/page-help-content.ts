@@ -105,7 +105,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
         text: 'The computers and servers this project can use. Add one once and choose it for any environment.',
       },
     ],
-    article: 'projects#project-types',
+    article: 'phases#delivery-recipes',
   },
   '/p/:projectKey/phases/:number': {
     title: 'Phase',
@@ -424,8 +424,8 @@ export const PAGE_HELP: Record<string, PageHelp> = {
         text: 'Shows GitHub, GitLab, Bitbucket, Azure DevOps or Plain git for each repository, whether the workstation is connected to it, and a Connect button with the command to run. The owner can change it with Change.',
       },
       {
-        name: 'Phases and deploys',
-        text: 'Create phases, set the default follow-ups and add deploy targets. For code projects.',
+        name: 'Phases and Environments',
+        text: 'Create phases here. Where your app runs, its start steps and the follow-ups of a new phase are on the Environments page (open it from the card here). For code projects.',
       },
       {
         name: 'Merging',

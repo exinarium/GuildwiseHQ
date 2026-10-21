@@ -9,11 +9,10 @@ A **phase** is a named slice of work you want to ship together: "Phase 2: autosa
 
 ## Setting up {#setting-up}
 
-To set up what can happen after a phase is done, open the project's settings (the gear on its board) and go to **Phases and deploys**. There you configure:
+To set up what can happen after a phase is done, open the project's **Environments** page (in the sidebar, under the board). Where your app runs is set up there, in one place: see [Environments](/help/phases#delivery-recipes). The phase-specific parts are:
 
-- **Set up deploys**: a guided wizard for non-coders. Pick a test copy or the live site, say where it runs (this computer or your own server), and Guildwise looks at what is already running, shows what it found, what each update will do and what it will not touch, then saves the steps. Try it without changing anything, and the Owner approves. Never stops your database or other containers. A server you have no sign-in for yet is connected with **Connect a different server** (address, user name, then a password used once, a key file, or a key you paste into your hosting panel; Guildwise shows the server's fingerprint for you to confirm first), a server that is not ready can be set up (Docker, folders, HTTPS) after you confirm a list, and **Reconnect** brings a server back when you change computers. **Move to a new server** copies the app, its settings and its data to another server while the old site keeps running, then takes a short downtime to move the last data, checks the new app, and shows what to change at your web name (with a live check); the old server stays as a standby until the Owner retires it, which only removes Guildwise's keys. **Let DevOps look at it first** suggests the whole setup for you to review.
-- **Deploy targets**: where a phase can be deployed. A local Docker stack deploys on every member workstation (not in a GitHub Codespace, which cannot run Docker: see [Cloud workstations](/help/cloud-workstations#codespaces)). A remote host deploys over SSH, using the DevOps engineer of the workstation you choose. No passwords or keys are stored in the app.
-- **Default follow-ups**: the list every new phase starts with (e.g., Deploy to local, then Regression run). Click **Save defaults** after changing it.
+- **What a new phase does when it is finished** (on the Environments page, under **Rules**): the list every new phase starts with, for example "Release to the test site, then to the live site (it waits for you)". A follow-up that releases picks an **environment**, not a technical target. Click **Save** after changing it.
+- **New phase** (project settings, **Phases**): enter a name and a description, set the follow-ups, then **Create phase**.
 
 Deploy and regression follow-ups need a repository on the project, and regression needs a test stage. In research projects or projects without repositories, **Add deploy** and **Add regression run** are greyed out (a phase has at most 10 follow-ups; **Add custom** is the third kind).
 
@@ -21,7 +20,7 @@ Deploy and regression follow-ups need a repository on the project, and regressio
 
 To create a phase:
 
-1. Open the project's settings and go to **Phases and deploys**.
+1. Open the project's settings and go to **Phases**.
 2. Click **New phase**.
 3. Enter a name and an optional description.
 4. Set the follow-ups that should happen when it is done (it starts with your defaults).
@@ -71,13 +70,28 @@ If any follow-up fails, the ones after it are skipped. At the end, a **Phase res
 
 The phase page shows live progress, the DevOps requests, regression cards and the full results thread.
 
-## Deploying with a recipe {#delivery-recipes}
+## Environments: where your app runs {#delivery-recipes}
 
-A project can deploy in two ways, chosen under **Delivery** in the project settings: **Instructions** (a DevOps request written in words, as before) or **Recipe**. A recipe is a small script kept in the project's vault, in a `delivery/` folder, that always does the same steps: deploy, wait until the app is healthy, run a smoke check. It names its environments, where each one goes, when it runs (after a merge, after a phase, or on request) and **who releases it**: you (the release queue), the CEO, or automatically once its gate holds.
+The **Environments** page of a project (sidebar, under the board) has one place for everything about running your app:
 
-- **Set it up by talking to the CEO**: "set up deploys for this project". The CEO asks about the environments, targets, gate and secrets, and DevOps writes the scripts and tries them. You then see the recipe under Delivery, with what it will do and what changed since the last version.
-- **You approve one exact version** with the **Approve this version** button (only the Owner). If anyone edits the recipe afterwards, it needs a new approval and nothing deploys from it meanwhile.
-- **A model never runs a deploy command.** It can only ask Guildwise; Guildwise checks the approved version and the gate (an earlier environment healthy on the same commit, tests passed, a time window, a freeze), and your workstation runs the script itself. Secrets are named in the recipe, set on your workstation from the Delivery section and never stored on the server or in the vault.
-- **The release queue** (under **Deploys**) lists releases that are ready: the commit, the environment and the servers. An Owner or an Admin presses **Release** and, when an environment has several servers, ticks the ones to release to. The CEO releases by itself only where the recipe names it.
+- **Your app: how to start it.** The steps that start the app. Test copies and environments on a computer that does not already run use them. Press **Scan with DevOps** (it reads the project and suggests the steps and the environments; it asks real questions with fields, and nothing is saved until you press **Use this**) or **Set up myself**.
+- **Test copies**: one temporary copy per card, thrown away after the card. It shows how many run now and how long a failed copy is kept.
+- **Environments**: the **test site** (always on, updates by itself after each merge), the **live site** (goes out only when you release it, after the test site is healthy, and you approve every release) and any extra site (a demo, a second live site). Each card shows the place it runs, its address, when it updates, its rules, and three steps: **Saved**, **Tried**, **Approved**. **Add an environment** is always there. A card has **Update now** or **Release**, and a **...** menu with **Edit**, **Change place** and **Remove**.
+- **Places**: the computers and servers the project uses, each listed once, with what uses it and whether it can be reached. **Add a server** uses a sign-in this computer already has, or **Connect a new server** (address, user name, then a password used once, a key file, or a key you paste into your hosting panel; Guildwise shows the server's fingerprint for you to confirm first). A place nothing uses can be removed (optionally with Guildwise's own key on the server); a place that looks like another one offers **Merge**. **Move to a new server** copies the app and its data to another server and keeps the old one as a standby until the Owner retires it.
+- **Rules** and **History**.
+
+**What is already running is found first.** When you add an environment Guildwise looks at the place (read-only) and lists what it found: a Docker app, or an app that runs directly on the machine (a system service, a pm2 process or a program), with its folder and port. If it is not there, **My app is somewhere else** takes a folder, and the page says where it looked. Then it shows **Found and will be used**, **Each update will** and **Will not be touched**.
+
+**How new versions get onto a server.** For a Docker app on a server you choose: **Build here and copy it** (the default), **Download a ready-made app from a registry**, or **Build it on the server**. For an app that runs directly on the machine each update gets the new version, builds it in a new folder, switches to it and restarts it the way you confirmed (the service, pm2, or a command), and keeps the last versions so you can go back. Docker apps and direct apps use the same cards.
+
+**Try, then approve.** Press **Try it without changing anything** on each environment (it checks and prints what it would do), then the Owner presses **Approve**. Approval needs a successful try of exactly that version. Guildwise only restarts the app, never stops the database or the rest, backs up the database first when asked, and puts the previous version back if the site does not become healthy.
+
+**Remove.** Removing an environment, a place or an old draft always says what happens and what is not touched: the running app is left exactly as it is.
+
+A project can deploy in two ways, chosen under **Delivery**: **Instructions** (a DevOps request written in words) or **Recipe** (the guided setup above, kept in the project vault in a `delivery/` folder). **Stop using guided deploys** (under technical details) goes back to instructions and keeps your places.
+
+- **You approve one exact version** with **Approve** (only the Owner). If anything changes afterwards it needs a new approval and nothing deploys from it meanwhile.
+- **A model never runs a deploy command.** It can only ask Guildwise; Guildwise checks the approved version and the rules (a test site healthy on the same version, tests passed, a time window, a freeze), and your workstation runs the steps itself. Secrets are named in the setup, set on your workstation and never stored on the server or in the vault.
+- **Releases** (sidebar, Organization) is where a ready version waits for you: **Waiting for you**, **What is live** (the version on every site, readable by everyone), **History** (with the rules that held and who released) and **Rules**. The Owner or an Admin presses **Release**; **Go back to an earlier version** (on the live card) puts an earlier release back at once, your data is not rolled back.
 
 The recipe lives in the project vault. A git vault is backed up with its repository; a local vault is a folder on the Owner's workstation that you back up yourself (put it in OneDrive, iCloud or another backed-up folder).

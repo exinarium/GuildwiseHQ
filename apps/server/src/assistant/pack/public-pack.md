@@ -37,6 +37,7 @@ Each repository can be on GitHub, GitLab, Bitbucket Cloud, Azure DevOps or a pla
 - A ledger: every decision is recorded once and given to every agent that asks later, so you are not asked the same thing twice.
 - Review and test gates. Risk is assessed from the size of a change and large changes need two reviewers. Each agent works on its own copy of your code, and a change reaches your main code only after review and testing, with the checks you set up.
 - Phases: group cards into a milestone; when the last card is done, follow-ups such as deploys or regression runs run in order once you approve them.
+- Environments: one page per project for where the app runs (start steps, test copies per card, a test site, a live site, extra sites, the computers and servers they use, rules, history); apps that run in Docker or directly on a machine (a service, pm2); Releases lists what waits, what is live and the history, and the Owner or an Admin can go back to an earlier version.
 - Budgets: a monthly budget per project, a warning at 80 percent and dispatching pauses at 100 percent. Running shifts finish.
 - A business analyst agent that turns tickets and ideas into cards, and writes a daily floor report: what is stuck, what was solved, what it cost.
 - Intake from Jira and GitHub: the BA maps incoming tickets to projects and drafts cards with specs and test plans. It can look at a Jira ticket's screenshots and design files (downloaded on your workstation with your Jira token, which never leaves it), and cards carry file attachments for builders and testers.
@@ -143,7 +144,7 @@ Reading the board and its warning banners, creating and editing cards, moving ca
 - Attachments: A card can carry files: screenshots, a design (SVG, PDF), a specification, a log. Use Attachments, Add files on the New card form, or the Attachments section of an open card, where you can also drag files in. Images show as previews; Download saves a file and Remove deletes it.…
 - Editing a card: You can edit a card while it is a draft or queued and unclaimed:
 - Moving cards: To move a card to a different stage (for example to fix a stuck card):
-- Run a branch: Run this branch (card) or Run branch... (board) has the workstation's DevOps engineer start the project so you can try it; it stops by itself after the time in Project settings > Run and test, or when you click Stop.…
+- Run a branch: Run this branch (card) or Run branch... (board) has the workstation's DevOps engineer start the project so you can try it; it stops by itself after the time in Environments > Test copies, or when you click Stop. The panel is called Test copy.…
 - Integration tests: With integration tests off (the default) the Test step still runs: the tester checks the branch against the test plan with what it can run in its own copy of the code, without a running app.…
 - Backing off: When three shifts on the same card end with no report within ten minutes (the agent crashed or timed out), the card shows an amber badge such as "backing off until 14:32 (3 failures)", and a "keeps failing" item lands on your desk. Guildwise HQ waits 1 minute before offering it again;…
 - Risk tier: Risk is computed when the builder hands off. A card is large when 200 or more lines changed, when the change touches the project's architectural paths (set in Project settings > Basics as architectural globs), or when it is a refactor; otherwise it is small.…
@@ -218,12 +219,12 @@ The test stage, how finished work lands (working branch or pull request), the ma
 
 ### Phases and follow-ups
 Creating phases, adding cards, when a phase is done, follow-ups, deploy and regression.
-- Setting up: To set up what can happen after a phase is done, open the project's settings (the gear on its board) and go to Phases and deploys. There you configure:
+- Setting up: To set up what can happen after a phase is done, open the project's Environments page (in the sidebar, under the board). Where your app runs is set up there, in one place: see Environments. The phase-specific parts are:
 - Creating a phase: To create a phase:
 - Phase done: A phase is done when:
 - The "phase done" desk item: When all cards are done, your BA writes a report and the desk shows a Phase done item titled like "PH-1 Autosave is done: approve 2 follow-ups?".
 - What runs after you approve: Once you approve, the follow-ups are locked and run one at a time in order:
-- Deploying with a recipe: A project can deploy in two ways, chosen under Delivery in the project settings: Instructions (a DevOps request written in words, as before) or Recipe. A recipe is a small script kept in the project's vault, in a delivery/ folder, that always does the same steps: deploy, wait until the app is healthy, run a smoke…
+- Environments: where your app runs: The Environments page of a project (sidebar, under the board) has one place for everything about running your app:
 
 ### The daily report and what is watched
 What your CEO triages, the signals the server watches for, the daily report, scheduled tasks and the time zone.

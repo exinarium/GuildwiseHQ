@@ -110,6 +110,7 @@ export function EnvironmentCard({
     env.hosting === 'ssh' &&
     env.mode === 'guided' &&
     !nativeOf(env) &&
+    !!env.app.imageVar &&
     !!target &&
     target.role === 'active' &&
     target.kind === 'remote_ssh' &&
@@ -536,6 +537,15 @@ export function EnvironmentCard({
           label={info.label}
           onClose={() => setChanging(false)}
           onAddServer={() => setAddingServer(true)}
+          moveBlocked={
+            env.hosting === 'ssh' && !canMove
+              ? nativeOf(env)
+                ? 'An app that runs without Docker cannot be moved to another server with its data yet.'
+                : !env.app.imageVar
+                  ? 'Moving needs the app version to be set in the .env file on the server. Yours is named in an extra file next to the compose file, so it cannot be moved this way yet.'
+                  : null
+              : null
+          }
           onMove={
             canMove
               ? () => {
