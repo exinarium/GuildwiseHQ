@@ -32,6 +32,7 @@ import {
 import { chatHandlers } from './handlers-chat.ts';
 import { deploySetupHandlers } from './handlers-deploy-setup.ts';
 import { extraHandlers } from './handlers-extra.ts';
+import { releaseHandlers } from './handlers-releases.ts';
 import { runHandlers } from './handlers-run.ts';
 
 const err = (status: number, code: string, message: string, details?: unknown) =>
@@ -82,6 +83,7 @@ async function body<T>(
 
 export const handlers = [
   ...deploySetupHandlers,
+  ...releaseHandlers,
   ...runHandlers,
   ...chatHandlers,
   http.get(`${A}/health`, () => HttpResponse.json({ ok: true, db: true })),

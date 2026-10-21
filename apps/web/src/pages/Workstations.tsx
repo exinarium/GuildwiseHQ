@@ -184,13 +184,13 @@ function CardlessShifts({ workstationId }: { workstationId: string }) {
   );
 }
 
-/** Run environments on this workstation, all projects (backlog #58); each can be extended and stopped here. */
+/** Test copies running on this computer, all projects (backlog #58); each can be extended and stopped here. */
 function WorkstationRuns({ workstationId }: { workstationId: string }) {
   const runs = useRuns({ workstationId });
   if (!runs.data || runs.data.length === 0) return null;
   return (
     <div className="mt-3" data-testid="workstation-runs">
-      <p className="mb-1 text-xs font-medium text-subtle">Environments</p>
+      <p className="mb-1 text-xs font-medium text-subtle">Test copies running here</p>
       <RunList envs={runs.data} showProject />
     </div>
   );

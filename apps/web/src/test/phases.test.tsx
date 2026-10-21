@@ -214,7 +214,7 @@ describe('FollowupEditor', () => {
     expect(screen.getByTestId('followup-result-1')).toHaveTextContent('DevOps on Box: done');
     expect(screen.getByRole('link', { name: 'bug TOY-8' })).toHaveAttribute('href', '/cards/TOY-8');
     expect(screen.getByRole('link', { name: 'TOY-7' })).toBeInTheDocument();
-    expect(screen.getByTestId('followup-1')).toHaveTextContent('Deploy to local');
+    expect(screen.getByTestId('followup-1')).toHaveTextContent('Release to local');
   });
 });
 
@@ -512,7 +512,7 @@ describe('PhaseDeskItem', () => {
     expect(screen.getByTestId('phase-cards')).toHaveTextContent('TOY-5 Autosave drafts');
     expect(screen.getByTestId('phase-cards')).toHaveTextContent('abcdef1234');
     expect(screen.getByTestId('phase-outstanding')).toHaveTextContent('TOY-9');
-    expect(screen.getByTestId('followup-1')).toHaveTextContent('Deploy to local');
+    expect(screen.getByTestId('followup-1')).toHaveTextContent('Release to local');
     expect(screen.getByTestId('phase-approve')).toHaveTextContent('Approve all 2');
     await user.click(screen.getByTestId('phase-approve'));
     await waitFor(() => expect(calls()).toContain(`POST /api/desk/${U(70)}/resolve`));

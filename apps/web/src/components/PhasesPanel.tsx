@@ -10,7 +10,7 @@ import {
 } from '../api/queries/phases.ts';
 import { PHASE_STATUS_LABEL, phasePath, phaseTone, withoutIds } from '../lib/phases.ts';
 import { useFollowupAvailability } from '../lib/projectWorkflow.ts';
-import { FollowupEditor, followupProblems } from './FollowupEditor.tsx';
+import { FollowupEditor, followupProblems, useEnvironmentOptions } from './FollowupEditor.tsx';
 import { Badge, Button, Dialog, ErrorBox, Panel, TextArea, TextInput } from './ui.tsx';
 
 /** The project's phases (a list with status) and a dialog to start a new one. */
@@ -68,11 +68,12 @@ function NewPhaseDialog({
   const [description, setDescription] = useState('');
   const [followups, setFollowups] = useState<FollowupSpec[] | null>(null);
   const [err, setErr] = useState('');
+  const envs = useEnvironmentOptions(projectId);
   const list = followups ?? withoutIds(defaults.data ?? []);
   const t = targets.data ?? [];
   const submit = () => {
     if (!name.trim()) return setErr('A name is required');
-    if (followupProblems(list, t).length) return setErr('Fix the follow-ups first');
+    if (followupProblems(list, t, envs).length) return setErr('Fix the follow-ups first');
     setErr('');
     create.mutate(
       {
@@ -111,7 +112,13 @@ function NewPhaseDialog({
         />
         <div>
           <h3 className="mb-1 text-xs font-medium text-muted">Follow-ups after the phase</h3>
-          <FollowupEditor unavailable={unavailable} value={list} onChange={setFollowups} targets={t} />
+          <FollowupEditor
+            unavailable={unavailable}
+            value={list}
+            onChange={setFollowups}
+            targets={t}
+            projectId={projectId}
+          />
         </div>
         {err && name.trim() && (
           <p role="alert" className="text-xs font-medium text-danger">
@@ -137,24 +144,32 @@ export function FollowupDefaultsPanel({ projectId }: { projectId: string }) {
   const unavailable = useFollowupAvailability(projectId);
   const save = useSetFollowupDefaults(projectId);
   const [draft, setDraft] = useState<FollowupSpec[] | null>(null);
+  const envs = useEnvironmentOptions(projectId);
   const list = draft ?? defaults.data ?? [];
   const t = targets.data ?? [];
   return (
     <Panel data-testid="followup-defaults">
-      <h2 className="mb-2 text-lg font-semibold text-fg">Default follow-ups</h2>
+      <h2 className="mb-2 text-lg font-semibold text-fg">What a new phase does when it is finished</h2>
       <p className="mb-2 text-xs text-subtle">
-        New phases start with these. Each phase can still change them until you approve.
+        New phases start with these steps, for example release to the test site, then to the live site (which
+        waits for you). Each phase can still change them until you approve.
       </p>
-      <FollowupEditor unavailable={unavailable} value={list} onChange={setDraft} targets={t} />
+      <FollowupEditor
+        unavailable={unavailable}
+        value={list}
+        onChange={setDraft}
+        targets={t}
+        projectId={projectId}
+      />
       <ErrorBox error={save.error} />
       <div className="mt-2 flex items-center gap-2">
         <Button
           variant="primary"
           data-testid="save-defaults"
-          disabled={save.isPending || draft === null || followupProblems(list, t).length > 0}
+          disabled={save.isPending || draft === null || followupProblems(list, t, envs).length > 0}
           onClick={() => save.mutate(list, { onSuccess: () => setDraft(null) })}
         >
-          Save defaults
+          Save
         </Button>
         {save.isSuccess && draft === null && (
           <span role="status" className="text-sm text-success">

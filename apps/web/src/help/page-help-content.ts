@@ -87,6 +87,26 @@ export const PAGE_HELP: Record<string, PageHelp> = {
     ],
     article: 'projects#project-types',
   },
+  '/p/:projectKey/environments': {
+    title: 'Environments',
+    intro:
+      'Where your app runs, in one place: how to start it, the computers and servers it can use, the test copies of cards, the test site and the live site, and the rules before a release.',
+    controls: [
+      {
+        name: 'Your app',
+        text: 'The steps that start your app. Test copies and sites on a computer use them.',
+      },
+      {
+        name: 'Add an environment',
+        text: 'Add a test site, a live site or another copy of your app. Pick where it runs; nothing changes until you save and the Owner approves.',
+      },
+      {
+        name: 'Places',
+        text: 'The computers and servers this project can use. Add one once and choose it for any environment.',
+      },
+    ],
+    article: 'projects#project-types',
+  },
   '/p/:projectKey/phases/:number': {
     title: 'Phase',
     intro: 'A phase groups cards you want to ship together. See its cards, follow-ups, report and progress.',
@@ -819,18 +839,22 @@ export const PAGE_HELP: Record<string, PageHelp> = {
     ],
     article: 'budgets-and-costs#monthly-budgets',
   },
-  '/deploys': {
-    title: 'Deploys',
+  '/releases': {
+    title: 'Releases',
     intro:
-      'Releases that are ready and waiting for you, what was deployed and why it was allowed, and the rules that gate a release. A deploy runs the recipe you approved, on your workstation, outside any model.',
+      'Everything about putting a new version of your app on a live site. Waiting for you lists versions that are ready; What is live shows the version on every site; History shows what was released and why it was allowed; Rules says what must be true first.',
     controls: [
       {
         name: 'Release',
-        text: 'Runs the approved recipe for that commit and environment. When the environment has several servers, tick the ones to release to. The gate is checked again at the moment you press it.',
+        text: 'Puts the waiting version on the live site, using the setup the Owner approved. If the site has several places, tick the ones to release to. The rules are checked again at the moment you press it.',
       },
       {
-        name: 'Gate presets',
-        text: 'The rules an environment must meet first: an earlier environment healthy on the same commit, tests passed, a time window, a freeze. Who releases is decided in the recipe, not here.',
+        name: 'What is live',
+        text: 'One row per project and site: the version, since when, whether it is healthy, and where it runs. Everyone in the organization can look; only the Owner or an Admin can release.',
+      },
+      {
+        name: 'Rules',
+        text: 'What must be true before a release, in plain sentences: for example the test site is healthy on the same version for 10 minutes. Freeze stops every release until you lift it.',
       },
     ],
     article: 'phases#delivery-recipes',
