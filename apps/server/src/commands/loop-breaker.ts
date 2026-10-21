@@ -239,9 +239,12 @@ export function rejectionBackoffEvents(ctx: Ctx, card: Row): AppendInput[] {
  * The question shifts that count toward the question loop (aliases: shift `s`, its desk item `d`). A shift counts when it
  * ran an agent that answered the item (outcome open or 'reported'), the item was not superseded, and the item was not
  * passed on after the shift started: each routing step (peer, BA, CEO, desk) of one question is its own shift, and the
- * hop is not a second question. Refused shifts (outcome 'rejected', no agent ran) do not count.
+ * hop is not a second question. Refused shifts (outcome 'rejected', no agent ran) do not count. Only questions an agent
+ * asked count: the system's own questions about the card (the stop-loss arbitration, routed to the architect) are not the
+ * card asking, and the stop-loss already holds the card.
  */
 export const COUNTED_QUESTION_SHIFT_SQL = `s.kind='question' AND (s.outcome IS NULL OR s.outcome='reported')
+  AND d.asked_by_kind = 'agent'
   AND d.status <> 'superseded'
   AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(d.escalation_trail,'[]'::jsonb)) t
                    WHERE t->>'step' IN ('peer','ba','ceo','desk') AND (t->>'at')::timestamptz >= s.started_at)`;
