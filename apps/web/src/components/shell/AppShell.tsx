@@ -3,8 +3,9 @@ import * as RadixDialog from '@radix-ui/react-dialog';
 import * as Tooltip from '@radix-ui/react-tooltip';
 import { ChevronLeft, CircleHelp, Menu, MessageSquare, Search, Wrench, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { Outlet, useLocation, useNavigate } from 'react-router';
+import { matchPath, Outlet, useLocation, useNavigate } from 'react-router';
 import { useLogout, useMe } from '../../api/queries/auth.ts';
+import { useCard } from '../../api/queries/cards.ts';
 import { useUnreadChatTotal } from '../../api/queries/chats.ts';
 import { useDesk } from '../../api/queries/desk.ts';
 import { BRAND } from '../../brand.ts';
@@ -196,7 +197,10 @@ function Shell({ name, live }: { name: string; live: string }) {
   }, [desk.data, deskOpen]);
 
   const navIds = new Set([...sections.flatMap((s) => s.items), ...footer].map((e) => e.id));
-  const crumbs = crumbsFor(pathname, search, projects);
+  const cardParam = matchPath('/cards/:ref', pathname)?.params.ref;
+  const shownCard = useCard(cardParam && cardParam !== 'new' ? cardParam : undefined);
+  const shownCardRef = shownCard.data?.card;
+  const crumbs = crumbsFor(pathname, search, projects, shownCardRef);
   const pageName = crumbs.at(-1)?.label ?? BRAND.name;
   const backTo = backTargetFor(pathname, crumbs);
 
@@ -241,7 +245,7 @@ function Shell({ name, live }: { name: string; live: string }) {
                 <header className="sticky top-0 z-20 flex h-14 items-center justify-between gap-4 border-b border-line bg-canvas/85 px-6 backdrop-blur lg:px-8">
                   <div className="flex min-w-0 items-center gap-3">
                     {isDesktop && collapsed && <CollapseButtonLight onToggle={toggle} />}
-                    <Breadcrumbs projects={projects} />
+                    <Breadcrumbs projects={projects} card={shownCardRef} />
                   </div>
                   <div className="flex shrink-0 items-center gap-4">
                     <LiveIndicator live={live} />
