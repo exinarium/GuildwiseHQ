@@ -95,7 +95,7 @@ export function RunSettings({ projectId, canEdit }: { projectId: string; canEdit
   );
 }
 
-function RunSettingsTechnical({ projectId, canEdit }: { projectId: string; canEdit: boolean }) {
+export function RunSettingsTechnical({ projectId, canEdit }: { projectId: string; canEdit: boolean }) {
   const q = useRunSettings(projectId);
   const save = useSaveRunSettings(projectId);
   const toast = useToast();

@@ -5,7 +5,7 @@ import { type APIRequestContext, expect, type Page, test } from '@playwright/tes
 import { apiAs, inviteAndAccept } from '../support/api.ts';
 import { q, waitFor } from '../support/db.ts';
 import { ADMIN, BASE_URL, DEPLOYER, E2E_DIR, paths, ROOT } from '../support/env.ts';
-import { pairRunner, startRunner } from '../support/runner.ts';
+import { killRunner, pairRunner, startRunner } from '../support/runner.ts';
 
 // Guided connect (docs/design/deploy-run-ux-design.md v2) against a REAL sshd: a throwaway container acting as the customer's
 // VPS (apps/runner/test/fixtures/sshd). Through the web UI: the fingerprint is shown and confirmed, a password is typed once and
@@ -41,6 +41,8 @@ test.beforeAll(async ({ browser }) => {
 });
 
 test.afterAll(() => {
+  // stop this spec's runner: a runner left behind is another computer of the same person and gets picked by the next spec
+  killRunner('SIGTERM', HOME);
   try {
     docker('rm', '-f', NAME);
   } catch {
@@ -93,12 +95,10 @@ test('setup: a throwaway sshd container, a paired runner that can connect, and a
 });
 
 test('Connect a different server: the fingerprint is shown in plain words and must be confirmed; then the password is typed once', async () => {
-  await page.goto(`/projects/${projectId}/settings`);
-  await page.getByTestId('setup-start').click();
-  await page.getByTestId('kind-live').click();
-  await page.getByTestId('wizard-next').click();
-  await page.getByTestId('where-server').click();
-  await page.getByTestId('wizard-next').click();
+  await page.goto('/p/DCN/environments');
+  await page.getByTestId('setup-add').first().click();
+  await page.getByTestId('role-live').click();
+  await page.getByTestId('choose-add-server').click();
   await page.getByTestId('connect-different').click({ timeout: 60_000 });
   await page.getByTestId('connect-name').fill('Shop server');
   await page.getByTestId('connect-address').fill('127.0.0.1');
@@ -170,7 +170,12 @@ test('the key is on the server, the private half and the password are not anywhe
 
 test('the new server is looked at; "Set up this server" lists what it would add and tries it without changing anything', async () => {
   await page.getByTestId('connect-finish').click();
+  // the new server is a place of its own now, looked at once; then it is chosen for the environment being added
+  await expect(page.getByTestId('server-look')).toBeVisible({ timeout: 90_000 });
   await expect(page.getByTestId('no-stacks')).toBeVisible({ timeout: 90_000 });
+  await page.getByTestId('server-done').click();
+  await expect(page.getByTestId('no-stacks')).toBeVisible({ timeout: 90_000 });
+  await page.getByTestId('new-copy').click();
   const prepare = page.getByTestId('prepare-server');
   await expect(prepare).toBeVisible({ timeout: 60_000 });
   await expect(prepare.getByTestId('prepare-actions')).toContainText('Install Docker on the server');
@@ -187,12 +192,19 @@ test('the new server is looked at; "Set up this server" lists what it would add 
 
 test('the key stops working: the card says so, Reconnect with a pasted key brings it back', async () => {
   inBox('rm -f /home/deploy/.ssh/authorized_keys');
-  await page.goto(`/projects/${projectId}/settings`);
-  const card = page.getByTestId('deploy-target-Shop server');
+  await page.goto('/p/DCN/environments#places');
+  await page.reload(); // a hash change alone does not reload the page, and the dialog of the last test is still open
+  const card = page.getByTestId('place-Shop server');
   await expect(card).toBeVisible();
-  await card.getByTestId('target-check-Shop server').click();
-  await expect(card.getByTestId('reachability-state')).toHaveText('Needs a sign-in', { timeout: 60_000 });
-  await card.getByTestId('target-reconnect-Shop server').click();
+  // one check a minute per server: press again until the server has looked
+  await expect(async () => {
+    await card
+      .getByTestId('place-check-Shop server')
+      .click({ timeout: 3_000 })
+      .catch(() => undefined);
+    await expect(card.getByTestId('reachability-state')).toHaveText('Needs a sign-in', { timeout: 5_000 });
+  }).toPass({ timeout: 120_000, intervals: [5_000] });
+  await card.getByTestId('place-reconnect-Shop server').click();
   await page.getByTestId('connect-method-panel').click();
   await page.getByTestId('connect-continue').click();
   await page.getByTestId('connect-fp-matches').click({ timeout: 60_000 });
@@ -212,6 +224,11 @@ test('the key stops working: the card says so, Reconnect with a pasted key bring
   await page.getByTestId('connect-go').click();
   await expect(page.getByTestId('connect-done')).toBeVisible({ timeout: 90_000 });
   await page.getByTestId('connect-finish').click();
-  await card.getByTestId('target-check-Shop server').click();
-  await expect(card.getByTestId('reachability-state')).toHaveText('Can sign in', { timeout: 60_000 });
+  await expect(async () => {
+    await card
+      .getByTestId('place-check-Shop server')
+      .click({ timeout: 3_000 })
+      .catch(() => undefined);
+    await expect(card.getByTestId('reachability-state')).toHaveText('Can sign in', { timeout: 5_000 });
+  }).toPass({ timeout: 120_000, intervals: [5_000] });
 });

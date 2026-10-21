@@ -19,7 +19,6 @@ import { CeoChat } from './pages/CeoChat.tsx';
 import { Chat } from './pages/Chat.tsx';
 import { ContactPublic } from './pages/ContactPublic.tsx';
 import { Costs } from './pages/Costs.tsx';
-import { Deploys } from './pages/Deploys.tsx';
 import { Desk } from './pages/Desk.tsx';
 import { ForgotPassword } from './pages/ForgotPassword.tsx';
 import { Help, PlatformHelp } from './pages/Help.tsx';
@@ -36,6 +35,7 @@ import { OrgDesigner } from './pages/OrgDesigner.tsx';
 import { OrgSettings } from './pages/OrgSettings.tsx';
 import { Phase } from './pages/Phase.tsx';
 import { PlatformTeamDesk } from './pages/PlatformTeamDesk.tsx';
+import { ProjectEnvironments } from './pages/ProjectEnvironments.tsx';
 import { ProjectSettings } from './pages/ProjectSettings.tsx';
 import { Projects } from './pages/Projects.tsx';
 import { PlatformApiKeys } from './pages/platform/PlatformApiKeys.tsx';
@@ -52,6 +52,7 @@ import { PlatformSupport } from './pages/platform/PlatformSupport.tsx';
 import { PlatformSupportTicket } from './pages/platform/PlatformSupportTicket.tsx';
 import { PlatformTeam } from './pages/platform/PlatformTeam.tsx';
 import { PlatformUsers } from './pages/platform/PlatformUsers.tsx';
+import { Releases } from './pages/Releases.tsx';
 import { ResearchTab } from './pages/ResearchTab.tsx';
 import { ResetPassword } from './pages/ResetPassword.tsx';
 import { Settings } from './pages/Settings.tsx';
@@ -103,6 +104,7 @@ export const routes = [
       { path: '/p/:projectKey/feed', element: <InterestRedirect tab="digest" /> },
       { path: '/p/:projectKey/research', element: <ResearchTab /> },
       { path: '/p/:projectKey/phases/:number', element: <Phase /> },
+      { path: '/p/:projectKey/environments', element: <ProjectEnvironments /> },
       { path: '/automations', element: <Automations /> },
       { path: '/schedules', element: <Navigate to="/automations" replace /> },
       { path: '/interests', element: <Interests /> },
@@ -127,7 +129,8 @@ export const routes = [
       { path: '/settings/org', element: <OrgSettings /> },
       { path: '/admin', element: <Navigate to="/settings/org" replace /> },
       { path: '/desk', element: <Desk /> },
-      { path: '/deploys', element: <Deploys /> },
+      { path: '/releases', element: <Releases /> },
+      { path: '/deploys', element: <Navigate to="/releases" replace /> },
       { path: '/platform-team', element: <PlatformTeamDesk /> },
       { path: '/help', element: <Help /> },
       { path: '/help/glossary', element: <Help /> },

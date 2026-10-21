@@ -148,10 +148,10 @@ async function completionStep(ctx: Ctx): Promise<void> {
 async function deployStep(ctx: Ctx): Promise<void> {
   const waiting = await rows(
     ctx.pool,
-    `SELECT f.id, f.phase_id, f.target_id, ph.project_id, t.name AS target_name FROM phase_followups f
+    `SELECT f.id, f.phase_id, f.target_id, f.environment, ph.project_id, t.name AS target_name FROM phase_followups f
        JOIN phases ph ON ph.id = f.phase_id AND ph.status = 'running_followups'
        JOIN projects p ON p.id = ph.project_id AND p.status = 'active' AND p.delivery_mode = 'recipe'
-       JOIN deploy_targets t ON t.id = f.target_id
+       LEFT JOIN deploy_targets t ON t.id = f.target_id
       WHERE f.status = 'running' AND f.kind = 'deploy' AND f.devops_request_ids = '{}'
         AND NOT EXISTS (SELECT 1 FROM deploy_runs r WHERE r.phase_followup_id = f.id AND NOT r.trial)
       ORDER BY f.phase_id, f.position`,
@@ -161,13 +161,15 @@ async function deployStep(ctx: Ctx): Promise<void> {
       f.project_id,
     ]);
     const env = (rec?.approved_parsed as Recipe | null)?.environments.find((e) =>
-      e.targets.some((t) => t.toLowerCase() === String(f.target_name).toLowerCase()),
+      f.environment
+        ? e.name === f.environment
+        : e.targets.some((t) => t.toLowerCase() === String(f.target_name).toLowerCase()),
     );
     if (!env) continue;
     await requestDeployRun(ctx, {
       projectId: f.project_id,
       env: env.name,
-      targets: [f.target_name],
+      ...(f.environment ? {} : { targets: [f.target_name] }),
       trigger: 'request',
       requester: { kind: 'trigger', id: null, name: 'phase follow-up', provenance: 'trigger' },
       phaseFollowupId: f.id,

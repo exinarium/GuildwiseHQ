@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { compileSetup, SETUP_GENERATOR } from '../src/index.ts';
+import { compileSetup, isOlderGenerator, SETUP_GENERATOR } from '../src/index.ts';
 import { FIRST_ADOPTER } from './setup-fixtures.ts';
 
 // v2 review fixes in the generated scripts (M4, M5, m8, m9, m10).
@@ -18,9 +18,12 @@ const script = (r: ReturnType<typeof compile>, name: string) =>
 describe('generated scripts, v2 review', () => {
   const r = compile();
   const prod = script(r, 'production');
-  it('is generator 1.3, so older stored setups show "improved steps available"', () => {
-    expect(SETUP_GENERATOR).toBe('setup-1.3');
-    expect(prod).toContain('setup-1.3');
+  it('is generator 1.4, so older stored setups show "improved steps available"', () => {
+    expect(SETUP_GENERATOR).toBe('setup-1.4');
+    expect(prod).toContain('setup-1.4');
+    // a stored 1.3 setup is an "improved version is available", never a hand edit
+    expect(isOlderGenerator('setup-1.3')).toBe(true);
+    expect(isOlderGenerator('setup-1.4')).toBe(false);
   });
   it('M4: the health address must be a web address before anything changes', () => {
     const at = prod.indexOf('[[ "$HEALTH_URL" =~ ^https?:// ]] || die');

@@ -1,23 +1,8 @@
-import type { Gate, GatePresetDto } from '@aom/shared';
+import { describeGate, type Gate, type GatePresetDto } from '@aom/shared';
 import { type FormEvent, useState } from 'react';
 import { useGates, useRemovePreset, useSetBinding, useSetPreset } from '../../api/queries/delivery.ts';
 import { useProjects } from '../../api/queries/projects.ts';
-import { Badge, Button, Callout, ErrorBox, Panel, Select, TextInput } from '../ui.tsx';
-
-export const describeGate = (g: Gate): string => {
-  const parts: string[] = [];
-  for (const r of g.requires)
-    parts.push(
-      'envHealthy' in r
-        ? `${r.envHealthy} healthy on the same commit${r.forMinutes ? ` for ${r.forMinutes} min` : ''}`
-        : 'checksPassed' in r
-          ? `${r.checksPassed} checks passed`
-          : 'a done phase',
-    );
-  if (g.window) parts.push(`only ${g.window.days} ${g.window.hours}`);
-  if (g.freeze) parts.push('FROZEN');
-  return parts.length ? parts.join(', ') : 'nothing required';
-};
+import { Badge, Button, Callout, Disclosure, ErrorBox, Panel, Select, TextInput } from '../ui.tsx';
 
 /** Gate presets and the standard rule bound to a project (docs/design/ceo-front-door.md 9.3). Who releases is the recipe's decision. */
 export function GatesPanel() {
@@ -68,21 +53,22 @@ export function GatesPanel() {
   };
 
   return (
-    <Panel data-testid="gates-panel">
-      <h2 className="mb-1 text-lg font-semibold text-fg">Gate presets</h2>
+    <div data-testid="gates-panel">
+      <h2 className="mb-1 text-lg font-semibold text-fg">Rule sets</h2>
       <p className="mb-3 text-sm text-muted">
-        A gate says what must be true before an environment is released: an earlier environment healthy on the
-        same commit, tests passed, a time window, a freeze. A recipe names a preset (or has its own gate); a
-        rule bound to a project always applies on top. Who releases is decided in the recipe, which you
-        approve.
+        A rule set says what must be true before a site is released: the test site healthy on the same
+        version, tests passed, a time window, a freeze. A site uses a rule set (or has its own); a rule bound
+        to a project always applies on top. Who releases is decided in the setup the Owner approves.
       </p>
       <ul className="mb-4 flex flex-col divide-y divide-line text-sm" data-testid="gate-presets">
-        {presets.length === 0 && <li className="py-2 text-subtle">No preset yet.</li>}
+        {presets.length === 0 && <li className="py-2 text-subtle">No rule set yet.</li>}
         {presets.map((p) => (
           <li key={p.name} className="flex flex-wrap items-center gap-2 py-2">
             <span className="font-medium">{p.name}</span>
             {p.gate.freeze && <Badge tone="danger">frozen</Badge>}
-            <span className="min-w-0 flex-1 text-xs text-muted">{describeGate(p.gate)}</span>
+            <span className="min-w-0 flex-1 text-xs text-muted">
+              {describeGate(p.gate).join('; ') || 'No extra rules'}
+            </span>
             <Button
               size="sm"
               variant="ghost"
@@ -103,13 +89,13 @@ export function GatesPanel() {
       </ul>
       <form onSubmit={save} className="grid gap-3 sm:grid-cols-2" data-testid="gate-form">
         <TextInput
-          label="Preset name"
+          label="Name of the rule set"
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="standard"
         />
         <TextInput
-          label="An earlier environment must be healthy (name)"
+          label="The test site that must be healthy first (its short name)"
           value={env}
           onChange={(e) => setEnv(e.target.value)}
           placeholder="uat"
@@ -159,7 +145,7 @@ export function GatesPanel() {
         )}
         <div className="sm:col-span-2">
           <Button type="submit" variant="primary" loading={setPreset.isPending} disabled={!name.trim()}>
-            Save preset
+            Save rule set
           </Button>
         </div>
       </form>
@@ -222,9 +208,95 @@ export function GatesPanel() {
         </Button>
       </div>
       <Callout tone="info" className="mt-3">
-        A bound rule is added to the recipe's own gate: a recipe cannot loosen it.
+        A bound rule is added to the site's own rules: a site cannot loosen it.
       </Callout>
       <ErrorBox error={q.error ?? setPreset.error ?? remove.error ?? bind.error} />
-    </Panel>
+    </div>
+  );
+}
+
+/**
+ * Rules (docs/design/environments-ux.md section 5.5): what must be true before a release, in sentences. A freeze stops every
+ * release. The raw rule-set editor sits behind "Advanced".
+ */
+export function RulesPanel({ canEdit }: { canEdit: boolean }) {
+  const q = useGates();
+  const projects = useProjects();
+  const setPreset = useSetPreset();
+  const presets = q.data?.presets ?? [];
+  const bindings = q.data?.bindings ?? [];
+  const bound = bindings
+    .map((b) => ({ b, preset: presets.find((p) => p.name === b.preset) }))
+    .filter((x) => x.preset);
+  const targets =
+    bound.length > 0 ? [...new Set(bound.map((x) => x.preset?.name))] : presets.map((p) => p.name);
+  const frozen =
+    presets.length > 0 && presets.filter((p) => targets.includes(p.name)).every((p) => p.gate.freeze);
+  const toggleFreeze = () => {
+    for (const p of presets.filter((x) => targets.includes(x.name)))
+      setPreset.mutate({ name: p.name, gate: { ...p.gate, freeze: !frozen } });
+  };
+  return (
+    <div className="flex flex-col gap-4" data-testid="rules-panel">
+      <Panel>
+        <h2 className="mb-1 text-lg font-semibold text-fg">The standard rule</h2>
+        <p className="mb-3 text-sm text-muted">What must be true before a version goes to a live site.</p>
+        {q.isPending ? (
+          <p className="text-sm text-muted">Loading the rules...</p>
+        ) : bound.length === 0 ? (
+          <p className="text-sm text-subtle" data-testid="rules-none">
+            No standard rule is set. Each site uses the rules written in its own setup.
+          </p>
+        ) : (
+          <ul className="flex flex-col gap-3" data-testid="rules-list">
+            {bound.map(({ b, preset }) => (
+              <li key={b.id} className="text-sm">
+                <p className="font-medium text-fg">
+                  {projects.data?.find((p) => p.id === b.projectId)?.key ?? 'A repository'}:{' '}
+                  {b.envMatch === 'production' ? 'live sites' : 'every site'}
+                </p>
+                <ul className="mt-1 list-disc pl-5 text-muted">
+                  {(preset ? describeGate(preset.gate) : []).map((t) => (
+                    <li key={t}>{t}</li>
+                  ))}
+                  <li>You approve every release</li>
+                </ul>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Panel>
+      <Panel>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <h2 className="text-lg font-semibold text-fg">Freeze</h2>
+            <p className="text-sm text-muted">
+              {frozen ? 'Nothing goes live right now.' : 'Releases are allowed when the rules hold.'} While a
+              freeze is on, nothing goes live.
+            </p>
+          </div>
+          <Badge tone={frozen ? 'danger' : 'neutral'}>{frozen ? 'Freeze is on' : 'Freeze is off'}</Badge>
+          {canEdit && (
+            <Button
+              onClick={toggleFreeze}
+              loading={setPreset.isPending}
+              disabled={presets.length === 0}
+              data-testid="freeze-toggle"
+              className="min-h-11"
+            >
+              {frozen ? 'Lift the freeze' : 'Freeze all releases'}
+            </Button>
+          )}
+        </div>
+        <ErrorBox error={setPreset.error} />
+      </Panel>
+      {canEdit && (
+        <Disclosure summary="Advanced: rule sets" data-testid="rules-advanced">
+          <Panel>
+            <GatesPanel />
+          </Panel>
+        </Disclosure>
+      )}
+    </div>
   );
 }

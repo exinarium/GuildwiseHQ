@@ -32,6 +32,7 @@ import {
 import { chatHandlers } from './handlers-chat.ts';
 import { deploySetupHandlers } from './handlers-deploy-setup.ts';
 import { extraHandlers } from './handlers-extra.ts';
+import { releaseHandlers } from './handlers-releases.ts';
 import { runHandlers } from './handlers-run.ts';
 
 const err = (status: number, code: string, message: string, details?: unknown) =>
@@ -59,7 +60,20 @@ const meBody = () => ({
   account: { kind: 'user' as const },
   isAdmin: true,
   orgs: [],
-  activeOrg: null,
+  // `aom-mock-org-role` (owner, admin, member) gives the mock user an organization with that role (the Environments journeys)
+  activeOrg:
+    typeof localStorage !== 'undefined' && localStorage.getItem('aom-mock-org-role')
+      ? {
+          id: ORG_ID,
+          name: 'Acme',
+          role: localStorage.getItem('aom-mock-org-role') as 'owner' | 'admin' | 'member',
+          status: 'active' as const,
+          plan: 'team',
+          planName: 'Team',
+          features: {},
+          requireTwoFactor: false,
+        }
+      : null,
   guestIn: [],
   guestProjectIds: [],
   pendingInvitations: 0,
@@ -82,6 +96,7 @@ async function body<T>(
 
 export const handlers = [
   ...deploySetupHandlers,
+  ...releaseHandlers,
   ...runHandlers,
   ...chatHandlers,
   http.get(`${A}/health`, () => HttpResponse.json({ ok: true, db: true })),

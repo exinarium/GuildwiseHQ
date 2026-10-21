@@ -234,7 +234,9 @@ export const phaseEvents = [
       }),
     }),
   ),
-  defineEvent('DeployTargetRemoved', z.object({ targetId: Id })),
+  defineEvent('DeployTargetRemoved', z.object({ targetId: Id, reason: z.string().max(200).optional() })),
+  /** Two places were merged: follow-ups that have not started yet and named `fromTargetId` now name `toTargetId`. */
+  defineEvent('PhaseFollowupRetargeted', z.object({ fromTargetId: Id, toTargetId: Id })),
   defineEvent(
     'BaTaskQueued',
     z.object({

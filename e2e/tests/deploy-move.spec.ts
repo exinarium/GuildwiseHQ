@@ -5,7 +5,7 @@ import { type APIRequestContext, expect, type Page, test } from '@playwright/tes
 import { apiAs, inviteAndAccept } from '../support/api.ts';
 import { q, waitFor } from '../support/db.ts';
 import { ADMIN, BASE_URL, DEPLOYER, E2E_DIR, paths, ROOT } from '../support/env.ts';
-import { pairRunner, startRunner } from '../support/runner.ts';
+import { killRunner, pairRunner, startRunner } from '../support/runner.ts';
 
 // Moving to a new server (docs/design/deploy-run-ux-design.md J6, v3) through the web UI against TWO REAL sshd containers acting as
 // the old and the new server (apps/runner/test/fixtures/sshd, each with the fake docker of apps/runner/test/fixtures; a real httpd
@@ -53,6 +53,8 @@ test.beforeAll(async ({ browser }) => {
 });
 
 test.afterAll(() => {
+  // stop this spec's runner: a runner left behind is another computer of the same person and gets picked by the next spec
+  killRunner('SIGTERM', HOME);
   for (const n of [OLD, NEW]) {
     try {
       docker('rm', '-f', n);
@@ -167,7 +169,7 @@ test('setup: two throwaway servers, a runner whose ssh sees only them, an approv
   );
   const setup = {
     version: 1,
-    generator: 'setup-1.3',
+    generator: 'setup-1.4',
     environments: [
       {
         name: 'production',
@@ -213,7 +215,7 @@ test('setup: two throwaway servers, a runner whose ssh sees only them, an approv
 });
 
 test('Move to a new server: connect the new server with a password; Guildwise looks at it and sets up the folder', async () => {
-  await page.goto(`/projects/${projectId}/settings`);
+  await page.goto('/p/DMV/environments');
   await page.getByTestId('env-move-production').click({ timeout: 60_000 });
   await page.getByTestId('move-connect-new').click();
   await page.getByTestId('connect-name').fill('New shop server');

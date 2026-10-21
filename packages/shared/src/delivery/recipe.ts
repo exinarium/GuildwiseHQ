@@ -200,7 +200,8 @@ export interface LintItem {
     | 'ci_unsatisfiable'
     | 'hand_edited'
     | 'generator_outdated'
-    | 'no_health_check';
+    | 'no_health_check'
+    | 'runner_update_needed';
   message: string;
   env?: string;
   path?: string;

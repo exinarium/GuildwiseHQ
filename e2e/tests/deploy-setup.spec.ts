@@ -5,7 +5,7 @@ import { type APIRequestContext, expect, type Page, test } from '@playwright/tes
 import { apiAs, inviteAndAccept } from '../support/api.ts';
 import { q, waitFor } from '../support/db.ts';
 import { ADMIN, BASE_URL, DEPLOYER, E2E_DIR, paths } from '../support/env.ts';
-import { addRepoRoot, pairRunner, startRunner } from '../support/runner.ts';
+import { addRepoRoot, killRunner, pairRunner, startRunner } from '../support/runner.ts';
 import { git } from '../support/vault.ts';
 
 // Guided deploy setup (docs/design/deploy-run-ux-design.md, v1b), against REAL Docker: a throwaway Compose stack (project
@@ -78,6 +78,8 @@ test.beforeAll(async ({ browser }) => {
 });
 
 test.afterAll(() => {
+  // stop this spec's runner: a runner left behind is another computer of the same person and gets picked by the next spec
+  killRunner('SIGTERM', HOME);
   try {
     compose('down', '-v', '--remove-orphans');
   } catch {
@@ -176,18 +178,18 @@ volumes:
   expect(caps.some((c) => c.capabilities.includes('deploy-setup:1'))).toBe(true);
 });
 
-test('a new project says nothing is deployed; the wizard finds the running stack and shows what it will and will not touch', async () => {
-  await page.goto(`/projects/${projectId}/settings`);
-  await expect(page.getByTestId('setup-empty')).toContainText('Your app is not deployed anywhere yet');
-  await page.getByTestId('setup-start').click();
-  await page.getByTestId('wizard-next').click(); // a test copy
-  await page.getByTestId('where-computer').click();
-  await page.getByTestId('wizard-next').click();
+test('a new project says nothing is set up; adding an environment finds the running stack and shows what it will and will not touch', async () => {
+  await page.goto('/p/DPS/environments');
+  await expect(page.getByTestId('setup-empty')).toContainText('Where does your app run?');
+  await page.getByTestId('setup-add').first().click();
+  // a test site is the default; the computer is chosen from the places, and the look at it starts by itself
+  await page.locator('[data-testid^="place-choice-"]').first().click();
   const stack = page.getByTestId('stack-choice').filter({ hasText: PROJECT_NAME });
   await expect(stack).toBeVisible({ timeout: 60_000 });
   await expect(stack).toContainText('3 parts');
   await expect(stack).toContainText('Running now');
   await stack.click();
+  await page.getByTestId('env-next').click();
   const found = page.getByTestId('found-changes');
   await expect(found.getByTestId('changes-reuse')).toContainText('The app part "app"');
   await expect(found.getByTestId('changes-each_deploy')).toContainText('Rebuild and restart only "app"');
@@ -195,13 +197,11 @@ test('a new project says nothing is deployed; the wizard finds the running stack
   await expect(found.getByTestId('changes-untouched')).toContainText('Part "db"');
   await expect(page.getByTestId('details-app')).toHaveValue('app');
   await expect(page.getByTestId('details-db')).toHaveValue('db');
-  await expect(page.getByTestId('details-production')).not.toBeChecked();
-  await page.screenshot({ path: join(DIR, 'wizard-found.png') });
+  await page.screenshot({ path: join(DIR, 'environment-found.png') });
 });
 
 test('Save writes the generated files; nothing is approved and nothing runs yet', async () => {
-  await page.getByTestId('wizard-next').click();
-  await page.getByTestId('wizard-next').click(); // Review
+  await page.getByTestId('env-to-review').click();
   await expect(page.getByTestId('review-save')).toBeEnabled({ timeout: 30_000 });
   await page.getByTestId('review-save').click();
   await expect(page.getByTestId('review-saved')).toBeVisible({ timeout: 60_000 });
@@ -214,7 +214,8 @@ test('Save writes the generated files; nothing is approved and nothing runs yet'
   )[0];
   expect(row).toMatchObject({ status: 'observed', hand_edited: [] });
   expect(row?.setup.environments[0]).toMatchObject({
-    name: 'uat',
+    name: 'test-site',
+    role: 'test',
     trigger: ['after_merge'],
     releasedBy: 'auto',
     hosting: 'this_computer',
@@ -224,13 +225,15 @@ test('Save writes the generated files; nothing is approved and nothing runs yet'
 });
 
 test('approval waits for a dry run; the dry run changes nothing', async () => {
-  await expect(page.getByTestId('setup-approve')).toBeDisabled();
-  await page.getByTestId('dryrun-run-uat').click();
-  await expect(page.getByTestId('dryrun-uat')).toContainText('Tried: OK', { timeout: 120_000 });
+  await page.goto('/p/DPS/environments');
+  await expect(page.getByTestId('env-approve-test-site')).toHaveCount(0);
+  await page.getByTestId('env-try-test-site').click();
+  await expect(page.getByTestId('env-tried-test-site')).toBeVisible({ timeout: 120_000 });
   expect(ids()).toEqual(before);
   expect(readdirSync(STACK)).toEqual(['docker-compose.yml']); // no backup folder: a dry run writes nothing
-  await expect(page.getByTestId('setup-approve')).toBeEnabled();
-  await page.getByTestId('setup-approve').click();
+  await expect(page.getByTestId('env-approve-test-site')).toBeEnabled();
+  await page.getByTestId('env-approve-test-site').click();
+  await page.getByTestId('approve-confirm').click();
   await waitFor(
     'approved',
     async () =>
@@ -244,9 +247,9 @@ test('approval waits for a dry run; the dry run changes nothing', async () => {
 });
 
 type DeployRow = { status: string; summary: string; log_tail: string };
-const release = async (sha: string): Promise<DeployRow> => {
+const release = async (sha: string, timeoutMs = 240_000): Promise<DeployRow> => {
   const res = await api.post(`/api/projects/${projectId}/delivery/deploy`, {
-    data: { env: 'uat', commit: sha },
+    data: { env: 'test-site', commit: sha },
   });
   expect(res.ok(), await res.text()).toBeTruthy();
   const run = (await res.json()).runs[0];
@@ -260,7 +263,7 @@ const release = async (sha: string): Promise<DeployRow> => {
         )
       )[0],
     (r) => r?.status === 'succeeded' || r?.status === 'failed' || r?.status === 'refused',
-    240_000,
+    timeoutMs,
   )) as DeployRow;
 };
 
@@ -281,7 +284,9 @@ test('a real release rebuilds ONLY the app from the approved commit; the databas
   const body = await (await fetch(`http://127.0.0.1:${PORT}/api/health`)).text();
   expect(body.trim()).toBe('ok v2');
   // the backup was taken first, in the stack's own backups folder
-  expect(readdirSync(join(STACK, 'backups')).filter((f) => f.startsWith('uat-before-'))).toHaveLength(1);
+  expect(readdirSync(join(STACK, 'backups')).filter((f) => f.startsWith('test-site-before-'))).toHaveLength(
+    1,
+  );
   expect(r.log_tail).toContain('AOM-DEPLOY');
   before = { ...before, app: after.app as string };
 });
@@ -296,7 +301,7 @@ test('an unhealthy release is rolled back to the previous image; the database is
   git(CLONE, 'push', 'origin', 'main');
   const bad = git(CLONE, 'rev-parse', 'HEAD').trim();
   void sha;
-  const r = await release(bad);
+  const r = await release(bad, 380_000); // the health check waits up to 120 s, then the rollback waits again
   expect(r.status).toBe('failed');
   expect(r.log_tail).toContain('rolled back to');
   expect(r.log_tail).toContain('the database was NOT rolled back');
@@ -307,17 +312,27 @@ test('an unhealthy release is rolled back to the previous image; the database is
 });
 
 test('Scan with DevOps for deploys: the mock DevOps adopts the same stack; the person reviews it and uses it as the draft', async () => {
-  await page.goto(`/projects/${projectId}/settings`);
-  await page.getByTestId('setup-advanced').click();
-  await page.getByText('Back to the simple view').click();
+  await page.goto('/p/DPS/environments');
   const scan = await api.post(`/api/projects/${projectId}/scan`, {
     data: { area: 'deploy', note: `the stack is called ${PROJECT_NAME}` },
   });
   expect(scan.status(), await scan.text()).toBe(202);
-  await expect(page.getByTestId('deploy-proposal-waiting')).toBeVisible({ timeout: 120_000 });
-  await page.getByTestId('deploy-proposal-open').click();
-  await expect(page.getByTestId('proposal-review')).toContainText('DevOps has a suggestion');
-  await expect(page.getByTestId('deploy-proposal-envs')).toContainText('Updates app part "app"');
+  const open = page.getByTestId('deploy-proposal-open').or(page.getByTestId('needs-answer-open'));
+  await expect(open).toBeVisible({ timeout: 120_000 });
+  await open.click();
+  await expect(page.getByTestId('proposal-review')).toContainText('Mock DevOps adopted the compose stack');
+  await expect(page.getByTestId('deploy-proposal-envs')).toContainText('Updates the app part "app"');
+  // questions are real fields: the first choice of each is used
+  const questions = page.getByTestId('proposal-questions');
+  if (await questions.count()) {
+    for (const group of await questions
+      .getByRole('radiogroup')
+      .all()
+      .catch(() => []))
+      await group.getByRole('radio').first().check();
+    for (const fs of await questions.locator('fieldset').all()) await fs.getByRole('radio').first().check();
+    await page.getByTestId('answers-submit').click();
+  }
   await page.getByTestId('proposal-use').click();
   await waitFor(
     'the proposal is the draft',

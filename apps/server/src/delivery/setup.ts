@@ -1,11 +1,15 @@
 import {
   type ChangeItem,
   compileSetup,
+  DEPLOY_DIRECT_CAPABILITY,
   DEPLOY_SETUP_CAPABILITY,
+  DEPLOY_SETUP_V2_CAPABILITY,
+  type DeliverySetup,
   DeliverySetupSchema,
   findSecret,
   type LintItem,
   type ProbeReport,
+  type ProposalMergeInfo,
   type PublishSetupRequest,
   parseRecipe,
   planChanges,
@@ -14,6 +18,7 @@ import {
   type SaveSetupDraftRequest,
   SETUP_GENERATOR,
   type SetupPreviewDto,
+  SetupProposalSchema,
   type SetupStateDto,
   type SetupTargetDto,
   type SetupWorkstationDto,
@@ -23,13 +28,14 @@ import { orgRoleOf } from '../auth/org-context.ts';
 import type { AuthSession } from '../auth/sessions.ts';
 import { loadVisibleProject } from '../authz/scope.ts';
 import { projectScope, runnerActor, SYSTEM_ACTOR, userActor } from '../commands/common.ts';
-import { listProposalDtos, openScan, scanProblemFor } from '../commands/setup-proposals.ts';
+import { listProposalDtos, openQuestionsOf, openScan, scanProblemFor } from '../commands/setup-proposals.ts';
 import type { Ctx } from '../context.ts';
 import { exec, iso, one, type Queryable, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, notFound, unprocessable } from '../errors.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { connectBlockedReason, listKeyDtos } from './connect.ts';
+import { workingSetup } from './environments.ts';
 import { moveBlockedReason } from './move.ts';
 import { listProbeDtos, setupBlockedReason } from './probes.ts';
 import {
@@ -138,6 +144,8 @@ export async function getSetupState(
       mine: w.user_id === user.id,
       canProbe: blocked === null,
       blocked,
+      canNewMethods: (w.capabilities ?? []).includes(DEPLOY_SETUP_V2_CAPABILITY),
+      canDirect: (w.capabilities ?? []).includes(DEPLOY_DIRECT_CAPABILITY),
     });
   }
   const lp = draft?.last_publish as
@@ -170,7 +178,7 @@ export async function getSetupState(
   return {
     canEdit: p.my_role === 'owner',
     canApprove: org === 'owner',
-    draft: draft
+    draft: draft?.setup
       ? {
           setup: draft.setup,
           customScripts: draft.custom_scripts ?? {},
@@ -218,6 +226,7 @@ export async function getSetupState(
     proposal: proposals[0] ?? null,
     generator: SETUP_GENERATOR,
     improvedAvailable: parsedSetup.success && parsedSetup.data.generator !== SETUP_GENERATOR,
+    deliveryMode: p.delivery_mode === 'recipe' ? 'recipe' : 'instructions',
   };
 }
 
@@ -297,6 +306,54 @@ async function reportsFor(
   return out;
 }
 
+/** Does this setup use what only a runner with `deploy-setup:2` writes: the override file or the registry / build-on-server steps? */
+export function needsV2(setup: DeliverySetup): boolean {
+  const newKinds = new Set([
+    'write_override',
+    'push_image_registry',
+    'pull_image_ssh',
+    'ship_source_ssh',
+    'build_image_server',
+  ]);
+  return setup.environments.some(
+    (e) =>
+      e.mode === 'guided' &&
+      e.runtime !== 'direct' &&
+      e.hosting === 'ssh' &&
+      (!e.app.imageVar || e.steps.some((x) => newKinds.has(x.kind))),
+  );
+}
+
+/** Does this setup have an environment whose app runs directly on the machine (capability `deploy-direct:1`)? */
+export function needsDirect(setup: DeliverySetup): boolean {
+  return setup.environments.some((e) => e.mode === 'guided' && e.runtime === 'direct');
+}
+
+/** Why a computer cannot write the newer update methods (null: it can). */
+export async function v2BlockedReason(db: Queryable, workstationId: string): Promise<string | null> {
+  const w = await one(
+    db,
+    `SELECT w.name, c.capabilities FROM workstations w LEFT JOIN workstation_capabilities c ON c.workstation_id = w.id WHERE w.id=$1`,
+    [workstationId],
+  );
+  if (!w) return null;
+  return (w.capabilities ?? []).includes(DEPLOY_SETUP_V2_CAPABILITY)
+    ? null
+    : `Guildwise on ${w.name} needs an update for this way of updating the server.`;
+}
+
+export async function directBlockedReason(db: Queryable, workstationId: string): Promise<string | null> {
+  const w = await one(
+    db,
+    `SELECT w.name, c.capabilities FROM workstations w LEFT JOIN workstation_capabilities c ON c.workstation_id = w.id WHERE w.id=$1`,
+    [workstationId],
+  );
+  if (!w) return null;
+  return (w.capabilities ?? []).includes(DEPLOY_DIRECT_CAPABILITY)
+    ? null
+    : `Guildwise on ${w.name} needs an update for apps that run without Docker.`;
+}
+
 export async function previewSetup(
   ctx: Ctx,
   user: AuthSession['user'],
@@ -342,6 +399,15 @@ export async function previewSetup(
         env: e.name,
         message: `${e.name}: there is no address to check after an update, so a broken update is not noticed and nothing is rolled back automatically. Add the address of the site.`,
       });
+  if (needsV2(c.setup) || needsDirect(c.setup)) {
+    const vault = await projectVault(ctx.pool, projectId);
+    const wsId = vault ? await workstationForVault(ctx.pool, projectId, vault, p.org_id) : null;
+    const why = wsId
+      ? ((needsV2(c.setup) ? await v2BlockedReason(ctx.pool, wsId) : null) ??
+        (needsDirect(c.setup) ? await directBlockedReason(ctx.pool, wsId) : null))
+      : null;
+    if (why) lint.push({ level: 'error', code: 'runner_update_needed', message: why });
+  }
   const reports = await reportsFor(ctx.pool, projectId, c.setup);
   const changes: ChangeItem[] = planChanges(c.setup, reports);
   const recipe = await loadRecipeRow(ctx.pool, projectId);
@@ -354,7 +420,15 @@ export async function previewSetup(
     .map((f) => f.path)
     .filter((path) => !generated.has(path) && !c.keep.includes(path))
     .sort();
-  const removing = (req.removeFiles ?? []).filter((f) => unmodelled.includes(f));
+  // The script of an environment the person took out goes with it (nothing else is deleted unless they name it)
+  const curSetup = DeliverySetupSchema.safeParse(recipe?.setup ?? null);
+  const taken = curSetup.success
+    ? curSetup.data.environments
+        .map((e) => e.name)
+        .filter((n) => !c.setup.environments.some((x) => x.name === n))
+        .map((n) => `scripts/${n}.sh`)
+    : [];
+  const removing = [...new Set([...(req.removeFiles ?? []), ...taken])].filter((f) => unmodelled.includes(f));
   const kept = unmodelled.filter((f) => !removing.includes(f));
   return {
     ok: true,
@@ -397,7 +471,7 @@ export async function publishSetup(
     ...(req.customScripts ? { customScripts: req.customScripts } : {}),
     ...(req.removeFiles ? { removeFiles: req.removeFiles } : {}),
   });
-  const errors = preview.lint.filter((l) => l.level === 'error');
+  const errors = preview.lint.filter((l) => l.level === 'error' && l.code !== 'runner_update_needed');
   if (errors.length)
     throw unprocessable(
       'setup_lint_errors',
@@ -419,7 +493,10 @@ export async function publishSetup(
   if (!vault) throw conflict('no_vault', NO_PROJECT_VAULT);
   const wsId = await workstationForVault(ctx.pool, projectId, vault, p.org_id);
   if (!wsId) throw conflict('no_workstation', 'no computer of the project can read the project files');
-  const blocked = await setupBlockedReason(ctx.pool, wsId);
+  const blocked =
+    (await setupBlockedReason(ctx.pool, wsId)) ??
+    (needsV2(c.setup) ? await v2BlockedReason(ctx.pool, wsId) : null) ??
+    (needsDirect(c.setup) ? await directBlockedReason(ctx.pool, wsId) : null);
   if (blocked)
     throw conflict(blocked.includes('update') ? 'runner_outdated' : 'workstation_offline', blocked);
   const payload: RecipeWritePayload = {
@@ -560,15 +637,19 @@ export async function requestSetupDryRun(
 
 // -------------------------------------------------------------------------------------------------------- proposals
 
-/** A deploy scan proposal becomes the wizard's draft; the user still reviews Found / Will change before saving. */
+/**
+ * A deploy scan proposal MERGES into the wizard's draft (else the saved setup) by environment name: an environment the
+ * proposal names replaces the one with that name, every other one stays as it was. The person still reviews Found / Will
+ * change before saving. Unanswered questions block it (409 `questions_open`).
+ */
 export async function useDeployProposal(
   ctx: Ctx,
   user: AuthSession['user'],
   projectId: string,
   proposalId: string,
-): Promise<void> {
+): Promise<ProposalMergeInfo> {
   const p = await projectOwnerOrThrow(ctx, user, projectId);
-  await withAppendTx(ctx.pool, async (tx) => {
+  return withAppendTx(ctx.pool, async (tx) => {
     const sp = await one(
       tx,
       `SELECT * FROM setup_proposals WHERE id=$1 AND project_id=$2 AND area='deploy' FOR UPDATE`,
@@ -580,14 +661,44 @@ export async function useDeployProposal(
     const ws = await one(tx, 'SELECT user_id FROM workstations WHERE id=$1', [sp.workstation_id]);
     if (ws && ws.user_id !== user.id)
       throw forbidden('only the owner of the computer that scanned can use this proposal');
-    const deploy = (sp.proposal as { deploy?: unknown }).deploy;
+    const proposal = SetupProposalSchema.parse(sp.proposal);
+    const open = openQuestionsOf(proposal);
+    if (open.length > 0)
+      throw conflict(
+        'questions_open',
+        `answer ${open.length === 1 ? 'the question' : `the ${open.length} questions`} first: ${open
+          .slice(0, 3)
+          .map((q) => `"${q.question}"`)
+          .join(', ')}`,
+      );
+    const proposed = (proposal.deploy ?? { environments: [] }) as Record<string, any> & {
+      environments: Array<Record<string, any>>;
+    };
+    const { setup: base } = await workingSetup(tx, projectId);
+    const existing = ((base?.environments ?? []) as Array<Record<string, any>>).slice();
+    const merge: ProposalMergeInfo = { added: [], replaced: [], notCovered: [] };
+    const merged = existing.map((e) => {
+      const np = proposed.environments.find((x) => x.name === e.name);
+      if (!np) {
+        merge.notCovered.push(e.name);
+        return e;
+      }
+      merge.replaced.push(e.name);
+      return np;
+    });
+    for (const np of proposed.environments)
+      if (!existing.some((e) => e.name === np.name)) {
+        merged.push(np);
+        merge.added.push(np.name);
+      }
+    const setup = { ...(base ?? proposed), environments: merged };
     await ctx.store.append(
       [
         {
           streamId: streamId.project(projectId),
           event: {
             type: 'DeliverySetupDraftSaved',
-            payload: { projectId, setup: deploy, proposalId, by: user.id },
+            payload: { projectId, setup, proposalId, by: user.id },
           },
           actor: userActor(user.id),
           scope: projectScope(p.org_id, projectId),
@@ -601,6 +712,7 @@ export async function useDeployProposal(
       ],
       { tx },
     );
+    return merge;
   });
 }
 

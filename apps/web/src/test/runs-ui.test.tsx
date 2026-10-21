@@ -174,7 +174,12 @@ describe('environment panel', () => {
     );
     expect(screen.getByTestId('run-working')).toHaveTextContent('DevOps engineer of Desk');
     expect(screen.getByTestId('run-activity')).toHaveTextContent('running npm ci');
-    expect(screen.queryByRole('link')).toBeNull();
+    expect(screen.getAllByRole('link').map((l) => l.textContent)).toEqual(['How it starts']);
+    expect(screen.getByTestId('run-kind')).toHaveTextContent('Test copy');
+    expect(screen.getByTestId('run-how-it-starts')).toHaveAttribute(
+      'href',
+      '/p/TOY/environments#start-steps',
+    );
   });
 
   it('Extend and Stop call the server; Stop asks first', async () => {
@@ -387,7 +392,7 @@ describe('environment panel', () => {
     const e = env();
     e.servicesStatus[0]!.urls = ['javascript:alert(1)', 'http://localhost:5174/'];
     wrap(<RunPanel env={e as never} />);
-    expect(screen.getAllByRole('link')).toHaveLength(1);
+    expect(screen.getAllByRole('link')).toHaveLength(2);
   });
 
   it('run events refresh the environments and the settings', () => {

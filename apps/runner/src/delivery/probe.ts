@@ -11,13 +11,14 @@ import {
   type ProbeError,
   type ProbeReport,
   ProbeReportSchema,
+  type ProbeService,
   type ProbeSshHost,
   parseYamlLimited,
 } from '@aom/shared';
 import { execa } from 'execa';
 import type { DeployKeys } from './deploy-keys.ts';
 import { userSshArgs } from './deploy-keys.ts';
-import { REMOTE_PROBE_SCRIPT } from './probe-remote.ts';
+import { REMOTE_PROBE_SCRIPT, SERVICES_PROBE_SCRIPT } from './probe-remote.ts';
 
 /**
  * `deploy.probe`: fixed, read-only questions about Docker on this computer or on a server (docs/design/deploy-run-ux-design.md
@@ -52,8 +53,9 @@ const SAFE_ALIAS = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 /** Hints are looked at, not trusted: a compose file by its name, a folder only where apps live. */
 const COMPOSE_NAME = /(^|\/)(docker-compose|compose)(\.[A-Za-z0-9_-]+)?\.ya?ml$/;
 const under = (p: string, root: string) => p === root || p.startsWith(`${root}/`);
-const serverHintDir = (d: string, roots: readonly string[] = ['/opt', '/srv']) =>
-  roots.some((r) => under(d, r));
+/** A folder the person typed or a hint named: under where apps live (and a user's home on a server), never a hidden folder. */
+const serverHintDir = (d: string, roots: readonly string[] = ['/opt', '/srv', '/home']) =>
+  roots.some((r) => under(d, r)) && !d.split('/').some((c) => c.startsWith('.'));
 const MAX_REPORT_BYTES = 64 * 1024;
 const MAX_COMPOSE_BYTES = 1_000_000;
 
@@ -120,11 +122,37 @@ export function parsePorts(s: string): ProbeContainer['ports'] {
   return out.slice(0, 20);
 }
 
-/** One `CONTAINER\tname\timage\tstate\tstatus\tports\tproject\tservice\tconfig_files\tworking_dir` line. */
+/** Where Guildwise itself writes the new version of the app next to the compose file. */
+const GUILDWISE_OVERRIDE = 'docker-compose.guildwise.yml';
+
+/**
+ * Why a stack cannot be restarted by Guildwise yet, from the labels `docker compose` wrote: several compose files (the override
+ * file Guildwise writes itself does not count), an --env-file, or a project folder other than the one of the compose file.
+ */
+export function unsupportedStack(
+  configFiles: string,
+  workingDir: string,
+  envFile: string,
+): string | undefined {
+  const files = configFiles
+    .split(',')
+    .map((x) => x.trim())
+    .filter(Boolean);
+  const own = files.filter((f) => f.split('/').pop() !== GUILDWISE_OVERRIDE);
+  if (own.length > 1) return 'It was started from several compose files. This is not supported yet.';
+  if (envFile.trim()) return 'It was started with its own --env-file. This is not supported yet.';
+  const first = own[0];
+  if (first && workingDir && (first.slice(0, first.lastIndexOf('/')) || '/') !== workingDir)
+    return 'It was started with another project folder (--project-directory). This is not supported yet.';
+  return undefined;
+}
+
+/** One `CONTAINER\tname\timage\tstate\tstatus\tports\tproject\tservice\tconfig_files\tworking_dir\tenvironment_file` line. */
 export function parseContainerLine(line: string): ProbeContainer | null {
   const f = line.replace(/^CONTAINER\t/, '').split('\t');
   if (f.length < 4 || !f[0]) return null;
   const configFile = (f[7] ?? '').split(',')[0]?.trim();
+  const unsupported = unsupportedStack(f[7] ?? '', f[8] ?? '', f[9] ?? '');
   return {
     name: (f[0] ?? '').slice(0, 200),
     image: (f[1] ?? '').slice(0, 200),
@@ -135,7 +163,16 @@ export function parseContainerLine(line: string): ProbeContainer | null {
     ...(f[6] ? { service: f[6].slice(0, 200) } : {}),
     ...(configFile ? { composeFile: configFile.slice(0, 300) } : {}),
     ...(f[8] ? { workingDir: f[8].slice(0, 300) } : {}),
+    ...(unsupported ? { unsupported } : {}),
   };
+}
+
+/** A compose file inherits the "not supported yet" reason of a running stack that was started from it. */
+export function markUnsupportedStacks(report: ProbeReport): void {
+  for (const cf of report.composeFiles) {
+    const c = report.containers.find((x) => x.unsupported && x.composeFile === cf.path);
+    if (c?.unsupported) cf.unsupported = c.unsupported;
+  }
 }
 
 const DB_IMAGES: Array<[RegExp, NonNullable<ProbeComposeService['database']>]> = [
@@ -235,6 +272,158 @@ export function parseComposeStructure(path: string, text: string, project?: stri
     volumes: vols.slice(0, 40).map((v) => v.slice(0, 200)),
   };
 }
+
+// ------------------------------------------------------------------------------- apps that run without Docker
+
+/** A command line shortened for display: a few words, nothing that looks like a value, a password or an address with a login. */
+export function safeCommand(cmd: string): string | undefined {
+  const out: string[] = [];
+  let skipNext = false;
+  for (const t of cmd.trim().split(/\s+/).filter(Boolean)) {
+    if (skipNext) {
+      skipNext = false;
+      continue;
+    }
+    if (/^-{1,2}(p|pass|password|passwd|token|secret|key|api-?key|auth)$/i.test(t)) {
+      skipNext = true;
+      continue;
+    }
+    if (t.includes('=') || t.includes('@')) continue;
+    out.push(t);
+    if (out.length >= 5) break;
+  }
+  const text = out.join(' ').slice(0, 300);
+  return text || undefined;
+}
+
+export interface ServiceLines {
+  services: string[];
+  pm2: string[];
+  processes: string[];
+  appDirs: string[];
+  /** `dir<TAB>path,path,...` rows of folders that hold data the app keeps itself. */
+  statePaths: string[];
+}
+
+/** The `SERVICE`, `PM2JSON`, `PROCESS` and `APPDIR` lines of the services probe as a report part. */
+export function buildServices(l: ServiceLines): { services: ProbeService[]; appDirs: string[] } {
+  const services: ProbeService[] = [];
+  const num = (x: string) =>
+    x
+      .split(',')
+      .map(Number)
+      .filter((n) => Number.isInteger(n) && n > 0 && n < 65536);
+  for (const row of l.services) {
+    const [manager, name, state, wd, user, ports, layout, argv] = row.split('\t');
+    if (!name || (manager !== 'systemd' && manager !== 'systemd_user')) continue;
+    const cmd = safeCommand(argv ?? '');
+    services.push({
+      manager,
+      name: name.slice(0, 120),
+      state: (state ?? 'running').slice(0, 40),
+      ...(wd && SAFE_PATH.test(wd) ? { workingDir: wd.slice(0, 300) } : {}),
+      ...(cmd ? { command: cmd } : {}),
+      ports: num(ports ?? '').slice(0, 10),
+      ...(user ? { user: user.slice(0, 60) } : {}),
+      ...(layout === '1' ? { releaseLayout: true } : {}),
+    });
+  }
+  for (const text of l.pm2) {
+    try {
+      const list = JSON.parse(text) as Array<{
+        name?: string;
+        pm2_env?: {
+          status?: string;
+          pm_cwd?: string;
+          pm_exec_path?: string;
+          username?: string;
+          args?: unknown;
+        };
+      }>;
+      for (const p of Array.isArray(list) ? list.slice(0, 20) : []) {
+        if (!p.name || !/^[A-Za-z0-9._-]+$/.test(p.name)) continue;
+        const wd = p.pm2_env?.pm_cwd;
+        const exec = [
+          p.pm2_env?.pm_exec_path,
+          ...(Array.isArray(p.pm2_env?.args) ? (p.pm2_env.args as unknown[]).map(String) : []),
+        ]
+          .filter(Boolean)
+          .join(' ');
+        const cmd = safeCommand(exec);
+        services.push({
+          manager: 'pm2',
+          name: p.name.slice(0, 120),
+          state: (p.pm2_env?.status ?? 'unknown').slice(0, 40),
+          ...(wd && SAFE_PATH.test(wd) ? { workingDir: wd.slice(0, 300) } : {}),
+          ...(cmd ? { command: cmd } : {}),
+          ports: [],
+          ...(p.pm2_env?.username ? { user: String(p.pm2_env.username).slice(0, 60) } : {}),
+        });
+      }
+    } catch {
+      // not JSON: no pm2 processes to report
+    }
+  }
+  // listening programs that no service explains
+  const byPid = new Map<string, { ports: number[]; cwd: string; cmd: string }>();
+  for (const row of l.processes) {
+    const [port, pid, cwd, cmd] = row.split('\t');
+    if (!pid || !cwd || !SAFE_PATH.test(cwd)) continue;
+    const e = byPid.get(pid) ?? { ports: [], cwd, cmd: cmd ?? '' };
+    const n = Number(port);
+    if (Number.isInteger(n) && n > 0 && !e.ports.includes(n)) e.ports.push(n);
+    byPid.set(pid, e);
+  }
+  for (const e of byPid.values()) {
+    if (services.some((s) => s.workingDir === e.cwd || s.ports.some((p) => e.ports.includes(p)))) continue;
+    const cmd = safeCommand(e.cmd);
+    const prog = (e.cmd.trim().split(/\s+/)[0] ?? 'program').split('/').pop() ?? 'program';
+    services.push({
+      manager: 'process',
+      name: prog.replace(/[^A-Za-z0-9._-]/g, '').slice(0, 60) || 'program',
+      state: 'running',
+      workingDir: e.cwd.slice(0, 300),
+      ...(cmd ? { command: cmd } : {}),
+      ports: e.ports.slice(0, 10),
+    });
+  }
+  for (const s of services)
+    if (!s.releaseLayout && s.workingDir && s.workingDir.endsWith('/current')) s.releaseLayout = true;
+  const state = new Map<string, string[]>();
+  for (const row of l.statePaths) {
+    const [dir, list] = row.split('\t');
+    if (!dir || !list) continue;
+    state.set(
+      dir,
+      list
+        .split(',')
+        .filter((x) => x && /^[A-Za-z0-9._][A-Za-z0-9._/+@=-]*$/.test(x))
+        .slice(0, 20),
+    );
+  }
+  for (const s of services) {
+    const sp = s.workingDir ? state.get(s.workingDir) : undefined;
+    if (sp?.length) s.statePaths = sp;
+  }
+  const appDirs = [...new Set(l.appDirs.filter((d) => SAFE_PATH.test(d)))].slice(0, 30);
+  return { services: services.slice(0, 40), appDirs };
+}
+
+const splitServiceLines = (out: string): ServiceLines => {
+  const l: ServiceLines = { services: [], pm2: [], processes: [], appDirs: [], statePaths: [] };
+  for (const line of out.split('\n')) {
+    const i = line.indexOf('\t');
+    if (i < 0) continue;
+    const tag = line.slice(0, i);
+    const rest = line.slice(i + 1);
+    if (tag === 'SERVICE') l.services.push(rest);
+    else if (tag === 'PM2JSON') l.pm2.push(rest);
+    else if (tag === 'PROCESS') l.processes.push(rest);
+    else if (tag === 'APPDIR') l.appDirs.push(rest);
+    else if (tag === 'STATEPATHS') l.statePaths.push(rest);
+  }
+  return l;
+};
 
 export function classifySsh(r: Ran): { state: ProbeSshHost['state']; detail?: string } {
   if (r.code === 0) return { state: 'reachable' };
@@ -360,13 +549,27 @@ async function probeLocal(p: DeployProbePayload, o: ProbeOptions): Promise<Deplo
     timeoutMs: t,
     ...(o.env ? { env: o.env } : {}),
   });
-  if (ver.missing) return { ok: false, error: 'docker_missing' };
-  if (/permission denied/i.test(ver.stderr)) return { ok: false, error: 'docker_permission' };
-  const usable = ver.code === 0;
+  // apps that run without Docker: a machine with none of Docker still has a report when it has such apps
+  const svc = await run('sh', ['-c', SERVICES_PROBE_SCRIPT], {
+    timeoutMs: t,
+    ...(o.env ? { env: o.env } : {}),
+  });
+  const direct = buildServices(splitServiceLines(svc.stdout));
+  const hasDirect = direct.services.length > 0 || direct.appDirs.length > 0;
+  if (ver.missing && !hasDirect) return { ok: false, error: 'docker_missing' };
+  if (!ver.missing && /permission denied/i.test(ver.stderr) && !hasDirect)
+    return { ok: false, error: 'docker_permission' };
+  const usable = !ver.missing && ver.code === 0;
   const report: ProbeReport = {
     scope: 'local',
     at: now(o),
-    docker: { installed: true, usable, ...(usable ? { version: ver.stdout.trim().slice(0, 40) } : {}) },
+    docker: {
+      installed: !ver.missing,
+      usable,
+      ...(usable ? { version: ver.stdout.trim().slice(0, 40) } : {}),
+    },
+    ...(direct.services.length ? { services: direct.services } : {}),
+    ...(direct.appDirs.length ? { appDirs: direct.appDirs } : {}),
     containers: [],
     composeFiles: [],
     volumes: [],
@@ -386,7 +589,7 @@ async function probeLocal(p: DeployProbePayload, o: ProbeOptions): Promise<Deplo
         'ps',
         '--all',
         '--format',
-        'CONTAINER\t{{.Names}}\t{{.Image}}\t{{.State}}\t{{.Status}}\t{{.Ports}}\t{{.Label "com.docker.compose.project"}}\t{{.Label "com.docker.compose.service"}}\t{{.Label "com.docker.compose.project.config_files"}}\t{{.Label "com.docker.compose.project.working_dir"}}',
+        'CONTAINER\t{{.Names}}\t{{.Image}}\t{{.State}}\t{{.Status}}\t{{.Ports}}\t{{.Label "com.docker.compose.project"}}\t{{.Label "com.docker.compose.service"}}\t{{.Label "com.docker.compose.project.config_files"}}\t{{.Label "com.docker.compose.project.working_dir"}}\t{{.Label "com.docker.compose.project.environment_file"}}',
       ],
       { timeoutMs: t, ...env },
     );
@@ -424,7 +627,24 @@ async function probeLocal(p: DeployProbePayload, o: ProbeOptions): Promise<Deplo
       if (COMPOSE_NAME.test(abs) && (under(abs, home) || serverHintDir(abs, o.hintRoots)) && !files.has(abs))
         files.set(abs, undefined);
     }
-    for (const [path, project] of [...files].slice(0, 10)) {
+    // compose files in the usual places: one and two levels under the home folder, and under /opt and /srv
+    const checked: string[] = [];
+    const note = (x: string) => {
+      if (!checked.includes(x) && checked.length < 60) checked.push(x);
+    };
+    for (const c of report.containers) if (c.workingDir) note(c.workingDir);
+    for (const d of p.hints?.dirs ?? []) note(d.startsWith('~/') ? join(home, d.slice(2)) : d);
+    const roots: Array<[string, number]> = [
+      [home, 2],
+      ...((o.hintRoots ?? ['/opt', '/srv']).map((r) => [r, 1]) as Array<[string, number]>),
+    ];
+    for (const [root, depth] of roots) note(`${root}/*${depth > 1 ? '/*' : ''}`);
+    const found = scanComposeFiles(roots, [
+      ...(p.hints?.dirs ?? []).map((d) => (d.startsWith('~/') ? join(home, d.slice(2)) : d)),
+    ]);
+    for (const f of found) if (!files.has(f)) files.set(f, undefined);
+    if (checked.length) report.checked = checked;
+    for (const [path, project] of [...files].slice(0, 16)) {
       if (!path.startsWith('/') || !SAFE_PATH.test(path)) continue;
       try {
         if (statSync(path).size > MAX_COMPOSE_BYTES) {
@@ -485,7 +705,50 @@ async function probeLocal(p: DeployProbePayload, o: ProbeOptions): Promise<Deplo
   const df = await run('df', ['-Pm', home], { timeoutMs: t, ...env });
   const mb = Number(df.stdout.trim().split('\n').pop()?.trim().split(/\s+/)[3]);
   if (Number.isFinite(mb)) report.freeDiskMb = mb;
+  markUnsupportedStacks(report);
   return { ok: true, report: fit(report) };
+}
+
+const COMPOSE_FILENAMES = ['docker-compose.yml', 'docker-compose.yaml', 'compose.yaml', 'compose.yml'];
+
+/** Compose files directly in the given folders, and one or two levels under the roots (hidden and dependency folders skipped). */
+function scanComposeFiles(roots: Array<[string, number]>, folders: string[]): string[] {
+  const out: string[] = [];
+  const add = (dir: string) => {
+    for (const n of COMPOSE_FILENAMES) {
+      const f = `${dir}/${n}`;
+      try {
+        if (statSync(f).isFile() && SAFE_PATH.test(f) && !out.includes(f)) out.push(f);
+      } catch {
+        // not there
+      }
+    }
+  };
+  const kids = (dir: string): string[] => {
+    try {
+      return readdirSync(dir)
+        .filter((n) => !n.startsWith('.') && n !== 'node_modules' && n !== 'snap')
+        .slice(0, 200)
+        .map((n) => join(dir, n))
+        .filter((c) => {
+          try {
+            return statSync(c).isDirectory();
+          } catch {
+            return false;
+          }
+        });
+    } catch {
+      return [];
+    }
+  };
+  for (const f of folders) if (SAFE_PATH.test(f)) add(f);
+  for (const [root, depth] of roots) {
+    for (const d1 of kids(root)) {
+      add(d1);
+      if (depth > 1) for (const d2 of kids(d1)) add(d2);
+    }
+  }
+  return out.slice(0, 16);
 }
 
 function backupsIn(dir: string): ProbeBackups | null {
@@ -704,7 +967,9 @@ export function parseRemoteOutput(out: string, host: string, o: ProbeOptions = {
     }
     return f;
   };
+  const svcLines: ServiceLines = { services: [], pm2: [], processes: [], appDirs: [], statePaths: [] };
   const composePaths: string[] = [];
+  const checked: string[] = [];
   const sites = new Map<string, Set<string>>();
   const systemd = new Set<string>();
   let compose: { path: string; text: string[] } | null = null;
@@ -751,6 +1016,29 @@ export function parseRemoteOutput(out: string, host: string, o: ProbeOptions = {
       case 'COMPOSEFILE':
         if (SAFE_PATH.test(rest.trim()) && !composePaths.includes(rest.trim()))
           composePaths.push(rest.trim());
+        break;
+      case 'SERVICE':
+        svcLines.services.push(rest);
+        break;
+      case 'PM2JSON':
+        svcLines.pm2.push(rest);
+        break;
+      case 'PROCESS':
+        svcLines.processes.push(rest);
+        break;
+      case 'APPDIR':
+        svcLines.appDirs.push(rest);
+        break;
+      case 'STATEPATHS':
+        svcLines.statePaths.push(rest);
+        break;
+      case 'CHECKED':
+        if (
+          /^\/[A-Za-z0-9._/+@=*-]*$/.test(rest.trim()) &&
+          !checked.includes(rest.trim()) &&
+          checked.length < 60
+        )
+          checked.push(rest.trim());
         break;
       case 'NODIR':
         folders.set(rest.trim(), { path: rest.trim(), exists: false, entries: [] });
@@ -820,8 +1108,12 @@ export function parseRemoteOutput(out: string, host: string, o: ProbeOptions = {
     }
   }
   report.docker = docker;
+  if (checked.length) report.checked = checked;
+  const direct = buildServices(svcLines);
+  if (direct.services.length) report.services = direct.services;
+  if (direct.appDirs.length) report.appDirs = direct.appDirs;
   report.folders = [...folders.values()].slice(0, 20);
-  for (const path of composePaths.slice(0, 10)) {
+  for (const path of composePaths.slice(0, 16)) {
     const text = composeTexts.get(path);
     const project = report.containers.find((c) => c.composeFile === path)?.project;
     report.composeFiles.push(
@@ -836,6 +1128,7 @@ export function parseRemoteOutput(out: string, host: string, o: ProbeOptions = {
           },
     );
   }
+  markUnsupportedStacks(report);
   // Only an image variable that a compose file of that folder really refers to is reported (not any `*IMAGE*` line of a .env)
   for (const f of report.folders) {
     if (!f.imageVars) continue;

@@ -82,6 +82,9 @@ export function RunPanel({ env, showProject = false }: { env: RunEnvironmentDto;
       data-testid={`run-${env.id}`}
       title={
         <span className="flex flex-wrap items-center gap-2">
+          <span className="text-xs font-semibold tracking-wide text-muted uppercase" data-testid="run-kind">
+            Test copy
+          </span>
           <span>
             {showProject ? `${env.projectKey} · ` : ''}
             {env.sources.map((s) => `${s.repoName}@${s.branch}`).join(', ')}
@@ -194,7 +197,14 @@ export function RunPanel({ env, showProject = false }: { env: RunEnvironmentDto;
           On {env.workstationName}
           {env.requestedBy.name ? `, started by ${env.requestedBy.name}` : ''}
           {env.cardRef ? ` for ${env.cardRef}` : ''}.{' '}
-          {env.activity && live && <span data-testid="run-activity">{env.activity}.</span>}
+          {env.activity && live && <span data-testid="run-activity">{env.activity}.</span>}{' '}
+          <Link
+            to={`/p/${env.projectKey}/environments#start-steps`}
+            className="text-brand-text underline-offset-2 hover:underline"
+            data-testid="run-how-it-starts"
+          >
+            How it starts
+          </Link>
         </p>
         {env.waiting && (
           <div

@@ -2,7 +2,7 @@ import type { DeployRunDto } from '@aom/shared';
 import { useState } from 'react';
 import { useDeployRuns } from '../../api/queries/delivery.ts';
 import { formatDateTime } from '../../lib/time.ts';
-import { Badge, Panel } from '../ui.tsx';
+import { Badge, Panel, Select } from '../ui.tsx';
 
 const TONE: Record<DeployRunDto['status'], 'neutral' | 'green' | 'red' | 'amber' | 'blue'> = {
   requested: 'neutral',
@@ -17,9 +17,9 @@ const TONE: Record<DeployRunDto['status'], 'neutral' | 'green' | 'red' | 'amber'
 const LABEL: Record<DeployRunDto['status'], string> = {
   requested: 'requested',
   waiting_release: 'waiting for a release',
-  queued: 'sent to the workstation',
+  queued: 'about to start',
   running: 'running',
-  succeeded: 'deployed',
+  succeeded: 'released',
   failed: 'failed',
   refused: 'refused',
   cancelled: 'cancelled',
@@ -28,15 +28,61 @@ const LABEL: Record<DeployRunDto['status'], string> = {
 const who = (a: { kind: string; name?: string | undefined } | null): string =>
   !a ? 'nobody yet' : a.kind === 'trigger' ? 'a rule' : `${a.name ?? a.kind} (${a.kind})`;
 
-/** Recent deploys with the audit: which recipe version, which gate and evidence, released by whom. */
-export function DeployRuns({ projectId }: { projectId?: string }) {
+/** History with the audit: which setup version, which rules held, who asked and who released. */
+export function DeployRuns({ projectId, filters = false }: { projectId?: string; filters?: boolean }) {
   const q = useDeployRuns();
   const [open, setOpen] = useState<string | null>(null);
-  const runs = (q.data ?? []).filter((r) => !projectId || r.projectId === projectId);
+  const [fProject, setFProject] = useState('');
+  const [fEnv, setFEnv] = useState('');
+  const [fResult, setFResult] = useState('');
+  const all = (q.data ?? []).filter((r) => !projectId || r.projectId === projectId);
+  const runs = all.filter(
+    (r) =>
+      (!fProject || r.projectKey === fProject) &&
+      (!fEnv || r.env === fEnv) &&
+      (!fResult ||
+        (fResult === 'ok'
+          ? r.status === 'succeeded'
+          : fResult === 'bad'
+            ? ['failed', 'refused'].includes(r.status)
+            : r.trigger === 'rollback')),
+  );
+  const projectsIn = [...new Set(all.map((r) => r.projectKey))];
+  const envsIn = [...new Set(all.map((r) => r.env))];
   return (
     <Panel data-testid="deploy-runs">
-      <h2 className="mb-3 text-lg font-semibold text-fg">Recent deploys</h2>
-      {runs.length === 0 && <p className="text-sm text-subtle">No deploy has been asked for yet.</p>}
+      <h2 className="mb-3 text-lg font-semibold text-fg">History</h2>
+      {filters && (
+        <div className="mb-3 grid gap-2 sm:grid-cols-3" data-testid="history-filters">
+          <Select label="Project" value={fProject} onChange={(e) => setFProject(e.target.value)}>
+            <option value="">All projects</option>
+            {projectsIn.map((k) => (
+              <option key={k} value={k}>
+                {k}
+              </option>
+            ))}
+          </Select>
+          <Select label="Site" value={fEnv} onChange={(e) => setFEnv(e.target.value)}>
+            <option value="">All sites</option>
+            {envsIn.map((k) => (
+              <option key={k} value={k}>
+                {k}
+              </option>
+            ))}
+          </Select>
+          <Select label="Result" value={fResult} onChange={(e) => setFResult(e.target.value)}>
+            <option value="">Any result</option>
+            <option value="ok">Released</option>
+            <option value="bad">Failed or refused</option>
+            <option value="rollback">Went back to an earlier version</option>
+          </Select>
+        </div>
+      )}
+      {runs.length === 0 && (
+        <p className="text-sm text-subtle" data-testid="history-empty">
+          Nothing has been released yet.
+        </p>
+      )}
       <ul className="flex flex-col divide-y divide-line text-sm">
         {runs.map((r) => (
           <li key={r.id} className="py-2" data-testid={`run-${r.id}`}>
@@ -50,7 +96,8 @@ export function DeployRuns({ projectId }: { projectId?: string }) {
               <Badge tone="brand">{r.env}</Badge>
               <span className="text-muted">{r.targetName}</span>
               <Badge tone={TONE[r.status]}>{LABEL[r.status]}</Badge>
-              {r.trial && <Badge>{r.dryRun ? 'dry run' : 'trial'}</Badge>}
+              {r.trigger === 'rollback' && <Badge tone="amber">Rollback</Badge>}
+              {r.trial && <Badge>{r.dryRun ? 'tried without changes' : 'trial'}</Badge>}
               <span className="font-mono text-xs text-subtle">{r.commit?.slice(0, 10) ?? ''}</span>
               <span className="ml-auto text-xs text-subtle">{formatDateTime(r.createdAt)}</span>
             </button>
@@ -60,11 +107,11 @@ export function DeployRuns({ projectId }: { projectId?: string }) {
                 <dd>{who(r.requestedBy)}</dd>
                 <dt>Released by</dt>
                 <dd>{who(r.releasedBy)}</dd>
-                <dt>Recipe version</dt>
+                <dt>Setup version</dt>
                 <dd className="font-mono">{r.recipeHash.slice(0, 16)}</dd>
                 {r.evidence.length > 0 && (
                   <>
-                    <dt>Gate evidence</dt>
+                    <dt>Rules that held</dt>
                     <dd>
                       <ul>
                         {r.evidence.map((e) => (

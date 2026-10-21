@@ -193,18 +193,22 @@ export async function startFollowup(ctx: Ctx, tx: Tx, phase: Row, project: Row, 
   // A recipe project deploys through its approved recipe: no prose request. The deploy run is requested outside this
   // transaction by the dispatcher (`deployStep`); the follow-up finishes with the run (`followupVerdict`).
   if (f.kind === 'deploy' && project.delivery_mode === 'recipe') {
-    if (!target) return void (await fail('the deploy target no longer exists'));
+    if (!target && !f.environment) return void (await fail('the deploy target no longer exists'));
     const rec = await one(tx, `SELECT approved_parsed, status FROM delivery_recipes WHERE project_id=$1`, [
       project.id,
     ]);
     const env = (rec?.approved_parsed as Recipe | null)?.environments.find((e) =>
-      e.targets.some((t) => t.toLowerCase() === String(target.name).toLowerCase()),
+      f.environment
+        ? e.name === f.environment
+        : e.targets.some((t) => t.toLowerCase() === String(target?.name).toLowerCase()),
     );
     if (rec?.status !== 'approved' || !env)
       return void (await fail(
         rec?.status !== 'approved'
           ? 'the delivery recipe is not approved (or changed since): approve it, then deploy'
-          : `the delivery recipe has no environment for ${target.name}`,
+          : f.environment
+            ? `the delivery recipe has no environment called ${f.environment}`
+            : `the delivery recipe has no environment for ${target?.name}`,
       ));
     await ctx.store.append(
       [

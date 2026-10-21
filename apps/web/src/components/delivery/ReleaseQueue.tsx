@@ -13,14 +13,14 @@ export function ReleaseQueue({ canRelease = true }: { canRelease?: boolean }) {
   const items = q.data ?? [];
   return (
     <Panel data-testid="release-queue">
-      <h2 className="mb-1 text-lg font-semibold text-fg">Ready to release</h2>
+      <h2 className="mb-1 text-lg font-semibold text-fg">Waiting for you</h2>
       <p className="mb-3 text-sm text-muted">
-        These releases passed their gate and wait for you. Release runs the Owner-approved recipe on the
-        workstation, outside any model.
+        These versions are ready for a live site. Release puts the version on the site using the setup the
+        Owner approved.
       </p>
       {items.length === 0 ? (
         <p className="text-sm text-subtle" data-testid="release-queue-empty">
-          Nothing is waiting for a release.
+          Nothing is waiting. Releases appear here when a version is ready for a live site.
         </p>
       ) : (
         <ul className="flex flex-col divide-y divide-line">
@@ -46,20 +46,19 @@ function QueueRow({ item, canRelease }: { item: ReleaseQueueItem; canRelease: bo
     <li className="flex flex-col gap-2 py-3" data-testid={`release-${item.projectKey}-${item.env}`}>
       <div className="flex flex-wrap items-center gap-2 text-sm">
         <span className="font-semibold text-fg">{item.projectKey}</span>
-        <Badge tone="brand">{item.env}</Badge>
+        <Badge tone="brand">{item.env === 'production' ? 'Live site' : item.env}</Badge>
         <span className="font-mono text-xs text-muted">
           {item.commit ? item.commit.slice(0, 10) : 'latest'}
         </span>
-        {item.waitingFor === 'ceo' && <Badge tone="info">the recipe lets the CEO release it</Badge>}
+        {item.waitingFor === 'ceo' && <Badge tone="info">the CEO may release it</Badge>}
       </div>
       {!item.gateNow.satisfied && (
-        <Callout tone="warning" role="status">
-          The gate does not hold any more: {item.gateNow.missing.join('; ')}. Release will refuse until it
-          does.
+        <Callout tone="warning" role="status" data-testid="queue-waiting-for">
+          Waiting for: {item.gateNow.missing.join('; ')}. Release is not possible until then.
         </Callout>
       )}
       <fieldset className="flex flex-col gap-1.5 text-sm" disabled={!canRelease}>
-        <legend className="sr-only">Servers to release to</legend>
+        <legend className="sr-only">Places to release to</legend>
         {item.targets.map((t) => (
           <div key={t.runId} className="flex flex-wrap items-center gap-2">
             {several && (
@@ -72,27 +71,27 @@ function QueueRow({ item, canRelease }: { item: ReleaseQueueItem; canRelease: bo
               />
             )}
             <span className="font-medium">{t.targetName}</span>
-            {t.production && <Badge tone="danger">production</Badge>}
-            {t.host && <span className="font-mono text-xs text-subtle">ssh {t.host}</span>}
+            {t.production && <Badge tone="danger">live</Badge>}
+            {t.host && <span className="text-xs text-subtle">server {t.host}</span>}
             {t.workstationName && <span className="text-xs text-subtle">from {t.workstationName}</span>}
           </div>
         ))}
       </fieldset>
       {canRelease && (
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Button
             variant="primary"
-            size="sm"
+            className="min-h-11"
             loading={release.isPending}
-            disabled={chosen.length === 0}
+            disabled={chosen.length === 0 || !item.gateNow.satisfied}
             data-testid={`release-${item.projectKey}-${item.env}-button`}
             onClick={() => release.mutate(chosen.map((t) => t.runId))}
           >
             {several ? `Release to ${chosen.length} of ${item.targets.length}` : 'Release'}
           </Button>
           <Button
-            size="sm"
             variant="ghost"
+            className="min-h-11"
             loading={cancel.isPending}
             onClick={() => {
               for (const t of item.targets) cancel.mutate(t.runId);
@@ -100,6 +99,11 @@ function QueueRow({ item, canRelease }: { item: ReleaseQueueItem; canRelease: bo
           >
             Not now
           </Button>
+          {!item.gateNow.satisfied && (
+            <span className="text-xs text-subtle" data-testid="release-disabled-reason">
+              The Release button is off until the rules hold.
+            </span>
+          )}
         </div>
       )}
       {release.data && (

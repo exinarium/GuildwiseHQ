@@ -5,6 +5,7 @@ import {
   HostKeyScanRequestSchema,
   IdParamsSchema,
   KeyCreateRequestSchema,
+  MergePlacesRequestSchema,
   MoveCompleteRequestSchema,
   MoveStartRequestSchema,
   MoveSwitchRequestSchema,
@@ -14,14 +15,19 @@ import {
   PublishSetupRequestSchema,
   RejectRecipeRequestSchema,
   ReleaseRequestSchema,
+  RemoveEnvironmentRequestSchema,
+  RemovePlaceRequestSchema,
   RetireRequestSchema,
   RevokeKeyRequestSchema,
+  RollbackRequestSchema,
   SaveSetupDraftRequestSchema,
   SetDeliveryModeRequestSchema,
   SetDeploySecretRequestSchema,
+  SetEnvironmentPlaceRequestSchema,
   SetGateBindingRequestSchema,
   SetGatePresetRequestSchema,
   SetupDryRunRequestSchema,
+  StopGuidedRequestSchema,
   UseProposalRequestSchema,
 } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
@@ -34,6 +40,7 @@ import { one } from '../db/sql.ts';
 import { removeGatePreset, setDeploySecret, setGateBinding, setGatePreset } from '../delivery/admin.ts';
 import {
   connectBlockedReason,
+  forgetKeyAnyway,
   getOp,
   requestConnect,
   requestHostKeyScan,
@@ -41,6 +48,19 @@ import {
   requestPrepare,
   requestRevoke,
 } from '../delivery/connect.ts';
+import {
+  discardDraft,
+  earlierReleases,
+  environmentsStatus,
+  listPlaces,
+  mergePlaces,
+  orgLive,
+  removeEnvironment,
+  removePlace,
+  requestRollback,
+  setEnvironmentPlace,
+  stopGuided,
+} from '../delivery/environments.ts';
 import {
   cancelMove,
   completeMove,
@@ -175,10 +195,111 @@ export function deliveryRoutes(ctx: Ctx) {
       { schema: { params: IdParamsSchema, body: UseProposalRequestSchema } },
       async (req) => {
         const s = await requireUser(ctx, req);
-        await useDeployProposal(ctx, s.user, req.params.id, req.body.proposalId);
+        const merge = await useDeployProposal(ctx, s.user, req.params.id, req.body.proposalId);
+        return { ...(await getSetupState(ctx, s.user, req.params.id)), merge };
+      },
+    );
+
+    // ------------------------------------------------------------------------------ the Environments page
+    const PlaceParams = z.object({ id: z.uuid(), placeId: z.uuid() });
+    const EnvParams = z.object({ id: z.uuid(), env: z.string().min(1).max(40) });
+
+    app.get('/api/projects/:id/places', { schema: { params: IdParamsSchema } }, async (req) => {
+      const s = await requireUser(ctx, req);
+      return listPlaces(ctx, s.user, req.params.id);
+    });
+
+    app.post(
+      '/api/projects/:id/places/:placeId/remove',
+      { schema: { params: PlaceParams, body: RemovePlaceRequestSchema } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        return removePlace(ctx, s.user, req.params.id, req.params.placeId, req.body);
+      },
+    );
+
+    app.post(
+      '/api/projects/:id/places/merge',
+      { schema: { params: IdParamsSchema, body: MergePlacesRequestSchema } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        return mergePlaces(ctx, s.user, req.params.id, req.body);
+      },
+    );
+
+    app.put(
+      '/api/projects/:id/delivery/setup/environments/:env/place',
+      { schema: { params: EnvParams, body: SetEnvironmentPlaceRequestSchema } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        await setEnvironmentPlace(ctx, s.user, req.params.id, req.params.env, req.body.placeId);
         return getSetupState(ctx, s.user, req.params.id);
       },
     );
+
+    app.post(
+      '/api/projects/:id/delivery/setup/remove-environment',
+      { schema: { params: IdParamsSchema, body: RemoveEnvironmentRequestSchema } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        const r = await removeEnvironment(ctx, s.user, req.params.id, req.body.env);
+        return { ...(await getSetupState(ctx, s.user, req.params.id)), ...r };
+      },
+    );
+
+    app.post(
+      '/api/projects/:id/delivery/setup/discard-draft',
+      { schema: { params: IdParamsSchema } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        await discardDraft(ctx, s.user, req.params.id);
+        return getSetupState(ctx, s.user, req.params.id);
+      },
+    );
+
+    app.post(
+      '/api/projects/:id/delivery/setup/stop-guided',
+      { schema: { params: IdParamsSchema, body: StopGuidedRequestSchema } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        await stopGuided(ctx, s.user, req.params.id);
+        return getSetupState(ctx, s.user, req.params.id);
+      },
+    );
+
+    app.get('/api/projects/:id/environments/status', { schema: { params: IdParamsSchema } }, async (req) => {
+      const s = await requireUser(ctx, req);
+      return environmentsStatus(ctx, s.user, req.params.id);
+    });
+
+    app.get(
+      '/api/projects/:id/environments/:env/releases',
+      {
+        schema: {
+          params: EnvParams,
+          querystring: z.object({ limit: z.coerce.number().int().min(1).max(20).optional() }),
+        },
+      },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        return earlierReleases(ctx, s.user, req.params.id, req.params.env, req.query.limit ?? 5);
+      },
+    );
+
+    app.post(
+      '/api/projects/:id/releases/rollback',
+      { schema: { params: IdParamsSchema, body: RollbackRequestSchema } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        return requestRollback(ctx, s.user, req.params.id, req.body);
+      },
+    );
+
+    /** What is live: one row per project and environment the viewer can see (read-only, any member). */
+    app.get('/api/org/live', async (req) => {
+      const a = await requireOrg(ctx, req);
+      return orgLive(ctx, a.session.user, a.orgId);
+    });
 
     /** The read-only look at Docker here, the servers this computer can reach, or one server (a durable command). */
     app.post(
@@ -351,6 +472,16 @@ export function deliveryRoutes(ctx: Ctx) {
       const s = await requireUser(ctx, req);
       return getOp(ctx, s.user, req.params.id, req.params.commandId);
     });
+
+    /** "Forget it anyway": delete this computer's key for a removed server that could not be reached (the person confirmed). */
+    app.post(
+      '/api/projects/:id/delivery/ops/:commandId/forget-key',
+      { schema: { params: OpParams } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        return forgetKeyAnyway(ctx, s.user, req.params.id, req.params.commandId);
+      },
+    );
 
     /** "Check connection": can the computer that deploys this server sign in to it now? */
     app.post(

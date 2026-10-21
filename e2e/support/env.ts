@@ -6,8 +6,10 @@ export const E2E_DIR = process.env.AOM_E2E_DIR ?? '/tmp/aom-e2e';
 export const PORT = Number(process.env.AOM_E2E_PORT ?? 4601);
 export const BASE_URL = `http://localhost:${PORT}`;
 export const DB_NAME = process.env.AOM_E2E_DB ?? 'aom_e2e';
-export const PG_ADMIN_URL = 'postgres://aom:aom@127.0.0.1:5433/postgres';
-export const DATABASE_URL = `postgres://aom:aom@127.0.0.1:5433/${DB_NAME}`;
+// the Postgres of the stack: the dev container by default; a private stack names its own (AOM_E2E_PG_HOSTPORT=127.0.0.1:55433)
+const PG_HOSTPORT = process.env.AOM_E2E_PG_HOSTPORT ?? '127.0.0.1:5433';
+export const PG_ADMIN_URL = `postgres://aom:aom@${PG_HOSTPORT}/postgres`;
+export const DATABASE_URL = `postgres://aom:aom@${PG_HOSTPORT}/${DB_NAME}`;
 export const MAILPIT_API = process.env.AOM_MAILPIT_API ?? 'http://127.0.0.1:8025';
 export const SMTP_URL = process.env.AOM_E2E_SMTP_URL ?? 'smtp://127.0.0.1:1025';
 
@@ -112,6 +114,12 @@ export const DEPLOYER = {
   email: 'deployer@e2e.test',
   name: 'E2E Deployer',
   password: 'deployer-password-12345',
+};
+/** Deploy-setup journey spec: an owner who sets up deploys for a stack on their own server (a throwaway sshd container). */
+export const JOURNEYER = {
+  email: 'journeyer@e2e.test',
+  name: 'E2E Journeyer',
+  password: 'journeyer-password-12345',
 };
 export const PHASER = { email: 'phaser@e2e.test', name: 'E2E Phaser', password: 'phaser-password-12345' };
 

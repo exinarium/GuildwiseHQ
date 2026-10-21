@@ -40,6 +40,7 @@ Each repository can be on GitHub, GitLab, Bitbucket Cloud, Azure DevOps or a pla
 - A ledger: every decision is recorded once and given to every agent that asks later, so you are not asked the same thing twice.
 - Review and test gates. Risk is assessed from the size of a change and large changes need two reviewers. Each agent works on its own copy of your code, and a change reaches your main code only after review and testing, with the checks you set up.
 - Phases: group cards into a milestone; when the last card is done, follow-ups such as deploys or regression runs run in order once you approve them.
+- Environments: one page per project for where the app runs (start steps, test copies per card, a test site, a live site, extra sites, the computers and servers they use, rules, history); apps that run in Docker or directly on a machine (a service, pm2); Releases lists what waits, what is live and the history, and the Owner or an Admin can go back to an earlier version.
 - Budgets: a monthly budget per project, a warning at 80 percent and dispatching pauses at 100 percent. Running shifts finish.
 - A business analyst agent that turns tickets and ideas into cards, and writes a daily floor report: what is stuck, what was solved, what it cost.
 - Intake from Jira and GitHub: the BA maps incoming tickets to projects and drafts cards with specs and test plans. It can look at a Jira ticket's screenshots and design files (downloaded on your workstation with your Jira token, which never leaves it), and cards carry file attachments for builders and testers.

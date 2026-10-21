@@ -1,4 +1,5 @@
 import {
+  AnswerProposalRequestSchema,
   ConfirmSuiteRequestSchema,
   ExtendRunRequestSchema,
   IdParamsSchema,
@@ -38,7 +39,7 @@ import {
   startRun,
   stopRun,
 } from '../commands/runs.ts';
-import { listProposals, resolveProposal, startScan } from '../commands/setup-proposals.ts';
+import { answerProposal, listProposals, resolveProposal, startScan } from '../commands/setup-proposals.ts';
 import { setTargetSecret, targetSecretStatuses } from '../commands/target-secrets.ts';
 import type { Ctx } from '../context.ts';
 import { typed } from './util.ts';
@@ -217,6 +218,15 @@ export function runRoutes(ctx: Ctx) {
         const s = await requireUser(ctx, req);
         await resolveProposal(ctx, s.user, req.params.id, req.body.outcome);
         return { ok: true };
+      },
+    );
+
+    app.post(
+      '/api/setup-proposals/:id/answers',
+      { schema: { params: IdParamsSchema, body: AnswerProposalRequestSchema } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        return answerProposal(ctx, s.user, req.params.id, req.body.answers, req.body.confirmed);
       },
     );
 

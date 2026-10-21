@@ -43,6 +43,12 @@ export default defineConfig({
     { name: 'deploy-connect', testMatch: 'deploy-connect.spec.ts', dependencies: ['auth'] },
     // Moving to a new server (v3): TWO real sshd containers (old and new server, each with a fake docker); own runner and project.
     { name: 'deploy-move', testMatch: 'deploy-move.spec.ts', dependencies: ['auth'] },
+    // The Environments redesign (docs/design/environments-ux.md section 12): the page against the real server; the full journeys run
+    // with the mocked web app (playwright.environments-msw.config.ts).
+    { name: 'environments', testMatch: 'environments.spec.ts', dependencies: ['pairing'] },
+    // The deploy-setup journey: a stack outside /opt with a literal tag on a throwaway sshd + fake docker, a real registry container,
+    // every update method, a second environment, merge of a DevOps proposal, removal. Own runner and project.
+    { name: 'deploy-setup-journey', testMatch: 'deploy-setup-journey.spec.ts', dependencies: ['auth'] },
     { name: 'reporter', testMatch: 'reporter.spec.ts', dependencies: ['phases'] },
     { name: 'hygiene', testMatch: 'hygiene.spec.ts', dependencies: ['reporter'] },
     { name: 'interests', testMatch: 'interests.spec.ts', dependencies: ['hygiene'] },

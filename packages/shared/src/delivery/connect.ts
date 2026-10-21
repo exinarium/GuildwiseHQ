@@ -282,6 +282,17 @@ export const DeployRevokePayloadSchema = z.object({
   /** The public key line of the key to remove. */
   publicKey: z.string().min(40).max(600),
   fingerprint: FingerprintSchema,
+  /**
+   * "Remove this server": the key may be this computer's OWN key (it is used once more to take itself off the server), and
+   * this computer deletes its key material for the target afterwards, whether or not the server could be reached
+   * (capability `deploy-setup:2`).
+   */
+  forget: z.boolean().optional(),
+  /**
+   * With `forget`: delete this computer's key material even when the server could not be asked to drop the key (the person
+   * confirmed that). Without it, a failed attempt keeps the key so that it can be tried again (the answer says `localKeyKept`).
+   */
+  forgetAnyway: z.boolean().optional(),
 });
 export type DeployRevokePayload = z.infer<typeof DeployRevokePayloadSchema>;
 
@@ -299,8 +310,17 @@ export const DeployRevokeResultSchema = z.union([
     /** Lines removed from authorized_keys (0: it was not there any more). */
     removed: z.number().int().min(0),
     backup: z.string().max(300).optional(),
+    /** `forget` was asked and this computer's key material for the target is gone. */
+    forgotten: z.boolean().optional(),
   }),
-  z.object({ ok: z.literal(false), error: z.enum(REVOKE_ERRORS), detail: z.string().max(300).optional() }),
+  z.object({
+    ok: z.literal(false),
+    error: z.enum(REVOKE_ERRORS),
+    detail: z.string().max(300).optional(),
+    forgotten: z.boolean().optional(),
+    /** `forget` was asked, the server could not be reached, so this computer kept its key (until the person confirms). */
+    localKeyKept: z.boolean().optional(),
+  }),
 ]);
 export type DeployRevokeResult = z.infer<typeof DeployRevokeResultSchema>;
 
@@ -610,6 +630,8 @@ export const OpStatusDtoSchema = z.object({
   /** A sentence for a failure. */
   errorText: z.string().nullable(),
   at: z.iso.datetime().nullable(),
+  /** A removal could not take the key off the server and this computer kept its key: offer "Forget it anyway". */
+  localKeyKept: z.boolean().optional(),
 });
 export type OpStatusDto = z.infer<typeof OpStatusDtoSchema>;
 

@@ -69,6 +69,11 @@ export interface RequestDeployInput {
   dryRun?: boolean;
   phaseFollowupId?: string | undefined;
   reason?: string | undefined;
+  /**
+   * "Go back to an earlier version": an earlier SUCCESSFUL release of this environment. The gate's test-site, checks and window
+   * rules do not apply (the audit says so); a freeze still blocks. Only an Owner or an Admin asks (checked by the caller).
+   */
+  rollback?: { runId: string; commit: string } | undefined;
 }
 
 export interface DeployRunOutcome {
@@ -467,7 +472,7 @@ export async function requestDeployRun(ctx: Ctx, input: RequestDeployInput): Pro
       targetId: 'missing' in t ? null : (t.id as string),
       targetName,
       hash,
-      trigger: input.trigger,
+      trigger: input.rollback ? 'rollback' : input.trigger,
       requester: input.requester,
       trial,
       releasedBy: env.releasedBy,
@@ -524,16 +529,41 @@ export async function requestDeployRun(ctx: Ctx, input: RequestDeployInput): Pro
         repoId: (repoRow?.id as string | undefined) ?? null,
       };
       const { gates } = await effectiveGates(ctx.pool, gateInput);
-      if (
-        automated &&
-        input.commit &&
-        !(await automatedCommitAllowed(ctx.pool, project.id, input.commit, gates))
-      ) {
-        refuse('commit_not_allowed', COMMIT_NOT_ALLOWED);
-        continue;
+      if (input.rollback) {
+        commit = input.rollback.commit;
+        if (gates.some((g) => g.gate.freeze)) {
+          refuse(
+            'frozen',
+            'releases are frozen: nothing goes out, not even an earlier version',
+            ['releases are frozen'],
+            commit,
+          );
+          continue;
+        }
+        finalVerdict = {
+          satisfied: true,
+          missing: [],
+          evidence: [
+            {
+              requirement: 'rollback',
+              ref: input.rollback.runId,
+              detail: `going back to ${commit.slice(0, 10)}, an earlier release of ${env.name}`,
+            },
+          ],
+          gates,
+        };
+      } else {
+        if (
+          automated &&
+          input.commit &&
+          !(await automatedCommitAllowed(ctx.pool, project.id, input.commit, gates))
+        ) {
+          refuse('commit_not_allowed', COMMIT_NOT_ALLOWED);
+          continue;
+        }
+        commit = await resolveCommit(ctx.pool, project.id, input.commit, gates);
+        finalVerdict = await evaluateEnvGate(ctx.pool, { ...gateInput, commit });
       }
-      commit = await resolveCommit(ctx.pool, project.id, input.commit, gates);
-      finalVerdict = await evaluateEnvGate(ctx.pool, { ...gateInput, commit });
     }
     if (finalVerdict && !finalVerdict.satisfied) {
       refuse(
@@ -604,7 +634,7 @@ export async function requestDeployRun(ctx: Ctx, input: RequestDeployInput): Pro
             hash,
             vaultCommit,
             commit,
-            trigger: input.trigger,
+            trigger: input.rollback ? 'rollback' : input.trigger,
             requestedBy: actorOnly(input.requester),
             origin: originOf(input.requester),
             trial,

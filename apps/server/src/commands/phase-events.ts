@@ -67,7 +67,13 @@ export const followupRows = (db: Queryable, phaseId: string): Promise<Row[]> =>
 /** A stored follow-up row as the spec events carry it. */
 export function rowToSpec(f: Row): FollowupSpecWithId {
   const base = { id: f.id as string, note: (f.note ?? '') as string };
-  if (f.kind === 'deploy') return { ...base, kind: 'deploy', targetId: f.target_id };
+  if (f.kind === 'deploy')
+    return {
+      ...base,
+      kind: 'deploy',
+      targetId: f.target_id,
+      ...(f.environment ? { environment: f.environment } : {}),
+    };
   if (f.kind === 'regression')
     return {
       ...base,

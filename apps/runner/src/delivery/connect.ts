@@ -527,6 +527,22 @@ export class DeployConnector {
   // ------------------------------------------------------------------------------------------ revoke
 
   async revoke(p: DeployRevokePayload): Promise<DeployRevokeResult> {
+    const r = await this.revokeOnServer(p);
+    // "Remove this server": this computer's key material for it goes when the server dropped the key, or when the person confirmed
+    // that it may go anyway (the server may be gone for good). Otherwise it is kept, so the removal can be tried again.
+    if (p.forget) {
+      if (!r.ok && !p.forgetAnyway) return { ...r, forgotten: false, localKeyKept: true } as DeployRevokeResult;
+      try {
+        this.deps.keys.forget(p.targetId);
+        return { ...r, forgotten: true } as DeployRevokeResult;
+      } catch {
+        return r;
+      }
+    }
+    return r;
+  }
+
+  private async revokeOnServer(p: DeployRevokePayload): Promise<DeployRevokeResult> {
     const pubParts = p.publicKey.trim().split(/\s+/);
     if (
       pubParts.length < 3 ||
@@ -537,7 +553,7 @@ export class DeployConnector {
     // only a key Guildwise made can be removed
     if (!(pubParts[2] ?? '').startsWith(DEPLOY_KEY_COMMENT_PREFIX)) return { ok: false, error: 'not_ours' };
     const own = await this.deps.keys.publicOf(p.targetId);
-    if (own && own.fingerprint === p.fingerprint) return { ok: false, error: 'own_key' };
+    if (own && own.fingerprint === p.fingerprint && !p.forget) return { ok: false, error: 'own_key' };
     const r = await run(
       'ssh',
       [

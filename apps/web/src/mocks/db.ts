@@ -349,6 +349,24 @@ export function seed() {
     createdAt: iso(2000),
     myRole: 'owner',
   });
+  // a second project for the Environments screenshots: P5 has a local stack and a server
+  db.projects.push({
+    id: uuid(),
+    orgId: ORG_ID,
+    key: 'P5',
+    name: 'Flow5',
+    workflowKey: 'code',
+    rank: 2,
+    branchPrefix: 'aom/',
+    workingBranch: 'main',
+    subCategories: [],
+    vaultFolder: null,
+    architecturalGlobs: [],
+    e2eGlobs: [],
+    status: 'active',
+    createdAt: iso(1900),
+    myRole: 'owner',
+  });
   const repoId = uuid();
   db.repos.push({
     id: repoId,

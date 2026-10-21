@@ -16,7 +16,8 @@ let api: APIRequestContext;
 let projectId: string;
 let repoId: string;
 
-const settingsUrl = () => `/projects/${projectId}/settings`;
+// the start steps live on the project's Environments page ("Your app"); the old settings anchor redirects there
+const settingsUrl = () => '/p/RST/environments#start-steps';
 const planRows = () =>
   q<{ source: string; workstation_id: string | null; version: number; status: string; plan: any }>(
     `SELECT source, workstation_id, version, status, plan FROM run_plans WHERE project_id=$1 AND status <> 'superseded'`,
@@ -178,20 +179,11 @@ test('the technical view is still there, with the plan DevOps and the owner save
   await expect(page.getByTestId('run-instructions')).toBeVisible();
 });
 
-test('deploy targets: a production checkbox and where each one deploys from', async () => {
-  await page.goto(settingsUrl());
-  const panel = page.getByTestId('deploy-targets');
-  await panel.getByLabel('Name').first().fill('rst-live');
-  await panel.getByLabel('Which computer?').selectOption({ index: 1 });
-  await panel.getByTestId('target-production-checkbox').check();
-  await panel.getByRole('button', { name: 'Add deploy target' }).click();
-  const card = page.getByTestId('deploy-target-rst-live');
-  await expect(card).toContainText('Production');
-  await expect(card).toContainText('Deploys from: Office PC');
-  const t = await q<{ production: boolean; workstation_id: string | null; kind: string }>(
-    `SELECT production, workstation_id, kind FROM deploy_targets WHERE name='rst-live'`,
-  );
-  expect(t[0]).toMatchObject({ production: true, kind: 'local_docker' });
-  expect(t[0]?.workstation_id).not.toBeNull();
+test('the old settings link lands on Your app, and Places says there is no place yet', async () => {
+  await page.goto(`/projects/${projectId}/settings#run`);
+  await expect(page).toHaveURL(/\/p\/RST\/environments#start-steps/);
+  await expect(page.getByTestId('your-app')).toBeVisible();
+  await expect(page.getByTestId('places-empty')).toContainText('No place yet');
+  await expect(page.getByTestId('places-add-server')).toBeVisible();
   void repoId;
 });

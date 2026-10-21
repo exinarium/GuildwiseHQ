@@ -91,7 +91,7 @@ const setupState = (workstations = [ws(WS, 'Office PC')]) => ({
   scan: null,
   scanProblem: null,
   proposal: null,
-  generator: 'setup-1.3',
+  generator: 'setup-1.4',
 });
 const op = (id: string, body: Record<string, unknown>) => {
   routes[`GET ${base}/delivery/ops/${id}`] = () => json({ id, at: '2026-10-20T10:00:00.000Z', ...body });

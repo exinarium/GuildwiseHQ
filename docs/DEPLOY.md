@@ -115,6 +115,24 @@ The runner on the deploying computer needs the `deploy-setup:1` capability (a cu
 server with a password, a key file or a pasted key (**Connect a different server**), to set a server up (Docker, folders, HTTPS with
 Caddy) and to keep a dedicated key per computer so that a replacement computer can **Reconnect**. See user guide 4.27 and RUNNER.md. **Moving to a new server** needs `deploy-move:1` (both servers must be reachable from the same computer); the server keeps a move per environment, deploys of that environment wait while it is open, and `AOM_DNS_OVERRIDE_FILE` (a JSON map of names to addresses) exists only for tests.
 
+**Things to know about deploys of your own app** (the generated scripts):
+
+- *The override file.* An app whose compose file names its image directly is switched to a new version through
+  `docker-compose.guildwise.yml` next to the compose file; your own compose file and `.env` are never edited. The file stays after
+  the update and keeps the app on the version Guildwise last released. To hand the version back to your compose file, delete it
+  and restart the app yourself. A rollback restores the earlier content of that file, or removes it when it did not exist before
+  the failed update. A stack that was started from several compose files, with `--env-file` or with `--project-directory` is not
+  updated (the probe marks it "not supported yet").
+- *Apps that run directly on the machine.* The first update of a plain folder moves it once to `releases/initial`; it is refused
+  when the folder holds data the app writes itself (sqlite files, `uploads`, `storage`, `data`, `.env`, logs) that is not marked as
+  a shared file, or when the folder is on another disk than the app folder. Shared files are copied from the running version right
+  before the switch (sqlite files with `sqlite3 .backup`; without `sqlite3` the update is refused). Writes made after that copy and
+  before the restart stay in the old release folder. If the move is interrupted the folder is put back where it was.
+- *Health after the restart.* Guildwise judges the new version by the health check only. A restart command that returns before the
+  app is ready (it starts the app in the background) is not waited for; keep the health check on so that the previous version is put
+  back when the app does not come up. A restart command that fails is always undone, with or without a health check.
+- *Files that are not a git checkout* are never sent to a server or into a release folder (they could include secrets).
+
 ## Upgrades
 
 Pull the latest code and rebuild:
@@ -154,6 +172,18 @@ The work/personal split is gone: your own organization is where personal work li
 3. Update the runners on your workstations together with the server: the runner command `vault.merge` is new, and a runner that does not know it cannot merge the personal vault.
 4. Deploy. On boot the schema migration `1322_project_ranking` runs (it adds `projects.rank` in the old order, keeps what `projects.domain` and `priority_tier` held in `legacy_project_domains`, then drops those columns and `interests.domain`, and turns `work` vaults into `org` vaults), then the data migration `no-personal-2026-10` (after `restructure-2026-10`). For each organization it ranks the projects (work before personal, by the old tier, then age), merges the personal vault into the organization vault under `personal/` (one runner command, `vault.merge`, queued for a workstation of the Owner or an Admin; the interest folders of personal interests are kept at `interests/<name>/`; an organization that only had a personal vault keeps it as its organization vault and nothing moves) and posts one desk note to each Owner. The merge runs when a workstation that holds the vaults is online, so keep a runner connected during the upgrade; until it has finished agents read an empty `personal/` folder. An organization with a personal vault and no workstation at all waits: pair one and run `node dist/ranking-migrate.mjs`. The migration is idempotent: running it again changes nothing, and it never overwrites a ranking the Owner made since. `AOM_DATA_MIGRATIONS=false` skips it (it then runs the next time the flag is on).
 5. Check **Projects** (the priority order, drag and drop for the Owner and Admins) and **Vaults** (the organization vault; `personal/` inside it holds the old personal files).
+
+### Release notes: the Environments page (October 2026), one-off reset of the deploy places
+
+The new **Environments** page replaces Run and test, Deploy targets and the guided setup wizard (`docs/design/environments-ux.md`). On
+**guildwisehq.com** the owner decided to clear every deploy place of every project when it goes live and set everything up again in
+the new page. This is an **operator script, never a boot migration** (UAT and any other install are not touched unless you run it):
+
+1. **Back up the database** first (see Backups). Update the runners on the workstations together with the server (capabilities `deploy-setup:2` and `deploy-direct:1`; the page tells a project owner when a computer is too old).
+2. Deploy as usual (migrations `2310_environments` and `2311_deploy_reset` run on boot; nothing is cleared by them).
+3. Look first: `docker compose -f docker-compose.prod.yml exec app node dist/deploy-reset.mjs --dry-run` prints, per organization and project, the places that would be removed, the delivery setup that would be cleared, drafts, waiting or queued releases that would be cancelled, phase follow-ups that would be skipped, and **the servers where Guildwise keys may remain**. It writes nothing. `--org <org id>` limits it to one organization.
+4. Do it: `docker compose -f docker-compose.prod.yml exec app node dist/deploy-reset.mjs --confirm`. Per project it appends events only (`DeployTargetRemoved` with the reason "reset for new environments", `DeliveryRecipeReset`, a discarded draft, the delivery mode back to `instructions`, cancelled waiting/queued releases and skipped phase follow-ups) so the new page starts empty. Approvals, run history and the audit stay in the event log; a projection rebuild reproduces the result; running it again changes nothing. A release that is **running** at that moment is not stopped (the plan says so).
+5. **It never contacts a runner or a server.** No key is revoked: the Guildwise keys (lines starting with `guildwise-deploy:` in `authorized_keys`) stay on the servers and the keys of the runners stay on their computers. The plan lists them; connecting a server again in the new page installs a new key, and the old line can be removed by hand. The files of the old setup stay in the vault; the reset remembers their hash so the vault does not bring the old setup back, and a new save starts fresh.
 
 ### First deploy: the launch blog articles
 

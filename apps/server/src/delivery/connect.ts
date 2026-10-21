@@ -4,6 +4,7 @@ import {
   type ConnectStartedDto,
   connectErrorText,
   DEPLOY_CONNECT_CAPABILITY,
+  DEPLOY_SETUP_V2_CAPABILITY,
   type DeployConnectPayload,
   DeployConnectResultSchema,
   type DeployKeyDto,
@@ -12,6 +13,7 @@ import {
   type DeployPreparePayload,
   DeployPrepareResultSchema,
   type DeployRevokePayload,
+  DeployRevokePayloadSchema,
   DeployRevokeResultSchema,
   type DeployTargetDto,
   type HostKeyScanPayload,
@@ -38,7 +40,7 @@ import { loadVisibleProject } from '../authz/scope.ts';
 import { projectScope, runnerActor, userActor } from '../commands/common.ts';
 import { addDeployTarget } from '../commands/deploy-targets.ts';
 import type { Ctx } from '../context.ts';
-import { exec, iso, one, type Queryable, rows } from '../db/sql.ts';
+import { exec, iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, notFound, unprocessable } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
@@ -264,6 +266,71 @@ export async function requestRevoke(
   return { commandId: await enqueueOp(ctx, ws.id, 'deploy.revoke', payload), workstationId: ws.id };
 }
 
+/**
+ * "Remove this server": asks the computers of the person who removes it to take Guildwise's own key off the server and delete
+ * their key material for it. Never blocks the removal: the answer says what was started and why anything was skipped.
+ */
+export async function revokeKeyOnRemoval(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  projectId: string,
+  t: Row,
+  opts: { forgetAnyway?: boolean } = {},
+): Promise<{ state: 'none' | 'started' | 'skipped'; commandId: string | null; reason: string | null }> {
+  const keys = await rows(
+    ctx.pool,
+    `SELECT k.*, w.user_id AS ws_user, w.name AS ws_name, w.connected AS ws_connected, c.capabilities
+       FROM deploy_target_keys k JOIN workstations w ON w.id = k.workstation_id
+       LEFT JOIN workstation_capabilities c ON c.workstation_id = w.id
+      WHERE k.target_id=$1 AND k.state='active'`,
+    [t.id],
+  );
+  if (keys.length === 0) return { state: 'none', commandId: null, reason: null };
+  const mine = keys.filter((k) => k.ws_user === user.id);
+  const others = keys.length - mine.length;
+  const otherNote =
+    others > 0
+      ? ` ${others === 1 ? 'A key' : `${others} keys`} made by other people's computers stay${others === 1 ? 's' : ''} on the server: remove the line${others === 1 ? '' : 's'} starting with "guildwise-deploy:" from its authorized_keys.`
+      : '';
+  if (mine.length === 0)
+    return {
+      state: 'skipped',
+      commandId: null,
+      reason: `The key on that server was made by a computer that is not yours.${otherNote}`,
+    };
+  let first: string | null = null;
+  const problems: string[] = [];
+  for (const k of mine) {
+    const caps = (k.capabilities ?? []) as string[];
+    if (!k.ws_connected) {
+      problems.push(`${k.ws_name} is offline, so its key was not taken off the server.`);
+      continue;
+    }
+    if (!caps.includes(DEPLOY_CONNECT_CAPABILITY) || !caps.includes(DEPLOY_SETUP_V2_CAPABILITY)) {
+      problems.push(`Guildwise on ${k.ws_name} needs an update to remove its key.`);
+      continue;
+    }
+    const payload: DeployRevokePayload = {
+      projectId,
+      targetId: t.id,
+      alias: String(t.host),
+      publicKey: k.public_key,
+      fingerprint: k.fingerprint,
+      forget: true,
+      ...(opts.forgetAnyway ? { forgetAnyway: true } : {}),
+    };
+    const id = await enqueueOp(ctx, k.workstation_id, 'deploy.revoke', payload);
+    first ??= id;
+  }
+  if (first)
+    return {
+      state: 'started',
+      commandId: first,
+      reason: problems.length || otherNote ? `${problems.join(' ')}${otherNote}`.trim() : null,
+    };
+  return { state: 'skipped', commandId: null, reason: `${problems.join(' ')}${otherNote}`.trim() };
+}
+
 /** The latest look at a server (or at this computer) by this computer, or null. */
 async function latestReport(
   db: Queryable,
@@ -410,6 +477,9 @@ export async function getOp(
       result: op.result ?? null,
       errorText: op.ok ? null : opError(kind, op.result, op.error),
       at: iso(op.at) as string,
+      ...(kind === 'revoke' && (op.result as { localKeyKept?: boolean } | null)?.localKeyKept
+        ? { localKeyKept: true }
+        : {}),
     };
   }
   const cmd = await one(
@@ -669,3 +739,32 @@ export async function decorateTargets(
 void randomUUID;
 void withAppendTx;
 void userActor;
+
+/**
+ * "Forget it anyway": a removal could not take the key off the server and this computer kept its key. After the person
+ * confirmed, the same request is sent again and this time the computer deletes its key material whatever the server says.
+ */
+export async function forgetKeyAnyway(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  projectId: string,
+  commandId: string,
+): Promise<OpStartedDto> {
+  await projectOwnerOrThrow(ctx, user, projectId);
+  const op = await one(
+    ctx.pool,
+    `SELECT o.workstation_id, o.result, c.payload, w.user_id AS ws_user FROM deploy_ops o
+       JOIN runner_commands c ON c.id = o.command_id JOIN workstations w ON w.id = o.workstation_id
+      WHERE o.command_id=$1 AND o.project_id=$2 AND o.kind='revoke'`,
+    [commandId, projectId],
+  );
+  const kept = (op?.result as { localKeyKept?: boolean } | null)?.localKeyKept;
+  if (!op || !kept) throw notFound('there is nothing to forget for that operation');
+  if (op.ws_user !== user.id) throw forbidden('only the person whose computer holds the key can forget it');
+  const payload = DeployRevokePayloadSchema.safeParse({ ...(op.payload as object), forgetAnyway: true });
+  if (!payload.success) throw unprocessable('bad_request', 'that request can no longer be repeated');
+  return {
+    commandId: await enqueueOp(ctx, op.workstation_id, 'deploy.revoke', payload.data),
+    workstationId: op.workstation_id,
+  };
+}

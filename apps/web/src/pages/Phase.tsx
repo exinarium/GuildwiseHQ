@@ -13,7 +13,7 @@ import {
   useSetPhaseFollowups,
 } from '../api/queries/phases.ts';
 import { useProjects } from '../api/queries/projects.ts';
-import { FollowupEditor, followupProblems } from '../components/FollowupEditor.tsx';
+import { FollowupEditor, followupProblems, useEnvironmentOptions } from '../components/FollowupEditor.tsx';
 import {
   Badge,
   Button,
@@ -370,6 +370,7 @@ function Followups({
 }) {
   const save = useSetPhaseFollowups(phase.id);
   const unavailable = useFollowupAvailability(phase.projectId);
+  const envs = useEnvironmentOptions(phase.projectId);
   const server = phase.followupDetails.map(specOf);
   const [draft, setDraft] = useState<FollowupSpec[] | null>(null);
   const list = draft ?? server;
@@ -378,13 +379,19 @@ function Followups({
       <h2 className="mb-2 text-lg font-semibold text-fg">Follow-ups</h2>
       {phase.canEditFollowups ? (
         <>
-          <FollowupEditor unavailable={unavailable} value={list} onChange={setDraft} targets={targets} />
+          <FollowupEditor
+            unavailable={unavailable}
+            value={list}
+            onChange={setDraft}
+            targets={targets}
+            projectId={phase.projectId}
+          />
           <ErrorBox error={save.error} />
           <div className="mt-2 flex items-center gap-2">
             <Button
               variant="primary"
               data-testid="save-followups"
-              disabled={save.isPending || draft === null || followupProblems(list, targets).length > 0}
+              disabled={save.isPending || draft === null || followupProblems(list, targets, envs).length > 0}
               onClick={() => save.mutate(list, { onSuccess: () => setDraft(null) })}
             >
               Save follow-ups
@@ -395,7 +402,13 @@ function Followups({
           </div>
         </>
       ) : (
-        <FollowupEditor value={server} targets={targets} readOnly details={phase.followupDetails} />
+        <FollowupEditor
+          value={server}
+          targets={targets}
+          readOnly
+          details={phase.followupDetails}
+          projectId={phase.projectId}
+        />
       )}
     </Panel>
   );

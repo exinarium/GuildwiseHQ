@@ -1,16 +1,56 @@
 import type { DeployTargetDto, FollowupSpec, PhaseFollowupDto } from '@aom/shared';
 import { Link } from 'react-router';
+import { useSetupState } from '../api/queries/deploy-setup.ts';
 import { HelpHint } from './help/HelpHint.tsx';
 import { Badge, Button, Select, TextArea } from './ui.tsx';
 
 type Spec = FollowupSpec;
 
+export interface EnvOption {
+  name: string;
+  label: string;
+  targetId: string;
+  /** The live site: its release waits for the Owner. */
+  live: boolean;
+}
+
+/** The project's environments as choices for a follow-up (test sites first, the live site last). */
+export function useEnvironmentOptions(projectId: string | undefined): EnvOption[] {
+  const q = useSetupState(projectId);
+  const s = q.data;
+  if (!s) return [];
+  return (s.current.setup?.environments ?? [])
+    .map((e) => {
+      const t = s.targets.find((x) => x.name.toLowerCase() === e.target.toLowerCase());
+      return { name: e.name, label: e.label, targetId: t?.id ?? '', live: !!t?.production };
+    })
+    .sort((a, b) => Number(a.live) - Number(b.live));
+}
+
+const envOf = (f: Spec, envs: readonly EnvOption[]) => {
+  const named = f.kind === 'deploy' ? f.environment : undefined;
+  return (
+    envs.find((e) => e.name === named) ??
+    envs.find((e) => f.kind === 'deploy' && !!f.targetId && e.targetId === f.targetId)
+  );
+};
+
+const envChoiceLabel = (e: EnvOption) => (e.live ? `${e.label} (waits for you)` : e.label);
+
 /** What stops the list being saved: a deploy needs a target, a custom item needs its instruction. */
-export function followupProblems(list: readonly Spec[], targets: readonly DeployTargetDto[]): string[] {
+export function followupProblems(
+  list: readonly Spec[],
+  targets: readonly DeployTargetDto[],
+  envs: readonly EnvOption[] = [],
+): string[] {
   const out: string[] = [];
   list.forEach((f, i) => {
     const n = i + 1;
-    if (f.kind === 'deploy') {
+    if (f.kind === 'deploy' && envs.length > 0) {
+      const e = envOf(f, envs);
+      if (!e) out.push(`Follow-up ${n}: choose where to release`);
+      else if (!e.targetId) out.push(`Follow-up ${n}: ${e.label} has no place yet`);
+    } else if (f.kind === 'deploy') {
       if (!f.targetId) out.push(`Follow-up ${n}: choose a deploy target`);
       else if (!targets.some((t) => t.id === f.targetId))
         out.push(`Follow-up ${n}: the deploy target no longer exists`);
@@ -23,7 +63,7 @@ export function followupProblems(list: readonly Spec[], targets: readonly Deploy
   return out;
 }
 
-const KIND_LABEL = { deploy: 'Deploy', regression: 'Regression run', custom: 'Custom' } as const;
+const KIND_LABEL = { deploy: 'Release', regression: 'Regression run', custom: 'Custom' } as const;
 const STATUS_TONE = {
   pending: 'neutral',
   queued: 'neutral',
@@ -49,7 +89,10 @@ export function FollowupEditor({
   readOnly = false,
   details,
   unavailable = {},
+  projectId,
 }: {
+  /** The project whose environments a release follow-up can target. */
+  projectId?: string;
   /** Kinds the project cannot run (no repository, no test stage), with the reason: greyed out (`useFollowupAvailability`). */
   unavailable?: { deploy?: string | undefined; regression?: string | undefined };
   value: Spec[];
@@ -58,6 +101,7 @@ export function FollowupEditor({
   readOnly?: boolean;
   details?: PhaseFollowupDto[];
 }) {
+  const envs = useEnvironmentOptions(projectId);
   const set = (i: number, patch: Partial<Spec>) =>
     onChange?.(value.map((f, j) => (j === i ? ({ ...f, ...patch } as Spec) : f)));
   const move = (i: number, d: -1 | 1) => {
@@ -71,15 +115,18 @@ export function FollowupEditor({
   };
   const add = (kind: Spec['kind']) => {
     const first = targets[0]?.id;
+    const firstEnv = envs[0];
     const item: Spec =
       kind === 'deploy'
-        ? { kind, targetId: first ?? '', note: '' }
+        ? firstEnv
+          ? ({ kind, environment: firstEnv.name, note: '' } as Spec)
+          : { kind, targetId: first ?? '', note: '' }
         : kind === 'regression'
           ? { kind, platform: 'web', note: '' }
           : { kind, instruction: '', note: '' };
     onChange?.([...value, item]);
   };
-  const problems = readOnly ? [] : followupProblems(value, targets);
+  const problems = readOnly ? [] : followupProblems(value, targets, envs);
 
   return (
     <div className="flex flex-col gap-2" data-testid="followup-editor">
@@ -146,8 +193,11 @@ export function FollowupEditor({
                 <div className="mt-1 text-sm">
                   {f.kind === 'deploy' && (
                     <p>
-                      Deploy to{' '}
-                      {d?.targetName ?? targets.find((t) => t.id === f.targetId)?.name ?? 'a removed target'}
+                      Release to{' '}
+                      {envOf(f, envs)?.label ??
+                        d?.targetName ??
+                        targets.find((t) => t.id === f.targetId)?.name ??
+                        'a removed place'}
                     </p>
                   )}
                   {f.kind === 'regression' && (
@@ -164,7 +214,24 @@ export function FollowupEditor({
                 </div>
               ) : (
                 <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                  {f.kind === 'deploy' && (
+                  {f.kind === 'deploy' && envs.length > 0 && (
+                    <Select
+                      label="Release to"
+                      value={envOf(f, envs)?.name ?? ''}
+                      onChange={(e) => {
+                        const env = envs.find((x) => x.name === e.target.value);
+                        set(i, { targetId: undefined, environment: env?.name ?? '' });
+                      }}
+                    >
+                      <option value="">Choose a site</option>
+                      {envs.map((e) => (
+                        <option key={e.name} value={e.name}>
+                          {envChoiceLabel(e)}
+                        </option>
+                      ))}
+                    </Select>
+                  )}
+                  {f.kind === 'deploy' && envs.length === 0 && (
                     <Select
                       label="Deploy target"
                       value={f.targetId}
@@ -273,6 +340,17 @@ export function FollowupEditor({
                 <li key={p}>{p}</li>
               ))}
             </ul>
+          )}
+          {envs.length > 0 && value.some((f) => f.kind === 'deploy') && (
+            <p className="text-xs text-muted" data-testid="followup-sentence">
+              When this phase is done:{' '}
+              {value
+                .filter((f) => f.kind === 'deploy')
+                .map((f) => envOf(f, envs))
+                .map((e, n) => `${n === 0 ? 'release to' : 'then'} ${e ? envChoiceLabel(e) : 'a site'}`)
+                .join(', ')}
+              .
+            </p>
           )}
           <p className="text-xs text-subtle">
             They run in this order, one at a time, after you approve them. A failed one stops the ones after

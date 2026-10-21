@@ -1,11 +1,14 @@
 export * from '../events/delivery-types.ts';
 export * from './changes.ts';
 export * from './connect.ts';
+export * from './environments.ts';
 export * from './gate.ts';
+export * from './gate-text.ts';
 export * from './move.ts';
 export * from './probe.ts';
 export * from './protocol.ts';
 export * from './recipe.ts';
 export * from './setup.ts';
 export * from './setup-compile.ts';
+export { STATE_PATHS_FN } from './setup-compile-direct.ts';
 export * from './setup-templates.ts';

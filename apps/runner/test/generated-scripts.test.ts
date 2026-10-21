@@ -178,6 +178,25 @@ describe('the generated UAT script, against a fake docker', () => {
     expect(w.forbidden()).toEqual([]);
   });
 
+  it('M3: an app that was started from other compose files or another project folder is not restarted', () => {
+    for (const [label, text] of [
+      [`${'$HOME'}/uat/docker-compose.yml,/tmp/extra.yml|$HOME/uat|aom-uat|`, 'several compose files'],
+      ['$HOME/other/docker-compose.yml|$HOME/other|aom-uat|', 'not from'],
+      ['$HOME/uat/docker-compose.yml|$HOME/elsewhere|aom-uat|', 'another project folder'],
+      ['$HOME/uat/docker-compose.yml|$HOME/uat|aom-uat|/x/.env', '--env-file'],
+    ] as const) {
+      const w = uatWorld();
+      writeFileSync(join(w.root, 'labels'), `${label.replaceAll('$HOME', w.home)}\n`);
+      for (const dry of ['1', '0']) {
+        const r = run(w, uat(), { AOM_DEPLOY_DRY_RUN: dry });
+        expect(r.code, r.out).not.toBe(0);
+        expect(r.out).toContain(text);
+        expect(existsSync(join(w.home, 'uat', 'backups'))).toBe(false);
+        expect(existsSync(join(w.root, 'up.log'))).toBe(false);
+      }
+    }
+  });
+
   it('a real run: backup (newest 20 kept), only the app restarted from the checkout through an override file, tags pruned', () => {
     const w = uatWorld();
     const backups = join(w.home, 'uat', 'backups');

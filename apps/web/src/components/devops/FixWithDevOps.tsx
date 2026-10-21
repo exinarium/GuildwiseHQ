@@ -32,6 +32,7 @@ export function FixWithDevOps({
   repoId,
   onDone,
   doneLabel = 'Check again',
+  label = 'Fix',
 }: {
   workstationId: string;
   /** One line naming what is broken, for example "dotnet (dotnet-maui) is missing on Desk". */
@@ -45,6 +46,8 @@ export function FixWithDevOps({
   /** Runs the check again; called once when the request is done. */
   onDone?: (() => void) | undefined;
   doneLabel?: string;
+  /** The button's words (default "Fix"). */
+  label?: string;
 }) {
   const create = useCreateDevOpsRequest();
   const requests = useDevOpsRequests(workstationId);
@@ -103,10 +106,10 @@ export function FixWithDevOps({
           size="sm"
           loading={pending}
           onClick={send}
-          aria-label={`${request ? 'Fix again' : 'Fix'}: ${problem}`}
+          aria-label={`${request ? 'Fix again' : label}: ${problem}`}
         >
           <Wrench aria-hidden="true" className="size-3.5" />
-          {request ? 'Fix again' : 'Fix'}
+          {request ? 'Fix again' : label}
         </Button>
       )}
       {s && (

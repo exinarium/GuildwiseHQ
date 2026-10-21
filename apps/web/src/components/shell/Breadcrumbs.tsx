@@ -16,6 +16,14 @@ export function crumbsFor(pathname: string, search: string, projects: ProjectDto
     ['/p/:key/archive', (p) => [{ label: name(p.key), to: `/p/${p.key}/board` }, { label: 'Archive' }]],
     ['/p/:key/feed', (p) => [{ label: name(p.key), to: `/p/${p.key}/board` }, { label: 'Feed' }]],
     [
+      '/p/:key/environments',
+      (p) => [
+        { label: 'Projects', to: '/projects' },
+        { label: name(p.key), to: `/p/${p.key}/board` },
+        { label: 'Environments' },
+      ],
+    ],
+    [
       '/p/:key/phases/:number',
       (p) => [{ label: name(p.key), to: `/p/${p.key}/board` }, { label: `Phase ${p.number}` }],
     ],
@@ -65,7 +73,7 @@ export function crumbsFor(pathname: string, search: string, projects: ProjectDto
     ],
     ['/integrations', () => [{ label: 'Organization' }, { label: 'Integrations' }]],
     ['/workstations', () => [{ label: 'Organization' }, { label: 'Workstations' }]],
-    ['/deploys', () => [{ label: 'Organization' }, { label: 'Deploys' }]],
+    ['/releases', () => [{ label: 'Organization' }, { label: 'Releases' }]],
     ['/metrics', () => [{ label: 'Organization' }, { label: 'Metrics' }]],
     ['/ledger', () => [{ label: 'Knowledge' }, { label: 'Ledger' }]],
     ['/interests', () => [{ label: 'Knowledge' }, { label: 'Interests' }]],

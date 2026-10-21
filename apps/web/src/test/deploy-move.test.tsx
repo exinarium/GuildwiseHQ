@@ -5,7 +5,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MoveWizard } from '../components/delivery/move/MoveWizard.tsx';
-import { OldServers } from '../components/delivery/setup/DeploySetup.tsx';
+import { PlacesPanel } from '../components/environments/PlacesPanel.tsx';
 import { ToastProvider } from '../components/ui.tsx';
 
 // Moving to a new server (design v3), web: the plain-language flow from "choose the new server" to "make it live", and the Owner's
@@ -136,7 +136,7 @@ const state = (over: Partial<SetupStateDto> = {}): SetupStateDto =>
     scan: null,
     scanProblem: null,
     proposal: null,
-    generator: 'setup-1.3',
+    generator: 'setup-1.4',
     improvedAvailable: false,
     ...over,
   }) as SetupStateDto;
@@ -400,7 +400,7 @@ describe('old servers: standby and retire', () => {
     ],
   });
   it('a standby is a fallback that nothing deploys to; a retired server says Guildwise cannot sign in any more', () => {
-    wrap(<OldServers projectId={PROJECT} s={old} />);
+    wrap(<PlacesPanel projectId={PROJECT} s={old} onAddServer={() => {}} />);
     expect(screen.getByTestId(`old-server-${OLD}`)).toHaveTextContent('Standby (fallback)');
     expect(screen.getByTestId(`old-server-${OLD}`)).toHaveTextContent('Nothing deploys here any more');
     expect(screen.getByTestId(`old-server-${ID(34)}`)).toHaveTextContent('Retired');
@@ -410,7 +410,7 @@ describe('old servers: standby and retire', () => {
   it('retire is the Owner’s: the explanation says only the keys go and nothing is deleted; confirming asks the server', async () => {
     const user = userEvent.setup();
     routes[`POST ${base}/delivery/targets/${OLD}/retire`] = () => json({ commandId: ID(99) }, 202);
-    wrap(<OldServers projectId={PROJECT} s={old} />);
+    wrap(<PlacesPanel projectId={PROJECT} s={old} onAddServer={() => {}} />);
     await user.click(screen.getByTestId(`retire-${OLD}`));
     expect(await screen.findByTestId('retire-explainer')).toHaveTextContent('removes the keys it added');
     expect(screen.getByTestId('retire-explainer')).toHaveTextContent('never deletes anything');
@@ -421,13 +421,13 @@ describe('old servers: standby and retire', () => {
   });
 
   it('someone else sees who can do it, not a button', () => {
-    wrap(<OldServers projectId={PROJECT} s={{ ...old, canApprove: false }} />);
+    wrap(<PlacesPanel projectId={PROJECT} s={{ ...old, canApprove: false }} onAddServer={() => {}} />);
     expect(screen.queryByTestId(`retire-${OLD}`)).toBeNull();
     expect(screen.getByText('Only the Owner retires a server.')).toBeInTheDocument();
   });
 
   it('nothing is shown when there is no old server', () => {
-    wrap(<OldServers projectId={PROJECT} s={state()} />);
+    wrap(<PlacesPanel projectId={PROJECT} s={state()} onAddServer={() => {}} />);
     expect(screen.queryByTestId('old-servers')).toBeNull();
   });
 });

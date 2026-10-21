@@ -1,10 +1,12 @@
-import { compileSetup, localAdoptEnv, type ProbeReport, sshShipEnv } from '@aom/shared';
+import { compileSetup, directEnv, localAdoptEnv, type ProbeReport, sshShipEnv } from '@aom/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router';
+import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { DeploySetup } from '../components/delivery/setup/DeploySetup.tsx';
+import { adaptStatus } from '../api/queries/environments.ts';
+import { AdvancedSetup } from '../components/delivery/setup/AdvancedSetup.tsx';
+import { AnswerFields, blockingQuestions, questionKind } from '../components/environments/AnswerFields.tsx';
 import {
   answersFromEnv,
   buildEnv,
@@ -15,8 +17,11 @@ import {
   healthProbeUrls,
   plainLint,
   stacksFromReport,
-} from '../components/delivery/setup/model.ts';
+} from '../components/environments/answers.ts';
+import { cardInfo, placesOf, roleOf, rulesOf, slugName } from '../components/environments/model.ts';
+import { EnvironmentsPointer } from '../components/environments/Pointer.tsx';
 import { ToastProvider } from '../components/ui.tsx';
+import { ProjectEnvironments } from '../pages/ProjectEnvironments.tsx';
 
 const ID = (n: number) => `0192f3a0-0000-7000-8000-${String(n).padStart(12, '0')}`;
 const json = (body: unknown, status = 200) =>
@@ -90,7 +95,7 @@ const state = (over: Record<string, unknown> = {}) => ({
   scan: null,
   scanProblem: null,
   proposal: null,
-  generator: 'setup-1.3',
+  generator: 'setup-1.4',
   ...over,
 });
 const report = (over: Partial<Record<string, unknown>> = {}) =>
@@ -192,7 +197,7 @@ describe('model', () => {
     };
     const env = buildEnv(a, '/home/u');
     expect(env).toMatchObject({
-      name: 'uat',
+      name: 'test-site',
       hosting: 'this_computer',
       trigger: ['after_merge'],
       releasedBy: 'auto',
@@ -309,283 +314,54 @@ describe('model', () => {
   });
 });
 
-describe('overview', () => {
-  it('empty: says nothing is deployed and offers the wizard and a DevOps look', async () => {
-    serve(state());
-    wrap(<DeploySetup projectId={PROJECT} />);
-    expect(await screen.findByTestId('setup-empty')).toHaveTextContent(
-      'Your app is not deployed anywhere yet',
-    );
-    expect(screen.getByTestId('setup-start')).toBeEnabled();
-    expect(screen.getByTestId('setup-scan')).toBeEnabled();
-  });
+// ------------------------------------------------------------------------------------------------ helpers of the page tests
 
-  it('a runner without guided setup is explained, the developer view stays', async () => {
-    serve(
-      state({
-        workstations: [
-          workstation({
-            canProbe: false,
-            blocked: 'Guildwise on Office PC needs an update for guided setup.',
-          }),
-        ],
+const mountPage = () => {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={qc}>
+      <ToastProvider>
+        <MemoryRouter initialEntries={['/p/P5/environments']}>
+          <Routes>
+            <Route path="/p/:projectKey/environments" element={<ProjectEnvironments />} />
+          </Routes>
+        </MemoryRouter>
+      </ToastProvider>
+    </QueryClientProvider>,
+  );
+};
+
+const savedState = (over: Record<string, unknown> = {}, current: Record<string, unknown> = {}): any => {
+  const c = compileSetup({
+    environments: [
+      localAdoptEnv({
+        name: 'uat',
+        label: 'Test site',
+        target: 'shop-uat',
+        composeFile: '~/shop-uat/docker-compose.yml',
+        service: 'app',
+        imageName: 'shop-uat-app',
+        appUrl: 'http://localhost:8080',
       }),
-    );
-    wrap(<DeploySetup projectId={PROJECT} />);
-    expect(await screen.findByTestId('setup-runner-old')).toHaveTextContent(
-      'needs an update for guided setup',
-    );
-    expect(screen.getByTestId('setup-advanced')).toBeInTheDocument();
-  });
-
-  it('a non-owner cannot start; the environments show where, who deploys, reachability and the approval', async () => {
-    const c = compileSetup({
-      environments: [
-        localAdoptEnv({
-          name: 'uat',
-          label: 'Test copy',
-          target: 'Test copy',
-          composeFile: '~/uat/c.yml',
+      sshShipEnv(
+        {
+          name: 'production',
+          label: 'Live site',
+          target: 'shop-live',
+          host: 'prod-server',
+          composeFile: '/opt/shop/docker-compose.yml',
           service: 'app',
-          imageName: 'a',
-          appUrl: 'http://localhost:4700',
-        }),
-        sshShipEnv(
-          {
-            name: 'production',
-            label: 'Live site',
-            target: 'Live',
-            host: 'prod',
-            composeFile: '/opt/p/c.yml',
-            service: 'app',
-            imageName: 'p',
-            imageVar: 'P_IMAGE',
-            healthUrl: 'https://p.example.com/ready',
-          },
-          'uat',
-        ),
-      ],
-    });
-    if (!c.ok) throw new Error('compile');
-    serve(
-      state({
-        canEdit: false,
-        current: {
-          setup: c.setup,
-          handEdited: ['uat'],
-          recipePresent: true,
-          recipeStatus: 'observed',
-          observedHash: 'a'.repeat(64),
-          approvedHash: null,
-          lint: [],
-          dryRunOk: [],
-          custom: false,
+          imageName: 'shop',
+          imageVar: 'SHOP_IMAGE',
+          healthUrl: 'https://shop.example.com/ready',
         },
-        targets: [
-          {
-            id: T_LOCAL,
-            name: 'Test copy',
-            kind: 'local_docker',
-            production: false,
-            workstationId: WS,
-            workstationName: 'Office PC',
-            workstationOnline: true,
-            host: null,
-            appUrl: null,
-            connection: null,
-          },
-          {
-            id: T_PROD,
-            name: 'Live',
-            kind: 'remote_ssh',
-            production: true,
-            workstationId: WS,
-            workstationName: 'Office PC',
-            workstationOnline: false,
-            host: 'prod',
-            appUrl: null,
-            connection: { state: 'asks_password', at, detail: null },
-          },
-        ],
-      }),
-    );
-    wrap(<DeploySetup projectId={PROJECT} />);
-    const prod = await screen.findByTestId('env-card-production');
-    expect(prod).toHaveTextContent('Production');
-    expect(prod).toHaveTextContent('On the server prod');
-    expect(prod).toHaveTextContent('Deploys from Office PC');
-    expect(prod).toHaveTextContent('Offline');
-    expect(prod).toHaveTextContent('Needs a sign-in');
-    expect(prod).toHaveTextContent('Only when you press Release');
-    const uat = screen.getByTestId('env-card-uat');
-    expect(uat).toHaveTextContent('Automatically after changes are merged');
-    expect(screen.getByTestId('env-hand-edited-uat')).toHaveTextContent('edited by hand');
-    expect(screen.queryByTestId('env-edit-uat')).toBeNull();
+        'uat',
+      ),
+    ],
   });
-
-  it('the nudge: an improved version of the steps is offered, updating saves the same setup again and says it needs approval', async () => {
-    const c = compileSetup({
-      environments: [
-        localAdoptEnv({
-          name: 'uat',
-          label: 'Test copy',
-          target: 'T',
-          composeFile: '~/uat/c.yml',
-          service: 'app',
-          imageName: 'a',
-        }),
-      ],
-    });
-    if (!c.ok) throw new Error('compile');
-    const user = userEvent.setup();
-    serve(
-      state({
-        improvedAvailable: true,
-        current: {
-          setup: { ...c.setup, generator: 'setup-1.0' },
-          handEdited: [],
-          recipePresent: true,
-          recipeStatus: 'approved',
-          observedHash: 'a'.repeat(64),
-          approvedHash: 'a'.repeat(64),
-          lint: [],
-          dryRunOk: ['uat'],
-          custom: false,
-        },
-      }),
-    );
-    routes[`POST /api/projects/${PROJECT}/delivery/setup/preview`] = () =>
-      json({
-        ok: true,
-        issues: [],
-        hash: 'b'.repeat(64),
-        files: [],
-        keep: [],
-        lint: [],
-        changes: [],
-        differsFromCurrent: true,
-        needsDryRun: ['uat'],
-      });
-    routes[`POST /api/projects/${PROJECT}/delivery/setup/publish`] = () =>
-      json({ commandId: ID(5), hash: 'b'.repeat(64) }, 202);
-    wrap(<DeploySetup projectId={PROJECT} />);
-    expect(await screen.findByTestId('setup-improved')).toHaveTextContent(
-      'An improved version of these steps is available',
-    );
-    await user.click(screen.getByTestId('setup-improved-update'));
-    await waitFor(() =>
-      expect(calls.find((x) => x.url.endsWith('/setup/publish'))?.body).toMatchObject({
-        setupHash: 'b'.repeat(64),
-      }),
-    );
-    expect(calls.find((x) => x.url.endsWith('/setup/publish'))?.body.setup.generator).toBe('setup-1.0');
-    expect(await screen.findByText(/needs the Owner’s approval/)).toBeInTheDocument();
-  });
-
-  it('the nudge: an environment without a web address says so in plain words and points to the field (final review)', async () => {
-    const c = compileSetup({
-      environments: [
-        localAdoptEnv({
-          name: 'uat',
-          label: 'Test copy',
-          target: 'T',
-          composeFile: '~/uat/c.yml',
-          service: 'app',
-          imageName: 'a',
-        }),
-      ],
-    });
-    if (!c.ok) throw new Error('compile');
-    const user = userEvent.setup();
-    serve(
-      state({
-        improvedAvailable: true,
-        current: {
-          setup: { ...c.setup, generator: 'setup-1.0' },
-          handEdited: [],
-          recipePresent: true,
-          recipeStatus: 'approved',
-          observedHash: 'a'.repeat(64),
-          approvedHash: 'a'.repeat(64),
-          lint: [],
-          dryRunOk: ['uat'],
-          custom: false,
-        },
-      }),
-    );
-    routes[`POST /api/projects/${PROJECT}/delivery/setup/preview`] = () =>
-      json({
-        ok: false,
-        issues: ['uat: the health check uses the app address, but no app address is set'],
-        hash: null,
-        files: [],
-        keep: [],
-        lint: [],
-        changes: [],
-        differsFromCurrent: false,
-        needsDryRun: [],
-      });
-    wrap(<DeploySetup projectId={PROJECT} />);
-    await user.click(await screen.findByTestId('setup-improved-update'));
-    const box = await screen.findByTestId('setup-improved-issues');
-    expect(box).toHaveTextContent('“Test copy” has no web address yet');
-    expect(box).toHaveTextContent('Address Guildwise checks after an update');
-    expect(box).not.toHaveTextContent('app address is set');
-    expect(calls.some((x) => x.url.endsWith('/setup/publish'))).toBe(false);
-  });
-
-  it('approval: a script edited by hand, or a recipe nobody generated, is tried too (every environment)', async () => {
-    const c = compileSetup({
-      environments: [
-        localAdoptEnv({
-          name: 'uat',
-          label: 'Test copy',
-          target: 'T',
-          composeFile: '~/uat/c.yml',
-          service: 'app',
-          imageName: 'a',
-        }),
-      ],
-    });
-    if (!c.ok) throw new Error('compile');
-    serve(
-      state({
-        current: {
-          setup: c.setup,
-          handEdited: ['uat'],
-          recipePresent: true,
-          recipeStatus: 'observed',
-          observedHash: 'a'.repeat(64),
-          approvedHash: null,
-          lint: [],
-          dryRunOk: [],
-          dryRunMissing: ['uat'],
-          envNames: ['uat'],
-          custom: false,
-        },
-      }),
-    );
-    wrap(<DeploySetup projectId={PROJECT} />);
-    expect(await screen.findByTestId('dryrun-uat')).toHaveTextContent('Not tried yet');
-    expect(screen.getByTestId('setup-approve')).toBeDisabled();
-  });
-
-  it('approval: each guided environment is tried first; the button waits for that', async () => {
-    const c = compileSetup({
-      environments: [
-        localAdoptEnv({
-          name: 'uat',
-          label: 'Test copy',
-          target: 'T',
-          composeFile: '~/uat/c.yml',
-          service: 'app',
-          imageName: 'a',
-        }),
-      ],
-    });
-    if (!c.ok) throw new Error('compile');
-    const user = userEvent.setup();
-    const cur = (dryRunOk: string[]) => ({
+  if (!c.ok) throw new Error('compile');
+  return state({
+    current: {
       setup: c.setup,
       handEdited: [],
       recipePresent: true,
@@ -593,574 +369,321 @@ describe('overview', () => {
       observedHash: 'a'.repeat(64),
       approvedHash: null,
       lint: [],
-      dryRunOk,
+      dryRunOk: [],
+      dryRunMissing: ['uat', 'production'],
       custom: false,
-    });
-    serve(state({ current: cur([]) }));
-    routes[`POST /api/projects/${PROJECT}/delivery/setup/dry-run`] = () =>
-      json({ message: 'queued', runs: [{ status: 'queued' }] });
-    wrap(<DeploySetup projectId={PROJECT} />);
-    expect(await screen.findByTestId('setup-approve')).toBeDisabled();
-    expect(screen.getByTestId('dryrun-uat')).toHaveTextContent('Not tried yet');
-    await user.click(screen.getByTestId('dryrun-run-uat'));
-    await waitFor(() =>
-      expect(calls.find((x) => x.url.endsWith('/setup/dry-run'))?.body).toEqual({ env: 'uat' }),
-    );
-    expect(await screen.findByTestId('dryrun-message')).toHaveTextContent('queued');
-  });
-
-  it('approval: tried, and only the Owner presses Approve', async () => {
-    const c = compileSetup({
-      environments: [
-        localAdoptEnv({
-          name: 'uat',
-          label: 'Test copy',
-          target: 'T',
-          composeFile: '~/uat/c.yml',
-          service: 'app',
-          imageName: 'a',
-        }),
-      ],
-    });
-    if (!c.ok) throw new Error('compile');
-    const user = userEvent.setup();
-    serve(
-      state({
-        canApprove: true,
-        current: {
-          setup: c.setup,
-          handEdited: [],
-          recipePresent: true,
-          recipeStatus: 'observed',
-          observedHash: 'b'.repeat(64),
-          approvedHash: null,
-          lint: [],
-          dryRunOk: ['uat'],
-          custom: false,
-        },
-      }),
-    );
-    routes[`POST /api/projects/${PROJECT}/delivery/approve`] = () => json({});
-    wrap(<DeploySetup projectId={PROJECT} />);
-    const btn = await screen.findByTestId('setup-approve');
-    expect(btn).toBeEnabled();
-    await user.click(btn);
-    await waitFor(() =>
-      expect(calls.find((x) => x.url.endsWith('/delivery/approve'))?.body).toEqual({ hash: 'b'.repeat(64) }),
-    );
-  });
-});
-
-describe('the wizard: on this computer', () => {
-  it('walks from the kind to the review, shows what was found and not touched, and saves the previewed hash', async () => {
-    const user = userEvent.setup();
-    let probes: unknown[] = [];
-    let publish: unknown = null;
-    routes[`GET /api/projects/${PROJECT}/delivery/setup`] = () => json(state({ probes, publish }));
-    routes[`POST /api/projects/${PROJECT}/delivery/probe`] = () => {
-      probes = [probe({ report: uatReport() })];
-      return json({ commandId: ID(77), workstationId: WS }, 202);
-    };
-    routes[`POST /api/projects/${PROJECT}/deploy-targets`] = () => json({ id: T_LOCAL });
-    routes[`PUT /api/projects/${PROJECT}/delivery/setup`] = () => json(state());
-    routes[`POST /api/projects/${PROJECT}/delivery/setup/preview`] = (init) => {
-      const body = JSON.parse(String(init.body));
-      const c = compileSetup(body.setup);
-      return json({
-        ok: true,
-        issues: [],
-        hash: c.ok ? c.hash : null,
-        files: [],
-        keep: [],
-        unmodelled: ['scripts/smoke.sh'],
-        removing: body.removeFiles ?? [],
-        lint: [],
-        changes: [
-          {
-            group: 'each_deploy',
-            env: 'uat',
-            text: 'Back up the database (postgres) to /home/u/uat/backups',
-          },
-        ],
-        differsFromCurrent: true,
-        needsDryRun: ['uat'],
-      });
-    };
-    routes[`POST /api/projects/${PROJECT}/delivery/setup/publish`] = () => {
-      publish = { setupHash: 'x', commandId: ID(88), status: 'written', error: null, at };
-      return json({ commandId: ID(88), hash: 'x' }, 202);
-    };
-    wrap(<DeploySetup projectId={PROJECT} />);
-    await user.click(await screen.findByTestId('setup-start'));
-    expect(screen.getByTestId('wizard-step')).toHaveTextContent('Step 1 of 6');
-    await user.click(screen.getByTestId('wizard-next')); // test copy (default)
-    await user.click(screen.getByTestId('where-computer'));
-    await user.click(screen.getByTestId('wizard-next'));
-    // the look at Docker starts by itself and the stack shows up
-    await waitFor(() =>
-      expect(calls.find((x) => x.url.endsWith('/delivery/probe'))?.body).toMatchObject({
-        scope: 'local',
+      ...current,
+    },
+    targets: [
+      {
+        id: T_LOCAL,
+        name: 'shop-uat',
+        kind: 'local_docker',
+        production: false,
         workstationId: WS,
-      }),
-    );
-    const stack = await screen.findByTestId('stack-choice', undefined, { timeout: 5000 });
-    expect(stack).toHaveTextContent('uat');
-    expect(stack).toHaveTextContent('3 parts (postgres, app, mailpit)');
-    expect(stack).toHaveTextContent('Running now');
-    await user.click(stack);
-    // what we found: reuse, each update, not touched
-    const found = await screen.findByTestId('found-changes');
-    expect(within(found).getByTestId('changes-reuse')).toHaveTextContent('Compose file');
-    expect(within(found).getByTestId('changes-each_deploy')).toHaveTextContent(
-      'Rebuild and restart only "app"',
-    );
-    const untouched = within(found).getByTestId('changes-untouched');
-    expect(untouched).toHaveTextContent('Part "mailpit"');
-    expect(untouched).toHaveTextContent('Container other-redis');
-    expect(untouched).toHaveTextContent('Volume "other_data"');
-    expect((screen.getByTestId('details-app') as HTMLSelectElement).value).toBe('app');
-    expect((screen.getByTestId('details-db') as HTMLSelectElement).value).toBe('postgres');
-    expect(screen.getByTestId('details-production')).not.toBeChecked();
-    await user.click(screen.getByTestId('wizard-next'));
-    // when: automatic after merge is the default
-    expect(screen.getByTestId('when-auto')).toHaveAttribute('aria-pressed', 'true');
-    await user.click(screen.getByTestId('wizard-next'));
-    // the target is made (a test copy, not production), the preview shows, and Save sends the hash that was previewed
-    await waitFor(() =>
-      expect(calls.find((x) => x.method === 'POST' && x.url.endsWith('/deploy-targets'))?.body).toMatchObject(
-        { name: 'Test copy', kind: 'local_docker', workstationId: WS, production: false },
-      ),
-    );
-    const save = await screen.findByTestId('review-save');
-    await waitFor(() => expect(save).toBeEnabled());
-    // a file the setup does not make is kept unless it is ticked
-    const other = await screen.findByTestId('review-unmodelled');
-    expect(other).toHaveTextContent('scripts/smoke.sh');
-    expect(other).toHaveTextContent('kept');
-    await user.click(within(other).getByRole('checkbox'));
-    await waitFor(() =>
-      expect(calls.filter((x) => x.url.endsWith('/setup/preview')).at(-1)?.body).toMatchObject({
-        removeFiles: ['scripts/smoke.sh'],
-      }),
-    );
-    await user.click(await screen.findByTestId('review-save'));
-    await waitFor(() =>
-      expect(calls.find((x) => x.url.endsWith('/setup/publish'))?.body).toMatchObject({
-        setupHash: expect.stringMatching(/^[0-9a-f]{64}$/),
-        removeFiles: ['scripts/smoke.sh'],
-      }),
-    );
-    const published = calls.find((x) => x.url.endsWith('/setup/publish'))?.body;
-    const previewed = calls.find((x) => x.url.endsWith('/setup/preview'))?.body;
-    expect(compileSetup(published.setup)).toMatchObject({ ok: true, hash: published.setupHash });
-    expect(published.setup).toEqual(previewed.setup);
-    expect(published.setup.environments[0]).toMatchObject({
-      name: 'uat',
-      trigger: ['after_merge'],
-      app: {
-        service: 'app',
-        composeProject: 'uat',
-        composeFile: expect.stringMatching(/uat\/docker-compose.yml$/),
+        workstationName: 'Office PC',
+        workstationOnline: true,
+        host: null,
+        appUrl: 'http://localhost:8080',
+        connection: null,
       },
+      {
+        id: T_PROD,
+        name: 'shop-live',
+        kind: 'remote_ssh',
+        production: true,
+        workstationId: WS,
+        workstationName: 'Office PC',
+        workstationOnline: true,
+        host: 'prod-server',
+        appUrl: 'https://shop.example.com',
+        connection: {
+          state: 'reachable',
+          at: new Date().toISOString(),
+          detail: null,
+          method: 'existing_alias',
+        },
+        keys: [],
+        role: 'active',
+      },
+    ],
+    ...over,
+  });
+};
+
+const serveProject = () => {
+  routes['GET /api/projects'] = () =>
+    json({ projects: [{ id: PROJECT, key: 'P5', name: 'Flow5', workflowKey: 'code', myRole: 'owner' }] });
+};
+
+describe('the Environments page: model', () => {
+  it('roles, names, rules in sentences and the state of a card', () => {
+    const s = savedState();
+    const envs = s.current.setup?.environments ?? [];
+    const places = placesOf(s as never);
+    expect(roleOf(envs[0] as never)).toBe('test');
+    expect(roleOf(envs[1] as never)).toBe('live');
+    expect(slugName('Test site', ['test-site'])).toBe('test-site-2');
+    expect(rulesOf(envs[1] as never, (n) => (n === 'uat' ? 'test site' : n))).toEqual([
+      'test site is healthy on the same version for 10 minutes',
+      'You approve every release',
+    ]);
+    const info = cardInfo({
+      s: s as never,
+      env: envs[0] as never,
+      draft: false,
+      place: places[0],
+      status: undefined,
     });
-    expect(await screen.findByTestId('review-saved')).toHaveTextContent('Nothing runs before that');
-  });
-
-  it('Docker missing is an answer with Check again; nothing running offers a DevOps look', async () => {
-    const user = userEvent.setup();
-    let probes: unknown[] = [];
-    routes[`GET /api/projects/${PROJECT}/delivery/setup`] = () => json(state({ probes }));
-    routes[`POST /api/projects/${PROJECT}/delivery/probe`] = () => {
-      probes = [
-        probe({
-          error: 'docker_missing',
-          errorText: 'Docker is not installed on this computer. Install Docker, then check again.',
-        }),
-      ];
-      return json({ commandId: ID(77), workstationId: WS }, 202);
+    expect(info.state).toBe('needs_try');
+    expect(info.chip.label).toBe('Needs a try');
+    expect(info.strip).toEqual({ saved: true, tried: false, approved: false });
+    const tried = savedState({}, { dryRunMissing: [], dryRunOk: ['uat', 'production'] });
+    expect(
+      cardInfo({
+        s: tried as never,
+        env: envs[0] as never,
+        draft: false,
+        place: places[0],
+        status: undefined,
+      }).state,
+    ).toBe('waiting_approval');
+    const approved = savedState({}, { dryRunMissing: [], recipeStatus: 'approved' });
+    expect(
+      cardInfo({
+        s: approved as never,
+        env: envs[1] as never,
+        draft: false,
+        place: places[1],
+        status: {
+          env: 'production',
+          version: '0.9.2',
+          commit: 'a',
+          since: null,
+          health: 'healthy',
+          appUrl: null,
+          lastRun: null,
+          waitingRelease: {
+            commit: 'b',
+            version: '0.9.4',
+            cards: [],
+            rulesMet: false,
+            waitingFor: ['test site healthy for 3 more minutes'],
+            places: [],
+          },
+        },
+      }),
+    ).toMatchObject({ state: 'blocked', sentence: 'Waiting for: test site healthy for 3 more minutes.' });
+    // a draft is "not saved", and a place nobody can sign in to blocks updates with the reason
+    expect(
+      cardInfo({ s: s as never, env: envs[0] as never, draft: true, place: places[0], status: undefined })
+        .sentence,
+    ).toBe('Not saved. Nothing has changed yet.');
+    const off = savedState({}, { dryRunMissing: [], recipeStatus: 'approved' });
+    (off.targets[1] as { connection: unknown }).connection = {
+      state: 'unreachable',
+      at,
+      detail: null,
+      method: 'existing_alias',
     };
-    wrap(<DeploySetup projectId={PROJECT} />);
-    await user.click(await screen.findByTestId('setup-start'));
-    await user.click(screen.getByTestId('wizard-next'));
-    await user.click(screen.getByTestId('where-computer'));
-    await user.click(screen.getByTestId('wizard-next'));
-    expect(await screen.findByTestId('probe-error', undefined, { timeout: 5000 })).toHaveTextContent(
-      'Docker is not installed',
-    );
-    expect(screen.getByTestId('wizard-next')).toBeDisabled();
+    const offPlaces = placesOf(off as never);
+    expect(
+      cardInfo({
+        s: off as never,
+        env: envs[1] as never,
+        draft: false,
+        place: offPlaces[1],
+        status: undefined,
+      }),
+    ).toMatchObject({ state: 'cannot_reach', action: 'check' });
   });
 
-  it('"Not sure" starts a deploy scan', async () => {
-    const user = userEvent.setup();
-    serve(state());
-    routes[`POST /api/projects/${PROJECT}/scan`] = () => json({ requestId: ID(5) }, 202);
-    wrap(<DeploySetup projectId={PROJECT} />);
-    await user.click(await screen.findByTestId('setup-start'));
-    await user.click(screen.getByTestId('wizard-next'));
-    await user.click(screen.getByTestId('where-scan'));
-    await waitFor(() => expect(calls.find((x) => x.url.endsWith('/scan'))?.body).toEqual({ area: 'deploy' }));
+  it('a place that repeats another (same server, same computer) is marked once, with what uses it', () => {
+    const s = savedState();
+    s.targets.push({ ...(s.targets[0] as object), id: ID(40), name: 'Test copy' } as never);
+    s.targets.push({ ...(s.targets[1] as object), id: ID(41), name: 'live again' } as never);
+    const places = placesOf(s as never);
+    expect(places[0]?.duplicateOf).toBeNull();
+    expect(places[2]?.duplicateOf).toBe(T_LOCAL);
+    expect(places[3]?.duplicateOf).toBe(T_PROD);
+    expect(places[0]?.usedBy.map((u) => u.label)).toEqual(['Test site']);
+    expect(places[2]?.usedBy).toEqual([]);
+  });
+
+  it('questions get the control they need and defaults do not block', () => {
+    expect(
+      questionKind({ path: '/a', question: 'Which part is your app?', options: ['app', 'worker', 'web'] }),
+    ).toBe('choice');
+    expect(
+      questionKind({
+        path: '/a',
+        question: 'Is it live?',
+        options: ['Yes, customers use it', 'No, a test site'],
+      }),
+    ).toBe('yesno');
+    expect(questionKind({ path: '/a', question: 'Which port does the website use?', default: '3000' })).toBe(
+      'number',
+    );
+    expect(questionKind({ path: '/a', question: 'What is the site called?' })).toBe('text');
+    const qs = [
+      { path: '/a', question: 'Which part is your app?', options: ['app', 'web'] },
+      { path: '/b', question: 'Port?', default: '3000', optional: true },
+      { path: '/c', question: 'Is it live?', kind: 'confirm' as const },
+    ];
+    expect(blockingQuestions(qs).map((q) => q.path)).toEqual(['/a', '/c']);
+    expect(blockingQuestions(qs.map((q) => ({ ...q, answer: 'app' })))).toEqual([]);
+    expect(questionKind(qs[2] as never)).toBe('yesno');
   });
 });
 
-describe('the wizard: on my own server', () => {
-  const hosts = (...h: Array<Record<string, unknown>>) => report({ scope: 'ssh_hosts', sshHosts: h });
-  const serverReport = () =>
-    report({
-      scope: 'ssh_target',
-      host: 'prod-server',
-      containers: [
+describe('the server status and places', () => {
+  const serverStatus = (over: Record<string, unknown> = {}) => ({
+    env: 'production',
+    label: 'Live site',
+    role: 'live',
+    hosting: 'ssh',
+    runtime: 'docker',
+    placeId: T_PROD,
+    placeName: 'shop-live',
+    appUrl: null,
+    releasedBy: 'owner',
+    updates: 'when you release',
+    rules: [],
+    current: {
+      runId: ID(60),
+      commit: 'abc1234def',
+      version: '0.9.2',
+      since: at,
+      releasedBy: 'Ada',
+      kind: 'release',
+    },
+    health: { state: 'healthy', at, detail: null },
+    lastRun: null,
+    waitingRelease: { runId: ID(61), commit: 'fff0000aaa', waitingFor: 'owner' },
+    blockedBy: ['test site healthy for 3 more minutes'],
+    savedState: 'saved',
+    triedState: 'tried',
+    approvalState: 'approved',
+    openQuestions: 0,
+    state: 'blocked',
+    stateText: 'Waiting for: test site healthy for 3 more minutes.',
+    ...over,
+  });
+
+  it('the card uses the server verdict and sentence, and the queue says which runs a Release presses', () => {
+    const adapted = adaptStatus(
+      serverStatus() as never,
+      [
         {
-          name: 'g-app-1',
-          project: 'g',
-          service: 'app',
-          image: 'guildwise-hq:4f2c1ab',
-          state: 'running',
-          ports: [],
-        },
-        { name: 'caddy', image: 'caddy:2', state: 'running', ports: [] },
-      ],
-      composeFiles: [
-        {
-          path: '/opt/app/docker-compose.yml',
-          project: 'g',
-          services: [
+          projectId: PROJECT,
+          projectKey: 'P5',
+          env: 'production',
+          commit: 'fff0000aaa',
+          waitingFor: 'owner',
+          requestedAt: at,
+          gateNow: { satisfied: false, missing: [] },
+          targets: [
             {
-              name: 'app',
-              image: '${GUILDWISE_IMAGE}',
-              ports: [],
-              volumes: [],
-              envFiles: [],
-              vars: ['GUILDWISE_IMAGE'],
-            },
-            {
-              name: 'postgres',
-              image: 'postgres:18',
-              database: 'postgres',
-              ports: [],
-              volumes: [],
-              envFiles: [],
-              vars: [],
+              runId: ID(61),
+              targetId: T_PROD,
+              targetName: 'shop-live',
+              production: true,
+              host: 'h',
+              workstationName: 'PC',
             },
           ],
-          volumes: ['pgdata'],
         },
-      ],
-      folders: [
-        {
-          path: '/opt/app',
-          exists: true,
-          entries: ['docker-compose.yml', '.env'],
-          envKeys: ['GUILDWISE_IMAGE'],
-          imageVars: [{ name: 'GUILDWISE_IMAGE', value: 'guildwise-hq:4f2c1ab' }],
-        },
-      ],
-      proxies: [{ kind: 'caddy', via: 'container', name: 'caddy', sites: ['hq.example.com'] }],
-      urls: [{ url: 'https://hq.example.com/ready', status: 200 }],
+      ] as never,
+      PROJECT,
+    );
+    expect(adapted).toMatchObject({
+      version: '0.9.2',
+      health: 'healthy',
+      waitingRelease: { rulesMet: false, version: 'fff0000', places: [{ runId: ID(61), name: 'shop-live' }] },
     });
-
-  async function toSignIn(user: ReturnType<typeof userEvent.setup>) {
-    await user.click(
-      await screen
-        .findByTestId('setup-start', undefined, { timeout: 1500 })
-        .catch(() => screen.findByTestId('setup-add')),
+    const s = savedState({}, { dryRunMissing: [], recipeStatus: 'approved' });
+    const env = s.current.setup.environments[1];
+    const info = cardInfo({ s, env, draft: false, place: placesOf(s)[1], status: adapted });
+    expect(info).toMatchObject({
+      state: 'blocked',
+      chip: { label: 'Waiting' },
+      sentence: 'Waiting for: test site healthy for 3 more minutes.',
+      strip: { saved: true, tried: true, approved: true },
+    });
+    const failed = adaptStatus(
+      serverStatus({ state: 'failed', stateText: 'The update stopped at the health check.' }) as never,
+      [],
+      PROJECT,
     );
-    await user.click(screen.getByTestId('kind-live'));
-    await user.click(screen.getByTestId('wizard-next'));
-    await user.click(screen.getByTestId('where-server'));
-    await user.click(screen.getByTestId('wizard-next'));
-  }
-
-  it('lists the servers this computer can reach, with the sign-in it already has; only a working one can be used', async () => {
-    const user = userEvent.setup();
-    serve(
-      state({
-        probes: [
-          probe({
-            scope: 'ssh_hosts',
-            report: hosts(
-              {
-                alias: 'prod-server',
-                hostname: '192.0.2.10',
-                user: 'root',
-                hasIdentity: true,
-                state: 'reachable',
-              },
-              {
-                alias: 'other',
-                state: 'asks_password',
-                detail: 'it did not accept the sign-in without a password',
-              },
-              { alias: 'moved', state: 'host_key_changed' },
-            ),
-          }),
-        ],
-      }),
-    );
-    routes[`POST /api/projects/${PROJECT}/delivery/probe`] = () =>
-      json({ commandId: ID(77), workstationId: WS }, 202);
-    wrap(<DeploySetup projectId={PROJECT} />);
-    await toSignIn(user);
-    const list = await screen.findByTestId('ssh-hosts', undefined, { timeout: 5000 });
-    expect(list).toHaveTextContent('Use the sign-in this computer already has');
-    expect(within(list).getByTestId('host-prod-server')).toHaveTextContent('Can sign in');
-    expect(within(list).getByTestId('host-prod-server')).toBeEnabled();
-    expect(within(list).getByTestId('host-other')).toBeDisabled();
-    expect(within(list).getByTestId('host-other')).toHaveTextContent('Asks for a password');
-    expect(within(list).getByTestId('host-moved')).toBeDisabled();
-    expect(within(list).getByTestId('host-moved')).toHaveTextContent('identity changed');
+    expect(cardInfo({ s, env, draft: false, place: placesOf(s)[1], status: failed })).toMatchObject({
+      state: 'failed',
+      action: 'fix',
+    });
   });
 
-  it('offers a dedicated key for a working sign-in (optional, with the exact change) and a new sign-in for one that asks for a password', async () => {
+  it('places come from the server when it lists them: its reason a place cannot go is what is shown', async () => {
     const user = userEvent.setup();
-    let probes: unknown[] = [
-      probe({
-        scope: 'ssh_hosts',
-        report: hosts(
-          { alias: 'prod-server', hostname: '192.0.2.10', user: 'root', state: 'reachable' },
+    serveProject();
+    serve(savedState());
+    routes[`GET /api/projects/${PROJECT}/places`] = () =>
+      json({
+        canEdit: true,
+        places: [
           {
-            alias: 'other',
-            hostname: 'other.example.com',
-            user: 'deploy',
-            port: 2222,
-            state: 'asks_password',
+            id: T_LOCAL,
+            name: 'shop-uat',
+            kind: 'computer',
+            workstationId: WS,
+            workstationName: 'Office PC',
+            workstationOnline: true,
+            host: null,
+            appUrl: null,
+            production: false,
+            role: 'active',
+            reachability: null,
+            lastProbeAt: at,
+            usedBy: [{ env: 'uat', label: 'Test site' }],
+            usedByDraft: ['demo'],
+            usedByFollowups: 0,
+            duplicateOf: null,
+            keyCount: 0,
+            canRemove: false,
+            removeBlockedReason: 'Used by Test site and the unfinished Demo: change that first.',
           },
-        ),
-      }),
-    ];
-    serve(state({ probes }));
-    routes[`GET /api/projects/${PROJECT}/delivery/setup`] = () => json(state({ probes }));
-    routes[`POST /api/projects/${PROJECT}/delivery/probe`] = (init) => {
-      if (JSON.parse(String(init.body)).scope === 'ssh_target')
-        probes = [
-          ...probes.filter((x: any) => x.scope !== 'ssh_target'),
-          probe({
-            id: ID(900 + probes.length),
-            scope: 'ssh_target',
-            host: 'prod-server',
-            report: serverReport(),
-          }),
-        ];
-      return json({ commandId: ID(77), workstationId: WS }, 202);
-    };
-    routes[`POST /api/projects/${PROJECT}/delivery/connect`] = () =>
-      json({ commandId: 'c9', workstationId: WS, targetId: T_PROD, alias: 'prod-server' }, 202);
-    routes[`GET /api/projects/${PROJECT}/delivery/ops/c9`] = () =>
-      json({
-        id: 'c9',
-        kind: 'connect',
-        state: 'done',
-        ok: true,
-        result: { ok: true, installed: 'added' },
-        errorText: null,
-        at,
+        ],
       });
-    wrap(<DeploySetup projectId={PROJECT} />);
-    await toSignIn(user);
-    await screen.findByTestId('ssh-hosts', undefined, { timeout: 5000 });
-    // a host that asks for a password can be set up again, with what is known filled in
-    await user.click(screen.getByTestId('host-connect-other'));
-    expect((await screen.findByTestId('connect-address')) as HTMLInputElement).toHaveValue(
-      'other.example.com',
-    );
-    expect(screen.getByTestId('connect-user')).toHaveValue('deploy');
-    await user.click(screen.getByTestId('connect-back'));
-    // pick the working one: the dedicated key is offered, never forced
-    await user.click(await screen.findByTestId('host-prod-server'));
-    expect(calls.some((c) => c.url.endsWith('/delivery/connect'))).toBe(false);
-    await user.click(await screen.findByTestId('dedicated-key-open'));
-    expect(screen.getByTestId('dedicated-key-confirm')).toHaveTextContent(
-      'Your keys and your ssh settings stay exactly as they are',
-    );
-    await user.click(screen.getByTestId('dedicated-key-add'));
-    await waitFor(() =>
-      expect(calls.find((c) => c.url.endsWith('/delivery/connect'))?.body).toMatchObject({
-        method: 'alias',
-        alias: 'prod-server',
-        workstationId: WS,
-      }),
-    );
-    expect(calls.find((c) => c.url.endsWith('/delivery/connect'))?.body.ciphertext).toBeUndefined();
-    expect(await screen.findByTestId('dedicated-key-done')).toBeInTheDocument();
-  });
-
-  it('"Connect a different server" opens the guided connect and the server it makes is looked at', async () => {
-    const user = userEvent.setup();
-    serve(state({ probes: [probe({ scope: 'ssh_hosts', report: hosts() })] }));
-    routes[`POST /api/projects/${PROJECT}/delivery/probe`] = () =>
-      json({ commandId: ID(77), workstationId: WS }, 202);
-    wrap(<DeploySetup projectId={PROJECT} />);
-    await toSignIn(user);
-    await user.click(await screen.findByTestId('connect-different', undefined, { timeout: 5000 }));
-    expect(await screen.findByTestId('connect-server')).toHaveAttribute('data-step', 'where');
-    expect(screen.getByTestId('connect-where')).toHaveTextContent('Guildwise signs in to your server');
-  });
-
-  it('a chosen server is looked at; the live site is pre-ticked as production, the Owner releases it, and the image setting is found', async () => {
-    const user = userEvent.setup();
-    let probes: unknown[] = [
-      probe({ scope: 'ssh_hosts', report: hosts({ alias: 'prod-server', state: 'reachable' }) }),
-    ];
-    routes[`GET /api/projects/${PROJECT}/delivery/setup`] = () =>
-      json(
-        state({
-          probes,
-          current: {
-            setup: (
-              compileSetup({
-                environments: [
-                  localAdoptEnv({
-                    name: 'uat',
-                    label: 'Test copy',
-                    target: 'T',
-                    composeFile: '~/uat/c.yml',
-                    service: 'app',
-                    imageName: 'a',
-                  }),
-                ],
-              }) as { ok: true; setup: unknown }
-            ).setup,
-            handEdited: [],
-            recipePresent: true,
-            recipeStatus: 'approved',
-            observedHash: 'a'.repeat(64),
-            approvedHash: 'a'.repeat(64),
-            lint: [],
-            dryRunOk: ['uat'],
-            custom: false,
-          },
-        }),
-      );
-    routes[`POST /api/projects/${PROJECT}/delivery/probe`] = (init) => {
-      const b = JSON.parse(String(init.body));
-      if (b.scope === 'ssh_target')
-        probes = [
-          ...probes.filter((p: any) => p.scope !== 'ssh_target'),
-          probe({ scope: 'ssh_target', host: 'prod-server', report: serverReport() }),
-        ];
-      return json({ commandId: ID(77), workstationId: WS }, 202);
-    };
-    wrap(<DeploySetup projectId={PROJECT} />);
-    await toSignIn(user);
-    await user.click(await screen.findByTestId('host-prod-server', undefined, { timeout: 5000 }));
-    await waitFor(() =>
-      expect(
-        calls.some(
-          (x) =>
-            x.url.endsWith('/delivery/probe') &&
-            x.body?.scope === 'ssh_target' &&
-            x.body?.host === 'prod-server',
-        ),
-      ).toBe(true),
-    );
-    const stack = await screen.findByTestId('stack-choice', undefined, { timeout: 5000 });
-    expect(stack).toHaveTextContent('/opt/app/docker-compose.yml');
-    await user.click(stack);
-    expect(screen.getByTestId('details-production')).toBeChecked();
-    expect((screen.getByTestId('details-imagevar') as HTMLSelectElement).value).toBe('GUILDWISE_IMAGE');
-    expect((screen.getByTestId('details-health') as HTMLInputElement).value).toBe(
-      'https://hq.example.com/ready',
-    );
-    const found = screen.getByTestId('found-changes');
-    expect(within(found).getByTestId('changes-untouched')).toHaveTextContent(
-      'Caddy proxy (caddy) for hq.example.com is not touched',
-    );
-    expect(within(found).getByTestId('changes-reuse')).toHaveTextContent(
-      'GUILDWISE_IMAGE now points at guildwise-hq:4f2c1ab',
-    );
-    await user.click(screen.getByTestId('wizard-next'));
-    // the live site: Release only, the test copy first, the Owner approves each release
-    expect(screen.getByText('Only when you press Release')).toBeInTheDocument();
-    expect(screen.getByTestId('when-test-first')).toBeChecked();
+    mountPage();
+    const places = await screen.findByTestId('places');
+    expect(await within(places).findByText(/Test site/)).toBeInTheDocument();
+    await waitFor(() => expect(places).toHaveTextContent('demo'));
+    await user.click(await within(places).findByRole('button', { name: 'More for Office PC' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Remove' }));
+    expect(await screen.findByTestId('place-in-use')).toHaveTextContent('unfinished Demo');
+    expect(screen.getByTestId('remove-place-confirm')).toBeDisabled();
   });
 });
 
-describe('technical details', () => {
-  it('shows the setup as fields, previews the generated files, and marks a hand-edited script custom', async () => {
+describe('the Environments page', () => {
+  it('empty: three choices, the scan is the primary one and starts a deploy scan', async () => {
     const user = userEvent.setup();
-    const c = compileSetup({
-      environments: [
-        localAdoptEnv({
-          name: 'uat',
-          label: 'Test copy',
-          target: 'T',
-          composeFile: '~/uat/c.yml',
-          service: 'app',
-          imageName: 'a',
-          appUrl: 'http://localhost:4700',
-        }),
-      ],
-    });
-    if (!c.ok) throw new Error('compile');
-    serve(
-      state({
-        current: {
-          setup: c.setup,
-          handEdited: [],
-          recipePresent: true,
-          recipeStatus: 'observed',
-          observedHash: 'a'.repeat(64),
-          approvedHash: null,
-          lint: [],
-          dryRunOk: [],
-          custom: false,
-        },
-      }),
-    );
-    routes[`POST /api/projects/${PROJECT}/delivery/setup/preview`] = () =>
-      json({
-        ok: true,
-        issues: [],
-        hash: c.hash,
-        files: c.files,
-        keep: [],
-        lint: [],
-        changes: [],
-        differsFromCurrent: false,
-        needsDryRun: ['uat'],
-      });
-    wrap(<DeploySetup projectId={PROJECT} />);
-    await user.click(await screen.findByTestId('setup-advanced'));
-    expect(((await screen.findByTestId('advanced-json')) as HTMLTextAreaElement).value).toContain(
-      '"composeFile": "~/uat/c.yml"',
-    );
-    await user.click(screen.getByTestId('advanced-preview'));
-    const result = await screen.findByTestId('advanced-preview-result');
-    expect(result).toHaveTextContent('scripts/uat.sh');
-    expect(result).toHaveTextContent('recipe.yaml');
-    await user.click(screen.getByTestId('edit-script-uat'));
-    const script = await screen.findByTestId('script-uat');
-    expect((script as HTMLTextAreaElement).value).toContain('Generated by Guildwise setup-1.3');
-    expect(screen.getByTestId('advanced-env-uat')).toHaveTextContent('custom (script by hand)');
-    expect((screen.getByTestId('advanced-json') as HTMLTextAreaElement).value).toContain('"mode": "custom"');
-    await user.click(screen.getByTestId('back-to-guided-uat'));
-    expect((screen.getByTestId('advanced-json') as HTMLTextAreaElement).value).toContain('"mode": "guided"');
-  });
-
-  it('invalid values are explained next to the fields', async () => {
-    const user = userEvent.setup();
+    serveProject();
     serve(state());
-    wrap(<DeploySetup projectId={PROJECT} />);
-    await user.click(await screen.findByTestId('setup-advanced'));
-    const box = await screen.findByTestId('advanced-json');
-    await user.clear(box);
-    await user.click(box);
-    await user.paste('{"environments": []}');
-    expect(await screen.findByTestId('advanced-errors')).toBeInTheDocument();
-    expect(screen.getByTestId('advanced-preview')).toBeDisabled();
+    routes[`POST /api/projects/${PROJECT}/scan`] = () => json({ requestId: ID(5) }, 202);
+    mountPage();
+    const empty = await screen.findByTestId('setup-empty');
+    expect(within(empty).getByText('I only want card test copies')).toBeInTheDocument();
+    expect(within(empty).getByText('A test site my team can try')).toBeInTheDocument();
+    await user.click(within(empty).getByTestId('empty-scan'));
+    await waitFor(() =>
+      expect(calls.find((x) => x.url.endsWith('/scan') && x.body?.area === 'deploy')).toBeTruthy(),
+    );
   });
-});
 
-describe('deploy scan', () => {
-  const proposal = () => {
-    const env = localAdoptEnv({
-      name: 'uat',
-      label: 'Test copy',
-      target: 'T',
-      composeFile: '~/uat/c.yml',
-      service: 'app',
-      imageName: 'a',
-    });
-    return {
+  it('a question has real fields: the banner opens the review, Use is blocked until it is answered, the answer is sent with its path', async () => {
+    const user = userEvent.setup();
+    serveProject();
+    let answers: Record<string, string> = {};
+    const proposal = () => ({
       id: ID(40),
       area: 'deploy',
       status: 'open',
@@ -1170,53 +693,291 @@ describe('deploy scan', () => {
       submittedAt: at,
       proposal: {
         area: 'deploy',
-        deploy: { version: 1, generator: 'setup-1.3', environments: [env] },
-        items: [
-          {
-            path: '/environments/0/app/service',
-            confidence: 'guessed',
-            evidence: [],
-            note: 'the only part built from the code',
-          },
-        ],
+        deploy: {
+          version: 1,
+          generator: 'setup-1.4',
+          environments: [
+            localAdoptEnv({
+              name: 'uat',
+              label: 'Test site',
+              target: 'T',
+              composeFile: '~/uat/c.yml',
+              service: 'app',
+              imageName: 'a',
+            }),
+          ],
+        },
+        items: [{ path: '/environments/0/app/service', confidence: 'unknown', evidence: [] }],
         questions: [
           {
             path: '/environments/0/app/service',
             question: 'Which part is your app?',
-            options: ['app', 'web'],
-            default: 'app',
+            options: ['app', 'worker', 'web'],
+          },
+          {
+            path: '/environments/0/app/appUrl',
+            question: 'Which port does the website use?',
+            default: '3000',
           },
         ],
+        answers,
         secretsNeeded: [],
-        notes: 'Found a compose project called uat.',
+        notes: '',
         filesRead: ['docker-compose.yml'],
       },
+    });
+    routes[`GET /api/projects/${PROJECT}/delivery/setup`] = () => json(state({ proposal: proposal() }));
+    routes['POST /api/setup-proposals/' + ID(40) + '/answers'] = (init) => {
+      for (const a of JSON.parse(String(init.body)).answers) answers = { ...answers, [a.path]: a.value };
+      return json(proposal());
     };
-  };
-
-  it('the suggestion is announced, reviewed with its questions, and used as the draft', async () => {
-    const user = userEvent.setup();
-    serve(state({ proposal: proposal() }));
     routes[`POST /api/projects/${PROJECT}/delivery/setup/use-proposal`] = () => json(state());
-    wrap(<DeploySetup projectId={PROJECT} />);
-    expect(await screen.findByTestId('deploy-proposal-waiting')).toHaveTextContent(
-      '1 environment, 1 questions for you',
-    );
-    await user.click(screen.getByTestId('deploy-proposal-open'));
-    expect(await screen.findByTestId('proposal-review')).toHaveTextContent('DevOps has a suggestion');
-    expect(screen.getByTestId('deploy-proposal-envs')).toHaveTextContent('Guessed: please check');
+    mountPage();
+    const banner = await screen.findByTestId('needs-answer');
+    expect(banner).toHaveTextContent('Which part is your app?');
+    await user.click(screen.getByTestId('needs-answer-open'));
+    const review = await screen.findByTestId('proposal-review');
+    // no "Answer" button anywhere: radios for the choices, a number field with its default said in words
+    expect(within(review).queryByRole('button', { name: 'Answer' })).toBeNull();
+    expect(within(review).getAllByRole('radio')).toHaveLength(3);
+    expect(within(review).getByTestId('answer-1-input')).toHaveValue('3000');
+    expect(within(review).getByText(/We will use 3000 unless you change it/)).toBeInTheDocument();
     expect(screen.getByTestId('proposal-use')).toBeDisabled();
-    await user.click(
-      within(screen.getByTestId('proposal-questions')).getByRole('button', { name: 'Answer' }),
-    );
-    expect(screen.getByTestId('proposal-use')).toBeEnabled();
-    await user.click(screen.getByTestId('proposal-use'));
+    await user.click(within(review).getByTestId('answer-0-app'));
+    await user.click(within(review).getByTestId('answers-submit'));
     await waitFor(() =>
-      expect(calls.find((x) => x.url.endsWith('/use-proposal'))?.body).toEqual({ proposalId: ID(40) }),
+      expect(calls.find((x) => x.url.endsWith('/answers'))?.body).toEqual({
+        answers: [
+          { path: '/environments/0/app/service', value: 'app' },
+          { path: '/environments/0/app/appUrl', value: '3000' },
+        ],
+      }),
     );
   });
 
-  it('progress and problems are shown while there is no suggestion', async () => {
+  it('the strip: saved, try it first, then the Owner approves exactly the version that was tried; a member waits', async () => {
+    const user = userEvent.setup();
+    serveProject();
+    serve(savedState());
+    routes[`POST /api/projects/${PROJECT}/delivery/setup/dry-run`] = () =>
+      json({
+        message: 'Would back up, build and copy. Nothing was changed.',
+        runs: [{ status: 'succeeded' }],
+      });
+    mountPage();
+    const card = await screen.findByTestId('env-card-uat');
+    expect(within(card).getByTestId('env-chip-uat')).toHaveTextContent('Needs a try');
+    expect(within(card).getByTestId('strip-saved')).toHaveAttribute('data-done', 'true');
+    expect(within(card).getByTestId('strip-tried')).toHaveAttribute('data-done', 'false');
+    expect(within(card).queryByTestId('env-approve-uat')).toBeNull();
+    await user.click(within(card).getByTestId('env-try-uat'));
+    await waitFor(() =>
+      expect(calls.find((x) => x.url.endsWith('/setup/dry-run'))?.body).toEqual({ env: 'uat' }),
+    );
+    expect(await within(card).findByTestId('env-tried-uat')).toHaveTextContent('Nothing was changed');
+  });
+
+  it('tried: Approve is disabled while another environment is untried (with the reason), then asks the server for the hash it showed', async () => {
+    const user = userEvent.setup();
+    serveProject();
+    serve(savedState({}, { dryRunMissing: ['production'], dryRunOk: ['uat'] }));
+    routes[`POST /api/projects/${PROJECT}/delivery/approve`] = () => json({});
+    mountPage();
+    const card = await screen.findByTestId('env-card-uat');
+    expect(within(card).getByTestId('env-chip-uat')).toHaveTextContent('Waiting for approval');
+    expect(within(card).getByTestId('env-approve-uat')).toBeDisabled();
+    expect(within(card).getByTestId('env-approve-reason-uat')).toHaveTextContent('Try Live site first');
+    cleanup();
+    serve(savedState({}, { dryRunMissing: [], dryRunOk: ['uat', 'production'] }));
+    mountPage();
+    const card2 = await screen.findByTestId('env-card-uat');
+    await user.click(within(card2).getByTestId('env-approve-uat'));
+    expect(await screen.findByTestId('approve-dialog')).toHaveTextContent('first approval');
+    await user.click(screen.getByTestId('approve-confirm'));
+    await waitFor(() =>
+      expect(calls.find((x) => x.url.endsWith('/delivery/approve'))?.body).toEqual({ hash: 'a'.repeat(64) }),
+    );
+  });
+
+  it('someone who is not the Owner sees the same page read-only with the one sentence, and waits for the approval', async () => {
+    serveProject();
+    serve(
+      savedState(
+        { canEdit: false, canApprove: false },
+        { dryRunMissing: [], dryRunOk: ['uat', 'production'] },
+      ),
+    );
+    mountPage();
+    expect(await screen.findByTestId('env-readonly')).toHaveTextContent(
+      'Only the project owner changes environments',
+    );
+    const card = await screen.findByTestId('env-card-uat');
+    expect(within(card).queryByTestId('env-approve-uat')).toBeNull();
+    expect(within(card).queryByTestId('setup-add')).toBeNull();
+    expect(screen.queryByTestId('setup-add')).toBeNull();
+  });
+
+  it('a runner that is too old is a plain warning, the cards stay', async () => {
+    serveProject();
+    serve(
+      savedState({
+        workstations: [workstation({ canProbe: false, blocked: 'Guildwise on Office PC needs an update.' })],
+      }),
+    );
+    mountPage();
+    expect(await screen.findByTestId('setup-runner-old')).toHaveTextContent(
+      'needs an update to set up environments',
+    );
+    expect(await screen.findByTestId('env-card-uat')).toBeInTheDocument();
+  });
+
+  it('Places lists each place once with what uses it; a duplicate offers Merge, and a place that is used cannot be removed', async () => {
+    const user = userEvent.setup();
+    serveProject();
+    const s = savedState();
+    s.targets.push({ ...(s.targets[0] as object), id: ID(40), name: 'Test copy' } as never);
+    serve(s);
+    routes[`POST /api/projects/${PROJECT}/places/merge`] = () =>
+      json({ repointed: [], followupsRepointed: 0, removed: true, stillUsedBySaved: [] });
+    mountPage();
+    const places = await screen.findByTestId('places');
+    expect(within(places).getByTestId('place-shop-uat')).toHaveTextContent('Used by: Test site');
+    expect(within(places).getByTestId('place-shop-live')).toHaveTextContent('Used by: Live site');
+    expect(within(places).getByTestId('place-duplicate-Test copy')).toHaveTextContent(
+      'Looks like a duplicate of Office PC',
+    );
+    // used: removing says which environment, and the button is off
+    await user.click(within(places).getAllByRole('button', { name: 'More for Office PC' })[0] as HTMLElement);
+    await user.click(await screen.findByRole('menuitem', { name: 'Remove' }));
+    expect(await screen.findByTestId('place-in-use')).toHaveTextContent(
+      'Used by Test site: change that first',
+    );
+    expect(screen.getByTestId('remove-place-confirm')).toBeDisabled();
+    await user.keyboard('{Escape}');
+    await user.click(within(places).getByTestId('place-merge-Test copy'));
+    expect(await screen.findByTestId('merge-dialog')).toHaveTextContent('Nothing on the computer is touched');
+    await user.click(screen.getByRole('button', { name: 'Merge' }));
+    await waitFor(() =>
+      expect(calls.find((x) => x.url.endsWith('/places/merge'))?.body).toEqual({
+        fromId: ID(40),
+        toId: T_LOCAL,
+      }),
+    );
+  });
+
+  it('removing an unused server says nothing on it is touched, and can also remove the Guildwise key', async () => {
+    const user = userEvent.setup();
+    serveProject();
+    const s = savedState();
+    s.targets.push({
+      ...(s.targets[1] as object),
+      id: ID(42),
+      name: 'old-vps',
+      host: 'old-vps',
+      production: false,
+    } as never);
+    serve(s);
+    routes[`POST /api/projects/${PROJECT}/places/${ID(42)}/remove`] = () =>
+      json({ removed: true, keyCleanup: { state: 'started', commandId: 'c', reason: null } });
+    mountPage();
+    const places = await screen.findByTestId('places');
+    await user.click(within(places).getByRole('button', { name: 'More for old-vps' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Remove' }));
+    const dialog = await screen.findByTestId('remove-place-dialog');
+    expect(dialog).toHaveTextContent('Nothing on the server is touched');
+    await user.click(within(dialog).getByTestId('remove-key'));
+    await user.click(screen.getByTestId('remove-place-confirm'));
+    await waitFor(() =>
+      expect(
+        calls.find((x) => x.method === 'POST' && x.url.endsWith(`/places/${ID(42)}/remove`))?.body,
+      ).toEqual({
+        removeKey: true,
+      }),
+    );
+  });
+
+  it('removing an environment names what is not touched and asks the server to take it out of the setup', async () => {
+    const user = userEvent.setup();
+    serveProject();
+    serve(savedState());
+    const without = () => {
+      const c = savedState().current.setup;
+      return { ...c, environments: c.environments.filter((e: { name: string }) => e.name !== 'uat') };
+    };
+    routes[`POST /api/projects/${PROJECT}/delivery/setup/remove-environment`] = () =>
+      json({
+        ...savedState({ draft: { setup: without(), customScripts: {}, proposalId: null, updatedAt: at } }),
+        impact: ['Live site was waiting for Test site: that rule is dropped.'],
+        lastEnvironment: false,
+      });
+    routes[`POST /api/projects/${PROJECT}/delivery/setup/preview`] = () =>
+      json({
+        ok: true,
+        issues: [],
+        hash: 'h'.repeat(64),
+        files: [],
+        keep: [],
+        lint: [],
+        changes: [],
+        differsFromCurrent: true,
+        needsDryRun: [],
+      });
+    routes[`POST /api/projects/${PROJECT}/delivery/setup/publish`] = () =>
+      json({ commandId: 'c', hash: 'h'.repeat(64) }, 202);
+    mountPage();
+    const card = await screen.findByTestId('env-card-uat');
+    await user.click(within(card).getByRole('button', { name: 'More for Test site' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Remove' }));
+    const dialog = await screen.findByTestId('remove-env-dialog');
+    expect(dialog).toHaveTextContent('left exactly as it is');
+    await user.click(screen.getByTestId('remove-env-confirm'));
+    await waitFor(() => expect(calls.some((x) => x.url.endsWith('/setup/publish'))).toBe(true));
+    expect(calls.find((x) => x.url.endsWith('/setup/remove-environment'))?.body).toEqual({ env: 'uat' });
+    // saved from the draft that no longer has it
+    expect(
+      calls
+        .find((x) => x.url.endsWith('/setup/publish'))
+        ?.body.setup.environments.map((e: { name: string }) => e.name),
+    ).toEqual(['production']);
+  });
+
+  it('clean up lists the unfinished draft and an old file, and nothing goes unless it is ticked', async () => {
+    const user = userEvent.setup();
+    serveProject();
+    const s = savedState();
+    (s as { draft: unknown }).draft = {
+      setup: { ...(s.current.setup as object), environments: [(s.current.setup?.environments ?? [])[0]] },
+      customScripts: {},
+      proposalId: null,
+      updatedAt: at,
+    };
+    serve(s);
+    routes[`POST /api/projects/${PROJECT}/delivery/setup/preview`] = () =>
+      json({
+        ok: true,
+        issues: [],
+        hash: 'h'.repeat(64),
+        files: [],
+        keep: [],
+        unmodelled: ['delivery/smoke.sh'],
+        lint: [],
+        changes: [],
+        differsFromCurrent: false,
+        needsDryRun: [],
+      });
+    routes[`POST /api/projects/${PROJECT}/delivery/setup/discard-draft`] = () => json(state());
+    mountPage();
+    await user.click(await screen.findByText(/Show technical details/));
+    expect(await screen.findByText('Old setups and drafts (2)')).toBeInTheDocument();
+    await user.click(screen.getByTestId('cleanup-open'));
+    const dialog = await screen.findByTestId('cleanup-dialog');
+    expect(within(dialog).getByTestId('cleanup-file-delivery/smoke.sh')).not.toBeChecked();
+    await user.click(screen.getByTestId('cleanup-confirm'));
+    await waitFor(() => expect(calls.some((x) => x.url.endsWith('/setup/discard-draft'))).toBe(true));
+  });
+
+  it('a scan in progress and a scan that gave nothing are said in words', async () => {
+    serveProject();
     serve(
       state({
         scan: {
@@ -1229,7 +990,600 @@ describe('deploy scan', () => {
         },
       }),
     );
-    wrap(<DeploySetup projectId={PROJECT} />);
-    expect(await screen.findByTestId('deploy-scan-progress')).toHaveTextContent('On Office PC');
+    mountPage();
+    expect(await screen.findByTestId('deploy-scan-progress')).toHaveTextContent(
+      'DevOps is looking on Office PC',
+    );
+    cleanup();
+    serve(state({ scanProblem: 'DevOps could not read the project.' }));
+    mountPage();
+    expect(await screen.findByTestId('deploy-scan-problem')).toHaveTextContent('could not read the project');
+  });
+});
+
+describe('answer fields', () => {
+  it('"Use these answers" is off until each required question has a value; choices are radios, a yes or no is two radios', async () => {
+    const user = userEvent.setup();
+    const sent: unknown[] = [];
+    wrap(
+      <AnswerFields
+        questions={[
+          { path: '/a', question: 'Which part is your app?', options: ['app', 'worker'] },
+          { path: '/b', question: 'Is it live?', kind: 'confirm' },
+        ]}
+        pending={false}
+        onSubmit={(a) => sent.push(a)}
+      />,
+    );
+    expect(screen.getByTestId('answers-submit')).toBeDisabled();
+    await user.click(screen.getByTestId('answer-0-worker'));
+    await user.click(screen.getByTestId('answer-1-no'));
+    await user.click(screen.getByTestId('answers-submit'));
+    expect(sent).toEqual([
+      [
+        { path: '/a', value: 'worker' },
+        { path: '/b', value: 'no' },
+      ],
+    ]);
+  });
+});
+
+describe('the Add environment dialog', () => {
+  const setupFlow = (over: { places?: boolean } = {}) => {
+    let probes: unknown[] = [];
+    let publish: unknown = null;
+    let created = false;
+    const base = () =>
+      state({
+        probes,
+        publish,
+        ...(over.places || created
+          ? {
+              targets: [
+                {
+                  id: T_LOCAL,
+                  name: 'Office PC',
+                  kind: 'local_docker',
+                  production: false,
+                  workstationId: WS,
+                  workstationName: 'Office PC',
+                  workstationOnline: true,
+                  host: null,
+                  appUrl: null,
+                  connection: null,
+                },
+              ],
+            }
+          : {}),
+      });
+    routes[`GET /api/projects/${PROJECT}/delivery/setup`] = () => json(base());
+    serveProject();
+    routes[`POST /api/projects/${PROJECT}/delivery/probe`] = () => {
+      probes = [probe({ report: uatReport() })];
+      return json({ commandId: ID(77), workstationId: WS }, 202);
+    };
+    routes[`POST /api/projects/${PROJECT}/deploy-targets`] = () => {
+      created = true;
+      return json({ id: T_LOCAL });
+    };
+    routes[`PUT /api/projects/${PROJECT}/delivery/setup`] = () => json(base());
+    routes[`POST /api/projects/${PROJECT}/delivery/setup/preview`] = (init) => {
+      const body = JSON.parse(String(init.body));
+      const c = compileSetup(body.setup);
+      return json({
+        ok: true,
+        issues: [],
+        hash: c.ok ? c.hash : null,
+        files: [],
+        keep: [],
+        lint: [],
+        changes: [],
+        differsFromCurrent: true,
+        needsDryRun: [],
+      });
+    };
+    routes[`POST /api/projects/${PROJECT}/delivery/setup/publish`] = () => {
+      publish = { setupHash: 'x', commandId: ID(88), status: 'written', error: null, at };
+      return json({ commandId: ID(88), hash: 'x' }, 202);
+    };
+  };
+
+  it('a computer becomes a place once, when the steps are checked: adopt the running stack, review what is not touched, save the previewed version', async () => {
+    const user = userEvent.setup();
+    setupFlow();
+    mountPage();
+    await user.click(await screen.findByTestId('setup-add'));
+    expect(screen.getByTestId('wizard-step')).toHaveTextContent('Step 1 of 3');
+    await user.click(screen.getByTestId('place-choice-Office PC'));
+    await waitFor(() =>
+      expect(calls.find((x) => x.url.endsWith('/delivery/probe'))?.body).toMatchObject({
+        scope: 'local',
+        workstationId: WS,
+      }),
+    );
+    const stack = await screen.findByTestId('stack-choice', undefined, { timeout: 6000 });
+    expect(stack).toHaveTextContent('3 parts (postgres, app, mailpit)');
+    expect(stack).toHaveTextContent('Running now');
+    await user.click(stack);
+    expect(screen.getByTestId('when-auto')).toBeChecked;
+    await user.click(screen.getByTestId('env-next'));
+    const found = await screen.findByTestId('found-changes');
+    expect(within(found).getByTestId('changes-untouched')).toHaveTextContent('Container other-redis');
+    expect((screen.getByTestId('details-app') as HTMLSelectElement).value).toBe('app');
+    expect(screen.queryByTestId('details-production')).toBeNull();
+    // nothing was created while the person was choosing
+    expect(calls.some((x) => x.method === 'POST' && x.url.endsWith('/deploy-targets'))).toBe(false);
+    await user.click(screen.getByTestId('env-to-review'));
+    const save = await screen.findByTestId('review-save');
+    await waitFor(() => expect(save).toBeEnabled());
+    await user.click(save);
+    await waitFor(() => expect(calls.find((x) => x.url.endsWith('/setup/publish'))).toBeTruthy());
+    expect(calls.find((x) => x.method === 'POST' && x.url.endsWith('/deploy-targets'))?.body).toMatchObject({
+      name: 'Office PC',
+      kind: 'local_docker',
+      workstationId: WS,
+      production: false,
+      reuseExisting: true,
+    });
+    // the place exists before the steps are checked against it
+    const order = calls.map((x) => x.url.split('/').slice(-1)[0]);
+    expect(order.indexOf('deploy-targets')).toBeLessThan(order.indexOf('preview'));
+    const published = calls.find((x) => x.url.endsWith('/setup/publish'))?.body;
+    expect(published.setup.environments[0]).toMatchObject({
+      name: 'test-site',
+      label: 'Test site',
+      role: 'test',
+      target: 'Office PC',
+      trigger: ['after_merge'],
+      app: { service: 'app', composeProject: 'uat' },
+    });
+    expect(await screen.findByTestId('review-saved')).toHaveTextContent('Nothing runs before that');
+  });
+
+  it('a place that already exists is chosen, never made again', async () => {
+    const user = userEvent.setup();
+    setupFlow({ places: true });
+    mountPage();
+    await user.click(await screen.findByTestId('setup-add'));
+    expect(screen.getAllByTestId('place-choice-Office PC')).toHaveLength(1);
+    await user.click(screen.getByTestId('place-choice-Office PC'));
+    await user.click(await screen.findByTestId('stack-choice', undefined, { timeout: 6000 }));
+    await user.click(screen.getByTestId('env-next'));
+    await user.click(await screen.findByTestId('env-to-review'));
+    await user.click(await screen.findByTestId('review-save'));
+    await waitFor(() => expect(calls.find((x) => x.url.endsWith('/setup/publish'))).toBeTruthy());
+    expect(calls.some((x) => x.method === 'POST' && x.url.endsWith('/deploy-targets'))).toBe(false);
+    expect(calls.find((x) => x.url.endsWith('/setup/publish'))?.body.setup.environments[0].target).toBe(
+      'Office PC',
+    );
+  });
+
+  it('when nothing is found it says what was checked, and "My app is somewhere else" looks in the folder given', async () => {
+    const user = userEvent.setup();
+    setupFlow();
+    let probes: unknown[] = [];
+    routes[`GET /api/projects/${PROJECT}/delivery/setup`] = () => json(state({ probes }));
+    routes[`POST /api/projects/${PROJECT}/delivery/probe`] = (init) => {
+      const b = JSON.parse(String(init.body));
+      probes = [
+        probe({
+          report: b.hints?.dirs?.length
+            ? uatReport()
+            : report({
+                folders: [
+                  { path: '/opt', exists: true, entries: [] },
+                  { path: '/srv', exists: true, entries: [] },
+                ],
+              }),
+        }),
+      ];
+      return json({ commandId: ID(77), workstationId: WS }, 202);
+    };
+    mountPage();
+    await user.click(await screen.findByTestId('setup-add'));
+    await user.click(screen.getByTestId('place-choice-Office PC'));
+    const miss = await screen.findByTestId('no-stacks', undefined, { timeout: 6000 });
+    expect(miss).toHaveTextContent('/opt, /srv');
+    expect(miss.textContent).not.toMatch(/^No app found/);
+    await user.click(screen.getByTestId('somewhere-else'));
+    await user.type(screen.getByTestId('folder-input'), '/home/u/dcode/uat');
+    await user.click(screen.getByTestId('folder-look'));
+    await waitFor(() =>
+      expect(calls.filter((x) => x.url.endsWith('/delivery/probe')).at(-1)?.body.hints).toMatchObject({
+        dirs: ['/home/u/dcode/uat'],
+      }),
+    );
+    expect(await screen.findByTestId('stack-choice', undefined, { timeout: 6000 })).toHaveTextContent('uat');
+  });
+});
+
+describe('an app that runs directly on the machine', () => {
+  const nativeReport = () =>
+    report({
+      services: [
+        { manager: 'pm2', name: 'crm-api', state: 'online', workingDir: '/home/u/apps/crm', ports: [3100] },
+        {
+          manager: 'systemd',
+          name: 'invoice-web.service',
+          state: 'running',
+          workingDir: '/srv/invoice/current',
+          ports: [3000],
+          releaseLayout: true,
+        },
+      ],
+    });
+
+  it('is found as a pm2 process or a service, with its folder and port; Docker wording stays out of it', async () => {
+    const user = userEvent.setup();
+    let probes: unknown[] = [];
+    serveProject();
+    routes[`GET /api/projects/${PROJECT}/delivery/setup`] = () => json(state({ probes }));
+    routes[`POST /api/projects/${PROJECT}/delivery/probe`] = () => {
+      probes = [probe({ report: nativeReport() })];
+      return json({ commandId: ID(77), workstationId: WS }, 202);
+    };
+    routes[`POST /api/projects/${PROJECT}/delivery/setup/preview`] = () =>
+      json({
+        ok: true,
+        issues: [],
+        hash: 'h'.repeat(64),
+        files: [],
+        keep: [],
+        lint: [],
+        changes: [],
+        differsFromCurrent: true,
+        needsDryRun: [],
+      });
+    mountPage();
+    await user.click(await screen.findByTestId('setup-add'));
+    await user.click(screen.getByTestId('place-choice-Office PC'));
+    const found = await screen.findAllByTestId('native-choice', undefined, { timeout: 6000 });
+    expect(found).toHaveLength(2);
+    expect(found[0]).toHaveTextContent('crm-api');
+    expect(found[0]).toHaveTextContent(/pm2 process, answers on port 3100/i);
+    expect(found[0]).toHaveTextContent('/home/u/apps/crm');
+    expect(found[1]).toHaveTextContent(/system service/i);
+    await user.click(found[0] as HTMLElement);
+    await user.click(screen.getByTestId('env-next'));
+    const details = await screen.findByTestId('native-details');
+    expect(details).toHaveTextContent('gets the new version of the code, builds it in a new folder');
+    expect(details).not.toHaveTextContent(/compose|Docker|image/i);
+    expect((screen.getByTestId('native-name') as HTMLInputElement).value).toBe('crm-api');
+    expect((screen.getByTestId('native-restart-target') as HTMLInputElement).value).toBe('crm-api');
+    // it runs from a plain folder: the first update moves it, and that needs a plain yes
+    expect(screen.getByTestId('native-adopt')).toHaveTextContent(
+      'moves the folder /home/u/apps/crm to /home/u/apps/crm-app/releases/initial',
+    );
+    expect(screen.getByTestId('env-to-review')).toBeDisabled();
+    await user.click(screen.getByTestId('native-adopt-confirm'));
+    await user.click(screen.getByTestId('env-to-review'));
+    await waitFor(() => expect(calls.find((x) => x.url.endsWith('/setup/preview'))).toBeTruthy());
+    const env = calls.find((x) => x.url.endsWith('/setup/preview'))?.body.setup.environments[0];
+    expect(env).toMatchObject({
+      runtime: 'direct',
+      hosting: 'this_computer',
+      direct: {
+        appDir: '/home/u/apps/crm-app',
+        currentLink: '/home/u/apps/crm',
+        adoptFolder: true,
+        keep: 5,
+        manager: { kind: 'pm2', name: 'crm-api' },
+      },
+    });
+    expect(env.steps.map((x: { kind: string }) => x.kind)).toEqual(['direct_prepare', 'direct_switch']);
+  });
+
+  it('a service that already keeps releases/current has nothing to convert', async () => {
+    const user = userEvent.setup();
+    let probes: unknown[] = [];
+    serveProject();
+    routes[`GET /api/projects/${PROJECT}/delivery/setup`] = () => json(state({ probes }));
+    routes[`POST /api/projects/${PROJECT}/delivery/probe`] = () => {
+      probes = [probe({ report: nativeReport() })];
+      return json({ commandId: ID(77), workstationId: WS }, 202);
+    };
+    mountPage();
+    await user.click(await screen.findByTestId('setup-add'));
+    await user.click(screen.getByTestId('place-choice-Office PC'));
+    const found = await screen.findAllByTestId('native-choice', undefined, { timeout: 6000 });
+    await user.click(found[1] as HTMLElement);
+    await user.click(screen.getByTestId('env-next'));
+    await screen.findByTestId('native-details');
+    expect(screen.queryByTestId('native-adopt')).toBeNull();
+    expect((screen.getByTestId('native-restart-target') as HTMLInputElement).value).toBe(
+      'invoice-web.service',
+    );
+    expect(screen.getByTestId('env-to-review')).toBeEnabled();
+  });
+
+  it('the card says how it runs and how it is restarted, in plain words', async () => {
+    serveProject();
+    const s = savedState({}, { dryRunMissing: [], recipeStatus: 'approved' });
+    const native = directEnv({
+      name: 'uat',
+      label: 'Test site',
+      target: 'shop-uat',
+      appDir: '/home/u/apps/crm-app',
+      currentLink: '/home/u/apps/crm',
+      adoptFolder: true,
+      manager: { kind: 'pm2', name: 'crm-api' },
+      appUrl: 'http://localhost:3100',
+      appName: 'crm-api',
+    });
+    (s.current.setup as { environments: unknown[] }).environments = [
+      native,
+      (s.current.setup?.environments ?? [])[1],
+    ];
+    serve(s);
+    mountPage();
+    const how = await screen.findByTestId('env-how-uat');
+    expect(how).toHaveTextContent('Runs directly on this computer: crm-api in /home/u/apps/crm, port 3100');
+    expect(how).toHaveTextContent('restart crm-api with pm2');
+    expect(how).not.toHaveTextContent(/compose|Docker/i);
+    // the Docker one next to it keeps its own words
+    expect(screen.getByTestId('env-how-production')).toHaveTextContent('Updates the existing app');
+  });
+});
+
+describe('the update method of a server', () => {
+  it('copy from my computer is the default, a registry needs its address, and each maps to its steps', () => {
+    const a = {
+      ...emptyAnswers('live'),
+      host: 'prod',
+      stackPath: '/home/administrator/dcode/flow5-full/docker-compose.yml',
+      appService: 'app',
+      imageName: 'flow5/app',
+      targetName: 'flow5-server',
+      healthUrl: 'http://192.168.1.13:8080/api/health',
+    };
+    // a literal image tag (no settings variable): the new version is named in an override file
+    const ship = buildEnv(a);
+    expect(ship.steps.map((s) => s.kind)).toEqual([
+      'build_image_local',
+      'ship_image_ssh',
+      'write_override',
+      'compose_up_remote',
+    ]);
+    expect(ship.app.imageVar).toBeUndefined();
+    const reg = buildEnv({ ...a, method: 'registry', registry: 'ghcr.io' });
+    expect(reg.steps.map((s) => s.kind)).toContain('pull_image_ssh');
+    expect(reg.app.registry).toBe('ghcr.io');
+    const srv = buildEnv({ ...a, method: 'build_on_server' });
+    expect(srv.steps.map((s) => s.kind)).toEqual([
+      'ship_source_ssh',
+      'build_image_server',
+      'write_override',
+      'compose_up_remote',
+    ]);
+    for (const e of [ship, reg, srv]) expect(compileSetup({ environments: [e] }).ok).toBe(true);
+  });
+});
+
+describe('technical details', () => {
+  it('shows the setup as fields and marks a hand-edited script custom', async () => {
+    const user = userEvent.setup();
+    const s = savedState();
+    routes[`POST /api/projects/${PROJECT}/delivery/setup/preview`] = () =>
+      json({
+        ok: true,
+        issues: [],
+        hash: 'h'.repeat(64),
+        files: [
+          { path: 'scripts/uat.sh', mode: '755', content: '# Generated by Guildwise setup-1.4\n' },
+          { path: 'recipe.yaml', mode: '644', content: 'x' },
+        ],
+        keep: [],
+        lint: [],
+        changes: [],
+        differsFromCurrent: false,
+        needsDryRun: ['uat'],
+      });
+    wrap(<AdvancedSetup projectId={PROJECT} state={s as never} onClose={() => {}} />);
+    expect(((await screen.findByTestId('advanced-json')) as HTMLTextAreaElement).value).toContain(
+      '"composeFile": "~/shop-uat/docker-compose.yml"',
+    );
+    await user.click(screen.getByTestId('advanced-preview'));
+    const result = await screen.findByTestId('advanced-preview-result');
+    expect(result).toHaveTextContent('scripts/uat.sh');
+    await user.click(screen.getByTestId('edit-script-uat'));
+    expect(screen.getByTestId('advanced-env-uat')).toHaveTextContent('custom (script by hand)');
+    await user.click(screen.getByTestId('back-to-guided-uat'));
+    expect((screen.getByTestId('advanced-json') as HTMLTextAreaElement).value).toContain('"mode": "guided"');
+  });
+});
+
+describe('settings pointer', () => {
+  it('says what is set up and links to the page', async () => {
+    serve(savedState());
+    wrap(<EnvironmentsPointer projectId={PROJECT} projectKey="P5" />);
+    const card = await screen.findByTestId('environments-pointer');
+    await waitFor(() => expect(card).toHaveTextContent('1 live, 1 test, 2 places'));
+    expect(screen.getByTestId('open-environments')).toHaveAttribute('href', '/p/P5/environments');
+  });
+});
+
+describe('what the review of the code made necessary', () => {
+  it('an answer that turns on sudo is not kept until the person confirms it in words', async () => {
+    const user = userEvent.setup();
+    serveProject();
+    let answer: string | undefined;
+    const proposal = () => ({
+      id: ID(40),
+      area: 'deploy',
+      status: 'open',
+      requestId: ID(41),
+      workstationId: WS,
+      workstationName: 'Office PC',
+      submittedAt: at,
+      proposal: {
+        area: 'deploy',
+        deploy: {
+          version: 1,
+          generator: 'setup-1.4',
+          environments: [
+            localAdoptEnv({
+              name: 'uat',
+              label: 'Test site',
+              target: 'T',
+              composeFile: '~/uat/c.yml',
+              service: 'app',
+              imageName: 'a',
+            }),
+          ],
+        },
+        items: [],
+        questions: [
+          {
+            path: '/environments/0/direct/manager/sudo',
+            question: 'Does restarting need sudo?',
+            kind: 'confirm',
+            ...(answer ? { answer } : {}),
+          },
+        ],
+        secretsNeeded: [],
+        notes: '',
+        filesRead: [],
+      },
+    });
+    routes[`GET /api/projects/${PROJECT}/delivery/setup`] = () => json(state({ proposal: proposal() }));
+    routes[`POST /api/setup-proposals/${ID(40)}/answers`] = (init) => {
+      const b = JSON.parse(String(init.body));
+      if (!b.confirmed?.length)
+        return json({
+          ...proposal(),
+          needsConfirmation: [
+            {
+              path: '/environments/0/direct/manager/sudo',
+              kind: 'sudo',
+              text: 'Guildwise will use sudo to restart invoice-web.',
+            },
+          ],
+        });
+      answer = 'yes';
+      return json({ ...proposal(), needsConfirmation: [] });
+    };
+    mountPage();
+    await user.click(await screen.findByTestId('needs-answer-open'));
+    await user.click(await screen.findByTestId('answer-0-yes'));
+    await user.click(screen.getByTestId('answers-submit'));
+    expect(await screen.findByTestId('answers-confirm-list')).toHaveTextContent(
+      'Guildwise will use sudo to restart invoice-web.',
+    );
+    expect(calls.filter((x) => x.url.endsWith('/answers'))).toHaveLength(1);
+    await user.click(screen.getByTestId('answers-confirm'));
+    await waitFor(() => expect(calls.filter((x) => x.url.endsWith('/answers'))).toHaveLength(2));
+    expect(calls.filter((x) => x.url.endsWith('/answers')).at(-1)?.body).toEqual({
+      answers: [{ path: '/environments/0/direct/manager/sudo', value: 'yes' }],
+      confirmed: ['/environments/0/direct/manager/sudo'],
+    });
+  });
+
+  it('a key that could not be taken off the server is kept here until the person says to forget it', async () => {
+    const user = userEvent.setup();
+    serveProject();
+    const s = savedState();
+    s.targets.push({
+      ...(s.targets[1] as object),
+      id: ID(42),
+      name: 'old-vps',
+      host: 'old-vps',
+      production: false,
+    } as never);
+    serve(s);
+    routes[`POST /api/projects/${PROJECT}/places/${ID(42)}/remove`] = () =>
+      json({ removed: true, keyCleanup: { state: 'started', commandId: ID(77), reason: null } });
+    routes[`GET /api/projects/${PROJECT}/delivery/ops/${ID(77)}`] = () =>
+      json({
+        id: ID(77),
+        kind: 'revoke',
+        state: 'failed',
+        ok: false,
+        result: null,
+        errorText: 'The server did not answer.',
+        at,
+        localKeyKept: true,
+      });
+    routes[`POST /api/projects/${PROJECT}/delivery/ops/${ID(77)}/forget-key`] = () => json({ ok: true });
+    mountPage();
+    const places = await screen.findByTestId('places');
+    await user.click(within(places).getByRole('button', { name: 'More for old-vps' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Remove' }));
+    await user.click(within(await screen.findByTestId('remove-place-dialog')).getByTestId('remove-key'));
+    await user.click(screen.getByTestId('remove-place-confirm'));
+    const box = await screen.findByTestId('key-cleanup');
+    expect(box).toHaveTextContent('The server did not answer.');
+    await user.click(within(box).getByTestId('forget-key-anyway'));
+    await waitFor(() => expect(calls.some((x) => x.url.endsWith(`/ops/${ID(77)}/forget-key`))).toBe(true));
+  });
+
+  it('a stack Guildwise cannot update yet is shown with its reason and cannot be chosen', async () => {
+    const user = userEvent.setup();
+    let probes: unknown[] = [];
+    serveProject();
+    routes[`GET /api/projects/${PROJECT}/delivery/setup`] = () => json(state({ probes }));
+    routes[`POST /api/projects/${PROJECT}/delivery/probe`] = () => {
+      const r = uatReport();
+      (r.composeFiles[0] as { unsupported?: string }).unsupported = 'it is started from two compose files';
+      probes = [probe({ report: r })];
+      return json({ commandId: ID(77), workstationId: WS }, 202);
+    };
+    mountPage();
+    await user.click(await screen.findByTestId('setup-add'));
+    await user.click(screen.getByTestId('place-choice-Office PC'));
+    const stack = await screen.findByTestId('stack-choice', undefined, { timeout: 6000 });
+    expect(within(stack).getByTestId('stack-unsupported')).toHaveTextContent(
+      'Not supported yet: it is started from two compose files',
+    );
+    expect(stack.querySelector('input')).toBeDisabled();
+  });
+
+  it('files an app writes itself must be kept between versions before a plain folder is adopted: one click marks them', async () => {
+    const user = userEvent.setup();
+    let probes: unknown[] = [];
+    serveProject();
+    routes[`GET /api/projects/${PROJECT}/delivery/setup`] = () => json(state({ probes }));
+    routes[`POST /api/projects/${PROJECT}/delivery/probe`] = () => {
+      probes = [
+        probe({
+          report: report({
+            services: [
+              {
+                manager: 'pm2',
+                name: 'crm-api',
+                state: 'online',
+                workingDir: '/home/u/apps/crm',
+                ports: [3100],
+                statePaths: ['uploads', '.env'],
+              },
+            ],
+          }),
+        }),
+      ];
+      return json({ commandId: ID(77), workstationId: WS }, 202);
+    };
+    mountPage();
+    await user.click(await screen.findByTestId('setup-add'));
+    await user.click(screen.getByTestId('place-choice-Office PC'));
+    await user.click(await screen.findByTestId('native-choice', undefined, { timeout: 6000 }));
+    await user.click(screen.getByTestId('env-next'));
+    const box = await screen.findByTestId('native-state-paths');
+    expect(box).toHaveTextContent('uploads');
+    await user.click(screen.getByTestId('native-adopt-confirm'));
+    expect(screen.getByTestId('env-to-review')).toBeDisabled();
+    await user.click(screen.getByTestId('native-keep-state'));
+    expect(screen.queryByTestId('native-state-paths')).toBeNull();
+    expect((screen.getByTestId('native-shared') as HTMLInputElement).value).toBe('uploads .env');
+    expect(screen.getByTestId('env-to-review')).toBeEnabled();
+  });
+
+  it('steps made by an older generator offer "An improved version of these steps is available"', async () => {
+    serveProject();
+    const s = savedState();
+    s.current.setup.generator = 'setup-1.3';
+    serve(s);
+    mountPage();
+    expect(await screen.findByTestId('setup-improved')).toHaveTextContent(
+      'An improved version of these steps is available',
+    );
   });
 });

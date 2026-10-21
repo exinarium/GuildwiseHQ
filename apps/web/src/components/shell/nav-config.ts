@@ -4,6 +4,7 @@ import {
   BriefcaseBusiness,
   Building2,
   ChartColumn,
+  Cloud,
   Coins,
   FolderKanban,
   Inbox,
@@ -45,6 +46,8 @@ export function buildNav(opts: {
   projectKey: string | null;
   /** The current project has published research notes or started as research: it gets a Research entry. */
   hasResearch?: boolean;
+  /** The current project delivers code (it has an Environments page: where its app runs). */
+  hasEnvironments?: boolean;
   /** Owner or Admin of the active organization. */
   canManage?: boolean;
   /** Feature flags of the active organization (a switched-off feature leaves the nav; its data is kept). */
@@ -55,7 +58,7 @@ export function buildNav(opts: {
   sections: NavSection[];
   footer: NavEntry[];
 } {
-  const { projectKey, hasResearch = false, canManage = false, features = {} } = opts;
+  const { projectKey, hasResearch = false, hasEnvironments = false, canManage = false, features = {} } = opts;
   const on = (f: string) => features[f] !== false;
   const work: NavEntry[] = [
     {
@@ -66,6 +69,15 @@ export function buildNav(opts: {
       match: (p) => p.startsWith('/p/') || p.startsWith('/cards/'),
     },
   ];
+  if (projectKey && hasEnvironments)
+    work.push({
+      id: 'environments',
+      label: 'Environments',
+      to: `/p/${projectKey}/environments`,
+      icon: Cloud,
+      testId: 'nav-environments',
+      match: (p) => p.endsWith('/environments'),
+    });
   if (hasResearch && projectKey)
     work.push({
       id: 'research',
@@ -122,9 +134,7 @@ export function buildNav(opts: {
           match: (p) => p === '/org' || p.startsWith('/org/workflows'),
         },
         { id: 'workstations', label: 'Workstations', to: '/workstations', icon: Server },
-        ...(canManage
-          ? [{ id: 'deploys', label: 'Deploys', to: '/deploys', icon: Rocket, testId: 'nav-deploys' }]
-          : []),
+        { id: 'releases', label: 'Releases', to: '/releases', icon: Rocket, testId: 'nav-releases' },
         {
           id: 'integrations',
           label: 'Integrations',

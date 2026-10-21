@@ -24,6 +24,8 @@ import { setupKey } from './deploy-setup.ts';
 const refresh = (qc: ReturnType<typeof useQueryClient>, projectId: string) => {
   void qc.invalidateQueries({ queryKey: setupKey(projectId) });
   void qc.invalidateQueries({ queryKey: ['deploy-targets', projectId] });
+  void qc.invalidateQueries({ queryKey: ['places', projectId] });
+  void qc.invalidateQueries({ queryKey: ['env-status', projectId] });
 };
 
 /** Follows one operation (a command on the chosen computer) until it is answered or expires. */

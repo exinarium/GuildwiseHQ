@@ -10,6 +10,14 @@ import { SshAliasSchema } from './setup.ts';
 
 /** Announced by a runner that answers `deploy.probe` and `recipe.write` (guided deploy setup). */
 export const DEPLOY_SETUP_CAPABILITY = 'deploy-setup:1';
+/**
+ * Announced by a runner that also finds stacks from container labels and home folders, reports the places it looked at
+ * (`ProbeReport.checked`), and can write the new update methods (override file, registry pull, build on the server) and
+ * remove its own key on `deploy.revoke {forget}`.
+ */
+export const DEPLOY_SETUP_V2_CAPABILITY = 'deploy-setup:2';
+/** Announced by a runner that lists systemd/pm2/listening apps in a probe and writes "runs directly on the machine" setups. */
+export const DEPLOY_DIRECT_CAPABILITY = 'deploy-direct:1';
 
 /** `ssh_check`: one non-interactive connect to a target's server (reachability only; nothing is read from it). */
 export const PROBE_SCOPES = ['local', 'ssh_hosts', 'ssh_target', 'ssh_check'] as const;
@@ -64,6 +72,8 @@ export const ProbeContainerSchema = z.object({
   ports: z.array(ProbePortSchema).max(20).default([]),
   composeFile: z.string().max(300).optional(),
   workingDir: z.string().max(300).optional(),
+  /** Why Guildwise cannot restart this stack safely yet: started from several compose files, with --env-file or --project-directory. */
+  unsupported: z.string().max(200).optional(),
 });
 export type ProbeContainer = z.infer<typeof ProbeContainerSchema>;
 
@@ -89,6 +99,8 @@ export const ProbeComposeFileSchema = z.object({
   volumes: z.array(Name).max(40).default([]),
   /** The file could not be read as a compose file. */
   unreadable: z.string().max(200).optional(),
+  /** The running stack of this file was started in a way Guildwise does not support yet (the reason, in plain words). */
+  unsupported: z.string().max(200).optional(),
 });
 export type ProbeComposeFile = z.infer<typeof ProbeComposeFileSchema>;
 
@@ -121,6 +133,30 @@ export const ProbeProxySchema = z.object({
   /** Site addresses only (Caddy site labels, nginx `server_name`). */
   sites: z.array(z.string().max(200)).max(30).default([]),
 });
+
+/** An app that runs on the machine itself: a systemd unit (system or --user), a pm2 process or a plain listening process. */
+export const ProbeServiceSchema = z.object({
+  manager: z.enum(['systemd', 'systemd_user', 'pm2', 'process']),
+  /** The unit (`myapp.service`), the pm2 name, or the program name of a plain process. */
+  name: z.string().max(120),
+  state: z.string().max(40),
+  /** The folder it runs in (systemd `WorkingDirectory`, pm2 `cwd`, the process's cwd). */
+  workingDir: z.string().max(300).optional(),
+  /** The program and arguments, shortened (never environment values). */
+  command: z.string().max(300).optional(),
+  /** TCP ports it listens on. */
+  ports: z.array(z.number().int()).max(10).default([]),
+  /** Runs as this user. */
+  user: z.string().max(60).optional(),
+  /** `<dir>/releases` and `<dir>/current` exist: it already deploys the way Guildwise does. */
+  releaseLayout: z.boolean().optional(),
+  /**
+   * Paths in its folder (names only, at most 20) that look like data the app keeps itself: sqlite files, uploads, storage, data
+   * and log folders, `.env` files. A plain folder can only be adopted when these are marked as shared files.
+   */
+  statePaths: z.array(z.string().max(200)).max(20).optional(),
+});
+export type ProbeService = z.infer<typeof ProbeServiceSchema>;
 
 export const ProbeUrlSchema = z.object({
   url: z.string().max(300),
@@ -160,7 +196,7 @@ export const ProbeReportSchema = z.object({
     })
     .optional(),
   containers: z.array(ProbeContainerSchema).max(100).default([]),
-  composeFiles: z.array(ProbeComposeFileSchema).max(10).default([]),
+  composeFiles: z.array(ProbeComposeFileSchema).max(16).default([]),
   volumes: z.array(Name).max(100).default([]),
   folders: z.array(ProbeFolderSchema).max(20).default([]),
   backups: z.array(ProbeBackupsSchema).max(10).default([]),
@@ -169,6 +205,12 @@ export const ProbeReportSchema = z.object({
   /** Ports 80 and 443 that something listens on. */
   listeners: z.array(z.number().int()).max(10).default([]),
   freeDiskMb: z.number().int().optional(),
+  /** Apps that run directly on the machine (systemd, pm2, listening processes). Absent from an older runner. */
+  services: z.array(ProbeServiceSchema).max(40).optional(),
+  /** Common app folders that exist (`/var/www/*`, `/srv/*`, `~/apps/*`...) with their entries, names only. */
+  appDirs: z.array(z.string().max(300)).max(30).optional(),
+  /** The places that were looked at (folders and compose files), so "nothing found" can say where it looked. Absent from an older runner. */
+  checked: z.array(z.string().max(300)).max(60).optional(),
   sshHosts: z.array(ProbeSshHostSchema).max(30).optional(),
 });
 export type ProbeReport = z.infer<typeof ProbeReportSchema>;
