@@ -670,10 +670,28 @@ describe('Scan with DevOps for the deploy setup', () => {
     expect(state.proposal).toMatchObject({ area: 'deploy', status: 'open' });
     expect(state.scan).not.toBeNull();
 
+    // a question without an answer blocks it; the answer is stored and applied to the proposal itself
+    const early = await req('POST', `${base()}/delivery/setup/use-proposal`, {
+      proposalId: state.proposal.id,
+    });
+    expect(early.status).toBe(409);
+    expect(early.body.error.code).toBe('questions_open');
+    const wrong = await req('POST', `/api/setup-proposals/${state.proposal.id}/answers`, {
+      answers: [{ path: '/environments/0/app/service', value: 'banana' }],
+    });
+    expect(wrong.status).toBe(422);
+    expect(wrong.body.error.message).toContain('Which part is your app?');
+    const answered = await call('POST', `/api/setup-proposals/${state.proposal.id}/answers`, {
+      answers: [{ path: '/environments/0/app/service', value: 'web' }],
+    });
+    expect(answered.proposal.questions[0].answer).toBe('web');
+    expect(answered.proposal.deploy.environments[0].app.service).toBe('web');
     // using it makes it the wizard's draft and resolves it; the review (Found / Will change) still comes before saving
     const used = await call('POST', `${base()}/delivery/setup/use-proposal`, {
       proposalId: state.proposal.id,
     });
+    expect(used.merge).toEqual({ added: ['uat', 'production'], replaced: [], notCovered: [] });
+    expect(used.draft.setup.environments[0].app.service).toBe('web');
     expect(used.proposal).toBeNull();
     expect(used.draft.proposalId).toBe(state.proposal.id);
     expect(used.draft.setup.environments.map((e: any) => e.name)).toEqual(['uat', 'production']);

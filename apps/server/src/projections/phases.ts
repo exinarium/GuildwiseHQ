@@ -19,8 +19,8 @@ async function insertFollowups(
     await exec(
       tx,
       `INSERT INTO phase_followups (id, phase_id, position, kind, target_id, platform, instruction, note, status, mock,
-         created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$11)`,
+         created_at, updated_at, environment)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$11,$12)`,
       [
         f.id,
         phaseId,
@@ -33,6 +33,7 @@ async function insertFollowups(
         status,
         f.kind === 'regression' && f.mock ? JSON.stringify(f.mock) : null,
         at,
+        f.kind === 'deploy' ? (f.environment ?? null) : null,
       ],
     );
   }

@@ -172,6 +172,13 @@ export const runProjectors: Record<string, Projector> = {
       ],
     );
   },
+  SetupProposalAnswered: async (tx, e) => {
+    const p = (e.event as EventOf<'SetupProposalAnswered'>).payload;
+    await exec(tx, `UPDATE setup_proposals SET proposal=$2::jsonb WHERE id=$1 AND status='open'`, [
+      p.proposalId,
+      JSON.stringify(p.proposal),
+    ]);
+  },
   SetupProposalResolved: async (tx, e) => {
     const p = (e.event as EventOf<'SetupProposalResolved'>).payload;
     await exec(

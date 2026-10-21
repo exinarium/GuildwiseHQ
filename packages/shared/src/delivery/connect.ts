@@ -282,6 +282,12 @@ export const DeployRevokePayloadSchema = z.object({
   /** The public key line of the key to remove. */
   publicKey: z.string().min(40).max(600),
   fingerprint: FingerprintSchema,
+  /**
+   * "Remove this server": the key may be this computer's OWN key (it is used once more to take itself off the server), and
+   * this computer deletes its key material for the target afterwards, whether or not the server could be reached
+   * (capability `deploy-setup:2`).
+   */
+  forget: z.boolean().optional(),
 });
 export type DeployRevokePayload = z.infer<typeof DeployRevokePayloadSchema>;
 
@@ -299,8 +305,15 @@ export const DeployRevokeResultSchema = z.union([
     /** Lines removed from authorized_keys (0: it was not there any more). */
     removed: z.number().int().min(0),
     backup: z.string().max(300).optional(),
+    /** `forget` was asked and this computer's key material for the target is gone. */
+    forgotten: z.boolean().optional(),
   }),
-  z.object({ ok: z.literal(false), error: z.enum(REVOKE_ERRORS), detail: z.string().max(300).optional() }),
+  z.object({
+    ok: z.literal(false),
+    error: z.enum(REVOKE_ERRORS),
+    detail: z.string().max(300).optional(),
+    forgotten: z.boolean().optional(),
+  }),
 ]);
 export type DeployRevokeResult = z.infer<typeof DeployRevokeResultSchema>;
 

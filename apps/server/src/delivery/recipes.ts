@@ -218,6 +218,9 @@ export async function observeRecipe(
     cur.present === inspected.present
   )
     return { recorded: false, status: cur.status };
+  // files that an operator reset away are not brought back by the vault still holding them
+  if (cur?.reset_hash && inspected.present && inspected.hash === cur.reset_hash)
+    return { recorded: false, status: cur.status };
   const recipe = (inspected.present ? inspected.recipe : null) as Recipe | null;
   const guided = inspected.present
     ? guidedState((inspected as { setup?: unknown }).setup, inspected.files)
@@ -366,8 +369,24 @@ export async function approveRecipe(
         'dry_run_required',
         `try it without changing anything first (${missing.join(', ')}): a guided setup is approved after a successful dry run of exactly this version`,
       );
+    // a release that waits for an environment this version no longer has can never go: it is cancelled with the approval
+    const kept = new Set(((row.parsed as Recipe | null)?.environments ?? []).map((e) => e.name));
+    const stale = await rows(
+      tx,
+      `SELECT id FROM deploy_runs WHERE project_id=$1 AND status IN ('waiting_release','requested') AND NOT trial AND NOT (env = ANY($2::text[]))`,
+      [projectId, [...kept]],
+    );
     await ctx.store.append(
       [
+        ...stale.map((r) => ({
+          streamId: streamId.project(projectId),
+          event: {
+            type: 'DeployRunCancelled' as const,
+            payload: { runId: r.id, orgId: row.org_id, projectId, by: user.id },
+          },
+          actor: userActor(user.id),
+          scope: projectScope(row.org_id, projectId),
+        })),
         {
           streamId: streamId.project(projectId),
           event: {
@@ -392,6 +411,30 @@ export async function approveRecipe(
   await closeDeskNotice(ctx, `recipe_approval:${projectId}`, user.id);
 }
 
+/** The observed recipe is the approved one with some environments (and their scripts) taken out, and nothing else changed. */
+export function onlyRemovals(row: Row): boolean {
+  const approved = row.approved_parsed as Recipe | null;
+  const observed = row.parsed as Recipe | null;
+  if (!row.approved_hash || !approved || !observed) return false;
+  const before = new Map(approved.environments.map((e) => [e.name, e]));
+  const removed = [...before.keys()].filter((n) => !observed.environments.some((e) => e.name === n));
+  if (removed.length === 0) return false;
+  for (const e of observed.environments)
+    if (JSON.stringify(before.get(e.name) ?? null) !== JSON.stringify(e)) return false;
+  const gone = new Set(removed.flatMap((n) => [`scripts/${n}.sh`]));
+  const files = (list: unknown) =>
+    new Map(
+      ((list ?? []) as Array<{ path: string; sha256: string; mode: string }>)
+        .filter((f) => !gone.has(f.path) && f.path !== 'setup.json' && f.path !== 'recipe.yaml')
+        .map((f) => [f.path, `${f.mode}:${f.sha256}`]),
+    );
+  const a = files(row.approved_files);
+  const b = files(row.files);
+  if (a.size !== b.size) return false;
+  for (const [k, v] of a) if (b.get(k) !== v) return false;
+  return true;
+}
+
 /** The guided environments of the observed recipe that have no successful dry run of its observed hash. */
 export async function guidedEnvsWithoutDryRun(db: Queryable, projectId: string, row: Row): Promise<string[]> {
   // EVERY environment of the observed version needs one: guided, edited by hand or custom. A recipe with no setup.json needs
@@ -407,6 +450,9 @@ export async function guidedEnvsWithoutDryRun(db: Queryable, projectId: string, 
     : (((row.parsed as { environments?: Array<{ name: string }> } | null)?.environments ?? []).map(
         (e) => e.name,
       ) as string[]);
+  // Taking environments OUT changes nothing that runs: when every environment that is left has the same entry and the same
+  // script as the approved version, no new try is needed (the remaining scripts were already tried at that version).
+  if (onlyRemovals(row)) return [];
   const out: string[] = [];
   for (const name of names) {
     const e = { name };

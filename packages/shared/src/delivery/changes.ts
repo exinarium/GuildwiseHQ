@@ -39,6 +39,10 @@ function envChanges(env: SetupEnv, r: ProbeReport | null | undefined): ChangeIte
   const add = (group: ChangeGroup, text: string, ref?: string) =>
     out.push({ group, text, env: env.name, ...(ref ? { ref } : {}) });
   const where = env.hosting === 'ssh' ? `the server ${env.host ?? ''}`.trim() : 'this computer';
+  if (env.runtime === 'direct') {
+    directChanges(env, r, add, where);
+    return out;
+  }
 
   if (!r) {
     add(
@@ -170,6 +174,83 @@ function envChanges(env: SetupEnv, r: ProbeReport | null | undefined): ChangeIte
   for (const s of env.steps) add('each_deploy', describeSetupStep(s, env), 'step');
   for (const t of imp.after) add('each_deploy', t, 'step');
   return out;
+}
+
+/** Found / Will change for an app that runs directly on the machine (no Docker). */
+function directChanges(
+  env: SetupEnv,
+  r: ProbeReport | null | undefined,
+  add: (group: ChangeGroup, text: string, ref?: string) => void,
+  where: string,
+): void {
+  const d = env.direct;
+  if (!r) {
+    add(
+      'question',
+      `${where} has not been checked yet. Check it first, so Guildwise can show what it found.`,
+    );
+  } else if (d) {
+    const m = d.manager;
+    const name = m.kind === 'systemd' ? m.unit : m.kind === 'pm2' ? m.name : null;
+    const norm = (n: string) => n.replace(/\.service$/, '');
+    const svc = r.services?.find(
+      (x) =>
+        (m.kind === 'systemd' &&
+          (x.manager === 'systemd' || x.manager === 'systemd_user') &&
+          norm(x.name) === norm(m.unit)) ||
+        (m.kind === 'pm2' && x.manager === 'pm2' && x.name === m.name),
+    );
+    if (name)
+      if (svc)
+        add(
+          'reuse',
+          `${m.kind === 'pm2' ? 'The pm2 process' : 'The service'} "${name}" is ${svc.state}${svc.workingDir ? ` and runs from ${svc.workingDir}` : ''}${svc.ports.length ? ` (port ${svc.ports.join(', ')})` : ''}`,
+          'service',
+        );
+      else add('question', `"${name}" was not found running on ${where}. Is it the right name?`, 'service');
+    else add('reuse', 'A restart command of your own', 'service');
+    if (m.kind === 'systemd' && m.scope === 'system' && m.sudo)
+      add(
+        'question',
+        `Restarting ${m.unit} needs administrator rights (sudo). Guildwise only uses sudo without a password prompt; check passes first with “Try it”.`,
+        'sudo',
+      );
+    const folder = r.folders.find((f) => f.path === d.appDir);
+    if (folder) {
+      add('reuse', `The app folder ${d.appDir}`, 'folder');
+      const entries = new Set(folder.entries);
+      if (entries.has('releases'))
+        add('reuse', 'It already keeps one folder per version (releases)', 'folder');
+    } else if (r.appDirs?.includes(d.appDir)) add('reuse', `The app folder ${d.appDir}`, 'folder');
+    else
+      add(
+        'question',
+        `The app folder ${d.appDir} was not seen on ${where}. It must exist and belong to the signed-in user.`,
+        'folder',
+      );
+    if (d.adoptFolder && d.currentLink)
+      add(
+        'setup_once',
+        `${d.currentLink} is a plain folder today. The first update moves it to ${d.appDir}/releases/initial and puts a link with the same name in its place. Nothing is deleted or copied.`,
+        'adopt',
+      );
+    for (const u of r.urls)
+      add('reuse', `${u.url} answers${u.status ? ` (${u.status})` : ' (no answer now)'}`, 'url');
+    for (const o of r.services ?? []) {
+      if (o === svc) continue;
+      add(
+        'untouched',
+        `${o.name} (${o.manager === 'pm2' ? 'pm2' : o.manager === 'process' ? 'program' : 'service'}) keeps running, untouched`,
+        'service',
+      );
+    }
+    for (const c of r.containers.filter((x) => x.state === 'running'))
+      add('untouched', `Container ${c.name} (${c.image}) keeps running, untouched`, 'container');
+  }
+  const imp = implicitStepText(env);
+  for (const t of imp.before) add('each_deploy', t, 'step');
+  for (const s of env.steps) add('each_deploy', describeSetupStep(s, env), 'step');
+  for (const t of imp.after) add('each_deploy', t, 'step');
 }
 
 /** The change list of every environment. `reports` is keyed by environment name (`null`/absent: not checked yet). */

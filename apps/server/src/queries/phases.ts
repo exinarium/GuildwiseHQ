@@ -82,7 +82,7 @@ async function summaries(
           kind: f.kind,
           label: followupLabel(
             { kind: f.kind, platform: f.platform, instruction: f.instruction },
-            f.target_id ? names.get(f.target_id) : null,
+            f.environment ?? (f.target_id ? names.get(f.target_id) : null),
           ),
           status: f.status,
         })),
@@ -149,9 +149,13 @@ async function followupDtos(db: Queryable, phaseId: string): Promise<PhaseFollow
       id: f.id,
       position: f.position,
       kind: f.kind,
-      label: followupLabel({ kind: f.kind, platform: f.platform, instruction: f.instruction }, targetName),
+      label: followupLabel(
+        { kind: f.kind, platform: f.platform, instruction: f.instruction },
+        f.environment ?? targetName,
+      ),
       targetId: f.target_id,
       targetName,
+      environment: f.environment ?? null,
       platform: f.platform,
       instruction: f.instruction,
       note: f.note,

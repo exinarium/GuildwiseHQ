@@ -44,6 +44,12 @@ export const ProposalQuestionSchema = z.object({
   question: z.string().min(1).max(300),
   options: z.array(z.string().max(100)).max(10).optional(),
   default: z.string().max(200).optional(),
+  /** The control to show: free text, one of `options`, or yes/no ("confirm", answered `yes` or `no`). Default: `choice` with options, else `text`. */
+  kind: z.enum(['text', 'choice', 'confirm']).optional(),
+  /** May be left unanswered (the default is used). */
+  optional: z.boolean().optional(),
+  /** The stored answer (set by `POST /api/setup-proposals/:id/answers`, never by DevOps). */
+  answer: z.string().max(500).optional(),
 });
 export type ProposalQuestion = z.infer<typeof ProposalQuestionSchema>;
 

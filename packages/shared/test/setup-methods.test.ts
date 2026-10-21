@@ -53,7 +53,9 @@ describe('update methods for a server (golden files)', () => {
     const c = script(compile(cases[k as keyof typeof cases]()));
     golden(`${k}.sh`, c);
     expect(spawnSync('bash', ['-n'], { input: c, encoding: 'utf8' }).status).toBe(0);
-    expect(c).not.toMatch(/compose[^\n]*\b(down|rm|stop|kill)\b|--remove-orphans|--volumes|prune|docker (rm|stop|kill)\b/);
+    expect(c).not.toMatch(
+      /compose[^\n]*\b(down|rm|stop|kill)\b|--remove-orphans|--volumes|prune|docker (rm|stop|kill)\b/,
+    );
     for (const line of c.split('\n').filter((l) => /\bup -d\b/.test(l))) expect(line).toContain('--no-deps');
     // the database is backed up first and a failed backup stops everything
     expect(c.indexOf('# step 1: back up the database')).toBeGreaterThan(0);
@@ -93,7 +95,7 @@ describe('update methods for a server (golden files)', () => {
   it('build on the server: files are copied, nothing is pulled from git there', () => {
     const c = script(compile(cases['build-on-server']()));
     expect(c).toContain('git -C "$CHECKOUT" archive');
-    expect(c).toContain("build_image_server".length ? 'build "$svc"' : '');
+    expect(c).toContain('build_image_server'.length ? 'build "$svc"' : '');
     expect(c).not.toContain('docker save');
   });
 

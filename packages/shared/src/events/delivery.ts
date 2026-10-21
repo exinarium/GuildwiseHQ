@@ -63,6 +63,21 @@ export const deliveryEvents = [
       approvedHash: z.string().length(64),
     }),
   ),
+  /**
+   * An operator cleared the delivery setup of a project ("reset for new environments"): the observed recipe, the guided setup
+   * and the approval are forgotten by the read model; this event and the earlier ones keep the history. `hash` is the content
+   * that was observed, ignored when it is observed again (the vault files stay as they were; a different save starts fresh).
+   */
+  defineEvent(
+    'DeliveryRecipeReset',
+    z.object({
+      recipeId: Id,
+      orgId: Id,
+      projectId: Id,
+      hash: z.string().length(64).nullable(),
+      reason: z.string().max(200),
+    }),
+  ),
   defineEvent(
     'DeliveryRecipeApproved',
     z.object({

@@ -51,6 +51,33 @@ import {
 
 // ------------------------------------------------------------------------------------- validation
 
+/** The place (deploy target) an environment of the approved, else observed, recipe releases to; 422 `unknown_environment`. */
+export async function resolveEnvironmentTarget(
+  db: Queryable,
+  projectId: string,
+  envName: string,
+): Promise<Row> {
+  const rec = await one(db, 'SELECT approved_parsed, parsed FROM delivery_recipes WHERE project_id=$1', [
+    projectId,
+  ]);
+  const recipe = (rec?.approved_parsed ?? rec?.parsed ?? null) as {
+    environments?: Array<{ name: string; targets: string[] }>;
+  } | null;
+  const env = recipe?.environments?.find((e) => e.name === envName);
+  if (!env)
+    throw unprocessable(
+      'unknown_environment',
+      `the project has no environment called ${envName}: set it up and approve it first`,
+    );
+  const t = await one(
+    db,
+    `SELECT * FROM deploy_targets WHERE project_id=$1 AND removed_at IS NULL AND lower(name)=lower($2)`,
+    [projectId, env.targets[0] ?? ''],
+  );
+  if (!t) throw unprocessable('unknown_environment', `the place of ${envName} does not exist any more`);
+  return t;
+}
+
 /**
  * Checks a follow-up list against the project (live targets, mock scripts only with AOM_MOCK_UI) and gives every
  * follow-up its id (a given id is kept, so editing the list does not lose track of items).
@@ -73,6 +100,17 @@ export async function normalizeFollowups(
         f.kind === 'deploy'
           ? 'a deploy follow-up needs a repository: this project has none (convert it to a delivery project first)'
           : 'a regression follow-up needs a repository and a workflow with a test stage: this project has neither',
+      );
+    if (f.kind === 'deploy' && f.environment) {
+      // an environment of the guided setup: it is resolved to its place now (so the row is valid), and again when it starts
+      const t = await resolveEnvironmentTarget(db, projectId, f.environment);
+      out.push({ ...f, targetId: t.id as string, id } as FollowupSpecWithId);
+      continue;
+    }
+    if (f.kind === 'deploy' && !f.targetId)
+      throw unprocessable(
+        'followup_needs_target',
+        'a deploy follow-up names an environment or a deploy target',
       );
     if (f.kind === 'deploy' || (f.kind === 'regression' && f.targetId))
       await liveTarget(db, projectId, f.targetId as string);

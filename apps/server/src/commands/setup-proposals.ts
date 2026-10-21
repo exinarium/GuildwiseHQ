@@ -5,6 +5,7 @@ import {
   type DevopsScan,
   type ProposalDto,
   RunPlanSchema,
+  resolvePointer,
   SCAN_REQUEST_KIND,
   type ScanStateDto,
   SETUP_SCAN_CAPABILITY,
@@ -12,6 +13,7 @@ import {
   type SetupProposal,
   SetupProposalSchema,
   type SetupScanRequest,
+  setPointer,
   streamId,
   validateRunPlan,
 } from '@aom/shared';
@@ -20,7 +22,7 @@ import { loadVisibleProject } from '../authz/scope.ts';
 import type { Ctx } from '../context.ts';
 import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
-import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
+import { badRequest, conflict, forbidden, notFound, unprocessable } from '../errors.ts';
 import { agentActor, projectScope, userActor } from './common.ts';
 import { createDevOpsRequestIn } from './devops.ts';
 
@@ -468,4 +470,114 @@ export async function resolveProposal(
       { tx },
     );
   });
+}
+
+// --------------------------------------------------------------------------------------------------- answers
+
+/** A proposal's unanswered questions that block using it: no answer, no default, not optional. */
+export const openQuestionsOf = (p: SetupProposal): SetupProposal['questions'] =>
+  p.questions.filter((q) => q.answer === undefined && q.default === undefined && !q.optional);
+
+/** The value to store at the question's path: a number where a number is, yes/no where a boolean is. */
+function coerceAnswer(
+  current: unknown,
+  raw: string,
+): { ok: true; value: unknown } | { ok: false; why: string } {
+  if (typeof current === 'number') {
+    const n = Number(raw);
+    return raw.trim() !== '' && Number.isFinite(n)
+      ? { ok: true, value: n }
+      : { ok: false, why: 'a number is needed' };
+  }
+  if (typeof current === 'boolean') {
+    if (/^(yes|true|y)$/i.test(raw.trim())) return { ok: true, value: true };
+    if (/^(no|false|n)$/i.test(raw.trim())) return { ok: true, value: false };
+    return { ok: false, why: 'answer yes or no' };
+  }
+  return { ok: true, value: raw };
+}
+
+/**
+ * `POST /api/setup-proposals/:id/answers`: stores each answer on its question and applies it to the proposed plan or setup at
+ * the question's path; the whole proposal is re-checked (a bad answer is refused with the question named). Nothing is saved
+ * from the proposal until the person uses it.
+ */
+export async function answerProposal(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  proposalId: string,
+  answers: Array<{ path: string; value: string }>,
+): Promise<ProposalDto> {
+  await withAppendTx(ctx.pool, async (tx) => {
+    const sp = await one(tx, 'SELECT * FROM setup_proposals WHERE id=$1 FOR UPDATE', [proposalId]);
+    if (!sp) throw notFound('proposal not found');
+    const p = await loadVisibleProject(tx, user.id, sp.project_id);
+    if (p.my_role !== 'owner') throw forbidden('only the project owner can answer');
+    if (sp.status !== 'open')
+      throw conflict('proposal_resolved', 'this proposal was already used or dismissed');
+    const ws = await one(tx, 'SELECT user_id FROM workstations WHERE id=$1', [sp.workstation_id]);
+    if (ws && ws.user_id !== user.id)
+      throw forbidden('only the owner of the computer that scanned can answer this proposal');
+    let proposal = SetupProposalSchema.parse(sp.proposal);
+    for (const a of answers) {
+      const qi = proposal.questions.findIndex((q) => q.path === a.path);
+      const q = proposal.questions[qi];
+      if (!q) throw badRequest('unknown_question', `there is no question about ${a.path}`);
+      const text = a.value.trim();
+      const fail = (why: string) => unprocessable('bad_answer', `"${q.question}": ${why}`);
+      if (!text && !q.optional && q.default === undefined) throw fail('an answer is needed');
+      const kind = q.kind ?? (q.options?.length ? 'choice' : 'text');
+      if (kind === 'choice' && q.options?.length && text && !q.options.includes(text))
+        throw fail(`pick one of: ${q.options.join(', ')}`);
+      if (kind === 'confirm' && !/^(yes|no)$/i.test(text)) throw fail('answer yes or no');
+      const root = proposal.area === 'run' ? proposal.run : proposal.deploy;
+      const value = text || q.default || '';
+      if (value !== '') {
+        const c = coerceAnswer(resolvePointer(root, a.path), value);
+        if (!c.ok) throw fail(c.why);
+        const next = setPointer(root, a.path, c.value);
+        proposal = { ...proposal, [proposal.area === 'run' ? 'run' : 'deploy']: next };
+      }
+      proposal = {
+        ...proposal,
+        questions: proposal.questions.map((x, i) => (i === qi ? { ...x, answer: text || value } : x)),
+      };
+    }
+    const checked = SetupProposalSchema.safeParse(proposal);
+    if (!checked.success)
+      throw unprocessable('bad_answer', `that answer does not fit: ${issuesText(checked.error)}`);
+    if (proposal.area === 'deploy' && proposal.deploy) {
+      const compiled = compileSetup(proposal.deploy);
+      if (!compiled.ok)
+        throw unprocessable(
+          'bad_answer',
+          `that answer does not fit: ${compiled.issues.slice(0, 4).join('; ')}`,
+        );
+    }
+    if (proposal.area === 'run' && proposal.run) {
+      const problems = validateRunPlan(proposal.run);
+      if (problems.length)
+        throw unprocessable('bad_answer', `that answer does not fit: ${problems.slice(0, 4).join('; ')}`);
+    }
+    await ctx.store.append(
+      [
+        {
+          streamId: streamId.project(sp.project_id),
+          event: {
+            type: 'SetupProposalAnswered',
+            payload: { proposalId, proposal: checked.data, by: user.id },
+          },
+          actor: userActor(user.id),
+          scope: projectScope(p.org_id, sp.project_id),
+        },
+      ],
+      { tx },
+    );
+  });
+  const row = await one(
+    ctx.pool,
+    `SELECT sp.*, w.name AS workstation_name FROM setup_proposals sp LEFT JOIN workstations w ON w.id = sp.workstation_id WHERE sp.id=$1`,
+    [proposalId],
+  );
+  return toDto(row as Row);
 }

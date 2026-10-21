@@ -12,6 +12,17 @@ export const deliveryProjectors: Record<string, Projector> = {
     await exec(tx, 'UPDATE projects SET delivery_mode=$2 WHERE id=$1', [p.projectId, p.mode]);
   },
 
+  DeliveryRecipeReset: async (tx, e) => {
+    const p = ev<'DeliveryRecipeReset'>(e).payload;
+    await exec(
+      tx,
+      `UPDATE delivery_recipes SET status='absent', present=false, observed_hash=NULL, observed_commit=NULL, parsed=NULL,
+         lint='[]'::jsonb, file_count=0, files='[]'::jsonb, setup=NULL, hand_edited='{}', approved_hash=NULL,
+         approved_commit=NULL, approved_parsed=NULL, approved_files='[]'::jsonb, reset_hash=$2, updated_at=$3
+       WHERE project_id=$1`,
+      [p.projectId, p.hash, e.createdAt],
+    );
+  },
   DeliveryRecipeObserved: async (tx, e) => {
     const p = ev<'DeliveryRecipeObserved'>(e).payload;
     const cur = await one<{ approved_hash: string | null; status: string }>(

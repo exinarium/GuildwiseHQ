@@ -17,7 +17,7 @@ import type { FastifyInstance } from 'fastify';
 import { requireUserWithFeature } from '../auth/guards.ts';
 import { requireProjectMember } from '../authz/scope.ts';
 import {
-  addDeployTarget,
+  addOrReuseDeployTarget,
   listDeployTargets,
   listMemberWorkstations,
   removeDeployTarget,
@@ -167,10 +167,11 @@ export function phaseRoutes(ctx: Ctx) {
       { schema: { params: IdParamsSchema, body: CreateDeployTargetRequestSchema } },
       async (req, reply) => {
         const s = await requireUserWithFeature(ctx, req, 'phases');
-        const id = await addDeployTarget(ctx, s.user, req.params.id, req.body);
-        reply.code(201);
+        const { id, reused } = await addOrReuseDeployTarget(ctx, s.user, req.params.id, req.body);
+        reply.code(reused ? 200 : 201);
         const t = (await listDeployTargets(ctx.pool, req.params.id)).find((x) => x.id === id);
-        return (await decorateTargets(ctx.pool, req.params.id, [toTargetDto(t ?? notFound())]))[0];
+        const dto = (await decorateTargets(ctx.pool, req.params.id, [toTargetDto(t ?? notFound())]))[0];
+        return reused ? { ...dto, reused: true } : dto;
       },
     );
 
