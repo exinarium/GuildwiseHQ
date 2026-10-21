@@ -42,6 +42,8 @@ export const DeployTargetDtoSchema = z.object({
   reachability: ReachabilityDtoSchema.nullable().optional(),
   /** The dedicated Guildwise keys of this target, public parts only. */
   keys: z.array(DeployKeyDtoSchema).optional(),
+  /** `active` (absent from an older server), `standby` (the old server after a move) or `retired`. */
+  role: z.enum(['active', 'standby', 'retired']).optional(),
 });
 export type DeployTargetDto = z.infer<typeof DeployTargetDtoSchema>;
 

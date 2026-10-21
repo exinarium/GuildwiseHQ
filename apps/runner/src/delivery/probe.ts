@@ -68,7 +68,7 @@ export interface Ran {
 export async function run(
   cmd: string,
   args: string[],
-  o: { timeoutMs: number; input?: string; env?: NodeJS.ProcessEnv },
+  o: { timeoutMs: number; input?: string; env?: NodeJS.ProcessEnv; raw?: boolean },
 ): Promise<Ran> {
   const r = await execa(cmd, args, {
     reject: false,
@@ -77,6 +77,8 @@ export async function run(
     env: o.env ?? process.env,
     maxBuffer: 4_000_000,
     all: false,
+    // a file copied through this computer has to arrive byte for byte, its last newline included
+    ...(o.raw ? { stripFinalNewline: false } : {}),
   });
   const err = r as unknown as { code?: string; timedOut?: boolean; exitCode?: number };
   return {

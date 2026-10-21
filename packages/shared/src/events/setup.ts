@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { FingerprintSchema, OpKindSchema } from '../delivery/connect.ts';
+import { MoveFactsSchema, MoveSpecSchema, MoveStateSchema, MoveStepSchema } from '../delivery/move.ts';
 import {
   CONNECTION_STATES,
   ProbeErrorSchema,
@@ -174,6 +175,84 @@ export const setupEvents = [
       ok: z.boolean(),
       dryRun: z.boolean().default(false),
       by: Id.nullable().default(null),
+      at: z.iso.datetime(),
+    }),
+  ),
+  /**
+   * Moving to a new server (design v3) started: from the target an environment deploys to now, to a new server's target. The
+   * spec is taken from the approved guided setup on the server.
+   */
+  defineEvent(
+    'DeployTargetMoveStarted',
+    z.object({
+      moveId: Id,
+      projectId: Id,
+      envName: z.string().max(60),
+      fromTargetId: Id,
+      toTargetId: Id,
+      workstationId: Id,
+      spec: MoveSpecSchema,
+      domain: z.string().max(253).nullable().default(null),
+      by: Id,
+      at: z.iso.datetime(),
+    }),
+  ),
+  /** The computer answered one step of a move (what it did, in plain words; no secret values). */
+  defineEvent(
+    'DeployTargetMoveStepDone',
+    z.object({
+      moveId: Id,
+      projectId: Id,
+      step: MoveStepSchema,
+      ok: z.boolean(),
+      detail: z.string().max(400).nullable().default(null),
+      checks: z
+        .array(z.object({ id: z.string().max(40), ok: z.boolean(), text: z.string().max(300) }))
+        .default([]),
+      facts: MoveFactsSchema.default({}),
+      /** The state the move is in now; stated in the event so a replay needs no logic. */
+      state: MoveStateSchema,
+      oldAppStopped: z.boolean(),
+      error: z.string().max(500).nullable().default(null),
+      at: z.iso.datetime(),
+    }),
+  ),
+  /** The person agreed to the downtime, or pressed Try again: the move runs on from `step`. */
+  defineEvent(
+    'DeployTargetMoveResumed',
+    z.object({ moveId: Id, projectId: Id, step: MoveStepSchema, by: Id, at: z.iso.datetime() }),
+  ),
+  /** The Owner made the new server live: it takes over the name (so the approved deploy files point at it) and the old one becomes the standby. */
+  defineEvent(
+    'DeployTargetMoveCompleted',
+    z.object({
+      moveId: Id,
+      projectId: Id,
+      fromTargetId: Id,
+      toTargetId: Id,
+      /** The names after the swap, decided once (a replay does not compute them). */
+      fromNewName: z.string().min(1).max(120),
+      toNewName: z.string().min(1).max(120),
+      /** The new server takes the old one's "production" mark. */
+      production: z.boolean(),
+      dns: z.enum(['verified', 'unverified']),
+      by: Id,
+      at: z.iso.datetime(),
+    }),
+  ),
+  /** The move was given up. The old app was started again when this move had stopped it. */
+  defineEvent(
+    'DeployTargetMoveCancelled',
+    z.object({ moveId: Id, projectId: Id, by: Id, at: z.iso.datetime() }),
+  ),
+  /** The Owner retired a standby server: Guildwise's keys were removed from it. Nothing else was touched there. */
+  defineEvent(
+    'DeployTargetRetired',
+    z.object({
+      targetId: Id,
+      projectId: Id,
+      removedKeys: z.number().int().min(0),
+      by: Id,
       at: z.iso.datetime(),
     }),
   ),

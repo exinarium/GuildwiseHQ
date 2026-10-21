@@ -229,6 +229,8 @@ export const phaseEvents = [
         destructiveOk: z.boolean().optional(),
         testHosts: z.array(z.string()).optional(),
         secretNames: z.array(z.string()).optional(),
+        /** v3: `standby` after a move to a new server, `retired` once the Owner let it go. Absent: unchanged. */
+        role: z.enum(['active', 'standby', 'retired']).optional(),
       }),
     }),
   ),

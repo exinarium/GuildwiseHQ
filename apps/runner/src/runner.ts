@@ -8,6 +8,7 @@ import {
   CommandPayloadSchemas,
   DELIVERY_CAPABILITY,
   DEPLOY_CONNECT_CAPABILITY,
+  DEPLOY_MOVE_CAPABILITY,
   DEPLOY_SETUP_CAPABILITY,
   defaultHost,
   type EnvEnsurePayload,
@@ -48,6 +49,7 @@ import { Outbox } from './connection/outbox.ts';
 import { DeployConnector } from './delivery/connect.ts';
 import { DeployKeys } from './delivery/deploy-keys.ts';
 import { DeployExecutor } from './delivery/exec.ts';
+import { DeployMover } from './delivery/move.ts';
 import { DeployPreparer } from './delivery/prepare.ts';
 import { runDeployProbe } from './delivery/probe.ts';
 import { DeliveryService } from './delivery/service.ts';
@@ -257,6 +259,7 @@ export class Runner {
   readonly deployKeys: DeployKeys;
   readonly deployConnector: DeployConnector;
   readonly deployPreparer: DeployPreparer;
+  readonly deployMover: DeployMover;
   /** The integrations of this workstation: status, connect from the web, interactive sign-ins (docs/design/integrations-page.md). */
   readonly integrations: IntegrationService;
   readonly claudeStore: ClaudeCredentialStore;
@@ -586,6 +589,7 @@ export class Runner {
       keys: this.deployKeys,
       repoPath: async (remote) => (await this.findRepo(remote))?.localPath ?? null,
     });
+    this.deployMover = new DeployMover({ keys: this.deployKeys, log: this.log });
     this.delivery = new DeliveryService({
       vaults: this.vaults,
       rpc: (shiftId, method, params) => this.rpc(shiftId, method, params),
@@ -1068,7 +1072,9 @@ export class Runner {
         // Guided deploy setup: `deploy.probe` and `recipe.write` (docs/design/deploy-run-ux-design.md section 6)
         DEPLOY_SETUP_CAPABILITY,
         // Guided connect, dedicated deploy keys and server preparation (design v2)
-        ...(platform() === 'win32' ? [] : [DEPLOY_CONNECT_CAPABILITY, SEAL_AAD_CAPABILITY]),
+        ...(platform() === 'win32'
+          ? []
+          : [DEPLOY_CONNECT_CAPABILITY, DEPLOY_MOVE_CAPABILITY, SEAL_AAD_CAPABILITY]),
         // "Scan with DevOps": `aom setup propose` and a read-only scan brief (docs/design/deploy-run-ux-design.md section 5).
         SETUP_SCAN_CAPABILITY,
         LOCAL_VAULT_CAPABILITY,
@@ -1542,6 +1548,9 @@ export class Runner {
         done(true, await this.deployConnector.revoke(CommandPayloadSchemas['deploy.revoke'].parse(payload)));
       } else if (command === 'deploy.prepare') {
         done(true, await this.deployPreparer.run(CommandPayloadSchemas['deploy.prepare'].parse(payload)));
+      } else if (command === 'deploy.move') {
+        // One step of moving an app to a new server; a refusal or a failure is an answer, never an exception.
+        done(true, await this.deployMover.run(CommandPayloadSchemas['deploy.move'].parse(payload)));
       } else if (command === 'deploy.exec') {
         // Runs an approved deploy outside any model. A refusal or a failed deploy is an ANSWER: the server never retries it.
         done(true, await this.deployExec.run(CommandPayloadSchemas['deploy.exec'].parse(payload)));

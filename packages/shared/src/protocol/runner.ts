@@ -16,6 +16,7 @@ import {
   DeployRevokePayloadSchema,
   HostKeyScanPayloadSchema,
 } from '../delivery/connect.ts';
+import { DeployMovePayloadSchema } from '../delivery/move.ts';
 import { DeployProbePayloadSchema } from '../delivery/probe.ts';
 import {
   DeployExecPayloadSchema,
@@ -779,6 +780,7 @@ export const RunnerCommandNameSchema = z.enum([
   'deploy.connect',
   'deploy.revoke',
   'deploy.prepare',
+  'deploy.move',
   'claude.account.ensure',
 ]);
 export type RunnerCommandName = z.infer<typeof RunnerCommandNameSchema>;
@@ -860,6 +862,8 @@ export const CommandPayloadSchemas = {
   'deploy.connect': DeployConnectPayloadSchema,
   'deploy.revoke': DeployRevokePayloadSchema,
   'deploy.prepare': DeployPreparePayloadSchema,
+  /** Moving to a new server (design v3): one step of the move per command. */
+  'deploy.move': DeployMovePayloadSchema,
 } as const;
 
 /** Announced in `hello.capabilities`-style lists by runners that apply a version pin (`runner.pin`, `welcome.runnerPin`). */
