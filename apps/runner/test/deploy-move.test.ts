@@ -11,6 +11,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { gzipSync } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { type DeployMovePayload, DeployMovePayloadSchema, type MoveSpec } from '@aom/shared';
 import { describe, expect, it } from 'vitest';
@@ -249,6 +250,71 @@ describe('deploy.move on two fake servers', () => {
     expect(out).toMatchObject({ ok: false, error: 'restore_failed', oldAppRunning: true });
     expect(r.exists('new-box', 'db.sql')).toBe(false);
     expect(r.exists('old-box', 'up-app')).toBe(true);
+  });
+
+  /** The last backup on the old server replaced by `content` (gzip'd here), as a stream or a file cut short would deliver it. */
+  const replaceBackup = (file: string, content: Buffer | string, raw = false) =>
+    writeFileSync(file, raw ? (content as Buffer) : gzipSync(content));
+  const BODY = '-- PostgreSQL database dump\nCREATE TABLE users;\nCREATE TABLE orders;\nCREATE TABLE sessions;\n';
+
+  it('a dump cut at a statement boundary (valid gzip, no trailer) is refused before anything is applied', async () => {
+    const r = rig();
+    await prepared(r);
+    const stopped = await r.run('stop_and_backup');
+    if (!stopped.ok) throw new Error('backup');
+    const file = stopped.facts.backupFile as string;
+    replaceBackup(file, `${BODY}-- padding\n`.repeat(20)); // ends cleanly after a statement, but is not a finished dump
+    const out = await r.run('restore', { backupFile: file });
+    expect(out).toMatchObject({ ok: false, error: 'restore_failed', oldAppRunning: true });
+    expect(out.ok ? '' : out.detail).toContain('incomplete');
+    expect(r.exists('new-box', 'db.sql')).toBe(false); // psql never ran
+    expect(readFileSync(join(r.state('new-box'), 'calls.log'), 'utf8')).not.toContain('--single-transaction');
+    expect(r.exists('old-box', 'up-app')).toBe(true);
+    expect(readdirSync(r.app).filter((n) => n.startsWith('.aom-restore'))).toEqual([]); // the temporary file is gone
+  });
+
+  it('a gzip stream cut in the middle is refused too', async () => {
+    const r = rig();
+    await prepared(r);
+    const stopped = await r.run('stop_and_backup');
+    if (!stopped.ok) throw new Error('backup');
+    const file = stopped.facts.backupFile as string;
+    const whole = readFileSync(file);
+    replaceBackup(file, whole.subarray(0, whole.length - 30), true);
+    const out = await r.run('restore', { backupFile: file });
+    expect(out).toMatchObject({ ok: false, error: 'restore_failed', oldAppRunning: true });
+    expect(r.exists('new-box', 'db.sql')).toBe(false);
+  });
+
+  it('a database that cannot be asked is an error, not an empty database', async () => {
+    const r = rig();
+    await prepared(r);
+    const stopped = await r.run('stop_and_backup');
+    if (!stopped.ok) throw new Error('backup');
+    r.put('new-box', 'fail-count');
+    const out = await r.run('restore', { backupFile: stopped.facts.backupFile as string });
+    expect(out).toMatchObject({ ok: false, error: 'database_not_ready', oldAppRunning: true });
+    expect(r.exists('new-box', 'db.sql')).toBe(false);
+  });
+
+  it('counts the tables of every schema but the system ones', async () => {
+    const r = rig();
+    await prepared(r);
+    await r.run('stop_and_backup');
+    const log = readFileSync(join(r.state('old-box'), 'calls.log'), 'utf8');
+    expect(log).toContain("table_schema not in ('pg_catalog','information_schema')");
+    expect(log).not.toContain("table_schema='public'");
+  });
+
+  it('a count that cannot be read after the restore is a failure, said as such (the data is there, unverified)', async () => {
+    const r = rig();
+    await prepared(r);
+    const stopped = await r.run('stop_and_backup');
+    if (!stopped.ok) throw new Error('backup');
+    r.put('old-box', 'fail-count'); // the old database cannot be counted for the comparison
+    const out = await r.run('restore', { backupFile: stopped.facts.backupFile as string });
+    expect(out).toMatchObject({ ok: false, error: 'restore_failed', oldAppRunning: false });
+    expect(out.ok ? '' : out.detail).toContain('could not be counted');
   });
 
   it('a database on the new server that has data is never restored over', async () => {

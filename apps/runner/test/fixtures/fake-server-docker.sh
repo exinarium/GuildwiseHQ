@@ -2,7 +2,7 @@
 # A tiny fake of the parts of docker / docker compose that `deploy.move` uses, for the tests (a "server" is a state folder):
 #   FAKE_STATE   the state folder of this server (default /var/fakedocker, inside a throwaway sshd container)
 # State: up-<svc> (running), db.sql (the "database"), images/<name>, port, calls.log. Failure switches (files): fail-dump,
-# fail-restore, unhealthy, no-docker-compose. Real tools are never touched.
+# fail-restore, fail-count (psql cannot answer a count), unhealthy, no-docker-compose. Real tools are never touched.
 S="${FAKE_STATE:-/var/fakedocker}"
 mkdir -p "$S/images"
 echo "docker $*" >> "$S/calls.log"
@@ -84,7 +84,10 @@ case "$cmd" in
           *psql*)
             input=$(cat)
             case "$input" in
-              *"select count"*) n=$(grep -c '^CREATE TABLE' "$S/db.sql" 2>/dev/null); echo "${n:-0}"; exit 0 ;;
+              *"select count"*)
+                echo "sql: $input" >> "$S/calls.log"
+                [ -f "$S/fail-count" ] && { echo "psql: error: connection to server failed" >&2; exit 2; }
+                n=$(grep -c '^CREATE TABLE' "$S/db.sql" 2>/dev/null); echo "${n:-0}"; exit 0 ;;
             esac
             [ -f "$S/fail-restore" ] && { echo "ERROR: syntax error" >&2; exit 3; }
             printf '%s\n' "$input" > "$S/db.sql"; exit 0 ;;

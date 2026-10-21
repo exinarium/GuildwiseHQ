@@ -76,10 +76,14 @@ dc() {
 dcf() { if [ -n "$PROJECT" ]; then dc -p "$PROJECT" -f "$FILE" "$@"; else dc -f "$FILE" "$@"; fi; }
 err() { echo "AOM_ERR $1 $2"; exit 4; }
 chk() { echo "AOM_CHECK $1 $2 $3"; }
-# the number of tables in the app's database ($USERNAME and $DBNAME may be empty: the container's own defaults)
+# the number of tables in the app's database, every schema but the system ones ($USERNAME and $DBNAME may be empty: the
+# container's own defaults). A database that does not answer is a FAILURE (return 1), never "0 tables" / "empty".
 tables() {
-  echo "select count(*) from information_schema.tables where table_schema='public'" |
-    dcf exec -T "$DB" sh -c 'psql -A -t -U "\${1:-$POSTGRES_USER}" -d "\${2:-$POSTGRES_DB}"' sh "$DBUSER" "$DBNAME" | tr -d ' \\r\\n'
+  out=$(echo "select count(*) from information_schema.tables where table_schema not in ('pg_catalog','information_schema') and table_schema !~ '^pg_(toast|temp)'" |
+    dcf exec -T "$DB" sh -c 'psql -A -t -U "\${1:-$POSTGRES_USER}" -d "\${2:-$POSTGRES_DB}"' sh "$DBUSER" "$DBNAME") || return 1
+  out=$(printf %s "$out" | tr -d ' \\r\\n')
+  case "$out" in ''|*[!0-9]*) return 1 ;; esac
+  printf %s "$out"
 }
 `;
 
@@ -168,26 +172,40 @@ mv -- "$out.part" "$out"
 [ -s "$out" ] || { back; err backup_failed "the backup file is missing after it was saved"; }
 echo "AOM_FACT backupFile $out"
 echo "AOM_FACT backupBytes $(wc -c < "$out" | tr -d ' ')"
-echo "AOM_FACT tablesOld $(tables)"
+if t=$(tables); then echo "AOM_FACT tablesOld $t"; fi
 echo "AOM_RESULT stopped"
 `;
 
-/** args: FILE PROJECT DB DBUSER DBNAME; the gzip'd dump arrives on stdin. Empty database only; one transaction. */
+/**
+ * args: FILE PROJECT DB DBUSER DBNAME; the gzip'd dump arrives on stdin. Empty database only; one transaction.
+ * The dump is first written to a temporary file on this server and checked (gzip intact, the trailer pg_dump writes last)
+ * so a stream that was cut short, even at a statement boundary, is refused before anything is applied. It is restored from
+ * that file. The remote shell may be dash, so nothing here depends on \`pipefail\`: each step is its own command.
+ */
 const RESTORE = `${HEADER}
 DB=$3; DBUSER=$4; DBNAME=$5
 n=$(tables) || err database_not_ready "the new database does not answer"
 if [ "$n" != 0 ]; then err new_database_not_empty "the new database already has $n tables"; fi
-if ! gunzip | dcf exec -T "$DB" sh -c 'psql -q -v ON_ERROR_STOP=1 --single-transaction -U "\${1:-$POSTGRES_USER}" -d "\${2:-$POSTGRES_DB}" >/dev/null' sh "$DBUSER" "$DBNAME"; then
+umask 077
+tmp=$(mktemp "$(dirname "$FILE")/.aom-restore.XXXXXX" 2>/dev/null) || tmp=$(mktemp) || err restore_failed "cannot make a temporary file on the new server"
+trap 'rm -f -- "$tmp"' EXIT
+if ! cat > "$tmp"; then err restore_failed "the backup did not arrive on the new server (nothing was applied)"; fi
+if ! gzip -t "$tmp" 2>/dev/null; then err restore_failed "the backup arrived damaged or cut short (nothing was applied)"; fi
+if ! gzip -dc "$tmp" | tail -n 8 | grep -q -- '-- PostgreSQL database dump complete'; then
+  err restore_failed "the backup is incomplete: it does not end like a finished dump (nothing was applied)"
+fi
+if ! gzip -dc "$tmp" | dcf exec -T "$DB" sh -c 'psql -q -v ON_ERROR_STOP=1 --single-transaction -U "\${1:-$POSTGRES_USER}" -d "\${2:-$POSTGRES_DB}" >/dev/null' sh "$DBUSER" "$DBNAME"; then
   err restore_failed "the database refused the backup (nothing was applied)"
 fi
-echo "AOM_FACT tablesNew $(tables)"
+t=$(tables) || err restore_failed "the data was loaded, but the new database's tables could not be counted afterwards"
+echo "AOM_FACT tablesNew $t"
 echo "AOM_RESULT restored"
 `;
 
 /** args: FILE PROJECT DB DBUSER DBNAME — table count of the old database (read-only). */
 const TABLES_ONLY = `${HEADER}
 DB=$3; DBUSER=$4; DBNAME=$5
-echo "AOM_FACT tablesOld $(tables)"
+if t=$(tables); then echo "AOM_FACT tablesOld $t"; else err failed "the old database's tables could not be counted"; fi
 `;
 
 /** args: FILE PROJECT APP PORT HPATH WAITSEC. */
@@ -761,17 +779,24 @@ export class DeployMover {
         oldAppRunning: back,
       };
     }
-    const tablesNew = Number(dst.facts.tablesNew);
+    const tablesNew = dst.facts.tablesNew === undefined ? Number.NaN : Number(dst.facts.tablesNew);
     const tables = await this.script(s, 'from', TABLES_ONLY, this.dbArgs(p), this.ms('check'));
-    const tablesOld = Number(tables.facts.tablesOld);
-    if (Number.isFinite(tablesNew) && Number.isFinite(tablesOld) && tablesNew !== tablesOld) {
+    const tablesOld = tables.facts.tablesOld === undefined ? Number.NaN : Number(tables.facts.tablesOld);
+    // a count that could not be read is a failure, never "the same": the data is on the new server but unverified
+    if (!Number.isFinite(tablesNew) || !Number.isFinite(tablesOld) || tablesNew !== tablesOld) {
       return {
         ok: false,
         step: 'restore',
         error: 'restore_failed',
-        detail: `the new database has ${tablesNew} tables, the old one ${tablesOld}`,
+        detail:
+          Number.isFinite(tablesNew) && Number.isFinite(tablesOld)
+            ? `the new database has ${tablesNew} tables, the old one ${tablesOld}`
+            : 'the data was loaded, but the tables of the two databases could not be counted to compare them',
         checks: [],
-        facts: { tablesOld, tablesNew },
+        facts: {
+          ...(Number.isFinite(tablesOld) ? { tablesOld } : {}),
+          ...(Number.isFinite(tablesNew) ? { tablesNew } : {}),
+        },
         oldAppRunning: false,
       };
     }
@@ -782,13 +807,10 @@ export class DeployMover {
         {
           id: 'restore',
           ok: true,
-          text: `The data is on the new server (${Number.isFinite(tablesNew) ? `${tablesNew} tables, like the old database` : 'restored'})`,
+          text: `The data is on the new server (${tablesNew} tables, like the old database)`,
         },
       ],
-      facts: {
-        ...(Number.isFinite(tablesNew) ? { tablesNew } : {}),
-        ...(Number.isFinite(tablesOld) ? { tablesOld } : {}),
-      },
+      facts: { tablesNew, tablesOld },
       oldAppRunning: false,
     };
   }
