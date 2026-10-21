@@ -571,3 +571,9 @@ cannot be found: the restart confirmation (and sudo), the build steps, which fil
 3. A command of the person's own (`manager.kind = 'command'`): the same two fields apply; Guildwise never edits a unit file.
 
 `EnvironmentStatusDto.savedState`: `none` = the environment exists only in the unfinished draft (nothing is saved yet), `draft` = saved, and the draft has changes to it that are not saved, `saved` = what is saved is what you see.
+
+**As built (direct environments)**: shared builder `directEnv` and `SetupEnv.runtime/direct` are in `packages/shared`; `SetupStateDto.workstations[].canDirect`
+(capability `deploy-direct:1`, `DEPLOY_DIRECT_CAPABILITY`); `EnvironmentStatusDto.runtime`; `ProbeReport.services/appDirs`; lint `runner_update_needed` and
+409 `runner_outdated` for a direct environment on a computer without the capability; `planChanges` lists the found service ("The service "shop" is running and
+runs from ..."), what stays untouched (other services, pm2 processes, containers), the folder adoption, and the steps in words. The probe of a machine with no
+Docker but with apps now answers with a report (`docker.installed:false`) instead of `docker_missing`; with neither it still says `docker_missing`.

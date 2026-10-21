@@ -533,6 +533,7 @@ interface EnvView {
   label: string;
   role: 'test' | 'live' | 'other';
   hosting: 'this_computer' | 'ssh';
+  runtime: 'docker' | 'direct';
   target: string;
   appUrl: string | null;
   releasedBy: 'owner' | 'ceo' | 'auto';
@@ -549,6 +550,7 @@ function viewsOf(recipe: Row | undefined, targets: Row[]): EnvView[] {
       label: e.label,
       role: e.role ?? (targets.find((t) => lc(t.name) === lc(e.target))?.production ? 'live' : e.trigger.includes('after_merge') ? 'test' : 'other'),
       hosting: e.hosting,
+      runtime: e.runtime ?? 'docker',
       target: e.target,
       appUrl: e.app.appUrl ?? targets.find((t) => lc(t.name) === lc(e.target))?.app_url ?? null,
       releasedBy: e.releasedBy,
@@ -566,6 +568,7 @@ function viewsOf(recipe: Row | undefined, targets: Row[]): EnvView[] {
       label: e.name,
       role: t?.production ? 'live' : e.triggers.includes('after_merge') ? 'test' : 'other',
       hosting: t?.kind === 'remote_ssh' ? 'ssh' : 'this_computer',
+      runtime: 'docker',
       target: e.targets[0] ?? '',
       appUrl: t?.app_url ?? null,
       releasedBy: e.releasedBy,
@@ -760,6 +763,7 @@ export async function buildStatus(ctx: Ctx, project: Row): Promise<EnvironmentsS
       label: v?.label ?? d?.label ?? name,
       role: (v?.role ?? (d?.role as 'test' | 'live' | 'other' | undefined) ?? 'other') as 'test' | 'live' | 'other',
       hosting: v?.hosting ?? 'this_computer',
+      runtime: v?.runtime ?? 'docker',
       placeId: t?.id ?? null,
       placeName: place,
       appUrl: v?.appUrl ?? null,

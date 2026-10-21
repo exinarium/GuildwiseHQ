@@ -1,6 +1,7 @@
 import {
   type ChangeItem,
   compileSetup,
+  DEPLOY_DIRECT_CAPABILITY,
   DEPLOY_SETUP_CAPABILITY,
   DEPLOY_SETUP_V2_CAPABILITY,
   type DeliverySetup,
@@ -149,6 +150,7 @@ export async function getSetupState(
       canProbe: blocked === null,
       blocked,
       canNewMethods: (w.capabilities ?? []).includes(DEPLOY_SETUP_V2_CAPABILITY),
+      canDirect: (w.capabilities ?? []).includes(DEPLOY_DIRECT_CAPABILITY),
     });
   }
   const lp = draft?.last_publish as
@@ -319,8 +321,17 @@ export function needsV2(setup: DeliverySetup): boolean {
     'build_image_server',
   ]);
   return setup.environments.some(
-    (e) => e.mode === 'guided' && e.hosting === 'ssh' && (!e.app.imageVar || e.steps.some((x) => newKinds.has(x.kind))),
+    (e) =>
+      e.mode === 'guided' &&
+      e.runtime !== 'direct' &&
+      e.hosting === 'ssh' &&
+      (!e.app.imageVar || e.steps.some((x) => newKinds.has(x.kind))),
   );
+}
+
+/** Does this setup have an environment whose app runs directly on the machine (capability `deploy-direct:1`)? */
+export function needsDirect(setup: DeliverySetup): boolean {
+  return setup.environments.some((e) => e.mode === 'guided' && e.runtime === 'direct');
 }
 
 /** Why a computer cannot write the newer update methods (null: it can). */
@@ -334,6 +345,18 @@ export async function v2BlockedReason(db: Queryable, workstationId: string): Pro
   return (w.capabilities ?? []).includes(DEPLOY_SETUP_V2_CAPABILITY)
     ? null
     : `Guildwise on ${w.name} needs an update for this way of updating the server.`;
+}
+
+export async function directBlockedReason(db: Queryable, workstationId: string): Promise<string | null> {
+  const w = await one(
+    db,
+    `SELECT w.name, c.capabilities FROM workstations w LEFT JOIN workstation_capabilities c ON c.workstation_id = w.id WHERE w.id=$1`,
+    [workstationId],
+  );
+  if (!w) return null;
+  return (w.capabilities ?? []).includes(DEPLOY_DIRECT_CAPABILITY)
+    ? null
+    : `Guildwise on ${w.name} needs an update for apps that run without Docker.`;
 }
 
 export async function previewSetup(
@@ -381,10 +404,13 @@ export async function previewSetup(
         env: e.name,
         message: `${e.name}: there is no address to check after an update, so a broken update is not noticed and nothing is rolled back automatically. Add the address of the site.`,
       });
-  if (needsV2(c.setup)) {
+  if (needsV2(c.setup) || needsDirect(c.setup)) {
     const vault = await projectVault(ctx.pool, projectId);
     const wsId = vault ? await workstationForVault(ctx.pool, projectId, vault, p.org_id) : null;
-    const why = wsId ? await v2BlockedReason(ctx.pool, wsId) : null;
+    const why = wsId
+      ? ((needsV2(c.setup) ? await v2BlockedReason(ctx.pool, wsId) : null) ??
+        (needsDirect(c.setup) ? await directBlockedReason(ctx.pool, wsId) : null))
+      : null;
     if (why)
       lint.push({ level: 'error', code: 'runner_update_needed', message: why });
   }
@@ -475,7 +501,8 @@ export async function publishSetup(
   if (!wsId) throw conflict('no_workstation', 'no computer of the project can read the project files');
   const blocked =
     (await setupBlockedReason(ctx.pool, wsId)) ??
-    (needsV2(c.setup) ? await v2BlockedReason(ctx.pool, wsId) : null);
+    (needsV2(c.setup) ? await v2BlockedReason(ctx.pool, wsId) : null) ??
+    (needsDirect(c.setup) ? await directBlockedReason(ctx.pool, wsId) : null);
   if (blocked)
     throw conflict(blocked.includes('update') ? 'runner_outdated' : 'workstation_offline', blocked);
   const payload: RecipeWritePayload = {

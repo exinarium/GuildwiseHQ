@@ -121,6 +121,8 @@ export const EnvironmentStatusDtoSchema = z.object({
   label: z.string(),
   role: EnvRoleSchema,
   hosting: z.enum(['this_computer', 'ssh']),
+  /** What runs: a Compose stack or an app that runs directly on the machine. */
+  runtime: z.enum(['docker', 'direct']).default('docker'),
   placeId: z.uuid().nullable(),
   placeName: z.string(),
   appUrl: z.string().nullable(),

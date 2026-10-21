@@ -72,6 +72,8 @@ export const SetupWorkstationDtoSchema = z.object({
   canMove: z.boolean().optional(),
   /** Writes the update methods "override file", "registry" and "build on the server" (capability `deploy-setup:2`). */
   canNewMethods: z.boolean().optional(),
+  /** Writes and probes apps that run directly on the machine (capability `deploy-direct:1`). */
+  canDirect: z.boolean().optional(),
 });
 export type SetupWorkstationDto = z.infer<typeof SetupWorkstationDtoSchema>;
 

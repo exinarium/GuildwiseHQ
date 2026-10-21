@@ -4,6 +4,61 @@
  * parses (`probe.ts`); compose files are printed between markers so the runner reduces them to structure and drops the text.
  * `.env` files are never printed: only key names, and the value of a key that names an image (the runner checks its charset).
  */
+
+/**
+ * Apps that run directly on the machine (no Docker): running systemd units (system and `--user`) whose working folder is under a
+ * home folder, /opt, /srv or /var/www, pm2 processes, listening processes of the same places, and folders that look like apps.
+ * Read-only; it prints names, folders, states and ports (the runner shortens and masks the command lines).
+ */
+export const SERVICES_PROBE_SCRIPT = `
+allowed() { case "$1" in "$HOME"/*|/opt/*|/srv/*|/var/www/*|/home/*) return 0 ;; esac; return 1; }
+ports_of() { command -v ss >/dev/null 2>&1 || return 0; ss -ltnpH 2>/dev/null | grep "pid=$1," | awk '{print $4}' | sed 's/.*://' | sort -un | tr '\\n' ',' | sed 's/,$//'; }
+sd_units() {
+  command -v systemctl >/dev/null 2>&1 || return 0
+  tag=$2
+  systemctl $1 list-units --type=service --state=running --no-legend --plain --no-pager 2>/dev/null | awk '{print $1}' | head -n 80 | while IFS= read -r u; do
+    info=$(systemctl $1 show "$u" -p WorkingDirectory -p User -p MainPID -p ExecStart --no-pager 2>/dev/null)
+    wd=$(printf '%s\\n' "$info" | sed -n 's/^WorkingDirectory=//p' | head -n 1)
+    allowed "$wd" || continue
+    usr=$(printf '%s\\n' "$info" | sed -n 's/^User=//p' | head -n 1)
+    pid=$(printf '%s\\n' "$info" | sed -n 's/^MainPID=//p' | head -n 1)
+    argv=$(printf '%s\\n' "$info" | sed -n 's/^ExecStart=.*argv\\[\\]=\\([^;]*\\);.*/\\1/p' | head -n 1)
+    layout=0; [ -d "$(dirname -- "$wd")/releases" ] && layout=1
+    printf 'SERVICE\\t%s\\t%s\\trunning\\t%s\\t%s\\t%s\\t%s\\t%s\\n' "$tag" "$u" "$wd" "$usr" "$(ports_of "$pid")" "$layout" "$argv"
+  done
+}
+sd_units "" systemd
+if [ -n "\${XDG_RUNTIME_DIR:-}" ] || [ -d "/run/user/$(id -u)" ]; then
+  export XDG_RUNTIME_DIR="\${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+  sd_units "--user" systemd_user
+fi
+if command -v pm2 >/dev/null 2>&1; then
+  printf 'PM2JSON\\t%s\\n' "$(pm2 jlist 2>/dev/null | head -c 30000 | tr -d '\\n')"
+fi
+if command -v ss >/dev/null 2>&1; then
+  ss -ltnpH 2>/dev/null | head -n 60 | while read -r st rq sq la pa rest; do
+    port=\${la##*:}
+    pid=$(printf '%s %s' "$pa" "$rest" | sed -n 's/.*pid=\\([0-9]*\\).*/\\1/p' | head -n 1)
+    [ -n "$pid" ] || continue
+    cwd=$(readlink "/proc/$pid/cwd" 2>/dev/null)
+    allowed "$cwd" || continue
+    cmd=$(tr '\\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | cut -c1-200)
+    [ -n "$cmd" ] || cmd=$(printf '%s' "$rest" | sed -n 's/.*(("\\([^"]*\\)".*/\\1/p')
+    printf 'PROCESS\\t%s\\t%s\\t%s\\t%s\\n' "$port" "$pid" "$cwd" "$cmd"
+  done
+fi
+roots="\${AOM_PROBE_APP_ROOTS:-}"; [ -n "$roots" ] || roots="/var/www /srv /opt $HOME/apps $HOME"
+for r in $roots; do
+  for d in "$r"/*; do
+    [ -d "$d" ] || continue
+    case "$d" in */.*) continue ;; esac
+    for m in package.json requirements.txt pyproject.toml Gemfile composer.json go.mod pom.xml Procfile manage.py releases; do
+      if [ -e "$d/$m" ]; then printf 'APPDIR\\t%s\\n' "$d"; break; fi
+    done
+  done
+done 2>/dev/null | head -n 30
+`;
+
 export const REMOTE_PROBE_SCRIPT = `set -u
 echo "OS $(uname -sm 2>/dev/null)"
 echo "UID $(id -u 2>/dev/null)"
@@ -96,5 +151,6 @@ for f in $FILES; do
   echo
   echo "@@ENDCOMPOSE"
 done
+${SERVICES_PROBE_SCRIPT}
 echo "@@DONE"
 `;

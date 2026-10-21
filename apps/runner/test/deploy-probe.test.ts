@@ -24,7 +24,9 @@ function fakeBin(scripts: Record<string, string>): {
   const dir = tmp('aom-fakebin-');
   const logFile = join(dir, 'calls.log');
   writeFileSync(logFile, '');
-  for (const [name, body] of Object.entries(scripts)) {
+  // nothing of the machine that runs the tests is seen: no systemd units, no listening programs, no app folders
+  const quiet = { systemctl: 'exit 1', ss: 'exit 1', pm2: 'exit 1' };
+  for (const [name, body] of Object.entries({ ...quiet, ...scripts })) {
     const file = join(dir, name);
     writeFileSync(file, `#!/bin/bash\necho "${name} $*" >> "${logFile}"\n${body}\n`);
     chmodSync(file, 0o755);
@@ -32,7 +34,7 @@ function fakeBin(scripts: Record<string, string>): {
   return {
     dir,
     // only the fake folder and the basic tools: a binary that is not faked is missing
-    env: { PATH: `${dir}:/usr/bin:/bin`, HOME: dir, FAKE_LOG: logFile },
+    env: { PATH: `${dir}:/usr/bin:/bin`, HOME: dir, FAKE_LOG: logFile, AOM_PROBE_APP_ROOTS: dir },
     log: () => readFileSync(logFile, 'utf8').split('\n').filter(Boolean),
   };
 }
@@ -99,6 +101,71 @@ const payload = (over: Partial<DeployProbePayload> = {}): DeployProbePayload => 
   projectId: PROJECT,
   scope: 'local',
   ...over,
+});
+
+describe('deploy.probe: apps that run without Docker', () => {
+  const FAKE_SYSTEMCTL = `
+case "$*" in
+  *"--user"*) exit 1 ;;
+  *"list-units"*) printf 'shop.service loaded active running Shop\\nnginx.service loaded active running nginx\\n' ;;
+  *"show shop.service"*) printf 'MainPID=4242\\nUser=shop\\nWorkingDirectory=%s\\nExecStart={ path=/usr/bin/node ; argv[]=/usr/bin/node server.js --token=abc123 --port 3000 ; ignore_errors=no }\\n' "$FAKE_APP/current" ;;
+  *"show nginx.service"*) printf 'MainPID=1\\nUser=root\\nWorkingDirectory=\\nExecStart={ path=/usr/sbin/nginx ; argv[]=/usr/sbin/nginx ; }\\n' ;;
+  *) exit 1 ;;
+esac`;
+  const FAKE_SS = `printf 'LISTEN 0 511 0.0.0.0:3000 0.0.0.0:* users:(("node",pid=4242,fd=19))\\nLISTEN 0 511 0.0.0.0:9100 0.0.0.0:* users:(("worker",pid=777,fd=3))\\n'`;
+  const FAKE_PM2 = `printf '[{"name":"api","pm2_env":{"status":"online","pm_cwd":"%s","pm_exec_path":"%s/index.js","username":"shop"}}]' "$FAKE_APP2" "$FAKE_APP2"`;
+
+  it('lists systemd units, pm2 processes and listening programs of the usual places, and app folders, without any secret', async () => {
+    const root = tmp('aom-probe-direct-');
+    const app = join(root, 'app');
+    const app2 = join(root, 'apps', 'api');
+    mkdirSync(join(app, 'releases', 'abc'), { recursive: true });
+    mkdirSync(app2, { recursive: true });
+    writeFileSync(join(app2, 'package.json'), '{}');
+    const fake = fakeBin({
+      docker: 'exit 127',
+      systemctl: FAKE_SYSTEMCTL,
+      ss: FAKE_SS,
+      pm2: FAKE_PM2,
+      readlink: 'case "$1" in /proc/777/cwd) echo "$FAKE_ROOT_HOME/worker-dir" ;; /proc/4242/cwd) echo "$FAKE_APP/current" ;; *) /usr/bin/readlink "$@" ;; esac',
+    });
+    mkdirSync(join(root, 'worker-dir'), { recursive: true });
+    const env = {
+      ...fake.env,
+      HOME: root,
+      FAKE_APP: app,
+      FAKE_APP2: app2,
+      FAKE_ROOT_HOME: root,
+      AOM_PROBE_APP_ROOTS: `${root} ${join(root, 'apps')}`,
+    };
+    const r = await runDeployProbe(payload(), { env, home: root, hintRoots: [] });
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    if (!r.ok) return;
+    const svc = r.report.services ?? [];
+    expect(svc.map((s) => `${s.manager}:${s.name}`)).toEqual(
+      expect.arrayContaining(['systemd:shop.service', 'pm2:api', 'process:worker']),
+    );
+    const shop = svc.find((s) => s.name === 'shop.service');
+    expect(shop).toMatchObject({ workingDir: `${app}/current`, user: 'shop', ports: [3000], releaseLayout: true });
+    // the command is shortened and nothing that looks like a value survives
+    expect(shop?.command).toBe('/usr/bin/node server.js --port 3000');
+    expect(JSON.stringify(r)).not.toContain('abc123');
+    // a unit that runs elsewhere (nginx, no working folder) is not offered
+    expect(svc.some((s) => s.name === 'nginx.service')).toBe(false);
+    expect(r.report.appDirs).toEqual(expect.arrayContaining([app, app2]));
+    // Docker is not installed here, and the report still comes because there are apps
+    expect(r.report.docker).toMatchObject({ installed: true, usable: false });
+  });
+
+  it('a machine with no Docker and no apps is still "Docker is missing"', async () => {
+    const root = tmp('aom-probe-direct-');
+    const r = await runDeployProbe(payload(), {
+      env: { PATH: '/nonexistent-bin', HOME: root, AOM_PROBE_APP_ROOTS: root },
+      home: root,
+      hintRoots: [],
+    });
+    expect(r).toEqual({ ok: false, error: 'docker_missing' });
+  });
 });
 
 describe('deploy.probe: local Docker', () => {
@@ -185,7 +252,7 @@ describe('deploy.probe: local Docker', () => {
     const text = JSON.stringify(r);
     expect(text).not.toContain(SECRET);
     expect(text).not.toContain('POSTGRES_PASSWORD');
-    for (const c of fake.log())
+    for (const c of fake.log().filter((x) => x.startsWith('docker ')))
       expect(c).toMatch(/^docker (version|compose version|compose ls|ps|volume ls)/);
   });
 

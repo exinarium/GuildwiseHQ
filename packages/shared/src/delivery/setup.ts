@@ -331,6 +331,41 @@ const ALLOWED: Record<SetupEnv['hosting'], DeployStepKind[]> = {
   ],
 };
 
+const DIRECT_KINDS: DeployStepKind[] = ['direct_db_backup', 'direct_prepare', 'direct_switch', 'custom_command'];
+
+/** Plain-words problems with an environment whose app runs directly on the machine. */
+function validateDirectShape(
+  e: Pick<SetupEnv, 'hosting' | 'steps' | 'rollback' | 'health' | 'host'> & { direct?: SetupEnv['direct'] },
+): string[] {
+  const out: string[] = [];
+  const d = e.direct;
+  if (!d) return ['An app that runs directly needs its folder and the way it is restarted.'];
+  if (e.hosting === 'ssh') {
+    if (!e.host) out.push('A server needs the name of the server.');
+    if (!RemotePathSchema.safeParse(d.appDir).success || (d.currentLink && !RemotePathSchema.safeParse(d.currentLink).success))
+      out.push('On a server the app folder needs a full path like /home/you/app.');
+  }
+  const kinds = e.steps.map((s) => s.kind);
+  for (const k of kinds)
+    if (!DIRECT_KINDS.includes(k)) out.push(`The step "${k}" belongs to apps that run in Docker, not to this one.`);
+  for (const k of ['direct_db_backup', 'direct_prepare', 'direct_switch'] as const)
+    if (kinds.filter((x) => x === k).length > 1) out.push(`The step "${k}" appears twice.`);
+  for (const need of ['direct_prepare', 'direct_switch'] as const)
+    if (!kinds.includes(need)) out.push(`An app that runs directly needs the step "${need}".`);
+  const at = (k: DeployStepKind) => kinds.indexOf(k);
+  if (kinds.includes('direct_db_backup') && at('direct_db_backup') > at('direct_prepare'))
+    out.push('The database backup must come before the new version is put in place.');
+  if (kinds.includes('direct_prepare') && kinds.includes('direct_switch') && at('direct_prepare') > at('direct_switch'))
+    out.push('The new version must be prepared before the app is switched to it.');
+  const m = d.manager;
+  if (m.kind === 'systemd' && m.scope === 'user' && m.sudo) out.push('A user service never needs sudo.');
+  if (d.adoptFolder && !d.currentLink) out.push('Turning a folder into the first release needs the folder (the link path).');
+  if (d.currentLink && d.currentLink.startsWith(`${d.appDir}/releases`)) out.push('The link cannot be inside the releases folder.');
+  if (e.rollback && e.health.kind !== 'http')
+    out.push('Automatic rollback needs a web address (http) health check, so the script can see the site is healthy.');
+  return out;
+}
+
 export type UpdateMethod = 'ship' | 'registry' | 'build_on_server';
 
 /** Which way a server environment gets its new version (derived from its steps; absent steps mean the original copy method). */
@@ -349,9 +384,13 @@ export const fullImageName = (a: Pick<SetupApp, 'imageName' | 'registry'>): stri
 export function validateEnvShape(
   e: Pick<SetupEnv, 'hosting' | 'steps' | 'app' | 'rollback' | 'health' | 'host' | 'mode'> & {
     name?: string;
+    runtime?: SetupEnv['runtime'];
+    direct?: SetupEnv['direct'];
   },
 ): string[] {
   if (e.mode === 'custom') return [];
+  if (e.runtime === 'direct') return validateDirectShape(e);
+  if (e.direct) return ['Settings for an app that runs directly belong to an environment that runs directly.'];
   const out: string[] = [];
   const kinds = e.steps.map((s) => s.kind);
   for (const k of kinds)
