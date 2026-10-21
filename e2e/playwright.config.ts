@@ -39,6 +39,8 @@ export default defineConfig({
     { name: 'run-steps', testMatch: 'run-steps.spec.ts', dependencies: ['auth'] },
     // Guided deploy setup (v1b): adopts a real throwaway Docker Compose stack (own project name and port, removed at the end).
     { name: 'deploy-setup', testMatch: 'deploy-setup.spec.ts', dependencies: ['auth'] },
+    // Guided connect (v2): a REAL sshd in a throwaway container acting as the VPS (removed at the end); own runner and project.
+    { name: 'deploy-connect', testMatch: 'deploy-connect.spec.ts', dependencies: ['auth'] },
     { name: 'reporter', testMatch: 'reporter.spec.ts', dependencies: ['phases'] },
     { name: 'hygiene', testMatch: 'hygiene.spec.ts', dependencies: ['reporter'] },
     { name: 'interests', testMatch: 'interests.spec.ts', dependencies: ['hygiene'] },

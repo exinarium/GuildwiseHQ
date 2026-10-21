@@ -443,6 +443,7 @@ function EnvCard({
           size="lg"
         >
           <ConnectServer
+            heading={false}
             projectId={projectId}
             target={{
               id: target.id,

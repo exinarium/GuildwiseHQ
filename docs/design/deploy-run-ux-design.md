@@ -888,3 +888,42 @@ when `SETUP_GENERATOR` changes, and showing the reachability chip on the deploy 
   0600, the deploy lock is not inherited by children and names the project (`AOM_DEPLOY_PROJECT_ID`, `$XDG_RUNTIME_DIR` or `~/.cache`),
   the `.env` temp file is removed by a trap, `imageKeep` is documented as this-computer only.
 
+
+### v2 (built 2026-10-21, branch `deploy-run-setup`)
+
+Built: guided connect for a server with no sign-in (password, key file, hosting-panel paste, connection test), the host key shown in
+plain words and confirmed before it is trusted, dedicated deploy keys (generated in the runner, public key shown, `AOM_DEPLOY_SSH` used by
+the generated scripts, revoke of exactly one Guildwise key), Reconnect from a new computer with the offer to remove the old key, the
+reachability chip and Check connection on target cards (daily and after a failed deploy), `deploy.prepare` (Docker, folders, compose from
+the project, one Caddy site, a new copy's supporting parts; detect first, dry run, confirmation), the `compose_run` step, "Start a new
+copy", DevOps probe results stored, and the "improved steps" nudge (generator `setup-1.2`). Migration `2290_deploy_connect.sql`; runner
+capability `deploy-connect:1` (`RUNNER_VERSION` not bumped). Tests: runner against a real sshd container, fake docker for preparation,
+server, web, and e2e project `deploy-connect` (own port, database and folder via `AOM_E2E_PORT|DB|DIR`, removes its container).
+
+Deviations and decisions:
+
+1. **Password by environment, not a pipe.** The password reaches `ssh` through `SSH_ASKPASS` (a constant helper script) with the secret in
+   the environment of that one process (`SSH_ASKPASS_REQUIRE=force`, OpenSSH 8.4+), not a pipe: a FIFO was fragile (ssh may prompt twice
+   or never). It is registered with the redaction registry, never logged, never written, the helper is in a 0700 temp folder removed after.
+2. **Hybrid sealing.** RSA-OAEP holds about 190 bytes, a key file is more: `sealLarge` (browser) and `RunnerKeys.decryptHybrid` use AES-GCM
+   under an RSA-OAEP wrapped key (`h1.<wrapped>.<iv>.<ct>`).
+3. **Key per (target, computer); aliases for managed keys.** A server connected here gets the alias `aom-<name>`; the runner's own
+   `ssh_config` (`ssh -F`) defines it with `IdentitiesOnly`, `StrictHostKeyChecking yes` and the pinned `known_hosts`. For an existing
+   alias ("also add a dedicated key") the file only adds the identity and `Include`s the person's `~/.ssh/config`; nothing in `~/.ssh` is
+   edited. IPv6 addresses are not supported (the generated scripts restrict the host to letters, digits, `.`, `_`, `-`).
+4. **A key made before its target exists** (the panel flow) is made under `pending/<ref>` and moved under the target on connect.
+5. **Preparation.** Docker is installed with the distribution's packages on Debian and Ubuntu only (root or passwordless sudo, and the user
+   is added to the `docker` group); anything else is a plain stop. Caddy: an existing Caddy (container with a mounted Caddyfile, or a system
+   service) gets the site appended after a dated copy and `caddy validate`, restored when invalid; with none and ports 80/443 free a
+   `caddy:2` container runs on the host network; nginx, Traefik or a busy port is a blocker, never touched. `write_compose` copies a plain
+   file of the project's checkout (no links, secret-scanned, 200 KB) and never overwrites. A new copy on this computer uses a project name
+   `aom-<name>` and starts only the services except the app (`start_services`); the first deploy builds the app.
+6. **Moves not built.** Removing the old key needs a computer that still reaches the server; `Standby`/move is v3.
+7. **Dry-run gate** now covers every environment (see the round 2 notes) and the overview lists them all.
+8. **Not done:** the scan brief does not yet mention `aom deploy probe` results being stored (they are, silently); `imageKeep` stays
+   hidden; no push notification for a failed check (the chip is the signal).
+
+For v3 (move to a new server): the connect and prepare flows are reusable as they are (`ConnectServer` with `newTarget`, `PrepareServer`
+with a target); a move needs the database dump/restore step kinds, the `.env` carry-over through the workstation, a DNS check, the standby
+role on `deploy_targets`, and revoke of the old target's keys on retire. `deploy_target_keys` already holds public parts per computer and
+`DeployTargetPrepared` records what was done on a server.

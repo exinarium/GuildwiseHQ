@@ -152,6 +152,7 @@ const hostsReport = () => ({
   listeners: [],
   sshHosts: [
     { alias: 'prod-server', hostname: '192.0.2.10', user: 'root', hasIdentity: true, state: 'reachable' },
+    { alias: 'fresh-vps', hostname: '192.0.2.77', user: 'root', hasIdentity: true, state: 'reachable' },
     {
       alias: 'backup-box',
       hostname: '192.0.2.44',
@@ -234,6 +235,30 @@ const serverReport = () => ({
   listeners: [80, 443],
 });
 
+const bareServerReport = () => ({
+  scope: 'ssh_target',
+  host: 'fresh-vps',
+  at: ago(0),
+  os: 'Linux x86_64',
+  docker: { installed: false, usable: false },
+  containers: [],
+  composeFiles: [],
+  volumes: [],
+  folders: [],
+  backups: [],
+  proxies: [],
+  urls: [],
+  listeners: [],
+});
+const bareLocalReport = () => ({
+  ...localReport(),
+  containers: [],
+  composeFiles: [],
+  backups: [],
+  volumes: [],
+  urls: [],
+});
+
 let probes: Array<Record<string, unknown>> = [];
 let published: Record<string, unknown> | null = null;
 const probeDto = (scope: string, host: string | null, report: unknown) => ({
@@ -288,7 +313,7 @@ function proposal() {
 
 function state() {
   const s = scenario();
-  const saved = s === 'ready' || s === 'waiting';
+  const saved = s === 'ready' || s === 'waiting' || s === 'improved';
   const envs = saved ? setup() : null;
   return {
     canEdit: true,
@@ -369,7 +394,15 @@ export const deploySetupHandlers = [
   http.post(`${A}/projects/:id/delivery/probe`, async ({ request }) => {
     const b = (await request.json()) as { scope: string; host?: string };
     const report =
-      b.scope === 'local' ? localReport() : b.scope === 'ssh_hosts' ? hostsReport() : serverReport();
+      b.scope === 'local'
+        ? localStorage.getItem('aom-mock-local') === 'bare'
+          ? bareLocalReport()
+          : localReport()
+        : b.scope === 'ssh_hosts'
+          ? hostsReport()
+          : b.host === 'fresh-vps'
+            ? bareServerReport()
+            : serverReport();
     probes = [
       ...probes.filter((p) => !(p.scope === b.scope && (p.host ?? null) === (b.host ?? null))),
       probeDto(b.scope, b.host ?? null, report),

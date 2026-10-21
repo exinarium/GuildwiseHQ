@@ -2379,6 +2379,17 @@ runs the script outside any model session.
   durable `deploy.probe` commands. A deploy scan (`deploy_scan`) reuses the run-scan machinery: `SetupProposalSchema.deploy` is a typed
   `DeliverySetup` and `setup.propose` also checks the targets and hosting. Capability `deploy-setup:1`; an older runner gets a 409
   `runner_outdated` and the developer view keeps working.
+- **Guided connect, dedicated keys and server preparation (v2).** Durable runner commands `deploy.hostkey|key|connect|revoke|prepare`
+  (capability `deploy-connect:1`; `deploy.connect` is in `ENVELOPE_COMMANDS`, 10 minute expiry, payload emptied when answered). The server
+  (`delivery/connect.ts`) only validates who may ask (own computers, project owner), relays and records public facts: events
+  `DeployOpFinished` (any answer, no secrets), `DeployTargetConnected` / `DeployKeyRevoked` (a key's fingerprint and public line),
+  `DeployTargetPrepared` (the steps), projections `deploy_ops`, `deploy_target_keys` (migration 2290); the page follows an operation with
+  `GET /api/projects/:id/delivery/ops/:commandId`. Routes `POST .../delivery/hostkey|key|connect|prepare` and
+  `.../targets/:targetId/revoke-key|check`. Reachability: `delivery/reachability.ts` queues a cheap `deploy.probe` scope `ssh_check` per
+  server target daily and after a failed deploy (scheduler tick; only runners with `deploy-connect:1`); its answer is only a
+  `DeployTargetConnectionChecked`. The compiler gained `compose_run` (generator `setup-1.2`); an older stored generator is reported as
+  `generator_outdated` (the "improved steps" nudge), never as a hand edit. A deploy scan's probe is stored through the IPC
+  `deploy.probe.record`. Runner side: `apps/runner/src/delivery/{deploy-keys,connect,prepare}.ts`.
 - **Content hash and approval.** `bundleHash` is a sha256 over the sorted listing `path\0mode\0sha256(content)\n` of `delivery/**`
   (mode is the executable bit only). The runner reads a git vault AT A COMMIT (`git ls-tree` + `git cat-file`, `delivery/bundle.ts`),
   never the working tree; a local folder is read once and the copy is what runs. `recipe.inspect` (durable command) returns the

@@ -2254,9 +2254,29 @@ with a recipe"). The runner announces the `delivery:1` capability and does three
   with no override; the whole probe has a 60 s budget and a 64 KB report. **`aom deploy probe --local | --ssh-hosts | --host
   <alias> [--dir D] [--compose-file F] [--url U]`** (DevOps, in a scan) runs the same probe through IPC. The scripts `compileSetup`
   generates run unchanged through `deploy.exec`; `generated-scripts.test.ts` runs them against fake docker/ssh/curl.
+- **Guided connect, dedicated keys and server preparation (`deploy-connect:1`, v2).** Five more durable commands (design: section
+  7.4 and 8). Keys live in `<data dir>/keys/deploy/<target id>/` (`id_ed25519` 0600 in a 0700 folder, its `.pub`, an `ssh_config` that
+  is passed to ssh with `-F`, a `known_hosts` of its own with the one host key the person confirmed, `meta.json`); a key made before
+  its target exists sits under `pending/<ref>` for up to a week. Nothing here edits `~/.ssh`. **`deploy.hostkey`** runs `ssh-keyscan`
+  and returns type and SHA256 fingerprint (it trusts nothing). **`deploy.key`** makes (or finds, never replaces) the ed25519 key with
+  the comment `guildwise-deploy:<id>:<computer>` and returns the public half. **`deploy.connect`** (an envelope command: the sealed
+  value is a password or key file, hybrid RSA-OAEP + AES-GCM, `h1.` format, expires after 10 minutes, emptied once answered) pins
+  exactly the confirmed fingerprint, appends the public key to the server's `authorized_keys` once with `grep -qxF` and a dated copy
+  (`authorized_keys.guildwise-bak-<time>`), by `SSH_ASKPASS` with `SSH_ASKPASS_REQUIRE=force` (OpenSSH 8.4+, else the copy-paste
+  option) for a password (in the environment of that one ssh process only), a 0600 temp file for a key file, the person's own alias
+  (`-F <their config>` only when given) for "also add a dedicated key", or not at all for a pasted key; then tests the new key in
+  BatchMode. The password, passphrase and key text are registered with the redaction registry for the call and never logged.
+  **`deploy.revoke`** removes the line of ONE key whose comment starts `guildwise-deploy:` (by its public key, dated copy first);
+  never its own key, never a line it did not add. **`deploy.prepare`** is a closed list (`install_docker`, `create_dir`,
+  `write_compose` from the project's checkout, `caddy_site`, `start_services`), every action idempotent, `dryRun` changes nothing, each
+  reports `done|skipped|would|failed`; the server scripts are fixed POSIX shell passed to ssh as a base64 argument with quoted
+  positional arguments. `deploy.exec` exports `AOM_DEPLOY_SSH="ssh -F <config>"` for a target this computer holds a key for (the
+  generated scripts use it), `deploy.probe` scope `ssh_check` is the cheap daily reachability look, and a DevOps scan's `aom deploy
+  probe` result is also reported to the server (`deploy.probe.record`). Tests: `deploy-connect.sshd.test.ts` runs all of it against a
+  real sshd container (skipped without Docker), `deploy-prepare.test.ts` against fake docker/systemctl/caddy.
 - **Read-only scans are an allowlist (v1a review).** In a `run_scan` or `deploy_scan` shift the guard allows only listed read
-  commands (`ls`, `cat`, `grep`, `git log|show|status|diff|ls-files|rev-parse`, docker read verbs, `npm ls|view|outdated`,
-  `aom setup propose`, `aom deploy probe`, ...), refuses shells, interpreters, wrappers and every redirect to a file, and limits
+  commands with an exact list of flags per command (an unknown flag or abbreviation is refused; `$`, backticks and `<(` are refused;
+  credentials, `.env` files and the runner's `secrets`/`keys` cannot be read; no web tools), refuses shells, interpreters, wrappers and every redirect to a file, and limits
   Edit/Write to the shift's scratch folder; the shift carries `devops.scanKind` so a scan whose brief cannot be built fails instead
   of running unrestricted.
 - **`deploy.exec`**: runs an approved deploy. It re-exports `delivery/` at the approved commit into `<data dir>/deploys/<run id>/recipe`

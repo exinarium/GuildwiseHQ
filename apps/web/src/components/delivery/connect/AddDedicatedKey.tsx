@@ -44,7 +44,12 @@ export function AddDedicatedKey({
   if (!open)
     return (
       <div data-testid="dedicated-key-offer">
-        <Button size="sm" onClick={() => setOpen(true)} data-testid="dedicated-key-open">
+        <Button
+          size="sm"
+          className="h-auto min-h-8 whitespace-normal py-1.5 text-left"
+          onClick={() => setOpen(true)}
+          data-testid="dedicated-key-open"
+        >
           <KeyRound aria-hidden="true" className="size-4" />
           Also add a dedicated Guildwise key (recommended)
         </Button>

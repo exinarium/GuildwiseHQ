@@ -267,6 +267,7 @@ export function DeployTargetsPanel({ projectId }: { projectId: string }) {
           size="lg"
         >
           <ConnectServer
+            heading={false}
             projectId={projectId}
             target={reconnecting}
             onCancel={() => setReconnecting(null)}

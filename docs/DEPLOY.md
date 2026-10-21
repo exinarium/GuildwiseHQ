@@ -111,7 +111,9 @@ in the app (user guide 4.27): the wizard adopts a Docker Compose stack on a work
 sign in to, backs up the database, rebuilds only the app service and puts the previous image back when the site is not healthy.
 For a server whose deploys are set up this way, the release procedure for Guildwise HQ is the same (build the image on the
 workstation, ship it over ssh, switch `GUILDWISE_IMAGE`, restart only `app`); the generated script reproduces it step by step.
-The runner on the deploying computer needs the `deploy-setup:1` capability (a current runner).
+The runner on the deploying computer needs the `deploy-setup:1` capability (a current runner), and `deploy-connect:1` to connect a
+server with a password, a key file or a pasted key (**Connect a different server**), to set a server up (Docker, folders, HTTPS with
+Caddy) and to keep a dedicated key per computer so that a replacement computer can **Reconnect**. See user guide 4.27 and RUNNER.md.
 
 ## Upgrades
 

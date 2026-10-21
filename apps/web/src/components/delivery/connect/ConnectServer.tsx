@@ -50,6 +50,7 @@ export function ConnectServer({
   projectId,
   target,
   production = false,
+  heading = true,
   prefill,
   onDone,
   onCancel,
@@ -64,6 +65,8 @@ export function ConnectServer({
     keys?: DeployKeyDto[] | undefined;
   };
   production?: boolean;
+  /** Show the title (off inside a dialog that has its own). */
+  heading?: boolean;
   /** Fields to start with (a server this computer already knows by name). */
   prefill?: { name?: string; address?: string; user?: string; port?: number } | undefined;
   onDone: (s: ConnectedServer) => void;
@@ -251,9 +254,11 @@ export function ConnectServer({
           <ArrowLeft aria-hidden="true" className="size-4" />
           {step === 'where' || step === 'done' ? 'Cancel' : 'Back'}
         </button>
-        <h3 className="text-lg font-semibold text-fg">
-          {target ? `Reconnect to ${target.name}` : 'Connect a different server'}
-        </h3>
+        {heading && (
+          <h3 className="text-lg font-semibold text-fg">
+            {target ? `Reconnect to ${target.name}` : 'Connect a different server'}
+          </h3>
+        )}
       </div>
 
       {step === 'where' && (
