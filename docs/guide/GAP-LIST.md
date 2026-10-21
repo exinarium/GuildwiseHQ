@@ -288,7 +288,7 @@ Taken from `buildNav` in `apps/web/src/components/shell/nav-config.ts` (Owner, e
 
 ## Figures
 
-Re-taken or added through `e2e/tests/guide-screenshots.spec.ts`: `run-settings` (now the Environments page; the old capture of a removed panel was broken), `desk-daily-report` (the old selector for "Floor report" matched nothing), and new captures `backlog`, `environments`, `releases`, `ceo`, `ceo-reporting`, `ceo-chat`, `metrics`, `org-project-links`. Status of the capture run is given in the delivery note.
+Not yet taken. The guide already references the new figures `backlog`, `environments`, `releases`, `ceo`, `ceo-reporting`, `ceo-chat`, `metrics`, `org-project-links` and `desk-daily-report`. The capture spec (`e2e/tests/guide-screenshots.spec.ts`) needs these changes, which belong to the testers: the `run-settings` capture must photograph the Environments page ("Your app"), because the panel it used is gone; the Desk capture must select the CEO's "Daily report <date>" item instead of "Floor report"; and the new pages above need captures. Then rebuild with `prepare-assets.mjs`, `assemble-guide.mjs` and `build-guide.mjs`. The figures of changed screens listed in the sections above are re-taken in the same run.
 
 ## Intro video: what is outdated (no fix; input for the video plan)
 
