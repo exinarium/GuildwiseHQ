@@ -62,7 +62,7 @@ Only the Owner can still sign in, with read access plus organization settings an
 
 ## Platform area {#platform-area}
 
-Platform administrators sign in at the same address but see only the **Platform** area instead of organizations. They can view and manage all organizations, accounts, invitations, billing, the blog, the audit log and support requests. They never see a specific organization's cards, desk or vaults. [Contact us](/help/contact) if you need a platform administrator.
+Platform administrators sign in at the same address but see only the **Platform** area instead of organizations. The Platform area has 11 entries: **Organizations**, **Invitations**, **Accounts**, **Billing**, **Support**, **Blog**, **API keys** (keys for outside tools that use `/api/v1`), **Runners** (pause the automatic runner updates), **Platform team** (which organization and project receive the platform's own bugs and reports), **Inbound mail** (whether inbound e-mail works and what arrived in the last 24 hours) and **Audit log**. Administrators can view and manage all organizations, accounts, invitations, billing, the blog and support requests. They never see a specific organization's cards, desk or vaults. [Contact us](/help/contact) if you need a platform administrator.
 
 ### Support emails {#console-emails}
 

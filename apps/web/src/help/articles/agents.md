@@ -13,7 +13,7 @@ To hire an agent:
 
 1. Go to **Agents** and click **Hire agent**. (A card that cannot be picked up also offers a **Hire** link that opens this form with the missing role filled in.)
 2. Fill in the form:
-   - **Role**: builder, reviewer, tester, technical writer, BA, architect (senior only; see [The architect](/help/architect)), or custom roles you designed. DevOps engineers are not hired here: each workstation gets one automatically (see [DevOps and repository hygiene](/help/devops-and-hygiene#devops-engineer)).
+   - **Role**: builder, reviewer, tester, technical writer, BA, architect (senior only; see [The architect](/help/architect)), and on the lean team also planner and pre-reviewer, or custom roles you designed. DevOps engineers are not hired here: each workstation gets one automatically (see [DevOps and repository hygiene](/help/devops-and-hygiene#devops-engineer)).
    - **Seniority**: junior or senior. Some roles come in one seniority only (the reviewer and the BA are senior).
    - **Workstation**: which of your paired workstations it runs on (your own computer, a VPS or a Codespace, see [Workstations and the installer](/help/workstations-and-installer)).
    - **Runtime**, **Model** and **Effort**: which runtime and Claude model to use and how much thinking to allow. Leave them empty for the role's defaults.
@@ -77,4 +77,4 @@ The HR board is the Agents page. It shows at a glance:
 - **Agent cards**: name, role, seniority, status (idle, on shift, blocked, or needs rehome), model, current card, who hired it, cost this month and in total, and quick actions.
 - **Performance stats** over the last 30 days: cards done, blocked rate, rework rate, bugs escaped, utilisation and tokens per card, each compared to the average of the agents in the same role. Builders also show work-quality figures such as the reviewer score.
 - **Recommendations**: rule-based suggestions (model up or down, split a role, fire or reassign, and so on) with the evidence. Depending on the suggestion you apply it with one click (for example **Change model**, **Split role** or **Propose standing order**, which goes to your desk), or it is advice only.
-- **Metrics**: the **Metrics** button opens team throughput, time blocked on you, queue depth, bounce rate per builder and average time to finish.
+- **Metrics**: the **Metrics** page (sidebar, Organization) has a **Project** filter and a range of 7, 14, 30 or 90 days, and shows **Throughput**, **Time blocked on you**, **Bounce rate per builder**, **Bugs escaped past test**, **Duration** (with shift time per agent) and **Queue depth per column**.

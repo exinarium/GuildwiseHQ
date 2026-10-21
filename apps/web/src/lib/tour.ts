@@ -42,6 +42,21 @@ const NAV_STEPS: Record<string, { title: string; body: string; more?: string }> 
     body: 'Every card of the current project, in columns that follow its workflow (for example Spec, In progress, Review, Done). Cards move by themselves as agents work: open one to see the plan, the transcript and what it cost. Use New card to hand out work.',
     more: 'board-and-cards#reading-the-board',
   },
+  backlog: {
+    title: 'Backlog',
+    body: 'Ideas and suggestions waiting to become cards, kept per project. Everyone on the project can read it; Owners and Admins add, edit and use Send to the BA to turn the ones they pick into cards.',
+    more: 'board-and-cards#backlog',
+  },
+  environments: {
+    title: 'Environments',
+    body: 'Where the project’s app runs: your app, its test copies, environments and places, and the Releases switch that pauses or resumes going live.',
+    more: 'phases#delivery-recipes',
+  },
+  research: {
+    title: 'Research',
+    body: 'Research cards that are in progress and the notes that have been published for this project.',
+    more: 'project-conversion#research-as-a-stage',
+  },
   desk: {
     title: 'Desk',
     body: 'Your decision desk. When an agent needs an answer, an approval or a go-ahead it lands here, and the number shows how many are waiting (red when something is blocked). Answer once and the whole team moves on.',
@@ -49,7 +64,7 @@ const NAV_STEPS: Record<string, { title: string; body: string; more?: string }> 
   },
   intake: {
     title: 'Intake',
-    body: 'Bring in tickets from Jira or GitHub. Guildwise HQ turns each one into a card with the details filled in, and asks you only about what is missing.',
+    body: 'Bring in tickets from Jira or GitHub, one at a time in a chat or many at once on the Batch tab. Guildwise HQ turns each one into a card with the details filled in and asks you only about what is missing; the Owner can also hand a ticket to the CEO with Tell your CEO.',
     more: 'intake-and-outbox#intake',
   },
   projects: {
@@ -77,14 +92,39 @@ const NAV_STEPS: Record<string, { title: string; body: string; more?: string }> 
     body: 'The team drawn as a chart: each agent with its face, status and workstation, grouped by department and by who reports to whom. Filter it by project and click an agent for its card.',
     more: 'org-chart-and-design#org-chart',
   },
+  ceo: {
+    title: 'CEO',
+    body: 'Your CEO, with tabs for Overview, Authority, Reporting & alerts, Persona & instructions, Memory, Tasks, Topics, Activity log and Workstations. It handles routine desk items before they reach you; use Ask followed by its name to chat with it.',
+    more: 'your-ceo#talking',
+  },
+  org: {
+    title: 'Roles & workflows',
+    body: 'The page is titled Organization. It has the Roles your agents fill, the Workflows cards follow, Departments, and Design with the BA to reshape them in a chat.',
+    more: 'org-chart-and-design#custom-workflows',
+  },
   workstations: {
     title: 'Workstations',
     body: 'The machines that run your agents: your own computer, a server (VPS) or a GitHub Codespace. Nothing runs until you have one: click Add a workstation and the wizard sets it up and shows its progress live.',
     more: 'workstations-and-installer#add-a-workstation',
   },
+  releases: {
+    title: 'Releases',
+    body: 'What is waiting to go live, what is live now, the history, and the rule that decides when changes are released, including Freeze all releases.',
+    more: 'phases#releases',
+  },
+  integrations: {
+    title: 'Integrations',
+    body: 'Sign in Claude (one tile per account), connect git hosts and Jira, and add MCP servers, per workstation.',
+    more: 'integrations#connect',
+  },
+  metrics: {
+    title: 'Metrics',
+    body: 'How the work flows: throughput, time blocked on you, bounce rate per builder, bugs escaped past test, durations and queue depth per column. Pick a project and a range of 7 to 90 days.',
+    more: 'agents#hr-board',
+  },
   costs: {
     title: 'Costs',
-    body: 'What your agents spend, by project, agent and day, and the monthly budgets that stop spending when a limit is reached. Only Owners and Admins can change a budget.',
+    body: 'What your agents spend, by project, agent, model and day. Monthly budgets are set in each project’s settings and the Costs page shows how much of each is used. Only Owners and Admins see this page.',
     more: 'budgets-and-costs#monthly-budgets',
   },
   ledger: {
@@ -94,15 +134,46 @@ const NAV_STEPS: Record<string, { title: string; body: string; more?: string }> 
   },
   vaults: {
     title: 'Vaults',
-    body: 'Shared folders of notes and documents that sync to your workstations, so agents work from the same knowledge you do. Secrets stay on the machines you choose.',
+    body: 'Folders of notes and documents that agents read. A git vault syncs to your workstations, and a project vault can also be a local folder, so agents work from the same knowledge you do.',
     more: 'ledger-and-vaults#vaults',
   },
   settings: {
     title: 'Settings',
-    body: 'Your own account: your picture, your time zone, when your daily report arrives, your two-factor login, the weekly blog digest and expert mode for code changes (off by default, so you never need git). Organization settings sit next to it.',
-    more: 'getting-started#first-login',
+    body: 'Your own account: your picture, your time zone, Notifications, the Monday briefing, your two-factor login, the weekly blog digest and expert mode for code changes (off by default, so you never need git). The time of the daily report is set on the CEO’s Reporting & alerts tab.',
+    more: 'getting-started#your-settings',
+  },
+  organization: {
+    title: 'Organization',
+    body: 'Members, invitations, guests, the e-mail inbox, project links, plan and billing of the whole organization.',
+    more: 'organizations-and-roles#members-and-invitations',
   },
 };
+
+/** The tour walks the sidebar top to bottom. Entries the user does not have are filtered out by `navIds`. */
+const SIDEBAR_ORDER = [
+  'board',
+  'backlog',
+  'environments',
+  'research',
+  'desk',
+  'intake',
+  'schedules',
+  'projects',
+  'agents',
+  'org-chart',
+  'ceo',
+  'org',
+  'workstations',
+  'releases',
+  'integrations',
+  'metrics',
+  'costs',
+  'interests',
+  'ledger',
+  'vaults',
+  'settings',
+  'organization',
+];
 
 const navStep = (nav: keyof typeof NAV_STEPS & string): TourStep => {
   const s = NAV_STEPS[nav] as { title: string; body: string; more?: string };
@@ -122,7 +193,7 @@ const VIDEO: TourStep = {
 const WELCOME: TourStep = {
   id: 'welcome',
   title: 'Welcome to Guildwise HQ',
-  body: 'You run a team of AI agents from here. This tour takes about two minutes and lights up each part of the screen as we go. You can skip it now and replay it any time from Help.',
+  body: 'You run a team of AI agents from here. This tour takes about three minutes and lights up each part of the screen as we go. You can skip it now and replay it any time from Help.',
   more: 'getting-started#the-tour',
 };
 
@@ -146,7 +217,7 @@ const ASK_DEVOPS: TourStep = {
   id: 'ask-devops',
   target: 'ask-devops',
   title: 'Ask DevOps',
-  body: 'Each workstation has a DevOps engineer that installs tools, fixes setup problems and runs commands for you. Ask it from here, from a card, a desk item or a workstation: what you are looking at is attached.',
+  body: 'Each workstation has a DevOps engineer that installs tools, fixes setup problems and runs commands for you. Your CEO passes your request on (the dialog says it works through the CEO now), so the button is Ask followed by your CEO’s name. Ask from here, from a card, a desk item or a workstation: what you are looking at is attached.',
   more: 'devops-and-hygiene#devops-engineer',
 };
 
@@ -155,7 +226,7 @@ const HELP: TourStep = {
   target: 'nav-help',
   drawer: true,
   title: 'Help centre',
-  body: 'A short training video, searchable articles, a glossary of the terms used here, what is new, this tour again, and a way to write to us. Small ? buttons next to the harder controls open the matching article.',
+  body: 'A short training video, searchable articles, a glossary of the terms used here, the Blog, what is new, this tour again, and a way to write to us, with My requests to follow your messages. Small ? buttons next to the harder controls open the matching article.',
   more: 'getting-started#the-sidebar',
 };
 
@@ -210,8 +281,36 @@ const PLATFORM_STEPS: TourStep[] = [
     id: 'platform-blog',
     target: 'platform-nav-blog',
     title: 'Blog',
-    body: 'The blog writer (switch it on, set topics and a monthly cap), the review queue for its articles, the weekly digest, social sharing and the switch that turns the blog off. API keys for outside tools sit next to it.',
+    body: 'The blog writer (switch it on, set topics and a monthly cap), the review queue for its articles, the weekly digest, social sharing and the switch that turns the blog off.',
     more: 'blog-and-digest#platform-blog',
+  },
+  {
+    id: 'platform-api-keys',
+    target: 'platform-nav-api-keys',
+    title: 'API keys',
+    body: 'Keys that let outside tools use the platform API (/api/v1). Create one, copy it once, and revoke it when it is no longer needed.',
+    more: 'organizations-and-roles#platform-area',
+  },
+  {
+    id: 'platform-runners',
+    target: 'platform-nav-runners',
+    title: 'Runners',
+    body: 'Runners check this server once a day and update themselves. Here you can pause the automatic updates and see when they are not happening.',
+    more: 'organizations-and-roles#platform-area',
+  },
+  {
+    id: 'platform-team',
+    target: 'platform-nav-team',
+    title: 'Platform team',
+    body: 'Which organization and project receive the platform’s own bugs and reports. Approvals go to that organization’s desk, not to you.',
+    more: 'organizations-and-roles#platform-area',
+  },
+  {
+    id: 'platform-inbound',
+    target: 'platform-nav-inbound',
+    title: 'Inbound mail',
+    body: 'Whether inbound e-mail is set up, and how many messages were accepted or skipped in the last 24 hours.',
+    more: 'organizations-and-roles#platform-area',
   },
   {
     id: 'platform-audit',
@@ -243,46 +342,9 @@ export function tourSteps(role: TourRole, nav: ReadonlySet<string>): TourStep[] 
   const common = [PALETTE, PAGE_HELP, ASK_DEVOPS, HELP];
   switch (role) {
     case 'manager':
-      return [
-        VIDEO,
-        WELCOME,
-        ...only(
-          'board',
-          'desk',
-          'intake',
-          'projects',
-          'interests',
-          'schedules',
-          'agents',
-          'org-chart',
-          'workstations',
-          'costs',
-          'ledger',
-          'vaults',
-          'settings',
-        ),
-        ...common,
-        DONE,
-      ];
+      return [VIDEO, WELCOME, ...only(...SIDEBAR_ORDER), ...common, DONE];
     case 'member':
-      return [
-        VIDEO,
-        WELCOME,
-        ...only(
-          'board',
-          'desk',
-          'projects',
-          'interests',
-          'schedules',
-          'agents',
-          'org-chart',
-          'workstations',
-          'ledger',
-          'settings',
-        ),
-        ...common,
-        DONE,
-      ];
+      return [VIDEO, WELCOME, ...only(...SIDEBAR_ORDER), ...common, DONE];
     case 'guest':
       return [
         VIDEO,

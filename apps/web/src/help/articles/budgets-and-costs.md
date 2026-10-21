@@ -16,16 +16,16 @@ You can see costs in several places:
 - **HR board**: each agent's cost this month and in total.
 - **A phase or a card**: what its shifts and BA work cost.
 - **Interests**: the spend and budget of the interest.
-- **Floor report**: a Spend section listing projects, cost and budget.
+- **The CEO's daily report**: a Spend section listing projects, cost and budget.
 - **Costs page** (Owner and Admin): breakdown by project, agent, model and day for any date range, with daily bars and an **Export CSV** button.
 
 ## Monthly budgets {#monthly-budgets}
 
-An Owner or Admin sets a project's budget in the project's settings under **Budget** (the **Monthly budget** panel: type an amount and click **Save budget**, or **Remove budget**), or an interest's budget on its **Settings** tab.
+The **Costs** page shows each project's budget and how much of it is used; it does not set budgets. An Owner or Admin sets a project's budget in the project's settings under **Budget** (the **Monthly budget** panel: type an amount and click **Save budget**, or **Remove budget**), or an interest's budget on its **Settings** tab.
 
 The month runs from the 1st to the end of the month in your organization's time zone (the Owner's time zone set under **Settings**). The budget resets at local midnight on the 1st.
 
-- **At 80%**: you get a desk notice (Budget warning) and your BA gets a Budget signal for the daily report. Work carries on.
+- **At 80%**: you get a desk notice (Budget warning) and the CEO's daily report mentions it. Work carries on.
 - **At 100%**: the project is **paused**. Running shifts finish; nothing new starts. Cards and BA tasks wait. A banner on the board and the project explains it, and a Budget paused item lands on your desk.
 
 ## Override {#override}
@@ -44,7 +44,7 @@ Members who are not Owner or Admin see the progress but cannot change the budget
 To change how costs appear:
 
 1. Go to **Costs** (sidebar: Organization; Owner and Admin).
-2. Click **Currency and prices**.
+2. Open the **Currency** panel (the prices used for the estimates are listed under it).
 3. Enter the **Currency** code (e.g., `EUR`) and the rate ("units per 1 USD"; e.g., `0.92` for euros), then save.
 
 Budgets and every amount you see use the currency you set. Changing the rate changes how all history is shown, not what was recorded.

@@ -17,6 +17,8 @@ The ledger keeps three kinds of entry:
 
 Agents search the ledger before they ask you a question, and the BA checks new questions against it. When you answer a desk item, the answer is written to the ledger (see **Add to ledger as** on the answer form). You can also add entries yourself with **Add entry** on the Ledger page.
 
+An entry that is out of date can be retired with **Retire** (a reason is required): it stays in the ledger greyed out and agents stop seeing it. **Show retired** lists them again. An entry that may clash with another standing order carries a **May contradict another order** badge.
+
 ## Editing a standing order {#editing-standing-orders}
 
 The Owner and Admins (a project's owner for its own) can press **Edit** on a standing order to change its title or text. Agents get the new wording from their next shift or chat, the DevOps engineer included, and **History** keeps the earlier versions.
@@ -33,7 +35,7 @@ Results show matching entries with context. Agents can also search the ledger du
 
 ## Vaults {#vaults}
 
-Vaults are git repositories of markdown notes that your DevOps engineers keep in sync on your workstations. By default each workstation syncs every 300 seconds (5 minutes); you can set another interval per vault.
+Vaults are folders of markdown notes. A git vault is a repository that your DevOps engineers keep in sync on your workstations; a project vault can also be a **local folder** on one workstation, which is not synced and has no copy anywhere else, so back it up yourself. By default each workstation syncs every 300 seconds (5 minutes); you can set another interval per vault.
 
 There are two kinds:
 

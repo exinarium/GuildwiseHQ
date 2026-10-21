@@ -19,6 +19,10 @@ On the **Help** page, the **Getting started in five steps** video is a spoken tu
 
 The captions show everything the voice says and are on by default; use the **CC** button on the player to turn them off. Under the video, each step is a button that jumps to that part.
 
+## Your settings {#your-settings}
+
+**Settings** (sidebar, bottom) is your own account: your picture, your time zone, **Notifications** (push notifications on your devices, with quiet hours), the **Monday briefing**, **Two-factor login** (**Set up**), the weekly blog digest and expert mode for code changes. The time of the CEO's daily report is not here: the Owner sets it on the CEO's **Reporting & alerts** tab. Organization-wide settings are on **Organization**, next to it.
+
 ## First login {#first-login}
 
 There are two ways in:
@@ -60,9 +64,9 @@ The guided tour mentions the checklist at its last step, so the two do not compe
 
 The left side of the app is split into areas. Each area groups related pages. From the top:
 
-- **Work**: Board (the current project's cards), Research (only on projects with research notes), Desk (questions waiting for you), Intake (tickets from Jira and GitHub; Owner and Admin), Automations (automatic actions) and Projects.
-- **Organization**: Agents, Org chart, Roles & workflows (custom organization design), Workstations (the computers where your agents run), Metrics and Costs (Costs is for Owner and Admin).
-- **Knowledge**: Interests (topics you watch), Ledger (decisions and standing orders) and Vaults (Owner and Admin).
+- **Work**: Board (the current project's cards), Backlog (ideas not yet cards), Environments (where a code project's app runs), Research (only on projects with research notes), Desk (questions waiting for you), Intake (tickets from Jira and GitHub; Owner and Admin), Automations (automatic actions), and Projects.
+- **Organization**: Agents, Org chart, CEO (Owner and Admin), Roles & workflows (custom organization design), Workstations (the computers where your agents run), Releases, Integrations, Metrics and Costs (Costs is for Owner and Admin).
+- **Knowledge**: Interests (topics you watch, when switched on), Ledger (decisions and standing orders) and Vaults (Owner and Admin).
 - **Bottom of the sidebar**: the **Get started** button while your organization is being set up, **Settings** (your own account), **Organization** (members, plan, billing and security of the organization) and **Help**. Your name there opens the user menu with theme, **Your settings**, **Help**, **Contact us**, **My requests** and **Log out**.
 
 The bar at the top of every page has the search box (the command palette), the **?** button (what is on this page), **Ask DevOps** (see [DevOps and repository hygiene](/help/devops-and-hygiene#devops-engineer)) and **Chat** (see [Chat with agents](/help/chat-with-agents)).
