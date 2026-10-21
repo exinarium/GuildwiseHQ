@@ -11,7 +11,7 @@ import {
   Server,
   ShieldCheck,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useApproveRecipe } from '../../../api/queries/delivery.ts';
 import { openMove, useMoves, useRetire } from '../../../api/queries/deploy-move.ts';
 import {
@@ -359,6 +359,13 @@ function EnvCard({
   const [moving, setMoving] = useState(false);
   const movesQ = useMoves(projectId);
   const moveOpen = openMove(movesQ.data)?.envName === env.name ? openMove(movesQ.data) : undefined;
+  // a move that was open when the dialog was opened stays on screen when it ends (the "it is live" message)
+  const [followId, setFollowId] = useState<string | null>(null);
+  useEffect(() => {
+    if (moveOpen) setFollowId(moveOpen.id);
+  }, [moveOpen]);
+  const shownMove =
+    moveOpen ?? (moving ? movesQ.data?.find((m) => m.id === followId && m.state === 'completed') : undefined);
   const mover = s.workstations.find((w) => w.id === target?.workstationId);
   // an older server does not tell the role of a target: then there are no moves either
   const canMove =
@@ -483,7 +490,7 @@ function EnvCard({
             s={s}
             env={env}
             from={target}
-            move={moveOpen}
+            move={shownMove}
             moves={movesQ.data ?? []}
             onClose={() => setMoving(false)}
           />
