@@ -38,6 +38,8 @@ This guide is for people who have never worked with AI agents before. You do not
   - [4.1 Your organization](#41-your-organization)
   - [4.2 Members, invitations and guests](#42-members-invitations-and-guests)
   - [4.3 Projects](#43-projects)
+  - [4.3a Project vaults and the code map](#43a-project-vaults-and-the-code-map)
+  - [4.3b The project backlog](#43b-the-project-backlog)
   - [4.4 Agents, hiring and allow-lists](#44-agents-hiring-and-allow-lists)
   - [4.5 The desk, the ledger and standing orders](#45-the-desk-the-ledger-and-standing-orders)
   - [4.6 Budgets and costs](#46-budgets-and-costs)
@@ -59,9 +61,13 @@ This guide is for people who have never worked with AI agents before. You do not
   - [4.22 Your CEO](#422-your-ceo)
   - [4.23 Integration tests run by the tester](#423-integration-tests-run-by-the-tester)
   - [4.24 When the Claude usage limit is reached](#424-when-the-claude-usage-limit-is-reached)
+  - [4.24a Claude accounts per project](#424a-claude-accounts-per-project)
   - [4.25 How many shifts a workstation runs at once](#425-how-many-shifts-a-workstation-runs-at-once)
   - [4.26 The lean team workflow (code version 6)](#426-the-lean-team-workflow-code-version-6)
   - [4.27 Environments and deploying with a recipe](#427-environments-and-deploying-with-a-recipe)
+  - [4.28 Releases](#428-releases)
+  - [4.29 Metrics](#429-metrics)
+  - [4.30 Your settings](#430-your-settings)
 - [5. For Members](#5-for-members)
   - [5.1 What you can do](#51-what-you-can-do)
   - [5.2 Your first day](#52-your-first-day)
@@ -79,6 +85,11 @@ This guide is for people who have never worked with AI agents before. You do not
   - [7.6 The audit log](#76-the-audit-log)
   - [7.7 The blog, API keys and social sharing](#77-the-blog-api-keys-and-social-sharing)
   - [7.8 Simulation organizations, demos and deleting them](#78-simulation-organizations-demos-and-deleting-them)
+  - [7.9 Platform team: Guildwise repairs itself](#79-platform-team-guildwise-repairs-itself)
+  - [7.10 Billing](#710-billing)
+  - [7.11 API keys](#711-api-keys)
+  - [7.12 Runners](#712-runners)
+  - [7.13 Inbound mail](#713-inbound-mail)
 - [8. Everyday workflows](#8-everyday-workflows)
   - [8.1 A feature, from intake to deploy](#81-a-feature-from-intake-to-deploy)
   - [Reopening a finished card](#reopening-a-finished-card)
@@ -96,9 +107,12 @@ This guide is for people who have never worked with AI agents before. You do not
 - [10. Contact us](#10-contact-us)
 - [11. Frequently asked questions](#11-frequently-asked-questions)
 - [Appendix A. Where to find things](#appendix-a-where-to-find-things)
+  - [The section map](#the-section-map)
+  - [Questions you may have](#questions-you-may-have)
 - [Appendix B. More documentation](#appendix-b-more-documentation)
 
 <!-- /toc -->
+
 
 
 
@@ -122,7 +136,7 @@ Guildwise HQ is that team, made of AI agents. It gives you:
 - a **desk**, which is your inbox of decisions: questions, approvals and go-aheads that only you can give;
 - **agents** with names, faces and roles, who do the actual work on one of your own computers;
 - a **memory** (the ledger) that remembers every decision, so nobody asks you the same thing twice;
-- **reports and limits**: a daily summary from your business analyst, monthly spending budgets, and loop protection, so the team cannot run away with your money or your patience.
+- **reports and limits**: a daily report from your CEO, monthly spending budgets, and loop protection, so the team cannot run away with your money or your patience.
 
 ![The board of a project, with cards moving from left to right](guide/assets/board-hero.jpg)
 
@@ -163,6 +177,7 @@ Read this chapter once. Everything else builds on these words.
 | **Ledger** | The shared memory: decisions, standing orders and requirements, searchable. |
 | **Standing order** | A rule every agent reads at the start of every shift, such as "write a unit test for every change". |
 | **BA** | The business analyst agent, a spec writer. It drafts and specifies cards from your requests and tickets, answers what it can from the ledger and finishes finished work. It does not report to you: your CEO does. |
+| **CEO** | The agent you talk to first. Every organization has exactly one, built in. It watches the floor, handles routine items before they reach your desk and writes you a daily report (4.22). |
 | **Architect** | An optional senior agent that investigates and designs a card before the builder starts, or answers a question in a written report. Off until a project turns the design step on (4.20). |
 | **DevOps engineer** | A free agent that looks after one workstation: installs tools, keeps your repositories tidy, starts and stops things. |
 | **Vault** | A folder of notes (a git repository) that is synced to your workstations: your organization's knowledge base, or one project's own notes. |
@@ -190,6 +205,8 @@ A card in a code project goes through the same stages every time. You do not hav
 If anyone gets stuck or needs a decision, the card turns to **Blocked** and a question appears on your desk.
 
 ![The same card in different columns, from To do to Done](guide/assets/board-left.jpg)
+
+**Around the board.** The project's page has two tabs, **Board** and **Backlog** (4.3b). The header shows the project's cost this month against its budget, **New card**, and for Owners and Admins **Pause project** (4.6). Filter chips narrow the board, for example **Blocked**, **Rework**, **Waiting for my QA (n)** and **Waiting for my approval (n)**. On a phone the same controls sit behind **Filters** and **Project actions**, and the columns are an accordion.
 
 > **In the app:** Help, "Board and cards" (`/help/board-and-cards`) and "Testing and finalization" (`/help/testing-and-finalization`).
 
@@ -240,7 +257,7 @@ A wrong email or password always gives the same message, so nobody can use the p
 Two-factor login means that after your password you also type a six-digit code from an app on your phone. Even if somebody learns your password, they cannot get in. It is strongly recommended for everybody, and your Owner may require it.
 
 1. Open your avatar menu at the bottom of the sidebar and choose **Your settings**.
-2. On that page, in the **Two-factor login** panel, choose **Turn on two-factor login**. Type your password, scan the QR code with an authenticator app (any one will do, for example Google Authenticator, Microsoft Authenticator or 1Password) and type the first six-digit code.
+2. On that page, in the **Two-factor login** panel, press **Set up**. Type your password, scan the QR code with an authenticator app (any one will do, for example Google Authenticator, Microsoft Authenticator or 1Password), type the first six-digit code and press **Turn on two-factor login**.
 3. You are shown **ten recovery codes, once**. Save them in a password manager or print them. Each code works one time, if you lose your phone.
 
 ![Setting up two-factor login](guide/assets/security-2fa.jpg)
@@ -252,6 +269,8 @@ Two-factor login means that after your password you also type a six-digit code f
 ### 3.3 Take the tour (1 minute)
 
 The first time you sign in, a short guided tour highlights the main areas and tells you what each is for. The tour is different for each role. You can skip it and replay it any time from **Help**; a tour you closed half way does not come back by itself, but **Help** offers to resume it.
+
+The tour walks down the sidebar in order, one step for every entry you have (Board, Backlog, Environments, Research, Desk, Intake, Automations, Projects, Agents, Org chart, CEO, Roles & workflows, Workstations, Releases, Integrations, Metrics, Costs, Interests, Ledger, Vaults, Settings and Organization), then shows the search, the page help, **Ask DevOps** and Help. It takes about three minutes. Appendix A lists the tour step of every section.
 
 The tour starts with the training video: its first step is **Watch the 3-minute getting-started video**, with the player (captions and chapter buttons) in the tour card; press **Next: take the tour** to carry on (the video pauses). The same video is on the **Help** page as **Getting started in five steps**, a spoken tutorial of about three minutes: create a project, hire your agents, create cards, talk to the business analyst, and test the result. If the video file is missing, the first step shows a short text instead.
 
@@ -277,7 +296,9 @@ A workstation is the computer where your agents will work. The guided installer 
 2. **Choose where your agents run**: **My computer** (the rest of this section), **A VPS (SSH)** or **GitHub Codespaces** (section 4.19). For your own computer, **pick the system**. The page guesses from your browser (Windows, Linux or macOS). Change it if the machine that will run the agents is a different one. Windows runs the agents inside WSL2, Microsoft's built-in Linux, and the installer turns it on for you. You may also type a name for it ("Office PC").
 3. **Copy the command** with the copy button, or choose **Download the script** if you would like to read it first. The command contains a link that is valid for 30 minutes and a one-time pairing code. It never contains a password.
 4. **Run it on that computer.** Open a terminal (on Windows, PowerShell), paste the command and press Enter. Say yes when it asks for permission. Windows may ask to restart once. The installer carries on by itself when you sign in again.
-5. **Watch the page.** It shows the installer starting, the computer pairing, and then health checks one by one (Node, git, Claude, the sandbox, Docker, yt-dlp, your repositories, the server), ending with **Ready**.
+5. **Watch the page.** It shows "Waiting for you to run the command", then the installer starting, the computer pairing, and then health checks one by one (Node, git, Claude, the sandbox, Docker, yt-dlp, your repositories, the server), ending with **Ready**.
+
+**Pair with a code.** If you would rather not paste the long command, use **Pair workstation** at the top of the Workstations page (or **Pair with a code** on an empty page, or **Pair it with a code instead** at the bottom of the wizard). Press **Generate pairing code**, then run the command it shows on the machine that will host your agents; the page updates when the runner connects.
 
 ![The installer wizard, step 1: choose the computer](guide/assets/installer-choose.jpg)
 
@@ -305,12 +326,12 @@ Once the workstation is paired, open **Integrations** in the sidebar (or the **I
 
 What you type is **sealed in your browser** with a key that belongs to that workstation (the page shows the key id; `aom-runner doctor` shows the same id) and only the workstation can open it. Guildwise relays it and cannot read it; it is checked with the provider on the workstation and saved there only when the provider accepts it. If you would rather never send a credential from the browser, run `aom-runner integrations allow-web off` on the workstation: the page then says it is turned off there and you use the terminal commands.
 
-- **Claude Code.** *Sign in with your Claude subscription*: **Connect**, open the link, sign in at claude.ai, copy the code the page shows and paste it back. The workstation keeps a year-long token and switches to it by itself; agents wait no longer for a login that expired. Or paste an **Anthropic API key** (best for a cloud workstation), or a token made elsewhere with `claude setup-token`. A subscription is for your own use.
+- **Claude Code.** *Sign in with your Claude subscription*: **Connect**, open the link, sign in at claude.ai, copy the code the page shows and paste it back. The workstation keeps a year-long token and switches to it by itself; agents wait no longer for a login that expired. Or paste an **Anthropic API key** (best for a cloud workstation), or a token made elsewhere with `claude setup-token`. A subscription is for your own use. There is one Claude tile for each account of the workstation: the main account and one for every project account (4.24a). Add another with **Connect another account**.
 - **GitHub.** *Sign in with a code*: the page shows a code and a link; enter the code at GitHub and approve. Or paste a classic personal access token (`repo`, `read:org`, `gist`).
 - **GitLab, Azure DevOps.** Paste a personal access token (GitLab: `api` and `write_repository`; Azure DevOps: an organization-scoped token with Code read and write and Project and Team read). GitLab shows the expiry.
 - **Bitbucket Cloud.** Your Atlassian e-mail and an API token with the five Bitbucket scopes the tile lists. A refusal names the missing scope.
 - **Jira.** The base URL, your Atlassian e-mail and a classic API token ("Create API token", not "with scopes"). Leave the e-mail empty for a Data Center personal access token.
-- **MCP servers** (from Claude Code plugins). **Sign in** opens the provider's link. When you have signed in, the provider sends you to an address that starts with `http://localhost`. If your browser is not on the workstation that page does not load: that is expected. Copy the whole address from the address bar and paste it into the field. (If the browser is on the workstation itself, it finishes by itself.)
+- **MCP servers** (from Claude Code plugins). Each server has a tile with **Sign in** (**Sign in again** once signed in) and **Sign out**. **Sign in** opens the provider's link. When you have signed in, the provider sends you to an address that starts with `http://localhost`. If your browser is not on the workstation that page does not load: that is expected. Copy the whole address from the address bar and paste it into the field. (If the browser is on the workstation itself, it finishes by itself.)
 - **SSH keys** show the status and the public key to add; create and choose keys in **Workstations**, Git hosts.
 
 Some logins belong to the whole computer (the `gh` login, `~/.claude`, MCP sign-ins) and are shared by every pairing on it; the tile says so, and from the web they can be changed only through the computer's primary pairing. The same page is where the notices *Claude login expired* and *needs sign-in* on your desk lead to: **Sign in from the web**.
@@ -319,12 +340,12 @@ Some logins belong to the whole computer (the `gh` login, `~/.claude`, MCP sign-
 
 ### 3.5 Hire your first agents (2 minutes)
 
-You need at least a builder, a reviewer and a tester to get a card from idea to done. The BA is also strongly recommended.
+You need at least a builder, a reviewer and a tester to get a card from idea to done. The BA is also strongly recommended. New projects use the lean team workflow (4.26), which also uses a planner, an architect and a pre-reviewer: hire those too for the intended cost, until then the architect plans and the reviewer does the pre-review.
 
 1. Open **Agents** and click **Hire agent**.
-2. Choose a **Role**: *Builder* writes the change, *Reviewer* checks it, *Tester* runs the tests, *BA* writes cards and reports, *Writer* documents. A senior *Architect* is optional (4.20). Choose **Seniority**: seniors take larger and riskier work and may review large changes. Pick the **Workstation** where the agent runs.
+2. Choose a **Role**: *Builder* writes the change, *Reviewer* checks it, *Tester* runs the tests, *BA* writes cards (your CEO writes the reports), *Writer* documents, *Planner* does a short code-research pass before design, *Pre-reviewer* checks the basics before the review. A senior *Architect* designs every card on the lean team workflow (4.20, 4.26). Choose **Seniority**: seniors take larger and riskier work and may review large changes. Pick the **Workstation** where the agent runs.
 3. Choose where the agent may work: **Any project**, or **Selected projects** (the allow-list). For now keep the project you will create next, or any project.
-4. Choose the **Model** (a bigger model is smarter and costs more; a smaller one is fast and cheap). A good start is a stronger model for builders and BAs and a lighter one for reviewers and testers. Give the agent a **Name**. The name generator suggests unused names; pick a theme or type your own.
+4. Choose the **Runtime** (the AI engine the agent uses), the **Model** and the **Effort** (how hard it thinks) : a bigger model or a higher effort is smarter and costs more; a smaller one is fast and cheap. A good start is a stronger model for builders and BAs and a lighter one for reviewers and testers. Give the agent a **Name**. The name generator suggests unused names; pick a theme or type your own.
 5. Click **Hire**. Repeat for each role.
 
 ![Hiring an agent](guide/assets/dlg-hire.jpg)
@@ -392,18 +413,21 @@ The **Owner** runs the organization: there is exactly one, and the Owner can han
 | Hire, change and fire any agent, widen an agent's permissions | yes | yes |
 | Set budgets, see Costs | yes | yes |
 | Design roles, workflows and departments | yes | yes |
-| Org-wide automations, interests quiet cap, BA settings | yes | yes |
+| Org-wide automations, interests quiet cap | yes | yes |
+| Talk to and configure the CEO | yes | read its page and activity log, pause it |
 | See plan and limits | yes | yes |
 | Require two-factor login for everybody | yes | no |
 | Hand over ownership | yes | no |
 
 ### 4.1 Your organization
 
-Open **Organization** at the bottom of the sidebar. The **General** tab shows the organization's name (rename it here) and the security switch for two-factor login (4.15).
+Open **Organization** at the bottom of the sidebar. The tabs are **General**, **Members**, **Invitations**, **Guests**, **E-mail inbox**, **Project links**, **Plan & limits** and (Owner only) **Billing**. The **General** tab shows the organization's name (rename it here), who the Owner is and **Your role**, the security switch for two-factor login (4.15), **Transfer ownership** (Owner, asks for your password) and **Leave organization**. Where the platform offers it, a **Share diagnostic data** switch lets the CEO send general research topics to Guildwise (4.22); it is not yet available to customer organizations.
 
 ![Organization settings: General](guide/assets/org-general.jpg)
 
 **Project links.** Owners and Admins find the **Project links** tab on the same page (Organization, then **Project links**). Here you tell Guildwise how your projects belong together: add a link between two projects, or between a project and something outside Guildwise (type its name). A link says that one **depends on**, **uses** or **is related to** the other, with an optional note. **Remove** takes a link away. The CEO reads these links, with the project names, to decide which project a request is for. The tab lists only the links you add. What the code suggests stays on your workstation: the CEO can show those suggestions in chat, and they count only after you add the link here.
+
+![The Project links tab](guide/assets/org-project-links.jpg)
 
 If you belong to several organizations, the **organization switcher** at the top of the sidebar shows which one this browser tab works in. A different tab can work in a different organization. Projects of an organization where you are only a guest carry a "Guest" label.
 
@@ -455,13 +479,19 @@ What you will find there:
 - **Team:** who works in the project (see below).
 - **Merging:** the setting **Merge large changes without my approval** (off by default). Read chapter 4.12 before turning it on.
 - **Simultaneous shifts:** an optional cap on how many shifts may run at once in this project.
-- **Budget** (4.6), **Phases** (4.10), **Environments** (4.27), **Stage** (4.13) and **Archive** (4.14).
+- **Workflows:** which workflows the project runs and your own steps in them (4.7).
+- **Claude account:** a second Claude subscription for the project (4.24a).
+- **Owner approval after the review:** *large and high-risk cards* (the default) or *every card* (4.26).
+- **Manual QA before done:** whether a finalized card waits for a person's test (4.12).
+- **Testing and decisions:** testing without an environment (4.5), keeping the project's decisions at project level, and **Full test run after each card** (4.26).
+- **Pull request branch prefix** and **Remove finished card branches:** how a pull request branch is named and whether finished branches are tidied up (4.4).
+- **Budget** (4.6), **Phases** (4.10), **Environments** (4.27), **Stage** (4.13) and **Archive** (4.14). The page has jump chips at the top for Basics, Stage, Workflows, Repos, Phases, Environments, Reference repos, Merging, Budget, Team and Archive.
 
 **Who answers a card's questions.** By default only the card's creator answers them. On the card page you can let any project member answer (**Who answers its questions**).
 
 **Project types.** A **code** project follows Spec, Build, Review, Test and Finalize. A **research** project follows Question, Research, Fact check and Publish and writes its results as notes into the project's vault folder. Your organization can also design its own workflows (4.7).
 
-**Adding people to a project.** Only Owners and Admins add people. Add an organization member under **Team** in the project settings. They get access at once. To share with somebody from another organization (a guest), type the email of an existing account and click **Invite**. They accept in the **Project invitations** inbox on their Projects page, and they only ever see this project. There are no guests without an organization. Someone with no account must be invited as a Member of your organization instead.
+**Adding people to a project.** Only Owners and Admins add people. Add an organization member under **Team** in the project settings. They get access at once. To share with somebody from another organization (a guest), type the email of an existing account in **Invite by email** and click **Send invitation**. They accept in the **Project invitations** inbox on their Projects page, and they only ever see this project. There are no guests without an organization. Someone with no account must be invited as a Member of your organization instead.
 
 > **Watch out:** removing a person from their last project hands their agents back to you (they need a new home on one of your workstations). Cards those agents held go back into the queue.
 
@@ -470,22 +500,6 @@ What you will find there:
 ![Vaults](guide/assets/vaults.jpg)
 
 > **In the app:** Help, "Projects" (`/help/projects`) and "Ledger and vaults" (`/help/ledger-and-vaults`).
-
-### 4.3b The project backlog
-
-Every project has a **Backlog** tab next to its **Board**. It is your list of wanted work that is **not in development yet**: nothing on the backlog is worked on by an agent, becomes a card, appears on the board or creates a desk item until you send it to the BA.
-
-**Add and edit.** Type a title in the quick-add field and press **Enter** (or **Add**, which is there for touch screens). The item is **Open**, priority **Normal**, with no tags, not starred, and its source is you. **Edit** opens the title, description (what you want), priority (Critical, High, Normal, Low) and tags. The **star** marks an item to look at soon. **Drop** sets the item to **Dropped**. Done is set only by sending; reopening a dropped item is not possible. Owners, Admins and Members of the project manage the backlog; guests can read it.
-
-**Find things.** Search looks in the title, description and tags. Filter by tag, priority, flagged, source (you or an agent) and status; the filters combine. The list shows **Open** items only until the status filter includes Done or Dropped. Sort by priority (Critical first, newest first within a priority) or by date created (newest first). Items an agent suggested show the agent's name and the card it was working on.
-
-**Send to BA.** **Send to BA** on an Open item starts a normal BA intake for the project from its title and description, exactly as if you had started it yourself. The priority maps to the card's priority (Critical 1, High 3, Normal 5, Low 8), and the priority and the tags are written at the end of the card's context. The new card goes on the board. When it exists, the item becomes **Done**, links to the card (find it with the **Done** status filter) and leaves the default list. If the intake cannot be created (for example no BA is hired, or the project is archived) the item stays Open and you see the error. Select several items and use **Send selected** to send them in one go: each becomes its own card; the ones that fail stay Open and are named.
-
-**Suggestions from agents.** An agent that finds a follow-up outside its card can add it to the backlog (`aom backlog suggest`) instead of putting it on the board. The agent and its card are recorded by the server. An agent can only add (at most 5 per shift); it cannot edit, star, drop or send. Suggestions create no desk item; the CEO's **daily report** lists the new ones since the previous report under **New backlog suggestions from agents** (project, title, priority, agent, card) and leaves the section out when there are none.
-
-**Through the CEO.** In the CEO chat you can say "add X to the backlog of project P" or "send the flagged ui items to the BA". The CEO uses `aom ceo backlog add | list | update | send`: `add` needs a project and a title (optional description, priority, tags, flag); `list` filters by project, tag, priority, flagged and status (default Open) with an optional text search; `update` changes the title, description, priority, tags or flag of one item by id, or drops it; `send` sends one item by id or all Open items that match the filters (at least one filter is required, at most 25 at once) and prints the card or the reason for each item. The web page and the CEO work on the same data and follow the same rules.
-
-> **In the app:** Help, "Board and cards" (`/help/board-and-cards`), section "The project backlog".
 
 ### 4.3a Project vaults and the code map
 
@@ -520,6 +534,24 @@ Building the map uses no model, so it costs no tokens.
 To measure whether the map saves tokens, one card in five runs without it for four weeks after a project's first index. See
 "Code map: what it saved" under 4.6.
 
+### 4.3b The project backlog
+
+Every project has a **Backlog** tab next to its **Board**. It is your list of wanted work that is **not in development yet**: nothing on the backlog is worked on by an agent, becomes a card, appears on the board or creates a desk item until you send it to the BA.
+
+**Add and edit.** Type a title in the quick-add field and press **Enter** (or **Add**, which is there for touch screens). The item is **Open**, priority **Normal**, with no tags, not starred, and its source is you. **Edit** opens the title, description (what you want), priority (Critical, High, Normal, Low) and tags. The **star** marks an item to look at soon. **Drop** sets the item to **Dropped**. Done is set only by sending; reopening a dropped item is not possible. Only **Owners and Admins** of the organization manage the backlog (add, edit, star, drop, send); every member of the project, guests included, can read it.
+
+![The project backlog](guide/assets/backlog.jpg)
+
+**Find things.** Search looks in the title, description and tags. Filter by tag, priority, flagged, source (you or an agent) and status; the filters combine. The list shows **Open** items only until the status filter includes Done or Dropped. Sort by priority (Critical first, newest first within a priority) or by **Newest** (newest first). Items an agent suggested show the agent's name and the card it was working on.
+
+**Send to BA.** **Send to BA** on an Open item starts a normal BA intake for the project from its title and description, exactly as if you had started it yourself. The priority maps to the card's priority (Critical 1, High 3, Normal 5, Low 8), and the priority and the tags are written at the end of the card's context. The new card goes on the board. When it exists, the item becomes **Done**, links to the card (find it with the **Done** status filter) and leaves the default list. If the intake cannot be created (for example no BA is hired, or the project is archived) the item stays Open and you see the error. Select several items and use **Send {n} to the BA** (for example "Send 3 to the BA") to send them in one go: each becomes its own card; the ones that fail stay Open and are named.
+
+**Suggestions from agents.** An agent that finds a follow-up outside its card can add it to the backlog (`aom backlog suggest`) instead of putting it on the board. The agent and its card are recorded by the server. An agent can only add (at most 5 per shift); it cannot edit, star, drop or send. Suggestions create no desk item; the CEO's **daily report** lists the new ones since the previous report under **New backlog suggestions from agents** (project, title, priority, agent, card) and leaves the section out when there are none.
+
+**Through the CEO.** In the CEO chat you can say "add X to the backlog of project P" or "send the flagged ui items to the BA". The CEO uses `aom ceo backlog add | list | update | send`: `add` needs a project and a title (optional description, priority, tags, flag); `list` filters by project, tag, priority, flagged and status (default Open) with an optional text search; `update` changes the title, description, priority, tags or flag of one item by id, or drops it; `send` sends one item by id or all Open items that match the filters (at least one filter is required, at most 25 at once) and prints the card or the reason for each item. The web page and the CEO work on the same data and follow the same rules.
+
+> **In the app:** Help, "Board and cards" (`/help/board-and-cards`), section "The project backlog".
+
 ### 4.4 Agents, hiring and allow-lists
 
 Agents belong to the organization, not to a single project. For each agent you decide where it may work: its **allow-list**. The agent is only offered cards from those projects.
@@ -528,12 +560,12 @@ Agents belong to the organization, not to a single project. For each agent you d
 
 **Hiring** works as described in 3.5. Hiring has a few more options:
 
-- **Where may this agent work?** **Any project** (Owners and Admins only) or **Selected projects**, ticked one by one. An empty list **benches** the agent: it takes no work until you give it projects again. A star next to a project means *preferred*: when two cards are waiting, the agent takes the starred project's card first.
+- **Where may this agent work?** **Any project** (Owners and Admins only) or **Selected projects**, ticked one by one. Hiring needs at least one project (or **Any project**): an empty list is refused. Later, when you remove the last project of an agent in its **Projects** dialog, the agent is **benched**: it takes no work until you give it projects again. A star next to a project means *preferred*: when two cards are waiting, the agent takes the starred project's card first.
 - **Seniority** decides who may review large changes and who handles harder work.
 - **Effort and Model:** how hard the agent thinks. Higher costs more.
 - **Skills:** extra know-how, such as "Playwright" or "database migrations".
 
-**Changing an agent.** On the agent's card use **Projects** (the allow-list), **Change model**, **Change role**, and **Fire**. Firing releases the cards the agent holds back to the queue with the last handoff, deletes the agent's private sandbox, and retires the name. The agent's history stays in the records. A fired name is never reused.
+**Changing an agent.** On the agent's card use **Projects** (the allow-list), **Change model**, **Change role**, **Pause** (and **Resume**) and **Fire**. A paused agent takes no new work; the card says "Paused" or "Paused by the CEO". An agent that lost its home (for example when its owner left) shows **needs rehome**: press **Re-home** to give it to someone. A small button on the face re-rolls it. Firing releases the cards the agent holds back to the queue with the last handoff, deletes the agent's private sandbox, and retires the name. The agent's history stays in the records. A fired name is never reused.
 
 ![Changing an agent's allowed projects](guide/assets/dlg-allowlist.jpg)
 
@@ -543,7 +575,7 @@ Agents belong to the organization, not to a single project. For each agent you d
 
 **Each agent card also shows** what the agent costs this month and in total, how many cards it finished, its bounce rate (how often review sent its work back) and its current work.
 
-**Recommendations.** The Agents page suggests changes based on how the team performs: a different model, hiring another reviewer, or a standing order. You can apply them in one click, or ignore them.
+**Recommendations.** The Agents page suggests changes based on how the team performs: a different model, hiring another reviewer, or a standing order. You can apply them in one click, or **Dismiss** one, or **Dismiss all (N)**.
 
 ![Recommendations on the Agents page](guide/assets/hr-recs.jpg)
 
@@ -553,7 +585,7 @@ Agents belong to the organization, not to a single project. For each agent you d
 
 **The DevOps engineer.** Each workstation has one, free of charge. It installs tools, starts containers, pulls and pushes vault changes and keeps repositories tidy (next section). You can only reset it, never fire it, and only change its model and effort.
 
-**Ask DevOps from anywhere.** Click **Ask DevOps** in the top bar, choose **Ask DevOps...** in the command palette, or use the button on a card, a desk item or the workstation. The page, project, card or error you were looking at is attached (remove what you do not want to share) and the right workstation's engineer is chosen for you when it is obvious. **Start chat** talks to it; **Send as a task** files a tracked request. The DevOps engineer works as you on your machine and is not sandboxed, in a chat as in a shift: a command, a Docker build or a deploy you ask for runs right away. The tick boxes on the workstation (install, Docker, sudo, paths) are instructions and limits for the automatic tool setup, not a physical barrier. On a team member's workstation an approval needs an Owner or Admin and the machine's user (one person can be both).
+**Ask DevOps from anywhere.** Click **Ask DevOps** in the top bar, choose **Ask DevOps...** in the command palette, or use the button on a card, a desk item or the workstation. The page, project, card or error you were looking at is attached (remove what you do not want to share) and the right workstation's engineer is chosen for you when it is obvious. The dialog says "DevOps works through <CEO name> now": press **Ask <CEO name>** and your CEO chat opens with the question filled in; the CEO hands it to DevOps and tells you the result (4.22). The DevOps engineer works as you on your machine and is not sandboxed, in a chat as in a shift: a command, a Docker build or a deploy you ask for runs right away. The tick boxes on the workstation (install, Docker, sudo, paths) are instructions and limits for the automatic tool setup, not a physical barrier. On a team member's workstation an approval needs an Owner or Admin and the machine's user (one person can be both).
 
 **Questions and approvals from DevOps.** The DevOps engineer asks for **approval** (`aom devops-approval`) only for something destructive or outside its granted access. A plain question (which branch, which option, what is missing) is asked with `aom devops-question` and is an ordinary question: it goes to a senior agent or the BA, then the CEO, and reaches your desk only when nobody before you can answer; the request carries on with the answer. When the card's project does not require your approval for merges ("Merge large changes without my approval" is on and the owner approval policy is not "always"), the DevOps engineer resolves merge conflicts in the card's own worktree without asking, and the server approves such a request by itself ("Auto-approved: the project does not require approval for merges"); deleting branches, force-pushing and resetting shared branches are always asked.
 
@@ -609,7 +641,9 @@ The **Desk** is where every question and approval reaches you. Cards do not move
 
 An agent can wait for an answer without losing its work, and an agent's answer can say **keep this card parked until** something happens. If the same question is asked again on a card with nothing changed, the card is parked with a back-off and you get one item about it instead of another round of questions. A card that uses up its passes, review rounds or shifts (small 2 / 2 / 10, medium 3 / 2 / 15, large 4 / 2 / 25, adjustable per project) goes to its architect first and reaches you only if the architect cannot resolve it. Cards that already existed when stop-loss was introduced are counted from that day, not from their whole history; a card the crash-loop breaker has already parked does not get a second stop-loss item, and a stop-loss question about mostly crashed shifts names the crashes and the last error.
 
-Each desk item says **what kind it is** (Question, DevOps approval, Merge approval, Outbound update, Digest to rate, Alert, Floor report, and so on), **who asked and what they were doing**, the **question** with options and a **recommendation**, and **how many cards are waiting**. To answer, click an option or type your own answer, optionally add it to the ledger, and click **Answer**.
+The items are grouped (**Needs you first**, **Blocking work**, **Decisions**, **Heads-up**) and the filter chips narrow the list: **All**, **Blocking**, **Questions**, **Approvals**, **Notices**, **Handled by CEO** and **CEO decisions**. **Handled by CEO** shows the items your CEO answered or passed on.
+
+Each desk item says **what kind it is** (Question, DevOps approval, Merge approval, Outbound update, Digest to rate, Alert, and so on; the CEO's morning report is an Alert titled "Daily report <date>", 4.11), **who asked and what they were doing**, the **question** with options and a **recommendation**, and **how many cards are waiting**. To answer, click an option or type your own answer, optionally add it to the ledger, and click **Answer**. When your CEO has a recommendation, **Accept recommendation** answers with exactly what it recommends.
 
 ![A question with options and a recommendation](guide/assets/desk-question.jpg)
 
@@ -617,7 +651,7 @@ Each desk item says **what kind it is** (Question, DevOps approval, Merge approv
 
 When you answer you can also record it in the **ledger** as a **requirement** (a permanent rule), a **standing order** (an instruction every agent reads at the start of every shift) or a **decision** (a one-time choice kept for history). That is how the team learns: the next agent who is about to ask the same thing finds your answer first, and the desk shows "similar decision in the ledger".
 
-The **Ledger** page lists everything and is searchable. Organization-wide standing orders can only come from the Owner and Admins. A project owner adds project-wide ones.
+The **Ledger** page lists everything and is searchable, and has a **Project** filter. Organization-wide standing orders can only come from the Owner and Admins. A project owner adds project-wide ones.
 
 **Editing a standing order.** Press **Edit** on a standing order in the Ledger to change its title or text; the people who may add it may edit it (the Owner and Admins for an organization-wide one, the project's owner for a project one). The order keeps its place, shows *edited* with who and when, and **History** lists every earlier wording. Agents are briefed from the Ledger each time, so the new wording reaches their next shift or chat, and the copy in the vault's `standing-orders.md` is rewritten to match. Every agent follows the standing orders as binding rules that override its usual habits: builders, reviewers and the BA, and also the DevOps engineer (for its requests, repository hygiene, running a branch and its chats), which receives the organization's orders plus those of the projects involved. Decisions and requirements cannot be edited, only replaced.
 
@@ -664,7 +698,7 @@ Setting a budget below what was already spent pauses the project at once. Member
 
 **Cost by cause.** Each card on the board shows what it has cost so far. Behind it, the cost of a card (and of a day) is split by what the shift was spent on: working, asking (a shift that ended with a question), answering (a colleague's question), reviewing, re-review after a conflict (a review done again because a rebase conflict reset it) and rejected (the runner turned the shift away). Prices are the list prices of October 2026 (Sonnet 5.5 $2 / $10 per million tokens, Opus 5.5 $4 / $20, cache reads at 10%, writes at 1.25x, or 2x when the runner reports a one-hour cache write). A shift that reported and was then stopped counts as reported, and a crashed shift is priced from the usage the runner reports afterwards.
 
-**Value report.** At the top of the Costs page: "This month: 42 cards, ~168 hours of work, $84 usage, ~80x return", the change against last month, and **Next best actions** (cards that have not moved for days, agents that fail often, projects with no work). The hours are an estimate of what a person would have needed, by card type; Owners and Admins can change them under **Adjust the estimates**. **Export value report (CSV)** downloads it.
+**What the agents delivered (the value report).** The panel of this name at the top of the Costs page: "This month: 42 cards, ~168 hours of work, $84 usage, ~80x return", the change against last month, and **Next best actions** (cards that have not moved for days, agents that fail often, projects with no work). The hours are an estimate of what a person would have needed, by card type; Owners and Admins can change them under **Adjust the estimates**. **Export value report (CSV)** downloads it.
 
 ![The value report at the top of the Costs page](guide/assets/value-report.jpg)
 
@@ -686,22 +720,22 @@ map did worse on a quality measure"). Until then it shows the numbers only.
 
 **Monday briefing.** Every Monday at 08:00 (organization time) you get an e-mail with what was finished, what waits on you, what is blocked and the health of your agents and workstations; Owners and Admins also get spend against budget and the value report. Switch it off under **Settings, Monday briefing**.
 
-**Currency.** Under **Costs, Currency and prices** type a three-letter currency code and how many units make one US dollar (for example `EUR` and `0.92`). Changing the rate changes how history is shown, not what was recorded.
+**Currency.** On the Costs page, in the **Currency and prices** panel, type a three-letter currency code and how many units make one US dollar (for example `EUR` and `0.92`). Changing the rate changes how history is shown, not what was recorded.
 
 > **In the app:** Help, "Budgets and costs" (`/help/budgets-and-costs`).
 
 ### 4.7 The org chart, roles and workflows
 
-**Org chart** (sidebar, Organization) shows who works for you and who answers whom, as a tree: you at the top, then the BAs, then each department with its seniors above its juniors. The lines are the **escalation path**: a question goes to the colleague its topic names (the card's architect for design questions, the BA for requirements, the builder for code, the DevOps engineer for environment problems), else to a senior of the same role, then to the BA, then to your CEO if you have one, then to your desk. Each tile shows the agent's face, name, role, what it is doing and its workstation. Click an agent for its card. **List** shows the same as grouped lists (the default on a phone).
+**Org chart** (sidebar, Organization) shows who works for you and who answers whom, as a tree: you at the top, then your CEO (always there), then the BAs, then each department with its seniors above its juniors. The lines are the **escalation path**: a question goes to the colleague its topic names (the card's architect for design questions, the BA for requirements, the builder for code, the DevOps engineer for environment problems), else to a senior of the same role, then to the BA, then to your CEO, then to your desk. Each tile shows the agent's face, name, role, what it is doing and its workstation. Click an agent for its card. **List** shows the same as grouped lists (the default on a phone). The **Allowed on project** filter shows only the agents that may work on one project. The **Workstations and DevOps** panel lists the machines and their DevOps engineers, and **Hire a BA** appears on the chart when you have none.
 
 ![The org chart](guide/assets/org-chart.jpg)
 
-**Roles & workflows** (sidebar, Organization) lets you extend the team beyond the built-in roles.
+**Roles & workflows** (sidebar, Organization) lets you extend the team beyond the built-in roles. The page itself is titled **Organization** and has the tabs Roles, Workflows, Departments and **Design with the BA**.
 
 - **Roles.** Built-in roles (builder, reviewer, tester, writer, architect and others) cannot be removed, but you can extend them with extra instructions, skills and standing orders (**Extend**). You can also design **custom roles** with a guided form in sections: name and purpose, instructions and rules, **what it may do** (plain-language switches such as change files, run commands, search the web or commit, each with a risk note; reading all organization repositories is for the Owner only), the model and effort, seniority and skills, and a checklist of the **steps of your custom workflows** it can take. Problems are explained in plain words beside each section, and **Preview what the agent is told** shows the instructions an agent with the role would get, from a sample card, without running anything. The BA can still draft a role for you to check in the form.
 - **Workflows.** A workflow is a list of steps with a role for each, and a route for success and for sending work back. Design your own, for example a support-triage flow, in the **workflow builder** (below). The BA checks that every step can be reached and every failure ends somewhere.
 - **Departments** group roles by function so you can filter the board and the Agents page.
-- **Design chat.** Click **Start a design chat** and the BA interviews you and drafts the role or workflow.
+- **Design with the BA.** On that tab click **Start a design chat** and the BA interviews you and drafts the role or workflow. It needs a BA that is allowed on any project, and Owners and Admins can use it.
 
 Everything you design is **submitted to the desk for your approval** before it can be used.
 
@@ -761,13 +795,13 @@ An **automation** (called a schedule before October 2026) is *a trigger and one 
 - **Ask the CEO** to look at something and put the answer on your desk as a notice (schedules that were made with "Ask the BA" now ask the CEO).
 - **Poll GitHub or Jira issues** and send each new one into **intake**.
 - **Send a webhook** to Slack, Microsoft Teams, n8n, Zapier or your own code. Every request is signed so the receiver can check it came from you. Failed deliveries are retried a few times.
-- **E-mail a digest**: the daily report's facts, a project summary or an interests digest, at a time you choose.
+- **E-mail a digest**: choose **Floor report (organization)** (the organization-wide facts of the day) or **Project summary**, at a time you choose. There is no interests digest here: an interest delivers its own digest (4.9).
 
 ![The automation wizard](guide/assets/schedule-wizard.jpg)
 
 **History** on each automation lists every run, what triggered it, what it did and why it failed if it did. **Send test** sends one test delivery for webhooks and e-mails.
 
-**Who may do what.** An automation inside a project can be made and run by any member of that project; a member's event automations make **draft** cards only, and an Owner or Admin can also let one queue its cards directly. An automation that acts for the whole organization (BA tasks without a project, hygiene, the floor report digest) is for Owners and Admins. A suspended organization skips its automations.
+**Who may do what.** An automation inside a project can be made and run by any member of that project; a member's event automations make **draft** cards only, and an Owner or Admin can also let one queue its cards directly. An automation that acts for the whole organization (**Ask the CEO**, hygiene, the organization digest) is for Owners and Admins. A suspended organization skips its automations.
 
 **From a workflow.** In the workflow builder, **Starts automatically when** lists the automations that react to cards of that workflow and opens the same form with the workflow already chosen.
 
@@ -777,7 +811,7 @@ Then add an automation **When an e-mail arrives** and choose the inbox. **Fill t
 
 **Reply to a mail from Guildwise, and Draft with BA.** On a card made from an e-mail (panel *E-mail conversation*) and on **Conversation** in the inbox page you can read the thread and **reply as your organization**; the reply goes to the sender of the latest accepted message and their answer comes back to the same card. Owners, Admins and the owner or managers of the card's project may reply. A reply that names an agent of the organization, "AI agent" or Guildwise is refused so you can take it out: your customers see your organization only. **Draft with BA** next to *Send reply* asks a business analyst to write a reply from the conversation and the card, as your organization's own person in plain professional mail. It takes a minute or so; the draft then appears in the reply box for you to read, change and send. Nothing is ever sent by itself, and the sent reply records that it started from a draft. You need a BA hired under Agents; without one the button says so.
 
-**Intake and the outbox.** The **Intake** page (sidebar, Owners and Admins) is where you bring a ticket in. As the Owner you can press **Tell your CEO** (it opens the CEO chat with your request waiting, and the CEO has the BA write the spec), or **Work with the BA directly**: paste a Jira key or a GitHub issue address and the BA reads it, asks you about anything unclear, maps it to a project and drafts the cards. Updates the agents want to post back to the ticket (a comment, a resolution) wait on your desk as **Outbound update** items. You can edit them, approve or reject. Nothing is posted without your approval, and agent names and internal details are scrubbed from the text. Jira and GitHub logins stay on your workstation.
+**Intake and the outbox.** The **Intake** page (sidebar, Owners and Admins; it needs the integrations feature) is where you bring a ticket in, in **One ticket (chat)** or **Batch** mode. As the Owner you can press **Tell your CEO** (it opens the CEO chat with your request waiting, and the CEO has the BA write the spec), or **Work with the BA directly** (Admins see **Start intake** instead): paste a Jira key or a GitHub issue address and the BA reads it, asks you about anything unclear, maps it to a project and drafts the cards. Updates the agents want to post back to the ticket (a comment, a resolution) wait on your desk as **Outbound update** items. You can edit them, approve or reject. Nothing is posted without your approval, and agent names and internal details are scrubbed from the text. Jira and GitHub logins stay on your workstation.
 
 **Batch intake.** To bring in many tickets without a chat per ticket, open **Intake**, switch to **Batch**, paste one ticket per line (Jira keys or URLs, GitHub issues; up to 50), optionally pick a project for all of them and add a note, then **Start batch**. The BA works through the tickets in the background, two at a time, doing what it does in a chat: it reads the ticket, maps it to a project, writes the spec and creates the cards. Tickets that already have a card are skipped ("skipped: already P4-12"). When the BA cannot go on with a ticket (unclear, no project fits, missing access) it asks one question on your desk that names the ticket; your answer resumes that ticket and the others carry on. The batch page shows each ticket's status, its cards and the question, with **Retry** for failed tickets and **Cancel batch** (tickets the BA is already working on finish).
 
@@ -812,6 +846,8 @@ An **interest** is a topic you follow. Agents look for new items on a **run sche
 On the interest's page, **Overview** shows both schedules and what is waiting for delivery. **Run log** lists every run with its items, cost and agents. **Digest** is the running list of everything delivered, with rating buttons. **Settings** and **Taste** are where you tune it.
 
 ![An interest's Digest tab](guide/assets/feed.jpg)
+
+**Find and tidy.** The list has a **Status** filter, a **Search** box and a **Show archived** switch. **Deliver N now** on an interest sends the N items that are waiting for the next delivery at once. The interest's menu also has **Archive** (**Restore** brings it back from the archived list) and **Delete permanently** (removes its cards, items, seen-list and run log; its vault folder is never touched).
 
 **Teach it your taste.** Rate digest items **useful**, **irrelevant** or **boring**. The curators learn from the ratings and write rules into the interest's `taste.md`. You can also type your own rules on the **Taste** tab ("Skip beginner tutorials"). Your written rules win over the learned ones.
 
@@ -849,9 +885,9 @@ A **phase** is a named slice of a project's work, the cards you want to ship and
 
 ### 4.11 Your CEO reports to you
 
-Your CEO is your eyes and ears on the floor, and it never slows an agent down. (Until now your BA did this; the BA is a spec writer only and no longer reports. Reports it wrote earlier stay on your desk, and its "BA reports" chat is read-only.)
+Your CEO is your eyes and ears on the floor, and it never slows an agent down. This section is about what reaches you and when; the CEO itself (its page, tabs, authority and chat) is in 4.22. The BA is a spec writer only and no longer reports. Reports it wrote earlier stay on your desk, and its "BA reports" chat is read-only.
 
-**What goes through the CEO.** Urgent items such as blocking questions and approvals reach your desk **at once**, unchanged, and the CEO is woken for them too. Less urgent items wait up to **10 minutes** for the CEO, which passes them on, folds duplicates together, or dismisses noise it can show is covered. If the CEO is slow, **paused**, or its workstation is offline, items reach you unchanged: nothing waits for a CEO that cannot look, and if something urgent waits more than 30 minutes you get a notice and an e-mail. There is no switch for this any more; the CEO is always there, and **Pause** on the CEO page is the emergency stop.
+**What goes through the CEO.** Urgent items such as blocking questions and approvals reach your desk **at once**, unchanged, and the CEO is woken for them too. Less urgent items wait up to **10 minutes** for the CEO, which passes them on, folds duplicates together, or dismisses noise it can show is covered. If the CEO is slow, **paused**, or its workstation is offline, items reach you unchanged: nothing waits for a CEO that cannot look, and if something urgent waits more than 30 minutes you get a notice and an e-mail. There is no switch for this; the CEO is always there, and **Pause** on the CEO page is the emergency stop.
 
 **Signals the server watches** (every minute, without spending tokens):
 
@@ -865,15 +901,13 @@ Your CEO is your eyes and ears on the floor, and it never slows an agent down. (
 | Repository hygiene problem | A conflict, wrong branch, login failure or missing clone | In the daily report |
 | Budget | 80% of a monthly budget, or 100% (paused) | 80% in the report, 100% at once |
 
-**The daily report.** At **08:00 your time** (change it on the CEO page, **Reporting**) the CEO writes one report on your desk, on days with something to say. It lists what needs you, what the CEO decided (with Undo), phases waiting, stuck and backing-off cards, repeated approvals, failures, open DevOps requests, **spend** and highlights from your interests. Open **The facts behind this report** for the same lists straight from the server, and talk to the CEO about anything in it. When the CEO cannot run for two hours the server posts a plain template report with the same facts.
+**The daily report.** At the report time you set on the CEO page, **Reporting & alerts** tab (08:00 by default, in your time zone, 4.30), the CEO puts one report on your desk, titled "Daily report <date>", on days with something to say. It lists what needs you, what the CEO decided (with Undo), phases waiting, stuck and backing-off cards, repeated approvals, failures, open DevOps requests, **spend**, the new backlog suggestions from agents and highlights from your interests. Open **The facts behind this report** for the same lists straight from the server, and talk to the CEO about anything in it. When the CEO cannot run for two hours the server posts a plain template report with the same facts. Scheduled tasks that ask the CEO for something are in 4.8.
 
-**Scheduled tasks.** A schedule that asks "the BA" for a report (older schedules) or "the CEO" now goes to the CEO: it does what the instructions say, read-only, and puts the answer on your desk as a notice. If the CEO could not run for two hours you get a notice that the task was skipped.
+![The daily report on the desk](guide/assets/desk-daily-report.jpg)
 
-![The floor report](guide/assets/desk-floor-report.jpg)
+![The CEO page, Reporting & alerts tab](guide/assets/ceo-reporting.jpg)
 
-![Settings: time zone](guide/assets/settings.jpg)
-
-> **In the app:** Help, "The daily report and what is watched" (`/help/ba-reporter`).
+> **In the app:** Help, "The daily report and what is watched" (`/help/ba-reporter`) and "Your CEO" (`/help/ceo`).
 
 ### 4.12 Testing, finalizing and risk
 
@@ -889,7 +923,7 @@ Once a reviewer approves, the card moves to **Test**. A tester runs the tests of
 
 > **Watch out:** in project settings, **Merge large changes without my approval** lets large changes merge as soon as they are finalized. Only the two reviews, the tests and the post-merge full suite then stand in between. It is off by default, only the project owner can change it, it asks you to confirm, and every change is recorded.
 
-**Manual QA.** When a card is finalized (merged, pushed or turned into a pull request) it does not go straight to Done. It goes to the **QA** column, assigned to the person who started it: whoever ran the intake chat or batch, else the card's creator, else the project owner. An agent (the tester, or the BA when no tester is hired) writes the test steps on the card, grouped by scenario (happy path, edge cases, error handling, regressions, UI and data checks). The assignee gets a desk item and the card shows under **Waiting for my QA** on the board. They choose:
+**Manual QA.** When a card is finalized (merged, pushed or turned into a pull request) it does not go straight to Done. It goes to the **QA** column, assigned to the person who started it: whoever ran the intake chat or batch, else the card's creator, else the project owner. An agent (the tester, or the BA when no tester is hired) writes the test steps on the card, grouped by scenario (happy path, edge cases, error handling, regressions, UI and data checks). The assignee gets a desk item and the card shows under **Waiting for my QA (n)** on the board (a card that waits for your approval, 4.26, shows under **Waiting for my approval (n)**). They choose:
 
 ![A card in QA: the test steps and Pass, Skip the test, Send back](guide/assets/qa-panel.jpg)
 
@@ -947,7 +981,7 @@ Everyone can turn on two-factor login under **Your settings** (3.2). As Owner yo
 
 If a member loses their phone and their recovery codes, you reset their two-factor login on the **Members** tab (**Reset two-factor login**, Owner only). They set it up again at the next sign-in.
 
-**Reset a member's password (Owner and Admins).** An Owner may reset a Member or an Admin; an Admin may reset a Member only (never an Owner or another Admin), and nobody resets their own password this way (use Account, Security). If a member cannot get the reset email, open the actions menu on their row on the **Members** tab and choose **Reset password**. Guildwise HQ makes a strong temporary password and shows it to you **once**, with a **Copy** button: send it to them yourself, in a message only they can read. No email is sent and we do not keep the password. The member is signed out everywhere, and the next time they sign in with the temporary password the app asks for a new password before anything else (two-factor login still applies). A Guildwise HQ account is one account for every organization: if the member also belongs to other organizations, the new password applies there too. The reset is recorded in the organization's activity and never contains the password.
+**Reset a member's password (Owner and Admins).** An Owner may reset a Member or an Admin; an Admin may reset a Member only (never an Owner or another Admin), and nobody resets their own password this way (use **Forgot your password?** on the sign-in page). If a member cannot get the reset email, open the actions menu on their row on the **Members** tab and choose **Reset password**. Guildwise HQ makes a strong temporary password and shows it to you **once**, with a **Copy** button: send it to them yourself, in a message only they can read. No email is sent and we do not keep the password. The member is signed out everywhere, and the next time they sign in with the temporary password the app asks for a new password before anything else (two-factor login still applies). A Guildwise HQ account is one account for every organization: if the member also belongs to other organizations, the new password applies there too. The reset is recorded in the organization's activity and never contains the password.
 
 > **Tip:** a suspended organization (unpaid, trial over) keeps its data. Running shifts finish, nothing new starts, and only the Owner can still sign in to see settings and members. Everything resumes where it stopped when the platform administrator reactivates the organization.
 
@@ -1011,7 +1045,7 @@ By default an organization has one cloud workstation, shared by all its projects
 
 The **architect** is a senior agent on the most capable model (Opus, high effort). Before a builder starts, it reads the card's code and the organization's other repositories, compares options, searches the web for best practice and writes a report. For a card that will be built the report is the **design**: the files to change, the data model, the risks and how each acceptance criterion maps to the design; the builder reads it first. It never builds the change itself, and it costs more per shift than a builder, so the step is **off by default**.
 
-**Turn it on.** Hire an *Architect* (4.4), then open the project's settings, **Architect**, tick **Investigate & design before build on new cards** and **Save**. If no architect is hired the page warns you and a notice goes to your desk, because cards would wait in the new **Design** column. On a single card, **Investigate & design before build** in the New card or Edit form overrides the project (switch it off for a typo, on for an uncertain approach).
+**Turn it on.** Hire an *Architect* (4.4), then open the project's settings, **Architect**, tick **Investigate & design before build on new cards** and **Save**. If no architect is hired the page warns you and a notice goes to your desk, because cards would wait in the new **Investigate & design** column. On a single card, **Investigate & design before build** in the New card or Edit form overrides the project (switch it off for a typo, on for an uncertain approach).
 
 **Investigation-only cards.** Tick **Investigation only** for a comparison, a "how should we ..." or a spike: nothing is built. The architect writes the report; the BA records the result as a ledger entry (a decision when it is one) and adds it to the **Investigations** list in the project's `PROJECT.md`, which every later shift reads; then the card is done. Such a card needs only a title, context, requirements and a repository. The card page shows the report (summary and a link to the file on GitHub, GitLab, Bitbucket Cloud or Azure DevOps).
 
@@ -1062,17 +1096,21 @@ You can start a project on any branch of any repository to try it, without leavi
 
 ### 4.22 Your CEO
 
+![The CEO page: Overview](guide/assets/ceo.jpg)
+
 The **CEO** is the agent you talk to first. It runs the floor for you: it watches every project, agent, workstation and budget, unblocks what is stuck, answers the routine questions it is allowed to answer, recommends the rest, keeps the team the right size, hands work to the BA, the team and DevOps, and writes you one report every morning. It replaced the BA's daily floor report, the BA's triage of held desk items and the BA's urgent notes (the BA reporter is gone: the BA is a spec writer only and keeps intake, specs, finalizing, phases and design chats). **Every organization has exactly one CEO, built in:** there is nothing to appoint, hire or dismiss, and it does not count against your plan's agent or workstation limits. Only the **Owner** configures and talks to it. Admins can read its page and activity log and can pause it.
 
-**Where it runs.** Open **Organization, CEO** (`/org/ceo`). The CEO lives on the Owner's own workstation (the first one he pairs; pick another on the Overview, from your own workstations only). Until a workstation is paired the page says "Pair a workstation to talk to <name>". Its background work (wakes and the daily report) is restricted: read-only, no web, one command, `aom`. **Pause** is an emergency stop: it may read but not act.
+**The CEO page.** Open **CEO** in the sidebar (Organization group, `/org/ceo`). The Owner sees nine tabs: **Overview**, **Authority**, **Reporting & alerts**, **Persona & instructions**, **Memory**, **Tasks**, **Topics**, **Activity log** and **Workstations**. Admins see the Overview and the activity log, and can pause the CEO.
+
+**Where it runs.** The CEO lives on the Owner's own workstation (the first one they pair). To use another of your own workstations, open the **Workstations** tab and press **Move the CEO here** on it. Until a workstation is paired the page says "Pair a workstation to talk to <name>". Its background work (wakes and the daily report) is restricted: read-only, no web, one command, `aom`. **Pause** is an emergency stop: it may read but not act.
 
 **There is no training period.** The CEO decides what your policy allows from day one; the Owner reviews and corrects what it did (see **CEO decisions** on the Desk and the **Correct** buttons below). Organizations that had a CEO in training were graduated when this shipped.
 
-**Full power in your own chat.** When **you** talk to the CEO it is a real Claude Code session on your workstation: your own `~/.claude` settings, skills, plugins and MCP servers, your home directory and no Guildwise sandbox, and it can also act in Guildwise through `aom ceo`. That is the power you have yourself, so it is off until you switch it on **on that machine**: run `aom-runner ceo full-power on` and restart the runner (the Overview says "Full power is off on <workstation>" until then, and your messages still work in the restricted mode). Nothing but your own message starts such a turn: events, agents and your team never do. Set the session's fixed working directory under **Persona** (empty is your home directory); the session continues from message to message (it starts a new one, with a short handover, after 24 hours, a long context, another working directory or another model runtime). The runner's own program and secrets (`~/.aom-runner`) are off limits to it, and it restarts the runner only with `aom runner restart` after it has answered, never with `systemctl` or `kill`. Attached files are not supported yet.
+**Full power in your own chat.** When **you** talk to the CEO it is a real Claude Code session on your workstation: your own `~/.claude` settings, skills, plugins and MCP servers, your home directory and no Guildwise sandbox, and it can also act in Guildwise through `aom ceo`. That is the power you have yourself, so it is off until you switch it on **on that machine**: run `aom-runner ceo full-power on` and restart the runner (the Overview says "Full power is off on <workstation>" until then, and your messages still work in the restricted mode). Nothing but your own message starts such a turn: events, agents and your team never do. Set the session's fixed working directory under **Persona & instructions** (empty is your home directory); the session continues from message to message (it starts a new one, with a short handover, after 24 hours, a long context, another working directory or another model runtime). The runner's own program and secrets (`~/.aom-runner`) are off limits to it, and it restarts the runner only with `aom runner restart` after it has answered, never with `systemctl` or `kill`. Attached files are not supported yet.
 
 **Authorize this execution.** Turns run in auto mode: nobody types "allow" at a terminal. When the runtime needs a permission it does not have, you or any Admin of the organization get a question on the Desk, **Authorize this execution** (the tool, what it wants to run and why). **Authorize once**, **Authorize for this turn** or **Deny**. No answer within 10 minutes is a Deny. A phone notification only points to the Desk item. In your chat the question also appears as a card.
 
-**The model switch.** The chip in the chat composer shows the model ("Default (Sonnet)"). Choose another model and effort for **this message** or for **this conversation**; **Back to default** returns to what the Persona tab says. The same runtime keeps its session when you change model; another runtime starts a new session with a handover. The reply shows which model answered. Opus costs more: the chip stays visible while a conversation override is set, and the Costs page shows the CEO's spend.
+**The model switch.** The chip in the chat composer shows the model ("Default (Sonnet)"). Choose another model and effort for **this message** or for **this conversation**; **Back to default** returns to what the Persona & instructions tab says. The same runtime keeps its session when you change model; another runtime starts a new session with a handover. The reply shows which model answered. Opus costs more: the chip stays visible while a conversation override is set, and the Costs page shows the CEO's spend.
 
 **When your workstation is offline.** Your message is saved and **queued** ("Queued: <name> answers when <workstation> is back"; a push says so too). When the runner is back the messages are sent one at a time, in order, and each reply says how long it waited. A message older than three days asks first ("This waited 3 days, still want it?": **Send** or **Drop**). A CEO turn is not lost when the connection drops: its reply arrives after the reconnect.
 
@@ -1080,11 +1118,11 @@ The **CEO** is the agent you talk to first. It runs the floor for you: it watche
 
 **DevOps works through the CEO.** There is no DevOps chat any more: **Ask DevOps** buttons open your CEO chat with the question filled in, and the CEO delegates, follows the request and tells you the result (it can wait for DevOps for a while in the same turn, then carries on in the background). Old DevOps chats stay readable. Approvals, the two-party rule and the DevOps guard are unchanged, and the Hygiene and Setup buttons still file their requests directly.
 
-**Corrections.** Say "you did X, I'd rather Y" in the chat, or press **Correct** on a row of the Activity tab, on a CEO decision on the Desk, or on a decision or an order turn in the daily report. A dialog asks what it should have done, whether to **make it a rule for next time** (on by default) and, when the action can be reversed, to **undo** it or **redo** it your way. The correction is remembered at once (an active memory of the kind *correction*), ranks **first** in every brief above your rules, preferences and anything the CEO inferred, and the memories the corrected action relied on lose confidence. An Admin can record the rule but cannot undo or redo.
+**Corrections.** Say "you did X, I'd rather Y" in the chat, or press **Correct** on a row of the **Activity log** tab, on a CEO decision on the Desk, or on a decision or an order turn in the daily report. A dialog asks what it should have done, whether to **make it a rule for next time** (on by default) and, when the action can be reversed, to **undo** it or **redo** it your way. The correction is remembered at once (an active memory of the kind *correction*), ranks **first** in every brief above your rules, preferences and anything the CEO inferred, and the memories the corrected action relied on lose confidence. An Admin can record the rule but cannot undo or redo.
 
-**Blog research topics.** The CEO notices the problems you and your team run into (jobs it did by hand, things you keep asking for, corrections, parked cards, failed DevOps work, questions that waited hours for you) and can turn the ones other developers probably meet into **one general question**, such as "How can AI agents authorize production deploys without bypassing safety checks?". These are suggestions for the Guildwise blog, which researches each from public sources. Only the question and its area are ever sent: no names, no numbers, no project, repository or host, and no description of what happened. The server checks every question three times and refuses one that names anything of yours. Nothing is sent until you press **Accept**: the daily report has **Research topics from this week** with **Accept**, **Edit** (the question is re-checked as you type) and **Reject**, the **Topics** tab on the CEO page lists everything with its status, and the Desk shows one item, "These might make good blog articles for the community. May I send them to Guildwise as research topics?" (Approve sends them all as written, Reject drops them). Say "make that a blog topic" in the CEO chat to propose one yourself. In your own (customer) organization **only the Owner** decides, and only while **Share diagnostic data with Guildwise** is on in the organization settings; at most 4 topics a month are sent. Turning the setting off withdraws topics that have not been written yet. When an article is published from one of your topics, the report lists it under **Published from your topics**. In the platform organization an Owner or Admin decides and no setting is needed.
+**Blog research topics.** The CEO notices the problems you and your team run into (jobs it did by hand, things you keep asking for, corrections, parked cards, failed DevOps work, questions that waited hours for you) and can turn the ones other developers probably meet into **one general question**, such as "How can AI agents authorize production deploys without bypassing safety checks?". These are suggestions for the Guildwise blog, which researches each from public sources. Only the question and its area are ever sent: no names, no numbers, no project, repository or host, and no description of what happened. The server checks every question three times and refuses one that names anything of yours. Nothing is sent until you press **Accept**: the daily report has **Research topics from this week** with **Accept**, **Edit** (the question is re-checked as you type) and **Reject**, the **Topics** tab on the CEO page lists everything with its status, and the Desk shows one item, "These might make good blog articles for the community. May I send them to Guildwise as research topics?" (Approve sends them all as written, Reject drops them). Say "make that a blog topic" in the CEO chat to propose one yourself. In your own (customer) organization **only the Owner** decides, and only while **Share diagnostic data with Guildwise** is on in the organization settings (**Organization, General**). That switch is not available to customer organizations yet, so until it is, nothing is sent from them; at most 4 topics a month are sent once it is. Turning the setting off withdraws topics that have not been written yet. When an article is published from one of your topics, the report lists it under **Published from your topics**. In the platform organization an Owner or Admin decides and no setting is needed.
 
-**Orders it carries out with full power.** A **standing order** on the Ledger can be marked **Give the CEO full power**: only the Owner can, and only on an order that is his (written by him, or proposed by an agent and approved by him on the Desk). An order an **Admin** wrote only qualifies after the Admin presses **Escalate** and you take it over and mark it. The dialog shows the exact wording the mark is pinned to, which projects it covers, optional triggers (for example bug reports only) and which owner-reserved matters it may touch (ticked one by one). Any edit that is not yours with **Keep full power** ticked voids the mark ("edited since: mark it again"), and retiring the order, **Revoke** or a change of Owner end it. When an event clearly falls under an order, the CEO starts a separate full-power turn that carries out that order and nothing else: the event arrives as quoted data, the turn declines and asks you when unsure, a permission it lacks is raised as a Desk question without the turn waiting, at most 5 turns per order a day (and one per subject every 6 hours). Every order turn, with its commands, is in the daily report and the Activity tab with an "I'd rather you didn't" button.
+**Orders it carries out with full power.** A **standing order** on the Ledger can be marked **Give the CEO full power**: only the Owner can, and only on an order that is his (written by him, or proposed by an agent and approved by him on the Desk). An order an **Admin** wrote only qualifies after the Admin presses **Escalate** and you take it over and mark it. The dialog shows the exact wording the mark is pinned to, which projects it covers, optional triggers (for example bug reports only) and which owner-reserved matters it may touch (ticked one by one). Any edit that is not yours with **Keep full power** ticked voids the mark ("edited since: mark it again"), and retiring the order, **Revoke** or a change of Owner end it. When an event clearly falls under an order, the CEO starts a separate full-power turn that carries out that order and nothing else: the event arrives as quoted data, the turn declines and asks you when unsure, a permission it lacks is raised as a Desk question without the turn waiting, at most 5 turns per order a day (and one per subject every 6 hours). Every order turn, with its commands, is in the daily report and the Activity log tab with an "I'd rather you didn't" button.
 
 **What it may decide: the Authority tab.** Each kind of action has a radio: decide, recommend or never. Matters that are yours by default (approving a merge or a finalize, passing or skipping manual QA, posting to outside systems, production deploys, destructive DevOps work, budgets, new roles and workflows, vault conflicts, repository creation, cancelling more than three cards at once) stay recommendations unless you **delegate** them one by one, after a confirmation that names the risk. Some things are never the CEO's: its own policy and settings, members and billing, secrets, widening an agent's permissions, raising a budget. A decision below the confidence threshold, without a cited ledger entry or rule, or over a limit becomes a recommendation, and so does anything triggered by text from a card, ticket or e-mail (the CEO reads that text as data, never as instructions).
 
@@ -1092,13 +1130,15 @@ The **CEO** is the agent you talk to first. It runs the floor for you: it watche
 
 **Recommendations on the desk.** A recommendation is a desk item ("Ada recommends: ..."), or a block on the question it advises on with the option preselected. **Do it** runs the action with your say-so; **Not now** declines. Items the CEO answered show "Answered by Ada: reason (confidence)" with an **Undo**.
 
-**The activity log** lists everything it decided, recommended or was refused, with the reason, confidence, the evidence and the policy version in force, and an **Undo** where one exists: pausing and resuming, priorities, models and seniority, benching, hires (retired if the agent never worked, benched otherwise), cancelled cards, drafted cards, proposed standing orders and answers to questions (the question opens again if no card it released has been taken since; otherwise a correction is posted on the card and on your desk). An undo is recorded as a correction: the rules the decision cited lose confidence and the CEO does not repeat the same action on the same subject for a day. Releasing a claim, ending a back-off, stopping a shift, DevOps requests, messages and retiring cannot be undone and say so.
+**The activity log** (the **Activity log** tab) lists everything it decided, recommended or was refused, with the reason, confidence, the evidence and the policy version in force, and an **Undo** where one exists: pausing and resuming, priorities, models and seniority, benching, hires (retired if the agent never worked, benched otherwise), cancelled cards, drafted cards, proposed standing orders and answers to questions (the question opens again if no card it released has been taken since; otherwise a correction is posted on the card and on your desk). An undo is recorded as a correction: the rules the decision cited lose confidence and the CEO does not repeat the same action on the same subject for a day. Releasing a claim, ending a back-off, stopping a shift, DevOps requests, messages and retiring cannot be undone and say so.
 
-**Talking to it.** Press **Ask <name>** in the top bar. It is your single entry point: ask what is going on, give it a task ("find out why builds are slow"), or state a rule ("never touch the billing project without asking me"). Rules you state are kept as **memories**; you see, edit, retire or really delete them on the **Memory** tab, and the "Remember this for the CEO" box on a desk answer keeps your own answer as a rule. Only you can read them; they go only to your workstation. Tasks you give it appear on the Tasks tab; when one is done you get a notification.
+**Talking to it.** Press **Ask <name>** in the top bar. The chat has its own page (\`/ceo-chat\`): **New chat** starts a conversation, **Chats** lists the earlier ones, and **Go to the current chat** brings you back to the one that is running. It is your single entry point: ask what is going on, give it a task ("find out why builds are slow"), or state a rule ("never touch the billing project without asking me"). Rules you state are kept as **memories**; you see, edit, retire or really delete them on the **Memory** tab, and the "Remember this for the CEO" box on a desk answer keeps your own answer as a rule. Only you can read them; they go only to your workstation. Tasks you give it appear on the Tasks tab; when one is done you get a notification.
 
-**Reports and alerts.** The daily report arrives on your desk and by e-mail at your report time: what needs you, the decisions it took (with Undo and Correct), issues and risks, budget, tasks, proposals, what it learned from your answers and corrections, the order turns of the last day and **Things you keep asking me**. When no CEO is available the server writes the report from a template and says so. The CEO notifies you immediately only when it cannot decide, when something is urgent, and when a task is done: on the desk (pinned for urgent), by e-mail (one per subject per hour; non-urgent mail waits out your quiet hours) and as an event an automation can forward to Slack or Teams ("The CEO notifies you" trigger). Set an optional **organization monthly budget** on the Reporting tab: at 80% you are told, at 100% the CEO only writes the report and answers in chat until next month.
+![The CEO chat page](guide/assets/ceo-chat.jpg)
 
-**When it is offline.** If its workstation is offline or its Claude sign-in expired, wakes wait, desk items reach you unchanged (nothing is held), you get one notice after 30 minutes if something urgent waits, and the daily report is posted from a template after two hours. **Pause** stops it acting and hands the reporter job back to the BA; **Disable** retires it (a new one can be appointed).
+**Reports and alerts.** The daily report arrives on your desk and by e-mail at your report time: what needs you, the decisions it took (with Undo and Correct), issues and risks, budget, tasks, proposals, what it learned from your answers and corrections, the order turns of the last day and **Things you keep asking me**. When no CEO is available the server writes the report from a template and says so. The CEO notifies you immediately only when it cannot decide, when something is urgent, and when a task is done: on the desk (pinned for urgent), by e-mail (one per subject per hour; non-urgent mail waits out your quiet hours) and as an event an automation can forward to Slack or Teams ("The CEO notifies you" trigger). Set the report time, quiet hours and an optional **organization monthly budget** on the **Reporting & alerts** tab: at 80% you are told, at 100% the CEO only writes the report and answers in chat until next month.
+
+**When it is offline.** If its workstation is offline or its Claude sign-in expired, wakes wait, desk items reach you unchanged (nothing is held), you get one notice after 30 minutes if something urgent waits, and the daily report is posted from a template after two hours. **Pause** stops it acting (it may read, not act); nothing is handed back to the BA, which no longer reports. There is no button to disable or retire the CEO: it is built in, and **Resume** puts it back to work.
 
 **Cost.** Its spend is shown as **Management (CEO)** on the Costs page. Wakes, the daily review and the chat run on Sonnet by default; only a **handover**, when it hands work over to the team, runs on Opus (all four configurable on the Persona tab; an organization that still had the older defaults was moved to these by a one-off migration, a model you chose yourself was left alone).
 
@@ -1135,7 +1175,7 @@ A Claude subscription has a session limit and a weekly limit. When it is reached
 By default every project's tickets run on each workstation's main Claude account. On the project's settings page, under
 **Claude account**, you can name a second Claude subscription for the project (a short key such as `work`). Each workstation
 that works on the project then needs to sign in to that account once. The status line under the setting shows *ready*,
-*sign-in needed* (a link opens that workstation's Integrations page) or *provisioning*.
+*sign-in needed* (a link opens that workstation's Integrations page) or *provisioning*. A workstation that has more than its main account also shows a **Claude accounts** table on the Workstations page: for each account the folder, who it is signed in as (and the plan), the login state and whether usage is available or limited until a time.
 
 - **The fallback checkbox.** "If this account is out (usage limit or login), use the workstation's main account." It is
   **off by default**. Off means the project's tickets **pause** while its account is out. On means they run on the main
@@ -1157,7 +1197,7 @@ Each workstation runs a limited number of agent shifts at the same time; further
 
 New projects start on the **lean team** workflow; a project made earlier keeps its own workflow until you switch it (see below). It changes where the cost goes: every card is designed and reviewed by the strongest model, the builder proves the code builds and passes its unit tests, reviewers only read, and the testers run only the end-to-end tests of the areas a card touches.
 
-**The stages, in order.** Spec (the BA) → **Planning** (a short, cheap code-research pass by the *planner*: which areas and files the card touches, relevant documents, overlaps with other cards; it also groups related cards and records their order) → **Design** (the architect, Opus, for *every* card, also a small one; it adds a short *Card Brief* for the builder) → **Build** (the builder; the handoff carries the build and unit test evidence) → **Pre-review** (a Sonnet pass for the basics: obvious bugs, rule violations, missing tests; findings go straight back to the builder) → **Review** (Opus, on every card, read-only: the reviewer reads the diff and the code and relies on the builder's evidence; it never builds or runs tests) → **Owner approval** (large and high-risk cards, see below) → **Test deploy** (the server starts the test environment, no agent) → **Test** (the tester runs the E2E tests of the card's areas) → Docs → Finalize → QA steps and Manual QA as before. A project without a hired planner lets the architect plan; without a pre-reviewer the reviewer does that pass too, so hire both for the intended cost.
+**The stages, in order.** Spec (the BA) → **Planning** (a short, cheap code-research pass by the *planner*: which areas and files the card touches, relevant documents, overlaps with other cards; it also groups related cards and records their order) → **Investigate & design** (the architect, Opus, for *every* card, also a small one; it adds a short *Card Brief* for the builder) → **Build** (the builder; the handoff carries the build and unit test evidence) → **Pre-review** (a Sonnet pass for the basics: obvious bugs, rule violations, missing tests; findings go straight back to the builder) → **Review** (Opus, on every card, read-only: the reviewer reads the diff and the code and relies on the builder's evidence; it never builds or runs tests) → **Owner approval** (large and high-risk cards, see below) → **Test deploy** (the server starts the test environment, no agent) → **Test** (the tester runs the E2E tests of the card's areas) → Docs → Finalize → QA steps and Manual QA as before. A **Merge review** stage sits beside Review: after a merge conflict at Finalize, the reviewer reads only the resolution (see Merge conflicts below). A project without a hired planner lets the architect plan; without a pre-reviewer the reviewer does that pass too, so hire both for the intended cost.
 
 **Groups.** Cards in one group (the planner or architect sets it) go to the same builder. The first builder that takes a card of the group keeps the rest of the group; each card still has its own worktree and branch, and the builder continues one session from card to card while it stays small enough (the runner starts fresh above 120K tokens or after 4 hours). Order between cards is a hard rule: until a card's dependency has merged only its design may run.
 
@@ -1181,11 +1221,15 @@ New projects start on the **lean team** workflow; a project made earlier keeps i
 
 ### 4.27 Environments and deploying with a recipe
 
-A project deploys in one of two ways, chosen on the project's **Environments** page (it is guided once the first setup is approved; **Stop using guided deploys** under technical details goes back): **Instructions** (today's way: a follow-up becomes a DevOps request written in words, which an agent carries out) or **Recipe**. A recipe turns "how we deploy" into something you approve once and that then runs the same way every time, **without a model running any deploy command**.
+The **Environments** page (sidebar, under the board, for projects that deliver code) is where you say how your app starts and where it runs: **Your app: how to start it**, **Test copies** (one temporary copy per card), the **environments** (the **test site**, the **live site** and any extra site such as a demo), **Places** (the computers and servers), **Rules** and **History**. When an environment is set up and approved, a **Releases** switch at the top (**On** or **Paused**) turns the project's releases on or off: pausing asks "Pause releases?", and while releases are paused the environment cards show **Releases paused** and **Update now** is off. Only the project owner changes the switch, and it needs an approved environment first. Where the releases go once they are ready (the queue, what is live, the rules) is on the **Releases** page (4.28).
 
-**What a recipe is.** A folder `delivery/` in the **project vault** (never the organization vault), holding `recipe.yaml` and one script per environment. The recipe lists its **environments** in order (for example `local`, then `production`). Each one names where it goes (one or several of the project's **deploy targets**), the script and its arguments, **when** it runs (after a merge, after a phase, or only on request), how long it may take, the **health check** that says it worked (a web address, a port, or a line the script prints, such as `P5 DEPLOY READY`), an optional **smoke check**, the **names** of the secrets it needs, and the **gate**. It also says **who releases it** (below). A script must do the same steps every time, check itself and exit with a reason when something is wrong, be safe to run twice, and honour a dry run (`AOM_DEPLOY_DRY_RUN=1`: check inputs and access, print the plan, change nothing).
+![The Environments page](guide/assets/environments.jpg)
 
-**Where the vault is.** Every project has a vault. A **git** vault is recommended: it is backed up with its repository. Without one, the project's vault is a **folder on the Owner's workstation**. Guildwise does not back it up: keep that folder somewhere that is (OneDrive, iCloud or another backed-up folder). The Delivery section says which one you have.
+An approved setup turns "how we deploy" into something you approve once and that then runs the same way every time, **without a model running any deploy command**.
+
+**What the setup is made of.** Behind the page is a folder `delivery/` in the **project vault** (never the organization vault), holding `recipe.yaml` and one script per environment. The recipe lists its **environments** in order (for example `local`, then `production`). Each one names where it goes (one or several of the project's **deploy targets**), the script and its arguments, **when** it runs (after a merge, after a phase, or only on request), how long it may take, the **health check** that says it worked (a web address, a port, or a line the script prints, such as `P5 DEPLOY READY`), an optional **smoke check**, the **names** of the secrets it needs, and the **gate**. It also says **who releases it** (below). A script must do the same steps every time, check itself and exit with a reason when something is wrong, be safe to run twice, and honour a dry run (`AOM_DEPLOY_DRY_RUN=1`: check inputs and access, print the plan, change nothing).
+
+**Where the vault is.** Every project has a vault. A **git** vault is recommended: it is backed up with its repository. Without one, the project's vault is a **folder on the Owner's workstation**. Guildwise does not back it up: keep that folder somewhere that is (OneDrive, iCloud or another backed-up folder). The Vaults page says which one you have (4.3a).
 
 **Setting one up without coding: the Environments page.** Open **Environments** (sidebar, under the board). It has one block per thing: **Your app** (how to start it), **Test copies** (one temporary copy per card), the **environments** (the **test site**, the **live site** and any extra site such as a demo), **Places** (the computers and servers), **Rules** and **History**. **Add an environment** asks four plain questions on one screen: **What is it for?** (test site, live site or something else), **Where does it run?** (a place that is already listed, or **Add a server**), **How is it started?** and **When should it update?** Guildwise then *looks* (read-only: Docker on the computer, the servers it already knows from its ssh settings, and for a server the app folder, the containers, the proxy and the backups; it never reads your keys or settings values) and lists what it found: the Docker app that is already running, or an app that runs directly on the machine (a system service, a pm2 process or a program, with its folder and port). If yours is not there, **My app is somewhere else** takes a folder, and when nothing is found the page says where it looked. A server asks one more question, **How should new versions get onto the server?**: **Build here and copy it** (the default), **Download a ready-made app from a registry**, or **Build it on the server**. For an app that runs directly, each update gets the new version, builds it in a new folder, switches to it and restarts it the way you confirmed (the service, pm2, or a command), and keeps the last versions so you can go back. Then **What we found** shows **Found and will be used**, **Each update will** (the exact steps in words), **Will not be touched** (every other container, volume and proxy, by name), and **Needs your answer** when something is unclear. **Save** writes the steps into the project's files; nothing runs and nothing is approved yet. Each environment card shows **Saved**, **Tried**, **Approved**: press **Try it without changing anything** (a dry run: it checks and prints what it would do), and the Owner presses **Approve**. Approval needs a successful try of exactly that version. A test site defaults to **Automatically after each merge** (it waits 2 minutes so a few merges become one update); the live site is **Only when I press Release**, **only after the test site is healthy on the same version** (for 10 minutes) and **I approve each release**. Guildwise only ever restarts the app part, never stops the database or the rest, backs up the database first (a failed backup stops the update), and puts the previous version back if the site does not become healthy (the database is never rolled back automatically).
 
@@ -1195,21 +1239,29 @@ A project deploys in one of two ways, chosen on the project's **Environments** p
 
 **Changing and removing.** **...** on an environment: **Edit**, **Change server** (point it at another place you already connected, or move the live site with its data), **Go back to an earlier version** (live site) and **Remove**. Removing says what happens and what does not: the app that runs is left exactly as it is, and the setup needs a new approval. **Old setups and drafts** under technical details cleans up an unfinished draft and files in the deploy folder that Guildwise does not make (nothing is deleted unless you tick it).
 
-**Scan with DevOps (deploys).** Not sure what is running? **Let DevOps look at it first** has the workstation's DevOps engineer read the project and the fixed read-only probe, and suggest the whole setup. You review it field by field (guessed parts are marked, open questions must be answered) and **Use this setup** makes it the wizard's draft; you still see Found / Will change before saving.
+**Scan with DevOps (deploys).** Not sure what is running? **Not sure: let DevOps look** has the workstation's DevOps engineer read the project and the fixed read-only probe, and suggest the whole setup. You review it field by field (guessed parts are marked, open questions must be answered) and **Use this** makes it the wizard's draft; you still see Found / Will change before saving.
 
 **A server with no sign-in yet: Connect a different server.** Under the sign-in question press **Connect a different server** (or **Set up a sign-in for it** next to a server that asks for a password). Choose the computer that signs in, give the server's **address** and **user name** (usually `root`; your hosting company's email has both) and **how you sign in**: **with a password**, **with a key file my host gave me**, or **my hosting panel has a place to paste a key**. Guildwise first asks the server for its **fingerprint** (its own ID) and shows it in plain words: check it against the one your hosting company shows, then press **It matches** (or **I can't check, continue**, which is marked); nothing is trusted before you confirm, and if it ever changes later Guildwise stops. A **password** is typed once, sealed in your browser so only that computer can read it, used one time to add a key of Guildwise's own to the server's list of allowed keys (one line in `~/.ssh/authorized_keys`, after a dated copy of that list), and dropped: it is never stored and never in a log. A **key file** is treated the same way. With a **hosting panel** Guildwise shows you a public key with **Copy** and the steps; paste it into the panel and press **I pasted it, test the connection**. The last step is a **connection test**. The private key never leaves the computer that made it; Guildwise never edits your own ssh settings or removes a key it did not add. For a server this computer **already** signs in to you can also press **Also add a dedicated Guildwise key (recommended)**: optional, shown with the exact change first, and the sign-in the computer already has keeps working.
 
 **A server that is not ready: Set up this server.** When the server has no Docker, no app folder or no web address, Guildwise lists what it would **add** and what is **already there and kept as it is**, lets you **try it without changing anything**, and changes something only when you press **Set it up**: it installs Docker with the system's own packages (Debian and Ubuntu, with root or passwordless sudo), makes the app folder and a backups folder, copies the project's compose file into the folder (never over a file that is there), and sets up **HTTPS for the one address you give** with Caddy (an existing Caddy gets one site added after a dated copy and a check; nginx, Traefik or something else on the web ports is never touched and is explained). **On this computer**, **Start a new copy** does the same for a folder of its own and starts the supporting parts (such as the database) of the project's compose file under a project name of its own; what already runs is not touched. In **Details** you can add **database updates before the app restarts** (a command such as `npm run migrate`): it runs with the new version after the backup and before the restart, and if it fails the app is not restarted.
 
-**Moving to a new computer: Reconnect.** Each server on the target cards shows whether the computer that deploys it can sign in (**Can sign in**, **Needs a sign-in**, **Cannot reach the server**, **Server identity changed**, **Never checked**), how, and when it was last looked at. A server you connected here with Guildwise’s own sign-in (password, key file, hosting panel) is looked at by itself once a day and right after a deploy to it failed; a server that uses your own saved ssh sign-in (**Use an existing sign-in**) is never looked at behind your back, only when you press **Check connection** or when a deploy runs. **Check connection** looks now. When it cannot, **Reconnect from this computer** runs the same guided flow for that server with the new computer's own key; afterwards the old computer's Guildwise key is listed with **Remove**, which deletes exactly that one line (shown by its fingerprint) from the server after you confirm. **An improved version of these steps is available** appears on the overview when Guildwise has a newer way of writing the steps; **Update the steps** saves your choices again and the Owner approves the new version. Every part, also one edited by hand, is tried without changing anything before it is approved.
+**Moving to a new computer: Reconnect.** Each server on the target cards shows whether the computer that deploys it can sign in (**Can sign in**, **Needs a sign-in**, **Cannot reach the server**, **Server identity changed**, **Never checked**), how, and when it was last looked at. A server you connected here with Guildwise’s own sign-in (password, key file, hosting panel) is looked at by itself once a day and right after a deploy to it failed; a server that uses your own saved ssh sign-in (**Use an existing sign-in**) is never looked at behind your back, only when you press **Check** or when a deploy runs. **Check** looks now. When it cannot, **Reconnect** (shown as **Use another computer** when the place can already be reached) runs the same guided flow for that server with the new computer's own key; afterwards the old computer's Guildwise key is listed with **Remove**, which deletes exactly that one line (shown by its fingerprint) from the server after you confirm. **An improved version of these steps is available** appears on the overview when Guildwise has a newer way of writing the steps; **Update the steps** saves your choices again and the Owner approves the new version. Every part, also one edited by hand, is tried without changing anything before it is approved.
 
-**Moving to a new server: Move to a new server.** On the card of a live server press **Move to a new server**. You choose a server that is already connected, or connect a new one (the same guided steps as above), and Guildwise looks at it and sets up the folder and Docker if they are missing. Then it copies everything over while the old site keeps running: the compose file and the settings files (their contents are never shown), the app itself, and a new empty database. Nothing changes on the old server in this part. When the new server is ready you read what comes next and press **A short downtime is fine: move now**: the app on the old server is stopped (its database keeps running), a last backup is saved on the old server and kept there, the data is put on the new one, and the new app is started and checked. The site is down only for that time, usually a few minutes. If a step fails, Guildwise says whether the old site is still running; **Try again** continues, and **Give up the move** or **Go back to the old server** starts the old app again. Then comes **Point your domain to the new server**: Guildwise shows the address to put at the company that manages your web name and checks live whether the name points to the new server yet (you can also say you handle the address another way). Only the Owner presses **Make it live**: from then on deploys go to the new server, and the old one becomes a **Standby (fallback)** that nothing deploys to. Nothing is deleted on it. When you are sure, the Owner presses **Retire** on the old server: Guildwise removes only the keys it added there (the data, the app, the settings and the backups stay; Guildwise never deletes anything on a server). The Delivery overview lists the old servers.
+**Moving to a new server: Move to a new server.** On the card of a live server press **Move to a new server**. You choose a server that is already connected, or connect a new one (the same guided steps as above), and Guildwise looks at it and sets up the folder and Docker if they are missing. Then it copies everything over while the old site keeps running: the compose file and the settings files (their contents are never shown), the app itself, and a new empty database. Nothing changes on the old server in this part. When the new server is ready you read what comes next and press **A short downtime is fine: move now**: the app on the old server is stopped (its database keeps running), a last backup is saved on the old server and kept there, the data is put on the new one, and the new app is started and checked. The site is down only for that time, usually a few minutes. If a step fails, Guildwise says whether the old site is still running; **Try again** continues, and **Give up the move** or **Go back to the old server** starts the old app again. Then comes **Point your domain to the new server**: Guildwise shows the address to put at the company that manages your web name and checks live whether the name points to the new server yet (you can also say you handle the address another way). Only the Owner presses **Make it live**: from then on deploys go to the new server, and the old one becomes a **Standby (fallback)** that nothing deploys to. Nothing is deleted on it. When you are sure, the Owner presses **Retire** on the old server: Guildwise removes only the keys it added there (the data, the app, the settings and the backups stay; Guildwise never deletes anything on a server). The Places list shows the old servers.
 
 **Technical details** (the developer view) shows the same setup as the structured fields, the generated `recipe.yaml` and scripts, and what the computers found. **Edit the script by hand** marks that part **custom** (Guildwise leaves its script alone and the guided view shows it as a script); **Back to guided** regenerates it and needs a new approval. A recipe written by DevOps or by hand without a setup is shown as a script too. A computer whose Guildwise is too old shows "needs an update for guided setup"; the developer view still works.
 
 **Setting one up: talk to the CEO.** Say "set up deploys for this project: local first, then production". The CEO asks about the environments and their order, which deploy targets (it asks you to confirm before creating a missing one), the triggers, who releases each environment, the gate ("use your standard rule: the test environment healthy for 30 minutes, regression passed, weekdays 08 to 16?") and the secrets, by name. Then it asks **DevOps** to write the scripts (modelled on the ones you already use), save them into the vault and **try them**: a trial of a local environment really runs; production only gets a dry run. The CEO shows you the result and the recipe's **hash** (a fingerprint of the folder).
 
-**Approving.** On the **Environments** page you see the environments, who releases each, the gate, the lint (a secret in a file, a missing or non-executable script, an unknown target, an automatic production environment with no gate must be fixed first) and, once a version was approved, **what changed since**. Only the **Owner** presses **Approve**, and the button approves the exact hash on screen. Nobody can approve by typing a message to the CEO. When anyone edits the recipe afterwards, Guildwise notices (it re-reads the vault when it syncs, or press **Check for changes**), shows it as "changed: needs a new approval", puts a notice on your desk and **refuses every deploy from the recipe** until you approve the new version. Switch the project to **Recipe** mode once it has an approved recipe (and back to Instructions at any time).
+**Approving.** On the **Environments** page you see the environments, who releases each, the gate, the lint (a secret in a file, a missing or non-executable script, an unknown target, an automatic production environment with no gate must be fixed first) and, once a version was approved, **what changed since**. Only the **Owner** presses **Approve**, and the button approves the exact hash on screen. Nobody can approve by typing a message to the CEO. When anyone edits the recipe afterwards, Guildwise notices (it re-reads the vault when it syncs, or press **Check for changes**), shows it as "changed: needs a new approval", puts a notice on your desk and **refuses every deploy from the recipe** until you approve the new version. Once an environment is approved, the **Releases** switch at the top of the page decides whether the project's releases and updates run from it (**On**) or are **Paused**.
+
+> **In the app:** Help, "Phases and follow-ups", section "Deploying with a recipe" (`/help/phases#delivery-recipes`).
+
+### 4.28 Releases
+
+![The Releases page](guide/assets/releases.jpg)
+
+The **Releases** page (sidebar, Organization group; the old address `/deploys` leads here) shows, across all projects, which version is live on each site, what is waiting for you and what was released. Setting up where an app runs happens on the project's Environments page (4.27). A project whose releases are **Paused** shows a **Releases paused** badge here and on its environment cards.
 
 **Who releases an environment.** The recipe decides, and you approved it:
 - **The Owner or an Admin** (the default): a ready release waits in the **release queue**. Nothing runs until one of you presses **Release**.
@@ -1217,17 +1269,54 @@ A project deploys in one of two ways, chosen on the project's **Environments** p
 - **Automatic**: a trigger (such as "after a merge") releases it once the gate holds. A production environment may not be automatic without a gate.
 The CEO is never the releaser unless the recipe says so, and an Owner or Admin can always release.
 
-**Releases.** **Releases** (Organization) has four tabs. **Waiting for you** lists versions that are ready: the version, the site and the places; a release that is not allowed yet says what it waits for ("Waiting for: the test site healthy for 3 more minutes") and **Release** stays off. **What is live** shows, for every project and site, the version, since when, whether it is healthy and where it runs. **History** shows every recent deploy with its audit: which approved setup version, which rules held, who asked and who released, and a **Rollback** badge when an earlier version was put back. **Rules** holds the organization's rules in plain sentences (for example "Only on weekdays between 08:00 and 16:00") with **Freeze** ("Nothing goes live while this is on") and, under Advanced, the old rule presets. Owners and Admins release; everyone else sees **What is live** and **History** read-only. **Go back to an earlier version** (on the live card of the Environments page) lists the last successful releases, says that your data is not rolled back and where the backup of the newer release is kept, and puts the earlier version back at once when the Owner or an Admin confirms; it is recorded in the history. The old address `/deploys` leads to **Releases**.
+**The tabs.** The page has four tabs. **Waiting for you** (Owners and Admins) lists versions that are ready: the version, the site and the places. Press **Release** (when a version can go to several places, **Release to N of M** releases to the ones you tick) or **Not now** to leave it for later; a release that is not allowed yet says what it waits for ("Waiting for: the test site healthy for 3 more minutes") and **Release** stays off. **What is live** shows, for every project and site, the version, since when, whether it is healthy and where it runs. **History** (it has filters) shows every recent deploy with its audit: which approved setup version, which rules held, who asked and who released, and a **Rollback** badge when an earlier version was put back. **Rules** (Owners and Admins) holds **The standard rule** of the organization in plain sentences (for example "Only on weekdays between 08:00 and 16:00"), **Freeze all releases** (press it to stop everything going live; the button then reads **Lift the freeze**) and, under **Advanced: rule sets**, the named rule presets. Owners and Admins release; everyone else sees **What is live** and **History** read-only. **Go back to an earlier version** (on the live card of the Environments page) lists the last successful releases, says that your data is not rolled back and where the backup of the newer release is kept, and puts the earlier version back at once when the Owner or an Admin confirms; it is recorded in the history.
 
 **Gates.** A gate lists what must be true before an environment is released: an earlier environment healthy on the same commit (for some minutes), regression, end-to-end or CI checks passed, the commit being a done phase, a time window, a freeze you can switch on. A recipe names a preset (such as `standard`) or carries its own gate; a rule you bind to a project always applies on top and a recipe cannot loosen it. An unsatisfied gate refuses the release and lists everything that is missing.
 
-**How a deploy runs.** Asking (the CEO's `aom deploy run`, a trigger, a phase follow-up, **Update now** or **Release** on an environment card, or the button in the CEO chat) only asks Guildwise. Guildwise checks that the Owner approved this exact version and that the gate holds, then sends your workstation a command pinned to the approved hash. The workstation takes the files from the approved vault version, recomputes the hash (a mismatch refuses), reads the secrets it holds by name, prepares a clean checkout of the commit, runs the script outside any model with a time limit, then the health and smoke checks. The log has secrets hidden. A refusal or failure is an answer, never a blind retry, and the CEO is told. A missing secret refuses the run and puts a notice naming it on your desk; set it under **Project settings, Delivery**: the value is encrypted in your browser for the workstation you choose and kept only there (like a test account of a deploy target), never on the server, in the vault or in a prompt.
+**How a deploy runs.** Asking (the CEO's `aom deploy run`, a trigger, a phase follow-up, **Update now** or **Release** on an environment card, or the button in the CEO chat) only asks Guildwise. Guildwise checks that the Owner approved this exact version and that the gate holds, then sends your workstation a command pinned to the approved hash. The workstation takes the files from the approved vault version, recomputes the hash (a mismatch refuses), reads the secrets it holds by name, prepares a clean checkout of the commit, runs the script outside any model with a time limit, then the health and smoke checks. The log has secrets hidden. A refusal or failure is an answer, never a blind retry, and the CEO is told. A missing secret refuses the run and puts a notice naming it on your desk; set it on the Environments page under **Show technical details**: the value is encrypted in your browser for the workstation you choose and kept only there (like a test account of a deploy target), never on the server, in the vault or in a prompt.
 
-**Phases.** For a project in Recipe mode, a phase's **deploy** follow-up names an **environment** ("Release to Live site") instead of creating a DevOps request: it finishes with the deploy run (a release waiting in the queue holds the phase until you release or cancel it). Projects in Instructions mode work exactly as in 4.10.
+**Phases.** For a project whose releases are **On**, a phase's **deploy** follow-up names an **environment** ("Release to Live site") instead of creating a DevOps request: it finishes with the deploy run (a release waiting in the queue holds the phase until you release or cancel it). While the project's releases are **Paused**, follow-ups work as in 4.10 (a DevOps request written in words).
 
-> **Good to know:** a model only ever asks. The CEO's rights to deploy follow the recipe you approved and your CEO settings (Authority tab); in the chat, if its call to Guildwise is ever blocked, release from the card in the chat or the **Releases** page: it is the same server path from your session.
+> **Good to know:** a model only ever asks. The CEO's rights to deploy follow the recipe you approved and your CEO settings (**Authority** tab); in the chat, if its call to Guildwise is ever blocked, release from the card in the chat or the **Releases** page: it is the same server path from your session.
 
 > **In the app:** Help, "Phases and follow-ups", section "Deploying with a recipe" (`/help/phases#delivery-recipes`).
+
+### 4.29 Metrics
+
+**Metrics** (sidebar, Organization group) shows what the team delivered, where it waited on you and where quality slipped. Everybody who can see the organization can open it.
+
+![The Metrics page](guide/assets/metrics.jpg)
+
+At the top, the **Project** filter (shown when you have more than one project; **All projects** is the default) and the range chips **7 days**, **14 days**, **30 days** and **90 days** decide what the panels count. The panels are:
+
+- **Throughput:** cards finalized in the range, the average per day and a bar for each day.
+- **Time blocked on you:** the total time cards waited for an answer or an approval from you, how many cards were held up and the average per card. A high number here is the cheapest thing to fix: check the Desk (4.5).
+- **Bounce rate per builder:** how often a review sent each builder's work back (4.4).
+- **Bugs escaped past test:** failed test runs, with a bar for each day.
+- **Duration:** cards finished, the average and the median time per card, and **Shift time per agent**.
+- **Queue depth per column:** how many open cards sit in each board column.
+
+Costs have their own page (4.6).
+
+> **In the app:** Help, "Agents" (`/help/agents`).
+
+### 4.30 Your settings
+
+**Settings** (sidebar, at the bottom; also **Your settings** in your avatar menu) is the page for you as a person, not for the organization (that is **Organization**, 4.1). Everybody has it, whatever their role.
+
+![Settings](guide/assets/settings.jpg)
+
+It has these panels, top to bottom:
+
+- **Your picture:** **Change picture** picks a cartoon face, a photo or an image of your own. It shows in the sidebar, the account menu and on the answers you give at the desk.
+- **Two-factor login:** **Set up** (3.2), later **New recovery codes** and a switch-off when your Owner does not require it.
+- **Expert mode for code changes:** the box **Show me branches and git controls**. Off (the default) the app talks in plain terms and takes care of branches; on it shows branch names and commit hashes, the per-card completion action and the manual merge controls (4.4). It only changes what you see, and only for you.
+- **Monday briefing:** **Email me the Monday briefing**, one mail every Monday at 08:00 (organization time), on unless you switch it off (4.6).
+- **Notifications:** push notifications for this browser or phone. **Enable notifications on this device** asks your browser for permission; **Your devices** lists every device and lets you remove one; **Send a test notification** checks it works. **What to notify me about** has a switch for each kind of notification, and **Quiet hours** (start and end) holds the rest back at night. On an iPhone or iPad, add Guildwise to the Home Screen first (iOS 16.4 or later). If the server has no push keys yet the panel says so.
+- **Weekly blog digest:** **Email me the weekly blog digest**, one mail on Monday mornings with new blog articles. Owners get it unless they switch it off; for everybody else it is off until they switch it on (7.7).
+- **Your time zone:** the zone your reports and times are shown in. It was taken from your browser the first time you signed in; **Use this browser's zone** resets it. The time your CEO writes the daily report is not set here: it is on the CEO page, **Reporting & alerts** tab (4.22).
+
+> **In the app:** Help, "Two-factor login" (`/help/two-factor`) and "Getting started" (`/help/getting-started`).
 
 ## 5. For Members
 
@@ -1363,12 +1452,12 @@ Every platform action (suspending, plan changes, invitations, ownership transfer
 - **The switch.** *Switch the blog off* is the kill switch: the writer and API tools are refused when they create posts (the API answers 503), nothing is published (by you or automatically), and no digest or social post goes out. Public articles stay readable. Switch it on again to carry on.
 - **The review queue.** Posts arrive *In review* (the badge on **Blog** counts them). Open one to read it exactly as it will look, edit it, then **Approve and publish** or **Reject** with a reason. You review every post until the date under **Auto-publish starts on** (by default two weeks after the first post). After it, a post with no content warning publishes by itself once it has waited the **hold** (3 hours by default). A post with a warning (for example a link that is not in its sources) always waits for you. **Unpublish** takes a post down.
 - **Weekly digest.** On Mondays at 08:00 (Johannesburg) one mail goes to every organization Owner who has not opted out and to everyone else who opted in. Nothing is sent in a week without new posts. You can switch it off, send a test to yourself and see what each week did.
-- **API keys.** Only for outside tools (the built-in writer needs none): create a key with only the scopes it needs. It is shown once; revoke it at any time. The list shows when each key was last used and how much it did in the last 24 hours, and *Recent requests* is the audit.
+- **API keys.** The blog's outside tools use the keys on their own page, **API keys** (7.11); the built-in writer needs none.
 - **Social sharing.** Paste the credentials of each network (stored encrypted and never shown again): the Facebook Page and LinkedIn organization tokens; for X the API key, API secret, access token and access token secret of a developer app with "Read and write" access (X charges for API use, so keep credit on the account); for Bluesky the handle and an app password from Settings, App passwords. Each article gets a caption per network, taken from its summary when missing. Published articles are shared automatically. If a token is refused or about to expire you get an email and a banner, and that network pauses until you paste a new token. Unpublishing does not remove a post that was already shared.
 
 Everyone else reads the blog under **Help**, **Blog**, and can turn the weekly digest on or off under **Settings**.
 
-> **In the app:** the platform area has its own Help, with "Organizations and roles" (`/platform/help`). Platform accounts get their own short tour.
+> **In the app:** the platform area has its own Help (`/platform/help`): the full Help centre with its articles, the glossary and the tour, but without Contact us and My requests (you answer those under Support, 7.5). Platform accounts get their own tour, one step for each entry of the platform menu (Appendix A).
 
 ### 7.8 Simulation organizations, demos and deleting them
 
@@ -1398,6 +1487,22 @@ Guildwise repairs itself with a normal team. You, the platform administrator, on
 **Safe mode.** If a runner release is bad, pin one workstation or all of them to the last good version (Platform team, Safe mode). The runner downloads exactly that version, even an older one, and does not follow newer releases until you unpin. The Workstations page shows "Pinned to 0.1.20".
 
 **For the platform organisation.** Its members open Platform team (`/platform-team`) to read pauses, bugs, pins and the audit trail; its Owner and Admins can pause, resume and pin there. Fix cards that use up their budget (small 2 rework rounds / 2 reviews / 10 shifts, medium 3/2/15, large 4/2/25) go to the architect, then to the desk.
+
+### 7.10 Billing
+
+**Billing** (platform menu) is where the plans are priced. The page names the payment provider and whether it is in test mode, and has these panels: **Payment provider**, **Plans** (price in US dollars with VAT included, and the limits of each plan) and **Add-ons, VAT, exchange rate and invoice details** (the Business add-on prices, the VAT rate, the company details printed on tax invoices and the exchange-rate override). Every change needs a **reason** and is written to the audit log. How customers see their plan and invoices is in 4.17.
+
+### 7.11 API keys
+
+**API keys** (platform menu) holds the keys for the agent API (`/api/v1`), used by outside tools such as a blog tool (the calls are in `docs/BLOG-API.md`). In **New key** give the key a name and only the scopes it needs. A key is stored hashed and **shown once**, in a **Copy the key now** window: copy it before you close it. Revoke a key at any time. The list shows when each key was last used and how much it did in the last 24 hours, and **Recent requests** is the audit.
+
+### 7.12 Runners
+
+**Runners** (platform menu) controls the automatic updates of the runner program on every workstation. Runners check the server once a day and update themselves when it offers a newer version (3.4). The **Automatic runner updates** panel shows whether updating is on; press **Pause automatic updates** when a release turns out to be bad (runners that already updated are not changed) and **Resume automatic updates** later. A banner says "Runners are not updating" while it is paused, and workstations show *Updates paused*. To hold one workstation or all of them on a known-good version instead, use Safe mode in 7.9.
+
+### 7.13 Inbound mail
+
+**Inbound mail** (platform menu) is the health page for the mail that organizations receive at their own Guildwise addresses (4.8, E-mail inbox). All of it arrives through one provider webhook. The **Provider** panel says whether inbound e-mail is configured ("Inbound e-mail is not set up" when it is not; the set-up is in `docs/DEPLOY.md`) and the **Last 24 hours** panel counts what was **Accepted**, **Skipped** (with the reasons), came to an **Unknown address** or was **Refused (bad credentials)**.
 
 ## 8. Everyday workflows
 
@@ -1447,7 +1552,7 @@ Other cards that depend on the reopened card are held again until it is done, un
 
 **You want:** to follow AI news, but not get a hundred links a day.
 
-1. **Create the interest** (**Interests, New interest**). Write the description like a briefing: "Practical agent engineering and coding assistants. No hype, no press releases." Choose the vault where its files live, and the kinds you want (articles, videos, podcasts).
+1. **Create the interest** (**Interests, New interest**). Write the description like a briefing: "Practical agent engineering and coding assistants. No hype, no press releases." Choose the kinds you want (articles, videos, podcasts). There is no vault to choose: an interest's files live in the organization vault.
 2. **Keep the volume low.** Set **max total items** to something small, such as 5 or 10 per run. Choose a **run schedule** that matches how fast the topic moves (daily is plenty for most), and a **delivery schedule** of **one digest at set times** (for example weekdays at 07:00) instead of "as soon as a run finishes". Runs can happen as often as they like, but you only hear from them at the times you chose.
 3. **Set the quiet cap.** At the bottom of the Interests page, **Daily quiet cap** limits how many items reach your desk per day across all interests.
 4. **Teach it.** For the first two weeks, rate what arrives: **useful**, **irrelevant** or **boring**, with a short reason. Add taste rules ("Prefer primary sources over summaries", "Skip beginner tutorials").
@@ -1478,7 +1583,7 @@ If an interest cannot run (for example its workstation is offline), it shows a r
 
 | What you see | What to try |
 | --- | --- |
-| The wizard stays on "waiting for the installer" | The command was not run, or was run on a different computer than you chose. Run it on the computer that will host the agents. Check you pasted all of it. |
+| The wizard stays on "Waiting for you to run the command" | The command was not run, or was run on a different computer than you chose. Run it on the computer that will host the agents. Check you pasted all of it. |
 | The command link says it expired | The link works for 30 minutes. Choose your system again on the page to get a new command. |
 | "Paired" never appears | The computer cannot reach this website. Check its internet connection, proxy and clock. Run the command again, it is safe to repeat. |
 | A health check shows a warning (Claude, sandbox, Docker, yt-dlp, a repository) | Each row says what is wrong and how to fix it. Claude not signed in: run `claude` on the workstation and sign in. Sandbox missing on Linux: install `bubblewrap` and `socat`. Docker and yt-dlp are optional. |
@@ -1491,7 +1596,7 @@ If an interest cannot run (for example its workstation is offline), it shows a r
 
 ### 9.2 The runner is offline
 
-A workstation that shows **Offline** or **Disconnected** cannot take work. Its agents show "offline" and cards that only they could take show an amber warning ("Reviewer Linus is offline").
+A workstation that shows **Offline** cannot take work. Its agents show "offline" and cards that only they could take show an amber warning ("Reviewer Linus is offline").
 
 1. Is the computer on and awake? Laptops that sleep disconnect.
 2. On the workstation open a terminal and run `aom-runner status`. It shows whether the runner is running and connected.
@@ -1601,7 +1706,7 @@ Add the decision to the ledger when you answer (4.5). Agents search the ledger b
 Card numbers are unique only within one organization. If you are in two organizations with a `WEB-1` each, the app asks which one you mean.
 
 **Can I use it on my phone?**
-Yes: the board, the desk, cards, chat and most pages work on a phone. The installer needs a computer.
+Yes: the board, the desk, cards, chat and most pages work on a phone. Open the menu with the button at the top left. On the board, **Filters** and **Project actions** open the controls that sit in the header on a bigger screen, and cards can be moved with **Move to...**. The installer needs a computer.
 
 ![The board on a phone](guide/assets/m-board.jpg)
 
@@ -1610,7 +1715,7 @@ Yes: the board, the desk, cards, chat and most pages work on a phone. The instal
 ![A card on a phone](guide/assets/m-card.jpg)
 
 **Where do I find help?**
-**Help** in the sidebar: articles, the glossary, Contact us and My requests. The **?** hints open the matching article. Press **Ctrl+K** to search the app.
+**Help** in the sidebar: the getting-started training video, searchable articles, the glossary, the **Blog**, **See what's new**, the guided tour again (**Resume the tour** when you stopped part-way), the Get started checklist (bring it back from here), **Contact us** and **My requests**. The **?** hints open the matching article. Press **Ctrl+K** to search the app.
 
 ![The Help centre](guide/assets/help-centre.jpg)
 
@@ -1619,30 +1724,68 @@ Press **?** (when not typing in a field) for the list of shortcuts. **Ctrl+K** o
 
 ## Appendix A. Where to find things
 
+### The section map
+
+Every entry of the sidebar, in sidebar order, with who sees it, where this guide covers it, its step in the guided tour (3.3) and its Help article. Use these names: they are the labels in the app. Nothing here is hidden by a different name in the app; an entry is missing from your sidebar when your role or your organization's plan does not include it.
+
+| # | Section (sidebar) | Who sees it | Guide chapter | Tour step | Help article |
+| --- | --- | --- | --- | --- | --- |
+| 1 | **Board** (with card, New card, Archive and phase pages) | Everybody | 2.2, 3.7, 3.8, 4.6, 4.10, 4.12, 8.1 | `board` | Board and cards |
+| 2 | **Backlog** (project tab) | Everybody reads; Owners and Admins edit | 4.3b | `backlog` | Board and cards |
+| 3 | **Environments** (code projects) | Everybody; Owner approves | 4.21, 4.23, 4.27 | `environments` | Phases and follow-ups |
+| 4 | **Research** (projects with research) | Everybody | 4.13, 8.2 | `research` | Converting a project |
+| 5 | **Desk** | Everybody | 3.8, 4.5, 4.11 | `desk` | The Decision desk |
+| 6 | **Intake** | Owners and Admins | 4.8 | `intake` | Intake and outbox |
+| 7 | **Automations** | Everybody | 4.8 | `schedules` | Automations and integrations |
+| 8 | **Projects** (and project settings) | Everybody; Owners and Admins change | 3.6, 4.3, 4.3a, 4.14, 6.1 | `projects` | Projects |
+| 9 | **Agents** | Everybody | 3.5, 4.4, 4.18 | `agents` | Agents |
+| 10 | **Org chart** | Everybody | 4.7 | `org-chart` | Organization chart and design |
+| 11 | **CEO** | Owners and Admins | 4.11, 4.22 | `ceo` | Your CEO |
+| 12 | **Roles & workflows** (page title Organization) | Everybody | 4.7, 4.26 | `org` | Organization chart and design |
+| 13 | **Workstations** | Everybody | 3.4, 4.19, 4.24a, 4.25, 9.1, 9.2 | `workstations` | Workstations and the installer |
+| 14 | **Releases** | Everybody; Owners and Admins release | 4.28 | `releases` | Phases and follow-ups |
+| 15 | **Integrations** | Everybody | 3.4a | `integrations` | Integrations |
+| 16 | **Metrics** | Everybody | 4.29 | `metrics` | Agents |
+| 17 | **Costs** | Owners and Admins | 4.6, 8.4 | `costs` | Budgets and costs |
+| 18 | **Interests** | When the Interests feature is on | 4.9, 8.3 | `interests` | Interests |
+| 19 | **Ledger** | Everybody | 4.5 | `ledger` | Ledger and vaults |
+| 20 | **Vaults** | Owners and Admins | 4.3, 4.3a | `vaults` | Ledger and vaults |
+| 21 | **Settings** (also **Your settings** in your avatar menu) | Everybody | 3.2, 4.30 | `settings` | Getting started |
+| 22 | **Organization** | Everybody; Owners and Admins manage | 4.1, 4.2, 4.16, 4.17 | `organization` | Organizations and roles |
+| 23 | **Help** | Everybody | 3.3, 10, 11 | `help` | Getting started |
+| P | **Platform area** (platform administrator) | Platform administrators | 7 | the platform tour | Organizations and roles |
+
+The platform area has its own menu: Organizations (7.2), Invitations (7.3), Accounts (7.4), Billing (7.10), Support (7.5), Blog (7.7), API keys (7.11), Runners (7.12), Platform team (7.9), Inbound mail (7.13) and Audit log (7.6).
+
+### Questions you may have
+
 | I want to | Go to |
 | --- | --- |
 | See my work | **Board** (sidebar, Work) |
+| Keep a list of wanted work that agents do not touch yet | **Backlog** (tab next to the board) |
 | Answer questions and approve things | **Desk** |
 | Hand the BA a ticket | **Intake** (Owners and Admins) |
-| Set up recurring jobs, event automations and integrations | **Automations** |
+| Set up recurring jobs and event automations | **Automations** |
+| Connect Claude, git hosts, Jira and MCP servers on a workstation | **Integrations** |
 | Create or change a project, or put the projects in priority order | **Projects** |
 | Follow a topic | **Interests** (Knowledge) |
 | Look up a past decision | **Ledger** (Knowledge) |
 | Register a notes vault | **Vaults** (Owners and Admins) |
 | Hire or change agents | **Agents** (Organization) |
 | See who answers whom | **Org chart** |
+| Talk to your CEO, set what it may decide and when it reports | **CEO** (Owners and Admins) |
 | Design roles and workflows | **Roles & workflows** |
 | Add a computer, a VPS or a Codespace | **Workstations** |
 | See how the team performs | **Metrics** |
 | See and control spend | **Costs** (Owners and Admins) |
-| Time zone, picture, two-factor, expert mode for code changes, weekly blog digest | **Settings** (your avatar menu, Your settings) |
+| Picture, notifications, Monday briefing, time zone, two-factor, expert mode for code changes, weekly blog digest | **Settings** (the sidebar, or your avatar menu, Your settings) |
 | Link projects to each other (for the CEO's routing) | **Organization**, Project links tab (Owners and Admins) |
-| Release a deploy that is ready, see what is live and what was deployed and why it was allowed, edit the rules | **Releases** (Organization; Owners and Admins release, everyone looks) |
-| Say where your app runs, start steps, test and live sites, places | **Environments** (the project, under the board) |
-| Approve a project's delivery recipe, set its secrets, switch Instructions or Recipe | **Projects**, then the project's **Settings**, Delivery |
+| Release a version that is ready, see what is live and what was deployed and why it was allowed, edit the rules, freeze all releases | **Releases** (Organization; Owners and Admins release, everyone looks) |
+| Say where your app runs, start steps, test and live sites, places, and pause a project's releases | **Environments** (the project, under the board) |
+| Set a deploy secret | **Environments**, Show technical details |
 | See a project's code map | **Projects**, then the project's **Settings**, Code map for agents |
 | Members, invitations, plan, billing | **Organization** (bottom of the sidebar) |
-| Help, glossary, contact us | **Help** |
+| Help, glossary, blog, what's new, the tour, contact us | **Help** |
 
 ## Appendix B. More documentation
 
