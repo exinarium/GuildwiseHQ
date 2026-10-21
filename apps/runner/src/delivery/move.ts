@@ -957,9 +957,15 @@ export class DeployMover {
         kill(src);
         kill(dst);
       }, timeoutMs);
-      src.stderr?.on('data', (b: Buffer) => void (srcErr = cap(srcErr, b)));
-      dst.stderr?.on('data', (b: Buffer) => void (dstErr = cap(dstErr, b)));
-      dst.stdout?.on('data', (b: Buffer) => void (dstOut = cap(dstOut, b)));
+      src.stderr?.on('data', (b: Buffer) => {
+        srcErr = cap(srcErr, b);
+      });
+      dst.stderr?.on('data', (b: Buffer) => {
+        dstErr = cap(dstErr, b);
+      });
+      dst.stdout?.on('data', (b: Buffer) => {
+        dstOut = cap(dstOut, b);
+      });
       dst.stdin?.on('error', () => undefined);
       src.stdout?.pipe(dst.stdin as NodeJS.WritableStream);
       src.on('error', () => {
