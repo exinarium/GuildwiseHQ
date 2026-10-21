@@ -247,7 +247,7 @@ test('approval waits for a dry run; the dry run changes nothing', async () => {
 });
 
 type DeployRow = { status: string; summary: string; log_tail: string };
-const release = async (sha: string): Promise<DeployRow> => {
+const release = async (sha: string, timeoutMs = 240_000): Promise<DeployRow> => {
   const res = await api.post(`/api/projects/${projectId}/delivery/deploy`, {
     data: { env: 'test-site', commit: sha },
   });
@@ -263,7 +263,7 @@ const release = async (sha: string): Promise<DeployRow> => {
         )
       )[0],
     (r) => r?.status === 'succeeded' || r?.status === 'failed' || r?.status === 'refused',
-    240_000,
+    timeoutMs,
   )) as DeployRow;
 };
 
@@ -301,7 +301,7 @@ test('an unhealthy release is rolled back to the previous image; the database is
   git(CLONE, 'push', 'origin', 'main');
   const bad = git(CLONE, 'rev-parse', 'HEAD').trim();
   void sha;
-  const r = await release(bad);
+  const r = await release(bad, 380_000); // the health check waits up to 120 s, then the rollback waits again
   expect(r.status).toBe('failed');
   expect(r.log_tail).toContain('rolled back to');
   expect(r.log_tail).toContain('the database was NOT rolled back');
