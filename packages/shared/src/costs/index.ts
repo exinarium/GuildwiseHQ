@@ -37,15 +37,39 @@ export interface ModelPrice {
  * fallback for an unknown model. The SQL in migration 1318 mirrors this table.
  */
 export const DEFAULT_MODEL_PRICES: readonly ModelPrice[] = [
-  { match: 'fable-5-1', label: 'Fable', input: 10, output: 50, cacheRead: 0.25, cacheWrite: 12.5, cacheWrite1h: 20 },
+  {
+    match: 'fable-5-1',
+    label: 'Fable',
+    input: 10,
+    output: 50,
+    cacheRead: 0.25,
+    cacheWrite: 12.5,
+    cacheWrite1h: 20,
+  },
   { match: 'fable', label: 'Fable', input: 10, output: 50, cacheRead: 1, cacheWrite: 12.5, cacheWrite1h: 20 },
   // Opus 5.5 is cheaper than the earlier Opus models ($4 / $20, cache reads $0.20); the plain `opus` alias stays at the
   // earlier price so spend is never under-counted when the alias points at an older Opus.
   { match: 'opus-5-5', label: 'Opus', input: 4, output: 20, cacheRead: 0.2, cacheWrite: 5, cacheWrite1h: 8 },
   { match: 'opus', label: 'Opus', input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25, cacheWrite1h: 10 },
   // Sonnet 5.5 and 5 are $2 / $10; cache reads are $0.10 on 5.5 and $0.20 on 5. Sonnet 4.x is $3 / $15.
-  { match: 'sonnet-5-5', label: 'Sonnet', input: 2, output: 10, cacheRead: 0.1, cacheWrite: 2.5, cacheWrite1h: 4 },
-  { match: 'sonnet-4', label: 'Sonnet', input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75, cacheWrite1h: 6 },
+  {
+    match: 'sonnet-5-5',
+    label: 'Sonnet',
+    input: 2,
+    output: 10,
+    cacheRead: 0.1,
+    cacheWrite: 2.5,
+    cacheWrite1h: 4,
+  },
+  {
+    match: 'sonnet-4',
+    label: 'Sonnet',
+    input: 3,
+    output: 15,
+    cacheRead: 0.3,
+    cacheWrite: 3.75,
+    cacheWrite1h: 6,
+  },
   {
     match: 'sonnet',
     label: 'Sonnet',

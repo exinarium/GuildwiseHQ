@@ -119,7 +119,8 @@ export const BranchPrefixSchema = z
   .string()
   .refine(isSafeBranchPrefix, { message: 'not a valid branch prefix (for example "aom/")' });
 export const PrBranchPrefixSchema = z.string().refine(isSafePrBranchPrefix, {
-  message: 'not a valid branch prefix (letters, digits, . _ - and /, at most 40 characters, for example "pieter")',
+  message:
+    'not a valid branch prefix (letters, digits, . _ - and /, at most 40 characters, for example "pieter")',
 });
 export const VaultFolderSchema = z
   .string()

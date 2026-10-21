@@ -1,0 +1,106 @@
+{
+  "version": 1,
+  "generator": "setup-1.3",
+  "environments": [
+    {
+      "name": "uat",
+      "label": "Test copy",
+      "target": "aom-uat",
+      "mode": "guided",
+      "hosting": "this_computer",
+      "app": {
+        "composeFile": "~/.config/aom-uat/docker-compose.yml",
+        "composeProject": "aom-uat",
+        "service": "app",
+        "imageName": "aom-uat-app",
+        "imageKeep": 5,
+        "appUrl": "http://localhost:4700"
+      },
+      "steps": [
+        {
+          "kind": "db_backup",
+          "service": "postgres",
+          "dir": "~/.config/aom-uat/backups",
+          "keep": 20
+        },
+        {
+          "kind": "compose_up_local"
+        }
+      ],
+      "health": {
+        "kind": "http",
+        "url": "${appUrl}/api/health",
+        "expect": "2xx"
+      },
+      "healthTimeoutSec": 120,
+      "rollback": true,
+      "trigger": [
+        "after_merge"
+      ],
+      "releasedBy": "auto",
+      "gate": "none",
+      "secrets": [],
+      "timeoutSec": 1800
+    },
+    {
+      "name": "production",
+      "label": "Live site",
+      "target": "prod-server",
+      "mode": "guided",
+      "hosting": "ssh",
+      "host": "prod-server",
+      "app": {
+        "composeFile": "/opt/app/docker-compose.yml",
+        "service": "app",
+        "imageName": "guildwise-hq",
+        "imageVar": "GUILDWISE_IMAGE",
+        "imageKeep": 5
+      },
+      "steps": [
+        {
+          "kind": "db_backup",
+          "service": "postgres",
+          "dir": "/opt/app/backups",
+          "keep": 20
+        },
+        {
+          "kind": "env_backup"
+        },
+        {
+          "kind": "build_image_local"
+        },
+        {
+          "kind": "ship_image_ssh"
+        },
+        {
+          "kind": "set_image_var"
+        },
+        {
+          "kind": "compose_up_remote"
+        }
+      ],
+      "health": {
+        "kind": "http",
+        "url": "https://hq.example.com/ready",
+        "expect": "2xx"
+      },
+      "healthTimeoutSec": 120,
+      "rollback": true,
+      "trigger": [
+        "on_request"
+      ],
+      "releasedBy": "owner",
+      "gate": {
+        "requires": [
+          {
+            "envHealthy": "uat",
+            "sameCommit": true,
+            "forMinutes": 10
+          }
+        ]
+      },
+      "secrets": [],
+      "timeoutSec": 3600
+    }
+  ]
+}

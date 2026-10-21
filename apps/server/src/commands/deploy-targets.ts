@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import {
   type CreateDeployTargetRequest,
   type DeployTargetDto,
+  MOVE_OPEN_STATES,
   type PatchDeployTargetRequest,
   type ProjectWorkstation,
   streamId,
@@ -11,7 +12,7 @@ import { loadVisibleProject } from '../authz/scope.ts';
 import type { Ctx } from '../context.ts';
 import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
-import { conflict, notFound, unprocessable } from '../errors.ts';
+import { conflict, forbidden, notFound, unprocessable } from '../errors.ts';
 import { projectScope, userActor } from './common.ts';
 
 export function toTargetDto(t: Row): DeployTargetDto {
@@ -31,6 +32,7 @@ export function toTargetDto(t: Row): DeployTargetDto {
     destructiveOk: t.destructive_ok ?? false,
     testHosts: t.test_hosts ?? [],
     secretNames: t.secret_names ?? [],
+    role: t.role ?? 'active',
   };
 }
 
@@ -116,10 +118,10 @@ function checkShape(input: {
         'a remote host needs the workstation whose DevOps engineer deploys',
       );
     if (!input.host) throw unprocessable('host_required', 'a remote host needs an SSH host alias');
-  } else if (input.workstationId || input.host) {
+  } else if (input.host) {
     throw unprocessable(
       'local_target_shape',
-      'a local Docker target has no workstation or host: it deploys on every workstation of every project member',
+      'a local Docker target has no host: it runs Docker on a workstation (or, with none named, on every workstation of every project member)',
     );
   }
 }
@@ -151,6 +153,9 @@ export async function addDeployTarget(
   return withAppendTx(ctx.pool, async (tx) => {
     const p = await loadVisibleProject(tx, user.id, projectId);
     if (p.status !== 'active') throw conflict('project_archived', 'project is archived');
+    // Marking a target production, testable or destructive-ok is the project owner's call.
+    if ((req.production || req.testEnabled || req.destructiveOk) && p.my_role !== 'owner')
+      throw forbidden('only the project owner can mark a target as production or open it to testing');
     checkShape(req);
     checkTesting({
       testEnabled: req.testEnabled ?? false,
@@ -206,16 +211,46 @@ export async function updateDeployTarget(
     ]);
     if (!t) throw notFound('deploy target not found');
     const p = await loadVisibleProject(tx, user.id, t.project_id);
+    const flips =
+      (patch.production !== undefined && patch.production !== !!t.production) ||
+      (patch.testEnabled !== undefined && patch.testEnabled !== !!t.test_enabled) ||
+      (patch.destructiveOk !== undefined && patch.destructiveOk !== !!t.destructive_ok);
+    if (flips && p.my_role !== 'owner')
+      throw forbidden('only the project owner can mark a target as production or open it to testing');
+    // What a move relies on (the name the approved files use, the server it reaches, the computer that signs in, the address it
+    // is checked at) stays as it is while a move for this target is open (final review).
+    const changesIdentity =
+      (patch.name !== undefined && patch.name !== t.name) ||
+      (patch.host !== undefined && patch.host !== t.host) ||
+      (patch.workstationId !== undefined && patch.workstationId !== t.workstation_id) ||
+      (patch.appUrl !== undefined && patch.appUrl !== t.app_url) ||
+      (patch.kind !== undefined && patch.kind !== t.kind);
+    if (changesIdentity) {
+      const inMove = await one(
+        tx,
+        `SELECT 1 AS x FROM deploy_target_moves WHERE (from_target_id=$1 OR to_target_id=$1) AND state = ANY($2::text[]) LIMIT 1`,
+        [t.id, [...MOVE_OPEN_STATES]],
+      );
+      if (inMove)
+        throw conflict(
+          'target_in_move',
+          'this server is part of a move that is not finished: finish or cancel the move before changing its name, address or computer',
+        );
+    }
+    // Pointing a live server at another address or computer redirects the real deploys: the project owner only.
+    const movesServer =
+      (patch.host !== undefined && patch.host !== t.host) ||
+      (patch.workstationId !== undefined && patch.workstationId !== t.workstation_id) ||
+      (patch.kind !== undefined && patch.kind !== t.kind);
+    if (t.production && movesServer && p.my_role !== 'owner')
+      throw forbidden('only the project owner can change the server or the computer of a production target');
     const merged = {
       kind: patch.kind ?? t.kind,
       workstationId: patch.workstationId !== undefined ? patch.workstationId : t.workstation_id,
       host: patch.host !== undefined ? patch.host : t.host,
     };
-    // Switching kind clears what no longer applies.
-    if (merged.kind === 'local_docker') {
-      merged.workstationId = null;
-      merged.host = null;
-    }
+    // Switching kind clears what no longer applies. A local Docker target may keep a workstation ("on this computer").
+    if (merged.kind === 'local_docker') merged.host = null;
     checkShape(merged);
     checkTesting({
       testEnabled: patch.testEnabled ?? t.test_enabled ?? false,

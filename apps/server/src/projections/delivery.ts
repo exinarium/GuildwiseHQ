@@ -29,11 +29,12 @@ export const deliveryProjectors: Record<string, Projector> = {
     await exec(
       tx,
       `INSERT INTO delivery_recipes (id, org_id, project_id, vault_id, path, status, present, observed_hash, observed_commit,
-         parsed, lint, file_count, files, observed_at, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11::jsonb,$12,$14::jsonb,$13,$13,$13)
+         parsed, lint, file_count, files, observed_at, created_at, updated_at, setup, hand_edited)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11::jsonb,$12,$14::jsonb,$13,$13,$13,$15::jsonb,$16::text[])
        ON CONFLICT (project_id) DO UPDATE SET vault_id=EXCLUDED.vault_id, path=EXCLUDED.path, status=$6, present=EXCLUDED.present,
          observed_hash=EXCLUDED.observed_hash, observed_commit=EXCLUDED.observed_commit, parsed=EXCLUDED.parsed,
-         lint=EXCLUDED.lint, file_count=EXCLUDED.file_count, files=EXCLUDED.files, observed_at=EXCLUDED.observed_at, updated_at=EXCLUDED.updated_at`,
+         lint=EXCLUDED.lint, file_count=EXCLUDED.file_count, files=EXCLUDED.files, observed_at=EXCLUDED.observed_at, updated_at=EXCLUDED.updated_at,
+         setup=EXCLUDED.setup, hand_edited=EXCLUDED.hand_edited`,
       [
         p.recipeId,
         p.orgId,
@@ -49,8 +50,251 @@ export const deliveryProjectors: Record<string, Projector> = {
         p.fileCount,
         e.createdAt,
         j(p.files),
+        p.setup === undefined ? null : j(p.setup),
+        p.handEdited ?? [],
       ],
     );
+  },
+
+  DeliverySetupDraftSaved: async (tx, e) => {
+    const p = ev<'DeliverySetupDraftSaved'>(e).payload;
+    await exec(
+      tx,
+      `INSERT INTO delivery_setup_drafts (project_id, org_id, setup, custom_scripts, proposal_id, updated_by, updated_at)
+       VALUES ($1,$2,$3::jsonb,$4::jsonb,$5,$6,$7)
+       ON CONFLICT (project_id) DO UPDATE SET setup=EXCLUDED.setup, custom_scripts=EXCLUDED.custom_scripts,
+         proposal_id=EXCLUDED.proposal_id, updated_by=EXCLUDED.updated_by, updated_at=EXCLUDED.updated_at`,
+      [
+        p.projectId,
+        e.scope.orgId,
+        j(p.setup),
+        j(p.customScripts ?? {}),
+        p.proposalId ?? null,
+        p.by,
+        e.createdAt,
+      ],
+    );
+  },
+  DeliverySetupPublished: async (tx, e) => {
+    const p = ev<'DeliverySetupPublished'>(e).payload;
+    await exec(tx, `UPDATE delivery_setup_drafts SET last_publish=$2::jsonb WHERE project_id=$1`, [
+      p.projectId,
+      j({
+        setupHash: p.setupHash,
+        commandId: p.commandId,
+        generator: p.generator,
+        at: e.createdAt,
+        by: p.by,
+        status: 'pending',
+      }),
+    ]);
+  },
+  DeliverySetupPublishResult: async (tx, e) => {
+    const p = ev<'DeliverySetupPublishResult'>(e).payload;
+    await exec(
+      tx,
+      `UPDATE delivery_setup_drafts SET last_publish = last_publish || $3::jsonb
+        WHERE project_id=$1 AND last_publish->>'commandId' = $2`,
+      [
+        p.projectId,
+        p.commandId,
+        j({
+          status: p.ok ? 'written' : 'failed',
+          error: p.error,
+          vaultCommit: p.vaultCommit,
+          finishedAt: e.createdAt,
+        }),
+      ],
+    );
+  },
+  DeployTargetProbed: async (tx, e) => {
+    const p = ev<'DeployTargetProbed'>(e).payload;
+    await exec(
+      tx,
+      `INSERT INTO deploy_probes (id, org_id, project_id, target_id, workstation_id, scope, host, report, error, detail, at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11)
+       ON CONFLICT (project_id, COALESCE(target_id, '00000000-0000-0000-0000-000000000000'::uuid), workstation_id, scope, COALESCE(host, ''))
+       DO UPDATE SET id=EXCLUDED.id, report=EXCLUDED.report, error=EXCLUDED.error, detail=EXCLUDED.detail, at=EXCLUDED.at`,
+      [
+        p.probeId,
+        e.scope.orgId,
+        p.projectId,
+        p.targetId,
+        p.workstationId,
+        p.scope,
+        p.host,
+        j(p.report),
+        p.error,
+        p.detail,
+        p.at,
+      ],
+    );
+  },
+  DeployTargetConnectionChecked: async (tx, e) => {
+    const p = ev<'DeployTargetConnectionChecked'>(e).payload;
+    await exec(
+      tx,
+      `INSERT INTO deploy_target_connections (target_id, workstation_id, project_id, state, method, host, detail, at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+       ON CONFLICT (target_id, workstation_id) DO UPDATE SET state=EXCLUDED.state, method=EXCLUDED.method, host=EXCLUDED.host,
+         detail=EXCLUDED.detail, at=EXCLUDED.at`,
+      [p.targetId, p.workstationId, p.projectId, p.state, p.method, p.host, p.detail, p.at],
+    );
+  },
+
+  DeployOpFinished: async (tx, e) => {
+    const p = ev<'DeployOpFinished'>(e).payload;
+    await exec(
+      tx,
+      `INSERT INTO deploy_ops (command_id, org_id, project_id, target_id, workstation_id, kind, ok, result, error, at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10)
+       ON CONFLICT (command_id) DO UPDATE SET ok=EXCLUDED.ok, result=EXCLUDED.result, error=EXCLUDED.error, at=EXCLUDED.at`,
+      [
+        p.opId,
+        e.scope.orgId,
+        p.projectId,
+        p.targetId,
+        p.workstationId,
+        p.kind,
+        p.ok,
+        j(p.result),
+        p.error,
+        p.at,
+      ],
+    );
+  },
+  DeployTargetConnected: async (tx, e) => {
+    const p = ev<'DeployTargetConnected'>(e).payload;
+    await exec(
+      tx,
+      `INSERT INTO deploy_target_keys (target_id, workstation_id, project_id, org_id, fingerprint, public_key, alias, method, address,
+         ssh_user, port, host_key_fingerprint, state, added_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'active',$13)
+       ON CONFLICT (target_id, workstation_id) DO UPDATE SET fingerprint=EXCLUDED.fingerprint, public_key=EXCLUDED.public_key,
+         alias=EXCLUDED.alias, method=EXCLUDED.method, address=EXCLUDED.address, ssh_user=EXCLUDED.ssh_user, port=EXCLUDED.port,
+         host_key_fingerprint=EXCLUDED.host_key_fingerprint, state='active', added_at=EXCLUDED.added_at, revoked_at=NULL,
+         revoked_by_workstation=NULL`,
+      [
+        p.targetId,
+        p.workstationId,
+        p.projectId,
+        e.scope.orgId,
+        p.fingerprint,
+        p.publicKey,
+        p.alias,
+        p.method,
+        p.address,
+        p.user,
+        p.port,
+        p.hostKeyFingerprint,
+        p.at,
+      ],
+    );
+  },
+  DeployKeyRevoked: async (tx, e) => {
+    const p = ev<'DeployKeyRevoked'>(e).payload;
+    await exec(
+      tx,
+      `UPDATE deploy_target_keys SET state='revoked', revoked_at=$4, revoked_by_workstation=$5
+        WHERE target_id=$1 AND workstation_id=$2 AND fingerprint=$3`,
+      [p.targetId, p.workstationId, p.fingerprint, p.at, p.byWorkstationId],
+    );
+  },
+  DeployTargetPrepared: async () => {
+    // audit only: the event is the record
+  },
+
+  // ---- moving to a new server (v3): every statement is a function of the event and the row, so a replay gives the same rows
+  DeployTargetMoveStarted: async (tx, e) => {
+    const p = ev<'DeployTargetMoveStarted'>(e).payload;
+    await exec(
+      tx,
+      `INSERT INTO deploy_target_moves (id, org_id, project_id, env_name, from_target_id, to_target_id, workstation_id, spec, domain,
+         state, current_step, started_by, started_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,'preparing','check',$10,$11)
+       ON CONFLICT (id) DO NOTHING`,
+      [
+        p.moveId,
+        e.scope.orgId,
+        p.projectId,
+        p.envName,
+        p.fromTargetId,
+        p.toTargetId,
+        p.workstationId,
+        j(p.spec),
+        p.domain,
+        p.by,
+        p.at,
+      ],
+    );
+  },
+  DeployTargetMoveStepDone: async (tx, e) => {
+    const p = ev<'DeployTargetMoveStepDone'>(e).payload;
+    const row = await one<{ steps: Array<{ step: string }> }>(
+      tx,
+      'SELECT steps FROM deploy_target_moves WHERE id=$1',
+      [p.moveId],
+    );
+    if (!row) return;
+    const entry = { step: p.step, ok: p.ok, detail: p.detail, checks: p.checks, at: p.at };
+    const steps = [...(row.steps ?? []).filter((s) => s.step !== p.step), entry];
+    const done = p.state === 'completed' || p.state === 'cancelled';
+    await exec(
+      tx,
+      `UPDATE deploy_target_moves SET steps=$2::jsonb, state=$3, error=$4, old_app_stopped=$5, facts = facts || $6::jsonb,
+              current_step=$7, finished_at = CASE WHEN $8::boolean THEN $9::timestamptz ELSE NULL END
+        WHERE id=$1`,
+      [p.moveId, j(steps), p.state, p.error, p.oldAppStopped, j(p.facts), p.step, done, p.at],
+    );
+  },
+  DeployTargetMoveResumed: async (tx, e) => {
+    const p = ev<'DeployTargetMoveResumed'>(e).payload;
+    const prepare = ['check', 'copy_config', 'copy_image', 'start_database'].includes(p.step);
+    await exec(
+      tx,
+      `UPDATE deploy_target_moves SET state=$2, current_step=$3, error=NULL, finished_at=NULL WHERE id=$1`,
+      [p.moveId, prepare ? 'preparing' : 'moving', p.step],
+    );
+  },
+  DeployTargetMoveCompleted: async (tx, e) => {
+    const p = ev<'DeployTargetMoveCompleted'>(e).payload;
+    await exec(
+      tx,
+      `UPDATE deploy_target_moves SET state='completed', current_step=NULL, error=NULL, dns=$2, finished_at=$3 WHERE id=$1`,
+      [p.moveId, p.dns, p.at],
+    );
+    // the old server is renamed first (names are unique), then the new one takes the name the approved deploy files use
+    await exec(tx, `UPDATE deploy_targets SET name=$2, role='standby', updated_at=$3 WHERE id=$1`, [
+      p.fromTargetId,
+      p.fromNewName,
+      p.at,
+    ]);
+    await exec(
+      tx,
+      `UPDATE deploy_targets SET name=$2, role='active', production=$3, app_url=COALESCE($4, app_url), updated_at=$5 WHERE id=$1`,
+      [p.toTargetId, p.toNewName, p.production, p.appUrl, p.at],
+    );
+    // a deploy step of a phase that has not run yet goes to the server that is live now
+    await exec(
+      tx,
+      `UPDATE phase_followups SET target_id=$2 WHERE target_id=$1 AND status IN ('pending','queued','briefed','running')`,
+      [p.fromTargetId, p.toTargetId],
+    );
+  },
+  DeployTargetMoveCancelled: async (tx, e) => {
+    const p = ev<'DeployTargetMoveCancelled'>(e).payload;
+    await exec(
+      tx,
+      `UPDATE deploy_target_moves SET state='cancelled', current_step=NULL, old_app_stopped=false, finished_at=$2 WHERE id=$1`,
+      [p.moveId, p.at],
+    );
+  },
+  DeployTargetRetired: async (tx, e) => {
+    const p = ev<'DeployTargetRetired'>(e).payload;
+    await exec(tx, `UPDATE deploy_targets SET role='retired', retired_at=$2, updated_at=$2 WHERE id=$1`, [
+      p.targetId,
+      p.at,
+    ]);
   },
 
   DeliveryRecipeDrifted: async (tx, e) => {

@@ -48,9 +48,13 @@ export const DevOpsRequestContextSchema = z.object({
   repoId: z.uuid().optional(),
   errorText: z.string().max(4000).optional(),
   /** A `run` request ("Run this branch"): the run environment the DevOps engineer sets up. */
-  requestKind: z.enum(['run', 'recipe']).optional(),
+  requestKind: z.enum(['run', 'recipe', 'run_scan', 'deploy_scan']).optional(),
   /** A `recipe` request the CEO filed from the Owner's own turn: a trial of the unapproved recipe is allowed (section 10). */
   ownerTurn: z.boolean().optional(),
+  /** A `run_scan`/`deploy_scan` request ("Scan with DevOps"): read-only, ends with `aom setup propose`. */
+  scanArea: z.enum(['run', 'deploy']).optional(),
+  /** What the user typed in the scan dialog (for the DevOps brief). */
+  scanNote: z.string().max(2000).optional(),
   /** A `recipe` request: the project key the recipe is for. */
   projectKey: z.string().max(10).optional(),
   envId: z.uuid().optional(),

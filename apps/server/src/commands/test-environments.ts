@@ -3,6 +3,7 @@ import {
   branchName,
   DEFAULT_RUN_PORT_RANGE,
   DESK_SUBKIND,
+  expandEnvId,
   FLAKY_NOTICE_COUNT,
   FLAKY_WINDOW_DAYS,
   getStage,
@@ -352,7 +353,7 @@ export async function startTestRunIn(
             ...(commitAs ? { commitAs } : {}),
           },
         }),
-    ...(replay ? { replay } : {}),
+    ...(replay ? { replay: { ...replay, plan: expandEnvId(replay.plan, envId) } } : {}),
   };
   await enqueueRunnerCommand(tx, ws.id, 'run.start', payload);
   return { envId, requestId, wsId: ws.id };

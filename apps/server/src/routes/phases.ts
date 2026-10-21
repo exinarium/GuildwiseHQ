@@ -36,6 +36,7 @@ import {
 } from '../commands/phases.ts';
 import type { Ctx } from '../context.ts';
 import { one } from '../db/sql.ts';
+import { decorateTargets } from '../delivery/connect.ts';
 import { notFound } from '../errors.ts';
 import { getCardDetail } from '../queries/cards.ts';
 import { getPhase, getPhaseByNumber, listPhases } from '../queries/phases.ts';
@@ -145,7 +146,13 @@ export function phaseRoutes(ctx: Ctx) {
     app.get('/api/projects/:id/deploy-targets', { schema: { params: IdParamsSchema } }, async (req) => {
       const s = await requireUserWithFeature(ctx, req, 'phases');
       await requireProjectMember(ctx.pool, s.user.id, req.params.id);
-      return { targets: (await listDeployTargets(ctx.pool, req.params.id)).map(toTargetDto) };
+      return {
+        targets: await decorateTargets(
+          ctx.pool,
+          req.params.id,
+          (await listDeployTargets(ctx.pool, req.params.id)).map(toTargetDto),
+        ),
+      };
     });
 
     // Any project member sees the workstations of every member (needed to name one in a remote deploy target).
@@ -163,7 +170,7 @@ export function phaseRoutes(ctx: Ctx) {
         const id = await addDeployTarget(ctx, s.user, req.params.id, req.body);
         reply.code(201);
         const t = (await listDeployTargets(ctx.pool, req.params.id)).find((x) => x.id === id);
-        return toTargetDto(t ?? notFound());
+        return (await decorateTargets(ctx.pool, req.params.id, [toTargetDto(t ?? notFound())]))[0];
       },
     );
 
@@ -175,7 +182,7 @@ export function phaseRoutes(ctx: Ctx) {
         await updateDeployTarget(ctx, s.user, req.params.id, req.body);
         const row = await one(ctx.pool, 'SELECT project_id FROM deploy_targets WHERE id=$1', [req.params.id]);
         const t = (await listDeployTargets(ctx.pool, row?.project_id)).find((x) => x.id === req.params.id);
-        return toTargetDto(t ?? notFound());
+        return (await decorateTargets(ctx.pool, row?.project_id, [toTargetDto(t ?? notFound())]))[0];
       },
     );
 

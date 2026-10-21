@@ -2,7 +2,7 @@ import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { delimiter, dirname, join, relative, resolve, sep } from 'node:path';
 import type { AgentPermissions } from '@aom/shared';
-import { sandboxReadEntries, secretReadDenies } from './read-only-dirs.ts';
+import { sandboxReadEntries, scanCloneEntries, scanMasksFor, secretReadDenies } from './read-only-dirs.ts';
 
 /**
  * What an agent session may touch, expressed in Claude Code's own settings (verified against
@@ -22,6 +22,8 @@ import { sandboxReadEntries, secretReadDenies } from './read-only-dirs.ts';
 export type SandboxMode = 'required' | 'best_effort' | 'off';
 
 export interface ClaudePolicyContext {
+  /** A "Scan with DevOps" shift: Edit, Write and NotebookEdit work only inside the shift's scratch folder. */
+  readOnlyScan?: boolean;
   /** Config dirs of the additional Claude accounts (`~/.claude-work`): credential stores no agent may read. */
   accountDirs?: string[];
   /** The runner data dir (`~/.aom-runner`): config (runner token, provider credentials), outbox, all agents. */
@@ -170,6 +172,7 @@ export const RUNNER_PRIVATE = [
   'logs',
   'mock-state',
   'secrets',
+  'keys',
 ];
 
 /**
@@ -440,6 +443,109 @@ export const runsBrowsers = (p: Pick<AgentPermissions, 'browser'>, roleKey?: str
  * given action is within its granted access is guidance in its prompt plus `aom devops-approval`, not enforced here.
  * Everything else about the DevOps agent is decided by this one flag, so the other roles' settings do not change.
  */
+/** `Read(...)` rules for the places a scan must not see (the Bash guard has the same list for shell commands). */
+export function scanSecretReadDenies(home: string): string[] {
+  const dirs = ['.ssh', '.aws', '.azure', '.kube', '.gnupg', '.docker', '.config/gcloud', '.config/gh'];
+  const files = ['.netrc', '.npmrc', '.pypirc', '.git-credentials', '.pgpass'];
+  return [
+    ...dirs.flatMap((d) => [`Read(${ruleAbs(join(home, d))}/**)`, `Read(${ruleAbs(join(home, d))})`]),
+    ...files.map((f) => `Read(${ruleAbs(join(home, f))})`),
+    'Read(**/.env)',
+    'Read(**/.env.*)',
+    'Read(**/*.pem)',
+    'Read(**/id_rsa*)',
+    'Read(**/id_ed25519*)',
+    'Read(**/secret.env)',
+  ];
+}
+
+/** Windows user folders mounted into WSL2 (`/mnt/c/Users`): the Windows side's credentials and browsers' stores. */
+export function windowsUserDirs(mnt = '/mnt'): string[] {
+  try {
+    return readdirSync(mnt)
+      .map((d) => join(mnt, d, 'Users'))
+      .filter((p) => existsSync(p));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * A "Scan with DevOps" shift runs inside the OS sandbox (bubblewrap), unlike the rest of the DevOps engineer's work
+ * (docs/design/deploy-run-ux-design.md section 14, v2 review). The checkouts of the project are read-only and their settings files
+ * (`.env*`, keys) are left out of what the shell can see (`sandboxReadEntries`); the scratch folder is the only place it
+ * writes; the credential folders of the real home, the runner's private folders, the Windows user folders and the Docker
+ * sockets are masked; and the shell has NO network (the model itself talks to the Anthropic API outside the sandbox). The
+ * `aom` command is excluded from the sandbox as in every sandboxed role (it only talks to the runner). The guard hook stays on
+ * as a second layer. Never "best effort": the caller refuses the scan when bubblewrap is missing.
+ */
+export function scanSandboxBlock(
+  ctx: ClaudePolicyContext,
+  paths: { home: string; scratch: string; tmp: string },
+): NonNullable<ClaudeSettings['sandbox']> {
+  const base = sandboxBlock(
+    new Set(['shell']),
+    {
+      ...ctx,
+      mode: 'required',
+      extraAllowedDomains: [],
+      // the clones are opened entry by entry (settings files left out), never whole as an `--add-dir` would be
+      addDirs: [],
+      readDirs: [...new Set([...(ctx.readDirs ?? []), ...ctx.addDirs])],
+    },
+    paths.home,
+    paths.scratch,
+    paths.tmp,
+    { browser: false, readOnlyWorktree: false },
+  ) as NonNullable<ClaudeSettings['sandbox']>;
+  base.failIfUnavailable = true;
+  base.filesystem.allowWrite = [paths.home, paths.scratch, paths.tmp];
+  // An allowlist: the whole real home is unreadable (credentials, `~/.config`, browser profiles, shell history, other
+  // projects, the Windows user folders), and only what the scan needs is opened again, read-only: the scratch folder, the
+  // runner's `aom` shim, the toolchain, and each clone. A secret file inside a clone is masked by path (bubblewrap
+  // binds /dev/null over it), wherever it is, including `build/` and `dist/`.
+  const clones = [...new Set([...(ctx.readDirs ?? []), ...ctx.addDirs])].map((d) => resolve(d));
+  const masks = clones.map((d) => ({ dir: d, masks: scanMasksFor(d) }));
+  // an allowed path beats a mask on the very same path, so a masked top-level entry is not offered
+  const masked = new Set(masks.flatMap((m) => [...(m.masks?.files ?? []), ...(m.masks?.dirs ?? [])]));
+  base.filesystem.denyRead = [
+    ...new Set([
+      ctx.realHome,
+      ctx.runnerRoot,
+      ...(ctx.otherAgentTmps ?? []),
+      ...(ctx.accountDirs ?? []),
+      ...HOME_SECRETS.map((p) => join(ctx.realHome, p)),
+      '/var/run/docker.sock',
+      '/run/docker.sock',
+      '/run/containerd',
+      '/run/podman',
+      '/run/WSL', // WSL2 interop: launches Windows binaries
+      ...windowsUserDirs(),
+      ...(ctx.uid !== undefined || process.getuid ? [`/run/user/${ctx.uid ?? process.getuid?.()}`] : []),
+      ...masks.flatMap((m) => [...(m.masks?.files ?? []), ...(m.masks?.dirs ?? [])]),
+    ]),
+  ];
+  base.filesystem.allowRead = [
+    ...new Set([
+      paths.scratch,
+      ...ctx.aomReadPaths,
+      ...(ctx.toolchainReadPaths ?? []),
+      // a clone too large to check is not opened at all
+      ...masks
+        .filter((m) => m.masks !== null)
+        .flatMap((m) => scanCloneEntries(m.dir))
+        .filter((e) => !masked.has(e)),
+    ]),
+  ];
+  base.network = {
+    allowedDomains: [],
+    strictAllowlist: true,
+    allowUnixSockets: ctx.ipcSocket ? [ctx.ipcSocket] : [],
+    allowLocalBinding: false,
+  };
+  return base;
+}
+
 function buildDevopsSettings(
   p: AgentPermissions,
   ctx: ClaudePolicyContext,
@@ -464,11 +570,31 @@ function buildDevopsSettings(
   ];
   return {
     permissions: {
-      allow: ['Bash', 'Read', 'Glob', 'Grep', 'Edit', 'WebFetch', 'WebSearch', ...DEPLOY_ASK_ALLOW],
-      deny: [...new Set(deny)],
+      allow: [
+        'Bash',
+        'Read',
+        'Glob',
+        'Grep',
+        // a scan writes only its proposal, in the scratch folder
+        ...(ctx.readOnlyScan
+          ? [`Edit(${ruleAbs(paths.scratch)}/**)`, `Write(${ruleAbs(paths.scratch)}/**)`]
+          : ['Edit']),
+        // a read-only scan has no web: nothing to send a secret to
+        ...(ctx.readOnlyScan ? [] : ['WebFetch', 'WebSearch']),
+        ...DEPLOY_ASK_ALLOW,
+      ],
+      deny: [
+        ...new Set([
+          ...deny,
+          ...(ctx.readOnlyScan
+            ? ['NotebookEdit', 'WebFetch', 'WebSearch', ...scanSecretReadDenies(ctx.realHome)]
+            : []),
+        ]),
+      ],
       defaultMode: 'dontAsk',
       additionalDirectories: [paths.scratch],
     },
+    ...(ctx.readOnlyScan ? { sandbox: scanSandboxBlock(ctx, paths) } : {}),
     ...(ctx.guardHookCommand
       ? {
           hooks: {

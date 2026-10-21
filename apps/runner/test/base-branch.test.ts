@@ -15,7 +15,9 @@ function staleHeadRepo() {
   sh(repo.clone, 'git', ['branch', 'master', 'HEAD~0']);
   sh(repo.clone, 'git', ['push', 'origin', 'master']);
   sh(repo.clone, 'git', ['remote', 'set-head', 'origin', 'master']);
-  expect(sh(repo.clone, 'git', ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'])).toBe('origin/master');
+  expect(sh(repo.clone, 'git', ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'])).toBe(
+    'origin/master',
+  );
   return repo;
 }
 
@@ -32,7 +34,9 @@ describe('default branch resolution', () => {
   it('asks the remote and repairs a stale local origin/HEAD', async () => {
     const repo = staleHeadRepo();
     expect(await defaultBranchOf(repo.clone)).toBe('main');
-    expect(sh(repo.clone, 'git', ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'])).toBe('origin/main');
+    expect(sh(repo.clone, 'git', ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'])).toBe(
+      'origin/main',
+    );
   });
 
   it('refuses to guess between main and master when the remote cannot be asked', async () => {

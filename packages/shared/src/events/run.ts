@@ -60,7 +60,8 @@ export const runEvents = [
     z.object({
       planId: Id,
       projectId: Id,
-      workstationId: Id,
+      /** Null: the project-wide plan (saved by the owner or from a confirmed scan); used where a workstation has none of its own. */
+      workstationId: Id.nullable(),
       version: z.number().int().positive(),
       plan: RunPlanSchema,
       fingerprint: z.string(),
@@ -69,15 +70,29 @@ export const runEvents = [
       /** The two halves of the fingerprint: BUILD.md (hashed by the runner) and the settings (hashed by the server). */
       buildHash: z.string().max(100).optional(),
       settingsHash: z.string().max(100).optional(),
+      /** Who wrote the plan; absent = `devops` (every plan before the guided editor). */
+      source: z.enum(['devops', 'owner', 'scan']).optional(),
+      /** The person who saved an owner or scan plan. */
+      savedBy: Id.optional(),
+      /** The scan proposal an owner confirmed. */
+      proposalId: Id.optional(),
     }),
   ),
+  /** A start from a saved plan failed. An owner or scan plan stays active and is flagged (DevOps repairs it per workstation). */
+  defineEvent('RunPlanFailureNoted', z.object({ planId: Id, projectId: Id, reason: z.string().max(4000) })),
+  /** An environment that replayed the plan became healthy: the flagged failure is history. */
+  defineEvent('RunPlanFailureCleared', z.object({ planId: Id, projectId: Id })),
+  /** The owner of a workstation allowed this version of a project-wide plan to run on their computer. */
+  defineEvent('RunPlanConsentGiven', z.object({ planId: Id, projectId: Id, workstationId: Id, by: Id })),
+  /** The owner dropped a workstation's own plan ("Use the project version here"). */
+  defineEvent('RunPlanDiscarded', z.object({ planId: Id, projectId: Id, by: Id })),
   /** The plan no longer matches BUILD.md or the Run & test settings: the next start goes through the DevOps engineer. */
   defineEvent(
     'RunPlanMarkedStale',
     z.object({
       planId: Id,
       projectId: Id,
-      workstationId: Id,
+      workstationId: Id.nullable(),
       reason: z.enum(['settings', 'build_doc']),
     }),
   ),

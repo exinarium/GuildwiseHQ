@@ -393,7 +393,7 @@ describe('environment panel', () => {
   it('run events refresh the environments and the settings', () => {
     expect(
       keysForEvent({ type: 'RunEnvironmentEnded', streamId: `run-${ID(50)}`, projectId: PROJECT }),
-    ).toEqual([['runs']]);
+    ).toEqual([['runs'], ['run-plan']]);
     expect(
       keysForEvent({ type: 'RunPlanSaved', streamId: `project-${PROJECT}`, projectId: PROJECT }),
     ).toContainEqual(['run-settings']);

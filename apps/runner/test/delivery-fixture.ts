@@ -2,6 +2,7 @@ import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { type DeployExecPayload, DeployExecPayloadSchema } from '@aom/shared';
+import type { DeployKeys } from '../src/delivery/deploy-keys.ts';
 import { DeployExecutor } from '../src/delivery/exec.ts';
 import { runnerPaths } from '../src/paths.ts';
 import { VaultManager } from '../src/vaults/manager.ts';
@@ -38,7 +39,7 @@ export interface DeliveryWorld {
 }
 
 export async function deliveryWorld(
-  opts: { storage?: 'git' | 'local'; fetchImpl?: typeof fetch } = {},
+  opts: { storage?: 'git' | 'local'; fetchImpl?: typeof fetch; keys?: DeployKeys } = {},
 ): Promise<DeliveryWorld> {
   const vault = makeVault();
   const root = tmp('aom-delivery-');
@@ -98,6 +99,7 @@ export async function deliveryWorld(
     findRepo: async () => undefined,
     send: (type, payload) => void sent.push({ type, payload }),
     ...(opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {}),
+    ...(opts.keys ? { keys: opts.keys } : {}),
     baseEnv: { PATH: process.env.PATH ?? '', HOME: root },
     home: root,
     timing: { healthPollMs: 10, healthTimeoutSec: 1, killGraceMs: 50, graceMs: 0 },

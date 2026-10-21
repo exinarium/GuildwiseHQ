@@ -35,6 +35,14 @@ export default defineConfig({
     { name: 'architect', testMatch: 'architect.spec.ts', dependencies: ['intake'] },
     { name: 'org-designer', testMatch: 'org-designer.spec.ts', dependencies: ['intake'] },
     { name: 'phases', testMatch: 'phases.spec.ts', dependencies: ['intake'] },
+    // Guided run steps and Scan with DevOps (v1a): its own user, runner and project; needs only the shared stack.
+    { name: 'run-steps', testMatch: 'run-steps.spec.ts', dependencies: ['auth'] },
+    // Guided deploy setup (v1b): adopts a real throwaway Docker Compose stack (own project name and port, removed at the end).
+    { name: 'deploy-setup', testMatch: 'deploy-setup.spec.ts', dependencies: ['auth'] },
+    // Guided connect (v2): a REAL sshd in a throwaway container acting as the VPS (removed at the end); own runner and project.
+    { name: 'deploy-connect', testMatch: 'deploy-connect.spec.ts', dependencies: ['auth'] },
+    // Moving to a new server (v3): TWO real sshd containers (old and new server, each with a fake docker); own runner and project.
+    { name: 'deploy-move', testMatch: 'deploy-move.spec.ts', dependencies: ['auth'] },
     { name: 'reporter', testMatch: 'reporter.spec.ts', dependencies: ['phases'] },
     { name: 'hygiene', testMatch: 'hygiene.spec.ts', dependencies: ['reporter'] },
     { name: 'interests', testMatch: 'interests.spec.ts', dependencies: ['hygiene'] },

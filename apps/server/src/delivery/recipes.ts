@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import {
+  compileSetup,
   DELIVERY_DIR,
   type DeliveryRecipeDto,
+  DeliverySetupSchema,
   type LintItem,
   lintHasErrors,
   lintRecipe,
@@ -10,6 +12,8 @@ import {
   type RecipeFileInfo,
   type RecipeInspectResult,
   RecipeInspectResultSchema,
+  SETUP_GENERATOR,
+  sha256Hex,
   streamId,
 } from '@aom/shared';
 import { orgRoleOf } from '../auth/org-context.ts';
@@ -125,7 +129,7 @@ export async function requestRecipeInspect(
 }
 
 /** The checks only the server can make: targets, presets and repositories of this project. */
-async function serverLint(
+export async function serverLint(
   db: Queryable,
   orgId: string,
   projectId: string,
@@ -163,6 +167,35 @@ async function serverLint(
   });
 }
 
+/**
+ * The guided setup the workstation read from `delivery/setup.json`, and the environments whose script is not what that setup
+ * compiles to (edited by hand). Whatever bytes are in `delivery/` are what is approved either way; this only tells the page
+ * to show such an environment as a script.
+ */
+export function guidedState(
+  rawSetup: unknown,
+  files: Array<{ path: string; sha256: string }>,
+): { setup: unknown; handEdited: string[]; outdated: boolean } {
+  if (rawSetup === undefined || rawSetup === null) return { setup: null, handEdited: [], outdated: false };
+  const parsed = DeliverySetupSchema.safeParse(rawSetup);
+  if (!parsed.success) return { setup: null, handEdited: [], outdated: false };
+  // Scripts made by an older compiler are not what this one would write: that is "an improved version is available", not a
+  // hand edit (a hand edit cannot be told apart from the difference between compilers, so none is reported).
+  if (parsed.data.generator !== SETUP_GENERATOR)
+    return { setup: parsed.data, handEdited: [], outdated: true };
+  const compiled = compileSetup(parsed.data);
+  if (!compiled.ok) return { setup: parsed.data, handEdited: [], outdated: false };
+  const handEdited: string[] = [];
+  for (const e of parsed.data.environments) {
+    if (e.mode !== 'guided') continue;
+    const path = `scripts/${e.name}.sh`;
+    const want = compiled.files.find((f) => f.path === path);
+    const have = files.find((f) => f.path === path);
+    if (!want || !have || sha256Hex(want.content) !== have.sha256) handEdited.push(e.name);
+  }
+  return { setup: parsed.data, handEdited, outdated: false };
+}
+
 /** What the workstation found in `delivery/`: recorded as an observation, with a drift event when it is not what was approved. */
 export async function observeRecipe(
   ctx: Ctx,
@@ -186,6 +219,9 @@ export async function observeRecipe(
   )
     return { recorded: false, status: cur.status };
   const recipe = (inspected.present ? inspected.recipe : null) as Recipe | null;
+  const guided = inspected.present
+    ? guidedState((inspected as { setup?: unknown }).setup, inspected.files)
+    : { setup: null, handEdited: [], outdated: false };
   const lint = await serverLint(
     ctx.pool,
     project.org_id,
@@ -195,6 +231,21 @@ export async function observeRecipe(
     inspected.lint as LintItem[],
     inspected.parseError,
   );
+  if (guided.outdated)
+    lint.push({
+      level: 'warn',
+      code: 'generator_outdated',
+      message:
+        'An improved version of these steps is available. Open the deploy setup and save it again to get it; the new version needs your approval.',
+    });
+  for (const env of guided.handEdited)
+    lint.push({
+      level: 'warn',
+      code: 'hand_edited',
+      env,
+      path: `scripts/${env}.sh`,
+      message: `${env}: the script was edited by hand, so the guided view shows it as a script. "Back to guided" regenerates it and needs a new approval.`,
+    });
   const recipeId = cur?.id ?? randomUUID();
   const scope = projectScope(project.org_id, projectId);
   const drifted = !!cur?.approved_hash && inspected.present && cur.approved_hash !== inspected.hash;
@@ -217,6 +268,7 @@ export async function observeRecipe(
           fileCount: inspected.files.length,
           files: inspected.files.map((f) => ({ path: f.path, mode: f.mode, sha256: f.sha256 })),
           ...(workstationId ? { workstationId } : {}),
+          ...(guided.setup ? { setup: guided.setup, handEdited: guided.handEdited } : {}),
         },
       },
       actor: workstationId ? runnerActor(workstationId) : SYSTEM_ACTOR,
@@ -306,6 +358,14 @@ export async function approveRecipe(
     if (row.status === 'approved' && row.approved_hash === hash) return;
     if (lintHasErrors((row.lint ?? []) as LintItem[]))
       throw unprocessable('recipe_lint_errors', 'the recipe has lint errors: fix them before approving');
+    // A guided setup is tried without changing anything before it is approved (design decision 11): every guided
+    // environment needs one successful dry run of exactly this version.
+    const missing = await guidedEnvsWithoutDryRun(tx, projectId, row);
+    if (missing.length)
+      throw unprocessable(
+        'dry_run_required',
+        `try it without changing anything first (${missing.join(', ')}): a guided setup is approved after a successful dry run of exactly this version`,
+      );
     await ctx.store.append(
       [
         {
@@ -330,6 +390,34 @@ export async function approveRecipe(
     );
   });
   await closeDeskNotice(ctx, `recipe_approval:${projectId}`, user.id);
+}
+
+/** The guided environments of the observed recipe that have no successful dry run of its observed hash. */
+export async function guidedEnvsWithoutDryRun(db: Queryable, projectId: string, row: Row): Promise<string[]> {
+  // EVERY environment of the observed version needs one: guided, edited by hand or custom. A recipe with no setup.json needs
+  // them too once the project has used the guided setup (deleting setup.json must not switch the check off); a project that
+  // never did (a recipe the CEO or DevOps wrote) is approved as before.
+  const parsed = DeliverySetupSchema.safeParse(row.setup ?? null);
+  const usedGuided =
+    parsed.success ||
+    !!(await one(db, 'SELECT 1 AS x FROM delivery_setup_drafts WHERE project_id=$1', [projectId]));
+  if (!usedGuided) return [];
+  const names: string[] = parsed.success
+    ? parsed.data.environments.map((e) => e.name)
+    : (((row.parsed as { environments?: Array<{ name: string }> } | null)?.environments ?? []).map(
+        (e) => e.name,
+      ) as string[]);
+  const out: string[] = [];
+  for (const name of names) {
+    const e = { name };
+    const ok = await one(
+      db,
+      `SELECT 1 AS x FROM deploy_runs WHERE project_id=$1 AND env=$2 AND hash=$3 AND dry_run AND status='succeeded' LIMIT 1`,
+      [projectId, e.name, row.observed_hash],
+    );
+    if (!ok) out.push(e.name);
+  }
+  return out;
 }
 
 export async function rejectRecipe(

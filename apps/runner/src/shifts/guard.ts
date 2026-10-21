@@ -1,4 +1,4 @@
-import { isRunnerOwnedBranch, type AgentPermissions, type GuardViolation } from '@aom/shared';
+import { type AgentPermissions, type GuardViolation, isRunnerOwnedBranch } from '@aom/shared';
 import picomatch from 'picomatch';
 import {
   statusLinesWithoutStubs,

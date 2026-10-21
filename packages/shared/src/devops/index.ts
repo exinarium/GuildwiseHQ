@@ -4,6 +4,7 @@ import { DevOpsAccessSchema, DevOpsRequester } from '../events/devops.ts';
 import { HygieneReportSchema, HygieneSpecSchema } from '../hygiene/index.ts';
 import { RunDeclaredServiceSchema, RunPlanSchema } from '../runs/plan.ts';
 import { RunPurposeSchema } from '../runs/types.ts';
+import { SetupAreaSchema } from '../setup/proposal.ts';
 
 /**
  * DevOps shifts (docs/ARCHITECTURE.md section 16.2). A DevOps shift has no card: it works one request and ends with
@@ -92,6 +93,54 @@ export const DevopsRunSchema = z.object({
 });
 export type DevopsRun = z.infer<typeof DevopsRunSchema>;
 
+/**
+ * A "Scan with DevOps" request (docs/design/deploy-run-ux-design.md section 5): a READ-ONLY look at the project that ends
+ * with `aom setup propose`. `clonePath` is filled by the runner (where the user's checkout of each repository lives).
+ */
+export const DevopsScanSchema = z.object({
+  area: SetupAreaSchema,
+  projectKey: z.string(),
+  projectName: z.string(),
+  repos: z.array(
+    z.object({
+      repoId: z.uuid(),
+      name: z.string(),
+      remoteUrlNormalized: z.string(),
+      projectPath: z.string().optional(),
+      workingBranch: z.string().optional(),
+      clonePath: z.string().optional(),
+    }),
+  ),
+  runInstructions: z.string().default(''),
+  repoInstructions: z.array(z.object({ repoId: z.uuid(), name: z.string(), text: z.string() })).default([]),
+  /** The run plan in force for this project (project-wide), so the scan can build on it. */
+  currentPlan: RunPlanSchema.nullable().default(null),
+  /** Anything the user wrote in the scan dialog. */
+  note: z.string().max(2000).optional(),
+  /** `area: deploy`: the targets, what is set up today and the latest probes. */
+  deploy: z
+    .object({
+      targets: z.array(
+        z.object({
+          name: z.string(),
+          kind: z.enum(['local_docker', 'remote_ssh']),
+          host: z.string().nullable(),
+          appUrl: z.string().nullable(),
+          production: z.boolean(),
+          workstationName: z.string().nullable(),
+        }),
+      ),
+      /** The guided setup in `delivery/setup.json` today (text), or null. */
+      currentSetup: z.string().nullable(),
+      /** The hand-written recipe summary when the recipe is not a guided one. */
+      currentRecipe: z.string().nullable(),
+      /** Latest probe reports, as JSON text each (names and shapes only). */
+      probes: z.array(z.object({ label: z.string(), json: z.string() })),
+    })
+    .optional(),
+});
+export type DevopsScan = z.infer<typeof DevopsScanSchema>;
+
 /** The `devops` part of `shift.start` for `kind: 'devops'`. */
 export const DevopsShiftSchema = z.object({
   requestId: z.uuid(),
@@ -138,6 +187,13 @@ export const DevopsShiftSchema = z.object({
   hygiene: HygieneSpecSchema.optional(),
   /** A `run` request: the environment to bring up (see `aom run`). */
   run: DevopsRunSchema.optional(),
+  /** A scan request (`run_scan`, `deploy_scan`): read-only, ends with `aom setup propose`. */
+  scan: DevopsScanSchema.optional(),
+  /**
+   * The kind of a scan request, set by the server whatever the brief holds. The runner makes the shift read-only from this
+   * (fail closed: a scan whose brief could not be built is still read-only).
+   */
+  scanKind: z.enum(['run_scan', 'deploy_scan']).optional(),
   /** Earlier messages of the request thread, oldest first. */
   history: z
     .array(z.object({ authorName: z.string(), kind: z.string(), body: z.string(), at: z.iso.datetime() }))

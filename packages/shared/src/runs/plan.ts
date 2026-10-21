@@ -46,6 +46,10 @@ export const RunSetupStepSchema = z.object({
   cmd: Cmd,
   timeoutSec: z.number().int().min(1).max(7200).default(1200),
   when: z.string().max(200).default('always'),
+  /** Plain-language name shown in the guided editor ("Install packages"); absent on plans DevOps wrote before. */
+  label: z.string().max(120).optional(),
+  /** The guided template this step was made from (`packages/shared/src/runs/templates.ts`), so it can be edited as one. */
+  template: z.string().max(40).optional(),
 });
 export type RunSetupStep = z.infer<typeof RunSetupStepSchema>;
 
@@ -64,6 +68,10 @@ export const RunServiceSchema = z.object({
   after: z.array(RunNameSchema).max(20).default([]),
   stopCmd: Cmd.optional(),
   docker: z.boolean().default(false),
+  /** Plain-language name shown in the guided editor ("The website"). */
+  label: z.string().max(120).optional(),
+  /** The guided template this service was made from. */
+  template: z.string().max(40).optional(),
 });
 export type RunService = z.infer<typeof RunServiceSchema>;
 

@@ -36,6 +36,7 @@ import {
   DEVOPS_INHERITED_ENV,
   gitDirsOf,
   type SandboxState,
+  sandboxMissing,
   sandboxState,
   toolchainReadPaths,
 } from './claude-policy.ts';
@@ -92,13 +93,16 @@ export const MAX_ARGV_PROMPT_BYTES = 64 * 1024;
 export function sessionEnv(
   input: Pick<ShiftStartInput, 'env' | 'sandbox'> & {
     agent?: Pick<ShiftStartInput['agent'], 'isDevops'>;
+    devopsGuard?: Pick<NonNullable<ShiftStartInput['devopsGuard']>, 'readOnlyScan'>;
     kind?: ShiftStartInput['kind'];
     promptCacheTtl?: ShiftStartInput['promptCacheTtl'];
   },
   cfg: ClaudeConfig,
   parent: NodeJS.ProcessEnv = process.env,
 ): Record<string, string> {
-  const devops = input.agent?.isDevops === true;
+  // A scan is a DevOps shift but works inside the OS sandbox with the agent's private HOME: no ssh agent, Docker
+  // socket or user runtime dir is handed to it (SSH_AUTH_SOCK would let the shell sign in to a server).
+  const devops = input.agent?.isDevops === true && input.devopsGuard?.readOnlyScan !== true;
   const provider: Record<string, string> = {};
   if (cfg.authMode === 'oauth' && cfg.oauthToken) provider.CLAUDE_CODE_OAUTH_TOKEN = cfg.oauthToken;
   else if (cfg.authMode === 'api_key' && cfg.apiKey) provider.ANTHROPIC_API_KEY = cfg.apiKey;
@@ -173,7 +177,11 @@ export function buildClaudeCommand(input: ShiftStartInput, cfg: ClaudeConfig): C
     // to every first call and no agent uses them (verified with claude 2.1.302: the init message lists 0 skills).
     '--disable-slash-commands',
   );
-  for (const d of [...input.addDirs, ...(input.readDirs ?? [])]) args.push('--add-dir', d);
+  // A scan's clones are NOT `--add-dir`s: Claude Code opens every added directory whole to the sandbox, which would
+  // undo the per-file masks (`.git/config`, `.env`) of the scan sandbox. The Read tool reads them anyway (no
+  // working-directory block in the DevOps settings; the secret rules deny the settings files).
+  if (input.devopsGuard?.readOnlyScan !== true)
+    for (const d of [...input.addDirs, ...(input.readDirs ?? [])]) args.push('--add-dir', d);
   if (input.resumeSessionId) args.push('--resume', input.resumeSessionId);
   return {
     bin: cfg.bin,
@@ -183,6 +191,7 @@ export function buildClaudeCommand(input: ShiftStartInput, cfg: ClaudeConfig): C
         env: input.env,
         sandbox: input.sandbox,
         agent: { isDevops: input.agent.isDevops },
+        ...(input.devopsGuard?.readOnlyScan ? { devopsGuard: { readOnlyScan: true } } : {}),
         ...(input.kind ? { kind: input.kind } : {}),
         ...(input.promptCacheTtl ? { promptCacheTtl: input.promptCacheTtl } : {}),
       },
@@ -433,6 +442,15 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     if (sb.state === 'unavailable') throw new Error(`the Claude Code sandbox is unavailable: ${sb.reason}`);
   }
 
+  /** A "Scan with DevOps" needs the OS sandbox enforced; `off` and "unsandboxed by choice" do not count. */
+  private assertScanSandbox(): void {
+    const missing = sandboxMissing(this.host.platform, this.host.pathVar);
+    if (missing)
+      throw new Error(
+        `A scan runs inside the OS sandbox and this computer cannot provide it: ${missing}. Install bubblewrap and socat (apt install bubblewrap socat), or run the runner in WSL2/Linux/macOS; then scan again.`,
+      );
+  }
+
   /** Effective OS-sandbox state of this runtime (see `sandboxState`). */
   sandboxStatus(): SandboxState {
     return sandboxState(this.cfg, this.host.platform, this.host.pathVar);
@@ -450,6 +468,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     /** A chat never writes: the repository metadata of its worktree is read-only there, not a writable dir. */
     chat = false,
     guardHookCommand?: string,
+    readOnlyScan = false,
   ): ClaudePolicyContext {
     const root = this.paths?.root ?? dirname(dirname(input.sandbox.home));
     const script = selfCommand('aom').at(-1);
@@ -476,6 +495,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       ...(process.platform === 'linux' ? { dotnetShmDir: DOTNET_SHM_DIR } : {}),
       otherAgentTmps: this.paths ? otherAgentTmps(this.paths, dirname(input.sandbox.home)) : [],
       ...(guardHookCommand ? { guardHookCommand } : {}),
+      ...(readOnlyScan ? { readOnlyScan: true } : {}),
     };
   }
 
@@ -496,6 +516,8 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       home: this.realHome(),
       protectedBranches: guard.protectedBranches ?? [],
       approvedCommands: guard.approvedCommands ?? [],
+      ...(guard.readOnlyScan ? { readOnlyScan: true } : {}),
+      secretRoots: ['secrets', 'keys', 'config.json'].map((d) => join(this.paths?.root ?? '', d)),
       auditFile: join(this.paths.logs, 'devops-audit.jsonl'),
     };
     const file = join(configDir, 'devops-guard.json');
@@ -586,8 +608,10 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
 
   async start(input: ShiftStartInput): Promise<RuntimeSession> {
     if (realClaudeBlocked()) throw new RealClaudeBlockedError();
-    // The DevOps engineer runs without the OS sandbox, so a missing bwrap/socat does not stop it.
-    if (!input.agent.isDevops) this.assertCanRun();
+    // The DevOps engineer runs without the OS sandbox, so a missing bwrap/socat does not stop it. A scan is the exception:
+    // it runs inside the sandbox or not at all (fail closed, whatever the runner's sandbox mode says).
+    if (input.agent.isDevops && input.devopsGuard?.readOnlyScan === true) this.assertScanSandbox();
+    else if (!input.agent.isDevops) this.assertCanRun();
     const account = this.account(input.account);
     const dir = input.sandbox.configDir;
     await mkdir(dir, { recursive: true });
@@ -595,7 +619,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     if (guard) input = { ...input, env: { ...input.env, AOM_DEVOPS_GUARD: guard.file } };
     const settings = buildShiftSettings(
       input.agent.permissions,
-      this.policy(input, input.cwd, false, guard?.command),
+      this.policy(input, input.cwd, false, guard?.command, input.devopsGuard?.readOnlyScan === true),
       input.sandbox,
       input.agent.roleKey,
       input.agent.isDevops,

@@ -65,6 +65,8 @@ interface Parsed {
 
 const BOOLEAN_FLAGS = new Set([
   'json',
+  'local',
+  'ssh-hosts',
   'non-blocking',
   'invalid',
   'force',
@@ -1207,9 +1209,23 @@ const VERBS: Record<string, Verb> = {
    */
   deploy: async (ctx, p) => {
     const sub = p.positionals[0];
+    if (sub === 'probe') {
+      // DevOps in a scan: fixed read-only probes, answered on this workstation (no ssh or docker command of its own)
+      const r = (await rpc(ctx, 'deploy.probe', {
+        ...(has(p, 'local') ? { local: true } : {}),
+        ...(has(p, 'ssh-hosts') ? { sshHosts: true } : {}),
+        ...(one(p, 'host') ? { host: one(p, 'host') } : {}),
+        ...(one(p, 'target') ? { target: one(p, 'target') } : {}),
+        ...(many(p, 'compose-file').length ? { composeFile: many(p, 'compose-file') } : {}),
+        ...(many(p, 'dir').length ? { dir: many(p, 'dir') } : {}),
+        ...(many(p, 'url').length ? { url: many(p, 'url') } : {}),
+      })) as { ok?: boolean; error?: string };
+      ctx.io.out(`${JSON.stringify(r, null, 2)}\n`);
+      return r.ok === false ? 1 : 0;
+    }
     if (sub !== 'run' && sub !== 'trial' && sub !== 'status')
       throw new UsageError(
-        'usage: aom deploy run <env> [--project KEY] [--commit SHA] [--target NAME] | aom deploy trial --env <env> [--project KEY] | aom deploy status [--project KEY] [--run ID]',
+        'usage: aom deploy run <env> [--project KEY] [--commit SHA] [--target NAME] | aom deploy trial --env <env> [--project KEY] | aom deploy status [--project KEY] [--run ID] | aom deploy probe --local | --ssh-hosts | --target <name> [--compose-file F] [--dir D] [--url U]',
       );
     const env = p.positionals[1] ?? one(p, 'env');
     if (sub !== 'status' && !env) throw new UsageError(`aom deploy ${sub}: name the environment`);
@@ -1252,6 +1268,28 @@ const VERBS: Record<string, Verb> = {
     if (r.hash) ctx.io.out(`recipe hash: ${r.hash} (${r.status ?? 'observed'})\n`);
     for (const l of r.lint ?? []) ctx.io.out(`lint ${l.level}: ${l.message}\n`);
     return (r.lint ?? []).some((l) => l.level === 'error') ? 1 : 0;
+  },
+  /**
+   * `aom setup propose --area run --file <proposal.json>` (DevOps, in a "Scan with DevOps" request): submit what the scan found.
+   * The server checks the proposal against its schema and answers with what is wrong, so it can be fixed and sent again.
+   */
+  setup: async (ctx, p) => {
+    if (p.positionals[0] !== 'propose' || !one(p, 'file'))
+      throw new UsageError('usage: aom setup propose --area run|deploy --file <proposal.json>');
+    let proposal: unknown;
+    try {
+      proposal = JSON.parse(ctx.readFile(one(p, 'file') as string));
+    } catch (err) {
+      throw new UsageError(
+        `the proposal file is not valid JSON: ${err instanceof Error ? err.message : err}`,
+      );
+    }
+    const area = one(p, 'area');
+    if (area !== undefined && proposal && typeof proposal === 'object')
+      (proposal as Record<string, unknown>).area = area;
+    const r = (await rpc(ctx, 'setup.propose', { proposal })) as { message?: string };
+    ctx.io.out(`${r?.message ?? 'Proposal saved.'}\n`);
+    return 0;
   },
   /** `aom runner restart [--reason ".."]`: restarts the runner after this reply (owner turns and DevOps shifts only). */
   runner: async (ctx, p) => {
@@ -2233,6 +2271,8 @@ export const USAGE = `usage: aom <verb> [options]
   toolchain list | add <name> --bin <dir>... [--read <dir>]... [--env KEY=VALUE]... | remove <name>   tools sandboxed agents may use; DevOps engineer: register what you installed so agents get it on PATH
   hygiene run [--note "<text>"]               DevOps engineer: repository hygiene request (commit to the working branch, pull, push, tidy), ends the request
   ceo snapshot | show | search | act <action> ... | recommend | notify | task | memory | review-reply | devops | draft-cards | correction | job | order | dir | done | report   CEO agent only: manage the organisation within the policy (see your instructions)
+  deploy probe --local | --ssh-hosts | --target <name> [--dir D] [--compose-file F] [--url U]   DevOps, in a scan: fixed read-only look at Docker here or a server (names and shapes only)
+  setup propose --area run|deploy --file <proposal.json>   DevOps, in a "Scan with DevOps" request: submit the proposal (read-only scan; the user reviews it)
   runner restart [--reason "<why>"]          CEO owner turns and DevOps shifts: restart the runner after your reply
   run info | status | logs <svc> | step --name <n> -- <cmd> | service --name <n> --port http:5000:ENV_VAR --health <url> -- <cmd> | ready | fail --reason <t>   DevOps engineer of a "run this branch" request: the runner starts and supervises the services (see your instructions)
 `;

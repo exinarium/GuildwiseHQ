@@ -7,6 +7,9 @@ import {
   CLAUDE_ACCOUNTS_CAPABILITY,
   CommandPayloadSchemas,
   DELIVERY_CAPABILITY,
+  DEPLOY_CONNECT_CAPABILITY,
+  DEPLOY_MOVE_CAPABILITY,
+  DEPLOY_SETUP_CAPABILITY,
   defaultHost,
   type EnvEnsurePayload,
   INTEGRATIONS_VERSION,
@@ -23,6 +26,8 @@ import {
   type RunnerUpdateCheckResult,
   type RunnerUpdateState,
   type RuntimeInfo,
+  SEAL_AAD_CAPABILITY,
+  SETUP_SCAN_CAPABILITY,
   type ServerToRunner,
   SHIFT_LIMIT_CAPABILITY,
   type ShiftLimitSetting,
@@ -41,7 +46,12 @@ import { ChatManager } from './chat/chat.ts';
 import { loadConfig, type RunnerConfig, saveConfig } from './config.ts';
 import { type BackoffOptions, RunnerClient, toWsUrl, UNPAIRED_MESSAGE } from './connection/client.ts';
 import { Outbox } from './connection/outbox.ts';
+import { DeployConnector } from './delivery/connect.ts';
+import { DeployKeys } from './delivery/deploy-keys.ts';
 import { DeployExecutor } from './delivery/exec.ts';
+import { DeployMover } from './delivery/move.ts';
+import { DeployPreparer } from './delivery/prepare.ts';
+import { runDeployProbe } from './delivery/probe.ts';
 import { DeliveryService } from './delivery/service.ts';
 import { verifyRights } from './devops/rights.ts';
 import { ExternalAdapters } from './external/index.ts';
@@ -245,6 +255,11 @@ export class Runner {
   readonly deploySecrets: DeploySecrets;
   readonly delivery: DeliveryService;
   readonly deployExec: DeployExecutor;
+  /** Dedicated deploy keys, guided connect and server preparation (design v2): keys live in `<data dir>/keys/deploy`. */
+  readonly deployKeys: DeployKeys;
+  readonly deployConnector: DeployConnector;
+  readonly deployPreparer: DeployPreparer;
+  readonly deployMover: DeployMover;
   /** The integrations of this workstation: status, connect from the web, interactive sign-ins (docs/design/integrations-page.md). */
   readonly integrations: IntegrationService;
   readonly claudeStore: ClaudeCredentialStore;
@@ -480,6 +495,7 @@ export class Runner {
       findLocal: (k) => this.findLocal(k),
       graph: () => this.graph,
       recipeSave: (shiftId, params) => this.delivery.save(shiftId, params),
+      deployProbe: (shiftId, params, targets) => this.delivery.probeFor(params, shiftId, targets),
       writeVault: (cmd) => this.vaults.write(cmd),
       http: this.serverHttp,
       rpc: (shiftId, method, params) =>
@@ -562,12 +578,26 @@ export class Runner {
       version: RUNNER_VERSION,
       log: this.log,
     });
+    this.deployKeys = new DeployKeys({ dir: join(this.paths.root, 'keys', 'deploy') });
+    this.deployConnector = new DeployConnector({
+      keys: this.deployKeys,
+      decrypt: (c, aad) => this.keys.decryptAny(c, aad),
+      keyId: () => this.keys.publicKey.keyId,
+      log: this.log,
+    });
+    this.deployPreparer = new DeployPreparer({
+      keys: this.deployKeys,
+      repoPath: async (remote) => (await this.findRepo(remote))?.localPath ?? null,
+    });
+    this.deployMover = new DeployMover({ keys: this.deployKeys, log: this.log });
     this.delivery = new DeliveryService({
       vaults: this.vaults,
       rpc: (shiftId, method, params) => this.rpc(shiftId, method, params),
+      keys: this.deployKeys,
       log: this.log,
     });
     this.deployExec = new DeployExecutor({
+      keys: this.deployKeys,
       paths: this.paths,
       vaults: this.vaults,
       secrets: this.deploySecrets,
@@ -1039,6 +1069,14 @@ export class Runner {
         RUNNER_PIN_CAPABILITY,
         RUNNER_UPDATE_CHECK_CAPABILITY,
         DELIVERY_CAPABILITY,
+        // Guided deploy setup: `deploy.probe` and `recipe.write` (docs/design/deploy-run-ux-design.md section 6)
+        DEPLOY_SETUP_CAPABILITY,
+        // Guided connect, dedicated deploy keys and server preparation (design v2)
+        ...(platform() === 'win32'
+          ? []
+          : [DEPLOY_CONNECT_CAPABILITY, DEPLOY_MOVE_CAPABILITY, SEAL_AAD_CAPABILITY]),
+        // "Scan with DevOps": `aom setup propose` and a read-only scan brief (docs/design/deploy-run-ux-design.md section 5).
+        SETUP_SCAN_CAPABILITY,
         LOCAL_VAULT_CAPABILITY,
         CLAUDE_ACCOUNTS_CAPABILITY,
         // The local opt-in (`aom-runner ceo full-power on`), read fresh: the server shows "Full power is off" without it.
@@ -1480,6 +1518,39 @@ export class Runner {
       } else if (command === 'recipe.inspect') {
         // What `delivery/` of the project vault holds, with its hash; a failure is an answer (ok:true, result.ok:false).
         done(true, await this.delivery.inspect(CommandPayloadSchemas['recipe.inspect'].parse(payload)));
+      } else if (command === 'recipe.write') {
+        // Writes the generated delivery/ files into the project vault; a refusal is an answer (ok:true, result.ok:false).
+        done(true, await this.delivery.write(CommandPayloadSchemas['recipe.write'].parse(payload)));
+      } else if (command === 'deploy.probe') {
+        // Read-only questions to Docker / a server; a failure is an answer, never an exception.
+        done(
+          true,
+          await runDeployProbe(CommandPayloadSchemas['deploy.probe'].parse(payload), {
+            keys: this.deployKeys,
+          }),
+        );
+      } else if (command === 'deploy.hostkey') {
+        // What fingerprint does the server show? Nothing is trusted or written by this.
+        done(
+          true,
+          await this.deployConnector.hostKeyScan(CommandPayloadSchemas['deploy.hostkey'].parse(payload)),
+        );
+      } else if (command === 'deploy.key') {
+        // This computer's dedicated key for a server: public key and fingerprint out, the private key stays here.
+        done(true, await this.deployConnector.createKey(CommandPayloadSchemas['deploy.key'].parse(payload)));
+      } else if (command === 'deploy.connect') {
+        // A password or key file is sealed to this runner, used once in memory, never stored. A failure is an answer.
+        done(
+          true,
+          await this.deployConnector.connect(CommandPayloadSchemas['deploy.connect'].parse(payload)),
+        );
+      } else if (command === 'deploy.revoke') {
+        done(true, await this.deployConnector.revoke(CommandPayloadSchemas['deploy.revoke'].parse(payload)));
+      } else if (command === 'deploy.prepare') {
+        done(true, await this.deployPreparer.run(CommandPayloadSchemas['deploy.prepare'].parse(payload)));
+      } else if (command === 'deploy.move') {
+        // One step of moving an app to a new server; a refusal or a failure is an answer, never an exception.
+        done(true, await this.deployMover.run(CommandPayloadSchemas['deploy.move'].parse(payload)));
       } else if (command === 'deploy.exec') {
         // Runs an approved deploy outside any model. A refusal or a failed deploy is an ANSWER: the server never retries it.
         done(true, await this.deployExec.run(CommandPayloadSchemas['deploy.exec'].parse(payload)));

@@ -1301,7 +1301,10 @@ export const PAGE_HELP: Record<string, PageHelp> = {
         name: 'Message thread',
         text: 'Back-and-forth conversation with the CEO. You can see the full history.',
       },
-      { name: 'New chat', text: 'Start a fresh conversation (an empty chat is reused). The earlier one stays under Earlier, and you can still open it and write in it.' },
+      {
+        name: 'New chat',
+        text: 'Start a fresh conversation (an empty chat is reused). The earlier one stays under Earlier, and you can still open it and write in it.',
+      },
       { name: 'Earlier', text: 'Open one of your previous chats with the CEO.' },
     ],
     article: 'chat-with-agents',

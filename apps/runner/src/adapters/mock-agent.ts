@@ -564,6 +564,12 @@ interface DevopsBrief extends Brief {
     access: { allowInstall: boolean; allowDocker: boolean; allowedPaths: string[]; sudo: boolean };
     approval?: { action: string };
     hygiene?: { repos: unknown[] };
+    /** A "Scan with DevOps" request: the mock submits a fixed proposal (`[no_proposal]` in the request text skips it). */
+    scan?: {
+      area: string;
+      repos: Array<{ repoId: string; name: string }>;
+      deploy?: { targets: Array<{ name: string; kind: string; host: string | null }> };
+    };
   };
 }
 
@@ -595,6 +601,140 @@ async function devopsMain(brief: DevopsBrief): Promise<number> {
   }
   if (d.summary.includes('[no_report]')) {
     emit({ kind: 'final', text: 'mock devops finished without reporting' });
+    return 0;
+  }
+  // "Scan with DevOps": read-only; the mock proposes one install step and one website part, with a question about readiness.
+  if (d.scan?.area === 'deploy') {
+    // A deploy scan: look at Docker here with the fixed probe, adopt the first compose stack for the first local target.
+    let note = 'no proposal';
+    const target = d.scan.deploy?.targets.find((t) => t.kind === 'local_docker');
+    if (target && !d.summary.includes('[no_proposal]')) {
+      const probed = aom(['deploy', 'probe', '--local']);
+      let stack:
+        | {
+            path: string;
+            project?: string;
+            services: Array<{ name: string; build?: string; database?: string }>;
+          }
+        | undefined;
+      try {
+        const r = JSON.parse(probed.out) as {
+          report?: { composeFiles: Array<any> };
+          result?: { report?: { composeFiles: Array<any> } };
+        };
+        const files = ((r.report ?? r.result?.report)?.composeFiles ?? []).filter(
+          (c) => !c.unreadable && c.services.length > 0,
+        );
+        stack =
+          files.find((c) => c.project && d.summary.includes(c.project)) ?? // the user named it in the scan dialog
+          files.find((c) => c.services.some((x: { build?: string }) => x.build)) ?? // the app is built from code
+          files[0];
+      } catch {
+        stack = undefined;
+      }
+      if (stack) {
+        const app = stack.services.find((x) => x.build) ?? stack.services[0];
+        const db = stack.services.find((x) => x.database === 'postgres');
+        const { localAdoptEnv } = await import('@aom/shared');
+        const env = localAdoptEnv({
+          name: 'uat',
+          label: 'Test copy',
+          target: target.name,
+          composeFile: stack.path,
+          ...(stack.project ? { composeProject: stack.project } : {}),
+          service: app?.name ?? 'app',
+          imageName: `${stack.project ?? 'app'}-${app?.name ?? 'app'}`,
+          ...(db
+            ? {
+                database: {
+                  service: db.name,
+                  dir: `${stack.path.slice(0, stack.path.lastIndexOf('/'))}/backups`,
+                },
+              }
+            : {}),
+        });
+        const file = tmpJson('proposal.json', {
+          area: 'deploy',
+          deploy: { environments: [env] },
+          items: [
+            {
+              path: '/environments/0',
+              confidence: 'found',
+              evidence: [{ probe: 'aom deploy probe --local' }],
+            },
+          ],
+          questions: [],
+          secretsNeeded: [],
+          notes: 'Mock DevOps adopted the compose stack that is already running.',
+          filesRead: ['docker-compose.yml'],
+        });
+        const sub = aom(['setup', 'propose', '--area', 'deploy', '--file', file]);
+        note = sub.code === 0 ? 'proposal submitted' : `proposal refused: ${(sub.err || sub.out).trim()}`;
+      } else note = 'no compose stack found';
+    }
+    const r = aom(['devops-done', '--summary', `mock deploy scan: ${note}`]);
+    emit({
+      kind: 'final',
+      text: `mock devops deploy scan (${note}): ${r.code === 0 ? r.out.trim() : (r.err || r.out).trim()}`,
+    });
+    return 0;
+  }
+  if (d.scan) {
+    const repo = d.scan.repos[0];
+    let note = 'no proposal';
+    if (repo && !d.summary.includes('[no_proposal]')) {
+      const file = tmpJson('proposal.json', {
+        area: 'run',
+        run: {
+          setup: [
+            {
+              name: 'Install packages',
+              label: 'Install packages',
+              template: 'install_packages',
+              repoId: repo.repoId,
+              cwd: '.',
+              cmd: ['npm', 'ci'],
+              when: 'changed:package-lock.json',
+            },
+          ],
+          services: [
+            {
+              name: 'web',
+              label: 'The website',
+              template: 'web_app',
+              repoId: repo.repoId,
+              cwd: '.',
+              cmd: ['node', 'index.js'],
+              ports: [{ name: 'http', default: 3000, envVar: 'PORT', url: 'http://localhost:${port}/' }],
+              health: { kind: 'none', graceSec: 3 },
+              after: [],
+            },
+          ],
+          notes: 'mock scan',
+        },
+        items: [
+          { path: '/setup/0', confidence: 'found', evidence: [{ file: 'package.json', line: 1 }] },
+          { path: '/services/0/ports/0/default', confidence: 'guessed', note: 'the usual port' },
+          { path: '/services/0/health', confidence: 'unknown' },
+        ],
+        questions: [
+          {
+            path: '/services/0/health',
+            question: 'Which page shows that the website is ready?',
+            default: '/',
+          },
+        ],
+        notes: 'Mock DevOps read index.js.',
+        filesRead: ['index.js', 'README.md'],
+      });
+      const p = aom(['setup', 'propose', '--area', 'run', '--file', file]);
+      note = p.code === 0 ? 'proposal submitted' : `proposal refused: ${(p.err || p.out).trim()}`;
+    }
+    const r = aom(['devops-done', '--summary', `mock scan: ${note}`]);
+    emit({
+      kind: 'final',
+      text: `mock devops scan (${note}): ${r.code === 0 ? r.out.trim() : (r.err || r.out).trim()}`,
+    });
     return 0;
   }
   // Repository hygiene: the deterministic `aom hygiene run` does the git work (and ends the request).

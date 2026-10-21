@@ -1810,7 +1810,11 @@ and the DevOps engineer split the work:
   fields from the server). The runner keeps the plan on the environment (it is what Restart starts again). `aom run fail`
   ends the environment as `failed`.
 - **Plan replay (phase 2, `runs:2`).** When a plan for the project on this workstation is `active` and both halves of its
-  fingerprint match, the server sends `run.start` with the plan (`replay`) and files **no DevOps request**: the runner prepares
+  fingerprint match (or, with no plan of its own, an active **project-wide** plan that the owner saved or confirmed from a
+  scan: `workstationId` null, `source` `owner|scan`, sent with `replay.buildHash: null`, which means "do not compare with
+  `BUILD.md`"; an owner plan never goes stale by itself, a failed start only flags it and files the DevOps repair, whose fix
+  is a plan of this workstation; "Test these steps" replays an unsaved plan the same way, a failure ends the environment
+  instead of filing a request), the server sends `run.start` with the plan (`replay`) and files **no DevOps request**: the runner prepares
   the worktrees, compares the plan's `BUILD.md` hash with the one it computes from the run worktrees, then replays the plan
   with no model call. Setup steps run in order and honour `when`: `always` (default), `first` (only in a fresh worktree) and
   `changed:<glob>` (in a fresh worktree, and after Update & restart when a changed file matches; the glob is matched against
@@ -1824,6 +1828,28 @@ and the DevOps engineer split the work:
   from that request adopts the environment. A `BUILD.md` that differs from the plan's hash is the same path with `stale: true`:
   the server marks the plan `stale` (`RunPlanMarkedStale`); a change to the run instructions or the declared services marks it
   stale as soon as it is saved. Plans saved before phase 2 have no hashes and are not replayed.
+- **Scan with DevOps (`setup-scan:1`).** The server files a DevOps request of kind `run_scan` (design:
+  `docs/design/deploy-run-ux-design.md` section 5); the shift's `devops.scan` carries the project's repositories, the run
+  instructions and the current plan, and the supervisor fills each repository's `clonePath` (the user's checkout, passed as
+  `--add-dir` so the DevOps settings deny editing it). The guard (`devops/guard.ts`, `readOnlyScan`) refuses every command that
+  starts, builds, installs, connects (ssh, curl) or writes (redirects outside the scratch directory, `rm`, `git` verbs that
+  change anything, `docker` verbs other than the read-only ones); it is defence in depth on top of the brief. The shift ends
+  with **`aom setup propose --area run --file <json>`** (IPC `setup.propose`, forwarded to the server): the file is a
+  `SetupProposal` (`packages/shared/src/setup/proposal.ts`: the proposed `run` plan, `items` with `found|guessed|unknown`,
+  evidence and JSON pointers, `questions`, `secretsNeeded`, `notes`); the server validates it (schema, pointers, run plan,
+  repository ids) and answers with the error so the engineer can fix and resubmit in the same shift. The proposal is data:
+  nothing it names runs or is saved until the user confirms it in the app.
+  **The scan's shell is an allowlist** (final review; `scanSandboxBlock`): the whole real home, `/run/WSL`, `/run/user/<uid>`,
+  `/mnt/*/Users` and the Docker sockets are unreadable (so `~/.config` including `aom-uat`, browser profiles, shell history and
+  every other project are gone without being listed), and only the scratch folder, the `aom` shim, the toolchain and each clone
+  are opened again, read-only. Secret files (`.env*`, `*.env`, `*.pem`, `*.key`, `id_*`, `.npmrc`, `.pypirc`, `.netrc`, ...) are
+  masked by path wherever the walk finds them, `build/` and `dist/` included (a clone over 400,000 entries is not opened at all;
+  a dependency folder over 60,000 entries is hidden). `.git` is opened without its `config` (remote URLs may carry tokens, so
+  `git remote -v` prints nothing during a scan). Links in a clone's top level are not opened (bubblewrap would bind their target).
+  A scan passes no `--add-dir` (Claude Code would open the whole clone to the sandbox and undo the masks), and gets no
+  `SSH_AUTH_SOCK`, `DOCKER_HOST` or `XDG_RUNTIME_DIR` and the agent's private `HOME`. Claude Code itself runs outside this
+  sandbox (only its Bash commands run in it), so it needs no part of the home; `scan-sandbox-real.test.ts` runs the real
+  `claude` binary and bubblewrap against a fake API to prove a normal file reads, bash runs and the secrets do not.
 - **Service sandbox (D10, phase 2).** Steps and services run under the runner's own bubblewrap profile
   (`apps/runner/src/runs/sandbox.ts`), not the DevOps session's: `--ro-bind / /` (read-only), `--unshare-pid`, `--cap-drop ALL`,
   the **host network** (no `--unshare-net`: a dev server must listen where a browser can reach it), and the same unreadable
@@ -2224,6 +2250,46 @@ with a recipe"). The runner announces the `delivery:1` capability and does three
 - **`recipe.inspect`**: reads `delivery/` of the project vault at a commit (`git ls-tree` and `git cat-file`, never the working tree;
   a local vault folder is read as it is), computes the content hash, parses `recipe.yaml`, lints it (a secret in a file, a missing or
   non-executable script) and reports the result. It reports kinds ("a private key"), never the secret.
+- **Guided deploy setup (`deploy-setup:1`).** Two more durable commands and one `aom` verb (design: `docs/design/deploy-run-ux-design.md`
+  sections 4 and 6). **`recipe.write`** replaces `<folder>/delivery/` with the files the server compiled from `setup.json`
+  (`packages/shared/src/delivery/setup-compile.ts`) in one commit (a local vault is rewritten in place), carrying over the
+  hand-written scripts named in `keep`; it refuses a path outside `delivery/`, a file the secret scan flags, and files that
+  do not hash to `expectedHash` (what the preview showed), then reports what `delivery/` holds now like `recipe.inspect` (which
+  also returns the parsed `setup.json`, so the server can find scripts edited by hand). **`deploy.probe`** (`delivery/probe.ts`)
+  answers fixed read-only questions, never a free command: scope `local` (`docker version`, `docker compose version|ls`,
+  `docker ps` with compose labels, `docker volume ls`, each compose file reduced to structure, backups next to it, a GET of the
+  hinted addresses), `ssh_hosts` (the non-wildcard `Host` aliases of `~/.ssh/config`, text only, each tested with
+  `ssh -o BatchMode=yes -o StrictHostKeyChecking=yes`) and `ssh_target` (one `ssh` running the bundled read-only script
+  `probe-remote.ts`, with only key names of `.env` files and the value of keys that name an image). Results are names and shapes:
+  never a secret value, a private key or a compose `environment:` value; a changed host key is a hard stop (`ssh_host_key_changed`)
+  with no override; the whole probe has a 60 s budget and a 64 KB report. **`aom deploy probe --local | --ssh-hosts | --host
+  <alias> [--dir D] [--compose-file F] [--url U]`** (DevOps, in a scan) runs the same probe through IPC. The scripts `compileSetup`
+  generates run unchanged through `deploy.exec`; `generated-scripts.test.ts` runs them against fake docker/ssh/curl.
+- **Guided connect, dedicated keys and server preparation (`deploy-connect:1`, v2).** Five more durable commands (design: section
+  7.4 and 8). Keys live in `<data dir>/keys/deploy/<target id>/` (`id_ed25519` 0600 in a 0700 folder, its `.pub`, an `ssh_config` that
+  is passed to ssh with `-F`, a `known_hosts` of its own with the one host key the person confirmed, `meta.json`); a key made before
+  its target exists sits under `pending/<ref>` for up to a week. Nothing here edits `~/.ssh`. **`deploy.hostkey`** runs `ssh-keyscan`
+  and returns type and SHA256 fingerprint (it trusts nothing). **`deploy.key`** makes (or finds, never replaces) the ed25519 key with
+  the comment `guildwise-deploy:<id>:<computer>` and returns the public half. **`deploy.connect`** (an envelope command: the sealed
+  value is a password or key file, hybrid RSA-OAEP + AES-GCM, `h1.` format, expires after 10 minutes, emptied once answered) pins
+  exactly the confirmed fingerprint, appends the public key to the server's `authorized_keys` once with `grep -qxF` and a dated copy
+  (`authorized_keys.guildwise-bak-<time>`), by `SSH_ASKPASS` with `SSH_ASKPASS_REQUIRE=force` (OpenSSH 8.4+, else the copy-paste
+  option) for a password (in the environment of that one ssh process only), a 0600 temp file for a key file, the person's own alias
+  (`-F <their config>` only when given) for "also add a dedicated key", or not at all for a pasted key; then tests the new key in
+  BatchMode. The password, passphrase and key text are registered with the redaction registry for the call and never logged.
+  **`deploy.revoke`** removes the line of ONE key whose comment starts `guildwise-deploy:` (by its public key, dated copy first);
+  never its own key, never a line it did not add. **`deploy.prepare`** is a closed list (`install_docker`, `create_dir`,
+  `write_compose` from the project's checkout, `caddy_site`, `start_services`), every action idempotent, `dryRun` changes nothing, each
+  reports `done|skipped|would|failed`; the server scripts are fixed POSIX shell passed to ssh as a base64 argument with quoted
+  positional arguments. `deploy.exec` exports `AOM_DEPLOY_SSH="ssh -F <config>"` for a target this computer holds a key for (the
+  generated scripts use it), `deploy.probe` scope `ssh_check` is the cheap reachability look (the server asks for it by itself daily and after a failed deploy only for targets connected through the guided flow, i.e. with a managed `ssh_config`: `IdentitiesOnly yes`, `IdentityAgent none`; a target on the person's own alias is checked only by the Check connection button or by a deploy), and a DevOps scan's `aom deploy
+  probe` result is also reported to the server (`deploy.probe.record`). Tests: `deploy-connect.sshd.test.ts` runs all of it against a
+  real sshd container (skipped without Docker), `deploy-prepare.test.ts` against fake docker/systemctl/caddy.
+- **Read-only scans are an allowlist (v1a review).** In a `run_scan` or `deploy_scan` shift the guard allows only listed read
+  commands with an exact list of flags per command (an unknown flag or abbreviation is refused; `$`, backticks and `<(` are refused;
+  credentials, `.env` files and the runner's `secrets`/`keys` cannot be read; no web tools), refuses shells, interpreters, wrappers and every redirect to a file, and limits
+  Edit/Write to the shift's scratch folder; the shift carries `devops.scanKind` so a scan whose brief cannot be built fails instead
+  of running unrestricted.
 - **`deploy.exec`**: runs an approved deploy. It re-exports `delivery/` at the approved commit into `<data dir>/deploys/<run id>/recipe`
   and **recomputes the hash; a mismatch refuses** (`hash_mismatch`). It resolves the secrets the recipe names from
   `<data dir>/secrets/deploy.json` (mode 0600; sealed by the browser to this runner's key, the same way as the test accounts of a
@@ -2237,6 +2303,26 @@ with a recipe"). The runner announces the `delivery:1` capability and does three
 - **`aom recipe save`** (the DevOps engineer, in a recipe request): copies a scratch folder into `<folder>/delivery/` of the vault
   (a git vault: one commit, pushed; a local vault: rewritten in place) and reports the new hash. A folder that holds a secret, a
   symlink or no `recipe.yaml` is refused.
+
+- **Moving to a new server (`deploy-move:1`, v3).** One durable command `deploy.move` with a step per command (design J6): `check`, `copy_config`,
+  `copy_image`, `start_database`, `stop_and_backup`, `restore`, `start_app`, `restart_old`, `retire_keys`. The server builds the payload from the
+  approved guided setup (compose file, app and database services, backup folder, health path) and chains the steps; the computer is stateless
+  between steps. It signs in to BOTH servers with the sign-ins it has (a target's managed `ssh_config`, else the person's own config named with
+  an explicit `-F` and `UserKnownHostsFile`: OpenSSH reads `~/.ssh/config` through the account database, not `$HOME`, so every ssh call
+  names its config) and moves data as streams through itself, never to disk: the compose file and `.env`/`env_file` files (written 0600 on the
+  new server, never over a different file: `config_differs`), the image (`docker save | gzip` to `gunzip | docker load`, skipped when present),
+  and the database (the last backup is made on the old server with the app stopped, dated in the backup folder and kept; it is streamed into
+  an EMPTY database in one `--single-transaction` psql, `new_database_not_empty` otherwise, and the table counts of both databases must match).
+  A step that stops the old app puts it back by itself when its own work fails (`oldAppRunning` in the answer); a failed `start_app` leaves the
+  old app stopped (the data is on the new server) and the person chooses Try again or `restart_old`. `retire_keys` removes every line whose
+  comment starts `guildwise-deploy:` after a dated copy (atomic: copy, filter, rename) and nothing else. Nothing is ever `down`, removed,
+  pruned or deleted on either server. Answers carry plain-words checks and counts, never a value. Tests: `deploy-move.test.ts` (fake ssh and
+  docker, hermetic: a fake `ssh` first on PATH) and `deploy-move.sshd.test.ts` (two real sshd containers with a fake docker and a real httpd).
+- **Scan shifts run in the OS sandbox.** A "Scan with DevOps" shift is the one DevOps session that is sandboxed: the clones are read-only with
+  their settings files (`.env*`, keys) left out of what the shell sees, the scratch folder is the only writable place, credential folders,
+  the runner's data, Windows user folders and the Docker sockets are masked, and the shell has no network. It is refused (fail closed) when
+  bubblewrap is not available, whatever the runner's sandbox mode says. The command guard stays as a second layer. A scan probes only its
+  project's own servers (`aom deploy probe --target <name>`).
 
 The script runs as you, on your machine, outside the Claude sandbox: that is the point of a recipe (Docker, ssh, a remote host).
 What protects you is that it only runs the exact version you approved, only when its gate holds and only when the recipe's releaser

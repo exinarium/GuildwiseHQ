@@ -55,6 +55,7 @@ import {
   applyRunStatus,
 } from '../commands/runs.ts';
 import { applyIntegrationResult } from '../commands/schedule-triggers.ts';
+import { setupProposeRpc } from '../commands/setup-proposals.ts';
 import {
   applyShiftEnded,
   applyShiftRejected,
@@ -94,9 +95,13 @@ import type { Ctx } from '../context.ts';
 import { exec, one, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import { applyDeploySecretResult } from '../delivery/admin.ts';
+import { applyConnectResult } from '../delivery/connect.ts';
+import { applyMoveResult } from '../delivery/move.ts';
+import { applyProbeResult } from '../delivery/probes.ts';
 import { applyInspectResult, onProjectVaultSynced } from '../delivery/recipes.ts';
 import { deployRpc } from '../delivery/rpc.ts';
 import { applyDeployProgress, applyDeployResult } from '../delivery/runs.ts';
+import { applyWriteResult } from '../delivery/setup.ts';
 import { pinForWelcome } from '../platform-team/pins.ts';
 import { platformTriageRpc } from '../platform-team/rpc.ts';
 import { buildBrief } from './brief.ts';
@@ -243,6 +248,10 @@ export class RunnerHandlers {
       case 'run.replay.failed':
         await this.withInbox(conn, msg.id, (tx) =>
           applyRunReplayFailed(this.ctx, tx, conn.workstationId, msg),
+        );
+        // a failed replay queues a run.stop for what it had started
+        void Promise.resolve(this.ctx.services.gateway.deliverPending(conn.workstationId)).catch(
+          () => undefined,
         );
         return this.ack(conn, msg);
       case 'jira.report':
@@ -506,6 +515,51 @@ export class RunnerHandlers {
           // Terminal: what the workstation found in `delivery/` is recorded as an observation.
           await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
           await applyInspectResult(this.ctx, conn.workstationId, cmd.payload, msg.ok, msg.result);
+        } else if (cmd?.type === 'recipe.write') {
+          // Terminal: the files were written (and are observed so the Owner can approve them) or refused with a reason.
+          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+          await applyWriteResult(
+            this.ctx,
+            conn.workstationId,
+            cmd.payload,
+            msg.ok,
+            msg.result,
+            msg.commandId,
+            msg.error,
+          );
+        } else if (cmd?.type === 'deploy.probe') {
+          // Terminal: a probe is read-only and cheap, the wizard asks again with "Check again".
+          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+          await applyProbeResult(this.ctx, conn.workstationId, cmd.payload, msg.ok, msg.result, msg.error);
+        } else if (
+          cmd?.type === 'deploy.hostkey' ||
+          cmd?.type === 'deploy.key' ||
+          cmd?.type === 'deploy.connect' ||
+          cmd?.type === 'deploy.revoke' ||
+          cmd?.type === 'deploy.prepare'
+        ) {
+          // Terminal: an answer (a refusal, a wrong password) is shown to the person, never retried blindly. The sealed
+          // sign-in of deploy.connect is forgotten here whatever the answer was.
+          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+          await applyConnectResult(
+            this.ctx,
+            conn.workstationId,
+            { id: msg.commandId, type: cmd.type, payload: cmd.payload },
+            msg.ok,
+            msg.result,
+            msg.error,
+          );
+        } else if (cmd?.type === 'deploy.move') {
+          // Terminal: an answer (a refusal, a failed backup) is shown to the person; a step is never retried blindly.
+          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+          await applyMoveResult(
+            this.ctx,
+            conn.workstationId,
+            { id: msg.commandId, payload: cmd.payload },
+            msg.ok,
+            msg.result,
+            msg.error,
+          );
         } else if (cmd?.type === 'deploy.exec') {
           // Terminal whatever the answer: a refusal or a failed deploy is an ANSWER, never a blind retry of a deploy.
           await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
@@ -1149,9 +1203,12 @@ export class RunnerHandlers {
         msg.method === 'deploy.run' ||
         msg.method === 'deploy.trial' ||
         msg.method === 'deploy.status' ||
-        msg.method === 'recipe.save'
+        msg.method === 'recipe.save' ||
+        msg.method === 'deploy.probe.record'
       )
         return reply(...(await deployRpc(ctx, shift, msg.method, msg.params)));
+      // "Scan with DevOps": the DevOps engineer submits its proposal.
+      if (msg.method === 'setup.propose') return reply(...(await setupProposeRpc(ctx, shift, msg.params)));
       // The CEO's management verbs (a CEO shift or the owner's chat with the CEO); the gateway checks the agent.
       if (msg.method === 'ceo') return reply(...(await ceoRpc(ctx, shift, msg.params)));
       if (shift.kind === 'ceo')

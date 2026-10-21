@@ -68,9 +68,7 @@ describe('merge latest main first: into the working branch', () => {
     expect(out.kind).toBe('merged_into_working');
     // pushed: origin/work has main's file and a merge commit
     expect(originFile(t.repo, 'work', 'main-only.txt')).toBe('from main');
-    expect(sh(t.repo.origin, 'git', ['log', '-1', '--format=%s', 'work'])).toBe(
-      'Merge main into work',
-    );
+    expect(sh(t.repo.origin, 'git', ['log', '-1', '--format=%s', 'work'])).toBe('Merge main into work');
     expect(out.kind === 'merged_into_working' && out.commit).toBe(
       sh(t.repo.origin, 'git', ['rev-parse', 'work']),
     );

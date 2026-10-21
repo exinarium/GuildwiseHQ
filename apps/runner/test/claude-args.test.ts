@@ -608,5 +608,14 @@ describe('the DevOps engineer runs unsandboxed (owner decision)', () => {
     expect(o.HOME).toBe('/data/agents/a1/home');
     expect(o.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB).toBe('1');
     expect(o.SSH_AUTH_SOCK).toBeUndefined();
+    // a scan is a DevOps shift but gets none of the user's agent sockets and keeps the private home (final review)
+    const scan = sessionEnv(
+      { env, sandbox: input().sandbox, agent: { isDevops: true }, devopsGuard: { readOnlyScan: true } },
+      cfg,
+      parent,
+    );
+    expect(scan.HOME).toBe('/data/agents/a1/home');
+    for (const k of ['SSH_AUTH_SOCK', 'DOCKER_HOST', 'XDG_RUNTIME_DIR']) expect(scan[k], k).toBeUndefined();
+    expect(scan.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB).toBe('1');
   });
 });

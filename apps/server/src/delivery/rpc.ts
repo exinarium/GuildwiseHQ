@@ -8,6 +8,7 @@ import { runAction } from '../ceo/engine.ts';
 import { ceoCallContext } from '../ceo/gateway.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Row, rows } from '../db/sql.ts';
+import { applyProbeResult } from './probes.ts';
 import { loadRecipeRow, NO_PROJECT_VAULT, observeRecipe, projectVault } from './recipes.ts';
 import { requestDeployRun } from './runs.ts';
 
@@ -127,6 +128,46 @@ export async function deployRpc(
       requester: { kind: 'devops', id: agent.id, name: agent.name, provenance: 'session' },
     });
     return [true, r];
+  }
+
+  // What a scan's probe saw becomes a stored fact, like the wizard's own probe (so the review shows it too).
+  if (method === 'deploy.probe.record') {
+    const req = await one(
+      ctx.pool,
+      `SELECT id, context FROM devops_requests WHERE shift_id=$1 AND status IN ('running','needs_approval')`,
+      [shift.id],
+    );
+    const c = (req?.context ?? {}) as { requestKind?: string; projectKey?: string; projectId?: string };
+    if (
+      !isDevops ||
+      (c.requestKind !== 'run_scan' && c.requestKind !== 'deploy_scan') ||
+      !shift.workstation_id
+    )
+      return [true, { recorded: false }];
+    const project = await projectOf(ctx, orgId, c.projectKey);
+    if (typeof project === 'string') return [true, { recorded: false }];
+    const scope = String(params.scope ?? '');
+    if (scope !== 'local' && scope !== 'ssh_hosts' && scope !== 'ssh_target')
+      return [true, { recorded: false }];
+    const host = typeof params.host === 'string' ? params.host : null;
+    const target =
+      scope === 'ssh_target' && host
+        ? await one(
+            ctx.pool,
+            `SELECT id FROM deploy_targets WHERE project_id=$1 AND host=$2 AND removed_at IS NULL LIMIT 1`,
+            [project.id, host],
+          )
+        : undefined;
+    const r = params.result as { ok?: boolean; error?: string } | undefined;
+    await applyProbeResult(
+      ctx,
+      shift.workstation_id as string,
+      { projectId: project.id, scope, ...(host ? { host } : {}), ...(target ? { targetId: target.id } : {}) },
+      true,
+      r,
+      r && r.ok === false ? r.error : undefined,
+    );
+    return [true, { recorded: true }];
   }
 
   // Trials and saving a recipe: DevOps, inside a recipe request the CEO filed from the Owner's own turn.

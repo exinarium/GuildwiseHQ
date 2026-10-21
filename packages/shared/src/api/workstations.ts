@@ -170,7 +170,12 @@ export type WorkstationDto = z.infer<typeof WorkstationDtoSchema>;
 export const WorkstationsResponseSchema = z.object({ workstations: z.array(WorkstationDtoSchema) });
 
 /** `GET /api/workstations/:id/sudo-key`: the public key to encrypt the sudo password with (RSA-OAEP, SHA-256). */
-export const SudoKeyResponseSchema = z.object({ keyId: z.string(), publicKey: z.string() });
+export const SudoKeyResponseSchema = z.object({
+  keyId: z.string(),
+  publicKey: z.string(),
+  /** The runner opens sealed sign-ins bound to the server address (`h2`). Absent from an older server or runner. */
+  sealAad: z.boolean().optional(),
+});
 export type SudoKeyResponse = z.infer<typeof SudoKeyResponseSchema>;
 /** `PUT /api/workstations/:id/sudo-password`: the password encrypted in the browser; the server cannot read it. */
 export const SetSudoPasswordRequestSchema = z.object({

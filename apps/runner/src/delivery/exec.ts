@@ -25,6 +25,7 @@ import {
   readBundleAtCommit,
   readBundleFromDir,
 } from './bundle.ts';
+import type { DeployKeys } from './deploy-keys.ts';
 
 /**
  * Runs an approved deploy (docs/design/ceo-front-door.md 9.5). Everything here is deterministic code: no model, no prompt.
@@ -58,6 +59,8 @@ export interface DeployExecDeps {
   baseEnv?: NodeJS.ProcessEnv;
   /** The user's home directory for `~/` in an env file path (tests point it at a temp folder). */
   home?: string;
+  /** This computer's dedicated deploy keys: a target that has one is reached with it (`AOM_DEPLOY_SSH`). */
+  keys?: DeployKeys;
   fetchImpl?: typeof fetch;
   /** Tests shorten these. */
   timing?: {
@@ -96,6 +99,9 @@ export function parseEnvFile(text: string): Record<string, string> {
 
 const expandHome = (p: string, home: string = homedir()): string =>
   p === '~' || p.startsWith('~/') ? join(home, p.slice(1)) : p;
+
+/** How long a script that ran out of time gets after SIGTERM: a script with an http health check may be rolling back. */
+export const killGraceSec = (healthKind: string): number => (healthKind === 'http' ? 180 : 10);
 
 export class DeployExecutor {
   private readonly log: Logger;
@@ -325,6 +331,8 @@ export class DeployExecutor {
         cwd: checkout?.path ?? recipeDir,
         env: this.scriptEnv(p, env, vars, sec.values, commit),
         timeoutSec: env.timeoutSec,
+        // a script with an http health check may be rolling back when the time is up: give it time to finish the rollback
+        killGraceSec: killGraceSec(env.health.kind),
         logFile,
       });
       const summaryBase = out.timedOut
@@ -413,8 +421,12 @@ export class DeployExecutor {
       AOM_DEPLOY_COMMIT: commit,
       AOM_DEPLOY_CHECKOUT: vars.checkout ?? '',
       AOM_DEPLOY_ENV: p.env,
+      AOM_DEPLOY_PROJECT_ID: p.projectId,
       AOM_DEPLOY_TARGET: p.target.name,
       AOM_DEPLOY_HOST: p.target.host ?? '',
+      ...(this.deps.keys?.deploySsh(p.target.id, p.target.host)
+        ? { AOM_DEPLOY_SSH: this.deps.keys.deploySsh(p.target.id, p.target.host) as string }
+        : {}),
       AOM_DEPLOY_APP_URL: p.target.appUrl ?? '',
       AOM_DEPLOY_DRY_RUN: p.dryRun ? '1' : '0',
       ...(env.envFile ? { AOM_DEPLOY_ENV_FILE: expandHome(env.envFile, this.deps.home) } : {}),
@@ -428,6 +440,7 @@ export class DeployExecutor {
     cwd: string;
     env: NodeJS.ProcessEnv;
     timeoutSec: number;
+    killGraceSec?: number;
     logFile: string;
   }): Promise<{
     exitCode: number | null;
@@ -492,7 +505,7 @@ export class DeployExecutor {
           if (child.pid) signalGroup(child.pid, 'SIGTERM');
           setTimeout(
             () => child.pid && signalGroup(child.pid, 'SIGKILL'),
-            this.deps.timing?.killGraceMs ?? 10_000,
+            this.deps.timing?.killGraceMs ?? (o.killGraceSec ?? 10) * 1000,
           ).unref?.();
         },
         this.deps.timing?.timeoutMs ?? o.timeoutSec * 1000,

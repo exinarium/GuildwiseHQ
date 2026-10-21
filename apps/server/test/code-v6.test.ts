@@ -603,10 +603,18 @@ describe('a reservation only holds a card for an agent that may take it', () => 
     const rows = await q(`SELECT * FROM agents WHERE name IN ('Bea','Ben') AND status='active'`);
     const bea = rows.find((a) => a.name === 'Bea')!;
     const ben = rows.find((a) => a.name === 'Ben')!;
-    await q(`UPDATE agents SET permissions = permissions || '{"riskTiers":["small"]}'::jsonb WHERE id=$1`, [bea.id]);
-    await q(`UPDATE agents SET permissions = permissions || '{"riskTiers":["large"]}'::jsonb WHERE id=$1`, [ben.id]);
-    const caps = (await q(`SELECT capabilities FROM workstation_capabilities WHERE workstation_id=$1`, [ben.workstation_id]))[0]
-      ?.capabilities ?? [];
+    await q(`UPDATE agents SET permissions = permissions || '{"riskTiers":["small"]}'::jsonb WHERE id=$1`, [
+      bea.id,
+    ]);
+    await q(`UPDATE agents SET permissions = permissions || '{"riskTiers":["large"]}'::jsonb WHERE id=$1`, [
+      ben.id,
+    ]);
+    const caps =
+      (
+        await q(`SELECT capabilities FROM workstation_capabilities WHERE workstation_id=$1`, [
+          ben.workstation_id,
+        ])
+      )[0]?.capabilities ?? [];
     const fresh = async (id: string) => (await q(`SELECT * FROM agents WHERE id=$1`, [id]))[0]!;
     const offered = async (id: string) =>
       (await candidateCards(w.t.app.ctx.pool, agentView(await fresh(id), caps), new Date())).map((c) => c.id);
@@ -638,7 +646,10 @@ describe('a reservation only holds a card for an agent that may take it', () => 
     expect(await offered(bea.id)).toContain(card.id);
     // a valid reservation still holds: affinity to the small builder keeps the card from everyone else
     await q(`UPDATE cards SET affinity_agent_id=$2 WHERE id=$1`, [card.id, bea.id]);
-    await q(`UPDATE agents SET permissions = permissions || '{"riskTiers":["small","large"]}'::jsonb WHERE id=$1`, [ben.id]);
+    await q(
+      `UPDATE agents SET permissions = permissions || '{"riskTiers":["small","large"]}'::jsonb WHERE id=$1`,
+      [ben.id],
+    );
     expect(await offered(ben.id)).not.toContain(card.id);
     expect(await offered(bea.id)).toContain(card.id);
     // excluded from the card: the reservation lapses

@@ -81,7 +81,8 @@ export async function deployWorkstations(
   target: Row,
   now: Date,
 ): Promise<Workstation[]> {
-  if (target.kind === 'remote_ssh') {
+  if (target.kind === 'remote_ssh' || target.workstation_id) {
+    // A remote host names its workstation; a local Docker target may name one too ("on this computer").
     return (
       await rows(db, `${WS_SELECT} WHERE w.id=$1 AND w.status='active' AND ${HAS_DEVOPS}`, [
         target.workstation_id,

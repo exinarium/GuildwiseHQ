@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { StoredCompletionAction } from '../cards/types.ts';
+import { DeployKeyDtoSchema, ReachabilityDtoSchema } from '../delivery/connect.ts';
 import {
   BaTaskKind,
   BaTaskStatus,
@@ -24,7 +25,7 @@ export const DeployTargetDtoSchema = z.object({
   projectId: z.uuid(),
   name: z.string(),
   kind: DeployTargetKind,
-  /** `remote_ssh`: whose DevOps engineer deploys; `local_docker`: null (every project member's workstation deploys). */
+  /** The workstation that deploys: always set for `remote_ssh`; for `local_docker` "on this computer", or null (every project member's workstation deploys). */
   workstationId: z.uuid().nullable(),
   workstationName: z.string().nullable(),
   host: z.string().nullable(),
@@ -37,6 +38,12 @@ export const DeployTargetDtoSchema = z.object({
   destructiveOk: z.boolean().optional(),
   testHosts: z.array(z.string()).optional(),
   secretNames: z.array(z.string()).optional(),
+  /** Can the deploying computer sign in to the server? Absent for "on a computer" targets and from an older server. */
+  reachability: ReachabilityDtoSchema.nullable().optional(),
+  /** The dedicated Guildwise keys of this target, public parts only. */
+  keys: z.array(DeployKeyDtoSchema).optional(),
+  /** `active` (absent from an older server), `standby` (the old server after a move) or `retired`. */
+  role: z.enum(['active', 'standby', 'retired']).optional(),
 });
 export type DeployTargetDto = z.infer<typeof DeployTargetDtoSchema>;
 

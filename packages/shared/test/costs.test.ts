@@ -128,7 +128,11 @@ describe('money formatting', () => {
     expect(costUsdMicros('claude-fable-5-1', read)).toBe(250_000);
     expect(costUsdMicros('claude-fable-5', read)).toBe(1_000_000);
     expect(costUsdMicros('claude-opus-5-5', read)).toBe(200_000);
-    expect(costUsdMicros('claude-sonnet-4-6', { inputTokens: 1_000_000, outputTokens: 1_000_000 })).toBe(18_000_000);
-    expect(costUsdMicros('claude-haiku-5-5', { inputTokens: 1_000_000, outputTokens: 1_000_000 })).toBe(600_000);
+    expect(costUsdMicros('claude-sonnet-4-6', { inputTokens: 1_000_000, outputTokens: 1_000_000 })).toBe(
+      18_000_000,
+    );
+    expect(costUsdMicros('claude-haiku-5-5', { inputTokens: 1_000_000, outputTokens: 1_000_000 })).toBe(
+      600_000,
+    );
   });
 });

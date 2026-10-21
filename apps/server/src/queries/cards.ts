@@ -40,8 +40,7 @@ import {
   spendBriefs,
 } from '../costs/index.ts';
 import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
-import { landedSql } from '../dispatcher/dependencies.ts';
-import { dependencyStates } from '../dispatcher/dependencies.ts';
+import { dependencyStates, landedSql } from '../dispatcher/dependencies.ts';
 import { notFound } from '../errors.ts';
 import { cardPhaseRef } from './phases.ts';
 import { publicationOfCard } from './research.ts';

@@ -33,7 +33,7 @@ export function keysForEvent(event: Pick<VisibleEvent, 'type' | 'streamId' | 'pr
       ];
     case 'run':
       // RunEnvironmentRequested / StopRequested / Ended
-      return [['runs']];
+      return [['runs'], ['run-plan']];
     case 'phase':
     case 'ba':
       // Phase* events and the BA's background tasks
@@ -67,6 +67,8 @@ export function keysForEvent(event: Pick<VisibleEvent, 'type' | 'streamId' | 'pr
       return [
         ['card'],
         ['devops'],
+        // a "Scan with DevOps" request moves on (queued, running, done)
+        ['run-plan'],
         ['thread', event.streamId.slice('thread-'.length)],
         ['chats'],
         ['intakes'],
@@ -115,6 +117,10 @@ export function keysForEvent(event: Pick<VisibleEvent, 'type' | 'streamId' | 'pr
         ['card'],
         // run settings and saved run plans (ProjectRunSettingsSet, RunPlanSaved)
         ['run-settings'],
+        // guided deploy setup: drafts, probes, ssh reachability, observed setup
+        ['deploy-setup'],
+        // RunPlanSaved / SetupProposalSubmitted / SetupProposalResolved: the guided run steps
+        ['run-plan'],
         ['commit-as'],
         // deploy targets and the default follow-ups live on the project stream
         ['deploy-targets'],

@@ -6,6 +6,7 @@ import {
   DeployExecResultSchema,
   type Gate,
   type GateEvidence,
+  MOVE_OPEN_STATES,
   maskText,
   type Recipe,
   type RecipeEnv,
@@ -24,6 +25,7 @@ import type { AppendInput } from '../eventstore/types.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { type EnvGateVerdict, effectiveGates, evaluateEnvGate, latestMerge } from './gate.ts';
 import { closeDeskNotice, raiseDeskNotice } from './notices.ts';
+import { queueReachabilityCheck } from './reachability.ts';
 import {
   loadRecipeRow,
   NO_PROJECT_VAULT,
@@ -63,6 +65,8 @@ export interface RequestDeployInput {
   trigger: Trigger | 'request';
   requester: DeployRequester;
   trial?: boolean;
+  /** A trial that only checks (AOM_DEPLOY_DRY_RUN=1): the guided setup's "Try it without changing anything". */
+  dryRun?: boolean;
   phaseFollowupId?: string | undefined;
   reason?: string | undefined;
 }
@@ -402,10 +406,25 @@ export async function requestDeployRun(ctx: Ctx, input: RequestDeployInput): Pro
   const vault = await projectVault(ctx.pool, project.id);
   if (!vault)
     return refuseAll(ctx, project, input, 'no_vault', NO_PROJECT_VAULT, { recipeId: recipeRow.id, hash });
+  // an environment that is being moved to a new server is not deployed meanwhile (the move copies a version, then switches)
+  const moving = await one(
+    ctx.pool,
+    `SELECT 1 AS x FROM deploy_target_moves WHERE project_id=$1 AND env_name=$2 AND state = ANY($3::text[])`,
+    [project.id, env.name, [...MOVE_OPEN_STATES]],
+  );
+  if (moving)
+    return refuseAll(
+      ctx,
+      project,
+      input,
+      'move_in_progress',
+      `${env.name} is being moved to a new server: deploys wait until the move is finished or given up`,
+      { recipeId: recipeRow.id, hash },
+    );
 
   const targetRows = await rows(
     ctx.pool,
-    `SELECT * FROM deploy_targets WHERE project_id=$1 AND removed_at IS NULL AND lower(name) = ANY($2::text[])`,
+    `SELECT * FROM deploy_targets WHERE project_id=$1 AND removed_at IS NULL AND role = 'active' AND lower(name) = ANY($2::text[])`,
     [project.id, env.targets.map((t) => t.toLowerCase())],
   );
   const wanted = input.targets?.map((t) => t.toLowerCase());
@@ -479,7 +498,7 @@ export async function requestDeployRun(ctx: Ctx, input: RequestDeployInput): Pro
       continue;
     }
     // Trials of an unapproved recipe never touch production: only a dry run (AOM_DEPLOY_DRY_RUN=1) may.
-    const runDry = dryRun || (trial && production);
+    const runDry = dryRun || (trial && (production || input.dryRun === true));
     if (runDry) dryRuns = true;
     // The commit may come from the gate itself (promote what the earlier environment runs), so the gates are read first.
     let commit: string | null;
@@ -923,6 +942,15 @@ export async function applyDeployResult(
       scope: projectScope(run.org_id, run.project_id),
     },
   ]);
+  // A deploy that did not get through may mean the server cannot be reached any more: look, so the card says so.
+  if (outcome !== 'succeeded' && run.target_name)
+    await one(
+      ctx.pool,
+      `SELECT id FROM deploy_targets WHERE project_id=$1 AND lower(name)=lower($2) AND kind='remote_ssh' AND removed_at IS NULL`,
+      [run.project_id, run.target_name],
+    )
+      .then((t) => (t ? queueReachabilityCheck(ctx, t.id) : false))
+      .catch(() => false);
   const project = await one(ctx.pool, 'SELECT key FROM projects WHERE id=$1', [run.project_id]);
   // A refusal for a missing secret names it on the desk (section 9.6).
   if (outcome === 'refused' && r.refused?.startsWith('missing_secret:'))

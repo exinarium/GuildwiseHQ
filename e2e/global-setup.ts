@@ -132,6 +132,8 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   const env = {
     ...process.env,
     DATABASE_URL,
+    // the move spec names fixed DNS answers here (an informational check; the Owner may confirm without it)
+    AOM_DNS_OVERRIDE_FILE: join(E2E_DIR, 'dns.json'),
     AOM_PORT: String(PORT),
     AOM_HOST: '127.0.0.1',
     AOM_PUBLIC_ORIGIN: BASE_URL,

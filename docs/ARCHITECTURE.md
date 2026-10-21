@@ -863,6 +863,9 @@ Streams `user-<id>`, `desk-<id>`, `ba-signal-<id>`, `ba-task-<id>`; audience `or
 | `BaTaskQueued` (extended), `BaTaskItemsAdded` | `…, signalIds?, deskItemIds?, localDate?` / `{taskId, deskItemIds?, signalIds?}` | `ba_tasks.signal_ids / desk_item_ids / local_date`; a `floor_report` also sets `users.floor_report_day` |
 | `WorkstationHygieneChanged` | `{workstationId, intervalHours (0,1,6,12,24,168), changedBy}` | `workstations.hygiene_interval_hours` |
 | `DevOpsRequested` (extended) | `…, hygiene?: HygieneSpec` | `devops_requests.hygiene` (the repositories the run covers); sets `workstations.hygiene_last_at` |
+| `RunPlanSaved` (extended) | `…, workstationId: Id \| null, source?: devops\|owner\|scan, savedBy?, proposalId?` | `run_plans` (migration 2280): `workstation_id` null is the project-wide plan (unique active index on `COALESCE(workstation_id, nil)`), `source` default `devops`; `findReplay` takes the workstation's own plan, then the project-wide one (`buildHash: null`); owner and scan plans never go stale by themselves |
+| `RunPlanFailureNoted` / `RunPlanDiscarded` | `{planId, projectId, reason}` / `{planId, projectId, by}` | `run_plans.last_failure` (an owner plan keeps its status and is flagged) / the workstation's own plan is superseded ("use the project version here") |
+| `SetupProposalSubmitted` / `SetupProposalResolved` | `{proposalId, projectId, area:'run'\|'deploy', requestId, workstationId, proposal}` / `{proposalId, outcome:'accepted'\|'dismissed'\|'superseded', by}` | `setup_proposals` ("Scan with DevOps": the DevOps request kind `run_scan`/`deploy_scan` ends with `aom setup propose`, IPC `setup.propose`, schema-checked in `packages/shared/src/setup/proposal.ts`; a newer proposal supersedes the open one; confirming goes through `PUT /api/projects/:id/run-plan` with the `proposalId`) |
 | `ProjectRepoWorkingBranchSet` | `{projectId, repoId, workingBranch, previousBranch, reason:'unconfirmed'\|'phase'\|'intake'\|'manual', setBy, deskItemId?}` | `project_repos.working_branch / working_branch_set_by / working_branch_set_at` |
 | `HygieneRepoReported` | `{requestId, workstationId, repos:[{repoId, projectId, name, problem:{kind, detail}\|null, files[], branches[]}]}` | `hygiene_findings` (one open row per workstation, repository and kind; other kinds of the repository close; a repository in order closes all; `needs_branch` is a question, not a finding), `project_repos.known_branches` |
 | `WorktreeSweepReported` | `{workstationId, requestId?, removed, kept, dirty:[{path, branch, files[]}]}` | `hygiene_findings` kind `dirty_worktree` (those no longer reported close) |
@@ -2364,6 +2367,29 @@ runs the script outside any model session.
   `${commit}` `${branch}` `${env}` `${appUrl}` `${target}` `${host}`), `trigger` (`after_merge|phase_done|on_request`), `timeoutSec`,
   `health` (`RunHealthSchema`: http, tcp, log, none), `smoke`, `secrets` (names), `envFile` (a path on the workstation), `docker`,
   **`releasedBy: owner|ceo|auto`** (default `owner`) and `gate` (`none`, a preset name, or an inline gate).
+- **Guided setup (v1b).** `delivery/setup.json` (`DeliverySetup`, strict character sets per value) is compiled by the pure
+  `compileSetup` (shared, golden-file tests for the first adopter's UAT and production) into `recipe.yaml` and one script per
+  environment, all inside the approved bundle, so hashes, drift and `deploy.exec` are unchanged. The server never writes the vault:
+  `POST /api/projects/:id/delivery/setup/preview|publish` compile, lint (`serverLint`), plan the change list (`planChanges`) and send
+  the durable `recipe.write`; the workstation's `recipe.inspected` answer (with `setup`) is recorded as `DeliveryRecipeObserved` with
+  `handEdited` (scripts that differ from the compiled ones, lint `hand_edited`). `approveRecipe` requires a successful dry run
+  (`requestDeployRun` `trial` + `dryRun`) of the observed hash for every guided environment. Events: `DeliverySetupDraftSaved`,
+  `DeliverySetupPublished`, `DeliverySetupPublishResult`, `DeployTargetProbed`, `DeployTargetConnectionChecked` (tables
+  `delivery_setup_drafts`, `deploy_probes`, `deploy_target_connections`, `delivery_recipes.setup|hand_edited`, migration 2282); probes are
+  durable `deploy.probe` commands. A deploy scan (`deploy_scan`) reuses the run-scan machinery: `SetupProposalSchema.deploy` is a typed
+  `DeliverySetup` and `setup.propose` also checks the targets and hosting. Capability `deploy-setup:1`; an older runner gets a 409
+  `runner_outdated` and the developer view keeps working.
+- **Guided connect, dedicated keys and server preparation (v2).** Durable runner commands `deploy.hostkey|key|connect|revoke|prepare`
+  (capability `deploy-connect:1`; `deploy.connect` is in `ENVELOPE_COMMANDS`, 10 minute expiry, payload emptied when answered). The server
+  (`delivery/connect.ts`) only validates who may ask (own computers, project owner), relays and records public facts: events
+  `DeployOpFinished` (any answer, no secrets), `DeployTargetConnected` / `DeployKeyRevoked` (a key's fingerprint and public line),
+  `DeployTargetPrepared` (the steps), projections `deploy_ops`, `deploy_target_keys` (migration 2290); the page follows an operation with
+  `GET /api/projects/:id/delivery/ops/:commandId`. Routes `POST .../delivery/hostkey|key|connect|prepare` and
+  `.../targets/:targetId/revoke-key|check`. Reachability: `delivery/reachability.ts` queues a cheap `deploy.probe` scope `ssh_check` per
+  server target daily and after a failed deploy (scheduler tick; only runners with `deploy-connect:1`); its answer is only a
+  `DeployTargetConnectionChecked`. The compiler gained `compose_run` (generator `setup-1.2`); an older stored generator is reported as
+  `generator_outdated` (the "improved steps" nudge), never as a hand edit. A deploy scan's probe is stored through the IPC
+  `deploy.probe.record`. Runner side: `apps/runner/src/delivery/{deploy-keys,connect,prepare}.ts`.
 - **Content hash and approval.** `bundleHash` is a sha256 over the sorted listing `path\0mode\0sha256(content)\n` of `delivery/**`
   (mode is the executable bit only). The runner reads a git vault AT A COMMIT (`git ls-tree` + `git cat-file`, `delivery/bundle.ts`),
   never the working tree; a local folder is read once and the copy is what runs. `recipe.inspect` (durable command) returns the
@@ -2420,3 +2446,20 @@ runs the script outside any model session.
 - **UI.** Project settings, Delivery (`DeliveryPanel`: mode, vault backup note, environments and releasers, lint, changes, Approve, Deploy
   buttons, secrets per workstation); the Deploys page (`ReleaseQueue` with the per-server choice, `DeployRuns` with the audit,
   `GatesPanel`); release cards in the CEO chat.
+- **Moving to a new server (v3).** Command `deploy.move` (capability `deploy-move:1`), one step per command. The server (`delivery/move.ts`)
+  builds a `MoveSpec` from the approved guided setup (`buildMoveSpec` in shared), appends `DeployTargetMoveStarted`, enqueues `check`, and on each
+  answer (`applyMoveResult`, from the gateway) appends `DeployTargetMoveStepDone` (stating the resulting state, so a replay needs no logic) and
+  chains the next step: the preparation (`check`, `copy_config`, `copy_image`, `start_database`) runs by itself and stops in state `ready`; the
+  downtime step (`stop_and_backup`, `restore`, `start_app`) starts only after the person's `POST .../moves/:id/switch`. States
+  `preparing | ready | moving | app_ready | completed | failed | cancelled`; `DeployTargetMoveResumed` (agree, try again, undo),
+  `DeployTargetMoveCancelled`. `deploy_targets.role` (`active | standby | retired`) and `deploy_target_moves` (migration 2300, no unique
+  index on open moves: a rebuild replays old ones; the command keeps one open per project). The Owner's `complete` (the server checks the
+  domain itself through `delivery/dns.ts`: a public lookup, injectable; `AOM_DNS_OVERRIDE_FILE` is a test hook) appends
+  `DeployTargetMoveCompleted` carrying the final names: the new server takes the old one's NAME, production mark and address (the approved
+  recipe and its hash name a target, so nothing needs re-approval) and the old one is renamed `<name> (old server)` and becomes `standby`;
+  unfinished phase follow-ups of the old target are re-pointed. Deploys of the environment are refused while a move is open
+  (`move_in_progress`) and never pick a non-active target. `retire` (Owner only) runs `retire_keys` on the standby and appends
+  `DeployKeyRevoked` per key and `DeployTargetRetired`. Routes under `/api/projects/:id/delivery/moves` and `.../targets/:targetId/retire`.
+- **Sealed sign-ins are bound (`deploy-seal-aad:1`).** The browser seals a password or key file with AES-GCM additional data
+  `aom-connect|project|address|port|user` (`h2.` format); a runner that announces the capability opens only a sign-in meant for that
+  server (older pages still send `h1.`). Expired `deploy.connect` payloads are emptied by the reachability tick.

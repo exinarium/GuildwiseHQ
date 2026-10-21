@@ -302,7 +302,7 @@ describe.skipIf(!bwrapWorks || !dotnet || process.platform !== 'linux')(
       const r = await run(true);
       expect(r.stdout, r.stderr).toContain('Build succeeded');
     }, 150_000);
-  
+
     // #33: a repository without .gitmodules, whose path the sandbox masks with /dev/null
     const gitmodulesScript =
       'git init -q . && dotnet new classlib -n lib -o lib --no-restore >/dev/null && cd lib && dotnet build -nologo 2>&1 | tail -8';

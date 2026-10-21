@@ -115,6 +115,8 @@ const RUNNER_SUBKINDS = new Set([
   'claude_usage_limit',
   'claude_account_login',
   'role_smoke_failed',
+  // a deploy server the computer can no longer sign in to
+  'deploy_unreachable',
 ]);
 /** Desk items that have their own event, their own category or are only reports: not a "decision for me". */
 const NOT_A_DECISION = new Set<string>([

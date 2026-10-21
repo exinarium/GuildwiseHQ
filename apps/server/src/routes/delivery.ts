@@ -1,13 +1,28 @@
 import {
   ApproveRecipeRequestSchema,
+  ConnectRequestSchema,
   DeployRequestSchema,
+  HostKeyScanRequestSchema,
   IdParamsSchema,
+  KeyCreateRequestSchema,
+  MoveCompleteRequestSchema,
+  MoveStartRequestSchema,
+  MoveSwitchRequestSchema,
+  PrepareRequestSchema,
+  PreviewSetupRequestSchema,
+  ProbeRequestSchema,
+  PublishSetupRequestSchema,
   RejectRecipeRequestSchema,
   ReleaseRequestSchema,
+  RetireRequestSchema,
+  RevokeKeyRequestSchema,
+  SaveSetupDraftRequestSchema,
   SetDeliveryModeRequestSchema,
   SetDeploySecretRequestSchema,
   SetGateBindingRequestSchema,
   SetGatePresetRequestSchema,
+  SetupDryRunRequestSchema,
+  UseProposalRequestSchema,
 } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -15,11 +30,42 @@ import { requireOrg, requireUser } from '../auth/guards.ts';
 import { orgRoleOf } from '../auth/org-context.ts';
 import { loadVisibleProject } from '../authz/scope.ts';
 import type { Ctx } from '../context.ts';
+import { one } from '../db/sql.ts';
 import { removeGatePreset, setDeploySecret, setGateBinding, setGatePreset } from '../delivery/admin.ts';
+import {
+  connectBlockedReason,
+  getOp,
+  requestConnect,
+  requestHostKeyScan,
+  requestKey,
+  requestPrepare,
+  requestRevoke,
+} from '../delivery/connect.ts';
+import {
+  cancelMove,
+  completeMove,
+  dnsCheck,
+  getMove,
+  listMoves,
+  retireTarget,
+  retryMove,
+  startMove,
+  switchMove,
+} from '../delivery/move.ts';
+import { listProbeDtos, requestProbe } from '../delivery/probes.ts';
 import { deliverySettings, listBindings, listPresets, releaseQueue, toRunDto } from '../delivery/queries.ts';
 import { approveRecipe, rejectRecipe, requestRecipeInspect, setDeliveryMode } from '../delivery/recipes.ts';
 import { cancelRun, listDeployRuns, releaseFromQueue, requestDeployRun } from '../delivery/runs.ts';
-import { forbidden } from '../errors.ts';
+import {
+  getSetupState,
+  previewSetup,
+  projectOwnerOrThrow,
+  publishSetup,
+  requestSetupDryRun,
+  saveSetupDraft,
+  useDeployProposal,
+} from '../delivery/setup.ts';
+import { forbidden, HttpError } from '../errors.ts';
 import { typed } from './util.ts';
 
 /**
@@ -77,6 +123,281 @@ export function deliveryRoutes(ctx: Ctx) {
         return deliverySettings(ctx, s.user, req.params.id);
       },
     );
+
+    // ------------------------------------------------------------------------------ the guided deploy setup
+    app.get('/api/projects/:id/delivery/setup', { schema: { params: IdParamsSchema } }, async (req) => {
+      const s = await requireUser(ctx, req);
+      return getSetupState(ctx, s.user, req.params.id);
+    });
+
+    app.put(
+      '/api/projects/:id/delivery/setup',
+      { schema: { params: IdParamsSchema, body: SaveSetupDraftRequestSchema } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        await saveSetupDraft(ctx, s.user, req.params.id, req.body);
+        return getSetupState(ctx, s.user, req.params.id);
+      },
+    );
+
+    app.post(
+      '/api/projects/:id/delivery/setup/preview',
+      { schema: { params: IdParamsSchema, body: PreviewSetupRequestSchema } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        return previewSetup(ctx, s.user, req.params.id, req.body);
+      },
+    );
+
+    app.post(
+      '/api/projects/:id/delivery/setup/publish',
+      { schema: { params: IdParamsSchema, body: PublishSetupRequestSchema } },
+      async (req, reply) => {
+        const s = await requireUser(ctx, req);
+        const r = await publishSetup(ctx, s.user, req.params.id, req.body);
+        reply.code(202);
+        return r;
+      },
+    );
+
+    /** "Try it without changing anything": a dry run of the saved version (the Owner's approval needs one). */
+    app.post(
+      '/api/projects/:id/delivery/setup/dry-run',
+      { schema: { params: IdParamsSchema, body: SetupDryRunRequestSchema } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        return requestSetupDryRun(ctx, s.user, req.params.id, req.body.env);
+      },
+    );
+
+    app.post(
+      '/api/projects/:id/delivery/setup/use-proposal',
+      { schema: { params: IdParamsSchema, body: UseProposalRequestSchema } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        await useDeployProposal(ctx, s.user, req.params.id, req.body.proposalId);
+        return getSetupState(ctx, s.user, req.params.id);
+      },
+    );
+
+    /** The read-only look at Docker here, the servers this computer can reach, or one server (a durable command). */
+    app.post(
+      '/api/projects/:id/delivery/probe',
+      { schema: { params: IdParamsSchema, body: ProbeRequestSchema } },
+      async (req, reply) => {
+        const s = await requireUser(ctx, req);
+        const r = await requestProbe(ctx, s.user, req.params.id, req.body);
+        reply.code(202);
+        return r;
+      },
+    );
+
+    // ------------------------------------------------------------------------------ guided connect (design v2)
+    const OpParams = z.object({ id: z.uuid(), commandId: z.uuid() });
+    const TargetParams = z.object({ id: z.uuid(), targetId: z.uuid() });
+
+    /** The server's fingerprint, as seen from the chosen computer (nothing is trusted or written). */
+    app.post(
+      '/api/projects/:id/delivery/hostkey',
+      { schema: { params: IdParamsSchema, body: HostKeyScanRequestSchema } },
+      async (req, reply) => {
+        const s = await requireUser(ctx, req);
+        const r = await requestHostKeyScan(ctx, s.user, req.params.id, req.body);
+        reply.code(202);
+        return r;
+      },
+    );
+
+    /** This computer's dedicated key for a server (the panel's copy-paste text); the private key stays on the computer. */
+    app.post(
+      '/api/projects/:id/delivery/key',
+      { schema: { params: IdParamsSchema, body: KeyCreateRequestSchema } },
+      async (req, reply) => {
+        const s = await requireUser(ctx, req);
+        const r = await requestKey(ctx, s.user, req.params.id, req.body);
+        reply.code(202);
+        return r;
+      },
+    );
+
+    /** Connect: a password or key file (sealed in the browser), a pasted key, or an existing sign-in; then the test. */
+    app.post(
+      '/api/projects/:id/delivery/connect',
+      { schema: { params: IdParamsSchema, body: ConnectRequestSchema } },
+      async (req, reply) => {
+        const s = await requireUser(ctx, req);
+        const r = await requestConnect(ctx, s.user, req.params.id, req.body);
+        reply.code(202);
+        return r;
+      },
+    );
+
+    /** Removes one key that Guildwise added (by its fingerprint), signing in from the chosen computer. */
+    app.post(
+      '/api/projects/:id/delivery/targets/:targetId/revoke-key',
+      { schema: { params: TargetParams, body: RevokeKeyRequestSchema } },
+      async (req, reply) => {
+        const s = await requireUser(ctx, req);
+        const r = await requestRevoke(ctx, s.user, req.params.id, req.params.targetId, req.body);
+        reply.code(202);
+        return r;
+      },
+    );
+
+    /** Prepare a server (or a folder on a computer): the confirmed list of actions. */
+    app.post(
+      '/api/projects/:id/delivery/prepare',
+      { schema: { params: IdParamsSchema, body: PrepareRequestSchema } },
+      async (req, reply) => {
+        const s = await requireUser(ctx, req);
+        const r = await requestPrepare(ctx, s.user, req.params.id, req.body);
+        reply.code(202);
+        return r;
+      },
+    );
+
+    // ------------------------------------------------------------------------------ moving to a new server (design v3)
+    const MoveParams = z.object({ id: z.uuid(), moveId: z.uuid() });
+
+    app.get('/api/projects/:id/delivery/moves', { schema: { params: IdParamsSchema } }, async (req) => {
+      const s = await requireUser(ctx, req);
+      return { moves: await listMoves(ctx, s.user, req.params.id) };
+    });
+
+    /** Start moving the environment that deploys to one server onto another (looks at both; nothing changes on the old one). */
+    app.post(
+      '/api/projects/:id/delivery/moves',
+      { schema: { params: IdParamsSchema, body: MoveStartRequestSchema } },
+      async (req, reply) => {
+        const s = await requireUser(ctx, req);
+        const r = await startMove(ctx, s.user, req.params.id, req.body);
+        reply.code(201);
+        return r;
+      },
+    );
+
+    app.get('/api/projects/:id/delivery/moves/:moveId', { schema: { params: MoveParams } }, async (req) => {
+      const s = await requireUser(ctx, req);
+      return getMove(ctx, s.user, req.params.id, req.params.moveId);
+    });
+
+    /** "A short downtime is fine": stop the old app, take the last backup, restore, start and check the new app. */
+    app.post(
+      '/api/projects/:id/delivery/moves/:moveId/switch',
+      { schema: { params: MoveParams, body: MoveSwitchRequestSchema } },
+      async (req, reply) => {
+        const s = await requireUser(ctx, req);
+        const r = await switchMove(ctx, s.user, req.params.id, req.params.moveId);
+        reply.code(202);
+        return r;
+      },
+    );
+
+    app.post(
+      '/api/projects/:id/delivery/moves/:moveId/retry',
+      { schema: { params: MoveParams } },
+      async (req, reply) => {
+        const s = await requireUser(ctx, req);
+        const r = await retryMove(ctx, s.user, req.params.id, req.params.moveId);
+        reply.code(202);
+        return r;
+      },
+    );
+
+    app.post(
+      '/api/projects/:id/delivery/moves/:moveId/cancel',
+      { schema: { params: MoveParams } },
+      async (req, reply) => {
+        const s = await requireUser(ctx, req);
+        const r = await cancelMove(ctx, s.user, req.params.id, req.params.moveId);
+        reply.code(202);
+        return r;
+      },
+    );
+
+    /** The live check: does the domain point to the new server yet? */
+    app.get(
+      '/api/projects/:id/delivery/moves/:moveId/dns',
+      { schema: { params: MoveParams } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        return dnsCheck(ctx, s.user, req.params.id, req.params.moveId);
+      },
+    );
+
+    /** The Owner makes the new server live (it takes the name the approved deploy files use); the old one becomes the standby. */
+    app.post(
+      '/api/projects/:id/delivery/moves/:moveId/complete',
+      { schema: { params: MoveParams, body: MoveCompleteRequestSchema } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        return completeMove(ctx, s.user, req.params.id, req.params.moveId, req.body);
+      },
+    );
+
+    /** The Owner lets the standby go: Guildwise's keys are removed from it. Nothing else there is touched. */
+    app.post(
+      '/api/projects/:id/delivery/targets/:targetId/retire',
+      { schema: { params: TargetParams, body: RetireRequestSchema } },
+      async (req, reply) => {
+        const s = await requireUser(ctx, req);
+        const r = await retireTarget(ctx, s.user, req.params.id, req.params.targetId, req.body);
+        reply.code(202);
+        return r;
+      },
+    );
+
+    app.get('/api/projects/:id/delivery/ops/:commandId', { schema: { params: OpParams } }, async (req) => {
+      const s = await requireUser(ctx, req);
+      return getOp(ctx, s.user, req.params.id, req.params.commandId);
+    });
+
+    /** "Check connection": can the computer that deploys this server sign in to it now? */
+    app.post(
+      '/api/projects/:id/delivery/targets/:targetId/check',
+      { schema: { params: TargetParams } },
+      async (req, reply) => {
+        const s = await requireUser(ctx, req);
+        await projectOwnerOrThrow(ctx, s.user, req.params.id);
+        const t = await one(
+          ctx.pool,
+          'SELECT workstation_id FROM deploy_targets WHERE id=$1 AND project_id=$2',
+          [req.params.targetId, req.params.id],
+        );
+        // one check a minute per server: the button cannot be used to hammer a customer's server
+        const last = await one(
+          ctx.pool,
+          `SELECT max(at) AS at FROM deploy_target_connections WHERE target_id=$1`,
+          [req.params.targetId],
+        );
+        const pending = await one(
+          ctx.pool,
+          `SELECT 1 AS x FROM runner_commands WHERE type='deploy.probe' AND status IN ('pending','sent')
+              AND payload->>'targetId'=$1 AND created_at > $2`,
+          [req.params.targetId, new Date(ctx.clock.now().getTime() - 120_000)],
+        );
+        if (pending || (last?.at && ctx.clock.now().getTime() - new Date(last.at).getTime() < 60_000))
+          throw new HttpError(429, 'too_soon', 'a check was done a moment ago: wait a minute');
+        const cheap = t?.workstation_id && (await connectBlockedReason(ctx.pool, t.workstation_id)) === null;
+        const r = await requestProbe(ctx, s.user, req.params.id, {
+          scope: cheap ? 'ssh_check' : 'ssh_target',
+          targetId: req.params.targetId,
+        });
+        reply.code(202);
+        return r;
+      },
+    );
+
+    app.get('/api/projects/:id/delivery/probes', { schema: { params: IdParamsSchema } }, async (req) => {
+      const s = await requireUser(ctx, req);
+      const project = await loadVisibleProject(ctx.pool, s.user.id, req.params.id);
+      return {
+        probes: await listProbeDtos(ctx.pool, req.params.id, {
+          userId: s.user.id,
+          projectOwner: project.my_role === 'owner',
+        }),
+      };
+    });
 
     /**
      * The Deploy button (and the fallback for a CEO whose `aom deploy run` call was blocked): the same server path, from the

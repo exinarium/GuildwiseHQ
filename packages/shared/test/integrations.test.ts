@@ -147,6 +147,7 @@ describe('integration status and protocol', () => {
     ] as const)
       expect(CommandPayloadSchemas[c]).toBeDefined();
     expect([...ENVELOPE_COMMANDS].sort()).toEqual([
+      'deploy.connect',
       'deploy.secret.set',
       'env.secret.set',
       'integration.connect',

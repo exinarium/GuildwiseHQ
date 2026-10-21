@@ -1,6 +1,6 @@
 import {
-  COMPLETION_ACTION_LABELS,
   type CardDto,
+  COMPLETION_ACTION_LABELS,
   CompletionAction,
   type WorkflowDefinition,
 } from '@aom/shared';
