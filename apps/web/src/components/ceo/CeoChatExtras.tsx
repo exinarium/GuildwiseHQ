@@ -337,7 +337,7 @@ export function ReleaseCards() {
               </Button>
             ) : (
               <Link
-                to="/deploys"
+                to="/releases"
                 className="inline-flex h-8 items-center rounded-control bg-brand px-3 text-sm font-medium text-brand-fg"
               >
                 Choose servers

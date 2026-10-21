@@ -115,6 +115,7 @@ function Shell({ name, live }: { name: string; live: string }) {
   const canManage = org?.role === 'owner' || org?.role === 'admin';
   const { sections, footer } = buildNav({
     projectKey: project?.key ?? null,
+    hasEnvironments: !!project && project.workflowKey !== 'research',
     hasResearch:
       !!project &&
       ((project.publishedNotes ?? 0) > 0 || (project.startedAs ?? project.workflowKey) === 'research'),
