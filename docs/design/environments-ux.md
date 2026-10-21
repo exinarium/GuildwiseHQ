@@ -520,3 +520,50 @@ schemas named below. Errors use the normal `{error:{code,message}}` body; codes 
 ### 13.3 Status vocabulary (`EnvironmentStatusDto.state`)
 
 `not_set_up`, `draft` (only in the draft), `needs_try` (saved, no successful dry run of this version), `waiting_approval` (tried, not approved), `healthy`, `unhealthy` (last health check failed), `updating` (a run is queued/running), `needs_answer` (open proposal question for it), `blocked` (a release waits for rules; `blockedBy` has the sentences), `cannot_reach` (the place is offline / ssh failed), `failed` (last real run failed or refused; `lastRun.rolledBack` says it went back by itself), `changed` (files changed outside Guildwise since approval), `custom` (hand-edited or custom script). The server picks exactly one by this order: updating, cannot_reach, needs_answer, failed, changed, custom, draft, needs_try, waiting_approval, blocked, unhealthy, healthy, not_set_up.
+
+### 13.4 Apps that run directly on the machine (no Docker)
+
+For an app that runs as a systemd unit, a pm2 process or a command of the person's own, on this computer or on a server over ssh.
+Same safety rules as Docker environments: nothing unrelated is stopped, no release folder in use is ever deleted, `sudo` only when the
+person confirmed a restart that needs it and passwordless sudo exists, a database backup first when asked (a failed backup stops
+everything), health check, automatic rollback.
+
+**Setup shape** (`packages/shared/src/delivery/setup.ts`): `SetupEnv.hosting` still says where (`this_computer` | `ssh`);
+`SetupEnv.runtime?: 'docker' | 'direct'` (absent = docker) says what runs; `SetupEnv.direct?: DirectApp` is required when `runtime` is `direct`:
+
+```
+DirectApp = {
+  appDir: absolute path          // holds releases/<12-char commit> and the symlink current -> releases/<sha>
+  keep: 2..30 (default 5)        // release folders kept; the running and the previous are never removed
+  build: [{label, argv[]}]       // run in the NEW release folder, in order (from "Your app" start steps where they fit)
+  manager: {kind:'systemd', unit, scope:'system'|'user', sudo:boolean}   // scope 'user' = systemctl --user, never sudo
+         | {kind:'pm2', name}
+         | {kind:'command', restart: argv[], sudo:boolean}
+  shared: string[]               // paths in <appDir>/shared linked into every release (.env, uploads)
+}
+```
+For a direct environment `app.composeFile` holds `appDir`, `app.service` the unit/process name and `app.imageName` the app's name (labels only; the builder
+`directEnv(...)` in `setup-templates.ts` fills them). `app.appUrl`, `health`, `rollback`, `trigger`, `releasedBy`, `gate` mean the same as for Docker.
+Steps (in this order, each once): optional `direct_db_backup {engine:'postgres'|'mysql'|'sqlite', database?, sqliteFile?, dir, keep}`
+(uses the signed-in user's own database access: peer auth, `~/.pgpass`, `~/.my.cnf`), then `direct_prepare`, then `direct_switch`. Builder:
+`directEnv({name,label,target,host?,appDir,manager,build,shared,keep,database?,healthUrl?,appUrl?,...}, testEnv)` returns the `SetupEnv`
+(`hosting` is `ssh` when `host` is given).
+
+**Probe** (`ProbeReport`, scopes `local` and `ssh_target`): `services?: ProbeService[]` and `appDirs?: string[]`.
+`ProbeService = {manager:'systemd'|'systemd_user'|'pm2'|'process', name, state, workingDir?, command?, ports[], user?, releaseLayout?}`
+(systemd = running units with a `WorkingDirectory` under a home folder, `/opt`, `/srv`, `/var/www`; `systemd_user` = `systemctl --user`; pm2 from
+`pm2 jlist`; `process` = listening non-system processes with their cwd; `releaseLayout` when `<dir>/releases` and `<dir>/current` exist).
+`appDirs` = folders that look like app folders (`/var/www/*`, `/srv/*`, `/opt/*`, `~/apps/*`, `~/*` with a `package.json`, `requirements.txt`, ...), names only.
+No environment values and no file contents are ever reported.
+
+**Capability** `deploy-direct:1` (`DEPLOY_DIRECT_CAPABILITY`): the computer that probes and the one that writes the vault need it.
+Server: `SetupStateDto.workstations[].canDirect?: boolean`; saving/publishing a setup with a direct environment on a runner without it gives
+409 `runner_outdated` and a lint error `runner_update_needed`. Status (`EnvironmentStatusDto`) gains `runtime: 'docker'|'direct'`.
+
+**What "adopt" means**: the person picks a detected service (manager + name + workingDir + ports); the wizard fills `manager` from it, `appDir` from the
+parent of `workingDir` when it already has the release layout, otherwise from `workingDir` itself (the first deploy then converts it: the existing folder is
+moved nowhere, it is left as it is and kept as `releases/previous`... see below), and asks only what cannot be found: the restart confirmation (and sudo), the
+build steps, which files stay shared. **First deploy into an existing plain folder**: Guildwise never moves or deletes the person's folder. `appDir` must be a folder
+that holds (or will hold) `releases/` and `current`; for a service that runs from a plain folder the wizard makes the new `appDir` a sibling (`<folder>-releases`)
+and the service's working directory is switched by the restart step only after the person confirms the unit change in the review (the unit file is NOT edited by Guildwise:
+the person confirms that the service already runs from `<appDir>/current`, or a command of their own is used). The review states this plainly.

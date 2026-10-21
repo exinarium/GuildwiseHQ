@@ -79,6 +79,61 @@ export const HealthUrlSchema = z
     'an address like https://app.example.com/ready',
   );
 
+// ------------------------------------------------------------------------------ apps that run without Docker
+
+export const UnitNameSchema = z
+  .string()
+  .max(100)
+  .regex(/^[A-Za-z0-9][A-Za-z0-9:_.@-]*$/, 'a service name like myapp or myapp.service');
+export const ProcessNameSchema = z
+  .string()
+  .max(80)
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/, 'a process name has letters, digits and . _ - only');
+
+/** How the running app is restarted. Detected, then confirmed by the person; `sudo` only with their explicit yes. */
+export const DirectManagerSchema = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('systemd'),
+    unit: UnitNameSchema,
+    /** `user`: `systemctl --user` (no sudo needed); `system`: `systemctl` (sudo only when `sudo` is true). */
+    scope: z.enum(['system', 'user']).default('system'),
+    sudo: z.boolean().default(false),
+  }),
+  z.object({ kind: z.literal('pm2'), name: ProcessNameSchema }),
+  /** A restart command of the person's own (argv, no shell). */
+  z.object({
+    kind: z.literal('command'),
+    restart: z.array(z.string().max(300)).min(1).max(20),
+    sudo: z.boolean().default(false),
+  }),
+]);
+export type DirectManager = z.infer<typeof DirectManagerSchema>;
+
+export const DirectBuildStepSchema = z.object({
+  label: z.string().min(1).max(120),
+  /** Run in the new release folder (argv, no shell). */
+  argv: z.array(z.string().max(300)).min(1).max(30),
+});
+
+/**
+ * An app that runs directly on a machine (no Docker): `<appDir>/releases/<12 characters of the commit>` folders, `<appDir>/current`
+ * is a symlink to the one that runs. `shared` names files and folders that live in `<appDir>/shared` and are linked into every
+ * release (settings file, uploads). The folder `appDir` must already exist and belong to the signed-in user.
+ */
+export const DirectAppSchema = z.object({
+  appDir: LocalPathSchema,
+  /** How many release folders to keep (the running one and the previous one are never removed). */
+  keep: z.number().int().min(2).max(30).default(5),
+  /** Install/build commands run in the new release folder, in order (taken from "Your app" start steps when possible). */
+  build: z.array(DirectBuildStepSchema).max(10).default([]),
+  manager: DirectManagerSchema,
+  shared: z
+    .array(z.string().regex(/^[A-Za-z0-9._][A-Za-z0-9._/-]{0,100}$/).refine(noDotDot, 'no ..'))
+    .max(20)
+    .default([]),
+});
+export type DirectApp = z.infer<typeof DirectAppSchema>;
+
 export const SetupAppSchema = z.object({
   /** The compose file of the app: local (`~/...` allowed) or an absolute path on the server. */
   composeFile: LocalPathSchema,
@@ -108,6 +163,24 @@ export type SetupApp = z.infer<typeof SetupAppSchema>;
 const Keep = z.number().int().min(0).max(500).default(20);
 
 export const DeployStepSchema = z.discriminatedUnion('kind', [
+  /** No Docker: back up pg/mysql/sqlite before anything changes; a failed backup stops the deploy. */
+  z.object({
+    kind: z.literal('direct_db_backup'),
+    engine: z.enum(['postgres', 'mysql', 'sqlite']),
+    /** postgres/mysql: the database name; sqlite: unused. */
+    database: z
+      .string()
+      .regex(/^[A-Za-z0-9_]{1,63}$/)
+      .optional(),
+    /** sqlite: the database file. */
+    sqliteFile: LocalPathSchema.optional(),
+    dir: LocalPathSchema,
+    keep: Keep,
+  }),
+  /** No Docker: put the approved version in `releases/<sha>`, link the shared files, run the build steps there. */
+  z.object({ kind: z.literal('direct_prepare') }),
+  /** No Docker: point `current` at the new release (atomic) and restart the app the way it was found. */
+  z.object({ kind: z.literal('direct_switch') }),
   /** Back up the database before anything changes; a failed backup stops the deploy. */
   z.object({
     kind: z.literal('db_backup'),
@@ -183,6 +256,13 @@ export const SetupEnvSchema = z
     /** `custom`: the script is hand-written; the compiler leaves its file alone. */
     mode: z.enum(['guided', 'custom']).default('guided'),
     hosting: z.enum(['this_computer', 'ssh']),
+    /**
+     * `docker` (default): the app is a Compose service. `direct`: the app runs on the machine itself (a systemd unit, pm2, or a
+     * command of the person's own) and `direct` below says how. For a direct environment `app.composeFile` holds the app
+     * folder (`direct.appDir`), `app.service` the unit or process name and `app.imageName` the app's name: they are only labels.
+     */
+    runtime: z.enum(['docker', 'direct']).optional(),
+    direct: DirectAppSchema.optional(),
     /** The ssh alias of the server (display and probing; the script reads it from `AOM_DEPLOY_HOST`). */
     host: SshAliasSchema.optional(),
     app: SetupAppSchema,
@@ -390,6 +470,12 @@ export function describeSetupStep(s: DeployStep, env: Pick<SetupEnv, 'app' | 'ho
       return 'Copy the new app image to the server (skipped if it is already there).';
     case 'set_image_var':
       return `Switch the server to the new version (only the ${env.app.imageVar ?? 'image'} line of its settings file changes).`;
+    case 'direct_db_backup':
+      return `Back up the database (${s.engine}) to ${s.dir}${s.keep ? `, keeping the newest ${s.keep}` : ''}. If the backup fails, nothing else happens.`;
+    case 'direct_prepare':
+      return 'Put the approved version in its own new folder next to the running one, link the shared files and run the build steps there. The running app is not touched.';
+    case 'direct_switch':
+      return 'Point "current" at the new folder in one step and restart the app the way it was found. If it does not answer, "current" goes back to the earlier folder and the app is restarted again.';
     case 'write_override':
       return `Switch the server to the new version by naming it in docker-compose.guildwise.yml next to your compose file (your own compose file is not edited).`;
     case 'push_image_registry':

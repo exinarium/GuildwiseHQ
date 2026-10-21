@@ -16,6 +16,8 @@ export const DEPLOY_SETUP_CAPABILITY = 'deploy-setup:1';
  * remove its own key on `deploy.revoke {forget}`.
  */
 export const DEPLOY_SETUP_V2_CAPABILITY = 'deploy-setup:2';
+/** Announced by a runner that lists systemd/pm2/listening apps in a probe and writes "runs directly on the machine" setups. */
+export const DEPLOY_DIRECT_CAPABILITY = 'deploy-direct:1';
 
 /** `ssh_check`: one non-interactive connect to a target's server (reachability only; nothing is read from it). */
 export const PROBE_SCOPES = ['local', 'ssh_hosts', 'ssh_target', 'ssh_check'] as const;
@@ -128,6 +130,25 @@ export const ProbeProxySchema = z.object({
   sites: z.array(z.string().max(200)).max(30).default([]),
 });
 
+/** An app that runs on the machine itself: a systemd unit (system or --user), a pm2 process or a plain listening process. */
+export const ProbeServiceSchema = z.object({
+  manager: z.enum(['systemd', 'systemd_user', 'pm2', 'process']),
+  /** The unit (`myapp.service`), the pm2 name, or the program name of a plain process. */
+  name: z.string().max(120),
+  state: z.string().max(40),
+  /** The folder it runs in (systemd `WorkingDirectory`, pm2 `cwd`, the process's cwd). */
+  workingDir: z.string().max(300).optional(),
+  /** The program and arguments, shortened (never environment values). */
+  command: z.string().max(300).optional(),
+  /** TCP ports it listens on. */
+  ports: z.array(z.number().int()).max(10).default([]),
+  /** Runs as this user. */
+  user: z.string().max(60).optional(),
+  /** `<dir>/releases` and `<dir>/current` exist: it already deploys the way Guildwise does. */
+  releaseLayout: z.boolean().optional(),
+});
+export type ProbeService = z.infer<typeof ProbeServiceSchema>;
+
 export const ProbeUrlSchema = z.object({
   url: z.string().max(300),
   status: z.number().int().nullable(),
@@ -175,6 +196,10 @@ export const ProbeReportSchema = z.object({
   /** Ports 80 and 443 that something listens on. */
   listeners: z.array(z.number().int()).max(10).default([]),
   freeDiskMb: z.number().int().optional(),
+  /** Apps that run directly on the machine (systemd, pm2, listening processes). Absent from an older runner. */
+  services: z.array(ProbeServiceSchema).max(40).optional(),
+  /** Common app folders that exist (`/var/www/*`, `/srv/*`, `~/apps/*`...) with their entries, names only. */
+  appDirs: z.array(z.string().max(300)).max(30).optional(),
   /** The places that were looked at (folders and compose files), so "nothing found" can say where it looked. Absent from an older runner. */
   checked: z.array(z.string().max(300)).max(60).optional(),
   sshHosts: z.array(ProbeSshHostSchema).max(30).optional(),
