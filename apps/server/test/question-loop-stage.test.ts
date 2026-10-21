@@ -81,9 +81,9 @@ async function askedItem(cardId: string, n: number, subkind: string | null = nul
   const id = randomUUID();
   await q(
     `INSERT INTO desk_items (id, org_id, project_id, card_id, kind, subkind, status, routed_to, title, body, doing, options,
-       blocking, affected_card_ids, asked_by_kind, asked_by_agent_id, pinned, stage)
+       blocking, affected_card_ids, asked_by_kind, asked_by_agent_id, pinned, stage, created_at, updated_at)
      VALUES ($1,$2,$3,$4,'question',$5,'open','manager','Which delay?','','', '[]', true, ARRAY[$4::uuid],
-       $6, $7, false, (SELECT stage FROM cards WHERE id=$4))`,
+       $6, $7, false, (SELECT stage FROM cards WHERE id=$4), now(), now())`,
     [id, orgId, toyId, cardId, subkind, subkind ? 'system' : 'agent', subkind ? null : agentId],
   );
   await shifts(id, n);
