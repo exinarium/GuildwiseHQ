@@ -17,16 +17,48 @@ if command -v docker >/dev/null 2>&1; then
 else
   echo "DOCKER_MISSING"
 fi
-for f in /opt/*/docker-compose.y*ml /opt/*/compose.y*ml /srv/*/docker-compose.y*ml /srv/*/compose.y*ml; do
-  [ -f "$f" ] && echo "COMPOSEFILE $f"
+safe() { case "$1" in ""|*[!A-Za-z0-9._/+@=-]*) return 1 ;; /*) return 0 ;; *) return 1 ;; esac; }
+LABELS=
+if command -v docker >/dev/null 2>&1; then
+  LABELS=$(docker ps --all --format '{{.Label "com.docker.compose.project.working_dir"}}	{{.Label "com.docker.compose.project.config_files"}}' 2>/dev/null | head -n 60)
+fi
+DIRS=$(printf '%s\n' "$@")
+FILES=
+addf() { [ -f "$1" ] && FILES="$FILES
+$1"; }
+addd() { [ -d "$1" ] && DIRS="$DIRS
+$1"; }
+for d in "$@"; do for n in docker-compose.yml docker-compose.yaml compose.yaml compose.yml; do addf "$d/$n"; done; done
+for f in /opt/*/docker-compose.y*ml /opt/*/compose.y*ml /srv/*/docker-compose.y*ml /srv/*/compose.y*ml; do addf "$f"; done
+for f in "$HOME"/*/docker-compose.y*ml "$HOME"/*/compose.y*ml "$HOME"/*/*/docker-compose.y*ml "$HOME"/*/*/compose.y*ml; do
+  if safe "$f" && [ -f "$f" ]; then FILES="$FILES
+$f"; DIRS="$DIRS
+\${f%/*}"; fi
 done
-for d in "$@"; do
-  [ -f "$d/docker-compose.yml" ] && echo "COMPOSEFILE $d/docker-compose.yml"
-  [ -f "$d/docker-compose.yaml" ] && echo "COMPOSEFILE $d/docker-compose.yaml"
-  [ -f "$d/compose.yaml" ] && echo "COMPOSEFILE $d/compose.yaml"
-  [ -f "$d/compose.yml" ] && echo "COMPOSEFILE $d/compose.yml"
+OLDIFS=$IFS
+IFS='
+'
+for l in $LABELS; do
+  wd=\${l%%	*}
+  cf=\${l#*	}
+  if safe "$wd" && [ -d "$wd" ]; then
+    DIRS="$DIRS
+$wd"
+    for n in docker-compose.yml docker-compose.yaml compose.yaml compose.yml; do addf "$wd/$n"; done
+  fi
+  IFS=,
+  for f in $cf; do
+    if safe "$f" && [ -f "$f" ]; then FILES="$FILES
+$f"; DIRS="$DIRS
+\${f%/*}"; fi
+  done
+  IFS='
+'
 done
-for d in "$@"; do
+DIRS=$(printf '%s\n' "$DIRS" | awk 'NF && !seen[$0]++' | head -n 16)
+FILES=$(printf '%s\n' "$FILES" | awk 'NF && !seen[$0]++' | head -n 16)
+for f in $FILES; do echo "COMPOSEFILE $f"; done
+for d in $DIRS; do
   if [ -d "$d" ]; then
     echo "DIR $d"
     ls -1 "$d" 2>/dev/null | head -n 40 | while IFS= read -r e; do echo "ENTRY $d	$e"; done
@@ -55,7 +87,8 @@ done
 if command -v ss >/dev/null 2>&1; then
   ss -ltn 2>/dev/null | awk '{print $4}' | grep -E ':(80|443)$' | sed 's/.*://' | sort -u | while IFS= read -r p; do echo "LISTEN $p"; done
 fi
-for f in $(for x in /opt/*/docker-compose.y*ml /opt/*/compose.y*ml /srv/*/docker-compose.y*ml /srv/*/compose.y*ml; do [ -f "$x" ] && echo "$x"; done) $(for d in "$@"; do for n in docker-compose.yml docker-compose.yaml compose.yaml compose.yml; do [ -f "$d/$n" ] && echo "$d/$n"; done; done); do
+IFS=$OLDIFS
+for f in $FILES; do
   echo "@@COMPOSE $f"
   head -c 200000 "$f" 2>/dev/null
   echo

@@ -433,6 +433,45 @@ esac`,
     ).toBe(true);
   });
 
+  it('finds a stack outside /opt and /srv from the container labels and from $HOME, with no hints', async () => {
+    const server = tmp('aom-server-');
+    const flow = join(server, 'dcode', 'flow5-full');
+    const other = join(server, 'tools');
+    mkdirSync(flow, { recursive: true });
+    mkdirSync(other, { recursive: true });
+    writeFileSync(
+      join(flow, 'compose.yaml'),
+      'services:\n  dcode-server:\n    image: dcode-server:remote29-showcase-abc\n    ports:\n      - "5500:500"\n  postgres:\n    image: postgres:18\n',
+    );
+    writeFileSync(join(flow, '.env'), `POSTGRES_PASSWORD=${SECRET}\nTOKEN=x\n`);
+    writeFileSync(join(other, 'docker-compose.yml'), 'services:\n  web:\n    image: nginx:1\n');
+    const fake = fakeBin({
+      ssh: SSH_LOCAL,
+      docker: `
+case "$1" in
+  version) echo 29.1.2 ;;
+  info) exit 0 ;;
+  compose) [ "$2" = version ] && echo 2.40.0 ;;
+  ps) printf '%s\\n' "${container('dcode-flow5-remote-dcode-server-1', 'dcode-server:remote29-showcase-abc', 'running', '0.0.0.0:5500->500/tcp', 'dcode-flow5-remote', 'dcode-server', join(flow, 'compose.yaml'), flow)}" "${container('portainer', 'portainer/portainer-ce', 'running', '9000/tcp')}" ;;
+esac`,
+    });
+    const r = await runDeployProbe(
+      payload({ scope: 'ssh_target', host: 'srv' }),
+      { env: { ...fake.env, HOME: server }, home: server },
+    );
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    if (!r.ok) return;
+    const files = r.report.composeFiles.map((c) => c.path);
+    expect(files).toContain(join(flow, 'compose.yaml'));
+    expect(files).toContain(join(other, 'docker-compose.yml'));
+    const f = r.report.folders.find((x) => x.path === flow);
+    expect(f?.envKeys).toEqual(['POSTGRES_PASSWORD', 'TOKEN']);
+    const cf = r.report.composeFiles.find((c) => c.path === join(flow, 'compose.yaml'));
+    expect(cf?.project).toBe('dcode-flow5-remote');
+    expect(cf?.services.map((x) => x.name)).toEqual(['dcode-server', 'postgres']);
+    expect(JSON.stringify(r)).not.toContain(SECRET);
+  });
+
   it('each ssh failure has its own error; a changed host key is a hard stop', async () => {
     const cases: Array<[string, string]> = [
       ['@    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @', 'ssh_host_key_changed'],

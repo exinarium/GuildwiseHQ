@@ -821,7 +821,7 @@ export function parseRemoteOutput(out: string, host: string, o: ProbeOptions = {
   }
   report.docker = docker;
   report.folders = [...folders.values()].slice(0, 20);
-  for (const path of composePaths.slice(0, 10)) {
+  for (const path of composePaths.slice(0, 16)) {
     const text = composeTexts.get(path);
     const project = report.containers.find((c) => c.composeFile === path)?.project;
     report.composeFiles.push(
