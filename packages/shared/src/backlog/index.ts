@@ -181,3 +181,19 @@ export function backlogContextBlock(item: {
   }
   return `${body}\n\n---\n${parts.join(' ')}`;
 }
+
+/**
+ * What an agent may send with `aom backlog suggest`. Strict: there is no source, agent, card, status, flag or id, so an
+ * agent cannot set them; any other key is refused.
+ */
+export const BacklogSuggestParams = z
+  .object({
+    title: Title,
+    description: Description.optional(),
+    priority: BacklogPriority.optional(),
+    tags: TagList.optional(),
+    /** Another active project of the same organization (a follow-up found in a sibling project). */
+    project: z.string().min(2).max(10).optional(),
+  })
+  .strict();
+export type BacklogSuggestParams = z.infer<typeof BacklogSuggestParams>;

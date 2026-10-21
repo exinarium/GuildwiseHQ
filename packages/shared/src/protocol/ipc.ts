@@ -320,6 +320,8 @@ export const RpcMethodSchema = z.enum([
   'deploy.probe',
   /** The workstation tells the server what a DevOps scan's probe found, so the wizard shows the same facts (design v2). */
   'deploy.probe.record',
+  /** An agent adds a follow-up it found as a backlog suggestion (`aom backlog suggest`); agent and card come from the shift. */
+  'backlog.suggest',
 ]);
 export type RpcMethod = z.infer<typeof RpcMethodSchema>;
 

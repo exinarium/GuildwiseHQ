@@ -2,11 +2,13 @@ import { randomUUID } from 'node:crypto';
 import {
   BACKLOG_CARD_PRIORITY,
   BACKLOG_SEND_MAX,
+  BACKLOG_SUGGEST_PER_SHIFT,
   type BacklogFilter,
   type BacklogItemDto,
   type BacklogSendResult,
+  BacklogSuggestParams,
   backlogContextBlock,
-  type CreateBacklogItemRequest,
+  CreateBacklogItemRequest,
   filterBacklog,
   isOrgManager,
   type PatchBacklogItemRequest,
@@ -310,4 +312,92 @@ export async function sendBacklogItems(
     }
   }
   return results;
+}
+
+/**
+ * `aom backlog suggest`: an agent adds a follow-up it found. The agent, the card and its ref come from the shift row,
+ * never from the params. It only adds: no card, no desk item, no dispatcher trigger (R2, R8).
+ */
+export async function addBacklogSuggestionRpc(
+  ctx: Ctx,
+  shift: Record<string, any>,
+  rawParams: unknown,
+): Promise<[boolean, unknown?, string?]> {
+  const parsed = BacklogSuggestParams.safeParse(rawParams ?? {});
+  if (!parsed.success)
+    return [
+      false,
+      undefined,
+      `agents can only add suggestions (title, description, priority, tags, project): ${parsed.error.issues
+        .map((i) => `${i.path.join('.') || 'params'}: ${i.message}`)
+        .join('; ')}`,
+    ];
+  const p = parsed.data;
+  let cardId = shift.card_id as string | null;
+  if (!cardId && shift.desk_item_id)
+    cardId = ((await one(ctx.pool, 'SELECT card_id FROM desk_items WHERE id=$1', [shift.desk_item_id]))
+      ?.card_id ?? null) as string | null;
+  if (!cardId)
+    return [
+      false,
+      undefined,
+      'a suggestion is recorded against the card you are working on; this conversation has no card',
+    ];
+  const card = (await one(ctx.pool, 'SELECT id, ref, org_id, project_id FROM cards WHERE id=$1', [cardId])) as Row;
+  const agent = await one(ctx.pool, 'SELECT id, name FROM agents WHERE id=$1', [shift.agent_id]);
+  if (!agent) return [false, undefined, 'unknown agent'];
+  let projectId = card.project_id as string;
+  if (p.project) {
+    const other = await one(
+      ctx.pool,
+      `SELECT id FROM projects WHERE org_id=$1 AND key=$2 AND kind='project' AND status='active'`,
+      [card.org_id, p.project.toUpperCase()],
+    );
+    if (!other) return [false, undefined, `unknown project ${p.project.toUpperCase()}`];
+    projectId = other.id as string;
+  }
+  const out = await withAppendTx(ctx.pool, async (tx) => {
+    const dup = await one(
+      tx,
+      `SELECT card_ref FROM backlog_items WHERE project_id=$1 AND status='open' AND lower(title)=lower($2)`,
+      [projectId, p.title],
+    );
+    if (dup) return { added: false as const };
+    const used = await one(tx, 'SELECT count(*)::int AS n FROM backlog_items WHERE source_shift_id=$1', [
+      shift.id,
+    ]);
+    if ((used?.n ?? 0) >= BACKLOG_SUGGEST_PER_SHIFT) return { limit: true as const };
+    const item = await addBacklogItemIn(
+      ctx,
+      tx,
+      {
+        kind: 'agent',
+        agentId: agent.id as string,
+        agentName: agent.name as string,
+        shiftId: shift.id as string,
+        cardId,
+        cardRef: card.ref as string,
+      },
+      projectId,
+      CreateBacklogItemRequest.parse({
+        title: p.title,
+        ...(p.description !== undefined ? { description: p.description } : {}),
+        ...(p.priority ? { priority: p.priority } : {}),
+        ...(p.tags ? { tags: p.tags } : {}),
+      }),
+    );
+    return { added: true as const, item };
+  });
+  if ('limit' in out)
+    return [false, undefined, `at most ${BACKLOG_SUGGEST_PER_SHIFT} suggestions per shift: mention the rest in your handoff`];
+  if (!out.added)
+    return [true, { added: false, message: 'Already on the backlog. The owner decides; continue your work.' }];
+  return [
+    true,
+    {
+      added: true,
+      itemId: out.item.id,
+      message: `Added to the ${out.item.projectKey} backlog as a suggestion. The owner decides; continue your work.`,
+    },
+  ];
 }
