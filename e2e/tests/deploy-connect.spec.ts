@@ -5,7 +5,7 @@ import { type APIRequestContext, expect, type Page, test } from '@playwright/tes
 import { apiAs, inviteAndAccept } from '../support/api.ts';
 import { q, waitFor } from '../support/db.ts';
 import { ADMIN, BASE_URL, DEPLOYER, E2E_DIR, paths, ROOT } from '../support/env.ts';
-import { pairRunner, startRunner } from '../support/runner.ts';
+import { killRunner, pairRunner, startRunner } from '../support/runner.ts';
 
 // Guided connect (docs/design/deploy-run-ux-design.md v2) against a REAL sshd: a throwaway container acting as the customer's
 // VPS (apps/runner/test/fixtures/sshd). Through the web UI: the fingerprint is shown and confirmed, a password is typed once and
@@ -41,6 +41,8 @@ test.beforeAll(async ({ browser }) => {
 });
 
 test.afterAll(() => {
+  // stop this spec's runner: a runner left behind is another computer of the same person and gets picked by the next spec
+  killRunner('SIGTERM', HOME);
   try {
     docker('rm', '-f', NAME);
   } catch {
@@ -190,8 +192,14 @@ test('the key stops working: the card says so, Reconnect with a pasted key bring
   await page.goto(`/projects/${projectId}/settings`);
   const card = page.getByTestId('deploy-target-Shop server');
   await expect(card).toBeVisible();
-  await card.getByTestId('target-check-Shop server').click();
-  await expect(card.getByTestId('reachability-state')).toHaveText('Needs a sign-in', { timeout: 60_000 });
+  // one check a minute per server: press again until the server has looked
+  await expect(async () => {
+    await card
+      .getByTestId('target-check-Shop server')
+      .click({ timeout: 3_000 })
+      .catch(() => undefined);
+    await expect(card.getByTestId('reachability-state')).toHaveText('Needs a sign-in', { timeout: 5_000 });
+  }).toPass({ timeout: 120_000, intervals: [5_000] });
   await card.getByTestId('target-reconnect-Shop server').click();
   await page.getByTestId('connect-method-panel').click();
   await page.getByTestId('connect-continue').click();
@@ -212,6 +220,11 @@ test('the key stops working: the card says so, Reconnect with a pasted key bring
   await page.getByTestId('connect-go').click();
   await expect(page.getByTestId('connect-done')).toBeVisible({ timeout: 90_000 });
   await page.getByTestId('connect-finish').click();
-  await card.getByTestId('target-check-Shop server').click();
-  await expect(card.getByTestId('reachability-state')).toHaveText('Can sign in', { timeout: 60_000 });
+  await expect(async () => {
+    await card
+      .getByTestId('target-check-Shop server')
+      .click({ timeout: 3_000 })
+      .catch(() => undefined);
+    await expect(card.getByTestId('reachability-state')).toHaveText('Can sign in', { timeout: 5_000 });
+  }).toPass({ timeout: 120_000, intervals: [5_000] });
 });

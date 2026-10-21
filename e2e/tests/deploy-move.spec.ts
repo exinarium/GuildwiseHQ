@@ -5,7 +5,7 @@ import { type APIRequestContext, expect, type Page, test } from '@playwright/tes
 import { apiAs, inviteAndAccept } from '../support/api.ts';
 import { q, waitFor } from '../support/db.ts';
 import { ADMIN, BASE_URL, DEPLOYER, E2E_DIR, paths, ROOT } from '../support/env.ts';
-import { pairRunner, startRunner } from '../support/runner.ts';
+import { killRunner, pairRunner, startRunner } from '../support/runner.ts';
 
 // Moving to a new server (docs/design/deploy-run-ux-design.md J6, v3) through the web UI against TWO REAL sshd containers acting as
 // the old and the new server (apps/runner/test/fixtures/sshd, each with the fake docker of apps/runner/test/fixtures; a real httpd
@@ -53,6 +53,8 @@ test.beforeAll(async ({ browser }) => {
 });
 
 test.afterAll(() => {
+  // stop this spec's runner: a runner left behind is another computer of the same person and gets picked by the next spec
+  killRunner('SIGTERM', HOME);
   for (const n of [OLD, NEW]) {
     try {
       docker('rm', '-f', n);
