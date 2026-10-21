@@ -185,6 +185,8 @@ export function DeployWizard({
   const publish = usePublishSetup(projectId);
   const saveDraft = useSaveSetupDraft(projectId);
   const [published, setPublished] = useState<string | null>(null);
+  // files of the project's deploy folder that the setup does not make: kept unless the person ticks them
+  const [removeFiles, setRemoveFiles] = useState<string[]>([]);
   const steps = stepsFor(answers, includeKind);
   const at = Math.max(0, steps.indexOf(step));
 
@@ -322,14 +324,14 @@ export function DeployWizard({
   const goReview = async () => {
     if (!(await ensureTarget())) return;
     setStep('review');
-    preview.mutate({ setup: proposed });
+    preview.mutate({ setup: proposed, removeFiles });
     saveDraft.mutate({ setup: proposed });
   };
 
   const save = () => {
     if (!preview.data?.hash) return;
     publish.mutate(
-      { setup: proposed, setupHash: preview.data.hash },
+      { setup: proposed, setupHash: preview.data.hash, removeFiles },
       { onSuccess: (r) => setPublished(r.commandId) },
     );
   };
@@ -579,7 +581,15 @@ export function DeployWizard({
           written={written}
           failed={failed ? (pub?.error ?? 'The computer could not save the files.') : null}
           onSave={save}
-          onAgain={() => preview.mutate({ setup: proposed })}
+          removeFiles={removeFiles}
+          onToggleRemove={(path) => {
+            const next = removeFiles.includes(path)
+              ? removeFiles.filter((x) => x !== path)
+              : [...removeFiles, path];
+            setRemoveFiles(next);
+            preview.mutate({ setup: proposed, removeFiles: next });
+          }}
+          onAgain={() => preview.mutate({ setup: proposed, removeFiles })}
           onDone={onClose}
           onAdvanced={onAdvanced}
         />
@@ -1043,6 +1053,8 @@ function Review({
   onAgain,
   onDone,
   onAdvanced,
+  removeFiles,
+  onToggleRemove,
 }: {
   answers: Answers;
   preview: ReturnType<typeof usePreviewSetup>['data'];
@@ -1057,6 +1069,8 @@ function Review({
   onAgain: () => void;
   onDone: () => void;
   onAdvanced: () => void;
+  removeFiles: string[];
+  onToggleRemove: (path: string) => void;
 }) {
   const errors = preview?.lint.filter((l) => l.level === 'error') ?? [];
   const warnings = preview?.lint.filter((l) => l.level === 'warn') ?? [];
@@ -1089,6 +1103,33 @@ function Review({
             {whenText(answers.trigger)}.
           </p>
           <FoundChanges items={preview.changes.filter((c) => c.env === answers.name)} />
+          {(preview.unmodelled?.length ?? 0) > 0 && (
+            <div className="rounded-control border border-line p-3 text-sm" data-testid="review-unmodelled">
+              <p className="font-medium text-fg">Other files in the project's deploy folder</p>
+              <p className="mt-0.5 text-muted">
+                Guildwise does not make these. They stay exactly as they are, unless you tick one to delete
+                it.
+              </p>
+              <ul className="mt-2 flex flex-col gap-1">
+                {preview.unmodelled?.map((f) => (
+                  <li key={f}>
+                    <label className="flex min-h-11 items-center gap-2">
+                      <input
+                        type="checkbox"
+                        className="size-4"
+                        checked={removeFiles.includes(f)}
+                        onChange={() => onToggleRemove(f)}
+                      />
+                      <span className="font-mono text-xs [overflow-wrap:anywhere]">{f}</span>
+                      <span className="text-xs text-subtle">
+                        {removeFiles.includes(f) ? 'will be deleted' : 'kept'}
+                      </span>
+                    </label>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           {errors.length > 0 && (
             <Callout tone="danger" title="Fix this first" data-testid="review-lint-errors">
               <ul className="list-disc pl-4">

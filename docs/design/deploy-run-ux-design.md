@@ -858,3 +858,33 @@ Deviations and additions:
 For v2: reconnect/connect flows and a dedicated key (`AOM_DEPLOY_SSH` is already honoured by the generated scripts), `deploy.prepare`,
 `compose_run` for migrations, "Start a new copy", an sshd test container, storing DevOps' probes, an "improved steps available" nudge
 when `SETUP_GENERATOR` changes, and showing the reachability chip on the deploy target card.
+
+### v1b code-review fixes, round 2 (decided by the coordinator)
+
+- **B1 compose flavour.** Every remote step runs through `dc`, which uses `docker compose` (v2) or else `docker-compose` (v1); `planChanges`
+  blocks (`setup_once`, ref `compose_tool`) when the probe finds neither (the remote probe reports the version of whichever exists).
+  Local scripts still need v2. The generator is now `setup-1.1`: older stored setups show "improved steps available" (`generator_outdated`
+  lint, a warning) and are never reported as hand-edited.
+- **B2 rollback on any failure.** Scripts set `SWITCHED` before the image variable / `up`, `FINISHED` after the health check, and an `EXIT`
+  trap (plus `TERM`/`INT` traps that `exit`) restores the previous image, and says `ROLLBACK FAILED ...` when it cannot. The previous image
+  is the `.env` value, else the running image.
+- **B3 stdin.** The remote script now travels as a base64 argument (`bash -c "$(printf %s B64 | base64 -d)"`), never on stdin; the remote
+  stdin is `/dev/null`, `exec -T` has `</dev/null`, and both backups check `[ -s file ]`. The fake docker drains stdin like the real one.
+- **B4 scan guard.** Per-command flag whitelists (an unknown flag or abbreviation is refused), `$`/backtick/`<(`/`>(` outside single quotes
+  refused, credentials unreadable (`~/.ssh`, `.aws`, gcloud, `.env*` except `.env.example`, key files, the runner's `secrets` and `keys`,
+  `/proc/*/environ`, also from a recursive search of a parent folder and by the Read tool), `docker inspect` only with a harmless
+  `--format`, `compose config`, `npm view/outdated`, `sort -o/-T`, `rg --pre/-z` gone, `uniq` one file, no WebFetch/WebSearch in a scan.
+- **M1** a member who does not own the computer can only ask for `ssh_target` of the target's own host (hints dropped); `local` and
+  `ssh_hosts` are the computer owner's. Probe results are listed for the computer's owner and the project owner only. The runner accepts
+  hinted folders only under `/opt` and `/srv` (and compose files only by name), and reports an image variable only when a compose file of
+  that folder refers to it.
+- **M2** a dry run needs org Owner or Admin (the requester kind is the real role); a script that is custom or hand-edited only runs for the
+  Owner. The dry-run gate covers every environment (hand-edited and custom ones too) and stays on after a project has used the guided
+  setup even if `setup.json` is deleted (a project that never did is approved as before).
+- **M3** files in `delivery/` that the setup does not make are kept and listed (`unmodelled`); the page offers a checkbox per file, and
+  only a ticked one is deleted (`removeFiles`).
+- **Minor** health falls back to the app address (a warning `no_health_check` otherwise), `recipe.write` is cancelled by a newer save and
+  expires after an hour, drafts' hand-written scripts are secret-scanned, `envFile` may not point into credential folders, backups are
+  0600, the deploy lock is not inherited by children and names the project (`AOM_DEPLOY_PROJECT_ID`, `$XDG_RUNTIME_DIR` or `~/.cache`),
+  the `.env` temp file is removed by a trap, `imageKeep` is documented as this-computer only.
+

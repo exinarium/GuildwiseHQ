@@ -64,7 +64,11 @@ function envChanges(env: SetupEnv, r: ProbeReport | null | undefined): ChangeIte
           'compose_tool',
         );
       else if (/^1\./.test(r.docker.composeVersion))
-        add('reuse', `Docker Compose ${r.docker.composeVersion} (the older docker-compose program) on ${where}`, 'compose_tool');
+        add(
+          'reuse',
+          `Docker Compose ${r.docker.composeVersion} (the older docker-compose program) on ${where}`,
+          'compose_tool',
+        );
     }
 
     const cf = composeFor(env, r);

@@ -1,11 +1,11 @@
-import { DeliverySetupSchema, type SetupStateDto } from '@aom/shared';
+import { DeliverySetupSchema, SETUP_GENERATOR, type SetupStateDto } from '@aom/shared';
 import { ArrowLeft } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { usePreviewSetup, usePublishSetup, useSaveSetupDraft } from '../../../api/queries/deploy-setup.ts';
 import { Badge, Button, Callout, Disclosure, ErrorBox, TextArea, TextInput } from '../../ui.tsx';
 import { FoundChanges } from './FoundChanges.tsx';
 
-const PLACEHOLDER = { version: 1, generator: 'setup-1.0', environments: [] };
+const PLACEHOLDER = { version: 1, generator: SETUP_GENERATOR, environments: [] };
 
 /**
  * The developer view of the same setup (design J7): the structured fields as JSON and as a few fields per environment, the

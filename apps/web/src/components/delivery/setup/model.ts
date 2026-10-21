@@ -194,6 +194,7 @@ export function buildEnv(a: Answers, homeDir?: string): SetupEnv {
             imageName: a.imageName,
             imageVar: a.imageVar,
             ...(a.healthUrl ? { healthUrl: a.healthUrl } : {}),
+            ...(a.appUrl ? { appUrl: a.appUrl } : {}),
             ...(database ? { database } : {}),
             secrets: a.secrets,
           },

@@ -312,6 +312,37 @@ case "$cmd" in
 esac
 exit 255`;
 
+  it('hinted folders and compose files outside where apps live are ignored; only an image variable a compose file uses is reported', async () => {
+    const server = tmp('aom-server-');
+    const app = join(server, 'guildwise');
+    mkdirSync(app, { recursive: true });
+    writeFileSync(join(app, 'docker-compose.yml'), 'services:\n  app:\n    image: ${GUILDWISE_IMAGE}\n');
+    writeFileSync(
+      join(app, '.env'),
+      'GUILDWISE_IMAGE=guildwise-hq:1\nSECRET_IMAGE_TOKEN=hunter2hunter2\nOTHER_IMAGE=x\n',
+    );
+    const fake = fakeBin({ ssh: SSH_LOCAL, docker: 'case "$1" in version) echo 29;; info) exit 0;; esac' });
+    const r = await runDeployProbe(
+      payload({
+        scope: 'ssh_target',
+        host: 'prod',
+        hints: {
+          dirs: [app, '/etc', '/home/other', '/root/.ssh'],
+          composeFiles: ['/etc/shadow', '/home/other/docker-compose.yml', `${app}/docker-compose.yml`],
+        },
+      }),
+      { env: fake.env, home: server, hintRoots: [server] },
+    );
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    const ssh = fake.log().find((c) => c.startsWith('ssh ')) ?? '';
+    expect(ssh).toContain(app);
+    for (const bad of ['/etc', '/home/other', '/root/.ssh', 'shadow']) expect(ssh).not.toContain(bad);
+    if (!r.ok) return;
+    const folder = r.report.folders.find((f) => f.path === app);
+    expect(folder?.imageVars).toEqual([{ name: 'GUILDWISE_IMAGE', value: 'guildwise-hq:1' }]);
+    expect(JSON.stringify(r)).not.toContain('hunter2');
+  });
+
   it('runs the read-only probe script and builds the report from its output', async () => {
     const server = tmp('aom-server-');
     const app = join(server, 'guildwise');
@@ -351,6 +382,7 @@ esac`,
       {
         env: fake.env,
         home: server,
+        hintRoots: [server],
         fetchImpl: (async (u: string) => {
           asked.push(u);
           return new Response('ok', { status: 200 });

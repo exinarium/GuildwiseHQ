@@ -34,6 +34,13 @@ export const RemotePathSchema = z
     'a full path on the server like /opt/app (letters, digits and . _ / + @ = - only)',
   )
   .refine(noDotDot, 'a path cannot contain ..');
+/** The settings file kept on the computer for a script: a plain path, never a place where credentials live. */
+export const SetupEnvFileSchema = LocalPathSchema.refine(
+  (p) =>
+    !/(^|\/)(\.ssh|\.aws|\.gnupg|\.kube|\.docker|\.config\/gcloud|etc|proc|sys|root)(\/|$)/.test(p) &&
+    !/(^|\/)id_[a-z0-9]+/i.test(p),
+  'a settings file of your own (not an ssh, cloud or system folder)',
+);
 export const ServiceNameSchema = z
   .string()
   .regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$/, 'a service name has letters, digits and . _ - only');
@@ -75,7 +82,10 @@ export const SetupAppSchema = z.object({
   imageName: ImageNameSchema,
   /** On a server: the `.env` key that pins the image (`GUILDWISE_IMAGE`). */
   imageVar: EnvVarNameSchema.optional(),
-  /** How many `<imageName>:<commit>` tags to keep on this computer (older ones are removed, never the running or previous). */
+  /**
+   * How many `<imageName>:<commit>` tags to keep on this computer (older ones are removed, never the running or previous).
+   * Only used when the app runs on this computer: a server's images are not pruned.
+   */
   imageKeep: z.number().int().min(1).max(50).default(5),
   appUrl: SetupUrlSchema.optional(),
 });
@@ -148,7 +158,7 @@ export const SetupEnvSchema = z
     releasedBy: ReleasedBySchema.default('owner'),
     gate: z.union([z.literal('none'), z.string().min(1).max(60), GateSchema]).default('none'),
     secrets: z.array(z.string().regex(SECRET_NAME)).max(30).default([]),
-    envFile: z.string().min(1).max(500).optional(),
+    envFile: SetupEnvFileSchema.optional(),
     timeoutSec: z.number().int().min(60).max(21_600).default(1800),
   })
   .superRefine((e, ctx) => {

@@ -126,6 +126,8 @@ export type SetupStateDto = z.infer<typeof SetupStateDtoSchema>;
 export const SaveSetupDraftRequestSchema = z.object({
   setup: z.unknown(),
   customScripts: z.record(z.string(), z.string().max(200_000)).optional(),
+  /** Files of `delivery/` that the guided setup does not make and the Owner chose to delete (everything else is kept). */
+  removeFiles: z.array(z.string().max(200)).max(50).optional(),
 });
 export type SaveSetupDraftRequest = z.infer<typeof SaveSetupDraftRequestSchema>;
 
@@ -140,6 +142,13 @@ export const SetupPreviewDtoSchema = z.object({
   files: z.array(z.object({ path: z.string(), mode: z.enum(['755', '644']), content: z.string() })),
   /** Files of hand-written scripts that stay as they are. */
   keep: z.array(z.string()),
+  /**
+   * Files in `delivery/` today that the guided setup does not generate (a smoke test, an old script). They are KEPT unless
+   * their path is in the request's `removeFiles`; the page shows them so nothing disappears unseen.
+   */
+  unmodelled: z.array(z.string()).optional(),
+  /** The ones the request asks to delete. */
+  removing: z.array(z.string()).optional(),
   lint: z.array(LintItemDtoSchema),
   changes: z.array(ChangeItemDtoSchema),
   /** The generated files differ from what `delivery/` holds now (a save would be a new version). */
@@ -152,6 +161,7 @@ export type SetupPreviewDto = z.infer<typeof SetupPreviewDtoSchema>;
 export const PublishSetupRequestSchema = z.object({
   setup: z.unknown(),
   customScripts: z.record(z.string(), z.string().max(200_000)).optional(),
+  removeFiles: z.array(z.string().max(200)).max(50).optional(),
   /** The hash the preview showed: a publish of anything else is refused. */
   setupHash: z.string().length(64),
 });

@@ -37,10 +37,17 @@ export interface ProbeOptions {
   commandMs?: number;
   /** ssh connect timeout in seconds (tests use 2). */
   connectSec?: number;
+  /** Where hinted folders on a server may be (default /opt and /srv; tests use a temp folder). */
+  hintRoots?: string[];
 }
 
 const SAFE_PATH = /^\/[A-Za-z0-9._/+@=-]*$/;
 const SAFE_ALIAS = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+/** Hints are looked at, not trusted: a compose file by its name, a folder only where apps live. */
+const COMPOSE_NAME = /(^|\/)(docker-compose|compose)(\.[A-Za-z0-9_-]+)?\.ya?ml$/;
+const under = (p: string, root: string) => p === root || p.startsWith(`${root}/`);
+const serverHintDir = (d: string, roots: readonly string[] = ['/opt', '/srv']) =>
+  roots.some((r) => under(d, r));
 const MAX_REPORT_BYTES = 64 * 1024;
 const MAX_COMPOSE_BYTES = 1_000_000;
 
@@ -403,8 +410,11 @@ async function probeLocal(p: DeployProbePayload, o: ProbeOptions): Promise<Deplo
     for (const [name, list] of projects) for (const f of list) files.set(f, name);
     for (const c of report.containers)
       if (c.composeFile && !files.has(c.composeFile)) files.set(c.composeFile, c.project);
-    for (const f of p.hints?.composeFiles ?? [])
-      if (!files.has(f)) files.set(f.startsWith('~/') ? join(home, f.slice(2)) : f, undefined);
+    for (const f of p.hints?.composeFiles ?? []) {
+      const abs = f.startsWith('~/') ? join(home, f.slice(2)) : f;
+      if (COMPOSE_NAME.test(abs) && (under(abs, home) || serverHintDir(abs, o.hintRoots)) && !files.has(abs))
+        files.set(abs, undefined);
+    }
     for (const [path, project] of [...files].slice(0, 10)) {
       if (!path.startsWith('/') || !SAFE_PATH.test(path)) continue;
       try {
@@ -430,9 +440,10 @@ async function probeLocal(p: DeployProbePayload, o: ProbeOptions): Promise<Deplo
       }
     }
     // folders: the hinted dirs and the backups folder next to a compose file
-    const dirs = new Set<string>(
-      (p.hints?.dirs ?? []).map((d) => (d.startsWith('~/') ? join(home, d.slice(2)) : d)),
-    );
+    const hintDirs = (p.hints?.dirs ?? [])
+      .map((d) => (d.startsWith('~/') ? join(home, d.slice(2)) : d))
+      .filter((d) => under(d, home) || serverHintDir(d, o.hintRoots));
+    const dirs = new Set<string>(hintDirs);
     for (const cf of report.composeFiles) dirs.add(cf.path.slice(0, cf.path.lastIndexOf('/')) || '/');
     for (const d of [...dirs].slice(0, 12)) {
       if (!SAFE_PATH.test(d)) continue;
@@ -441,8 +452,7 @@ async function probeLocal(p: DeployProbePayload, o: ProbeOptions): Promise<Deplo
       const direct = backupsIn(d);
       if (direct && direct.count > 0 && /backup/i.test(d)) report.backups.push(direct);
     }
-    for (const d of (p.hints?.dirs ?? []).slice(0, 10)) {
-      const abs = d.startsWith('~/') ? join(home, d.slice(2)) : d;
+    for (const abs of hintDirs.slice(0, 10)) {
       if (!SAFE_PATH.test(abs)) continue;
       const b = backupsIn(abs);
       if (b && b.count > 0 && !report.backups.some((x) => x.dir === b.dir)) report.backups.push(b);
@@ -562,11 +572,13 @@ async function probeSshTarget(
   host: string,
   o: ProbeOptions,
 ): Promise<DeployProbeResult> {
-  const dirs = [...new Set((p.hints?.dirs ?? []).filter((d) => SAFE_PATH.test(d)))].slice(0, 6);
+  const dirs = [
+    ...new Set((p.hints?.dirs ?? []).filter((d) => SAFE_PATH.test(d) && serverHintDir(d, o.hintRoots))),
+  ].slice(0, 6);
   for (const f of p.hints?.composeFiles ?? [])
-    if (SAFE_PATH.test(f)) {
+    if (SAFE_PATH.test(f) && COMPOSE_NAME.test(f)) {
       const d = f.slice(0, f.lastIndexOf('/'));
-      if (d && !dirs.includes(d) && dirs.length < 8) dirs.push(d);
+      if (d && serverHintDir(d, o.hintRoots) && !dirs.includes(d) && dirs.length < 8) dirs.push(d);
     }
   const r = await run(
     'ssh',
@@ -756,6 +768,18 @@ export function parseRemoteOutput(out: string, host: string, o: ProbeOptions = {
             unreadable: 'could not be read',
           },
     );
+  }
+  // Only an image variable that a compose file of that folder really refers to is reported (not any `*IMAGE*` line of a .env)
+  for (const f of report.folders) {
+    if (!f.imageVars) continue;
+    const named = new Set(
+      report.composeFiles
+        .filter((c) => c.path.startsWith(`${f.path}/`))
+        .flatMap((c) => c.services.flatMap((svc) => svc.vars)),
+    );
+    const kept = f.imageVars.filter((v) => named.has(v.name));
+    if (kept.length) f.imageVars = kept;
+    else delete f.imageVars;
   }
   // proxies: running containers and active services
   for (const c of report.containers) {

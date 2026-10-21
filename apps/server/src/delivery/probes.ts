@@ -72,23 +72,33 @@ export async function requestProbe(
     [workstationId],
   );
   if (!ws) throw notFound('workstation not found');
-  // the ssh hosts and Docker of a computer belong to its owner; a target's own deploying computer may be looked at by members
+  // The ssh hosts and Docker of a computer belong to its owner. Another member may only ask the target's own deploying
+  // computer to look at THAT target's server (its own host, nothing they type), which is what the target is for.
   const targetsOwn = !!target && target.workstation_id === ws.id;
-  if (ws.user_id !== user.id && !targetsOwn) throw forbidden('you can only check your own computers');
-  if (req.scope === 'ssh_hosts' && ws.user_id !== user.id)
-    throw forbidden('only the owner of a computer can list its servers');
+  const mine = ws.user_id === user.id;
+  if (!mine && !targetsOwn) throw forbidden('you can only check your own computers');
+  if (!mine && req.scope !== 'ssh_target')
+    throw forbidden('only the owner of a computer can look at its Docker or list its servers');
   const blocked = await setupBlockedReason(ctx.pool, ws.id);
   if (blocked)
     throw conflict(blocked.includes('update') ? 'runner_outdated' : 'workstation_offline', blocked);
-  const host = req.scope === 'ssh_target' ? (req.host ?? target?.host ?? undefined) : undefined;
-  if (req.scope === 'ssh_target' && !host) throw conflict('host_required', 'name the server to look at');
-  const hints = {
-    ...(req.hints?.composeFiles?.length ? { composeFiles: req.hints.composeFiles } : {}),
-    ...(req.hints?.dirs?.length ? { dirs: req.hints.dirs } : {}),
-    urls: [
-      ...new Set([...(req.hints?.urls ?? []), ...(target?.app_url ? [target.app_url as string] : [])]),
-    ].slice(0, 10),
-  };
+  const wantsHost = req.scope === 'ssh_target';
+  // a member who does not own the computer gets the target's own host and address, never a name or a path of their choosing
+  const host = wantsHost
+    ? mine
+      ? (req.host ?? target?.host ?? undefined)
+      : ((target?.host as string | null) ?? undefined)
+    : undefined;
+  if (wantsHost && !host) throw conflict('host_required', 'name the server to look at');
+  const hints = mine
+    ? {
+        ...(req.hints?.composeFiles?.length ? { composeFiles: req.hints.composeFiles } : {}),
+        ...(req.hints?.dirs?.length ? { dirs: req.hints.dirs } : {}),
+        urls: [
+          ...new Set([...(req.hints?.urls ?? []), ...(target?.app_url ? [target.app_url as string] : [])]),
+        ].slice(0, 10),
+      }
+    : { urls: target?.app_url ? [target.app_url as string] : [] };
   const payload: DeployProbePayload = {
     projectId: project.id,
     ...(target ? { targetId: target.id } : {}),
@@ -205,12 +215,17 @@ export async function applyProbeResult(
 }
 
 /** The latest probes of a project, newest first, with plain-words errors. */
-export async function listProbeDtos(db: Queryable, projectId: string): Promise<SetupProbeDto[]> {
+export async function listProbeDtos(
+  db: Queryable,
+  projectId: string,
+  /** Who is looking: a probe is visible to the owner of the computer that made it and to the project owner. */
+  viewer: { userId: string; projectOwner: boolean },
+): Promise<SetupProbeDto[]> {
   const list = await rows(
     db,
     `SELECT p.*, w.name AS workstation_name FROM deploy_probes p JOIN workstations w ON w.id = p.workstation_id
-      WHERE p.project_id=$1 ORDER BY p.at DESC LIMIT 40`,
-    [projectId],
+      WHERE p.project_id=$1 AND ($2::boolean OR w.user_id = $3) ORDER BY p.at DESC LIMIT 40`,
+    [projectId, viewer.projectOwner, viewer.userId],
   );
   return list.map((r) => ({
     id: r.id,

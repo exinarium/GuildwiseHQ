@@ -198,7 +198,9 @@ export interface LintItem {
     | 'unknown_repo'
     | 'dry_run_missing'
     | 'ci_unsatisfiable'
-    | 'hand_edited';
+    | 'hand_edited'
+    | 'generator_outdated'
+    | 'no_health_check';
   message: string;
   env?: string;
   path?: string;

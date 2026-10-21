@@ -25,7 +25,7 @@ import { loadVisibleProject } from '../authz/scope.ts';
 import { projectScope, runnerActor, SYSTEM_ACTOR, userActor } from '../commands/common.ts';
 import { listProposalDtos, openScan, scanProblemFor } from '../commands/setup-proposals.ts';
 import type { Ctx } from '../context.ts';
-import { iso, one, type Queryable, rows } from '../db/sql.ts';
+import { exec, iso, one, type Queryable, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, notFound, unprocessable } from '../errors.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
@@ -47,6 +47,8 @@ import { requestDeployRun } from './runs.ts';
  * and on publish sends `recipe.write` to the workstation that holds the vault. What lands in `delivery/` is observed like any
  * other recipe and still needs the Owner's approval of exactly that hash.
  */
+
+export const RECIPE_WRITE_TTL_MS = 3_600_000;
 
 const asLint = (l: LintItem[]) =>
   l.map((x) => ({
@@ -141,8 +143,7 @@ export async function getSetupState(
   const dryRunOk: string[] = [];
   if (recipe?.observed_hash && parsedSetup.success) {
     const missing = new Set(await guidedEnvsWithoutDryRun(ctx.pool, projectId, recipe));
-    for (const e of parsedSetup.data.environments)
-      if (e.mode === 'guided' && !missing.has(e.name)) dryRunOk.push(e.name);
+    for (const e of parsedSetup.data.environments) if (!missing.has(e.name)) dryRunOk.push(e.name);
   }
   const vault = await projectVault(ctx.pool, projectId);
   const writeWs = vault ? await workstationForVault(ctx.pool, projectId, vault, p.org_id) : null;
@@ -179,14 +180,19 @@ export async function getSetupState(
       ? {
           setupHash: lp.setupHash,
           commandId: lp.commandId,
-          status: lp.status,
-          error: lp.error ?? null,
+          // a write nobody picked up in time is never delivered any more
+          ...(lp.status === 'pending' && ctx.clock.now().getTime() - Date.parse(lp.at) > RECIPE_WRITE_TTL_MS
+            ? { status: 'failed' as const, error: 'The computer did not pick this up in time. Save again.' }
+            : { status: lp.status, error: lp.error ?? null }),
           at: lp.at,
         }
       : null,
     targets: targetDtos,
     workstations,
-    probes: await listProbeDtos(ctx.pool, projectId),
+    probes: await listProbeDtos(ctx.pool, projectId, {
+      userId: user.id,
+      projectOwner: p.my_role === 'owner',
+    }),
     writeBlocked,
     scan,
     scanProblem: scan || proposals[0] ? null : await scanProblemFor(ctx.pool, projectId, 'deploy'),
@@ -197,6 +203,18 @@ export async function getSetupState(
 
 // -------------------------------------------------------------------------------------------------------- draft
 
+/** A draft keeps hand-written scripts as text: a credential in one is refused here, not discovered later. */
+function refuseSecretsIn(customScripts: Record<string, string> | undefined): void {
+  for (const [env, text] of Object.entries(customScripts ?? {})) {
+    const hit = findSecret(text);
+    if (hit)
+      throw unprocessable(
+        'secret_in_script',
+        `the script of ${env} contains ${hit}: a script names its secrets and never holds them`,
+      );
+  }
+}
+
 export async function saveSetupDraft(
   ctx: Ctx,
   user: AuthSession['user'],
@@ -206,6 +224,7 @@ export async function saveSetupDraft(
 ): Promise<void> {
   const p = await projectOwnerOrThrow(ctx, user, projectId);
   if (JSON.stringify(req.setup ?? null).length > 400_000) throw badRequest('too_big', 'the setup is too big');
+  refuseSecretsIn(req.customScripts);
   await ctx.store.append([
     {
       streamId: streamId.project(projectId),
@@ -276,6 +295,7 @@ export async function previewSetup(
     differsFromCurrent: false,
     needsDryRun: [],
   };
+  refuseSecretsIn(req.customScripts);
   const c = compileSetup(req.setup, { customScripts: req.customScripts ?? {} });
   if (!c.ok) return { ...empty, issues: c.issues };
   const recipeText = c.files.find((f) => f.path === 'recipe.yaml')?.content ?? '';
@@ -294,17 +314,36 @@ export async function previewSetup(
     [],
     parsed.ok ? undefined : parsed.error,
   );
+  for (const e of c.setup.environments)
+    if (e.mode === 'guided' && e.health.kind === 'none')
+      lint.push({
+        level: 'warn',
+        code: 'no_health_check',
+        env: e.name,
+        message: `${e.name}: there is no address to check after an update, so a broken update is not noticed and nothing is rolled back automatically. Add the address of the site.`,
+      });
   const reports = await reportsFor(ctx.pool, projectId, c.setup);
   const changes: ChangeItem[] = planChanges(c.setup, reports);
   const recipe = await loadRecipeRow(ctx.pool, projectId);
   const current = await currentGeneratedHash(recipe);
   const guided = c.setup.environments.filter((e) => e.mode === 'guided').map((e) => e.name);
+  // Saving replaces the folder, so a file the setup does not make (a smoke test, an old script) would vanish. It stays unless
+  // the Owner names it.
+  const generated = new Set(c.files.map((f) => f.path));
+  const unmodelled = ((recipe?.files ?? []) as Array<{ path: string }>)
+    .map((f) => f.path)
+    .filter((path) => !generated.has(path) && !c.keep.includes(path))
+    .sort();
+  const removing = (req.removeFiles ?? []).filter((f) => unmodelled.includes(f));
+  const kept = unmodelled.filter((f) => !removing.includes(f));
   return {
     ok: true,
     issues: [],
     hash: c.hash,
     files: c.files,
-    keep: c.keep,
+    keep: [...c.keep, ...kept],
+    unmodelled,
+    removing,
     lint: asLint(lint),
     changes,
     differsFromCurrent: current !== c.hash,
@@ -336,6 +375,7 @@ export async function publishSetup(
   const preview = await previewSetup(ctx, user, projectId, {
     setup: req.setup,
     ...(req.customScripts ? { customScripts: req.customScripts } : {}),
+    ...(req.removeFiles ? { removeFiles: req.removeFiles } : {}),
   });
   const errors = preview.lint.filter((l) => l.level === 'error');
   if (errors.length)
@@ -366,17 +406,26 @@ export async function publishSetup(
     projectId,
     vault: { vaultId: vault.vaultId, storage: vault.storage, folder: vault.folder },
     files: c.files,
-    keep: c.keep,
+    keep: preview.keep,
     commitMessage: `delivery setup for ${p.key} (guided, ${c.setup.generator})`,
     expectedHash: c.hash,
     setupHash: c.hash,
   };
   const commandId = await withAppendTx(ctx.pool, async (tx) => {
+    // The newest save wins: an older write that has not been picked up yet is cancelled, and a write nobody picks up within
+    // an hour is never delivered (a computer that comes back next week must not overwrite newer files).
+    await exec(
+      tx,
+      `UPDATE runner_commands SET status='failed', last_error='superseded', payload='{}'::jsonb
+        WHERE type='recipe.write' AND status IN ('pending','sent') AND payload->>'projectId' = $1`,
+      [projectId],
+    );
     const id = await enqueueRunnerCommand(
       tx,
       wsId,
       'recipe.write',
       payload as unknown as Record<string, unknown>,
+      new Date(ctx.clock.now().getTime() + RECIPE_WRITE_TTL_MS),
     );
     await ctx.store.append(
       [
@@ -463,19 +512,29 @@ export async function requestSetupDryRun(
   env: string,
 ): Promise<ReturnType<typeof requestDeployRun>> {
   const p = await projectOwnerOrThrow(ctx, user, projectId);
+  // A dry run RUNS the script on the deploying computer, as that computer's user: the same people who may deploy may try.
   const role = await orgRoleOf(ctx.pool, user.id, p.org_id);
+  if (role !== 'owner' && role !== 'admin')
+    throw forbidden('only an Owner or an Admin can try a deploy setup');
+  // A script that a person wrote or edited may not honour "only check": only the Owner may run it, even as a trial.
+  const recipe = await loadRecipeRow(ctx.pool, projectId);
+  const parsedSetup = DeliverySetupSchema.safeParse(recipe?.setup ?? null);
+  const envDef = parsedSetup.success ? parsedSetup.data.environments.find((e) => e.name === env) : undefined;
+  const handWritten =
+    !parsedSetup.success ||
+    envDef?.mode === 'custom' ||
+    ((recipe?.hand_edited ?? []) as string[]).includes(env);
+  if (handWritten && role !== 'owner')
+    throw forbidden(
+      'this script was written or edited by hand and may not stop at "only check": only the Owner can try it',
+    );
   return requestDeployRun(ctx, {
     projectId,
     env,
     trigger: 'request',
     trial: true,
     dryRun: true,
-    requester: {
-      kind: role === 'owner' ? 'owner' : role === 'admin' ? 'admin' : 'owner',
-      id: user.id,
-      name: user.displayName,
-      provenance: 'session',
-    },
+    requester: { kind: role, id: user.id, name: user.displayName, provenance: 'session' },
   });
 }
 

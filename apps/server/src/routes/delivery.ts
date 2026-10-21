@@ -163,8 +163,13 @@ export function deliveryRoutes(ctx: Ctx) {
 
     app.get('/api/projects/:id/delivery/probes', { schema: { params: IdParamsSchema } }, async (req) => {
       const s = await requireUser(ctx, req);
-      await loadVisibleProject(ctx.pool, s.user.id, req.params.id);
-      return { probes: await listProbeDtos(ctx.pool, req.params.id) };
+      const project = await loadVisibleProject(ctx.pool, s.user.id, req.params.id);
+      return {
+        probes: await listProbeDtos(ctx.pool, req.params.id, {
+          userId: s.user.id,
+          projectOwner: project.my_role === 'owner',
+        }),
+      };
     });
 
     /**

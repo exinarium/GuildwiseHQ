@@ -6,6 +6,7 @@ import type {
   SetupScanRequest,
   SetupStateDto,
 } from '@aom/shared';
+import { SETUP_GENERATOR } from '@aom/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { get, post, put } from '../client.ts';
 
@@ -46,7 +47,7 @@ export function useSetupState(projectId: string | undefined, waiting = false) {
         scan: d.scan ?? null,
         scanProblem: d.scanProblem ?? null,
         proposal: d.proposal ?? null,
-        generator: d.generator ?? 'setup-1.0',
+        generator: d.generator ?? SETUP_GENERATOR,
       };
     },
     refetchInterval: (q) =>

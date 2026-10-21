@@ -12,6 +12,7 @@ import {
   type RecipeFileInfo,
   type RecipeInspectResult,
   RecipeInspectResultSchema,
+  SETUP_GENERATOR,
   sha256Hex,
   streamId,
 } from '@aom/shared';
@@ -174,12 +175,16 @@ export async function serverLint(
 export function guidedState(
   rawSetup: unknown,
   files: Array<{ path: string; sha256: string }>,
-): { setup: unknown; handEdited: string[] } {
-  if (rawSetup === undefined || rawSetup === null) return { setup: null, handEdited: [] };
+): { setup: unknown; handEdited: string[]; outdated: boolean } {
+  if (rawSetup === undefined || rawSetup === null) return { setup: null, handEdited: [], outdated: false };
   const parsed = DeliverySetupSchema.safeParse(rawSetup);
-  if (!parsed.success) return { setup: null, handEdited: [] };
+  if (!parsed.success) return { setup: null, handEdited: [], outdated: false };
+  // Scripts made by an older compiler are not what this one would write: that is "an improved version is available", not a
+  // hand edit (a hand edit cannot be told apart from the difference between compilers, so none is reported).
+  if (parsed.data.generator !== SETUP_GENERATOR)
+    return { setup: parsed.data, handEdited: [], outdated: true };
   const compiled = compileSetup(parsed.data);
-  if (!compiled.ok) return { setup: parsed.data, handEdited: [] };
+  if (!compiled.ok) return { setup: parsed.data, handEdited: [], outdated: false };
   const handEdited: string[] = [];
   for (const e of parsed.data.environments) {
     if (e.mode !== 'guided') continue;
@@ -188,7 +193,7 @@ export function guidedState(
     const have = files.find((f) => f.path === path);
     if (!want || !have || sha256Hex(want.content) !== have.sha256) handEdited.push(e.name);
   }
-  return { setup: parsed.data, handEdited };
+  return { setup: parsed.data, handEdited, outdated: false };
 }
 
 /** What the workstation found in `delivery/`: recorded as an observation, with a drift event when it is not what was approved. */
@@ -216,7 +221,7 @@ export async function observeRecipe(
   const recipe = (inspected.present ? inspected.recipe : null) as Recipe | null;
   const guided = inspected.present
     ? guidedState((inspected as { setup?: unknown }).setup, inspected.files)
-    : { setup: null, handEdited: [] };
+    : { setup: null, handEdited: [], outdated: false };
   const lint = await serverLint(
     ctx.pool,
     project.org_id,
@@ -226,6 +231,13 @@ export async function observeRecipe(
     inspected.lint as LintItem[],
     inspected.parseError,
   );
+  if (guided.outdated)
+    lint.push({
+      level: 'warn',
+      code: 'generator_outdated',
+      message:
+        'An improved version of these steps is available. Open the deploy setup and save it again to get it; the new version needs your approval.',
+    });
   for (const env of guided.handEdited)
     lint.push({
       level: 'warn',
@@ -382,12 +394,22 @@ export async function approveRecipe(
 
 /** The guided environments of the observed recipe that have no successful dry run of its observed hash. */
 export async function guidedEnvsWithoutDryRun(db: Queryable, projectId: string, row: Row): Promise<string[]> {
+  // EVERY environment of the observed version needs one: guided, edited by hand or custom. A recipe with no setup.json needs
+  // them too once the project has used the guided setup (deleting setup.json must not switch the check off); a project that
+  // never did (a recipe the CEO or DevOps wrote) is approved as before.
   const parsed = DeliverySetupSchema.safeParse(row.setup ?? null);
-  if (!parsed.success) return [];
-  const handEdited = new Set<string>((row.hand_edited ?? []) as string[]);
+  const usedGuided =
+    parsed.success ||
+    !!(await one(db, 'SELECT 1 AS x FROM delivery_setup_drafts WHERE project_id=$1', [projectId]));
+  if (!usedGuided) return [];
+  const names: string[] = parsed.success
+    ? parsed.data.environments.map((e) => e.name)
+    : (((row.parsed as { environments?: Array<{ name: string }> } | null)?.environments ?? []).map(
+        (e) => e.name,
+      ) as string[]);
   const out: string[] = [];
-  for (const e of parsed.data.environments) {
-    if (e.mode !== 'guided' || handEdited.has(e.name)) continue;
+  for (const name of names) {
+    const e = { name };
     const ok = await one(
       db,
       `SELECT 1 AS x FROM deploy_runs WHERE project_id=$1 AND env=$2 AND hash=$3 AND dry_run AND status='succeeded' LIMIT 1`,

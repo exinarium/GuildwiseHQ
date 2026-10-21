@@ -1,4 +1,11 @@
-import { compileSetup, localAdoptEnv, type ProbeReport, planChanges, sshShipEnv } from '@aom/shared';
+import {
+  compileSetup,
+  localAdoptEnv,
+  type ProbeReport,
+  planChanges,
+  SETUP_GENERATOR,
+  sshShipEnv,
+} from '@aom/shared';
 import { HttpResponse, http } from 'msw';
 
 /**
@@ -157,7 +164,7 @@ const serverReport = () => ({
   scope: 'ssh_target',
   host: 'prod-server',
   at: ago(1),
-  docker: { installed: true, usable: true, version: '29.1.2' },
+  docker: { installed: true, usable: true, version: '29.1.2', composeVersion: '2.40.0' },
   containers: [
     {
       name: 'shop-app-1',
@@ -338,7 +345,7 @@ function state() {
     scan: null,
     scanProblem: null,
     proposal: s === 'proposal' ? proposal() : null,
-    generator: 'setup-1.0',
+    generator: SETUP_GENERATOR,
   };
 }
 

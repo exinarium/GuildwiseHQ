@@ -119,6 +119,8 @@ export interface SshShipAnswers {
   /** The `.env` key that pins the image. */
   imageVar: string;
   healthUrl?: string;
+  /** The address of the site: its home page is checked when there is no health address of its own. */
+  appUrl?: string;
   database?: DatabaseAnswers;
   secrets?: string[];
   envFile?: string;
@@ -157,12 +159,18 @@ export function sshShipEnv(a: SshShipAnswers, testEnv: string | null = null): Se
       service: a.service,
       imageName: a.imageName,
       imageVar: a.imageVar,
+      // only used when deploying on this computer (a server is not pruned)
       imageKeep: 5,
+      ...(a.appUrl ? { appUrl: a.appUrl } : {}),
     },
     steps,
-    health: a.healthUrl ? { kind: 'http', url: a.healthUrl, expect: '2xx' } : { kind: 'none', graceSec: 10 },
+    health: a.healthUrl
+      ? { kind: 'http', url: a.healthUrl, expect: '2xx' }
+      : a.appUrl
+        ? { kind: 'http', url: '${appUrl}/', expect: '2xx3xx' }
+        : { kind: 'none', graceSec: 10 },
     healthTimeoutSec: 120,
-    rollback: !!a.healthUrl,
+    rollback: !!(a.healthUrl || a.appUrl),
     trigger: d.trigger,
     releasedBy: d.releasedBy,
     gate: d.gate,

@@ -5,6 +5,7 @@ import {
   localAdoptEnv,
   parseRecipe,
   type RecipeInspectResult,
+  SETUP_GENERATOR,
   SETUP_SCAN_CAPABILITY,
   sha256Hex,
   sshShipEnv,
@@ -245,7 +246,7 @@ describe('publish through recipe.write, then observe', () => {
     // the observed recipe is the one the Owner sees (and approves): the generated files, nothing else
     const row = (await q('SELECT * FROM delivery_recipes WHERE project_id=$1', [d.w.projectId]))[0];
     expect(row.parsed.environments.map((e: any) => e.name)).toEqual(['uat', 'production']);
-    expect(row.setup.generator).toBe('setup-1.0');
+    expect(row.setup.generator).toBe(SETUP_GENERATOR);
   });
 
   it('a refusal by the workstation is shown, and nothing is observed', async () => {
@@ -315,6 +316,24 @@ describe('hand-edited scripts and the dry run before approval', () => {
       level: 'warn',
       env: 'uat',
     });
+    // an edited script is the one that most needs trying without changing anything
+    const hash = (
+      await q('SELECT observed_hash FROM delivery_recipes WHERE project_id=$1', [d.w.projectId])
+    )[0].observed_hash;
+    const early = await d.approve(hash);
+    expect(early.status).toBe(422);
+    expect(early.body.error.message).toContain('uat');
+  });
+
+  it('scripts made by an older compiler are "an improved version is available", not hand edits', async () => {
+    const c = compiled();
+    const old = { ...inspected(c), setup: { ...c.setup, generator: 'setup-0.9' } } as RecipeInspectResult;
+    await observeRecipe(d.w.t.app.ctx, d.w.projectId, old, d.w.workstationId);
+    const st = await call('GET', `${base()}/delivery/setup`);
+    expect(st.current.handEdited).toEqual([]);
+    expect(st.current.lint.find((l: any) => l.code === 'generator_outdated')).toMatchObject({
+      level: 'warn',
+    });
   });
 
   it('a guided setup is approved only after a successful dry run of exactly that version', async () => {
@@ -364,11 +383,20 @@ describe('hand-edited scripts and the dry run before approval', () => {
     });
   });
 
-  it('a recipe without a setup.json is custom: no dry run is demanded and the page shows it as a script', async () => {
+  it('a recipe without a setup.json is custom: no dry run is demanded in a project that never used the guided setup', async () => {
+    await q('DELETE FROM delivery_setup_drafts WHERE project_id=$1', [d.w.projectId]);
     const o = await d.observe();
     const st = await call('GET', `${base()}/delivery/setup`);
     expect(st.current).toMatchObject({ custom: true, setup: null });
     expect((await d.approve(o.hash)).status).toBe(200);
+  });
+
+  it('...but once the guided setup was used, deleting setup.json does not switch the dry run check off', async () => {
+    await call('PUT', `${base()}/delivery/setup`, { setup: setup() });
+    const o = await d.observe();
+    const early = await d.approve(o.hash);
+    expect(early.status).toBe(422);
+    expect(early.body.error.code).toBe('dry_run_required');
   });
 });
 
@@ -376,7 +404,7 @@ describe('probes and the reachability of a server', () => {
   const report = (scope: string, extra: Record<string, unknown> = {}) => ({
     scope,
     at: new Date().toISOString(),
-    docker: { installed: true, usable: true, version: '29.1' },
+    docker: { installed: true, usable: true, version: '29.1', composeVersion: '2.40.0' },
     containers: [],
     composeFiles: [],
     volumes: [],

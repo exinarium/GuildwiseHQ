@@ -406,7 +406,7 @@ function remoteState(): string[] {
     '[ -f "$file" ] || { echo "AOM: there is no compose file $file on the server" >&2; exit 22; }',
     'docker info >/dev/null 2>&1 || { echo "AOM: docker is not usable by this user on the server" >&2; exit 23; }',
     'cur=',
-    "if [ -f \"$dir/.env\" ]; then cur=$(VAR=\"$var\" awk '" + ENV_VALUE_AWK + "' \"$dir/.env\"); fi",
+    'if [ -f "$dir/.env" ]; then cur=$(VAR="$var" awk \'' + ENV_VALUE_AWK + '\' "$dir/.env"); fi',
     'run=',
     'id=$(cd "$dir" && dc -f "$file" ps -q "$svc" 2>/dev/null | head -n 1) || id=',
     `if [ -n "$id" ]; then run=$(docker inspect --format '{{.Config.Image}}' "$id" 2>/dev/null) || run=; fi`,
@@ -507,7 +507,7 @@ function sshScript(setup: DeliverySetup, env: SetupEnv): string {
 /** Everything after the image switch is undone when the script ends early (any failure, TERM, INT), unless it finished. */
 function sshGuard(env: SetupEnv): string[] {
   return [
-    '# the image to go back to: the settings file\'s value, else what runs now',
+    "# the image to go back to: the settings file's value, else what runs now",
     'PREVIOUS="${CURRENT_IMAGE:-$RUNNING_IMAGE}"',
     'SWITCHED=0',
     'FINISHED=0',
