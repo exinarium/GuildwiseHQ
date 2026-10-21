@@ -3,9 +3,10 @@ import {
   BACKLOG_STATUS_LABEL,
   type BacklogItemDto,
   type BacklogPriority,
-  type BacklogSendResult,
   BacklogPriority as BacklogPrioritySchema,
-} from '@aom/shared';import { ListTodo, MoreHorizontal, Star } from 'lucide-react';
+  type BacklogSendResult,
+} from '@aom/shared';
+import { ListTodo, MoreHorizontal, Star } from 'lucide-react';
 import { type FormEvent, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import { errorMessage } from '../api/client.ts';
@@ -69,13 +70,7 @@ function SourceLabel({ item }: { item: BacklogItemDto }) {
   );
 }
 
-function EditDialog({
-  item,
-  onClose,
-}: {
-  item: BacklogItemDto;
-  onClose: () => void;
-}) {
+function EditDialog({ item, onClose }: { item: BacklogItemDto; onClose: () => void }) {
   const edit = useEditBacklogItem();
   const toast = useToast();
   const readOnly = item.status !== 'open';
@@ -330,7 +325,11 @@ export function Backlog() {
               </option>
             ))}
           </Select>
-          <Select label="Sort" value={sort} onChange={(e) => setSort(e.target.value as 'priority' | 'created')}>
+          <Select
+            label="Sort"
+            value={sort}
+            onChange={(e) => setSort(e.target.value as 'priority' | 'created')}
+          >
             <option value="priority">Priority</option>
             <option value="created">Newest</option>
           </Select>
@@ -371,9 +370,16 @@ export function Backlog() {
         />
       )}
       {items.length > 0 && (
-        <ul className="divide-y divide-line rounded-card border border-line bg-surface" data-testid="backlog-list">
+        <ul
+          className="divide-y divide-line rounded-card border border-line bg-surface"
+          data-testid="backlog-list"
+        >
           {items.map((i) => (
-            <li key={i.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2.5" data-testid="backlog-row">
+            <li
+              key={i.id}
+              className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2.5"
+              data-testid="backlog-row"
+            >
               {canManage && i.status === 'open' ? (
                 <input
                   type="checkbox"
@@ -400,7 +406,10 @@ export function Backlog() {
                     )
                   }
                 >
-                  <Star aria-hidden="true" className={i.flagged ? 'size-5 fill-current text-warning' : 'size-5'} />
+                  <Star
+                    aria-hidden="true"
+                    className={i.flagged ? 'size-5 fill-current text-warning' : 'size-5'}
+                  />
                 </button>
               ) : (
                 i.flagged && <Star aria-label="Flagged" className="size-5 fill-current text-warning" />
@@ -419,14 +428,24 @@ export function Backlog() {
               <span className="text-sm text-muted">
                 <SourceLabel item={i} />
               </span>
-              {i.status !== 'open' && <Badge tone={i.status === 'done' ? 'success' : 'neutral'}>{BACKLOG_STATUS_LABEL[i.status]}</Badge>}
+              {i.status !== 'open' && (
+                <Badge tone={i.status === 'done' ? 'success' : 'neutral'}>
+                  {BACKLOG_STATUS_LABEL[i.status]}
+                </Badge>
+              )}
               {i.status === 'done' && i.cardRef && (
-                <Link to={`/cards/${i.cardRef}`} className="tnum text-sm font-medium text-brand-text hover:underline">
+                <Link
+                  to={`/cards/${i.cardRef}`}
+                  className="tnum text-sm font-medium text-brand-text hover:underline"
+                >
                   Became {i.cardRef}
                 </Link>
               )}
               {canManage && i.status === 'open' && (
-                <Menu label={`Actions for ${i.title}`} trigger={<MoreHorizontal aria-hidden="true" className="size-5" />}>
+                <Menu
+                  label={`Actions for ${i.title}`}
+                  trigger={<MoreHorizontal aria-hidden="true" className="size-5" />}
+                >
                   <MenuItem onSelect={() => setEditing(i)}>Edit</MenuItem>
                   <MenuItem onSelect={() => sendItems([i.id])}>Send to BA</MenuItem>
                   <MenuItem danger onSelect={() => setDropping(i)}>
@@ -456,7 +475,11 @@ export function Backlog() {
         open={!!dropping}
         onOpenChange={(o) => !o && setDropping(null)}
         title="Drop this item?"
-        description={dropping ? `"${dropping.title}" leaves the backlog. You can still find it with the Dropped filter.` : undefined}
+        description={
+          dropping
+            ? `"${dropping.title}" leaves the backlog. You can still find it with the Dropped filter.`
+            : undefined
+        }
         confirmLabel="Drop"
         pending={drop.isPending}
         onConfirm={() =>

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { agentEvents } from './agent.ts';
 import { approvalEvents } from './approval.ts';
+import { backlogEvents } from './backlog.ts';
 import { blogEvents } from './blog.ts';
 import { cardEvents } from './card.ts';
 import { catalogueEvents } from './catalogue.ts';
@@ -19,7 +20,6 @@ import { hrEvents } from './hr.ts';
 import { hygieneEvents } from './hygiene.ts';
 import { intakeEvents } from './intake.ts';
 import { intakeBatchEvents } from './intake-batch.ts';
-import { backlogEvents } from './backlog.ts';
 import { interestEvents } from './interest.ts';
 import { ledgerEvents } from './ledger.ts';
 import { mailEvents } from './mail.ts';
