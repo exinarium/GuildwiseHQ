@@ -147,6 +147,7 @@ export function EnvironmentDialog({
   const [addingServer, setAddingServer] = useState(false);
   const [removeFiles, setRemoveFiles] = useState<string[]>([]);
   const [published, setPublished] = useState<string | null>(null);
+  const [finalSetup, setFinal] = useState<{ environments: DeliverySetup['environments'] } | null>(null);
   const [folder, setFolder] = useState('');
 
   const place: PlaceVm | undefined = places.find((p) => p.id === placeId);
@@ -349,7 +350,7 @@ export function EnvironmentDialog({
   const ensurePlace = async (): Promise<string | null> => {
     try {
       if (vplace) {
-        await addTarget.mutateAsync({
+        const made = await addTarget.mutateAsync({
           name: vplace.name,
           kind: 'local_docker',
           workstationId: vplace.workstationId,
@@ -358,7 +359,8 @@ export function EnvironmentDialog({
           production: answers.role === 'live',
           reuseExisting: true,
         });
-        return vplace.name;
+        setPlaceId(made.id ?? placeId);
+        return made.name ?? vplace.name;
       }
       if (place) {
         const patch: Record<string, unknown> = {};
@@ -373,18 +375,20 @@ export function EnvironmentDialog({
     return null;
   };
 
-  const goReview = () => {
+  const goReview = async () => {
+    // the place must exist for the steps to be checked against it (a computer is made a place now, once)
+    const target = await ensurePlace();
+    if (!target) return;
+    const checked = target === answers.targetName ? proposed : withEnv(baseSetup, { ...env, target });
+    setFinal(checked);
     setStep('review');
-    preview.mutate({ setup: proposed, removeFiles });
-    saveDraft.mutate({ setup: proposed });
+    preview.mutate({ setup: checked, removeFiles });
+    saveDraft.mutate({ setup: checked });
   };
   const save = async () => {
     if (!preview.data?.hash) return;
-    const target = await ensurePlace();
-    if (!target) return;
-    const finalEnv = target === answers.targetName ? proposed : withEnv(baseSetup, { ...env, target });
     publish.mutate(
-      { setup: finalEnv, setupHash: preview.data.hash, removeFiles },
+      { setup: finalSetup ?? proposed, setupHash: preview.data.hash, removeFiles },
       { onSuccess: (r) => setPublished(r.commandId) },
     );
   };
@@ -445,7 +449,12 @@ export function EnvironmentDialog({
         ) : step === 'details' ? (
           <>
             <Button onClick={() => setStep('form')}>Back</Button>
-            <Button variant="primary" disabled={!detailsReady} onClick={goReview} data-testid="env-to-review">
+            <Button
+              variant="primary"
+              disabled={!detailsReady}
+              onClick={() => void goReview()}
+              data-testid="env-to-review"
+            >
               Review
             </Button>
           </>
@@ -592,19 +601,21 @@ export function EnvironmentDialog({
                 }}
                 onAgain={() => lookAt(folder || undefined)}
                 onScan={() => scan.mutate({}, { onSuccess: onClose })}
-                canStartNew={!server}
+                canStartNew
                 startNew={
                   <PrepareServer
                     projectId={projectId}
-                    hosting="this_computer"
+                    hosting={server ? 'ssh' : 'this_computer'}
                     workstationId={wsId}
+                    {...(server && place ? { targetId: place.id } : {})}
                     report={report}
                     suggestedName={placeName}
                     onPrepared={(info) => {
                       setChoice(null);
                       flow.ask({
-                        scope: 'local',
+                        scope: server ? 'ssh_target' : 'local',
                         workstationId: wsId,
+                        ...(server && place?.host ? { host: place.host } : {}),
                         hints: { composeFiles: [info.composeFile] },
                       });
                     }}
@@ -764,9 +775,9 @@ export function EnvironmentDialog({
                 ? removeFiles.filter((x) => x !== path)
                 : [...removeFiles, path];
               setRemoveFiles(next);
-              preview.mutate({ setup: proposed, removeFiles: next });
+              preview.mutate({ setup: finalSetup ?? proposed, removeFiles: next });
             }}
-            onAgain={() => preview.mutate({ setup: proposed, removeFiles })}
+            onAgain={() => preview.mutate({ setup: finalSetup ?? proposed, removeFiles })}
             onDone={onClose}
             onAdvanced={onAdvanced}
           />

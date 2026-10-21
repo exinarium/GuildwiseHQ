@@ -1088,7 +1088,7 @@ describe('the Add environment dialog', () => {
     };
   };
 
-  it('a computer becomes a place only at Save: adopt the running stack, review what is not touched, save the previewed version', async () => {
+  it('a computer becomes a place once, when the steps are checked: adopt the running stack, review what is not touched, save the previewed version', async () => {
     const user = userEvent.setup();
     setupFlow();
     mountPage();
@@ -1111,7 +1111,7 @@ describe('the Add environment dialog', () => {
     expect(within(found).getByTestId('changes-untouched')).toHaveTextContent('Container other-redis');
     expect((screen.getByTestId('details-app') as HTMLSelectElement).value).toBe('app');
     expect(screen.queryByTestId('details-production')).toBeNull();
-    // nothing was created yet
+    // nothing was created while the person was choosing
     expect(calls.some((x) => x.method === 'POST' && x.url.endsWith('/deploy-targets'))).toBe(false);
     await user.click(screen.getByTestId('env-to-review'));
     const save = await screen.findByTestId('review-save');
@@ -1123,7 +1123,11 @@ describe('the Add environment dialog', () => {
       kind: 'local_docker',
       workstationId: WS,
       production: false,
+      reuseExisting: true,
     });
+    // the place exists before the steps are checked against it
+    const order = calls.map((x) => x.url.split('/').slice(-1)[0]);
+    expect(order.indexOf('deploy-targets')).toBeLessThan(order.indexOf('preview'));
     const published = calls.find((x) => x.url.endsWith('/setup/publish'))?.body;
     expect(published.setup.environments[0]).toMatchObject({
       name: 'test-site',

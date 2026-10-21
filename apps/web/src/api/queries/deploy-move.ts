@@ -41,6 +41,8 @@ function useMoveMutation<V, R>(projectId: string, fn: (v: V) => Promise<R>) {
       void qc.invalidateQueries({ queryKey: movesKey(projectId) });
       void qc.invalidateQueries({ queryKey: setupKey(projectId) });
       void qc.invalidateQueries({ queryKey: ['deploy-targets', projectId] });
+      void qc.invalidateQueries({ queryKey: ['places', projectId] });
+      void qc.invalidateQueries({ queryKey: ['env-status', projectId] });
     },
   });
 }

@@ -41,7 +41,11 @@ export function YourAppCard({ projectId, canEdit }: { projectId: string; canEdit
       collapsible={!!plan && !o.proposal && !o.scan}
     >
       <RunStepsCard projectId={projectId} canEdit={canEdit} />
-      <Disclosure summary="Notes for DevOps (technical details)" className="border-t border-line pt-3">
+      <Disclosure
+        summary="Notes for DevOps (technical details)"
+        className="border-t border-line pt-3"
+        data-testid="run-technical"
+      >
         <RunSettingsTechnical projectId={projectId} canEdit={canEdit} />
       </Disclosure>
     </Section>

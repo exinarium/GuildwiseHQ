@@ -215,7 +215,7 @@ test('setup: two throwaway servers, a runner whose ssh sees only them, an approv
 });
 
 test('Move to a new server: connect the new server with a password; Guildwise looks at it and sets up the folder', async () => {
-  await page.goto(`/projects/${projectId}/settings`);
+  await page.goto('/p/DMV/environments');
   await page.getByTestId('env-move-production').click({ timeout: 60_000 });
   await page.getByTestId('move-connect-new').click();
   await page.getByTestId('connect-name').fill('New shop server');

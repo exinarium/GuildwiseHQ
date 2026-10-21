@@ -119,6 +119,10 @@ export function keysForEvent(event: Pick<VisibleEvent, 'type' | 'streamId' | 'pr
         ['run-settings'],
         // guided deploy setup: drafts, probes, ssh reachability, observed setup
         ['deploy-setup'],
+        // the Environments page: places, what runs where, the unfinished files
+        ['places'],
+        ['env-status'],
+        ['env-unmodelled'],
         // RunPlanSaved / SetupProposalSubmitted / SetupProposalResolved: the guided run steps
         ['run-plan'],
         ['commit-as'],

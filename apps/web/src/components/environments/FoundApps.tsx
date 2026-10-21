@@ -164,8 +164,8 @@ export function FoundApps({
               </p>
               <p className="mt-1">
                 You can point us at the folder, start a new copy
-                {canStartNew ? ' from your start steps' : ''}, type in an app that runs directly on the
-                machine, or ask DevOps to look.
+                {canStartNew ? (server ? ', set the server up' : ' from your start steps') : ''}, type in an
+                app that runs directly on the machine, or ask DevOps to look.
               </p>
             </Callout>
           )}
@@ -190,10 +190,12 @@ export function FoundApps({
               checked={selected?.kind === 'new'}
               onSelect={() => onSelect({ kind: 'new' })}
               icon={<PlayCircle className="size-5" />}
-              title="Start a new copy from my start steps"
+              title={server ? 'Set this server up first' : 'Start a new copy from my start steps'}
               testId="new-copy"
             >
-              Starts a fresh copy. What is running now is not touched.
+              {server
+                ? 'Guildwise adds what is missing (Docker, a folder, the compose file, HTTPS for your address) after you confirm a list. What is there is kept.'
+                : 'Starts a fresh copy. What is running now is not touched.'}
             </Choice>
           )}
           {selected?.kind === 'new' && startNew}
