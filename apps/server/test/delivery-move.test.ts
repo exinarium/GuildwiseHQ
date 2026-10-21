@@ -496,11 +496,18 @@ describe('the way through', () => {
     const member = await d.member();
     await q(`UPDATE deploy_targets SET production=true WHERE id=$1`, [newTarget]);
     try {
-      const out = await req('PATCH', `/api/deploy-targets/${newTarget}`, { host: 'elsewhere' }, member.cookie);
+      const out = await req(
+        'PATCH',
+        `/api/deploy-targets/${newTarget}`,
+        { host: 'elsewhere' },
+        member.cookie,
+      );
       expect([403, 404]).toContain(out.status);
       const host = (await q(`SELECT host FROM deploy_targets WHERE id=$1`, [newTarget]))[0].host;
       expect(host).toBe('aom-p5-new');
-      expect((await req('PATCH', `/api/deploy-targets/${newTarget}`, { host: 'elsewhere' })).status).toBe(200);
+      expect((await req('PATCH', `/api/deploy-targets/${newTarget}`, { host: 'elsewhere' })).status).toBe(
+        200,
+      );
     } finally {
       await q(`UPDATE deploy_targets SET production=false, host='aom-p5-new' WHERE id=$1`, [newTarget]);
     }

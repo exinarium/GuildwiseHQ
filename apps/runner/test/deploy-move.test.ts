@@ -11,8 +11,8 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { gzipSync } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
+import { gzipSync } from 'node:zlib';
 import { type DeployMovePayload, DeployMovePayloadSchema, type MoveSpec } from '@aom/shared';
 import { describe, expect, it } from 'vitest';
 import { DeployKeys } from '../src/delivery/deploy-keys.ts';
@@ -255,7 +255,8 @@ describe('deploy.move on two fake servers', () => {
   /** The last backup on the old server replaced by `content` (gzip'd here), as a stream or a file cut short would deliver it. */
   const replaceBackup = (file: string, content: Buffer | string, raw = false) =>
     writeFileSync(file, raw ? (content as Buffer) : gzipSync(content));
-  const BODY = '-- PostgreSQL database dump\nCREATE TABLE users;\nCREATE TABLE orders;\nCREATE TABLE sessions;\n';
+  const BODY =
+    '-- PostgreSQL database dump\nCREATE TABLE users;\nCREATE TABLE orders;\nCREATE TABLE sessions;\n';
 
   it('a dump cut at a statement boundary (valid gzip, no trailer) is refused before anything is applied', async () => {
     const r = rig();

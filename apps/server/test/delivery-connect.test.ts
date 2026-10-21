@@ -636,11 +636,22 @@ describe('prepare', () => {
 
 /** The target is connected through the guided flow on its own computer (an active key that is not the person's own alias). */
 const guided = async (targetId: string, method = 'password') => {
-  await q(`DELETE FROM deploy_target_keys WHERE target_id=$1 AND workstation_id=$2`, [targetId, d.w.workstationId]);
+  await q(`DELETE FROM deploy_target_keys WHERE target_id=$1 AND workstation_id=$2`, [
+    targetId,
+    d.w.workstationId,
+  ]);
   await q(
     `INSERT INTO deploy_target_keys (target_id, workstation_id, project_id, org_id, fingerprint, public_key, alias, method, state, added_at)
      VALUES ($1,$2,$3,$4,$5,$6,'prod',$7,'active',now())`,
-    [targetId, d.w.workstationId, d.w.projectId, d.orgId, `SHA256:guided${randomUUID().slice(0, 8)}`, PUB('55555555'), method],
+    [
+      targetId,
+      d.w.workstationId,
+      d.w.projectId,
+      d.orgId,
+      `SHA256:guided${randomUUID().slice(0, 8)}`,
+      PUB('55555555'),
+      method,
+    ],
   );
 };
 
