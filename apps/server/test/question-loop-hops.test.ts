@@ -46,6 +46,8 @@ const ask = (shiftId: string, n: number) =>
     options: [],
     doing: `building screen ${n}`,
     blocking: false,
+    // the answers to earlier questions sit in the ledger and match the next question's wording
+    force: true,
   });
 
 /** The next shift of `kind` for `name` that nobody took yet, started. */
