@@ -13,6 +13,7 @@ import type { Ctx } from '../context.ts';
 import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import { conflict, forbidden, notFound, unprocessable } from '../errors.ts';
+import { duplicateOfPlace, placeBlockFor } from '../delivery/environments.ts';
 import { projectScope, userActor } from './common.ts';
 
 export function toTargetDto(t: Row): DeployTargetDto {
@@ -144,15 +145,47 @@ const nameTaken = async (tx: Queryable, projectId: string, name: string, exceptI
     [projectId, name, exceptId ?? null],
   );
 
+/** The id of a place that is the same as what is being added (same alias on the same computer, or the same computer). */
+async function matchingPlace(
+  tx: Queryable,
+  projectId: string,
+  req: { kind: string; workstationId?: string | null | undefined; host?: string | null | undefined },
+): Promise<Row | undefined> {
+  const probe = {
+    id: 'new',
+    kind: req.kind,
+    host: req.host ?? null,
+    workstation_id: req.workstationId ?? null,
+    created_at: new Date(8.64e15),
+  };
+  const existing = await rows(tx, `${SELECT} WHERE t.project_id=$1 AND t.removed_at IS NULL`, [projectId]);
+  const hit = duplicateOfPlace(probe as Row, existing);
+  return hit ? existing.find((x) => x.id === hit.id) : undefined;
+}
+
 export async function addDeployTarget(
   ctx: Ctx,
   user: AuthSession['user'],
   projectId: string,
   req: CreateDeployTargetRequest,
 ): Promise<string> {
+  return (await addOrReuseDeployTarget(ctx, user, projectId, req)).id;
+}
+
+/** `addDeployTarget`, saying whether an existing place was returned (`reuseExisting`) instead of a new one made. */
+export async function addOrReuseDeployTarget(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  projectId: string,
+  req: CreateDeployTargetRequest,
+): Promise<{ id: string; reused: boolean }> {
   return withAppendTx(ctx.pool, async (tx) => {
     const p = await loadVisibleProject(tx, user.id, projectId);
     if (p.status !== 'active') throw conflict('project_archived', 'project is archived');
+    if (req.reuseExisting) {
+      const same = await matchingPlace(tx, projectId, req);
+      if (same) return { id: same.id as string, reused: true };
+    }
     // Marking a target production, testable or destructive-ok is the project owner's call.
     if ((req.production || req.testEnabled || req.destructiveOk) && p.my_role !== 'owner')
       throw forbidden('only the project owner can mark a target as production or open it to testing');
@@ -195,7 +228,7 @@ export async function addDeployTarget(
       ],
       { tx },
     );
-    return targetId;
+    return { id: targetId, reused: false };
   });
 }
 
@@ -309,6 +342,8 @@ export async function removeDeployTarget(
     ]);
     if (!t) throw notFound('deploy target not found');
     const p = await loadVisibleProject(tx, user.id, t.project_id);
+    const block = await placeBlockFor(tx, t);
+    if (block) throw conflict(block.code, block.message);
     if (await targetInUse(tx, targetId))
       throw conflict('target_in_use', 'a phase follow-up that is not finished yet uses this deploy target');
     await ctx.store.append(

@@ -4,6 +4,7 @@ import {
   type ConnectStartedDto,
   connectErrorText,
   DEPLOY_CONNECT_CAPABILITY,
+  DEPLOY_SETUP_V2_CAPABILITY,
   type DeployConnectPayload,
   DeployConnectResultSchema,
   type DeployKeyDto,
@@ -38,7 +39,7 @@ import { loadVisibleProject } from '../authz/scope.ts';
 import { projectScope, runnerActor, userActor } from '../commands/common.ts';
 import { addDeployTarget } from '../commands/deploy-targets.ts';
 import type { Ctx } from '../context.ts';
-import { exec, iso, one, type Queryable, rows } from '../db/sql.ts';
+import { exec, iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, notFound, unprocessable } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
@@ -262,6 +263,69 @@ export async function requestRevoke(
     fingerprint: key.fingerprint,
   };
   return { commandId: await enqueueOp(ctx, ws.id, 'deploy.revoke', payload), workstationId: ws.id };
+}
+
+/**
+ * "Remove this server": asks the computers of the person who removes it to take Guildwise's own key off the server and delete
+ * their key material for it. Never blocks the removal: the answer says what was started and why anything was skipped.
+ */
+export async function revokeKeyOnRemoval(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  projectId: string,
+  t: Row,
+): Promise<{ state: 'none' | 'started' | 'skipped'; commandId: string | null; reason: string | null }> {
+  const keys = await rows(
+    ctx.pool,
+    `SELECT k.*, w.user_id AS ws_user, w.name AS ws_name, w.connected AS ws_connected, c.capabilities
+       FROM deploy_target_keys k JOIN workstations w ON w.id = k.workstation_id
+       LEFT JOIN workstation_capabilities c ON c.workstation_id = w.id
+      WHERE k.target_id=$1 AND k.state='active'`,
+    [t.id],
+  );
+  if (keys.length === 0) return { state: 'none', commandId: null, reason: null };
+  const mine = keys.filter((k) => k.ws_user === user.id);
+  const others = keys.length - mine.length;
+  const otherNote =
+    others > 0
+      ? ` ${others === 1 ? 'A key' : `${others} keys`} made by other people's computers stay${others === 1 ? 's' : ''} on the server: remove the line${others === 1 ? '' : 's'} starting with "guildwise-deploy:" from its authorized_keys.`
+      : '';
+  if (mine.length === 0)
+    return {
+      state: 'skipped',
+      commandId: null,
+      reason: `The key on that server was made by a computer that is not yours.${otherNote}`,
+    };
+  let first: string | null = null;
+  const problems: string[] = [];
+  for (const k of mine) {
+    const caps = (k.capabilities ?? []) as string[];
+    if (!k.ws_connected) {
+      problems.push(`${k.ws_name} is offline, so its key was not taken off the server.`);
+      continue;
+    }
+    if (!caps.includes(DEPLOY_CONNECT_CAPABILITY) || !caps.includes(DEPLOY_SETUP_V2_CAPABILITY)) {
+      problems.push(`Guildwise on ${k.ws_name} needs an update to remove its key.`);
+      continue;
+    }
+    const payload: DeployRevokePayload = {
+      projectId,
+      targetId: t.id,
+      alias: String(t.host),
+      publicKey: k.public_key,
+      fingerprint: k.fingerprint,
+      forget: true,
+    };
+    const id = await enqueueOp(ctx, k.workstation_id, 'deploy.revoke', payload);
+    first ??= id;
+  }
+  if (first)
+    return {
+      state: 'started',
+      commandId: first,
+      reason: problems.length || otherNote ? `${problems.join(' ')}${otherNote}`.trim() : null,
+    };
+  return { state: 'skipped', commandId: null, reason: `${problems.join(' ')}${otherNote}`.trim() };
 }
 
 /** The latest look at a server (or at this computer) by this computer, or null. */
