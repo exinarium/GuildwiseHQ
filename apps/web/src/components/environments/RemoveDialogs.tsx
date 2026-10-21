@@ -1,7 +1,13 @@
 import type { DeliverySetup, SetupEnv, SetupStateDto } from '@aom/shared';
 import { useState } from 'react';
 import { usePreviewSetup, usePublishSetup } from '../../api/queries/deploy-setup.ts';
-import { useDiscardDraft, useRemoveEnvironment } from '../../api/queries/environments.ts';
+import {
+  useDiscardDraft,
+  usePublishDraft,
+  useRemoveEnvironment,
+  useSetEnvironmentPlace,
+  useStopGuided,
+} from '../../api/queries/environments.ts';
 import { Button, Callout, Dialog, ErrorBox, useToast } from '../ui.tsx';
 import { Choice } from './Choice.tsx';
 import { type PlaceVm, placeOfEnv, placesOf } from './model.ts';
@@ -15,17 +21,37 @@ export function RemoveEnvironmentDialog({
   label,
   env,
   place,
+  last,
   onClose,
 }: {
   projectId: string;
   label: string;
   env: SetupEnv;
   place: PlaceVm | undefined;
+  /** It is the only environment: removing it means stopping guided deploys. */
+  last: boolean;
   onClose: () => void;
 }) {
   const remove = useRemoveEnvironment(projectId);
+  const stop = useStopGuided(projectId);
+  const publish = usePublishDraft(projectId);
   const toast = useToast();
   const where = place ? place.name : 'its place';
+  const busy = remove.isPending || stop.isPending || publish.isPending;
+  const go = async () => {
+    try {
+      if (last) await stop.mutateAsync();
+      else {
+        const r = await remove.mutateAsync(env.name);
+        const saved = await publish.mutateAsync(r.draft?.setup);
+        if (!saved.ok) return;
+      }
+      toast.success(`${label} removed. The app was not touched.`);
+      onClose();
+    } catch {
+      // shown below
+    }
+  };
   return (
     <Dialog
       open
@@ -36,19 +62,7 @@ export function RemoveEnvironmentDialog({
           <Button variant="ghost" autoFocus onClick={onClose}>
             Cancel
           </Button>
-          <Button
-            variant="danger"
-            loading={remove.isPending}
-            data-testid="remove-env-confirm"
-            onClick={() =>
-              remove.mutate(env.name, {
-                onSuccess: () => {
-                  toast.success(`${label} removed. The app was not touched.`);
-                  onClose();
-                },
-              })
-            }
-          >
+          <Button variant="danger" loading={busy} data-testid="remove-env-confirm" onClick={() => void go()}>
             Remove {label}
           </Button>
         </>
@@ -58,11 +72,33 @@ export function RemoveEnvironmentDialog({
         <p>
           Guildwise stops updating {label}. The app that is running on {where} is left exactly as it is.
         </p>
+        {last && (
+          <p data-testid="remove-last">
+            This is the only environment, so Guildwise stops using guided deploys for this project. Your
+            places and files stay.
+          </p>
+        )}
         <p>
           {place ? `${place.name} stays in your places` : 'The place stays'}, so you can add the environment
           again later. The setup changes, so the Owner approves it again.
         </p>
-        <ErrorBox error={remove.error} />
+        {remove.data && remove.data.impact.length > 0 && (
+          <ul className="list-disc pl-5" data-testid="remove-impact">
+            {remove.data.impact.map((i) => (
+              <li key={i}>{i}</li>
+            ))}
+          </ul>
+        )}
+        {publish.data && !publish.data.ok && (
+          <Callout tone="danger" title="The change cannot be saved yet">
+            <ul className="list-disc pl-4">
+              {publish.data.issues.map((i) => (
+                <li key={i}>{i}</li>
+              ))}
+            </ul>
+          </Callout>
+        )}
+        <ErrorBox error={remove.error ?? stop.error ?? publish.error} />
       </div>
     </Dialog>
   );
@@ -94,38 +130,21 @@ export function ChangePlaceDialog({
     (p) => p.role === 'active' && !p.duplicateOf && p.kind === kind && p.id !== current?.id,
   );
   const [pick, setPick] = useState('');
-  const preview = usePreviewSetup(projectId);
-  const publish = usePublishSetup(projectId);
+  const setPlace = useSetEnvironmentPlace(projectId);
+  const publish = usePublishDraft(projectId);
   const toast = useToast();
-  const base = ((s.draft?.setup as DeliverySetup | null) ?? s.current.setup) as DeliverySetup | null;
   const chosen = options.find((p) => p.id === pick);
-  const change = () => {
-    if (!chosen || !base) return;
-    const setup = {
-      ...base,
-      environments: base.environments.map((e) =>
-        e.name === env.name
-          ? { ...e, target: chosen.key, ...(kind === 'server' && chosen.host ? { host: chosen.host } : {}) }
-          : e,
-      ),
-    };
-    preview.mutate(
-      { setup },
-      {
-        onSuccess: (p) => {
-          if (!p.ok || !p.hash) return;
-          publish.mutate(
-            { setup, setupHash: p.hash },
-            {
-              onSuccess: () => {
-                toast.success(`${label} now uses ${chosen.name}. Try it and approve it again.`);
-                onClose();
-              },
-            },
-          );
-        },
-      },
-    );
+  const change = async () => {
+    if (!chosen) return;
+    try {
+      const st = await setPlace.mutateAsync({ env: env.name, placeId: chosen.id });
+      const saved = await publish.mutateAsync(st.draft?.setup);
+      if (!saved.ok) return;
+      toast.success(`${label} now uses ${chosen.name}. Try it and approve it again.`);
+      onClose();
+    } catch {
+      // shown below
+    }
   };
   return (
     <Dialog
@@ -141,8 +160,8 @@ export function ChangePlaceDialog({
           <Button
             variant="primary"
             disabled={!chosen}
-            loading={preview.isPending || publish.isPending}
-            onClick={change}
+            loading={setPlace.isPending || publish.isPending}
+            onClick={() => void change()}
             data-testid="change-place-confirm"
           >
             Use {chosen?.name ?? `the ${kind}`}
@@ -199,11 +218,11 @@ export function ChangePlaceDialog({
             </div>
           </div>
         )}
-        <ErrorBox error={preview.error ?? publish.error} />
-        {preview.data && !preview.data.ok && (
+        <ErrorBox error={setPlace.error ?? publish.error} />
+        {publish.data && !publish.data.ok && (
           <Callout tone="danger" title="These steps cannot be saved yet">
             <ul className="list-disc pl-4">
-              {preview.data.issues.map((i) => (
+              {publish.data.issues.map((i) => (
                 <li key={i}>{i}</li>
               ))}
             </ul>

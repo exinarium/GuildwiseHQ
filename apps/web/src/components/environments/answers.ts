@@ -1,13 +1,16 @@
-import type { ChangeGroup } from '@aom/shared';
 import {
   type ConnectionState,
   type DeliverySetup,
+  type DirectApp,
+  type DirectManager,
+  directEnv,
   formatCommandLine,
   localAdoptEnv,
   type ProbeComposeFile,
   type ProbeComposeService,
   type ProbeContainer,
   type ProbeReport,
+  type ProbeService,
   parseCommandLine,
   type SetupEnv,
   sshShipEnv,
@@ -24,61 +27,101 @@ import { type EnvRole, roleOf } from './model.ts';
 export type Purpose = EnvRole;
 export type Hosting = 'this_computer' | 'ssh';
 
-/** An app that runs directly on the machine: found as a system service, a pm2 process or a running program, or typed in. */
-export interface NativeApp {
-  kind: 'systemd' | 'pm2' | 'process';
-  name: string;
-  folder: string;
-  port: number | null;
-  user?: string | undefined;
-  running: boolean;
-  /** The command that restarts it, when it is known (a service or a pm2 name). */
-  restart: string | null;
-}
+/** An app that runs directly on the machine (no Docker), as the probe found it: a system service, a pm2 process or a program. */
+export type NativeApp = ProbeService;
 
-/** The apps a probe found that run directly on the machine (not in Docker). */
+/** The apps a probe found that run directly on the machine. A program that listens nowhere and has no folder is not an app. */
 export function nativeAppsFromReport(report: ProbeReport | null | undefined): NativeApp[] {
-  return ((report as { nativeApps?: NativeApp[] } | null | undefined)?.nativeApps ?? []).filter(
-    (a) => a.kind !== 'process' || a.port !== null || !!a.folder,
+  return (report?.services ?? []).filter(
+    (a) => a.manager !== 'process' || a.ports.length > 0 || !!a.workingDir,
   );
 }
 
+/** The words for the manager of a found app ("a system service", "a pm2 process"). */
+export const MANAGER_WORDS: Record<NativeApp['manager'], string> = {
+  systemd: 'a system service',
+  systemd_user: 'a service of your own user',
+  pm2: 'a pm2 process',
+  process: 'a running program',
+};
+
 export interface NativeAnswers {
-  how: 'systemd' | 'pm2' | 'process' | 'typed';
+  how: NativeApp['manager'] | 'typed';
+  /** The unit, the pm2 name or the program: it names the app on the card. */
   name: string;
-  folder: string;
+  /** Where it runs from now (the link the service must start from). */
+  workingDir: string;
+  /** The folder that holds `releases/` (a new one beside a plain folder). */
+  appDir: string;
+  /** It already runs from `.../current` of a releases layout: nothing to convert. */
+  releaseLayout: boolean;
+  /** The person confirmed that a plain folder may become the first release (moved, never copied or deleted). */
+  adoptFolder: boolean;
   port: string;
   restartVia: 'service' | 'pm2' | 'command';
+  /** The unit name, the pm2 name, or the command line. */
   restartTarget: string;
+  scope: 'system' | 'user';
+  /** Restarting needs sudo (only with an explicit yes). */
+  sudo: boolean;
   keepReleases: number;
+  /** Commands that build the new version, one per line (run in the new folder). */
+  build: string;
+  /** Files and folders kept in `shared/` and linked into every release. */
+  shared: string;
+  /** Back up a database first (empty: none). */
+  dbEngine: '' | 'postgres' | 'mysql' | 'sqlite';
+  dbName: string;
+  dbFile: string;
+  dbDir: string;
 }
 
 export const emptyNative = (): NativeAnswers => ({
   how: 'typed',
   name: '',
-  folder: '',
+  workingDir: '',
+  appDir: '',
+  releaseLayout: false,
+  adoptFolder: false,
   port: '',
   restartVia: 'service',
   restartTarget: '',
+  scope: 'system',
+  sudo: false,
   keepReleases: 5,
+  build: '',
+  shared: '',
+  dbEngine: '',
+  dbName: '',
+  dbFile: '',
+  dbDir: '',
 });
 
-/** How an app found on the machine is restarted, as the first guess. */
-export function nativeFromApp(app: NativeApp): NativeAnswers {
-  const via = app.kind === 'systemd' ? 'service' : app.kind === 'pm2' ? 'pm2' : 'command';
+/** What the answers can say about an app that was found: the folder layout, how it is restarted, the first guess for the rest. */
+export function nativeFromApp(app: NativeApp, buildHint = ''): NativeAnswers {
+  const wd = (app.workingDir ?? '').replace(/\/$/, '');
+  const layout = !!app.releaseLayout || wd.endsWith('/current');
+  const via = app.manager === 'pm2' ? 'pm2' : app.manager === 'process' ? 'command' : 'service';
+  const unit = app.name.replace(/\.service$/, '');
   return {
-    how: app.kind,
-    name: app.name,
-    folder: app.folder,
-    port: app.port ? String(app.port) : '',
+    how: app.manager,
+    name: unit,
+    workingDir: wd,
+    appDir: layout ? wd.replace(/\/current$/, '') : wd ? `${wd}-app` : '',
+    releaseLayout: layout,
+    adoptFolder: false,
+    port: app.ports[0] ? String(app.ports[0]) : '',
     restartVia: via,
-    restartTarget:
-      app.kind === 'systemd'
-        ? `${app.name}.service`.replace(/\.service\.service$/, '.service')
-        : app.kind === 'pm2'
-          ? app.name
-          : '',
+    restartTarget: via === 'service' ? `${unit}.service` : via === 'pm2' ? app.name : '',
+    scope: app.manager === 'systemd_user' ? 'user' : 'system',
+    sudo: false,
     keepReleases: 5,
+    build: buildHint,
+    shared: '',
+    dbEngine: '',
+    dbName: '',
+    dbFile: '',
+    dbDir: wd ? `${wd}-app/backups` : '',
   };
 }
 
@@ -89,6 +132,16 @@ export function restartWords(n: Pick<NativeAnswers, 'restartVia' | 'restartTarge
     : n.restartVia === 'pm2'
       ? `restart ${n.restartTarget || '(name it)'} with pm2`
       : `run ${n.restartTarget || '(your restart command)'}`;
+}
+
+/** The same sentence for a saved environment. */
+export function directRestartWords(d: DirectApp): string {
+  const m = d.manager;
+  return m.kind === 'systemd'
+    ? `restart the service ${m.unit}`
+    : m.kind === 'pm2'
+      ? `restart ${m.name} with pm2`
+      : `run ${formatCommandLine(m.restart)}`;
 }
 
 export type Runtime = 'docker' | 'native';
@@ -344,75 +397,63 @@ export function buildEnv(a: Answers, homeDir?: string): SetupEnv {
   };
 }
 
-/**
- * An app that runs directly on the machine. The environment keeps the same shape as the others (a place, an update rule, the
- * rules); how it is updated is the `runtime` block: get the new version, build it in a new folder, switch to it, restart.
- * ASSUMPTION until the API contract (section 13) names the real field.
- */
+/** The environment of an app that runs directly on the machine: the shared builder fills the steps (prepare, switch) and the rules. */
 function buildNativeEnv(a: Answers): SetupEnv {
   const n = a.native;
-  const compose = `${n.folder.replace(/\/$/, '')}/docker-compose.yml`;
   const port = Number(n.port) || null;
   const url = a.appUrl || (port ? `http://${a.hosting === 'ssh' ? a.host : 'localhost'}:${port}` : '');
-  const base =
-    a.hosting === 'ssh'
-      ? sshShipEnv(
-          {
-            name: a.name,
-            label: a.label,
-            target: a.targetName,
-            host: a.host,
-            composeFile: compose,
-            service: 'app',
-            imageName: 'app',
-            ...(url ? { appUrl: url } : {}),
-          },
-          a.role === 'live' ? a.testEnv : null,
-        )
-      : localAdoptEnv(
-          {
-            name: a.name,
-            label: a.label,
-            target: a.targetName,
-            composeFile: compose,
-            service: 'app',
-            imageName: 'app',
-            ...(url ? { appUrl: url } : {}),
-            testCopy: a.role !== 'live',
-          },
-          a.role === 'live' ? a.testEnv : null,
-        );
-  return {
-    ...base,
-    steps: [],
-    trigger: [a.trigger],
-    role: a.role,
-    runtime: {
-      kind: 'native',
-      how: n.how,
-      name: n.name,
-      folder: n.folder,
-      port,
-      restart: { via: n.restartVia, target: n.restartTarget },
-      keepReleases: n.keepReleases,
+  const manager: DirectManager =
+    n.restartVia === 'service'
+      ? {
+          kind: 'systemd',
+          unit: n.restartTarget.trim() || `${n.name}.service`,
+          scope: n.scope,
+          sudo: n.scope === 'system' && n.sudo,
+        }
+      : n.restartVia === 'pm2'
+        ? { kind: 'pm2', name: n.restartTarget.trim() }
+        : { kind: 'command', restart: parseCommandLine(n.restartTarget.trim()), sudo: n.sudo };
+  const build = n.build
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .map((l) => ({ label: l.length > 60 ? `${l.slice(0, 57)}...` : l, argv: parseCommandLine(l) }));
+  const env = directEnv(
+    {
+      name: a.name,
+      label: a.label,
+      target: a.targetName,
+      ...(a.hosting === 'ssh' ? { host: a.host } : {}),
+      appDir: n.appDir,
+      ...(n.releaseLayout ? {} : n.workingDir ? { currentLink: n.workingDir } : {}),
+      ...(n.adoptFolder ? { adoptFolder: true } : {}),
+      manager,
+      build,
+      shared: n.shared.split(/[\s,]+/).filter(Boolean),
+      keep: n.keepReleases,
+      ...(a.healthUrl ? { healthUrl: a.healthUrl } : {}),
+      ...(url ? { appUrl: url } : {}),
+      ...(n.dbEngine
+        ? {
+            database: {
+              engine: n.dbEngine,
+              ...(n.dbEngine !== 'sqlite' && n.dbName ? { database: n.dbName } : {}),
+              ...(n.dbEngine === 'sqlite' && n.dbFile ? { sqliteFile: n.dbFile } : {}),
+              dir: n.dbDir || `${n.appDir}/backups`,
+            },
+          }
+        : {}),
+      live: a.role === 'live',
+      appName: n.name,
     },
-  } as unknown as SetupEnv;
+    a.role === 'live' ? a.testEnv : null,
+  );
+  return { ...env, trigger: [a.trigger], role: a.role };
 }
 
-/** The native block of an environment, when it runs directly on the machine. */
-export const nativeOf = (
-  env: SetupEnv,
-): {
-  how: NativeAnswers['how'];
-  name: string;
-  folder: string;
-  port: number | null;
-  restart: { via: NativeAnswers['restartVia']; target: string };
-  keepReleases: number;
-} | null => {
-  const r = (env as unknown as { runtime?: { kind?: string } }).runtime;
-  return r?.kind === 'native' ? (r as never) : null;
-};
+/** The direct block of an environment, when it runs directly on the machine. */
+export const nativeOf = (env: SetupEnv): DirectApp | null =>
+  env.runtime === 'direct' && env.direct ? env.direct : null;
 
 /** What the dialog asks again when someone edits an existing environment. */
 export function answersFromEnv(env: SetupEnv, target: { production: boolean }): Answers {
@@ -424,18 +465,40 @@ export function answersFromEnv(env: SetupEnv, target: { production: boolean }): 
         null)
       : null;
   const nat = nativeOf(env);
+  const mgr = nat?.manager;
   return {
     role: roleOf(env, target),
     runtime: nat ? 'native' : 'docker',
     native: nat
       ? {
-          how: nat.how,
-          name: nat.name,
-          folder: nat.folder,
-          port: nat.port ? String(nat.port) : '',
-          restartVia: nat.restart.via,
-          restartTarget: nat.restart.target,
-          keepReleases: nat.keepReleases,
+          ...emptyNative(),
+          how:
+            mgr?.kind === 'pm2'
+              ? 'pm2'
+              : mgr?.kind === 'command'
+                ? 'process'
+                : mgr?.scope === 'user'
+                  ? 'systemd_user'
+                  : 'systemd',
+          name: env.app.imageName,
+          workingDir: nat.currentLink ?? `${nat.appDir}/current`,
+          appDir: nat.appDir,
+          releaseLayout: !nat.currentLink || nat.currentLink === `${nat.appDir}/current`,
+          adoptFolder: !!nat.adoptFolder,
+          port: /:(\d+)/.exec(env.app.appUrl ?? '')?.[1] ?? '',
+          restartVia: mgr?.kind === 'pm2' ? 'pm2' : mgr?.kind === 'command' ? 'command' : 'service',
+          restartTarget:
+            mgr?.kind === 'pm2'
+              ? mgr.name
+              : mgr?.kind === 'command'
+                ? formatCommandLine(mgr.restart)
+                : (mgr?.unit ?? ''),
+          scope: mgr?.kind === 'systemd' ? mgr.scope : 'system',
+          sudo: mgr?.kind === 'systemd' || mgr?.kind === 'command' ? mgr.sudo : false,
+          keepReleases: nat.keep,
+          build: nat.build.map((b) => formatCommandLine(b.argv)).join('\n'),
+          shared: nat.shared.join(' '),
+          ...dbFrom(env),
         }
       : emptyNative(),
     method: env.hosting === 'ssh' ? updateMethodOf(env) : 'ship',
@@ -516,27 +579,9 @@ export function whenText(trigger: string): string {
     : 'Only when you press Release';
 }
 
-/** "Found / Each update will / Will not be touched" for an app that runs directly on the machine. */
-export function nativeChangeItems(a: Answers): Array<{ group: ChangeGroup; text: string; env: string }> {
-  const n = a.native;
-  const env = a.name;
-  const where = a.hosting === 'ssh' ? `the server ${a.host}` : 'this computer';
-  const items: Array<{ group: ChangeGroup; text: string; env: string }> = [];
-  if (n.name || n.folder)
-    items.push({
-      group: 'reuse',
-      text: `${n.name || 'The app'}${n.folder ? ` in ${n.folder}` : ''} on ${where} is used as it is`,
-      env,
-    });
-  if (!n.name || !n.folder) items.push({ group: 'question', text: 'Name the app and its folder', env });
-  if (!n.restartTarget.trim()) items.push({ group: 'question', text: 'Say how the app is restarted', env });
-  items.push(
-    { group: 'each_deploy', text: 'Get the new version of the code', env },
-    { group: 'each_deploy', text: 'Build it in a new folder next to the current one', env },
-    { group: 'each_deploy', text: 'Switch to the new version', env },
-    { group: 'each_deploy', text: `Then ${restartWords(n)} and check the app answers`, env },
-    { group: 'each_deploy', text: `Keep the last ${n.keepReleases} versions so you can go back`, env },
-    { group: 'untouched', text: 'Your data, your settings files and everything else on the machine', env },
-  );
-  return items;
-}
+const dbFrom = (env: SetupEnv): Pick<NativeAnswers, 'dbEngine' | 'dbName' | 'dbFile' | 'dbDir'> => {
+  const b = env.steps.find((x) => x.kind === 'direct_db_backup');
+  return b?.kind === 'direct_db_backup'
+    ? { dbEngine: b.engine, dbName: b.database ?? '', dbFile: b.sqliteFile ?? '', dbDir: b.dir }
+    : { dbEngine: '', dbName: '', dbFile: '', dbDir: '' };
+};

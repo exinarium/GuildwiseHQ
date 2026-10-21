@@ -29,13 +29,16 @@ import { type PlaceVm, placesOf } from './model.ts';
 export function PlacesPanel({
   projectId,
   s,
+  places: given,
   onAddServer,
 }: {
   projectId: string;
   s: SetupStateDto;
+  /** The places the server lists; absent: derived from the setup state. */
+  places?: PlaceVm[] | undefined;
   onAddServer: () => void;
 }) {
-  const places = placesOf(s);
+  const places = given ?? placesOf(s);
   const active = places.filter((p) => p.role === 'active');
   const old = places.filter((p) => p.role !== 'active');
   const check = useCheckTarget(projectId);
@@ -79,6 +82,7 @@ export function PlacesPanel({
                 {p.usedBy.length > 0
                   ? `Used by: ${p.usedBy.map((u) => u.label).join(', ')}`
                   : 'Used by: nothing'}
+                {p.usedByDraft.length > 0 ? ` · in your unfinished changes: ${p.usedByDraft.join(', ')}` : ''}
                 {p.key !== p.name && p.kind === 'computer' ? ` · called ${p.key}` : ''}
               </p>
               {p.duplicateOf && (
@@ -192,7 +196,7 @@ export function PlacesPanel({
               </Button>
               <Button
                 variant="danger"
-                disabled={removing.usedBy.length > 0}
+                disabled={!!blockedBy(removing)}
                 loading={remove.isPending}
                 data-testid="remove-place-confirm"
                 onClick={() =>
@@ -214,10 +218,9 @@ export function PlacesPanel({
           }
         >
           <div className="flex flex-col gap-3 text-sm" data-testid="remove-place-dialog">
-            {removing.usedBy.length > 0 ? (
+            {blockedBy(removing) ? (
               <Callout tone="warning" data-testid="place-in-use">
-                Used by {removing.usedBy.map((u) => u.label).join(', ')}: change that first. Open the
-                environment, choose{' '}
+                {blockedBy(removing)} Open the environment, choose{' '}
                 <strong>Change {removing.kind === 'server' ? 'server' : 'computer'}</strong>, then remove this
                 place.
               </Callout>
@@ -227,7 +230,7 @@ export function PlacesPanel({
                 the connection from this project to {removing.name} is removed.
               </p>
             )}
-            {removing.kind === 'server' && removing.usedBy.length === 0 && (
+            {removing.kind === 'server' && !blockedBy(removing) && (
               <label className="flex min-h-11 items-start gap-2">
                 <input
                   type="checkbox"
@@ -389,4 +392,12 @@ function OldServers({ projectId, s, old }: { projectId: string; s: SetupStateDto
       )}
     </section>
   );
+}
+
+/** Why a place cannot be removed, in a sentence naming what uses it; null when it can. */
+function blockedBy(p: PlaceVm): string | null {
+  if (p.removeBlockedReason) return p.removeBlockedReason;
+  if (p.canRemove === false) return 'Something still uses it: change that first.';
+  const names = [...p.usedBy.map((u) => u.label), ...p.usedByDraft];
+  return names.length > 0 ? `Used by ${names.join(', ')}: change that first.` : null;
 }

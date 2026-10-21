@@ -1,6 +1,7 @@
 import {
   compileSetup,
   type DeliverySetup,
+  directEnv,
   localAdoptEnv,
   type ProbeReport,
   SETUP_GENERATOR,
@@ -135,63 +136,42 @@ const p5Live = (): SetupEnv =>
     'test-site',
   );
 
-/** An app that runs directly on the machine (no Docker): the shape the backend adds is mocked as an extra `runtime` on the environment. */
-export interface NativeRuntime {
-  kind: 'native';
-  how: 'systemd' | 'pm2' | 'process' | 'typed';
-  name: string;
-  folder: string;
-  port: number | null;
-  restart: { via: 'service' | 'pm2' | 'command'; target: string };
-  keepReleases: number;
-}
-const nativeEnv = (
-  o: { name: string; label: string; target: string; host?: string; trigger: 'after_merge' | 'on_request' },
-  runtime: NativeRuntime,
-): SetupEnv => {
-  const base = o.host
-    ? sshShipEnv(
-        {
-          name: o.name,
-          label: o.label,
-          target: o.target,
-          host: o.host,
-          composeFile: `${runtime.folder}/docker-compose.yml`,
-          service: 'app',
-          imageName: 'app',
-          appUrl: `http://${o.host}:${runtime.port ?? 3000}`,
-        },
-        null,
-      )
-    : localAdoptEnv({
-        name: o.name,
-        label: o.label,
-        target: o.target,
-        composeFile: `${runtime.folder}/docker-compose.yml`,
-        service: 'app',
-        imageName: 'app',
-        appUrl: `http://localhost:${runtime.port ?? 3000}`,
-      });
-  return { ...base, steps: [], trigger: [o.trigger], runtime } as unknown as SetupEnv;
-};
-const crmRuntime: NativeRuntime = {
-  kind: 'native',
-  how: 'pm2',
-  name: 'crm-api',
-  folder: '/home/user/apps/crm',
-  port: 3100,
-  restart: { via: 'pm2', target: 'crm-api' },
-  keepReleases: 5,
-};
-const invoiceRuntime: NativeRuntime = {
-  kind: 'native',
-  how: 'systemd',
-  name: 'invoice-web',
-  folder: '/srv/invoice',
-  port: 3000,
-  restart: { via: 'service', target: 'invoice-web.service' },
-  keepReleases: 5,
-};
+const crmEnv = (): SetupEnv =>
+  directEnv({
+    name: 'test-site',
+    label: 'Test site',
+    target: 'crm-local',
+    appDir: '/home/user/apps/crm-app',
+    currentLink: '/home/user/apps/crm',
+    adoptFolder: true,
+    manager: { kind: 'pm2', name: 'crm-api' },
+    build: [
+      { label: 'npm ci', argv: ['npm', 'ci'] },
+      { label: 'npm run build', argv: ['npm', 'run', 'build'] },
+    ],
+    shared: ['.env'],
+    appUrl: 'http://localhost:3100',
+    appName: 'crm-api',
+  });
+const invoiceEnv = (): SetupEnv =>
+  directEnv(
+    {
+      name: 'live-site',
+      label: 'Live site',
+      target: 'billing-vps',
+      host: 'billing-vps',
+      appDir: '/srv/invoice',
+      manager: { kind: 'systemd', unit: 'invoice-web.service', scope: 'system', sudo: true },
+      build: [{ label: 'npm ci', argv: ['npm', 'ci'] }],
+      shared: ['.env', 'uploads'],
+      database: { engine: 'postgres', database: 'invoice', dir: '/srv/invoice/backups' },
+      healthUrl: 'http://192.168.1.40:3000/health',
+      appUrl: 'http://192.168.1.40:3000',
+      live: true,
+      appName: 'invoice-web',
+    },
+    'test-site',
+  );
 
 const norm = (envs: SetupEnv[]): DeliverySetup => {
   const c = compileSetup({ environments: envs });
@@ -290,27 +270,7 @@ function seed(scenario: string): Store {
       return s;
     }
     case 'native': {
-      const setup = {
-        version: 1,
-        generator: SETUP_GENERATOR,
-        environments: [
-          nativeEnv(
-            { name: 'test-site', label: 'Test site', target: 'crm-local', trigger: 'after_merge' },
-            crmRuntime,
-          ),
-          nativeEnv(
-            {
-              name: 'live-site',
-              label: 'Live site',
-              target: 'billing-vps',
-              host: 'billing-vps',
-              trigger: 'on_request',
-            },
-            invoiceRuntime,
-          ),
-        ],
-      } as unknown as DeliverySetup;
-      const s = saved(setup, 'approved', ['test-site', 'live-site']);
+      const s = saved(norm([crmEnv(), invoiceEnv()]), 'approved', ['test-site', 'live-site']);
       s.targets = [
         office({ id: T1, name: 'crm-local', appUrl: 'http://localhost:3100' }),
         vps({ id: T5, name: 'billing-vps', host: 'billing-vps', appUrl: 'http://192.168.1.40:3000' }),
@@ -754,51 +714,52 @@ export function reportFor(
     if (scope === 'local')
       return {
         ...bareLocalReport(),
-        nativeApps: [
+        services: [
           {
-            kind: 'pm2',
+            manager: 'pm2',
             name: 'crm-api',
-            folder: '/home/user/apps/crm',
-            port: 3100,
+            state: 'online',
+            workingDir: '/home/user/apps/crm',
+            command: 'node dist/server.js',
+            ports: [3100],
             user: 'pieter',
-            running: true,
-            restart: 'pm2 restart crm-api',
           },
           {
-            kind: 'process',
+            manager: 'process',
             name: 'node server.js',
-            folder: '/home/user/apps/blog',
-            port: 4000,
+            state: 'running',
+            workingDir: '/home/user/apps/blog',
+            ports: [4000],
             user: 'pieter',
-            running: true,
-            restart: null,
           },
         ],
+        appDirs: ['/home/user/apps/crm', '/home/user/apps/blog'],
       } as unknown as ProbeReport;
     if (host === 'billing-vps')
       return {
         ...bareServerReport(host),
         docker: { installed: true, usable: true },
-        nativeApps: [
+        services: [
           {
-            kind: 'systemd',
-            name: 'invoice-web',
-            folder: '/srv/invoice',
-            port: 3000,
+            manager: 'systemd',
+            name: 'invoice-web.service',
+            state: 'running',
+            workingDir: '/srv/invoice/current',
+            command: 'node dist/main.js',
+            ports: [3000],
             user: 'www-data',
-            running: true,
-            restart: 'systemctl restart invoice-web.service',
+            releaseLayout: true,
           },
           {
-            kind: 'process',
+            manager: 'process',
             name: 'node dist/worker.js',
-            folder: '/srv/invoice',
-            port: null,
+            state: 'running',
+            workingDir: '/srv/invoice/current',
+            ports: [],
             user: 'www-data',
-            running: true,
-            restart: null,
           },
         ],
+        appDirs: ['/srv/invoice'],
       } as unknown as ProbeReport;
   }
   if (scope === 'local') {
@@ -860,19 +821,29 @@ export function proposal(s: Store) {
           path: '/environments/0/app/service',
           question: 'Which part is your app?',
           options: ['app', 'worker', 'web'],
+          kind: 'choice',
+          ...(answers['/environments/0/app/service'] !== undefined
+            ? { answer: String(answers['/environments/0/app/service']) }
+            : {}),
         },
         {
           path: '/environments/0/app/appUrl',
           question: 'Which port does the website use?',
           default: '3000',
+          kind: 'text',
+          ...(answers['/environments/0/app/appUrl'] !== undefined
+            ? { answer: String(answers['/environments/0/app/appUrl']) }
+            : {}),
         },
         {
           path: '/environments/1/production',
           question: 'Is this server the live site?',
-          options: ['Yes, customers use it', 'No, it is a test site'],
+          kind: 'confirm',
+          ...(answers['/environments/1/production'] !== undefined
+            ? { answer: String(answers['/environments/1/production']) }
+            : {}),
         },
       ],
-      answers,
       secretsNeeded: [],
       notes:
         'The test site is a Docker Compose project called shop-uat on Office PC. The live site is built here and shipped over ssh.',

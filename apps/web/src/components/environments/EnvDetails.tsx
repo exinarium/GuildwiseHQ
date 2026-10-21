@@ -1,6 +1,6 @@
 import type { ProbeReport, planChanges } from '@aom/shared';
 import { FoundChanges } from '../delivery/setup/FoundChanges.tsx';
-import { Button, Select, TextInput } from '../ui.tsx';
+import { Button, Select, TextArea, TextInput } from '../ui.tsx';
 import { type Answers, type NativeAnswers, restartWords, type Stack } from './answers.ts';
 import { Choice } from './Choice.tsx';
 
@@ -169,7 +169,7 @@ function HealthField({
   );
 }
 
-/** "What we found" for an app that runs directly on the machine: name, folder, port and the way it is restarted. */
+/** "What we found" for an app that runs directly on the machine: its folder, how it is restarted and how a new version is built. */
 export function NativeDetails({
   answers,
   set,
@@ -189,6 +189,7 @@ export function NativeDetails({
 }) {
   const n = answers.native;
   const where = answers.hosting === 'ssh' ? 'the server' : 'this computer';
+  const plainFolder = !n.releaseLayout && !!n.workingDir;
   return (
     <section className="flex flex-col gap-4" data-testid="native-details">
       <h3 className="text-lg font-semibold text-fg">What we found</h3>
@@ -205,16 +206,61 @@ export function NativeDetails({
           placeholder="invoice-web"
           data-testid="native-name"
         />
-        <TextInput
-          label={`Folder on ${where}`}
-          value={n.folder}
-          onChange={(e) => setNative({ folder: e.target.value.trim() })}
-          hint="The folder the app runs from, for example /srv/invoice."
-          placeholder="/srv/invoice"
-          autoCapitalize="none"
-          spellCheck={false}
-          data-testid="native-folder"
-        />
+        {n.workingDir ? (
+          <p className="text-sm text-fg" data-testid="native-runs-from">
+            It runs from <span className="font-mono text-xs [overflow-wrap:anywhere]">{n.workingDir}</span> on{' '}
+            {where}.
+          </p>
+        ) : (
+          <TextInput
+            label={`Folder on ${where}`}
+            value={n.appDir}
+            onChange={(e) =>
+              setNative({
+                appDir: e.target.value.trim(),
+                workingDir: `${e.target.value.trim()}/current`,
+                releaseLayout: true,
+              })
+            }
+            hint="The folder the app runs from, for example /srv/invoice."
+            placeholder="/srv/invoice"
+            autoCapitalize="none"
+            spellCheck={false}
+            data-testid="native-folder"
+          />
+        )}
+        {plainFolder && (
+          <div className="flex flex-col gap-2 rounded-control bg-sunken p-3" data-testid="native-adopt">
+            <TextInput
+              label="Folder for the versions"
+              value={n.appDir}
+              onChange={(e) => setNative({ appDir: e.target.value.trim() })}
+              hint="A new folder next to the app. Each version gets its own folder in it."
+              autoCapitalize="none"
+              spellCheck={false}
+              data-testid="native-appdir"
+            />
+            <label className="flex min-h-11 items-start gap-2 text-sm">
+              <input
+                type="checkbox"
+                className="mt-1 size-4"
+                checked={n.adoptFolder}
+                onChange={(e) => setNative({ adoptFolder: e.target.checked })}
+                data-testid="native-adopt-confirm"
+              />
+              <span>
+                The first update moves the folder {n.workingDir} to {n.appDir}/releases/initial and puts a
+                link with the same name in its place. Nothing is deleted or copied; the app keeps running from
+                the same files.
+              </span>
+            </label>
+          </div>
+        )}
+        {n.releaseLayout && n.workingDir && (
+          <p className="text-xs text-muted">
+            It already keeps its versions in a releases folder: nothing to convert.
+          </p>
+        )}
         <TextInput
           label="Port the app answers on (optional)"
           value={n.port}
@@ -228,7 +274,12 @@ export function NativeDetails({
           <Choice
             name="native-restart"
             checked={n.restartVia === 'service'}
-            onSelect={() => setNative({ restartVia: 'service' })}
+            onSelect={() =>
+              setNative({
+                restartVia: 'service',
+                restartTarget: n.restartVia === 'service' ? n.restartTarget : `${n.name}.service`,
+              })
+            }
             title="It is a system service"
             testId="restart-service"
           >
@@ -237,7 +288,12 @@ export function NativeDetails({
           <Choice
             name="native-restart"
             checked={n.restartVia === 'pm2'}
-            onSelect={() => setNative({ restartVia: 'pm2' })}
+            onSelect={() =>
+              setNative({
+                restartVia: 'pm2',
+                restartTarget: n.restartVia === 'pm2' ? n.restartTarget : n.name,
+              })
+            }
             title="It runs with pm2"
             testId="restart-pm2"
           >
@@ -246,11 +302,16 @@ export function NativeDetails({
           <Choice
             name="native-restart"
             checked={n.restartVia === 'command'}
-            onSelect={() => setNative({ restartVia: 'command' })}
+            onSelect={() =>
+              setNative({
+                restartVia: 'command',
+                restartTarget: n.restartVia === 'command' ? n.restartTarget : '',
+              })
+            }
             title="I restart it with a command"
             testId="restart-command"
           >
-            You type the command. It runs in the app's folder.
+            You type the command. Guildwise never edits a service file.
           </Choice>
           <TextInput
             label={
@@ -271,10 +332,81 @@ export function NativeDetails({
             }
             autoCapitalize="none"
             spellCheck={false}
-            hint={`Each update will ${restartWords(n)}.`}
+            hint={`Each update will ${restartWords(n)}. Please check that this is right.`}
             data-testid="native-restart-target"
           />
+          {n.restartVia !== 'pm2' && n.scope === 'system' && (
+            <label className="flex min-h-11 items-start gap-2 text-sm">
+              <input
+                type="checkbox"
+                className="mt-1 size-4"
+                checked={n.sudo}
+                onChange={(e) => setNative({ sudo: e.target.checked })}
+                data-testid="native-sudo"
+              />
+              <span>
+                <strong>Restarting needs administrator rights (sudo)</strong>
+                <span className="block text-muted">
+                  Only tick this if you know it does. It needs sudo without a password.
+                </span>
+              </span>
+            </label>
+          )}
         </fieldset>
+        <TextArea
+          label="How is a new version built? (one command per line)"
+          value={n.build}
+          rows={3}
+          onChange={(e) => setNative({ build: e.target.value })}
+          placeholder={'npm ci\nnpm run build'}
+          hint="They run in the new folder, in this order. If one fails, nothing is switched."
+          data-testid="native-build"
+        />
+        <TextInput
+          label="Files that stay between versions (optional)"
+          value={n.shared}
+          onChange={(e) => setNative({ shared: e.target.value })}
+          placeholder=".env uploads"
+          hint="Settings files and folders that are kept on the machine and linked into every version."
+          autoCapitalize="none"
+          data-testid="native-shared"
+        />
+        <Select
+          label="Back up a database first (optional)"
+          value={n.dbEngine}
+          onChange={(e) => setNative({ dbEngine: e.target.value as NativeAnswers['dbEngine'] })}
+          data-testid="native-db"
+        >
+          <option value="">No backup</option>
+          <option value="postgres">PostgreSQL</option>
+          <option value="mysql">MySQL or MariaDB</option>
+          <option value="sqlite">SQLite file</option>
+        </Select>
+        {n.dbEngine && n.dbEngine !== 'sqlite' && (
+          <TextInput
+            label="Database name"
+            value={n.dbName}
+            onChange={(e) => setNative({ dbName: e.target.value.trim() })}
+            data-testid="native-db-name"
+          />
+        )}
+        {n.dbEngine === 'sqlite' && (
+          <TextInput
+            label="Database file"
+            value={n.dbFile}
+            onChange={(e) => setNative({ dbFile: e.target.value.trim() })}
+            data-testid="native-db-file"
+          />
+        )}
+        {n.dbEngine && (
+          <TextInput
+            label="Folder for the backups"
+            value={n.dbDir}
+            onChange={(e) => setNative({ dbDir: e.target.value.trim() })}
+            hint="If the backup fails, nothing else happens."
+            data-testid="native-db-dir"
+          />
+        )}
         <HealthField
           answers={answers}
           set={set}

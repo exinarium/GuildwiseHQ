@@ -264,9 +264,10 @@ function ServerLook({
             </p>
           ))}
           {natives.map((a) => (
-            <p key={`${a.kind}-${a.name}`} className="text-sm text-fg" data-testid="server-found-native">
-              Found {a.name} running directly on the server{a.folder ? ` in ${a.folder}` : ''}
-              {a.port ? `, port ${a.port}` : ''}.
+            <p key={`${a.manager}-${a.name}`} className="text-sm text-fg" data-testid="server-found-native">
+              Found {a.name.replace(/\.service$/, '')} running directly on the server
+              {a.workingDir ? ` in ${a.workingDir}` : ''}
+              {a.ports[0] ? `, port ${a.ports[0]}` : ''}.
             </p>
           ))}
           {stacks.length === 0 && natives.length === 0 && (

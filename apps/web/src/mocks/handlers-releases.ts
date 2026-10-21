@@ -139,7 +139,16 @@ const run = (id: number, over: Record<string, unknown>) => ({
 });
 
 export const releaseHandlers = [
-  http.get(`${A}/org/live`, () => HttpResponse.json({ rows: liveRows() })),
+  http.get(`${A}/org/live`, () =>
+    HttpResponse.json({
+      rows: liveRows().map(({ waitingRelease, ...r }) => ({
+        ...r,
+        waitingReleases: waitingRelease,
+        health: r.health === 'updating' ? 'unknown' : r.health,
+      })),
+      generatedAt: ago(0),
+    }),
+  ),
   http.get(`${A}/delivery/queue`, () => HttpResponse.json({ items: queueItems() })),
   http.get(`${A}/delivery/runs`, () =>
     HttpResponse.json({
@@ -195,88 +204,62 @@ export const releaseHandlers = [
     }),
   ),
   http.post(`${A}/delivery/release`, () => HttpResponse.json({ message: 'Releasing', runs: [] })),
-  http.get(`${A}/projects/:id/environments/:env/rollback-candidates`, () =>
-    HttpResponse.json({
-      candidates: [
-        {
-          commit: '4f2c1ab0d2e4',
-          version: '0.9.2',
-          at: ago(60 * 24 * 3),
-          releasedBy: 'Ada',
-          backupPath: '/opt/app/backups/production-before-4f2c1ab.sql.gz',
-        },
-        {
-          commit: '9e1d2c3f4a5b',
-          version: '0.9.1',
-          at: ago(60 * 24 * 12),
-          releasedBy: 'Ada',
-          backupPath: '/opt/app/backups/production-before-9e1d2c3.sql.gz',
-        },
-        {
-          commit: '5a5a5a5a5a5a',
-          version: '0.9.0',
-          at: ago(60 * 24 * 20),
-          releasedBy: 'Ben',
-          backupPath: '/opt/app/backups/production-before-5a5a5a5.sql.gz',
-        },
+  http.get(`${A}/projects/:id/environments/:env/releases`, () => {
+    const back = rolledBack();
+    const rel = (
+      n: number,
+      commit: string,
+      version: string,
+      days: number,
+      by: string,
+      backup: string,
+      current: boolean,
+    ) => ({
+      runId: `00000000-0000-4000-8000-00000000009${n}`,
+      commit,
+      version,
+      at: ago(60 * 24 * days),
+      releasedBy: by,
+      targetName: 'prod-server',
+      kind: 'release',
+      current,
+      backupNote: backup,
+    });
+    return HttpResponse.json({
+      releases: [
+        rel(
+          1,
+          '4f2c1ab0d2e4',
+          '0.9.2',
+          3,
+          'Ada',
+          '/opt/app/backups/production-before-4f2c1ab.sql.gz',
+          !back,
+        ),
+        rel(
+          2,
+          '9e1d2c3f4a5b',
+          '0.9.1',
+          12,
+          'Ada',
+          '/opt/app/backups/production-before-9e1d2c3.sql.gz',
+          back,
+        ),
+        rel(
+          3,
+          '5a5a5a5a5a5a',
+          '0.9.0',
+          20,
+          'Ben',
+          '/opt/app/backups/production-before-5a5a5a5.sql.gz',
+          false,
+        ),
       ],
-    }),
-  ),
-  http.post(`${A}/projects/:id/releases`, () => {
-    localStorage.setItem('aom-mock-rollback', '1');
-    return HttpResponse.json({ message: 'Going back to the earlier version' }, { status: 202 });
+      canRollback: true,
+    });
   }),
-  http.get(`${A}/projects/:id/environments/status`, () =>
-    HttpResponse.json({
-      environments: [
-        {
-          env: 'uat',
-          version: '0.9.4',
-          commit: 'a1b2c3d4e5f6',
-          since: ago(12),
-          health: 'healthy',
-          appUrl: 'http://localhost:8080',
-          lastRun: {
-            id: 'r1',
-            status: 'succeeded',
-            at: ago(12),
-            summary: 'Updated and answering',
-            failedStep: null,
-            reason: null,
-            wentBackTo: null,
-          },
-          waitingRelease: null,
-        },
-        {
-          env: 'production',
-          version: rolledBack() ? '0.9.1' : '0.9.2',
-          commit: rolledBack() ? '9e1d2c3f4a5b' : '4f2c1ab0d2e4',
-          since: rolledBack() ? ago(1) : ago(60 * 24 * 3),
-          health: 'healthy',
-          appUrl: 'https://shop.example.com',
-          lastRun: {
-            id: 'r2',
-            status: 'succeeded',
-            at: ago(60 * 24 * 3),
-            summary: 'Released and answering',
-            failedStep: null,
-            reason: null,
-            wentBackTo: null,
-          },
-          waitingRelease: {
-            commit: 'a1b2c3d4e5f6',
-            version: '0.9.4',
-            cards: [
-              { ref: 'P5-12', title: 'Show the order total on the checkout page' },
-              { ref: 'P5-15', title: 'Fix the date on the invoice' },
-              { ref: 'P5-17', title: 'Faster product search' },
-            ],
-            rulesMet: false,
-            waitingFor: ['test site healthy for 3 more minutes'],
-            places: [{ runId: RUN_WAITING, targetId: T_LIVE, name: 'prod-server' }],
-          },
-        },
-      ],
-    }),
-  ),
+  http.post(`${A}/projects/:id/releases/rollback`, () => {
+    localStorage.setItem('aom-mock-rollback', '1');
+    return HttpResponse.json({ message: 'Going back to the earlier version', runs: [] }, { status: 202 });
+  }),
 ];

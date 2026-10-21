@@ -4,13 +4,7 @@ import type { QuestionAnswer } from '../../api/queries/environments.ts';
 import { Badge, Button, ErrorBox, Select, TextInput } from '../ui.tsx';
 import { Choice } from './Choice.tsx';
 
-/** A question may carry more than the shared schema says today (`kind`, `optional`); the control is inferred when it does not. */
-export type Question = ProposalQuestion & {
-  kind?: 'text' | 'choice' | 'number' | 'yesno';
-  optional?: boolean;
-};
-export type AnswerValue = string | number | boolean;
-export type Answered = Record<string, AnswerValue>;
+export type Question = ProposalQuestion;
 
 export type QuestionKind = 'text' | 'choice' | 'number' | 'yesno';
 
@@ -18,7 +12,8 @@ const YES_NO = /^(yes|no)\b/i;
 
 /** The control a question needs, from `kind` or from its options and default. */
 export function questionKind(q: Question): QuestionKind {
-  if (q.kind) return q.kind;
+  if (q.kind === 'confirm') return 'yesno';
+  if (q.kind === 'text') return /^\d+$/.test((q.default ?? '').trim()) ? 'number' : 'text';
   const o = q.options ?? [];
   if (o.length === 2 && o.every((x) => YES_NO.test(x.trim()))) return 'yesno';
   if (o.length > 0) return 'choice';
@@ -27,12 +22,23 @@ export function questionKind(q: Question): QuestionKind {
   return 'text';
 }
 
-/** A question with a default does not stop anyone: "we will use 3000 unless you change it". */
-export const isOptional = (q: Question): boolean => q.optional === true || q.default !== undefined;
+/** The choices of a yes or no question: its own words, or plain Yes and No (the stored answer is yes or no). */
+const yesNoOptions = (q: Question): Array<{ label: string; value: string }> =>
+  q.kind === 'confirm' || !q.options?.length
+    ? [
+        { label: 'Yes', value: 'yes' },
+        { label: 'No', value: 'no' },
+      ]
+    : q.options.map((o) => ({ label: o, value: o }));
 
-/** The questions that still stop "Use this": required ones with no saved answer. */
-export const blockingQuestions = (qs: Question[], answered: Answered): Question[] =>
-  qs.filter((q) => !isOptional(q) && answered[q.path] === undefined);
+/** A question marked optional does not stop anyone: "we will use 3000 unless you change it". */
+export const isOptional = (q: Question): boolean => q.optional === true;
+
+export const isAnswered = (q: Question): boolean => q.answer !== undefined;
+
+/** The questions that still stop "Use this": required ones with no stored answer. */
+export const blockingQuestions = (qs: Question[]): Question[] =>
+  qs.filter((q) => !isOptional(q) && !isAnswered(q));
 
 /**
  * The questions of a DevOps suggestion as real fields (docs/design/environments-ux.md journey G): radios for a few choices, a
@@ -41,53 +47,35 @@ export const blockingQuestions = (qs: Question[], answered: Answered): Question[
  */
 export function AnswerFields({
   questions,
-  answered,
   pending,
   error,
   onSubmit,
   onLater,
 }: {
   questions: Question[];
-  answered: Answered;
   pending: boolean;
   error?: unknown;
   onSubmit: (a: QuestionAnswer[]) => void;
   onLater?: (() => void) | undefined;
 }) {
   const [values, setValues] = useState<Record<string, string>>(() =>
-    Object.fromEntries(
-      questions.map((q) => [
-        q.path,
-        answered[q.path] !== undefined ? String(answered[q.path]) : (q.default ?? ''),
-      ]),
-    ),
+    Object.fromEntries(questions.map((q) => [q.path, q.answer ?? q.default ?? ''])),
   );
   const set = (path: string, v: string) => setValues((c) => ({ ...c, [path]: v }));
-  const open = blockingQuestions(questions, answered).length;
+  const open = blockingQuestions(questions).length;
+  const unanswered = questions.filter((q) => !isAnswered(q)).length;
   const ready = questions.every((q) => isOptional(q) || (values[q.path] ?? '').trim() !== '');
   const submit = () =>
     onSubmit(
       questions
         .filter((q) => (values[q.path] ?? '').trim() !== '')
-        .map((q) => {
-          const v = (values[q.path] ?? '').trim();
-          const kind = questionKind(q);
-          return {
-            path: q.path,
-            value:
-              kind === 'number' && /^\d+$/.test(v)
-                ? Number(v)
-                : kind === 'yesno'
-                  ? YES_NO.exec(v)?.[0].toLowerCase() === 'yes'
-                  : v,
-          };
-        }),
+        .map((q) => ({ path: q.path, value: (values[q.path] ?? '').trim() })),
     );
   return (
     <section className="flex flex-col gap-3" aria-label="Questions" data-testid="proposal-questions">
       <h4 className="text-sm font-semibold text-fg">
         {open > 0
-          ? `${questions.filter((q) => answered[q.path] === undefined).length} ${questions.filter((q) => answered[q.path] === undefined).length === 1 ? 'question' : 'questions'} before you can use this`
+          ? `${unanswered} ${unanswered === 1 ? 'question' : 'questions'} before you can use this`
           : 'Your answers'}
       </h4>
       <ol className="flex flex-col gap-4">
@@ -95,7 +83,7 @@ export function AnswerFields({
           const kind = questionKind(q);
           const id = `q-${i}`;
           const v = values[q.path] ?? '';
-          const saved = answered[q.path] !== undefined;
+          const saved = isAnswered(q);
           return (
             <li key={q.path + q.question} className="flex flex-col gap-1.5" data-testid={`answer-${i}`}>
               <div className="flex flex-wrap items-center gap-2">
@@ -105,16 +93,19 @@ export function AnswerFields({
                 {saved && <Badge tone="success">Answered</Badge>}
                 {!saved && isOptional(q) && <Badge>Optional</Badge>}
               </div>
-              {(kind === 'choice' || kind === 'yesno') && (q.options?.length ?? 0) <= 5 && (
+              {(kind === 'yesno' || (kind === 'choice' && (q.options?.length ?? 0) <= 5)) && (
                 <fieldset className="flex flex-col gap-1.5" aria-labelledby={`${id}-label`}>
-                  {(q.options ?? []).map((o) => (
+                  {(kind === 'yesno'
+                    ? yesNoOptions(q)
+                    : (q.options ?? []).map((o) => ({ label: o, value: o }))
+                  ).map((o) => (
                     <Choice
-                      key={o}
+                      key={o.value}
                       name={id}
-                      checked={v === o}
-                      onSelect={() => set(q.path, o)}
-                      title={o}
-                      testId={`answer-${i}-${o}`}
+                      checked={v === o.value}
+                      onSelect={() => set(q.path, o.value)}
+                      title={o.label}
+                      testId={`answer-${i}-${o.value}`}
                     />
                   ))}
                 </fieldset>

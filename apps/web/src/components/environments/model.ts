@@ -1,6 +1,8 @@
 import {
   type ConnectionState,
   type DeliverySetup,
+  describeGate,
+  type PlacesResponse,
   type SetupEnv,
   type SetupStateDto,
   type SetupTargetDto,
@@ -8,7 +10,6 @@ import {
   updateMethodOf,
 } from '@aom/shared';
 import type { EnvStatusDto } from '../../api/queries/environments.ts';
-import { describeGate } from '../delivery/gate-text.ts';
 
 /**
  * The pure part of the Environments page (docs/design/environments-ux.md sections 1, 3 and 6): the role of an environment,
@@ -79,19 +80,28 @@ export interface PlaceVm {
   duplicateOf: string | null;
   duplicateName: string | null;
   keys: SetupTargetDto['keys'];
+  /** Environments that only the unfinished draft uses. */
+  usedByDraft: string[];
+  /** The server's verdict on removing it (absent from an older server). */
+  canRemove?: boolean;
+  removeBlockedReason?: string | null;
 }
 
 type EnvLite = Pick<SetupEnv, 'name' | 'label' | 'target'>;
 
-/** The environments shown on the page: what `delivery/` holds, then the ones only the unfinished draft has. */
+/**
+ * The environments shown on the page: what `delivery/` holds, with the ones the unfinished draft adds or changes shown as drafts
+ * (a changed one shows its draft version, so a place that was changed or merged is visible before it is saved).
+ */
 export function allEnvironments(s: SetupStateDto): Array<{ env: SetupEnv; draft: boolean }> {
   const current = s.current.setup?.environments ?? [];
-  const draftSetup = s.draft?.setup as DeliverySetup | null | undefined;
-  const draftOnly = (draftSetup?.environments ?? []).filter((d) => !current.some((c) => c.name === d.name));
-  return [
-    ...current.map((env) => ({ env, draft: false })),
-    ...draftOnly.map((env) => ({ env, draft: true })),
-  ];
+  const draftEnvs = (s.draft?.setup as DeliverySetup | null | undefined)?.environments ?? [];
+  const merged = current.map((env) => {
+    const d = draftEnvs.find((x) => x.name === env.name);
+    return d && JSON.stringify(d) !== JSON.stringify(env) ? { env: d, draft: true } : { env, draft: false };
+  });
+  const draftOnly = draftEnvs.filter((d) => !current.some((c) => c.name === d.name));
+  return [...merged, ...draftOnly.map((env) => ({ env, draft: true }))];
 }
 
 export function placesOf(
@@ -131,9 +141,38 @@ export function placesOf(
       duplicateOf: (t.role ?? 'active') === 'active' && sameAs ? sameAs.id : null,
       duplicateName: sameAs?.name ?? null,
       keys: t.keys,
+      usedByDraft: [],
     });
   }
   return out;
+}
+
+/** The places the server lists (`GET .../places`), in the shape the page uses. */
+export function placesFromApi(r: PlacesResponse, s: SetupStateDto): PlaceVm[] {
+  return r.places.map((p) => ({
+    id: p.id,
+    key: p.name,
+    kind: p.kind,
+    name: p.kind === 'computer' ? (p.workstationName ?? p.name) : p.name,
+    what: p.kind === 'computer' ? 'this computer' : `server ${p.host ?? ''}`.trim(),
+    host: p.host,
+    appUrl: p.appUrl,
+    workstationId: p.workstationId,
+    workstationName: p.workstationName,
+    online: p.workstationOnline,
+    reach: p.reachability
+      ? { state: p.reachability.state, at: p.reachability.at, detail: p.reachability.detail }
+      : null,
+    production: p.production,
+    role: p.role,
+    usedBy: p.usedBy.map((u) => ({ name: u.env, label: u.label })),
+    usedByDraft: p.usedByDraft,
+    duplicateOf: p.duplicateOf?.id ?? null,
+    duplicateName: p.duplicateOf?.name ?? null,
+    keys: s.targets.find((t) => t.id === p.id)?.keys,
+    canRemove: p.canRemove,
+    removeBlockedReason: p.removeBlockedReason,
+  }));
 }
 
 export const placeOfEnv = (places: PlaceVm[], env: Pick<SetupEnv, 'target'>): PlaceVm | undefined =>
@@ -166,6 +205,7 @@ export type CardState =
   | 'cannot_reach'
   | 'failed'
   | 'custom'
+  | 'needs_answer'
   | 'not_set_up';
 
 export type CardAction =
@@ -179,6 +219,7 @@ export type CardAction =
   | 'fix'
   | 'retry'
   | 'back_to_guided'
+  | 'answer'
   | null;
 
 export interface Strip {
@@ -216,7 +257,79 @@ const when = (iso: string | null | undefined, now = Date.now()): string => {
 
 export { when as agoText };
 
+const SERVER_CHIP: Record<string, { label: string; tone: Tone }> = {
+  draft: { label: 'Draft', tone: 'neutral' },
+  needs_try: { label: 'Needs a try', tone: 'amber' },
+  waiting_approval: { label: 'Waiting for approval', tone: 'amber' },
+  healthy: { label: 'Healthy', tone: 'green' },
+  unhealthy: { label: 'Not answering', tone: 'red' },
+  updating: { label: 'Updating', tone: 'blue' },
+  needs_answer: { label: 'Needs your answer', tone: 'amber' },
+  blocked: { label: 'Blocked', tone: 'amber' },
+  cannot_reach: { label: 'Cannot reach', tone: 'red' },
+  failed: { label: 'Failed', tone: 'red' },
+  changed: { label: 'Changed', tone: 'amber' },
+  custom: { label: 'Custom', tone: 'amber' },
+  not_set_up: { label: 'Not set up', tone: 'neutral' },
+};
+
+/** The server's own verdict (section 13.3) wins over what the page works out from the setup state. */
+function withServerState(info: CardInfo, status: EnvStatusDto, place: PlaceVm | undefined): CardInfo {
+  const st = status.serverState;
+  if (!st || !status.stateText) return info;
+  const problem = placeProblem(place);
+  const action: CardAction =
+    st === 'draft' || st === 'not_set_up'
+      ? 'review'
+      : st === 'needs_try'
+        ? 'try'
+        : st === 'waiting_approval' || st === 'changed'
+          ? 'approve'
+          : st === 'cannot_reach'
+            ? problem?.fix === 'reconnect'
+              ? 'reconnect'
+              : 'check'
+            : st === 'needs_answer'
+              ? 'answer'
+              : st === 'failed' || st === 'unhealthy'
+                ? 'fix'
+                : st === 'custom'
+                  ? 'back_to_guided'
+                  : st === 'healthy'
+                    ? info.role === 'live'
+                      ? status.waitingRelease
+                        ? 'release'
+                        : null
+                      : 'update'
+                    : null;
+  const state: CardState = st === 'unhealthy' ? 'failed' : st;
+  return {
+    ...info,
+    state,
+    chip: SERVER_CHIP[st] ?? info.chip,
+    sentence: status.stateText,
+    action,
+    strip: {
+      saved: status.savedState ? status.savedState !== 'none' : info.strip.saved,
+      tried: status.triedState ? status.triedState === 'tried' : info.strip.tried,
+      approved: status.approvalState ? status.approvalState === 'approved' : info.strip.approved,
+    },
+  };
+}
+
 export function cardInfo(args: {
+  s: SetupStateDto;
+  env: SetupEnv;
+  draft: boolean;
+  place: PlaceVm | undefined;
+  status: EnvStatusDto | undefined;
+  now?: number;
+}): CardInfo {
+  const local = cardInfoLocal(args);
+  return args.status?.serverState ? withServerState(local, args.status, args.place) : local;
+}
+
+function cardInfoLocal(args: {
   s: SetupStateDto;
   env: SetupEnv;
   draft: boolean;

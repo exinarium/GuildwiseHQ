@@ -88,7 +88,15 @@ export function useOrgLive() {
     retry: false,
     queryFn: async (): Promise<LiveRow[]> => {
       try {
-        return (await get<{ rows: LiveRow[] }>('/org/live')).rows ?? [];
+        const rows =
+          (
+            await get<{
+              rows: Array<
+                Omit<LiveRow, 'waitingRelease'> & { waitingReleases?: number; waitingRelease?: number }
+              >;
+            }>('/org/live')
+          ).rows ?? [];
+        return rows.map((r) => ({ ...r, waitingRelease: r.waitingReleases ?? r.waitingRelease ?? 0 }));
       } catch (e) {
         if (!(e instanceof ApiError) || ![404, 403].includes(e.status)) throw e;
       }
@@ -106,27 +114,45 @@ export function useOrgLive() {
 }
 
 export interface RollbackCandidate {
+  /** The earlier release run a rollback goes back to. */
+  runId: string;
   commit: string;
   version: string | null;
   at: string;
   releasedBy: string | null;
-  /** Where the backup taken before the newer release is kept. */
+  /** The version that runs now (not an earlier one). */
+  current: boolean;
+  /** Where the backup taken before the newer release is kept, in the server's words. */
   backupPath: string | null;
 }
 
+/** `GET /api/projects/:id/environments/:env/releases?limit=5` (Owner and Admin): the last successful releases, newest first. */
 export function useRollbackCandidates(projectId: string, env: string) {
   return useQuery({
     queryKey: ['rollback-candidates', projectId, env],
     retry: false,
     queryFn: async (): Promise<RollbackCandidate[]> => {
       try {
-        return (
-          (
-            await get<{ candidates: RollbackCandidate[] }>(
-              `/projects/${projectId}/environments/${encodeURIComponent(env)}/rollback-candidates`,
-            )
-          ).candidates ?? []
-        );
+        const d = await get<{
+          releases: Array<{
+            runId: string;
+            commit: string;
+            version: string | null;
+            at: string;
+            releasedBy: string | null;
+            current: boolean;
+            backupNote: string | null;
+          }>;
+        }>(`/projects/${projectId}/environments/${encodeURIComponent(env)}/releases?limit=5`);
+        return (d.releases ?? []).map((r) => ({
+          runId: r.runId,
+          commit: r.commit,
+          version: r.version,
+          at: r.at,
+          releasedBy: r.releasedBy,
+          current: r.current,
+          backupPath: r.backupNote,
+        }));
       } catch (e) {
         if (!(e instanceof ApiError) || ![404, 403].includes(e.status)) throw e;
       }
@@ -138,23 +164,25 @@ export function useRollbackCandidates(projectId: string, env: string) {
         )
         .sort((a, b) => ((a.finishedAt ?? a.createdAt) < (b.finishedAt ?? b.createdAt) ? 1 : -1))
         .slice(0, 5)
-        .map((r) => ({
+        .map((r, i) => ({
+          runId: r.id,
           commit: r.deployedCommit ?? r.commit ?? '',
           version: (r.deployedCommit ?? r.commit)?.slice(0, 7) ?? null,
           at: r.finishedAt ?? r.createdAt,
           releasedBy: r.releasedBy?.name ?? null,
+          current: i === 0,
           backupPath: null,
         }));
     },
   });
 }
 
-/** `POST /api/projects/:id/releases {env, commit, kind: 'rollback'}`: Owner or Admin, audited, no test-site rule. */
+/** `POST /api/projects/:id/releases/rollback {env, runId}`: Owner or Admin; the confirm is the approval. No test-site rule, a freeze still blocks. */
 export function useRollback(projectId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (v: { env: string; commit: string }) =>
-      post<{ message?: string }>(`/projects/${projectId}/releases`, { ...v, kind: 'rollback' }),
+    mutationFn: (v: { env: string; runId: string }) =>
+      post<{ message?: string }>(`/projects/${projectId}/releases/rollback`, v),
     onSuccess: () => {
       for (const k of [liveKey, queueKey, runsKey, ['env-status', projectId], ['delivery', projectId]])
         void qc.invalidateQueries({ queryKey: k });

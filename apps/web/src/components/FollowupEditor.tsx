@@ -6,9 +6,6 @@ import { Badge, Button, Select, TextArea } from './ui.tsx';
 
 type Spec = FollowupSpec;
 
-/** A deploy follow-up names an environment ("Test site"); `targetId` stays set for an older server. */
-type DeploySpec = Extract<Spec, { kind: 'deploy' }> & { environment?: string };
-
 export interface EnvOption {
   name: string;
   label: string;
@@ -31,9 +28,10 @@ export function useEnvironmentOptions(projectId: string | undefined): EnvOption[
 }
 
 const envOf = (f: Spec, envs: readonly EnvOption[]) => {
-  const named = (f as DeploySpec).environment;
+  const named = f.kind === 'deploy' ? f.environment : undefined;
   return (
-    envs.find((e) => e.name === named) ?? envs.find((e) => f.kind === 'deploy' && e.targetId === f.targetId)
+    envs.find((e) => e.name === named) ??
+    envs.find((e) => f.kind === 'deploy' && !!f.targetId && e.targetId === f.targetId)
   );
 };
 
@@ -104,7 +102,7 @@ export function FollowupEditor({
   details?: PhaseFollowupDto[];
 }) {
   const envs = useEnvironmentOptions(projectId);
-  const set = (i: number, patch: Partial<Spec> | Partial<DeploySpec>) =>
+  const set = (i: number, patch: Partial<Spec>) =>
     onChange?.(value.map((f, j) => (j === i ? ({ ...f, ...patch } as Spec) : f)));
   const move = (i: number, d: -1 | 1) => {
     const j = i + d;
@@ -121,7 +119,7 @@ export function FollowupEditor({
     const item: Spec =
       kind === 'deploy'
         ? firstEnv
-          ? ({ kind, targetId: firstEnv.targetId, environment: firstEnv.name, note: '' } as Spec)
+          ? ({ kind, environment: firstEnv.name, note: '' } as Spec)
           : { kind, targetId: first ?? '', note: '' }
         : kind === 'regression'
           ? { kind, platform: 'web', note: '' }
@@ -222,7 +220,7 @@ export function FollowupEditor({
                       value={envOf(f, envs)?.name ?? ''}
                       onChange={(e) => {
                         const env = envs.find((x) => x.name === e.target.value);
-                        set(i, { targetId: env?.targetId ?? '', environment: env?.name ?? '' });
+                        set(i, { targetId: undefined, environment: env?.name ?? '' });
                       }}
                     >
                       <option value="">Choose a site</option>

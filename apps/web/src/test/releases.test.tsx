@@ -1,9 +1,9 @@
+import { describeGate } from '@aom/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createMemoryRouter, MemoryRouter, type RouteObject, RouterProvider } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { describeGate } from '../components/delivery/gate-text.ts';
 import { ReleaseSheet } from '../components/environments/ReleaseSheet.tsx';
 import { RollbackSheet } from '../components/environments/RollbackSheet.tsx';
 import { FollowupEditor, followupProblems } from '../components/FollowupEditor.tsx';
@@ -86,22 +86,39 @@ const status = (rulesMet: boolean) => ({
   environments: [
     {
       env: 'production',
-      version: '0.9.2',
-      commit: 'aaa',
-      since: ago(4320),
-      health: 'healthy',
+      label: 'Live site',
+      role: 'live',
+      hosting: 'ssh',
+      runtime: 'docker',
+      placeId: U(5),
+      placeName: 'prod-server',
       appUrl: null,
-      lastRun: null,
-      waitingRelease: {
-        commit: 'a1b2c3d4e5f6',
-        version: '0.9.4',
-        cards: [{ ref: 'P5-12', title: 'Show the total' }],
-        rulesMet,
-        waitingFor: rulesMet ? [] : ['test site healthy for 3 more minutes'],
-        places: [{ runId: U(9), targetId: U(5), name: 'prod-server' }],
+      releasedBy: 'owner',
+      updates: 'when you release',
+      rules: [],
+      current: {
+        runId: U(8),
+        commit: 'aaa',
+        version: '0.9.2',
+        since: ago(4320),
+        releasedBy: 'Ada',
+        kind: 'release',
       },
+      health: { state: 'healthy', at: ago(2), detail: null },
+      lastRun: null,
+      waitingRelease: { runId: U(9), commit: 'a1b2c3d4e5f6', waitingFor: 'owner' },
+      blockedBy: rulesMet ? [] : ['test site healthy for 3 more minutes'],
+      savedState: 'saved',
+      triedState: 'tried',
+      approvalState: 'approved',
+      openQuestions: 0,
+      state: rulesMet ? 'healthy' : 'blocked',
+      stateText: rulesMet ? 'Version 0.9.2 is live.' : 'Waiting for: test site healthy for 3 more minutes.',
     },
   ],
+  openQuestions: 0,
+  deliveryMode: 'recipe',
+  generatedAt: ago(0),
 });
 
 function route(over: { queue?: unknown; status?: unknown } = {}) {
@@ -113,25 +130,44 @@ function route(over: { queue?: unknown; status?: unknown } = {}) {
     if (u === '/api/delivery/queue') return json({ items: over.queue ?? [queueItem(false)] });
     if (u.startsWith('/api/delivery/runs')) return json({ runs: [] });
     if (u.endsWith('/environments/status')) return json(over.status ?? status(false));
-    if (u.endsWith('/rollback-candidates'))
+    if (u.includes('/environments/production/releases'))
       return json({
-        candidates: [
-          { commit: 'now', version: '0.9.2', at: ago(10), releasedBy: 'Ada', backupPath: null },
+        releases: [
           {
+            runId: U(40),
+            commit: 'now',
+            version: '0.9.2',
+            at: ago(10),
+            releasedBy: 'Ada',
+            targetName: 'p',
+            kind: 'release',
+            current: true,
+            backupNote: null,
+          },
+          {
+            runId: U(41),
             commit: 'c1',
             version: '0.9.1',
             at: ago(2000),
             releasedBy: 'Ada',
-            backupPath: '/opt/backups/b1.sql.gz',
+            targetName: 'p',
+            kind: 'release',
+            current: false,
+            backupNote: '/opt/backups/b1.sql.gz',
           },
           {
+            runId: U(42),
             commit: 'c0',
             version: '0.9.0',
             at: ago(4000),
             releasedBy: 'Ben',
-            backupPath: '/opt/backups/b0.sql.gz',
+            targetName: 'p',
+            kind: 'release',
+            current: false,
+            backupNote: '/opt/backups/b0.sql.gz',
           },
         ],
+        canRollback: true,
       });
     if (method === 'POST') return json({ message: 'ok', runs: [] });
     return json({});
@@ -237,8 +273,7 @@ describe('ReleaseSheet', () => {
     expect(await screen.findByTestId('release-waiting-for')).toHaveTextContent(
       'Waiting for: test site healthy for 3 more minutes',
     );
-    expect(screen.getByTestId('release-version')).toHaveTextContent('0.9.4');
-    expect(screen.getByTestId('release-cards')).toHaveTextContent('P5-12');
+    expect(screen.getByTestId('release-version')).toHaveTextContent('a1b2c3d');
     expect(screen.getByTestId('release-backup')).toHaveTextContent('backup');
     expect(screen.getByTestId('release-now')).toBeDisabled();
     expect(screen.getByTestId('release-disabled-reason')).toBeInTheDocument();
@@ -273,8 +308,8 @@ describe('RollbackSheet', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Go back to 0.9.1' }));
     await waitFor(() => expect(onClose).toHaveBeenCalled());
     const post = calls.find((c) => c.method === 'POST');
-    expect(post?.url).toBe(`/api/projects/${U(1)}/releases`);
-    expect(post?.body).toEqual({ env: 'production', commit: 'c1', kind: 'rollback' });
+    expect(post?.url).toBe(`/api/projects/${U(1)}/releases/rollback`);
+    expect(post?.body).toEqual({ env: 'production', runId: U(41) });
   });
 
   it('a Member gets the Owner note and no confirm', async () => {
@@ -329,9 +364,7 @@ describe('follow-ups choose an environment', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
     await userEvent.click(screen.getByTestId('add-deploy'));
     await waitFor(() => expect(onChange).toHaveBeenCalled());
-    expect(onChange).toHaveBeenCalledWith([
-      { kind: 'deploy', targetId: U(21), environment: 'uat', note: '' },
-    ]);
+    expect(onChange).toHaveBeenCalledWith([{ kind: 'deploy', environment: 'uat', note: '' }]);
   });
 
   it('shows "Release to" with the sites and a plain sentence', async () => {

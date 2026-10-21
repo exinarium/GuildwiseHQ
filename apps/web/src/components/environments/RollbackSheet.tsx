@@ -24,11 +24,11 @@ export function RollbackSheet({
   const rollback = useRollback(projectId);
   const canManage = useCanManageOrg();
   const toast = useToast();
-  const [commit, setCommit] = useState('');
+  const [runId, setRunId] = useState('');
   const list = (q.data ?? []).slice(0, 5);
-  // the newest one is what runs now: it is not an earlier version
-  const earlier = list.slice(1);
-  const chosen = earlier.find((c) => c.commit === commit);
+  // the one that runs now is not an earlier version
+  const earlier = list.filter((c) => !c.current);
+  const chosen = earlier.find((c) => c.runId === runId);
   const name = (c: { version: string | null; commit: string }) => c.version ?? c.commit.slice(0, 7);
   return (
     <Dialog
@@ -48,7 +48,7 @@ export function RollbackSheet({
             onClick={() =>
               chosen &&
               rollback.mutate(
-                { env, commit: chosen.commit },
+                { env, runId: chosen.runId },
                 {
                   onSuccess: () => {
                     toast.success(`Going back to ${name(chosen)}`);
@@ -96,7 +96,7 @@ export function RollbackSheet({
             <legend className="font-semibold text-fg">Choose the version</legend>
             {earlier.map((c) => (
               <label
-                key={c.commit}
+                key={c.runId}
                 className="flex min-h-11 items-center gap-3 rounded-control border border-line p-2"
                 data-testid="rollback-candidate"
               >
@@ -104,8 +104,8 @@ export function RollbackSheet({
                   type="radio"
                   name="rollback-version"
                   className="size-4"
-                  checked={commit === c.commit}
-                  onChange={() => setCommit(c.commit)}
+                  checked={runId === c.runId}
+                  onChange={() => setRunId(c.runId)}
                 />
                 <span className="min-w-0 flex-1">
                   <span className="font-mono text-fg">{name(c)}</span>

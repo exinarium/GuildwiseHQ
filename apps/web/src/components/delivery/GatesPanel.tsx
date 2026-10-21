@@ -1,9 +1,8 @@
-import type { Gate, GatePresetDto } from '@aom/shared';
+import { describeGate, type Gate, type GatePresetDto } from '@aom/shared';
 import { type FormEvent, useState } from 'react';
 import { useGates, useRemovePreset, useSetBinding, useSetPreset } from '../../api/queries/delivery.ts';
 import { useProjects } from '../../api/queries/projects.ts';
 import { Badge, Button, Callout, Disclosure, ErrorBox, Panel, Select, TextInput } from '../ui.tsx';
-import { describeGate } from './gate-text.ts';
 
 /** Gate presets and the standard rule bound to a project (docs/design/ceo-front-door.md 9.3). Who releases is the recipe's decision. */
 export function GatesPanel() {

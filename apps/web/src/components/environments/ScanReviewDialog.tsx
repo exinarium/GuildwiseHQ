@@ -4,7 +4,7 @@ import { useUseDeployProposal } from '../../api/queries/deploy-setup.ts';
 import { useAnswerProposal } from '../../api/queries/environments.ts';
 import { useDismissProposal, useRunPlanOverview, useSaveRunPlan } from '../../api/queries/run-plan.ts';
 import { Badge, Button, Callout, Dialog, Disclosure, ErrorBox, useToast } from '../ui.tsx';
-import { type Answered, AnswerFields, blockingQuestions, type Question } from './AnswerFields.tsx';
+import { AnswerFields, blockingQuestions } from './AnswerFields.tsx';
 import { nativeOf } from './answers.ts';
 import { ROLE_TITLE, roleOf } from './model.ts';
 
@@ -32,9 +32,8 @@ export function ScanReviewDialog({
   const runOverview = useRunPlanOverview(projectId);
   const saveRun = useSaveRunPlan(projectId);
   const p = proposal.proposal;
-  const questions = p.questions as Question[];
-  const answered = ((p as { answers?: Answered }).answers ?? {}) as Answered;
-  const blocking = blockingQuestions(questions, answered);
+  const questions = p.questions;
+  const blocking = blockingQuestions(questions);
   const envs = (p.deploy?.environments ?? []) as SetupEnv[];
   const runProposal = runOverview.data?.proposal?.proposal.run;
   const runProposalDto = runOverview.data?.proposal;
@@ -105,7 +104,6 @@ export function ScanReviewDialog({
         {questions.length > 0 && (
           <AnswerFields
             questions={questions}
-            answered={answered}
             pending={answer.isPending}
             error={answer.error}
             onSubmit={(a) => answer.mutate({ proposalId: proposal.id, answers: a })}
@@ -156,7 +154,7 @@ export function ScanReviewDialog({
                 <p className="text-sm text-muted">
                   {e.hosting === 'ssh' ? `On a server (${e.host})` : 'On this computer'}.{' '}
                   {native
-                    ? `Runs directly on the machine: ${native.name}.`
+                    ? `Runs directly on the machine: ${e.app.imageName}.`
                     : `Updates the app part "${e.app.service}".`}
                 </p>
                 <Disclosure summary="Each update will" className="mt-1">

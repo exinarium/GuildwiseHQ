@@ -1,6 +1,7 @@
 // biome-ignore-all lint/correctness/useExhaustiveDependencies: the effects follow the chosen place, they are not re-run by every callback
 import {
   type DeliverySetup,
+  formatCommandLine,
   type ProbeReport,
   planChanges,
   type SetupEnv,
@@ -22,6 +23,7 @@ import {
   usePatchDeployTarget,
   useProjectWorkstations,
 } from '../../api/queries/phases.ts';
+import { useRunPlanOverview } from '../../api/queries/run-plan.ts';
 import { PrepareServer } from '../delivery/connect/PrepareServer.tsx';
 import { ReachabilityChip } from '../delivery/connect/ReachabilityChip.tsx';
 import { TargetTesting } from '../runs/TargetTesting.tsx';
@@ -40,7 +42,6 @@ import {
   healthyUrls,
   imageVarOf,
   type NativeAnswers,
-  nativeChangeItems,
   nativeFromApp,
   type Stack,
   stacksFromReport,
@@ -158,6 +159,12 @@ export function EnvironmentDialog({
   const server = hosting === 'ssh';
 
   const flow = useProbeFlow(projectId, s.probes);
+  // the start steps that build the app are the first guess for how a new version is built
+  const plan = useRunPlanOverview(projectId).data?.projectPlan?.plan;
+  const buildHint = (plan?.setup ?? [])
+    .filter((x) => /install|build/i.test(`${x.template ?? ''} ${x.name}`))
+    .map((x) => formatCommandLine(x.cmd ?? []))
+    .join('\n');
   const scan = useStartDeployScan(projectId);
   const addTarget = useAddDeployTarget(projectId);
   const patchTarget = usePatchDeployTarget(projectId);
@@ -283,7 +290,7 @@ export function EnvironmentDialog({
       const st = stacks.find((x) => x.path === c.path);
       if (st) pickStack(st);
     } else if (c.kind === 'native') {
-      const n = nativeFromApp(c.app);
+      const n = nativeFromApp(c.app, buildHint);
       set({
         runtime: 'native',
         native: n,
@@ -291,7 +298,10 @@ export function EnvironmentDialog({
         healthUrl: '',
       });
     } else if (c.kind === 'typed') {
-      set({ runtime: 'native', native: { ...answers.native, how: 'typed' } });
+      set({
+        runtime: 'native',
+        native: { ...answers.native, how: 'typed', build: answers.native.build || buildHint },
+      });
     } else set({ runtime: 'docker' });
   };
 
@@ -324,10 +334,7 @@ export function EnvironmentDialog({
   );
   const proposed = useMemo(() => withEnv(baseSetup, env), [baseSetup, env]);
   const changes = useMemo(
-    () =>
-      answers.runtime === 'native'
-        ? nativeChangeItems({ ...answers, hosting })
-        : planChanges({ version: 1, generator: s.generator, environments: [env] }, { [env.name]: report }),
+    () => planChanges({ version: 1, generator: s.generator, environments: [env] }, { [env.name]: report }),
     [env, report, s.generator, answers, hosting],
   );
 
@@ -341,6 +348,7 @@ export function EnvironmentDialog({
           ...(answers.appUrl ? { appUrl: answers.appUrl } : {}),
           notes: '',
           production: answers.role === 'live',
+          reuseExisting: true,
         });
         return vplace.name;
       }
@@ -387,10 +395,20 @@ export function EnvironmentDialog({
   const detailsReady =
     answers.runtime === 'native'
       ? !!answers.native.name.trim() &&
-        /^\//.test(answers.native.folder) &&
-        !!answers.native.restartTarget.trim()
+        /^\//.test(answers.native.appDir) &&
+        !!answers.native.restartTarget.trim() &&
+        (answers.native.releaseLayout || !answers.native.workingDir || answers.native.adoptFolder)
       : !!answers.appService && !!answers.imageName && !blockers;
 
+  // the computer that writes the setup must be new enough for the way of updating that was chosen (section 13.2)
+  const needsNewMethods =
+    answers.runtime === 'docker' && server && (!answers.imageVar || answers.method !== 'ship');
+  const runnerOld =
+    ws &&
+    ((needsNewMethods && ws.canNewMethods === false) ||
+      (answers.runtime === 'native' && ws.canDirect === false))
+      ? `Guildwise on ${ws.name} needs an update for this way of updating.`
+      : null;
   const hasTestEnv = !!testEnvName;
   const title = editing ? `Change ${editing.label}` : 'Add an environment';
   const stepNo = step === 'form' ? 1 : step === 'details' ? 2 : 3;
@@ -427,6 +445,11 @@ export function EnvironmentDialog({
       }
     >
       <div className="flex flex-col gap-4" data-testid="environment-dialog">
+        {runnerOld && step !== 'form' && (
+          <Callout tone="warning" title="This computer needs an update first" data-testid="runner-outdated">
+            {runnerOld} Update it on the Workstations page, or choose another way.
+          </Callout>
+        )}
         <p className="text-xs text-subtle" role="status" aria-live="polite" data-testid="wizard-step">
           Step {stepNo} of 3:{' '}
           {step === 'form' ? 'What it is' : step === 'details' ? 'What we found' : 'Review'}

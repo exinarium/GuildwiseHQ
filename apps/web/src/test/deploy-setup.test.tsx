@@ -1,9 +1,10 @@
-import { compileSetup, localAdoptEnv, type ProbeReport, sshShipEnv } from '@aom/shared';
+import { compileSetup, directEnv, localAdoptEnv, type ProbeReport, sshShipEnv } from '@aom/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { adaptStatus } from '../api/queries/environments.ts';
 import { AdvancedSetup } from '../components/delivery/setup/AdvancedSetup.tsx';
 import { AnswerFields, blockingQuestions, questionKind } from '../components/environments/AnswerFields.tsx';
 import {
@@ -526,10 +527,139 @@ describe('the Environments page: model', () => {
     expect(questionKind({ path: '/a', question: 'What is the site called?' })).toBe('text');
     const qs = [
       { path: '/a', question: 'Which part is your app?', options: ['app', 'web'] },
-      { path: '/b', question: 'Port?', default: '3000' },
+      { path: '/b', question: 'Port?', default: '3000', optional: true },
+      { path: '/c', question: 'Is it live?', kind: 'confirm' as const },
     ];
-    expect(blockingQuestions(qs, {}).map((q) => q.path)).toEqual(['/a']);
-    expect(blockingQuestions(qs, { '/a': 'app' })).toEqual([]);
+    expect(blockingQuestions(qs).map((q) => q.path)).toEqual(['/a', '/c']);
+    expect(blockingQuestions(qs.map((q) => ({ ...q, answer: 'app' })))).toEqual([]);
+    expect(questionKind(qs[2] as never)).toBe('yesno');
+  });
+});
+
+describe('the server status and places', () => {
+  const serverStatus = (over: Record<string, unknown> = {}) => ({
+    env: 'production',
+    label: 'Live site',
+    role: 'live',
+    hosting: 'ssh',
+    runtime: 'docker',
+    placeId: T_PROD,
+    placeName: 'shop-live',
+    appUrl: null,
+    releasedBy: 'owner',
+    updates: 'when you release',
+    rules: [],
+    current: {
+      runId: ID(60),
+      commit: 'abc1234def',
+      version: '0.9.2',
+      since: at,
+      releasedBy: 'Ada',
+      kind: 'release',
+    },
+    health: { state: 'healthy', at, detail: null },
+    lastRun: null,
+    waitingRelease: { runId: ID(61), commit: 'fff0000aaa', waitingFor: 'owner' },
+    blockedBy: ['test site healthy for 3 more minutes'],
+    savedState: 'saved',
+    triedState: 'tried',
+    approvalState: 'approved',
+    openQuestions: 0,
+    state: 'blocked',
+    stateText: 'Waiting for: test site healthy for 3 more minutes.',
+    ...over,
+  });
+
+  it('the card uses the server verdict and sentence, and the queue says which runs a Release presses', () => {
+    const adapted = adaptStatus(
+      serverStatus() as never,
+      [
+        {
+          projectId: PROJECT,
+          projectKey: 'P5',
+          env: 'production',
+          commit: 'fff0000aaa',
+          waitingFor: 'owner',
+          requestedAt: at,
+          gateNow: { satisfied: false, missing: [] },
+          targets: [
+            {
+              runId: ID(61),
+              targetId: T_PROD,
+              targetName: 'shop-live',
+              production: true,
+              host: 'h',
+              workstationName: 'PC',
+            },
+          ],
+        },
+      ] as never,
+      PROJECT,
+    );
+    expect(adapted).toMatchObject({
+      version: '0.9.2',
+      health: 'healthy',
+      waitingRelease: { rulesMet: false, version: 'fff0000', places: [{ runId: ID(61), name: 'shop-live' }] },
+    });
+    const s = savedState({}, { dryRunMissing: [], recipeStatus: 'approved' });
+    const env = s.current.setup.environments[1];
+    const info = cardInfo({ s, env, draft: false, place: placesOf(s)[1], status: adapted });
+    expect(info).toMatchObject({
+      state: 'blocked',
+      chip: { label: 'Blocked' },
+      sentence: 'Waiting for: test site healthy for 3 more minutes.',
+      strip: { saved: true, tried: true, approved: true },
+    });
+    const failed = adaptStatus(
+      serverStatus({ state: 'failed', stateText: 'The update stopped at the health check.' }) as never,
+      [],
+      PROJECT,
+    );
+    expect(cardInfo({ s, env, draft: false, place: placesOf(s)[1], status: failed })).toMatchObject({
+      state: 'failed',
+      action: 'fix',
+    });
+  });
+
+  it('places come from the server when it lists them: its reason a place cannot go is what is shown', async () => {
+    const user = userEvent.setup();
+    serveProject();
+    serve(savedState());
+    routes[`GET /api/projects/${PROJECT}/places`] = () =>
+      json({
+        canEdit: true,
+        places: [
+          {
+            id: T_LOCAL,
+            name: 'shop-uat',
+            kind: 'computer',
+            workstationId: WS,
+            workstationName: 'Office PC',
+            workstationOnline: true,
+            host: null,
+            appUrl: null,
+            production: false,
+            role: 'active',
+            reachability: null,
+            lastProbeAt: at,
+            usedBy: [{ env: 'uat', label: 'Test site' }],
+            usedByDraft: ['demo'],
+            usedByFollowups: 0,
+            duplicateOf: null,
+            keyCount: 0,
+            canRemove: false,
+            removeBlockedReason: 'Used by Test site and the unfinished Demo: change that first.',
+          },
+        ],
+      });
+    mountPage();
+    const places = await screen.findByTestId('places');
+    expect(await within(places).findByText(/Test site/)).toBeInTheDocument();
+    await waitFor(() => expect(places).toHaveTextContent('demo'));
+    await user.click(await within(places).findByRole('button', { name: 'More for Office PC' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Remove' }));
+    expect(await screen.findByTestId('place-in-use')).toHaveTextContent('unfinished Demo');
+    expect(screen.getByTestId('remove-place-confirm')).toBeDisabled();
   });
 });
 
@@ -552,7 +682,7 @@ describe('the Environments page', () => {
   it('a question has real fields: the banner opens the review, Use is blocked until it is answered, the answer is sent with its path', async () => {
     const user = userEvent.setup();
     serveProject();
-    let answers: Record<string, unknown> = {};
+    let answers: Record<string, string> = {};
     const proposal = () => ({
       id: ID(40),
       area: 'deploy',
@@ -599,7 +729,7 @@ describe('the Environments page', () => {
     routes[`GET /api/projects/${PROJECT}/delivery/setup`] = () => json(state({ proposal: proposal() }));
     routes['POST /api/setup-proposals/' + ID(40) + '/answers'] = (init) => {
       for (const a of JSON.parse(String(init.body)).answers) answers = { ...answers, [a.path]: a.value };
-      return json({ proposal: proposal(), remaining: 0 });
+      return json(proposal());
     };
     routes[`POST /api/projects/${PROJECT}/delivery/setup/use-proposal`] = () => json(state());
     mountPage();
@@ -619,7 +749,7 @@ describe('the Environments page', () => {
       expect(calls.find((x) => x.url.endsWith('/answers'))?.body).toEqual({
         answers: [
           { path: '/environments/0/app/service', value: 'app' },
-          { path: '/environments/0/app/appUrl', value: 3000 },
+          { path: '/environments/0/app/appUrl', value: '3000' },
         ],
       }),
     );
@@ -707,8 +837,8 @@ describe('the Environments page', () => {
     const s = savedState();
     s.targets.push({ ...(s.targets[0] as object), id: ID(40), name: 'Test copy' } as never);
     serve(s);
-    routes['POST /api/deploy-targets/merge'] = () => json({ ok: true });
-    routes[`DELETE /api/deploy-targets/${ID(40)}`] = () => json({ ok: true });
+    routes[`POST /api/projects/${PROJECT}/places/merge`] = () =>
+      json({ repointed: [], followupsRepointed: 0, removed: true, stillUsedBySaved: [] });
     mountPage();
     const places = await screen.findByTestId('places');
     expect(within(places).getByTestId('place-shop-uat')).toHaveTextContent('Used by: Test site');
@@ -728,7 +858,7 @@ describe('the Environments page', () => {
     expect(await screen.findByTestId('merge-dialog')).toHaveTextContent('Nothing on the computer is touched');
     await user.click(screen.getByRole('button', { name: 'Merge' }));
     await waitFor(() =>
-      expect(calls.find((x) => x.url.endsWith('/deploy-targets/merge'))?.body).toEqual({
+      expect(calls.find((x) => x.url.endsWith('/places/merge'))?.body).toEqual({
         fromId: ID(40),
         toId: T_LOCAL,
       }),
@@ -747,7 +877,8 @@ describe('the Environments page', () => {
       production: false,
     } as never);
     serve(s);
-    routes[`DELETE /api/deploy-targets/${ID(42)}`] = () => json({ ok: true });
+    routes[`POST /api/projects/${PROJECT}/places/${ID(42)}/remove`] = () =>
+      json({ removed: true, keyCleanup: { state: 'started', commandId: 'c', reason: null } });
     mountPage();
     const places = await screen.findByTestId('places');
     await user.click(within(places).getByRole('button', { name: 'More for old-vps' }));
@@ -757,9 +888,11 @@ describe('the Environments page', () => {
     await user.click(within(dialog).getByTestId('remove-key'));
     await user.click(screen.getByTestId('remove-place-confirm'));
     await waitFor(() =>
-      expect(calls.find((x) => x.method === 'DELETE' && x.url.includes(ID(42)))?.url).toContain(
-        'revokeKey=1',
-      ),
+      expect(
+        calls.find((x) => x.method === 'POST' && x.url.endsWith(`/places/${ID(42)}/remove`))?.body,
+      ).toEqual({
+        removeKey: true,
+      }),
     );
   });
 
@@ -767,7 +900,30 @@ describe('the Environments page', () => {
     const user = userEvent.setup();
     serveProject();
     serve(savedState());
-    routes[`DELETE /api/projects/${PROJECT}/delivery/environments/uat`] = () => json({ ok: true });
+    const without = () => {
+      const c = savedState().current.setup;
+      return { ...c, environments: c.environments.filter((e: { name: string }) => e.name !== 'uat') };
+    };
+    routes[`POST /api/projects/${PROJECT}/delivery/setup/remove-environment`] = () =>
+      json({
+        ...savedState({ draft: { setup: without(), customScripts: {}, proposalId: null, updatedAt: at } }),
+        impact: ['Live site was waiting for Test site: that rule is dropped.'],
+        lastEnvironment: false,
+      });
+    routes[`POST /api/projects/${PROJECT}/delivery/setup/preview`] = () =>
+      json({
+        ok: true,
+        issues: [],
+        hash: 'h'.repeat(64),
+        files: [],
+        keep: [],
+        lint: [],
+        changes: [],
+        differsFromCurrent: true,
+        needsDryRun: [],
+      });
+    routes[`POST /api/projects/${PROJECT}/delivery/setup/publish`] = () =>
+      json({ commandId: 'c', hash: 'h'.repeat(64) }, 202);
     mountPage();
     const card = await screen.findByTestId('env-card-uat');
     await user.click(within(card).getByRole('button', { name: 'More for Test site' }));
@@ -775,9 +931,14 @@ describe('the Environments page', () => {
     const dialog = await screen.findByTestId('remove-env-dialog');
     expect(dialog).toHaveTextContent('left exactly as it is');
     await user.click(screen.getByTestId('remove-env-confirm'));
-    await waitFor(() =>
-      expect(calls.some((x) => x.method === 'DELETE' && x.url.endsWith('/environments/uat'))).toBe(true),
-    );
+    await waitFor(() => expect(calls.some((x) => x.url.endsWith('/setup/publish'))).toBe(true));
+    expect(calls.find((x) => x.url.endsWith('/setup/remove-environment'))?.body).toEqual({ env: 'uat' });
+    // saved from the draft that no longer has it
+    expect(
+      calls
+        .find((x) => x.url.endsWith('/setup/publish'))
+        ?.body.setup.environments.map((e: { name: string }) => e.name),
+    ).toEqual(['production']);
   });
 
   it('clean up lists the unfinished draft and an old file, and nothing goes unless it is ticked', async () => {
@@ -804,7 +965,7 @@ describe('the Environments page', () => {
         differsFromCurrent: false,
         needsDryRun: [],
       });
-    routes[`DELETE /api/projects/${PROJECT}/delivery/setup/draft`] = () => json({ ok: true });
+    routes[`POST /api/projects/${PROJECT}/delivery/setup/discard-draft`] = () => json(state());
     mountPage();
     await user.click(await screen.findByText(/Show technical details/));
     expect(await screen.findByText('Old setups and drafts (2)')).toBeInTheDocument();
@@ -812,9 +973,7 @@ describe('the Environments page', () => {
     const dialog = await screen.findByTestId('cleanup-dialog');
     expect(within(dialog).getByTestId('cleanup-file-delivery/smoke.sh')).not.toBeChecked();
     await user.click(screen.getByTestId('cleanup-confirm'));
-    await waitFor(() =>
-      expect(calls.some((x) => x.method === 'DELETE' && x.url.endsWith('/setup/draft'))).toBe(true),
-    );
+    await waitFor(() => expect(calls.some((x) => x.url.endsWith('/setup/discard-draft'))).toBe(true));
   });
 
   it('a scan in progress and a scan that gave nothing are said in words', async () => {
@@ -850,21 +1009,20 @@ describe('answer fields', () => {
       <AnswerFields
         questions={[
           { path: '/a', question: 'Which part is your app?', options: ['app', 'worker'] },
-          { path: '/b', question: 'Is it live?', options: ['Yes, customers use it', 'No, a test site'] },
+          { path: '/b', question: 'Is it live?', kind: 'confirm' },
         ]}
-        answered={{}}
         pending={false}
         onSubmit={(a) => sent.push(a)}
       />,
     );
     expect(screen.getByTestId('answers-submit')).toBeDisabled();
     await user.click(screen.getByTestId('answer-0-worker'));
-    await user.click(screen.getByTestId('answer-1-No, a test site'));
+    await user.click(screen.getByTestId('answer-1-no'));
     await user.click(screen.getByTestId('answers-submit'));
     expect(sent).toEqual([
       [
         { path: '/a', value: 'worker' },
-        { path: '/b', value: false },
+        { path: '/b', value: 'no' },
       ],
     ]);
   });
@@ -1038,22 +1196,15 @@ describe('the Add environment dialog', () => {
 describe('an app that runs directly on the machine', () => {
   const nativeReport = () =>
     report({
-      nativeApps: [
+      services: [
+        { manager: 'pm2', name: 'crm-api', state: 'online', workingDir: '/home/u/apps/crm', ports: [3100] },
         {
-          kind: 'pm2',
-          name: 'crm-api',
-          folder: '/home/u/apps/crm',
-          port: 3100,
-          running: true,
-          restart: 'pm2 restart crm-api',
-        },
-        {
-          kind: 'systemd',
-          name: 'invoice-web',
-          folder: '/srv/invoice',
-          port: 3000,
-          running: true,
-          restart: null,
+          manager: 'systemd',
+          name: 'invoice-web.service',
+          state: 'running',
+          workingDir: '/srv/invoice/current',
+          ports: [3000],
+          releaseLayout: true,
         },
       ],
     });
@@ -1067,7 +1218,7 @@ describe('an app that runs directly on the machine', () => {
       probes = [probe({ report: nativeReport() })];
       return json({ commandId: ID(77), workstationId: WS }, 202);
     };
-    routes[`POST /api/projects/${PROJECT}/delivery/setup/preview`] = (init) =>
+    routes[`POST /api/projects/${PROJECT}/delivery/setup/preview`] = () =>
       json({
         ok: true,
         issues: [],
@@ -1078,7 +1229,6 @@ describe('an app that runs directly on the machine', () => {
         changes: [],
         differsFromCurrent: true,
         needsDryRun: [],
-        _body: JSON.parse(String(init.body)),
       });
     mountPage();
     await user.click(await screen.findByTestId('setup-add'));
@@ -1096,37 +1246,66 @@ describe('an app that runs directly on the machine', () => {
     expect(details).not.toHaveTextContent(/compose|Docker|image/i);
     expect((screen.getByTestId('native-name') as HTMLInputElement).value).toBe('crm-api');
     expect((screen.getByTestId('native-restart-target') as HTMLInputElement).value).toBe('crm-api');
-    expect(screen.getByTestId('restart-pm2')).toBeChecked;
+    // it runs from a plain folder: the first update moves it, and that needs a plain yes
+    expect(screen.getByTestId('native-adopt')).toHaveTextContent(
+      'moves the folder /home/u/apps/crm to /home/u/apps/crm-app/releases/initial',
+    );
+    expect(screen.getByTestId('env-to-review')).toBeDisabled();
+    await user.click(screen.getByTestId('native-adopt-confirm'));
     await user.click(screen.getByTestId('env-to-review'));
     await waitFor(() => expect(calls.find((x) => x.url.endsWith('/setup/preview'))).toBeTruthy());
     const env = calls.find((x) => x.url.endsWith('/setup/preview'))?.body.setup.environments[0];
-    expect(env.runtime).toMatchObject({
-      kind: 'native',
-      how: 'pm2',
-      name: 'crm-api',
-      folder: '/home/u/apps/crm',
-      port: 3100,
-      restart: { via: 'pm2', target: 'crm-api' },
-      keepReleases: 5,
+    expect(env).toMatchObject({
+      runtime: 'direct',
+      hosting: 'this_computer',
+      direct: {
+        appDir: '/home/u/apps/crm-app',
+        currentLink: '/home/u/apps/crm',
+        adoptFolder: true,
+        keep: 5,
+        manager: { kind: 'pm2', name: 'crm-api' },
+      },
     });
+    expect(env.steps.map((x: { kind: string }) => x.kind)).toEqual(['direct_prepare', 'direct_switch']);
+  });
+
+  it('a service that already keeps releases/current has nothing to convert', async () => {
+    const user = userEvent.setup();
+    let probes: unknown[] = [];
+    serveProject();
+    routes[`GET /api/projects/${PROJECT}/delivery/setup`] = () => json(state({ probes }));
+    routes[`POST /api/projects/${PROJECT}/delivery/probe`] = () => {
+      probes = [probe({ report: nativeReport() })];
+      return json({ commandId: ID(77), workstationId: WS }, 202);
+    };
+    mountPage();
+    await user.click(await screen.findByTestId('setup-add'));
+    await user.click(screen.getByTestId('place-choice-Office PC'));
+    const found = await screen.findAllByTestId('native-choice', undefined, { timeout: 6000 });
+    await user.click(found[1] as HTMLElement);
+    await user.click(screen.getByTestId('env-next'));
+    await screen.findByTestId('native-details');
+    expect(screen.queryByTestId('native-adopt')).toBeNull();
+    expect((screen.getByTestId('native-restart-target') as HTMLInputElement).value).toBe(
+      'invoice-web.service',
+    );
+    expect(screen.getByTestId('env-to-review')).toBeEnabled();
   });
 
   it('the card says how it runs and how it is restarted, in plain words', async () => {
     serveProject();
     const s = savedState({}, { dryRunMissing: [], recipeStatus: 'approved' });
-    const native = {
-      ...((s.current.setup?.environments ?? [])[0] as object),
-      steps: [],
-      runtime: {
-        kind: 'native',
-        how: 'pm2',
-        name: 'crm-api',
-        folder: '/home/u/apps/crm',
-        port: 3100,
-        restart: { via: 'pm2', target: 'crm-api' },
-        keepReleases: 5,
-      },
-    };
+    const native = directEnv({
+      name: 'uat',
+      label: 'Test site',
+      target: 'shop-uat',
+      appDir: '/home/u/apps/crm-app',
+      currentLink: '/home/u/apps/crm',
+      adoptFolder: true,
+      manager: { kind: 'pm2', name: 'crm-api' },
+      appUrl: 'http://localhost:3100',
+      appName: 'crm-api',
+    });
     (s.current.setup as { environments: unknown[] }).environments = [
       native,
       (s.current.setup?.environments ?? [])[1],

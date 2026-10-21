@@ -25,7 +25,7 @@ import { MoveWizard } from '../delivery/move/MoveWizard.tsx';
 import { FixWithDevOps } from '../devops/FixWithDevOps.tsx';
 import { Badge, Button, Callout, Dialog, ErrorBox, Menu, MenuItem, MenuSeparator, useToast } from '../ui.tsx';
 import { AddServerDialog } from './AddPlaceDialogs.tsx';
-import { nativeOf, restartWords } from './answers.ts';
+import { directRestartWords, nativeOf } from './answers.ts';
 import { EnvironmentDialog } from './EnvironmentDialog.tsx';
 import {
   agoText,
@@ -58,6 +58,7 @@ export function EnvironmentCard({
   labelOf,
   changesSinceApproval,
   onAdvanced,
+  onAnswer,
 }: {
   projectId: string;
   s: SetupStateDto;
@@ -69,6 +70,8 @@ export function EnvironmentCard({
   labelOf: (name: string) => string;
   changesSinceApproval: string[];
   onAdvanced: () => void;
+  /** Open the questions DevOps asked. */
+  onAnswer?: (() => void) | undefined;
 }) {
   const place = places.find((p) => p.key.toLowerCase() === env.target.toLowerCase());
   const info = cardInfo({ s, env, draft, place, status });
@@ -204,7 +207,7 @@ export function EnvironmentCard({
           <dt className="text-subtle">How</dt>
           <dd className="text-muted" data-testid={`env-how-${env.name}`}>
             {native
-              ? `Runs directly on ${place?.kind === 'server' ? 'the server' : 'this computer'}: ${native.name}${native.folder ? ` in ${native.folder}` : ''}${native.port ? `, port ${native.port}` : ''}. Each update gets the new version, builds it, switches to it and will ${restartWords({ restartVia: native.restart.via, restartTarget: native.restart.target })}.`
+              ? `Runs directly on ${place?.kind === 'server' ? 'the server' : 'this computer'}: ${env.app.imageName} in ${native.currentLink ?? native.appDir}${portOf(env.app.appUrl) ? `, port ${portOf(env.app.appUrl)}` : ''}. Each update gets the new version, builds it, switches to it and will ${directRestartWords(native)}. The last ${native.keep} versions are kept.`
               : howItStarts(env, hasPlan)}
           </dd>
           {rules.length > 0 && (
@@ -262,6 +265,11 @@ export function EnvironmentCard({
 
         {canEdit ? (
           <div className="flex flex-wrap items-center gap-2" data-testid={`env-actions-${env.name}`}>
+            {info.action === 'answer' && onAnswer && (
+              <Button variant="primary" onClick={onAnswer} data-testid={`env-answer-${env.name}`}>
+                Answer
+              </Button>
+            )}
             {info.action === 'review' && (
               <Button variant="primary" onClick={onEdit} data-testid={`env-review-${env.name}`}>
                 Review and save
@@ -550,6 +558,7 @@ export function EnvironmentCard({
           label={info.label}
           env={env}
           place={place}
+          last={(s.current.setup?.environments.length ?? 0) <= 1}
           onClose={() => setRemoving(false)}
         />
       )}
@@ -561,3 +570,5 @@ export function EnvironmentCard({
 }
 
 export { agoText };
+
+const portOf = (url: string | undefined) => /:(\d+)(\/|$)/.exec(url ?? '')?.[1] ?? '';

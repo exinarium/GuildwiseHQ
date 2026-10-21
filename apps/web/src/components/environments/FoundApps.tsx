@@ -2,7 +2,13 @@ import type { ProbeReport } from '@aom/shared';
 import { Box, Cog, FolderSearch, PlayCircle, Search, Terminal } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
 import { Button, Callout, ErrorBox, Spinner, TextInput } from '../ui.tsx';
-import { type NativeApp, nativeAppsFromReport, type Stack, stacksFromReport } from './answers.ts';
+import {
+  MANAGER_WORDS,
+  type NativeApp,
+  nativeAppsFromReport,
+  type Stack,
+  stacksFromReport,
+} from './answers.ts';
 import { Choice } from './Choice.tsx';
 
 export type StartChoice =
@@ -10,12 +16,6 @@ export type StartChoice =
   | { kind: 'native'; app: NativeApp }
   | { kind: 'typed' }
   | { kind: 'new' };
-
-const NATIVE_KIND: Record<NativeApp['kind'], string> = {
-  systemd: 'a system service',
-  pm2: 'a pm2 process',
-  process: 'a running program',
-};
 
 /** Where the look went, as a list a person can read ("/opt", "/srv", "/home/ada"). */
 export function checkedPlaces(report: ProbeReport | null | undefined): string[] {
@@ -129,26 +129,29 @@ export function FoundApps({
           ))}
           {natives.map((app) => (
             <Choice
-              key={`${app.kind}-${app.name}-${app.folder}`}
+              key={`${app.manager}-${app.name}-${app.workingDir ?? ''}`}
               name={group}
               checked={selected?.kind === 'native' && selected.app === app}
               onSelect={() => onSelect({ kind: 'native', app })}
               icon={<Cog className="size-5" />}
               title={
                 <>
-                  Runs directly on this machine: {app.name}{' '}
+                  Runs directly on this machine: {app.name.replace(/\.service$/, '')}{' '}
                   <span className="font-normal text-muted">(found, not in Docker)</span>
                 </>
               }
               testId="native-choice"
             >
-              {NATIVE_KIND[app.kind][0]?.toUpperCase()}
-              {NATIVE_KIND[app.kind].slice(1)}
-              {app.port ? `, answers on port ${app.port}` : ''}
-              {app.running ? '' : ', not running'}.
-              {app.folder && (
+              {MANAGER_WORDS[app.manager][0]?.toUpperCase()}
+              {MANAGER_WORDS[app.manager].slice(1)}
+              {app.ports[0] ? `, answers on port ${app.ports[0]}` : ''}
+              {app.state === 'running' || app.state === 'online' || app.state === 'active'
+                ? ''
+                : `, ${app.state}`}
+              .
+              {app.workingDir && (
                 <span className="mt-0.5 block font-mono text-xs text-subtle [overflow-wrap:anywhere]">
-                  {app.folder}
+                  {app.workingDir}
                 </span>
               )}
             </Choice>

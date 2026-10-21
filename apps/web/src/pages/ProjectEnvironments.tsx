@@ -4,17 +4,28 @@ import { useEffect, useMemo, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router';
 import { useDelivery, useInspectRecipe } from '../api/queries/delivery.ts';
 import { useSetupState, useStartDeployScan } from '../api/queries/deploy-setup.ts';
-import { useEnvStatus, useUnmodelledFiles } from '../api/queries/environments.ts';
+import {
+  useEnvStatus,
+  usePlacesApi,
+  usePublishDraft,
+  useUnmodelledFiles,
+} from '../api/queries/environments.ts';
 import { useProjects } from '../api/queries/projects.ts';
 import { useRunPlanOverview, useStartScan } from '../api/queries/run-plan.ts';
 import { AdvancedSetup } from '../components/delivery/setup/AdvancedSetup.tsx';
 import { AddServerDialog } from '../components/environments/AddPlaceDialogs.tsx';
-import { blockingQuestions, type Question } from '../components/environments/AnswerFields.tsx';
+import { blockingQuestions } from '../components/environments/AnswerFields.tsx';
 import { EnvironmentCard } from '../components/environments/EnvironmentCard.tsx';
 import { EnvironmentDialog } from '../components/environments/EnvironmentDialog.tsx';
 import { HistorySection } from '../components/environments/HistorySection.tsx';
 import { ImprovedSteps } from '../components/environments/ImprovedSteps.tsx';
-import { allEnvironments, displayLabel, placesOf, roleOf } from '../components/environments/model.ts';
+import {
+  allEnvironments,
+  displayLabel,
+  placesFromApi,
+  placesOf,
+  roleOf,
+} from '../components/environments/model.ts';
 import { PlacesPanel } from '../components/environments/PlacesPanel.tsx';
 import { CleanUpDialog } from '../components/environments/RemoveDialogs.tsx';
 import { RulesSection } from '../components/environments/RulesSection.tsx';
@@ -74,6 +85,8 @@ function EnvironmentsBody({
 }) {
   const q = useSetupState(projectId);
   const status = useEnvStatus(projectId);
+  const placesApi = usePlacesApi(projectId);
+  const saveDraft = usePublishDraft(projectId);
   const delivery = useDelivery(projectId);
   const run = useRunPlanOverview(projectId);
   const scanDeploy = useStartDeployScan(projectId);
@@ -124,7 +137,7 @@ function EnvironmentsBody({
       </div>
     );
 
-  const places = placesOf(s);
+  const places = placesApi.data ? placesFromApi(placesApi.data, s) : placesOf(s);
   const labelOf = (name: string) => {
     const e = items.find((x) => x.env.name === name)?.env;
     return e ? displayLabel(e, roleOf(e)) : name;
@@ -132,11 +145,8 @@ function EnvironmentsBody({
   const statusOf = (name: string) => status.data?.find((x) => x.env === name);
   const noneCan = s.workstations.length > 0 && s.workstations.every((w) => !w.canProbe);
   const dirty = !!s.draft?.setup && JSON.stringify(s.draft.setup) !== JSON.stringify(s.current.setup);
-  const questions = (s.proposal?.proposal.questions ?? []) as Question[];
-  const answered = ((
-    s.proposal?.proposal as { answers?: Record<string, string | number | boolean> } | undefined
-  )?.answers ?? {}) as Record<string, string | number | boolean>;
-  const blocking = blockingQuestions(questions, answered);
+  const questions = s.proposal?.proposal.questions ?? [];
+  const blocking = blockingQuestions(questions);
   const empty = items.length === 0 && !s.current.custom;
   const unmodelledFiles = unmodelled.data ?? [];
   const oldCount = (s.draft && dirty ? 1 : 0) + unmodelledFiles.length;
@@ -372,6 +382,7 @@ function EnvironmentsBody({
               labelOf={labelOf}
               changesSinceApproval={recipe?.changes ?? []}
               onAdvanced={() => setAdvanced(true)}
+              onAnswer={() => setReviewing(true)}
             />
           ))}
         </ul>
@@ -401,7 +412,7 @@ function EnvironmentsBody({
         collapsible
         chip={<span className="text-xs text-subtle">{places.filter((p) => p.role === 'active').length}</span>}
       >
-        <PlacesPanel projectId={projectId} s={s} onAddServer={() => setAddingServer(true)} />
+        <PlacesPanel projectId={projectId} s={s} places={places} onAddServer={() => setAddingServer(true)} />
       </Section>
 
       <RulesSection projectId={projectId} s={s} />
