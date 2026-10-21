@@ -91,7 +91,9 @@ describe('a question passed on between agents', () => {
       r.ended(ann.shiftId, 'reported');
     }
 
-    const hops = await q(`SELECT count(*)::int AS n FROM shifts WHERE kind='question' AND outcome='reported'`);
+    const hops = await q(
+      `SELECT count(*)::int AS n FROM shifts WHERE kind='question' AND outcome='reported'`,
+    );
     expect(hops[0]!.n).toBe(6);
     expect(await questionShiftCount(w.t.app.ctx.pool, card.id, new Date(0))).toBe(3);
     expect(
