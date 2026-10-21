@@ -4,7 +4,11 @@ Logged fixes to pick up when development resumes. Newest first.
 
 ## 2026-10-18
 
-### 82. Evaluate Graphify for project graphs and an organization graph
+### 82. Project graphs and an organization graph — SHIPPED, measuring
+
+**Shipped to production on 2026-10-20** (first in image `guildwise-hq:ce1bd5be`, runner 0.1.32; in every release since).
+What remains is measurement (phase 8, the four-week holdout) and the optional items under "Not done" below; nothing here
+blocks using it. The "Ideas to explore" further down are the original request, kept for history, not open work.
 
 **Owner request (2026-10-18):** "Take a look at https://github.com/Graphify-Labs/graphify. We can possibly rewrite this
 to enhance our ledger and context system and add a project graph for every project as well as adding an organizational
@@ -28,7 +32,7 @@ visual view and nothing code-derived on the server, no MCP server, tree-sitter a
   20-card offline benchmark, decisions and orders in the work layer, "reopened cards" as a quality guard. Phase 7 (the visual
   view) is withdrawn by the owner.
 
-**Ideas to explore.**
+**Ideas to explore** (original request, history only).
 - **Project graph** per project: a knowledge graph of the codebase and work (modules, services, cards, decisions, ledger
   orders, owners), built and kept current by the agents, as richer context for shift briefs and chats than today's
   ledger search and file reads.
