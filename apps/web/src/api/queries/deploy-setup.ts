@@ -37,6 +37,7 @@ export function useSetupState(projectId: string | undefined, waiting = false) {
           approvedHash: null,
           lint: [],
           dryRunOk: [],
+          dryRunMissing: [],
           custom: false,
         },
         publish: d.publish ?? null,
@@ -48,6 +49,7 @@ export function useSetupState(projectId: string | undefined, waiting = false) {
         scanProblem: d.scanProblem ?? null,
         proposal: d.proposal ?? null,
         generator: d.generator ?? SETUP_GENERATOR,
+        improvedAvailable: d.improvedAvailable ?? false,
       };
     },
     refetchInterval: (q) =>

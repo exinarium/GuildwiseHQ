@@ -64,6 +64,7 @@ const workstation = (over: Record<string, unknown> = {}) => ({
   mine: true,
   canProbe: true,
   blocked: null,
+  canConnect: true,
   ...over,
 });
 const state = (over: Record<string, unknown> = {}) => ({
@@ -239,6 +240,57 @@ describe('model', () => {
     expect(sshShipEnv).toBeTypeOf('function');
   });
 
+  it('database updates before the restart become a compose_run step in the right place, and come back when editing', () => {
+    const a = {
+      ...emptyAnswers('test'),
+      stackPath: '/home/u/uat/docker-compose.yml',
+      appService: 'app',
+      dbService: 'postgres',
+      imageName: 'uat-app',
+      appUrl: 'http://localhost:4700',
+      targetName: 'Test copy',
+      backupDir: '/home/u/uat/backups',
+      migrateCmd: 'npm run migrate -- --yes',
+    };
+    const env = buildEnv(a, '/home/u');
+    expect(env.steps.map((s) => s.kind)).toEqual(['db_backup', 'compose_run', 'compose_up_local']);
+    expect(env.steps[1]).toMatchObject({
+      kind: 'compose_run',
+      argv: ['npm', 'run', 'migrate', '--', '--yes'],
+    });
+    expect(compileSetup({ environments: [env] }).ok).toBe(true);
+    expect(answersFromEnv(env, { production: false }).migrateCmd).toBe('npm run migrate -- --yes');
+    // without a database backup the setup is refused with a plain reason
+    const noDb = compileSetup({ environments: [buildEnv({ ...a, dbService: '' }, '/home/u')] });
+    expect(noDb.ok).toBe(false);
+    // on a server it runs after the copy and before the restart
+    const live = buildEnv(
+      {
+        ...emptyAnswers('live'),
+        host: 'prod',
+        stackPath: '/opt/g/docker-compose.yml',
+        appService: 'app',
+        dbService: 'postgres',
+        imageName: 'g',
+        imageVar: 'G_IMAGE',
+        healthUrl: 'https://g.example.com/ready',
+        targetName: 'Live',
+        migrateCmd: 'npm run migrate',
+      },
+      undefined,
+    );
+    expect(live.steps.map((s) => s.kind)).toEqual([
+      'db_backup',
+      'env_backup',
+      'build_image_local',
+      'ship_image_ssh',
+      'set_image_var',
+      'compose_run',
+      'compose_up_remote',
+    ]);
+    expect(compileSetup({ environments: [live] }).ok).toBe(true);
+  });
+
   it('plain lint copy and the sites worth asking a server about', () => {
     expect(plainLint({ code: 'production_no_gate', level: 'error', message: 'x' })).toContain(
       'needs your release',
@@ -363,12 +415,107 @@ describe('overview', () => {
     expect(prod).toHaveTextContent('On the server prod');
     expect(prod).toHaveTextContent('Deploys from Office PC');
     expect(prod).toHaveTextContent('Offline');
-    expect(prod).toHaveTextContent('Asks for a password');
+    expect(prod).toHaveTextContent('Needs a sign-in');
     expect(prod).toHaveTextContent('Only when you press Release');
     const uat = screen.getByTestId('env-card-uat');
     expect(uat).toHaveTextContent('Automatically after changes are merged');
     expect(screen.getByTestId('env-hand-edited-uat')).toHaveTextContent('edited by hand');
     expect(screen.queryByTestId('env-edit-uat')).toBeNull();
+  });
+
+  it('the nudge: an improved version of the steps is offered, updating saves the same setup again and says it needs approval', async () => {
+    const c = compileSetup({
+      environments: [
+        localAdoptEnv({
+          name: 'uat',
+          label: 'Test copy',
+          target: 'T',
+          composeFile: '~/uat/c.yml',
+          service: 'app',
+          imageName: 'a',
+        }),
+      ],
+    });
+    if (!c.ok) throw new Error('compile');
+    const user = userEvent.setup();
+    serve(
+      state({
+        improvedAvailable: true,
+        current: {
+          setup: { ...c.setup, generator: 'setup-1.0' },
+          handEdited: [],
+          recipePresent: true,
+          recipeStatus: 'approved',
+          observedHash: 'a'.repeat(64),
+          approvedHash: 'a'.repeat(64),
+          lint: [],
+          dryRunOk: ['uat'],
+          custom: false,
+        },
+      }),
+    );
+    routes[`POST /api/projects/${PROJECT}/delivery/setup/preview`] = () =>
+      json({
+        ok: true,
+        issues: [],
+        hash: 'b'.repeat(64),
+        files: [],
+        keep: [],
+        lint: [],
+        changes: [],
+        differsFromCurrent: true,
+        needsDryRun: ['uat'],
+      });
+    routes[`POST /api/projects/${PROJECT}/delivery/setup/publish`] = () =>
+      json({ commandId: ID(5), hash: 'b'.repeat(64) }, 202);
+    wrap(<DeploySetup projectId={PROJECT} />);
+    expect(await screen.findByTestId('setup-improved')).toHaveTextContent(
+      'An improved version of these steps is available',
+    );
+    await user.click(screen.getByTestId('setup-improved-update'));
+    await waitFor(() =>
+      expect(calls.find((x) => x.url.endsWith('/setup/publish'))?.body).toMatchObject({
+        setupHash: 'b'.repeat(64),
+      }),
+    );
+    expect(calls.find((x) => x.url.endsWith('/setup/publish'))?.body.setup.generator).toBe('setup-1.0');
+    expect(await screen.findByText(/needs the Owner’s approval/)).toBeInTheDocument();
+  });
+
+  it('approval: a script edited by hand, or a recipe nobody generated, is tried too (every environment)', async () => {
+    const c = compileSetup({
+      environments: [
+        localAdoptEnv({
+          name: 'uat',
+          label: 'Test copy',
+          target: 'T',
+          composeFile: '~/uat/c.yml',
+          service: 'app',
+          imageName: 'a',
+        }),
+      ],
+    });
+    if (!c.ok) throw new Error('compile');
+    serve(
+      state({
+        current: {
+          setup: c.setup,
+          handEdited: ['uat'],
+          recipePresent: true,
+          recipeStatus: 'observed',
+          observedHash: 'a'.repeat(64),
+          approvedHash: null,
+          lint: [],
+          dryRunOk: [],
+          dryRunMissing: ['uat'],
+          envNames: ['uat'],
+          custom: false,
+        },
+      }),
+    );
+    wrap(<DeploySetup projectId={PROJECT} />);
+    expect(await screen.findByTestId('dryrun-uat')).toHaveTextContent('Not tried yet');
+    expect(screen.getByTestId('setup-approve')).toBeDisabled();
   });
 
   it('approval: each guided environment is tried first; the button waits for that', async () => {
@@ -540,9 +687,9 @@ describe('the wizard: on this computer', () => {
     expect(other).toHaveTextContent('kept');
     await user.click(within(other).getByRole('checkbox'));
     await waitFor(() =>
-      expect(
-        calls.filter((x) => x.url.endsWith('/setup/preview')).at(-1)?.body,
-      ).toMatchObject({ removeFiles: ['scripts/smoke.sh'] }),
+      expect(calls.filter((x) => x.url.endsWith('/setup/preview')).at(-1)?.body).toMatchObject({
+        removeFiles: ['scripts/smoke.sh'],
+      }),
     );
     await user.click(await screen.findByTestId('review-save'));
     await waitFor(() =>
@@ -709,6 +856,91 @@ describe('the wizard: on my own server', () => {
     expect(within(list).getByTestId('host-other')).toHaveTextContent('Asks for a password');
     expect(within(list).getByTestId('host-moved')).toBeDisabled();
     expect(within(list).getByTestId('host-moved')).toHaveTextContent('identity changed');
+  });
+
+  it('offers a dedicated key for a working sign-in (optional, with the exact change) and a new sign-in for one that asks for a password', async () => {
+    const user = userEvent.setup();
+    let probes: unknown[] = [
+      probe({
+        scope: 'ssh_hosts',
+        report: hosts(
+          { alias: 'prod-server', hostname: '192.0.2.10', user: 'root', state: 'reachable' },
+          {
+            alias: 'other',
+            hostname: 'other.example.com',
+            user: 'deploy',
+            port: 2222,
+            state: 'asks_password',
+          },
+        ),
+      }),
+    ];
+    serve(state({ probes }));
+    routes[`GET /api/projects/${PROJECT}/delivery/setup`] = () => json(state({ probes }));
+    routes[`POST /api/projects/${PROJECT}/delivery/probe`] = (init) => {
+      if (JSON.parse(String(init.body)).scope === 'ssh_target')
+        probes = [
+          ...probes.filter((x: any) => x.scope !== 'ssh_target'),
+          probe({
+            id: ID(900 + probes.length),
+            scope: 'ssh_target',
+            host: 'prod-server',
+            report: serverReport(),
+          }),
+        ];
+      return json({ commandId: ID(77), workstationId: WS }, 202);
+    };
+    routes[`POST /api/projects/${PROJECT}/delivery/connect`] = () =>
+      json({ commandId: 'c9', workstationId: WS, targetId: T_PROD, alias: 'prod-server' }, 202);
+    routes[`GET /api/projects/${PROJECT}/delivery/ops/c9`] = () =>
+      json({
+        id: 'c9',
+        kind: 'connect',
+        state: 'done',
+        ok: true,
+        result: { ok: true, installed: 'added' },
+        errorText: null,
+        at,
+      });
+    wrap(<DeploySetup projectId={PROJECT} />);
+    await toSignIn(user);
+    await screen.findByTestId('ssh-hosts', undefined, { timeout: 5000 });
+    // a host that asks for a password can be set up again, with what is known filled in
+    await user.click(screen.getByTestId('host-connect-other'));
+    expect((await screen.findByTestId('connect-address')) as HTMLInputElement).toHaveValue(
+      'other.example.com',
+    );
+    expect(screen.getByTestId('connect-user')).toHaveValue('deploy');
+    await user.click(screen.getByTestId('connect-back'));
+    // pick the working one: the dedicated key is offered, never forced
+    await user.click(await screen.findByTestId('host-prod-server'));
+    expect(calls.some((c) => c.url.endsWith('/delivery/connect'))).toBe(false);
+    await user.click(await screen.findByTestId('dedicated-key-open'));
+    expect(screen.getByTestId('dedicated-key-confirm')).toHaveTextContent(
+      'Your keys and your ssh settings stay exactly as they are',
+    );
+    await user.click(screen.getByTestId('dedicated-key-add'));
+    await waitFor(() =>
+      expect(calls.find((c) => c.url.endsWith('/delivery/connect'))?.body).toMatchObject({
+        method: 'alias',
+        alias: 'prod-server',
+        workstationId: WS,
+      }),
+    );
+    expect(calls.find((c) => c.url.endsWith('/delivery/connect'))?.body.ciphertext).toBeUndefined();
+    expect(await screen.findByTestId('dedicated-key-done')).toBeInTheDocument();
+  });
+
+  it('"Connect a different server" opens the guided connect and the server it makes is looked at', async () => {
+    const user = userEvent.setup();
+    serve(state({ probes: [probe({ scope: 'ssh_hosts', report: hosts() })] }));
+    routes[`POST /api/projects/${PROJECT}/delivery/probe`] = () =>
+      json({ commandId: ID(77), workstationId: WS }, 202);
+    wrap(<DeploySetup projectId={PROJECT} />);
+    await toSignIn(user);
+    await user.click(await screen.findByTestId('connect-different', undefined, { timeout: 5000 }));
+    expect(await screen.findByTestId('connect-server')).toHaveAttribute('data-step', 'where');
+    expect(screen.getByTestId('connect-where')).toHaveTextContent('Guildwise signs in to your server');
   });
 
   it('a chosen server is looked at; the live site is pre-ticked as production, the Owner releases it, and the image setting is found', async () => {

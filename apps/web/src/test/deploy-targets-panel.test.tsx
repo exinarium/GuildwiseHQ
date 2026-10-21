@@ -130,6 +130,90 @@ describe('DeployTargetsPanel', () => {
     );
   });
 
+  it('a server shows whether its computer can sign in; Reconnect when it cannot, Check connection, and the Guildwise keys', async () => {
+    const user = userEvent.setup();
+    const key = {
+      targetId: U(31),
+      workstationId: U(2),
+      workstationName: 'Old laptop',
+      fingerprint: `SHA256:${'A'.repeat(43)}`,
+      state: 'active',
+      alias: 'aom-live',
+      address: 'live.example.com',
+      user: 'root',
+      port: 22,
+      hostKeyFingerprint: null,
+      addedAt: '2026-10-01T10:00:00.000Z',
+      revokedAt: null,
+    };
+    serve(
+      [
+        target({
+          id: U(31),
+          name: 'live',
+          kind: 'remote_ssh',
+          host: 'aom-live',
+          production: true,
+          workstationId: U(1),
+          workstationName: 'Office PC',
+          reachability: {
+            state: 'unreachable',
+            at: new Date(Date.now() - 2 * 3600_000).toISOString(),
+            detail: null,
+            method: 'deploy_key',
+            workstationId: U(1),
+          },
+          keys: [key],
+        }),
+        target({
+          id: U(33),
+          name: 'fine',
+          kind: 'remote_ssh',
+          host: 'prod',
+          reachability: {
+            state: 'reachable',
+            at: new Date().toISOString(),
+            detail: null,
+            method: 'existing_alias',
+            workstationId: U(1),
+          },
+        }),
+        target(),
+      ],
+      (url, init) => {
+        if (url.endsWith('/targets/' + U(31) + '/check') && init.method === 'POST')
+          return json({ commandId: 'c1', workstationId: U(1) }, 202);
+        return undefined;
+      },
+    );
+    mount();
+    const live = await screen.findByTestId('deploy-target-live');
+    expect(within(live).getByTestId('reachability-state')).toHaveTextContent('Cannot reach the server');
+    expect(within(live).getByTestId('reachability-detail')).toHaveTextContent(
+      'with its own Guildwise key, checked 2 hours ago',
+    );
+    expect(within(live).getByTestId('target-reconnect-live')).toHaveTextContent(
+      'Reconnect from this computer',
+    );
+    const fine = screen.getByTestId('deploy-target-fine');
+    expect(within(fine).getByTestId('reachability-state')).toHaveTextContent('Can sign in');
+    expect(within(fine).getByTestId('reachability-detail')).toHaveTextContent(
+      'with the computer’s own sign-in',
+    );
+    expect(within(fine).getByTestId('target-reconnect-fine')).toHaveTextContent('Use another computer');
+    // a computer target has no chip
+    expect(
+      within(screen.getByTestId('deploy-target-shop-uat')).queryByTestId('reachability-chip'),
+    ).toBeNull();
+    await user.click(within(live).getByTestId('target-check-live'));
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some(([u]) => String(u).endsWith(`/targets/${U(31)}/check`))).toBe(true),
+    );
+    // the keys of the server are listed (public parts only)
+    await user.click(within(live).getByText(/Guildwise keys on this server/));
+    expect(within(live).getByTestId('keys-list')).toHaveTextContent('Old laptop');
+  });
+
   it('adds a production target on a chosen computer: the checkbox and the workstation travel with the request', async () => {
     const user = userEvent.setup();
     serve([], (_url, init) => (init.method === 'POST' ? json(target({ production: true }), 201) : undefined));

@@ -119,6 +119,10 @@ export const SetupStateDtoSchema = z.object({
     dryRunOk: z.array(z.string()),
     /** The recipe is not from the guided setup (written by DevOps or by hand): shown as a script. */
     custom: z.boolean(),
+    /** Every environment of what `delivery/` holds (each needs a successful dry run before approval). Absent from an older server. */
+    envNames: z.array(z.string()).optional(),
+    /** The environments that still need a successful dry run before the Owner can approve (empty: none, or not required). */
+    dryRunMissing: z.array(z.string()).optional(),
   }),
   publish: PublishStatusDtoSchema.nullable(),
   targets: z.array(SetupTargetDtoSchema),

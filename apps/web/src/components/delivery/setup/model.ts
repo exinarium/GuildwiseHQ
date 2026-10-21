@@ -1,11 +1,13 @@
 import {
   type ConnectionState,
   type DeliverySetup,
+  formatCommandLine,
   localAdoptEnv,
   type ProbeComposeFile,
   type ProbeComposeService,
   type ProbeContainer,
   type ProbeReport,
+  parseCommandLine,
   type SetupEnv,
   sshShipEnv,
 } from '@aom/shared';
@@ -137,6 +139,8 @@ export interface Answers {
   testEnv: string | null;
   targetName: string;
   secrets: string[];
+  /** A command that updates the database with the new version before the app is restarted (empty: none). */
+  migrateCmd: string;
 }
 
 export const emptyAnswers = (purpose: Purpose): Answers => ({
@@ -161,6 +165,7 @@ export const emptyAnswers = (purpose: Purpose): Answers => ({
   testEnv: null,
   targetName: purpose === 'test' ? 'Test copy' : 'Live site',
   secrets: [],
+  migrateCmd: '',
 });
 
 const dirOf = (p: string) => p.slice(0, p.lastIndexOf('/')) || '/';
@@ -218,6 +223,16 @@ export function buildEnv(a: Answers, homeDir?: string): SetupEnv {
           test,
         );
   const live = env.gate !== 'none' || a.purpose === 'live';
+  const migrate = a.migrateCmd.trim() ? parseCommandLine(a.migrateCmd.trim()) : [];
+  if (migrate.length > 0) {
+    // the database updates run with the new version, before the app is restarted (and after the backup)
+    const at = env.steps.findIndex((s) => s.kind === 'compose_up_local' || s.kind === 'compose_up_remote');
+    env.steps.splice(at < 0 ? env.steps.length : at, 0, {
+      kind: 'compose_run',
+      label: 'Run database updates',
+      argv: migrate,
+    });
+  }
   return {
     ...env,
     trigger: [a.trigger],
@@ -257,6 +272,10 @@ export function answersFromEnv(env: SetupEnv, target: { production: boolean }): 
     testEnv,
     targetName: env.target,
     secrets: env.secrets,
+    migrateCmd: (() => {
+      const s = env.steps.find((x) => x.kind === 'compose_run');
+      return s?.kind === 'compose_run' ? formatCommandLine(s.argv) : '';
+    })(),
   };
 }
 

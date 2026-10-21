@@ -51,6 +51,16 @@ const prodEnv = () =>
     },
     'uat',
   );
+/** A throwaway RSA public key (SPKI, base64) so the browser can really seal a password; nobody holds the private half. */
+const MOCK_RUNNER_KEY =
+  'MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAyPsQ9mQHfUXOPgmcIYCfzV7GKofuKILmFsVejRjpjKKAjQrjaeTVuH14F0X9p0w/VwGMmlaAbEE60Fou/E+1uIFsJbYpdWIO819i4jqvpZP0QJKHszgXW22NsdQVaUPjt6tXH3Zs0PLEnu0uy2aRoRQGSP505sI2/sGQf8vyJ5cDPVds9vyq9JOJqKJCL+1srIhpcFnwMuXVonT6DpR4EX8EPT6GnqHT1QtGNfSsDep6fcIUw+4nVFzE5I5UBQPPYhuUTDu6oYlVi16WdTOWAxg0IdoC+H5etwKy+ej9jFtJzZqxOaOfnj7WafB7V/ZDuk/cQowEt1j5XcCDC6rwdQIDAQAB';
+const FP_ED = 'SHA256:5kXwQ2m0n7yT1p3QbZ9sJd8vLr4uHc6aGfE2iNoPtYw';
+const ops = new Map<string, Record<string, unknown>>();
+const op = (kind: string, ok: boolean, result: unknown, errorText: string | null = null) => {
+  const id = crypto.randomUUID();
+  ops.set(id, { id, kind, state: ok ? 'done' : 'failed', ok, result, errorText, at: ago(0) });
+  return id;
+};
 const setup = () => {
   const c = compileSetup({ environments: [uatEnv(), prodEnv()] });
   return c.ok ? c.setup : null;
@@ -319,7 +329,8 @@ function state() {
         workstationOnline: true,
         host: 'prod-server',
         appUrl: 'https://shop.example.com',
-        connection: saved ? { state: 'reachable', at: ago(5), detail: null } : null,
+        connection: saved ? { state: 'reachable', at: ago(5), detail: null, method: 'existing_alias' } : null,
+        keys: [],
       },
     ],
     workstations: [
@@ -330,6 +341,7 @@ function state() {
         mine: true,
         canProbe: s !== 'old',
         blocked: s === 'old' ? 'Guildwise on Office PC needs an update for guided setup.' : null,
+        canConnect: s !== 'old',
       },
       {
         id: WS2,
@@ -338,6 +350,7 @@ function state() {
         mine: true,
         canProbe: false,
         blocked: 'Old laptop is offline.',
+        canConnect: false,
       },
     ],
     probes,
@@ -346,6 +359,7 @@ function state() {
     scanProblem: null,
     proposal: s === 'proposal' ? proposal() : null,
     generator: SETUP_GENERATOR,
+    improvedAvailable: s === 'improved',
   };
 }
 
@@ -413,4 +427,96 @@ export const deploySetupHandlers = [
   http.post(`${A}/projects/:id/deploy-targets`, () => HttpResponse.json({ id: T1 })),
   http.patch(`${A}/deploy-targets/:id`, () => HttpResponse.json({ id: T1 })),
   http.get(`${A}/projects/:id/delivery/probes`, () => HttpResponse.json({ probes })),
+  // guided connect (v2): every operation answers at once with sample facts
+  http.get(`${A}/workstations/:id/sudo-key`, () =>
+    HttpResponse.json({ keyId: 'mock-key', publicKey: MOCK_RUNNER_KEY }),
+  ),
+  http.post(`${A}/projects/:id/delivery/hostkey`, async ({ request }) => {
+    const b = (await request.json()) as { address: string };
+    const id = /^(nowhere|bad)/.test(b.address)
+      ? op(
+          'hostkey',
+          false,
+          { ok: false, error: 'unreachable' },
+          'This computer cannot reach that address. Check the address and that the server is on.',
+        )
+      : op('hostkey', true, { ok: true, keys: [{ type: 'ssh-ed25519', fingerprint: FP_ED, bits: 256 }] });
+    return HttpResponse.json({ commandId: id, workstationId: WS }, { status: 202 });
+  }),
+  http.post(`${A}/projects/:id/delivery/key`, () =>
+    HttpResponse.json(
+      {
+        commandId: op('key', true, {
+          ok: true,
+          publicKey:
+            'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGuildwiseDedicatedKeyForShop guildwise-deploy:9f3a7c1e:Office-PC',
+          fingerprint: FP_ED,
+          existed: false,
+        }),
+        workstationId: WS,
+      },
+      { status: 202 },
+    ),
+  ),
+  http.post(`${A}/projects/:id/delivery/connect`, async ({ request }) => {
+    const b = (await request.json()) as { newTarget?: { name: string }; targetId?: string; method: string };
+    const ok = localStorage.getItem('aom-mock-connect') !== 'wrong';
+    const id = ok
+      ? op('connect', true, { ok: true, installed: b.method === 'panel' ? 'pasted' : 'added' })
+      : op(
+          'connect',
+          false,
+          { ok: false, error: 'bad_password' },
+          'The server did not accept that user name and password. Check them in your hosting company’s email or panel, then try again.',
+        );
+    localStorage.setItem('aom-mock-reach', 'ok');
+    return HttpResponse.json(
+      { commandId: id, workstationId: WS, targetId: b.targetId ?? T2, alias: 'aom-shop-live' },
+      { status: 202 },
+    );
+  }),
+  http.post(`${A}/projects/:id/delivery/targets/:targetId/revoke-key`, () =>
+    HttpResponse.json(
+      { commandId: op('revoke', true, { ok: true, removed: 1 }), workstationId: WS },
+      { status: 202 },
+    ),
+  ),
+  http.post(`${A}/projects/:id/delivery/targets/:targetId/check`, () => {
+    localStorage.setItem('aom-mock-reach', 'ok');
+    return HttpResponse.json({ commandId: crypto.randomUUID(), workstationId: WS }, { status: 202 });
+  }),
+  http.post(`${A}/projects/:id/delivery/prepare`, async ({ request }) => {
+    const b = (await request.json()) as {
+      dryRun: boolean;
+      actions: Array<{ kind: string; path?: string; domain?: string }>;
+    };
+    const steps = b.actions.map((a) => ({
+      kind: a.kind,
+      outcome: b.dryRun
+        ? 'would'
+        : a.kind === 'create_dir' && a.path?.endsWith('backups')
+          ? 'skipped'
+          : 'done',
+      detail:
+        a.kind === 'install_docker'
+          ? b.dryRun
+            ? 'install Docker with the system packages'
+            : 'Docker installed'
+          : a.kind === 'caddy_site'
+            ? `${b.dryRun ? 'add' : 'added'} ${a.domain} to Caddy`
+            : a.kind === 'write_compose'
+              ? `${b.dryRun ? 'write' : 'wrote'} ${a.path}`
+              : `${b.dryRun ? 'create' : 'created'} ${a.path ?? ''}`,
+    }));
+    return HttpResponse.json(
+      { commandId: op('prepare', true, { ok: true, steps }), workstationId: WS },
+      { status: 202 },
+    );
+  }),
+  http.get(`${A}/projects/:id/delivery/ops/:commandId`, ({ params }) => {
+    const o = ops.get(String(params.commandId));
+    return o
+      ? HttpResponse.json(o)
+      : HttpResponse.json({ error: { code: 'not_found', message: 'not found' } }, { status: 404 });
+  }),
 ];

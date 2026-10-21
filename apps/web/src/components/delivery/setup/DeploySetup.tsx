@@ -4,7 +4,9 @@ import { Eye, Monitor, Pencil, Plus, RefreshCw, ScanSearch, Server, ShieldCheck 
 import { useState } from 'react';
 import { useApproveRecipe } from '../../../api/queries/delivery.ts';
 import {
+  usePreviewSetup,
   useProbe,
+  usePublishSetup,
   useSetupDryRun,
   useSetupState,
   useStartDeployScan,
@@ -12,10 +14,12 @@ import {
 } from '../../../api/queries/deploy-setup.ts';
 import { useDismissProposal } from '../../../api/queries/run-plan.ts';
 import { ProposalReview, type ReviewQuestion } from '../../setup/ProposalReview.tsx';
-import { Badge, Button, Callout, ErrorBox, Panel, Spinner, useToast } from '../../ui.tsx';
+import { Badge, Button, Callout, Dialog, ErrorBox, Panel, Spinner, useToast } from '../../ui.tsx';
+import { ConnectServer } from '../connect/ConnectServer.tsx';
+import { needsReconnect, ReachabilityChip } from '../connect/ReachabilityChip.tsx';
 import { AdvancedSetup } from './AdvancedSetup.tsx';
 import { DeployWizard } from './DeployWizard.tsx';
-import { CONNECTION_TEXT, whenText } from './model.ts';
+import { whenText } from './model.ts';
 
 type Mode =
   | { kind: 'overview' }
@@ -179,6 +183,8 @@ function Overview({
         </Callout>
       )}
 
+      {s.improvedAvailable && s.current.setup && <ImprovedSteps projectId={projectId} s={s} />}
+
       {envs.length === 0 && !s.current.custom ? (
         <div
           className="flex flex-col gap-3 rounded-control border border-dashed border-line p-4"
@@ -268,6 +274,51 @@ function Overview({
   );
 }
 
+/**
+ * "An improved version of these steps is available" (design v2): Guildwise's generator changed since these scripts were made.
+ * Nothing changes by itself; updating writes the same setup again with the newer generator and needs the Owner's approval.
+ */
+function ImprovedSteps({ projectId, s }: { projectId: string; s: SetupStateDto }) {
+  const preview = usePreviewSetup(projectId);
+  const publish = usePublishSetup(projectId);
+  const [done, setDone] = useState(false);
+  const run = () =>
+    preview.mutate(
+      { setup: s.current.setup },
+      {
+        onSuccess: (p) => {
+          if (!p.ok || !p.hash) return;
+          publish.mutate({ setup: s.current.setup, setupHash: p.hash }, { onSuccess: () => setDone(true) });
+        },
+      },
+    );
+  return (
+    <Callout
+      tone="info"
+      title="An improved version of these steps is available"
+      data-testid="setup-improved"
+      actions={
+        s.canEdit && !done ? (
+          <Button
+            size="sm"
+            variant="primary"
+            onClick={run}
+            loading={preview.isPending || publish.isPending}
+            data-testid="setup-improved-update"
+          >
+            Update the steps
+          </Button>
+        ) : undefined
+      }
+    >
+      {done
+        ? 'Saved. The new version of the steps needs the Owner’s approval (and a try-out) before it is used.'
+        : 'Your steps were made by an older version of Guildwise. Updating keeps your choices and changes only how the steps are written (for example how a failed update is undone). The Owner approves the new version before anything runs.'}
+      <ErrorBox error={preview.error ?? publish.error} />
+    </Callout>
+  );
+}
+
 function EnvCard({
   projectId,
   s,
@@ -282,7 +333,16 @@ function EnvCard({
   const target = s.targets.find((t) => t.name.toLowerCase() === env.target.toLowerCase());
   const probe = useProbe(projectId);
   const handEdited = s.current.handEdited.includes(env.name);
-  const conn = target?.connection ? CONNECTION_TEXT[target.connection.state] : null;
+  const reach = target?.connection
+    ? {
+        state: target.connection.state,
+        at: target.connection.at,
+        detail: target.connection.detail,
+        method: target.connection.method ?? ('existing_alias' as const),
+        workstationId: target.workstationId ?? '',
+      }
+    : null;
+  const [reconnect, setReconnect] = useState(false);
   const status = s.current.recipeStatus;
   const approvalText = !s.current.recipePresent
     ? 'Not saved yet'
@@ -322,9 +382,7 @@ function EnvCard({
             {target.workstationOnline ? 'Online' : 'Offline'}
           </Badge>
         )}
-        {env.hosting === 'ssh' && (
-          <Badge tone={conn?.tone ?? 'neutral'}>{conn?.text ?? 'Never checked'}</Badge>
-        )}
+        {env.hosting === 'ssh' && <ReachabilityChip reachability={reach} />}
       </p>
       {handEdited && env.mode === 'guided' && (
         <p className="text-xs text-warning" data-testid={`env-hand-edited-${env.name}`}>
@@ -364,9 +422,40 @@ function EnvCard({
               Check connection
             </Button>
           )}
+          {env.hosting === 'ssh' && target && needsReconnect(reach) && (
+            <Button
+              size="sm"
+              variant="primary"
+              onClick={() => setReconnect(true)}
+              data-testid={`env-reconnect-${env.name}`}
+            >
+              Reconnect from this computer
+            </Button>
+          )}
         </div>
       )}
       <ErrorBox error={probe.error} />
+      {reconnect && target && (
+        <Dialog
+          open
+          onOpenChange={(o) => !o && setReconnect(false)}
+          title={`Reconnect ${target.name}`}
+          size="lg"
+        >
+          <ConnectServer
+            projectId={projectId}
+            target={{
+              id: target.id,
+              name: target.name,
+              host: target.host,
+              workstationId: target.workstationId,
+              keys: target.keys ?? [],
+            }}
+            onCancel={() => setReconnect(false)}
+            onDone={() => setReconnect(false)}
+          />
+        </Dialog>
+      )}
     </li>
   );
 }
@@ -376,9 +465,13 @@ function Approval({ projectId, s }: { projectId: string; s: SetupStateDto }) {
   const dry = useSetupDryRun(projectId);
   const approve = useApproveRecipe(projectId);
   const toast = useToast();
-  const guided = (s.current.setup?.environments ?? []).filter(
-    (e) => e.mode === 'guided' && !s.current.handEdited.includes(e.name),
-  );
+  // every environment of this version is tried (also a script edited by hand or written by someone else)
+  const labels = new Map((s.current.setup?.environments ?? []).map((e) => [e.name, e.label]));
+  const required = s.current.dryRunMissing ?? [];
+  const guided = (s.current.envNames ?? [...labels.keys()]).map((name) => ({
+    name,
+    label: labels.get(name) ?? name,
+  }));
   if (
     !s.current.recipePresent ||
     s.current.recipeStatus === 'approved' ||
@@ -386,7 +479,9 @@ function Approval({ projectId, s }: { projectId: string; s: SetupStateDto }) {
     guided.length === 0
   )
     return null;
-  const missing = guided.filter((e) => !s.current.dryRunOk.includes(e.name));
+  const missing = guided.filter(
+    (e) => required.includes(e.name) || (!s.current.dryRunMissing && !s.current.dryRunOk.includes(e.name)),
+  );
   const errors = s.current.lint.filter((l) => l.level === 'error');
   return (
     <section
@@ -396,7 +491,7 @@ function Approval({ projectId, s }: { projectId: string; s: SetupStateDto }) {
       <h3 className="text-base font-semibold text-fg">Before it can be used</h3>
       <ol className="flex flex-col gap-2 text-sm">
         {guided.map((e) => {
-          const ok = s.current.dryRunOk.includes(e.name);
+          const ok = !missing.some((m) => m.name === e.name);
           return (
             <li key={e.name} className="flex flex-wrap items-center gap-2" data-testid={`dryrun-${e.name}`}>
               <Badge tone={ok ? 'green' : 'neutral'}>{ok ? 'Tried: OK' : 'Not tried yet'}</Badge>

@@ -21,6 +21,9 @@ import {
 } from '../../../api/queries/deploy-setup.ts';
 import { useAddDeployTarget, usePatchDeployTarget } from '../../../api/queries/phases.ts';
 import { Badge, Button, Callout, cx, ErrorBox, Select, Spinner, TextInput } from '../../ui.tsx';
+import { AddDedicatedKey } from '../connect/AddDedicatedKey.tsx';
+import { ConnectServer } from '../connect/ConnectServer.tsx';
+import { PrepareServer } from '../connect/PrepareServer.tsx';
 import { FoundChanges } from './FoundChanges.tsx';
 import {
   type Answers,
@@ -185,6 +188,13 @@ export function DeployWizard({
   const publish = usePublishSetup(projectId);
   const saveDraft = useSaveSetupDraft(projectId);
   const [published, setPublished] = useState<string | null>(null);
+  // "Connect a different server" (guided connect) replaces the sign-in choices while it runs
+  const [connecting, setConnecting] = useState<null | {
+    name?: string;
+    address?: string;
+    user?: string;
+    port?: number;
+  }>(null);
   // files of the project's deploy folder that the setup does not make: kept unless the person ticks them
   const [removeFiles, setRemoveFiles] = useState<string[]>([]);
   const steps = stepsFor(answers, includeKind);
@@ -450,7 +460,23 @@ export function DeployWizard({
         </section>
       )}
 
-      {(step === 'computer' || step === 'signin') && (
+      {step === 'signin' && connecting && (
+        <ConnectServer
+          projectId={projectId}
+          production={answers.production}
+          prefill={connecting}
+          onCancel={() => setConnecting(null)}
+          onDone={(c) => {
+            setConnecting(null);
+            setStack(undefined);
+            set({ host: c.alias, targetName: c.name, workstationId: c.workstationId });
+            askedFor.current = `hosts:${c.workstationId}`;
+            flow.ask({ scope: 'ssh_target', workstationId: c.workstationId, host: c.alias });
+          }}
+        />
+      )}
+
+      {(step === 'computer' || step === 'signin') && !(step === 'signin' && connecting) && (
         <section className="flex flex-col gap-3">
           <h3 className="text-lg font-semibold text-fg">
             {step === 'computer'
@@ -505,6 +531,17 @@ export function DeployWizard({
           <ErrorBox error={flow.error} />
           {step === 'computer' && (
             <ComputerChoices
+              projectId={projectId}
+              workstationId={wsId}
+              suggestedName={answers.targetName}
+              onPrepared={(info) => {
+                askedFor.current = `local:${wsId}`;
+                flow.ask({
+                  scope: 'local',
+                  workstationId: wsId,
+                  hints: { composeFiles: [info.composeFile] },
+                });
+              }}
               flow={flow}
               stacks={stacks}
               report={localReport}
@@ -519,6 +556,17 @@ export function DeployWizard({
           )}
           {step === 'signin' && (
             <ServerChoices
+              projectId={projectId}
+              workstationId={wsId}
+              workstationName={ws?.name ?? 'this computer'}
+              serverReport={serverReport}
+              targets={s.targets}
+              suggestedName={answers.targetName}
+              onConnect={(prefill) => setConnecting(prefill ?? {})}
+              onPrepared={() => {
+                askedFor.current = '';
+                flow.ask({ scope: 'ssh_target', workstationId: wsId, host: answers.host });
+              }}
               hosts={hostsProbe}
               loadingHosts={flow.loading && flow.asked?.scope === 'ssh_hosts'}
               host={answers.host}
@@ -622,6 +670,10 @@ export function DeployWizard({
 // ------------------------------------------------------------------------------------------------ this computer
 
 function ComputerChoices({
+  projectId,
+  workstationId,
+  suggestedName,
+  onPrepared,
   flow,
   stacks,
   report,
@@ -630,6 +682,10 @@ function ComputerChoices({
   onAgain,
   onScan,
 }: {
+  projectId: string;
+  workstationId: string;
+  suggestedName: string;
+  onPrepared: (info: { dir: string; composeFile: string }) => void;
   flow: ReturnType<typeof useProbeFlow>;
   stacks: Stack[];
   report: ProbeReport | null;
@@ -638,8 +694,32 @@ function ComputerChoices({
   onAgain: () => void;
   onScan: () => void;
 }) {
+  const [newCopy, setNewCopy] = useState(false);
   const r = flow.result;
   if (flow.loading || !r) return null;
+  const startNew = (
+    <div className="flex flex-col gap-2" data-testid="new-copy">
+      {!newCopy ? (
+        <div>
+          <Button size="sm" onClick={() => setNewCopy(true)} data-testid="new-copy-open">
+            Start a new copy
+          </Button>
+          <p className="mt-1 text-xs text-subtle">
+            Starts a fresh copy from the project's own compose file. What is running now is not touched.
+          </p>
+        </div>
+      ) : (
+        <PrepareServer
+          projectId={projectId}
+          hosting="this_computer"
+          workstationId={workstationId}
+          report={report}
+          suggestedName={suggestedName}
+          onPrepared={onPrepared}
+        />
+      )}
+    </div>
+  );
   if (r.error)
     return (
       <Callout
@@ -669,7 +749,7 @@ function ComputerChoices({
       >
         <p>
           Docker is {report?.docker?.usable ? 'ready' : 'not ready'} on this computer, but Guildwise found no
-          app to update. Starting a new copy from scratch comes in a later version.
+          app to update. You can start a new copy from the project's own files.
         </p>
         <p className="mt-1">
           <button type="button" className="underline" onClick={onScan}>
@@ -677,6 +757,7 @@ function ComputerChoices({
           </button>{' '}
           or use the developer view.
         </p>
+        <div className="mt-3">{startNew}</div>
       </Callout>
     );
   return (
@@ -702,6 +783,7 @@ function ComputerChoices({
           </span>
         </Choice>
       ))}
+      {startNew}
       <div>
         <Button size="sm" variant="ghost" onClick={onAgain}>
           Check again
@@ -714,6 +796,14 @@ function ComputerChoices({
 // ------------------------------------------------------------------------------------------------ a server
 
 function ServerChoices({
+  projectId,
+  workstationId,
+  workstationName,
+  serverReport,
+  targets,
+  suggestedName,
+  onConnect,
+  onPrepared,
   hosts,
   loadingHosts,
   host,
@@ -725,6 +815,14 @@ function ServerChoices({
   onPick,
   onAgain,
 }: {
+  projectId: string;
+  workstationId: string;
+  workstationName: string;
+  serverReport: ProbeReport | null;
+  targets: SetupStateDto['targets'];
+  suggestedName: string;
+  onConnect: (prefill?: { name?: string; address?: string; user?: string; port?: number }) => void;
+  onPrepared: () => void;
   hosts: SetupProbeDto | undefined;
   loadingHosts: boolean;
   host: string;
@@ -747,8 +845,8 @@ function ServerChoices({
       {!loadingHosts && hosts?.report && list.length === 0 && (
         <Callout tone="info" title="This computer does not know any server yet" data-testid="no-hosts">
           Servers show up here when this computer already has a sign-in for them (an entry in its ssh
-          settings). Setting up a new sign-in comes in a later version; the developer view can still describe
-          a server by hand.
+          settings). Use <strong>Connect a different server</strong> to set up a new sign-in with the address
+          and the password your hosting company gave you.
         </Callout>
       )}
       {list.length > 0 && (
@@ -760,29 +858,53 @@ function ServerChoices({
             const c = CONNECTION_TEXT[h.state];
             const ok = h.state === 'reachable';
             return (
-              <Choice
-                key={h.alias}
-                selected={host === h.alias}
-                disabled={!ok}
-                onClick={() => onHost(h.alias)}
-                title={
-                  <span className="flex flex-wrap items-center gap-2">
-                    {h.alias}
-                    <Badge tone={c.tone}>{c.text}</Badge>
-                  </span>
-                }
-                testId={`host-${h.alias}`}
-              >
-                {h.hostname ? `${h.hostname}` : ''}
-                {h.user ? `, user ${h.user}` : ''}
-                {!ok && h.detail ? ` ${h.detail}.` : ''}
-                {h.state === 'host_key_changed' && (
-                  <span className="mt-1 block text-danger">
-                    The server's identity changed. This can mean it was reinstalled, or someone is in between.
-                    Guildwise will not connect.
-                  </span>
+              <div key={h.alias} className="flex flex-col gap-1">
+                <Choice
+                  selected={host === h.alias}
+                  disabled={!ok}
+                  onClick={() => onHost(h.alias)}
+                  title={
+                    <span className="flex flex-wrap items-center gap-2">
+                      {h.alias}
+                      <Badge tone={c.tone}>{c.text}</Badge>
+                    </span>
+                  }
+                  testId={`host-${h.alias}`}
+                >
+                  {h.hostname ? `${h.hostname}` : ''}
+                  {h.user ? `, user ${h.user}` : ''}
+                  {!ok && h.detail ? ` ${h.detail}.` : ''}
+                  {h.state === 'asks_password' && (
+                    <span className="mt-1 block">
+                      It needs a password to sign in. Connect it again so Guildwise gets a key of its own.
+                    </span>
+                  )}
+                  {h.state === 'host_key_changed' && (
+                    <span className="mt-1 block text-danger">
+                      The server's identity changed. This can mean it was reinstalled, or someone is in
+                      between. Guildwise will not connect.
+                    </span>
+                  )}
+                </Choice>
+                {h.state === 'asks_password' && (
+                  <div>
+                    <Button
+                      size="sm"
+                      onClick={() =>
+                        onConnect({
+                          name: h.alias,
+                          ...(h.hostname ? { address: h.hostname } : {}),
+                          ...(h.user ? { user: h.user } : {}),
+                          ...(h.port ? { port: h.port } : {}),
+                        })
+                      }
+                      data-testid={`host-connect-${h.alias}`}
+                    >
+                      Set up a sign-in for it
+                    </Button>
+                  </div>
                 )}
-              </Choice>
+              </div>
             );
           })}
         </div>
@@ -800,10 +922,40 @@ function ServerChoices({
       )}
       {!serverLoading && serverResult?.report && host && stacks.length === 0 && (
         <Callout tone="info" title="No app found on the server" data-testid="no-stacks">
-          Guildwise looked in /opt and /srv and found no docker-compose file. Setting up a bare server
-          (Docker, folders, HTTPS) comes in a later version.
+          Guildwise looked in /opt and /srv and found no docker-compose file. Set the server up below:
+          Guildwise adds what is missing (Docker, a folder, the project's compose file, HTTPS for your
+          address) and keeps everything that is there.
         </Callout>
       )}
+      {!serverLoading &&
+        serverResult?.report &&
+        host &&
+        (stacks.length === 0 || !serverResult.report.docker?.installed) && (
+          <PrepareServer
+            projectId={projectId}
+            hosting="ssh"
+            workstationId={workstationId}
+            targetId={targets.find((t) => t.host === host)?.id}
+            report={serverReport}
+            suggestedName={suggestedName}
+            onPrepared={onPrepared}
+          />
+        )}
+      {!serverLoading &&
+        serverResult?.report &&
+        host &&
+        !targets
+          .find((t) => t.host === host)
+          ?.keys?.some((k) => k.workstationId === workstationId && k.state === 'active') && (
+          <AddDedicatedKey
+            projectId={projectId}
+            workstationId={workstationId}
+            workstationName={workstationName}
+            alias={host}
+            targetId={targets.find((t) => t.host === host)?.id}
+            newTargetName={suggestedName}
+          />
+        )}
       {!serverLoading && stacks.length > 0 && (
         <div className="flex flex-col gap-2" data-testid="stacks">
           <p className="text-sm text-muted">
@@ -826,7 +978,10 @@ function ServerChoices({
           ))}
         </div>
       )}
-      <div>
+      <div className="flex flex-wrap gap-2">
+        <Button size="sm" onClick={() => onConnect()} data-testid="connect-different">
+          Connect a different server
+        </Button>
         <Button size="sm" variant="ghost" onClick={onAgain}>
           Check again
         </Button>
@@ -945,6 +1100,20 @@ function Details({
             )}
           </div>
         </div>
+        <TextInput
+          label="Database updates before the app restarts (optional)"
+          value={answers.migrateCmd}
+          placeholder="npm run migrate"
+          hint={
+            answers.migrateCmd.trim() && !answers.dbService
+              ? 'Choose the database part above first: it is backed up before this runs.'
+              : 'A command your app uses to update its database for the new version. It runs with the new version, after the backup and before the restart. If it fails, the app is not restarted. The database is never rolled back automatically.'
+          }
+          onChange={(e) => set({ migrateCmd: e.target.value })}
+          autoCapitalize="none"
+          spellCheck={false}
+          data-testid="details-migrate"
+        />
         <label className="flex min-h-11 items-start gap-2 text-sm">
           <input
             type="checkbox"

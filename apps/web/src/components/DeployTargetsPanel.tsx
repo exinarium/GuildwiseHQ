@@ -1,6 +1,7 @@
 import type { DeployTargetDto, DeployTargetKind, ProjectWorkstation } from '@aom/shared';
 import { Pencil } from 'lucide-react';
 import { type FormEvent, useState } from 'react';
+import { useCheckTarget } from '../api/queries/deploy-connect.ts';
 import {
   useAddDeployTarget,
   useDeployTargets,
@@ -8,8 +9,22 @@ import {
   useProjectWorkstations,
   useRemoveDeployTarget,
 } from '../api/queries/phases.ts';
+import { ConnectServer } from './delivery/connect/ConnectServer.tsx';
+import { KeysList } from './delivery/connect/KeysList.tsx';
+import { needsReconnect, ReachabilityChip } from './delivery/connect/ReachabilityChip.tsx';
 import { TargetTesting } from './runs/TargetTesting.tsx';
-import { Badge, Button, Dialog, ErrorBox, Panel, Select, TextArea, TextInput, useToast } from './ui.tsx';
+import {
+  Badge,
+  Button,
+  Dialog,
+  Disclosure,
+  ErrorBox,
+  Panel,
+  Select,
+  TextArea,
+  TextInput,
+  useToast,
+} from './ui.tsx';
 
 /**
  * Where a phase can be deployed: the project's deploy targets (any member manages them). "On a computer" runs Docker on
@@ -48,6 +63,9 @@ export function DeployTargetsPanel({ projectId }: { projectId: string }) {
   const [production, setProduction] = useState(false);
   const [err, setErr] = useState<Record<string, string>>({});
   const [editing, setEditing] = useState<DeployTargetDto | null>(null);
+  const [reconnecting, setReconnecting] = useState<DeployTargetDto | null>(null);
+  const check = useCheckTarget(projectId);
+  const toast = useToast();
   const ws = workstations.data ?? [];
 
   const submit = (e: FormEvent) => {
@@ -114,6 +132,55 @@ export function DeployTargetsPanel({ projectId }: { projectId: string }) {
                     </span>
                   )}
                 </span>
+                {t.kind === 'remote_ssh' && (
+                  <span className="mt-1 flex flex-col gap-1.5" data-testid={`target-connection-${t.name}`}>
+                    <ReachabilityChip reachability={t.reachability} />
+                    <span className="flex flex-wrap gap-2">
+                      <Button
+                        size="sm"
+                        variant={needsReconnect(t.reachability) ? 'primary' : 'secondary'}
+                        onClick={() => setReconnecting(t)}
+                        data-testid={`target-reconnect-${t.name}`}
+                      >
+                        {needsReconnect(t.reachability)
+                          ? 'Reconnect from this computer'
+                          : 'Use another computer'}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        loading={check.isPending && check.variables === t.id}
+                        onClick={() =>
+                          check.mutate(t.id, { onSuccess: () => toast.success('Checking the connection') })
+                        }
+                        data-testid={`target-check-${t.name}`}
+                      >
+                        Check connection
+                      </Button>
+                    </span>
+                    {(t.keys?.length ?? 0) > 0 && (
+                      <Disclosure
+                        summary={`Guildwise keys on this server (${t.keys?.filter((k) => k.state === 'active').length ?? 0})`}
+                      >
+                        <KeysList
+                          projectId={projectId}
+                          targetId={t.id}
+                          keys={t.keys ?? []}
+                          signInWorkstationId={
+                            ws.find((w) => w.id === t.workstationId && w.mine)?.id ??
+                            ws.find(
+                              (w) =>
+                                w.mine &&
+                                t.keys?.some((k) => k.workstationId === w.id && k.state === 'active'),
+                            )?.id ??
+                            null
+                          }
+                        />
+                      </Disclosure>
+                    )}
+                    <ErrorBox error={check.error} />
+                  </span>
+                )}
                 {t.appUrl && <span className="block font-mono text-xs text-subtle">{t.appUrl}</span>}
                 <TargetTesting projectId={projectId} target={t} workstations={ws} />
               </span>
@@ -192,6 +259,24 @@ export function DeployTargetsPanel({ projectId }: { projectId: string }) {
           Add deploy target
         </Button>
       </form>
+      {reconnecting && (
+        <Dialog
+          open
+          onOpenChange={(o) => !o && setReconnecting(null)}
+          title={`Reconnect ${reconnecting.name}`}
+          size="lg"
+        >
+          <ConnectServer
+            projectId={projectId}
+            target={reconnecting}
+            onCancel={() => setReconnecting(null)}
+            onDone={() => {
+              setReconnecting(null);
+              toast.success('Connected');
+            }}
+          />
+        </Dialog>
+      )}
       {editing && (
         <EditTarget
           projectId={projectId}
