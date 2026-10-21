@@ -223,6 +223,8 @@ export class DeployKeys {
         `  Port ${m.port ?? 22}`,
         `  IdentityFile ${key}`,
         '  IdentitiesOnly yes',
+        // never the person's ssh agent: only this dedicated key signs in, whatever SSH_AUTH_SOCK says
+        '  IdentityAgent none',
         `  UserKnownHostsFile ${join(confDir, 'known_hosts')}`,
         '  GlobalKnownHostsFile /dev/null',
         '  StrictHostKeyChecking yes',

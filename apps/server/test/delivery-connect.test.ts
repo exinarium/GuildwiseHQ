@@ -634,9 +634,20 @@ describe('prepare', () => {
   });
 });
 
+/** The target is connected through the guided flow on its own computer (an active key that is not the person's own alias). */
+const guided = async (targetId: string, method = 'password') => {
+  await q(`DELETE FROM deploy_target_keys WHERE target_id=$1 AND workstation_id=$2`, [targetId, d.w.workstationId]);
+  await q(
+    `INSERT INTO deploy_target_keys (target_id, workstation_id, project_id, org_id, fingerprint, public_key, alias, method, state, added_at)
+     VALUES ($1,$2,$3,$4,$5,$6,'prod',$7,'active',now())`,
+    [targetId, d.w.workstationId, d.w.projectId, d.orgId, `SHA256:guided${randomUUID().slice(0, 8)}`, PUB('55555555'), method],
+  );
+};
+
 describe('reachability', () => {
   it('a server target nobody has checked is checked by its computer (cheap, one at a time); the answer is the card chip; a failure is plain', async () => {
     const { queueReachabilityCheck, reachabilityTick } = await import('../src/delivery/reachability.ts');
+    await guided(d.targets.prod);
     await q(`DELETE FROM deploy_target_connections WHERE target_id=$1`, [d.targets.prod]);
     await q(`DELETE FROM runner_commands WHERE type='deploy.probe'`);
     const n = commands('deploy.probe').length;
@@ -955,6 +966,7 @@ const report0 = () => ({
 
 describe('v2 review: reachability answers, connect clean-up, expired sign-ins', () => {
   it('m6: every failed check is a state (an error the page does not know is "cannot reach")', async () => {
+    await guided(d.targets.prod);
     await q(`DELETE FROM deploy_target_connections WHERE target_id=$1`, [d.targets.prod]);
     await q(`DELETE FROM runner_commands WHERE type='deploy.probe'`);
     const n = commands('deploy.probe').length;
@@ -975,6 +987,7 @@ describe('v2 review: reachability answers, connect clean-up, expired sign-ins', 
 
   it('a server the computer can no longer reach is put on the desk (and pushed as a runner alert); answering again closes it', async () => {
     const { queueReachabilityCheck } = await import('../src/delivery/reachability.ts');
+    await guided(d.targets.prod);
     await q(`DELETE FROM runner_commands WHERE type='deploy.probe'`);
     const subject = `deploy_unreachable:${d.targets.prod}`;
     await q(`DELETE FROM desk_items WHERE subject_key=$1`, [subject]);
@@ -1014,6 +1027,37 @@ describe('v2 review: reachability answers, connect clean-up, expired sign-ins', 
       5000,
       'notice closed',
     );
+  });
+
+  it('final review: only a target connected through the guided flow is checked by itself; the button and a deploy still work for the rest', async () => {
+    const { queueReachabilityCheck, reachabilityTick } = await import('../src/delivery/reachability.ts');
+    const none = async () => {
+      await q(`DELETE FROM deploy_target_connections WHERE target_id=$1`, [d.targets.prod]);
+      await q(`DELETE FROM runner_commands WHERE type='deploy.probe'`);
+    };
+    // the person's own ssh alias: no key of ours
+    await q(`DELETE FROM deploy_target_keys WHERE target_id=$1`, [d.targets.prod]);
+    await none();
+    const n = commands('deploy.probe').length;
+    expect(await queueReachabilityCheck(d.w.t.app.ctx, d.targets.prod)).toBe(false);
+    await reachabilityTick(d.w.t.app.ctx);
+    // a dedicated key added to the person's own alias is still their config and their agent
+    await guided(d.targets.prod, 'alias');
+    expect(await queueReachabilityCheck(d.w.t.app.ctx, d.targets.prod)).toBe(false);
+    // a revoked guided key does not count
+    await guided(d.targets.prod);
+    await q(`UPDATE deploy_target_keys SET state='revoked' WHERE target_id=$1`, [d.targets.prod]);
+    expect(await queueReachabilityCheck(d.w.t.app.ctx, d.targets.prod)).toBe(false);
+    await new Promise((r) => setTimeout(r, 200));
+    expect(commands('deploy.probe')).toHaveLength(n);
+    // the button is on demand: it asks whatever the connection
+    await q(`DELETE FROM deploy_target_connections WHERE target_id=$1`, [d.targets.prod]);
+    await call('POST', `${base()}/delivery/targets/${d.targets.prod}/check`, undefined, 202);
+    expect((await lastCommand('deploy.probe', n)).payload.targetId).toBe(d.targets.prod);
+    // a managed one is checked by itself
+    await none();
+    await guided(d.targets.prod, 'keyfile');
+    expect(await queueReachabilityCheck(d.w.t.app.ctx, d.targets.prod)).toBe(true);
   });
 
   it('m6: only the project owner presses Check connection', async () => {

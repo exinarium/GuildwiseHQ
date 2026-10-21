@@ -69,6 +69,7 @@ describe('the dedicated deploy keys of this computer', () => {
     const cfg = readFileSync(join(k.dir, 'ssh_config'), 'utf8');
     expect(cfg).toContain('StrictHostKeyChecking yes');
     expect(cfg).toContain('IdentitiesOnly yes');
+    expect(cfg).toContain('IdentityAgent none');
     expect(cfg).toContain('PasswordAuthentication no');
     expect(cfg).toContain(`UserKnownHostsFile ${join(k.dir, 'known_hosts')}`);
     expect(readFileSync(join(k.dir, 'known_hosts'), 'utf8')).toBe('203.0.113.9 ssh-ed25519 AAAA\n');
