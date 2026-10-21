@@ -122,6 +122,14 @@ export const DirectBuildStepSchema = z.object({
  */
 export const DirectAppSchema = z.object({
   appDir: LocalPathSchema,
+  /**
+   * Where the symlink to the running release lives (default `<appDir>/current`). The service must start from this path. For an app
+   * that runs from a plain folder today, set it to that folder and `adoptFolder` to true: the first deploy moves that folder to
+   * `<appDir>/releases/initial` and puts the link in its place (same disk, one `mv`); nothing is deleted.
+   */
+  currentLink: LocalPathSchema.optional(),
+  /** The person confirmed that `currentLink` may be a plain folder that is turned into the first release (see above). */
+  adoptFolder: z.boolean().optional(),
   /** How many release folders to keep (the running one and the previous one are never removed). */
   keep: z.number().int().min(2).max(30).default(5),
   /** Install/build commands run in the new release folder, in order (taken from "Your app" start steps when possible). */

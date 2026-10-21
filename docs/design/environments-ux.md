@@ -560,10 +560,12 @@ No environment values and no file contents are ever reported.
 Server: `SetupStateDto.workstations[].canDirect?: boolean`; saving/publishing a setup with a direct environment on a runner without it gives
 409 `runner_outdated` and a lint error `runner_update_needed`. Status (`EnvironmentStatusDto`) gains `runtime: 'docker'|'direct'`.
 
-**What "adopt" means**: the person picks a detected service (manager + name + workingDir + ports); the wizard fills `manager` from it, `appDir` from the
-parent of `workingDir` when it already has the release layout, otherwise from `workingDir` itself (the first deploy then converts it: the existing folder is
-moved nowhere, it is left as it is and kept as `releases/previous`... see below), and asks only what cannot be found: the restart confirmation (and sudo), the
-build steps, which files stay shared. **First deploy into an existing plain folder**: Guildwise never moves or deletes the person's folder. `appDir` must be a folder
-that holds (or will hold) `releases/` and `current`; for a service that runs from a plain folder the wizard makes the new `appDir` a sibling (`<folder>-releases`)
-and the service's working directory is switched by the restart step only after the person confirms the unit change in the review (the unit file is NOT edited by Guildwise:
-the person confirms that the service already runs from `<appDir>/current`, or a command of their own is used). The review states this plainly.
+**What "adopt" means**: the person picks a detected service (manager + name + workingDir + ports); the wizard fills `manager` from it and asks only what
+cannot be found: the restart confirmation (and sudo), the build steps, which files stay shared. The service must start from the symlink path
+(`direct.currentLink`, default `<appDir>/current`). Three cases, decided by the wizard from `ProbeService.workingDir` / `releaseLayout`:
+
+1. It already runs from a `.../current` link of a releases layout: `appDir` = the parent folder, nothing to convert.
+2. It runs from a plain folder `D` (for example `/var/www/shop`): the wizard sets `currentLink = D`, `appDir = <D>-app` (a new sibling folder, editable) and
+   `adoptFolder = true` after a plain confirmation: "The first update moves the folder /var/www/shop to /var/www/shop-app/releases/initial and puts a link with the
+   same name in its place. Nothing is deleted or copied; the app keeps running from the same files." Without `adoptFolder` the script refuses a plain folder.
+3. A command of the person's own (`manager.kind = 'command'`): the same two fields apply; Guildwise never edits a unit file.
