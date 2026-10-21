@@ -149,6 +149,8 @@ export function placesOf(
 
 /** The places the server lists (`GET .../places`), in the shape the page uses. */
 export function placesFromApi(r: PlacesResponse, s: SetupStateDto): PlaceVm[] {
+  const label = (p: PlacesResponse['places'][number]) =>
+    p.kind === 'computer' ? (p.workstationName ?? p.name) : p.name;
   return r.places.map((p) => ({
     id: p.id,
     key: p.name,
@@ -168,7 +170,9 @@ export function placesFromApi(r: PlacesResponse, s: SetupStateDto): PlaceVm[] {
     usedBy: p.usedBy.map((u) => ({ name: u.env, label: u.label })),
     usedByDraft: p.usedByDraft,
     duplicateOf: p.duplicateOf?.id ?? null,
-    duplicateName: p.duplicateOf?.name ?? null,
+    duplicateName: r.places.find((o) => o.id === p.duplicateOf?.id)?.name
+      ? label(r.places.find((o) => o.id === p.duplicateOf?.id) as PlacesResponse['places'][number])
+      : (p.duplicateOf?.name ?? null),
     keys: s.targets.find((t) => t.id === p.id)?.keys,
     canRemove: p.canRemove,
     removeBlockedReason: p.removeBlockedReason,

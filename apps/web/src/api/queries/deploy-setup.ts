@@ -65,6 +65,8 @@ function useSetupMutation<V, R>(projectId: string, fn: (v: V) => Promise<R>) {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: setupKey(projectId) });
       void qc.invalidateQueries({ queryKey: ['delivery', projectId] });
+      void qc.invalidateQueries({ queryKey: ['places', projectId] });
+      void qc.invalidateQueries({ queryKey: ['env-status', projectId] });
     },
   });
 }

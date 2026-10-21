@@ -945,8 +945,15 @@ export const deploySetupHandlers = [
       { status: 202 },
     ),
   ),
-  http.post(`${A}/projects/:id/delivery/targets/:targetId/check`, () => {
+  http.post(`${A}/projects/:id/delivery/targets/:targetId/check`, ({ params }) => {
     localStorage.setItem('aom-mock-reach', 'ok');
+    update((s) => {
+      const t = s.targets.find((x) => x.id === params.targetId);
+      if (t) {
+        t.reach = 'reachable';
+        t.reachAgo = 0;
+      }
+    });
     return HttpResponse.json({ commandId: crypto.randomUUID(), workstationId: WS }, { status: 202 });
   }),
   http.post(`${A}/projects/:id/delivery/prepare`, async ({ request }) => {

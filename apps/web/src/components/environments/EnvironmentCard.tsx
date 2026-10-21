@@ -392,8 +392,10 @@ export function EnvironmentCard({
         ) : (
           <p className="text-xs text-subtle">Only the project owner changes environments.</p>
         )}
-        {!s.canApprove && info.action === 'approve' && canEdit && (
-          <p className="text-xs text-subtle">Waiting for the Owner's approval.</p>
+        {!s.canApprove && info.action === 'approve' && (
+          <p className="text-xs text-subtle" data-testid={`env-waiting-owner-${env.name}`}>
+            Waiting for the Owner's approval.
+          </p>
         )}
         {s.canApprove && info.action === 'approve' && missingElsewhere.length > 0 && (
           <p className="text-xs text-subtle" data-testid={`env-approve-reason-${env.name}`}>

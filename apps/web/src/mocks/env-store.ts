@@ -223,7 +223,7 @@ function seed(scenario: string): Store {
     unmodelled: [],
     proposal: { open: false, answers: {} },
     runs: {},
-    member: scenario === 'member',
+    member: scenario === 'member' || localStorage.getItem('aom-mock-member') === '1',
     old: scenario === 'old',
     improved: scenario === 'improved',
   };

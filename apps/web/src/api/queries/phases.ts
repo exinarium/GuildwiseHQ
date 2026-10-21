@@ -143,7 +143,11 @@ export function useAddDeployTarget(projectId: string) {
   return useMutation({
     mutationFn: (b: CreateDeployTargetRequest) =>
       post<DeployTargetDto>(`/projects/${projectId}/deploy-targets`, b),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['deploy-targets', projectId] }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['deploy-targets', projectId] });
+      void qc.invalidateQueries({ queryKey: ['places', projectId] });
+      void qc.invalidateQueries({ queryKey: ['deploy-setup', projectId] });
+    },
   });
 }
 
@@ -152,7 +156,11 @@ export function usePatchDeployTarget(projectId: string) {
   return useMutation({
     mutationFn: (v: { id: string; body: PatchDeployTargetRequest }) =>
       patch<DeployTargetDto>(`/deploy-targets/${v.id}`, v.body),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['deploy-targets', projectId] }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['deploy-targets', projectId] });
+      void qc.invalidateQueries({ queryKey: ['places', projectId] });
+      void qc.invalidateQueries({ queryKey: ['deploy-setup', projectId] });
+    },
   });
 }
 
@@ -160,6 +168,10 @@ export function useRemoveDeployTarget(projectId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => del(`/deploy-targets/${id}`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['deploy-targets', projectId] }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['deploy-targets', projectId] });
+      void qc.invalidateQueries({ queryKey: ['places', projectId] });
+      void qc.invalidateQueries({ queryKey: ['deploy-setup', projectId] });
+    },
   });
 }

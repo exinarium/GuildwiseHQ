@@ -52,7 +52,15 @@ import { Choice } from './Choice.tsx';
 import { DockerDetails, NativeDetails } from './EnvDetails.tsx';
 import { EnvReview } from './EnvReview.tsx';
 import { FoundApps, type StartChoice } from './FoundApps.tsx';
-import { allEnvironments, type EnvRole, METHOD_TEXT, type PlaceVm, placesOf, roleOf } from './model.ts';
+import {
+  allEnvironments,
+  type EnvRole,
+  METHOD_TEXT,
+  type PlaceVm,
+  placesOf,
+  roleOf,
+  slugName,
+} from './model.ts';
 import { useProbeFlow } from './useProbeFlow.ts';
 
 type StepId = 'form' | 'details' | 'review';
@@ -485,7 +493,12 @@ export function EnvironmentDialog({
                   label={answers.role === 'other' ? 'Name it' : 'Name'}
                   value={answers.label}
                   placeholder="Demo"
-                  onChange={(e) => set({ label: e.target.value })}
+                  onChange={(e) =>
+                    set({
+                      label: e.target.value,
+                      ...(editing ? {} : { name: slugName(e.target.value, taken) }),
+                    })
+                  }
                   data-testid="env-label"
                 />
               )}

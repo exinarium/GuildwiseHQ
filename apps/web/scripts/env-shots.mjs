@@ -26,6 +26,7 @@ export async function newPage(browser, { size, scheme, scenario, extra = {} }) {
       localStorage.setItem('guildwise-theme', s);
       if (!sessionStorage.getItem('seeded')) {
         sessionStorage.setItem('seeded', '1');
+        localStorage.setItem('aom-mock-org-role', sc === 'member' ? 'member' : 'owner');
         localStorage.setItem('aom-mock-deploy', sc);
         localStorage.removeItem('aom-mock-env');
         localStorage.setItem(

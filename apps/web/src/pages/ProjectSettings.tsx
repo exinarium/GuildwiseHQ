@@ -1,7 +1,7 @@
 import { COMPLETION_ACTION_LABELS, isSafePrBranchPrefix } from '@aom/shared';
 import { type FormEvent, useEffect, useState } from 'react';
 import { Navigate, useLocation, useParams } from 'react-router';
-import { usePatchProject, useProject, useRemoveRepo } from '../api/queries/projects.ts';
+import { usePatchProject, useProject, useProjects, useRemoveRepo } from '../api/queries/projects.ts';
 import { AddRepoForm } from '../components/AddRepoForm.tsx';
 import { ArchitectPanel } from '../components/ArchitectPanel.tsx';
 import { BudgetBanner } from '../components/BudgetBanner.tsx';
@@ -71,6 +71,8 @@ export function ProjectSettings() {
   const [e2e, setE2e] = useState('');
   const project = q.data?.project;
   const { hash } = useLocation();
+  const projectList = useProjects();
+  const projectKey = projectList.data?.find((p) => p.id === id)?.key ?? project?.key;
   const traits = useProjectWorkflowTraits(project?.id, project?.workflowKey);
   const canConvert = useCanConvert(project);
 
@@ -86,10 +88,10 @@ export function ProjectSettings() {
   }, [project]);
 
   // the old anchors moved: the start steps and the deploy setup live on the Environments page now
-  if (project && (hash === '#run' || hash === '#phases'))
+  if (projectKey && (hash === '#run' || hash === '#phases'))
     return (
       <Navigate
-        to={`/p/${project.key}/environments#${hash === '#run' ? 'start-steps' : 'environments'}`}
+        to={`/p/${projectKey}/environments#${hash === '#run' ? 'start-steps' : 'environments'}`}
         replace
       />
     );

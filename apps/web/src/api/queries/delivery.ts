@@ -39,6 +39,8 @@ function useDeliveryMutation<V, R>(projectId: string, fn: (v: V) => Promise<R>) 
       void qc.invalidateQueries({ queryKey: queueKey });
       void qc.invalidateQueries({ queryKey: runsKey });
       void qc.invalidateQueries({ queryKey: ['desk'] });
+      void qc.invalidateQueries({ queryKey: ['deploy-setup', projectId] });
+      void qc.invalidateQueries({ queryKey: ['env-status', projectId] });
     },
   });
 }

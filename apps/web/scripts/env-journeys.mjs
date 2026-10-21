@@ -51,7 +51,7 @@ export const journeys = [
       await p.getByTestId('proposal-use').scrollIntoViewIfNeeded();
       await shot(name('2b-review-bottom'), { full: false });
       await p.getByTestId('answer-0-app').click();
-      await p.getByTestId('answer-2-No, it is a test site').click();
+      await p.getByTestId('answer-2-no').click();
       await click(p, 'answers-submit');
       await p.waitForTimeout(600);
       await dialogShot(p, shot, name('3-answered'));
@@ -264,6 +264,11 @@ export const journeys = [
       await p.getByRole('button', { name: 'Merge', exact: true }).last().click();
       await p.waitForTimeout(700);
       await shot(name('4-merged'));
+      if (await tid(p, 'setup-draft-save').count()) {
+        await click(p, 'setup-draft-save');
+        await p.waitForTimeout(900);
+        await shot(name('5-saved'));
+      }
     },
   },
   {
@@ -311,6 +316,7 @@ export const journeys = [
       await click(p, 'env-next');
       await tid(p, 'native-details').waitFor();
       await dialogShot(p, shot, name('2-details'));
+      await tid(p, 'native-adopt-confirm').check();
       await click(p, 'env-to-review');
       await tid(p, 'review-save').waitFor();
       await dialogShot(p, shot, name('3-review'));
@@ -336,7 +342,7 @@ export const journeys = [
     },
   },
   {
-    id: 'q-settings',
+    id: 'q-settings-OLD',
     scenario: 'approved',
     run: async ({ p, name, shot }) => {
       await p.goto(`${BASE}/projects`);
@@ -348,5 +354,85 @@ export const journeys = [
         .catch(() => undefined);
     },
     sizes: [],
+  },
+
+  {
+    id: 'r-releases',
+    scenario: 'approved',
+    dark: true,
+    run: async ({ p, name, shot }) => {
+      for (const tab of ['waiting', 'live', 'history', 'rules']) {
+        await p.goto(`${BASE}/releases?tab=${tab}`);
+        await p.waitForTimeout(900);
+        await shot(name(tab));
+      }
+    },
+  },
+  {
+    id: 'r-releases-member',
+    scenario: 'member',
+    run: async ({ p, name, shot }) => {
+      await p.goto(`${BASE}/releases?tab=live`);
+      await p.waitForTimeout(900);
+      await shot(name('live'));
+    },
+    sizes: ['d'],
+  },
+  {
+    id: 's-redirects',
+    scenario: 'approved',
+    run: async ({ p, name, shot }) => {
+      await p.goto(`${BASE}/deploys`);
+      await p.waitForURL(/\/releases/);
+      await shot(name('deploys-to-releases'), { full: false });
+      const id = await p.evaluate(
+        async () => (await (await fetch('/api/projects')).json()).projects.find((x) => x.key === 'P5').id,
+      );
+      const go = (to) =>
+        p.evaluate((u) => {
+          window.history.pushState({}, '', u);
+          window.dispatchEvent(new PopStateEvent('popstate'));
+        }, to);
+      await go(`/projects/${id}/settings#run`);
+      await p.waitForURL(/environments/);
+      await p.waitForTimeout(700);
+      await shot(name('settings-run-to-start-steps'), { full: false });
+      const toy = await p.evaluate(
+        async () => (await (await fetch('/api/projects')).json()).projects.find((x) => x.key === 'TOY').id,
+      );
+      await go(`/projects/${toy}/settings`);
+      await p.waitForTimeout(900);
+      await p.getByTestId('environments-pointer').scrollIntoViewIfNeeded();
+      await shot(name('settings-pointer'), { full: false });
+    },
+  },
+  {
+    id: 't-edit',
+    scenario: 'approved',
+    run: async ({ p, name, shot }) => {
+      await goEnv(p);
+      await p.getByRole('button', { name: 'More for Test site' }).click();
+      await p.getByRole('menuitem', { name: /Edit/ }).click();
+      await tid(p, 'environment-dialog').waitFor();
+      await dialogShot(p, shot, name('1-edit'));
+    },
+  },
+  {
+    id: 'u-last-env',
+    scenario: 'ready',
+    run: async ({ p, name, shot }) => {
+      await goEnv(p);
+      await p.getByRole('button', { name: 'More for Live site' }).click();
+      await p.getByRole('menuitem', { name: /Remove/ }).click();
+      await click(p, 'remove-env-confirm');
+      await p.waitForTimeout(900);
+      await p.getByRole('button', { name: 'More for Test site' }).click();
+      await p.getByRole('menuitem', { name: /Remove/ }).click();
+      await tid(p, 'remove-last').waitFor();
+      await dialogShot(p, shot, name('1-last'));
+      await click(p, 'remove-env-confirm');
+      await tid(p, 'setup-empty').waitFor();
+      await shot(name('2-empty-again'));
+    },
   },
 ];

@@ -60,7 +60,20 @@ const meBody = () => ({
   account: { kind: 'user' as const },
   isAdmin: true,
   orgs: [],
-  activeOrg: null,
+  // `aom-mock-org-role` (owner, admin, member) gives the mock user an organization with that role (the Environments journeys)
+  activeOrg:
+    typeof localStorage !== 'undefined' && localStorage.getItem('aom-mock-org-role')
+      ? {
+          id: ORG_ID,
+          name: 'Acme',
+          role: localStorage.getItem('aom-mock-org-role') as 'owner' | 'admin' | 'member',
+          status: 'active' as const,
+          plan: 'team',
+          planName: 'Team',
+          features: {},
+          requireTwoFactor: false,
+        }
+      : null,
   guestIn: [],
   guestProjectIds: [],
   pendingInvitations: 0,
