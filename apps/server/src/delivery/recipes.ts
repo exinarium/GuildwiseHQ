@@ -27,6 +27,7 @@ import { withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, notFound, unprocessable } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
+import { RELEASES_PAUSED_REASON, RELEASES_RESUMED_REASON, releasesPaused } from './mode.ts';
 import { closeDeskNotice, raiseDeskNotice } from './notices.ts';
 
 /**
@@ -374,6 +375,7 @@ export async function approveRecipe(
         'dry_run_required',
         `try it without changing anything first (${missing.join(', ')}): a guided setup is approved after a successful dry run of exactly this version`,
       );
+    const paused = await releasesPaused(tx, projectId);
     // a release that waits for an environment this version no longer has can never go: it is cancelled with the approval
     const kept = new Set(((row.parsed as Recipe | null)?.environments ?? []).map((e) => e.name));
     const stale = await rows(
@@ -409,6 +411,21 @@ export async function approveRecipe(
           actor: userActor(user.id),
           scope: projectScope(row.org_id, projectId),
         },
+        // approving a recipe is what turns guided deploys on: the project switches to recipe mode in the same transaction
+        // ...unless the owner paused releases on purpose: approving a new version keeps them paused
+        ...(project.delivery_mode !== 'recipe' && !paused
+          ? [
+              {
+                streamId: streamId.project(projectId),
+                event: {
+                  type: 'DeliveryModeSet' as const,
+                  payload: { projectId, orgId: row.org_id, mode: 'recipe' as const, by: user.id },
+                },
+                actor: userActor(user.id),
+                scope: projectScope(row.org_id, projectId),
+              },
+            ]
+          : []),
       ],
       { tx },
     );
@@ -526,7 +543,16 @@ export async function setDeliveryMode(
   await ctx.store.append([
     {
       streamId: streamId.project(projectId),
-      event: { type: 'DeliveryModeSet', payload: { projectId, orgId: project.org_id, mode, by: user.id } },
+      event: {
+        type: 'DeliveryModeSet',
+        payload: {
+          projectId,
+          orgId: project.org_id,
+          mode,
+          by: user.id,
+          reason: mode === 'recipe' ? RELEASES_RESUMED_REASON : RELEASES_PAUSED_REASON,
+        },
+      },
       actor: userActor(user.id),
       scope: projectScope(project.org_id, projectId),
     },

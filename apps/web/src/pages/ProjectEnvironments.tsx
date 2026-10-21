@@ -3,7 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Cloud, Plus, ScanSearch } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router';
-import { useDelivery, useInspectRecipe } from '../api/queries/delivery.ts';
+import { useDelivery, useInspectRecipe, useSetDeliveryMode } from '../api/queries/delivery.ts';
 import { useSetupState, useStartDeployScan } from '../api/queries/deploy-setup.ts';
 import {
   useEnvStatus,
@@ -94,6 +94,8 @@ function EnvironmentsBody({
   const scanRun = useStartScan(projectId);
   const inspect = useInspectRecipe(projectId);
   const toast = useToast();
+  const setMode = useSetDeliveryMode(projectId);
+  const [pausing, setPausing] = useState(false);
   const qc = useQueryClient();
   const [params, setParams] = useSearchParams();
   const [adding, setAdding] = useState<null | { role?: 'test' | 'live' | 'other' }>(null);
@@ -160,6 +162,10 @@ function EnvironmentsBody({
       ) === 'live',
   );
   const approvedWaiting = items.filter((i) => statusOf(i.env.name)?.waitingRelease);
+  const releasesOn = s.deliveryMode === 'recipe';
+  // turning on needs an approved recipe; pausing is always possible. Only the owner flips it.
+  const canSwitch = s.canEdit && s.canApprove && (releasesOn || !!s.current.approvedHash);
+  const turnOn = () => setMode.mutate('recipe', { onSuccess: () => toast.success('Releases are on') });
 
   const scanAll = () => {
     scanDeploy.mutate({}, { onSuccess: () => toast.success('DevOps is looking') });
@@ -207,6 +213,102 @@ function EnvironmentsBody({
         >
           {s.workstations.find((w) => w.blocked)?.blocked} The cards below still show what was last known.
         </Callout>
+      )}
+      {(s.current.recipePresent || s.deliveryMode === 'recipe') && (
+        <div
+          className="-mt-2 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-card border border-line bg-surface px-4 py-3"
+          data-testid="releases-switch"
+        >
+          <span className="text-sm font-medium text-fg">Releases:</span>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={releasesOn}
+            aria-label="Releases"
+            disabled={!canSwitch || setMode.isPending}
+            onClick={() => (releasesOn ? setPausing(true) : turnOn())}
+            className={`inline-flex min-h-9 items-center rounded-full border px-3 text-sm font-medium disabled:opacity-60 ${
+              releasesOn ? 'border-success bg-success/10 text-fg' : 'border-warning bg-warning/10 text-fg'
+            }`}
+            data-testid="releases-toggle"
+          >
+            {releasesOn ? 'On' : 'Paused'}
+          </button>
+          {!s.current.approvedHash && !releasesOn ? (
+            <span className="text-sm text-muted" data-testid="releases-needs-approval">
+              Approve an environment first.
+            </span>
+          ) : !canSwitch ? (
+            <span className="text-sm text-muted">Only the project owner changes this.</span>
+          ) : null}
+        </div>
+      )}
+      {s.deliveryMode === 'instructions' &&
+        !s.releasesPaused &&
+        s.current.recipePresent &&
+        s.current.recipeStatus === 'approved' && (
+          <Callout
+            tone="warning"
+            title="Releases from these environments are off"
+            data-testid="env-mode-off"
+            actions={
+              s.canEdit && s.canApprove ? (
+                <Button
+                  size="sm"
+                  variant="primary"
+                  loading={setMode.isPending}
+                  onClick={turnOn}
+                  data-testid="env-mode-on"
+                >
+                  Turn on deploys from these environments
+                </Button>
+              ) : undefined
+            }
+          >
+            Your setup is approved, but this project still delivers by instructions, so releases and updates
+            after a merge do not use it.{canSwitch ? '' : ' The project owner can turn it on.'}
+          </Callout>
+        )}
+      {pausing && (
+        <Dialog
+          open
+          onOpenChange={(o) => !o && setPausing(false)}
+          title="Pause releases?"
+          footer={
+            <>
+              <Button variant="ghost" onClick={() => setPausing(false)}>
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                loading={setMode.isPending}
+                onClick={() =>
+                  setMode.mutate('instructions', {
+                    onSuccess: () => {
+                      toast.success('Releases are paused');
+                      setPausing(false);
+                    },
+                  })
+                }
+                data-testid="releases-pause-confirm"
+              >
+                Pause releases
+              </Button>
+            </>
+          }
+        >
+          <div className="flex flex-col gap-2 text-sm" data-testid="releases-pause-dialog">
+            <p>
+              <strong>This stops:</strong> automatic updates after a merge, the Release and Update now
+              buttons, and deploy follow-ups that use these environments.
+            </p>
+            <p>
+              <strong>This does not:</strong> stop or remove anything that is running. Your setups and
+              approvals are kept. Turning Releases back on needs no new approval, unless the files changed in
+              the meantime.
+            </p>
+          </div>
+        </Dialog>
       )}
       {s.writeBlocked && !noneCan && (
         <Callout tone="warning" title="Saving is not possible yet" data-testid="setup-write-blocked">
@@ -418,7 +520,7 @@ function EnvironmentsBody({
       </Section>
 
       <RulesSection projectId={projectId} s={s} />
-      <HistorySection projectId={projectId} labelOf={labelOf} />
+      <HistorySection projectId={projectId} labelOf={labelOf} modeHistory={s.modeHistory ?? []} />
 
       <Disclosure
         summary="Show technical details (setup file, scripts, what was found)"

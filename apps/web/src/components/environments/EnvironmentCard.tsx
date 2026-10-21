@@ -91,7 +91,10 @@ export function EnvironmentCard({
       : null;
   const mismatch = baseInfo.state === 'failed' && ORIGIN_MISMATCH.test(failureText);
   const runningFile = mismatch ? runningFileFor(env, localReport) : null;
-  const info = mismatch ? { ...baseInfo, sentence: originMismatchSentence(env, runningFile) } : baseInfo;
+  const shown = mismatch ? { ...baseInfo, sentence: originMismatchSentence(env, runningFile) } : baseInfo;
+  // approved, but the project's releases are off (paused by the owner): no update or release can start from here
+  const paused = s.deliveryMode === 'instructions' && shown.strip.approved;
+  const info = paused ? { ...shown, chip: { label: 'Releases paused', tone: 'amber' as const } } : shown;
   const saveDraft = useSaveSetupDraft(projectId);
   const toast = useToast();
   const qc = useQueryClient();
@@ -305,6 +308,12 @@ export function EnvironmentCard({
           </p>
         )}
 
+        {paused && (
+          <p className="text-sm text-warning" data-testid={`env-paused-${env.name}`}>
+            Releases are paused for this project, so Update now and Release are off. Turn Releases on again at
+            the top of this page.
+          </p>
+        )}
         {canEdit ? (
           <div className="flex flex-wrap items-center gap-2" data-testid={`env-actions-${env.name}`}>
             {info.action === 'answer' && onAnswer && (
@@ -343,16 +352,18 @@ export function EnvironmentCard({
               <Button
                 variant="primary"
                 loading={deploy.isPending}
+                disabled={paused}
                 onClick={doUpdate}
                 data-testid={`env-update-${env.name}`}
               >
                 <RefreshCw aria-hidden="true" className="size-4" />
-                Update now
+                {info.state === 'ready' && env.trigger[0] !== 'after_merge' ? 'Release' : 'Update now'}
               </Button>
             )}
             {info.action === 'release' && waiting && (
               <Button
                 variant="primary"
+                disabled={paused}
                 onClick={() => setReleasing(true)}
                 data-testid={`env-release-${env.name}`}
               >
@@ -395,7 +406,12 @@ export function EnvironmentCard({
               </Button>
             )}
             {info.state === 'failed' && (
-              <Button loading={deploy.isPending} onClick={doUpdate} data-testid={`env-retry-${env.name}`}>
+              <Button
+                loading={deploy.isPending}
+                disabled={paused}
+                onClick={doUpdate}
+                data-testid={`env-retry-${env.name}`}
+              >
                 Try again
               </Button>
             )}
@@ -478,6 +494,12 @@ export function EnvironmentCard({
           }
         >
           <div className="flex flex-col gap-3 text-sm" data-testid="approve-dialog">
+            {s.releasesPaused && (
+              <p className="text-warning" data-testid="approve-paused-note">
+                Releases are paused for this project. Approving keeps them paused: turn them on again at the
+                top of the page.
+              </p>
+            )}
             <p className="text-fg">
               {(s.current.setup?.environments ?? []).map((e) => e.label).join(', ')} will use the steps that
               were tried.

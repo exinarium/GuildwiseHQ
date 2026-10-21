@@ -50,6 +50,9 @@ export function useSetupState(projectId: string | undefined, waiting = false) {
         proposal: d.proposal ?? null,
         generator: d.generator ?? SETUP_GENERATOR,
         improvedAvailable: d.improvedAvailable ?? false,
+        ...(d.deliveryMode ? { deliveryMode: d.deliveryMode } : {}),
+        releasesPaused: d.releasesPaused ?? false,
+        modeHistory: d.modeHistory ?? [],
       };
     },
     refetchInterval: (q) =>

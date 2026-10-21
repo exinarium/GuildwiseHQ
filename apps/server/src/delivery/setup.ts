@@ -36,6 +36,7 @@ import { badRequest, conflict, forbidden, notFound, unprocessable } from '../err
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { connectBlockedReason, listKeyDtos } from './connect.ts';
 import { workingSetup } from './environments.ts';
+import { modeHistory, releasesPaused } from './mode.ts';
 import { moveBlockedReason } from './move.ts';
 import { listProbeDtos, setupBlockedReason } from './probes.ts';
 import {
@@ -236,6 +237,8 @@ export async function getSetupState(
     generator: SETUP_GENERATOR,
     improvedAvailable: parsedSetup.success && parsedSetup.data.generator !== SETUP_GENERATOR,
     deliveryMode: p.delivery_mode === 'recipe' ? 'recipe' : 'instructions',
+    releasesPaused: await releasesPaused(ctx.pool, projectId),
+    modeHistory: await modeHistory(ctx.pool, projectId),
   };
 }
 

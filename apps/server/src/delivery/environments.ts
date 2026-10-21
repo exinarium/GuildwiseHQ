@@ -34,6 +34,7 @@ import { withAppendTx } from '../db/tx.ts';
 import { conflict, forbidden, notFound, unprocessable } from '../errors.ts';
 import { revokeKeyOnRemoval } from './connect.ts';
 import { evaluateEnvGate } from './gate.ts';
+import { releasesPaused } from './mode.ts';
 import { guidedEnvsWithoutDryRun, loadRecipeRow } from './recipes.ts';
 import { type RequestDeployResult, requestDeployRun } from './runs.ts';
 import { projectOwnerOrThrow } from './setup.ts';
@@ -866,6 +867,12 @@ export async function buildStatus(ctx: Ctx, project: Row): Promise<EnvironmentsS
     } else if (cur) {
       state = 'healthy';
       text = `Version ${String(cur.deployed_commit ?? cur.commit ?? '').slice(0, 7)} is running.`;
+    } else if (inSaved) {
+      // saved and approved, never released
+      state = 'ready';
+      text = v?.triggers.includes('after_merge')
+        ? 'Approved. It updates after the next merge, or press Update now.'
+        : 'Approved. Nothing is live here yet: press Release when you are ready.';
     } else {
       state = 'not_set_up';
       text = 'Nothing has been released here yet.';
@@ -940,6 +947,7 @@ export async function orgLive(ctx: Ctx, user: AuthSession['user'], orgId: string
     const recipe = await loadRecipeRow(ctx.pool, p.id);
     if (!recipe?.present) continue;
     const s = await buildStatus(ctx, p);
+    const paused = await releasesPaused(ctx.pool, p.id);
     const waitingCounts = await rows(
       ctx.pool,
       `SELECT env, count(DISTINCT commit)::int AS n FROM deploy_runs WHERE project_id=$1 AND status='waiting_release' GROUP BY env`,
@@ -961,6 +969,7 @@ export async function orgLive(ctx: Ctx, user: AuthSession['user'], orgId: string
         since: e.current?.since ?? null,
         health: e.health.state,
         waitingReleases: waitingCounts.find((w) => w.env === e.env)?.n ?? 0,
+        releasesPaused: paused,
       });
     }
   }

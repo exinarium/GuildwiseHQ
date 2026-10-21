@@ -43,6 +43,7 @@ const live = [
     commit: 'aaa',
     since: ago(4320),
     health: 'healthy',
+    releasesPaused: true,
     placeName: 'prod-server',
     appUrl: null,
     waitingRelease: 1,
@@ -194,6 +195,8 @@ describe('Releases page', () => {
     expect(await screen.findByTestId('live-row-P5-production')).toHaveTextContent('0.9.2');
     expect(screen.getByTestId('live-row-P5-uat')).toHaveTextContent('Updating');
     expect(screen.getByTestId('live-waiting-P5-production')).toHaveTextContent('1 release waiting');
+    expect(screen.getByTestId('live-paused-row-P5-production')).toHaveTextContent('Releases paused');
+    expect(screen.queryByTestId('live-paused-row-P5-uat')).toBeNull();
   });
 
   it('opens on the tab named in the address', async () => {

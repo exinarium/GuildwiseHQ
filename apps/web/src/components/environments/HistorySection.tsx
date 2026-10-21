@@ -19,9 +19,17 @@ const RESULT: Record<string, { text: string; tone: 'green' | 'red' | 'amber' | '
 export function HistorySection({
   projectId,
   labelOf,
+  modeHistory = [],
 }: {
   projectId: string;
   labelOf: (env: string) => string;
+  /** Who turned Releases on or paused them, and when (newest first). */
+  modeHistory?: Array<{
+    at: string;
+    mode: 'instructions' | 'recipe';
+    by: string | null;
+    reason: string | null;
+  }>;
 }) {
   const runs = useDeployRuns();
   const mine = (runs.data ?? []).filter((r) => r.projectId === projectId && !r.dryRun).slice(0, 10);
@@ -40,6 +48,23 @@ export function HistorySection({
         </Link>
       }
     >
+      {modeHistory.length > 0 && (
+        <ul className="flex flex-col divide-y divide-line" data-testid="history-modes">
+          {modeHistory.map((m) => (
+            <li
+              key={`${m.at}|${m.mode}`}
+              className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2 text-sm"
+              data-testid="history-mode"
+            >
+              <span className="font-medium text-fg">
+                {m.mode === 'recipe' ? 'Releases turned on' : 'Releases paused'}
+              </span>
+              <span className="text-muted">{m.by ? `by ${m.by}` : 'by Guildwise'}</span>
+              <span className="ml-auto text-xs text-subtle">{agoText(m.at)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
       {runs.isError ? (
         <p className="text-sm text-muted">The history is not available to you here. Ask the project owner.</p>
       ) : mine.length === 0 ? (

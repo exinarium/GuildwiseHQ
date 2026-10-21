@@ -18,7 +18,13 @@ export const deliveryEvents = [
   /** `projects.delivery_mode`: `instructions` (the prose DevOps request of a phase follow-up) or `recipe`. */
   defineEvent(
     'DeliveryModeSet',
-    z.object({ projectId: Id, orgId: Id, mode: DeliveryMode, by: Id.nullable().default(null) }),
+    z.object({
+      projectId: Id,
+      orgId: Id,
+      mode: DeliveryMode,
+      by: Id.nullable().default(null),
+      reason: z.string().max(300).optional(),
+    }),
   ),
   /** The workstation inspected `delivery/` of the project vault: its content hash, the parsed recipe and the lint. */
   defineEvent(

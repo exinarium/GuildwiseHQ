@@ -210,7 +210,8 @@ export type CardState =
   | 'failed'
   | 'custom'
   | 'needs_answer'
-  | 'not_set_up';
+  | 'not_set_up'
+  | 'ready';
 
 export type CardAction =
   | 'review'
@@ -275,6 +276,7 @@ const SERVER_CHIP: Record<string, { label: string; tone: Tone }> = {
   changed: { label: 'Changed', tone: 'amber' },
   custom: { label: 'Custom', tone: 'amber' },
   not_set_up: { label: 'Not set up', tone: 'neutral' },
+  ready: { label: 'Ready', tone: 'green' },
 };
 
 /** The server's own verdict (section 13.3) wins over what the page works out from the setup state. */
@@ -299,13 +301,15 @@ function withServerState(info: CardInfo, status: EnvStatusDto, place: PlaceVm | 
                 ? 'fix'
                 : st === 'custom'
                   ? 'back_to_guided'
-                  : st === 'healthy'
-                    ? info.role === 'live'
-                      ? status.waitingRelease
-                        ? 'release'
-                        : null
-                      : 'update'
-                    : null;
+                  : st === 'ready'
+                    ? 'update'
+                    : st === 'healthy'
+                      ? info.role === 'live'
+                        ? status.waitingRelease
+                          ? 'release'
+                          : null
+                        : 'update'
+                      : null;
   const state: CardState = st === 'unhealthy' ? 'failed' : st;
   return {
     ...info,

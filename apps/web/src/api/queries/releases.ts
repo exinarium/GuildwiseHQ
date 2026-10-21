@@ -27,6 +27,8 @@ export interface LiveRow {
   appUrl: string | null;
   /** How many releases wait for this environment. */
   waitingRelease: number;
+  /** The owner paused releases of this project. */
+  releasesPaused?: boolean;
 }
 
 export const liveKey = ['org-live'] as const;
