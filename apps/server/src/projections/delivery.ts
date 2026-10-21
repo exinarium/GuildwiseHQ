@@ -204,6 +204,99 @@ export const deliveryProjectors: Record<string, Projector> = {
     // audit only: the event is the record
   },
 
+  // ---- moving to a new server (v3): every statement is a function of the event and the row, so a replay gives the same rows
+  DeployTargetMoveStarted: async (tx, e) => {
+    const p = ev<'DeployTargetMoveStarted'>(e).payload;
+    await exec(
+      tx,
+      `INSERT INTO deploy_target_moves (id, org_id, project_id, env_name, from_target_id, to_target_id, workstation_id, spec, domain,
+         state, current_step, started_by, started_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,'preparing','check',$10,$11)
+       ON CONFLICT (id) DO NOTHING`,
+      [
+        p.moveId,
+        e.scope.orgId,
+        p.projectId,
+        p.envName,
+        p.fromTargetId,
+        p.toTargetId,
+        p.workstationId,
+        j(p.spec),
+        p.domain,
+        p.by,
+        p.at,
+      ],
+    );
+  },
+  DeployTargetMoveStepDone: async (tx, e) => {
+    const p = ev<'DeployTargetMoveStepDone'>(e).payload;
+    const row = await one<{ steps: Array<{ step: string }> }>(
+      tx,
+      'SELECT steps FROM deploy_target_moves WHERE id=$1',
+      [p.moveId],
+    );
+    if (!row) return;
+    const entry = { step: p.step, ok: p.ok, detail: p.detail, checks: p.checks, at: p.at };
+    const steps = [...(row.steps ?? []).filter((s) => s.step !== p.step), entry];
+    const done = p.state === 'completed' || p.state === 'cancelled';
+    await exec(
+      tx,
+      `UPDATE deploy_target_moves SET steps=$2::jsonb, state=$3, error=$4, old_app_stopped=$5, facts = facts || $6::jsonb,
+              current_step=$7, finished_at = CASE WHEN $8::boolean THEN $9::timestamptz ELSE NULL END
+        WHERE id=$1`,
+      [p.moveId, j(steps), p.state, p.error, p.oldAppStopped, j(p.facts), p.step, done, p.at],
+    );
+  },
+  DeployTargetMoveResumed: async (tx, e) => {
+    const p = ev<'DeployTargetMoveResumed'>(e).payload;
+    const prepare = ['check', 'copy_config', 'copy_image', 'start_database'].includes(p.step);
+    await exec(
+      tx,
+      `UPDATE deploy_target_moves SET state=$2, current_step=$3, error=NULL, finished_at=NULL WHERE id=$1`,
+      [p.moveId, prepare ? 'preparing' : 'moving', p.step],
+    );
+  },
+  DeployTargetMoveCompleted: async (tx, e) => {
+    const p = ev<'DeployTargetMoveCompleted'>(e).payload;
+    await exec(
+      tx,
+      `UPDATE deploy_target_moves SET state='completed', current_step=NULL, error=NULL, dns=$2, finished_at=$3 WHERE id=$1`,
+      [p.moveId, p.dns, p.at],
+    );
+    // the old server is renamed first (names are unique), then the new one takes the name the approved deploy files use
+    await exec(tx, `UPDATE deploy_targets SET name=$2, role='standby', updated_at=$3 WHERE id=$1`, [
+      p.fromTargetId,
+      p.fromNewName,
+      p.at,
+    ]);
+    await exec(
+      tx,
+      `UPDATE deploy_targets SET name=$2, role='active', production=$3, app_url=COALESCE($4, app_url), updated_at=$5 WHERE id=$1`,
+      [p.toTargetId, p.toNewName, p.production, p.appUrl, p.at],
+    );
+    // a deploy step of a phase that has not run yet goes to the server that is live now
+    await exec(
+      tx,
+      `UPDATE phase_followups SET target_id=$2 WHERE target_id=$1 AND status IN ('pending','queued','briefed','running')`,
+      [p.fromTargetId, p.toTargetId],
+    );
+  },
+  DeployTargetMoveCancelled: async (tx, e) => {
+    const p = ev<'DeployTargetMoveCancelled'>(e).payload;
+    await exec(
+      tx,
+      `UPDATE deploy_target_moves SET state='cancelled', current_step=NULL, old_app_stopped=false, finished_at=$2 WHERE id=$1`,
+      [p.moveId, p.at],
+    );
+  },
+  DeployTargetRetired: async (tx, e) => {
+    const p = ev<'DeployTargetRetired'>(e).payload;
+    await exec(tx, `UPDATE deploy_targets SET role='retired', retired_at=$2, updated_at=$2 WHERE id=$1`, [
+      p.targetId,
+      p.at,
+    ]);
+  },
+
   DeliveryRecipeDrifted: async (tx, e) => {
     const p = ev<'DeliveryRecipeDrifted'>(e).payload;
     await exec(

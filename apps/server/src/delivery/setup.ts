@@ -30,6 +30,7 @@ import { withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, notFound, unprocessable } from '../errors.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { connectBlockedReason, listKeyDtos } from './connect.ts';
+import { moveBlockedReason } from './move.ts';
 import { listProbeDtos, setupBlockedReason } from './probes.ts';
 import {
   guidedEnvsWithoutDryRun,
@@ -113,6 +114,7 @@ export async function getSetupState(
         ? { state: c.state, at: iso(c.at) as string, detail: c.detail ?? null, method: c.method }
         : null,
       keys: keys.filter((k) => k.targetId === t.id),
+      role: (t.role ?? 'active') as 'active' | 'standby' | 'retired',
     };
   });
   const stations = await rows(
@@ -129,6 +131,7 @@ export async function getSetupState(
     const connectBlocked = await connectBlockedReason(ctx.pool, w.id);
     workstations.push({
       canConnect: connectBlocked === null,
+      canMove: (await moveBlockedReason(ctx.pool, w.id)) === null,
       id: w.id,
       name: w.name,
       connected: !!w.connected,

@@ -70,7 +70,7 @@ export async function connectBlockedReason(db: Queryable, workstationId: string)
 }
 
 /** The workstation of the person asking: connect works on their own computers only (their password, their sign-in). */
-async function ownComputer(ctx: Ctx, user: AuthSession['user'], workstationId: string) {
+export async function ownComputer(ctx: Ctx, user: AuthSession['user'], workstationId: string) {
   const ws = await one(
     ctx.pool,
     `SELECT id, name, user_id FROM workstations WHERE id=$1 AND status='active'`,
@@ -84,7 +84,7 @@ async function ownComputer(ctx: Ctx, user: AuthSession['user'], workstationId: s
   return ws as { id: string; name: string; user_id: string };
 }
 
-async function serverTarget(db: Queryable, projectId: string, targetId: string) {
+export async function serverTarget(db: Queryable, projectId: string, targetId: string) {
   const t = await one(
     db,
     `SELECT * FROM deploy_targets WHERE id=$1 AND project_id=$2 AND removed_at IS NULL`,

@@ -51,6 +51,8 @@ export const SetupTargetDtoSchema = z.object({
     .nullable(),
   /** The dedicated Guildwise keys of this target (one per computer that connected), public parts only. */
   keys: z.array(DeployKeyDtoSchema).optional(),
+  /** `active`, `standby` (the old server after a move) or `retired`. Absent from an older server. */
+  role: z.enum(['active', 'standby', 'retired']).optional(),
 });
 export type SetupTargetDto = z.infer<typeof SetupTargetDtoSchema>;
 
@@ -65,6 +67,8 @@ export const SetupWorkstationDtoSchema = z.object({
   blocked: z.string().nullable(),
   /** Answers the guided-connect commands (capability `deploy-connect:1`). Absent from an older server. */
   canConnect: z.boolean().optional(),
+  /** Answers `deploy.move` (capability `deploy-move:1`). Absent from an older server. */
+  canMove: z.boolean().optional(),
 });
 export type SetupWorkstationDto = z.infer<typeof SetupWorkstationDtoSchema>;
 

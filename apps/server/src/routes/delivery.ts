@@ -5,12 +5,16 @@ import {
   HostKeyScanRequestSchema,
   IdParamsSchema,
   KeyCreateRequestSchema,
+  MoveCompleteRequestSchema,
+  MoveStartRequestSchema,
+  MoveSwitchRequestSchema,
   PrepareRequestSchema,
   PreviewSetupRequestSchema,
   ProbeRequestSchema,
   PublishSetupRequestSchema,
   RejectRecipeRequestSchema,
   ReleaseRequestSchema,
+  RetireRequestSchema,
   RevokeKeyRequestSchema,
   SaveSetupDraftRequestSchema,
   SetDeliveryModeRequestSchema,
@@ -37,6 +41,17 @@ import {
   requestPrepare,
   requestRevoke,
 } from '../delivery/connect.ts';
+import {
+  cancelMove,
+  completeMove,
+  dnsCheck,
+  getMove,
+  listMoves,
+  retireTarget,
+  retryMove,
+  startMove,
+  switchMove,
+} from '../delivery/move.ts';
 import { listProbeDtos, requestProbe } from '../delivery/probes.ts';
 import { deliverySettings, listBindings, listPresets, releaseQueue, toRunDto } from '../delivery/queries.ts';
 import { approveRecipe, rejectRecipe, requestRecipeInspect, setDeliveryMode } from '../delivery/recipes.ts';
@@ -236,6 +251,97 @@ export function deliveryRoutes(ctx: Ctx) {
       async (req, reply) => {
         const s = await requireUser(ctx, req);
         const r = await requestPrepare(ctx, s.user, req.params.id, req.body);
+        reply.code(202);
+        return r;
+      },
+    );
+
+    // ------------------------------------------------------------------------------ moving to a new server (design v3)
+    const MoveParams = z.object({ id: z.uuid(), moveId: z.uuid() });
+
+    app.get('/api/projects/:id/delivery/moves', { schema: { params: IdParamsSchema } }, async (req) => {
+      const s = await requireUser(ctx, req);
+      return { moves: await listMoves(ctx, s.user, req.params.id) };
+    });
+
+    /** Start moving the environment that deploys to one server onto another (looks at both; nothing changes on the old one). */
+    app.post(
+      '/api/projects/:id/delivery/moves',
+      { schema: { params: IdParamsSchema, body: MoveStartRequestSchema } },
+      async (req, reply) => {
+        const s = await requireUser(ctx, req);
+        const r = await startMove(ctx, s.user, req.params.id, req.body);
+        reply.code(201);
+        return r;
+      },
+    );
+
+    app.get('/api/projects/:id/delivery/moves/:moveId', { schema: { params: MoveParams } }, async (req) => {
+      const s = await requireUser(ctx, req);
+      return getMove(ctx, s.user, req.params.id, req.params.moveId);
+    });
+
+    /** "A short downtime is fine": stop the old app, take the last backup, restore, start and check the new app. */
+    app.post(
+      '/api/projects/:id/delivery/moves/:moveId/switch',
+      { schema: { params: MoveParams, body: MoveSwitchRequestSchema } },
+      async (req, reply) => {
+        const s = await requireUser(ctx, req);
+        const r = await switchMove(ctx, s.user, req.params.id, req.params.moveId);
+        reply.code(202);
+        return r;
+      },
+    );
+
+    app.post(
+      '/api/projects/:id/delivery/moves/:moveId/retry',
+      { schema: { params: MoveParams } },
+      async (req, reply) => {
+        const s = await requireUser(ctx, req);
+        const r = await retryMove(ctx, s.user, req.params.id, req.params.moveId);
+        reply.code(202);
+        return r;
+      },
+    );
+
+    app.post(
+      '/api/projects/:id/delivery/moves/:moveId/cancel',
+      { schema: { params: MoveParams } },
+      async (req, reply) => {
+        const s = await requireUser(ctx, req);
+        const r = await cancelMove(ctx, s.user, req.params.id, req.params.moveId);
+        reply.code(202);
+        return r;
+      },
+    );
+
+    /** The live check: does the domain point to the new server yet? */
+    app.get(
+      '/api/projects/:id/delivery/moves/:moveId/dns',
+      { schema: { params: MoveParams } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        return dnsCheck(ctx, s.user, req.params.id, req.params.moveId);
+      },
+    );
+
+    /** The Owner makes the new server live (it takes the name the approved deploy files use); the old one becomes the standby. */
+    app.post(
+      '/api/projects/:id/delivery/moves/:moveId/complete',
+      { schema: { params: MoveParams, body: MoveCompleteRequestSchema } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        return completeMove(ctx, s.user, req.params.id, req.params.moveId, req.body);
+      },
+    );
+
+    /** The Owner lets the standby go: Guildwise's keys are removed from it. Nothing else there is touched. */
+    app.post(
+      '/api/projects/:id/delivery/targets/:targetId/retire',
+      { schema: { params: TargetParams, body: RetireRequestSchema } },
+      async (req, reply) => {
+        const s = await requireUser(ctx, req);
+        const r = await retireTarget(ctx, s.user, req.params.id, req.params.targetId, req.body);
         reply.code(202);
         return r;
       },

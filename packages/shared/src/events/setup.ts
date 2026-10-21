@@ -233,8 +233,9 @@ export const setupEvents = [
       /** The names after the swap, decided once (a replay does not compute them). */
       fromNewName: z.string().min(1).max(120),
       toNewName: z.string().min(1).max(120),
-      /** The new server takes the old one's "production" mark. */
+      /** The new server takes the old one's "production" mark and web address (the deploys read them from the target). */
       production: z.boolean(),
+      appUrl: z.string().max(500).nullable().default(null),
       dns: z.enum(['verified', 'unverified']),
       by: Id,
       at: z.iso.datetime(),

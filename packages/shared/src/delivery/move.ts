@@ -496,7 +496,6 @@ export type MoveCompleteRequest = z.infer<typeof MoveCompleteRequestSchema>;
 export const RetireRequestSchema = z.object({
   /** The Owner read what retiring does. */
   confirmed: z.literal(true),
-  workstationId: z.uuid(),
 });
 export type RetireRequest = z.infer<typeof RetireRequestSchema>;
 

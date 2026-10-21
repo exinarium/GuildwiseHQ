@@ -31,6 +31,7 @@ export function toTargetDto(t: Row): DeployTargetDto {
     destructiveOk: t.destructive_ok ?? false,
     testHosts: t.test_hosts ?? [],
     secretNames: t.secret_names ?? [],
+    role: t.role ?? 'active',
   };
 }
 

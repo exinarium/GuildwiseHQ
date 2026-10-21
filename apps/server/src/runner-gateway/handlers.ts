@@ -96,6 +96,7 @@ import { exec, one, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import { applyDeploySecretResult } from '../delivery/admin.ts';
 import { applyConnectResult } from '../delivery/connect.ts';
+import { applyMoveResult } from '../delivery/move.ts';
 import { applyProbeResult } from '../delivery/probes.ts';
 import { applyInspectResult, onProjectVaultSynced } from '../delivery/recipes.ts';
 import { deployRpc } from '../delivery/rpc.ts';
@@ -544,6 +545,17 @@ export class RunnerHandlers {
             this.ctx,
             conn.workstationId,
             { id: msg.commandId, type: cmd.type, payload: cmd.payload },
+            msg.ok,
+            msg.result,
+            msg.error,
+          );
+        } else if (cmd?.type === 'deploy.move') {
+          // Terminal: an answer (a refusal, a failed backup) is shown to the person; a step is never retried blindly.
+          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+          await applyMoveResult(
+            this.ctx,
+            conn.workstationId,
+            { id: msg.commandId, payload: cmd.payload },
             msg.ok,
             msg.result,
             msg.error,

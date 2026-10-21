@@ -414,7 +414,7 @@ export const phaseProjectors: Record<string, Projector> = {
               notes = COALESCE($10, notes), updated_at=$11,
               test_enabled = COALESCE($12, test_enabled), production = COALESCE($13, production),
               destructive_ok = COALESCE($14, destructive_ok), test_hosts = COALESCE($15::text[], test_hosts),
-              secret_names = COALESCE($16::text[], secret_names)
+              secret_names = COALESCE($16::text[], secret_names), role = COALESCE($17, role)
         WHERE id=$1`,
       [
         p.targetId,
@@ -433,6 +433,7 @@ export const phaseProjectors: Record<string, Projector> = {
         c.destructiveOk ?? null,
         c.testHosts ?? null,
         c.secretNames ?? null,
+        c.role ?? null,
       ],
     );
   },

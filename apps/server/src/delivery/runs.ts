@@ -6,6 +6,7 @@ import {
   DeployExecResultSchema,
   type Gate,
   type GateEvidence,
+  MOVE_OPEN_STATES,
   maskText,
   type Recipe,
   type RecipeEnv,
@@ -405,10 +406,25 @@ export async function requestDeployRun(ctx: Ctx, input: RequestDeployInput): Pro
   const vault = await projectVault(ctx.pool, project.id);
   if (!vault)
     return refuseAll(ctx, project, input, 'no_vault', NO_PROJECT_VAULT, { recipeId: recipeRow.id, hash });
+  // an environment that is being moved to a new server is not deployed meanwhile (the move copies a version, then switches)
+  const moving = await one(
+    ctx.pool,
+    `SELECT 1 AS x FROM deploy_target_moves WHERE project_id=$1 AND env_name=$2 AND state = ANY($3::text[])`,
+    [project.id, env.name, [...MOVE_OPEN_STATES]],
+  );
+  if (moving)
+    return refuseAll(
+      ctx,
+      project,
+      input,
+      'move_in_progress',
+      `${env.name} is being moved to a new server: deploys wait until the move is finished or given up`,
+      { recipeId: recipeRow.id, hash },
+    );
 
   const targetRows = await rows(
     ctx.pool,
-    `SELECT * FROM deploy_targets WHERE project_id=$1 AND removed_at IS NULL AND lower(name) = ANY($2::text[])`,
+    `SELECT * FROM deploy_targets WHERE project_id=$1 AND removed_at IS NULL AND role = 'active' AND lower(name) = ANY($2::text[])`,
     [project.id, env.targets.map((t) => t.toLowerCase())],
   );
   const wanted = input.targets?.map((t) => t.toLowerCase());

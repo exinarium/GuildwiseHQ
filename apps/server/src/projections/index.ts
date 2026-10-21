@@ -192,6 +192,7 @@ export const PROJECTION_TABLES = [
   'deploy_target_connections',
   'deploy_target_keys',
   'deploy_ops',
+  'deploy_target_moves',
   'repo_clones',
   'project_environments',
   'environment_changes',
