@@ -70,6 +70,14 @@ export function EnvReview({
                 : 'Each update backs up the database, rebuilds only the app from the approved version, checks it and goes back if it is not healthy.'}{' '}
             {whenText(answers.trigger)}.
           </p>
+          {!answers.healthUrl.trim() && (
+            <Callout tone="warning" title="Automatic rollback is off" data-testid="review-no-health">
+              No address is checked after an update, so Guildwise cannot tell whether the{' '}
+              {answers.hosting === 'ssh' || answers.role === 'live' ? 'live ' : ''}site still works and will
+              not go back to the previous version by itself. Go back to the details to add an address, or save
+              knowing this.
+            </Callout>
+          )}
           <FoundChanges items={preview.changes.filter((c) => c.env === answers.name)} />
           {(preview.unmodelled?.length ?? 0) > 0 && (
             <div className="rounded-control border border-line p-3 text-sm" data-testid="review-unmodelled">

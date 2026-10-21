@@ -158,6 +158,14 @@ export async function getSetupState(
       }
     | null
     | undefined;
+  // A draft is "unfinished" only while it differs from what was published: a save appends DraftSaved and then Published, so a
+  // draft that was not touched after its newest publish (pending or written) is just the saved setup. A failed publish, or an
+  // edit after it, keeps the draft. (Derived here, so replay needs nothing new.)
+  const draftIsPublished =
+    !!lp &&
+    (lp.status === 'written' || lp.status === 'pending') &&
+    !!draft?.updated_at &&
+    +new Date(lp.at) >= +new Date(draft.updated_at);
   const dryRunOk: string[] = [];
   let dryRunMissing: string[] = [];
   if (recipe?.observed_hash) {
@@ -178,14 +186,15 @@ export async function getSetupState(
   return {
     canEdit: p.my_role === 'owner',
     canApprove: org === 'owner',
-    draft: draft?.setup
-      ? {
-          setup: draft.setup,
-          customScripts: draft.custom_scripts ?? {},
-          proposalId: draft.proposal_id ?? null,
-          updatedAt: iso(draft.updated_at) as string,
-        }
-      : null,
+    draft:
+      draft?.setup && !draftIsPublished
+        ? {
+            setup: draft.setup,
+            customScripts: draft.custom_scripts ?? {},
+            proposalId: draft.proposal_id ?? null,
+            updatedAt: iso(draft.updated_at) as string,
+          }
+        : null,
     current: {
       setup: parsedSetup.success ? parsedSetup.data : null,
       handEdited: (recipe?.hand_edited ?? []) as string[],

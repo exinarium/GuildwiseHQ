@@ -12,6 +12,7 @@ import {
   type ProbeReport,
   type ProbeService,
   parseCommandLine,
+  parseImageRef,
   type SetupEnv,
   sshShipEnv,
   type UpdateMethod,
@@ -160,28 +161,99 @@ export interface Stack {
   running: boolean;
   /** Guildwise cannot update it yet (several compose files, --env-file, another project folder): why, in words. */
   unsupported?: string | undefined;
+  /** The folder the running containers were started in (their `working_dir` label). */
+  workingDir?: string | undefined;
+  /**
+   * Another checkout of the same compose project (same project name) than the one that is running: it is NOT what runs, so
+   * it is listed apart ("other copies of this file, not running") and never preselected. The path of the running one.
+   */
+  copyOf?: string | undefined;
+  /** Several copies with the same project name were found and none runs: the person must pick one explicitly. */
+  mustPick?: boolean | undefined;
 }
 
-/** The compose stacks a report found, running ones first. */
+/** The home folder the report's absolute paths live under (`/home/user`), to compare `~/x` with `/home/user/x`. */
+export function homeOfReport(report: ProbeReport | null | undefined): string | undefined {
+  const paths = [
+    ...(report?.composeFiles.map((c) => c.path) ?? []),
+    ...(report?.containers.map((c) => c.composeFile ?? '') ?? []),
+  ];
+  for (const p of paths) {
+    const m = /^(\/home\/[^/]+|\/Users\/[^/]+|\/root)\//.exec(p);
+    if (m) return m[1];
+  }
+  return undefined;
+}
+
+/** A path with a leading `~` written out as the home folder, so `~/a` and `/home/u/a` compare equal. */
+export function normPath(p: string, home: string | undefined): string {
+  return home && (p === '~' || p.startsWith('~/')) ? `${home}${p.slice(1)}` : p;
+}
+
+/**
+ * The compose stacks a report found, running ones first. A running stack takes its compose file and folder from the labels of its
+ * containers: several checkouts of one repo share the compose project name, so the project name alone says nothing about which
+ * file the running app was started from.
+ */
 export function stacksFromReport(report: ProbeReport | null | undefined): Stack[] {
   if (!report) return [];
-  const out = report.composeFiles
-    .filter((c: ProbeComposeFile) => !c.unreadable && c.services.length > 0)
-    .map((c) => {
-      const containers = report.containers.filter(
-        (k) => (c.project && k.project === c.project) || k.composeFile === c.path,
-      );
-      return {
-        path: c.path,
-        project: c.project,
-        services: c.services,
-        containers,
-        volumes: c.volumes,
-        running: containers.some((k) => k.state === 'running'),
-        unsupported: c.unsupported ?? containers.find((k) => k.unsupported)?.unsupported,
-      };
+  const home = homeOfReport(report);
+  const norm = (p: string) => normPath(p, home);
+  const files = report.composeFiles.filter((c: ProbeComposeFile) => !c.unreadable && c.services.length > 0);
+  // the file each container was started from (its first config file label); some have none
+  const labelled = report.containers.filter((k) => k.composeFile);
+  const projectHasLabel = (project: string | undefined) =>
+    !!project && labelled.some((k) => k.project === project);
+  const stacks: Stack[] = files.map((c) => {
+    const containers = report.containers.filter((k) =>
+      k.composeFile
+        ? norm(k.composeFile) === norm(c.path)
+        : !!c.project && k.project === c.project && !projectHasLabel(c.project),
+    );
+    const running = containers.some((k) => k.state === 'running');
+    const wd = containers.find((k) => k.workingDir)?.workingDir;
+    return {
+      path: running ? (containers.find((k) => k.composeFile)?.composeFile ?? c.path) : c.path,
+      project: c.project,
+      services: c.services,
+      containers,
+      volumes: c.volumes,
+      running,
+      workingDir: wd,
+      unsupported: c.unsupported ?? containers.find((k) => k.unsupported)?.unsupported,
+    };
+  });
+  // a running stack whose file the report did not list: borrow the parts of a sibling with the same project name
+  for (const k of labelled) {
+    const p = norm(k.composeFile as string);
+    if (k.state !== 'running' || stacks.some((s) => norm(s.path) === p)) continue;
+    const sibling = stacks.find((s) => s.project && s.project === k.project);
+    if (!sibling) continue;
+    const containers = labelled.filter((x) => norm(x.composeFile as string) === p);
+    stacks.push({
+      path: k.composeFile as string,
+      project: k.project,
+      services: sibling.services,
+      containers,
+      volumes: sibling.volumes,
+      running: true,
+      workingDir: containers.find((x) => x.workingDir)?.workingDir,
+      unsupported: containers.find((x) => x.unsupported)?.unsupported,
     });
-  return out.sort((a, b) => Number(b.running) - Number(a.running) || (a.path < b.path ? -1 : 1));
+  }
+  // other checkouts of a project that runs from somewhere else
+  for (const s of stacks) {
+    const runner = stacks.find((r) => r.running && r.project && r.project === s.project);
+    if (!s.running && runner) s.copyOf = runner.path;
+    else if (!s.running && s.project && stacks.filter((r) => r.project === s.project).length > 1)
+      s.mustPick = true;
+  }
+  return stacks.sort(
+    (a, b) =>
+      Number(b.running) - Number(a.running) ||
+      Number(!!a.copyOf) - Number(!!b.copyOf) ||
+      (a.path < b.path ? -1 : 1),
+  );
 }
 
 const isDb = (s: ProbeComposeService) => !!s.database && s.database !== 'redis';
@@ -201,11 +273,11 @@ export function guessDbService(stack: Stack): string {
   return stack.services.find((s) => s.database === 'postgres')?.name ?? '';
 }
 
-/** `guildwise-hq` from `guildwise-hq:4f2c1ab`; a compose-built service has `<project>-<service>`. */
+/** `guildwise-hq` from `guildwise-hq:4f2c1ab`, `dcode-server` from `192.168.1.11:5000/dcode-server:v1` (the registry is the registry field); a compose-built service has `<project>-<service>`. */
 export function guessImageName(stack: Stack, service: string, serverImage?: string): string {
-  const fromImage = (serverImage ?? stack.containers.find((c) => c.service === service)?.image ?? '').split(
-    ':',
-  )[0];
+  const fromImage = parseImageRef(
+    serverImage ?? stack.containers.find((c) => c.service === service)?.image ?? '',
+  ).name;
   const clean = (s: string) =>
     s
       .toLowerCase()
@@ -237,6 +309,64 @@ export function healthProbeUrls(report: ProbeReport | null | undefined): string[
   return [...new Set(sites)]
     .slice(0, 3)
     .flatMap((s) => ['/ready', '/api/health', '/health'].map((p) => `https://${s}${p}`));
+}
+
+/** The run stopped because the app was started from another compose file than the one in the setup (the script's own words). */
+export const ORIGIN_MISMATCH = /started from .+, not from /i;
+
+/**
+ * The compose file the app of `env` is running from, as the last probe saw it (the labels of its running container), when that
+ * is not the file the setup names. Null when it is the same file, or the probe does not know.
+ */
+export function runningFileFor(env: SetupEnv, report: ProbeReport | null | undefined): string | null {
+  if (!report || env.runtime === 'direct') return null;
+  const home = homeOfReport(report);
+  const wanted = normPath(env.app.composeFile, home);
+  const project =
+    env.app.composeProject ||
+    report.composeFiles.find((c) => normPath(c.path, home) === wanted)?.project ||
+    report.containers.find((c) => c.composeFile && normPath(c.composeFile, home) === wanted)?.project;
+  const c = report.containers.find(
+    (k) =>
+      k.state === 'running' &&
+      !!k.composeFile &&
+      k.service === env.app.service &&
+      (!project || k.project === project),
+  );
+  return c?.composeFile && normPath(c.composeFile, home) !== wanted ? c.composeFile : null;
+}
+
+/** The same failure in plain words (the script's sentence names paths that may be shortened). */
+export function originMismatchSentence(env: SetupEnv, runningFile: string | null): string {
+  return runningFile
+    ? `The update did not start: the app is running from ${runningFile}, but this environment is set up with ${env.app.composeFile}, another copy of the same app. Nothing was changed.`
+    : `The update did not start: the app is running from a different copy of the compose file than the one this environment is set up with (${env.app.composeFile}). Nothing was changed.`;
+}
+
+/** The usual health addresses of an app, best first. */
+export const HEALTH_PATHS = ['/ready', '/api/health', '/health', '/'] as const;
+
+/** The port the running app part publishes on the machine (`0.0.0.0:5500->500` is 5500), or null. */
+export function publishedPort(stack: Stack | undefined, service: string): number | null {
+  const c = stack?.containers.find((k) => k.service === service && k.state === 'running');
+  const p = c?.ports.find((x) => x.host && x.bind !== '127.0.0.1' && x.bind !== '::1');
+  return p?.host ?? null;
+}
+
+/** `http://192.168.1.13:5500` from the address of a server and the port its app part publishes; '' when either is unknown. */
+export function serverAppBase(address: string | undefined, port: number | null): string {
+  return address && port ? `http://${address}:${port}` : '';
+}
+
+/** The addresses to try for an app that answers on `base`: `base/ready`, `base/api/health`, `base/health`, `base`. */
+export function healthCandidates(base: string): string[] {
+  return base ? HEALTH_PATHS.map((p) => (p === '/' ? base : `${base}${p}`)) : [];
+}
+
+/** The first of `candidates` that answered with a 2xx in the report (a tested address), or ''. */
+export function firstAnswering(report: ProbeReport | null | undefined, candidates: string[]): string {
+  const ok = new Set(healthyUrls(report));
+  return candidates.find((u) => ok.has(u)) ?? '';
 }
 
 /** `GUILDWISE_IMAGE` and its current value from the server's settings file, for the folder of a stack. */

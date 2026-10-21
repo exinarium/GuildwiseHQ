@@ -13,6 +13,7 @@ export function DockerDetails({
   changes,
   onCheckUrl,
   checking,
+  healthOptions = [],
 }: {
   answers: Answers;
   set: (p: Partial<Answers>) => void;
@@ -21,6 +22,8 @@ export function DockerDetails({
   changes: ReturnType<typeof planChanges>;
   onCheckUrl: (url: string) => void;
   checking: boolean;
+  /** Addresses worth trying for a server (its address, the port the app publishes, the usual health paths). */
+  healthOptions?: string[];
 }) {
   const parts = stack?.services ?? [];
   const urls = (report?.urls ?? []).filter((u) => u.status !== null);
@@ -91,6 +94,8 @@ export function DockerDetails({
           status={status}
           onCheckUrl={onCheckUrl}
           checking={checking}
+          options={healthOptions}
+          live={answers.role === 'live' || server}
         />
         <TextInput
           label="Web address people use (optional)"
@@ -126,6 +131,8 @@ function HealthField({
   status,
   onCheckUrl,
   checking,
+  options = [],
+  live = false,
 }: {
   answers: Answers;
   set: (p: Partial<Answers>) => void;
@@ -133,7 +140,10 @@ function HealthField({
   status: number | null | undefined;
   onCheckUrl: (url: string) => void;
   checking: boolean;
+  options?: string[];
+  live?: boolean;
 }) {
+  const shown = new Set(urls.slice(0, 4).map((u) => u.url));
   return (
     <div>
       <TextInput
@@ -159,12 +169,32 @@ function HealthField({
             {u.url} ({u.status})
           </button>
         ))}
+        {options
+          .filter((u) => !shown.has(u))
+          .map((u) => (
+            <button
+              key={u}
+              type="button"
+              className="min-h-8 text-xs underline"
+              onClick={() => set({ healthUrl: u })}
+              data-testid="health-option"
+            >
+              {u}
+            </button>
+          ))}
         {/^https?:\/\//.test(answers.healthUrl) && (
           <Button size="sm" variant="ghost" loading={checking} onClick={() => onCheckUrl(answers.healthUrl)}>
             Check this address
           </Button>
         )}
       </div>
+      {!answers.healthUrl.trim() && (
+        <p className="mt-2 text-sm font-medium text-warning" role="alert" data-testid="health-none-warning">
+          {live
+            ? 'No address to check: after an update Guildwise cannot tell whether the site works, so automatic rollback is OFF. A broken version stays live until you put the old one back yourself.'
+            : 'No address to check: automatic rollback is off.'}
+        </p>
+      )}
     </div>
   );
 }

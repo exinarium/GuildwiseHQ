@@ -271,3 +271,52 @@ describe('docker compose on the server (version 1 or 2)', () => {
     expect(items.some((i) => i.ref === 'compose_tool' && i.text.includes('older docker-compose'))).toBe(true);
   });
 });
+
+describe('several checkouts with the same compose project', () => {
+  const copy = (dir: string) => ({
+    path: `/home/user/projects/${dir}/deploy/local/docker-compose.yml`,
+    project: 'aom-uat',
+    services: [{ name: 'app', build: '.' }],
+    volumes: [],
+  });
+  const withRunning = (composeFile: string) =>
+    report({
+      containers: [
+        {
+          name: 'aom-uat-app-1',
+          project: 'aom-uat',
+          service: 'app',
+          image: 'x',
+          state: 'running',
+          ports: [],
+          composeFile,
+        },
+      ],
+      composeFiles: [copy('p5-run-trial'), copy('mm-fixes-wt')],
+    });
+  const forFile = (file: string) => {
+    const s = setup();
+    const env = s.environments.find((e) => e.name === 'uat');
+    if (!env) throw new Error('no uat');
+    env.app.composeFile = file;
+    env.app.service = 'app';
+    env.app.composeProject = 'aom-uat';
+    return s;
+  };
+
+  it('blocks a setup that points at another copy than the one that runs, naming the running file', () => {
+    const running = copy('p5-run-trial').path;
+    const items = planChanges(forFile(copy('mm-fixes-wt').path), { uat: withRunning(running) }, 'uat');
+    const q = texts(items, 'question', 'uat').join('\n');
+    expect(q).toContain(`running from ${running}`);
+    expect(q).toContain(copy('mm-fixes-wt').path);
+  });
+
+  it('is quiet when the setup points at the running copy (also written with ~)', () => {
+    const running = copy('p5-run-trial').path;
+    for (const file of [running, running.replace('/home/user', '~')]) {
+      const items = planChanges(forFile(file), { uat: withRunning(running) }, 'uat');
+      expect(texts(items, 'question', 'uat').join('\n')).not.toContain('running from');
+    }
+  });
+});

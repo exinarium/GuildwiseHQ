@@ -1,4 +1,4 @@
-import type { SetupEnv, SetupStateDto } from '@aom/shared';
+import type { DeliverySetup, SetupEnv, SetupStateDto } from '@aom/shared';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   ArrowRightLeft,
@@ -17,7 +17,7 @@ import { useEffect, useState } from 'react';
 import { useApproveRecipe, useDeploy } from '../../api/queries/delivery.ts';
 import { useCheckTarget } from '../../api/queries/deploy-connect.ts';
 import { openMove, useMoves } from '../../api/queries/deploy-move.ts';
-import { useProbe, useSetupDryRun } from '../../api/queries/deploy-setup.ts';
+import { useProbe, useSaveSetupDraft, useSetupDryRun } from '../../api/queries/deploy-setup.ts';
 import { type EnvStatusDto, statusKey } from '../../api/queries/environments.ts';
 import { ConnectServer } from '../delivery/connect/ConnectServer.tsx';
 import { needsReconnect, ReachabilityChip } from '../delivery/connect/ReachabilityChip.tsx';
@@ -25,7 +25,14 @@ import { MoveWizard } from '../delivery/move/MoveWizard.tsx';
 import { FixWithDevOps } from '../devops/FixWithDevOps.tsx';
 import { Badge, Button, Callout, Dialog, ErrorBox, Menu, MenuItem, MenuSeparator, useToast } from '../ui.tsx';
 import { AddServerDialog } from './AddPlaceDialogs.tsx';
-import { directRestartWords, nativeOf } from './answers.ts';
+import {
+  directRestartWords,
+  nativeOf,
+  ORIGIN_MISMATCH,
+  originMismatchSentence,
+  runningFileFor,
+  withEnv,
+} from './answers.ts';
 import { EnvironmentDialog } from './EnvironmentDialog.tsx';
 import {
   agoText,
@@ -74,7 +81,18 @@ export function EnvironmentCard({
   onAnswer?: (() => void) | undefined;
 }) {
   const place = places.find((p) => p.key.toLowerCase() === env.target.toLowerCase());
-  const info = cardInfo({ s, env, draft, place, status });
+  const baseInfo = cardInfo({ s, env, draft, place, status });
+  // the update stopped because the app runs from another copy of the compose file: say so in plain words and offer the fix
+  const failureText = `${status?.lastRun?.summary ?? ''} ${baseInfo.sentence}`;
+  const localReport =
+    env.hosting === 'this_computer'
+      ? (s.probes.find((p) => p.scope === 'local' && p.workstationId === place?.workstationId && p.report)
+          ?.report ?? null)
+      : null;
+  const mismatch = baseInfo.state === 'failed' && ORIGIN_MISMATCH.test(failureText);
+  const runningFile = mismatch ? runningFileFor(env, localReport) : null;
+  const info = mismatch ? { ...baseInfo, sentence: originMismatchSentence(env, runningFile) } : baseInfo;
+  const saveDraft = useSaveSetupDraft(projectId);
   const toast = useToast();
   const qc = useQueryClient();
   const dry = useSetupDryRun(projectId);
@@ -243,6 +261,29 @@ export function EnvironmentCard({
           </p>
         )}
 
+        {mismatch && runningFile && canEdit && (
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <Button
+              variant="primary"
+              loading={saveDraft.isPending}
+              onClick={() => {
+                const base = (s.draft?.setup ?? s.current.setup) as DeliverySetup | null;
+                saveDraft.mutate(
+                  { setup: withEnv(base, { ...env, app: { ...env.app, composeFile: runningFile } }) },
+                  {
+                    onSuccess: () =>
+                      toast.success(
+                        'Now pointing at the file the app runs from. Review it, save it and try it again.',
+                      ),
+                  },
+                );
+              }}
+              data-testid={`env-use-running-file-${env.name}`}
+            >
+              Use the file the app runs from
+            </Button>
+          </div>
+        )}
         {info.state === 'failed' && place?.workstationId && (
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
             <FixWithDevOps

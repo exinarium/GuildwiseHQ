@@ -3,6 +3,7 @@ import {
   type DeliverySetup,
   formatCommandLine,
   type ProbeReport,
+  parseImageRef,
   planChanges,
   type SetupEnv,
   type SetupStateDto,
@@ -34,17 +35,21 @@ import {
   answersFromEnv,
   buildEnv,
   emptyAnswers,
+  firstAnswering,
   guessAppService,
   guessAppUrl,
   guessDbService,
   guessImageName,
+  healthCandidates,
   healthProbeUrls,
   healthyUrls,
   imageVarOf,
   missingShared,
   type NativeAnswers,
   nativeFromApp,
+  publishedPort,
   type Stack,
+  serverAppBase,
   stacksFromReport,
   whenText,
   withEnv,
@@ -264,22 +269,44 @@ export function EnvironmentDialog({
   const defaultMethod = (st: Stack, app: string): Pick<Answers, 'method' | 'registry'> => {
     const svc = st.services.find((x) => x.name === app);
     const img = svc?.image ?? '';
-    const host = img.split('/')[0] ?? '';
-    if (img && !img.includes('$') && img.includes('/') && (host.includes('.') || host.includes(':')))
-      return { method: 'registry', registry: host };
+    const host = parseImageRef(img).registry;
+    if (img && !img.includes('$') && host) return { method: 'registry', registry: host };
     if (svc?.build) return { method: 'build_on_server', registry: '' };
     return { method: 'ship', registry: '' };
   };
 
+  // the address of a server (not its ssh alias): from the list of ssh hosts, else the alias when it is itself an address
+  const serverAddress = useMemo(() => {
+    const alias = place?.host ?? '';
+    const fromHosts = s.probes
+      .find((p) => p.scope === 'ssh_hosts' && p.report)
+      ?.report?.sshHosts?.find((h) => h.alias === alias)?.hostname;
+    return fromHosts ?? (/^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$/.test(alias) ? alias : '');
+  }, [s.probes, place?.host]);
+  const [healthOptions, setHealthOptions] = useState<string[]>([]);
+  const autoHealth = useRef(false);
+
   const pickStack = (st: Stack) => {
     const app = guessAppService(st);
     const iv = imageVarOf(report, st);
-    const image = server && iv.value ? iv.value.split(':')[0] : '';
+    const image = server && iv.value ? parseImageRef(iv.value).name : '';
     const healthy = healthyUrls(report);
     setStack(st);
     setChoice({ kind: 'stack', path: st.path });
     const dir = st.path.slice(0, st.path.lastIndexOf('/'));
     const appUrl = server ? '' : guessAppUrl(st, app);
+    // a server: the published port of the app part on the server's address, with the usual health paths. They are asked about
+    // from this computer; only an address that answered becomes the default (a wrong guess would roll back a good update).
+    const options = server ? healthCandidates(serverAppBase(serverAddress, publishedPort(st, app))) : [];
+    setHealthOptions(options);
+    autoHealth.current = options.length > 0;
+    if (options.length && place?.host)
+      flow.ask({
+        scope: 'ssh_target',
+        workstationId: wsId,
+        host: place.host,
+        hints: { urls: options, ...(dir ? { dirs: [dir] } : {}) },
+      });
     set({
       runtime: 'docker',
       stackPath: st.path,
@@ -290,10 +317,29 @@ export function EnvironmentDialog({
       appUrl,
       imageVar: iv.name,
       backupDir: dir ? `${dir}/backups` : '',
-      healthUrl: healthy[0] ?? (server ? '' : appUrl ? `${appUrl}/api/health` : ''),
+      healthUrl:
+        (server ? firstAnswering(report, options) : '') ||
+        (healthy[0] ?? (server ? '' : appUrl ? `${appUrl}/api/health` : '')),
       ...(server ? defaultMethod(st, app) : {}),
     });
   };
+  // the answers of the asked addresses arrive a moment later: the first one that answered becomes the check address
+  useEffect(() => {
+    if (!autoHealth.current || answers.healthUrl) return;
+    const found = firstAnswering(report, healthOptions);
+    if (found) {
+      autoHealth.current = false;
+      set({ healthUrl: found });
+    }
+  }, [report, healthOptions, answers.healthUrl]);
+  // the one app that is running here is chosen for the person; copies that are not running never are, and several
+  // candidates with none running are left for the person to pick
+  useEffect(() => {
+    if (editing || choice) return;
+    const running = stacks.filter((x) => x.running && !x.copyOf && !x.unsupported);
+    if (running.length === 1 && running[0] && !stacks.some((x) => x.running && x.unsupported))
+      pickStack(running[0]);
+  }, [stacks, choice, editing]);
   const onSelect = (c: StartChoice) => {
     setChoice(c);
     if (c.kind === 'stack') {
@@ -746,6 +792,7 @@ export function EnvironmentDialog({
               set={set}
               stack={chosenStack}
               report={report}
+              healthOptions={healthOptions}
               changes={changes}
               onCheckUrl={(url) =>
                 flow.ask({
