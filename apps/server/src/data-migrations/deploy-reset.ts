@@ -1,6 +1,6 @@
 import { streamId } from '@aom/shared';
 import { projectScope, SYSTEM_ACTOR } from '../commands/common.ts';
-import { rows } from '../db/sql.ts';
+import { type Queryable, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import type { DataMigrationEnv } from './orgs.ts';
@@ -33,23 +33,43 @@ export interface ResetProject {
   name: string;
   targets: ResetTarget[];
   /** The project has a delivery recipe in force (observed or approved) that is cleared. */
-  recipe: { id: string; hash: string | null } | null;
+  recipe: { id: string; hash: string | null; hashes: string[] } | null;
   draft: boolean;
   deliveryMode: string;
   openRuns: Array<{ id: string; env: string; status: string }>;
   runningRuns: number;
   followups: Array<{ id: string; phaseId: string; status: string }>;
   notices: string[];
+  /** Setup proposals still open (put away by the reset) and stored checks of the project's machines (forgotten). */
+  proposals: string[];
+  probes: number;
 }
 
 export interface ResetPlan {
   projects: ResetProject[];
 }
 
-export async function planDeployReset(
-  pool: DataMigrationEnv['pool'],
-  opts: { orgId?: string } = {},
-): Promise<ResetPlan> {
+const openRunsOf = (db: Queryable, projectId: string) =>
+  rows(
+    db,
+    `SELECT id, env, status FROM deploy_runs WHERE project_id=$1 AND NOT trial AND status IN ('requested','waiting_release','queued','running')`,
+    [projectId],
+  );
+
+const followupsOf = (db: Queryable, projectId: string) =>
+  rows(
+    db,
+    `SELECT f.id, f.phase_id, f.status FROM phase_followups f JOIN phases ph ON ph.id = f.phase_id
+      WHERE ph.project_id=$1 AND f.kind='deploy' AND f.status IN ('pending','queued','briefed')
+        AND (f.target_id IN (SELECT id FROM deploy_targets WHERE project_id=$1 AND removed_at IS NULL) OR f.environment IS NOT NULL)`,
+    [projectId],
+  );
+
+/**
+ * What a reset would do. Read-only: the dry run of the operator script runs it in a read-only transaction (and without running
+ * the migrations), so it can never write.
+ */
+export async function planDeployReset(pool: Queryable, opts: { orgId?: string } = {}): Promise<ResetPlan> {
   const projects = await rows(
     pool,
     `SELECT p.id, p.key, p.name, p.org_id, p.delivery_mode, o.name AS org_name FROM projects p
@@ -87,25 +107,30 @@ export async function planDeployReset(
         [p.id],
       )
     )[0];
-    const runs = await rows(
+    const runs = await openRunsOf(pool, p.id);
+    const followups = await followupsOf(pool, p.id);
+    const proposals = await rows(
       pool,
-      `SELECT id, env, status FROM deploy_runs WHERE project_id=$1 AND NOT trial AND status IN ('requested','waiting_release','queued','running')`,
+      `SELECT id FROM setup_proposals WHERE project_id=$1 AND area='deploy' AND status='open'`,
       [p.id],
     );
-    const followups = await rows(
-      pool,
-      `SELECT f.id, f.phase_id, f.status FROM phase_followups f JOIN phases ph ON ph.id = f.phase_id
-        WHERE ph.project_id=$1 AND f.kind='deploy' AND f.status IN ('pending','queued','briefed')
-          AND (f.target_id IN (SELECT id FROM deploy_targets WHERE project_id=$1 AND removed_at IS NULL) OR f.environment IS NOT NULL)`,
-      [p.id],
-    );
+    const probes =
+      (await rows(pool, `SELECT count(*)::int AS n FROM deploy_probes WHERE project_id=$1`, [p.id]))[0]?.n ??
+      0;
     const notices = await rows(
       pool,
       `SELECT id FROM desk_items WHERE project_id=$1 AND status='open'
           AND (subject_key LIKE 'deploy_release:%' OR subject_key LIKE 'recipe_approval:%')`,
       [p.id],
     ).catch(() => []);
-    const hasAnything = targets.length > 0 || recipe || draft || runs.length > 0 || followups.length > 0;
+    const hasAnything =
+      targets.length > 0 ||
+      recipe ||
+      draft ||
+      runs.length > 0 ||
+      followups.length > 0 ||
+      proposals.length > 0 ||
+      probes > 0;
     if (!hasAnything && p.delivery_mode !== 'recipe') continue;
     out.push({
       orgId: p.org_id,
@@ -123,7 +148,16 @@ export async function planDeployReset(
           .filter((k) => k.target_id === t.id)
           .map((k) => ({ alias: k.alias, workstation: k.workstation, fingerprint: k.fingerprint })),
       })),
-      recipe: recipe ? { id: recipe.id, hash: recipe.approved_hash ?? recipe.observed_hash ?? null } : null,
+      recipe: recipe
+        ? {
+            id: recipe.id,
+            hash: recipe.approved_hash ?? recipe.observed_hash ?? null,
+            // the observed and the approved content can differ: both are ignored when the vault is read again
+            hashes: [
+              ...new Set([recipe.approved_hash, recipe.observed_hash].filter((h): h is string => !!h)),
+            ],
+          }
+        : null,
       draft: !!draft,
       deliveryMode: p.delivery_mode,
       openRuns: runs
@@ -132,9 +166,26 @@ export async function planDeployReset(
       runningRuns: runs.filter((r) => r.status === 'running').length,
       followups: followups.map((f) => ({ id: f.id, phaseId: f.phase_id, status: f.status })),
       notices: notices.map((n) => n.id),
+      proposals: proposals.map((x) => x.id),
+      probes,
     });
   }
   return { projects: out };
+}
+
+/** The plan, made inside a read-only transaction: the dry run of the operator script cannot write anything. */
+export async function planDeployResetReadOnly(
+  pool: DataMigrationEnv['pool'],
+  opts: { orgId?: string } = {},
+): Promise<ResetPlan> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN READ ONLY');
+    return await planDeployReset(client, opts);
+  } finally {
+    await client.query('ROLLBACK').catch(() => undefined);
+    client.release();
+  }
 }
 
 export function formatResetPlan(plan: ResetPlan): string {
@@ -155,7 +206,11 @@ export function formatResetPlan(plan: ResetPlan): string {
         p.openRuns.length
           ? `, ${p.openRuns.length} waiting/queued release${p.openRuns.length === 1 ? '' : 's'} cancelled`
           : ''
-      }${p.followups.length ? `, ${p.followups.length} phase follow-up${p.followups.length === 1 ? '' : 's'} skipped` : ''}`,
+      }${p.followups.length ? `, ${p.followups.length} phase follow-up${p.followups.length === 1 ? '' : 's'} skipped` : ''}${
+        p.proposals.length
+          ? `, ${p.proposals.length} open suggestion${p.proposals.length === 1 ? '' : 's'} put away`
+          : ''
+      }${p.probes ? ', stored checks of the machines forgotten' : ''}`,
     );
     if (p.runningRuns) lines.push(`    ${p.runningRuns} release is running right now and is NOT stopped`);
     for (const t of p.targets) {
@@ -184,7 +239,15 @@ export async function applyDeployReset(env: DataMigrationEnv, plan: ResetPlan): 
     const by = owner?.owner_user_id as string | undefined;
     await withAppendTx(env.pool, async (tx) => {
       const events: AppendInput[] = [];
-      for (const r of p.openRuns)
+      // what waits and what is running is read again here: a release that started since the plan was made is not cancelled
+      const openRuns = (await openRunsOf(tx, p.projectId)).filter((r) => r.status !== 'running');
+      const followups = await followupsOf(tx, p.projectId);
+      const proposals = await rows(
+        tx,
+        `SELECT id FROM setup_proposals WHERE project_id=$1 AND area='deploy' AND status='open'`,
+        [p.projectId],
+      );
+      for (const r of openRuns)
         events.push({
           streamId: streamId.project(p.projectId),
           event: {
@@ -194,19 +257,39 @@ export async function applyDeployReset(env: DataMigrationEnv, plan: ResetPlan): 
           actor: SYSTEM_ACTOR,
           scope,
         });
-      for (const f of p.followups)
+      for (const f of followups)
         events.push({
-          streamId: streamId.phase(f.phaseId),
+          streamId: streamId.phase(f.phase_id),
           event: {
             type: 'PhaseFollowupFinished',
             payload: {
-              phaseId: f.phaseId,
+              phaseId: f.phase_id,
               followupId: f.id,
               status: 'skipped',
               summary:
                 'The deploy places were cleared for the new Environments page. Choose the environment again.',
               evidence: {},
             },
+          },
+          actor: SYSTEM_ACTOR,
+          scope,
+        });
+      for (const pr of proposals)
+        events.push({
+          streamId: streamId.project(p.projectId),
+          event: {
+            type: 'SetupProposalResolved',
+            payload: { proposalId: pr.id, outcome: 'dismissed', by: null },
+          },
+          actor: SYSTEM_ACTOR,
+          scope,
+        });
+      if (p.probes)
+        events.push({
+          streamId: streamId.project(p.projectId),
+          event: {
+            type: 'DeployProbesCleared',
+            payload: { projectId: p.projectId, reason: DEPLOY_RESET_REASON },
           },
           actor: SYSTEM_ACTOR,
           scope,
@@ -231,6 +314,7 @@ export async function applyDeployReset(env: DataMigrationEnv, plan: ResetPlan): 
               orgId: p.orgId,
               projectId: p.projectId,
               hash: p.recipe.hash,
+              hashes: p.recipe.hashes,
               reason: DEPLOY_RESET_REASON,
             },
           },
@@ -266,7 +350,7 @@ export async function applyDeployReset(env: DataMigrationEnv, plan: ResetPlan): 
         });
       if (events.length) await env.store.append(events, { tx });
       // queued commands that were never delivered are dropped from the queue; nothing is sent to any runner
-      for (const r of p.openRuns)
+      for (const r of openRuns)
         await tx.query(
           `UPDATE runner_commands SET status='failed', last_error=$2, payload='{}'::jsonb
             WHERE type='deploy.exec' AND status='pending' AND payload->>'runId'=$1`,

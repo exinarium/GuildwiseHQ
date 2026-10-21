@@ -447,6 +447,16 @@ export const phaseProjectors: Record<string, Projector> = {
     ]);
   },
 
+  PhaseFollowupRetargeted: async (tx, e) => {
+    const p = ev<'PhaseFollowupRetargeted'>(e).payload;
+    await exec(
+      tx,
+      `UPDATE phase_followups SET target_id=$2, updated_at=$3
+        WHERE target_id=$1 AND status IN ('pending','queued','briefed')`,
+      [p.fromTargetId, p.toTargetId, e.createdAt],
+    );
+  },
+
   BaTaskQueued: async (tx, e) => {
     const p = ev<'BaTaskQueued'>(e).payload;
     const org = e.scope.orgId;

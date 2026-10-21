@@ -10,7 +10,12 @@ import {
   sshShipEnv,
 } from '@aom/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { applyDeployReset, formatResetPlan, planDeployReset } from '../src/data-migrations/deploy-reset.ts';
+import {
+  applyDeployReset,
+  formatResetPlan,
+  planDeployReset,
+  planDeployResetReadOnly,
+} from '../src/data-migrations/deploy-reset.ts';
 import { observeRecipe } from '../src/delivery/recipes.ts';
 import { rebuildProjections } from '../src/projections/rebuild.ts';
 import { keepOnline } from './helpers/ceo.ts';
@@ -73,7 +78,7 @@ const setup = () => ({
   ],
 });
 
-function inspected(s: unknown): RecipeInspectResult {
+function inspected(s: unknown): Extract<RecipeInspectResult, { ok: true }> {
   const c = compileSetup(s);
   if (!c.ok) throw new Error(c.issues.join('; '));
   const files = c.files.map((f) => ({
@@ -93,7 +98,7 @@ function inspected(s: unknown): RecipeInspectResult {
     recipe: rec.recipe,
     lint: [],
     setup: c.setup,
-  } as RecipeInspectResult;
+  } as Extract<RecipeInspectResult, { ok: true }>;
 }
 
 describe('deploy reset', () => {
@@ -217,5 +222,127 @@ describe('deploy reset', () => {
     expect(st.current.setup).toBeNull();
     expect(st.draft).toBeNull();
     expect((await call('GET', `${base()}/places`)).places).toEqual([]);
+  });
+
+  const resetEnv = () => ({
+    pool: d.w.t.app.ctx.pool,
+    store: d.w.t.app.ctx.store,
+    clock: d.w.t.clock as never,
+    log: () => undefined,
+  });
+
+  /** A project with a setup that was observed (hash O) and approved at a different content (hash A). */
+  async function observedAndApproved(approved: string, label: string) {
+    const content = setup();
+    (content.environments[1] as { label: string }).label = label; // other content than any earlier test: its hash is new
+    const ins = inspected(content);
+    await call('PUT', `${base()}/delivery/setup`, { setup: content });
+    await observeRecipe(d.w.t.app.ctx, d.w.projectId, ins, d.w.workstationId);
+    await q(`UPDATE delivery_recipes SET approved_hash=$2, status='changed_unapproved' WHERE project_id=$1`, [
+      d.w.projectId,
+      approved,
+    ]);
+    return ins;
+  }
+  const recipeRow = async () =>
+    (
+      await q('SELECT present, status, reset_hashes FROM delivery_recipes WHERE project_id=$1', [
+        d.w.projectId,
+      ])
+    )[0];
+
+  it('M5: when the observed and the approved content differ, a vault sync of either does not bring the setup back', async () => {
+    const approved = 'a'.repeat(64);
+    const ins = await observedAndApproved(approved, 'Live site M5a');
+    const plan = await planDeployReset(d.w.t.app.ctx.pool);
+    const mine = plan.projects.find((p) => p.projectId === d.w.projectId);
+    expect(mine?.recipe?.hashes.sort()).toEqual([approved, ins.hash].sort());
+    await applyDeployReset(resetEnv(), plan);
+    expect((await recipeRow()).reset_hashes.sort()).toEqual([approved, ins.hash].sort());
+    // the observed content again, and the approved content as a new observation: both stay cleared
+    await observeRecipe(d.w.t.app.ctx, d.w.projectId, ins, d.w.workstationId);
+    expect((await recipeRow()).present).toBe(false);
+    await observeRecipe(d.w.t.app.ctx, d.w.projectId, { ...ins, hash: approved } as never, d.w.workstationId);
+    expect((await recipeRow()).present).toBe(false);
+    // a different save starts fresh
+    await observeRecipe(
+      d.w.t.app.ctx,
+      d.w.projectId,
+      { ...ins, hash: 'b'.repeat(64) } as never,
+      d.w.workstationId,
+    );
+    expect((await recipeRow()).present).toBe(true);
+    // a rebuild keeps it all
+    const before = await recipeRow();
+    await rebuildProjections(d.w.t.app.ctx.pool, d.w.t.app.ctx.store);
+    expect(await recipeRow()).toEqual(before);
+  });
+
+  it('M5: stopping guided deploys forgets both the observed and the approved content too', async () => {
+    const approved = 'c'.repeat(64);
+    const ins = await observedAndApproved(approved, 'Live site M5b');
+    await call('POST', `${base()}/delivery/setup/stop-guided`, { confirm: true });
+    expect((await recipeRow()).reset_hashes.sort()).toEqual([approved, ins.hash].sort());
+    await observeRecipe(d.w.t.app.ctx, d.w.projectId, { ...ins, hash: approved } as never, d.w.workstationId);
+    expect((await recipeRow()).present).toBe(false);
+    await observeRecipe(d.w.t.app.ctx, d.w.projectId, ins, d.w.workstationId);
+    expect((await recipeRow()).present).toBe(false);
+  });
+
+  it('m10: the read-only plan is the same plan, a run that started since is not cancelled, and probes and open suggestions are cleared by events', async () => {
+    await observedAndApproved('d'.repeat(64), 'Live site m10');
+    const waiting = randomUUID();
+    await q(
+      `INSERT INTO deploy_runs (id, org_id, project_id, recipe_id, env, target_name, hash, trigger, requested_by, status, released_by_policy, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,'live','p5-prod',$5,'request','{"kind":"owner","id":null}','waiting_release','owner',now(),now())`,
+      [waiting, d.orgId, d.w.projectId, randomUUID(), 'c'.repeat(64)],
+    );
+    const proposalId = randomUUID();
+    await q(
+      `INSERT INTO setup_proposals (id, org_id, project_id, area, request_id, workstation_id, proposal, status, submitted_at)
+       VALUES ($1,$2,$3,'deploy',$4,$5,'{}'::jsonb,'open',now())`,
+      [proposalId, d.orgId, d.w.projectId, randomUUID(), d.w.workstationId],
+    );
+    const runProposal = randomUUID();
+    await q(
+      `INSERT INTO setup_proposals (id, org_id, project_id, area, request_id, workstation_id, proposal, status, submitted_at)
+       VALUES ($1,$2,$3,'run',$4,$5,'{}'::jsonb,'open',now())`,
+      [runProposal, d.orgId, d.w.projectId, randomUUID(), d.w.workstationId],
+    );
+    await q(
+      `INSERT INTO deploy_probes (id, org_id, project_id, workstation_id, scope, at) VALUES ($1,$2,$3,$4,'local',now())`,
+      [randomUUID(), d.orgId, d.w.projectId, d.w.workstationId],
+    );
+    const plan = await planDeployResetReadOnly(d.w.t.app.ctx.pool);
+    const mine = plan.projects.find((p) => p.projectId === d.w.projectId);
+    expect(mine?.proposals).toEqual([proposalId]);
+    expect(mine?.probes).toBe(1);
+    expect(formatResetPlan(plan)).toContain('open suggestion');
+    expect(plan).toEqual(await planDeployReset(d.w.t.app.ctx.pool));
+    // the release starts running after the plan was made: it is not cancelled
+    await q(`UPDATE deploy_runs SET status='running' WHERE id=$1`, [waiting]);
+    await applyDeployReset(resetEnv(), plan);
+    expect((await q('SELECT status FROM deploy_runs WHERE id=$1', [waiting]))[0].status).toBe('running');
+    expect((await q('SELECT status FROM setup_proposals WHERE id=$1', [proposalId]))[0].status).toBe(
+      'dismissed',
+    );
+    expect((await q('SELECT status FROM setup_proposals WHERE id=$1', [runProposal]))[0].status).toBe('open');
+    expect(
+      (await q('SELECT count(*)::int AS n FROM deploy_probes WHERE project_id=$1', [d.w.projectId]))[0].n,
+    ).toBe(0);
+    await q(`UPDATE deploy_runs SET status='failed' WHERE id=$1`, [waiting]);
+  });
+
+  it('m10: the plan runs in a read-only transaction (a write inside it is refused)', async () => {
+    const client = await d.w.t.app.ctx.pool.connect();
+    try {
+      await client.query('BEGIN READ ONLY');
+      await expect(
+        client.query(`UPDATE projects SET name=name WHERE id=$1`, [d.w.projectId]),
+      ).rejects.toThrow(/read-only/);
+    } finally {
+      await client.query('ROLLBACK').catch(() => undefined);
+      client.release();
+    }
   });
 });

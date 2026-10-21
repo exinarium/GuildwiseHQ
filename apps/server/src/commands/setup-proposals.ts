@@ -3,11 +3,13 @@ import {
   compileSetup,
   DEPLOY_SETUP_CAPABILITY,
   type DevopsScan,
+  type NeedsConfirmation,
   type ProposalDto,
   RunPlanSchema,
   resolvePointer,
   SCAN_REQUEST_KIND,
   type ScanStateDto,
+  SENSITIVE_ANSWER_PATH,
   SETUP_SCAN_CAPABILITY,
   type SetupArea,
   type SetupProposal,
@@ -507,7 +509,9 @@ export async function answerProposal(
   user: AuthSession['user'],
   proposalId: string,
   answers: Array<{ path: string; value: string }>,
-): Promise<ProposalDto> {
+  confirmed: string[] = [],
+): Promise<ProposalDto & { needsConfirmation: NeedsConfirmation[] }> {
+  const needsConfirmation: NeedsConfirmation[] = [];
   await withAppendTx(ctx.pool, async (tx) => {
     const sp = await one(tx, 'SELECT * FROM setup_proposals WHERE id=$1 FOR UPDATE', [proposalId]);
     if (!sp) throw notFound('proposal not found');
@@ -535,6 +539,24 @@ export async function answerProposal(
       if (value !== '') {
         const c = coerceAnswer(resolvePointer(root, a.path), value);
         if (!c.ok) throw fail(c.why);
+        // turning on sudo or the move of a folder is not decided by one click on a form: it waits for its own confirmation
+        const sensitive = SENSITIVE_ANSWER_PATH.exec(a.path)?.[1];
+        if (
+          sensitive &&
+          c.value === true &&
+          resolvePointer(root, a.path) !== true &&
+          !confirmed.includes(a.path)
+        ) {
+          needsConfirmation.push({
+            path: a.path,
+            kind: sensitive === 'sudo' ? 'sudo' : 'adopt_folder',
+            text:
+              sensitive === 'sudo'
+                ? 'Guildwise will restart the app with administrator rights (sudo). It never types a password: sudo must already allow this without one. Confirm that you want this.'
+                : 'The first update will move the app folder to a new place and put a link with the same name where it was. Nothing is deleted. Confirm that you want this.',
+          });
+          continue;
+        }
         const next = setPointer(root, a.path, c.value);
         proposal = { ...proposal, [proposal.area === 'run' ? 'run' : 'deploy']: next };
       }
@@ -543,6 +565,8 @@ export async function answerProposal(
         questions: proposal.questions.map((x, i) => (i === qi ? { ...x, answer: text || value } : x)),
       };
     }
+    // nothing was stored (every answer waits for its confirmation): the proposal stays as it was
+    if (needsConfirmation.length === answers.length) return;
     const checked = SetupProposalSchema.safeParse(proposal);
     if (!checked.success)
       throw unprocessable('bad_answer', `that answer does not fit: ${issuesText(checked.error)}`);
@@ -579,5 +603,5 @@ export async function answerProposal(
     `SELECT sp.*, w.name AS workstation_name FROM setup_proposals sp LEFT JOIN workstations w ON w.id = sp.workstation_id WHERE sp.id=$1`,
     [proposalId],
   );
-  return toDto(row as Row);
+  return { ...toDto(row as Row), needsConfirmation };
 }

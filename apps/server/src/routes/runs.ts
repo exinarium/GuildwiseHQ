@@ -226,7 +226,7 @@ export function runRoutes(ctx: Ctx) {
       { schema: { params: IdParamsSchema, body: AnswerProposalRequestSchema } },
       async (req) => {
         const s = await requireUser(ctx, req);
-        return answerProposal(ctx, s.user, req.params.id, req.body.answers);
+        return answerProposal(ctx, s.user, req.params.id, req.body.answers, req.body.confirmed);
       },
     );
 

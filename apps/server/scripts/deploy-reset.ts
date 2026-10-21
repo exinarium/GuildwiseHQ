@@ -1,7 +1,11 @@
 import { parseArgs } from 'node:util';
 import { createClock } from '../src/clock.ts';
 import { loadConfig } from '../src/config.ts';
-import { applyDeployReset, formatResetPlan, planDeployReset } from '../src/data-migrations/deploy-reset.ts';
+import {
+  applyDeployReset,
+  formatResetPlan,
+  planDeployResetReadOnly,
+} from '../src/data-migrations/deploy-reset.ts';
 import { migrate } from '../src/db/migrate.ts';
 import { createPool } from '../src/db/pool.ts';
 import { PgEventStore } from '../src/eventstore/pg-event-store.ts';
@@ -24,10 +28,12 @@ if (values.confirm && values['dry-run']) {
   process.exit(1);
 }
 const config = loadConfig();
-await migrate(config.databaseUrl);
+// the dry run changes nothing at all: no migrations (a database that is not migrated yet can fail to answer, and says so),
+// and the plan is made in a read-only transaction
+if (values.confirm) await migrate(config.databaseUrl);
 const pool = createPool(config.databaseUrl, 2);
 try {
-  const plan = await planDeployReset(pool, values.org ? { orgId: values.org } : {});
+  const plan = await planDeployResetReadOnly(pool, values.org ? { orgId: values.org } : {});
   console.log(formatResetPlan(plan));
   if (!values.confirm) {
     console.log('\nDry run: nothing was written. Run again with --confirm to do it.');

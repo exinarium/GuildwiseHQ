@@ -13,6 +13,7 @@ import {
   type DeployPreparePayload,
   DeployPrepareResultSchema,
   type DeployRevokePayload,
+  DeployRevokePayloadSchema,
   DeployRevokeResultSchema,
   type DeployTargetDto,
   type HostKeyScanPayload,
@@ -274,6 +275,7 @@ export async function revokeKeyOnRemoval(
   user: AuthSession['user'],
   projectId: string,
   t: Row,
+  opts: { forgetAnyway?: boolean } = {},
 ): Promise<{ state: 'none' | 'started' | 'skipped'; commandId: string | null; reason: string | null }> {
   const keys = await rows(
     ctx.pool,
@@ -315,6 +317,7 @@ export async function revokeKeyOnRemoval(
       publicKey: k.public_key,
       fingerprint: k.fingerprint,
       forget: true,
+      ...(opts.forgetAnyway ? { forgetAnyway: true } : {}),
     };
     const id = await enqueueOp(ctx, k.workstation_id, 'deploy.revoke', payload);
     first ??= id;
@@ -474,6 +477,9 @@ export async function getOp(
       result: op.result ?? null,
       errorText: op.ok ? null : opError(kind, op.result, op.error),
       at: iso(op.at) as string,
+      ...(kind === 'revoke' && (op.result as { localKeyKept?: boolean } | null)?.localKeyKept
+        ? { localKeyKept: true }
+        : {}),
     };
   }
   const cmd = await one(
@@ -733,3 +739,32 @@ export async function decorateTargets(
 void randomUUID;
 void withAppendTx;
 void userActor;
+
+/**
+ * "Forget it anyway": a removal could not take the key off the server and this computer kept its key. After the person
+ * confirmed, the same request is sent again and this time the computer deletes its key material whatever the server says.
+ */
+export async function forgetKeyAnyway(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  projectId: string,
+  commandId: string,
+): Promise<OpStartedDto> {
+  await projectOwnerOrThrow(ctx, user, projectId);
+  const op = await one(
+    ctx.pool,
+    `SELECT o.workstation_id, o.result, c.payload, w.user_id AS ws_user FROM deploy_ops o
+       JOIN runner_commands c ON c.id = o.command_id JOIN workstations w ON w.id = o.workstation_id
+      WHERE o.command_id=$1 AND o.project_id=$2 AND o.kind='revoke'`,
+    [commandId, projectId],
+  );
+  const kept = (op?.result as { localKeyKept?: boolean } | null)?.localKeyKept;
+  if (!op || !kept) throw notFound('there is nothing to forget for that operation');
+  if (op.ws_user !== user.id) throw forbidden('only the person whose computer holds the key can forget it');
+  const payload = DeployRevokePayloadSchema.safeParse({ ...(op.payload as object), forgetAnyway: true });
+  if (!payload.success) throw unprocessable('bad_request', 'that request can no longer be repeated');
+  return {
+    commandId: await enqueueOp(ctx, op.workstation_id, 'deploy.revoke', payload.data),
+    workstationId: op.workstation_id,
+  };
+}

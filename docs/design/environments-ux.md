@@ -577,3 +577,31 @@ cannot be found: the restart confirmation (and sudo), the build steps, which fil
 409 `runner_outdated` for a direct environment on a computer without the capability; `planChanges` lists the found service ("The service "shop" is running and
 runs from ..."), what stays untouched (other services, pm2 processes, containers), the folder adoption, and the steps in words. The probe of a machine with no
 Docker but with apps now answers with a report (`docker.installed:false`) instead of `docker_missing`; with neither it still says `docker_missing`.
+
+---
+
+## 15. Decisions from the code review (scripts, probe, reset, places)
+
+Fixes made after the review of sections 13 and 14, each with a test. Contract changes are marked **API**.
+
+**Scripts for apps that run directly (`setup-compile-direct.ts`, generator `setup-1.4`).**
+- The deploy lock (fd 9) is closed for everything the script starts (`remote()` on this computer), so a restart that leaves a background process behind cannot keep the lock.
+- A plain folder is adopted only when (a) nothing in it looks like data the app writes itself that is not listed in `shared` (sqlite files, `uploads`, `storage`, `data`, log folders and files, `.env`; the same heuristic is in the probe as `ProbeService.statePaths`, and `planChanges` blocks the save with the same list), (b) it is on the same disk as the app folder with nothing mounted inside it (`stat -c %d`, checked before the move, also in the dry run). The refusal is a plain list asking the person to mark them shared.
+- Shared files are copied from the running version at switch time (not when the files are prepared). A sqlite file is copied with `sqlite3 .backup`; without `sqlite3` the update is refused. Writes made after that copy and before the restart stay in the old release folder (documented in `docs/DEPLOY.md`).
+- `SWITCHED=1` and `PREVIOUS_TARGET` are set before the folder is moved, so an interruption puts the folder back from `releases/initial` (only the link made by Guildwise is removed). A failed restart command always restores the link (and starts the previous version again), with or without health check or rollback. A health failure without rollback still leaves the new version, as before.
+- `APP_DIR` and the link are resolved inside the state script on the machine (a leading `~` is the home of the signed-in user, parents resolved with `pwd -P`); the prune guard compares `readlink -f` of the candidate, the new, the previous and the running folder.
+- Restart permission is checked in the dry run (`sudo -n -l <the very command>`, `systemctl --user show-environment`). `ProcessNameSchema` refuses `all` and all-digit names; the program of a restart or build command cannot start with `-`; units of type `.target/.slice/.socket/.mount/.device` and `docker`, `containerd`, `ssh`/`sshd`, `systemd-*` are refused. A postgres or mysql backup needs the database name.
+- Files that are not a git checkout are never sent (direct or Docker over ssh): the update stops with a plain message.
+- A restart command that returns before the app is ready is judged by the health check only (note in the review, `restart_note`).
+
+**Compose stacks.** The server-side state script (and the local script) read the labels of the running app container: the config files must be the one in the setup, plus at most the override file Guildwise writes itself (`docker-compose.guildwise.yml` on a server, the temporary override of the local script); the working directory must be the folder of the compose file; no `--env-file`; the project must match. Otherwise the script stops before anything changes. The probe marks such stacks (`ProbeContainer.unsupported`, `ProbeComposeFile.unsupported`) and `planChanges` blocks the save ("cannot be updated by Guildwise yet"). The override file stays after an update and is documented in `docs/DEPLOY.md`; a rollback restores its earlier content, or removes it when it did not exist before the update.
+
+**Server.**
+- **API** `PhaseFollowupRetargeted {fromTargetId,toTargetId}` replaces the direct `UPDATE` of `phase_followups` when places are merged (projector in `projections/phases.ts`; replay test).
+- **API** `DeliveryRecipeReset.hashes` (new optional field) and column `delivery_recipes.reset_hashes` (migration 2312): both the observed and the approved hash are ignored when the vault is read again. The reset script and "stop guided" write both. A different save starts fresh (`DeliverySetupPublished` clears them).
+- The reset script: `--dry-run` (the default) does not run migrations and plans in a read-only transaction; the apply step reads the runs, follow-ups and open deploy suggestions again inside its transaction (a release that started since is not cancelled); `DeployProbesCleared` and `SetupProposalResolved(dismissed)` clear the stored checks and the open deploy suggestions of reset projects.
+- Places: the in-use check runs before anything is sent to a computer; "in use" also counts the approved recipe; a merge goes only into an `active` place (422 `not_duplicates`). **API** `RemovePlaceRequest.forgetKeyAnyway`, `DeployRevokePayload.forgetAnyway`: a removal that cannot take the key off the server keeps this computer's key (`localKeyKept` in the revoke result and `OpStatusDto.localKeyKept`); the page then offers "Forget it anyway" which calls **API** `POST /api/projects/:id/delivery/ops/:commandId/forget-key` (only the owner of the computer; 404 when the operation kept no key). An older runner still forgets the key at once.
+- **API** `AnswerProposalRequest.confirmed: string[]` and `AnswerProposalResult.needsConfirmation: [{path, kind: 'sudo'|'adopt_folder', text}]`: an answer that turns on `sudo` or `adoptFolder` is not stored until its path is listed in `confirmed`; the page shows `text` in a separate confirmation step and repeats the answer with `confirmed`.
+- `SETUP_GENERATOR` is `setup-1.4`; a stored `setup-1.3` setup shows "an improved version is available" (the existing outdated path).
+
+**Not done / for the web pass.** `apps/web` fixtures that mention `setup-1.3` (`deploy-setup.test.tsx`, `deploy-connect.test.tsx`) need the new generator; the page needs the confirmation step, "Forget it anyway", and to show `unsupported` and `statePaths` blockers.

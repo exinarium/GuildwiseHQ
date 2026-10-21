@@ -4,6 +4,7 @@ import {
   DEPLOY_CONNECT_CAPABILITY,
   DEPLOY_SETUP_CAPABILITY,
   DEPLOY_SETUP_V2_CAPABILITY,
+  directEnv,
   localAdoptEnv,
   parseRecipe,
   type RecipeInspectResult,
@@ -267,6 +268,102 @@ describe('places', () => {
     const gone = await call('POST', `${base()}/places/${spare}/remove`, { removeKey: true });
     expect(gone.keyCleanup.state).toBe('skipped');
     expect(gone.keyCleanup.reason).toContain('needs an update');
+  });
+
+  it('m7: a place only the APPROVED recipe uses is in use too; a merge goes only into a place that is in use; nothing is sent when removal is refused', async () => {
+    await approved();
+    // the files in the vault now point the live site somewhere else; the approved recipe still names p5-prod
+    await q(
+      `UPDATE delivery_recipes SET setup = jsonb_set(setup, '{environments,1,target}', '"p5-local"') WHERE project_id=$1`,
+      [d.w.projectId],
+    );
+    const names = (await call('GET', `${base()}/places`)).places.find((p: any) => p.id === d.targets.prod);
+    expect(names.usedBy.map((u: any) => u.env)).toContain('live');
+    expect(names.canRemove).toBe(false);
+    // a refused removal sends nothing to any computer
+    await q(
+      `INSERT INTO deploy_target_keys (target_id, workstation_id, project_id, org_id, fingerprint, public_key, alias, method, state, added_at)
+       VALUES ($1,$2,$3,$4,$5,$6,'prod','password','active',now())`,
+      [
+        d.targets.prod,
+        d.w.workstationId,
+        d.w.projectId,
+        d.orgId,
+        `SHA256:${'m'.repeat(43)}`,
+        `ssh-ed25519 ${'M'.repeat(68)} guildwise-deploy:test`,
+      ],
+    );
+    const sent = r.of('command').filter((c) => c.command === 'deploy.revoke').length;
+    const refused = await req('POST', `${base()}/places/${d.targets.prod}/remove`, { removeKey: true });
+    expect(refused.status).toBe(409);
+    expect(r.of('command').filter((c) => c.command === 'deploy.revoke').length).toBe(sent);
+    // merge into a spare place is refused
+    const dup = await addTarget('prod-dup', { at: new Date(Date.now() + 60_000) });
+    await q(`UPDATE deploy_targets SET role='standby' WHERE id=$1`, [d.targets.prod]);
+    const toSpare = await req('POST', `${base()}/places/merge`, { fromId: dup, toId: d.targets.prod });
+    expect(toSpare.status).toBe(422);
+    expect(toSpare.body.error.message).toContain('not in use');
+    await q(`UPDATE deploy_targets SET role='active' WHERE id=$1`, [d.targets.prod]);
+  });
+
+  it('m7: when the server cannot be reached the computer keeps its key; "forget it anyway" sends the request again with the confirmation', async () => {
+    const spare = await addTarget('gone-vps', { host: 'gone' });
+    await q(
+      `INSERT INTO deploy_target_keys (target_id, workstation_id, project_id, org_id, fingerprint, public_key, alias, method, state, added_at)
+       VALUES ($1,$2,$3,$4,$5,$6,'gone','password','active',now())`,
+      [
+        spare,
+        d.w.workstationId,
+        d.w.projectId,
+        d.orgId,
+        `SHA256:${'g'.repeat(43)}`,
+        `ssh-ed25519 ${'G'.repeat(68)} guildwise-deploy:test`,
+      ],
+    );
+    const n = r.of('command').filter((c) => c.command === 'deploy.revoke').length;
+    const gone = await call('POST', `${base()}/places/${spare}/remove`, { removeKey: true });
+    expect(gone.keyCleanup.state).toBe('started');
+    await until(
+      async () => r.of('command').filter((c) => c.command === 'deploy.revoke').length > n,
+      5000,
+      'sent',
+    );
+    const first = r.of('command').filter((c) => c.command === 'deploy.revoke')[n] as {
+      commandId: string;
+      payload: any;
+    };
+    expect(first.payload.forget).toBe(true);
+    expect(first.payload.forgetAnyway).toBeUndefined();
+    // the computer could not reach the server and kept its key
+    r.send('command.result', {
+      commandId: first.commandId,
+      ok: true,
+      result: { ok: false, error: 'unreachable', forgotten: false, localKeyKept: true },
+    });
+    await until(
+      async () => (await call('GET', `${base()}/delivery/ops/${first.commandId}`)).state === 'failed',
+      5000,
+      'answered',
+    );
+    const st = await call('GET', `${base()}/delivery/ops/${first.commandId}`);
+    expect(st.localKeyKept).toBe(true);
+    expect(st.errorText).toContain('cannot sign in');
+    // the person confirms: the same request goes again with the confirmation
+    const again = await call('POST', `${base()}/delivery/ops/${first.commandId}/forget-key`, {}, 200);
+    await until(
+      async () => r.of('command').filter((c) => c.command === 'deploy.revoke').length > n + 1,
+      5000,
+      'sent again',
+    );
+    const second = r.of('command').filter((c) => c.command === 'deploy.revoke')[n + 1] as {
+      commandId: string;
+      payload: any;
+    };
+    expect(second.commandId).toBe(again.commandId);
+    expect(second.payload).toMatchObject({ targetId: spare, forget: true, forgetAnyway: true });
+    // an operation that did not keep a key has nothing to forget
+    const none = await req('POST', `${base()}/delivery/ops/${second.commandId}/forget-key`, {});
+    expect(none.status).toBe(404);
   });
 
   it('create with reuseExisting returns the matching place instead of a second one', async () => {
@@ -623,6 +720,61 @@ describe('proposals merge into the draft and answers are stored', () => {
     const again = await call('GET', `${base()}/proposals?area=deploy`);
     expect(again.proposals[0].proposal.questions.map((x: any) => x.answer)).toEqual(['web', 'yes', '90']);
     await call('POST', `${base()}/delivery/setup/use-proposal`, { proposalId: id });
+  });
+
+  it('m12: an answer that turns on sudo or the move of a folder is not stored until it is confirmed on its own', async () => {
+    const env = directEnv({
+      name: 'live',
+      label: 'Live site',
+      target: 'p5-prod',
+      host: 'prod',
+      appDir: '/home/shop/shop-app',
+      currentLink: '/home/shop/shop',
+      manager: { kind: 'systemd', unit: 'shop.service', scope: 'system', sudo: false },
+      healthUrl: 'http://127.0.0.1:3000/health',
+    } as never) as any;
+    env.direct.adoptFolder = false;
+    const id = await propose({ environments: [env] }, [
+      { path: '/environments/0/direct/manager/sudo', question: 'Use sudo?', kind: 'confirm' },
+      { path: '/environments/0/direct/adoptFolder', question: 'Move the folder?', kind: 'confirm' },
+    ]);
+    const sudo = '/environments/0/direct/manager/sudo';
+    const adopt = '/environments/0/direct/adoptFolder';
+    const first = await call('POST', `/api/setup-proposals/${id}/answers`, {
+      answers: [
+        { path: sudo, value: 'yes' },
+        { path: adopt, value: 'yes' },
+      ],
+    });
+    expect(first.needsConfirmation.map((n: any) => [n.path, n.kind])).toEqual([
+      [sudo, 'sudo'],
+      [adopt, 'adopt_folder'],
+    ]);
+    expect(first.proposal.deploy.environments[0].direct.manager.sudo).toBe(false);
+    expect(first.proposal.deploy.environments[0].direct.adoptFolder).toBe(false);
+    expect(first.proposal.questions.map((x: any) => x.answer)).toEqual([undefined, undefined]);
+    // "no" needs no confirmation; one confirmed path is stored, the other still waits
+    const second = await call('POST', `/api/setup-proposals/${id}/answers`, {
+      answers: [
+        { path: sudo, value: 'yes' },
+        { path: adopt, value: 'yes' },
+      ],
+      confirmed: [sudo],
+    });
+    expect(second.needsConfirmation.map((n: any) => n.path)).toEqual([adopt]);
+    expect(second.proposal.deploy.environments[0].direct.manager.sudo).toBe(true);
+    expect(second.proposal.deploy.environments[0].direct.adoptFolder).toBe(false);
+    const third = await call('POST', `/api/setup-proposals/${id}/answers`, {
+      answers: [{ path: adopt, value: 'yes' }],
+      confirmed: [adopt],
+    });
+    expect(third.needsConfirmation).toEqual([]);
+    expect(third.proposal.deploy.environments[0].direct.adoptFolder).toBe(true);
+    const off = await call('POST', `/api/setup-proposals/${id}/answers`, {
+      answers: [{ path: sudo, value: 'no' }],
+    });
+    expect(off.needsConfirmation).toEqual([]);
+    expect(off.proposal.deploy.environments[0].direct.manager.sudo).toBe(false);
   });
 
   it('only the project owner answers, and a used proposal cannot be answered', async () => {

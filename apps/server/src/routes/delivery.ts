@@ -40,6 +40,7 @@ import { one } from '../db/sql.ts';
 import { removeGatePreset, setDeploySecret, setGateBinding, setGatePreset } from '../delivery/admin.ts';
 import {
   connectBlockedReason,
+  forgetKeyAnyway,
   getOp,
   requestConnect,
   requestHostKeyScan,
@@ -471,6 +472,16 @@ export function deliveryRoutes(ctx: Ctx) {
       const s = await requireUser(ctx, req);
       return getOp(ctx, s.user, req.params.id, req.params.commandId);
     });
+
+    /** "Forget it anyway": delete this computer's key for a removed server that could not be reached (the person confirmed). */
+    app.post(
+      '/api/projects/:id/delivery/ops/:commandId/forget-key',
+      { schema: { params: OpParams } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        return forgetKeyAnyway(ctx, s.user, req.params.id, req.params.commandId);
+      },
+    );
 
     /** "Check connection": can the computer that deploys this server sign in to it now? */
     app.post(

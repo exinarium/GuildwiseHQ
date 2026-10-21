@@ -169,7 +169,7 @@ test('setup: two throwaway servers, a runner whose ssh sees only them, an approv
   );
   const setup = {
     version: 1,
-    generator: 'setup-1.3',
+    generator: 'setup-1.4',
     environments: [
       {
         name: 'production',

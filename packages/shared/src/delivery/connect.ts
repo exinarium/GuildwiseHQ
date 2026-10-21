@@ -288,6 +288,11 @@ export const DeployRevokePayloadSchema = z.object({
    * (capability `deploy-setup:2`).
    */
   forget: z.boolean().optional(),
+  /**
+   * With `forget`: delete this computer's key material even when the server could not be asked to drop the key (the person
+   * confirmed that). Without it, a failed attempt keeps the key so that it can be tried again (the answer says `localKeyKept`).
+   */
+  forgetAnyway: z.boolean().optional(),
 });
 export type DeployRevokePayload = z.infer<typeof DeployRevokePayloadSchema>;
 
@@ -313,6 +318,8 @@ export const DeployRevokeResultSchema = z.union([
     error: z.enum(REVOKE_ERRORS),
     detail: z.string().max(300).optional(),
     forgotten: z.boolean().optional(),
+    /** `forget` was asked, the server could not be reached, so this computer kept its key (until the person confirms). */
+    localKeyKept: z.boolean().optional(),
   }),
 ]);
 export type DeployRevokeResult = z.infer<typeof DeployRevokeResultSchema>;
@@ -623,6 +630,8 @@ export const OpStatusDtoSchema = z.object({
   /** A sentence for a failure. */
   errorText: z.string().nullable(),
   at: z.iso.datetime().nullable(),
+  /** A removal could not take the key off the server and this computer kept its key: offer "Forget it anyway". */
+  localKeyKept: z.boolean().optional(),
 });
 export type OpStatusDto = z.infer<typeof OpStatusDtoSchema>;
 

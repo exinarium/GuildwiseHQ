@@ -447,7 +447,7 @@ describe.skipIf(!can)('guided connect against a real sshd', () => {
   );
 
   ti(
-    'removing a server: the computer takes its own key off the server and forgets it; an unreachable server does not stop it',
+    'removing a server: the computer takes its own key off the server and forgets it; an unreachable server keeps the key until the person confirms',
     async () => {
       const a = rig('Office PC');
       sshd.sh('rm -f /home/deploy/.ssh/authorized_keys');
@@ -493,15 +493,21 @@ describe.skipIf(!can)('guided connect against a real sshd', () => {
       expect(dead).toBeTruthy();
       // the server stops answering: the alias now points at a port nobody listens on
       writeFileSync(dead as string, readFileSync(dead as string, 'utf8').replace(/^(\s*Port\s+)\d+/m, '$11'));
-      const gone = await b.c.revoke({
+      const deadPayload = {
         projectId: P,
         targetId: T,
         alias: 'aom-shop',
         publicKey: rb.publicKey,
         fingerprint: rb.fingerprint,
         forget: true,
-      } as never);
-      expect(gone).toMatchObject({ ok: false, forgotten: true });
+      };
+      // the server could not be asked: this computer keeps its key until the person confirms
+      const gone = await b.c.revoke(deadPayload as never);
+      expect(gone).toMatchObject({ ok: false, forgotten: false, localKeyKept: true });
+      expect(b.keys.has(T)).toBe(true);
+      // "forget it anyway": the key material goes, and the answer still says why the server was not cleaned
+      const confirmed = await b.c.revoke({ ...deadPayload, forgetAnyway: true } as never);
+      expect(confirmed).toMatchObject({ ok: false, forgotten: true });
       expect(b.keys.has(T)).toBe(false);
     },
     120_000,
