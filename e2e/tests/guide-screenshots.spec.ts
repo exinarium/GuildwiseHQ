@@ -2105,7 +2105,7 @@ cap('the desk and the ledger', async () => {
     ['desk-large-merge', /Approve merge of/],
     ['desk-branch', /Which branch is the working branch of notes-app/],
     ['desk-phase-done', /is done: approve/],
-    ['desk-daily-report', /^Daily report /],
+    ['desk-floor-report', /^Floor report /],
   ];
   for (const [name, title] of shots) {
     const el = item(title);
@@ -2114,23 +2114,6 @@ cap('the desk and the ledger', async () => {
   }
   await open(pPage, '/ledger');
   await snap(pPage, 'ledger', { maxH: 1100, content: true });
-});
-
-cap('backlog, environments, releases, the CEO and metrics', async () => {
-  await pPage.setViewportSize({ width: 1280, height: 1200 });
-  for (const [name, path] of [
-    ['backlog', '/p/WEB/backlog'],
-    ['environments', '/p/WEB/environments'],
-    ['releases', '/releases'],
-    ['ceo', '/org/ceo'],
-    ['ceo-reporting', '/org/ceo?tab=reporting'],
-    ['ceo-chat', '/ceo-chat'],
-    ['metrics', '/metrics'],
-    ['org-project-links', '/settings/org?tab=links'],
-  ] as const) {
-    await open(pPage, path);
-    await snap(pPage, name, { maxH: 1200, content: true });
-  }
 });
 
 cap('agents', async () => {
@@ -2433,10 +2416,9 @@ cap(
     await snap(pPage, 'manual-qa-setting', {
       sel: pPage.getByTestId('manual-qa-toggle').locator('xpath=ancestor::section[1]'),
     });
-    // "Your app" now lives on the Environments page (the project settings panel it came from is gone)
-    await open(pPage, '/p/WEB/environments');
-    await expect(pPage.getByTestId('environments-page')).toBeVisible();
-    await snap(pPage, 'run-settings', { maxH: 1100, content: true });
+    await snap(pPage, 'run-settings', {
+      sel: pPage.getByTestId('run-settings').locator('xpath=ancestor::section[1]'),
+    });
     // the archive of finished cards
     await open(pPage, '/p/WEB/archive');
     await snap(pPage, 'archive', { maxH: 900, content: true });
