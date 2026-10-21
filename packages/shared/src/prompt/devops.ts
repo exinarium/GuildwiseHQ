@@ -269,7 +269,7 @@ export function renderScanSection(scan: DevopsScan): string {
     [
       'This is a READ-ONLY scan. Do not start, stop, build, install, download or edit anything, do not use ssh, and write nothing into the repositories: the runner refuses those commands. Read files and run harmless read commands (`ls`, `cat`, `git log`, `docker version`, `jq`).' +
         (scan.area === 'deploy'
-          ? ' To look at Docker on this computer or at a server use only `aom deploy probe --local`, `aom deploy probe --ssh-hosts` or `aom deploy probe --host <alias> --dir <folder>`: they are fixed read-only probes that answer with names and shapes.'
+          ? ' To look at Docker on this computer or at a server use only `aom deploy probe --local`, `aom deploy probe --ssh-hosts` or `aom deploy probe --target <deploy target name> --dir <folder>` (a server of this project only): they are fixed read-only probes that answer with names and shapes. Earlier probe results of this project are stored and listed below as "Probe: ..." with their age: read them first and probe again only when they are missing or old.'
           : ''),
       'You are writing a proposal for a person with no coding experience, who will review it field by field and confirm it. Say what you found, say honestly what you guessed, and ask about what you cannot tell.',
       `The proposal is JSON checked by a schema. Write it to a file in your scratch directory with the Write tool (shell redirects are refused in a scan) and submit it with \`aom setup propose --area ${scan.area} --file <path>\`. If it is refused, the message says what is wrong: fix the file and submit again in this shift. Then end the request with \`aom devops-done\` (one or two plain sentences).`,

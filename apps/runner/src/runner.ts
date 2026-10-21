@@ -491,7 +491,7 @@ export class Runner {
       findLocal: (k) => this.findLocal(k),
       graph: () => this.graph,
       recipeSave: (shiftId, params) => this.delivery.save(shiftId, params),
-      deployProbe: (shiftId, params) => this.delivery.probeFor(params, shiftId),
+      deployProbe: (shiftId, params, targets) => this.delivery.probeFor(params, shiftId, targets),
       writeVault: (cmd) => this.vaults.write(cmd),
       http: this.serverHttp,
       rpc: (shiftId, method, params) =>

@@ -173,7 +173,11 @@ export interface SupervisorDeps {
   /** `aom recipe save`: write a drafted delivery recipe into the project vault (docs/design/ceo-front-door.md 10). */
   recipeSave?: (shiftId: string, params: Record<string, unknown>) => Promise<IpcRpcResponse>;
   /** `aom deploy probe` (DevOps in a scan): the fixed read-only probe, answered on this workstation. */
-  deployProbe?: (shiftId: string, params: Record<string, unknown>) => Promise<IpcRpcResponse>;
+  deployProbe?: (
+    shiftId: string,
+    params: Record<string, unknown>,
+    targets: Array<{ name: string; host: string | null }>,
+  ) => Promise<IpcRpcResponse>;
   /** Writes (and commits, pushes) a file into a vault clone: `aom publish` puts research notes there (M6). */
   writeVault?: (
     cmd: VaultWriteCommand,
@@ -1548,7 +1552,11 @@ export class ShiftSupervisor {
             : ({ ok: false, error: 'only the DevOps engineer saves a recipe' } as IpcRpcResponse);
         if (req.method === 'deploy.probe')
           return s.msg.kind === 'devops' && s.msg.agent.isDevops === true && this.deps.deployProbe
-            ? this.deps.deployProbe(s.msg.shiftId, req.params)
+            ? this.deps.deployProbe(
+                s.msg.shiftId,
+                req.params,
+                (s.msg.devops?.scan?.deploy?.targets ?? []).map((t) => ({ name: t.name, host: t.host })),
+              )
             : ({ ok: false, error: 'only the DevOps engineer probes' } as IpcRpcResponse);
         if (req.method === 'card.attachments') return this.cardAttachments(s, req.params);
         if (req.method === 'transcript.fetch') return this.transcriptFetch(s, req.params);

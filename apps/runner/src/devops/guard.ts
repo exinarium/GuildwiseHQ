@@ -153,10 +153,12 @@ export function splitSegments(line: string): Segment[] {
         endWord();
         if (line[i + 1] === '>') i++;
         if (line[i + 1] === '&') {
-          // `>&2`: a descriptor, not a file
           i++;
-          while (/\d|-/.test(line[i + 1] ?? '')) i++;
           raw += '>&';
+          // `>&2` and `>&-` name a descriptor; `>&out.txt` writes a FILE (bash treats it like `&>out.txt`)
+          if (/[\d-]/.test(line[i + 1] ?? '')) {
+            while (/\d|-/.test(line[i + 1] ?? '')) i++;
+          } else redirectNext = true;
           continue;
         }
         redirectNext = true;
@@ -892,7 +894,8 @@ const SCAN_SPECS: Record<string, FlagSpec> = {
     recursiveLongs: ['recursive', 'dereference-recursive'],
   },
   rg: {
-    shorts: 'inlcwvFsuUaHhoqNI',
+    // no -u/--hidden/--no-ignore/--unrestricted/--follow: they make `rg` read the hidden and ignored files, `.env` among them
+    shorts: 'inlcwvFsUaHhoqNI',
     valueShorts: 'egtTABCmdf',
     longs: [
       'ignore-case',
@@ -906,9 +909,6 @@ const SCAN_SPECS: Record<string, FlagSpec> = {
       'word-regexp',
       'invert-match',
       'fixed-strings',
-      'hidden',
-      'no-ignore',
-      'unrestricted',
       'files',
       'json',
       'heading',
@@ -920,7 +920,6 @@ const SCAN_SPECS: Record<string, FlagSpec> = {
       'no-messages',
       'text',
       'no-config',
-      'follow',
       'multiline',
       'pcre2',
       'stats',
@@ -1231,6 +1230,10 @@ function scanGit(args: string[], cwd: string, cfg: GuardConfig): GuardVerdict | 
   if (verb === 'tag' && p.flags.includes('n') === false && p.positionals.length > 1)
     return refuseScan('Changing tags');
   for (const w of [...p.positionals, ...p.values]) {
+    if (/[*?[]/.test(w) && verb !== 'log' && verb !== 'tag')
+      return refuseScan(`A pattern in a path (\`${w}\`)`);
+    if (/[*?[]/.test(w) && p.positionals.includes(w) && verb === 'log')
+      return refuseScan(`A pattern in a path (\`${w}\`)`);
     const bad = secretPath(w, dir, cfg, false);
     if (bad) return refuseSecret(bad);
   }
@@ -1302,8 +1305,8 @@ function scanDocker(first: string, args: string[], cwd: string, cfg: GuardConfig
   if (p.bad) return refuseScan(`\`${first} ${verb} ${p.bad}\``);
   if (sub === 'inspect') {
     // `-f`/`--format` is the only way to see a container, and only the harmless fields
-    const fmt = p.values[0];
-    if (!fmt || !INSPECT_FORMAT.test(fmt))
+    // EVERY format is checked: a second `--format` would otherwise print what the first one left out
+    if (p.values.length === 0 || !p.values.every((f) => INSPECT_FORMAT.test(f)))
       return refuseScan(
         `\`${first} inspect\` without a --format naming a harmless field (a container's settings include its secrets)`,
       );
@@ -1366,6 +1369,7 @@ function scanFind(args: string[], cwd: string, cfg: GuardConfig): GuardVerdict |
   )
     paths.push(args[i++] as string);
   for (const p of paths.length ? paths : ['.']) {
+    if (/[*?[{]/.test(p)) return refuseScan(`A pattern in a path (\`${p}\`)`);
     const bad = secretPath(p, cwd, cfg, true);
     if (bad) return refuseSecret(bad);
   }
@@ -1389,7 +1393,8 @@ const AOM_SPECS: Array<{ path: string[]; spec: FlagSpec }> = [
     path: ['deploy', 'probe'],
     spec: {
       longs: ['local', 'ssh-hosts'],
-      valueLongs: ['host', 'compose-file', 'dir', 'url'],
+      // `--target <name>` probes that deploy target's OWN host; an arbitrary `--host` (any alias in ~/.ssh/config) is not offered
+      valueLongs: ['target', 'compose-file', 'dir', 'url'],
       maxPositionals: 0,
     },
   },
@@ -1432,6 +1437,29 @@ function scanSegment(seg: Segment, cwd: string, cfg: GuardConfig): GuardVerdict 
       p.flags.some((f) =>
         f.length === 1 ? !!spec.recursiveShorts?.includes(f) : !!spec.recursiveLongs?.includes(f),
       );
+    // a shell expands `*`, `?`, `[..]` and `{a,b}` in a path before the command sees it: `cat .e*` would read .env. Refused in
+    // every path word (the pattern of grep/rg and the program of jq are not paths).
+    if (!['echo', 'tr', 'true', 'pwd', 'basename', 'dirname'].includes(first)) {
+      const patternFirst =
+        (first === 'grep' || first === 'rg' || first === 'jq') &&
+        !(first === 'rg' && p.flags.includes('files')) &&
+        !p.flags.some((f) => ['e', 'f', 'regexp', 'file'].includes(f));
+      const glob = (patternFirst ? p.positionals.slice(1) : p.positionals).find((w) => /[*?[{]/.test(w));
+      if (glob) return refuseScan(`A pattern in a path (\`${glob}\`)`);
+    }
+    if (first === 'grep' && (recursive || p.values.includes('recurse'))) {
+      // a recursive grep reads hidden files too: it has to say that `.env` is not one of them
+      if (
+        !p.values.some((v) => v.includes('.env') && /^\.env(\*|\.\*)?$|^\*\.env$/.test(v.replace(/^\//, '')))
+      )
+        return refuseScan('A recursive `grep` that does not exclude settings files (add `--exclude=.env*`)');
+    }
+    if (
+      first === 'rg' &&
+      p.flags.some((f) => f === 'g' || f === 'glob') &&
+      p.values.some((v) => !v.startsWith('!') && /env/i.test(v))
+    )
+      return refuseScan('An `rg --glob` that names settings files');
     // the first positional of grep/rg/jq is the pattern or program, not a path; checking it too only costs false alarms
     const checked = [...p.positionals, ...p.values];
     for (const w of checked) {

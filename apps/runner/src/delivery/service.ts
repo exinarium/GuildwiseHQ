@@ -167,15 +167,31 @@ export class DeliveryService {
   }
 
   /** `aom deploy probe` (DevOps in a scan): the same fixed probe, answered here and returned as JSON. */
-  async probeFor(params: Record<string, unknown>, shiftId?: string): Promise<IpcRpcResponse> {
+  async probeFor(
+    params: Record<string, unknown>,
+    shiftId?: string,
+    targets: Array<{ name: string; host: string | null }> = [],
+  ): Promise<IpcRpcResponse> {
     const p = DeployProbeParamsSchema.safeParse(params);
     if (!p.success)
       return {
         ok: false,
         error:
-          'usage: aom deploy probe --local | --ssh-hosts | --host <alias> [--compose-file F] [--dir D] [--url U]',
+          'usage: aom deploy probe --local | --ssh-hosts | --target <name> [--compose-file F] [--dir D] [--url U]',
       };
     const v = p.data;
+    // A scan may look at its project's own servers only, never at any alias that happens to be in ~/.ssh/config.
+    if (v.target) {
+      const t = targets.find((x) => x.name.toLowerCase() === v.target?.toLowerCase());
+      if (!t) return { ok: false, error: `there is no deploy target called ${v.target} in this project` };
+      if (!t.host) return { ok: false, error: `${t.name} runs on a computer, not on a server: use --local` };
+      v.host = t.host;
+    } else if (v.host && !targets.some((t) => t.host === v.host)) {
+      return {
+        ok: false,
+        error: `${v.host} is not the server of one of this project's deploy targets: use --target <name>`,
+      };
+    }
     const scope = v.host ? 'ssh_target' : v.sshHosts ? 'ssh_hosts' : 'local';
     const r = await runDeployProbe(
       {

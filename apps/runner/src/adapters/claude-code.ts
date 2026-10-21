@@ -36,6 +36,7 @@ import {
   DEVOPS_INHERITED_ENV,
   gitDirsOf,
   type SandboxState,
+  sandboxMissing,
   sandboxState,
   toolchainReadPaths,
 } from './claude-policy.ts';
@@ -433,6 +434,15 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     if (sb.state === 'unavailable') throw new Error(`the Claude Code sandbox is unavailable: ${sb.reason}`);
   }
 
+  /** A "Scan with DevOps" needs the OS sandbox enforced; `off` and "unsandboxed by choice" do not count. */
+  private assertScanSandbox(): void {
+    const missing = sandboxMissing(this.host.platform, this.host.pathVar);
+    if (missing)
+      throw new Error(
+        `A scan runs inside the OS sandbox and this computer cannot provide it: ${missing}. Install bubblewrap and socat (apt install bubblewrap socat), or run the runner in WSL2/Linux/macOS; then scan again.`,
+      );
+  }
+
   /** Effective OS-sandbox state of this runtime (see `sandboxState`). */
   sandboxStatus(): SandboxState {
     return sandboxState(this.cfg, this.host.platform, this.host.pathVar);
@@ -590,8 +600,10 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
 
   async start(input: ShiftStartInput): Promise<RuntimeSession> {
     if (realClaudeBlocked()) throw new RealClaudeBlockedError();
-    // The DevOps engineer runs without the OS sandbox, so a missing bwrap/socat does not stop it.
-    if (!input.agent.isDevops) this.assertCanRun();
+    // The DevOps engineer runs without the OS sandbox, so a missing bwrap/socat does not stop it. A scan is the exception:
+    // it runs inside the sandbox or not at all (fail closed, whatever the runner's sandbox mode says).
+    if (input.agent.isDevops && input.devopsGuard?.readOnlyScan === true) this.assertScanSandbox();
+    else if (!input.agent.isDevops) this.assertCanRun();
     const account = this.account(input.account);
     const dir = input.sandbox.configDir;
     await mkdir(dir, { recursive: true });

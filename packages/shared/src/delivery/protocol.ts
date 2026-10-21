@@ -97,7 +97,10 @@ export type RecipeWriteResult = z.infer<typeof RecipeWriteResultSchema>;
 export const DeployProbeParamsSchema = z.object({
   local: z.boolean().optional(),
   sshHosts: z.boolean().optional(),
+  /** Only a host that one of the project's deploy targets uses is probed (never an arbitrary alias of ~/.ssh/config). */
   host: z.string().max(64).optional(),
+  /** A deploy target of the project, by name: its own host is probed. */
+  target: z.string().max(80).optional(),
   composeFile: z.array(z.string().max(300)).max(10).optional(),
   dir: z.array(z.string().max(300)).max(10).optional(),
   url: z.array(z.string().max(300)).max(10).optional(),

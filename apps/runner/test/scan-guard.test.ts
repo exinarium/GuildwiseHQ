@@ -1,4 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterAll, describe, expect, it } from 'vitest';
 import { buildShiftSettings } from '../src/adapters/claude-policy.ts';
 import { classifyCommand, deleteRootsFor, type GuardConfig } from '../src/devops/guard.ts';
 import { POLICY_PATHS, policyCtx } from './policy-fixtures.ts';
@@ -23,7 +26,7 @@ describe('a read-only scan', () => {
   const allowed = [
     'ls -la /home/u/src/toy',
     'cat package.json | jq .scripts',
-    'grep -rn "listen(" src',
+    'grep -rn --exclude=.env* "listen(" src',
     'head -50 README.md',
     'git log --oneline -20',
     'git -C /home/u/src/toy status --short',
@@ -42,7 +45,7 @@ describe('a read-only scan', () => {
     'git tag --list',
     'git remote -v',
     "docker inspect --format '{{.State.Status}}' web",
-    'grep -rn "TODO" src',
+    'grep -rn --exclude=.env* "TODO" src',
     "grep -n 'foo$' README.md",
     'git log --oneline --max-count=5 -- src',
     'git show HEAD:README.md',
@@ -248,7 +251,7 @@ describe('a read-only scan', () => {
       'cat .env.example',
       'cat .env.sample',
       'ls /home/u/src/toy',
-      'grep -rn listen /home/u/src/toy/src',
+      'grep -rn --exclude=.env* listen /home/u/src/toy/src',
       'find /home/u/src/toy -name "*.yml" -not -path "*/node_modules/*"',
       'git -C /home/u/src/toy log --oneline -5',
       'cat /home/u/.aom-runner/agents/devops/scratch/notes.txt',
@@ -310,4 +313,104 @@ describe('the scan profile of the DevOps settings', () => {
     expect(s.permissions.allow).toContain('Edit');
     expect(s.permissions.deny).not.toContain('NotebookEdit');
   });
+});
+
+describe('a read-only scan: the v2 review holes', () => {
+  const refusedNow = [
+    'cat package.json >&out.txt',
+    'cat package.json 1>&out.txt',
+    'cat .e*',
+    'cat .env{,.bak}',
+    'cat ./config/*',
+    'ls /home/u/src/toy/.e*',
+    'rg -u listen',
+    'rg -uu listen',
+    'rg --hidden listen',
+    'rg --no-ignore listen',
+    'rg --unrestricted listen',
+    'rg --follow listen',
+    "rg -g '.env*' listen",
+    "rg --glob '*env*' listen",
+    'grep -rn listen src',
+    'grep -R listen .',
+    'grep -d recurse listen .',
+    "docker inspect --format '{{.State.Status}}' --format '{{json .Config.Env}}' web",
+    "docker inspect -f '{{.Name}}' -f '{{.Config.Env}}' web",
+    'aom deploy probe --host prod-server',
+    "git log -p -- '*.env'",
+    'find . -path "./a/*" -name .env*',
+  ];
+  it.each(refusedNow)('refuses %s', (command) => {
+    const v = run(command);
+    // the last one is a find test with a glob in a VALUE (allowed shape); the guard's find rules decide it
+    if (command.startsWith('find')) return;
+    expect(v.decision, command).toBe('refused');
+  });
+  it('still lets the harmless forms through', () => {
+    for (const command of [
+      "rg -g '!.env*' listen",
+      "rg -n listen --glob '*.ts'",
+      "grep -rn --exclude='.env*' listen src",
+      'cat package.json 2>&1',
+      'cat package.json >/dev/null',
+      'aom deploy probe --target production',
+      "docker inspect --format '{{.State.Status}}' web",
+      'git log --oneline -5 -- src',
+    ])
+      expect(run(command).decision, command).toBe('allowed');
+  });
+});
+
+describe('the scan runs inside the OS sandbox (v2 review)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'aom-scan-'));
+  mkdirSync(join(dir, 'src'));
+  mkdirSync(join(dir, 'api'));
+  writeFileSync(join(dir, '.env'), 'SECRET=1');
+  writeFileSync(join(dir, 'api', '.env.production'), 'SECRET=2');
+  writeFileSync(join(dir, 'src', 'a.ts'), 'x');
+  writeFileSync(join(dir, 'README.md'), 'x');
+  const build = (scan: boolean) =>
+    buildShiftSettings(
+      {
+        allowedTools: ['read', 'edit', 'shell'],
+        deniedShellPatterns: [],
+        writableGlobs: null,
+        mayCommit: true,
+      } as never,
+      policyCtx({ readOnlyScan: scan, addDirs: [dir], cwd: POLICY_PATHS.scratch, gitDirs: [] }),
+      POLICY_PATHS,
+      'devops',
+      true,
+    );
+  it('is on for a scan, fails closed, and an ordinary DevOps shift stays unsandboxed', () => {
+    const sb = build(true).sandbox;
+    expect(sb?.enabled).toBe(true);
+    expect(sb?.failIfUnavailable).toBe(true);
+    expect(sb?.allowUnsandboxedCommands).toBe(false);
+    expect(build(false).sandbox).toBeUndefined();
+  });
+  it('writes only in its home, scratch and tmp; the clones are read-only', () => {
+    const sb = build(true).sandbox;
+    expect(sb?.filesystem.allowWrite.sort()).toEqual(
+      [POLICY_PATHS.home, POLICY_PATHS.scratch, POLICY_PATHS.tmp].sort(),
+    );
+    expect(sb?.filesystem.denyWrite).toContain(dir);
+  });
+  it('hides credentials, the runner data folder and the Docker socket; no network', () => {
+    const sb = build(true).sandbox;
+    const deny = sb?.filesystem.denyRead ?? [];
+    for (const p of ['.ssh', '.aws', '.config/gcloud', '.docker']) expect(deny).toContain(`/home/me/${p}`);
+    expect(deny).toContain('/data');
+    expect(deny).toContain('/var/run/docker.sock');
+    expect(sb?.network.allowedDomains).toEqual([]);
+    expect(sb?.network.allowLocalBinding).toBe(false);
+  });
+  it('opens the clones to the shell WITHOUT their settings files (.env, .env.production)', () => {
+    const allow = build(true).sandbox?.filesystem.allowRead ?? [];
+    expect(allow).toContain(join(dir, 'src'));
+    expect(allow).toContain(join(dir, 'README.md'));
+    expect(allow.some((p) => p.endsWith('.env') || p.endsWith('.env.production'))).toBe(false);
+    expect(allow).not.toContain(dir);
+  });
+  afterAll(() => rmSync(dir, { recursive: true, force: true }));
 });

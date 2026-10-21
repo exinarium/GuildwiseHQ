@@ -459,6 +459,80 @@ export function scanSecretReadDenies(home: string): string[] {
   ];
 }
 
+/** Windows user folders mounted into WSL2 (`/mnt/c/Users`): the Windows side's credentials and browsers' stores. */
+export function windowsUserDirs(mnt = '/mnt'): string[] {
+  try {
+    return readdirSync(mnt)
+      .map((d) => join(mnt, d, 'Users'))
+      .filter((p) => existsSync(p));
+  } catch {
+    return [];
+  }
+}
+
+/** More credential places than `HOME_SECRETS` that a scan never needs. */
+const SCAN_HOME_EXTRA = [
+  '.config/helm',
+  '.config/doctl',
+  '.config/rclone',
+  '.terraform.d',
+  '.vault-token',
+  '.gem/credentials',
+  '.pgpass',
+  '.my.cnf',
+];
+
+/**
+ * A "Scan with DevOps" shift runs inside the OS sandbox (bubblewrap), unlike the rest of the DevOps engineer's work
+ * (docs/design/deploy-run-ux-design.md section 14, v2 review). The checkouts of the project are read-only and their settings files
+ * (`.env*`, keys) are left out of what the shell can see (`sandboxReadEntries`); the scratch folder is the only place it
+ * writes; the credential folders of the real home, the runner's private folders, the Windows user folders and the Docker
+ * sockets are masked; and the shell has NO network (the model itself talks to the Anthropic API outside the sandbox). The
+ * `aom` command is excluded from the sandbox as in every sandboxed role (it only talks to the runner). The guard hook stays on
+ * as a second layer. Never "best effort": the caller refuses the scan when bubblewrap is missing.
+ */
+export function scanSandboxBlock(
+  ctx: ClaudePolicyContext,
+  paths: { home: string; scratch: string; tmp: string },
+): NonNullable<ClaudeSettings['sandbox']> {
+  const base = sandboxBlock(
+    new Set(['shell']),
+    {
+      ...ctx,
+      mode: 'required',
+      extraAllowedDomains: [],
+      // the clones are opened entry by entry (settings files left out), never whole as an `--add-dir` would be
+      addDirs: [],
+      readDirs: [...new Set([...(ctx.readDirs ?? []), ...ctx.addDirs])],
+    },
+    paths.home,
+    paths.scratch,
+    paths.tmp,
+    { browser: false, readOnlyWorktree: false },
+  ) as NonNullable<ClaudeSettings['sandbox']>;
+  base.failIfUnavailable = true;
+  base.filesystem.allowWrite = [paths.home, paths.scratch, paths.tmp];
+  base.filesystem.denyRead = [
+    ...new Set([
+      ...base.filesystem.denyRead,
+      ...SCAN_HOME_EXTRA.map((p) => join(ctx.realHome, p)),
+      '/var/run/docker.sock',
+      '/run/docker.sock',
+      '/run/containerd',
+      '/run/podman',
+      ...windowsUserDirs(),
+      ...(ctx.uid !== undefined || process.getuid ? [`/run/user/${ctx.uid ?? process.getuid?.()}`] : []),
+    ]),
+  ];
+  base.network = {
+    allowedDomains: [],
+    strictAllowlist: true,
+    allowUnixSockets: ctx.ipcSocket ? [ctx.ipcSocket] : [],
+    allowLocalBinding: false,
+  };
+  return base;
+}
+
 function buildDevopsSettings(
   p: AgentPermissions,
   ctx: ClaudePolicyContext,
@@ -507,6 +581,7 @@ function buildDevopsSettings(
       defaultMode: 'dontAsk',
       additionalDirectories: [paths.scratch],
     },
+    ...(ctx.readOnlyScan ? { sandbox: scanSandboxBlock(ctx, paths) } : {}),
     ...(ctx.guardHookCommand
       ? {
           hooks: {

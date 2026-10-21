@@ -288,7 +288,7 @@ async function deployScanSection(ctx: Ctx, projectId: string): Promise<NonNullab
   );
   const probes = await rows(
     ctx.pool,
-    `SELECT p.scope, p.host, p.report, w.name AS workstation_name FROM deploy_probes p JOIN workstations w ON w.id = p.workstation_id
+    `SELECT p.scope, p.host, p.report, p.at, w.name AS workstation_name FROM deploy_probes p JOIN workstations w ON w.id = p.workstation_id
       WHERE p.project_id=$1 AND p.report IS NOT NULL ORDER BY p.at DESC LIMIT 4`,
     [projectId],
   );
@@ -305,7 +305,7 @@ async function deployScanSection(ctx: Ctx, projectId: string): Promise<NonNullab
     currentRecipe:
       recipe?.present && !recipe.setup && recipe.parsed ? JSON.stringify(recipe.parsed, null, 2) : null,
     probes: probes.map((p) => ({
-      label: `${p.scope}${p.host ? ` ${p.host}` : ''} (from ${p.workstation_name})`,
+      label: `${p.scope}${p.host ? ` ${p.host}` : ''} (from ${p.workstation_name}, stored ${iso(p.at) ?? 'earlier'})`,
       json: JSON.stringify(p.report),
     })),
   };

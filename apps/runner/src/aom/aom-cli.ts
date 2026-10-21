@@ -1215,6 +1215,7 @@ const VERBS: Record<string, Verb> = {
         ...(has(p, 'local') ? { local: true } : {}),
         ...(has(p, 'ssh-hosts') ? { sshHosts: true } : {}),
         ...(one(p, 'host') ? { host: one(p, 'host') } : {}),
+        ...(one(p, 'target') ? { target: one(p, 'target') } : {}),
         ...(many(p, 'compose-file').length ? { composeFile: many(p, 'compose-file') } : {}),
         ...(many(p, 'dir').length ? { dir: many(p, 'dir') } : {}),
         ...(many(p, 'url').length ? { url: many(p, 'url') } : {}),
@@ -1224,7 +1225,7 @@ const VERBS: Record<string, Verb> = {
     }
     if (sub !== 'run' && sub !== 'trial' && sub !== 'status')
       throw new UsageError(
-        'usage: aom deploy run <env> [--project KEY] [--commit SHA] [--target NAME] | aom deploy trial --env <env> [--project KEY] | aom deploy status [--project KEY] [--run ID] | aom deploy probe --local | --ssh-hosts | --host <alias> [--compose-file F] [--dir D] [--url U]',
+        'usage: aom deploy run <env> [--project KEY] [--commit SHA] [--target NAME] | aom deploy trial --env <env> [--project KEY] | aom deploy status [--project KEY] [--run ID] | aom deploy probe --local | --ssh-hosts | --target <name> [--compose-file F] [--dir D] [--url U]',
       );
     const env = p.positionals[1] ?? one(p, 'env');
     if (sub !== 'status' && !env) throw new UsageError(`aom deploy ${sub}: name the environment`);
@@ -2270,7 +2271,7 @@ export const USAGE = `usage: aom <verb> [options]
   toolchain list | add <name> --bin <dir>... [--read <dir>]... [--env KEY=VALUE]... | remove <name>   tools sandboxed agents may use; DevOps engineer: register what you installed so agents get it on PATH
   hygiene run [--note "<text>"]               DevOps engineer: repository hygiene request (commit to the working branch, pull, push, tidy), ends the request
   ceo snapshot | show | search | act <action> ... | recommend | notify | task | memory | review-reply | devops | draft-cards | correction | job | order | dir | done | report   CEO agent only: manage the organisation within the policy (see your instructions)
-  deploy probe --local | --ssh-hosts | --host <alias> [--dir D] [--compose-file F] [--url U]   DevOps, in a scan: fixed read-only look at Docker here or a server (names and shapes only)
+  deploy probe --local | --ssh-hosts | --target <name> [--dir D] [--compose-file F] [--url U]   DevOps, in a scan: fixed read-only look at Docker here or a server (names and shapes only)
   setup propose --area run|deploy --file <proposal.json>   DevOps, in a "Scan with DevOps" request: submit the proposal (read-only scan; the user reviews it)
   runner restart [--reason "<why>"]          CEO owner turns and DevOps shifts: restart the runner after your reply
   run info | status | logs <svc> | step --name <n> -- <cmd> | service --name <n> --port http:5000:ENV_VAR --health <url> -- <cmd> | ready | fail --reason <t>   DevOps engineer of a "run this branch" request: the runner starts and supervises the services (see your instructions)
