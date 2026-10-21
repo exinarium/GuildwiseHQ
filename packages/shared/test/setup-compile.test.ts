@@ -188,7 +188,7 @@ describe('the generated scripts', () => {
     expect(c).toContain('die "the database backup failed; nothing was changed"');
     expect(c).toContain('KEEP_BACKUPS=20');
     expect(c).toContain('set_image_var "$PREVIOUS"');
-    expect(c).toContain("trap on_exit EXIT");
+    expect(c).toContain('trap on_exit EXIT');
     expect(c).toContain("trap 'exit 143' TERM");
     expect(c).toContain('the database was NOT rolled back');
     expect(c).toContain('${AOM_DEPLOY_SSH:-ssh}');
@@ -196,13 +196,16 @@ describe('the generated scripts', () => {
     expect(c).toContain('BatchMode=yes');
   });
 
-  it.each(['uat', 'production'])('%s: the deploy lock is not inherited by what the script starts and names the project', (n) => {
-    const c = (scripts.find((s) => s.path.endsWith(`${n}.sh`)) as { content: string }).content;
-    expect(c).toContain('docker() { command docker "$@" 9>&-; }');
-    expect(c).toContain('AOM_DEPLOY_PROJECT_ID');
-    expect(c).toContain('${XDG_RUNTIME_DIR:-$HOME/.cache}');
-    expect(c).toMatch(/umask 077/);
-  });
+  it.each(['uat', 'production'])(
+    '%s: the deploy lock is not inherited by what the script starts and names the project',
+    (n) => {
+      const c = (scripts.find((s) => s.path.endsWith(`${n}.sh`)) as { content: string }).content;
+      expect(c).toContain('docker() { command docker "$@" 9>&-; }');
+      expect(c).toContain('AOM_DEPLOY_PROJECT_ID');
+      expect(c).toContain('${XDG_RUNTIME_DIR:-$HOME/.cache}');
+      expect(c).toMatch(/umask 077/);
+    },
+  );
 
   it('production: the remote script travels as an argument, never on stdin, and docker commands get no stdin', () => {
     const c = (scripts.find((s) => s.path.endsWith('production.sh')) as { content: string }).content;
@@ -390,20 +393,23 @@ describe('the compose_run step (database updates before the restart)', () => {
     return input;
   };
 
-  it.each([0, 1] as const)('environment %i compiles, passes bash -n, quotes the command and has a dry-run branch', (w) => {
-    const r = compileSetup(withRun(w));
-    expect(r.ok, JSON.stringify(r)).toBe(true);
-    if (!r.ok) return;
-    const name = w === 0 ? 'uat' : 'production';
-    const c = r.files.find((f) => f.path === `scripts/${name}.sh`)!.content;
-    expect(spawnSync('bash', ['-n'], { input: c, encoding: 'utf8' }).status).toBe(0);
-    expect(c).toContain("'npm' 'run' 'migrate' '--' 'it'\\''s'");
-    expect(c).toMatch(/the database updates failed; the app was not restarted/);
-    const part = c.split(/\n# step \d+: /).find((p) => p.startsWith('Run database updates'))!;
-    expect(part).toContain('DRY_RUN" = 1');
-    // never a down / rm / volume flag
-    expect(c).not.toMatch(/compose[^\n]*\b(down|rm)\b/);
-  });
+  it.each([0, 1] as const)(
+    'environment %i compiles, passes bash -n, quotes the command and has a dry-run branch',
+    (w) => {
+      const r = compileSetup(withRun(w));
+      expect(r.ok, JSON.stringify(r)).toBe(true);
+      if (!r.ok) return;
+      const name = w === 0 ? 'uat' : 'production';
+      const c = r.files.find((f) => f.path === `scripts/${name}.sh`)!.content;
+      expect(spawnSync('bash', ['-n'], { input: c, encoding: 'utf8' }).status).toBe(0);
+      expect(c).toContain("'npm' 'run' 'migrate' '--' 'it'\\''s'");
+      expect(c).toMatch(/the database updates failed; the app was not restarted/);
+      const part = c.split(/\n# step \d+: /).find((p) => p.startsWith('Run database updates'))!;
+      expect(part).toContain('DRY_RUN" = 1');
+      // never a down / rm / volume flag
+      expect(c).not.toMatch(/compose[^\n]*\b(down|rm)\b/);
+    },
+  );
 
   it('must come after the backup and before the restart (and after the copy to a server)', () => {
     const bad = FIRST_ADOPTER();

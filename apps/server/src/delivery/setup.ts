@@ -152,7 +152,8 @@ export async function getSetupState(
   if (recipe?.observed_hash) {
     dryRunMissing = await guidedEnvsWithoutDryRun(ctx.pool, projectId, recipe);
     if (parsedSetup.success)
-      for (const e of parsedSetup.data.environments) if (!dryRunMissing.includes(e.name)) dryRunOk.push(e.name);
+      for (const e of parsedSetup.data.environments)
+        if (!dryRunMissing.includes(e.name)) dryRunOk.push(e.name);
   }
   const vault = await projectVault(ctx.pool, projectId);
   const writeWs = vault ? await workstationForVault(ctx.pool, projectId, vault, p.org_id) : null;
@@ -187,7 +188,9 @@ export async function getSetupState(
       custom: !!recipe?.present && !parsedSetup.success,
       envNames: parsedSetup.success
         ? parsedSetup.data.environments.map((e) => e.name)
-        : (((recipe?.parsed as { environments?: Array<{ name: string }> } | null)?.environments ?? []).map((e) => e.name)),
+        : ((recipe?.parsed as { environments?: Array<{ name: string }> } | null)?.environments ?? []).map(
+            (e) => e.name,
+          ),
     },
     publish: lp
       ? {

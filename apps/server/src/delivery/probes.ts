@@ -105,9 +105,18 @@ export async function requestProbe(
         ].slice(0, 10),
       }
     : { urls: target?.app_url ? [target.app_url as string] : [] };
+  // a server looked at by its name belongs to the target that uses that name (the computer then uses that target's own key)
+  const byHost =
+    !target && host && mine
+      ? await one(
+          ctx.pool,
+          `SELECT id FROM deploy_targets WHERE project_id=$1 AND host=$2 AND kind='remote_ssh' AND removed_at IS NULL LIMIT 1`,
+          [projectId, host],
+        )
+      : undefined;
   const payload: DeployProbePayload = {
     projectId: project.id,
-    ...(target ? { targetId: target.id } : {}),
+    ...(target || byHost ? { targetId: (target?.id ?? byHost?.id) as string } : {}),
     scope: req.scope,
     ...(host ? { host: host as string } : {}),
     hints,

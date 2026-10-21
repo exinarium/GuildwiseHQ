@@ -644,7 +644,7 @@ export function DeployWizard({
       )}
 
       {/* the sticky bar (mobile: always in reach of the thumb) */}
-      {step !== 'review' && (
+      {step !== 'review' && !(step === 'signin' && connecting) && (
         <div
           className="sticky bottom-[var(--app-bottom-inset,0px)] z-10 -mx-4 flex gap-2 border-t border-line bg-surface px-4 py-3 sm:mx-0 sm:rounded-control sm:border"
           data-testid="wizard-bar"

@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { type APIRequestContext, expect, type Page, test } from '@playwright/test';
 import { apiAs, inviteAndAccept } from '../support/api.ts';
@@ -70,9 +70,12 @@ test('setup: a throwaway sshd container, a paired runner that can connect, and a
     (ok) => ok,
     30_000,
   );
-  const code = (await (await api.post('/api/workstations/pairing-codes', { data: {} })).json()).code as string;
+  const code = (await (await api.post('/api/workstations/pairing-codes', { data: {} })).json())
+    .code as string;
   pairRunner(BASE_URL, code, 'Connect PC', HOME);
-  startRunner({ AOM_MOCK_STEP_MS: '100' }, HOME);
+  // HOME is an empty folder: the runner reads ssh aliases from it, so no real server of this computer is ever looked at
+  mkdirSync(join(DIR, 'home'), { recursive: true });
+  startRunner({ AOM_MOCK_STEP_MS: '100', HOME: join(DIR, 'home') }, HOME);
   await waitFor(
     'runner connected',
     async () =>
@@ -105,7 +108,9 @@ test('Connect a different server: the fingerprint is shown in plain words and mu
   await page.getByTestId('connect-continue').click();
   // what the server really says
   await expect(page.getByTestId('connect-fp')).toHaveText(fingerprint, { timeout: 60_000 });
-  await expect(page.getByTestId('connect-fingerprint')).toContainText('If your hosting company shows a fingerprint');
+  await expect(page.getByTestId('connect-fingerprint')).toContainText(
+    'If your hosting company shows a fingerprint',
+  );
   // nothing was written on the computer or the server yet
   expect(existsSync(join(HOME, 'keys', 'deploy'))).toBe(false);
   await page.getByTestId('connect-fp-matches').click();
@@ -113,7 +118,9 @@ test('Connect a different server: the fingerprint is shown in plain words and mu
   await page.getByTestId('connect-password').fill(PASSWORD);
   await page.screenshot({ path: join(DIR, 'connect-password.png') }).catch(() => undefined);
   await page.getByTestId('connect-go').click();
-  await expect(page.getByTestId('connect-done')).toContainText('can sign in to 127.0.0.1', { timeout: 90_000 });
+  await expect(page.getByTestId('connect-done')).toContainText('can sign in to 127.0.0.1', {
+    timeout: 90_000,
+  });
 });
 
 test('the key is on the server, the private half and the password are not anywhere they should not be', async () => {
@@ -128,25 +135,42 @@ test('the key is on the server, the private half and the password are not anywhe
   expect(target).toMatchObject({ host: 'aom-shop-server', kind: 'remote_ssh' });
   const keys = await q<any>('SELECT * FROM deploy_target_keys WHERE project_id=$1', [projectId]);
   expect(keys).toHaveLength(1);
-  expect(keys[0]).toMatchObject({ state: 'active', method: 'password', address: '127.0.0.1', ssh_user: 'deploy' });
+  expect(keys[0]).toMatchObject({
+    state: 'active',
+    method: 'password',
+    address: '127.0.0.1',
+    ssh_user: 'deploy',
+  });
   expect(ak).toContain(keys[0].public_key.split(' ')[1]);
-  const conn = (await q<any>('SELECT state, method FROM deploy_target_connections WHERE target_id=$1', [target?.id]))[0];
+  const conn = (
+    await q<any>('SELECT state, method FROM deploy_target_connections WHERE target_id=$1', [target?.id])
+  )[0];
   expect(conn).toMatchObject({ state: 'reachable', method: 'deploy_key' });
   // the runner holds the private key (0600); the server and the logs never saw it or the password
   const keyDir = join(HOME, 'keys', 'deploy', target?.id as string);
-  expect(readdirSync(keyDir).sort()).toEqual(['id_ed25519', 'id_ed25519.pub', 'known_hosts', 'meta.json', 'ssh_config']);
+  expect(readdirSync(keyDir).sort()).toEqual([
+    'id_ed25519',
+    'id_ed25519.pub',
+    'known_hosts',
+    'meta.json',
+    'ssh_config',
+  ]);
   const priv = readFileSync(join(keyDir, 'id_ed25519'), 'utf8');
-  const everything = JSON.stringify(await q('SELECT payload FROM events')) + JSON.stringify(await q('SELECT payload FROM runner_commands'));
+  const everything =
+    JSON.stringify(await q('SELECT payload FROM events')) +
+    JSON.stringify(await q('SELECT payload FROM runner_commands'));
   expect(everything).not.toContain(PASSWORD);
   expect(everything).not.toContain(priv.split('\n')[1] as string);
   expect(everything).not.toContain('BEGIN OPENSSH PRIVATE KEY');
   // the person's own ssh folder on this computer was not touched
-  expect(readFileSync(join(HOME, 'keys', 'deploy', target?.id as string, 'ssh_config'), 'utf8')).toContain('IdentitiesOnly yes');
+  expect(readFileSync(join(HOME, 'keys', 'deploy', target?.id as string, 'ssh_config'), 'utf8')).toContain(
+    'IdentitiesOnly yes',
+  );
 });
 
 test('the new server is looked at; "Set up this server" lists what it would add and tries it without changing anything', async () => {
+  await page.getByTestId('connect-finish').click();
   await expect(page.getByTestId('no-stacks')).toBeVisible({ timeout: 90_000 });
-  await page.getByTestId('connect-finish').click().catch(() => undefined);
   const prepare = page.getByTestId('prepare-server');
   await expect(prepare).toBeVisible({ timeout: 60_000 });
   await expect(prepare.getByTestId('prepare-actions')).toContainText('Install Docker on the server');
@@ -156,7 +180,9 @@ test('the new server is looked at; "Set up this server" lists what it would add 
   expect(inBox('ls /home/deploy')).not.toContain('apps');
   // for real: the folder is made, Docker is not guessed at on a system Guildwise does not install it on
   await prepare.getByTestId('prepare-run').click();
-  await expect(prepare.getByTestId('prepare-error')).toContainText('Debian and Ubuntu only', { timeout: 60_000 });
+  await expect(prepare.getByTestId('prepare-error')).toContainText('Debian and Ubuntu only', {
+    timeout: 60_000,
+  });
 });
 
 test('the key stops working: the card says so, Reconnect with a pasted key brings it back', async () => {
@@ -170,13 +196,19 @@ test('the key stops working: the card says so, Reconnect with a pasted key bring
   await page.getByTestId('connect-method-panel').click();
   await page.getByTestId('connect-continue').click();
   await page.getByTestId('connect-fp-matches').click({ timeout: 60_000 });
-  const pub = (await page.getByTestId('connect-public-key').textContent({ timeout: 60_000 }))?.trim() as string;
+  const pub = (
+    await page.getByTestId('connect-public-key').textContent({ timeout: 60_000 })
+  )?.trim() as string;
   expect(pub).toMatch(/^ssh-ed25519 \S+ guildwise-deploy:/);
   // before it is pasted the test says so in plain words
   await page.getByTestId('connect-go').click();
-  await expect(page.getByTestId('connect-error')).toContainText('does not accept the Guildwise key yet', { timeout: 60_000 });
+  await expect(page.getByTestId('connect-error')).toContainText('does not accept the Guildwise key yet', {
+    timeout: 60_000,
+  });
   // the person pastes it into the panel
-  inBox(`mkdir -p /home/deploy/.ssh && printf '%s\\n' '${pub}' > /home/deploy/.ssh/authorized_keys && chown -R deploy:deploy /home/deploy/.ssh && chmod 700 /home/deploy/.ssh && chmod 600 /home/deploy/.ssh/authorized_keys`);
+  inBox(
+    `mkdir -p /home/deploy/.ssh && printf '%s\\n' '${pub}' > /home/deploy/.ssh/authorized_keys && chown -R deploy:deploy /home/deploy/.ssh && chmod 700 /home/deploy/.ssh && chmod 600 /home/deploy/.ssh/authorized_keys`,
+  );
   await page.getByTestId('connect-go').click();
   await expect(page.getByTestId('connect-done')).toBeVisible({ timeout: 90_000 });
   await page.getByTestId('connect-finish').click();

@@ -654,7 +654,9 @@ export async function sealLarge(publicKeyB64: string, text: string): Promise<str
   const rsa = await subtle.importKey('spki', der, { name: 'RSA-OAEP', hash: 'SHA-256' }, false, ['encrypt']);
   const aes = await subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt']);
   const iv = globalThis.crypto.getRandomValues(new Uint8Array(12));
-  const ct = new Uint8Array(await subtle.encrypt({ name: 'AES-GCM', iv }, aes, new TextEncoder().encode(text)));
+  const ct = new Uint8Array(
+    await subtle.encrypt({ name: 'AES-GCM', iv }, aes, new TextEncoder().encode(text)),
+  );
   const raw = new Uint8Array(await subtle.exportKey('raw', aes));
   const wrapped = new Uint8Array(await subtle.encrypt({ name: 'RSA-OAEP' }, rsa, raw));
   return `h1.${b64(wrapped)}.${b64(iv)}.${b64(ct)}`;
