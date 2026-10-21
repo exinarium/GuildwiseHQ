@@ -718,6 +718,7 @@ test('an app that runs without Docker: found as a plain folder, turned into the 
     build: [{ label: 'Prepare', argv: ['sh', '-c', 'echo built > built.txt'] }],
     healthUrl: shopUrl,
     appUrl: `http://127.0.0.1:${shopPort}`,
+    live: true,
   });
   // without the yes, the plain folder is refused at the dry run
   const noYes = JSON.parse(JSON.stringify(shopEnv));
