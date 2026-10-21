@@ -482,6 +482,58 @@ describe('overview', () => {
     expect(await screen.findByText(/needs the Owner’s approval/)).toBeInTheDocument();
   });
 
+  it('the nudge: an environment without a web address says so in plain words and points to the field (final review)', async () => {
+    const c = compileSetup({
+      environments: [
+        localAdoptEnv({
+          name: 'uat',
+          label: 'Test copy',
+          target: 'T',
+          composeFile: '~/uat/c.yml',
+          service: 'app',
+          imageName: 'a',
+        }),
+      ],
+    });
+    if (!c.ok) throw new Error('compile');
+    const user = userEvent.setup();
+    serve(
+      state({
+        improvedAvailable: true,
+        current: {
+          setup: { ...c.setup, generator: 'setup-1.0' },
+          handEdited: [],
+          recipePresent: true,
+          recipeStatus: 'approved',
+          observedHash: 'a'.repeat(64),
+          approvedHash: 'a'.repeat(64),
+          lint: [],
+          dryRunOk: ['uat'],
+          custom: false,
+        },
+      }),
+    );
+    routes[`POST /api/projects/${PROJECT}/delivery/setup/preview`] = () =>
+      json({
+        ok: false,
+        issues: ['uat: the health check uses the app address, but no app address is set'],
+        hash: null,
+        files: [],
+        keep: [],
+        lint: [],
+        changes: [],
+        differsFromCurrent: false,
+        needsDryRun: [],
+      });
+    wrap(<DeploySetup projectId={PROJECT} />);
+    await user.click(await screen.findByTestId('setup-improved-update'));
+    const box = await screen.findByTestId('setup-improved-issues');
+    expect(box).toHaveTextContent('“Test copy” has no web address yet');
+    expect(box).toHaveTextContent('Address Guildwise checks after an update');
+    expect(box).not.toHaveTextContent('app address is set');
+    expect(calls.some((x) => x.url.endsWith('/setup/publish'))).toBe(false);
+  });
+
   it('approval: a script edited by hand, or a recipe nobody generated, is tried too (every environment)', async () => {
     const c = compileSetup({
       environments: [
