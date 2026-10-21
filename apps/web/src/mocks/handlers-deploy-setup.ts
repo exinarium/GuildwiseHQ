@@ -1,57 +1,41 @@
 import {
   compileSetup,
-  localAdoptEnv,
+  type DeliverySetup,
   type ProbeReport,
   planChanges,
   SETUP_GENERATOR,
-  sshShipEnv,
 } from '@aom/shared';
 import { HttpResponse, http } from 'msw';
+import {
+  ago,
+  bareServerReport,
+  hostsReport,
+  newHash,
+  proposal,
+  reportFor,
+  scenarioName,
+  serverReport,
+  setScenario,
+  store,
+  T1,
+  T2,
+  update,
+  WS,
+  WS2,
+} from './env-store.ts';
 
 /**
- * Mock server for the guided deploy setup (VITE_MSW=1 dev). The scenario comes from `localStorage['aom-mock-deploy']`:
- * `empty` (default), `ready` (a test copy and the live site, saved), `waiting` (saved, nobody tried it yet), `proposal`
- * (DevOps has a suggestion), `old` (the runner needs an update). A probe answers at once from fixed sample facts.
+ * Mock server for the guided deploy setup and the Environments page (VITE_MSW=1 dev). The scenario comes from
+ * `localStorage['aom-mock-deploy']` (see env-store.ts); the page's changes are kept in `localStorage['aom-mock-env']`.
  */
 const A = '/api';
-const scenario = () =>
-  (typeof localStorage !== 'undefined' && localStorage.getItem('aom-mock-deploy')) || 'empty';
-const setScenario = (s: string) => localStorage.setItem('aom-mock-deploy', s);
-const ago = (min: number) => new Date(Date.now() - min * 60_000).toISOString();
-const WS = '00000000-0000-4000-8000-0000000000a1';
-const WS2 = '00000000-0000-4000-8000-0000000000a2';
-const T1 = '00000000-0000-4000-8000-0000000000f1';
-const T2 = '00000000-0000-4000-8000-0000000000f2';
+const scenario = scenarioName;
+void WS2;
+void T2;
+void serverReport;
+void bareServerReport;
+void hostsReport;
 
-const uatEnv = () =>
-  localAdoptEnv({
-    name: 'uat',
-    label: 'Test copy',
-    target: 'shop-uat',
-    composeFile: '~/shop-uat/docker-compose.yml',
-    composeProject: 'shop-uat',
-    service: 'app',
-    imageName: 'shop-uat-app',
-    appUrl: 'http://localhost:8080',
-    database: { service: 'postgres', dir: '~/shop-uat/backups' },
-  });
-const prodEnv = () =>
-  sshShipEnv(
-    {
-      name: 'production',
-      label: 'Live site',
-      target: 'shop-live',
-      host: 'prod-server',
-      composeFile: '/opt/shop/docker-compose.yml',
-      service: 'app',
-      imageName: 'shop',
-      imageVar: 'SHOP_IMAGE',
-      healthUrl: 'https://shop.example.com/ready',
-      database: { service: 'postgres', dir: '/opt/shop/backups' },
-    },
-    'uat',
-  );
-/** A throwaway RSA public key (SPKI, base64) so the browser can really seal a password; nobody holds the private half. */
 const MOCK_RUNNER_KEY =
   'MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAyPsQ9mQHfUXOPgmcIYCfzV7GKofuKILmFsVejRjpjKKAjQrjaeTVuH14F0X9p0w/VwGMmlaAbEE60Fou/E+1uIFsJbYpdWIO819i4jqvpZP0QJKHszgXW22NsdQVaUPjt6tXH3Zs0PLEnu0uy2aRoRQGSP505sI2/sGQf8vyJ5cDPVds9vyq9JOJqKJCL+1srIhpcFnwMuXVonT6DpR4EX8EPT6GnqHT1QtGNfSsDep6fcIUw+4nVFzE5I5UBQPPYhuUTDu6oYlVi16WdTOWAxg0IdoC+H5etwKy+ej9jFtJzZqxOaOfnj7WafB7V/ZDuk/cQowEt1j5XcCDC6rwdQIDAQAB';
 const FP_ED = 'SHA256:5kXwQ2m0n7yT1p3QbZ9sJd8vLr4uHc6aGfE2iNoPtYw';
@@ -61,203 +45,6 @@ const op = (kind: string, ok: boolean, result: unknown, errorText: string | null
   ops.set(id, { id, kind, state: ok ? 'done' : 'failed', ok, result, errorText, at: ago(0) });
   return id;
 };
-const setup = () => {
-  const c = compileSetup({ environments: [uatEnv(), prodEnv()] });
-  return c.ok ? c.setup : null;
-};
-
-const base = {
-  version: 1,
-  mode: 'guided',
-};
-void base;
-
-const part = (name: string, extra: Record<string, unknown> = {}) => ({
-  name,
-  ports: [],
-  volumes: [],
-  envFiles: [],
-  vars: [],
-  ...extra,
-});
-const localReport = () => ({
-  scope: 'local',
-  at: ago(1),
-  docker: { installed: true, usable: true, version: '29.1.2', composeVersion: '2.40.0' },
-  containers: [
-    {
-      name: 'shop-uat-app-1',
-      project: 'shop-uat',
-      service: 'app',
-      image: 'shop-uat-app',
-      state: 'running',
-      status: 'Up 3 days',
-      ports: [{ host: 8080, container: 4600, bind: '0.0.0.0' }],
-    },
-    {
-      name: 'shop-uat-postgres-1',
-      project: 'shop-uat',
-      service: 'postgres',
-      image: 'postgres:18',
-      state: 'running',
-      status: 'Up 3 days',
-      ports: [],
-    },
-    {
-      name: 'shop-uat-mailpit-1',
-      project: 'shop-uat',
-      service: 'mailpit',
-      image: 'axllent/mailpit',
-      state: 'running',
-      ports: [],
-    },
-    { name: 'notes-db-1', project: 'notes', service: 'db', image: 'redis:7', state: 'running', ports: [] },
-  ],
-  composeFiles: [
-    {
-      path: '/home/ada/shop-uat/docker-compose.yml',
-      project: 'shop-uat',
-      services: [
-        part('postgres', { image: 'postgres:18', database: 'postgres', volumes: ['pgdata'] }),
-        part('app', { build: '/home/ada/src/shop', ports: ['8080:4600'] }),
-        part('mailpit', { image: 'axllent/mailpit:latest' }),
-      ],
-      volumes: ['pgdata'],
-    },
-  ],
-  volumes: ['shop-uat_pgdata', 'notes_data'],
-  folders: [],
-  backups: [
-    {
-      dir: '/home/ada/shop-uat/backups',
-      count: 4,
-      newestName: 'uat-before-ab12cd34.sql.gz',
-      newestAt: ago(2880),
-    },
-  ],
-  proxies: [],
-  urls: [{ url: 'http://localhost:8080/api/health', status: 200 }],
-  listeners: [],
-});
-const hostsReport = () => ({
-  scope: 'ssh_hosts',
-  at: ago(1),
-  containers: [],
-  composeFiles: [],
-  volumes: [],
-  folders: [],
-  backups: [],
-  proxies: [],
-  urls: [],
-  listeners: [],
-  sshHosts: [
-    { alias: 'prod-server', hostname: '192.0.2.10', user: 'root', hasIdentity: true, state: 'reachable' },
-    { alias: 'fresh-vps', hostname: '192.0.2.77', user: 'root', hasIdentity: true, state: 'reachable' },
-    {
-      alias: 'backup-box',
-      hostname: '192.0.2.44',
-      user: 'ada',
-      hasIdentity: false,
-      state: 'asks_password',
-      detail: 'it did not accept the sign-in without a password',
-    },
-    {
-      alias: 'old-vps',
-      hostname: '192.0.2.99',
-      user: 'root',
-      hasIdentity: true,
-      state: 'host_key_changed',
-      detail: "the server's identity changed",
-    },
-  ],
-});
-const serverReport = () => ({
-  scope: 'ssh_target',
-  host: 'prod-server',
-  at: ago(1),
-  docker: { installed: true, usable: true, version: '29.1.2', composeVersion: '2.40.0' },
-  containers: [
-    {
-      name: 'shop-app-1',
-      project: 'shop',
-      service: 'app',
-      image: 'shop:4f2c1ab',
-      state: 'running',
-      status: 'Up 2 days',
-      ports: [],
-    },
-    {
-      name: 'shop-postgres-1',
-      project: 'shop',
-      service: 'postgres',
-      image: 'postgres:18',
-      state: 'running',
-      ports: [],
-    },
-    {
-      name: 'caddy',
-      image: 'caddy:2',
-      state: 'running',
-      ports: [{ host: 443, container: 443, bind: '0.0.0.0' }],
-    },
-  ],
-  composeFiles: [
-    {
-      path: '/opt/shop/docker-compose.yml',
-      project: 'shop',
-      services: [
-        part('app', { image: '${SHOP_IMAGE}', vars: ['SHOP_IMAGE'] }),
-        part('postgres', { image: 'postgres:18', database: 'postgres' }),
-      ],
-      volumes: ['pgdata'],
-    },
-  ],
-  volumes: ['shop_pgdata'],
-  folders: [
-    {
-      path: '/opt/shop',
-      exists: true,
-      entries: ['docker-compose.yml', '.env', 'backups'],
-      envKeys: ['SHOP_IMAGE', 'DATABASE_URL'],
-      imageVars: [{ name: 'SHOP_IMAGE', value: 'shop:4f2c1ab' }],
-    },
-  ],
-  backups: [
-    {
-      dir: '/opt/shop/backups',
-      count: 9,
-      newestName: 'production-before-4f2c1ab-2026.sql.gz',
-      newestAt: ago(4320),
-    },
-  ],
-  proxies: [{ kind: 'caddy', via: 'container', name: 'caddy', sites: ['shop.example.com'] }],
-  urls: [{ url: 'https://shop.example.com/ready', status: 200 }],
-  listeners: [80, 443],
-});
-
-const bareServerReport = () => ({
-  scope: 'ssh_target',
-  host: 'fresh-vps',
-  at: ago(0),
-  os: 'Linux x86_64',
-  docker: { installed: false, usable: false },
-  containers: [],
-  composeFiles: [],
-  volumes: [],
-  folders: [],
-  backups: [],
-  proxies: [],
-  urls: [],
-  listeners: [],
-});
-const bareLocalReport = () => ({
-  ...localReport(),
-  containers: [],
-  composeFiles: [],
-  backups: [],
-  volumes: [],
-  urls: [],
-});
 
 let probes: Array<Record<string, unknown>> = [];
 let published: Record<string, unknown> | null = null;
@@ -412,7 +199,13 @@ const newServerReport = () => ({
   listeners: [],
 });
 
-const probeDto = (scope: string, host: string | null, report: unknown, targetId: string | null = null) => ({
+const probeDto = (
+  scope: string,
+  host: string | null,
+  report: unknown,
+  targetId: string | null = null,
+  dirs: string[] = [],
+) => ({
   id: crypto.randomUUID(),
   targetId,
   workstationId: WS,
@@ -423,110 +216,61 @@ const probeDto = (scope: string, host: string | null, report: unknown, targetId:
   report,
   error: null,
   errorText: null,
+  dirs,
 });
 
-function proposal() {
-  return {
-    id: '00000000-0000-4000-8000-0000000000c1',
-    area: 'deploy',
-    status: 'open',
-    requestId: '00000000-0000-4000-8000-0000000000d1',
-    workstationId: WS,
-    workstationName: 'Office PC',
-    submittedAt: ago(3),
-    proposal: {
-      area: 'deploy',
-      deploy: setup(),
-      items: [
-        { path: '/environments/0', confidence: 'found', evidence: [{ file: 'docker-compose.yml' }] },
-        {
-          path: '/environments/1/app/imageVar',
-          confidence: 'guessed',
-          evidence: [],
-          note: 'the only setting that names an image',
-        },
-      ],
-      questions: [
-        {
-          path: '/environments/1/app/imageVar',
-          question: 'Which setting holds the app version on the server?',
-          options: ['SHOP_IMAGE'],
-          default: 'SHOP_IMAGE',
-        },
-      ],
-      secretsNeeded: [],
-      notes:
-        'The test copy is a Docker Compose project called shop-uat. The live site is built here and shipped over ssh.',
-      filesRead: ['docker-compose.yml', 'Dockerfile', 'deploy/Caddyfile', 'README.md'],
-    },
-  };
-}
+const targetDto = (t: ReturnType<typeof store>['targets'][number]) => ({
+  id: t.id,
+  name: t.name,
+  kind: t.kind,
+  production: t.production,
+  workstationId: t.workstationId,
+  workstationName: t.workstationName,
+  workstationOnline: t.workstationOnline,
+  host: t.host,
+  appUrl: t.appUrl,
+  connection: t.reach
+    ? { state: t.reach, at: ago(t.reachAgo), detail: null, method: 'existing_alias' }
+    : null,
+  keys: [],
+  role: t.role,
+});
 
 function state() {
-  const s = scenario();
-  const saved = s === 'ready' || s === 'waiting' || s === 'improved';
-  const envs = saved ? setup() : null;
+  const st = store();
+  const envs = st.setup;
+  const present = !!envs;
+  const names = envs ? envs.environments.map((e) => e.name) : [];
+  const moving = moveScenario() === 'standby' || moveScenario() === 'retired';
   return {
-    canEdit: true,
-    canApprove: true,
-    draft: null,
+    canEdit: !st.member,
+    canApprove: !st.member,
+    draft: st.draft ? { setup: st.draft, customScripts: {}, proposalId: null, updatedAt: ago(30) } : null,
     current: {
       setup: envs,
       handEdited: [],
-      recipePresent: saved,
-      recipeStatus: saved ? 'observed' : null,
-      observedHash: saved ? 'a'.repeat(64) : null,
-      approvedHash: null,
+      recipePresent: present,
+      recipeStatus: st.status === 'none' ? null : st.status,
+      observedHash: present ? st.hash : null,
+      approvedHash: st.approvedHash,
       lint: [],
-      dryRunOk: s === 'ready' ? ['uat'] : [],
+      dryRunOk: st.tried,
+      dryRunMissing: names.filter((n) => !st.tried.includes(n)),
+      envNames: names,
       custom: false,
     },
     publish: published,
-    targets: [
-      ...moveTargets(),
-      {
-        id: T1,
-        name: 'shop-uat',
-        kind: 'local_docker',
-        production: false,
-        workstationId: WS,
-        workstationName: 'Office PC',
-        workstationOnline: true,
-        host: null,
-        appUrl: 'http://localhost:8080',
-        connection: null,
-      },
-      ...(moveScenario() === 'standby' || moveScenario() === 'retired'
-        ? []
-        : [
-            {
-              id: T2,
-              name: 'shop-live',
-              kind: 'remote_ssh',
-              production: true,
-              workstationId: WS,
-              workstationName: 'Office PC',
-              workstationOnline: true,
-              host: 'prod-server',
-              appUrl: 'https://shop.example.com',
-              connection: saved
-                ? { state: 'reachable', at: ago(5), detail: null, method: 'existing_alias' }
-                : null,
-              keys: [],
-              role: 'active',
-            },
-          ]),
-    ],
+    targets: [...moveTargets(), ...st.targets.filter((t) => !(moving && t.id === T2)).map(targetDto)],
     workstations: [
       {
         id: WS,
         name: 'Office PC',
         connected: true,
         mine: true,
-        canProbe: s !== 'old',
-        blocked: s === 'old' ? 'Guildwise on Office PC needs an update for guided setup.' : null,
-        canConnect: s !== 'old',
-        canMove: s !== 'old',
+        canProbe: !st.old,
+        blocked: st.old ? 'Guildwise on Office PC needs an update for guided setup.' : null,
+        canConnect: !st.old,
+        canMove: !st.old,
       },
       {
         id: WS2,
@@ -542,10 +286,60 @@ function state() {
     writeBlocked: null,
     scan: null,
     scanProblem: null,
-    proposal: s === 'proposal' ? proposal() : null,
+    proposal: st.proposal.open ? proposal(st) : null,
     generator: SETUP_GENERATOR,
-    improvedAvailable: s === 'improved',
+    improvedAvailable: st.improved,
+    unmodelled: st.unmodelled,
   };
+}
+
+const isNative = (e: unknown) => (e as { runtime?: { kind?: string } }).runtime?.kind === 'native';
+
+/** The compile result of a request body; an environment that runs directly on the machine is not Docker, so it is not compiled here. */
+function compileBody(body: unknown) {
+  const envs = ((body as { environments?: unknown[] } | null)?.environments ?? []) as unknown[];
+  if (envs.some(isNative)) return { native: true as const, setup: body as DeliverySetup };
+  const c = compileSetup(body);
+  return c.ok ? { native: false as const, c, setup: c.setup } : { native: false as const, issues: c.issues };
+}
+
+const reportsOf = (setup: DeliverySetup) => {
+  const sc = scenario();
+  return Object.fromEntries(
+    setup.environments.map((e) => [
+      e.name,
+      reportFor(sc, e.hosting === 'ssh' ? 'ssh_target' : 'local', e.host) as ProbeReport,
+    ]),
+  );
+};
+
+/** Changes list of an environment that runs directly on the machine (it is not compiled in the mock). */
+function nativeChanges(setup: DeliverySetup) {
+  return setup.environments.flatMap((e) => {
+    const rt = (
+      e as unknown as { runtime?: { name: string; folder: string; restart: { via: string; target: string } } }
+    ).runtime;
+    if (!rt) return [];
+    const how =
+      rt.restart.via === 'service'
+        ? `restart the service ${rt.restart.target}`
+        : rt.restart.via === 'pm2'
+          ? `restart ${rt.restart.target} with pm2`
+          : `run ${rt.restart.target}`;
+    return [
+      { group: 'reuse', text: `${rt.name} in ${rt.folder} is used as it is`, env: e.name },
+      { group: 'each_deploy', text: 'Get the new version of the code', env: e.name },
+      { group: 'each_deploy', text: 'Build it in a new folder next to the current one', env: e.name },
+      { group: 'each_deploy', text: 'Switch to the new version', env: e.name },
+      { group: 'each_deploy', text: `Then ${how} and check the app answers`, env: e.name },
+      { group: 'each_deploy', text: 'Keep the last 5 versions so you can go back', env: e.name },
+      {
+        group: 'untouched',
+        text: 'Your data, settings files and everything else on the machine',
+        env: e.name,
+      },
+    ];
+  });
 }
 
 export const deploySetupHandlers = [
@@ -596,37 +390,66 @@ export const deploySetupHandlers = [
     return HttpResponse.json({ commandId: crypto.randomUUID() }, { status: 202 });
   }),
   http.get(`${A}/projects/:id/delivery/setup`, () => HttpResponse.json(state())),
-  http.put(`${A}/projects/:id/delivery/setup`, () => HttpResponse.json(state())),
+  http.put(`${A}/projects/:id/delivery/setup`, async ({ request }) => {
+    const b = (await request.json()) as { setup: DeliverySetup };
+    update((s) => {
+      s.draft = b.setup;
+    });
+    return HttpResponse.json(state());
+  }),
+  http.delete(`${A}/projects/:id/delivery/setup/draft`, () => {
+    update((s) => {
+      s.draft = null;
+      s.unmodelled = [];
+    });
+    return HttpResponse.json({ ok: true });
+  }),
   http.post(`${A}/projects/:id/delivery/probe`, async ({ request }) => {
-    const b = (await request.json()) as { scope: string; host?: string };
+    const b = (await request.json()) as {
+      scope: string;
+      host?: string;
+      targetId?: string;
+      hints?: { dirs?: string[] };
+    };
+    const dirs = b.hints?.dirs ?? [];
     const report =
-      b.scope === 'ssh_target' && (b as { targetId?: string }).targetId === T3
+      b.scope === 'ssh_target' && b.targetId === T3
         ? newServerReport()
-        : b.scope === 'local'
-          ? localStorage.getItem('aom-mock-local') === 'bare'
-            ? bareLocalReport()
-            : localReport()
-          : b.scope === 'ssh_hosts'
-            ? hostsReport()
-            : b.host === 'fresh-vps'
-              ? bareServerReport()
-              : serverReport();
-    const tid = (b as { targetId?: string }).targetId ?? null;
+        : b.scope === 'ssh_check'
+          ? reportFor(scenario(), 'ssh_hosts', undefined)
+          : reportFor(scenario(), b.scope, b.host, dirs);
+    const tid = b.targetId ?? null;
     probes = [
       ...probes.filter(
         (p) => !(p.scope === b.scope && (p.host ?? null) === (b.host ?? null) && p.targetId === tid),
       ),
-      probeDto(b.scope, b.host ?? null, report, tid),
+      probeDto(b.scope, b.host ?? null, report, tid, dirs),
     ];
     return HttpResponse.json({ commandId: crypto.randomUUID(), workstationId: WS }, { status: 202 });
   }),
   http.post(`${A}/projects/:id/delivery/setup/preview`, async ({ request }) => {
-    const b = (await request.json()) as { setup: unknown };
-    const c = compileSetup(b.setup);
-    if (!c.ok)
+    const b = (await request.json()) as { setup: unknown; removeFiles?: string[] };
+    const r = compileBody(b.setup);
+    const st = store();
+    const unmodelled = st.unmodelled;
+    if (r.native)
+      return HttpResponse.json({
+        ok: true,
+        issues: [],
+        hash: newHash(),
+        files: [],
+        keep: [],
+        unmodelled,
+        removing: b.removeFiles ?? [],
+        lint: [],
+        changes: nativeChanges(r.setup),
+        differsFromCurrent: true,
+        needsDryRun: r.setup.environments.map((e) => e.name),
+      });
+    if (!r.c)
       return HttpResponse.json({
         ok: false,
-        issues: c.issues,
+        issues: r.issues,
         hash: null,
         files: [],
         keep: [],
@@ -638,38 +461,290 @@ export const deploySetupHandlers = [
     return HttpResponse.json({
       ok: true,
       issues: [],
-      hash: c.hash,
-      files: c.files,
-      keep: c.keep,
+      hash: r.c.hash,
+      files: r.c.files,
+      keep: r.c.keep,
+      unmodelled,
+      removing: b.removeFiles ?? [],
       lint: [],
-      changes: planChanges(c.setup, {
-        uat: localReport() as unknown as ProbeReport,
-        production: serverReport() as unknown as ProbeReport,
-      }),
+      changes: planChanges(r.setup, reportsOf(r.setup)),
       differsFromCurrent: true,
-      needsDryRun: c.setup.environments.map((e) => e.name),
+      needsDryRun: r.setup.environments.map((e) => e.name),
     });
   }),
-  http.post(`${A}/projects/:id/delivery/setup/publish`, async () => {
+  http.post(`${A}/projects/:id/delivery/setup/publish`, async ({ request }) => {
+    const b = (await request.json()) as { setup: DeliverySetup; removeFiles?: string[] };
+    const r = compileBody(b.setup);
+    update((s) => {
+      const wasApproved = s.status === 'approved' || s.status === 'changed_unapproved';
+      s.setup = r.native ? b.setup : r.c ? r.setup : b.setup;
+      s.status = wasApproved ? 'changed_unapproved' : 'observed';
+      s.hash = newHash();
+      s.tried = [];
+      s.draft = null;
+      s.unmodelled = s.unmodelled.filter((f) => !(b.removeFiles ?? []).includes(f));
+      for (const e of s.setup.environments)
+        if (!s.runs[e.name]) s.runs[e.name] = { version: '', commit: '', sinceMin: 0, health: 'unknown' };
+    });
     published = { setupHash: 'a'.repeat(64), commandId: 'c1', status: 'written', error: null, at: ago(0) };
-    setScenario('waiting');
     return HttpResponse.json({ commandId: 'c1', hash: 'a'.repeat(64) }, { status: 202 });
   }),
-  http.post(`${A}/projects/:id/delivery/setup/dry-run`, () => {
-    setScenario('ready');
-    return HttpResponse.json({ message: 'Queued on Office PC.', runs: [{ status: 'queued' }] });
+  http.post(`${A}/projects/:id/delivery/setup/dry-run`, async ({ request }) => {
+    const b = (await request.json()) as { env: string };
+    update((s) => {
+      if (!s.tried.includes(b.env)) s.tried.push(b.env);
+    });
+    return HttpResponse.json({
+      message:
+        'Would back up the database, build the new version, copy it over and check the site. Nothing was changed.',
+      runs: [{ status: 'succeeded' }],
+    });
+  }),
+  http.post(`${A}/projects/:id/delivery/approve`, () => {
+    update((s) => {
+      s.status = 'approved';
+      s.approvedHash = s.hash;
+    });
+    return HttpResponse.json({});
   }),
   http.post(`${A}/projects/:id/delivery/setup/use-proposal`, () => {
-    setScenario('waiting');
+    update((s) => {
+      s.draft = proposal(s).proposal.deploy as DeliverySetup;
+      s.proposal.open = false;
+      s.targets = s.targets.length
+        ? s.targets
+        : [
+            {
+              id: T1,
+              name: 'shop-uat',
+              kind: 'local_docker',
+              production: false,
+              workstationId: WS,
+              workstationName: 'Office PC',
+              workstationOnline: true,
+              host: null,
+              appUrl: 'http://localhost:8080',
+              reach: null,
+              reachAgo: 0,
+              role: 'active',
+            },
+          ];
+    });
     return HttpResponse.json(state());
+  }),
+  http.post(`${A}/setup-proposals/:id/answers`, async ({ request }) => {
+    const b = (await request.json()) as {
+      answers: Array<{ path: string; value: string | number | boolean }>;
+    };
+    const st = update((s) => {
+      for (const a of b.answers) s.proposal.answers[a.path] = a.value;
+    });
+    const p = proposal(st);
+    const remaining = p.proposal.questions.filter((q) => st.proposal.answers[q.path] === undefined).length;
+    return HttpResponse.json({ proposal: p, remaining });
   }),
   http.post(`${A}/projects/:id/scan`, async ({ request }) => {
     const b = (await request.json()) as { area?: string };
-    if (b.area === 'deploy') setScenario('proposal');
+    if (b.area === 'deploy') {
+      setScenario('proposal');
+    }
     return HttpResponse.json({ requestId: crypto.randomUUID() }, { status: 202 });
   }),
-  http.post(`${A}/projects/:id/deploy-targets`, () => HttpResponse.json({ id: T1 })),
-  http.patch(`${A}/deploy-targets/:id`, () => HttpResponse.json({ id: T1 })),
+  http.get(`${A}/projects/:id/deploy-targets`, () =>
+    HttpResponse.json({
+      targets: [...moveTargets(), ...store().targets].map((t) => ({
+        id: t.id,
+        projectId: '00000000-0000-4000-8000-000000000000',
+        name: t.name,
+        kind: t.kind,
+        workstationId: t.workstationId,
+        workstationName: t.workstationName,
+        host: t.host,
+        appUrl: t.appUrl,
+        notes: '',
+        createdAt: ago(5000),
+        production: t.production,
+        role: t.role,
+      })),
+    }),
+  ),
+  http.post(`${A}/projects/:id/deploy-targets`, async ({ request }) => {
+    const b = (await request.json()) as {
+      name: string;
+      kind: 'local_docker' | 'remote_ssh';
+      workstationId?: string | null;
+      host?: string | null;
+      appUrl?: string | null;
+      production?: boolean;
+    };
+    const id = crypto.randomUUID();
+    update((s) => {
+      s.targets.push({
+        id,
+        name: b.name,
+        kind: b.kind,
+        production: !!b.production,
+        workstationId: b.workstationId ?? WS,
+        workstationName: 'Office PC',
+        workstationOnline: true,
+        host: b.host ?? null,
+        appUrl: b.appUrl ?? null,
+        reach: b.kind === 'remote_ssh' ? 'reachable' : null,
+        reachAgo: 0,
+        role: 'active',
+      });
+    });
+    return HttpResponse.json({ id }, { status: 201 });
+  }),
+  http.patch(`${A}/deploy-targets/:id`, async ({ params, request }) => {
+    const b = (await request.json()) as Record<string, unknown>;
+    update((s) => {
+      const t = s.targets.find((x) => x.id === params.id);
+      if (t) Object.assign(t, b);
+    });
+    return HttpResponse.json({ id: params.id });
+  }),
+  http.delete(`${A}/deploy-targets/:id`, ({ params }) => {
+    const s = store();
+    const t = s.targets.find((x) => x.id === params.id);
+    const users = (s.setup?.environments ?? []).filter((e) => e.target === t?.name);
+    if (users.length)
+      return HttpResponse.json(
+        {
+          error: {
+            code: 'in_use',
+            message: `Used by ${users.map((u) => u.label).join(', ')}: change that first.`,
+          },
+        },
+        { status: 409 },
+      );
+    update((x) => {
+      x.targets = x.targets.filter((y) => y.id !== params.id);
+    });
+    return HttpResponse.json({ ok: true });
+  }),
+  http.post(`${A}/deploy-targets/merge`, async ({ request }) => {
+    const b = (await request.json()) as { fromId: string; toId: string };
+    update((s) => {
+      const from = s.targets.find((t) => t.id === b.fromId);
+      const to = s.targets.find((t) => t.id === b.toId);
+      if (!from || !to) return;
+      const repoint = (d: DeliverySetup | null) => {
+        for (const e of d?.environments ?? []) if (e.target === from.name) e.target = to.name;
+      };
+      repoint(s.setup);
+      repoint(s.draft);
+      s.targets = s.targets.filter((t) => t.id !== from.id);
+      if (s.setup) {
+        s.status = 'changed_unapproved';
+        s.tried = [];
+        s.hash = newHash();
+      }
+    });
+    return HttpResponse.json({ ok: true });
+  }),
+  http.delete(`${A}/projects/:id/delivery/environments/:name`, ({ params }) => {
+    update((s) => {
+      if (!s.setup) return;
+      const left = s.setup.environments.filter((e) => e.name !== params.name);
+      s.setup = left.length ? { ...s.setup, environments: left } : null;
+      delete s.runs[String(params.name)];
+      s.tried = s.tried.filter((n) => n !== params.name);
+      if (!s.setup) {
+        s.status = 'none';
+        s.approvedHash = null;
+      } else {
+        s.hash = newHash();
+        if (s.status === 'approved') s.status = 'changed_unapproved';
+        s.tried = s.setup.environments.map((e) => e.name).filter((n) => s.tried.includes(n));
+      }
+    });
+    return HttpResponse.json({ ok: true });
+  }),
+  http.get(`${A}/projects/:id/environments/status`, () => {
+    const s = store();
+    const rules = localStorage.getItem('aom-mock-rules') === 'met';
+    return HttpResponse.json({
+      environments: (s.setup?.environments ?? []).map((e) => {
+        const r = s.runs[e.name];
+        const live = e.target === 'shop-live' || e.name === 'production' || e.name === 'live-site';
+        return {
+          env: e.name,
+          version: r?.version || null,
+          commit: r?.commit || null,
+          since: r?.version ? ago(r.sinceMin) : null,
+          health: r?.health ?? 'unknown',
+          appUrl: e.app.appUrl ?? null,
+          updatingStep: null,
+          lastRun: r?.failed
+            ? {
+                id: crypto.randomUUID(),
+                status: 'failed',
+                at: ago(20),
+                summary: null,
+                failedStep: r.failed.step,
+                reason: r.failed.reason,
+                wentBackTo: r.failed.wentBackTo ?? null,
+              }
+            : r?.version
+              ? {
+                  id: crypto.randomUUID(),
+                  status: 'succeeded',
+                  at: ago(r.sinceMin),
+                  summary: null,
+                  failedStep: null,
+                  reason: null,
+                  wentBackTo: null,
+                }
+              : null,
+          waitingRelease:
+            live && r?.version && s.status === 'approved'
+              ? {
+                  commit: 'a1b2c3d4e5f6',
+                  version: '0.9.4',
+                  cards: [
+                    { ref: 'P5-12', title: 'Add the order export' },
+                    { ref: 'P5-15', title: 'Fix the login redirect' },
+                  ],
+                  rulesMet: rules,
+                  waitingFor: rules ? [] : ['test site healthy for 3 more minutes'],
+                  places: [
+                    { runId: '00000000-0000-4000-8000-0000000000b1', targetId: T2, name: 'prod-server' },
+                  ],
+                }
+              : null,
+        };
+      }),
+    });
+  }),
+  http.get(`${A}/projects/:id/delivery`, () => {
+    const s = store();
+    return HttpResponse.json({
+      mode: 'recipe',
+      canChangeMode: !s.member,
+      canApprove: !s.member,
+      vault: { folder: 'projects/p5', name: 'P5 vault', storage: 'git' },
+      recipe: {
+        present: !!s.setup,
+        status: s.status === 'none' ? 'absent' : s.status,
+        observedHash: s.setup ? s.hash : null,
+        approvedHash: s.approvedHash,
+        version: s.approvedHash ? 3 : 0,
+        approvedAt: ago(2000),
+        changes: [],
+        lint: [],
+      },
+      environments: (s.setup?.environments ?? []).map((e) => ({
+        name: e.name,
+        targets: [{ name: e.target, production: e.target === 'shop-live', exists: true }],
+        releasedBy: e.releasedBy,
+        gate: 'inline',
+        triggers: e.trigger,
+        secrets: e.secrets,
+      })),
+      secrets: [],
+    });
+  }),
   http.get(`${A}/projects/:id/delivery/probes`, () => HttpResponse.json({ probes })),
   // guided connect (v2): every operation answers at once with sample facts
   http.get(`${A}/workstations/:id/sudo-key`, () =>
