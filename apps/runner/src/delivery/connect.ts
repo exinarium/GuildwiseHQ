@@ -528,8 +528,10 @@ export class DeployConnector {
 
   async revoke(p: DeployRevokePayload): Promise<DeployRevokeResult> {
     const r = await this.revokeOnServer(p);
-    // "Remove this server": this computer's key material for it goes whatever the server said (it may be gone for good)
+    // "Remove this server": this computer's key material for it goes when the server dropped the key, or when the person confirmed
+    // that it may go anyway (the server may be gone for good). Otherwise it is kept, so the removal can be tried again.
     if (p.forget) {
+      if (!r.ok && !p.forgetAnyway) return { ...r, forgotten: false, localKeyKept: true } as DeployRevokeResult;
       try {
         this.deps.keys.forget(p.targetId);
         return { ...r, forgotten: true } as DeployRevokeResult;

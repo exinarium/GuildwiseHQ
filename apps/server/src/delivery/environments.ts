@@ -73,13 +73,28 @@ function rawEnvs(setup: unknown): Array<{ name: string; label: string; target: s
   });
 }
 
-/** The saved environments including those of a recipe that is not from the guided setup (several targets each). */
+/**
+ * The saved environments: those of the observed guided setup, those of a recipe that is not from the guided setup (several
+ * targets each), and those of the APPROVED recipe (what is allowed to run, even when the files in the vault changed since).
+ */
 function savedEnvUsage(recipe: Row | undefined): Array<{ name: string; label: string; targets: string[] }> {
+  const out: Array<{ name: string; label: string; targets: string[] }> = [];
+  const add = (name: string, label: string, targets: string[]) => {
+    const known = out.find((x) => x.name === name);
+    if (!known) out.push({ name, label, targets: [...targets] });
+    else for (const t of targets) if (!known.targets.some((k) => lc(k) === lc(t))) known.targets.push(t);
+  };
   const guided = rawEnvs(recipe?.setup);
-  if (guided.length) return guided.map((e) => ({ name: e.name, label: e.label, targets: [e.target] }));
-  const parsed = (recipe?.parsed as { environments?: Array<{ name: string; targets: string[] }> } | null)
-    ?.environments;
-  return (parsed ?? []).map((e) => ({ name: e.name, label: e.name, targets: e.targets }));
+  if (guided.length) for (const e of guided) add(e.name, e.label, [e.target]);
+  else
+    for (const e of (recipe?.parsed as { environments?: Array<{ name: string; targets: string[] }> } | null)
+      ?.environments ?? [])
+      add(e.name, e.name, e.targets);
+  for (const e of (
+    recipe?.approved_parsed as { environments?: Array<{ name: string; targets: string[] }> } | null
+  )?.environments ?? [])
+    add(e.name, e.name, e.targets ?? []);
+  return out;
 }
 
 async function usageOf(db: Queryable, projectId: string): Promise<Usage> {
@@ -271,10 +286,7 @@ export async function removePlace(
     await inOpenMove(ctx.pool, t.id),
   );
   if (block) throw conflict(block.code, block.message);
-  // the key cleanup is started FIRST (it carries everything it needs), then the place goes whatever happens to it
-  let keyCleanup: RemovePlaceResult['keyCleanup'] = { state: 'none', commandId: null, reason: null };
-  if (req.removeKey && t.kind === 'remote_ssh')
-    keyCleanup = await revokeKeyOnRemoval(ctx, user, projectId, t);
+  // nothing is sent to any computer before the place may really go: the in-use check runs inside the removal itself
   await withAppendTx(ctx.pool, async (tx) => {
     if (await targetInUse(tx, placeId))
       throw conflict('place_in_use', 'a phase follow-up that is not finished yet uses this place');
@@ -290,6 +302,11 @@ export async function removePlace(
       { tx },
     );
   });
+  // then the key is taken off the server (a durable command that outlives the place). If the server cannot be reached the
+  // computer keeps its key until the person confirms ("forget it anyway", `localKeyKept` in the answer of the operation).
+  let keyCleanup: RemovePlaceResult['keyCleanup'] = { state: 'none', commandId: null, reason: null };
+  if (req.removeKey && t.kind === 'remote_ssh')
+    keyCleanup = await revokeKeyOnRemoval(ctx, user, projectId, t, { forgetAnyway: req.forgetKeyAnyway });
   return { removed: true, keyCleanup };
 }
 
@@ -397,6 +414,11 @@ export async function mergePlaces(
   const from = targets.find((t) => t.id === req.fromId);
   const to = targets.find((t) => t.id === req.toId);
   if (!from || !to) throw notFound('place not found');
+  if (to.role !== 'active')
+    throw unprocessable(
+      'not_duplicates',
+      `${to.name} is not in use (it is kept as a spare or retired): merge into the place that is in use`,
+    );
   const same =
     from.kind === to.kind &&
     (from.kind === 'remote_ssh'
@@ -421,11 +443,25 @@ export async function mergePlaces(
   const usage = await usageOf(ctx.pool, projectId);
   const stillUsedBySaved = (usage.saved.get(lc(from.name)) ?? []).map((x) => x.env);
   const moved = await withAppendTx(ctx.pool, async (tx) => {
-    const r = await tx.query(
-      `UPDATE phase_followups f SET target_id=$2, updated_at=$3 FROM phases ph
-        WHERE ph.id = f.phase_id AND f.target_id=$1 AND f.status IN ('pending','queued','briefed')`,
-      [from.id, to.id, ctx.clock.now()],
+    // follow-ups that have not started are re-pointed through an event (the projection replays it)
+    const open = await one(
+      tx,
+      `SELECT count(*)::int AS n FROM phase_followups WHERE target_id=$1 AND status IN ('pending','queued','briefed')`,
+      [from.id],
     );
+    if ((open?.n ?? 0) > 0)
+      await ctx.store.append(
+        [
+          {
+            streamId: streamId.project(projectId),
+            event: { type: 'PhaseFollowupRetargeted', payload: { fromTargetId: from.id, toTargetId: to.id } },
+            actor: userActor(user.id),
+            scope: projectScope(p.org_id, projectId),
+          },
+        ],
+        { tx },
+      );
+    const r = { rowCount: open?.n ?? 0 };
     let removed = false;
     if (stillUsedBySaved.length === 0 && !(await targetInUse(tx, from.id))) {
       await ctx.store.append(
@@ -552,6 +588,7 @@ export async function stopGuided(ctx: Ctx, user: AuthSession['user'], projectId:
           orgId: p.org_id,
           projectId,
           hash: recipe.approved_hash ?? recipe.observed_hash ?? null,
+          hashes: [...new Set([recipe.approved_hash, recipe.observed_hash].filter((h): h is string => !!h))],
           reason: 'stopped using guided deploys',
         },
       },

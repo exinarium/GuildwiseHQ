@@ -62,6 +62,8 @@ export type PlacesResponse = z.infer<typeof PlacesResponseSchema>;
 export const RemovePlaceRequestSchema = z.object({
   /** Also remove Guildwise's own key from the server and delete this computer's key material for it. */
   removeKey: z.boolean().default(false),
+  /** With `removeKey`: delete this computer's key even if the server cannot be asked to drop it (the person confirmed). */
+  forgetKeyAnyway: z.boolean().default(false),
 });
 export type RemovePlaceRequest = z.infer<typeof RemovePlaceRequestSchema>;
 export const RemovePlaceResultSchema = z.object({
@@ -273,8 +275,22 @@ export const ProposalAnswerSchema = z.object({
 export type ProposalAnswer = z.infer<typeof ProposalAnswerSchema>;
 export const AnswerProposalRequestSchema = z.object({
   answers: z.array(ProposalAnswerSchema).min(1).max(30),
+  /**
+   * Paths of answers that turn on `sudo` or `adoptFolder`, which the person confirmed in a separate step. An answer that turns
+   * one of them on is NOT stored until its path is listed here; the result lists what still needs the confirmation.
+   */
+  confirmed: z.array(z.string().max(300)).max(10).optional(),
 });
 export type AnswerProposalRequest = z.infer<typeof AnswerProposalRequestSchema>;
+/** An answer that was not stored yet because it turns on administrator rights or the move of a folder. */
+export const NeedsConfirmationSchema = z.object({
+  path: z.string(),
+  kind: z.enum(['sudo', 'adopt_folder']),
+  /** What the person is asked to confirm, in plain words. */
+  text: z.string(),
+});
+export type NeedsConfirmation = z.infer<typeof NeedsConfirmationSchema>;
+export const SENSITIVE_ANSWER_PATH = /(?:^|\/)(sudo|adoptFolder)$/;
 
 /** The answer of `POST .../use-proposal`: the whole `SetupStateDto` plus what the merge did. */
 export const ProposalMergeInfoSchema = z.object({

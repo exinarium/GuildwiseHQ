@@ -18,10 +18,15 @@ export const deliveryProjectors: Record<string, Projector> = {
       tx,
       `UPDATE delivery_recipes SET status='absent', present=false, observed_hash=NULL, observed_commit=NULL, parsed=NULL,
          lint='[]'::jsonb, file_count=0, files='[]'::jsonb, setup=NULL, hand_edited='{}', approved_hash=NULL,
-         approved_commit=NULL, approved_parsed=NULL, approved_files='[]'::jsonb, reset_hash=$2, updated_at=$3
+         approved_commit=NULL, approved_parsed=NULL, approved_files='[]'::jsonb, reset_hash=$2, reset_hashes=$4::text[],
+         updated_at=$3
        WHERE project_id=$1`,
-      [p.projectId, p.hash, e.createdAt],
+      [p.projectId, p.hash, e.createdAt, [...new Set([...(p.hashes ?? []), ...(p.hash ? [p.hash] : [])])]],
     );
+  },
+  DeployProbesCleared: async (tx, e) => {
+    const p = ev<'DeployProbesCleared'>(e).payload;
+    await exec(tx, 'DELETE FROM deploy_probes WHERE project_id=$1', [p.projectId]);
   },
   DeliveryRecipeObserved: async (tx, e) => {
     const p = ev<'DeliveryRecipeObserved'>(e).payload;
@@ -89,7 +94,9 @@ export const deliveryProjectors: Record<string, Projector> = {
   DeliverySetupPublished: async (tx, e) => {
     const p = ev<'DeliverySetupPublished'>(e).payload;
     // saving again (even the same files) starts fresh after an operator reset
-    await exec(tx, `UPDATE delivery_recipes SET reset_hash=NULL WHERE project_id=$1`, [p.projectId]);
+    await exec(tx, `UPDATE delivery_recipes SET reset_hash=NULL, reset_hashes='{}' WHERE project_id=$1`, [
+      p.projectId,
+    ]);
     await exec(tx, `UPDATE delivery_setup_drafts SET last_publish=$2::jsonb WHERE project_id=$1`, [
       p.projectId,
       j({
