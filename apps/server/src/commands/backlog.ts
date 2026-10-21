@@ -253,6 +253,8 @@ export async function sendBacklogItem(
     const row = await loadItem(tx, user, itemId, true);
     await assertManager(tx, user, row.org_id);
     assertOpen(row);
+    const project = await one(tx, 'SELECT status FROM projects WHERE id=$1', [row.project_id]);
+    if (project?.status !== 'active') throw conflict('project_archived', 'project is archived');
     if (!(await hasActiveBa(tx, row.org_id)))
       throw conflict('no_ba', 'Hire a business analyst (BA) first: Send to BA needs one.');
     const dto = backlogItemDto(row);

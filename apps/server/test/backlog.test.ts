@@ -149,6 +149,19 @@ describe('Send to BA', () => {
     expect(r.status).toBe(409);
   });
 
+  it('an item of an archived project cannot be sent (409 project_archived) and stays Open', async () => {
+    const item = await add('Archived project');
+    await q(`UPDATE projects SET status='archived' WHERE id=$1`, [w.projectId]);
+    try {
+      const r = await w.t.req('POST', `/api/backlog/${item.id}/send`, { cookie: cookie(), body: {} });
+      expect(r.status).toBe(409);
+      expect(r.body.error.code).toBe('project_archived');
+    } finally {
+      await q(`UPDATE projects SET status='active' WHERE id=$1`, [w.projectId]);
+    }
+    expect((await list()).find((i) => i.id === item.id)).toMatchObject({ status: 'open', cardRef: null });
+  });
+
   it('bulk: each item becomes its own card; a failed item stays Open and is named', async () => {
     const a = await add('Bulk A');
     const b = await add('Bulk B');

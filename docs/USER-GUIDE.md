@@ -471,6 +471,22 @@ What you will find there:
 
 > **In the app:** Help, "Projects" (`/help/projects`) and "Ledger and vaults" (`/help/ledger-and-vaults`).
 
+### 4.3b The project backlog
+
+Every project has a **Backlog** tab next to its **Board**. It is your list of wanted work that is **not in development yet**: nothing on the backlog is worked on by an agent, becomes a card, appears on the board or creates a desk item until you send it to the BA.
+
+**Add and edit.** Type a title in the quick-add field and press **Enter** (or **Add**, which is there for touch screens). The item is **Open**, priority **Normal**, with no tags, not starred, and its source is you. **Edit** opens the title, description (what you want), priority (Critical, High, Normal, Low) and tags. The **star** marks an item to look at soon. **Drop** sets the item to **Dropped**. Done is set only by sending; reopening a dropped item is not possible. Owners, Admins and Members of the project manage the backlog; guests can read it.
+
+**Find things.** Search looks in the title, description and tags. Filter by tag, priority, flagged, source (you or an agent) and status; the filters combine. The list shows **Open** items only until the status filter includes Done or Dropped. Sort by priority (Critical first, newest first within a priority) or by date created (newest first). Items an agent suggested show the agent's name and the card it was working on.
+
+**Send to BA.** **Send to BA** on an Open item starts a normal BA intake for the project from its title and description, exactly as if you had started it yourself. The priority maps to the card's priority (Critical 1, High 3, Normal 5, Low 8), and the priority and the tags are written at the end of the card's context. The new card goes on the board. When it exists, the item becomes **Done**, links to the card (find it with the **Done** status filter) and leaves the default list. If the intake cannot be created (for example no BA is hired, or the project is archived) the item stays Open and you see the error. Select several items and use **Send selected** to send them in one go: each becomes its own card; the ones that fail stay Open and are named.
+
+**Suggestions from agents.** An agent that finds a follow-up outside its card can add it to the backlog (`aom backlog suggest`) instead of putting it on the board. The agent and its card are recorded by the server. An agent can only add (at most 5 per shift); it cannot edit, star, drop or send. Suggestions create no desk item; the CEO's **daily report** lists the new ones since the previous report under **New backlog suggestions from agents** (project, title, priority, agent, card) and leaves the section out when there are none.
+
+**Through the CEO.** In the CEO chat you can say "add X to the backlog of project P" or "send the flagged ui items to the BA". The CEO uses `aom ceo backlog add | list | update | send`: `add` needs a project and a title (optional description, priority, tags, flag); `list` filters by project, tag, priority, flagged and status (default Open) with an optional text search; `update` changes the title, description, priority, tags or flag of one item by id, or drops it; `send` sends one item by id or all Open items that match the filters (at least one filter is required, at most 25 at once) and prints the card or the reason for each item. The web page and the CEO work on the same data and follow the same rules.
+
+> **In the app:** Help, "Board and cards" (`/help/board-and-cards`), section "The project backlog".
+
 ### 4.3a Project vaults and the code map
 
 **Every project has a vault.** It is created with the project. A vault is one of two kinds of storage:
