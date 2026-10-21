@@ -80,6 +80,7 @@ import { hrRoutes } from './routes/hr.ts';
 import { inboundRoutes } from './routes/inbound.ts';
 import { installerRoutes } from './routes/installer.ts';
 import { intakeBatchRoutes } from './routes/intake-batches.ts';
+import { backlogRoutes } from './routes/backlog.ts';
 import { intakeRoutes } from './routes/intakes.ts';
 import { integrationRoutes } from './routes/integrations.ts';
 import { interestRoutes } from './routes/interests.ts';
@@ -398,6 +399,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   await app.register(digestRoutes(ctx));
   await app.register(researchRoutes(ctx));
   await app.register(intakeRoutes(ctx));
+  await app.register(backlogRoutes(ctx));
   await app.register(intakeBatchRoutes(ctx));
   await app.register(hrRoutes(ctx));
   await app.register(designerRoutes(ctx));

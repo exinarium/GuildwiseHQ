@@ -16,17 +16,12 @@ import {
   setAgentAllowedProjects,
   suggestNames,
 } from '../commands/agents.ts';
+import { baIntakeIn, completeDraft as completeDraftIn } from '../commands/ba-intake.ts';
 import { cancelCard, specifyCardIn } from '../commands/cards.ts';
 import { cardMessage, orgScope, userActor } from '../commands/common.ts';
 import { isNearDuplicate } from '../commands/ledger-checks.ts';
 import { retireLedgerEntryAs } from '../commands/ledger-retire.ts';
-import {
-  cardMissing,
-  hasActiveBa,
-  missingText,
-  queueSpecCardTask,
-  splitMissing,
-} from '../commands/spec-card.ts';
+import { cardMissing } from '../commands/spec-card.ts';
 import { one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import { landedSql } from '../dispatcher/dependencies.ts';
@@ -861,31 +856,8 @@ const IntakeP = z.object({
   priority: z.coerce.number().int().min(1).max(9).optional(),
 });
 
-/**
- * What became of a draft that `specify:true` could not specify: the BA completes it when it can (a `spec_card` task), and
- * the CEO is told plainly when it cannot (a missing repository needs a person; no BA means "hire one").
- */
-async function completeDraft(
-  env: ActionEnv,
-  tx: Tx,
-  cardId: string,
-  missing: string[],
-): Promise<{ queued: boolean; text: string }> {
-  const card = (await one(tx, 'SELECT * FROM cards WHERE id=$1', [cardId])) as Row;
-  const { other } = await splitMissing(tx, card, missing);
-  if (other.length)
-    return {
-      queued: false,
-      text: `it stays a draft: it needs ${missingText(other)}, which only a person can add (the BA cannot)`,
-    };
-  if (!(await hasActiveBa(tx, env.orgId)))
-    return {
-      queued: false,
-      text: `it stays a draft: missing ${missingText(missing)} and there is no BA to write it. Recommend hiring a BA`,
-    };
-  await queueSpecCardTask(env.ctx, tx, card, userActor(env.owner.id));
-  return { queued: true, text: `sent to the BA to complete: ${missingText(missing)}` };
-}
+const completeDraft = (env: ActionEnv, tx: Tx, cardId: string, missing: string[]) =>
+  completeDraftIn(env.ctx, tx, env.orgId, env.owner, cardId, missing);
 
 const intake: ActionDef<z.infer<typeof IntakeP>> = {
   cls: 'card.create_via_ba',
@@ -902,26 +874,23 @@ const intake: ActionDef<z.infer<typeof IntakeP>> = {
     return { ...base, subjectId: ps[0]!.id as string, data: { pid: ps[0]!.id } };
   },
   async execute(env, p, pr) {
-    const { createCardIn } = await import('../commands/cards.ts');
     const title = p.title ?? truncate(p.text.split('\n')[0] ?? p.text, 120);
-    const out = await withAppendTx(env.ctx.pool, async (tx) => {
-      const r = await createCardIn(env.ctx, tx, env.owner, {
+    const out = await withAppendTx(env.ctx.pool, (tx) =>
+      baIntakeIn(env.ctx, tx, env.orgId, env.owner, {
         projectId: pr.data?.pid as string,
         title,
+        text: p.text,
         cardType: p.cardType,
-        fields: { context: p.text, ...(p.ticket ? { externalRef: p.ticket } : {}) },
-        specify: true,
+        ...(p.ticket ? { ticket: p.ticket } : {}),
         ...(p.priority ? { priority: p.priority } : {}),
-        ...(p.investigation ? { investigationOnly: true } : {}),
-      } as never);
-      const next = r.missing?.length ? await completeDraft(env, tx, r.cardId, r.missing) : undefined;
-      return { r, next };
-    });
-    const card = await one(env.ctx.pool, 'SELECT ref FROM cards WHERE id=$1', [out.r.cardId]);
+        ...(p.investigation ? { investigation: true } : {}),
+      }),
+    );
+    const card = { ref: out.ref };
     return {
       message: `${card?.ref ?? 'A card'} was drafted${out.next ? `: ${out.next.text}` : ' and specified'}.`,
       result: {
-        cardId: out.r.cardId,
+        cardId: out.cardId,
         ref: card?.ref,
         specified: !out.next,
         baQueued: out.next?.queued ?? false,
@@ -929,7 +898,7 @@ const intake: ActionDef<z.infer<typeof IntakeP>> = {
       inverse: {
         kind: 'inverse',
         action: 'cancel-draft',
-        params: { card: out.r.cardId },
+        params: { card: out.cardId },
         preconditions: {},
         label: `Cancel ${card?.ref ?? 'the draft'}`,
       },
