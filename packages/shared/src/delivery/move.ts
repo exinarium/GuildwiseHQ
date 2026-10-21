@@ -236,6 +236,12 @@ export const MoveFactsSchema = z
     /** Public IPv4 addresses are resolved by the server, not the computer. */
     removedKeys: z.number().int().min(0).optional(),
     keysBackup: z.string().max(300).optional(),
+    /**
+     * Set by the SERVER, never by a computer: the "stop the old app and back up" step failed without saying the app is running
+     * (a timeout, a lost connection), so the old app may be stopped. A cancel then runs the undo (idempotent). Cleared by a step
+     * that knows (the stop succeeded, the app is reported running, or the undo worked).
+     */
+    oldAppUnknown: z.boolean().optional(),
   })
   .strict();
 export type MoveFacts = z.infer<typeof MoveFactsSchema>;

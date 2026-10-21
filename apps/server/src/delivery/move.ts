@@ -342,7 +342,9 @@ export async function cancelMove(
     throw conflict('not_open', 'this move is over already');
   if (await inFlight(ctx.pool, m.id))
     throw conflict('step_running', 'a step is still running: wait a moment');
-  if (m.old_app_stopped || m.state === 'app_ready') {
+  const unknown = ((m.facts ?? {}) as MoveFacts).oldAppUnknown === true;
+  if (m.old_app_stopped || m.state === 'app_ready' || unknown) {
+    // (a stop that timed out may have stopped it: the undo is safe to run when it did not)
     // the old app comes back (and the new one stops, so two copies never write to two databases)
     await requireComputer(ctx, user, m.workstation_id);
     await resume(ctx, user, m, 'restart_old');
@@ -615,6 +617,19 @@ export async function applyMoveResult(
         : res.oldAppRunning === true
           ? false
           : !!m.old_app_stopped;
+  // A failed "stop and back up" that does not say the app is running leaves the old app in an unknown state (it may be
+  // stopped): remembered, so a cancel runs the (idempotent) undo. Any step that knows clears it.
+  const oldAppUnknown =
+    step === 'stop_and_backup'
+      ? !success && res.oldAppRunning !== true
+      : step === 'restart_old'
+        ? success
+          ? false
+          : null
+        : res.oldAppRunning !== undefined
+          ? false
+          : null;
+  const eventFacts: MoveFacts = oldAppUnknown === null ? res.facts : { ...res.facts, oldAppUnknown };
   const detail = success
     ? (res.checks.find((c) => c.ok)?.text ?? null)
     : moveErrorText(res.error ?? 'failed', res.detail).slice(0, 380);
@@ -630,7 +645,7 @@ export async function applyMoveResult(
           ok: success,
           detail,
           checks: res.checks,
-          facts: res.facts,
+          facts: eventFacts,
           state,
           oldAppStopped: oldStopped,
           error: success ? null : moveErrorText(res.error ?? 'failed', res.detail).slice(0, 480),

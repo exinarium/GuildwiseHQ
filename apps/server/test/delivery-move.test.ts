@@ -434,6 +434,45 @@ describe('the way through', () => {
     expect(commands()).toHaveLength(n);
   });
 
+  it('a stop that timed out leaves the old app in an unknown state: cancel runs the undo (final review)', async () => {
+    const { id, n: n0 } = await prepared();
+    await call('POST', `${base()}/delivery/moves/${id}/switch`, { agreedDowntime: true }, 202);
+    answer((await lastMove(n0)).commandId, {
+      ok: false,
+      step: 'stop_and_backup',
+      error: 'timeout',
+      checks: [],
+      facts: {},
+    });
+    const m = await state(id, 'failed');
+    expect(m.oldAppStopped).toBe(false); // not known to be stopped ...
+    expect(m.facts.oldAppUnknown).toBe(true); // ... and not known to be running
+    await call('POST', `${base()}/delivery/moves/${id}/cancel`, undefined, 202);
+    const undo = await lastMove(n0 + 1);
+    expect(undo.payload.step).toBe('restart_old');
+    answer(undo.commandId, stepOk('restart_old', { oldAppRunning: true }));
+    const end = await state(id, 'cancelled');
+    expect(end.oldAppStopped).toBe(false);
+  });
+
+  it('a failed backup that says the old app is running again cancels without an undo', async () => {
+    const { id, n: n0 } = await prepared();
+    await call('POST', `${base()}/delivery/moves/${id}/switch`, { agreedDowntime: true }, 202);
+    answer((await lastMove(n0)).commandId, {
+      ok: false,
+      step: 'stop_and_backup',
+      error: 'backup_failed',
+      oldAppRunning: true,
+      checks: [],
+      facts: {},
+    });
+    const m = await state(id, 'failed');
+    expect(m.facts.oldAppUnknown).toBe(false);
+    await call('POST', `${base()}/delivery/moves/${id}/cancel`, undefined, 202);
+    await state(id, 'cancelled');
+    expect(commands()).toHaveLength(n0 + 1);
+  });
+
   it('cannot be cancelled or switched while a step is running', async () => {
     const m = await start();
     const out = await req('POST', `${base()}/delivery/moves/${m.id}/cancel`);
