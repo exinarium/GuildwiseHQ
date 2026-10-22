@@ -14,22 +14,22 @@
   ],
   "captions": "/videos/agents.vtt",
   "voice": "Piper en_GB-cori-high",
-  "duration": 86.3,
+  "duration": 86,
   "chapters": [
     {
-      "t": 10.6,
+      "t": 10.4,
       "title": "Hire an agent"
     },
     {
-      "t": 30.9,
+      "t": 30.6,
       "title": "Pause, resume and change model"
     },
     {
-      "t": 48.4,
+      "t": 48.1,
       "title": "Recommendations"
     },
     {
-      "t": 71.3,
+      "t": 71,
       "title": "Filter by project"
     }
   ]
