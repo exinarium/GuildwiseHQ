@@ -126,6 +126,7 @@ This guide is for people who have never worked with AI agents before. You do not
 
 
 
+
 ## 1. What Guildwise HQ is
 
 ### 1.1 The idea in one minute
@@ -212,6 +213,8 @@ If anyone gets stuck or needs a decision, the card turns to **Blocked** and a qu
 
 > **In the app:** Help, "Board and cards" (`/help/board-and-cards`) and "Testing and finalization" (`/help/testing-and-finalization`).
 
+> **In the app:** watch the video "The Board and your cards" (Help, "Board and cards", `/help/board-and-cards#reading-the-board`). The page's own help panel (**?** in the top bar) has it too, under **Watch the video**.
+
 ### 2.3 Who is allowed to do what
 
 In short: **Owners and Admins manage**, **Members work** in the projects they were added to, **Guests work** in the one project that was shared with them, and the **platform administrator** only runs the service and never sees your work. Chapter 4 to 7 have the details for each role.
@@ -223,6 +226,8 @@ In short: **Owners and Admins manage**, **Members work** in the projects they we
 By the end of this chapter you have: a working login with two-factor protection, a workstation connected, a small team hired, a project and your first card moving across the board.
 
 > **Before you start:** you need an invitation email or your own sign-up (below), a computer to use as a workstation (it can be the one you are on now; a VPS or a GitHub Codespace works too), and a Claude account. A Claude subscription (Pro, Max, Team or Enterprise) is the easiest. An API key works too.
+
+> **In the app:** watch the video "Getting started with Guildwise HQ" (Help, "Getting started", `/help/getting-started#training-video`). It is also the first step of the guided tour.
 
 ### 3.1 Accept the invitation and sign in (2 minutes)
 
@@ -318,6 +323,8 @@ If something goes wrong, the installer says what happened and links to the insta
 
 > **In the app:** Help, "Workstations and the installer" (`/help/workstations-and-installer`) and "Installing a workstation: if something goes wrong" (`/help/install-troubleshooting`).
 
+> **In the app:** watch the video "Workstations" (Help, "Workstations and the installer", `/help/workstations-and-installer#add-a-workstation`). The page's own help panel (**?** in the top bar) has it too, under **Watch the video**.
+
 ### 3.4a Connect your integrations
 
 Once the workstation is paired, open **Integrations** in the sidebar (or the **Integrations** button on the workstation's card). With several workstations you choose one first. Each tile is one connection with its status: *Connected*, *Not connected*, *Refused*, *Expired*, *Needs sign-in*, *Unreachable*, *Tool missing* or *Not needed*; it also shows who it is signed in as, the scopes (missing ones in amber), when it expires and when it was last checked. **Connect**, **Replace**, **Test** and **Remove** are on the tile; "How to set it up" lists the steps with links to where the token is made, and "From a terminal" gives the command for a machine without a browser.
@@ -340,6 +347,8 @@ Some logins belong to the whole computer (the `gh` login, `~/.claude`, MCP sign-
 
 > **In the app:** Help, "Integrations" (`/help/integrations`).
 
+> **In the app:** watch the videos "Workstations" (Help, "Workstations and the installer", `/help/workstations-and-installer#add-a-workstation`) and "Integrations" (Help, "Integrations", `/help/integrations#connect`). The page's own help panel (**?** in the top bar) has each too, under **Watch the video**.
+
 ### 3.5 Hire your first agents (2 minutes)
 
 You need at least a builder, a reviewer and a tester to get a card from idea to done. The BA is also strongly recommended. New projects use the lean team workflow (4.26), which also uses a planner, an architect and a pre-reviewer: hire those too for the intended cost, until then the architect plans and the reviewer does the pre-review.
@@ -358,6 +367,8 @@ Each workstation also gets a free **DevOps engineer** automatically. You never h
 
 > **In the app:** Help, "Agents" (`/help/agents`).
 
+> **In the app:** watch the video "Your agents" (Help, "Agents", `/help/agents#hiring`). The page's own help panel (**?** in the top bar) has it too, under **Watch the video**.
+
 ### 3.6 Create your first project (1 minute)
 
 1. Open **Projects** and click **New project** (Owners and Admins only).
@@ -367,6 +378,8 @@ Each workstation also gets a free **DevOps engineer** automatically. You never h
 ![The new project dialog](guide/assets/dlg-new-project.jpg)
 
 > **In the app:** Help, "Projects" (`/help/projects`).
+
+> **In the app:** watch the video "Projects and their settings" (Help, "Projects", `/help/projects#ranking`). The page's own help panel (**?** in the top bar) has it too, under **Watch the video**.
 
 ### 3.7 Create your first card (2 minutes)
 
@@ -433,6 +446,8 @@ Open **Organization** at the bottom of the sidebar. The tabs are **General**, **
 
 If you belong to several organizations, the **organization switcher** at the top of the sidebar shows which one this browser tab works in. A different tab can work in a different organization. Projects of an organization where you are only a guest carry a "Guest" label.
 
+> **In the app:** watch the video "Your organization" (Help, "Organizations and roles", `/help/organizations-and-roles#members-and-invitations`). The page's own help panel (**?** in the top bar) has it too, under **Watch the video**.
+
 ### 4.2 Members, invitations and guests
 
 On **Organization, Members** you see everybody with their role.
@@ -452,6 +467,8 @@ On **Organization, Members** you see everybody with their role.
 ![The Guests tab](guide/assets/org-guests.jpg)
 
 > **In the app:** Help, "Organizations and roles" (`/help/organizations-and-roles`).
+
+> **In the app:** watch the video "Your organization" (Help, "Organizations and roles", `/help/organizations-and-roles#members-and-invitations`). The page's own help panel (**?** in the top bar) has it too, under **Watch the video**.
 
 ### 4.3 Projects
 
@@ -503,6 +520,8 @@ What you will find there:
 
 > **In the app:** Help, "Projects" (`/help/projects`) and "Ledger and vaults" (`/help/ledger-and-vaults`).
 
+> **In the app:** watch the video "Projects and their settings" (Help, "Projects", `/help/projects#ranking`). The page's own help panel (**?** in the top bar) has it too, under **Watch the video**.
+
 ### 4.3a Project vaults and the code map
 
 **Every project has a vault.** It is created with the project. A vault is one of two kinds of storage:
@@ -536,6 +555,8 @@ Building the map uses no model, so it costs no tokens.
 To measure whether the map saves tokens, one card in five runs without it for four weeks after a project's first index. See
 "Code map: what it saved" under 4.6.
 
+> **In the app:** watch the video "Vaults" (Help, "Ledger and vaults", `/help/ledger-and-vaults#vaults`). The page's own help panel (**?** in the top bar) has it too, under **Watch the video**.
+
 ### 4.3b The project backlog
 
 Every project has a **Backlog** tab next to its **Board**. It is your list of wanted work that is **not in development yet**: nothing on the backlog is worked on by an agent, becomes a card, appears on the board or creates a desk item until you send it to the BA.
@@ -553,6 +574,8 @@ Every project has a **Backlog** tab next to its **Board**. It is your list of wa
 **Through the CEO.** In the CEO chat you can say "add X to the backlog of project P" or "send the flagged ui items to the BA". The CEO uses `aom ceo backlog add | list | update | send`: `add` needs a project and a title (optional description, priority, tags, flag); `list` filters by project, tag, priority, flagged and status (default Open) with an optional text search; `update` changes the title, description, priority, tags or flag of one item by id, or drops it; `send` sends one item by id or all Open items that match the filters (at least one filter is required, at most 25 at once) and prints the card or the reason for each item. The web page and the CEO work on the same data and follow the same rules.
 
 > **In the app:** Help, "Board and cards" (`/help/board-and-cards`), section "The project backlog".
+
+> **In the app:** watch the video "The project backlog" (Help, "Board and cards", `/help/board-and-cards#backlog`). The page's own help panel (**?** in the top bar) has it too, under **Watch the video**.
 
 ### 4.4 Agents, hiring and allow-lists
 
@@ -635,6 +658,8 @@ What hygiene cannot resolve, it does not force. For a conflict while pulling, th
 
 > **In the app:** Help, "DevOps and repository hygiene" (`/help/devops-and-hygiene`).
 
+> **In the app:** watch the video "Your agents" (Help, "Agents", `/help/agents#hiring`). The page's own help panel (**?** in the top bar) has it too, under **Watch the video**.
+
 ### 4.5 The desk, the ledger and standing orders
 
 The **Desk** is where every question and approval reaches you. Cards do not move past a question until you answer.
@@ -670,6 +695,8 @@ The **Ledger** page lists everything and is searchable, and has a **Project** fi
 #### Testing without an environment
 
 In the project settings, **Test without an environment** replaces the old "Test mode" and "Test Environment" standing orders (which contradicted each other). Off (the default): when a card needs a test environment and none is ready, it waits for DevOps to start one. On: the tester runs what it can without an environment and records in its note that none was used.
+
+> **In the app:** watch the videos "Your Desk" (Help, "The Decision desk", `/help/desk#desk-items`) and "The Ledger" (Help, "Ledger and vaults", `/help/ledger-and-vaults#ledger`). The page's own help panel (**?** in the top bar) has each too, under **Watch the video**.
 
 ### 4.6 Budgets and costs
 
@@ -726,6 +753,8 @@ map did worse on a quality measure"). Until then it shows the numbers only.
 
 > **In the app:** Help, "Budgets and costs" (`/help/budgets-and-costs`).
 
+> **In the app:** watch the video "Costs and budgets" (Help, "Budgets and costs", `/help/budgets-and-costs#monthly-budgets`). The page's own help panel (**?** in the top bar) has it too, under **Watch the video**.
+
 ### 4.7 The org chart, roles and workflows
 
 **Org chart** (sidebar, Organization) shows who works for you and who answers whom, as a tree: you at the top, then your CEO (always there), then the BAs, then each department with its seniors above its juniors. The lines are the **escalation path**: a question goes to the colleague its topic names (the card's architect for design questions, the BA for requirements, the builder for code, the DevOps engineer for environment problems), else to a senior of the same role, then to the BA, then to your CEO, then to your desk. Each tile shows the agent's face, name, role, what it is doing and its workstation. Click an agent for its card. **List** shows the same as grouped lists (the default on a phone). The **Allowed on project** filter shows only the agents that may work on one project. The **Workstations and DevOps** panel lists the machines and their DevOps engineers, and **Hire a BA** appears on the chart when you have none.
@@ -769,6 +798,8 @@ Everything you design is **submitted to the desk for your approval** before it c
 A role that works an inserted step must be allowed to claim it: the roles that already work a base step (the builder on Build, and so on) keep working it, while a step you add needs a role that claims it (a custom role naming the step, or the architect for steps named `investigate...`).
 
 > **In the app:** Help, "Organization chart and design" (`/help/org-chart-and-design`) and "Projects" (`/help/projects#workflows`).
+
+> **In the app:** watch the videos "The org chart" (Help, "Organization chart and design", `/help/org-chart-and-design#org-chart`) and "Roles and workflows" (Help, "Organization chart and design", `/help/org-chart-and-design#custom-workflows`). The page's own help panel (**?** in the top bar) has each too, under **Watch the video**.
 
 ### 4.8 Automations and integrations
 
@@ -831,6 +862,8 @@ Then add an automation **When an e-mail arrives** and choose the inbox. **Fill t
 
 > **In the app:** Help, "Automations and integrations" (`/help/automations-and-integrations`; the old `/help/schedules-and-integrations` still works) and "Intake and outbox" (`/help/intake-and-outbox`).
 
+> **In the app:** watch the videos "Intake: bring in tickets" (Help, "Intake and outbox", `/help/intake-and-outbox#intake`) and "Automations" (Help, "Automations and integrations", `/help/automations-and-integrations#triggers`). The page's own help panel (**?** in the top bar) has each too, under **Watch the video**.
+
 ### 4.9 Interests
 
 An **interest** is a topic you follow. Agents look for new items on a **run schedule**, and deliver what they found to your desk on a **delivery schedule**. Keeping those two apart is how you avoid being flooded.
@@ -864,6 +897,8 @@ On the interest's page, **Overview** shows both schedules and what is waiting fo
 **Who sees an interest.** Owners and Admins see all interests. An interest made by a Member or Guest is private to them until an Owner or Admin shares it. Whoever made an interest, or someone with an equal or higher role, may change it.
 
 > **In the app:** Help, "Interests" (`/help/interests`).
+
+> **In the app:** watch the video "Interests" (Help, "Interests", `/help/interests#run-and-delivery`). The page's own help panel (**?** in the top bar) has it too, under **Watch the video**.
 
 ### 4.10 Phases and follow-ups
 
@@ -946,6 +981,8 @@ After a merge, a **full suite** card runs the entire end-to-end suite once. If i
 
 > **In the app:** Help, "Testing and finalization" (`/help/testing-and-finalization`).
 
+> **In the app:** watch the video "The Board and your cards" (Help, "Board and cards", `/help/board-and-cards#reading-the-board`). The page's own help panel (**?** in the top bar) has it too, under **Watch the video**.
+
 ### 4.13 Conversion, the Research tab and research cards
 
 **Research cards in any project.** Pick the card type **research** on the New card form to ask a question in any project. It runs on the research workflow (question, research, fact check, publish) and gets a **Research** chip on the board.
@@ -966,6 +1003,8 @@ Cards, notes and history stay as they are. For each repository added, the DevOps
 ![The Research tab](guide/assets/research-tab.jpg)
 
 > **In the app:** Help, "Converting a project" (`/help/project-conversion`).
+
+> **In the app:** watch the video "Research" (Help, "Converting a project", `/help/project-conversion#research-as-a-stage`). The page's own help panel (**?** in the top bar) has it too, under **Watch the video**.
 
 ### 4.14 Archive and delete
 
@@ -1150,6 +1189,8 @@ The **CEO** is the agent you talk to first. It runs the floor for you: it watche
 
 > **In the app:** Help, "Your CEO" (`/help/ceo`).
 
+> **In the app:** watch the video "Your CEO" (Help, "Your CEO", `/help/your-ceo#talking`). The page's own help panel (**?** in the top bar) has it too, under **Watch the video**.
+
 ### 4.23 Integration tests run by the tester
 
 Unit tests are run by builders and reviewers. **Integration and end-to-end tests** need a running copy of the app, so only the tester runs them, and only when you switch them on for the project. They start **off**. With them off the Test step still runs, as the **plain tester**: the tester checks the card's branch against its test plan with what it can run in its own copy of the code, without a running app (end-to-end tests that start their own server, unit-level checks, build and lint), and says in its evidence what it could not check. With them on, the tester also gets a running copy of the card's branch and your suites, as described below.
@@ -1221,6 +1262,8 @@ New projects start on the **lean team** workflow; a project made earlier keeps i
 
 **Who approves.** The owner approval is asked of the project's creator when they are an organization Owner or Admin, else of the organization's Owner, else an Admin (a person made owner of that one project by hand comes before the organization's Owners). The approval can name the commit you read: the web sends the commit of the diff it shows, and the server refuses with "the code changed after the diff was shown" (409 `approval_stale`) when the branch is at another commit.
 
+> **In the app:** watch the video "Roles and workflows" (Help, "Organization chart and design", `/help/org-chart-and-design#custom-workflows`). The page's own help panel (**?** in the top bar) has it too, under **Watch the video**.
+
 ### 4.27 Environments and deploying with a recipe
 
 The **Environments** page (sidebar, under the board, for projects that deliver code) is where you say how your app starts and where it runs: **Your app: how to start it**, **Test copies** (one temporary copy per card), the **environments** (the **test site**, the **live site** and any extra site such as a demo), **Places** (the computers and servers), **Rules** and **History**. When an environment is set up and approved, a **Releases** switch at the top (**On** or **Paused**) turns the project's releases on or off: pausing asks "Pause releases?", and while releases are paused the environment cards show **Releases paused** and **Update now** is off. Only the project owner changes the switch, and it needs an approved environment first. Where the releases go once they are ready (the queue, what is live, the rules) is on the **Releases** page (4.28).
@@ -1259,6 +1302,8 @@ An approved setup turns "how we deploy" into something you approve once and that
 
 > **In the app:** Help, "Phases and follow-ups", section "Deploying with a recipe" (`/help/phases#delivery-recipes`).
 
+> **In the app:** watch the video "Environments: where your app runs" (Help, "Phases and follow-ups", `/help/phases#delivery-recipes`). The page's own help panel (**?** in the top bar) has it too, under **Watch the video**.
+
 ### 4.28 Releases
 
 The **Releases** page (sidebar, Organization group; the old address `/deploys` leads here) shows, across all projects, which version is live on each site, what is waiting for you and what was released. Setting up where an app runs happens on the project's Environments page (4.27). A project whose releases are **Paused** shows a **Releases paused** badge here and on its environment cards.
@@ -1283,6 +1328,8 @@ The CEO is never the releaser unless the recipe says so, and an Owner or Admin c
 
 > **In the app:** Help, "Phases and follow-ups", section "Deploying with a recipe" (`/help/phases#delivery-recipes`).
 
+> **In the app:** watch the video "Releases" (Help, "Phases and follow-ups", `/help/phases#releases`). The page's own help panel (**?** in the top bar) has it too, under **Watch the video**.
+
 ### 4.29 Metrics
 
 **Metrics** (sidebar, Organization group) shows what the team delivered, where it waited on you and where quality slipped. Everybody who can see the organization can open it.
@@ -1302,6 +1349,8 @@ Costs have their own page (4.6).
 
 > **In the app:** Help, "Agents" (`/help/agents`).
 
+> **In the app:** watch the video "Metrics" (Help, "Agents", `/help/agents#hr-board`). The page's own help panel (**?** in the top bar) has it too, under **Watch the video**.
+
 ### 4.30 Your settings
 
 **Settings** (sidebar, at the bottom; also **Your settings** in your avatar menu) is the page for you as a person, not for the organization (that is **Organization**, 4.1). Everybody has it, whatever their role.
@@ -1319,6 +1368,8 @@ It has these panels, top to bottom:
 - **Your time zone:** the zone your reports and times are shown in. It was taken from your browser the first time you signed in; **Use this browser's zone** resets it. The time your CEO writes the daily report is not set here: it is on the CEO page, **Reporting & alerts** tab (4.22).
 
 > **In the app:** Help, "Two-factor login" (`/help/two-factor`) and "Getting started" (`/help/getting-started`).
+
+> **In the app:** watch the video "Your settings" (Help, "Getting started", `/help/getting-started#your-settings`). The page's own help panel (**?** in the top bar) has it too, under **Watch the video**.
 
 ## 5. For Members
 
@@ -1394,6 +1445,8 @@ If you are removed from the project, the agents you hired for it move back to th
 ## 7. For the platform administrator
 
 The **platform administrator** (also called the **super admin**) runs the Guildwise HQ service itself, not any one organization's work. You sign in at the same address as everyone else, but you see only the **Platform** area. You can never see an organization's cards, desk, vaults, ledger, chats or agents. That is by design.
+
+> **In the app:** watch the video "The platform area" (Help, "Organizations and roles", `/help/organizations-and-roles#platform-area`). The page's own help panel (**?** in the top bar) has it too, under **Watch the video**.
 
 ### 7.1 First sign-in and two-factor login
 
@@ -1677,6 +1730,8 @@ We answer by email, and the answer also appears under **Help, My requests**, whe
 ![My requests](guide/assets/my-requests.jpg)
 
 > **In the app:** Help, "Writing to us" (`/help/writing-to-us`).
+
+> **In the app:** watch the video "The Help centre" (Help, "Getting started", `/help/getting-started#the-sidebar`). The page's own help panel (**?** in the top bar) has it too, under **Watch the video**.
 
 ## 11. Frequently asked questions
 
