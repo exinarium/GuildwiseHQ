@@ -1766,6 +1766,7 @@ export class ShiftSupervisor {
       startSha,
       branchesAtStart: s.branchesAtStart,
       e2eGlobs: msg.brief.project.e2eGlobs,
+      ...(s.worktree?.baseBranch ? { baseBranch: s.worktree.baseBranch } : {}),
       ...(extra.length ? { extraWritableGlobs: extra } : {}),
       ...(s.mainShas.length ? { mainMergeShas: s.mainShas } : {}),
     };

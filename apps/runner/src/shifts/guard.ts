@@ -6,6 +6,7 @@ import {
   withoutSandboxStubs,
 } from '../adapters/sandbox-placeholders.ts';
 import { currentBranch, git } from '../git/git.ts';
+import { baseTarget } from '../git/rebase.ts';
 
 export interface BranchSnapshot {
   [branch: string]: string;
@@ -69,6 +70,44 @@ export interface GuardInput {
    * step, `aom git merge-main`). What a merge commit with such a second parent changed is main's work, not the agent's.
    */
   mainMergeShas?: string[];
+  /**
+   * The card's base (target) branch. Lets the builder e2e check compare against the merge-base with it instead of the
+   * shift start: a revert of an e2e file to its base content is not an edit. Absent: every changed e2e path counts.
+   */
+  baseBranch?: string;
+}
+
+/**
+ * Of the changed paths, those whose content in the worktree still differs from the merge-base with the base branch.
+ * A path restored to its base content (or absent in both) is not a net change. Falls back to all paths when the
+ * merge-base cannot be resolved.
+ */
+export async function netChangedFromBase(
+  worktree: string,
+  baseBranch: string | undefined,
+  paths: string[],
+): Promise<string[]> {
+  if (!baseBranch || paths.length === 0) return paths;
+  const target = await baseTarget(worktree, baseBranch);
+  const mb = await git(worktree, ['merge-base', target, 'HEAD']);
+  const base = mb.stdout.trim();
+  if (mb.exitCode !== 0 || !base) return paths;
+  const net: string[] = [];
+  for (const p of paths) {
+    const b = await git(worktree, ['rev-parse', '--verify', '--quiet', `${base}:${p}`]);
+    const baseBlob = b.exitCode === 0 ? b.stdout.trim() : null;
+    const exists =
+      (
+        await git(worktree, ['ls-files', '--others', '--cached', '--exclude-standard', '--', p])
+      ).stdout.trim() !== '';
+    let nowBlob: string | null = null;
+    if (exists) {
+      const h = await git(worktree, ['hash-object', '--', p]);
+      nowBlob = h.exitCode === 0 ? h.stdout.trim() : null;
+    }
+    if (baseBlob !== nowBlob) net.push(p);
+  }
+  return net;
 }
 
 /**
@@ -257,7 +296,11 @@ export async function runGuard(input: GuardInput): Promise<GuardViolation[]> {
   // Builders never do E2E testing: the tester owns the E2E paths (spec "Testing strategy").
   if (input.roleKey === 'builder' && input.e2eGlobs.length > 0) {
     const isE2e = picomatch(input.e2eGlobs, { dot: true });
-    const touched = changed.filter((p) => isE2e(p));
+    const touched = await netChangedFromBase(
+      input.worktree,
+      input.baseBranch,
+      changed.filter((p) => isE2e(p)),
+    );
     if (touched.length > 0) {
       violations.push({
         rule: 'builder_edited_e2e',
