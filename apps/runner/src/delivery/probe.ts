@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import {
   type DeployProbePayload,
   type DeployProbeResult,
+  isGuildwiseTemporaryOverride,
   type ProbeBackups,
   type ProbeComposeFile,
   type ProbeComposeService,
@@ -127,7 +128,7 @@ const GUILDWISE_OVERRIDE = 'docker-compose.guildwise.yml';
 
 /**
  * Why a stack cannot be restarted by Guildwise yet, from the labels `docker compose` wrote: several compose files (the override
- * file Guildwise writes itself does not count), an --env-file, or a project folder other than the one of the compose file.
+ * files Guildwise writes itself do not count: the one next to the compose file and the temporary ones of a local deploy or rollback), an --env-file, or a project folder other than the one of the compose file.
  */
 export function unsupportedStack(
   configFiles: string,
@@ -138,7 +139,9 @@ export function unsupportedStack(
     .split(',')
     .map((x) => x.trim())
     .filter(Boolean);
-  const own = files.filter((f) => f.split('/').pop() !== GUILDWISE_OVERRIDE);
+  const own = files.filter(
+    (f) => f.split('/').pop() !== GUILDWISE_OVERRIDE && !isGuildwiseTemporaryOverride(f),
+  );
   if (own.length > 1) return 'It was started from several compose files. This is not supported yet.';
   if (envFile.trim()) return 'It was started with its own --env-file. This is not supported yet.';
   const first = own[0];

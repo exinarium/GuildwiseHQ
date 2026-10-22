@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import {
   compileSetup,
   DeliverySetupSchema,
+  isGuildwiseTemporaryOverride,
   lintRecipe,
   localAdoptEnv,
   parseRecipe,
@@ -14,6 +15,7 @@ import {
   parseSetupText,
   shq,
   sshShipEnv,
+  TEMP_OVERRIDE_CASE_PATTERNS,
 } from '../src/index.ts';
 import { FIRST_ADOPTER } from './setup-fixtures.ts';
 
@@ -426,5 +428,34 @@ describe('the compose_run step (database updates before the restart)', () => {
     const r2 = compileSetup(noBackup);
     expect(r2.ok).toBe(false);
     if (!r2.ok) expect(r2.issues.join(' ')).toMatch(/Back up the database before/);
+  });
+});
+
+describe('isGuildwiseTemporaryOverride: one definition for the deploy script and the runner probe', () => {
+  it('accepts the override and rollback file of a deploy temp folder and nothing else', () => {
+    expect(isGuildwiseTemporaryOverride('/tmp/aom-deploy.4EtfKJ/override.yml')).toBe(true);
+    expect(isGuildwiseTemporaryOverride('/var/tmp/x/aom-deploy.abc123/rollback.yml')).toBe(true);
+    expect(isGuildwiseTemporaryOverride('/srv/shop/b.yaml')).toBe(false);
+    expect(isGuildwiseTemporaryOverride('/tmp/aom-deploy.4EtfKJ/other.yml')).toBe(false);
+    expect(isGuildwiseTemporaryOverride('/tmp/aom-deploy.4Et/override.yml')).toBe(false);
+    expect(isGuildwiseTemporaryOverride('/tmp/aom-deploy.4EtfKJx/override.yml')).toBe(false);
+  });
+
+  it('agrees with the shell case patterns the deploy script uses', () => {
+    const sh = (p: string) =>
+      spawnSync('sh', [
+        '-c',
+        `case "$1" in ${TEMP_OVERRIDE_CASE_PATTERNS}) exit 0;; *) exit 1;; esac`,
+        'sh',
+        p,
+      ]).status === 0;
+    for (const p of [
+      '/tmp/aom-deploy.4EtfKJ/override.yml',
+      '/tmp/aom-deploy.4EtfKJ/rollback.yml',
+      '/tmp/aom-deploy.4Et/override.yml',
+      '/tmp/aom-deploy.4EtfKJ/x.yml',
+      '/srv/shop/b.yaml',
+    ])
+      expect(sh(p)).toBe(isGuildwiseTemporaryOverride(p));
   });
 });

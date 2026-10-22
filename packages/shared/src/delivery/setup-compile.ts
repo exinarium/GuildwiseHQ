@@ -440,6 +440,34 @@ export const ENV_VALUE_AWK = String.raw`BEGIN { v = ENVIRON["VAR"] } { sub(/\r$/
  * project folder, an --env-file) a restart would recreate it differently, so it stops first with a plain message. Needs the shell
  * variables `id` (container), `file`, `dir`, optional `proj`, and a `fail "message"` function.
  */
+/**
+ * The temporary compose files a local deploy or rollback adds to `docker compose` (`-f <compose> -f $TMPDIR/aom-deploy.XXXXXX/override.yml`).
+ * They end up in the stack's `config_files` label, so the deploy script and the runner's probe must both accept exactly these and
+ * nothing else as "not a second compose file". This is the one definition: the shell `case` patterns and the TypeScript check are
+ * both built from it.
+ */
+export const TEMP_OVERRIDE_DIR_PREFIX = 'aom-deploy.';
+export const TEMP_OVERRIDE_FILE_NAMES = ['override.yml', 'rollback.yml'] as const;
+/** `mktemp -d .../aom-deploy.XXXXXX` leaves six characters. */
+const TEMP_OVERRIDE_SUFFIX_LENGTH = 6;
+
+/** The shell `case` patterns that match the temporary files, joined with `|`. */
+export const TEMP_OVERRIDE_CASE_PATTERNS = TEMP_OVERRIDE_FILE_NAMES.map(
+  (n) => `*/${TEMP_OVERRIDE_DIR_PREFIX}${'?'.repeat(TEMP_OVERRIDE_SUFFIX_LENGTH)}/${n}`,
+).join('|');
+
+/** True when the path is one of the temporary files of a Guildwise deploy or rollback (the same paths the deploy script accepts). */
+export function isGuildwiseTemporaryOverride(path: string): boolean {
+  const m = /^(.*)\/([^/]*)\/([^/]*)$/.exec(path.trim());
+  if (!m) return false;
+  const dir = m[2] ?? '';
+  return (
+    dir.length === TEMP_OVERRIDE_DIR_PREFIX.length + TEMP_OVERRIDE_SUFFIX_LENGTH &&
+    dir.startsWith(TEMP_OVERRIDE_DIR_PREFIX) &&
+    (TEMP_OVERRIDE_FILE_NAMES as readonly string[]).includes(m[3] ?? '')
+  );
+}
+
 function originCheck(indent: string, extra: 'none' | 'guildwise_override' | 'temporary_override'): string[] {
   const fmt = [
     'com.docker.compose.project.config_files',
@@ -468,7 +496,7 @@ function originCheck(indent: string, extra: 'none' | 'guildwise_override' | 'tem
           '      "") ;;',
           extra === 'guildwise_override'
             ? `      *) [ "$(rl "$l_more")" = "$(rl "$dir/${OVERRIDE_NAME}")" ] || fail "the app was started from several compose files ($l_cfg). Guildwise does not support that yet, so it will not restart it: nothing was changed" ;;`
-            : '      */aom-deploy.??????/override.yml|*/aom-deploy.??????/rollback.yml) ;; *) fail "the app was started from several compose files ($l_cfg). Guildwise does not support that yet, so it will not restart it: nothing was changed" ;;',
+            : `      ${TEMP_OVERRIDE_CASE_PATTERNS}) ;; *) fail "the app was started from several compose files ($l_cfg). Guildwise does not support that yet, so it will not restart it: nothing was changed" ;;`,
           '    esac',
         ]),
     '    [ -z "$l_wd" ] || [ "$(rl "$l_wd")" = "$(rl "$dir")" ] || fail "the app was started with another project folder ($l_wd) than the folder of its compose file ($dir). Guildwise does not support that yet: nothing was changed"',
