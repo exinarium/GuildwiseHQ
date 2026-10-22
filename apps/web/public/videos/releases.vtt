@@ -1,0 +1,37 @@
+WEBVTT
+
+1
+00:00:00.403 --> 00:00:07.148
+Releases shows, for every project, what is waiting for you, what is live, and what was released.
+
+2
+00:00:07.854 --> 00:00:13.483
+Open Releases in the sidebar. Waiting for you lists the versions that are ready for a site.
+
+3
+00:00:14.183 --> 00:00:18.212
+Release puts the version on the site, with the setup the Owner approved.
+
+4
+00:00:18.910 --> 00:00:23.273
+Not now takes a version off the list. Nothing changes on that site.
+
+5
+00:00:23.977 --> 00:00:33.716
+What is live shows the version on each site, since when, and where it runs. A site with nothing waiting offers Release the newest version on its project page.
+
+6
+00:00:34.415 --> 00:00:42.389
+History lists every release, who asked for it and who released it. Filter it by project, site or result.
+
+7
+00:00:43.092 --> 00:00:51.589
+Under Rules, the standard rule says what must be true before a version goes live. The advanced rule sets hold the details.
+
+8
+00:00:52.288 --> 00:00:58.602
+Freeze all releases stops everything from going live. Lift the freeze when you are ready again.
+
+9
+00:00:59.301 --> 00:01:02.970
+That is Releases: one place to decide what goes live.

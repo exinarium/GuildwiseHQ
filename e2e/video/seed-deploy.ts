@@ -268,14 +268,14 @@ export async function release(api: APIRequestContext, projectId: string, env: st
 }
 
 /** A new commit on the toy repository (pushed to its origin); returns its sha. */
-export function demoCommit(message: string, file = 'index.js', content?: string): string {
+export function demoCommit(message: string): string {
   const g = (...a: string[]) =>
     execFileSync(
       'git',
       ['-C', paths.toyClone, '-c', 'user.name=Alex Morgan', '-c', 'user.email=alex@demo.local', ...a],
       { encoding: 'utf8' },
     ).trim();
-  writeFileSync(join(paths.toyClone, file), content ?? `console.log(${JSON.stringify(message)});\n`);
+  writeFileSync(join(paths.toyClone, 'index.js'), `console.log(${JSON.stringify(message)});\n`);
   g('add', '-A');
   g('commit', '-m', message);
   g('push', 'origin', 'main');
