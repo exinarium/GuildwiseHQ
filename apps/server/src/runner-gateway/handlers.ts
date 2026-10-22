@@ -1,4 +1,5 @@
 import {
+  CAPABILITY_REGISTRY_FEATURE,
   CHAT_ACTIVITY_FEATURE,
   HEARTBEAT_SEC,
   LOCAL_VAULT_CAPABILITY,
@@ -9,12 +10,13 @@ import {
   type ServerToRunner,
   streamId,
 } from '@aom/shared';
+import { applyCapabilitiesReport } from '../capabilities/registry.ts';
 import { ceoRpc } from '../ceo/gateway.ts';
 import { announceRestart } from '../ceo/restart.ts';
 import { endCeoShift } from '../ceo/shift.ts';
 import type { ChatTerminal } from '../chat/relay.ts';
-import { addBacklogSuggestionRpc } from '../commands/backlog.ts';
 import { baTaskRpc, endBaTaskShift } from '../commands/ba-tasks.ts';
+import { addBacklogSuggestionRpc } from '../commands/backlog.ts';
 import { attachmentRpc } from '../commands/card-attachments.ts';
 import { cardDependRpc, cardFactsRpc } from '../commands/card-facts.ts';
 import { cardBriefRpc, cardGroupRpc } from '../commands/card-group.ts';
@@ -105,6 +107,7 @@ import { applyDeployProgress, applyDeployResult } from '../delivery/runs.ts';
 import { applyWriteResult } from '../delivery/setup.ts';
 import { pinForWelcome } from '../platform-team/pins.ts';
 import { platformTriageRpc } from '../platform-team/rpc.ts';
+import type { SessionTerminal } from '../sessions/turns.ts';
 import { buildBrief } from './brief.ts';
 import { claimPendingCommands, completeCommand, requeueSentCommands } from './commands-queue.ts';
 import { ledgerRetireRpc, ledgerSearchRpc } from './ledger-rpc.ts';
@@ -604,20 +607,40 @@ export class RunnerHandlers {
         return this.ack(conn, msg);
       }
       case 'chat.delta':
+        // Turns of discovery and boardroom sessions are told apart by their id and handled by the session service.
+        if (this.ctx.services.sessions.onDelta(conn.workstationId, msg)) return;
         return this.ctx.services.chat.onDelta(conn.workstationId, msg);
       case 'chat.activity':
+        if (this.ctx.services.sessions.onActivity(conn.workstationId, msg)) return;
         return this.ctx.services.chat.onActivity(conn.workstationId, msg);
       case 'chat.done':
       case 'chat.error': {
         const chat = this.ctx.services.chat;
-        const { duplicate, result } = await this.withInbox<ChatTerminal | null>(conn, msg.id, async (tx) =>
-          msg.type === 'chat.done'
-            ? ((await chat.applyDone(conn.workstationId, msg, tx)) ?? null)
-            : ((await chat.applyError(conn.workstationId, msg, tx)) ?? null),
-        );
-        if (!duplicate) chat.notify(result ?? undefined);
+        const sessions = this.ctx.services.sessions;
+        const { duplicate, result } = await this.withInbox<
+          { chat: ChatTerminal | null } | { session: SessionTerminal }
+        >(conn, msg.id, async (tx) => {
+          const s =
+            msg.type === 'chat.done'
+              ? await sessions.applyDone(conn.workstationId, msg, tx)
+              : await sessions.applyError(conn.workstationId, msg, tx);
+          if (s) return { session: s };
+          return {
+            chat:
+              (msg.type === 'chat.done'
+                ? await chat.applyDone(conn.workstationId, msg, tx)
+                : await chat.applyError(conn.workstationId, msg, tx)) ?? null,
+          };
+        });
+        if (!duplicate && result) {
+          if ('session' in result) await sessions.notify(result.session);
+          else chat.notify(result.chat ?? undefined);
+        }
         return this.ack(conn, msg);
       }
+      case 'capabilities.report':
+        await applyCapabilitiesReport(this.ctx, ws, msg);
+        return;
       case 'token.rotate':
         this.send(conn, 'token.rotated', { token: await issueRotatedToken(this.ctx, conn.workstationId) });
         return;
@@ -811,7 +834,7 @@ export class RunnerHandlers {
       limits: { maxConcurrentShifts: conn.maxShifts, shiftLimit: setting },
       // Safe mode: the runner version this workstation is pinned to (the runner's updater follows it, not the latest).
       runnerPin: await pinForWelcome(ctx.pool, conn.workstationId),
-      features: [CHAT_ACTIVITY_FEATURE],
+      features: [CHAT_ACTIVITY_FEATURE, CAPABILITY_REGISTRY_FEATURE],
     });
     // With nothing in the runner's outbox there is nothing to wait for; otherwise reconcile on outbox.flushed.
     if (msg.outboxPending === 0) await this.reconcile(conn);
@@ -858,6 +881,8 @@ export class RunnerHandlers {
     await this.reconcileCeo(conn, known, helloAt);
     // CEO owner and order turns the runner no longer holds are over; messages that queued meanwhile go out in order.
     await ctx.services.chat.reconcileCeoTurns(conn.workstationId, conn.helloChatIds ?? [], helloAt);
+    // Session turns the runner no longer holds go back to the queue; queued ones go out.
+    await ctx.services.sessions.onReconnect(conn.workstationId, conn.helloChatIds ?? [], helloAt);
     await announceRestart(ctx, conn.workstationId);
     await ctx.services.chat.onReconnect(conn.workstationId);
     // The owner's first workstation holds the automatic local vaults of the projects that have none (graphs design 3).

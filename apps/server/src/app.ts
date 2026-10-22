@@ -62,6 +62,7 @@ import { billingRoutes } from './routes/billing.ts';
 import { blogApiRoutes } from './routes/blog-api.ts';
 import { blogPlatformRoutes } from './routes/blog-platform.ts';
 import { blogPublicRoutes } from './routes/blog-public.ts';
+import { capabilityRoutes } from './routes/capabilities.ts';
 import { cardAttachmentRoutes } from './routes/card-attachments.ts';
 import { cardRoutes } from './routes/cards.ts';
 import { catalogueRoutes } from './routes/catalogue.ts';
@@ -75,6 +76,7 @@ import { designerRoutes } from './routes/designer.ts';
 import { deskRoutes } from './routes/desk.ts';
 import { devopsRoutes } from './routes/devops.ts';
 import { digestRoutes } from './routes/digests.ts';
+import { documentRoutes } from './routes/documents.ts';
 import { graphRoutes } from './routes/graph.ts';
 import { hookRoutes } from './routes/hooks.ts';
 import { hrRoutes } from './routes/hr.ts';
@@ -100,6 +102,7 @@ import { reportingRoutes } from './routes/reporting.ts';
 import { researchRoutes } from './routes/research.ts';
 import { runRoutes } from './routes/runs.ts';
 import { scheduleRoutes } from './routes/schedules.ts';
+import { sessionRoutes } from './routes/sessions.ts';
 import { setupChecklistRoutes } from './routes/setup-checklist.ts';
 import { sharingRoutes } from './routes/sharing.ts';
 import { shiftRoutes } from './routes/shifts.ts';
@@ -111,6 +114,7 @@ import { workstationRoutes } from './routes/workstations.ts';
 import { RunnerGateway } from './runner-gateway/gateway.ts';
 import { RunnerRegistry } from './runner-gateway/registry.ts';
 import { Scheduler } from './scheduler/scheduler.ts';
+import { SessionTurns } from './sessions/turns.ts';
 import { SimulationHostImpl } from './simulation/host.ts';
 
 export interface BuildOptions {
@@ -400,6 +404,9 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   await app.register(researchRoutes(ctx));
   await app.register(intakeRoutes(ctx));
   await app.register(backlogRoutes(ctx));
+  await app.register(sessionRoutes(ctx));
+  await app.register(documentRoutes(ctx));
+  await app.register(capabilityRoutes(ctx));
   await app.register(intakeBatchRoutes(ctx));
   await app.register(hrRoutes(ctx));
   await app.register(designerRoutes(ctx));
@@ -438,6 +445,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   Object.assign(ctx.services, { runners, gateway, browser, dispatcher, reaper, scheduler, signals });
   ctx.services.cloud = { ssh: realSshConnector, github: createGithubApi(), pending: new Set() };
   ctx.services.chat = new ChatRelay(ctx);
+  ctx.services.sessions = new SessionTurns(ctx);
   ctx.services.billing = createBillingRuntime(config);
   await app.register(websocket, {
     options: {

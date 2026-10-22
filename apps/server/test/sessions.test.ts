@@ -1,0 +1,500 @@
+import { SESSION_TURNS_CAPABILITY } from '@aom/shared';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { PROJECTION_TABLES } from '../src/projections/index.ts';
+import { rebuildProjections } from '../src/projections/rebuild.ts';
+import { uniqueEmail } from './helpers/app.ts';
+import { Browser } from './helpers/browser.ts';
+import { closeAdminPool, q } from './helpers/db.ts';
+import type { FakeRunner } from './helpers/fake-runner.ts';
+import { createWorld, ok, until, type World } from './helpers/world.ts';
+
+/** Discovery and boardroom sessions: participants, durable turns, the runner round trip and replay safety. */
+let w: World;
+beforeAll(async () => {
+  w = await createWorld({ env: { AOM_FIRST_RUN_HIRE_CAP: 'false' } });
+});
+afterAll(async () => {
+  await w.t.close();
+  await closeAdminPool();
+});
+
+const owner = (method: string, url: string, body?: unknown, expected = 200) =>
+  ok<any>(
+    w.t.req(method, url, { cookie: w.owner.cookie, ...(body !== undefined ? { body } : {}) }),
+    expected,
+  );
+const raw = (method: string, url: string, body?: unknown, cookie = w.owner.cookie) =>
+  w.t.req(method, url, { cookie, ...(body !== undefined ? { body } : {}) });
+const persona = (key: string, seat = 'Panel') => ({ kind: 'persona', refId: key, seat });
+const newSession = async (over: Record<string, unknown> = {}) =>
+  (
+    await owner(
+      'POST',
+      '/api/sessions',
+      {
+        kind: 'boardroom',
+        title: 'Pricing debate',
+        participants: [persona('devils-advocate', 'Skeptic'), persona('cost-hawk')],
+        ...over,
+      },
+      201,
+    )
+  ).session;
+const connect = (caps: string[] = [SESSION_TURNS_CAPABILITY]) => w.connectRunner({ capabilities: caps });
+const turns = async (threadId: string) =>
+  (await owner('GET', `/api/sessions/${threadId}/turns`)).turns as any[];
+const messages = async (threadId: string) =>
+  (await owner('GET', `/api/threads/${threadId}/messages`)).messages as any[];
+const reply = (r: FakeRunner, start: { chatId: string; threadId: string }, text: string) =>
+  r.send('chat.done', {
+    chatId: start.chatId,
+    threadId: start.threadId,
+    messageText: text,
+    usage: { inputTokens: 100, outputTokens: 20, cacheReadTokens: 0, cacheWriteTokens: 0 },
+  });
+const startOf = async (r: FakeRunner, chatId: string): Promise<any> =>
+  r.waitFor('chat.start', (f) => f.chatId === chatId);
+const turnRow = async (id: string): Promise<any> =>
+  (await q('SELECT * FROM session_turns WHERE id=$1', [id]))[0];
+const hangUp = async (r: FakeRunner) => {
+  r.close();
+  await until(async () => !w.t.app.ctx.services.runners.isOnline(w.workstationId), 3000, 'runner offline');
+};
+const speaker = (s: any, key: string) => s.participants.find((p: any) => p.refId === key);
+
+describe('creating a session', () => {
+  it('creates a thread with its participants, the owner and the facilitator included', async () => {
+    const analyst = await w.hire(`Ana${Math.random().toString(36).slice(2, 6)}`, 'analyst', 'senior');
+    const analystName = analyst.name;
+    const s = await newSession({
+      kind: 'discovery',
+      title: 'Idea: invoicing',
+      facilitatorAgentId: analyst.id,
+      projectId: w.projectId,
+      config: { phase: 'frame', stance: 'facilitator' },
+    });
+    expect(s).toMatchObject({
+      kind: 'discovery',
+      title: 'Idea: invoicing',
+      facilitatorAgentId: analyst.id,
+      projectId: w.projectId,
+      workstationId: w.workstationId,
+      workstationOnline: false,
+      config: { phase: 'frame', stance: 'facilitator' },
+    });
+    expect(s.participants.map((p: any) => [p.kind, p.seat, p.displayName])).toEqual([
+      ['user', 'Owner', expect.any(String)],
+      ['persona', 'Skeptic', "Devil's Advocate"],
+      ['persona', 'Panel', 'Cost Hawk'],
+      ['agent', 'Facilitator', analystName],
+    ]);
+    expect(
+      (await owner('GET', '/api/sessions?kind=discovery')).sessions.map((x: any) => x.threadId),
+    ).toContain(s.threadId);
+    expect(
+      (await owner('GET', '/api/sessions?kind=boardroom')).sessions.map((x: any) => x.threadId),
+    ).not.toContain(s.threadId);
+    expect((await owner('GET', `/api/sessions/${s.threadId}`)).session.threadId).toBe(s.threadId);
+    // a session is not a chat: the chat list never shows it
+    expect((await owner('GET', '/api/chats')).chats.map((c: any) => c.threadId)).not.toContain(s.threadId);
+    expect(await messages(s.threadId)).toEqual([]);
+  });
+
+  it('refuses unknown personas, a persona without a brief, strangers and non-managers', async () => {
+    expect(
+      (
+        await raw('POST', '/api/sessions', {
+          kind: 'boardroom',
+          title: 'x',
+          participants: [persona('nobody-here')],
+        })
+      ).status,
+    ).toBe(400);
+    const adhoc = await raw('POST', '/api/sessions', {
+      kind: 'boardroom',
+      title: 'x',
+      participants: [persona('ad-hoc-pirate')],
+    });
+    expect(adhoc.status).toBe(400);
+    expect(JSON.stringify(adhoc.body)).toContain('ad_hoc_persona_needs_brief');
+    const ok1 = await newSession({
+      participants: [
+        {
+          kind: 'persona',
+          refId: 'ad-hoc-pirate',
+          seat: 'Wildcard',
+          stance: 'A pirate who hates subscriptions',
+          displayName: 'Pirate',
+        },
+      ],
+    });
+    expect(ok1.participants.find((p: any) => p.refId === 'ad-hoc-pirate')).toMatchObject({
+      displayName: 'Pirate',
+      stance: 'A pirate who hates subscriptions',
+    });
+    const stranger = await w.t.userSession(uniqueEmail('stranger'));
+    expect((await raw('GET', `/api/sessions/${ok1.threadId}`, undefined, stranger.cookie)).status).toBe(404);
+    expect(
+      (await raw('GET', `/api/threads/${ok1.threadId}/messages`, undefined, stranger.cookie)).status,
+    ).toBe(404);
+    expect((await raw('POST', '/api/sessions', { kind: 'discovery', title: 'x' })).status).toBe(201);
+    expect((await w.t.req('POST', '/api/sessions', { body: { kind: 'discovery', title: 'x' } })).status).toBe(
+      401,
+    );
+  });
+
+  it('updates config by merging, adds and removes participants, and keeps the creator', async () => {
+    const s = await newSession();
+    const p = await owner('PATCH', `/api/sessions/${s.threadId}`, {
+      config: { phase: 'diverge', note: 'x' },
+      title: 'Renamed',
+    });
+    expect(p.session).toMatchObject({ title: 'Renamed', config: { phase: 'diverge', note: 'x' } });
+    const p2 = await owner('PATCH', `/api/sessions/${s.threadId}`, { config: { note: null, round: 2 } });
+    expect(p2.session.config).toEqual({ phase: 'diverge', round: 2 });
+    const added = await owner(
+      'POST',
+      `/api/sessions/${s.threadId}/participants`,
+      persona('security', 'Guard'),
+      201,
+    );
+    expect(added.participant).toMatchObject({ displayName: 'Security', seat: 'Guard' });
+    expect((await raw('POST', `/api/sessions/${s.threadId}/participants`, persona('security'))).status).toBe(
+      409,
+    );
+    const patched = await owner('PATCH', `/api/sessions/${s.threadId}/participants/${added.participant.id}`, {
+      seat: 'Gatekeeper',
+      stance: 'strict',
+    });
+    expect(patched.participant).toMatchObject({ seat: 'Gatekeeper', stance: 'strict' });
+    await w.t.req('DELETE', `/api/sessions/${s.threadId}/participants/${added.participant.id}`, {
+      cookie: w.owner.cookie,
+    });
+    const cur = (await owner('GET', `/api/sessions/${s.threadId}`)).session;
+    expect(cur.participants.map((x: any) => x.refId)).not.toContain('security');
+    const me = cur.participants.find((x: any) => x.kind === 'user');
+    expect((await raw('DELETE', `/api/sessions/${s.threadId}/participants/${me.id}`)).status).toBe(409);
+  });
+
+  it('stores a human message without queueing a turn', async () => {
+    const s = await newSession();
+    const m = await owner(
+      'POST',
+      `/api/sessions/${s.threadId}/messages`,
+      { body: 'Should we charge per seat?' },
+      201,
+    );
+    expect(m.message).toMatchObject({ authorKind: 'user', kind: 'chat', body: 'Should we charge per seat?' });
+    expect(await turns(s.threadId)).toEqual([]);
+    expect((await messages(s.threadId)).map((x) => x.body)).toEqual(['Should we charge per seat?']);
+  });
+});
+
+describe('durable turns', () => {
+  it('waits while the workstation is offline, is sent when it connects, and stores the reply as the persona', async () => {
+    const s = await newSession();
+    const q1 = await owner(
+      'POST',
+      `/api/sessions/${s.threadId}/messages`,
+      { body: 'Should we charge per seat?' },
+      201,
+    );
+    const da = speaker(s, 'devils-advocate');
+    const t = (
+      await owner(
+        'POST',
+        `/api/sessions/${s.threadId}/turns`,
+        {
+          participantId: da.id,
+          message: 'Attack the per-seat idea.',
+          replyToMessageId: q1.message.id,
+          round: 1,
+        },
+        202,
+      )
+    ).turn;
+    expect(t).toMatchObject({ status: 'queued', speakerName: "Devil's Advocate", round: 1 });
+    const b = await Browser.open(w.baseUrl, w.owner.cookie);
+    await b.hello();
+    const r = await connect();
+    const start = await startOf(r, t.id);
+    expect(start.session).toMatchObject({
+      turnId: t.id,
+      kind: 'boardroom',
+      speaker: { kind: 'persona', name: "Devil's Advocate", personaKey: 'devils-advocate', seat: 'Skeptic' },
+    });
+    expect(start.session?.instructions).toContain('Devil');
+    expect(start.session?.roster.map((x: { name: string }) => x.name)).toEqual(
+      expect.arrayContaining(["Devil's Advocate", 'Cost Hawk']),
+    );
+    expect(start.agent).toMatchObject({ roleKey: 'persona', name: "Devil's Advocate" });
+    expect(start.agent.permissions).toMatchObject({
+      allowedTools: ['read'],
+      mayCommit: false,
+      writableGlobs: [],
+    });
+    expect(start.message).toContain('Should we charge per seat?');
+    expect(start.message).toContain('## Your turn');
+    expect(start.message).toContain('Attack the per-seat idea.');
+    await until(async () => (await turnRow(t.id)).status === 'running');
+    expect((await turnRow(t.id)).attempts).toBe(1);
+
+    r.send('chat.delta', { chatId: t.id, threadId: s.threadId, text: 'Per seat ' });
+    await b.until(() => b.of('chat.delta').some((m) => m.turnId === t.id));
+    reply(r, start, 'Per-seat pricing punishes growth.');
+    await until(async () => (await turnRow(t.id)).status === 'done');
+    const msgs = await messages(s.threadId);
+    const mine = msgs.find((m) => m.authorPersonaKey === 'devils-advocate');
+    expect(mine).toMatchObject({
+      authorKind: 'agent',
+      authorAgentId: null,
+      authorName: "Devil's Advocate",
+      body: 'Per-seat pricing punishes growth.',
+      data: {
+        turnId: t.id,
+        participantId: da.id,
+        seat: 'Skeptic',
+        round: 1,
+        replyToMessageId: q1.message.id,
+      },
+    });
+    expect((await turnRow(t.id)).message_id).toBe(mine.id);
+    await b.until(() =>
+      b
+        .of('chat.done')
+        .some((m) => m.turnId === t.id && m.participantId === da.id && m.message?.id === mine.id),
+    );
+    expect(b.of('session.turn').map((m) => m.status)).toEqual(expect.arrayContaining(['running', 'done']));
+    b.close();
+    r.close();
+  });
+
+  it('shows a persona only the messages the turn selects (independent first round)', async () => {
+    const r = await connect();
+    const s = await newSession();
+    const question = (
+      await owner('POST', `/api/sessions/${s.threadId}/messages`, { body: 'QUESTION-ONE' }, 201)
+    ).message;
+    await owner('POST', `/api/sessions/${s.threadId}/messages`, { body: 'SECRET-OTHER-ANSWER' }, 201);
+    const t = (
+      await owner(
+        'POST',
+        `/api/sessions/${s.threadId}/turns`,
+        {
+          participantId: speaker(s, 'cost-hawk').id,
+          message: 'Answer alone.',
+          context: { mode: 'selected', messageIds: [question.id] },
+        },
+        202,
+      )
+    ).turn;
+    const start = await startOf(r, t.id);
+    expect(start.message).toContain('QUESTION-ONE');
+    expect(start.message).not.toContain('SECRET-OTHER-ANSWER');
+    const none = (
+      await owner(
+        'POST',
+        `/api/sessions/${s.threadId}/turns`,
+        { participantId: speaker(s, 'cost-hawk').id, message: 'Blind.', context: { mode: 'none' } },
+        202,
+      )
+    ).turn;
+    const startNone = await startOf(r, none.id);
+    expect(startNone.message).toBe('## Your turn\n\nBlind.');
+    r.close();
+  });
+
+  it('lets an agent speak with its own spec and the registry persona of its role', async () => {
+    const r = await connect();
+    const analyst = await w.hire(`Ana${Math.random().toString(36).slice(2, 6)}`, 'analyst', 'senior');
+    const s = await newSession({ kind: 'discovery', facilitatorAgentId: analyst.id, participants: [] });
+    const t = (
+      await owner(
+        'POST',
+        `/api/sessions/${s.threadId}/turns`,
+        { participantId: speaker(s, analyst.id).id, message: 'Ask the first question.' },
+        202,
+      )
+    ).turn;
+    const start = await startOf(r, t.id);
+    expect(start.agent).toMatchObject({ agentId: analyst.id, roleKey: 'analyst' });
+    expect(start.session?.speaker).toMatchObject({ kind: 'agent', name: analyst.name });
+    expect(start.session?.instructions).toContain('discovery session');
+    reply(r, start, 'What problem are you solving?');
+    await until(async () => (await turnRow(t.id)).status === 'done');
+    const m = (await messages(s.threadId)).find((x) => x.authorAgentId === analyst.id);
+    expect(m).toMatchObject({ authorName: analyst.name, body: 'What problem are you solving?' });
+    expect(m.authorPersonaKey).toBeUndefined();
+    r.close();
+  });
+
+  it('puts a turn the runner lost back in the queue and sends it again', async () => {
+    let r = await connect();
+    const s = await newSession();
+    const t = (
+      await owner(
+        'POST',
+        `/api/sessions/${s.threadId}/turns`,
+        { participantId: speaker(s, 'cost-hawk').id, message: 'Cost?' },
+        202,
+      )
+    ).turn;
+    await startOf(r, t.id);
+    await until(async () => (await turnRow(t.id)).status === 'running');
+    await hangUp(r);
+    // the runner comes back and no longer holds the turn (it restarted)
+    r = await connect();
+    const again = await startOf(r, t.id);
+    await until(async () => (await turnRow(t.id)).attempts === 2);
+    expect((await turnRow(t.id)).status).toBe('running');
+    reply(r, again, 'Cheap enough.');
+    await until(async () => (await turnRow(t.id)).status === 'done');
+    r.close();
+  });
+
+  it('keeps a running turn the runner still holds', async () => {
+    const r = await connect();
+    const s = await newSession();
+    const t = (
+      await owner(
+        'POST',
+        `/api/sessions/${s.threadId}/turns`,
+        { participantId: speaker(s, 'cost-hawk').id, message: 'Cost?' },
+        202,
+      )
+    ).turn;
+    const start = await startOf(r, t.id);
+    await until(async () => (await turnRow(t.id)).status === 'running');
+    await hangUp(r);
+    const { FakeRunner } = await import('./helpers/fake-runner.ts');
+    const held = await FakeRunner.connect(w.baseUrl, w.runnerToken);
+    held.send('hello', {
+      runnerVersion: '0.0.0-test',
+      protocol: 1,
+      platform: 'linux',
+      hostname: 'fake-host',
+      runtimes: [{ id: 'mock', version: '1', available: true, capabilities: [] }],
+      repos: [],
+      vaults: [],
+      activeShifts: [],
+      activeChats: [t.id],
+      outboxPending: 0,
+      capabilities: [SESSION_TURNS_CAPABILITY],
+    });
+    await held.waitFor('welcome');
+    await held.barrier();
+    expect((await turnRow(t.id)).status).toBe('running');
+    expect((await turnRow(t.id)).attempts).toBe(1);
+    expect(held.of('chat.start')).toHaveLength(0);
+    // its reply is accepted after a server-side forgetting (the turn is in the database, not only in memory)
+    reply(held, start, 'Still here.');
+    await until(async () => (await turnRow(t.id)).status === 'done');
+    held.close();
+  });
+
+  it('retries a dropped connection and ends the turn on a real error or a cancel', async () => {
+    const r = await connect();
+    const s = await newSession();
+    const da = speaker(s, 'devils-advocate').id;
+    const queue = async (message: string) =>
+      (await owner('POST', `/api/sessions/${s.threadId}/turns`, { participantId: da, message }, 202)).turn;
+    const t1 = await queue('one');
+    const st1 = await startOf(r, t1.id);
+    r.send('chat.error', {
+      chatId: t1.id,
+      threadId: s.threadId,
+      error: 'workstation offline: the connection to the server dropped',
+    });
+    await until(async () => (await turnRow(t1.id)).attempts === 2);
+    expect((await turnRow(t1.id)).status).toBe('running');
+    expect(r.of('chat.start').filter((f) => f.chatId === t1.id)).toHaveLength(2);
+    r.send('chat.error', {
+      chatId: t1.id,
+      threadId: s.threadId,
+      error: 'the claude process exited with code 1',
+    });
+    await until(async () => (await turnRow(t1.id)).status === 'failed');
+    expect((await turnRow(t1.id)).error).toContain('exited with code 1');
+    expect(st1.chatId).toBe(t1.id);
+    // a cancel of a running turn goes to the runner
+    const t2 = await queue('two');
+    await startOf(r, t2.id);
+    await owner('POST', `/api/sessions/${s.threadId}/turns/${t2.id}/cancel`);
+    await r.waitFor('chat.cancel', (f) => f.chatId === t2.id);
+    r.send('chat.error', { chatId: t2.id, threadId: s.threadId, error: 'cancelled' });
+    await until(async () => (await turnRow(t2.id)).status === 'failed');
+    // a queued turn is cancelled at once
+    await hangUp(r);
+    const t3 = await queue('three');
+    expect((await owner('POST', `/api/sessions/${s.threadId}/turns/${t3.id}/cancel`)).turn).toMatchObject({
+      status: 'failed',
+      error: 'cancelled',
+    });
+    expect((await raw('POST', `/api/sessions/${s.threadId}/turns/${t3.id}/cancel`)).status).toBe(409);
+  });
+
+  it('fails a turn on a runner that cannot run session turns, and refuses a person as speaker', async () => {
+    const r = await connect([]);
+    const s = await newSession();
+    const t = (
+      await owner(
+        'POST',
+        `/api/sessions/${s.threadId}/turns`,
+        { participantId: speaker(s, 'cost-hawk').id, message: 'hi' },
+        202,
+      )
+    ).turn;
+    await until(async () => (await turnRow(t.id)).status === 'failed');
+    expect((await turnRow(t.id)).error).toContain('runner_too_old');
+    expect(r.of('chat.start')).toHaveLength(0);
+    const me = (await owner('GET', `/api/sessions/${s.threadId}`)).session.participants.find(
+      (p: any) => p.kind === 'user',
+    );
+    expect(
+      (await raw('POST', `/api/sessions/${s.threadId}/turns`, { participantId: me.id, message: 'x' })).status,
+    ).toBe(400);
+    expect(
+      (
+        await raw('POST', `/api/sessions/${s.threadId}/turns`, {
+          participantId: crypto.randomUUID(),
+          message: 'x',
+        })
+      ).status,
+    ).toBe(404);
+    r.close();
+  });
+
+  it('expires a turn that waited a day for a workstation', async () => {
+    const s = await newSession();
+    const t = (
+      await owner(
+        'POST',
+        `/api/sessions/${s.threadId}/turns`,
+        { participantId: speaker(s, 'cost-hawk').id, message: 'hi' },
+        202,
+      )
+    ).turn;
+    w.t.clock.advance(25 * 3_600_000);
+    await w.t.app.ctx.services.sessions.sweep();
+    expect(await turnRow(t.id)).toMatchObject({ status: 'failed' });
+    expect((await turnRow(t.id)).error).toContain('expired');
+  });
+});
+
+describe('replay', () => {
+  it('rebuilds identical projection tables for sessions and turns', async () => {
+    const snapshot = async () => {
+      const out: Record<string, string[]> = {};
+      for (const table of ['threads', 'thread_participants', 'session_turns', 'thread_messages']) {
+        const rows = await q(`SELECT to_jsonb(t)::text AS j FROM "${table}" t`);
+        out[table] = rows.map((r) => r.j as string).sort();
+      }
+      return out;
+    };
+    const before = await snapshot();
+    expect(before.session_turns?.length).toBeGreaterThan(3);
+    await rebuildProjections(w.t.app.ctx.pool, w.t.app.ctx.store, w.t.clock.now());
+    expect(await snapshot()).toEqual(before);
+    expect(PROJECTION_TABLES).toEqual(expect.arrayContaining(['thread_participants', 'session_turns']));
+  });
+});

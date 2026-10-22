@@ -2,6 +2,7 @@ import type { Projector, ProjectorMap } from '../eventstore/types.ts';
 import { agentProjectors } from './agents.ts';
 import { backlogProjectors } from './backlog.ts';
 import { blogProjectors } from './blog.ts';
+import { capabilityProjectors } from './capabilities.ts';
 import { cardProjectors, releaseHeldDesigns } from './cards.ts';
 import { catalogueProjectors } from './catalogue.ts';
 import { ceoProjectors } from './ceo.ts';
@@ -14,6 +15,7 @@ import { costProjectors } from './costs.ts';
 import { deliveryProjectors } from './delivery.ts';
 import { deskProjectors } from './desk.ts';
 import { devopsProjectors } from './devops.ts';
+import { documentProjectors } from './documents.ts';
 import { environmentProjectors } from './environment.ts';
 import { feedProjectors } from './feeds.ts';
 import { graphProjectors } from './graph.ts';
@@ -36,6 +38,7 @@ import { reporterProjectors } from './reporter.ts';
 import { researchProjectors } from './research.ts';
 import { runProjectors } from './runs.ts';
 import { scheduleProjectors } from './schedules.ts';
+import { sessionProjectors } from './sessions.ts';
 import { sharingProjectors } from './sharing.ts';
 import { shiftProjectors } from './shifts.ts';
 import { subworkflowProjectors } from './subworkflows.ts';
@@ -97,6 +100,9 @@ const domains: Array<Record<string, Projector>> = [
   ceoTopicProjectors,
   questionFlowProjectors,
   codeV6Projectors,
+  sessionProjectors,
+  documentProjectors,
+  capabilityProjectors,
 ];
 
 /**
@@ -232,4 +238,10 @@ export const PROJECTION_TABLES = [
   'gate_presets',
   'gate_bindings',
   'deploy_runs',
+  'thread_participants',
+  'session_turns',
+  'documents',
+  'document_versions',
+  'capability_index',
+  'capability_index_status',
 ];

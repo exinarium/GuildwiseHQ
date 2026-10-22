@@ -322,6 +322,9 @@ export const RpcMethodSchema = z.enum([
   'deploy.probe.record',
   /** An agent adds a follow-up it found as a backlog suggestion (`aom backlog suggest`); agent and card come from the shift. */
   'backlog.suggest',
+  /** Capability Registry: `aom skill show|list`, answered by the runner from its local registry (built-ins and the organization vault). */
+  'skill.show',
+  'skill.list',
 ]);
 export type RpcMethod = z.infer<typeof RpcMethodSchema>;
 

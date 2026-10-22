@@ -18,6 +18,7 @@ import type { PushService } from './push/notifier.ts';
 import type { RunnerGateway } from './runner-gateway/gateway.ts';
 import type { RunnerRegistry } from './runner-gateway/registry.ts';
 import type { Scheduler } from './scheduler/scheduler.ts';
+import type { SessionTurns } from './sessions/turns.ts';
 
 /** Everything a command, route or gateway needs. Built once in `createApp` (app.ts). */
 export interface Ctx {
@@ -60,6 +61,8 @@ export interface Services {
   signals: SignalSweep;
   browser: BrowserGateway;
   chat: ChatRelay;
+  /** Durable turns of discovery and boardroom sessions. */
+  sessions: SessionTurns;
   cloud: CloudServices;
   billing: BillingRuntime;
   /** Web Push notifier (only when VAPID is configured). */

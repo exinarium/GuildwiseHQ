@@ -337,3 +337,15 @@ export function renderCapabilityIndex(
     ...lines,
   ].join('\n');
 }
+
+/** Digest of a reported index: an identical report (the same ids, hashes and issues) produces the same value. */
+export function digestCapabilityIndex(
+  items: ReadonlyArray<Pick<CapabilityMeta, 'kind' | 'key' | 'hash' | 'name' | 'description'>>,
+  issues: ReadonlyArray<{ path: string; message: string }> = [],
+): string {
+  const lines = [
+    ...items.map((i) => `${i.kind}:${i.key}\u0000${i.hash}\u0000${i.name}\u0000${i.description}`).sort(),
+    ...issues.map((i) => `issue\u0000${i.path}\u0000${i.message}`).sort(),
+  ];
+  return sha256Hex(lines.join('\u0001'));
+}

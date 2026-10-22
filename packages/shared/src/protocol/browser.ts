@@ -72,10 +72,16 @@ export const BrowserShiftProgressSchema = z.object({
   cardId: z.uuid().nullable(),
   items: z.array(ProgressItemSchema),
 });
+/** Present on the frames of a discovery or boardroom session turn: which turn and which seat is speaking. */
+const SessionTurnTag = {
+  turnId: z.uuid().optional(),
+  participantId: z.uuid().optional(),
+};
 export const BrowserChatDeltaSchema = z.object({
   type: z.literal('chat.delta'),
   threadId: z.uuid(),
   text: z.string(),
+  ...SessionTurnTag,
 });
 export const BrowserChatDoneSchema = z.object({
   type: z.literal('chat.done'),
@@ -83,6 +89,7 @@ export const BrowserChatDoneSchema = z.object({
   messageId: z.uuid(),
   /** Additive: the stored agent message (what `GET /api/threads/:id/messages` returns), to swap the streamed bubble for. */
   message: ThreadMessageDtoSchema.optional(),
+  ...SessionTurnTag,
 });
 /** Tool activity of the running turn (forwarded from the runner, not stored): see `ChatActivitySchema`. */
 export const BrowserChatActivitySchema = z.object({
@@ -91,6 +98,7 @@ export const BrowserChatActivitySchema = z.object({
   seq: z.number().int().nonnegative(),
   segment: ChatSegmentSchema,
   replace: z.boolean().optional(),
+  ...SessionTurnTag,
 });
 /** The CEO's workstation is offline: the message is saved and waits (it is sent when the workstation is back). */
 export const BrowserChatQueuedSchema = z.object({
@@ -103,6 +111,16 @@ export const BrowserChatErrorSchema = z.object({
   type: z.literal('chat.error'),
   threadId: z.uuid(),
   reason: z.string(),
+  ...SessionTurnTag,
+});
+/** A session turn changed state (queued, started, requeued, failed): the session page refreshes its turn list. */
+export const BrowserSessionTurnSchema = z.object({
+  type: z.literal('session.turn'),
+  threadId: z.uuid(),
+  turnId: z.uuid(),
+  participantId: z.uuid().nullable(),
+  status: z.enum(['queued', 'running', 'done', 'failed']),
+  error: z.string().optional(),
 });
 export const PresenceSchema = z.object({
   type: z.literal('presence'),
@@ -130,6 +148,7 @@ export const ServerToBrowserSchema = z.discriminatedUnion('type', [
   BrowserChatDoneSchema,
   BrowserChatQueuedSchema,
   BrowserChatErrorSchema,
+  BrowserSessionTurnSchema,
   PresenceSchema,
   BrowserRunChangedSchema,
   BrowserRunLogSchema,

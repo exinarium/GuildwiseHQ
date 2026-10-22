@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { BriefAttachmentSchema } from '../attachments/index.ts';
+import { CapabilityMetaSchema } from '../capabilities/parse.ts';
 import { CHANGED_PATHS_MAX, DiffUploadSchema, E2eAreaMapSchema } from '../cards/lean-v6.ts';
 import { DiffStats, StoredCompletionAction } from '../cards/types.ts';
 import { CeoShiftSchema } from '../ceo/ipc.ts';
@@ -85,6 +86,7 @@ import {
   RunStopPayloadSchema,
 } from '../runs/types.ts';
 import { VaultFolderSchema } from '../safe.ts';
+import { SessionTurnSpecSchema } from '../sessions/index.ts';
 import { FinalizeExecutePayloadSchema } from '../testing/index.ts';
 import {
   VaultConfigureCommandSchema,
@@ -1037,6 +1039,23 @@ export const MAX_TOOLCHAINS = 64;
 export const ToolchainsReportSchema = msg('toolchains.report', {
   toolchains: z.array(ToolchainInfoSchema).max(MAX_TOOLCHAINS),
 });
+/** Announced in `hello.capabilities` by runners that execute session turns (`chat.start.session`). */
+export const SESSION_TURNS_CAPABILITY = 'session-turns:1';
+/** Announced in `welcome.features` by servers that accept `capabilities.report`. */
+export const CAPABILITY_REGISTRY_FEATURE = 'capability-registry:1';
+export const MAX_CAPABILITY_ITEMS = 500;
+/**
+ * The organization vault's capabilities (`org/skills`, `org/personas`, `org/playbooks`) as this runner indexed them:
+ * metadata only. A full snapshot, sent after a vault sync that changed them (and after `welcome`).
+ */
+export const CapabilitiesReportSchema = msg('capabilities.report', {
+  vaultId: z.uuid(),
+  items: z.array(CapabilityMetaSchema.extend({ source: z.literal('org-vault') })).max(MAX_CAPABILITY_ITEMS),
+  issues: z
+    .array(z.object({ path: z.string().max(300), message: z.string().max(500) }))
+    .max(100)
+    .default([]),
+});
 /** How a runner's self-update stands (docs/RUNNER.md "Updates"). */
 export const RUNNER_UPDATE_STATES = [
   'up_to_date',
@@ -1495,6 +1514,12 @@ export const ChatStartSchema = msg('chat.start', {
   briefDelta: z.string().optional(),
   /** Order turns: the authorization the runner checks again (mark and hash) before it starts. */
   order: CeoOrderSpecSchema.optional(),
+  /**
+   * A turn of a discovery or boardroom session (only sent to a runner that announced `SESSION_TURNS_CAPABILITY`): the
+   * runner writes the persona's instructions, runs the headless call read-only and answers with the usual `chat.*`
+   * frames (`chatId` is the turn id). An older runner would run it as a plain chat.
+   */
+  session: SessionTurnSpecSchema.optional(),
 });
 export const TokenRotatedSchema = msg('token.rotated', { token: z.string().min(1) });
 /** A browser started (or stopped) following the logs of a run environment: the runner sends `run.log` only meanwhile. */
@@ -1520,6 +1545,7 @@ export const RunnerToServerSchema = z.discriminatedUnion('type', [
   OrgFoldersReportSchema,
   McpServersReportSchema,
   ToolchainsReportSchema,
+  CapabilitiesReportSchema,
   JiraReportSchema,
   IntegrationsReportSchema,
   IntegrationSessionSchema,

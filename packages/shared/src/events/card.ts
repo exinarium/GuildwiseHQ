@@ -536,6 +536,8 @@ export const cardEvents = [
       authorKind: z.enum(['user', 'agent', 'system']),
       authorUserId: Id.optional(),
       authorAgentId: Id.optional(),
+      /** A persona speaking in a discovery or boardroom session (authorKind stays `agent`; no agent row needed). */
+      authorPersonaKey: z.string().max(80).optional(),
       kind: ThreadMessageKind,
       body: z.string(),
       data: z.record(z.string(), z.unknown()).default({}),

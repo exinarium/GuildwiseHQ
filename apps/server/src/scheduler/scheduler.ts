@@ -4,6 +4,7 @@ import { cloudTick } from '../cloud/tick.ts';
 import { autoPublishDue } from '../commands/blog.ts';
 import { blogDigestTick } from '../commands/blog-digest.ts';
 import { evaluateAllBudgets } from '../commands/budgets.ts';
+import { publishPendingDocuments } from '../commands/documents.ts';
 import { fireDueHygiene } from '../commands/hygiene.ts';
 import { sweepIntegrations } from '../commands/integrations.ts';
 import { deliverDueInterests, fireDueInterests } from '../commands/interest-runs.ts';
@@ -122,6 +123,13 @@ export class Scheduler {
       );
       await expireRuns(this.ctx).catch((err) => this.ctx.log.error({ err }, 'run environment expiry failed'));
       await this.blog();
+      // Discovery and boardroom sessions: queued turns go out, approved documents reach the vault.
+      await this.ctx.services.sessions
+        .sweep()
+        .catch((err) => this.ctx.log.error({ err }, 'session turns failed'));
+      await publishPendingDocuments(this.ctx).catch((err) =>
+        this.ctx.log.error({ err }, 'document publishing failed'),
+      );
       await weeklyBriefingTick(this.ctx).catch((err) =>
         this.ctx.log.error({ err }, 'weekly briefing failed'),
       );

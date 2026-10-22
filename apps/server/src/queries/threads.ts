@@ -2,6 +2,11 @@ import type { ThreadMessageDto, ThreadMessagesQuery, ThreadMessagesResponse } fr
 import { iso, one, type Queryable, rows } from '../db/sql.ts';
 import { notFound } from '../errors.ts';
 
+/** The display name of the participant a persona message came from (a persona has no agent row). */
+const PERSONA_NAME_SQL = `(SELECT tp.display_name FROM thread_participants tp
+   WHERE m.author_persona_key IS NOT NULL AND tp.thread_id = m.thread_id AND tp.kind = 'persona' AND tp.ref_id = m.author_persona_key
+   ORDER BY tp.added_at LIMIT 1)`;
+
 /**
  * Messages of a thread the user may read: their own chats, card threads of projects they are an active member of,
  * DevOps threads of their own workstations and the intake threads of organizations they are Owner or Admin of. Returned oldest first; `before` pages backwards.
@@ -21,13 +26,15 @@ export async function threadMessages(
         OR (t.kind = 'devops' AND EXISTS (SELECT 1 FROM devops_requests r JOIN workstations w ON w.id = r.workstation_id
               WHERE r.thread_id = t.id AND w.user_id = $2))
         OR (t.kind = 'intake' AND EXISTS (SELECT 1 FROM org_members om WHERE om.org_id = t.org_id AND om.user_id = $2
-              AND om.status = 'active' AND om.role IN ('owner','admin'))))`,
+              AND om.status = 'active' AND om.role IN ('owner','admin')))
+        OR (t.kind IN ('discovery','boardroom') AND (t.created_by = $2 OR EXISTS (SELECT 1 FROM thread_participants tp
+              WHERE tp.thread_id = t.id AND tp.kind = 'user' AND tp.ref_id = $2::text AND tp.removed_at IS NULL))))`,
     [threadId, userId],
   );
   if (!t) throw notFound('thread not found');
   const list = await rows(
     db,
-    `SELECT m.*, u.display_name AS user_name, a.name AS agent_name FROM thread_messages m
+    `SELECT m.*, u.display_name AS user_name, a.name AS agent_name, ${PERSONA_NAME_SQL} AS persona_name FROM thread_messages m
        LEFT JOIN users u ON u.id = m.author_user_id LEFT JOIN agents a ON a.id = m.author_agent_id
       WHERE m.thread_id = $1
         AND CASE
@@ -55,7 +62,8 @@ function messageDto(m: any): ThreadMessageDto {
     authorKind: m.author_kind,
     authorUserId: m.author_user_id,
     authorAgentId: m.author_agent_id,
-    authorName: m.user_name ?? m.agent_name ?? null,
+    ...(m.author_persona_key ? { authorPersonaKey: m.author_persona_key } : {}),
+    authorName: m.user_name ?? m.persona_name ?? m.agent_name ?? null,
     kind: m.kind,
     body: m.body,
     data: m.data,
@@ -70,7 +78,7 @@ export async function threadMessageById(
 ): Promise<ThreadMessageDto | undefined> {
   const m = await one(
     db,
-    `SELECT m.*, u.display_name AS user_name, a.name AS agent_name FROM thread_messages m
+    `SELECT m.*, u.display_name AS user_name, a.name AS agent_name, ${PERSONA_NAME_SQL} AS persona_name FROM thread_messages m
        LEFT JOIN users u ON u.id = m.author_user_id LEFT JOIN agents a ON a.id = m.author_agent_id
       WHERE m.id = $1`,
     [messageId],

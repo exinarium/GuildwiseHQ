@@ -3,6 +3,7 @@ import { agentEvents } from './agent.ts';
 import { approvalEvents } from './approval.ts';
 import { backlogEvents } from './backlog.ts';
 import { blogEvents } from './blog.ts';
+import { capabilityEvents } from './capability.ts';
 import { cardEvents } from './card.ts';
 import { catalogueEvents } from './catalogue.ts';
 import { ceoEvents } from './ceo.ts';
@@ -13,6 +14,7 @@ import { costEvents } from './cost.ts';
 import { deliveryEvents } from './delivery.ts';
 import { deskEvents } from './desk.ts';
 import { devopsEvents } from './devops.ts';
+import { documentEvents } from './document.ts';
 import { environmentEvents } from './environment.ts';
 import { feedEvents } from './feed.ts';
 import { graphEvents } from './graph.ts';
@@ -36,6 +38,7 @@ import { reporterEvents } from './reporter.ts';
 import { researchEvents } from './research.ts';
 import { runEvents } from './run.ts';
 import { scheduleEvents } from './schedule.ts';
+import { sessionEvents } from './session.ts';
 import { setupEvents } from './setup.ts';
 import { sharingEvents } from './sharing.ts';
 import { shiftEvents } from './shift.ts';
@@ -91,6 +94,9 @@ export const DomainEventSchema = z.discriminatedUnion('type', [
   ...questionFlowEvents,
   ...platformEvents,
   ...codeV6Events,
+  ...sessionEvents,
+  ...documentEvents,
+  ...capabilityEvents,
 ]);
 export type DomainEvent = z.infer<typeof DomainEventSchema>;
 export type EventType = DomainEvent['type'];
@@ -101,6 +107,7 @@ export * from './agent.ts';
 export * from './approval.ts';
 export * from './backlog.ts';
 export * from './blog.ts';
+export * from './capability.ts';
 export * from './card.ts';
 export * from './catalogue.ts';
 export * from './ceo.ts';
@@ -110,6 +117,7 @@ export * from './cost.ts';
 export { defineEvent, IsoDate, Usage, UserRole } from './define.ts';
 export * from './desk.ts';
 export * from './devops.ts';
+export * from './document.ts';
 export * from './envelope.ts';
 export * from './environment.ts';
 export * from './feed.ts';
@@ -132,6 +140,7 @@ export * from './reporter.ts';
 export * from './research.ts';
 export * from './run.ts';
 export * from './schedule.ts';
+export * from './session.ts';
 export * from './sharing.ts';
 export * from './shift.ts';
 export * from './testing.ts';

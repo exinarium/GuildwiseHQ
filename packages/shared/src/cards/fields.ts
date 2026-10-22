@@ -129,6 +129,8 @@ export const CodeFieldsSchema = z.object({
   affectedAreas: z.string().optional(),
   constraints: z.string().optional(),
   linkedLedgerIds: z.array(z.uuid()).optional(),
+  /** Documents (brief, PRD, minutes) this card was drafted from: ids of `documents` (Discovery Studio and Boardroom). */
+  linkedDocIds: z.array(z.uuid()).optional(),
   testPlan: z.string().optional(),
   /**
    * Run the tester's `test` stage (integration and E2E tests against a running environment). Set from the project's
@@ -165,6 +167,7 @@ export const CODE_FIELDS: Record<string, FieldMeta> = {
   affectedAreas: { label: 'Affected areas', kind: 'markdown' },
   constraints: { label: 'Constraints', kind: 'markdown' },
   linkedLedgerIds: { label: 'Linked ledger entries', kind: 'list' },
+  linkedDocIds: { label: 'Linked documents', kind: 'list' },
   testPlan: { label: 'Test plan', kind: 'markdown' },
   integrationTests: { label: 'Integration tests', kind: 'boolean' },
   reportPath: { label: 'Report path', kind: 'text' },

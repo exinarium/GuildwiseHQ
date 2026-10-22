@@ -213,6 +213,8 @@ export const ThreadMessageDtoSchema = z.object({
   authorKind: z.enum(['user', 'agent', 'system']),
   authorUserId: z.uuid().nullable(),
   authorAgentId: z.uuid().nullable(),
+  /** Set for a persona's message in a discovery or boardroom session. */
+  authorPersonaKey: z.string().nullable().optional(),
   authorName: z.string().nullable(),
   kind: ThreadMessageKind,
   body: z.string(),

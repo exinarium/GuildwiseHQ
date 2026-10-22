@@ -13,6 +13,7 @@
       "!**/playwright-report",
       "!pnpm-lock.yaml",
       "!docs",
+      "!packages/shared/src/capabilities/builtin-data.ts",
       "!.claude"
     ]
   },

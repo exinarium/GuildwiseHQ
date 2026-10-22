@@ -46,6 +46,11 @@ export const streamId = {
   workflow: (orgId: string | null, key: string) => `workflow-${orgId ?? 'builtin'}-${key}`,
   department: (orgId: string) => `departments-${orgId}`,
   role: (orgId: string | null, key: string) => `role-${orgId ?? 'builtin'}-${key}`,
+  /** Durable turns of a discovery or boardroom session. */
+  sessionTurn: (id: string) => `session-turn-${id}`,
+  document: (id: string) => `document-${id}`,
+  /** The organization vault's capability index. */
+  capabilities: (orgId: string) => `capabilities-${orgId}`,
 } as const;
 
 export const ProjectKeySchema = z

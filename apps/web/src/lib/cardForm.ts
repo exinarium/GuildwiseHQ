@@ -68,7 +68,7 @@ export function specifyTargetStage(def: WorkflowDefinition): Stage | undefined {
 }
 
 /** Not editable in the card form (ledger linking arrives with the ledger in M2). */
-const HIDDEN_FIELDS = new Set(['linkedLedgerIds', 'reportPath']);
+const HIDDEN_FIELDS = new Set(['linkedLedgerIds', 'linkedDocIds', 'reportPath']);
 
 /**
  * Field-set fields (excluding real card columns), in schema order, with their kinds. The mock-runtime fields (Mock
