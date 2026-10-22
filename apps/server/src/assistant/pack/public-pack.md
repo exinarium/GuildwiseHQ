@@ -95,7 +95,7 @@ An outline of the in-app help articles, to answer how things work. Do not quote 
 
 ### Getting started
 The training video, signing up or in, the guided tour, the Get started checklist, the sidebar, the command palette and keyboard shortcuts.
-- The training video: On the Help page, the Getting started in five steps video is a spoken tutorial of about three minutes. A friendly voice walks you through the five steps while you watch them happen on screen:
+- The training video: On the Help page, the Getting started video is a spoken tutorial of under three minutes. A friendly voice takes you from an empty organization to a team of agents at work while you watch it happen on screen:
 - Your settings: Settings (sidebar, bottom) is your own account: your picture, your time zone, Notifications (push notifications on your devices, with quiet hours), the Monday briefing, Two-factor login (Set up), the weekly blog digest and expert mode for code changes.…
 - First login: There are two ways in:
 - Forgot your password: On the sign-in page click Forgot your password? and type your email. We send a link that works once and expires after an hour. Choose a new password (12 or more characters); you are signed out everywhere else, then sign in with the new one. If you use two-factor login you still enter your code.…
