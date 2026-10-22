@@ -46,6 +46,7 @@ Each repository can be on GitHub, GitLab, Bitbucket Cloud, Azure DevOps or a pla
 - Standing orders and automations (formerly schedules): recurring instructions and work that starts by itself, on a time or when something happens in a workflow.
 - Vaults: knowledge repositories (git) for the organization and per project that sync to your workstations.
 - A DevOps engineer agent on every workstation, free: it installs tools and the project's packages, keeps repositories tidy (unsaved edits are kept in a local git stash, never pushed), tries to fix conflicting changes itself, and runs commands, Docker builds and deploys you ask for in a chat. It works as you, outside the sandbox the other agents use; privileged actions on a team member's machine need an Owner or Admin and the machine's user to agree.
+- A project backlog: a Backlog tab next to the board for work you want but have not started. Items (title, description, priority, tags, star) stay out of development until you send them to the BA; sending creates a normal intake and card and marks the item done. Agents can suggest follow-ups there, and the CEO's daily report lists the new suggestions.
 - Cards explain themselves on the board: why they are blocked, a repository problem, or a budget that is nearly used up, each with a link to fix it.
 - A What's new window after updates, and in-app help with articles, a glossary and a page-by-page help panel.
 - Shared projects: invite people as additional managers on a single project.
@@ -95,6 +96,7 @@ An outline of the in-app help articles, to answer how things work. Do not quote 
 ### Getting started
 The training video, signing up or in, the guided tour, the Get started checklist, the sidebar, the command palette and keyboard shortcuts.
 - The training video: On the Help page, the Getting started in five steps video is a spoken tutorial of about three minutes. A friendly voice walks you through the five steps while you watch them happen on screen:
+- Your settings: Settings (sidebar, bottom) is your own account: your picture, your time zone, Notifications (push notifications on your devices, with quiet hours), the Monday briefing, Two-factor login (Set up), the weekly blog digest and expert mode for code changes.…
 - First login: There are two ways in:
 - Forgot your password: On the sign-in page click Forgot your password? and type your email. We send a link that works once and expires after an hour. Choose a new password (12 or more characters); you are signed out everywhere else, then sign in with the new one. If you use two-factor login you still enter your code.…
 - The tour: The first time you sign in, Guildwise HQ starts a guided tour. Its first step is the getting-started video described above, right in the tour card, with captions and the chapter buttons; press Next: take the tour (or Skip tour) when you are done, and the video pauses.…
@@ -112,7 +114,7 @@ Four roles, what each can do, members, invitations, guests, temporary passwords,
 - Members and invitations: To manage people in your organization, open Organization at the bottom of the sidebar, then the Members tab (Members see the list but cannot change it; the Invitations, Guests and Plan & limits tabs are for Owner and Admins, and the Billing tab is for the Owner).
 - Guests: Guests are people from other organizations who have access to one or more of your projects. You invite a guest by sharing a project with them. To do this:
 - Suspension: A platform administrator can suspend your organization. Running shifts finish and nothing new starts. Scheduled actions are skipped and recorded. A banner at the top explains the suspension.
-- Platform area: Platform administrators sign in at the same address but see only the Platform area instead of organizations. They can view and manage all organizations, accounts, invitations, billing, the blog, the audit log and support requests. They never see a specific organization's cards, desk or vaults.…
+- Platform area: Platform administrators sign in at the same address but see only the Platform area instead of organizations. The Platform area has 11 entries: Organizations, Invitations, Accounts, Billing, Support, Blog, API keys (keys for outside tools that use /api/v1), Runners (pause the automatic runner updates), Platform team…
 
 ### Two-factor login
 Setting up two-factor authentication, recovery codes, enforcement and owner reset.
@@ -148,6 +150,7 @@ Reading the board and its warning banners, creating and editing cards, moving ca
 - Integration tests: With integration tests off (the default) the Test step still runs: the tester checks the branch against the test plan with what it can run in its own copy of the code, without a running app.…
 - Backing off: When three shifts on the same card end with no report within ten minutes (the agent crashed or timed out), the card shows an amber badge such as "backing off until 14:32 (3 failures)", and a "keeps failing" item lands on your desk. Guildwise HQ waits 1 minute before offering it again;…
 - Risk tier: Risk is computed when the builder hands off. A card is large when 200 or more lines changed, when the change touches the project's architectural paths (set in Project settings > Basics as architectural globs), or when it is a refactor; otherwise it is small.…
+- The project backlog: Each project has a Backlog page in the sidebar (and a Board/Backlog tab pair at the top of the board). It holds wanted work that is not in development: nothing on it is worked by an agent until an Owner or Admin sends it to the BA. Every member of the project can read the backlog;…
 
 ### Agents
 Hiring agents, seniority, runtime and model, allowed projects, focus, firing and the HR board.
@@ -185,7 +188,7 @@ The ledger, searching it, vaults and shared knowledge, vault conflicts.
 - Ledger: The ledger keeps three kinds of entry:
 - Editing a standing order: The Owner and Admins (a project's owner for its own) can press Edit on a standing order to change its title or text. Agents get the new wording from their next shift or chat, the DevOps engineer included, and History keeps the earlier versions.
 - Searching the ledger: To find something in the ledger:
-- Vaults: Vaults are git repositories of markdown notes that your DevOps engineers keep in sync on your workstations. By default each workstation syncs every 300 seconds (5 minutes); you can set another interval per vault.
+- Vaults: Vaults are folders of markdown notes. A git vault is a repository that your DevOps engineers keep in sync on your workstations; a project vault can also be a local folder on one workstation, which is not synced and has no copy anywhere else, so back it up yourself.…
 - Which vault an agent reads: Agents only ever read a vault, never write it directly. What they can read depends on the work:
 - Shared knowledge: Agents read your vaults during shifts to find shared knowledge. Research interests store their notes in the interest's folder in the organization vault (interests/<name>/) under notes/. Converted projects keep their research notes in PROJECT.md of the project vault.
 - Vault conflicts: If a local change conflicts with a remote change, sync of that vault pauses on that workstation. The Vaults page shows a Sync paused: conflict badge with the conflicting files, and a desk item of kind Vault conflict appears.
@@ -196,7 +199,7 @@ Intake from Jira and GitHub, unmapped tickets, credentials, the outbox and guard
 - Unmapped tickets: If a ticket does not match a project (for example it is a support request for a system you do not track):
 - Jira attachments: The tool your BA reads Jira with shows the names of a ticket's attachments, but not the screenshots or design files themselves, and agents have no internet. So the BA asks your workstation's runner to download them with your Jira login.…
 - Credentials: - Jira: on the workstation run aom-runner jira-connect. It asks for your Jira address, your Atlassian e-mail and an API token (create one at id.atlassian.com, Security, API tokens; for Jira Data Center use a personal access token and no e-mail), checks them and saves the token on that computer only.…
-- Outbox: When an agent drafts an update to post back to a ticket (a comment, a status change, etc.), it lands on your desk as an Outbox approval.
+- Outbox: When an agent drafts an update to post back to a ticket (a comment, a status change, etc.), it lands on your desk as an Outbound update.
 - Guardrails: Before posting, your runner checks the text against your organization's agent names and internal terms. A draft that mentions an agent by name, or gives away internal process details (review scores, rework reasons and similar), is refused even if you approved it. The agent can revise and resubmit.
 
 ### The architect: investigate and design
@@ -225,6 +228,7 @@ Creating phases, adding cards, when a phase is done, follow-ups, deploy and regr
 - The "phase done" desk item: When all cards are done, your BA writes a report and the desk shows a Phase done item titled like "PH-1 Autosave is done: approve 2 follow-ups?".
 - What runs after you approve: Once you approve, the follow-ups are locked and run one at a time in order:
 - Environments: where your app runs: The Environments page of a project (sidebar, under the board) has one place for everything about running your app:
+- Releases: Releases (sidebar, Organization) is where a ready version waits for you: Waiting for you, What is live (the version on every site, readable by everyone), History (with the rules that held and who released; you can filter it) and Rules.…
 
 ### The daily report and what is watched
 What your CEO triages, the signals the server watches for, the daily report, scheduled tasks and the time zone.
@@ -258,7 +262,7 @@ Creating automations (formerly schedules), triggers and actions, feeds, how scan
 ### Budgets and costs
 Where spend shows, monthly budgets, budget limit handling, override and currency.
 - Where spend shows: You can see costs in several places:
-- Monthly budgets: An Owner or Admin sets a project's budget in the project's settings under Budget (the Monthly budget panel: type an amount and click Save budget, or Remove budget), or an interest's budget on its Settings tab.
+- Monthly budgets: The Costs page shows each project's budget and how much of it is used; it does not set budgets. An Owner or Admin sets a project's budget in the project's settings under Budget (the Monthly budget panel: type an amount and click Save budget, or Remove budget), or an interest's budget on its Settings tab.
 - Override: When a project hits 100% of its budget, a desk item offers:
 - Currency: To change how costs appear:
 
@@ -308,7 +312,7 @@ Installer troubleshooting: expired links, restart, permissions, git version, san
 
 ### Integrations
 Connect Claude, git hosts, Jira and MCP servers from the web.
-- Connect: Click Connect on a tile. Your token is encrypted in your browser for that workstation.
+- Connect: Open Integrations (sidebar, Organization) and pick a workstation if you have several. Each login is a tile: Claude has one tile per account, and Connect another account adds one. Click Connect (or Replace) on a tile; your token is encrypted in your browser for that workstation.…
 - Greyed out: The tile says why. From a terminal shows the command instead.
 
 ### Converting a project
