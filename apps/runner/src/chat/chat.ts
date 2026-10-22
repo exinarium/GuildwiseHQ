@@ -14,6 +14,7 @@ import {
   JIRA_SKILL_PATH,
   type ReadableFolder,
   renderChatInstructions,
+  renderSessionTurnInstructions,
   type ServerToRunnerOf,
   summarizeCommandTexts,
   type ToolCounts,
@@ -31,6 +32,7 @@ import {
   type ServerHttp,
   syncCardAttachments,
 } from '../attachments/index.ts';
+import { type CapabilityRegistry, skillRpc } from '../capabilities/registry.ts';
 import { type GuardClone, markJobStarted } from '../ceo/guard-hook.ts';
 import { selectChatProfile } from '../ceo/profile.ts';
 import { composeOwnerMessage, removeTurnDir, turnDirOf, writeTurnFiles } from '../ceo/turn-files.ts';
@@ -53,6 +55,8 @@ import { readVaultContext } from '../vaults/context.ts';
 type ChatStartMsg = ServerToRunnerOf<'chat.start'>;
 
 export interface ChatDeps {
+  /** `aom skill show|list`, the capability index in an agent's instructions and the persona text of a session turn. */
+  capabilities?: CapabilityRegistry;
   /** The project graph (`aom graph query|explain` in a chat). Absent: none. */
   graph?: () => GraphService | undefined;
   paths: RunnerPaths;
@@ -256,6 +260,12 @@ export class ChatManager {
     const { chatId } = chat.msg;
     return {
       report: async (req: IpcReportRequest): Promise<IpcReportResponse> => {
+        if (chat.msg.session)
+          return {
+            accepted: false,
+            message: 'Not available in a session turn: answer in your reply.',
+            error: 'not available in a session turn',
+          };
         // `aom devops-approval` in the DevOps engineer's chat: the owner is in the conversation, so the request is
         // posted there (a chat has no shift to end) and the agent waits for their answer.
         if (
@@ -296,6 +306,13 @@ export class ChatManager {
           : { accepted: false, message: `Rejected: ${r.error ?? 'failed'}`, error: r.error ?? 'failed' };
       },
       rpc: async (req: IpcRpcRequest): Promise<IpcRpcResponse> => {
+        if (req.method === 'skill.show' || req.method === 'skill.list')
+          return skillRpc(this.deps.capabilities, req.method, req.params);
+        // A turn of a discovery or boardroom session reads and talks: nothing else reaches the server from it.
+        if (chat.msg.session)
+          return req.method === 'ledger.search'
+            ? this.deps.rpc(chatId, req.method, req.params)
+            : { ok: false, error: `${req.method} is not available in a session turn` };
         // The owner's chat with the CEO: `aom ceo ...` (the server checks the agent and the owner again).
         if (req.method === 'ceo') {
           if (chat.msg.agent.roleKey !== 'ceo')
@@ -691,9 +708,86 @@ export class ChatManager {
     );
   }
 
+  /**
+   * A turn of a discovery or boardroom session: one headless, read-only call as the speaker. The persona text comes with the
+   * turn, or from this workstation's registry (a persona in the organization vault); the only command the speaker may run
+   * is `aom`. The reply goes back as the usual `chat.done`, which the server stores as a message of the speaker.
+   */
+  private async runSessionTurn(chat: ActiveChat): Promise<void> {
+    const { msg } = chat;
+    const session = msg.session;
+    if (!session) return;
+    const { paths } = this.deps;
+    const adapter = this.deps.adapters.get(msg.agent.runtime);
+    const caps = adapter ? await adapter.capabilities() : undefined;
+    if (!adapter?.startChat || !caps?.available || !mainOk(adapter))
+      return this.error(
+        msg,
+        `runtime ${msg.agent.runtime} is not available for session turns on this workstation`,
+      );
+    // A persona that lives in the organization vault travels without its text: read it from the registry here.
+    const stored = session.speaker.personaKey
+      ? this.deps.capabilities?.persona(session.speaker.personaKey)
+      : undefined;
+    const persona = session.instructions ?? stored?.body;
+    if (session.speaker.kind === 'persona' && !persona)
+      return this.error(
+        msg,
+        `persona "${session.speaker.personaKey ?? session.speaker.name}" was not found on this workstation`,
+      );
+    const spec = {
+      ...session,
+      speaker: {
+        ...session.speaker,
+        ...(session.speaker.stance || !stored ? {} : { stance: stored.meta.stance }),
+        ...(session.speaker.voice || !stored ? {} : { voice: stored.meta.voice }),
+      },
+    };
+    const sandbox = await ensureSandbox(
+      paths,
+      msg.agent.agentId,
+      msg.agent.name,
+      await resolveCommitIdentity(paths.root),
+    );
+    chat.sandbox = sandbox;
+    chat.releaseTmp = holdAgentTmp(sandbox);
+    const capIndex = this.deps.capabilities?.instructionsIndex(msg.agent.skills) ?? '';
+    await adapter.writeInstructions(
+      sandbox,
+      `${renderSessionTurnInstructions(spec, persona ?? '')}${capIndex ? `\n\n${capIndex}\n` : ''}`,
+    );
+    chat.token = this.deps.ipc.registerShift(this.handlerFor(chat));
+    const tc = this.deps.toolchains?.resolve();
+    const env = {
+      ...sandboxEnv(sandbox, undefined, tc?.env),
+      AOM_IPC_URL: this.deps.ipc.url,
+      ...(this.deps.ipc.socketPath ? { AOM_IPC_SOCKET: this.deps.ipc.socketPath } : {}),
+      AOM_SHIFT_TOKEN: chat.token,
+      AOM_SHIFT_ID: msg.chatId,
+      PATH: tc ? agentPath(tc, paths.bin) : `${paths.bin}${delimiter}${process.env.PATH ?? ''}`,
+    };
+    chat.session = await adapter.startChat({
+      chatId: msg.chatId,
+      message: msg.message,
+      cwd: sandbox.scratch,
+      sandbox,
+      agent: msg.agent,
+      env,
+      // read-only: no edit tool in the scratch directory either (the policy denies the working directory)
+      readOnly: true,
+      readDirs: [],
+      ...(tc ? { toolchainReadDirs: tc.readDirs } : {}),
+      context: msg.context,
+      logFile: `${paths.shiftLogs}/chat-${msg.chatId}.jsonl`,
+    });
+    if (chat.stopReason) void chat.session.stop(`chat.${chat.stopReason}`);
+    await this.finishTurn(chat, { fullPower: false });
+  }
+
   private async run(chat: ActiveChat): Promise<void> {
     const { msg } = chat;
     const { paths } = this.deps;
+    if (msg.session) return this.runSessionTurn(chat);
     const profile = selectChatProfile(msg, { fullPower: this.deps.ceoFullPower?.() ?? false });
     if (profile.kind === 'refuse') return this.error(msg, profile.error);
     if (profile.kind === 'full') return this.runOwnerTurn(chat, profile.mode);
@@ -763,19 +857,24 @@ export class ChatManager {
     // The project's code graph (read-only verbs): only when this workstation can read it and the chat is not the holdout.
     const gs = msg.context.graph;
     const graphNote = gs && gs.arm === 'on' && this.deps.graph?.()?.load(gs) ? `\n${CHAT_GRAPH_NOTE}\n` : '';
+    const capIndex = this.deps.capabilities?.instructionsIndex(msg.agent.skills) ?? '';
     await adapter.writeInstructions(
       sandbox,
-      `${signIn ? `${signIn}\n` : ''}${graphNote}${renderChatInstructions(msg.agent, msg.context, {
-        jiraSkill: await this.jiraSkill(msg),
-        readFolders: folders,
-        ...(!devops && msg.context.vault
-          ? {
-              vault: vaultCtx
-                ? { projectDoc: vaultCtx.projectDoc, standingOrders: vaultCtx.standingOrders }
-                : { missing: true },
-            }
-          : {}),
-      })}`,
+      `${signIn ? `${signIn}\n` : ''}${graphNote}${capIndex ? `${capIndex}\n\n` : ''}${renderChatInstructions(
+        msg.agent,
+        msg.context,
+        {
+          jiraSkill: await this.jiraSkill(msg),
+          readFolders: folders,
+          ...(!devops && msg.context.vault
+            ? {
+                vault: vaultCtx
+                  ? { projectDoc: vaultCtx.projectDoc, standingOrders: vaultCtx.standingOrders }
+                  : { missing: true },
+              }
+            : {}),
+        },
+      )}`,
     );
     chat.token = this.deps.ipc.registerShift(this.handlerFor(chat));
     const tc = this.deps.toolchains?.resolve();

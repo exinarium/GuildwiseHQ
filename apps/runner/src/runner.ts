@@ -1,7 +1,8 @@
-import { statSync, writeFileSync } from 'node:fs';
+import { existsSync, statSync, writeFileSync } from 'node:fs';
 import { homedir, hostname, platform } from 'node:os';
 import { basename, join } from 'node:path';
 import {
+  CAPABILITY_REGISTRY_FEATURE,
   CEO_FULL_POWER_CAPABILITY,
   CHAT_ACTIVITY_FEATURE,
   CLAUDE_ACCOUNTS_CAPABILITY,
@@ -29,6 +30,7 @@ import {
   type RunnerUpdateState,
   type RuntimeInfo,
   SEAL_AAD_CAPABILITY,
+  SESSION_TURNS_CAPABILITY,
   SETUP_SCAN_CAPABILITY,
   type ServerToRunner,
   SHIFT_LIMIT_CAPABILITY,
@@ -44,6 +46,7 @@ import { formatLimitTime } from './adapters/claude-usage-limit.ts';
 import { buildAdapters } from './adapters/registry.ts';
 import type { RuntimeAdapter } from './adapters/types.ts';
 import { ServerHttp } from './attachments/index.ts';
+import { CapabilityRegistry } from './capabilities/registry.ts';
 import { ChatManager } from './chat/chat.ts';
 import { loadConfig, type RunnerConfig, saveConfig } from './config.ts';
 import { type BackoffOptions, RunnerClient, toWsUrl, UNPAIRED_MESSAGE } from './connection/client.ts';
@@ -452,6 +455,7 @@ export class Runner {
         load: { runningShifts: this.supervisor.size },
       }),
     });
+    this.capabilities = new CapabilityRegistry({ log: this.log });
     this.vaults = new VaultManager({
       paths: this.paths,
       log: this.log,
@@ -460,6 +464,8 @@ export class Runner {
       // generated graph files that two workstations both wrote: the sync took one side, the indexer rebuilds them
       onGraphResolved: (vaultId, folders) =>
         void this.graph.regenerate(vaultId, folders).catch(() => undefined),
+      // the organization vault's skills, personas and playbooks: index them and tell the server what is there
+      onSynced: (vaultId) => this.indexCapabilities(vaultId),
     });
     this.toolchains = new ToolchainRegistry(this.paths.toolchains, this.paths.root, () => ({
       toolchainPaths: opts.config.runtimes['claude-code'].toolchainPaths,
@@ -483,6 +489,7 @@ export class Runner {
       ...(opts.runTiming ? { timing: opts.runTiming } : {}),
     });
     this.supervisor = new ShiftSupervisor({
+      capabilities: this.capabilities,
       paths: this.paths,
       config: opts.config,
       adapters: this.adapters,
@@ -543,6 +550,7 @@ export class Runner {
       ...(opts.restartTiming ?? {}),
     });
     this.chat = new ChatManager({
+      capabilities: this.capabilities,
       restart: this.restartAfterReply,
       ceoFullPower: () => this.freshConfig().ceo.fullPower,
       guardClones: () =>
@@ -631,6 +639,7 @@ export class Runner {
     this.client.on('message', (m) => this.onMessage(m));
     this.client.on('welcome', (w) => {
       this.serverFeatures = new Set(w.features ?? []);
+      this.reportCapabilities();
       void this.reportGit(true);
       void this.reportIntegrations(true);
       void this.reportOrgFolders();
@@ -835,6 +844,29 @@ export class Runner {
   private smokeStarted = false;
   /** What the server announced in its last `welcome` (`features`). */
   private serverFeatures = new Set<string>();
+  private readonly capabilities: CapabilityRegistry;
+
+  /** Re-reads the organization vault's capabilities after a sync of that vault and reports them when they changed. */
+  private indexCapabilities(vaultId: string): void {
+    const v = this.vaults.vault(vaultId);
+    if (!v || v.kind !== 'org' || v.projectId || v.storage === 'local') return;
+    // no clone yet: nothing to index (an empty report would wipe what the server knows)
+    if (!existsSync(join(this.vaults.dir(vaultId), '.git'))) return;
+    const r = this.capabilities.index(vaultId, this.vaults.dir(vaultId));
+    if (r.changed) this.reportCapabilities();
+  }
+
+  /** `capabilities.report`: metadata of the organization vault's capabilities, only to a server that announced the feature. */
+  private reportCapabilities(): void {
+    if (!this.serverFeatures.has(CAPABILITY_REGISTRY_FEATURE)) return;
+    const last = this.capabilities.last();
+    if (!last) return;
+    this.client.send('capabilities.report', {
+      vaultId: last.vaultId,
+      items: last.items,
+      issues: last.issues.slice(0, 100),
+    });
+  }
 
   /**
    * The role smoke test, once per process (so on every runner start, which includes the start after an update): each
@@ -883,6 +915,8 @@ export class Runner {
       .catch((err) => this.log.warn(`could not re-adopt run environments: ${String(err)}`));
     this.runs.start();
     this.vaults.start();
+    // what the organization vault clone already holds is known before the first sync of this process finishes
+    for (const id of this.vaults.configured()) this.indexCapabilities(id);
     this.client.start();
     this.sync.start(this.opts.syncIntervalMs);
     const t = setInterval(() => void this.rescan(), this.opts.rescanMs ?? 600_000);
@@ -1085,6 +1119,8 @@ export class Runner {
         SETUP_SCAN_CAPABILITY,
         LOCAL_VAULT_CAPABILITY,
         CLAUDE_ACCOUNTS_CAPABILITY,
+        // Runs the turns of discovery and boardroom sessions (`chat.start.session`) and indexes the capability registry.
+        SESSION_TURNS_CAPABILITY,
         // The local opt-in (`aom-runner ceo full-power on`), read fresh: the server shows "Full power is off" without it.
         ...(this.freshConfig().ceo.fullPower ? [CEO_FULL_POWER_CAPABILITY] : []),
       ],

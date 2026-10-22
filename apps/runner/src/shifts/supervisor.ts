@@ -55,6 +55,7 @@ import {
   type ServerHttp,
   syncCardAttachments,
 } from '../attachments/index.ts';
+import { type CapabilityRegistry, skillRpc } from '../capabilities/registry.ts';
 import type { RunnerConfig } from '../config.ts';
 import type { Outbox } from '../connection/outbox.ts';
 import { recordDevopsAudit } from '../devops/audit.ts';
@@ -153,6 +154,8 @@ export interface ShiftTransport {
 }
 
 export interface SupervisorDeps {
+  /** The capability registry (`aom skill show|list`, and the index in the instructions of an agent whose role lists skills). */
+  capabilities?: CapabilityRegistry;
   paths: RunnerPaths;
   config: RunnerConfig;
   adapters: Map<string, RuntimeAdapter>;
@@ -975,6 +978,9 @@ export class ShiftSupervisor {
       }
     }
     const texts = shiftTexts(msg, s.brief);
+    // The skills, playbooks and personas the role lists, as a name-and-description index (`aom skill show <key>` loads one).
+    const capIndex = this.deps.capabilities?.instructionsIndex(msg.agent.skills) ?? '';
+    if (capIndex) texts.instructions += `\n${capIndex}\n`;
     // The project's reference repositories (read-only), for a card shift and a BA task shift (the server sends repositories
     // there only for a repository-scoping task given to an architect); only clones this runner found itself.
     const registeredFolders =
@@ -1503,6 +1509,8 @@ export class ShiftSupervisor {
     return {
       report: async (req: IpcReportRequest) => this.submit(s, req.report),
       rpc: async (req: IpcRpcRequest) => {
+        if (req.method === 'skill.show' || req.method === 'skill.list')
+          return skillRpc(this.deps.capabilities, req.method, req.params);
         // `aom ceo ...` belongs to the CEO's own shifts (the server checks the agent again).
         if (req.method === 'ceo') {
           if (!(s.msg.kind === 'ceo' && s.msg.agent.roleKey === 'ceo'))

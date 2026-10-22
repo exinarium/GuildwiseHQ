@@ -1627,6 +1627,7 @@ Runner → server:
 | `chat.error` | `{chatId, threadId, error}` | yes |
 | `worktrees.query` | `{queryId, paths: string[]}`: the card worktrees the runner found under `worktrees/`; which are still in use? (stale-worktree sweep) | no; reply `worktrees.live` |
 | `command.result` | `{commandId, ok, result?, error?}` | yes |
+| `capabilities.report` | `{vaultId, items:[{key, kind, name, description, hash, source:'org-vault'}], issues:[{path, message}]}` (§38; only after `welcome.features` has `capability-registry:1`) | no |
 | `vault.status` | `{vaultId, lastPullAt, lastPushAt, error?}` (M3) | no |
 | `vault.conflict` | `{vaultId, files[]}` (M3) | yes |
 
@@ -1640,7 +1641,7 @@ Server → runner:
 | `shift.report.result` | `{reportId, accepted, error?}` | — |
 | `rpc.response` | `{rpcId, ok, result?, error?}` | — |
 | `worktrees.live` | `{queryId, live: string[]}`: the subset of the queried paths that belongs to a live card (not done-and-finalized, not cancelled, known to the server, on this workstation) | — |
-| `chat.start` | `{chatId, threadId, agent: AgentRuntimeSpec, message:string, resumeSessionId?, context: ChatContext}` | runner replies with chat.* |
+| `chat.start` | `{chatId, threadId, agent: AgentRuntimeSpec, message:string, resumeSessionId?, context: ChatContext, session?: SessionTurnSpec}` (`session`: a discovery or boardroom turn, §38; only to runners announcing `session-turns:1`) | runner replies with chat.* |
 | `chat.cancel` | `{chatId}` | — |
 | `command` | `{commandId, command: 'agent.wipe'|'worktree.remove'|'repos.rescan'|'vault.configure'|'vault.write'|'finalize.execute'|'outbound.post'|'repo.create'|'branch.check_merged'|'worktrees.sweep'|'integration.run'|'repo.clone'|'env.ensure'|'rights.verify'|'sudo.set'|'sudo.clear'|'claude.account.ensure', payload}` | runner replies `command.result`. The DevOps setup commands (docs/RUNNER.md "Repository setup, toolchain and rights"): `repo.clone {requestId, repoId, projectId, projectKey, projectName, name, remoteUrl, workingBranch?, create?:{name, visibility, description?}}` answers `{ok, state:'cloned'|'created'|'failed'|'needs_manager', localPath?, detail?, error?}`; `env.ensure {requestId, projectId, repos:[{repoId, name, remoteUrlNormalized}], access}` answers an `EnvironmentReport {state:'ready'|'failed'|'needs_access', stacks, tools:[{stack, tool, status, version?, detail?, fix?}], summary, logTail}`; `rights.verify {access}` answers a `RightsReport {checkedAt, platform, checks:{docker?, sudo?, install?, paths?: {status:'verified'\|'failed', reason, fix?}}, sudoPasswordStored}`; `sudo.set {ciphertext, keyId}` (RSA-OAEP ciphertext; the server empties the payload when answered) answers `{stored, works?, error?}`; `sudo.clear {}` |
 | `ack` | `{ackOf}` | — |
@@ -2489,3 +2490,73 @@ runs the script outside any model session.
 - **Sealed sign-ins are bound (`deploy-seal-aad:1`).** The browser seals a password or key file with AES-GCM additional data
   `aom-connect|project|address|port|user` (`h2.` format); a runner that announces the capability opens only a sign-in meant for that
   server (older pages still send `h1.`). Expired `deploy.connect` payloads are emptied by the reachability tick.
+
+## 38. Sessions, documents and the capability registry (experimental branch `feat/discovery-boardroom`, phase A)
+
+Foundation for the Discovery Studio and the Boardroom (`docs/design/discovery-boardroom-registry.md`). Nothing here changes chat, card or CEO
+threads. Migrations 2340 to 2342; all tables are projections (no foreign keys into other projection tables).
+
+- **Session threads.** `threads.kind` gains `discovery` and `boardroom`; `threads.workstation_id` (where turns run), `threads.agent_id` (the host
+  or facilitator agent) and `threads.session_config` (free-form facilitator state: phase, stance, time box). Events `SessionThreadCreated`,
+  `SessionThreadUpdated` (config merges key by key, `null` removes a key), `ThreadParticipantAdded|Updated|Removed` on stream
+  `thread-<id>`. `thread_participants(kind user|agent|persona, ref_id, seat, stance, display_name, removed_at)`: removal is soft, so old messages keep
+  the name. A persona speaks as `authorKind 'agent'` with no agent row and `ThreadMessagePosted.authorPersonaKey` (`thread_messages.author_persona_key`),
+  so every query on agent messages keeps working; `authorName` comes from the participant. A session is private to its creator and its user
+  participants (`loadSession`, 404 otherwise; `GET /api/threads/:id/messages` follows the same rule). Creating one, changing config or
+  participants needs the creator or an Owner/Admin (creating also needs Owner/Admin). An `ad-hoc-<slug>` persona is cast from a one-line brief
+  (its `stance`); any other persona key must exist in the registry.
+- **REST** (`routes/sessions.ts`, org from `X-AOM-Org`): `POST|GET /api/sessions`, `GET|PATCH /api/sessions/:id`,
+  `POST /api/sessions/:id/participants`, `PATCH|DELETE .../participants/:participantId`, `POST /api/sessions/:id/messages` (a human message; queues
+  nothing), `GET|POST /api/sessions/:id/turns`, `POST .../turns/:turnId/cancel`.
+- **Durable turns** (`sessions/turns.ts SessionTurns`, `ctx.services.sessions`). `POST .../turns {participantId, message, instructions?, model?,
+  context?, replyToMessageId?, round?, workstationId?}` appends `SessionTurnQueued` (stream `session-turn-<id>`; projection `session_turns`:
+  `queued|running|done|failed`, `attempts`) and returns 202. `context` says which thread messages the speaker sees: `all` (latest `limit`, default 40,
+  optionally up to `upToMessageId`), `selected` (`messageIds`: the independent-first round) or `none`. Persona text: the request's `instructions`, else
+  the built-in persona prompt (travels with the event); a persona that lives in the organization vault travels without text and the runner reads it from
+  its registry. An agent speaks with its own `AgentRuntimeSpec`; a persona with a synthetic read-only spec (`roleKey 'persona'`, tools `read`,
+  `PERSONA_HOST_AGENT_ID`), by default on the host agent's runtime (on Claude Code the persona's own model, cheap by default). The dispatcher sends
+  `chat.start` (with the additive `session` block, see §11.2) when the turn's workstation is online, announces `session-turns:1`, and has fewer than 4
+  running turns: it appends `SessionTurnStarted` (attempt n) first, then sends. `chat.delta|activity|done|error` are routed by chat id to the session
+  service (`runner-gateway/handlers.ts`); `chat.done` appends the speaker's `ThreadMessagePosted` and `SessionTurnCompleted` in the runner-inbox
+  transaction. The browser gets `chat.delta|activity|done|error` with `turnId` and `participantId`, and `session.turn {threadId, turnId,
+  participantId, status}` on every state change. Recovery: on `outbox.flushed` the turns the runner no longer holds (`hello.activeChats`) get
+  `SessionTurnRequeued` and are sent again (at most 3 attempts, then `SessionTurnFailed`); a `chat.error` of a dropped connection or runner stop is
+  requeued the same way; a started turn nobody answered for 30 minutes is requeued by the 15 s sweep; a queued turn older than 24 hours fails as
+  `expired`; a workstation without `session-turns:1` fails the turn with `runner_too_old`. A cancel fails a queued turn at once and sends
+  `chat.cancel` for a running one. Not yet: turns are not `shifts`, so their token usage is stored on the turn (`session_turns.usage`) and in the
+  message, but not in the organization's cost ledger or budgets.
+- **Runner execution** (`ChatManager.runSessionTurn`). The same sandbox, `startChat` and `finishTurn` as a chat, with `readOnly: true`, no
+  repositories and no vault, and only `skill.*` and `ledger.search` as rpc (no `comment`, no `thread.post`). `renderSessionTurnInstructions`
+  (shared) writes the speaker's `CLAUDE.md`: who you are, stance, voice, persona prompt, roster, rules. The mock adapter echoes the message, so the
+  whole path is testable (`apps/runner/test/session-turn.test.ts`, `apps/server/test/sessions.test.ts`).
+- **Documents** (`commands/documents.ts`, `routes/documents.ts`, tables `documents`, `document_versions`). Kinds `brief|prd|minutes|session_log`,
+  statuses `draft|in_review|approved|handed_off|archived` (`DOCUMENT_TRANSITIONS`; an approved document is read-only until reopened to draft).
+  Events `DocumentCreated`, `DocumentVersionSaved` (the server assigns `version = current + 1`; `baseVersion` gives a 409 `version_conflict`; an
+  identical save appends nothing), `DocumentStatusChanged`, `DocumentPublishQueued`. REST: `POST|GET /api/documents` (filters `projectId`,
+  `kind`, `status`, `orgOnly`, `threadId`), `GET /api/documents/:id`, `GET .../versions/:n`, `POST .../versions`, `POST .../status`. Reading needs project
+  visibility (project document) or organization membership (organization document); writing needs Owner/Admin. `sourceThreadIds` link the sessions
+  a document came from. **Publishing**: approving sets `publish_state 'pending'` for the approved version; `publishDocument` then queues a durable
+  `vault.write` (`mode replace`, section 16.4) to `<project folder>/docs/<slug>.md` in the project's vault (else the organization vault), or
+  `org/docs/<slug>.md` for an organization document, and appends `DocumentPublishQueued` (`publish_state 'queued'`). Without a vault or a workstation
+  the document stays `pending` and `publishPendingDocuments` retries every scheduler pass. Cards gain the optional `fields.linkedDocIds` (uuid list).
+- **Capability Registry v0.** Kinds `skill` (Agent Skills `SKILL.md` folder), `persona` (`<key>.md`, frontmatter name, description, stance, voice, icon,
+  model?, tools?, skills?; the body is the prompt) and `playbook` (`workflow.md` + `steps/step-NN-*.md` + optional `assets/*.csv`), parsed and
+  validated by `packages/shared/src/capabilities/parse.ts` (zod; a skill's `name` must match its directory; keys are lowercase-hyphen). The built-ins
+  live in `packages/capabilities/` (part of the repository, so of the Docker build) and are compiled into `capabilities/builtin-data.ts` by
+  `node packages/capabilities/generate.mjs` (a test fails when they disagree), so the server and runner bundles carry them. Shipped: personas
+  `devils-advocate`, `user-advocate`, `creative-strategist`, `cost-hawk`, `security`, `ops`, `customer-smb`, `chair`, `analyst`; playbooks
+  `brainstorm`, `advanced-elicitation`, `product-brief`, `prd`; skill `interview-techniques`. **Organization overrides**: the runner indexes
+  `org/skills|personas|playbooks` of the organization vault clone after each sync of it (symlinks, non-text and large files are skipped) and sends
+  `capabilities.report {vaultId, items, issues}` (metadata only: key, kind, name, description, hash, source) to a server that announced
+  `capability-registry:1`. The server appends `CapabilityIndexReported` only when the digest changed (`capability_index`,
+  `capability_index_status`). `GET /api/capabilities[?kind=]` returns the effective registry (built-in overridden by the vault, by kind and key, with
+  `overrides`, the parse `issues` and `indexedAt`). **Use by agents**: a role's `skills: string[]` names resolve against the registry (a bare key
+  tries skill, then playbook, then persona; `kind:key` is exact); the runner appends an index (name and description) to the instructions of shifts,
+  chats and session turns, and `aom skill show <key|kind:key> [--file <path>]` / `aom skill list [--kind k]` (rpc `skill.show|list`, answered by
+  the runner) print the main file or any file of a capability. **`allowed-tools` of a skill is advisory in v0 and never widens an agent's permissions**
+  (`ALLOWED_TOOLS_NOTE`); nothing is granted from it.
+- **Role `analyst`** (built-in, version 1): the facilitator of discovery sessions; read-only permissions, no claimable stages; skills
+  `interview-techniques`, `brainstorm`, `advanced-elicitation`, `product-brief`, `prd`.
+- **Version skew.** `RUNNER_VERSION` 0.1.42. The runner announces `session-turns:1`; the server sends a `session` block only to such runners and fails
+  the turn otherwise (an older runner would run it as a plain chat). The server announces `capability-registry:1` in `welcome.features`; a runner
+  sends `capabilities.report` only after that.

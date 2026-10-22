@@ -11,6 +11,7 @@ import {
   type RunnerToServerOf,
   streamId,
 } from '@aom/shared';
+import { z } from 'zod';
 import { orgRoleOf } from '../auth/org-context.ts';
 import { orgScope, runnerActor } from '../commands/common.ts';
 import type { Ctx } from '../context.ts';
@@ -112,6 +113,7 @@ export async function applyCapabilitiesReport(
   ws: { id: string; userId: string },
   msg: RunnerToServerOf<'capabilities.report'>,
 ): Promise<boolean> {
+  if (!z.uuid().safeParse(msg.vaultId).success) return false;
   const vault = await one(
     ctx.pool,
     `SELECT id, org_id FROM vaults WHERE id=$1 AND kind='org' AND project_id IS NULL`,

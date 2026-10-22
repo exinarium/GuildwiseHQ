@@ -2336,6 +2336,30 @@ const VERBS: Record<string, Verb> = {
   },
   ceo: ceoVerb,
   backlog: backlogVerb,
+  /**
+   * `aom skill show <key> [--file <path>]` and `aom skill list [--kind skill|persona|playbook]`: the Capability Registry,
+   * answered by the runner from its own copy (the built-ins and the organization vault). A skill's `allowed-tools` is
+   * advisory: it never adds a permission to the agent that loads it.
+   */
+  skill: async (ctx, p) => {
+    const sub = p.positionals[0];
+    const usage =
+      'usage: aom skill show <key | kind:key> [--file <path>] | aom skill list [--kind skill|persona|playbook]';
+    if (sub === 'list') {
+      const kind = one(p, 'kind');
+      if (kind !== undefined && !['skill', 'persona', 'playbook'].includes(kind)) throw new UsageError(usage);
+      const r = (await rpc(ctx, 'skill.list', kind ? { kind } : {})) as { text?: string } | null;
+      ctx.io.out(`${r?.text ?? 'No capabilities.'}\n`);
+      return 0;
+    }
+    if (sub !== 'show' || !p.positionals[1]) throw new UsageError(usage);
+    const file = one(p, 'file');
+    const r = (await rpc(ctx, 'skill.show', { ref: p.positionals[1], ...(file ? { file } : {}) })) as {
+      text?: string;
+    } | null;
+    ctx.io.out(`${(r?.text ?? '').replace(/\n*$/, '')}\n`);
+    return 0;
+  },
   outcome: async (ctx, p) => {
     const id = p.positionals[0];
     if (!id) throw new UsageError('usage: aom outcome <outcomeId> --note "<text>" [--data-file <json>]');
@@ -2386,6 +2410,7 @@ export const USAGE = `usage: aom <verb> [options]
   card attach <path> [--card <REF>]          BA intake: attach a file from your scratch dir (for example a downloaded Jira attachment) to a card you drafted
   card attachments [<REF>]                   copy the card's attached files next to this shift (read-only) and print the paths; builders get them at the start of the shift
   org catalogue | org role draft --json '<json>' | --file <json|-> | org workflow draft (same) | org workflow variant --file <json|-> (a project's own version) | org validate <key> | org submit <key> | org department --name "<n>"   BA design chat: draft roles and workflows (the owner approves on the desk)
+  skill show <key | kind:key> [--file <path>]   print a capability of the registry (skill, playbook or persona; a playbook's steps and assets with --file); skill list [--kind k] lists them
   graph query "<words>" [--budget <tokens>] | graph path <a> <b> | graph explain <node> | graph impact <file or symbol> [--depth 2]   the map of this project's code, kept in the project vault: where a thing is, what touches it, the blast radius of a change; [I] and [A] links are leads, read the file
   transcript --url <url>                     fetch the transcript of a video or podcast (the runner saves it in the vault; prints a header and the text)
   phase list | propose --name "<n>" [--description "<t>"] [--followups-file <json>] | assign <REF> --phase <ref>|--none | submit <ref>   BA intake: propose a phase, put cards in it, ask the manager to confirm

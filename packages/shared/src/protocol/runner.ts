@@ -1049,7 +1049,7 @@ export const MAX_CAPABILITY_ITEMS = 500;
  * metadata only. A full snapshot, sent after a vault sync that changed them (and after `welcome`).
  */
 export const CapabilitiesReportSchema = msg('capabilities.report', {
-  vaultId: z.uuid(),
+  vaultId: VaultIdSchema,
   items: z.array(CapabilityMetaSchema.extend({ source: z.literal('org-vault') })).max(MAX_CAPABILITY_ITEMS),
   issues: z
     .array(z.object({ path: z.string().max(300), message: z.string().max(500) }))

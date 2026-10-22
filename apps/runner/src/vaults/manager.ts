@@ -41,6 +41,8 @@ export interface VaultManagerOptions {
   secondMs?: number;
   /** A sync resolved a conflict in generated project graph files by itself: rebuild the graph of these folders. */
   onGraphResolved?: (vaultId: string, folders: string[]) => void;
+  /** A sync pass of a repository vault finished without error: its files may have changed (the capability index re-reads them). */
+  onSynced?: (vaultId: string) => void;
 }
 
 interface PersistedState {
@@ -280,6 +282,11 @@ export class VaultManager {
       }
       this.lastPull.set(vaultId, now);
       if (r.pushed) this.lastPush.set(vaultId, now);
+      try {
+        this.opts.onSynced?.(vaultId);
+      } catch (err) {
+        this.log.warn(`vault ${vaultId} after-sync hook failed: ${String(err)}`);
+      }
       this.opts.transport.send('vault.status', {
         vaultId,
         lastPullAt: this.lastPull.get(vaultId) ?? null,
