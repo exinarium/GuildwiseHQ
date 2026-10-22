@@ -228,11 +228,11 @@ describe('an answer that keeps the card parked', () => {
 });
 
 describe('the repeat guard', () => {
-  it('parks the card with a back-off and one desk item when the same question comes again', async () => {
+  it('counts a serial repeat, answers it from the earlier answer and parks the card with one repeat_loop item on the 3rd', async () => {
     await reset();
     await w.hire('Bea', 'builder', 'junior');
     await w.hire('Sam', 'builder', 'senior');
-    const { card, start } = await buildAndAsk('Asks twice');
+    const { card } = await buildAndAsk('Asks again and again');
     const [first] = await itemsOf(card.id);
     const qs = await questionShift('Sam');
     await answer(qs.shiftId, first!.id, 'Use 10 seconds.');
@@ -245,29 +245,72 @@ describe('the repeat guard', () => {
     const refused = await ask(again.shiftId);
     expect(refused).toMatchObject({ accepted: false });
     expect(refused.error).toMatch(/ledger already has similar entries/);
-    const res = await ask(again.shiftId, { force: true });
-    expect(res).toMatchObject({ accepted: true });
-    expect(res.message).toMatch(/same question/);
-    r.ended(again.shiftId, 'reported');
+    const second = await ask(again.shiftId, { force: true });
+    expect(second).toMatchObject({ accepted: true });
+    expect(second.message).toMatch(/already answered/);
+    expect(second.message).toMatch(/Use 10 seconds/);
+    // No fresh item, no block: the earlier item counts the repeat.
+    expect(await itemsOf(card.id)).toHaveLength(1);
+    expect(await itemRow(first!.id)).toMatchObject({ repeat_count: 2, status: 'answered' });
+    expect(await cardRow(card.id)).toMatchObject({ status: 'claimed' });
 
+    // The third time the card is parked on one repeat_loop escalation that quotes the question and the answers.
+    const third = await ask(again.shiftId, { force: true });
+    expect(third).toMatchObject({ accepted: true });
+    expect(third.message).toMatch(/parked and escalated/);
+    r.ended(again.shiftId, 'reported');
     const items = await itemsOf(card.id);
     expect(items.filter((i) => i.kind === 'question')).toHaveLength(1);
-    const alerts = items.filter((i) => i.subkind === 'repeat_question');
-    expect(alerts).toHaveLength(1);
-    expect(alerts[0]).toMatchObject({ status: 'open', blocking: true, kind: 'escalation' });
+    expect(items.filter((i) => i.subkind === 'repeat_question')).toHaveLength(0);
+    const loops = items.filter((i) => i.subkind === 'repeat_loop');
+    expect(loops).toHaveLength(1);
+    expect(loops[0]).toMatchObject({ status: 'open', blocking: true, kind: 'escalation' });
+    expect(loops[0]!.title).toMatch(/retry delay/);
+    expect(loops[0]!.body).toMatch(/Use 10 seconds/);
+    expect(await itemRow(first!.id)).toMatchObject({ repeat_count: 3 });
     const c = await cardRow(card.id);
     expect(c).toMatchObject({ status: 'blocked', claim_id: null });
     expect(new Date(c.retry_after).getTime()).toBeGreaterThan(Date.now());
     expect(await eventsOfType('QuestionRaised')).toHaveLength(1);
 
-    // Resolving the item is the owner's call; the card returns to the queue after the back-off.
+    // Resolving the escalation clears the condition: the card is queued, no back-off, the count starts again.
     await ok(
-      w.t.req('POST', `/api/desk/${alerts[0]!.id}/resolve`, {
+      w.t.req('POST', `/api/desk/${loops[0]!.id}/resolve`, {
         cookie: w.owner.cookie,
         body: { resolution: 'acknowledged' },
       }),
     );
-    expect((await cardRow(card.id)).status).toBe('queued');
+    expect(await cardRow(card.id)).toMatchObject({
+      status: 'queued',
+      retry_after: null,
+      retry_failures: 0,
+      blocked_since: null,
+    });
+    const next = await claimCard(card.id);
+    await p.startShift(r, next);
+    const fresh = await ask(next.shiftId, { force: true });
+    expect(fresh).toMatchObject({ accepted: true });
+    expect(fresh.message).not.toMatch(/already answered/);
+    expect((await itemsOf(card.id)).filter((i) => i.kind === 'question')).toHaveLength(2);
+    expect((await itemsOf(card.id)).filter((i) => i.subkind === 'repeat_loop')).toHaveLength(1);
+  });
+
+  it('does not count an answer older than the window', async () => {
+    await reset();
+    await w.hire('Bea', 'builder', 'junior');
+    await w.hire('Sam', 'builder', 'senior');
+    const { card } = await buildAndAsk('Asks late');
+    const [first] = await itemsOf(card.id);
+    const qs = await questionShift('Sam');
+    await answer(qs.shiftId, first!.id, 'Use 10 seconds.');
+    r.ended(qs.shiftId, 'reported');
+    await until(async () => (await cardRow(card.id)).status === 'queued', 3000, 'queued');
+    await q(`UPDATE desk_items SET answered_at = answered_at - interval '2 hours' WHERE id=$1`, [first!.id]);
+    const again = await claimCard(card.id);
+    await p.startShift(r, again);
+    const res = await ask(again.shiftId, { force: true });
+    expect(res.message).not.toMatch(/already answered/);
+    expect((await itemsOf(card.id)).filter((i) => i.kind === 'question')).toHaveLength(2);
   });
 
   it('does not fire when something changed (a handoff) or the stage differs', async () => {

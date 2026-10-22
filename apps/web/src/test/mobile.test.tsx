@@ -200,7 +200,7 @@ describe('Move to... sheet', () => {
         card={{ id: 'card-1', ref: 'TOY-1', stage: 'build' }}
       />,
     );
-    expect(screen.getByTestId('move-to-build')).toBeDisabled();
+    expect(screen.queryByTestId('move-to-build')).toBeNull();
     await userEvent.click(screen.getByTestId('move-to-review'));
     await userEvent.click(screen.getByRole('button', { name: 'Move card' }));
     expect(screen.getByText('A reason is required')).toBeInTheDocument();

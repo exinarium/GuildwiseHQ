@@ -310,6 +310,13 @@ export const CardDetailResponseSchema = z.object({
     /** Put the card in a phase or take it out (the card is open and not a suite or bug child). */
     canSetPhase: z.boolean().optional(),
   }),
+  /**
+   * The stages a manager may move this card to (`POST /api/cards/:id/move`): its workflow's stages without the current
+   * one, the closing ones and the steps for a person (`movableStages`). Empty when the viewer cannot move the card.
+   */
+  moveTargets: z.array(z.object({ id: z.string(), label: z.string(), kind: z.string() })).optional(),
+  /** Only on the response of a move: it was accepted, but something will keep the card from running (unlanded dependencies). */
+  moveNotice: z.string().optional(),
   diffStats: DiffStats.nullable().optional(),
   /** Open desk items blocking this card (M2). */
   blockers: z

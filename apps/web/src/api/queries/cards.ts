@@ -57,7 +57,9 @@ export const usePatchCard = (id: string) =>
 export const useComment = (id: string) =>
   useCardAction(id, (body: string) => post(`/cards/${id}/comments`, { body }));
 export const useMoveCard = (id: string) =>
-  useCardAction(id, (b: { toStage: string; reason: string }) => post(`/cards/${id}/move`, b));
+  useCardAction(id, (b: { toStage: string; reason: string }) =>
+    post<{ moveNotice?: string }>(`/cards/${id}/move`, b),
+  );
 export const useReopenCard = (id: string) =>
   useCardAction(id, (b: { toStage: string; reason: string }) => post(`/cards/${id}/reopen`, b));
 export const useReleaseCard = (id: string) =>

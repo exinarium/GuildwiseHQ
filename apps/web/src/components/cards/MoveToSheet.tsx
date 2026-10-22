@@ -3,6 +3,7 @@ import { Check } from 'lucide-react';
 import { type FormEvent, type ReactNode, useState } from 'react';
 import { useWorkflows } from '../../api/queries/agents.ts';
 import { useMoveCard } from '../../api/queries/cards.ts';
+import { moveStageOptions } from '../../lib/moveStages.ts';
 import { stageStyle } from '../../lib/stages.ts';
 import { BottomSheet } from '../ui/BottomSheet.tsx';
 import { cx } from '../ui/cx.ts';
@@ -19,6 +20,9 @@ import { Button, ErrorBox, Spinner, TextArea, useToast } from '../ui.tsx';
  * - `workflow`: the card's workflow definition when the caller has it; otherwise it is loaded from `card.projectId`
  *   and `card.workflowKey` / `card.workflowVersion`.
  * - `open` / `onClose`: visibility. `onClose` is called on dismiss and after a successful move.
+ * - `targetIds`: the stages the server accepts (`moveTargets` of the card query); without it the shared move rules
+ *   are applied to the workflow. Only these stages are listed: the current stage, closing stages and steps for a
+ *   person are not offered.
  * - `onMoved`: optional, called after a successful move (the card queries are refetched either way).
  */
 export function MoveToSheet({
@@ -27,6 +31,7 @@ export function MoveToSheet({
   open,
   onClose,
   onMoved,
+  targetIds,
 }: {
   card: {
     id: string;
@@ -40,6 +45,7 @@ export function MoveToSheet({
   open: boolean;
   onClose: () => void;
   onMoved?: (toStage: string) => void;
+  targetIds?: string[] | undefined;
 }) {
   const move = useMoveCard(card.id);
   const toast = useToast();
@@ -60,10 +66,12 @@ export function MoveToSheet({
     move.mutate(
       { toStage, reason: reason.trim() },
       {
-        onSuccess: () => {
+        onSuccess: (res) => {
           const to = toStage;
           close();
           toast.success(`${card.ref ?? 'Card'} moved`);
+          const notice = (res as { moveNotice?: string } | undefined)?.moveNotice;
+          if (notice) toast.info(notice);
           onMoved?.(to);
         },
       },
@@ -102,7 +110,7 @@ export function MoveToSheet({
             aria-label="Move card"
           >
             <ul className="flex flex-col gap-2" aria-label="Target stage">
-              {resolved.stages.map((s) => {
+              {moveStageOptions(resolved, card.stage, targetIds).map((s) => {
                 const current = s.id === card.stage;
                 const picked = s.id === toStage;
                 return (

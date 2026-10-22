@@ -85,6 +85,7 @@ import {
 import { WorkabilityWarning } from '../components/WorkabilityWarning.tsx';
 import { useIsMobile } from '../hooks/useIsMobile.ts';
 import { fieldLabel } from '../lib/cardForm.ts';
+import { moveStageOptions } from '../lib/moveStages.ts';
 import { landingText } from '../lib/outcomes.ts';
 import { priorityLabel } from '../lib/priority.ts';
 import { stageStyle } from '../lib/stages.ts';
@@ -854,6 +855,7 @@ export function CardDetailView({
             workflowKey: card.workflowKey,
             workflowVersion: card.workflowVersion,
           }}
+          targetIds={data.moveTargets?.map((t) => t.id)}
         />
       )}
 
@@ -898,6 +900,7 @@ export function CardDetailView({
           cardId={card.id}
           workflow={workflow}
           current={card.stage}
+          targetIds={data.moveTargets?.map((t) => t.id)}
         />
       )}
       {workflow && permissions.canReopen && (
@@ -1029,33 +1032,42 @@ function ThreadPanel({
   );
 }
 
-function MoveDialog({
+export function MoveDialog({
   open,
   onOpenChange,
   cardId,
   workflow,
   current,
+  targetIds,
 }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
   cardId: string;
   workflow: WorkflowDefinition;
   current: string;
+  /** The stages the server accepts (`moveTargets`); the shared rules apply when absent. */
+  targetIds?: string[] | undefined;
 }) {
   const move = useMoveCard(cardId);
-  const [toStage, setToStage] = useState(current);
+  const toast = useToast();
+  const stages = moveStageOptions(workflow, current, targetIds);
+  const [picked, setToStage] = useState('');
+  const toStage = stages.some((s) => s.id === picked) ? picked : (stages[0]?.id ?? '');
   const [reason, setReason] = useState('');
   const [err, setErr] = useState('');
   const submit = (e: FormEvent) => {
     e.preventDefault();
+    if (!toStage) return setErr('There is no stage to move this card to');
     if (!reason.trim()) return setErr('A reason is required');
     setErr('');
     move.mutate(
       { toStage, reason: reason.trim() },
       {
-        onSuccess: () => {
+        onSuccess: (res) => {
           setReason('');
           onOpenChange(false);
+          const notice = (res as { moveNotice?: string } | undefined)?.moveNotice;
+          if (notice) toast.info(notice);
         },
       },
     );
@@ -1069,7 +1081,7 @@ function MoveDialog({
     >
       <form onSubmit={submit} className="flex flex-col gap-3" noValidate>
         <Select label="Target stage" value={toStage} onChange={(e) => setToStage(e.target.value)}>
-          {workflow.stages.map((s) => (
+          {stages.map((s) => (
             <option key={s.id} value={s.id}>
               {s.label}
             </option>
@@ -1079,7 +1091,7 @@ function MoveDialog({
         <ErrorBox error={move.error} />
         <div className="flex justify-end gap-2">
           <Button onClick={() => onOpenChange(false)}>Close</Button>
-          <Button type="submit" variant="primary" disabled={move.isPending}>
+          <Button type="submit" variant="primary" disabled={move.isPending || !toStage}>
             Move card
           </Button>
         </div>

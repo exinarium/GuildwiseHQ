@@ -76,13 +76,13 @@ export async function repeatGuard(
     tx,
     `SELECT d.id, d.title, d.created_at FROM desk_items d
       WHERE d.card_id=$1 AND d.kind='question' AND d.subkind IS DISTINCT FROM $3 AND d.stage IS NOT DISTINCT FROM $2
-        AND d.status IN ('open','answered')
+        AND d.status = 'open'
         AND NOT EXISTS (SELECT 1 FROM card_handoffs h WHERE h.card_id = d.card_id AND h.created_at > d.created_at)
       ORDER BY d.created_at DESC LIMIT 30`,
     [card.id, card.stage, DESK_SUBKIND.stopLoss],
   );
   const same = prior.find((p) => questionSimilarity(report.text, p.title) >= DUPLICATE_SIMILARITY);
-  if (!same) return undefined;
+  if (!same) return serialRepeat(ctx, tx, card, agent, report);
 
   const alert = await one(tx, `SELECT 1 FROM desk_items WHERE card_id=$1 AND subkind=$2 AND status='open'`, [
     card.id,
@@ -129,6 +129,115 @@ export async function repeatGuard(
     accepted: true,
     message:
       'This is the same question as an earlier one on this card and nothing has changed since: it was not sent again. The card is parked and the owner was told. Finish now; do not make further changes.',
+  };
+}
+
+/** The serial repeat guard: a question answered on the card and asked again within `windowMinutes`, nothing changed since. */
+export const SERIAL_REPEAT = { windowMinutes: 30, parkAt: 3 } as const;
+
+/**
+ * A question that matches one already *answered* on the same card and stage within `SERIAL_REPEAT.windowMinutes`, with
+ * no handoff since (so no stage change either: items are per stage), is a serial repeat. It does not become a fresh item
+ * that gets answered the same way again: the earlier item's `repeat_count` goes up and the agent gets the earlier answer
+ * back. The `SERIAL_REPEAT.parkAt`-th time the same question comes, the card is parked with one `repeat_loop`
+ * escalation quoting the question and the earlier answers. Resolving that escalation ends the episode: items from before
+ * it no longer count (cut-off below) and the back-off is cleared (projections/desk.ts `unblock`).
+ */
+async function serialRepeat(
+  ctx: Ctx,
+  tx: Tx,
+  card: Row,
+  agent: Row,
+  report: QuestionReport,
+): Promise<Result | undefined> {
+  const since = new Date(ctx.clock.now().getTime() - SERIAL_REPEAT.windowMinutes * 60_000);
+  const prior = await rows(
+    tx,
+    `SELECT d.id, d.title, d.answer, d.repeat_count, d.created_at FROM desk_items d
+      WHERE d.card_id=$1 AND d.kind='question' AND d.status='answered' AND d.subkind IS DISTINCT FROM $3
+        AND d.stage IS NOT DISTINCT FROM $2
+        AND COALESCE(d.answered_at, d.created_at) > $4
+        AND d.created_at > COALESCE((SELECT max(x.created_at) FROM desk_items x WHERE x.card_id=d.card_id AND x.subkind=$5),
+                                    '-infinity'::timestamptz)
+        AND NOT EXISTS (SELECT 1 FROM card_handoffs h WHERE h.card_id = d.card_id AND h.created_at > d.created_at)
+      ORDER BY d.created_at DESC LIMIT 30`,
+    [card.id, card.stage, DESK_SUBKIND.stopLoss, since, DESK_SUBKIND.repeatLoop],
+  );
+  const same = prior.filter((p) => questionSimilarity(report.text, p.title) >= DUPLICATE_SIMILARITY);
+  const newest = same[0];
+  if (!newest) return undefined;
+  const count = same.reduce((n, p) => n + Number(p.repeat_count ?? 1), 0) + 1;
+  const scope = projectScope(card.org_id, card.project_id);
+  const repeated: AppendInput = {
+    streamId: streamId.desk(newest.id),
+    event: {
+      type: 'DeskItemRepeated',
+      payload: { deskItemId: newest.id, count: Number(newest.repeat_count ?? 1) + 1 },
+    },
+    actor: agentActor(agent.id),
+    scope,
+  };
+  const text = String(report.text).replace(/\s+/g, ' ').trim();
+  const answers = same.map((p) => String(p.answer ?? '').trim()).filter(Boolean);
+  if (count < SERIAL_REPEAT.parkAt) {
+    await ctx.store.append([repeated], { tx });
+    const last = answers[0];
+    return {
+      accepted: true,
+      message: `This question was already answered on this card and nothing has changed since, so it was not asked again.${last ? ` The answer was: "${last.slice(0, 1000)}".` : ''} Act on that answer and carry on; do not ask the same thing again.`,
+    };
+  }
+
+  const alert = await one(tx, `SELECT 1 FROM desk_items WHERE card_id=$1 AND subkind=$2 AND status='open'`, [
+    card.id,
+    DESK_SUBKIND.repeatLoop,
+  ]);
+  const events: AppendInput[] = [
+    repeated,
+    cardMessage(
+      card,
+      { kind: 'system' },
+      'system',
+      `The same question came ${count} times on ${card.ref} in this stage with nothing changed after each answer ("${text.slice(0, 200)}"). The card is parked and escalated.`,
+      { deskItemId: newest.id },
+    ),
+    ...rejectionBackoffEvents(ctx, card),
+  ];
+  if (!alert) {
+    const deskItemId = randomUUID();
+    const quoted = answers.length
+      ? answers.map((a, i) => `${i + 1}. ${a.slice(0, 500)}`).join('\n')
+      : '(no answer text recorded)';
+    events.push({
+      streamId: streamId.desk(deskItemId),
+      event: {
+        type: 'DeskItemCreated',
+        payload: {
+          deskItemId,
+          kind: 'escalation',
+          subkind: DESK_SUBKIND.repeatLoop,
+          title: `${card.ref} keeps asking the same question (${count} times): "${text.slice(0, 120)}"`,
+          body: `${agent.name} asked "${text}" ${count} times in the ${card.stage} stage. Each time it was answered and nothing on the card changed, so the answers are not what the agent needs. The card is parked instead of going round again.\n\nPrevious answers:\n${quoted}\n\nSay what is missing (a decision, a dependency, an environment), move the card, or tell the agent how to proceed, then resolve this item: the card returns to the queue and the repeat count starts again.`,
+          options: [],
+          blocking: true,
+          pinned: true,
+          cardId: card.id,
+          projectId: card.project_id,
+          affectedCardIds: [card.id],
+          data: { question: text, answers, count, previousItemIds: same.map((p) => p.id) },
+          askedBy: { kind: 'system' },
+          subjectKey: `repeat_loop:${card.id}`,
+        },
+      },
+      actor: SYSTEM_ACTOR,
+      scope,
+    });
+  }
+  await ctx.store.append(await releaseClaimEvents(tx, card, 'question', null, null, events), { tx });
+  return {
+    accepted: true,
+    message:
+      'This question was already answered on this card and keeps coming back with nothing changed. It was not sent again: the card is parked and escalated. Finish now; do not make further changes.',
   };
 }
 
