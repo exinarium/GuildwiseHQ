@@ -9,9 +9,9 @@ import {
   FolderKanban,
   Inbox,
   KanbanSquare,
-  ListTodo,
   LifeBuoy,
   Lightbulb,
+  ListTodo,
   type LucideIcon,
   Network,
   Plug,
@@ -42,6 +42,11 @@ export interface NavSection {
   items: NavEntry[];
 }
 
+/** Project pages with a sidebar entry of their own: the Board entry is not highlighted on them. */
+const OWN_ENTRY = /\/(backlog|environments|research)\/?$/;
+/** A workstation's Integrations page: under /workstations, but the Integrations entry is highlighted. */
+const WORKSTATION_INTEGRATIONS = /^\/workstations\/[^/]+\/integrations/;
+
 /** The sidebar as data. Board points at the current project; Interests live under Knowledge. */
 export function buildNav(opts: {
   projectKey: string | null;
@@ -67,7 +72,8 @@ export function buildNav(opts: {
       label: 'Board',
       to: projectKey ? `/p/${projectKey}/board` : '/projects',
       icon: KanbanSquare,
-      match: (p) => (p.startsWith('/p/') && !p.endsWith('/backlog')) || p.startsWith('/cards/'),
+      // a project page is the Board unless it is one of the project's own sidebar entries (Backlog, Environments, Research)
+      match: (p) => (p.startsWith('/p/') && !OWN_ENTRY.test(p)) || p.startsWith('/cards/'),
     },
   ];
   if (projectKey)
@@ -143,14 +149,22 @@ export function buildNav(opts: {
           icon: Workflow,
           match: (p) => p === '/org' || p.startsWith('/org/workflows'),
         },
-        { id: 'workstations', label: 'Workstations', to: '/workstations', icon: Server },
+        {
+          id: 'workstations',
+          label: 'Workstations',
+          to: '/workstations',
+          icon: Server,
+          // a workstation's Integrations page belongs to the Integrations entry
+          match: (p) =>
+            (p === '/workstations' || p.startsWith('/workstations/')) && !WORKSTATION_INTEGRATIONS.test(p),
+        },
         { id: 'releases', label: 'Releases', to: '/releases', icon: Rocket, testId: 'nav-releases' },
         {
           id: 'integrations',
           label: 'Integrations',
           to: '/integrations',
           icon: Plug,
-          match: (p) => p.startsWith('/integrations') || /^\/workstations\/[^/]+\/integrations/.test(p),
+          match: (p) => p.startsWith('/integrations') || WORKSTATION_INTEGRATIONS.test(p),
           testId: 'nav-integrations',
         },
         { id: 'metrics', label: 'Metrics', to: '/metrics', icon: ChartColumn },

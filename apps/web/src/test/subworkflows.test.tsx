@@ -225,7 +225,8 @@ describe('card detail: sub-workflows', () => {
       parkedOn: null,
     } as unknown as NonNullable<CardDetailResponse['testing']>;
     const { rerender } = wrap(<TestingLinks testing={testing} status="waiting" />);
-    expect(screen.getByTestId('waiting-line').textContent).toContain('a bug fix');
+    // no bug child to wait on: no "waiting on a bug fix" line at all
+    expect(screen.queryByTestId('waiting-line')).toBeNull();
     rerender(
       <MemoryRouter>
         <TestingLinks testing={testing} status="waiting" hideWaiting />

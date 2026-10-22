@@ -153,9 +153,10 @@ export function Desk() {
   }, [hash, items.length, decisions.length, mobile]);
 
   const openItem = openId ? ([...items, ...decisions].find((i) => i.id === openId) ?? null) : null;
-  const closedShown = (closed.data?.items ?? []).filter(
-    filterKey === 'ceo' || onlyDecisions ? filter.test : () => true,
-  );
+  // the closed items under "Answered and closed": all of them, or only the CEO's for the two CEO filters
+  const closedShownFor = (f: (typeof FILTERS)[number]) =>
+    (closed.data?.items ?? []).filter(f.key === 'ceo' || f.key === 'ceoDecisions' ? f.test : () => true);
+  const closedShown = closedShownFor(filter);
 
   if (open.isPending)
     return (
@@ -165,8 +166,12 @@ export function Desk() {
       </div>
     );
   const counts = open.data?.counts ?? { open: 0, blocking: 0, urgent: 0 };
+  // A chip counts what its filter shows. "Handled by CEO" and "CEO decisions" also list the closed items (the CEO
+  // closes what it handles, an acknowledged decision is closed), so their counts take those in too.
+  const closedCount = (f: (typeof FILTERS)[number]) =>
+    f.key === 'ceo' || f.key === 'ceoDecisions' ? closedShownFor(f).length : 0;
   const count = (f: (typeof FILTERS)[number]) =>
-    f.key === 'ceoDecisions' ? decisions.length : items.filter(f.test).length;
+    (f.key === 'ceoDecisions' ? decisions.length : items.filter(f.test).length) + closedCount(f);
   // group the (already ordered) items; the h2 order inside `desk-list` stays the API order
   const grouped =
     sort === 'priority'

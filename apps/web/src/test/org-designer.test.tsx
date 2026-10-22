@@ -345,6 +345,22 @@ describe('the organization page', () => {
     ).toBeInTheDocument();
   });
 
+  it('workflows: a draft keeps all four actions, Discard included, inside its card (the actions wrap)', async () => {
+    const cat = catalogue(true);
+    const support = cat.workflows[0];
+    support?.versions.unshift(
+      version(6, { ...wf(), version: 3, builtIn: false }, 'draft', { cardsInFlight: 0 }) as never,
+    );
+    mountPage(cat, '/org?tab=workflows');
+    const row = within(await screen.findByTestId('workflow-support')).getByTestId('version-3');
+    const actions = within(row).getByTestId('version-actions');
+    for (const name of ['View support v3', 'Edit support v3', 'Submit support v3', 'Discard support v3'])
+      expect(within(actions).getByRole(/Edit/.test(name) ? 'link' : 'button', { name })).toBeInTheDocument();
+    // jsdom does not lay out: the row's action group must wrap and never grow wider than the card
+    expect(actions.className).toContain('flex-wrap');
+    expect(actions.className).toContain('max-w-full');
+  });
+
   it('departments: lists them with their roles and workflows and creates one', async () => {
     const user = userEvent.setup();
     const calls = mountPage(catalogue(true), '/org?tab=departments');

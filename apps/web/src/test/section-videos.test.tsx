@@ -10,6 +10,7 @@ import { TourVideo } from '../components/tour/TourVideo.tsx';
 import { ARTICLES, articleBySlug } from '../help/articles.ts';
 import { Markdown } from '../help/Markdown.tsx';
 import {
+  GETTING_STARTED_SLUG,
   navIdForPath,
   publishedVideo,
   SECTION_VIDEOS,
@@ -44,6 +45,10 @@ const serve = (...slugs: string[]) => {
 
 const publish = (...slugs: string[]) => {
   for (const s of slugs) (SECTION_VIDEOS[s] as { published: boolean }).published = true;
+};
+/** Every video is recorded and published; the tests of the "not published yet" paths take one back. */
+const unpublish = (...slugs: string[]) => {
+  for (const s of slugs) (SECTION_VIDEOS[s] as { published: boolean }).published = false;
 };
 let before: Record<string, boolean>;
 beforeEach(() => {
@@ -99,7 +104,24 @@ describe('the video registry', () => {
     }
   });
 
+  it('publishes all 25 videos, each with its four files', () => {
+    for (const [slug, e] of Object.entries(SECTION_VIDEOS)) expect(e.published, slug).toBe(true);
+  });
+
+  it('finds a video by nav id, article and path for every section', () => {
+    for (const [slug, e] of Object.entries(SECTION_VIDEOS)) {
+      if (slug === GETTING_STARTED_SLUG) continue; // its own player on Help and in the tour (tour.test.tsx)
+      if (e.nav) expect(videoForNav(e.nav)?.slug, slug).toBe(slug);
+      const [article, anchor] = e.help.split('#');
+      expect(
+        videosForArticle(article as string).some((v) => v.slug === slug && v.anchor === anchor),
+        slug,
+      ).toBe(true);
+    }
+  });
+
   it('finds a video by nav id, article and path only when it is published', () => {
+    unpublish('desk');
     expect(videoForNav('desk')).toBeUndefined();
     expect(videosForArticle('desk')).toEqual([]);
     expect(videoForPath('/desk')).toBeUndefined();
@@ -130,6 +152,7 @@ describe('the video registry', () => {
 
 describe('SectionVideo', () => {
   it('shows nothing, and asks for nothing, while the video is not published', async () => {
+    unpublish('desk');
     const f = serve('desk');
     const { container } = render(<SectionVideo slug="desk" />);
     await Promise.resolve();
@@ -159,6 +182,7 @@ describe('SectionVideo', () => {
 
 describe('the Watch the video button of the page help', () => {
   it('is absent on a page without a published video', async () => {
+    unpublish('desk');
     serve('desk');
     const { container } = render(<PageVideo pathname="/desk" />);
     await Promise.resolve();
@@ -201,6 +225,7 @@ describe('a Help article', () => {
   );
 
   it('shows no video under a heading until one is published', async () => {
+    unpublish('desk');
     serve('desk');
     render(view());
     await Promise.resolve();
@@ -217,9 +242,69 @@ describe('a Help article', () => {
   });
 });
 
+describe('every published video on its three places', () => {
+  it("Help, the tour card and the page help's Watch the video show each section video", async () => {
+    const user = userEvent.setup();
+    const paths: Record<string, string> = {
+      board: '/p/X/board',
+      backlog: '/p/X/backlog',
+      environments: '/p/X/environments',
+      research: '/p/X/research',
+    };
+    for (const [slug, e] of Object.entries(SECTION_VIDEOS)) {
+      if (slug === GETTING_STARTED_SLUG) continue; // its own player on Help and in the tour (tour.test.tsx)
+      serve(slug);
+      // Help: the article shows the player under the registered heading
+      const [article] = e.help.split('#');
+      const help = render(
+        <MemoryRouter>
+          <Markdown
+            blocks={articleBySlug(article as string)?.blocks ?? []}
+            afterHeading={(id) =>
+              videosForArticle(article as string)
+                .filter((v) => v.anchor === id && v.slug === slug)
+                .map((v) => <SectionVideo key={v.slug} slug={v.slug} />)
+            }
+          />
+        </MemoryRouter>,
+      );
+      expect(await screen.findByTestId(`${slug}-player`), `${slug}: Help`).toBeInTheDocument();
+      help.unmount();
+      // the tour card
+      const tour = render(<TourVideo slug={slug} onShown={() => {}} />);
+      expect(await screen.findByTestId(`${slug}-player`), `${slug}: tour`).toBeInTheDocument();
+      tour.unmount();
+      // the page help (section videos only: Getting started has no page of its own)
+      if (!e.nav) continue;
+      const path =
+        paths[e.nav] ?? (e.nav === 'platform' ? '/platform/orgs' : (buildNavPath(e.nav) ?? `/${e.nav}`));
+      const page = render(<PageVideo pathname={path} />);
+      await user.click(await screen.findByRole('button', { name: 'Watch the video' }));
+      expect(
+        await screen.findByTestId(`${slug}-player`),
+        `${slug}: page help on ${path}`,
+      ).toBeInTheDocument();
+      page.unmount();
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
+/** The sidebar link of a nav entry (with every optional entry on). */
+function buildNavPath(nav: string): string | undefined {
+  const { sections, footer } = buildNav({
+    projectKey: 'X',
+    hasResearch: true,
+    hasEnvironments: true,
+    canManage: true,
+  });
+  return [...sections.flatMap((s) => s.items), ...footer].find((i) => i.id === nav)?.to;
+}
+
 describe('a video in a tour card', () => {
   it('shows only a published section video, and tells the card when it appears', async () => {
     const shown = vi.fn();
+    unpublish('desk');
     serve('desk');
     const first = render(<TourVideo slug="desk" onShown={shown} />);
     await Promise.resolve();

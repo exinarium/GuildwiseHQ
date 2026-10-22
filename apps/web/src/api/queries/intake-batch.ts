@@ -8,10 +8,15 @@ import {
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { get, post } from '../client.ts';
 
-/** Batch intake (#63). Lists and details refresh every few seconds while a batch is running (no socket event yet). */
+/**
+ * Batch intake (#63). Lists and details refresh every few seconds while a batch is running (no socket event yet), and
+ * are never served from the cache when a page mounts: the app-wide 15 s staleTime kept "Running · 2 queued" on the
+ * Intake page while the intakes listed under it (fetched fresh) already showed the cards of both tickets.
+ */
 export function useBatches() {
   return useQuery({
     queryKey: ['intake-batches'],
+    staleTime: 0,
     refetchInterval: (q) => (q.state.data?.some((b) => b.status === 'running') ? 5000 : false),
     queryFn: async () => (await get('/intake/batches', BatchesResponseSchema)).batches,
   });
@@ -21,6 +26,7 @@ export function useBatch(id: string | undefined) {
   return useQuery({
     queryKey: ['intake-batches', id],
     enabled: !!id,
+    staleTime: 0,
     refetchInterval: (q) => (q.state.data?.status === 'running' ? 5000 : false),
     queryFn: async () => (await get(`/intake/batches/${id}`, BatchResponseSchema)).batch as BatchDto,
   });

@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { type APIRequestContext, expect } from '@playwright/test';
 import { apiAs } from '../support/api.ts';
-import { waitFor } from '../support/db.ts';
+import { q, waitFor } from '../support/db.ts';
 import { ADMIN, BASE_URL, DATABASE_URL, paths, ROOT } from '../support/env.ts';
 import { addRepoRoot, pairRunner, startRunner } from '../support/runner.ts';
 
@@ -12,9 +12,21 @@ import { addRepoRoot, pairRunner, startRunner } from '../support/runner.ts';
  * invented names, `@demo.local` and `example.com` addresses, the mock agent runtime and a toy git repository.
  */
 
-/** The Owner's API client (Alex Morgan, organization Acme). */
-export async function demoApi(): Promise<APIRequestContext> {
-  return apiAs(ADMIN.email, ADMIN.password);
+/** The Owner's demo address. The stack signs the Owner up as `admin@e2e.test`; the video shows this one instead. */
+export const OWNER_EMAIL = 'alex.morgan@demo.local';
+
+/**
+ * The Owner's API client (Alex Morgan, organization Acme). Call it first in every spec, before `pairWorkstation`.
+ * - It renames the Owner's sign-in address from the stack's e2e address to the demo one in the database, so every
+ *   screen that shows it (the user menu, members, project members, the activity) shows only demo data.
+ * - It gives Acme its built-in CEO on the mock runtime, as every new organization has in production (the stack creates
+ *   Acme with `admin:create` before the role catalogue exists, so it starts without one). `ceo: false` skips it.
+ */
+export async function demoApi(opts: { ceo?: boolean } = {}): Promise<APIRequestContext> {
+  await q('UPDATE users SET email=$1 WHERE lower(email)=lower($2)', [OWNER_EMAIL, ADMIN.email]);
+  const api = await apiAs(OWNER_EMAIL, ADMIN.password);
+  if (opts.ceo ?? true) await provisionCeo(api);
+  return api;
 }
 
 /**
@@ -68,14 +80,28 @@ export async function createProject(
   return { projectId, repoId: (await add.json()).repos[0].id as string };
 }
 
-/** Hires a mock-runtime agent. `roleKey` is one of ba, planner, architect, builder, pre_reviewer, reviewer, tester. */
+/**
+ * Hires a mock-runtime agent and returns its id. `roleKey` is a role of the catalogue (ba, planner, architect, builder,
+ * pre_reviewer, reviewer, tester, researcher, ...). Without `seniority` it hires a junior when the role has juniors,
+ * else the role's first level (the BA, the architect, the reviewer and DevOps are senior only).
+ */
 export async function hireAgent(
   api: APIRequestContext,
   a: { name: string; roleKey: string; seniority?: string; workstationId: string; projectId?: string },
 ): Promise<string> {
-  const r = await api.post('/api/agents', { data: { seniority: 'junior', runtime: 'mock', ...a } });
+  let seniority = a.seniority;
+  if (!seniority) {
+    const roles = (await (await api.get('/api/roles')).json()).roles as Array<{
+      definition: { key: string; seniorityLevels: string[] };
+    }>;
+    const levels = roles.find((r) => r.definition.key === a.roleKey)?.definition.seniorityLevels ?? [];
+    seniority = levels.includes('junior') ? 'junior' : (levels[0] ?? 'senior');
+  }
+  const r = await api.post('/api/agents', { data: { runtime: 'mock', ...a, seniority } });
   expect(r.status(), `${a.name}: ${await r.text()}`).toBe(201);
-  return (await r.json()).agent?.id as string;
+  const id = ((await r.json()) as { id?: string }).id; // the route answers with the agent itself
+  expect(id, `${a.name}: the hire returns the agent id`).toBeTruthy();
+  return id as string;
 }
 
 /** A feature card with a complete brief (queued for the team unless `specify: false`). */
@@ -89,7 +115,7 @@ export async function createCard(
       title: c.title,
       cardType: 'feature',
       repoId: c.repoId,
-      completionAction: 'push_branch',
+      completionAction: 'merge',
       fields: {
         context: 'Demo context.',
         requirements: c.title,
@@ -107,7 +133,8 @@ export async function createCard(
 /**
  * Gives Acme its built-in CEO (the global setup's organization is created before the role catalogue, so it has none
  * yet). Call it before `pairWorkstation`: the Owner's first workstation becomes the CEO's home. With `mock` (the
- * default) the CEO runs on the mock runtime, so the recording never needs a real model.
+ * default) the CEO runs on the mock runtime, so the recording never needs a real model. `demoApi` already calls it;
+ * calling it again is harmless (it returns the same CEO).
  */
 export async function provisionCeo(
   api: APIRequestContext,

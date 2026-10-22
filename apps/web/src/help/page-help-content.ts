@@ -20,7 +20,10 @@ export const PAGE_HELP: Record<string, PageHelp> = {
     intro:
       'Wanted work for this project that is not in development. Nothing here is worked by an agent until you send it to the BA. Agents may add follow-ups they find as suggestions; you decide what happens to them.',
     controls: [
-      { name: 'Add to the backlog', text: 'Type a title and press Enter (or tap Add). Fill in the details later with Edit.' },
+      {
+        name: 'Add to the backlog',
+        text: 'Type a title and press Enter (or tap Add). Fill in the details later with Edit.',
+      },
       {
         name: 'Search and filters',
         text: 'Search title, description and tags. Filter by flagged, agent suggestions, status, priority and tag. Open items are shown by default.',
@@ -1160,7 +1163,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'Getting started video',
-        text: 'A spoken tutorial of about three minutes in five steps, with captions (CC). Each step under the video jumps to that part. The same video is the first step of the guided tour.',
+        text: 'A spoken tutorial of under three minutes, from an empty organization to a team at work, with captions (CC). Each chapter under the video jumps to that part. The same video is the first step of the guided tour.',
       },
       {
         name: 'Get started checklist',

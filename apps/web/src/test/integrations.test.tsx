@@ -367,6 +367,19 @@ describe('Integrations page: disabled reasons', () => {
     // A workstation-scope tile stays usable.
     expect(within(screen.getByTestId('tile-jira')).getByRole('button', { name: 'Connect' })).toBeEnabled();
   });
+
+  it('the Sign out confirmation of a machine-wide sign-in says "shared by every pairing" once', async () => {
+    server.page = makePage({
+      integrations: [
+        status({ kind: 'mcp', instance: 'plugin_atlassian_atlassian', scope: 'machine', state: 'connected' }),
+      ],
+    });
+    page();
+    const tile = await screen.findByTestId('tile-mcp:plugin_atlassian_atlassian');
+    await userEvent.click(within(tile).getByRole('button', { name: 'Sign out' }));
+    const dialog = await screen.findByRole('dialog', { name: /Sign out of/ });
+    expect(dialog.textContent?.match(/shared by every pairing/g)).toHaveLength(1);
+  });
 });
 
 describe('Connect dialog', () => {

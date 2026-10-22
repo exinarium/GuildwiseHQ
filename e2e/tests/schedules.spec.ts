@@ -226,7 +226,7 @@ test('an event trigger with a signed Slack webhook: the card is finalized, the h
       title: 'Export archived items',
       cardType: 'feature',
       repoId,
-      completionAction: 'push_branch',
+      completionAction: 'merge', // the API takes pr or merge (push_branch was retired)
       fields: { ...SPEC, mock: { build: ['ok'] } },
       specify: true,
     },

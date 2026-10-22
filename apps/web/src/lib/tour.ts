@@ -186,7 +186,7 @@ const navStep = (nav: keyof typeof NAV_STEPS & string): TourStep => {
 const VIDEO: TourStep = {
   id: 'video',
   title: 'Watch the 3-minute getting-started video',
-  body: 'A short voice-over shows the five steps to get going: create a project, hire agents, create cards, talk to the business analyst and test what they build. Watch it now, or any time from Help, then take the tour.',
+  body: 'A short voice-over goes from an empty organization to a team at work: the Get started checklist, a workstation, a project and its repository, a lean team, a first card and a talk with the business analyst, an answer on the Desk, and the board moving by itself. Watch it now, or any time from Help, then take the tour.',
   more: 'getting-started#training-video',
   video: true,
   nextLabel: 'Next: take the tour',

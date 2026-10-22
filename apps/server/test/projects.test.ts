@@ -54,6 +54,13 @@ describe('projects', () => {
         })
       ).status,
     ).toBe(400);
+    // the built-in bugfix workflow only runs the bug cards of code projects: never a project's workflow
+    const bugfix = await t.req('POST', '/api/projects', {
+      cookie: a.cookie,
+      body: { key: 'BUG', name: 'n', workflowKey: 'code-bugfix' },
+    });
+    expect(bugfix.status).toBe(400);
+    expect(bugfix.body.error.code).toBe('not_a_project_workflow');
     // same key in another org is fine
     expect(
       (await t.req('POST', '/api/projects', { cookie: b.cookie, body: { key: 'WEB', name: 'b web' } }))

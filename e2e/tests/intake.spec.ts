@@ -54,7 +54,7 @@ async function makeCard(project: string, title: string, mock: Record<string, str
       title,
       cardType: 'feature',
       repoId: projects[project]?.repoId,
-      completionAction: 'push_branch',
+      completionAction: 'merge', // the API takes pr or merge (push_branch was retired)
       fields: { ...SPEC, mock },
       specify: true,
       ...extra,
@@ -392,12 +392,12 @@ test('AC finalize: the BA claims Finalize and finalizes a small card without the
       small.id,
     ])
   )[0];
-  expect(handoff).toMatchObject({ agent_id: ba.id, outcome: 'finalized', data: { action: 'push_branch' } });
+  expect(handoff).toMatchObject({ agent_id: ba.id, outcome: 'finalized', data: { action: 'merge' } });
   const req = (await events('FinalizeRequested')).find((e) => e.payload.cardId === small.id);
-  expect(req?.payload).toMatchObject({ action: 'push_branch', requestedBy: ba.id });
+  expect(req?.payload).toMatchObject({ action: 'merge', requestedBy: ba.id });
   expect(req?.actor_kind).toBe('agent');
-  const branch = (await card(small.ref)).branch_name as string;
-  expect(git(paths.origin, 'branch', '--list', branch).trim()).toContain(branch);
+  // the small merge went straight into the working branch
+  expect(git(paths.origin, 'show', `main:aom-mock/${small.ref}.txt`)).toBeTruthy();
   // no desk approval was needed
   expect(
     await q('SELECT 1 FROM desk_items WHERE card_id=$1 AND kind=$2', [small.id, 'approval']),

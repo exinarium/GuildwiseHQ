@@ -203,3 +203,31 @@ describe('batch detail', () => {
     expect(screen.queryByRole('button', { name: 'Cancel batch' })).toBeNull();
   });
 });
+
+describe('batch status on the Intake page', () => {
+  it('refetches the batch list on mount, even within the app-wide staleTime, so it never shows an old "queued"', async () => {
+    const { useBatches } = await import('../api/queries/intake-batch.ts');
+    const summary = (b: BatchDto) => {
+      const { items: _items, ...rest } = b;
+      return rest;
+    };
+    const fresh = summary(batch({ status: 'done', counts: counts({ done: 2 }) }));
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ batches: [fresh] }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 15_000 } } });
+    // what the list held right after "Start batch": both tickets queued
+    qc.setQueryData(['intake-batches'], [summary(batch({ counts: counts({ queued: 2 }) }))]);
+    function Status() {
+      const list = useBatches();
+      return <p data-testid="batch-status">{list.data?.[0]?.status}</p>;
+    }
+    render(
+      <QueryClientProvider client={qc}>
+        <Status />
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(screen.getByTestId('batch-status')).toHaveTextContent('done'));
+    expect(fetchMock).toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+});

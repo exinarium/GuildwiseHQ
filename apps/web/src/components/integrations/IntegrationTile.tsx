@@ -340,7 +340,8 @@ export function IntegrationTile({
         onOpenChange={setRemoveOpen}
         title={isMcp ? `Sign out of ${title ?? instance}?` : `Remove ${heading}?`}
         description={`This deletes ${isMcp ? 'the sign-in' : 'the saved credential'} on ${ctx.workstationName}: ${kind.storage}${
-          integrationScope(kind, status?.method) === 'machine' || scope === 'machine'
+          (integrationScope(kind, status?.method) === 'machine' || scope === 'machine') &&
+          !/shared by every pairing/i.test(kind.storage) // said once, not twice (some stores already say it)
             ? ' It is shared by every pairing on this machine.'
             : ''
         }`}

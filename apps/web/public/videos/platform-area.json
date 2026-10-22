@@ -14,26 +14,26 @@
   ],
   "captions": "/videos/platform-area.vtt",
   "voice": "Piper en_GB-cori-high",
-  "duration": 100.5,
+  "duration": 100.4,
   "chapters": [
     {
       "t": 11,
       "title": "Organizations"
     },
     {
-      "t": 25.8,
+      "t": 25.7,
       "title": "Invitations"
     },
     {
-      "t": 34.8,
+      "t": 34.7,
       "title": "Accounts"
     },
     {
-      "t": 40.1,
+      "t": 40,
       "title": "Billing"
     },
     {
-      "t": 48.9,
+      "t": 48.8,
       "title": "Support and Blog"
     },
     {
@@ -41,7 +41,7 @@
       "title": "Keys, runners, team and mail"
     },
     {
-      "t": 85.7,
+      "t": 85.6,
       "title": "Audit log"
     }
   ]

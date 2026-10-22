@@ -76,21 +76,19 @@ export function TestingLinks({
   hideWaiting?: boolean;
 }) {
   const { parent, children, waitingOn, parkedOn } = testing;
-  const waits = status === 'waiting' && !hideWaiting;
-  if (!parent && children.length === 0 && !waitingOn && !parkedOn && !waits) return null;
+  // Only a card that waits on its open bug child (`waitingOn`) says so. A card waiting for the owner's approval, manual
+  // QA, a running merge, DevOps or a sub-workflow child waits for something else, shown by its own line.
+  const waits = status === 'waiting' && !hideWaiting && !!waitingOn;
+  if (!parent && children.length === 0 && !waitingOn && !parkedOn) return null;
   return (
     <div className="mb-3 flex flex-col gap-1.5 text-sm" data-testid="testing-links">
-      {waits && (
+      {waits && waitingOn && (
         <p data-testid="waiting-line">
-          Waiting on{' '}
-          {waitingOn ? (
-            <Link to={`/cards/${waitingOn.id}`} className="font-medium underline">
-              {waitingOn.ref}
-            </Link>
-          ) : (
-            'a bug fix'
-          )}
-          {waitingOn ? ` ${waitingOn.title}` : ''}
+          Waiting on a bug fix:{' '}
+          <Link to={`/cards/${waitingOn.id}`} className="font-medium underline">
+            {waitingOn.ref}
+          </Link>{' '}
+          {waitingOn.title}
         </p>
       )}
       {parkedOn && (
