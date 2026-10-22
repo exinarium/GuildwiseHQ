@@ -1,0 +1,53 @@
+WEBVTT
+
+1
+00:00:01.009 --> 00:00:09.008
+Environments is where your app runs: the test site your team tries, the live site your customers use, and the computers they run on.
+
+2
+00:00:09.725 --> 00:00:14.518
+Open Environments in the sidebar. Each project has its own page.
+
+3
+00:00:15.218 --> 00:00:22.064
+Your app says how to start the app. DevOps has looked at the project and has a suggestion. Review it.
+
+4
+00:00:22.769 --> 00:00:28.874
+Answer its question, then press Use these steps. Test copies of cards use the same steps.
+
+5
+00:00:30.398 --> 00:00:41.159
+Each environment shows where it runs, its address, the version that runs, and when it updates. The test site updates by itself after each merge.
+
+6
+00:00:41.876 --> 00:00:53.238
+The live site changes only when you say so. With nothing waiting, Release the newest version puts the latest approved version live. A database backup is taken first.
+
+7
+00:00:53.986 --> 00:01:03.096
+Places lists the computers and servers this project uses, and what uses them. Check looks at a computer again. Nothing is changed.
+
+8
+00:01:03.797 --> 00:01:10.773
+A server is reached from one of your computers. Reconnect signs in again, and you choose which computer does it.
+
+9
+00:01:11.488 --> 00:01:16.213
+Add an environment asks what it is for and where it runs, then shows the app it found there.
+
+10
+00:01:22.489 --> 00:01:31.367
+Nothing is saved before the review. When Save is off, it always says why. Here, Docker Compose is missing on that computer.
+
+11
+00:01:32.070 --> 00:01:41.134
+What you started stays as a draft. At the top, the Releases switch pauses releases and automatic updates. Nothing that runs is stopped.
+
+12
+00:01:41.834 --> 00:01:43.982
+Turn it on again when you are ready.
+
+13
+00:01:44.682 --> 00:01:49.430
+That is Environments: set up where your app runs once, and release when you are ready.

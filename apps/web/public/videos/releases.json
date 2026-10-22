@@ -1,0 +1,32 @@
+{
+  "title": "Releases",
+  "src": "/videos/releases.webm",
+  "type": "video/webm",
+  "sources": [
+    {
+      "src": "/videos/releases.mp4",
+      "type": "video/mp4"
+    },
+    {
+      "src": "/videos/releases.webm",
+      "type": "video/webm"
+    }
+  ],
+  "captions": "/videos/releases.vtt",
+  "voice": "Piper en_GB-cori-high",
+  "duration": 63.7,
+  "chapters": [
+    {
+      "t": 7.8,
+      "title": "Waiting for you"
+    },
+    {
+      "t": 24,
+      "title": "What is live and the history"
+    },
+    {
+      "t": 43.1,
+      "title": "Rules and the freeze"
+    }
+  ]
+}

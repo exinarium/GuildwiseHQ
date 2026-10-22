@@ -1,0 +1,36 @@
+{
+  "title": "Projects and their settings",
+  "src": "/videos/projects.webm",
+  "type": "video/webm",
+  "sources": [
+    {
+      "src": "/videos/projects.mp4",
+      "type": "video/mp4"
+    },
+    {
+      "src": "/videos/projects.webm",
+      "type": "video/webm"
+    }
+  ],
+  "captions": "/videos/projects.vtt",
+  "voice": "Piper en_GB-cori-high",
+  "duration": 72,
+  "chapters": [
+    {
+      "t": 6.3,
+      "title": "A new project"
+    },
+    {
+      "t": 18.9,
+      "title": "The priority order"
+    },
+    {
+      "t": 29.5,
+      "title": "Project settings"
+    },
+    {
+      "t": 45.9,
+      "title": "Budget and team"
+    }
+  ]
+}
