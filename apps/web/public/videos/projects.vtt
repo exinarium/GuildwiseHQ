@@ -1,0 +1,37 @@
+WEBVTT
+
+1
+00:00:00.387 --> 00:00:05.623
+Projects lists everything your organization works on, in the order your agents serve it.
+
+2
+00:00:06.329 --> 00:00:08.639
+Open Projects in the sidebar.
+
+3
+00:00:09.339 --> 00:00:18.230
+New project asks for a name, a short key that card references start with, and a workflow. Code builds features from repositories.
+
+4
+00:00:18.938 --> 00:00:28.758
+The project at the top is served first: agents take the next card from the highest project that has work. Drag a project, or use its arrows, to move it up.
+
+5
+00:00:29.465 --> 00:00:34.711
+The gear opens the project settings. The chips at the top jump straight to a section.
+
+6
+00:00:35.411 --> 00:00:43.687
+Under Repos, add the repository the agents work in: its address and a name. The DevOps engineer then clones it onto your computers.
+
+7
+00:00:45.879 --> 00:00:53.482
+Set a monthly budget. At eighty percent you are warned, and at the limit nothing new starts until you raise it or override it for the month.
+
+8
+00:00:54.180 --> 00:01:04.917
+Under Team, invite someone who has a Guildwise account by email, with Send invitation. They show as pending until they accept, and then help manage this project.
+
+9
+00:01:05.618 --> 00:01:11.270
+Back on Projects, the new project has its place in the order. That is Projects.
