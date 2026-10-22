@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { type ChainLevel, DESK_SUBKIND, type DeskActor, streamId } from '@aom/shared';
 import { ceoDecisionItemEvents } from '../ceo/decisions.ts';
-import { ceoActive } from '../ceo/state.ts';
+import { ceoActive, ceoReachable } from '../ceo/state.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Queryable, type Row, rows } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
@@ -154,16 +154,22 @@ export async function architectRoute(ctx: Ctx, db: Queryable, card: Row): Promis
 }
 
 /**
- * The organization's CEO as the step before the desk, whenever it is active (enabled, not paused, its agent active). A CEO
- * that is slow or cannot run a shift right now still gets the question: it waits for the CEO and reaches the owner's desk
- * only after `QUESTION_STALL_MS` (the stalled-question sweep), never the BA's hands (owner decision, 22 Oct).
+ * The organization's CEO as the step before the desk, whenever it is active (enabled, not paused, its agent active) and
+ * can run a shift now. An active CEO that is not reachable (offline workstation, runtime signed out) cannot answer: the
+ * question goes to the owner's desk at once, never to the BA and not after a wait (owner decision, 22 Oct: the BA does
+ * not decide because the CEO was slow).
  */
-async function ceoRoute(_ctx: Ctx, db: Queryable, i: RouteInput): Promise<Route | undefined> {
-  if (i.askerRole === 'ceo') return undefined;
+async function ceoRoute(
+  ctx: Ctx,
+  db: Queryable,
+  i: RouteInput,
+): Promise<{ route?: Route; unreachable?: boolean }> {
+  if (i.askerRole === 'ceo') return {};
   const ceo = await ceoActive(db, i.orgId);
-  if (!ceo?.agentId || ceo.agentId === i.askerAgentId || i.tried.includes(ceo.agentId)) return undefined;
+  if (!ceo?.agentId || ceo.agentId === i.askerAgentId || i.tried.includes(ceo.agentId)) return {};
+  if (!(await ceoReachable(db, i.orgId, ctx.clock.now())).ok) return { unreachable: true };
   const a = await one(db, 'SELECT * FROM agents WHERE id=$1', [ceo.agentId]);
-  return a ? asRoute(a, 'ceo') : undefined;
+  return a ? { route: asRoute(a, 'ceo') } : {};
 }
 
 /**
@@ -178,10 +184,10 @@ export async function nextRoute(ctx: Ctx, db: Queryable, i: RouteInput): Promise
   if (i.from === 'desk' || i.from === 'ceo' || i.askerRole === 'ceo') return desk;
   if (i.subkind === DESK_SUBKIND.stopLoss && i.from !== 'raise') return desk;
   const agents = await onlineAgents(ctx, db, i);
-  const ceo = await ceoRoute(ctx, db, i);
+  const { route: ceo, unreachable } = await ceoRoute(ctx, db, i);
   if (i.from === 'ba' || i.askerRole === 'ba') return ceo ?? desk;
   if (i.from === 'raise') {
-    const topic = await topicRoute(db, i, agents, !!ceo);
+    const topic = await topicRoute(db, i, agents, !!ceo || !!unreachable);
     if (topic) return topic;
   }
   if (i.from === 'raise' && i.via !== 'ba') {
@@ -201,6 +207,7 @@ export async function nextRoute(ctx: Ctx, db: Queryable, i: RouteInput): Promise
   }
   // With an active CEO the BA is skipped: the CEO decides what the BA used to answer from the ledger.
   if (ceo) return ceo;
+  if (unreachable) return desk;
   const ba = agents.find((a) => a.role_key === 'ba');
   return ba ? asRoute(ba, 'ba') : desk;
 }

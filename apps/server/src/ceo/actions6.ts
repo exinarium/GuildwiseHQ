@@ -2,7 +2,7 @@ import { type CeoActionName, canonicalWorkflowKey, isKnownChoice, streamId } fro
 import { z } from 'zod';
 import { loadWorkflowById } from '../catalogue/loader.ts';
 import { moveCard } from '../commands/cards.ts';
-import { cardMessage, userActor } from '../commands/common.ts';
+import { agentActor, cardMessage, userActor } from '../commands/common.ts';
 import type { Queryable, Row } from '../db/sql.ts';
 import { HttpError } from '../errors.ts';
 import { appendLocked, cardOf, refuse, truncate } from './actions.ts';
@@ -49,7 +49,7 @@ const move: ActionDef<z.infer<typeof MoveP>> = {
   describe: (p, pr) => `Move ${pr.subjectLabel} to ${p.to}`,
   async prepare(env, p) {
     const card = await cardOf(env.ctx.pool, env, p.card);
-    if (!card) return refuse(`card ${p.card} not found`);
+    if (!card || card.org_id !== env.orgId) return refuse(`card ${p.card} not found`);
     const base = subjectOf(card);
     if (['done', 'cancelled'].includes(card.status))
       return { ...base, refuse: `the card is ${card.status}; it cannot be moved` };
@@ -66,7 +66,10 @@ const move: ActionDef<z.infer<typeof MoveP>> = {
     const targets = pr.data?.targets as { id: string }[];
     const reason = p.note?.trim() || 'moved by the CEO';
     try {
-      await moveCard(env.ctx, env.owner, card.id, p.to, `${reason} (CEO)`);
+      await moveCard(env.ctx, env.owner, card.id, p.to, `${reason} (CEO)`, {
+        actor: agentActor(env.agentId),
+        by: `${env.agentName} (CEO)`,
+      });
     } catch (err) {
       // moveCard is the authority (required fields, a person's step, a closed card): its message plus where one may go.
       if (err instanceof HttpError)
@@ -101,7 +104,7 @@ const raiseModel: ActionDef<z.infer<typeof RaiseP>> = {
   describe: (p, pr) => `Run ${pr.subjectLabel} on ${p.model}${p.effort ? ` (${p.effort})` : ''}`,
   async prepare(env, p) {
     const card = await cardOf(env.ctx.pool, env, p.card);
-    if (!card) return refuse(`card ${p.card} not found`);
+    if (!card || card.org_id !== env.orgId) return refuse(`card ${p.card} not found`);
     const base = subjectOf(card);
     if (['done', 'cancelled'].includes(card.status)) return { ...base, refuse: `the card is ${card.status}` };
     const choice = {
