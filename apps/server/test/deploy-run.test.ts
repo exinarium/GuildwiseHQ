@@ -560,6 +560,53 @@ describe('coalescing, running runs and expiry', () => {
     await q(`UPDATE deploy_runs SET status='cancelled' WHERE id=$1`, [after[0]!.id]);
   });
 
+  it('a throw in the first request does not block the next one for the same environment', async () => {
+    await expect(
+      requestDeployRun(ctx(), {
+        projectId: randomUUID(),
+        env: 'local',
+        commit: COMMIT,
+        trigger: 'request',
+        requester: ownerReq(),
+      }),
+    ).rejects.toThrow();
+    const res = await ask('local', { requester: trigger, commit: COMMIT });
+    expect(res.runs[0]!.status).toBe('queued');
+    await q(`UPDATE deploy_runs SET status='cancelled' WHERE id=$1`, [res.runs[0]!.runId]);
+  });
+
+  it('two parallel requests for one environment start one run', async () => {
+    const [x, y] = await Promise.all([ask('local', { commit: COMMIT }), ask('local', { commit: COMMIT })]);
+    const statuses = [...x.runs, ...y.runs].map((o) => o.status).sort();
+    expect(statuses).toEqual(['queued', 'refused']);
+    const open = await q(`SELECT id FROM deploy_runs WHERE env='local' AND status IN ('queued','running')`);
+    expect(open).toHaveLength(1);
+    await q(`UPDATE deploy_runs SET status='cancelled' WHERE id=$1`, [open[0]!.id]);
+  });
+
+  it('another process holding the database lock of the environment makes the request wait (the lock is the guarantee)', async () => {
+    const other = await ctx().pool.connect();
+    try {
+      await other.query('BEGIN');
+      await other.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+        `deploy_request:${d.w.projectId}|local`,
+      ]);
+      let done = false;
+      const pending = ask('local', { requester: trigger, commit: COMMIT }).then((x) => {
+        done = true;
+        return x;
+      });
+      await new Promise((res) => setTimeout(res, 600));
+      expect(done).toBe(false);
+      await other.query('COMMIT');
+      const res = await pending;
+      expect(res.runs[0]!.status).toBe('queued');
+      await q(`UPDATE deploy_runs SET status='cancelled' WHERE id=$1`, [res.runs[0]!.runId]);
+    } finally {
+      other.release();
+    }
+  });
+
   it('a deploy nobody collected in two hours expires instead of firing late', async () => {
     const res = await ask('local', { requester: trigger, commit: COMMIT });
     expect(res.runs[0]!.status).toBe('queued');

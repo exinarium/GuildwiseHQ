@@ -19,7 +19,7 @@ import { enqueueWake } from '../ceo/wakes.ts';
 import { projectScope, runnerActor, SYSTEM_ACTOR, userActor } from '../commands/common.ts';
 import type { Ctx } from '../context.ts';
 import { exec, one, type Queryable, type Row, rows } from '../db/sql.ts';
-import { withAppendTx } from '../db/tx.ts';
+import { withAppendTx, withTx } from '../db/tx.ts';
 import { forbidden, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
@@ -324,7 +324,16 @@ const requestChains = new Map<string, Promise<unknown>>();
 export async function requestDeployRun(ctx: Ctx, input: RequestDeployInput): Promise<RequestDeployResult> {
   const key = `${input.projectId}|${input.env}`;
   const before = requestChains.get(key) ?? Promise.resolve();
-  const mine = before.catch(() => undefined).then(() => requestDeployRunNow(ctx, input));
+  // The chain serialises requests inside this process (and keeps one lock-waiting connection per key); the database lock
+  // is the guarantee across processes. It is held until the run's events are committed, so the next request sees them.
+  const mine = before
+    .catch(() => undefined)
+    .then(() =>
+      withTx(ctx.pool, async (lockTx) => {
+        await lockTx.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`deploy_request:${key}`]);
+        return requestDeployRunNow(ctx, input);
+      }),
+    );
   const tail = mine.catch(() => undefined);
   requestChains.set(key, tail);
   try {
