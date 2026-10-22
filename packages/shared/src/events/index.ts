@@ -14,6 +14,7 @@ import { costEvents } from './cost.ts';
 import { deliveryEvents } from './delivery.ts';
 import { deskEvents } from './desk.ts';
 import { devopsEvents } from './devops.ts';
+import { discoveryEvents } from './discovery.ts';
 import { documentEvents } from './document.ts';
 import { environmentEvents } from './environment.ts';
 import { feedEvents } from './feed.ts';
@@ -95,6 +96,7 @@ export const DomainEventSchema = z.discriminatedUnion('type', [
   ...platformEvents,
   ...codeV6Events,
   ...sessionEvents,
+  ...discoveryEvents,
   ...documentEvents,
   ...capabilityEvents,
 ]);
@@ -117,6 +119,7 @@ export * from './cost.ts';
 export { defineEvent, IsoDate, Usage, UserRole } from './define.ts';
 export * from './desk.ts';
 export * from './devops.ts';
+export * from './discovery.ts';
 export * from './document.ts';
 export * from './envelope.ts';
 export * from './environment.ts';

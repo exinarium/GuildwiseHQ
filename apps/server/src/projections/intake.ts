@@ -44,8 +44,8 @@ export const intakeProjectors: Record<string, Projector> = {
       );
     await exec(
       tx,
-      `INSERT INTO intakes (id, org_id, thread_id, external_system, external_key, note, started_by, ba_agent_id, created_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+      `INSERT INTO intakes (id, org_id, thread_id, external_system, external_key, note, started_by, ba_agent_id, created_at, linked_doc_ids)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
       [
         p.intakeId,
         e.scope.orgId,
@@ -56,6 +56,7 @@ export const intakeProjectors: Record<string, Projector> = {
         p.startedBy,
         p.baAgentId,
         e.createdAt,
+        JSON.stringify(p.linkedDocIds ?? []),
       ],
     );
   },

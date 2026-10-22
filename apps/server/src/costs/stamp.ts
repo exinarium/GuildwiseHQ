@@ -32,6 +32,25 @@ export function createCostStampInterceptor(): Interceptor {
           continue;
         }
       }
+      if (ev.type === 'SessionTurnCompleted' && ev.payload.costMicros === undefined) {
+        // A discovery or boardroom turn: priced by the model the turn was queued with (it is not a shift).
+        const t = await one<{ model: { model?: string } | null }>(
+          tx,
+          'SELECT model FROM session_turns WHERE id=$1',
+          [ev.payload.turnId],
+        );
+        const model = ev.payload.usage.model ?? t?.model?.model;
+        if (model) {
+          out.push({
+            ...input,
+            event: {
+              ...ev,
+              payload: { ...ev.payload, costMicros: costUsdMicros(model, { ...ev.payload.usage }) },
+            },
+          } as typeof input);
+          continue;
+        }
+      }
       out.push(input);
     }
     return out;

@@ -18,6 +18,7 @@ import type { PushService } from './push/notifier.ts';
 import type { RunnerGateway } from './runner-gateway/gateway.ts';
 import type { RunnerRegistry } from './runner-gateway/registry.ts';
 import type { Scheduler } from './scheduler/scheduler.ts';
+import type { DiscoveryService } from './sessions/discovery.ts';
 import type { SessionTurns } from './sessions/turns.ts';
 
 /** Everything a command, route or gateway needs. Built once in `createApp` (app.ts). */
@@ -63,6 +64,8 @@ export interface Services {
   chat: ChatRelay;
   /** Durable turns of discovery and boardroom sessions. */
   sessions: SessionTurns;
+  /** The Discovery Studio orchestrator: the facilitated session state machine. */
+  discovery: DiscoveryService;
   cloud: CloudServices;
   billing: BillingRuntime;
   /** Web Push notifier (only when VAPID is configured). */

@@ -76,6 +76,7 @@ import { designerRoutes } from './routes/designer.ts';
 import { deskRoutes } from './routes/desk.ts';
 import { devopsRoutes } from './routes/devops.ts';
 import { digestRoutes } from './routes/digests.ts';
+import { discoveryRoutes } from './routes/discovery.ts';
 import { documentRoutes } from './routes/documents.ts';
 import { graphRoutes } from './routes/graph.ts';
 import { hookRoutes } from './routes/hooks.ts';
@@ -114,6 +115,7 @@ import { workstationRoutes } from './routes/workstations.ts';
 import { RunnerGateway } from './runner-gateway/gateway.ts';
 import { RunnerRegistry } from './runner-gateway/registry.ts';
 import { Scheduler } from './scheduler/scheduler.ts';
+import { DiscoveryService } from './sessions/discovery.ts';
 import { SessionTurns } from './sessions/turns.ts';
 import { SimulationHostImpl } from './simulation/host.ts';
 
@@ -405,6 +407,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   await app.register(intakeRoutes(ctx));
   await app.register(backlogRoutes(ctx));
   await app.register(sessionRoutes(ctx));
+  await app.register(discoveryRoutes(ctx));
   await app.register(documentRoutes(ctx));
   await app.register(capabilityRoutes(ctx));
   await app.register(intakeBatchRoutes(ctx));
@@ -446,6 +449,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   ctx.services.cloud = { ssh: realSshConnector, github: createGithubApi(), pending: new Set() };
   ctx.services.chat = new ChatRelay(ctx);
   ctx.services.sessions = new SessionTurns(ctx);
+  ctx.services.discovery = new DiscoveryService(ctx);
   ctx.services.billing = createBillingRuntime(config);
   await app.register(websocket, {
     options: {
@@ -518,6 +522,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   const unhookDecisions = registerDecisionHook(ctx);
   const unhookTaste = registerTasteHook(ctx);
   const unhookBudgets = registerBudgetHook(ctx);
+  const unhookDiscovery = ctx.services.discovery.registerHook();
   const unhookHr = registerHrHook(ctx);
   const unhookCeoWakes = registerCeoWakes(ctx);
   const unhookDefinitions = registerDefinitionHook(ctx);
@@ -541,6 +546,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
     unhookDecisions();
     unhookTaste();
     unhookBudgets();
+    unhookDiscovery();
     unhookHr();
     unhookCeoWakes();
     unhookDefinitions();

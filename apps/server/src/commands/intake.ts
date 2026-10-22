@@ -162,6 +162,8 @@ export async function startIntakeIn(
   user: Pick<AuthSession['user'], 'id'>,
   orgId: string,
   req: CreateIntakeRequest,
+  /** A PRD handed over from a discovery session: the documents the BA's cards link to, and the project it is for. */
+  extra: { linkedDocIds?: string[]; projectId?: string } = {},
 ): Promise<IntakeDto> {
   const org = { id: orgId };
   const ref = parseExternalRef(req.externalKey ?? req.note);
@@ -184,7 +186,7 @@ export async function startIntakeIn(
     );
   const intakeId = randomUUID();
   const threadId = randomUUID();
-  await ctx.store.append([
+  const events: AppendInput[] = [
     {
       streamId: streamId.intake(intakeId),
       event: {
@@ -197,12 +199,25 @@ export async function startIntakeIn(
           startedBy: user.id,
           baAgentId: ba.id,
           note: req.note,
+          ...(extra.linkedDocIds?.length ? { linkedDocIds: extra.linkedDocIds } : {}),
         },
       },
       actor: userActor(user.id),
       scope: orgScope(org.id),
     },
-  ]);
+  ];
+  // The session's project, when the user can see it, is the ticket's project from the start.
+  if (extra.projectId) {
+    const project = (await visibleProjects(ctx.pool, user.id, org.id)).find((p) => p.id === extra.projectId);
+    if (project)
+      events.push({
+        streamId: streamId.intake(intakeId),
+        event: { type: 'TicketMapped', payload: { intakeId, projectId: project.id, unmapped: false } },
+        actor: userActor(user.id),
+        scope: orgScope(org.id),
+      });
+  }
+  await ctx.store.append(events);
   await ctx.services.chat.send(user.id, { threadId, body: req.note, clientMsgId: randomUUID() });
   return getIntake(ctx, org.id, intakeId);
 }
@@ -532,6 +547,8 @@ async function createDraft(
   if (draft.project && draft.project.toUpperCase() !== project.key)
     return [false, undefined, `this intake is mapped to ${project.key}, not ${draft.project}`];
   const result = await withAppendTx(ctx.pool, async (tx) => {
+    // A PRD handed over from a discovery session: its cards trace back to the document.
+    const linkedDocIds = Array.isArray(intake.linked_doc_ids) ? (intake.linked_doc_ids as string[]) : [];
     const req: CreateCardRequest = {
       projectId: project.id,
       title: draft.title,
@@ -539,6 +556,16 @@ async function createDraft(
       ...(draft.workflowKey ? { workflowKey: draft.workflowKey } : {}),
       fields: {
         ...draft.fields,
+        ...(linkedDocIds.length
+          ? {
+              linkedDocIds: [
+                ...new Set([
+                  ...((draft.fields as { linkedDocIds?: string[] }).linkedDocIds ?? []),
+                  ...linkedDocIds,
+                ]),
+              ],
+            }
+          : {}),
         externalRef: draft.externalRef ?? draft.fields.externalRef ?? intake.external_key ?? undefined,
       },
       ...(draft.repo ? { repoId: await resolveRepo(tx, project.id, draft.repo) } : {}),

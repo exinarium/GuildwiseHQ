@@ -72,6 +72,9 @@ export class MockAdapter implements RuntimeAdapter {
   }
 
   async startChat(input: ChatStartInput): Promise<RuntimeSession> {
+    // A discovery session turn: the scripted mock facilitator (or CEO) drives the real `aom session ...` verbs.
+    if (input.sessionTurn?.kind === 'discovery' && input.message.includes('<!--discovery:'))
+      return this.startIntakeChat(input, 'discovery');
     if (input.agent.roleKey === 'ba' && input.context?.intake && !input.context.intake.fromChat)
       return this.startIntakeChat(input);
     if (input.agent.roleKey === 'ceo') return this.startIntakeChat(input, 'ceo');
@@ -133,7 +136,7 @@ export class MockAdapter implements RuntimeAdapter {
    */
   private async startIntakeChat(
     input: ChatStartInput,
-    mode: 'intake' | 'design' | 'desk' | 'ceo' = 'intake',
+    mode: 'intake' | 'design' | 'desk' | 'ceo' | 'discovery' = 'intake',
   ): Promise<RuntimeSession> {
     const [bin, ...pre] = selfCommand('mock-agent') as [string, ...string[]];
     const prior = /-(\d+)$/.exec(input.resumeSessionId ?? '');

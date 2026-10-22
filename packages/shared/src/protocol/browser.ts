@@ -122,6 +122,11 @@ export const BrowserSessionTurnSchema = z.object({
   status: z.enum(['queued', 'running', 'done', 'failed']),
   error: z.string().optional(),
 });
+/** Something in a discovery session changed (question, note, proposal, phase, document, cost): the page refetches its state. */
+export const BrowserDiscoveryUpdatedSchema = z.object({
+  type: z.literal('discovery.updated'),
+  threadId: z.uuid(),
+});
 export const PresenceSchema = z.object({
   type: z.literal('presence'),
   workstationId: z.uuid(),
@@ -149,6 +154,7 @@ export const ServerToBrowserSchema = z.discriminatedUnion('type', [
   BrowserChatQueuedSchema,
   BrowserChatErrorSchema,
   BrowserSessionTurnSchema,
+  BrowserDiscoveryUpdatedSchema,
   PresenceSchema,
   BrowserRunChangedSchema,
   BrowserRunLogSchema,

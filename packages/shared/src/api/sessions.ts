@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { SessionCostSchema } from '../discovery/index.ts';
 import {
   ParticipantDtoSchema,
   ParticipantInputSchema,
@@ -41,6 +42,8 @@ export const SessionDtoSchema = z.object({
   createdBy: z.uuid().nullable(),
   createdAt: z.iso.datetime(),
   lastMessageAt: z.iso.datetime().nullable(),
+  /** What the session's turns cost so far (also in the organization's cost ledger) and its budget, if any. */
+  cost: SessionCostSchema,
   participants: z.array(ParticipantDtoSchema),
 });
 export type SessionDto = z.infer<typeof SessionDtoSchema>;

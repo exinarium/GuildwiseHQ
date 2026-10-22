@@ -31,6 +31,7 @@ import {
   type RuntimeInfo,
   SEAL_AAD_CAPABILITY,
   SESSION_TURNS_CAPABILITY,
+  SESSION_VERBS_CAPABILITY,
   SETUP_SCAN_CAPABILITY,
   type ServerToRunner,
   SHIFT_LIMIT_CAPABILITY,
@@ -1121,6 +1122,8 @@ export class Runner {
         CLAUDE_ACCOUNTS_CAPABILITY,
         // Runs the turns of discovery and boardroom sessions (`chat.start.session`) and indexes the capability registry.
         SESSION_TURNS_CAPABILITY,
+        // A session turn may call the `aom session ...` verbs (the facilitator's questions, notes, proposals and drafts).
+        SESSION_VERBS_CAPABILITY,
         // The local opt-in (`aom-runner ceo full-power on`), read fresh: the server shows "Full power is off" without it.
         ...(this.freshConfig().ceo.fullPower ? [CEO_FULL_POWER_CAPABILITY] : []),
       ],

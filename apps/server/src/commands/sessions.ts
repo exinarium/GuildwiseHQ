@@ -20,6 +20,7 @@ import { withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { threadMessageById } from '../queries/threads.ts';
+import { sessionCost } from '../sessions/cost.ts';
 import { workstationServesOrg } from '../simulation/fit.ts';
 import { orgScope, userActor } from './common.ts';
 
@@ -53,7 +54,7 @@ export async function listParticipants(
   );
 }
 
-async function sessionDto(ctx: Ctx, t: Row, db: Queryable = ctx.pool): Promise<SessionDto> {
+export async function sessionDto(ctx: Ctx, t: Row, db: Queryable = ctx.pool): Promise<SessionDto> {
   const last = await one(db, 'SELECT max(created_at) AS at FROM thread_messages WHERE thread_id=$1', [t.id]);
   return {
     threadId: t.id,
@@ -67,6 +68,7 @@ async function sessionDto(ctx: Ctx, t: Row, db: Queryable = ctx.pool): Promise<S
     createdBy: t.created_by ?? null,
     createdAt: iso(t.created_at) as string,
     lastMessageAt: iso(last?.at),
+    cost: await sessionCost(db, t),
     participants: (await listParticipants(db, t.id)).map(participantDto),
   };
 }
@@ -95,7 +97,7 @@ export async function loadSession(
 }
 
 /** Changing who is in the room, its config or its workstation: the creator or an Owner/Admin of the organization. */
-async function assertSessionManager(db: Queryable, userId: string, t: Row): Promise<void> {
+export async function assertSessionManager(db: Queryable, userId: string, t: Row): Promise<void> {
   if (t.created_by === userId) return;
   if (!isOrgManager({ orgRole: await orgRoleOf(db, userId, t.org_id) }))
     throw forbidden('only the session creator, an Owner or an Admin can change this session');

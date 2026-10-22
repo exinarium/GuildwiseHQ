@@ -159,6 +159,8 @@ export interface ChatStartInput {
   intake?: boolean;
   /** The Claude account of this chat (absent: `main`; chats always use main today). */
   account?: string;
+  /** A turn of a discovery or boardroom session: the mock runtime plays a facilitator or the CEO from the turn's message. */
+  sessionTurn?: { kind: 'discovery' | 'boardroom'; speakerKind: 'agent' | 'persona'; personaKey?: string };
   logFile?: string;
 }
 

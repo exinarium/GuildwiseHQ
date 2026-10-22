@@ -1665,7 +1665,231 @@ async function ceoChatMain(): Promise<number> {
   return 0;
 }
 
+/**
+ * A believable discovery session without a model: the facilitator asks a fixed run of questions, keeps the panel, proposes a
+ * change, moves through the phases and drafts a PRD from the panel; the CEO proposes the first option. The turn's message
+ * carries a machine-readable header (`<!--discovery:{...}-->`) that says what the turn is for. Everything goes through the
+ * real `aom session ...` verbs, so the whole path (rpc, server rules, projections) is exercised.
+ */
+const MOCK_QUESTIONS: Array<{ q: string; options: string[]; why: string }> = [
+  {
+    q: 'Who is the primary user?',
+    options: ['Freelancers', 'Small agencies', 'Finance teams'],
+    why: 'Everything else follows from who we build this for',
+  },
+  {
+    q: 'What is their biggest pain today?',
+    options: ['Getting paid late', 'Invoices take too long to create', 'Hard to track what was billed'],
+    why: 'The pain decides the first version',
+  },
+  {
+    q: 'How will we know it worked?',
+    options: ['Time to send an invoice drops', 'Fewer late payments', 'More repeat customers'],
+    why: 'A measure keeps the scope honest',
+  },
+  {
+    q: 'Which idea do we keep for the first version?',
+    options: ['Recurring invoices', 'Payment reminders', 'Both, but small'],
+    why: 'Converging means choosing',
+  },
+  {
+    q: 'What is most likely to make this fail?',
+    options: ['Nobody switches from spreadsheets', 'Payments are too hard to integrate', 'We build too much'],
+    why: 'A pre-mortem finds the weak spot while it is cheap',
+  },
+  {
+    q: 'Is anything still open that blocks the PRD?',
+    options: ['No, write it down', 'Yes, one more round'],
+    why: 'Last check before we capture',
+  },
+];
+
+async function discoveryMain(): Promise<number> {
+  const message = process.env.AOM_MOCK_MESSAGE ?? '';
+  const header = JSON.parse(/<!--discovery:(\{.*?\})-->/.exec(message)?.[1] ?? '{}') as Record<string, any>;
+  const said: string[] = [];
+  const say = (text: string) => {
+    said.push(text);
+    emit({ kind: 'delta', text: `${text}\n` });
+  };
+  const run = (args: string[]): string => {
+    emit({ kind: 'tool', name: 'Bash', summary: `aom ${args.slice(0, 3).join(' ')}` });
+    const r = aom(args);
+    if (r.code !== 0) say(`(a command failed: ${(r.err || r.out).trim().slice(0, 160)})`);
+    return r.out;
+  };
+  emit({ kind: 'session', runtimeSessionId: process.env.AOM_MOCK_SESSION ?? 'mock-discovery' });
+  emit({ kind: 'usage', usage: { inputTokens: message.length, outputTokens: 150 } });
+  const finish = (): number => {
+    emit({ kind: 'final', text: said.join('\n') });
+    return 0;
+  };
+  await sleep(stepMs);
+
+  if (header.role === 'ceo_answer') {
+    const options = (header.options ?? []) as string[];
+    if (options.length) {
+      run([
+        'session',
+        'answer',
+        '--option',
+        options[0] as string,
+        '--why',
+        'It is the narrowest group we can win first.',
+      ]);
+      say('I would start with the first option: it is the narrowest group we can win first.');
+    } else {
+      run([
+        'session',
+        'answer',
+        '--text',
+        'Start small and learn from the first ten customers.',
+        '--why',
+        'Smallest useful step.',
+      ]);
+      say('Start small and learn from the first ten customers.');
+    }
+    return finish();
+  }
+
+  const lastAnswer = (
+    /->\s*(.+)\s*$/m.exec(
+      message
+        .split('## The panel')[0]
+        ?.trim()
+        .split('\n')
+        .filter((l) => l.includes('->'))
+        .at(-1) ?? '',
+    )?.[1] ?? ''
+  ).slice(0, 200);
+  const idx = Number(header.asked ?? 0);
+  const phaseFor = (n: number) =>
+    n <= 1 ? 'frame' : n === 2 ? 'diverge' : n === 3 ? 'converge' : n === 4 ? 'stress_test' : 'capture';
+
+  const draftPrd = () => {
+    const shown = run(['session', 'show']);
+    const section = (name: string) =>
+      shown
+        .split(`### ${name}\n`)[1]
+        ?.split('\n###')[0]
+        ?.split('\n')
+        .filter((l) => l.startsWith('- ['))
+        .map((l) => l.replace(/^- \[[0-9a-f]+\]\s*/, '').replace(/\s*\([^)]*\)$/, '')) ?? [];
+    const list = (items: string[]) => (items.length ? items.map((i) => `- ${i}`).join('\n') : '- (none)');
+    const decisions = section('Decisions');
+    const content = [
+      '# PRD: Invoicing for freelancers',
+      '',
+      '## 1. Problem and goals',
+      '',
+      `Freelancers lose time and money on invoices. Goal: ${decisions[0] ?? 'send an invoice in under a minute'}.`,
+      '',
+      '## 2. Users',
+      '',
+      list(section('Assumptions')),
+      '',
+      '## 3. Requirements',
+      '',
+      '| ID | Requirement | Priority | Acceptance criteria |',
+      '| --- | --- | --- | --- |',
+      '| R1 | A user can create and send an invoice | Must | An invoice is created from a template and sent by email |',
+      '| R2 | The system sends a payment reminder | Should | A reminder goes out 7 days after the due date |',
+      '',
+      '## 4. Non-goals',
+      '',
+      '- Tax filing',
+      '',
+      '## 5. Open questions',
+      '',
+      list(section('Open questions')),
+      '',
+    ].join('\n');
+    run(['session', 'draft', '--kind', 'prd', '--content', content, '--note', 'Drafted from the panel']);
+    say('I wrote the PRD from what we settled. Have a look at the draft in the panel.');
+  };
+
+  if (header.trigger === 'draft') {
+    draftPrd();
+    return finish();
+  }
+  if (header.trigger === 'validate') {
+    const checks = [...message.matchAll(/^- \[ \] (.+)$/gm)].map((m) => m[1] as string).slice(0, 5);
+    const args = ['session', 'validate', '--summary', 'Mostly complete: goals still need a measured target.'];
+    for (const [i, c] of checks.entries())
+      args.push(
+        '--check',
+        `${c.replace(/\|/g, '/')}|${i === 1 ? 'fail' : 'pass'}|${i === 1 ? 'No target date yet' : 'Covered'}`,
+      );
+    run(args);
+    say('I checked the PRD against the checklist: it mostly holds, one goal still needs a target.');
+    return finish();
+  }
+
+  if (header.trigger === 'start') {
+    say('Hello! Let us turn this idea into something buildable. I will ask one question at a time.');
+    const idea = /Starting idea: (.+)/.exec(message)?.[1];
+    if (idea) run(['session', 'note', 'add', '--section', 'ideas', '--text', idea.slice(0, 300)]);
+  } else if (
+    header.trigger === 'answer' ||
+    header.trigger === 'ceo_answered' ||
+    header.trigger === 'review_done'
+  ) {
+    say(`Got it${lastAnswer ? `: ${lastAnswer}` : ''}.`);
+    if (lastAnswer && idx >= 1 && idx <= 5)
+      run([
+        'session',
+        'note',
+        'add',
+        '--section',
+        idx === 1 ? 'assumptions' : idx === 4 ? 'open_questions' : 'decisions',
+        '--text',
+        lastAnswer,
+      ]);
+  } else if (header.trigger === 'proposal') {
+    say('Understood, I will carry on with that.');
+  } else if (header.trigger === 'message') {
+    say('Thanks, I have noted that and will keep it in mind.');
+    if (header.openQuestion) return finish();
+  } else {
+    say('Let us continue.');
+    if (header.openQuestion) return finish();
+  }
+
+  if (idx === 3 && !header.openProposals)
+    run([
+      'session',
+      'propose',
+      '--title',
+      'Make reminders part of the first version',
+      '--change',
+      'Payment reminders are in scope for the first version.',
+      '--rationale',
+      'Late payment is the pain you named.',
+      '--section',
+      'decisions',
+    ]);
+  const wanted = header.timeUp ? 'capture' : phaseFor(idx);
+  let phase = header.phase as string;
+  if (wanted !== phase && !header.timeUp) {
+    run(['session', 'phase', '--to', wanted, '--reason', 'We have covered this phase.']);
+    phase = wanted;
+  }
+  if (header.timeUp || idx >= MOCK_QUESTIONS.length || (idx >= 5 && lastAnswer.startsWith('No'))) {
+    if (phase !== 'capture')
+      run(['session', 'phase', '--to', 'capture', '--reason', 'Time to write it down.']);
+    if (!header.hasPrd) draftPrd();
+    else say('The PRD draft is ready for your review.');
+    return finish();
+  }
+  const next = MOCK_QUESTIONS[idx] as (typeof MOCK_QUESTIONS)[number];
+  const args = ['session', 'ask', '--question', next.q, '--why', next.why];
+  for (const o of next.options) args.push('--option', o);
+  run(args);
+  return finish();
+}
+
 async function main(): Promise<number> {
+  if (process.env.AOM_MOCK_CHAT === 'discovery') return discoveryMain();
   if (process.env.AOM_MOCK_CHAT === 'desk') return deskMain();
   if (process.env.AOM_MOCK_CHAT === 'intake') return intakeMain();
   if (process.env.AOM_MOCK_CHAT === 'design') return designMain();

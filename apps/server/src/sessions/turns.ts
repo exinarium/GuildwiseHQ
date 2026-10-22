@@ -18,6 +18,7 @@ import {
   SESSION_TURN_PER_WORKSTATION,
   SESSION_TURN_STALE_HOURS,
   SESSION_TURNS_CAPABILITY,
+  SESSION_VERBS_CAPABILITY,
   type ServerToBrowser,
   type SessionContext,
   type SessionTurnDto,
@@ -38,6 +39,7 @@ import { badRequest, conflict, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { threadMessageById } from '../queries/threads.ts';
 import { agentSpecFor } from '../runner-gateway/brief.ts';
+import { assertSessionMayQueue } from './cost.ts';
 
 const ZERO_USAGE: Usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
 const ORPHAN_MS = 30 * 60_000;
@@ -152,10 +154,17 @@ export class SessionTurns {
   // ----------------------------------------------------------------------------------------------- queueing
 
   /** `POST /api/sessions/:id/turns`: persists a turn and tries to send it. */
-  async queue(userId: string, threadId: string, req: QueueTurnRequest): Promise<SessionTurnDto> {
+  async queue(
+    userId: string,
+    threadId: string,
+    req: QueueTurnRequest,
+    opts: { meta?: Record<string, unknown> } = {},
+  ): Promise<SessionTurnDto> {
     const { ctx } = this;
     const row = await withAppendTx(ctx.pool, async (tx) => {
       const t = await loadSession(tx, userId, threadId);
+      // A used-up session budget or a paused project stops new turns with a message the page shows as it is.
+      await assertSessionMayQueue(tx, t, ctx.clock.now());
       const part = (await listParticipants(tx, threadId)).find((p) => p.id === req.participantId);
       if (!part) throw notFound('participant not found');
       if (part.kind === 'user')
@@ -253,6 +262,7 @@ export class SessionTurns {
                 ...(req.replyToMessageId ? { replyToMessageId: req.replyToMessageId } : {}),
                 ...(req.round !== undefined ? { round: req.round } : {}),
                 requestedBy: userId,
+                ...(opts.meta ? { meta: opts.meta } : {}),
               },
             },
             actor: userActor(userId),
@@ -291,6 +301,7 @@ export class SessionTurns {
     if (turn.status === 'queued') {
       await ctx.store.append([this.failed(turn, t, 'cancelled', userActor(userId))]);
       await this.announce(ctx.pool, turn, 'failed', 'cancelled');
+      this.ended(turn.thread_id, turn.id, 'failed');
     } else if (turn.status === 'running' && turn.workstation_id) {
       ctx.services.runners.send(turn.workstation_id, 'chat.cancel', { chatId: turn.id }, ctx.clock.now());
     } else throw conflict('turn_finished', 'that turn already ended');
@@ -325,6 +336,14 @@ export class SessionTurns {
     ]);
     this.inflight.delete(turn.id);
     await this.announce(this.ctx.pool, turn, 'failed', error);
+    this.ended(turn.thread_id, turn.id, 'failed');
+  }
+
+  /** A turn reached a terminal state: the Discovery orchestrator decides what comes next. Never throws. */
+  private ended(threadId: string, turnId: string, status: 'done' | 'failed'): void {
+    void this.ctx.services.discovery
+      ?.onTurnEnded(threadId, turnId, status)
+      .catch((err) => this.ctx.log.error({ err, threadId, turnId }, 'discovery follow-up failed'));
   }
 
   /** Starts queued turns whose workstation is online, oldest first, up to the per-workstation limit; ends stale ones. */
@@ -398,6 +417,20 @@ export class SessionTurns {
           'runner_too_old: update the runner on this workstation to run session turns',
         );
         return false;
+      }
+      if ((turn.meta as { purpose?: string } | null)?.purpose) {
+        const verbs = await one(
+          ctx.pool,
+          'SELECT $2 = ANY(capabilities) AS ok FROM workstation_capabilities WHERE workstation_id=$1',
+          [wsId, SESSION_VERBS_CAPABILITY],
+        );
+        if (!verbs?.ok) {
+          await this.failTurn(
+            turn,
+            'runner_too_old: update the runner on this workstation to run a discovery session',
+          );
+          return false;
+        }
       }
       const payload = await this.buildStart(turn, thread);
       if (!payload) {
@@ -806,6 +839,8 @@ export class SessionTurns {
         error: t.error,
       });
     }
+    if (t.messageId) this.ended(t.threadId, t.turnId, 'done');
+    else if (t.error && !t.requeued) this.ended(t.threadId, t.turnId, 'failed');
     if (t.workstationId)
       void this.sweep(t.workstationId).catch((err) =>
         this.ctx.log.error({ err }, 'session turn sweep failed'),

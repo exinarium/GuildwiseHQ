@@ -15,6 +15,7 @@ import { costProjectors } from './costs.ts';
 import { deliveryProjectors } from './delivery.ts';
 import { deskProjectors } from './desk.ts';
 import { devopsProjectors } from './devops.ts';
+import { discoveryProjectors } from './discovery.ts';
 import { documentProjectors } from './documents.ts';
 import { environmentProjectors } from './environment.ts';
 import { feedProjectors } from './feeds.ts';
@@ -101,6 +102,7 @@ const domains: Array<Record<string, Projector>> = [
   questionFlowProjectors,
   codeV6Projectors,
   sessionProjectors,
+  discoveryProjectors,
   documentProjectors,
   capabilityProjectors,
 ];
@@ -240,6 +242,9 @@ export const PROJECTION_TABLES = [
   'deploy_runs',
   'thread_participants',
   'session_turns',
+  'discovery_questions',
+  'discovery_notes',
+  'discovery_proposals',
   'documents',
   'document_versions',
   'capability_index',

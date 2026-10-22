@@ -11,6 +11,7 @@ import {
   type IpcReportResponse,
   type IpcRpcRequest,
   type IpcRpcResponse,
+  isSessionRpc,
   JIRA_SKILL_PATH,
   type ReadableFolder,
   renderChatInstructions,
@@ -308,9 +309,10 @@ export class ChatManager {
       rpc: async (req: IpcRpcRequest): Promise<IpcRpcResponse> => {
         if (req.method === 'skill.show' || req.method === 'skill.list')
           return skillRpc(this.deps.capabilities, req.method, req.params);
-        // A turn of a discovery or boardroom session reads and talks: nothing else reaches the server from it.
+        // A turn of a discovery or boardroom session reads and talks: `aom ledger search` and the `aom session ...` verbs
+        // are all that reach the server from it (which verbs a turn may use, the server decides from what the turn is for).
         if (chat.msg.session)
-          return req.method === 'ledger.search'
+          return req.method === 'ledger.search' || isSessionRpc(req.method)
             ? this.deps.rpc(chatId, req.method, req.params)
             : { ok: false, error: `${req.method} is not available in a session turn` };
         // The owner's chat with the CEO: `aom ceo ...` (the server checks the agent and the owner again).
@@ -778,6 +780,11 @@ export class ChatManager {
       readDirs: [],
       ...(tc ? { toolchainReadDirs: tc.readDirs } : {}),
       context: msg.context,
+      sessionTurn: {
+        kind: session.kind,
+        speakerKind: session.speaker.kind,
+        ...(session.speaker.personaKey ? { personaKey: session.speaker.personaKey } : {}),
+      },
       logFile: `${paths.shiftLogs}/chat-${msg.chatId}.jsonl`,
     });
     if (chat.stopReason) void chat.session.stop(`chat.${chat.stopReason}`);

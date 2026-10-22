@@ -361,10 +361,15 @@ export async function evaluateAllBudgets(ctx: Ctx): Promise<void> {
  */
 export function registerBudgetHook(ctx: Ctx): () => void {
   return ctx.store.subscribe(async (e) => {
-    if (e.event.type !== 'ShiftEnded') return;
-    const r = await one(ctx.pool, 'SELECT project_id FROM shift_costs WHERE shift_id=$1', [
-      e.event.payload.shiftId,
-    ]);
+    // A session turn is not a shift, but its cost counts against the project's budget all the same.
+    const id =
+      e.event.type === 'ShiftEnded'
+        ? e.event.payload.shiftId
+        : e.event.type === 'SessionTurnCompleted'
+          ? e.event.payload.turnId
+          : undefined;
+    if (!id) return;
+    const r = await one(ctx.pool, 'SELECT project_id FROM shift_costs WHERE shift_id=$1', [id]);
     if (r?.project_id) await evaluateProjectBudget(ctx, r.project_id);
   });
 }

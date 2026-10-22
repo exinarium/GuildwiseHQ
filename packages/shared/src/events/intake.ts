@@ -29,6 +29,8 @@ export const intakeEvents = [
        * card there. The thread already exists and keeps its kind; there is no external ticket.
        */
       source: z.literal('chat').optional(),
+      /** Documents (a PRD handed over from a discovery session) the BA's cards link to (`fields.linkedDocIds`). */
+      linkedDocIds: z.array(Id).max(10).optional(),
     }),
   ),
   /**

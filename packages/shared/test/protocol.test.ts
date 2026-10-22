@@ -273,6 +273,7 @@ const runnerToServer: Record<string, Record<string, unknown>> = {
   },
   'chat.done': { ...env('chat.done'), chatId: 'c1', threadId: U.c, messageText: 'hi there', usage },
   'chat.error': { ...env('chat.error'), chatId: 'c1', threadId: U.c, error: 'boom' },
+  'capabilities.report': { ...env('capabilities.report'), vaultId: U.a, items: [], issues: [] },
   'command.result': { ...env('command.result'), commandId: 'k1', ok: true, result: { removed: true } },
   'vault.status': { ...env('vault.status'), vaultId: 'v1', lastPullAt: TS, lastPushAt: null, error: 'x' },
   'vault.conflict': { ...env('vault.conflict'), vaultId: 'v1', files: ['standing-orders.md'] },
@@ -424,6 +425,8 @@ describe('browser protocol', () => {
     'chat.error': { type: 'chat.error', threadId: U.c, reason: 'workstation_offline' },
     'run.changed': { type: 'run.changed', envId: U.a },
     'run.log': { type: 'run.log', envId: U.a, service: 'web', lines: ['x'] },
+    'session.turn': { type: 'session.turn', threadId: U.c, turnId: U.a, participantId: null, status: 'running' },
+    'discovery.updated': { type: 'discovery.updated', threadId: U.c },
     presence: { type: 'presence', workstationId: U.a, connected: true },
     pong: { type: 'pong' },
   };

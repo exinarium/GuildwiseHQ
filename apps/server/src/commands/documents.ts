@@ -50,6 +50,7 @@ export function documentDto(r: Row): DocumentDto {
 
 const scopeOf = (d: { org_id: string; project_id: string | null }) =>
   d.project_id ? projectScope(d.org_id, d.project_id) : orgScope(d.org_id);
+export const scopeOfDoc = scopeOf;
 
 /** Reading: the project's members (project document), or an organization member (organization document). Others get 404. */
 async function loadDocument(db: Queryable, who: Who, docId: string, lock = false): Promise<Row> {
@@ -175,7 +176,7 @@ export async function createDocument(
   });
 }
 
-function versionEvent(
+export function versionEvent(
   docId: string,
   version: number,
   content: string,

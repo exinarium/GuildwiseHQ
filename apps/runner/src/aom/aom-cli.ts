@@ -91,6 +91,8 @@ const BOOLEAN_FLAGS = new Set([
   'unflag',
   'flagged',
   'drop',
+  'allow-free-text',
+  'no-free-text',
 ]);
 
 /** Verbs whose JSON body can be passed inline (`--json '<json>'`): there `--json` takes a value instead of being a switch. */
@@ -2360,6 +2362,129 @@ const VERBS: Record<string, Verb> = {
     ctx.io.out(`${(r?.text ?? '').replace(/\n*$/, '')}\n`);
     return 0;
   },
+  /**
+   * `aom session ...`: the structured side of a discovery session (docs/ARCHITECTURE.md section 38). The facilitator asks one
+   * question at a time, keeps the panel, proposes changes (the owner applies them), changes phase and saves drafts; the CEO
+   * proposes an answer to the open question. The server decides which verbs this turn may use.
+   */
+  session: async (ctx, p) => {
+    const usage =
+      'usage: aom session ask --question "<q>" [--option "<a>"]... [--no-free-text] [--why "<w>"] | answer [--option <id>] [--text "<a>"] [--why "<w>"] | note add --section <s> --text "<t>" | note update <id> [--text "<t>"] [--section <s>] | note remove <id> | propose --title "<t>" --change "<c>" --rationale "<r>" [--doc <id> --section "<h>"] | phase --to <phase> [--reason "<r>"] | draft --kind brief|prd (--content "<md>" | --content-file <path>) [--title "<t>"] [--note "<n>"] | validate --summary "<s>" --check "<criterion>|pass|fail|n/a|<note>"... | show';
+    const sub = p.positionals[0];
+    const print = (r: unknown): number => {
+      const x = r as { message?: string; text?: string } | null;
+      ctx.io.out(`${(x?.text ?? x?.message ?? 'Done.').replace(/\n*$/, '')}\n`);
+      return 0;
+    };
+    const opt = (key: string): string | undefined => {
+      const v = one(p, key);
+      return v === undefined || !v.trim() ? undefined : v.trim();
+    };
+    switch (sub) {
+      case 'show':
+        return print(await rpc(ctx, 'session.show'));
+      case 'ask': {
+        const question = textFlag(ctx, p, 'question', true) as string;
+        return print(
+          await rpc(ctx, 'session.ask', {
+            question: question.trim(),
+            options: many(p, 'option'),
+            allowFreeText: !has(p, 'no-free-text'),
+            ...(opt('why') ? { why: opt('why') } : {}),
+          }),
+        );
+      }
+      case 'answer': {
+        const text =
+          one(p, 'text') ??
+          (one(p, 'text-file') !== undefined ? ctx.readFile(one(p, 'text-file') as string) : undefined);
+        if (opt('option') === undefined && !text?.trim()) throw new UsageError(usage);
+        return print(
+          await rpc(ctx, 'session.answer', {
+            ...(opt('option') ? { option: opt('option') } : {}),
+            ...(text?.trim() ? { text: text.trim() } : {}),
+            ...(opt('why') ? { why: opt('why') } : {}),
+          }),
+        );
+      }
+      case 'note': {
+        const op = p.positionals[1];
+        if (op === 'add') {
+          const text = textFlag(ctx, p, 'text', true) as string;
+          if (!opt('section')) throw new UsageError(usage);
+          return print(
+            await rpc(ctx, 'session.note', { op: 'add', section: opt('section'), text: text.trim() }),
+          );
+        }
+        if (op === 'update' || op === 'remove') {
+          const id = p.positionals[2];
+          if (!id) throw new UsageError(usage);
+          const text = textFlag(ctx, p, 'text', false);
+          if (op === 'update' && !text?.trim() && !opt('section')) throw new UsageError(usage);
+          return print(
+            await rpc(ctx, 'session.note', {
+              op,
+              id,
+              ...(op === 'update' && text?.trim() ? { text: text.trim() } : {}),
+              ...(op === 'update' && opt('section') ? { section: opt('section') } : {}),
+            }),
+          );
+        }
+        throw new UsageError(usage);
+      }
+      case 'propose': {
+        const title = opt('title');
+        const change = textFlag(ctx, p, 'change', true) as string;
+        const rationale = textFlag(ctx, p, 'rationale', true) as string;
+        if (!title) throw new UsageError(usage);
+        return print(
+          await rpc(ctx, 'session.propose', {
+            title,
+            change: change.trim(),
+            rationale: rationale.trim(),
+            ...(opt('doc') ? { doc: opt('doc') } : {}),
+            ...(opt('section') ? { section: opt('section') } : {}),
+          }),
+        );
+      }
+      case 'phase': {
+        if (!opt('to')) throw new UsageError(usage);
+        return print(
+          await rpc(ctx, 'session.phase', {
+            to: opt('to'),
+            ...(opt('reason') ? { reason: opt('reason') } : {}),
+          }),
+        );
+      }
+      case 'draft': {
+        const kind = opt('kind');
+        if (kind !== 'brief' && kind !== 'prd') throw new UsageError(usage);
+        const file = one(p, 'file');
+        const content =
+          one(p, 'content') ??
+          (one(p, 'content-file') !== undefined
+            ? ctx.readFile(one(p, 'content-file') as string)
+            : undefined) ??
+          (file !== undefined ? ctx.readFile(file) : undefined);
+        if (!content?.trim()) throw new UsageError(usage);
+        return print(
+          await rpc(ctx, 'session.draft', {
+            kind,
+            content,
+            ...(opt('title') ? { title: opt('title') } : {}),
+            ...(opt('note') ? { note: opt('note') } : {}),
+          }),
+        );
+      }
+      case 'validate': {
+        const items = many(p, 'check');
+        if (!items.length) throw new UsageError(usage);
+        return print(await rpc(ctx, 'session.validate', { summary: opt('summary') ?? '', items }));
+      }
+      default:
+        throw new UsageError(usage);
+    }
+  },
   outcome: async (ctx, p) => {
     const id = p.positionals[0];
     if (!id) throw new UsageError('usage: aom outcome <outcomeId> --note "<text>" [--data-file <json>]');
@@ -2411,6 +2536,7 @@ export const USAGE = `usage: aom <verb> [options]
   card attachments [<REF>]                   copy the card's attached files next to this shift (read-only) and print the paths; builders get them at the start of the shift
   org catalogue | org role draft --json '<json>' | --file <json|-> | org workflow draft (same) | org workflow variant --file <json|-> (a project's own version) | org validate <key> | org submit <key> | org department --name "<n>"   BA design chat: draft roles and workflows (the owner approves on the desk)
   skill show <key | kind:key> [--file <path>]   print a capability of the registry (skill, playbook or persona; a playbook's steps and assets with --file); skill list [--kind k] lists them
+  session ask --question "<q>" [--option "<a>"]... | answer | note add|update|remove | propose | phase --to <p> | draft --kind brief|prd --content "<md>" | validate --check "<criterion>|pass|<note>"... | show   discovery session turns: the facilitator's question cards, panel notes, proposals, phase and drafts; the CEO proposes an answer (the owner decides)
   graph query "<words>" [--budget <tokens>] | graph path <a> <b> | graph explain <node> | graph impact <file or symbol> [--depth 2]   the map of this project's code, kept in the project vault: where a thing is, what touches it, the blast radius of a change; [I] and [A] links are leads, read the file
   transcript --url <url>                     fetch the transcript of a video or podcast (the runner saves it in the vault; prints a header and the text)
   phase list | propose --name "<n>" [--description "<t>"] [--followups-file <json>] | assign <REF> --phase <ref>|--none | submit <ref>   BA intake: propose a phase, put cards in it, ask the manager to confirm

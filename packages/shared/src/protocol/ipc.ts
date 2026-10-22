@@ -325,6 +325,15 @@ export const RpcMethodSchema = z.enum([
   /** Capability Registry: `aom skill show|list`, answered by the runner from its local registry (built-ins and the organization vault). */
   'skill.show',
   'skill.list',
+  /** Discovery sessions: `aom session ask|answer|note|propose|phase|draft|validate|show`, answered by the server for a session turn. */
+  'session.show',
+  'session.ask',
+  'session.answer',
+  'session.note',
+  'session.propose',
+  'session.phase',
+  'session.draft',
+  'session.validate',
 ]);
 export type RpcMethod = z.infer<typeof RpcMethodSchema>;
 

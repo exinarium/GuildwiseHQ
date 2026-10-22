@@ -84,6 +84,8 @@ export const sessionEvents = [
       replyToMessageId: Id.optional(),
       round: z.number().int().optional(),
       requestedBy: Id.nullable(),
+      /** What the turn is for (set by the Discovery orchestrator): `{purpose: 'facilitator'|'ceo_answer', questionId?, ...}`. */
+      meta: z.record(z.string(), z.unknown()).optional(),
     }),
   ),
   /** The turn was sent to the workstation. Appended again for each re-dispatch after `SessionTurnRequeued`. */
@@ -104,6 +106,8 @@ export const sessionEvents = [
       threadId: Id,
       messageId: Id,
       usage: Usage,
+      /** Price stamped when the event was appended (like `ShiftEnded.costMicros`), so a rebuild never reprices it. */
+      costMicros: z.number().int().nonnegative().optional(),
       runtimeSessionId: z.string().max(200).optional(),
     }),
   ),

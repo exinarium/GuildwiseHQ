@@ -1,5 +1,5 @@
-import type { EventOf } from '@aom/shared';
-import { exec } from '../db/sql.ts';
+import { costUsdMicros, type EventOf, PERSONA_HOST_AGENT_ID } from '@aom/shared';
+import { exec, one } from '../db/sql.ts';
 import type { Projector, StoredEvent } from '../eventstore/types.ts';
 
 type SessionEventType =
@@ -83,8 +83,8 @@ export const sessionProjectors: Record<string, Projector> = {
     await exec(
       tx,
       `INSERT INTO session_turns (id, org_id, thread_id, participant_id, speaker_kind, speaker_name, agent_id, persona_key, seat,
-         instructions, message, context, model, workstation_id, status, round, reply_to_message_id, requested_by, queued_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'queued',$15,$16,$17,$18)
+         instructions, message, context, model, workstation_id, status, round, reply_to_message_id, requested_by, queued_at, meta)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'queued',$15,$16,$17,$18,$19)
        ON CONFLICT (id) DO NOTHING`,
       [
         p.turnId,
@@ -105,6 +105,7 @@ export const sessionProjectors: Record<string, Projector> = {
         p.replyToMessageId ?? null,
         p.requestedBy,
         e.createdAt,
+        p.meta ? JSON.stringify(p.meta) : null,
       ],
     );
   },
@@ -131,6 +132,39 @@ export const sessionProjectors: Record<string, Projector> = {
       `UPDATE session_turns SET status='done', message_id=$2, usage=$3, runtime_session_id=$4, error=NULL, finished_at=$5
         WHERE id=$1 AND status IN ('queued','running')`,
       [p.turnId, p.messageId, JSON.stringify(p.usage), p.runtimeSessionId ?? null, e.createdAt],
+    );
+    // A session turn is not a shift, but its tokens are the organization's cost: one `shift_costs` row keyed by the turn id
+    // (kind `session`), so the cost ledger, the project budgets and the cost pages count it. Priced like a shift: a stamped
+    // price is used as is, otherwise the default table (a replay of an event that carried no price).
+    const t = await one(
+      tx,
+      `SELECT st.org_id, st.thread_id, st.agent_id, st.model, th.project_id
+         FROM session_turns st LEFT JOIN threads th ON th.id = st.thread_id WHERE st.id = $1`,
+      [p.turnId],
+    );
+    if (!t) return;
+    const model = p.usage.model ?? (t.model as { model?: string } | null)?.model ?? 'unknown';
+    await exec(
+      tx,
+      `INSERT INTO shift_costs (shift_id, org_id, agent_id, project_id, kind, model, tokens_input, tokens_output,
+         tokens_cache_read, tokens_cache_write, cost_usd_micros, reported_usd_micros, ended_at, cost_stamped)
+       VALUES ($1,$2,$3,$4,'session',$5,$6,$7,$8,$9,$10,$11,$12,$13)
+       ON CONFLICT (shift_id) DO NOTHING`,
+      [
+        p.turnId,
+        t.org_id,
+        t.agent_id ?? PERSONA_HOST_AGENT_ID,
+        t.project_id ?? null,
+        model,
+        p.usage.inputTokens,
+        p.usage.outputTokens,
+        p.usage.cacheReadTokens,
+        p.usage.cacheWriteTokens,
+        p.costMicros ?? costUsdMicros(model, { ...p.usage }),
+        p.usage.costUsd === undefined ? null : Math.round(p.usage.costUsd * 1_000_000),
+        e.createdAt,
+        p.costMicros !== undefined,
+      ],
     );
   },
   SessionTurnFailed: async (tx, e) => {
