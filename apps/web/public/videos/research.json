@@ -1,0 +1,32 @@
+{
+  "title": "Research",
+  "src": "/videos/research.webm",
+  "type": "video/webm",
+  "sources": [
+    {
+      "src": "/videos/research.mp4",
+      "type": "video/mp4"
+    },
+    {
+      "src": "/videos/research.webm",
+      "type": "video/webm"
+    }
+  ],
+  "captions": "/videos/research.vtt",
+  "voice": "Piper en_GB-cori-high",
+  "duration": 64.2,
+  "chapters": [
+    {
+      "t": 11.3,
+      "title": "Ask a question"
+    },
+    {
+      "t": 31,
+      "title": "In progress"
+    },
+    {
+      "t": 40.9,
+      "title": "Published notes"
+    }
+  ]
+}
