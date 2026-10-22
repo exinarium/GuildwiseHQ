@@ -8,12 +8,13 @@ import {
   StopLossSettingsSchema,
   streamId,
 } from '@aom/shared';
+import { ceoActive } from '../ceo/state.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Queryable, type Row, rows } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { cardMessage, projectScope, SYSTEM_ACTOR } from './common.ts';
-import { architectRoute } from './escalation.ts';
+import { architectRoute, type Route } from './escalation.ts';
 
 /**
  * Stop-loss per card (design section 11, owner decision 17 Oct): a card that used its budget of build passes, review
@@ -92,7 +93,9 @@ export async function stopLossBudget(db: Queryable, card: Row): Promise<StopLoss
   const base = (parsed.success ? parsed.data : DEFAULT_STOP_LOSS)[size];
   const ext = await one<{ n: number }>(
     db,
-    `SELECT count(*)::int AS n FROM desk_items WHERE card_id=$1 AND subkind=$2 AND status='answered'
+    // An answer and a dismissal both resolve the arbitration and grant the extension: a dismissed item must not be
+    // raised again a minute later by the same usage (production: GWP-19, GWP-3).
+    `SELECT count(*)::int AS n FROM desk_items WHERE card_id=$1 AND subkind=$2 AND status IN ('answered','dismissed')
         AND keep_blocked_until IS NULL AND created_at >= ${SINCE}`,
     [card.id, DESK_SUBKIND.stopLoss],
   );
@@ -117,6 +120,58 @@ export function limitReached(
   if (next.reviewRound && usage.buildPasses >= budget.buildPasses) return 'build passes';
   if (!next.reviewRound && usage.shifts >= budget.shifts) return 'shifts';
   return null;
+}
+
+/** The CEO arbitrates one card's stop-loss this many times; the next one goes to the owner's desk. */
+export const CEO_STOP_LOSS_ARBITRATIONS = 3;
+/** How long a stop-loss is held for the CEO (hidden from the desk) before the owner sees it. */
+export const CEO_STOP_LOSS_HOLD_MINUTES = 20;
+
+/** How often the CEO resolved a stop-loss of this card (it answered the item), since the card's baseline. */
+export async function ceoStopLossArbitrations(db: Queryable, cardId: string): Promise<number> {
+  const r = await one<{ n: number }>(
+    db,
+    `SELECT count(*)::int AS n FROM desk_items d
+      WHERE d.card_id=$1 AND d.subkind=$2 AND d.status IN ('answered','dismissed') AND d.created_at >= ${SINCE}
+        AND (d.data->'ceoDecision' IS NOT NULL
+             OR EXISTS (SELECT 1 FROM agents a WHERE a.id = d.answered_by_agent_id AND a.role_key = 'ceo'))`,
+    [cardId, DESK_SUBKIND.stopLoss],
+  );
+  return Number(r?.n ?? 0);
+}
+
+/**
+ * Who arbitrates a stop-loss. With an active CEO it is the CEO alone (not the architect, not the owner): the item is held,
+ * hidden from the desk, for it and released to the owner after `CEO_STOP_LOSS_HOLD_MINUTES` if the CEO did not decide.
+ * After `CEO_STOP_LOSS_ARBITRATIONS` arbitrations of the same card the owner decides. Without a CEO: the card's architect,
+ * else the desk, as before.
+ */
+async function stopLossRoute(
+  ctx: Ctx,
+  tx: Tx,
+  card: Row,
+): Promise<{ route: Route; ceoHold?: { deadline: string }; note: string }> {
+  const ceo = await ceoActive(tx, card.org_id);
+  if (!ceo) {
+    const route = await architectRoute(ctx, tx, card);
+    return {
+      route,
+      note: `Asked: ${route.routedTo === 'manager' ? "the manager's desk" : `${route.agentName} (${route.agentRole})`}. The architect decides how it goes on; if it cannot, the owner gets one item with options.`,
+    };
+  }
+  const done = await ceoStopLossArbitrations(tx, card.id);
+  if (done >= CEO_STOP_LOSS_ARBITRATIONS)
+    return {
+      route: { routedTo: 'manager', level: 'desk' },
+      note: `The CEO arbitrated this card's stop-loss ${done} times already: the owner decides now.`,
+    };
+  return {
+    route: { routedTo: 'manager', level: 'desk' },
+    ceoHold: {
+      deadline: new Date(ctx.clock.now().getTime() + CEO_STOP_LOSS_HOLD_MINUTES * 60_000).toISOString(),
+    },
+    note: `Asked: the CEO (arbitration ${done + 1} of ${CEO_STOP_LOSS_ARBITRATIONS}). It raises the model or effort when there are real issues, moves the card when there are none, or cancels or reassigns it; the owner sees the item only if the CEO cannot decide.`,
+  };
 }
 
 /** The last error text the loop breaker recorded for the card (its parked or back-off item), short. */
@@ -154,7 +209,7 @@ export async function stopLossEvents(
     DESK_SUBKIND.loopParked,
   ]);
   if (looped) return [];
-  const route = await architectRoute(ctx, tx, card);
+  const { route, ceoHold, note } = await stopLossRoute(ctx, tx, card);
   const deskItemId = randomUUID();
   const size = cardSize(card);
   const counts = `${size} card: ${usage.buildPasses}/${budget.buildPasses} build passes, ${usage.reviewRounds}/${budget.reviewRounds} review rounds, ${usage.shifts}/${budget.shifts} shifts`;
@@ -184,6 +239,7 @@ export async function stopLossEvents(
           routedTo: route.routedTo,
           ...(route.routedAgentId ? { routedAgentId: route.routedAgentId } : {}),
           chainLevel: route.level,
+          ...(ceoHold ? { triage: ceoHold } : {}),
           topic: 'design',
           subkind: DESK_SUBKIND.stopLoss,
           dedupLedgerIds: [],
@@ -198,7 +254,7 @@ export async function stopLossEvents(
       card,
       { kind: 'system' },
       'system',
-      `${card.ref} reached its stop-loss (${limit}): it is parked. Asked: ${route.routedTo === 'manager' ? "the manager's desk" : `${route.agentName} (${route.agentRole})`}. The architect decides how it goes on; if it cannot, the owner gets one item with options.`,
+      `${card.ref} reached its stop-loss (${limit}): it is parked. ${note}`,
       { deskItemId },
     ),
   ];

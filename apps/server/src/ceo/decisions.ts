@@ -15,7 +15,7 @@ import { one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
-import { DESK_VISIBLE } from '../queries/desk.ts';
+import { DESK_VISIBLE, IS_CEO_DECISION_SQL, UNREVIEWED_CEO_DECISION_SQL } from '../queries/desk.ts';
 import { carrierProject } from './carrier.ts';
 import { addMemoryIn } from './memory.ts';
 import { loadCeo } from './state.ts';
@@ -65,8 +65,36 @@ export interface DecisionInput {
   confidence?: number | undefined;
 }
 
-/** `DeskItemCreated` for one CEO decision (informational: alert, not blocking, not pinned). */
+/**
+ * Either the question or the decision on the desk, never both: a decision about a desk item the CEO answered is
+ * recorded ON that (now resolved) item, which then shows as decided by the CEO. Only a decision with no item of its own
+ * to resolve (a cancellation, a firing, a delegated reserved matter) becomes one informational `ceo_decision` item.
+ */
 export function ceoDecisionItemEvents(d: DecisionInput): AppendInput[] {
+  if (d.questionItemId)
+    return [
+      {
+        streamId: streamId.desk(d.questionItemId),
+        event: {
+          type: 'CeoDecisionRecorded',
+          payload: {
+            orgId: d.orgId,
+            deskItemId: d.questionItemId,
+            ceoAgentId: d.ceoAgentId,
+            ceoName: d.ceoName,
+            class: d.cls,
+            source: d.source,
+            actionId: d.actionId ?? null,
+            question: clip(d.question, 600),
+            decision: clip(d.decision, 2000),
+            reason: clip(d.reason, 2000),
+            confidence: d.confidence ?? null,
+          },
+        },
+        actor: agentActor(d.ceoAgentId),
+        scope: d.projectId ? projectScope(d.orgId, d.projectId) : orgScope(d.orgId),
+      },
+    ];
   const deskItemId = randomUUID();
   const askedBy: DeskActor = { kind: 'agent', agentId: d.ceoAgentId, role: 'ceo' };
   return [
@@ -132,13 +160,16 @@ const itemScope = (item: Row) =>
 async function lockDecision(tx: Tx, user: AuthSession['user'], id: string): Promise<Row> {
   const item = await one(
     tx,
-    `SELECT d.* FROM desk_items d WHERE d.id=$2 AND ${DESK_VISIBLE} AND d.subkind=$3 FOR UPDATE OF d`,
-    [user.id, id, CEO_DECISION_SUBKIND],
+    `SELECT d.* FROM desk_items d WHERE d.id=$2 AND ${DESK_VISIBLE} AND ${IS_CEO_DECISION_SQL} FOR UPDATE OF d`,
+    [user.id, id],
   );
   if (!item) throw notFound('desk item not found');
   if (!isOrgManager({ orgRole: await orgRoleOf(tx, user.id, item.org_id) }))
     throw forbidden('only an Owner or Admin can review the CEO decisions');
-  if (item.status !== 'open') throw conflict('already_resolved', `this item is already ${item.status}`);
+  if (item.subkind === CEO_DECISION_SUBKIND) {
+    if (item.status !== 'open') throw conflict('already_resolved', `this item is already ${item.status}`);
+  } else if (item.data?.acknowledgedAt || item.data?.correction)
+    throw conflict('already_resolved', 'this decision was already reviewed');
   return item;
 }
 
@@ -190,6 +221,18 @@ async function acknowledgeLearning(db: Queryable, orgId: string, items: Row[]): 
   return events;
 }
 
+/**
+ * Closes a legacy `ceo_decision` item. A decision recorded on a question the CEO resolved has nothing to close: the
+ * item is resolved already, and the review event alone marks it reviewed.
+ */
+const resolvedEvents = (
+  item: Row,
+  user: AuthSession['user'],
+  resolution: 'acknowledged' | 'rejected',
+  note?: string,
+): AppendInput[] =>
+  item.subkind === CEO_DECISION_SUBKIND ? [resolvedEvent(item, user, resolution, note)] : [];
+
 const resolvedEvent = (
   item: Row,
   user: AuthSession['user'],
@@ -236,7 +279,7 @@ export async function acknowledgeCeoDecision(ctx: Ctx, user: AuthSession['user']
     const item = await lockDecision(tx, user, id);
     await ctx.store.append(
       [
-        resolvedEvent(item, user, 'acknowledged'),
+        ...resolvedEvents(item, user, 'acknowledged'),
         reviewedEvent(item, user, { outcome: 'acknowledged' }),
         ...(await acknowledgeLearning(tx, item.org_id, [item])),
       ],
@@ -259,13 +302,13 @@ export async function acknowledgeAllCeoDecisions(
       throw forbidden('only an Owner or Admin can review the CEO decisions');
     const items = await rows(
       tx,
-      `SELECT d.* FROM desk_items d WHERE d.org_id=$2 AND ${DESK_VISIBLE} AND d.subkind=$3 AND d.status='open'
+      `SELECT d.* FROM desk_items d WHERE d.org_id=$2 AND ${DESK_VISIBLE} AND ${UNREVIEWED_CEO_DECISION_SQL}
         ORDER BY d.created_at, d.id FOR UPDATE OF d`,
-      [user.id, orgId, CEO_DECISION_SUBKIND],
+      [user.id, orgId],
     );
     if (items.length === 0) return 0;
     const events: AppendInput[] = items.flatMap((it) => [
-      resolvedEvent(it, user, 'acknowledged'),
+      ...resolvedEvents(it, user, 'acknowledged'),
       reviewedEvent(it, user, { outcome: 'acknowledged', batch: true }),
     ]);
     events.push(...(await acknowledgeLearning(tx, orgId, items)));
@@ -371,7 +414,7 @@ export async function correctCeoDecision(
     }
     const card = item.card_id ? await one(tx, 'SELECT * FROM cards WHERE id=$1', [item.card_id]) : undefined;
     const events: AppendInput[] = [
-      resolvedEvent(item, user, 'rejected', correction),
+      ...resolvedEvents(item, user, 'rejected', correction),
       reviewedEvent(item, user, {
         outcome: 'corrected',
         correction,
@@ -487,5 +530,5 @@ export async function ceoReviewItemOfTask(db: Queryable, task: Row): Promise<Row
     return undefined;
   const id = (task.desk_item_ids as string[] | null)?.[0];
   if (!id) return undefined;
-  return one(db, `SELECT * FROM desk_items WHERE id=$1 AND subkind=$2`, [id, CEO_DECISION_SUBKIND]);
+  return one(db, `SELECT d.* FROM desk_items d WHERE d.id=$1 AND ${IS_CEO_DECISION_SQL}`, [id]);
 }

@@ -3,6 +3,7 @@ import {
   type ActionClass,
   CEO_DECISION_SUBKIND,
   type CeoActionName,
+  DESK_SUBKIND,
   type DeskActor,
   deskMode,
   reservedKeyOfDesk,
@@ -86,6 +87,14 @@ export async function agentByName(tx: Queryable, orgId: string, name: string): P
 
 // ------------------------------------------------------------------------------------------------ answers
 
+/** Items that park a card in a loop: the CEO releases them on the evidence of the card itself. */
+export const LOOP_RELEASE_SUBKINDS: readonly string[] = [
+  DESK_SUBKIND.loopParked,
+  DESK_SUBKIND.repeatQuestion,
+  DESK_SUBKIND.stopLoss,
+  DESK_SUBKIND.loopBackoff,
+];
+
 const AnswerP = z
   .object({
     item: z.uuid(),
@@ -129,7 +138,9 @@ const answer: ActionDef<z.infer<typeof AnswerP>> = {
           ? 'decide'
           : tableMode,
       reservedKey: reservedKeyOfDesk(item.kind, item.subkind),
-      needsEvidence: !branchDelegated,
+      // A loop, a park or a stop-loss is released from what the card shows (its thread, handoffs, usage), not from a cited
+      // ledger entry: the CEO acts on it without one (owner decision, 22 Oct).
+      needsEvidence: !branchDelegated && !LOOP_RELEASE_SUBKINDS.includes(item.subkind),
       data: { item },
     };
   },

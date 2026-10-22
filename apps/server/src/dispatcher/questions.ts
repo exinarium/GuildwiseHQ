@@ -136,15 +136,65 @@ export async function questionPass(
   return started;
 }
 
+/** A blocking question routed to an agent that is still open after this long goes on (to the CEO, then the owner). */
+export const BLOCKED_QUESTION_ESCALATE_MS = 20 * 60_000;
+/** ...or after this many question shifts that ended without an answer (rejected by the runner, crashed, timed out). */
+export const BLOCKED_QUESTION_MAX_MISSES = 3;
+
+/**
+ * Blocking questions routed to an agent are invisible to the owner, so one nobody answers must not wait forever. A blocking
+ * item that is still open `BLOCKED_QUESTION_ESCALATE_MS` after it was routed, or after `BLOCKED_QUESTION_MAX_MISSES`
+ * question shifts that did not answer it, is passed on by the system (`QuestionEscalated` with a note): to the CEO when the
+ * organization has an active one and the item is not with it yet, else to the owner's desk. An item of a paused project
+ * goes on at once: the pause stops every question shift and CEO wake of the project, so neither the agent nor the CEO could
+ * ever take it up, and the card would stay blocked without anybody prompted (GWP-20). It goes to the owner's desk.
+ * Returns how many items were passed on.
+ */
+export async function blockedQuestionPass(ctx: Ctx): Promise<number> {
+  const now = ctx.clock.now();
+  const cutoff = new Date(now.getTime() - BLOCKED_QUESTION_ESCALATE_MS);
+  const due = await rows<{ id: string; paused: boolean; misses: number; aged: boolean }>(
+    ctx.pool,
+    `SELECT d.id, (dp.paused_at IS NOT NULL) AS paused,
+            (SELECT count(*)::int FROM shifts s WHERE s.desk_item_id = d.id AND s.agent_id = d.routed_agent_id
+               AND s.status = 'ended' AND s.outcome IS DISTINCT FROM 'reported') AS misses,
+            (d.updated_at < $1) AS aged
+       FROM desk_items d LEFT JOIN projects dp ON dp.id = d.project_id
+       JOIN organizations po ON po.id = d.org_id AND po.status IN ('trial','active')
+      WHERE d.status = 'open' AND d.routed_to = 'agent' AND d.blocking
+        AND NOT EXISTS (SELECT 1 FROM shifts s WHERE s.desk_item_id = d.id AND s.status <> 'ended')
+      ORDER BY d.created_at, d.id`,
+    [cutoff],
+  );
+  let n = 0;
+  for (const r of due) {
+    const misses = Number(r.misses);
+    if (!r.paused && !r.aged && misses < BLOCKED_QUESTION_MAX_MISSES) continue;
+    const why = r.paused
+      ? 'the project is paused, so the question was never dispatched'
+      : misses >= BLOCKED_QUESTION_MAX_MISSES
+        ? `${misses} question shifts ended without an answer`
+        : `no answer within ${BLOCKED_QUESTION_ESCALATE_MS / 60_000} minutes`;
+    const done = await escalateStalled(ctx, r.id, why, { toDesk: r.paused });
+    if (done) n++;
+  }
+  return n;
+}
+
 /** The item goes on to the next step (the system passes it on). */
-async function escalateStalled(ctx: Ctx, deskItemId: string, why: string): Promise<void> {
-  await withAppendTx(ctx.pool, async (tx) => {
+async function escalateStalled(
+  ctx: Ctx,
+  deskItemId: string,
+  why: string,
+  opts: { toDesk?: boolean } = {},
+): Promise<boolean> {
+  return withAppendTx(ctx.pool, async (tx) => {
     const item = await one(
       tx,
       `SELECT * FROM desk_items WHERE id=$1 AND status='open' AND routed_to='agent' FOR UPDATE`,
       [deskItemId],
     );
-    if (!item) return;
+    if (!item) return false;
     const to = (await one(tx, 'SELECT name, role_key FROM agents WHERE id=$1', [item.routed_agent_id])) as
       | Row
       | undefined;
@@ -154,8 +204,10 @@ async function escalateStalled(ctx: Ctx, deskItemId: string, why: string): Promi
       item,
       null,
       `${to ? `${to.name} (${to.role_key})` : 'The agent'} could not take it: ${why}`,
+      opts,
     );
     await ctx.store.append(events, { tx });
+    return true;
   });
 }
 

@@ -14,6 +14,10 @@ export const CEO_ACTIONS = [
   'release',
   'release-backoff',
   'reassign',
+  /** `aom ceo act move`: move a card to another stage of its workflow (the same command the owner's Move button runs). */
+  'move',
+  /** `aom ceo act raise-model`: run this card's next shifts on a stronger model and/or effort (a per-card override). */
+  'raise-model',
   'priority',
   'cancel-card',
   'stop-shift',

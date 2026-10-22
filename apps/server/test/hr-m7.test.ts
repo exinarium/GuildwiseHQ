@@ -1,10 +1,17 @@
 import { randomUUID } from 'node:crypto';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { closeAdminPool, q } from './helpers/db.ts';
 import type { FakeRunner } from './helpers/fake-runner.ts';
 import { board, handoff, recommendations, resetHr } from './helpers/hr.ts';
 import { pipeline } from './helpers/pipeline.ts';
 import { createWorld, ok, until, type World } from './helpers/world.ts';
+
+// These tests move the clock by hours between a question and its answer: the pass that escalates a blocking question nobody
+// took up for 20 minutes would send the questions on before the chain answers them, so it is switched off here.
+vi.mock('../src/dispatcher/questions.ts', async (orig) => ({
+  ...(await orig<typeof import('../src/dispatcher/questions.ts')>()),
+  blockedQuestionPass: async () => 0,
+}));
 
 // M9 stats meet the M7 escalation chain and intake: who answered a question changes whose time it cost, and the
 // BA's specs are blamed through the intake that drafted the card.

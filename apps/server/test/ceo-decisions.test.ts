@@ -44,8 +44,12 @@ const result = (resp: any) => {
   expect(resp.ok, JSON.stringify(resp)).toBe(true);
   return resp.result;
 };
-const decisions = (status = 'open') =>
-  q(`SELECT * FROM desk_items WHERE subkind='ceo_decision' AND status=$1 ORDER BY created_at`, [status]);
+/** The CEO decisions waiting for the owner's review: resolved desk items that carry the decision (no second card). */
+const decisions = () =>
+  q(
+    `SELECT * FROM desk_items WHERE data->'ceoDecision' IS NOT NULL AND data->>'acknowledgedAt' IS NULL
+        AND data->'correction' IS NULL ORDER BY created_at, id`,
+  );
 
 /** A working-branch question on the manager's desk (what the hygiene and intake flow raises). */
 async function branchQuestion(
@@ -102,10 +106,16 @@ describe('the CEO may decide working-branch questions', () => {
     expect(
       (await q(`SELECT 1 FROM desk_items WHERE subkind='ceo_recommendation' AND status='open'`)).length,
     ).toBe(0);
-    // ... and it is on the desk for review
-    const review = (await decisions()).find((d) => d.data.ceoDecision.questionItemId === id)!;
-    expect(review).toMatchObject({ kind: 'alert', blocking: false, pinned: false });
+    // ... and the decision is on that resolved item for review: no second `ceo_decision` card next to it
+    const review = (await decisions()).find((d) => d.id === id)!;
+    expect(review).toMatchObject({ kind: 'question', status: 'answered', subkind: 'working_branch' });
     expect(review.data.ceoDecision).toMatchObject({ decision: 'dev', actionId: res.actionId, source: 'act' });
+    expect(
+      await q(
+        `SELECT 1 FROM desk_items WHERE subkind='ceo_decision' AND data->'ceoDecision'->>'questionItemId'=$1`,
+        [id],
+      ),
+    ).toHaveLength(0);
   });
 
   it('is a recommendation again when the owner takes the delegation back', async () => {
@@ -145,21 +155,22 @@ describe('CEO decisions on the desk', () => {
     const open = await decisions();
     expect(open.length).toBeGreaterThan(0);
     const list = await ok<any>(owner('GET', '/api/desk?status=open'));
-    const dto = list.items.find((i: any) => i.subkind === 'ceo_decision');
-    expect(dto.ceoDecision).toMatchObject({ ceoName: 'Ada Prime', source: 'act' });
+    const dto = list.items.find((i: any) => i.ceoDecision);
+    expect(dto.ceoDecision).toMatchObject({ ceoName: 'Ada Prime', source: 'act', reviewed: false });
     expect(dto.ceoDecision.question).toBeTruthy();
     expect(dto.ceoDecision.reason).toBeTruthy();
-    expect(dto.blocking).toBe(false);
-    const decisionItems = list.items.filter((i: any) => i.subkind === 'ceo_decision').length;
+    // the question item itself shows as resolved by the CEO, and is not counted as waiting
+    expect(dto.status).toBe('answered');
+    const decisionItems = list.items.filter((i: any) => i.ceoDecision && !i.ceoDecision.reviewed).length;
     expect(list.counts.ceoDecisions ?? 0).toBe(decisionItems);
-    expect(list.counts.open).toBe(list.items.length - decisionItems);
+    expect(list.counts.open).toBe(list.items.filter((i: any) => i.status === 'open').length);
   });
 
   it('are not tools for the CEO itself: it cannot triage or acknowledge its own decisions', async () => {
     const item = (await decisions())[0]!;
     const res = result(await act(r, shiftId, 'resolve-notice', { item: item.id }, { key: 'self-ack' }));
     expect(res.status).toBe('refused');
-    expect((await q(`SELECT status FROM desk_items WHERE id=$1`, [item.id]))[0]!.status).toBe('open');
+    expect((await decisions()).some((d) => d.id === item.id)).toBe(true);
   });
 
   it('acknowledge marks one read, with a thumbs-up for the CEO', async () => {
@@ -189,7 +200,7 @@ describe('CEO decisions on the desk', () => {
       await asMember('POST', '/api/desk/ceo-decisions/acknowledge-all'),
     ])
       expect([403, 404]).toContain(res.status);
-    expect((await q(`SELECT status FROM desk_items WHERE id=$1`, [item.id]))[0]!.status).toBe('open');
+    expect((await decisions()).some((d) => d.id === item.id)).toBe(true);
     // an Admin may
     const admin = await w.t.userSession(uniqueEmail('admin'));
     await w.t.addOrgMember(w.owner.id, admin.id, 'admin');
@@ -229,7 +240,7 @@ describe('correcting a decision', () => {
     await w.hire('Ben', 'ba', 'senior');
     const id = await branchQuestion('Keep pieter/dev as the working branch of Flow-Web (P4)?');
     result(await act(r, shiftId, 'answer', { item: id, option: 'keep' }, { key: 'corr-1' }));
-    const item = (await decisions()).find((d) => d.data.ceoDecision.questionItemId === id)!;
+    const item = (await decisions()).find((d) => d.id === id)!;
 
     const out = await ok<any>(
       owner('POST', `/api/desk/${item.id}/ceo-decision/correct`, {
@@ -342,7 +353,7 @@ describe('correcting a decision', () => {
     await q(`UPDATE agents SET status='retired' WHERE role_key='ba'`);
     const id = await branchQuestion('Which branch should the API repo use?');
     result(await act(r, shiftId, 'answer', { item: id, option: 'branch:dev' }, { key: 'corr-2' }));
-    const item = (await decisions()).find((d) => d.data.ceoDecision.questionItemId === id)!;
+    const item = (await decisions()).find((d) => d.id === id)!;
     await ok(
       owner('POST', `/api/desk/${item.id}/ceo-decision/correct`, { correction: 'The release branch.' }),
     );
@@ -391,7 +402,7 @@ describe('correcting a decision', () => {
         { key: 'apply-1', evidence: [`ledger:${entry}`] },
       ),
     );
-    const item = (await decisions()).find((d) => d.data.ceoDecision.questionItemId === id)!;
+    const item = (await decisions()).find((d) => d.id === id)!;
     const out = await ok<any>(
       owner('POST', `/api/desk/${item.id}/ceo-decision/correct`, { correction: 'SQLite', applyNow: true }),
     );

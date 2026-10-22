@@ -20,7 +20,7 @@ import { agentView, candidateCards, isCandidate, ONLINE_WINDOW_MS } from './cand
 import { type ClaimResult, claim } from './claim.ts';
 import { devopsPass } from './devops.ts';
 import { phasePass } from './phases.ts';
-import { questionPass } from './questions.ts';
+import { blockedQuestionPass, questionPass } from './questions.ts';
 
 /** Events that make a dispatch pass worthwhile (docs/ARCHITECTURE.md section 9.1). */
 const TRIGGER_TYPES = new Set([
@@ -227,7 +227,7 @@ export class Dispatcher {
     if (this.stopped || !(await this.ensureLock())) return [];
     const nowMs = this.ctx.clock.now().getTime();
     // Phases first: the requests, cards and tasks it creates are dispatched in this same pass.
-    await phasePass(this.ctx);
+    await this.safely('phase', () => phasePass(this.ctx), undefined);
     const made: ClaimResult[] = [];
     const agents = await this.freeAgents();
     // The Claude account each project names (docs/design/claude-accounts.md): chosen again for every claim.
@@ -294,28 +294,43 @@ export class Dispatcher {
         }
       }
     }
-    made.push(...(await this.overflowPass(agents, nowMs, full, accountOf)));
+    // Every sub-pass below is isolated: a throw in one is logged and the others (and `sendShiftStart` for the claims
+    // already made above) still run. Without this a throw released claims that never got their `shift.start`.
+    made.push(
+      ...(await this.safely('overflow', () => this.overflowPass(agents, nowMs, full, accountOf), [])),
+    );
     // The DevOps, question and BA passes respect the workstation's shift limit like the card passes do (each shift they
     // start counts, so the next pass sees it).
     const cooling = (agentId: string) => (this.cooldown.get(agentId) ?? 0) > nowMs;
     const counted = <T extends { workstationId: string }>(started: T[]): void => {
       for (const s of started) load.set(s.workstationId, (load.get(s.workstationId) ?? 0) + 1);
     };
-    counted(await devopsPass(this.ctx, cooling, full));
-    counted(await questionPass(this.ctx, cooling, full));
-    counted(await baTaskPass(this.ctx, cooling, full));
-    await ceoPass(this.ctx);
+    counted(await this.safely('devops', () => devopsPass(this.ctx, cooling, full), []));
+    await this.safely('blocked-questions', () => blockedQuestionPass(this.ctx), undefined);
+    counted(await this.safely('question', () => questionPass(this.ctx, cooling, full), []));
+    counted(await this.safely('ba-task', () => baTaskPass(this.ctx, cooling, full), []));
+    await this.safely('ceo', () => ceoPass(this.ctx), undefined);
     // Delivery: merge triggers that are due become deploy requests; deploys nobody collected expire (never throws).
     await deliveryPass(this.ctx).catch((err) => this.ctx.log.error({ err }, 'delivery pass failed'));
     // A CEO decision review the CEO never answered continues without it after the timeout.
     await sweepCeoReviews(this.ctx).catch((err) => this.ctx.log.error({ err }, 'ceo review sweep failed'));
-    await testingPass(this.ctx);
-    // Platform team: bug intake from the detectors, pauses of fixed bugs end, grants expire, fix stop-loss (never throws).
-    await platformPass(this.ctx);
+    await this.safely('testing', () => testingPass(this.ctx), undefined);
+    // Platform team: bug intake from the detectors, pauses of fixed bugs end, grants expire, fix stop-loss.
+    await this.safely('platform', () => platformPass(this.ctx), undefined);
     // Test environments for cards waiting at an environment stage (the tester can claim them once healthy).
-    await testEnvironmentPass(this.ctx);
+    await this.safely('test-environment', () => testEnvironmentPass(this.ctx), undefined);
     for (const r of made) await this.sendShiftStart(r);
     return made;
+  }
+
+  /** Runs one sub-pass; a throw is logged (as `deliveryPass` already is) and `fallback` stands in for its result. */
+  private async safely<T>(name: string, fn: () => Promise<T>, fallback: T): Promise<T> {
+    try {
+      return await fn();
+    } catch (err) {
+      this.ctx.log.error({ err, pass: name }, `${name} pass failed`);
+      return fallback;
+    }
   }
 
   /** Spec rule 1: a late scheduled card with no free agent gets one extra shift at a time per organization. */

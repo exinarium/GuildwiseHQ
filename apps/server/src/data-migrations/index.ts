@@ -1,6 +1,7 @@
 import { migrateBlogCiteCleanup } from './blog-cite-cleanup.ts';
 import { migrateBlogLaunch } from './blog-launch.ts';
 import { migrateCardCompletionInherit } from './card-completion-inherit.ts';
+import { migrateCeoAuthority, migrateCeoDecisionDedupe } from './ceo-authority.ts';
 import { migrateCeoBuiltin } from './ceo-builtin.ts';
 import { migrateCeoModels } from './ceo-models.ts';
 import { migrateCeoWorkingBranch } from './ceo-working-branch.ts';
@@ -26,6 +27,12 @@ export {
   type CardCompletionInheritReport,
   migrateCardCompletionInherit,
 } from './card-completion-inherit.ts';
+export {
+  CEO_AUTHORITY_MIGRATION,
+  CEO_DECISION_DEDUPE_MIGRATION,
+  migrateCeoAuthority,
+  migrateCeoDecisionDedupe,
+} from './ceo-authority.ts';
 export { CEO_BUILTIN_MIGRATION, type CeoBuiltinReport, migrateCeoBuiltin } from './ceo-builtin.ts';
 export { CEO_MODELS_MIGRATION, type CeoModelsReport, migrateCeoModels } from './ceo-models.ts';
 export { CEO_WORKING_BRANCH_MIGRATION, migrateCeoWorkingBranch } from './ceo-working-branch.ts';
@@ -90,6 +97,8 @@ export const DATA_MIGRATIONS: Array<{ name: string; run: (env: DataMigrationEnv)
   { name: 'graph-backfill-2026-10', run: (env) => migrateGraphBackfill(env) },
   { name: 'reporter-retired-2026-10', run: (env) => migrateReporterRetired(env) },
   { name: 'guided-mode-2026-10', run: (env) => migrateGuidedMode(env) },
+  { name: 'ceo-authority-2026-10', run: (env) => migrateCeoAuthority(env) },
+  { name: 'ceo-decision-dedupe-2026-10', run: (env) => migrateCeoDecisionDedupe(env) },
 ];
 
 export async function runDataMigrations(env: DataMigrationEnv): Promise<void> {

@@ -69,6 +69,24 @@ export async function agentSpecFor(ctx: Ctx, a: Row): Promise<AgentRuntimeSpec> 
   return spec;
 }
 
+/** The model a card was raised to (`CardModelRaised`), or null. */
+async function cardModelOverride(
+  ctx: Ctx,
+  cardId: string,
+): Promise<{ model: string; effort?: string; runtime?: string } | null> {
+  const r = await one(ctx.pool, 'SELECT model_override FROM cards WHERE id=$1', [cardId]);
+  return (r?.model_override as { model: string; effort?: string; runtime?: string } | null) ?? null;
+}
+
+/** The card's own model choice wins over the agent's, when it is meant for the agent's runtime. */
+export function withCardModel(
+  spec: AgentRuntimeSpec,
+  o: { model: string; effort?: string; runtime?: string } | null,
+): AgentRuntimeSpec {
+  if (!o || (o.runtime && o.runtime !== spec.runtime)) return spec;
+  return { ...spec, model: o.model, effort: o.effort ?? spec.effort };
+}
+
 /** Name of the person who last sent the card back from manual QA (null: it was never sent back). */
 async function qaSentBackBy(db: Queryable, card: Row): Promise<string | null> {
   const by = card.qa?.lastSendBack?.by as string | undefined;
@@ -577,7 +595,7 @@ export async function buildShiftStart(ctx: Ctx, claim: ClaimResult): Promise<Shi
     shiftId: claim.shiftId,
     claimId: claim.claimId,
     kind: 'card',
-    agent: await agentSpecFor(ctx, agent),
+    agent: withCardModel(await agentSpecFor(ctx, agent), await cardModelOverride(ctx, brief.card.id)),
     brief,
     worktree,
     prepare: { rebase: claim.rebase, ...(claim.syncMain ? { syncMain: claim.syncMain } : {}) },

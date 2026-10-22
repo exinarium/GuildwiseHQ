@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
   CEO_DECISION_REVIEW_REASON,
-  CEO_DECISION_SUBKIND,
   CEO_REVIEW_REPLY_TIMEOUT_MS,
   type FixCard,
   type FixPlan,
@@ -15,6 +14,7 @@ import type { Ctx } from '../context.ts';
 import { exec, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import type { AppendInput } from '../eventstore/types.ts';
+import { IS_CEO_DECISION_SQL } from '../queries/desk.ts';
 import { carrierProject } from './carrier.ts';
 import { CEO_REVIEW_FINAL_TASK_NAME, citedBy, clip, decisionOf, proposedRuleOf } from './decisions.ts';
 import { addMemoryIn } from './memory.ts';
@@ -241,11 +241,11 @@ export async function ceoReviewReply(
     cardChanges?: string | undefined;
   },
 ): Promise<{ status: 'executed' | 'refused'; message: string }> {
-  const item = await one(ctx.pool, `SELECT * FROM desk_items WHERE id=$1 AND org_id=$2 AND subkind=$3`, [
-    rpc.item,
-    orgId,
-    CEO_DECISION_SUBKIND,
-  ]);
+  const item = await one(
+    ctx.pool,
+    `SELECT d.* FROM desk_items d WHERE d.id=$1 AND d.org_id=$2 AND ${IS_CEO_DECISION_SQL}`,
+    [rpc.item, orgId],
+  );
   const corr = item ? correctionOf(item) : undefined;
   if (!item || !corr?.reviewId)
     return { status: 'refused', message: 'that is not a corrected CEO decision under review' };
@@ -788,9 +788,9 @@ export async function sweepCeoReviews(
   const cutoff = new Date(ctx.clock.now().getTime() - timeoutMs).toISOString();
   const stale = await rows(
     ctx.pool,
-    `SELECT id, data->'correction'->>'reviewId' AS review_id FROM desk_items
-      WHERE subkind=$1 AND data->'correction'->>'review' = 'analysed' AND data->'correction'->>'analysedAt' < $2`,
-    [CEO_DECISION_SUBKIND, cutoff],
+    `SELECT d.id, d.data->'correction'->>'reviewId' AS review_id FROM desk_items d
+      WHERE ${IS_CEO_DECISION_SQL} AND d.data->'correction'->>'review' = 'analysed' AND d.data->'correction'->>'analysedAt' < $1`,
+    [cutoff],
   );
   let n = 0;
   for (const s of stale) {

@@ -1,4 +1,4 @@
-import { ROUTING_EXEMPT_SUBKINDS } from '@aom/shared';
+import { CEO_DECISION_REVIEW_REASON, ROUTING_EXEMPT_SUBKINDS } from '@aom/shared';
 import type { Ctx } from '../context.ts';
 import { exec, one, type Queryable } from '../db/sql.ts';
 import { isProjectPaused } from '../dispatcher/project-hold.ts';
@@ -87,7 +87,8 @@ export async function enqueueWake(db: Queryable, orgId: string, w: NewWake, now:
         await exec(db, `UPDATE ceo_wakes SET urgency='urgent' WHERE id=$1`, [pending.id]);
       return false;
     }
-    if (w.urgency !== 'urgent') {
+    // (A decision review is about a decision the CEO took on this very subject: its own recent action is the point.)
+    if (w.urgency !== 'urgent' && w.reason !== CEO_DECISION_REVIEW_REASON) {
       const recent = await one(
         db,
         `SELECT 1 FROM ceo_actions WHERE org_id=$1 AND subject_kind=$2 AND subject_id=$3 AND created_at > $4 AND mode IN ('decided','recommended')`,
