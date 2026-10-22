@@ -1,7 +1,8 @@
+import { execFileSync } from 'node:child_process';
 import { type APIRequestContext, expect } from '@playwright/test';
 import { apiAs } from '../support/api.ts';
 import { waitFor } from '../support/db.ts';
-import { ADMIN, BASE_URL, paths } from '../support/env.ts';
+import { ADMIN, BASE_URL, DATABASE_URL, paths, ROOT } from '../support/env.ts';
 import { addRepoRoot, pairRunner, startRunner } from '../support/runner.ts';
 
 /**
@@ -101,4 +102,55 @@ export async function createCard(
     },
   });
   expect(r.status(), await r.text()).toBe(201);
+}
+
+/**
+ * Gives Acme its built-in CEO (the global setup's organization is created before the role catalogue, so it has none
+ * yet). Call it before `pairWorkstation`: the Owner's first workstation becomes the CEO's home. With `mock` (the
+ * default) the CEO runs on the mock runtime, so the recording never needs a real model.
+ */
+export async function provisionCeo(
+  api: APIRequestContext,
+  mock = true,
+): Promise<{ id: string; name: string }> {
+  execFileSync('pnpm', ['--filter', '@aom/server', 'exec', 'tsx', `${ROOT}/e2e/support/provision-ceo.ts`], {
+    cwd: ROOT,
+    env: { ...process.env, DATABASE_URL },
+    stdio: 'pipe',
+  });
+  const agents = (await (await api.get('/api/agents')).json()).agents as Array<{
+    id: string;
+    name: string;
+    roleKey: string;
+  }>;
+  const ceo = agents.find((a) => a.roleKey === 'ceo');
+  expect(ceo, 'the built-in CEO exists').toBeTruthy();
+  if (mock) {
+    const r = await api.patch(`/api/agents/${ceo?.id}`, { data: { runtime: 'mock', model: 'mock' } });
+    expect(r.ok(), await r.text()).toBe(true);
+  }
+  return ceo as { id: string; name: string };
+}
+
+/** Real CEO decisions through the server's action engine (see ceo-act.ts). Returns one result per action. */
+export function ceoAct(
+  acts: Array<{ action: string; params: Record<string, unknown>; reason: string; confidence?: number }>,
+): Array<{ action: string; status: string; mode?: string; message: string }> {
+  const out = execFileSync(
+    'pnpm',
+    [
+      '--silent',
+      '--filter',
+      '@aom/server',
+      'exec',
+      'tsx',
+      `${ROOT}/e2e/video/ceo-act.ts`,
+      JSON.stringify(acts.map((a) => ({ confidence: 0.9, ...a }))),
+    ],
+    { cwd: ROOT, env: { ...process.env, DATABASE_URL }, encoding: 'utf8' },
+  );
+  return out
+    .split('\n')
+    .filter((l) => l.startsWith('{"action"'))
+    .map((l) => JSON.parse(l));
 }

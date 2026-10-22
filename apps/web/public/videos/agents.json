@@ -1,0 +1,36 @@
+{
+  "title": "Your agents",
+  "src": "/videos/agents.webm",
+  "type": "video/webm",
+  "sources": [
+    {
+      "src": "/videos/agents.mp4",
+      "type": "video/mp4"
+    },
+    {
+      "src": "/videos/agents.webm",
+      "type": "video/webm"
+    }
+  ],
+  "captions": "/videos/agents.vtt",
+  "voice": "Piper en_GB-cori-high",
+  "duration": 86.3,
+  "chapters": [
+    {
+      "t": 10.6,
+      "title": "Hire an agent"
+    },
+    {
+      "t": 30.9,
+      "title": "Pause, resume and change model"
+    },
+    {
+      "t": 48.4,
+      "title": "Recommendations"
+    },
+    {
+      "t": 71.3,
+      "title": "Filter by project"
+    }
+  ]
+}
