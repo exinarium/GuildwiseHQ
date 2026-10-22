@@ -19,7 +19,7 @@ function canonical(v: unknown): unknown {
     return Object.fromEntries(
       Object.entries(v as Record<string, unknown>)
         .filter(([, x]) => x !== undefined)
-        .sort(([a], [b]) => a.localeCompare(b))
+        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
         .map(([k, x]) => [k, canonical(x)]),
     );
   return v;
@@ -29,6 +29,8 @@ const sha = (def: unknown) =>
   createHash('sha256')
     .update(JSON.stringify(canonical(def)))
     .digest('hex');
+
+const id = (e: { kind: string; key: string; version: number }) => `${e.kind}/${e.key}/${e.version}`;
 
 type Entry = { kind: 'role' | 'workflow'; key: string; version: number; sha256: string };
 
@@ -41,28 +43,64 @@ const current = (): Entry[] =>
       version: d.version,
       sha256: sha(d),
     })),
-  ].sort((a, b) => `${a.kind}/${a.key}/${a.version}`.localeCompare(`${b.kind}/${b.key}/${b.version}`));
+  ].sort((a, b) => {
+    const x = id(a);
+    const y = id(b);
+    return x < y ? -1 : x > y ? 1 : 0;
+  });
+
+/**
+ * Problems between a snapshot and the current definitions. In update mode a changed hash of an existing (kind, key,
+ * version) is still a problem (that is exactly the bug the guard exists for); new entries are fine there.
+ */
+function problems(snap: Entry[], now: Entry[], update: boolean): string[] {
+  const byKey = new Map(snap.map((e) => [id(e), e]));
+  const cur = new Set(now.map(id));
+  const out: string[] = [];
+  for (const e of now) {
+    const old = byKey.get(id(e));
+    if (old && old.sha256 !== e.sha256)
+      out.push(
+        `${e.kind} '${e.key}' v${e.version}: its definition changed but the version did not. Bump the version (production only registers missing versions and agents only follow newer ones)${update ? '; update mode never overwrites an existing version' : ', then regenerate with UPDATE_BUILTIN_SNAPSHOT=1'}.`,
+      );
+    if (!old && !update)
+      out.push(
+        `${e.kind} '${e.key}' v${e.version} is not in the snapshot. Regenerate with UPDATE_BUILTIN_SNAPSHOT=1 npx vitest run test/builtin-version-snapshot.test.ts and commit the snapshot.`,
+      );
+  }
+  for (const e of snap)
+    if (!cur.has(id(e)))
+      out.push(
+        `${e.kind} '${e.key}' v${e.version} is in the snapshot but no longer defined: a built-in version is never removed (agents may still follow it). Restore it.`,
+      );
+  return out;
+}
 
 describe('built-in definitions are pinned to their version', () => {
   it('no role or workflow changed content without a version bump', () => {
-    if (process.env.UPDATE_BUILTIN_SNAPSHOT || !existsSync(FILE)) {
+    const update = !!process.env.UPDATE_BUILTIN_SNAPSHOT;
+    if (!existsSync(FILE)) {
+      if (!update)
+        expect.fail(
+          `The snapshot ${FILE.pathname} is missing. Restore it from version control, or create it once with UPDATE_BUILTIN_SNAPSHOT=1.`,
+        );
       writeFileSync(FILE, `${JSON.stringify(current(), null, 2)}\n`);
+      return;
     }
     const snap = JSON.parse(readFileSync(FILE, 'utf8')) as Entry[];
-    const byKey = new Map(snap.map((e) => [`${e.kind}/${e.key}/${e.version}`, e]));
-    const changed: string[] = [];
-    for (const e of current()) {
-      const old = byKey.get(`${e.kind}/${e.key}/${e.version}`);
-      if (old && old.sha256 !== e.sha256)
-        changed.push(
-          `${e.kind} '${e.key}' v${e.version}: its definition changed but the version did not. Bump the version (production only registers missing versions and agents only follow newer ones), then regenerate with UPDATE_BUILTIN_SNAPSHOT=1.`,
-        );
-      if (!old)
-        changed.push(
-          `${e.kind} '${e.key}' v${e.version} is not in the snapshot. Regenerate with UPDATE_BUILTIN_SNAPSHOT=1 npx vitest run test/builtin-version-snapshot.test.ts and commit the snapshot.`,
-        );
-    }
-    expect(changed).toEqual([]);
+    const found = problems(snap, current(), update);
+    expect(found).toEqual([]);
+    if (update) writeFileSync(FILE, `${JSON.stringify(current(), null, 2)}\n`);
+  });
+
+  it('flags changed, new and removed definitions', () => {
+    const a: Entry = { kind: 'role', key: 'x', version: 1, sha256: 'a' };
+    expect(problems([a], [{ ...a, sha256: 'b' }], false)).toHaveLength(1);
+    expect(problems([a], [{ ...a, sha256: 'b' }], true)).toHaveLength(1);
+    expect(problems([a], [a, { ...a, version: 2 }], false)).toHaveLength(1);
+    expect(problems([a], [a, { ...a, version: 2 }], true)).toEqual([]);
+    expect(problems([a], [], false)).toHaveLength(1);
+    expect(problems([a], [], true)).toHaveLength(1);
   });
 
   it('detects a content change under an unchanged version', () => {
