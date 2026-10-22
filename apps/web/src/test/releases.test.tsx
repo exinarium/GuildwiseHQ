@@ -122,12 +122,13 @@ const status = (rulesMet: boolean) => ({
   generatedAt: ago(0),
 });
 
-function route(over: { queue?: unknown; status?: unknown } = {}) {
+function route(over: { queue?: unknown; status?: unknown; release?: () => unknown } = {}) {
   fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
     const u = String(url);
     const method = init?.method ?? 'GET';
     calls.push({ url: u, method, body: init?.body ? JSON.parse(String(init.body)) : undefined });
     if (u === '/api/org/live') return json({ rows: live });
+    if (u === '/api/delivery/release' && over.release) return json(over.release());
     if (u === '/api/delivery/queue') return json({ items: over.queue ?? [queueItem(false)] });
     if (u.startsWith('/api/delivery/runs')) return json({ runs: [] });
     if (u.endsWith('/environments/status')) return json(over.status ?? status(false));
@@ -315,6 +316,85 @@ describe('ReleaseSheet', () => {
     const post = calls.find((c) => c.method === 'POST');
     expect(post?.url).toBe('/api/delivery/release');
     expect(post?.body).toEqual({ runIds: [U(9)] });
+  });
+
+  const twoPlaces = () => {
+    const item = queueItem(true);
+    return [
+      {
+        ...item,
+        targets: [
+          item.targets[0],
+          { ...item.targets[0], runId: U(10), targetId: U(6), targetName: 'prod-server-2' },
+        ],
+      },
+    ];
+  };
+
+  it('some places queued and others refused: the refused ones stay on screen with their reasons', async () => {
+    let n = 0;
+    route({
+      status: status(true),
+      queue: twoPlaces(),
+      release: () => {
+        n += 1;
+        return {
+          message: 'one started',
+          runs: [
+            { runId: U(9), target: 'prod-server', status: 'queued' },
+            {
+              runId: U(10),
+              target: 'prod-server-2',
+              status: 'refused',
+              refusal: 'run_in_progress',
+              detail: 'production on prod-server-2 is being deployed right now',
+            },
+          ],
+        };
+      },
+    });
+    const onClose = vi.fn();
+    wrap(<ReleaseSheet projectId={U(1)} env="production" label="Live site" onClose={onClose} />);
+    await userEvent.click(await screen.findByTestId('release-place-prod-server'));
+    await userEvent.click(screen.getByTestId('release-place-prod-server-2'));
+    const btn = screen.getByTestId('release-now');
+    await waitFor(() => expect(btn).toBeEnabled());
+    await userEvent.click(btn);
+    const box = await screen.findByTestId('release-refused');
+    expect(box).toHaveTextContent('prod-server-2');
+    expect(box).toHaveTextContent('is being deployed right now');
+    expect(box).not.toHaveTextContent('prod-server:');
+    expect(onClose).not.toHaveBeenCalled();
+    expect(n).toBe(1);
+  });
+
+  it('a retry after a refusal clears the old reason first, and closes when it works', async () => {
+    let n = 0;
+    route({
+      status: status(true),
+      release: () => {
+        n += 1;
+        return n === 1
+          ? {
+              message: 'Refused (run_in_progress): busy',
+              runs: [
+                { runId: U(9), target: 'prod-server', status: 'refused', refusal: 'run_in_progress' },
+              ],
+            }
+          : { message: 'ok', runs: [{ runId: U(9), target: 'prod-server', status: 'queued' }] };
+      },
+    });
+    const onClose = vi.fn();
+    wrap(<ReleaseSheet projectId={U(1)} env="production" label="Live site" onClose={onClose} />);
+    const btn = await screen.findByTestId('release-now');
+    await waitFor(() => expect(btn).toBeEnabled());
+    await userEvent.click(btn);
+    expect(await screen.findByTestId('release-refused')).toHaveTextContent('busy');
+    expect(onClose).not.toHaveBeenCalled();
+    await userEvent.click(btn);
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(screen.queryByTestId('release-refused')).toBeNull();
+    expect(n).toBe(2);
   });
 });
 

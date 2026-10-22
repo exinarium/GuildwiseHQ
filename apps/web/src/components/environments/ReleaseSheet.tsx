@@ -1,3 +1,4 @@
+import type { DeployResult } from '@aom/shared';
 import { useState } from 'react';
 import { useDeploy, useRelease } from '../../api/queries/delivery.ts';
 import { useEnvStatus } from '../../api/queries/environments.ts';
@@ -24,7 +25,7 @@ export function ReleaseSheet({
   const deploy = useDeploy(projectId);
   const toast = useToast();
   const w = status.data?.find((s) => s.env === env)?.waitingRelease ?? null;
-  const [refused, setRefused] = useState<string | null>(null);
+  const [refused, setRefused] = useState<string[] | null>(null);
   const [picked, setPicked] = useState<Record<string, boolean> | null>(null);
   const places = w?.places ?? [];
   const pick = picked ?? Object.fromEntries(places.map((p) => [p.runId, places.length === 1]));
@@ -36,23 +37,24 @@ export function ReleaseSheet({
     toast.success(`Releasing to ${label}`);
     onClose();
   };
+  // What the server said: nothing refused closes the sheet; everything refused stays with its reason; some of each starts the
+  // ones that were accepted and keeps the refused ones on screen with their reasons (the sheet is not closed over them).
+  const answered = (r: DeployResult) => {
+    const no = r.runs.filter((x) => x.status === 'refused');
+    if (no.length === 0) return done();
+    if (no.length === r.runs.length) return setRefused([r.message]);
+    const started = r.runs.filter((x) => x.status !== 'refused').map((x) => x.target);
+    toast.success(`Releasing to ${started.join(', ')}`);
+    setRefused(no.map((x) => `${x.target || label}: ${x.detail ?? x.refusal ?? 'refused'}`));
+  };
   const go = () => {
+    setRefused(null);
     if (w && places.length > 0)
       release.mutate(
         chosen.map((p) => p.runId),
-        { onSuccess: done },
+        { onSuccess: answered },
       );
-    else
-      deploy.mutate(
-        { env, ...(w?.commit ? { commit: w.commit } : {}) },
-        {
-          onSuccess: (r) => {
-            // a request the server refused (a rule that does not hold, a run already going) stays on screen with its reason
-            if (r.runs.length > 0 && r.runs.every((x) => x.status === 'refused')) setRefused(r.message);
-            else done();
-          },
-        },
-      );
+    else deploy.mutate({ env, ...(w?.commit ? { commit: w.commit } : {}) }, { onSuccess: answered });
   };
   const reason = blocked
     ? `Waiting for: ${w?.waitingFor.join('; ') || 'the rules to hold'}.`
@@ -155,9 +157,11 @@ export function ReleaseSheet({
               </p>
             )}
             {refused && (
-              <p role="alert" className="text-sm text-danger" data-testid="release-refused">
-                {refused}
-              </p>
+              <div role="alert" className="text-sm text-danger" data-testid="release-refused">
+                {refused.map((line) => (
+                  <p key={line}>{line}</p>
+                ))}
+              </div>
             )}
             <ErrorBox error={release.error ?? deploy.error} />
           </>
