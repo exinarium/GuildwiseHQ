@@ -333,6 +333,9 @@ step('workstation A, projects, agents', async () => {
   await hire('Arno', 'architect', 'senior', 'opus');
   await hire('Ada', 'builder', 'senior', 'opus');
   await hire('Linus', 'reviewer', 'senior', 'sonnet');
+  // the Pre-review stage of the lean flow: without a pre-reviewer the reviewer does that pass too, and a card waiting
+  // for the busy reviewer would sit in Pre-review instead of in the review queue
+  await hire('Petra', 'pre_reviewer', 'junior', 'sonnet');
   await hire('Tess', 'tester', 'junior', 'sonnet');
   await hire('Olga', 'ba', 'senior', 'opus', false);
 });
@@ -1433,7 +1436,15 @@ step('test stage: bug loop, conflict, review queue, large merge, busy agents, to
   expect(
     (await p.post(`/api/cards/${ta.ref}/cancel`, { data: { reason: 'Replaced by a later card' } })).ok(),
   ).toBeTruthy();
-  await waitCard(cc.ref, 'back in build after the conflict', (c) => c.stage === 'merge_review' || c.rework_round >= 1, 300_000);
+  // the conflict at Finalize: DevOps asks to resolve it (the card waits in Finalize for that approval), or the card goes
+  // to the merge review or back to build
+  await waitCard(
+    cc.ref,
+    'back in build after the conflict',
+    (c) =>
+      c.stage === 'merge_review' || c.rework_round >= 1 || (c.stage === 'finalize' && c.status === 'waiting'),
+    300_000,
+  );
   await waitCard(tb.ref, 'waiting on its bug', (c) => c.status === 'waiting', 300_000);
   // the second long test is made only now: if the runner turns the conflicting card's shift away because it is still
   // tearing down the cancelled one, the card goes to the back of the queue and a hanging test would starve it
@@ -1815,7 +1826,11 @@ step(
     const pp = await pieter();
     const ceo = (await (await pp.get('/api/agents')).json()).agents.find((a: any) => a.roleKey === 'ceo');
     expect(ceo, 'the built-in CEO exists').toBeTruthy();
-    expect((await pp.patch(`/api/agents/${ceo.id}`, { data: { runtime: 'mock', model: 'mock' } })).ok()).toBe(true);
+    // the CEO goes to the Owner's most recently seen workstation, which can be the unsandboxed workstation B
+    const ceoMock = await pp.patch(`/api/agents/${ceo.id}`, {
+      data: { runtime: 'mock', model: 'mock', acknowledgeUnsandboxed: true },
+    });
+    expect(ceoMock.ok(), await ceoMock.text()).toBe(true);
     S.ids['agent:ceo'] = ceo.id;
     const p = await pieter();
     const ZONE = 'Africa/Johannesburg';
@@ -2144,7 +2159,8 @@ cap('the desk and the ledger', async () => {
   const shots: Array<[string, string | RegExp]> = [
     ['desk-question', /How long may we keep the personal data/],
     ['desk-outbound', /Approve resolution for Jira SUP-231/],
-    ['desk-large-merge', /Approve merge of/],
+    // no 'desk-large-merge': the lean flow asks for the owner approval after the review, not for a merge approval at
+    // Finalize (the large card of the seed merges without a desk item)
     ['desk-branch', /Which branch is the working branch of notes-app/],
     ['desk-phase-done', /is done: approve/],
     ['desk-daily-report', /^Daily report /],
@@ -2457,9 +2473,6 @@ cap(
     await snap(pPage, 'commit-as', { sel: commitAs });
     await snap(pPage, 'manual-qa-setting', {
       sel: pPage.getByTestId('manual-qa-toggle').locator('xpath=ancestor::section[1]'),
-    });
-    await snap(pPage, 'run-settings', {
-      sel: pPage.getByTestId('run-settings').locator('xpath=ancestor::section[1]'),
     });
     // the archive of finished cards
     await open(pPage, '/p/WEB/archive');

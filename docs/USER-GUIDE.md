@@ -124,6 +124,7 @@ This guide is for people who have never worked with AI agents before. You do not
 
 
 
+
 ## 1. What Guildwise HQ is
 
 ### 1.1 The idea in one minute
@@ -427,6 +428,8 @@ Open **Organization** at the bottom of the sidebar. The tabs are **General**, **
 
 **Project links.** Owners and Admins find the **Project links** tab on the same page (Organization, then **Project links**). Here you tell Guildwise how your projects belong together: add a link between two projects, or between a project and something outside Guildwise (type its name). A link says that one **depends on**, **uses** or **is related to** the other, with an optional note. **Remove** takes a link away. The CEO reads these links, with the project names, to decide which project a request is for. The tab lists only the links you add. What the code suggests stays on your workstation: the CEO can show those suggestions in chat, and they count only after you add the link here.
 
+![The Project links tab of the organization](guide/assets/org-project-links.jpg)
+
 If you belong to several organizations, the **organization switcher** at the top of the sidebar shows which one this browser tab works in. A different tab can work in a different organization. Projects of an organization where you are only a guest carry a "Guest" label.
 
 ### 4.2 Members, invitations and guests
@@ -535,6 +538,8 @@ To measure whether the map saves tokens, one card in five runs without it for fo
 ### 4.3b The project backlog
 
 Every project has a **Backlog** tab next to its **Board**. It is your list of wanted work that is **not in development yet**: nothing on the backlog is worked on by an agent, becomes a card, appears on the board or creates a desk item until you send it to the BA.
+
+![The backlog of a project](guide/assets/backlog.jpg)
 
 **Add and edit.** Type a title in the quick-add field and press **Enter** (or **Add**, which is there for touch screens). The item is **Open**, priority **Normal**, with no tags, not starred, and its source is you. **Edit** opens the title, description (what you want), priority (Critical, High, Normal, Low) and tags. The **star** marks an item to look at soon. **Drop** sets the item to **Dropped**. Done is set only by sending; reopening a dropped item is not possible. Only **Owners and Admins** of the organization manage the backlog (add, edit, star, drop, send); every member of the project, guests included, can read it.
 
@@ -899,6 +904,8 @@ Your CEO is your eyes and ears on the floor, and it never slows an agent down. T
 
 **The daily report.** At the report time you set on the CEO page, **Reporting & alerts** tab (08:00 by default, in your time zone, 4.30), the CEO puts one report on your desk, titled "Daily report <date>", on days with something to say. It lists what needs you, what the CEO decided (with Undo), phases waiting, stuck and backing-off cards, repeated approvals, failures, open DevOps requests, **spend**, the new backlog suggestions from agents and highlights from your interests. Open **The facts behind this report** for the same lists straight from the server, and talk to the CEO about anything in it. When the CEO cannot run for two hours the server posts a plain template report with the same facts. Scheduled tasks that ask the CEO for something are in 4.8.
 
+![The CEO's daily report on the desk](guide/assets/desk-daily-report.jpg)
+
 > **In the app:** Help, "The daily report and what is watched" (`/help/ba-reporter`) and "Your CEO" (`/help/ceo`).
 
 ### 4.12 Testing, finalizing and risk
@@ -1092,11 +1099,17 @@ The **CEO** is the agent you talk to first. It runs the floor for you: it watche
 
 **The CEO page.** Open **CEO** in the sidebar (Organization group, `/org/ceo`). The Owner sees nine tabs: **Overview**, **Authority**, **Reporting & alerts**, **Persona & instructions**, **Memory**, **Tasks**, **Topics**, **Activity log** and **Workstations**. Admins see the Overview and the activity log, and can pause the CEO.
 
+![The CEO page, Overview tab](guide/assets/ceo.jpg)
+
+![The Reporting & alerts tab of the CEO page](guide/assets/ceo-reporting.jpg)
+
 **Where it runs.** The CEO lives on the Owner's own workstation (the first one they pair). To use another of your own workstations, open the **Workstations** tab and press **Move the CEO here** on it. Until a workstation is paired the page says "Pair a workstation to talk to <name>". Its background work (wakes and the daily report) is restricted: read-only, no web, one command, `aom`. **Pause** is an emergency stop: it may read but not act.
 
 **There is no training period.** The CEO decides what your policy allows from day one; the Owner reviews and corrects what it did (see **CEO decisions** on the Desk and the **Correct** buttons below). Organizations that had a CEO in training were graduated when this shipped.
 
 **Full power in your own chat.** When **you** talk to the CEO it is a real Claude Code session on your workstation: your own `~/.claude` settings, skills, plugins and MCP servers, your home directory and no Guildwise sandbox, and it can also act in Guildwise through `aom ceo`. That is the power you have yourself, so it is off until you switch it on **on that machine**: run `aom-runner ceo full-power on` and restart the runner (the Overview says "Full power is off on <workstation>" until then, and your messages still work in the restricted mode). Nothing but your own message starts such a turn: events, agents and your team never do. Set the session's fixed working directory under **Persona & instructions** (empty is your home directory); the session continues from message to message (it starts a new one, with a short handover, after 24 hours, a long context, another working directory or another model runtime). The runner's own program and secrets (`~/.aom-runner`) are off limits to it, and it restarts the runner only with `aom runner restart` after it has answered, never with `systemctl` or `kill`. Attached files are not supported yet.
+
+![A chat with the CEO](guide/assets/ceo-chat.jpg)
 
 **Authorize this execution.** Turns run in auto mode: nobody types "allow" at a terminal. When the runtime needs a permission it does not have, you or any Admin of the organization get a question on the Desk, **Authorize this execution** (the tool, what it wants to run and why). **Authorize once**, **Authorize for this turn** or **Deny**. No answer within 10 minutes is a Deny. A phone notification only points to the Desk item. In your chat the question also appears as a card.
 
@@ -1211,6 +1224,8 @@ New projects start on the **lean team** workflow; a project made earlier keeps i
 
 The **Environments** page (sidebar, under the board, for projects that deliver code) is where you say how your app starts and where it runs: **Your app: how to start it**, **Test copies** (one temporary copy per card), the **environments** (the **test site**, the **live site** and any extra site such as a demo), **Places** (the computers and servers), **Rules** and **History**. When an environment is set up and approved, a **Releases** switch at the top (**On** or **Paused**) turns the project's releases on or off: pausing asks "Pause releases?", and while releases are paused the environment cards show **Releases paused** and **Update now** is off. Only the project owner changes the switch, and it needs an approved environment first. Where the releases go once they are ready (the queue, what is live, the rules) is on the **Releases** page (4.28).
 
+![The Environments page of a project](guide/assets/environments.jpg)
+
 An approved setup turns "how we deploy" into something you approve once and that then runs the same way every time, **without a model running any deploy command**.
 
 **What the setup is made of.** Behind the page is a folder `delivery/` in the **project vault** (never the organization vault), holding `recipe.yaml` and one script per environment. The recipe lists its **environments** in order (for example `local`, then `production`). Each one names where it goes (one or several of the project's **deploy targets**), the script and its arguments, **when** it runs (after a merge, after a phase, or only on request), how long it may take, the **health check** that says it worked (a web address, a port, or a line the script prints, such as `P5 DEPLOY READY`), an optional **smoke check**, the **names** of the secrets it needs, and the **gate**. It also says **who releases it** (below). A script must do the same steps every time, check itself and exit with a reason when something is wrong, be safe to run twice, and honour a dry run (`AOM_DEPLOY_DRY_RUN=1`: check inputs and access, print the plan, change nothing).
@@ -1247,6 +1262,8 @@ An approved setup turns "how we deploy" into something you approve once and that
 
 The **Releases** page (sidebar, Organization group; the old address `/deploys` leads here) shows, across all projects, which version is live on each site, what is waiting for you and what was released. Setting up where an app runs happens on the project's Environments page (4.27). A project whose releases are **Paused** shows a **Releases paused** badge here and on its environment cards.
 
+![The Releases page](guide/assets/releases.jpg)
+
 **Who releases an environment.** The recipe decides, and you approved it:
 - **The Owner or an Admin** (the default): a ready release waits in the **release queue**. Nothing runs until one of you presses **Release**.
 - **The CEO**: only where the recipe names the CEO, it releases by itself once the gate holds. Where text from outside (a card, a ticket, an e-mail) may have caused the request, production still waits for you.
@@ -1268,6 +1285,8 @@ The CEO is never the releaser unless the recipe says so, and an Owner or Admin c
 ### 4.29 Metrics
 
 **Metrics** (sidebar, Organization group) shows what the team delivered, where it waited on you and where quality slipped. Everybody who can see the organization can open it.
+
+![The Metrics page](guide/assets/metrics.jpg)
 
 At the top, the **Project** filter (shown when you have more than one project; **All projects** is the default) and the range chips **7 days**, **14 days**, **30 days** and **90 days** decide what the panels count. The panels are:
 
