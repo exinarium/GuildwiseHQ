@@ -1,0 +1,36 @@
+{
+  "title": "Automations",
+  "src": "/videos/automations.webm",
+  "type": "video/webm",
+  "sources": [
+    {
+      "src": "/videos/automations.mp4",
+      "type": "video/mp4"
+    },
+    {
+      "src": "/videos/automations.webm",
+      "type": "video/webm"
+    }
+  ],
+  "captions": "/videos/automations.vtt",
+  "voice": "Piper en_GB-cori-high",
+  "duration": 75,
+  "chapters": [
+    {
+      "t": 8.2,
+      "title": "Your automations"
+    },
+    {
+      "t": 17.9,
+      "title": "New automation: When"
+    },
+    {
+      "t": 34.1,
+      "title": "What and Details"
+    },
+    {
+      "t": 50.7,
+      "title": "Run now, History and Pause"
+    }
+  ]
+}

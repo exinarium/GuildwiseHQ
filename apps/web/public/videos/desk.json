@@ -1,0 +1,44 @@
+{
+  "title": "Your Desk",
+  "src": "/videos/desk.webm",
+  "type": "video/webm",
+  "sources": [
+    {
+      "src": "/videos/desk.mp4",
+      "type": "video/mp4"
+    },
+    {
+      "src": "/videos/desk.webm",
+      "type": "video/webm"
+    }
+  ],
+  "captions": "/videos/desk.vtt",
+  "voice": "Piper en_GB-cori-high",
+  "duration": 100,
+  "chapters": [
+    {
+      "t": 9.3,
+      "title": "Open the desk"
+    },
+    {
+      "t": 23.7,
+      "title": "Filters"
+    },
+    {
+      "t": 34.6,
+      "title": "Answer a question"
+    },
+    {
+      "t": 52.4,
+      "title": "Accept a recommendation"
+    },
+    {
+      "t": 65.7,
+      "title": "What the CEO handled"
+    },
+    {
+      "t": 82.8,
+      "title": "The daily report"
+    }
+  ]
+}
