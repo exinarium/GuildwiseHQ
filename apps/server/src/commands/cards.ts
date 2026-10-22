@@ -516,7 +516,7 @@ export async function patchCardIn(
     if (card.worktree_path || card.branch_name)
       throw conflict(
         'repo_locked',
-        `${card.ref} already has a worktree or a branch in its repository: the repository can no longer be changed`,
+        `${card.ref} already has a branch or a worktree in its current repository, and moving the card would leave them behind on the workstation: cancel this card and create a new one in the right repository`,
       );
     if (patch.repoId) await assertRepoInProject(tx, card.project_id, patch.repoId);
     changes.repoId = patch.repoId;

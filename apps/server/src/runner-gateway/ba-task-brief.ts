@@ -210,7 +210,7 @@ export async function buildBaTaskShiftStart(
     vault: await shiftVault(ctx, agent, project.id),
     // Repository scoping given to an architect (the fallback): it reads the project's repositories, read-only. The BA never
     // gets them: it works from the code graph and the vault (it reads no source).
-    ...(specTask?.chooseRepo && agent.permissions?.readOrgRepos === true
+    ...(specTask?.chooseRepo && specTask.by === 'architect' && agent.permissions?.readOrgRepos === true
       ? { readRepos: await projectReadRepos(ctx.pool, project.id) }
       : {}),
     ...(await graphScopeFor(ctx, project.id).then((graph) => (graph ? { graph } : {}))),

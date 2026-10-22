@@ -1,6 +1,7 @@
 import { graphRepoKey, MIN_RUNNER_FOR_REPO_SCOPING } from '@aom/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { baTaskPass } from '../src/dispatcher/ba-tasks.ts';
+import { uniqueEmail } from './helpers/app.ts';
 import { act, appoint, keepOnline, startCeoShift, wakeNow } from './helpers/ceo.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import type { FakeRunner } from './helpers/fake-runner.ts';
@@ -416,5 +417,184 @@ describe('Send to BA', () => {
     const complete = await w.card({ title: 'Complete', repoId: repoIds.api });
     const again = await w.t.req('POST', `/api/cards/${complete.id}/send-to-ba`, { cookie: w.owner.cookie });
     expect(again.status).toBe(409);
+  });
+});
+
+describe('review fixes', () => {
+  beforeAll(async () => {
+    // tasks left over from the tests above would be dispatched first
+    await q(`UPDATE ba_tasks SET status='cancelled' WHERE status='queued'`);
+  });
+
+  const depsOf = async (id: string) =>
+    (await q('SELECT depends_on_card_id AS d FROM card_dependencies WHERE card_id=$1', [id]))
+      .map((x) => x.d as string)
+      .sort();
+
+  it('a split passes the parent upstream on to the roots and the downstream onto the leaves', async () => {
+    const upstream = await w.card({ title: 'Upstream of the parent', repoId: repoIds.api });
+    const downstream = await w.card({ title: 'Waits on the parent', repoId: repoIds.api });
+    const made = await findRepoCard('Cross-repo with neighbours');
+    const parent = made.card.id;
+    await q('INSERT INTO card_dependencies (card_id, depends_on_card_id) VALUES ($1,$2),($3,$1)', [
+      parent,
+      upstream.id,
+      downstream.id,
+    ]);
+    const start = await dispatch('ba');
+    const sent = await report(start, {
+      split: [
+        { title: 'API part', repo: 'api', fields: fieldsFor(start, 'api') },
+        { title: 'Web part', repo: 'web', fields: fieldsFor(start, 'web'), dependsOn: [1] },
+        { title: 'Toy part', repo: 'toy', fields: fieldsFor(start, 'toy') },
+      ],
+    });
+    expect(sent.accepted, JSON.stringify(sent)).toBe(true);
+    const [api, web, toy] = await q('SELECT * FROM cards WHERE parent_card_id=$1 ORDER BY number', [parent]);
+    expect(await depsOf(api!.id)).toEqual([upstream.id]); // root: inherits the parent's prerequisite
+    expect(await depsOf(toy!.id)).toEqual([upstream.id]); // root
+    expect(await depsOf(web!.id)).toEqual([api!.id]); // reached through its sibling
+    // the dependent waits on the leaves (web and toy), not on the cancelled parent
+    expect(await depsOf(downstream.id)).toEqual([web!.id, toy!.id].sort());
+    r.ended(start.shiftId, 'reported');
+  });
+
+  it('a repository-only report that leaves fields missing is rolled back, and the same report can be retried', async () => {
+    const made = await findRepoCard('Repo first, fields later');
+    const start = await dispatch('ba');
+    const first = await report(start, { repo: 'api' });
+    expect(first.accepted).toBe(false);
+    expect(first.error).toContain('still lacks');
+    expect((await cardRow(made.card.id)).repo_id).toBeNull();
+    expect(
+      await q(`SELECT 1 FROM events WHERE type='CardUpdated' AND payload->>'cardId'=$1`, [made.card.id]),
+    ).toHaveLength(0);
+    const retry = await report(start, { repo: 'api', fields: fieldsFor(start, 'api') });
+    expect(retry.accepted, JSON.stringify(retry)).toBe(true);
+    expect((await cardRow(made.card.id)).repo_id).toBe(repoIds.api);
+    r.ended(start.shiftId, 'reported');
+  });
+
+  it('accepts the repository the card got meanwhile', async () => {
+    const made = await findRepoCard('Owner set the repo meanwhile');
+    const start = await dispatch('ba');
+    await q('UPDATE cards SET repo_id=$2 WHERE id=$1', [made.card.id, repoIds.web]);
+    const other = await report(start, { repo: 'api', fields: fieldsFor(start, 'x') });
+    expect(other.accepted).toBe(false);
+    const res = await report(start, { repo: 'web', fields: fieldsFor(start, 'web') });
+    expect(res.accepted, JSON.stringify(res)).toBe(true);
+    expect((await cardRow(made.card.id)).status).toBe('queued');
+    r.ended(start.shiftId, 'reported');
+  });
+
+  it('never gives the BA readRepos, even when its role carries readOrgRepos', async () => {
+    await q(`UPDATE agents SET permissions = permissions || '{"readOrgRepos": true}' WHERE role_key='ba'`);
+    try {
+      const made = await findRepoCard('BA with a wide role');
+      const start = await dispatch('ba');
+      expect(start.baTask.specCard.by).toBe('ba');
+      expect(start.readRepos).toBeUndefined();
+      await reportFail(start, 'skip');
+      r.ended(start.shiftId, 'reported');
+      void made;
+    } finally {
+      await q(`UPDATE agents SET permissions = permissions - 'readOrgRepos' WHERE role_key='ba'`);
+    }
+  });
+
+  it('Send to BA twice at once queues one task and refuses the second', async () => {
+    const draft = await ok<any>(
+      w.t.req('POST', '/api/cards', {
+        cookie: w.owner.cookie,
+        body: {
+          projectId: w.projectId,
+          title: 'Double click',
+          cardType: 'feature',
+          fields: { context: text },
+        },
+      }),
+      201,
+    );
+    const go = () => w.t.req('POST', `/api/cards/${draft.card.id}/send-to-ba`, { cookie: w.owner.cookie });
+    const res = await Promise.all([go(), go()]);
+    expect(res.map((x) => x.status).sort()).toEqual([200, 409]);
+    expect(
+      await q(`SELECT 1 FROM ba_tasks WHERE card_id=$1 AND kind='spec_card'`, [draft.card.id]),
+    ).toHaveLength(1);
+    // the card page stops offering it
+    const detail = await ok<any>(w.t.req('GET', `/api/cards/${draft.card.id}`, { cookie: w.owner.cookie }));
+    expect(detail.canSendToBa).toBe(false);
+    await q(`UPDATE ba_tasks SET status='cancelled' WHERE card_id=$1`, [draft.card.id]);
+    const complete = await w.card({ title: 'Has everything', repoId: repoIds.api });
+    const d2 = await ok<any>(w.t.req('GET', `/api/cards/${complete.id}`, { cookie: w.owner.cookie }));
+    expect(d2.canSendToBa).toBe(false);
+  });
+
+  it('offers Send to BA on a draft that only lacks a repository', async () => {
+    const draft = await ok<any>(
+      w.t.req('POST', '/api/cards', {
+        cookie: w.owner.cookie,
+        body: { projectId: w.projectId, title: 'Offer it', cardType: 'feature', fields: { context: text } },
+      }),
+      201,
+    );
+    const detail = await ok<any>(w.t.req('GET', `/api/cards/${draft.card.id}`, { cookie: w.owner.cookie }));
+    expect(detail.canSendToBa).toBe(true);
+  });
+
+  it('create reports baQueued=false when nothing was queued', async () => {
+    await q(`UPDATE agents SET status='retired' WHERE role_key IN ('ba','architect')`);
+    try {
+      const res = await findRepoCard('Nobody home');
+      expect((res as any).baQueued).toBe(false);
+    } finally {
+      await q(`UPDATE agents SET status='active' WHERE role_key IN ('ba','architect')`);
+    }
+  });
+
+  it('a paused BA is not chosen: the architect takes the task', async () => {
+    await w.hire('Archie2', 'architect', 'senior');
+    await q(`UPDATE agents SET paused_at=now() WHERE role_key='ba'`);
+    try {
+      const made = await findRepoCard('Only BA is paused');
+      expect(made.message).toContain('sent to the architect');
+      const start = await dispatch('architect');
+      expect(start.baTask.specCard.by).toBe('architect');
+      await reportFail(start, 'skip');
+      r.ended(start.shiftId, 'reported');
+    } finally {
+      await q(`UPDATE agents SET paused_at=NULL WHERE role_key='ba'`);
+      await q(`UPDATE agents SET status='retired' WHERE role_key='architect'`);
+    }
+  });
+
+  it('splits a card whose owner has left the project, as the project owner', async () => {
+    const gone = await w.t.userSession(uniqueEmail('gone'));
+    const made = await findRepoCard('Owner is gone');
+    const parent = made.card.id;
+    await q('UPDATE cards SET owner_user_id=$2 WHERE id=$1', [parent, gone.id]);
+    const start = await dispatch('ba');
+    const sent = await report(start, {
+      split: [
+        { title: 'Gone API', repo: 'api', fields: fieldsFor(start, 'api') },
+        { title: 'Gone web', repo: 'web', fields: fieldsFor(start, 'web') },
+      ],
+    });
+    expect(sent.accepted, JSON.stringify(sent)).toBe(true);
+    const kids = await q('SELECT owner_user_id FROM cards WHERE parent_card_id=$1', [parent]);
+    expect(kids).toHaveLength(2);
+    expect(kids.every((k) => k.owner_user_id === w.owner.id)).toBe(true);
+    r.ended(start.shiftId, 'reported');
+  });
+
+  it('the repo_locked refusal says what to do instead', async () => {
+    const card = await w.card({ title: 'Stale branch', repoId: repoIds.api });
+    await q(`UPDATE cards SET branch_name='aom/stale' WHERE id=$1`, [card.id]);
+    const res = await w.t.req('PATCH', `/api/cards/${card.id}`, {
+      cookie: w.owner.cookie,
+      body: { repoId: repoIds.web },
+    });
+    expect(res.status).toBe(409);
+    expect(JSON.stringify(res.body)).toContain('create a new one in the right repository');
   });
 });

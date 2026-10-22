@@ -19,8 +19,8 @@ import type { Ctx } from '../context.ts';
 import { one, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { buildBaTaskShiftStart } from '../runner-gateway/ba-task-brief.ts';
-import { wsServesOrgSql } from '../simulation/fit.ts';
 import { accountFor, loadProjectAccounts } from './accounts.ts';
+import { BA_TASK_AGENT_FROM, baTaskAgentEligibleSql } from './ba-agent-sql.ts';
 import { projectHeldSql } from './project-hold.ts';
 
 const ONLINE_WINDOW_MS = 45_000;
@@ -116,13 +116,8 @@ export async function baTaskPass(
     const bas = await rows(
       ctx.pool,
       `SELECT a.*, ws.id AS ws_id, ws.user_id AS ws_user_id, ws.runner_version, ws.runtimes, ws.connected, ws.last_seen_at
-         FROM agents a JOIN workstations ws ON ws.id = a.workstation_id AND ws.status = 'active'
-                       JOIN users wu ON wu.id = ws.user_id AND wu.status = 'active'
-        WHERE a.org_id = $1 AND a.role_key = $5 AND a.status = 'active' AND a.paused_at IS NULL AND NOT a.is_devops
-          AND ${wsServesOrgSql('ws', 'a.org_id')}
-          AND ($4::boolean OR ((a.allowed_project_ids IS NULL OR $2::uuid = ANY (a.allowed_project_ids))
-               AND EXISTS (SELECT 1 FROM project_members pm WHERE pm.project_id = $2::uuid AND pm.user_id = ws.user_id
-                            AND pm.status = 'active')))
+         FROM ${BA_TASK_AGENT_FROM}
+        WHERE a.role_key = $5 AND ${baTaskAgentEligibleSql({ org: '$1', project: '$2', orgLevel: '$4' })}
         ORDER BY (a.id = $3::uuid) DESC,
                  (SELECT count(*) FROM workstation_repos wr JOIN project_repos pr ON pr.id = wr.project_repo_id
                    WHERE wr.workstation_id = ws.id AND pr.project_id = $2::uuid AND pr.removed_at IS NULL

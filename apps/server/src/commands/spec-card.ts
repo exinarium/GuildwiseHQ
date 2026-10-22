@@ -22,6 +22,7 @@ import { loadWorkflowById } from '../catalogue/loader.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Queryable, type Row, rows } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
+import { BA_TASK_AGENT_FROM, baTaskAgentEligibleSql } from '../dispatcher/ba-agent-sql.ts';
 import { needsRepoScoping, resolveRepo } from './card-repo.ts';
 import {
   architectFlags,
@@ -136,9 +137,10 @@ export async function scopingPlan(
 ): Promise<{ role: 'ba' | 'architect'; vaultRequired: boolean } | null> {
   const agents = await rows(
     db,
-    `SELECT a.role_key, w.user_id FROM agents a LEFT JOIN workstations w ON w.id = a.workstation_id
-      WHERE a.org_id=$1 AND a.role_key IN ('ba','architect') AND a.status='active' AND NOT a.is_devops`,
-    [card.org_id],
+    `SELECT a.role_key, ws.user_id FROM ${BA_TASK_AGENT_FROM}
+      WHERE a.role_key IN ('ba','architect')
+        AND ${baTaskAgentEligibleSql({ org: '$1', project: '$2', orgLevel: 'false' })}`,
+    [card.org_id, card.project_id],
   );
   const bas = agents.filter((a) => a.role_key === 'ba');
   const hasArchitect = agents.some((a) => a.role_key === 'architect');
@@ -164,6 +166,8 @@ export async function queueSpecCardTask(
   card: Row,
   actor: Parameters<Ctx['store']['append']>[0][number]['actor'],
 ): Promise<{ taskId: string; existing: boolean }> {
+  // Under the card's lock, so two callers cannot both see "no open task" and queue two.
+  await tx.query('SELECT 1 FROM cards WHERE id=$1 FOR UPDATE', [card.id]);
   const open = await one(
     tx,
     `SELECT id FROM ba_tasks WHERE card_id=$1 AND kind='spec_card' AND status IN ('queued','running') LIMIT 1`,
@@ -381,6 +385,28 @@ async function planSplit(
 const PARENT_LINK_ORIGINS = new Set(['test_failure', 'full_suite', 'regression', 'subworkflow']);
 
 /**
+ * Who the children belong to: the card's owner, or the project owner when the owner has left the project (the children
+ * are created through the owner's project access, which a former member no longer has).
+ */
+async function splitOwner(tx: Tx, card: Row): Promise<AuthSession['user']> {
+  const member = await one(
+    tx,
+    `SELECT 1 AS x FROM project_members WHERE project_id=$1 AND user_id=$2 AND status='active'`,
+    [card.project_id, card.owner_user_id],
+  );
+  let id = card.owner_user_id as string;
+  if (!member) {
+    const po = await one(
+      tx,
+      `SELECT user_id FROM project_members WHERE project_id=$1 AND role='owner' AND status='active' LIMIT 1`,
+      [card.project_id],
+    );
+    if (po) id = po.user_id as string;
+  }
+  return { id, displayName: 'the card owner' } as AuthSession['user'];
+}
+
+/**
  * Applies a split (decision: atomic). Every child is checked first (`planSplit`); only when all pass are the children
  * created (with the parent as `parentCardId`, their repository and their dependencies), the parent cancelled with cause
  * `split`, and the thread note written, all in the caller's transaction. A failure while writing rolls the lot back to a
@@ -400,9 +426,15 @@ async function applySplit(
       accepted: false,
       error: `the split was refused and nothing was written: ${planned.problems.join('. ')}`,
     };
-  const owner = { id: card.owner_user_id, displayName: 'the card owner' };
+  const owner = await splitOwner(tx, card);
   // An agent may not set a completion action: a card that carries an override is split by the system on the BA's behalf.
   const actor = card.completion_action ? SYSTEM_ACTOR : agentActor(shift.agent_id);
+  // The parent's own prerequisites move to the children that start the work (the roots), and what waited on the parent
+  // waits on the children that end it (the leaves): a cancelled card counts as landed, so without this a split would
+  // start the children early and free the parent's dependents at once.
+  const parentDeps = (
+    await rows(tx, 'SELECT depends_on_card_id FROM card_dependencies WHERE card_id=$1', [card.id])
+  ).map((d) => d.depends_on_card_id as string);
   await tx.query('SAVEPOINT spec_split');
   try {
     const made: Array<{ id: string; ref: string; title: string; repo: string }> = [];
@@ -426,9 +458,9 @@ async function applySplit(
             : {}),
           ...(card.completion_action ? { completionAction: card.completion_action } : {}),
           ...(plan.workflowKey ? { workflowKey: plan.workflowKey } : {}),
-          dependencies: [...new Set(plan.child.dependsOn ?? [])].map(
-            (d) => (made[d - 1] as { id: string }).id,
-          ),
+          dependencies: (plan.child.dependsOn ?? []).length
+            ? [...new Set(plan.child.dependsOn ?? [])].map((d) => (made[d - 1] as { id: string }).id)
+            : parentDeps,
           specify: true,
         },
         {
@@ -440,6 +472,36 @@ async function applySplit(
       if (made1.missing?.length)
         throw new Error(`child ${i + 1} would still lack ${missingText(made1.missing)}`);
       made.push({ id: made1.cardId, ref: made1.ref, title: plan.child.title, repo: plan.child.repo });
+    }
+    const dependedOn = new Set(planned.plans.flatMap((p) => p.child.dependsOn ?? []));
+    const leaves = made.filter((_, i) => !dependedOn.has(i + 1)).map((c) => c.id);
+    const downstream = await rows(
+      tx,
+      `SELECT c.id, c.org_id, c.project_id FROM card_dependencies d JOIN cards c ON c.id = d.card_id
+        WHERE d.depends_on_card_id=$1 AND c.status NOT IN ('done','cancelled')`,
+      [card.id],
+    );
+    for (const down of downstream) {
+      const current = (
+        await rows(tx, 'SELECT depends_on_card_id FROM card_dependencies WHERE card_id=$1', [down.id])
+      ).map((d) => d.depends_on_card_id as string);
+      await ctx.store.append(
+        [
+          {
+            streamId: streamId.card(down.id),
+            event: {
+              type: 'CardUpdated',
+              payload: {
+                cardId: down.id,
+                changes: { dependencies: [...new Set([...current.filter((d) => d !== card.id), ...leaves])] },
+              },
+            },
+            actor,
+            scope: projectScope(down.org_id, down.project_id),
+          },
+        ],
+        { tx },
+      );
     }
     const list = made.map((c) => `${c.ref} (${c.repo}): ${c.title}`).join('; ');
     await cancelCardIn(ctx, tx, owner, card, `Split into ${made.map((c) => c.ref).join(', ')}`, {
@@ -511,11 +573,20 @@ export async function applySpecCardReport(
       accepted: false,
       error: `${card.ref} has no repository: name the one it touches with "repo", or split it with "split" (2 to 8 cards, each with its own "repo"), or report that it cannot be specified`,
     };
-  if (!scoping && (data.repo || data.split))
+  if (!scoping && data.split)
     return {
       accepted: false,
       error: `${card.ref} needs no repository from you: write its fields only`,
     };
+  // The card got its repository meanwhile (the CEO or the owner set it): naming that same repository is no mistake.
+  if (!scoping && data.repo) {
+    const named = await resolveRepo(tx, card.project_id, data.repo).catch(() => null);
+    if (!named || named !== card.repo_id)
+      return {
+        accepted: false,
+        error: `${card.ref} needs no repository from you: write its fields only`,
+      };
+  }
   if (!scoping && !data.fields)
     return {
       accepted: false,
@@ -524,6 +595,9 @@ export async function applySpecCardReport(
   if (data.split) return applySplit(ctx, tx, task, shift, card, data.split);
   const owner = { id: card.owner_user_id } as AuthSession['user'];
   const acting = { actor: agentActor(shift.agent_id) };
+  // The gateway commits a rejected report too, so the repository and the fields are written under a savepoint that a
+  // rejection rolls back: a repository-only report must not leave the repository set on a card that is still incomplete.
+  await tx.query('SAVEPOINT spec_report');
   try {
     await patchCardIn(
       ctx,
@@ -537,6 +611,7 @@ export async function applySpecCardReport(
       acting,
     );
   } catch (err) {
+    await tx.query('ROLLBACK TO SAVEPOINT spec_report');
     return {
       accepted: false,
       error: `${scoping && data.repo ? 'the repository or the fields' : 'the fields'} were refused: ${err instanceof Error ? err.message : String(err)}`,
@@ -544,11 +619,14 @@ export async function applySpecCardReport(
   }
   const fresh = (await one(tx, 'SELECT * FROM cards WHERE id=$1', [card.id])) as Row;
   const stillMissing = await cardMissing(tx, fresh);
-  if (stillMissing.length)
+  if (stillMissing.length) {
+    await tx.query('ROLLBACK TO SAVEPOINT spec_report');
     return {
       accepted: false,
-      error: `${card.ref} still lacks ${missingText(stillMissing)}: write ${stillMissing.length === 1 ? 'it' : 'them'} and report again`,
+      error: `${card.ref} still lacks ${missingText(stillMissing)}: write ${stillMissing.length === 1 ? 'it' : 'them'} and report again, the repository and the fields together (nothing of this report was kept)`,
     };
+  }
+  await tx.query('RELEASE SAVEPOINT spec_report');
   await specifyCardIn(ctx, tx, owner, card.id, acting);
   await ctx.store.append([completed(task, 'done')], { tx });
   return { accepted: true };
