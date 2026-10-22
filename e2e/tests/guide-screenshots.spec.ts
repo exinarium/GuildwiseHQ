@@ -1,4 +1,5 @@
 import { chmodSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import {
   type APIRequestContext,
@@ -10,7 +11,7 @@ import {
 } from '@playwright/test';
 import { apiAs, inviteAndAccept } from '../support/api.ts';
 import { pool, q, waitFor } from '../support/db.ts';
-import { ADMIN, BASE_URL, paths } from '../support/env.ts';
+import { ADMIN, BASE_URL, DATABASE_URL, paths, ROOT } from '../support/env.ts';
 import {
   ADMIN_DEMO,
   ARI,
@@ -35,7 +36,7 @@ import { git, makeVault } from '../support/vault.ts';
  *     pnpm --filter @aom/e2e exec playwright test --project=guide
  * Part 1 (tests "seed: ...") builds a realistic demo world with fake data through the real API and the mock runtime
  * (no real Claude, GitHub or Jira is ever contacted). Each seed step is recorded in the state file and skipped on a
- * re-run with AOM_GUIDE_REUSE=1. Part 2 lives in guide-capture.ts.
+ * re-run with AOM_GUIDE_REUSE=1. Part 2 (the `capture:` tests, built with cap()) is further down in this file.
  */
 
 const A = paths.runnerHome('guide-a');
@@ -327,6 +328,9 @@ step('workstation A, projects, agents', async () => {
     expect(r.status(), await r.text()).toBe(201);
     S.ids[`agent:${name}`] = (await r.json()).agent?.id ?? '';
   };
+  // the lean team flow (code v6) starts with Planning and Design: nobody claims a card without these two roles
+  await hire('Paula', 'planner', 'junior', 'haiku');
+  await hire('Arno', 'architect', 'senior', 'opus');
   await hire('Ada', 'builder', 'senior', 'opus');
   await hire('Linus', 'reviewer', 'senior', 'sonnet');
   await hire('Tess', 'tester', 'junior', 'sonnet');
@@ -378,7 +382,9 @@ step('history: four clean cards, a docs card', async () => {
     S.ids[`card:${key}`] = c.ref;
   }
   for (const r of refs) await done(r);
-  // the merge spawned a full-suite card for the tester
+  // the lean team flow does not start the full suite after a merge by itself: the owner starts it
+  const fs = await p.post(`/api/projects/${S.ids['project:WEB']}/full-suite`, { data: {} });
+  expect(fs.ok(), await fs.text()).toBeTruthy();
   await waitFor(
     'full suite card done',
     () => q<any>(`SELECT status FROM cards WHERE origin='full_suite'`),
@@ -1427,7 +1433,7 @@ step('test stage: bug loop, conflict, review queue, large merge, busy agents, to
   expect(
     (await p.post(`/api/cards/${ta.ref}/cancel`, { data: { reason: 'Replaced by a later card' } })).ok(),
   ).toBeTruthy();
-  await waitCard(cc.ref, 'back in build after the conflict', (c) => c.rework_round >= 1, 300_000);
+  await waitCard(cc.ref, 'back in build after the conflict', (c) => c.stage === 'merge_review' || c.rework_round >= 1, 300_000);
   await waitCard(tb.ref, 'waiting on its bug', (c) => c.status === 'waiting', 300_000);
   // the second long test is made only now: if the runner turns the conflicting card's shift away because it is still
   // tearing down the cancelled one, the card goes to the back of the queue and a hanging test would starve it
@@ -1798,8 +1804,19 @@ step('platform: the administrator, other organizations, support requests', async
 });
 
 step(
-  'the daily floor report of the next morning (the test clock moves; keep this step last)',
+  'the daily report of the next morning (the test clock moves; keep this step last)',
   async (browser) => {
+    // the CEO writes the daily report: provision the built-in CEO (it lives on workstation A) and run it on the mock
+    execFileSync('pnpm', ['--filter', '@aom/server', 'exec', 'tsx', `${ROOT}/e2e/support/provision-ceo.ts`], {
+      cwd: ROOT,
+      env: { ...process.env, DATABASE_URL },
+      stdio: 'pipe',
+    });
+    const pp = await pieter();
+    const ceo = (await (await pp.get('/api/agents')).json()).agents.find((a: any) => a.roleKey === 'ceo');
+    expect(ceo, 'the built-in CEO exists').toBeTruthy();
+    expect((await pp.patch(`/api/agents/${ceo.id}`, { data: { runtime: 'mock', model: 'mock' } })).ok()).toBe(true);
+    S.ids['agent:ceo'] = ceo.id;
     const p = await pieter();
     const ZONE = 'Africa/Johannesburg';
     const ctx = await browser.newContext({ storageState: await p.storageState(), timezoneId: ZONE });
@@ -1829,13 +1846,38 @@ step(
     const target = Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate() + 1, 7, 0, 0);
     expect((await clock(target - now.getTime())).ok).toBe(true);
     await waitFor(
-      'the floor report',
-      () => q<any>(`SELECT id FROM desk_items WHERE subkind='floor_report' AND org_id=$1`, [orgId]),
+      'the daily report',
+      () => q<any>(`SELECT id FROM desk_items WHERE subkind='ceo_report' AND org_id=$1`, [orgId]),
       (r) => r.length > 0,
       180_000,
     );
   },
 );
+
+step('backlog items and links between projects', async () => {
+  const p = await pieter();
+  const web = S.ids['project:WEB'] as string;
+  for (const [title, description, priority, flagged] of [
+    ['Gift cards at checkout', 'Shoppers ask to pay part of an order with a gift card.', 'high', true],
+    ['Order export for the accountant', 'A monthly CSV of paid orders.', 'normal', false],
+    ['Dark mode for the admin area', 'Nice to have; no one is waiting for it.', 'low', false],
+  ] as const) {
+    const r = await p.post(`/api/projects/${web}/backlog`, { data: { title, description, priority, flagged } });
+    expect(r.status(), await r.text()).toBe(201);
+  }
+  for (const data of [
+    {
+      from: { projectId: web },
+      to: { projectId: S.ids['project:SHOOT'] as string },
+      kind: 'depends_on',
+      note: 'The shop reads the research notes for its product texts.',
+    },
+    { from: { projectId: web }, to: { name: 'Payment provider' }, kind: 'uses', note: 'Card payments, via example.com.' },
+  ]) {
+    const r = await p.post('/api/org-graph/links', { data });
+    expect(r.status(), await r.text()).toBeLessThan(300);
+  }
+});
 
 step('batch intake: tickets pasted in a list, one already has a card, one waits for an answer', async () => {
   const p = await pieter();
@@ -2105,7 +2147,7 @@ cap('the desk and the ledger', async () => {
     ['desk-large-merge', /Approve merge of/],
     ['desk-branch', /Which branch is the working branch of notes-app/],
     ['desk-phase-done', /is done: approve/],
-    ['desk-floor-report', /^Floor report /],
+    ['desk-daily-report', /^Daily report /],
   ];
   for (const [name, title] of shots) {
     const el = item(title);
@@ -2429,6 +2471,33 @@ cap(
     });
   },
 );
+
+cap('backlog, environments, metrics, releases, project links', async () => {
+  for (const [name, path, maxH] of [
+    ['backlog', '/p/WEB/backlog', 900],
+    ['environments', '/p/WEB/environments', 1200],
+    ['metrics', '/metrics', 1200],
+    ['releases', '/releases', 1200],
+    ['org-project-links', '/settings/org?tab=links', 900],
+  ] as const) {
+    await open(pPage, path);
+    await snap(pPage, name, { maxH, content: true });
+  }
+});
+
+cap('the CEO', async () => {
+  await open(pPage, '/org/ceo');
+  await snap(pPage, 'ceo', { maxH: 1000, content: true });
+  await pPage.getByRole('tab', { name: /Reporting/ }).click();
+  await snap(pPage, 'ceo-reporting', { maxH: 1000, content: true });
+  await open(pPage, '/ceo-chat');
+  const box = pPage.getByRole('textbox').last();
+  await box.fill('How did the shop do yesterday?');
+  await box.press('Enter');
+  await expect(pPage.getByText('How did the shop do yesterday?').first()).toBeVisible();
+  await pPage.waitForTimeout(3000);
+  await snap(pPage, 'ceo-chat', { maxH: 900 });
+});
 
 cap('on a phone', async () => {
   for (const [name, path] of [
