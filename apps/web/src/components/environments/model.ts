@@ -305,9 +305,7 @@ function withServerState(info: CardInfo, status: EnvStatusDto, place: PlaceVm | 
                     ? 'update'
                     : st === 'healthy'
                       ? info.role === 'live'
-                        ? status.waitingRelease
-                          ? 'release'
-                          : null
+                        ? 'release'
                         : 'update'
                       : null;
   const state: CardState = st === 'unhealthy' ? 'failed' : st;
@@ -434,7 +432,7 @@ function cardInfoLocal(args: {
           ? { label: 'Ready', tone: 'green' }
           : { label: 'Healthy', tone: 'green' },
     sentence: version ? `Version ${version} is live${since}.` : 'Nothing has been updated here yet.',
-    action: role === 'live' ? (waiting ? 'release' : null) : 'update',
+    action: role === 'live' ? 'release' : 'update',
   };
 }
 

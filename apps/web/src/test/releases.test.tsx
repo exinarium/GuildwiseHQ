@@ -199,6 +199,28 @@ describe('Releases page', () => {
     expect(screen.queryByTestId('live-paused-row-P5-uat')).toBeNull();
   });
 
+  it('What is live: a healthy site with nothing waiting offers Release; paused or updating say why it is off', async () => {
+    live.push({
+      ...live[1],
+      env: 'staging',
+      label: 'Staging',
+      health: 'healthy',
+      waitingRelease: 0,
+    } as never);
+    try {
+      route();
+      wrap(<Releases />, '/releases?tab=live');
+      const link = await screen.findByTestId('live-row-release-P5-staging');
+      expect(link).toHaveTextContent('Release the newest version');
+      expect(link).toHaveAttribute('href', '/p/P5/environments');
+      expect(screen.getByTestId('live-row-off-P5-uat')).toHaveTextContent('Updating now');
+      // production has a release waiting: the waiting link is shown, not a second Release
+      expect(screen.queryByTestId('live-row-release-P5-production')).toBeNull();
+    } finally {
+      live.pop();
+    }
+  });
+
   it('opens on the tab named in the address', async () => {
     route();
     wrap(<Releases />, '/releases?tab=history');

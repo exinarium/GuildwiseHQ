@@ -538,6 +538,28 @@ describe('coalescing, running runs and expiry', () => {
     await mergeLanded(d, COMMIT); // COMMIT is the newest merge again for the tests that follow
   });
 
+  it('a double click on Release starts one run: the second request is refused while the first is queued', async () => {
+    const before = await q(`SELECT id FROM deploy_runs WHERE env='local'`);
+    const [one, two] = await Promise.all([
+      owner('POST', `/api/projects/${d.w.projectId}/delivery/deploy`, { env: 'local' }),
+      owner('POST', `/api/projects/${d.w.projectId}/delivery/deploy`, { env: 'local' }),
+    ]);
+    const outcomes = [one, two].flatMap((x) => (x.body as { runs: Array<{ status: string }> }).runs);
+    expect(outcomes.map((o) => o.status).sort()).toEqual(['queued', 'refused']);
+    expect(outcomes.find((o) => o.status === 'refused')).toMatchObject({ refusal: 'run_in_progress' });
+    const after = await q(
+      `SELECT id, status FROM deploy_runs WHERE env='local' AND status IN ('queued','running')`,
+    );
+    expect(after).toHaveLength(1);
+    expect((await q(`SELECT id FROM deploy_runs WHERE env='local' AND status <> 'refused'`)).length).toBe(
+      before.filter(() => false).length +
+        1 +
+        (await q(`SELECT 1 FROM deploy_runs WHERE env='local' AND status NOT IN ('queued','refused')`))
+          .length,
+    );
+    await q(`UPDATE deploy_runs SET status='cancelled' WHERE id=$1`, [after[0]!.id]);
+  });
+
   it('a deploy nobody collected in two hours expires instead of firing late', async () => {
     const res = await ask('local', { requester: trigger, commit: COMMIT });
     expect(res.runs[0]!.status).toBe('queued');

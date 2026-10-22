@@ -33,6 +33,23 @@ export function LiveMatrix({ canRelease = false }: { canRelease?: boolean }) {
         </p>
       </Panel>
     );
+  // nothing waiting: the Owner or an Admin can still ask for the newest version; the sheet that confirms it is on the project's page
+  const askRelease = (r: LiveRow, id: string) =>
+    r.waitingRelease === 0 && canRelease ? (
+      r.releasesPaused || r.health === 'updating' ? (
+        <span className="text-sm text-subtle" data-testid={`${id}-off-${r.projectKey}-${r.env}`}>
+          {r.releasesPaused ? 'Releases are paused' : 'Updating now'}
+        </span>
+      ) : (
+        <Link
+          to={`/p/${r.projectKey}/environments`}
+          className="text-sm text-brand-text underline-offset-2 hover:underline"
+          data-testid={`${id}-release-${r.projectKey}-${r.env}`}
+        >
+          Release the newest version
+        </Link>
+      )
+    ) : null;
   const waiting = (r: LiveRow, id: string) =>
     r.waitingRelease > 0 ? (
       canRelease ? (
@@ -75,6 +92,7 @@ export function LiveMatrix({ canRelease = false }: { canRelease?: boolean }) {
               {r.placeName ? `, on ${r.placeName}` : ''}
             </p>
             {waiting(r, 'live-card-waiting')}
+            {askRelease(r, 'live-card')}
           </li>
         ))}
       </ul>
@@ -125,7 +143,10 @@ export function LiveMatrix({ canRelease = false }: { canRelease?: boolean }) {
                   )}
                 </td>
                 <td className="px-3 py-2 text-muted">{r.placeName ?? ''}</td>
-                <td className="px-3 py-2">{waiting(r, 'live-waiting')}</td>
+                <td className="px-3 py-2">
+                  {waiting(r, 'live-waiting')}
+                  {askRelease(r, 'live-row')}
+                </td>
               </tr>
             ))}
           </tbody>

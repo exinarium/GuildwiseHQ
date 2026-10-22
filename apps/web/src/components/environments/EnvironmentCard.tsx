@@ -360,7 +360,7 @@ export function EnvironmentCard({
                 {info.state === 'ready' && env.trigger[0] !== 'after_merge' ? 'Release' : 'Update now'}
               </Button>
             )}
-            {info.action === 'release' && waiting && (
+            {info.action === 'release' && (
               <Button
                 variant="primary"
                 disabled={paused}
@@ -368,7 +368,7 @@ export function EnvironmentCard({
                 data-testid={`env-release-${env.name}`}
               >
                 <Rocket aria-hidden="true" className="size-4" />
-                Release {waiting.version ?? 'the new version'}
+                {waiting ? `Release ${waiting.version ?? 'the new version'}` : 'Release the newest version'}
               </Button>
             )}
             {info.action === 'check' && place && (
@@ -448,7 +448,18 @@ export function EnvironmentCard({
             </Menu>
           </div>
         ) : (
-          <p className="text-xs text-subtle">Only the project owner changes environments.</p>
+          <>
+            {info.action === 'release' && (
+              <Button variant="primary" disabled data-testid={`env-release-${env.name}`}>
+                <Rocket aria-hidden="true" className="size-4" />
+                {waiting ? `Release ${waiting.version ?? 'the new version'}` : 'Release the newest version'}
+              </Button>
+            )}
+            <p className="text-xs text-subtle" data-testid={`env-readonly-${env.name}`}>
+              Only the project owner changes environments
+              {info.action === 'release' ? ' and releases' : ''}.
+            </p>
+          </>
         )}
         {!s.canApprove && info.action === 'approve' && (
           <p className="text-xs text-subtle" data-testid={`env-waiting-owner-${env.name}`}>
