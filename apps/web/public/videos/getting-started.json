@@ -2,31 +2,6 @@
   "title": "Getting started with Guildwise HQ",
   "src": "/videos/getting-started.webm",
   "type": "video/webm",
-  "captions": "/videos/getting-started.vtt",
-  "voice": "Piper en_GB-cori-high",
-  "duration": 171.7,
-  "chapters": [
-    {
-      "t": 16.7,
-      "title": "Create your first project"
-    },
-    {
-      "t": 46.3,
-      "title": "Hire your agents"
-    },
-    {
-      "t": 83.4,
-      "title": "Create cards"
-    },
-    {
-      "t": 111.2,
-      "title": "Talk to the business analyst"
-    },
-    {
-      "t": 134,
-      "title": "Test your running project"
-    }
-  ],
   "sources": [
     {
       "src": "/videos/getting-started.mp4",
@@ -35,6 +10,43 @@
     {
       "src": "/videos/getting-started.webm",
       "type": "video/webm"
+    }
+  ],
+  "captions": "/videos/getting-started.vtt",
+  "voice": "Piper en_GB-cori-high",
+  "duration": 150.4,
+  "chapters": [
+    {
+      "t": 8.9,
+      "title": "The Get started checklist"
+    },
+    {
+      "t": 23.3,
+      "title": "Add a workstation"
+    },
+    {
+      "t": 42.4,
+      "title": "Create a project"
+    },
+    {
+      "t": 56.6,
+      "title": "Hire a lean team"
+    },
+    {
+      "t": 86.8,
+      "title": "Create a card and talk to the BA"
+    },
+    {
+      "t": 111.2,
+      "title": "Answer on the Desk"
+    },
+    {
+      "t": 124,
+      "title": "Watch the board"
+    },
+    {
+      "t": 135.5,
+      "title": "Help and shortcuts"
     }
   ]
 }

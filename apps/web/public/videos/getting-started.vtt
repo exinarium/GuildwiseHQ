@@ -1,81 +1,69 @@
 WEBVTT
 
 1
-00:00:00.289 --> 00:00:10.968
-Hello, and welcome to Guildwise HQ. In the next few minutes I will show you how to run a small team of AI agents, from your very first project to a result you can try.
+00:00:00.600 --> 00:00:08.238
+Welcome to Guildwise HQ. In under three minutes, you go from an empty organization to a team of AI agents at work.
 
 2
-00:00:11.668 --> 00:00:16.008
-There are five steps. You can follow along in your own account as we go.
+00:00:08.943 --> 00:00:22.581
+A new organization shows Get started in the sidebar. It lists what is left: a project, its repository, a workstation, your team, and a first talk with the business analyst. Each step ticks itself off.
 
 3
-00:00:16.712 --> 00:00:22.167
-Step one: your first project. Open Projects, and choose New project.
+00:00:23.285 --> 00:00:30.505
+A workstation is the computer that runs your agents. Open Workstations, and choose Add a workstation.
 
 4
-00:00:22.866 --> 00:00:30.666
-Give it a short key, like SHOP, and a name, like Web shop. The key is what you will see in front of every card number.
+00:00:31.204 --> 00:00:41.721
+The guide asks where your agents run, gives you one command to copy, and shows the progress live. Here, Alex's laptop is already paired and online.
 
 5
-00:00:31.366 --> 00:00:45.561
-Now tell the project where its code lives. Add a repository, give it a name, and paste in its address. Your agents work on their own copy, and a change only reaches your main code after it has been reviewed and tested.
+00:00:42.423 --> 00:00:50.813
+Next, open Projects and choose New project. Give it a name and a short key. The key goes in front of every card number.
 
 6
-00:00:46.264 --> 00:00:55.318
-Step two: hire your agents. Every agent has a role and a seniority, and the seniority decides how much they are trusted with.
+00:00:51.514 --> 00:00:55.914
+Then, in the project settings, add the repository where the code lives.
 
 7
-00:00:56.016 --> 00:01:01.181
-Start with a business analyst. Bea will turn your ideas into clear, written work.
+00:00:56.618 --> 00:01:05.707
+Now hire your team. On Agents, choose Hire agent, pick a role, and keep this project selected under Where may this agent work.
 
 8
-00:01:01.880 --> 00:01:10.711
-Then a builder, Ada, who writes the code. A senior reviewer, Linus, who checks it. And a tester, Tess, who tries it out.
+00:01:06.406 --> 00:01:15.531
+A lean team has seven roles: a business analyst, a planner, an architect, a builder, a pre-reviewer, a reviewer and a tester.
 
 9
-00:01:16.058 --> 00:01:22.709
-That is a small, complete team. You can hire more at any time, or change their roles later.
+00:01:16.504 --> 00:01:22.286
+Together they plan, design, build and check every change before it reaches your main code.
 
 10
-00:01:23.410 --> 00:01:28.377
-Step three: describe the work as a card. A card is one thing you would like done.
+00:01:26.841 --> 00:01:36.057
+To ask for work, use New card at the top of the sidebar. Give it a title, say what you need and how you will know it is done, then choose Specify.
 
 11
-00:01:29.077 --> 00:01:37.249
-Give it a title, say what you need and why, and list how you will know it is finished. The clearer the card, the better the result.
+00:01:36.763 --> 00:01:43.205
+You can also just talk to your business analyst. Open the chat, pick Bea, and ask in plain words.
 
 12
-00:01:37.948 --> 00:01:44.484
-When you choose Specify, the card joins the team queue, and the agents pick it up by themselves.
+00:01:44.787 --> 00:01:48.967
+She answers like a colleague, and can turn the conversation into cards.
 
 13
-00:01:45.184 --> 00:01:50.465
-Add as many cards as you like. Here is a second one, and now the board shows both.
+00:01:51.196 --> 00:01:56.699
+When an agent needs a decision, it lands on the Desk, and the number in the sidebar tells you.
 
 14
-00:01:51.168 --> 00:01:59.396
-Step four: talk to your business analyst. You do not need a form for everything. Open the chat, pick Bea, and ask in plain words.
+00:01:57.399 --> 00:02:03.260
+Pick an option and choose Answer. The count drops, and the agent carries on.
 
 15
-00:02:00.096 --> 00:02:02.685
-Let us ask what she would add to the shop next.
+00:02:03.964 --> 00:02:11.789
+On the Board, the card moves from column to column by itself, as the agents plan, design, build, review and test.
 
 16
-00:02:05.249 --> 00:02:13.281
-And there is her answer. She suggests ideas, asks good questions, and can turn a whole conversation into cards for you.
+00:02:15.496 --> 00:02:23.772
+Help is at the bottom of the sidebar, with the articles, the glossary and the guided tour. And Ctrl K jumps anywhere.
 
 17
-00:02:13.997 --> 00:02:23.121
-Step five: watch the work, and test your running project. Cards move across the board as the agents plan, build, review and test.
-
-18
-00:02:23.819 --> 00:02:28.242
-Open a card to see the plan, the conversation, and what it cost.
-
-19
-00:02:28.943 --> 00:02:38.763
-When the tester runs your project, she reports what she found, and every bug becomes a new card. Your part is to try the result, and tell the team what you think.
-
-20
-00:02:39.465 --> 00:02:51.000
-And that is all there is to it. Hire your team, describe the work, and watch it happen. You will find more guides in Help. Thank you for watching, and good luck with your first project.
+00:02:24.501 --> 00:02:29.724
+That is all it takes. Thank you for watching, and enjoy your new team.
