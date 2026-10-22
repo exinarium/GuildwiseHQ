@@ -1,0 +1,40 @@
+{
+  "title": "Roles and workflows",
+  "src": "/videos/roles-and-workflows.webm",
+  "type": "video/webm",
+  "sources": [
+    {
+      "src": "/videos/roles-and-workflows.mp4",
+      "type": "video/mp4"
+    },
+    {
+      "src": "/videos/roles-and-workflows.webm",
+      "type": "video/webm"
+    }
+  ],
+  "captions": "/videos/roles-and-workflows.vtt",
+  "voice": "Piper en_GB-cori-high",
+  "duration": 83,
+  "chapters": [
+    {
+      "t": 8,
+      "title": "Roles"
+    },
+    {
+      "t": 24.6,
+      "title": "Workflows"
+    },
+    {
+      "t": 37.6,
+      "title": "The workflow builder"
+    },
+    {
+      "t": 59.8,
+      "title": "Departments"
+    },
+    {
+      "t": 67.3,
+      "title": "Design with the BA"
+    }
+  ]
+}
