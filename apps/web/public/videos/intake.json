@@ -1,0 +1,32 @@
+{
+  "title": "Intake: bring in tickets",
+  "src": "/videos/intake.webm",
+  "type": "video/webm",
+  "sources": [
+    {
+      "src": "/videos/intake.mp4",
+      "type": "video/mp4"
+    },
+    {
+      "src": "/videos/intake.webm",
+      "type": "video/webm"
+    }
+  ],
+  "captions": "/videos/intake.vtt",
+  "voice": "Piper en_GB-cori-high",
+  "duration": 63.4,
+  "chapters": [
+    {
+      "t": 7.9,
+      "title": "One ticket"
+    },
+    {
+      "t": 27.8,
+      "title": "The chat with the BA"
+    },
+    {
+      "t": 42.3,
+      "title": "A batch of tickets"
+    }
+  ]
+}
