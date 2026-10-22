@@ -14,18 +14,18 @@
   ],
   "captions": "/videos/intake.vtt",
   "voice": "Piper en_GB-cori-high",
-  "duration": 63.4,
+  "duration": 63.3,
   "chapters": [
     {
-      "t": 7.9,
+      "t": 7.8,
       "title": "One ticket"
     },
     {
-      "t": 27.8,
+      "t": 27.7,
       "title": "The chat with the BA"
     },
     {
-      "t": 42.3,
+      "t": 42.2,
       "title": "A batch of tickets"
     }
   ]
