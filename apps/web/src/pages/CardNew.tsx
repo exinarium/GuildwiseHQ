@@ -23,7 +23,7 @@ import {
   Select,
   useToast,
 } from '../components/ui.tsx';
-import { buildCardRequest, type CardFormValues, emptyForm, fieldLabel } from '../lib/cardForm.ts';
+import { buildCardRequest, type CardFormValues, emptyForm, FIND_REPO, fieldLabel } from '../lib/cardForm.ts';
 import { getLastProjectKey } from '../lib/lastProject.ts';
 
 export function CardNew() {
@@ -186,6 +186,12 @@ export function CardNewForm({
                 `${res.card.ref} was saved, but ${failed.length} file${failed.length === 1 ? '' : 's'} could not be attached (${failed.map((f) => `${f.name}: ${f.message}`).join('; ')}). Add them on the card.`,
               );
           }
+          // "Not sure which repository": the server sent the draft to the BA, who finds it; nothing is left to fix here.
+          if (specify && v.repoId === FIND_REPO && res.missing?.includes('repoId')) {
+            toast.success(res.message ?? `${res.card.ref} sent to the BA to find the repository`);
+            nav(`/cards/${res.card.ref}`);
+            return;
+          }
           if (specify && res.missing?.length) {
             const errs: Record<string, string> = {};
             for (const m of res.missing)
@@ -271,6 +277,7 @@ export function CardNewForm({
               mockUi={mockUi}
               designDefault={designDefault}
               projectDefault={projectDefault}
+              allowFindRepo
             />
           </div>
         </Panel>

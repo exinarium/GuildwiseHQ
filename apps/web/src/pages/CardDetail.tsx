@@ -22,6 +22,7 @@ import {
   useReleaseBackoff,
   useReleaseCard,
   useReopenCard,
+  useSendCardToBa,
   useSpecifyCard,
 } from '../api/queries/cards.ts';
 import { useDecisionPolicy, useRehomeCard } from '../api/queries/members.ts';
@@ -56,6 +57,7 @@ import { ShiftLog } from '../components/ShiftLog.tsx';
 import { ShiftClock, ShiftStopControls } from '../components/ShiftStop.tsx';
 import {
   cancellableChildren,
+  SplitLinks,
   StartedByLine,
   SubworkflowsPanel,
   SubworkflowWaitLine,
@@ -206,6 +208,7 @@ export function CardDetailView({
 }) {
   const { card, handoffs, transitions, activity, thread, currentShift, permissions, blockers } = data;
   const specify = useSpecifyCard(card.id);
+  const sendToBa = useSendCardToBa(card.id);
   const release = useReleaseCard(card.id);
   const releaseBackoff = useReleaseBackoff(card.id);
   const policy = useDecisionPolicy(card.id);
@@ -222,6 +225,8 @@ export function CardDetailView({
   const toast = useToast();
   const mockUi = me.data?.features?.mockUi ?? false;
   const missing = missingFromError(specify.error);
+  // A draft with no repository: the BA finds it (or splits the card per repository) when a project has several.
+  const sendToBaOffered = permissions.canSpecify && card.status === 'draft' && !card.repoId;
   const catalogue = workflow ? fieldCatalogue(workflow.fieldSet, workflow.customFields) : {};
   // Mock-runtime fields (Mock script, ...) are shown only in mock mode.
   const keys = Object.keys(card.fields).filter((k) => mockUi || !isMockField(k));
@@ -265,6 +270,11 @@ export function CardDetailView({
             {permissions.canSpecify && card.status === 'draft' && (
               <Button variant="primary" loading={specify.isPending} onClick={() => specify.mutate(undefined)}>
                 Specify
+              </Button>
+            )}
+            {sendToBaOffered && (
+              <Button loading={sendToBa.isPending} onClick={() => sendToBa.mutate(undefined)}>
+                Send to BA
               </Button>
             )}
             <Button data-testid="card-actions" onClick={() => setActionsOpen(true)}>
@@ -327,6 +337,15 @@ export function CardDetailView({
                   onClick={() => specify.mutate(undefined)}
                 >
                   Specify
+                </Button>
+              )}
+              {sendToBaOffered && (
+                <Button
+                  data-testid="send-to-ba"
+                  loading={sendToBa.isPending}
+                  onClick={() => sendToBa.mutate(undefined)}
+                >
+                  Send to BA
                 </Button>
               )}
               {permissions.canEdit && workflow && (
@@ -417,9 +436,21 @@ export function CardDetailView({
           {missing.map((m) => (workflow ? fieldLabel(workflow, m) : m)).join(', ')}
         </Callout>
       )}
+      {sendToBa.data?.baNotice && (
+        <Callout tone="info" role="status" className="mb-4" data-testid="send-to-ba-notice">
+          {sendToBa.data.baNotice}
+        </Callout>
+      )}
       {!missing.length && (
         <ErrorBox
-          error={specify.error ?? release.error ?? releaseBackoff.error ?? rehome.error ?? policy.error}
+          error={
+            sendToBa.error ??
+            specify.error ??
+            release.error ??
+            releaseBackoff.error ??
+            rehome.error ??
+            policy.error
+          }
         />
       )}
       {blockers.length > 0 && (
@@ -443,6 +474,7 @@ export function CardDetailView({
         </Callout>
       )}
 
+      <SplitLinks splitInto={data.splitInto} splitFrom={data.splitFrom} />
       <SubworkflowWaitLine data={data.subworkflows} />
       <StartedByLine data={data.subworkflows} />
       {data.testing && (

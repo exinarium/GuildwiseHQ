@@ -1,4 +1,8 @@
-import type { SubworkflowChildDto, SubworkflowsPanel as SubworkflowsData } from '@aom/shared';
+import type {
+  CardDetailResponse,
+  SubworkflowChildDto,
+  SubworkflowsPanel as SubworkflowsData,
+} from '@aom/shared';
 import { Link } from 'react-router';
 import { Badge, Callout, Panel } from './ui.tsx';
 
@@ -133,5 +137,47 @@ export function SubworkflowsPanel({ data }: { data: SubworkflowsData | undefined
         })}
       </ul>
     </Panel>
+  );
+}
+
+/**
+ * Repository scoping: a card the BA split is cancelled and lists the cards that replaced it; one of those cards links back.
+ * Nothing is shown for a card that was not split.
+ */
+export function SplitLinks({
+  splitInto,
+  splitFrom,
+}: {
+  splitInto: CardDetailResponse['splitInto'];
+  splitFrom: CardDetailResponse['splitFrom'];
+}) {
+  if (!splitInto?.length && !splitFrom) return null;
+  return (
+    <div data-testid="split-links" className="mb-4 flex flex-col gap-2">
+      {splitInto && splitInto.length > 0 && (
+        <Callout tone="info" role="status" title="Split into">
+          <ul className="mt-1 flex flex-col gap-1">
+            {splitInto.map((c) => (
+              <li key={c.id} data-testid={`split-into-${c.ref}`}>
+                <Link to={`/cards/${c.id}`} className="font-medium underline">
+                  {c.ref}
+                </Link>{' '}
+                {c.title}
+                {c.repoName ? ` (${c.repoName})` : ''} <Badge>{c.status}</Badge>
+              </li>
+            ))}
+          </ul>
+        </Callout>
+      )}
+      {splitFrom && (
+        <p className="text-sm text-muted" data-testid="split-from">
+          Split from{' '}
+          <Link to={`/cards/${splitFrom.id}`} className="font-medium underline">
+            {splitFrom.ref}
+          </Link>
+          .
+        </p>
+      )}
+    </div>
   );
 }

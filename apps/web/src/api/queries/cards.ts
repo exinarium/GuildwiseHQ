@@ -33,12 +33,12 @@ export function useCreateCard() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (b: CreateCardRequest) =>
-      post<{ card: CardDetailResponse['card']; missing?: string[] }>('/cards', b),
+      post<{ card: CardDetailResponse['card']; missing?: string[]; message?: string }>('/cards', b),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['board'] }),
   });
 }
 
-function useCardAction<V>(cardId: string, fn: (v: V) => Promise<unknown>) {
+function useCardAction<V, R = unknown>(cardId: string, fn: (v: V) => Promise<R>) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: fn,
@@ -52,6 +52,9 @@ function useCardAction<V>(cardId: string, fn: (v: V) => Promise<unknown>) {
 }
 
 export const useSpecifyCard = (id: string) => useCardAction(id, () => post(`/cards/${id}/specify`));
+/** "Send to BA": the BA completes the draft, finding the repository (or splitting the card) when it has none. */
+export const useSendCardToBa = (id: string) =>
+  useCardAction<void, CardDetailResponse>(id, () => post<CardDetailResponse>(`/cards/${id}/send-to-ba`));
 export const usePatchCard = (id: string) =>
   useCardAction(id, (b: PatchCardRequest) => patch(`/cards/${id}`, b));
 export const useComment = (id: string) =>
