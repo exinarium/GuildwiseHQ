@@ -2458,9 +2458,6 @@ cap(
     await snap(pPage, 'manual-qa-setting', {
       sel: pPage.getByTestId('manual-qa-toggle').locator('xpath=ancestor::section[1]'),
     });
-    await snap(pPage, 'run-settings', {
-      sel: pPage.getByTestId('run-settings').locator('xpath=ancestor::section[1]'),
-    });
     // the archive of finished cards
     await open(pPage, '/p/WEB/archive');
     await snap(pPage, 'archive', { maxH: 900, content: true });
