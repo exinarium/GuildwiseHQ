@@ -1,7 +1,7 @@
 import { type APIRequestContext, expect, request, test } from '@playwright/test';
 import { apiAs, inviteAndAccept } from '../support/api.ts';
-import { pool, q } from '../support/db.ts';
-import { ADMIN, BASE_URL } from '../support/env.ts';
+import { pool } from '../support/db.ts';
+import { BASE_URL } from '../support/env.ts';
 import { deleteMailFor, waitForMail } from '../support/mail.ts';
 import { click, type } from './captions.ts';
 import { pause, prepareVideo, startRecording } from './harness.ts';
@@ -42,8 +42,6 @@ async function inviteAndJoin(api: APIRequestContext, email: string, name: string
 test('record the organization video', async ({ browser }) => {
   // ---- seed (demo data only): Acme and its Owner Alex Morgan exist already -----------------------------------------
   const api = await demoApi();
-  // the demo stack signs the Owner up with an e2e address; the video shows a demo one
-  await q('UPDATE users SET email=$1 WHERE lower(email)=lower($2)', ['alex.morgan@demo.local', ADMIN.email]);
   const { projectId: shop } = await createProject(api, 'SHOP', 'Web shop', { repo: false });
   await createProject(api, 'BLOG', 'Company blog', { repo: false });
   await inviteAndJoin(api, 'jamie.lee@demo.local', 'Jamie Lee', 'member');

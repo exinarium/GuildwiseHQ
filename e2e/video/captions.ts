@@ -50,10 +50,25 @@ const INIT = `
     el.style.display = 'flex';
   };
   // Recording only: the demo shows a real-looking runtime and account, never the stand-in "mock" or the test address.
-  const FIX = [[/mock · mock/g, 'Claude Code · Sonnet'], [/\\bmock\\b/gi, 'Claude Code'], [/admin@e2e\\.test/g, 'alex@acme.com']];
+  // Only exact runtime/model badges are rewritten, never free text: a whole text node "mock · mock", or a text node that
+  // is exactly "mock" and is the runtime or the model of a "{runtime} · {model}" badge (React renders each part as its
+  // own node) or the only text of its element. The Owner's address is renamed in the database by the seeding
+  // (seed.ts demoApi); the e2e address is mapped to the same demo address here only as a safety net.
+  const RUNTIME = 'Claude Code', MODEL = 'Sonnet';
+  const isSep = (s) => !!s && s.nodeType === 3 && s.nodeValue.trim() === '·';
+  const isRuntime = (s) => !!s && s.nodeType === 3 && (s.nodeValue.trim() === 'mock' || s.nodeValue.trim() === RUNTIME);
+  const badge = (n) => {
+    const v = n.nodeValue;
+    if (/^\\s*mock · mock\\s*$/.test(v)) return v.replace('mock · mock', RUNTIME + ' · ' + MODEL);
+    if (v.trim() !== 'mock') return v;
+    const prev = n.previousSibling, next = n.nextSibling;
+    if (isSep(prev) && isRuntime(prev.previousSibling)) return v.replace('mock', MODEL);
+    if (isSep(next) || (n.parentElement && n.parentElement.textContent.trim() === 'mock')) return v.replace('mock', RUNTIME);
+    return v;
+  };
   const fix = (n) => {
     let v = n.nodeValue; if (!v) return;
-    for (const [re, to] of FIX) v = v.replace(re, to);
+    v = badge(n).replace(/admin@e2e\\.test/g, 'alex.morgan@demo.local');
     if (v !== n.nodeValue) n.nodeValue = v;
   };
   const sweep = (root) => {
