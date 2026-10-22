@@ -17,6 +17,7 @@ import { cardMessage, orgScope, projectScope, userActor } from '../commands/comm
 import { createDevOpsRequestIn, devopsAgentOn } from '../commands/devops.ts';
 import { mergedAnswerNotes } from '../commands/escalation.ts';
 import { runHygieneForConfirmedRepo, workingBranchAnsweredEvents } from '../commands/hygiene.ts';
+import { testerLoopAnswered } from '../commands/tester-loop.ts';
 import { one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import { NO_PROJECT_VAULT, projectVault } from '../delivery/recipes.ts';
@@ -94,6 +95,7 @@ export const LOOP_RELEASE_SUBKINDS: readonly string[] = [
   DESK_SUBKIND.loopParked,
   DESK_SUBKIND.repeatQuestion,
   DESK_SUBKIND.stopLoss,
+  DESK_SUBKIND.testerLoop,
   DESK_SUBKIND.loopBackoff,
   DESK_SUBKIND.repeatLoop,
 ];
@@ -231,6 +233,19 @@ const answer: ActionDef<z.infer<typeof AnswerP>> = {
         return b.hygieneForRepo;
       });
       if (hygieneRepo) await runHygieneForConfirmedRepo(env.ctx, hygieneRepo);
+    } else if (item.subkind === DESK_SUBKIND.testerLoop) {
+      // The tester loop: the option performs its action in the answer's transaction (bug card, back to the tester, cancel).
+      await withAppendTx(env.ctx.pool, async (tx) => {
+        const cur = await one(tx, 'SELECT status FROM desk_items WHERE id=$1 FOR UPDATE', [item.id]);
+        if (cur?.status !== 'open')
+          throw conflict('already_closed', `this item is already ${cur?.status ?? 'gone'}`);
+        await env.ctx.store.append(events, { tx });
+        await testerLoopAnswered(env.ctx, tx, item, p.option, text, {
+          user: env.owner,
+          actor: userActor(env.owner.id),
+          author: { kind: 'agent', agentId: env.agentId },
+        });
+      });
     } else await appendLocked(env, events, item.id);
     env.ctx.services.dispatcher.trigger();
     return {

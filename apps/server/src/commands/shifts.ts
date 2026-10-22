@@ -486,7 +486,7 @@ export async function applyShiftReport(
         break;
       }
       if (outcome.event === 'TestFailed') {
-        mains = await testFailedEvents(tx, card, agent.id, report.note, ev);
+        mains = await testFailedEvents(ctx, tx, card, agent.id, report.note, ev, shift.start_sha ?? null);
         break;
       }
       // Integration tests: the pass is refused while a confirmed suite of the project has no passing result in this shift.

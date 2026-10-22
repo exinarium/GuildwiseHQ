@@ -131,7 +131,11 @@ export const CEO_STOP_LOSS_HOLD_MINUTES = 20;
  * How often the CEO resolved a stop-loss of this card (it answered the item, or dismissed it by moving the card), since
  * the card's baseline.
  */
-export async function ceoStopLossArbitrations(db: Queryable, cardId: string): Promise<number> {
+export async function ceoStopLossArbitrations(
+  db: Queryable,
+  cardId: string,
+  subkind: string = DESK_SUBKIND.stopLoss,
+): Promise<number> {
   const r = await one<{ n: number }>(
     db,
     `SELECT count(*)::int AS n FROM desk_items d
@@ -141,7 +145,7 @@ export async function ceoStopLossArbitrations(db: Queryable, cardId: string): Pr
              OR EXISTS (SELECT 1 FROM events ev JOIN agents a ON a.id = ev.actor_id AND a.role_key = 'ceo'
                          WHERE ev.stream_id = 'desk-' || d.id::text AND ev.type = 'DeskItemResolved'
                            AND ev.actor_kind = 'agent'))`,
-    [cardId, DESK_SUBKIND.stopLoss],
+    [cardId, subkind],
   );
   return Number(r?.n ?? 0);
 }
@@ -152,10 +156,12 @@ export async function ceoStopLossArbitrations(db: Queryable, cardId: string): Pr
  * After `CEO_STOP_LOSS_ARBITRATIONS` arbitrations of the same card the owner decides. Without a CEO: the card's architect,
  * else the desk, as before.
  */
-async function stopLossRoute(
+export async function stopLossRoute(
   ctx: Ctx,
   tx: Tx,
   card: Row,
+  /** `tester_loop`: the same arbitration (CEO three times, then the owner), counted on its own, and no architect without a CEO. */
+  subkind: string = DESK_SUBKIND.stopLoss,
 ): Promise<{ route: Route; ceoHold?: { deadline: string }; note: string }> {
   const ceo = await ceoActive(tx, card.org_id);
   const reachable = ceo ? (await ceoReachable(tx, card.org_id, ctx.clock.now())).ok : false;
@@ -169,6 +175,11 @@ async function stopLossRoute(
       route: { routedTo: 'manager', level: 'desk' },
       note: `The CEO ${paused ? 'cannot look at this now (the project is paused)' : 'is not reachable'}: the owner decides.`,
     };
+  if (!ceo && subkind !== DESK_SUBKIND.stopLoss)
+    return {
+      route: { routedTo: 'manager', level: 'desk' },
+      note: "Asked: the manager's desk (no CEO is active).",
+    };
   if (!ceo) {
     const route = await architectRoute(ctx, tx, card);
     return {
@@ -176,11 +187,11 @@ async function stopLossRoute(
       note: `Asked: ${route.routedTo === 'manager' ? "the manager's desk" : `${route.agentName} (${route.agentRole})`}. The architect decides how it goes on; if it cannot, the owner gets one item with options.`,
     };
   }
-  const done = await ceoStopLossArbitrations(tx, card.id);
+  const done = await ceoStopLossArbitrations(tx, card.id, subkind);
   if (done >= CEO_STOP_LOSS_ARBITRATIONS)
     return {
       route: { routedTo: 'manager', level: 'desk' },
-      note: `The CEO arbitrated this card's stop-loss ${done} times already: the owner decides now.`,
+      note: `The CEO arbitrated this card's ${subkind === DESK_SUBKIND.stopLoss ? 'stop-loss' : 'tester loop'} ${done} times already: the owner decides now.`,
     };
   return {
     route: { routedTo: 'manager', level: 'desk' },

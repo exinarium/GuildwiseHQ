@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { StoredCompletionAction, TestEvidence } from '../cards/types.ts';
 import { ForgeKindSchema } from '../forge/index.ts';
 import { CommitAsSchema } from '../repo/commit-identity.ts';
+import { globToRegExp } from '../workflows/high-risk.ts';
 
 /**
  * M4 contract shared by the server and the runner: the `finalize.execute` runner command, the tester environment
@@ -41,6 +42,8 @@ export const DESK_SUBKIND = {
   repeatLoop: 'repeat_loop',
   /** A card used its budget of passes, rounds or shifts: the architect arbitrates, then the owner. */
   stopLoss: 'stop_loss',
+  /** The tester failed a card again after its bug card was cancelled, or keeps asking for rework: the CEO decides (one item). */
+  testerLoop: 'tester_loop',
   /** D5: a project environment needs access or failed on a workstation. */
   environmentAttention: 'environment_attention',
   /** G-Q2: DevOps is trying to resolve a rebase/merge conflict (a notice). */
@@ -165,4 +168,53 @@ export function loopBackoffMinutes(failures: number): number {
     LOOP_BREAKER.capMinutes,
     LOOP_BREAKER.baseMinutes * 2 ** Math.max(0, failures - LOOP_BREAKER.failures),
   );
+}
+
+/** Consecutive tester reworks of one card with no new commit between them before the CEO is asked (`tester_loop`). */
+export const TESTER_REWORK_CAP = 3;
+
+/** Option ids of a `tester_loop` question: each performs its action when the item is answered. */
+export const TESTER_LOOP_OPTIONS = {
+  builder: 'builder',
+  tester: 'tester',
+  cancel: 'cancel',
+} as const;
+
+const PATH_TOKEN = /(?:[A-Za-z0-9_.@~-]*\/)+[A-Za-z0-9_.@-]+\.[A-Za-z0-9]{1,8}\b/g;
+const ARTIFACT_WORD = /\b(?:jpe?g|png|webp|gif|screenshots?|captures?|images?)\b/i;
+const MISSING_WORD =
+  /\b(?:missing|not (?:found|produced|generated|created|captured|written)|no such file|ENOENT|does not exist|was not run|never ran|has not (?:been )?(?:run|produced|generated))\b/i;
+
+/**
+ * Does a failure report name only the project's E2E paths (or only artifacts the E2E capture produces, such as missing
+ * screenshots)? Then the work is in the E2E spec or its fixtures, which only the tester may change: a bug card for a
+ * builder can never fix it (production: GWP-11, a docs card whose capture run had not produced its images).
+ * Conservative: any path outside the E2E globs, or no evidence of either kind, is not an E2E-only failure.
+ */
+export function e2eOnlyFailure(
+  text: string,
+  e2eGlobs: readonly string[],
+): { e2eOnly: boolean; paths: string[]; reason: string } {
+  const none = { e2eOnly: false, paths: [] as string[] };
+  if (e2eGlobs.length === 0) return { ...none, reason: 'the project has no E2E paths' };
+  const res = e2eGlobs.map((g) => globToRegExp(g));
+  const clean = text.replace(/\b[a-z][a-z0-9+.-]*:\/\/\S+/gi, ' ');
+  const tokens = [...new Set(clean.match(PATH_TOKEN) ?? [])];
+  const isE2e = (raw: string): boolean => {
+    const path = raw.replace(/^(?:\.\/)+/, '');
+    if (res.some((re) => re.test(path))) return true;
+    if (!path.startsWith('/')) return false;
+    // An absolute path (a worktree): any tail of it that is an E2E path.
+    const parts = path.split('/').filter(Boolean);
+    return parts.some((_, i) => res.some((re) => re.test(parts.slice(i).join('/'))));
+  };
+  const e2e = tokens.filter(isE2e);
+  const other = tokens.filter((t) => !isE2e(t));
+  if (other.length > 0)
+    return { e2eOnly: false, paths: e2e, reason: `it names a path outside the E2E paths: ${other[0]}` };
+  if (e2e.length > 0)
+    return { e2eOnly: true, paths: e2e, reason: `it names only E2E paths (${e2e.slice(0, 3).join(', ')})` };
+  if (ARTIFACT_WORD.test(clean) && MISSING_WORD.test(clean))
+    return { e2eOnly: true, paths: [], reason: 'it reports missing artifacts that the E2E capture produces' };
+  return { ...none, reason: 'it names no E2E path' };
 }

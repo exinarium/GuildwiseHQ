@@ -3,6 +3,7 @@ import {
   bugDescription,
   DESK_SUBKIND,
   DevOpsAccessSchema,
+  e2eOnlyFailure,
   emptyFields,
   type RunnerToServerOf,
   streamId,
@@ -18,39 +19,46 @@ import { agentActor, cardMessage, projectScope, SYSTEM_ACTOR } from './common.ts
 import { createDevOpsRequestIn } from './devops.ts';
 import { bugJoinEvents } from './phases.ts';
 import { spawnCardEvent } from './spawn.ts';
+import {
+  bugCardEvents,
+  latestFailureChild,
+  reworkOrEscalateEvents,
+  testerLoopQuestionEvents,
+} from './tester-loop.ts';
 
-/** Bug child of a failed feature test (spec "Testing strategy"): shares the parent's worktree and branch. */
+/**
+ * A failed feature test (spec "Testing strategy"). A failure in the product is a bug child that shares the parent's
+ * worktree and branch (`bugCardEvents`). A failure in the E2E spec or its fixtures is a rework: builders may not change
+ * those, so the card goes back to the tester (`TestReworkRequested`), capped when it makes no progress. Two guards keep the
+ * product route from looping (GWP-11): a failure that names only E2E paths is a rework whatever scope the tester gave, and
+ * a failure reported again after the card's bug card was cancelled creates no new bug card but asks the CEO.
+ */
 export async function testFailedEvents(
+  ctx: Ctx,
   tx: Tx,
   card: Row,
   agentId: string,
   note: string,
   evidence: TestEvidence,
+  /** The commit the reporting tester shift started at (`shifts.start_sha`). */
+  headSha: string | null = null,
 ): Promise<AppendInput[]> {
   const title = evidence.title?.trim() || `Bug found testing ${card.ref}`;
   const scope = projectScope(card.org_id, card.project_id);
   // The failure is in the E2E spec or its fixtures: builders may not change those, so a bug card for a builder could
   // never fix it. The card stays in Test and goes back to the tester.
-  if (evidence.failureScope === 'e2e_spec') {
-    return [
-      {
-        streamId: streamId.card(card.id),
-        event: {
-          type: 'TestReworkRequested',
-          payload: { cardId: card.id, testerAgentId: agentId, evidence, summary: title },
-        },
-        actor: agentActor(agentId),
-        scope,
-      },
-      cardMessage(
-        card,
-        { kind: 'system' },
-        'system',
-        `Test failed in the E2E spec itself ("${title}"). No bug card was created: only the tester may change E2E tests, so ${card.ref} stays in Test and goes back to the tester.\n\n${note}`,
-        { failureScope: 'e2e_spec' },
-      ),
-    ];
-  }
+  if (evidence.failureScope === 'e2e_spec')
+    return reworkOrEscalateEvents(
+      ctx,
+      tx,
+      card,
+      agentId,
+      evidence,
+      title,
+      note,
+      `Test failed in the E2E spec itself ("${title}"). No bug card was created: only the tester may change E2E tests, so ${card.ref} stays in Test and goes back to the tester.`,
+      headSha,
+    );
   const desc = bugDescription({ note, evidence, parentRef: card.ref });
   // A bug child of this failure is still open: append the new findings to it instead of creating a duplicate.
   const open = await one(
@@ -87,50 +95,37 @@ export async function testFailedEvents(
       ),
     ];
   }
-  const child = await spawnCardEvent(tx, {
-    from: card,
-    title,
-    cardType: 'bug',
-    origin: 'test_failure',
-    workflowKey: 'code-bugfix',
-    stage: 'build',
-    status: 'queued',
-    fields: {
-      ...emptyFields('code'),
-      context: desc,
-      requirements: `Fix the bug described in the context.`,
-      constraints: `Fix on the branch of ${card.ref}; add a regression unit test.`,
-    },
-    parentCardId: card.id,
-    worktreeCardId: card.worktree_card_id ?? card.id,
-    completionAction: card.completion_action,
-    riskTier: null,
-  });
-  return [
-    child.event,
-    {
-      streamId: streamId.card(card.id),
-      event: {
-        type: 'TestFailed',
-        payload: {
-          cardId: card.id,
-          testerAgentId: agentId,
-          bugCardId: child.cardId,
-          evidence,
-          summary: title,
-        },
-      },
-      actor: agentActor(agentId),
-      scope,
-    },
-    cardMessage(
+  // Product scope, but does the report name only E2E paths or the artifacts of the E2E capture? Then it is spec work.
+  const project = await one(tx, 'SELECT e2e_globs FROM projects WHERE id=$1', [card.project_id]);
+  const verdict = e2eOnlyFailure(
+    [title, note, evidence.summary, evidence.outputExcerpt, ...evidence.commands].join('\n'),
+    (project?.e2e_globs as string[] | undefined) ?? [],
+  );
+  const previous = await latestFailureChild(tx, card.id);
+  const cancelled = previous?.status === 'cancelled' ? previous : undefined;
+  if (verdict.e2eOnly)
+    return reworkOrEscalateEvents(
+      ctx,
+      tx,
       card,
-      { kind: 'system' },
-      'system',
-      `Test failed: bug card ${child.ref} ("${title}") was created for the original builder. ${card.ref} waits in Test until the fix passed review.`,
-      { bugCardId: child.cardId },
-    ),
-  ];
+      agentId,
+      { ...evidence, failureScope: 'e2e_spec' },
+      title,
+      note,
+      `The tester reported "${title}" with scope product, but ${verdict.reason}: that is E2E spec work, which builders may not do. No bug card was created${cancelled ? ` (bug card ${cancelled.ref} was cancelled earlier)` : ''}; ${card.ref} stays in Test and goes back to the tester.`,
+      headSha,
+    );
+  if (cancelled)
+    return testerLoopQuestionEvents(ctx, tx, card, {
+      reason: 'cancelled_bug',
+      summary: `${title}. ${note}`.slice(0, 1500),
+      testerAgentId: agentId,
+      evidence,
+      note,
+      title,
+      cancelledRef: cancelled.ref,
+    });
+  return bugCardEvents(tx, card, agentId, note, evidence, title);
 }
 
 /** Outcome of a suite or regression card: green ends it; a genuine failure files a bug in Spec and a desk notice. */
