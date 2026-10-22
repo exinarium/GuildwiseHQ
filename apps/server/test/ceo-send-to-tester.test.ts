@@ -1,5 +1,6 @@
-import { DEFAULT_CEO_POLICY, TESTER_REWORK_CAP } from '@aom/shared';
+import { DEFAULT_CEO_POLICY, streamId, TESTER_REWORK_CAP } from '@aom/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { projectScope, SYSTEM_ACTOR } from '../src/commands/common.ts';
 import { CEO_STOP_LOSS_ARBITRATIONS, ceoStopLossArbitrations } from '../src/commands/stop-loss.ts';
 import { testerLoopQuestionEvents } from '../src/commands/tester-loop.ts';
 import { testFailedEvents } from '../src/commands/testing.ts';
@@ -172,6 +173,131 @@ describe('send-to-tester', () => {
       await act(r, shiftId, 'send-to-tester', { card: card.ref, note: 'back to test' }, { key: 'stt-3' }),
     );
     expect(res.status).toBe('refused');
+  });
+});
+
+describe('send-to-tester status checks', () => {
+  it('refuses a card with a live claim', async () => {
+    const { card } = await failedCard('Claimed');
+    await q(
+      `UPDATE cards SET claim_id=gen_random_uuid(), claimed_by_agent_id=$2, status='claimed' WHERE id=$1`,
+      [card.id, testerId],
+    );
+    const res = result(
+      await act(r, shiftId, 'send-to-tester', { card: card.ref, note: 'claimed one' }, { key: 'stt-claim' }),
+    );
+    expect(res.status).toBe('refused');
+    expect(await events('TestReworkRequested', card.id)).toHaveLength(0);
+  });
+
+  it('refuses a card in Test with the wrong status', async () => {
+    const { card, bug } = await failedCard('Blocked status');
+    await q(`UPDATE cards SET status='blocked' WHERE id=$1`, [card.id]);
+    const res = result(
+      await act(r, shiftId, 'send-to-tester', { card: card.ref, note: 'blocked one' }, { key: 'stt-status' }),
+    );
+    expect(res.status).toBe('refused');
+    expect(await cardRow(bug.id)).toMatchObject({ status: expect.not.stringMatching(/cancelled/) });
+  });
+
+  it('refuses a card whose test never failed', async () => {
+    const card = await w.card({ title: 'Never failed' });
+    await q(`UPDATE cards SET stage='test', status='queued' WHERE id=$1`, [card.id]);
+    const res = result(
+      await act(
+        r,
+        shiftId,
+        'send-to-tester',
+        { card: card.ref, note: 'no failure yet' },
+        { key: 'stt-nofail' },
+      ),
+    );
+    expect(res.status).toBe('refused');
+  });
+
+  it('refuses a card whose last failure was followed by a pass', async () => {
+    const { card } = await failedCard('Failed then passed');
+    await withAppendTx(ctx().pool, async (tx) => {
+      await ctx().store.append(
+        [
+          {
+            streamId: streamId.card(card.id),
+            event: {
+              type: 'TestPassed',
+              payload: {
+                cardId: card.id,
+                testerAgentId: testerId,
+                evidence: PRODUCT_EVIDENCE,
+                toStage: 'docs',
+              },
+            },
+            actor: SYSTEM_ACTOR,
+            scope: projectScope(card.org_id, card.project_id),
+          } as never,
+        ],
+        { tx },
+      );
+    });
+    await q(`UPDATE cards SET stage='test', status='waiting' WHERE id=$1`, [card.id]);
+    const res = result(
+      await act(
+        r,
+        shiftId,
+        'send-to-tester',
+        { card: card.ref, note: 'already passed' },
+        { key: 'stt-passed' },
+      ),
+    );
+    expect(res.status).toBe('refused');
+  });
+});
+
+describe('tester_loop answers by the CEO', () => {
+  const setCancelMode = (mode: string) =>
+    q(
+      `UPDATE ceo_settings SET policy = jsonb_set(policy, '{classes,card.cancel,mode}', to_jsonb($2::text)) WHERE org_id=$1`,
+      [w.owner.id, mode],
+    );
+  const inverseOf = async (key: string) =>
+    (
+      await q(
+        `SELECT inverse FROM ceo_actions WHERE idem_key LIKE '%' || $1 ORDER BY created_at DESC LIMIT 1`,
+        [key],
+      )
+    )[0];
+
+  it('option cancel is refused while card.cancel is not decide, and works when it is', async () => {
+    const card = await w.card({ title: 'Cancel policy' });
+    await q(`UPDATE cards SET stage='test', status='queued' WHERE id=$1`, [card.id]);
+    const item = await raiseLoop(card.id);
+    await setCancelMode('recommend');
+    const refused = result(
+      await act(r, shiftId, 'answer', { item: item.id, option: 'cancel' }, { key: 'tlc-1' }),
+    );
+    expect(refused.status).toBe('refused');
+    expect(await cardRow(card.id)).toMatchObject({ status: 'blocked' });
+    expect((await q('SELECT status FROM desk_items WHERE id=$1', [item.id]))[0]!.status).toBe('open');
+    await setCancelMode('decide');
+    try {
+      const ok2 = result(
+        await act(r, shiftId, 'answer', { item: item.id, option: 'cancel' }, { key: 'tlc-2' }),
+      );
+      expect(ok2.status).toBe('executed');
+      expect(await cardRow(card.id)).toMatchObject({ status: 'cancelled' });
+    } finally {
+      await setCancelMode('recommend');
+    }
+  });
+
+  it('an answer has no inverse (no undo)', async () => {
+    const card = await w.card({ title: 'No undo' });
+    await q(`UPDATE cards SET stage='test', status='queued' WHERE id=$1`, [card.id]);
+    const item = await raiseLoop(card.id);
+    const res = result(
+      await act(r, shiftId, 'answer', { item: item.id, option: 'tester' }, { key: 'tlc-3' }),
+    );
+    expect(res.status).toBe('executed');
+    expect((await inverseOf('tlc-3'))?.inverse ?? null).toBeNull();
   });
 });
 

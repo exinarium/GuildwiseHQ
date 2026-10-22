@@ -195,6 +195,23 @@ const sendToTester: ActionDef<z.infer<typeof SendToTesterP>> = {
         ...base,
         refuse: `${parent.ref} is at '${parent.stage}', not in Test: only a card whose test failed goes back to the tester`,
       };
+    if (!['waiting', 'queued'].includes(parent.status) || parent.claim_id)
+      return {
+        ...base,
+        refuse: `${parent.ref} is ${parent.claim_id ? 'being worked on right now' : parent.status} in Test: only a card that waits or is queued in Test, with no live claim, goes back to the tester`,
+      };
+    const failed = await one(
+      env.ctx.pool,
+      `SELECT 1 FROM events f WHERE f.stream_id=$1 AND f.type='TestFailed'
+          AND f.seq > COALESCE((SELECT max(p.seq) FROM events p WHERE p.stream_id=$1 AND p.type='TestPassed'), 0)
+        LIMIT 1`,
+      [streamId.card(parent.id)],
+    );
+    if (!failed)
+      return {
+        ...base,
+        refuse: `${parent.ref} has no failed test since its last pass: only a card whose test failed goes back to the tester`,
+      };
     const question = await one(
       env.ctx.pool,
       `SELECT id FROM desk_items WHERE card_id=$1 AND subkind=$2 AND status='open'`,
@@ -213,7 +230,7 @@ const sendToTester: ActionDef<z.infer<typeof SendToTesterP>> = {
     const workstations = new Set<string>();
     await withAppendTx(env.ctx.pool, async (tx) => {
       const cur = await one(tx, 'SELECT * FROM cards WHERE id=$1 FOR UPDATE', [parent.id]);
-      if (!cur || cur.stage !== 'test' || ['done', 'cancelled'].includes(cur.status))
+      if (!cur || cur.stage !== 'test' || !['waiting', 'queued'].includes(cur.status) || cur.claim_id)
         throw new HttpError(409, 'not_in_test', `${parent.ref} is no longer in Test`);
       const open = await rows(
         tx,
