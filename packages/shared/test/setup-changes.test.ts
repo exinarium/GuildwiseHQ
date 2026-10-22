@@ -333,4 +333,13 @@ describe('blockersFor', () => {
     expect(blockersFor(items, 'uat').map((i) => i.text)).toEqual(['b']);
     expect(blockersFor(items, 'other')).toEqual([]);
   });
+  it('an item with no environment blocks every save', () => {
+    const odd = [
+      { group: 'setup_once', env: '', text: 'x' },
+      { group: 'setup_once', text: 'y' },
+      { group: 'question', env: '', text: 'z' },
+    ] as unknown as ChangeItem[];
+    expect(blockersFor(odd, 'uat').map((i) => i.text)).toEqual(['x', 'y']);
+    expect(blockersFor(odd, 'other').map((i) => i.text)).toEqual(['x', 'y']);
+  });
 });

@@ -377,6 +377,8 @@ describe('publish through recipe.write, then observe', () => {
       'probe stored',
     );
     const c = compiled();
+    // what is stored now is this setup: a change to one environment is a change to that one only
+    await observeRecipe(d.w.t.app.ctx, d.w.projectId, inspected(c), d.w.workstationId);
     const preview = await call('POST', `${base()}/delivery/setup/preview`, { setup: setup() });
     expect(preview.changes.some((i: any) => i.env === 'uat' && i.group === 'setup_once')).toBe(true);
     expect(preview.changes.some((i: any) => i.env === 'production' && i.group === 'setup_once')).toBe(false);
@@ -392,6 +394,73 @@ describe('publish through recipe.write, then observe', () => {
     // saving production is not held back by the blocker of uat
     await call('POST', `${base()}/delivery/setup/publish`, { ...body, onlyEnv: 'production' }, 202);
     expect(await sinceCommands('recipe.write', 1)).toBeTruthy();
+  });
+
+  /** Docker is missing on this computer (a blocker for uat), and the stored setup is the plain one. */
+  async function uatBlockedAndStored() {
+    await call('POST', `${base()}/delivery/probe`, { scope: 'local' }, 202);
+    const cmd = await sinceCommands('deploy.probe', 1);
+    r.send('command.result', {
+      commandId: cmd.commandId,
+      ok: true,
+      result: {
+        ok: true,
+        report: {
+          scope: 'local',
+          at: new Date().toISOString(),
+          docker: { installed: false, usable: false },
+          containers: [],
+          composeFiles: [],
+          volumes: [],
+          folders: [],
+          backups: [],
+          proxies: [],
+          urls: [],
+          listeners: [],
+        },
+      },
+    });
+    await until(
+      async () => (await call('GET', `${base()}/delivery/setup`)).probes.length === 1,
+      5000,
+      'probe stored',
+    );
+    await observeRecipe(d.w.t.app.ctx, d.w.projectId, inspected(compiled()), d.w.workstationId);
+  }
+
+  it('onlyEnv naming an environment that is not in the setup is ignored: every blocker counts', async () => {
+    await uatBlockedAndStored();
+    const body = { setup: setup(), setupHash: compiled().hash };
+    const res = await req('POST', `${base()}/delivery/setup/publish`, { ...body, onlyEnv: 'nowhere' });
+    expect(res.status).toBe(422);
+    expect(res.body.error.code).toBe('setup_needs_work');
+    expect(commands('recipe.write')).toHaveLength(0);
+  });
+
+  it('onlyEnv=production while uat is also edited is blocked by the blocker of uat', async () => {
+    await uatBlockedAndStored();
+    const edited = setup();
+    (edited.environments[0] as any).label = 'Test copy, renamed';
+    const res = await req('POST', `${base()}/delivery/setup/publish`, {
+      setup: edited,
+      setupHash: compiled(edited).hash,
+      onlyEnv: 'production',
+    });
+    expect(res.status).toBe(422);
+    expect(res.body.error.code).toBe('setup_needs_work');
+    expect(commands('recipe.write')).toHaveLength(0);
+  });
+
+  it('onlyEnv with nothing stored yet (every environment is new) is a whole-setup save', async () => {
+    await uatBlockedAndStored();
+    await q(`DELETE FROM delivery_recipes WHERE project_id=$1`, [d.w.projectId]);
+    const unstored = await req('POST', `${base()}/delivery/setup/publish`, {
+      setup: setup(),
+      setupHash: compiled().hash,
+      onlyEnv: 'production',
+    });
+    expect(unstored.status).toBe(422);
+    expect(unstored.body.error.code).toBe('setup_needs_work');
   });
 });
 

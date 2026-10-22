@@ -468,6 +468,45 @@ async function currentGeneratedHash(recipe: Record<string, any> | undefined): Pr
 
 // -------------------------------------------------------------------------------------------------------- publish
 
+/** JSON with sorted keys, so two equal values compare equal whatever the order their keys were built in. */
+function canonicalJson(v: unknown): string {
+  if (Array.isArray(v)) return `[${v.map(canonicalJson).join(',')}]`;
+  if (v && typeof v === 'object')
+    return `{${Object.entries(v as Record<string, unknown>)
+      .filter(([, x]) => x !== undefined)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .map(([k, x]) => `${JSON.stringify(k)}:${canonicalJson(x)}`)
+      .join(',')}}`;
+  return JSON.stringify(v) ?? 'null';
+}
+
+/**
+ * `onlyEnv` when it can be trusted: it names an environment of the submitted setup and every other environment is identical
+ * (canonical form) to the stored one. Added, removed or otherwise edited environments make it a whole-setup save (undefined).
+ */
+async function verifiedOnlyEnv(
+  ctx: Ctx,
+  projectId: string,
+  submitted: DeliverySetup,
+  onlyEnv: string | undefined,
+): Promise<string | undefined> {
+  if (!onlyEnv) return undefined;
+  if (!submitted.environments.some((e) => e.name === onlyEnv)) return undefined;
+  const recipe = await loadRecipeRow(ctx.pool, projectId);
+  const stored = DeliverySetupSchema.safeParse(recipe?.setup ?? null);
+  if (!stored.success) return undefined;
+  const storedC = compileSetup(stored.data);
+  const storedSetup = storedC.ok ? storedC.setup : stored.data;
+  const others = (s: DeliverySetup) =>
+    s.environments
+      .filter((e) => e.name !== onlyEnv)
+      .map((e) => canonicalJson(e))
+      .sort();
+  const a = others(submitted);
+  const b = others(storedSetup);
+  return a.length === b.length && a.every((x, i) => x === b[i]) ? onlyEnv : undefined;
+}
+
 export async function publishSetup(
   ctx: Ctx,
   user: AuthSession['user'],
@@ -494,7 +533,10 @@ export async function publishSetup(
         .slice(0, 400),
     );
   // A save of one environment is stopped only by that environment's own blockers; a whole-setup publish by every one.
-  const blockers = blockersFor(preview.changes, req.onlyEnv);
+  // `onlyEnv` is a claim by the caller: it is honoured only when it names an environment of this setup and every other
+  // environment is exactly what is stored now. Otherwise the save touches more than one environment and all blockers count.
+  const onlyEnv = await verifiedOnlyEnv(ctx, projectId, c.setup, req.onlyEnv);
+  const blockers = blockersFor(preview.changes, onlyEnv);
   if (blockers.length)
     throw unprocessable(
       'setup_needs_work',

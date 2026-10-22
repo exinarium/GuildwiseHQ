@@ -310,9 +310,9 @@ export const hasBlockers = (items: readonly ChangeItem[]): boolean =>
 
 /**
  * The blockers that stop saving a change to one environment: only that environment's own. With no `env` it is every blocker
- * (publishing the whole setup). The blockers of other environments are not hidden, the caller shows them as information.
+ * (publishing the whole setup). A blocker with no environment belongs to every save. The blockers of other environments are not hidden, the caller shows them as information.
  */
-export const blockersFor = <T extends Pick<ChangeItem, 'group' | 'env'>>(
+export const blockersFor = <T extends Pick<ChangeItem, 'group'> & { env?: string }>(
   items: readonly T[],
   env?: string,
-): T[] => items.filter((i) => i.group === 'setup_once' && (!env || i.env === env));
+): T[] => items.filter((i) => i.group === 'setup_once' && (!env || !i.env || i.env === env));
