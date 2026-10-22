@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AskCeoButton } from '../components/ceo/AskCeoButton.tsx';
-import { buildNav } from '../components/shell/nav-config.ts';
+import { buildNav, isActive } from '../components/shell/nav-config.ts';
 import { Agents } from '../pages/Agents.tsx';
 import { ceoStatus, jsonRes, meFor, stubApi, U } from './ceo-fixtures.tsx';
 
@@ -38,6 +38,15 @@ describe('navigation', () => {
     expect(lit('/p/SHOP/backlog')).toEqual(['backlog']);
     expect(lit('/p/SHOP/environments')).toEqual(['environments']);
     expect(lit('/p/SHOP/research')).toEqual(['research']);
+  });
+  it("highlights only Integrations on a workstation's Integrations page, and Workstations elsewhere under it", () => {
+    const { sections, footer } = buildNav({ projectKey: 'SHOP', canManage: true });
+    const all = [...sections.flatMap((s) => s.items), ...footer];
+    const lit = (path: string) => all.filter((e) => isActive(e, path)).map((e) => e.id);
+    expect(lit('/workstations/w1/integrations')).toEqual(['integrations']);
+    expect(lit('/integrations')).toEqual(['integrations']);
+    expect(lit('/workstations')).toEqual(['workstations']);
+    expect(lit('/workstations/w1')).toEqual(['workstations']);
   });
 });
 
