@@ -66,3 +66,23 @@ describe('EnvReview: a blocker of another environment', () => {
     expect(screen.getByTestId('review-save-reason')).toHaveTextContent('until the steps are prepared');
   });
 });
+
+describe('EnvReview: the runner needs an update', () => {
+  // The server refuses the write in this case too (409 runner_outdated), so Save is off here instead of failing after the click
+  it('disables Save with a reason that says saving and releases need the update', () => {
+    show(
+      preview([], {
+        lint: [
+          {
+            level: 'error',
+            code: 'runner_update_needed',
+            message: 'Guildwise on Office PC needs an update for this way of updating the server.',
+          },
+        ],
+      }),
+    );
+    expect(screen.getByTestId('review-save')).toBeDisabled();
+    expect(screen.getByTestId('review-save-reason')).toHaveTextContent('Saving and releases both need it');
+    expect(screen.getByTestId('review-lint-errors')).toHaveTextContent('saving and releases both need');
+  });
+});

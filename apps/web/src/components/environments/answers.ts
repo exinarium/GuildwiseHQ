@@ -702,6 +702,8 @@ export function plainLint(l: { code: string; message: string; level: string }): 
       return l.message;
     case 'secret_in_file':
       return 'A file would contain a password or key. Passwords stay on the computer and are never saved in the project.';
+    case 'runner_update_needed':
+      return `${l.message.replace(/\.$/, '')}. Update it first: saving and releases both need the newer version.`;
     case 'unknown_env_in_gate':
       return 'The live site waits for a test copy that is not in this setup.';
     default:

@@ -55,11 +55,13 @@ export function EnvReview({
         ? 'Save is off until the steps are prepared. Choose Preview again.'
         : !preview.ok
           ? 'Save is off: these steps cannot be saved yet (see above).'
-          : errors.length > 0
-            ? 'Save is off: fix the problems under "Fix this first" above.'
-            : blocked
-              ? 'Save is off: this environment still needs something set up first (see "Needs setting up first" above).'
-              : null;
+          : errors.some((l) => l.code === 'runner_update_needed')
+            ? 'Save is off: Guildwise on the computer that writes the files must be updated first. Saving and releases both need it (see "Fix this first" above).'
+            : errors.length > 0
+              ? 'Save is off: fix the problems under "Fix this first" above.'
+              : blocked
+                ? 'Save is off: this environment still needs something set up first (see "Needs setting up first" above).'
+                : null;
   const native = answers.runtime === 'native';
   return (
     <section className="flex flex-col gap-4" data-testid="env-review">

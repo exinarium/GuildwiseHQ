@@ -524,6 +524,8 @@ export async function publishSetup(
     ...(req.customScripts ? { customScripts: req.customScripts } : {}),
     ...(req.removeFiles ? { removeFiles: req.removeFiles } : {}),
   });
+  // runner_update_needed is left out here only so that the check below answers it with its own code (409 runner_outdated):
+  // the publish is refused either way, and the web shows Save off for it too.
   const errors = preview.lint.filter((l) => l.level === 'error' && l.code !== 'runner_update_needed');
   if (errors.length)
     throw unprocessable(
