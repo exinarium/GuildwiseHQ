@@ -245,7 +245,7 @@ If the link says the invitation is no longer valid, it has expired, was used alr
 
 **Forgot your password?** On the sign-in page click **Forgot your password?**, type your email and we send a link (it works once and expires after an hour). We answer the same way whether or not the email has an account, so nobody can find out who is registered. Choose a new password (at least 12 characters); every other place you were signed in is signed out. Then sign in as usual: if you use two-factor login you still enter your code. A platform administrator can also send you this link (7.4). Platform administrators may use it too (their two-factor code is still asked at the next sign-in). If the email never reaches you, your organization's Owner or an Admin can give you a temporary password instead (4.15).
 
-Visitors who are not signed in see the landing page, with **Log in** and **Start free trial** buttons, the plans and prices, a link to the blog, and a small **Ask Guildwise** chat that answers questions about the product.
+Visitors who are not signed in see the landing page, with **Log in** and **Start free trial** buttons, a link to the blog, and a small **Ask Guildwise** chat that answers questions about the product.
 
 ![The landing page](guide/assets/landing.jpg)
 
