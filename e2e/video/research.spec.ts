@@ -31,7 +31,8 @@ const claim = (text: string, slug: string, title: string) => ({
 
 test('record the research video', async ({ browser }) => {
   // ---- seed (demo data only) ---------------------------------------------------------------------------------------
-  const api = await demoApi();
+  // no CEO: it would answer the open research's question itself, and the video shows research that waits for you
+  const api = await demoApi({ ceo: false });
   const { projectId } = await createProject(api, 'INS', 'Customer insights', {
     repo: false,
     workflowKey: 'research',
