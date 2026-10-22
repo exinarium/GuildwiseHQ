@@ -21,7 +21,7 @@ import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { threadMessageById } from '../queries/threads.ts';
 import { workstationServesOrg } from '../simulation/fit.ts';
-import { orgScope, projectScope, userActor } from './common.ts';
+import { orgScope, userActor } from './common.ts';
 
 /** `ad-hoc-<slug>`: a persona cast on the fly from a one-line brief (the brief is its stance; it is not in the registry). */
 export const isAdHocPersona = (key: string): boolean => key.startsWith('ad-hoc-');
@@ -195,9 +195,11 @@ function participantEvent(
   };
 }
 
-/** Events of a session go to the project's members, else to the organization. */
-export const sessionScope = (t: Row) =>
-  t.project_id ? projectScope(t.org_id, t.project_id) : orgScope(t.org_id);
+/**
+ * Events of a session are organization events whatever its project: the browser stream gives them to Owners and Admins in
+ * full and to Members stripped of their payload, so a session stays private to the people in it.
+ */
+export const sessionScope = (t: Row) => orgScope(t.org_id);
 
 /** `POST /api/sessions`: a thread of kind `discovery` or `boardroom`, its participants and its first workstation. */
 export async function createSession(ctx: Ctx, who: Who, req: CreateSessionRequest): Promise<SessionDto> {
@@ -231,7 +233,7 @@ export async function createSession(ctx: Ctx, who: Who, req: CreateSessionReques
     }
 
     const threadId = randomUUID();
-    const scope = req.projectId ? projectScope(who.orgId, req.projectId) : orgScope(who.orgId);
+    const scope = orgScope(who.orgId);
     const events: AppendInput[] = [
       {
         streamId: streamId.thread(threadId),

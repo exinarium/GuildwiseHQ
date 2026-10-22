@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { PERSONA_HOST_AGENT_ID, uuidv7 } from '@aom/shared';
+import { BUILTIN_ROLES, PERSONA_HOST_AGENT_ID, uuidv7 } from '@aom/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { runnerPaths } from '../src/paths.ts';
 import { type Harness, startHarness } from './harness.ts';
@@ -160,5 +160,37 @@ describe('a session turn on the runner (mock adapter)', () => {
     } finally {
       delete process.env.AOM_MOCK_CHAT_TOKEN_MS;
     }
+  });
+});
+
+describe('the capability index in a card shift', () => {
+  it('lists the capabilities a role names, with name and description, and how to load them', async () => {
+    h = await startHarness();
+    const builder = BUILTIN_ROLES.find((r) => r.key === 'builder');
+    if (!builder) throw new Error('role');
+    const agentId = '019e3f6a-7b1c-7a2d-8c3e-0123456789b1';
+    await h.runShift({
+      stage: 'build',
+      agentId,
+      agentName: 'Una',
+      startExtra: {
+        agent: {
+          agentId,
+          name: 'Una',
+          roleKey: 'builder',
+          seniority: 'senior',
+          runtime: 'mock',
+          model: 'mock',
+          skills: ['prd', 'not-in-the-registry'],
+          permissions: builder.permissions,
+          isDevops: false,
+        },
+      },
+    });
+    const md = readFileSync(join(h.dataDir, 'agents', agentId, 'claude', 'CLAUDE.md'), 'utf8');
+    expect(md).toContain('# Capabilities');
+    expect(md).toContain('`playbook:prd`');
+    expect(md).toContain('aom skill show');
+    expect(md).toContain('`not-in-the-registry`: not found in the registry');
   });
 });

@@ -154,6 +154,7 @@ describe('two-user isolation', () => {
     const u = await w.t.userSession(uniqueEmail('cat'));
     const roles = await ok<any>(w.t.req('GET', '/api/roles', { cookie: u.cookie }));
     expect(roles.roles.map((r: any) => r.definition.key).sort()).toEqual([
+      'analyst',
       'architect',
       'ba',
       'builder',
