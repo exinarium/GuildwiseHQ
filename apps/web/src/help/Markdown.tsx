@@ -51,76 +51,91 @@ function InlineNodes({ c }: { c: Inline[] }): ReactNode {
 }
 
 /** Renders the blocks of an article. Headings carry their anchor ids (and a link to themselves). */
-export function Markdown({ blocks }: { blocks: Block[] }) {
+export function Markdown({
+  blocks,
+  afterHeading,
+}: {
+  blocks: Block[];
+  /** Extra content shown right below the heading with this anchor id (a section video). */
+  afterHeading?: (id: string) => ReactNode;
+}) {
   return (
     <div className="flex flex-col gap-3 text-base leading-relaxed text-muted" data-testid="help-article-body">
-      {blocks.map((b, i) => {
-        const key = `${i}-${b.t}`;
-        switch (b.t) {
-          case 'h':
-            return b.level === 2 ? (
-              <h2 key={key} id={b.id} className="group mt-5 scroll-mt-20 text-xl font-semibold text-fg">
-                <a href={`#${b.id}`} className="no-underline hover:underline">
-                  {b.text}
-                </a>
-              </h2>
-            ) : (
-              <h3 key={key} id={b.id} className="mt-3 scroll-mt-20 text-base font-semibold text-fg">
-                {b.text}
-              </h3>
-            );
-          case 'p':
-            return (
-              <p key={key}>
-                <InlineNodes c={b.c} />
-              </p>
-            );
-          case 'ul':
-            return (
-              <ul key={key} className="ml-5 flex list-disc flex-col gap-1.5 marker:text-subtle">
-                {b.items.map((it, j) => (
-                  // biome-ignore lint/suspicious/noArrayIndexKey: static content
-                  <li key={j}>
-                    <InlineNodes c={it} />
-                  </li>
-                ))}
-              </ul>
-            );
-          case 'ol':
-            return (
-              <ol key={key} className="ml-5 flex list-decimal flex-col gap-1.5 marker:text-subtle">
-                {b.items.map((it, j) => (
-                  // biome-ignore lint/suspicious/noArrayIndexKey: static content
-                  <li key={j}>
-                    <InlineNodes c={it} />
-                  </li>
-                ))}
-              </ol>
-            );
-          case 'quote':
-            return (
-              <blockquote
-                key={key}
-                className="rounded-control border border-info-fill/40 bg-info-soft px-3.5 py-2.5 text-sm text-info-soft-fg"
-              >
-                <InlineNodes c={b.c} />
-              </blockquote>
-            );
-          case 'code':
-            return (
-              <pre
-                key={key}
-                // biome-ignore lint/a11y/noNoninteractiveTabindex: scrollable region must be keyboard reachable
-                tabIndex={0}
-                className="overflow-x-auto rounded-control border border-line bg-sunken p-3 font-mono text-sm text-fg"
-              >
-                <code>{b.v}</code>
-              </pre>
-            );
-          default:
-            return null;
-        }
-      })}
+      {blocks.map((b, i) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: static content
+        <Fragment key={`${i}-${b.t}`}>
+          <BlockView b={b} i={i} />
+          {b.t === 'h' && afterHeading?.(b.id)}
+        </Fragment>
+      ))}
     </div>
   );
+}
+
+function BlockView({ b, i }: { b: Block; i: number }): ReactNode {
+  const key = `${i}-${b.t}`;
+  switch (b.t) {
+    case 'h':
+      return b.level === 2 ? (
+        <h2 key={key} id={b.id} className="group mt-5 scroll-mt-20 text-xl font-semibold text-fg">
+          <a href={`#${b.id}`} className="no-underline hover:underline">
+            {b.text}
+          </a>
+        </h2>
+      ) : (
+        <h3 key={key} id={b.id} className="mt-3 scroll-mt-20 text-base font-semibold text-fg">
+          {b.text}
+        </h3>
+      );
+    case 'p':
+      return (
+        <p key={key}>
+          <InlineNodes c={b.c} />
+        </p>
+      );
+    case 'ul':
+      return (
+        <ul key={key} className="ml-5 flex list-disc flex-col gap-1.5 marker:text-subtle">
+          {b.items.map((it, j) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: static content
+            <li key={j}>
+              <InlineNodes c={it} />
+            </li>
+          ))}
+        </ul>
+      );
+    case 'ol':
+      return (
+        <ol key={key} className="ml-5 flex list-decimal flex-col gap-1.5 marker:text-subtle">
+          {b.items.map((it, j) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: static content
+            <li key={j}>
+              <InlineNodes c={it} />
+            </li>
+          ))}
+        </ol>
+      );
+    case 'quote':
+      return (
+        <blockquote
+          key={key}
+          className="rounded-control border border-info-fill/40 bg-info-soft px-3.5 py-2.5 text-sm text-info-soft-fg"
+        >
+          <InlineNodes c={b.c} />
+        </blockquote>
+      );
+    case 'code':
+      return (
+        <pre
+          key={key}
+          // biome-ignore lint/a11y/noNoninteractiveTabindex: scrollable region must be keyboard reachable
+          tabIndex={0}
+          className="overflow-x-auto rounded-control border border-line bg-sunken p-3 font-mono text-sm text-fg"
+        >
+          <code>{b.v}</code>
+        </pre>
+      );
+    default:
+      return null;
+  }
 }

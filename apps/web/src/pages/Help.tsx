@@ -5,6 +5,7 @@ import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'reac
 import { useMyTickets } from '../api/queries/support.ts';
 import { BlogSearchHits, HelpBlog } from '../components/blog/HelpBlog.tsx';
 import { GettingStartedVideo } from '../components/help/GettingStartedVideo.tsx';
+import { SectionVideo } from '../components/help/SectionVideo.tsx';
 import { SetupHelpCard, useSetupChecklistUi } from '../components/setup/SetupChecklist.tsx';
 import { ContactForm, prefillFor } from '../components/support/ContactForm.tsx';
 import { MyRequest } from '../components/support/MyRequest.tsx';
@@ -18,6 +19,7 @@ import { GLOSSARY } from '../help/glossary.ts';
 import { Markdown } from '../help/Markdown.tsx';
 import { formatDateTime } from '../lib/time.ts';
 import { usePageTitle } from '../lib/usePageTitle.ts';
+import { videosForArticle } from '../lib/videos.ts';
 
 type Tab = 'help' | 'blog' | 'contact' | 'requests';
 
@@ -373,7 +375,20 @@ function ArticleView({ article, base }: { article: ReturnType<typeof articleBySl
             <GettingStartedVideo />
           </div>
         )}
-        <Markdown blocks={article.blocks} />
+        <Markdown
+          blocks={article.blocks}
+          afterHeading={(id) =>
+            videosForArticle(article.slug)
+              .filter((v) => v.anchor === id)
+              .map((v) => (
+                <SectionVideo
+                  key={v.slug}
+                  slug={v.slug}
+                  className="rounded-card border border-line bg-surface p-4"
+                />
+              ))
+          }
+        />
         {base === '/help' && (
           <p className="mt-8 border-t border-line pt-4 text-sm text-muted">
             Still stuck?{' '}

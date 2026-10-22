@@ -1,7 +1,8 @@
 import { Clapperboard } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { GETTING_STARTED_SLUG, videoInfoUrl } from '../../lib/videos.ts';
 
-/** What `e2e/video/getting-started.spec.ts` writes next to the video (seconds from the start). */
+/** What the harness of `e2e/video/*.spec.ts` writes next to every video (seconds from the start). */
 export interface VideoInfo {
   title: string;
   src: string;
@@ -14,7 +15,7 @@ export interface VideoInfo {
   chapters: Array<{ t: number; title: string }>;
 }
 
-export const VIDEO_INFO_URL = '/videos/getting-started.json';
+export const VIDEO_INFO_URL = videoInfoUrl(GETTING_STARTED_SLUG);
 
 const clock = (s: number): string => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 
@@ -23,19 +24,27 @@ function isInfo(v: unknown): v is VideoInfo {
   return !!i && typeof i.src === 'string' && Array.isArray(i.chapters);
 }
 
-/** Loads the video's description once per mounting; `null` while loading, `'none'` when there is no video yet. */
-export function useVideoInfo(): VideoInfo | null | 'none' {
-  const [info, setInfo] = useState<VideoInfo | null | 'none'>(null);
+/**
+ * Loads the video's description once per mounting; `null` while loading, `'none'` when there is no video yet. `url` is
+ * the chapters JSON (default: Getting started); `null` skips the request and stays `'none'`.
+ */
+export function useVideoInfo(url: string | null = VIDEO_INFO_URL): VideoInfo | null | 'none' {
+  const [info, setInfo] = useState<VideoInfo | null | 'none'>(url ? null : 'none');
   useEffect(() => {
+    if (!url) {
+      setInfo('none');
+      return;
+    }
+    setInfo(null);
     let live = true;
-    fetch(VIDEO_INFO_URL, { headers: { accept: 'application/json' } })
+    fetch(url, { headers: { accept: 'application/json' } })
       .then((r) => (r.ok ? r.json() : null))
       .then((j: unknown) => live && setInfo(isInfo(j) ? j : 'none'))
       .catch(() => live && setInfo('none'));
     return () => {
       live = false;
     };
-  }, []);
+  }, [url]);
   return info;
 }
 
@@ -43,7 +52,16 @@ export function useVideoInfo(): VideoInfo | null | 'none' {
  * The player with its captions and one button per chapter. `onBroken` is told when no encoding can be loaded. The video
  * is paused when the player goes away (the tour moves to its next step).
  */
-export function VideoPlayer({ info, onBroken }: { info: VideoInfo; onBroken: () => void }) {
+export function VideoPlayer({
+  info,
+  onBroken,
+  slug = GETTING_STARTED_SLUG,
+}: {
+  info: VideoInfo;
+  onBroken: () => void;
+  /** The video's slug: names the test id (`<slug>-player`) and the default captions file. */
+  slug?: string;
+}) {
   const video = useRef<HTMLVideoElement>(null);
   useEffect(() => {
     const v = video.current;
@@ -62,7 +80,7 @@ export function VideoPlayer({ info, onBroken }: { info: VideoInfo; onBroken: () 
         controls
         preload="metadata"
         playsInline
-        data-testid="getting-started-player"
+        data-testid={`${slug}-player`}
         aria-label={info.title}
         className="aspect-video w-full rounded-control bg-black"
         onError={onBroken}
@@ -78,7 +96,7 @@ export function VideoPlayer({ info, onBroken }: { info: VideoInfo; onBroken: () 
         {/* the narration as captions (on by default; the CC button turns them off) */}
         <track
           kind="captions"
-          src={info.captions ?? '/videos/getting-started.vtt'}
+          src={info.captions ?? `/videos/${slug}.vtt`}
           srcLang="en"
           label="English"
           default

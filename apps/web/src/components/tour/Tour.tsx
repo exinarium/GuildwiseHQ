@@ -6,6 +6,7 @@ import { useSetTour } from '../../api/queries/tour.ts';
 import { useWorkstations } from '../../api/queries/workstations.ts';
 import { helpBase, helpPath } from '../../help/articles.ts';
 import { type TourStep, tourRoleOf, tourSteps, WORKSTATION_OFFER } from '../../lib/tour.ts';
+import { videoForNav } from '../../lib/videos.ts';
 import { Button } from '../ui.tsx';
 import { type TourApi, TourContext } from './TourContext.tsx';
 import { TourVideo } from './TourVideo.tsx';
@@ -126,6 +127,7 @@ function Card({
     const el = ref.current;
     if (el) setSize((s) => (s.h === el.offsetHeight ? s : { w: el.offsetWidth, h: el.offsetHeight }));
   }, [step.id, vp.w, offer, videoShown]);
+  const sectionVideo = videoForNav(step.videoNav ?? step.id);
   const last = index === total - 1;
   const at = place(found ? box : null, size, vp.w, vp.h);
   const pct = Math.round(((index + 1) / total) * 100);
@@ -187,6 +189,9 @@ function Card({
           {last && offer && ` ${WORKSTATION_OFFER.text}`}
         </RadixDialog.Description>
         {step.video && <TourVideo onShown={setVideoShown} />}
+        {!step.video && sectionVideo && (
+          <TourVideo key={sectionVideo.slug} slug={sectionVideo.slug} onShown={setVideoShown} />
+        )}
         {step.more && (
           <Link
             to={helpPath(step.more, base)}
