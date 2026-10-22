@@ -1,4 +1,5 @@
 import { join } from 'node:path';
+import { graphRepoKey } from '@aom/shared';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { indexRepository } from '../src/graph/indexer.ts';
 import { loadGraph } from '../src/graph/load.ts';
@@ -138,5 +139,36 @@ describe('aom graph impact and path', () => {
     expect(index.path('py/app/models.py', 'go/main.go')).toMatch(/No path|Path of \d+ link/);
     const same = index.path('format', 'format');
     expect(same).toContain('same node');
+  });
+});
+
+describe('a graph of several repositories', () => {
+  it('shows the repository of every hit, so the BA can tell the repositories apart; a single-repository graph is unchanged', async () => {
+    const out = tmp('aom-graph-q2-');
+    const a = makeGraphRepo({ 'src/invoice.ts': 'export function sendInvoice() { return 1; }\n' });
+    const b = makeGraphRepo({ 'src/invoice.ts': 'export function renderInvoice() { return 2; }\n' });
+    for (const [fx, name] of [
+      [a, 'billing-api'],
+      [b, 'billing-web'],
+    ] as const) {
+      await indexRepository({
+        repoPath: fx.repo,
+        repoKey: graphRepoKey(`example.com/acme/${name}`),
+        repoName: name,
+        graphDir: join(out, 'graph'),
+        cacheDir: join(out, 'cache'),
+        indexerVersion: 'test',
+      });
+    }
+    const g = loadGraph(join(out, 'graph'));
+    if (!g) throw new Error('graph not loaded');
+    const multi = new GraphIndex(g);
+    const answer = multi.query('invoice').text;
+    expect(answer).toContain('sendInvoice');
+    expect(answer).toContain('renderInvoice');
+    expect(answer).toMatch(/sendInvoice.*\[repo billing-api\]/);
+    expect(answer).toMatch(/renderInvoice.*\[repo billing-web\]/);
+    // the single-repository index of this file shows no repository label
+    expect(index.query('Ledger').text).not.toContain('[repo ');
   });
 });

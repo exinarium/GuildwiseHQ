@@ -72,7 +72,7 @@ export function commandForOutcome(outcome: BriefOutcome): string {
     case 'mail_draft_fail':
       return 'aom report mail-draft-fail --note "<why no reply can be written>"';
     case 'spec_card_done':
-      return 'aom report spec-card --file <fields.json>   # { "fields": { "<missing field key>": "<text>", ... } }';
+      return 'aom report spec-card --file <fields.json>   # { "fields": { "<missing field key>": "<text>", ... } }; to find the repository: { "repo": "<name>", "fields": {...} } or { "split": [ { "title", "repo", "fields", "dependsOn": [1] }, ... ] }';
     case 'spec_card_fail':
       return 'aom report spec-card-fail --note "<why the card cannot be specified and what the manager must say>"';
     case 'batch_done':

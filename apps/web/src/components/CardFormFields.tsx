@@ -6,7 +6,7 @@ import {
   workflowSupportsInvestigationOnly,
 } from '@aom/shared';
 import type { CardFormValues } from '../lib/cardForm.ts';
-import { effectiveDesign, formFieldList } from '../lib/cardForm.ts';
+import { effectiveDesign, FIND_REPO, formFieldList } from '../lib/cardForm.ts';
 import { useExpertMode } from '../lib/expert-mode.ts';
 import { DEFAULT_PRIORITY } from '../lib/priority.ts';
 import { PriorityPicker, Select, TextArea, TextInput } from './ui.tsx';
@@ -27,6 +27,7 @@ export function CardFormFields({
   template = false,
   designDefault = false,
   projectDefault,
+  allowFindRepo = false,
 }: {
   workflow: Workflow;
   values: CardFormValues;
@@ -34,6 +35,8 @@ export function CardFormFields({
   errors: Record<string, string>;
   repos: Array<{ id: string; name: string }>;
   mockUi: boolean;
+  /** New card only: offer "Not sure: let the BA find out" in a project with several repositories. */
+  allowFindRepo?: boolean;
   /** A template for a scheduled card: no repository, completion action or docs flag (they belong to a real card). */
   template?: boolean;
   /** The project's "Investigate & design before build" setting: what an unticked-by-default card follows. */
@@ -66,6 +69,9 @@ export function CardFormFields({
               error={errors.repoId}
             >
               <option value="">None</option>
+              {allowFindRepo && repos.length >= 2 && (
+                <option value={FIND_REPO}>Not sure: let the BA find out</option>
+              )}
               {repos.map((r) => (
                 <option key={r.id} value={r.id}>
                   {r.name}

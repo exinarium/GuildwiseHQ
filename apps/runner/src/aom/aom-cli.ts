@@ -427,7 +427,7 @@ async function cardDraft(ctx: AomContext, p: Parsed, sub: 'create' | 'update' | 
 const REPORT_USAGE = `usage: aom report brief --summary-file <report.md>   # the CEO's analysis request (read-only)
        aom report mail-draft --text-file <reply.txt> [--subject "<subject>"]
        aom report mail-draft-fail --note "<why no reply can be written>"
-       aom report spec-card --file <fields.json>      # { "fields": { "<missing field key>": "<text>" } }
+       aom report spec-card --file <fields.json>      # { "fields": { "<missing field key>": "<text>" } } | { "repo": "<name>", "fields": {...} } | { "split": [ { "title", "repo", "fields", "dependsOn" } ] }
        aom report spec-card-fail --note "<why the card cannot be specified>"`;
 
 /**

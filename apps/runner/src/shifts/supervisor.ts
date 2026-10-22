@@ -975,9 +975,10 @@ export class ShiftSupervisor {
       }
     }
     const texts = shiftTexts(msg, s.brief);
-    // The project's reference repositories (read-only), for a card shift only; only clones this runner found itself.
+    // The project's reference repositories (read-only), for a card shift and a BA task shift (the server sends repositories
+    // there only for a repository-scoping task given to an architect); only clones this runner found itself.
     const registeredFolders =
-      msg.kind === 'card'
+      msg.kind === 'card' || msg.kind === 'ba_task'
         ? await resolveReadRepos(
             msg.readRepos,
             {
@@ -1013,6 +1014,8 @@ export class ShiftSupervisor {
     );
     if (msg.kind === 'card')
       texts.instructions += `\n${renderReadableFolders(readFolders, { workingDir: cwd })}\n`;
+    else if (msg.kind === 'ba_task' && registeredFolders.length + vaultReadFolder.length > 0)
+      texts.instructions += `\n${renderReadableFolders(mergeReadFolders(registeredFolders, vaultReadFolder), { workingDir: cwd })}\n`;
     else if (vaultReadFolder.length > 0)
       texts.instructions += `\n${renderReadableFolders(vaultReadFolder, { workingDir: cwd })}\n`;
     // The card's attachments, copied read-only next to the shift (outside the worktree) and listed in the instructions.
@@ -1170,7 +1173,11 @@ export class ShiftSupervisor {
         agent: msg.agent as AgentRuntimeSpec,
         env: s.env,
         addDirs: vaultCtx && msg.kind === 'card' ? [vaultCtx.addDir] : scanDirs,
-        readDirs: [...readFolders, ...vaultReadFolder].map((f) => f.path),
+        readDirs: [
+          ...readFolders,
+          ...(msg.kind === 'ba_task' ? registeredFolders : []),
+          ...vaultReadFolder,
+        ].map((f) => f.path),
         ...(tc ? { toolchainReadDirs: tc.readDirs } : {}),
         // plugin MCP servers: card shifts only (the DevOps engineer, questions and BA tasks keep their behaviour)
         ...(msg.kind === 'card' && msg.mcpServers?.length ? { mcpServers: msg.mcpServers } : {}),

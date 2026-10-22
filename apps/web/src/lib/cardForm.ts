@@ -19,6 +19,12 @@ import {
 import { DEFAULT_PRIORITY } from './priority.ts';
 
 /** Raw form state: everything is a string except the boolean, so inputs stay controlled. */
+/**
+ * The repository choice "Not sure: let the BA find out" (a project with several repositories): no repository is sent, the
+ * card asks for `findRepo`, and the BA works out which repository (or repositories) it touches.
+ */
+export const FIND_REPO = '__find__';
+
 export interface CardFormValues {
   title: string;
   cardType: string;
@@ -119,6 +125,8 @@ export interface CardFormResult {
   cardType: CardType;
   fields: Record<string, unknown>;
   repoId?: string;
+  /** "Not sure which repository": the BA finds it (see `FIND_REPO`). */
+  findRepo?: boolean;
   completionAction?: CompletionAction;
   docsNeeded: boolean;
   priority?: number;
@@ -179,7 +187,8 @@ export function buildCardRequest(
     const missing = missingForSpecify(def, {
       title: v.title,
       cardType: v.cardType,
-      repoId: v.repoId || null,
+      // "Not sure" is not a missing repository: the BA finds it.
+      repoId: v.repoId === FIND_REPO ? 'find-by-ba' : v.repoId || null,
       // Left empty, the project's "how finished work lands" setting fills it in on the server.
       completionAction: v.completionAction || 'merge',
       docsNeeded: v.docsNeeded,
@@ -197,7 +206,7 @@ export function buildCardRequest(
     title: v.title.trim(),
     cardType: v.cardType as CardType,
     fields,
-    ...(v.repoId ? { repoId: v.repoId } : {}),
+    ...(v.repoId === FIND_REPO ? { findRepo: true } : v.repoId ? { repoId: v.repoId } : {}),
     ...(v.completionAction ? { completionAction: v.completionAction as CompletionAction } : {}),
     docsNeeded: v.docsNeeded,
     ...(priority !== undefined && !errors.priority ? { priority } : {}),

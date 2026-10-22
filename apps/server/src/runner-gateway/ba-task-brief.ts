@@ -19,6 +19,7 @@ import type { Ctx } from '../context.ts';
 import { one, type Queryable, type Row } from '../db/sql.ts';
 import { standingOrdersFor } from '../queries/ledger.ts';
 import { accountOf, agentSpecFor, shiftVault } from './brief.ts';
+import { projectReadRepos } from './read-repos.ts';
 
 type ShiftStartPayload = Omit<ServerToRunnerOf<'shift.start'>, 'v' | 'id' | 'type' | 'ts'>;
 
@@ -103,7 +104,9 @@ export async function buildBaTaskShiftStart(
   const role = await loadRole(ctx.pool, agent.org_id, agent.role_key, agent.role_version);
   const batchTask = batch ? await buildBatchTask(ctx.pool, task) : null;
   const mailTask = mailDraft ? await buildMailDraftTask(ctx.pool, task) : null;
-  const specTask = specCard ? await buildSpecCardTask(ctx.pool, task) : null;
+  const specTask = specCard
+    ? await buildSpecCardTask(ctx.pool, task, agent.role_key === 'architect' ? 'architect' : 'ba')
+    : null;
   const baTask: BaTaskShift | null = specCard
     ? specTask
       ? { taskId: task.id, kind: task.kind, specCard: specTask, cards: [], followups: [], outstanding: [] }
@@ -205,6 +208,11 @@ export async function buildBaTaskShiftStart(
     ),
     baTask,
     vault: await shiftVault(ctx, agent, project.id),
+    // Repository scoping given to an architect (the fallback): it reads the project's repositories, read-only. The BA never
+    // gets them: it works from the code graph and the vault (it reads no source).
+    ...(specTask?.chooseRepo && specTask.by === 'architect' && agent.permissions?.readOrgRepos === true
+      ? { readRepos: await projectReadRepos(ctx.pool, project.id) }
+      : {}),
     ...(await graphScopeFor(ctx, project.id).then((graph) => (graph ? { graph } : {}))),
   };
 }
