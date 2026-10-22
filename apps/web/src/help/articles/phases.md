@@ -88,10 +88,13 @@ The **Environments** page of a project (sidebar, under the board) has one place 
 
 **Remove.** Removing an environment, a place or an old draft always says what happens and what is not touched: the running app is left exactly as it is.
 
-A project can deploy in two ways, chosen under **Delivery**: **Instructions** (a DevOps request written in words) or **Recipe** (the guided setup above, kept in the project vault in a `delivery/` folder). **Stop using guided deploys** (under technical details) goes back to instructions and keeps your places.
+The page also has a **Releases** switch, **On** or **Paused**. Pausing asks "Pause releases?" and stops automatic updates after a merge, the **Release** and **Update now** buttons, and deploy follow-ups that use these environments. Secrets and other technical details sit under **Show technical details**.
 
 - **You approve one exact version** with **Approve** (only the Owner). If anything changes afterwards it needs a new approval and nothing deploys from it meanwhile.
 - **A model never runs a deploy command.** It can only ask Guildwise; Guildwise checks the approved version and the rules (a test site healthy on the same version, tests passed, a time window, a freeze), and your workstation runs the steps itself. Secrets are named in the setup, set on your workstation and never stored on the server or in the vault.
-- **Releases** (sidebar, Organization) is where a ready version waits for you: **Waiting for you**, **What is live** (the version on every site, readable by everyone), **History** (with the rules that held and who released) and **Rules**. The Owner or an Admin presses **Release**; **Go back to an earlier version** (on the live card) puts an earlier release back at once, your data is not rolled back.
 
-The recipe lives in the project vault. A git vault is backed up with its repository; a local vault is a folder on the Owner's workstation that you back up yourself (put it in OneDrive, iCloud or another backed-up folder).
+## Releases {#releases}
+
+**Releases** (sidebar, Organization) is where a ready version waits for you: **Waiting for you**, **What is live** (the version on every site, readable by everyone), **History** (with the rules that held and who released; you can filter it) and **Rules**. The Owner or an Admin presses **Release** (or **Release to N of M** when only some of the sites are ready) or **Not now** to leave it waiting; **Go back to an earlier version** (on the live card) puts an earlier release back at once, your data is not rolled back. **The standard rule** applies to every project; **Advanced: rule sets** lets you give a project its own. **Freeze all releases** stops every release until you press **Lift the freeze**. A project whose Releases switch is Paused shows a Releases paused badge.
+
+The setup lives in the project vault. A git vault is backed up with its repository; a local vault is a folder on the Owner's workstation that you back up yourself (put it in OneDrive, iCloud or another backed-up folder).

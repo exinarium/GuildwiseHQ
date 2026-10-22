@@ -4,31 +4,19 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { buildNav } from '../components/shell/nav-config.ts';
 import { TourProvider } from '../components/tour/Tour.tsx';
 import { useTour } from '../components/tour/TourContext.tsx';
 import { type TourRole, tourSteps } from '../lib/tour.ts';
 
-const ALL_NAV = [
-  'board',
-  'research',
-  'desk',
-  'intake',
-  'schedules',
-  'projects',
-  'interests',
-  'ledger',
-  'vaults',
-  'agents',
-  'org-chart',
-  'org',
-  'workstations',
-  'metrics',
-  'costs',
-  'settings',
-  'organization',
-  'help',
+const navIdsOf = (canManage: boolean) => [
+  ...buildNav({ projectKey: 'P', hasResearch: true, hasEnvironments: true, canManage }).sections.flatMap(
+    (x) => x.items.map((i) => i.id),
+  ),
+  ...buildNav({ projectKey: 'P', canManage }).footer.map((i) => i.id),
 ];
-const MEMBER_NAV = ALL_NAV.filter((n) => !['intake', 'vaults', 'costs'].includes(n));
+const ALL_NAV = navIdsOf(true);
+const MEMBER_NAV = navIdsOf(false);
 const ids = (role: TourRole, nav: string[]) => tourSteps(role, new Set(nav)).map((s) => s.id);
 
 describe('the tour steps', () => {
@@ -38,18 +26,27 @@ describe('the tour steps', () => {
       'video',
       'welcome',
       'board',
+      'backlog',
+      'environments',
+      'research',
       'desk',
       'intake',
-      'projects',
-      'interests',
       'schedules',
+      'projects',
       'agents',
       'org-chart',
+      'ceo',
+      'org',
       'workstations',
+      'releases',
+      'integrations',
+      'metrics',
       'costs',
+      'interests',
       'ledger',
       'vaults',
       'settings',
+      'organization',
       'palette',
       'page-help',
       'ask-devops',
@@ -67,11 +64,11 @@ describe('the tour steps', () => {
     expect(tourSteps('platform', new Set()).some((s) => s.video)).toBe(false);
   });
 
-  it('a Member has no Intake, Costs or Vaults step', () => {
+  it('a Member has no Intake, CEO, Costs or Vaults step', () => {
     const steps = ids('member', MEMBER_NAV);
     expect(steps).toContain('workstations');
     expect(steps).toContain('interests');
-    for (const gone of ['intake', 'costs', 'vaults']) expect(steps).not.toContain(gone);
+    for (const gone of ['intake', 'ceo', 'costs', 'vaults']) expect(steps).not.toContain(gone);
   });
 
   it('a Guest gets the short tour', () => {
@@ -103,12 +100,47 @@ describe('the tour steps', () => {
       'platform-billing',
       'platform-support',
       'platform-blog',
+      'platform-api-keys',
+      'platform-runners',
+      'platform-team',
+      'platform-inbound',
       'platform-audit',
       'page-help',
       'platform-help',
       'done',
     ]);
     expect(steps.some((s) => s.target?.startsWith('nav-'))).toBe(false);
+  });
+
+  it('every sidebar entry of an Owner has a step, in sidebar order', () => {
+    const sidebar = ALL_NAV.filter((n) => n !== 'help');
+    const steps = ids('manager', ALL_NAV).filter((id) => sidebar.includes(id));
+    expect(steps).toEqual(sidebar);
+  });
+
+  it('every nav step targets a sidebar entry that buildNav can produce', () => {
+    const real = new Set([...ALL_NAV, ...MEMBER_NAV]);
+    for (const role of ['manager', 'member', 'guest'] as const)
+      for (const s of tourSteps(role, real))
+        if (s.target?.startsWith('nav-')) expect(real.has(s.target.slice(4))).toBe(true);
+  });
+
+  it('every platform step targets an entry of the platform navigation', () => {
+    const platformNav = [
+      'orgs',
+      'invitations',
+      'users',
+      'billing',
+      'support',
+      'blog',
+      'api-keys',
+      'runners',
+      'team',
+      'inbound',
+      'audit',
+    ];
+    for (const s of tourSteps('platform', new Set()))
+      if (s.target?.startsWith('platform-nav-')) expect(platformNav).toContain(s.target.slice(13));
   });
 
   it('never points at an area the user does not have', () => {

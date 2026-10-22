@@ -12,16 +12,17 @@ The **org chart** shows your team structure: who works for you, who is a senior 
 Go to **Org chart** in the sidebar (Organization section) to see:
 
 - The **manager** (you, the Owner, with Admins) at the top.
-- Below, the **business analysts**.
+- Below, your **CEO**, always shown. Use **Hire a BA** if there is none yet.
+- Below it, the **business analysts**.
 - Below them, **departments** (Delivery, Research, and custom ones) as boxes, with seniors on the upper row and juniors below.
 
-The lines show **escalation**: a junior's question goes to a senior of the same role, then to the BA, then to your desk. A junior with no senior goes straight to the BA.
+The lines show **escalation**: a junior's question goes to a senior of the same role, then to the BA, then to the CEO, and only then to your desk. A junior with no senior goes straight to the BA.
 
 Each agent's tile shows: face, name, role, seniority, status (working, blocked, idle, offline), and workstation. Click an agent to see its projects, cost, recent work and who it escalates to.
 
 Pick a project in **Allowed on project** to see who may work it (agents allowed on any project always show). Switch **View** to **List** for a grouped list view (the default on phones).
 
-The **DevOps engineer** of each workstation is shown separately below, reporting to your desk (not to the BA).
+The **DevOps engineer** of each workstation is shown separately in the **Workstations and DevOps** panel, reporting to the CEO (not to the BA).
 
 ## Custom roles {#custom-roles}
 

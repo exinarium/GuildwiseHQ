@@ -13,7 +13,7 @@ To bring a ticket into Guildwise HQ:
 
 1. Click **Intake** in the sidebar (Owner and Admin; also an **Intake** button on the Desk page).
 2. Paste a Jira issue key (e.g., `ABC-123`), a GitHub issue (e.g., `acme/web#12`, or its URL) into **Ticket or need**, or just describe what you need. The page shows what it detected.
-3. Click **Start intake**.
+3. Click **Tell your CEO** to hand the ticket to your CEO (Owner only), or **Work with the BA directly** (Owner) / **Start intake** (Admin) to work it out with the BA yourself in an intake chat.
 4. Your BA reads the ticket (via its credentials on your workstation) and asks you about the scope and project.
 5. Answer the BA's questions in the intake chat.
 6. The BA drafts a card with context, requirements, acceptance criteria, test plan and how to ship it.
@@ -46,7 +46,7 @@ Neither credential leaves the runner or travels to the server, and agents never 
 
 ## Outbox {#outbox}
 
-When an agent drafts an update to post back to a ticket (a comment, a status change, etc.), it lands on your desk as an **Outbox approval**.
+When an agent drafts an update to post back to a ticket (a comment, a status change, etc.), it lands on your desk as an **Outbound update**.
 
 The draft shows what would be posted. You can:
 

@@ -17,9 +17,11 @@ Each item shows:
 - **The question**: with options and a recommendation.
 - **How many cards are blocked**: a count of cards waiting on this answer, and the item's age.
 
+The desk also has the filters **Handled by CEO** and **CEO decisions**. A question that has a recommendation offers **Accept recommendation**, which answers with exactly what is recommended. The CEO's daily report arrives as a **Daily report** item.
+
 Alerts, approvals and notices also have **Ask DevOps about this**, which opens a request to the DevOps engineer with the item attached.
 
-Some items are urgent: approval requests, blocking questions, pinned alerts and cards that keep failing. Everything else can wait up to 10 minutes while your BA reviews it first (if you have routing on).
+Some items are urgent: approval requests, blocking questions, pinned alerts and cards that keep failing. Everything else can wait up to 10 minutes while your BA reviews it first (if you have routing on; with a CEO it reviews them first).
 
 ## CEO decisions {#ceo-decisions}
 
