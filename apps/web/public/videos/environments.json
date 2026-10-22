@@ -1,0 +1,40 @@
+{
+  "title": "Environments: where your app runs",
+  "src": "/videos/environments.webm",
+  "type": "video/webm",
+  "sources": [
+    {
+      "src": "/videos/environments.mp4",
+      "type": "video/mp4"
+    },
+    {
+      "src": "/videos/environments.webm",
+      "type": "video/webm"
+    }
+  ],
+  "captions": "/videos/environments.vtt",
+  "voice": "Piper en_GB-cori-high",
+  "duration": 110.1,
+  "chapters": [
+    {
+      "t": 9.7,
+      "title": "Your app: how to start it"
+    },
+    {
+      "t": 30.4,
+      "title": "The test site and the live site"
+    },
+    {
+      "t": 53.9,
+      "title": "Places"
+    },
+    {
+      "t": 71.5,
+      "title": "Add an environment"
+    },
+    {
+      "t": 92.1,
+      "title": "Pause releases"
+    }
+  ]
+}
