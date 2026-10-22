@@ -1,0 +1,32 @@
+{
+  "title": "The org chart",
+  "src": "/videos/org-chart.webm",
+  "type": "video/webm",
+  "sources": [
+    {
+      "src": "/videos/org-chart.mp4",
+      "type": "video/mp4"
+    },
+    {
+      "src": "/videos/org-chart.webm",
+      "type": "video/webm"
+    }
+  ],
+  "captions": "/videos/org-chart.vtt",
+  "voice": "Piper en_GB-cori-high",
+  "duration": 68.6,
+  "chapters": [
+    {
+      "t": 8.6,
+      "title": "Who reports to whom"
+    },
+    {
+      "t": 42.5,
+      "title": "Filter and switch views"
+    },
+    {
+      "t": 55.2,
+      "title": "Workstations and DevOps"
+    }
+  ]
+}

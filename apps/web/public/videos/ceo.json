@@ -1,0 +1,44 @@
+{
+  "title": "Your CEO",
+  "src": "/videos/ceo.webm",
+  "type": "video/webm",
+  "sources": [
+    {
+      "src": "/videos/ceo.mp4",
+      "type": "video/mp4"
+    },
+    {
+      "src": "/videos/ceo.webm",
+      "type": "video/webm"
+    }
+  ],
+  "captions": "/videos/ceo.vtt",
+  "voice": "Piper en_GB-cori-high",
+  "duration": 116,
+  "chapters": [
+    {
+      "t": 12.2,
+      "title": "Overview"
+    },
+    {
+      "t": 24.6,
+      "title": "Authority"
+    },
+    {
+      "t": 57.1,
+      "title": "Reporting and alerts"
+    },
+    {
+      "t": 64.5,
+      "title": "Ask the CEO"
+    },
+    {
+      "t": 78.1,
+      "title": "Activity log and Undo"
+    },
+    {
+      "t": 100.6,
+      "title": "Workstations"
+    }
+  ]
+}

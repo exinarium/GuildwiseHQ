@@ -1,0 +1,45 @@
+WEBVTT
+
+1
+00:00:00.747 --> 00:00:09.917
+The Agents page is your team. Every agent has a card with its role, model, current work and how it performs against the others in its role.
+
+2
+00:00:10.626 --> 00:00:14.016
+Open Agents in the sidebar, then choose Hire agent.
+
+3
+00:00:14.721 --> 00:00:21.360
+Pick the role and the seniority. The runtime and the effort come from the role, and you can change them here.
+
+4
+00:00:22.062 --> 00:00:30.162
+Under Where may this agent work, tick the projects it is allowed on. Give it a name, and Hire. It appears on the page at once.
+
+5
+00:00:30.880 --> 00:00:37.983
+Pause stops an agent from taking new work; a running shift still finishes. Resume puts it back to work.
+
+6
+00:00:38.683 --> 00:00:47.702
+Change model switches an agent to another model or effort. It applies from its next shift, and the agent keeps its name and history.
+
+7
+00:00:48.477 --> 00:00:55.731
+Recommendations are rule-based suggestions with their evidence. Here two builders have been idle for ten days while the queue is empty.
+
+8
+00:00:56.431 --> 00:01:01.156
+Apply one with its button: Fire retires Cleo, and the card says what was done.
+
+9
+00:01:01.857 --> 00:01:10.572
+Dismiss the other if you disagree. It will not be suggested again for thirty days. With several open, Dismiss all clears them in one go.
+
+10
+00:01:11.290 --> 00:01:18.569
+The Project filter shows only the agents allowed on one project, and the Department filter does the same for a department.
+
+11
+00:01:19.269 --> 00:01:25.583
+That is the Agents page. Hire the team you need, and keep it tuned with the recommendations.
