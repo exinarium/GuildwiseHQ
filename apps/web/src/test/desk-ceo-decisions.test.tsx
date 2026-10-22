@@ -242,6 +242,60 @@ describe('the desk: CEO decisions', () => {
     );
   });
 
+  it('the "Handled by CEO" and "CEO decisions" chips count the closed items their filter lists', async () => {
+    const reviewed = decision(1, {
+      status: 'answered',
+      ceoDecision: {
+        ...(decision(1).ceoDecision as NonNullable<DeskItemDto['ceoDecision']>),
+        acknowledgedAt: '2026-10-19T10:00:00.000Z',
+      },
+    });
+    const handled = deskItem({
+      id: U(7),
+      title: 'Which port for the preview?',
+      status: 'answered',
+      ceo: {
+        actionId: U(90),
+        agentName: 'Johnny',
+        reason: 'The ledger',
+        confidence: 0.9,
+        undoable: false,
+        recommendation: null,
+      },
+    });
+    stubApi('owner', [
+      [
+        'GET /api/desk?',
+        (c) =>
+          c.url.includes('status=closed')
+            ? list([reviewed, handled])
+            : list([decision(2), deskItem({ id: U(5), title: 'Tabs or spaces?' })]),
+      ],
+    ]);
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <ToastProvider>
+          <MemoryRouter>
+            <Desk />
+          </MemoryRouter>
+        </ToastProvider>
+      </QueryClientProvider>,
+    );
+    const chips = await screen.findByRole('group', { name: 'Filter items' });
+    const handledChip = await within(chips).findByRole('button', { name: /Handled by CEO/ });
+    const decisionsChip = within(chips).getByRole('button', { name: /CEO decisions/ });
+    // one closed item handled by the CEO (the reviewed decision is a decision, not shown by this filter)
+    await waitFor(() => expect(handledChip).toHaveTextContent('Handled by CEO1'));
+    // one open decision plus one reviewed (closed) decision
+    expect(decisionsChip).toHaveTextContent('CEO decisions2');
+    await userEvent.click(handledChip);
+    expect(await screen.findByText('Answered and closed (1)')).toBeInTheDocument();
+    await userEvent.click(decisionsChip);
+    expect(await screen.findByText('Answered and closed (1)')).toBeInTheDocument();
+    expect(within(screen.getByTestId('ceo-decisions')).getAllByTestId(/^desk-item-/)).toHaveLength(1);
+  });
+
   it('works on a phone: a card per decision that opens full screen with the actions', async () => {
     setMobile(true);
     show('owner', [decision(1), decision(2)]);
