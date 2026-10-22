@@ -270,6 +270,26 @@ export const ceoEvents = [
    * The owner reviewed a decision of the CEO on the desk: acknowledged it (positive feedback) or corrected it. A correction
    * starts the CEO-BA review (`reviewId`); the owner's words are kept as an owner-confirmed memory (`memoryId`).
    */
+  /**
+   * The CEO decided a desk item (answered a question or a stop-loss). The decision is recorded on that item, which shows
+   * as resolved by the CEO and is open for the owner's review: no separate `ceo_decision` item is created for it.
+   */
+  defineEvent(
+    'CeoDecisionRecorded',
+    z.object({
+      orgId: Id,
+      deskItemId: Id,
+      ceoAgentId: Id,
+      ceoName: z.string(),
+      class: z.string(),
+      source: z.enum(['act', 'chain']),
+      actionId: z.string().nullable().optional(),
+      question: z.string().max(1000),
+      decision: z.string().max(4000),
+      reason: z.string().max(4000),
+      confidence: z.number().nullable().optional(),
+    }),
+  ),
   defineEvent(
     'CeoDecisionReviewed',
     z.object({

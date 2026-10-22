@@ -55,10 +55,10 @@ const decision = (n: number, over: Partial<DeskItemDto> = {}): DeskItemDto =>
 const list = (items: DeskItemDto[], extra: Partial<{ open: number }> = {}) => ({
   items,
   counts: {
-    open: items.filter((i) => i.subkind !== 'ceo_decision').length,
+    open: items.filter((i) => i.subkind !== 'ceo_decision' && !i.ceoDecision).length,
     blocking: 0,
     urgent: 0,
-    ceoDecisions: items.filter((i) => i.subkind === 'ceo_decision').length,
+    ceoDecisions: items.filter((i) => i.subkind === 'ceo_decision' || i.ceoDecision).length,
     ...extra,
   },
 });
@@ -101,6 +101,42 @@ describe('the desk: CEO decisions', () => {
     // the normal item is not mixed into the section, and the decisions are not counted as waiting
     expect(within(section).queryByText('Tabs or spaces?')).toBeNull();
     expect(screen.getByTestId('desk-counts')).toHaveTextContent('1 open');
+  });
+
+  it('shows a question the CEO resolved as one item with the decision on it, to acknowledge, and no second card', async () => {
+    const resolved = deskItem({
+      id: U(90),
+      kind: 'question',
+      subkind: 'stop_loss',
+      status: 'answered',
+      title: 'GWP-3 reached its stop-loss',
+      blocking: true,
+      ceoDecision: {
+        question: 'GWP-3 reached its stop-loss',
+        decision: 'Everything is approved: moved to review and one more pass granted',
+        reason: 'The reviewer approved twice',
+        confidence: 0.9,
+        ceoName: 'Johnny',
+        class: 'desk.answer_question',
+        source: 'act',
+        questionItemId: U(90),
+        reviewed: false,
+        correction: null,
+        acknowledgedAt: null,
+      },
+    });
+    const calls = show('owner', [resolved, deskItem({ id: U(5), title: 'Tabs or spaces?' })]);
+    const section = await screen.findByTestId('ceo-decisions');
+    const card = within(section).getByTestId(`desk-item-${U(90)}`);
+    expect(within(card).getByTestId('ceo-decision-resolved')).toHaveTextContent('Resolved by the CEO');
+    expect(within(card).getByTestId('ceo-decision-decided')).toHaveTextContent('moved to review');
+    // exactly one card for it on the desk, and it is not counted as waiting on the owner
+    expect(screen.getAllByTestId(`desk-item-${U(90)}`)).toHaveLength(1);
+    expect(screen.getByTestId('desk-counts')).toHaveTextContent('1 open');
+    await userEvent.click(await within(card).findByTestId('ceo-decision-ack'));
+    await waitFor(() =>
+      expect(calls.some((c) => c.url === `/api/desk/${U(90)}/ceo-decision/acknowledge`)).toBe(true),
+    );
   });
 
   it('shows an all clear when only CEO decisions are left, and they are not "waiting on you"', async () => {

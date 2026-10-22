@@ -27,6 +27,27 @@ async function patchDecision(
 }
 
 export const ceoProjectors: Record<string, Projector> = {
+  // The CEO's decision on a desk item (a question or stop-loss it answered), kept on the item itself for the owner's review.
+  CeoDecisionRecorded: async (tx, e) => {
+    const p = ev<'CeoDecisionRecorded'>(e).payload;
+    // A decided item that was held for the CEO is out of the hold: it shows on the desk as the CEO's decision.
+    await exec(tx, `UPDATE desk_items SET triage='passed' WHERE id=$1 AND triage='pending'`, [p.deskItemId]);
+    await patchDecision(tx, p.deskItemId, (data) => ({
+      ...data,
+      ceoDecision: {
+        question: p.question,
+        decision: p.decision,
+        reason: p.reason,
+        confidence: p.confidence ?? null,
+        ceoName: p.ceoName,
+        ceoAgentId: p.ceoAgentId,
+        class: p.class,
+        source: p.source,
+        actionId: p.actionId ?? null,
+        questionItemId: p.deskItemId,
+      },
+    }));
+  },
   // The owner's review of a CEO decision, shown on the desk item.
   CeoDecisionReviewed: async (tx, e) => {
     const p = ev<'CeoDecisionReviewed'>(e).payload;

@@ -13,7 +13,12 @@ import { ageLabel, formatDateTime } from '../../lib/time.ts';
 import { cx } from '../ui/cx.ts';
 import { Badge, Button, Callout, Dialog, ErrorBox, TextArea, useToast } from '../ui.tsx';
 
-export const isCeoDecision = (i: Pick<DeskItemDto, 'subkind'>): boolean => i.subkind === 'ceo_decision';
+/**
+ * A CEO decision for the owner's review: the legacy informational item, or a desk item the CEO resolved (a question or a
+ * stop-loss it answered), whose decision is recorded on the item itself. One item, not a question plus a second card.
+ */
+export const isCeoDecision = (i: Pick<DeskItemDto, 'subkind' | 'ceoDecision'>): boolean =>
+  i.subkind === 'ceo_decision' || !!i.ceoDecision;
 
 /** Owner or Admin: the same people who may answer an organization-level item. */
 const useMayReview = (): boolean => {
@@ -201,7 +206,9 @@ export function CeoDecisionItem({
   const ack = useAcknowledgeCeoDecision();
   const [correcting, setCorrecting] = useState(false);
   if (!d) return null;
-  const open = item.status === 'open';
+  // A legacy decision item is reviewed while it is open; a decision on a resolved question until the owner reviewed it.
+  const open = item.subkind === 'ceo_decision' ? item.status === 'open' : !d.reviewed;
+  const onQuestion = item.subkind !== 'ceo_decision';
   return (
     <article
       {...(bare ? {} : { id: `desk-item-${item.id}` })}
@@ -219,6 +226,11 @@ export function CeoDecisionItem({
         <Badge tone="violet" icon={<Bot aria-hidden="true" />}>
           <span data-testid="ceo-decision-badge">CEO decision · {d.ceoName ?? 'CEO'}</span>
         </Badge>
+        {onQuestion && (
+          <span className="text-xs text-subtle" data-testid="ceo-decision-resolved">
+            Resolved by the CEO, nothing for you to decide
+          </span>
+        )}
         <span className="tnum ml-auto text-xs text-subtle" title={formatDateTime(item.createdAt)}>
           {ageLabel(item.createdAt, now)} ago
         </span>

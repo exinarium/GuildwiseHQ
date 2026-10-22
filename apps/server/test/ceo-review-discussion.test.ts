@@ -111,11 +111,11 @@ const owner = (method: string, url: string, body?: unknown) =>
   w.t.req(method, url, { cookie: w.owner.cookie, body });
 const ctx = () => w.t.app.ctx;
 
+/** The CEO's decision is recorded on the question it answered (no second card): the item to review is the question itself. */
 async function decisionFor(questionId: string): Promise<string> {
-  const rowsFound = await q(
-    `SELECT id FROM desk_items WHERE subkind='ceo_decision' AND data->'ceoDecision'->>'questionItemId'=$1`,
-    [questionId],
-  );
+  const rowsFound = await q(`SELECT id FROM desk_items WHERE id=$1 AND data->'ceoDecision' IS NOT NULL`, [
+    questionId,
+  ]);
   return rowsFound[0]!.id as string;
 }
 

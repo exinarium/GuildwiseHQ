@@ -145,6 +145,8 @@ export const DeskItemDtoSchema = z.object({
       source: z.enum(['act', 'chain']),
       /** The question the CEO answered (when the decision answered one). */
       questionItemId: z.uuid().nullable(),
+      /** The owner acknowledged or corrected it (a decision recorded on a resolved question is open for review until then). */
+      reviewed: z.boolean().optional(),
       correction: z
         .object({
           text: z.string(),

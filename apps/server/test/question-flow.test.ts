@@ -523,9 +523,18 @@ describe('topic routing', () => {
     const qs = await questionShift('Ada Prime');
     await answer(qs.shiftId, it!.id, 'Take option 1.');
     r.ended(qs.shiftId, 'reported');
-    const list = await ok<any>(w.t.req('GET', '/api/desk?status=closed', { cookie: w.owner.cookie }));
+    // The CEO's decision is on the resolved item (open for the owner's review), not on a second card.
+    const list = await ok<any>(w.t.req('GET', '/api/desk?status=open', { cookie: w.owner.cookie }));
     const dto = (list.items ?? list).find((x: any) => x.id === it!.id);
-    expect(dto).toMatchObject({ answeredByAgentName: 'Ada Prime', answeredByAgentRole: 'ceo' });
+    expect(dto).toMatchObject({
+      answeredByAgentName: 'Ada Prime',
+      answeredByAgentRole: 'ceo',
+      status: 'answered',
+    });
+    expect(dto.ceoDecision).toMatchObject({ decision: 'Take option 1.', reviewed: false });
+    expect(
+      await q(`SELECT 1 FROM desk_items WHERE subkind='ceo_decision' AND card_id=$1`, [card.id]),
+    ).toHaveLength(0);
     const msgs = await q(`SELECT body FROM thread_messages WHERE thread_id=$1 AND kind='answer'`, [card.id]);
     expect(msgs.map((m) => m.body)).toEqual(['CEO decision: Take option 1.']);
     const led = await q('SELECT tags, body FROM ledger_entries WHERE source_desk_item_id=$1', [it!.id]);

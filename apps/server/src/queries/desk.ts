@@ -35,6 +35,14 @@ SELECT d.*, c.ref AS card_ref, c.title AS card_title, c.stage AS card_stage, c.s
   LEFT JOIN agents aa ON aa.id = d.answered_by_agent_id`;
 
 /**
+ * SQL for "a CEO decision the owner reviews": the legacy informational item, or a desk item the CEO resolved (its
+ * decision is recorded on the item itself). Table alias `d`.
+ */
+export const IS_CEO_DECISION_SQL = `(COALESCE(d.subkind, '') = '${CEO_DECISION_SUBKIND}' OR d.data->'ceoDecision' IS NOT NULL)`;
+/** ...and the owner has not acknowledged or corrected it yet. Open legacy items count as unreviewed (alias `d`). */
+export const UNREVIEWED_CEO_DECISION_SQL = `(${IS_CEO_DECISION_SQL} AND (d.data->>'acknowledgedAt') IS NULL AND (d.data->'correction') IS NULL AND (COALESCE(d.subkind, '') <> '${CEO_DECISION_SUBKIND}' OR d.status = 'open'))`;
+
+/**
  * Desk items the user may see (docs/design/organizations.md section 6): the items of projects they are an active
  * member of, and the org-level items of organizations where they are Owner or Admin, plus the ones addressed to them.
  */
@@ -202,7 +210,7 @@ export function toDeskDto(
           },
         }
       : {}),
-    ...(r.subkind === CEO_DECISION_SUBKIND && r.data?.ceoDecision
+    ...(r.data?.ceoDecision
       ? {
           ceoDecision: {
             question: r.data.ceoDecision.question ?? '',
@@ -213,6 +221,7 @@ export function toDeskDto(
             class: r.data.ceoDecision.class ?? null,
             source: r.data.ceoDecision.source === 'chain' ? ('chain' as const) : ('act' as const),
             questionItemId: r.data.ceoDecision.questionItemId ?? null,
+            reviewed: !!(r.data.acknowledgedAt || r.data.correction),
             correction: r.data.correction
               ? {
                   text: r.data.correction.text ?? '',
@@ -299,7 +308,9 @@ export async function listDesk(
       ? []
       : await rows(
           db,
-          `${SELECT} WHERE ${scope} AND d.status = 'open' AND d.routed_to = 'manager'
+          // Next to the open items: what the CEO decided on a question or stop-loss (resolved, the decision on the item) until the owner reviews it.
+          `${SELECT} WHERE ${scope} AND ((d.status = 'open' AND d.routed_to = 'manager')
+              OR (d.status <> 'open' AND d.subkind IS DISTINCT FROM '${CEO_DECISION_SUBKIND}' AND ${UNREVIEWED_CEO_DECISION_SQL}))
             ORDER BY d.pinned DESC, d.blocking DESC, cardinality(d.affected_card_ids) DESC, d.created_at ASC, d.id`,
           params,
         );
@@ -308,7 +319,7 @@ export async function listDesk(
       ? []
       : await rows(
           db,
-          `${SELECT} WHERE ${scope} AND d.status <> 'open' ORDER BY d.updated_at DESC, d.id LIMIT 100`,
+          `${SELECT} WHERE ${scope} AND d.status <> 'open' AND NOT (d.subkind IS DISTINCT FROM '${CEO_DECISION_SUBKIND}' AND ${UNREVIEWED_CEO_DECISION_SQL}) ORDER BY d.updated_at DESC, d.id LIMIT 100`,
           params,
         );
   const all = [...open, ...closed];
@@ -324,11 +335,12 @@ export async function listDesk(
     items.push(await withPhase(db, withDigest(toDeskDto(r, userId, roles, dedup, orgRoles), digests), r));
   const openItems = items.filter((i) => i.status === 'open');
   // CEO decisions are for review, not decisions waiting on the user: they are not part of the open count.
-  const decisions = openItems.filter((i) => i.subkind === CEO_DECISION_SUBKIND).length;
+  const decisions = items.filter((i) => i.ceoDecision && !i.ceoDecision.reviewed).length;
+  const legacyDecisions = openItems.filter((i) => i.subkind === CEO_DECISION_SUBKIND).length;
   return {
     items,
     counts: {
-      open: openItems.length - decisions,
+      open: openItems.length - legacyDecisions,
       ...(decisions > 0 ? { ceoDecisions: decisions } : {}),
       blocking: openItems.filter((i) => i.blocking).length,
       urgent: openItems.filter((i) => i.urgent).length,
