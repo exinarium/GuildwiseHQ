@@ -14,22 +14,22 @@
   ],
   "captions": "/videos/integrations.vtt",
   "voice": "Piper en_GB-cori-high",
-  "duration": 97.2,
+  "duration": 96.4,
   "chapters": [
     {
-      "t": 14.1,
+      "t": 13.4,
       "title": "Choose the workstation"
     },
     {
-      "t": 24.2,
+      "t": 23.5,
       "title": "Claude Code accounts"
     },
     {
-      "t": 55,
+      "t": 54.2,
       "title": "Git hosts and Jira"
     },
     {
-      "t": 71.5,
+      "t": 70.7,
       "title": "MCP servers"
     }
   ]
