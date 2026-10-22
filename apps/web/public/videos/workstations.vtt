@@ -1,0 +1,37 @@
+WEBVTT
+
+1
+00:00:00.399 --> 00:00:07.143
+A workstation is a computer of yours that runs your agents. Every shift an agent works happens on one of them.
+
+2
+00:00:07.845 --> 00:00:15.715
+Open Workstations in the sidebar. This organization has two: one online and one offline.
+
+3
+00:00:16.415 --> 00:00:26.583
+To add another, choose Add a workstation. Pick where your agents should run: your own computer, a server you reach over SSH, or GitHub Codespaces.
+
+4
+00:00:27.283 --> 00:00:40.515
+For your own computer, pick the system. The wizard shows the steps and one command to copy. Once you run it, the progress below moves on from Waiting for you to run the command, through the health checks, to Ready.
+
+5
+00:00:41.219 --> 00:00:50.201
+Already have the runner on that computer? Pair it with a code instead. Generate a one-time code and run the pair command it shows on the machine.
+
+6
+00:00:50.905 --> 00:00:59.586
+Each workstation has a card. The dot shows whether it is online, and the card counts the shifts running there. Open the card for the details.
+
+7
+00:01:00.285 --> 00:01:14.190
+Here you see its runtimes, the repositories it serves and how many shifts run now. Shifts at once sets how many it may run side by side. Git hosts lists the git accounts it pushes with, with a link to Integrations.
+
+8
+00:01:14.901 --> 00:01:22.746
+The runner updates itself once a day. To check now, choose Check for updates. The answer appears beside the button.
+
+9
+00:01:23.444 --> 00:01:30.038
+That is the Workstations page: add machines, keep an eye on their health, and set how much work each one takes.

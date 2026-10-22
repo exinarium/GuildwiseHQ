@@ -1,0 +1,36 @@
+{
+  "title": "Costs and budgets",
+  "src": "/videos/costs.webm",
+  "type": "video/webm",
+  "sources": [
+    {
+      "src": "/videos/costs.mp4",
+      "type": "video/mp4"
+    },
+    {
+      "src": "/videos/costs.webm",
+      "type": "video/webm"
+    }
+  ],
+  "captions": "/videos/costs.vtt",
+  "voice": "Piper en_GB-cori-high",
+  "duration": 72.5,
+  "chapters": [
+    {
+      "t": 8.7,
+      "title": "Range and total spend"
+    },
+    {
+      "t": 26.3,
+      "title": "By project, agent and model"
+    },
+    {
+      "t": 45.7,
+      "title": "What the agents delivered"
+    },
+    {
+      "t": 55.9,
+      "title": "Export and currency"
+    }
+  ]
+}

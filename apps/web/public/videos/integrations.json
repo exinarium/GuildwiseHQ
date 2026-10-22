@@ -1,0 +1,36 @@
+{
+  "title": "Integrations",
+  "src": "/videos/integrations.webm",
+  "type": "video/webm",
+  "sources": [
+    {
+      "src": "/videos/integrations.mp4",
+      "type": "video/mp4"
+    },
+    {
+      "src": "/videos/integrations.webm",
+      "type": "video/webm"
+    }
+  ],
+  "captions": "/videos/integrations.vtt",
+  "voice": "Piper en_GB-cori-high",
+  "duration": 97.2,
+  "chapters": [
+    {
+      "t": 14.1,
+      "title": "Choose the workstation"
+    },
+    {
+      "t": 24.2,
+      "title": "Claude Code accounts"
+    },
+    {
+      "t": 55,
+      "title": "Git hosts and Jira"
+    },
+    {
+      "t": 71.5,
+      "title": "MCP servers"
+    }
+  ]
+}

@@ -1,0 +1,36 @@
+{
+  "title": "Workstations",
+  "src": "/videos/workstations.webm",
+  "type": "video/webm",
+  "sources": [
+    {
+      "src": "/videos/workstations.mp4",
+      "type": "video/mp4"
+    },
+    {
+      "src": "/videos/workstations.webm",
+      "type": "video/webm"
+    }
+  ],
+  "captions": "/videos/workstations.vtt",
+  "voice": "Piper en_GB-cori-high",
+  "duration": 90.7,
+  "chapters": [
+    {
+      "t": 7.8,
+      "title": "Add a workstation"
+    },
+    {
+      "t": 41.2,
+      "title": "Pair with a code"
+    },
+    {
+      "t": 50.9,
+      "title": "The workstation card"
+    },
+    {
+      "t": 74.9,
+      "title": "Check for updates"
+    }
+  ]
+}

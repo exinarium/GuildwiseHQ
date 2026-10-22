@@ -1,0 +1,36 @@
+{
+  "title": "Metrics",
+  "src": "/videos/metrics.webm",
+  "type": "video/webm",
+  "sources": [
+    {
+      "src": "/videos/metrics.mp4",
+      "type": "video/mp4"
+    },
+    {
+      "src": "/videos/metrics.webm",
+      "type": "video/webm"
+    }
+  ],
+  "captions": "/videos/metrics.vtt",
+  "voice": "Piper en_GB-cori-high",
+  "duration": 64.9,
+  "chapters": [
+    {
+      "t": 6.8,
+      "title": "Range and project"
+    },
+    {
+      "t": 17.1,
+      "title": "Throughput and time blocked"
+    },
+    {
+      "t": 29.5,
+      "title": "Bounce rate and bugs"
+    },
+    {
+      "t": 43.2,
+      "title": "Duration and queues"
+    }
+  ]
+}
