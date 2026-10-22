@@ -587,6 +587,19 @@ export const cardProjectors: Record<string, Projector> = {
     );
   },
 
+  // The card's next shifts run on this model and effort (the CEO raised it after real problems).
+  CardModelRaised: async (tx, e) => {
+    const p = ev<'CardModelRaised'>(e).payload;
+    await exec(tx, 'UPDATE cards SET model_override=$2::jsonb WHERE id=$1', [
+      p.cardId,
+      JSON.stringify({
+        model: p.model,
+        ...(p.effort ? { effort: p.effort } : {}),
+        ...(p.runtime ? { runtime: p.runtime } : {}),
+      }),
+    ]);
+  },
+
   CardRetryDeferred: async (tx, e) => {
     const p = ev<'CardRetryDeferred'>(e).payload;
     await exec(tx, 'UPDATE cards SET retry_after=$2, retry_failures=$3, retry_episode_id=$4 WHERE id=$1', [

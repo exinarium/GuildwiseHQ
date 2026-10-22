@@ -160,6 +160,21 @@ export const cardEvents = [
       viaCeo: z.boolean().default(false),
     }),
   ),
+  /**
+   * A per-card model override: the card's next shifts run on this model and effort instead of the agent's own (the CEO
+   * raises it when a card keeps failing for real reasons). Additive: cards without it run as before.
+   */
+  defineEvent(
+    'CardModelRaised',
+    z.object({
+      cardId: Id,
+      model: z.string().min(1).max(120),
+      effort: z.string().min(1).max(20).optional(),
+      runtime: z.string().min(1).max(60).optional(),
+      by: Id.optional(),
+      reason: z.string().max(2000).optional(),
+    }),
+  ),
   defineEvent(
     'HandoffWritten',
     z.object({

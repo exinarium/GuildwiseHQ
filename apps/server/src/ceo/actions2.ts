@@ -24,6 +24,7 @@ import { retireLedgerEntryAs } from '../commands/ledger-retire.ts';
 import { cardMissing } from '../commands/spec-card.ts';
 import { one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
+import { eligibility } from '../dispatcher/candidates.ts';
 import { landedSql } from '../dispatcher/dependencies.ts';
 import { conflict } from '../errors.ts';
 import { applyRecommendation, listRecommendations } from '../hr/hr.ts';
@@ -48,6 +49,52 @@ const csv = z
   .transform((v) => (Array.isArray(v) ? v : v.split(',')).map((s) => s.trim()).filter(Boolean));
 
 // ------------------------------------------------------------------------------------------- reassign
+
+/** The dispatcher's own clauses, for one agent on its own columns (the workability check uses the same `eligibility()`). */
+const REASSIGN_REFS = {
+  id: 'a.id',
+  orgId: 'a.org_id',
+  allowedProjects: 'a.allowed_project_ids',
+  roleKey: 'a.role_key',
+  senior: `(a.seniority = 'senior')`,
+  workstationId: 'a.workstation_id',
+  capabilities: 'ARRAY[]::text[]',
+  riskTiers: `ARRAY(SELECT jsonb_array_elements_text(COALESCE(a.permissions->'riskTiers', '["small","large"]'::jsonb)))`,
+};
+const REASSIGN_E = eligibility(REASSIGN_REFS);
+
+/**
+ * Why `agent` could never take `card` at the stage it is at now, or undefined when it can: the stage's role, a senior-only
+ * stage, an exclusion or the risk tier, all through the dispatcher's `eligibility()`. Handing the card to an agent whose role
+ * does not work the stage only releases it: the stage's own role takes it again at once (production, GWP-11 and GWP-19).
+ */
+async function cannotWorkStage(db: Queryable, card: Row, a: Row): Promise<string | undefined> {
+  const r = await one(
+    db,
+    `SELECT st.claim_role, st.fallback_role, (${REASSIGN_E.role}) AS role_ok, (${REASSIGN_E.senior}) AS senior_ok,
+            (${REASSIGN_E.notExcluded}) AS not_excluded, (${REASSIGN_E.tier}) AS tier_ok
+       FROM cards c JOIN workflow_stages st ON st.workflow_version_id = c.workflow_version_id AND st.stage_id = c.stage
+       JOIN agents a ON a.id = $2
+      WHERE c.id = $1`,
+    [card.id, a.id],
+  );
+  if (!r) return undefined; // a stage the catalogue does not know: nothing to compare with
+  if (!r.role_ok) {
+    const stages = await rows(
+      db,
+      `SELECT stage_id FROM workflow_stages WHERE workflow_version_id=$1 AND kind='agent' AND claim_role=$2 ORDER BY ordinal`,
+      [card.workflow_version_id, a.role_key],
+    );
+    const where = stages.length
+      ? `Use card.move (aom ceo act move --card ${card.ref} --to <stage>) to put it in a stage ${a.name} can work (${stages.map((s) => s.stage_id).join(', ')}), then reassign.`
+      : `No stage of this card's workflow is worked by the ${a.role_key} role; pick an agent whose role works '${card.stage}' (${r.claim_role ?? 'none'}), or card.move the card first.`;
+    return `${a.name} (${a.role_key}) cannot work the stage '${card.stage}' of ${card.ref}: that stage is for the ${r.claim_role ?? 'unassigned'} role. ${where}`;
+  }
+  if (!r.senior_ok) return `the stage '${card.stage}' is for senior agents only and ${a.name} is not senior`;
+  if (!r.not_excluded) return `${a.name} is excluded from ${card.ref}`;
+  if (!r.tier_ok) return `${a.name} may not take ${card.risk_tier} cards`;
+  return undefined;
+}
 
 const ReassignP = z.object({ card: z.string().min(1).max(40), agent: z.string().min(1).max(120) });
 const reassign: ActionDef<z.infer<typeof ReassignP>> = {
@@ -81,6 +128,8 @@ const reassign: ActionDef<z.infer<typeof ReassignP>> = {
       };
     }
     if (card.claimed_by_agent_id === a.id) return { ...base, refuse: `${a.name} has the card already` };
+    const cannot = await cannotWorkStage(env.ctx.pool, card, a);
+    if (cannot) return { ...base, refuse: cannot };
     return { ...base, targetAgentId: a.id, data: { card, agent: a } };
   },
   async execute(env, _p, pr) {
