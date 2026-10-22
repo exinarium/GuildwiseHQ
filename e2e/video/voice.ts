@@ -1,9 +1,9 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import type { Cue } from './narration.ts';
+import type { Cue } from './narration/types.ts';
 
 /**
  * Offline text to speech for the getting-started video: Piper (https://github.com/rhasspy/piper) with a female
@@ -58,13 +58,16 @@ export function speak(cues: Cue[]): Spoken[] {
     const key = createHash('sha1').update(`${VOICE}|${LENGTH_SCALE}|${speech}`).digest('hex').slice(0, 16);
     const file = join(dir, `${key}.wav`);
     if (!existsSync(file)) {
-      const txt = join(dir, `${key}.txt`);
+      // written under a private name, then renamed: recordings running at once share this cache
+      const txt = join(dir, `${key}.${process.pid}.txt`);
+      const part = join(dir, `${key}.${process.pid}.part.wav`);
       writeFileSync(txt, speech);
       execFileSync(
         PIPER,
-        ['-m', MODEL, '-i', txt, '-f', file, '--length-scale', LENGTH_SCALE, '--sentence-silence', '0.3'],
+        ['-m', MODEL, '-i', txt, '-f', part, '--length-scale', LENGTH_SCALE, '--sentence-silence', '0.3'],
         { stdio: 'ignore' },
       );
+      renameSync(part, file);
     }
     return { id: c.id, file, duration: wavSeconds(file) };
   });

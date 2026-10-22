@@ -5,6 +5,7 @@ import { helpBase, helpPath } from '../../help/articles.ts';
 import { pageHelpFor } from '../../help/pageHelp.ts';
 import { useTour } from '../tour/TourContext.tsx';
 import { Button } from '../ui.tsx';
+import { PageVideo } from './SectionVideo.tsx';
 
 /** "What's on this page": a side panel (a sheet on a phone) explaining each control of the page behind it. */
 export function PageHelpPanel({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
@@ -44,6 +45,7 @@ export function PageHelpPanel({ open, onOpenChange }: { open: boolean; onOpenCha
             </RadixDialog.Close>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+            <PageVideo pathname={pathname} />
             {help ? (
               <>
                 <p id="page-help-intro" className="text-base text-muted">

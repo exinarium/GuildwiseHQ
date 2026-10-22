@@ -1,35 +1,23 @@
-import { copyFileSync, mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
-import { apiAs } from '../support/api.ts';
 import { pool, q, waitFor } from '../support/db.ts';
-import { ADMIN, BASE_URL, E2E_DIR, paths, ROOT } from '../support/env.ts';
-import { addRepoRoot, pairRunner, startRunner } from '../support/runner.ts';
-import { caption, click, installOverlays, sleep, type } from './captions.ts';
-import { allCues, BA_ANSWER, BA_QUESTION, CHAPTERS } from './narration.ts';
-import { mux, speak, toMp4, VOICE, vtt } from './voice.ts';
+import { paths } from '../support/env.ts';
+import { caption, click, sleep, type } from './captions.ts';
+import { pause, prepareVideo, startRecording } from './harness.ts';
+import { allCues, BA_ANSWER, BA_QUESTION, CHAPTERS } from './narration/getting-started.ts';
+import { demoApi, pairWorkstation } from './seed.ts';
 
 /**
  * The "Getting started" help video: a spoken tutorial. A female voice (Piper, offline) tells you how to create your
  * first project, hire agents, create cards, talk to the BA and test your running project, while the real UI does it. A
  * fresh local stack, the mock agent runtime (no real Claude, GitHub or Jira is ever contacted), a step banner and a
- * visible pointer, recorded with Playwright's `recordVideo`. Every narrated passage waits for its audio to finish, then
- * the audio is mixed into the recording (VP9 + Opus WebM) and the captions are written as WebVTT.
+ * visible pointer. The harness (harness.ts) speaks, films, mixes and writes the files.
  *
  *   e2e/video/setup-voice.sh            once: Piper, the voice and a static ffmpeg into ~/.cache/aom-video
- *   pnpm build && pnpm --filter @aom/e2e video
+ *   pnpm build && e2e/video/record.sh getting-started
  *
- * Output (served by the app as static files, read by the Help page):
- *   apps/web/public/videos/getting-started.webm   the video with the voice-over
- *   apps/web/public/videos/getting-started.vtt    the captions (the same words as the narration)
- *   apps/web/public/videos/getting-started.json   its length and chapters (seconds), matching the five steps
+ * Output: apps/web/public/videos/getting-started.{webm,mp4,vtt,json}
  */
-const OUT_DIR = join(ROOT, 'apps/web/public/videos');
-const RAW_DIR = join(E2E_DIR, 'video-raw');
-const HOME = paths.runnerHome('video');
-const PACE = Number(process.env.AOM_VIDEO_PACE ?? 1); // pauses between actions; 0.5 is twice as fast (the voice sets the pace)
-const pause = (ms: number) => sleep(ms * PACE);
-const GAP = 0.7; // seconds of quiet after every passage
+const SLUG = 'getting-started';
 
 test.afterAll(async () => {
   await pool.end();
@@ -37,70 +25,18 @@ test.afterAll(async () => {
 
 test('record the getting-started video', async ({ browser }) => {
   // ---- before the camera rolls: the voice, the scripted BA answer and a workstation ---------------------------------
-  const spoken = new Map(speak(allCues()).map((s) => [s.id, s]));
-  mkdirSync(E2E_DIR, { recursive: true });
-  const repliesFile = join(E2E_DIR, 'video-replies.json');
-  writeFileSync(repliesFile, JSON.stringify({ [BA_QUESTION]: BA_ANSWER }));
-  process.env.AOM_MOCK_REPLIES_FILE = repliesFile; // read by the runner (recording only)
-
-  const api = await apiAs(ADMIN.email, ADMIN.password);
-  const code = (await (await api.post('/api/workstations/pairing-codes', { data: {} })).json())
-    .code as string;
-  pairRunner(BASE_URL, code, "Alex's laptop", HOME);
-  addRepoRoot(paths.repoRoot, HOME);
-  startRunner({}, HOME);
-  await waitFor(
-    'runner connected',
-    async () => (await (await api.get('/api/workstations')).json()).workstations as any[],
-    (w) => w[0]?.connected === true,
-    30_000,
+  const prepared = prepareVideo(
+    {
+      slug: SLUG,
+      title: 'Getting started with Guildwise HQ',
+      cues: allCues(),
+      chapters: CHAPTERS,
+    },
+    { [BA_QUESTION]: BA_ANSWER },
   );
-
-  rmSync(RAW_DIR, { recursive: true, force: true });
-  const ctx = await browser.newContext({
-    storageState: await api.storageState(),
-    viewport: { width: 1280, height: 720 },
-    recordVideo: { dir: RAW_DIR, size: { width: 1280, height: 720 } },
-  });
-  await installOverlays(ctx);
-  // The server follows every finished card with a "Full E2E suite after ..." card (always on, no setting). It is
-  // noise for a first-time viewer, so the camera never sees it: hide those tiles in the recorded page only.
-  await ctx.addInitScript(`(() => {
-    const hide = () => {
-      const walker = document.createTreeWalker(document.body || document, NodeFilter.SHOW_TEXT);
-      for (let n = walker.nextNode(); n; n = walker.nextNode()) {
-        if (!(n.nodeValue || '').includes('Full E2E suite')) continue;
-        // a board tile, else the short "spawned card" row on the card page (never anything bigger)
-        const el = n.parentElement && (n.parentElement.closest('[data-testid^="card-tile-"]') || n.parentElement);
-        if (el && el !== document.body && (el.textContent || '').length < 160) el.style.display = 'none';
-      }
-    };
-    new MutationObserver(hide).observe(document, { childList: true, subtree: true, characterData: true });
-    setInterval(hide, 200);
-  })();`);
-  const t0 = Date.now();
-  const page = await ctx.newPage();
-  const now = () => (Date.now() - t0) / 1000;
-  const chapters: Array<{ t: number; title: string }> = [];
-  const timeline: Array<{ id: string; text: string; start: number; end: number; file: string }> = [];
-  const textOf = new Map(allCues().map((c) => [c.id, c.text]));
-
-  /** Speaks the passage while `actions` run on screen; then waits until the voice has finished (and a breath more). */
-  const narrate = async (id: string, actions?: () => Promise<void>) => {
-    const s = spoken.get(id);
-    if (!s) throw new Error(`no audio for ${id}`);
-    const start = now();
-    const end = start + s.duration;
-    timeline.push({ id, text: textOf.get(id) ?? '', start, end, file: s.file });
-    if (actions) await actions();
-    const rest = end + GAP - now();
-    if (rest > 0) await sleep(rest * 1000);
-  };
-  const chapter = async (n: number) => {
-    const c = CHAPTERS[n - 1] as (typeof CHAPTERS)[number];
-    chapters.push({ t: Math.max(0, Math.round(now() * 10) / 10), title: c.title });
-    await caption(page, c.banner, n);
-  };
+  const api = await demoApi();
+  await pairWorkstation(api);
+  const { page, narrate, chapter, finish } = await startRecording(prepared, browser, api);
 
   // ---- intro ----------------------------------------------------------------------------------------------------
   await page.goto('/');
@@ -248,48 +184,5 @@ test('record the getting-started video', async ({ browser }) => {
   await narrate('outro-1');
 
   // ---- finish: mix the voice into the recording, write the captions and the chapter list ----------------------------
-  const duration = Math.round(now() * 10) / 10;
-  const video = page.video();
-  await ctx.close();
-  const raw = await video?.path();
-  expect(raw).toBeTruthy();
-  mkdirSync(OUT_DIR, { recursive: true });
-  const dest = join(OUT_DIR, 'getting-started.webm');
-  try {
-    mux(
-      raw as string,
-      timeline.map((c) => ({ file: c.file, start: c.start })),
-      dest,
-    );
-  } catch (e) {
-    copyFileSync(raw as string, dest);
-    throw new Error(`the narration could not be mixed in (is ffmpeg set up? see setup-voice.sh): ${e}`);
-  }
-  const bytes = statSync(dest).size;
-  expect(bytes, 'the video must stay under 20 MB').toBeLessThan(20 * 1024 * 1024);
-  const mp4 = join(OUT_DIR, 'getting-started.mp4');
-  toMp4(dest, mp4);
-  expect(statSync(mp4).size, 'the MP4 must stay under 20 MB').toBeLessThan(20 * 1024 * 1024);
-  writeFileSync(join(OUT_DIR, 'getting-started.vtt'), vtt(timeline));
-  writeFileSync(
-    join(OUT_DIR, 'getting-started.json'),
-    `${JSON.stringify(
-      {
-        title: 'Getting started with Guildwise HQ',
-        src: '/videos/getting-started.webm',
-        type: 'video/webm',
-        sources: [
-          { src: '/videos/getting-started.mp4', type: 'video/mp4' },
-          { src: '/videos/getting-started.webm', type: 'video/webm' },
-        ],
-        captions: '/videos/getting-started.vtt',
-        voice: `Piper ${VOICE}`,
-        duration,
-        chapters,
-      },
-      null,
-      2,
-    )}\n`,
-  );
-  console.log(`video: ${dest} ${(bytes / 1024 / 1024).toFixed(1)} MB, ${duration}s`);
+  await finish();
 });

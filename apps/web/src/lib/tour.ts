@@ -31,6 +31,8 @@ export interface TourStep {
   more?: string;
   /** The getting-started video player is shown inside the card (text only when there is no video file). */
   video?: boolean;
+  /** The nav id whose section video the card shows, when it is not the step's own id (only once published). */
+  videoNav?: string;
   /** The label of the Next button, when it is not "Next". */
   nextLabel?: string;
 }
@@ -239,6 +241,7 @@ const DONE: TourStep = {
 const PLATFORM_STEPS: TourStep[] = [
   {
     id: 'welcome',
+    videoNav: 'platform',
     title: 'Welcome, platform administrator',
     body: 'This is the platform area. You look after the organizations that use Guildwise HQ, not their work. This tour shows the places you will use.',
     more: 'organizations-and-roles#platform-area',

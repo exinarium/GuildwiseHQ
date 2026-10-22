@@ -1,426 +1,577 @@
 # Video plan: Getting started plus one video per section
 
-This plan replaces the single introduction video with a short set: one **Getting started** video (G) and one short video per group of sections (S1 to S17). It is a plan only. The existing introduction video and every link to it stay as they are until the new Getting started video is recorded. Nothing in the guide, the tour or Help links to a video listed here until that video exists.
+The owner decided: **one video per section**. There is one **Getting started** video (G) and one video for each section of the sidebar inventory (sections 1 to 23 and P, the platform area): 25 videos in all. Each section video is 60 to 120 seconds and G is 120 to 180 seconds.
 
-Section numbers and names are those of the section inventory in `GAP-LIST.md` (1 Board … 23 Help, P Platform area).
+Section numbers and names are those of the section inventory in `docs/investigations/GWP-10-documentation-onboarding-refresh-for-gwp-many-chan.md` (decision D1) and `GAP-LIST.md`.
+
+Labels of buttons, tabs and fields are written in `code` style when they are exactly what the app shows (checked against the web code in `apps/web/src`). Where a label contains a number or a name, `{n}` or `{CEO}` stands for it.
 
 ## Length rule
 
 - G: 120 to 180 seconds (target 2:30).
-- Each S video: 60 to 120 seconds.
+- Each section video: 60 to 120 seconds.
 - The `duration` in the chapters JSON that the pipeline writes after recording makes this measurable. A video outside its range is re-cut before it is published.
+- A rough guide: the voice speaks about 2.3 words a second, so 60 s is about 140 words of narration and 120 s about 280, plus the pauses between passages (0.7 s each).
 
 ## How a video is made
 
-The existing pipeline in `e2e/video/` is used unchanged in method:
+The pipeline lives in `e2e/video/` (V-0 is done, see below):
 
-- A Playwright script drives a seeded demo stack (port 4671, database `aom_onboard_video`, organization "Acme", Owner "Alex Morgan", mock runner) and records the screen.
-- The voice is Piper `en_GB-cori-high`. The narration cues are spoken first and their lengths set the pacing of the clicks.
+- A Playwright spec drives a seeded demo stack (default port 4671, database `aom_onboard_video`, organization "Acme", Owner "Alex Morgan", mock runner) and records the screen with a step banner and a visible pointer.
+- The voice is Piper `en_GB-cori-high`. The narration cues are spoken first and their lengths set the pacing of the clicks. Piper and a static ffmpeg live in `~/.cache/aom-video` (`e2e/video/setup-voice.sh`).
 - Output per video: WebM and MP4, VTT captions and a chapters JSON, together under 20 MB, in `apps/web/public/videos/<slug>.*`.
 - Only demo data appears on screen (`@demo.local`, `example.com`, invented names). No real customer or personal data.
+- How to record one video, a list, and several at once: `docs/guide/README.md`, "Recording a video".
 
 ## Rules for every video
 
 1. One spec file and one narration module per video: `e2e/video/<slug>.spec.ts` and `e2e/video/narration/<slug>.ts`. Output `apps/web/public/videos/<slug>.*`.
-2. Each video seeds its own data through the API in its own `beforeAll`. It never relies on the recording or the state of another video.
+2. Each video seeds its own data through the API in its own spec (helpers in `e2e/video/seed.ts`). It never relies on the recording or the state of another video. `record.sh` gives every video a fresh stack and database.
 3. It starts on its own page, reached through the sidebar (never "as we saw in…"), and ends on that page.
 4. It never names or shows another section video. It may say "see the guide, chapter x".
 5. Only demo data.
 6. Getting started may show the sidebar but explains no section beyond one sentence.
+7. The narration uses the app's exact labels, and every beat is something the screen really shows. When the page changes, the beat list is re-checked against the page help (`apps/web/src/help/page-help-content.ts`) and the code.
+8. A finished video is published by setting `published: true` for its slug in `apps/web/src/lib/videos.ts` in the same commit as its four files. Nothing links to a video that has not been recorded.
 
-## Prerequisite task V-0: make the pipeline and the player multi-video
+## Pipeline (V-0, done)
 
-Before the first section video is recorded, one separate piece of work:
+- `e2e/video/playwright.video.config.ts` matches every `e2e/video/*.spec.ts`; `AOM_VIDEO_SLUG` picks one. `e2e/video/record.sh <slug>...` records a list, each on a fresh stack.
+- Each spec writes `apps/web/public/videos/<slug>.{webm,mp4,vtt,json}` through the shared harness (`harness.ts`); narration modules live in `e2e/video/narration/<slug>.ts`; seeding helpers (Acme, Alex Morgan, mock runner, demo project, agents, cards) are in `seed.ts`; the spec template is `e2e/video/template/slug.spec.ts`.
+- The stack's port, database and scratch directory are set per run (`AOM_VIDEO_PORT`, `AOM_VIDEO_DB`, `AOM_VIDEO_DIR_BASE`), so recordings can run at once.
+- The web app: `useVideoInfo(url)` and `VideoPlayer` take a URL or slug that defaults to getting-started; `apps/web/src/lib/videos.ts` is the registry (slug to title, sidebar entry, Help anchor and a `published` flag); a published video appears under its Help anchor, in the tour step of its section and behind a `Watch the video` button in the page help panel of its section.
+- The Backlog video was recorded as the proof of the pipeline and is published.
 
-- Parametrise `playwright.video.config.ts` (`testMatch` for all `*.spec.ts`) and the spec's output names and chapter source.
-- Give `useVideoInfo(url)` and `GettingStartedVideo` a slug or URL prop that defaults to getting-started (the tour test mocks that URL).
-- Add a way to link a video from a Help article and from a tour step.
+## The 25 videos
 
-Every video below depends on V-0 and on nothing else. Linking a finished video from the guide, the tour and Help is part of that video's own work.
+| # | Slug | Section | Length | Status |
+|---|---|---|---|---|
+| G | `getting-started` | Getting started | 2:30 | recorded once (to be re-recorded, see G) |
+| 1 | `board` | Board | 1:30 | to record |
+| 2 | `backlog` | Backlog | 1:00 | recorded (proof) |
+| 3 | `environments` | Environments | 1:30 | to record |
+| 4 | `research` | Research | 1:00 | to record |
+| 5 | `desk` | Desk | 1:30 | to record |
+| 6 | `intake` | Intake | 1:00 | to record |
+| 7 | `automations` | Automations | 1:30 | to record |
+| 8 | `projects` | Projects | 1:30 | to record |
+| 9 | `agents` | Agents | 1:30 | to record |
+| 10 | `org-chart` | Org chart | 1:00 | to record |
+| 11 | `ceo` | CEO | 1:30 | to record |
+| 12 | `roles-and-workflows` | Roles & workflows | 1:30 | to record |
+| 13 | `workstations` | Workstations | 1:30 | to record |
+| 14 | `releases` | Releases | 1:00 | to record |
+| 15 | `integrations` | Integrations | 1:30 | to record |
+| 16 | `metrics` | Metrics | 1:00 | to record |
+| 17 | `costs` | Costs | 1:15 | to record |
+| 18 | `interests` | Interests | 1:30 | to record |
+| 19 | `ledger` | Ledger | 1:15 | to record |
+| 20 | `vaults` | Vaults | 1:00 | to record |
+| 21 | `settings` | Settings | 1:15 | to record |
+| 22 | `organization` | Organization | 1:30 | to record |
+| 23 | `help` | Help | 1:00 | to record |
+| P | `platform-area` | Platform area | 2:00 | to record |
 
 ## Videos
 
-Each entry has the same fields. "Linked from" names the guide chapter, the tour step id and the Help article anchor where the link will be added once the video exists.
+Each entry has the same fields. "Linked from" names the guide chapter, the tour step id and the Help article anchor where the video is shown once it exists (the tour step and the Help anchor are wired by the registry; the guide link is added by hand).
 
 ### G. Getting started
 
+- **Slug:** `getting-started`
 - **Title:** Getting started with Guildwise HQ
 - **Sections covered:** none as primary; touches 1 Board, 5 Desk, 8 Projects, 9 Agents and 13 Workstations lightly.
-- **Scope in:** sign in; the Get started checklist; the Add a workstation wizard (shown, not waited on); hiring a lean team; creating a project and its repository; New card; talking to the business analyst; answering on the Desk; the card moving on the Board; where Help, the tour and Ctrl K are.
+- **Scope in:** sign in; the `Get started` checklist; the `Add a workstation` wizard (shown, not waited on); hiring a lean team; creating a project and its repository; `New card`; talking to the business analyst; answering on the Desk; the card moving on the Board; where Help, the tour and Ctrl K are.
 - **Scope out:** any explanation of a section beyond one sentence; Backlog, Environments, Releases, CEO, Integrations, Metrics, Costs, Interests, Ledger, Vaults, Settings, Organization.
 - **Target length:** 2:30 (120 to 180 s).
 - **Script outline:**
-  1. Sign in as the Owner; the empty organization shows the Get started button in the sidebar.
-  2. Open Get started: the checklist of what is left (project, repository, workstation, team, business analyst).
-  3. Workstations: Add a workstation opens the wizard; show the steps and the live progress, then continue with a workstation that is already online.
-  4. Agents: Hire agent for the lean team (business analyst, planner, architect, builder, pre-reviewer, reviewer, tester), choosing the project allow-list.
-  5. Projects: New project with its repository.
-  6. New card from the sidebar button; talk to the business analyst until the brief is ready.
+  1. Sign in as the Owner; the empty organization shows `Get started` in the sidebar.
+  2. Open `Get started`: the checklist of what is left (project, repository, workstation, team, business analyst).
+  3. Workstations: `Add a workstation` opens the wizard; show the steps and the live progress, then continue with a workstation that is already online.
+  4. Agents: `Hire agent` for the lean team (business analyst, planner, architect, builder, pre-reviewer, reviewer, tester), choosing the project allow-list.
+  5. Projects: `New project` with its repository.
+  6. `New card` from the sidebar button; talk to the business analyst until the brief is ready.
   7. Desk: answer the question that arrives; the number in the sidebar drops.
   8. Board: the card moves between columns by itself.
-  9. Close: Help in the sidebar, the tour replay, and Ctrl K.
-- **Prerequisites and test data:** empty demo organization "Acme", Owner "Alex Morgan", one pre-paired mock workstation, one demo repository, mock runner that answers the BA's questions.
-- **Linked from:** guide chapter 3 intro; tour step `video`; Help article `getting-started#training-video`.
-- **Re-record when:** the Get started checklist, the Add a workstation wizard, Hire agent, New project, New card, answering on the Desk or the sidebar layout changes (see the re-record map).
+  9. Close: `Help` in the sidebar, the tour replay, and Ctrl K.
+- **Prerequisites and test data:** empty demo organization "Acme", Owner "Alex Morgan", one pre-paired mock workstation, one demo repository, mock runner that answers the BA's questions (the reply map of `prepareVideo`).
+- **Start from:** the existing `getting-started.spec.ts` and `narration/getting-started.ts` (five steps: project, agents, cards, talk to the BA, test the result). They already run on the new harness with unchanged output; the re-recording rewrites the beats above.
+- **Linked from:** guide chapter 3 intro; tour step `video`; Help article `getting-started#training-video` (already wired).
+- **Re-record when:** the `Get started` checklist, the `Add a workstation` wizard, `Hire agent`, `New project`, `New card`, answering on the Desk or the sidebar layout changes (see the re-record map).
 
-### S1. Board and cards
+### 1. Board
 
+- **Slug:** `board`
 - **Title:** The Board and your cards
-- **Sections covered:** 1 Board.
-- **Scope in:** columns that follow the workflow; the filter chips (Blocked, Rework, Waiting for my QA, Waiting for my approval); opening a card (brief, thread, shifts, cost); New card; Pause project; Archive.
+- **Sections covered:** 1 Board (with card detail, `New card`, Archive).
+- **Scope in:** columns that follow the workflow; the filters (`Blocked`, `Rework`, `Waiting for my QA`, `Waiting for my approval`); opening a card (brief, thread, shifts, cost); `New card`; `Pause project`; `Archive`.
 - **Scope out:** the Backlog tab content, phases and follow-ups, Environments, Desk answers.
 - **Target length:** 1:30.
 - **Script outline:**
   1. Open Board from the sidebar: columns for the project's workflow.
-  2. Use the chips to show only what is Blocked, then what is Waiting for my approval.
+  2. Use the chips to show only what is `Blocked`, then what is `Waiting for my approval`.
   3. Open a card: the brief, the thread, the shifts and what it cost.
-  4. Close it and choose New card; show the fields, cancel.
-  5. Pause project and resume it.
-  6. Open Archive from the Board and return.
-- **Prerequisites and test data:** one demo project with about eight cards across all columns, one blocked, one in rework, one waiting for QA, one waiting for approval; shift and cost history on one card.
+  4. Close it and choose `New card`; show the fields, cancel.
+  5. `Pause project` and resume it.
+  6. Open `Archive` from the Board and return.
+- **Prerequisites and test data:** one demo project with about eight cards across all columns, one blocked, one in rework, one waiting for QA, one waiting for approval; shift and cost history on one card. The cards are created through the API and moved by the mock runner (or inserted in the needed stage by the spec's own helper).
 - **Linked from:** guide 2.2 and 4.12; tour step `board`; Help `board-and-cards#reading-the-board`.
 - **Re-record when:** Board layout, chips, card detail or Archive changes.
 
-### S2. Backlog
+### 2. Backlog
 
+- **Slug:** `backlog` (recorded, the proof video)
 - **Title:** The project backlog
 - **Sections covered:** 2 Backlog.
-- **Scope in:** quick add; flags; filters and the Newest sort; Send {n} to the BA; Drop; who may edit (Owners and Admins; every member can read).
+- **Scope in:** quick add (`Add to the backlog`); the star flag; search and the `Sort` menu (`Newest`); the filters; `Drop`; selecting items and `Send {n} to the BA`; who may edit (Owners and Admins; every member can read).
 - **Scope out:** what the BA does with the items afterwards, the Board.
-- **Target length:** 1:00.
+- **Target length:** 1:00 (recorded: 61 s).
 - **Script outline:**
   1. Open Backlog from the sidebar.
-  2. Quick add two ideas.
-  3. Set a flag on one; use the filters and sort by Newest.
-  4. Select two items and choose Send 2 to the BA.
-  5. Drop one item.
-  6. Say who can edit and who can only read.
-- **Prerequisites and test data:** demo project with eight backlog items of mixed flags; Owner signed in.
+  2. Quick add an idea: type a title, press Enter.
+  3. Flag one with the star; sort by `Newest`.
+  4. Search by title; the filters.
+  5. Drop one item from its actions menu.
+  6. Tick two items: `Send {n} to the BA`; say who can edit and who can only read.
+- **Prerequisites and test data:** demo project "Web shop" (SHOP) with four backlog items of mixed priority; Owner signed in.
 - **Linked from:** guide 4.3b; tour step `backlog`; Help `board-and-cards#backlog`.
 - **Re-record when:** Backlog page, its buttons or its permissions change.
 
-### S3. Environments
+### 3. Environments
 
+- **Slug:** `environments`
 - **Title:** Environments: where your app runs
 - **Sections covered:** 3 Environments.
-- **Scope in:** Your app; Scan with DevOps / Not sure: let DevOps look / Use this; Add an environment; test copies and places; Check, Reconnect, Use another computer; the Releases On/Paused switch.
+- **Scope in:** `Your app`; what DevOps found and `Use this`; `Add an environment`; test copies and `Places`; `Check`, `Reconnect`, `Use another computer`; the Releases `On`/`Paused` switch.
 - **Scope out:** the Releases page, workstation setup, secrets (shown only as "technical details").
 - **Target length:** 1:30.
 - **Script outline:**
   1. Open Environments from the sidebar (code project).
-  2. Your app: what DevOps found and Use this.
-  3. Add an environment.
-  4. A test copy and the place it runs on; Check.
-  5. Reconnect and Use another computer, briefly.
-  6. Releases switch: Pause releases? dialog, then back On.
-- **Prerequisites and test data:** demo code project with a scanned app, one test copy, one environment, two workstations.
+  2. `Your app`: what DevOps found and `Use this`.
+  3. `Add an environment`.
+  4. A test copy and the place it runs on; `Check`.
+  5. `Reconnect` and `Use another computer`, briefly.
+  6. The Releases switch: the pause dialog, then back on.
+- **Prerequisites and test data:** demo code project with a scanned app, one test copy, one environment, two workstations (two mock runners).
 - **Linked from:** guide 4.27; tour step `environments`; Help `phases#delivery-recipes`.
 - **Re-record when:** the Environments page or its Releases switch changes.
 
-### S4. Research
+### 4. Research
 
+- **Slug:** `research`
 - **Title:** Research
 - **Sections covered:** 4 Research.
-- **Scope in:** New research card; research in progress; published notes.
+- **Scope in:** `New research card`; research `In progress`; `Published notes`.
 - **Scope out:** Ledger, Interests.
 - **Target length:** 1:00.
 - **Script outline:**
   1. Open Research from the sidebar.
-  2. New research card: write the question.
-  3. The list of research in progress.
+  2. `New research card`: write the question.
+  3. The list of research `In progress`.
   4. Open a published note.
   5. Where the note is kept.
-- **Prerequisites and test data:** demo project with the research stage, one published note, one in progress.
+- **Prerequisites and test data:** demo project that started as research (or has published notes), one published note, one card in progress.
 - **Linked from:** guide 4.13; tour step `research`; Help `project-conversion#research-as-a-stage`.
 - **Re-record when:** the Research tab changes.
 
-### S5. Desk
+### 5. Desk
 
+- **Slug:** `desk`
 - **Title:** Your Desk
 - **Sections covered:** 5 Desk.
-- **Scope in:** groups and chips (including Handled by CEO and CEO decisions); answering a question; Add to ledger as; Accept recommendation; the CEO's Daily report item.
+- **Scope in:** the filters and groups (including `Handled by CEO` and `CEO decisions`); answering a question; `Add to ledger as`; `Accept recommendation`; the CEO's `Daily report` item.
 - **Scope out:** how the CEO is configured, the Ledger page.
 - **Target length:** 1:30.
 - **Script outline:**
   1. Open Desk from the sidebar; the number shows what is waiting.
-  2. Groups and chips.
-  3. Open a question, answer it, and choose Add to ledger as a standing order.
-  4. An item with a recommendation: Accept recommendation.
-  5. The Handled by CEO and CEO decisions chips.
-  6. Open the Daily report item.
-- **Prerequisites and test data:** one question, one approval, one recommendation, two items handled by the CEO, one Daily report, all from demo cards.
+  2. Filters and groups.
+  3. Open a question, answer it, and choose `Add to ledger as` a standing order.
+  4. An item with a recommendation: `Accept recommendation`.
+  5. The `Handled by CEO` and `CEO decisions` chips.
+  6. Open the `Daily report` item.
+- **Prerequisites and test data:** one question, one approval, one recommendation, two items handled by the CEO, one Daily report, all from demo cards (created by the mock runner or seeded through the API).
 - **Linked from:** guide 4.5; tour step `desk`; Help `desk#desk-items`.
 - **Re-record when:** Desk items, chips or answer controls change.
 
-### S6. Intake
+### 6. Intake
 
+- **Slug:** `intake`
 - **Title:** Intake: bring in tickets
 - **Sections covered:** 6 Intake.
-- **Scope in:** one ticket (chat); Batch; Tell your CEO; Work with the BA directly.
+- **Scope in:** one ticket (the chat, `Start intake`); `Batch`; `Tell your CEO`; `Work with the BA directly`.
 - **Scope out:** connecting Jira or GitHub (see Integrations).
 - **Target length:** 1:00.
 - **Script outline:**
   1. Open Intake from the sidebar.
   2. Paste one ticket reference and start the chat.
   3. The BA asks only what is missing.
-  4. Switch to the Batch tab.
-  5. Tell your CEO versus Work with the BA directly.
+  4. Switch to the `Batch` tab.
+  5. `Tell your CEO` versus `Work with the BA directly`.
 - **Prerequisites and test data:** demo Jira-style tickets served by the mock integration; Owner signed in.
 - **Linked from:** guide 4.8; tour step `intake`; Help `intake-and-outbox#intake`.
 - **Re-record when:** Intake tabs or buttons change.
 
-### S7. Automations
+### 7. Automations
 
+- **Slug:** `automations`
 - **Title:** Automations
 - **Sections covered:** 7 Automations (nav id `schedules`).
-- **Scope in:** New automation wizard (When, What, Details); Run now; History; Pause.
+- **Scope in:** `New automation` wizard (When, What, Details); `Run now`; `History`; Pause.
 - **Scope out:** Interests schedules, webhook receivers.
 - **Target length:** 1:30.
 - **Script outline:**
   1. Open Automations from the sidebar.
-  2. New automation: When (a weekday morning).
+  2. `New automation`: When (a weekday morning).
   3. What (create a card), then Details.
-  4. Save; Run now.
-  5. History of runs.
+  4. Save; `Run now`.
+  5. `History` of runs.
   6. Pause the automation.
 - **Prerequisites and test data:** demo project; one existing automation with a short history.
 - **Linked from:** guide 4.8; tour step `schedules`; Help `automations-and-integrations#triggers`.
 - **Re-record when:** the wizard, History or the automations list changes.
 
-### S8. Projects
+### 8. Projects
 
+- **Slug:** `projects`
 - **Title:** Projects and their settings
 - **Sections covered:** 8 Projects.
-- **Scope in:** New project; priority order; project settings and its jump chips; budget; Send invitation.
+- **Scope in:** `New project`; the priority order; project settings and its jump chips; the budget; `Send invitation` to a project.
 - **Scope out:** Environments, Releases, agents' allow-lists.
 - **Target length:** 1:30.
 - **Script outline:**
   1. Open Projects from the sidebar.
-  2. New project with a repository.
+  2. `New project` with a repository.
   3. Drag a project up in the priority order.
   4. Open project settings and use the jump chips.
   5. Set the monthly budget.
-  6. Invite a member by email with Send invitation.
+  6. Invite a member by email with `Send invitation`.
 - **Prerequisites and test data:** three demo projects; a demo invitee `guest@demo.local`.
 - **Linked from:** guide 3.6 and 4.3; tour step `projects`; Help `projects#ranking`.
 - **Re-record when:** the Projects page or project settings change.
 
-### S9. Agents and the org chart
+### 9. Agents
 
-- **Title:** Your agents and the org chart
-- **Sections covered:** 9 Agents, 10 Org chart.
-- **Scope in:** Hire agent dialog; allow-list; Pause and Resume; Change model; recommendations (Dismiss, Dismiss all); the org chart, its Allowed on project filter and Workstations and DevOps panel.
-- **Scope out:** the CEO page, roles and workflows.
-- **Target length:** 2:00.
-- **Script outline:**
-  1. Open Agents from the sidebar.
-  2. Hire agent: role, seniority, Runtime, Effort, allow-list.
-  3. Pause and Resume an agent.
-  4. Change model.
-  5. A recommendation: act on it, and Dismiss.
-  6. Open Org chart from the sidebar: you, the CEO, the BAs.
-  7. Filter by Allowed on project; open the Workstations and DevOps panel.
-- **Prerequisites and test data:** six demo agents, one recommendation, a CEO appointed.
-- **Linked from:** guide 3.5, 4.4 and 4.7; tour steps `agents` and `org-chart`; Help `agents#hiring` and `org-chart-and-design#org-chart`.
-- **Re-record when:** the Hire agent dialog, the agent list controls or the org chart change.
-
-### S10. Your CEO
-
-- **Title:** Your CEO
-- **Sections covered:** 11 CEO.
-- **Scope in:** Overview; Authority; Reporting & alerts; Ask {CEO} chat (New chat, Chats list); Activity log with Undo.
-- **Scope out:** Persona & instructions, Memory, Topics (named in one sentence), Desk.
+- **Slug:** `agents`
+- **Title:** Your agents
+- **Sections covered:** 9 Agents.
+- **Scope in:** `Hire agent` (role, seniority, Runtime, Effort, the project allow-list); Pause and Resume an agent; `Change model`; the recommendations (`Dismiss`, `Dismiss all`); the Project and Department filters.
+- **Scope out:** the Org chart, the CEO page, roles and workflows.
 - **Target length:** 1:30.
 - **Script outline:**
-  1. Open CEO from the sidebar: Overview.
-  2. Authority: what the CEO may decide.
-  3. Reporting & alerts: when the daily report arrives.
+  1. Open Agents from the sidebar.
+  2. `Hire agent`: role, seniority, `Runtime`, `Effort`, allow-list.
+  3. Pause and Resume an agent.
+  4. `Change model`.
+  5. A recommendation: act on it, then `Dismiss`.
+  6. The Project filter.
+- **Prerequisites and test data:** six demo agents on a mock workstation, one recommendation (seeded through the API), a CEO appointed.
+- **Linked from:** guide 3.5 and 4.4; tour step `agents`; Help `agents#hiring`.
+- **Re-record when:** the `Hire agent` dialog or the agent list controls change.
+
+### 10. Org chart
+
+- **Slug:** `org-chart`
+- **Title:** The org chart
+- **Sections covered:** 10 Org chart.
+- **Scope in:** the chart (you, the CEO, the BAs, the teams by department); the `Chart view` and `List view` toggle; `Allowed on project`; an agent's details; the `Workstations and DevOps` panel.
+- **Scope out:** hiring (Agents), the CEO page, roles and workflows.
+- **Target length:** 1:00.
+- **Script outline:**
+  1. Open Org chart from the sidebar: who reports to whom.
+  2. Click an agent for its details.
+  3. Filter by `Allowed on project`.
+  4. Switch between `Chart view` and `List view`.
+  5. The `Workstations and DevOps` panel: one DevOps engineer per machine.
+- **Prerequisites and test data:** the six demo agents of the Agents video on two projects, a CEO appointed, one workstation with its DevOps engineer.
+- **Linked from:** guide 4.7; tour step `org-chart`; Help `org-chart-and-design#org-chart`.
+- **Re-record when:** the org chart, its filter or its DevOps panel changes.
+
+### 11. CEO
+
+- **Slug:** `ceo`
+- **Title:** Your CEO
+- **Sections covered:** 11 CEO.
+- **Scope in:** `Overview`; `Authority`; `Reporting & alerts`; Ask {CEO} (`New chat`, earlier chats); `Activity log` with `Undo`; the `Workstations` tab (`Move the CEO here`).
+- **Scope out:** `Persona & instructions`, `Memory`, `Topics` (named in one sentence), Desk.
+- **Target length:** 1:30.
+- **Script outline:**
+  1. Open CEO from the sidebar: `Overview`.
+  2. `Authority`: what the CEO may decide.
+  3. `Reporting & alerts`: when the daily report arrives.
   4. Ask {CEO}: start a chat and ask a question.
-  5. Activity log: Undo one action.
-  6. Workstations tab: Move the CEO here, shown once.
-- **Prerequisites and test data:** appointed demo CEO with a short activity log and one chat.
+  5. `Activity log`: `Undo` one action.
+  6. `Workstations` tab: `Move the CEO here`, shown once.
+- **Prerequisites and test data:** appointed demo CEO with a short activity log and one chat (the mock runner answers).
 - **Linked from:** guide 4.22; tour step `ceo`; Help `your-ceo#talking`.
 - **Re-record when:** any CEO tab or the CEO chat changes.
 
-### S11. Roles and workflows
+### 12. Roles & workflows
 
+- **Slug:** `roles-and-workflows`
 - **Title:** Roles and workflows
 - **Sections covered:** 12 Roles & workflows (nav id `org`; the page is titled "Organization").
-- **Scope in:** Roles; Workflows (view, compare); the workflow builder; Create department; Design with the BA (Investigate & design).
+- **Scope in:** the `Roles` tab; the `Workflows` tab (view, compare); the workflow builder; `Departments` and `Create department`; `Design with the BA`.
 - **Scope out:** the Board, agent hiring.
 - **Target length:** 1:30.
 - **Script outline:**
   1. Open Roles & workflows from the sidebar.
-  2. Roles tab.
-  3. Workflows tab: open Code, then compare two versions.
+  2. The `Roles` tab.
+  3. The `Workflows` tab: open Code, then compare two versions.
   4. The builder: add a stage, save.
-  5. Create department.
-  6. Design with the BA: start a design chat.
+  5. `Create department`.
+  6. `Design with the BA`: start a design chat.
 - **Prerequisites and test data:** the default workflows plus one custom workflow; a BA allowed on a project.
 - **Linked from:** guide 4.7 and 4.26; tour step `org`; Help `org-chart-and-design#custom-workflows`.
-- **Re-record when:** the Roles, Workflows or Design with the BA tabs change.
+- **Re-record when:** the Roles, Workflows, Departments or Design with the BA tabs change.
 
-### S12. Workstations and integrations
+### 13. Workstations
 
-- **Title:** Workstations and integrations
-- **Sections covered:** 13 Workstations, 15 Integrations.
-- **Scope in:** Add a workstation wizard; Pair workstation / Pair with a code; health; Shifts at once; Check for updates; Integrations tiles (one Claude tile per account, Connect another account); git hosts, Jira, MCP Sign in and Sign out.
-- **Scope out:** Environments, DevOps requests.
-- **Target length:** 2:00.
+- **Slug:** `workstations`
+- **Title:** Workstations
+- **Sections covered:** 13 Workstations.
+- **Scope in:** `Add a workstation` wizard; `Pair workstation` and `Pair with a code`; the workstation card (health, `Shifts at once`); `Check for updates`; git hosts in one sentence.
+- **Scope out:** Integrations (Claude accounts, MCP servers), Environments, DevOps requests.
+- **Target length:** 1:30.
 - **Script outline:**
   1. Open Workstations from the sidebar.
-  2. Add a workstation: the wizard steps and "Waiting for you to run the command".
-  3. Pair with a code.
-  4. A workstation card: health, Shifts at once.
-  5. Check for updates.
-  6. Open Integrations from the sidebar: the Claude account tiles.
-  7. Connect another account; a git host and an MCP server.
-- **Prerequisites and test data:** two demo workstations (one online, one offline), two demo Claude accounts, one demo MCP server.
-- **Linked from:** guide 3.4, 3.4a and 4.19; tour steps `workstations` and `integrations`; Help `workstations-and-installer#add-a-workstation` and `integrations#connect`.
-- **Re-record when:** the workstation wizard, workstation card or Integrations tiles change.
+  2. `Add a workstation`: the wizard steps and "Waiting for you to run the command".
+  3. `Pair with a code`.
+  4. A workstation card: health, `Shifts at once`.
+  5. `Check for updates`.
+- **Prerequisites and test data:** two demo workstations (one online, one offline) from mock runners.
+- **Linked from:** guide 3.4 and 3.4a; tour step `workstations`; Help `workstations-and-installer#add-a-workstation`.
+- **Re-record when:** the workstation wizard or the workstation card changes.
 
-### S13. Releases
+### 14. Releases
 
+- **Slug:** `releases`
 - **Title:** Releases
 - **Sections covered:** 14 Releases.
-- **Scope in:** the queue (Release, Not now, Release to N of M); what is live; history and its filters; The standard rule; Freeze all releases and Lift the freeze; Advanced: rule sets.
+- **Scope in:** the queue (`Release`, `Not now`, `Release to {n} of {m}`); what is live; history and its filters; `The standard rule`; `Freeze all releases` and `Lift the freeze`; advanced rule sets.
 - **Scope out:** Environments setup.
 - **Target length:** 1:00.
 - **Script outline:**
   1. Open Releases from the sidebar.
-  2. The queue: Release one item, Not now for another.
+  2. The queue: `Release` one item, `Not now` for another.
   3. What is live.
   4. History and its filters.
-  5. The standard rule; Advanced: rule sets.
-  6. Freeze all releases, then Lift the freeze.
+  5. `The standard rule`; the advanced rule sets.
+  6. `Freeze all releases`, then `Lift the freeze`.
 - **Prerequisites and test data:** two queued demo releases, one live, a short history.
-- **Linked from:** guide 4.28; tour step `releases`; Help `phases#delivery-recipes`.
+- **Linked from:** guide 4.28; tour step `releases`; Help `phases#releases`.
 - **Re-record when:** the Releases page changes.
 
-### S14. Metrics and costs
+### 15. Integrations
 
-- **Title:** Metrics and costs
-- **Sections covered:** 16 Metrics, 17 Costs.
-- **Scope in:** the Project filter and 7/14/30/90-day range; the panels (Throughput, Time blocked on you, Bounce rate per builder, Bugs escaped past test, Duration, Queue depth); Costs by project, agent, model and day; the budget meter; What the agents delivered.
-- **Scope out:** setting budgets (shown in project settings, S8).
+- **Slug:** `integrations`
+- **Title:** Integrations
+- **Sections covered:** 15 Integrations.
+- **Scope in:** the workstation chooser; the tiles (one Claude Code tile per account, `Connect another account`); how a tile connects (`Start sign-in`, `Test`, `Remove`); git hosts, Jira, MCP `Sign in` and sign out.
+- **Scope out:** adding a workstation, Environments, DevOps requests.
 - **Target length:** 1:30.
 - **Script outline:**
+  1. Open Integrations from the sidebar and choose the workstation.
+  2. The Claude Code tiles: the main account and one more.
+  3. `Connect another account`: the connect dialog ("How do you want to connect?"); cancel.
+  4. A git host tile and the Jira tile: what each is for.
+  5. An MCP server: `Sign in` and sign out.
+- **Prerequisites and test data:** two demo workstations, two demo Claude accounts (state seeded through the API, no real login), one demo MCP server.
+- **Linked from:** guide 4.19; tour step `integrations`; Help `integrations#connect`.
+- **Re-record when:** the Integrations tiles or the connect dialog change.
+
+### 16. Metrics
+
+- **Slug:** `metrics`
+- **Title:** Metrics
+- **Sections covered:** 16 Metrics.
+- **Scope in:** the Project filter and the range (`7 days`, `14 days`, `30 days`, `90 days`); the panels `Throughput`, `Time blocked on you`, `Bounce rate per builder`, `Bugs escaped past test`, `Duration`, `Queue depth`.
+- **Scope out:** costs (see Costs).
+- **Target length:** 1:00.
+- **Script outline:**
   1. Open Metrics from the sidebar; choose a range and a project.
-  2. Throughput and Time blocked on you.
-  3. Bounce rate per builder, Bugs escaped past test.
-  4. Duration and Queue depth per column.
-  5. Open Costs from the sidebar: by project, agent, model and day.
-  6. The budget meter and What the agents delivered.
-- **Prerequisites and test data:** 30 days of generated demo activity and cost data across two projects.
-- **Linked from:** guide 4.29 and 4.6; tour steps `metrics` and `costs`; Help `agents#hr-board` and `budgets-and-costs#monthly-budgets`.
-- **Re-record when:** the Metrics panels or the Costs page change.
+  2. `Throughput` and `Time blocked on you`.
+  3. `Bounce rate per builder` and `Bugs escaped past test`.
+  4. `Duration` and `Queue depth` per column.
+- **Prerequisites and test data:** 30 days of generated demo activity across two projects (cards, transitions and shifts inserted by the spec's own seed helper, since a mock run does not span days).
+- **Linked from:** guide 4.29; tour step `metrics`; Help `agents#hr-board`.
+- **Re-record when:** the Metrics panels change.
 
-### S15. Interests
+### 17. Costs
 
+- **Slug:** `costs`
+- **Title:** Costs and budgets
+- **Sections covered:** 17 Costs.
+- **Scope in:** the range (`This month`, `Last 30 days`, `Last month`) and the Project filter; `Total spend`; costs `By day`, `By project`, `By agent` and `By model`; the budget meter and `Organization budget`; `What the agents delivered`; `Export CSV`; `Currency and prices`.
+- **Scope out:** setting a project budget (shown in project settings, see Projects), Metrics.
+- **Target length:** 1:15.
+- **Script outline:**
+  1. Open Costs from the sidebar (Owners and Admins only); choose `Last 30 days`.
+  2. `Total spend` and the daily chart.
+  3. `By project`, `By agent`, `By model`.
+  4. The budget meter and `Organization budget`.
+  5. `What the agents delivered`.
+  6. `Export CSV`; where `Currency and prices` are set.
+- **Prerequisites and test data:** 30 days of demo shift costs across two projects (inserted by the spec), one project with a budget at about 80 percent.
+- **Linked from:** guide 4.6; tour step `costs`; Help `budgets-and-costs#monthly-budgets`.
+- **Re-record when:** the Costs page changes.
+
+### 18. Interests
+
+- **Slug:** `interests`
 - **Title:** Interests
 - **Sections covered:** 18 Interests.
-- **Scope in:** New interest; look and digest schedules; Deliver N now; taste rules; quiet cap; Archive, Restore, Delete permanently.
+- **Scope in:** `New interest`; the look and digest schedules; `Deliver now`; taste rules; the `Quiet cap`; archive and restore.
 - **Scope out:** Automations.
 - **Target length:** 1:30.
 - **Script outline:**
   1. Open Interests from the sidebar.
-  2. New interest with a topic.
+  2. `New interest` with a topic.
   3. Set the schedules for looking and for the digest.
-  4. Taste rules and the quiet cap.
-  5. Deliver N now.
-  6. Archive and Restore.
-- **Prerequisites and test data:** the interests feature on; two demo interests with delivered digests.
+  4. The `Taste` tab and the `Quiet cap`.
+  5. `Deliver now`.
+  6. Archive and restore.
+- **Prerequisites and test data:** the interests feature on; two demo interests with delivered digests (mock runner).
 - **Linked from:** guide 4.9; tour step `interests`; Help `interests#run-and-delivery`.
 - **Re-record when:** the Interests list or detail page changes.
 
-### S16. Ledger and vaults
+### 19. Ledger
 
-- **Title:** The Ledger and vaults
-- **Sections covered:** 19 Ledger, 20 Vaults.
-- **Scope in:** search and the Project filter; Add entry; standing orders; Edit, History, Retire, Show retired; registering a vault (git or local folder).
-- **Scope out:** Desk's Add to ledger as.
-- **Target length:** 1:30.
+- **Slug:** `ledger`
+- **Title:** The Ledger
+- **Sections covered:** 19 Ledger.
+- **Scope in:** `Search`; the scope and Project filters; `Add entry`; standing orders; the entry kinds (requirement, decision, standing order); edit, history and retire; `Show retired`.
+- **Scope out:** Desk's `Add to ledger as`, Vaults.
+- **Target length:** 1:15.
 - **Script outline:**
   1. Open Ledger from the sidebar and search.
-  2. Add entry as a standing order.
-  3. Edit and History of an entry.
-  4. Retire an entry; Show retired.
-  5. Open Vaults from the sidebar.
-  6. Register a vault: git, then a local folder.
-- **Prerequisites and test data:** about twelve demo entries including one retired; one demo git vault.
-- **Linked from:** guide 4.5 and 4.3a; tour steps `ledger` and `vaults`; Help `ledger-and-vaults#ledger` and `#vaults`.
-- **Re-record when:** the Ledger page or the Vaults page changes.
+  2. `Add entry` as a standing order.
+  3. Edit and the history of an entry.
+  4. Retire an entry; `Show retired`.
+- **Prerequisites and test data:** about twelve demo entries including one retired.
+- **Linked from:** guide 4.5; tour step `ledger`; Help `ledger-and-vaults#ledger`.
+- **Re-record when:** the Ledger page changes.
 
-### S17. Your settings, organization and Help
+### 20. Vaults
 
-- **Title:** Your settings, your organization and Help
-- **Sections covered:** 21 Settings, 22 Organization, 23 Help.
-- **Scope in:** Settings (picture, time zone, two-factor login, Notifications, Monday briefing); Organization tabs (members, invitations, guests, plan); Help centre in one beat.
-- **Scope out:** billing detail, platform area.
-- **Target length:** 1:30.
+- **Slug:** `vaults`
+- **Title:** Vaults
+- **Sections covered:** 20 Vaults.
+- **Scope in:** `Register a vault` (git URL or local folder); `Sync interval`; a vault card; `Edit`; the conflict state `Sync paused: conflict` and `I resolved it, resume`.
+- **Scope out:** the Ledger.
+- **Target length:** 1:00.
+- **Script outline:**
+  1. Open Vaults from the sidebar.
+  2. `Register a vault`: a git vault, then a local folder.
+  3. The vault card and its sync interval; `Edit`.
+  4. What a paused sync looks like and how to resume it.
+- **Prerequisites and test data:** one demo git vault (a throwaway bare repository on the stack's scratch directory), one demo project.
+- **Linked from:** guide 4.3a; tour step `vaults`; Help `ledger-and-vaults#vaults`.
+- **Re-record when:** the Vaults page changes.
+
+### 21. Settings
+
+- **Slug:** `settings`
+- **Title:** Your settings
+- **Sections covered:** 21 Settings.
+- **Scope in:** `Your picture` and `Change picture`; `Your time zone`; two-factor security; `Monday briefing`; `Notifications`; `Weekly blog digest`; `Expert mode for code changes`.
+- **Scope out:** organization-wide settings (see Organization), the daily report time (CEO).
+- **Target length:** 1:15.
 - **Script outline:**
   1. Open Settings from the sidebar: picture and time zone.
-  2. Set up two-factor login.
-  3. Notifications and Monday briefing.
-  4. Open Organization: Members, then Send invitation.
-  5. Guests and Plan.
-  6. Open Help: the tour replay and search.
-- **Prerequisites and test data:** Owner signed in; demo members and one pending invitation.
-- **Linked from:** guide 4.30, 4.1, 4.2 and 10; tour steps `settings`, `organization` and `help`; Help `getting-started#your-settings`, `organizations-and-roles#members-and-invitations` and `getting-started#the-sidebar`.
-- **Re-record when:** Settings, Organization or the Help centre layout changes.
+  2. Two-factor security: where it is set up (do not enrol on camera).
+  3. `Monday briefing` and `Notifications`.
+  4. `Weekly blog digest`.
+  5. `Expert mode for code changes`: off by default.
+- **Prerequisites and test data:** Owner signed in.
+- **Linked from:** guide 4.30; tour step `settings`; Help `getting-started#your-settings`.
+- **Re-record when:** the Settings page changes.
 
-### P. Platform area (optional)
+### 22. Organization
 
+- **Slug:** `organization`
+- **Title:** Your organization
+- **Sections covered:** 22 Organization.
+- **Scope in:** the tabs `General`, `Members`, `Invitations`, `Guests`, `E-mail inbox`, `Project links`, `Plan & limits` and `Billing`; `Invite member` and `Send invitation`; `Revoke`; the role of each member.
+- **Scope out:** billing detail, the platform area.
+- **Target length:** 1:30.
+- **Script outline:**
+  1. Open Organization from the sidebar: `General` and your role.
+  2. `Members`: roles, then `Invite member` and `Send invitation`.
+  3. `Invitations`: `Resend` and `Revoke`.
+  4. `Guests`.
+  5. `E-mail inbox` and `Project links`, one sentence each.
+  6. `Plan & limits`: what is used and the limits.
+- **Prerequisites and test data:** Owner signed in; two demo members, one pending invitation to `guest@demo.local`.
+- **Linked from:** guide 4.1 and 4.2; tour step `organization`; Help `organizations-and-roles#members-and-invitations`.
+- **Re-record when:** the Organization tabs change.
+
+### 23. Help
+
+- **Slug:** `help`
+- **Title:** The Help centre
+- **Sections covered:** 23 Help.
+- **Scope in:** the Help page: `Search the help articles`; `Articles`, `Glossary`, `Blog`; `What’s new`; `Contact us` and `My requests`; the tour replay; the `?` button for the page behind you.
+- **Scope out:** the content of any article, the platform Help.
+- **Target length:** 1:00.
+- **Script outline:**
+  1. Open Help from the sidebar.
+  2. Search for "budget" and open an article.
+  3. The `Glossary`.
+  4. `What’s new` and `Blog`.
+  5. `Contact us` and `My requests`.
+  6. The `?` button in the top bar and the tour replay.
+- **Prerequisites and test data:** Owner signed in; one answered demo request in `My requests`.
+- **Linked from:** guide chapter 10; tour step `help`; Help `getting-started#the-sidebar`.
+- **Re-record when:** the Help centre layout changes.
+
+### P. Platform area
+
+- **Slug:** `platform-area`
 - **Title:** The platform area
-- **Sections covered:** P Platform area.
-- **Scope in:** organizations, invitations, accounts, billing, support, blog, API keys, runners, team, inbound mail, audit log.
+- **Sections covered:** P Platform area (platform administrator; separate shell).
+- **Scope in:** `Organizations`, `Invitations`, `Accounts`, `Billing`, `Support`, `Blog`, `API keys`, `Runners`, `Platform team`, `Inbound mail`, `Audit log`.
 - **Scope out:** everything inside an organization.
 - **Target length:** 2:00.
-- **Script outline:** 1. Organizations; 2. Invitations; 3. Accounts; 4. Billing; 5. Support and Blog; 6. API keys, Runners, Team, Inbound; 7. Audit log.
-- **Prerequisites and test data:** platform administrator login, two demo organizations.
+- **Script outline:** 1. `Organizations`; 2. `Invitations`; 3. `Accounts`; 4. `Billing`; 5. `Support` and `Blog`; 6. `API keys`, `Runners`, `Platform team`, `Inbound mail`; 7. `Audit log`.
+- **Prerequisites and test data:** platform administrator login (the stack's `platform@e2e.test`, which sets up two-factor login at first sign-in: the spec completes that before the camera rolls), two demo organizations.
 - **Linked from:** guide chapter 7; platform tour step `welcome`; Help `organizations-and-roles#platform-area`.
 - **Re-record when:** any platform page changes.
-- Only recorded if the owner asks for it (see the decisions below).
 
 ## Re-record map
 
-Each section belongs to exactly one section video. G is also re-recorded for the five sections whose first-run flow it shows.
+Each section belongs to exactly one video. G is also re-recorded for the five sections whose first-run flow it shows.
 
-| # | Section | Section video | Also re-record G when |
+| # | Section | Video (slug) | Also re-record G when |
 |---|---|---|---|
-| 1 | Board | S1 | New card (the dialog or sidebar button) changes |
-| 2 | Backlog | S2 | never |
-| 3 | Environments | S3 | never |
-| 4 | Research | S4 | never |
-| 5 | Desk | S5 | answering a question on the Desk changes |
-| 6 | Intake | S6 | never |
-| 7 | Automations | S7 | never |
-| 8 | Projects | S8 | New project (the dialog or its repository step) changes |
-| 9 | Agents | S9 | the Hire agent dialog changes |
-| 10 | Org chart | S9 | never |
-| 11 | CEO | S10 | never |
-| 12 | Roles & workflows | S11 | never |
-| 13 | Workstations | S12 | the Add a workstation wizard or the Get started checklist changes |
-| 14 | Releases | S13 | never |
-| 15 | Integrations | S12 | never |
-| 16 | Metrics | S14 | never |
-| 17 | Costs | S14 | never |
-| 18 | Interests | S15 | never |
-| 19 | Ledger | S16 | never |
-| 20 | Vaults | S16 | never |
-| 21 | Settings | S17 | never |
-| 22 | Organization | S17 | never |
-| 23 | Help | S17 | the Get started button or the tour entry point changes |
-| P | Platform area | P (if recorded) | never |
+| 1 | Board | `board` | New card (the dialog or sidebar button) changes |
+| 2 | Backlog | `backlog` | never |
+| 3 | Environments | `environments` | never |
+| 4 | Research | `research` | never |
+| 5 | Desk | `desk` | answering a question on the Desk changes |
+| 6 | Intake | `intake` | never |
+| 7 | Automations | `automations` | never |
+| 8 | Projects | `projects` | New project (the dialog or its repository step) changes |
+| 9 | Agents | `agents` | the Hire agent dialog changes |
+| 10 | Org chart | `org-chart` | never |
+| 11 | CEO | `ceo` | never |
+| 12 | Roles & workflows | `roles-and-workflows` | never |
+| 13 | Workstations | `workstations` | the Add a workstation wizard or the Get started checklist changes |
+| 14 | Releases | `releases` | never |
+| 15 | Integrations | `integrations` | never |
+| 16 | Metrics | `metrics` | never |
+| 17 | Costs | `costs` | never |
+| 18 | Interests | `interests` | never |
+| 19 | Ledger | `ledger` | never |
+| 20 | Vaults | `vaults` | never |
+| 21 | Settings | `settings` | never |
+| 22 | Organization | `organization` | never |
+| 23 | Help | `help` | the Get started button or the tour entry point changes |
+| P | Platform area | `platform-area` | never |
 
-A change to the sidebar itself (labels, order, new entry) re-records G and every video whose first beat opens a changed entry.
+A change to the sidebar itself (labels, order, a new entry) re-records G and every video whose first beat opens a changed entry.
 
-## Alternative: one video per sidebar entry
+## Decisions taken
 
-If the owner prefers one video per section, the set is G plus 23 section videos (sections 1 to 23, plus P if wanted), each 60 to 120 seconds. The same fields, rules and prerequisites apply; the entries above are split at the section boundaries (S9 into Agents and Org chart, S12 into Workstations and Integrations, S14 into Metrics and Costs, S16 into Ledger and Vaults, S17 into Settings, Organization and Help). The re-record map then becomes strictly one section to one video, plus G for the same five first-run flows. Splitting needs no further analysis, only the beat lists cut at those boundaries.
-
-## Decisions for the owner
-
-1. Grouping: approve the 17 grouped section videos above, or choose one video per sidebar entry (23 plus G).
-2. Platform area: record video P, or leave the platform administrator with the tour and the guide only.
+1. Grouping: one video per section (the owner's decision), so 24 section videos plus G. The earlier plan of 17 grouped videos is dropped.
+2. Platform area: recorded as its own video (`platform-area`).
 3. Order of recording: Getting started first, then by how often the section changes.

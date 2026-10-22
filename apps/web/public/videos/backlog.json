@@ -1,0 +1,32 @@
+{
+  "title": "The project backlog",
+  "src": "/videos/backlog.webm",
+  "type": "video/webm",
+  "sources": [
+    {
+      "src": "/videos/backlog.mp4",
+      "type": "video/mp4"
+    },
+    {
+      "src": "/videos/backlog.webm",
+      "type": "video/webm"
+    }
+  ],
+  "captions": "/videos/backlog.vtt",
+  "voice": "Piper en_GB-cori-high",
+  "duration": 60.9,
+  "chapters": [
+    {
+      "t": 8.7,
+      "title": "Open the backlog and add ideas"
+    },
+    {
+      "t": 21.1,
+      "title": "Flag, sort and drop"
+    },
+    {
+      "t": 45.1,
+      "title": "Send it to the BA"
+    }
+  ]
+}

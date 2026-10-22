@@ -55,3 +55,35 @@ Without `AOM_GUIDE_KEEP` the stack is stopped at the end, like in the default e2
 1. Add `![Caption](guide/assets/my-figure.jpg)` to `docs/USER-GUIDE.md`.
 2. Add a `snap(page, 'my-figure', ...)` to a `capture:` test in the spec and run it.
 3. Run `prepare-assets.mjs`, `assemble-guide.mjs` and `build-guide.mjs`.
+
+## Recording a video
+
+The training videos (Getting started and one per section) are listed in [`VIDEO-PLAN.md`](VIDEO-PLAN.md). Each is a Playwright spec in `e2e/video/<slug>.spec.ts` that drives a fresh demo stack (organization "Acme", Owner "Alex Morgan", mock agents) while an offline voice (Piper) reads `e2e/video/narration/<slug>.ts`. Output goes to `apps/web/public/videos/<slug>.{webm,mp4,vtt,json}`.
+
+Once per machine: Postgres on 127.0.0.1:5433 and Mailpit on 1025/8025 (as for `pnpm e2e`), `pnpm build` (the stack runs the built server, web and runner), and `e2e/video/setup-voice.sh` (Piper, the voice and a static ffmpeg into `~/.cache/aom-video`). Rebuild with `pnpm build` after the web app, server or runner changes.
+
+**One video**
+
+```sh
+e2e/video/record.sh backlog
+```
+
+**A batch**, one video after the other, each on a fresh stack and database:
+
+```sh
+e2e/video/record.sh board desk intake
+```
+
+**In parallel**: every concurrent run needs its own port and database, nothing else; the scratch directory follows the port (`aom-e2e-video-<port>`, under `AOM_VIDEO_DIR_BASE` or `TMPDIR`).
+
+```sh
+AOM_VIDEO_PORT=4672 AOM_VIDEO_DB=aom_video_a e2e/video/record.sh board desk intake &
+AOM_VIDEO_PORT=4673 AOM_VIDEO_DB=aom_video_b e2e/video/record.sh ledger vaults costs &
+wait
+```
+
+The defaults are port 4671 and database `aom_onboard_video`. The database is dropped and created at the start of every video, so never point two runs at the same one, and never at a database you want to keep. A run stops its own server and runners at the end; if you kill it, stop the leftovers named in `<scratch dir>/pids.json`. `AOM_VIDEO_OUT` writes the files somewhere other than `apps/web/public/videos` (a trial run); `AOM_VIDEO_PACE=0.5` halves the pauses between clicks (the voice still sets the pace).
+
+**A new video**: copy `e2e/video/template/slug.spec.ts` to `e2e/video/<slug>.spec.ts` and `e2e/video/narration/slug.ts` to `e2e/video/narration/<slug>.ts`, follow the entry in `VIDEO-PLAN.md`, record it, look at it, then set `published: true` for the slug in `apps/web/src/lib/videos.ts` and commit the spec, the narration and the four files. The Help article, the tour step and the page help of the section then show it; nothing links to a video that is not published.
+
+Shared on the machine, so not parallel-safe beyond what is described: the Piper audio cache (`~/.cache/aom-video/audio`, safe to share: files are written under a private name and renamed), Mailpit, and the Postgres container (each run uses its own database). The finished WebM and MP4 must each stay under 20 MB (the spec fails otherwise).
