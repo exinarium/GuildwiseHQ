@@ -76,8 +76,18 @@ describe('reviewer role v3', () => {
   const role = BUILTIN_ROLES.find((r) => r.key === 'reviewer')!;
 
   it('is version 3 and keeps high effort', () => {
-    expect(role.version).toBe(7);
+    expect(role.version).toBe(8);
     expect(role.defaultModel.effort).toBe('high');
+  });
+
+  it('leaves test scope to the reviewer, with no automatic bounce', () => {
+    for (const key of ['reviewer', 'pre_reviewer']) {
+      const r = BUILTIN_ROLES.find((x) => x.key === key)!;
+      const rules = r.coreRules.join(' ');
+      expect(rules).toMatch(/judge from the card and the diff/i);
+      expect(rules).toContain('out_of_scope_test_change');
+      expect(rules).not.toMatch(/automatic bounce|refuses an approval/i);
+    }
   });
 
   it('asks for an adversarial pass and a risk analysis, and the new report flags', () => {

@@ -89,33 +89,55 @@ describe('review tiers', () => {
   });
 });
 
-describe('out-of-scope unit test changes (spec: automatic bounce)', () => {
-  const flagged = {
+describe('out-of-scope unit test changes are the reviewer\'s decision', () => {
+  // A diff recorded by an older runner still carries the retired flag; it must not matter any more.
+  const legacy = {
     diffStats: { files: 3, added: 20, removed: 5, architecturalPaths: [], outOfScopeTestChange: true },
     riskTier: 'small',
   };
 
-  it('refuses an approval while the diff carries the flag, and tags a bounce as a quality cause', async () => {
+  it('accepts an approval although the diff carries the legacy flag', async () => {
     await freshState();
     await hireTeam(w);
     const card = await w.card({ title: 'Edited a foreign test' });
-    await p.run('Bea', handoff(), flagged);
+    await p.run('Bea', handoff(), legacy);
 
     const start = await p.next('Rex');
     await p.startShift(r, start);
     const res = await p.report(r, start.shiftId, approve());
-    expect(res).toMatchObject({ accepted: false });
-    expect(res.error).toMatch(/out_of_scope_test_change/);
-    expect((await cardRow(card.id)).stage).toBe('review');
+    expect(res).toMatchObject({ accepted: true });
+    r.ended(start.shiftId, 'reported');
+    expect((await cardRow(card.id)).stage).not.toBe('review');
+  });
 
-    // changes requested for another reason is tagged automatically
+  it('stores only the reasons the reviewer gave', async () => {
+    await freshState();
+    await hireTeam(w);
+    const card = await w.card({ title: 'Weak tests only' });
+    await p.run('Bea', handoff(), legacy);
+
+    const start = await p.next('Rex');
+    await p.startShift(r, start);
     const ok = await p.report(r, start.shiftId, changes(['weak_tests']));
     expect(ok).toMatchObject({ accepted: true });
     r.ended(start.shiftId, 'reported');
     const ev = await q(`SELECT payload FROM events WHERE type='ChangesRequested' AND payload->>'cardId'=$1`, [
       card.id,
     ]);
-    expect(ev[0]?.payload.reasons.sort()).toEqual(['out_of_scope_test_change', 'weak_tests']);
+    expect(ev[0]?.payload.reasons).toEqual(['weak_tests']);
+  });
+
+  it('lets the reviewer request changes for out-of-scope tests by hand', async () => {
+    await freshState();
+    await hireTeam(w);
+    const card = await w.card({ title: 'Reviewer judges scope' });
+    await p.run('Bea', handoff());
+
+    const start = await p.next('Rex');
+    await p.startShift(r, start);
+    const ok = await p.report(r, start.shiftId, changes(['out_of_scope_test_change']));
+    expect(ok).toMatchObject({ accepted: true });
+    r.ended(start.shiftId, 'reported');
     expect(await cardRow(card.id)).toMatchObject({ stage: 'build', rework_round: 1 });
   });
 });

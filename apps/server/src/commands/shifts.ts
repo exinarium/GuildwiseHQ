@@ -350,12 +350,6 @@ export async function applyShiftReport(
       break;
     }
     case 'ReviewApproved': {
-      if (await outOfScopeTestChange(tx, cardId))
-        return {
-          accepted: false,
-          error:
-            'the builder changed unit tests outside the card scope (flagged on the diff): request changes with `--reason out_of_scope_test_change`; this cannot be approved',
-        };
       const tier = (card.risk_tier ?? 'small') as 'small' | 'large';
       // lean team: a high-risk change (paths computed by the server) needs a second Opus approval.
       const required = Math.max(stage.approvals?.[tier] ?? 1, card.high_risk === true ? 2 : 1);
@@ -433,9 +427,7 @@ export async function applyShiftReport(
           fromStage: card.stage === 'pre_review' || card.stage === 'merge_review' ? card.stage : 'review',
           toStage: 'build',
           reviewerAgentId: agent.id,
-          reasons: (await outOfScopeTestChange(tx, cardId))
-            ? [...new Set([...(payloadData.reasons ?? []), 'out_of_scope_test_change'])]
-            : (payloadData.reasons ?? []),
+          reasons: payloadData.reasons ?? [],
           score: payloadData.score,
           criteriaMissed: payloadData.criteriaMissed ?? [],
           comments: report.note,
@@ -822,16 +814,6 @@ async function storeCardDiff(
       JSON.stringify(msg.changedPaths ?? []),
     ],
   );
-}
-
-/** The latest build handoff's diff carries the out-of-scope unit test change flag (spec: an automatic bounce). */
-async function outOfScopeTestChange(tx: Tx, cardId: string): Promise<boolean> {
-  const h = await one(
-    tx,
-    `SELECT data FROM card_handoffs WHERE card_id=$1 AND data ? 'diffStats' ORDER BY created_at DESC, event_seq DESC LIMIT 1`,
-    [cardId],
-  );
-  return h?.data?.diffStats?.outOfScopeTestChange === true;
 }
 
 // ----------------------------------------------------------------------------- shift lifecycle

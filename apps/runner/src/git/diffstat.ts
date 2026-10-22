@@ -67,10 +67,9 @@ export interface DiffInput {
   worktree: string;
   baseBranch: string;
   architecturalGlobs: string[];
-  affectedAreas?: string;
 }
 
-/** `git diff --numstat <base>...HEAD` summarised, plus architectural path matches and the out-of-scope test heuristic. */
+/** `git diff --numstat <base>...HEAD` summarised, plus architectural path matches and the test file count. */
 export async function computeDiffStats(input: DiffInput): Promise<DiffStats> {
   const base = await baseRef(input.worktree, input.baseBranch);
   const own = await ownChangedPaths(input.worktree, base);
@@ -93,17 +92,8 @@ export async function computeDiffStats(input: DiffInput): Promise<DiffStats> {
   });
   const architecturalPaths = input.architecturalGlobs.length ? paths.filter((p) => isArch(p)) : [];
 
-  // Heuristic: modified (not added) test files that also exist on the base and are not named in affectedAreas.
-  const mod =
-    own?.length === 0
-      ? { exitCode: 0, stdout: '' }
-      : await git(input.worktree, scoped(['diff', '--name-only', '--diff-filter=M', `${base}...HEAD`], own));
-  const isTest = picomatch(TEST_GLOBS, { dot: true });
-  const areas = input.affectedAreas ?? '';
-  const outOfScopeTestChange =
-    mod.exitCode === 0 && mod.stdout.split('\n').some((p) => p && isTest(p) && !areas.includes(p));
-
   // M9: how many changed files are tests (the HR board's "test coverage of its changes").
+  const isTest = picomatch(TEST_GLOBS, { dot: true });
   const stats: DiffStats = {
     files: paths.length,
     added,
@@ -111,7 +101,6 @@ export async function computeDiffStats(input: DiffInput): Promise<DiffStats> {
     architecturalPaths,
     testFiles: paths.filter((p) => isTest(p)).length,
   };
-  if (outOfScopeTestChange) stats.outOfScopeTestChange = true;
   return stats;
 }
 

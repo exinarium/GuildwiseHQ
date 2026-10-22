@@ -110,7 +110,6 @@ export const DiffStats = z.object({
   added: z.number().int().nonnegative(),
   removed: z.number().int().nonnegative(),
   architecturalPaths: z.array(z.string()).default([]),
-  outOfScopeTestChange: z.boolean().optional(),
   /** M9: how many of the changed files are test files (null/absent when the runner does not report it). */
   testFiles: z.number().int().nonnegative().optional(),
 });

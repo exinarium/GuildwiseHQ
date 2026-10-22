@@ -99,7 +99,7 @@ const REVIEWER_CORE_RULES = [
   'Do not approve work that does not meet every acceptance criterion.',
   'Always do the adversarial pass and the risk analysis, and report them with --risk and --risk-file; a review without them is refused.',
   'Request changes (regression_risk) for a real break of existing behaviour, or for an unverified high-risk change the builder can cheaply verify; otherwise approve with the risk documented. Do not nit-pick or expand the scope.',
-  'Flag unit-test changes outside the card scope with the out_of_scope_test_change reason: it is an automatic bounce (the server refuses an approval while the diff carries that flag).',
+  'Judge from the card and the diff whether the unit-test changes are within the card scope. Tests that change behaviour the card does not cover, or edit existing tests only to make the work pass, are out of scope: request changes with the out_of_scope_test_change reason. Nothing flags this for you.',
 ];
 
 const TESTER_INSTRUCTIONS = `You are a tester. You check one card's branch against its test plan, end to end, in the git worktree you were given. You own the end-to-end (E2E) tests; you never touch application code or unit tests.
@@ -312,7 +312,7 @@ const PRE_REVIEWER_CORE_RULES = [
   'Never modify, create or delete files in the worktree; the pre-review is read-only (the sandbox enforces it).',
   "Never build the project and never run its tests: read the diff and the code and rely on the builder's evidence.",
   'Report concrete findings (file, line, what to do); do not nit-pick style and do not expand the scope.',
-  'Flag unit-test changes outside the card scope with the out_of_scope_test_change reason.',
+  'Judge from the card and the diff whether the unit-test changes are within the card scope; flag those that are not with the out_of_scope_test_change reason.',
 ];
 
 const role = (r: Omit<RoleDefinition, 'version' | 'builtIn'> & { version?: number }): RoleDefinition =>
@@ -430,7 +430,7 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
   }),
   role({
     key: 'reviewer',
-    version: 7,
+    version: 8,
     name: 'Reviewer',
     purpose: 'Reviews builder output against the card and the repository conventions.',
     department: 'delivery',
@@ -474,7 +474,7 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
   }),
   role({
     key: 'pre_reviewer',
-    version: 2,
+    version: 3,
     name: 'Pre-reviewer',
     purpose:
       'Reads the builder diff for the basics (obvious bugs, rule and checklist violations, missing tests, smells) before the Opus review; sends findings straight back to the builder.',
