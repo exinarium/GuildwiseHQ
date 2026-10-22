@@ -999,7 +999,9 @@ export async function ceoBacklog(ctx: AomContext, p: Parsed, args: string[]): Pr
           ...(priorities.length ? { priority: priorities } : {}),
           ...(has(p, 'flagged') ? { flagged: true } : {}),
         },
-        item ? `the owner asked: send backlog item ${item} to the BA` : 'the owner asked: send backlog items to the BA',
+        item
+          ? `the owner asked: send backlog item ${item} to the BA`
+          : 'the owner asked: send backlog items to the BA',
       );
     }
     default:
@@ -1024,7 +1026,9 @@ async function backlogVerb(ctx: AomContext, p: Parsed): Promise<number> {
     ...(tags.length ? { tags } : {}),
     ...(one(p, 'project') ? { project: one(p, 'project') } : {}),
   })) as { message?: string };
-  ctx.io.out(`${r?.message ?? 'Added to the backlog as a suggestion. The owner decides; continue your work.'}\n`);
+  ctx.io.out(
+    `${r?.message ?? 'Added to the backlog as a suggestion. The owner decides; continue your work.'}\n`,
+  );
   return 0;
 }
 
@@ -1733,10 +1737,15 @@ const VERBS: Record<string, Verb> = {
       if (!title) throw new UsageError('--title "<bug title>" is required');
       const note = textFlag(ctx, p, 'note', true) as string;
       const evidence = textFlag(ctx, p, 'evidence', false) ?? '';
+      const rawScope = one(p, 'scope')?.replace('-', '_');
+      if (rawScope !== undefined && rawScope !== 'product' && rawScope !== 'e2e_spec')
+        throw new UsageError('--scope must be product or e2e-spec');
+      const scope = rawScope as 'product' | 'e2e_spec' | undefined;
       return report(
         ctx,
         outcome('fail', note, {
           title,
+          ...(scope ? { failureScope: scope } : {}),
           summary: note.slice(0, 1000),
           commands: many(p, 'command'),
           outputExcerpt: evidence.slice(0, 4000),
@@ -2356,7 +2365,7 @@ export const USAGE = `usage: aom <verb> [options]
   test suite --name <suite> --status passed|failed|timeout|skipped [--junit <glob>] [--log <file>]   tester: report one suite run (a pass after a failure counts as flaky)
   env info | logs <service> | restart | suites [propose ...]   tester: the running environment (use \`aom-env --timeout <min> -- <cmd>\` to reach it) and the project's suites
   test pass --evidence "<text>" [--command "<cmd>"]...
-  test fail --title "<bug>" --note "<text>" [--evidence "<text>"] [--command "<cmd>"]...
+  test fail --title "<bug>" --note "<text>" [--scope product|e2e-spec] [--evidence "<text>"] [--command "<cmd>"]...
   outcome <id> --note "<text>" [--data-file <json>]
   batch done|ask|skip|fail ...   BA batch intake: end the shift for this ticket (done: cards created; ask: one question for the owner, who answers on the desk; skip; fail)
   answer --item <id> --text "<answer>" [--option <id>] [--keep-blocked-until "<condition>"]   answer a colleague's question (question shifts); --keep-blocked-until keeps the asker's card parked

@@ -69,7 +69,10 @@ export const backlogProjectors: Record<string, Projector> = {
 
   BacklogItemDropped: async (tx, e) => {
     const p = ev<'BacklogItemDropped'>(e).payload;
-    await exec(tx, `UPDATE backlog_items SET status='dropped', updated_at=$2 WHERE id=$1`, [p.itemId, e.createdAt]);
+    await exec(tx, `UPDATE backlog_items SET status='dropped', updated_at=$2 WHERE id=$1`, [
+      p.itemId,
+      e.createdAt,
+    ]);
   },
 
   BacklogItemSent: async (tx, e) => {

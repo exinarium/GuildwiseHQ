@@ -28,7 +28,65 @@ export async function testFailedEvents(
   evidence: TestEvidence,
 ): Promise<AppendInput[]> {
   const title = evidence.title?.trim() || `Bug found testing ${card.ref}`;
+  const scope = projectScope(card.org_id, card.project_id);
+  // The failure is in the E2E spec or its fixtures: builders may not change those, so a bug card for a builder could
+  // never fix it. The card stays in Test and goes back to the tester.
+  if (evidence.failureScope === 'e2e_spec') {
+    return [
+      {
+        streamId: streamId.card(card.id),
+        event: {
+          type: 'TestReworkRequested',
+          payload: { cardId: card.id, testerAgentId: agentId, evidence, summary: title },
+        },
+        actor: agentActor(agentId),
+        scope,
+      },
+      cardMessage(
+        card,
+        { kind: 'system' },
+        'system',
+        `Test failed in the E2E spec itself ("${title}"). No bug card was created: only the tester may change E2E tests, so ${card.ref} stays in Test and goes back to the tester.\n\n${note}`,
+        { failureScope: 'e2e_spec' },
+      ),
+    ];
+  }
   const desc = bugDescription({ note, evidence, parentRef: card.ref });
+  // A bug child of this failure is still open: append the new findings to it instead of creating a duplicate.
+  const open = await one(
+    tx,
+    `SELECT id, ref FROM cards WHERE parent_card_id=$1 AND card_type='bug' AND origin='test_failure'
+        AND status NOT IN ('done','cancelled') AND merged_into_working_at IS NULL
+      ORDER BY created_at DESC LIMIT 1`,
+    [card.id],
+  );
+  if (open) {
+    return [
+      {
+        streamId: streamId.card(card.id),
+        event: {
+          type: 'TestFailed',
+          payload: { cardId: card.id, testerAgentId: agentId, bugCardId: open.id, evidence, summary: title },
+        },
+        actor: agentActor(agentId),
+        scope,
+      },
+      cardMessage(
+        { id: open.id, org_id: card.org_id, project_id: card.project_id },
+        { kind: 'system' },
+        'system',
+        `The tester failed ${card.ref} again while this bug is still open ("${title}"). No second bug card was created.\n\n${desc}`,
+        { duplicateOf: open.id },
+      ),
+      cardMessage(
+        card,
+        { kind: 'system' },
+        'system',
+        `Test failed again: the open bug card ${open.ref} already covers it, so no new bug card was created. The new findings were added to ${open.ref}; ${card.ref} waits in Test until it passed review.`,
+        { bugCardId: open.id },
+      ),
+    ];
+  }
   const child = await spawnCardEvent(tx, {
     from: card,
     title,
@@ -48,7 +106,6 @@ export async function testFailedEvents(
     completionAction: card.completion_action,
     riskTier: null,
   });
-  const scope = projectScope(card.org_id, card.project_id);
   return [
     child.event,
     {
