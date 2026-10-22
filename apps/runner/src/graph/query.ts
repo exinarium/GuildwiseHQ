@@ -69,8 +69,12 @@ export class GraphIndex {
   private readonly nodeTerms = new Map<string, Set<string>>();
   private readonly children = new Map<string, string[]>();
   private readonly nbrs = new Map<string, GEdge[]>();
+  /** Repo key (the id prefix before `:`) to the repository's name; only used when the graph has several repositories. */
+  private readonly repoNames = new Map<string, string>();
 
   constructor(readonly g: LoadedGraph) {
+    for (const n of g.nodes.values())
+      if (n.kind === 'repo') this.repoNames.set(n.id.slice(0, n.id.indexOf(':')), n.name);
     for (const n of g.nodes.values()) {
       if (
         n.kind === 'repo' ||
@@ -101,7 +105,15 @@ export class GraphIndex {
 
   // ------------------------------------------------------------------------------------------------ rendering
 
+  /** A node as one line. With several repositories in the graph the repository's name follows (`[repo web]`). */
   label(n: GNode): string {
+    const base = this.baseLabel(n);
+    if (this.repoNames.size < 2 || n.kind === 'repo') return base;
+    const repo = this.repoNames.get(n.id.slice(0, Math.max(0, n.id.indexOf(':'))));
+    return repo ? `${base} [repo ${sanitizeLabel(repo, 60)}]` : base;
+  }
+
+  private baseLabel(n: GNode): string {
     const loc = n.path ? `${n.path}${n.line ? `:${n.line}` : ''}` : '';
     switch (n.kind) {
       case 'symbol':

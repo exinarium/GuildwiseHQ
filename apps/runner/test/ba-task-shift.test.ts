@@ -435,4 +435,66 @@ describe('spec_card shifts (docs/design/ceo-front-door.md 2.4)', () => {
     await run(h, msg);
     expect(reports(h, msg.shiftId)[0]?.report).toMatchObject({ outcomeId: 'spec_card_fail' });
   }, 60_000);
+
+  describe('repository scoping', () => {
+    const scopingShift = (hh: Harness, title: string, extra: Record<string, unknown> = {}) => {
+      const msg = specShift(hh, title) as any;
+      const repoName = 'toy';
+      msg.baTask.specCard = {
+        ...msg.baTask.specCard,
+        chooseRepo: true,
+        by: 'architect',
+        repos: [
+          { repoId: uuidv7(), name: repoName, graphKey: 'abc123abc123', indexed: true },
+          { repoId: uuidv7(), name: 'web', graphKey: 'def456def456', indexed: true },
+        ],
+      };
+      Object.assign(msg, extra);
+      return msg as ReturnType<typeof specShift>;
+    };
+
+    it('the mock names the first repository, or the one the title asks for', async () => {
+      h = await startHarness();
+      const msg = scopingShift(h, 'Blank page [repo:web]');
+      await run(h, msg);
+      const rep = reports(h, msg.shiftId)[0]?.report as any;
+      expect(rep).toMatchObject({ outcomeId: 'spec_card_done' });
+      expect(rep.data.repo).toBe('web');
+      expect(Object.keys(rep.data.fields).sort()).toEqual(['acceptanceCriteria', 'requirements']);
+    }, 60_000);
+
+    it('the mock splits into the first two repositories, the second depending on the first', async () => {
+      h = await startHarness();
+      const msg = scopingShift(h, 'Cross-repo [split]');
+      await run(h, msg);
+      const rep = reports(h, msg.shiftId)[0]?.report as any;
+      expect(rep.data.split.map((c: any) => c.repo)).toEqual(['toy', 'web']);
+      expect(rep.data.split[1].dependsOn).toEqual([1]);
+      expect(rep.data.split[0].fields.requirements).toBeTruthy();
+    }, 60_000);
+
+    it('a ba_task shift gets the repositories the server sent as read folders', async () => {
+      h = await startHarness();
+      const msg = scopingShift(h, 'Blank page', {
+        readRepos: [
+          { repoId: uuidv7(), name: 'toy', remoteUrlNormalized: h.repo.remoteNormalized, kind: 'project' },
+        ],
+      });
+      const ended = await run(h, msg);
+      expect(ended.outcome).toBe('reported');
+      const md = readFileSync(join(h.dataDir, 'agents', msg.agent.agentId, 'claude', 'CLAUDE.md'), 'utf8');
+      expect(md).toContain('repository of this project "toy", read-only');
+      expect(md).toContain('the architect');
+    }, 60_000);
+
+    it('without readRepos (the BA) no repository is opened for reading', async () => {
+      h = await startHarness();
+      const msg = scopingShift(h, 'Blank page');
+      (msg as any).baTask.specCard.by = 'ba';
+      await run(h, msg);
+      const md = readFileSync(join(h.dataDir, 'agents', msg.agent.agentId, 'claude', 'CLAUDE.md'), 'utf8');
+      expect(md).not.toContain('repository of this project');
+      expect(md).toContain('aom graph query');
+    }, 60_000);
+  });
 });

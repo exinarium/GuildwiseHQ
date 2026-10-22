@@ -841,7 +841,14 @@ interface BaTaskBrief extends Brief {
       | 'batch_intake'
       | 'mail_reply_draft'
       | 'spec_card';
-    specCard?: { ref: string; title: string; missing: string[]; listFields?: string[] };
+    specCard?: {
+      ref: string;
+      title: string;
+      missing: string[];
+      listFields?: string[];
+      chooseRepo?: boolean;
+      repos?: Array<{ name: string }>;
+    };
     mailDraft?: {
       senderName: string;
       orgName: string;
@@ -1059,31 +1066,40 @@ async function mailDraftMain(m: NonNullable<BaTaskBrief['baTask']['mailDraft']>)
   );
 }
 
-/** Spec card, scripted: writes a placeholder for every missing field; `[spec_fail]` in the title reports that it cannot. */
+/**
+ * Spec card, scripted: writes a placeholder for every missing field; `[spec_fail]` in the title reports that it cannot.
+ * Repository scoping (`chooseRepo`): `[split]` splits into the first two repositories (the second depends on the first),
+ * `[repo:<name>]` names that repository, otherwise the first one.
+ */
 async function specCardMain(m: NonNullable<BaTaskBrief['baTask']['specCard']>): Promise<number> {
   emit({ kind: 'progress', text: `mock BA specifies ${m.ref}` });
   await sleep(stepMs);
   emit({ kind: 'usage', usage: { inputTokens: 300, outputTokens: 80 } });
+  const fieldsFor = (label: string) =>
+    Object.fromEntries(
+      m.missing.map((k) => [
+        k,
+        m.listFields?.includes(k) ? [`mock: ${k} for ${label}`] : `mock: ${k} for ${label} (${m.title})`,
+      ]),
+    );
+  const repos = (m.repos ?? []).map((r) => r.name);
+  let data: Record<string, unknown> = { fields: fieldsFor(m.ref) };
+  if (m.chooseRepo) {
+    const named = /\[repo:([^\]]+)\]/.exec(m.title)?.[1];
+    if (m.title.includes('[split]') && repos.length >= 2)
+      data = {
+        split: repos.slice(0, 2).map((repo, i) => ({
+          title: `${m.title} (${repo})`,
+          repo,
+          fields: fieldsFor(`${m.ref} ${repo}`),
+          ...(i > 0 ? { dependsOn: [1] } : {}),
+        })),
+      };
+    else data = { repo: named ?? repos[0], ...(m.missing.length ? { fields: fieldsFor(m.ref) } : {}) };
+  }
   const r = m.title.includes('[spec_fail]')
     ? aom(['report', 'spec-card-fail', '--note', 'mock: too vague to specify'])
-    : aom([
-        'report',
-        'spec-card',
-        '--file',
-        tmpText(
-          'fields.json',
-          JSON.stringify({
-            fields: Object.fromEntries(
-              m.missing.map((k) => [
-                k,
-                m.listFields?.includes(k)
-                  ? [`mock: ${k} for ${m.ref}`]
-                  : `mock: ${k} for ${m.ref} (${m.title})`,
-              ]),
-            ),
-          }),
-        ),
-      ]);
+    : aom(['report', 'spec-card', '--file', tmpText('fields.json', JSON.stringify(data))]);
   emit({
     kind: 'final',
     text: r.code === 0 ? 'mock spec card reported' : `mock spec card failed: ${(r.err || r.out).trim()}`,
