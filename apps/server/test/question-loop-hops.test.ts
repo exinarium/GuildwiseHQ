@@ -93,6 +93,7 @@ describe('a question passed on between agents', () => {
       r.ended(ann.shiftId, 'reported');
     }
 
+    await r.barrier(); // the last `shift.ended` must be recorded before the shifts are counted
     const hops = await q(
       `SELECT count(*)::int AS n FROM shifts WHERE kind='question' AND outcome='reported'`,
     );

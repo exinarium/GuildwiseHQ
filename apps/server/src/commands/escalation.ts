@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { type ChainLevel, DESK_SUBKIND, type DeskActor, streamId } from '@aom/shared';
 import { ceoDecisionItemEvents } from '../ceo/decisions.ts';
-import { ceoActive, ceoReachable } from '../ceo/state.ts';
+import { ceoActive } from '../ceo/state.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Queryable, type Row, rows } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
@@ -12,7 +12,7 @@ import type { ReportResult, WsRef } from './shifts.ts';
 /**
  * The escalation chain (docs/ARCHITECTURE.md section 15; docs/SPEC.md "Agent communication and escalation"):
  * a question goes to a senior agent of the same role or the card's previous holder (`peer`), then to the BA
- * (`ba`), then to the manager's desk (`desk`). Every step but the last is a `question` shift for the agent it is
+ * (`ba`, only when the organization has no active CEO), then the CEO, then to the manager's desk (`desk`). Every step but the last is a `question` shift for the agent it is
  * routed to; that agent answers (`aom answer`) or passes it on (`aom escalate`). Only agents that are online can
  * be asked: with nobody to ask, the question goes straight on.
  */
@@ -107,10 +107,17 @@ async function cardHolderOf(
  * to the BA, code to the card's builder. An architect or builder who is not reachable is replaced by another online
  * agent of that role (a senior first); nobody online means the normal chain.
  */
-async function topicRoute(db: Queryable, i: RouteInput, agents: Row[]): Promise<Route | undefined> {
+async function topicRoute(
+  db: Queryable,
+  i: RouteInput,
+  agents: Row[],
+  /** An active CEO decides in the BA's place: a `requirements` topic is not routed to the BA then. */
+  ceoDecides = false,
+): Promise<Route | undefined> {
   const topic = i.topic;
   if (!topic) return undefined;
   if (topic === 'requirements') {
+    if (ceoDecides) return undefined;
     const ba = agents.find((a) => a.role_key === 'ba');
     return ba ? asRoute(ba, 'ba') : undefined;
   }
@@ -146,20 +153,23 @@ export async function architectRoute(ctx: Ctx, db: Queryable, card: Row): Promis
   return (await topicRoute(db, input, agents)) ?? { routedTo: 'manager', level: 'desk' };
 }
 
-/** The organization's CEO as a step before the desk, when it is active and a shift of it can run now. */
-async function ceoRoute(ctx: Ctx, db: Queryable, i: RouteInput): Promise<Route | undefined> {
+/**
+ * The organization's CEO as the step before the desk, whenever it is active (enabled, not paused, its agent active). A CEO
+ * that is slow or cannot run a shift right now still gets the question: it waits for the CEO and reaches the owner's desk
+ * only after `QUESTION_STALL_MS` (the stalled-question sweep), never the BA's hands (owner decision, 22 Oct).
+ */
+async function ceoRoute(_ctx: Ctx, db: Queryable, i: RouteInput): Promise<Route | undefined> {
   if (i.askerRole === 'ceo') return undefined;
   const ceo = await ceoActive(db, i.orgId);
   if (!ceo?.agentId || ceo.agentId === i.askerAgentId || i.tried.includes(ceo.agentId)) return undefined;
-  if (!(await ceoReachable(db, i.orgId, ctx.clock.now())).ok) return undefined;
   const a = await one(db, 'SELECT * FROM agents WHERE id=$1', [ceo.agentId]);
   return a ? asRoute(a, 'ceo') : undefined;
 }
 
 /**
  * Who gets the question next (docs/ARCHITECTURE.md section 15). Pure of side effects. A named topic is asked first
- * (the card's architect, BA or builder); then the card's previous holder and the asker's seniors; then the BA, then the
- * CEO when the organization has an active one, then the manager's desk. A stop-loss arbitration (the architect decides,
+ * (the card's architect, BA or builder); then the card's previous holder and the asker's seniors; then the CEO when the
+ * organization has an active one (the BA is skipped then), else the BA; then the manager's desk. A stop-loss arbitration (the architect decides,
  * else the owner) goes from the architect straight to the desk. Environment, sandbox and tooling questions are not
  * routed here: they become a DevOps request (`commands/questions.ts`).
  */
@@ -168,9 +178,10 @@ export async function nextRoute(ctx: Ctx, db: Queryable, i: RouteInput): Promise
   if (i.from === 'desk' || i.from === 'ceo' || i.askerRole === 'ceo') return desk;
   if (i.subkind === DESK_SUBKIND.stopLoss && i.from !== 'raise') return desk;
   const agents = await onlineAgents(ctx, db, i);
-  if (i.from === 'ba' || i.askerRole === 'ba') return (await ceoRoute(ctx, db, i)) ?? desk;
+  const ceo = await ceoRoute(ctx, db, i);
+  if (i.from === 'ba' || i.askerRole === 'ba') return ceo ?? desk;
   if (i.from === 'raise') {
-    const topic = await topicRoute(db, i, agents);
+    const topic = await topicRoute(db, i, agents, !!ceo);
     if (topic) return topic;
   }
   if (i.from === 'raise' && i.via !== 'ba') {
@@ -188,8 +199,10 @@ export async function nextRoute(ctx: Ctx, db: Queryable, i: RouteInput): Promise
     const senior = agents.find((a) => a.seniority === 'senior' && a.role_key === i.askerRole);
     if (senior) return asRoute(senior, 'peer');
   }
+  // With an active CEO the BA is skipped: the CEO decides what the BA used to answer from the ledger.
+  if (ceo) return ceo;
   const ba = agents.find((a) => a.role_key === 'ba');
-  return ba ? asRoute(ba, 'ba') : ((await ceoRoute(ctx, db, i)) ?? desk);
+  return ba ? asRoute(ba, 'ba') : desk;
 }
 
 /** Ids of the agents already in the item's trail (they are not asked again). */
@@ -328,6 +341,8 @@ export async function escalateEvents(
   item: Row,
   by: Row | null,
   note: string,
+  /** Skip the chain: the item goes straight to the manager's desk (a paused project never dispatches a question). */
+  opts: { toDesk?: boolean } = {},
 ): Promise<{ events: AppendInput[]; route: Route; mergedInto?: { id: string; title: string } }> {
   const card = item.card_id ? await one(tx, 'SELECT * FROM cards WHERE id=$1', [item.card_id]) : undefined;
   const at: ChainLevel =
@@ -338,17 +353,19 @@ export async function escalateEvents(
         : item.routed_agent_id
           ? await currentLevel(tx, item.routed_agent_id)
           : 'desk';
-  const route = await nextRoute(ctx, tx, {
-    orgId: item.org_id,
-    projectId: item.project_id,
-    cardId: item.card_id,
-    askerAgentId: item.asked_by_agent_id,
-    askerRole: item.asked_by_role,
-    from: at,
-    tried: triedAgents(item),
-    topic: item.topic ?? null,
-    subkind: item.subkind ?? null,
-  });
+  const route: Route = opts.toDesk
+    ? { routedTo: 'manager', level: 'desk' }
+    : await nextRoute(ctx, tx, {
+        orgId: item.org_id,
+        projectId: item.project_id,
+        cardId: item.card_id,
+        askerAgentId: item.asked_by_agent_id,
+        askerRole: item.asked_by_role,
+        from: at,
+        tried: triedAgents(item),
+        topic: item.topic ?? null,
+        subkind: item.subkind ?? null,
+      });
   // A question reaching the BA or the desk that matches an open one is attached to it, not asked a second time.
   if (route.level !== 'peer') {
     const dup = await findOpenDuplicate(tx, {

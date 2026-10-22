@@ -272,7 +272,7 @@ describe('cards: nothing is claimed while paused, the claim is refused cleanly, 
 });
 
 describe('question, DevOps and BA passes', () => {
-  it('a question routed to an agent waits while paused (no escalation) and starts at resume', async () => {
+  it("a blocking question routed to an agent of a paused project goes to the owner's desk at once, not dispatched", async () => {
     await freshState();
     await q(`UPDATE shifts SET status='ended', ended_at=now(), outcome='reported' WHERE status <> 'ended'`);
     await online();
@@ -307,13 +307,24 @@ describe('question, DevOps and BA passes', () => {
     await dispatcher().run();
     await r.barrier();
     expect(startsFrom(from, 'question')).toHaveLength(0);
+    // A paused project never dispatches the question: a blocking one is not left waiting for nobody. It goes to the owner's
+    // desk at once, with a note (owner decision, 22 Oct), and is not started.
     expect((await q('SELECT status, routed_to FROM desk_items WHERE id=$1', [itemId]))[0]).toMatchObject({
       status: 'open',
-      routed_to: 'agent',
+      routed_to: 'manager',
     });
+    expect(
+      (
+        await q(
+          `SELECT payload->>'note' AS note FROM events WHERE type='QuestionEscalated' AND stream_id=$1`,
+          [streamId.desk(itemId)],
+        )
+      )[0]?.note,
+    ).toMatch(/project is paused/);
     await ok(resume());
     await dispatcher().run();
-    await r.waitFor('shift.start', (f) => f.kind === 'question', 5000, from);
+    await r.barrier();
+    expect(startsFrom(from, 'question')).toHaveLength(0);
   });
 
   it('a BA task of the project waits (and is not written from the template) and starts at resume', async () => {
