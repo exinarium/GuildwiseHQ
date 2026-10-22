@@ -315,6 +315,8 @@ export const CardDetailResponseSchema = z.object({
    * one, the closing ones and the steps for a person (`movableStages`). Empty when the viewer cannot move the card.
    */
   moveTargets: z.array(z.object({ id: z.string(), label: z.string(), kind: z.string() })).optional(),
+  /** Only on the response of "Send to BA": what became of the draft (queued for the BA, or why not). */
+  baNotice: z.string().optional(),
   /** Only on the response of a move: it was accepted, but something will keep the card from running (unlanded dependencies). */
   moveNotice: z.string().optional(),
   diffStats: DiffStats.nullable().optional(),
@@ -345,6 +347,20 @@ export const CardDetailResponseSchema = z.object({
     })
     .nullable()
     .optional(),
+  /** Repository scoping: the cards this one was split into (it is cancelled with cause `split`). Absent: not split. */
+  splitInto: z
+    .array(
+      z.object({
+        id: z.uuid(),
+        ref: z.string(),
+        title: z.string(),
+        status: z.string(),
+        repoName: z.string().nullable(),
+      }),
+    )
+    .optional(),
+  /** Repository scoping: the card this one was split from. */
+  splitFrom: z.object({ id: z.uuid(), ref: z.string() }).optional(),
 });
 export type CardDetailResponse = z.infer<typeof CardDetailResponseSchema>;
 
@@ -367,6 +383,11 @@ export const CreateCardRequestSchema = z.object({
   dependencies: z.array(z.uuid()).optional(),
   /** Specify immediately; if required fields are missing the card stays draft and the response lists them. */
   specify: z.boolean().optional(),
+  /**
+   * "Not sure which repository": the card has none, and the BA finds the repository (or splits the card per repository)
+   * through the project's code graph. Only for a project with several repositories; needs `specify`.
+   */
+  findRepo: z.boolean().optional(),
   /** "Research this": the interest the card belongs to (its research or feed project must be `projectId`). */
   interestId: z.uuid().optional(),
   /** One of the project's enabled workflows (project settings); absent: the default for the card type. */

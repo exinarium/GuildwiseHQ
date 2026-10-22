@@ -18,6 +18,7 @@ import {
   repoFileUrl,
   type ShiftDto,
   scrubRemoteUrl,
+  streamId,
   type WorkflowDefinition,
 } from '@aom/shared';
 import { orgRoleOf } from '../auth/org-context.ts';
@@ -373,6 +374,7 @@ export async function getCardDetail(ctx: Ctx, userId: string, idOrRef: string): 
     })),
     publication: await publicationOfCard(ctx.pool, card.id),
     phase: await cardPhaseRef(ctx.pool, card),
+    ...(await splitLinks(ctx, card)),
     ...((await orgRoleOf(ctx.pool, userId, card.org_id))
       ? {
           spend: (
@@ -770,4 +772,44 @@ export async function searchCards(
       projectName: c.project_name,
     })),
   };
+}
+
+/**
+ * Repository scoping: the cards a split card was replaced by (read from its `CardCancelled{cause:'split'}`, so a card
+ * that merely has children is not mistaken for one), and the split parent of a child.
+ */
+async function splitLinks(ctx: Ctx, card: Row): Promise<Pick<CardDetailResponse, 'splitInto' | 'splitFrom'>> {
+  const out: Pick<CardDetailResponse, 'splitInto' | 'splitFrom'> = {};
+  const idsOf = async (cardId: string): Promise<string[]> => {
+    const ev = await one<{ ids: string[] | null }>(
+      ctx.pool,
+      `SELECT payload->'childCardIds' AS ids FROM events
+        WHERE stream_id=$1 AND type='CardCancelled' AND payload->>'cause'='split' ORDER BY seq DESC LIMIT 1`,
+      [streamId.card(cardId)],
+    );
+    return ev?.ids ?? [];
+  };
+  if (card.status === 'cancelled') {
+    const ids = await idsOf(card.id);
+    if (ids.length) {
+      const kids = await rows(
+        ctx.pool,
+        `SELECT c.id, c.ref, c.title, c.status, r.name AS repo_name FROM cards c
+           LEFT JOIN project_repos r ON r.id = c.repo_id WHERE c.id = ANY($1::uuid[]) ORDER BY c.number`,
+        [ids],
+      );
+      out.splitInto = kids.map((k) => ({
+        id: k.id,
+        ref: k.ref,
+        title: k.title,
+        status: k.status,
+        repoName: k.repo_name ?? null,
+      }));
+    }
+  }
+  if (card.parent_card_id && (await idsOf(card.parent_card_id)).includes(card.id)) {
+    const parent = await one(ctx.pool, 'SELECT id, ref FROM cards WHERE id=$1', [card.parent_card_id]);
+    if (parent) out.splitFrom = { id: parent.id, ref: parent.ref };
+  }
+  return out;
 }

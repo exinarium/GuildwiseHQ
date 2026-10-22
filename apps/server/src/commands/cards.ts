@@ -38,7 +38,7 @@ import { dependencyStates } from '../dispatcher/dependencies.ts';
 import { badRequest, conflict, forbidden, notFound, unprocessable } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
-import { singleRepoDefault } from './card-repo.ts';
+import { needsRepoScoping, singleRepoDefault } from './card-repo.ts';
 import { cardMessage, projectScope, userActor } from './common.ts';
 import { integrationTestsDefault } from './integration-tests.ts';
 import { openLoopAlerts } from './loop-breaker.ts';
@@ -224,8 +224,20 @@ export async function createCard(
   ctx: Ctx,
   user: AuthSession['user'],
   req: CreateCardRequest,
-): Promise<{ cardId: string; missing?: string[] }> {
-  return withAppendTx(ctx.pool, (tx) => createCardIn(ctx, tx, user, req));
+): Promise<{ cardId: string; missing?: string[]; scoping?: { queued: boolean; text: string } }> {
+  return withAppendTx(ctx.pool, async (tx) => {
+    const created = await createCardIn(ctx, tx, user, req);
+    // "Not sure which repository": the card has none and the project has several; the BA finds out (a `spec_card` task).
+    if (req.findRepo && req.specify && created.missing?.includes('repoId')) {
+      const card = (await one(tx, 'SELECT * FROM cards WHERE id=$1', [created.cardId])) as Row;
+      if (await needsRepoScoping(tx, card)) {
+        const { completeDraft } = await import('./ba-intake.ts');
+        const scoping = await completeDraft(ctx, tx, card.org_id, user, created.cardId, created.missing);
+        return { ...created, scoping };
+      }
+    }
+    return created;
+  });
 }
 
 export async function createCardIn(
@@ -500,6 +512,12 @@ export async function patchCardIn(
     Object.assign(changes, flags);
   }
   if (patch.repoId !== undefined && patch.repoId !== card.repo_id) {
+    // Once the card has a worktree or a branch, its repository is where the work is: a change would orphan them.
+    if (card.worktree_path || card.branch_name)
+      throw conflict(
+        'repo_locked',
+        `${card.ref} already has a worktree or a branch in its repository: the repository can no longer be changed`,
+      );
     if (patch.repoId) await assertRepoInProject(tx, card.project_id, patch.repoId);
     changes.repoId = patch.repoId;
   }
@@ -930,7 +948,16 @@ export async function cancelCardIn(
   user: { id: string; displayName: string },
   card: Row,
   reason: string,
-  opts: { cause?: 'project_archived' | 'project_converted'; alsoCancelling?: ReadonlySet<string> } = {},
+  opts: {
+    cause?: 'project_archived' | 'project_converted' | 'split';
+    alsoCancelling?: ReadonlySet<string>;
+    /** `cause: 'split'`: the cards that replace this one. */
+    childCardIds?: string[];
+    /** Who cancels, when it is not the user (the BA that split the card). */
+    actor?: AppendInput['actor'];
+    /** The thread note, when "Cancelled by <user>: <reason>" does not fit. */
+    note?: string;
+  } = {},
 ): Promise<string | undefined> {
   // A cancelled bug child will never pass review: the parent waiting on it goes back to the Test queue
   // (unless another bug child of the same parent is still open).
@@ -974,12 +1001,22 @@ export async function cancelCardIn(
         streamId: streamId.card(card.id),
         event: {
           type: 'CardCancelled',
-          payload: { cardId: card.id, reason, ...(opts.cause ? { cause: opts.cause } : {}) },
+          payload: {
+            cardId: card.id,
+            reason,
+            ...(opts.cause ? { cause: opts.cause } : {}),
+            ...(opts.childCardIds?.length ? { childCardIds: opts.childCardIds } : {}),
+          },
         },
-        actor: userActor(user.id),
+        actor: opts.actor ?? userActor(user.id),
         scope: projectScope(card.org_id, card.project_id),
       },
-      cardMessage(card, { kind: 'system' }, 'system', `Cancelled by ${user.displayName}: ${reason}`),
+      cardMessage(
+        card,
+        { kind: 'system' },
+        'system',
+        opts.note ?? `Cancelled by ${user.displayName}: ${reason}`,
+      ),
       ...resume,
     ],
     { tx },

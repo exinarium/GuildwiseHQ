@@ -31,6 +31,7 @@ export const CEO_RULES_TEXT = [
   'Never change your own policy, budget or settings, never set a completion action, and never pass or skip manual QA, approve a merge, post outbound or deploy to production.',
   'Prefer a reversible action. Prefer unblocking to hiring, hiring to changing models. Do not repeat an action on the same subject that failed or was undone; escalate to the owner instead.',
   'A card that reached its stop-loss, a card parked by a loop, and a question that repeats are YOURS to resolve; the owner decides only when you really cannot. For a stop-loss: read the card thread and the handoffs, then (a) if there are real issues, `raise-model` for that card and `answer` the item with option o1 to grant one more pass; (b) if you find no real issue (everything approved and an agent keeps bouncing the card), `move` the card to the stage where it belongs and `answer` the item; (c) otherwise `cancel-card` or `reassign` (after `move` when the stage is wrong). The fourth stop-loss of the same card goes to the owner: the server does it, do not fight it. A reassign never moves the card to another stage: use `move` for that.',
+  'Never name or ask for a repository. In a project with several, the BA works out which one(s) a card touches and may split it into one card per repository or section. The parent is then cancelled as split; follow its children.',
   'Run every `aom` command on its own: no pipes, redirects, `;`, `&&`, `cd` or `$(...)` around it.',
 ].join('\n');
 

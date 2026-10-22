@@ -27,6 +27,7 @@ import { type Tx, withAppendTx } from '../db/tx.ts';
 import { conflict, forbidden, HttpError, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { dedupMatches } from '../queries/ledger.ts';
+import { resolveRepo } from './card-repo.ts';
 import { cardView, createCardIn, patchCardIn, specifyCardIn } from './cards.ts';
 import { agentActor, cardMessage, orgScope, SYSTEM_ACTOR, userActor } from './common.ts';
 import { batchIntakeOf } from './intake-batch.ts';
@@ -238,21 +239,6 @@ const threadNote = (intake: Row, body: string): AppendInput => ({
   actor: SYSTEM_ACTOR,
   scope: orgScope(intake.org_id),
 });
-
-/** Repo of a project by id or name. */
-async function resolveRepo(tx: Queryable, projectId: string, repo: string): Promise<string> {
-  const list = await rows<{ id: string; name: string }>(
-    tx,
-    'SELECT id, name FROM project_repos WHERE project_id=$1 AND removed_at IS NULL',
-    [projectId],
-  );
-  const hit = list.find((r) => r.id === repo || r.name.toLowerCase() === repo.toLowerCase());
-  if (!hit)
-    throw new Error(
-      `unknown repo '${repo}' (this project has: ${list.map((r) => r.name).join(', ') || 'none'})`,
-    );
-  return hit.id;
-}
 
 async function resolveDependencies(tx: Queryable, projectId: string, refs: string[]): Promise<string[]> {
   if (refs.length === 0) return [];

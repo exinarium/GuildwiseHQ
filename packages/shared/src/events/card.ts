@@ -442,13 +442,17 @@ export const cardEvents = [
       workflowVersionId: Id.optional(),
     }),
   ),
-  /** `cause: 'project_archived'` marks a card closed because its project was archived (not cancelled by hand). */
+  /**
+   * `cause: 'project_archived'` marks a card closed because its project was archived (not cancelled by hand); `'split'` a
+   * draft that was replaced by the cards in `childCardIds` (repository scoping: one card per repository or section).
+   */
   defineEvent(
     'CardCancelled',
     z.object({
       cardId: Id,
       reason: z.string(),
-      cause: z.enum(['project_archived', 'project_converted']).optional(),
+      cause: z.enum(['project_archived', 'project_converted', 'split']).optional(),
+      childCardIds: z.array(Id).optional(),
     }),
   ),
   /**

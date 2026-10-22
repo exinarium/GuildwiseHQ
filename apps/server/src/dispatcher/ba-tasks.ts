@@ -5,11 +5,16 @@ import {
   BA_TASK_STALL_MS,
   BATCH_MAX_IN_FLIGHT,
   MAIN_ACCOUNT,
+  MIN_RUNNER_FOR_REPO_SCOPING,
+  runnerAtLeast,
   streamId,
 } from '@aom/shared';
 import { endBaTaskShift, runBaTaskFallback } from '../commands/ba-tasks.ts';
+import { needsRepoScoping } from '../commands/card-repo.ts';
 import { withCommitAs } from '../commands/commit-as.ts';
 import { projectScope, SYSTEM_ACTOR } from '../commands/common.ts';
+import { scopingPlan } from '../commands/spec-card.ts';
+import { vaultForProject } from '../commands/vaults.ts';
 import type { Ctx } from '../context.ts';
 import { one, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
@@ -100,18 +105,37 @@ export async function baTaskPass(
         continue;
       }
     }
+    // Repository scoping (a `spec_card` task for a card with no repository in a project with several): the BA, or an
+    // architect when the graph or the vault cannot serve the BA (or none is hired). Derived from the card, as at the brief.
+    let scoping: Awaited<ReturnType<typeof scopingPlan>> = null;
+    if (t.kind === 'spec_card' && t.card_id) {
+      const sc = await one(ctx.pool, 'SELECT * FROM cards WHERE id=$1', [t.card_id]);
+      if (sc && (await needsRepoScoping(ctx.pool, sc))) scoping = await scopingPlan(ctx, ctx.pool, sc);
+    }
+    const scopingRole = scoping?.role ?? null;
     const bas = await rows(
       ctx.pool,
-      `SELECT a.*, ws.id AS ws_id, ws.runtimes, ws.connected, ws.last_seen_at
+      `SELECT a.*, ws.id AS ws_id, ws.user_id AS ws_user_id, ws.runner_version, ws.runtimes, ws.connected, ws.last_seen_at
          FROM agents a JOIN workstations ws ON ws.id = a.workstation_id AND ws.status = 'active'
                        JOIN users wu ON wu.id = ws.user_id AND wu.status = 'active'
-        WHERE a.org_id = $1 AND a.role_key = 'ba' AND a.status = 'active' AND a.paused_at IS NULL AND NOT a.is_devops
+        WHERE a.org_id = $1 AND a.role_key = $5 AND a.status = 'active' AND a.paused_at IS NULL AND NOT a.is_devops
           AND ${wsServesOrgSql('ws', 'a.org_id')}
           AND ($4::boolean OR ((a.allowed_project_ids IS NULL OR $2::uuid = ANY (a.allowed_project_ids))
                AND EXISTS (SELECT 1 FROM project_members pm WHERE pm.project_id = $2::uuid AND pm.user_id = ws.user_id
                             AND pm.status = 'active')))
-        ORDER BY (a.id = $3::uuid) DESC, a.last_shift_ended_at NULLS FIRST, a.hired_at, a.id`,
-      [t.org_id, t.project_id, t.preferred_agent_id, t.org_level === true],
+        ORDER BY (a.id = $3::uuid) DESC,
+                 (SELECT count(*) FROM workstation_repos wr JOIN project_repos pr ON pr.id = wr.project_repo_id
+                   WHERE wr.workstation_id = ws.id AND pr.project_id = $2::uuid AND pr.removed_at IS NULL
+                     AND $6::boolean) DESC,
+                 a.last_shift_ended_at NULLS FIRST, a.hired_at, a.id`,
+      [
+        t.org_id,
+        t.project_id,
+        t.preferred_agent_id,
+        t.org_level === true,
+        scopingRole ?? 'ba',
+        scopingRole !== null,
+      ],
     );
     const stalled =
       t.kind !== 'batch_intake' && now.getTime() - new Date(t.updated_at).getTime() > BA_TASK_STALL_MS;
@@ -135,6 +159,13 @@ export async function baTaskPass(
       const reachable =
         a.connected && a.last_seen_at && new Date(a.last_seen_at) > onlineSince && account !== null;
       if (!reachable || busy.has(a.id) || skipAgent(a.id) || workstationFull(a.ws_id)) continue;
+      if (scopingRole !== null) {
+        // The prompt of a scoping task is rendered on the runner: an older runner would not know the mode.
+        if (!runnerAtLeast(a.runner_version, MIN_RUNNER_FOR_REPO_SCOPING)) continue;
+        // The BA works from the project vault: a workstation whose user cannot reach it is no use.
+        if (scoping?.vaultRequired && !(await vaultForProject(ctx.pool, t.project_id, a.ws_user_id)))
+          continue;
+      }
       const conn = ctx.services.runners.get(a.ws_id);
       if (!conn || !conn.reconciled) continue;
       const shiftId = randomUUID();

@@ -1,9 +1,27 @@
 import { CEO_DECISION_REVIEW_REASON, ROUTING_EXEMPT_SUBKINDS } from '@aom/shared';
 import type { Ctx } from '../context.ts';
-import { exec, one, type Queryable } from '../db/sql.ts';
+import { exec, one, type Queryable, rows } from '../db/sql.ts';
 import { isProjectPaused } from '../dispatcher/project-hold.ts';
 import type { StoredEvent } from '../eventstore/types.ts';
 import { ceoActive } from './state.ts';
+
+/** The refs of the children a split card was replaced by, and the card's own label. */
+async function splitWakeDetail(
+  ctx: Ctx,
+  cardId: string,
+  childIds: string[],
+): Promise<{ refs: string[]; label: string }> {
+  const parent = await one(ctx.pool, 'SELECT ref, title FROM cards WHERE id=$1', [cardId]);
+  const kids = await rows(
+    ctx.pool,
+    'SELECT ref, title FROM cards WHERE id = ANY($1::uuid[]) ORDER BY number',
+    [childIds],
+  );
+  return {
+    refs: kids.map((k) => `${k.ref}: ${k.title}`),
+    label: `${parent?.ref ?? 'A card'} was split into ${kids.map((k) => k.ref).join(', ')}`,
+  };
+}
 
 export type WakeUrgency = 'urgent' | 'normal' | 'scheduled';
 
@@ -324,6 +342,11 @@ export function registerCeoWakes(ctx: Ctx): () => void {
         // Follow-up: something a CEO task watches changed.
         const id: string | undefined = p.cardId ?? p.requestId ?? p.deskItemId;
         if (!id) return;
+        // A card split by repository scoping is replaced by its children: the CEO is told which, to follow them.
+        const split =
+          type === 'CardCancelled' && p.cause === 'split' && Array.isArray(p.childCardIds)
+            ? await splitWakeDetail(ctx, id, p.childCardIds as string[])
+            : undefined;
         const t = await one(
           ctx.pool,
           `SELECT id, title FROM ceo_tasks WHERE org_id=$1 AND status IN ('open','in_progress','waiting_work','waiting_owner')
@@ -340,8 +363,24 @@ export function registerCeoWakes(ctx: Ctx): () => void {
               subjectKind: 'task',
               subjectId: t.id,
               subjectLabel: t.title,
-              detail: { changed: type },
+              detail: { changed: type, ...(split ? { cause: 'split', children: split.refs } : {}) },
               eventSeq: e.seq,
+            },
+            now,
+          );
+        else if (split)
+          await enqueueWake(
+            ctx.pool,
+            orgId,
+            {
+              reason: 'card_split',
+              urgency: 'normal',
+              subjectKind: 'card',
+              subjectId: id,
+              subjectLabel: split.label,
+              detail: { cause: 'split', children: split.refs },
+              eventSeq: e.seq,
+              dedupe: { key: `card:${id}:split`, state: 'cancelled' },
             },
             now,
           );

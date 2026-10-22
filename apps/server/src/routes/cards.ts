@@ -14,6 +14,7 @@ import {
 import type { FastifyInstance } from 'fastify';
 import { requireUser } from '../auth/guards.ts';
 import { loadVisibleCard } from '../authz/scope.ts';
+import { sendCardToBa } from '../commands/ba-intake.ts';
 import {
   cancelCard,
   commentOnCard,
@@ -51,7 +52,7 @@ export function cardRoutes(ctx: Ctx) {
 
     app.post('/api/cards', { schema: { body: CreateCardRequestSchema } }, async (req, reply) => {
       const s = await requireUser(ctx, req);
-      const { cardId, missing } = await createCard(ctx, s.user, req.body);
+      const { cardId, missing, scoping } = await createCard(ctx, s.user, req.body);
       const { card } = await loadVisibleCard(ctx.pool, s.user.id, cardId);
       reply.code(201);
       return {
@@ -60,7 +61,9 @@ export function cardRoutes(ctx: Ctx) {
           ? {
               missing,
               specified: false,
-              message: `Saved as a draft, not specified: required fields are missing (${missing.join(', ')}).`,
+              message: scoping
+                ? `Saved as a draft: ${scoping.text}.`
+                : `Saved as a draft, not specified: required fields are missing (${missing.join(', ')}).`,
             }
           : req.body.specify
             ? { specified: true }
@@ -87,6 +90,12 @@ export function cardRoutes(ctx: Ctx) {
       const s = await requireUser(ctx, req);
       const id = await specifyCard(ctx, s.user, req.params.id);
       return getCardDetail(ctx, s.user.id, id);
+    });
+
+    app.post('/api/cards/:id/send-to-ba', { schema: { params: CardParamsSchema } }, async (req) => {
+      const s = await requireUser(ctx, req);
+      const { cardId, next } = await sendCardToBa(ctx, s.user, req.params.id);
+      return { ...(await getCardDetail(ctx, s.user.id, cardId)), baNotice: next.text };
     });
 
     app.post(
