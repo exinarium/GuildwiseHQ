@@ -1,0 +1,36 @@
+{
+  "title": "The Help centre",
+  "src": "/videos/help.webm",
+  "type": "video/webm",
+  "sources": [
+    {
+      "src": "/videos/help.mp4",
+      "type": "video/mp4"
+    },
+    {
+      "src": "/videos/help.webm",
+      "type": "video/webm"
+    }
+  ],
+  "captions": "/videos/help.vtt",
+  "voice": "Piper en_GB-cori-high",
+  "duration": 73.9,
+  "chapters": [
+    {
+      "t": 9.7,
+      "title": "Search the articles"
+    },
+    {
+      "t": 23.7,
+      "title": "Glossary, what’s new and the blog"
+    },
+    {
+      "t": 41.5,
+      "title": "Contact us and My requests"
+    },
+    {
+      "t": 56.8,
+      "title": "Page help and the tour"
+    }
+  ]
+}
