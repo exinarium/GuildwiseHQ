@@ -17,6 +17,7 @@ export {
 } from './high-risk.ts';
 export * from './ids.ts';
 export * from './legacy.ts';
+export * from './movable.ts';
 export * from './resolve.ts';
 export * from './schema.ts';
 export * from './simulate.ts';

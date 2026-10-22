@@ -18,7 +18,7 @@ import {
   cancelCard,
   commentOnCard,
   createCard,
-  moveCard,
+  moveCardWithNotice,
   patchCard,
   releaseBackoff,
   releaseCard,
@@ -121,8 +121,9 @@ export function cardRoutes(ctx: Ctx) {
       { schema: { params: CardParamsSchema, body: MoveCardRequestSchema } },
       async (req) => {
         const s = await requireUser(ctx, req);
-        const id = await moveCard(ctx, s.user, req.params.id, req.body.toStage, req.body.reason);
-        return getCardDetail(ctx, s.user.id, id);
+        const moved = await moveCardWithNotice(ctx, s.user, req.params.id, req.body.toStage, req.body.reason);
+        const detail = await getCardDetail(ctx, s.user.id, moved.cardId);
+        return moved.notice ? { ...detail, moveNotice: moved.notice } : detail;
       },
     );
 

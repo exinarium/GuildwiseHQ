@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import {
+  type Actor,
   type CardChanges,
   type CardOrigin,
   type CompletionAction,
   type CreateCardRequest,
   canManageCard,
-  canonicalWorkflowKey,
   cardRef,
   DEFAULT_CARD_PRIORITY,
   emptyFields,
@@ -13,6 +13,7 @@ import {
   getStage,
   isMockField,
   missingForSpecify,
+  moveRefusal,
   type PatchCardRequest,
   parseCardFields,
   requiredMissing,
@@ -33,6 +34,7 @@ import { resolveProjectCardWorkflow } from '../catalogue/project-workflows.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
+import { dependencyStates } from '../dispatcher/dependencies.ts';
 import { badRequest, conflict, forbidden, notFound, unprocessable } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
@@ -635,33 +637,69 @@ export function releaseEvents(card: Row, actorUserId: string, reason: 'manual'):
   ];
 }
 
+/** What a manual move needs from its caller beyond the user: who the move is attributed to (default: the user). */
+export interface MoveOptions {
+  /** The actor of the events, e.g. the CEO agent acting for the user. */
+  actor?: Actor;
+  /** The name shown in the notes ("moved by <name>"); default the user's display name. */
+  by?: string;
+}
+
+export interface MoveResult {
+  cardId: string;
+  /** Set when the move is accepted but nothing will run in the target stage yet (its dependencies have not landed). */
+  notice?: string;
+}
+
+/** Moves a card (see `moveCardWithNotice`); returns the card id. Signature kept for the callers that only need that. */
 export async function moveCard(
   ctx: Ctx,
   user: AuthSession['user'],
   idOrRef: string,
   toStage: string,
   reason: string,
-) {
+  opts: MoveOptions = {},
+): Promise<string> {
+  return (await moveCardWithNotice(ctx, user, idOrRef, toStage, reason, opts)).cardId;
+}
+
+/**
+ * A manual move (owner/manager). The card's open blockers (questions, stop-loss, loop-park, repeat items: anything that
+ * holds it) are dismissed with the note "moved by <who>" through `DeskItemResolved` events, and `CardMovedByManager`
+ * clears `blocked_since`, the back-off and the blockers that are left (an answer's "keep parked" and items that block
+ * other cards too). A target stage whose dependencies have not landed is still accepted; the result carries a notice,
+ * because the dispatcher starts nothing there until they land.
+ */
+export async function moveCardWithNotice(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  idOrRef: string,
+  toStage: string,
+  reason: string,
+  opts: MoveOptions = {},
+): Promise<MoveResult> {
   return withAppendTx(ctx.pool, async (tx) => {
     const card = await loadManageable(tx, user, idOrRef);
     if (['done', 'cancelled'].includes(card.status)) throw conflict('card_closed', `card is ${card.status}`);
     const wf = await loadWorkflowById(tx, card.workflow_version_id);
     const stage = wf ? getStage(wf.definition, toStage) : undefined;
-    if (!stage)
+    if (!wf || !stage)
       throw badRequest('unknown_stage', `stage '${toStage}' does not exist in this card's workflow`);
-    if (stage.kind === 'terminal')
-      throw badRequest('invalid_stage', 'use cancel or finalize to close a card');
-    // A person's step (manual QA, an approval) opens by itself when the card reaches it: it is not a place to move to.
-    if (
-      stage.kind === 'human' ||
-      stage.kind === 'server' ||
-      (stage.id === 'qa_steps' && canonicalWorkflowKey(wf?.definition.key ?? '') === 'code')
-    )
-      throw badRequest('invalid_stage', 'a step for a person starts by itself when the card reaches it');
+    const refusal = moveRefusal(wf.definition, stage);
+    if (refusal) throw badRequest(refusal.code, refusal.message);
     const missing = stage.kind === 'agent' ? requiredMissing(cardView(card), stage) : [];
     if (missing.length)
       throw unprocessable('missing_fields', `missing required fields: ${missing.join(', ')}`, { missing });
     const status = stage.kind === 'manual' ? 'draft' : 'queued';
+    const actor = opts.actor ?? userActor(user.id);
+    const by = opts.by ?? user.displayName;
+    const resolvedBy =
+      actor.kind === 'agent' && actor.id
+        ? { kind: 'agent' as const, agentId: actor.id }
+        : actor.kind === 'user'
+          ? { kind: 'user' as const, userId: user.id }
+          : { kind: 'system' as const };
+    const scope = projectScope(card.org_id, card.project_id);
     // Moving a card out of manual QA closes the person's desk item.
     const approval = card.approval as { deskItemId?: string | null; stageId?: string; state?: string } | null;
     const qa =
@@ -673,25 +711,29 @@ export async function moveCard(
     const qaItem = qa?.deskItemId
       ? await one(tx, 'SELECT status FROM desk_items WHERE id=$1', [qa.deskItemId])
       : undefined;
+    const qaOpen = qaItem?.status === 'open' && qa?.deskItemId ? qa.deskItemId : null;
+    // Every other open item that holds only this card is dismissed; one that holds other cards too stays open for them
+    // (the projection drops this card's blocker row).
+    const blockers = await rows(
+      tx,
+      `SELECT d.id FROM card_blockers b JOIN desk_items d ON d.id = b.desk_item_id
+        WHERE b.card_id=$1 AND d.status='open' AND d.id IS DISTINCT FROM $2::uuid
+          AND NOT EXISTS (SELECT 1 FROM unnest(d.affected_card_ids) x WHERE x <> $1::uuid)
+        ORDER BY d.created_at`,
+      [card.id, qaOpen],
+    );
+    const dismiss = (deskItemId: string, note: string): AppendInput => ({
+      streamId: streamId.desk(deskItemId),
+      event: {
+        type: 'DeskItemResolved' as const,
+        payload: { deskItemId, resolution: 'dismissed' as const, note, by: resolvedBy },
+      },
+      actor,
+      scope,
+    });
     const events: AppendInput[] = [
-      ...(qaItem?.status === 'open' && qa?.deskItemId
-        ? [
-            {
-              streamId: streamId.desk(qa.deskItemId),
-              event: {
-                type: 'DeskItemResolved' as const,
-                payload: {
-                  deskItemId: qa.deskItemId,
-                  resolution: 'dismissed' as const,
-                  note: `Moved to ${toStage} by ${user.displayName}`,
-                  by: { kind: 'user' as const, userId: user.id },
-                },
-              },
-              actor: userActor(user.id),
-              scope: projectScope(card.org_id, card.project_id),
-            },
-          ]
-        : []),
+      ...(qaOpen ? [dismiss(qaOpen, `Moved to ${toStage} by ${by}`)] : []),
+      ...blockers.map((b) => dismiss(b.id as string, `moved by ${by}`)),
       ...releaseEvents(card, user.id, 'manual'),
       {
         streamId: streamId.card(card.id),
@@ -699,18 +741,25 @@ export async function moveCard(
           type: 'CardMovedByManager',
           payload: { cardId: card.id, fromStage: card.stage, toStage, status, reason },
         },
-        actor: userActor(user.id),
-        scope: projectScope(card.org_id, card.project_id),
+        actor,
+        scope,
       },
       cardMessage(
         card,
         { kind: 'system' },
         'system',
-        `Moved from ${card.stage} to ${toStage} by ${user.displayName}: ${reason}`,
+        `Moved from ${card.stage} to ${toStage} by ${by}: ${reason}`,
       ),
     ];
     await ctx.store.append(events, { tx });
-    return card.id as string;
+    // The dependency gate holds every stage but planning and design: say so instead of leaving the card looking stuck.
+    let notice: string | undefined;
+    if (stage.kind === 'agent' && toStage !== 'planning' && !toStage.startsWith('investigate')) {
+      const unlanded = (await dependencyStates(tx, card.id)).filter((d) => !d.landed);
+      if (unlanded.length)
+        notice = `The card moved, but nothing will run in ${stage.label} until ${unlanded.map((d) => d.ref).join(', ')} ${unlanded.length === 1 ? 'has' : 'have'} landed.`;
+    }
+    return { cardId: card.id as string, ...(notice ? { notice } : {}) };
   });
 }
 

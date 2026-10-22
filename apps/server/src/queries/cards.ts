@@ -14,6 +14,7 @@ import {
   canManageCard,
   columnFor,
   getStage,
+  movableStages,
   repoFileUrl,
   type ShiftDto,
   scrubRemoteUrl,
@@ -268,6 +269,7 @@ export async function getCardDetail(ctx: Ctx, userId: string, idOrRef: string): 
   const ctxAuth = { userId, projectRole: role, cardOwnerUserId: card.owner_user_id };
   const manage = canManageCard(ctxAuth);
   const open = !['done', 'cancelled'].includes(card.status);
+  const wf = manage && open ? await loadWorkflowById(ctx.pool, card.workflow_version_id) : undefined;
   const lastDiff = [...handoffs].reverse().find((h) => h.data?.diffStats);
   const workability = (await cardWorkability(ctx, [card])).get(card.id);
   return {
@@ -344,6 +346,14 @@ export async function getCardDetail(ctx: Ctx, userId: string, idOrRef: string): 
       canComment: canCommentOnCard(role),
       canAttach: manage && open,
     },
+    moveTargets:
+      manage && open && wf
+        ? movableStages(wf.definition, card.stage).map((st) => ({
+            id: st.id,
+            label: st.label,
+            kind: st.kind,
+          }))
+        : [],
     diffStats: lastDiff?.data?.diffStats ?? null,
     testing: await cardTesting(ctx, card, manage),
     subworkflows: await subworkflowsPanel(ctx, userId, card),
