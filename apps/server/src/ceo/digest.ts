@@ -1,6 +1,7 @@
 import type { FloorDigest, SignalBrief } from '@aom/shared';
 import { spendDigest } from '../costs/index.ts';
 import { iso, type Queryable, rows } from '../db/sql.ts';
+import { plainText, questionTitles, summarize } from './report-text.ts';
 
 export const toSignalBrief = (r: Record<string, any>): SignalBrief => ({
   id: r.id,
@@ -109,6 +110,23 @@ export async function buildFloorDigest(
     [orgId, sinceOrEpoch],
   );
 
+  // The report is read by a person: ids, validation messages and long request bodies are turned into plain words.
+  const titles = await questionTitles(db, orgId, [
+    ...signals.flatMap((s) => [s.subject?.title, s.subject?.detail]),
+    ...resolved.map((r) => r.ba_note ?? r.answer),
+    ...resolved.map((r) => r.title),
+    ...devops.map((r) => r.summary),
+  ]);
+  const plain = (t: unknown): string => plainText(String(t ?? ''), titles);
+  const readableSignals = signals.map((s) => ({
+    ...s,
+    subject: {
+      ...s.subject,
+      ...(s.subject?.title !== undefined ? { title: plain(s.subject.title) } : {}),
+      ...(s.subject?.detail !== undefined ? { detail: plain(s.subject.detail) } : {}),
+    },
+  }));
+
   const interests = await interestsDigest(db, orgId, sinceOrEpoch);
   const spend = await spendDigest(db, orgId, now, sinceOrEpoch);
 
@@ -117,7 +135,7 @@ export async function buildFloorDigest(
     localDate,
     since: since ? since.toISOString() : null,
     phases,
-    signals,
+    signals: readableSignals,
     backingOff: backing.map((b) => ({
       ref: b.ref,
       title: b.title,
@@ -126,15 +144,15 @@ export async function buildFloorDigest(
     })),
     devopsOpen: devops.map((r) => ({
       id: r.id,
-      summary: r.summary,
+      summary: summarize(plain(r.summary)),
       status: r.status,
       workstation: r.ws_name,
     })),
     resolvedByBa: resolved.map((r) => ({
       id: r.id,
-      title: r.title,
+      title: plain(r.title),
       how: r.triage === 'merged' ? 'merged' : r.triage === 'dismissed' ? 'dismissed' : 'answered',
-      note: r.ba_note ?? r.answer ?? null,
+      note: (r.ba_note ?? r.answer) ? summarize(plain(r.ba_note ?? r.answer)) || null : null,
     })),
     failures: failures.map((f) => ({ ref: f.ref, title: f.title, failedShifts: f.n })),
     interests,
