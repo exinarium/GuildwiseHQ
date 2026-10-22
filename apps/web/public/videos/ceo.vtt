@@ -1,0 +1,49 @@
+WEBVTT
+
+1
+00:00:00.818 --> 00:00:11.486
+Every organization has a built-in CEO agent. It stands in for you: it works the desk and the floor inside the limits you set, and only what it cannot decide comes to you.
+
+2
+00:00:12.205 --> 00:00:23.939
+Open CEO in the sidebar. The Overview shows its state, the workstation it runs on, its spend, and how many of its decisions you undid this week. Pause is the emergency stop.
+
+3
+00:00:24.656 --> 00:00:32.667
+Authority sets, for every kind of action, whether the CEO decides it, only recommends it, or never does it.
+
+4
+00:00:33.367 --> 00:00:42.945
+By default it decides card work itself: it can move a card to another stage, raise the model for one card, and send a card with a failed test back to the tester.
+
+5
+00:00:43.645 --> 00:00:56.368
+Under Items on the desk, questions, stop-losses and loops are set to Decide, so the CEO settles them without asking you. Persona, Memory and Topics shape how it thinks; see the guide.
+
+6
+00:00:57.081 --> 00:01:03.757
+Reporting and alerts sets the time of the daily report, which news reaches you by which channel, and your quiet hours.
+
+7
+00:01:04.484 --> 00:01:11.100
+Ask Ada, in the top bar, opens your chat with the CEO. Type a question and press Enter.
+
+8
+00:01:11.800 --> 00:01:17.383
+New chat starts a clean conversation. The earlier chats stay in the list on the left.
+
+9
+00:01:18.094 --> 00:01:33.185
+Back on the CEO page, the Activity log lists everything the CEO decided, recommended or refused, with its reason and confidence. Here it paused Ben, changed a priority, moved a card and raised a card's model.
+
+10
+00:01:33.886 --> 00:01:39.945
+Undo reverses an action where that is possible. Ada is told, and learns from your choice.
+
+11
+00:01:40.657 --> 00:01:48.411
+The CEO runs on one of your own workstations. On the Workstations tab, Move the CEO here moves it to another one.
+
+12
+00:01:49.110 --> 00:01:55.343
+That is your CEO. Set its limits once, and check its work in the activity log.
