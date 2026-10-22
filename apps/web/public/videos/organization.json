@@ -1,0 +1,44 @@
+{
+  "title": "Your organization",
+  "src": "/videos/organization.webm",
+  "type": "video/webm",
+  "sources": [
+    {
+      "src": "/videos/organization.mp4",
+      "type": "video/mp4"
+    },
+    {
+      "src": "/videos/organization.webm",
+      "type": "video/webm"
+    }
+  ],
+  "captions": "/videos/organization.vtt",
+  "voice": "Piper en_GB-cori-high",
+  "duration": 85.1,
+  "chapters": [
+    {
+      "t": 8.3,
+      "title": "General and your role"
+    },
+    {
+      "t": 17.9,
+      "title": "Members and inviting"
+    },
+    {
+      "t": 38,
+      "title": "Invitations"
+    },
+    {
+      "t": 47.6,
+      "title": "Guests"
+    },
+    {
+      "t": 54.9,
+      "title": "E-mail inbox and project links"
+    },
+    {
+      "t": 71,
+      "title": "Plan and limits"
+    }
+  ]
+}

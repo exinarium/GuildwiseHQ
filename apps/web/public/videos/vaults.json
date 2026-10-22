@@ -1,0 +1,36 @@
+{
+  "title": "Vaults",
+  "src": "/videos/vaults.webm",
+  "type": "video/webm",
+  "sources": [
+    {
+      "src": "/videos/vaults.mp4",
+      "type": "video/mp4"
+    },
+    {
+      "src": "/videos/vaults.webm",
+      "type": "video/webm"
+    }
+  ],
+  "captions": "/videos/vaults.vtt",
+  "voice": "Piper en_GB-cori-high",
+  "duration": 70.3,
+  "chapters": [
+    {
+      "t": 11.1,
+      "title": "Open Vaults"
+    },
+    {
+      "t": 21,
+      "title": "Register a vault"
+    },
+    {
+      "t": 41.7,
+      "title": "The vault card and Edit"
+    },
+    {
+      "t": 54,
+      "title": "A paused sync"
+    }
+  ]
+}

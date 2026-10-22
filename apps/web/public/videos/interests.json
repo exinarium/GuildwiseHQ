@@ -1,0 +1,40 @@
+{
+  "title": "Interests",
+  "src": "/videos/interests.webm",
+  "type": "video/webm",
+  "sources": [
+    {
+      "src": "/videos/interests.mp4",
+      "type": "video/mp4"
+    },
+    {
+      "src": "/videos/interests.webm",
+      "type": "video/webm"
+    }
+  ],
+  "captions": "/videos/interests.vtt",
+  "voice": "Piper en_GB-cori-high",
+  "duration": 99.4,
+  "chapters": [
+    {
+      "t": 10.6,
+      "title": "Open Interests"
+    },
+    {
+      "t": 20.4,
+      "title": "A new interest and its schedules"
+    },
+    {
+      "t": 46.1,
+      "title": "Taste rules and the quiet cap"
+    },
+    {
+      "t": 62.2,
+      "title": "Deliver now"
+    },
+    {
+      "t": 76.3,
+      "title": "Archive and restore"
+    }
+  ]
+}
