@@ -305,6 +305,9 @@ const WORKFLOW_BLURB: Record<string, { title: string; text: string; icon: typeof
   feed: { title: 'Feed', text: 'Scheduled scans and digests you rate.', icon: Rss },
 };
 
+/** Built-in workflows that never run a project (New project does not offer them). */
+const NOT_A_PROJECT_WORKFLOW: readonly string[] = ['code-bugfix'];
+
 function NewProjectDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
   const create = useCreateProject();
   const toast = useToast();
@@ -316,7 +319,15 @@ function NewProjectDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
   const [errors, setErrors] = useState<Record<string, string>>({});
   const selected = workflows.data?.find((w) => w.definition.key === workflowKey)?.definition;
   const noRepo = selected ? !workflowUsesRepos(selected) : false;
-  const keys = [...new Set(workflows.data?.map((w) => w.definition.key) ?? ['code'])];
+  // `code-bugfix` runs only the bug cards a failed test files under a code card: never a project's workflow
+  const keys = [
+    ...new Set(
+      workflows.data?.map((w) => w.definition.key).filter((k) => !NOT_A_PROJECT_WORKFLOW.includes(k)) ?? [
+        'code',
+      ],
+    ),
+  ];
+  const nameOf = (k: string) => workflows.data?.find((w) => w.definition.key === k)?.definition.name ?? k;
 
   const onName = (v: string) => {
     setName(v);
@@ -397,8 +408,10 @@ function NewProjectDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
                 />
                 <Icon aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-muted" />
                 <span className="min-w-0 flex-1">
-                  <span className="block text-base font-medium text-fg">{b?.title ?? k}</span>
-                  <span className="block text-sm text-muted">{b?.text ?? `Custom workflow ${k}.`}</span>
+                  <span className="block text-base font-medium text-fg">{b?.title ?? nameOf(k)}</span>
+                  <span className="block text-sm text-muted">
+                    {b?.text ?? 'A custom workflow of your organization.'}
+                  </span>
                 </span>
               </label>
             );

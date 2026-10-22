@@ -1,4 +1,4 @@
-import type { ProjectDto } from '@aom/shared';
+import { BUILTIN_WORKFLOWS, type ProjectDto } from '@aom/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -53,7 +53,7 @@ const rankCalls = () =>
     .filter(([u, i]) => String(u) === '/api/projects/ranking' && (i as RequestInit)?.method === 'PUT')
     .map(([, i]) => JSON.parse(String((i as RequestInit).body)).projectIds as string[]);
 
-function page(role: string, projects: ProjectDto[] = PROJECTS, rankStatus = 200) {
+function page(role: string, projects: ProjectDto[] = PROJECTS, rankStatus = 200, workflows: unknown[] = []) {
   let current = projects;
   fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
     if (url === '/api/auth/me') return json(me(role));
@@ -67,7 +67,7 @@ function page(role: string, projects: ProjectDto[] = PROJECTS, rankStatus = 200)
     if (url.startsWith('/api/projects?status=archived')) return json({ projects: [] });
     if (url.startsWith('/api/projects')) return json({ projects: current });
     if (url.includes('invitations')) return json({ invitations: [] });
-    if (url.startsWith('/api/workflows')) return json({ workflows: [] });
+    if (url.startsWith('/api/workflows')) return json({ workflows });
     return json({});
   });
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
@@ -232,5 +232,35 @@ describe('ProjectRankList on its own', () => {
     expect(screen.getByText('Clear the filter to change the order.')).toBeInTheDocument();
     expect(screen.queryByTestId('rank-up-BBB')).toBeNull();
     expect(screen.getByTestId('rank-row-AAA')).toHaveAttribute('draggable', 'false');
+  });
+});
+
+describe('New project', () => {
+  it('offers the project workflows by name, never the internal bugfix workflow', async () => {
+    const latest = new Map(BUILTIN_WORKFLOWS.map((d) => [d.key, d]));
+    const custom = {
+      ...(latest.get('code') as (typeof BUILTIN_WORKFLOWS)[number]),
+      key: 'support',
+      name: 'Support desk',
+      builtIn: false,
+    };
+    const workflows = [...latest.values(), custom].map((definition, n) => ({
+      id: `0192f3a0-0000-7000-8000-00000000020${n}`,
+      orgId: null,
+      status: 'active',
+      definition,
+    }));
+    page('owner', PROJECTS, 200, workflows);
+    await userEvent.click(await screen.findByRole('button', { name: 'New project' }));
+    const form = await screen.findByRole('form', { name: 'New project' });
+    const options = within(form)
+      .getAllByRole('radio')
+      .map((r) => (r as HTMLInputElement).value);
+    expect(options).toEqual(expect.arrayContaining(['code', 'research', 'feed', 'support']));
+    expect(options).not.toContain('code-bugfix');
+    expect(within(form).queryByText(/code-bugfix/)).toBeNull();
+    // a custom workflow shows its own name, not its key
+    expect(within(form).getByText('Support desk')).toBeInTheDocument();
+    expect(within(form).getByText('A custom workflow of your organization.')).toBeInTheDocument();
   });
 });

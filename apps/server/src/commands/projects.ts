@@ -55,6 +55,12 @@ export async function createProject(
   await withAppendTx(ctx.pool, async (tx) => {
     await assertWithinLimit(tx, org.id, 'projects');
     const workflowKey = input.workflowKey ?? ctx.config.defaultWorkflow;
+    // `code-bugfix` runs only the bug cards a failed test files under a code card (Convert refuses it too)
+    if (workflowKey === 'code-bugfix')
+      throw badRequest(
+        'not_a_project_workflow',
+        'the code-bugfix workflow only runs bug cards of code projects',
+      );
     if (!(await resolveWorkflow(tx, org.id, workflowKey))) {
       throw badRequest('unknown_workflow', `workflow '${workflowKey}' does not exist`);
     }
