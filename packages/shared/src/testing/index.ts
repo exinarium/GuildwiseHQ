@@ -173,6 +173,9 @@ export function loopBackoffMinutes(failures: number): number {
 /** Consecutive tester reworks of one card with no new commit between them before the CEO is asked (`tester_loop`). */
 export const TESTER_REWORK_CAP = 3;
 
+/** All tester reworks of one card since its last test result or `tester_loop` answer, even when the branch moves between them. */
+export const TESTER_TOTAL_REWORK_CAP = 6;
+
 /** Option ids of a `tester_loop` question: each performs its action when the item is answered. */
 export const TESTER_LOOP_OPTIONS = {
   builder: 'builder',
@@ -181,15 +184,12 @@ export const TESTER_LOOP_OPTIONS = {
 } as const;
 
 const PATH_TOKEN = /(?:[A-Za-z0-9_.@~-]*\/)+[A-Za-z0-9_.@-]+\.[A-Za-z0-9]{1,8}\b/g;
-const ARTIFACT_WORD = /\b(?:jpe?g|png|webp|gif|screenshots?|captures?|images?)\b/i;
-const MISSING_WORD =
-  /\b(?:missing|not (?:found|produced|generated|created|captured|written)|no such file|ENOENT|does not exist|was not run|never ran|has not (?:been )?(?:run|produced|generated))\b/i;
 
 /**
- * Does a failure report name only the project's E2E paths (or only artifacts the E2E capture produces, such as missing
- * screenshots)? Then the work is in the E2E spec or its fixtures, which only the tester may change: a bug card for a
- * builder can never fix it (production: GWP-11, a docs card whose capture run had not produced its images).
- * Conservative: any path outside the E2E globs, or no evidence of either kind, is not an E2E-only failure.
+ * Does a failure report (the tester's note, title and evidence summary and output) name only the project's E2E paths?
+ * Then the work may be in the E2E spec or its fixtures, which only the tester may change (production: GWP-11). This is a
+ * HINT shown in the `tester_loop` question: it never overrides the scope the tester reported.
+ * Conservative: any path outside the E2E globs, or no path at all, is not an E2E-only failure.
  */
 export function e2eOnlyFailure(
   text: string,
@@ -214,7 +214,5 @@ export function e2eOnlyFailure(
     return { e2eOnly: false, paths: e2e, reason: `it names a path outside the E2E paths: ${other[0]}` };
   if (e2e.length > 0)
     return { e2eOnly: true, paths: e2e, reason: `it names only E2E paths (${e2e.slice(0, 3).join(', ')})` };
-  if (ARTIFACT_WORD.test(clean) && MISSING_WORD.test(clean))
-    return { e2eOnly: true, paths: [], reason: 'it reports missing artifacts that the E2E capture produces' };
   return { ...none, reason: 'it names no E2E path' };
 }

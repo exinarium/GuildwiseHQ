@@ -6,6 +6,7 @@ import {
   streamId,
   TESTER_LOOP_OPTIONS,
   TESTER_REWORK_CAP,
+  TESTER_TOTAL_REWORK_CAP,
   type TestEvidence,
 } from '@aom/shared';
 import type { Ctx } from '../context.ts';
@@ -93,9 +94,14 @@ export async function latestFailureChild(tx: Tx, parentId: string): Promise<Row 
 /**
  * Reworks of this card in a row whose tester shift started at the same commit as the reporting shift (`head`: the shift's
  * `start_sha`, so a commit the tester made shows when its next shift starts): since the last test result, and since the last
- * `tester_loop` question of the card (its answer starts the count again).
+ * `tester_loop` question of the card (its answer starts the count again). `total` counts every tester rework in that window,
+ * whatever commit it started at: a tester that commits every shift is not progress either.
  */
-export async function consecutiveReworks(tx: Tx, card: Row, head: string | null): Promise<number> {
+export async function reworkCounts(
+  tx: Tx,
+  card: Row,
+  head: string | null,
+): Promise<{ consecutive: number; total: number }> {
   const stream = streamId.card(card.id);
   const last = await one<{ seq: string | null }>(
     tx,
@@ -108,17 +114,19 @@ export async function consecutiveReworks(tx: Tx, card: Row, head: string | null)
     [card.id, DESK_SUBKIND.testerLoop],
   );
   const evs = await tx.query(
-    `SELECT payload->>'headSha' AS sha FROM events
+    `SELECT payload->>'headSha' AS sha, payload->>'instruction' AS instruction FROM events
       WHERE stream_id=$1 AND type='TestReworkRequested' AND seq > $2::bigint AND created_at > $3::timestamptz
       ORDER BY seq DESC`,
     [stream, last?.seq ?? '0', asked?.at ?? '-infinity'],
   );
-  let n = 0;
-  for (const r of evs.rows as Array<{ sha: string | null }>) {
+  const list = evs.rows as Array<{ sha: string | null; instruction: string | null }>;
+  let consecutive = 0;
+  for (const r of list) {
     if ((r.sha ?? null) !== head) break;
-    n++;
+    consecutive++;
   }
-  return n;
+  // Reworks the CEO or an answer ordered (they carry an instruction) are the reset, not tester reworks.
+  return { consecutive, total: list.filter((r) => r.instruction == null).length };
 }
 
 /** The `tester_loop` question: one blocking item through the stop-loss route (the CEO, three times, then the owner). */
@@ -128,6 +136,8 @@ export async function testerLoopQuestionEvents(
   card: Row,
   q: {
     reason: 'cancelled_bug' | 'rework_cap';
+    /** Which cap a `rework_cap` question hit. */
+    cap?: 'consecutive' | 'total';
     /** The text after the colon of the question. */
     summary: string;
     testerAgentId: string;
@@ -135,6 +145,8 @@ export async function testerLoopQuestionEvents(
     note: string;
     title: string;
     cancelledRef?: string;
+    /** Shown in the question when the evidence only names E2E paths. */
+    e2eHint?: string;
   },
 ): Promise<AppendInput[]> {
   const open = await one(tx, `SELECT 1 FROM desk_items WHERE card_id=$1 AND subkind=$2 AND status='open'`, [
@@ -144,10 +156,15 @@ export async function testerLoopQuestionEvents(
   if (open) return [];
   const { route, ceoHold, note } = await stopLossRoute(ctx, tx, card, DESK_SUBKIND.testerLoop);
   const deskItemId = randomUUID();
+  const stale =
+    q.reason === 'rework_cap' && q.cancelledRef ? ' (a bug card was cancelled earlier on this card)' : '';
+  const hint = q.e2eHint ? ` Note: ${q.e2eHint}.` : '';
   const text =
     q.reason === 'cancelled_bug'
-      ? `The tester reports the failure again after bug card ${q.cancelledRef} was cancelled: ${q.summary}`
-      : `The tester asked for E2E rework ${TESTER_REWORK_CAP} times in a row with no new commit on the branch: ${q.summary}`;
+      ? `The tester reports the failure again after bug card ${q.cancelledRef} was cancelled: ${q.summary}${hint}`
+      : q.cap === 'total'
+        ? `The tester asked for E2E rework ${TESTER_TOTAL_REWORK_CAP} times since the last test result or answer${stale}: ${q.summary}`
+        : `The tester asked for E2E rework ${TESTER_REWORK_CAP} times in a row with no new commit on the branch${stale}: ${q.summary}`;
   return [
     {
       streamId: streamId.desk(deskItemId),
@@ -191,6 +208,7 @@ export async function testerLoopQuestionEvents(
           pinned: true,
           data: {
             reason: q.reason,
+            ...(q.cap ? { cap: q.cap } : {}),
             testerAgentId: q.testerAgentId,
             title: q.title,
             note: q.note,
@@ -209,7 +227,9 @@ export async function testerLoopQuestionEvents(
       `${card.ref} failed its test again but no bug card was created: ${
         q.reason === 'cancelled_bug'
           ? `its earlier bug card ${q.cancelledRef} was cancelled`
-          : `the tester asked for rework ${TESTER_REWORK_CAP} times with no new commit`
+          : q.cap === 'total'
+            ? `the tester asked for rework ${TESTER_TOTAL_REWORK_CAP} times without a test result`
+            : `the tester asked for rework ${TESTER_REWORK_CAP} times with no new commit`
       }. The card waits in Test on one question. ${note}\n\n${q.summary}`,
       { deskItemId, failureScope: 'tester_loop' },
     ),
@@ -218,7 +238,7 @@ export async function testerLoopQuestionEvents(
 
 /**
  * The card goes back to the tester (`TestReworkRequested`) unless it already went back `TESTER_REWORK_CAP` times with the
- * branch unchanged: then the CEO is asked (`tester_loop`) instead.
+ * branch unchanged, or `TESTER_TOTAL_REWORK_CAP` times in all without a test result: then the CEO is asked (`tester_loop`) instead.
  */
 export async function reworkOrEscalateEvents(
   ctx: Ctx,
@@ -233,16 +253,20 @@ export async function reworkOrEscalateEvents(
   /** The commit the reporting shift started at: the progress signal of the rework cap. */
   head: string | null,
 ): Promise<AppendInput[]> {
-  const done = await consecutiveReworks(tx, card, head);
-  if (done >= TESTER_REWORK_CAP)
+  const counts = await reworkCounts(tx, card, head);
+  if (counts.consecutive >= TESTER_REWORK_CAP || counts.total >= TESTER_TOTAL_REWORK_CAP) {
+    const previous = await latestFailureChild(tx, card.id);
     return testerLoopQuestionEvents(ctx, tx, card, {
       reason: 'rework_cap',
+      cap: counts.consecutive >= TESTER_REWORK_CAP ? 'consecutive' : 'total',
+      ...(previous?.status === 'cancelled' ? { cancelledRef: previous.ref as string } : {}),
       summary: `${title}. ${note}`.slice(0, 1500),
       testerAgentId: agentId,
       evidence,
       note,
       title,
     });
+  }
   return [
     {
       streamId: streamId.card(card.id),
@@ -299,7 +323,22 @@ export async function testerLoopAnswered(
     });
     return;
   }
-  if (card.stage !== 'test') return; // someone moved the card meanwhile: the answer is on its thread, nothing to redo
+  if (card.stage !== 'test') {
+    // Someone moved the card meanwhile: say on its thread that the choice was not carried out.
+    await ctx.store.append(
+      [
+        cardMessage(
+          card,
+          by.author,
+          'comment',
+          `The tester-loop answer ("${choice}") was not carried out: ${card.ref} is no longer in Test (it is at '${card.stage}').`,
+          { failureScope: 'tester_loop' },
+        ),
+      ],
+      { tx },
+    );
+    return;
+  }
   const evidence: TestEvidence = data.evidence ?? {
     commands: [],
     summary: data.title ?? answer,

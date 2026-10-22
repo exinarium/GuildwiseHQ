@@ -29,9 +29,8 @@ import {
 /**
  * A failed feature test (spec "Testing strategy"). A failure in the product is a bug child that shares the parent's
  * worktree and branch (`bugCardEvents`). A failure in the E2E spec or its fixtures is a rework: builders may not change
- * those, so the card goes back to the tester (`TestReworkRequested`), capped when it makes no progress. Two guards keep the
- * product route from looping (GWP-11): a failure that names only E2E paths is a rework whatever scope the tester gave, and
- * a failure reported again after the card's bug card was cancelled creates no new bug card but asks the CEO.
+ * those, so the card goes back to the tester (`TestReworkRequested`), capped when it makes no progress. A product failure
+ * reported again after the card's bug card was cancelled creates no new bug card but asks the CEO (GWP-11).
  */
 export async function testFailedEvents(
   ctx: Ctx,
@@ -95,27 +94,16 @@ export async function testFailedEvents(
       ),
     ];
   }
-  // Product scope, but does the report name only E2E paths or the artifacts of the E2E capture? Then it is spec work.
-  const project = await one(tx, 'SELECT e2e_globs FROM projects WHERE id=$1', [card.project_id]);
-  const verdict = e2eOnlyFailure(
-    [title, note, evidence.summary, evidence.outputExcerpt, ...evidence.commands].join('\n'),
-    (project?.e2e_globs as string[] | undefined) ?? [],
-  );
   const previous = await latestFailureChild(tx, card.id);
   const cancelled = previous?.status === 'cancelled' ? previous : undefined;
-  if (verdict.e2eOnly)
-    return reworkOrEscalateEvents(
-      ctx,
-      tx,
-      card,
-      agentId,
-      { ...evidence, failureScope: 'e2e_spec' },
-      title,
-      note,
-      `The tester reported "${title}" with scope product, but ${verdict.reason}: that is E2E spec work, which builders may not do. No bug card was created${cancelled ? ` (bug card ${cancelled.ref} was cancelled earlier)` : ''}; ${card.ref} stays in Test and goes back to the tester.`,
-      headSha,
+  // A bug card of this card was cancelled and the failure is reported again: no fresh bug card, the CEO decides. The tester's
+  // scope is never overridden; a report that names only E2E paths is shown as a hint in the question.
+  if (cancelled) {
+    const project = await one(tx, 'SELECT e2e_globs FROM projects WHERE id=$1', [card.project_id]);
+    const verdict = e2eOnlyFailure(
+      [title, note, evidence.summary, evidence.outputExcerpt].join('\n'),
+      (project?.e2e_globs as string[] | undefined) ?? [],
     );
-  if (cancelled)
     return testerLoopQuestionEvents(ctx, tx, card, {
       reason: 'cancelled_bug',
       summary: `${title}. ${note}`.slice(0, 1500),
@@ -124,7 +112,11 @@ export async function testFailedEvents(
       note,
       title,
       cancelledRef: cancelled.ref,
+      ...(verdict.e2eOnly
+        ? { e2eHint: `the evidence only names E2E paths (${verdict.paths.slice(0, 3).join(', ')})` }
+        : {}),
     });
+  }
   return bugCardEvents(tx, card, agentId, note, evidence, title);
 }
 
