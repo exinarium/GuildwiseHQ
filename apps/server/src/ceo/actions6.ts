@@ -1,9 +1,10 @@
-import { type CeoActionName, canonicalWorkflowKey, isKnownChoice, streamId } from '@aom/shared';
+import { type CeoActionName, canonicalWorkflowKey, DESK_SUBKIND, isKnownChoice, streamId } from '@aom/shared';
 import { z } from 'zod';
 import { loadWorkflowById } from '../catalogue/loader.ts';
-import { moveCard } from '../commands/cards.ts';
+import { cancelCardIn, moveCard } from '../commands/cards.ts';
 import { agentActor, cardMessage, userActor } from '../commands/common.ts';
-import type { Queryable, Row } from '../db/sql.ts';
+import { one, type Queryable, type Row, rows } from '../db/sql.ts';
+import { withAppendTx } from '../db/tx.ts';
 import { HttpError } from '../errors.ts';
 import { appendLocked, cardOf, refuse, truncate } from './actions.ts';
 import type { ActionDef, ActionEnv } from './types.ts';
@@ -154,7 +155,132 @@ const raiseModel: ActionDef<z.infer<typeof RaiseP>> = {
   },
 };
 
+// ---------------------------------------------------------------------------------------- send to tester
+
+const SendToTesterP = z.object({
+  card: z.string().min(1).max(40),
+  note: z.string().trim().min(3).max(4000),
+});
+
+/** The card whose test failed and its open bug cards for a builder: `ref` is the bug card or its parent. */
+async function testerTarget(db: Queryable, card: Row): Promise<{ parent: Row | undefined; open: Row[] }> {
+  const parent =
+    card.origin === 'test_failure' && card.parent_card_id
+      ? await one(db, 'SELECT * FROM cards WHERE id=$1', [card.parent_card_id])
+      : card;
+  if (!parent) return { parent: undefined, open: [] };
+  const open = await rows(
+    db,
+    `SELECT * FROM cards WHERE parent_card_id=$1 AND card_type='bug' AND origin='test_failure'
+        AND status NOT IN ('done','cancelled') ORDER BY created_at`,
+    [parent.id],
+  );
+  return { parent, open };
+}
+
+const sendToTester: ActionDef<z.infer<typeof SendToTesterP>> = {
+  cls: 'card.send_to_tester',
+  schema: SendToTesterP,
+  describe: (p, pr) => `Send ${pr.subjectLabel} back to the tester: ${truncate(p.note, 100)}`,
+  async prepare(env, p) {
+    const card = await cardOf(env.ctx.pool, env, p.card);
+    if (!card || card.org_id !== env.orgId) return refuse(`card ${p.card} not found`);
+    const { parent, open } = await testerTarget(env.ctx.pool, card);
+    if (!parent) return { ...subjectOf(card), refuse: 'the card the bug belongs to does not exist' };
+    const base = subjectOf(parent);
+    if (['done', 'cancelled'].includes(parent.status))
+      return { ...base, refuse: `${parent.ref} is ${parent.status}` };
+    if (parent.stage !== 'test')
+      return {
+        ...base,
+        refuse: `${parent.ref} is at '${parent.stage}', not in Test: only a card whose test failed goes back to the tester`,
+      };
+    const question = await one(
+      env.ctx.pool,
+      `SELECT id FROM desk_items WHERE card_id=$1 AND subkind=$2 AND status='open'`,
+      [parent.id, DESK_SUBKIND.testerLoop],
+    );
+    if (question)
+      return {
+        ...base,
+        refuse: `${parent.ref} waits on the tester-loop question ${question.id}: answer it with option 'tester' (and the note as text) instead`,
+      };
+    return { ...base, data: { parent, open } };
+  },
+  async execute(env, p, pr) {
+    const parent = pr.data?.parent as Row;
+    const cancelledRefs: string[] = [];
+    const workstations = new Set<string>();
+    await withAppendTx(env.ctx.pool, async (tx) => {
+      const cur = await one(tx, 'SELECT * FROM cards WHERE id=$1 FOR UPDATE', [parent.id]);
+      if (!cur || cur.stage !== 'test' || ['done', 'cancelled'].includes(cur.status))
+        throw new HttpError(409, 'not_in_test', `${parent.ref} is no longer in Test`);
+      const open = await rows(
+        tx,
+        `SELECT * FROM cards WHERE parent_card_id=$1 AND card_type='bug' AND origin='test_failure'
+            AND status NOT IN ('done','cancelled') ORDER BY created_at FOR UPDATE`,
+        [parent.id],
+      );
+      // The cancellation must not put the parent back in Test on its own (the tester would fail it again before the
+      // note arrives): the rework below is the next step.
+      for (const child of open) {
+        const ws = await cancelCardIn(
+          env.ctx,
+          tx,
+          env.owner,
+          child,
+          `cancelled by the CEO: the work is in the E2E spec, which only the tester may change. ${p.note}`,
+          { keepParentWaiting: true },
+        );
+        if (ws) workstations.add(ws);
+        cancelledRefs.push(child.ref as string);
+      }
+      const tester = await one<{ agent_id: string }>(
+        tx,
+        `SELECT agent_id FROM card_handoffs WHERE card_id=$1 AND stage='test' AND agent_id IS NOT NULL
+          ORDER BY created_at DESC, event_seq DESC LIMIT 1`,
+        [parent.id],
+      );
+      await env.ctx.store.append(
+        [
+          {
+            streamId: streamId.card(parent.id),
+            event: {
+              type: 'TestReworkRequested',
+              payload: {
+                cardId: parent.id,
+                testerAgentId: tester?.agent_id ?? env.agentId,
+                evidence: { commands: [], summary: p.note, outputExcerpt: '', failureScope: 'e2e_spec' },
+                summary: truncate(p.note, 200),
+                headSha: null,
+                instruction: p.note,
+              },
+            },
+            actor: userActor(env.owner.id),
+            scope: { orgId: env.orgId, projectId: parent.project_id, audience: 'project' },
+          },
+          cardMessage(
+            parent,
+            { kind: 'agent', agentId: env.agentId },
+            'comment',
+            `The CEO sent ${parent.ref} back to the tester${cancelledRefs.length ? ` (cancelled ${cancelledRefs.join(', ')})` : ''}. Do the work yourself in this shift: edit the E2E spec or fixtures and run the capture or the suites; report \`--scope e2e-spec\` only when you cannot finish it.\n\n${p.note}`,
+            { viaCeo: true, failureScope: 'e2e_spec' },
+          ),
+        ],
+        { tx },
+      );
+    });
+    for (const w of workstations) await env.ctx.services.gateway.deliverPending(w);
+    env.ctx.services.dispatcher.trigger();
+    return {
+      message: `${parent.ref} is back in the Test queue with your note${cancelledRefs.length ? `; ${cancelledRefs.join(', ')} cancelled` : ''}.`,
+      result: { cardId: parent.id, cancelled: cancelledRefs },
+    };
+  },
+};
+
 export const ACTIONS6: Partial<Record<CeoActionName, ActionDef>> = {
   move,
   'raise-model': raiseModel,
+  'send-to-tester': sendToTester,
 };
