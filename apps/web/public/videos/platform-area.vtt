@@ -1,0 +1,53 @@
+WEBVTT
+
+1
+00:00:00.449 --> 00:00:10.316
+The platform area is for the people who run Guildwise HQ itself. A platform administrator signs in with two-factor login and sees this separate menu.
+
+2
+00:00:11.021 --> 00:00:18.043
+Organizations lists every customer, with its plan and status. You see metadata, never their work.
+
+3
+00:00:18.748 --> 00:00:25.087
+Open one for its overview, its plan, limits and features, and its recent activity.
+
+4
+00:00:25.797 --> 00:00:34.052
+Invitations starts a new organization: enter the owner’s email and the organization name, and they become its Owner when they accept.
+
+5
+00:00:34.756 --> 00:00:39.365
+Accounts lists everyone with an account, in every organization.
+
+6
+00:00:40.074 --> 00:00:48.166
+Billing holds the payment provider, the plans and their prices, the add-ons, VAT and the invoice details.
+
+7
+00:00:48.876 --> 00:00:56.688
+Support is the inbox of every Contact us request. Your reply is emailed, and shows under the person’s My requests.
+
+8
+00:00:57.388 --> 00:01:00.743
+Blog is where new posts wait for your review before they are published.
+
+9
+00:01:01.455 --> 00:01:08.117
+API keys are for the agent API. A key is stored hashed, and shown only once.
+
+10
+00:01:08.820 --> 00:01:15.111
+Runners shows the runner version this server offers. Workstations check once a day and update themselves.
+
+11
+00:01:15.811 --> 00:01:25.004
+Platform team names the organization that fixes Guildwise itself. And Inbound mail sets up the provider for the mail that organizations receive.
+
+12
+00:01:25.707 --> 00:01:31.663
+Finally, the Audit log records every platform administrator action, and is kept forever.
+
+13
+00:01:32.364 --> 00:01:39.829
+That is the platform area: customers, money, support and the running system, kept apart from the work of each organization.
