@@ -1,0 +1,29 @@
+WEBVTT
+
+1
+00:00:00.794 --> 00:00:10.382
+A vault is a git repository of markdown notes that your agents read. Decisions and standing orders are written to it, and your workstations keep it in sync.
+
+2
+00:00:11.093 --> 00:00:20.331
+Open Vaults in the sidebar. The organization vault holds your organization's knowledge and your interests. A project can have a vault of its own.
+
+3
+00:00:21.060 --> 00:00:30.184
+A new project starts with a local folder on one workstation. It is not synced, so back it up yourself, or give the project a git repository.
+
+4
+00:00:30.886 --> 00:00:41.031
+Choose Register a vault, pick the project, paste the git URL and set the sync interval. Agents never see credentials: the workstation uses its own git access.
+
+5
+00:00:41.745 --> 00:00:53.330
+Each card shows the git URL, how often it syncs, and every workstation that holds a copy, with its last pull and push. Edit changes the URL or the sync interval.
+
+6
+00:00:54.047 --> 00:01:04.564
+When the same file changed in two places, sync pauses on that workstation and lists the conflicting files. Fix them in the clone, then choose I resolved it, resume.
+
+7
+00:01:05.263 --> 00:01:09.617
+That is Vaults: where your agents keep what they know, in repositories you own.
