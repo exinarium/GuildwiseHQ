@@ -1,0 +1,40 @@
+{
+  "title": "Your settings",
+  "src": "/videos/settings.webm",
+  "type": "video/webm",
+  "sources": [
+    {
+      "src": "/videos/settings.mp4",
+      "type": "video/mp4"
+    },
+    {
+      "src": "/videos/settings.webm",
+      "type": "video/webm"
+    }
+  ],
+  "captions": "/videos/settings.vtt",
+  "voice": "Piper en_GB-cori-high",
+  "duration": 74.2,
+  "chapters": [
+    {
+      "t": 9.2,
+      "title": "Your picture"
+    },
+    {
+      "t": 20.9,
+      "title": "Two-factor login"
+    },
+    {
+      "t": 28.9,
+      "title": "Expert mode for code changes"
+    },
+    {
+      "t": 41.8,
+      "title": "Briefing, notifications and the blog digest"
+    },
+    {
+      "t": 60.9,
+      "title": "Your time zone"
+    }
+  ]
+}
