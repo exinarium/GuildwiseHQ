@@ -14,38 +14,38 @@
   ],
   "captions": "/videos/getting-started.vtt",
   "voice": "Piper en_GB-cori-high",
-  "duration": 150.4,
+  "duration": 149.6,
   "chapters": [
     {
-      "t": 8.9,
+      "t": 8.8,
       "title": "The Get started checklist"
     },
     {
-      "t": 23.3,
+      "t": 23.2,
       "title": "Add a workstation"
     },
     {
-      "t": 42.4,
+      "t": 42.3,
       "title": "Create a project"
     },
     {
-      "t": 56.6,
+      "t": 56.5,
       "title": "Hire a lean team"
     },
     {
-      "t": 86.8,
+      "t": 86.5,
       "title": "Create a card and talk to the BA"
     },
     {
-      "t": 111.2,
+      "t": 110.3,
       "title": "Answer on the Desk"
     },
     {
-      "t": 124,
+      "t": 123.1,
       "title": "Watch the board"
     },
     {
-      "t": 135.5,
+      "t": 134.6,
       "title": "Help and shortcuts"
     }
   ]

@@ -103,7 +103,8 @@ test('record the getting-started video', async ({ browser }) => {
     },
     { [BA_QUESTION]: BA_ANSWER },
   );
-  const api = await demoApi();
+  // no CEO: the video starts from an empty organization and hires the team on camera
+  const api = await demoApi({ ceo: false });
   await pairWorkstation(api);
   const { page, narrate, chapter, finish } = await startRecording(prepared, browser, api);
 
