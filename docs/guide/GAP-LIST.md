@@ -292,7 +292,7 @@ Done in the GWP-11 follow-up capture run. The nine missing figures are taken and
 
 Open points from the run:
 - The seed step "test stage: bug loop, conflict, review queue, ..." stops when the manager moves a card straight to Test: on the lean flow such a card is never claimed (no Test deploy ran, so `test_deploy_state` is never `skipped`), which looks like an app bug. The rest of that step (Grace's long build, the bug sent back, the to-do cards, the drafts and the tester bottleneck alert) and the step "an edited card and a risk override" do not run, so the board figures show fewer cards than intended.
-- `desk-large-merge` is not re-taken: the lean flow has no merge approval at Finalize (the owner approval after the review replaces it). The old figure stays in 4.12 until that section and the figure are brought up to date.
+- `desk-large-merge` is removed (file and link). Section 4.12 now describes the owner approval after the review in words only: there is no figure of the owner approval (its desk item with **Show the diff**, **Approve** and **Send back**) yet. Take one in the next capture run and add it to 4.12 after the "Owner approval" paragraph.
 
 ## Intro video: what is outdated (no fix; input for the video plan)
 

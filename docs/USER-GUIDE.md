@@ -125,6 +125,7 @@ This guide is for people who have never worked with AI agents before. You do not
 
 
 
+
 ## 1. What Guildwise HQ is
 
 ### 1.1 The idea in one minute
@@ -910,17 +911,17 @@ Your CEO is your eyes and ears on the floor, and it never slows an agent down. T
 
 ### 4.12 Testing, finalizing and risk
 
-Once a reviewer approves, the card moves to **Test**. A tester runs the tests of the test plan. If they fail, a bug card is created on the same branch, and the original card waits ("waiting on bug") until the bug is fixed and the tests pass.
+Once a reviewer approves (and, where it applies, you have given the owner approval below), the card moves to **Test**. A tester runs the tests of the test plan. If they fail, a bug card is created on the same branch, and the original card waits ("waiting on bug") until the bug is fixed and the tests pass.
 
 **Risk tier.** The app computes it from the size of the change: **Small**: one reviewer and one tester. **Large** (200 or more changed lines, or changes in the architectural areas you configured, or a refactor): two different senior reviewers. You can override it on the card (**Change** next to the risk tier) with a reason. A 50-line change to a critical system may deserve large-tier review.
 
 ![Setting the risk tier](guide/assets/dlg-risk.jpg)
 
-**Finalize.** The BA completes the card the way the project's **How finished work lands** says (4.4): committed and pushed to the working branch, or as a pull request for you. In expert mode a card can have its own completion action: **Commit and push to the working branch** (no pull request), **Pull request** (push the card branch and open a pull request into the working branch). A card branch is only ever pushed to the git host when the work goes out as a pull request; otherwise it stays on the workstation. **A large change that would be committed to the working branch waits for your approval** on the desk, and the card stays in the Finalize column with an "Awaiting your approval" badge.
+**Finalize.** The BA completes the card the way the project's **How finished work lands** says (4.4): committed and pushed to the working branch, or as a pull request for you. In expert mode a card can have its own completion action: **Commit and push to the working branch** (no pull request), **Pull request** (push the card branch and open a pull request into the working branch). A card branch is only ever pushed to the git host when the work goes out as a pull request; otherwise it stays on the workstation. Finalize no longer asks for an approval of its own.
 
-![A large merge waiting for approval](guide/assets/desk-large-merge.jpg)
+**Owner approval (lean team workflow).** On a new project the approval comes *after the review*, not at Finalize (4.26). When the last review approval is in, the card moves to the **Owner approval** stage (column **Approval**) and waits for the project owner; the card shows an "Awaiting your approval" badge and appears under **Waiting for my approval (n)** on the board, and a desk item asks you. Open the card, or the desk item, and press **Show the diff** to read the final diff of the reviewed commit. Then press **Approve**, or **Send back**, which asks for a comment ("What is missing? (required)") and returns the card to Build as rework. A note is optional when you approve. The approval is for that commit: if the code changed after the diff was shown, the card asks again. Which cards ask is set in the project's settings under **Owner approval after the review**: *Large and high-risk cards* (the default; a small low-risk card is approved automatically) or *Every card* (**Ask me to approve every card, also small low-risk ones**). A high-risk change always needs it. Details are in 4.26.
 
-> **Watch out:** in project settings, **Merge large changes without my approval** lets large changes merge as soon as they are finalized. Only the two reviews, the tests and the post-merge full suite then stand in between. It is off by default, only the project owner can change it, it asks you to confirm, and every change is recorded.
+> **Watch out:** a project that used **Merge large changes without my approval** keeps that choice for large cards that are not high risk, so they merge once the two reviews and the tests are through. It is off by default, only the project owner can change it, and every change is recorded. A high-risk card still waits for you.
 
 **Manual QA.** When a card is finalized (merged, pushed or turned into a pull request) it does not go straight to Done. It goes to the **QA** column, assigned to the person who started it: whoever ran the intake chat or batch, else the card's creator, else the project owner. An agent (the tester, or the BA when no tester is hired) writes the test steps on the card, grouped by scenario (happy path, edge cases, error handling, regressions, UI and data checks). The assignee gets a desk item and the card shows under **Waiting for my QA (n)** on the board (a card that waits for your approval, 4.26, shows under **Waiting for my approval (n)**). They choose:
 
@@ -1103,7 +1104,7 @@ The **CEO** is the agent you talk to first. It runs the floor for you: it watche
 
 ![The Reporting & alerts tab of the CEO page](guide/assets/ceo-reporting.jpg)
 
-**Where it runs.** The CEO lives on the Owner's own workstation (the first one they pair). To use another of your own workstations, open the **Workstations** tab and press **Move the CEO here** on it. Until a workstation is paired the page says "Pair a workstation to talk to <name>". Its background work (wakes and the daily report) is restricted: read-only, no web, one command, `aom`. **Pause** is an emergency stop: it may read but not act.
+**Where it runs.** The CEO lives on the Owner's most recently seen workstation that serves the organization (the one that last connected). To use another of your own workstations, open the **Workstations** tab and press **Move the CEO here** on it. Until a workstation is paired the page says "Pair a workstation to talk to <name>". Its background work (wakes and the daily report) is restricted: read-only, no web, one command, `aom`. **Pause** is an emergency stop: it may read but not act.
 
 **There is no training period.** The CEO decides what your policy allows from day one; the Owner reviews and corrects what it did (see **CEO decisions** on the Desk and the **Correct** buttons below). Organizations that had a CEO in training were graduated when this shipped.
 
