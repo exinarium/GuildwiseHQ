@@ -14,30 +14,30 @@
   ],
   "captions": "/videos/ceo.vtt",
   "voice": "Piper en_GB-cori-high",
-  "duration": 116,
+  "duration": 115.6,
   "chapters": [
     {
-      "t": 12.2,
+      "t": 11.8,
       "title": "Overview"
     },
     {
-      "t": 24.6,
+      "t": 24.2,
       "title": "Authority"
     },
     {
-      "t": 57.1,
+      "t": 56.6,
       "title": "Reporting and alerts"
     },
     {
-      "t": 64.5,
+      "t": 64,
       "title": "Ask the CEO"
     },
     {
-      "t": 78.1,
+      "t": 77.6,
       "title": "Activity log and Undo"
     },
     {
-      "t": 100.6,
+      "t": 100.2,
       "title": "Workstations"
     }
   ]
