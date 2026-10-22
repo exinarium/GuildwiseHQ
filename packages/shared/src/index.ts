@@ -4,6 +4,7 @@ export * from './authz/index.ts';
 export * from './avatars/index.ts';
 export * from './backlog/index.ts';
 export * from './blog/index.ts';
+export * from './capabilities/index.ts';
 export * from './cards/index.ts';
 export * from './ceo/index.ts';
 export * from './claude/accounts.ts';

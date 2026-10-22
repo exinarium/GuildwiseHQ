@@ -1,0 +1,21 @@
+category,method_name,description,output_pattern
+Risk,Pre-mortem,Assume the project failed a year from now and explain why.,Failure causes then likelihood then prevention
+Risk,Red team,Attack the plan as an adversary or a competitor would.,Attack paths then impact then countermeasure
+Risk,Failure mode analysis,List how each part can fail and what the failure causes.,Part then failure then effect then mitigation
+Risk,Edge cases,Probe the boundaries: empty and huge and concurrent and offline and malicious input.,Case then expected behaviour then gap
+Assumptions,Assumptions audit,List every assumption and rate it by how much depends on it and how sure we are.,Assumption then evidence then test
+Assumptions,Devil's advocate,Argue the strongest case against the current direction.,Objection then reply then residual risk
+Assumptions,Falsification test,Decide what result would prove the idea wrong and how to look for it.,Claim then disproof then cheapest test
+Reasoning,First principles,Strip the problem to facts that are certainly true and rebuild the solution from them.,Fact then inference then new option
+Reasoning,Five whys,Ask why until you reach a cause that can be changed.,Symptom then why chain then root cause
+Reasoning,Inversion,Ask what would guarantee failure and avoid it.,Guarantee of failure then avoidance
+Reasoning,Second order effects,Follow each consequence one step further.,Change then first effect then second effect
+People,Stakeholder mapping,List who is affected or has power and what each one wants and fears.,Stakeholder then interest then influence then plan
+People,Persona walkthrough,Walk the draft as each user type and note where they stumble.,Persona then step then friction then fix
+People,Jobs to be done,State the job the user hires the solution for and test the draft against it.,Job then current solution then gap
+Quality,Requirements check,Test each requirement for clarity and testability and independence.,Requirement then problem then rewrite
+Quality,Ambiguity hunt,Find words that two readers would interpret differently and define them.,Term then readings then definition
+Quality,Consistency check,Compare sections for contradictions and missing links.,Statement A then statement B then resolution
+Value,Cost and benefit,Estimate the cost and the benefit of each item and drop the weak ones.,Item then cost then benefit then verdict
+Value,Opportunity cost,Name what is not done because of this choice.,Choice then alternative then trade-off
+Value,Minimum viable cut,Find the smallest version that still delivers the core value.,Feature then essential or not then cut

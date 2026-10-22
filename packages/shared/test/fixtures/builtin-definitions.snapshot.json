@@ -1,6 +1,12 @@
 [
   {
     "kind": "role",
+    "key": "analyst",
+    "version": 1,
+    "sha256": "c4c8970be5ab9eb4060bc70d3316066e58fca6ebf4db53076689cb4215bffd3e"
+  },
+  {
+    "kind": "role",
     "key": "architect",
     "version": 5,
     "sha256": "d39b0d95093bc7c60a84041ad4c11bb47bbfd98fbc57f7c36cc8375d6490c0b1"

@@ -1,0 +1,26 @@
+category,technique_name,description
+Collaborative,Round robin,Each person adds one idea in turn so that nobody dominates and quiet voices are heard.
+Collaborative,Yes and,Build on the last idea by starting with "yes and" before adding to it.
+Collaborative,Role storming,Propose ideas as if you were a competitor or a customer or a regulator.
+Collaborative,Brainwriting,Everyone writes ideas silently for a few minutes before any discussion.
+Structured,SCAMPER,Substitute then combine then adapt then modify then put to another use then eliminate then reverse.
+Structured,Starbursting,Generate questions (who and what and when and where and why and how) instead of answers.
+Structured,Morphological box,List the parameters of the problem and the options for each and combine across columns.
+Structured,Six thinking hats,Look at the problem in turn from facts and feelings and risks and benefits and creativity and process.
+Structured,Mind map,Put the topic in the centre and branch out themes and sub-themes to see gaps.
+Reframing,Reverse brainstorm,Ask how to cause the problem or make it worse and then flip each answer into a solution.
+Reframing,How might we,Rephrase the problem as "How might we..." to open it up without implying a solution.
+Reframing,Five whys,Ask why repeatedly to move from a symptom to a root cause that can be addressed.
+Reframing,Jobs to be done,Describe the progress a person is trying to make and the situation they hire a solution in.
+Reframing,Constraint flip,Treat the biggest constraint as a feature and ask what it would enable.
+Analogy,Analogous industries,Ask how a very different industry solves the same underlying problem.
+Analogy,Nature as a model,Look for how living systems handle the same need and borrow the pattern.
+Analogy,Metaphor mashup,Describe the product as a metaphor (a library or a kitchen or an airport) and mine it for features.
+Extremes,Ten times bigger or smaller,Imagine ten times the users or one tenth of the budget and see what breaks or appears.
+Extremes,Zero click,Ask what the experience would be if the user had to do nothing at all.
+Extremes,Worst possible idea,Collect deliberately terrible ideas then look for the useful kernel in each one.
+Futures,Back from the headline,Write the headline you want in two years and work backwards to what had to happen.
+Futures,Pre-mortem,Assume it failed and list the reasons so that they can be prevented now.
+Prioritising,Dot voting,Each person places a few dots on the ideas they value most to show the group's weight.
+Prioritising,Impact and effort grid,Place ideas on a grid of value against effort and start with high value and low effort.
+Prioritising,Now next later,Sort the ideas into what to do now and what next and what later to give them a sequence.

@@ -331,6 +331,24 @@ How to work:
 8. A \`decision_review\` wake means the owner corrected one of your decisions and the BA has analysed it (its consequences and proposed fix cards are in the brief). The owner's correction stands. Reply once, honestly: \`aom ceo review-reply --item <id> --agree|--disagree --reflection "<what you got wrong and why>" --lesson "<the rule for next time>" [--card-changes "<comments on the BA's proposed cards>"]\`. Agree if the correction is right; disagree only when you hold a reasoned different view, which is recorded for the owner and changes nothing. The lesson is recorded in your memory in your own words, so make it a rule you can apply next time, naming the signal you missed. Comment on the BA's cards (too many, too few, wrong project, a missing dependency); the BA then creates the final cards. There is no second round.
 9. End every wake with \`aom ceo done\`; the daily review ends with \`aom ceo report\`.`;
 
+const ANALYST_INSTRUCTIONS = `You are the analyst, the facilitator of discovery sessions. You interview the owner about an idea, one question at a time, and help turn it into a clear brief or product requirements document. You never write code and you never change files outside your scratch directory.
+
+How to work:
+1. Run the session as a conversation: one question at a time, with two to four quick-pick options and room for free text. The owner may skip or park any question.
+2. Move through the phases in order (frame, diverge, converge, stress test, capture) and say which one you are in.
+3. Load a playbook or skill when it fits: \`aom skill show playbook:brainstorm\`, \`playbook:advanced-elicitation\`, \`playbook:product-brief\`, \`playbook:prd\`, \`skill:interview-techniques\`. Read a step or an asset with \`--file steps/<name>\`.
+4. Never invent facts. Anything the owner has not confirmed is an assumption, and you write it down as one.
+5. Changes to a document are suggestions: the owner applies, rejects or redirects each one. Never apply one yourself.
+6. When the CEO takes part in the session, its answers are proposals; the owner decides.
+7. Search recorded decisions first (\`aom ledger search "<query>"\`) so you do not ask what is already settled.`;
+
+const ANALYST_CORE_RULES = [
+  'Ask one question at a time and wait for the answer.',
+  'Never apply a change to a document without the owner choosing Apply.',
+  'Never invent requirements, numbers or decisions the owner did not give; label guesses as assumptions.',
+  'Read only: do not modify files, run builds, or push anything.',
+];
+
 export const BUILTIN_ROLES: RoleDefinition[] = [
   role({
     key: 'ba',
@@ -379,6 +397,25 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
       mayCommit: false,
     }),
     skills: [],
+    claimableStages: [],
+  }),
+  role({
+    key: 'analyst',
+    version: 1,
+    name: 'Analyst',
+    purpose: 'Facilitates discovery sessions: interviews the owner and turns an idea into a brief or a PRD.',
+    department: 'delivery',
+    instructions: ANALYST_INSTRUCTIONS,
+    coreRules: ANALYST_CORE_RULES,
+    seniorityLevels: ['senior'],
+    defaultModel: { runtime: 'claude-code', model: 'sonnet', effort: 'medium' },
+    permissions: perms({
+      allowedTools: ['read'],
+      deniedShellPatterns: [],
+      writableGlobs: [],
+      mayCommit: false,
+    }),
+    skills: ['interview-techniques', 'brainstorm', 'advanced-elicitation', 'product-brief', 'prd'],
     claimableStages: [],
   }),
   role({
