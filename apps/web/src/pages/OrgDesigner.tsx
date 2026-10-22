@@ -179,7 +179,10 @@ function VersionRow({
           {vaultPath}
         </span>
       )}
-      <span className="ml-auto flex gap-1">{actions}</span>
+      {/* the actions wrap inside the row: a draft has four buttons, more than half a card is wide */}
+      <span className="ml-auto flex max-w-full flex-wrap justify-end gap-1" data-testid="version-actions">
+        {actions}
+      </span>
     </li>
   );
 }
