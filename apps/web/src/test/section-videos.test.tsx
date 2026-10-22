@@ -100,22 +100,21 @@ describe('the video registry', () => {
   });
 
   it('finds a video by nav id, article and path only when it is published', () => {
-    expect(videoForNav('backlog')).toBeUndefined();
-    expect(videosForArticle('board-and-cards')).toEqual([]);
-    expect(videoForPath('/p/ABC/backlog')).toBeUndefined();
-    publish('backlog');
-    expect(publishedVideo('backlog')?.title).toBe('The project backlog');
-    expect(videoForNav('backlog')?.slug).toBe('backlog');
-    expect(videosForArticle('board-and-cards').map((v) => [v.slug, v.anchor])).toEqual([
-      ['backlog', 'backlog'],
-    ]);
-    expect(videoForPath('/p/ABC/backlog')?.slug).toBe('backlog');
+    expect(videoForNav('desk')).toBeUndefined();
+    expect(videosForArticle('desk')).toEqual([]);
+    expect(videoForPath('/desk')).toBeUndefined();
+    publish('desk');
+    expect(publishedVideo('desk')?.title).toBe('Your Desk');
+    expect(videoForNav('desk')?.slug).toBe('desk');
+    expect(videosForArticle('desk').map((v) => [v.slug, v.anchor])).toEqual([['desk', 'desk-items']]);
+    expect(videoForPath('/desk')?.slug).toBe('desk');
   });
 
   it('maps a page to its sidebar section', () => {
     expect(navIdForPath('/p/ABC/board')).toBe('board');
     expect(navIdForPath('/cards/123')).toBe('board');
     expect(navIdForPath('/p/ABC/backlog')).toBe('backlog');
+    expect(navIdForPath('/desk')).toBe('desk');
     expect(navIdForPath('/p/ABC/environments')).toBe('environments');
     expect(navIdForPath('/p/ABC/research')).toBe('research');
     expect(navIdForPath('/org/workflows/w1')).toBe('org');
@@ -131,58 +130,58 @@ describe('the video registry', () => {
 
 describe('SectionVideo', () => {
   it('shows nothing, and asks for nothing, while the video is not published', async () => {
-    const f = serve('backlog');
-    const { container } = render(<SectionVideo slug="backlog" />);
+    const f = serve('desk');
+    const { container } = render(<SectionVideo slug="desk" />);
     await Promise.resolve();
     expect(container).toBeEmptyDOMElement();
     expect(f).not.toHaveBeenCalled();
   });
 
   it('shows the player of a published video, with its own test id and captions', async () => {
-    publish('backlog');
-    serve('backlog');
-    render(<SectionVideo slug="backlog" />);
-    const player = (await screen.findByTestId('backlog-player')) as HTMLVideoElement;
-    expect(player.querySelector('source')).toHaveAttribute('src', '/videos/backlog.webm');
-    expect(player.querySelector('track')).toHaveAttribute('src', '/videos/backlog.vtt');
-    expect(screen.getByRole('heading', { name: 'The project backlog' })).toBeInTheDocument();
+    publish('desk');
+    serve('desk');
+    render(<SectionVideo slug="desk" />);
+    const player = (await screen.findByTestId('desk-player')) as HTMLVideoElement;
+    expect(player.querySelector('source')).toHaveAttribute('src', '/videos/desk.webm');
+    expect(player.querySelector('track')).toHaveAttribute('src', '/videos/desk.vtt');
+    expect(screen.getByRole('heading', { name: 'Your Desk' })).toBeInTheDocument();
     expect(screen.getByTestId('video-chapter-2')).toHaveTextContent('0:30');
   });
 
   it('shows nothing when a published video has no chapters JSON', async () => {
-    publish('backlog');
+    publish('desk');
     const f = serve();
-    const { container } = render(<SectionVideo slug="backlog" />);
-    await waitFor(() => expect(f).toHaveBeenCalledWith('/videos/backlog.json', expect.anything()));
+    const { container } = render(<SectionVideo slug="desk" />);
+    await waitFor(() => expect(f).toHaveBeenCalledWith('/videos/desk.json', expect.anything()));
     expect(container).toBeEmptyDOMElement();
   });
 });
 
 describe('the Watch the video button of the page help', () => {
   it('is absent on a page without a published video', async () => {
-    serve('backlog');
-    const { container } = render(<PageVideo pathname="/p/ABC/backlog" />);
+    serve('desk');
+    const { container } = render(<PageVideo pathname="/desk" />);
     await Promise.resolve();
     expect(container).toBeEmptyDOMElement();
   });
 
   it('is absent when the video is published but its file is missing', async () => {
-    publish('backlog');
+    publish('desk');
     const f = serve();
-    const { container } = render(<PageVideo pathname="/p/ABC/backlog" />);
+    const { container } = render(<PageVideo pathname="/desk" />);
     await waitFor(() => expect(f).toHaveBeenCalled());
     expect(container).toBeEmptyDOMElement();
   });
 
   it('opens and closes the player of the page section', async () => {
-    publish('backlog');
-    serve('backlog');
+    publish('desk');
+    serve('desk');
     const user = userEvent.setup();
-    render(<PageVideo pathname="/p/ABC/backlog" />);
+    render(<PageVideo pathname="/desk" />);
     await user.click(await screen.findByRole('button', { name: 'Watch the video' }));
-    expect(await screen.findByTestId('backlog-player')).toBeInTheDocument();
+    expect(await screen.findByTestId('desk-player')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Hide the video' }));
-    expect(screen.queryByTestId('backlog-player')).toBeNull();
+    expect(screen.queryByTestId('desk-player')).toBeNull();
   });
 });
 
@@ -191,9 +190,9 @@ describe('a Help article', () => {
   const view = () => (
     <MemoryRouter>
       <Markdown
-        blocks={article('board-and-cards').blocks}
+        blocks={article('desk').blocks}
         afterHeading={(id) =>
-          videosForArticle('board-and-cards')
+          videosForArticle('desk')
             .filter((v) => v.anchor === id)
             .map((v) => <SectionVideo key={v.slug} slug={v.slug} />)
         }
@@ -202,18 +201,18 @@ describe('a Help article', () => {
   );
 
   it('shows no video under a heading until one is published', async () => {
-    serve('backlog');
+    serve('desk');
     render(view());
     await Promise.resolve();
-    expect(screen.queryByTestId('section-video-backlog')).toBeNull();
+    expect(screen.queryByTestId('section-video-desk')).toBeNull();
   });
 
   it('shows the published video right under the heading it is registered for', async () => {
-    publish('backlog');
-    serve('backlog');
+    publish('desk');
+    serve('desk');
     render(view());
-    const box = await screen.findByTestId('section-video-backlog');
-    const heading = document.getElementById('backlog');
+    const box = await screen.findByTestId('section-video-desk');
+    const heading = document.getElementById('desk-items');
     expect(heading?.nextElementSibling).toBe(box);
   });
 });
@@ -221,15 +220,15 @@ describe('a Help article', () => {
 describe('a video in a tour card', () => {
   it('shows only a published section video, and tells the card when it appears', async () => {
     const shown = vi.fn();
-    serve('backlog');
-    const first = render(<TourVideo slug="backlog" onShown={shown} />);
+    serve('desk');
+    const first = render(<TourVideo slug="desk" onShown={shown} />);
     await Promise.resolve();
     expect(first.container).toBeEmptyDOMElement();
     first.unmount();
-    publish('backlog');
-    render(<TourVideo slug="backlog" onShown={shown} />);
+    publish('desk');
+    render(<TourVideo slug="desk" onShown={shown} />);
     expect(await screen.findByTestId('tour-video')).toBeInTheDocument();
-    expect(screen.getByTestId('backlog-player')).toBeInTheDocument();
+    expect(screen.getByTestId('desk-player')).toBeInTheDocument();
     expect(shown).toHaveBeenLastCalledWith(true);
   });
 });

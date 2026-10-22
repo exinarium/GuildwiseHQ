@@ -38,7 +38,7 @@ export const SECTION_VIDEOS: Record<string, SectionVideoEntry> = {
     title: 'The project backlog',
     nav: 'backlog',
     help: 'board-and-cards#backlog',
-    published: false,
+    published: true,
   },
   environments: {
     title: 'Environments: where your app runs',
