@@ -15,6 +15,7 @@ import { migrateProjectVaults } from './project-vaults.ts';
 import { migratePushBranchRetired } from './push-branch-retired.ts';
 import { migrateReporterRetired } from './reporter-retired.ts';
 import { migrateRestructure } from './restructure.ts';
+import { migrateStrandedTestCards } from './stranded-test-cards.ts';
 
 export {
   BLOG_CITE_CLEANUP_MIGRATION,
@@ -75,6 +76,11 @@ export {
   planRestructure,
   RESTRUCTURE_MIGRATION,
 } from './restructure.ts';
+export {
+  migrateStrandedTestCards,
+  STRANDED_TEST_CARDS_MIGRATION,
+  type StrandedTestCardsReport,
+} from './stranded-test-cards.ts';
 
 /**
  * Boot data migrations, run after the SQL migrations and before the dispatcher, scheduler and HTTP listener
@@ -99,6 +105,7 @@ export const DATA_MIGRATIONS: Array<{ name: string; run: (env: DataMigrationEnv)
   { name: 'guided-mode-2026-10', run: (env) => migrateGuidedMode(env) },
   { name: 'ceo-authority-2026-10', run: (env) => migrateCeoAuthority(env) },
   { name: 'ceo-decision-dedupe-2026-10', run: (env) => migrateCeoDecisionDedupe(env) },
+  { name: 'stranded-test-cards-2026-10', run: (env) => migrateStrandedTestCards(env) },
 ];
 
 export async function runDataMigrations(env: DataMigrationEnv): Promise<void> {

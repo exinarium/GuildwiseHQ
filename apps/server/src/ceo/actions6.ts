@@ -1,7 +1,7 @@
 import { type CeoActionName, canonicalWorkflowKey, DESK_SUBKIND, isKnownChoice, streamId } from '@aom/shared';
 import { z } from 'zod';
 import { loadWorkflowById } from '../catalogue/loader.ts';
-import { cancelCardIn, moveCard } from '../commands/cards.ts';
+import { cancelCardIn, moveCardWithNotice } from '../commands/cards.ts';
 import { agentActor, cardMessage, userActor } from '../commands/common.ts';
 import { one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
@@ -66,8 +66,9 @@ const move: ActionDef<z.infer<typeof MoveP>> = {
     const card = pr.data?.card as Row;
     const targets = pr.data?.targets as { id: string }[];
     const reason = p.note?.trim() || 'moved by the CEO';
+    let moved: Awaited<ReturnType<typeof moveCardWithNotice>>;
     try {
-      await moveCard(env.ctx, env.owner, card.id, p.to, `${reason} (CEO)`, {
+      moved = await moveCardWithNotice(env.ctx, env.owner, card.id, p.to, `${reason} (CEO)`, {
         actor: agentActor(env.agentId),
         by: `${env.agentName} (CEO)`,
       });
@@ -83,7 +84,7 @@ const move: ActionDef<z.infer<typeof MoveP>> = {
     }
     env.ctx.services.dispatcher.trigger();
     return {
-      message: `${card.ref} moved from ${card.stage} to ${p.to}; it is queued there.`,
+      message: `${card.ref} moved from ${card.stage} to ${p.to}; it is queued there.${moved.notice ? ` ${moved.notice}` : ''}`,
       result: { cardId: card.id, from: card.stage, to: p.to },
     };
   },

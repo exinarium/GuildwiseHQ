@@ -214,3 +214,15 @@ export async function suiteResultsOf(db: Queryable, cardId: string): Promise<Tes
   );
   return list.map(toSuiteResultDto);
 }
+
+/** Why a card needs no test environment (the tester works without one), or null when it does. */
+export function testDeploySkipReason(card: Row, project: Row, settings: IntegrationTests): string | null {
+  if (project.test_without_environment) return 'the project tests without an environment (project setting)';
+  if (card.origin === 'full_suite' || card.origin === 'regression')
+    return 'a suite card tests a target, not a card commit';
+  if ((card.fields as Record<string, unknown> | null)?.integrationTests === false)
+    return 'integration tests are switched off for this card';
+  if (settings.mode === 'off') return 'the project does not run integration tests';
+  if (settings.mode === 'remote') return 'the project tests against a deployed target: nothing to start';
+  return null;
+}

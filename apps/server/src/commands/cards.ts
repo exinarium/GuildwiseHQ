@@ -39,8 +39,8 @@ import { badRequest, conflict, forbidden, notFound, unprocessable } from '../err
 import type { AppendInput } from '../eventstore/types.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { needsRepoScoping, singleRepoDefault } from './card-repo.ts';
-import { cardMessage, projectScope, userActor } from './common.ts';
-import { integrationTestsDefault } from './integration-tests.ts';
+import { cardMessage, projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
+import { integrationTestsDefault, integrationTestsOf, testDeploySkipReason } from './integration-tests.ts';
 import { openLoopAlerts } from './loop-breaker.ts';
 import { NO_VAULT_MESSAGE, projectHasVault } from './vaults.ts';
 
@@ -655,6 +655,50 @@ export function releaseEvents(card: Row, actorUserId: string, reason: 'manual'):
   ];
 }
 
+/**
+ * A card put into the Test stage by a person (a manual move, a reopen) skips the server-run Test deploy stage, which is
+ * what normally leaves it ready for the tester (`cards.test_deploy_state`; the dispatcher's `envReady` offers a card in
+ * an `envStrict` stage only when that is `skipped` or the card has a healthy environment). So the move does what Test
+ * deploy would have done:
+ * - nothing to start (integration tests off, remote target, opted-out card, suite card): the same `TestDeployResolved`
+ *   with result `skipped` that the stage appends, right after the move;
+ * - an environment is needed: the card is routed through the Test deploy stage instead (it starts the environment for
+ *   the card's commit and moves on to Test when it is healthy). Duplicating the start here would be a second path to keep right.
+ * Any other target stage is returned unchanged.
+ */
+async function testDeployRouting(
+  tx: Tx,
+  card: Row,
+  def: WorkflowDefinition,
+  stage: { id: string; kind: string; envStrict?: boolean },
+): Promise<{ toStage: string; after: AppendInput[]; note?: string }> {
+  const deploy = def.stages.find((s) => s.kind === 'server' && s.server?.action === 'test_deploy');
+  if (stage.kind !== 'agent' || !stage.envStrict || !deploy) return { toStage: stage.id, after: [] };
+  const project = (await one(tx, 'SELECT * FROM projects WHERE id=$1', [card.project_id])) as Row;
+  const skip = testDeploySkipReason(card, project, integrationTestsOf(project));
+  if (!skip)
+    return { toStage: deploy.id, after: [], note: `${deploy.label} starts the test environment first` };
+  return {
+    toStage: stage.id,
+    after: [
+      {
+        streamId: streamId.card(card.id),
+        event: {
+          type: 'TestDeployResolved',
+          payload: {
+            cardId: card.id,
+            result: 'skipped',
+            reason: skip,
+            ...(card.head_sha ? { sha: card.head_sha } : {}),
+          },
+        },
+        actor: SYSTEM_ACTOR,
+        scope: projectScope(card.org_id, card.project_id),
+      },
+    ],
+  };
+}
+
 /** What a manual move needs from its caller beyond the user: who the move is attributed to (default: the user). */
 export interface MoveOptions {
   /** The actor of the events, e.g. the CEO agent acting for the user. */
@@ -709,6 +753,7 @@ export async function moveCardWithNotice(
     if (missing.length)
       throw unprocessable('missing_fields', `missing required fields: ${missing.join(', ')}`, { missing });
     const status = stage.kind === 'manual' ? 'draft' : 'queued';
+    const routed = await testDeployRouting(tx, card, wf.definition, stage);
     const actor = opts.actor ?? userActor(user.id);
     const by = opts.by ?? user.displayName;
     const resolvedBy =
@@ -760,7 +805,7 @@ export async function moveCardWithNotice(
           payload: {
             cardId: card.id,
             fromStage: card.stage,
-            toStage,
+            toStage: routed.toStage,
             status,
             reason,
             clearsBlockers: true,
@@ -769,16 +814,19 @@ export async function moveCardWithNotice(
         actor,
         scope,
       },
+      ...routed.after,
       cardMessage(
         card,
         { kind: 'system' },
         'system',
-        `Moved from ${card.stage} to ${toStage} by ${by}: ${reason}`,
+        `Moved from ${card.stage} to ${toStage} by ${by}: ${reason}${routed.toStage !== toStage ? ` (${routed.note})` : ''}`,
       ),
     ];
     await ctx.store.append(events, { tx });
     // The dependency gate holds every stage but planning and design: say so instead of leaving the card looking stuck.
-    let notice: string | undefined;
+    let notice: string | undefined = routed.note
+      ? `The card went to ${routed.toStage} first: ${routed.note}, then it moves on to ${stage.label}.`
+      : undefined;
     if (stage.kind === 'agent' && toStage !== 'planning' && !toStage.startsWith('investigate')) {
       const unlanded = (await dependencyStates(tx, card.id)).filter((d) => !d.landed);
       if (unlanded.length)
@@ -810,7 +858,7 @@ export async function reopenCard(
       );
     const wf = await loadWorkflowById(tx, card.workflow_version_id);
     const stage = wf ? getStage(wf.definition, toStage) : undefined;
-    if (!stage)
+    if (!wf || !stage)
       throw badRequest('unknown_stage', `stage '${toStage}' does not exist in this card's workflow`);
     if (stage.kind !== 'agent' && stage.kind !== 'manual')
       throw badRequest('invalid_stage', 'a card is reopened into a work stage (an agent or manual stage)');
@@ -818,6 +866,7 @@ export async function reopenCard(
     if (missing.length)
       throw unprocessable('missing_fields', `missing required fields: ${missing.join(', ')}`, { missing });
     const status = stage.kind === 'manual' ? 'draft' : 'queued';
+    const routed = await testDeployRouting(tx, card, wf.definition, stage);
     const earlier = (card.finalize_result ?? {}) as { prUrl?: string; pushedBranch?: string };
     const earlierNote = earlier.prUrl
       ? ` An earlier pull request exists: ${earlier.prUrl} (finalizing again reuses it while it is open).`
@@ -834,7 +883,7 @@ export async function reopenCard(
             cardId: card.id,
             fromStage: card.stage,
             fromStatus: card.status,
-            toStage,
+            toStage: routed.toStage,
             status,
             reason,
             by: user.id,
@@ -843,6 +892,7 @@ export async function reopenCard(
         actor: userActor(user.id),
         scope,
       },
+      ...routed.after,
       cardMessage(
         card,
         { kind: 'system' },

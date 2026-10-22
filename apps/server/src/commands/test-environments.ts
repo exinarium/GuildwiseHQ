@@ -33,9 +33,12 @@ import { loadCommitAs } from './commit-as.ts';
 import { cardMessage, projectScope, SYSTEM_ACTOR } from './common.ts';
 import { openItemForSubject, raiseOrCoalesce } from './desk-coalesce.ts';
 import { createDevOpsRequestIn } from './devops.ts';
-import { cardIntegrationTests, integrationTestsOf } from './integration-tests.ts';
+import { cardIntegrationTests, integrationTestsOf, testDeploySkipReason } from './integration-tests.ts';
 import { branchKey, capsOf, findReplay, requestStopIn } from './runs.ts';
 import { PROBLEM_TEXT, testEnvironmentHardStop } from './testing.ts';
+
+export { testDeploySkipReason };
+
 import { deliver } from './workstation-setup.ts';
 
 /**
@@ -422,18 +425,6 @@ SELECT c.id FROM cards c
  WHERE st.kind = 'server' AND c.status = 'queued' AND c.claim_id IS NULL
  ORDER BY c.queued_at NULLS LAST, c.created_at
  LIMIT 20`;
-
-/** Why a card needs no test environment (the tester works without one), or null when it does. */
-export function testDeploySkipReason(card: Row, project: Row, settings: IntegrationTests): string | null {
-  if (project.test_without_environment) return 'the project tests without an environment (project setting)';
-  if (card.origin === 'full_suite' || card.origin === 'regression')
-    return 'a suite card tests a target, not a card commit';
-  if ((card.fields as Record<string, unknown> | null)?.integrationTests === false)
-    return 'integration tests are switched off for this card';
-  if (settings.mode === 'off') return 'the project does not run integration tests';
-  if (settings.mode === 'remote') return 'the project tests against a deployed target: nothing to start';
-  return null;
-}
 
 /**
  * The server-run Test deploy stage (lean team, design 5.6): no agent works here. For a card queued in a `server` stage with the
