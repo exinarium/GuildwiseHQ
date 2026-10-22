@@ -9,13 +9,16 @@ When you sign in for the first time, Guildwise HQ shows you around and introduce
 
 ## The training video {#training-video}
 
-On the **Help** page, the **Getting started in five steps** video is a spoken tutorial of about three minutes. A friendly voice walks you through the five steps while you watch them happen on screen:
+On the **Help** page, the **Getting started** video is a spoken tutorial of under three minutes. A friendly voice takes you from an empty organization to a team of agents at work while you watch it happen on screen:
 
-1. **Create your first project:** open **Projects**, choose **New project**, give it a key and a name, and add the repository the agents work in.
-2. **Hire your agents:** a business analyst, a builder, a reviewer and a tester make a small, complete team.
-3. **Create cards:** describe one thing you want done, then choose **Specify** so the team picks it up.
-4. **Talk to the business analyst:** open the chat, pick the analyst and ask in plain words. The analyst can turn a conversation into cards.
-5. **Test your running project:** watch the cards move across the board, open one to see its plan and cost, and try the result.
+1. **The Get started checklist:** a new organization shows **Get started** in the sidebar, with what is left to do. Each step ticks itself off.
+2. **Add a workstation:** on **Workstations**, **Add a workstation** asks where your agents run, gives you one command to copy and shows the progress live.
+3. **Create a project:** on **Projects**, **New project** with a name and a short key; then add the repository in the project settings.
+4. **Hire a lean team:** on **Agents**, **Hire agent** for each role, with the project selected under **Where may this agent work**. A lean team has seven roles: a business analyst, a planner, an architect, a builder, a pre-reviewer, a reviewer and a tester.
+5. **Create a card and talk to the BA:** **New card** at the top of the sidebar, then **Specify**; or open the chat, pick the business analyst and ask in plain words. The analyst can turn the conversation into cards.
+6. **Answer on the Desk:** when an agent needs a decision it lands on the **Desk**, and the number in the sidebar tells you. Pick an option and choose **Answer**.
+7. **Watch the board:** the card moves from column to column by itself as the agents plan, design, build, review and test.
+8. **Help and shortcuts:** **Help** at the bottom of the sidebar, the guided tour, and Ctrl K to jump anywhere.
 
 The captions show everything the voice says and are on by default; use the **CC** button on the player to turn them off. Under the video, each step is a button that jumps to that part.
 

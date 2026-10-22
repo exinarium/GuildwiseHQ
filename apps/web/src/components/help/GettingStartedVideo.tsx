@@ -122,8 +122,8 @@ export function VideoPlayer({
 }
 
 /**
- * The "Getting started" video with its chapters (create a project, hire agents, create cards, talk to the BA, test your
- * project). The video is a static file recorded by `pnpm --filter @aom/e2e video`; until it exists, or when it cannot be
+ * The "Getting started" video with its chapters (the Get started checklist, a workstation, a project, a lean team, a card
+ * and the BA, the Desk, the board, Help). The video is a static file recorded by `pnpm --filter @aom/e2e video`; until it exists, or when it cannot be
  * loaded, a short "coming soon" note takes its place (the written article below says the same).
  */
 export function GettingStartedVideo() {
@@ -138,12 +138,12 @@ export function GettingStartedVideo() {
     >
       <h2 id="gs-video-h" className="flex items-center gap-2 text-base font-semibold text-fg">
         <Clapperboard aria-hidden="true" className="size-4 text-brand-text" />
-        Getting started in five steps
+        Getting started
       </h2>
       <p className="mt-1 mb-3 text-sm text-muted">
-        A voice-over tutorial of about three minutes: create your first project, hire agents, create cards,
-        talk to the business analyst and test your running project. Captions are on; use the CC button to turn
-        them off.
+        A voice-over tutorial of under three minutes, from an empty organization to a team at work: the Get
+        started checklist, a workstation, a project, a lean team, a first card and the business analyst, the
+        Desk and the board. Captions are on; use the CC button to turn them off.
       </p>
       {info === 'none' || broken ? (
         <p

@@ -274,7 +274,7 @@ The first time you sign in, a short guided tour highlights the main areas and te
 
 The tour walks down the sidebar in order, one step for every entry you have (Board, Backlog, Environments, Research, Desk, Intake, Automations, Projects, Agents, Org chart, CEO, Roles & workflows, Workstations, Releases, Integrations, Metrics, Costs, Interests, Ledger, Vaults, Settings and Organization), then shows the search, the page help, **Ask DevOps** and Help. It takes about three minutes. Appendix A lists the tour step of every section.
 
-The tour starts with the training video: its first step is **Watch the 3-minute getting-started video**, with the player (captions and chapter buttons) in the tour card; press **Next: take the tour** to carry on (the video pauses). The same video is on the **Help** page as **Getting started in five steps**, a spoken tutorial of about three minutes: create a project, hire your agents, create cards, talk to the business analyst, and test the result. If the video file is missing, the first step shows a short text instead.
+The tour starts with the training video: its first step is **Watch the 3-minute getting-started video**, with the player (captions and chapter buttons) in the tour card; press **Next: take the tour** to carry on (the video pauses). The same video is on the **Help** page as **Getting started**, a spoken tutorial of under three minutes: the Get started checklist, adding a workstation, a project and its repository, hiring a lean team, a first card and a talk with the business analyst, answering on the Desk, the board moving by itself, and where Help and Ctrl K are. If the video file is missing, the first step shows a short text instead.
 
 ![The first step of the tour](guide/assets/tour-1.jpg)
 

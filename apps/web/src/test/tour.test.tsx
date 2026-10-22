@@ -406,7 +406,7 @@ describe('the first-login tour', () => {
     await screen.findByRole('dialog');
     await new Promise((r) => setTimeout(r, 30));
     expect(screen.queryByTestId('getting-started-player')).toBeNull();
-    expect(screen.getByRole('dialog')).toHaveTextContent(/five steps to get going/);
+    expect(screen.getByRole('dialog')).toHaveTextContent(/from an empty organization to a team at work/);
     await user.click(screen.getByTestId('tour-next'));
     expect(screen.getByTestId('tour-title')).toHaveTextContent('Welcome to Guildwise HQ');
   });
