@@ -9,9 +9,9 @@ import {
   FolderKanban,
   Inbox,
   KanbanSquare,
-  ListTodo,
   LifeBuoy,
   Lightbulb,
+  ListTodo,
   type LucideIcon,
   Network,
   Plug,
@@ -42,6 +42,9 @@ export interface NavSection {
   items: NavEntry[];
 }
 
+/** Project pages with a sidebar entry of their own: the Board entry is not highlighted on them. */
+const OWN_ENTRY = /\/(backlog|environments|research)\/?$/;
+
 /** The sidebar as data. Board points at the current project; Interests live under Knowledge. */
 export function buildNav(opts: {
   projectKey: string | null;
@@ -67,7 +70,8 @@ export function buildNav(opts: {
       label: 'Board',
       to: projectKey ? `/p/${projectKey}/board` : '/projects',
       icon: KanbanSquare,
-      match: (p) => (p.startsWith('/p/') && !p.endsWith('/backlog')) || p.startsWith('/cards/'),
+      // a project page is the Board unless it is one of the project's own sidebar entries (Backlog, Environments, Research)
+      match: (p) => (p.startsWith('/p/') && !OWN_ENTRY.test(p)) || p.startsWith('/cards/'),
     },
   ];
   if (projectKey)

@@ -29,6 +29,16 @@ describe('navigation', () => {
     expect(roles?.match?.('/org')).toBe(true);
     expect(roles?.match?.('/org/ceo')).toBe(false);
   });
+  it('highlights only the current entry on a project page: Board stays dark on Backlog, Environments and Research', () => {
+    const work =
+      buildNav({ projectKey: 'SHOP', hasResearch: true, hasEnvironments: true }).sections[0]?.items ?? [];
+    const lit = (path: string) => work.filter((e) => e.match?.(path)).map((e) => e.id);
+    expect(lit('/p/SHOP/board')).toEqual(['board']);
+    expect(lit('/cards/SHOP-3')).toEqual(['board']);
+    expect(lit('/p/SHOP/backlog')).toEqual(['backlog']);
+    expect(lit('/p/SHOP/environments')).toEqual(['environments']);
+    expect(lit('/p/SHOP/research')).toEqual(['research']);
+  });
 });
 
 function Shell() {
