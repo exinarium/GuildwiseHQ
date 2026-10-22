@@ -711,7 +711,7 @@ Heartbeats are not events.
 | `CardReopened` | `{cardId, fromStage, fromStatus, toStage, status, reason, by}` | a done or cancelled card goes back to an agent or manual stage (`POST /api/cards/:id/reopen`); branch, worktree and the finalize result stay |
 | `FinalizeRequested` | `{cardId, action, requestedBy, withoutApproval?}` (`withoutApproval`: a large merge that skipped the desk because the project setting allows it; adds a `merge_policy` row to the card timeline) | (M4) status `waiting`; runner command `finalize.execute` queued to the card's home workstation; its `command.result` produces `CardFinalized` (or a desk escalation on failure) |
 | **`CardFinalized`** | `{cardId, action, resultRef: {mergeCommit?, prUrl?, pushedBranch?}, toStage:'done'}` | stage done, status done, finalized_at; queues `worktree.remove` runner command; dependents become claimable |
-| `CardCancelled` | `{cardId, reason}` | status cancelled; claim released first |
+| `CardCancelled` | `{cardId, reason, cause?, childCardIds?}` | status cancelled; claim released first. `cause`: `project_archived`, `project_converted`, or `split` (repository scoping: the draft was replaced by the cards in `childCardIds`; the projector ignores both) |
 | `ThreadMessagePosted` | `{threadId, messageId, cardId?, authorKind, authorUserId?, authorAgentId?, kind, body, data}` | thread_messages |
 
 `ReworkReason = 'missed_requirement' | 'broke_convention' | 'weak_tests' | 'poor_structure' | 'spec_unclear' | 'out_of_scope_test_change' | 'regression_risk'`.
@@ -1314,6 +1314,28 @@ still leaves fields empty. A missing repository or other non-text key stays with
 becomes a pinned `spec_needed` alert. `intake` takes `cardType`, `ticket` (the card's `externalRef`) and `priority`, uses the
 same completion path, and without a BA reports "recommend hiring a BA" instead of refusing. The reporter sweep and routing use the
 same test for "the CEO holds items" (`ceoActive` and `ceoReachable`).
+
+**Repository scoping (a card with no repository in a project with two or more).** Nobody is asked to pick a repository, least of
+all the CEO. `needsRepoScoping` (`commands/card-repo.ts`) is derived from the card (a draft, no `repo_id`, a workflow that uses
+repositories, two or more active repositories), so there is no new queue event and no migration. `splitMissing` then treats a
+missing `repoId` as the BA's work: `intake`, `specify`, the web's "Not sure: let the BA find out" (`findRepo` on
+`POST /api/cards`) and **Send to BA** (`POST /api/cards/:id/send-to-ba`) queue the same `spec_card` task, which
+`buildSpecCardTask` renders in a scoping mode (`chooseRepo`, the repositories with their graph key and whether the graph covers
+them, `by`). The BA reads no source (owner rule): it works through `aom graph query|impact` (every hit now shows `[repo <name>]`
+when the graph has several repositories), the vault and the repository names. `scopingPlan` picks who: the BA, or an architect
+(who may read the project's repositories, sent as `readRepos`, which the runner now resolves for `ba_task` shifts too) when no BA
+is hired, the graph is not indexed for every repository, or no BA works where the project vault is reachable. `baTaskPass`
+applies it per task and skips workstations whose runner is older than `MIN_RUNNER_FOR_REPO_SCOPING` (`packages/shared`; the
+prompt is rendered on the runner). The report is `{repo, fields?}` or `{split: [{title, cardType?, repo, fields, dependsOn?}]}`
+(2 to 8 cards; `dependsOn` is 1-based and only names earlier children). A split is checked first (`planSplit`: repositories, card
+types, field parsing, `missingForSpecify`, dependencies) and applied in one transaction under a savepoint: the children are
+created with `parentCardId`, their repository, the parent's priority, flags, completion action and origin, and their
+dependencies, then the parent is cancelled with `CardCancelled{cause:'split', childCardIds}` and a thread note. The CEO wake for
+that cancel carries the children's refs (`task_follow_up` detail, or a `card_split` wake). The card page shows `splitInto` and
+`splitFrom`, which come from the `CardCancelled` event. When neither BA nor architect can tell (`spec_card_fail`, or the task
+falls back), the `spec_needed` alert is **not pinned**, so routing holds it for the CEO's triage and the owner sees it only if the
+CEO cannot decide; any other failed `spec_card` keeps its pinned owner alert. `patchCardIn` refuses a repository change once the
+card has a worktree or a branch (`repo_locked`). Single-repository projects and projects with none are unchanged.
 
 **The front door, step 1 (`docs/design/ceo-front-door.md` sections 3 to 8, with the owner decisions of section 14).**
 
