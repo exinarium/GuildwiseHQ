@@ -72,7 +72,9 @@ export async function deskItem(tx: Queryable, orgId: string, id: string): Promis
 
 export async function cardOf(tx: Queryable, env: ActionEnv, ref: string) {
   try {
-    return (await loadVisibleCard(tx, env.owner.id, ref)).card;
+    const card = (await loadVisibleCard(tx, env.owner.id, ref)).card;
+    // The owner may see cards of other organizations too: the CEO acts inside its own.
+    return card.org_id === env.orgId ? card : undefined;
   } catch {
     return undefined;
   }
@@ -93,6 +95,7 @@ export const LOOP_RELEASE_SUBKINDS: readonly string[] = [
   DESK_SUBKIND.repeatQuestion,
   DESK_SUBKIND.stopLoss,
   DESK_SUBKIND.loopBackoff,
+  DESK_SUBKIND.repeatLoop,
 ];
 
 const AnswerP = z
