@@ -37,6 +37,8 @@ export const DESK_SUBKIND = {
   loopParked: 'loop_parked',
   /** The same question asked again on the same card and stage with nothing changed: the card is parked (one item). */
   repeatQuestion: 'repeat_question',
+  /** The same question was answered and asked again `SERIAL_REPEAT.parkAt` times with nothing changed: the card is parked (one item). */
+  repeatLoop: 'repeat_loop',
   /** A card used its budget of passes, rounds or shifts: the architect arbitrates, then the owner. */
   stopLoss: 'stop_loss',
   /** D5: a project environment needs access or failed on a workstation. */
