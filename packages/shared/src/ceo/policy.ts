@@ -234,6 +234,8 @@ export const DEFAULT_CEO_POLICY: CeoPolicy = {
     'escalation:repeat_question': 'decide',
     'escalation:stop_loss': 'decide',
     'escalation:loop_backoff': 'decide',
+    'escalation:repeat_loop': 'decide',
+    'question:repeat_loop': 'decide',
     'question:stop_loss': 'decide',
     'question:repeat_question': 'decide',
     'alert:loop_backoff': 'decide',
