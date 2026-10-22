@@ -140,6 +140,7 @@ describe('evidence panel', () => {
       ],
       parent: { id: ID(5), ref: 'TOY-5', title: 'P', cardType: 'feature', stage: 'x', status: 'done' },
       children: [{ id: ID(3), ref: 'TOY-3', title: 'Bug', cardType: 'bug', stage: 'spec', status: 'draft' }],
+      waitingOn: { id: ID(3), ref: 'TOY-3', title: 'Bug', cardType: 'bug', stage: 'spec', status: 'draft' },
       parkedOn: { requestId: ID(8), problem: 'docker_missing' },
     });
     wrap(
@@ -155,8 +156,28 @@ describe('evidence panel', () => {
     expect(panel.querySelector('pre')?.textContent).toBe('Error: boom');
     expect(screen.getByTestId('child-card-link-TOY-3')).toBeTruthy();
     expect(screen.getByTestId('parent-card-link').getAttribute('href')).toBe('/cards/TOY-5');
-    expect(screen.getByTestId('waiting-line')).toBeTruthy();
+    expect(screen.getByTestId('waiting-line').textContent).toBe('Waiting on a bug fix: TOY-3 Bug');
     expect(screen.getByTestId('parked-notice').textContent).toContain('docker missing');
+  });
+});
+
+describe('the waiting line', () => {
+  const bug = {
+    id: ID(3),
+    ref: 'TOY-3',
+    title: 'Login broken',
+    cardType: 'bug',
+    stage: 'spec',
+    status: 'draft',
+  } as const;
+  it('names the bug child the card waits on', () => {
+    wrap(<TestingLinks testing={testing({ children: [bug], waitingOn: bug })} status="waiting" />);
+    expect(screen.getByTestId('waiting-line').textContent).toBe('Waiting on a bug fix: TOY-3 Login broken');
+  });
+  it('says nothing about a bug fix on a card waiting for approval, manual QA or a merge (no bug child)', () => {
+    wrap(<TestingLinks testing={testing()} status="waiting" />);
+    expect(screen.queryByTestId('waiting-line')).toBeNull();
+    expect(screen.queryByText(/bug fix/)).toBeNull();
   });
 });
 
