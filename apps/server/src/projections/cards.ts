@@ -765,6 +765,9 @@ export const cardProjectors: Record<string, Projector> = {
 
   CardMovedByManager: async (tx, e) => {
     const p = ev<'CardMovedByManager'>(e).payload;
+    // `clearsBlockers` marks a move that dismissed the card's blockers itself (see `moveCard`). Events from before it
+    // keep the rule they were written under, so a replay gives the state they gave.
+    const clears = p.clearsBlockers === true;
     await mutateCard(
       tx,
       e,
@@ -773,17 +776,26 @@ export const cardProjectors: Record<string, Projector> = {
         exec(
           tx,
           `UPDATE cards SET stage=$2, status=$3, queued_at = CASE WHEN $3 = 'queued' THEN $4::timestamptz ELSE queued_at END,
-                  excluded_agent_ids='{}', review_approvals=0, updated_at=$4, blocked_since=NULL,
+                  excluded_agent_ids='{}', review_approvals=0, updated_at=$4${clears ? ', blocked_since=NULL' : ''},
                   retry_after=NULL, retry_failures=0, retry_episode_id=NULL WHERE id=$1`,
           [p.cardId, p.toStage, p.status, e.createdAt],
         ),
       { agentId: null },
     );
-    // A move ends every park of the card. The open blockers were dismissed by their own `DeskItemResolved` events (see
-    // `moveCard`); what is left is a park an answer asked for ("keep blocked until ..."), items that hold other cards
-    // too and, in events from before the dismissals, any other stale blocker. Earlier versions cleared only the first
-    // kind and loop parks.
-    await exec(tx, 'DELETE FROM card_blockers WHERE card_id=$1', [p.cardId]);
+    if (clears) {
+      // A move ends every park of the card. The open blockers were dismissed by their own `DeskItemResolved` events;
+      // what is left is a park an answer asked for ("keep blocked until ..."), items that hold other cards too, and
+      // any other stale blocker.
+      await exec(tx, 'DELETE FROM card_blockers WHERE card_id=$1', [p.cardId]);
+    } else if (p.status === 'queued') {
+      // Lean Team v3: moving the card to the queue ends a park that an answer asked for, and a loop park.
+      await exec(
+        tx,
+        `DELETE FROM card_blockers WHERE card_id=$1 AND desk_item_id IN (
+           SELECT id FROM desk_items WHERE (keep_blocked_until IS NOT NULL AND status='answered') OR subkind='loop_parked')`,
+        [p.cardId],
+      );
+    }
   },
 
   // A done or cancelled card goes back to work. The branch, worktree and the earlier finalize result (`finalize_action`,
