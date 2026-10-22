@@ -155,4 +155,38 @@ describe('tester fail -> bug child -> resume', () => {
     const { start } = await p.run('Tess', testPass());
     expect(start.brief.card.ref).toBe(card.ref);
   });
+
+  it('a failure in the E2E spec goes back to the tester on the same card: no bug card', async () => {
+    await freshState();
+    await hireTeam(w);
+    const card = await w.card({ title: 'Spec rework' });
+    await p.toTest('Bea', ['Rex']);
+    const fail = testFail('Selector is stale');
+    await p.run('Tess', { ...fail, data: { ...fail.data, failureScope: 'e2e_spec' } });
+    expect(await q('SELECT 1 FROM cards WHERE parent_card_id=$1', [card.id])).toHaveLength(0);
+    expect(await cardRow(card.id)).toMatchObject({ stage: 'test', status: 'queued', claim_id: null });
+    const mine = (rows: any[]) => rows.filter((e) => e.cardId === card.id);
+    expect(mine(await eventsOfType('TestReworkRequested'))).toHaveLength(1);
+    expect(mine(await eventsOfType('TestFailed'))).toHaveLength(0);
+    const { start } = await p.run('Tess', testPass('fixed the spec'));
+    expect(start.brief.card.ref).toBe(card.ref);
+    expect((await cardRow(card.id)).stage).toBe('finalize');
+    expect((await detail(card.id)).testing.testRuns.map((x: any) => x.result)).toEqual(['failed', 'passed']);
+  });
+
+  it('a second failure while the bug child is open adds to it instead of creating another bug card', async () => {
+    await freshState();
+    await hireTeam(w);
+    const card = await w.card({ title: 'Dup' });
+    await p.toTest('Bea', ['Rex']);
+    await p.run('Tess', testFail('First'));
+    // the parent is put back in the Test queue while its bug child is still open (for example by a manual move)
+    await q(`UPDATE cards SET status='queued' WHERE id=$1`, [card.id]);
+    await p.run('Tess', testFail('Second'));
+    const children = await q('SELECT * FROM cards WHERE parent_card_id=$1', [card.id]);
+    expect(children).toHaveLength(1);
+    expect(await cardRow(card.id)).toMatchObject({ stage: 'test', status: 'waiting' });
+    const posted = (await eventsOfType('ThreadMessagePosted')).filter((e) => e.cardId === children[0]!.id);
+    expect(posted.map((m: any) => m.body).join('\n')).toContain('No second bug card');
+  });
 });

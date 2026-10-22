@@ -34,6 +34,7 @@ const TRIGGER_TYPES = new Set([
   'TestPassed',
   'StageCompleted',
   'ChildCardResolved',
+  'TestReworkRequested',
   'QuestionRaised',
   'QuestionEscalated',
   'QuestionAnswered',

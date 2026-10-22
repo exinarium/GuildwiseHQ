@@ -77,6 +77,18 @@ export const testingProjectors: Record<string, Projector> = {
     ]);
   },
 
+  TestReworkRequested: async (tx, e) => {
+    const p = ev<'TestReworkRequested'>(e).payload;
+    const card = await getCard(tx, p.cardId);
+    await recordRun(tx, e, {
+      cardId: p.cardId,
+      shiftId: card?.claim_shift_id,
+      kind: 'feature',
+      result: 'failed',
+      evidence: p.evidence,
+    });
+  },
+
   FullSuitePassed: async (tx, e) => {
     const p = ev<'FullSuitePassed'>(e).payload;
     const card = await getCard(tx, p.suiteCardId);

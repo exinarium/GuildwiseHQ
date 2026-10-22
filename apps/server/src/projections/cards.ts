@@ -696,6 +696,12 @@ export const cardProjectors: Record<string, Projector> = {
     );
   },
 
+  /** The failure is in the E2E spec: the card stays in Test and is queued for the tester again (no bug child). */
+  TestReworkRequested: async (tx, e) => {
+    const p = ev<'TestReworkRequested'>(e).payload;
+    await moveTo(tx, e, p.cardId, 'test');
+  },
+
   ChildCardResolved: async (tx, e) => {
     const p = ev<'ChildCardResolved'>(e).payload;
     await moveTo(tx, e, p.cardId, p.toStage);

@@ -264,6 +264,14 @@ export const cardEvents = [
     'TestFailed',
     z.object({ cardId: Id, testerAgentId: Id, bugCardId: Id, evidence: TestEvidence, summary: z.string() }),
   ),
+  /**
+   * A test failure whose cause is the E2E spec or its fixtures (`failureScope: 'e2e_spec'`): no bug card is created,
+   * the card stays in Test and is queued for the tester again. Replay-safe: a plain status change.
+   */
+  defineEvent(
+    'TestReworkRequested',
+    z.object({ cardId: Id, testerAgentId: Id, evidence: TestEvidence, summary: z.string() }),
+  ),
   defineEvent('ChildCardResolved', z.object({ cardId: Id, childCardId: Id, toStage: z.literal('test') })),
   /**
    * A `subworkflow` stage started a child card (docs/design/workflow-builder.md section 4). Appended with the child's

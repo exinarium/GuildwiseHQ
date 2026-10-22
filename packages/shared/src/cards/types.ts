@@ -148,6 +148,12 @@ export const TestEvidence = z.object({
   outputExcerpt: z.string().default(''),
   /** `aom test fail --title`: the bug title (failures only). */
   title: z.string().optional(),
+  /**
+   * `aom test fail --scope`: where the failure lives. `e2e_spec`: the E2E spec or its fixtures need changing, which only
+   * the tester may do, so the card goes back to the tester instead of a bug card for a builder. Absent or `product`:
+   * the product is wrong (a bug card for the builder).
+   */
+  failureScope: z.enum(['product', 'e2e_spec']).optional(),
 });
 export type TestEvidence = z.infer<typeof TestEvidence>;
 
