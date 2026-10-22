@@ -714,7 +714,7 @@ Heartbeats are not events.
 | `CardCancelled` | `{cardId, reason}` | status cancelled; claim released first |
 | `ThreadMessagePosted` | `{threadId, messageId, cardId?, authorKind, authorUserId?, authorAgentId?, kind, body, data}` | thread_messages |
 
-`ReworkReason = 'missed_requirement' | 'broke_convention' | 'weak_tests' | 'poor_structure' | 'spec_unclear' | 'out_of_scope_test_change'`.
+`ReworkReason = 'missed_requirement' | 'broke_convention' | 'weak_tests' | 'poor_structure' | 'spec_unclear' | 'out_of_scope_test_change' | 'regression_risk'`.
 
 #### Shifts and agents (`events/shift.ts`, `events/agent.ts`) — audience `project` when the shift has a card, else `org`
 
@@ -1844,7 +1844,7 @@ Before submitting a terminal report the runner checks the worktree against the r
 
 - reviewer / any role with `mayCommit:false`: HEAD unchanged and no working-tree changes, else violation `reviewer_modified_code`;
 - tester: every changed path (committed since the shift's start SHA plus uncommitted) matches `project.e2e_globs`, else violation `tester_edited_non_e2e`;
-- builder: no changes to test files outside the card's diff that were not created in this card (heuristic: modified files matching test globs that also exist on the base branch and are not in the card's `affectedAreas`) → flag `out_of_scope_test_change` in `diffStats` for the reviewer (not blocking).
+- builder: no changes to unit tests outside the card's scope. The runner does not check this; the reviewer judges test scope from the card and the diff and requests changes with `out_of_scope_test_change` when it is exceeded.
 - any role: no commits on any branch other than the card branch; no changes outside the worktree.
 - architect: every changed path matches `writableGlobs` plus the investigation folder and report path (`architect_edited_non_docs`), except what a merge commit of a recorded `origin/<main>` SHA brought in and nothing changed afterwards; an unfinished main merge is `merge_unresolved`. The report named in `aom design|investigate` must be a committed file in the worktree without obvious secrets (or, for the vault location, is copied into the project vault by the runner).
 

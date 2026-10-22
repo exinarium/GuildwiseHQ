@@ -2274,10 +2274,6 @@ export class ShiftSupervisor {
             worktree: s.worktree.path,
             baseBranch: s.worktree.baseBranch,
             architecturalGlobs: msg.brief.project.architecturalGlobs,
-            affectedAreas:
-              typeof msg.brief.card.fields.affectedAreas === 'string'
-                ? msg.brief.card.fields.affectedAreas
-                : '',
           });
           attach = { diffStats: stats, riskTier: riskTier(stats, msg.brief.card.cardType) };
           // lean team: the commit the evidence is bound to, the changed paths (the server computes the high-risk flag from

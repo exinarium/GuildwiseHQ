@@ -472,19 +472,13 @@ describe('diffstat and risk tier', () => {
     expect(riskTier(stats, 'feature')).toBe('large');
   });
 
-  it('flags modified existing test files that are not in the card scope', async () => {
+  it('does not flag modified existing test files: test scope is the reviewer\'s decision', async () => {
     const path = await setup();
     writeFileSync(join(path, 'test', 'existing.test.ts'), '// changed\n');
     sh(path, 'git', ['commit', '-am', 'touch test']);
     const stats = await computeDiffStats({ worktree: path, baseBranch: 'main', architecturalGlobs: [] });
-    expect(stats.outOfScopeTestChange).toBe(true);
-    const inScope = await computeDiffStats({
-      worktree: path,
-      baseBranch: 'main',
-      architecturalGlobs: [],
-      affectedAreas: 'test/existing.test.ts',
-    });
-    expect(inScope.outOfScopeTestChange).toBeUndefined();
+    expect(stats).not.toHaveProperty('outOfScopeTestChange');
+    expect(stats.testFiles).toBe(1);
   });
 
   it('counts the changed test files (HR: test coverage of the changes)', async () => {

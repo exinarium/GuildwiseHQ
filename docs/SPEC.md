@@ -278,7 +278,7 @@ Each role tests at its own level and may change only the tests it owns: builders
 | Full E2E suite | Dedicated tester, spawned automatically | After the BA's completion action | Tester triages, see below |
 | Regression | Testers, via a regression card | On demand or scheduled by the manager, per platform: web, mobile or both | Bug cards, manager notified |
 
-**Builder rules**: write unit tests for the card's work and run the full unit suite before handoff. Never modify unit tests outside the card's scope to make the work pass; a broken test means the work gets fixed. No E2E testing. The reviewer checks this, and any out-of-scope test change is an automatic bounce tagged as a quality cause.
+**Builder rules**: write unit tests for the card's work and run the full unit suite before handoff. Never modify unit tests outside the card's scope to make the work pass; a broken test means the work gets fixed. No E2E testing. The reviewer checks this and decides whether a test change is in the card's scope.
 
 **Tester rules**: write Playwright tests for new features, run them, and commit them to the card branch. Testers change E2E tests only, never application code or unit tests.
 
