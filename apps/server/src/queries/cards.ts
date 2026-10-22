@@ -26,6 +26,7 @@ import { loadVisibleCard, loadVisibleProject } from '../authz/scope.ts';
 import { loadWorkflowById, resolveWorkflow } from '../catalogue/loader.ts';
 import { enabledWorkflows } from '../catalogue/project-workflows.ts';
 import { cardApprovalDto } from '../commands/approval.ts';
+import { canSendCardToBa } from '../commands/ba-intake.ts';
 import { attachmentsOf } from '../commands/card-attachments.ts';
 import { effectiveCompletion } from '../commands/completion.ts';
 import { memberRefusal } from '../commands/phases.ts';
@@ -375,6 +376,7 @@ export async function getCardDetail(ctx: Ctx, userId: string, idOrRef: string): 
     publication: await publicationOfCard(ctx.pool, card.id),
     phase: await cardPhaseRef(ctx.pool, card),
     ...(await splitLinks(ctx, card)),
+    canSendToBa: await canSendCardToBa(ctx, ctx.pool, card),
     ...((await orgRoleOf(ctx.pool, userId, card.org_id))
       ? {
           spend: (

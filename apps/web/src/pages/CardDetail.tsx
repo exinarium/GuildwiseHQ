@@ -226,7 +226,7 @@ export function CardDetailView({
   const mockUi = me.data?.features?.mockUi ?? false;
   const missing = missingFromError(specify.error);
   // A draft with no repository: the BA finds it (or splits the card per repository) when a project has several.
-  const sendToBaOffered = permissions.canSpecify && card.status === 'draft' && !card.repoId;
+  const sendToBaOffered = permissions.canSpecify && data.canSendToBa === true;
   const catalogue = workflow ? fieldCatalogue(workflow.fieldSet, workflow.customFields) : {};
   // Mock-runtime fields (Mock script, ...) are shown only in mock mode.
   const keys = Object.keys(card.fields).filter((k) => mockUi || !isMockField(k));

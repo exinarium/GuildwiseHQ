@@ -61,6 +61,7 @@ export function cardRoutes(ctx: Ctx) {
           ? {
               missing,
               specified: false,
+              ...(scoping ? { baQueued: scoping.queued } : {}),
               message: scoping
                 ? `Saved as a draft: ${scoping.text}.`
                 : `Saved as a draft, not specified: required fields are missing (${missing.join(', ')}).`,

@@ -33,7 +33,10 @@ export function useCreateCard() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (b: CreateCardRequest) =>
-      post<{ card: CardDetailResponse['card']; missing?: string[]; message?: string }>('/cards', b),
+      post<{ card: CardDetailResponse['card']; missing?: string[]; message?: string; baQueued?: boolean }>(
+        '/cards',
+        b,
+      ),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['board'] }),
   });
 }

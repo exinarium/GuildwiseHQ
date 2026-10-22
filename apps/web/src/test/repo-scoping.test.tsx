@@ -5,6 +5,7 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ToastProvider } from '../components/ui.tsx';
 import { CardDetailView } from '../pages/CardDetail.tsx';
 import { CardNewForm } from '../pages/CardNew.tsx';
 
@@ -17,15 +18,17 @@ function newForm(repos: Array<{ id: string; name: string }>) {
   render(
     <QueryClientProvider client={qc}>
       <MemoryRouter>
-        <CardNewForm
-          projectId={ID(1)}
-          projectKey="TOY"
-          projectKeys={['TOY']}
-          onProject={() => {}}
-          workflow={codeWorkflowV1}
-          repos={repos}
-          mockUi={false}
-        />
+        <ToastProvider>
+          <CardNewForm
+            projectId={ID(1)}
+            projectKey="TOY"
+            projectKeys={['TOY']}
+            onProject={() => {}}
+            workflow={codeWorkflowV1}
+            repos={repos}
+            mockUi={false}
+          />
+        </ToastProvider>
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -73,6 +76,45 @@ describe('"Not sure: let the BA find out"', () => {
     const body = JSON.parse(String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body));
     expect(body).toMatchObject({ specify: true, findRepo: true });
     expect(body).not.toHaveProperty('repoId');
+  });
+
+  it('shows the server message as info, not as a success, when nothing was queued', async () => {
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          card: { id: ID(5), ref: 'TOY-5' },
+          missing: ['repoId'],
+          baQueued: false,
+          message: 'Saved as a draft: it stays a draft: no BA or architect to find it.',
+        }),
+        { status: 201 },
+      ),
+    );
+    const user = newForm([
+      { id: ID(2), name: 'api' },
+      { id: ID(3), name: 'web' },
+    ]);
+    await fill(user);
+    const select = screen.getByLabelText('Repository') as HTMLSelectElement;
+    await user.selectOptions(select, within(select).getByRole('option', { name: /Not sure/ }));
+    await user.click(screen.getByRole('button', { name: 'Specify' }));
+    const toast = (await screen.findByText(/no BA or architect to find it/)).parentElement as HTMLElement;
+    expect(toast.querySelector('.text-info')).not.toBeNull();
+    expect(toast.querySelector('.text-success')).toBeNull();
+  });
+
+  it('shows the success toast when the BA got the card', async () => {
+    const user = newForm([
+      { id: ID(2), name: 'api' },
+      { id: ID(3), name: 'web' },
+    ]);
+    await fill(user);
+    const select = screen.getByLabelText('Repository') as HTMLSelectElement;
+    await user.selectOptions(select, within(select).getByRole('option', { name: /Not sure/ }));
+    await user.click(screen.getByRole('button', { name: 'Specify' }));
+    const toast = (await screen.findByText(/sent to the BA to find the repository/))
+      .parentElement as HTMLElement;
+    expect(toast.querySelector('.text-success')).not.toBeNull();
   });
 
   it('is not offered with a single repository', () => {
@@ -186,11 +228,14 @@ describe('CardDetail: a card the BA split', () => {
     expect(screen.queryByTestId('split-links')).toBeNull();
   });
 
-  it('offers Send to BA on a draft with no repository, and not on one that has it', () => {
-    const first = view(detail({ status: 'draft', stage: 'draft' }));
+  it('offers Send to BA only when the server says the card can be sent', () => {
+    const first = view(detail({ status: 'draft', stage: 'draft' }, { canSendToBa: true }));
     expect(screen.getAllByRole('button', { name: 'Send to BA' }).length).toBeGreaterThan(0);
     first.unmount();
-    view(detail({ status: 'draft', stage: 'draft', repoId: ID(3) }));
+    const second = view(detail({ status: 'draft', stage: 'draft' }, { canSendToBa: false }));
+    expect(screen.queryByRole('button', { name: 'Send to BA' })).toBeNull();
+    second.unmount();
+    view(detail({ status: 'draft', stage: 'draft' }));
     expect(screen.queryByRole('button', { name: 'Send to BA' })).toBeNull();
   });
 });

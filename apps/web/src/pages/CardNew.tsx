@@ -188,7 +188,9 @@ export function CardNewForm({
           }
           // "Not sure which repository": the server sent the draft to the BA, who finds it; nothing is left to fix here.
           if (specify && v.repoId === FIND_REPO && res.missing?.includes('repoId')) {
-            toast.success(res.message ?? `${res.card.ref} sent to the BA to find the repository`);
+            if (res.baQueued === false)
+              toast.info(res.message ?? `${res.card.ref} was saved as a draft: nothing was sent to the BA`);
+            else toast.success(res.message ?? `${res.card.ref} sent to the BA to find the repository`);
             nav(`/cards/${res.card.ref}`);
             return;
           }

@@ -315,6 +315,8 @@ export const CardDetailResponseSchema = z.object({
    * one, the closing ones and the steps for a person (`movableStages`). Empty when the viewer cannot move the card.
    */
   moveTargets: z.array(z.object({ id: z.string(), label: z.string(), kind: z.string() })).optional(),
+  /** The draft can be sent to the BA now: it lacks something the BA can write or find, an agent can take it, none is working on it yet. */
+  canSendToBa: z.boolean().optional(),
   /** Only on the response of "Send to BA": what became of the draft (queued for the BA, or why not). */
   baNotice: z.string().optional(),
   /** Only on the response of a move: it was accepted, but something will keep the card from running (unlanded dependencies). */
@@ -403,6 +405,8 @@ export const CreateCardResponseSchema = z.object({
   specified: z.boolean().optional(),
   /** Present with `missing`: a sentence to show, "Saved as a draft: it cannot be specified yet, missing ...". */
   message: z.string().optional(),
+  /** Present with a `message` about the BA: false when nothing was queued (the card just stays a draft). */
+  baQueued: z.boolean().optional(),
 });
 
 /** `PATCH /api/cards/:id` (owner). */
