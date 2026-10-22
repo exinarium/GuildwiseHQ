@@ -643,6 +643,56 @@ describe('the server status and places', () => {
     }
   });
 
+  it('a live environment that is healthy with nothing waiting still offers Release; while it updates there is none', () => {
+    const s = savedState({}, { dryRunMissing: [], recipeStatus: 'approved' });
+    const env = s.current.setup.environments[1];
+    const healthy = adaptStatus(
+      serverStatus({
+        state: 'healthy',
+        stateText: 'Version 0.9.2 is live.',
+        waitingRelease: null,
+        blockedBy: [],
+      }) as never,
+      [],
+      PROJECT,
+    );
+    expect(healthy.waitingRelease).toBeNull();
+    expect(cardInfo({ s, env, draft: false, place: placesOf(s)[1], status: healthy })).toMatchObject({
+      state: 'healthy',
+      action: 'release',
+    });
+    const updating = adaptStatus(
+      serverStatus({
+        state: 'updating',
+        stateText: 'Updating now.',
+        waitingRelease: null,
+        blockedBy: [],
+      }) as never,
+      [],
+      PROJECT,
+    );
+    expect(cardInfo({ s, env, draft: false, place: placesOf(s)[1], status: updating }).action).toBeNull();
+  });
+
+  it('the live card offers Release the newest version, off with a reason for a member and while releases are paused', async () => {
+    serveProject();
+    serve(savedState({ deliveryMode: 'recipe' }, { dryRunMissing: [], recipeStatus: 'approved' }));
+    mountPage();
+    const card = await screen.findByTestId('env-card-production');
+    expect(within(card).getByTestId('env-release-production')).toHaveTextContent(
+      'Release the newest version',
+    );
+    expect(within(card).getByTestId('env-release-production')).toBeEnabled();
+    cleanup();
+    serve(
+      savedState({ deliveryMode: 'recipe', canEdit: false }, { dryRunMissing: [], recipeStatus: 'approved' }),
+    );
+    mountPage();
+    const ro = await screen.findByTestId('env-card-production');
+    expect(within(ro).getByTestId('env-release-production')).toBeDisabled();
+    expect(within(ro).getByTestId('env-readonly-production')).toHaveTextContent('Only the project owner');
+  });
+
   it('places come from the server when it lists them: its reason a place cannot go is what is shown', async () => {
     const user = userEvent.setup();
     serveProject();

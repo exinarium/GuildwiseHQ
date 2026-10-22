@@ -318,7 +318,23 @@ async function refuseAll(
   };
 }
 
+/** Requests for one project and environment run one after the other, so a double click cannot start two runs. */
+const requestChains = new Map<string, Promise<unknown>>();
+
 export async function requestDeployRun(ctx: Ctx, input: RequestDeployInput): Promise<RequestDeployResult> {
+  const key = `${input.projectId}|${input.env}`;
+  const before = requestChains.get(key) ?? Promise.resolve();
+  const mine = before.catch(() => undefined).then(() => requestDeployRunNow(ctx, input));
+  const tail = mine.catch(() => undefined);
+  requestChains.set(key, tail);
+  try {
+    return await mine;
+  } finally {
+    if (requestChains.get(key) === tail) requestChains.delete(key);
+  }
+}
+
+async function requestDeployRunNow(ctx: Ctx, input: RequestDeployInput): Promise<RequestDeployResult> {
   const now = ctx.clock.now();
   const project = await one(
     ctx.pool,

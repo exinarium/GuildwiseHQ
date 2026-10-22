@@ -24,6 +24,7 @@ export function ReleaseSheet({
   const deploy = useDeploy(projectId);
   const toast = useToast();
   const w = status.data?.find((s) => s.env === env)?.waitingRelease ?? null;
+  const [refused, setRefused] = useState<string | null>(null);
   const [picked, setPicked] = useState<Record<string, boolean> | null>(null);
   const places = w?.places ?? [];
   const pick = picked ?? Object.fromEntries(places.map((p) => [p.runId, places.length === 1]));
@@ -41,7 +42,17 @@ export function ReleaseSheet({
         chosen.map((p) => p.runId),
         { onSuccess: done },
       );
-    else deploy.mutate({ env, ...(w?.commit ? { commit: w.commit } : {}) }, { onSuccess: done });
+    else
+      deploy.mutate(
+        { env, ...(w?.commit ? { commit: w.commit } : {}) },
+        {
+          onSuccess: (r) => {
+            // a request the server refused (a rule that does not hold, a run already going) stays on screen with its reason
+            if (r.runs.length > 0 && r.runs.every((x) => x.status === 'refused')) setRefused(r.message);
+            else done();
+          },
+        },
+      );
   };
   const reason = blocked
     ? `Waiting for: ${w?.waitingFor.join('; ') || 'the rules to hold'}.`
@@ -141,6 +152,11 @@ export function ReleaseSheet({
             {reason && (
               <p role="status" className="text-xs text-subtle" data-testid="release-disabled-reason">
                 {reason} The button turns on by itself when it holds.
+              </p>
+            )}
+            {refused && (
+              <p role="alert" className="text-sm text-danger" data-testid="release-refused">
+                {refused}
               </p>
             )}
             <ErrorBox error={release.error ?? deploy.error} />

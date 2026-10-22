@@ -307,3 +307,12 @@ export const CHANGE_GROUP_TITLES: Record<ChangeGroup, string> = {
 /** Is there anything that stops a save (something the setup needs that is missing)? */
 export const hasBlockers = (items: readonly ChangeItem[]): boolean =>
   items.some((i) => i.group === 'setup_once');
+
+/**
+ * The blockers that stop saving a change to one environment: only that environment's own. With no `env` it is every blocker
+ * (publishing the whole setup). The blockers of other environments are not hidden, the caller shows them as information.
+ */
+export const blockersFor = <T extends Pick<ChangeItem, 'group' | 'env'>>(
+  items: readonly T[],
+  env?: string,
+): T[] => items.filter((i) => i.group === 'setup_once' && (!env || i.env === env));

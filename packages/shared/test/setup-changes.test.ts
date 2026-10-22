@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { z } from 'zod';
 import {
+  blockersFor,
   type ChangeItem,
   DeliverySetupSchema,
   DeployProbeResultSchema,
@@ -318,5 +319,18 @@ describe('several checkouts with the same compose project', () => {
       const items = planChanges(forFile(file), { uat: withRunning(running) }, 'uat');
       expect(texts(items, 'question', 'uat').join('\n')).not.toContain('running from');
     }
+  });
+});
+
+describe('blockersFor', () => {
+  const items = [
+    { group: 'setup_once', env: 'live', text: 'a' },
+    { group: 'setup_once', env: 'uat', text: 'b' },
+    { group: 'reuse', env: 'uat', text: 'c' },
+  ] as ChangeItem[];
+  it('is every blocker for the whole setup and only the own ones for one environment', () => {
+    expect(blockersFor(items).map((i) => i.text)).toEqual(['a', 'b']);
+    expect(blockersFor(items, 'uat').map((i) => i.text)).toEqual(['b']);
+    expect(blockersFor(items, 'other')).toEqual([]);
   });
 });

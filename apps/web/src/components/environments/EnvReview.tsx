@@ -1,4 +1,4 @@
-import { hasBlockers, type planChanges, type SetupPreviewDto } from '@aom/shared';
+import { blockersFor, type planChanges, type SetupPreviewDto } from '@aom/shared';
 import { FoundChanges } from '../delivery/setup/FoundChanges.tsx';
 import { Button, Callout, ErrorBox, Spinner } from '../ui.tsx';
 import { type Answers, plainLint, restartWords, whenText } from './answers.ts';
@@ -39,7 +39,27 @@ export function EnvReview({
 }) {
   const errors = preview?.lint.filter((l) => l.level === 'error') ?? [];
   const warnings = preview?.lint.filter((l) => l.level === 'warn') ?? [];
-  const blocked = hasBlockers(preview?.changes?.length ? (preview.changes as never) : changes);
+  // Only this environment's own blockers stop its save; other environments' are shown below as information, never hidden.
+  const allChanges = (preview?.changes?.length ? preview.changes : changes) as ReadonlyArray<{
+    group: 'setup_once';
+    env: string;
+    text: string;
+  }>;
+  const blocked = blockersFor(allChanges, answers.name).length > 0;
+  const otherBlockers = blockersFor(allChanges).filter((c) => c.env !== answers.name);
+  const saveOffReason = saving
+    ? null
+    : previewing
+      ? 'Save is off while the steps are being prepared.'
+      : !preview
+        ? 'Save is off until the steps are prepared. Choose Preview again.'
+        : !preview.ok
+          ? 'Save is off: these steps cannot be saved yet (see above).'
+          : errors.length > 0
+            ? 'Save is off: fix the problems under "Fix this first" above.'
+            : blocked
+              ? 'Save is off: this environment still needs something set up first (see "Needs setting up first" above).'
+              : null;
   const native = answers.runtime === 'native';
   return (
     <section className="flex flex-col gap-4" data-testid="env-review">
@@ -79,6 +99,19 @@ export function EnvReview({
             </Callout>
           )}
           <FoundChanges items={preview.changes.filter((c) => c.env === answers.name)} />
+          {otherBlockers.length > 0 && (
+            <Callout
+              tone="info"
+              title="Another environment needs setting up first"
+              data-testid="review-other-blockers"
+            >
+              <p className="mb-1">
+                This does not stop you from saving {answers.label || answers.name}. It stops the publish of
+                that environment until it is done.
+              </p>
+              <FoundChanges items={otherBlockers} showEnv />
+            </Callout>
+          )}
           {(preview.unmodelled?.length ?? 0) > 0 && (
             <div className="rounded-control border border-line p-3 text-sm" data-testid="review-unmodelled">
               <p className="font-medium text-fg">Other files in the project's deploy folder</p>
@@ -161,6 +194,15 @@ export function EnvReview({
             <Button variant="ghost" onClick={onAdvanced}>
               Show technical details
             </Button>
+            {saveOffReason && (
+              <p
+                className="basis-full text-sm text-warning-soft-fg"
+                role="status"
+                data-testid="review-save-reason"
+              >
+                {saveOffReason}
+              </p>
+            )}
           </>
         )}
       </div>

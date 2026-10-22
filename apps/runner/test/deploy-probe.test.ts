@@ -638,6 +638,29 @@ describe('parsers', () => {
       parseContainerLine(line('/srv/shop/compose.yaml,/srv/shop/docker-compose.guildwise.yml', '/srv/shop'))
         ?.unsupported,
     ).toBeUndefined();
+    // the temporary override and rollback files of a local Guildwise deploy count as no second file
+    expect(
+      parseContainerLine(line('/srv/shop/compose.yaml,/tmp/aom-deploy.4EtfKJ/override.yml', '/srv/shop'))
+        ?.unsupported,
+    ).toBeUndefined();
+    expect(
+      parseContainerLine(line('/srv/shop/compose.yaml,/tmp/aom-deploy.4EtfKJ/rollback.yml', '/srv/shop'))
+        ?.unsupported,
+    ).toBeUndefined();
+    // a real second file is still flagged, also next to a temporary one and with a look-alike name
+    expect(
+      parseContainerLine(
+        line('/srv/shop/compose.yaml,/srv/shop/b.yaml,/tmp/aom-deploy.4EtfKJ/override.yml', '/srv/shop'),
+      )?.unsupported,
+    ).toContain('several compose files');
+    expect(
+      parseContainerLine(line('/srv/shop/compose.yaml,/tmp/aom-deploy.4EtfKJ/other.yml', '/srv/shop'))
+        ?.unsupported,
+    ).toContain('several compose files');
+    expect(
+      parseContainerLine(line('/srv/shop/compose.yaml,/tmp/aom-deploy.4Et/override.yml', '/srv/shop'))
+        ?.unsupported,
+    ).toContain('several compose files');
     expect(parseContainerLine(line('/srv/shop/a.yaml,/srv/shop/b.yaml', '/srv/shop'))?.unsupported).toContain(
       'several compose files',
     );
