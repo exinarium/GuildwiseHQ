@@ -1,4 +1,5 @@
 import {
+  blockersFor,
   type ChangeItem,
   compileSetup,
   DEPLOY_DIRECT_CAPABILITY,
@@ -492,7 +493,8 @@ export async function publishSetup(
         .join('; ')
         .slice(0, 400),
     );
-  const blockers = preview.changes.filter((i) => i.group === 'setup_once');
+  // A save of one environment is stopped only by that environment's own blockers; a whole-setup publish by every one.
+  const blockers = blockersFor(preview.changes, req.onlyEnv);
   if (blockers.length)
     throw unprocessable(
       'setup_needs_work',

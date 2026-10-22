@@ -202,6 +202,11 @@ export const PublishSetupRequestSchema = z.object({
   setup: z.unknown(),
   customScripts: z.record(z.string(), z.string().max(200_000)).optional(),
   removeFiles: z.array(z.string().max(200)).max(50).optional(),
+  /**
+   * Set when the save is a change to one environment: only that environment's own "needs setting up first" items stop the save.
+   * Absent: the whole setup is published and every environment must be clean.
+   */
+  onlyEnv: z.string().min(1).max(40).optional(),
   /** The hash the preview showed: a publish of anything else is refused. */
   setupHash: z.string().length(64),
 });

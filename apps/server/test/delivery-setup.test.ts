@@ -346,6 +346,53 @@ describe('publish through recipe.write, then observe', () => {
     // a probe on the old runner is refused the same way
     expect((await req('POST', `${base()}/delivery/probe`, { scope: 'local' })).status).toBe(409);
   });
+
+  it('a save of one environment is stopped only by its own blockers; a whole-setup publish by all of them', async () => {
+    // Docker is missing on this computer: a blocker for uat (local) and not for production (not checked yet)
+    await call('POST', `${base()}/delivery/probe`, { scope: 'local' }, 202);
+    const cmd = await sinceCommands('deploy.probe', 1);
+    r.send('command.result', {
+      commandId: cmd.commandId,
+      ok: true,
+      result: {
+        ok: true,
+        report: {
+          scope: 'local',
+          at: new Date().toISOString(),
+          docker: { installed: false, usable: false },
+          containers: [],
+          composeFiles: [],
+          volumes: [],
+          folders: [],
+          backups: [],
+          proxies: [],
+          urls: [],
+          listeners: [],
+        },
+      },
+    });
+    await until(
+      async () => (await call('GET', `${base()}/delivery/setup`)).probes.length === 1,
+      5000,
+      'probe stored',
+    );
+    const c = compiled();
+    const preview = await call('POST', `${base()}/delivery/setup/preview`, { setup: setup() });
+    expect(preview.changes.some((i: any) => i.env === 'uat' && i.group === 'setup_once')).toBe(true);
+    expect(preview.changes.some((i: any) => i.env === 'production' && i.group === 'setup_once')).toBe(false);
+    const body = { setup: setup(), setupHash: c.hash };
+    // the whole setup, and the environment that has the blocker: refused
+    const all = await req('POST', `${base()}/delivery/setup/publish`, body);
+    expect(all.status).toBe(422);
+    expect(all.body.error.code).toBe('setup_needs_work');
+    const own = await req('POST', `${base()}/delivery/setup/publish`, { ...body, onlyEnv: 'uat' });
+    expect(own.status).toBe(422);
+    expect(own.body.error.code).toBe('setup_needs_work');
+    expect(commands('recipe.write')).toHaveLength(0);
+    // saving production is not held back by the blocker of uat
+    await call('POST', `${base()}/delivery/setup/publish`, { ...body, onlyEnv: 'production' }, 202);
+    expect(await sinceCommands('recipe.write', 1)).toBeTruthy();
+  });
 });
 
 describe('hand-edited scripts and the dry run before approval', () => {

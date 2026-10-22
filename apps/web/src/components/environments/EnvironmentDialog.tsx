@@ -435,7 +435,12 @@ export function EnvironmentDialog({
   const save = async () => {
     if (!preview.data?.hash) return;
     publish.mutate(
-      { setup: finalSetup ?? proposed, setupHash: preview.data.hash, removeFiles },
+      {
+        setup: finalSetup ?? proposed,
+        setupHash: preview.data.hash,
+        removeFiles,
+        ...(answers.name ? { onlyEnv: answers.name } : {}),
+      },
       { onSuccess: (r) => setPublished(r.commandId) },
     );
   };
