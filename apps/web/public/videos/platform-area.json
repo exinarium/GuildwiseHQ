@@ -1,0 +1,48 @@
+{
+  "title": "The platform area",
+  "src": "/videos/platform-area.webm",
+  "type": "video/webm",
+  "sources": [
+    {
+      "src": "/videos/platform-area.mp4",
+      "type": "video/mp4"
+    },
+    {
+      "src": "/videos/platform-area.webm",
+      "type": "video/webm"
+    }
+  ],
+  "captions": "/videos/platform-area.vtt",
+  "voice": "Piper en_GB-cori-high",
+  "duration": 100.5,
+  "chapters": [
+    {
+      "t": 11,
+      "title": "Organizations"
+    },
+    {
+      "t": 25.8,
+      "title": "Invitations"
+    },
+    {
+      "t": 34.8,
+      "title": "Accounts"
+    },
+    {
+      "t": 40.1,
+      "title": "Billing"
+    },
+    {
+      "t": 48.9,
+      "title": "Support and Blog"
+    },
+    {
+      "t": 61.4,
+      "title": "Keys, runners, team and mail"
+    },
+    {
+      "t": 85.7,
+      "title": "Audit log"
+    }
+  ]
+}
