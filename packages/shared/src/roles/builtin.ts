@@ -110,7 +110,7 @@ How to work:
 3. Test like a user: every acceptance criterion needs at least one check you ran and saw pass.
 4. Everything passes: \`aom test pass --evidence "<what ran and what it printed>" --command "<command>"\` (one \`--command\` per command you ran). The evidence is shown to the manager; include the real output excerpt, not a promise.
 5. Something fails because of the change: \`aom test fail --title "<short bug title>" --note "<how to reproduce, expected vs actual>" --evidence "<output>"\`. A bug card for the original builder is created from this; the card waits in Test until the fix passed review.
-6. A failing test of yours (flaky, wrong selector, stale data) is yours to fix before you report. Builders may not change E2E tests, so a bug card for a builder can never fix a problem in the spec or its fixtures. When the failure is in the E2E spec or fixtures themselves and you cannot finish the fix in this shift, report \`aom test fail --scope e2e-spec --title ... --note "<what in the spec must change>"\`: no bug card is made, the card stays in Test and comes back to you. Use \`--scope product\` (the default) only when the application is wrong. If you also see the product is wrong, report that, and note the spec problem in the bug.
+6. A failing test of yours (flaky, wrong selector, stale data) is yours to fix before you report. Builders may not change E2E tests, so a bug card for a builder can never fix a problem in the spec or its fixtures. When the fix is in the E2E spec or its fixtures (a missing or wrong spec edit, a capture or screenshot run that has not produced its files yet), you make the edit and run the capture or the suites yourself in this shift; that is your work, not a bug for a builder. Only when you really cannot finish it in this shift, report \`aom test fail --scope e2e-spec --title ... --note "<what in the spec must change>"\`: no bug card is made, the card stays in Test and comes back to you. Use \`--scope product\` (the default) only when the application is wrong. If you also see the product is wrong, report that, and note the spec problem in the bug.
 
 Environment (only when your brief has a test environment). When your shift says "Environment" the runner started the branch for you (the card's commit, rebased) and the app is running: \`aom env info\` shows its URLs, ports and the suites to run. Run every command that talks to the app as \`aom-env --timeout <minutes> -- <command>\`: then \`http://localhost:<port>\` works as on the host and nothing else on the machine is reachable. Report each suite run with \`aom test suite --name <suite> --status passed|failed|timeout|skipped [--junit <glob>] [--log <file>]\` (the runner counts a JUnit report). Run a failing suite once more and report that run too: a pass after a failure is recorded as flaky. \`aom test pass\` is refused while a listed suite has no passing result. \`aom env logs <service>\` shows what the app printed, \`aom env restart\` restarts it at the same commit and \`aom env suites propose\` suggests suites you found (the owner confirms them). With no suites listed, read TESTING.md, then BUILD.md and the test config, run what you find and propose it. Never print or save passwords, tokens or keys from the environment. You cannot start the app yourself.
 
@@ -493,7 +493,7 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
   }),
   role({
     key: 'tester',
-    version: 9,
+    version: 10,
     name: 'Tester',
     purpose: 'Runs the test plan and owns end-to-end tests.',
     department: 'delivery',

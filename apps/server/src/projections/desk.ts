@@ -130,7 +130,13 @@ async function unblock(
   // starts again from zero and the back-off is gone, so the card is not held (or re-parked) straight away.
   const parkedItem = await one(tx, 'SELECT 1 FROM desk_items WHERE id=$1 AND subkind = ANY($2::text[])', [
     itemId,
-    [DESK_SUBKIND.loopParked, DESK_SUBKIND.repeatQuestion, DESK_SUBKIND.repeatLoop, DESK_SUBKIND.stopLoss],
+    [
+      DESK_SUBKIND.loopParked,
+      DESK_SUBKIND.repeatQuestion,
+      DESK_SUBKIND.repeatLoop,
+      DESK_SUBKIND.stopLoss,
+      DESK_SUBKIND.testerLoop,
+    ],
   ]);
   await exec(tx, 'DELETE FROM card_blockers WHERE desk_item_id=$1', [itemId]);
   for (const { card_id } of blocked) {

@@ -285,7 +285,16 @@ export const cardEvents = [
    */
   defineEvent(
     'TestReworkRequested',
-    z.object({ cardId: Id, testerAgentId: Id, evidence: TestEvidence, summary: z.string() }),
+    z.object({
+      cardId: Id,
+      testerAgentId: Id,
+      evidence: TestEvidence,
+      summary: z.string(),
+      /** The commit the reporting tester shift started at: reworks in a row from the same commit are counted (`TESTER_REWORK_CAP`). */
+      headSha: z.string().nullish(),
+      /** What the tester is told when it was not the tester's own report (the CEO, or an answered `tester_loop` question). */
+      instruction: z.string().optional(),
+    }),
   ),
   defineEvent('ChildCardResolved', z.object({ cardId: Id, childCardId: Id, toStage: z.literal('test') })),
   /**

@@ -8,6 +8,7 @@ import {
   deskMode,
   reservedKeyOfDesk,
   streamId,
+  TESTER_LOOP_OPTIONS,
   WORKING_BRANCH_SUBKIND,
 } from '@aom/shared';
 import { z } from 'zod';
@@ -17,6 +18,7 @@ import { cardMessage, orgScope, projectScope, userActor } from '../commands/comm
 import { createDevOpsRequestIn, devopsAgentOn } from '../commands/devops.ts';
 import { mergedAnswerNotes } from '../commands/escalation.ts';
 import { runHygieneForConfirmedRepo, workingBranchAnsweredEvents } from '../commands/hygiene.ts';
+import { testerLoopAnswered } from '../commands/tester-loop.ts';
 import { one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import { NO_PROJECT_VAULT, projectVault } from '../delivery/recipes.ts';
@@ -94,6 +96,7 @@ export const LOOP_RELEASE_SUBKINDS: readonly string[] = [
   DESK_SUBKIND.loopParked,
   DESK_SUBKIND.repeatQuestion,
   DESK_SUBKIND.stopLoss,
+  DESK_SUBKIND.testerLoop,
   DESK_SUBKIND.loopBackoff,
   DESK_SUBKIND.repeatLoop,
 ];
@@ -125,6 +128,16 @@ const answer: ActionDef<z.infer<typeof AnswerP>> = {
       return { ...base, refuse: 'approvals and alerts are resolved, not answered' };
     if (p.option && !(item.options as Array<{ id: string }>).some((o) => o.id === p.option))
       return { ...base, refuse: `option ${p.option} is not one of the item's options` };
+    // The cancel option of a tester-loop question cancels the card: the owner's `card.cancel` policy applies to it too.
+    if (
+      item.subkind === DESK_SUBKIND.testerLoop &&
+      p.option === TESTER_LOOP_OPTIONS.cancel &&
+      (env.ceo.policy.classes['card.cancel']?.mode ?? 'recommend') !== 'decide'
+    )
+      return {
+        ...base,
+        refuse: `option '${TESTER_LOOP_OPTIONS.cancel}' cancels the card, and the owner's policy does not let you decide card cancellations (card.cancel is ${env.ceo.policy.classes['card.cancel']?.mode ?? 'recommend'}). Recommend it to the owner instead (recommend the cancel action on the card), or choose another option.`,
+      };
     // A card owned by someone else than the organization Owner with "owner only": that person decides.
     const foreignOwner =
       item.card_policy === 'owner_only' && item.card_owner && item.card_owner !== item.org_owner;
@@ -162,6 +175,7 @@ const answer: ActionDef<z.infer<typeof AnswerP>> = {
       : undefined;
     const text = (p.text?.trim() || optionLabel || p.option) as string;
     const entryId = randomUUID();
+    const isTesterLoop = item.subkind === DESK_SUBKIND.testerLoop;
     const by = ceoBy(env);
     const events: AppendInput[] = [
       {
@@ -231,23 +245,41 @@ const answer: ActionDef<z.infer<typeof AnswerP>> = {
         return b.hygieneForRepo;
       });
       if (hygieneRepo) await runHygieneForConfirmedRepo(env.ctx, hygieneRepo);
+    } else if (item.subkind === DESK_SUBKIND.testerLoop) {
+      // The tester loop: the option performs its action in the answer's transaction (bug card, back to the tester, cancel).
+      await withAppendTx(env.ctx.pool, async (tx) => {
+        const cur = await one(tx, 'SELECT status FROM desk_items WHERE id=$1 FOR UPDATE', [item.id]);
+        if (cur?.status !== 'open')
+          throw conflict('already_closed', `this item is already ${cur?.status ?? 'gone'}`);
+        await env.ctx.store.append(events, { tx });
+        await testerLoopAnswered(env.ctx, tx, item, p.option, text, {
+          user: env.owner,
+          actor: userActor(env.owner.id),
+          author: { kind: 'agent', agentId: env.agentId },
+        });
+      });
     } else await appendLocked(env, events, item.id);
     env.ctx.services.dispatcher.trigger();
     return {
-      message: `Answered. ${blocked.length ? `${blocked.length} card(s) go back to the queue. ` : ''}The owner can undo it.`,
+      message: `Answered. ${blocked.length ? `${blocked.length} card(s) go back to the queue. ` : ''}${isTesterLoop ? '' : 'The owner can undo it.'}`,
       result: {
         itemId: item.id,
         unblocked: blocked.map((b) => b.card_id),
         ledgerEntryId: entryId,
         answer: text,
       },
-      inverse: {
-        kind: 'compensating',
-        action: 'reopen-question',
-        params: { item: item.id, unblocked: blocked.map((b) => b.card_id) },
-        preconditions: { itemStatus: 'answered' },
-        label: 'Re-open the question',
-      },
+      // A tester-loop answer performs its action (bug card, rework, cancel): re-opening the question would not undo that.
+      ...(isTesterLoop
+        ? {}
+        : {
+            inverse: {
+              kind: 'compensating' as const,
+              action: 'reopen-question' as const,
+              params: { item: item.id, unblocked: blocked.map((b) => b.card_id) },
+              preconditions: { itemStatus: 'answered' },
+              label: 'Re-open the question',
+            },
+          }),
     };
   },
 };

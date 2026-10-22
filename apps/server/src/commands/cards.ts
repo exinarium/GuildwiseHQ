@@ -957,6 +957,8 @@ export async function cancelCardIn(
     actor?: AppendInput['actor'];
     /** The thread note, when "Cancelled by <user>: <reason>" does not fit. */
     note?: string;
+    /** The caller sends the waiting parent on itself (back to the tester): do not put it back in the Test queue here. */
+    keepParentWaiting?: boolean;
   } = {},
 ): Promise<string | undefined> {
   // A cancelled bug child will never pass review: the parent waiting on it goes back to the Test queue
@@ -965,6 +967,7 @@ export async function cancelCardIn(
   if (
     card.parent_card_id &&
     card.origin === 'test_failure' &&
+    !opts.keepParentWaiting &&
     !opts.alsoCancelling?.has(card.parent_card_id)
   ) {
     const parent = await one(tx, 'SELECT * FROM cards WHERE id=$1 FOR UPDATE', [card.parent_card_id]);

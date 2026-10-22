@@ -1,0 +1,140 @@
+[
+  {
+    "kind": "role",
+    "key": "architect",
+    "version": 5,
+    "sha256": "d39b0d95093bc7c60a84041ad4c11bb47bbfd98fbc57f7c36cc8375d6490c0b1"
+  },
+  {
+    "kind": "role",
+    "key": "ba",
+    "version": 18,
+    "sha256": "b6cbb4de570a2d89e80e60931990539f6786e89b3471e2403c819959d9d9f33f"
+  },
+  {
+    "kind": "role",
+    "key": "builder",
+    "version": 6,
+    "sha256": "a778e542d44ad789dbd3edd06bdf28c3a0149e1419fbf18c3f4d0f00d9031f3b"
+  },
+  {
+    "kind": "role",
+    "key": "ceo",
+    "version": 3,
+    "sha256": "802480bae010fac4a973a1de69471ecf266406ee204028d10ee63226ea6840c9"
+  },
+  {
+    "kind": "role",
+    "key": "checker",
+    "version": 3,
+    "sha256": "d52f3853e8b361c1e58288b1d0233bfea491dd73e07362fc087872cda3411c48"
+  },
+  {
+    "kind": "role",
+    "key": "curator",
+    "version": 4,
+    "sha256": "51b5f5cfe63d4b529434a77ec7a17cac60b5b961992460ed481a7d7abe3b7962"
+  },
+  {
+    "kind": "role",
+    "key": "devops",
+    "version": 10,
+    "sha256": "7e25b66171a7348c68271a26778d73bd0a04b552da9125b38019dfa73313a8d0"
+  },
+  {
+    "kind": "role",
+    "key": "planner",
+    "version": 2,
+    "sha256": "8f67824701e7d2aeeca846de8fb2a30c79142ee86fcfede369fd53896896f415"
+  },
+  {
+    "kind": "role",
+    "key": "pre_reviewer",
+    "version": 3,
+    "sha256": "1b42d6f2d8892767dc2bf37247a42138c583fb62206e8867bf7ca42cab2e1781"
+  },
+  {
+    "kind": "role",
+    "key": "researcher",
+    "version": 3,
+    "sha256": "7e725e57dbdf2508842c8421095a4c678d4217bceff4c39df6bd434a4f10aa29"
+  },
+  {
+    "kind": "role",
+    "key": "reviewer",
+    "version": 8,
+    "sha256": "3a3d32bd70d3534e87116236825f319ba660450fe6a8e3211b26e0a5bfbac1a5"
+  },
+  {
+    "kind": "role",
+    "key": "scout",
+    "version": 3,
+    "sha256": "4e8a1ed707ba88d6dcdeb3d91a428127a4d948c30eed65e661666994fcb7d387"
+  },
+  {
+    "kind": "role",
+    "key": "tester",
+    "version": 10,
+    "sha256": "ca0449d71f9560fd2042fd77e3d8494bd1be7990895fbf09ccb7926b6d26cc70"
+  },
+  {
+    "kind": "role",
+    "key": "writer",
+    "version": 4,
+    "sha256": "0bffb0459e7b4c3ac8f4a94669ee28135fd236f01e56d26a597ea2137cecc206"
+  },
+  {
+    "kind": "workflow",
+    "key": "code-bugfix",
+    "version": 1,
+    "sha256": "dcd3ceca333c451c3e545458be81a744cd563f9250dfeec9b4634e5bc56d649e"
+  },
+  {
+    "kind": "workflow",
+    "key": "code",
+    "version": 1,
+    "sha256": "a50036807c94594fa43fa2cbfc0337bbfcffd8770da66bb46c73543a5fd65ebb"
+  },
+  {
+    "kind": "workflow",
+    "key": "code",
+    "version": 2,
+    "sha256": "ca21f48371bf0713740a48df75de5fae460abf8b16e3e3aee787d1bc616e46a3"
+  },
+  {
+    "kind": "workflow",
+    "key": "code",
+    "version": 3,
+    "sha256": "fc2af98c7dba148793d14a11305a5e380aa013731d7c82ae3f41b564fbe94737"
+  },
+  {
+    "kind": "workflow",
+    "key": "code",
+    "version": 4,
+    "sha256": "e7ea9ba8edde26ac94efe8ce76160a4b2a6b84291234b94b8af6fde31158e397"
+  },
+  {
+    "kind": "workflow",
+    "key": "code",
+    "version": 5,
+    "sha256": "350ea5d44ecba6ea4323bc299580f50dc07c147ead23acc423e87555582ac5dd"
+  },
+  {
+    "kind": "workflow",
+    "key": "code",
+    "version": 6,
+    "sha256": "c0766961c4a7a6f3740c056ee7c46bc1f966ae2612fc4378322a179584ca321c"
+  },
+  {
+    "kind": "workflow",
+    "key": "feed",
+    "version": 1,
+    "sha256": "f5a211b75c70190fc8834433cddd6372e4ff78847c79788cb1fe4a9c67a13df8"
+  },
+  {
+    "kind": "workflow",
+    "key": "research",
+    "version": 1,
+    "sha256": "5263dd4f34c80dd53d139e81a2b8c8ccac18cde53eb8a7193339e53106271ede"
+  }
+]

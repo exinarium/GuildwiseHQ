@@ -18,6 +18,8 @@ export const CEO_ACTIONS = [
   'move',
   /** `aom ceo act raise-model`: run this card's next shifts on a stronger model and/or effort (a per-card override). */
   'raise-model',
+  /** `aom ceo act send-to-tester`: cancel the open bug card(s) of a failed test and send the card back to the tester with a note. */
+  'send-to-tester',
   'priority',
   'cancel-card',
   'stop-shift',

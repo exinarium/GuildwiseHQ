@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { BUILTIN_ROLES, COMMON_DENIED_SHELL, streamId } from '@aom/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { registerBuiltins } from '../src/catalogue/boot.ts';
+import { loadRole } from '../src/catalogue/loader.ts';
 import { rebaseAgentsToCurrentRoles } from '../src/hr/follow-role.ts';
 import { rebuildProjections } from '../src/projections/rebuild.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
@@ -144,5 +146,60 @@ describe('agents follow the current version of their role', () => {
     expect(before.length).toBeGreaterThan(0);
     await rebuildProjections(w.t.app.ctx.pool, w.t.app.ctx.store);
     expect(await snap()).toEqual(before);
+  });
+});
+
+describe('the tester role v10 reaches testers hired under v9 (GWP-11)', () => {
+  it('boot registers v10 and the rebase moves hired testers; their instructions carry --scope', async () => {
+    const testerNow = BUILTIN_ROLES.find((r) => r.key === 'tester')!;
+    expect(testerNow.version).toBeGreaterThanOrEqual(10);
+    // Production state: role_definitions has tester v9 (without the --scope text), no v10 yet, and hired testers on v9.
+    const v9 = {
+      ...testerNow,
+      version: 9,
+      instructions: testerNow.instructions
+        .replaceAll('--scope e2e-spec', '')
+        .replaceAll('--scope product', ''),
+    };
+    expect(v9.instructions).not.toContain('--scope');
+    await q(`DELETE FROM role_definitions WHERE org_id IS NULL AND key='tester'`);
+    await w.t.app.ctx.store.append([
+      {
+        streamId: streamId.role(null, 'tester'),
+        event: {
+          type: 'RoleVersionRegistered',
+          payload: {
+            roleVersionId: randomUUID(),
+            orgId: null,
+            key: 'tester',
+            version: 9,
+            definition: v9,
+            status: 'active',
+          },
+        },
+        actor: SYSTEM,
+        scope: { orgId: null, projectId: null, audience: 'system' },
+      },
+    ]);
+    const dennis = await w.hire('Dennis', 'tester', 'senior');
+    const orgId = (await q('SELECT org_id FROM agents WHERE id=$1', [dennis.id]))[0]!.org_id as string;
+    await q(`UPDATE agents SET role_version=9 WHERE id=$1`, [dennis.id]);
+    expect((await loadRole(w.t.app.ctx.pool, orgId, 'tester', 9))!.definition.instructions).not.toContain(
+      '--scope',
+    );
+
+    // Boot: the missing version is registered, then the agents follow it.
+    const reg = await registerBuiltins(w.t.app.ctx);
+    expect(reg.roles).toBeGreaterThanOrEqual(1);
+    expect(await rebaseAgentsToCurrentRoles(w.t.app.ctx)).toBeGreaterThanOrEqual(1);
+
+    const after = await permsOf(dennis.id);
+    expect(after.role_version).toBe(testerNow.version);
+    const role = await loadRole(w.t.app.ctx.pool, orgId, 'tester', after.role_version);
+    expect(role!.definition.instructions).toContain('--scope e2e-spec');
+    expect(role!.definition.instructions).toContain(
+      'you make the edit and run the capture or the suites yourself',
+    );
+    expect(await rebaseAgentsToCurrentRoles(w.t.app.ctx)).toBe(0);
   });
 });

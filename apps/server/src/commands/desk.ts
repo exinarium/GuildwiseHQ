@@ -44,6 +44,7 @@ import { findNearDuplicate } from './ledger-checks.ts';
 import { resolveOutboundIn } from './outbox.ts';
 import { resolvePhaseDeskItemIn } from './phases.ts';
 import { resolveRepoCreateIn, retryRepoCreateIn } from './repo-create.ts';
+import { testerLoopAnswered } from './tester-loop.ts';
 import { resolveVaultConflictIn } from './vaults.ts';
 
 const itemScope = (item: Row) =>
@@ -233,6 +234,12 @@ export async function answerDeskItem(
       if (b.hygieneForRepo) after.hygieneRepo = b.hygieneForRepo;
     }
     await ctx.store.append(events, { tx });
+    // The tester loop: each option of that question performs its action (bug card, back to the tester, cancel).
+    await testerLoopAnswered(ctx, tx, item, req.optionId, req.answer, {
+      user,
+      actor: userActor(user.id),
+      author: { kind: 'user', userId: user.id },
+    });
     after.item = item;
     return { ledgerEntryId: entryId, unblockedCardIds: blocked.map((b) => b.card_id) };
   });

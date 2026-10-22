@@ -79,6 +79,9 @@ export const testingProjectors: Record<string, Projector> = {
 
   TestReworkRequested: async (tx, e) => {
     const p = ev<'TestReworkRequested'>(e).payload;
+    // A rework the CEO or an answer ordered (`instruction`) is not a failed run of the tester. Events written before
+    // `instruction` existed never carry it, so a replay records exactly the runs it recorded then.
+    if (p.instruction) return;
     const card = await getCard(tx, p.cardId);
     await recordRun(tx, e, {
       cardId: p.cardId,
