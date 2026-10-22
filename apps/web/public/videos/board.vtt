@@ -1,0 +1,49 @@
+WEBVTT
+
+1
+00:00:00.672 --> 00:00:07.926
+The board shows every card of a project, in the stages of its workflow. Cards move by themselves as your agents work.
+
+2
+00:00:08.631 --> 00:00:15.491
+Open Board in the sidebar. Each column is a stage of the workflow, from Spec on the left to Done on the right.
+
+3
+00:00:16.191 --> 00:00:23.631
+The header counts the open and blocked cards and shows what the project spent this month. Each card shows what it has cost so far.
+
+4
+00:00:24.334 --> 00:00:29.580
+The chips narrow the board. Blocked shows only the cards that wait for your answer at the desk.
+
+5
+00:00:30.279 --> 00:00:37.162
+Waiting for my approval shows the cards you must approve. Waiting for my QA shows the ones you test before they are done.
+
+6
+00:00:39.518 --> 00:00:45.913
+Click a card to open it. This one is blocked: its builder asked a question, and the card waits for your answer.
+
+7
+00:00:46.614 --> 00:00:54.739
+The brief says what to build: context, requirements and acceptance criteria. The details show its stage and risk.
+
+8
+00:00:55.439 --> 00:01:04.820
+Further down, the thread holds the conversation, with the question itself, and the handoffs record every shift: which agent did it, and the outcome.
+
+9
+00:01:05.523 --> 00:01:11.512
+New card opens the form: a title, the repository and the brief. Cancel takes you back to the board.
+
+10
+00:01:12.889 --> 00:01:20.259
+Pause project stops new work from starting. Running shifts finish, and Resume project picks up where it left off.
+
+11
+00:01:21.733 --> 00:01:28.384
+Finished cards leave the board a day later. Archive lists them, and you can open or reopen any of them.
+
+12
+00:01:29.083 --> 00:01:35.304
+That is the board. Check the chips each day, and open a card whenever you want the full story.

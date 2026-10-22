@@ -1,0 +1,36 @@
+{
+  "title": "The Board and your cards",
+  "src": "/videos/board.webm",
+  "type": "video/webm",
+  "sources": [
+    {
+      "src": "/videos/board.mp4",
+      "type": "video/mp4"
+    },
+    {
+      "src": "/videos/board.webm",
+      "type": "video/webm"
+    }
+  ],
+  "captions": "/videos/board.vtt",
+  "voice": "Piper en_GB-cori-high",
+  "duration": 96,
+  "chapters": [
+    {
+      "t": 8.6,
+      "title": "Read the board"
+    },
+    {
+      "t": 24.3,
+      "title": "Filter what needs you"
+    },
+    {
+      "t": 39.5,
+      "title": "Open a card"
+    },
+    {
+      "t": 65.5,
+      "title": "New card, pause and archive"
+    }
+  ]
+}
