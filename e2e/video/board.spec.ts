@@ -80,7 +80,8 @@ test('record the board video', async ({ browser }) => {
     cues: allCues(),
     chapters: CHAPTERS,
   });
-  const api = await demoApi();
+  // no CEO: this board video hires its own team (a CEO could take a name it uses, and would answer its questions)
+  const api = await demoApi({ ceo: false });
   // a fast mock while the history is made; the camera only starts once every card stands where the video needs it
   const ws = await pairWorkstation(api, "Alex's laptop", undefined, { AOM_MOCK_STEP_MS: '300' });
   const devops = (

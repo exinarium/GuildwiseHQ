@@ -14,22 +14,22 @@
   ],
   "captions": "/videos/board.vtt",
   "voice": "Piper en_GB-cori-high",
-  "duration": 96,
+  "duration": 95.3,
   "chapters": [
     {
-      "t": 8.6,
+      "t": 8.4,
       "title": "Read the board"
     },
     {
-      "t": 24.3,
+      "t": 24.1,
       "title": "Filter what needs you"
     },
     {
-      "t": 39.5,
+      "t": 39.3,
       "title": "Open a card"
     },
     {
-      "t": 65.5,
+      "t": 65.3,
       "title": "New card, pause and archive"
     }
   ]
