@@ -8,7 +8,7 @@ import {
   StopLossSettingsSchema,
   streamId,
 } from '@aom/shared';
-import { ceoActive } from '../ceo/state.ts';
+import { ceoActive, ceoReachable } from '../ceo/state.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Queryable, type Row, rows } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
@@ -127,14 +127,20 @@ export const CEO_STOP_LOSS_ARBITRATIONS = 3;
 /** How long a stop-loss is held for the CEO (hidden from the desk) before the owner sees it. */
 export const CEO_STOP_LOSS_HOLD_MINUTES = 20;
 
-/** How often the CEO resolved a stop-loss of this card (it answered the item), since the card's baseline. */
+/**
+ * How often the CEO resolved a stop-loss of this card (it answered the item, or dismissed it by moving the card), since
+ * the card's baseline.
+ */
 export async function ceoStopLossArbitrations(db: Queryable, cardId: string): Promise<number> {
   const r = await one<{ n: number }>(
     db,
     `SELECT count(*)::int AS n FROM desk_items d
       WHERE d.card_id=$1 AND d.subkind=$2 AND d.status IN ('answered','dismissed') AND d.created_at >= ${SINCE}
         AND (d.data->'ceoDecision' IS NOT NULL
-             OR EXISTS (SELECT 1 FROM agents a WHERE a.id = d.answered_by_agent_id AND a.role_key = 'ceo'))`,
+             OR EXISTS (SELECT 1 FROM agents a WHERE a.id = d.answered_by_agent_id AND a.role_key = 'ceo')
+             OR EXISTS (SELECT 1 FROM events ev JOIN agents a ON a.id = ev.actor_id AND a.role_key = 'ceo'
+                         WHERE ev.stream_id = 'desk-' || d.id::text AND ev.type = 'DeskItemResolved'
+                           AND ev.actor_kind = 'agent'))`,
     [cardId, DESK_SUBKIND.stopLoss],
   );
   return Number(r?.n ?? 0);
@@ -152,6 +158,17 @@ async function stopLossRoute(
   card: Row,
 ): Promise<{ route: Route; ceoHold?: { deadline: string }; note: string }> {
   const ceo = await ceoActive(tx, card.org_id);
+  const reachable = ceo ? (await ceoReachable(tx, card.org_id, ctx.clock.now())).ok : false;
+  const paused = ceo
+    ? !!(await one(tx, 'SELECT 1 FROM projects WHERE id=$1 AND paused_at IS NOT NULL', [card.project_id]))
+    : false;
+  // A CEO that cannot run a shift now, or a paused project (nothing of it is dispatched, so nobody would look at the
+  // item): the owner's desk at once. Never the architect or the BA in the CEO's place.
+  if (ceo && (!reachable || paused))
+    return {
+      route: { routedTo: 'manager', level: 'desk' },
+      note: `The CEO ${paused ? 'cannot look at this now (the project is paused)' : 'is not reachable'}: the owner decides.`,
+    };
   if (!ceo) {
     const route = await architectRoute(ctx, tx, card);
     return {

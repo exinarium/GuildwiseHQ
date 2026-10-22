@@ -68,9 +68,10 @@ describe('the default CEO policy', () => {
   it('lets the CEO move cards, raise a card model and release loops on its own', () => {
     expect(DEFAULT_CEO_POLICY.classes['card.move']?.mode).toBe('decide');
     expect(DEFAULT_CEO_POLICY.classes['card.raise_model']?.mode).toBe('decide');
-    for (const sub of ['loop_parked', 'repeat_question', 'stop_loss', 'loop_backoff'])
+    for (const sub of ['loop_parked', 'repeat_question', 'repeat_loop', 'stop_loss', 'loop_backoff'])
       expect(deskMode(DEFAULT_CEO_POLICY, 'escalation', sub), sub).toBe('decide');
     expect(deskMode(DEFAULT_CEO_POLICY, 'question', 'stop_loss')).toBe('decide');
+    expect(deskMode(DEFAULT_CEO_POLICY, 'question', 'repeat_loop')).toBe('decide');
     // other escalations stay with the owner
     expect(deskMode(DEFAULT_CEO_POLICY, 'escalation', 'something_else')).toBe('recommend');
   });
@@ -218,6 +219,58 @@ describe('stop-loss goes to the CEO', () => {
     expect(await deskIds()).toContain(fourth.id);
   });
 
+  it('counts the CEO moving the card (which dismisses the stop-loss) as an arbitration: the 4th goes to the owner', async () => {
+    const card = await w.card({ title: 'Moved again and again' });
+    let to = 'review';
+    for (let i = 0; i < CEO_STOP_LOSS_ARBITRATIONS; i++) {
+      const item = await raiseStopLoss(card.id);
+      expect(item.triage, `stop-loss ${i + 1} is the CEO's`).toBe('pending');
+      const res = result(await act(r, shiftId, 'move', { card: card.ref, to }, { key: `capmove-${i}` }));
+      expect(res.status).toBe('executed');
+      const after = (await q(`SELECT status FROM desk_items WHERE id=$1`, [item.id]))[0]!;
+      expect(after.status).toBe('dismissed');
+      to = to === 'review' ? 'build' : 'review';
+    }
+    // the move is attributed to the CEO agent, not to the owner
+    const moved = await q(
+      `SELECT actor_kind, actor_id FROM events WHERE type='CardMovedByManager' AND payload->>'cardId'=$1`,
+      [card.id],
+    );
+    expect(moved).toHaveLength(CEO_STOP_LOSS_ARBITRATIONS);
+    for (const m of moved) expect(m).toMatchObject({ actor_kind: 'agent', actor_id: ceoAgentId });
+    expect(await ceoStopLossArbitrations(ctx().pool, card.id)).toBe(CEO_STOP_LOSS_ARBITRATIONS);
+    const fourth = await raiseStopLoss(card.id);
+    expect(fourth).toMatchObject({ routed_to: 'manager', triage: 'none', status: 'open' });
+    expect(await deskIds()).toContain(fourth.id);
+  });
+
+  it('goes straight to the owner when the CEO cannot run a shift now, never the architect', async () => {
+    await q(`UPDATE workstations SET connected=false WHERE id=$1`, [w.workstationId]);
+    try {
+      const card = await w.card({ title: 'CEO offline' });
+      const item = await raiseStopLoss(card.id);
+      expect(item).toMatchObject({ routed_to: 'manager', triage: 'none', status: 'open' });
+      expect(item.routed_agent_id ?? null).toBeNull();
+      expect(await deskIds()).toContain(item.id);
+    } finally {
+      await q(`UPDATE workstations SET connected=true, last_seen_at=$2 WHERE id=$1`, [
+        w.workstationId,
+        w.t.clock.now(),
+      ]);
+    }
+  });
+
+  it('goes straight to the owner when the card project is paused (nobody would look at a held item)', async () => {
+    const card = await w.card({ title: 'Paused project' });
+    await q(`UPDATE projects SET paused_at=now() WHERE id=$1`, [w.projectId]);
+    try {
+      const item = await raiseStopLoss(card.id);
+      expect(item).toMatchObject({ routed_to: 'manager', triage: 'none', status: 'open' });
+    } finally {
+      await q(`UPDATE projects SET paused_at=NULL WHERE id=$1`, [w.projectId]);
+    }
+  });
+
   it('counts a dismissal as a resolution, so the same usage does not raise it again', async () => {
     const card = await w.card({ title: 'Dismissed' });
     const before = await stopLossBudget(ctx().pool, await cardRow(card.id));
@@ -269,20 +322,24 @@ describe('questions go to the CEO, not the BA', () => {
     expect(fromPeer).toMatchObject({ level: 'ceo' });
   });
 
-  it('keeps waiting for a CEO that cannot run a shift now; the CEO passing it on goes to the desk, never the BA', async () => {
+  it('goes to the owner at once when the CEO cannot run a shift now, never the BA and not after a wait', async () => {
     await q(`UPDATE workstations SET connected=false WHERE id=$1`, [w.workstationId]);
     try {
-      expect(await nextRoute(ctx(), ctx().pool, input())).toMatchObject({ level: 'ceo' });
-      expect(await nextRoute(ctx(), ctx().pool, input({ from: 'ceo', tried: [ceoAgentId] }))).toMatchObject({
-        routedTo: 'manager',
-        level: 'desk',
-      });
+      const desk = { routedTo: 'manager', level: 'desk' };
+      expect(await nextRoute(ctx(), ctx().pool, input())).toMatchObject(desk);
+      expect(await nextRoute(ctx(), ctx().pool, input({ topic: 'requirements' }))).toMatchObject(desk);
+      expect(await nextRoute(ctx(), ctx().pool, input({ via: 'ba' }))).toMatchObject(desk);
+      expect(await nextRoute(ctx(), ctx().pool, input({ from: 'ceo', tried: [ceoAgentId] }))).toMatchObject(
+        desk,
+      );
     } finally {
       await q(`UPDATE workstations SET connected=true, last_seen_at=$2 WHERE id=$1`, [
         w.workstationId,
         w.t.clock.now(),
       ]);
     }
+    // reachable again: the CEO
+    expect(await nextRoute(ctx(), ctx().pool, input())).toMatchObject({ level: 'ceo' });
   });
 
   it('uses the BA only when there is no active CEO', async () => {
@@ -507,6 +564,120 @@ describe('either the question or the decision on the desk', () => {
   });
 });
 
+describe('the CEO releases a repeat_loop escalation', () => {
+  it('resolves it without cited evidence', async () => {
+    expect(deskMode(DEFAULT_CEO_POLICY, 'escalation', 'repeat_loop')).toBe('decide');
+    const card = await w.card({ title: 'Asks the same thing' });
+    const id = randomUUID();
+    await seed(w, [
+      {
+        streamId: streamId.desk(id),
+        event: {
+          type: 'DeskItemCreated',
+          payload: {
+            deskItemId: id,
+            kind: 'escalation',
+            subkind: 'repeat_loop',
+            title: `${card.ref} keeps asking the same question (3 times)`,
+            body: 'Say what is missing, then resolve this item.',
+            options: [],
+            blocking: true,
+            pinned: true,
+            cardId: card.id,
+            projectId: w.projectId,
+            affectedCardIds: [card.id],
+            askedBy: { kind: 'system' },
+            subjectKey: `repeat_loop:${card.id}`,
+          },
+        },
+        actor: SYSTEM_ACTOR,
+        scope: projectScope(w.owner.id, w.projectId),
+      },
+    ]);
+    const res = result(
+      await act(r, shiftId, 'answer', { item: id, text: 'Use the staging database.' }, { key: 'rl-1' }),
+    );
+    expect(res.status).toBe('executed');
+    expect((await q(`SELECT status FROM desk_items WHERE id=$1`, [id]))[0]!.status).toBe('answered');
+  });
+});
+
+describe('CEO actions stay inside the CEO organization', () => {
+  it('refuses to move or raise a card of another organization', async () => {
+    const other = await w.t.createOrg(w.owner.id, 'Elsewhere');
+    const card = await w.card({ title: 'Foreign card' });
+    await q(`UPDATE cards SET org_id=$2 WHERE id=$1`, [card.id, other]);
+    const mv = result(await act(r, shiftId, 'move', { card: card.ref, to: 'review' }, { key: 'org-mv' }));
+    expect(mv.status).toBe('refused');
+    const rm = result(
+      await act(r, shiftId, 'raise-model', { card: card.ref, model: 'opus' }, { key: 'org-rm' }),
+    );
+    expect(rm.status).toBe('refused');
+    expect((await cardRow(card.id)).stage).toBe(card.stage);
+    expect((await cardRow(card.id)).model_override).toBeNull();
+  });
+});
+
+describe('CardMovedByManager replay', () => {
+  it('an event without clearsBlockers keeps the older rule: an open question stays, blocked_since is not cleared', async () => {
+    const card = await w.card({ title: 'Old-shape move' });
+    const id = randomUUID();
+    const scope = projectScope(w.owner.id, w.projectId);
+    await seed(w, [
+      {
+        streamId: streamId.desk(id),
+        event: {
+          type: 'QuestionRaised',
+          payload: {
+            deskItemId: id,
+            cardId: card.id,
+            projectId: w.projectId,
+            askedBy: { kind: 'system' },
+            question: 'Old open question?',
+            options: [{ id: 'o1', label: 'A' }],
+            blocking: true,
+            routedTo: 'manager',
+            pinned: false,
+            affectedCardIds: [card.id],
+          },
+        },
+        actor: SYSTEM_ACTOR,
+        scope,
+      },
+    ]);
+    const before = await cardRow(card.id);
+    expect(before.blocked_since).not.toBeNull();
+    const move = (payload: Record<string, unknown>) =>
+      seed(w, [
+        {
+          streamId: streamId.card(card.id),
+          event: {
+            type: 'CardMovedByManager',
+            payload: {
+              cardId: card.id,
+              fromStage: card.stage,
+              toStage: 'review',
+              status: 'queued',
+              reason: 'old',
+              ...payload,
+            },
+          },
+          actor: SYSTEM_ACTOR,
+          scope,
+        },
+      ]);
+    await move({});
+    const blockers = () =>
+      q(`SELECT 1 FROM card_blockers WHERE card_id=$1 AND desk_item_id=$2`, [card.id, id]);
+    expect(await blockers()).toHaveLength(1);
+    expect((await cardRow(card.id)).blocked_since).not.toBeNull();
+    // the new shape clears everything
+    await move({ clearsBlockers: true, fromStage: 'review', toStage: 'build' });
+    expect(await blockers()).toHaveLength(0);
+    expect((await cardRow(card.id)).blocked_since).toBeNull();
+  });
+});
+
 describe('the policy migration', () => {
   it('adds the loop keys to a stored policy once, and leaves a key the owner set alone', async () => {
     const cur = (
@@ -533,5 +704,31 @@ describe('the policy migration', () => {
     expect(pol.desk['question:stop_loss']).toBe('decide');
     expect(pol.desk['escalation:stop_loss']).toBe('never');
     expect(await migrateCeoAuthority(env)).toBeNull();
+  });
+
+  it('does not add the loop keys of a family whose wildcard the owner set explicitly', async () => {
+    const cur = (await q(`SELECT policy FROM ceo_settings WHERE org_id=$1`, [w.owner.id]))[0]!;
+    const stored = { ...cur.policy, desk: { ...cur.policy.desk, 'escalation:*': 'never' } };
+    for (const k of Object.keys(stored.desk))
+      if (/^(escalation|question|alert):(loop_|repeat_|stop_loss)/.test(k)) delete stored.desk[k];
+    await q(`UPDATE ceo_settings SET policy=$2 WHERE org_id=$1`, [w.owner.id, JSON.stringify(stored)]);
+    await q(`DELETE FROM data_migrations WHERE name=$1`, [CEO_AUTHORITY_MIGRATION]);
+    const logs: string[] = [];
+    const env = {
+      pool: ctx().pool,
+      store: ctx().store,
+      clock: ctx().clock,
+      log: (m: string) => logs.push(m),
+    } as never;
+    await migrateCeoAuthority(env);
+    const pol = (await ok<any>(owner('GET', '/api/ceo/policy'))).policy;
+    expect(pol.desk['escalation:repeat_loop']).toBeUndefined();
+    expect(pol.desk['escalation:stop_loss']).toBeUndefined();
+    expect(pol.desk['question:repeat_loop']).toBe('decide');
+    expect(pol.desk['alert:loop_parked']).toBe('decide');
+    expect(logs.some((l) => l.includes(w.owner.id) && l.includes('escalation'))).toBe(true);
+    expect(await migrateCeoAuthority(env)).toBeNull();
+    // restore the default for later tests
+    await q(`UPDATE ceo_settings SET policy=$2 WHERE org_id=$1`, [w.owner.id, JSON.stringify(cur.policy)]);
   });
 });

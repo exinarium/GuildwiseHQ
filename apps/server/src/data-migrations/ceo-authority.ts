@@ -19,11 +19,20 @@ const LOOP_DESK_KEYS = [
   'escalation:repeat_question',
   'escalation:stop_loss',
   'escalation:loop_backoff',
+  'escalation:repeat_loop',
   'question:stop_loss',
   'question:repeat_question',
+  'question:repeat_loop',
   'alert:loop_backoff',
   'alert:loop_parked',
 ] as const;
+
+/** The wildcard each family had in the old default policy: an owner's different value there is an explicit choice. */
+const OLD_WILDCARD_DEFAULT: Record<string, string> = {
+  escalation: 'recommend',
+  question: 'decide',
+  alert: 'decide',
+};
 
 export async function migrateCeoAuthority(env: DataMigrationEnv): Promise<{ changed: string[] } | null> {
   const { pool, store, clock, log } = env;
@@ -34,7 +43,20 @@ export async function migrateCeoAuthority(env: DataMigrationEnv): Promise<{ chan
     const ceo = await loadCeo(pool, o.org_id);
     const by = await orgOwnerId(pool, o.org_id);
     if (!ceo || !by) continue;
-    const missing = LOOP_DESK_KEYS.filter((k) => !(k in ceo.policy.desk));
+    // An owner who set a family wildcard (`escalation:*`, ...) to something else than the old default meant it for the
+    // whole family: its loop keys are not added.
+    const overridden = new Set<string>();
+    for (const [family, old] of Object.entries(OLD_WILDCARD_DEFAULT)) {
+      const v = (ceo.policy.desk as Record<string, string>)[`${family}:*`];
+      if (v !== undefined && v !== old) overridden.add(family);
+    }
+    const missing = LOOP_DESK_KEYS.filter(
+      (k) => !(k in ceo.policy.desk) && !overridden.has(k.slice(0, k.indexOf(':'))),
+    );
+    if (overridden.size > 0)
+      log(
+        `${CEO_AUTHORITY_MIGRATION}: ${o.org_id} keeps its own wildcard for ${[...overridden].join(', ')}; those loop keys are not added`,
+      );
     if (missing.length === 0) continue;
     const next = {
       ...ceo.policy,

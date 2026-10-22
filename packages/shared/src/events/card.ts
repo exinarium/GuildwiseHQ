@@ -367,7 +367,19 @@ export const cardEvents = [
   ),
   defineEvent(
     'CardMovedByManager',
-    z.object({ cardId: Id, fromStage: Stage, toStage: Stage, status: CardStatus, reason: z.string() }),
+    z.object({
+      cardId: Id,
+      fromStage: Stage,
+      toStage: Stage,
+      status: CardStatus,
+      reason: z.string(),
+      /**
+       * Set by moves that dismiss the card's open blockers themselves (`moveCard`): the projection then clears
+       * `blocked_since` and every blocker row. Events without it keep the older rule (kept and loop-parked blockers,
+       * only when the new status is queued).
+       */
+      clearsBlockers: z.boolean().optional(),
+    }),
   ),
   /**
    * A done or cancelled card goes back to work by a manager. `fromStatus` is what it was (`done` / `cancelled`); the

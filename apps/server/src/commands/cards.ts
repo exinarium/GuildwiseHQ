@@ -739,7 +739,14 @@ export async function moveCardWithNotice(
         streamId: streamId.card(card.id),
         event: {
           type: 'CardMovedByManager',
-          payload: { cardId: card.id, fromStage: card.stage, toStage, status, reason },
+          payload: {
+            cardId: card.id,
+            fromStage: card.stage,
+            toStage,
+            status,
+            reason,
+            clearsBlockers: true,
+          },
         },
         actor,
         scope,
