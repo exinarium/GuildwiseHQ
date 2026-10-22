@@ -1,0 +1,36 @@
+{
+  "title": "The Ledger",
+  "src": "/videos/ledger.webm",
+  "type": "video/webm",
+  "sources": [
+    {
+      "src": "/videos/ledger.mp4",
+      "type": "video/mp4"
+    },
+    {
+      "src": "/videos/ledger.webm",
+      "type": "video/webm"
+    }
+  ],
+  "captions": "/videos/ledger.vtt",
+  "voice": "Piper en_GB-cori-high",
+  "duration": 78.9,
+  "chapters": [
+    {
+      "t": 10.3,
+      "title": "Search and filter"
+    },
+    {
+      "t": 24.1,
+      "title": "Add a standing order"
+    },
+    {
+      "t": 46.5,
+      "title": "Edit and history"
+    },
+    {
+      "t": 58.8,
+      "title": "Retire an entry"
+    }
+  ]
+}
