@@ -52,10 +52,7 @@ export interface HistoryProject {
   open: Array<{ title: string; status: 'queued' | 'blocked' | 'draft'; stage: string }>;
 }
 
-/**
- * A feature card with a complete brief, left in Spec. (Not seed.ts's createCard: its `push_branch` completion action is
- * no longer accepted by the API, which takes `pr` or `merge`.)
- */
+/** A feature card with a complete brief, left in Spec (seed.ts's createCard queues it for the team instead). */
 async function draftCard(
   api: APIRequestContext,
   projectId: string,

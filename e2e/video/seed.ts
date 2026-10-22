@@ -68,14 +68,28 @@ export async function createProject(
   return { projectId, repoId: (await add.json()).repos[0].id as string };
 }
 
-/** Hires a mock-runtime agent. `roleKey` is one of ba, planner, architect, builder, pre_reviewer, reviewer, tester. */
+/**
+ * Hires a mock-runtime agent and returns its id. `roleKey` is a role of the catalogue (ba, planner, architect, builder,
+ * pre_reviewer, reviewer, tester, researcher, ...). Without `seniority` it hires a junior when the role has juniors,
+ * else the role's first level (the BA, the architect, the reviewer and DevOps are senior only).
+ */
 export async function hireAgent(
   api: APIRequestContext,
   a: { name: string; roleKey: string; seniority?: string; workstationId: string; projectId?: string },
 ): Promise<string> {
-  const r = await api.post('/api/agents', { data: { seniority: 'junior', runtime: 'mock', ...a } });
+  let seniority = a.seniority;
+  if (!seniority) {
+    const roles = (await (await api.get('/api/roles')).json()).roles as Array<{
+      definition: { key: string; seniorityLevels: string[] };
+    }>;
+    const levels = roles.find((r) => r.definition.key === a.roleKey)?.definition.seniorityLevels ?? [];
+    seniority = levels.includes('junior') ? 'junior' : (levels[0] ?? 'senior');
+  }
+  const r = await api.post('/api/agents', { data: { runtime: 'mock', ...a, seniority } });
   expect(r.status(), `${a.name}: ${await r.text()}`).toBe(201);
-  return (await r.json()).agent?.id as string;
+  const id = ((await r.json()) as { id?: string }).id; // the route answers with the agent itself
+  expect(id, `${a.name}: the hire returns the agent id`).toBeTruthy();
+  return id as string;
 }
 
 /** A feature card with a complete brief (queued for the team unless `specify: false`). */
@@ -89,7 +103,7 @@ export async function createCard(
       title: c.title,
       cardType: 'feature',
       repoId: c.repoId,
-      completionAction: 'push_branch',
+      completionAction: 'merge',
       fields: {
         context: 'Demo context.',
         requirements: c.title,
