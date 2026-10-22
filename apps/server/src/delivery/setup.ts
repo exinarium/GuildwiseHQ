@@ -188,6 +188,7 @@ export async function getSetupState(
   return {
     canEdit: p.my_role === 'owner',
     canApprove: org === 'owner',
+    canRelease: org === 'owner' || org === 'admin',
     draft:
       draft?.setup && !draftIsPublished
         ? {

@@ -105,6 +105,8 @@ export const SetupStateDtoSchema = z.object({
   canEdit: z.boolean(),
   /** The organization Owner: the one who approves. */
   canApprove: z.boolean(),
+  /** An organization Owner or Admin: who may release (the same rule the server applies to a release). */
+  canRelease: z.boolean().optional(),
   /** The wizard's work in progress. */
   draft: z
     .object({

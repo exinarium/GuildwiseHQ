@@ -693,6 +693,33 @@ describe('the server status and places', () => {
     expect(within(ro).getByTestId('env-readonly-production')).toHaveTextContent('Only the project owner');
   });
 
+  it('an Admin (not the project owner) gets a working Release button on the live card; a member does not', async () => {
+    serveProject();
+    serve(
+      savedState(
+        { deliveryMode: 'recipe', canEdit: false, canRelease: true },
+        { dryRunMissing: [], recipeStatus: 'approved' },
+      ),
+    );
+    mountPage();
+    const card = await screen.findByTestId('env-card-production');
+    expect(within(card).getByTestId('env-release-production')).toBeEnabled();
+    expect(within(card).getByTestId('env-readonly-production')).toHaveTextContent('You can release');
+    cleanup();
+    serve(
+      savedState(
+        { deliveryMode: 'recipe', canEdit: false, canRelease: false },
+        { dryRunMissing: [], recipeStatus: 'approved' },
+      ),
+    );
+    mountPage();
+    const ro = await screen.findByTestId('env-card-production');
+    expect(within(ro).getByTestId('env-release-production')).toBeDisabled();
+    expect(within(ro).getByTestId('env-readonly-production')).toHaveTextContent(
+      'Only an Owner or an Admin releases',
+    );
+  });
+
   it('places come from the server when it lists them: its reason a place cannot go is what is shown', async () => {
     const user = userEvent.setup();
     serveProject();

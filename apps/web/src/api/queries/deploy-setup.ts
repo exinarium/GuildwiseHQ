@@ -27,6 +27,7 @@ export function useSetupState(projectId: string | undefined, waiting = false) {
       return {
         canEdit: d.canEdit ?? false,
         canApprove: d.canApprove ?? false,
+        ...(d.canRelease === undefined ? {} : { canRelease: d.canRelease }),
         draft: d.draft ?? null,
         current: d.current ?? {
           setup: null,

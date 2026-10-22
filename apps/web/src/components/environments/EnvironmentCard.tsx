@@ -147,6 +147,8 @@ export function EnvironmentCard({
       }
     : null;
   const canEdit = s.canEdit;
+  // releasing is the organization Owner's or an Admin's, the same rule as the Releases page (not the project-owner rule of editing)
+  const canRelease = s.canRelease ?? s.canEdit;
   const rules = info.role === 'live' || env.gate !== 'none' ? rulesOf(env, labelOf) : [];
   const waiting = status?.waitingRelease;
   const headingId = `env-${env.name}-title`;
@@ -363,7 +365,7 @@ export function EnvironmentCard({
             {info.action === 'release' && (
               <Button
                 variant="primary"
-                disabled={paused}
+                disabled={paused || !canRelease}
                 onClick={() => setReleasing(true)}
                 data-testid={`env-release-${env.name}`}
               >
@@ -450,14 +452,20 @@ export function EnvironmentCard({
         ) : (
           <>
             {info.action === 'release' && (
-              <Button variant="primary" disabled data-testid={`env-release-${env.name}`}>
+              <Button
+                variant="primary"
+                disabled={!canRelease || paused}
+                onClick={() => setReleasing(true)}
+                data-testid={`env-release-${env.name}`}
+              >
                 <Rocket aria-hidden="true" className="size-4" />
                 {waiting ? `Release ${waiting.version ?? 'the new version'}` : 'Release the newest version'}
               </Button>
             )}
             <p className="text-xs text-subtle" data-testid={`env-readonly-${env.name}`}>
-              Only the project owner changes environments
-              {info.action === 'release' ? ' and releases' : ''}.
+              {info.action === 'release' && canRelease
+                ? 'Only the project owner changes environments. You can release.'
+                : `Only the project owner changes environments${info.action === 'release' ? '. Only an Owner or an Admin releases' : ''}.`}
             </p>
           </>
         )}
