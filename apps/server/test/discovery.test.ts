@@ -260,11 +260,12 @@ describe('the facilitator verbs', () => {
     await answer(s.threadId, a.result.questionId, { kind: 'pick', optionId: 'o1' });
     expect((await get(s.threadId)).config).toBeDefined();
     const cfg = (await q('SELECT session_config FROM threads WHERE id=$1', [s.threadId]))[0].session_config;
-    expect(cfg.pendingTrigger).toMatchObject({ kind: 'answer' });
+    expect(cfg.pendingTriggers).toMatchObject([{ kind: 'answer' }]);
     await finish(start);
     const next = await nextStart();
     expect(next.message).toContain('"trigger":"answer"');
     const cfg2 = (await q('SELECT session_config FROM threads WHERE id=$1', [s.threadId]))[0].session_config;
+    expect(cfg2.pendingTriggers).toBeUndefined();
     expect(cfg2.pendingTrigger).toBeUndefined();
     await finish(next);
   });
@@ -775,7 +776,16 @@ describe('PRD flow: draft, validate, approve, hand to the BA', () => {
     void locked;
     // hand to the BA
     await w.hire('Ben', 'ba', 'senior');
-    const handed = await owner('POST', `/api/discovery/${s.threadId}/hand-to-ba`);
+    // a double click creates one intake: the second request is refused
+    const both = await Promise.all([
+      raw('POST', `/api/discovery/${s.threadId}/hand-to-ba`),
+      raw('POST', `/api/discovery/${s.threadId}/hand-to-ba`),
+    ]);
+    expect(both.map((x) => x.status).sort()).toEqual([200, 409]);
+    const handed = both.find((x) => x.status === 200)?.body;
+    expect(
+      await q(`SELECT 1 FROM intakes WHERE linked_doc_ids @> $1::jsonb`, [JSON.stringify([docId])]),
+    ).toHaveLength(1);
     expect(handed.state.config.intakeId).toBe(handed.intakeId);
     expect((await owner('GET', `/api/documents/${docId}`)).document.status).toBe('handed_off');
     expect((await raw('POST', `/api/discovery/${s.threadId}/hand-to-ba`)).status).toBe(409);
@@ -823,6 +833,7 @@ describe('PRD flow: draft, validate, approve, hand to the BA', () => {
     const res = await raw('POST', `/api/discovery/${s.threadId}/hand-to-ba`);
     expect(res.status).toBe(409);
     expect(JSON.stringify(res.body)).toContain('no_ba');
+    expect((await get(s.threadId)).config.handingOff ?? null).toBeNull();
     expect((await owner('GET', `/api/documents/${docId}`)).document.status).toBe('approved');
   });
 });
@@ -871,5 +882,118 @@ describe('access and replay', () => {
     );
     await rebuildProjections(w.t.app.ctx.pool, w.t.app.ctx.store, w.t.clock.now());
     expect(await snap()).toEqual(before);
+  });
+});
+
+describe('review fixes: blocks, waiting triggers, recovery and authority', () => {
+  it('tells the owner once about a paused project, however often the sweep runs', async () => {
+    const s = await create({ title: 'Quiet block', projectId: w.projectId });
+    const start = await nextStart();
+    await finish(start);
+    await q(`UPDATE projects SET paused_at = now() WHERE id=$1`, [w.projectId]);
+    try {
+      await owner('POST', `/api/discovery/${s.threadId}/say`, { body: 'hello?' }, 201);
+      for (let i = 0; i < 3; i++) await w.t.app.ctx.services.discovery.sweep();
+      const msgs = (await owner('GET', `/api/threads/${s.threadId}/messages`)).messages as any[];
+      expect(
+        msgs.filter((m) => m.kind === 'system' && /project of this session is paused/.test(m.body)),
+      ).toHaveLength(1);
+    } finally {
+      await q(`UPDATE projects SET paused_at = NULL WHERE id=$1`, [w.projectId]);
+    }
+    await w.t.app.ctx.services.discovery.sweep();
+    await finish(await nextStart());
+  });
+
+  it('keeps a draft request and an answer that wait for a running turn, and sends both in order', async () => {
+    const s = await create({ title: 'Two waiting' });
+    const start = await nextStart();
+    const a = await ask(start.chatId, 'Who?', ['A', 'B']);
+    await owner('POST', `/api/discovery/${s.threadId}/draft`, { kind: 'prd' }, 202);
+    await answer(s.threadId, a.result.questionId, { kind: 'pick', optionId: 'o1' });
+    const cfg = (await q('SELECT session_config FROM threads WHERE id=$1', [s.threadId]))[0].session_config;
+    expect(cfg.pendingTriggers.map((x: any) => x.kind)).toEqual(['draft', 'answer']);
+    await finish(start);
+    const first = await nextStart();
+    expect(first.message).toContain('"trigger":"draft"');
+    await finish(first);
+    const second = await nextStart();
+    expect(second.message).toContain('"trigger":"answer"');
+    await finish(second);
+    const after = (await q('SELECT session_config FROM threads WHERE id=$1', [s.threadId]))[0].session_config;
+    expect(after.pendingTriggers).toBeUndefined();
+  });
+
+  it('retries a failed facilitator turn once on its own, then waits for Continue', async () => {
+    const s = await create({ title: 'Failing' });
+    const start = await nextStart((f) => f.threadId === s.threadId);
+    r.send('chat.error', { chatId: start.chatId, threadId: s.threadId, error: 'boom' });
+    const retry = await nextStart((f) => f.threadId === s.threadId);
+    expect(retry.message).toContain('"trigger":"resume"');
+    r.send('chat.error', { chatId: retry.chatId, threadId: s.threadId, error: 'boom again' });
+    await until(
+      async () =>
+        (await q("SELECT session_config->>'blocked' AS b FROM threads WHERE id=$1", [s.threadId]))[0]?.b ===
+        'facilitator_failed',
+    );
+    await w.t.app.ctx.services.discovery.sweep();
+    await r.barrier();
+    expect(r.received.filter((f) => f.type === 'chat.start' && !seen.has((f as any).chatId))).toHaveLength(0);
+    await owner('POST', `/api/discovery/${s.threadId}/continue`);
+    await finish(await nextStart());
+  });
+
+  it('joint: the sweep asks the CEO when the turn-end hook was lost', async () => {
+    await appoint(w);
+    const s = await create({ title: 'Lost hook', ceoMode: 'joint' });
+    const { questionId } = await facilitatorAsks();
+    const ceo = await nextStart((f) => f.message.includes('"role":"ceo_answer"'));
+    // the server "died" before it queued the CEO: no CEO turn exists, and the facilitator's turn ended long ago
+    await q('DELETE FROM session_turns WHERE id=$1', [ceo.chatId]);
+    await q(
+      `UPDATE session_turns SET finished_at = now() - interval '10 minutes' WHERE thread_id=$1 AND meta->>'purpose'='facilitator'`,
+      [s.threadId],
+    );
+    await w.t.app.ctx.services.discovery.sweep();
+    const again = await nextStart((f) => f.message.includes('"role":"ceo_answer"'));
+    expect(again.message).toContain(questionId.slice(0, 8));
+    await call(again.chatId, 'session.answer', { option: 'o1' });
+    await finish(again, 'Freelancers.');
+    // a second sweep does not ask again
+    await w.t.app.ctx.services.discovery.sweep();
+    await r.barrier();
+    expect(r.received.filter((f) => f.type === 'chat.start' && !seen.has((f as any).chatId))).toHaveLength(0);
+  });
+
+  it('lets only the creator or a manager steer a session; a participant may still write', async () => {
+    const s = await create({ title: 'Members' });
+    const member = await w.t.userSession(`dm-${randomUUID().slice(0, 6)}@example.com`);
+    await w.t.addOrgMember(w.owner.id, member.id, 'member');
+    await owner(
+      'POST',
+      `/api/sessions/${s.threadId}/participants`,
+      { kind: 'user', refId: member.id, seat: 'member' },
+      201,
+    );
+    const as = (m: string, u: string, body?: unknown) =>
+      w.t.req(m, u, { cookie: member.cookie, ...(body ? { body } : {}) });
+    for (const verb of ['pause', 'resume', 'continue', 'draft', 'validate', 'hand-to-ba'])
+      expect(
+        (
+          await as(
+            'POST',
+            `/api/discovery/${s.threadId}/${verb}`,
+            verb === 'draft' ? { kind: 'prd' } : undefined,
+          )
+        ).status,
+        verb,
+      ).toBe(403);
+    expect((await as('POST', `/api/discovery/${s.threadId}/phase`, { phase: 'diverge' })).status).toBe(403);
+    expect(
+      (await as('POST', `/api/discovery/${s.threadId}/questions/${randomUUID()}/answer`, { kind: 'skip' }))
+        .status,
+    ).toBe(403);
+    expect((await as('POST', `/api/discovery/${s.threadId}/say`, { body: 'a thought' })).status).toBe(201);
+    await finish(await nextStart());
   });
 });

@@ -111,6 +111,27 @@ export const DiscoveryConfigSchema = z.object({
     .object({ kind: z.string().max(30), detail: z.string().max(4000).optional() })
     .nullable()
     .default(null),
+  /**
+   * Owner actions that arrived while a turn was running, the session was paused or a turn could not start, oldest first.
+   * Each is kept as its own entry (a draft request is never overwritten by an answer); `ref` names a document whose text
+   * is rebuilt when the turn is queued (a validation), so no copy of it is stored here.
+   */
+  pendingTriggers: z
+    .array(
+      z.object({
+        kind: z.string().max(30),
+        detail: z.string().max(4000).optional(),
+        ref: z.string().max(100).optional(),
+      }),
+    )
+    .max(30)
+    .default([]),
+  /** Why the last attempt to start a facilitator turn was refused (a paused project, no workstation ...); shown once. */
+  blocked: z.string().max(60).nullable().default(null),
+  /** Facilitator turns in a row that failed (the server retries once on its own, then waits for the owner). */
+  facilitatorFailures: z.number().int().nonnegative().default(0),
+  /** Set (an ISO time) while "Hand to BA" is creating the intake: a second click is refused. */
+  handingOff: z.iso.datetime().nullable().default(null),
   /** The intake created by "Hand to BA". */
   intakeId: z.uuid().nullable().default(null),
 });

@@ -71,6 +71,7 @@ const BLOCKING_CODES = new Set([
   'project_paused',
   'project_budget_paused',
   'no_workstation',
+  'runtime_unavailable',
 ]);
 
 /** A discovery session that starts from a PRD draft and panel notes it was handed (the Boardroom's "Pull into PRD"). */
@@ -84,6 +85,35 @@ const assertDiscovery = (t: Row): void => {
 };
 
 const clip = (s: string, n: number): string => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
+
+interface PendingEntry {
+  kind: string;
+  detail?: string | undefined;
+  ref?: string | undefined;
+}
+
+/** The pending entries of a config, oldest first (a row written before the list existed has the one legacy entry). */
+const pendingOf = (cfg: {
+  pendingTriggers: PendingEntry[];
+  pendingTrigger: PendingEntry | null;
+}): PendingEntry[] =>
+  cfg.pendingTriggers.length ? cfg.pendingTriggers : cfg.pendingTrigger ? [cfg.pendingTrigger] : [];
+
+/** What is stored for a trigger that has to wait: a validation keeps only the document id (its text is rebuilt later). */
+const entryOf = (trigger: FacilitatorTrigger, prdDocId: string | null): PendingEntry =>
+  trigger.kind === 'validate'
+    ? { kind: 'validate', ...(prdDocId ? { ref: prdDocId } : {}) }
+    : {
+        kind: trigger.kind,
+        ...('detail' in trigger && trigger.detail ? { detail: clip(trigger.detail, 1500) } : {}),
+      };
+
+const sameEntry = (a: PendingEntry, b: PendingEntry): boolean =>
+  a.kind === b.kind && a.detail === b.detail && a.ref === b.ref;
+
+/** Kinds whose consecutive entries are one facilitator turn (their details are joined). */
+const MERGEABLE = new Set(['answer', 'message', 'proposal', 'ceo_answered']);
+const isCancelled = (turn: Row): boolean => /^cancel/i.test(String(turn.error ?? ''));
 
 /**
  * Discovery Studio orchestrator (docs/ARCHITECTURE.md section 38, phase B). The state lives in events and projections: the
@@ -389,17 +419,10 @@ export class DiscoveryService {
     threadId: string,
     trigger: FacilitatorTrigger,
   ): Promise<'queued' | 'pending' | 'blocked'> {
-    return this.serial(threadId, () => this.queueFacilitator(threadId, trigger));
-  }
-
-  private async setPending(t: Row, trigger: FacilitatorTrigger): Promise<void> {
-    const cfg = parseDiscoveryConfig(t.session_config);
-    const old = cfg.pendingTrigger;
-    const detail = [old?.detail, 'detail' in trigger ? trigger.detail : undefined].filter(Boolean).join('\n');
-    const kind = trigger.kind === 'answer' && old?.kind === 'message' ? 'message' : trigger.kind;
-    await this.ctx.store.append([
-      this.configEvent(t, { pendingTrigger: { kind, ...(detail ? { detail: clip(detail, 3500) } : {}) } }),
-    ]);
+    return this.serial(threadId, async () => {
+      const r = await this.queueFacilitator(threadId, trigger);
+      return r === 'idle' ? 'queued' : r;
+    });
   }
 
   configEvent(
@@ -443,10 +466,44 @@ export class DiscoveryService {
     );
   }
 
-  private async queueFacilitator(
+  /** The text a validation turn carries, built from the PRD as it is now; undefined when there is no PRD any more. */
+  private async validationDetail(prdDocId: string | null): Promise<string | undefined> {
+    if (!prdDocId) return undefined;
+    const d = await one(this.ctx.pool, 'SELECT * FROM documents WHERE id=$1', [prdDocId]);
+    const cur = d
+      ? await one(
+          this.ctx.pool,
+          'SELECT content FROM document_versions WHERE document_id=$1 AND version=$2',
+          [d.id, d.current_version],
+        )
+      : undefined;
+    if (!d || !cur) return undefined;
+    const prd = builtinCapabilities().find((c) => c.kind === 'playbook' && c.key === 'prd');
+    return [
+      `PRD document ${d.id}, version ${d.current_version}:`,
+      '',
+      clip(cur.content, 60_000),
+      '',
+      '## Checklist (assets/prd-checklist.md)',
+      prd?.files['assets/prd-checklist.md'] ?? '',
+    ].join('\n');
+  }
+
+  private queueFacilitator(
     threadId: string,
-    trigger: FacilitatorTrigger,
-  ): Promise<'queued' | 'pending' | 'blocked'> {
+    trigger?: FacilitatorTrigger,
+  ): Promise<'queued' | 'pending' | 'blocked' | 'idle'> {
+    return this.drain(threadId, trigger);
+  }
+
+  /**
+   * Queues the next facilitator turn from the waiting triggers (and `extra`, which joins the end of the line). Triggers are
+   * kept one by one, so a draft request is never lost to an answer; they are stored as references where they are large.
+   */
+  private async drain(
+    threadId: string,
+    extra?: FacilitatorTrigger,
+  ): Promise<'queued' | 'pending' | 'blocked' | 'idle'> {
     const { ctx } = this;
     const t = await one(
       ctx.pool,
@@ -455,15 +512,65 @@ export class DiscoveryService {
     );
     if (!t) return 'blocked';
     const cfg = parseDiscoveryConfig(t.session_config);
-    if (cfg.paused || (await this.activeTurn(threadId))) {
-      await this.setPending(t, trigger);
-      return 'pending';
+    const stored = pendingOf(cfg);
+    let list = [...stored];
+    if (extra) {
+      const e = entryOf(extra, cfg.prdDocId);
+      if (!list.some((x) => sameEntry(x, e))) list.push(e);
+      list = list.slice(-30);
     }
+    if (!list.length) return 'idle';
+    const listPatch = (l: PendingEntry[]) => ({
+      pendingTriggers: l.length ? l : null,
+      ...(cfg.pendingTrigger ? { pendingTrigger: null } : {}),
+    });
+    const changed = (l: PendingEntry[]) =>
+      JSON.stringify(l) !== JSON.stringify(stored) || (l.length === 0 && !!cfg.pendingTrigger);
+    const hold = async (result: 'pending' | 'blocked') => {
+      if (changed(list)) await ctx.store.append([this.configEvent(t, listPatch(list))]);
+      return result;
+    };
+    if (cfg.paused || (await this.activeTurn(threadId))) return hold('pending');
     const participants = await listParticipants(ctx.pool, threadId);
     const fac = participants.find((p) => p.seat === FACILITATOR_SEAT && p.kind !== 'user');
-    if (!fac) {
-      await this.setPending(t, trigger);
-      return 'blocked';
+    if (!fac) return hold('blocked');
+    const head = list[0] as PendingEntry;
+    let n = 1;
+    if (MERGEABLE.has(head.kind)) while (n < list.length && list[n]?.kind === head.kind) n++;
+    const rest = list.slice(n);
+    const detail = list
+      .slice(0, n)
+      .map((g) => g.detail)
+      .filter(Boolean)
+      .join('\n');
+    let trigger: FacilitatorTrigger;
+    switch (head.kind) {
+      case 'validate': {
+        const d = await this.validationDetail(cfg.prdDocId ?? head.ref ?? null);
+        if (!d) {
+          // the PRD is gone: there is nothing to validate
+          await ctx.store.append([this.configEvent(t, listPatch(rest))]);
+          return this.drain(threadId);
+        }
+        trigger = { kind: 'validate', detail: d };
+        break;
+      }
+      case 'message':
+      case 'proposal':
+      case 'phase_override':
+      case 'draft':
+        trigger = { kind: head.kind, detail };
+        break;
+      case 'ceo_answered':
+        trigger = { kind: 'ceo_answered', ...(detail ? { detail } : {}) };
+        break;
+      case 'resume':
+      case 'review_done':
+      case 'start':
+        trigger = { kind: head.kind };
+        break;
+      default:
+        trigger = { kind: 'answer', ...(detail ? { detail } : {}) };
     }
     const facts = await this.promptFacts(t);
     const ceoPart = participants.find((p) => p.seat === CEO_SEAT && p.kind === 'agent');
@@ -503,26 +610,24 @@ export class DiscoveryService {
       );
     } catch (err) {
       if (err instanceof HttpError && BLOCKING_CODES.has(err.code)) {
-        const patch: Record<string, unknown> = {
-          pendingTrigger: {
-            kind: trigger.kind,
-            ...('detail' in trigger && trigger.detail ? { detail: clip(trigger.detail, 3500) } : {}),
-          },
-        };
-        const events: AppendInput[] = [];
-        if (err.code === 'session_budget_exceeded' && !cfg.budgetStopped) {
-          patch.budgetStopped = true;
-          events.push(this.systemMessage(t, err.message, { blocked: err.code }));
-        } else if (err.code !== 'session_budget_exceeded') {
-          events.push(this.systemMessage(t, err.message, { blocked: err.code }));
-        }
-        await ctx.store.append([this.configEvent(t, patch), ...events]);
+        // Every waiting trigger stays; the owner is told once per reason, not on every sweep.
+        const events: AppendInput[] = [
+          this.configEvent(t, {
+            ...listPatch(list),
+            blocked: err.code,
+            ...(err.code === 'session_budget_exceeded' ? { budgetStopped: true } : {}),
+          }),
+        ];
+        if (cfg.blocked !== err.code) events.push(this.systemMessage(t, err.message, { blocked: err.code }));
+        await ctx.store.append(events);
         return 'blocked';
       }
       throw err;
     }
-    if (cfg.pendingTrigger || cfg.budgetStopped)
-      await ctx.store.append([this.configEvent(t, { pendingTrigger: null, budgetStopped: null })]);
+    if (changed(rest) || cfg.blocked || cfg.budgetStopped)
+      await ctx.store.append([
+        this.configEvent(t, { ...listPatch(rest), blocked: null, budgetStopped: null }),
+      ]);
     return 'queued';
   }
 
@@ -595,29 +700,36 @@ export class DiscoveryService {
   private async flushPending(t: Row): Promise<boolean> {
     const fresh = (await one(this.ctx.pool, 'SELECT * FROM threads WHERE id=$1', [t.id])) as Row;
     const cfg = parseDiscoveryConfig(fresh.session_config);
-    if (!cfg.pendingTrigger || cfg.paused) return false;
-    const pend = cfg.pendingTrigger;
-    const trigger = (
-      pend.kind === 'message' ||
-      pend.kind === 'proposal' ||
-      pend.kind === 'phase_override' ||
-      pend.kind === 'draft' ||
-      pend.kind === 'validate'
-        ? { kind: pend.kind, detail: pend.detail ?? '' }
-        : pend.kind === 'ceo_answered'
-          ? { kind: 'ceo_answered', ...(pend.detail ? { detail: pend.detail } : {}) }
-          : pend.kind === 'resume' || pend.kind === 'review_done' || pend.kind === 'start'
-            ? { kind: pend.kind }
-            : { kind: 'answer', ...(pend.detail ? { detail: pend.detail } : {}) }
-    ) as FacilitatorTrigger;
-    return (await this.queueFacilitator(t.id, trigger)) === 'queued';
+    if (!pendingOf(cfg).length || cfg.paused) return false;
+    return (await this.queueFacilitator(t.id)) === 'queued';
   }
 
   private async afterFacilitatorTurn(t: Row, turn: Row, status: 'done' | 'failed'): Promise<void> {
+    if (status === 'failed' && !isCancelled(turn)) {
+      // A failed turn is not lost: the facilitator is asked to pick up again once on its own, then the owner decides.
+      const cur = parseDiscoveryConfig(
+        ((await one(this.ctx.pool, 'SELECT * FROM threads WHERE id=$1', [t.id])) as Row).session_config,
+      );
+      const failures = cur.facilitatorFailures + 1;
+      if (failures < 2) {
+        await this.ctx.store.append([this.configEvent(t, { facilitatorFailures: failures })]);
+        await this.queueFacilitator(t.id, { kind: 'resume' });
+      } else if (cur.blocked !== 'facilitator_failed') {
+        await this.ctx.store.append([
+          this.configEvent(t, { facilitatorFailures: failures, blocked: 'facilitator_failed' }),
+          this.systemMessage(t, 'The facilitator could not finish its turn. Press Continue to try again.', {
+            blocked: 'facilitator_failed',
+          }),
+        ]);
+      }
+      return;
+    }
     if (await this.flushPending(t)) return;
     if (status !== 'done') return;
     const fresh = (await one(this.ctx.pool, 'SELECT * FROM threads WHERE id=$1', [t.id])) as Row;
     const cfg = parseDiscoveryConfig(fresh.session_config);
+    if (cfg.facilitatorFailures || cfg.blocked === 'facilitator_failed')
+      await this.ctx.store.append([this.configEvent(fresh, { facilitatorFailures: null, blocked: null })]);
     if (cfg.paused) return;
     const open = await one(
       this.ctx.pool,
@@ -726,21 +838,95 @@ export class DiscoveryService {
     if (!review) await this.queueFacilitator(t.id, { kind: 'review_done' });
   }
 
-  /** On startup and on the scheduler's pass: a trigger that was waiting (restart, budget raised elsewhere) goes out. */
+  /**
+   * On startup and on the scheduler's pass: a trigger that was waiting (restart, budget raised elsewhere) goes out, and a
+   * session that a lost turn-end hook left standing (a CEO follow-up or pre-draft step that never started) is picked up.
+   */
   async sweep(): Promise<void> {
     const list = await rows(
       this.ctx.pool,
-      `SELECT id FROM threads WHERE kind='discovery' AND deleted_at IS NULL AND session_config->'pendingTrigger' IS NOT NULL
-         AND session_config->>'paused' IS DISTINCT FROM 'true'`,
+      `SELECT id FROM threads WHERE kind='discovery' AND deleted_at IS NULL
+         AND session_config->>'paused' IS DISTINCT FROM 'true'
+         AND (session_config->'pendingTriggers' IS NOT NULL OR session_config->'pendingTrigger' IS NOT NULL
+              OR session_config->>'ceoMode' = 'joint' OR session_config->'ceoPrep'->>'state' = 'running')`,
     );
     for (const { id } of list)
       await this.serial(id, async () => {
         const t = await one(this.ctx.pool, 'SELECT * FROM threads WHERE id=$1', [id]);
-        if (t && !(await this.activeTurn(id))) await this.flushPending(t);
+        if (!t || (await this.activeTurn(id))) return;
+        const cfg = parseDiscoveryConfig(t.session_config);
+        if (cfg.facilitatorFailures >= 2) return; // waits for the owner's Continue
+        if (await this.flushPending(t)) return;
+        await this.recover(t);
       }).catch((err) => this.ctx.log.error({ err, threadId: id }, 'discovery sweep failed'));
   }
 
+  /** The turn-end hook never ran for the latest turn (the server died first): do what it would have done. */
+  private async recover(t: Row): Promise<void> {
+    const cfg = parseDiscoveryConfig(t.session_config);
+    if (cfg.paused) return;
+    const last = await one(
+      this.ctx.pool,
+      `SELECT * FROM session_turns WHERE thread_id=$1 AND meta->>'purpose' IS NOT NULL ORDER BY queued_at DESC LIMIT 1`,
+      [t.id],
+    );
+    // A turn that ended a moment ago is the hook's to handle; only an older one was left behind.
+    const cutoff = new Date(this.ctx.clock.now().getTime() - 2 * 60_000);
+    if (!last || (last.status !== 'done' && last.status !== 'failed')) return;
+    if (!last.finished_at || new Date(last.finished_at) > cutoff) return;
+    const purpose = (last.meta as { purpose?: string } | null)?.purpose;
+    const open = await one(
+      this.ctx.pool,
+      `SELECT * FROM discovery_questions WHERE thread_id=$1 AND status='open' ORDER BY seq DESC LIMIT 1`,
+      [t.id],
+    );
+    const answered = async (qid: string) =>
+      !!(await one(
+        this.ctx.pool,
+        `SELECT 1 FROM session_turns WHERE thread_id=$1 AND meta->>'purpose'='ceo_answer' AND meta->>'questionId'=$2`,
+        [t.id, qid],
+      ));
+    if (cfg.ceoMode === 'joint') {
+      if (
+        purpose === 'facilitator' &&
+        last.status === 'done' &&
+        open &&
+        !open.proposed &&
+        open.turn_id === last.id
+      )
+        if (!(await answered(open.id))) await this.queueCeoAnswer(t, open, 'joint');
+      return;
+    }
+    if (cfg.ceoMode === 'ceo_prep' && cfg.ceoPrep?.state === 'running') {
+      if (purpose === 'facilitator' && last.status === 'done') {
+        if (open && !open.proposed && open.turn_id === last.id && !(await answered(open.id))) {
+          if (!(await this.queueCeoAnswer(t, open, 'ceo_prep'))) await this.finishPrep(t);
+        } else await this.finishPrep(t);
+      } else if (purpose === 'ceo_answer' && last.status === 'done') {
+        if (cfg.ceoPrep.turns + 1 >= cfg.ceoPrep.cap) {
+          await this.ctx.store.append([
+            this.configEvent(t, { ceoPrep: { ...cfg.ceoPrep, turns: cfg.ceoPrep.turns + 1 } }),
+          ]);
+          await this.finishPrep(t);
+        } else {
+          await this.ctx.store.append([
+            this.configEvent(t, { ceoPrep: { ...cfg.ceoPrep, turns: cfg.ceoPrep.turns + 1 } }),
+          ]);
+          await this.queueFacilitator(t.id, { kind: 'ceo_answered' });
+        }
+      } else await this.finishPrep(t);
+    }
+  }
+
   // ----------------------------------------------------------------------------------------------- the owner's actions
+
+  /** The session for an action only its creator, an Owner or an Admin may take (participants may still write to it). */
+  private async loadManaged(userId: string, threadId: string): Promise<Row> {
+    const t = await loadSession(this.ctx.pool, userId, threadId);
+    assertDiscovery(t);
+    await assertSessionManager(this.ctx.pool, userId, t);
+    return t;
+  }
 
   private async userName(db: Queryable, userId: string): Promise<string> {
     const u = await one(db, 'SELECT display_name FROM users WHERE id=$1', [userId]);
@@ -757,6 +943,7 @@ export class DiscoveryService {
     const result = await withAppendTx(ctx.pool, async (tx) => {
       const t = await loadSession(tx, userId, threadId, true);
       assertDiscovery(t);
+      await assertSessionManager(tx, userId, t);
       const q = await one(tx, 'SELECT * FROM discovery_questions WHERE id=$1 AND thread_id=$2 FOR UPDATE', [
         questionId,
         threadId,
@@ -993,6 +1180,7 @@ export class DiscoveryService {
     const detail = await withAppendTx(ctx.pool, async (tx) => {
       const t = await loadSession(tx, userId, threadId, true);
       assertDiscovery(t);
+      await assertSessionManager(tx, userId, t);
       const p = await one(tx, 'SELECT * FROM discovery_proposals WHERE id=$1 AND thread_id=$2 FOR UPDATE', [
         proposalId,
         threadId,
@@ -1084,6 +1272,7 @@ export class DiscoveryService {
     await withAppendTx(this.ctx.pool, async (tx) => {
       const t = await loadSession(tx, userId, threadId, true);
       assertDiscovery(t);
+      await assertSessionManager(tx, userId, t);
       from = parseDiscoveryConfig(t.session_config).phase;
       if (from === phase) return;
       changed = true;
@@ -1119,6 +1308,7 @@ export class DiscoveryService {
     await withAppendTx(this.ctx.pool, async (tx) => {
       const t = await loadSession(tx, userId, threadId, true);
       assertDiscovery(t);
+      await assertSessionManager(tx, userId, t);
       const cfg = parseDiscoveryConfig(t.session_config);
       if (cfg.paused) return;
       await this.ctx.store.append(
@@ -1149,6 +1339,7 @@ export class DiscoveryService {
     await withAppendTx(this.ctx.pool, async (tx) => {
       const t = await loadSession(tx, userId, threadId, true);
       assertDiscovery(t);
+      await assertSessionManager(tx, userId, t);
       const cfg = parseDiscoveryConfig(t.session_config);
       if (!cfg.paused) return;
       was = true;
@@ -1174,7 +1365,7 @@ export class DiscoveryService {
         [threadId],
       );
       const t = (await one(this.ctx.pool, 'SELECT * FROM threads WHERE id=$1', [threadId])) as Row;
-      const pending = parseDiscoveryConfig(t.session_config).pendingTrigger;
+      const pending = pendingOf(parseDiscoveryConfig(t.session_config)).length > 0;
       if (pending) await this.serial(threadId, () => this.flushPending(t));
       else if (!open) await this.requestFacilitator(threadId, { kind: 'resume' });
     }
@@ -1191,6 +1382,7 @@ export class DiscoveryService {
       if (req.budgetUsd !== undefined) {
         cfg.budgetUsd = req.budgetUsd;
         cfg.budgetStopped = null;
+        cfg.blocked = null;
         raised = true;
       }
       if (req.timeBoxMinutes !== undefined) cfg.timeBoxMinutes = req.timeBoxMinutes;
@@ -1213,8 +1405,7 @@ export class DiscoveryService {
 
   /** "Draft the brief/PRD now" and "Validate the PRD": a facilitator turn with that one job. */
   async requestDraft(userId: string, threadId: string, kind: 'brief' | 'prd'): Promise<DiscoveryStateDto> {
-    const t = await loadSession(this.ctx.pool, userId, threadId);
-    assertDiscovery(t);
+    const t = await this.loadManaged(userId, threadId);
     const cfg = parseDiscoveryConfig(t.session_config);
     const doc = kind === 'prd' ? cfg.prdDocId : cfg.briefDocId;
     if (doc) {
@@ -1233,39 +1424,25 @@ export class DiscoveryService {
   }
 
   async requestValidation(userId: string, threadId: string): Promise<DiscoveryStateDto> {
-    const t = await loadSession(this.ctx.pool, userId, threadId);
-    assertDiscovery(t);
+    const t = await this.loadManaged(userId, threadId);
     const cfg = parseDiscoveryConfig(t.session_config);
-    if (!cfg.prdDocId) throw conflict('no_prd', 'There is no PRD to validate yet.');
-    const d = await one(this.ctx.pool, 'SELECT * FROM documents WHERE id=$1', [cfg.prdDocId]);
-    const cur = d
-      ? await one(
-          this.ctx.pool,
-          'SELECT content FROM document_versions WHERE document_id=$1 AND version=$2',
-          [d.id, d.current_version],
-        )
-      : undefined;
-    if (!d || !cur) throw conflict('no_prd', 'There is no PRD to validate yet.');
-    const prd = builtinCapabilities().find((c) => c.kind === 'playbook' && c.key === 'prd');
-    const checklist = prd?.files['assets/prd-checklist.md'] ?? '';
-    const detail = [
-      `PRD document ${d.id}, version ${d.current_version}:`,
-      '',
-      clip(cur.content, 60_000),
-      '',
-      '## Checklist (assets/prd-checklist.md)',
-      checklist,
-    ].join('\n');
-    await this.requestFacilitator(threadId, { kind: 'validate', detail });
+    if (!(await this.validationDetail(cfg.prdDocId)))
+      throw conflict('no_prd', 'There is no PRD to validate yet.');
+    // The PRD text is read when the turn is queued, not now: a waiting request keeps only the document id.
+    await this.requestFacilitator(threadId, { kind: 'validate', detail: '' });
     return this.state(userId, threadId);
   }
 
   /** `POST /api/discovery/:id/continue`: the owner asks the facilitator to carry on (after a failed turn, a restart or a raised budget). */
   async continue(userId: string, threadId: string): Promise<DiscoveryStateDto> {
-    const t = await loadSession(this.ctx.pool, userId, threadId);
-    assertDiscovery(t);
+    const t = await this.loadManaged(userId, threadId);
     if (await this.activeTurn(threadId))
       throw conflict('turn_running', 'The facilitator is already working.');
+    const cur = parseDiscoveryConfig(t.session_config);
+    if (cur.blocked || cur.facilitatorFailures)
+      await this.ctx.store.append([
+        this.configEvent(t, { blocked: null, facilitatorFailures: null }, userActor(userId)),
+      ]);
     const open = await one(
       this.ctx.pool,
       `SELECT 1 FROM discovery_questions WHERE thread_id=$1 AND status='open'`,
@@ -1284,61 +1461,80 @@ export class DiscoveryService {
    */
   async handToBa(userId: string, threadId: string): Promise<{ intakeId: string; state: DiscoveryStateDto }> {
     const { ctx } = this;
-    const t = await loadSession(ctx.pool, userId, threadId);
-    assertDiscovery(t);
-    await assertSessionManager(ctx.pool, userId, t);
-    const cfg = parseDiscoveryConfig(t.session_config);
-    if (!cfg.prdDocId) throw conflict('no_prd', 'There is no PRD to hand over yet.');
-    if (cfg.intakeId) throw conflict('already_handed_off', 'This PRD was already handed to the BA.');
-    const d = await one(ctx.pool, 'SELECT * FROM documents WHERE id=$1 AND org_id=$2', [
-      cfg.prdDocId,
-      t.org_id,
-    ]);
-    if (!d || d.status !== 'approved')
-      throw conflict('prd_not_approved', 'Approve the PRD first: only an approved PRD goes to the BA.');
-    const version = d.approved_version ?? d.current_version;
-    const cur = await one(
-      ctx.pool,
-      'SELECT content FROM document_versions WHERE document_id=$1 AND version=$2',
-      [d.id, version],
-    );
-    const note = buildHandoffNote({
-      title: d.title,
-      docId: d.id,
-      version,
-      content: cur?.content ?? '',
-      max: HANDOFF_NOTE_MAX_CHARS,
-    });
-    const intake = await startIntakeIn(
-      ctx,
-      { id: userId },
-      t.org_id,
-      { note },
-      {
-        linkedDocIds: [d.id],
-        ...(t.project_id ? { projectId: t.project_id } : {}),
-      },
-    );
-    await ctx.store.append([
-      {
-        streamId: streamId.document(d.id),
-        event: {
-          type: 'DocumentStatusChanged',
-          payload: {
-            docId: d.id,
-            from: 'approved',
-            to: 'handed_off',
-            version,
-            by: userId,
-            note: 'Handed to the BA',
+    await this.loadManaged(userId, threadId);
+    // One at a time, and a marker first: a second click (or a retry while the first still runs) finds it and is refused.
+    const intakeId = await this.serial(threadId, async () => {
+      const t = (await one(ctx.pool, 'SELECT * FROM threads WHERE id=$1', [threadId])) as Row;
+      const cfg = parseDiscoveryConfig(t.session_config);
+      if (!cfg.prdDocId) throw conflict('no_prd', 'There is no PRD to hand over yet.');
+      if (cfg.intakeId) throw conflict('already_handed_off', 'This PRD was already handed to the BA.');
+      const now = ctx.clock.now();
+      if (cfg.handingOff && now.getTime() - new Date(cfg.handingOff).getTime() < 2 * 60_000)
+        throw conflict('handoff_in_progress', 'The PRD is being handed to the BA right now.');
+      const d = await one(ctx.pool, 'SELECT * FROM documents WHERE id=$1 AND org_id=$2', [
+        cfg.prdDocId,
+        t.org_id,
+      ]);
+      if (!d || d.status !== 'approved')
+        throw conflict('prd_not_approved', 'Approve the PRD first: only an approved PRD goes to the BA.');
+      await ctx.store.append([this.configEvent(t, { handingOff: now.toISOString() }, userActor(userId))]);
+      try {
+        const version = d.approved_version ?? d.current_version;
+        const cur = await one(
+          ctx.pool,
+          'SELECT content FROM document_versions WHERE document_id=$1 AND version=$2',
+          [d.id, version],
+        );
+        const note = buildHandoffNote({
+          title: d.title,
+          docId: d.id,
+          version,
+          content: cur?.content ?? '',
+          max: HANDOFF_NOTE_MAX_CHARS,
+        });
+        const intake = await startIntakeIn(
+          ctx,
+          { id: userId },
+          t.org_id,
+          { note },
+          {
+            linkedDocIds: [d.id],
+            ...(t.project_id ? { projectId: t.project_id } : {}),
           },
-        },
-        actor: userActor(userId),
-        scope: scopeOfDoc(d as never),
-      },
-      this.configEvent(t, { intakeId: intake.id }, userActor(userId)),
-      this.systemMessage(t, `The PRD was handed to the BA. Follow it in Intake.`, { intakeId: intake.id }),
-    ]);
-    return { intakeId: intake.id, state: await this.state(userId, threadId) };
+        );
+        await ctx.store.append([
+          {
+            streamId: streamId.document(d.id),
+            event: {
+              type: 'DocumentStatusChanged',
+              payload: {
+                docId: d.id,
+                from: 'approved',
+                to: 'handed_off',
+                version,
+                by: userId,
+                note: 'Handed to the BA',
+              },
+            },
+            actor: userActor(userId),
+            scope: scopeOfDoc(d as never),
+          },
+          this.configEvent(t, { intakeId: intake.id, handingOff: null }, userActor(userId)),
+          this.systemMessage(t, `The PRD was handed to the BA. Follow it in Intake.`, {
+            intakeId: intake.id,
+          }),
+        ]);
+        return intake.id;
+      } catch (err) {
+        // nothing was created (startIntakeIn refuses before it writes): release the marker so the owner can try again
+        const again = (await one(ctx.pool, 'SELECT session_config FROM threads WHERE id=$1', [
+          threadId,
+        ])) as Row;
+        if (!parseDiscoveryConfig(again.session_config).intakeId)
+          await ctx.store.append([this.configEvent(t, { handingOff: null }, userActor(userId))]);
+        throw err;
+      }
+    });
+    return { intakeId, state: await this.state(userId, threadId) };
   }
 }
