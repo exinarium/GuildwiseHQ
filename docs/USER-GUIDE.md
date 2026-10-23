@@ -1390,6 +1390,16 @@ Agents and cards always run on Claude Code. Discovery and Boardroom conversation
 3. **Costs.** Models are priced from a built-in table; a model without a price shows "Cost unknown for N turns" and is not counted in the total or the budget.
 4. **If it does not start**, "X is not set up on this workstation" means that provider's key is not on the workstation the session runs on.
 
+### Capabilities and packs
+
+**Settings, Capabilities** lists everything agents and sessions can use: skills, personas (voices for the Boardroom) and playbooks, with where each comes from (built in, your organization vault, a project's repository, or an imported pack) and whether it replaces another. A role's **Skills** list is picked from this registry.
+
+**Packs** import more from a git repository (Owners and Admins). Click **Add pack**, enter the repository URL and a tag or commit, or click **Add BMAD Method** for the BMad Method (MIT licence, by BMad Code, LLC: its analyst, product manager, architect, developer and designer become personas you can seat in a Boardroom, brainstorming and elicitation become Discovery playbooks, and its brief and PRD templates can be chosen in a new discovery; its party mode is not imported because the Boardroom replaces it). A workstation fetches the pack and pins the exact commit.
+
+Nothing in a pack can be used until you approve it. **Review** shows every capability, every file (script files are flagged) and what the importer left out; **Approve this commit** unlocks it. Scripts stay off unless you switch on **Enable scripts** for the pack, and they then run only inside the agents' sandbox. Agents are told that pack text is outside content: it can guide a task but cannot change their rules. If a file changes on a workstation after you approved, the pack is switched off there and the page says so. **Check for updates** fetches a newer tag or commit and shows a diff (added, removed and changed capabilities and files, new scripts highlighted); the pack only moves to it when you click **Accept**. A pack you approved stays approved at the accepted commit, with scripts off again if the update touched them. **Remove** deletes the pack.
+
+A project's own `.agents/skills`, `.claude/skills` and `.claude/agents` are picked up the first time an agent works in that repository and appear in the registry for that project.
+
 ## 5. For Members
 
 A **Member** works inside the projects an Owner or Admin has added them to. You do the day-to-day work: write cards, answer questions, hire your own agents and follow the board. You do not manage the organization.

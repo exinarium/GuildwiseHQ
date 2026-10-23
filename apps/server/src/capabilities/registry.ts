@@ -127,7 +127,13 @@ export async function effectiveRegistry(
   const vault = await vaultCapabilityMeta(db, orgId);
   const repo = o.projectId ? await projectRepoMeta(db, orgId, o.projectId) : [];
   const packs = await packItems(db, orgId, o.projectId);
-  const lower = new Set([...builtin, ...vault, ...repo].map((b) => `${b.kind}:${b.key}`));
+  const idsOf = (l: CapabilityMeta[]) => l.map((b) => `${b.kind}:${b.key}`);
+  // what each source can override: the ids of the sources below it
+  const below: Record<string, Set<string>> = {
+    'org-vault': new Set(idsOf(builtin)),
+    'project-repo': new Set(idsOf([...builtin, ...vault])),
+    pack: new Set(idsOf([...builtin, ...vault, ...repo])),
+  };
   const extra = new Map(packs.map((p) => [`${p.meta.kind}:${p.meta.key}`, p]));
   const status = await one(db, 'SELECT issues, reported_at FROM capability_index_status WHERE org_id=$1', [
     orgId,
@@ -145,7 +151,7 @@ export async function effectiveRegistry(
       const pk = m.source === 'pack' ? extra.get(id) : undefined;
       return {
         ...m,
-        overrides: m.source !== 'builtin' && lower.has(id),
+        overrides: below[m.source]?.has(id) ?? false,
         usable: pk ? pk.usable : true,
         ...(pk && !pk.usable && pk.reason ? { unusableReason: pk.reason } : {}),
         ...(pk ? { packId: pk.packId, sha: pk.sha } : {}),

@@ -2219,6 +2219,18 @@ Vault writes are staged and included in the next sync commit.
 
 A builder on a work-domain card sees only the work vault; personal cards see only personal.
 
+## Capability packs
+
+Owners add skill, persona and playbook packs from git (Settings, Capabilities, Packs). The server pins a commit and keeps the owner's approval; the runner does the git work. Needs runner 0.1.46 (`packs:1`).
+
+- **Where.** `<data dir>/packs/<packId>/repo` (a shallow clone checked out at the pinned commit) and `packs/state.json` (what the server last asked for, so shifts that resume before the server answers still find their skills). Delete a pack in the web app and the folder goes on the next `packs.sync`.
+- **Git.** Public repositories over `https`, or `ssh` with your agent's keys. The runner runs git with hooks off, no submodules, no LFS, only the `https` and `ssh` protocols (`AOM_PACKS_ALLOW_LOCAL=1` also allows `file` and local paths; tests only) and a minimal environment (`PATH`, `HOME`, `SSH_AUTH_SOCK`). No token is ever put in a URL.
+- **Nothing runs from a pack.** Files are read as text. Script files (`scripts/`, `.sh`, `.py`, `.js`...) are listed in the review and are removed from what agents are given unless the owner enabled scripts for that pack; enabled scripts only run inside the agent's normal sandbox.
+- **Approval and integrity.** A pack is served only when the owner approved exactly the commit that is checked out and the files on disk still hash to the approved content hash (checked on use). Editing a file under `packs/` by hand therefore disables the pack on this workstation until you restore it (the web app shows "files changed").
+- **Updates.** "Check for updates" fetches a ref into a second worktree and reports what changed; the pin only moves when the owner accepts.
+- **Skills for agents.** A role's `skills` that name skills are written into the agent's own Claude Code config folder (`agents/<id>/claude/skills`) at the start of every shift or chat; an agent with no granted skills keeps Claude Code's skills switched off. Only the granted ones can be used: a hook (`aom skill-guard`) refuses every other skill, including the ones synced to your Claude account.
+- **Project repositories.** At the start of a card shift the runner looks for `.agents/skills`, `.claude/skills` and `.claude/agents` in the card's checkout and makes them available to that project's agents.
+
 ## Project graphs (the code map)
 
 The project graph is a derived index of a repository's code and docs: the "code map" that agents query with `aom graph`.
