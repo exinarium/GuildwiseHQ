@@ -36,6 +36,7 @@ import { AgentToolchains } from '../components/workstations/AgentToolchains.tsx'
 import { CheckForUpdates } from '../components/workstations/CheckForUpdates.tsx';
 import { ClaudeAccountsTable } from '../components/workstations/ClaudeAccountsTable.tsx';
 import { CloudWorkstations } from '../components/workstations/CloudWorkstations.tsx';
+import { ModelProviders } from '../components/workstations/ModelProviders.tsx';
 import { OrgSourceFolder } from '../components/workstations/OrgSourceFolder.tsx';
 import { RunnerUpdateBadge } from '../components/workstations/RunnerUpdateBadge.tsx';
 import { ShiftLimit } from '../components/workstations/ShiftLimit.tsx';
@@ -337,6 +338,7 @@ export function WorkstationCard({
                   ))}
                 </p>
                 <ClaudeAccountsTable runtimes={w.runtimes} />
+                <ModelProviders w={w} canEdit={!admin} />
               </div>
               <div>
                 <p className="mb-1 text-xs font-medium text-subtle">Shifts running</p>

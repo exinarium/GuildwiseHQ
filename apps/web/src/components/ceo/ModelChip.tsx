@@ -1,5 +1,7 @@
 import {
   type CeoChatStateDto,
+  DIRECT_RUNTIME,
+  findModelOption,
   MODEL_CHOICES,
   type ModelChoice,
   modelChoiceLabel,
@@ -11,8 +13,8 @@ import { useSetThreadModel } from '../../api/queries/ceo-chat.ts';
 import { Button, Dialog, ErrorBox, Segmented, Select } from '../ui.tsx';
 
 /** The model's own name without the effort ("Sonnet"). */
-const modelName = (c: ModelChoice): string =>
-  MODEL_CHOICES[c.runtime]?.find((m) => m.id === c.model)?.label ?? c.model;
+const modelName = (c: ModelChoice, providers?: CeoChatStateDto['model']['providers']): string =>
+  findModelOption(c, providers)?.label ?? c.model;
 
 /**
  * The model chip of the CEO composer (docs/design/ceo-front-door.md section 5.4): "Default (Sonnet)", and a persistent chip
@@ -31,17 +33,17 @@ export function ModelChip({
 }) {
   const [open, setOpen] = useState(false);
   const setThread = useSetThreadModel();
-  const groups = modelChoicesFor(model.runtimes.length > 0 ? model.runtimes : undefined);
+  const groups = modelChoicesFor(model.runtimes.length > 0 ? model.runtimes : undefined, model.providers);
   const start = messageChoice ?? model.thread ?? model.default;
   const [pick, setPick] = useState(`${start.runtime}/${start.model}`);
   const [effort, setEffort] = useState(start.effort ?? '');
   const [scope, setScope] = useState<'message' | 'thread'>('thread');
 
   const label = messageChoice
-    ? `This message: ${modelChoiceLabel(messageChoice)}`
+    ? `This message: ${modelChoiceLabel(messageChoice, model.providers)}`
     : model.thread
-      ? `This conversation: ${modelChoiceLabel(model.thread)}`
-      : `Default (${modelName(model.default)})`;
+      ? `This conversation: ${modelChoiceLabel(model.thread, model.providers)}`
+      : `Default (${modelName(model.default, model.providers)})`;
   const overridden = !!messageChoice || !!model.thread;
 
   const [runtime = '', modelId = ''] = pick.split('/');
@@ -92,7 +94,7 @@ export function ModelChip({
         open={open}
         onOpenChange={setOpen}
         title="Model for this chat"
-        description={`The default is ${modelChoiceLabel(model.default)}. Pick another for one message or for the whole conversation.`}
+        description={`The default is ${modelChoiceLabel(model.default, model.providers)}. Pick another for one message or for the whole conversation.`}
         footer={
           <>
             {overridden && (
@@ -108,8 +110,13 @@ export function ModelChip({
       >
         <div className="flex flex-col gap-3">
           {groups.map((g) => (
-            <fieldset key={g.runtime} className="flex flex-col gap-1">
+            <fieldset key={`${g.runtime}/${g.provider ?? ''}`} className="flex flex-col gap-1">
               <legend className="text-sm font-semibold text-fg">{g.label}</legend>
+              {g.runtime === DIRECT_RUNTIME && (
+                <p className="text-xs text-subtle" data-testid="direct-note">
+                  Conversation only: no tools, cannot take actions.
+                </p>
+              )}
               {g.models.map((m) => (
                 <label key={m.id} className="flex min-h-9 items-center gap-2 text-sm text-fg">
                   <input

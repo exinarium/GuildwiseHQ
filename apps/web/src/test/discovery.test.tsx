@@ -87,6 +87,7 @@ const state = (over: Partial<DiscoveryStateDto> = {}): DiscoveryStateDto => ({
     idea: 'Invoices',
     timeBoxMinutes: 30,
     paused: false,
+    model: null,
     budgetStopped: false,
     ceoPrep: null,
     intakeId: null,

@@ -4,6 +4,7 @@ import type {
   ResolveDiscoveryProposalRequest,
   ThreadMessageDto,
 } from '@aom/shared';
+import { modelChoiceLabel } from '@aom/shared';
 import { Loader2 } from 'lucide-react';
 import { useMemo, useRef } from 'react';
 import { type ChatSegment, parseSegments } from '../../lib/chatSegments.ts';
@@ -130,7 +131,7 @@ export function DiscoveryConversation({
             <Loader2 aria-hidden="true" className="size-3.5 animate-spin" />
             {state.waitingFor === 'ceo'
               ? `${state.ceoName ?? 'The CEO'} is thinking…`
-              : `${state.facilitatorName} is thinking…`}
+              : `${state.facilitatorName}${state.config.model ? ` (${modelChoiceLabel(state.config.model)})` : ''} is thinking…`}
           </li>
         )}
       </ol>

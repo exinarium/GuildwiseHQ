@@ -10,7 +10,6 @@ import {
   type BoardRoom,
   type CastMember,
   type ModelChoice,
-  modelChoicesFor,
   participantSlug,
 } from '@aom/shared';
 import { Plus, Sparkles, X } from 'lucide-react';
@@ -28,6 +27,7 @@ import {
 } from '../../api/queries/boardroom.ts';
 import { useProjects } from '../../api/queries/projects.ts';
 import { useWorkstations } from '../../api/queries/workstations.ts';
+import { fromChoice, ModelSelect, toChoice, unionProviders } from '../ModelSelect.tsx';
 import { Badge, Button, Dialog, ErrorBox, Select, TextArea, TextInput } from '../ui.tsx';
 
 interface Seat extends CastMember {
@@ -37,41 +37,6 @@ interface Seat extends CastMember {
 
 const ROUND_CAPS = [2, 3, 4, 5, 6, 8];
 const key = (m: { kind: string; refId: string }) => `${m.kind}:${m.refId}`;
-
-/** Role pickers for the three models; empty means "the default for the workstation" (cheap for personas and the Chair, strong for the minutes). */
-function ModelSelect({
-  label,
-  hint,
-  value,
-  onChange,
-  runtimes,
-}: {
-  label: string;
-  hint: string;
-  value: string;
-  onChange: (v: string) => void;
-  runtimes: string[];
-}) {
-  const groups = modelChoicesFor(runtimes.length ? runtimes : undefined);
-  return (
-    <Select label={label} value={value} onChange={(e) => onChange(e.target.value)} hint={hint}>
-      <option value="">Default</option>
-      {groups.flatMap((g) =>
-        g.models.map((m) => (
-          <option key={`${g.runtime}/${m.id}`} value={`${g.runtime}/${m.id}`}>
-            {g.label}: {m.label}
-          </option>
-        )),
-      )}
-    </Select>
-  );
-}
-
-const toChoice = (v: string): ModelChoice | undefined => {
-  if (!v) return undefined;
-  const [runtime = '', model = ''] = v.split('/');
-  return runtime && model ? { runtime, model } : undefined;
-};
 
 /**
  * "New boardroom": the topic and brief, the format, the cast (library personas, your agents, personas cast from a one-line brief,
@@ -100,6 +65,9 @@ export function NewBoardroomDialog({
       ),
     ),
   ];
+  // Direct API providers configured on the workstations (the session runs on one of them; the server refuses a model its
+  // workstation does not offer with `runtime_unavailable`).
+  const providers = unionProviders(workstations.data ?? []);
 
   const [topic, setTopic] = useState('');
   const [brief, setBrief] = useState('');
@@ -131,6 +99,15 @@ export function NewBoardroomDialog({
     ...(toChoice(chairModel) ? { chair: toChoice(chairModel) as ModelChoice } : {}),
     ...(toChoice(synthModel) ? { synthesis: toChoice(synthModel) as ModelChoice } : {}),
   });
+  const setSeatModel = (s: Seat, v: string) =>
+    setSeats((cur) =>
+      cur.map((c) => {
+        if (key(c) !== key(s)) return c;
+        const { model: _m, ...rest } = c;
+        const choice = toChoice(v);
+        return choice ? { ...rest, model: choice } : rest;
+      }),
+    );
   const cast = (): CastMember[] => seats.map(({ label: _l, hint: _h, ...m }) => m as CastMember);
 
   const addAdHoc = () => {
@@ -167,9 +144,9 @@ export function NewBoardroomDialog({
         hint: m.stance ?? '',
       })),
     );
-    setPersonaModel(r.models.persona ? `${r.models.persona.runtime}/${r.models.persona.model}` : '');
-    setChairModel(r.models.chair ? `${r.models.chair.runtime}/${r.models.chair.model}` : '');
-    setSynthModel(r.models.synthesis ? `${r.models.synthesis.runtime}/${r.models.synthesis.model}` : '');
+    setPersonaModel(fromChoice(r.models.persona));
+    setChairModel(fromChoice(r.models.chair));
+    setSynthModel(fromChoice(r.models.synthesis));
   };
 
   const askForCast = () => {
@@ -322,6 +299,27 @@ export function NewBoardroomDialog({
                 </li>
               ))}
             </ul>
+          )}
+          {seats.length > 0 && (
+            <details data-testid="seat-models">
+              <summary className="cursor-pointer text-xs font-medium text-subtle">
+                Model per seat (optional): mix providers
+              </summary>
+              <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                {seats.map((s) => (
+                  <ModelSelect
+                    key={key(s)}
+                    label={s.label}
+                    ariaLabel={`Model for ${s.label}`}
+                    value={fromChoice(s.model)}
+                    onChange={(v) => setSeatModel(s, v)}
+                    runtimes={runtimes}
+                    providers={providers}
+                    defaultLabel="Room default"
+                  />
+                ))}
+              </div>
+            </details>
           )}
           <div className="flex flex-col gap-1" role="group" aria-label="Library personas">
             <p className="text-xs font-medium text-subtle">Personas</p>
@@ -500,6 +498,7 @@ export function NewBoardroomDialog({
             value={personaModel}
             onChange={setPersonaModel}
             runtimes={runtimes}
+            providers={providers}
           />
           <ModelSelect
             label="The Chair runs on"
@@ -507,6 +506,7 @@ export function NewBoardroomDialog({
             value={chairModel}
             onChange={setChairModel}
             runtimes={runtimes}
+            providers={providers}
           />
           <ModelSelect
             label="Minutes are written by"
@@ -514,6 +514,7 @@ export function NewBoardroomDialog({
             value={synthModel}
             onChange={setSynthModel}
             runtimes={runtimes}
+            providers={providers}
           />
         </div>
         <ErrorBox error={create.error ?? start.error ?? suggest.error} />

@@ -926,6 +926,22 @@ export const deploySetupHandlers = [
   }),
   http.get(`${A}/projects/:id/delivery/probes`, () => HttpResponse.json({ probes })),
   // guided connect (v2): every operation answers at once with sample facts
+  // direct API providers (model keys sealed for the runner): accepted at once, nothing is stored in the mock
+  http.get(`${A}/workstations/:id/providers`, ({ params }) =>
+    HttpResponse.json({
+      workstationId: params.id,
+      supported: true,
+      online: true,
+      providers: [],
+      lastResult: null,
+    }),
+  ),
+  http.put(`${A}/workstations/:id/providers/:provider`, () =>
+    HttpResponse.json({ queued: true }, { status: 202 }),
+  ),
+  http.delete(`${A}/workstations/:id/providers/:provider`, () =>
+    HttpResponse.json({ queued: true }, { status: 202 }),
+  ),
   http.get(`${A}/workstations/:id/sudo-key`, () =>
     HttpResponse.json({ keyId: 'mock-key', publicKey: MOCK_RUNNER_KEY }),
   ),

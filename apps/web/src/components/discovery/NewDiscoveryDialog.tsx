@@ -12,6 +12,7 @@ import { useNavigate } from 'react-router';
 import { useCeoStatus } from '../../api/queries/ceo.ts';
 import { useCreateDiscovery } from '../../api/queries/discovery.ts';
 import { useProjects } from '../../api/queries/projects.ts';
+import { useWorkstations } from '../../api/queries/workstations.ts';
 import {
   CEO_MODE_HELP,
   CEO_MODE_LABEL,
@@ -19,6 +20,7 @@ import {
   STANCE_HELP,
   STANCE_LABEL,
 } from '../../lib/discovery.ts';
+import { ModelSelect, toChoice, unionProviders } from '../ModelSelect.tsx';
 import { Button, Dialog, ErrorBox, Select, TextArea, TextInput } from '../ui.tsx';
 
 const TIME_BOXES = [
@@ -41,6 +43,12 @@ export function NewDiscoveryDialog({
   const create = useCreateDiscovery();
   const projects = useProjects();
   const ceo = useCeoStatus(open);
+  const workstations = useWorkstations({ enabled: open });
+  const wsList = workstations.data ?? [];
+  const runtimes = [
+    ...new Set(wsList.flatMap((w) => (w.runtimes ?? []).filter((r) => r.available).map((r) => r.id))),
+  ];
+  const [model, setModel] = useState('');
   const ceoAvailable = ceo.data?.state === 'active' || ceo.data?.state === 'offline';
   const [title, setTitle] = useState('');
   const [projectId, setProjectId] = useState('');
@@ -60,6 +68,7 @@ export function NewDiscoveryDialog({
       ceoMode: ceoAvailable ? ceoMode : 'owner_only',
       playbook,
       idea: idea.trim(),
+      ...(toChoice(model) ? { model: toChoice(model) as NonNullable<ReturnType<typeof toChoice>> } : {}),
       ...(projectId ? { projectId } : {}),
       ...(timeBox ? { timeBoxMinutes: Number(timeBox) } : {}),
       ...(budget.trim() && Number(budget) > 0 ? { budgetUsd: Number(budget) } : {}),
@@ -179,6 +188,15 @@ export function NewDiscoveryDialog({
             hint="The session stops asking the model when it is used up."
           />
         </div>
+        <ModelSelect
+          label="Facilitator model (optional)"
+          hint="Any model your workstation offers, a direct API provider included."
+          value={model}
+          onChange={setModel}
+          runtimes={runtimes}
+          providers={unionProviders(wsList)}
+          defaultLabel="The facilitator's own"
+        />
         <ErrorBox error={create.error} />
       </form>
     </Dialog>
