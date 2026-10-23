@@ -32,6 +32,7 @@ import {
 import { chatHandlers } from './handlers-chat.ts';
 import { deploySetupHandlers } from './handlers-deploy-setup.ts';
 import { extraHandlers } from './handlers-extra.ts';
+import { packHandlers } from './handlers-packs.ts';
 import { releaseHandlers } from './handlers-releases.ts';
 import { runHandlers } from './handlers-run.ts';
 
@@ -519,6 +520,7 @@ export const handlers = [
       workflows: workflows.map((definition) => ({ id: uuid(), orgId: null, status: 'active', definition })),
     }),
   ),
+  ...packHandlers,
   ...extraHandlers,
 ];
 

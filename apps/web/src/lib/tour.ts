@@ -154,6 +154,11 @@ const NAV_STEPS: Record<string, { title: string; body: string; more?: string }> 
     body: 'Folders of notes and documents that agents read. A git vault syncs to your workstations, and a project vault can also be a local folder, so agents work from the same knowledge you do.',
     more: 'ledger-and-vaults#vaults',
   },
+  capabilities: {
+    title: 'Capabilities',
+    body: 'The skills, personas and playbooks your agents can use, and the packs that add more. A pack from a git repository stays off until you have read it and approved the exact commit.',
+    more: 'capabilities#packs',
+  },
   settings: {
     title: 'Settings',
     body: 'Your own account: your picture, your time zone, Notifications, the Monday briefing, your two-factor login, the weekly blog digest and expert mode for code changes (off by default, so you never need git). The time of the daily report is set on the CEO’s Reporting & alerts tab.',
@@ -191,6 +196,7 @@ const SIDEBAR_ORDER = [
   'ledger',
   'documents',
   'vaults',
+  'capabilities',
   'settings',
   'organization',
 ];

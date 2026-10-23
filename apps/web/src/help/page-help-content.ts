@@ -1012,6 +1012,34 @@ export const PAGE_HELP: Record<string, PageHelp> = {
     ],
     article: 'ledger-and-vaults#vaults',
   },
+  '/settings/capabilities': {
+    title: 'Capabilities',
+    intro:
+      'The skills, personas and playbooks your agents can use, and the packs that add more. Owners and Admins manage them.',
+    controls: [
+      {
+        name: 'Registry',
+        text: 'Every capability with where it comes from. Filter by kind and source. A pack item says needs approval or files changed until it can be used.',
+      },
+      {
+        name: 'Add a pack / Add BMAD Method',
+        text: 'Add a git repository at a tag or commit. It stays untrusted: nothing of it is used until you approve it.',
+      },
+      {
+        name: 'Review and approve',
+        text: 'Read the capabilities and files (scripts flagged) and approve that exact commit and content. Scripts stay off.',
+      },
+      {
+        name: 'Check for updates',
+        text: 'Looks for a newer commit and shows what changed. Accept it to use it.',
+      },
+      {
+        name: 'Skill grants',
+        text: 'Which skills each role has, resolved against the registry.',
+      },
+    ],
+    article: 'capabilities#packs',
+  },
   '/settings/org': {
     title: 'Organization',
     intro: 'Manage your organization: members, invitations, guests, plan and billing.',

@@ -4,11 +4,11 @@ import {
   DISCOVERY_PLAYBOOKS,
   DISCOVERY_STANCES,
   type DiscoveryCeoMode,
-  type DiscoveryPlaybook,
   type DiscoveryStance,
 } from '@aom/shared';
 import { type FormEvent, useState } from 'react';
 import { useNavigate } from 'react-router';
+import { usableOnly, useCapabilities } from '../../api/queries/capabilities.ts';
 import { useCeoStatus } from '../../api/queries/ceo.ts';
 import { useCreateDiscovery } from '../../api/queries/discovery.ts';
 import { useProjects } from '../../api/queries/projects.ts';
@@ -55,7 +55,17 @@ export function NewDiscoveryDialog({
   const [stance, setStance] = useState<DiscoveryStance>('facilitator');
   const [ceoMode, setCeoMode] = useState<DiscoveryCeoMode>('owner_only');
   const [timeBox, setTimeBox] = useState('');
-  const [playbook, setPlaybook] = useState<DiscoveryPlaybook>('brainstorm');
+  const [playbook, setPlaybook] = useState<string>('brainstorm');
+  const [templateKey, setTemplateKey] = useState('');
+  const registry = useCapabilities({ kind: 'playbook', usable: true }, open);
+  // Usable pack playbooks only: those tagged `discovery` start a session, those tagged `template:brief` or `template:prd` shape the draft.
+  const packPlaybooks = usableOnly(registry.data?.items).filter(
+    (i) => i.kind === 'playbook' && i.source === 'pack',
+  );
+  const startPlaybooks = packPlaybooks.filter((i) => (i.tags ?? []).includes('discovery'));
+  const templates = packPlaybooks.filter((i) =>
+    (i.tags ?? []).some((t) => t === 'template:brief' || t === 'template:prd'),
+  );
   const [idea, setIdea] = useState('');
   const [budget, setBudget] = useState('');
 
@@ -67,6 +77,7 @@ export function NewDiscoveryDialog({
       stance,
       ceoMode: ceoAvailable ? ceoMode : 'owner_only',
       playbook,
+      ...(templateKey ? { templateKey } : {}),
       idea: idea.trim(),
       ...(toChoice(model) ? { model: toChoice(model) as NonNullable<ReturnType<typeof toChoice>> } : {}),
       ...(projectId ? { projectId } : {}),
@@ -158,17 +169,33 @@ export function NewDiscoveryDialog({
             ))}
           </Select>
         )}
-        <Select
-          label="Start from"
-          value={playbook}
-          onChange={(e) => setPlaybook(e.target.value as DiscoveryPlaybook)}
-        >
+        <Select label="Start from" value={playbook} onChange={(e) => setPlaybook(e.target.value)}>
           {DISCOVERY_PLAYBOOKS.map((p) => (
             <option key={p} value={p}>
               {PLAYBOOK_LABEL[p]}
             </option>
           ))}
+          {startPlaybooks.map((i) => (
+            <option key={i.key} value={i.key}>
+              {i.name} ({i.pack ?? 'pack'})
+            </option>
+          ))}
         </Select>
+        {templates.length > 0 && (
+          <Select
+            label="Document template (optional)"
+            value={templateKey}
+            onChange={(e) => setTemplateKey(e.target.value)}
+            hint="A brief or PRD template from an approved pack."
+          >
+            <option value="">The standard layout</option>
+            {templates.map((i) => (
+              <option key={i.key} value={i.key}>
+                {i.name} ({i.pack ?? 'pack'})
+              </option>
+            ))}
+          </Select>
+        )}
         <div className="grid gap-3.5 sm:grid-cols-2">
           <Select label="Time box" value={timeBox} onChange={(e) => setTimeBox(e.target.value)}>
             {TIME_BOXES.map((t) => (

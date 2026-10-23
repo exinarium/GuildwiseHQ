@@ -337,7 +337,13 @@ export function NewBoardroomDialog({
                         aria-label={p.name}
                       />
                       <span className="min-w-0">
+                        {p.icon && (
+                          <span aria-hidden="true" className="mr-1" data-testid={`persona-icon-${p.key}`}>
+                            {p.icon}
+                          </span>
+                        )}
                         <span className="font-medium text-fg">{p.name}</span>
+                        {p.source === 'pack' && <span className="ml-1 text-xs text-subtle">({p.pack})</span>}
                         <span className="block text-xs text-muted [overflow-wrap:anywhere]">
                           {p.description}
                         </span>

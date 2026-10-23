@@ -172,6 +172,10 @@ export function usePersonas(enabled = true) {
     enabled,
     queryKey: ['capabilities', 'persona'],
     staleTime: 300_000,
-    queryFn: async () => (await get<CapabilitiesResponse>('/capabilities?kind=persona')).items,
+    // personas of a pack that is not approved (or whose files changed) are never offered for a seat
+    queryFn: async () =>
+      (await get<CapabilitiesResponse>('/capabilities?kind=persona&usable=true')).items.filter(
+        (i) => i.usable !== false,
+      ),
   });
 }

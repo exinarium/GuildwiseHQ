@@ -94,6 +94,8 @@ export function keysForEvent(event: Pick<VisibleEvent, 'type' | 'streamId' | 'pr
       return [['ledger'], ['desk'], ['card']];
     case 'vault':
       return [['vaults']];
+    case 'pack':
+      return [['packs'], ['capabilities']];
     case 'shift':
       return [['card'], ['agents'], ['board'], ['hr'], ['metrics'], ['workstations']];
     case 'agent':

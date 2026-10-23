@@ -48,6 +48,7 @@ describe('the tour steps', () => {
       'ledger',
       'documents',
       'vaults',
+      'capabilities',
       'settings',
       'organization',
       'palette',
@@ -71,7 +72,8 @@ describe('the tour steps', () => {
     const steps = ids('member', MEMBER_NAV);
     expect(steps).toContain('workstations');
     expect(steps).toContain('interests');
-    for (const gone of ['intake', 'ceo', 'costs', 'vaults']) expect(steps).not.toContain(gone);
+    for (const gone of ['intake', 'ceo', 'costs', 'vaults', 'capabilities'])
+      expect(steps).not.toContain(gone);
   });
 
   it('a Guest gets the short tour', () => {

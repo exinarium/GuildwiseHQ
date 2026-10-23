@@ -15,6 +15,7 @@ import { BILLING_GATE_PATH } from './pages/BillingGate.tsx';
 import { Board } from './pages/Board.tsx';
 import { BoardroomList } from './pages/Boardroom.tsx';
 import { BoardroomSession } from './pages/BoardroomSession.tsx';
+import { Capabilities } from './pages/Capabilities.tsx';
 import { CardDetail } from './pages/CardDetail.tsx';
 import { CardNew } from './pages/CardNew.tsx';
 import { Ceo } from './pages/Ceo.tsx';
@@ -133,6 +134,7 @@ export const routes = [
       { path: '/integrations', element: <IntegrationsIndex /> },
       { path: '/settings', element: <Settings /> },
       { path: '/settings/vaults', element: <Vaults /> },
+      { path: '/settings/capabilities', element: <Capabilities /> },
       { path: '/settings/org', element: <OrgSettings /> },
       { path: '/admin', element: <Navigate to="/settings/org" replace /> },
       { path: '/desk', element: <Desk /> },

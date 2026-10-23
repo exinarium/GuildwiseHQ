@@ -17,6 +17,7 @@ import {
   type LucideIcon,
   Network,
   Plug,
+  Puzzle,
   Rocket,
   Server,
   Settings,
@@ -148,6 +149,14 @@ export function buildNav(opts: {
       to: '/settings/vaults',
       icon: Vault,
       testId: 'nav-vaults',
+    });
+  if (canManage)
+    knowledge.push({
+      id: 'capabilities',
+      label: 'Capabilities',
+      to: '/settings/capabilities',
+      icon: Puzzle,
+      testId: 'nav-capabilities',
     });
   const sections: NavSection[] = [
     { label: 'Work', items: work },

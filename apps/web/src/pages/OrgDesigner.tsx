@@ -22,6 +22,8 @@ import {
 import { useProjects } from '../api/queries/projects.ts';
 import { RoleBuilder } from '../components/builder/RoleBuilder.tsx';
 import { ChatPanel } from '../components/ChatPanel.tsx';
+import { SkillPicker } from '../components/capabilities/SkillPicker.tsx';
+import { ListInput } from '../components/org/ListInput.tsx';
 import { WorkflowGraph } from '../components/org/WorkflowGraph.tsx';
 import { LargerScreenNote } from '../components/ui/LargerScreenNote.tsx';
 import { panelId, tabId } from '../components/ui/Tabs.tsx';
@@ -40,7 +42,7 @@ import {
   TextArea,
   TextInput,
 } from '../components/ui.tsx';
-import { blankRole, errorCount, roleToInput, splitList } from '../lib/designer.ts';
+import { blankRole, errorCount, roleToInput } from '../lib/designer.ts';
 import { claimableWorkflows } from '../lib/role-builder.ts';
 
 type Tab = 'roles' | 'workflows' | 'departments' | 'design';
@@ -422,7 +424,7 @@ function ExtendDialog({
   const extend = useExtendRole();
   const def = (role.versions.find((v) => v.status === 'active') ?? role.versions[0])?.definition;
   const [instructions, setInstructions] = useState(role.extensions?.instructions ?? '');
-  const [skills, setSkills] = useState((role.extensions?.skills ?? []).join(', '));
+  const [skills, setSkills] = useState<string[]>(role.extensions?.skills ?? []);
   const [orders, setOrders] = useState((role.extensions?.standingOrders ?? []).join('\n'));
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -432,7 +434,7 @@ function ExtendDialog({
         projectId,
         body: {
           instructions,
-          skills: splitList(skills),
+          skills,
           standingOrders: orders
             .split('\n')
             .map((x) => x.trim())
@@ -464,11 +466,10 @@ function ExtendDialog({
           value={instructions}
           onChange={(e) => setInstructions(e.target.value)}
         />
-        <TextInput
-          label="Extra skills (comma separated)"
-          value={skills}
-          onChange={(e) => setSkills(e.target.value)}
-        />
+        <div>
+          <ListInput label="Extra skills (comma separated)" value={skills} onChange={setSkills} />
+          <SkillPicker value={skills} onChange={setSkills} projectId={projectId} />
+        </div>
         <TextArea
           label="Standing orders (one per line)"
           rows={3}

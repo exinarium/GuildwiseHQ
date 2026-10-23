@@ -38,6 +38,7 @@ import {
   toggleStep,
   unknownClaims,
 } from '../../lib/role-builder.ts';
+import { SkillPicker } from '../capabilities/SkillPicker.tsx';
 import { ListInput } from '../org/ListInput.tsx';
 import { RoleEditor } from '../org/RoleEditor.tsx';
 import { Badge, Button, Callout, ErrorBox, Select, TextArea, TextInput } from '../ui.tsx';
@@ -620,6 +621,12 @@ export function RoleBuilder({
               ))}
             </p>
           )}
+          <SkillPicker
+            value={value.skills}
+            onChange={(skills) => set({ skills })}
+            disabled={readOnly}
+            projectId={projectId}
+          />
         </div>
       </Section>
 

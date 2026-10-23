@@ -73,6 +73,13 @@ export const SECTION_VIDEOS: Record<string, SectionVideoEntry> = {
     // not recorded yet: the recording task flips this flag together with the files
     published: false,
   },
+  capabilities: {
+    title: 'Capabilities and packs',
+    nav: 'capabilities',
+    help: 'capabilities#packs',
+    // not recorded yet: the recording task flips this flag together with the files
+    published: false,
+  },
   automations: {
     title: 'Automations',
     nav: 'schedules',
