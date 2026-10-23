@@ -1,4 +1,4 @@
-import { PACK_PRESETS, type PackDto, type PackPreset } from '@aom/shared';
+import { PACK_PRESETS, type PackDto, type PackPreset, type PacksResponse } from '@aom/shared';
 import { type FormEvent, useState } from 'react';
 import {
   useAddPack,
@@ -67,13 +67,73 @@ export function PacksTab() {
           description="A pack brings extra skills, personas and playbooks from a git repository. It stays off until you have read it and approved it."
         />
       )}
-      {adding && <AddPackDialog onClose={() => setAdding(false)} />}
-      {preset && <PresetDialog preset={preset} onClose={() => setPreset(null)} />}
+      {adding && <AddPackDialog workstations={q.data?.workstations ?? []} onClose={() => setAdding(false)} />}
+      {preset && (
+        <PresetDialog
+          preset={preset}
+          workstations={q.data?.workstations ?? []}
+          onClose={() => setPreset(null)}
+        />
+      )}
     </div>
   );
 }
 
-function AddPackDialog({ onClose }: { onClose: () => void }) {
+type PackWorkstation = PacksResponse['workstations'][number];
+
+/**
+ * Which workstations fetch and hold a new pack. Packs are cloned and read by a workstation, so the admin says which ones:
+ * by default their own. `null` is that default (not sent, so a laptop they pair later holds it too).
+ */
+function useWorkstationChoice(workstations: PackWorkstation[]) {
+  const [chosen, setChosen] = useState<string[] | null>(null);
+  const mine = workstations.filter((w) => w.mine).map((w) => w.id);
+  const current = chosen ?? mine;
+  return {
+    current,
+    /** The request field: only when the admin changed the default. */
+    field: chosen && chosen.length ? { workstationIds: chosen } : {},
+    toggle: (id: string) =>
+      setChosen(current.includes(id) ? current.filter((x) => x !== id) : [...current, id]),
+    valid: workstations.length === 0 || current.some((id) => mine.includes(id)),
+  };
+}
+
+function WorkstationPicker({
+  workstations,
+  choice,
+}: {
+  workstations: PackWorkstation[];
+  choice: ReturnType<typeof useWorkstationChoice>;
+}) {
+  if (workstations.length === 0) return null;
+  return (
+    <fieldset className="flex flex-col gap-1 text-sm" data-testid="pack-workstations">
+      <legend className="font-medium">Fetched and read by</legend>
+      {workstations.map((w) => (
+        <label key={w.id} className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={choice.current.includes(w.id)}
+            onChange={() => choice.toggle(w.id)}
+          />
+          <span>
+            {w.name}
+            {w.mine ? ' (yours)' : ''}
+            {w.online ? '' : ', offline'}
+          </span>
+        </label>
+      ))}
+      <p className="text-xs text-muted">
+        A pack is cloned from a public https URL with no credentials of whoever owns the workstation. Include
+        at least one of your own: only your workstation can pin the commit you review.
+      </p>
+    </fieldset>
+  );
+}
+
+function AddPackDialog({ workstations, onClose }: { workstations: PackWorkstation[]; onClose: () => void }) {
+  const choice = useWorkstationChoice(workstations);
   const add = useAddPack();
   const projects = useProjects();
   const toast = useToast();
@@ -82,7 +142,7 @@ function AddPackDialog({ onClose }: { onClose: () => void }) {
   const [name, setName] = useState('');
   const [scope, setScope] = useState<'org' | 'project'>('org');
   const [projectId, setProjectId] = useState('');
-  const ready = url.trim() && ref.trim() && (scope === 'org' || projectId);
+  const ready = url.trim() && ref.trim() && (scope === 'org' || projectId) && choice.valid;
   const submit = (e: FormEvent) => {
     e.preventDefault();
     if (!ready) return;
@@ -94,6 +154,7 @@ function AddPackDialog({ onClose }: { onClose: () => void }) {
         scope,
         ...(name.trim() ? { name: name.trim() } : {}),
         ...(scope === 'project' ? { projectId } : {}),
+        ...choice.field,
       },
       {
         onSuccess: () => {
@@ -108,7 +169,7 @@ function AddPackDialog({ onClose }: { onClose: () => void }) {
       open
       onOpenChange={(o) => !o && onClose()}
       title="Add a pack"
-      description="Give the git URL and a tag, branch or commit. No password or token in the URL: the workstation uses its own git access."
+      description="Give a public https git URL and a tag, branch or commit. No password or token in the URL: packs are fetched without anyone's git credentials or ssh keys."
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>
@@ -163,13 +224,23 @@ function AddPackDialog({ onClose }: { onClose: () => void }) {
             ))}
           </Select>
         )}
+        <WorkstationPicker workstations={workstations} choice={choice} />
         <ErrorBox error={add.error} />
       </form>
     </Dialog>
   );
 }
 
-function PresetDialog({ preset, onClose }: { preset: PackPreset; onClose: () => void }) {
+function PresetDialog({
+  preset,
+  workstations,
+  onClose,
+}: {
+  preset: PackPreset;
+  workstations: PackWorkstation[];
+  onClose: () => void;
+}) {
+  const choice = useWorkstationChoice(workstations);
   const add = useAddPack();
   const toast = useToast();
   const [ref, setRef] = useState(preset.ref);
@@ -186,7 +257,7 @@ function PresetDialog({ preset, onClose }: { preset: PackPreset; onClose: () => 
           </Button>
           <Button
             variant="primary"
-            disabled={!ref.trim()}
+            disabled={!ref.trim() || !choice.valid}
             loading={add.isPending}
             onClick={() =>
               add.mutate(
@@ -197,6 +268,7 @@ function PresetDialog({ preset, onClose }: { preset: PackPreset; onClose: () => 
                   adapter: preset.adapter,
                   scope: 'org',
                   preset: preset.id,
+                  ...choice.field,
                 },
                 {
                   onSuccess: () => {
@@ -219,6 +291,7 @@ function PresetDialog({ preset, onClose }: { preset: PackPreset; onClose: () => 
           imported files.
         </p>
         <TextInput label="Version (tag)" value={ref} onChange={(e) => setRef(e.target.value)} />
+        <WorkstationPicker workstations={workstations} choice={choice} />
         <Callout tone="info">
           Adding it does not turn anything on. It stays untrusted until you review it and approve the exact
           commit.

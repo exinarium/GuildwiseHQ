@@ -60,6 +60,7 @@ const packDto = () => ({
   license: 'MIT',
   integrityFailed: false,
   itemCount: 2,
+  workstationIds: [],
   update: null,
   lastCheckedAt: null,
   addedAt: new Date().toISOString(),

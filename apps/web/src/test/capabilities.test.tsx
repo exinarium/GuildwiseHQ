@@ -38,6 +38,7 @@ const pack = (over: Partial<PackDto> = {}): PackDto => ({
   license: 'MIT',
   integrityFailed: false,
   itemCount: 2,
+  workstationIds: [],
   update: null,
   lastCheckedAt: null,
   addedAt: AT,
@@ -248,6 +249,42 @@ describe('Capabilities: packs', () => {
         adapter: 'auto',
         scope: 'project',
         projectId: '0192f3a0-0000-7000-8000-0000000000a1',
+      }),
+    );
+  });
+
+  it('lets the admin choose the workstations that hold a new pack, their own by default', async () => {
+    const user = userEvent.setup();
+    const mine = '0192f3a0-0000-7000-8000-0000000000b1';
+    const theirs = '0192f3a0-0000-7000-8000-0000000000b2';
+    const calls = stub({
+      ...me,
+      'GET /api/projects': () => ({ projects: [] }),
+      'GET /api/packs': () => ({
+        packs: [],
+        workstationsOnline: 1,
+        workstations: [
+          { id: mine, name: 'Laptop', mine: true, online: true },
+          { id: theirs, name: 'Desk of Sam', mine: false, online: true },
+        ],
+      }),
+      'POST /api/packs': () => ({ pack: pack() }),
+    });
+    packsTab();
+    await user.click(await screen.findByRole('button', { name: 'Add a pack by git URL' }));
+    await user.type(screen.getByLabelText('Git URL'), 'https://github.com/acme/skills.git');
+    await user.type(screen.getByLabelText('Tag, branch or commit'), 'v1.0.0');
+    expect(screen.getByLabelText(/Laptop/)).toBeChecked();
+    expect(screen.getByLabelText(/Desk of Sam/)).not.toBeChecked();
+    // only a colleague's workstation: refused, one of the admin's own is needed to pin
+    await user.click(screen.getByLabelText(/Desk of Sam/));
+    await user.click(screen.getByLabelText(/Laptop/));
+    expect(screen.getByRole('button', { name: 'Add pack' })).toBeDisabled();
+    await user.click(screen.getByLabelText(/Laptop/));
+    await user.click(screen.getByRole('button', { name: 'Add pack' }));
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === 'POST' && c.url === '/api/packs')?.body).toMatchObject({
+        workstationIds: expect.arrayContaining([mine, theirs]),
       }),
     );
   });
