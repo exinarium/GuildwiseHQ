@@ -70,6 +70,29 @@ export const JiraConfigSchema = z.object({
 });
 export type JiraConfig = z.infer<typeof JiraConfigSchema>;
 
+/**
+ * The Codex CLI runtime (docs/RUNNER.md, "Codex CLI runtime"). Registered only when the `codex` binary is found: on PATH, or at
+ * `bin`. Its OS sandbox is Codex's own and always on (no `off`): the runtime is unavailable where that sandbox does not run.
+ */
+export const CodexRuntimeConfigSchema = z.object({
+  /** `false`: never register the runtime, even when `codex` is installed. */
+  enabled: z.boolean().default(true),
+  /** Path of the `codex` binary (`~` allowed). Absent: look for `codex` on PATH. */
+  bin: z.string().optional(),
+  /**
+   * `login` (default): the owner's own `codex login` (ChatGPT sign-in or a stored API key) is copied into each agent's private
+   * Codex home for a session and a refreshed login is handed back. `api_key`: `apiKey` is passed as CODEX_API_KEY and no
+   * login file is read.
+   */
+  authMode: z.enum(['login', 'api_key']).default('login'),
+  apiKey: z.string().optional(),
+  /** The folder holding the owner's `auth.json` (`~` allowed). Default `$CODEX_HOME`, else `~/.codex`. */
+  loginDir: z.string().optional(),
+  /** Extra toolchain directories sandboxed shell commands may read (see the claude-code setting of the same name). */
+  toolchainPaths: z.array(z.string()).default([]),
+});
+export type CodexRuntimeConfig = z.infer<typeof CodexRuntimeConfigSchema>;
+
 export const MockRuntimeConfigSchema = z.object({
   enabled: z.boolean().default(false),
   /** Narrow the advertised capabilities (default: all). */
@@ -113,6 +136,7 @@ export const RunnerConfigSchema = z.object({
     .object({
       'claude-code': ClaudeRuntimeConfigSchema.default(ClaudeRuntimeConfigSchema.parse({})),
       mock: MockRuntimeConfigSchema.optional(),
+      codex: CodexRuntimeConfigSchema.optional(),
     })
     .default({ 'claude-code': ClaudeRuntimeConfigSchema.parse({}) }),
   /** M8: credentials for posting approved updates to Jira (GitHub uses this machine's `gh` login). */

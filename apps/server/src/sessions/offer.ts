@@ -1,4 +1,5 @@
 import {
+  CODEX_RUNTIME,
   DIRECT_RUNTIME,
   directProvider,
   isKnownChoice,
@@ -13,6 +14,9 @@ export interface RuntimeReport {
   id: string;
   available?: boolean;
   providers?: ReportedProvider[];
+  sandbox?: string;
+  sandboxReason?: string;
+  auth?: string;
 }
 
 /** The runtimes a workstation reported at its last hello or re-probe (empty: unknown, so nothing is refused for it). */
@@ -37,6 +41,18 @@ export const providersOf = (reports: readonly RuntimeReport[]): ReportedProvider
  */
 export function runtimeProblem(reports: readonly RuntimeReport[], choice: ModelChoice): string | null {
   if (reports.length === 0) return null;
+  // The Codex runtime is registered by a runner only when `codex` is installed there, and reports itself unavailable with
+  // the reason when its sandbox does not run or nobody is signed in.
+  if (choice.runtime === CODEX_RUNTIME) {
+    const rt = reports.find((r) => r.id === CODEX_RUNTIME);
+    if (!rt)
+      return 'the Codex CLI is not installed on this workstation (or its runner has to be restarted to find it)';
+    if (rt.available === false)
+      return rt.auth === 'expired'
+        ? 'Codex is not signed in on this workstation: run `codex login` as the runner user'
+        : `Codex cannot run on this workstation: ${rt.sandboxReason ?? 'it is unavailable'}`;
+    return null;
+  }
   // Only the direct-model runtime is judged here. Another runtime the workstation does not have is reported by its runner in its own
   // words when the turn arrives (the same `runtime ... is not available` it always gave), and a workstation that reports no Claude
   // Code (a mock-only one) must keep running the turns it ran before.

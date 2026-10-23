@@ -1,10 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import {
   type AgentChanges,
+  type AgentPermissions,
+  CODEX_REFUSED_ROLES,
+  CODEX_RUNTIME,
   canHireAgentInOrg,
   canManageAgentInOrg,
   canWidenPermissions,
   checkPermissions,
+  codexRoleProblem,
   DEFAULT_AVATAR_STYLE,
   DEVOPS_ROLE_KEY,
   DIRECT_RUNTIME,
@@ -197,6 +201,8 @@ export async function sandboxGate(
   workstationId: string,
   runtimeId: string,
   acknowledged: boolean | undefined,
+  /** The agent's role, when known: the Codex runtime refuses the roles its sandbox cannot confine (`codexRoleProblem`). */
+  role?: { roleKey: string; isDevops?: boolean; permissions?: AgentPermissions },
 ): Promise<UnsandboxedAck | undefined> {
   // Agents work cards and shifts with a shell and edit tools. The direct API models (conversation only) are for session turns.
   if (runtimeId === DIRECT_RUNTIME)
@@ -204,6 +210,18 @@ export async function sandboxGate(
       'runtime_not_for_agents',
       'the direct API models have no shell or edit tools, so an agent cannot run on them: pick them for a Discovery or Boardroom seat instead',
     );
+  if (runtimeId === CODEX_RUNTIME && role) {
+    const problem = role.permissions
+      ? codexRoleProblem({ ...role, permissions: role.permissions })
+      : CODEX_REFUSED_ROLES.includes(role.roleKey) || role.isDevops
+        ? codexRoleProblem({
+            ...role,
+            permissions: { allowedTools: ['shell'], writableGlobs: null, browser: false },
+          })
+        : null;
+    if (problem)
+      throw badRequest('runtime_not_for_role', `the Codex runtime cannot run this agent: ${problem}`);
+  }
   const ws = await one(tx, 'SELECT name, runtimes FROM workstations WHERE id=$1', [workstationId]);
   const rt = (
     ws?.runtimes as Array<{ id: string; sandbox?: string; sandboxReason?: string }> | undefined
@@ -317,6 +335,7 @@ export async function hireAgent(
       req.workstationId,
       req.runtime ?? dm.runtime,
       req.acknowledgeUnsandboxed,
+      { roleKey: roleDef.key, permissions: roleDef.definition.permissions },
     );
     await ctx.store.append(
       [
@@ -430,7 +449,13 @@ export async function patchAgent(
     if (changes.permissions) await assertMcpAdditions(tx, user, a, role, changes.permissions);
     const unsandboxedAck =
       next.runtime && next.runtime !== a.runtime && a.workstation_id
-        ? await sandboxGate(ctx, tx, user.id, a.workstation_id, next.runtime, acknowledgeUnsandboxed)
+        ? await sandboxGate(ctx, tx, user.id, a.workstation_id, next.runtime, acknowledgeUnsandboxed, {
+            roleKey: next.roleKey ?? a.role_key,
+            isDevops: a.is_devops === true,
+            ...((next.permissions ?? role?.definition.permissions)
+              ? { permissions: (next.permissions ?? role?.definition.permissions) as AgentPermissions }
+              : {}),
+          })
         : undefined;
     await ctx.store.append(
       [

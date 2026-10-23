@@ -451,6 +451,14 @@ aom-runner doctor             # checks node, git, claude, docker, yt-dlp, repos,
   - **mcpConfig**: path to MCP config file with Jira server and credentials
   - **allowedTools** (array): tools the intake chat can use (`mcp__jira`, `WebFetch`, etc.)
 
+**Codex CLI** (`runtimes.codex`, optional; see "Codex CLI runtime"). The runtime is registered only when the `codex` binary is found, so a workstation without it needs no block:
+- **enabled** (default `true`): `false` never registers it, even when `codex` is installed
+- **bin** (optional): path of the `codex` binary (`~` allowed); default: the first `codex` on `PATH`
+- **authMode** (default `"login"`): `"login"` uses the runner user's own `codex login`; `"api_key"` passes **apiKey** as `CODEX_API_KEY`
+- **apiKey** (optional): the OpenAI API key (when authMode is `"api_key"`; keep `config.json` at 0600)
+- **loginDir** (optional): the folder with the owner's `auth.json` (default `$CODEX_HOME`, else `~/.codex`)
+- **toolchainPaths** (array): extra toolchain folders the sandboxed shell may read, as for Claude Code
+
 **Mock** (test-only, token-free):
 - **enabled** (default `false`): turn on for testing
 - **capabilities** (optional array): limit advertised roles (e.g., `["builder"]`)
@@ -802,7 +810,7 @@ The runner process (outside the agent sandbox, so the network allowlist does not
 
 **Full reference:** see `docs/USER-GUIDE.md` for the full `aom` reference and examples.
 
-## Adapters: Claude Code, Direct-model and Mock
+## Adapters: Claude Code, Codex, Direct-model and Mock
 
 ### Claude Code adapter
 
@@ -903,6 +911,66 @@ The `direct-model` runtime calls a model provider's API from this workstation wi
 **What a call does.** The turn's `chat.start` carries the model (`provider:model`) and, for a session turn, its purpose. The runner sends the instructions (the same room text as for Claude Code, written for tools) and the message, and runs at most 12 model calls with a 5-minute limit; each `aom` verb the purpose allows is a tool that goes through the runner's IPC with the turn's token and is checked by the server like an `aom` call from Claude Code. Plain chats keep their earlier messages in `direct-chats/<id>.json` (0600). Data goes from this workstation straight to the provider; Guildwise's servers never see the key or the traffic.
 
 **Troubleshooting.** "X is not set up on this workstation": add the key. "X refused the API key (HTTP 401)": the key is wrong or expired, replace it. "does not know this model (HTTP 404)": the id is not available to this key, or the endpoint does not serve it. A model that is not in the built-in list needs its id added under **Model providers**. Costs of models without a price in the table show as "cost unknown".
+
+### Codex CLI runtime
+
+The `codex` runtime runs OpenAI's Codex CLI (`codex exec`) for card shifts and chats, in Codex's own OS sandbox. It is registered **only when the `codex` binary is found** when the runner starts (on `PATH` or at `runtimes.codex.bin`; installing it later needs a runner restart) and it is reported in `hello` and `runtimes.report` like the other runtimes: version, `available`, `sandbox` (`enforced` or `unavailable` with the reason in `sandboxReason`) and `auth` (`expired` when nobody is signed in). A Codex agent is hired like any other (runtime `codex`, model `gpt-6.1-sol`, ...); the server accepts it when the workstation reports it available and the role is one its sandbox can confine (below).
+
+**Requirements.** Linux (WSL2) or macOS (native Windows is not supported by this adapter); `codex` 0.163.0 or newer (`npm i -g @openai/codex`, or the standalone/Homebrew install); on Linux bubblewrap (`apt install bubblewrap`) or user namespaces for Codex's bundled helper. The runner proves the sandbox works with `codex sandbox -- true` under the same profile sessions use (cached ten minutes); when it does not start the runtime reports `sandbox: unavailable` with Codex's own error and **refuses every session**. There is no `off` or `best_effort` mode and no unsandboxed acknowledgement for Codex.
+
+**Sign-in.** `authMode: "login"` (default): run `codex login` as the runner user (ChatGPT sign-in, or `codex login --with-api-key`) with the **file** credential store, so `~/.codex/auth.json` exists (a login kept only in the OS keyring is not found; use `cli_auth_credentials_store = "file"` in `~/.codex/config.toml` and log in again, or use an API key). Each session gets a **private 0600 copy** of that file in the agent's own Codex home; a refreshed login (newer `last_refresh`) is written back to the owner's file when the session ends. Several agents refreshing a ChatGPT login at the same moment can invalidate each other's refresh token (it rotates): `authMode: "api_key"` avoids that. `authMode: "api_key"`: `apiKey` goes to the codex process as `CODEX_API_KEY` (codex reads it only for `exec`) with `forced_login_method = "api"`; no login file is read and none is left in the agent's home. A failed login (HTTP 401, expired refresh token) ends the session with `authFailed` (the shift is put back, not counted as a crash) and the runtime reports `auth: expired` until `auth.json` changes or a session works. Cost: the usage of a ChatGPT plan is not billed per token.
+
+**Flags and files (codex-cli 0.163.0).** Verified on 2026-10-23 against the sources at github.com/openai/codex tag `rust-v0.163.0` (`codex-rs/exec/src/cli.rs`, `exec_events.rs`, `lib.rs`; `codex-rs/utils/cli/src/shared_options.rs`; `codex-rs/core/config.schema.json`), the documentation at developers.openai.com/codex (auth, skills, AGENTS.md, security, permissions, config reference; the site now redirects to learn.chatgpt.com/docs), and by running the real binary (`codex exec --help`, `codex debug models`, `codex sandbox`, `codex execpolicy check`, and the opt-in `apps/runner/test/codex-real.test.ts` against a fake Responses API):
+
+```
+codex exec --json --skip-git-repo-check --strict-config --color never --cd <worktree> --model <id>
+      -c approval_policy="never" -c default_permissions="aom" -c permissions.aom={...}
+      -c shell_environment_policy={inherit="none", set={...}} -c allow_login_shell=false
+      -c web_search="disabled|live" -c cli_auth_credentials_store="file" -c project_doc_max_bytes=1048576
+      -c skills={bundled={enabled=false}} -c analytics/feedback/history off [-c model_reasoning_effort=<effort>]
+      [resume <thread id>] -        # the prompt is read from stdin (`-`): never in argv or `ps`
+```
+
+- `--json` prints one JSON event per line: `thread.started {thread_id}` (the session id to `resume`), `turn.started`, `item.started|updated|completed` (`agent_message`, `reasoning`, `command_execution`, `file_change`, `mcp_tool_call`, `web_search`, `todo_list`, `error`), `turn.completed {usage}`, `turn.failed {error}` and `error {message}` ("Reconnecting..." retries are ignored). Codex does not stream tokens: a reply arrives whole, so a chat gets it as one `delta`. `exec` never asks for approval (headless default `never`, set anyway); a request to run something unsandboxed (`sandbox_permissions: require_escalated`) is refused, which the real-binary test checks.
+- `--sandbox` is **not** used: Codex does not combine `sandbox_mode` with permission profiles. `--strict-config` makes a key this Codex version does not know an error instead of a silently weaker sandbox. `--dangerously-bypass-approvals-and-sandbox`, `--oss`, `--profile`, `--add-dir` and `--worktree` are never passed. Every `-c` value is TOML, so the whole per-session policy travels in argv and the agent's Codex home holds only state shared by its sessions.
+- **Models.** `gpt-6-luna` (small), `gpt-6.1-sol` (medium), `gpt-6-astra` (large) from `codex debug models`; efforts `low|medium|high|xhigh|max` (`ultra`, automatic delegation, is not offered). Other ids can still be set on an agent and are passed through.
+- **Codex home** `agents/<id>/codex` (`CODEX_HOME`): `AGENTS.md` (the agent's instructions, written by `writeInstructions` from the same shared renderer text as `CLAUDE.md`, nothing forked), `auth.json` (private copy), `rules/aom.rules`, `sessions/` and Codex's state databases. The owner's `~/.codex` (config, skills, AGENTS.md, rules) is never read. Codex also reads an `AGENTS.md` in the repository, as Claude Code reads a `CLAUDE.md`.
+- **Skills.** Granted skills (`grantedSkills`) are written by `materializeSkills` into `agents/<id>/home/.agents/skills` (Codex's USER scope, under the agent's private `HOME`), replacing the folder each session; nothing is written into the worktree. Codex has no switch for the repository's own `.agents/skills` (REPO scope), so those load too; Codex's bundled skills are turned off.
+- **Environment.** The codex process gets the allow-listed variables (`PATH`, locale, proxies, certificates), the session's variables (`HOME` private, `AOM_*`, caches), `CODEX_HOME` and, in `api_key` mode, `CODEX_API_KEY`: nothing else of the runner's environment (no `GH_TOKEN`, ssh agent, cloud keys, the runner token). The **shell** Codex starts for the agent gets exactly the session's variables (`inherit = "none"` plus `set`), without `CODEX_*`. Codex strips variables named `*KEY*`, `*SECRET*`, `*TOKEN*` by default; `set` is applied afterwards, so `AOM_SHIFT_TOKEN` arrives (checked). `allow_login_shell = false` keeps `/etc/profile` from rewriting `PATH`.
+
+**The sandbox profile.** A permission profile named `aom`, built per session (`codexPermissions` in `adapters/codex.ts`): the filesystem is **deny by default** (`:minimal` system read, then only the paths below), the network is off. Paths granted: write: the working folder (the worktree, or read-only for a role without `edit` and for chats), the agent's private home, scratch and temp folder, the shared package caches, `/tmp/.dotnet`; read: the toolchain folders (Node install, `toolchainPaths`), the runner's `bin/` and the `aom` script's folder, the codex install, the vault folder, reference repositories (their `.env`, `*.pem`, `id_*`, ... files denied), NuGet's fallback folder; for a role that commits, the worktree's git admin folder (`.git/worktrees/<name>`), `objects`, `refs` and `logs` of the main repository, writable; its `config` and `hooks` stay read-only. Everything else, including the owner's home, the runner's data directory with its token and secrets, other agents' folders, `~/.ssh` and **this agent's own Codex home with `auth.json`**, does not exist for the shell (checked with the real binary).
+
+**The `aom` command.** Inside Codex's network-restricted sandbox a Unix socket cannot be connected (`connect()` fails with EPERM, checked on 0.163.0) and loopback is a separate network namespace, so the sandboxed shell cannot reach the runner. `rules/aom.rules` therefore holds `prefix_rule(pattern=["aom"], decision="allow")`: Codex runs a standalone `aom ...` command **outside the sandbox without asking**, the same way Claude Code's excluded `aom` runs (and with the same hint: run `aom` as its own command, not in a pipe or after `cd`). A compound command that contains anything else stays sandboxed. The rules file also forbids (`decision="forbidden"`) the role's denied shell patterns that are plain command prefixes, `git push`, `git reset --hard`, `git stash drop|pop|clear` and, except for builders, `git rebase|checkout|switch`; this is defence in depth, the structure above (no network, no credentials, read-only `.git` config) is what holds.
+
+**Parity with the Claude Code adapter.**
+
+| Guarantee | Claude Code | Codex runtime |
+| --- | --- | --- |
+| Private `HOME`, own config dir | `HOME`, `CLAUDE_CONFIG_DIR` in `agents/<id>` | `HOME` and `CODEX_HOME` in `agents/<id>`; the owner's `~/.codex` never read |
+| Runner environment kept out | allow-listed env, `inheritEnv: false` | same for the codex process; the shell gets only the session's variables |
+| Credentials | per-agent copy of `.credentials.json`, or a token | per-agent 0600 copy of `auth.json`, or `CODEX_API_KEY`; hidden from the shell |
+| Writes only in the worktree, scratch, home, tmp | `denyWrite` / `allowWrite` | deny-by-default profile: same areas |
+| Reads | `/home` hidden, allow-list of toolchain, reference and vault folders | whole filesystem hidden except `:minimal` and the allow-list (stricter than a blocklist) |
+| Secret files denied (`.env`, keys) in reference repositories | per-file masks | deny globs, **fixed when the process starts**: a file created later is not covered |
+| Network | domain allow-list (registries, git hosts, per-shift target host) | **off**: no `npm install` or `git fetch` from the shell; no per-domain list (Codex's proxy is not used). Packages must already be in the shared caches or the repository |
+| `aom` over IPC | Unix socket allowed through the sandbox | `aom` runs outside the sandbox by an `allow` execpolicy rule (above) |
+| Git: commit in the worktree, no push | yes; hooks and config of the main repository read-only | same: commit works, `config` and `hooks` read-only; no network, so no push; git prints a harmless `packed-refs.lock` warning |
+| Denied shell patterns | permission rules | execpolicy `forbidden` prefix rules for plain prefixes (best effort); the structure holds |
+| Chat shell limited to `aom` | `Bash(aom:*)` | **not limited**: the chat shell is any command, in a read-only, network-less, allow-listed sandbox |
+| Web | `WebFetch`/`WebSearch` per role | Codex's hosted web search only, for roles with `web`; the shell has no network |
+| MCP servers (plugins, Jira intake) | granted per role | **none** |
+| Per-role path scopes (tester, writer) | `Edit(...)` globs | not expressible: those roles are refused |
+| Browser roles (Unix sockets) | opt-in | refused |
+| DevOps guard, DevOps/CEO profiles | yes | refused |
+| Token cost | priced from `DEFAULT_MODEL_PRICES` | **cost unknown** |
+
+**Restrictions chosen (nothing is weakened; where parity is not possible the role stays on Claude Code).** The runner refuses to start (`codex_role_refused: ...`) and the server refuses to hire or move an agent onto the runtime (`runtime_not_for_role`, from `codexRoleProblem` in shared) for: the DevOps engineer and the CEO (their own guard and full-power profiles); roles with no `shell` tool (Codex always has one; the read-only analyst, researcher, checker, scout and curator); roles with `browser` (the tester); roles that may edit only some paths (`writableGlobs`, the writer and the architect); the DevOps guard and read-only scans; the BA intake chat (needs the Jira MCP tool). The CEO chat never offers Codex models. The runtime is also refused whenever its sandbox self-test fails or nobody is signed in. What remains: the builder, the reviewer, the planner, the pre-reviewer, the BA's tasks and chats, and custom roles with a shell and no path or browser needs.
+
+**Usage and cost.** `turn.completed.usage` (`input_tokens` includes the cached part; `cached_input_tokens`, `cache_write_input_tokens`, `output_tokens`, `reasoning_output_tokens` is part of the output) becomes `Usage` with `inputTokens` the non-cached part and `model` `codex:<model>`. `CODEX_MODEL_PRICES` in shared is empty: a Codex turn is costed 0 and flagged `isCostUnknown` ("Cost unknown for N turns" in Discovery and the Boardroom), never priced like a Claude model. Card shifts show 0 for it (the shift ledger has no unknown flag yet).
+
+**Known gaps.** The repository's own `AGENTS.md` and `.agents/skills` are loaded by Codex (no switch). A plain clone (not a linked worktree) cannot commit: its `.git` is inside the writable root and Codex keeps it read-only. `resume` works by thread id, but the supervisor's "continue this agent's session" decision reads Claude transcripts, so a shift always starts a new thread unless the caller passes a `resumeSessionId` from a chat. A Codex login shared by several agents can lose a refresh-token rotation (use an API key). Codex's own stderr is shown only in the failure text, cut to 1000 characters.
+
+**Tests.** `apps/runner/test/codex-adapter.test.ts` (a fake `codex` script that records argv, environment, cwd, stdin, `AGENTS.md`, skills and rules: argv, env allow-list, instructions, skills, stream parsing, usage, exit and auth mapping, role refusals, registration only when the binary exists); `apps/runner/test/codex-real.test.ts` (opt-in, `AOM_CODEX_REAL_BIN=/path/to/codex`: the real binary against a fake local Responses API, checking the sandbox, the shell environment, the `aom` exclusion, git, skills discovery and the event parser); `packages/shared/test/codex-runtime.test.ts`; `apps/server/test/codex-runtime.test.ts`.
 
 ### Mock adapter
 

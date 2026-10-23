@@ -1,3 +1,4 @@
+import { codexPrice, isCodexModel } from '../models/codex.ts';
 import { directPrice, splitDirectModel } from '../models/direct.ts';
 
 /**
@@ -117,6 +118,8 @@ function directPriceOf(
   model: string,
   table: readonly ModelPrice[],
 ): { input: number; output: number; cacheRead?: number; cacheWrite?: number } | null | undefined {
+  // A Codex CLI model: its own (empty) price table, never a Claude price.
+  if (isCodexModel(model)) return codexPrice(model);
   const d = splitDirectModel(model);
   if (!d) return undefined;
   return directPrice(d.provider, d.model, (m) => {

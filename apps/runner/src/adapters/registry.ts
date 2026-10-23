@@ -3,16 +3,18 @@ import type { ProviderStore } from '../direct/store.ts';
 import type { RunnerPaths } from '../paths.ts';
 import type { ClaudeAccountRegistry } from './claude-accounts.ts';
 import type { ClaudeAuthMonitor } from './claude-auth.ts';
-import { ClaudeCodeAdapter } from './claude-code.ts';
+import { ClaudeCodeAdapter, realClaudeBlocked } from './claude-code.ts';
 import type { ClaudeUsageMonitor } from './claude-usage-limit.ts';
+import { CodexAdapter, detectCodex } from './codex.ts';
 import type { DirectModelOptions } from './direct-model.ts';
 import { DirectModelAdapter } from './direct-model.ts';
 import { MockAdapter } from './mock.ts';
 import type { RuntimeAdapter } from './types.ts';
 
 /**
- * Adapters enabled by the config: `claude-code` always, `mock` only when `runtimes.mock.enabled`, and `direct-model` whenever the
- * runner has a provider store (it reports no providers, and is unavailable, until a key is stored).
+ * Adapters enabled by the config: `claude-code` always, `mock` only when `runtimes.mock.enabled`, `direct-model` whenever the
+ * runner has a provider store (it reports no providers, and is unavailable, until a key is stored), and `codex` only when the
+ * `codex` binary is found (on PATH or at `runtimes.codex.bin`) at start: installing it later needs a runner restart.
  */
 export function buildAdapters(
   config: RunnerConfig,
@@ -34,6 +36,17 @@ export function buildAdapters(
     }),
   );
   if (config.runtimes.mock?.enabled) adapters.set('mock', new MockAdapter(config.runtimes.mock, paths));
+  const codexBin = detectCodex(config.runtimes.codex, { blocked: realClaudeBlocked() });
+  if (codexBin) {
+    const c = config.runtimes.codex;
+    adapters.set(
+      'codex',
+      new CodexAdapter(
+        { enabled: true, authMode: 'login', toolchainPaths: [], ...(c ?? {}), bin: codexBin },
+        paths,
+      ),
+    );
+  }
   if (direct)
     adapters.set(
       'direct-model',

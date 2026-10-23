@@ -34,6 +34,28 @@ export const MODEL_CHOICES: Readonly<Record<string, readonly ModelOption[]>> = {
     { id: 'sonnet', label: 'Sonnet', effortLevels: ['low', 'medium', 'high'], tier: 'medium' },
     { id: 'opus', label: 'Opus', effortLevels: ['low', 'medium', 'high', 'xhigh'], tier: 'large' },
   ],
+  // The Codex CLI runtime (registered by a runner only when the `codex` binary is found). Ids are the model slugs of
+  // `codex debug models` (codex-cli 0.163.0); `ultra` effort (automatic task delegation) is left out.
+  codex: [
+    {
+      id: 'gpt-6-luna',
+      label: 'GPT-6 Luna',
+      effortLevels: ['low', 'medium', 'high', 'xhigh', 'max'],
+      tier: 'small',
+    },
+    {
+      id: 'gpt-6.1-sol',
+      label: 'GPT-6.1 Sol',
+      effortLevels: ['low', 'medium', 'high', 'xhigh', 'max'],
+      tier: 'medium',
+    },
+    {
+      id: 'gpt-6-astra',
+      label: 'GPT-6 Astra',
+      effortLevels: ['low', 'medium', 'high', 'xhigh', 'max'],
+      tier: 'large',
+    },
+  ],
   mock: [{ id: 'mock', label: 'Mock', effortLevels: [], tier: 'medium' }],
 };
 // The direct-model runtime has no entry here: its models come from what each workstation's runner reports (the providers
@@ -42,6 +64,7 @@ export const MODEL_CHOICES: Readonly<Record<string, readonly ModelOption[]>> = {
 /** Display names of the runtimes (the model menu groups by runtime). */
 export const RUNTIME_LABEL: Readonly<Record<string, string>> = {
   'claude-code': 'Claude Code',
+  codex: 'Codex',
   mock: 'Mock',
   [DIRECT_RUNTIME]: 'Direct API',
 };

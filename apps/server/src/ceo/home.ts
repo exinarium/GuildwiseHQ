@@ -33,7 +33,9 @@ export async function moveCeo(
     );
     if (!a || !ws) throw notFound('workstation not found: the CEO runs on your own workstation');
     if (a.workstation_id === ws.id) return;
-    const ack = await sandboxGate(ctx, tx, user.id, ws.id, a.runtime, req.acknowledgeUnsandboxed);
+    const ack = await sandboxGate(ctx, tx, user.id, ws.id, a.runtime, req.acknowledgeUnsandboxed, {
+      roleKey: 'ceo',
+    });
     await ctx.store.append(
       [
         {
