@@ -62,6 +62,7 @@ import { billingRoutes } from './routes/billing.ts';
 import { blogApiRoutes } from './routes/blog-api.ts';
 import { blogPlatformRoutes } from './routes/blog-platform.ts';
 import { blogPublicRoutes } from './routes/blog-public.ts';
+import { boardRoutes } from './routes/board.ts';
 import { capabilityRoutes } from './routes/capabilities.ts';
 import { cardAttachmentRoutes } from './routes/card-attachments.ts';
 import { cardRoutes } from './routes/cards.ts';
@@ -115,6 +116,7 @@ import { workstationRoutes } from './routes/workstations.ts';
 import { RunnerGateway } from './runner-gateway/gateway.ts';
 import { RunnerRegistry } from './runner-gateway/registry.ts';
 import { Scheduler } from './scheduler/scheduler.ts';
+import { BoardService } from './sessions/board.ts';
 import { DiscoveryService } from './sessions/discovery.ts';
 import { SessionTurns } from './sessions/turns.ts';
 import { SimulationHostImpl } from './simulation/host.ts';
@@ -408,6 +410,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   await app.register(backlogRoutes(ctx));
   await app.register(sessionRoutes(ctx));
   await app.register(discoveryRoutes(ctx));
+  await app.register(boardRoutes(ctx));
   await app.register(documentRoutes(ctx));
   await app.register(capabilityRoutes(ctx));
   await app.register(intakeBatchRoutes(ctx));
@@ -450,6 +453,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   ctx.services.chat = new ChatRelay(ctx);
   ctx.services.sessions = new SessionTurns(ctx);
   ctx.services.discovery = new DiscoveryService(ctx);
+  ctx.services.board = new BoardService(ctx);
   ctx.services.billing = createBillingRuntime(config);
   await app.register(websocket, {
     options: {
@@ -523,6 +527,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   const unhookTaste = registerTasteHook(ctx);
   const unhookBudgets = registerBudgetHook(ctx);
   const unhookDiscovery = ctx.services.discovery.registerHook();
+  const unhookBoard = ctx.services.board.registerHook();
   const unhookHr = registerHrHook(ctx);
   const unhookCeoWakes = registerCeoWakes(ctx);
   const unhookDefinitions = registerDefinitionHook(ctx);
@@ -547,6 +552,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
     unhookTaste();
     unhookBudgets();
     unhookDiscovery();
+    unhookBoard();
     unhookHr();
     unhookCeoWakes();
     unhookDefinitions();

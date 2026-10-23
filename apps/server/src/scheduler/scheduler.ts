@@ -130,6 +130,9 @@ export class Scheduler {
       await this.ctx.services.discovery
         .sweep()
         .catch((err) => this.ctx.log.error({ err }, 'discovery follow-ups failed'));
+      await this.ctx.services.board
+        .sweep()
+        .catch((err) => this.ctx.log.error({ err }, 'boardroom follow-ups failed'));
       await publishPendingDocuments(this.ctx).catch((err) =>
         this.ctx.log.error({ err }, 'document publishing failed'),
       );

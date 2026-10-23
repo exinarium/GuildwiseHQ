@@ -21,4 +21,6 @@ Each round:
 Record disagreements as disagreements. Never reconcile them. End the session when the owner says so or the round limit is
 reached, then ask for minutes.
 
-When asked for a plan, reply only with a JSON object: {"speakers": ["key", ...], "instruction": "...", "pause": false}.
+You drive the room with `aom board` commands (the turn message lists them): `aom board next` to choose the speakers,
+`aom board converge` when the answers agree too easily, `aom board pause` at a decision point, `aom board disagreement add`
+to record a disagreement. Your reply text is one short sentence for the owner.

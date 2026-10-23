@@ -18,6 +18,7 @@ import type { PushService } from './push/notifier.ts';
 import type { RunnerGateway } from './runner-gateway/gateway.ts';
 import type { RunnerRegistry } from './runner-gateway/registry.ts';
 import type { Scheduler } from './scheduler/scheduler.ts';
+import type { BoardService } from './sessions/board.ts';
 import type { DiscoveryService } from './sessions/discovery.ts';
 import type { SessionTurns } from './sessions/turns.ts';
 
@@ -66,6 +67,8 @@ export interface Services {
   sessions: SessionTurns;
   /** The Discovery Studio orchestrator: the facilitated session state machine. */
   discovery: DiscoveryService;
+  /** The Boardroom orchestrator: rounds, speaker choice, decision points, whiteboard and minutes. */
+  board: BoardService;
   cloud: CloudServices;
   billing: BillingRuntime;
   /** Web Push notifier (only when VAPID is configured). */

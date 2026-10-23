@@ -11,6 +11,7 @@ import {
   type IpcReportResponse,
   type IpcRpcRequest,
   type IpcRpcResponse,
+  isBoardRpc,
   isSessionRpc,
   JIRA_SKILL_PATH,
   type ReadableFolder,
@@ -312,7 +313,7 @@ export class ChatManager {
         // A turn of a discovery or boardroom session reads and talks: `aom ledger search` and the `aom session ...` verbs
         // are all that reach the server from it (which verbs a turn may use, the server decides from what the turn is for).
         if (chat.msg.session)
-          return req.method === 'ledger.search' || isSessionRpc(req.method)
+          return req.method === 'ledger.search' || isSessionRpc(req.method) || isBoardRpc(req.method)
             ? this.deps.rpc(chatId, req.method, req.params)
             : { ok: false, error: `${req.method} is not available in a session turn` };
         // The owner's chat with the CEO: `aom ceo ...` (the server checks the agent and the owner again).

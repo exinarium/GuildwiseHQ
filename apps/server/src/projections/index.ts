@@ -2,6 +2,7 @@ import type { Projector, ProjectorMap } from '../eventstore/types.ts';
 import { agentProjectors } from './agents.ts';
 import { backlogProjectors } from './backlog.ts';
 import { blogProjectors } from './blog.ts';
+import { boardProjectors } from './board.ts';
 import { capabilityProjectors } from './capabilities.ts';
 import { cardProjectors, releaseHeldDesigns } from './cards.ts';
 import { catalogueProjectors } from './catalogue.ts';
@@ -103,6 +104,7 @@ const domains: Array<Record<string, Projector>> = [
   codeV6Projectors,
   sessionProjectors,
   discoveryProjectors,
+  boardProjectors,
   documentProjectors,
   capabilityProjectors,
 ];
@@ -245,6 +247,11 @@ export const PROJECTION_TABLES = [
   'discovery_questions',
   'discovery_notes',
   'discovery_proposals',
+  'board_notes',
+  'board_rounds',
+  'board_disagreements',
+  'board_decisions',
+  'board_rooms',
   'documents',
   'document_versions',
   'capability_index',

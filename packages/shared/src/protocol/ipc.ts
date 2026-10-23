@@ -334,6 +334,15 @@ export const RpcMethodSchema = z.enum([
   'session.phase',
   'session.draft',
   'session.validate',
+  /** Boardroom turns: `aom board show|add|next|pause|converge|disagreement|cast|minutes`, answered by the server for a session turn. */
+  'board.show',
+  'board.add',
+  'board.next',
+  'board.pause',
+  'board.converge',
+  'board.disagreement',
+  'board.cast',
+  'board.minutes',
 ]);
 export type RpcMethod = z.infer<typeof RpcMethodSchema>;
 

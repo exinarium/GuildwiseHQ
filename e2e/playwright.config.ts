@@ -30,6 +30,8 @@ export default defineConfig({
     { name: 'intake', testMatch: 'intake.spec.ts', dependencies: ['research'] },
     // Discovery Studio (phase B): its own user, runner and project; needs only the shared stack.
     { name: 'discovery', testMatch: 'discovery.spec.ts', dependencies: ['auth'] },
+    // Boardroom (phase C): its own user and runner; needs only the shared stack.
+    { name: 'boardroom', testMatch: 'boardroom.spec.ts', dependencies: ['auth'] },
     { name: 'hr', testMatch: 'hr.spec.ts', dependencies: ['intake'] },
     { name: 'workability', testMatch: 'workability.spec.ts', dependencies: ['intake'] },
     { name: 'sandbox', testMatch: 'sandbox.spec.ts', dependencies: ['intake'] },

@@ -2485,6 +2485,79 @@ const VERBS: Record<string, Verb> = {
         throw new UsageError(usage);
     }
   },
+  /**
+   * `aom board ...`: the structured side of a boardroom session (docs/ARCHITECTURE.md section 38.2). Speakers put sticky notes
+   * on the whiteboard and record disagreements; the Chair chooses the next speakers, flags early agreement and pauses for a
+   * decision; the cast turn suggests voices; the minutes turn saves the synthesis. The server decides which verbs a turn may use.
+   */
+  board: async (ctx, p) => {
+    const usage =
+      'usage: aom board add --column ideas|risks|questions|decisions|parked --text "<t>" | next --speaker <handle>... --reason "<r>" [--instruction "<i>"] | pause --question "<q>" [--option "<a>"]... | converge --note "<n>" | disagreement add --topic "<t>" --position "<Name>|<view>"... | cast (--persona <key> | --name "<n>" --brief "<one line>") [--seat "<s>"] [--why "<w>"] | minutes (--content "<md>" | --content-file <path>) | show';
+    const sub = p.positionals[0];
+    const print = (r: unknown): number => {
+      const x = r as { message?: string; text?: string } | null;
+      ctx.io.out(`${(x?.text ?? x?.message ?? 'Done.').replace(/\n*$/, '')}\n`);
+      return 0;
+    };
+    const opt = (key: string): string | undefined => {
+      const v = one(p, key);
+      return v === undefined || !v.trim() ? undefined : v.trim();
+    };
+    switch (sub) {
+      case 'show':
+        return print(await rpc(ctx, 'board.show'));
+      case 'add': {
+        const text = textFlag(ctx, p, 'text', true) as string;
+        if (!opt('column')) throw new UsageError(usage);
+        return print(await rpc(ctx, 'board.add', { column: opt('column'), text: text.trim() }));
+      }
+      case 'next': {
+        const speakers = many(p, 'speaker').filter((x) => x.trim());
+        if (!speakers.length || !opt('reason')) throw new UsageError(usage);
+        return print(
+          await rpc(ctx, 'board.next', {
+            speakers,
+            reason: opt('reason'),
+            ...(opt('instruction') ? { instruction: opt('instruction') } : {}),
+          }),
+        );
+      }
+      case 'pause': {
+        if (!opt('question')) throw new UsageError(usage);
+        return print(
+          await rpc(ctx, 'board.pause', { question: opt('question'), options: many(p, 'option') }),
+        );
+      }
+      case 'converge': {
+        if (!opt('note')) throw new UsageError(usage);
+        return print(await rpc(ctx, 'board.converge', { note: opt('note') }));
+      }
+      case 'disagreement': {
+        if (p.positionals[1] !== 'add') throw new UsageError(usage);
+        const positions = many(p, 'position');
+        if (!opt('topic') || positions.length < 2) throw new UsageError(usage);
+        return print(await rpc(ctx, 'board.disagreement', { topic: opt('topic'), positions }));
+      }
+      case 'cast': {
+        if (!opt('persona') && !(opt('name') && opt('brief'))) throw new UsageError(usage);
+        return print(
+          await rpc(ctx, 'board.cast', {
+            ...(opt('persona') ? { persona: opt('persona') } : {}),
+            ...(opt('name') ? { name: opt('name') } : {}),
+            ...(opt('brief') ? { brief: opt('brief') } : {}),
+            ...(opt('seat') ? { seat: opt('seat') } : {}),
+            why: opt('why') ?? '',
+          }),
+        );
+      }
+      case 'minutes': {
+        const content = textFlag(ctx, p, 'content', true) as string;
+        return print(await rpc(ctx, 'board.minutes', { content }));
+      }
+      default:
+        throw new UsageError(usage);
+    }
+  },
   outcome: async (ctx, p) => {
     const id = p.positionals[0];
     if (!id) throw new UsageError('usage: aom outcome <outcomeId> --note "<text>" [--data-file <json>]');
@@ -2536,6 +2609,7 @@ export const USAGE = `usage: aom <verb> [options]
   card attachments [<REF>]                   copy the card's attached files next to this shift (read-only) and print the paths; builders get them at the start of the shift
   org catalogue | org role draft --json '<json>' | --file <json|-> | org workflow draft (same) | org workflow variant --file <json|-> (a project's own version) | org validate <key> | org submit <key> | org department --name "<n>"   BA design chat: draft roles and workflows (the owner approves on the desk)
   skill show <key | kind:key> [--file <path>]   print a capability of the registry (skill, playbook or persona; a playbook's steps and assets with --file); skill list [--kind k] lists them
+  board add --column <c> --text "<t>" | next --speaker <h>... --reason "<r>" | pause --question "<q>" | converge --note "<n>" | disagreement add --topic "<t>" --position "<Name>|<view>"... | cast --persona <key> | minutes --content "<md>" | show   boardroom turns: whiteboard notes and disagreements; the Chair chooses speakers, flags early agreement and pauses for the owner; the minutes
   session ask --question "<q>" [--option "<a>"]... | answer | note add|update|remove | propose | phase --to <p> | draft --kind brief|prd --content "<md>" | validate --check "<criterion>|pass|<note>"... | show   discovery session turns: the facilitator's question cards, panel notes, proposals, phase and drafts; the CEO proposes an answer (the owner decides)
   graph query "<words>" [--budget <tokens>] | graph path <a> <b> | graph explain <node> | graph impact <file or symbol> [--depth 2]   the map of this project's code, kept in the project vault: where a thing is, what touches it, the blast radius of a change; [I] and [A] links are leads, read the file
   transcript --url <url>                     fetch the transcript of a video or podcast (the runner saves it in the vault; prints a header and the text)

@@ -74,6 +74,11 @@ const NAV_STEPS: Record<string, { title: string; body: string; more?: string }> 
     body: 'Turn an idea into a brief or a PRD. An analyst interviews you one question at a time, keeps ideas, assumptions and decisions in a side panel, and drafts the document with you; your CEO can join. Approve the PRD and hand it to the BA to get cards.',
     more: 'discovery#start',
   },
+  boardroom: {
+    title: 'Boardroom',
+    body: 'Put a question to a group of personas and agents. Everyone answers on their own first and the answers are revealed together; then a Chair picks who speaks next, records disagreements and stops when it needs your decision. Interject or @mention a seat at any time, keep a whiteboard of ideas and risks, and pull the minutes into a PRD.',
+    more: 'boardroom#start',
+  },
   projects: {
     title: 'Projects and phases',
     body: 'Each project has its own board, repositories and settings, and the Projects page puts them in priority order: drag a project up to have your agents serve it first (the Owner and Admins can; everyone sees the order). Inside a project, phases group cards into a milestone: when the last card of a phase is done, you approve the follow-ups (such as a deploy and a regression run) and they run in order.',
@@ -170,6 +175,7 @@ const SIDEBAR_ORDER = [
   'desk',
   'intake',
   'discovery',
+  'boardroom',
   'schedules',
   'projects',
   'agents',

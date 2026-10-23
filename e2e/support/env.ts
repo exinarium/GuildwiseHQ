@@ -75,6 +75,12 @@ export const DISCOVERER = {
   name: 'E2E Discoverer',
   password: 'discoverer-password-12345',
 };
+/** Boardroom spec: own user, own runner (mock). */
+export const BOARDER = {
+  email: 'boarder@e2e.test',
+  name: 'E2E Boarder',
+  password: 'boarder-password-12345',
+};
 /** M9 HR board spec: the owner of the HR project and an additional manager of it. */
 export const HR = { email: 'hr@e2e.test', name: 'E2E HR', password: 'hr-password-12345' };
 export const HRGUEST = {

@@ -1407,6 +1407,62 @@ export const PAGE_HELP: Record<string, PageHelp> = {
     ],
     article: 'discovery#conversation',
   },
+  '/boardroom': {
+    title: 'Boardroom',
+    intro:
+      'A boardroom puts one question to a cast of personas and agents, run by a Chair. Each one keeps its own conversation, whiteboard, cost and minutes.',
+    controls: [
+      {
+        name: 'New boardroom',
+        text: 'Start a session: the topic and brief, the format, the cast (library personas, your agents, personas cast from a one-line brief, or a saved room), a round cap, a budget and the models.',
+      },
+      {
+        name: 'A boardroom row',
+        text: 'Shows the round, the format, the number of seats, what it has cost and when it last moved. A badge says when the Chair needs your decision.',
+      },
+    ],
+    article: 'boardroom#start',
+  },
+  '/boardroom/:id': {
+    title: 'Boardroom session',
+    intro:
+      'The group conversation, the whiteboard, the cost meter and the minutes. Everyone answers on their own first; the Chair runs the rounds after that.',
+    controls: [
+      {
+        name: 'Sealed answers',
+        text: 'In round 1 nobody sees the others. The answers are hidden until the last one is in, then revealed together.',
+      },
+      {
+        name: 'Chair picks',
+        text: 'Who speaks in the next round and why. The Chair never picks the same speaker twice in a row, and always includes a seat you @mentioned.',
+      },
+      {
+        name: 'Decision card',
+        text: 'The Chair stops when only you can decide. Pick an option or write your own, and the session goes on.',
+      },
+      {
+        name: 'Message box',
+        text: 'Interject at any time. Type @ to call on a seat by name, or @all for everyone; they speak in the next round.',
+      },
+      {
+        name: 'Whiteboard',
+        text: 'Ideas, risks, questions, decisions and parked items. Drag a note to another column, vote +1, merge notes, edit or delete.',
+      },
+      {
+        name: 'Cost meter',
+        text: 'What the session has cost and what the next round will cost about. With a budget set, no new turn starts once it is used up.',
+      },
+      {
+        name: 'End session',
+        text: 'Stops the debate and has the Chair write the minutes. The session also ends at the round cap.',
+      },
+      {
+        name: 'Minutes and Pull into PRD',
+        text: 'The minutes are saved as a document. Pull into PRD starts a Discovery session in the capture phase, seeded from them.',
+      },
+    ],
+    article: 'boardroom#session',
+  },
   '/documents': {
     title: 'Documents',
     intro: 'Briefs, PRDs, minutes and session logs of your organization.',

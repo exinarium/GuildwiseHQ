@@ -2605,3 +2605,51 @@ Migration 2350; projection tables `discovery_questions`, `discovery_notes`, `dis
   `e2e/tests/discovery.spec.ts` (project `discovery`).
 - **For phase C** reuse: `queue(userId, threadId, req, {meta})`, `assertSessionMayQueue`, `sessionCost`, the `session.*` rpc dispatch (`DiscoveryService.rpc`, add `board.*` there),
   `discovery.updated`, `buildTimeline`/cards on the web, `sessionDocs`, and the document hand-off (`Pull into PRD` can create a discovery session with `phase: 'capture'` and `prdDocId`).
+
+### 38.2 Boardroom (phase C)
+
+Migration 2360; projection tables `board_notes`, `board_rounds`, `board_disagreements`, `board_decisions`, `board_rooms`. Runner 0.1.44 announces `board-verbs:1`.
+
+- **State machine.** A boardroom is a `boardroom` thread. Its state is `threads.session_config` (`parseBoardConfig`, shared `boardroom/index.ts`): `topic`, `brief`, `format` (open|pre_mortem|red_blue|six_hats|option_scoring), `roundCap`
+  (default 4, max 12), `budgetUsd`/`budgetStopped`/`blocked`, `models` `{persona, chair, synthesis}` and `castModels` (`kind:refId` to a `ModelChoice`), `stage` (setup|round|chair|decision|minutes|ended), `round`, `plan`
+  `{round, kind independent|discussion|dissent, speakers[], reason, instruction, source independent|chair|fallback}`, `revealedRound`, `paused`, `mentions`, `dissentNext`, `briefMessageId`, `endReason`, `chairFailures`,
+  `minutesDocId`/`minutesTurnId`, `prdSessionId`, `suggestions`/`suggestState`. Everything changes by event: `SessionThreadUpdated` (config), `BoardRoundPlanned`, `BoardNoteAdded|Updated|Merged|Removed|Voted`,
+  `BoardDisagreementRecorded`, `BoardDecisionRaised|Resolved`, and on the organization stream `BoardRoomSaved|Deleted`. A rebuild gives identical rows (test).
+- **Orchestrator** (`sessions/board.ts BoardService`, `ctx.services.board`). `advance(threadId)` is the one step function, serialized per thread: not while `setup`, `ended`, `decision` or paused, and not while a board turn
+  is queued or running; then by stage. `round`: queue the planned speakers that have no turn yet (round 1, `independent`: all at once with `context {mode selected, messageIds [briefMessageId]}`, so a seat sees only the topic
+  and the owner's brief; later rounds one speaker at a time with `context all`), and when every speaker has a turn that ended (a failed one is skipped with a system message) the round is complete: round 1 is revealed
+  (`revealedRound`), then the cap ends the session into the minutes, otherwise `stage chair`. `chair`: queue a Chair turn (`meta.purpose board_chair`). `minutes`: queue the synthesis turn. Triggers: turn end
+  (`SessionTurns.ended` calls `board.onTurnEnded`), the owner's message, resume, a raised budget, a decision, `POST .../continue`, and the scheduler's `board.sweep()` (every session in `round|chair|minutes` that is not paused), so a
+  restart or a missed follow-up costs nothing. A refusal the owner can fix (`session_budget_exceeded`, `project_paused`, `project_budget_paused`, `no_workstation`) sets `blocked` (the system message is posted once per code) and the sweep retries.
+- **Turn purposes** (`session_turns.meta.purpose`): `board_speaker {round, kind, maxChars}`, `board_chair`, `board_cast`, `board_minutes {onDemand?}`. The dispatcher requires `board-verbs:1` for these (`runner_too_old` otherwise;
+  discovery turns still need `session-verbs:1` only). A reply is truncated at `maxChars` (`capTurnText`, `data.truncated`); the message `data` carries `purpose`, and the Chair's, cast and minutes replies are left out of every
+  speaker's transcript. Prompts are pure and shared (`boardroom/prompt.ts`: `buildSpeakerTurn`, `buildChairTurn`, `buildCastTurn`, `buildMinutesTurn`, `roundAssignment`, `assembleMinutes`, `seedPrdFromMinutes`); the stance of the
+  seat (participant stance, else the persona's) is repeated in every speaker turn, the protocol travels in the message so the persona text (registry or vault) stays the instructions. A turn's header `<!--board:{json}-->` drives the mock.
+- **Speaker choice** (`chooseSpeakers`, pure). The owner's @mentions (`parseMentions`, handles from `handlesOf`: display-name slug, the seat if it is not "Panelist"; `@all`) come first and are exempt from the repeat rule; nobody is listed
+  twice; unknown handles are dropped; the last speaker (the latest finished speaker turn) cannot open the round; at most three besides the mentioned. With no usable pick the least heard seats are chosen. `aom board converge`
+  sets `dissentNext`: the next plan has `kind dissent` (steel-man/dissent prompts; red/blue swap sides). `aom board pause` raises a `BoardDecisionRaised` and `stage decision`; `POST .../decisions/:id/resolve` posts the owner's
+  decision as a message, adds a note to the decisions column and goes back to `chair`. If the Chair ends a turn without a pick it is asked once more, then the server plans the round (`source fallback`).
+- **Formats**: per seat and round, `roundAssignment(format, {round, kind, index})`: pre-mortem (failure story, then mitigations), red/blue (alternating sides, defend/attack, swapped on dissent), six hats (hat rotates with seat and round),
+  option scoring (scores and votes as decision notes).
+- **Verbs** (`aom board show|add|next|pause|converge|disagreement add|cast|minutes`, rpc `board.*`, `sessions/board-verbs.ts`; `DiscoveryService.rpc` hands `board.*` to `BoardService.rpc`). Allowed by purpose: speaker
+  `show add disagreement`, Chair `show add next pause converge disagreement`, cast `cast`, minutes `show minutes`; only while the turn runs; a speaker adds at most two notes per turn; `show` is refused to a seat in the sealed round.
+- **Whiteboard.** Columns ideas|risks|questions|decisions|parked. Agents `add` only; the owner adds, edits, moves, deletes, votes (`+1`, a second call takes it back) and merges (`noteIds` folded into the first: votes unioned,
+  texts kept in `mergedFrom`). Notes written by seats in the sealed round are counted in `hiddenNotes` and not returned until round 1 is revealed.
+- **Minutes.** The synthesis turn runs on `models.synthesis`; `aom board minutes --content` (or, without the verb, a reply that has `##` headings) is wrapped by `assembleMinutes` with the exact sections from the data (cast,
+  recorded disagreements, decisions, whiteboard snapshot, cost) and saved as a `minutes` document linked to the session (`sourceThreadIds`), creating it or adding a version. The end of the session waits for it
+  (`minutesTurnId`); if it cannot be queued (budget) the minutes are still written without the synthesis. `POST .../minutes` does it on demand and the session goes on.
+- **Pull into PRD** (`BoardService.pullIntoPrd`, Owner/Admin, needs minutes, once): a `prd` document seeded by `seedPrdFromMinutes` (the PRD template, then decisions, ideas, risks, questions and parked items), then
+  `DiscoveryService.create(who, {playbook prd, ceoMode joint if a CEO is available}, seed)`: `phase capture`, `prdDocId` and the board's notes as panel notes; `prdSessionId` links back.
+- **Cost.** Turns are session turns: `shift_costs` rows, `sessionCost`, `assertSessionMayQueue`. `BoardStateDto.cost` is the live meter, `estimate` the next round (`estimateNextRound`: seats of the round times the average speaker
+  turn so far, default $0.01, plus a Chair turn after round 1). The budget is a stop (409 `session_budget_exceeded` becomes `budgetStopped`; `PATCH /api/board/:id {budgetUsd}` lifts it).
+- **Models (the phase D hook).** `BoardService.modelFor(role)` and `speakerModel(participant)` are the only places a turn's `{runtime, model}` is chosen: seat choice, else the room's role choice, else `defaultModelFor`
+  (`board-state.ts`: haiku/sonnet/opus on Claude Code, or the first runtime the workstation offers). `SessionTurns.queue` takes it as `req.model` and the dispatcher builds the `AgentRuntimeSpec` from it (`buildStart`).
+- **Rooms and Suggest a cast.** `GET|POST /api/board-rooms`, `DELETE /api/board-rooms/:id` (Owner/Admin, organization-wide). `POST /api/board/suggest` creates a session in `setup` with only the Chair and queues a `board_cast`
+  turn that calls `aom board cast`; `POST /api/board/:id/start` seats the chosen cast and begins round 1.
+- **REST** (`routes/board.ts`; every response is the fresh `state`): `POST /api/board`, `POST /api/board/suggest`, `GET|PATCH /api/board/:id`, `POST .../start|say|pause|resume|continue|end|minutes|pull-into-prd`,
+  `POST .../decisions/:decisionId/resolve`, `POST .../notes`, `POST .../notes/merge`, `PATCH|DELETE .../notes/:noteId`, `POST .../notes/:noteId/vote`. The browser gets `discovery.updated {threadId}` (and `session.turn`,
+  `chat.delta|activity|done` with `turnId` and `participantId`) as in section 38.1; the state query key is `['discovery', id, 'board']`. A boardroom is private to its creator and user participants (`loadSession`).
+- **Mock runtime.** `mock-agent boardMain`: personas answer in their own voice with a note and sometimes a disagreement, the Chair honours mentions, avoids the last speaker, and reads `[[decide]]` / `[[converge]]` in the
+  topic to pause or flag early agreement, the cast turn suggests voices, the minutes turn writes the synthesis. Tests: `apps/server/test/boardroom.test.ts`, `packages/shared/test/boardroom.test.ts`,
+  `apps/runner/test/aom-board.test.ts`, `apps/web/src/test/boardroom.test.tsx`, `e2e/tests/boardroom.spec.ts` (project `boardroom`).
+- **For phase E**: persona sources are the registry (`resolvePersona`, `effectiveRegistry`); an imported pack's personas appear there and need nothing else in the Boardroom (the dialog lists `GET /api/capabilities?kind=persona`).

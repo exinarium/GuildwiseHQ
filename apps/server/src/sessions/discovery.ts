@@ -17,6 +17,7 @@ import {
   type FacilitatorTrigger,
   getBuiltinRole,
   HANDOFF_NOTE_MAX_CHARS,
+  isBoardRpc,
   isSessionRpc,
   PANEL_SECTIONS,
   type PanelSection,
@@ -69,6 +70,12 @@ const BLOCKING_CODES = new Set([
   'project_budget_paused',
   'no_workstation',
 ]);
+
+/** A discovery session that starts from a PRD draft and panel notes it was handed (the Boardroom's "Pull into PRD"). */
+export interface DiscoverySeed {
+  prdDocId: string;
+  notes: Array<{ section: PanelSection; text: string }>;
+}
 
 const assertDiscovery = (t: Row): void => {
   if (t.kind !== 'discovery') throw notFound('session not found');
@@ -176,12 +183,13 @@ export class DiscoveryService {
     if (method === 'ledger.search')
       return [true, await ledgerSearchRpc(this.ctx, { org_id: turn.org_id } as Row, params)];
     if (isSessionRpc(method)) return sessionVerb(this, this.ctx, turn, method, params);
+    if (isBoardRpc(method)) return this.ctx.services.board.rpc(turn, method, params);
     return [false, undefined, `${method} is not available in a session turn`];
   }
 
   // ----------------------------------------------------------------------------------------------- creating and reading
 
-  async create(who: Who, req: CreateDiscoveryRequest): Promise<DiscoveryStateDto> {
+  async create(who: Who, req: CreateDiscoveryRequest, seed?: DiscoverySeed): Promise<DiscoveryStateDto> {
     const { ctx } = this;
     let ceo: Row | undefined;
     if (req.ceoMode !== 'owner_only') {
@@ -203,7 +211,8 @@ export class DiscoveryService {
     const config: Record<string, unknown> = {
       discovery: true,
       stance: req.stance,
-      phase: 'frame',
+      phase: seed ? 'capture' : 'frame',
+      ...(seed ? { prdDocId: seed.prdDocId } : {}),
       ceoMode: req.ceoMode,
       playbook: req.playbook,
       idea: req.idea,
@@ -228,6 +237,14 @@ export class DiscoveryService {
       ...(req.workstationId ? { workstationId: req.workstationId } : {}),
       config,
     });
+    if (seed?.notes.length) {
+      const t = (await one(ctx.pool, 'SELECT * FROM threads WHERE id=$1', [session.threadId])) as Row;
+      await ctx.store.append(
+        seed.notes.map((n) =>
+          this.noteEvent(t, n.section, n.text, { kind: 'system', id: null, name: 'Boardroom' }),
+        ),
+      );
+    }
     await this.requestFacilitator(session.threadId, { kind: 'start' });
     return this.state(who.userId, session.threadId);
   }

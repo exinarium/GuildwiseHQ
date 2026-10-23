@@ -2,6 +2,7 @@ import { existsSync, statSync, writeFileSync } from 'node:fs';
 import { homedir, hostname, platform } from 'node:os';
 import { basename, join } from 'node:path';
 import {
+  BOARD_VERBS_CAPABILITY,
   CAPABILITY_REGISTRY_FEATURE,
   CEO_FULL_POWER_CAPABILITY,
   CHAT_ACTIVITY_FEATURE,
@@ -1124,6 +1125,8 @@ export class Runner {
         SESSION_TURNS_CAPABILITY,
         // A session turn may call the `aom session ...` verbs (the facilitator's questions, notes, proposals and drafts).
         SESSION_VERBS_CAPABILITY,
+        // A boardroom turn may call the `aom board ...` verbs (whiteboard notes, the Chair's speaker choice, the minutes).
+        BOARD_VERBS_CAPABILITY,
         // The local opt-in (`aom-runner ceo full-power on`), read fresh: the server shows "Full power is off" without it.
         ...(this.freshConfig().ceo.fullPower ? [CEO_FULL_POWER_CAPABILITY] : []),
       ],

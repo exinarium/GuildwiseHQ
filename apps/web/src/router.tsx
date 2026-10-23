@@ -13,6 +13,8 @@ import { Automations } from './pages/Automations.tsx';
 import { Backlog } from './pages/Backlog.tsx';
 import { BILLING_GATE_PATH } from './pages/BillingGate.tsx';
 import { Board } from './pages/Board.tsx';
+import { BoardroomList } from './pages/Boardroom.tsx';
+import { BoardroomSession } from './pages/BoardroomSession.tsx';
 import { CardDetail } from './pages/CardDetail.tsx';
 import { CardNew } from './pages/CardNew.tsx';
 import { Ceo } from './pages/Ceo.tsx';
@@ -151,6 +153,8 @@ export const routes = [
       { path: '/ceo-chat/:threadId', element: <CeoChat /> },
       { path: '/discovery', element: <DiscoveryList /> },
       { path: '/discovery/:id', element: <DiscoverySession /> },
+      { path: '/boardroom', element: <BoardroomList /> },
+      { path: '/boardroom/:id', element: <BoardroomSession /> },
       { path: '/documents', element: <DocumentsList /> },
       { path: '/documents/:id', element: <DocumentView /> },
       { path: '/intake', element: <IntakeNew /> },

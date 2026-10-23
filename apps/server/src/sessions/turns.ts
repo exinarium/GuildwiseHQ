@@ -1,10 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import {
   type AgentRuntimeSpec,
+  BOARD_VERBS_CAPABILITY,
   builtinCapabilities,
   type ChatContext,
   type ChatSegment,
   capChatSegments,
+  capTurnText,
   chatSegmentsText,
   composeTurnMessage,
   getBuiltinRole,
@@ -344,6 +346,9 @@ export class SessionTurns {
     void this.ctx.services.discovery
       ?.onTurnEnded(threadId, turnId, status)
       .catch((err) => this.ctx.log.error({ err, threadId, turnId }, 'discovery follow-up failed'));
+    void this.ctx.services.board
+      ?.onTurnEnded(threadId, turnId, status)
+      .catch((err) => this.ctx.log.error({ err, threadId, turnId }, 'boardroom follow-up failed'));
   }
 
   /** Starts queued turns whose workstation is online, oldest first, up to the per-workstation limit; ends stale ones. */
@@ -418,16 +423,19 @@ export class SessionTurns {
         );
         return false;
       }
-      if ((turn.meta as { purpose?: string } | null)?.purpose) {
+      const purpose = (turn.meta as { purpose?: string } | null)?.purpose;
+      if (purpose) {
+        // A boardroom turn needs the board verbs, a discovery turn the session verbs (an older runner has the latter only).
+        const boardTurn = purpose.startsWith('board_');
         const verbs = await one(
           ctx.pool,
           'SELECT $2 = ANY(capabilities) AS ok FROM workstation_capabilities WHERE workstation_id=$1',
-          [wsId, SESSION_VERBS_CAPABILITY],
+          [wsId, boardTurn ? BOARD_VERBS_CAPABILITY : SESSION_VERBS_CAPABILITY],
         );
         if (!verbs?.ok) {
           await this.failTurn(
             turn,
-            'runner_too_old: update the runner on this workstation to run a discovery session',
+            `runner_too_old: update the runner on this workstation to run a ${boardTurn ? 'boardroom' : 'discovery'} session`,
           );
           return false;
         }
@@ -496,7 +504,8 @@ export class SessionTurns {
          (SELECT tp.display_name FROM thread_participants tp WHERE m.author_persona_key IS NOT NULL AND tp.thread_id = m.thread_id
             AND tp.kind='persona' AND tp.ref_id = m.author_persona_key ORDER BY tp.added_at LIMIT 1) AS persona_name
        FROM thread_messages m LEFT JOIN users u ON u.id = m.author_user_id LEFT JOIN agents a ON a.id = m.author_agent_id
-      WHERE m.thread_id = $1 AND m.kind IN ('chat','comment')`;
+      WHERE m.thread_id = $1 AND m.kind IN ('chat','comment')
+        AND COALESCE(m.data->>'purpose','') NOT IN ('board_chair','board_cast','board_minutes')`;
     let list: Row[];
     if (ctxSpec.mode === 'selected') {
       list = await rows(
@@ -676,7 +685,12 @@ export class SessionTurns {
     const segments: ChatSegment[] | undefined = msg.segments?.length
       ? capChatSegments(msg.segments)
       : undefined;
-    const body = (msg.segments && chatSegmentsText(msg.segments)) || msg.messageText;
+    const rawBody = (msg.segments && chatSegmentsText(msg.segments)) || msg.messageText;
+    // A boardroom speaker is told to be brief and the server enforces it.
+    const meta = (turn.meta ?? {}) as { purpose?: string; maxChars?: number };
+    const capped =
+      typeof meta.maxChars === 'number' ? capTurnText(rawBody, meta.maxChars) : { text: rawBody, cut: false };
+    const body = capped.text;
     const model = turn.model as ModelChoice;
     await this.ctx.store.append(
       [
@@ -700,7 +714,9 @@ export class SessionTurns {
                 ...(turn.reply_to_message_id ? { replyToMessageId: turn.reply_to_message_id } : {}),
                 usage: msg.usage,
                 model,
-                ...(segments ? { segments } : {}),
+                ...(meta.purpose ? { purpose: meta.purpose } : {}),
+                ...(capped.cut ? { truncated: true } : {}),
+                ...(segments && !capped.cut ? { segments } : {}),
               },
             },
           },

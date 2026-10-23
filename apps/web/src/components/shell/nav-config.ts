@@ -116,6 +116,14 @@ export function buildNav(opts: {
       icon: Compass,
       testId: 'nav-discovery',
     });
+  if (canManage)
+    work.push({
+      id: 'boardroom',
+      label: 'Boardroom',
+      to: '/boardroom',
+      icon: Users,
+      testId: 'nav-boardroom',
+    });
   work.push(
     { id: 'schedules', label: 'Automations', to: '/automations', icon: Timer },
     { id: 'projects', label: 'Projects', to: '/projects', icon: FolderKanban },

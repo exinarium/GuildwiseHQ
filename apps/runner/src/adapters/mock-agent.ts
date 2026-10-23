@@ -1825,6 +1825,12 @@ async function discoveryMain(): Promise<number> {
     return finish();
   }
 
+  if (header.trigger === 'start' && header.phase === 'capture' && header.hasPrd) {
+    say(
+      'I read the boardroom minutes and seeded the PRD draft from them. Review it in the panel, and tell me what to tighten.',
+    );
+    return finish();
+  }
   if (header.trigger === 'start') {
     say('Hello! Let us turn this idea into something buildable. I will ask one question at a time.');
     const idea = /Starting idea: (.+)/.exec(message)?.[1];
@@ -1888,7 +1894,252 @@ async function discoveryMain(): Promise<number> {
   return finish();
 }
 
+/**
+ * A believable boardroom without a model: speakers answer in the voice of their persona (a few sentences, a sticky note,
+ * sometimes a recorded disagreement), the Chair chooses the next speakers (mentions first, never the last speaker, a dissent
+ * round on request, a pause when the topic asks for a decision), the cast turn suggests voices and the minutes turn writes the
+ * synthesis. The turn's message carries a machine-readable header (`<!--board:{...}-->`). Everything goes through the real
+ * `aom board ...` verbs, so the whole path (rpc, server rules, projections) is exercised.
+ */
+const BOARD_VOICES: Record<
+  string,
+  { first: string; reply: string; dissent: string; column: string; note: string; risk?: boolean }
+> = {
+  'devils-advocate': {
+    first:
+      'I assume this fails on the first real customer. The plan rests on people changing a habit, and nothing here shows they will. The cheapest test: ask ten of them to pay before we build anything.',
+    reply:
+      'I hear the enthusiasm, but nobody has said what happens when the first month goes badly. A reversible first step would answer that; a big launch would not.',
+    dissent:
+      'Steel-manning the opposite: if adoption is easy, the risk is moving too slowly. A small, fast bet may beat all this caution.',
+    column: 'risks',
+    note: 'Adoption is assumed, not shown: test with ten paying users first',
+    risk: true,
+  },
+  'user-advocate': {
+    first:
+      'Start from the person using it on a bad day. If it takes more than two clicks or needs a manual, it will not be used. I want one clear promise and a first run that works without help.',
+    reply:
+      'I agree that cost matters, but a cheap thing people cannot figure out is still wasted. Let us define what the first five minutes look like.',
+    dissent:
+      'The opposite view has a point: users often say they want simple and then pick the option with more control. We may be over-simplifying.',
+    column: 'questions',
+    note: 'What does a first-time user see in the first five minutes?',
+  },
+  'creative-strategist': {
+    first:
+      'What if we turned this around: give the first version away to the people who would talk about it, and charge the businesses that depend on them. A bold pilot with one partner could teach us more than a plan.',
+    reply:
+      'Building on that, a pilot with one friendly customer gives us the proof the cautious voices want, and a story the rest of the market will repeat.',
+    dissent:
+      'To argue the other side honestly: a bold move needs trust we have not earned yet. A quiet, boring launch may be the real strategy.',
+    column: 'ideas',
+    note: 'Pilot with one friendly partner and publish what we learn',
+  },
+  'cost-hawk': {
+    first:
+      'Before anything else, what does it cost to run and what does one customer bring in? I want a number on the table. If the unit economics are unclear, we pay to learn that late.',
+    reply:
+      'The pilot idea is attractive, but a pilot is still headcount. Cap it at four weeks and one person, and decide on a figure up front.',
+    dissent:
+      'The opposing case: spending a little more now to get quality right can be cheaper than fixing a bad reputation later.',
+    column: 'risks',
+    note: 'No unit-economics figure yet: set a cost cap before building',
+    risk: true,
+  },
+  security: {
+    first:
+      'I want to know what data this touches and who can see it. A single leak ends the product, so I would settle access and retention before the first customer, not after.',
+    reply:
+      'Fast is fine, but not at the cost of keeping customer data we do not need. Keep the pilot on synthetic or minimal data.',
+    dissent:
+      'The other side: too much control makes the product unusable and people route around it. Security that is ignored protects nothing.',
+    column: 'risks',
+    note: 'Decide what customer data is kept and for how long',
+    risk: true,
+  },
+  ops: {
+    first:
+      'Who gets paged when this breaks at night? I would not ship without a runbook, a rollback and one person on call. Small and boring beats clever when you run it.',
+    reply:
+      'A pilot is fine if we can switch it off in a minute. Let us agree on the rollback before we agree on the launch.',
+    dissent:
+      'The opposing view: heavy operations process can kill a small team. Maybe we run it by hand at first.',
+    column: 'questions',
+    note: 'What is the rollback and who is on call?',
+  },
+  'customer-smb': {
+    first:
+      'I run a small shop and I have twenty minutes a week for this. If it saves me an hour I will pay a fair price; if it needs setup I will not even try. Show me before you tell me.',
+    reply:
+      'I like the pilot, as long as it is free to try and does not lock me in. I need to know what I get in the first week.',
+    dissent:
+      'On the other side: small customers do not always want cheap. Many will pay more for someone to pick up the phone.',
+    column: 'ideas',
+    note: 'Free first week, no lock-in, a person on the phone',
+  },
+};
+
+const BOARD_GENERIC = {
+  first:
+    'From my seat, the key question is what we are really trying to achieve and what we would accept as proof. I would define success in one sentence before choosing a direction.',
+  reply:
+    'I take the points made so far; what is still missing is a concrete next step we can test this month.',
+  dissent:
+    'To be fair to the other view: the option we are leaning away from deserves a stronger hearing than it got.',
+  column: 'questions',
+  note: 'What would count as proof that this worked?',
+};
+
+async function boardMain(): Promise<number> {
+  const message = process.env.AOM_MOCK_MESSAGE ?? '';
+  const header = JSON.parse(/<!--board:(\{.*?\})-->/s.exec(message)?.[1] ?? '{}') as Record<string, any>;
+  const said: string[] = [];
+  const say = (text: string) => {
+    said.push(text);
+    emit({ kind: 'delta', text: `${text}\n` });
+  };
+  const run = (args: string[]): string => {
+    emit({ kind: 'tool', name: 'Bash', summary: `aom ${args.slice(0, 3).join(' ')}` });
+    const r = aom(args);
+    if (r.code !== 0) say(`(a command failed: ${(r.err || r.out).trim().slice(0, 160)})`);
+    return r.out;
+  };
+  emit({ kind: 'session', runtimeSessionId: process.env.AOM_MOCK_SESSION ?? 'mock-board' });
+  emit({ kind: 'usage', usage: { inputTokens: message.length, outputTokens: 120 } });
+  const finish = (): number => {
+    emit({ kind: 'final', text: said.join('\n') });
+    return 0;
+  };
+  await sleep(stepMs);
+
+  if (header.role === 'speaker') {
+    const slug = String(header.slug ?? '');
+    const v = BOARD_VOICES[slug] ?? BOARD_GENERIC;
+    const label = String(header.label ?? '');
+    const prefix =
+      header.format === 'six_hats' && label
+        ? `(${label}) `
+        : header.format === 'red_blue' && label
+          ? `(${label}) `
+          : header.format === 'pre_mortem' && header.kind === 'independent'
+            ? 'A year on, it failed because: '
+            : '';
+    if (message.includes('[[long]]')) {
+      say(`${prefix}${'This is a very long answer that goes on and on. '.repeat(80)}`);
+      return finish();
+    }
+    const base = header.kind === 'dissent' ? v.dissent : header.kind === 'independent' ? v.first : v.reply;
+    say(`${prefix}${base}`);
+    if (header.format === 'option_scoring' && header.kind === 'independent') {
+      run([
+        'board',
+        'add',
+        '--column',
+        'decisions',
+        '--text',
+        `Option A: ${3 + (Number(header.index ?? 0) % 3)}/5 - ${v.note.slice(0, 80)}`,
+      ]);
+    } else {
+      run(['board', 'add', '--column', header.kind === 'dissent' ? 'questions' : v.column, '--text', v.note]);
+    }
+    if (slug === 'devils-advocate' && header.kind === 'discussion')
+      run([
+        'board',
+        'disagreement',
+        'add',
+        '--topic',
+        'Move fast with a pilot or prove demand first',
+        '--position',
+        "Devil's Advocate|Prove demand with paying users before building",
+        '--position',
+        'Creative Strategist|A bold pilot is the fastest way to learn',
+      ]);
+    return finish();
+  }
+
+  if (header.role === 'chair') {
+    const people = (header.people ?? []) as Array<{ slug: string; name: string; spoken: number }>;
+    const mentions = (header.mentions ?? []) as string[];
+    const last = header.lastSpeaker as string | null;
+    if (message.includes('[[decide]]') && !message.includes('## Decisions the owner took')) {
+      run([
+        'board',
+        'pause',
+        '--question',
+        'Which direction do we take?',
+        '--option',
+        'Pilot first',
+        '--option',
+        'Prove demand first',
+      ]);
+      say('We have reached a decision only you can take.');
+      return finish();
+    }
+    if (message.includes('[[converge]]') && header.round === 1 && !header.dissentNext)
+      run(['board', 'converge', '--note', 'every first answer leans the same way']);
+    const pool = people
+      .filter((p) => p.slug !== last || mentions.includes(p.slug))
+      .sort((a, b) => a.spoken - b.spoken || a.slug.localeCompare(b.slug));
+    const picks = [...mentions, ...pool.map((p) => p.slug).filter((s) => !mentions.includes(s))].slice(0, 2);
+    const args = ['board', 'next'];
+    for (const sl of picks) args.push('--speaker', sl);
+    args.push(
+      '--reason',
+      mentions.length
+        ? 'The owner asked to hear from them, and they have said least.'
+        : 'They have spoken least so far and see this differently.',
+      '--instruction',
+      header.dissentNext
+        ? 'Steel-man the view nobody has argued yet.'
+        : 'React to what was said and name the real disagreement.',
+    );
+    run(args);
+    say(`Next: ${picks.join(' and ')}.`);
+    return finish();
+  }
+
+  if (header.role === 'cast') {
+    const keys = (header.personas ?? []) as string[];
+    const want = ['devils-advocate', 'user-advocate', 'cost-hawk'].filter((k) => keys.includes(k));
+    for (const k of want) run(['board', 'cast', '--persona', k, '--why', 'A voice this topic needs.']);
+    run([
+      'board',
+      'cast',
+      '--name',
+      'Skeptical Regulator',
+      '--brief',
+      'A cautious compliance officer who asks what could get us fined',
+      '--seat',
+      'Compliance',
+      '--why',
+      'Nobody else covers the rules.',
+    ]);
+    say('Here is a cast that should disagree usefully.');
+    return finish();
+  }
+
+  if (header.role === 'minutes') {
+    const people = (header.people ?? []) as string[];
+    const bullets = people
+      .map((n) => `- **${n}**: stated a clear position and held it; see the conversation.`)
+      .join('\n');
+    run([
+      'board',
+      'minutes',
+      '--content',
+      `## Positions\n\n${bullets}\n\n## Agreements\n\n- Test with real customers before a large commitment.\n\n## Open questions\n\n- What does one customer cost to serve?\n- Who is on call when it breaks?`,
+    ]);
+    say('The minutes are saved.');
+    return finish();
+  }
+
+  say('Understood.');
+  return finish();
+}
+
 async function main(): Promise<number> {
+  if (process.env.AOM_MOCK_CHAT === 'board') return boardMain();
   if (process.env.AOM_MOCK_CHAT === 'discovery') return discoveryMain();
   if (process.env.AOM_MOCK_CHAT === 'desk') return deskMain();
   if (process.env.AOM_MOCK_CHAT === 'intake') return intakeMain();

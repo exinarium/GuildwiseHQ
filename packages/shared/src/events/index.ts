@@ -3,6 +3,7 @@ import { agentEvents } from './agent.ts';
 import { approvalEvents } from './approval.ts';
 import { backlogEvents } from './backlog.ts';
 import { blogEvents } from './blog.ts';
+import { boardEvents } from './board.ts';
 import { capabilityEvents } from './capability.ts';
 import { cardEvents } from './card.ts';
 import { catalogueEvents } from './catalogue.ts';
@@ -97,6 +98,7 @@ export const DomainEventSchema = z.discriminatedUnion('type', [
   ...codeV6Events,
   ...sessionEvents,
   ...discoveryEvents,
+  ...boardEvents,
   ...documentEvents,
   ...capabilityEvents,
 ]);
@@ -109,6 +111,7 @@ export * from './agent.ts';
 export * from './approval.ts';
 export * from './backlog.ts';
 export * from './blog.ts';
+export * from './board.ts';
 export * from './capability.ts';
 export * from './card.ts';
 export * from './catalogue.ts';

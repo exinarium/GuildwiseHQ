@@ -49,6 +49,8 @@ export const streamId = {
   /** Durable turns of a discovery or boardroom session. */
   sessionTurn: (id: string) => `session-turn-${id}`,
   document: (id: string) => `document-${id}`,
+  /** Saved boardroom casts of an organization. */
+  boardRooms: (orgId: string) => `board-rooms-${orgId}`,
   /** The organization vault's capability index. */
   capabilities: (orgId: string) => `capabilities-${orgId}`,
 } as const;
