@@ -12,6 +12,7 @@ import {
   directModelId,
   estimateNextRound,
   handlesOf,
+  isOrgManager,
   MODEL_CHOICES,
   type ModelChoice,
   type ModelTier,
@@ -19,6 +20,7 @@ import {
   participantSlug,
   type ReportedProvider,
 } from '@aom/shared';
+import { orgRoleOf } from '../auth/org-context.ts';
 import { resolvePersona } from '../capabilities/registry.ts';
 import { isAdHocPersona, listParticipants } from '../commands/sessions.ts';
 import type { Ctx } from '../context.ts';
@@ -276,6 +278,8 @@ export async function boardState(ctx: Ctx, t: Row, userId: string): Promise<Boar
               .join(', ')}${plan.reason ? ` — ${plan.reason}` : ''}`
           : null;
 
+  const canManage =
+    t.created_by === userId || isOrgManager({ orgRole: await orgRoleOf(db, userId, t.org_id) });
   return {
     threadId: t.id,
     title: t.title,
@@ -322,6 +326,7 @@ export async function boardState(ctx: Ctx, t: Row, userId: string): Promise<Boar
     busy: !!active,
     waitingFor,
     chairStatus,
+    canManage,
     createdAt: iso(t.created_at) as string,
   };
 }

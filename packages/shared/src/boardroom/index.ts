@@ -462,6 +462,8 @@ export const BoardStateDtoSchema = z.object({
   waitingFor: BoardWaitingSchema,
   /** The Chair's latest words about the pick ("Chair picks: X, Y"), from the current plan. */
   chairStatus: z.string().nullable(),
+  /** The caller may steer the session (end, pause, decide, edit the whiteboard): its creator, an Owner or an Admin. */
+  canManage: z.boolean().optional(),
   createdAt: z.iso.datetime(),
 });
 export type BoardStateDto = z.infer<typeof BoardStateDtoSchema>;

@@ -225,6 +225,7 @@ export function BoardroomSession() {
         actions={
           <div className="flex flex-wrap gap-2">
             {!over &&
+              s.canManage !== false &&
               (s.config.paused ? (
                 <Button
                   onClick={() => resume.mutate()}
@@ -240,7 +241,7 @@ export function BoardroomSession() {
                   Pause
                 </Button>
               ))}
-            {!over && s.config.stage !== 'minutes' && (
+            {!over && s.canManage !== false && s.config.stage !== 'minutes' && (
               <Button variant="danger" onClick={() => setConfirmEnd(true)} data-testid="end-session">
                 <Square aria-hidden="true" className="size-4" />
                 End session

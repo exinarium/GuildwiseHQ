@@ -1209,6 +1209,9 @@ describe('review fixes: authority, decisions, minutes and pull-into-prd', () => 
     ).toBe(403);
     expect((await as('POST', `/api/board/${st.threadId}/say`, { body: 'a thought' })).status).toBe(201);
     expect((await get(st.threadId)).config.stage).toBe('round');
+    // the page hides the controls from the member
+    expect((await get(st.threadId)).canManage).toBe(true);
+    expect((await as('GET', `/api/board/${st.threadId}`)).body.state.canManage).toBe(false);
   });
 
   it('takes a decision once, refuses one after the session moved on, and withdraws it when the session ends', async () => {
