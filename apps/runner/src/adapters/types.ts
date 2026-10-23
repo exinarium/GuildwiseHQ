@@ -1,4 +1,5 @@
 import type { AgentRuntimeSpec, ChatContext, ClaudeAccountInfo, ReportedProvider, Usage } from '@aom/shared';
+import type { GrantedSkill } from '../capabilities/materialize.ts';
 import type { Sandbox } from '../sandbox/sandbox.ts';
 
 export interface RuntimeCapabilities {
@@ -83,6 +84,12 @@ export interface ShiftStartInput {
   devopsGuard?: DevopsGuardInput;
   /** The Claude account this shift runs on (absent: `main`). Its config dir is `sandbox.configDir`, one per account per agent. */
   account?: string;
+  /**
+   * The skills granted to this agent (resolved from the registry; untrusted packs and disabled scripts already removed). A
+   * runtime with native skills writes exactly these into its private skills folder (`materializeSkills`); it never loads the
+   * account's own. Absent or empty: the runtime loads no skills.
+   */
+  grantedSkills?: GrantedSkill[];
   /** Raw runtime stream is appended here (logs/shifts/<shiftId>.jsonl). */
   logFile?: string;
 }
@@ -174,6 +181,8 @@ export interface ChatStartInput {
    * (`instructionStyle 'tools'`: the direct-model runtime). Claude Code and the mock read the file `writeInstructions` wrote.
    */
   instructions?: string;
+  /** See `ShiftStartInput.grantedSkills`. */
+  grantedSkills?: GrantedSkill[];
   logFile?: string;
 }
 
