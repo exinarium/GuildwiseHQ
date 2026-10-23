@@ -52,7 +52,7 @@ export const PacksReportSchema = z.object({
   state: z.enum(['resolved', 'update', 'current', 'failed', 'integrity']),
   snapshot: PackSnapshotSchema.optional(),
   /** `update` only: the changes against the pinned commit as this runner computed them (the server recomputes from snapshots). */
-  diff: PackDiffSchema.optional(),
+  diff: z.unknown().optional(),
   message: z.string().max(500).optional(),
   expected: z.string().optional(),
   actual: z.string().optional(),

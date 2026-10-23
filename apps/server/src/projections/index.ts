@@ -4,6 +4,7 @@ import { backlogProjectors } from './backlog.ts';
 import { blogProjectors } from './blog.ts';
 import { boardProjectors } from './board.ts';
 import { capabilityProjectors } from './capabilities.ts';
+import { packProjectors } from './packs.ts';
 import { cardProjectors, releaseHeldDesigns } from './cards.ts';
 import { catalogueProjectors } from './catalogue.ts';
 import { ceoProjectors } from './ceo.ts';
@@ -107,6 +108,7 @@ const domains: Array<Record<string, Projector>> = [
   boardProjectors,
   documentProjectors,
   capabilityProjectors,
+  packProjectors,
 ];
 
 /**
@@ -256,4 +258,7 @@ export const PROJECTION_TABLES = [
   'document_versions',
   'capability_index',
   'capability_index_status',
+  'packs',
+  'project_capability_index',
+  'project_capability_status',
 ];

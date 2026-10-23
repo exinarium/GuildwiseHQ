@@ -300,7 +300,7 @@ export class BoardService {
     const cfg = parseBoardConfig(t.session_config);
     const chair = await chairOf(this.ctx.pool, threadId);
     if (!chair) return;
-    const reg = await effectiveRegistry(this.ctx.pool, t.org_id, 'persona');
+    const reg = await effectiveRegistry(this.ctx.pool, t.org_id, { kind: 'persona', usableOnly: true });
     const agents = await rows(
       this.ctx.pool,
       `SELECT name, role_key FROM agents WHERE org_id=$1 AND status='active' ORDER BY name LIMIT 20`,

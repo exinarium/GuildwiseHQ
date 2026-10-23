@@ -273,6 +273,8 @@ const runnerToServer: Record<string, Record<string, unknown>> = {
   },
   'chat.done': { ...env('chat.done'), chatId: 'c1', threadId: U.c, messageText: 'hi there', usage },
   'chat.error': { ...env('chat.error'), chatId: 'c1', threadId: U.c, error: 'boom' },
+  'packs.report': { ...env('packs.report'), packId: U.a, state: 'current', sha: 'a'.repeat(40) },
+  'capabilities.project.report': { ...env('capabilities.project.report'), projectId: U.a, items: [], issues: [] },
   'capabilities.report': { ...env('capabilities.report'), vaultId: U.a, items: [], issues: [] },
   'command.result': { ...env('command.result'), commandId: 'k1', ok: true, result: { removed: true } },
   'vault.status': { ...env('vault.status'), vaultId: 'v1', lastPullAt: TS, lastPushAt: null, error: 'x' },

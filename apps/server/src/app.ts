@@ -93,6 +93,7 @@ import { ledgerRoutes } from './routes/ledger.ts';
 import { orgChartRoutes } from './routes/org-chart.ts';
 import { orgRoutes } from './routes/orgs.ts';
 import { outboundRoutes } from './routes/outbound.ts';
+import { packRoutes } from './routes/packs.ts';
 import { phaseRoutes } from './routes/phases.ts';
 import { platformRoutes } from './routes/platform.ts';
 import { platformTeamRoutes } from './routes/platform-team.ts';
@@ -415,6 +416,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   await app.register(boardRoutes(ctx));
   await app.register(documentRoutes(ctx));
   await app.register(capabilityRoutes(ctx));
+  await app.register(packRoutes(ctx));
   await app.register(intakeBatchRoutes(ctx));
   await app.register(hrRoutes(ctx));
   await app.register(designerRoutes(ctx));

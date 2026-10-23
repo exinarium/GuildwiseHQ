@@ -19,7 +19,7 @@ export const PersonaKeySchema = z
   .string()
   .min(1)
   .max(80)
-  .regex(/^[a-z0-9]+(-[a-z0-9]+)*$/);
+  .regex(/^[a-z0-9]+(-[a-z0-9]+)*(:[a-z0-9]+(-[a-z0-9]+)*)?$/);
 
 export const ParticipantInputSchema = z
   .object({

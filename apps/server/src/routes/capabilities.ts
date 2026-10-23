@@ -11,7 +11,11 @@ export function capabilityRoutes(ctx: Ctx) {
     const app = typed(fastify);
     app.get('/api/capabilities', { schema: { querystring: ListCapabilitiesQuerySchema } }, async (req) => {
       const a = await requireOrg(ctx, req, { min: 'member' });
-      return effectiveRegistry(ctx.pool, a.orgId, req.query.kind);
+      return effectiveRegistry(ctx.pool, a.orgId, {
+        ...(req.query.kind ? { kind: req.query.kind } : {}),
+        ...(req.query.projectId ? { projectId: req.query.projectId } : {}),
+        ...(req.query.usable === 'true' ? { usableOnly: true } : {}),
+      });
     });
   };
 }

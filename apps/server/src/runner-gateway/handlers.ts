@@ -5,6 +5,7 @@ import {
   LOCAL_VAULT_CAPABILITY,
   type McpCall,
   normalizeRemoteUrl,
+  PACKS_CAPABILITY,
   type RunnerToServer,
   type RunnerToServerOf,
   type ServerToRunner,
@@ -43,6 +44,7 @@ import { applyMcpServersReport, mcpCallsIn, mergeMcpCalls } from '../commands/mc
 import { applyOrgFolderResult, applyOrgFoldersReport } from '../commands/org-folders.ts';
 import { dispatchOrgGraph } from '../commands/org-graph.ts';
 import { applyOutboundResult, finishOutboundCommand, queueApprovedFor } from '../commands/outbox.ts';
+import { applyPacksReport, applyProjectCapabilitiesReport, queuePacksSync } from '../commands/packs.ts';
 import { applyBranchCheckResult } from '../commands/phases.ts';
 import { applyProviderKeyResult } from '../commands/provider-keys.ts';
 import { questionStatus } from '../commands/question-flow.ts';
@@ -653,6 +655,12 @@ export class RunnerHandlers {
       case 'capabilities.report':
         await applyCapabilitiesReport(this.ctx, ws, msg);
         return;
+      case 'packs.report':
+        await applyPacksReport(this.ctx, ws, msg);
+        return;
+      case 'capabilities.project.report':
+        await applyProjectCapabilitiesReport(this.ctx, ws, msg);
+        return;
       case 'token.rotate':
         this.send(conn, 'token.rotated', { token: await issueRotatedToken(this.ctx, conn.workstationId) });
         return;
@@ -803,6 +811,11 @@ export class RunnerHandlers {
           WHERE workstation_id=$1 AND type IN ('graph.index','graph.update','graph.org') AND status IN ('pending','sent')`,
         [conn.workstationId],
       );
+    // Capability packs: a runner that holds them gets the full list again on every connection (its state may be stale).
+    if ((msg.capabilities ?? []).includes(PACKS_CAPABILITY))
+      await queuePacksSync(ctx.pool, conn.workstationId).catch((err) =>
+        ctx.log.warn({ err }, 'packs.sync not queued'),
+      );
     // Whatever the previous connection was sent may not have arrived: it is due again on this one.
     await requeueSentCommands(ctx.pool, conn.workstationId);
     await this.matchRepos(conn);
@@ -846,7 +859,7 @@ export class RunnerHandlers {
       limits: { maxConcurrentShifts: conn.maxShifts, shiftLimit: setting },
       // Safe mode: the runner version this workstation is pinned to (the runner's updater follows it, not the latest).
       runnerPin: await pinForWelcome(ctx.pool, conn.workstationId),
-      features: [CHAT_ACTIVITY_FEATURE, CAPABILITY_REGISTRY_FEATURE],
+      features: [CHAT_ACTIVITY_FEATURE, CAPABILITY_REGISTRY_FEATURE, PACKS_CAPABILITY],
     });
     // With nothing in the runner's outbox there is nothing to wait for; otherwise reconcile on outbox.flushed.
     if (msg.outboxPending === 0) await this.reconcile(conn);

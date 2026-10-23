@@ -55,6 +55,8 @@ export const streamId = {
   capabilities: (orgId: string) => `capabilities-${orgId}`,
   /** One capability pack (git import, trust, pin). */
   pack: (id: string) => `pack-${id}`,
+  /** What a project's checkout carries (.agents/skills ...). */
+  projectCapabilities: (projectId: string) => `project-capabilities-${projectId}`,
 } as const;
 
 export const ProjectKeySchema = z
