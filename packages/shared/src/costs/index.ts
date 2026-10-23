@@ -1,3 +1,5 @@
+import { directPrice, splitDirectModel } from '../models/direct.ts';
+
 /**
  * Cost tracking and budgets (docs/design/restructure.md, "Roadmap after the restructure").
  *
@@ -110,6 +112,28 @@ export interface TokenCounts {
   cacheWrite1hTokens?: number;
 }
 
+/** The price of a model of the direct-model runtime (`provider:model`): undefined for any other model, null when unknown. */
+function directPriceOf(
+  model: string,
+  table: readonly ModelPrice[],
+): { input: number; output: number; cacheRead?: number; cacheWrite?: number } | null | undefined {
+  const d = splitDirectModel(model);
+  if (!d) return undefined;
+  return directPrice(d.provider, d.model, (m) => {
+    const lower = m.toLowerCase();
+    const hit = table.find((x) => x.match !== '' && lower.includes(x.match));
+    return hit ? { input: hit.input, output: hit.output, cacheRead: hit.cacheRead, cacheWrite: hit.cacheWrite } : null;
+  });
+}
+
+/**
+ * A model of the direct-model runtime with no price in the tables: its cost shows as 0 and must be flagged "cost unknown"
+ * wherever it is shown. Every other model is priced (an unknown one like Sonnet).
+ */
+export function isCostUnknown(model: string, table: readonly ModelPrice[] = DEFAULT_MODEL_PRICES): boolean {
+  return directPriceOf(model, table) === null;
+}
+
 export function priceFor(model: string, table: readonly ModelPrice[] = DEFAULT_MODEL_PRICES): ModelPrice {
   const m = model.toLowerCase();
   return (
@@ -129,6 +153,17 @@ export function costUsdMicros(
   usage: TokenCounts,
   table: readonly ModelPrice[] = DEFAULT_MODEL_PRICES,
 ): number {
+  const direct = directPriceOf(model, table);
+  if (direct !== undefined) {
+    if (direct === null) return 0; // unknown price: zero here, flagged by `isCostUnknown` (never silently priced as Sonnet)
+    const c = (price: number) => Math.round(price * 100);
+    const total =
+      usage.inputTokens * c(direct.input) +
+      usage.outputTokens * c(direct.output) +
+      (usage.cacheReadTokens ?? 0) * c(direct.cacheRead ?? direct.input) +
+      (usage.cacheWriteTokens ?? 0) * c(direct.cacheWrite ?? direct.input);
+    return Math.floor((total + 50) / 100);
+  }
   const p = priceFor(model, table);
   // Integer arithmetic in hundredths of a micro-USD so the result is exact (and equals the SQL backfill's numeric math).
   const c = (price: number) => Math.round(price * 100);

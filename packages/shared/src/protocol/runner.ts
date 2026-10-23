@@ -66,6 +66,7 @@ import {
   IntegrationsPolicySchema,
   MAX_INTEGRATION_STATUSES,
 } from '../integrations/schema.ts';
+import { ProviderKeyClearPayloadSchema, ProviderKeySetPayloadSchema, ReportedProviderSchema } from '../models/direct.ts';
 import { MAX_MCP_SERVERS, McpServerInfoSchema } from '../mcp/index.ts';
 import { BaTaskShiftSchema, BranchCheckMergedPayloadSchema } from '../phases/index.ts';
 import { CommitAsSchema, RepoCreatePayloadSchema, RepoIdentityFactSchema } from '../repo/index.ts';
@@ -154,6 +155,11 @@ export const RuntimeInfoSchema = z.object({
    * `usage` and `limitedUntil` describe main, and `available` is false only when no account is usable.
    */
   accounts: z.array(ClaudeAccountInfoSchema).max(20).optional(),
+  /**
+   * Direct-model only: the providers whose key (or endpoint) is stored on this workstation, with the models each offers.
+   * Names only, never a key. Absent from older runners and from other runtimes: no direct models are offered then.
+   */
+  providers: z.array(ReportedProviderSchema).max(10).optional(),
 });
 export type RuntimeInfo = z.infer<typeof RuntimeInfoSchema>;
 
@@ -784,11 +790,15 @@ export const RunnerCommandNameSchema = z.enum([
   'deploy.prepare',
   'deploy.move',
   'claude.account.ensure',
+  'provider.key.set',
+  'provider.key.clear',
 ]);
 export type RunnerCommandName = z.infer<typeof RunnerCommandNameSchema>;
 
 /** Typed payloads for the commands; `command.payload` is the loose record on the wire. */
 export const CommandPayloadSchemas = {
+  'provider.key.set': ProviderKeySetPayloadSchema,
+  'provider.key.clear': ProviderKeyClearPayloadSchema,
   'claude.account.ensure': ClaudeAccountEnsurePayloadSchema,
   'vault.configure': VaultConfigureCommandSchema,
   'vault.write': VaultWriteCommandSchema,
@@ -900,6 +910,7 @@ export const ENVELOPE_COMMANDS: ReadonlySet<string> = new Set([
   'env.secret.set',
   'deploy.secret.set',
   'deploy.connect',
+  'provider.key.set',
 ]);
 
 export const ShiftRejectReasonSchema = z.enum([

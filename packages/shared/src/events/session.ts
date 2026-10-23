@@ -108,6 +108,8 @@ export const sessionEvents = [
       usage: Usage,
       /** Price stamped when the event was appended (like `ShiftEnded.costMicros`), so a rebuild never reprices it. */
       costMicros: z.number().int().nonnegative().optional(),
+      /** The model has no price in the tables (a direct-model provider's unlisted model): `costMicros` is 0 and the cost is unknown, not zero. */
+      costUnknown: z.boolean().optional(),
       runtimeSessionId: z.string().max(200).optional(),
     }),
   ),

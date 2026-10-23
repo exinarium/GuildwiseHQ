@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { CeoPermissionDecision, type CeoTurnMode, type RepeatSuggestion } from '../ceo/turns.ts';
 import { ModelChoiceSchema } from '../models/choices.ts';
+import type { ReportedProvider } from '../models/direct.ts';
 
 /**
  * The CEO as the owner's front door (docs/design/ceo-front-door.md, step 1): the CEO chat as a full session, the model
@@ -28,6 +29,8 @@ export interface CeoChatStateDto {
     default: z.infer<typeof ModelChoiceSchema>;
     thread: z.infer<typeof ModelChoiceSchema> | null;
     runtimes: string[];
+    /** Direct-model providers configured on the workstation (names and models); absent: none (an older server or runner). */
+    providers?: ReportedProvider[];
   };
   cwd: string;
   /** A reply is being written right now. */

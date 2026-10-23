@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   BOARD_NOTES_PER_TURN,
+  BOARD_PURPOSE_VERBS,
   BoardAddParamsSchema,
   BoardCastParamsSchema,
   BoardConvergeParamsSchema,
@@ -31,12 +32,7 @@ type Reply = [boolean, unknown?, string?];
 const zodText = (issues: Array<{ path: PropertyKey[]; message: string }>): string =>
   issues.map((i) => `${i.path.join('.') || 'value'}: ${i.message}`).join('; ');
 
-const PURPOSE_VERBS: Record<string, readonly string[]> = {
-  board_speaker: ['show', 'add', 'disagreement'],
-  board_chair: ['show', 'add', 'next', 'pause', 'converge', 'disagreement'],
-  board_cast: ['cast'],
-  board_minutes: ['show', 'minutes'],
-};
+const PURPOSE_VERBS = BOARD_PURPOSE_VERBS;
 
 export const actorOf = (turn: Row): AppendInput['actor'] =>
   turn.agent_id

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ModelChoiceSchema } from '../models/choices.ts';
 import { DocumentKindSchema, DocumentStatusSchema } from '../documents/index.ts';
 import { SessionTurnDtoSchema } from '../sessions/index.ts';
 
@@ -69,6 +70,8 @@ export const DiscoveryConfigSchema = z.object({
   idea: z.string().max(4000).default(''),
   budgetUsd: z.number().positive().max(100_000).nullable().default(null),
   paused: z.boolean().default(false),
+  /** The model the facilitator's turns run on (absent: the facilitator's own runtime and model). */
+  model: ModelChoiceSchema.nullable().default(null),
   /** Active time before `activeSince` (a paused session keeps its clock). */
   elapsedMs: z.number().int().nonnegative().default(0),
   activeSince: z.iso.datetime().nullable().default(null),
@@ -270,6 +273,8 @@ export const CreateDiscoveryRequestSchema = z.object({
   idea: z.string().max(4000).default(''),
   budgetUsd: z.number().positive().max(100_000).optional(),
   workstationId: z.uuid().optional(),
+  /** The facilitator's model (any runtime the workstation offers, a direct provider included); absent: the facilitator's own. */
+  model: ModelChoiceSchema.optional(),
 });
 export type CreateDiscoveryRequest = z.infer<typeof CreateDiscoveryRequestSchema>;
 
@@ -284,6 +289,8 @@ export const PatchDiscoveryRequestSchema = z.object({
     .nullable()
     .optional(),
   stance: DiscoveryStanceSchema.optional(),
+  /** `null` goes back to the facilitator's own model. */
+  model: ModelChoiceSchema.nullable().optional(),
 });
 export type PatchDiscoveryRequest = z.infer<typeof PatchDiscoveryRequestSchema>;
 
@@ -325,6 +332,8 @@ export const DiscoveryStateDtoSchema = z.object({
     idea: z.string(),
     timeBoxMinutes: z.number().nullable(),
     paused: z.boolean(),
+    /** The facilitator's chosen model (null: its own). */
+    model: ModelChoiceSchema.nullable(),
     budgetStopped: z.boolean(),
     ceoPrep: z
       .object({ state: z.enum(['running', 'review', 'done']), turns: z.number(), cap: z.number() })

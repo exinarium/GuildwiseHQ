@@ -13,6 +13,7 @@ import {
   SessionPhaseParamsSchema,
   SessionProposeParamsSchema,
   type SessionRpcMethod,
+  DISCOVERY_PURPOSE_VERBS,
   SessionValidateParamsSchema,
   streamId,
 } from '@aom/shared';
@@ -31,10 +32,7 @@ type Reply = [boolean, unknown?, string?];
 const zodText = (issues: Array<{ path: PropertyKey[]; message: string }>): string =>
   issues.map((i) => `${i.path.join('.') || 'value'}: ${i.message}`).join('; ');
 
-const PURPOSE_VERBS: Record<string, readonly string[]> = {
-  facilitator: ['show', 'ask', 'note', 'propose', 'phase', 'draft', 'validate'],
-  ceo_answer: ['show', 'answer', 'note'],
-};
+const PURPOSE_VERBS = DISCOVERY_PURPOSE_VERBS;
 
 /**
  * The server side of `aom session ...` for a discovery session turn. The caller proved the turn (its id is the chat id the

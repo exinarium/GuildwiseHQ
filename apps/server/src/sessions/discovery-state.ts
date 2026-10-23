@@ -144,6 +144,7 @@ export async function discoveryState(ctx: Ctx, t: Row, db: Queryable = ctx.pool)
       idea: cfg.idea,
       timeBoxMinutes: cfg.timeBoxMinutes,
       paused: cfg.paused,
+      model: cfg.model,
       budgetStopped: cfg.budgetStopped,
       ceoPrep: cfg.ceoPrep,
       intakeId: cfg.intakeId,

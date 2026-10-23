@@ -15,7 +15,12 @@
     "test:smoke": "AOM_CLAUDE_SMOKE=1 vitest run test/claude-smoke.test.ts"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "4.0.87",
+    "@ai-sdk/google": "4.0.104",
+    "@ai-sdk/openai": "4.0.101",
+    "@ai-sdk/openai-compatible": "3.0.77",
     "@aom/shared": "workspace:*",
+    "ai": "7.0.150",
     "commander": "^14.0.0",
     "execa": "^9.0.0",
     "picomatch": "^4.0.0",
