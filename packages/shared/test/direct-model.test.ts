@@ -168,7 +168,10 @@ describe('the tools of a session turn', () => {
     for (const [purpose, verbs] of Object.entries(SESSION_PURPOSE_VERBS)) {
       const board = purpose.startsWith('board_');
       const expected = SESSION_TOOLS.filter(
-        (t) => t.family === (board ? 'board' : 'session') && t.verb && verbs.includes(t.verb),
+        (t) =>
+          (t.family === 'any' || t.family === (board ? 'board' : 'session')) &&
+          t.verb &&
+          verbs.includes(t.verb),
       )
         .map((t) => t.name)
         .concat(COMMON_TOOLS.map((t) => t.name))
@@ -204,7 +207,9 @@ describe('the tools of a session turn', () => {
       for (const v of verbs)
         expect(
           SESSION_TOOLS.some(
-            (t) => t.verb === v && t.family === (purpose.startsWith('board_') ? 'board' : 'session'),
+            (t) =>
+              t.verb === v &&
+              (t.family === 'any' || t.family === (purpose.startsWith('board_') ? 'board' : 'session')),
           ),
           `${purpose}:${v}`,
         ).toBe(true);

@@ -13,6 +13,7 @@ import { delimiter, isAbsolute, join, resolve } from 'node:path';
 import {
   type AgentRuntimeSpec,
   type BriefAttachment,
+  DELEGATE_RPC,
   type GuardViolation,
   hasTranscript,
   type InvestigationData,
@@ -21,6 +22,7 @@ import {
   type IpcRpcRequest,
   type IpcRpcResponse,
   identityLast,
+  isDelegateServerRpc,
   isPublishRequest,
   isTerminalReport,
   isValidReportPath,
@@ -58,6 +60,7 @@ import {
 import { type CapabilityRegistry, type ProjectIndexResult, skillRpc } from '../capabilities/registry.ts';
 import type { RunnerConfig } from '../config.ts';
 import type { Outbox } from '../connection/outbox.ts';
+import { DELEGATE_NOTE, DelegateRunner } from '../delegate/delegate.ts';
 import { recordDevopsAudit } from '../devops/audit.ts';
 import { redactCommand } from '../devops/guard.ts';
 import { cardPayload, shiftTexts } from '../devops/requests.ts';
@@ -369,9 +372,19 @@ export class ShiftSupervisor {
   private readonly log: Logger;
 
   private readonly sessions: SessionRegistry;
+  /** `aom delegate`: read-only persona sub-tasks of a running shift (costs booked under the shift). */
+  private readonly delegates: DelegateRunner;
 
   constructor(private readonly deps: SupervisorDeps) {
     this.log = deps.log ?? nullLogger;
+    this.delegates = new DelegateRunner({
+      adapters: deps.adapters,
+      paths: deps.paths,
+      ipc: deps.ipc,
+      rpc: (id, method, params) => deps.rpc(id, method, params),
+      ...(deps.capabilities ? { capabilities: deps.capabilities } : {}),
+      ...(deps.log ? { log: deps.log } : {}),
+    });
     this.sessions = deps.sessions ?? new SessionRegistry(join(deps.paths.root, 'sessions.json'));
   }
 
@@ -457,6 +470,7 @@ export class ShiftSupervisor {
       if (shift.readOnlyCheckout)
         await removeReadOnlyCheckout(shift.readOnlyCheckout.repoPath, shift.readOnlyCheckout.path);
       if (shift.token) this.deps.ipc.revoke(shift.token);
+      this.delegates.endCaller(msg.shiftId, 'the shift ended');
       if (shift.graceTimer) clearTimeout(shift.graceTimer);
       shift.forwards?.close();
       shift.releaseWorktree?.();
@@ -990,6 +1004,8 @@ export class ShiftSupervisor {
     }
     const capIndex = this.deps.capabilities?.instructionsIndex(msg.agent.skills, registryProject) ?? '';
     if (capIndex) texts.instructions += `\n${capIndex}\n`;
+    if (msg.kind !== 'ceo' && msg.kind !== 'devops' && !msg.agent.isDevops && msg.agent.roleKey !== 'ceo')
+      texts.instructions += `\n${DELEGATE_NOTE}\n`;
     // The skills this agent's role grants, for a runtime with native skills (Claude Code, Codex): written into its private folder.
     const grantedSkills = this.deps.capabilities?.grantedSkills(msg.agent.skills, registryProject) ?? [];
     // The project's reference repositories (read-only), for a card shift and a BA task shift (the server sends repositories
@@ -1523,6 +1539,26 @@ export class ShiftSupervisor {
       rpc: async (req: IpcRpcRequest) => {
         if (req.method === 'skill.show' || req.method === 'skill.list')
           return skillRpc(this.deps.capabilities, req.method, req.params, s.msg.brief?.project?.id);
+        // `aom delegate`: a read-only sub-task with a registry persona. Not for the CEO's and the DevOps engineer's shifts.
+        if (req.method === DELEGATE_RPC) {
+          if (
+            s.msg.kind === 'ceo' ||
+            s.msg.kind === 'devops' ||
+            s.msg.agent.isDevops ||
+            s.msg.agent.roleKey === 'ceo'
+          )
+            return { ok: false, error: '`aom delegate` is not available to this agent' };
+          return this.delegates.run(
+            {
+              id: s.msg.shiftId,
+              runtime: s.msg.agent.runtime,
+              ...(s.msg.brief?.project?.id ? { projectId: s.msg.brief.project.id } : {}),
+            },
+            req.params,
+          );
+        }
+        // The runner's own questions to the server about a delegate are not for the agent to ask.
+        if (isDelegateServerRpc(req.method)) return { ok: false, error: `${req.method} is not available` };
         // `aom ceo ...` belongs to the CEO's own shifts (the server checks the agent again).
         if (req.method === 'ceo') {
           if (!(s.msg.kind === 'ceo' && s.msg.agent.roleKey === 'ceo'))

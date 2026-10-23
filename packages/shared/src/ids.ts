@@ -48,6 +48,8 @@ export const streamId = {
   role: (orgId: string | null, key: string) => `role-${orgId ?? 'builtin'}-${key}`,
   /** Durable turns of a discovery or boardroom session. */
   sessionTurn: (id: string) => `session-turn-${id}`,
+  /** One nested `aom delegate` call (its cost, booked under the caller). */
+  delegate: (id: string) => `delegate-${id}`,
   document: (id: string) => `document-${id}`,
   /** Saved boardroom casts of an organization. */
   boardRooms: (orgId: string) => `board-rooms-${orgId}`,

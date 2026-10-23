@@ -12,6 +12,7 @@ type SessionEventType =
   | 'SessionTurnStarted'
   | 'SessionTurnRequeued'
   | 'SessionTurnCompleted'
+  | 'DelegateCompleted'
   | 'SessionTurnFailed';
 
 const ev = <T extends SessionEventType>(e: StoredEvent) => e.event as EventOf<T>;
@@ -166,6 +167,57 @@ export const sessionProjectors: Record<string, Projector> = {
         p.costMicros !== undefined,
         // Stamped by the interceptor; an event from before it is judged by the model, which is deterministic on replay.
         p.costUnknown ?? isCostUnknown(model),
+      ],
+    );
+  },
+  /**
+   * A nested `aom delegate` call: one `shift_costs` row of kind `delegate` keyed by the delegate id, attributed to the
+   * caller's agent, project, card and phase; `parent_id` is the caller, so the session meter (`sessionCost`) adds it to its turns.
+   */
+  DelegateCompleted: async (tx, e) => {
+    const p = ev<'DelegateCompleted'>(e).payload;
+    const c =
+      p.callerKind === 'session_turn'
+        ? await one(
+            tx,
+            `SELECT st.org_id, st.agent_id, th.project_id, NULL::uuid AS card_id, NULL::uuid AS phase_id
+               FROM session_turns st LEFT JOIN threads th ON th.id = st.thread_id WHERE st.id = $1`,
+            [p.callerId],
+          )
+        : await one(
+            tx,
+            `SELECT s.org_id, s.agent_id, COALESCE(s.project_id, c.project_id, bt.project_id) AS project_id, s.card_id, bt.phase_id
+               FROM shifts s LEFT JOIN cards c ON c.id = s.card_id LEFT JOIN ba_tasks bt ON bt.id = s.ba_task_id
+              WHERE s.id = $1`,
+            [p.callerId],
+          );
+    if (!c) return;
+    const model = p.usage.model ?? 'unknown';
+    await exec(
+      tx,
+      `INSERT INTO shift_costs (shift_id, org_id, agent_id, project_id, card_id, phase_id, kind, model, tokens_input,
+         tokens_output, tokens_cache_read, tokens_cache_write, cost_usd_micros, reported_usd_micros, ended_at, cost_stamped,
+         cost_unknown, parent_id)
+       VALUES ($1,$2,$3,$4,$5,$6,'delegate',$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+       ON CONFLICT (shift_id) DO NOTHING`,
+      [
+        p.delegateId,
+        c.org_id,
+        c.agent_id ?? PERSONA_HOST_AGENT_ID,
+        c.project_id ?? null,
+        c.card_id ?? null,
+        c.phase_id ?? null,
+        model,
+        p.usage.inputTokens,
+        p.usage.outputTokens,
+        p.usage.cacheReadTokens,
+        p.usage.cacheWriteTokens,
+        p.costMicros ?? costUsdMicros(model, { ...p.usage }),
+        p.usage.costUsd === undefined ? null : Math.round(p.usage.costUsd * 1_000_000),
+        e.createdAt,
+        p.costMicros !== undefined,
+        p.costUnknown ?? isCostUnknown(model),
+        p.callerId,
       ],
     );
   },

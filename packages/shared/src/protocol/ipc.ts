@@ -343,6 +343,10 @@ export const RpcMethodSchema = z.enum([
   'board.disagreement',
   'board.cast',
   'board.minutes',
+  /** `aom delegate`: a read-only sub-task with a registry persona; run by the runner (`.run`), authorized and booked by the server (`.begin`, `.cost`). */
+  'delegate.run',
+  'delegate.begin',
+  'delegate.cost',
 ]);
 export type RpcMethod = z.infer<typeof RpcMethodSchema>;
 

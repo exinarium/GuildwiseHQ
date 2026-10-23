@@ -183,6 +183,8 @@ export interface ChatStartInput {
   instructions?: string;
   /** See `ShiftStartInput.grantedSkills`. */
   grantedSkills?: GrantedSkill[];
+  /** A narrower step cap than the runtime's own (a delegate's: `DELEGATE_LIMITS.maxSteps`). Only the direct-model runtime has steps. */
+  maxSteps?: number;
   logFile?: string;
 }
 

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { DelegateOutcomeSchema } from '../delegate/index.ts';
 import { ModelChoiceSchema } from '../models/choices.ts';
 import { ParticipantKindSchema, SessionContextSchema, SessionThreadKindSchema } from '../sessions/index.ts';
 import { defineEvent, Id, Usage } from './define.ts';
@@ -111,6 +112,27 @@ export const sessionEvents = [
       /** The model has no price in the tables (a direct-model provider's unlisted model): `costMicros` is 0 and the cost is unknown, not zero. */
       costUnknown: z.boolean().optional(),
       runtimeSessionId: z.string().max(200).optional(),
+    }),
+  ),
+  /**
+   * A nested `aom delegate` call ended (stream `delegate-<id>`). Its usage is booked under the caller: a session turn or a
+   * shift (`shift_costs` kind `delegate`, `parent_id` = the caller), so the session's and the project's meters count it.
+   */
+  defineEvent(
+    'DelegateCompleted',
+    z.object({
+      delegateId: Id,
+      callerKind: z.enum(['session_turn', 'shift']),
+      callerId: Id,
+      /** The session of a `session_turn` caller (so the session page refreshes its cost meter). */
+      threadId: Id.optional(),
+      personaKey: z.string().max(120),
+      usage: Usage,
+      outcome: DelegateOutcomeSchema,
+      durationMs: z.number().int().nonnegative().optional(),
+      /** Stamped when appended, like `SessionTurnCompleted.costMicros`. */
+      costMicros: z.number().int().nonnegative().optional(),
+      costUnknown: z.boolean().optional(),
     }),
   ),
   defineEvent(

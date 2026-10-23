@@ -131,6 +131,7 @@ export class DiscoveryService {
       type === 'SessionTurnStarted' ||
       type === 'SessionTurnRequeued' ||
       type === 'SessionTurnCompleted' ||
+      type === 'DelegateCompleted' ||
       type === 'SessionTurnFailed' ||
       type === 'ThreadMessagePosted'
     ) {

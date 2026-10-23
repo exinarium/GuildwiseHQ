@@ -2,6 +2,7 @@ import {
   CAPABILITY_REGISTRY_FEATURE,
   CHAT_ACTIVITY_FEATURE,
   HEARTBEAT_SEC,
+  isDelegateServerRpc,
   LOCAL_VAULT_CAPABILITY,
   type McpCall,
   normalizeRemoteUrl,
@@ -110,6 +111,7 @@ import { applyDeployProgress, applyDeployResult } from '../delivery/runs.ts';
 import { applyWriteResult } from '../delivery/setup.ts';
 import { pinForWelcome } from '../platform-team/pins.ts';
 import { platformTriageRpc } from '../platform-team/rpc.ts';
+import { delegateRpc } from '../sessions/delegate.ts';
 import type { SessionTerminal } from '../sessions/turns.ts';
 import { buildBrief } from './brief.ts';
 import { claimPendingCommands, completeCommand, requeueSentCommands } from './commands-queue.ts';
@@ -1238,6 +1240,9 @@ export class RunnerHandlers {
       this.send(conn, 'rpc.response', { rpcId: msg.rpcId, ok, result, error });
     };
     try {
+      // `aom delegate` asks the server before it starts and reports its usage after (the caller may have just ended).
+      if (isDelegateServerRpc(msg.method))
+        return reply(...(await delegateRpc(ctx, conn.workstationId, msg.shiftId, msg.method, msg.params)));
       // A discovery or boardroom turn is not a shift: its token is scoped to the turn.
       const sessionTurn = await ctx.services.discovery.turnOf(conn.workstationId, msg.shiftId);
       if (sessionTurn)

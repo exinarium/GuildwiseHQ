@@ -56,6 +56,23 @@ export function createCostStampInterceptor(): Interceptor {
           continue;
         }
       }
+      if (ev.type === 'DelegateCompleted' && ev.payload.costMicros === undefined) {
+        const model = ev.payload.usage.model;
+        if (model) {
+          out.push({
+            ...input,
+            event: {
+              ...ev,
+              payload: {
+                ...ev.payload,
+                costMicros: costUsdMicros(model, { ...ev.payload.usage }),
+                ...(isCostUnknown(model) ? { costUnknown: true } : {}),
+              },
+            },
+          } as typeof input);
+          continue;
+        }
+      }
       out.push(input);
     }
     return out;

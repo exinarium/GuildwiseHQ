@@ -12,9 +12,10 @@ import { conflict } from '../errors.ts';
 export async function sessionCost(db: Queryable, t: Row): Promise<SessionCost> {
   const r = await one(
     db,
-    `SELECT COALESCE(sum(sc.cost_usd_micros),0)::bigint AS micros, count(*)::int AS turns,
+    `SELECT COALESCE(sum(sc.cost_usd_micros),0)::bigint AS micros,
+            count(*) FILTER (WHERE sc.kind = 'session')::int AS turns,
             count(*) FILTER (WHERE sc.cost_unknown)::int AS unpriced
-       FROM shift_costs sc JOIN session_turns st ON st.id = sc.shift_id WHERE st.thread_id = $1`,
+       FROM shift_costs sc JOIN session_turns st ON st.id = COALESCE(sc.parent_id, sc.shift_id) WHERE st.thread_id = $1`,
     [t.id],
   );
   const costMicros = Number(r?.micros ?? 0);
@@ -46,18 +47,27 @@ export async function assertSessionMayQueue(db: Queryable, t: Row, now: Date): P
         { budgetUsd: cfg.budgetUsd, costUsd: c.costUsd },
       );
   }
-  if (t.project_id) {
-    const p = await one(
-      db,
-      `SELECT ${projectPausedSql('p')} AS paused, ${budgetPausedSql('p', '$2')} AS budget_paused FROM projects p WHERE p.id=$1`,
-      [t.project_id, now],
+  await assertProjectMayRun(db, t.project_id, now, 'session');
+}
+
+/** The project is not paused and its monthly budget is not used up (shared by a session turn and an `aom delegate` call). */
+export async function assertProjectMayRun(
+  db: Queryable,
+  projectId: string | null | undefined,
+  now: Date,
+  what: 'session' | 'shift',
+): Promise<void> {
+  if (!projectId) return;
+  const p = await one(
+    db,
+    `SELECT ${projectPausedSql('p')} AS paused, ${budgetPausedSql('p', '$2')} AS budget_paused FROM projects p WHERE p.id=$1`,
+    [projectId, now],
+  );
+  if (p?.paused)
+    throw conflict('project_paused', `The project of this ${what} is paused: resume it to continue.`);
+  if (p?.budget_paused)
+    throw conflict(
+      'project_budget_paused',
+      `The project of this ${what} has used up its monthly budget: raise it or override it for this month to continue.`,
     );
-    if (p?.paused)
-      throw conflict('project_paused', 'The project of this session is paused: resume it to continue.');
-    if (p?.budget_paused)
-      throw conflict(
-        'project_budget_paused',
-        'The project of this session has used up its monthly budget: raise it or override it for this month to continue.',
-      );
-  }
 }

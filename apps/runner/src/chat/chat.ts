@@ -8,17 +8,20 @@ import {
   capChatSegments,
   chatSegmentsText,
   chatToolsFor,
+  DELEGATE_RPC,
   type IpcReportRequest,
   type IpcReportResponse,
   type IpcRpcRequest,
   type IpcRpcResponse,
   isBoardRpc,
+  isDelegateServerRpc,
   isSessionRpc,
   JIRA_SKILL_PATH,
   type ReadableFolder,
   renderChatInstructions,
   renderDirectSystemPrompt,
   renderSessionTurnInstructions,
+  SESSION_PURPOSE_VERBS,
   type ServerToRunnerOf,
   sessionToolsFor,
   summarizeCommandTexts,
@@ -41,6 +44,7 @@ import { type CapabilityRegistry, skillRpc } from '../capabilities/registry.ts';
 import { type GuardClone, markJobStarted } from '../ceo/guard-hook.ts';
 import { selectChatProfile } from '../ceo/profile.ts';
 import { composeOwnerMessage, removeTurnDir, turnDirOf, writeTurnFiles } from '../ceo/turn-files.ts';
+import { DELEGATE_NOTE, DelegateRunner } from '../delegate/delegate.ts';
 import { recordDevopsAudit } from '../devops/audit.ts';
 import { redactCommand } from '../devops/guard.ts';
 import { type ExternalAdapters, formatSource, readScopedJira } from '../external/index.ts';
@@ -172,9 +176,19 @@ export class ChatManager {
   /** Chats that ran to an end in this process: a redelivered `chat.start` of one is ignored. */
   private readonly recent = new Set<string>();
   private readonly log: Logger;
+  /** `aom delegate`: read-only persona sub-tasks of a running turn (costs booked under it). */
+  private readonly delegates: DelegateRunner;
 
   constructor(readonly deps: ChatDeps) {
     this.log = deps.log ?? nullLogger;
+    this.delegates = new DelegateRunner({
+      adapters: deps.adapters,
+      paths: deps.paths,
+      ipc: deps.ipc,
+      rpc: (id, method, params) => deps.rpc(id, method, params),
+      ...(deps.capabilities ? { capabilities: deps.capabilities } : {}),
+      ...(deps.log ? { log: deps.log } : {}),
+    });
   }
 
   get size(): number {
@@ -229,6 +243,7 @@ export class ChatManager {
       this.error(msg, err instanceof Error ? err.message : String(err));
     } finally {
       if (chat.token) this.deps.ipc.revoke(chat.token);
+      this.delegates.endCaller(msg.chatId, 'the turn ended');
       this.active.delete(msg.chatId);
       this.remember(msg.chatId);
       if (chat.turnDir) removeTurnDir(chat.turnDir);
@@ -242,6 +257,7 @@ export class ChatManager {
     const c = this.active.get(chatId);
     if (!c) return;
     c.stopReason ??= 'cancelled';
+    this.delegates.endCaller(chatId, 'cancelled');
     await c.session?.stop('chat.cancel');
   }
 
@@ -313,6 +329,22 @@ export class ChatManager {
       rpc: async (req: IpcRpcRequest): Promise<IpcRpcResponse> => {
         if (req.method === 'skill.show' || req.method === 'skill.list')
           return skillRpc(this.deps.capabilities, req.method, req.params, chat.msg.context?.projectId);
+        // `aom delegate`: a read-only sub-task with a registry persona. A session turn may use it where its purpose allows (the
+        // server decides in `delegate.begin`); of the plain chats not the CEO's and the DevOps engineer's.
+        if (req.method === DELEGATE_RPC) {
+          if (!chat.msg.session && (chat.msg.agent.isDevops || chat.msg.agent.roleKey === 'ceo'))
+            return { ok: false, error: '`aom delegate` is not available to this agent' };
+          return this.delegates.run(
+            {
+              id: chatId,
+              runtime: chat.msg.agent.runtime,
+              ...(chat.msg.context?.projectId ? { projectId: chat.msg.context.projectId } : {}),
+            },
+            req.params,
+          );
+        }
+        // The runner's own questions to the server about a delegate are not for the agent to ask.
+        if (isDelegateServerRpc(req.method)) return { ok: false, error: `${req.method} is not available` };
         // A turn of a discovery or boardroom session reads and talks: `aom ledger search` and the `aom session ...` verbs
         // are all that reach the server from it (which verbs a turn may use, the server decides from what the turn is for).
         if (chat.msg.session)
@@ -771,7 +803,11 @@ export class ChatManager {
     if (!direct)
       await adapter.writeInstructions(
         sandbox,
-        `${renderSessionTurnInstructions(spec, persona ?? '')}${capIndex ? `\n\n${capIndex}\n` : ''}`,
+        `${renderSessionTurnInstructions(spec, persona ?? '')}${capIndex ? `\n\n${capIndex}\n` : ''}${
+          session.purpose && SESSION_PURPOSE_VERBS[session.purpose]?.includes('delegate')
+            ? `\n\n${DELEGATE_NOTE}\n`
+            : ''
+        }`,
       );
     chat.token = this.deps.ipc.registerShift(this.handlerFor(chat));
     const tc = this.deps.toolchains?.resolve();
@@ -937,7 +973,7 @@ export class ChatManager {
       this.deps.capabilities?.grantedSkills(msg.agent.skills, msg.context.projectId) ?? [];
     await adapter.writeInstructions(
       sandbox,
-      `${signIn ? `${signIn}\n` : ''}${graphNote}${capIndex ? `${capIndex}\n\n` : ''}${renderChatInstructions(
+      `${signIn ? `${signIn}\n` : ''}${graphNote}${capIndex ? `${capIndex}\n\n` : ''}${devops || msg.agent.roleKey === 'ceo' ? '' : `${DELEGATE_NOTE}\n\n`}${renderChatInstructions(
         msg.agent,
         msg.context,
         {

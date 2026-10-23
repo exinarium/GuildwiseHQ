@@ -13,6 +13,7 @@ export * from './claude/accounts.ts';
 export * from './cloud/index.ts';
 export * from './costs/index.ts';
 export * from './definitions/index.ts';
+export * from './delegate/index.ts';
 export * from './delivery/index.ts';
 export * from './devops/index.ts';
 export * from './discovery/doc.ts';

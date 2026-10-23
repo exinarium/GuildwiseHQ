@@ -250,7 +250,7 @@ export class DirectModelAdapter implements RuntimeAdapter {
           system: input.instructions ?? '',
           messages,
           tools: toolSet,
-          stopWhen: isStepCount(this.opts.maxSteps),
+          stopWhen: isStepCount(Math.min(input.maxSteps ?? this.opts.maxSteps, this.opts.maxSteps)),
           abortSignal: ac.signal,
           maxOutputTokens: this.opts.maxOutputTokens,
           maxRetries: 2,

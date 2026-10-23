@@ -256,6 +256,7 @@ describe('direct-model adapter: the tool loop', () => {
         'board_next',
         'board_pause',
         'board_show',
+        'delegate',
       ].sort(),
     );
     expect(await run('board_minutes', 'boardroom')).toEqual(
