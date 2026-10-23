@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 import { CARD_ATTACHMENTS_DIR, type ClaudeAccountInfo, MAIN_ACCOUNT } from '@aom/shared';
 import { execa } from 'execa';
 import type { z } from 'zod';
+import { type GrantedSkill, materializeSkills, skillsDirOf } from '../capabilities/materialize.ts';
 import type { ClaudeRuntimeConfigSchema } from '../config.ts';
 import { deleteRootsFor, type GuardConfig } from '../devops/guard.ts';
 import { holdSandboxRepo } from '../git/config-lock.ts';
@@ -32,6 +33,7 @@ import {
   buildDevopsChatSettings,
   buildShiftSettings,
   type ClaudePolicyContext,
+  type ClaudeSettings,
   DEPLOY_ASK_ALLOW,
   DEVOPS_INHERITED_ENV,
   gitDirsOf,
@@ -96,6 +98,8 @@ export function sessionEnv(
     devopsGuard?: Pick<NonNullable<ShiftStartInput['devopsGuard']>, 'readOnlyScan'>;
     kind?: ShiftStartInput['kind'];
     promptCacheTtl?: ShiftStartInput['promptCacheTtl'];
+    /** The agent loads its granted skills natively: Claude Code's own bundled skills are switched off. */
+    nativeSkills?: boolean;
   },
   cfg: ClaudeConfig,
   parent: NodeJS.ProcessEnv = process.env,
@@ -122,6 +126,7 @@ export function sessionEnv(
     // subscription costs twice the input price and is never read again. Verified against claude 2.1.302 (the variable
     // is in its binary next to ENABLE_PROMPT_CACHING_1H / FORCE_PROMPT_CACHING_5M).
     ...(input.promptCacheTtl ? { CLAUDE_CODE_PROMPT_CACHE_TTL: input.promptCacheTtl } : {}),
+    ...(input.nativeSkills ? { CLAUDE_CODE_DISABLE_BUNDLED_SKILLS: '1' } : {}),
   };
   // Opt-in: Claude Code strips credentials from what Bash and MCP children see and isolates their PID namespace.
   // The DevOps engineer is unsandboxed and works as the user: their HOME (docker, ssh, kube configs) and the agent
@@ -150,6 +155,12 @@ export function sessionEnv(
   );
 }
 
+/** Whether this call loads the agent's granted skills natively (and so cannot use `--disable-slash-commands`). */
+export const nativeSkills = (input: {
+  grantedSkills?: unknown[] | undefined;
+  agent?: { isDevops?: boolean };
+}): boolean => !!input.grantedSkills?.length && input.agent?.isDevops !== true;
+
 /** The exact argv/env of docs/ARCHITECTURE.md section 12.2. Pure; unit tested. */
 export function buildClaudeCommand(input: ShiftStartInput, cfg: ClaudeConfig): ClaudeCommand {
   const viaStdin = Buffer.byteLength(input.prompt) > MAX_ARGV_PROMPT_BYTES;
@@ -173,10 +184,12 @@ export function buildClaudeCommand(input: ShiftStartInput, cfg: ClaudeConfig): C
     '--strict-mcp-config',
     '--mcp-config',
     join(input.sandbox.configDir, 'mcp.json'),
-    // No skills: the account's synced skills (anthropic-skills:*) and the bundled ones add ~10K tokens of descriptions
-    // to every first call and no agent uses them (verified with claude 2.1.302: the init message lists 0 skills).
-    '--disable-slash-commands',
   );
+  // No skills: the account's synced skills (anthropic-skills:*) and the bundled ones add ~10K tokens of descriptions
+  // to every first call and no agent uses them (verified with claude 2.1.302: the init message lists 0 skills). An agent
+  // with granted skills gets them natively instead (`nativeSkills`): the flag is dropped, the granted ones are written into
+  // its private config dir, and a PreToolUse hook (`aom skill-guard`) refuses every other skill.
+  if (!nativeSkills(input)) args.push('--disable-slash-commands');
   // A scan's clones are NOT `--add-dir`s: Claude Code opens every added directory whole to the sandbox, which would
   // undo the per-file masks (`.git/config`, `.env`) of the scan sandbox. The Read tool reads them anyway (no
   // working-directory block in the DevOps settings; the secret rules deny the settings files).
@@ -192,6 +205,7 @@ export function buildClaudeCommand(input: ShiftStartInput, cfg: ClaudeConfig): C
         sandbox: input.sandbox,
         agent: { isDevops: input.agent.isDevops },
         ...(input.devopsGuard?.readOnlyScan ? { devopsGuard: { readOnlyScan: true } } : {}),
+        ...(nativeSkills(input) ? { nativeSkills: true } : {}),
         ...(input.kind ? { kind: input.kind } : {}),
         ...(input.promptCacheTtl ? { promptCacheTtl: input.promptCacheTtl } : {}),
       },
@@ -231,8 +245,8 @@ export function buildClaudeChatCommand(input: ChatStartInput, cfg: ClaudeConfig)
     '--strict-mcp-config',
     '--mcp-config',
     join(input.sandbox.configDir, 'mcp.json'),
-    '--disable-slash-commands',
   );
+  if (!nativeSkills(input)) args.push('--disable-slash-commands');
   for (const d of input.readDirs ?? []) args.push('--add-dir', d);
   if (input.resumeSessionId) args.push('--resume', input.resumeSessionId);
   // G-Q1: the DevOps agent's chat works as the user like its shifts (real HOME, no sandbox); other chats stay sandboxed
@@ -240,7 +254,12 @@ export function buildClaudeChatCommand(input: ChatStartInput, cfg: ClaudeConfig)
     bin: cfg.bin,
     args,
     env: sessionEnv(
-      { env: input.env, sandbox: input.sandbox, agent: { isDevops: input.agent.isDevops } },
+      {
+        env: input.env,
+        sandbox: input.sandbox,
+        agent: { isDevops: input.agent.isDevops },
+        ...(nativeSkills(input) ? { nativeSkills: true } : {}),
+      },
       cfg,
     ),
   };
@@ -601,6 +620,35 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     }
   }
 
+  /**
+   * The agent's granted skills (`grantedSkills`, absent: leave the folder alone): wipes and rewrites `<config dir>/skills`
+   * with exactly those, so nothing of an earlier shift stays and the account's own skills are never copied in, and adds the
+   * allow-list hook that refuses every other `Skill` call (the account's synced skills and plugins load natively otherwise).
+   * Returns the input with only the skills that were written.
+   */
+  private prepareSkills<T extends { grantedSkills?: GrantedSkill[]; agent: { isDevops?: boolean } }>(
+    dir: string,
+    input: T,
+    settings: ClaudeSettings,
+  ): T {
+    if (input.grantedSkills === undefined || input.agent.isDevops) return input;
+    const written = materializeSkills(skillsDirOf(dir), input.grantedSkills);
+    const kept = input.grantedSkills.filter((g) => written.includes(g.name));
+    if (kept.length === 0) return { ...input, grantedSkills: [] };
+    const file = join(dir, 'skill-guard.json');
+    writeFileSync(file, `${JSON.stringify({ allowed: written })}\n`, { mode: 0o600 });
+    const quote = (w: string) => `'${w.replace(/'/g, `'\\''`)}'`;
+    const command = `AOM_SKILL_GUARD=${quote(file)} ${[...selfCommand('aom'), 'skill-guard'].map(quote).join(' ')}`;
+    settings.hooks = {
+      PreToolUse: [
+        ...(settings.hooks?.PreToolUse ?? []),
+        { matcher: 'Skill', hooks: [{ type: 'command' as const, command, timeout: 10 }] },
+      ],
+    };
+    settings.permissions.deny = [...new Set([...settings.permissions.deny, 'Skill(anthropic-skills:*)'])];
+    return { ...input, grantedSkills: kept };
+  }
+
   async writeInstructions(sandbox: { configDir: string }, markdown: string): Promise<void> {
     await mkdir(sandbox.configDir, { recursive: true });
     await writeFile(join(sandbox.configDir, 'CLAUDE.md'), markdown);
@@ -624,6 +672,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       input.agent.roleKey,
       input.agent.isDevops,
     );
+    input = this.prepareSkills(dir, input, settings);
     await writeFile(join(dir, 'settings.json'), `${JSON.stringify(settings, null, 2)}\n`);
     // A read-only worktree (reviewer): Claude Code's sandbox must find its protected dotfile names already there.
     const dropPlaceholders = settings.sandbox?.filesystem.denyWrite.includes(input.cwd)
@@ -709,33 +758,28 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       devops || input.agent.roleKey === 'ceo' ? undefined : input.context?.mcpServers,
       intakeMcp && existsSync(intakeMcp) ? intakeMcp : undefined,
     );
-    await writeFile(
-      join(dir, 'settings.json'),
-      `${JSON.stringify(
-        devops
-          ? buildDevopsChatSettings(
-              input.agent.permissions,
-              this.policy(input, input.cwd, false, guard?.command),
-              input.sandbox,
-            )
-          : input.agent.roleKey === 'ceo'
-            ? buildCeoSettings(this.policy(chatInput, input.cwd, true), input.sandbox)
-            : buildChatSettings(
-                input.readOnly,
-                [
-                  ...(input.intake ? (this.cfg.intake?.allowedTools ?? []) : []),
-                  ...used.map((u) => `mcp__${u.name}`),
-                ],
-                this.policy(chatInput, input.cwd, true),
-                input.sandbox,
-              ),
-        null,
-        2,
-      )}\n`,
-    );
+    const chatSettings: ClaudeSettings = devops
+      ? buildDevopsChatSettings(
+          input.agent.permissions,
+          this.policy(input, input.cwd, false, guard?.command),
+          input.sandbox,
+        )
+      : input.agent.roleKey === 'ceo'
+        ? buildCeoSettings(this.policy(chatInput, input.cwd, true), input.sandbox)
+        : buildChatSettings(
+            input.readOnly,
+            [
+              ...(input.intake ? (this.cfg.intake?.allowedTools ?? []) : []),
+              ...used.map((u) => `mcp__${u.name}`),
+            ],
+            this.policy(chatInput, input.cwd, true),
+            input.sandbox,
+          );
+    const withSkills = this.prepareSkills(dir, chatInput, chatSettings);
+    await writeFile(join(dir, 'settings.json'), `${JSON.stringify(chatSettings, null, 2)}\n`);
     await this.linkCredentials(dir, used, account.key);
     const cmd = buildClaudeChatCommand(
-      guard ? { ...chatInput, env: input.env } : chatInput,
+      guard ? { ...withSkills, env: input.env } : withSkills,
       this.liveFor(account),
     );
     const parser = new ClaudeStreamParser();

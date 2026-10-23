@@ -29,6 +29,7 @@ import { ledgerEvents } from './ledger.ts';
 import { mailEvents } from './mail.ts';
 import { orgEvents } from './org.ts';
 import { outboundEvents } from './outbound.ts';
+import { packEvents } from './pack.ts';
 import { phaseEvents } from './phase.ts';
 import { platformEvents } from './platform.ts';
 import { projectEvents } from './project.ts';
@@ -101,6 +102,7 @@ export const DomainEventSchema = z.discriminatedUnion('type', [
   ...boardEvents,
   ...documentEvents,
   ...capabilityEvents,
+  ...packEvents,
 ]);
 export type DomainEvent = z.infer<typeof DomainEventSchema>;
 export type EventType = DomainEvent['type'];

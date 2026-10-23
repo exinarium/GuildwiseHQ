@@ -23,6 +23,7 @@ import {
   LOCAL_VAULT_CAPABILITY,
   type McpAuthState,
   normalizeRemoteUrl,
+  PACKS_CAPABILITY,
   READONLY_DESIGN_CAPABILITY,
   type RepoReport,
   RUNNER_PIN_CAPABILITY,
@@ -49,6 +50,7 @@ import { formatLimitTime } from './adapters/claude-usage-limit.ts';
 import { buildAdapters } from './adapters/registry.ts';
 import type { RuntimeAdapter } from './adapters/types.ts';
 import { ServerHttp } from './attachments/index.ts';
+import { PackManager } from './capabilities/packs.ts';
 import { CapabilityRegistry } from './capabilities/registry.ts';
 import { ChatManager } from './chat/chat.ts';
 import { loadConfig, type RunnerConfig, saveConfig } from './config.ts';
@@ -463,7 +465,13 @@ export class Runner {
         load: { runningShifts: this.supervisor.size },
       }),
     });
-    this.capabilities = new CapabilityRegistry({ log: this.log });
+    this.packs = new PackManager({
+      dir: this.paths.packs,
+      log: this.log,
+      report: (r) => void this.client.send('packs.report', r),
+      allowLocal: process.env.AOM_PACKS_ALLOW_LOCAL === '1',
+    });
+    this.capabilities = new CapabilityRegistry({ log: this.log, packs: this.packs });
     this.vaults = new VaultManager({
       paths: this.paths,
       log: this.log,
@@ -498,6 +506,14 @@ export class Runner {
     });
     this.supervisor = new ShiftSupervisor({
       capabilities: this.capabilities,
+      onProjectCapabilities: (projectId, r) => {
+        if (this.serverFeatures.has(PACKS_CAPABILITY))
+          this.client.send('capabilities.project.report', {
+            projectId,
+            items: r.items.slice(0, 300),
+            issues: r.issues.slice(0, 50),
+          });
+      },
       paths: this.paths,
       config: opts.config,
       adapters: this.adapters,
@@ -853,6 +869,7 @@ export class Runner {
   /** What the server announced in its last `welcome` (`features`). */
   private serverFeatures = new Set<string>();
   private readonly capabilities: CapabilityRegistry;
+  private readonly packs: PackManager;
 
   /** Re-reads the organization vault's capabilities after a sync of that vault and reports them when they changed. */
   private indexCapabilities(vaultId: string): void {
@@ -1136,6 +1153,8 @@ export class Runner {
         BOARD_VERBS_CAPABILITY,
         // The direct-model runtime (Vercel AI SDK, provider keys kept here): session turns and chats on OpenAI, Gemini, Anthropic's API or an OpenAI-compatible endpoint.
         DIRECT_MODEL_CAPABILITY,
+        // Capability packs: git import pinned to a commit, hash-checked before use (`packs.sync`, `pack.check`, `packs.report`).
+        PACKS_CAPABILITY,
         // The local opt-in (`aom-runner ceo full-power on`), read fresh: the server shows "Full power is off" without it.
         ...(this.freshConfig().ceo.fullPower ? [CEO_FULL_POWER_CAPABILITY] : []),
       ],
@@ -1755,6 +1774,14 @@ export class Runner {
       } else if (command === 'env.secret.set') {
         // Ciphertext in, a fact out: the value is never in an answer, a log line or an event.
         done(true, this.targetSecrets.set(CommandPayloadSchemas['env.secret.set'].parse(payload)));
+      } else if (command === 'packs.sync') {
+        // Clone/fetch, pin, index and enforce the packs the server wants here; the answers are `packs.report` messages.
+        await this.packs.sync(CommandPayloadSchemas['packs.sync'].parse(payload).packs);
+        done(true, { packs: this.packs.summary().length });
+      } else if (command === 'pack.check') {
+        const p = CommandPayloadSchemas['pack.check'].parse(payload);
+        await this.packs.check(p.packId, p.ref);
+        done(true, {});
       } else if (command === 'provider.key.set') {
         // Ciphertext in, a fact out (like env.secret.set): the key is never in an answer, a log line or an event.
         const r = this.providers.set(CommandPayloadSchemas['provider.key.set'].parse(payload));

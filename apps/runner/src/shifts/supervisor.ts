@@ -55,7 +55,7 @@ import {
   type ServerHttp,
   syncCardAttachments,
 } from '../attachments/index.ts';
-import { type CapabilityRegistry, skillRpc } from '../capabilities/registry.ts';
+import { type CapabilityRegistry, type ProjectIndexResult, skillRpc } from '../capabilities/registry.ts';
 import type { RunnerConfig } from '../config.ts';
 import type { Outbox } from '../connection/outbox.ts';
 import { recordDevopsAudit } from '../devops/audit.ts';
@@ -156,6 +156,8 @@ export interface ShiftTransport {
 export interface SupervisorDeps {
   /** The capability registry (`aom skill show|list`, and the index in the instructions of an agent whose role lists skills). */
   capabilities?: CapabilityRegistry;
+  /** The capabilities found in a project's checkout changed: tell the server (metadata only). */
+  onProjectCapabilities?: (projectId: string, r: ProjectIndexResult) => void;
   paths: RunnerPaths;
   config: RunnerConfig;
   adapters: Map<string, RuntimeAdapter>;
@@ -979,8 +981,17 @@ export class ShiftSupervisor {
     }
     const texts = shiftTexts(msg, s.brief);
     // The skills, playbooks and personas the role lists, as a name-and-description index (`aom skill show <key>` loads one).
-    const capIndex = this.deps.capabilities?.instructionsIndex(msg.agent.skills) ?? '';
+    // The project's own skills and subagents (`.agents/skills`, `.claude/skills`, `.claude/agents` of its checkout) join the
+    // registry for this project; what changed since the last look is reported so the registry page lists it.
+    const registryProject = msg.kind === 'card' ? msg.brief.project.id : undefined;
+    if (registryProject && s.worktree && this.deps.capabilities) {
+      const r = this.deps.capabilities.indexProject(registryProject, s.worktree.path);
+      if (r.changed) this.deps.onProjectCapabilities?.(registryProject, r);
+    }
+    const capIndex = this.deps.capabilities?.instructionsIndex(msg.agent.skills, registryProject) ?? '';
     if (capIndex) texts.instructions += `\n${capIndex}\n`;
+    // The skills this agent's role grants, for a runtime with native skills (Claude Code, Codex): written into its private folder.
+    const grantedSkills = this.deps.capabilities?.grantedSkills(msg.agent.skills, registryProject) ?? [];
     // The project's reference repositories (read-only), for a card shift and a BA task shift (the server sends repositories
     // there only for a repository-scoping task given to an architect); only clones this runner found itself.
     const registeredFolders =
@@ -1178,6 +1189,7 @@ export class ShiftSupervisor {
         sandbox,
         agent: msg.agent as AgentRuntimeSpec,
         env: s.env,
+        grantedSkills,
         addDirs: vaultCtx && msg.kind === 'card' ? [vaultCtx.addDir] : scanDirs,
         readDirs: [
           ...readFolders,
@@ -1510,7 +1522,7 @@ export class ShiftSupervisor {
       report: async (req: IpcReportRequest) => this.submit(s, req.report),
       rpc: async (req: IpcRpcRequest) => {
         if (req.method === 'skill.show' || req.method === 'skill.list')
-          return skillRpc(this.deps.capabilities, req.method, req.params);
+          return skillRpc(this.deps.capabilities, req.method, req.params, s.msg.brief?.project?.id);
         // `aom ceo ...` belongs to the CEO's own shifts (the server checks the agent again).
         if (req.method === 'ceo') {
           if (!(s.msg.kind === 'ceo' && s.msg.agent.roleKey === 'ceo'))

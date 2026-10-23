@@ -1,5 +1,11 @@
 import { z } from 'zod';
 import { BriefAttachmentSchema } from '../attachments/index.ts';
+import {
+  PackCheckPayloadSchema,
+  PacksReportSchema,
+  PacksSyncPayloadSchema,
+  ProjectCapabilitiesReportSchema,
+} from '../capabilities/pack-wire.ts';
 import { CapabilityMetaSchema } from '../capabilities/parse.ts';
 import { CHANGED_PATHS_MAX, DiffUploadSchema, E2eAreaMapSchema } from '../cards/lean-v6.ts';
 import { DiffStats, StoredCompletionAction } from '../cards/types.ts';
@@ -796,11 +802,16 @@ export const RunnerCommandNameSchema = z.enum([
   'claude.account.ensure',
   'provider.key.set',
   'provider.key.clear',
+  'packs.sync',
+  'pack.check',
 ]);
 export type RunnerCommandName = z.infer<typeof RunnerCommandNameSchema>;
 
 /** Typed payloads for the commands; `command.payload` is the loose record on the wire. */
 export const CommandPayloadSchemas = {
+  /** The full list of capability packs this workstation should hold (git, pinned commit, trust, scripts); see section 38.4. */
+  'packs.sync': PacksSyncPayloadSchema,
+  'pack.check': PackCheckPayloadSchema,
   'provider.key.set': ProviderKeySetPayloadSchema,
   'provider.key.clear': ProviderKeyClearPayloadSchema,
   'claude.account.ensure': ClaudeAccountEnsurePayloadSchema,
@@ -1071,6 +1082,13 @@ export const CapabilitiesReportSchema = msg('capabilities.report', {
     .max(100)
     .default([]),
 });
+/** A pack's state on this workstation (cloned, indexed, update found, failed, or its files no longer match the approved hash). */
+export const PacksReportMsgSchema = msg('packs.report', PacksReportSchema.shape);
+/** The capabilities found in a project's checkout (`.agents/skills`, `.claude/skills`, `.claude/agents`). */
+export const ProjectCapabilitiesReportMsgSchema = msg(
+  'capabilities.project.report',
+  ProjectCapabilitiesReportSchema.shape,
+);
 /** How a runner's self-update stands (docs/RUNNER.md "Updates"). */
 export const RUNNER_UPDATE_STATES = [
   'up_to_date',
@@ -1561,6 +1579,8 @@ export const RunnerToServerSchema = z.discriminatedUnion('type', [
   McpServersReportSchema,
   ToolchainsReportSchema,
   CapabilitiesReportSchema,
+  PacksReportMsgSchema,
+  ProjectCapabilitiesReportMsgSchema,
   JiraReportSchema,
   IntegrationsReportSchema,
   IntegrationSessionSchema,

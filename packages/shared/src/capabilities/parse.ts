@@ -17,8 +17,13 @@ export const CAPABILITY_KINDS = ['skill', 'persona', 'playbook'] as const;
 export const CapabilityKindSchema = z.enum(CAPABILITY_KINDS);
 export type CapabilityKind = z.infer<typeof CapabilityKindSchema>;
 
-/** Where a capability came from. Later sources override earlier ones with the same kind and key. */
-export const CapabilitySourceSchema = z.enum(['builtin', 'org-vault']);
+/**
+ * Where a capability came from. Precedence, lowest first: built-in, organization vault, project repository, imported pack
+ * (`SOURCE_RANK`). A later source overrides an earlier one with the same kind and key; a pack's keys are namespaced
+ * (`bmad:analyst`) so in practice a pack never shadows anything by accident.
+ */
+export const CAPABILITY_SOURCES = ['builtin', 'org-vault', 'project-repo', 'pack'] as const;
+export const CapabilitySourceSchema = z.enum(CAPABILITY_SOURCES);
 export type CapabilitySource = z.infer<typeof CapabilitySourceSchema>;
 
 /** Lowercase letters and digits joined by single hyphens, at most 64 characters (the Agent Skills `name` rule). */
@@ -28,16 +33,44 @@ export const CapabilityKeySchema = z
   .max(64)
   .regex(/^[a-z0-9]+(-[a-z0-9]+)*$/, 'lowercase letters, digits and single hyphens');
 
+export const SOURCE_RANK: Record<CapabilitySource, number> = {
+  builtin: 0,
+  'org-vault': 1,
+  'project-repo': 2,
+  pack: 3,
+};
+
+/** A key inside an imported pack: `<pack>:<key>`, each part lowercase letters, digits and single hyphens. */
+export const PackedKeySchema = z
+  .string()
+  .min(3)
+  .max(129)
+  .regex(/^[a-z0-9]+(-[a-z0-9]+)*:[a-z0-9]+(-[a-z0-9]+)*$/, '<pack>:<key>');
+/** A plain key or a pack key. */
+export const AnyCapabilityKeySchema = z.union([CapabilityKeySchema, PackedKeySchema]);
+export const packedKey = (pack: string, key: string): string => `${pack}:${key}`;
+export const isPackedKey = (key: string): boolean => key.includes(':');
+
 /** The only thing the runner reports to the server about a vault capability: never the content. */
-export const CapabilityMetaSchema = z.object({
-  key: CapabilityKeySchema,
+const MetaExtras = {
+  /** The pack this comes from (`source 'pack'`). */
+  pack: CapabilityKeySchema.optional(),
+  hasScripts: z.boolean().optional(),
+  tags: z.array(z.string().max(40)).max(10).optional(),
+  icon: z.string().max(60).optional(),
+};
+const MetaBase = {
   kind: CapabilityKindSchema,
   name: z.string().min(1).max(200),
   description: z.string().max(1024),
   hash: z.string().regex(/^[0-9a-f]{64}$/),
   source: CapabilitySourceSchema,
-});
-export type CapabilityMeta = z.infer<typeof CapabilityMetaSchema>;
+  ...MetaExtras,
+};
+export const CapabilityMetaSchema = z.object({ key: CapabilityKeySchema, ...MetaBase });
+/** What a registry lists: the same, with a pack's `<pack>:<key>` keys allowed. */
+export const RegistryMetaSchema = z.object({ key: AnyCapabilityKeySchema, ...MetaBase });
+export type CapabilityMeta = Omit<z.infer<typeof RegistryMetaSchema>, 'key'> & { key: string };
 
 // ---------------------------------------------------------------------------------------------------- frontmatter
 
@@ -101,7 +134,16 @@ export const STEP_FILE_RE = /^steps\/step-(\d{2})-[a-z0-9][a-z0-9-]*\.md$/;
 // ---------------------------------------------------------------------------------------------------- the parsed forms
 
 interface Base {
+  /** A plain key, or `<pack>:<key>` for a capability of an imported pack. */
   key: string;
+  /** Set for a capability of an imported pack. */
+  pack?: { name: string; sha?: string };
+  /** The capability ships files that could run (`scripts/` or executable-looking files). */
+  hasScripts?: boolean;
+  /** Free labels the pickers read: `discovery`, `template:brief`, `template:prd`, `roster`, `delegate`. */
+  tags?: string[];
+  /** A persona's icon, for the pickers (the metadata does not carry the prompt). */
+  icon?: string;
   /** Path of the file that carries the frontmatter, relative to the capability root (`SKILL.md`, `<key>.md`, `workflow.md`). */
   main: string;
   /** Every file of the capability, by path relative to its root. */
@@ -277,6 +319,10 @@ export function capabilityMeta(e: ParsedCapability, source: CapabilitySource): C
     description: e.description.slice(0, 1024),
     hash: e.hash,
     source,
+    ...(e.pack ? { pack: e.pack.name } : {}),
+    ...(e.hasScripts ? { hasScripts: true } : {}),
+    ...(e.tags?.length ? { tags: e.tags } : {}),
+    ...(e.icon ? { icon: e.icon } : {}),
   };
 }
 
@@ -289,7 +335,12 @@ export const capabilityId = (c: { kind: CapabilityKind; key: string }): string =
  */
 export function mergeRegistry(...sources: CapabilityMeta[][]): CapabilityMeta[] {
   const byId = new Map<string, CapabilityMeta>();
-  for (const list of sources) for (const m of list) byId.set(capabilityId(m), m);
+  for (const list of sources)
+    for (const m of list) {
+      const cur = byId.get(capabilityId(m));
+      // The higher source wins whatever the order of the lists; equal rank: the later list.
+      if (!cur || SOURCE_RANK[m.source] >= SOURCE_RANK[cur.source]) byId.set(capabilityId(m), m);
+    }
   return [...byId.values()].sort((a, b) =>
     a.kind === b.kind ? a.key.localeCompare(b.key) : a.kind.localeCompare(b.kind),
   );
@@ -306,8 +357,11 @@ export function resolveCapabilityRef<T extends { kind: CapabilityKind; key: stri
   const colon = ref.indexOf(':');
   if (colon > 0) {
     const kind = ref.slice(0, colon);
-    const key = ref.slice(colon + 1);
-    return all.find((c) => c.kind === kind && c.key === key);
+    // `persona:bmad:analyst` is exact; `bmad:analyst` (a pack key) is not a kind prefix and resolves like a bare key.
+    if ((CAPABILITY_KINDS as readonly string[]).includes(kind)) {
+      const key = ref.slice(colon + 1);
+      return all.find((c) => c.kind === kind && c.key === key);
+    }
   }
   for (const kind of CAPABILITY_KINDS) {
     const hit = all.find((c) => c.kind === kind && c.key === ref);

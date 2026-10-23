@@ -53,6 +53,8 @@ export const streamId = {
   boardRooms: (orgId: string) => `board-rooms-${orgId}`,
   /** The organization vault's capability index. */
   capabilities: (orgId: string) => `capabilities-${orgId}`,
+  /** One capability pack (git import, trust, pin). */
+  pack: (id: string) => `pack-${id}`,
 } as const;
 
 export const ProjectKeySchema = z

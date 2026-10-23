@@ -37,6 +37,7 @@ import {
   type ShiftReport,
 } from '@aom/shared';
 import { z } from 'zod';
+import { loadSkillGuardConfig, runSkillGuard } from '../capabilities/skill-guard.ts';
 import { runGuardHook as runCeoGuardHook } from '../ceo/guard-hook.ts';
 import { PermissionRelay } from '../ceo/permission-relay.ts';
 import type { ChangeStateLookup } from '../devops/branch-cleanup.ts';
@@ -1978,6 +1979,12 @@ const VERBS: Record<string, Verb> = {
         }
       },
     });
+    if (r.stdout) ctx.io.out(r.stdout);
+    return r.code;
+  },
+  /** The `Skill` tool allow-list (a Claude Code PreToolUse hook, see capabilities/skill-guard.ts). Agents never call it. */
+  'skill-guard': async (ctx) => {
+    const r = runSkillGuard({ stdin: ctx.readFile('-'), cfg: loadSkillGuardConfig(ctx.env.AOM_SKILL_GUARD) });
     if (r.stdout) ctx.io.out(r.stdout);
     return r.code;
   },

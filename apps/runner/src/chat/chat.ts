@@ -312,7 +312,7 @@ export class ChatManager {
       },
       rpc: async (req: IpcRpcRequest): Promise<IpcRpcResponse> => {
         if (req.method === 'skill.show' || req.method === 'skill.list')
-          return skillRpc(this.deps.capabilities, req.method, req.params);
+          return skillRpc(this.deps.capabilities, req.method, req.params, chat.msg.context?.projectId);
         // A turn of a discovery or boardroom session reads and talks: `aom ledger search` and the `aom session ...` verbs
         // are all that reach the server from it (which verbs a turn may use, the server decides from what the turn is for).
         if (chat.msg.session)
@@ -932,7 +932,9 @@ export class ChatManager {
     // The project's code graph (read-only verbs): only when this workstation can read it and the chat is not the holdout.
     const gs = msg.context.graph;
     const graphNote = gs && gs.arm === 'on' && this.deps.graph?.()?.load(gs) ? `\n${CHAT_GRAPH_NOTE}\n` : '';
-    const capIndex = this.deps.capabilities?.instructionsIndex(msg.agent.skills) ?? '';
+    const capIndex = this.deps.capabilities?.instructionsIndex(msg.agent.skills, msg.context.projectId) ?? '';
+    const grantedSkills =
+      this.deps.capabilities?.grantedSkills(msg.agent.skills, msg.context.projectId) ?? [];
     await adapter.writeInstructions(
       sandbox,
       `${signIn ? `${signIn}\n` : ''}${graphNote}${capIndex ? `${capIndex}\n\n` : ''}${renderChatInstructions(
@@ -972,6 +974,8 @@ export class ChatManager {
       readDirs: folders.map((f) => f.path),
       ...(tc ? { toolchainReadDirs: tc.readDirs } : {}),
       context: msg.context,
+      // Skills this agent's role grants, loaded natively by a runtime that has them (never for the CEO's conversation or DevOps).
+      ...(!devops && msg.agent.roleKey !== 'ceo' ? { grantedSkills } : {}),
       ...(msg.context.intake ? { intake: true } : {}),
       ...(msg.resumeSessionId ? { resumeSessionId: msg.resumeSessionId } : {}),
       ...(devops ? { devopsGuard: { sessionRef: msg.chatId } } : {}),

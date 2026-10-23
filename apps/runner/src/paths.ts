@@ -35,6 +35,8 @@ export interface RunnerPaths {
   toolchains: string;
   /** The project graph's runner-local cache: parsed facts per file, and the shards of a repository too big for the vault. */
   graphCache: string;
+  /** Cloned capability packs (`packs/<packId>/repo`) and their state (docs/ARCHITECTURE.md section 38.4). */
+  packs: string;
   agentDir(agentId: string): string;
   /**
    * Default worktree location. Project keys are only unique per organization, so the project id (first 8 hex
@@ -64,6 +66,7 @@ export function runnerPaths(root: string): RunnerPaths {
     activeShifts: join(root, 'active-shifts'),
     toolchains: join(root, 'toolchains.json'),
     graphCache: join(root, 'graph-cache'),
+    packs: join(root, 'packs'),
     agentDir: (agentId) => join(root, 'agents', agentId),
     worktreePath: (projectKey, cardRef, projectId) =>
       join(root, 'worktrees', projectId ? `${projectKey}-${projectId.slice(0, 8)}` : projectKey, cardRef),
