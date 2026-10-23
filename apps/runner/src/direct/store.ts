@@ -29,7 +29,9 @@ export interface ProviderConfig {
 }
 
 /** Refuses an endpoint that carries credentials, a query or a non-http scheme (it is shown in the UI and logged). */
-export function validateBaseUrl(raw: string): { ok: true; url: string } | { ok: false; error: string } {
+export function validateBaseUrl(
+  raw: string,
+): { ok: true; url: string; warning?: string } | { ok: false; error: string } {
   let u: URL;
   try {
     u = new URL(raw.trim());
@@ -40,7 +42,18 @@ export function validateBaseUrl(raw: string): { ok: true; url: string } | { ok: 
     return { ok: false, error: 'the endpoint must start with http:// or https://' };
   if (u.username || u.password) return { ok: false, error: 'put the key in the key field, not in the URL' };
   if (u.search || u.hash) return { ok: false, error: 'the endpoint must not have a query or a fragment' };
-  return { ok: true, url: u.toString().replace(/\/+$/, '') };
+  const loopback =
+    /^(localhost|127(\.\d{1,3}){3}|\[::1\]|::1)$/i.test(u.hostname) || u.hostname.endsWith('.localhost');
+  return {
+    ok: true,
+    url: u.toString().replace(/\/+$/, ''),
+    ...(u.protocol === 'http:' && !loopback
+      ? {
+          warning:
+            'This endpoint uses plain http:// away from this machine: the key and every prompt travel unencrypted. Use https:// unless the network is trusted.',
+        }
+      : {}),
+  };
 }
 
 /**
@@ -128,11 +141,13 @@ export class ProviderStore {
       return { stored: false, error: `${def.label} needs an API key` };
     }
     let baseUrl: string | undefined;
+    let warning: string | undefined;
     if (def.needsBaseUrl) {
       if (!p.baseUrl?.trim()) return { stored: false, error: 'enter the endpoint (base URL)' };
       const v = validateBaseUrl(p.baseUrl);
       if (!v.ok) return { stored: false, error: v.error };
       baseUrl = v.url;
+      warning = v.warning;
     }
     const all = this.all();
     this.unregister(all[p.provider]?.ciphertext);
@@ -145,7 +160,7 @@ export class ProviderStore {
     this.save(all);
     if (plain) registerSecret(plain);
     for (const f of this.changed) f();
-    return { stored: true };
+    return { stored: true, ...(warning ? { warning } : {}) };
   }
 
   /** `provider.key.clear`: forget the key and the endpoint. */

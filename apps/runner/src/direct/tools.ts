@@ -64,6 +64,16 @@ export function resultText(result: unknown): string {
   return result === undefined || result === null ? 'Done.' : JSON.stringify(result, null, 2);
 }
 
+/** The most a tool result may add to the model's context (a playbook or a PRD can be far longer than a turn needs). */
+export const TOOL_RESULT_MAX_CHARS = 20_000;
+
+/** Cuts a tool result to `max` characters and says so, so the model knows the text is incomplete. */
+export function capToolResult(text: string, max = TOOL_RESULT_MAX_CHARS): string {
+  return text.length > max
+    ? `${text.slice(0, max)}\n\n[cut: ${text.length - max} more characters were not shown]`
+    : text;
+}
+
 /** The AI SDK tool set for a turn: one tool per allowed verb, each a typed call of the same rpc `aom` would make. */
 export function buildToolSet(defs: readonly SessionToolDef[], ipc: IpcTarget, signal?: AbortSignal): ToolSet {
   const out: ToolSet = {};
@@ -74,7 +84,7 @@ export function buildToolSet(defs: readonly SessionToolDef[], ipc: IpcTarget, si
       execute: async (input: unknown) => {
         const params = { ...((input ?? {}) as Record<string, unknown>), ...(def.fixed ?? {}) };
         try {
-          return resultText(await callRpc(ipc, def.rpc, params, signal));
+          return capToolResult(resultText(await callRpc(ipc, def.rpc, params, signal)));
         } catch (err) {
           // Whatever the server said, with any key-shaped text removed: the model sees it, a log may keep it.
           const e = err instanceof Error ? err : new Error(String(err));

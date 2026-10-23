@@ -215,6 +215,8 @@ export const ProviderKeyClearPayloadSchema = z.object({ provider: DirectProvider
 export const ProviderKeyResultSchema = z.object({
   stored: z.boolean(),
   error: z.string().max(500).optional(),
+  /** The key was stored, but something deserves a second look (a plain-http endpoint that is not on this machine). */
+  warning: z.string().max(500).optional(),
 });
 export type ProviderKeyResult = z.infer<typeof ProviderKeyResultSchema>;
 
@@ -236,6 +238,7 @@ export const WorkstationProvidersResponseSchema = z.object({
       provider: DirectProviderIdSchema,
       stored: z.boolean(),
       error: z.string().optional(),
+      warning: z.string().optional(),
       at: z.iso.datetime(),
     })
     .nullable(),

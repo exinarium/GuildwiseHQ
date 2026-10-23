@@ -27,7 +27,7 @@ const KEY_TTL_MS = 24 * 3600_000;
 /** The last answer of a runner to a key command, per workstation and provider: transient, for the page right after a save. */
 const lastResults = new Map<
   string,
-  { provider: DirectProviderId; stored: boolean; error?: string; at: Date }
+  { provider: DirectProviderId; stored: boolean; error?: string; warning?: string; at: Date }
 >();
 
 async function ownWorkstation(
@@ -126,6 +126,7 @@ export async function applyProviderKeyResult(
       : ok
         ? {}
         : { error: 'the workstation could not store the key' }),
+    ...(parsed?.warning ? { warning: parsed.warning } : {}),
     at: ctx.clock.now(),
   });
 }
@@ -159,6 +160,7 @@ export async function workstationProviders(
           provider: last.provider,
           stored: last.stored,
           ...(last.error ? { error: last.error } : {}),
+          ...(last.warning ? { warning: last.warning } : {}),
           at: last.at.toISOString(),
         }
       : null,

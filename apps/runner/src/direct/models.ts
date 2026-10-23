@@ -38,6 +38,32 @@ export const defaultModelFactory: ModelFactory = (choiceModel, cfg, fetch) => {
 
 const LIST_TTL_MS = 10 * 60_000;
 const LIST_TIMEOUT_MS = 5_000;
+/** The most of a `/models` answer that is read: a real list is a few tens of KB. */
+export const MODEL_LIST_MAX_BYTES = 1_000_000;
+
+/** The body of a response as text, never more than `max` bytes (the rest is not read). Undefined: it was larger. */
+async function readCapped(res: Response, max: number): Promise<string | undefined> {
+  const declared = Number(res.headers.get('content-length'));
+  if (Number.isFinite(declared) && declared > max) return undefined;
+  if (!res.body) {
+    const t = await res.text();
+    return t.length > max ? undefined : t;
+  }
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > max) {
+      await reader.cancel().catch(() => undefined);
+      return undefined;
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString('utf8');
+}
 
 /**
  * Model ids an OpenAI-compatible endpoint offers (`GET <base>/models`), cached for ten minutes and refreshed when the provider
@@ -45,6 +71,8 @@ const LIST_TIMEOUT_MS = 5_000;
  */
 export class ModelLister {
   private cache = new Map<string, { at: number; ids: string[]; problem?: string }>();
+  /** A list being fetched, per provider: concurrent callers wait for it instead of starting their own request. */
+  private readonly inflight = new Map<string, Promise<{ ids: string[]; problem?: string }>>();
 
   constructor(private readonly deps: { fetch?: FetchLike; now?: () => number } = {}) {}
 
@@ -52,9 +80,18 @@ export class ModelLister {
     return this.deps.now?.() ?? Date.now();
   }
 
+  /** Bumped when a provider's settings change: a fetch that started before must not fill the cache with the old answer. */
+  private generation = 0;
+
   invalidate(provider?: string): void {
-    if (provider) this.cache.delete(provider);
-    else this.cache.clear();
+    this.generation++;
+    if (provider) {
+      this.cache.delete(provider);
+      this.inflight.delete(provider);
+    } else {
+      this.cache.clear();
+      this.inflight.clear();
+    }
   }
 
   /** What is cached for a provider and whether it is still fresh (a stale or missing list is refreshed in the background). */
@@ -74,6 +111,17 @@ export class ModelLister {
     const hit = this.cache.get(cfg.id);
     if (!force && hit && this.now() - hit.at < LIST_TTL_MS)
       return { ids: hit.ids, ...(hit.problem ? { problem: hit.problem } : {}) };
+    const running = this.inflight.get(cfg.id);
+    if (running) return running;
+    const p: Promise<{ ids: string[]; problem?: string }> = this.fetchList(cfg).finally(() => {
+      if (this.inflight.get(cfg.id) === p) this.inflight.delete(cfg.id);
+    });
+    this.inflight.set(cfg.id, p);
+    return p;
+  }
+
+  private async fetchList(cfg: ProviderConfig): Promise<{ ids: string[]; problem?: string }> {
+    const gen = this.generation;
     const f = this.deps.fetch ?? ((url, init) => fetch(url, init));
     let out: { ids: string[]; problem?: string };
     try {
@@ -90,8 +138,10 @@ export class ModelLister {
               : `the endpoint's model list answered HTTP ${res.status}`,
         };
       } else {
-        const body = (await res.json()) as { data?: Array<{ id?: unknown }> };
-        const ids = (body.data ?? [])
+        const text = await readCapped(res, MODEL_LIST_MAX_BYTES);
+        if (text === undefined) throw new Error('the model list is too large');
+        const body = JSON.parse(text) as { data?: Array<{ id?: unknown }> };
+        const ids = (Array.isArray(body.data) ? body.data : [])
           .map((m) => (typeof m.id === 'string' ? m.id : ''))
           .filter((id) => id && id.length <= 120)
           .slice(0, 200);
@@ -105,7 +155,7 @@ export class ModelLister {
         ).slice(0, 200),
       };
     }
-    this.cache.set(cfg.id, { at: this.now(), ...out });
+    if (gen === this.generation) this.cache.set(cfg.id, { at: this.now(), ...out });
     return out;
   }
 }
