@@ -104,6 +104,8 @@ export const boardEvents = [
       decisionId: Id,
       answer: z.string().max(4000).default(''),
       optionId: z.string().max(20).optional(),
+      /** The session ended while the decision was open: it is withdrawn, not answered. */
+      withdrawn: z.boolean().optional(),
       by: Id.nullable(),
     }),
   ),

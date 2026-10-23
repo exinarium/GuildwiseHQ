@@ -205,6 +205,14 @@ export class BoardService {
     };
   }
 
+  /** The session for an action only its creator, an Owner or an Admin may take (participants may still post messages). */
+  private async loadManaged(userId: string, threadId: string): Promise<Row> {
+    const t = await loadSession(this.ctx.pool, userId, threadId);
+    assertBoard(t);
+    await assertSessionManager(this.ctx.pool, userId, t);
+    return t;
+  }
+
   private async fresh(threadId: string): Promise<Row | undefined> {
     return one(
       this.ctx.pool,
@@ -775,8 +783,32 @@ export class BoardService {
     return { round, kind, speakers: pick.speakers, notes: pick.notes };
   }
 
-  private async beginMinutes(t: Row, reason: 'owner' | 'round_cap'): Promise<void> {
+  /**
+   * The session moves to 'minutes' first (under the caller's lock), and only then are the turns that have not started
+   * cancelled, so a cancellation's follow-up never sees the old stage. An open decision is withdrawn.
+   */
+  private async beginMinutes(
+    t: Row,
+    reason: 'owner' | 'round_cap',
+    cancelFor?: { userId: string },
+  ): Promise<void> {
+    const open = await rows(
+      this.ctx.pool,
+      `SELECT id FROM board_decisions WHERE thread_id=$1 AND status='open'`,
+      [t.id],
+    );
     await this.ctx.store.append([
+      ...open.map(
+        (d): AppendInput => ({
+          streamId: streamId.thread(t.id),
+          event: {
+            type: 'BoardDecisionResolved',
+            payload: { threadId: t.id, decisionId: d.id, answer: '', withdrawn: true, by: null },
+          },
+          actor: SYSTEM_ACTOR,
+          scope: sessionScope(t),
+        }),
+      ),
       this.configEvent(t, { stage: 'minutes', endReason: reason, minutesTurnId: null }),
       this.systemMessage(
         t,
@@ -786,6 +818,16 @@ export class BoardService {
         { ended: reason },
       ),
     ]);
+    if (cancelFor) {
+      // Turns that have not started are cancelled; the ones running finish and stay in the minutes.
+      const queued = await rows(
+        this.ctx.pool,
+        `SELECT id FROM session_turns WHERE thread_id=$1 AND status='queued' AND meta->>'purpose' IN ('board_speaker','board_chair')`,
+        [t.id],
+      );
+      for (const q of queued)
+        await this.ctx.services.sessions.cancel(cancelFor.userId, t.id, q.id).catch(() => undefined);
+    }
     return this.advanceLocked(t.id);
   }
 
@@ -839,7 +881,17 @@ export class BoardService {
         await this.ctx.store.append([this.configEvent(t, { minutesTurnId: turn.id })]);
         return;
       }
-      // Blocked (budget used up): the minutes are still written, from the session's data without the synthesis.
+      // Only a used-up session budget ends the session without the synthesis; any other block (paused project, no
+      // workstation, runtime unavailable) leaves the session in 'minutes' with `blocked` set, and the sweep retries.
+      const cur = parseBoardConfig(((await this.fresh(t.id)) ?? t).session_config);
+      if (cur.blocked && cur.blocked !== 'session_budget_exceeded') return;
+      await this.ctx.store.append([
+        this.systemMessage(
+          t,
+          "The session budget is used up, so the minutes are written from the session data without the Chair's synthesis.",
+          { minutesWithoutSynthesis: true },
+        ),
+      ]);
       await this.saveMinutes(t, '', { kind: 'system', id: null }, SYSTEM_ACTOR, null);
       await this.finishEnd(t);
       return;
@@ -944,6 +996,7 @@ export class BoardService {
     note: string,
     savedBy: { kind: 'user' | 'agent' | 'persona' | 'system'; id: string | null },
     actor: AppendInput['actor'],
+    docId: string = randomUUID(),
   ): Promise<string> {
     const base = documentSlug(title);
     let slug = base;
@@ -957,7 +1010,6 @@ export class BoardService {
       n++
     )
       slug = `${base.slice(0, 56)}-${n}`;
-    const docId = randomUUID();
     const scope = this.docScope(t);
     await this.ctx.store.append([
       {
@@ -1013,19 +1065,27 @@ export class BoardService {
 
   /** On demand: the Chair writes minutes now and the session carries on. */
   async requestMinutes(userId: string, threadId: string): Promise<BoardStateDto> {
-    const t = await loadSession(this.ctx.pool, userId, threadId);
-    assertBoard(t);
-    const cfg = parseBoardConfig(t.session_config);
-    if (cfg.stage === 'setup') throw conflict('not_started', 'The boardroom has not started yet.');
-    if (cfg.round < 1) throw conflict('nothing_to_minute', 'Nothing has been said yet.');
-    const busy = await one(
-      this.ctx.pool,
-      `SELECT 1 FROM session_turns WHERE thread_id=$1 AND status IN ('queued','running') AND meta->>'purpose'='board_minutes'`,
-      [threadId],
-    );
-    if (busy) throw conflict('minutes_running', 'The minutes are already being written.');
-    const turn = await this.serialized(threadId, () => this.synthesisTurn(t, cfg, { onDemand: true }));
-    if (!turn) throw conflict('blocked', 'The minutes cannot be written right now: check the budget.');
+    await this.loadManaged(userId, threadId);
+    await this.serialized(threadId, async () => {
+      const t = await this.fresh(threadId);
+      if (!t) throw notFound('session not found');
+      const cfg = parseBoardConfig(t.session_config);
+      if (cfg.stage === 'setup') throw conflict('not_started', 'The boardroom has not started yet.');
+      if (cfg.stage === 'decision')
+        throw conflict('decision_open', 'Answer the open decision first: the minutes would miss it.');
+      if (cfg.stage === 'minutes')
+        throw conflict('minutes_running', 'The session is already writing its minutes.');
+      if (cfg.paused) throw conflict('paused', 'Resume the session first.');
+      if (cfg.round < 1) throw conflict('nothing_to_minute', 'Nothing has been said yet.');
+      const busy = await one(
+        this.ctx.pool,
+        `SELECT 1 FROM session_turns WHERE thread_id=$1 AND status IN ('queued','running') AND meta->>'purpose'='board_minutes'`,
+        [threadId],
+      );
+      if (busy) throw conflict('minutes_running', 'The minutes are already being written.');
+      const turn = await this.synthesisTurn(t, cfg, { onDemand: true });
+      if (!turn) throw conflict('blocked', 'The minutes cannot be written right now: check the budget.');
+    });
     return this.state(userId, threadId);
   }
 
@@ -1038,8 +1098,9 @@ export class BoardService {
       if (!turn || !purpose?.startsWith('board_')) return;
       const t = await this.fresh(threadId);
       if (!t) return;
+      const cancelled = status === 'failed' && /^cancel/i.test(String(turn.error ?? ''));
       if (purpose === 'board_speaker') {
-        if (status === 'failed')
+        if (status === 'failed' && !cancelled)
           await this.ctx.store.append([
             this.systemMessage(
               t,
@@ -1051,7 +1112,8 @@ export class BoardService {
           ]);
         return this.advanceLocked(threadId);
       }
-      if (purpose === 'board_chair') return this.afterChair(t, status);
+      if (purpose === 'board_chair')
+        return cancelled ? this.advanceLocked(threadId) : this.afterChair(t, status);
       if (purpose === 'board_cast') {
         const cfg = parseBoardConfig(t.session_config);
         await this.ctx.store.append([
@@ -1159,15 +1221,13 @@ export class BoardService {
   }
 
   async pause(userId: string, threadId: string): Promise<BoardStateDto> {
-    const t = await loadSession(this.ctx.pool, userId, threadId);
-    assertBoard(t);
+    const t = await this.loadManaged(userId, threadId);
     await this.ctx.store.append([this.configEvent(t, { paused: true }, userActor(userId))]);
     return this.state(userId, threadId);
   }
 
   async resume(userId: string, threadId: string): Promise<BoardStateDto> {
-    const t = await loadSession(this.ctx.pool, userId, threadId);
-    assertBoard(t);
+    const t = await this.loadManaged(userId, threadId);
     await this.ctx.store.append([this.configEvent(t, { paused: null }, userActor(userId))]);
     await this.advance(threadId);
     return this.state(userId, threadId);
@@ -1175,8 +1235,7 @@ export class BoardService {
 
   /** "Carry on": a nudge after a failure, a restart or a raised budget. */
   async continue(userId: string, threadId: string): Promise<BoardStateDto> {
-    const t = await loadSession(this.ctx.pool, userId, threadId);
-    assertBoard(t);
+    const t = await this.loadManaged(userId, threadId);
     await this.ctx.store.append([
       this.configEvent(t, { chairFailures: null, blocked: null }, userActor(userId)),
     ]);
@@ -1185,22 +1244,14 @@ export class BoardService {
   }
 
   async end(userId: string, threadId: string): Promise<BoardStateDto> {
-    const t = await loadSession(this.ctx.pool, userId, threadId);
-    assertBoard(t);
-    const cfg = parseBoardConfig(t.session_config);
-    if (cfg.stage === 'setup') throw conflict('not_started', 'The boardroom has not started yet.');
-    if (cfg.stage === 'ended' || cfg.stage === 'minutes') return this.state(userId, threadId);
-    // Turns that have not started are cancelled; the ones running finish and stay in the minutes.
-    const queued = await rows(
-      this.ctx.pool,
-      `SELECT id FROM session_turns WHERE thread_id=$1 AND status='queued' AND meta->>'purpose' IN ('board_speaker','board_chair')`,
-      [threadId],
-    );
-    for (const q of queued)
-      await this.ctx.services.sessions.cancel(userId, threadId, q.id).catch(() => undefined);
+    await this.loadManaged(userId, threadId);
     await this.serialized(threadId, async () => {
-      const f = (await this.fresh(threadId)) as Row;
-      await this.beginMinutes(f, 'owner');
+      const f = await this.fresh(threadId);
+      if (!f) throw notFound('session not found');
+      const cfg = parseBoardConfig(f.session_config);
+      if (cfg.stage === 'setup') throw conflict('not_started', 'The boardroom has not started yet.');
+      if (cfg.stage === 'ended' || cfg.stage === 'minutes') return;
+      await this.beginMinutes(f, 'owner', { userId });
     });
     return this.state(userId, threadId);
   }
@@ -1238,60 +1289,66 @@ export class BoardService {
     decisionId: string,
     req: { answer: string; optionId?: string | undefined },
   ): Promise<BoardStateDto> {
-    const t = await loadSession(this.ctx.pool, userId, threadId);
-    assertBoard(t);
-    const d = await one(this.ctx.pool, 'SELECT * FROM board_decisions WHERE id=$1 AND thread_id=$2', [
-      decisionId,
-      threadId,
-    ]);
-    if (!d) throw notFound('decision not found');
-    if (d.status !== 'open') throw conflict('decision_closed', 'That decision was already taken.');
-    const label = req.optionId
-      ? (d.options as Array<{ id: string; label: string }>).find((o) => o.id === req.optionId)?.label
-      : undefined;
-    if (req.optionId && !label) throw badRequest('unknown_option', 'Pick one of the options.');
-    const answer = [label, req.answer.trim()].filter(Boolean).join(': ');
-    if (!answer) throw badRequest('empty_answer', 'Say what you decide.');
-    const name = await this.userName(userId);
-    await postSessionMessage(this.ctx, userId, threadId, {
-      body: `Decision on "${clip(d.question, 200)}": ${answer}`,
-      kind: 'chat',
-      data: { board: true, decisionId },
+    await this.loadManaged(userId, threadId);
+    // Under the session's lock: a double click, or an answer arriving after the session ended, finds the stage changed.
+    await this.serialized(threadId, async () => {
+      const t = await this.fresh(threadId);
+      if (!t) throw notFound('session not found');
+      if (parseBoardConfig(t.session_config).stage !== 'decision')
+        throw conflict('not_in_decision', 'The session is not waiting for a decision.');
+      const d = await one(this.ctx.pool, 'SELECT * FROM board_decisions WHERE id=$1 AND thread_id=$2', [
+        decisionId,
+        threadId,
+      ]);
+      if (!d) throw notFound('decision not found');
+      if (d.status !== 'open') throw conflict('decision_closed', 'That decision was already taken.');
+      const label = req.optionId
+        ? (d.options as Array<{ id: string; label: string }>).find((o) => o.id === req.optionId)?.label
+        : undefined;
+      if (req.optionId && !label) throw badRequest('unknown_option', 'Pick one of the options.');
+      const answer = [label, req.answer.trim()].filter(Boolean).join(': ');
+      if (!answer) throw badRequest('empty_answer', 'Say what you decide.');
+      const name = await this.userName(userId);
+      await this.ctx.store.append([
+        {
+          streamId: streamId.thread(threadId),
+          event: {
+            type: 'BoardDecisionResolved',
+            payload: {
+              threadId,
+              decisionId,
+              answer,
+              ...(req.optionId ? { optionId: req.optionId } : {}),
+              by: userId,
+            },
+          },
+          actor: userActor(userId),
+          scope: sessionScope(t),
+        },
+        {
+          streamId: streamId.thread(threadId),
+          event: {
+            type: 'BoardNoteAdded',
+            payload: {
+              threadId,
+              noteId: randomUUID(),
+              column: 'decisions',
+              text: clip(`${d.question} -> ${answer}`, 600),
+              by: { kind: 'user', id: userId, name },
+              round: null,
+            },
+          },
+          actor: userActor(userId),
+          scope: sessionScope(t),
+        },
+        this.configEvent(t, { stage: 'chair', chairFailures: null }, userActor(userId)),
+      ]);
+      await postSessionMessage(this.ctx, userId, threadId, {
+        body: `Decision on "${clip(d.question, 200)}": ${answer}`,
+        kind: 'chat',
+        data: { board: true, decisionId },
+      });
     });
-    await this.ctx.store.append([
-      {
-        streamId: streamId.thread(threadId),
-        event: {
-          type: 'BoardDecisionResolved',
-          payload: {
-            threadId,
-            decisionId,
-            answer,
-            ...(req.optionId ? { optionId: req.optionId } : {}),
-            by: userId,
-          },
-        },
-        actor: userActor(userId),
-        scope: sessionScope(t),
-      },
-      {
-        streamId: streamId.thread(threadId),
-        event: {
-          type: 'BoardNoteAdded',
-          payload: {
-            threadId,
-            noteId: randomUUID(),
-            column: 'decisions',
-            text: clip(`${d.question} -> ${answer}`, 600),
-            by: { kind: 'user', id: userId, name },
-            round: null,
-          },
-        },
-        actor: userActor(userId),
-        scope: sessionScope(t),
-      },
-      this.configEvent(t, { stage: 'chair', chairFailures: null }, userActor(userId)),
-    ]);
     await this.advance(threadId);
     return this.state(userId, threadId);
   }
@@ -1339,8 +1396,7 @@ export class BoardService {
     noteId: string,
     patch: { column?: string | undefined; text?: string | undefined },
   ): Promise<BoardStateDto> {
-    const t = await loadSession(this.ctx.pool, userId, threadId);
-    assertBoard(t);
+    const t = await this.loadManaged(userId, threadId);
     await this.note(threadId, noteId);
     await this.ctx.store.append([
       {
@@ -1367,8 +1423,7 @@ export class BoardService {
     noteIds: string[],
     text?: string,
   ): Promise<BoardStateDto> {
-    const t = await loadSession(this.ctx.pool, userId, threadId);
-    assertBoard(t);
+    const t = await this.loadManaged(userId, threadId);
     const ids = [...new Set(noteIds)];
     if (ids.length < 2) throw badRequest('merge_needs_two', 'Pick at least two notes to merge.');
     const found = await rows(
@@ -1399,8 +1454,7 @@ export class BoardService {
   }
 
   async removeNote(userId: string, threadId: string, noteId: string): Promise<BoardStateDto> {
-    const t = await loadSession(this.ctx.pool, userId, threadId);
-    assertBoard(t);
+    const t = await this.loadManaged(userId, threadId);
     await this.note(threadId, noteId);
     await this.ctx.store.append([
       {
@@ -1440,74 +1494,128 @@ export class BoardService {
     who: Who,
     threadId: string,
   ): Promise<{ discoveryId: string; docId: string; state: BoardStateDto }> {
-    const t = await loadSession(this.ctx.pool, who.userId, threadId);
-    assertBoard(t);
+    const t0 = await loadSession(this.ctx.pool, who.userId, threadId);
+    assertBoard(t0);
+    if (t0.org_id !== who.orgId) throw notFound('session not found');
     if (!isOrgManager({ orgRole: who.role }))
       throw forbidden('only an Owner or an Admin can start a discovery session');
-    const cfg = parseBoardConfig(t.session_config);
-    if (!cfg.minutesDocId)
-      throw conflict('no_minutes', 'Write the minutes first: the PRD is seeded from them.');
-    if (cfg.prdSessionId) throw conflict('already_pulled', 'These minutes were already pulled into a PRD.');
-    const notes = await listBoardNotes(this.ctx.pool, threadId);
-    const decided = await this.decisionsTaken(threadId);
-    const col = (c: string) => notes.filter((n) => n.col === c).map((n) => n.text as string);
-    const prd = builtinCapabilities().find((c) => c.kind === 'playbook' && c.key === 'prd');
-    const title = `PRD: ${clip(cfg.topic.split('\n')[0] ?? cfg.topic, 100)}`;
-    const content = seedPrdFromMinutes({
-      title: cfg.topic.split('\n')[0] ?? cfg.topic,
-      topic: cfg.topic,
-      minutesDocId: cfg.minutesDocId,
-      decisions: [...new Set([...decided.map((d) => `${d.question} -> ${d.answer}`), ...col('decisions')])],
-      ideas: col('ideas'),
-      risks: col('risks'),
-      questions: col('questions'),
-      parked: col('parked'),
-      template: prd?.kind === 'playbook' ? (prd.files['assets/prd-template.md'] ?? '') : '',
+    const out = await this.serialized(threadId, async () => {
+      const t = await this.fresh(threadId);
+      if (!t) throw notFound('session not found');
+      if (t.org_id !== who.orgId) throw notFound('session not found');
+      const cfg = parseBoardConfig(t.session_config);
+      if (cfg.stage !== 'ended')
+        throw conflict('session_running', 'End the session first: the PRD is seeded from its final minutes.');
+      if (!cfg.minutesDocId)
+        throw conflict('no_minutes', 'Write the minutes first: the PRD is seeded from them.');
+      if (cfg.prdSessionId) throw conflict('already_pulled', 'These minutes were already pulled into a PRD.');
+      const notes = await listBoardNotes(this.ctx.pool, threadId);
+      const decided = await this.decisionsTaken(threadId);
+      const col = (c: string) => notes.filter((n) => n.col === c).map((n) => n.text as string);
+      const prd = builtinCapabilities().find((c) => c.kind === 'playbook' && c.key === 'prd');
+      const title = `PRD: ${clip(cfg.topic.split('\n')[0] ?? cfg.topic, 100)}`;
+      const content = seedPrdFromMinutes({
+        title: cfg.topic.split('\n')[0] ?? cfg.topic,
+        topic: cfg.topic,
+        minutesDocId: cfg.minutesDocId,
+        decisions: [...new Set([...decided.map((d) => `${d.question} -> ${d.answer}`), ...col('decisions')])],
+        ideas: col('ideas'),
+        risks: col('risks'),
+        questions: col('questions'),
+        parked: col('parked'),
+        template: prd?.kind === 'playbook' ? (prd.files['assets/prd-template.md'] ?? '') : '',
+      });
+      const actor = userActor(who.userId);
+      // Reserve the document id first: a retry after a failure reuses the document and any session already made for it.
+      const docId = cfg.prdPullDocId ?? randomUUID();
+      if (!cfg.prdPullDocId)
+        await this.ctx.store.append([this.configEvent(t, { prdPullDocId: docId }, actor)]);
+      const existing = await one(this.ctx.pool, 'SELECT 1 FROM documents WHERE id=$1', [docId]);
+      if (!existing)
+        await this.createDoc(
+          t,
+          'prd',
+          title,
+          content,
+          'Seeded from the boardroom minutes',
+          { kind: 'user', id: who.userId },
+          actor,
+          docId,
+        );
+      const ceo = await availableCeo(this.ctx.pool, who.orgId);
+      const seeded: Array<{
+        section: 'ideas' | 'assumptions' | 'open_questions' | 'decisions' | 'parked';
+        text: string;
+      }> = [
+        ...[...decided.map((d) => `${d.question} -> ${d.answer}`), ...col('decisions')].map((text) => ({
+          section: 'decisions' as const,
+          text,
+        })),
+        ...col('ideas').map((text) => ({ section: 'ideas' as const, text })),
+        ...col('risks').map((text) => ({ section: 'assumptions' as const, text: `Risk: ${text}` })),
+        ...col('questions').map((text) => ({ section: 'open_questions' as const, text })),
+        ...col('parked').map((text) => ({ section: 'parked' as const, text })),
+      ];
+      const made = await one(
+        this.ctx.pool,
+        `SELECT id FROM threads WHERE kind='discovery' AND org_id=$1 AND deleted_at IS NULL
+            AND session_config->>'prdDocId'=$2 ORDER BY created_at LIMIT 1`,
+        [who.orgId, docId],
+      );
+      const discoveryId =
+        (made?.id as string | undefined) ??
+        (
+          await this.ctx.services.discovery.create(
+            who,
+            {
+              title: `Discovery: ${clip(cfg.topic.split('\n')[0] ?? cfg.topic, 100)}`,
+              ...(t.project_id ? { projectId: t.project_id } : {}),
+              stance: 'facilitator',
+              ceoMode: ceo ? 'joint' : 'owner_only',
+              playbook: 'prd',
+              idea: clip(`From the boardroom "${cfg.topic}". Minutes: document ${cfg.minutesDocId}.`, 3900),
+            },
+            { prdDocId: docId, notes: seeded.slice(0, 60).map((n) => ({ ...n, text: clip(n.text, 1900) })) },
+          )
+        ).threadId;
+      // The Discovery session must be among the document's source sessions, or its facilitator cannot propose edits to it.
+      const doc = await one(
+        this.ctx.pool,
+        'SELECT current_version, source_thread_ids FROM documents WHERE id=$1',
+        [docId],
+      );
+      const sources = (doc?.source_thread_ids as string[] | undefined) ?? [];
+      if (doc && !sources.includes(discoveryId)) {
+        const body = await one(
+          this.ctx.pool,
+          'SELECT content FROM document_versions WHERE document_id=$1 AND version=$2',
+          [docId, doc.current_version],
+        );
+        await this.ctx.store.append([
+          versionEvent(
+            docId,
+            Number(doc.current_version) + 1,
+            String(body?.content ?? content),
+            { kind: 'system', id: null },
+            this.docScope(t),
+            actor,
+            {
+              note: 'Linked to the Discovery session',
+              sourceThreadIds: [...sources, discoveryId].slice(0, 20),
+            },
+          ),
+        ]);
+      }
+      await this.ctx.store.append([
+        this.configEvent(t, { prdSessionId: discoveryId, prdPullDocId: null }, actor),
+        this.systemMessage(t, 'The minutes were pulled into a PRD. Continue in the Discovery session.', {
+          discoveryId,
+          docId,
+        }),
+      ]);
+      return { discoveryId, docId };
     });
-    const actor = userActor(who.userId);
-    const docId = await this.createDoc(
-      t,
-      'prd',
-      title,
-      content,
-      'Seeded from the boardroom minutes',
-      { kind: 'user', id: who.userId },
-      actor,
-    );
-    const ceo = await availableCeo(this.ctx.pool, who.orgId);
-    const seeded: Array<{
-      section: 'ideas' | 'assumptions' | 'open_questions' | 'decisions' | 'parked';
-      text: string;
-    }> = [
-      ...[...decided.map((d) => `${d.question} -> ${d.answer}`), ...col('decisions')].map((text) => ({
-        section: 'decisions' as const,
-        text,
-      })),
-      ...col('ideas').map((text) => ({ section: 'ideas' as const, text })),
-      ...col('risks').map((text) => ({ section: 'assumptions' as const, text: `Risk: ${text}` })),
-      ...col('questions').map((text) => ({ section: 'open_questions' as const, text })),
-      ...col('parked').map((text) => ({ section: 'parked' as const, text })),
-    ];
-    const state = await this.ctx.services.discovery.create(
-      who,
-      {
-        title: `Discovery: ${clip(cfg.topic.split('\n')[0] ?? cfg.topic, 100)}`,
-        ...(t.project_id ? { projectId: t.project_id } : {}),
-        stance: 'facilitator',
-        ceoMode: ceo ? 'joint' : 'owner_only',
-        playbook: 'prd',
-        idea: clip(`From the boardroom "${cfg.topic}". Minutes: document ${cfg.minutesDocId}.`, 3900),
-      },
-      { prdDocId: docId, notes: seeded.slice(0, 60).map((n) => ({ ...n, text: clip(n.text, 1900) })) },
-    );
-    await this.ctx.store.append([
-      this.configEvent(t, { prdSessionId: state.threadId }, actor),
-      this.systemMessage(t, 'The minutes were pulled into a PRD. Continue in the Discovery session.', {
-        discoveryId: state.threadId,
-        docId,
-      }),
-    ]);
-    return { discoveryId: state.threadId, docId, state: await this.state(who.userId, threadId) };
+    return { ...out, state: await this.state(who.userId, threadId) };
   }
 
   // ----------------------------------------------------------------------------------------------- rooms

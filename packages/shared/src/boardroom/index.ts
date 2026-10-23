@@ -145,6 +145,8 @@ export const BoardConfigSchema = z.object({
   /** Set when minutes were requested on demand while the session goes on. */
   minutesRequested: z.boolean().default(false),
   prdSessionId: z.uuid().nullable().default(null),
+  /** The PRD document reserved by a "pull into PRD" that has not finished: a retry reuses it instead of making another. */
+  prdPullDocId: z.uuid().nullable().default(null),
   suggestions: z.array(BoardSuggestionSchema).default([]),
   suggestState: z.enum(['asking', 'done', 'failed']).nullable().default(null),
   roomId: z.uuid().nullable().default(null),

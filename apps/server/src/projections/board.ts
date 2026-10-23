@@ -160,8 +160,8 @@ export const boardProjectors: Record<string, Projector> = {
     const p = ev<'BoardDecisionResolved'>(e).payload;
     await exec(
       tx,
-      `UPDATE board_decisions SET status='resolved', answer=$2, option_id=$3, resolved_at=$4 WHERE id=$1 AND status='open'`,
-      [p.decisionId, p.answer, p.optionId ?? null, e.createdAt],
+      `UPDATE board_decisions SET status=$5, answer=$2, option_id=$3, resolved_at=$4 WHERE id=$1 AND status='open'`,
+      [p.decisionId, p.answer, p.optionId ?? null, e.createdAt, p.withdrawn ? 'withdrawn' : 'resolved'],
     );
   },
   BoardRoomSaved: async (tx, e) => {

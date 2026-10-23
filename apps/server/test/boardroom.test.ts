@@ -1126,3 +1126,115 @@ describe('Pull into PRD with a CEO', () => {
     await finish(fac);
   });
 });
+
+describe('review fixes: authority, decisions, minutes and pull-into-prd', () => {
+  it('lets only the creator or a manager steer; a plain participant may still post', async () => {
+    const st = await create({ roundCap: 3 });
+    const member = await w.t.userSession(`member-${randomUUID().slice(0, 6)}@example.com`);
+    await w.t.addOrgMember(w.owner.id, member.id, 'member');
+    await owner(
+      'POST',
+      `/api/sessions/${st.threadId}/participants`,
+      { kind: 'user', refId: member.id, seat: 'member' },
+      201,
+    );
+    const as = (m: string, u: string, body?: unknown) =>
+      w.t.req(m, u, { cookie: member.cookie, ...(body ? { body } : {}) });
+    for (const verb of ['pause', 'resume', 'continue', 'end', 'minutes'])
+      expect((await as('POST', `/api/board/${st.threadId}/${verb}`)).status, verb).toBe(403);
+    expect(
+      (await as('POST', `/api/board/${st.threadId}/decisions/${randomUUID()}/resolve`, { answer: 'x' }))
+        .status,
+    ).toBe(403);
+    expect((await as('POST', `/api/board/${st.threadId}/say`, { body: 'a thought' })).status).toBe(201);
+    expect((await get(st.threadId)).config.stage).toBe('round');
+  });
+
+  it('takes a decision once, refuses one after the session moved on, and withdraws it when the session ends', async () => {
+    const st = await create({ roundCap: 4 });
+    await answerRound1(st.threadId);
+    const chair = await nextStart(st.threadId, role('chair'));
+    await call(chair.chatId, 'board.pause', { question: 'Go or no go?', options: ['Go', 'No go'] });
+    await finish(chair, 'Over to you.');
+    const d = (await get(st.threadId)).decisions[0];
+    // minutes cannot be requested while a decision is open
+    expect((await raw('POST', `/api/board/${st.threadId}/minutes`)).status).toBe(409);
+    const url = `/api/board/${st.threadId}/decisions/${d.id}/resolve`;
+    const both = await Promise.all([
+      raw('POST', url, { optionId: 'o1', answer: 'now' }),
+      raw('POST', url, { optionId: 'o1', answer: 'now' }),
+    ]);
+    expect(both.map((x) => x.status).sort()).toEqual([200, 409]);
+    const posted = await q(`SELECT 1 FROM thread_messages WHERE thread_id=$1 AND body LIKE 'Decision on%'`, [
+      st.threadId,
+    ]);
+    expect(posted).toHaveLength(1);
+    await finish(await nextStart(st.threadId, role('chair')));
+  });
+
+  it('withdraws an open decision when the owner ends the session and refuses to answer it afterwards', async () => {
+    const st = await create({ roundCap: 4 });
+    await answerRound1(st.threadId);
+    const chair = await nextStart(st.threadId, role('chair'));
+    await call(chair.chatId, 'board.pause', { question: 'Ship it?', options: ['Yes', 'No'] });
+    await finish(chair, 'Over to you.');
+    const d = (await get(st.threadId)).decisions[0];
+    await owner('POST', `/api/board/${st.threadId}/end`);
+    const after = await get(st.threadId);
+    expect(after.config.stage).toBe('minutes');
+    expect(after.decisions[0].status).toBe('withdrawn');
+    const res = await raw('POST', `/api/board/${st.threadId}/decisions/${d.id}/resolve`, { answer: 'late' });
+    expect(res.status).toBe(409);
+    expect((await get(st.threadId)).config.stage).toBe('minutes');
+    await finish(await nextStart(st.threadId, role('minutes')), 'x');
+  });
+
+  it('stays in the minutes stage with a block that is not the budget, instead of ending without a synthesis', async () => {
+    const st = await create({ roundCap: 5, projectId: w.projectId });
+    await answerRound1(st.threadId);
+    const chair = await nextStart(st.threadId, role('chair'));
+    await q('UPDATE projects SET paused_at=now() WHERE id=$1', [w.projectId]);
+    try {
+      await owner('POST', `/api/board/${st.threadId}/end`);
+      await finish(chair, 'late');
+      await until(
+        async () =>
+          (await q(`SELECT session_config->>'blocked' b FROM threads WHERE id=$1`, [st.threadId]))[0]?.b ===
+          'project_paused',
+      );
+      await new Promise((res) => setTimeout(res, 300));
+      expect((await get(st.threadId)).config.stage).toBe('minutes');
+    } finally {
+      await q('UPDATE projects SET paused_at=NULL WHERE id=$1', [w.projectId]);
+    }
+    await owner('POST', `/api/board/${st.threadId}/continue`);
+    await finish(await nextStart(st.threadId, role('minutes')), 'x');
+  });
+
+  it('pulls into a PRD only once the session ended, links the discovery session to the PRD, and is repeatable', async () => {
+    const st = await create({ roundCap: 1 });
+    await answerRound1(st.threadId);
+    const min = await nextStart(st.threadId, role('minutes'));
+    // not ended yet
+    expect((await raw('POST', `/api/board/${st.threadId}/pull-into-prd`)).status).toBe(409);
+    await call(min.chatId, 'board.minutes', { content: '## Positions\n\n- all three answered' });
+    await finish(min, 'Saved.');
+    await until(async () => (await get(st.threadId)).config.stage === 'ended');
+    const results = await Promise.all([
+      raw('POST', `/api/board/${st.threadId}/pull-into-prd`),
+      raw('POST', `/api/board/${st.threadId}/pull-into-prd`),
+    ]);
+    expect(results.map((x) => x.status).sort()).toEqual([201, 409]);
+    const ok1 = results.find((x) => x.status === 201) as any;
+    const body = ok1.body;
+    const doc = (await q('SELECT source_thread_ids FROM documents WHERE id=$1', [body.docId]))[0];
+    expect(doc.source_thread_ids).toContain(body.discoveryId);
+    expect(doc.source_thread_ids).toContain(st.threadId);
+    expect(
+      await q(`SELECT 1 FROM documents WHERE kind='prd' AND source_thread_ids @> ARRAY[$1]::uuid[]`, [
+        st.threadId,
+      ]),
+    ).toHaveLength(1);
+    await finish(await nextStart(body.discoveryId, (f) => f.message.includes('"role":"facilitator"')));
+  });
+});
