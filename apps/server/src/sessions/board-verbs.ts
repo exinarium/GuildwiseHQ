@@ -27,6 +27,7 @@ import { one, type Row } from '../db/sql.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import type { BoardService } from './board.ts';
 import { castOf, listBoardNotes, listDisagreements } from './board-state.ts';
+import { NOT_A_MEMBER, requesterIsMember } from './membership.ts';
 
 type Reply = [boolean, unknown?, string?];
 
@@ -73,6 +74,7 @@ export async function boardVerb(
     [turn.thread_id],
   );
   if (!t) return [false, undefined, 'the session no longer exists'];
+  if (!(await requesterIsMember(ctx, turn, t))) return [false, undefined, NOT_A_MEMBER];
   return svc.serialized(t.id, async () => {
     const fresh = (await one(ctx.pool, 'SELECT * FROM threads WHERE id=$1', [t.id])) as Row;
     try {

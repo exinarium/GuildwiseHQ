@@ -17,7 +17,7 @@ import { resolvePersona } from '../capabilities/registry.ts';
 import type { Ctx } from '../context.ts';
 import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
-import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
+import { badRequest, conflict, forbidden, HttpError, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { threadMessageById } from '../queries/threads.ts';
 import { sessionCost } from '../sessions/cost.ts';
@@ -74,7 +74,8 @@ export async function sessionDto(ctx: Ctx, t: Row, db: Queryable = ctx.pool): Pr
 }
 
 /**
- * A session thread the user takes part in: the creator, or a user participant. Anyone else gets 404 (a session is private
+ * A session thread the user takes part in: the creator, or a user participant, and still an active member of the organization
+ * (someone who left or was removed loses the session with the membership). Anyone else gets 404 (a session is private
  * to its participants, whatever the organization role).
  */
 export async function loadSession(
@@ -87,6 +88,7 @@ export async function loadSession(
     db,
     `SELECT t.* FROM threads t
       WHERE t.id=$1 AND t.kind IN (${SESSION_KIND_SQL}) AND t.deleted_at IS NULL
+        AND EXISTS (SELECT 1 FROM org_members om WHERE om.org_id=t.org_id AND om.user_id=$2 AND om.status='active')
         AND (t.created_by=$2 OR EXISTS (SELECT 1 FROM thread_participants p
               WHERE p.thread_id=t.id AND p.kind='user' AND p.ref_id=$2::text AND p.removed_at IS NULL))
       ${lock ? 'FOR UPDATE OF t' : ''}`,
@@ -119,12 +121,23 @@ async function defaultWorkstation(
   return w?.id;
 }
 
-async function assertWorkstation(
+/**
+ * A workstation a session may run on: active, owned by a member of the organization and serving it, and one the actor may
+ * spend. A session turn runs with the workstation owner's logins and provider keys, so it runs on the actor's own workstation,
+ * the session creator's, or the workstation of an agent the session was built around (the agent's owner put it there). Anyone
+ * else's is refused.
+ */
+export async function assertWorkstation(
   ctx: Ctx,
   db: Queryable,
   orgId: string,
   workstationId: string,
-): Promise<void> {
+  who?: {
+    actorId: string;
+    creatorId?: string | null;
+    agentWorkstationIds?: Array<string | null | undefined>;
+  },
+): Promise<{ userId: string; viaAgent: boolean }> {
   const w = await one(db, `SELECT id, user_id FROM workstations WHERE id=$1 AND status='active'`, [
     workstationId,
   ]);
@@ -132,6 +145,10 @@ async function assertWorkstation(
     throw badRequest('unknown_workstation', 'workstation not found');
   if (!(await workstationServesOrg(db, workstationId, orgId)))
     throw badRequest('simulation_workstation', 'that workstation does not serve this organization');
+  const viaAgent = !!who?.agentWorkstationIds?.includes(workstationId);
+  if (who && w.user_id !== who.actorId && w.user_id !== who.creatorId && !viaAgent)
+    throw new HttpError(403, 'workstation_not_yours', 'choose one of your own workstations for this session');
+  return { userId: w.user_id as string, viaAgent };
 }
 
 /** One participant, checked and with its display name; events are built by the caller. */
@@ -220,7 +237,11 @@ export async function createSession(ctx: Ctx, who: Who, req: CreateSessionReques
       if (!agent) throw badRequest('unknown_participant', 'facilitator agent not found');
     }
     const workstationId = req.workstationId ?? (await defaultWorkstation(tx, who.userId, agent));
-    if (workstationId) await assertWorkstation(ctx, tx, who.orgId, workstationId);
+    if (workstationId)
+      await assertWorkstation(ctx, tx, who.orgId, workstationId, {
+        actorId: who.userId,
+        agentWorkstationIds: [agent?.workstation_id],
+      });
 
     const list: ParticipantInput[] = [...req.participants];
     if (!list.some((p) => p.kind === 'user' && p.refId === who.userId))
@@ -296,7 +317,16 @@ export async function patchSession(
   return withAppendTx(ctx.pool, async (tx) => {
     const t = await loadSession(tx, userId, threadId, true);
     await assertSessionManager(tx, userId, t);
-    if (req.workstationId) await assertWorkstation(ctx, tx, t.org_id, req.workstationId);
+    if (req.workstationId) {
+      const host = t.agent_id
+        ? await one(tx, 'SELECT workstation_id FROM agents WHERE id=$1', [t.agent_id])
+        : undefined;
+      await assertWorkstation(ctx, tx, t.org_id, req.workstationId, {
+        actorId: userId,
+        creatorId: t.created_by,
+        agentWorkstationIds: [host?.workstation_id],
+      });
+    }
     await ctx.store.append(
       [
         {

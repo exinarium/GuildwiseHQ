@@ -77,6 +77,8 @@ export const discoveryEvents = [
       section: PanelSectionSchema,
       text: z.string().min(1).max(2000),
       by: Author,
+      /** The session turn that added the note (for the limits on what one turn may add). */
+      turnId: Id.optional(),
     }),
   ),
   defineEvent(

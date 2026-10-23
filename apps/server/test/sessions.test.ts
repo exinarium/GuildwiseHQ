@@ -2,11 +2,13 @@ import { SESSION_TURNS_CAPABILITY } from '@aom/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { PROJECTION_TABLES } from '../src/projections/index.ts';
 import { rebuildProjections } from '../src/projections/rebuild.ts';
+import { requesterIsMember } from '../src/sessions/membership.ts';
 import { uniqueEmail } from './helpers/app.ts';
 import { Browser } from './helpers/browser.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import type { FakeRunner } from './helpers/fake-runner.ts';
-import { createWorld, ok, until, type World } from './helpers/world.ts';
+import { FakeRunner as Runner } from './helpers/fake-runner.ts';
+import { createWorld, MOCK_RUNTIME, ok, pairWorkstation, until, type World } from './helpers/world.ts';
 
 /** Discovery and boardroom sessions: participants, durable turns, the runner round trip and replay safety. */
 let w: World;
@@ -478,6 +480,147 @@ describe('durable turns', () => {
     await w.t.app.ctx.services.sessions.sweep();
     expect(await turnRow(t.id)).toMatchObject({ status: 'failed' });
     expect((await turnRow(t.id)).error).toContain('expired');
+  });
+});
+
+describe('whose workstation a session may use, and who may end a turn', () => {
+  let adm: { id: string; cookie: string; email: string };
+  let admWs = '';
+  let admToken = '';
+  it('refuses a workstation of someone else when a session is created, changed or a turn is queued', async () => {
+    adm = await w.t.userSession(uniqueEmail('wsadmin'));
+    await w.t.addOrgMember(w.owner.id, adm.id, 'admin');
+    const p = await pairWorkstation(w.t, adm, 'adm-box');
+    admWs = p.workstationId;
+    admToken = p.runnerToken;
+    const own = await raw('POST', '/api/sessions', {
+      kind: 'boardroom',
+      title: 'Elsewhere',
+      workstationId: admWs,
+      participants: [persona('cost-hawk')],
+    });
+    expect(own.status).toBe(403);
+    expect(JSON.stringify(own.body)).toContain('workstation_not_yours');
+    const s = await newSession();
+    expect((await raw('PATCH', `/api/sessions/${s.threadId}`, { workstationId: admWs })).status).toBe(403);
+    // a turn may not name another person's workstation either
+    const t = await raw('POST', `/api/sessions/${s.threadId}/turns`, {
+      participantId: speaker(s, 'cost-hawk').id,
+      message: 'hi',
+      workstationId: admWs,
+    });
+    expect(t.status).toBe(403);
+    // the admin may use their own for a session of their own
+    const mine = await raw(
+      'POST',
+      '/api/sessions',
+      { kind: 'boardroom', title: 'Mine', workstationId: admWs, participants: [persona('cost-hawk')] },
+      adm.cookie,
+    );
+    expect(mine.status, JSON.stringify(mine.body)).toBe(201);
+  });
+
+  it('keeps a direct-model turn on the workstation of the person who queues it', async () => {
+    const s = await newSession();
+    await owner(
+      'POST',
+      `/api/sessions/${s.threadId}/participants`,
+      { kind: 'user', refId: adm.id, seat: 'Guest' },
+      201,
+    );
+    const res = await raw(
+      'POST',
+      `/api/sessions/${s.threadId}/turns`,
+      {
+        participantId: speaker(s, 'cost-hawk').id,
+        message: 'spend the owner keys',
+        model: { runtime: 'direct-model', model: 'openai:gpt-5' },
+      },
+      adm.cookie,
+    );
+    expect(res.status, JSON.stringify(res.body)).toBe(403);
+    expect(JSON.stringify(res.body)).toContain('workstation_not_yours');
+    expect((await q('SELECT 1 FROM session_turns WHERE thread_id=$1', [s.threadId])).length).toBe(0);
+  });
+
+  it('ignores chat.done and chat.error from a workstation the turn was not sent to', async () => {
+    const r = await connect();
+    const other = await Runner.connect(w.baseUrl, admToken);
+    other.hello({ repos: [], runtimes: MOCK_RUNTIME, capabilities: [SESSION_TURNS_CAPABILITY] });
+    await other.waitFor('welcome');
+    const s = await newSession();
+    const t = (
+      await owner(
+        'POST',
+        `/api/sessions/${s.threadId}/turns`,
+        { participantId: speaker(s, 'cost-hawk').id, message: 'who answers?' },
+        202,
+      )
+    ).turn;
+    const start = await startOf(r, t.id);
+    reply(other, start, 'FORGED ANSWER');
+    other.send('chat.error', { chatId: t.id, threadId: s.threadId, error: 'boom' });
+    await other.barrier();
+    expect((await turnRow(t.id)).status).toBe('running');
+    expect((await messages(s.threadId)).some((m) => m.body === 'FORGED ANSWER')).toBe(false);
+    reply(r, start, 'The real answer');
+    await until(async () => (await turnRow(t.id)).status === 'done');
+    expect((await messages(s.threadId)).map((m) => m.body)).toContain('The real answer');
+    // a late frame for a turn that went back to the queue is not taken either
+    const t2 = (
+      await owner(
+        'POST',
+        `/api/sessions/${s.threadId}/turns`,
+        { participantId: speaker(s, 'cost-hawk').id, message: 'again' },
+        202,
+      )
+    ).turn;
+    const start2 = await startOf(r, t2.id);
+    r.send('chat.error', { chatId: t2.id, threadId: s.threadId, error: 'workstation offline' });
+    // back in the queue and sent again: the second attempt is the one that counts
+    await until(async () => (await turnRow(t2.id)).attempts === 2);
+    reply(other, start2, 'LATE ANSWER');
+    other.send('chat.error', { chatId: t2.id, threadId: s.threadId, error: 'late failure' });
+    await other.barrier();
+    expect(await turnRow(t2.id)).toMatchObject({ status: 'running', attempts: 2 });
+    expect((await messages(s.threadId)).some((m) => m.body === 'LATE ANSWER')).toBe(false);
+    other.close();
+    r.close();
+  });
+
+  it('shows a session to nobody who left the organization, whatever the thread says', async () => {
+    const s = await newSession();
+    await owner(
+      'POST',
+      `/api/sessions/${s.threadId}/participants`,
+      { kind: 'user', refId: adm.id, seat: 'Guest' },
+      201,
+    );
+    const asAdm = (url: string) =>
+      w.t.req('GET', url, { cookie: adm.cookie, headers: { 'x-aom-org': w.owner.id } });
+    expect((await asAdm(`/api/sessions/${s.threadId}`)).status).toBe(200);
+    expect((await asAdm(`/api/threads/${s.threadId}/messages`)).status).toBe(200);
+    await w.t.app.ctx.store.append([
+      {
+        streamId: `org-${w.owner.id}`,
+        event: {
+          type: 'OrgMemberRemoved',
+          payload: { orgId: w.owner.id, userId: adm.id, reason: 'removed' },
+        },
+        actor: { kind: 'system', id: null },
+        scope: { orgId: w.owner.id, projectId: null, audience: 'org' },
+      } as never,
+    ]);
+    expect((await asAdm(`/api/sessions/${s.threadId}`)).status).toBeGreaterThanOrEqual(400);
+    expect((await asAdm(`/api/threads/${s.threadId}/messages`)).status).toBe(404);
+    // the verbs of a turn that person queued stop with the membership, too; the owner's own turns carry on
+    const ctx = w.t.app.ctx;
+    const thread = { created_by: w.owner.id };
+    expect(await requesterIsMember(ctx, { org_id: w.owner.id, requested_by: adm.id }, thread)).toBe(false);
+    expect(
+      await requesterIsMember(ctx, { org_id: w.owner.id, requested_by: null }, { created_by: adm.id }),
+    ).toBe(false);
+    expect(await requesterIsMember(ctx, { org_id: w.owner.id, requested_by: w.owner.id }, thread)).toBe(true);
   });
 });
 

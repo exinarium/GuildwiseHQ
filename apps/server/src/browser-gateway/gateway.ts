@@ -16,7 +16,16 @@ import { projectRole } from '../authz/scope.ts';
 import type { Ctx } from '../context.ts';
 import { one } from '../db/sql.ts';
 import type { StoredEvent } from '../eventstore/types.ts';
-import { accessOf, loadProjects, replayVisible, type SocketViewer, toVisibleEvent } from './visibility.ts';
+import {
+  accessOf,
+  loadProjects,
+  replayVisible,
+  type SessionAudience,
+  type SocketViewer,
+  sessionAudienceOf,
+  sessionLevel,
+  toVisibleEvent,
+} from './visibility.ts';
 
 interface BConn {
   socket: WebSocket;
@@ -183,7 +192,12 @@ export class BrowserGateway {
           else
             for (const e of missed) {
               if (e.seq > maxSeq) break;
-              const level = accessOf(c.viewer, e);
+              const level = sessionLevel(
+                accessOf(c.viewer, e),
+                c.viewer,
+                e,
+                await sessionAudienceOf(this.ctx.pool, e),
+              );
               if (level) this.send(c, { type: 'event', event: toVisibleEvent(e, level) });
             }
         }
@@ -191,7 +205,8 @@ export class BrowserGateway {
         this.send(c, { type: 'ready', seq: Number(upTo) });
         c.ready = true;
         const queued = c.buffer.splice(0);
-        for (const e of queued) if (e.seq > c.sentUpTo) this.deliver(c, e);
+        for (const e of queued)
+          if (e.seq > c.sentUpTo) this.deliver(c, e, await sessionAudienceOf(this.ctx.pool, e));
         return;
       }
       case 'shift.watch': {
@@ -306,8 +321,8 @@ export class BrowserGateway {
         this.send(c, { type: 'run.log', envId, service, lines, ...(history ? { history: true } : {}) });
   }
 
-  private deliver(c: BConn, e: StoredEvent): void {
-    const level = accessOf(c.viewer, e);
+  private deliver(c: BConn, e: StoredEvent, aud: SessionAudience | null): void {
+    const level = sessionLevel(accessOf(c.viewer, e), c.viewer, e, aud);
     if (!level) return;
     this.send(c, { type: 'event', event: toVisibleEvent(e, level) });
     c.sentUpTo = e.seq;
@@ -317,13 +332,18 @@ export class BrowserGateway {
     const t = e.event.type;
     const payload = e.event.payload as Record<string, any>;
     if (t === 'UserDeactivated') this.closeUser(payload.userId);
+    // who may see a session event's content, looked up once for every socket
+    const aud = await sessionAudienceOf(this.ctx.pool, e).catch(
+      // fail closed: nobody gets the content of a session event we could not check
+      (): SessionAudience => ({ users: new Set(), sealed: true }),
+    );
     for (const c of this.conns) {
       if (ACCESS_EVENTS.has(t)) await this.refreshAccess(c, e);
       if (!c.ready) {
         c.buffer.push(e);
         continue;
       }
-      if (e.seq > c.sentUpTo) this.deliver(c, e);
+      if (e.seq > c.sentUpTo) this.deliver(c, e, aud);
       if (
         (t === 'WorkstationConnected' || t === 'WorkstationDisconnected') &&
         (e.scope.userId === c.userId || (!e.scope.userId && e.scope.orgId === c.userId))

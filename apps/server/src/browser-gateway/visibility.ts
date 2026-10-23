@@ -1,6 +1,12 @@
-import { type EventViewer, eventAccess, type OrgRole, type VisibleEvent } from '@aom/shared';
+import {
+  type EventViewer,
+  eventAccess,
+  type OrgRole,
+  parseBoardConfig,
+  type VisibleEvent,
+} from '@aom/shared';
 import { EVENT_VISIBILITY_SQL, visibleProjectIds } from '../authz/scope.ts';
-import { type Queryable, rows } from '../db/sql.ts';
+import { one, type Queryable, rows } from '../db/sql.ts';
 import { rowToEvent } from '../eventstore/pg-event-store.ts';
 import type { StoredEvent } from '../eventstore/types.ts';
 
@@ -81,4 +87,98 @@ export async function replayVisible(
     ],
   );
   return r.map(rowToEvent);
+}
+
+// ---------------------------------------------------------------------------------------------- session privacy
+
+/**
+ * Events of a discovery or boardroom session are organization-scope, so by their audience every Owner and Admin would get
+ * their full payload (messages, notes, minutes). A session is private to its creator and its user participants, so for anyone
+ * else the payload is stripped like a Member's: the event still tells the browser something changed. While a boardroom's first
+ * round is sealed, the speakers' words are held back from the participants too (the same rule the read paths apply).
+ */
+const SESSION_CONTENT_EVENTS = new Set([
+  'SessionThreadCreated',
+  'SessionThreadUpdated',
+  'ThreadParticipantAdded',
+  'ThreadParticipantUpdated',
+  'ThreadMessagePosted',
+  'SessionTurnQueued',
+  'SessionTurnStarted',
+  'SessionTurnRequeued',
+  'SessionTurnCompleted',
+  'SessionTurnFailed',
+  'DelegateCompleted',
+  'DiscoveryQuestionAsked',
+  'DiscoveryQuestionWithdrawn',
+  'DiscoveryAnswerProposed',
+  'DiscoveryQuestionAnswered',
+  'DiscoveryNoteAdded',
+  'DiscoveryNoteUpdated',
+  'DiscoveryProposalRaised',
+  'DiscoveryProposalResolved',
+  'BoardRoundPlanned',
+  'BoardNoteAdded',
+  'BoardNoteUpdated',
+  'BoardNoteMerged',
+  'BoardDisagreementRecorded',
+  'BoardDecisionRaised',
+  'BoardDecisionResolved',
+]);
+
+export interface SessionAudience {
+  /** Creator and user participants. */
+  users: ReadonlySet<string>;
+  /** The thread is a boardroom whose first round is still sealed. */
+  sealed: boolean;
+}
+
+/** Who may see the content of this event, when it belongs to a session thread; null: it does not. */
+export async function sessionAudienceOf(db: Queryable, e: StoredEvent): Promise<SessionAudience | null> {
+  if (!SESSION_CONTENT_EVENTS.has(e.event.type) || e.scope.audience !== 'org') return null;
+  const threadId = (e.event.payload as { threadId?: unknown }).threadId;
+  if (typeof threadId !== 'string') return null;
+  const t = await one(
+    db,
+    `SELECT kind, created_by, session_config FROM threads WHERE id=$1 AND kind IN ('discovery','boardroom')`,
+    [threadId],
+  );
+  if (!t) return null;
+  const p = await rows(
+    db,
+    `SELECT ref_id FROM thread_participants WHERE thread_id=$1 AND kind='user' AND removed_at IS NULL`,
+    [threadId],
+  );
+  const cfg = t.kind === 'boardroom' ? parseBoardConfig(t.session_config) : null;
+  return {
+    users: new Set([...(t.created_by ? [t.created_by as string] : []), ...p.map((r) => r.ref_id as string)]),
+    sealed: !!cfg && cfg.round >= 1 && cfg.revealedRound < 1 && cfg.stage !== 'setup',
+  };
+}
+
+/** True for what the speakers say in round 1 of a boardroom (their messages, notes and disagreements, and what edits them). */
+function isSealedContent(e: StoredEvent): boolean {
+  const type = e.event.type;
+  const pl = e.event.payload as {
+    round?: number | null;
+    data?: { round?: number; purpose?: string };
+    by?: { kind?: string };
+  };
+  if (type === 'ThreadMessagePosted') return pl.data?.round === 1 && pl.data?.purpose === 'board_speaker';
+  if (type === 'BoardNoteAdded' || type === 'BoardDisagreementRecorded')
+    return pl.round === 1 && pl.by?.kind !== 'user';
+  return type === 'BoardNoteUpdated' || type === 'BoardNoteMerged';
+}
+
+/** The level a viewer gets of an event after the session rules. */
+export function sessionLevel(
+  level: 'full' | 'stripped' | false,
+  viewer: SocketViewer,
+  e: StoredEvent,
+  aud: SessionAudience | null,
+): 'full' | 'stripped' | false {
+  if (level !== 'full' || !aud) return level;
+  if (!aud.users.has(viewer.userId)) return 'stripped';
+  if (aud.sealed && isSealedContent(e)) return 'stripped';
+  return level;
 }

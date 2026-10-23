@@ -25,6 +25,7 @@ import { one, type Row } from '../db/sql.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import type { DiscoveryService } from './discovery.ts';
 import { listNotes, listQuestions } from './discovery-state.ts';
+import { NOT_A_MEMBER, requesterIsMember } from './membership.ts';
 
 /** `[ok, result, error]`, as every rpc handler of the gateway answers. */
 type Reply = [boolean, unknown?, string?];
@@ -63,6 +64,7 @@ export async function sessionVerb(
     [turn.thread_id],
   );
   if (!t) return [false, undefined, 'the session no longer exists'];
+  if (!(await requesterIsMember(ctx, turn, t))) return [false, undefined, NOT_A_MEMBER];
   return svc.serialized(t.id, async () => {
     const fresh = (await one(ctx.pool, 'SELECT * FROM threads WHERE id=$1', [t.id])) as Row;
     const cfg = parseDiscoveryConfig(fresh.session_config);
@@ -247,12 +249,13 @@ async function note(
     if (purpose === 'ceo_answer') {
       const n = await one(
         ctx.pool,
-        `SELECT count(*)::int AS n FROM discovery_notes WHERE thread_id=$1 AND by_id=$2 AND removed_at IS NULL AND created_at > now() - interval '1 minute'`,
-        [t.id, by.id],
+        `SELECT count(*)::int AS n FROM discovery_notes WHERE thread_id=$1 AND turn_id=$2 AND removed_at IS NULL`,
+        [t.id, turn.id],
       );
-      if ((n?.n ?? 0) >= 2) return [false, undefined, 'You may add one opinion per turn.'];
+      if ((n?.n ?? 0) >= 1) return [false, undefined, 'You may add one opinion per turn.'];
     }
     const ev = svc.noteEvent(t, p.data.section as PanelSection, p.data.text, by);
+    (ev.event.payload as { turnId?: string }).turnId = turn.id;
     await ctx.store.append([ev]);
     const id = (ev.event.payload as { noteId: string }).noteId;
     return [true, { id: id.slice(0, 8), message: `Added to ${p.data.section}.` }];

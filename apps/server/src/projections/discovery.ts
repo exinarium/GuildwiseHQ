@@ -101,8 +101,8 @@ export const discoveryProjectors: Record<string, Projector> = {
     const p = ev<'DiscoveryNoteAdded'>(e).payload;
     await exec(
       tx,
-      `INSERT INTO discovery_notes (id, thread_id, org_id, seq, section, text, by_kind, by_name, by_id, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$10)
+      `INSERT INTO discovery_notes (id, thread_id, org_id, seq, section, text, by_kind, by_name, by_id, created_at, updated_at, turn_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$10,$11)
        ON CONFLICT (id) DO NOTHING`,
       [
         p.noteId,
@@ -115,6 +115,7 @@ export const discoveryProjectors: Record<string, Projector> = {
         p.by.name,
         p.by.id,
         e.createdAt,
+        p.turnId ?? null,
       ],
     );
   },

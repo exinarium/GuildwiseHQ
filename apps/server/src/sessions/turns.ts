@@ -9,10 +9,12 @@ import {
   capTurnText,
   chatSegmentsText,
   composeTurnMessage,
+  DIRECT_RUNTIME,
   getBuiltinRole,
   isKnownChoice,
   type ModelChoice,
   PERSONA_HOST_AGENT_ID,
+  parseBoardConfig,
   type QueueTurnRequest,
   type RunnerToServerOf,
   renderSessionTranscript,
@@ -32,12 +34,18 @@ import {
 } from '@aom/shared';
 import { resolvePersona } from '../capabilities/registry.ts';
 import { agentActor, runnerActor, userActor } from '../commands/common.ts';
-import { isAdHocPersona, listParticipants, loadSession, sessionScope } from '../commands/sessions.ts';
+import {
+  assertWorkstation,
+  isAdHocPersona,
+  listParticipants,
+  loadSession,
+  sessionScope,
+} from '../commands/sessions.ts';
 import type { Ctx } from '../context.ts';
 import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
 import { withAppendTx } from '../db/tx.ts';
-import { badRequest, conflict, notFound } from '../errors.ts';
+import { badRequest, conflict, HttpError, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { threadMessageById } from '../queries/threads.ts';
 import { agentSpecFor } from '../runner-gateway/brief.ts';
@@ -80,6 +88,8 @@ export interface SessionTerminal {
   message?: ThreadMessageDto;
   error?: string;
   requeued?: boolean;
+  /** The frame came from the wrong workstation or for a turn that is not running: nothing was recorded, nothing to announce. */
+  ignored?: boolean;
   workstationId: string | null;
 }
 
@@ -116,7 +126,10 @@ function personaSpec(name: string, choice: ModelChoice, skills: string[]): Agent
  */
 export class SessionTurns {
   /** turn id -> workstation, for the turns this process sent and has not heard the end of. */
-  private readonly inflight = new Map<string, { workstationId: string; userIds: string[] }>();
+  private readonly inflight = new Map<
+    string,
+    { workstationId: string; userIds: string[]; sealed: boolean }
+  >();
   private readonly dispatching = new Set<string>();
 
   constructor(private readonly ctx: Ctx) {}
@@ -136,6 +149,19 @@ export class SessionTurns {
     return [
       ...new Set([...(t?.created_by ? [t.created_by as string] : []), ...p.map((r) => r.ref_id as string)]),
     ];
+  }
+
+  /**
+   * Is this turn one of the speakers of a boardroom's sealed first round? Their words are not shown to anyone, the owner
+   * included, until every seat has answered (independent-first); nothing of them may travel live either.
+   */
+  private async isSealed(db: Queryable, turn: Row): Promise<boolean> {
+    const meta = (turn.meta ?? {}) as { purpose?: string };
+    if (meta.purpose !== 'board_speaker' || turn.round !== 1) return false;
+    const t = await one(db, `SELECT kind, session_config FROM threads WHERE id=$1`, [turn.thread_id]);
+    if (t?.kind !== 'boardroom') return false;
+    const cfg = parseBoardConfig(t.session_config);
+    return cfg.round >= 1 && cfg.revealedRound < 1 && cfg.stage !== 'setup';
   }
 
   private async announce(
@@ -233,10 +259,25 @@ export class SessionTurns {
       const workstationId: string | undefined =
         req.workstationId ?? agent?.workstation_id ?? t.workstation_id ?? undefined;
       if (!workstationId) throw conflict('no_workstation', 'this session has no workstation: set one first');
-      const ws = await one(tx, `SELECT id FROM workstations WHERE id=$1 AND status='active'`, [
-        workstationId,
-      ]);
-      if (!ws) throw conflict('no_workstation', 'the workstation of this session is not available');
+      // The workstation must belong to a member of this organization and serve it, and the turn runs with its owner's logins and
+      // provider keys: only the actor's own, the session creator's or the facilitating agent's workstation. A direct-model turn
+      // spends the owner's provider keys, so it needs the actor's own workstation (or the agent's, with the agent's own model).
+      const agentWs = [agent?.workstation_id, host?.workstation_id];
+      const owned = await assertWorkstation(ctx, tx, t.org_id, workstationId, {
+        actorId: userId,
+        creatorId: t.created_by,
+        agentWorkstationIds: agentWs,
+      }).catch((err) => {
+        if (err instanceof HttpError && err.status === 400)
+          throw conflict('no_workstation', 'the workstation of this session is not available');
+        throw err;
+      });
+      if (choice.runtime === DIRECT_RUNTIME && owned.userId !== userId && !(owned.viaAgent && !req.model))
+        throw new HttpError(
+          403,
+          'workstation_not_yours',
+          'a direct-model turn spends the keys of the workstation owner: run it on your own workstation',
+        );
       // A model the owner (or the Boardroom's defaults) picked must be one this workstation can run: its runtime is there and, for a
       // direct model, its provider has a key stored on that machine. Refused now, with the reason, rather than hanging in the queue.
       if (req.model) {
@@ -463,6 +504,7 @@ export class SessionTurns {
       this.inflight.set(turn.id, {
         workstationId: wsId,
         userIds: await this.audience(ctx.pool, turn.thread_id),
+        sealed: await this.isSealed(ctx.pool, turn),
       });
       const scope = sessionScope(thread);
       await ctx.store.append([
@@ -656,7 +698,8 @@ export class SessionTurns {
   onDelta(workstationId: string, msg: RunnerToServerOf<'chat.delta'>): boolean {
     const c = this.inflight.get(msg.chatId);
     if (!c) return false;
-    if (c.workstationId === workstationId)
+    // a sealed speaker's words are held back (the reply is read from the thread once the round is revealed)
+    if (c.workstationId === workstationId && !c.sealed)
       this.tell(c.userIds, {
         type: 'chat.delta',
         threadId: msg.threadId,
@@ -669,7 +712,7 @@ export class SessionTurns {
   onActivity(workstationId: string, msg: RunnerToServerOf<'chat.activity'>): boolean {
     const c = this.inflight.get(msg.chatId);
     if (!c) return false;
-    if (c.workstationId === workstationId)
+    if (c.workstationId === workstationId && !c.sealed)
       this.tell(c.userIds, {
         type: 'chat.activity',
         threadId: msg.threadId,
@@ -695,6 +738,10 @@ export class SessionTurns {
       participantId: turn.participant_id ?? null,
       workstationId,
     };
+    // Only the workstation the turn was sent to may end it, and only while it runs: a frame of an earlier attempt that arrives
+    // after the turn went back to the queue (or from any other workstation) changes nothing.
+    if (turn.workstation_id !== workstationId || turn.status === 'queued')
+      return { ...base, workstationId: null, ignored: true };
     if (turn.status === 'done' || turn.status === 'failed')
       return { ...base, ...(turn.message_id ? { messageId: turn.message_id } : {}) };
     const t = await one(tx, 'SELECT * FROM threads WHERE id=$1', [turn.thread_id]);
@@ -777,6 +824,8 @@ export class SessionTurns {
       participantId: turn.participant_id ?? null,
       workstationId,
     };
+    if (turn.workstation_id !== workstationId || turn.status === 'queued')
+      return { ...base, workstationId: null, ignored: true };
     if (turn.status === 'done' || turn.status === 'failed') return base;
     const t = (await one(tx, 'SELECT org_id, project_id FROM threads WHERE id=$1', [turn.thread_id])) as
       | Row
@@ -828,16 +877,23 @@ export class SessionTurns {
 
   /** After the transaction committed: tell the watchers and let the next queued turn go. */
   async notify(t: SessionTerminal | undefined): Promise<void> {
-    if (!t) return;
+    if (!t || t.ignored) return;
     const c = this.inflight.get(t.turnId);
     const users = c?.userIds ?? (await this.audience(this.ctx.pool, t.threadId));
     this.inflight.delete(t.turnId);
     if (t.messageId) {
+      // a sealed first-round answer travels without its text: the browser reads it when the round is revealed
+      const sealed =
+        c?.sealed ??
+        (await this.isSealed(
+          this.ctx.pool,
+          (await one(this.ctx.pool, 'SELECT * FROM session_turns WHERE id=$1', [t.turnId])) ?? {},
+        ));
       this.tell(users, {
         type: 'chat.done',
         threadId: t.threadId,
         messageId: t.messageId,
-        ...(t.message ? { message: t.message } : {}),
+        ...(t.message && !sealed ? { message: t.message } : {}),
         turnId: t.turnId,
         ...(t.participantId ? { participantId: t.participantId } : {}),
       });

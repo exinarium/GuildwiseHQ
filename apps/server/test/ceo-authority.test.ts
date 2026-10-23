@@ -156,6 +156,22 @@ describe('card.raise_model', () => {
     });
     expect(withCardModel(spec, null)).toBe(spec);
   });
+
+  it('checks a Codex choice against the role of the agents on the card, like hiring does', async () => {
+    const card = await w.card({ title: 'Codex for whom?' });
+    const codex = { card: card.ref, model: 'gpt-6-luna', runtime: 'codex' };
+    // nobody works the card yet, so there is no role to check it against
+    const none = result(await act(r, shiftId, 'raise-model', codex, { key: 'rm-cx-0' }));
+    expect(none.status).toBe('refused');
+    expect(none.message).toMatch(/Codex|agent/);
+    // a role the Codex sandbox cannot confine (the tester drives a browser) is refused with the reason
+    const tester = await w.hire(`Tess${Math.random().toString(36).slice(2, 6)}`, 'tester', 'senior');
+    await q('UPDATE cards SET last_agent_id=$2 WHERE id=$1', [card.id, tester.id]);
+    const res = result(await act(r, shiftId, 'raise-model', codex, { key: 'rm-cx-1' }));
+    expect(res.status).toBe('refused');
+    expect(res.message).toMatch(/cannot run on Codex/);
+    expect((await cardRow(card.id)).model_override).toBeNull();
+  });
 });
 
 /** Parks a card for its stop-loss through the real function and returns the new item. */

@@ -489,6 +489,45 @@ describe('CEO modes', () => {
     ceoId = await appoint(w);
   });
 
+  it('lets the CEO add one opinion per turn, counted per turn and not over the last minute', async () => {
+    const s = await create({ title: 'Opinions', ceoMode: 'joint' });
+    const mine = (role: string) => (f: any) =>
+      f.threadId === s.threadId && f.message.includes(`"role":"${role}"`);
+    for (let i = 0; i < 3; i++) {
+      const fac = await nextStart(mine('facilitator'));
+      const asked = await ask(fac.chatId, `Question ${i}?`, ['Yes', 'No']);
+      expect(asked.ok).toBe(true);
+      await finish(fac, 'Asked.');
+      const c = await nextStart(mine('ceo_answer'));
+      const first = await call(c.chatId, 'session.note', {
+        op: 'add',
+        section: 'ideas',
+        text: `Opinion ${i}`,
+      });
+      expect(first.ok, first.error).toBe(true);
+      const second = await call(c.chatId, 'session.note', { op: 'add', section: 'ideas', text: `More ${i}` });
+      expect(second.ok).toBe(false);
+      expect(second.error).toContain('one opinion per turn');
+      await finish(c, 'ok');
+      if (i === 2) await raw('POST', `/api/discovery/${s.threadId}/pause`);
+      await answer(s.threadId, asked.result.questionId, { kind: 'pick', optionId: 'o1' });
+    }
+    await until(
+      async () =>
+        (
+          await q(`SELECT 1 FROM session_turns WHERE thread_id=$1 AND status IN ('queued','running')`, [
+            s.threadId,
+          ])
+        ).length === 0,
+    );
+    // three turns within a minute each added theirs; the turn is recorded on the note
+    const notes = await q('SELECT text, turn_id FROM discovery_notes WHERE thread_id=$1 ORDER BY seq', [
+      s.threadId,
+    ]);
+    expect(notes.map((n) => n.text)).toEqual(['Opinion 0', 'Opinion 1', 'Opinion 2']);
+    expect(new Set(notes.map((n) => n.turn_id)).size).toBe(3);
+  });
+
   it('joint: the CEO proposes after each question; the owner confirms, edits or overrides; the CEO never answers on its own', async () => {
     const s = await create({ title: 'Joint', ceoMode: 'joint' });
     expect(s.ceoAvailable).toBe(true);

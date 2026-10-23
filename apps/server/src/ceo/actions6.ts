@@ -1,6 +1,8 @@
 import {
   type CeoActionName,
+  CODEX_RUNTIME,
   canonicalWorkflowKey,
+  codexRoleProblem,
   DESK_SUBKIND,
   DIRECT_RUNTIME,
   isKnownChoice,
@@ -13,6 +15,7 @@ import { agentActor, cardMessage, userActor } from '../commands/common.ts';
 import { one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { HttpError } from '../errors.ts';
+import { agentSpecFor } from '../runner-gateway/brief.ts';
 import { appendLocked, cardOf, refuse, truncate } from './actions.ts';
 import type { ActionDef, ActionEnv } from './types.ts';
 
@@ -132,6 +135,27 @@ const raiseModel: ActionDef<z.infer<typeof RaiseP>> = {
         ...base,
         refuse: `${p.model}${p.effort ? ` with effort ${p.effort}` : ''} is not a model choice of ${choice.runtime}`,
       };
+    // The Codex runtime cannot confine every role (no shell-less roles, no DevOps, no browsers, no path-limited writers): the agents
+    // that work this card must all be able to run there. The same rule as hiring or moving an agent onto Codex.
+    if (choice.runtime === CODEX_RUNTIME) {
+      const ids = [card.claimed_by_agent_id, card.last_agent_id, card.original_builder_agent_id].filter(
+        (x): x is string => !!x,
+      );
+      if (!ids.length)
+        return {
+          ...base,
+          refuse: 'no agent works this card yet, so Codex cannot be checked against its role',
+        };
+      for (const a of await rows(env.ctx.pool, 'SELECT * FROM agents WHERE id = ANY($1::uuid[])', [ids])) {
+        const spec = await agentSpecFor(env.ctx, a);
+        const problem = codexRoleProblem({
+          roleKey: spec.roleKey,
+          isDevops: spec.isDevops,
+          permissions: spec.permissions,
+        });
+        if (problem) return { ...base, refuse: `${a.name} cannot run on Codex: ${problem}` };
+      }
+    }
     return { ...base, data: { card, choice } };
   },
   async execute(env: ActionEnv, p, pr) {
