@@ -65,19 +65,36 @@ const CONTEXT_NOTE = (ref: string): string =>
 /** Sections whose whole body is installer, activation or headless plumbing. */
 const DROPPED_SECTIONS = /^(on activation|conventions|headless mode|headless)$/i;
 
+/** Longest line the shim runs a pattern over; a longer one is cut (such a line is not prose a pack author wrote). */
+const MAX_LINE = 4096;
+
+/** `## Title` -> level and trimmed title, by scanning (no backtracking regex). */
+export function parseHeading(line: string): { level: number; text: string } | null {
+  if (line.length > MAX_LINE) return null;
+  let n = 0;
+  while (line[n] === '#') n++;
+  if (n < 1 || n > 6) return null;
+  const c = line[n];
+  if (c !== ' ' && c !== '\t') return null;
+  return { level: n, text: line.slice(n).trim() };
+}
+
 /** Pure text shim: drops activation and plumbing sections and script calls, maps config variables, renames pack references. */
 export function shimBmadText(text: string, opts: { pack: string; known: ReadonlySet<string> }): string {
-  const lines = text.replace(/\r\n/g, '\n').split('\n');
+  const lines = text
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .map((l) => (l.length > MAX_LINE ? l.slice(0, MAX_LINE) : l));
   const out: string[] = [];
   let skipLevel = 0; // heading level of the section being dropped
   let fenced = false;
   for (const line of lines) {
     if (/^\s*(```|~~~)/.test(line)) fenced = !fenced;
-    const h = !fenced ? /^(#{1,6})\s+(.*?)\s*$/.exec(line) : null;
+    const h = !fenced ? parseHeading(line) : null;
     if (h) {
-      const level = (h[1] as string).length;
+      const level = h.level;
       if (skipLevel && level <= skipLevel) skipLevel = 0;
-      if (!skipLevel && DROPPED_SECTIONS.test(h[2] as string)) {
+      if (!skipLevel && DROPPED_SECTIONS.test(h.text)) {
         skipLevel = level;
         continue;
       }
@@ -112,8 +129,19 @@ function descriptionOf(main: string, fallback: string): string {
 }
 
 function section(body: string, title: string): string {
-  const m = new RegExp(`^##\\s+${title}\\s*\\n([\\s\\S]*?)(?=^##\\s|(?![\\s\\S]))`, 'im').exec(body);
-  return m?.[1]?.trim() ?? '';
+  const want = title.toLowerCase();
+  const out: string[] = [];
+  let inside = false;
+  for (const line of body.split('\n')) {
+    const h = parseHeading(line);
+    if (h?.level === 2) {
+      if (inside) break;
+      if (h.text.toLowerCase() === want) inside = true;
+      continue;
+    }
+    if (inside) out.push(line);
+  }
+  return out.join('\n').trim();
 }
 
 interface Roster {
@@ -145,6 +173,24 @@ function readRoster(tree: PackTree): Map<string, Roster> {
   return out;
 }
 
+/** The first `# Name - Title` line (dash, en dash or em dash, with spaces around it), found by scanning. */
+function h1Of(body: string): [string, string, string] | null {
+  for (const raw of body.split('\n')) {
+    const line = raw.trimEnd();
+    if (line.length > MAX_LINE || !/^#[ \t]/.test(line)) continue;
+    const text = line.slice(1).trim();
+    for (let i = 1; i < text.length - 1; i++) {
+      const ch = text[i];
+      if ((ch === '—' || ch === '–' || ch === '-') && /\s/.test(text[i + 1] as string)) {
+        const a = text.slice(0, i).trim();
+        const b = text.slice(i + 1).trim();
+        if (a && b) return ['', a, b];
+      }
+    }
+  }
+  return null;
+}
+
 function personaFor(
   pack: string,
   s: RawSkill,
@@ -157,9 +203,9 @@ function personaFor(
   const toml = s.files['customize.toml'] ? parseTomlLite(s.files['customize.toml']) : {};
   const agent = tomlTable(toml.agent) ?? {};
   const r = roster.get(s.key) ?? {};
-  const h1 = /^#\s+(.+?)\s*[—–-]\s+(.+?)\s*$/m.exec(body);
-  const name = tomlString(agent.name) ?? r.name ?? h1?.[1]?.trim() ?? key;
-  const title = tomlString(agent.title) ?? r.title ?? h1?.[2]?.trim() ?? 'Specialist';
+  const h1 = h1Of(body);
+  const name = tomlString(agent.name) ?? r.name ?? h1?.[1] ?? key;
+  const title = tomlString(agent.title) ?? r.title ?? h1?.[2] ?? 'Specialist';
   const icon = tomlString(agent.icon) ?? r.icon ?? '🧑';
   const role = tomlString(agent.role);
   const identity = tomlString(agent.identity);

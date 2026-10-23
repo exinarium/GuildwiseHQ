@@ -77,8 +77,24 @@ export type CapabilityMeta = Omit<z.infer<typeof RegistryMetaSchema>, 'key'> & {
 /** Splits `---\nyaml\n---\nbody`. Throws a readable error when the frontmatter is missing or is not a YAML mapping. */
 export function splitFrontmatter(text: string): { data: Record<string, unknown>; body: string } {
   const src = text.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
-  const m = /^---\n([\s\S]*?)\n---[ \t]*(?:\n|$)([\s\S]*)$/.exec(src);
-  if (!m) throw new Error('missing frontmatter: the file must start with a --- block');
+  if (!src.startsWith('---\n')) throw new Error('missing frontmatter: the file must start with a --- block');
+  // A linear scan for the closing fence (a regex with a lazy group backtracks badly on long inputs).
+  let close = -1;
+  let from = 3; // the first "\n---" may be the one right after the opening fence line
+  for (;;) {
+    const at = src.indexOf('\n---', from);
+    if (at < 0) break;
+    let j = at + 4;
+    while (src[j] === ' ' || src[j] === '\t') j++;
+    if (j >= src.length || src[j] === '\n') {
+      close = at;
+      from = j < src.length ? j + 1 : j;
+      break;
+    }
+    from = at + 1;
+  }
+  if (close < 0) throw new Error('missing frontmatter: the file must start with a --- block');
+  const m = [src, src.slice(4, close), src.slice(from)];
   let data: unknown;
   try {
     data = parseYaml(m[1] ?? '');
@@ -172,11 +188,12 @@ export interface CapabilityIssue {
 
 /** Hash of all files of one capability: stable under file order, changes with any path or byte. */
 export function hashCapabilityFiles(files: Record<string, string>): string {
+  // Length-prefixed, so no path or content can imitate a separator and collide with another file set.
   return sha256Hex(
     Object.keys(files)
       .sort()
-      .map((p) => `${p}\u0000${files[p]}`)
-      .join('\u0001'),
+      .map((p) => `${p.length}:${p}${(files[p] as string).length}:${files[p]}`)
+      .join(''),
   );
 }
 
@@ -204,6 +221,7 @@ export function parseSkill(key: string, files: Record<string, string>): ParsedCa
 }
 
 export function parsePersona(key: string, text: string): ParsedCapability {
+  if (utf8Bytes(text) > CAPABILITY_MAX_FILE_BYTES) throw new Error(`${key}.md is too large`);
   const { data, body } = splitFrontmatter(text);
   const r = PersonaFrontmatterSchema.safeParse(data);
   if (!r.success) throw new Error(zodMessage(r.error));
@@ -256,6 +274,9 @@ export function parsePlaybook(key: string, files: Record<string, string>): Parse
 /** The most files and bytes one capability may have: a vault is not trusted to be small. */
 export const CAPABILITY_MAX_FILES = 200;
 export const CAPABILITY_MAX_FILE_BYTES = 512 * 1024;
+export const CAPABILITY_MAX_TOTAL_BYTES = 4 * 1024 * 1024;
+const utf8Encoder = new TextEncoder();
+const utf8Bytes = (t: string): number => utf8Encoder.encode(t).length;
 
 /**
  * Indexes a tree of files (`path -> text`, paths relative to the capability root, `/` separators) into capabilities.
@@ -300,8 +321,13 @@ export function indexCapabilityTree(tree: Record<string, string>): {
       if (!CapabilityKeySchema.safeParse(key).success)
         throw new Error('the directory name must be lowercase letters, digits and single hyphens');
       if (Object.keys(files).length > CAPABILITY_MAX_FILES) throw new Error('too many files');
-      for (const [p, t] of Object.entries(files))
-        if (t.length > CAPABILITY_MAX_FILE_BYTES) throw new Error(`${p} is too large`);
+      let total = 0;
+      for (const [p, t] of Object.entries(files)) {
+        const n = utf8Bytes(t);
+        if (n > CAPABILITY_MAX_FILE_BYTES) throw new Error(`${p} is too large`);
+        total += n;
+      }
+      if (total > CAPABILITY_MAX_TOTAL_BYTES) throw new Error('the capability is too large');
       entries.push(dir === 'skills' ? parseSkill(key, files) : parsePlaybook(key, files));
     } catch (err) {
       issues.push({ path, message: err instanceof Error ? err.message : String(err) });
