@@ -3,7 +3,7 @@
 // per-shift token from the environment. Verb table: one line per verb.
 import { readFileSync, realpathSync } from 'node:fs';
 import { request as httpRequest } from 'node:http';
-import { resolve as resolvePath } from 'node:path';
+import { isAbsolute, relative, resolve as resolvePath } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
   type BaTaskShift,
@@ -2738,11 +2738,50 @@ export function socketFetch(socketPath: string, fallback?: typeof fetch): typeof
     })) as typeof fetch;
 }
 
+/**
+ * `--file`, `--text-file`, `--content-file` and the like read a file for the agent, but `aom` runs outside the agent's sandbox:
+ * without a limit an agent could have it read `~/.ssh/id_rsa` or a runtime's auth file and post the text into a session
+ * document. A path is read only when its real location (symbolic links followed) is under the shift's worktree
+ * (`AOM_WORKDIR`), the agent's scratch folder (`AOM_SCRATCH`) or its temporary folder (`TMPDIR`). `-` is standard input.
+ */
+export function confinedReader(
+  env: Record<string, string | undefined>,
+  cwd: string,
+): (path: string) => string {
+  const real = (p: string): string | undefined => {
+    try {
+      return realpathSync(p);
+    } catch {
+      return undefined;
+    }
+  };
+  // Fixed places the runner names in the environment, never the current directory (an agent can `cd` anywhere first). Only a
+  // process started without them (outside a shift) falls back to its directory.
+  const named = [env.AOM_WORKDIR, env.AOM_SCRATCH, env.TMPDIR, env.TMP, env.TEMP].filter(
+    (r): r is string => !!r,
+  );
+  const roots = (named.length ? named : [cwd]).map((r) => real(r)).filter((r): r is string => !!r);
+  return (p) => {
+    if (p === '-') return readFileSync(0, 'utf8');
+    const abs = real(resolvePath(cwd, p));
+    if (!abs) return readFileSync(resolvePath(cwd, p), 'utf8'); // not there: the usual error
+    const inside = roots.some((r) => {
+      const rel = relative(r, abs);
+      return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+    });
+    if (!inside)
+      throw new Error(
+        `${p} is outside this shift's working folder and temporary folder; copy it there first (files elsewhere are not read)`,
+      );
+    return readFileSync(abs, 'utf8');
+  };
+}
+
 if (isEntry) {
   runAom(process.argv.slice(2), {
     env: process.env,
     io: { out: (s) => process.stdout.write(s), err: (s) => process.stderr.write(s) },
     fetch: process.env.AOM_IPC_SOCKET ? socketFetch(process.env.AOM_IPC_SOCKET, fetch) : fetch,
-    readFile: (p) => readFileSync(p === '-' ? 0 : p, 'utf8'),
+    readFile: confinedReader(process.env, process.cwd()),
   }).then((code) => process.exit(code));
 }

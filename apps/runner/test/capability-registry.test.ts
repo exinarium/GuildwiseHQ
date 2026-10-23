@@ -111,6 +111,15 @@ describe('aom skill show', () => {
     expect(!near.ok && near.error).toContain('playbook:brainstorm');
   });
 
+  it('treats --file as a file name only: prototype property names are not files', () => {
+    const reg = new CapabilityRegistry();
+    for (const f of ['__proto__', 'constructor', 'toString', 'hasOwnProperty']) {
+      const r = reg.show('prd', f);
+      expect(r.ok, f).toBe(false);
+      expect(!r.ok && r.error).toContain('has no file');
+    }
+  });
+
   it('answers the rpc methods and builds the instructions index', () => {
     const reg = new CapabilityRegistry();
     expect(skillRpc(undefined, 'skill.show', { ref: 'prd' }).ok).toBe(false);

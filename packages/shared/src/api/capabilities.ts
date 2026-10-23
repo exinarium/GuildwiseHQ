@@ -54,6 +54,11 @@ export const AddPackRequestSchema = z.object({
   scope: PackScopeSchema.default('org'),
   projectId: z.uuid().optional(),
   preset: z.string().max(40).optional(),
+  /**
+   * The workstations that fetch and hold the pack. Omitted: the adding admin's own workstations. A chosen list must include
+   * one of the admin's own (only those can pin the commit).
+   */
+  workstationIds: z.array(z.uuid()).max(20).optional(),
 });
 export type AddPackRequest = z.infer<typeof AddPackRequestSchema>;
 
@@ -81,6 +86,8 @@ export const PackDtoSchema = z.object({
   /** A workstation found the files changed from the approved hash. */
   integrityFailed: z.boolean(),
   itemCount: z.number().int(),
+  /** The workstations chosen to hold the pack; empty: the adding admin's own. */
+  workstationIds: z.array(z.uuid()).default([]),
   update: z
     .object({ sha: PackShaSchema, ref: z.string(), diff: PackDiffSchema, foundAt: z.iso.datetime() })
     .nullable(),
@@ -102,6 +109,10 @@ export const PacksResponseSchema = z.object({
   packs: z.array(PackDtoSchema),
   /** Workstations of the owner that hold packs (`packs:1`); none: nothing can be fetched yet. */
   workstationsOnline: z.number().int(),
+  /** Workstations that can hold packs, for the picker when adding one. `mine`: the caller's own. */
+  workstations: z
+    .array(z.object({ id: z.uuid(), name: z.string(), mine: z.boolean(), online: z.boolean() }))
+    .default([]),
 });
 export type PacksResponse = z.infer<typeof PacksResponseSchema>;
 

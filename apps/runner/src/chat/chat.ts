@@ -328,7 +328,13 @@ export class ChatManager {
       },
       rpc: async (req: IpcRpcRequest): Promise<IpcRpcResponse> => {
         if (req.method === 'skill.show' || req.method === 'skill.list')
-          return skillRpc(this.deps.capabilities, req.method, req.params, chat.msg.context?.projectId);
+          return skillRpc(
+            this.deps.capabilities,
+            req.method,
+            req.params,
+            chat.msg.context?.projectId,
+            chat.msg.context?.orgId,
+          );
         // `aom delegate`: a read-only sub-task with a registry persona. A session turn may use it where its purpose allows (the
         // server decides in `delegate.begin`); of the plain chats not the CEO's and the DevOps engineer's.
         if (req.method === DELEGATE_RPC) {
@@ -339,6 +345,7 @@ export class ChatManager {
               id: chatId,
               runtime: chat.msg.agent.runtime,
               ...(chat.msg.context?.projectId ? { projectId: chat.msg.context.projectId } : {}),
+              ...(chat.msg.context?.orgId ? { orgId: chat.msg.context.orgId } : {}),
             },
             req.params,
           );
@@ -765,7 +772,7 @@ export class ChatManager {
       );
     // A persona that lives in the organization vault travels without its text: read it from the registry here.
     const stored = session.speaker.personaKey
-      ? this.deps.capabilities?.persona(session.speaker.personaKey)
+      ? this.deps.capabilities?.persona(session.speaker.personaKey, undefined, msg.context.orgId)
       : undefined;
     const persona = session.instructions ?? stored?.body;
     if (session.speaker.kind === 'persona' && !persona)
@@ -789,7 +796,8 @@ export class ChatManager {
     );
     chat.sandbox = sandbox;
     chat.releaseTmp = holdAgentTmp(sandbox);
-    const capIndex = this.deps.capabilities?.instructionsIndex(msg.agent.skills) ?? '';
+    const capIndex =
+      this.deps.capabilities?.instructionsIndex(msg.agent.skills, undefined, msg.context.orgId) ?? '';
     // A runtime with tools and no shell (the direct-model runtime) gets the same turn rendered for tools, with the call; the
     // others read `CLAUDE.md` from their config dir.
     const direct = adapter.instructionStyle === 'tools';
@@ -863,7 +871,8 @@ export class ChatManager {
     );
     chat.sandbox = sandbox;
     chat.releaseTmp = holdAgentTmp(sandbox);
-    const capIndex = this.deps.capabilities?.instructionsIndex(msg.agent.skills) ?? '';
+    const capIndex =
+      this.deps.capabilities?.instructionsIndex(msg.agent.skills, undefined, msg.context.orgId) ?? '';
     const instructions = renderDirectSystemPrompt({
       chat: { agent: msg.agent, context: msg.context },
       tools: chatToolsFor(),
@@ -968,9 +977,11 @@ export class ChatManager {
     // The project's code graph (read-only verbs): only when this workstation can read it and the chat is not the holdout.
     const gs = msg.context.graph;
     const graphNote = gs && gs.arm === 'on' && this.deps.graph?.()?.load(gs) ? `\n${CHAT_GRAPH_NOTE}\n` : '';
-    const capIndex = this.deps.capabilities?.instructionsIndex(msg.agent.skills, msg.context.projectId) ?? '';
+    const capIndex =
+      this.deps.capabilities?.instructionsIndex(msg.agent.skills, msg.context.projectId, msg.context.orgId) ??
+      '';
     const grantedSkills =
-      this.deps.capabilities?.grantedSkills(msg.agent.skills, msg.context.projectId) ?? [];
+      this.deps.capabilities?.grantedSkills(msg.agent.skills, msg.context.projectId, msg.context.orgId) ?? [];
     await adapter.writeInstructions(
       sandbox,
       `${signIn ? `${signIn}\n` : ''}${graphNote}${capIndex ? `${capIndex}\n\n` : ''}${devops || msg.agent.roleKey === 'ceo' ? '' : `${DELEGATE_NOTE}\n\n`}${renderChatInstructions(

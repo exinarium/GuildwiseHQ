@@ -178,34 +178,31 @@ export class CapabilityRegistry {
    * Effective entries with their source, lowest precedence first: built-ins, the organization vault, the project's own
    * repository, then imported packs (usable ones only: approved at this commit and unchanged on disk).
    */
-  private all(projectId?: string): Array<{ e: ParsedCapability; source: CapabilitySource }> {
+  private all(projectId?: string, orgId?: string): Array<{ e: ParsedCapability; source: CapabilitySource }> {
     const byId = new Map<string, { e: ParsedCapability; source: CapabilitySource }>();
     for (const e of builtinCapabilities()) byId.set(capabilityId(e), { e, source: 'builtin' });
     for (const e of this.vault) byId.set(capabilityId(e), { e, source: 'org-vault' });
     if (projectId)
       for (const e of this.projectRepo.get(projectId) ?? [])
         byId.set(capabilityId(e), { e, source: 'project-repo' });
-    for (const e of this.packs?.entries(projectId) ?? []) byId.set(capabilityId(e), { e, source: 'pack' });
+    for (const e of this.packs?.entries(projectId, orgId) ?? [])
+      byId.set(capabilityId(e), { e, source: 'pack' });
     return [...byId.values()].sort((a, b) =>
       a.e.kind === b.e.kind ? a.e.key.localeCompare(b.e.key) : a.e.kind.localeCompare(b.e.kind),
     );
   }
 
   /** Effective entries, sorted by kind and key. */
-  entries(projectId?: string): ParsedCapability[] {
-    return this.all(projectId).map((x) => x.e);
+  entries(projectId?: string, orgId?: string): ParsedCapability[] {
+    return this.all(projectId, orgId).map((x) => x.e);
   }
 
-  meta(projectId?: string): CapabilityMeta[] {
-    return this.all(projectId).map((x) => capabilityMeta(x.e, x.source));
+  meta(projectId?: string, orgId?: string): CapabilityMeta[] {
+    return this.all(projectId, orgId).map((x) => capabilityMeta(x.e, x.source));
   }
 
-  get(ref: string, projectId?: string): ParsedCapability | undefined {
-    return resolveCapabilityRef(ref, this.entries(projectId));
-  }
-
-  private sourceOf(e: ParsedCapability, projectId?: string): CapabilitySource {
-    return this.all(projectId).find((x) => x.e === e)?.source ?? 'builtin';
+  get(ref: string, projectId?: string, orgId?: string): ParsedCapability | undefined {
+    return resolveCapabilityRef(ref, this.entries(projectId, orgId));
   }
 
   /** The text of a pack capability as a model sees it: labelled and fenced as outside content. */
@@ -215,8 +212,12 @@ export class CapabilityRegistry {
   }
 
   /** The persona text for a turn that did not carry it (a persona in the vault, a project repo or a pack). */
-  persona(key: string, projectId?: string): Extract<ParsedCapability, { kind: 'persona' }> | undefined {
-    const e = this.entries(projectId).find((x) => x.kind === 'persona' && x.key === key);
+  persona(
+    key: string,
+    projectId?: string,
+    orgId?: string,
+  ): Extract<ParsedCapability, { kind: 'persona' }> | undefined {
+    const e = this.entries(projectId, orgId).find((x) => x.kind === 'persona' && x.key === key);
     if (e?.kind !== 'persona') return undefined;
     return e.pack ? { ...e, body: this.served(e, e.body) } : e;
   }
@@ -230,10 +231,11 @@ export class CapabilityRegistry {
     ref: string,
     file?: string,
     projectId?: string,
+    orgId?: string,
   ): { ok: true; text: string } | { ok: false; error: string } {
-    const e = this.get(ref, projectId);
+    const e = this.get(ref, projectId, orgId);
     if (!e) {
-      const near = this.entries(projectId)
+      const near = this.entries(projectId, orgId)
         .filter((x) => x.key.includes(ref.replace(/^[a-z]+:/, '')))
         .slice(0, 5)
         .map((x) => `${x.kind}:${x.key}`);
@@ -244,11 +246,12 @@ export class CapabilityRegistry {
     }
     if (file) {
       const clean = file.replace(/\\/g, '/').replace(/^\.\//, '');
-      const text = e.files[clean];
-      if (text === undefined || clean.split('/').includes('..'))
+      // an own property only: `__proto__` or `constructor` are not files
+      const text = Object.hasOwn(e.files, clean) ? e.files[clean] : undefined;
+      if (typeof text !== 'string' || clean.split('/').includes('..'))
         return {
           ok: false,
-          error: `${e.kind}:${e.key} has no file "${file}". Files: ${Object.keys(e.files).sort().join(', ')}${e.hasScripts && e.pack && !this.packs?.scriptsEnabled(e.pack.name) ? ' (script files are disabled for this pack)' : ''}`,
+          error: `${e.kind}:${e.key} has no file "${file}". Files: ${Object.keys(e.files).sort().join(', ')}${e.hasScripts && e.pack && !this.packs?.scriptsEnabled(e.pack.name, orgId) ? ' (script files are disabled for this pack)' : ''}`,
         };
       return { ok: true, text: this.served(e, text) };
     }
@@ -263,8 +266,8 @@ export class CapabilityRegistry {
   }
 
   /** `aom skill list`: kind, key and description of every effective capability. */
-  list(kind?: string, projectId?: string): string {
-    const rows = this.all(projectId).filter((x) => !kind || x.e.kind === kind);
+  list(kind?: string, projectId?: string, orgId?: string): string {
+    const rows = this.all(projectId, orgId).filter((x) => !kind || x.e.kind === kind);
     if (!rows.length) return 'No capabilities.';
     const label: Record<CapabilitySource, string> = {
       builtin: '',
@@ -276,8 +279,8 @@ export class CapabilityRegistry {
   }
 
   /** The "Capabilities" section of an agent's instructions for the names its role lists (empty when it lists none). */
-  instructionsIndex(names: readonly string[], projectId?: string): string {
-    return renderCapabilityIndex(names, this.meta(projectId));
+  instructionsIndex(names: readonly string[], projectId?: string, orgId?: string): string {
+    return renderCapabilityIndex(names, this.meta(projectId, orgId));
   }
 
   /**
@@ -285,11 +288,11 @@ export class CapabilityRegistry {
    * folder: the descriptive frontmatter only (an `allowed-tools` line never reaches the runtime), pack text fenced as outside
    * content, script files only when the pack's owner enabled them. Folder names are unique and safe.
    */
-  grantedSkills(names: readonly string[], projectId?: string): GrantedSkill[] {
+  grantedSkills(names: readonly string[], projectId?: string, orgId?: string): GrantedSkill[] {
     const out: GrantedSkill[] = [];
     const seen = new Set<string>();
     for (const n of names) {
-      const e = this.get(n, projectId);
+      const e = this.get(n, projectId, orgId);
       if (e?.kind !== 'skill' || seen.has(capabilityId(e))) continue;
       seen.add(capabilityId(e));
       const name = e.pack ? `${e.pack.name}-${e.key.slice(e.pack.name.length + 1)}` : e.key;
@@ -325,12 +328,15 @@ export function skillRpc(
   method: string,
   params: Record<string, unknown>,
   projectId?: string,
+  orgId?: string,
 ): IpcRpcResponse {
   if (!registry) return { ok: false, error: 'the capability registry is not available on this workstation' };
   if (method === 'skill.list')
     return {
       ok: true,
-      result: { text: registry.list(typeof params.kind === 'string' ? params.kind : undefined, projectId) },
+      result: {
+        text: registry.list(typeof params.kind === 'string' ? params.kind : undefined, projectId, orgId),
+      },
     };
   const ref = typeof params.ref === 'string' ? params.ref.trim() : '';
   if (!ref) return { ok: false, error: 'usage: aom skill show <key> [--file <path>]' };
@@ -338,6 +344,7 @@ export function skillRpc(
     ref,
     typeof params.file === 'string' && params.file ? params.file : undefined,
     projectId,
+    orgId,
   );
   return r.ok ? { ok: true, result: { text: r.text } } : { ok: false, error: r.error };
 }

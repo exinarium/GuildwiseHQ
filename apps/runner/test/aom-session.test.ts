@@ -1,9 +1,11 @@
+import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { PERSONA_HOST_AGENT_ID, uuidv7 } from '@aom/shared';
 import { afterEach, describe, expect, it } from 'vitest';
-import { type AomContext, runAom } from '../src/aom/aom-cli.ts';
+import { type AomContext, confinedReader, runAom } from '../src/aom/aom-cli.ts';
 import { IpcServer } from '../src/ipc/server.ts';
 import { type Harness, startHarness } from './harness.ts';
-import { cleanupTmp } from './helpers.ts';
+import { cleanupTmp, tmp } from './helpers.ts';
 
 cleanupTmp();
 const servers: IpcServer[] = [];
@@ -322,5 +324,29 @@ describe('session turns on the runner: the verbs reach the server, nothing else 
         'x',
       ),
     ).toEqual([]);
+  });
+});
+
+describe('files `aom` reads for the agent', () => {
+  it('reads only under the shift worktree, scratch and temp folders, whatever the current directory and links', () => {
+    const root = tmp('aom-read-');
+    const work = join(root, 'work');
+    const scratch = join(root, 'scratch');
+    const secret = join(root, 'home', '.ssh');
+    for (const d of [work, scratch, join(root, 'tmp'), secret]) mkdirSync(d, { recursive: true });
+    writeFileSync(join(work, 'doc.md'), 'in the worktree');
+    writeFileSync(join(scratch, 'n.md'), 'in scratch');
+    writeFileSync(join(secret, 'id_rsa'), 'PRIVATE KEY');
+    symlinkSync(join(secret, 'id_rsa'), join(work, 'innocent.md'));
+    const env = { AOM_WORKDIR: work, AOM_SCRATCH: scratch, TMPDIR: join(root, 'tmp') };
+    // the agent `cd`ed into the folder with the secret: relative paths must not widen the roots
+    const read = confinedReader(env, secret);
+    expect(read(join(work, 'doc.md'))).toBe('in the worktree');
+    expect(read(join(scratch, 'n.md'))).toBe('in scratch');
+    expect(() => read(join(secret, 'id_rsa'))).toThrow(/outside/);
+    expect(() => read('id_rsa')).toThrow(/outside/);
+    expect(() => read(join(work, 'innocent.md'))).toThrow(/outside/);
+    expect(() => read(join(work, '..', 'home', '.ssh', 'id_rsa'))).toThrow(/outside/);
+    expect(() => read('/etc/passwd')).toThrow(/outside/);
   });
 });

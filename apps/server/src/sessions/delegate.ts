@@ -9,6 +9,7 @@ import {
 import { orgScope, runnerActor } from '../commands/common.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Row } from '../db/sql.ts';
+import { withTx } from '../db/tx.ts';
 import { assertProjectMayRun, sessionCost } from './cost.ts';
 
 /** `[ok, result, error]`, as every rpc handler of the gateway answers. */
@@ -72,6 +73,7 @@ async function begin(ctx: Ctx, caller: Caller, params: Record<string, unknown>):
   if (p.data.taskChars > DELEGATE_LIMITS.maxTaskChars)
     return [false, undefined, `the task is longer than ${DELEGATE_LIMITS.maxTaskChars} characters`];
   const now = ctx.clock.now();
+  let sessionBudgeted = false;
   if (caller.kind === 'session_turn') {
     const turn = caller.row;
     if (turn.status !== 'running') return [false, undefined, 'this turn is over'];
@@ -83,6 +85,7 @@ async function begin(ctx: Ctx, caller: Caller, params: Record<string, unknown>):
     ]);
     if (!t) return [false, undefined, 'the session no longer exists'];
     const c = await sessionCost(ctx.pool, t);
+    sessionBudgeted = c.budgetUsd !== null;
     if (c.exceeded)
       return [
         false,
@@ -105,16 +108,78 @@ async function begin(ctx: Ctx, caller: Caller, params: Record<string, unknown>):
       return [false, undefined, message(err)];
     }
   }
-  const used = await one(ctx.pool, 'SELECT count(*)::int AS n FROM shift_costs WHERE parent_id=$1', [
-    caller.row.id,
-  ]);
-  if ((used?.n ?? 0) >= DELEGATE_LIMITS.maxPerCaller)
-    return [
-      false,
-      undefined,
-      `at most ${DELEGATE_LIMITS.maxPerCaller} delegates per ${caller.kind === 'shift' ? 'shift' : 'turn'}: work with what you have`,
-    ];
-  return [true, { delegateId: p.data.delegateId }];
+  return reserve(ctx, caller, p.data.delegateId, now, sessionBudgeted);
+}
+
+/** A delegate that has not reported its cost this long after it began is taken to be gone (the runner's own limit is shorter). */
+const STALE_MS = DELEGATE_LIMITS.timeoutMs * 3;
+
+/**
+ * Counts what the caller has started, finished or still running, and records this one, in one step under a lock per caller. A
+ * session or project with a budget runs one delegate at a time: the budget is checked against costs that are booked when a
+ * delegate ends, so with several running at once none of them would see what the others are about to spend.
+ */
+async function reserve(
+  ctx: Ctx,
+  caller: Caller,
+  delegateId: string,
+  now: Date,
+  sessionBudgeted: boolean,
+): Promise<Reply> {
+  const row = caller.row;
+  const threadId: string | null = caller.kind === 'session_turn' ? (row.thread_id ?? null) : null;
+  return withTx(ctx.pool, async (tx): Promise<Reply> => {
+    const projectId: string | null =
+      caller.kind === 'shift'
+        ? caller.project
+        : ((await one(tx, 'SELECT project_id FROM threads WHERE id=$1', [threadId]))?.project_id ?? null);
+    await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`delegate:${row.id}`]);
+    const stale = new Date(now.getTime() - STALE_MS);
+    await tx.query('DELETE FROM delegate_begins WHERE begun_at < $1', [stale]);
+    if (await one(tx, 'SELECT 1 FROM delegate_begins WHERE delegate_id=$1', [delegateId]))
+      return [true, { delegateId }]; // a retried begin is the same delegate
+    const used = await one(
+      tx,
+      `SELECT (SELECT count(*) FROM shift_costs WHERE parent_id=$1)
+            + (SELECT count(*) FROM delegate_begins b WHERE b.caller_id=$1
+                  AND NOT EXISTS (SELECT 1 FROM shift_costs sc WHERE sc.shift_id = b.delegate_id)) AS n`,
+      [row.id],
+    );
+    if (Number(used?.n ?? 0) >= DELEGATE_LIMITS.maxPerCaller)
+      return [
+        false,
+        undefined,
+        `at most ${DELEGATE_LIMITS.maxPerCaller} delegates per ${caller.kind === 'shift' ? 'shift' : 'turn'}: work with what you have`,
+      ];
+    const running = async (col: 'thread_id' | 'project_id', id: string): Promise<boolean> =>
+      !!(await one(
+        tx,
+        `SELECT 1 FROM delegate_begins b WHERE b.${col}=$1
+            AND NOT EXISTS (SELECT 1 FROM shift_costs sc WHERE sc.shift_id = b.delegate_id) LIMIT 1`,
+        [id],
+      ));
+    if (threadId && sessionBudgeted && (await running('thread_id', threadId)))
+      return [
+        false,
+        undefined,
+        'session_budget_pending: a delegate of this session is still running and the session has a budget; try again when it has finished',
+      ];
+    const projectBudgeted =
+      !!projectId &&
+      !!(await one(tx, 'SELECT 1 FROM projects WHERE id=$1 AND budget_micros IS NOT NULL', [projectId]));
+    if (projectId && projectBudgeted && (await running('project_id', projectId)))
+      return [
+        false,
+        undefined,
+        'project_budget_pending: a delegate of this project is still running and the project has a budget; try again when it has finished',
+      ];
+    await tx.query(
+      `INSERT INTO delegate_begins (delegate_id, caller_id, org_id, thread_id, project_id, begun_at)
+       VALUES ($1,$2,$3,$4,$5,$6)`,
+      [delegateId, row.id, row.org_id, threadId, projectId, now],
+    );
+    return [true, { delegateId }];
+  });
 }
 
 async function cost(
@@ -127,7 +192,10 @@ async function cost(
   if (!p.success) return [false, undefined, 'invalid delegate cost report'];
   // Idempotent: a retried report is booked once.
   const had = await one(ctx.pool, 'SELECT 1 FROM shift_costs WHERE shift_id=$1', [p.data.delegateId]);
-  if (had) return [true, { recorded: false }];
+  if (had) {
+    await ctx.pool.query('DELETE FROM delegate_begins WHERE delegate_id=$1', [p.data.delegateId]);
+    return [true, { recorded: false }];
+  }
   await ctx.store.append([
     {
       streamId: streamId.delegate(p.data.delegateId),
@@ -148,5 +216,6 @@ async function cost(
       scope: orgScope(caller.row.org_id),
     },
   ]);
+  await ctx.pool.query('DELETE FROM delegate_begins WHERE delegate_id=$1', [p.data.delegateId]);
   return [true, { recorded: true }];
 }

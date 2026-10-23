@@ -5,8 +5,8 @@ import { bmadFixtureStable } from '../../../packages/shared/test/fixtures/bmad-f
 import { rebuildProjections } from '../src/projections/rebuild.ts';
 import { uniqueEmail } from './helpers/app.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
-import type { FakeRunner } from './helpers/fake-runner.ts';
-import { createWorld, ok, until, type World } from './helpers/world.ts';
+import { FakeRunner } from './helpers/fake-runner.ts';
+import { createWorld, MOCK_RUNTIME, ok, pairWorkstation, until, type World } from './helpers/world.ts';
 
 /** Capability packs on the server: events, projection, trust gating, update flow, rebuild equality, isolation. */
 let w: World;
@@ -219,11 +219,9 @@ describe('integrity', () => {
     tampered[k] = '# tampered\n';
     r.send('packs.report', { packId, state: 'resolved', snapshot: snapshotOf(tampered, SHA1) });
     await until(async () => (await call('GET', '/api/packs')).packs[0].integrityFailed === true);
+    // a finding on one workstation is shown, but it does not switch the pack off for the organization
     const items = (await call('GET', '/api/capabilities')).items;
-    expect(items.find((i: { key: string }) => i.key === 'bmad:analyst')).toMatchObject({
-      usable: false,
-      unusableReason: 'integrity',
-    });
+    expect(items.find((i: { key: string }) => i.key === 'bmad:analyst')).toMatchObject({ usable: true });
     r.send('packs.report', { packId, state: 'resolved', snapshot: snap1 });
     await until(async () => (await call('GET', '/api/packs')).packs[0].integrityFailed === false);
     r.send('packs.report', {
@@ -334,6 +332,164 @@ describe('project repository capabilities', () => {
     await r.barrier();
     expect(await events('ProjectCapabilitiesReported')).toBe(before);
     void other;
+  });
+});
+
+describe('who may report on a pack', () => {
+  const URL = 'https://github.com/example/forge.git';
+  let forgeId = '';
+  let member: Awaited<ReturnType<typeof w.t.userSession>>;
+  let mr: FakeRunner;
+  let memberWs = '';
+  const goodSnap = () =>
+    packSnapshotOf({
+      name: 'forge',
+      ref: 'v1',
+      sha: SHA1,
+      index: indexPack({ name: 'forge', adapter: 'generic', tree: bmadFixtureStable() }),
+    });
+  const pack = async () => (await call('GET', `/api/packs/${forgeId}`)).pack;
+  const stateRows = async () =>
+    q('SELECT workstation_id, integrity_failed FROM pack_workstation_state WHERE pack_id=$1', [forgeId]);
+
+  it('sets up a member with a workstation that announces packs', async () => {
+    member = await w.t.userSession(uniqueEmail('packmember'));
+    await w.t.addOrgMember(w.owner.id, member.id, 'member');
+    const paired = await pairWorkstation(w.t, member, 'member-box');
+    memberWs = paired.workstationId;
+    mr = await FakeRunner.connect(w.baseUrl, paired.runnerToken);
+    mr.hello({ repos: [], runtimes: MOCK_RUNTIME, capabilities: [PACKS_CAPABILITY] });
+    await mr.waitFor('welcome');
+  });
+
+  it('syncs a new pack only to the adding admin, not to a member workstation', async () => {
+    forgeId = (
+      await call('POST', '/api/packs', { url: URL, ref: 'v1', name: 'forge', adapter: 'generic' }, 201)
+    ).pack.id;
+    await until(async () => (lastSync() ?? []).some((p) => p.packId === forgeId));
+    expect(lastSync().find((p) => p.packId === forgeId)).toMatchObject({ orgId: w.owner.id });
+    await mr.barrier();
+    const toMember = mr.of('command').filter((c) => c.command === 'packs.sync');
+    expect(toMember.every((c) => (c.payload.packs as unknown[]).length === 0)).toBe(true);
+  });
+
+  it('refuses a workstation list without one of the admin own workstations, or with a stranger', async () => {
+    await call('POST', '/api/packs', { url: URL, ref: 'v1', name: 'nope', workstationIds: [memberWs] }, 400);
+    await call(
+      'POST',
+      '/api/packs',
+      { url: URL, ref: 'v1', name: 'nope', workstationIds: [randomUUID()] },
+      400,
+    );
+  });
+
+  it('ignores reports from a workstation that was not sent the pack', async () => {
+    mr.send('packs.report', { packId: forgeId, state: 'resolved', snapshot: goodSnap() });
+    mr.send('packs.report', { packId: forgeId, state: 'failed', message: 'member says no' });
+    mr.send('packs.report', { packId: forgeId, state: 'integrity', expected: 'a', actual: 'b' });
+    await mr.barrier();
+    const p = await pack();
+    expect(p).toMatchObject({ pinnedSha: null, status: 'pending', error: null, integrityFailed: false });
+  });
+
+  it('rejects a snapshot whose content hash does not match its items', async () => {
+    const snap = goodSnap();
+    r.send('packs.report', {
+      packId: forgeId,
+      state: 'resolved',
+      snapshot: { ...snap, contentHash: 'e'.repeat(64) },
+    });
+    // a forged item list under the genuine hash is the same lie the other way round
+    r.send('packs.report', {
+      packId: forgeId,
+      state: 'resolved',
+      snapshot: { ...snap, items: snap.items.slice(1) },
+    });
+    await r.barrier();
+    expect((await pack()).pinnedSha).toBeNull();
+  });
+
+  it('pins from the adding admin workstation', async () => {
+    r.send('packs.report', { packId: forgeId, state: 'resolved', snapshot: goodSnap() });
+    await until(async () => (await pack()).pinnedSha === SHA1);
+    expect((await pack()).contentHash).toBe(goodSnap().contentHash);
+  });
+
+  it('syncs to a chosen member workstation, which may then confirm but not pin or offer updates, and whose integrity finding stays its own', async () => {
+    const id = (
+      await call(
+        'POST',
+        '/api/packs',
+        {
+          url: URL,
+          ref: 'v1',
+          name: 'shared',
+          adapter: 'generic',
+          workstationIds: [w.workstationId, memberWs],
+        },
+        201,
+      )
+    ).pack.id as string;
+    await until(async () =>
+      mr
+        .of('command')
+        .some(
+          (c) =>
+            c.command === 'packs.sync' &&
+            (c.payload.packs as Array<{ packId: string }>).some((p) => p.packId === id),
+        ),
+    );
+    const snap = packSnapshotOf({
+      name: 'shared',
+      ref: 'v1',
+      sha: SHA1,
+      index: indexPack({ name: 'shared', adapter: 'generic', tree: bmadFixtureStable() }),
+    });
+    mr.send('packs.report', { packId: id, state: 'resolved', snapshot: snap });
+    await mr.barrier();
+    expect((await call('GET', `/api/packs/${id}`)).pack.pinnedSha).toBeNull();
+    r.send('packs.report', { packId: id, state: 'resolved', snapshot: snap });
+    await until(async () => (await call('GET', `/api/packs/${id}`)).pack.pinnedSha === SHA1);
+    await call('POST', `/api/packs/${id}/trust`, { sha: SHA1, contentHash: snap.contentHash });
+    const next = packSnapshotOf({
+      name: 'shared',
+      ref: 'v2',
+      sha: SHA2,
+      index: indexPack({
+        name: 'shared',
+        adapter: 'generic',
+        tree: { ...bmadFixtureStable(), 'x/NOTE.md': 'x' },
+      }),
+    });
+    mr.send('packs.report', { packId: id, state: 'update', snapshot: next });
+    mr.send('packs.report', {
+      packId: id,
+      state: 'integrity',
+      expected: snap.contentHash,
+      actual: 'c'.repeat(64),
+    });
+    await mr.barrier();
+    const p = (await call('GET', `/api/packs/${id}`)).pack;
+    expect(p.update).toBeNull();
+    expect(p).toMatchObject({ trusted: true, integrityFailed: true });
+    const rows = await q(
+      'SELECT workstation_id FROM pack_workstation_state WHERE pack_id=$1 AND integrity_failed',
+      [id],
+    );
+    expect(rows.map((x) => x.workstation_id)).toEqual([memberWs]);
+    // the approval and the registry are untouched
+    expect(
+      (await call('GET', '/api/capabilities?usable=true')).items.some(
+        (i: { packId?: string }) => i.packId === id,
+      ),
+    ).toBe(true);
+    void stateRows;
+    await call('DELETE', `/api/packs/${id}`, undefined, 204);
+  });
+
+  it('removes the forge pack again', async () => {
+    await call('DELETE', `/api/packs/${forgeId}`, undefined, 204);
+    mr.close();
   });
 });
 

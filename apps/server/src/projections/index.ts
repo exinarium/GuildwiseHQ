@@ -259,6 +259,7 @@ export const PROJECTION_TABLES = [
   'capability_index',
   'capability_index_status',
   'packs',
+  'pack_workstation_state',
   'project_capability_index',
   'project_capability_status',
 ];

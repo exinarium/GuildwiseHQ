@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import {
+  LegacyPackUrlSchema,
   PackAdapterSchema,
   PackDiffSchema,
   PackNameSchema,
@@ -7,7 +8,6 @@ import {
   PackScopeSchema,
   PackShaSchema,
   PackSnapshotSchema,
-  PackUrlSchema,
 } from '../capabilities/packs.ts';
 import { RegistryMetaSchema } from '../capabilities/parse.ts';
 import { defineEvent, Id } from './define.ts';
@@ -24,7 +24,7 @@ export const packEvents = [
       packId: Id,
       orgId: Id,
       name: PackNameSchema,
-      url: PackUrlSchema,
+      url: LegacyPackUrlSchema,
       ref: PackRefSchema,
       adapter: PackAdapterSchema,
       scope: PackScopeSchema,
@@ -32,6 +32,11 @@ export const packEvents = [
       /** The preset it was added from (`bmad`), for attribution. */
       preset: z.string().max(40).nullable().default(null),
       addedBy: Id,
+      /**
+       * The workstations the adding admin chose to hold the pack. Empty: the admin's own workstations (whichever they have).
+       * Packs added before this field existed behave the same.
+       */
+      workstationIds: z.array(Id).max(20).default([]),
     }),
   ),
   /** A workstation resolved the ref to a commit and indexed it. The first one pins; later ones only matter if the pin is not set. */

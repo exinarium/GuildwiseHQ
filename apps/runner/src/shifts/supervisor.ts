@@ -1002,12 +1002,14 @@ export class ShiftSupervisor {
       const r = this.deps.capabilities.indexProject(registryProject, s.worktree.path);
       if (r.changed) this.deps.onProjectCapabilities?.(registryProject, r);
     }
-    const capIndex = this.deps.capabilities?.instructionsIndex(msg.agent.skills, registryProject) ?? '';
+    const capIndex =
+      this.deps.capabilities?.instructionsIndex(msg.agent.skills, registryProject, msg.orgId) ?? '';
     if (capIndex) texts.instructions += `\n${capIndex}\n`;
     if (msg.kind !== 'ceo' && msg.kind !== 'devops' && !msg.agent.isDevops && msg.agent.roleKey !== 'ceo')
       texts.instructions += `\n${DELEGATE_NOTE}\n`;
     // The skills this agent's role grants, for a runtime with native skills (Claude Code, Codex): written into its private folder.
-    const grantedSkills = this.deps.capabilities?.grantedSkills(msg.agent.skills, registryProject) ?? [];
+    const grantedSkills =
+      this.deps.capabilities?.grantedSkills(msg.agent.skills, registryProject, msg.orgId) ?? [];
     // The project's reference repositories (read-only), for a card shift and a BA task shift (the server sends repositories
     // there only for a repository-scoping task given to an architect); only clones this runner found itself.
     const registeredFolders =
@@ -1110,6 +1112,7 @@ export class ShiftSupervisor {
       ...(this.deps.ipc.socketPath ? { AOM_IPC_SOCKET: this.deps.ipc.socketPath } : {}),
       AOM_SHIFT_TOKEN: s.token,
       AOM_SHIFT_ID: msg.shiftId,
+      ...(s.worktree?.path ? { AOM_WORKDIR: s.worktree.path } : {}),
       // A suite or regression card of a phase follow-up tests the deployed app: Playwright configs read this.
       ...(msg.agent.roleKey === 'tester' && typeof msg.brief.card.fields.targetUrl === 'string'
         ? { AOM_TARGET_URL: msg.brief.card.fields.targetUrl }
@@ -1538,7 +1541,13 @@ export class ShiftSupervisor {
       report: async (req: IpcReportRequest) => this.submit(s, req.report),
       rpc: async (req: IpcRpcRequest) => {
         if (req.method === 'skill.show' || req.method === 'skill.list')
-          return skillRpc(this.deps.capabilities, req.method, req.params, s.msg.brief?.project?.id);
+          return skillRpc(
+            this.deps.capabilities,
+            req.method,
+            req.params,
+            s.msg.brief?.project?.id,
+            s.msg.orgId,
+          );
         // `aom delegate`: a read-only sub-task with a registry persona. Not for the CEO's and the DevOps engineer's shifts.
         if (req.method === DELEGATE_RPC) {
           if (
@@ -1553,6 +1562,7 @@ export class ShiftSupervisor {
               id: s.msg.shiftId,
               runtime: s.msg.agent.runtime,
               ...(s.msg.brief?.project?.id ? { projectId: s.msg.brief.project.id } : {}),
+              ...(s.msg.orgId ? { orgId: s.msg.orgId } : {}),
             },
             req.params,
           );

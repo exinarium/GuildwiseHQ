@@ -11,8 +11,8 @@ export const packProjectors: Record<string, Projector> = {
     const p = (e.event as EventOf<'PackAdded'>).payload;
     await exec(
       tx,
-      `INSERT INTO packs (id, org_id, name, url, ref, adapter, scope, project_id, preset, added_by, added_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+      `INSERT INTO packs (id, org_id, name, url, ref, adapter, scope, project_id, preset, added_by, added_at, workstation_ids)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
        ON CONFLICT (id) DO NOTHING`,
       [
         p.packId,
@@ -26,6 +26,7 @@ export const packProjectors: Record<string, Projector> = {
         p.preset,
         p.addedBy,
         e.createdAt,
+        p.workstationIds ?? [],
       ],
     );
   },
@@ -36,8 +37,7 @@ export const packProjectors: Record<string, Projector> = {
     // another commit (a workstation resolved the ref again) is ignored: the pin only moves with PackUpdateAccepted.
     await exec(
       tx,
-      `UPDATE packs SET pinned_sha=$2, content_hash=$3, snapshot=$4, has_scripts=$5, license=$6, status='ready', error=NULL,
-              integrity_failed=false
+      `UPDATE packs SET pinned_sha=$2, content_hash=$3, snapshot=$4, has_scripts=$5, license=$6, status='ready', error=NULL
         WHERE id=$1 AND removed_at IS NULL AND pinned_sha IS NULL`,
       [
         p.packId,
@@ -48,11 +48,13 @@ export const packProjectors: Record<string, Projector> = {
         p.snapshot.license,
       ],
     );
-    // The pinned commit with the approved content again (files restored): the integrity flag goes.
+    // The pinned commit with the approved content again on this workstation (files restored): its integrity flag goes.
     await exec(
       tx,
-      `UPDATE packs SET integrity_failed=false WHERE id=$1 AND removed_at IS NULL AND pinned_sha=$2 AND content_hash=$3`,
-      [p.packId, p.snapshot.sha, p.snapshot.contentHash],
+      `UPDATE pack_workstation_state SET integrity_failed=false, updated_at=$4
+        WHERE pack_id=$1 AND workstation_id=$5
+          AND EXISTS (SELECT 1 FROM packs WHERE id=$1 AND removed_at IS NULL AND pinned_sha=$2 AND content_hash=$3)`,
+      [p.packId, p.snapshot.sha, p.snapshot.contentHash, e.createdAt, p.workstationId],
     );
     await exec(tx, `UPDATE packs SET status='ready', error=NULL WHERE id=$1 AND removed_at IS NULL`, [
       p.packId,
@@ -87,12 +89,14 @@ export const packProjectors: Record<string, Projector> = {
       `UPDATE packs SET pinned_sha=$2, ref=$3, content_hash=$4, snapshot=update_snapshot,
               has_scripts=COALESCE((update_snapshot->>'hasScripts')::boolean, has_scripts),
               license=COALESCE(update_snapshot->>'license', license),
-              update_snapshot=NULL, update_diff=NULL, update_found_at=NULL, integrity_failed=false,
+              update_snapshot=NULL, update_diff=NULL, update_found_at=NULL,
               trusted=$5, trusted_sha=CASE WHEN $5 THEN $2 ELSE NULL END, trusted_hash=CASE WHEN $5 THEN $4 ELSE NULL END,
               scripts_enabled=CASE WHEN $6 THEN false ELSE scripts_enabled END
         WHERE id=$1 AND removed_at IS NULL`,
       [p.packId, p.sha, p.ref, p.contentHash, p.keepTrust, p.scriptsReset],
     );
+    // a new pin is a new comparison: earlier per-workstation findings were about the old content
+    await exec(tx, 'DELETE FROM pack_workstation_state WHERE pack_id=$1', [p.packId]);
   },
 
   PackTrusted: async (tx, e) => {
@@ -125,7 +129,15 @@ export const packProjectors: Record<string, Projector> = {
 
   PackIntegrityFailed: async (tx, e) => {
     const p = (e.event as EventOf<'PackIntegrityFailed'>).payload;
-    await exec(tx, `UPDATE packs SET integrity_failed=true WHERE id=$1 AND removed_at IS NULL`, [p.packId]);
+    // One workstation's files differ from what the owner approved: that workstation stops serving the pack (the runner does it);
+    // the organization's approval and the other workstations are untouched.
+    await exec(
+      tx,
+      `INSERT INTO pack_workstation_state (pack_id, workstation_id, integrity_failed, updated_at)
+       VALUES ($1,$2,true,$3)
+       ON CONFLICT (pack_id, workstation_id) DO UPDATE SET integrity_failed=true, updated_at=EXCLUDED.updated_at`,
+      [p.packId, p.workstationId, e.createdAt],
+    );
   },
 
   PackFailed: async (tx, e) => {

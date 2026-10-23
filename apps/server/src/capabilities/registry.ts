@@ -54,7 +54,7 @@ export function packUsable(p: {
   trusted: boolean;
   trusted_sha: string | null;
   trusted_hash: string | null;
-  integrity_failed: boolean;
+  integrity_failed?: boolean;
 }): { usable: boolean; reason?: 'untrusted' | 'integrity' | 'pending' } {
   if (!p.pinned_sha) return { usable: false, reason: 'pending' };
   if (!p.trusted || p.trusted_sha !== p.pinned_sha || p.trusted_hash !== p.content_hash)
@@ -66,7 +66,7 @@ export function packUsable(p: {
 async function packItems(db: Queryable, orgId: string, projectId?: string) {
   const packs = await rows(
     db,
-    `SELECT id, scope, project_id, pinned_sha, content_hash, snapshot, trusted, trusted_sha, trusted_hash, integrity_failed
+    `SELECT id, scope, project_id, pinned_sha, content_hash, snapshot, trusted, trusted_sha, trusted_hash
        FROM packs WHERE org_id=$1 AND removed_at IS NULL AND snapshot IS NOT NULL
         AND (scope='org' OR (project_id IS NOT NULL AND project_id = $2))
       ORDER BY name`,

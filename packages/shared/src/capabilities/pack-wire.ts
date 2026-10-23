@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import {
+  LegacyPackUrlSchema,
   PackAdapterSchema,
   PackDiffSchema,
   PackIssueSchema,
@@ -8,7 +9,6 @@ import {
   PackScopeSchema,
   PackShaSchema,
   PackSnapshotSchema,
-  PackUrlSchema,
 } from './packs.ts';
 import { RegistryMetaSchema } from './parse.ts';
 
@@ -25,8 +25,10 @@ export type PackTrust = z.infer<typeof PackTrustSchema>;
 /** One pack as the server wants it on a workstation (`packs.sync`, a full list: a pack that is missing is removed). */
 export const PackDesiredSchema = z.object({
   packId: z.uuid(),
+  /** The organization the pack belongs to; packs of different organizations never share a namespace on a workstation. Absent: an older server. */
+  orgId: z.uuid().optional(),
   name: PackNameSchema,
-  url: PackUrlSchema,
+  url: LegacyPackUrlSchema,
   ref: PackRefSchema,
   adapter: PackAdapterSchema,
   scope: PackScopeSchema,

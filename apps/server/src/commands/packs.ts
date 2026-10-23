@@ -12,6 +12,7 @@ import {
   type PacksReport,
   type PacksResponse,
   type ProjectCapabilitiesReport,
+  packSnapshotContentHash,
   type RunnerToServerOf,
   streamId,
 } from '@aom/shared';
@@ -37,6 +38,9 @@ const requireManager = (who: Who): void => {
 
 const MAX_PACKS = 30;
 
+/** True when any workstation found the pack's files changed from the approved content. */
+const INTEGRITY_SQL = `EXISTS (SELECT 1 FROM pack_workstation_state s WHERE s.pack_id = p.id AND s.integrity_failed)`;
+
 function dto(r: Row): PackDto {
   const preset = PACK_PRESETS.find((p) => p.id === r.preset);
   const snap = r.snapshot as PackSnapshot | null;
@@ -60,6 +64,7 @@ function dto(r: Row): PackDto {
     license: r.license ?? null,
     integrityFailed: !!r.integrity_failed,
     itemCount: snap?.items.length ?? 0,
+    workstationIds: (r.workstation_ids ?? []) as string[],
     update: r.update_snapshot
       ? {
           sha: (r.update_snapshot as PackSnapshot).sha,
@@ -77,37 +82,63 @@ function dto(r: Row): PackDto {
 async function load(db: Queryable, who: Who, id: string, lock = false): Promise<Row> {
   const r = await one(
     db,
-    `SELECT * FROM packs WHERE id=$1 AND org_id=$2 AND removed_at IS NULL ${lock ? 'FOR UPDATE' : ''}`,
+    `SELECT p.*, ${INTEGRITY_SQL} AS integrity_failed FROM packs p
+      WHERE p.id=$1 AND p.org_id=$2 AND p.removed_at IS NULL ${lock ? 'FOR UPDATE OF p' : ''}`,
     [id, who.orgId],
   );
   if (!r) throw notFound('pack not found');
   return r;
 }
 
-/** Workstations that hold this organization's packs: active, of a member, announcing `packs:1`. */
-async function packWorkstations(db: Queryable, orgId: string): Promise<Array<{ id: string }>> {
+/** Workstations of the organization's members that announce `packs:1`: the ones an admin may choose from. */
+async function packWorkstations(
+  db: Queryable,
+  orgId: string,
+): Promise<Array<{ id: string; name: string; user_id: string }>> {
   return rows(
     db,
-    `SELECT w.id FROM workstations w
+    `SELECT w.id, w.name, w.user_id FROM workstations w
        JOIN org_members om ON om.user_id = w.user_id AND om.org_id = $1 AND om.status = 'active'
        JOIN workstation_capabilities wc ON wc.workstation_id = w.id
-      WHERE w.status = 'active' AND $2 = ANY(wc.capabilities)`,
+      WHERE w.status = 'active' AND $2 = ANY(wc.capabilities)
+      ORDER BY w.name, w.id`,
     [orgId, PACKS_CAPABILITY],
   );
 }
 
-/** Every pack of the organizations the workstation's owner belongs to, as `packs.sync` wants them. */
+/**
+ * Whether a pack may be on, and may be reported by, this workstation: it is active, its owner is an active member of the
+ * pack's organization, and it is one the adding admin chose (no choice: any workstation of the admin who added the pack).
+ */
+const HOLDS_PACK_SQL = `w.status = 'active'
+  AND EXISTS (SELECT 1 FROM org_members om WHERE om.user_id = w.user_id AND om.org_id = p.org_id AND om.status = 'active')
+  AND (w.id = ANY(p.workstation_ids) OR (cardinality(p.workstation_ids) = 0 AND w.user_id = p.added_by))`;
+
+export async function workstationHoldsPack(
+  db: Queryable,
+  packId: string,
+  workstationId: string,
+): Promise<boolean> {
+  return !!(await one(
+    db,
+    `SELECT 1 FROM packs p JOIN workstations w ON w.id = $2
+      WHERE p.id = $1 AND p.removed_at IS NULL AND ${HOLDS_PACK_SQL}`,
+    [packId, workstationId],
+  ));
+}
+
+/** Every pack this workstation is meant to hold, as `packs.sync` wants them. Packs of other workstations are never sent. */
 export async function desiredPacksFor(db: Queryable, workstationId: string): Promise<PackDesired[]> {
   const r = await rows(
     db,
-    `SELECT p.* FROM packs p
-       JOIN org_members om ON om.org_id = p.org_id AND om.status = 'active'
-       JOIN workstations w ON w.user_id = om.user_id AND w.id = $1
-      WHERE p.removed_at IS NULL ORDER BY p.added_at`,
+    `SELECT p.* FROM packs p JOIN workstations w ON w.id = $1
+      WHERE p.removed_at IS NULL AND ${HOLDS_PACK_SQL}
+      ORDER BY p.added_at`,
     [workstationId],
   );
   return r.map((p) => ({
     packId: p.id,
+    orgId: p.org_id,
     name: p.name,
     url: p.url,
     ref: p.ref,
@@ -164,13 +195,22 @@ export async function listPacks(ctx: Ctx, who: Who): Promise<PacksResponse> {
   requireManager(who);
   const r = await rows(
     ctx.pool,
-    'SELECT * FROM packs WHERE org_id=$1 AND removed_at IS NULL ORDER BY added_at',
+    `SELECT p.*, ${INTEGRITY_SQL} AS integrity_failed FROM packs p
+      WHERE p.org_id=$1 AND p.removed_at IS NULL ORDER BY p.added_at`,
     [who.orgId],
   );
   const ws = await packWorkstations(ctx.pool, who.orgId);
   return {
     packs: r.map(dto),
-    workstationsOnline: ws.filter((w) => ctx.services.runners.isOnline(w.id)).length,
+    // the caller's own: the default holders of a pack they add
+    workstationsOnline: ws.filter((w) => w.user_id === who.userId && ctx.services.runners.isOnline(w.id))
+      .length,
+    workstations: ws.map((w) => ({
+      id: w.id,
+      name: w.name,
+      mine: w.user_id === who.userId,
+      online: ctx.services.runners.isOnline(w.id),
+    })),
   };
 }
 
@@ -208,7 +248,20 @@ export async function addPack(ctx: Ctx, who: Who, req: AddPackRequest): Promise<
   if (req.scope === 'project' && !req.projectId)
     throw badRequest('project_required', 'a project pack needs a project');
   const id = randomUUID();
+  const chosen = [...new Set(req.workstationIds ?? [])];
   await withAppendTx(ctx.pool, async (tx) => {
+    if (chosen.length) {
+      const ok = await packWorkstations(tx, who.orgId);
+      const known = new Map(ok.map((w) => [w.id, w]));
+      if (chosen.some((c) => !known.has(c)))
+        throw badRequest(
+          'unknown_workstation',
+          'choose workstations of this organization that can hold packs',
+        );
+      // only a workstation of the admin who adds the pack may pin it, so at least one of those must hold it
+      if (!chosen.some((c) => known.get(c)?.user_id === who.userId))
+        throw badRequest('own_workstation_required', 'include at least one of your own workstations');
+    }
     if (req.scope === 'project') {
       const p = await one(tx, 'SELECT id FROM projects WHERE id=$1 AND org_id=$2', [
         req.projectId,
@@ -240,6 +293,7 @@ export async function addPack(ctx: Ctx, who: Who, req: AddPackRequest): Promise<
             projectId: req.scope === 'project' ? (req.projectId ?? null) : null,
             preset: preset?.id ?? null,
             addedBy: who.userId,
+            workstationIds: chosen,
           },
           who.orgId,
           id,
@@ -257,8 +311,15 @@ export async function checkPack(ctx: Ctx, who: Who, id: string, ref?: string): P
   requireManager(who);
   const r = await load(ctx.pool, who, id);
   if (!r.pinned_sha) throw conflict('pack_pending', 'the pack has not been fetched yet');
-  const ws = (await packWorkstations(ctx.pool, who.orgId)).filter((w) => ctx.services.runners.isOnline(w.id));
-  const first = ws[0];
+  // only a workstation of the admin who added the pack reports updates (the same one that pinned it)
+  const holders = await rows(
+    ctx.pool,
+    `SELECT w.id FROM packs p JOIN workstations w ON w.user_id = p.added_by
+       JOIN workstation_capabilities wc ON wc.workstation_id = w.id
+      WHERE p.id = $1 AND ${HOLDS_PACK_SQL} AND $2 = ANY(wc.capabilities) ORDER BY w.id`,
+    [id, PACKS_CAPABILITY],
+  );
+  const first = holders.find((w) => ctx.services.runners.isOnline(w.id));
   if (!first)
     throw conflict('no_workstation', 'no workstation that can fetch packs is online: start your runner');
   await enqueueRunnerCommand(ctx.pool, first.id, 'pack.check', { packId: id, ...(ref ? { ref } : {}) });
@@ -403,9 +464,10 @@ export async function applyPacksReport(
 ): Promise<void> {
   const r = await one(ctx.pool, 'SELECT * FROM packs WHERE id=$1 AND removed_at IS NULL', [msg.packId]);
   if (!r) return;
-  const role = await orgRoleOf(ctx.pool, ws.userId, r.org_id);
-  if (!role) return;
+  // a workstation reports only on packs it was sent: member of the organization, chosen by the admin who added the pack
+  if (!(await workstationHoldsPack(ctx.pool, msg.packId, ws.id))) return;
   const orgId = r.org_id as string;
+  const fromAdder = ws.userId === r.added_by;
   const base = { packId: msg.packId, orgId, workstationId: ws.id };
   const out: AppendInput[] = [];
   const m = msg as PacksReport;
@@ -416,17 +478,26 @@ export async function applyPacksReport(
       actor: runnerActor(ws.id),
       scope: orgScope(orgId),
     }) as AppendInput;
+  // The server never takes a reported content hash on trust: it is recomputed from the snapshot's own items, and a snapshot
+  // whose hash does not match them is dropped.
+  const snapshotOk = (s: PackSnapshot | undefined): s is PackSnapshot =>
+    !!s && packSnapshotContentHash(s) === s.contentHash;
   if (m.state === 'resolved' && m.snapshot) {
-    if (!r.pinned_sha) out.push(mk('PackRefResolved', { ...base, snapshot: m.snapshot }));
-    else if (m.snapshot.sha === r.pinned_sha) {
+    if (!snapshotOk(m.snapshot)) return;
+    // the first resolution pins the commit and the content the owner will review: only the adding admin's own workstation may
+    // supply it. Other chosen workstations can only confirm it afterwards.
+    if (!r.pinned_sha) {
+      if (fromAdder) out.push(mk('PackRefResolved', { ...base, snapshot: m.snapshot }));
+    } else if (m.snapshot.sha === r.pinned_sha) {
       if (m.snapshot.contentHash !== r.content_hash)
         out.push(
           mk('PackIntegrityFailed', { ...base, expected: r.content_hash, actual: m.snapshot.contentHash }),
         );
-      else if (r.integrity_failed || r.status !== 'ready' || r.error)
+      else if (r.status !== 'ready' || r.error || (await integrityFailedOn(ctx.pool, msg.packId, ws.id)))
         out.push(mk('PackRefResolved', { ...base, snapshot: m.snapshot }));
     }
   } else if (m.state === 'update' && m.snapshot) {
+    if (!snapshotOk(m.snapshot) || !fromAdder) return;
     const have = r.update_snapshot as PackSnapshot | null;
     if (m.snapshot.sha !== r.pinned_sha && have?.sha !== m.snapshot.sha && r.snapshot)
       out.push(
@@ -437,9 +508,10 @@ export async function applyPacksReport(
         }),
       );
   } else if (m.state === 'current' && m.sha) {
-    out.push(mk('PackUpToDate', { ...base, sha: m.sha, ref: r.ref }));
+    if (fromAdder) out.push(mk('PackUpToDate', { ...base, sha: m.sha, ref: r.ref }));
   } else if (m.state === 'integrity') {
-    if (!r.integrity_failed)
+    // only a fact about this workstation (the projection keeps it per workstation)
+    if (!(await integrityFailedOn(ctx.pool, msg.packId, ws.id)))
       out.push(
         mk('PackIntegrityFailed', {
           ...base,
@@ -453,6 +525,14 @@ export async function applyPacksReport(
       out.push(mk('PackFailed', { ...base, stage: r.pinned_sha ? 'check' : 'fetch', message }));
   }
   if (out.length) await ctx.store.append(out);
+}
+
+async function integrityFailedOn(db: Queryable, packId: string, workstationId: string): Promise<boolean> {
+  return !!(await one(
+    db,
+    'SELECT 1 FROM pack_workstation_state WHERE pack_id=$1 AND workstation_id=$2 AND integrity_failed',
+    [packId, workstationId],
+  ));
 }
 
 /** `capabilities.project.report`: what a project's checkout carries. Only a member of the project's organization may report. */

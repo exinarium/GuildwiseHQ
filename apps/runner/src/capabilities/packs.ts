@@ -5,7 +5,7 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
-  statSync,
+  type Stats,
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
@@ -23,6 +23,7 @@ import {
 } from '@aom/shared';
 import { execa } from 'execa';
 import { type Logger, nullLogger } from '../log.ts';
+import { type CheckedPackUrl, checkPackUrl, type Resolver } from './pack-url.ts';
 
 /**
  * Capability packs on this workstation (docs/ARCHITECTURE.md section 38.4). A pack is a git repository the owner added by URL
@@ -35,7 +36,10 @@ import { type Logger, nullLogger } from '../log.ts';
  *    the approved content hash. Anything else is disabled and flagged (`integrity`). Script files are removed from what is served
  *    unless the owner enabled scripts for the pack.
  *
- * git runs with hooks off, only the protocols the runner allows (`https`, `ssh`, and `file` in tests), no submodules and no LFS.
+ * git runs in an isolated environment: a private HOME, no global or system git config, no credential helper, no ssh agent or keys,
+ * no prompts, hooks off, https only (and `file` in tests), no submodules and no LFS. A pack is public by design: it is cloned
+ * as nobody, never with the identity of whoever runs this workstation. The host is resolved and checked first (no loopback,
+ * link-local, metadata, private or shared addresses) and git is pinned to the addresses that were checked.
  * Pack files are read as text and never executed here.
  */
 
@@ -47,22 +51,24 @@ const TEXT_NAMES = new Set(['SKILL.md', 'LICENSE', 'LICENSE.md', 'LICENSE.txt'])
 const PRUNED = new Set(['.git', 'node_modules']);
 
 export interface PackFilesState {
-  /** path -> `size:mtimeMs`, of the files the index was built from. */
+  /** path -> file stamp, of the files the index was built from. */
   stamps: Record<string, string>;
 }
 
-/** Reads the text files of a checked-out pack into a path -> text map; symlinks, binaries and big files are skipped. */
-export function readPackTree(dir: string): {
-  tree: Record<string, string>;
-  stamps: Record<string, string>;
-  truncated: boolean;
-} {
-  const tree: Record<string, string> = {};
-  const stamps: Record<string, string> = {};
+/** What identifies a file's content without reading it: size, mtime, ctime (which a program cannot set back) and inode. */
+const stampOf = (st: Stats): string =>
+  `${st.size}:${Math.trunc(st.mtimeMs)}:${Math.trunc(st.ctimeMs)}:${st.ino}`;
+
+/**
+ * Walks a checked-out pack and calls `visit` for every text file that belongs to it (symlinks, binaries, big files and `.git`
+ * are skipped). Returns whether the limits cut the walk short. Reading and listing share this so they always agree.
+ */
+function walkPack(dir: string, visit: (rel: string, abs: string, st: Stats) => void): boolean {
   let count = 0;
   let bytes = 0;
   let truncated = false;
   const walk = (abs: string, rel: string): void => {
+    if (truncated) return;
     let names: string[];
     try {
       names = readdirSync(abs).sort();
@@ -73,7 +79,7 @@ export function readPackTree(dir: string): {
       if (PRUNED.has(name)) continue;
       const p = join(abs, name);
       const r = rel ? `${rel}/${name}` : name;
-      let st: ReturnType<typeof lstatSync>;
+      let st: Stats;
       try {
         st = lstatSync(p);
       } catch {
@@ -92,17 +98,40 @@ export function readPackTree(dir: string): {
           truncated = true;
           return;
         }
-        try {
-          tree[r] = readFileSync(p, 'utf8').replace(/\r\n/g, '\n');
-          stamps[r] = `${st.size}:${Math.trunc(st.mtimeMs)}`;
-        } catch {
-          // unreadable: skipped
-        }
+        visit(r, p, st);
       }
     }
   };
   walk(dir, '');
+  return truncated;
+}
+
+/** Reads the text files of a checked-out pack into a path -> text map; symlinks, binaries and big files are skipped. */
+export function readPackTree(dir: string): {
+  tree: Record<string, string>;
+  stamps: Record<string, string>;
+  truncated: boolean;
+} {
+  const tree: Record<string, string> = {};
+  const stamps: Record<string, string> = {};
+  const truncated = walkPack(dir, (r, p, st) => {
+    try {
+      tree[r] = readFileSync(p, 'utf8').replace(/\r\n/g, '\n');
+      stamps[r] = stampOf(st);
+    } catch {
+      // unreadable: skipped
+    }
+  });
   return { tree, stamps, truncated };
+}
+
+/** The stamps of the files a pack directory holds now, without reading them (to see what was added, removed or touched). */
+export function stampPackTree(dir: string): Record<string, string> {
+  const stamps: Record<string, string> = {};
+  walkPack(dir, (r, _p, st) => {
+    stamps[r] = stampOf(st);
+  });
+  return stamps;
 }
 
 export interface PackManagerOptions {
@@ -114,6 +143,8 @@ export interface PackManagerOptions {
   /** Allow `file://` and local paths (tests only). */
   allowLocal?: boolean;
   gitBin?: string;
+  /** Resolves a host name (tests); default: the system resolver. */
+  resolve?: Resolver;
   /** Called after the set of usable capabilities changed. */
   onChange?: () => void;
 }
@@ -164,8 +195,26 @@ export class PackManager {
 
   // ------------------------------------------------------------------------------------------------ git
 
-  private async git(cwd: string, args: string[], timeout = 180_000): Promise<string> {
-    const allow = this.opts.allowLocal ? 'https:ssh:file' : 'https:ssh';
+  /** A private home for git: it never sees the user's `~/.gitconfig`, credential store, ssh keys or known hosts. */
+  private get gitHome(): string {
+    const home = join(this.opts.dir, '.githome');
+    mkdirSync(home, { recursive: true });
+    return home;
+  }
+
+  private async git(
+    cwd: string,
+    args: string[],
+    opts: { timeout?: number; net?: CheckedPackUrl } = {},
+  ): Promise<string> {
+    const allow = this.opts.allowLocal ? 'https:file' : 'https';
+    const home = this.gitHome;
+    // the addresses that were checked: git must not look the name up again and land somewhere else
+    const net = opts.net;
+    const pin =
+      net && net.host && net.addresses[0]
+        ? ['-c', `http.curloptResolve=${net.host}:${net.port}:${net.addresses.join(',')}`]
+        : [];
     const r = await execa(
       this.opts.gitBin ?? 'git',
       [
@@ -173,6 +222,12 @@ export class PackManager {
         'core.hooksPath=/dev/null',
         '-c',
         'core.fsmonitor=false',
+        '-c',
+        'core.sshCommand=false',
+        '-c',
+        'credential.helper=',
+        '-c',
+        'http.followRedirects=false',
         '-c',
         'submodule.recurse=false',
         '-c',
@@ -185,20 +240,23 @@ export class PackManager {
         'filter.lfs.required=false',
         '-c',
         'advice.detachedHead=false',
+        ...pin,
         ...args,
       ],
       {
         cwd,
-        timeout,
+        timeout: opts.timeout ?? 180_000,
         extendEnv: false,
         env: {
           PATH: process.env.PATH ?? '',
-          HOME: process.env.HOME ?? '',
-          ...(process.env.SSH_AUTH_SOCK ? { SSH_AUTH_SOCK: process.env.SSH_AUTH_SOCK } : {}),
+          HOME: home,
+          XDG_CONFIG_HOME: home,
+          GIT_CONFIG_GLOBAL: '/dev/null',
+          GIT_CONFIG_NOSYSTEM: '1',
           GIT_TERMINAL_PROMPT: '0',
+          GIT_ASKPASS: 'echo',
           GIT_ALLOW_PROTOCOL: allow,
           GIT_LFS_SKIP_SMUDGE: '1',
-          GIT_CONFIG_NOSYSTEM: '1',
           LANG: 'C',
         },
         reject: true,
@@ -207,11 +265,20 @@ export class PackManager {
     return r.stdout.trim();
   }
 
+  /** Throws unless a runner may clone this URL (see `checkPackUrl`). */
+  private checkUrl(url: string): Promise<CheckedPackUrl> {
+    return checkPackUrl(url, {
+      ...(this.opts.allowLocal !== undefined ? { allowLocal: this.opts.allowLocal } : {}),
+      ...(this.opts.resolve ? { resolve: this.opts.resolve } : {}),
+    });
+  }
+
   private repoDir(id: string): string {
     return join(dirOf(this.opts.dir, id), 'repo');
   }
 
   private async ensureRepo(d: PackDesired): Promise<string> {
+    await this.checkUrl(d.url);
     const repo = this.repoDir(d.packId);
     if (!existsSync(join(repo, '.git'))) {
       mkdirSync(repo, { recursive: true });
@@ -223,9 +290,12 @@ export class PackManager {
     return repo;
   }
 
-  /** Fetches `what` (a ref or a commit) shallowly and returns the commit it points to. */
-  private async fetchCommit(repo: string, what: string): Promise<string> {
-    await this.git(repo, ['fetch', '--depth', '1', '--no-tags', '--no-recurse-submodules', 'origin', what]);
+  /** Fetches `what` (a ref or a commit) shallowly from `url` and returns the commit it points to. */
+  private async fetchCommit(repo: string, what: string, url: string): Promise<string> {
+    const net = await this.checkUrl(url);
+    await this.git(repo, ['fetch', '--depth', '1', '--no-tags', '--no-recurse-submodules', 'origin', what], {
+      net,
+    });
     return this.git(repo, ['rev-parse', '--verify', 'FETCH_HEAD^{commit}']);
   }
 
@@ -287,25 +357,17 @@ export class PackManager {
   }
 
   /**
-   * Before a pack's content is served: have the files changed since they were indexed? A changed file triggers a re-read and
-   * a new comparison with the approved hash; a mismatch disables the pack and tells the server.
+   * Before a pack's content is served: have the files changed since they were indexed (a file touched, added or removed)? A
+   * change triggers a re-read of every file and a new comparison with the approved hash; a mismatch disables the pack and
+   * tells the server. The stamp (size, mtime, ctime, inode) only decides whether to look again, never what is trusted.
    */
   private verify(l: Loaded): void {
     if (!l.index || !l.sha) return;
     const repo = this.repoDir(l.desired.packId);
-    let changed = false;
-    for (const [p, stamp] of Object.entries(l.stamps)) {
-      try {
-        const st = statSync(join(repo, p));
-        if (`${st.size}:${Math.trunc(st.mtimeMs)}` !== stamp) {
-          changed = true;
-          break;
-        }
-      } catch {
-        changed = true;
-        break;
-      }
-    }
+    // the directory is listed again, so a file that was added or removed is noticed as well as one that was touched
+    const now = stampPackTree(repo);
+    const had = Object.keys(l.stamps);
+    const changed = had.length !== Object.keys(now).length || had.some((p) => now[p] !== l.stamps[p]);
     if (!changed) return;
     const was = l.integrity;
     const next = this.indexFromDisk(l.desired);
@@ -363,7 +425,7 @@ export class PackManager {
         return;
       }
       const repo = await this.ensureRepo(d);
-      const sha = d.pinnedSha ? await this.fetchPinned(repo, d) : await this.fetchCommit(repo, d.ref);
+      const sha = d.pinnedSha ? await this.fetchPinned(repo, d) : await this.fetchCommit(repo, d.ref, d.url);
       await this.checkout(repo, sha);
       const l = this.judge(this.indexDir(d, repo, sha, d.ref));
       this.packs.set(d.packId, l);
@@ -384,12 +446,12 @@ export class PackManager {
   private async fetchPinned(repo: string, d: PackDesired): Promise<string> {
     const pin = d.pinnedSha as string;
     try {
-      const got = await this.fetchCommit(repo, pin);
+      const got = await this.fetchCommit(repo, pin, d.url);
       if (got === pin) return pin;
     } catch {
       // some servers do not serve a commit by id: try the ref
     }
-    const viaRef = await this.fetchCommit(repo, d.ref);
+    const viaRef = await this.fetchCommit(repo, d.ref, d.url);
     if (viaRef !== pin)
       throw new Error(
         `the pinned commit ${pin.slice(0, 7)} cannot be fetched and ${d.ref} now points to ${viaRef.slice(0, 7)}; check for updates and accept the new commit`,
@@ -425,7 +487,7 @@ export class PackManager {
       let tmp: string | undefined;
       const repo = this.repoDir(packId);
       try {
-        const sha = await this.fetchCommit(repo, target);
+        const sha = await this.fetchCommit(repo, target, d.url);
         if (sha === l.sha) {
           this.opts.report({ packId, state: 'current', sha: sha as never });
           return;
@@ -472,9 +534,10 @@ export class PackManager {
    * whose files still match the approved hash. Script files are left out unless scripts are enabled for the pack. Pack
    * packs scoped to another project are not offered.
    */
-  entries(projectId?: string): ParsedCapability[] {
+  entries(projectId?: string, orgId?: string): ParsedCapability[] {
     const out: ParsedCapability[] = [];
     for (const l of this.packs.values()) {
+      if (!this.inOrg(l, orgId)) continue;
       if (l.desired.scope === 'project' && l.desired.projectId !== (projectId ?? null)) continue;
       this.verify(l);
       if (!this.usable(l) || !l.index) continue;
@@ -491,9 +554,18 @@ export class PackManager {
   }
 
   /** Whether the pack of a capability has scripts enabled (informs `aom skill show`). */
-  scriptsEnabled(packName: string): boolean {
-    for (const l of this.packs.values()) if (l.desired.name === packName) return l.desired.scriptsEnabled;
+  scriptsEnabled(packName: string, orgId?: string): boolean {
+    for (const l of this.packs.values())
+      if (l.desired.name === packName && this.inOrg(l, orgId)) return l.desired.scriptsEnabled;
     return false;
+  }
+
+  /**
+   * Packs belong to one organization; a workstation of several organizations never serves one organization's pack to another.
+   * A pack from a server that did not name the organization (an older server) is served to every caller, as before.
+   */
+  private inOrg(l: Loaded, orgId: string | undefined): boolean {
+    return !l.desired.orgId || l.desired.orgId === orgId;
   }
 }
 

@@ -39,8 +39,26 @@ export const PackNameSchema = CapabilityKeySchema.max(32).refine(
   'this name is reserved',
 );
 
-/** https, ssh or scp-style git URLs, without credentials (a token in a URL would be stored in events and logs). */
+/**
+ * Public https git URLs without credentials (a token in a URL would be stored in events and logs). ssh is not accepted: a
+ * runner clones packs with an isolated git environment that has no keys, agent or credentials, so ssh could not work anyway.
+ */
 export const PackUrlSchema = z
+  .string()
+  .trim()
+  .min(8)
+  .max(500)
+  .refine((u) => !/\s/.test(u), 'no spaces')
+  .refine(
+    (u) => /^https:\/\/[^/@\s]+\/[^\s]+$/i.test(u),
+    'use a public https:// URL without a password or token in it',
+  );
+
+/**
+ * What an already stored pack (or a `packs.sync` from an older server) may carry: ssh forms were accepted before. Such a pack
+ * stays in the list, but a runner refuses to clone it.
+ */
+export const LegacyPackUrlSchema = z
   .string()
   .trim()
   .min(8)
@@ -51,7 +69,7 @@ export const PackUrlSchema = z
       /^https:\/\/[^/@\s]+\/[^\s]+$/i.test(u) ||
       /^ssh:\/\/(?:git@)?[^/@\s:]+(?::\d+)?\/[^\s]+$/i.test(u) ||
       /^git@[^/@\s:]+:[^\s]+$/i.test(u),
-    'use an https:// or ssh:// URL (or git@host:path) without a password or token in it',
+    'use an https:// URL without a password or token in it',
   );
 
 /** A tag, branch or commit: letters, digits and `._/-`, never starting with `-` (it would read as an option). */
@@ -502,6 +520,14 @@ export function packItemOf(e: ParsedCapability, pack: string): PackItem {
         hash: sha256Hex(text).slice(0, 12),
       })),
   };
+}
+
+/**
+ * The content hash a snapshot must carry: recomputed from its items (kind, key and hash of each capability). The server never
+ * takes a reported `contentHash` on trust.
+ */
+export function packSnapshotContentHash(snapshot: Pick<PackSnapshot, 'items'>): string {
+  return packContentHash(snapshot.items);
 }
 
 export function packSnapshotOf(input: {

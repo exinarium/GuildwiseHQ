@@ -4,11 +4,14 @@ import {
   diffPackSnapshots,
   indexPack,
   isScriptPath,
+  LegacyPackUrlSchema,
   mergeRegistry,
   PACK_PRESETS,
   PackNameSchema,
   PackRefSchema,
   PackUrlSchema,
+  packContentHash,
+  packSnapshotContentHash,
   packSnapshotOf,
   parseTomlLite,
   resolveCapabilityRef,
@@ -24,8 +27,12 @@ describe('pack names, urls and refs', () => {
     expect(PackNameSchema.safeParse('bmad').success).toBe(true);
     expect(PackNameSchema.safeParse('persona').success).toBe(false);
     expect(PackNameSchema.safeParse('Bad Name').success).toBe(false);
-    for (const u of ['https://github.com/a/b.git', 'ssh://git@github.com/a/b.git', 'git@github.com:a/b.git'])
-      expect(PackUrlSchema.safeParse(u).success).toBe(true);
+    expect(PackUrlSchema.safeParse('https://github.com/a/b.git').success).toBe(true);
+    // ssh is no longer accepted for a new pack (the runner clones without keys), but stored ones still parse
+    for (const u of ['ssh://git@github.com/a/b.git', 'git@github.com:a/b.git']) {
+      expect(PackUrlSchema.safeParse(u).success).toBe(false);
+      expect(LegacyPackUrlSchema.safeParse(u).success).toBe(true);
+    }
     for (const u of [
       'https://user:pw@github.com/a/b.git',
       'http://github.com/a/b',
@@ -37,6 +44,18 @@ describe('pack names, urls and refs', () => {
     expect(PackRefSchema.safeParse('v6.12.4').success).toBe(true);
     expect(PackRefSchema.safeParse('--upload-pack=x').success).toBe(false);
     expect(PackRefSchema.safeParse('a..b').success).toBe(false);
+  });
+  it('recomputes a snapshot content hash from its items', () => {
+    const snap = packSnapshotOf({
+      name: 'bmad',
+      ref: 'v1',
+      sha: 'a'.repeat(40),
+      index: indexPack({ name: 'bmad', adapter: 'auto', tree: bmadFixtureStable() }),
+    });
+    expect(packSnapshotContentHash(snap)).toBe(snap.contentHash);
+    const forged = { ...snap, items: snap.items.slice(1) };
+    expect(packSnapshotContentHash(forged)).not.toBe(snap.contentHash);
+    expect(packContentHash(snap.items)).toBe(snap.contentHash);
   });
   it('has a BMAD preset pinned to a tag', () => {
     const p = PACK_PRESETS.find((x) => x.id === 'bmad');

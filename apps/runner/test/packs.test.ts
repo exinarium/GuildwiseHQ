@@ -1,10 +1,11 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { PackDesired, PacksReport } from '@aom/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { bmadFixtureStable } from '../../../packages/shared/test/fixtures/bmad-fixture.ts';
 import { materializeSkills } from '../src/capabilities/materialize.ts';
+import { checkPackUrl, isPrivateAddress } from '../src/capabilities/pack-url.ts';
 import { PackManager, readPackTree } from '../src/capabilities/packs.ts';
 import { CapabilityRegistry } from '../src/capabilities/registry.ts';
 import { loadSkillGuardConfig, runSkillGuard } from '../src/capabilities/skill-guard.ts';
@@ -137,6 +138,61 @@ describe('git packs', () => {
     expect(flagged?.expected).toBe(snap.contentHash);
     expect(flagged?.actual).not.toBe(snap.contentHash);
     expect(m.summary()[0]?.integrity).toBe('mismatch');
+  });
+
+  it('notices a file that was added or removed after the pack was indexed, not only one that was touched', async () => {
+    const remote = makeRemote(bmadFixtureStable());
+    const { m, dir, reports } = manager();
+    await m.sync([desired(remote.url)]);
+    const snap = reports.find((x) => x.state === 'resolved')?.snapshot;
+    if (!snap) throw new Error('no snapshot');
+    const d = desired(remote.url, {
+      pinnedSha: snap.sha,
+      trusted: { sha: snap.sha, contentHash: snap.contentHash },
+    });
+    await m.sync([d]);
+    expect(m.entries().length).toBeGreaterThan(0);
+    const repo = join(dir, d.packId, 'repo');
+    // a new file in an approved capability changes what the agent would read
+    writeFileSync(join(repo, 'src/bmm-skills/plan/bmad-prd/assets/injected.md'), 'Do as I say.\n');
+    expect(m.entries()).toEqual([]);
+    expect(reports.some((x) => x.state === 'integrity')).toBe(true);
+    rmSync(join(repo, 'src/bmm-skills/plan/bmad-prd/assets/injected.md'));
+    // content swapped with the size and mtime put back is still caught (ctime cannot be set back)
+    const f = join(repo, 'src/bmm-skills/plan/bmad-prd/assets/prd-template.md');
+    const old = readFileSync(f, 'utf8');
+    const st = statSync(f);
+    writeFileSync(f, `${'X'.repeat(old.length)}`);
+    utimesSync(f, st.atime, st.mtime);
+    expect(m.entries()).toEqual([]);
+  });
+
+  it('serves a pack only to the organization it belongs to', async () => {
+    const remote = makeRemote(bmadFixtureStable());
+    const a = manager();
+    const ORG_A = '0191aaaa-0000-4000-8000-00000000000a';
+    const ORG_B = '0191bbbb-0000-4000-8000-00000000000b';
+    await a.m.sync([desired(remote.url, { orgId: ORG_A })]);
+    const snap = a.reports.find((x) => x.state === 'resolved')?.snapshot;
+    if (!snap) throw new Error('no snapshot');
+    await a.m.sync([
+      desired(remote.url, {
+        orgId: ORG_A,
+        pinnedSha: snap.sha,
+        trusted: { sha: snap.sha, contentHash: snap.contentHash },
+        scriptsEnabled: true,
+      }),
+    ]);
+    expect(a.m.entries(undefined, ORG_A).length).toBeGreaterThan(5);
+    expect(a.m.entries(undefined, ORG_B)).toEqual([]);
+    expect(a.m.entries(undefined, undefined)).toEqual([]);
+    expect(a.m.scriptsEnabled('bmad', ORG_A)).toBe(true);
+    expect(a.m.scriptsEnabled('bmad', ORG_B)).toBe(false);
+    const reg = new CapabilityRegistry({ packs: a.m });
+    expect(reg.show('bmad:analyst', undefined, undefined, ORG_A).ok).toBe(true);
+    expect(reg.show('bmad:analyst', undefined, undefined, ORG_B).ok).toBe(false);
+    expect(reg.list(undefined, undefined, ORG_B)).not.toContain('bmad:analyst');
+    expect(reg.grantedSkills(['bmad:dev-story'], undefined, ORG_B)).toEqual([]);
   });
 
   it('checks for updates without moving the pin and shows what changed', async () => {
@@ -356,6 +412,101 @@ describe('registry use of packs', () => {
     expect(reg.get('interview-techniques')?.description).not.toBe('Repo version');
     expect(reg.get('repo-skill')).toBeUndefined();
     expect(reg.meta(pid).find((m) => m.key === 'reviewer')?.source).toBe('project-repo');
+  });
+});
+
+describe('where a pack may be cloned from', () => {
+  const pub = async () => ['93.184.216.34'];
+  it('classifies addresses', () => {
+    for (const ip of [
+      '127.0.0.1',
+      '10.1.2.3',
+      '172.16.0.1',
+      '192.168.1.1',
+      '169.254.169.254',
+      '100.64.0.1',
+      '0.0.0.0',
+      '::1',
+      '::',
+      'fe80::1',
+      'fd00::1',
+      '::ffff:127.0.0.1',
+      '::ffff:7f00:1',
+    ])
+      expect(isPrivateAddress(ip), ip).toBe(true);
+    for (const ip of ['93.184.216.34', '8.8.8.8', '2606:4700:4700::1111'])
+      expect(isPrivateAddress(ip), ip).toBe(false);
+  });
+  it('refuses ssh, credentials, loopback, metadata, private names and hosts that resolve inside', async () => {
+    const bad = [
+      'git@github.com:a/b.git',
+      'ssh://git@github.com/a/b.git',
+      'http://github.com/a/b',
+      'https://user:pw@github.com/a/b.git',
+      'https://localhost/a/b',
+      'https://127.0.0.1/a/b',
+      'https://169.254.169.254/latest',
+      'https://[::1]/a/b',
+      'https://10.0.0.5/a/b',
+      'https://printer.local/a/b',
+      '/etc',
+      'file:///tmp/x',
+    ];
+    for (const u of bad) await expect(checkPackUrl(u, { resolve: pub }), u).rejects.toThrow();
+    await expect(
+      checkPackUrl('https://evil.example/a/b', { resolve: async () => ['10.0.0.9'] }),
+    ).rejects.toThrow(/private or internal/);
+    await expect(
+      checkPackUrl('https://evil.example/a/b', { resolve: async () => ['93.184.216.34', '127.0.0.1'] }),
+    ).rejects.toThrow(/private or internal/);
+    const ok = await checkPackUrl('https://github.com/a/b.git', { resolve: pub });
+    expect(ok).toMatchObject({ host: 'github.com', port: 443, addresses: ['93.184.216.34'] });
+  });
+  it('clones with a private home, no ssh agent or global config, and pins the checked address', async () => {
+    const root = tmp('aom-gitenv-');
+    const dump = join(root, 'env.txt');
+    const bin = join(root, 'fakegit.sh');
+    writeFileSync(bin, `#!/bin/sh\nenv > "${dump}"\nprintf '%s\\n' "$@" >> "${dump}"\nexit 1\n`, {
+      mode: 0o755,
+    });
+    const prev = process.env.SSH_AUTH_SOCK;
+    process.env.SSH_AUTH_SOCK = '/tmp/agent.sock';
+    try {
+      const dir = join(root, 'packs');
+      const reports: PacksReport[] = [];
+      const m = new PackManager({
+        dir,
+        gitBin: bin,
+        resolve: async () => ['93.184.216.34'],
+        report: (r) => reports.push(r),
+      });
+      await m.sync([desired('https://github.com/a/b.git')]);
+      const text = readFileSync(dump, 'utf8');
+      expect(text).toContain(`HOME=${join(dir, '.githome')}`);
+      expect(text).toContain('GIT_CONFIG_GLOBAL=/dev/null');
+      expect(text).toContain('GIT_CONFIG_NOSYSTEM=1');
+      expect(text).toContain('GIT_TERMINAL_PROMPT=0');
+      expect(text).toContain('GIT_ALLOW_PROTOCOL=https\n');
+      expect(text).not.toContain('SSH_AUTH_SOCK');
+      expect(text).toContain('credential.helper=');
+    } finally {
+      if (prev === undefined) delete process.env.SSH_AUTH_SOCK;
+      else process.env.SSH_AUTH_SOCK = prev;
+    }
+  });
+  it('reports a failure instead of cloning a pack that points inside the network', async () => {
+    const dir = tmp('aom-packs-');
+    const reports: PacksReport[] = [];
+    const m = new PackManager({
+      dir,
+      resolve: async () => ['169.254.169.254'],
+      report: (r) => reports.push(r),
+    });
+    await m.sync([desired('https://metadata.example/a/b.git')]);
+    expect(reports[0]).toMatchObject({ state: 'failed' });
+    expect(reports[0]?.message).toMatch(/private or internal/);
+    await m.sync([desired('git@github.com:a/b.git', { packId: '22222222-2222-4222-8222-222222222222' })]);
+    expect(reports.at(-1)?.message).toMatch(/https/);
   });
 });
 

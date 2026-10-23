@@ -149,6 +149,33 @@ describe('delegate.begin for a session turn', () => {
   });
 });
 
+describe('delegates that are still running', () => {
+  it('count against the per-turn cap before any cost arrives', async () => {
+    const { id, start } = await facilitator();
+    const all = await Promise.all(Array.from({ length: DELEGATE_LIMITS.maxPerCaller + 4 }, () => begin(id)));
+    expect(all.filter((b) => b.ok).length).toBe(DELEGATE_LIMITS.maxPerCaller);
+    expect(all.find((b) => !b.ok)?.error).toContain(`at most ${DELEGATE_LIMITS.maxPerCaller} delegates`);
+    // a finished delegate frees nothing (the cap is per turn), a retried begin of a running one is not counted twice
+    const first = all.find((b) => b.ok) as (typeof all)[number];
+    expect((await begin(id, { delegateId: first.delegateId })).ok).toBe(true);
+    expect((await cost(id, first.delegateId, { inputTokens: 1, outputTokens: 1 })).ok).toBe(true);
+    expect((await begin(id)).ok).toBe(false);
+    await finish(start);
+  });
+
+  it('run one at a time in a session with a budget, so none is started on spend the others have not booked yet', async () => {
+    const { id, start } = await facilitator({ budgetUsd: 100 });
+    const a = await begin(id);
+    expect(a.ok).toBe(true);
+    const b = await begin(id);
+    expect(b.ok).toBe(false);
+    expect(b.error).toContain('session_budget_pending');
+    await cost(id, a.delegateId, { inputTokens: 10, outputTokens: 10 });
+    expect((await begin(id)).ok).toBe(true);
+    await finish(start);
+  });
+});
+
 describe('delegate.cost books the usage under the caller', () => {
   it('writes DelegateCompleted and a cost row of kind delegate that the session meter counts', async () => {
     const { s, start, id } = await facilitator({ projectId: w.projectId });

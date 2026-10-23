@@ -257,6 +257,46 @@ describe('aom delegate on the runner', () => {
     expect((await s.runner.run(CALLER, { persona: 'security', task: 'ok' })).ok).toBe(true);
   });
 
+  it('reserves the slot before anything is awaited, so parallel calls cannot exceed the per-caller cap', async () => {
+    const a = scripted();
+    const s = setup([a]);
+    const all = await Promise.all(
+      Array.from({ length: DELEGATE_LIMITS.maxPerCaller + 5 }, () =>
+        s.runner.run(CALLER, { persona: 'security', task: 'ok' }),
+      ),
+    );
+    expect(all.filter((r) => r.ok)).toHaveLength(DELEGATE_LIMITS.maxPerCaller);
+    expect(s.calls.filter((c) => c.method === 'delegate.begin')).toHaveLength(DELEGATE_LIMITS.maxPerCaller);
+    expect(a.starts).toHaveLength(DELEGATE_LIMITS.maxPerCaller);
+  });
+
+  it('gives the slot back when the server refuses the delegate or no model is offered', async () => {
+    const refused = setup([scripted()], { refuse: 'budget used up' });
+    for (let i = 0; i < DELEGATE_LIMITS.maxPerCaller + 2; i++) {
+      const r = await refused.runner.run(CALLER, { persona: 'security', task: 'ok' });
+      expect(r.error).toBe('budget used up');
+    }
+    const none = setup([]);
+    for (let i = 0; i < DELEGATE_LIMITS.maxPerCaller + 2; i++) {
+      const r = await none.runner.run(CALLER, { persona: 'security', task: 'ok' });
+      expect(r.error).not.toContain('at most');
+    }
+  });
+
+  it('asks the registry for the caller organization, so another organization pack is not offered', async () => {
+    const seen: Array<string | undefined> = [];
+    const s = setup([scripted()]);
+    s.capabilities.setPacks({
+      entries: (_p: unknown, org?: string) => {
+        seen.push(org);
+        return [];
+      },
+      scriptsEnabled: () => false,
+    } as never);
+    await s.runner.run({ ...CALLER, orgId: 'org-a' }, { persona: 'security', task: 'ok' });
+    expect(seen).toContain('org-a');
+  });
+
   it('stops a delegate at the time limit and still books what it used', async () => {
     const s = setup([scripted({ hang: true })], { timeoutMs: 80 });
     const r = await s.runner.run(CALLER, { persona: 'security', task: 'Think forever.' });

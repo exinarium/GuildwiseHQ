@@ -37,6 +37,8 @@ export interface DelegateCaller {
   id: string;
   /** The project, for the registry (a project repository's own personas). */
   projectId?: string;
+  /** The caller's organization: a pack of another organization is never offered to it. */
+  orgId?: string;
   /** The caller's runtime: the default model of a delegate is a small one of the same runtime when it has one. */
   runtime: string;
 }
@@ -95,32 +97,50 @@ export class DelegateRunner {
       };
     const { task } = parsed.data;
     const key = parsed.data.persona.replace(/^persona:/, '');
-    const persona = this.deps.capabilities?.persona(key, caller.projectId);
+    const persona = this.deps.capabilities?.persona(key, caller.projectId, caller.orgId);
     if (!persona)
       return {
         ok: false,
         error: `no persona "${key}" is available here. Personas: \`aom skill list --kind persona\` (an imported pack's persona needs the pack to be approved and unchanged).`,
       };
+    // Reserve the slot now, before anything is awaited: parallel calls of one caller all pass through this line one after the
+    // other, so they cannot all see the count before any of them has raised it. A refusal below gives the slot back.
     const started = this.started.get(caller.id) ?? 0;
     if (started >= DELEGATE_LIMITS.maxPerCaller)
       return {
         ok: false,
         error: `at most ${DELEGATE_LIMITS.maxPerCaller} delegates per turn: work with what you have`,
       };
-
-    const choice = await this.resolveModel(caller, parsed.data.model, persona.meta.model);
-    if (!choice.ok) return { ok: false, error: choice.error };
-    const adapter = this.deps.adapters.get(choice.choice.runtime) as RuntimeAdapter;
-
-    const delegateId = randomUUID();
-    const begin = await this.deps.rpc(caller.id, 'delegate.begin', {
-      delegateId,
-      persona: key,
-      model: { runtime: choice.choice.runtime, model: choice.choice.model },
-      taskChars: task.length,
-    });
-    if (!begin.ok) return { ok: false, error: begin.error ?? 'the server refused the delegate' };
     this.started.set(caller.id, started + 1);
+    const release = (): void => {
+      const n = this.started.get(caller.id);
+      if (n !== undefined) this.started.set(caller.id, Math.max(0, n - 1));
+    };
+
+    let choice: Awaited<ReturnType<DelegateRunner['resolveModel']>>;
+    let begin: IpcRpcResponse;
+    const delegateId = randomUUID();
+    try {
+      choice = await this.resolveModel(caller, parsed.data.model, persona.meta.model);
+      if (!choice.ok) {
+        release();
+        return { ok: false, error: choice.error };
+      }
+      begin = await this.deps.rpc(caller.id, 'delegate.begin', {
+        delegateId,
+        persona: key,
+        model: { runtime: choice.choice.runtime, model: choice.choice.model },
+        taskChars: task.length,
+      });
+    } catch (err) {
+      release();
+      throw err;
+    }
+    if (!begin.ok) {
+      release();
+      return { ok: false, error: begin.error ?? 'the server refused the delegate' };
+    }
+    const adapter = this.deps.adapters.get(choice.choice.runtime) as RuntimeAdapter;
 
     const handle: Running = {};
     const set = this.running.get(caller.id) ?? new Set<Running>();
@@ -298,7 +318,7 @@ export class DelegateRunner {
       }),
       rpc: async (req: IpcRpcRequest): Promise<IpcRpcResponse> => {
         if (req.method === 'skill.show' || req.method === 'skill.list')
-          return skillRpc(this.deps.capabilities, req.method, req.params, caller.projectId);
+          return skillRpc(this.deps.capabilities, req.method, req.params, caller.projectId, caller.orgId);
         if (req.method === 'ledger.search') return this.deps.rpc(caller.id, req.method, req.params);
         if (req.method === DELEGATE_RPC || req.method.startsWith('delegate.'))
           return {

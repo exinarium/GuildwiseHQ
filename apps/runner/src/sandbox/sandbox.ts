@@ -223,6 +223,7 @@ export function sandboxEnv(
     GIT_CONFIG_GLOBAL: join(sb.home, '.gitconfig'),
     GIT_CONFIG_NOSYSTEM: '1',
     CLAUDE_CONFIG_DIR: sb.configDir,
+    AOM_SCRATCH: sb.scratch,
     TMPDIR: sb.tmp,
     TMP: sb.tmp,
     TEMP: sb.tmp,
