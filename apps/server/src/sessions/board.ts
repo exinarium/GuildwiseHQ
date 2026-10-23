@@ -555,16 +555,21 @@ export class BoardService {
       `SELECT participant_id FROM session_turns WHERE thread_id=$1 AND round=$2 AND meta->>'purpose'='board_speaker'`,
       [t.id, plan.round],
     );
-    const missing = plan.speakers.filter((id) => !have.some((h) => h.participant_id === id));
+    // A seat that left the room (removed, or its agent or persona is gone) is not waited for.
+    const missing = plan.speakers.filter(
+      (id) => cast.some((c) => c.id === id) && !have.some((h) => h.participant_id === id),
+    );
     if (!missing.length) return this.completeRound(t, cfg, plan);
     // The independent round goes out all at once; later rounds one speaker at a time, so each hears the one before.
     const todo = plan.kind === 'independent' ? missing : missing.slice(0, 1);
+    let dropped = false;
     for (const id of todo) {
-      const p = cast.find((c) => c.id === id);
-      if (!p) continue;
+      const p = cast.find((c) => c.id === id) as Row;
       const ok = await this.queueSpeaker(t, cfg, plan, p, cast);
-      if (!ok) return;
+      if (ok === 'blocked') return;
+      if (ok === 'gone') dropped = true;
     }
+    if (dropped) return this.advanceLocked(t.id);
   }
 
   private async queueSpeaker(
@@ -573,7 +578,7 @@ export class BoardService {
     plan: BoardPlan,
     p: Row,
     cast: Row[],
-  ): Promise<boolean> {
+  ): Promise<'queued' | 'blocked' | 'gone'> {
     let stance: string | null = p.stance ?? null;
     if (!stance && p.kind === 'persona' && !isAdHocPersona(p.ref_id))
       stance = (await resolvePersona(this.ctx.pool, t.org_id, p.ref_id))?.stance ?? null;
@@ -600,17 +605,45 @@ export class BoardService {
       decisions: await this.decisionsTaken(t.id),
     });
     const independent = plan.kind === 'independent';
-    return !!(await this.tryQueue(t, cfg, {
-      participantId: p.id,
-      message: built.message,
-      model: await this.speakerModel(t, cfg, p),
-      context:
-        independent && cfg.briefMessageId
-          ? { mode: 'selected', messageIds: [cfg.briefMessageId] }
-          : { mode: 'all', limit: MAX_SPOKEN_CONTEXT },
-      round: plan.round,
-      meta: { purpose: 'board_speaker', round: plan.round, kind: plan.kind, maxChars: BOARD_TURN_MAX_CHARS },
-    }));
+    try {
+      const turn = await this.tryQueue(t, cfg, {
+        participantId: p.id,
+        message: built.message,
+        model: await this.speakerModel(t, cfg, p),
+        context:
+          independent && cfg.briefMessageId
+            ? { mode: 'selected', messageIds: [cfg.briefMessageId] }
+            : { mode: 'all', limit: MAX_SPOKEN_CONTEXT },
+        round: plan.round,
+        meta: {
+          purpose: 'board_speaker',
+          round: plan.round,
+          kind: plan.kind,
+          maxChars: BOARD_TURN_MAX_CHARS,
+        },
+      });
+      return turn ? 'queued' : 'blocked';
+    } catch (err) {
+      // The agent was retired or the persona left the registry: the seat is dropped and the round goes on without it.
+      if (
+        err instanceof HttpError &&
+        (err.code === 'agent_unavailable' || err.code === 'persona_unavailable')
+      ) {
+        await this.ctx.store.append([
+          {
+            streamId: streamId.thread(t.id),
+            event: { type: 'ThreadParticipantRemoved', payload: { threadId: t.id, participantId: p.id } },
+            actor: SYSTEM_ACTOR,
+            scope: sessionScope(t),
+          },
+          this.systemMessage(t, `${p.display_name} is no longer available and left the room.`, {
+            gone: p.id,
+          }),
+        ]);
+        return 'gone';
+      }
+      throw err;
+    }
   }
 
   /** Every planned speaker's turn ended: reveal round 1, then end at the cap or hand over to the Chair. */
@@ -1419,7 +1452,7 @@ export class BoardService {
       title: cfg.topic.split('\n')[0] ?? cfg.topic,
       topic: cfg.topic,
       minutesDocId: cfg.minutesDocId,
-      decisions: [...decided.map((d) => `${d.question} -> ${d.answer}`), ...col('decisions')],
+      decisions: [...new Set([...decided.map((d) => `${d.question} -> ${d.answer}`), ...col('decisions')])],
       ideas: col('ideas'),
       risks: col('risks'),
       questions: col('questions'),

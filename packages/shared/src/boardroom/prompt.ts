@@ -498,15 +498,15 @@ export function assembleMinutes(i: MinutesDocInput): string {
       : '_None recorded._',
     '',
   );
-  const decided = i.decisions.filter((d) => d.answer);
+  const decided = i.decisions.filter((d) => d.answer).map((d) => `${d.question} -> ${d.answer}`);
   out.push('## Decisions', '');
-  const fromBoard = i.notes.filter((n) => n.column === 'decisions');
+  // the owner's decision is also a note of the decisions column: list it once
+  const fromBoard = i.notes
+    .filter((n) => n.column === 'decisions' && !decided.includes(n.text))
+    .map((n) => n.text);
   out.push(
     decided.length || fromBoard.length
-      ? [
-          ...decided.map((d) => `- ${d.question} -> ${d.answer}`),
-          ...fromBoard.map((n) => `- ${n.text}`),
-        ].join('\n')
+      ? [...decided, ...fromBoard].map((t) => `- ${t}`).join('\n')
       : '_None._',
     '',
   );

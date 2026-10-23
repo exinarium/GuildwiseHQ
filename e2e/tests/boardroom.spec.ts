@@ -34,6 +34,12 @@ test('setup: a paired mock runner that announces the board verbs', async () => {
     (w) => w[0]?.connected === true,
     30_000,
   );
+  // the analyst who facilitates the Discovery session that "Pull into PRD" starts (personas run on the chosen models; the
+  // facilitator is an agent here, on the mock runtime)
+  const hire = await api.post('/api/agents', {
+    data: { name: 'Ana', roleKey: 'analyst', seniority: 'senior', workstationId: ws[0].id, runtime: 'mock' },
+  });
+  expect(hire.status(), await hire.text()).toBe(201);
   await waitFor(
     'the runner announces the board verbs',
     async () =>

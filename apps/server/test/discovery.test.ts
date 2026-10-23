@@ -563,6 +563,8 @@ describe('CEO modes', () => {
     const { questionId } = await facilitatorAsks();
     const c = await nextStart((f) => f.message.includes('"role":"ceo_answer"'));
     await finish(c, 'Agencies, because they pay more.');
+    // the follow-up of a turn runs just after it ends
+    await until(async () => !!(await get(s.threadId)).questions[0]?.proposed);
     let st = await get(s.threadId);
     expect(st.questions[0].proposed).toMatchObject({
       text: 'Agencies, because they pay more.',

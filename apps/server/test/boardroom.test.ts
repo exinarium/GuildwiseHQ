@@ -4,6 +4,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { PROJECTION_TABLES } from '../src/projections/index.ts';
 import { rebuildProjections } from '../src/projections/rebuild.ts';
 import { Browser } from './helpers/browser.ts';
+import { appoint } from './helpers/ceo.ts';
 import { closeAdminPool, q as rawQ } from './helpers/db.ts';
 import type { FakeRunner } from './helpers/fake-runner.ts';
 import { createWorld, ok, until, type World } from './helpers/world.ts';
@@ -895,6 +896,41 @@ describe('suggesting a cast and saved rooms', () => {
   });
 });
 
+describe('a seat that is gone', () => {
+  it('drops an agent that was retired mid-session and goes on with the others', async () => {
+    const ag = await w.hire(`Gil${Math.random().toString(36).slice(2, 6)}`, 'ba', 'senior');
+    const agentId = ag.agent?.id ?? ag.id;
+    const st = await create({
+      cast: [
+        { kind: 'agent', refId: agentId },
+        { kind: 'persona', refId: 'cost-hawk' },
+        { kind: 'persona', refId: 'user-advocate' },
+      ],
+      roundCap: 3,
+    });
+    for (let i = 0; i < 3; i++) await finish(await nextStart(st.threadId, role('speaker')));
+    const chair = await nextStart(st.threadId, role('chair'));
+    await q(`UPDATE agents SET status='retired' WHERE id=$1`, [agentId]);
+    const agentSlug = st.cast.find((c: any) => c.refId === agentId).slug;
+    const pick = await call(chair.chatId, 'board.next', {
+      speakers: [agentSlug, slugOf(st, 'cost-hawk')],
+      reason: 'x',
+    });
+    expect(pick.ok, pick.error).toBe(true);
+    await finish(chair);
+    const spk = await nextStart(st.threadId, role('speaker'));
+    expect(speakerOf(spk)).toBe('cost-hawk');
+    const mid = await get(st.threadId);
+    expect(mid.cast.map((c: any) => c.refId)).toEqual(['cost-hawk', 'user-advocate']);
+    const msgs = (await owner('GET', `/api/threads/${st.threadId}/messages`)).messages as any[];
+    expect(
+      msgs.some((m) => m.kind === 'system' && /no longer available and left the room/.test(m.body)),
+    ).toBe(true);
+    await finish(spk);
+    await finish(await nextStart(st.threadId, role('chair')));
+  });
+});
+
 describe('cost, budget, pause and restart', () => {
   it('shows a live cost meter and an estimate of the next round, and stops at the session budget until it is raised', async () => {
     const st = await create({ budgetUsd: 0.5, roundCap: 4 });
@@ -1065,5 +1101,28 @@ describe('access and replay', () => {
     );
     await rebuildProjections(w.t.app.ctx.pool, w.t.app.ctx.store, w.t.clock.now());
     expect(await snap()).toEqual(before);
+  });
+});
+
+describe('Pull into PRD with a CEO', () => {
+  it('starts the discovery session in joint mode when the organization has a CEO, and the CEO proposes on the seeded session', async () => {
+    await appoint(w);
+    // a one-round session ends at once: the minutes follow round 1
+    const st = await create({ roundCap: 1 });
+    await answerRound1(st.threadId);
+    const min = await nextStart(st.threadId, role('minutes'));
+    expect(
+      (await call(min.chatId, 'board.minutes', { content: '## Positions\n\n- all three answered' })).ok,
+    ).toBe(true);
+    await finish(min, 'Saved.');
+    await until(async () => (await get(st.threadId)).config.stage === 'ended');
+    const pulled = await owner('POST', `/api/board/${st.threadId}/pull-into-prd`, undefined, 201);
+    const ds = (await owner('GET', `/api/discovery/${pulled.discoveryId}`)).state;
+    expect(ds.config).toMatchObject({ phase: 'capture', ceoMode: 'joint' });
+    expect(ds.ceoAvailable).toBe(true);
+    const fac = await nextStart(pulled.discoveryId, (f) => f.message.includes('"role":"facilitator"'));
+    expect(fac.message).toContain('"phase":"capture"');
+    expect(fac.message).toContain('"ceoMode":"joint"');
+    await finish(fac);
   });
 });

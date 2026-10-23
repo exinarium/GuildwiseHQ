@@ -2556,7 +2556,7 @@ threads. Migrations 2340 to 2342; all tables are projections (no foreign keys in
   (`ALLOWED_TOOLS_NOTE`); nothing is granted from it.
 - **Role `analyst`** (built-in, version 1): the facilitator of discovery sessions; read-only permissions, no claimable stages; skills
   `interview-techniques`, `brainstorm`, `advanced-elicitation`, `product-brief`, `prd`.
-- **Version skew.** `RUNNER_VERSION` 0.1.43 (phase B adds `session-verbs:1`). The runner announces `session-turns:1`; the server sends a `session` block only to such runners and fails
+- **Version skew.** `RUNNER_VERSION` 0.1.44 (phase B adds `session-verbs:1`, phase C `board-verbs:1`; a runner without it still runs discovery sessions, and a boardroom turn fails with `runner_too_old`). The runner announces `session-turns:1`; the server sends a `session` block only to such runners and fails
   the turn otherwise (an older runner would run it as a plain chat). The server announces `capability-registry:1` in `welcome.features`; a runner
   sends `capabilities.report` only after that.
 

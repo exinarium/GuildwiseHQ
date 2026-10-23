@@ -2043,7 +2043,7 @@ async function boardMain(): Promise<number> {
     } else {
       run(['board', 'add', '--column', header.kind === 'dissent' ? 'questions' : v.column, '--text', v.note]);
     }
-    if (slug === 'devils-advocate' && header.kind === 'discussion')
+    if ((slug === 'devils-advocate' || slug === 'cost-hawk') && header.kind !== 'independent')
       run([
         'board',
         'disagreement',
@@ -2051,7 +2051,9 @@ async function boardMain(): Promise<number> {
         '--topic',
         'Move fast with a pilot or prove demand first',
         '--position',
-        "Devil's Advocate|Prove demand with paying users before building",
+        slug === 'cost-hawk'
+          ? 'Cost Hawk|Cap the pilot at four weeks and one person'
+          : "Devil's Advocate|Prove demand with paying users before building",
         '--position',
         'Creative Strategist|A bold pilot is the fastest way to learn',
       ]);
