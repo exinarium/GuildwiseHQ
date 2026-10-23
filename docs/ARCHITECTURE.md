@@ -2523,8 +2523,7 @@ threads. Migrations 2340 to 2342; all tables are projections (no foreign keys in
   `SessionTurnRequeued` and are sent again (at most 3 attempts, then `SessionTurnFailed`); a `chat.error` of a dropped connection or runner stop is
   requeued the same way; a started turn nobody answered for 30 minutes is requeued by the 15 s sweep; a queued turn older than 24 hours fails as
   `expired`; a workstation without `session-turns:1` fails the turn with `runner_too_old`. A cancel fails a queued turn at once and sends
-  `chat.cancel` for a running one. Not yet: turns are not `shifts`, so their token usage is stored on the turn (`session_turns.usage`) and in the
-  message, but not in the organization's cost ledger or budgets.
+  `chat.cancel` for a running one. Turns are not `shifts`, but their cost is in the ledger (phase B, below).
 - **Runner execution** (`ChatManager.runSessionTurn`). The same sandbox, `startChat` and `finishTurn` as a chat, with `readOnly: true`, no
   repositories and no vault, and only `skill.*` and `ledger.search` as rpc (no `comment`, no `thread.post`). `renderSessionTurnInstructions`
   (shared) writes the speaker's `CLAUDE.md`: who you are, stance, voice, persona prompt, roster, rules. The mock adapter echoes the message, so the
@@ -2557,6 +2556,52 @@ threads. Migrations 2340 to 2342; all tables are projections (no foreign keys in
   (`ALLOWED_TOOLS_NOTE`); nothing is granted from it.
 - **Role `analyst`** (built-in, version 1): the facilitator of discovery sessions; read-only permissions, no claimable stages; skills
   `interview-techniques`, `brainstorm`, `advanced-elicitation`, `product-brief`, `prd`.
-- **Version skew.** `RUNNER_VERSION` 0.1.42. The runner announces `session-turns:1`; the server sends a `session` block only to such runners and fails
+- **Version skew.** `RUNNER_VERSION` 0.1.43 (phase B adds `session-verbs:1`). The runner announces `session-turns:1`; the server sends a `session` block only to such runners and fails
   the turn otherwise (an older runner would run it as a plain chat). The server announces `capability-registry:1` in `welcome.features`; a runner
   sends `capabilities.report` only after that.
+
+### 38.1 Discovery Studio (phase B)
+
+Migration 2350; projection tables `discovery_questions`, `discovery_notes`, `discovery_proposals`, `session_turns.meta`, `intakes.linked_doc_ids`.
+
+- **State machine.** A discovery session is a `discovery` thread. Its facilitation state is `threads.session_config` (`parseDiscoveryConfig`, shared
+  `discovery/index.ts`): `stance` (facilitator|partner|ideate_for_me), `phase` (frame, diverge, converge, stress_test, capture), `timeBoxMinutes`,
+  `ceoMode` (owner_only|joint|ceo_prep), `playbook`, `budgetUsd`, `paused`, `elapsedMs`+`activeSince` (a paused session keeps its clock), `ceoPrep`
+  `{state running|review|done, turns, cap 12}`, `briefDocId`/`prdDocId`, `prdValidation`, `intakeId`, and `pendingTrigger`. Everything changes by event:
+  `SessionThreadUpdated` (config), `DiscoveryPhaseChanged`, `DiscoveryPauseChanged`, `DiscoveryQuestionAsked|Withdrawn`, `DiscoveryAnswerProposed`,
+  `DiscoveryQuestionAnswered` (`source` owner|ceo_confirmed|ceo_edited|owner_override), `DiscoveryNoteAdded|Updated|Removed`,
+  `DiscoveryProposalRaised|Resolved`. A rebuild gives identical rows (test).
+- **Orchestrator** (`sessions/discovery.ts DiscoveryService`, `ctx.services.discovery`). The facilitator is the `analyst` agent when the organization has an
+  active one, else the persona `analyst` (seat "Facilitator"). `buildFacilitatorTurn` (shared, pure) writes the turn: persona + protocol (the verbs) in
+  the instructions, and in the message the trigger, stance, phase guide, time box, CEO mode, the question/answer log, the panel with short ids, proposals,
+  documents and the active playbook (steps and assets; `<!--discovery:{json}-->` header for the mock). Turns are ordinary durable session turns with
+  `meta {purpose: facilitator|ceo_answer, ...}`. After the owner answers, writes, resolves a proposal, overrides the phase or resumes, the server queues the
+  next facilitator turn (`requestFacilitator`); if a turn is running, the session is paused, or the queue is refused (budget, paused project, no
+  workstation) the trigger is kept as `pendingTrigger` and sent when possible (turn end, resume, budget raise, scheduler `sweep`): nothing is lost on restart.
+  A runner without `session-verbs:1` fails such a turn as `runner_too_old`.
+- **Verbs** (`aom session ask|answer|note add|update|remove|propose|phase|draft|validate|show`, rpc `session.*`, `sessions/discovery-verbs.ts`). The IPC token of a
+  session turn is scoped to the turn (`shiftId` = turn id, `DiscoveryService.turnOf`); the runner forwards only `ledger.search` and `session.*`; the
+  server allows a verb by `meta.purpose` (facilitator: all but `answer`; ceo_answer: `answer`, one `note add`) and only while the turn runs. One question per
+  turn; a new question withdraws the open one. `draft` creates or versions a document linked to the session (a locked document is refused).
+- **Proposals.** Raised by the facilitator, never applied by it. Owner Apply: a panel note (`--section` a panel section) or a markdown section replaced/appended
+  in the draft (`applyDocSection`) as a new version; Reject; Redirect (text goes to the next facilitator turn).
+- **CEO modes.** The CEO (`ceo_settings` enabled and not paused) is a participant (seat "CEO"). `joint`: after each question a CEO turn proposes an answer (verb or its
+  reply text) stored as a labelled proposal; the owner Confirms, Edits or Overrides (`POST .../answer` kind confirm|pick|text|skip|park). `ceo_prep`: facilitator and
+  CEO alternate up to the cap, questions stay `proposed`, then `ceoPrep.state review`; when the last is reviewed the facilitator continues. The CEO never answers
+  on its own authority. Without a CEO the modes are refused (`no_ceo`) and hidden in the UI.
+- **Cost.** `SessionTurnCompleted` also writes a `shift_costs` row (`kind 'session'`, id = turn id, project = the session's project, agent = the agent or
+  `PERSONA_HOST_AGENT_ID`); the price is stamped on the event (`costMicros`, `costs/stamp.ts`) so a replay never reprices. Cost pages and project budgets count it
+  (the budget hook also listens to `SessionTurnCompleted`). `SessionDto.cost` and `DiscoveryStateDto.cost` give the running cost. `budgetUsd` in the config: once spent,
+  `SessionTurns.queue` refuses with 409 `session_budget_exceeded` (also for a paused project: `project_paused`, `project_budget_paused`), the session gets a system message
+  and `budgetStopped`; `PATCH /api/discovery/:id {budgetUsd}` lifts it. Spend is in USD (not the organization currency).
+- **PRD flow.** Capture: `draft` -> `POST /api/discovery/:id/validate` (facilitator turn with the checklist, result in `prdValidation`) -> approve through the documents API
+  (draft -> in_review -> approved, vault publish as in phase A) -> `POST /api/discovery/:id/hand-to-ba`: an intake (`startIntakeIn`, note = PRD text, `IntakeStarted.linkedDocIds`,
+  project pre-mapped) and the document `handed_off`; cards the BA drafts get `fields.linkedDocIds`.
+- **REST** (`routes/discovery.ts`; every response is the fresh `state`): `POST /api/discovery`, `GET|PATCH /api/discovery/:id`, `POST .../questions/:qid/answer`, `.../say`,
+  `.../notes` (POST, PATCH|DELETE `/:noteId`), `.../proposals/:pid/resolve`, `.../phase`, `.../pause`, `.../resume`, `.../continue`, `.../draft`, `.../validate`, `.../hand-to-ba`.
+  The browser gets `discovery.updated {threadId}` (and `session.turn`) on every change; streaming uses `chat.delta|activity|done` with `turnId`.
+- **Mock runtime.** `MockAdapter` plays the facilitator or the CEO for a discovery turn (`mock-agent discoveryMain`), driving the real `aom session` verbs. Tests:
+  `apps/server/test/discovery.test.ts`, `packages/shared/test/discovery.test.ts`, `apps/runner/test/aom-session.test.ts`, `apps/web/src/test/discovery.test.tsx`,
+  `e2e/tests/discovery.spec.ts` (project `discovery`).
+- **For phase C** reuse: `queue(userId, threadId, req, {meta})`, `assertSessionMayQueue`, `sessionCost`, the `session.*` rpc dispatch (`DiscoveryService.rpc`, add `board.*` there),
+  `discovery.updated`, `buildTimeline`/cards on the web, `sessionDocs`, and the document hand-off (`Pull into PRD` can create a discovery session with `phase: 'capture'` and `prdDocId`).

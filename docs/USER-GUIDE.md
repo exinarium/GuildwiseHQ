@@ -1371,6 +1371,10 @@ It has these panels, top to bottom:
 
 > **In the app:** watch the video "Your settings" (Help, "Getting started", `/help/getting-started#your-settings`). The page's own help panel (**?** in the top bar) has it too, under **Watch the video**.
 
+## Discovery: from an idea to a PRD
+
+**Discovery** (sidebar, Owners and Admins) turns an idea into a brief or a PRD. Click **New discovery**, give it a title and optionally a starting idea, a project, a time box and a budget, and choose how the analyst works (Facilitator, Partner or Ideate for me) and whether the CEO takes part (just you, with the CEO, or CEO prepares first). The analyst asks one question at a time: pick a quick answer, write your own, skip it or park it. The CEO's answers are shown as proposals that you confirm, edit or override. Proposals from the analyst change nothing until you click **Apply**. The side panel keeps ideas, assumptions, open questions, decisions and parked items, and you can edit all of them. **Pause** any time and come back later. The page shows the cost so far; when a budget is set and used up, no new turn starts until you raise it. In the Capture phase the analyst writes the PRD in the **Draft** panel: validate it against the checklist, approve it, and click **Hand to BA** to start an intake whose cards link back to the PRD. **Documents** lists every brief and PRD with its versions.
+
 ## 5. For Members
 
 A **Member** works inside the projects an Owner or Admin has added them to. You do the day-to-day work: write cards, answer questions, hire your own agents and follow the board. You do not manage the organization.

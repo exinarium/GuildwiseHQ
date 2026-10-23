@@ -2,7 +2,7 @@ import { type NoteDto, PANEL_SECTION_LABEL, PANEL_SECTIONS, type PanelSection } 
 import { Check, Pencil, Trash2, X } from 'lucide-react';
 import { useState } from 'react';
 import { useAddNote, usePatchNote, useRemoveNote } from '../../api/queries/discovery.ts';
-import { Badge, Button } from '../ui.tsx';
+import { Button } from '../ui.tsx';
 
 function NoteRow({ note, threadId }: { note: NoteDto; threadId: string }) {
   const patch = usePatchNote(threadId);
@@ -42,7 +42,6 @@ function NoteRow({ note, threadId }: { note: NoteDto; threadId: string }) {
       )}
       <div className="flex flex-wrap items-center gap-1.5 text-xs text-subtle">
         <span>{note.byName}</span>
-        {note.byKind === 'agent' && <Badge tone="info">CEO or agent</Badge>}
         <span className="flex-1" />
         <label className="sr-only" htmlFor={`move-${note.id}`}>
           Move to

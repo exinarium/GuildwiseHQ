@@ -274,7 +274,7 @@ export function DiscoverySession() {
             ]}
           />
           {tab === 'conversation' && (
-            <div className="h-[calc(100dvh-22rem)] min-h-[22rem] flex flex-col">{conversation}</div>
+            <div className="h-[calc(100dvh-27rem)] min-h-[20rem] flex flex-col">{conversation}</div>
           )}
           {tab === 'panel' && panel}
           {tab === 'draft' && drafts}

@@ -5,11 +5,13 @@ import { PROJECTION_TABLES } from '../src/projections/index.ts';
 import { rebuildProjections } from '../src/projections/rebuild.ts';
 import { Browser } from './helpers/browser.ts';
 import { appoint } from './helpers/ceo.ts';
-import { closeAdminPool, q } from './helpers/db.ts';
+import { closeAdminPool, q as rawQ } from './helpers/db.ts';
 import type { FakeRunner } from './helpers/fake-runner.ts';
 import { createWorld, ok, until, type World } from './helpers/world.ts';
 
 /** Discovery Studio: the facilitated session, its verbs, CEO modes, budget stop, PRD hand-off and replay safety. */
+/** Rows as loosely typed records (the assertions name the columns). */
+const q = async (sql: string, params: unknown[] = []): Promise<any[]> => rawQ(sql, params) as Promise<any[]>;
 let w: World;
 let r: FakeRunner;
 const seen = new Set<string>();

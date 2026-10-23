@@ -1874,7 +1874,7 @@ async function discoveryMain(): Promise<number> {
     run(['session', 'phase', '--to', wanted, '--reason', 'We have covered this phase.']);
     phase = wanted;
   }
-  if (header.timeUp || idx >= MOCK_QUESTIONS.length || (idx >= 5 && lastAnswer.startsWith('No'))) {
+  if (header.timeUp || idx >= MOCK_QUESTIONS.length || (idx >= 5 && lastAnswer.startsWith('No, write'))) {
     if (phase !== 'capture')
       run(['session', 'phase', '--to', 'capture', '--reason', 'Time to write it down.']);
     if (!header.hasPrd) draftPrd();
