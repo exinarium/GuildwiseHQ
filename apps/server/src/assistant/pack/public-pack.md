@@ -211,6 +211,15 @@ The optional design step before build, investigation-only cards, where reports g
 - What the architect may touch: - It writes only documentation and its report; the runner checks this after each shift. - It reads the card's repository and every repository of the organization's projects cloned on its workstation, read-only, secret files blocked.…
 - Organisation source folder: Open Workstations, expand your workstation and find the row Organisation source folder (only the workstation's owner sees it; it is set per organization, for the one you are working in). The architect may read every repository in the folder, read-only; secret files stay blocked.
 
+### Discovery and documents
+Turn an idea into a brief or a PRD with an analyst, optionally with your CEO, and hand the approved PRD to the BA.
+- Start a discovery: Sidebar, Discovery, New discovery (Owner and Admin).
+- The conversation: Five phases: Frame, Diverge, Converge, Stress test, Capture. Click a phase to override the analyst.
+- The panel: Ideas, assumptions, open questions, decisions and parked items; the analyst keeps it up to date and you can edit it.
+- Cost and budget: The page shows cost and time used (also in Costs). With a budget, no new turn starts once it is used up; raise it to carry on.
+- Draft, approve and hand to the BA: In Capture the analyst writes the Draft. Validate against the checklist, then Approve; Hand to BA opens an intake linked to the PRD.
+- Documents: Documents lists every brief and PRD with status and versions.
+
 ### Testing and finalization
 The test stage, how finished work lands (working branch or pull request), the main and working branch, expert mode, the full suite and regression runs.
 - Test stage: When a card reaches Test, a tester runs the E2E tests from the test plan. If tests pass:
@@ -219,6 +228,15 @@ The test stage, how finished work lands (working branch or pull request), the ma
 - Simple mode and expert mode: You do not need to know git to use Guildwise HQ. By default (simple mode) cards and the desk speak in results: *"Goes into the working branch after review and test"*, *"Your change is live on the working branch"*, *"Waiting for you to merge the pull request"*.…
 - Manual QA: After a card is finalized it goes to QA (when the project has it on, which is the default): the person who started the card gets a desk item and an agent writes test steps on the card.…
 - Full suite and regression: After finalization, a full suite card is created for testers to run the entire E2E suite once. A test-side failure (a flaky test, data or environment) is fixed by the tester; a genuine bug becomes a new bug card and you get a notice. These failures do not block merges.
+
+### Boardroom
+Put a question to personas and agents, run by a Chair. Interject, keep a whiteboard, and turn the minutes into a PRD.
+- Start a boardroom: Sidebar, Boardroom, New boardroom (Owner and Admin).
+- How a session runs: Round 1 is independent: each seat answers from your topic and brief alone, then all are revealed.
+- Talk to the room: Type in the box at the bottom at any time. @name (or @all) calls on a seat for the next round. Pause stops anything new from starting.
+- The whiteboard: Sticky notes in five columns (Ideas, Risks, Questions, Decisions, Parked). Seats add notes; you can add, edit, drag, vote +1, merge and delete.
+- Cost: The meter shows the cost so far and the estimate for the next round. With a budget, no new turn starts once it is used up; raise it or end the session.
+- Minutes and the PRD: When the session ends, or on Write minutes now, the Chair writes the minutes (positions, agreements, open disagreements, decisions, whiteboard) into Documents.
 
 ### Phases and follow-ups
 Creating phases, adding cards, when a phase is done, follow-ups, deploy and regression.
@@ -399,4 +417,9 @@ The built-in agent you talk to first: it runs your desk and the floor, works on 
 - Activity log, Undo and Correct: Everything it decided, recommended or refused is in the Activity log, with its reason, its confidence and the evidence. Most decisions have an Undo, also on the desk item and in the daily report. The Owner can export the log.
 - Memory: It remembers rules you give it. Tick Remember this for the CEO when you answer, or add a rule on the Memory tab. Proposed rules wait for your Keep or Drop. Only the Owner can read the memory.
 - Talking to it: Press Ask in the top bar for your standing chat, or give it a task on the Tasks tab. Its spend shows as Management on the Costs page. The DevOps engineer no longer has a chat of its own: ask the CEO, who delegates to DevOps and tells you what happened.…
+
+### Capabilities and packs
+The skills, personas and playbooks agents can use, and how to add and approve a pack from git.
+- The registry: It lists every skill, persona and playbook and where it comes from: built in, your vault, a project or a pack. Pick a role's skills on Roles and workflows.
+- Packs: Add a pack by git URL and tag, or click Add BMAD Method. It starts untrusted: nothing of it is used. Review and approve shows its files, scripts flagged, and approves that exact commit. Scripts stay off unless you enable them, and only run in the sandbox. Pack text reaches agents as outside content.…
 </help_outline>
