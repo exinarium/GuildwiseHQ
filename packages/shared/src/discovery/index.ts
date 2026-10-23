@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { PackedKeySchema } from '../capabilities/parse.ts';
 import { DocumentKindSchema, DocumentStatusSchema } from '../documents/index.ts';
 import { ModelChoiceSchema } from '../models/choices.ts';
 import { SessionTurnDtoSchema } from '../sessions/index.ts';
@@ -33,8 +34,12 @@ export type DiscoveryCeoMode = z.infer<typeof CeoModeSchema>;
 
 /** The playbooks a session can start from. */
 export const DISCOVERY_PLAYBOOKS = ['brainstorm', 'advanced-elicitation', 'product-brief', 'prd'] as const;
-export const DiscoveryPlaybookSchema = z.enum(DISCOVERY_PLAYBOOKS);
+export const BuiltinDiscoveryPlaybookSchema = z.enum(DISCOVERY_PLAYBOOKS);
+/** A built-in playbook, or a registry playbook of an approved pack (`bmad:brainstorming`, tagged `discovery`). */
+export const DiscoveryPlaybookSchema = z.union([BuiltinDiscoveryPlaybookSchema, PackedKeySchema]);
 export type DiscoveryPlaybook = z.infer<typeof DiscoveryPlaybookSchema>;
+/** A brief or PRD template of an approved pack (a playbook tagged `template:brief` or `template:prd`). */
+export const DiscoveryTemplateSchema = PackedKeySchema;
 
 export const PANEL_SECTIONS = ['ideas', 'assumptions', 'open_questions', 'decisions', 'parked'] as const;
 export const PanelSectionSchema = z.enum(PANEL_SECTIONS);
@@ -67,6 +72,8 @@ export const DiscoveryConfigSchema = z.object({
     .default(null),
   ceoMode: CeoModeSchema.default('owner_only'),
   playbook: DiscoveryPlaybookSchema.default('brainstorm'),
+  /** A pack template used at the capture step instead of the built-in one. */
+  templateKey: DiscoveryTemplateSchema.nullable().default(null),
   idea: z.string().max(4000).default(''),
   budgetUsd: z.number().positive().max(100_000).nullable().default(null),
   paused: z.boolean().default(false),
@@ -270,6 +277,7 @@ export const CreateDiscoveryRequestSchema = z.object({
     .max(24 * 60)
     .optional(),
   playbook: DiscoveryPlaybookSchema.default('brainstorm'),
+  templateKey: DiscoveryTemplateSchema.optional(),
   idea: z.string().max(4000).default(''),
   budgetUsd: z.number().positive().max(100_000).optional(),
   workstationId: z.uuid().optional(),
@@ -331,6 +339,7 @@ export const DiscoveryStateDtoSchema = z.object({
     phase: DiscoveryPhaseSchema,
     ceoMode: CeoModeSchema,
     playbook: DiscoveryPlaybookSchema,
+    templateKey: DiscoveryTemplateSchema.nullable().optional(),
     idea: z.string(),
     timeBoxMinutes: z.number().nullable(),
     paused: z.boolean(),

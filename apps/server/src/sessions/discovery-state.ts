@@ -141,6 +141,7 @@ export async function discoveryState(ctx: Ctx, t: Row, db: Queryable = ctx.pool)
       phase: cfg.phase,
       ceoMode: cfg.ceoMode,
       playbook: cfg.playbook,
+      templateKey: cfg.templateKey,
       idea: cfg.idea,
       timeBoxMinutes: cfg.timeBoxMinutes,
       paused: cfg.paused,
