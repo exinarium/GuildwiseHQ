@@ -17,7 +17,7 @@ export const codexUsageModel = (model: string): string =>
  * record holds it (`gpt-6-sol`). Neither has a Claude price.
  */
 export const isCodexModel = (model: string): boolean =>
-  model.startsWith(CODEX_MODEL_PREFIX) || /^(gpt-|o\d|codex-)/i.test(model);
+  model.startsWith(CODEX_MODEL_PREFIX) || /^(gpt-\d|o\d|codex-)/i.test(model);
 
 /**
  * List prices in USD per million tokens by model id (prefix match, longest first). Empty on purpose: the prices of the models
