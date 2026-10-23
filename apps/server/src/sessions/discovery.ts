@@ -113,7 +113,9 @@ const sameEntry = (a: PendingEntry, b: PendingEntry): boolean =>
 
 /** Kinds whose consecutive entries are one facilitator turn (their details are joined). */
 const MERGEABLE = new Set(['answer', 'message', 'proposal', 'ceo_answered']);
-const isCancelled = (turn: Row): boolean => /^cancel/i.test(String(turn.error ?? ''));
+/** A failure that another try cannot fix: the owner asked for it, or the workstation cannot run the turn at all. */
+const isFinalFailure = (turn: Row): boolean =>
+  /^(cancel|runner_too_old|codex_role_refused)/i.test(String(turn.error ?? ''));
 
 /**
  * Discovery Studio orchestrator (docs/ARCHITECTURE.md section 38, phase B). The state lives in events and projections: the
@@ -705,7 +707,7 @@ export class DiscoveryService {
   }
 
   private async afterFacilitatorTurn(t: Row, turn: Row, status: 'done' | 'failed'): Promise<void> {
-    if (status === 'failed' && !isCancelled(turn)) {
+    if (status === 'failed' && !isFinalFailure(turn)) {
       // A failed turn is not lost: the facilitator is asked to pick up again once on its own, then the owner decides.
       const cur = parseDiscoveryConfig(
         ((await one(this.ctx.pool, 'SELECT * FROM threads WHERE id=$1', [t.id])) as Row).session_config,
