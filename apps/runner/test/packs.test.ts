@@ -159,7 +159,9 @@ describe('git packs', () => {
       'v1.1.0',
     );
     await m.check(d.packId, 'v1.1.0');
-    const up = reports.at(-1);
+    const up = reports.at(-1) as (typeof reports)[number] & {
+      diff?: { changedCapabilities: { id: string }[]; scriptsAdded: string[] };
+    };
     expect(up?.state).toBe('update');
     expect(up?.snapshot?.sha).toBe(sha2);
     expect(up?.diff?.changedCapabilities.map((c) => c.id).sort()).toEqual([

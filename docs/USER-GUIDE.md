@@ -1398,6 +1398,8 @@ Agents and cards always run on Claude Code. Discovery and Boardroom conversation
 
 Nothing in a pack can be used until you approve it. **Review** shows every capability, every file (script files are flagged) and what the importer left out; **Approve this commit** unlocks it. Scripts stay off unless you switch on **Enable scripts** for the pack, and they then run only inside the agents' sandbox. Agents are told that pack text is outside content: it can guide a task but cannot change their rules. If a file changes on a workstation after you approved, the pack is switched off there and the page says so. **Check for updates** fetches a newer tag or commit and shows a diff (added, removed and changed capabilities and files, new scripts highlighted); the pack only moves to it when you click **Accept**. A pack you approved stays approved at the accepted commit, with scripts off again if the update touched them. **Remove** deletes the pack.
 
+Agents can ask a persona for a second opinion with `aom delegate`: a short, read-only sub-task whose cost is counted in the session or shift that asked (facilitators and Chairs in Discovery and Boardroom, and card, question and BA-task agents).
+
 A project's own `.agents/skills`, `.claude/skills` and `.claude/agents` are picked up the first time an agent works in that repository and appear in the registry for that project.
 
 ## 5. For Members
