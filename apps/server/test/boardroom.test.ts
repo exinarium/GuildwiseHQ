@@ -138,6 +138,58 @@ const chairPicks = async (id: string, speakers: string[], extra: Record<string, 
   return { start, reply: a };
 };
 
+describe('privacy of a session on the live paths', () => {
+  it('holds the sealed first round back from live frames and events, and shows session payloads only to participants', async () => {
+    const admin = await w.t.userSession(`pad-${randomUUID().slice(0, 6)}@example.test`);
+    await w.t.addOrgMember(w.owner.id, admin.id, 'admin');
+    const mine = await Browser.open(w.baseUrl, w.owner.cookie, undefined, w.owner.id);
+    const other = await Browser.open(w.baseUrl, admin.cookie, undefined, w.owner.id);
+    await mine.hello();
+    await other.hello();
+    const st = await create();
+    const starts = [];
+    for (let i = 0; i < 3; i++) starts.push(await nextStart(st.threadId, role('speaker')));
+    const first = starts[0];
+    r.send('chat.delta', { chatId: first.chatId, threadId: st.threadId, text: 'SECRET-DELTA' });
+    await finish(first, 'SECRET-ANSWER');
+    await mine.until(() =>
+      mine.of('session.turn').some((m) => m.turnId === first.chatId && m.status === 'done'),
+    );
+    await mine.barrier();
+    await other.barrier();
+    // the owner sees that the turn is done, not what was said
+    expect(mine.of('chat.delta').filter((m) => m.turnId === first.chatId)).toEqual([]);
+    const done = mine.of('chat.done').find((m) => m.turnId === first.chatId);
+    expect(done?.message).toBeUndefined();
+    expect(JSON.stringify(mine.msgs)).not.toContain('SECRET-');
+    // an Owner/Admin who is not in the room gets the events without their payloads
+    const seenByOther = other
+      .events()
+      .filter((e) => JSON.stringify(e).includes(st.threadId) || e.streamId.includes(st.threadId));
+    expect(JSON.stringify(other.msgs)).not.toContain('SECRET-');
+    expect(JSON.stringify(other.msgs)).not.toContain('Should we launch a pilot?');
+    for (const e of other
+      .events()
+      .filter((e) => e.type === 'SessionTurnQueued' || e.type === 'ThreadMessagePosted'))
+      expect(e.payload).toEqual({});
+    void seenByOther;
+    // and cannot read the session over the API either
+    const res = await w.t.req('GET', `/api/threads/${st.threadId}/messages`, {
+      cookie: admin.cookie,
+      headers: { 'x-aom-org': w.owner.id },
+    });
+    expect(res.status).toBe(404);
+    // the answers are revealed together once every seat has answered; then they can be read
+    await finish(starts[1], 'Two');
+    await finish(starts[2], 'Three');
+    await until(async () => (await get(st.threadId)).config.revealedRound === 1);
+    const msgs = (await owner('GET', `/api/threads/${st.threadId}/messages`)).messages as any[];
+    expect(msgs.some((m) => m.body === 'SECRET-ANSWER')).toBe(true);
+    mine.close();
+    other.close();
+  });
+});
+
 describe('creating a boardroom and the independent first round', () => {
   it('queues every seat at once with only the topic and the brief, seals the answers, then reveals them together', async () => {
     const b = await Browser.open(w.baseUrl, w.owner.cookie);
@@ -437,12 +489,19 @@ describe('convergence, decision points and the end', () => {
       positions: ['Cost Hawk|later, after the numbers', 'User Advocate|now, with one customer'],
     });
     expect(dis.ok, dis.error).toBe(true);
+    // a name that is not in the room is refused
+    const stranger = await call(s1.chatId, 'board.disagreement', {
+      topic: 'Who is there',
+      positions: ['Mallory|x', 'Cost Hawk|y'],
+    });
+    expect(stranger.ok).toBe(false);
+    expect(stranger.error).toContain('not in the room');
     // the same topic is not recorded twice; one position is not a disagreement
     expect(
       (
         await call(s1.chatId, 'board.disagreement', {
           topic: 'pilot now or later',
-          positions: ['A|x', 'B|y'],
+          positions: ['Cost Hawk|x', 'User Advocate|y'],
         })
       ).result.message,
     ).toContain('already recorded');
@@ -761,6 +820,8 @@ describe('suggesting a cast and saved rooms', () => {
     ).toBe(true);
     expect((await call(turn.chatId, 'board.add', { column: 'ideas', text: 'x' })).ok).toBe(false);
     await finish(turn, 'Here is a cast.');
+    // the room is told when the turn ended; that follow-up runs after the turn row is already done
+    await until(async () => (await get(sug.threadId)).config.suggestState === 'done');
     const st = await get(sug.threadId);
     expect(st.config.suggestState).toBe('done');
     expect(st.suggestions.map((s: any) => s.name)).toEqual(['Cost Hawk', 'Security', 'Neighbour']);

@@ -1,3 +1,4 @@
+import { headerJson, oneLine, safeName } from '../sessions/untrusted.ts';
 import {
   DISCOVERY_PHASE_LABEL,
   DISCOVERY_PHASES,
@@ -150,7 +151,7 @@ export function renderPanel(notes: readonly PromptNote[]): string {
     out.push(`### ${PANEL_SECTION_LABEL[s]}`);
     out.push(
       list.length
-        ? list.map((n) => `- [${shortId(n.id)}] ${n.text} (${n.byName})`).join('\n')
+        ? list.map((n) => `- [${shortId(n.id)}] ${oneLine(n.text, 2000)} (${safeName(n.byName)})`).join('\n')
         : '- (none yet)',
     );
   }
@@ -165,10 +166,10 @@ export function renderQa(questions: readonly PromptQuestion[], max = 30): string
     ...(list.length > shown.length ? [`- (${list.length - shown.length} earlier questions not shown)`] : []),
     ...shown.map((q) => {
       if (q.status === 'open')
-        return `- [${q.phase}] OPEN: ${clip(q.question, 300)}${q.proposed ? ` (CEO proposes: ${clip(q.proposed.text, 200)})` : ''}`;
+        return `- [${q.phase}] OPEN: ${oneLine(q.question, 300)}${q.proposed ? ` (CEO proposes: ${oneLine(q.proposed.text, 200)})` : ''}`;
       if (q.status === 'proposed')
-        return `- [${q.phase}] ${clip(q.question, 300)} -> CEO's provisional answer (not yet reviewed by the owner): ${clip(q.proposed?.text ?? '', 400)}`;
-      return `- [${q.phase}] ${clip(q.question, 300)} -> ${clip(answerText(q), 500)}`;
+        return `- [${q.phase}] ${oneLine(q.question, 300)} -> CEO's provisional answer (not yet reviewed by the owner): ${oneLine(q.proposed?.text ?? '', 400)}`;
+      return `- [${q.phase}] ${oneLine(q.question, 300)} -> ${oneLine(answerText(q), 500)}`;
     }),
   ].join('\n');
 }
@@ -203,7 +204,7 @@ export function buildFacilitatorTurn(i: FacilitatorPromptInput): { instructions:
   const instructions = [i.persona.trim(), sessionProtocol()].filter(Boolean).join('\n\n');
   const phaseIdx = DISCOVERY_PHASES.indexOf(i.phase);
   const open = i.questions.find((q) => q.status === 'open');
-  const header = JSON.stringify({
+  const header = headerJson({
     role: 'facilitator',
     trigger: i.trigger.kind,
     phase: i.phase,
@@ -224,7 +225,7 @@ export function buildFacilitatorTurn(i: FacilitatorPromptInput): { instructions:
     TRIGGER_TEXT(i.trigger),
     '## The session',
     [
-      `Title: ${i.title}`,
+      `Title: ${oneLine(i.title, 200)}`,
       i.idea.trim()
         ? `Starting idea: ${clip(i.idea.trim(), 1500)}`
         : 'Starting idea: (none given: ask what the owner wants to explore)',
@@ -314,7 +315,7 @@ export function buildCeoAnswerTurn(i: CeoAnswerPromptInput): { instructions: str
   ]
     .filter(Boolean)
     .join('\n\n');
-  const header = JSON.stringify({
+  const header = headerJson({
     role: 'ceo_answer',
     questionId: i.question.id,
     options: i.question.options.map((o) => o.id),
@@ -325,12 +326,12 @@ export function buildCeoAnswerTurn(i: CeoAnswerPromptInput): { instructions: str
     `<!--discovery:${header}-->`,
     `Propose an answer to this question for the owner.`,
     '## The question',
-    `${i.question.question}${i.question.why ? `\n(The facilitator asks because: ${i.question.why})` : ''}`,
+    `${oneLine(i.question.question, 600)}${i.question.why ? `\n(The facilitator asks because: ${oneLine(i.question.why, 400)})` : ''}`,
     i.question.options.length
       ? `Options:\n${i.question.options.map((o) => `- ${o.id}: ${o.label}`).join('\n')}${i.question.allowFreeText ? '\n- or your own words' : ''}`
       : 'Free text answer.',
     '## The session',
-    `Title: ${i.title}\n${i.idea.trim() ? `Starting idea: ${clip(i.idea.trim(), 1500)}\n` : ''}Phase: ${DISCOVERY_PHASE_LABEL[i.phase]}`,
+    `Title: ${oneLine(i.title, 200)}\n${i.idea.trim() ? `Starting idea: ${clip(i.idea.trim(), 1500)}\n` : ''}Phase: ${DISCOVERY_PHASE_LABEL[i.phase]}`,
     i.mode === 'ceo_prep'
       ? 'You are pre-answering on your own before the owner joins; the owner will review each answer.'
       : 'The owner sees your proposal beside the question and may answer first.',

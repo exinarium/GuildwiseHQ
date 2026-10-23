@@ -13,6 +13,7 @@ import {
   boardShortId,
   parseBoardConfig,
   parsePosition,
+  participantSlug,
   renderBoardNotes,
   renderDisagreements,
   resolveHandle,
@@ -314,6 +315,23 @@ async function disagreement(ctx: Ctx, t: Row, turn: Row, params: Record<string, 
     ];
   const positions = p.data.positions.map(parsePosition);
   if (positions.some((x) => !x)) return [false, undefined, 'each --position is "<Name>|<their view>"'];
+  // `who` must be someone in the room: the stored name is the roster's, never free text from the model
+  const roster = await castOf(ctx.pool, t.id);
+  const canonical: Array<{ who: string; position: string }> = [];
+  for (const x of positions as Array<{ who: string; position: string }>) {
+    const key = x.who.trim().toLowerCase();
+    const hit = roster.find(
+      (c) =>
+        c.display_name.toLowerCase() === key || participantSlug(c.display_name) === participantSlug(x.who),
+    );
+    if (!hit)
+      return [
+        false,
+        undefined,
+        `"${x.who.slice(0, 60)}" is not in the room. Use one of: ${roster.map((c) => c.display_name).join(', ')}`,
+      ];
+    canonical.push({ who: hit.display_name, position: x.position });
+  }
   const dup = await one(
     ctx.pool,
     `SELECT 1 FROM board_disagreements WHERE thread_id=$1 AND lower(topic)=lower($2)`,
@@ -329,7 +347,7 @@ async function disagreement(ctx: Ctx, t: Row, turn: Row, params: Record<string, 
           threadId: t.id,
           disagreementId: randomUUID(),
           topic: p.data.topic,
-          positions: positions as Array<{ who: string; position: string }>,
+          positions: canonical,
           round: turn.round ?? null,
           by: authorOf(turn),
         },

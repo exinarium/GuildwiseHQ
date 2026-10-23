@@ -1,3 +1,4 @@
+import { headerJson, oneLine, safeName } from '../sessions/untrusted.ts';
 import {
   BOARD_COLUMN_LABEL,
   BOARD_COLUMNS,
@@ -170,7 +171,10 @@ export function renderBoardNotes(notes: readonly PromptBoardNote[], max = 40): s
     out.push(
       list.length
         ? list
-            .map((n) => `- [${boardShortId(n.id)}] ${n.text} (${n.byName}${n.votes ? `, +${n.votes}` : ''})`)
+            .map(
+              (n) =>
+                `- [${boardShortId(n.id)}] ${oneLine(n.text)} (${safeName(n.byName)}${n.votes ? `, +${n.votes}` : ''})`,
+            )
             .join('\n')
         : '- (none yet)',
     );
@@ -182,7 +186,8 @@ export function renderDisagreements(list: readonly PromptDisagreement[]): string
   if (!list.length) return '- (none recorded)';
   return list
     .map(
-      (d) => `- ${d.topic}\n${d.positions.map((p) => `  - ${p.who}: ${clip(p.position, 300)}`).join('\n')}`,
+      (d) =>
+        `- ${oneLine(d.topic, 200)}\n${d.positions.map((p) => `  - ${safeName(p.who)}: ${oneLine(p.position, 300)}`).join('\n')}`,
     )
     .join('\n');
 }
@@ -227,7 +232,7 @@ export function boardSpeakerProtocol(independent: boolean): string {
 /** The message of a speaker's turn. Their persona text comes in the instructions; the stance is repeated here every turn. */
 export function buildSpeakerTurn(i: SpeakerPromptInput): { message: string } {
   const a = roundAssignment(i.format, { round: i.round, kind: i.kind, index: i.speaker.index });
-  const header = JSON.stringify({
+  const header = headerJson({
     role: 'speaker',
     format: i.format,
     round: i.round,
@@ -243,7 +248,7 @@ export function buildSpeakerTurn(i: SpeakerPromptInput): { message: string } {
     `Speak as ${i.speaker.name} in a boardroom session with the owner.`,
     '## The boardroom',
     [
-      `Topic: ${clip(i.topic, 1200)}`,
+      `Topic: ${oneLine(i.topic, 1200)}`,
       `Format: ${BOARD_FORMAT_LABEL[i.format]} (${BOARD_FORMAT_HINT[i.format]})`,
       `Round ${i.round} of at most ${i.roundCap}: ${KIND_LABEL[i.kind]}.`,
     ].join('\n'),
@@ -253,8 +258,8 @@ export function buildSpeakerTurn(i: SpeakerPromptInput): { message: string } {
       i.speaker.stance ? `Your stance (hold it, whatever the others say): ${i.speaker.stance}` : '',
       a.label ? `Your role this round: ${a.label}.` : '',
       a.text,
-      i.instruction ? `The Chair asks: ${i.instruction}` : '',
-      i.reason ? `(The Chair picked you because: ${clip(i.reason, 300)})` : '',
+      i.instruction ? `The Chair asks: ${oneLine(i.instruction, 600)}` : '',
+      i.reason ? `(The Chair picked you because: ${oneLine(i.reason, 300)})` : '',
     ]
       .filter(Boolean)
       .join('\n'),
@@ -263,7 +268,7 @@ export function buildSpeakerTurn(i: SpeakerPromptInput): { message: string } {
   if (i.decisions.length)
     parts.push(
       '## Decisions the owner already took',
-      i.decisions.map((d) => `- ${clip(d.question, 200)} -> ${clip(d.answer ?? '', 300)}`).join('\n'),
+      i.decisions.map((d) => `- ${oneLine(d.question, 200)} -> ${oneLine(d.answer ?? '', 300)}`).join('\n'),
     );
   parts.push('## How to answer', boardSpeakerProtocol(i.kind === 'independent'));
   return { message: parts.join('\n\n') };
@@ -305,7 +310,7 @@ export function chairProtocol(): string {
 }
 
 export function buildChairTurn(i: ChairPromptInput): { message: string } {
-  const header = JSON.stringify({
+  const header = headerJson({
     role: 'chair',
     format: i.format,
     round: i.round,
@@ -322,7 +327,7 @@ export function buildChairTurn(i: ChairPromptInput): { message: string } {
     `Round ${i.round} is over (the room has at most ${i.roundCap}). Choose who speaks in round ${i.round + 1}.`,
     '## The boardroom',
     [
-      `Topic: ${clip(i.topic, 1200)}`,
+      `Topic: ${oneLine(i.topic, 1200)}`,
       `Format: ${BOARD_FORMAT_LABEL[i.format]} (${BOARD_FORMAT_HINT[i.format]})`,
     ].join('\n'),
     '## Roster (use the handle after --speaker)',
@@ -339,7 +344,7 @@ export function buildChairTurn(i: ChairPromptInput): { message: string } {
       ? `The owner @mentioned ${i.mentions.map((p) => `${p.name} (${p.slug})`).join(', ')}: they speak next. Include them.`
       : 'The owner mentioned nobody.',
     i.dissentNext
-      ? `You already flagged convergence${i.dissentNote ? ` ("${clip(i.dissentNote, 200)}")` : ''}: the next round is a dissent round. Pick the speakers best placed to dissent.`
+      ? `You already flagged convergence${i.dissentNote ? ` ("${oneLine(i.dissentNote, 200)}")` : ''}: the next round is a dissent round. Pick the speakers best placed to dissent.`
       : 'Read the last answers. If they agree too easily, call `aom board converge` before you pick.',
     i.retry ? 'Your last turn ended without a valid pick. Call `aom board next` now.' : '',
   ].filter(Boolean);
@@ -353,7 +358,7 @@ export function buildChairTurn(i: ChairPromptInput): { message: string } {
   if (i.decisions.length)
     parts.push(
       '## Decisions the owner took',
-      i.decisions.map((d) => `- ${clip(d.question, 200)} -> ${clip(d.answer ?? '', 300)}`).join('\n'),
+      i.decisions.map((d) => `- ${oneLine(d.question, 200)} -> ${oneLine(d.answer ?? '', 300)}`).join('\n'),
     );
   parts.push(chairProtocol());
   return { message: parts.join('\n\n') };
@@ -370,7 +375,7 @@ export interface CastPromptInput {
 }
 
 export function buildCastTurn(i: CastPromptInput): { message: string } {
-  const header = JSON.stringify({ role: 'cast', format: i.format, personas: i.personas.map((p) => p.key) });
+  const header = headerJson({ role: 'cast', format: i.format, personas: i.personas.map((p) => p.key) });
   const parts = [
     `<!--board:${header}-->`,
     'Propose the cast for this boardroom: three to six voices that will disagree usefully about the topic. Mix library personas and, where the topic needs a viewpoint nobody covers, personas cast from a one-line brief.',
@@ -411,7 +416,7 @@ export interface MinutesPromptInput {
 }
 
 export function buildMinutesTurn(i: MinutesPromptInput): { message: string } {
-  const header = JSON.stringify({
+  const header = headerJson({
     role: 'minutes',
     format: i.format,
     rounds: i.rounds,
@@ -430,7 +435,7 @@ export function buildMinutesTurn(i: MinutesPromptInput): { message: string } {
       '(what is still unanswered, as bullets)',
     ].join('\n'),
     'Be faithful: do not invent positions, do not resolve disagreements, do not add a recommendation of your own.',
-    `Topic: ${clip(i.topic, 1200)}`,
+    `Topic: ${oneLine(i.topic, 1200)}`,
     '## Participants',
     i.people.map((p) => `- ${p.name} (${p.seat}), ${p.spoken} turns`).join('\n'),
     '## Whiteboard',
