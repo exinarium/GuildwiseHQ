@@ -292,7 +292,7 @@ describe('codex adapter: a shift on a fake codex binary', () => {
     expect(c.argv).toContain('--skip-git-repo-check');
     expect(c.argv).toContain('--strict-config');
     expect(argAfter(c.argv, '--cd')).toBe(r.cwd);
-    expect(argAfter(c.argv, '--model')).toBe('gpt-6-sol');
+    expect(c.argv).toContain('--model=gpt-6-sol');
     expect(c.argv.at(-1)).toBe('-');
     expect(c.argv).not.toContain('--sandbox'); // a permission profile does not combine with it
     expect(c.argv).not.toContain('--dangerously-bypass-approvals-and-sandbox');
@@ -372,13 +372,13 @@ describe('codex adapter: a shift on a fake codex binary', () => {
       names.map((name) => ({ name, files: { 'SKILL.md': `---\nname: ${name}\ndescription: d\n---\n` } }));
     await drain(await r.adapter.start(shiftInput(r, { grantedSkills: skills(['one', 'two']) })));
     await drain(
-      await r.adapter.start(shiftInput(r, { resumeSessionId: 'thread-123', grantedSkills: skills(['two']) })),
+      await r.adapter.start(shiftInput(r, { resumeSessionId: '0190aaaa-1111-7222-8333-444455556666', grantedSkills: skills(['two']) })),
     );
     const calls = r.fake.calls();
     expect(calls[0]?.skills).toEqual(['one', 'two']);
     expect(calls[1]?.skills).toEqual(['two']);
     const argv = calls[1]?.argv ?? [];
-    expect(argv.slice(-3)).toEqual(['resume', 'thread-123', '-']);
+    expect(argv.slice(-4)).toEqual(['resume', '--', '0190aaaa-1111-7222-8333-444455556666', '-']);
     expect(argv.indexOf('--json')).toBeLessThan(argv.indexOf('resume'));
   });
 
@@ -603,7 +603,7 @@ function chatInput(r: Rig, over: Partial<ChatStartInput> = {}): ChatStartInput {
 describe('codex adapter: chats', () => {
   it('streams the reply as textstart + delta, resumes by thread id, and keeps the worktree read-only', async () => {
     const r = rig();
-    const events = await drain(await r.adapter.startChat(chatInput(r, { resumeSessionId: 'thread-9' })));
+    const events = await drain(await r.adapter.startChat(chatInput(r, { resumeSessionId: '0190bbbb-1111-7222-8333-444455556666' })));
     expect(events.map((e) => e.kind)).toEqual([
       'session',
       'thinking',
@@ -618,8 +618,8 @@ describe('codex adapter: chats', () => {
     ]);
     expect(events.find((e) => e.kind === 'delta')).toEqual({ kind: 'delta', text: 'all done' });
     const c = r.fake.calls()[0] as Recorded;
-    expect(c.argv.slice(-3)).toEqual(['resume', 'thread-9', '-']);
-    expect(argAfter(c.argv, '--model')).toBe('gpt-6-luna');
+    expect(c.argv.slice(-4)).toEqual(['resume', '--', '0190bbbb-1111-7222-8333-444455556666', '-']);
+    expect(c.argv).toContain('--model=gpt-6-luna');
     expect(c.stdin).toBe('What is in this repo?');
     expect(configs(c.argv).find((x) => x.startsWith('permissions.aom='))).toContain(
       '":workspace_roots" = {"." = "read"}',

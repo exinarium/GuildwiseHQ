@@ -209,6 +209,8 @@ export function codexFilesystem(i: CodexProfileInput): Record<string, unknown> {
   };
   fs[':minimal'] = 'read';
   for (const p of [i.sandbox.home, i.sandbox.tmp]) set(p, 'write');
+  // The user-scope skills folder is filled by the runner (unsandboxed) before each session: the shell reads it, never writes it.
+  set(join(i.sandbox.home, '.agents'), 'read');
   if (i.sandbox.cacheRoot) set(i.sandbox.cacheRoot, 'write');
   // The scratch folder: writable unless it IS the (read-only) working folder.
   if (!(i.readOnlyCwd && (inside(i.sandbox.scratch, i.cwd) || inside(i.cwd, i.sandbox.scratch))))
@@ -303,6 +305,9 @@ export interface CodexCommand {
 
 const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
 
+/** A Codex thread id is a UUID. */
+const CODEX_THREAD_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /**
  * The environment of the codex process: the allow-listed inherited variables, the session's variables, `CODEX_HOME` and, in
  * `api_key` mode, `CODEX_API_KEY`. Nothing else of the runner's environment (its tokens, `GH_TOKEN`, ssh agent, ...) reaches it.
@@ -356,12 +361,15 @@ export function buildCodexCommand(
     'never',
     '--cd',
     input.cwd,
-    '--model',
-    input.model,
+    // one argument, so a model name that starts with a dash can never be read as an option
+    `--model=${input.model}`,
   ];
   for (const [k, v] of overrides) args.push('-c', `${k}=${tomlValue(v)}`);
-  if (input.resumeSessionId) args.push('resume', input.resumeSessionId);
-  args.push('-');
+  // `--` ends the options: what follows is positional whatever it looks like. A resume id that is not a thread id (a UUID)
+  // is not passed on at all: the session starts fresh instead.
+  if (input.resumeSessionId && CODEX_THREAD_ID.test(input.resumeSessionId))
+    args.push('resume', '--', input.resumeSessionId, '-');
+  else args.push('--', '-');
   return {
     bin: cfg.bin,
     args,
@@ -728,7 +736,7 @@ export class CodexAdapter implements RuntimeAdapter {
     writeFileSync(join(home, 'rules', 'aom.rules'), codexRules(permissions, roleKey));
     // The USER-scope skills folder, in the agent's private HOME: exactly the granted skills, nothing from the owner or an
     // earlier shift, and nothing written into the card's worktree.
-    materializeSkills(codexSkillsDirOf(sandbox), grantedSkills ?? []);
+    materializeSkills(codexSkillsDirOf(sandbox), grantedSkills ?? [], sandbox.home);
     return home;
   }
 
@@ -736,7 +744,7 @@ export class CodexAdapter implements RuntimeAdapter {
     const x = this.host.extraArgs;
     if (x?.length)
       cmd.args.splice(
-        cmd.args.indexOf('resume') >= 0 ? cmd.args.indexOf('resume') : cmd.args.length - 1,
+        cmd.args.indexOf('resume') >= 0 ? cmd.args.indexOf('resume') : cmd.args.lastIndexOf('--'),
         0,
         ...x,
       );
@@ -774,7 +782,10 @@ export class CodexAdapter implements RuntimeAdapter {
             } catch {
               /* no file */
             }
-            this.authBad = { mtimeMs };
+            // The owner's file was refreshed (by another session) after this session took its copy: the copy was stale,
+            // not the login. The next session starts from the newer file, so the runtime stays available.
+            const stale = lastRefresh(this.loginFile()) > lastRefresh(join(codexHome, 'auth.json'));
+            if (!stale) this.authBad = { mtimeMs };
           } else if (code === 0 && parser.usage().outputTokens > 0) this.authBad = undefined;
           await this.harvestLogin(codexHome);
         } catch {
