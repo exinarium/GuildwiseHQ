@@ -7,6 +7,7 @@ import {
   type ChatSegment,
   capChatSegments,
   chatSegmentsText,
+  chatToolsFor,
   type IpcReportRequest,
   type IpcReportResponse,
   type IpcRpcRequest,
@@ -16,8 +17,10 @@ import {
   JIRA_SKILL_PATH,
   type ReadableFolder,
   renderChatInstructions,
+  renderDirectSystemPrompt,
   renderSessionTurnInstructions,
   type ServerToRunnerOf,
+  sessionToolsFor,
   summarizeCommandTexts,
   type ToolCounts,
   type Usage,
@@ -755,10 +758,21 @@ export class ChatManager {
     chat.sandbox = sandbox;
     chat.releaseTmp = holdAgentTmp(sandbox);
     const capIndex = this.deps.capabilities?.instructionsIndex(msg.agent.skills) ?? '';
-    await adapter.writeInstructions(
-      sandbox,
-      `${renderSessionTurnInstructions(spec, persona ?? '')}${capIndex ? `\n\n${capIndex}\n` : ''}`,
-    );
+    // A runtime with tools and no shell (the direct-model runtime) gets the same turn rendered for tools, with the call; the
+    // others read `CLAUDE.md` from their config dir.
+    const direct = adapter.instructionStyle === 'tools';
+    const instructions = direct
+      ? renderDirectSystemPrompt({
+          session: { spec, persona: persona ?? '' },
+          tools: sessionToolsFor(session.purpose),
+          capabilityIndex: capIndex,
+        })
+      : undefined;
+    if (!direct)
+      await adapter.writeInstructions(
+        sandbox,
+        `${renderSessionTurnInstructions(spec, persona ?? '')}${capIndex ? `\n\n${capIndex}\n` : ''}`,
+      );
     chat.token = this.deps.ipc.registerShift(this.handlerFor(chat));
     const tc = this.deps.toolchains?.resolve();
     const env = {
@@ -785,7 +799,58 @@ export class ChatManager {
         kind: session.kind,
         speakerKind: session.speaker.kind,
         ...(session.speaker.personaKey ? { personaKey: session.speaker.personaKey } : {}),
+        ...(session.purpose ? { purpose: session.purpose } : {}),
       },
+      ...(instructions ? { instructions } : {}),
+      logFile: `${paths.shiftLogs}/chat-${msg.chatId}.jsonl`,
+    });
+    if (chat.stopReason) void chat.session.stop(`chat.${chat.stopReason}`);
+    await this.finishTurn(chat, { fullPower: false });
+  }
+
+  /**
+   * A plain chat on the direct-model runtime: a conversation with the model, its memory kept by the runner, and only the registry
+   * and ledger tools. No repositories, no vault, no worktree, no shell: the instructions say so. The CEO's full-power owner turns
+   * are never run here (they need Claude Code): a CEO chat on a direct model is a restricted conversation.
+   */
+  private async runDirectChat(chat: ActiveChat, adapter: RuntimeAdapter): Promise<void> {
+    const { msg } = chat;
+    const { paths } = this.deps;
+    const caps = await adapter.capabilities();
+    if (!adapter.startChat || !caps.available)
+      return this.error(msg, `runtime ${msg.agent.runtime} is not available for chat on this workstation`);
+    const sandbox = await ensureSandbox(
+      paths,
+      msg.agent.agentId,
+      msg.agent.name,
+      await resolveCommitIdentity(paths.root),
+    );
+    chat.sandbox = sandbox;
+    chat.releaseTmp = holdAgentTmp(sandbox);
+    const capIndex = this.deps.capabilities?.instructionsIndex(msg.agent.skills) ?? '';
+    const instructions = renderDirectSystemPrompt({
+      chat: { agent: msg.agent, context: msg.context },
+      tools: chatToolsFor(),
+      capabilityIndex: capIndex,
+    });
+    chat.token = this.deps.ipc.registerShift(this.handlerFor(chat));
+    const env = {
+      ...sandboxEnv(sandbox),
+      AOM_IPC_URL: this.deps.ipc.url,
+      AOM_SHIFT_TOKEN: chat.token,
+      AOM_SHIFT_ID: msg.chatId,
+    };
+    chat.session = await adapter.startChat({
+      chatId: msg.chatId,
+      message: msg.ceoMode ? composeOwnerMessage(msg) : msg.message,
+      cwd: sandbox.scratch,
+      sandbox,
+      agent: msg.agent,
+      env,
+      readOnly: true,
+      context: msg.context,
+      instructions,
+      ...(msg.resumeSessionId ? { resumeSessionId: msg.resumeSessionId } : {}),
       logFile: `${paths.shiftLogs}/chat-${msg.chatId}.jsonl`,
     });
     if (chat.stopReason) void chat.session.stop(`chat.${chat.stopReason}`);
@@ -796,6 +861,8 @@ export class ChatManager {
     const { msg } = chat;
     const { paths } = this.deps;
     if (msg.session) return this.runSessionTurn(chat);
+    const chosen = this.deps.adapters.get(msg.agent.runtime);
+    if (chosen?.instructionStyle === 'tools') return this.runDirectChat(chat, chosen);
     const profile = selectChatProfile(msg, { fullPower: this.deps.ceoFullPower?.() ?? false });
     if (profile.kind === 'refuse') return this.error(msg, profile.error);
     if (profile.kind === 'full') return this.runOwnerTurn(chat, profile.mode);

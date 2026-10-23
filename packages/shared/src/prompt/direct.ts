@@ -1,7 +1,7 @@
+import type { AgentRuntimeSpec, ChatContext } from '../protocol/runner.ts';
+import { renderDirectTurnInstructions, type SessionTurnSpec } from '../sessions/index.ts';
 import type { SessionToolDef } from '../sessions/tools.ts';
 import { renderToolMapping } from '../sessions/tools.ts';
-import { renderDirectTurnInstructions, type SessionTurnSpec } from '../sessions/index.ts';
-import type { AgentRuntimeSpec, ChatContext } from '../protocol/runner.ts';
 import { renderBindingStandingOrders } from './standing-orders.ts';
 
 /**

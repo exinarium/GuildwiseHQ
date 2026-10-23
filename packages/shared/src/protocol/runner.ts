@@ -66,8 +66,12 @@ import {
   IntegrationsPolicySchema,
   MAX_INTEGRATION_STATUSES,
 } from '../integrations/schema.ts';
-import { ProviderKeyClearPayloadSchema, ProviderKeySetPayloadSchema, ReportedProviderSchema } from '../models/direct.ts';
 import { MAX_MCP_SERVERS, McpServerInfoSchema } from '../mcp/index.ts';
+import {
+  ProviderKeyClearPayloadSchema,
+  ProviderKeySetPayloadSchema,
+  ReportedProviderSchema,
+} from '../models/direct.ts';
 import { BaTaskShiftSchema, BranchCheckMergedPayloadSchema } from '../phases/index.ts';
 import { CommitAsSchema, RepoCreatePayloadSchema, RepoIdentityFactSchema } from '../repo/index.ts';
 import { AgentPermissionsSchema, Seniority } from '../roles/schema.ts';

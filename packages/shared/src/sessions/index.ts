@@ -207,7 +207,11 @@ export function renderSessionTurnInstructions(spec: SessionTurnSpec, persona: st
  * roster sections are the ones above, and the closing rules say that `aom ...` in the instructions means the matching tool.
  * `toolMapping` is `renderToolMapping(tools)`; empty: the turn has no tools.
  */
-export function renderDirectTurnInstructions(spec: SessionTurnSpec, persona: string, toolMapping: string): string {
+export function renderDirectTurnInstructions(
+  spec: SessionTurnSpec,
+  persona: string,
+  toolMapping: string,
+): string {
   const out = renderSessionTurnHead(spec, persona);
   out.push('# How to answer');
   const rules = [

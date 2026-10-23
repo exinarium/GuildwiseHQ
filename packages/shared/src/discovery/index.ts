@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { ModelChoiceSchema } from '../models/choices.ts';
 import { DocumentKindSchema, DocumentStatusSchema } from '../documents/index.ts';
+import { ModelChoiceSchema } from '../models/choices.ts';
 import { SessionTurnDtoSchema } from '../sessions/index.ts';
 
 /**

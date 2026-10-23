@@ -56,7 +56,12 @@ export interface ModelChoiceGroup {
 
 /** The pickers' option for a model a provider reports: the model id carries the provider (`openai:gpt-5`). */
 function reportedOption(p: ReportedProvider, m: ReportedProvider['models'][number]): ModelOption {
-  return { id: directModelId(p.id, m.id), label: m.label, effortLevels: [], ...(m.tier ? { tier: m.tier } : {}) };
+  return {
+    id: directModelId(p.id, m.id),
+    label: m.label,
+    effortLevels: [],
+    ...(m.tier ? { tier: m.tier } : {}),
+  };
 }
 
 /**

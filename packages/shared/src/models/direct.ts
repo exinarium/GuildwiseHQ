@@ -129,7 +129,8 @@ export const DIRECT_PROVIDERS: readonly DirectProviderDef[] = [
     keyLabel: 'API key (if the endpoint needs one)',
     needsBaseUrl: true,
     keyOptional: true,
-    baseUrlHint: 'For example https://openrouter.ai/api/v1, http://localhost:11434/v1 (Ollama) or your LiteLLM URL',
+    baseUrlHint:
+      'For example https://openrouter.ai/api/v1, http://localhost:11434/v1 (Ollama) or your LiteLLM URL',
     dataNote:
       'Calls go from this workstation straight to the endpoint you enter (OpenRouter, Ollama, LiteLLM, LM Studio, ...). That endpoint and whatever it forwards to are outside Guildwise.',
     models: [],
@@ -211,7 +212,10 @@ export const ProviderKeySetPayloadSchema = z.object({
 });
 export type ProviderKeySetPayload = z.infer<typeof ProviderKeySetPayloadSchema>;
 export const ProviderKeyClearPayloadSchema = z.object({ provider: DirectProviderIdSchema });
-export const ProviderKeyResultSchema = z.object({ stored: z.boolean(), error: z.string().max(500).optional() });
+export const ProviderKeyResultSchema = z.object({
+  stored: z.boolean(),
+  error: z.string().max(500).optional(),
+});
 export type ProviderKeyResult = z.infer<typeof ProviderKeyResultSchema>;
 
 /** `PUT /api/workstations/:id/providers/:provider`: the browser's sealed key (same shape as the command payload). */
@@ -228,7 +232,12 @@ export const WorkstationProvidersResponseSchema = z.object({
   providers: z.array(ReportedProviderSchema),
   /** The last `provider.key.set` or `.clear` answer of the runner in this server process (transient). */
   lastResult: z
-    .object({ provider: DirectProviderIdSchema, stored: z.boolean(), error: z.string().optional(), at: z.iso.datetime() })
+    .object({
+      provider: DirectProviderIdSchema,
+      stored: z.boolean(),
+      error: z.string().optional(),
+      at: z.iso.datetime(),
+    })
     .nullable(),
 });
 export type WorkstationProvidersResponse = z.infer<typeof WorkstationProvidersResponseSchema>;

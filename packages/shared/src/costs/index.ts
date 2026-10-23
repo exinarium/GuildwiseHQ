@@ -122,7 +122,9 @@ function directPriceOf(
   return directPrice(d.provider, d.model, (m) => {
     const lower = m.toLowerCase();
     const hit = table.find((x) => x.match !== '' && lower.includes(x.match));
-    return hit ? { input: hit.input, output: hit.output, cacheRead: hit.cacheRead, cacheWrite: hit.cacheWrite } : null;
+    return hit
+      ? { input: hit.input, output: hit.output, cacheRead: hit.cacheRead, cacheWrite: hit.cacheWrite }
+      : null;
   });
 }
 
@@ -156,13 +158,14 @@ export function costUsdMicros(
   const direct = directPriceOf(model, table);
   if (direct !== undefined) {
     if (direct === null) return 0; // unknown price: zero here, flagged by `isCostUnknown` (never silently priced as Sonnet)
-    const c = (price: number) => Math.round(price * 100);
+    // Thousandths of a micro-USD: cache prices like $0.025 per million stay exact.
+    const c = (price: number) => Math.round(price * 1000);
     const total =
       usage.inputTokens * c(direct.input) +
       usage.outputTokens * c(direct.output) +
       (usage.cacheReadTokens ?? 0) * c(direct.cacheRead ?? direct.input) +
       (usage.cacheWriteTokens ?? 0) * c(direct.cacheWrite ?? direct.input);
-    return Math.floor((total + 50) / 100);
+    return Math.floor((total + 500) / 1000);
   }
   const p = priceFor(model, table);
   // Integer arithmetic in hundredths of a micro-USD so the result is exact (and equals the SQL backfill's numeric math).

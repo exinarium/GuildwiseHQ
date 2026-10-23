@@ -1,4 +1,4 @@
-import type { AgentRuntimeSpec, ChatContext, ClaudeAccountInfo, Usage } from '@aom/shared';
+import type { AgentRuntimeSpec, ChatContext, ClaudeAccountInfo, ReportedProvider, Usage } from '@aom/shared';
 import type { Sandbox } from '../sandbox/sandbox.ts';
 
 export interface RuntimeCapabilities {
@@ -19,6 +19,8 @@ export interface RuntimeCapabilities {
   limitedLabel?: string;
   /** Claude Code: every account of this workstation (main first) with its own login and usage state. */
   accounts?: ClaudeAccountInfo[];
+  /** Direct-model: the providers that have a key (or endpoint) on this workstation, with their models. Names only. */
+  providers?: ReportedProvider[];
 }
 
 /** May a shift run on this account now? (`ClaudeCodeAdapter.accountGate`) */
@@ -160,7 +162,18 @@ export interface ChatStartInput {
   /** The Claude account of this chat (absent: `main`; chats always use main today). */
   account?: string;
   /** A turn of a discovery or boardroom session: the mock runtime plays a facilitator or the CEO from the turn's message. */
-  sessionTurn?: { kind: 'discovery' | 'boardroom'; speakerKind: 'agent' | 'persona'; personaKey?: string };
+  sessionTurn?: {
+    kind: 'discovery' | 'boardroom';
+    speakerKind: 'agent' | 'persona';
+    personaKey?: string;
+    /** What the turn is for (`facilitator`, `board_speaker`, ...): the direct-model runtime offers the tools it allows. */
+    purpose?: string;
+  };
+  /**
+   * The rendered instructions, for a runtime that takes them with the call instead of from a file in its config dir
+   * (`instructionStyle 'tools'`: the direct-model runtime). Claude Code and the mock read the file `writeInstructions` wrote.
+   */
+  instructions?: string;
   logFile?: string;
 }
 
@@ -187,6 +200,11 @@ export interface OwnerTurnInput {
 
 export interface RuntimeAdapter {
   readonly id: string;
+  /**
+   * How the runtime acts: `cli` (default) runs `aom ...` commands in a shell; `tools` has no shell and calls typed tools
+   * (the direct-model runtime), so its instructions are rendered for tools and passed with `startChat` (`instructions`).
+   */
+  readonly instructionStyle?: 'cli' | 'tools';
   /** Probed at start and every 10 min. */
   capabilities(): Promise<RuntimeCapabilities>;
   /** Where this runtime reads its instructions (Claude Code: `<configDir>/CLAUDE.md`). */

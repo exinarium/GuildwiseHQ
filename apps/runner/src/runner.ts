@@ -14,6 +14,7 @@ import {
   DEPLOY_MOVE_CAPABILITY,
   DEPLOY_SETUP_CAPABILITY,
   DEPLOY_SETUP_V2_CAPABILITY,
+  DIRECT_MODEL_CAPABILITY,
   defaultHost,
   type EnvEnsurePayload,
   INTEGRATIONS_VERSION,
@@ -61,6 +62,7 @@ import { DeployPreparer } from './delivery/prepare.ts';
 import { runDeployProbe } from './delivery/probe.ts';
 import { DeliveryService } from './delivery/service.ts';
 import { verifyRights } from './devops/rights.ts';
+import { ProviderStore } from './direct/store.ts';
 import { ExternalAdapters } from './external/index.ts';
 import { resolveJira } from './external/jira-store.ts';
 import { OutboundExecutor } from './external/outbound.ts';
@@ -260,6 +262,8 @@ export class Runner {
   /** Test accounts for deploy targets (docs/design/run-and-integration-tests.md D11): ciphertext only on disk. */
   readonly targetSecrets: TargetSecrets;
   readonly deploySecrets: DeploySecrets;
+  /** Provider keys of the direct-model runtime (sealed in the browser, ciphertext on disk, redacted everywhere). */
+  readonly providers: ProviderStore;
   readonly delivery: DeliveryService;
   readonly deployExec: DeployExecutor;
   /** Dedicated deploy keys, guided connect and server preparation (design v2): keys live in `<data dir>/keys/deploy`. */
@@ -359,6 +363,7 @@ export class Runner {
       keys: this.keys,
     });
     this.deploySecrets = new DeploySecrets({ secretsDir: this.paths.secrets, keys: this.keys });
+    this.providers = new ProviderStore({ file: join(this.paths.secrets, 'providers.json'), keys: this.keys });
     this.serverLimitFile = join(this.paths.root, 'server-limits.json');
     // Until the server says otherwise: the owner's saved choice, else this runner's own configured value.
     this.maxConcurrent =
@@ -412,6 +417,7 @@ export class Runner {
         mainCredential,
         this.claudeUsage,
         this.claudeAccounts,
+        { store: this.providers },
       );
     this.integrations = new IntegrationService({
       workstationId: opts.config.workstationId,
@@ -998,6 +1004,7 @@ export class Runner {
         ...(c.limitedUntil ? { limitedUntil: c.limitedUntil } : {}),
         ...(c.limitedLabel ? { limitedLabel: c.limitedLabel } : {}),
         ...(c.accounts ? { accounts: c.accounts } : {}),
+        ...(c.providers ? { providers: c.providers } : {}),
       });
     }
     return out;
@@ -1127,6 +1134,8 @@ export class Runner {
         SESSION_VERBS_CAPABILITY,
         // A boardroom turn may call the `aom board ...` verbs (whiteboard notes, the Chair's speaker choice, the minutes).
         BOARD_VERBS_CAPABILITY,
+        // The direct-model runtime (Vercel AI SDK, provider keys kept here): session turns and chats on OpenAI, Gemini, Anthropic's API or an OpenAI-compatible endpoint.
+        DIRECT_MODEL_CAPABILITY,
         // The local opt-in (`aom-runner ceo full-power on`), read fresh: the server shows "Full power is off" without it.
         ...(this.freshConfig().ceo.fullPower ? [CEO_FULL_POWER_CAPABILITY] : []),
       ],
@@ -1746,6 +1755,15 @@ export class Runner {
       } else if (command === 'env.secret.set') {
         // Ciphertext in, a fact out: the value is never in an answer, a log line or an event.
         done(true, this.targetSecrets.set(CommandPayloadSchemas['env.secret.set'].parse(payload)));
+      } else if (command === 'provider.key.set') {
+        // Ciphertext in, a fact out (like env.secret.set): the key is never in an answer, a log line or an event.
+        const r = this.providers.set(CommandPayloadSchemas['provider.key.set'].parse(payload));
+        void this.reportRuntimes();
+        done(true, r);
+      } else if (command === 'provider.key.clear') {
+        this.providers.clear(CommandPayloadSchemas['provider.key.clear'].parse(payload).provider);
+        void this.reportRuntimes();
+        done(true, { cleared: true });
       } else if (command === 'env.secret.clear') {
         const p = CommandPayloadSchemas['env.secret.clear'].parse(payload);
         this.targetSecrets.clear(p.targetId, p.name);

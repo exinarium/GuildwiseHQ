@@ -60,7 +60,11 @@ export interface SessionToolDef {
   fixed?: Record<string, unknown>;
 }
 
-const NoteIdSchema = z.string().min(4).max(40).describe('The short id of the note, as `session_show` lists it.');
+const NoteIdSchema = z
+  .string()
+  .min(4)
+  .max(40)
+  .describe('The short id of the note, as `session_show` lists it.');
 
 export const SESSION_TOOLS: readonly SessionToolDef[] = [
   {
@@ -208,7 +212,8 @@ export const SESSION_TOOLS: readonly SessionToolDef[] = [
     rpc: 'board.converge',
     verb: 'converge',
     family: 'board',
-    description: 'Chair only: flag that the board agrees too early, so the next round steel-mans the other side.',
+    description:
+      'Chair only: flag that the board agrees too early, so the next round steel-mans the other side.',
     input: BoardConvergeParamsSchema,
   },
   {
@@ -226,7 +231,8 @@ export const SESSION_TOOLS: readonly SessionToolDef[] = [
     rpc: 'board.cast',
     verb: 'cast',
     family: 'board',
-    description: 'Suggest one voice for the cast: a library persona (`persona`) or a new one (`name` and `brief`).',
+    description:
+      'Suggest one voice for the cast: a library persona (`persona`) or a new one (`name` and `brief`).',
     input: BoardCastParamsSchema,
   },
   {
@@ -275,7 +281,9 @@ export const COMMON_TOOLS: readonly SessionToolDef[] = [
  */
 export function sessionToolsFor(purpose: string | undefined): SessionToolDef[] {
   const verbs = purpose ? (SESSION_PURPOSE_VERBS[purpose] ?? []) : [];
-  const own = SESSION_TOOLS.filter((t) => t.verb && t.family && verbs.includes(t.verb) && familyMatches(t, purpose));
+  const own = SESSION_TOOLS.filter(
+    (t) => t.verb && t.family && verbs.includes(t.verb) && familyMatches(t, purpose),
+  );
   return [...own, ...COMMON_TOOLS];
 }
 
