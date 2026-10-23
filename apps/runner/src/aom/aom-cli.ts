@@ -1984,9 +1984,20 @@ const VERBS: Record<string, Verb> = {
   },
   /** The `Skill` tool allow-list (a Claude Code PreToolUse hook, see capabilities/skill-guard.ts). Agents never call it. */
   'skill-guard': async (ctx) => {
-    const r = runSkillGuard({ stdin: ctx.readFile('-'), cfg: loadSkillGuardConfig(ctx.env.AOM_SKILL_GUARD) });
-    if (r.stdout) ctx.io.out(r.stdout);
-    return r.code;
+    // Claude Code treats every hook exit code but 2 as "the hook failed, carry on": an error here must block, not allow.
+    try {
+      const r = runSkillGuard({
+        stdin: ctx.readFile('-'),
+        cfg: loadSkillGuardConfig(ctx.env.AOM_SKILL_GUARD),
+      });
+      if (r.stdout) ctx.io.out(r.stdout);
+      return r.code;
+    } catch (err) {
+      ctx.io.err(
+        `skill guard failed, the skill call is refused: ${err instanceof Error ? err.message : String(err)}\n`,
+      );
+      return 2;
+    }
   },
   'devops-done': async (ctx, p) => {
     const summary = textFlag(ctx, p, 'summary', true) as string;
@@ -2686,7 +2697,8 @@ export async function runAom(argv: string[], ctx: AomContext): Promise<number> {
       return 2;
     }
     ctx.io.err(`aom ${verb}: ${err instanceof Error ? err.message : String(err)}\n`);
-    return 1;
+    // a guard hook that fails must block (exit 2), never let the call through
+    return verb === 'skill-guard' ? 2 : 1;
   }
 }
 
@@ -2783,5 +2795,8 @@ if (isEntry) {
     io: { out: (s) => process.stdout.write(s), err: (s) => process.stderr.write(s) },
     fetch: process.env.AOM_IPC_SOCKET ? socketFetch(process.env.AOM_IPC_SOCKET, fetch) : fetch,
     readFile: confinedReader(process.env, process.cwd()),
-  }).then((code) => process.exit(code));
+  }).then(
+    (code) => process.exit(process.argv[2] === 'skill-guard' && code !== 0 ? 2 : code),
+    () => process.exit(process.argv[2] === 'skill-guard' ? 2 : 1),
+  );
 }

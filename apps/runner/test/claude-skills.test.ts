@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { BUILTIN_ROLES } from '@aom/shared';
@@ -110,6 +111,11 @@ describe('Claude Code with granted skills', () => {
       const settings = JSON.parse(readFileSync(join(sandbox.configDir, 'settings.json'), 'utf8'));
       expect(settings.hooks.PreToolUse.some((h: { matcher: string }) => h.matcher === 'Skill')).toBe(true);
       expect(settings.permissions.deny).toContain('Skill(anthropic-skills:*)');
+      // a guard that cannot run (aom missing, a crash) must refuse the call: Claude Code only blocks on exit 2
+      const hook = settings.hooks.PreToolUse.find((h: { matcher: string }) => h.matcher === 'Skill').hooks[0];
+      expect(hook.command).toMatch(/ \|\| exit 2$/);
+      // the same shape with the binary missing really exits 2
+      expect(spawnSync('sh', ['-c', '/no/such/aom skill-guard || exit 2']).status).toBe(2);
       expect(JSON.parse(readFileSync(join(sandbox.configDir, 'skill-guard.json'), 'utf8'))).toEqual({
         allowed: ['bmad-dev-story'],
       });

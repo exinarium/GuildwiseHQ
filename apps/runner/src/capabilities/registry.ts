@@ -1,5 +1,5 @@
-import { lstatSync, readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { lstatSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
+import { isAbsolute, join, relative } from 'node:path';
 import {
   builtinCapabilities,
   CAPABILITY_MAX_FILE_BYTES,
@@ -18,6 +18,7 @@ import {
   packLabel,
   renderCapabilityIndex,
   renderPackText,
+  renderProjectRepoText,
   resolveCapabilityRef,
 } from '@aom/shared';
 import { type Logger, nullLogger } from '../log.ts';
@@ -35,8 +36,37 @@ const MAX_DEPTH = 6;
  */
 export function readCapabilityTree(orgDir: string): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const r of ROOTS) Object.assign(out, walkTextTree(join(orgDir, r), r));
+  // the organization folder itself is a link in a hostile clone? then nothing of it is read
+  try {
+    if (lstatSync(orgDir).isSymbolicLink()) return out;
+  } catch {
+    return out;
+  }
+  for (const r of ROOTS) {
+    const dir = realFolder(orgDir, r);
+    if (dir) Object.assign(out, walkTextTree(dir, r));
+  }
   return out;
+}
+
+/**
+ * `<root>/<folder>` when every part of `folder` below `root` is a real directory (not a link) and the result really lies inside
+ * `root`; else undefined. A checkout is somebody else's content: a `.claude` that is a link to `~/.ssh` must not be read.
+ */
+function realFolder(root: string, folder: string): string | undefined {
+  let cur = root;
+  try {
+    for (const part of folder.split('/')) {
+      cur = join(cur, part);
+      const st = lstatSync(cur);
+      if (st.isSymbolicLink() || !st.isDirectory()) return undefined;
+    }
+    const rel = relative(realpathSync(root), realpathSync(cur));
+    if (rel.split(/[\\/]/)[0] === '..' || isAbsolute(rel)) return undefined;
+  } catch {
+    return undefined;
+  }
+  return cur;
 }
 
 /** The text files below `root`, keyed `<prefix>/<relative path>`; same rules as `readCapabilityTree`. */
@@ -99,6 +129,8 @@ export class CapabilityRegistry {
   private lastReport: IndexResult | undefined;
   /** Capabilities of project checkouts (`.agents/skills`, `.claude/skills`, `.claude/agents`), by project id. */
   private projectRepo = new Map<string, ParsedCapability[]>();
+  /** The entries read from a project's checkout: anyone with push access wrote them, so their text is fenced. */
+  private readonly fromRepo = new WeakSet<ParsedCapability>();
   private projectDigest = new Map<string, string>();
   private readonly log: Logger;
   private packs: PackManager | undefined;
@@ -155,6 +187,7 @@ export class CapabilityRegistry {
     const r = indexCapabilityTree(tree);
     issues.push(...r.issues);
     this.projectRepo.set(projectId, r.entries);
+    for (const e of r.entries) this.fromRepo.add(e);
     const items = r.entries.map((e) => ({
       ...capabilityMeta(e, 'project-repo'),
       source: 'project-repo' as const,
@@ -207,8 +240,10 @@ export class CapabilityRegistry {
 
   /** The text of a pack capability as a model sees it: labelled and fenced as outside content. */
   private served(e: ParsedCapability, text: string): string {
-    if (!e.pack) return text;
-    return renderPackText(packLabel(e.pack.name, e.pack.sha ?? 'unpinned', `${e.kind}:${e.key}`), text);
+    if (e.pack)
+      return renderPackText(packLabel(e.pack.name, e.pack.sha ?? 'unpinned', `${e.kind}:${e.key}`), text);
+    if (this.fromRepo.has(e)) return renderProjectRepoText(`project repository: ${e.kind}:${e.key}`, text);
+    return text;
   }
 
   /** The persona text for a turn that did not carry it (a persona in the vault, a project repo or a pack). */
@@ -219,7 +254,7 @@ export class CapabilityRegistry {
   ): Extract<ParsedCapability, { kind: 'persona' }> | undefined {
     const e = this.entries(projectId, orgId).find((x) => x.kind === 'persona' && x.key === key);
     if (e?.kind !== 'persona') return undefined;
-    return e.pack ? { ...e, body: this.served(e, e.body) } : e;
+    return e.pack || this.fromRepo.has(e) ? { ...e, body: this.served(e, e.body) } : e;
   }
 
   /**
@@ -299,9 +334,11 @@ export class CapabilityRegistry {
       const files = { ...e.files };
       files['SKILL.md'] = materialisedSkillMarkdown(
         name,
-        packLabel(e.pack?.name ?? '', e.pack?.sha ?? '', `skill:${e.key}`),
+        e.pack
+          ? packLabel(e.pack.name, e.pack.sha ?? '', `skill:${e.key}`)
+          : `project repository: skill:${e.key}`,
         e.files['SKILL.md'] ?? '',
-        { wrap: !!e.pack },
+        this.fromRepo.has(e) ? { wrap: true, render: renderProjectRepoText } : { wrap: !!e.pack },
       );
       out.push({ name, files });
     }
@@ -318,7 +355,10 @@ export interface ProjectIndexResult {
 /** Reads text files below the given folders of a checkout into a path -> text map (paths relative to `root`). */
 export function readCapabilityTreeAt(root: string, folders: readonly string[]): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const f of folders) Object.assign(out, walkTextTree(join(root, f), f));
+  for (const f of folders) {
+    const dir = realFolder(root, f);
+    if (dir) Object.assign(out, walkTextTree(dir, f));
+  }
   return out;
 }
 

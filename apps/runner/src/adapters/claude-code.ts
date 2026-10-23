@@ -638,15 +638,44 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     const file = join(dir, 'skill-guard.json');
     writeFileSync(file, `${JSON.stringify({ allowed: written })}\n`, { mode: 0o600 });
     const quote = (w: string) => `'${w.replace(/'/g, `'\\''`)}'`;
-    const command = `AOM_SKILL_GUARD=${quote(file)} ${[...selfCommand('aom'), 'skill-guard'].map(quote).join(' ')}`;
+    // Claude Code lets the call through when a hook fails in any way but exit 2 (the command is not found: 127, it crashed). The
+    // `|| exit 2` makes every failure of the guard, a missing `aom` included, a refusal. (A hook that is killed at its time
+    // limit still counts as failed-open; the deny rules below are the second line for names we can list.)
+    const command = `AOM_SKILL_GUARD=${quote(file)} ${[...selfCommand('aom'), 'skill-guard'].map(quote).join(' ')} || exit 2`;
     settings.hooks = {
       PreToolUse: [
         ...(settings.hooks?.PreToolUse ?? []),
         { matcher: 'Skill', hooks: [{ type: 'command' as const, command, timeout: 10 }] },
       ],
     };
-    settings.permissions.deny = [...new Set([...settings.permissions.deny, 'Skill(anthropic-skills:*)'])];
+    settings.permissions.deny = [
+      ...new Set([
+        ...settings.permissions.deny,
+        'Skill(anthropic-skills:*)',
+        // every skill the accounts on this workstation have of their own and the agent was not granted
+        ...this.accountSkillNames()
+          .filter((n) => !written.includes(n))
+          .map((n) => `Skill(${n})`),
+      ]),
+    ];
     return { ...input, grantedSkills: kept };
+  }
+
+  /** Names of the skills in the accounts' own skills folders (`<config dir>/skills/*`): what can be listed is denied outright. */
+  private accountSkillNames(): string[] {
+    const dirs = [
+      join(homedir(), '.claude', 'skills'),
+      ...this.registry.list().flatMap((a) => (a.configDir ? [join(a.configDir, 'skills')] : [])),
+    ];
+    const names = new Set<string>();
+    for (const d of dirs) {
+      try {
+        for (const n of readdirSync(d)) if (/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(n)) names.add(n);
+      } catch {
+        // no such folder
+      }
+    }
+    return [...names].sort();
   }
 
   async writeInstructions(sandbox: { configDir: string }, markdown: string): Promise<void> {
