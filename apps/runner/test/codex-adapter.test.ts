@@ -372,7 +372,12 @@ describe('codex adapter: a shift on a fake codex binary', () => {
       names.map((name) => ({ name, files: { 'SKILL.md': `---\nname: ${name}\ndescription: d\n---\n` } }));
     await drain(await r.adapter.start(shiftInput(r, { grantedSkills: skills(['one', 'two']) })));
     await drain(
-      await r.adapter.start(shiftInput(r, { resumeSessionId: '0190aaaa-1111-7222-8333-444455556666', grantedSkills: skills(['two']) })),
+      await r.adapter.start(
+        shiftInput(r, {
+          resumeSessionId: '0190aaaa-1111-7222-8333-444455556666',
+          grantedSkills: skills(['two']),
+        }),
+      ),
     );
     const calls = r.fake.calls();
     expect(calls[0]?.skills).toEqual(['one', 'two']);
@@ -603,7 +608,9 @@ function chatInput(r: Rig, over: Partial<ChatStartInput> = {}): ChatStartInput {
 describe('codex adapter: chats', () => {
   it('streams the reply as textstart + delta, resumes by thread id, and keeps the worktree read-only', async () => {
     const r = rig();
-    const events = await drain(await r.adapter.startChat(chatInput(r, { resumeSessionId: '0190bbbb-1111-7222-8333-444455556666' })));
+    const events = await drain(
+      await r.adapter.startChat(chatInput(r, { resumeSessionId: '0190bbbb-1111-7222-8333-444455556666' })),
+    );
     expect(events.map((e) => e.kind)).toEqual([
       'session',
       'thinking',
