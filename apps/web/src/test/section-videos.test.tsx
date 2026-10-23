@@ -60,9 +60,9 @@ afterEach(() => {
 });
 
 describe('the video registry', () => {
-  it('has 25 videos: Getting started and one per section, with unique kebab-case slugs', () => {
+  it('has 27 videos: Getting started and one per section, with unique kebab-case slugs', () => {
     const slugs = Object.keys(SECTION_VIDEOS);
-    expect(slugs).toHaveLength(25);
+    expect(slugs).toHaveLength(27);
     for (const s of slugs) expect(s).toMatch(/^[a-z0-9]+(-[a-z0-9]+)*$/);
   });
 
@@ -104,11 +104,14 @@ describe('the video registry', () => {
     }
   });
 
-  it('publishes all 25 videos, each with its four files', () => {
-    for (const [slug, e] of Object.entries(SECTION_VIDEOS)) expect(e.published, slug).toBe(true);
+  it('publishes every recorded video, each with its four files (Discovery and Documents wait for their recording)', () => {
+    const waiting = new Set(['discovery', 'documents']);
+    for (const [slug, e] of Object.entries(SECTION_VIDEOS))
+      expect(e.published, slug).toBe(!waiting.has(slug));
   });
 
   it('finds a video by nav id, article and path for every section', () => {
+    publish('discovery', 'documents'); // not recorded yet: published for this check only (restored after each test)
     for (const [slug, e] of Object.entries(SECTION_VIDEOS)) {
       if (slug === GETTING_STARTED_SLUG) continue; // its own player on Help and in the tour (tour.test.tsx)
       if (e.nav) expect(videoForNav(e.nav)?.slug, slug).toBe(slug);
@@ -244,6 +247,7 @@ describe('a Help article', () => {
 
 describe('every published video on its three places', () => {
   it("Help, the tour card and the page help's Watch the video show each section video", async () => {
+    publish('discovery', 'documents'); // not recorded yet: published for this check only (restored after each test)
     const user = userEvent.setup();
     const paths: Record<string, string> = {
       board: '/p/X/board',

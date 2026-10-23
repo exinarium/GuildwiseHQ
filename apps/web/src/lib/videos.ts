@@ -59,6 +59,13 @@ export const SECTION_VIDEOS: Record<string, SectionVideoEntry> = {
     help: 'intake-and-outbox#intake',
     published: true,
   },
+  discovery: {
+    title: 'Discovery: from an idea to a PRD',
+    nav: 'discovery',
+    help: 'discovery#start',
+    // not recorded yet: the recording task flips this flag together with the files
+    published: false,
+  },
   automations: {
     title: 'Automations',
     nav: 'schedules',
@@ -112,6 +119,12 @@ export const SECTION_VIDEOS: Record<string, SectionVideoEntry> = {
     published: true,
   },
   ledger: { title: 'The Ledger', nav: 'ledger', help: 'ledger-and-vaults#ledger', published: true },
+  documents: {
+    title: 'Documents',
+    nav: 'documents',
+    help: 'discovery#documents',
+    published: false,
+  },
   vaults: { title: 'Vaults', nav: 'vaults', help: 'ledger-and-vaults#vaults', published: true },
   settings: {
     title: 'Your settings',

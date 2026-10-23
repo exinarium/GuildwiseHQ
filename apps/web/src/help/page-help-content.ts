@@ -1355,6 +1355,79 @@ export const PAGE_HELP: Record<string, PageHelp> = {
     ],
     article: 'chat-with-agents',
   },
+  '/discovery': {
+    title: 'Discovery',
+    intro:
+      'Discovery sessions turn an idea into a brief or a PRD with an analyst. Each one keeps its own notes, cost and drafts.',
+    controls: [
+      {
+        name: 'New discovery',
+        text: 'Start a session: title, optional project and starting idea, how the analyst works, whether the CEO takes part, a time box and a budget.',
+      },
+      {
+        name: 'A session row',
+        text: 'Shows the phase, the stance, what it has cost so far and when it last moved. Click it to carry on where you left off.',
+      },
+    ],
+    article: 'discovery#start',
+  },
+  '/discovery/:id': {
+    title: 'Discovery session',
+    intro:
+      'The conversation with the analyst, the side panel of ideas and decisions, and the draft document.',
+    controls: [
+      {
+        name: 'Question card',
+        text: 'Pick a quick answer, write your own, skip it or park it for later. When the CEO took part, its proposal is shown next to the question: confirm, edit or override it.',
+      },
+      {
+        name: 'Proposal',
+        text: 'A change the analyst suggests. Nothing changes until you choose Apply; Reject drops it and Redirect sends your own words back.',
+      },
+      {
+        name: 'Phase',
+        text: 'Frame, Diverge, Converge, Stress test, Capture. The analyst moves on; click a phase to override it.',
+      },
+      {
+        name: 'Pause and Resume',
+        text: 'Stops the clock and anything new from starting. Nothing is lost, also across days.',
+      },
+      {
+        name: 'Cost and budget',
+        text: 'What the session has cost so far. With a budget set, no new turn starts once it is used up; raise it to continue.',
+      },
+      {
+        name: 'Panel',
+        text: 'Ideas, assumptions, open questions, decisions and parked items. You can add, edit, move and delete.',
+      },
+      {
+        name: 'Draft',
+        text: 'The brief or PRD with its versions and the checklist result. Approve it, then Hand to BA to start an intake with the PRD linked.',
+      },
+    ],
+    article: 'discovery#conversation',
+  },
+  '/documents': {
+    title: 'Documents',
+    intro: 'Briefs, PRDs, minutes and session logs of your organization.',
+    controls: [
+      { name: 'Filters', text: 'Narrow the list by kind (brief, PRD, minutes) or by status.' },
+      { name: 'A document', text: 'Click one to read it, see its versions and change its status.' },
+    ],
+    article: 'discovery#documents',
+  },
+  '/documents/:id': {
+    title: 'Document',
+    intro: 'One document as formatted text, with its version history and status.',
+    controls: [
+      { name: 'Version', text: 'Pick an earlier version to read it. The current version is the default.' },
+      {
+        name: 'Approve and Reopen',
+        text: 'Owners and Admins approve a document (it is then copied to the vault) or reopen it to edit again.',
+      },
+    ],
+    article: 'discovery#documents',
+  },
   '/intake': {
     title: 'New intake',
     intro:

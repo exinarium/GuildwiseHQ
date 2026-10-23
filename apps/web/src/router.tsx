@@ -9,8 +9,8 @@ import { getLastProjectKey } from './lib/lastProject.ts';
 import { AcceptInvite } from './pages/AcceptInvite.tsx';
 import { Agents } from './pages/Agents.tsx';
 import { Archive } from './pages/Archive.tsx';
-import { Backlog } from './pages/Backlog.tsx';
 import { Automations } from './pages/Automations.tsx';
+import { Backlog } from './pages/Backlog.tsx';
 import { BILLING_GATE_PATH } from './pages/BillingGate.tsx';
 import { Board } from './pages/Board.tsx';
 import { CardDetail } from './pages/CardDetail.tsx';
@@ -21,6 +21,9 @@ import { Chat } from './pages/Chat.tsx';
 import { ContactPublic } from './pages/ContactPublic.tsx';
 import { Costs } from './pages/Costs.tsx';
 import { Desk } from './pages/Desk.tsx';
+import { DiscoveryList } from './pages/Discovery.tsx';
+import { DiscoverySession } from './pages/DiscoverySession.tsx';
+import { DocumentsList, DocumentView } from './pages/Documents.tsx';
 import { ForgotPassword } from './pages/ForgotPassword.tsx';
 import { Help, PlatformHelp } from './pages/Help.tsx';
 import { IntakeNew, IntakeView } from './pages/Intake.tsx';
@@ -146,6 +149,10 @@ export const routes = [
       { path: '/chat/:threadId', element: <Chat /> },
       { path: '/ceo-chat', element: <CeoChat /> },
       { path: '/ceo-chat/:threadId', element: <CeoChat /> },
+      { path: '/discovery', element: <DiscoveryList /> },
+      { path: '/discovery/:id', element: <DiscoverySession /> },
+      { path: '/documents', element: <DocumentsList /> },
+      { path: '/documents/:id', element: <DocumentView /> },
       { path: '/intake', element: <IntakeNew /> },
       { path: '/intake/batches/:id', element: <BatchView /> },
       { path: '/intake/:id', element: <IntakeView /> },

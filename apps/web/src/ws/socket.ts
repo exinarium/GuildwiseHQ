@@ -22,9 +22,10 @@ export type RunLogListener = (service: string, lines: string[], history: boolean
 
 /** What a chat panel hears about its conversation (docs/ARCHITECTURE.md section 20). */
 export type ChatEvent =
-  | { type: 'delta'; text: string }
-  | { type: 'done'; messageId: string; message?: ThreadMessageDto }
-  | { type: 'activity'; activity: ChatActivityMessage }
+  /** `turnId` and `participantId` are set for the turns of a discovery or boardroom session (who is speaking). */
+  | { type: 'delta'; text: string; turnId?: string }
+  | { type: 'done'; messageId: string; message?: ThreadMessageDto; turnId?: string; participantId?: string }
+  | { type: 'activity'; activity: ChatActivityMessage; turnId?: string }
   | { type: 'queued'; clientMsgId?: string; workstationName?: string }
   | { type: 'error'; reason: string }
   /** The connection dropped: any reply in flight may be lost, so the panel stops waiting (the history is refetched on reconnect). */
@@ -181,17 +182,35 @@ export class LiveSocket {
           cb(msg.service, msg.lines, msg.history === true);
         break;
       case 'chat.delta':
-        this.emitChat(msg.threadId, { type: 'delta', text: msg.text });
+        this.emitChat(msg.threadId, {
+          type: 'delta',
+          text: msg.text,
+          ...(msg.turnId ? { turnId: msg.turnId } : {}),
+        });
         break;
       case 'chat.activity':
-        this.emitChat(msg.threadId, { type: 'activity', activity: msg });
+        this.emitChat(msg.threadId, {
+          type: 'activity',
+          activity: msg,
+          ...(msg.turnId ? { turnId: msg.turnId } : {}),
+        });
         break;
       case 'chat.done':
         this.emitChat(msg.threadId, {
           type: 'done',
           messageId: msg.messageId,
           ...(msg.message ? { message: msg.message } : {}),
+          ...(msg.turnId ? { turnId: msg.turnId } : {}),
+          ...(msg.participantId ? { participantId: msg.participantId } : {}),
         });
+        break;
+      case 'discovery.updated':
+      case 'session.turn':
+        // A discovery session changed (question, note, proposal, phase, document, cost, a turn): refetch its state.
+        void this.qc.invalidateQueries({ queryKey: ['discovery', msg.threadId] });
+        void this.qc.invalidateQueries({ queryKey: ['sessions'] });
+        if (msg.type === 'session.turn')
+          void this.qc.invalidateQueries({ queryKey: ['thread', msg.threadId] });
         break;
       case 'chat.queued':
         void this.qc.invalidateQueries({ queryKey: ['ceo'] });

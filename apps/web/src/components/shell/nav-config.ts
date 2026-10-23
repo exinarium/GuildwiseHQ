@@ -6,6 +6,8 @@ import {
   ChartColumn,
   Cloud,
   Coins,
+  Compass,
+  FileText,
   FolderKanban,
   Inbox,
   KanbanSquare,
@@ -106,6 +108,14 @@ export function buildNav(opts: {
   work.push({ id: 'desk', label: 'Desk', to: '/desk', icon: Inbox });
   if (on('integrations') && canManage)
     work.push({ id: 'intake', label: 'Intake', to: '/intake', icon: BriefcaseBusiness });
+  if (canManage)
+    work.push({
+      id: 'discovery',
+      label: 'Discovery',
+      to: '/discovery',
+      icon: Compass,
+      testId: 'nav-discovery',
+    });
   work.push(
     { id: 'schedules', label: 'Automations', to: '/automations', icon: Timer },
     { id: 'projects', label: 'Projects', to: '/projects', icon: FolderKanban },
@@ -119,7 +129,10 @@ export function buildNav(opts: {
       icon: Lightbulb,
       testId: 'nav-interests',
     });
-  knowledge.push({ id: 'ledger', label: 'Ledger', to: '/ledger', icon: BookOpen, testId: 'nav-ledger' });
+  knowledge.push(
+    { id: 'ledger', label: 'Ledger', to: '/ledger', icon: BookOpen, testId: 'nav-ledger' },
+    { id: 'documents', label: 'Documents', to: '/documents', icon: FileText, testId: 'nav-documents' },
+  );
   if (canManage)
     knowledge.push({
       id: 'vaults',

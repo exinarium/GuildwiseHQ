@@ -69,6 +69,11 @@ const NAV_STEPS: Record<string, { title: string; body: string; more?: string }> 
     body: 'Bring in tickets from Jira or GitHub, one at a time in a chat or many at once on the Batch tab. Guildwise HQ turns each one into a card with the details filled in and asks you only about what is missing; the Owner can also hand a ticket to the CEO with Tell your CEO.',
     more: 'intake-and-outbox#intake',
   },
+  discovery: {
+    title: 'Discovery',
+    body: 'Turn an idea into a brief or a PRD. An analyst interviews you one question at a time, keeps ideas, assumptions and decisions in a side panel, and drafts the document with you; your CEO can join. Approve the PRD and hand it to the BA to get cards.',
+    more: 'discovery#start',
+  },
   projects: {
     title: 'Projects and phases',
     body: 'Each project has its own board, repositories and settings, and the Projects page puts them in priority order: drag a project up to have your agents serve it first (the Owner and Admins can; everyone sees the order). Inside a project, phases group cards into a milestone: when the last card of a phase is done, you approve the follow-ups (such as a deploy and a regression run) and they run in order.',
@@ -129,6 +134,11 @@ const NAV_STEPS: Record<string, { title: string; body: string; more?: string }> 
     body: 'What your agents spend, by project, agent, model and day. Monthly budgets are set in each project’s settings and the Costs page shows how much of each is used. Only Owners and Admins see this page.',
     more: 'budgets-and-costs#monthly-budgets',
   },
+  documents: {
+    title: 'Documents',
+    body: 'Briefs and PRDs from your discovery sessions, with their versions and status. Approved ones are copied to your vault.',
+    more: 'discovery#documents',
+  },
   ledger: {
     title: 'Ledger',
     body: 'The memory of your team: the requirements, decisions and standing orders agents rely on, searchable. Agents read it before they ask you, so you answer a question only once.',
@@ -159,6 +169,7 @@ const SIDEBAR_ORDER = [
   'research',
   'desk',
   'intake',
+  'discovery',
   'schedules',
   'projects',
   'agents',
@@ -172,6 +183,7 @@ const SIDEBAR_ORDER = [
   'costs',
   'interests',
   'ledger',
+  'documents',
   'vaults',
   'settings',
   'organization',
