@@ -1,5 +1,10 @@
-import type { ThreadMessageDto, ThreadMessagesQuery, ThreadMessagesResponse } from '@aom/shared';
-import { iso, one, type Queryable, rows } from '../db/sql.ts';
+import {
+  parseBoardConfig,
+  type ThreadMessageDto,
+  type ThreadMessagesQuery,
+  type ThreadMessagesResponse,
+} from '@aom/shared';
+import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { notFound } from '../errors.ts';
 
 /** The display name of the participant a persona message came from (a persona has no agent row). */
@@ -32,18 +37,22 @@ export async function threadMessages(
     [threadId, userId],
   );
   if (!t) throw notFound('thread not found');
+  // A boardroom's first round is sealed until every seat has answered (independent-first): until it is revealed its
+  // answers are not returned to anyone, the session's own participants included. A read-time filter, so a replay is unaffected.
+  const sealedIds = await sealedBoardMessageIds(db, t);
   const list = await rows(
     db,
     `SELECT m.*, u.display_name AS user_name, a.name AS agent_name, ${PERSONA_NAME_SQL} AS persona_name FROM thread_messages m
        LEFT JOIN users u ON u.id = m.author_user_id LEFT JOIN agents a ON a.id = m.author_agent_id
       WHERE m.thread_id = $1
+        AND NOT (m.id = ANY($5::uuid[]))
         AND CASE
               WHEN $4::uuid IS NOT NULL THEN (m.created_at, m.event_seq, m.id) < (
                 SELECT c.created_at, c.event_seq, c.id FROM thread_messages c WHERE c.id = $4 AND c.thread_id = $1)
               ELSE ($2::timestamptz IS NULL OR m.created_at < $2)
             END
       ORDER BY m.created_at DESC, m.event_seq DESC, m.id DESC LIMIT $3`,
-    [threadId, q.before ?? null, q.limit + 1, q.beforeId ?? null],
+    [threadId, q.before ?? null, q.limit + 1, q.beforeId ?? null, sealedIds],
   );
   const page = list.slice(0, q.limit).reverse();
   return {
@@ -52,6 +61,20 @@ export async function threadMessages(
     hasMore: list.length > q.limit,
     messages: page.map(messageDto),
   };
+}
+
+/** The speakers' messages of a boardroom's round 1 while that round is sealed (none for any other thread). */
+async function sealedBoardMessageIds(db: Queryable, t: Row): Promise<string[]> {
+  if (t.kind !== 'boardroom') return [];
+  const cfg = parseBoardConfig(t.session_config);
+  if (!(cfg.round >= 1 && cfg.revealedRound < 1 && cfg.stage !== 'setup')) return [];
+  const turns = await rows(
+    db,
+    `SELECT message_id FROM session_turns
+      WHERE thread_id=$1 AND round=1 AND meta->>'purpose'='board_speaker' AND message_id IS NOT NULL`,
+    [t.id],
+  );
+  return turns.map((r) => r.message_id as string);
 }
 
 // biome-ignore lint/suspicious/noExplicitAny: a raw row

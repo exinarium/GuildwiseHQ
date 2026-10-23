@@ -21,7 +21,7 @@ export function buildAdapters(
   credentials?: NonNullable<ConstructorParameters<typeof ClaudeCodeAdapter>[2]>['credentials'],
   usage?: ClaudeUsageMonitor,
   accounts?: ClaudeAccountRegistry,
-  direct?: { store: ProviderStore; options?: Partial<DirectModelOptions> },
+  direct?: { store: ProviderStore; options?: Partial<DirectModelOptions>; onModelsChanged?: () => void },
 ): Map<string, RuntimeAdapter> {
   const adapters = new Map<string, RuntimeAdapter>();
   adapters.set(
@@ -41,6 +41,7 @@ export function buildAdapters(
         store: direct.store,
         root: paths.root,
         ...(direct.options ? { options: direct.options } : {}),
+        ...(direct.onModelsChanged ? { onModelsChanged: direct.onModelsChanged } : {}),
       }),
     );
   return adapters;

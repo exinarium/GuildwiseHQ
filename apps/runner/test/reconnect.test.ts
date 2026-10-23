@@ -198,7 +198,7 @@ describe('connection', () => {
     await runner.start();
     try {
       const hello = await server.waitFor('hello');
-      expect(hello.runtimes.map((r) => r.id).sort()).toEqual(['claude-code', 'mock']);
+      expect(hello.runtimes.map((r) => r.id).sort()).toEqual(['claude-code', 'direct-model', 'mock']);
       expect(hello.runtimes.find((r) => r.id === 'mock')?.available).toBe(true);
       expect(hello.activeShifts).toEqual([]);
     } finally {

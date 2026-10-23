@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
+  DISCOVERY_PURPOSE_VERBS,
   type DiscoveryConfig,
   type PanelSection,
   parseCheckItem,
@@ -13,7 +14,6 @@ import {
   SessionPhaseParamsSchema,
   SessionProposeParamsSchema,
   type SessionRpcMethod,
-  DISCOVERY_PURPOSE_VERBS,
   SessionValidateParamsSchema,
   streamId,
 } from '@aom/shared';

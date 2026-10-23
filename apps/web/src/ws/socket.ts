@@ -209,8 +209,9 @@ export class LiveSocket {
         // A discovery session changed (question, note, proposal, phase, document, cost, a turn): refetch its state.
         void this.qc.invalidateQueries({ queryKey: ['discovery', msg.threadId] });
         void this.qc.invalidateQueries({ queryKey: ['sessions'] });
-        if (msg.type === 'session.turn')
-          void this.qc.invalidateQueries({ queryKey: ['thread', msg.threadId] });
+        // The messages are refetched too: a boardroom's sealed first round is not returned until it is revealed, and the
+        // reveal arrives as `discovery.updated`.
+        void this.qc.invalidateQueries({ queryKey: ['thread', msg.threadId] });
         break;
       case 'chat.queued':
         void this.qc.invalidateQueries({ queryKey: ['ceo'] });

@@ -6,6 +6,7 @@ import {
   CEO_QUEUE_STALE_HOURS,
   type ChatContext,
   costUsdMicros,
+  DIRECT_RUNTIME,
   isKnownChoice,
   type ModelChoice,
   modelChoiceLabel,
@@ -25,6 +26,7 @@ import type { Ctx } from '../context.ts';
 import { one, type Queryable, type Row, rows } from '../db/sql.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { agentSpecFor } from '../runner-gateway/brief.ts';
+import { providersOf, type RuntimeReport, runtimeProblem } from '../sessions/offer.ts';
 
 /** A CEO conversation is one long session (docs section 5.3): it rotates after this long or this much context. */
 export const CEO_SESSION_MAX_MS = 24 * 3_600_000;
@@ -58,19 +60,29 @@ export function threadOverride(row: Row): ModelChoice | null {
   return o?.runtime && o?.model ? o : null;
 }
 
-/** Message override, else thread override, else the default; unknown choices are refused (null). */
+/**
+ * Message override, else thread override, else the default; unknown choices are refused (null). `reports` is what the agent's
+ * workstation reports (empty: not known): with it a direct-model choice must be one the workstation can run (its provider has a
+ * key there), and a thread override that no longer can (the key was removed) falls back to the default instead of failing every
+ * message of the conversation. An override picked in this very request is checked by the caller with `runtimeProblem`.
+ */
 export function resolveTurnModel(
   agent: Row,
   threadRow: Row,
   chat: { model: string; effort: string },
   message?: ModelChoice | null,
+  reports: readonly RuntimeReport[] = [],
 ): { choice: ModelChoice; source: 'message' | 'thread' | 'default' } | null {
+  const providers = providersOf(reports);
+  const known = (c: ModelChoice): boolean =>
+    isKnownChoice(c, c.runtime === DIRECT_RUNTIME && reports.length ? providers : undefined);
   const r = resolveModelChoice({
     message: message ?? null,
     thread: threadOverride(threadRow),
     default: defaultChoiceOf(agent, chat),
+    isAvailable: (c) => c.runtime !== DIRECT_RUNTIME || !runtimeProblem(reports, c),
   });
-  if (r.source !== 'default' && !isKnownChoice(r.choice)) return null;
+  if (r.source !== 'default' && !known(r.choice)) return null;
   return r;
 }
 

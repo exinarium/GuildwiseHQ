@@ -7,6 +7,7 @@ import {
   checkPermissions,
   DEFAULT_AVATAR_STYLE,
   DEVOPS_ROLE_KEY,
+  DIRECT_RUNTIME,
   type HireAgentRequest,
   isOrgManager,
   randomAvatarSeed,
@@ -197,6 +198,12 @@ export async function sandboxGate(
   runtimeId: string,
   acknowledged: boolean | undefined,
 ): Promise<UnsandboxedAck | undefined> {
+  // Agents work cards and shifts with a shell and edit tools. The direct API models (conversation only) are for session turns.
+  if (runtimeId === DIRECT_RUNTIME)
+    throw badRequest(
+      'runtime_not_for_agents',
+      'the direct API models have no shell or edit tools, so an agent cannot run on them: pick them for a Discovery or Boardroom seat instead',
+    );
   const ws = await one(tx, 'SELECT name, runtimes FROM workstations WHERE id=$1', [workstationId]);
   const rt = (
     ws?.runtimes as Array<{ id: string; sandbox?: string; sandboxReason?: string }> | undefined

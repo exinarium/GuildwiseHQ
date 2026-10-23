@@ -42,6 +42,7 @@ import type { AppendInput } from '../eventstore/types.ts';
 import { threadMessageById } from '../queries/threads.ts';
 import { agentSpecFor } from '../runner-gateway/brief.ts';
 import { assertSessionMayQueue } from './cost.ts';
+import { runtimeProblem, runtimeReports } from './offer.ts';
 
 const ZERO_USAGE: Usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
 const ORPHAN_MS = 30 * 60_000;
@@ -236,6 +237,12 @@ export class SessionTurns {
         workstationId,
       ]);
       if (!ws) throw conflict('no_workstation', 'the workstation of this session is not available');
+      // A model the owner (or the Boardroom's defaults) picked must be one this workstation can run: its runtime is there and, for a
+      // direct model, its provider has a key stored on that machine. Refused now, with the reason, rather than hanging in the queue.
+      if (req.model) {
+        const problem = runtimeProblem(await runtimeReports(tx, workstationId), choice);
+        if (problem) throw conflict('runtime_unavailable', problem);
+      }
 
       const turnId = randomUUID();
       await ctx.store.append(
@@ -423,6 +430,13 @@ export class SessionTurns {
         );
         return false;
       }
+      // The runtime this turn runs on must be there: a direct model needs its provider's key on the workstation. Failed clearly,
+      // not left to hang (a Claude Code that is logged out or limited is left to the runner, which says so itself).
+      const problem = runtimeProblem(await runtimeReports(ctx.pool, wsId), turn.model as ModelChoice);
+      if (problem) {
+        await this.failTurn(turn, `runtime_unavailable: ${problem}`);
+        return false;
+      }
       const purpose = (turn.meta as { purpose?: string } | null)?.purpose;
       if (purpose) {
         // A boardroom turn needs the board verbs, a discovery turn the session verbs (an older runner has the latter only).
@@ -573,6 +587,10 @@ export class SessionTurns {
         ...(persona?.icon ? { icon: persona.icon } : {}),
       },
       ...(turn.instructions ? { instructions: turn.instructions } : {}),
+      // What the turn is for: a runtime with tools offers the verbs this purpose allows (the server checks them again).
+      ...((turn.meta as { purpose?: string } | null)?.purpose
+        ? { purpose: (turn.meta as { purpose: string }).purpose }
+        : {}),
       roster,
     };
     const message = composeTurnMessage(renderSessionTranscript(await this.transcript(turn)), turn.message);

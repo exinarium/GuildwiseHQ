@@ -1,4 +1,11 @@
-import { type CeoActionName, canonicalWorkflowKey, DESK_SUBKIND, isKnownChoice, streamId } from '@aom/shared';
+import {
+  type CeoActionName,
+  canonicalWorkflowKey,
+  DESK_SUBKIND,
+  DIRECT_RUNTIME,
+  isKnownChoice,
+  streamId,
+} from '@aom/shared';
 import { z } from 'zod';
 import { loadWorkflowById } from '../catalogue/loader.ts';
 import { cancelCardIn, moveCardWithNotice } from '../commands/cards.ts';
@@ -114,6 +121,12 @@ const raiseModel: ActionDef<z.infer<typeof RaiseP>> = {
       model: p.model,
       ...(p.effort ? { effort: p.effort } : {}),
     };
+    // Card work needs a shell and edit tools: the direct-model runtime (conversation only) can never run a card.
+    if (choice.runtime === DIRECT_RUNTIME)
+      return {
+        ...base,
+        refuse: 'the direct API models cannot work cards (no shell or edit tools): pick a Claude Code model',
+      };
     if (!isKnownChoice(choice))
       return {
         ...base,

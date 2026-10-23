@@ -126,7 +126,7 @@ const state = (over: Partial<BoardStateDto> = {}): BoardStateDto => ({
   sealedProgress: null,
   documents: [],
   turns: [],
-  cost: { costMicros: 120_000, costUsd: 0.12, turns: 3, budgetUsd: 5, exceeded: false },
+  cost: { costMicros: 120_000, costUsd: 0.12, turns: 3, unpricedTurns: 0, budgetUsd: 5, exceeded: false },
   estimate: { speakers: 3, usd: 0.03, basis: 'average' },
   workstationOnline: true,
   ceoAvailable: false,
@@ -233,7 +233,7 @@ const session = (over: Partial<SessionDto> = {}): SessionDto =>
     createdBy: null,
     createdAt: AT,
     lastMessageAt: AT,
-    cost: { costMicros: 500_000, costUsd: 0.5, turns: 4, budgetUsd: null, exceeded: false },
+    cost: { costMicros: 500_000, costUsd: 0.5, turns: 4, unpricedTurns: 0, budgetUsd: null, exceeded: false },
     participants: [
       {
         id: P1,
@@ -806,7 +806,7 @@ describe('Boardroom session', () => {
       waitingFor: 'budget',
       config: { ...state().config, budgetStopped: true, paused: true },
       workstationOnline: false,
-      cost: { costMicros: 5_100_000, costUsd: 5.1, turns: 9, budgetUsd: 5, exceeded: true },
+      cost: { costMicros: 5_100_000, costUsd: 5.1, turns: 9, unpricedTurns: 0, budgetUsd: 5, exceeded: true },
     });
     const calls = mountSession(s, [message()], { 'POST /api/board/': () => ({ state: s }) });
     const user = userEvent.setup();

@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { costUsdMicros, isCostUnknown, type ReportedProvider, type Usage } from '@aom/shared';
 import { convertArrayToReadableStream, MockLanguageModelV4 } from 'ai/test';
 import { afterEach, describe, expect, it } from 'vitest';
-import { DirectModelAdapter } from '../src/adapters/direct-model.ts';
+import { DIRECT_MODEL_VERSION, DirectModelAdapter } from '../src/adapters/direct-model.ts';
 import type { ChatStartInput, RuntimeEvent, RuntimeSession } from '../src/adapters/types.ts';
 import { ModelLister } from '../src/direct/models.ts';
 import { ProviderStore } from '../src/direct/store.ts';
@@ -550,6 +550,72 @@ describe('the model list of an OpenAI-compatible endpoint', () => {
     const bad = await lister.refresh(cfg, true);
     expect(bad).toEqual({ ids: [], problem: 'the endpoint refused the key' });
     expect(JSON.stringify(bad)).not.toContain('k-123');
+  });
+});
+
+describe('the pinned AI SDK', () => {
+  it('pins ai and the provider packages exactly and reports the ai version', () => {
+    const pkg = JSON.parse(readFileSync(join(import.meta.dirname, '..', 'package.json'), 'utf8')) as {
+      dependencies: Record<string, string>;
+    };
+    for (const name of [
+      'ai',
+      '@ai-sdk/anthropic',
+      '@ai-sdk/openai',
+      '@ai-sdk/google',
+      '@ai-sdk/openai-compatible',
+    ])
+      expect(pkg.dependencies[name], name).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(DIRECT_MODEL_VERSION).toBe(`ai-sdk-${pkg.dependencies.ai}`);
+  });
+});
+
+describe('the capabilities of the runtime', () => {
+  it('does not wait for an endpoint’s model list: reports what is cached and reports again when the list arrives', async () => {
+    const root = tmp('aom-direct-caps-');
+    const store = new ProviderStore({ file: join(root, 'p.json'), keys: fakeKeys });
+    store.set({
+      provider: 'openai-compatible',
+      keyId: 'key-1',
+      baseUrl: 'http://ollama.local/v1',
+      models: [],
+    });
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    let changed = 0;
+    const adapter = new DirectModelAdapter({
+      store,
+      root,
+      onModelsChanged: () => {
+        changed++;
+      },
+      fetch: async () => {
+        await gate;
+        return new Response(JSON.stringify({ data: [{ id: 'llama3' }] }));
+      },
+    });
+    const first = await adapter.capabilities(); // returns at once, although the fetch is pending
+    expect(first.available).toBe(true);
+    expect(first.providers?.[0]?.models).toEqual([]);
+    release();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(changed).toBe(1);
+    expect((await adapter.capabilities()).providers?.[0]?.models.map((m) => m.id)).toEqual(['llama3']);
+  });
+
+  it('is unavailable with no provider and says so with an empty provider list', async () => {
+    const root = tmp('aom-direct-caps2-');
+    const adapter = new DirectModelAdapter({
+      store: new ProviderStore({ file: join(root, 'p.json'), keys: fakeKeys }),
+      root,
+    });
+    expect(await adapter.capabilities()).toMatchObject({
+      runtime: 'direct-model',
+      available: false,
+      providers: [],
+    });
   });
 });
 

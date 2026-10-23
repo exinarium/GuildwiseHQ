@@ -28,6 +28,12 @@ export function BoardMeters({ state, canManage }: { state: BoardStateDto; canMan
           {formatUsd(cost.costUsd)}
           {cost.budgetUsd !== null && <span className="text-muted"> of {formatUsd(cost.budgetUsd)}</span>}
         </p>
+        {cost.unpricedTurns > 0 && (
+          <p className="text-xs text-warning" data-testid="cost-unknown">
+            Cost unknown for {cost.unpricedTurns} {cost.unpricedTurns === 1 ? 'turn' : 'turns'} (no price for
+            that model), not counted above.
+          </p>
+        )}
         {ratio !== null && (
           <div
             role="progressbar"

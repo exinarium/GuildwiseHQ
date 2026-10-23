@@ -152,6 +152,7 @@ describe('integration status and protocol', () => {
       'env.secret.set',
       'integration.connect',
       'integration.input',
+      'provider.key.set',
     ]);
     expect(CommandPayloadSchemas['integration.begin'].safeParse({}).success).toBe(false);
   });

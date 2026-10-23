@@ -94,7 +94,7 @@ const state = (over: Partial<DiscoveryStateDto> = {}): DiscoveryStateDto => ({
     prdValidation: null,
   },
   progress: { elapsedMinutes: 12, remainingMinutes: 18, fraction: 0.4 },
-  cost: { costMicros: 120_000, costUsd: 0.12, turns: 3, budgetUsd: 5, exceeded: false },
+  cost: { costMicros: 120_000, costUsd: 0.12, turns: 3, unpricedTurns: 0, budgetUsd: 5, exceeded: false },
   ceoAvailable: false,
   facilitatorName: 'Analyst',
   ceoName: null,
@@ -268,7 +268,14 @@ describe('Discovery list and the new session dialog', () => {
       createdBy: null,
       createdAt: AT,
       lastMessageAt: AT,
-      cost: { costMicros: 500_000, costUsd: 0.5, turns: 2, budgetUsd: null, exceeded: false },
+      cost: {
+        costMicros: 500_000,
+        costUsd: 0.5,
+        turns: 2,
+        unpricedTurns: 0,
+        budgetUsd: null,
+        exceeded: false,
+      },
       participants: [],
       ...over,
     }) as SessionDto;
@@ -352,6 +359,23 @@ describe('Discovery session page', () => {
       'GET /api/threads/': () => thread(),
       ...extra,
     });
+
+  it('says when the cost of some turns is unknown instead of counting them as free', async () => {
+    base(
+      state({
+        cost: {
+          costMicros: 120_000,
+          costUsd: 0.12,
+          turns: 3,
+          unpricedTurns: 2,
+          budgetUsd: null,
+          exceeded: false,
+        },
+      }),
+    );
+    mount(`/discovery/${T}`);
+    expect(await screen.findByTestId('cost-unknown')).toHaveTextContent('Cost unknown for 2 turns');
+  });
 
   it('shows the conversation, the question card, the phase, the meters and the panel', async () => {
     base(state());
@@ -534,7 +558,14 @@ describe('Discovery session page', () => {
       state({
         waitingFor: 'budget',
         config: { ...state().config, budgetStopped: true },
-        cost: { costMicros: 5_100_000, costUsd: 5.1, turns: 9, budgetUsd: 5, exceeded: true },
+        cost: {
+          costMicros: 5_100_000,
+          costUsd: 5.1,
+          turns: 9,
+          unpricedTurns: 0,
+          budgetUsd: 5,
+          exceeded: true,
+        },
       }),
       { [`PATCH /api/discovery/${T}`]: () => ({ state: state() }) },
     );

@@ -57,10 +57,16 @@ export class ModelLister {
     else this.cache.clear();
   }
 
-  /** Cached ids and problem of a provider that has no list of its own. */
-  peek(provider: string): { ids: string[]; problem?: string } {
+  /** What is cached for a provider and whether it is still fresh (a stale or missing list is refreshed in the background). */
+  peek(provider: string): { ids: string[]; problem?: string; fresh: boolean } {
     const hit = this.cache.get(provider);
-    return hit ? { ids: hit.ids, ...(hit.problem ? { problem: hit.problem } : {}) } : { ids: [] };
+    return hit
+      ? {
+          ids: hit.ids,
+          ...(hit.problem ? { problem: hit.problem } : {}),
+          fresh: this.now() - hit.at < LIST_TTL_MS,
+        }
+      : { ids: [], fresh: false };
   }
 
   async refresh(cfg: ProviderConfig, force = false): Promise<{ ids: string[]; problem?: string }> {

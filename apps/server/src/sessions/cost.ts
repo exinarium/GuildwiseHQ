@@ -12,7 +12,8 @@ import { conflict } from '../errors.ts';
 export async function sessionCost(db: Queryable, t: Row): Promise<SessionCost> {
   const r = await one(
     db,
-    `SELECT COALESCE(sum(sc.cost_usd_micros),0)::bigint AS micros, count(*)::int AS turns
+    `SELECT COALESCE(sum(sc.cost_usd_micros),0)::bigint AS micros, count(*)::int AS turns,
+            count(*) FILTER (WHERE sc.cost_unknown)::int AS unpriced
        FROM shift_costs sc JOIN session_turns st ON st.id = sc.shift_id WHERE st.thread_id = $1`,
     [t.id],
   );
@@ -22,6 +23,7 @@ export async function sessionCost(db: Queryable, t: Row): Promise<SessionCost> {
     costMicros,
     costUsd: costMicros / 1_000_000,
     turns: r?.turns ?? 0,
+    unpricedTurns: r?.unpriced ?? 0,
     budgetUsd: cfg.budgetUsd,
     exceeded: cfg.budgetUsd !== null && costMicros >= cfg.budgetUsd * 1_000_000,
   };

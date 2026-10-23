@@ -802,7 +802,7 @@ The runner process (outside the agent sandbox, so the network allowlist does not
 
 **Full reference:** see `docs/USER-GUIDE.md` for the full `aom` reference and examples.
 
-## Adapters: Claude Code and Mock
+## Adapters: Claude Code, Direct-model and Mock
 
 ### Claude Code adapter
 
@@ -891,6 +891,18 @@ reported and the process exits. A failed shift handler is reported too. `runner.
 the message with paths, ids and secrets masked, a stack of function names with file basenames, the version and a short context
 label, never a prompt, card text or client code. The server keeps one row per signature with a counter in `runner_errors`
 (`GET /api/platform/runner-errors`, super admin).
+
+### Direct-model adapter: provider API keys (runner 0.1.45)
+
+The `direct-model` runtime calls a model provider's API from this workstation with the Vercel AI SDK: Anthropic's API, OpenAI, Google Gemini, and one OpenAI-compatible endpoint (OpenRouter, Ollama, LiteLLM, LM Studio). It is for conversation: Discovery and Boardroom turns (facilitator, CEO proposals, personas, the Chair, the minutes) and plain chats. It has no shell, no edit tool and no files, so it never runs a card or a shift. It announces the `direct-model:1` capability and always reports the runtime (`available: false` until a key is stored).
+
+**Setting a key.** On the Workstations page, under the workstation, **Model providers**: the owner of the workstation pastes the key (and, for an OpenAI-compatible endpoint, the base URL such as `http://localhost:11434/v1`; the key is optional for a local Ollama or LM Studio; extra model ids can be added for any provider). The browser encrypts the key with this runner's public key (RSA-OAEP, the same one the sudo password uses, so a key longer than 190 bytes is refused) and the server only relays the ciphertext in the `provider.key.set` command and empties it once the runner has answered. **Remove** sends `provider.key.clear`. There is no command-line form on purpose: the key never needs to be typed into a shell.
+
+**Where it lives.** `secrets/providers.json` (mode 0600, in the 0700 `secrets/` folder, never readable by agents): per provider the ciphertext, the base URL and the extra model ids. The plain key is decrypted in memory when a turn needs it and registered with the redaction registry (also after a restart), so it does not appear in `logs/`, in a tool summary or in an error text. The server learns only provider names, model ids, the endpoint's host and a short problem text: `RuntimeInfo.providers` in `hello` and `runtimes.report`. Models offered: the built-in list per provider, the extra ids, and for the compatible endpoint the list from its `/models` (cached ten minutes).
+
+**What a call does.** The turn's `chat.start` carries the model (`provider:model`) and, for a session turn, its purpose. The runner sends the instructions (the same room text as for Claude Code, written for tools) and the message, and runs at most 12 model calls with a 5-minute limit; each `aom` verb the purpose allows is a tool that goes through the runner's IPC with the turn's token and is checked by the server like an `aom` call from Claude Code. Plain chats keep their earlier messages in `direct-chats/<id>.json` (0600). Data goes from this workstation straight to the provider; Guildwise's servers never see the key or the traffic.
+
+**Troubleshooting.** "X is not set up on this workstation": add the key. "X refused the API key (HTTP 401)": the key is wrong or expired, replace it. "does not know this model (HTTP 404)": the id is not available to this key, or the endpoint does not serve it. A model that is not in the built-in list needs its id added under **Model providers**. Costs of models without a price in the table show as "cost unknown".
 
 ### Mock adapter
 

@@ -417,7 +417,7 @@ export class Runner {
         mainCredential,
         this.claudeUsage,
         this.claudeAccounts,
-        { store: this.providers },
+        { store: this.providers, onModelsChanged: () => void this.reportRuntimes() },
       );
     this.integrations = new IntegrationService({
       workstationId: opts.config.workstationId,

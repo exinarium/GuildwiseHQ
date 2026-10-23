@@ -120,6 +120,8 @@ export class DirectModelAdapter implements RuntimeAdapter {
       /** The HTTP the providers' SDKs use (tests point it at a local server). */
       fetch?: FetchLike;
       options?: Partial<DirectModelOptions>;
+      /** The model list of an OpenAI-compatible endpoint changed after it was fetched: report the runtimes again. */
+      onModelsChanged?: () => void;
       log?: Logger;
     },
   ) {
@@ -137,9 +139,16 @@ export class DirectModelAdapter implements RuntimeAdapter {
     const problems: Record<string, string> = {};
     for (const cfg of this.deps.store.configured()) {
       if (cfg.id !== 'openai-compatible') continue;
-      const r = await this.lister.refresh(cfg);
-      listed[cfg.id] = r.ids;
-      if (r.problem) problems[cfg.id] = r.problem;
+      // Never wait for the endpoint here (an offline Ollama must not delay the hello): report what is cached and refresh in the
+      // background; a changed list is reported again through `onModelsChanged`.
+      const hit = this.lister.peek(cfg.id);
+      listed[cfg.id] = hit.ids;
+      if (hit.problem) problems[cfg.id] = hit.problem;
+      if (!hit.fresh)
+        void this.lister.refresh(cfg, true).then((r) => {
+          if (JSON.stringify([r.ids, r.problem]) !== JSON.stringify([hit.ids, hit.problem]))
+            this.deps.onModelsChanged?.();
+        });
     }
     const providers = this.deps.store.report(listed, problems);
     return {

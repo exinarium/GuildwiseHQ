@@ -7,6 +7,7 @@ import {
   canDirectAgentInOrg,
   capChatSegments,
   chatSegmentsText,
+  DIRECT_RUNTIME,
   type ModelChoice,
   type ReadRepo,
   type RunnerToServerOf,
@@ -44,6 +45,7 @@ import { threadMessageById } from '../queries/threads.ts';
 import { agentSpecFor } from '../runner-gateway/brief.ts';
 import { orgReadRepos, projectReadRepos, referenceReadRepos } from '../runner-gateway/read-repos.ts';
 import { localReadRepos } from '../runner-gateway/workstation-repos.ts';
+import { runtimeProblem, runtimeReports } from '../sessions/offer.ts';
 import { workstationServesOrg } from '../simulation/fit.ts';
 import {
   backstopJobEvents,
@@ -351,11 +353,17 @@ export class ChatRelay {
       return this.fail(userId, msg.threadId, CHAT_ERROR.simulationWorkstation);
     // The model: this message's choice, else the conversation's, else the default. `thread` scope makes the choice stick.
     const threadChoice = msg.modelScope === 'thread' && msg.model ? msg.model : undefined;
+    const reports = await runtimeReports(ctx.pool, row.workstation_id);
+    // A model picked in this request must be one the workstation can run (a direct model needs its provider's key there).
+    const picked = threadChoice ?? msg.model;
+    if (picked?.runtime === DIRECT_RUNTIME && runtimeProblem(reports, picked))
+      return this.fail(userId, msg.threadId, CHAT_ERROR.unknownModel);
     const resolved = resolveTurnModel(
       row,
       threadChoice ? { ...row, model_override: threadChoice } : row,
       ceo.settings.models.chat,
       msg.modelScope === 'thread' ? undefined : msg.model,
+      reports,
     );
     if (!resolved) return this.fail(userId, msg.threadId, CHAT_ERROR.unknownModel);
     const online = ctx.services.runners.isOnline(row.workstation_id);

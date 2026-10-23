@@ -1,4 +1,10 @@
-import { CEO_QUEUE_STALE_HOURS, type CeoChatStateDto, type ModelChoice, streamId } from '@aom/shared';
+import {
+  CEO_QUEUE_STALE_HOURS,
+  type CeoChatStateDto,
+  DIRECT_RUNTIME,
+  type ModelChoice,
+  streamId,
+} from '@aom/shared';
 import type { AuthSession } from '../auth/sessions.ts';
 import { defaultChoiceOf, resolveTurnModel } from '../chat/ceo-turns.ts';
 import { orgScope, userActor } from '../commands/common.ts';
@@ -8,6 +14,7 @@ import { withAppendTx } from '../db/tx.ts';
 import { CLAUDE_RUNTIME, mainUsable } from '../dispatcher/accounts.ts';
 import { conflict, notFound } from '../errors.ts';
 import { fullPowerOf } from '../queries/ceo.ts';
+import { providersOf, type RuntimeReport, runtimeProblem, runtimeReports } from '../sessions/offer.ts';
 import { ensureCeoThread } from './chat.ts';
 import { listCorrections } from './corrections.ts';
 import { pendingForThread } from './permissions.ts';
@@ -58,6 +65,7 @@ export async function ceoChatState(ctx: Ctx, orgId: string): Promise<CeoChatStat
     model: {
       default: defaultChoiceOf(agent, ceo.settings.models.chat) as ModelChoice,
       thread: (thread?.model_override as ModelChoice | null) ?? null,
+      providers: providersOf(runtimes as RuntimeReport[]),
       runtimes: // chats and the CEO run on the workstation's main Claude account: `available` only says some account works
         runtimes
           .filter(
@@ -99,7 +107,12 @@ export async function setThreadModel(
   if (!ceo?.chatThreadId || !ceo.agentId) throw notFound('the CEO chat does not exist yet');
   const agent = await one(ctx.pool, 'SELECT * FROM agents WHERE id=$1', [ceo.agentId]);
   if (!agent) throw notFound('the CEO agent is gone');
-  if (choice && !resolveTurnModel(agent, { model_override: choice }, ceo.settings.models.chat))
+  const reports = await runtimeReports(ctx.pool, agent.workstation_id);
+  if (
+    choice &&
+    (!resolveTurnModel(agent, { model_override: choice }, ceo.settings.models.chat, null, reports) ||
+      (choice.runtime === DIRECT_RUNTIME && runtimeProblem(reports, choice)))
+  )
     throw conflict('unknown_model', 'that model is not offered');
   await withAppendTx(ctx.pool, async (tx) => {
     await ctx.store.append(

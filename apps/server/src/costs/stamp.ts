@@ -1,4 +1,4 @@
-import { costUsdMicros } from '@aom/shared';
+import { costUsdMicros, isCostUnknown } from '@aom/shared';
 import { one } from '../db/sql.ts';
 import type { Interceptor } from '../eventstore/pg-event-store.ts';
 
@@ -45,7 +45,12 @@ export function createCostStampInterceptor(): Interceptor {
             ...input,
             event: {
               ...ev,
-              payload: { ...ev.payload, costMicros: costUsdMicros(model, { ...ev.payload.usage }) },
+              payload: {
+                ...ev.payload,
+                costMicros: costUsdMicros(model, { ...ev.payload.usage }),
+                // A direct-model provider's model without a price: 0 here means "unknown", and the pages say so.
+                ...(isCostUnknown(model) ? { costUnknown: true } : {}),
+              },
             },
           } as typeof input);
           continue;

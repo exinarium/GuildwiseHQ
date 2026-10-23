@@ -1381,6 +1381,15 @@ It has these panels, top to bottom:
 
 In round 1 every seat answers on its own, seeing only your topic and brief. The answers stay sealed until the last one is in and are then revealed together. After that the Chair picks two or three speakers per round (never the same speaker twice in a row; the line **Chair picks** says who and why), calls a dissent round when the answers agree too easily, records disagreements without reconciling them, and stops with a decision card when only you can decide. Replies are kept short. Interject at any time in the box at the bottom; type **@** to call on a seat (or **@all**): a mentioned seat speaks in the next round. The **whiteboard** has Ideas, Risks, Questions, Decisions and Parked; the seats add notes, and you can add, edit, drag to another column, vote +1, merge and delete. The meter shows the cost so far and what the next round is estimated to cost; when a budget is set and used up, no new turn starts until you raise it. **Pause** stops anything new from starting. **End session** (or the round cap) has the Chair write the **minutes**: the topic, the cast, each position, agreements, the unresolved disagreements, your decisions, the whiteboard and the open questions, saved in **Documents**. **Pull into PRD** starts a Discovery session in the capture phase (with your CEO, if you have one) with a PRD draft seeded from the minutes.
 
+### Choosing providers and models for Discovery and Boardroom
+
+Agents and cards always run on Claude Code. Discovery and Boardroom conversations can also use **direct API models** (Anthropic's API, OpenAI, Google Gemini, or an OpenAI-compatible endpoint such as OpenRouter or Ollama). They are conversation only: no shell, no files.
+
+1. **Add a key.** Workstations, open your workstation, **Model providers (direct API)**, **Add key**. The key is encrypted in your browser for that workstation's runner and kept only there; calls go from the workstation straight to the provider. For an OpenAI-compatible endpoint also enter its address (a local Ollama needs no key). A model missing from the list can be added under **Extra model ids**.
+2. **Pick models.** **New boardroom** has a model per role and per seat, and seats can use different providers. **New discovery** has **Facilitator model (optional)**. The CEO chat's model chip lists direct models as "Conversation only" (the CEO cannot take actions on them).
+3. **Costs.** Models are priced from a built-in table; a model without a price shows "Cost unknown for N turns" and is not counted in the total or the budget.
+4. **If it does not start**, "X is not set up on this workstation" means that provider's key is not on the workstation the session runs on.
+
 ## 5. For Members
 
 A **Member** works inside the projects an Owner or Admin has added them to. You do the day-to-day work: write cards, answer questions, hire your own agents and follow the board. You do not manage the organization.

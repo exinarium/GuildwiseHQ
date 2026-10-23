@@ -98,3 +98,25 @@ Details in `docs/ARCHITECTURE.md` section 38.2.
 - **Pull into PRD**: `DiscoveryService.create(..., seed)` with `phase capture`, a seeded PRD draft (the PRD template, then the minutes' substance) and panel notes; CEO `joint` when a CEO exists.
 - **Models**: `{runtime, model}` per role (`persona`, `chair`, `synthesis`) and per seat (`castModels`); unset roles use `DEFAULT_BOARD_MODELS` (haiku, sonnet, opus) or, when the workstation does not offer that runtime, the first runtime it offers (`defaultModelFor`).
 - **Open product questions (decided by default):** the default round cap is 4 (max 12) and the cast 2 to 8; the session runs on its own until the cap, a decision point, a budget stop or the owner pauses (it does not wait for the owner after every round); a mention takes effect in the next round, not inside the current one; the budget is in USD like Discovery; only Owners and Admins create boardrooms and rooms, and rooms are shared by the organization; one minutes document per session (versions, not copies); real agents in the cast run on their own runtime and model unless a seat model is chosen; Suggest a cast leaves an unstarted session in the list marked "Setting up"; the Boardroom video is registered but unrecorded; `option_scoring` records scores as sticky notes, there is no tally yet; the Chair's chatter is not shown (its picks are).
+
+## Phase D as built: notes and deviations
+
+Details in `docs/ARCHITECTURE.md` section 38.3.
+
+- **One adapter, four providers.** `direct-model` on the Vercel AI SDK (pinned): Anthropic API, OpenAI, Google Gemini and one OpenAI-compatible endpoint (OpenRouter, Ollama, LiteLLM, LM Studio) with a base URL. Models are `provider:model`. It runs session turns and plain chats; it has no shell, edit or file tools and cannot work cards.
+- **Tool calls, not a shell.** Each `aom session|board|skill|ledger` verb is a typed tool (zod schemas are the verbs' own), offered by the turn's purpose from one shared table (`SESSION_PURPOSE_VERBS`) that the server also enforces. Calls go over the runner's IPC with the turn's token, so enforcement is the Claude Code path's. 12 steps per turn, 5 minutes per turn.
+- **Keys stay on the runner.** Sealed in the browser (the sudo-password key), 0600 `secrets/providers.json`, redacted everywhere; the server relays ciphertext and stores no provider state. The runner reports provider names and models in its runtime report; the choice lists are merged per workstation from that.
+- **Costs.** Provider price table in shared (`DIRECT_PROVIDERS`), Claude prices from the existing table; a model with no price is costed 0 and flagged ("Cost unknown for N turns", `shift_costs.cost_unknown`), never the Sonnet fallback.
+- **Validation.** `runtime_unavailable` at queue time (explicit model) and at dispatch (every turn). Mixed providers in one boardroom work; the Boardroom blocks with the reason when a seat's provider has no key.
+- **Phase C gap fixed.** `GET /api/threads/:id/messages` no longer returns a boardroom's sealed round 1 before the reveal.
+- **Deviations from the brief.** The CEO chat chip offers direct models marked "Conversation only" (a restricted conversation: no repositories, no `aom ceo`, never full power); plain chats on a direct model keep their memory on the runner. Discovery got an optional facilitator model (it had no model setting). The Boardroom dialog got a per-seat model picker (the server already took `castModels`; the page had none). Reasoning/"effort" settings are not offered on direct models.
+- **Open product questions (decided by default):**
+  1. Direct models are not offered for card work or for any agent default, even read-only roles; a reviewer on a direct model would need file reading.
+  2. One OpenAI-compatible endpoint per workstation (a second needs a second workstation or a proxy such as LiteLLM in front).
+  3. Model lists are static per provider plus the owner's extra ids; only the compatible endpoint's list is fetched. Prices cover the models listed; everything else is "cost unknown" until added to the table. Local models (Ollama) are therefore always "cost unknown", not free.
+  4. The key size limit of the sealing (190 bytes, RSA-OAEP) covers today's API keys; a longer credential (a service-account JSON) is not supported.
+  5. The Boardroom and Discovery dialogs have no workstation chooser, so the pickers show the union of the owner's workstations; `runtime_unavailable` is the safety net if the session's workstation lacks the provider.
+  6. Provider keys are per workstation, set by the workstation's owner only; there is no organization-wide key and no spend cap per provider (the session budget applies).
+  7. Direct-model chats keep their text on the workstation (`direct-chats/`); there is no retention setting.
+  8. Prompt caching is not set up for any provider (Anthropic needs explicit cache control); cached tokens are priced only when the provider reports them.
+  9. The release-age policy of the package manager was relaxed for the pinned AI SDK versions (`minimumReleaseAgeExclude` in `pnpm-workspace.yaml`); drop the entries once they are old enough.

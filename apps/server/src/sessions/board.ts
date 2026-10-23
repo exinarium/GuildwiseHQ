@@ -65,11 +65,11 @@ import {
   listDecisions,
   listDisagreements,
   type ModelRole,
-  workstationRuntimes,
 } from './board-state.ts';
 import { boardVerb } from './board-verbs.ts';
 import { sessionCost } from './cost.ts';
 import { availableCeo } from './discovery-state.ts';
+import { providersOf, runtimeReports } from './offer.ts';
 
 /** Why a queue attempt was refused for a reason the owner can fix: the session waits and the sweep retries. */
 const BLOCKING_CODES = new Set([
@@ -77,6 +77,7 @@ const BLOCKING_CODES = new Set([
   'project_paused',
   'project_budget_paused',
   'no_workstation',
+  'runtime_unavailable',
 ]);
 
 const clip = (s: string, n: number): string => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
@@ -428,9 +429,12 @@ export class BoardService {
 
   /** The model of a role: the owner's choice, else the cheap default of the workstation's runtime. */
   private async modelFor(t: Row, cfg: BoardConfig, role: ModelRole): Promise<ModelChoice> {
-    return (
-      cfg.models[role] ??
-      defaultModelFor(role, await workstationRuntimes(this.ctx.pool, t.workstation_id ?? null))
+    if (cfg.models[role]) return cfg.models[role] as ModelChoice;
+    const reports = await runtimeReports(this.ctx.pool, t.workstation_id ?? null);
+    return defaultModelFor(
+      role,
+      reports.filter((r) => r.available !== false).map((r) => r.id),
+      providersOf(reports),
     );
   }
 

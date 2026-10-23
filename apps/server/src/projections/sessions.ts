@@ -1,4 +1,4 @@
-import { costUsdMicros, type EventOf, PERSONA_HOST_AGENT_ID } from '@aom/shared';
+import { costUsdMicros, type EventOf, isCostUnknown, PERSONA_HOST_AGENT_ID } from '@aom/shared';
 import { exec, one } from '../db/sql.ts';
 import type { Projector, StoredEvent } from '../eventstore/types.ts';
 
@@ -147,8 +147,8 @@ export const sessionProjectors: Record<string, Projector> = {
     await exec(
       tx,
       `INSERT INTO shift_costs (shift_id, org_id, agent_id, project_id, kind, model, tokens_input, tokens_output,
-         tokens_cache_read, tokens_cache_write, cost_usd_micros, reported_usd_micros, ended_at, cost_stamped)
-       VALUES ($1,$2,$3,$4,'session',$5,$6,$7,$8,$9,$10,$11,$12,$13)
+         tokens_cache_read, tokens_cache_write, cost_usd_micros, reported_usd_micros, ended_at, cost_stamped, cost_unknown)
+       VALUES ($1,$2,$3,$4,'session',$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
        ON CONFLICT (shift_id) DO NOTHING`,
       [
         p.turnId,
@@ -164,6 +164,8 @@ export const sessionProjectors: Record<string, Projector> = {
         p.usage.costUsd === undefined ? null : Math.round(p.usage.costUsd * 1_000_000),
         e.createdAt,
         p.costMicros !== undefined,
+        // Stamped by the interceptor; an event from before it is judged by the model, which is deterministic on replay.
+        p.costUnknown ?? isCostUnknown(model),
       ],
     );
   },

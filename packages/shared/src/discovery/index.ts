@@ -305,6 +305,8 @@ export const SessionCostSchema = z.object({
   costMicros: z.number().int().nonnegative(),
   costUsd: z.number().nonnegative(),
   turns: z.number().int().nonnegative(),
+  /** Turns on a model without a price (a direct-model provider's unlisted model): their cost is unknown, counted as 0 above. */
+  unpricedTurns: z.number().int().nonnegative().default(0),
   budgetUsd: z.number().nullable(),
   exceeded: z.boolean(),
 });

@@ -8,12 +8,16 @@ import {
   type BoardStateDto,
   CHAIR_SEAT,
   DEFAULT_BOARD_MODELS,
+  DIRECT_RUNTIME,
+  directModelId,
   estimateNextRound,
   handlesOf,
   MODEL_CHOICES,
   type ModelChoice,
+  type ModelTier,
   parseBoardConfig,
   participantSlug,
+  type ReportedProvider,
 } from '@aom/shared';
 import { resolvePersona } from '../capabilities/registry.ts';
 import { isAdHocPersona, listParticipants } from '../commands/sessions.ts';
@@ -21,6 +25,7 @@ import type { Ctx } from '../context.ts';
 import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { sessionCost } from './cost.ts';
 import { availableCeo, sessionDocs } from './discovery-state.ts';
+import { providersOf, runtimeReports } from './offer.ts';
 import { turnDto } from './turns.ts';
 
 /** The purposes of board turns, as `session_turns.meta.purpose`. */
@@ -39,26 +44,57 @@ export async function workstationRuntimes(db: Queryable, workstationId: string |
   return list.filter((r) => r.id && r.available !== false).map((r) => r.id as string);
 }
 
+/** The direct-model providers a workstation offers (empty: none, or the workstation is unknown). */
+export async function workstationProviders(
+  db: Queryable,
+  workstationId: string | null,
+): Promise<ReportedProvider[]> {
+  return providersOf(await runtimeReports(db, workstationId));
+}
+
 export type ModelRole = 'persona' | 'chair' | 'synthesis';
+
+/** The size a role wants when its default runtime is not on offer: cheap personas, a middle Chair, a strong synthesis. */
+const ROLE_TIER: Record<ModelRole, ModelTier> = { persona: 'small', chair: 'medium', synthesis: 'large' };
+const TIER_ORDER: readonly ModelTier[] = ['small', 'medium', 'large'];
+
+/** The model of `options` closest to `want` (exact tier first, then the nearest size, then the first). */
+function byTier<T extends { tier?: ModelTier | undefined }>(
+  options: readonly T[],
+  want: ModelTier,
+): T | undefined {
+  const rank = (t: ModelTier | undefined) => TIER_ORDER.indexOf(t ?? 'medium');
+  const w = rank(want);
+  return [...options].sort((x, y) => Math.abs(rank(x.tier) - w) - Math.abs(rank(y.tier) - w))[0];
+}
 
 /**
  * The model a role runs on when the owner chose nothing: the cheap defaults of `DEFAULT_BOARD_MODELS`, or, when the
- * workstation does not offer that runtime, the first runtime it does offer (cheapest model for personas, the strongest for the
- * synthesis). This is the one place phase D (other providers) changes how a seat picks its runtime and model.
+ * workstation does not offer that runtime, the first runtime it does offer: a built-in one by the role's size (cheapest model
+ * for personas, the strongest for the synthesis), else a direct-model provider the workstation has a key for, by the same size.
+ * This is the one place that decides how a seat picks its runtime and model when the owner chose none.
  */
-export function defaultModelFor(role: ModelRole, runtimes: readonly string[]): ModelChoice {
+export function defaultModelFor(
+  role: ModelRole,
+  runtimes: readonly string[],
+  providers: readonly ReportedProvider[] = [],
+): ModelChoice {
   const d = DEFAULT_BOARD_MODELS[role];
   if (!runtimes.length || runtimes.includes(d.runtime)) return d;
-  const runtime = runtimes.find((r) => MODEL_CHOICES[r]) ?? runtimes[0] ?? d.runtime;
-  const models = MODEL_CHOICES[runtime] ?? [];
-  if (!models.length) return d;
-  const pick =
-    role === 'persona'
-      ? models[0]
-      : role === 'chair'
-        ? models[Math.min(1, models.length - 1)]
-        : models.at(-1);
-  return { runtime, model: (pick ?? models[0])?.id ?? d.model };
+  const builtin = runtimes.find((r) => MODEL_CHOICES[r]);
+  if (builtin) {
+    const models = MODEL_CHOICES[builtin] ?? [];
+    const pick = byTier(models, ROLE_TIER[role]);
+    return { runtime: builtin, model: (pick ?? models[0])?.id ?? d.model };
+  }
+  const direct = providers.flatMap((p) =>
+    p.models.map((m) => ({ id: directModelId(p.id, m.id), tier: m.tier })),
+  );
+  if (runtimes.includes(DIRECT_RUNTIME) && direct.length) {
+    const pick = byTier(direct, ROLE_TIER[role]);
+    if (pick) return { runtime: DIRECT_RUNTIME, model: pick.id };
+  }
+  return { runtime: runtimes.find((r) => r !== DIRECT_RUNTIME) ?? runtimes[0] ?? d.runtime, model: d.model };
 }
 
 export const noteDto = (r: Row, userId: string): BoardNoteDto => ({

@@ -44,6 +44,7 @@ import { applyOrgFolderResult, applyOrgFoldersReport } from '../commands/org-fol
 import { dispatchOrgGraph } from '../commands/org-graph.ts';
 import { applyOutboundResult, finishOutboundCommand, queueApprovedFor } from '../commands/outbox.ts';
 import { applyBranchCheckResult } from '../commands/phases.ts';
+import { applyProviderKeyResult } from '../commands/provider-keys.ts';
 import { questionStatus } from '../commands/question-flow.ts';
 import { applyReleasePrResult } from '../commands/release-pr.ts';
 import { applyRepoCreateResult, repoCreateRpc } from '../commands/repo-create.ts';
@@ -589,6 +590,17 @@ export class RunnerHandlers {
             msg.ok,
             msg.result,
             String(cmd.payload.keyId ?? ''),
+          );
+        } else if (cmd?.type === 'provider.key.set' || cmd?.type === 'provider.key.clear') {
+          // The sealed key is forgotten whatever the answer was; only the fact is kept for the page.
+          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+          await applyProviderKeyResult(
+            this.ctx,
+            conn.workstationId,
+            msg.commandId,
+            cmd.payload,
+            msg.ok,
+            msg.result,
           );
         } else if (cmd?.type === 'env.secret.set') {
           // Like the sudo password: the ciphertext is forgotten whatever the answer was.

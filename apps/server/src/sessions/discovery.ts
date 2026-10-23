@@ -18,6 +18,7 @@ import {
   getBuiltinRole,
   HANDOFF_NOTE_MAX_CHARS,
   isBoardRpc,
+  isKnownChoice,
   isSessionRpc,
   PANEL_SECTIONS,
   type PanelSection,
@@ -200,6 +201,8 @@ export class DiscoveryService {
           'This organization has no CEO that can take part: choose "Owner only", or appoint a CEO first.',
         );
     }
+    if (req.model && !isKnownChoice(req.model))
+      throw badRequest('unknown_model', 'unknown model choice for the facilitator');
     const analyst = await one(
       ctx.pool,
       `SELECT a.id FROM agents a JOIN workstations ws ON ws.id = a.workstation_id
@@ -221,6 +224,7 @@ export class DiscoveryService {
       activeSince: now.toISOString(),
       ...(req.timeBoxMinutes ? { timeBoxMinutes: req.timeBoxMinutes } : {}),
       ...(req.budgetUsd ? { budgetUsd: req.budgetUsd } : {}),
+      ...(req.model ? { model: req.model } : {}),
       ...(req.ceoMode === 'ceo_prep'
         ? { ceoPrep: { state: 'running', turns: 0, cap: DISCOVERY_PREP_TURN_CAP } }
         : {}),
@@ -450,6 +454,8 @@ export class DiscoveryService {
           message: built.message,
           instructions: built.instructions,
           context: { mode: 'all', limit: 20 },
+          // The owner's choice for the facilitator (any runtime the workstation offers); absent: the facilitator's own.
+          ...(cfg.model ? { model: cfg.model } : {}),
         },
         { meta: { purpose: 'facilitator', trigger: trigger.kind } },
       );
@@ -1147,6 +1153,11 @@ export class DiscoveryService {
       }
       if (req.timeBoxMinutes !== undefined) cfg.timeBoxMinutes = req.timeBoxMinutes;
       if (req.stance) cfg.stance = req.stance;
+      if (req.model !== undefined) {
+        if (req.model && !isKnownChoice(req.model))
+          throw badRequest('unknown_model', 'unknown model choice for the facilitator');
+        cfg.model = req.model;
+      }
       if (!Object.keys(cfg).length) return;
       await this.ctx.store.append([this.configEvent(t, cfg, userActor(userId))], { tx });
     });

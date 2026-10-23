@@ -98,6 +98,7 @@ import { platformRoutes } from './routes/platform.ts';
 import { platformTeamRoutes } from './routes/platform-team.ts';
 import { projectWorkflowRoutes } from './routes/project-workflows.ts';
 import { projectRoutes } from './routes/projects.ts';
+import { providerRoutes } from './routes/providers.ts';
 import { pushRoutes } from './routes/push.ts';
 import { qaRoutes } from './routes/qa.ts';
 import { reportingRoutes } from './routes/reporting.ts';
@@ -395,6 +396,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   await app.register(graphRoutes(ctx));
   await app.register(deliveryRoutes(ctx));
   await app.register(devopsRoutes(ctx));
+  await app.register(providerRoutes(ctx));
   await app.register(runRoutes(ctx));
   await app.register(commitAsRoutes(ctx));
   await app.register(sharingRoutes(ctx));
