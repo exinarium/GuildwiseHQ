@@ -86,7 +86,9 @@ export function readPackTree(dir: string): {
         st.size <= CAPABILITY_MAX_FILE_BYTES &&
         (TEXT_EXT.test(name) || TEXT_NAMES.has(name))
       ) {
-        if (++count > MAX_TREE_FILES || (bytes += st.size) > MAX_TREE_BYTES) {
+        count++;
+        bytes += st.size;
+        if (count > MAX_TREE_FILES || bytes > MAX_TREE_BYTES) {
           truncated = true;
           return;
         }
