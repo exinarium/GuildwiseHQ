@@ -17,6 +17,8 @@ import {
   useSetPhase,
 } from '../api/queries/discovery.ts';
 import { Composer } from '../components/chat/Composer.tsx';
+import { DelegateGrants } from '../components/delegation/DelegateGrants.tsx';
+import { DelegationSteps } from '../components/delegation/DelegationSteps.tsx';
 import { CostMeter } from '../components/discovery/CostMeter.tsx';
 import { DiscoveryConversation, type LiveTurn } from '../components/discovery/DiscoveryConversation.tsx';
 import { DraftPanel } from '../components/discovery/DraftPanel.tsx';
@@ -286,6 +288,8 @@ export function DiscoverySession() {
           disabled={setPhase.isPending}
         />
         <CostMeter state={s} canManage={canManage && !archived} />
+        <DelegationSteps steps={s.delegations} />
+        <DelegateGrants ownerKind="session" ownerId={id} />
         {canManage && <SessionAdmin threadId={id} archived={archived} backTo="/discovery" />}
         <ErrorBox error={setPhase.error ?? pause.error ?? resume.error ?? carryOn.error} />
       </div>

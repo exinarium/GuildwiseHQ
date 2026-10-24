@@ -42,6 +42,7 @@ import {
 } from '../components/agents/ProjectAccess.tsx';
 import { PickPackToHire } from '../components/capabilities/PickPackToHire.tsx';
 import { RoleOffers } from '../components/capabilities/RoleOffers.tsx';
+import { DelegateGrants } from '../components/delegation/DelegateGrants.tsx';
 import { AgentAvatar } from '../components/Face.tsx';
 import { AgentStats, WorkQualityPanel } from '../components/hr/AgentStats.tsx';
 import { ChangeModelDialog, ChangeRoleDialog } from '../components/hr/ChangeDialogs.tsx';
@@ -443,6 +444,7 @@ function AgentCard({
         />
       )}
       {!a.isDevops && <PlaybookGrants agentId={a.id} />}
+      {!a.isDevops && a.roleKey !== 'ceo' && <DelegateGrants ownerKind="agent" ownerId={a.id} />}
       {a.isDevops ? (
         <div className="mt-auto flex items-center gap-2">
           <Badge tone="violet">DevOps engineer</Badge>

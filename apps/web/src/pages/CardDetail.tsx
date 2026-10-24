@@ -39,6 +39,7 @@ import {
 import { CardPhase } from '../components/CardPhase.tsx';
 import { MoveToSheet } from '../components/cards/MoveToSheet.tsx';
 import { DependenciesPanel } from '../components/DependenciesPanel.tsx';
+import { DelegationStep } from '../components/delegation/DelegationSteps.tsx';
 import { AskDevOpsButton } from '../components/devops/AskDevOps.tsx';
 import { EvidencePanel, TestingLinks } from '../components/EvidencePanel.tsx';
 import { AgentAvatar } from '../components/Face.tsx';
@@ -233,6 +234,8 @@ export function CardDetailView({
   const timeline = [
     ...transitions.map((t) => ({ ...t, sort: t.at, tie: t.id, entry: 'transition' as const })),
     ...activity.map((a) => ({ ...a, sort: a.at, tie: a.id, entry: 'activity' as const })),
+    // what the card's agents delegated, as sub-steps between the transitions
+    ...(data.delegations ?? []).map((d, i) => ({ ...d, sort: d.at, tie: i, entry: 'delegation' as const })),
   ].sort(
     (a, b) =>
       a.sort.localeCompare(b.sort) ||
@@ -754,6 +757,11 @@ export function CardDetailView({
                         <span className="text-xs text-subtle">
                           {t.reason} · {formatDateTime(t.at)}
                         </span>
+                      </li>
+                    ) : t.entry === 'delegation' ? (
+                      <li key={`d${t.delegateId}`} data-testid="timeline-delegation">
+                        <DelegationStep d={t} />
+                        <span className="pl-3 text-xs text-subtle">{formatDateTime(t.at)}</span>
                       </li>
                     ) : (
                       <li

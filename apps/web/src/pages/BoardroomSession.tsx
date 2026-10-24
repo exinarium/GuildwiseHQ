@@ -21,6 +21,8 @@ import { BoardMeters } from '../components/boardroom/BoardMeters.tsx';
 import { MinutesBudgetCard } from '../components/boardroom/MinutesBudgetCard.tsx';
 import { MinutesPanel } from '../components/boardroom/MinutesPanel.tsx';
 import { Whiteboard } from '../components/boardroom/Whiteboard.tsx';
+import { DelegateGrants } from '../components/delegation/DelegateGrants.tsx';
+import { DelegationSteps } from '../components/delegation/DelegationSteps.tsx';
 import { ReadOnlyHint } from '../components/session/ReadOnlyHint.tsx';
 import { ArchivedBanner, SessionAdmin } from '../components/session/SessionAdmin.tsx';
 import { TimeWarning } from '../components/session/SessionCountdown.tsx';
@@ -280,6 +282,8 @@ export function BoardroomSession() {
       />
       <div className="mb-4 flex flex-col gap-3">
         <BoardMeters state={s} canManage={canManage && !archived} />
+        <DelegationSteps steps={s.delegations} />
+        <DelegateGrants ownerKind="session" ownerId={id} />
         {canManage && (
           <SessionAdmin
             threadId={id}

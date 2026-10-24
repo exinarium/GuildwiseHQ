@@ -70,6 +70,10 @@ To hire the same role again, create a new agent with a different name. Retired n
 
 Each agent card has an **External tools (MCP)** section listing the plugin MCP servers (Jira, Confluence, ...) your workstations report, as switches with a plain-language note. Switch one on to let that agent call its tools. Everyone who can see the agent reads the switches; only the organization **Owner** can change them (an Administrator can switch a server off but not on). The server must also be granted to the agent's project in the project settings ([MCP servers](/help/projects#mcp-servers)), otherwise it still cannot be used. A server whose tools can write, send or delete lets the agent change data in that service as you, so prefer read-only use. The DevOps engineer has no such section. A server that is not signed in on a workstation shows **Needs sign-in** with the steps to take on that machine; if the Claude login itself expires, agents on that workstation pause (their cards wait, nothing fails) until you run `claude` and `/login` there.
 
+## Delegation {#delegation}
+
+Off by default. Under **Who it may delegate to** on an agent's card (Owner, Admin or its manager), list the personas or agents it may hand sub-tasks to. Each runs on its own model, never with wider tools than the agent, and shows as a sub-step on the card with its cost.
+
 ## HR board {#hr-board}
 
 The HR board is the Agents page. It shows at a glance:

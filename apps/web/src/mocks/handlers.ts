@@ -30,6 +30,7 @@ import {
   workflows,
 } from './db.ts';
 import { chatHandlers } from './handlers-chat.ts';
+import { delegationHandlers } from './handlers-delegation.ts';
 import { deploySetupHandlers } from './handlers-deploy-setup.ts';
 import { extraHandlers } from './handlers-extra.ts';
 import { packHandlers } from './handlers-packs.ts';
@@ -521,6 +522,7 @@ export const handlers = [
     }),
   ),
   ...packHandlers,
+  ...delegationHandlers,
   ...extraHandlers,
 ];
 
