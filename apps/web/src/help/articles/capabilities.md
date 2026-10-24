@@ -29,12 +29,14 @@ For a private git repository add a deploy key (ssh) or token (https). Your brows
 
 ## Hire from a pack {#hire}
 
+Members can hire too, for projects they are on and on their own workstation. Owners and Admins can also **read the text** of an organization pack before approving it, with a diff against the version approved before (the text is encrypted for your browser only).
+
 On an approved pack, **Hire from this pack** turns a persona into an agent tagged like *BMAD · analyst · v6.12.4*. It gets read access unless the persona asks for more and you may grant it. **Add all agents** hires every persona. If the pack changes a persona you get a new version to review, never applied by itself. An agent whose pack lost its approval keeps working and shows a warning.
 
 ## Chat with a persona {#chat-with-a-persona}
 
-**Chat** on a persona opens a one-to-one chat on your own workstation. It only reads, and its cost is tracked. A private persona is only yours.
+**Chat** on a persona opens a one-to-one chat on your own workstation. It only reads, and its cost is tracked. You can set a cost limit and a time limit for the chat; chats are deleted after 90 days. A private persona is only yours.
 
 ## Playbooks and the / menu {#playbooks}
 
-Type **/** in a chat or session box to list the playbooks and skills you may use (private packs only to you). A skill adds an instruction; a playbook runs in the chat, step by step, or as a new guided session. An agent starts one only if allowed under **Playbooks it may start** on its card (empty by default).
+Type **/** in a chat or session box to list the playbooks and skills you may use (private packs only to you). Text after the command (`/brainstorm pricing for teams`) is the input of the playbook. A skill adds an instruction; a playbook runs in the chat, step by step, or as a new guided session. An agent starts one only if allowed under **Playbooks it may start** on its card (empty by default).

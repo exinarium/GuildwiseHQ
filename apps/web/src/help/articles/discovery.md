@@ -38,7 +38,7 @@ Ideas, assumptions, open questions, decisions and parked items; the analyst keep
 
 The page shows cost and time used (also in **Costs**). With a cost limit, no new turn starts once it is used up; raise it to carry on.
 
-A **time limit** works like a meeting: a countdown shows what is left, and about 5 minutes before the end the analyst steers to wrap-up. At time-up nothing new starts and you choose **Extend** (+10, +15 or +30 minutes) or **Wrap up now** (the analyst captures where you got to). Paused time does not count. Change either limit in the session's settings.
+A **time limit** works like a meeting: a countdown shows what is left, and about 5 minutes before the end the analyst steers to wrap-up. At time-up nothing new starts and you choose **Extend** (+10, +15 or +30 minutes) or **Wrap up now** (the analyst captures where you got to). Time spent waiting for your decision counts. You get a push notification at the warning and at time-up. Paused time does not count. Change either limit in the session's settings.
 
 ## Draft, approve and hand to the BA {#prd}
 

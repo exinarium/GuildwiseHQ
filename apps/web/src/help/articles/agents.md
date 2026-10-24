@@ -72,7 +72,7 @@ Each agent card has an **External tools (MCP)** section listing the plugin MCP s
 
 ## Delegation {#delegation}
 
-Off by default. Under **Who it may delegate to** on an agent's card (Owner, Admin or its manager), list the personas or agents it may hand sub-tasks to. Each runs on its own model, never with wider tools than the agent, and shows as a sub-step on the card with its cost.
+Off by default. Under **Who it may delegate to** on an agent's card (Owner, Admin or its manager), list the personas or agents it may hand sub-tasks to. Each runs on its own model, never with wider tools than the agent (when it would need more it runs with fewer, and the card says so), and shows as a sub-step on the card with its cost. Owners and Admins can also set delegation for a whole **role** (Org designer): it covers every agent of the role, including future hires, and shows as inherited on each card. A grant can also set the model the target runs on.
 
 ## HR board {#hr-board}
 

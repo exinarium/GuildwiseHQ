@@ -39,7 +39,7 @@ Sticky notes in five columns (Ideas, Risks, Questions, Decisions, Parked). Seats
 
 The meter shows the cost so far and the estimate for the **next round**. With a **cost limit**, no new turn starts once it is used up; raise it or end the session. If it runs out before the Chair can write the minutes, you choose: **Write minutes without the Chair's summary**, or **Raise the limit**.
 
-A **time limit** is a countdown. About 5 minutes before the end the Chair moves to a final round. At time-up nothing new starts until you **Extend** (+10, +15, +30) or **Wrap up now** (minutes). Paused time does not count.
+A **time limit** is a countdown. About 5 minutes before the end the Chair moves to a final round. At time-up nothing new starts until you **Extend** (+10, +15, +30) or **Wrap up now** (minutes). Paused time does not count, but time spent waiting for your decision does. You get a push notification at the warning and at time-up (switch it off under Notifications).
 
 ## Minutes and the PRD {#minutes}
 
@@ -47,4 +47,6 @@ When the session ends, or on **Write minutes now**, the Chair writes the **minut
 
 **Pull into PRD** starts a Discovery session in the capture phase (with your CEO, when you have one), with a PRD draft seeded from the minutes, the decisions and the whiteboard. Both sessions link to each other.
 
-A finished boardroom can be **archived** (read-only) or **deleted** by its creator or an Owner or Admin.
+A finished boardroom can be **archived** (read-only). Archiving one that is still running asks you to confirm: it ends the room and writes the minutes first, then archives it.
+
+A boardroom can be **deleted** by its creator or an Owner or Admin; an archived or **deleted** by its creator or an Owner or Admin.
