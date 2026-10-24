@@ -150,6 +150,8 @@ CORS or CSP change, and the Caddy in front of the app needs no extra route.
   `sha256` and size, captions, poster, duration; plus one content hash of the whole folder). The web app shows a video only
   when the manifest lists it; with the media service down or the manifest missing the video UI is simply hidden, and the
   app answers `/videos/*` with 503 (404 when `AOM_MEDIA_URL` is unset).
+  The route is open (the help videos play before sign-in), so it limits each client address: at most `AOM_MEDIA_MAX_CONCURRENT_PER_IP`
+  (8) simultaneous requests and `AOM_MEDIA_RATE_PER_MIN` (240) per minute, then `429` with `Retry-After`; `0` turns a limit off.
 - **Publishing new or changed videos.** Record with `e2e/video/record.sh` (files land in `media/videos/`), set `published:
   true` in `apps/web/src/lib/videos.ts` for a new slug, commit, then build and restart only the media service:
   ```bash

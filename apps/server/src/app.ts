@@ -496,7 +496,10 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   }
 
   // The help videos live in the media container: /videos/* is forwarded there (404 when AOM_MEDIA_URL is unset).
-  registerMediaProxy(app, config.mediaUrl);
+  registerMediaProxy(app, config.mediaUrl, {
+    maxConcurrentPerIp: config.mediaMaxConcurrentPerIp,
+    ratePerMin: config.mediaRatePerMin,
+  });
 
   if (config.serveWeb) {
     const root = webDistDir(config);

@@ -35,11 +35,68 @@ export function mediaTarget(rawUrl: string): string | null {
   return path + (SAFE_QUERY.test(query) && query !== '?' ? query : '');
 }
 
+/** How much one client address may take from the media service (an unauthenticated route that streams tens of MB). */
+export interface MediaLimits {
+  /** Simultaneous requests per address; 0 = no limit. */
+  maxConcurrentPerIp: number;
+  /** Requests per rolling minute per address; 0 = no limit. */
+  ratePerMin: number;
+}
+export const DEFAULT_MEDIA_LIMITS: MediaLimits = { maxConcurrentPerIp: 8, ratePerMin: 240 };
+
+/** Per-address concurrency and rate. In memory; an address with nothing running and nothing in the last minute is forgotten. */
+export function createMediaLimiter(limits: MediaLimits, now: () => number = Date.now) {
+  const byIp = new Map<string, { active: number; hits: number[] }>();
+  const prune = (t: number): void => {
+    for (const [ip, e] of byIp) {
+      while (e.hits.length && t - (e.hits[0] as number) >= 60_000) e.hits.shift();
+      if (e.active === 0 && e.hits.length === 0) byIp.delete(ip);
+    }
+  };
+  return {
+    /** A release function when the request may go on, else the reason and when to retry. */
+    take(ip: string): { release: () => void } | { refused: 'concurrent' | 'rate'; retryAfterSec: number } {
+      const t = now();
+      if (byIp.size > 1000) prune(t);
+      let e = byIp.get(ip);
+      if (!e) {
+        e = { active: 0, hits: [] };
+        byIp.set(ip, e);
+      }
+      while (e.hits.length && t - (e.hits[0] as number) >= 60_000) e.hits.shift();
+      if (limits.ratePerMin > 0 && e.hits.length >= limits.ratePerMin)
+        return {
+          refused: 'rate',
+          retryAfterSec: Math.max(1, Math.ceil((60_000 - (t - (e.hits[0] as number))) / 1000)),
+        };
+      if (limits.maxConcurrentPerIp > 0 && e.active >= limits.maxConcurrentPerIp)
+        return { refused: 'concurrent', retryAfterSec: 1 };
+      e.hits.push(t);
+      e.active++;
+      const entry = e;
+      let released = false;
+      return {
+        release: () => {
+          if (released) return;
+          released = true;
+          entry.active = Math.max(0, entry.active - 1);
+        },
+      };
+    },
+    size: () => byIp.size,
+  };
+}
+
 const fail = (reply: FastifyReply, status: number, code: string, message: string) =>
   reply.code(status).header('cache-control', 'no-store').send({ error: { code, message } });
 
-export function registerMediaProxy(app: FastifyInstance, mediaUrl: string | undefined): void {
+export function registerMediaProxy(
+  app: FastifyInstance,
+  mediaUrl: string | undefined,
+  limits: MediaLimits = DEFAULT_MEDIA_LIMITS,
+): void {
   const base = mediaUrl ? new URL(mediaUrl) : null;
+  const limiter = createMediaLimiter(limits);
   const client = base?.protocol === 'https:' ? https : http;
 
   app.route({
@@ -49,6 +106,18 @@ export function registerMediaProxy(app: FastifyInstance, mediaUrl: string | unde
       if (!base) return fail(reply, 404, 'not_found', 'videos are not available');
       const target = mediaTarget(req.raw.url ?? '');
       if (!target) return fail(reply, 404, 'not_found', 'not found');
+      const slot = limiter.take(req.ip);
+      if ('refused' in slot) {
+        void reply.header('retry-after', String(slot.retryAfterSec));
+        return fail(
+          reply,
+          429,
+          'too_many_requests',
+          'too many video requests from this address; try again shortly',
+        );
+      }
+      // freed when the response is over, however it ends (finished, cut, client gone, upstream failed)
+      reply.raw.once('close', slot.release);
 
       const headers: Record<string, string> = { accept: '*/*', 'accept-encoding': 'identity' };
       for (const h of REQUEST_HEADERS) {
@@ -60,6 +129,7 @@ export function registerMediaProxy(app: FastifyInstance, mediaUrl: string | unde
         const done = () => {
           if (!settled) {
             settled = true;
+            slot.release();
             resolve();
           }
         };

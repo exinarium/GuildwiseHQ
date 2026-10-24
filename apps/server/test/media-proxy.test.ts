@@ -1,7 +1,7 @@
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { mediaTarget } from '../src/media-proxy.ts';
+import { createMediaLimiter, mediaTarget } from '../src/media-proxy.ts';
 import { createTestApp, type TestApp } from './helpers/app.ts';
 import { closeAdminPool } from './helpers/db.ts';
 
@@ -214,5 +214,69 @@ describe('the /videos proxy', () => {
       expect(r.statusCode, method).toBeGreaterThanOrEqual(400);
     }
     expect(seen).toHaveLength(0);
+  });
+});
+
+describe('the /videos limits per address (security review finding 15)', () => {
+  it('limiter: concurrency and a rolling-minute rate, freed on release, forgotten when idle', () => {
+    let t = 1_000_000;
+    const lim = createMediaLimiter({ maxConcurrentPerIp: 2, ratePerMin: 5 }, () => t);
+    const a = lim.take('1.1.1.1');
+    const b = lim.take('1.1.1.1');
+    expect('release' in a && 'release' in b).toBe(true);
+    expect(lim.take('1.1.1.1')).toMatchObject({ refused: 'concurrent' });
+    // another address is unaffected
+    expect('release' in lim.take('2.2.2.2')).toBe(true);
+    if ('release' in a) a.release();
+    if ('release' in a) a.release(); // twice is harmless
+    const c = lim.take('1.1.1.1');
+    expect('release' in c).toBe(true);
+    if ('release' in b) b.release();
+    if ('release' in c) c.release();
+    // 3 so far for 1.1.1.1, two more fit the rate of 5, then it is refused with a retry time
+    for (let i = 0; i < 2; i++) {
+      const x = lim.take('1.1.1.1');
+      if ('release' in x) x.release();
+    }
+    const over = lim.take('1.1.1.1');
+    expect(over).toMatchObject({ refused: 'rate' });
+    expect((over as { retryAfterSec: number }).retryAfterSec).toBeGreaterThan(0);
+    t += 61_000;
+    expect('release' in lim.take('1.1.1.1')).toBe(true);
+  });
+
+  it('the route answers 429 with Retry-After past the rate, and recovers for other addresses', async () => {
+    const app = await createTestApp({ env: { AOM_MEDIA_URL: fakeUrl, AOM_MEDIA_RATE_PER_MIN: '3' } });
+    try {
+      for (let i = 0; i < 3; i++)
+        expect(
+          (await app.app.inject({ method: 'GET', url: '/videos/desk.mp4', remoteAddress: '9.9.9.9' }))
+            .statusCode,
+        ).toBe(200);
+      const over = await app.app.inject({ method: 'GET', url: '/videos/desk.mp4', remoteAddress: '9.9.9.9' });
+      expect(over.statusCode).toBe(429);
+      expect(Number(over.headers['retry-after'])).toBeGreaterThan(0);
+      expect(
+        (await app.app.inject({ method: 'GET', url: '/videos/desk.mp4', remoteAddress: '8.8.4.4' }))
+          .statusCode,
+      ).toBe(200);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('the route refuses a third simultaneous request of one address and frees the slot afterwards', async () => {
+    const app = await createTestApp({
+      env: { AOM_MEDIA_URL: fakeUrl, AOM_MEDIA_MAX_CONCURRENT_PER_IP: '2' },
+    });
+    try {
+      const get = () =>
+        app.app.inject({ method: 'GET', url: '/videos/slow-body.mp4', remoteAddress: '7.7.7.7' });
+      const results = await Promise.all([get(), get(), get()]);
+      expect(results.map((r) => r.statusCode).sort()).toEqual([200, 200, 429]);
+      expect((await get()).statusCode).toBe(200);
+    } finally {
+      await app.close();
+    }
   });
 });

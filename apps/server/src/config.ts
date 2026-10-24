@@ -30,6 +30,9 @@ const EnvSchema = z.object({
       .refine((u) => /^https?:\/\//.test(u), 'must be an http(s) URL')
       .optional(),
   ),
+  /** Per client address: simultaneous /videos requests (0 = no limit) and requests per minute (0 = no limit). */
+  AOM_MEDIA_MAX_CONCURRENT_PER_IP: z.coerce.number().int().min(0).max(1000).default(8),
+  AOM_MEDIA_RATE_PER_MIN: z.coerce.number().int().min(0).max(100000).default(240),
   AOM_RATE_LIMIT: bool(true),
   AOM_TEST_CLOCK: bool(false),
   AOM_ALLOW_LOCAL_REMOTES: bool(false),
@@ -152,6 +155,8 @@ export interface Config {
   webDist: string | undefined;
   /** The media service (help videos), e.g. `http://media:80`: `/videos/*` is forwarded there. Unset: videos are off. */
   mediaUrl: string | undefined;
+  mediaMaxConcurrentPerIp: number;
+  mediaRatePerMin: number;
   rateLimit: boolean;
   testClock: boolean;
   /** Accept `file://` and absolute-path git remotes (tests and the e2e harness only). */
@@ -254,6 +259,8 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     serveWeb: e.AOM_SERVE_WEB,
     webDist: e.AOM_WEB_DIST,
     mediaUrl: e.AOM_MEDIA_URL,
+    mediaMaxConcurrentPerIp: e.AOM_MEDIA_MAX_CONCURRENT_PER_IP,
+    mediaRatePerMin: e.AOM_MEDIA_RATE_PER_MIN,
     rateLimit: e.AOM_RATE_LIMIT,
     testClock: e.AOM_TEST_CLOCK,
     allowLocalRemotes: e.AOM_ALLOW_LOCAL_REMOTES,
