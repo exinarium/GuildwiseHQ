@@ -181,6 +181,9 @@ export async function hireFromPack(
   const p = await usablePackFor(ctx.pool, who.userId, who.orgId, packId);
   if (!p.pinned_sha || !isTrustedRow(p))
     throw conflict('pack_not_trusted', 'the pack has to be approved before agents can be hired from it');
+  // Members hire only for a project they are on (the normal hire rule); said now, not after the persona was read.
+  if (!isOrgManager({ orgRole: who.role }) && !req.allowedProjectIds?.length)
+    throw forbidden('you cannot hire agents here: choose a project you are on, or ask an Owner or Admin');
   const items = personaItems(p);
   for (const it of req.items)
     if (!items.some((i) => shortKey(p.name, i.key) === it.key))

@@ -241,6 +241,12 @@ export const sessionScope = (t: Row) => orgScope(t.org_id);
 
 /** `POST /api/sessions`: a thread of kind `discovery` or `boardroom`, its participants and its first workstation. */
 export async function createSession(ctx: Ctx, who: Who, req: CreateSessionRequest): Promise<SessionDto> {
+  // A persona chat is started with its own call (`POST /api/persona-chats`): it checks the persona and the workstation.
+  if (req.kind === 'persona_chat')
+    throw badRequest(
+      'use_persona_chats',
+      'start a chat with a persona from the registry (POST /api/persona-chats)',
+    );
   // Any member of the organization may start a session; it runs on their own workstation (assertWorkstation below).
   return withAppendTx(ctx.pool, async (tx) => {
     if (req.projectId) {
