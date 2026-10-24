@@ -46,10 +46,6 @@ The BA works with your rights: it can only use projects you are a member of. It 
 
 Other agents cannot create cards from chat; only the BA can. For a ticket from Jira or GitHub, an [intake](/help/intake-and-outbox#intake) does the same with the ticket attached.
 
-## Playbooks and skills with / {#slash}
-
-Type **/** in the message box to pick a playbook or a skill. A playbook runs in this chat, step by step, or as a new guided session. See [Playbooks and the / menu](/help/capabilities#playbooks).
-
 ## Archiving chats {#archiving-chats}
 
 Click the menu on a thread and choose **Close chat** to tidy it away. Closed chats move to the **Archived** view of the chat list, and **Restore to the list** brings one back. **Delete chat** removes a conversation for good, but a chat linked to a card cannot be deleted: it stays in the card's history.

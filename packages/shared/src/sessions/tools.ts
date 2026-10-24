@@ -10,7 +10,6 @@ import {
   BoardScoreParamsSchema,
 } from '../boardroom/index.ts';
 import { DelegateRunParamsSchema } from '../delegate/index.ts';
-import { PlaybookRunParamsSchema, SessionStepParamsSchema } from '../playbooks/index.ts';
 import {
   PanelSectionSchema,
   SessionAnswerParamsSchema,
@@ -20,6 +19,7 @@ import {
   SessionProposeParamsSchema,
   SessionValidateParamsSchema,
 } from '../discovery/index.ts';
+import { PlaybookRunParamsSchema, SessionStepParamsSchema } from '../playbooks/index.ts';
 
 /**
  * What each kind of session turn may do through the `aom` verbs, by `session_turns.meta.purpose`. The server enforces it

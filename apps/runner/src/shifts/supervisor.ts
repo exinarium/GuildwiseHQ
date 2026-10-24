@@ -62,7 +62,6 @@ import { type CapabilityRegistry, type ProjectIndexResult, skillRpc } from '../c
 import type { RunnerConfig } from '../config.ts';
 import type { Outbox } from '../connection/outbox.ts';
 import { DELEGATE_NOTE, DelegateRunner } from '../delegate/delegate.ts';
-import { playbookNote } from '../playbooks/note.ts';
 import { recordDevopsAudit } from '../devops/audit.ts';
 import { redactCommand } from '../devops/guard.ts';
 import { cardPayload, shiftTexts } from '../devops/requests.ts';
@@ -103,6 +102,7 @@ import { diskProblem } from '../health/disk.ts';
 import type { IpcServer, ShiftIpcHandler } from '../ipc/server.ts';
 import { type Logger, nullLogger } from '../log.ts';
 import type { RunnerPaths } from '../paths.ts';
+import { playbookNote } from '../playbooks/note.ts';
 import { mergeReadFolders, resolveOrgFolderRepos, resolveReadRepos } from '../read-repos.ts';
 import { preparePublication } from '../research/publish.ts';
 import { type EnvForwards, startForwards } from '../runs/forward.ts';

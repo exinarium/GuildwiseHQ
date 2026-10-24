@@ -41,7 +41,11 @@ export const BuiltinDiscoveryPlaybookSchema = z.enum(DISCOVERY_PLAYBOOKS);
  * A built-in playbook, a registry playbook of an approved pack (`bmad:brainstorming`, tagged `discovery`), or (R3b, a guided
  * playbook session) any usable playbook of the registry: a vault or project playbook has a plain key.
  */
-export const DiscoveryPlaybookSchema = z.union([BuiltinDiscoveryPlaybookSchema, PackedKeySchema, CapabilityKeySchema]);
+export const DiscoveryPlaybookSchema = z.union([
+  BuiltinDiscoveryPlaybookSchema,
+  PackedKeySchema,
+  CapabilityKeySchema,
+]);
 export type DiscoveryPlaybook = z.infer<typeof DiscoveryPlaybookSchema>;
 /** A brief or PRD template of an approved pack (a playbook tagged `template:brief` or `template:prd`). */
 export const DiscoveryTemplateSchema = PackedKeySchema;

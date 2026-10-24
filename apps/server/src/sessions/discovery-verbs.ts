@@ -16,8 +16,8 @@ import {
   SessionProposeParamsSchema,
   type SessionRpcMethod,
   SessionStepParamsSchema,
-  stepLabel,
   SessionValidateParamsSchema,
+  stepLabel,
   streamId,
 } from '@aom/shared';
 import { SYSTEM_ACTOR } from '../commands/common.ts';
@@ -419,7 +419,10 @@ async function step(
     await ctx.store.append([
       {
         streamId: streamId.thread(t.id),
-        event: { type: 'SessionThreadUpdated', payload: { threadId: t.id, config: { playbookRun: r.state } } },
+        event: {
+          type: 'SessionThreadUpdated',
+          payload: { threadId: t.id, config: { playbookRun: r.state } },
+        },
         actor: actorOf(turn),
         scope: sessionScope(t),
       },
