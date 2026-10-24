@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { BACKEND_IDS } from './backends.ts';
 
 /**
  * The direct-model runtime (docs/ARCHITECTURE.md section 38.3): one runner adapter that talks to a provider's API with the
@@ -12,6 +13,24 @@ export const DIRECT_MODEL_CAPABILITY = 'direct-model:1';
 export const DIRECT_PROVIDER_IDS = ['anthropic', 'openai', 'google', 'openai-compatible'] as const;
 export const DirectProviderIdSchema = z.enum(DIRECT_PROVIDER_IDS);
 export type DirectProviderId = z.infer<typeof DirectProviderIdSchema>;
+
+/**
+ * Every id a provider key or credential is stored under on a workstation: the direct-model providers and the Claude Code
+ * backends (`bedrock`, `vertex`, `gateway`; see backends.ts).
+ */
+export const PROVIDER_KEY_IDS = [...DIRECT_PROVIDER_IDS, ...BACKEND_IDS] as const;
+export const ProviderKeyIdSchema = z.enum(PROVIDER_KEY_IDS);
+export type ProviderKeyId = z.infer<typeof ProviderKeyIdSchema>;
+
+/**
+ * Whose key a call used: the organization's (sealed to this workstation by an Owner or Admin, subject to the monthly cap) or the
+ * workstation's own (which overrides it and is not subject to the cap).
+ */
+export const KeySourceSchema = z.enum(['org', 'workstation']);
+export type KeySource = z.infer<typeof KeySourceSchema>;
+
+/** Announced in `hello.capabilities` by runners that keep an organization key beside the workstation's own and know the backends. */
+export const PROVIDER_KEYS_CAPABILITY = 'provider-keys:2';
 
 export type ModelTier = 'small' | 'medium' | 'large';
 
@@ -168,6 +187,10 @@ export const ReportedProviderSchema = z.object({
   endpointHost: z.string().max(200).optional(),
   /** The last check of the key or endpoint failed (the text is short and never contains the key). */
   problem: z.string().max(300).optional(),
+  /** Whose key is in effect here (workstation key over organization key). Absent from older runners: the workstation's. */
+  keySource: KeySourceSchema.optional(),
+  /** An organization key is also stored here (it is overridden when `keySource` is `workstation`). */
+  orgKey: z.boolean().optional(),
 });
 export type ReportedProvider = z.infer<typeof ReportedProviderSchema>;
 
@@ -203,15 +226,24 @@ export function directPrice(
  * (it holds no secret; credentials in the URL are refused). `models` adds model ids to the provider's built-in list.
  */
 export const ProviderKeySetPayloadSchema = z.object({
-  provider: DirectProviderIdSchema,
+  provider: ProviderKeyIdSchema,
   keyId: z.string().min(1).max(64),
-  /** Absent: no key (only an OpenAI-compatible endpoint may be keyless, e.g. a local Ollama). */
-  ciphertext: z.string().min(1).max(4000).optional(),
+  /**
+   * Absent: no key (only an OpenAI-compatible endpoint may be keyless, e.g. a local Ollama). A Claude Code backend's credential is
+   * a sealed JSON of its fields (backends.ts) and always present. Sealed with RSA-OAEP (short keys) or `sealLarge` (`h1.`).
+   */
+  ciphertext: z.string().min(1).max(20000).optional(),
+  /** Whose slot this fills. Absent (an older server): the workstation's own key. */
+  source: KeySourceSchema.optional(),
   baseUrl: z.string().max(300).optional(),
   models: z.array(z.string().min(1).max(120)).max(50).default([]),
 });
 export type ProviderKeySetPayload = z.infer<typeof ProviderKeySetPayloadSchema>;
-export const ProviderKeyClearPayloadSchema = z.object({ provider: DirectProviderIdSchema });
+export const ProviderKeyClearPayloadSchema = z.object({
+  provider: ProviderKeyIdSchema,
+  /** Which slot to empty. Absent: the workstation's own key. */
+  source: KeySourceSchema.optional(),
+});
 export const ProviderKeyResultSchema = z.object({
   stored: z.boolean(),
   error: z.string().max(500).optional(),
@@ -235,7 +267,7 @@ export const WorkstationProvidersResponseSchema = z.object({
   /** The last `provider.key.set` or `.clear` answer of the runner in this server process (transient). */
   lastResult: z
     .object({
-      provider: DirectProviderIdSchema,
+      provider: ProviderKeyIdSchema,
       stored: z.boolean(),
       error: z.string().optional(),
       warning: z.string().optional(),

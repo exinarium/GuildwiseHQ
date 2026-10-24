@@ -120,6 +120,28 @@ function directPriceOf(
 ): { input: number; output: number; cacheRead?: number; cacheWrite?: number } | null | undefined {
   // A Codex CLI model: its own (empty) price table, never a Claude price.
   if (isCodexModel(model)) return codexPrice(model);
+  // The Gemini CLI reports `gemini:<model>`: Google's list prices when the table has the model, else unknown.
+  if (model.startsWith('gemini:')) return directPrice('google', model.slice('gemini:'.length));
+  // opencode reports `opencode:<provider>/<model>`: the provider's table (Anthropic models from the Claude table), else unknown.
+  if (model.startsWith('opencode:')) {
+    const rest = model.slice('opencode:'.length);
+    const i = rest.indexOf('/');
+    const provider = i > 0 ? rest.slice(0, i) : '';
+    const name = i > 0 ? rest.slice(i + 1) : rest;
+    return directPrice(provider, name, (m) => {
+      const lower = m.toLowerCase();
+      const hit = table.find((x) => x.match !== '' && lower.includes(x.match));
+      return hit
+        ? { input: hit.input, output: hit.output, cacheRead: hit.cacheRead, cacheWrite: hit.cacheWrite }
+        : null;
+    });
+  }
+  // A model behind an Anthropic-compatible gateway (`gateway:<model>`): a Claude model is priced from the Claude table; anything
+  // else has no price we can vouch for.
+  if (model.startsWith('gateway:')) {
+    const lower = model.toLowerCase();
+    return table.some((x) => x.match !== '' && lower.includes(x.match)) ? undefined : null;
+  }
   const d = splitDirectModel(model);
   if (!d) return undefined;
   return directPrice(d.provider, d.model, (m) => {

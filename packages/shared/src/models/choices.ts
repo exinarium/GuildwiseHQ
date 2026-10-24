@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { backendDef, splitBackendModel } from './backends.ts';
+import type { ReportedBackend, ReportedModel } from './credentials.ts';
 import {
   DIRECT_RUNTIME,
   directModelId,
@@ -7,6 +9,7 @@ import {
   type ReportedProvider,
   splitDirectModel,
 } from './direct.ts';
+import { GEMINI_RUNTIME, OPENCODE_RUNTIME } from './runtimes.ts';
 
 /**
  * Provider-neutral model choices (docs/design/ceo-front-door.md section 5.4). A choice is `{runtime, model, effort}`.
@@ -56,8 +59,21 @@ export const MODEL_CHOICES: Readonly<Record<string, readonly ModelOption[]>> = {
       tier: 'large',
     },
   ],
+  // The Gemini CLI runtime (registered by a runner only when the `gemini` binary is found). The ids are the models the CLI
+  // accepts (`VALID_GEMINI_MODELS` of @google/gemini-cli 0.65). The CLI has no reasoning-effort option, so none is offered.
+  // A workstation can add ids (`runtimes.gemini.models`) and reports them.
+  gemini: [
+    { id: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro (preview)', effortLevels: [], tier: 'large' },
+    { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', effortLevels: [], tier: 'large' },
+    { id: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash', effortLevels: [], tier: 'medium' },
+    { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash', effortLevels: [], tier: 'medium' },
+    { id: 'gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash-Lite', effortLevels: [], tier: 'small' },
+    { id: 'gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash-Lite', effortLevels: [], tier: 'small' },
+  ],
   mock: [{ id: 'mock', label: 'Mock', effortLevels: [], tier: 'medium' }],
 };
+// The opencode runtime has no entry here either: its models are what the workstation's opencode reports for the providers that
+// have a key there (`provider/model`), see `RuntimeExtras`.
 // The direct-model runtime has no entry here: its models come from what each workstation's runner reports (the providers
 // whose key is stored there), see `ReportedProvider` and `modelChoicesFor`.
 
@@ -65,6 +81,8 @@ export const MODEL_CHOICES: Readonly<Record<string, readonly ModelOption[]>> = {
 export const RUNTIME_LABEL: Readonly<Record<string, string>> = {
   'claude-code': 'Claude Code',
   codex: 'Codex',
+  [GEMINI_RUNTIME]: 'Gemini CLI',
+  [OPENCODE_RUNTIME]: 'opencode',
   mock: 'Mock',
   [DIRECT_RUNTIME]: 'Direct API',
 };
@@ -73,8 +91,19 @@ export interface ModelChoiceGroup {
   runtime: string;
   label: string;
   models: readonly ModelOption[];
-  /** Direct-model groups: the provider (one group per provider). */
+  /** Direct-model groups: the provider (one group per provider). Claude Code backend groups: the backend. */
   provider?: string;
+  /** A caution to show beside the group (models behind a gateway). */
+  warning?: string;
+}
+
+/**
+ * What a workstation reports beyond the direct-model providers: the Claude Code backends that have a credential there, and the
+ * models of the runtimes whose list comes from the workstation (gemini: the built-ins plus its extras; opencode: all of them).
+ */
+export interface RuntimeExtras {
+  backends?: readonly ReportedBackend[];
+  models?: Readonly<Record<string, readonly ReportedModel[]>>;
 }
 
 /** The pickers' option for a model a provider reports: the model id carries the provider (`openai:gpt-5`). */
@@ -87,18 +116,63 @@ function reportedOption(p: ReportedProvider, m: ReportedProvider['models'][numbe
   };
 }
 
+/** Claude Code through a backend: the model id carries the backend (`bedrock:us.anthropic...`); efforts are Claude's own. */
+function backendOption(b: ReportedBackend, m: ReportedModel): ModelOption {
+  return {
+    id: `${b.id}:${m.id}`,
+    label: m.label,
+    effortLevels: [],
+    ...(m.tier ? { tier: m.tier } : {}),
+  };
+}
+
+const plainOption = (m: ReportedModel): ModelOption => ({
+  id: m.id,
+  label: m.label,
+  effortLevels: [],
+  ...(m.tier ? { tier: m.tier } : {}),
+});
+
 /**
  * The options of the runtimes in `runtimes` (absent: all of the registry), plus one group per direct-model provider the
- * workstation's runner reports (`providers`). This is what a workstation really offers: the built-ins merged with what its
- * runner reports.
+ * workstation's runner reports (`providers`), one per Claude Code backend it has a credential for, and the data-driven lists of
+ * gemini and opencode (`extras`). This is what a workstation really offers: the built-ins merged with what its runner reports.
  */
 export function modelChoicesFor(
   runtimes?: readonly string[],
   providers?: readonly ReportedProvider[],
+  extras?: RuntimeExtras,
 ): ModelChoiceGroup[] {
-  const groups: ModelChoiceGroup[] = Object.entries(MODEL_CHOICES)
-    .filter(([runtime]) => !runtimes || runtimes.includes(runtime))
-    .map(([runtime, models]) => ({ runtime, label: RUNTIME_LABEL[runtime] ?? runtime, models }));
+  const groups: ModelChoiceGroup[] = [];
+  for (const [runtime, builtin] of Object.entries(MODEL_CHOICES)) {
+    if (runtimes && !runtimes.includes(runtime)) continue;
+    let models: readonly ModelOption[] = builtin;
+    const reported = extras?.models?.[runtime];
+    if (reported?.length) {
+      const known = new Set(builtin.map((m) => m.id));
+      models = [...builtin, ...reported.filter((m) => !known.has(m.id)).map(plainOption)];
+    }
+    groups.push({ runtime, label: RUNTIME_LABEL[runtime] ?? runtime, models });
+    if (runtime === 'claude-code')
+      for (const b of extras?.backends ?? []) {
+        const def = backendDef(b.id);
+        if (!b.models.length) continue;
+        groups.push({
+          runtime,
+          provider: b.id,
+          label: `${b.label} (Claude Code)`,
+          models: b.models.map((m) => backendOption(b, m)),
+          ...(def?.warning ? { warning: def.warning } : {}),
+        });
+      }
+  }
+  const opencode = extras?.models?.[OPENCODE_RUNTIME];
+  if (opencode?.length && (!runtimes || runtimes.includes(OPENCODE_RUNTIME)))
+    groups.push({
+      runtime: OPENCODE_RUNTIME,
+      label: RUNTIME_LABEL[OPENCODE_RUNTIME] ?? OPENCODE_RUNTIME,
+      models: opencode.map(plainOption),
+    });
   for (const p of providers ?? [])
     if (p.models.length)
       groups.push({
@@ -114,8 +188,29 @@ export function modelChoicesFor(
 export function findModelOption(
   c: Pick<ModelChoice, 'runtime' | 'model'>,
   providers?: readonly ReportedProvider[],
+  extras?: RuntimeExtras,
 ): ModelOption | undefined {
-  if (c.runtime !== DIRECT_RUNTIME) return MODEL_CHOICES[c.runtime]?.find((m) => m.id === c.model);
+  if (c.runtime === 'claude-code') {
+    const q = splitBackendModel(c.model);
+    if (q) {
+      const b = extras?.backends?.find((x) => x.id === q.backend);
+      const m =
+        b?.models.find((x) => x.id === q.model) ??
+        backendDef(q.backend)?.models.find((x) => x.id === q.model);
+      if (m) return { id: c.model, label: m.label, effortLevels: [], tier: m.tier };
+      return { id: c.model, label: q.model, effortLevels: [] };
+    }
+  }
+  if (c.runtime === OPENCODE_RUNTIME) {
+    const m = extras?.models?.[OPENCODE_RUNTIME]?.find((x) => x.id === c.model);
+    return m ? plainOption(m) : undefined;
+  }
+  if (c.runtime !== DIRECT_RUNTIME) {
+    const built = MODEL_CHOICES[c.runtime]?.find((m) => m.id === c.model);
+    if (built) return built;
+    const r = extras?.models?.[c.runtime]?.find((m) => m.id === c.model);
+    return r ? plainOption(r) : undefined;
+  }
   const d = splitDirectModel(c.model);
   if (!d) return undefined;
   const reported = providers?.find((p) => p.id === d.provider);
@@ -131,7 +226,32 @@ export function findModelOption(
  * of an OpenAI-compatible endpoint that is configured there (such an endpoint serves models the runner cannot list). Without
  * `providers` the workstation is not known and any well-formed direct model passes.
  */
-export function isKnownChoice(c: ModelChoice, providers?: readonly ReportedProvider[]): boolean {
+export function isKnownChoice(
+  c: ModelChoice,
+  providers?: readonly ReportedProvider[],
+  extras?: RuntimeExtras,
+): boolean {
+  // Claude Code through a backend: `bedrock:<id>`. Any well-formed id passes (Bedrock inference profiles, Vertex versions and
+  // gateway models are the owner's to name); with the workstation's report the backend must have a credential there. The
+  // efforts are Claude's own.
+  if (c.runtime === 'claude-code') {
+    const q = splitBackendModel(c.model);
+    if (q) {
+      if (c.effort && !MODEL_CHOICES['claude-code']?.some((m) => m.effortLevels.includes(c.effort ?? '')))
+        return false;
+      return !extras?.backends || extras.backends.some((b) => b.id === q.backend);
+    }
+  }
+  // opencode: `provider/model` from the workstation's list when it is known; any well-formed id otherwise.
+  if (c.runtime === OPENCODE_RUNTIME) {
+    if (c.effort || !/^[^/\s]+\/\S+$/.test(c.model)) return false;
+    const list = extras?.models?.[OPENCODE_RUNTIME];
+    return !list || list.some((m) => m.id === c.model);
+  }
+  if (c.runtime === GEMINI_RUNTIME && !MODEL_CHOICES[GEMINI_RUNTIME]?.some((m) => m.id === c.model)) {
+    // an extra id the owner added on that workstation
+    return !c.effort && !!extras?.models?.[GEMINI_RUNTIME]?.some((m) => m.id === c.model);
+  }
   if (c.runtime === DIRECT_RUNTIME) {
     const d = splitDirectModel(c.model);
     if (!d || c.effort) return false;
@@ -165,8 +285,12 @@ export function resolveModelChoice(input: {
   return { choice: input.default, source: 'default' };
 }
 
-export const modelChoiceLabel = (c: ModelChoice, providers?: readonly ReportedProvider[]): string => {
-  const opt = findModelOption(c, providers);
+export const modelChoiceLabel = (
+  c: ModelChoice,
+  providers?: readonly ReportedProvider[],
+  extras?: RuntimeExtras,
+): string => {
+  const opt = findModelOption(c, providers, extras);
   if (c.runtime === DIRECT_RUNTIME) {
     const d = splitDirectModel(c.model);
     const provider = d ? (directProvider(d.provider)?.label ?? d.provider) : '';

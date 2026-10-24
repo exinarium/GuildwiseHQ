@@ -55,7 +55,7 @@ describe('merged model choices', () => {
     expect(groups[1]?.models.map((m) => m.id)).toEqual(['openai:gpt-5-mini', 'openai:gpt-5']);
     // a workstation that reports no providers offers no direct models; the registry itself never lists them
     expect(modelChoicesFor(['claude-code']).map((g) => g.runtime)).toEqual(['claude-code']);
-    expect(Object.keys(MODEL_CHOICES)).toEqual(['claude-code', 'codex', 'mock']);
+    expect(Object.keys(MODEL_CHOICES)).toEqual(['claude-code', 'codex', 'gemini', 'mock']);
   });
 
   it('validates a direct choice against what the workstation reports', () => {

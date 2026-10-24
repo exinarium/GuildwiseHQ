@@ -74,6 +74,12 @@ import {
 } from '../integrations/schema.ts';
 import { MAX_MCP_SERVERS, McpServerInfoSchema } from '../mcp/index.ts';
 import {
+  ProviderKeyResealPayloadSchema,
+  ReportedBackendSchema,
+  ReportedKeySchema,
+  ReportedModelSchema,
+} from '../models/credentials.ts';
+import {
   ProviderKeyClearPayloadSchema,
   ProviderKeySetPayloadSchema,
   ReportedProviderSchema,
@@ -170,6 +176,17 @@ export const RuntimeInfoSchema = z.object({
    * Names only, never a key. Absent from older runners and from other runtimes: no direct models are offered then.
    */
   providers: z.array(ReportedProviderSchema).max(10).optional(),
+  /**
+   * Direct-model runtime: every provider key or credential stored here and whose it is (workstation key over organization key).
+   * Facts for the server's key resolution and spend caps; never a key. Absent from older runners.
+   */
+  keys: z.array(ReportedKeySchema).max(20).optional(),
+  /** Claude Code: the backends (Bedrock, Vertex, a gateway) that have a credential on this workstation, with their models. */
+  backends: z.array(ReportedBackendSchema).max(5).optional(),
+  /** Gemini CLI and opencode: the models this workstation offers (the Gemini built-ins plus the owner's extras; opencode's own list). */
+  models: z.array(ReportedModelSchema).max(400).optional(),
+  /** Gemini CLI: whether the runtime signs in with the owner's Google login or spends the stored `google` key. */
+  authVia: z.enum(['login', 'key']).optional(),
 });
 export type RuntimeInfo = z.infer<typeof RuntimeInfoSchema>;
 
@@ -802,6 +819,7 @@ export const RunnerCommandNameSchema = z.enum([
   'claude.account.ensure',
   'provider.key.set',
   'provider.key.clear',
+  'provider.key.reseal',
   'packs.sync',
   'pack.check',
 ]);
@@ -814,6 +832,7 @@ export const CommandPayloadSchemas = {
   'pack.check': PackCheckPayloadSchema,
   'provider.key.set': ProviderKeySetPayloadSchema,
   'provider.key.clear': ProviderKeyClearPayloadSchema,
+  'provider.key.reseal': ProviderKeyResealPayloadSchema,
   'claude.account.ensure': ClaudeAccountEnsurePayloadSchema,
   'vault.configure': VaultConfigureCommandSchema,
   'vault.write': VaultWriteCommandSchema,

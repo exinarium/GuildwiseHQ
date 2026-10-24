@@ -19,6 +19,10 @@ export const Usage = z.object({
   model: z.string().max(120).optional(),
   /** What the runtime itself reported as cost in USD (Claude Code `total_cost_usd`); informational. */
   costUsd: z.number().nonnegative().optional(),
+  /** Whose provider key paid for the work (`org`: the organization's, counted against its monthly cap; `workstation`: the owner's own). Absent: no key (a login). */
+  keySource: z.enum(['org', 'workstation']).optional(),
+  /** The provider key id that was used (`openai`, `google`, `bedrock`, ...), with `keySource`. */
+  keyProvider: z.string().max(40).optional(),
 });
 export type Usage = z.infer<typeof Usage>;
 

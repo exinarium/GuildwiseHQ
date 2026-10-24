@@ -1,10 +1,16 @@
-import type { AgentPermissions } from '../roles/schema.ts';
+import {
+  CODEX_RUNTIME,
+  HARNESS_REFUSED_ROLES,
+  type RoleForRuntimeCheck,
+  runtimeRoleProblem,
+} from './runtimes.ts';
+
+export { CODEX_RUNTIME };
 
 /**
  * The Codex CLI runtime (docs/RUNNER.md, "Codex CLI runtime"): OpenAI's `codex exec` run by the workstation's runner for card
  * work and chats, inside Codex's own OS sandbox. The runner registers it only when it finds the `codex` binary.
  */
-export const CODEX_RUNTIME = 'codex';
 
 /** Usage and cost of a Codex turn name the model as `codex:<model>` so the price lookup never falls back to a Claude price. */
 export const CODEX_MODEL_PREFIX = 'codex:';
@@ -41,27 +47,12 @@ export function codexPrice(
 }
 
 /** Roles that never run on Codex whatever their permissions (the runtime has no equivalent of their guard). */
-export const CODEX_REFUSED_ROLES: readonly string[] = ['devops', 'ceo'];
+export const CODEX_REFUSED_ROLES: readonly string[] = HARNESS_REFUSED_ROLES;
 
 /**
- * Why an agent with this role and these permissions cannot run on the Codex runtime, or null when it can. The Codex sandbox
- * gives a private home, a worktree-only write area, no network and a read allow-list, but it cannot: remove the shell tool,
- * limit writes to globs that do not exist yet (a tester's e2e folder), open the Unix sockets a browser needs, or host the
- * DevOps guard. A role that depends on one of those stays on Claude Code. The runner applies the same rule at start.
+ * Why an agent with this role and these permissions cannot run on the Codex runtime, or null when it can: the Codex case of
+ * `runtimeRoleProblem` (the rule all harness runtimes share).
  */
-export function codexRoleProblem(role: {
-  roleKey: string;
-  isDevops?: boolean;
-  permissions: Pick<AgentPermissions, 'allowedTools' | 'writableGlobs' | 'browser'>;
-}): string | null {
-  if (role.isDevops || CODEX_REFUSED_ROLES.includes(role.roleKey))
-    return `the ${role.roleKey} role needs its own guard and full workstation access, which the Codex sandbox cannot provide: use Claude Code`;
-  const p = role.permissions;
-  if (!p.allowedTools.includes('shell'))
-    return 'this role has no shell, and Codex always has one: use Claude Code (the shell-less roles are not offered on Codex)';
-  if (p.browser)
-    return 'this role runs browsers, which need Unix sockets the Codex sandbox does not open: use Claude Code';
-  if (p.allowedTools.includes('edit') && p.writableGlobs !== null)
-    return 'this role may write only certain paths, which the Codex sandbox cannot limit to files that do not exist yet: use Claude Code';
-  return null;
+export function codexRoleProblem(role: RoleForRuntimeCheck): string | null {
+  return runtimeRoleProblem(CODEX_RUNTIME, role);
 }
