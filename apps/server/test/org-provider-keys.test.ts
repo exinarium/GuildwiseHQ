@@ -967,6 +967,37 @@ describe('the cap stops running work at once', () => {
     expect(liveSpendMicros(ctx(), orgId, 'google')).toBe(0);
   });
 
+  it('counts a model with an Owner-set price live, and stops at the cap on it (R3c)', async () => {
+    await clearSpend();
+    await q(
+      `UPDATE org_providers SET cap_paused_month=NULL, cap_warned_month=NULL, cap_override_month=NULL WHERE org_id=$1`,
+      [orgId],
+    );
+    await giveGoogleKey('org');
+    const { liveSpendMicros } = await import('../src/provider-keys/live-usage.ts');
+    // the tables do not know this model: it is "cost unknown" and counts nothing until the Owner prices it
+    const id = await startShift('gemini-owner-priced-1');
+    await report(id, 2_000_000);
+    expect(liveSpendMicros(ctx(), orgId, 'google')).toBe(0);
+    await asOwner('PUT', '/api/org/model-prices', {
+      provider: 'google',
+      model: 'gemini-owner-priced-1',
+      inputPerMtok: 1,
+      outputPerMtok: 10,
+      cacheReadPerMtok: null,
+    });
+    expect((await asOwner('PUT', '/api/org/providers/google/cap', { monthlyUsd: 50 })).status).toBe(200);
+    // 3M output tokens at $10 per million: $30 so far, below the cap
+    await report(id, 3_000_000);
+    expect(liveSpendMicros(ctx(), orgId, 'google')).toBe(30_000_000);
+    expect(stops(r1, id)).toHaveLength(0);
+    // $60 in flight crosses the $50 cap: the run is stopped
+    await report(id, 6_000_000);
+    await until(async () => stops(r1, id).length > 0);
+    await q(`UPDATE org_providers SET cap_paused_month=NULL WHERE org_id=$1`, [orgId]);
+    await asOwner('DELETE', '/api/org/model-prices?provider=google&model=gemini-owner-priced-1');
+  });
+
   it('cancels a running session turn on the organization key and tells the session', async () => {
     await clearSpend();
     await q(

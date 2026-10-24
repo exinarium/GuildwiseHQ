@@ -1,5 +1,5 @@
 import { costUsdMicros, isCostUnknown, isOwnerPriced, type OwnerModelPrice } from '@aom/shared';
-import { one, rows } from '../db/sql.ts';
+import { one, type Queryable, rows } from '../db/sql.ts';
 import type { Interceptor } from '../eventstore/pg-event-store.ts';
 
 /**
@@ -8,6 +8,29 @@ import type { Interceptor } from '../eventstore/pg-event-store.ts';
  * table never reprices these shifts on a projection rebuild. Events appended before stamping existed carry no price and
  * are still priced from the table on replay. Events that already carry one (a super admin's price, a test) are kept.
  */
+/** The Owner-set prices of an organization (R2), for stamping a turn's cost and for the live spend (R3c). */
+export async function loadOwnerPrices(db: Queryable, orgId: string): Promise<OwnerModelPrice[]> {
+  return (
+    await rows<{
+      provider: string;
+      model: string;
+      input_per_mtok: string;
+      output_per_mtok: string;
+      cache_read_per_mtok: string | null;
+    }>(
+      db,
+      'SELECT provider, model, input_per_mtok, output_per_mtok, cache_read_per_mtok FROM org_model_prices WHERE org_id=$1',
+      [orgId],
+    )
+  ).map((r) => ({
+    provider: r.provider,
+    model: r.model,
+    inputPerMtok: Number(r.input_per_mtok),
+    outputPerMtok: Number(r.output_per_mtok),
+    cacheReadPerMtok: r.cache_read_per_mtok === null ? null : Number(r.cache_read_per_mtok),
+  }));
+}
+
 export function createCostStampInterceptor(): Interceptor {
   return async (tx, inputs) => {
     const out = [];
@@ -16,28 +39,7 @@ export function createCostStampInterceptor(): Interceptor {
     const ownerPrices = async (orgId: string | null | undefined): Promise<OwnerModelPrice[]> => {
       if (!orgId) return [];
       let list = owned.get(orgId);
-      if (!list) {
-        list = (
-          await rows<{
-            provider: string;
-            model: string;
-            input_per_mtok: string;
-            output_per_mtok: string;
-            cache_read_per_mtok: string | null;
-          }>(
-            tx,
-            'SELECT provider, model, input_per_mtok, output_per_mtok, cache_read_per_mtok FROM org_model_prices WHERE org_id=$1',
-            [orgId],
-          )
-        ).map((r) => ({
-          provider: r.provider,
-          model: r.model,
-          inputPerMtok: Number(r.input_per_mtok),
-          outputPerMtok: Number(r.output_per_mtok),
-          cacheReadPerMtok: r.cache_read_per_mtok === null ? null : Number(r.cache_read_per_mtok),
-        }));
-        owned.set(orgId, list);
-      }
+      if (!list) owned.set(orgId, (list = await loadOwnerPrices(tx, orgId)));
       return list;
     };
     for (const input of inputs) {

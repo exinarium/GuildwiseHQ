@@ -122,13 +122,30 @@ export interface OwnerModelPrice {
   cacheReadPerMtok?: number | null;
 }
 
+/**
+ * The (provider, model) an Owner's price is kept under for a model id as usage names it: a direct model `openai:gpt-5` as it is,
+ * a Gemini CLI model `gemini:<m>` under `google`, an opencode model `opencode:<provider>/<m>` under that provider and a Codex
+ * model `codex:<m>` under `openai`, so one price serves the same model whichever runtime ran it (R3c).
+ */
+export function ownerPriceKeyOf(model: string): { provider: string; model: string } | null {
+  if (model.startsWith('gemini:')) return { provider: 'google', model: model.slice('gemini:'.length) };
+  if (model.startsWith('opencode:')) {
+    const rest = model.slice('opencode:'.length);
+    const i = rest.indexOf('/');
+    return i > 0 ? { provider: rest.slice(0, i), model: rest.slice(i + 1) } : null;
+  }
+  if (isCodexModel(model))
+    return { provider: 'openai', model: model.startsWith('codex:') ? model.slice('codex:'.length) : model };
+  return splitDirectModel(model);
+}
+
 /** The Owner's price for `provider:model` (exact id), if there is one. */
 export function ownerPriceOf(
   model: string,
   owner: readonly OwnerModelPrice[] | undefined,
 ): { input: number; output: number; cacheRead?: number } | undefined {
   if (!owner?.length) return undefined;
-  const d = splitDirectModel(model);
+  const d = ownerPriceKeyOf(model);
   if (!d) return undefined;
   const hit = owner.find((o) => o.provider === d.provider && o.model === d.model);
   return hit

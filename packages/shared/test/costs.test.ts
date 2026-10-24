@@ -4,10 +4,12 @@ import {
   costUsdMicros,
   DEFAULT_MODEL_PRICES,
   formatMoney,
+  isCostUnknown,
   modelFamily,
   monthKeyOf,
   monthStartOf,
   nextMonthStartOf,
+  ownerPriceKeyOf,
   priceFor,
 } from '../src/index.ts';
 
@@ -134,5 +136,34 @@ describe('money formatting', () => {
     expect(costUsdMicros('claude-haiku-5-5', { inputTokens: 1_000_000, outputTokens: 1_000_000 })).toBe(
       600_000,
     );
+  });
+});
+
+describe('R3c: an Owner-set price follows the model across runtimes', () => {
+  const owner = [
+    { provider: 'google', model: 'gemini-x', inputPerMtok: 1, outputPerMtok: 10 },
+    { provider: 'openai', model: 'gpt-new', inputPerMtok: 2, outputPerMtok: 20 },
+    { provider: 'groq', model: 'llama-x', inputPerMtok: 3, outputPerMtok: 30 },
+  ];
+  const tok = { inputTokens: 1_000_000, outputTokens: 1_000_000 };
+  it('keys a Gemini CLI, opencode and Codex model by its provider and model', () => {
+    expect(ownerPriceKeyOf('gemini:gemini-x')).toEqual({ provider: 'google', model: 'gemini-x' });
+    expect(ownerPriceKeyOf('opencode:groq/llama-x')).toEqual({ provider: 'groq', model: 'llama-x' });
+    expect(ownerPriceKeyOf('codex:gpt-new')).toEqual({ provider: 'openai', model: 'gpt-new' });
+    expect(ownerPriceKeyOf('openai:gpt-new')).toEqual({ provider: 'openai', model: 'gpt-new' });
+    expect(ownerPriceKeyOf('sonnet')).toBeNull();
+  });
+  it('prices what the tables do not know, and leaves a listed price alone', () => {
+    expect(isCostUnknown('gemini:gemini-x')).toBe(true);
+    expect(isCostUnknown('gemini:gemini-x', undefined, owner)).toBe(false);
+    expect(costUsdMicros('gemini:gemini-x', tok, undefined, owner)).toBe(11_000_000);
+    expect(costUsdMicros('opencode:groq/llama-x', tok, undefined, owner)).toBe(33_000_000);
+    expect(costUsdMicros('codex:gpt-new', tok, undefined, owner)).toBe(22_000_000);
+    // a model with a list price keeps it
+    expect(
+      costUsdMicros('codex:gpt-6-sol', tok, undefined, [
+        { provider: 'openai', model: 'gpt-6-sol', inputPerMtok: 99, outputPerMtok: 99 },
+      ]),
+    ).toBe(12_000_000);
   });
 });

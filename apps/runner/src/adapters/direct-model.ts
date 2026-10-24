@@ -11,6 +11,7 @@ import {
 } from '@aom/shared';
 import { isStepCount, streamText, type ToolSet } from 'ai';
 import { withPromptCaching } from '../direct/cache.ts';
+import { guardedFetch, type Resolver } from '../direct/guarded-fetch.ts';
 import { ChatHistory } from '../direct/history.ts';
 import { defaultModelFactory, type FetchLike, type ModelFactory, ModelLister } from '../direct/models.ts';
 import type { ProviderStore } from '../direct/store.ts';
@@ -123,13 +124,15 @@ export class DirectModelAdapter implements RuntimeAdapter {
       modelFactory?: ModelFactory;
       /** The HTTP the providers' SDKs use (tests point it at a local server). */
       fetch?: FetchLike;
+      /** Test hook: resolves the name of an OpenAI-compatible endpoint (default: DNS). */
+      resolve?: Resolver;
       options?: Partial<DirectModelOptions>;
       /** The model list of an OpenAI-compatible endpoint changed after it was fetched: report the runtimes again. */
       onModelsChanged?: () => void;
       log?: Logger;
     },
   ) {
-    this.lister = deps.lister ?? new ModelLister(deps.fetch ? { fetch: deps.fetch } : {});
+    this.lister = deps.lister ?? new ModelLister({ fetch: this.endpointFetch() });
     this.history = new ChatHistory(join(deps.root, 'direct-chats'));
     this.factory = deps.modelFactory ?? defaultModelFactory;
     this.opts = { ...DIRECT_MODEL_DEFAULTS, ...deps.options };
@@ -187,6 +190,20 @@ export class DirectModelAdapter implements RuntimeAdapter {
     };
   }
 
+  /**
+   * The HTTP for an OpenAI-compatible endpoint (and its model list): the name of the base URL is resolved and judged against the
+   * private-endpoint rules, and the connection goes to a judged address (R3c). The hosted providers need no such check.
+   */
+  private endpointFetch(): FetchLike {
+    // a test that points the HTTP at its own fake keeps it, unless it also supplies a resolver to exercise the check
+    if (this.deps.fetch && !this.deps.resolve) return this.deps.fetch;
+    return guardedFetch({
+      entries: () => this.deps.store.endpoints(),
+      ...(this.deps.resolve ? { resolve: this.deps.resolve } : {}),
+      ...(this.deps.fetch ? { inner: this.deps.fetch } : {}),
+    });
+  }
+
   /** The instructions travel with `startChat` (`instructions`); the file is a copy for the owner to read, not an input. */
   async writeInstructions(sandbox: { configDir: string }, markdown: string): Promise<void> {
     await mkdir(sandbox.configDir, { recursive: true });
@@ -232,7 +249,11 @@ export class DirectModelAdapter implements RuntimeAdapter {
     }
     let model: ReturnType<ModelFactory>;
     try {
-      model = this.factory(input.agent.model, cfg, this.deps.fetch);
+      model = this.factory(
+        input.agent.model,
+        cfg,
+        choice.provider === 'openai-compatible' ? this.endpointFetch() : this.deps.fetch,
+      );
     } catch (err) {
       fail(describeProviderError(choice.provider, err));
       return session;

@@ -12,6 +12,7 @@ import {
 import { orgScope, SYSTEM_ACTOR } from '../commands/common.ts';
 import { evaluateProviderCap } from '../commands/org-provider-keys.ts';
 import type { Ctx } from '../context.ts';
+import { loadOwnerPrices } from '../costs/stamp.ts';
 import { one } from '../db/sql.ts';
 import { providerCapState } from './caps.ts';
 
@@ -165,8 +166,12 @@ export async function applyRunUsage(
   if (!use || use.source !== 'org') return; // the workstation's own key (or none): never counted, never stopped
   const live = liveOf(ctx);
   // a model with no price is unknown: it counts nothing against the cap (Q50)
+  // ... unless the Owner set a price for it (R2): the live figure is priced the way the booked cost will be
   const priced = msg.usage.model ?? (run.runtime === 'gemini' ? `gemini:${run.model}` : run.model);
-  const micros = isCostUnknown(priced) ? 0 : costUsdMicros(priced, { ...msg.usage });
+  const owner = await loadOwnerPrices(ctx.pool, run.orgId);
+  const micros = isCostUnknown(priced, undefined, owner)
+    ? 0
+    : costUsdMicros(priced, { ...msg.usage }, undefined, owner);
   live.set(msg.id, {
     kind: msg.kind,
     id: msg.id,
