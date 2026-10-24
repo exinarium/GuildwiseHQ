@@ -394,6 +394,49 @@ describe('Discovery session page', () => {
     expect(await screen.findByTestId('cost-unknown')).toHaveTextContent('Cost unknown for 2 turns');
   });
 
+  it('shows what the facilitator delegated as sub-steps, and a Delegation control that is off until opened', async () => {
+    base(
+      state({
+        delegations: [
+          {
+            delegateId: '0192f3a0-0000-7000-8000-000000000050',
+            callerId: '0192f3a0-0000-7000-8000-000000000051',
+            target: 'devils-advocate',
+            targetName: "Devil's Advocate",
+            targetKind: 'persona',
+            model: 'claude-haiku-4-5',
+            profile: 'read_only',
+            outcome: 'ok',
+            durationMs: 3100,
+            costUsd: 0.004,
+            costUnknown: false,
+            summary: 'The pricing is the weak spot.',
+            native: false,
+            at: '2026-10-03T10:00:30.000Z',
+          },
+        ],
+      }),
+      {
+        [`GET /api/sessions/${T}/delegate-grants`]: () => ({
+          ownerKind: 'session',
+          ownerId: T,
+          canManage: true,
+          grants: [],
+        }),
+      },
+    );
+    mount(`/discovery/${T}`);
+    const steps = await screen.findByTestId('delegation-steps');
+    expect(steps).toHaveTextContent("Delegated to Devil's Advocate");
+    expect(steps).toHaveTextContent('claude-haiku-4-5 · reads only · 3.1 s · $0.0040');
+    expect(steps).toHaveTextContent('The pricing is the weak spot.');
+    expect(screen.queryByTestId('delegate-grants')).toBeNull();
+    await userEvent.click(screen.getByTestId('delegate-grants-toggle'));
+    expect(await screen.findByTestId('delegate-grants-none')).toHaveTextContent(
+      'This session cannot delegate',
+    );
+  });
+
   it('shows the conversation, the question card, the phase, the meters and the panel', async () => {
     base(state());
     mount(`/discovery/${T}`);

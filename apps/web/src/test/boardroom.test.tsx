@@ -620,6 +620,45 @@ describe('Boardroom session', () => {
     expect(within(screen.getByTestId('cast')).getByText('@regulator')).toBeInTheDocument();
   });
 
+  it('shows the Chair’s delegations and the Delegation control of the session', async () => {
+    const s = state({
+      delegations: [
+        {
+          delegateId: '0192f3a0-0000-7000-8000-000000000060',
+          callerId: '0192f3a0-0000-7000-8000-000000000061',
+          target: 'agent:rex',
+          targetName: 'Rex',
+          targetKind: 'agent',
+          model: 'claude-opus-5-5',
+          profile: 'read_only',
+          outcome: 'timeout',
+          durationMs: 110_000,
+          costUsd: null,
+          costUnknown: true,
+          summary: 'the delegate did not finish within 110 seconds',
+          native: false,
+          at: '2026-10-03T10:01:00.000Z',
+        },
+      ],
+    });
+    mountSession(s, [message()], {
+      [`GET /api/sessions/${T}/delegate-grants`]: () => ({
+        ownerKind: 'session',
+        ownerId: T,
+        canManage: false,
+        grants: [],
+      }),
+    });
+    const steps = await screen.findByTestId('delegation-steps');
+    expect(steps).toHaveTextContent('Delegated to Rex');
+    expect(within(steps).getByTestId('delegation-step')).toHaveAttribute('data-outcome', 'timeout');
+    expect(steps).toHaveTextContent('cost unknown');
+    await userEvent.click(screen.getByTestId('delegate-grants-toggle'));
+    expect(
+      await screen.findByText(/Only the creator of the session, an Owner or an Admin/),
+    ).toBeInTheDocument();
+  });
+
   it('keeps round 1 sealed until every answer is in', async () => {
     const s = state({
       config: { ...state().config, stage: 'round', revealedRound: 0 },
