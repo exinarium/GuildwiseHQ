@@ -70,11 +70,13 @@ export function deskRoutes(ctx: Ctx) {
     // S-B1: the one-tap link of a notification. GET only shows what it would do (safe to prefetch); POST applies, for the
     // signed-in person the link was made for, once.
     const TokenParams = z.object({ token: z.string().min(20).max(300) });
-    app.get('/api/m/desk/:token', { schema: { params: TokenParams } }, async (req) => {
+    app.get('/api/m/desk/:token', { schema: { params: TokenParams } }, async (req, reply) => {
+      void reply.header('cache-control', 'no-store');
       const s = await requireUser(ctx, req);
       return previewDeskAction(ctx, s.user, req.params.token);
     });
-    app.post('/api/m/desk/:token/apply', { schema: { params: TokenParams } }, async (req) => {
+    app.post('/api/m/desk/:token/apply', { schema: { params: TokenParams } }, async (req, reply) => {
+      void reply.header('cache-control', 'no-store');
       const s = await requireUser(ctx, req);
       return applyDeskAction(ctx, s.user, req.params.token);
     });

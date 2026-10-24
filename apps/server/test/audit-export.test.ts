@@ -63,7 +63,7 @@ describe('audit export', () => {
       /attachment; filename="audit-\d{4}-\d{2}-\d{2}-to-\d{4}-\d{2}-\d{2}\.csv"/,
     );
     expect(r.headers['cache-control']).toBe('no-store');
-    const text = String(r.raw ?? r.body);
+    const text = String(r.body);
     const lines = text.trim().split('\r\n');
     expect(lines[0]).toBe('at,type,actor_kind,actor_id,actor_name,stream,project_id,summary,payload');
     expect(text).toContain('LedgerEntryAdded');
@@ -153,7 +153,7 @@ describe('audit export', () => {
       },
     ]);
     await ledger(admin.id, org, '=HYPERLINK("http://evil")');
-    const text = String((await get(admin)).raw ?? (await get(admin)).body);
+    const text = String((await get(admin)).body);
     expect(text).not.toContain('private chatter xyz');
     expect(text).not.toMatch(/(^|,)=HYPERLINK/m);
   });
