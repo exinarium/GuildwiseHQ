@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import {
   BOARD_VERBS_CAPABILITY,
   DIRECT_MODEL_CAPABILITY,
+  PROVIDER_KEYS_BOUND_CAPABILITY,
   type ReportedProvider,
   SESSION_TURNS_CAPABILITY,
   SESSION_VERBS_CAPABILITY,
@@ -30,6 +31,7 @@ const CAPS = [
   SESSION_VERBS_CAPABILITY,
   BOARD_VERBS_CAPABILITY,
   DIRECT_MODEL_CAPABILITY,
+  PROVIDER_KEYS_BOUND_CAPABILITY,
 ];
 const KEY = { keyId: 'abcd1234abcd1234', publicKey: 'AAAA' };
 
@@ -230,6 +232,33 @@ describe('what the workstation offers', () => {
 
 describe('provider keys travel as sealed commands', () => {
   const commands = (type: string) => r.of('command').filter((c) => c.command === type);
+
+  it('sends no key to a runner that cannot open one bound to its purpose (security review finding 2)', async () => {
+    const caps = (
+      await q('SELECT capabilities FROM workstation_capabilities WHERE workstation_id=$1', [w.workstationId])
+    )[0]?.capabilities as string[];
+    await q(
+      `UPDATE workstation_capabilities SET capabilities = array_remove(capabilities, $2) WHERE workstation_id=$1`,
+      [w.workstationId, PROVIDER_KEYS_BOUND_CAPABILITY],
+    );
+    try {
+      const from = r.received.length;
+      const res = await raw('PUT', `/api/workstations/${w.workstationId}/providers/openai`, {
+        keyId: KEY.keyId,
+        ciphertext: 'U0VDUkVULUtFWQ==',
+      });
+      expect(res.status).toBe(422);
+      expect(JSON.stringify(res.body)).toContain('runner_too_old');
+      expect(
+        r.received.slice(from).some((f) => f.type === 'command' && f.command === 'provider.key.set'),
+      ).toBe(false);
+    } finally {
+      await q('UPDATE workstation_capabilities SET capabilities = $2 WHERE workstation_id=$1', [
+        w.workstationId,
+        caps,
+      ]);
+    }
+  });
 
   it('relays the ciphertext, forgets it once answered and never writes it to an event', async () => {
     const stale = await raw('PUT', `/api/workstations/${w.workstationId}/providers/openai`, {
