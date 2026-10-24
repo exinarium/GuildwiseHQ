@@ -894,7 +894,7 @@ describe('the cap stops running work at once', () => {
     const id = randomUUID();
     await q(
       `INSERT INTO shifts (id, org_id, agent_id, workstation_id, kind, status, runtime, model, started_at)
-       VALUES ($1,$2,$3,$4,'chat','running','gemini',$5, now())`,
+       VALUES ($1,$2,$3,$4,'chat','running','gemini',$5, now() - interval '12 hours')`,
       [id, orgId, agent, w.workstationId, model],
     );
     return id;
@@ -1014,7 +1014,7 @@ describe('the cap stops running work at once', () => {
     );
     await q(
       `INSERT INTO session_turns (id, org_id, thread_id, speaker_kind, speaker_name, message, context, model, workstation_id, status, queued_at, requested_by)
-       VALUES ($1,$2,$3,'persona','Analyst','go','{}',$4,$5,'running',now(),$6)`,
+       VALUES ($1,$2,$3,'persona','Analyst','go','{}',$4,$5,'running',now() - interval '12 hours',$6)`,
       [
         turn,
         orgId,
@@ -1044,7 +1044,7 @@ describe('the cap stops running work at once', () => {
     const child = randomUUID();
     await q(
       `INSERT INTO delegate_begins (delegate_id, caller_id, org_id, begun_at, workstation_id, target, target_kind, runtime, model)
-       VALUES ($1,$2,$3,now(),$4,'gem','persona','gemini','gemini-2.5-pro')`,
+       VALUES ($1,$2,$3,now() - interval '12 hours',$4,'gem','persona','gemini','gemini-2.5-pro')`,
       [child, parent, orgId, w.workstationId],
     );
     await report(child, 20_000_000, 'delegate');
@@ -1067,5 +1067,179 @@ describe('the cap stops running work at once', () => {
     await q(`UPDATE shifts SET status='ended' WHERE id=$1`, [id]);
     await report(id, 100_000);
     expect(liveSpendMicros(ctx(), orgId, 'google')).toBe(0);
+  });
+
+  // ---------------------------------------------------------------------------------- security review findings 4 and 17
+  async function startShiftAt(ago: string, kind = 'chat', workstation = w.workstationId): Promise<string> {
+    const agent = (await q(`SELECT id FROM agents LIMIT 1`))[0]?.id;
+    const id = randomUUID();
+    await q(
+      `INSERT INTO shifts (id, org_id, agent_id, workstation_id, kind, status, runtime, model, started_at)
+       VALUES ($1,$2,$3,$4,$5,'running','gemini','gemini-2.5-pro', now() - $6::interval)`,
+      [id, orgId, agent, workstation, kind, ago],
+    );
+    return id;
+  }
+  const reset = async () => {
+    await clearSpend();
+    await q('DELETE FROM desk_items WHERE subkind IN ($1,$2)', [
+      'provider_cap_paused',
+      'provider_cap_warning',
+    ]);
+    await q(
+      `UPDATE org_providers SET cap_micros=NULL, cap_paused_month=NULL, cap_warned_month=NULL, cap_override_month=NULL WHERE org_id=$1`,
+      [orgId],
+    );
+  };
+
+  it('bounds what one report may claim by how long the run has been going', async () => {
+    await reset();
+    await giveGoogleKey('org');
+    const { liveSpendMicros, clampLiveUsage, LIVE_TOKEN_CEILING } = await import(
+      '../src/provider-keys/live-usage.ts'
+    );
+    const fresh = await startShiftAt('0 seconds');
+    await report(fresh, 9_000_000_000_000);
+    // 50k output tokens of burst at the Gemini output price, never the trillions it claimed
+    const burst = liveSpendMicros(ctx(), orgId, 'google');
+    expect(burst).toBeGreaterThan(0);
+    expect(burst).toBeLessThan(2_000_000);
+    expect(stops(r1, fresh)).toHaveLength(0);
+    // the same claim from a run that has been going for a day is allowed far more
+    const old = await startShiftAt('24 hours');
+    await report(old, 9_000_000_000_000);
+    expect(liveSpendMicros(ctx(), orgId, 'google')).toBeGreaterThan(burst * 100);
+    // the clamp itself
+    const u = clampLiveUsage(
+      { inputTokens: 1e12, outputTokens: 1e12, cacheReadTokens: 1e12, cacheWriteTokens: 1e12 },
+      10_000,
+    );
+    expect(u.outputTokens).toBe(LIVE_TOKEN_CEILING.outputBurst + LIVE_TOKEN_CEILING.outputPerSec * 10);
+    expect(u.inputTokens + u.cacheWriteTokens).toBeLessThanOrEqual(
+      LIVE_TOKEN_CEILING.inputBurst + LIVE_TOKEN_CEILING.inputPerSec * 10,
+    );
+    expect(clampLiveUsage({ inputTokens: 5, outputTokens: 7 }, 0)).toMatchObject({
+      inputTokens: 5,
+      outputTokens: 7,
+    });
+    for (const id of [fresh, old])
+      (await import('../src/provider-keys/live-usage.ts')).dropLiveUsage(ctx(), id);
+  });
+
+  it('counts a session turn or a plain chat only from the workstation that runs it', async () => {
+    await reset();
+    await giveGoogleKey('org');
+    const { liveSpendMicros, dropLiveUsage } = await import('../src/provider-keys/live-usage.ts');
+    const thread = randomUUID();
+    const turn = randomUUID();
+    await q(
+      `INSERT INTO threads (id, org_id, kind, title, created_by, created_at, workstation_id, session_config)
+       VALUES ($1,$2,'discovery','Elsewhere',$3,now(),$4,'{}')`,
+      [thread, orgId, w.owner.id, ws2],
+    );
+    // the turn runs on another workstation (ws2); this one (w.workstationId) reports it
+    await q(
+      `INSERT INTO session_turns (id, org_id, thread_id, speaker_kind, speaker_name, message, context, model, workstation_id, status, queued_at, requested_by)
+       VALUES ($1,$2,$3,'persona','Analyst','go','{}',$4,$5,'running',now() - interval '12 hours',$6)`,
+      [turn, orgId, thread, JSON.stringify({ runtime: 'gemini', model: 'gemini-2.5-pro' }), ws2, w.owner.id],
+    );
+    await report(turn, 1_000_000, 'chat');
+    expect(liveSpendMicros(ctx(), orgId, 'google')).toBe(0);
+    // a plain chat (a shift of kind chat) of another workstation, and a message id of the organization, count nothing either
+    const foreign = await startShiftAt('1 hour', 'chat', ws2);
+    await report(foreign, 1_000_000, 'chat');
+    await report(randomUUID(), 1_000_000, 'chat');
+    expect(liveSpendMicros(ctx(), orgId, 'google')).toBe(0);
+    // its own plain chat counts, and is forgotten when the shift ends
+    const mine = await startShiftAt('1 hour', 'chat');
+    await report(mine, 1_000_000, 'chat');
+    expect(liveSpendMicros(ctx(), orgId, 'google')).toBeGreaterThan(0);
+    dropLiveUsage(ctx(), mine);
+    expect(liveSpendMicros(ctx(), orgId, 'google')).toBe(0);
+    await q(`DELETE FROM session_turns WHERE id=$1`, [turn]);
+  });
+
+  it('a key report that names no organizations is no organization key: nothing counts and nothing is paused', async () => {
+    await reset();
+    await markOnline(w.t, w.workstationId, {
+      runtimes: [
+        ...GEMINI_RUNTIMES([orgId]).filter((x) => x.id !== 'direct-model'),
+        {
+          id: 'direct-model',
+          version: 'v',
+          available: true,
+          capabilities: ['skills'],
+          keys: [{ provider: 'google', source: 'org', orgKey: true }],
+        },
+      ] as never,
+      repoIds: [w.repoId],
+    });
+    expect((await asOwner('PUT', '/api/org/providers/google/cap', { monthlyUsd: 1 })).status).toBe(200);
+    const { liveSpendMicros } = await import('../src/provider-keys/live-usage.ts');
+    const id = await startShiftAt('12 hours');
+    await report(id, 9_000_000);
+    expect(liveSpendMicros(ctx(), orgId, 'google')).toBe(0);
+    expect(stops(r1, id)).toHaveLength(0);
+    expect((await alerts('provider_cap_paused')).length).toBe(0);
+    await giveGoogleKey('org');
+  });
+
+  it('forgets a finished delegate and does not bring it back: no double count, no map leak', async () => {
+    await reset();
+    await giveGoogleKey('org');
+    const { liveSpendMicros, dropLiveUsage, liveUsageSize } = await import(
+      '../src/provider-keys/live-usage.ts'
+    );
+    const parent = await startShiftAt('12 hours', 'card');
+    const child = randomUUID();
+    await q(
+      `INSERT INTO delegate_begins (delegate_id, caller_id, org_id, begun_at, workstation_id, target, target_kind, runtime, model)
+       VALUES ($1,$2,$3,now() - interval '12 hours',$4,'gem','persona','gemini','gemini-2.5-pro')`,
+      [child, parent, orgId, w.workstationId],
+    );
+    await report(child, 100_000, 'delegate');
+    expect(liveSpendMicros(ctx(), orgId, 'google')).toBeGreaterThan(0);
+    const before = liveUsageSize(ctx());
+    // completion books the child's cost (a shift_costs row of kind delegate keyed by its id) and drops the live figure
+    await q(
+      `INSERT INTO shift_costs (shift_id, org_id, agent_id, project_id, kind, model, cost_usd_micros, ended_at, key_source, key_provider)
+       VALUES ($1,$2,(SELECT id FROM agents LIMIT 1),$3,'delegate','gemini:gemini-2.5-pro',1000,now(),'org','google')`,
+      [child, orgId, w.projectId],
+    );
+    dropLiveUsage(ctx(), child);
+    expect(liveSpendMicros(ctx(), orgId, 'google')).toBe(0);
+    // a late report of the finished child counts nothing and leaves nothing behind
+    await report(child, 100_000, 'delegate');
+    await report(child, 200_000, 'delegate');
+    expect(liveSpendMicros(ctx(), orgId, 'google')).toBe(0);
+    expect(liveUsageSize(ctx()).live).toBe(before.live - 1);
+    await q(`DELETE FROM shift_costs WHERE shift_id=$1`, [child]);
+    await q(`DELETE FROM delegate_begins WHERE delegate_id=$1`, [child]);
+    await report(child, 100_000, 'delegate'); // no begin row: nothing
+    expect(liveSpendMicros(ctx(), orgId, 'google')).toBe(0);
+  });
+
+  it('prunes reports nobody repeated, so the live map cannot grow without bound', async () => {
+    await reset();
+    await giveGoogleKey('org');
+    const { liveUsageSize } = await import('../src/provider-keys/live-usage.ts');
+    const base = liveUsageSize(ctx()).live;
+    const ids: string[] = [];
+    for (let i = 0; i < 5; i++) {
+      const id = await startShiftAt('1 hour');
+      ids.push(id);
+      await report(id, 1000);
+    }
+    expect(liveUsageSize(ctx()).live).toBe(base + 5);
+    // two minutes later the clock has moved past STALE_MS: the next report prunes them
+    const real = ctx().clock.now.bind(ctx().clock);
+    (ctx().clock as { now: () => Date }).now = () => new Date(real().getTime() + 120_000);
+    try {
+      const last = await startShiftAt('1 hour');
+      await report(last, 1000);
+      expect(liveUsageSize(ctx()).live).toBe(1);
+    } finally {
+      (ctx().clock as { now: () => Date }).now = real;
+    }
   });
 });

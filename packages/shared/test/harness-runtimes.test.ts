@@ -231,14 +231,14 @@ describe('resolution order of provider keys: workstation key, then the organizat
       source: 'org',
     });
     expect(choiceKeyUse(r, { runtime: 'direct-model', model: 'openai:gpt-5' }, B)).toBeNull();
-    // an older runner reports no organizations: the key is taken as the one there is
+    // a report that names no organizations proves nothing: it is no organization key (security review finding 4)
     expect(
       choiceKeyUse(
         reports({ provider: 'openai', source: 'org' }),
         { runtime: 'direct-model', model: 'openai:gpt-5' },
         B,
       ),
-    ).toEqual({ provider: 'openai', source: 'org' });
+    ).toBeNull();
   });
   it('a provider with no key at all is none, and a Claude Code backend resolves like any other key', () => {
     expect(

@@ -94,8 +94,9 @@ export function choiceKeyUse(
   const keys = reports.find((r) => r.id === DIRECT_RUNTIME)?.keys ?? [];
   const k = keys.find((x) => x.provider === provider);
   if (!k) return null;
-  // the key in effect is an organization's but not this organization's: this work has no key here
-  if (k.source === 'org' && orgId && k.orgIds && !k.orgIds.includes(orgId)) return null;
+  // the key in effect is an organization's but not this organization's: this work has no key here. A report that does not say
+  // which organizations the key belongs to proves nothing (a runner could claim it to pause or count against any organization).
+  if (k.source === 'org' && orgId && !k.orgIds?.includes(orgId)) return null;
   return { provider, source: k.source };
 }
 
