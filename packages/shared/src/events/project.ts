@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ClaudeAccountKeySchema } from '../claude/accounts.ts';
+import { AccountKeySchema, ClaudeAccountKeySchema } from '../claude/accounts.ts';
 import { ForgeKindSchema, GitAccessMethodSchema } from '../forge/index.ts';
 import { WorkingBranchReason } from '../hygiene/index.ts';
 import { ProjectKeySchema } from '../ids.ts';
@@ -296,6 +296,21 @@ export const projectEvents = [
     z.object({
       projectId: Id,
       accountKey: ClaudeAccountKeySchema.nullable(),
+      fallbackToMain: z.boolean(),
+      changedBy: Id,
+    }),
+  ),
+  /**
+   * The project's account for a provider or runtime other than Claude Code (S-A): `scope` is `codex`, `gemini` or a provider key id
+   * (`anthropic`, `openai`, `google`, `openai-compatible`, `bedrock`, `vertex`, `gateway`); `accountKey` is a named account, `org`
+   * (the organization's key; key scopes only) or null for the main account. Claude Code keeps `ProjectClaudeAccountSet`.
+   */
+  defineEvent(
+    'ProjectProviderAccountSet',
+    z.object({
+      projectId: Id,
+      scope: z.string().min(1).max(40),
+      accountKey: AccountKeySchema.nullable(),
       fallbackToMain: z.boolean(),
       changedBy: Id,
     }),

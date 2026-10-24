@@ -21,6 +21,7 @@ import {
   INTEGRATIONS_VERSION,
   type IntegrationKindId,
   type IpcRpcResponse,
+  isKeyScope,
   LOCAL_VAULT_CAPABILITY,
   type McpAuthState,
   normalizeRemoteUrl,
@@ -28,8 +29,10 @@ import {
   PACK_CREDENTIALS_BOUND_CAPABILITY,
   PACKS_CAPABILITY,
   PRIVATE_ENDPOINTS_CAPABILITY,
+  PROVIDER_ACCOUNTS_CAPABILITY,
   PROVIDER_KEYS_BOUND_CAPABILITY,
   PROVIDER_KEYS_CAPABILITY,
+  type ProviderAccountPromoteResult,
   READONLY_DESIGN_CAPABILITY,
   type RepoReport,
   RUN_USAGE_FEATURE,
@@ -55,6 +58,14 @@ import { probeClaudeLogin } from './adapters/claude-auth.ts';
 import { sweepVertexKeys } from './adapters/claude-backend.ts';
 import { ClaudeCodeAdapter, realClaudeBlocked } from './adapters/claude-code.ts';
 import { formatLimitTime } from './adapters/claude-usage-limit.ts';
+import { codexMainFolder, detectCodex } from './adapters/codex.ts';
+import { detectGemini, geminiMainFolder } from './adapters/gemini.ts';
+import {
+  CODEX_DEF,
+  GEMINI_DEF,
+  LoginAccountRegistry,
+  swapMainLoginAccount,
+} from './adapters/login-accounts.ts';
 import { buildAdapters } from './adapters/registry.ts';
 import type { RuntimeAdapter } from './adapters/types.ts';
 import { ServerHttp } from './attachments/index.ts';
@@ -312,6 +323,9 @@ export class Runner {
    * usage-limit state (persisted in `claude-accounts-state.json`) and its own recovery probes.
    */
   readonly claudeAccounts: ClaudeAccountRegistry;
+  /** The named login accounts of Codex and of the Gemini CLI (S-A), with the same login and usage state per account. */
+  readonly codexAccounts: LoginAccountRegistry;
+  readonly geminiAccounts: LoginAccountRegistry;
   /** The main account's login: expired pauses it until a probe succeeds. */
   get claudeAuth() {
     return this.claudeAccounts.main.auth;
@@ -425,6 +439,21 @@ export class Runner {
       accounts: () => this.freshConfig().runtimes['claude-code'].accounts,
       mainCredential,
     });
+    // The named login accounts of Codex and the Gemini CLI (S-A): the owner's own login is main, the others are folders of their own.
+    this.codexAccounts = new LoginAccountRegistry({
+      def: CODEX_DEF,
+      home: homedir(),
+      stateFile: join(this.paths.root, 'codex-accounts-state.json'),
+      accounts: () => this.freshConfig().runtimes.codex?.accounts ?? [],
+      mainFolder: () => codexMainFolder(this.freshConfig().runtimes.codex, homedir()),
+    });
+    this.geminiAccounts = new LoginAccountRegistry({
+      def: GEMINI_DEF,
+      home: homedir(),
+      stateFile: join(this.paths.root, 'gemini-accounts-state.json'),
+      accounts: () => this.freshConfig().runtimes.gemini?.accounts ?? [],
+      mainFolder: () => geminiMainFolder(this.freshConfig().runtimes.gemini, homedir()),
+    });
     this.adapters =
       opts.adapters ??
       buildAdapters(
@@ -439,6 +468,7 @@ export class Runner {
           onModelsChanged: () => void this.reportRuntimes(),
           options: { chatRetentionDays: opts.config.directChatRetentionDays },
         },
+        { codex: this.codexAccounts, gemini: this.geminiAccounts },
       );
     this.integrations = new IntegrationService({
       workstationId: opts.config.workstationId,
@@ -471,6 +501,23 @@ export class Runner {
         this.log.info(`${tag} account works again: ${where} resumes`);
       void this.reportRuntimes();
     });
+    for (const reg of [this.codexAccounts, this.geminiAccounts]) {
+      reg.onChange((a) => {
+        const what = `${reg.def.label} account ${a.main ? 'main' : a.key}`;
+        if (a.auth.state !== 'ok')
+          this.log.warn(
+            a.auth.state === 'none'
+              ? `${what}: no login: its work is paused until you sign in (${a.terminalLogin()})`
+              : `${what}: the login does not work: its work is paused until you sign in (${a.terminalLogin()})`,
+          );
+        if (a.usage.state === 'limited' && a.usage.limitedUntil)
+          this.log.warn(
+            `${what}: usage limit reached: paused until ${formatLimitTime(new Date(a.usage.limitedUntil))}`,
+          );
+        if (a.auth.state === 'ok' && a.usage.state === 'ok') this.log.info(`${what}: works again`);
+        void this.reportRuntimes();
+      });
+    }
     this.client = new RunnerClient({
       url: toWsUrl(opts.config.serverUrl),
       token: opts.config.runnerToken,
@@ -757,6 +804,24 @@ export class Runner {
         },
       },
       claudeAccounts: this.claudeAccounts,
+      loginRuntimes: {
+        codex: {
+          registry: this.codexAccounts,
+          bin: () =>
+            this.adapters.has('codex')
+              ? detectCodex(this.freshConfig().runtimes.codex, { blocked: realClaudeBlocked() })
+              : undefined,
+          afterChange: () => this.reportRuntimes(),
+        },
+        gemini: {
+          registry: this.geminiAccounts,
+          bin: () =>
+            this.adapters.has('gemini')
+              ? detectGemini(this.freshConfig().runtimes.gemini, { blocked: realClaudeBlocked() })
+              : undefined,
+          afterChange: () => this.reportRuntimes(),
+        },
+      },
       mcp: {
         discover: () => (this.opts.mcpDiscover ?? (() => discoverPluginMcpServers()))(),
         authOf: () => (this.opts.mcpAuth ?? mcpAuthStates)(),
@@ -986,6 +1051,9 @@ export class Runner {
       void this.probeAccountLogins();
       void this.probeAuth();
       void this.probeUsage();
+      // a login made in a terminal or a limit that has reset: the registries notice and report it
+      this.codexAccounts.poll();
+      this.geminiAccounts.poll();
     }, this.opts.minuteMs ?? 60_000);
     m.unref();
     this.timers.push(m);
@@ -1126,6 +1194,27 @@ export class Runner {
     }
   }
 
+  /**
+   * "Make main" (`provider.account.promote`): a named account and the main account swap places. A login scope swaps the login
+   * folders in this pairing's config; a key scope opens both sealed keys and seals them again under their new names with this
+   * runner's own key. Claude Code's main account is the machine login or token, which is not swapped from here.
+   */
+  private async promoteAccount(scope: string, key: string): Promise<ProviderAccountPromoteResult> {
+    if (scope === 'codex' || scope === 'gemini') {
+      const reg = scope === 'codex' ? this.codexAccounts : this.geminiAccounts;
+      if (!reg.get(key) || key === 'main')
+        return { ok: false, error: `there is no account ${key} on this workstation` };
+      const r = swapMainLoginAccount(this.paths.config, reg.def, key, homedir(), reg.main.folder);
+      reg.refresh();
+      return r.ok ? { ok: true } : { ok: false, error: r.error };
+    }
+    if (isKeyScope(scope)) return this.providers.promote(scope, key);
+    return {
+      ok: false,
+      error: 'the main Claude Code account is the machine login or token and is not swapped from here',
+    };
+  }
+
   /** The instructions note for granted plugin MCP servers that are not signed in on this workstation. */
   private mcpSignInNote(granted: readonly string[] | undefined): string {
     if (!granted?.length) return '';
@@ -1183,6 +1272,8 @@ export class Runner {
         SETUP_SCAN_CAPABILITY,
         LOCAL_VAULT_CAPABILITY,
         CLAUDE_ACCOUNTS_CAPABILITY,
+        // Named accounts of Codex, the Gemini CLI and the provider keys; "Make main" (`provider.account.promote`).
+        PROVIDER_ACCOUNTS_CAPABILITY,
         // Runs the turns of discovery and boardroom sessions (`chat.start.session`) and indexes the capability registry.
         SESSION_TURNS_CAPABILITY,
         // A session turn may call the `aom session ...` verbs (the facilitator's questions, notes, proposals and drafts).
@@ -1622,6 +1713,13 @@ export class Runner {
             detail: 'this runner has no updater',
           },
         );
+      } else if (command === 'provider.account.promote') {
+        // "Make main": the named account and the main account swap places (login folders, or the two sealed keys)
+        const p = CommandPayloadSchemas['provider.account.promote'].parse(payload);
+        const r = await this.promoteAccount(p.scope, p.key);
+        this.log.info(`provider account ${p.scope}/${p.key}: make main ${r.ok ? 'done' : 'refused'}`);
+        void this.reportRuntimes();
+        done(true, r);
       } else if (command === 'claude.account.ensure') {
         // Provision an additional Claude account (folder, config entry, alias); an unexpected error is ok:false only.
         const p = CommandPayloadSchemas['claude.account.ensure'].parse(payload);

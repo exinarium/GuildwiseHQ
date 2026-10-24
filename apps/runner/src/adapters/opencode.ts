@@ -264,8 +264,8 @@ export class OpencodeAdapter implements RuntimeAdapter {
   }
 
   /** The providers this workstation holds keys (or an endpoint) for, workstation key over organization key. */
-  providers(orgId?: string): ProviderConfig[] {
-    return (this.store?.configured(orgId) ?? []).filter((p) =>
+  providers(orgId?: string, pick?: { provider: string; account?: string | undefined }): ProviderConfig[] {
+    return (this.store?.configured(orgId, pick) ?? []).filter((p) =>
       (OPENCODE_PROVIDERS as readonly string[]).includes(p.id),
     );
   }
@@ -396,9 +396,10 @@ export class OpencodeAdapter implements RuntimeAdapter {
   }
 
   /** The provider an agent's model names, with its key; throws when it is not set up here. */
-  private providerOf(model: string, orgId?: string): ProviderConfig {
+  private providerOf(model: string, orgId?: string, account?: string): ProviderConfig {
     const id = model.split('/')[0] ?? '';
-    const p = this.providers(orgId).find((x) => x.id === id);
+    // the project's account (S-A) applies to the provider the model names; the other providers use their main keys
+    const p = this.providers(orgId, { provider: id, account }).find((x) => x.id === id);
     if (!p)
       throw new Error(
         `${id || 'the provider'} is not set up on this workstation: add its key under Workstations > Model providers (or ask an Owner or Admin to share the organization's)`,
@@ -431,8 +432,11 @@ export class OpencodeAdapter implements RuntimeAdapter {
   ): Promise<RuntimeSession> {
     const sb = this.sandboxProblem();
     if (!sb.ok) throw new Error(`the opencode sandbox is unavailable: ${sb.reason}`);
-    const used = this.providerOf(input.agent.model, input.orgId);
-    const all = this.providers(input.orgId);
+    const used = this.providerOf(input.agent.model, input.orgId, input.account);
+    const all = this.providers(input.orgId, {
+      provider: input.agent.model.split('/')[0] ?? '',
+      account: input.account,
+    });
     const ohome = opencodeHomeOf(input.sandbox);
     const confDir = join(ohome, 'config', 'opencode');
     for (const d of ['config', 'data', 'cache', 'state'].map((x) => join(ohome, x)))

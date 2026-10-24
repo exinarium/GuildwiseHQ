@@ -26,6 +26,7 @@ import { ClaudeCodeIntegration } from './claude-code.ts';
 import { AzureDevOpsIntegration, BitbucketIntegration, GitLabIntegration } from './forge-tokens.ts';
 import { GitHubIntegration } from './github.ts';
 import { JiraIntegration } from './jira.ts';
+import { LoginRuntimeIntegration } from './login-runtimes.ts';
 import { McpIntegration } from './mcp.ts';
 import type { LoginSpawner } from './pty.ts';
 import { ReplayCache } from './seen.ts';
@@ -52,6 +53,8 @@ export function buildIntegrationAdapters(
 ): Map<IntegrationKindId, IntegrationAdapter> {
   const list: IntegrationAdapter[] = [
     new ClaudeCodeIntegration(env),
+    new LoginRuntimeIntegration('codex', env),
+    new LoginRuntimeIntegration('gemini', env),
     new GitHubIntegration(env),
     new GitLabIntegration(env),
     new BitbucketIntegration(env),

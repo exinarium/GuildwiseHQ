@@ -800,6 +800,8 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     agent: { model: string; roleKey: string; isDevops?: boolean },
     sessionRef: string,
     orgId?: string,
+    /** The project's account for this backend (S-A): a named account of this workstation, or `org`. Absent: main. */
+    account?: string,
   ):
     | {
         model: string;
@@ -813,10 +815,12 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     if (!b) return undefined;
     const role = backendRoleProblem(agent);
     if (role) throw new Error(`runtime_role_refused: ${role}`);
-    const cred = this.host.providers?.getBackend(b.backend, orgId);
+    const cred = this.host.providers?.getBackend(b.backend, orgId, account);
     if (!cred)
       throw new Error(
-        `${b.backend} is not set up on this workstation: add its credentials under Workstations > Model providers (or ask an Owner or Admin to share the organization's)`,
+        account && account !== 'main'
+          ? `${b.backend} has no account ${account} on this workstation: add it under Integrations, AI runtime`
+          : `${b.backend} is not set up on this workstation: add its credentials under Workstations > Model providers (or ask an Owner or Admin to share the organization's)`,
       );
     let vertexKeyFile: string | undefined;
     if (b.backend === 'vertex')
@@ -846,8 +850,9 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     // it runs inside the sandbox or not at all (fail closed, whatever the runner's sandbox mode says).
     if (input.agent.isDevops && input.devopsGuard?.readOnlyScan === true) this.assertScanSandbox();
     else if (!input.agent.isDevops) this.assertCanRun();
-    const account = this.account(input.account);
-    const bk = this.backendSession(input.agent, input.shiftId, input.orgId);
+    // a backend model (Bedrock, Vertex, a gateway) has no Claude login: its `account` names a credential of the backend, not a Claude account
+    const account = this.account(backendOfModel(input.agent.model) ? undefined : input.account);
+    const bk = this.backendSession(input.agent, input.shiftId, input.orgId, input.account);
     // The Vertex key file exists from here on: whatever fails before the process runs (and so before its exit hook can remove
     // the file) removes it.
     try {
@@ -958,8 +963,9 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
             ]),
           ],
     };
-    const account = this.account(input.account);
-    const bk = this.backendSession(input.agent, input.chatId, input.orgId);
+    // a backend model (Bedrock, Vertex, a gateway) has no Claude login: its `account` names a credential of the backend, not a Claude account
+    const account = this.account(backendOfModel(input.agent.model) ? undefined : input.account);
+    const bk = this.backendSession(input.agent, input.chatId, input.orgId, input.account);
     // see `start`: the Vertex key file is removed when anything fails before the process runs
     try {
       return await this.startChatSession(input, chatInput, devops, account, bk);

@@ -11,9 +11,12 @@ import {
   directProvider,
   type KeySource,
   keyIdOfSpki,
+  MAIN_ACCOUNT,
   normalizeEndpoint,
   normalizePrivateEndpoints,
+  ORG_ACCOUNT,
   orgCredentialEndpointProblem,
+  type ProviderAccountPromoteResult,
   type ProviderKeyBinding,
   type ProviderKeyClearPayload,
   type ProviderKeyId,
@@ -57,6 +60,13 @@ interface StoredProvider {
 const OWN_FLOOR_SLOT = '~workstation';
 
 type SlotFileContent = Partial<Record<ProviderKeyId, StoredProvider>>;
+/** The workstation's NAMED accounts: `{ [account]: { [provider]: StoredProvider } }`. */
+type AccountsFileContent = Record<string, SlotFileContent>;
+
+/** The most named accounts a workstation keeps (the report and the pickers stay small). */
+const MAX_NAMED_ACCOUNTS = 20;
+const ACCOUNT_NAME_RE = /^[a-z][a-z0-9-]{0,31}$/;
+const floorSlotOf = (account?: string): string => (account ? `${OWN_FLOOR_SLOT}/${account}` : OWN_FLOOR_SLOT);
 /** The organizations' slots: `{ [orgId]: { [provider]: StoredProvider } }`. */
 type OrgFileContent = Record<string, SlotFileContent>;
 
@@ -68,6 +78,8 @@ export interface ProviderConfig {
   models: string[];
   /** Whose key this is: the workstation's own, else the organization's (absent: the workstation's). */
   source?: KeySource;
+  /** The named account it came from (absent: the main key, or the organization's). */
+  account?: string;
 }
 
 /** A Claude Code backend credential, opened: the flat field map of `backends.ts`. The secrets are in memory only. */
@@ -76,6 +88,7 @@ export interface BackendConfig {
   fields: Record<string, string>;
   models: string[];
   source: KeySource;
+  account?: string;
 }
 
 /** Refuses an endpoint that carries credentials, a query or a non-http scheme (it is shown in the UI and logged). */
@@ -117,6 +130,8 @@ export function validateBaseUrl(
 export class ProviderStore {
   private changed: Array<() => void> = [];
   private readonly orgFile: string;
+  /** The named accounts of the workstation's own keys. */
+  private readonly accountsFile: string;
   private readonly endpointsFile: string;
   /** The highest generation of each organization key that was revoked or replaced here: never accepted again. */
   private readonly floorFile: string;
@@ -129,13 +144,14 @@ export class ProviderStore {
       orgFile?: string;
       keys: Pick<RunnerKeys, 'decrypt'> & {
         decryptAny?: (value: string, aad?: string, opts?: { requireBound?: boolean }) => string;
-        publicKey: { keyId: string };
+        publicKey: { keyId: string; publicKey?: string };
       };
       /** Clock for the approval's expiry (tests). */
       now?: () => number;
     },
   ) {
     this.orgFile = deps.orgFile ?? join(dirname(deps.file), 'providers-org.json');
+    this.accountsFile = join(dirname(deps.file), 'providers-accounts.json');
     this.endpointsFile = join(dirname(deps.file), 'private-endpoints.json');
     this.floorFile = join(dirname(deps.file), 'providers-org-floor.json');
     this.approvals = new ReplayCache(join(dirname(deps.file), 'reseal-approvals.json'), deps.now ?? Date.now);
@@ -145,6 +161,10 @@ export class ProviderStore {
     for (const [orgId, slot] of Object.entries(this.orgs()))
       for (const [id, p] of Object.entries(slot))
         if (p.ciphertext && p.bound) this.register(p.ciphertext, this.aadOf('org', orgId, id, p));
+    for (const [account, slot] of Object.entries(this.namedAccounts()))
+      for (const [id, p] of Object.entries(slot))
+        if (p.ciphertext && p.bound)
+          this.register(p.ciphertext, this.aadOf('workstation', undefined, id, p, account));
   }
 
   /** The private-endpoint allow-list (exact `host:port`, set by the workstation's owner; empty by default). */
@@ -179,6 +199,7 @@ export class ProviderStore {
     orgId: string | undefined,
     provider: string,
     s: Pick<StoredProvider, 'bound' | 'endpoint' | 'generation' | 'baseUrl'>,
+    account?: string,
   ): string | undefined {
     if (!s.bound) return undefined;
     const b: ProviderKeyBinding = {
@@ -188,6 +209,7 @@ export class ProviderStore {
       endpoint: s.endpoint ?? s.baseUrl ?? '',
       generation: s.generation ?? 0,
       keyId: this.deps.keys.publicKey.keyId,
+      ...(account ? { account } : {}),
     };
     return providerKeyAad(b);
   }
@@ -221,6 +243,12 @@ export class ProviderStore {
     return j && typeof j === 'object' ? (j as SlotFileContent) : {};
   }
 
+  /** The named accounts' keys, by account name. */
+  private namedAccounts(): AccountsFileContent {
+    const j = this.readJson(this.accountsFile);
+    return j && typeof j === 'object' ? (j as AccountsFileContent) : {};
+  }
+
   /** The organizations' keys, by organization. */
   private orgs(): OrgFileContent {
     const j = this.readJson(this.orgFile);
@@ -240,12 +268,24 @@ export class ProviderStore {
   }
 
   /** The slot a key is written to or read from: the workstation's, or one organization's. */
-  private slotFor(source: KeySource, orgId: string | undefined): SlotFileContent {
-    if (source === 'workstation') return this.own();
+  private slotFor(source: KeySource, orgId: string | undefined, account?: string): SlotFileContent {
+    if (source === 'workstation') return account ? (this.namedAccounts()[account] ?? {}) : this.own();
     return (orgId ? this.orgs()[orgId] : undefined) ?? {};
   }
 
-  private saveSlot(source: KeySource, orgId: string | undefined, slot: SlotFileContent): void {
+  private saveSlot(
+    source: KeySource,
+    orgId: string | undefined,
+    slot: SlotFileContent,
+    account?: string,
+  ): void {
+    if (source === 'workstation' && account) {
+      const all = this.namedAccounts();
+      if (Object.keys(slot).length === 0) delete all[account];
+      else all[account] = slot;
+      this.write(this.accountsFile, all);
+      return;
+    }
     if (source === 'workstation') {
       this.write(this.deps.file, slot);
       return;
@@ -305,6 +345,7 @@ export class ProviderStore {
         endpoint,
         generation: p.generation ?? 0,
         keyId: p.keyId,
+        ...(p.account ? { account: p.account } : {}),
       });
       try {
         return { plain: this.open(ct, aad, true), bound: true };
@@ -320,6 +361,9 @@ export class ProviderStore {
         error:
           'this organization key was sealed in the older form that is not tied to its purpose. Ask the Owner or an Admin to enter the key again (Settings, Model providers).',
       };
+    // a named account exists only with the bound form: there is no older form of it
+    if (p.account)
+      return { error: 'a named account needs the current web app: reload it and enter the key again' };
     const held = this.own()[p.provider as ProviderKeyId];
     if (held?.bound)
       return { error: 'this key was sealed in the older form; reload the web app and enter it again' };
@@ -340,6 +384,18 @@ export class ProviderStore {
     const source: KeySource = p.source ?? 'workstation';
     if (source === 'org' && !p.orgId)
       return { stored: false, error: 'an organization key needs its organization' };
+    if (p.account) {
+      if (source === 'org')
+        return {
+          stored: false,
+          error: 'a named account holds the workstation’s own key, not the organization’s',
+        };
+      if (!ACCOUNT_NAME_RE.test(p.account) || p.account === MAIN_ACCOUNT || p.account === ORG_ACCOUNT)
+        return { stored: false, error: 'that account name is not allowed' };
+      const names = Object.keys(this.namedAccounts());
+      if (!names.includes(p.account) && names.length >= MAX_NAMED_ACCOUNTS)
+        return { stored: false, error: `a workstation keeps at most ${MAX_NAMED_ACCOUNTS} named accounts` };
+    }
     if (p.keyId !== this.deps.keys.publicKey.keyId)
       return {
         stored: false,
@@ -349,7 +405,7 @@ export class ProviderStore {
       const refused = this.generationProblem(p.orgId as string, p.provider, p.generation);
       if (refused) return { stored: false, error: refused };
     } else {
-      const refused = this.ownGenerationProblem(p.provider, p.generation);
+      const refused = this.ownGenerationProblem(p.provider, p.generation, p.account);
       if (refused) return { stored: false, error: refused };
     }
     if ((BACKEND_IDS as readonly string[]).includes(p.provider))
@@ -386,9 +442,9 @@ export class ProviderStore {
     } else if (!def.keyOptional) {
       return { stored: false, error: `${def.label} needs an API key` };
     }
-    const all = this.slotFor(source, p.orgId);
+    const all = this.slotFor(source, p.orgId, p.account);
     const old = all[p.provider];
-    this.unregister(old?.ciphertext, old && this.aadOf(source, p.orgId, p.provider, old));
+    this.unregister(old?.ciphertext, old && this.aadOf(source, p.orgId, p.provider, old, p.account));
     all[p.provider] = {
       ...(p.ciphertext ? { ciphertext: p.ciphertext } : {}),
       ...(baseUrl ? { baseUrl } : {}),
@@ -398,7 +454,7 @@ export class ProviderStore {
         ? { bound: true as const, endpoint, ...(p.generation ? { generation: p.generation } : {}) }
         : {}),
     };
-    this.saveSlot(source, p.orgId, all);
+    this.saveSlot(source, p.orgId, all, p.account);
     if (plain) registerSecret(plain);
     for (const f of this.changed) f();
     return { stored: true, ...(warning ? { warning } : {}) };
@@ -409,13 +465,17 @@ export class ProviderStore {
    * held (a replayed blob of a removed key is refused). A key with no generation (sealed before they existed) is still accepted
    * with a warning, unless a versioned one is stored (no downgrade).
    */
-  private ownGenerationProblem(provider: string, generation: number | undefined): string | undefined {
-    const held = this.own()[provider as ProviderKeyId]?.generation ?? 0;
+  private ownGenerationProblem(
+    provider: string,
+    generation: number | undefined,
+    account?: string,
+  ): string | undefined {
+    const held = this.slotFor('workstation', undefined, account)[provider as ProviderKeyId]?.generation ?? 0;
     if (!generation)
       return held > 0
         ? 'a versioned key is already stored: reload the web app and enter this one again'
         : undefined;
-    if (generation <= this.floorOf(OWN_FLOOR_SLOT, provider))
+    if (generation <= this.floorOf(floorSlotOf(account), provider))
       return 'this key was removed or replaced here: it is not accepted again. Enter it again.';
     if (generation < held) return 'a newer version of this key is already stored';
     return undefined;
@@ -465,9 +525,9 @@ export class ProviderStore {
       const blocked = orgCredentialEndpointProblem(fields.baseUrl, this.endpoints());
       if (blocked) return { stored: false, error: blocked };
     }
-    const all = this.slotFor(source, p.orgId);
+    const all = this.slotFor(source, p.orgId, p.account);
     const old = all[id];
-    this.unregister(old?.ciphertext, old && this.aadOf(source, p.orgId, id, old));
+    this.unregister(old?.ciphertext, old && this.aadOf(source, p.orgId, id, old, p.account));
     all[id] = {
       ciphertext: p.ciphertext,
       models: [...new Set(p.models.map((m) => m.trim()).filter(Boolean))],
@@ -476,8 +536,8 @@ export class ProviderStore {
         ? { bound: true as const, endpoint, ...(p.generation ? { generation: p.generation } : {}) }
         : {}),
     };
-    this.saveSlot(source, p.orgId, all);
-    this.register(p.ciphertext, this.aadOf(source, p.orgId, id, all[id] as StoredProvider));
+    this.saveSlot(source, p.orgId, all, p.account);
+    this.register(p.ciphertext, this.aadOf(source, p.orgId, id, all[id] as StoredProvider, p.account));
     for (const f of this.changed) f();
     const plainHttp =
       fields.baseUrl?.startsWith('http://') && !/^http:\/\/(localhost|127\.|\[::1\])/.test(fields.baseUrl)
@@ -496,8 +556,9 @@ export class ProviderStore {
     source: KeySource = 'workstation',
     orgId?: string,
     generation?: number,
+    account?: string,
   ): void {
-    const all = this.slotFor(source, orgId);
+    const all = this.slotFor(source, orgId, account);
     const old = all[provider];
     if (source === 'org' && orgId) {
       const g = Math.max(generation ?? 0, old?.generation ?? 0);
@@ -506,17 +567,17 @@ export class ProviderStore {
     if (source === 'workstation') {
       // Q73: what is removed here cannot be put back by replaying its blob
       const g = Math.max(generation ?? 0, old?.generation ?? 0);
-      if (g > 0) this.raiseFloor(OWN_FLOOR_SLOT, provider, g);
+      if (g > 0) this.raiseFloor(floorSlotOf(account), provider, g);
     }
     if (!old) return;
-    this.unregister(old.ciphertext, this.aadOf(source, orgId, provider, old));
+    this.unregister(old.ciphertext, this.aadOf(source, orgId, provider, old, account));
     delete all[provider];
-    this.saveSlot(source, orgId, all);
+    this.saveSlot(source, orgId, all, account);
     for (const f of this.changed) f();
   }
 
   clearPayload(p: ProviderKeyClearPayload): void {
-    this.clear(p.provider, p.source ?? 'workstation', p.orgId, p.generation);
+    this.clear(p.provider, p.source ?? 'workstation', p.orgId, p.generation, p.account);
   }
 
   /**
@@ -527,7 +588,18 @@ export class ProviderStore {
   private slotOf(
     provider: string,
     orgId?: string,
-  ): { source: KeySource; stored: StoredProvider; orgId?: string } | undefined {
+    account?: string,
+  ): { source: KeySource; stored: StoredProvider; orgId?: string; account?: string } | undefined {
+    // An account a project chose (S-A): a named one of this workstation, or the organization's key on purpose. Never a fallback to
+    // another slot here: the dispatcher decided what to do when the account is missing.
+    if (account && account !== MAIN_ACCOUNT) {
+      if (account === ORG_ACCOUNT) {
+        const org = orgId ? this.orgs()[orgId]?.[provider as ProviderKeyId] : undefined;
+        return org?.bound && orgId ? { source: 'org', stored: org, orgId } : undefined;
+      }
+      const named = this.namedAccounts()[account]?.[provider as ProviderKeyId];
+      return named ? { source: 'workstation', stored: named, account } : undefined;
+    }
     const own = this.own()[provider as ProviderKeyId];
     if (own) return { source: 'workstation', stored: own };
     if (!orgId) return undefined;
@@ -538,12 +610,27 @@ export class ProviderStore {
   /** For the report only (names, models, whose key): the workstation's own, else the first organization that holds a bound one. */
   private reportSlotOf(
     provider: string,
-  ): { source: KeySource; stored: StoredProvider; orgId?: string; orgAlso: boolean } | undefined {
+  ):
+    | { source: KeySource; stored: StoredProvider; orgId?: string; account?: string; orgAlso: boolean }
+    | undefined {
     const holders = Object.entries(this.orgs()).filter(([, slot]) => slot[provider as ProviderKeyId]?.bound);
     const own = this.own()[provider as ProviderKeyId];
     if (own) return { source: 'workstation', stored: own, orgAlso: holders.length > 0 };
     const first = holders[0];
-    if (!first) return undefined;
+    if (!first) {
+      // only named accounts hold this provider: its models are still offered (the project's account decides which key pays)
+      const named = Object.entries(this.namedAccounts())
+        .sort(([a], [b]) => a.localeCompare(b))
+        .find(([, slot]) => slot[provider as ProviderKeyId]);
+      return named
+        ? {
+            source: 'workstation',
+            stored: named[1][provider as ProviderKeyId] as StoredProvider,
+            account: named[0],
+            orgAlso: false,
+          }
+        : undefined;
+    }
     return {
       source: 'org',
       stored: first[1][provider as ProviderKeyId] as StoredProvider,
@@ -554,7 +641,7 @@ export class ProviderStore {
 
   private configOf(
     provider: string,
-    slot: { source: KeySource; stored: StoredProvider; orgId?: string },
+    slot: { source: KeySource; stored: StoredProvider; orgId?: string; account?: string },
   ): ProviderConfig | undefined {
     const s = slot.stored;
     // An endpoint on a private network stops working when its entry is removed from the allow-list.
@@ -568,7 +655,7 @@ export class ProviderStore {
     let apiKey: string | undefined;
     if (s.ciphertext) {
       try {
-        apiKey = this.open(s.ciphertext, this.aadOf(slot.source, slot.orgId, provider, s));
+        apiKey = this.open(s.ciphertext, this.aadOf(slot.source, slot.orgId, provider, s, slot.account));
       } catch {
         return undefined;
       }
@@ -579,29 +666,38 @@ export class ProviderStore {
       ...(s.baseUrl ? { baseUrl: s.baseUrl } : {}),
       models: s.models ?? [],
       source: slot.source,
+      ...(slot.account ? { account: slot.account } : {}),
     };
   }
 
-  /** The configuration of one provider with its key decrypted, or undefined when it is not set (or its key is unreadable). */
-  get(provider: string, orgId?: string): ProviderConfig | undefined {
+  /**
+   * The configuration of one provider with its key decrypted, or undefined when it is not set (or its key is unreadable). `account`
+   * (S-A) picks a named account of this workstation, or `org` for the organization's key; absent or `main`: the key in effect.
+   */
+  get(provider: string, orgId?: string, account?: string): ProviderConfig | undefined {
     if (!(DIRECT_PROVIDER_IDS as readonly string[]).includes(provider)) return undefined;
-    const slot = this.slotOf(provider, orgId);
+    const slot = this.slotOf(provider, orgId, account);
     return slot ? this.configOf(provider, slot) : undefined;
   }
 
-  /** The providers that are set for a run of `orgId` (the workstation's own, else that organization's), with their keys readable. */
-  configured(orgId?: string): ProviderConfig[] {
-    return DIRECT_PROVIDER_IDS.map((id) => this.get(id, orgId)).filter((c): c is ProviderConfig => !!c);
+  /**
+   * The providers that are set for a run of `orgId` (the workstation's own, else that organization's), with their keys readable.
+   * `pick` names the one provider a project's account applies to; every other provider uses its main key.
+   */
+  configured(orgId?: string, pick?: { provider: string; account?: string | undefined }): ProviderConfig[] {
+    return DIRECT_PROVIDER_IDS.map((id) =>
+      this.get(id, orgId, pick && pick.provider === id ? pick.account : undefined),
+    ).filter((c): c is ProviderConfig => !!c);
   }
 
   private backendOf(
     id: BackendId,
-    slot: { source: KeySource; stored: StoredProvider; orgId?: string },
+    slot: { source: KeySource; stored: StoredProvider; orgId?: string; account?: string },
   ): BackendConfig | undefined {
     if (!slot.stored.ciphertext) return undefined;
     try {
       const j = JSON.parse(
-        this.open(slot.stored.ciphertext, this.aadOf(slot.source, slot.orgId, id, slot.stored)),
+        this.open(slot.stored.ciphertext, this.aadOf(slot.source, slot.orgId, id, slot.stored, slot.account)),
       ) as Record<string, unknown>;
       const fields = Object.fromEntries(Object.entries(j).map(([k, v]) => [k, String(v ?? '')]));
       if (
@@ -610,7 +706,13 @@ export class ProviderStore {
         orgCredentialEndpointProblem(fields.baseUrl, this.endpoints())
       )
         return undefined;
-      return { id, fields, models: slot.stored.models ?? [], source: slot.source };
+      return {
+        id,
+        fields,
+        models: slot.stored.models ?? [],
+        source: slot.source,
+        ...(slot.account ? { account: slot.account } : {}),
+      };
     } catch {
       return undefined;
     }
@@ -639,8 +741,8 @@ export class ProviderStore {
   }
 
   /** A backend's credential opened, or undefined when it is not set or unreadable. */
-  getBackend(id: BackendId, orgId?: string): BackendConfig | undefined {
-    const slot = this.slotOf(id, orgId);
+  getBackend(id: BackendId, orgId?: string, account?: string): BackendConfig | undefined {
+    const slot = this.slotOf(id, orgId, account);
     return slot ? this.backendOf(id, slot) : undefined;
   }
 
@@ -649,8 +751,8 @@ export class ProviderStore {
   }
 
   /** Whose key is in effect for a provider, or null. */
-  sourceOf(provider: string, orgId?: string): KeySource | null {
-    return this.slotOf(provider, orgId)?.source ?? null;
+  sourceOf(provider: string, orgId?: string, account?: string): KeySource | null {
+    return this.slotOf(provider, orgId, account)?.source ?? null;
   }
 
   /** Claude Code backends with a credential here: names, models and whose credential it is. */
@@ -681,19 +783,106 @@ export class ProviderStore {
   reportKeys(): ReportedKey[] {
     const out: ReportedKey[] = [];
     const orgs = this.orgs();
+    const named = this.namedAccounts();
     for (const id of [...DIRECT_PROVIDER_IDS, ...BACKEND_IDS] as ProviderKeyId[]) {
       const own = !!this.own()[id];
       const orgIds = Object.entries(orgs)
         .filter(([, slot]) => slot[id]?.bound)
         .map(([o]) => o);
-      if (!own && orgIds.length === 0) continue;
+      const accounts = Object.keys(named)
+        .filter((a) => named[a]?.[id])
+        .sort();
+      if (!own && orgIds.length === 0 && accounts.length === 0) continue;
       out.push({
         provider: id,
-        source: own ? 'workstation' : 'org',
+        source: own ? 'workstation' : orgIds.length ? 'org' : 'workstation',
         ...(orgIds.length ? { orgKey: true, orgIds: orgIds.slice(0, 50) } : {}),
+        // always present from runners that know accounts (even empty): the server reads it as "this runner can run on an account"
+        accounts,
+        ...(!own && orgIds.length === 0 ? { main: false as const } : {}),
       });
     }
     return out;
+  }
+
+  /** The names of this workstation's named key accounts, sorted. */
+  accountNames(): string[] {
+    return Object.keys(this.namedAccounts()).sort();
+  }
+
+  /** Does the named account hold a (readable) key for the provider? */
+  holdsAccount(provider: string, account: string): boolean {
+    return !!this.namedAccounts()[account]?.[provider as ProviderKeyId];
+  }
+
+  /**
+   * "Make main" for a key (S-A): the named account's key becomes the main key, and the former main key becomes the named account
+   * (a swap, undone by doing it again). The name is part of what a blob is bound to, so both are opened and sealed again under their
+   * new names with THIS runner's own key; the plain text exists in this function only. A key with no main yet simply moves. Each
+   * gets a generation newer than any held, so an old blob of either cannot be replayed over the new state.
+   */
+  async promote(provider: ProviderKeyId, account: string): Promise<ProviderAccountPromoteResult> {
+    if (!ACCOUNT_NAME_RE.test(account) || account === MAIN_ACCOUNT || account === ORG_ACCOUNT)
+      return { ok: false, error: 'that account name is not allowed' };
+    if (!this.deps.keys.publicKey.publicKey)
+      return { ok: false, error: 'this runner cannot seal keys: update it' };
+    const named = this.namedAccounts();
+    const acct = named[account]?.[provider];
+    if (!acct) return { ok: false, error: `there is no ${provider} key under the account ${account}` };
+    const main = this.own()[provider];
+    const reopen = async (
+      stored: StoredProvider,
+      from: string | undefined,
+      to: string | undefined,
+      generation: number,
+    ): Promise<StoredProvider> => {
+      if (!stored.ciphertext) return { ...stored, generation };
+      if (!stored.bound) throw new Error('a key stored in the older form cannot be moved: enter it again');
+      const plain = this.open(
+        stored.ciphertext,
+        this.aadOf('workstation', undefined, provider, stored, from),
+      );
+      const ciphertext = await sealProviderKey(this.deps.keys.publicKey.publicKey as string, plain, {
+        scope: 'workstation',
+        provider,
+        endpoint: stored.endpoint ?? stored.baseUrl ?? '',
+        generation,
+        keyId: this.deps.keys.publicKey.keyId,
+        ...(to ? { account: to } : {}),
+      });
+      return { ...stored, ciphertext, bound: true, generation, setAt: new Date().toISOString() };
+    };
+    const generation = Math.max(
+      Math.floor((this.deps.now ?? Date.now)() / 1000),
+      (acct.generation ?? 0) + 1,
+      (main?.generation ?? 0) + 1,
+    );
+    let nextMain: StoredProvider;
+    let nextAcct: StoredProvider | undefined;
+    try {
+      nextMain = await reopen(acct, account, undefined, generation);
+      if (main) nextAcct = await reopen(main, undefined, account, generation);
+    } catch (e) {
+      return {
+        ok: false,
+        error: e instanceof Error ? e.message.slice(0, 200) : 'the key could not be moved',
+      };
+    }
+    // forget the redaction entries of the old blobs, then write both slots
+    this.unregister(acct.ciphertext, this.aadOf('workstation', undefined, provider, acct, account));
+    if (main) this.unregister(main.ciphertext, this.aadOf('workstation', undefined, provider, main));
+    const own = this.own();
+    own[provider] = nextMain;
+    this.saveSlot('workstation', undefined, own);
+    const acctSlot = this.slotFor('workstation', undefined, account);
+    if (nextAcct) acctSlot[provider] = nextAcct;
+    else delete acctSlot[provider];
+    this.saveSlot('workstation', undefined, acctSlot, account);
+    this.register(nextMain.ciphertext ?? '', this.aadOf('workstation', undefined, provider, nextMain));
+    if (nextAcct?.ciphertext)
+      this.register(nextAcct.ciphertext, this.aadOf('workstation', undefined, provider, nextAcct, account));
+    for (const f of this.changed) f();
+    return { ok: true };
   }
 
   /** Is the organization's key stored here (it may be overridden by the workstation's own)? */

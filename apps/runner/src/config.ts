@@ -1,6 +1,6 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { ClaudeAccountKeySchema } from '@aom/shared';
+import { ClaudeAccountKeySchema, ProviderAccountKeySchema } from '@aom/shared';
 import { z } from 'zod';
 
 /** An additional Claude account of this workstation (docs/design/claude-accounts.md section 2.1). */
@@ -12,6 +12,19 @@ export const ClaudeAccountConfigSchema = z.object({
   source: z.enum(['config_dir', 'token']).default('config_dir'),
 });
 export type ClaudeAccountConfig = z.infer<typeof ClaudeAccountConfigSchema>;
+
+/**
+ * A named login account of Codex or the Gemini CLI (S-A, docs/design/discovery-boardroom-registry.md): the CLI's own login kept in
+ * a folder of its own. Codex: the folder is a `CODEX_HOME` (default `~/.codex-gw-<key>`, with `auth.json`). Gemini: the folder is
+ * the account's `GEMINI_CLI_HOME` (default `~/.gemini-gw-<key>`, with `.gemini/` inside). The main account stays the owner's own
+ * login (`loginDir`, else `~/.codex` / `~/.gemini`).
+ */
+export const LoginAccountConfigSchema = z.object({
+  key: ProviderAccountKeySchema,
+  /** The account's folder; '~' allowed. Default as above (created when missing, marked as runner-owned). */
+  loginDir: z.string().optional(),
+});
+export type LoginAccountConfig = z.infer<typeof LoginAccountConfigSchema>;
 
 export const ClaudeRuntimeConfigSchema = z.object({
   bin: z.string().default('claude'),
@@ -98,6 +111,8 @@ export const CodexRuntimeConfigSchema = z.object({
   sandbox: z.enum(['auto', 'harness', 'native']).optional(),
   /** More hosts the sandboxed CLI and its shell may reach (the harness sandbox's domain allow-list). */
   extraAllowedDomains: z.array(z.string()).optional(),
+  /** Named login accounts besides the main one (`loginDir`/`~/.codex`); a project names one by its key. */
+  accounts: z.array(LoginAccountConfigSchema).default([]),
 });
 export type CodexRuntimeConfig = z.infer<typeof CodexRuntimeConfigSchema>;
 
@@ -123,6 +138,8 @@ export const GeminiRuntimeConfigSchema = z.object({
   extraAllowedDomains: z.array(z.string()).default([]),
   /** Model ids besides the built-in ones, reported to the server so they can be picked. */
   models: z.array(z.string().min(1).max(120)).default([]),
+  /** Named Google-login accounts besides the main one (`loginDir`/`~/.gemini`); a project names one by its key. */
+  accounts: z.array(LoginAccountConfigSchema).default([]),
 });
 export type GeminiRuntimeConfig = z.infer<typeof GeminiRuntimeConfigSchema>;
 

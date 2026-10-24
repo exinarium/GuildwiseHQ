@@ -3,6 +3,9 @@ import { join } from 'node:path';
 import { ClaudeAccountRegistry } from '../adapters/claude-accounts.ts';
 import { probeClaudeLogin } from '../adapters/claude-auth.ts';
 import { realClaudeBlocked } from '../adapters/claude-code.ts';
+import { codexMainFolder, detectCodex } from '../adapters/codex.ts';
+import { detectGemini, geminiMainFolder } from '../adapters/gemini.ts';
+import { CODEX_DEF, GEMINI_DEF, LoginAccountRegistry } from '../adapters/login-accounts.ts';
 import { loadConfig } from '../config.ts';
 import { touchRecheck } from '../forge/connect.ts';
 import { SshSettingsStore } from '../forge/ssh.ts';
@@ -28,6 +31,20 @@ export function headlessEnv(paths: RunnerPaths, overrides: Partial<AdapterEnv> =
     secretsDir: paths.secrets,
     accounts: () => config().runtimes['claude-code'].accounts,
     mainCredential: () => resolveClaudeCredential(claudeStore, config().runtimes['claude-code']),
+  });
+  const codexAccounts = new LoginAccountRegistry({
+    def: CODEX_DEF,
+    home: homedir(),
+    stateFile: join(paths.root, 'codex-accounts-state.json'),
+    accounts: () => config().runtimes.codex?.accounts ?? [],
+    mainFolder: () => codexMainFolder(config().runtimes.codex, homedir()),
+  });
+  const geminiAccounts = new LoginAccountRegistry({
+    def: GEMINI_DEF,
+    home: homedir(),
+    stateFile: join(paths.root, 'gemini-accounts-state.json'),
+    accounts: () => config().runtimes.gemini?.accounts ?? [],
+    mainFolder: () => geminiMainFolder(config().runtimes.gemini, homedir()),
   });
   return {
     paths,
@@ -67,6 +84,18 @@ export function headlessEnv(paths: RunnerPaths, overrides: Partial<AdapterEnv> =
       afterChange: async () => undefined,
     },
     claudeAccounts,
+    loginRuntimes: {
+      codex: {
+        registry: codexAccounts,
+        bin: () => detectCodex(config().runtimes.codex, { blocked: realClaudeBlocked() }),
+        afterChange: () => undefined,
+      },
+      gemini: {
+        registry: geminiAccounts,
+        bin: () => detectGemini(config().runtimes.gemini, { blocked: realClaudeBlocked() }),
+        afterChange: () => undefined,
+      },
+    },
     mcp: { discover: () => discoverPluginMcpServers(), authOf: () => mcpAuthStates() },
     repoHosts: () => ({}),
     sessionCwd: join(paths.root, 'tmp', 'integrations'),

@@ -177,6 +177,78 @@ export const INTEGRATION_KINDS: readonly IntegrationKind[] = [
     minIntegrationsVersion: 1,
   },
   {
+    id: 'codex',
+    label: 'Codex',
+    group: 'ai',
+    instances: { by: 'account', label: 'Account', placeholder: 'work', defaultInstance: '' },
+    scope: 'machine',
+    machineMethods: ['codex_login'],
+    methods: [
+      {
+        id: 'codex_login',
+        label: 'Sign in with ChatGPT (codex login)',
+        flow: 'interactive',
+        paste: 'none',
+        steps: [
+          { text: 'Open the sign-in link and enter the code shown here.' },
+          {
+            text: 'Sign in to the ChatGPT account for this key and approve. The workstation finishes by itself.',
+          },
+          {
+            text: "The login is stored in this account's own Codex folder on the workstation (e.g. ~/.codex-gw-work); the main account is ~/.codex.",
+          },
+        ],
+        warning: 'Device-code sign-in must be allowed in your ChatGPT security settings.',
+      },
+    ],
+    help: {
+      summary:
+        'The Codex login the agents on this workstation use. Other API keys are set under Model providers.',
+      docsUrl: 'https://developers.openai.com/codex/cli',
+    },
+    test: { label: 'Check the login', what: 'Looks for a valid sign-in in the account folder.' },
+    storage: 'The account folder: ~/.codex for the main account, ~/.codex-gw-<key> for named accounts.',
+    cli: 'codex login --device-auth',
+    minRunner: '0.1.58',
+    minRunnerForInstance: '0.1.58',
+    minIntegrationsVersion: 1,
+  },
+  {
+    id: 'gemini',
+    label: 'Gemini CLI',
+    group: 'ai',
+    instances: { by: 'account', label: 'Account', placeholder: 'work', defaultInstance: '' },
+    scope: 'machine',
+    machineMethods: ['gemini_login'],
+    methods: [
+      {
+        id: 'gemini_login',
+        label: 'Sign in with Google',
+        flow: 'interactive',
+        paste: 'code',
+        steps: [
+          { text: 'Open the sign-in link and sign in to the Google account for this key.' },
+          { text: 'Copy the authorization code the page shows and paste it here.' },
+          {
+            text: "The login is stored in this account's own Gemini folder on the workstation (e.g. ~/.gemini-gw-work); the main account is ~/.gemini.",
+          },
+        ],
+      },
+    ],
+    help: {
+      summary:
+        'The Google login of the Gemini CLI on this workstation. A Gemini API key is set under Model providers.',
+      docsUrl: 'https://github.com/google-gemini/gemini-cli',
+    },
+    test: { label: 'Check the login', what: 'Looks for a valid sign-in in the account folder.' },
+    storage:
+      'The account folder: ~/.gemini for the main account, ~/.gemini-gw-<key>/.gemini for named accounts.',
+    cli: 'gemini',
+    minRunner: '0.1.58',
+    minRunnerForInstance: '0.1.58',
+    minIntegrationsVersion: 1,
+  },
+  {
     id: 'github',
     label: 'GitHub',
     group: 'git',

@@ -9,6 +9,7 @@ import { CodexAdapter, detectCodex } from './codex.ts';
 import type { DirectModelOptions } from './direct-model.ts';
 import { DirectModelAdapter } from './direct-model.ts';
 import { detectGemini, GeminiAdapter } from './gemini.ts';
+import type { LoginAccountRegistry } from './login-accounts.ts';
 import { MockAdapter } from './mock.ts';
 import { detectOpencode, OpencodeAdapter } from './opencode.ts';
 import type { RuntimeAdapter } from './types.ts';
@@ -27,6 +28,8 @@ export function buildAdapters(
   usage?: ClaudeUsageMonitor,
   accounts?: ClaudeAccountRegistry,
   direct?: { store: ProviderStore; options?: Partial<DirectModelOptions>; onModelsChanged?: () => void },
+  /** The named login accounts of Codex and the Gemini CLI (S-A). */
+  loginAccounts?: { codex?: LoginAccountRegistry; gemini?: LoginAccountRegistry },
 ): Map<string, RuntimeAdapter> {
   const adapters = new Map<string, RuntimeAdapter>();
   adapters.set(
@@ -48,7 +51,10 @@ export function buildAdapters(
       new CodexAdapter(
         { enabled: true, authMode: 'login', toolchainPaths: [], ...(c ?? {}), bin: codexBin },
         paths,
-        { ...(direct?.store ? { store: direct.store } : {}) },
+        {
+          ...(direct?.store ? { store: direct.store } : {}),
+          ...(loginAccounts?.codex ? { accounts: loginAccounts.codex } : {}),
+        },
       ),
     );
   }
@@ -69,6 +75,7 @@ export function buildAdapters(
         },
         paths,
         direct?.store,
+        loginAccounts?.gemini ? { accounts: loginAccounts.gemini } : {},
       ),
     );
   }

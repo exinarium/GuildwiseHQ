@@ -11,7 +11,7 @@ import {
 } from 'node:fs';
 import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
-import { delimiter, dirname, isAbsolute, join, resolve, sep } from 'node:path';
+import { basename, delimiter, dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { type AgentPermissions, CODEX_RUNTIME, codexRoleProblem } from '@aom/shared';
 import { execa } from 'execa';
 import { materializeSkills } from '../capabilities/materialize.ts';
@@ -40,10 +40,12 @@ import {
   launchInHarnessSandbox,
   probeHarnessSandbox,
 } from './harness-session.ts';
+import type { LoginAccountRegistry } from './login-accounts.ts';
 import { withFileLock } from './login-lock.ts';
 import { spawnSession } from './process-session.ts';
 import { SECRET_FILE_GLOBS } from './read-only-dirs.ts';
 import type {
+  AccountGate,
   ChatStartInput,
   RuntimeAdapter,
   RuntimeCapabilities,
@@ -72,7 +74,10 @@ export const CODEX_VERIFIED_VERSION = '0.163.0';
 /** The oldest version the profile syntax and `--strict-config` below were checked on. */
 export const CODEX_MIN_VERSION: readonly [number, number, number] = [0, 163, 0];
 
-type CodexConfig = CodexRuntimeConfig & { bin: string };
+type CodexConfig = Omit<CodexRuntimeConfig, 'accounts'> & {
+  accounts?: CodexRuntimeConfig['accounts'];
+  bin: string;
+};
 type SandboxInfo = Pick<ShiftStartInput['sandbox'], 'home' | 'configDir' | 'scratch' | 'tmp' | 'cacheRoot'>;
 
 // ------------------------------------------------------------------------------------------------ TOML for `-c`
@@ -94,8 +99,20 @@ export function tomlValue(v: unknown): string {
 // ------------------------------------------------------------------------------------------------ locations
 
 /** The agent's private Codex home: `agents/<id>/codex`, next to the Claude config dir. State shared by its sessions only. */
-export const codexHomeOf = (sandbox: Pick<SandboxInfo, 'configDir'>): string =>
-  join(dirname(sandbox.configDir), 'codex');
+export const codexHomeOf = (sandbox: Pick<SandboxInfo, 'configDir'>): string => {
+  // one Codex home per account per agent (S-A), like the Claude config dir: `codex` for main, `codex-acct-<key>` for a named account
+  const m = /^claude-acct-(.+)$/.exec(basename(sandbox.configDir));
+  return join(dirname(sandbox.configDir), m ? `codex-acct-${m[1]}` : 'codex');
+};
+
+/** The main account's login folder: `loginDir`, else `$CODEX_HOME`, else `~/.codex`. */
+export function codexMainFolder(
+  cfg: { loginDir?: string | undefined } | undefined,
+  home: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  return cfg?.loginDir ? expandHome(cfg.loginDir, home) : (env.CODEX_HOME ?? join(home, '.codex'));
+}
 
 /** Codex's USER-scope skills folder, inside the agent's private HOME (never the card worktree or repository). */
 export const codexSkillsDirOf = (sandbox: Pick<SandboxInfo, 'home'>): string =>
@@ -608,6 +625,8 @@ export interface CodexHost {
   sandboxProbe?: () => Promise<{ ok: boolean; reason: string }>;
   /** The workstation's provider keys (an `openai` key is used in `api_key` mode, and never enters the sandbox). */
   store?: ProviderStore;
+  /** The named login accounts of this workstation (S-A); absent: only the main login exists. */
+  accounts?: LoginAccountRegistry;
   /** Test hook (harness sandbox): the key's upstream, a fake OpenAI API on localhost. */
   upstream?: { url: string; allowPrivate?: boolean };
   /** Test hook (harness sandbox): start the command without bubblewrap. */
@@ -621,8 +640,8 @@ const PROBE_TTL_MS = 10 * 60_000;
 export class CodexAdapter implements RuntimeAdapter {
   readonly id = CODEX_RUNTIME;
   private probe: { at: number; result: { ok: boolean; reason: string } } | undefined;
-  /** The login failed in a session: unavailable until `auth.json` changes or a session works. */
-  private authBad: { mtimeMs: number } | undefined;
+  /** The login failed in a session: unavailable until `auth.json` changes or a session works. One per account. */
+  private readonly authBad = new Map<string, { mtimeMs: number }>();
 
   constructor(
     private readonly cfg: CodexConfig,
@@ -638,29 +657,76 @@ export class CodexAdapter implements RuntimeAdapter {
     return this.host.parent ?? process.env;
   }
 
-  /** The owner's login file (`auth.json`): `loginDir`, else `$CODEX_HOME`, else `~/.codex`. */
-  loginFile(): string {
-    const dir = this.cfg.loginDir
-      ? expandHome(this.cfg.loginDir, this.realHome())
-      : (this.parentEnv().CODEX_HOME ?? join(this.realHome(), '.codex'));
-    return join(dir, 'auth.json');
+  /**
+   * The login file (`auth.json`) of an account. Main (default): the owner's, in `loginDir`, else `$CODEX_HOME`, else `~/.codex`.
+   * A named account: the login folder the registry knows it by (a folder that does not exist for an unknown name).
+   */
+  loginFile(account?: string): string {
+    if (account && account !== 'main') {
+      const a = this.host.accounts?.get(account);
+      return join(a ? a.folder : join(this.realHome(), `.codex-gw-unknown-${account}`), 'auth.json');
+    }
+    return join(codexMainFolder(this.cfg, this.realHome(), this.parentEnv()), 'auth.json');
   }
 
-  private loginState(): 'ok' | 'expired' {
+  private loginState(account?: string): 'ok' | 'expired' {
     if (this.cfg.authMode === 'api_key')
       // availability only: an organization's key counts, but a run uses it only for the organization it names
       return this.cfg.apiKey || this.host.store?.holds('openai') ? 'ok' : 'expired';
-    const f = this.loginFile();
+    const k = account ?? 'main';
+    const f = this.loginFile(account);
     if (!existsSync(f)) return 'expired';
-    if (this.authBad) {
+    // with the account registry a file that holds no login (an empty file, a signed-out one) is no login
+    const known = this.host.accounts?.get(k);
+    if (known && !known.hasLogin()) return 'expired';
+    const bad = this.authBad.get(k);
+    if (bad) {
       try {
-        if (statSync(f).mtimeMs === this.authBad.mtimeMs) return 'expired';
+        if (statSync(f).mtimeMs === bad.mtimeMs) return 'expired';
       } catch {
         return 'expired';
       }
-      this.authBad = undefined;
+      this.authBad.delete(k);
     }
     return 'ok';
+  }
+
+  /** Brings the registry's login state of every account in line with what the files and the last sessions say. */
+  private syncAccounts(): void {
+    const reg = this.host.accounts;
+    if (!reg || this.cfg.authMode === 'api_key') return;
+    reg.poll();
+    for (const a of reg.list()) {
+      if (!a.hasLogin()) {
+        a.auth.markNone();
+        continue;
+      }
+      if (this.loginState(a.key) === 'expired') a.auth.markExpired();
+      else if (a.auth.state !== 'ok') a.auth.markOk();
+    }
+  }
+
+  /** May a shift run on this account now? The server picked it from the last report; this closes the race. */
+  accountGate(account: string): AccountGate {
+    const reg = this.host.accounts;
+    if (account === 'main' && !reg)
+      return this.loginState() === 'ok' ? { state: 'ok' } : { state: 'login', login: 'expired' };
+    this.syncAccounts();
+    const a = reg?.get(account);
+    if (!a) return { state: 'missing' };
+    if (this.cfg.authMode !== 'api_key' && a.auth.state !== 'ok')
+      return { state: 'login', login: a.auth.state === 'none' ? 'none' : 'expired' };
+    if (a.usage.state === 'limited')
+      return {
+        state: 'limited',
+        ...(a.usage.limitedUntil ? { limitedUntil: a.usage.limitedUntil } : {}),
+        label: a.info().limitedLabel ?? 'later',
+      };
+    return { state: 'ok' };
+  }
+
+  async checkLogin(account?: string): Promise<'ok' | 'expired' | 'unknown'> {
+    return this.loginState(account) === 'ok' ? 'ok' : 'expired';
   }
 
   /** Where the sandbox comes from: the runner's own (Linux and WSL2, by default) or Codex's permission profile (macOS). */
@@ -780,6 +846,7 @@ export class CodexAdapter implements RuntimeAdapter {
   async capabilities(): Promise<RuntimeCapabilities> {
     const caps = ['shell', 'edit', 'web', 'skills', 'resume'];
     const auth = this.loginState();
+    this.syncAccounts();
     let version = 'unknown';
     try {
       const r = await execa(this.cfg.bin, ['--version'], { reject: false, timeout: 10_000, stdin: 'ignore' });
@@ -801,7 +868,11 @@ export class CodexAdapter implements RuntimeAdapter {
       return this.unavailable(version, auth, 'unavailable', 'the codex binary does not run');
     }
     const sb = await this.probeSandbox();
-    const ok = sb.ok && auth === 'ok';
+    // available while ANY account is usable: which one a card runs on is decided per card by the server
+    const reg = this.host.accounts;
+    const anyUsable = reg && this.cfg.authMode !== 'api_key' ? reg.anyUsable() : auth === 'ok';
+    const ok = sb.ok && anyUsable;
+    const main = reg?.main;
     return {
       runtime: this.id,
       version,
@@ -810,6 +881,10 @@ export class CodexAdapter implements RuntimeAdapter {
       sandbox: sb.ok ? 'enforced' : 'unavailable',
       sandboxReason: sb.reason,
       auth,
+      ...(reg && this.cfg.authMode !== 'api_key' ? { accounts: reg.infos() } : {}),
+      ...(main && main.usage.state === 'limited' && main.usage.limitedUntil
+        ? { usage: 'limited' as const, limitedUntil: main.usage.limitedUntil }
+        : {}),
     };
   }
 
@@ -850,24 +925,26 @@ export class CodexAdapter implements RuntimeAdapter {
     if (problem) throw new Error(`codex_role_refused: ${problem}`);
   }
 
-  private async assertCanRun(): Promise<void> {
+  private async assertCanRun(account?: string): Promise<void> {
     const sb = await this.probeSandbox();
     if (!sb.ok) throw new Error(`the Codex sandbox is unavailable: ${sb.reason}`);
-    if (this.loginState() === 'expired')
+    if (this.loginState(account) === 'expired')
       throw new Error(
         this.cfg.authMode === 'api_key'
           ? 'Codex has no API key: set runtimes.codex.apiKey in the runner config'
-          : 'Codex is not signed in on this workstation: run `codex login` as the runner user',
+          : account && account !== 'main'
+            ? `Codex account ${account} is not signed in on this workstation: sign it in from Integrations`
+            : 'Codex is not signed in on this workstation: run `codex login` as the runner user',
       );
   }
 
   /** In-process chain plus a lock file beside the owner's login, so two runners or a concurrent `codex login` cannot interleave. */
-  private locked<T>(fn: () => T | Promise<T>): Promise<T> {
-    return withAuthLock(() => withFileLock(`${this.loginFile()}.aom-lock`, fn));
+  private locked<T>(fn: () => T | Promise<T>, account?: string): Promise<T> {
+    return withAuthLock(() => withFileLock(`${this.loginFile(account)}.aom-lock`, fn));
   }
 
   /** Puts the owner's login (or nothing, in api_key mode) into the agent's private Codex home. */
-  private prepareLogin(codexHome: string): Promise<void> {
+  private prepareLogin(codexHome: string, account?: string): Promise<void> {
     return this.locked(() => {
       mkdirSync(codexHome, { recursive: true, mode: 0o700 });
       const dest = join(codexHome, 'auth.json');
@@ -875,7 +952,7 @@ export class CodexAdapter implements RuntimeAdapter {
         rmSync(dest, { force: true });
         return;
       }
-      const src = this.loginFile();
+      const src = this.loginFile(account);
       if (!existsSync(src)) return;
       // keep a copy that a running session of this agent already refreshed
       // (but not one that fails the checks of a login coming back: a private copy an agent edited is replaced by the owner's)
@@ -893,15 +970,15 @@ export class CodexAdapter implements RuntimeAdapter {
       }
       writePrivate(dest, readFileSync(src, 'utf8'));
       registerCodexLoginSecrets(dest);
-    });
+    }, account);
   }
 
   /** After a session: a refreshed login (newer `last_refresh`) goes back to the owner's file, so the next session starts valid. */
-  private harvestLogin(codexHome: string): Promise<void> {
+  private harvestLogin(codexHome: string, account?: string): Promise<void> {
     if (this.cfg.authMode === 'api_key') return Promise.resolve();
     return this.locked(() => {
       const mine = join(codexHome, 'auth.json');
-      const src = this.loginFile();
+      const src = this.loginFile(account);
       if (!existsSync(mine) || !existsSync(src)) return;
       if (lastRefresh(mine) <= lastRefresh(src)) return;
       // tokens the CLI refreshed are secrets from now on, whatever becomes of the file
@@ -919,7 +996,7 @@ export class CodexAdapter implements RuntimeAdapter {
         return;
       }
       writePrivate(src, `${JSON.stringify(parsed, null, 2)}\n`);
-    });
+    }, account);
   }
 
   private shellEnv(input: { env: Record<string, string> }): Record<string, string> {
@@ -1005,6 +1082,7 @@ export class CodexAdapter implements RuntimeAdapter {
     logFile: string | undefined,
     codexHome: string,
     cleanup?: () => Promise<void>,
+    account?: string,
   ): RuntimeSession {
     return spawnSession({
       bin: cmd.bin,
@@ -1022,21 +1100,27 @@ export class CodexAdapter implements RuntimeAdapter {
       usageLimit: (stderr) =>
         codexUsageLimit(parser.usageLimitText ?? '', this.host.now?.()) ??
         codexUsageLimit(stderr, this.host.now?.()),
-      onExit: async ({ code, authFailed }) => {
+      onExit: async ({ code, authFailed, usageLimit }) => {
         try {
+          const k = account ?? 'main';
           if (authFailed) {
             let mtimeMs = 0;
             try {
-              mtimeMs = statSync(this.loginFile()).mtimeMs;
+              mtimeMs = statSync(this.loginFile(account)).mtimeMs;
             } catch {
               /* no file */
             }
             // The owner's file was refreshed (by another session) after this session took its copy: the copy was stale,
             // not the login. The next session starts from the newer file, so the runtime stays available.
-            const stale = lastRefresh(this.loginFile()) > lastRefresh(join(codexHome, 'auth.json'));
-            if (!stale) this.authBad = { mtimeMs };
-          } else if (code === 0 && parser.usage().outputTokens > 0) this.authBad = undefined;
-          await this.harvestLogin(codexHome);
+            const stale = lastRefresh(this.loginFile(account)) > lastRefresh(join(codexHome, 'auth.json'));
+            if (!stale) {
+              this.authBad.set(k, { mtimeMs });
+              this.host.accounts?.get(k)?.auth.markExpired();
+            }
+          } else if (code === 0 && parser.usage().outputTokens > 0) this.authBad.delete(k);
+          // the account hit its usage limit: it is paused (and reported) until the reset time
+          if (usageLimit) this.host.accounts?.get(k)?.usage.markLimited(usageLimit.until);
+          await this.harvestLogin(codexHome, account);
         } catch {
           /* best effort */
         } finally {
@@ -1051,6 +1135,7 @@ export class CodexAdapter implements RuntimeAdapter {
   /** How Codex signs in right now (harness mode): the owner's login, or a stored OpenAI key that stays in the runner. */
   authSelection(
     orgId?: string,
+    account?: string,
   ):
     | { via: 'login' }
     | { via: 'key'; apiKey: string; source: 'org' | 'workstation' }
@@ -1065,10 +1150,13 @@ export class CodexAdapter implements RuntimeAdapter {
           'Codex has no API key: set runtimes.codex.apiKey in the runner config, or add an OpenAI key under Model providers',
       };
     }
-    if (this.loginState() === 'ok') return { via: 'login' };
+    if (this.loginState(account) === 'ok') return { via: 'login' };
     return {
       via: 'none',
-      reason: 'Codex is not signed in on this workstation: run `codex login` as the runner user',
+      reason:
+        account && account !== 'main'
+          ? `Codex account ${account} is not signed in on this workstation: sign it in from Integrations`
+          : 'Codex is not signed in on this workstation: run `codex login` as the runner user',
     };
   }
 
@@ -1134,10 +1222,10 @@ export class CodexAdapter implements RuntimeAdapter {
   ): Promise<RuntimeSession> {
     const sb = await this.probeSandbox();
     if (!sb.ok) throw new Error(`the Codex sandbox is unavailable: ${sb.reason}`);
-    const sel = this.authSelection(input.orgId);
+    const sel = this.authSelection(input.orgId, input.account);
     if (sel.via === 'none') throw new Error(sel.reason);
     const codexHome = this.prepareHome(input.sandbox, input.grantedSkills, o.perms, o.roleKey, true);
-    await this.prepareLogin(codexHome);
+    await this.prepareLogin(codexHome, input.account);
     const shellEnv = { ...this.shellEnv(input), ...proxyEnv(BRIDGE_PORT) };
     const cmd = buildCodexHarnessCommand(
       {
@@ -1200,6 +1288,7 @@ export class CodexAdapter implements RuntimeAdapter {
       input.logFile,
       codexHome,
       () => harness.cleanup(),
+      input.account,
     );
   }
 
@@ -1218,9 +1307,9 @@ export class CodexAdapter implements RuntimeAdapter {
         perms,
         roleKey: input.agent.roleKey,
       });
-    await this.assertCanRun();
+    await this.assertCanRun(input.account);
     const codexHome = this.prepareHome(input.sandbox, input.grantedSkills, perms, input.agent.roleKey);
-    await this.prepareLogin(codexHome);
+    await this.prepareLogin(codexHome, input.account);
     const profile = this.profile(input, !edit, edit && perms.mayCommit);
     const cmd = buildCodexCommand(
       {
@@ -1244,6 +1333,8 @@ export class CodexAdapter implements RuntimeAdapter {
       new CodexStreamParser({ model: input.agent.model }),
       input.logFile,
       codexHome,
+      undefined,
+      input.account,
     );
   }
 
@@ -1264,14 +1355,14 @@ export class CodexAdapter implements RuntimeAdapter {
         perms: input.agent.permissions,
         roleKey: input.agent.roleKey,
       });
-    await this.assertCanRun();
+    await this.assertCanRun(input.account);
     const codexHome = this.prepareHome(
       input.sandbox,
       input.grantedSkills,
       input.agent.permissions,
       input.agent.roleKey,
     );
-    await this.prepareLogin(codexHome);
+    await this.prepareLogin(codexHome, input.account);
     // A chat reads: its working folder is read-only (a card's worktree, or the scratch folder of a session turn).
     const readDirs = [...new Set([...(input.readDirs ?? [])])];
     const profile = this.profile({ ...input, readDirs }, true, false);
@@ -1297,6 +1388,8 @@ export class CodexAdapter implements RuntimeAdapter {
       new CodexStreamParser({ model: input.agent.model, chat: true }),
       input.logFile,
       codexHome,
+      undefined,
+      input.account,
     );
   }
 }

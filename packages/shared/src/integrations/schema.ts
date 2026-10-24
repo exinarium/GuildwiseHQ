@@ -8,6 +8,8 @@ import { z } from 'zod';
 
 export const INTEGRATION_KIND_IDS = [
   'claude-code',
+  'codex',
+  'gemini',
   'github',
   'gitlab',
   'bitbucket-cloud',

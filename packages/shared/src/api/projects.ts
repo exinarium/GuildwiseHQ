@@ -211,6 +211,10 @@ export const ProjectDtoSchema = z.object({
     })
     .nullable()
     .optional(),
+  /** The project's account per other provider or runtime (S-A): `{ codex: { key, fallbackToMain }, anthropic: ... }`. Absent scopes = main. */
+  providerAccounts: z
+    .record(z.string(), z.object({ key: AccountKeySchema.nullable(), fallbackToMain: z.boolean() }))
+    .optional(),
   /** The project's Claude account (docs/design/claude-accounts.md). Absent = main, no fallback. */
   claudeAccount: z.object({ key: ClaudeAccountKeySchema.nullable(), fallbackToMain: z.boolean() }).optional(),
   /** Manual pause by an organization Owner or Admin: nothing new starts until one resumes it. Null/absent: running. */

@@ -119,7 +119,10 @@ describe('the provider store: two slots, three backends', () => {
     expect(store.get('openai', ORG)).toMatchObject({ apiKey: 'sk-org-key-1111', source: 'org' });
     // another organization's work on this workstation has no key here
     expect(store.get('openai', ORG2)).toBeUndefined();
-    expect(store.reportKeys()).toEqual([{ provider: 'openai', source: 'org', orgKey: true, orgIds: [ORG] }]);
+    // `accounts` is always reported (even none): it tells the server this runner can run on a named account or the organization's key
+    expect(store.reportKeys()).toEqual([
+      { provider: 'openai', source: 'org', orgKey: true, orgIds: [ORG], accounts: [] },
+    ]);
     store.set({
       provider: 'openai',
       keyId: keys.publicKey.keyId,

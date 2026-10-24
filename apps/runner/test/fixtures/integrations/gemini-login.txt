@@ -1,0 +1,7 @@
+Code Assist login required.
+Attempting to open authentication page in your browser.
+Otherwise navigate to:
+
+https://accounts.google.com/o/oauth2/v2/auth?redirect_uri=https%3A%2F%2Fcodeassist.google.com%2Fauthcode&access_type=offline&client_id=fake-client&scope=openid&state=abc123&response_type=code
+
+Enter the authorization code:

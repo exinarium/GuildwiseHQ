@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ProviderAccountPromotePayloadSchema } from '../accounts/provider-accounts.ts';
 import { BriefAttachmentSchema } from '../attachments/index.ts';
 import {
   PackAuthorSavePayloadSchema,
@@ -831,6 +832,7 @@ export const RunnerCommandNameSchema = z.enum([
   'deploy.prepare',
   'deploy.move',
   'claude.account.ensure',
+  'provider.account.promote',
   'provider.key.set',
   'provider.key.clear',
   'provider.key.reseal',
@@ -865,6 +867,7 @@ export const CommandPayloadSchemas = {
   'provider.key.reseal': ProviderKeyResealPayloadSchema,
   'provider.endpoints.set': PrivateEndpointsSetSchema,
   'claude.account.ensure': ClaudeAccountEnsurePayloadSchema,
+  'provider.account.promote': ProviderAccountPromotePayloadSchema,
   'vault.configure': VaultConfigureCommandSchema,
   'vault.write': VaultWriteCommandSchema,
   'vault.move': VaultMoveCommandSchema,

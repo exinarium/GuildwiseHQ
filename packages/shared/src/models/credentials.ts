@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { MAIN_ACCOUNT } from '../claude/accounts.ts';
 import { BACKEND_IDS, BackendIdSchema, splitBackendModel } from './backends.ts';
 import {
   DIRECT_PROVIDER_IDS,
@@ -43,8 +44,59 @@ export const ReportedKeySchema = z.object({
   orgIds: z.array(z.uuid()).max(50).optional(),
   /** Short note about the setup (region, endpoint host); no secret. */
   detail: z.string().max(200).optional(),
+  /**
+   * The names of the workstation's NAMED key accounts for this provider (S-A: `work`, `personal`), besides the main key.
+   * Names only. Absent from runners older than `provider-accounts:1`.
+   */
+  accounts: z.array(z.string().min(1).max(32)).max(20).optional(),
+  /** `false`: there is no main key or organization key here, only the named accounts (`source` then says nothing). Absent: true. */
+  main: z.boolean().optional(),
 });
 export type ReportedKey = z.infer<typeof ReportedKeySchema>;
+
+/** The organization's key as an account a project may choose (key scopes only). Reserved: no account is named this. */
+export const ORG_ACCOUNT = 'org' as const;
+
+/**
+ * Is a key account usable on a workstation that reported `reports` (its runtimes)? `main`: the workstation's own key, or the
+ * organization's key of `orgId`; `org`: the organization's key of `orgId` only; a name: the named account. `orgCapped`: the
+ * organization's monthly cap for the provider is reached, so the organization's key is not usable (the workstation's own and the
+ * named accounts are never capped). A runner that reports no key facts at all (older than the organization keys) is trusted for
+ * `main` (it runs as it always did) and has no named accounts.
+ */
+export function keyAccountUsable(
+  reports: readonly KeyUseReport[] | undefined,
+  provider: ProviderKeyId,
+  account: string,
+  orgId?: string,
+  orgCapped = false,
+): boolean {
+  const keys = (reports ?? []).find((r) => r.id === DIRECT_RUNTIME)?.keys;
+  if (!keys) return account === MAIN_ACCOUNT;
+  const k = keys.find((x) => x.provider === provider);
+  const orgHolds = !!orgId && !!k?.orgIds?.includes(orgId);
+  if (account === MAIN_ACCOUNT) {
+    if (!k || k.main === false) return false;
+    return k.source === 'workstation' || (orgHolds && !orgCapped);
+  }
+  if (!k) return false;
+  // `org` needs a runner that knows accounts (it reports `accounts`, even none): an older one would spend its own key instead
+  if (account === ORG_ACCOUNT) return orgHolds && !orgCapped && k?.accounts !== undefined;
+  return !!k.accounts?.includes(account);
+}
+
+/** Which key a run on an account spends (the cap and the cost rows key on it): the organization's only for `org` (and `main` with no own key). */
+export function keyAccountSource(
+  reports: readonly KeyUseReport[] | undefined,
+  provider: ProviderKeyId,
+  account: string,
+): KeySource | null {
+  const k = (reports ?? []).find((r) => r.id === DIRECT_RUNTIME)?.keys?.find((x) => x.provider === provider);
+  if (account === ORG_ACCOUNT) return 'org';
+  if (account !== MAIN_ACCOUNT) return k?.accounts?.includes(account) ? 'workstation' : null;
+  if (!k || k.main === false) return null;
+  return k.source;
+}
 
 /** `workstation key > organization key > none`. */
 export function effectiveKeySource(slots: { workstation?: boolean; org?: boolean }): KeySource | null {
@@ -84,6 +136,8 @@ export function choiceKeyUse(
   choice: { runtime: string; model: string },
   /** The organization the work belongs to: an organization key counts only when it is that organization's. */
   orgId?: string,
+  /** The project's account for this run (S-A): a named account, or `org`. Absent or `main`: the key in effect. */
+  account?: string,
 ): { provider: ProviderKeyId; source: KeySource } | null {
   const provider = providerOfChoice(choice.runtime, choice.model);
   if (!provider) return null;
@@ -93,7 +147,14 @@ export function choiceKeyUse(
   }
   const keys = reports.find((r) => r.id === DIRECT_RUNTIME)?.keys ?? [];
   const k = keys.find((x) => x.provider === provider);
-  if (!k) return null;
+  if (account && account !== MAIN_ACCOUNT) {
+    // a named account is the workstation's own key (never capped); `org` is the organization's, only this organization's
+    const source = keyAccountSource(reports, provider, account);
+    if (!source) return null;
+    if (source === 'org' && !(orgId && k?.orgIds?.includes(orgId))) return null;
+    return { provider, source };
+  }
+  if (!k || k.main === false) return null;
   // the key in effect is an organization's but not this organization's: this work has no key here. A report that does not say
   // which organizations the key belongs to proves nothing (a runner could claim it to pause or count against any organization).
   if (k.source === 'org' && orgId && !k.orgIds?.includes(orgId)) return null;

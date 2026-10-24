@@ -37,11 +37,17 @@ export interface ProviderKeyBinding {
   generation: number;
   /** The id of the runner key it is sealed to. */
   keyId: string;
+  /**
+   * A named account of the workstation's own key (S-A): the same provider can hold a main key and keys named `work`, `personal`.
+   * Bound into the associated data, so a blob sealed for one account does not open as another's (or as the main key). Absent or
+   * empty for the main key, whose associated data is unchanged (every key sealed before accounts existed still opens).
+   */
+  account?: string | undefined;
 }
 
 /** The associated data of a sealed provider or backend credential. Every field is a plain string, joined unambiguously. */
 export function providerKeyAad(b: ProviderKeyBinding): string {
-  return JSON.stringify([
+  const base: Array<string | number> = [
     'aom-provider-key/v2',
     b.scope,
     b.scope === 'org' ? (b.orgId ?? '') : '',
@@ -49,7 +55,10 @@ export function providerKeyAad(b: ProviderKeyBinding): string {
     normalizeEndpoint(b.endpoint),
     b.generation,
     b.keyId,
-  ]);
+  ];
+  // the account comes last and only when there is one: the main key's associated data is what it always was
+  if (b.scope === 'workstation' && b.account) base.push(b.account);
+  return JSON.stringify(base);
 }
 
 /** Seals a provider or backend credential for one runner, bound to its purpose (`h2.`). */

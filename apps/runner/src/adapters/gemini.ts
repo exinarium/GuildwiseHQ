@@ -12,7 +12,7 @@ import {
 } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { homedir, hostname, userInfo } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { type AgentPermissions, GEMINI_RUNTIME, runtimeRoleProblem } from '@aom/shared';
 import { execa } from 'execa';
 import { materializeSkills } from '../capabilities/materialize.ts';
@@ -33,9 +33,11 @@ import {
   launchInHarnessSandbox,
   probeHarnessSandbox,
 } from './harness-session.ts';
+import type { LoginAccountRegistry } from './login-accounts.ts';
 import { withFileLock } from './login-lock.ts';
 import { spawnSession } from './process-session.ts';
 import type {
+  AccountGate,
   ChatStartInput,
   RuntimeAdapter,
   RuntimeCapabilities,
@@ -63,7 +65,10 @@ import type {
 export const GEMINI_VERIFIED_VERSION = '0.65.0';
 export const GEMINI_MIN_VERSION: readonly [number, number, number] = [0, 65, 0];
 
-type GeminiConfig = GeminiRuntimeConfig & { bin: string };
+type GeminiConfig = Omit<GeminiRuntimeConfig, 'accounts'> & {
+  accounts?: GeminiRuntimeConfig['accounts'];
+  bin: string;
+};
 type SandboxInfo = Pick<ShiftStartInput['sandbox'], 'home' | 'configDir' | 'scratch' | 'tmp' | 'cacheRoot'>;
 
 /** Under tests and the mock runtime a binary on PATH is NOT picked up (a real `gemini` could spend tokens): only an explicit `bin`. */
@@ -78,8 +83,21 @@ export function detectGemini(
 }
 
 /** The agent's private Gemini root: `agents/<id>/gemini` (`GEMINI_CLI_HOME`); the CLI's files are in its `.gemini` folder. */
-export const geminiHomeOf = (sandbox: Pick<SandboxInfo, 'configDir'>): string =>
-  join(dirname(sandbox.configDir), 'gemini');
+export const geminiHomeOf = (sandbox: Pick<SandboxInfo, 'configDir'>): string => {
+  // one Gemini home per account per agent (S-A), like the Claude config dir
+  const m = /^claude-acct-(.+)$/.exec(basename(sandbox.configDir));
+  return join(dirname(sandbox.configDir), m ? `gemini-acct-${m[1]}` : 'gemini');
+};
+
+/** The main account's `.gemini` folder: `loginDir`, else `$GEMINI_CLI_HOME/.gemini`, else `~/.gemini`. */
+export function geminiMainFolder(
+  cfg: { loginDir?: string | undefined } | undefined,
+  home: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  if (cfg?.loginDir) return expandHome(cfg.loginDir, home);
+  return env.GEMINI_CLI_HOME ? join(env.GEMINI_CLI_HOME, '.gemini') : join(home, '.gemini');
+}
 const dotGemini = (ghome: string): string => join(ghome, '.gemini');
 
 /** The CLI's install folders (the bundle and its package), read-only inside the sandbox. */
@@ -542,12 +560,14 @@ export interface GeminiHost {
   extraArgs?: string[];
   /** Test hook: start the command without the sandbox (unit tests with a fake binary run where there is no bubblewrap). */
   launch?: (l: HarnessLaunch) => Promise<LaunchedHarness>;
+  /** The named Google-login accounts of this workstation (S-A); absent: only the main login exists. */
+  accounts?: LoginAccountRegistry;
 }
 
 export class GeminiAdapter implements RuntimeAdapter {
   readonly id = GEMINI_RUNTIME;
-  /** The login failed in a session: unavailable until the login file changes or a session works. */
-  private authBad: { freshness: number } | undefined;
+  /** The login failed in a session: unavailable until the login file changes or a session works. One per account. */
+  private readonly authBad = new Map<string, { freshness: number }>();
 
   constructor(
     private readonly cfg: GeminiConfig,
@@ -565,41 +585,92 @@ export class GeminiAdapter implements RuntimeAdapter {
   }
 
   /** The owner's own `.gemini` folder: `loginDir`, else `$GEMINI_CLI_HOME/.gemini`, else `~/.gemini`. */
-  loginDir(): string {
-    if (this.cfg.loginDir) return expandHome(this.cfg.loginDir, this.realHome());
-    const root = this.parentEnv().GEMINI_CLI_HOME;
-    return root ? join(root, '.gemini') : join(this.realHome(), '.gemini');
+  loginDir(account?: string): string {
+    if (account && account !== 'main') {
+      const a = this.host.accounts?.get(account);
+      return a ? a.folder : join(this.realHome(), `.gemini-gw-unknown-${account}`, '.gemini');
+    }
+    return geminiMainFolder(this.cfg, this.realHome(), this.parentEnv());
   }
 
-  /** The owner's login file in use: the encrypted store first, then the older plain file. */
-  loginFile(): string | undefined {
+  /** The login file of an account in use: the encrypted store first, then the older plain file. Main by default. */
+  loginFile(account?: string): string | undefined {
     for (const n of LOGIN_FILES) {
-      const f = join(this.loginDir(), n);
+      const f = join(this.loginDir(account), n);
       if (existsSync(f)) return f;
     }
     return undefined;
   }
 
-  private loginUsable(): boolean {
-    const f = this.loginFile();
+  private loginUsable(account?: string): boolean {
+    const f = this.loginFile(account);
     if (!f) return false;
-    if (this.authBad) {
-      if (geminiLoginFreshness(f) === this.authBad.freshness) return false;
-      this.authBad = undefined;
+    const k = account ?? 'main';
+    const bad = this.authBad.get(k);
+    if (bad) {
+      if (geminiLoginFreshness(f) === bad.freshness) return false;
+      this.authBad.delete(k);
     }
     return true;
+  }
+
+  /** Brings the registry's login state of every account in line with the files and the last sessions. */
+  private syncAccounts(): void {
+    const reg = this.host.accounts;
+    if (!reg || this.cfg.authMode === 'api_key') return;
+    reg.poll();
+    for (const a of reg.list()) {
+      if (!a.hasLogin()) a.auth.markNone();
+      else if (!this.loginUsable(a.key)) a.auth.markExpired();
+      else if (a.auth.state !== 'ok') a.auth.markOk();
+    }
+  }
+
+  /** May a shift run on this account now? The server picked it from the last report; this closes the race. */
+  accountGate(account: string): AccountGate {
+    const reg = this.host.accounts;
+    if (account === 'main' && !reg)
+      return this.loginUsable() ? { state: 'ok' } : { state: 'login', login: 'expired' };
+    this.syncAccounts();
+    const a = reg?.get(account);
+    if (!a) {
+      // a key account of the Google key (the workstation runs the CLI on a key): known to the store, not the login registry
+      if (account === 'org' || this.store?.holdsAccount('google', account)) return { state: 'ok' };
+      return { state: 'missing' };
+    }
+    // the main account also runs on the Google key when there is one (authMode auto/api_key)
+    const keyRuns = a.main && this.cfg.authMode !== 'login' && !!this.store?.holds('google');
+    if (this.cfg.authMode !== 'api_key' && a.auth.state !== 'ok' && !keyRuns)
+      return { state: 'login', login: a.auth.state === 'none' ? 'none' : 'expired' };
+    if (a.usage.state === 'limited')
+      return {
+        state: 'limited',
+        ...(a.usage.limitedUntil ? { limitedUntil: a.usage.limitedUntil } : {}),
+        label: a.info().limitedLabel ?? 'later',
+      };
+    return { state: 'ok' };
+  }
+
+  async checkLogin(account?: string): Promise<'ok' | 'expired' | 'unknown'> {
+    return this.loginUsable(account) ? 'ok' : 'expired';
   }
 
   /** How this workstation signs the CLI in right now. */
   authSelection(
     orgId?: string,
+    account?: string,
   ):
     | { via: 'login' }
     | { via: 'key'; apiKey: string; source: 'org' | 'workstation' }
     | { via: 'none'; reason: string } {
     const mode = this.cfg.authMode;
-    const key = this.store?.get('google', orgId);
-    if (mode !== 'api_key' && this.loginUsable()) return { via: 'login' };
+    // An account the project chose: a named LOGIN account of this workstation when one has that name, else a named key
+    // account (or `org`) of the Google key. A name that is neither selects nothing (the server only sends known names).
+    const named = account && account !== 'main';
+    const isLoginAccount = !!named && !!this.host.accounts?.get(account as string);
+    const key = this.store?.get('google', orgId, named && !isLoginAccount ? account : undefined);
+    if (mode !== 'api_key' && (!named || isLoginAccount) && this.loginUsable(account))
+      return { via: 'login' };
     if (mode !== 'login' && key?.apiKey)
       return { via: 'key', apiKey: key.apiKey, source: key.source ?? 'workstation' };
     return {
@@ -618,9 +689,12 @@ export class GeminiAdapter implements RuntimeAdapter {
   async capabilities(): Promise<RuntimeCapabilities> {
     const caps = ['shell', 'edit', 'web', 'skills', 'resume'];
     const sel = this.authSelection();
+    this.syncAccounts();
     // availability only: a key of some organization counts, but a run uses it only for the organization it names
     const keyHeld = this.cfg.authMode !== 'login' && !!this.store?.holds('google');
-    const auth = sel.via === 'none' && !keyHeld ? ('expired' as const) : ('ok' as const);
+    const reg = this.host.accounts;
+    const anyLogin = !!reg && this.cfg.authMode !== 'api_key' && reg.anyUsable();
+    const auth = sel.via === 'none' && !keyHeld && !anyLogin ? ('expired' as const) : ('ok' as const);
     const models = this.cfg.models.map((id) => ({ id, label: id }));
     let version = 'unknown';
     const down = (reason: string): RuntimeCapabilities => ({
@@ -660,6 +734,10 @@ export class GeminiAdapter implements RuntimeAdapter {
       ...(sel.via !== 'none' || keyHeld
         ? { authVia: sel.via === 'login' ? ('login' as const) : ('key' as const) }
         : {}),
+      ...(reg && this.cfg.authMode !== 'api_key' ? { accounts: reg.infos() } : {}),
+      ...(reg?.main.usage.state === 'limited' && reg.main.usage.limitedUntil
+        ? { usage: 'limited' as const, limitedUntil: reg.main.usage.limitedUntil }
+        : {}),
       ...(models.length ? { models } : {}),
     };
   }
@@ -680,10 +758,11 @@ export class GeminiAdapter implements RuntimeAdapter {
 
   private assertCanRun(
     orgId?: string,
+    account?: string,
   ): ReturnType<GeminiAdapter['authSelection']> & { via: 'login' | 'key' } {
     const sb = this.sandboxProblem();
     if (!sb.ok) throw new Error(`the Gemini CLI sandbox is unavailable: ${sb.reason}`);
-    const sel = this.authSelection(orgId);
+    const sel = this.authSelection(orgId, account);
     if (sel.via === 'none') throw new Error(sel.reason);
     return sel;
   }
@@ -713,14 +792,14 @@ export class GeminiAdapter implements RuntimeAdapter {
   }
 
   /** In-process chain plus a lock folder beside the owner's login, so two runners or the owner's own CLI cannot interleave with us. */
-  private locked<T>(fn: () => T | Promise<T>): Promise<T> {
-    const f = this.loginFile() ?? join(this.loginDir(), 'gemini-credentials.json');
+  private locked<T>(fn: () => T | Promise<T>, account?: string): Promise<T> {
+    const f = this.loginFile(account) ?? join(this.loginDir(account), 'gemini-credentials.json');
     return withAuthLock(() => withFileLock(`${f}.aom-lock`, fn));
   }
 
-  private prepareLogin(ghome: string): Promise<void> {
+  private prepareLogin(ghome: string, account?: string): Promise<void> {
     return this.locked(() => {
-      const src = this.loginFile();
+      const src = this.loginFile(account);
       if (!src) return;
       const dir = dotGemini(ghome);
       const name = src.endsWith('oauth_creds.json') ? 'oauth_creds.json' : 'gemini-credentials.json';
@@ -742,16 +821,16 @@ export class GeminiAdapter implements RuntimeAdapter {
       for (const n of LOGIN_FILES) rmSync(join(dir, n), { force: true });
       writePrivate(dest, readFileSync(src, 'utf8'));
       registerGeminiLoginSecrets(dest);
-    });
+    }, account);
   }
 
   /**
    * After a session: a refreshed login (a later expiry) goes back to the owner's file, in the form it is kept in. What the session
    * left in the agent's home is checked first (`geminiLoginProblem`): a file an agent wrote cannot overwrite the owner's login.
    */
-  private harvestLogin(ghome: string): Promise<void> {
+  private harvestLogin(ghome: string, account?: string): Promise<void> {
     return this.locked(() => {
-      const src = this.loginFile();
+      const src = this.loginFile(account);
       if (!src) return;
       const dir = dotGemini(ghome);
       const now = (this.host.now?.() ?? new Date()).getTime();
@@ -783,7 +862,7 @@ export class GeminiAdapter implements RuntimeAdapter {
         if (text) writePrivate(src, text);
         return;
       }
-    });
+    }, account);
   }
 
   private sessionEnv(input: { env: Record<string, string> }): Record<string, string> {
@@ -857,13 +936,13 @@ export class GeminiAdapter implements RuntimeAdapter {
       roleKey: string;
     },
   ): Promise<RuntimeSession> {
-    const sel = this.assertCanRun(input.orgId);
+    const sel = this.assertCanRun(input.orgId, input.account);
     const { ghome, policyFile } = this.prepareHome(input.sandbox, sel, input.grantedSkills, {
       perms: opts.perms,
       roleKey: opts.roleKey,
       chat: opts.chat,
     });
-    if (sel.via === 'login') await this.prepareLogin(ghome);
+    if (sel.via === 'login') await this.prepareLogin(ghome, input.account);
     const includeDirs = [
       ...new Set([...(('addDirs' in input ? input.addDirs : []) ?? []), ...(input.readDirs ?? [])]),
     ];
@@ -935,13 +1014,17 @@ export class GeminiAdapter implements RuntimeAdapter {
       usageLimit: (stderr) =>
         geminiUsageLimit(parser.usageLimitText ?? '', this.host.now?.()) ??
         geminiUsageLimit(stderr, this.host.now?.()),
-      onExit: async ({ code, authFailed }) => {
+      onExit: async ({ code, authFailed, usageLimit }) => {
         try {
+          const k = input.account ?? 'main';
           if (authFailed && sel.via === 'login') {
-            const f = this.loginFile();
-            this.authBad = { freshness: f ? geminiLoginFreshness(f) : 0 };
-          } else if (code === 0 && parser.usage().outputTokens > 0) this.authBad = undefined;
-          if (sel.via === 'login') await this.harvestLogin(ghome);
+            const f = this.loginFile(input.account);
+            this.authBad.set(k, { freshness: f ? geminiLoginFreshness(f) : 0 });
+            this.host.accounts?.get(k)?.auth.markExpired();
+          } else if (code === 0 && parser.usage().outputTokens > 0) this.authBad.delete(k);
+          if (usageLimit && sel.via === 'login')
+            this.host.accounts?.get(k)?.usage.markLimited(usageLimit.until);
+          if (sel.via === 'login') await this.harvestLogin(ghome, input.account);
         } catch {
           // best effort
         } finally {

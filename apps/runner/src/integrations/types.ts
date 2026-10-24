@@ -8,6 +8,7 @@ import type {
 } from '@aom/shared';
 import type { ClaudeAccountRegistry } from '../adapters/claude-accounts.ts';
 import type { ProbeResult } from '../adapters/claude-auth.ts';
+import type { LoginRuntime } from '../adapters/login-accounts.ts';
 import type { RunnerConfig } from '../config.ts';
 import type { ForgeEnv } from '../forge/types.ts';
 import type { Logger } from '../log.ts';
@@ -15,6 +16,7 @@ import type { PluginMcpServer } from '../mcp/plugins.ts';
 import type { RunnerPaths } from '../paths.ts';
 import type { Executor } from '../toolchain/exec.ts';
 import type { ClaudeCredentialStore } from './claude-store.ts';
+import type { LoginRuntimeHandle } from './login-runtimes.ts';
 import type { LoginSpec } from './session.ts';
 
 /** A connect or remove that did not work: the sentence shown on the page (it never holds a value). */
@@ -57,6 +59,8 @@ export interface AdapterEnv {
   };
   /** The Claude accounts of this workstation (main + additional); absent: only the main account exists. */
   claudeAccounts?: ClaudeAccountRegistry;
+  /** The login accounts of Codex and the Gemini CLI (S-A); absent: this process cannot manage them. */
+  loginRuntimes?: Partial<Record<LoginRuntime, LoginRuntimeHandle>>;
   mcp: {
     discover(): PluginMcpServer[];
     authOf(): (s: PluginMcpServer) => McpAuthState;

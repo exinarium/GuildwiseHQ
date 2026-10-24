@@ -250,6 +250,14 @@ export const ProviderKeySetPayloadSchema = z.object({
    * is bound to, and the runner refuses a generation older than one it already held or revoked (a replayed key).
    */
   generation: z.number().int().min(1).max(2_000_000_000).optional(),
+  /**
+   * A NAMED account of the workstation's own key (S-A, `provider-accounts:1`): `work`, `personal`. Absent: the main key. Only for
+   * `source: 'workstation'`; the name is part of what the blob is bound to (`providerKeyAad`).
+   */
+  account: z
+    .string()
+    .regex(/^[a-z][a-z0-9-]{0,31}$/)
+    .optional(),
 });
 export type ProviderKeySetPayload = z.infer<typeof ProviderKeySetPayloadSchema>;
 export type ProviderKeyClearPayload = z.infer<typeof ProviderKeyClearPayloadSchema>;
@@ -261,6 +269,11 @@ export const ProviderKeyClearPayloadSchema = z.object({
   orgId: z.uuid().optional(),
   /** With `source: 'org'`: the generation being revoked or replaced; the runner refuses to take that generation (or older) again. */
   generation: z.number().int().min(0).max(2_000_000_000).optional(),
+  /** Which NAMED account of the workstation's own key to forget. Absent: the main key. */
+  account: z
+    .string()
+    .regex(/^[a-z][a-z0-9-]{0,31}$/)
+    .optional(),
 });
 export const ProviderKeyResultSchema = z.object({
   stored: z.boolean(),
