@@ -47,6 +47,9 @@ export function HirePackDialog({
   const toast = useToast();
   const mine = (stations.data ?? []).filter((w) => w.userId === me.data?.user?.id && w.status === 'active');
   const [picked, setPicked] = useState<Record<string, string>>({});
+  // A private pack's persona text becomes the instructions of a role stored on the server: that needs a yes.
+  const [consent, setConsent] = useState(false);
+  const privatePack = q.data?.visibility === 'private';
   const [workstationId, setWorkstationId] = useState('');
   const [model, setModel] = useState('');
   const station = mine.find((w) => w.id === (workstationId || mine[0]?.id));
@@ -68,6 +71,7 @@ export function HirePackDialog({
           workstationId: station.id,
           ...(model && runtime && m.length ? { runtime, model: m.join('/') } : {}),
           capacity: 1,
+          ...(privatePack ? { acknowledgePrivateText: true } : {}),
           ...(isManager ? {} : { allowedProjectIds: effectiveAccess.allowed ?? [] }),
         },
       },
@@ -83,7 +87,11 @@ export function HirePackDialog({
   };
   const accessOk = isManager || (effectiveAccess.allowed?.length ?? 0) > 0;
   const ready =
-    chosen.length > 0 && chosen.every((p) => (picked[p.key] ?? '').trim()) && !!station && accessOk;
+    chosen.length > 0 &&
+    chosen.every((p) => (picked[p.key] ?? '').trim()) &&
+    !!station &&
+    accessOk &&
+    (!privatePack || consent);
   return (
     <Dialog
       open
@@ -113,6 +121,24 @@ export function HirePackDialog({
         {q.isError && <ErrorBox error={q.error} onRetry={() => q.refetch()} />}
         {q.data && !q.data.trusted && (
           <Callout tone="warning">This pack is not approved yet. Approve it before hiring from it.</Callout>
+        )}
+        {privatePack && (
+          <Callout tone="warning" data-testid="private-pack-consent">
+            <p>
+              This is your private pack. Hiring from it sends each persona's text to Guildwise's server, which
+              keeps it as the instructions of a role (only you can see or hire that role). The pack itself
+              stays on your workstation.
+            </p>
+            <label className="mt-2 flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={consent}
+                onChange={(e) => setConsent(e.target.checked)}
+                data-testid="private-pack-consent-box"
+              />
+              <span>I understand that the server will store this text</span>
+            </label>
+          </Callout>
         )}
         {q.data?.trusted && !q.data.readableNow && (
           <Callout tone="warning" data-testid="hire-offline">

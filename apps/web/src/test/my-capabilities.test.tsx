@@ -526,6 +526,32 @@ describe('hire from pack', () => {
     expect(calls.find((c) => c.url.endsWith('/hire'))?.body.allowedProjectIds).toEqual([PROJ]);
   });
 
+  it('finding 12: a private pack cannot be hired from until the person agrees that the server stores the persona text', async () => {
+    const user = userEvent.setup();
+    const calls = stub({
+      ...base([personaDto()]),
+      [`GET /api/packs/${PACK}/personas`]: () => ({
+        packId: PACK,
+        packName: 'mine',
+        trusted: true,
+        readableNow: true,
+        visibility: 'private',
+        personas: [personaDto()],
+      }),
+      [`POST /api/packs/${PACK}/hire`]: () => ({ requestId: '0192f3a0-0000-7000-8000-0000000000e2' }),
+      'GET /api/pack-hires/': () => ({ requestId: 'x', status: 'done', error: null, agents: [] }),
+    });
+    wrap(<HirePackDialog packId={PACK} packName="mine" onClose={() => undefined} />);
+    await user.click(await screen.findByLabelText('Hire Mary, Analyst'));
+    expect(await screen.findByTestId('private-pack-consent')).toHaveTextContent(/server/);
+    expect(screen.getByTestId('confirm-hire')).toBeDisabled();
+    await user.click(screen.getByTestId('private-pack-consent-box'));
+    await waitFor(() => expect(screen.getByTestId('confirm-hire')).toBeEnabled());
+    await user.click(screen.getByTestId('confirm-hire'));
+    await waitFor(() => expect(calls.some((c) => c.url.endsWith('/hire'))).toBe(true));
+    expect(calls.find((c) => c.url.endsWith('/hire'))?.body.acknowledgePrivateText).toBe(true);
+  });
+
   it('adds every agent of the pack at once and lists them for review before confirming', async () => {
     const user = userEvent.setup();
     stub(

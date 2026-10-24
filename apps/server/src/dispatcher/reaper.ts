@@ -5,6 +5,7 @@ import { endBaTaskShift } from '../commands/ba-tasks.ts';
 import { SYSTEM_ACTOR, userScope } from '../commands/common.ts';
 import { endDevopsShift } from '../commands/devops.ts';
 import { endQuestionShift } from '../commands/escalation.ts';
+import { expirePackRequests } from '../commands/pack-hire.ts';
 import { releaseClaimEvents } from '../commands/shifts.ts';
 import type { Ctx } from '../context.ts';
 import { rows } from '../db/sql.ts';
@@ -39,6 +40,9 @@ export class Reaper {
       await this.releaseUnaccepted();
       await this.releaseExpiredLeases();
       await this.stopOverrunShifts();
+      await expirePackRequests(this.ctx).catch((err) =>
+        this.ctx.log.error({ err }, 'could not expire stale pack requests'),
+      );
       // Housekeeping once an hour: the runner inbox keeps 7 days of idempotency records.
       const t = this.ctx.clock.now().getTime();
       if (t - this.lastInboxPrune > 3_600_000) {

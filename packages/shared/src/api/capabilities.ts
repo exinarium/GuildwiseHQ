@@ -379,6 +379,8 @@ export const PackPersonasResponseSchema = z.object({
   trusted: z.boolean(),
   /** A hire needs the pack's files to be reachable on an online workstation. */
   readableNow: z.boolean(),
+  /** A private pack's persona text is stored on the server as an organization role: the hire dialog asks for consent first. */
+  visibility: PackVisibilitySchema.default('org'),
   personas: z.array(PackPersonaDtoSchema),
 });
 export type PackPersonasResponse = z.infer<typeof PackPersonasResponseSchema>;
@@ -414,6 +416,11 @@ export const HireFromPackRequestSchema = z.object({
   capacity: z.number().int().min(1).max(8).default(1),
   allowedProjectIds: z.array(z.uuid()).max(500).nullable().optional(),
   acknowledgeUnsandboxed: z.boolean().optional(),
+  /**
+   * Required to hire from a PRIVATE pack: the persona text then becomes the instructions of an organization role stored on the
+   * server (visible to its owner alone), which the pack's private status otherwise keeps on the workstation.
+   */
+  acknowledgePrivateText: z.boolean().optional(),
 });
 export type HireFromPackRequest = z.infer<typeof HireFromPackRequestSchema>;
 

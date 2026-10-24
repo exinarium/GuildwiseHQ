@@ -132,6 +132,7 @@ export async function listPackPersonas(ctx: Ctx, who: Who, packId: string): Prom
     packId,
     packName: p.name,
     trusted,
+    visibility: p.visibility as 'org' | 'private',
     readableNow: !!reader,
     personas:
       trusted || mayWiden
@@ -207,6 +208,13 @@ export async function hireFromPack(
   const p = await usablePackFor(ctx.pool, who.userId, who.orgId, packId);
   if (!p.pinned_sha || !isTrustedRow(p))
     throw conflict('pack_not_trusted', 'the pack has to be approved before agents can be hired from it');
+  // The persona text of a private pack becomes the instructions of an organization role on the server (Q58): said and agreed to
+  // first, not assumed.
+  if (p.visibility === 'private' && req.acknowledgePrivateText !== true)
+    throw badRequest(
+      'consent_required',
+      'hiring from a private pack stores its persona text on the server as the instructions of a role: confirm that you accept this',
+    );
   // Members hire only for a project they are on (the normal hire rule); said now, not after the persona was read.
   if (!isOrgManager({ orgRole: who.role }) && !req.allowedProjectIds?.length)
     throw forbidden('you cannot hire agents here: choose a project you are on, or ask an Owner or Admin');
@@ -338,9 +346,11 @@ export async function applyPersonaReadResult(
 }
 
 async function fail(ctx: Ctx, req: Row, error: string): Promise<void> {
+  // the persona texts read so far are not kept past the end of the request, whichever way it ended
   await exec(
     ctx.pool,
-    `UPDATE pack_requests SET status='failed', error=$2, updated_at=$3 WHERE id=$1 AND status='pending'`,
+    `UPDATE pack_requests SET status='failed', error=$2, results = COALESCE(results, '{}'::jsonb) - 'reads', updated_at=$3
+      WHERE id=$1 AND status='pending'`,
     [req.id, error.slice(0, 500), ctx.clock.now()],
   );
   const p = await one(ctx.pool, 'SELECT * FROM packs WHERE id=$1', [req.pack_id]);
@@ -645,6 +655,19 @@ export async function startRoleReview(ctx: Ctx, who: Who, roleKey: string): Prom
   return { requestId };
 }
 
+/**
+ * A request still waiting after this long (the workstation went away, an answer never came) fails, and the persona texts it had
+ * collected go with it. Called by the reaper.
+ */
+export async function expirePackRequests(ctx: Ctx): Promise<void> {
+  const stale = await rows(
+    ctx.pool,
+    `SELECT * FROM pack_requests WHERE status='pending' AND created_at < $1`,
+    [new Date(ctx.clock.now().getTime() - 2 * PERSONA_READ_TTL_MS)],
+  );
+  for (const r of stale) await fail(ctx, r, 'the workstation did not answer in time: try again');
+}
+
 async function completeReview(ctx: Ctx, req: Row): Promise<void> {
   const read = Object.values(
     (req.results as { reads: Record<string, { text: string; hash: string; sha: string }> }).reads,
@@ -734,6 +757,7 @@ export async function acceptRoleOffer(
       proposed,
       isOrgManager({ orgRole: who.role }),
     );
+    await clearReviewTexts(tx, who.orgId, roleKey);
     await ctx.store.append(
       [
         {
@@ -753,6 +777,15 @@ export async function acceptRoleOffer(
   });
 }
 
+/** The proposed persona text of a role update review is kept only until the offer is accepted or dismissed. */
+async function clearReviewTexts(db: Queryable, orgId: string, roleKey: string): Promise<void> {
+  await exec(
+    db,
+    `UPDATE pack_requests SET results='{}'::jsonb WHERE org_id=$1 AND kind='role_review' AND params->>'roleKey' = $2`,
+    [orgId, roleKey],
+  );
+}
+
 export async function dismissRoleOffer(
   ctx: Ctx,
   user: AuthSession['user'],
@@ -760,6 +793,7 @@ export async function dismissRoleOffer(
   roleKey: string,
 ): Promise<void> {
   const o = await loadOffer(ctx.pool, who, roleKey);
+  await clearReviewTexts(ctx.pool, who.orgId, roleKey);
   await ctx.store.append([
     {
       streamId: streamId.role(who.orgId, roleKey),

@@ -14,7 +14,7 @@ import {
 } from '@aom/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { replayVisible, sessionAudienceOf, sessionLevel } from '../src/browser-gateway/visibility.ts';
-import { ensureRole } from '../src/commands/pack-hire.ts';
+import { applyPersonaReadResult, ensureRole, expirePackRequests } from '../src/commands/pack-hire.ts';
 import { withAppendTx } from '../src/db/tx.ts';
 import { rebaseAgentsToCurrentRoles } from '../src/hr/follow-role.ts';
 import { rebuildProjections } from '../src/projections/rebuild.ts';
@@ -1264,10 +1264,17 @@ describe('hire from pack', () => {
     const review = await asOwner('GET', `/api/role-offers/crew-critic/review/${rev.requestId}`);
     expect(review.current).toContain('You find the weak spot in a plan.');
     expect(review.proposed).toContain('name the cheapest fix');
+    // finding 12: the review keeps the proposed text until the offer is decided, and none of the raw reads
+    const kept = (await q(`SELECT results FROM pack_requests WHERE id=$1`, [rev.requestId]))[0]?.results;
+    expect(kept).toHaveProperty('proposed');
+    expect(kept).not.toHaveProperty('reads');
     // accepting needs a review of this very version
     await asOwner('POST', '/api/role-offers/crew-critic/accept', { requestId: randomUUID() }, 409);
     const done = await asOwner('POST', '/api/role-offers/crew-critic/accept', { requestId: rev.requestId });
     expect(done.version).toBe(2);
+    expect((await q(`SELECT results FROM pack_requests WHERE id=$1`, [rev.requestId]))[0]?.results).toEqual(
+      {},
+    );
     expect(
       (await asOwner('GET', '/api/agents')).agents.find((a: { id: string }) => a.id === agentId),
     ).toMatchObject({
@@ -1275,6 +1282,106 @@ describe('hire from pack', () => {
       provenance: { warning: null },
     });
     expect((await asOwner('GET', '/api/role-offers')).items).toEqual([]);
+  });
+
+  describe('security review finding 12: the persona text of a private pack, and what the server keeps of a read', () => {
+    const reqRow = async (over: { status?: string; ageMs?: number; kind?: string; key?: string } = {}) => {
+      const id = randomUUID();
+      await q(
+        `INSERT INTO pack_requests (id, org_id, pack_id, kind, requested_by, params, results, status, created_at, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8, now() - ($9 || ' milliseconds')::interval, now())`,
+        [
+          id,
+          w.owner.id,
+          crewId,
+          over.kind ?? 'hire',
+          w.owner.id,
+          JSON.stringify({
+            items: [
+              { key: 'critic', name: 'A' },
+              { key: 'ghost', name: 'B' },
+            ],
+          }),
+          JSON.stringify({
+            reads: { critic: { text: 'TOP SECRET PERSONA TEXT', hash: 'a'.repeat(64), sha: 'b' } },
+          }),
+          over.status ?? 'pending',
+          String(over.ageMs ?? 0),
+        ],
+      );
+      return id;
+    };
+    const resultsOf = async (id: string) =>
+      (await q(`SELECT status, results FROM pack_requests WHERE id=$1`, [id]))[0] as Record<string, any>;
+
+    it('a hire from a private pack needs the explicit consent, and says why', async () => {
+      const mineId = (
+        await q(
+          `SELECT id FROM packs WHERE owner_user_id=$1 AND visibility='private' AND removed_at IS NULL AND source='authored' LIMIT 1`,
+          [member.id],
+        )
+      )[0]?.id as string;
+      const body = {
+        items: [{ key: 'critic', name: 'Consent' }],
+        workstationId: memberWs,
+        runtime: 'mock',
+        model: 'mock',
+        allowedProjectIds: [w.projectId],
+      };
+      const refused = await asMember('POST', `/api/packs/${mineId}/hire`, body, 400);
+      expect(refused.error.code).toBe('consent_required');
+      await asMember('POST', `/api/packs/${mineId}/hire`, { ...body, acknowledgePrivateText: false }, 400);
+      expect((await q(`SELECT 1 FROM pack_requests WHERE pack_id=$1`, [mineId])).length).toBe(0);
+      // the dialog is told which kind of pack it is looking at
+      expect((await asMember('GET', `/api/packs/${mineId}/personas`)).visibility).toBe('private');
+      expect((await asOwner('GET', `/api/packs/${crewId}/personas`)).visibility).toBe('org');
+    });
+
+    it('a read that fails after another persona was read leaves no persona text behind', async () => {
+      const id = await reqRow();
+      await applyPersonaReadResult(
+        w.t.app.ctx,
+        w.workstationId,
+        randomUUID(),
+        { requestId: id, key: 'ghost' },
+        false,
+        undefined,
+      );
+      const row = await resultsOf(id);
+      expect(row.status).toBe('failed');
+      expect(JSON.stringify(row.results)).not.toContain('TOP SECRET');
+      expect(row.results).not.toHaveProperty('reads');
+    });
+
+    it('a request nobody answered expires, and its reads go with it', async () => {
+      const stale = await reqRow({ ageMs: 3 * 60 * 60_000 });
+      const fresh = await reqRow({ ageMs: 1000 });
+      await expirePackRequests(w.t.app.ctx);
+      expect(await resultsOf(stale)).toMatchObject({ status: 'failed' });
+      expect(JSON.stringify((await resultsOf(stale)).results)).not.toContain('TOP SECRET');
+      // one that is still within its time keeps waiting
+      expect(await resultsOf(fresh)).toMatchObject({ status: 'pending' });
+      await q(`DELETE FROM pack_requests WHERE id=$1`, [fresh]);
+    });
+
+    it('a finished hire keeps the agents it made and none of the texts', async () => {
+      const done = (await q(
+        `SELECT results FROM pack_requests WHERE kind='hire' AND status='done'`,
+      )) as Array<{
+        results: unknown;
+      }>;
+      expect(done.length).toBeGreaterThan(0);
+      for (const r of done) {
+        expect(r.results).not.toHaveProperty('reads');
+        expect(JSON.stringify(r.results)).not.toContain('weak spot');
+      }
+      const failed = (await q(
+        `SELECT results FROM pack_requests WHERE kind='hire' AND status='failed'`,
+      )) as Array<{
+        results: unknown;
+      }>;
+      for (const r of failed) expect(JSON.stringify(r.results)).not.toContain('weak spot');
+    });
   });
 
   describe('security review finding 3: a pack adds versions only to a role of its own', () => {
@@ -1343,6 +1450,7 @@ describe('hire from pack', () => {
           runtime: 'mock',
           model: 'mock',
           allowedProjectIds: [w.projectId],
+          acknowledgePrivateText: true,
         },
         202,
       );
