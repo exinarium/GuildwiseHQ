@@ -33,6 +33,7 @@ export function playbookRoutes(ctx: Ctx) {
           items: await slashCommands(ctx, whoOf(a), {
             context: req.query.context,
             projectId: req.query.projectId,
+            agentId: req.query.agentId,
           }),
         };
       },

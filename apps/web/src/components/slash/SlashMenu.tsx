@@ -16,6 +16,8 @@ import { cx } from '../ui/cx.ts';
 export interface SlashConfig {
   context: SlashContext;
   projectId?: string;
+  /** The agent of a chat: only what it can load is offered (a private pack granted to it). */
+  agentId?: string;
 }
 
 /** A handler the composer calls for a key press first: true when the menu used it. */

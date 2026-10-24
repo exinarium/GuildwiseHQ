@@ -389,6 +389,23 @@ describe('who may grant a playbook to an agent', () => {
   });
 });
 
+describe('the / menu in a chat with an agent', () => {
+  it('offers a private pack only to an agent its owner granted it to', async () => {
+    const agent = (await q(`SELECT id FROM agents WHERE name='Bea'`))[0].id;
+    const url = `/api/slash-commands?context=chat&agentId=${agent}`;
+    expect(keysOf(await asMember('GET', url))).not.toContain('mine:secret-play');
+    expect(keysOf(await asMember('GET', '/api/slash-commands?context=chat'))).toContain('mine:secret-play');
+    const pack = (await q(`SELECT id FROM packs WHERE name='mine'`))[0].id;
+    await q(
+      'INSERT INTO pack_agent_grants (pack_id, agent_id, granted_by, granted_at) VALUES ($1,$2,$3,now())',
+      [pack, agent, member.id],
+    );
+    expect(keysOf(await asMember('GET', url))).toContain('mine:secret-play');
+    // an organization playbook is there either way
+    expect(keysOf(await asMember('GET', url))).toContain('prd');
+  });
+});
+
 describe('an agent starts a playbook itself', () => {
   let agentId = '';
   let shiftId = '';
@@ -435,6 +452,11 @@ describe('an agent starts a playbook itself', () => {
     ]);
     expect(desk).toHaveLength(1);
     expect(desk[0].title).toContain('Cy started "');
+    // the owner's desk carries the link to the session
+    const listed = (await asOwner('GET', '/api/desk')).items.find(
+      (i: any) => i.subkind === 'playbook_input_needed',
+    );
+    expect(listed?.data?.threadId).toBe(res.result.threadId);
     // the facilitator is told who started it
     const start = await nextStart((f) => f.message.includes('"role":"facilitator"'));
     expect(start.message).toContain('The agent Cy started this session');

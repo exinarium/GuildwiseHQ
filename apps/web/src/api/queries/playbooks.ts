@@ -12,15 +12,15 @@ import { get, post, put } from '../client.ts';
 /** The playbooks and skills the `/` menu offers in this place. Cheap and stable: kept for a minute. */
 export function useSlashCommands(
   context: SlashContext,
-  opts: { enabled?: boolean; projectId?: string } = {},
+  opts: { enabled?: boolean; projectId?: string; agentId?: string } = {},
 ) {
   return useQuery({
     enabled: opts.enabled ?? true,
     staleTime: 60_000,
-    queryKey: ['slash-commands', context, opts.projectId ?? null],
+    queryKey: ['slash-commands', context, opts.projectId ?? null, opts.agentId ?? null],
     queryFn: (): Promise<SlashCommandsResponse> =>
       get(
-        `/slash-commands?context=${context}${opts.projectId ? `&projectId=${opts.projectId}` : ''}`,
+        `/slash-commands?context=${context}${opts.projectId ? `&projectId=${opts.projectId}` : ''}${opts.agentId ? `&agentId=${opts.agentId}` : ''}`,
         SlashCommandsResponseSchema,
       ),
   });

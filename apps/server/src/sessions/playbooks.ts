@@ -52,15 +52,24 @@ async function runnablePlaybooks(
 export async function slashCommands(
   ctx: Ctx,
   who: Who,
-  q: { context: SlashContext; projectId?: string | undefined },
+  q: { context: SlashContext; projectId?: string | undefined; agentId?: string | undefined },
 ): Promise<SlashCommand[]> {
   const reg = await effectiveRegistry(ctx.pool, who.orgId, {
     usableOnly: true,
     userId: who.userId,
     ...(q.projectId ? { projectId: q.projectId } : {}),
   });
+  // A chat with an agent: the agent loads the capability itself, and a private pack reaches only the agents its owner granted.
+  const grantedPacks = new Set<string>(
+    q.agentId
+      ? (await rows(ctx.pool, 'SELECT pack_id FROM pack_agent_grants WHERE agent_id=$1', [q.agentId])).map(
+          (x) => x.pack_id as string,
+        )
+      : [],
+  );
   const out: SlashCommand[] = [];
   for (const i of reg.items) {
+    if (q.agentId && i.visibility === 'private' && !(i.packId && grantedPacks.has(i.packId))) continue;
     if (i.kind === 'persona') continue;
     if (i.kind === 'playbook' && isTemplateTagged(i.tags)) continue;
     if (i.kind === 'skill' && q.context === 'session') continue;

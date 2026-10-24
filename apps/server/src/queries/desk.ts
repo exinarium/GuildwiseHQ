@@ -138,11 +138,16 @@ export function toDeskDto(
         }
       : null,
     projectId: r.project_id,
-    ...(r.data && typeof r.data === 'object' && (r.data.workstationId || r.data.key || r.data.askId)
+    ...(r.data &&
+    typeof r.data === 'object' &&
+    (r.data.workstationId || r.data.key || r.data.askId || r.subkind === 'playbook_input_needed')
       ? {
           data: {
             ...(typeof r.data.workstationId === 'string' ? { workstationId: r.data.workstationId } : {}),
             ...(typeof r.data.key === 'string' ? { key: r.data.key } : {}),
+            ...(r.subkind === 'playbook_input_needed' && typeof r.data.threadId === 'string'
+              ? { threadId: r.data.threadId }
+              : {}),
             // "Authorize this execution" (docs/design/ceo-front-door.md section 14.1)
             ...(r.subkind === 'ceo_permission'
               ? Object.fromEntries(

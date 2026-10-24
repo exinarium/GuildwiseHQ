@@ -104,6 +104,8 @@ export const DeskItemDtoSchema = z.object({
     .object({
       workstationId: z.string().optional(),
       key: z.string().optional(),
+      /** A `playbook_input_needed` notice: the guided session that waits for the owner's answers. */
+      threadId: z.uuid().optional(),
       /** `ceo_permission` items ("authorize this execution"): what the runtime wants to run, and until when it waits. */
       askId: z.string().optional(),
       turnId: z.string().optional(),

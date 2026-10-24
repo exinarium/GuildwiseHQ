@@ -51,6 +51,8 @@ export type SlashCommand = z.infer<typeof SlashCommandSchema>;
 export const SlashCommandsQuerySchema = z.object({
   context: SlashContextSchema.default('chat'),
   projectId: z.uuid().optional(),
+  /** A chat with this agent: a private pack is offered only if its owner granted it to the agent (the agent loads it itself). */
+  agentId: z.uuid().optional(),
 });
 export const SlashCommandsResponseSchema = z.object({ items: z.array(SlashCommandSchema) });
 export type SlashCommandsResponse = z.infer<typeof SlashCommandsResponseSchema>;

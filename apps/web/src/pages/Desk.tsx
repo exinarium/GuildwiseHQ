@@ -509,6 +509,17 @@ export function DeskItem({ item, now, bare = false }: { item: DeskItemDto; now?:
           {item.hint}
         </Callout>
       )}
+      {item.subkind === 'playbook_input_needed' && item.data?.threadId && (
+        <p className="mt-2 text-sm text-muted">
+          <Link
+            to={`/discovery/${item.data.threadId}`}
+            className="text-brand-text underline"
+            data-testid="open-playbook-session"
+          >
+            Open the session and answer
+          </Link>
+        </p>
+      )}
       {item.subkind === 'definition' && (
         <p className="mt-2 text-sm text-muted">
           <Link to="/org?tab=workflows" className="text-brand-text underline" data-testid="open-org">
