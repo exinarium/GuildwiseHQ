@@ -163,10 +163,27 @@ export async function queuePacksSync(db: Queryable, workstationId: string): Prom
   );
   await enqueueRunnerCommand(db, workstationId, 'packs.sync', {
     packs: await desiredPacksFor(db, workstationId),
+    blocked: await blockedProjectCapabilities(db, workstationId),
   });
 }
 
-async function syncOrg(ctx: Ctx, orgId: string): Promise<void> {
+/** The project-repository capabilities the owner blocked, in the organizations this workstation's owner belongs to. */
+export async function blockedProjectCapabilities(
+  db: Queryable,
+  workstationId: string,
+): Promise<Array<{ projectId: string; kind: 'skill' | 'persona' | 'playbook'; key: string }>> {
+  const r = await rows(
+    db,
+    `SELECT cr.project_id, cr.kind, cr.key FROM capability_reviews cr
+       JOIN workstations w ON w.id = $1
+       JOIN org_members om ON om.user_id = w.user_id AND om.org_id = cr.org_id AND om.status = 'active'
+      WHERE cr.status = 'blocked' ORDER BY cr.project_id, cr.kind, cr.key LIMIT 1000`,
+    [workstationId],
+  );
+  return r.map((x) => ({ projectId: x.project_id, kind: x.kind, key: x.key }));
+}
+
+export async function syncOrg(ctx: Ctx, orgId: string): Promise<void> {
   const ws = await packWorkstations(ctx.pool, orgId);
   for (const w of ws) await queuePacksSync(ctx.pool, w.id);
   deliver(

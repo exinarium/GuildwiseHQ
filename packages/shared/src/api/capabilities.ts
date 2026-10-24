@@ -43,6 +43,46 @@ export const CapabilitiesResponseSchema = z.object({
 });
 export type CapabilitiesResponse = z.infer<typeof CapabilitiesResponseSchema>;
 
+// ------------------------------------------------------------------------------------------------ project skills review
+
+export const PROJECT_SKILL_STATUSES = ['unreviewed', 'reviewed', 'changed', 'blocked'] as const;
+/** `changed`: reviewed once, but the file's content hash is not the reviewed one any more. */
+export const ProjectSkillStatusSchema = z.enum(PROJECT_SKILL_STATUSES);
+
+/** A capability found in a project's own repository, with where it lives and what the owner decided. */
+export const ProjectSkillDtoSchema = z.object({
+  projectId: z.uuid(),
+  projectKey: z.string(),
+  projectName: z.string(),
+  kind: CapabilityKindSchema,
+  key: z.string(),
+  name: z.string(),
+  description: z.string(),
+  hash: z.string(),
+  /** The project's repository the capability was read from (null when the project has none known). */
+  repo: z.string().nullable(),
+  /** Its folder or file in that repository (null: reported by an older runner). */
+  path: z.string().nullable(),
+  status: ProjectSkillStatusSchema,
+  reviewedHash: z.string().nullable(),
+  reviewedBy: z.string().nullable(),
+  reviewedAt: z.iso.datetime().nullable(),
+  indexedAt: z.iso.datetime(),
+});
+export type ProjectSkillDto = z.infer<typeof ProjectSkillDtoSchema>;
+export const ProjectSkillsResponseSchema = z.object({ items: z.array(ProjectSkillDtoSchema) });
+export type ProjectSkillsResponse = z.infer<typeof ProjectSkillsResponseSchema>;
+
+export const ReviewProjectSkillRequestSchema = z.object({
+  projectId: z.uuid(),
+  kind: CapabilityKindSchema,
+  key: z.string().min(1).max(130),
+  /** The hash the owner looked at; refused when the file changed since. */
+  hash: z.string().regex(/^[0-9a-f]{64}$/),
+  status: z.enum(['reviewed', 'blocked', 'unreviewed']),
+});
+export type ReviewProjectSkillRequest = z.infer<typeof ReviewProjectSkillRequestSchema>;
+
 // ------------------------------------------------------------------------------------------------------- packs
 
 /** `POST /api/packs`: add a pack by git URL and ref. The name is the namespace; a preset fills in the rest. */

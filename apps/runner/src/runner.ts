@@ -1787,7 +1787,10 @@ export class Runner {
         done(true, this.targetSecrets.set(CommandPayloadSchemas['env.secret.set'].parse(payload)));
       } else if (command === 'packs.sync') {
         // Clone/fetch, pin, index and enforce the packs the server wants here; the answers are `packs.report` messages.
-        await this.packs.sync(CommandPayloadSchemas['packs.sync'].parse(payload).packs);
+        const sync = CommandPayloadSchemas['packs.sync'].parse(payload);
+        // The owner's blocked project-repository capabilities (additive: an older server sends none).
+        this.capabilities.setBlocked(sync.blocked);
+        await this.packs.sync(sync.packs);
         done(true, { packs: this.packs.summary().length });
       } else if (command === 'pack.check') {
         const p = CommandPayloadSchemas['pack.check'].parse(payload);

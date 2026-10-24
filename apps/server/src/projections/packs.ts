@@ -157,17 +157,48 @@ export const packProjectors: Record<string, Projector> = {
     await exec(tx, `UPDATE packs SET removed_at=$2 WHERE id=$1`, [p.packId, e.createdAt]);
   },
 
+  ProjectCapabilityReviewed: async (tx, e) => {
+    const p = (e.event as EventOf<'ProjectCapabilityReviewed'>).payload;
+    if (p.status === 'unreviewed') {
+      await exec(tx, 'DELETE FROM capability_reviews WHERE project_id=$1 AND kind=$2 AND key=$3', [
+        p.projectId,
+        p.kind,
+        p.key,
+      ]);
+      return;
+    }
+    await exec(
+      tx,
+      `INSERT INTO capability_reviews (org_id, project_id, kind, key, hash, status, reviewed_by, reviewed_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+       ON CONFLICT (project_id, kind, key) DO UPDATE SET hash=EXCLUDED.hash, status=EXCLUDED.status,
+         reviewed_by=EXCLUDED.reviewed_by, reviewed_at=EXCLUDED.reviewed_at`,
+      [p.orgId, p.projectId, p.kind, p.key, p.hash, p.status, p.by, e.createdAt],
+    );
+  },
+
   ProjectCapabilitiesReported: async (tx, e) => {
     const p = (e.event as EventOf<'ProjectCapabilitiesReported'>).payload;
     await exec(tx, 'DELETE FROM project_capability_index WHERE project_id=$1', [p.projectId]);
     for (const i of p.items)
       await exec(
         tx,
-        `INSERT INTO project_capability_index (org_id, project_id, kind, key, name, description, hash, icon, reported_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+        `INSERT INTO project_capability_index (org_id, project_id, kind, key, name, description, hash, icon, path, reported_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
          ON CONFLICT (project_id, kind, key) DO UPDATE SET name=EXCLUDED.name, description=EXCLUDED.description,
-           hash=EXCLUDED.hash, icon=EXCLUDED.icon, reported_at=EXCLUDED.reported_at`,
-        [p.orgId, p.projectId, i.kind, i.key, i.name, i.description, i.hash, i.icon ?? null, e.createdAt],
+           hash=EXCLUDED.hash, icon=EXCLUDED.icon, path=EXCLUDED.path, reported_at=EXCLUDED.reported_at`,
+        [
+          p.orgId,
+          p.projectId,
+          i.kind,
+          i.key,
+          i.name,
+          i.description,
+          i.hash,
+          i.icon ?? null,
+          i.path ?? null,
+          e.createdAt,
+        ],
       );
     await exec(
       tx,

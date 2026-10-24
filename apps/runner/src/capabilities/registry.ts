@@ -134,6 +134,8 @@ export class CapabilityRegistry {
   private projectDigest = new Map<string, string>();
   private readonly log: Logger;
   private packs: PackManager | undefined;
+  /** Project-repository capabilities the owner blocked (`<projectId>/<kind>:<key>`): indexed and reported, never served. */
+  private blocked = new Set<string>();
 
   constructor(opts: { log?: Logger; packs?: PackManager } = {}) {
     this.log = opts.log ?? nullLogger;
@@ -142,6 +144,11 @@ export class CapabilityRegistry {
 
   setPacks(packs: PackManager): void {
     this.packs = packs;
+  }
+
+  /** The owner's blocked list from the server (`packs.sync`): a blocked capability is left out of every effective view. */
+  setBlocked(list: ReadonlyArray<{ projectId: string; kind: string; key: string }>): void {
+    this.blocked = new Set(list.map((b) => `${b.projectId}/${b.kind}:${b.key}`));
   }
 
   /** Re-reads the organization vault folder (`<clone>/org`). */
@@ -168,17 +175,21 @@ export class CapabilityRegistry {
     const tree: Record<string, string> = {};
     const issues: CapabilityIssue[] = [];
     const read = readCapabilityTreeAt(repoDir, ['.claude/skills', '.agents/skills', '.claude/agents']);
+    // where each capability was read from, for the owner's review list (`skills/<name>`, `personas/<name>`)
+    const origin = new Map<string, string>();
     for (const [path, text] of Object.entries(read)) {
       const m = /^\.(?:claude|agents)\/skills\/(.+)$/.exec(path);
       if (m) {
         // `.agents/skills` wins over `.claude/skills` for the same name (it is read last)
         tree[`skills/${m[1]}`] = text;
+        origin.set(`skill:${(m[1] as string).split('/')[0]}`, path.split('/').slice(0, 3).join('/'));
         continue;
       }
       const a = /^\.claude\/agents\/([^/]+)\.md$/.exec(path);
       if (a) {
         try {
           tree[`personas/${a[1]}.md`] = claudeAgentToPersonaText(a[1] as string, text);
+          origin.set(`persona:${a[1]}`, path);
         } catch (err) {
           issues.push({ path, message: err instanceof Error ? err.message : String(err) });
         }
@@ -188,10 +199,14 @@ export class CapabilityRegistry {
     issues.push(...r.issues);
     this.projectRepo.set(projectId, r.entries);
     for (const e of r.entries) this.fromRepo.add(e);
-    const items = r.entries.map((e) => ({
-      ...capabilityMeta(e, 'project-repo'),
-      source: 'project-repo' as const,
-    }));
+    const items = r.entries.map((e) => {
+      const path = origin.get(`${e.kind}:${e.key}`);
+      return {
+        ...capabilityMeta(e, 'project-repo'),
+        source: 'project-repo' as const,
+        ...(path ? { path } : {}),
+      };
+    });
     const digest = digestCapabilityIndex(items, issues);
     const changed = this.projectDigest.get(projectId) !== digest;
     this.projectDigest.set(projectId, digest);
@@ -217,7 +232,8 @@ export class CapabilityRegistry {
     for (const e of this.vault) byId.set(capabilityId(e), { e, source: 'org-vault' });
     if (projectId)
       for (const e of this.projectRepo.get(projectId) ?? [])
-        byId.set(capabilityId(e), { e, source: 'project-repo' });
+        if (!this.blocked.has(`${projectId}/${capabilityId(e)}`))
+          byId.set(capabilityId(e), { e, source: 'project-repo' });
     for (const e of this.packs?.entries(projectId, orgId) ?? [])
       byId.set(capabilityId(e), { e, source: 'pack' });
     return [...byId.values()].sort((a, b) =>

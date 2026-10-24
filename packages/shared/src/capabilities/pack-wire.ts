@@ -40,7 +40,19 @@ export const PackDesiredSchema = z.object({
 });
 export type PackDesired = z.infer<typeof PackDesiredSchema>;
 
-export const PacksSyncPayloadSchema = z.object({ packs: z.array(PackDesiredSchema).max(100) });
+/** A project-repository capability the owner blocked: the runner leaves it out of what an agent can use. */
+export const BlockedProjectCapabilitySchema = z.object({
+  projectId: z.uuid(),
+  kind: z.enum(['skill', 'persona', 'playbook']),
+  key: z.string().min(1).max(130),
+});
+export type BlockedProjectCapability = z.infer<typeof BlockedProjectCapabilitySchema>;
+
+export const PacksSyncPayloadSchema = z.object({
+  packs: z.array(PackDesiredSchema).max(100),
+  /** Additive: absent from an older server. */
+  blocked: z.array(BlockedProjectCapabilitySchema).max(1000).default([]),
+});
 /** "Check for updates": fetch `ref` (default the pack's own) and report the commit it points to now. */
 export const PackCheckPayloadSchema = z.object({ packId: z.uuid(), ref: PackRefSchema.optional() });
 

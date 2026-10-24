@@ -122,4 +122,21 @@ export const packEvents = [
         .default([]),
     }),
   ),
+  /**
+   * The owner reviewed a capability the project's own repository carries (`.claude/skills`, `.agents/skills`, `.claude/agents`):
+   * `reviewed` at this content hash (a changed file needs a new review), `blocked` (unusable until cleared) or `unreviewed`
+   * (back to the start). One decision per project, kind and key.
+   */
+  defineEvent(
+    'ProjectCapabilityReviewed',
+    z.object({
+      orgId: Id,
+      projectId: Id,
+      kind: z.enum(['skill', 'persona', 'playbook']),
+      key: z.string().min(1).max(130),
+      hash: z.string().regex(/^[0-9a-f]{64}$/),
+      status: z.enum(['reviewed', 'blocked', 'unreviewed']),
+      by: Id,
+    }),
+  ),
 ] as const;

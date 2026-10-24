@@ -95,13 +95,22 @@ async function packItems(db: Queryable, orgId: string, projectId?: string) {
   return out;
 }
 
-async function projectRepoMeta(db: Queryable, orgId: string, projectId: string): Promise<CapabilityMeta[]> {
+async function projectRepoMeta(
+  db: Queryable,
+  orgId: string,
+  projectId: string,
+): Promise<Array<CapabilityMeta & { blocked?: boolean }>> {
   const r = await rows(
     db,
-    'SELECT kind, key, name, description, hash, icon FROM project_capability_index WHERE org_id=$1 AND project_id=$2 ORDER BY kind, key',
+    `SELECT i.kind, i.key, i.name, i.description, i.hash, i.icon, i.path, (cr.status = 'blocked') AS blocked
+       FROM project_capability_index i
+       LEFT JOIN capability_reviews cr ON cr.project_id = i.project_id AND cr.kind = i.kind AND cr.key = i.key
+      WHERE i.org_id=$1 AND i.project_id=$2 ORDER BY i.kind, i.key`,
     [orgId, projectId],
   );
   return r.map((x) => ({
+    ...(x.blocked ? { blocked: true } : {}),
+    ...(x.path ? { path: x.path } : {}),
     kind: x.kind as CapabilityKind,
     key: x.key,
     name: x.name,
@@ -125,7 +134,9 @@ export async function effectiveRegistry(
   const o: RegistryOptions = typeof opts === 'string' ? { kind: opts } : opts;
   const builtin = builtinCapabilityMeta();
   const vault = await vaultCapabilityMeta(db, orgId);
-  const repo = o.projectId ? await projectRepoMeta(db, orgId, o.projectId) : [];
+  const repoRaw = o.projectId ? await projectRepoMeta(db, orgId, o.projectId) : [];
+  // A capability the owner blocked is not in the registry at all (it does not shadow a built-in either).
+  const repo: CapabilityMeta[] = repoRaw.filter((r) => !r.blocked).map(({ blocked: _b, ...m }) => m);
   const packs = await packItems(db, orgId, o.projectId);
   const idsOf = (l: CapabilityMeta[]) => l.map((b) => `${b.kind}:${b.key}`);
   // what each source can override: the ids of the sources below it
@@ -185,11 +196,15 @@ export async function resolvePersona(
   db: Queryable,
   orgId: string,
   key: string,
+  /** The session's project: a pack added to that project applies in it (an org pack applies everywhere). */
+  projectId?: string | null,
 ): Promise<ResolvedPersona | undefined> {
   // An imported pack's persona (`bmad:analyst`): only when the pack is approved at its pinned commit and unchanged. The text
   // is never on the server; the runner reads it from its clone (and fences it as outside content).
   if (isPackedKey(key)) {
-    const hit = (await packItems(db, orgId)).find((p) => p.meta.kind === 'persona' && p.meta.key === key);
+    const hit = (await packItems(db, orgId, projectId ?? undefined)).find(
+      (p) => p.meta.kind === 'persona' && p.meta.key === key,
+    );
     if (!hit?.usable) return undefined;
     return {
       key,

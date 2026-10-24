@@ -58,6 +58,8 @@ const MetaExtras = {
   hasScripts: z.boolean().optional(),
   tags: z.array(z.string().max(40)).max(10).optional(),
   icon: z.string().max(60).optional(),
+  /** Where a project-repository capability lives in its checkout (`.claude/skills/<name>`), for the review list. */
+  path: z.string().max(300).optional(),
 };
 const MetaBase = {
   kind: CapabilityKindSchema,
