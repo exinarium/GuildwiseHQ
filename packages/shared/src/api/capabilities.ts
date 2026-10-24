@@ -378,6 +378,19 @@ export const PackPersonasResponseSchema = z.object({
 });
 export type PackPersonasResponse = z.infer<typeof PackPersonasResponseSchema>;
 
+/** The packs a member can hire from on the HR page (R3c, Q60): approved organization packs and their own private packs with personas. */
+export const HirablePacksResponseSchema = z.object({
+  packs: z.array(
+    z.object({
+      id: z.uuid(),
+      name: z.string(),
+      personaCount: z.number().int(),
+      visibility: PackVisibilitySchema,
+    }),
+  ),
+});
+export type HirablePacksResponse = z.infer<typeof HirablePacksResponseSchema>;
+
 export const HireFromPackRequestSchema = z.object({
   items: z
     .array(

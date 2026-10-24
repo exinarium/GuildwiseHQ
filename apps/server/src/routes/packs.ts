@@ -35,6 +35,7 @@ import {
   getHireStatus,
   getRoleReview,
   hireFromPack,
+  listHirablePacks,
   listPackPersonas,
   listRoleOffers,
   startRoleReview,
@@ -231,7 +232,8 @@ export function packRoutes(ctx: Ctx) {
       },
     );
 
-    // hire from pack
+    // hire from pack (any member: the HR page lists what they could hire from)
+    app.get('/api/packs-hirable', async (req) => listHirablePacks(ctx, whoOf(await member(req))));
     app.get('/api/packs/:id/personas', { schema: { params: Params } }, async (req) =>
       listPackPersonas(ctx, whoOf(await member(req)), req.params.id),
     );

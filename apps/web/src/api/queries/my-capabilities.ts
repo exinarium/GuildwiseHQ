@@ -1,5 +1,6 @@
 import {
   type CreateMyPackRequest,
+  type HirablePacksResponse,
   type HireFromPackRequest,
   type MyPackDto,
   type MyPacksResponse,
@@ -282,5 +283,14 @@ export function usePersonaChat(id: string) {
     },
     refetchInterval: (q) =>
       q.state.data?.turns.some((t) => t.status === 'queued' || t.status === 'running') ? 2500 : false,
+  });
+}
+
+/** The packs the caller can hire from on the HR page (members too, Q60). */
+export function useHirablePacks(enabled = true) {
+  return useQuery({
+    enabled,
+    queryKey: ['packs', 'hirable'],
+    queryFn: () => get<HirablePacksResponse>('/packs-hirable'),
   });
 }

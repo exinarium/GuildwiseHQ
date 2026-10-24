@@ -496,6 +496,35 @@ describe('hire from pack', () => {
     expect(hire?.body).toEqual({ items: [{ key: 'analyst', name: 'Mary' }], workstationId: WS, capacity: 1 });
   });
 
+  it('Q60: a Member picks a project they are on and the hire carries it; with no project the hire cannot be confirmed', async () => {
+    const user = userEvent.setup();
+    const PROJ = '0192f3a0-0000-7000-8000-0000000000f1';
+    const member = {
+      'GET /api/auth/me': () => ({
+        user: { id: 'u', email: 'm@example.com', displayName: 'Mia' },
+        activeOrg: { id: 'o', name: 'Org', role: 'member' },
+        orgs: [{ id: 'o', role: 'member' }],
+      }),
+    };
+    const projects = (list: unknown[]) => ({ 'GET /api/projects': () => ({ projects: list }) });
+    const proj = { id: PROJ, orgId: 'o', key: 'TOY', name: 'Toy', orgName: 'Org' };
+    const calls = stub({
+      ...base([personaDto()]),
+      ...member,
+      ...projects([proj]),
+      [`POST /api/packs/${PACK}/hire`]: () => ({ requestId: '0192f3a0-0000-7000-8000-0000000000e2' }),
+      'GET /api/pack-hires/': () => ({ requestId: 'x', status: 'done', error: null, agents: [] }),
+    });
+    wrap(<HirePackDialog packId={PACK} packName="bmad" onClose={() => undefined} />);
+    await user.click(await screen.findByLabelText('Hire Mary, Analyst'));
+    expect(await screen.findByTestId('hire-access')).toBeInTheDocument();
+    expect(screen.queryByText('Any project')).toBeNull();
+    await waitFor(() => expect(screen.getByTestId('confirm-hire')).toBeEnabled());
+    await user.click(screen.getByTestId('confirm-hire'));
+    await waitFor(() => expect(calls.some((c) => c.url.endsWith('/hire'))).toBe(true));
+    expect(calls.find((c) => c.url.endsWith('/hire'))?.body.allowedProjectIds).toEqual([PROJ]);
+  });
+
   it('adds every agent of the pack at once and lists them for review before confirming', async () => {
     const user = userEvent.setup();
     stub(

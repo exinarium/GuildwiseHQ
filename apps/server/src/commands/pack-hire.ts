@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
+  type HirablePacksResponse,
   type HireFromPackRequest,
   isOrgManager,
   PACK_AUTHORING_CAPABILITY,
@@ -83,6 +84,30 @@ function provenanceOf(p: Row, item: PackItem): PackProvenance {
 }
 
 // ------------------------------------------------------------------------------------------------ the list
+
+/**
+ * The packs a member can hire from on the HR page (Q60): approved organization packs and their own private packs that carry
+ * personas. Names and counts only; a member's hire is bound by the same rule as any hire of theirs (a project they are on).
+ */
+export async function listHirablePacks(ctx: Ctx, who: Who): Promise<HirablePacksResponse> {
+  const r = await rows(
+    ctx.pool,
+    `SELECT * FROM packs WHERE org_id=$1 AND removed_at IS NULL AND snapshot IS NOT NULL AND pinned_sha IS NOT NULL
+        AND (visibility='org' OR owner_user_id=$2) ORDER BY name`,
+    [who.orgId, who.userId],
+  );
+  return {
+    packs: r
+      .filter((p) => isTrustedRow(p))
+      .map((p) => ({
+        id: p.id as string,
+        name: p.name as string,
+        personaCount: personaItems(p).length,
+        visibility: p.visibility as 'org' | 'private',
+      }))
+      .filter((p) => p.personaCount > 0),
+  };
+}
 
 export async function listPackPersonas(ctx: Ctx, who: Who, packId: string): Promise<PackPersonasResponse> {
   const p = await usablePackFor(ctx.pool, who.userId, who.orgId, packId);

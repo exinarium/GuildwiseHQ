@@ -1029,6 +1029,50 @@ describe('hire from pack', () => {
     await asOwner('POST', '/api/sessions', { kind: 'persona_chat', title: 'x', participants: [] }, 400);
   });
 
+  it('Q60: a Member sees the hirable packs on the HR page and hires from one for a project they are on, on their own workstation', async () => {
+    const list = await asMember('GET', '/api/packs-hirable');
+    expect(list.packs).toContainEqual(
+      expect.objectContaining({ id: crewId, name: 'crew', personaCount: 1, visibility: 'org' }),
+    );
+    // a pack that is not approved is not offered, and a stranger gets no list from this organization
+    const strangerList = await ok(w.t.req('GET', '/api/packs-hirable', { cookie: stranger.cookie }), 200);
+    expect(strangerList.packs.map((p: { id: string }) => p.id)).not.toContain(crewId);
+    // the member's hire needs a project they are on, and is bound to it
+    await asOwner('POST', `/api/projects/${w.projectId}/members`, { email: member.email }, 201);
+    const r = await asMember(
+      'POST',
+      `/api/packs/${crewId}/hire`,
+      {
+        items: [{ key: 'critic', name: 'Memo' }],
+        workstationId: memberWs,
+        runtime: 'mock',
+        model: 'mock',
+        allowedProjectIds: [w.projectId],
+      },
+      202,
+    );
+    await answerRead(mem, crewId, personaText(critic));
+    await until(async () => (await asMember('GET', `/api/pack-hires/${r.requestId}`)).status !== 'pending');
+    const status = await asMember('GET', `/api/pack-hires/${r.requestId}`);
+    expect(status.status, status.error ?? '').toBe('done');
+    const row = (
+      await q(
+        `SELECT manager_user_id, allowed_project_ids, workstation_id, provenance FROM agents WHERE name='Memo'`,
+      )
+    )[0];
+    expect(row.manager_user_id).toBe(member.id);
+    expect(row.allowed_project_ids).toEqual([w.projectId]);
+    expect(row.workstation_id).toBe(memberWs);
+    expect(row.provenance).toMatchObject({ packName: 'crew', capability: 'critic' });
+    // the role it got is read only: a Member never widens the persona's tools
+    const agent = (await asMember('GET', '/api/agents')).agents.find(
+      (a: { name: string }) => a.name === 'Memo',
+    );
+    expect(agent.permissions.allowedTools).toEqual(['read']);
+    // the member who hired may let them go again (the later tests count only the Owner's hires)
+    await asMember('POST', `/api/agents/${agent.id}/fire`, undefined, 200);
+  });
+
   it('refuses a pack that is not approved, another organization’s pack and a persona it does not have', async () => {
     await asOwner('POST', `/api/packs/${crewId}/revoke`);
     await asOwner(

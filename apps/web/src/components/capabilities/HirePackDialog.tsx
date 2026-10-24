@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import { useMe } from '../../api/queries/auth.ts';
 import { useHireFromPack, usePackPersonas } from '../../api/queries/my-capabilities.ts';
+import { useProjects } from '../../api/queries/projects.ts';
 import { useWorkstations } from '../../api/queries/workstations.ts';
+import { type Access, ProjectAccessEditor } from '../agents/ProjectAccess.tsx';
 import { ModelSelect, unionExtras, unionProviders } from '../ModelSelect.tsx';
 import {
   Badge,
@@ -35,6 +37,13 @@ export function HirePackDialog({
   const stations = useWorkstations();
   const me = useMe();
   const hire = useHireFromPack();
+  const projects = useProjects();
+  const isManager = me.data?.activeOrg?.role === 'owner' || me.data?.activeOrg?.role === 'admin';
+  // A member hires within their existing permissions: for projects they are on (the normal hire rule). Owners and Admins as before.
+  const [access, setAccess] = useState<Access | null>(null);
+  const defaultProject =
+    projects.data?.find((p) => p.orgId === me.data?.activeOrg?.id)?.id ?? projects.data?.[0]?.id;
+  const effectiveAccess: Access = access ?? { allowed: defaultProject ? [defaultProject] : [], focus: [] };
   const toast = useToast();
   const mine = (stations.data ?? []).filter((w) => w.userId === me.data?.user.id && w.status === 'active');
   const [picked, setPicked] = useState<Record<string, string>>({});
@@ -59,6 +68,7 @@ export function HirePackDialog({
           workstationId: station.id,
           ...(model && runtime && m.length ? { runtime, model: m.join('/') } : {}),
           capacity: 1,
+          ...(isManager ? {} : { allowedProjectIds: effectiveAccess.allowed ?? [] }),
         },
       },
       {
@@ -71,7 +81,9 @@ export function HirePackDialog({
       },
     );
   };
-  const ready = chosen.length > 0 && chosen.every((p) => (picked[p.key] ?? '').trim()) && !!station;
+  const accessOk = isManager || (effectiveAccess.allowed?.length ?? 0) > 0;
+  const ready =
+    chosen.length > 0 && chosen.every((p) => (picked[p.key] ?? '').trim()) && !!station && accessOk;
   return (
     <Dialog
       open
@@ -184,6 +196,22 @@ export function HirePackDialog({
               extras={unionExtras(station ? [station] : [])}
               defaultLabel="The role's default"
             />
+            {!isManager && (
+              <div data-testid="hire-access">
+                <ProjectAccessEditor
+                  value={effectiveAccess}
+                  onChange={setAccess}
+                  projects={projects.data ?? []}
+                  canAny={false}
+                  idPrefix="packhire"
+                />
+                {!accessOk && (
+                  <p role="alert" className="mt-1 text-sm font-medium text-danger">
+                    Pick at least one project you are on.
+                  </p>
+                )}
+              </div>
+            )}
             <div data-testid="hire-review">
               <p className="text-sm font-medium">Review</p>
               <ul className="list-disc pl-5 text-sm text-muted">

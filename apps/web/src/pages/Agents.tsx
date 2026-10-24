@@ -137,11 +137,9 @@ export function Agents() {
             <ButtonLink to="/metrics" data-testid="metrics-link">
               Metrics
             </ButtonLink>
-            {orgManager && (
-              <Button onClick={() => setPackHireOpen(true)} data-testid="hire-from-pack-open">
-                Hire from a pack
-              </Button>
-            )}
+            <Button onClick={() => setPackHireOpen(true)} data-testid="hire-from-pack-open">
+              Hire from a pack
+            </Button>
             <Button variant="primary" onClick={() => setHireOpen(true)}>
               Hire agent
             </Button>
