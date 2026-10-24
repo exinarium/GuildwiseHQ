@@ -51,6 +51,16 @@ Every agent runs on a Claude model that you choose when you hire it. The model a
 
 When hiring, pick the runtime, model and effort level. You can change them later with **Change model** on the agent's card on the Agents page, and swap the role with **Change role**.
 
+## Describe the agent you need {#describe}
+
+On **Agents**, click **Describe the agent you need** and write one sentence, for example "an agent that turns merged pull requests into customer release notes". The Analyst drafts a role on your workstation (this takes about a minute and its cost is booked like any chat): a name, what it is for, instructions, what it may do, a suggested model, and any skills or playbooks that fit.
+
+You review and edit all of it. **What it may do** is never wider than you may grant: an Owner or Admin can give edit, shell and web; anyone else gets read only, and the dialog says what was left out. **Continue to hire** opens the normal hire dialog with the draft as the role. Nothing is hired before you press **Hire**, and the role works in chats, sessions and mentions; it does not take cards from the board.
+
+## Mentions in card comments {#mentions}
+
+In a card's thread, type **@** and an agent's name to ask it a small question about the card. The agent reads and answers in the thread; it cannot edit files, run commands or commit, and its cost is booked to the card (budgets and provider caps apply). Owners and Admins can mention any agent that may work on the project. For everyone else the agent's manager has to switch on **Project members may mention this agent** under **Who may mention it** on its card. Each person is limited to 5 mentions per card and 20 in all per hour, and one agent answers on a card at a time.
+
 ## Firing an agent {#firing}
 
 To fire an agent:

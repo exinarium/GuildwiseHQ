@@ -51,6 +51,12 @@ Your answer is recorded in the ledger (shared with future agents), the card is u
 
 Only people who may answer see the form; on a card with the default policy only the card's owner can answer, and others see the item read only (see the decision policy on the card).
 
+## Reminders {#reminders}
+
+A question, approval, escalation or digest rating that is still open after **3 days** reminds the person it is waiting for: a notification on their devices (the **Reminders for open items** category in notification settings) and a **Reminded** mark on the item. It repeats at most once per period. An item that sits with an agent is handed back to the agent once instead.
+
+Use **Snooze** on an item to hold its next reminder back for a day up to two weeks. An Owner or Admin changes the period, or turns reminders off with 0, under **Settings > General > Reminders for open items**.
+
 ## Standing orders {#standing-orders}
 
 **Standing orders** are recurring instructions that show up in every agent's shift. Use them for:
