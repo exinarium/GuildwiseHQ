@@ -133,6 +133,15 @@ Details in `docs/ARCHITECTURE.md` section 38.4 (packs, trust, BMAD, materialisat
 - **Delegation and Codex, open questions (defaults chosen):** delegate targets are persona keys, not hired agents; a persona's own model wins over the cheap default; Claude Code has no max-turns flag so only the 110 s timeout caps a Claude delegate; delegates are not offered to board speakers (sealed rounds) or plain direct chats; Codex runs only roles its sandbox can confine, has no network allow-list, and a Codex agent's shift resume starts fresh; Codex prices are unknown (cost shown as unknown).
 
 
+## Revision R1 as built: other runtimes and provider keys
+
+Details in `docs/ARCHITECTURE.md` section 38.5 and `docs/RUNNER.md` ("Claude Code on Bedrock, Vertex AI or a gateway", "Gemini CLI runtime", "opencode runtime", "Sandbox parity of the other runtimes", "Provider keys"). Runner 0.1.49, migration 2430.
+
+- **Built:** Claude Code backends (`bedrock:`, `vertex:`, `gateway:` models, data-driven `BACKENDS`); a runtime-agnostic role check (`RUNTIME_GUARANTEES`, `runtimeRoleProblem`) used by hire, move, CEO raise-model, the server command and the runner; the Gemini CLI and opencode adapters inside a runner-owned bubblewrap box with an egress proxy that injects API keys; organization-wide provider keys sealed per workstation with a monthly cap per provider (key source recorded on `shift_costs`), reseal by a holding runner, revocation, and an org Model providers page.
+- **Verified against real binaries:** gemini 0.65.0 and opencode 1.19.4 (argv, event streams, policy and permission behaviour, sandbox isolation, resume) against fake local model APIs; claude against a fake Anthropic-compatible gateway. **Only faked:** Bedrock and Vertex (environment contract only), real Google and provider accounts, the Google login flow, real quota messages, and the reseal approval across two real runners.
+- **Decisions taken by default:** the harness sandbox wraps the whole CLI rather than using each CLI's own sandbox (none holds on Linux); Gemini and opencode may take no-shell roles because their shell can be restricted to `aom`; tester, writer, architect, DevOps and CEO are refused on all harness runtimes; DevOps and the CEO are also refused on Bedrock/Vertex/gateway; an organization cap counts only keys of source `org`; unknown-cost turns are shown as unknown, not blocked; the cap is checked at queue and dispatch, so a run already started finishes; the org key is stored per organization id on the runner.
+- **Open questions:** (1) Google login traffic cannot go through a key route, so it reaches Google's hosts directly (allow-listed); is that acceptable, or should Gemini be API-key only? (2) A local Ollama is reachable only through a configured route; a general "private endpoint" allow-list is not provided. (3) Should a cap also pause already-running sessions at 100%? (4) Native Windows/macOS have no harness sandbox, so Gemini and opencode are Linux/WSL2 only. (5) Cost tables for opencode providers beyond the common ones are unknown until priced.
+
 ## Owner decisions (2026-10-24), to build in the revision pass
 
 ### Owner's own decisions

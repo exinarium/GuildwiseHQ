@@ -459,6 +459,14 @@ aom-runner doctor             # checks node, git, claude, docker, yt-dlp, repos,
 - **loginDir** (optional): the folder with the owner's `auth.json` (default `$CODEX_HOME`, else `~/.codex`)
 - **toolchainPaths** (array): extra toolchain folders the sandboxed shell may read, as for Claude Code
 
+**Gemini CLI** (`runtimes.gemini`, optional; see "Gemini CLI runtime"). Registered only when the `gemini` binary is found:
+- **enabled** (default `true`), **bin** (optional path, `~` allowed; default the first `gemini` on `PATH`)
+- **authMode** (default `"auto"`): `"auto"` uses the owner's Google login when there is one, else the stored `google` key; `"login"` only the login; `"api_key"` only the stored key (workstation key over organization key)
+- **loginDir** (optional): the owner's `.gemini` folder (default `$GEMINI_CLI_HOME/.gemini`, else `~/.gemini`)
+- **toolchainPaths**, **extraAllowedDomains** (arrays), **models** (extra model ids offered for picking)
+
+**opencode** (`runtimes.opencode`, optional; see "opencode runtime"). Registered only when the `opencode` binary is found: **enabled**, **bin**, **toolchainPaths**, **extraAllowedDomains** as above. Its providers are the keys held under Model providers.
+
 **Mock** (test-only, token-free):
 - **enabled** (default `false`): turn on for testing
 - **capabilities** (optional array): limit advertised roles (e.g., `["builder"]`)
@@ -971,6 +979,92 @@ codex exec --json --skip-git-repo-check --strict-config --color never --cd <work
 **Known gaps.** The repository's own `AGENTS.md` and `.agents/skills` are loaded by Codex (no switch). A plain clone (not a linked worktree) cannot commit: its `.git` is inside the writable root and Codex keeps it read-only. `resume` works by thread id, but the supervisor's "continue this agent's session" decision reads Claude transcripts, so a shift always starts a new thread unless the caller passes a `resumeSessionId` from a chat. A Codex login shared by several agents can lose a refresh-token rotation (use an API key). Codex's own stderr is shown only in the failure text, cut to 1000 characters.
 
 **Tests.** `apps/runner/test/codex-adapter.test.ts` (a fake `codex` script that records argv, environment, cwd, stdin, `AGENTS.md`, skills and rules: argv, env allow-list, instructions, skills, stream parsing, usage, exit and auth mapping, role refusals, registration only when the binary exists); `apps/runner/test/codex-real.test.ts` (opt-in, `AOM_CODEX_REAL_BIN=/path/to/codex`: the real binary against a fake local Responses API, checking the sandbox, the shell environment, the `aom` exclusion, git, skills discovery and the event parser); `packages/shared/test/codex-runtime.test.ts`; `apps/server/test/codex-runtime.test.ts`.
+
+### Claude Code on Bedrock, Vertex AI or a gateway
+
+The same adapter, harness and sandbox as Claude Code on a subscription; only the model backend changes. An agent's model is `bedrock:<model id>`, `vertex:<model id>` or `gateway:<model id>` (the part before the first colon is the backend). The credential is entered under the workstation's (or the organization's) Model providers, sealed in the browser to the runner like a provider key, kept in the provider store and put into **that agent's Claude Code process only**; it is in the redaction registry (logs, activity, errors) and never in the agent's shell, because the sandbox hides the process environment of the CLI from commands.
+
+| Backend | Credential fields | Claude Code environment set for the process |
+| --- | --- | --- |
+| Amazon Bedrock | region; a Bedrock API key (bearer token) or access key id, secret and optional session token | `CLAUDE_CODE_USE_BEDROCK=1`, `AWS_REGION`, `AWS_BEARER_TOKEN_BEDROCK` or `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`/`AWS_SESSION_TOKEN` |
+| Google Vertex AI | project id, region, service-account JSON | `CLAUDE_CODE_USE_VERTEX=1`, `ANTHROPIC_VERTEX_PROJECT_ID`, `CLOUD_ML_REGION`, `GOOGLE_APPLICATION_CREDENTIALS` (the JSON is written 0600 in the runner's secrets folder for that session, which no agent shell can see, and removed when the session ends) |
+| Anthropic-compatible gateway | base URL, token or API key | `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_API_KEY`, `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1` |
+
+All three also set `ANTHROPIC_MODEL` and the `ANTHROPIC_DEFAULT_OPUS_MODEL`/`SONNET`/`HAIKU` pins to the chosen id (so Claude Code's own small-model calls do not name a model the backend lacks) and `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`. The subscription login of the workstation is not used for such a run. Variable names are Claude Code's documented settings (code.claude.com, Amazon Bedrock, Vertex AI and LLM gateway pages), checked against the real `claude` binary talking to a fake gateway (`apps/runner/test/claude-backend-real.test.ts`, opt-in); Bedrock and Vertex themselves were **not** called (no cloud account), only their environment contract was checked.
+
+Roles: every role Claude Code can take except DevOps and the CEO (they need the owner's own login). **Warning shown in the UI:** non-Claude models behind a gateway may follow Claude Code's tools and instructions less reliably, and Anthropic does not support that setup. Cost: priced from the model id when it is a known Claude id, otherwise unknown.
+
+### Gemini CLI runtime
+
+The `gemini` runtime runs Google's Gemini CLI (checked against `@google/gemini-cli` 0.65.0) for card shifts and chats. It is registered **only when the `gemini` binary is found** and is `available` only where the runner's own sandbox runs (Linux or WSL2 with bubblewrap and `socat`); there is no unsandboxed mode. See "Sandbox parity of the other runtimes" below for the sandbox.
+
+```
+gemini -p '' --output-format stream-json --approval-mode yolo --skip-trust --model <id>
+       [--resume <session uuid>] --admin-policy <policy.toml> --include-directories <readonly dirs>      # prompt on stdin
+```
+
+- `--approval-mode yolo` is required headless (there is nobody to approve); the safety is the sandbox and the admin policy, not the CLI's prompts. `--skip-trust` stops the folder-trust prompt. The CLI's own sandbox options (seatbelt, docker, podman, runsc, lxc) are **not** used: the runner's bubblewrap wraps the whole CLI.
+- `--admin-policy` is the policy tier above user and workspace settings, so nothing in the repository or the owner's folder can override it: the role's allowed `aom` command and the role's denied shell prefixes (`git push`, ...) as `commandPrefix` rules; a role with no shell tool gets a shell restricted to `aom`.
+- Output: one JSON event per line: `init {session_id, model}`, `message`, `tool_use`, `tool_result`, `error`, `result {status, stats}`. `stats.input` is the non-cached prompt, `cached`, `output_tokens`; usage is `gemini:<model>`. Other lines (startup notes) are ignored.
+- **Sign-in.** `login`: the owner's login (`gemini-credentials.json`, the encrypted file store whose key derives from hostname and user, or the legacy `oauth_creds.json`; the OS keychain is not read, set `GEMINI_FORCE_FILE_STORAGE` by signing in with the file store) is **copied into a private `GEMINI_CLI_HOME`** per agent and a refreshed copy (newer file) is harvested back when the session ends, so parallel agents cannot clobber each other's rotated token. Inside the box the login files are hidden from the agent's shell. `api_key`: the stored `google` key; it never enters the sandbox, the egress proxy adds `x-goog-api-key` on a route and the CLI is pointed at the proxy with `GOOGLE_GEMINI_BASE_URL`. An unsigned or expired login ends the session with `authFailed` and the runtime reports `auth: expired`. A quota message ("Your quota will reset after 3h5m20s") is a usage limit with that reset time, not a crash.
+- **Instructions and skills** use the same provider-neutral renderer as `CLAUDE.md` and `AGENTS.md` (written to the agent's private home as `GEMINI.md`); granted skills are materialised into the agent's private `GEMINI_CLI_HOME/.gemini/skills`; the repository's `AGENTS.md` is read as well; the owner's `~/.gemini` is never read.
+- Models: built-in list plus `runtimes.gemini.models`; data-driven in the pickers.
+
+### opencode runtime
+
+The `opencode` runtime runs the open-source opencode CLI (checked against `opencode-ai` 1.19.4) with the provider keys held on the workstation (OpenAI-compatible, Anthropic, Google, OpenRouter, ... whichever keys exist). Models are `provider/model`; global instructions are the private `opencode/AGENTS.md` and granted skills `opencode/skills/` under the agent's private XDG config. Registered only when the `opencode` binary is found; same sandbox requirement as Gemini.
+
+```
+opencode run --format json -m <provider>/<model> [-s <ses_...>]       # prompt on stdin
+```
+
+- Everything the runner decides is in the environment, so a repository's or the owner's own opencode files cannot loosen it: `OPENCODE_CONFIG_CONTENT` (permission table, `enabled_providers` limited to the held keys so the vendor's hosted models are unreachable, provider base URLs pointing at the egress proxy), `OPENCODE_DISABLE_PROJECT_CONFIG`, `OPENCODE_DISABLE_CLAUDE_CODE` and `OPENCODE_DISABLE_EXTERNAL_SKILLS` (the repository's `.claude` and `.agents` are not read), `OPENCODE_DISABLE_MODELS_FETCH`, `OPENCODE_DISABLE_AUTOUPDATE`, `OPENCODE_DISABLE_LSP_DOWNLOAD`, `OPENCODE_DISABLE_DEFAULT_PLUGINS`, `OPENCODE_PURE`, and `XDG_*` into the agent's private home.
+- Permissions are **last match wins**: `bash: {"*": "deny", "aom *": "allow", ...}` for a role restricted to `aom`; a role without `edit` has the edit and write tools denied (opencode then hides the write tool); `external_directory` is denied.
+- Events: `step_start`, `text`, `tool_use`, `step_finish {tokens: {input, output, cache}}` (input excludes cache), `error`. Usage is booked under the provider of the key (`keySource`, `keyProvider`).
+- API keys are never in the sandbox: each provider has an egress route that adds the key header upstream.
+
+### Sandbox parity of the other runtimes
+
+Gemini CLI and opencode have no OS sandbox of their own that holds under Linux, and no split between "the CLI" and "the shell it starts", so the runner puts **the whole CLI** in bubblewrap (`sandbox/harness-sandbox.ts`) and exposes the network only through an egress proxy (`sandbox/egress-proxy.ts`). Requirements: Linux or WSL2, `bwrap`, `socat`; the runtime reports `sandbox: unavailable` with the reason otherwise and refuses every session.
+
+| Guarantee | Claude Code | Codex | Gemini CLI and opencode (harness sandbox) |
+| --- | --- | --- | --- |
+| What is sandboxed | the agent's shell | the agent's shell | the whole CLI and everything it starts |
+| Private `HOME` and config | yes | yes | yes (`GEMINI_CLI_HOME` / XDG dirs in `agents/<id>`) |
+| Runner environment kept out | allow-list | allow-list | new env; empty root, new user, pid, ipc, uts, cgroup namespaces |
+| Owner's home, runner data dir and token, other agents, `~/.ssh`, Docker socket | hidden | hidden | not present in the box |
+| Writes only in worktree, home, scratch, tmp, caches | yes | yes | yes (worktree read-only for roles without `edit` and for chats) |
+| Secret files in reference repos | masked | deny globs fixed at start | masked with /dev/null at start |
+| Network | domain allow-list | off | no interface; egress proxy with domain allow-list, ports 80 and 443, public addresses only |
+| Model API key | in the CLI process | in the CLI process | **not in the box**: the proxy adds it upstream (Google login excepted, see below) |
+| CLI's own login files | in the agent's config dir | hidden from the shell | exist for the CLI, masked from the shell by a nested sandbox shim |
+| `aom` over IPC | Unix socket | execpolicy allow outside sandbox | Unix socket through the box |
+| Git: commit yes, push no | yes | yes | yes (no credentials, no network to git hosts) |
+| Denied shell patterns | permission rules | execpolicy | Gemini admin policy / opencode permission table (best effort, the structure holds) |
+| Shell limited to `aom` (roles without a shell) | `Bash(aom:*)` | not possible | **yes** |
+| Per-role path scopes (tester, writer, architect) | `Edit` globs | no | no |
+| Browser roles | opt-in | no | no |
+| DevOps guard, DevOps and CEO | yes | no | no |
+| MCP servers | per role | none | none |
+| Token cost | priced | unknown | Gemini priced by `gemini:<model>`; opencode by key provider where priced, else unknown |
+
+Gaps, said plainly: the Gemini login files must exist inside the box for the CLI, so a prompt-injected model could use the CLI itself to call tools but cannot read them from the shell (masked); with a Google login the traffic goes straight to Google's hosts on the allow-list (`cloudcode-pa.googleapis.com`, `oauth2.googleapis.com`, `www.googleapis.com`) because the login flow cannot be routed through a key route. The proxy refuses private addresses, so a local Ollama or a self-hosted endpoint works only as a configured route target.
+
+**Roles each runtime may take** (`runtimeRoleProblem`, the same check on the server, in the hire form, in "move agent" and in the CEO raise-model action, and again in the runner at session start with `runtime_not_for_role`):
+
+| Role kind | Claude Code (incl. Bedrock, Vertex, gateway) | Codex | Gemini CLI | opencode |
+| --- | --- | --- | --- | --- |
+| Builder, reviewer, planner, pre-reviewer, BA tasks and chats, custom roles with a shell | yes | yes | yes | yes |
+| Read-only roles with no shell (analyst, researcher, checker, scout, curator) | yes | no | yes (shell restricted to `aom`) | yes (same) |
+| Tester (browser) | yes | no | no | no |
+| Writer, architect (path-limited edit) | yes | no | no | no |
+| DevOps, CEO | yes on subscription; **no** on Bedrock, Vertex or a gateway | no | no | no |
+
+**Verified against real binaries and what was only faked.** gemini 0.65.0 and opencode 1.19.4 were installed and run in the real sandbox against fake local model APIs (`gemini-real.test.ts`, `opencode-real.test.ts`, opt-in with `AOM_GEMINI_REAL_BIN` / `AOM_OPENCODE_REAL_BIN`): argv, event format, policy enforcement (denied commands, hidden login files, no network except the proxy, key not visible), session resume. Real Google and provider accounts, real quota messages and the Google login flow were **not** exercised (a faked login file and a faked API only); Bedrock and Vertex were not called.
+
+### Provider keys: workstation and organization
+
+Keys for direct-model providers, opencode and the Claude Code backends live in the provider store on the runner (`secrets/providers.json` for the workstation's own keys, organization keys in slots per organization id). The server and the browser never see them again: the browser seals a key to the runner's public key (`provider.key.set`), and `provider.key.clear` removes one. **Organization keys** (Settings > Model providers, Owner or Admin) are sealed once per target workstation in the admin's browser, so the server stores only ciphertexts per workstation. A workstation added later receives its copy when the admin enters the key again, or through "Share to this workstation": the server sends the durable `provider.key.reseal` command to a runner that holds the key, the runner re-seals to the new workstation's public key and the server stores the result once an Owner or Admin approved. Revoking deletes the key on every workstation. Resolution order for a run: the workstation's own key, else the organization's key for the agent's organization, else none. A workstation key overrides the organization's and is not capped. A runner older than 0.1.49 (no `provider-keys:2` in its capabilities) can use workstation keys as before and cannot receive organization shares (the server answers 422 `runner_too_old`).
 
 ### Mock adapter
 
