@@ -24,6 +24,7 @@ import { Chat } from './pages/Chat.tsx';
 import { ContactPublic } from './pages/ContactPublic.tsx';
 import { Costs } from './pages/Costs.tsx';
 import { Desk } from './pages/Desk.tsx';
+import { DeskActionConfirm } from './pages/DeskActionConfirm.tsx';
 import { DiscoveryList } from './pages/Discovery.tsx';
 import { DiscoverySession } from './pages/DiscoverySession.tsx';
 import { DocumentsList, DocumentView } from './pages/Documents.tsx';
@@ -102,6 +103,8 @@ export const routes = [
   { path: '/verify-email/:token', element: <VerifyEmail />, errorElement: <RouteError /> },
   { path: '/contact', element: <ContactPublic />, errorElement: <RouteError /> },
   { path: '/invite/:token', element: <AcceptInvite />, errorElement: <RouteError /> },
+  // S-B1: the page a notification button opens; it signs the person in first and applies nothing until they press the button
+  { path: '/m/desk/:token', element: <DeskActionConfirm />, errorElement: <RouteError /> },
   {
     element: <RequireAuth />,
     errorElement: <RouteError />,

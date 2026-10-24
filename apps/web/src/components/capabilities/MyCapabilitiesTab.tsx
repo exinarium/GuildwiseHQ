@@ -1,6 +1,7 @@
 import type { MyPackDto, PackVisibility } from '@aom/shared';
 import { type FormEvent, useState } from 'react';
 import { useAgents } from '../../api/queries/agents.ts';
+import { scopesMissing } from '../../api/queries/governance.ts';
 import {
   readMyPackTree,
   readPackContent,
@@ -13,6 +14,7 @@ import {
 } from '../../api/queries/my-capabilities.ts';
 import { useCanManageOrg } from '../../lib/orgRole.ts';
 import { canSealHere } from '../../lib/secure.ts';
+import { ScopeConfirm, type ScopeInfo } from '../governance/ScopeConfirm.tsx';
 import { SecureContextNotice } from '../SecureContextNotice.tsx';
 import {
   Badge,
@@ -370,6 +372,8 @@ function MyPackCard({
 function GrantAgents({ pack }: { pack: MyPackDto }) {
   const agents = useAgents();
   const grant = useGrantPackAgent();
+  // S-B1: the pack needs a scope this agent lacks: shown, and granted only on confirmation
+  const [needs, setNeeds] = useState<{ agentId: string; agentName: string; info: ScopeInfo } | null>(null);
   const here = (agents.data ?? []).filter(
     (a) => a.workstationId === pack.workstationId && a.status !== 'retired',
   );
@@ -386,12 +390,36 @@ function GrantAgents({ pack }: { pack: MyPackDto }) {
           <input
             type="checkbox"
             checked={pack.grantedAgentIds.includes(a.id)}
-            onChange={(e) => grant.mutate({ id: pack.id, agentId: a.id, granted: e.target.checked })}
+            onChange={(e) =>
+              grant.mutate(
+                { id: pack.id, agentId: a.id, granted: e.target.checked },
+                {
+                  onError: (err) => {
+                    const info = scopesMissing(err);
+                    if (info) setNeeds({ agentId: a.id, agentName: a.name, info });
+                  },
+                },
+              )
+            }
           />
           {a.name}
         </label>
       ))}
-      <ErrorBox error={grant.error} />
+      <ErrorBox error={scopesMissing(grant.error) ? null : grant.error} />
+      <ScopeConfirm
+        info={needs?.info ?? null}
+        what={`The pack "${pack.name}"`}
+        agentName={needs?.agentName ?? ''}
+        pending={grant.isPending}
+        onCancel={() => setNeeds(null)}
+        onConfirm={() =>
+          needs &&
+          grant.mutate(
+            { id: pack.id, agentId: needs.agentId, granted: true, confirmScopes: true },
+            { onSuccess: () => setNeeds(null) },
+          )
+        }
+      />
     </fieldset>
   );
 }

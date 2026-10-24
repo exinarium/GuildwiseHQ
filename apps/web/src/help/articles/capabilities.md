@@ -15,6 +15,10 @@ It lists every skill, persona and playbook and where it comes from: built in, yo
 
 Add a pack by git URL and tag (any repository of skills in the Agent Skills format, folders with a SKILL.md, works). It starts untrusted: nothing of it is used. **Review and approve** shows its files, scripts flagged, and approves that exact commit. Scripts stay off unless you enable them, and only run in the sandbox. Pack text reaches agents as outside content. **Check for updates** fetches now and shows a diff to accept. A pack added to one project applies in that project's sessions.
 
+## Scopes a pack needs {#scopes}
+
+A pack can say what it needs: `scopes:` in its `pack.yaml` (for the whole pack or one skill, persona or playbook), `metadata.scopes` in a `SKILL.md`, or `scopes:` in a persona's or playbook's frontmatter. Known scopes are `read`, `edit`, `shell`, `web`, `mcp`, `commit`, `browser`, `org-repos`, `scripts` and `delegate`. Reviewers see them on the pack, and granting a playbook, a delegate persona or a private pack to an agent that lacks one shows what is missing and asks you to confirm (**Grant anyway**). A scope the manifest adds changes the pack, so it is reviewed again.
+
 ## Project skills {#project-skills}
 
 **Project skills** lists the skills and personas found in project repositories (repository, path, hash). Nothing found there is used until an Owner or Admin has read it and marked it **reviewed**; a file that changes needs a new review. You also get a notice on your desk when something waits. **Block** one to keep it out for good.

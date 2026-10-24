@@ -33,6 +33,7 @@ import { useRunningShifts } from '../api/queries/shifts.ts';
 import { useWorkstations } from '../api/queries/workstations.ts';
 import { AgentMcpSection } from '../components/agents/AgentMcpSection.tsx';
 import { AgentRoleFollow } from '../components/agents/AgentRoleFollow.tsx';
+import { MayDoButton } from '../components/agents/MayDo.tsx';
 import { PackProvenance } from '../components/agents/PackProvenance.tsx';
 import {
   type Access,
@@ -441,6 +442,9 @@ function AgentCard({
             : {})}
         />
       )}
+      <div>
+        <MayDoButton agentId={a.id} agentName={a.name} />
+      </div>
       {!a.isDevops && <PlaybookGrants agentId={a.id} />}
       {!a.isDevops && a.roleKey !== 'ceo' && <DelegateGrants ownerKind="agent" ownerId={a.id} />}
       {a.isDevops ? (

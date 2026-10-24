@@ -119,6 +119,55 @@ describe('push', () => {
     expect(sw.shown[0]?.options.body).toBe('plain words');
   });
 
+  it('shows at most two buttons and keeps only same-origin confirm pages for them', async () => {
+    const sw = load();
+    await sw.fire('push', {
+      data: {
+        json: () => ({
+          title: 'Ship it?',
+          body: 'b',
+          url: '/desk#desk-item-1',
+          tag: 't',
+          badge: 1,
+          actions: [
+            { action: 'approve', title: 'Approve', url: '/m/desk/tok1' },
+            { action: 'reject', title: 'Reject', url: '/m/desk/tok2' },
+            { action: 'third', title: 'Third', url: '/m/desk/tok3' },
+          ],
+        }),
+      },
+    });
+    const o = sw.shown[0]?.options;
+    expect(o?.actions).toEqual([
+      { action: 'approve', title: 'Approve' },
+      { action: 'reject', title: 'Reject' },
+    ]);
+    expect(o?.data.actions).toEqual({ approve: '/m/desk/tok1', reject: '/m/desk/tok2' });
+    const evil = load();
+    await evil.fire('push', {
+      data: {
+        json: () => ({
+          title: 'T',
+          body: '',
+          url: '/',
+          tag: 't',
+          badge: 1,
+          actions: [
+            { action: 'approve', title: 'Approve', url: 'https://evil.example.org/m/desk/x' },
+            { action: 'reject', title: 'Reject', url: '/api/desk/1/resolve' },
+          ],
+        }),
+      },
+    });
+    expect(evil.shown[0]?.options.data.actions).toEqual({});
+  });
+
+  it('shows no buttons for a notification without actions', async () => {
+    const sw = load();
+    await sw.fire('push', { data: { json: () => ({ title: 'T', body: '', url: '/', tag: 't', badge: 1 }) } });
+    expect(sw.shown[0]?.options.actions).toBeUndefined();
+  });
+
   it('never opens another origin from a notification', async () => {
     const sw = load();
     await sw.fire('push', {
@@ -140,6 +189,19 @@ describe('notificationclick', () => {
     expect(win.focus).toHaveBeenCalled();
     expect(navigate).toHaveBeenCalledWith('/cards/TOY-3');
     expect(sw.openWindow).not.toHaveBeenCalled();
+  });
+
+  it('a button opens its confirm page, the body of the notification opens the Desk', async () => {
+    const data = { url: '/desk#desk-item-1', actions: { approve: '/m/desk/tok1' } };
+    const sw = load();
+    await sw.fire('notificationclick', { action: 'approve', notification: { close: vi.fn(), data } });
+    expect(sw.openWindow).toHaveBeenCalledWith('/m/desk/tok1');
+    const body = load();
+    await body.fire('notificationclick', { action: '', notification: { close: vi.fn(), data } });
+    expect(body.openWindow).toHaveBeenCalledWith('/desk#desk-item-1');
+    const unknown = load();
+    await unknown.fire('notificationclick', { action: 'zzz', notification: { close: vi.fn(), data } });
+    expect(unknown.openWindow).toHaveBeenCalledWith('/desk#desk-item-1');
   });
 
   it('opens a window when none is open', async () => {

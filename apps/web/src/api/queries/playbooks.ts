@@ -49,7 +49,7 @@ export function usePlaybookGrants(agentId: string) {
 export function useSetPlaybookGrant(agentId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (v: { key: string; granted: boolean }) =>
+    mutationFn: (v: { key: string; granted: boolean; confirmScopes?: boolean }) =>
       put<PlaybookGrantsDto>(`/agents/${agentId}/playbook-grants`, v),
     onSuccess: (data) => qc.setQueryData(['playbook-grants', agentId], data),
   });

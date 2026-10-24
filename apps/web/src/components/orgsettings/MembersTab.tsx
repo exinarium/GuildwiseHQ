@@ -1,4 +1,4 @@
-import { ORG_ROLE_LABEL, type OrgMemberDto } from '@aom/shared';
+import { type OffboardingReport, ORG_ROLE_LABEL, type OrgMemberDto } from '@aom/shared';
 import { Copy, ShieldCheck, UserPlus, Users } from 'lucide-react';
 import { useState } from 'react';
 import {
@@ -29,6 +29,7 @@ import {
   useToast,
 } from '../ui.tsx';
 import { InviteDialog } from './InviteDialog.tsx';
+import { OffboardingChecklist, OffboardingReportDialog } from './Offboarding.tsx';
 
 const roleTone = { owner: 'brand', admin: 'blue', member: 'neutral' } as const;
 
@@ -48,6 +49,7 @@ export function MembersTab({ me }: { me: { userId: string; role: 'owner' | 'admi
   // The temporary password lives in this state only while its dialog is open (shown once, never stored).
   const [temporary, setTemporary] = useState<{ name: string; password: string } | null>(null);
   const [removing, setRemoving] = useState<OrgMemberDto | null>(null);
+  const [report, setReport] = useState<OffboardingReport | null>(null);
   const [assigning, setAssigning] = useState<OrgMemberDto | null>(null);
   const [picked, setPicked] = useState<string[]>([]);
   const preview = useRemovalPreview(removing?.userId ?? null);
@@ -270,9 +272,10 @@ export function MembersTab({ me }: { me: { userId: string; role: 'owner' | 'admi
         onConfirm={() =>
           removing &&
           remove.mutate(removing.userId, {
-            onSuccess: () => {
+            onSuccess: (r) => {
               toast.success(`${removing.displayName} was removed`);
               setRemoving(null);
+              if (r?.offboarding) setReport(r.offboarding);
             },
             onError: () => setRemoving(null),
           })
@@ -301,7 +304,18 @@ export function MembersTab({ me }: { me: { userId: string; role: 'owner' | 'admi
             </li>
           </ul>
         )}
+        {preview.data?.offboarding && preview.data.offboarding.length > 0 && (
+          <div className="mt-3 border-t border-line pt-3">
+            <p className="mb-1.5 text-sm font-medium text-fg">Offboarding checklist</p>
+            <OffboardingChecklist steps={preview.data.offboarding} testId="removal-offboarding" />
+            <p className="mt-2 text-xs text-subtle">
+              Private chats and packs are deleted after {preview.data.privatePurgeDays} days. Everything else
+              is done now and reported here.
+            </p>
+          </div>
+        )}
       </ConfirmDialog>
+      <OffboardingReportDialog report={report} onClose={() => setReport(null)} />
 
       <Dialog
         open={!!assigning}

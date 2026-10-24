@@ -41,6 +41,19 @@ Everyone can reset their own password with **Forgot your password?** on the sign
 
 The Owner can change an Admin or Member's role from the role selector on their row. Your plan may limit how many members you can have; the **Plan & limits** tab shows it (see [Plans and billing](/help/billing-and-plans#plans)).
 
+## Removing a member: offboarding {#offboarding}
+
+The remove dialog lists an **offboarding checklist** and, once the person is removed, a report shows what was done:
+
+- Notification links of this organization are revoked. If it was their **last** organization, they are signed out everywhere, their workstations are unlinked and their notification devices removed; otherwise those stay.
+- The organization's packs come off their workstations and sealed pack credentials are deleted. The organization's key is cleared from their workstations (rotate it if you do not trust them: an unlinked machine never gets the command).
+- Their agents and cards go to the Owner. Sessions and organization packs they owned move to you (to the Owner when they left).
+- Private chats and private packs are kept for **30 days**, then deleted.
+
+## Audit log {#audit-log}
+
+**Organization, Audit log** (Owner and Admins) downloads what people did as **CSV** or **JSON** for a date range (up to a year) and optionally one person. It lists actions, not message text, and masks anything that looks like a secret. Each export is itself recorded.
+
 ## Guests {#guests}
 
 Guests are people from other organizations who have access to one or more of your projects. You invite a guest by sharing a project with them. To do this:

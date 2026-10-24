@@ -51,6 +51,10 @@ Your answer is recorded in the ledger (shared with future agents), the card is u
 
 Only people who may answer see the form; on a card with the default policy only the card's owner can answer, and others see the item read only (see the decision policy on the card).
 
+## Approve from a notification {#from-notification}
+
+A push notification for an approval has **Approve** and **Reject** buttons; one for a question with options has its first two options (the notification itself opens the Desk for the rest, and some phones show no buttons). A button opens a small page that asks you to sign in, shows the item, and waits for you to press the button: opening the link changes nothing. The link works **once**, for **15 minutes**, and only for you. There are no buttons on code approvals (you see the diff first) or on items that need more from you. Every use is on the audit log (Organization, Audit log).
+
 ## Standing orders {#standing-orders}
 
 **Standing orders** are recurring instructions that show up in every agent's shift. Use them for:

@@ -12,6 +12,7 @@ export const NO_PAGE_HELP = [
   '/deploys',
   '/login',
   '/invite/:token',
+  '/m/desk/:token',
   '/forgot-password',
   '/reset-password/:token',
   '/contact',

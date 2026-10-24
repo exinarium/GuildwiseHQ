@@ -1,6 +1,7 @@
 import { useSearchParams } from 'react-router';
 import { useMe } from '../api/queries/auth.ts';
 import { useOrg } from '../api/queries/orgs.ts';
+import { AuditTab } from '../components/orgsettings/AuditTab.tsx';
 import { BillingTab } from '../components/orgsettings/BillingTab.tsx';
 import { GeneralTab } from '../components/orgsettings/GeneralTab.tsx';
 import { GuestsTab } from '../components/orgsettings/GuestsTab.tsx';
@@ -22,6 +23,7 @@ type TabId =
   | 'links'
   | 'providers'
   | 'plan'
+  | 'audit'
   | 'billing';
 
 /** `/settings/org`: General, Members, Invitations, Guests, Plan & limits (docs/design/organizations.md section 11.2). */
@@ -42,6 +44,7 @@ export function OrgSettings() {
           { id: 'links', label: 'Project links' },
           { id: 'providers', label: 'Model providers' },
           { id: 'plan', label: 'Plan & limits' },
+          { id: 'audit', label: 'Audit log' },
         ]
       : []),
     ...(role === 'owner' ? [{ id: 'billing', label: 'Billing' }] : []),
@@ -83,6 +86,7 @@ export function OrgSettings() {
         {tab === 'links' && manager && <ProjectLinksTab />}
         {tab === 'providers' && manager && <OrgProvidersBody />}
         {tab === 'plan' && manager && <PlanTab org={org.data} />}
+        {tab === 'audit' && manager && <AuditTab />}
         {tab === 'billing' && role === 'owner' && <BillingTab />}
       </div>
     </div>
