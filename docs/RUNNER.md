@@ -2742,3 +2742,9 @@ rm -rf ~/.aom-runner/agents/*/claude/cache
 - `docs/DEPLOY.md`: server deployment
 - `docs/BYO-VPS.md`: running agents on a server you rent
 - `docs/ARCHITECTURE.md`: technical design and protocol
+
+### R2 session side on the runner (0.1.51)
+
+- **`aom board score --option "<o>" --score 1-5 [--why "<w>"]`** (rpc `board.score`): option scoring for a speaker; the server decides who may call it (speakers of an option-scoring boardroom).
+- **Project-repository capabilities** are reported with their `path` (`.claude/skills/<name>`, `.agents/skills/<name>`, `.claude/agents/<name>.md`) for the owner's review list.
+- **Blocked list.** `packs.sync` may carry `blocked: [{projectId, kind, key}]`; `CapabilityRegistry.setBlocked` leaves those project-repository capabilities out of every effective view (they are still indexed and reported, so the list shows them). An older server sends none.

@@ -258,6 +258,27 @@ Details in `docs/ARCHITECTURE.md` section 38.5 and `docs/RUNNER.md` ("Claude Cod
 - Update `e2e/video/voice.ts` and `e2e/video/setup-voice.sh` (install Kokoro and the voice into `~/.cache/aom-video`, no network after setup), and the VIDEO-PLAN.md voice notes. The narration pacing (words per second) must be re-measured.
 - To be built after the media-container change lands (videos then live in `media/videos/`). Re-recording the videos stays for later.
 
+## Revision R2 as built: ownership, limits, the cast, hand-off, packs and skills review
+
+Details in `docs/ARCHITECTURE.md` section 38.7. Migrations 2440 and 2441; runner 0.1.51 (additive).
+
+- **Built, per owner decision.** (1) Any member creates Discovery and Boardroom sessions, on their own workstation. (2) A session belongs to its creator who manages it in full; Owners/Admins in it override; others talk, add notes and vote; `canManage` in both state DTOs and the pages hide the controls. (3) Cost limit optional (unset means unlimited; at minutes time a used-up limit asks the creator: write the minutes without the Chair's summary, or raise the limit) and a time limit for both kinds with a countdown, a warning about 5 minutes before the end that steers the Chair to a final round and the facilitator to capture, a time-up choice (extend +10/+15/+30 or wrap up) with nothing new started until it is made, paused time not counted, durable and sweep-driven. (4) The Boardroom cast: fixed Optimist and Devil's Advocate plus 3 to 4 others, a built-in `optimist` persona, validated on the server. (5) Hand to BA queues when no BA is online, with a Hire a BA action and a desk notice when none is hired, and checks for an existing intake before any start. (6) The prep-mode cap is a setting. (7) Option-scoring tally, @mention jump, archive and delete. (8) Project-scoped packs apply in sessions with that project; one-click Check for updates. (9) Document events stripped for non-participant Owners/Admins; workstation picker in both dialogs. (10) Review list of project-repository skills with block.
+- **Decided by default.**
+  1. The warning comes at a third of the limit, at most 5 minutes (a 10-minute limit warns at 3, a 5-minute one at 1).
+  2. The Boardroom clock runs while a round or the Chair is working, not while it waits for a decision, the minutes, a pause or the creator's time-up choice; the Discovery clock runs whenever the session is not paused (it includes waiting for your answer, like a meeting).
+  3. The clock is booked at most one minute per sweep tick, so a server that was down does not eat the meeting (at most a minute is lost per restart).
+  4. A time limit set on a running session starts its clock then; removing it forgets the count.
+  5. The independent first round queues all its speakers at once; those already queued at time-up still run (they belong to the round that started), the next round does not start.
+  6. After the warning, the next planned Boardroom round is the last one and the session then goes to the minutes by itself (a server rule, not only an instruction to the Chair).
+  7. Wrap-up in Discovery ends the enforcement of the limit; extending starts it again.
+  8. "Hand to BA" marks the document `handed_off` when it queues, not when the intake starts.
+  9. An unreviewed project-repository skill stays usable: the review list records decisions and enforces blocks, it does not gate. A block reaches runners with the next `packs.sync`.
+  10. Archiving is allowed in any stage on the server (the web offers it for finished and unstarted boardrooms); a deleted session keeps its events and rows, hidden by `deleted_at`.
+  11. Owners and Admins who are not in a session still cannot open it (sessions are private to their participants); "override" applies once they are in it.
+  12. "Hire a BA" is a plain hire with defaults (junior, the user's first online workstation), not the full hire dialog.
+- **Not built (R3).** Capability editor, private/custom packs, private git packs and deploy keys, member opt-in for packs, hire-from-pack, persona chat, `/` playbooks, explicit delegation grants.
+- **Open questions.** (a) Should the Boardroom clock also stop while it waits for the creator at a decision? It does now; the Discovery one does not. (b) Should an unreviewed project skill need review before first use? (c) Should "Archive" of a running Boardroom end it first? (d) Should the time-up choice also notify the creator outside the page (push)?
+
 ## Revision R2 hardening as built (workstation and cost side)
 
 Details in `docs/ARCHITECTURE.md` section 38.6 and `docs/RUNNER.md` ("R2 hardening on the runner"). Runner 0.1.50, migrations 2450 and 2460. The session, limits, cast and hand-off items of R2 are in "Revision R2 as built".

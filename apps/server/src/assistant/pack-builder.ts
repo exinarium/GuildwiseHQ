@@ -16,7 +16,7 @@ export const REPO_ROOT = join(here, '..', '..', '..', '..');
 export const PACK_FILE = join(here, 'pack', 'public-pack.md');
 
 /** Longest paragraph kept per section: the pack is an outline, the full articles are in the app. */
-const SECTION_CHARS = 320;
+const SECTION_CHARS = 290;
 
 interface Article {
   slug: string;
