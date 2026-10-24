@@ -35,6 +35,12 @@ export function DelegationStep({ d }: { d: DelegationStepDto }) {
         {d.model} · {profileText(d.profile)}
         {d.durationMs !== null ? ` · ${formatMs(d.durationMs)}` : ''} · {formatCostUsd(d)}
       </span>
+      {d.narrowedFrom && (
+        <span className="text-xs text-warning-text" data-testid="delegation-narrowed">
+          Ran narrower than its own tools ({profileText(d.narrowedFrom)}): the caller’s tools or the grant’s
+          ceiling allow less.
+        </span>
+      )}
       {d.summary && (
         <span
           className={failed ? 'text-xs text-danger-text' : 'text-xs text-subtle'}

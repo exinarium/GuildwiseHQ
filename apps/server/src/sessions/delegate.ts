@@ -391,6 +391,7 @@ async function cost(
           ...((p.data.profile ?? begun?.profile) ? { profile: p.data.profile ?? begun?.profile } : {}),
           ...(p.data.summary ? { summary: p.data.summary } : {}),
           ...(p.data.native || begun?.native ? { native: true } : {}),
+          ...(p.data.narrowedFrom ? { narrowedFrom: p.data.narrowedFrom } : {}),
         },
       },
       actor: runnerActor(workstationId),

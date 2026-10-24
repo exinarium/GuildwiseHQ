@@ -288,6 +288,8 @@ export const DelegationStepDtoSchema = z.object({
   summary: z.string().nullable(),
   /** Run by Claude Code's own subagent tool instead of `aom delegate`. */
   native: z.boolean(),
+  /** R3c (Q63): the target's own profile when it ran with a narrower one (the caller's tools or the grant's ceiling allow less). */
+  narrowedFrom: DelegateProfileSchema.nullable().default(null),
   at: z.iso.datetime(),
 });
 export type DelegationStepDto = z.infer<typeof DelegationStepDtoSchema>;

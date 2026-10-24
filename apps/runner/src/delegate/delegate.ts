@@ -31,6 +31,7 @@ import {
   permissionsForPersona,
   profileOfPermissions,
   profileOfPersonaTools,
+  profileRank,
   type ReportedProvider,
   renderDelegateReply,
   renderToolMapping,
@@ -491,6 +492,9 @@ export class DelegateRunner {
       Date.now() - t0,
       profile,
       outcome === 'ok' ? summarizeReply(text) : (error ?? 'the delegate failed'),
+      false,
+      // Q63: a delegation that needs wider tools than the caller has runs narrower, and the card says so
+      profileRank(resolved.profile) > profileRank(profile) ? resolved.profile : undefined,
     );
 
     if (outcome !== 'ok') return { ok: false, error: error ?? 'the delegate failed' };
@@ -508,6 +512,7 @@ export class DelegateRunner {
     profile: DelegateProfile,
     summary: string,
     native = false,
+    narrowedFrom?: DelegateProfile,
   ): Promise<void> {
     const cost = await this.deps
       .rpc(caller.id, 'delegate.cost', {
@@ -519,6 +524,7 @@ export class DelegateRunner {
         profile,
         summary: summary.slice(0, 400),
         ...(native ? { native: true } : {}),
+        ...(narrowedFrom ? { narrowedFrom } : {}),
       })
       .catch((err: unknown) => ({ ok: false, error: String(err) }) as IpcRpcResponse);
     if (!cost.ok) this.log.warn(`delegate ${delegateId}: could not report its cost: ${cost.error}`);

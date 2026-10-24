@@ -213,8 +213,8 @@ export const sessionProjectors: Record<string, Projector> = {
          tokens_output, tokens_cache_read, tokens_cache_write, cost_usd_micros, reported_usd_micros, ended_at, cost_stamped,
          cost_unknown, parent_id, key_source, key_provider, owner_priced, delegate_target, delegate_target_name,
          delegate_target_kind, delegate_profile, delegate_outcome, delegate_duration_ms, delegate_summary, delegate_native,
-         delegate_thread_id)
-       VALUES ($1,$2,$3,$4,$5,$6,'delegate',$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29)
+         delegate_thread_id, delegate_narrowed_from)
+       VALUES ($1,$2,$3,$4,$5,$6,'delegate',$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30)
        ON CONFLICT (shift_id) DO NOTHING`,
       [
         p.delegateId,
@@ -246,6 +246,7 @@ export const sessionProjectors: Record<string, Projector> = {
         p.summary ?? null,
         p.native === true,
         p.threadId ?? null,
+        p.narrowedFrom ?? null,
       ],
     );
   },

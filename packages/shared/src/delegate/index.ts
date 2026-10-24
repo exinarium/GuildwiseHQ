@@ -110,6 +110,8 @@ export const DelegateCostParamsSchema = z.object({
   /** The first lines of the reply or the failure, for the card and the session page. */
   summary: z.string().max(400).optional(),
   native: z.boolean().optional(),
+  /** R3c (Q63): the target's own profile, when the child ran with a narrower one (the caller's tools or the grant's ceiling). */
+  narrowedFrom: DelegateProfileSchema.optional(),
 });
 export type DelegateCostParams = z.infer<typeof DelegateCostParamsSchema>;
 

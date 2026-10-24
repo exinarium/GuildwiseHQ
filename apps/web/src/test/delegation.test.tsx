@@ -252,6 +252,7 @@ const step = (over: Partial<DelegationStepDto> = {}): DelegationStepDto => ({
   costUnknown: false,
   summary: 'Looks fine to me.',
   native: false,
+  narrowedFrom: null,
   at: NOW,
   ...over,
 });
@@ -475,5 +476,14 @@ describe('role-level delegation grants and a model per grant (R3c)', () => {
       runtime: 'claude-code',
       model: 'haiku',
     });
+  });
+});
+
+describe('a delegation that ran narrower (R3c, Q63)', () => {
+  it('says on the card which profile it was cut from, and says nothing when it was not cut', () => {
+    view(<DelegationSteps steps={[step({ narrowedFrom: 'shell' }), step({ delegateId: ID(32) })]} />);
+    const notes = screen.getAllByTestId('delegation-narrowed');
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toHaveTextContent('Ran narrower than its own tools (can edit files and run commands)');
   });
 });

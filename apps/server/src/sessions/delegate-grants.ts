@@ -644,7 +644,7 @@ export async function delegationSteps(
   const r = await rows(
     db,
     `SELECT shift_id, parent_id, model, cost_usd_micros, cost_unknown, ended_at, delegate_target, delegate_target_name,
-            delegate_target_kind, delegate_profile, delegate_outcome, delegate_duration_ms, delegate_summary, delegate_native
+            delegate_target_kind, delegate_profile, delegate_outcome, delegate_duration_ms, delegate_summary, delegate_native, delegate_narrowed_from
        FROM shift_costs
       WHERE kind='delegate' AND ${'cardId' in by ? 'card_id' : 'delegate_thread_id'} = $1
       ORDER BY ended_at, shift_id LIMIT 200`,
@@ -664,6 +664,7 @@ export async function delegationSteps(
     costUnknown: x.cost_unknown === true,
     summary: x.delegate_summary ?? null,
     native: x.delegate_native === true,
+    narrowedFrom: x.delegate_narrowed_from ?? null,
     at: iso(x.ended_at) as string,
   }));
 }

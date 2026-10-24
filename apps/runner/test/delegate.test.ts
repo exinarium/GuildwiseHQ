@@ -716,6 +716,38 @@ describe('a grant that sets the model (R3c, Q62)', () => {
   });
 });
 
+describe('a delegation that needs wider tools than its caller has runs narrower and says so (R3c, Q63)', () => {
+  it('books the profile the target is cut from when the caller allows less, and none when nothing was cut', async () => {
+    const a = scripted();
+    const s = setup([a]);
+    // the persona 'security' reads (its own profile); the analyst edits in frontmatter? use a hired agent that can run commands
+    const rex = target('agent:rex', {
+      kind: 'agent',
+      key: '019e3f6a-7b1c-7a2d-8c3e-0123456789aa',
+      name: 'Rex',
+      runtime: 'mock',
+      model: 'mock',
+      profile: 'shell',
+      permissions: { ...READ, allowedTools: ['read', 'edit', 'shell'] },
+      instructions: '# You are Rex',
+    });
+    const r = await run(
+      s,
+      { target: 'agent:rex', task: 'Fix it.' },
+      { ...CALLER, delegation: { targets: [rex] } as DelegationSpec },
+    );
+    expect(r.ok).toBe(true);
+    const cost = s.calls.find((c) => c.method === 'delegate.cost');
+    // the caller (READ) only reads: the child ran read only, from shell
+    expect(cost?.params.profile).toBe('read_only');
+    expect(cost?.params.narrowedFrom).toBe('shell');
+    // a target that reads anyway was not narrowed
+    const s2 = setup([scripted()]);
+    await run(s2, { target: 'security', task: 'x' });
+    expect(s2.calls.find((c) => c.method === 'delegate.cost')?.params).not.toHaveProperty('narrowedFrom');
+  });
+});
+
 describe('the tool profile of a child', () => {
   const work = {
     cwd: '/work/card-1',

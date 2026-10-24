@@ -157,6 +157,8 @@ export const sessionEvents = [
       profile: DelegateProfileSchema.optional(),
       summary: z.string().max(400).optional(),
       native: z.boolean().optional(),
+      /** R3c (Q63): the target's own profile when the child ran with a narrower one. */
+      narrowedFrom: DelegateProfileSchema.optional(),
       /** Stamped when appended, like `SessionTurnCompleted.costMicros`. */
       costMicros: z.number().int().nonnegative().optional(),
       costUnknown: z.boolean().optional(),

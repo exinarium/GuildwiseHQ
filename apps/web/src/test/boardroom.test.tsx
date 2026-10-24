@@ -637,6 +637,7 @@ describe('Boardroom session', () => {
           costUnknown: true,
           summary: 'the delegate did not finish within 110 seconds',
           native: false,
+          narrowedFrom: null,
           at: '2026-10-03T10:01:00.000Z',
         },
       ],

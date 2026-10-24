@@ -412,6 +412,7 @@ describe('Discovery session page', () => {
             costUnknown: false,
             summary: 'The pricing is the weak spot.',
             native: false,
+            narrowedFrom: null,
             at: '2026-10-03T10:00:30.000Z',
           },
         ],

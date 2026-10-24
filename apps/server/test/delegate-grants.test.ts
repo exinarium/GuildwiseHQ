@@ -348,6 +348,7 @@ describe('an agent as the target', () => {
       target: 'agent:rex',
       outcome: 'ok',
       profile: 'read_only',
+      narrowedFrom: 'shell',
       summary: 'Looks fine to me.',
       usage: { inputTokens: 1_000_000, outputTokens: 100_000, model: 'claude-haiku-4-5' },
       durationMs: 4200,
@@ -369,6 +370,8 @@ describe('an agent as the target', () => {
       summary: 'Looks fine to me.',
       native: false,
       costUnknown: false,
+      // Q63: it ran narrower than its own profile, and the step says which
+      narrowedFrom: 'shell',
     });
     expect(detail.delegations[0].costUsd).toBeCloseTo(1.5, 5);
   });
