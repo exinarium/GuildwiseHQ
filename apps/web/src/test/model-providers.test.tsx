@@ -144,11 +144,14 @@ describe('model providers settings', () => {
     await waitFor(() => expect(calls.find((c) => c.method === 'PUT')).toBeTruthy());
     const put = calls.find((c) => c.method === 'PUT') as Call;
     expect(put.url).toBe(`/api/workstations/${WS}/providers/openai`);
+    // Q73: the key's version travels with it (seconds since the epoch), so a replay of an older blob is refused by the runner
     expect(put.body).toEqual({
       keyId: 'k1',
       ciphertext: 'h2.sealed(13)',
+      generation: expect.any(Number),
       models: ['gpt-9', 'gpt-9-mini'],
     });
+    expect((put.body as { generation: number }).generation).toBeGreaterThan(1_700_000_000);
     expect(JSON.stringify(calls)).not.toContain('sk-secret-123');
   });
 

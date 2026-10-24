@@ -29,7 +29,10 @@ export interface ProviderKeyBinding {
   provider: string;
   /** The endpoint (base URL) the credential is for: the provider's `baseUrl`, or a backend credential's `baseUrl` field. */
   endpoint?: string | undefined;
-  /** The organization key's generation (`org_providers.key_generation`); 0 for a workstation key. */
+  /**
+   * The key's generation. An organization key: `org_providers.key_generation`. A workstation's own key (Q73): chosen by the browser
+   * (seconds since the epoch), so a later entry is always higher; 0 for a key sealed before keys had one (still accepted, with a warning).
+   */
   generation: number;
   /** The id of the runner key it is sealed to. */
   keyId: string;
@@ -43,7 +46,7 @@ export function providerKeyAad(b: ProviderKeyBinding): string {
     b.scope === 'org' ? (b.orgId ?? '') : '',
     b.provider,
     normalizeEndpoint(b.endpoint),
-    b.scope === 'org' ? b.generation : 0,
+    b.generation,
     b.keyId,
   ]);
 }

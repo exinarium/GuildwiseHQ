@@ -270,14 +270,17 @@ describe('provider keys travel as sealed commands', () => {
     const res = await raw('PUT', `/api/workstations/${w.workstationId}/providers/openai`, {
       keyId: KEY.keyId,
       ciphertext: 'U0VDUkVULUtFWQ==',
+      generation: 1_790_000_000,
       models: ['gpt-5.1'],
     });
     expect(res.status).toBe(202);
     const cmd = await r.waitFor('command', (c) => c.command === 'provider.key.set', 5000, from);
+    // Q73: the workstation key's version is relayed to the runner (which keeps the revocation floor), not kept by the server
     expect(cmd.payload).toEqual({
       provider: 'openai',
       keyId: KEY.keyId,
       ciphertext: 'U0VDUkVULUtFWQ==',
+      generation: 1_790_000_000,
       models: ['gpt-5.1'],
     });
     r.send('command.result', { commandId: cmd.commandId, ok: true, result: { stored: true } });

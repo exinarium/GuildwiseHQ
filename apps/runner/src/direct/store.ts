@@ -53,6 +53,9 @@ interface StoredProvider {
   generation?: number;
 }
 
+/** The revocation floor of the workstation's own keys is kept in the same file as the organizations', under this pseudo slot. */
+const OWN_FLOOR_SLOT = '~workstation';
+
 type SlotFileContent = Partial<Record<ProviderKeyId, StoredProvider>>;
 /** The organizations' slots: `{ [orgId]: { [provider]: StoredProvider } }`. */
 type OrgFileContent = Record<string, SlotFileContent>;
@@ -300,7 +303,7 @@ export class ProviderStore {
         orgId: p.orgId,
         provider: p.provider,
         endpoint,
-        generation: source === 'org' ? (p.generation ?? 0) : 0,
+        generation: p.generation ?? 0,
         keyId: p.keyId,
       });
       try {
@@ -344,6 +347,9 @@ export class ProviderStore {
       };
     if (source === 'org') {
       const refused = this.generationProblem(p.orgId as string, p.provider, p.generation);
+      if (refused) return { stored: false, error: refused };
+    } else {
+      const refused = this.ownGenerationProblem(p.provider, p.generation);
       if (refused) return { stored: false, error: refused };
     }
     if ((BACKEND_IDS as readonly string[]).includes(p.provider))
@@ -389,13 +395,30 @@ export class ProviderStore {
       models: [...new Set(p.models.map((m) => m.trim()).filter(Boolean))],
       setAt: new Date().toISOString(),
       ...(bound
-        ? { bound: true as const, endpoint, ...(source === 'org' ? { generation: p.generation } : {}) }
+        ? { bound: true as const, endpoint, ...(p.generation ? { generation: p.generation } : {}) }
         : {}),
     };
     this.saveSlot(source, p.orgId, all);
     if (plain) registerSecret(plain);
     for (const f of this.changed) f();
     return { stored: true, ...(warning ? { warning } : {}) };
+  }
+
+  /**
+   * A workstation's own key (Q73): accepted at a generation newer than any removed or replaced here and not older than the one
+   * held (a replayed blob of a removed key is refused). A key with no generation (sealed before they existed) is still accepted
+   * with a warning, unless a versioned one is stored (no downgrade).
+   */
+  private ownGenerationProblem(provider: string, generation: number | undefined): string | undefined {
+    const held = this.own()[provider as ProviderKeyId]?.generation ?? 0;
+    if (!generation)
+      return held > 0
+        ? 'a versioned key is already stored: reload the web app and enter this one again'
+        : undefined;
+    if (generation <= this.floorOf(OWN_FLOOR_SLOT, provider))
+      return 'this key was removed or replaced here: it is not accepted again. Enter it again.';
+    if (generation < held) return 'a newer version of this key is already stored';
+    return undefined;
   }
 
   /** An organization key is accepted only at a generation newer than any revoked here and not older than the one held. */
@@ -450,7 +473,7 @@ export class ProviderStore {
       models: [...new Set(p.models.map((m) => m.trim()).filter(Boolean))],
       setAt: new Date().toISOString(),
       ...(opened.bound
-        ? { bound: true as const, endpoint, ...(source === 'org' ? { generation: p.generation } : {}) }
+        ? { bound: true as const, endpoint, ...(p.generation ? { generation: p.generation } : {}) }
         : {}),
     };
     this.saveSlot(source, p.orgId, all);
@@ -479,6 +502,11 @@ export class ProviderStore {
     if (source === 'org' && orgId) {
       const g = Math.max(generation ?? 0, old?.generation ?? 0);
       if (g > 0) this.raiseFloor(orgId, provider, g);
+    }
+    if (source === 'workstation') {
+      // Q73: what is removed here cannot be put back by replaying its blob
+      const g = Math.max(generation ?? 0, old?.generation ?? 0);
+      if (g > 0) this.raiseFloor(OWN_FLOOR_SLOT, provider, g);
     }
     if (!old) return;
     this.unregister(old.ciphertext, this.aadOf(source, orgId, provider, old));

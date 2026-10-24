@@ -475,3 +475,73 @@ describe('provider.key.reseal needs the approval of an admin, made in their brow
     expect((await b.store.reseal(payload(await approval()))).ok).toBe(false);
   });
 });
+
+describe('a workstation’s own key has a generation and a revocation floor (Q73)', () => {
+  const setOwn = async (
+    r: ReturnType<typeof rig>,
+    secret: string,
+    o: { generation?: number; sealedGeneration?: number } = {},
+  ) =>
+    r.store.set({
+      provider: 'openai',
+      keyId: r.keys.publicKey.keyId,
+      ciphertext: await sealWs(r.keys, 'openai', secret, undefined, o.sealedGeneration ?? o.generation ?? 0),
+      ...(o.generation ? { generation: o.generation } : {}),
+      models: [],
+    });
+
+  it('binds the generation into the blob: the same blob with another generation does not open', async () => {
+    const r = rig();
+    expect(await setOwn(r, 'sk-1', { generation: 100 })).toEqual({ stored: true });
+    const bad = await setOwn(r, 'sk-1', { generation: 101, sealedGeneration: 100 });
+    expect(bad.stored).toBe(false);
+    expect(bad.error).toMatch(/could not be opened/);
+    // a blob sealed with a generation but sent without one does not open either
+    const missing = await setOwn(r, 'sk-1', { sealedGeneration: 100 });
+    expect(missing.stored).toBe(false);
+  });
+
+  it('refuses a replay of a removed key, an older one after a replacement, and survives a restart', async () => {
+    const r = rig();
+    expect(await setOwn(r, 'sk-1', { generation: 100 })).toEqual({ stored: true });
+    expect(await setOwn(r, 'sk-2', { generation: 200 })).toEqual({ stored: true });
+    // the first blob replayed after it was replaced
+    const old = await setOwn(r, 'sk-1', { generation: 100 });
+    expect(old.stored).toBe(false);
+    expect(old.error).toMatch(/newer version/);
+    // the same version again (re-entering the key) is fine
+    expect(await setOwn(r, 'sk-2', { generation: 200 })).toEqual({ stored: true });
+    // removed: neither it nor anything older comes back
+    r.store.clear('openai');
+    expect(r.store.get('openai')).toBeUndefined();
+    const replay = await setOwn(r, 'sk-2', { generation: 200 });
+    expect(replay.stored).toBe(false);
+    expect(replay.error).toMatch(/removed or replaced/);
+    expect((await setOwn(r, 'sk-1', { generation: 100 })).stored).toBe(false);
+    // a restart remembers it
+    const again = new ProviderStore({ file: join(r.dir, 'secrets', 'providers.json'), keys: r.keys });
+    expect(
+      again.set({
+        provider: 'openai',
+        keyId: r.keys.publicKey.keyId,
+        ciphertext: await sealWs(r.keys, 'openai', 'sk-2', undefined, 200),
+        generation: 200,
+        models: [],
+      }).stored,
+    ).toBe(false);
+    // a genuinely newer entry is accepted
+    expect(await setOwn(r, 'sk-3', { generation: 201 })).toEqual({ stored: true });
+    expect(r.store.get('openai')?.apiKey).toBe('sk-3');
+  });
+
+  it('still accepts a key with no generation until a versioned one is stored (no downgrade)', async () => {
+    const r = rig();
+    const legacy = await setOwn(r, 'sk-old');
+    expect(legacy.stored).toBe(true);
+    expect(await setOwn(r, 'sk-new', { generation: 300 })).toEqual({ stored: true });
+    const down = await setOwn(r, 'sk-old');
+    expect(down.stored).toBe(false);
+    expect(down.error).toMatch(/versioned key is already stored/);
+    expect(r.store.get('openai')?.apiKey).toBe('sk-new');
+  });
+});

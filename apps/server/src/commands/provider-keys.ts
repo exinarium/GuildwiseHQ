@@ -97,6 +97,7 @@ export async function setProviderKey(
         provider,
         keyId: body.keyId,
         ...(body.ciphertext ? { ciphertext: body.ciphertext } : {}),
+        ...(body.ciphertext && body.generation ? { generation: body.generation } : {}),
         ...(body.baseUrl ? { baseUrl: body.baseUrl } : {}),
         models: body.models,
       },

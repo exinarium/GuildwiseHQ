@@ -472,7 +472,7 @@ describe('diffstat and risk tier', () => {
     expect(riskTier(stats, 'feature')).toBe('large');
   });
 
-  it('does not flag modified existing test files: test scope is the reviewer\'s decision', async () => {
+  it("does not flag modified existing test files: test scope is the reviewer's decision", async () => {
     const path = await setup();
     writeFileSync(join(path, 'test', 'existing.test.ts'), '// changed\n');
     sh(path, 'git', ['commit', '-am', 'touch test']);

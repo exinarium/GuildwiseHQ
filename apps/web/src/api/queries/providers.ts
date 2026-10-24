@@ -39,6 +39,9 @@ export function useSetProviderKey(workstationId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (v: { provider: ProviderKeyId; key: string; baseUrl?: string; models: string[] }) => {
+      // Q73: the key's version (seconds since the epoch: a later entry is always higher), bound into the sealed blob; the runner
+      // refuses an older one, so a removed or replaced key cannot be put back by replaying its blob
+      const generation = Math.floor(Date.now() / 1000);
       const sealed = await get<{ keyId: string; publicKey: string }>(
         `/workstations/${workstationId}/sudo-key`,
       );
@@ -56,11 +59,12 @@ export function useSetProviderKey(workstationId: string) {
                 scope: 'workstation',
                 provider: v.provider,
                 endpoint,
-                generation: 0,
+                generation,
                 keyId: sealed.keyId,
               }),
             }
           : {}),
+        ...(v.key ? { generation } : {}),
         ...(endpoint ? { baseUrl: endpoint } : {}),
         models: v.models,
       };

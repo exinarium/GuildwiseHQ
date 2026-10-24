@@ -427,3 +427,7 @@ Details in `docs/ARCHITECTURE.md` section 38.11 ("Security review fixes, part tw
 - Q71: an org pack may use the same name as a private pack. Private keys stay namespaced by pack id, as built.
 - Q72: a one-off data migration **flags suspicious roles**: any role whose versions came from different packs, or from a private pack. Each gets a desk notice for an Owner to review, and nothing is changed automatically.
 - Q73: a workstation's own provider key gets a **generation and revocation floor**, like org keys.
+
+**Owner decisions Q72 and Q73 as built**
+- Q72: data migration `suspicious-roles-2026-10` flags every role with versions from more than one pack, or from a private pack, with one desk notice (`suspicious_role`) per role for an Owner; it changes nothing else and is idempotent (`apps/server/src/data-migrations/suspicious-roles.ts`).
+- Q73: a workstation's own provider key has a generation (the browser sends seconds since the epoch; it is bound into the `h2` associated data and relayed as `generation`) and a revocation floor on the runner (`providers-org-floor.json`, slot `~workstation`): removing or replacing a key raises the floor, and a replay of an older or removed generation is refused, across restarts. A key with no generation (sealed by an older web app, or the older `h1` form) is still accepted, with the existing warning for `h1`, until a versioned key is stored (no downgrade).

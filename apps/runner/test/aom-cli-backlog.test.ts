@@ -54,7 +54,12 @@ describe('aom backlog suggest (agents)', () => {
     expect(rpcs).toEqual([
       {
         method: 'backlog.suggest',
-        params: { title: 'Tidy the login page', description: 'It has two spinners', priority: 'high', tags: ['ui', 'login'] },
+        params: {
+          title: 'Tidy the login page',
+          description: 'It has two spinners',
+          priority: 'high',
+          tags: ['ui', 'login'],
+        },
       },
     ]);
     expect(out.join('')).toContain('Added to the GWP backlog');
@@ -62,7 +67,9 @@ describe('aom backlog suggest (agents)', () => {
 
   it('reads the description from a file and may name another project', async () => {
     const { run, rpcs } = await setup(() => ({}));
-    expect(await run('backlog', 'suggest', '--title', 'T', '--description-file', 'd.md', '--project', 'WEB')).toBe(0);
+    expect(
+      await run('backlog', 'suggest', '--title', 'T', '--description-file', 'd.md', '--project', 'WEB'),
+    ).toBe(0);
     expect(rpcs[0]?.params).toEqual({ title: 'T', description: 'from a file', project: 'WEB' });
   });
 
@@ -175,7 +182,21 @@ describe('aom ceo backlog', () => {
     const { run, rpcs } = await setup(executed);
     const id = '0192f3a0-0000-7000-8000-000000000201';
     expect(
-      await run('ceo', 'backlog', 'update', id, '--title', 'New', '--description', 'D', '--priority', 'Low', '--tag', 'a', '--unflag'),
+      await run(
+        'ceo',
+        'backlog',
+        'update',
+        id,
+        '--title',
+        'New',
+        '--description',
+        'D',
+        '--priority',
+        'Low',
+        '--tag',
+        'a',
+        '--unflag',
+      ),
     ).toBe(0);
     expect(rpcs[0]?.params).toMatchObject({
       action: 'backlog-update',
