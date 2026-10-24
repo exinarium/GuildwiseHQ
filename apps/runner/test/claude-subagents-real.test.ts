@@ -275,7 +275,8 @@ describe.skipIf(!enabled)('real Claude Code with native subagents (fake API, ski
       rpc: async (r: IpcRpcRequest) =>
         r.method === 'delegate.guard' ? { ok: true, result: {} } : { ok: false, error: 'no' },
     });
-    // a subagent that keeps reading files, one every 700 ms, until a tool result tells it the time is over
+    // a subagent that reads one file at once, then waits past the limit before the next read, until a tool result tells it the time is over
+    // (the first read has the whole limit to arrive in, so a loaded machine does not turn it into a refusal)
     const seen = { subResults: [] as string[], parentResults: [] as string[], subCalls: 0 };
     const server = createServer((req, res) => {
       const chunks: Buffer[] = [];
@@ -379,7 +380,7 @@ describe.skipIf(!enabled)('real Claude Code with native subagents (fake API, ski
               toolUse(`toolu_read_${seen.subCalls}`, 'Read', { file_path: join(cwd, '.git', 'HEAD') }),
               'tool_use',
             ),
-          700,
+          seen.subCalls === 1 ? 0 : 7_000,
         );
       });
     });
@@ -404,7 +405,7 @@ describe.skipIf(!enabled)('real Claude Code with native subagents (fake API, ski
       tools: ['Read', 'Grep', 'Glob'],
       model: 'haiku',
       profile: 'read_only',
-      timeoutSec: 2,
+      timeoutSec: 6,
     };
     try {
       const reviewer = BUILTIN_ROLES.find((r) => r.key === 'reviewer');
@@ -442,9 +443,9 @@ describe.skipIf(!enabled)('real Claude Code with native subagents (fake API, ski
       const events: RuntimeEvent[] = [];
       for await (const e of session.events()) events.push(e);
       expect(events.at(-1)).toMatchObject({ kind: 'exit', code: 0 });
-      // the early reads went through; once the call was over its two seconds the next read was refused with the reason,
+      // the early reads went through; once the call was over its six seconds the next read was refused with the reason,
       // and the subagent answered with what it had
-      expect(seen.subResults.some((r) => /time limit of 2 seconds/.test(r))).toBe(true);
+      expect(seen.subResults.some((r) => /time limit of 6 seconds/.test(r))).toBe(true);
       expect(seen.subResults.filter((r) => !/time limit/.test(r)).length).toBeGreaterThanOrEqual(1);
       // the parent got the subagent's answer and was not held up by a marker that stayed behind
       expect(seen.parentResults.join(' ')).toContain('SUB-STOPPED');

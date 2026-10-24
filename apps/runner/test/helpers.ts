@@ -17,7 +17,9 @@ export function tmp(prefix = 'aom-runner-test-'): string {
 /** Call once per test file to remove temp dirs. */
 export function cleanupTmp(): void {
   afterAll(() => {
-    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+    // a shift that is still wrapping up may write into its directory while it is removed (ENOTEMPTY): retry instead of failing the file
+    for (const d of dirs.splice(0))
+      rmSync(d, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 });
   });
 }
 

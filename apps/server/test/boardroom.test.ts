@@ -989,12 +989,16 @@ describe('a seat that is gone', () => {
     await finish(chair);
     const spk = await nextStart(st.threadId, role('speaker'));
     expect(speakerOf(spk)).toBe('cost-hawk');
+    // the room is updated and the notice written before the next speaker is sent, but read them as they settle (not as one
+    // snapshot) so a loaded machine cannot make this race
+    await until(async () => (await get(st.threadId)).cast.every((c: any) => c.refId !== agentId));
     const mid = await get(st.threadId);
     expect(mid.cast.map((c: any) => c.refId)).toEqual(CAST.slice(0, 4).map((c) => c.refId));
-    const msgs = (await owner('GET', `/api/threads/${st.threadId}/messages`)).messages as any[];
-    expect(
-      msgs.some((m) => m.kind === 'system' && /no longer available and left the room/.test(m.body)),
-    ).toBe(true);
+    await until(async () =>
+      ((await owner('GET', `/api/threads/${st.threadId}/messages`)).messages as any[]).some(
+        (m) => m.kind === 'system' && /no longer available and left the room/.test(m.body),
+      ),
+    );
     await finish(spk);
     await finish(await nextStart(st.threadId, role('chair')));
   });

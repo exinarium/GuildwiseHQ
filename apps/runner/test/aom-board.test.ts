@@ -289,7 +289,8 @@ describe('boardroom turns on the runner: the board verbs reach the server, nothi
     expect(String(min?.params.content)).toContain('## Positions');
     expect(String(min?.params.content)).toContain('## Open questions');
     expect(h.server.invalid).toEqual([]);
-  });
+    // eleven turns one after the other, each starting the mock agent as a process: the time they take grows with the load on the machine
+  }, 180_000);
 
   it('a session verb is not available in a boardroom turn on the runner side either', async () => {
     const rpcs: string[] = [];
