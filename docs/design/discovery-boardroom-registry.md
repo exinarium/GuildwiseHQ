@@ -451,3 +451,43 @@ Five owner-driven fixes on `feat/discovery-boardroom`, found while testing the U
 **4. The round cap is optional and off by default.** `roundCap` is `null` unless given (1 to 50). A session made with a cap keeps it (its config stores the number); `PATCH` can set a cap or remove it with `null`; saved rooms carry `null` (migration 2501 drops `NOT NULL` on `board_rooms.round_cap`; `BoardRoomSaved.roundCap` is nullable, old events replay). Without a cap a session ends on the owner's End, the time limit (warning, final round, minutes) or the budget stop. The Chair is told there is no cap and, when the last two rounds added no whiteboard note and no recorded disagreement (`quietRounds`, computed by the server), is told to propose ending with `aom board pause --question "End here?" --option "End and write the minutes" --option "Keep going"`. Picking the first option goes straight to the minutes (`endReason: owner`); the second resumes the Chair. The new dialog has a "Round cap" number field, empty meaning no cap.
 
 **5. Packs are read generically; no product is special.** The `bmad` adapter, its text shim, its tag mappings and the "Add BMAD Method" preset are removed (`PACK_PRESETS` is gone). A pack is read by convention: `SKILL.md` folders are skills; `personas/*.md`, `.claude/agents/*.md`, the files an optional `pack.yaml`/`pack.json` lists under `agents:` and a skill whose frontmatter says `metadata.kind: agent` (or `type: agent`) are personas; `playbooks/<key>/workflow.md` folders and the ones the manifest lists under `playbooks:` are playbooks. Manifest `tags` (`discovery`, `template:brief`, `template:prd`) are labels the pickers read and are part of the capability hash. Anything that does not fit is a plain skill, so a repository laid out for another tool (the BMad layout is kept as a test fixture) imports without errors. Attribution is generic: the snapshot carries the LICENSE copyright line and the pack card shows it with the licence. Compatibility: `adapter: bmad` and `preset: bmad` still parse in stored events, `packs.sync` and runner reports and mean `auto`; nothing produces them. Packs that were indexed by the old adapter are re-read generically on their next fetch; their capabilities and hashes change (a `bmad:analyst` persona becomes the skill `bmad:bmad-agent-analyst`), so they show as changed and must be approved again; their events replay unchanged. Tests use a neutral sample pack (`packages/shared/test/fixtures/sample-pack-fixture.ts`).
+
+## Next streams (owner go-ahead 2026-10-24; open questions use defaults and are recorded here)
+
+### S-A: AI runtime setup and multiple accounts per provider
+- Integrations > **AI runtime** gets a tile per runtime: Claude Code (incl. Bedrock, Vertex and gateway), Codex, Gemini CLI, opencode, and the direct API providers (Anthropic, OpenAI, Gemini, OpenAI-compatible).
+- Each tile shows:
+  - whether the program is installed, with install hints;
+  - the login state, with "Sign in", which runs the CLI's own login on the workstation;
+  - API-key entry;
+  - "runner too old" where it applies;
+  - which key is in effect (workstation or org), with a link to Settings > Model providers.
+- Settings > **Model providers** (org keys and caps) stays.
+- **Accounts work like Claude accounts:**
+  - Per workstation and provider, a **main account** plus **named accounts**.
+  - A project chooses an account per provider, with **fall back to main**.
+  - Usage-limit and login-expired notices are per (workstation, account).
+  - Org-level work (CEO, DevOps, chats) uses main.
+  - An org key counts as one more account a project may choose, and its cap still applies.
+
+### S-B1: Governance (Zenzap ideas 1, 2, 7)
+1. **Approve and answer from the notification.**
+   - Desk push notifications carry actions (Approve, Reject, quick options) and a signed one-tap link that opens a minimal mobile confirm page.
+   - Tokens are short-lived and single-use, and they are bound to the user, the item and the option.
+2. **Per-agent "What it may do" screen.**
+   - One view per agent: tools, repos, data, provider and account, delegation grants, playbook and skill grants, spend.
+   - Approval gates per side-effecting action (merge or push, deploy, outbound mail, pack scripts, delegation). A gated action routes to the Desk.
+   - Packs declare the scopes they need.
+7. **Audit export and offboarding.**
+   - Org admins export the org audit log as CSV or JSON.
+   - Removing a member runs an offboarding checklist: revoke sessions, API tokens, pack credentials and assignments, workstation pairings and provider keys owned by them. It reports what was done.
+
+### S-B2: Agent UX (Zenzap ideas 3–6)
+3. **@agent in card comments.** Mentioning a hired agent in a card thread hands it a small task as a delegated child run, with cost booked to the card. It needs a delegation grant from the commenter's authority; Owners and Admins may mention any agent.
+4. **Describe-an-agent quick hire.** One sentence produces a drafted role (instructions, permissions, model) for review before hiring.
+5. **Starter gallery.** Curated built-in personas and playbooks with one-line outcomes, shown on first run and under Capabilities.
+6. **Follow-up and chase.** Desk and digest items still open after N days (default 3) nudge the owner, or are re-queued to the agent.
+
+### Coordination
+- Migration number ranges: S-A 2510–2519, S-B1 2520–2529, S-B2 2530–2539.
+- Only S-A bumps `RUNNER_VERSION` (0.1.58). If B1 or B2 need runner changes, they say so and the coordinator bumps it at merge.
