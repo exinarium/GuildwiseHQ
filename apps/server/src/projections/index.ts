@@ -1,4 +1,5 @@
 import type { Projector, ProjectorMap } from '../eventstore/types.ts';
+import { agentUxProjectors } from './agent-ux.ts';
 import { agentProjectors } from './agents.ts';
 import { backlogProjectors } from './backlog.ts';
 import { blogProjectors } from './blog.ts';
@@ -113,6 +114,7 @@ const domains: Array<Record<string, Projector>> = [
   capabilityProjectors,
   packProjectors,
   playbookProjectors,
+  agentUxProjectors,
 ];
 
 /**
@@ -271,6 +273,10 @@ export const PROJECTION_TABLES = [
   'pack_agent_grants',
   'agent_playbook_grants',
   'playbook_run_requests',
+  'agent_mention_policy',
+  'card_mentions',
+  'org_follow_up',
+  'desk_follow_ups',
   'delegate_grants',
   'delegate_exclusions',
   'role_pack_offers',

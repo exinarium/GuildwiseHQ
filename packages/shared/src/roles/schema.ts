@@ -48,6 +48,8 @@ export const RoleDefinitionSchema = z.object({
   claimableStages: z.array(z.object({ workflowKey: z.string(), stageId: z.string() })),
   /** R3a: the role was made from a pack persona (chat and sessions only; it claims no workflow stage). */
   source: PackProvenanceSchema.optional(),
+  /** S-B2: the role was drafted in the hire dialog or made from a starter persona: chats, sessions and mentions only, no workflow stage. */
+  chatOnly: z.boolean().optional(),
 });
 export type RoleDefinition = z.infer<typeof RoleDefinitionSchema>;
 

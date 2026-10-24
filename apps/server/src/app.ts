@@ -56,6 +56,7 @@ import { reportServerError } from './platform-team/detectors.ts';
 import { buildProjectors } from './projections/index.ts';
 import { registerPushNotifier } from './push/notifier.ts';
 import { adminRoutes } from './routes/admin.ts';
+import { agentUxRoutes } from './routes/agent-ux.ts';
 import { agentRoutes } from './routes/agents.ts';
 import { approvalRoutes } from './routes/approval.ts';
 import { assistantRoutes } from './routes/assistant.ts';
@@ -424,6 +425,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   await app.register(documentRoutes(ctx));
   await app.register(capabilityRoutes(ctx));
   await app.register(playbookRoutes(ctx));
+  await app.register(agentUxRoutes(ctx));
   await app.register(delegationRoutes(ctx));
   await app.register(packRoutes(ctx));
   await app.register(intakeBatchRoutes(ctx));

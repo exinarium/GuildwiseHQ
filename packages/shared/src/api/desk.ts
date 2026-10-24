@@ -256,6 +256,14 @@ export const DeskItemDtoSchema = z.object({
     .optional(),
   /** False for members who may see but not answer (owner_only on a shared card). */
   canAnswer: z.boolean(),
+  /** S-B2 follow-up and chase: present once the item was nudged or snoozed. */
+  followUp: z
+    .object({
+      nudgedAt: IsoTime.nullable(),
+      nudgeCount: z.number().int(),
+      snoozedUntil: IsoTime.nullable(),
+    })
+    .optional(),
   createdAt: IsoTime,
 });
 export type DeskItemDto = z.infer<typeof DeskItemDtoSchema>;

@@ -53,8 +53,8 @@ export function validateRoleDefinition(input: unknown, ctx: RoleValidationContex
     err('builtin_key', `'${def.key}' is a built-in role: pick another key`, 'key');
   if (!def.name.trim()) err('invalid_schema', 'the role needs a name', 'name');
   if (!def.instructions.trim()) err('no_instructions', 'the role needs instructions', 'instructions');
-  // a role made from a pack persona is for chats and sessions: it claims no workflow stage
-  if (def.claimableStages.length === 0 && !def.source)
+  // a role made from a pack persona (or drafted in the hire dialog) is for chats and sessions: it claims no workflow stage
+  if (def.claimableStages.length === 0 && !def.source && !def.chatOnly)
     err(
       'no_claimable_stages',
       'the role must be able to claim at least one workflow stage',

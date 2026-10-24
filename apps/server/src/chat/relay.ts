@@ -35,6 +35,7 @@ import { intakeContext } from '../commands/intake.ts';
 import { grantedMcpServers, orgGrantedMcpServers } from '../commands/mcp-servers.ts';
 import { vaultForConversation } from '../commands/vaults.ts';
 import type { Ctx } from '../context.ts';
+import { budgetPausedSql } from '../costs/index.ts';
 import { one, type Row, rows } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
 import { isProjectPaused } from '../dispatcher/project-hold.ts';
@@ -84,10 +85,14 @@ interface Inflight {
   startedAt: Date;
   /** A CEO owner or order turn: its state is also persisted in `ceo_turns`, so it survives a restart of the server. */
   ceo?: CeoInflightInfo;
+  /** An @agent mention in a card comment (S-B2): `threadId` is the card, the answer is posted as a comment in its thread. */
+  mention?: { mentionId: string; cardId: string; projectId: string; commentId: string };
 }
 
 /** What a terminal chat frame produced, for the notification after the transaction committed. */
 export interface ChatTerminal {
+  /** A mention's turn: the commenter's chat window is not told. */
+  silent?: boolean;
   userId: string;
   threadId: string;
   messageId?: string;
@@ -251,94 +256,114 @@ export class ChatRelay {
           scope: orgScope(row.org_id),
         },
       ]);
-      const intake = await intakeContext(ctx, msg.threadId);
-      // A chat about a project may read the project's own clones and its reference repositories (when this workstation has
-      // them); the DevOps engineer reads anywhere anyway.
-      // The business analyst never reads code (#47): the Architect investigates the repositories, the BA specifies. A BA chat
-      // gets no repository at all, neither the project's, the reference repositories nor a card's worktree.
-      const readsCode = row.role_key !== BA_ROLE_KEY && !isCeo;
-      const readRepos: ReadRepo[] =
-        row.thread_project_id && readsCode
-          ? [
-              ...(await projectReadRepos(ctx.pool, row.thread_project_id)),
-              ...(await referenceReadRepos(ctx.pool, row.thread_project_id)),
-            ]
-          : [];
-      // A role with `readOrgRepos` (the architect) also reads every repository of the organization (read-only).
-      if (readsCode && row.permissions?.readOrgRepos === true) {
-        const seen = new Set(readRepos.map((r) => r.repoId));
-        for (const r of await orgReadRepos(ctx.pool, row.org_id, userId))
-          if (!seen.has(r.repoId)) readRepos.push(r);
-      }
-      const localRepos =
-        row.thread_project_id && readsCode
-          ? await localReadRepos(ctx.pool, row.thread_project_id, row.workstation_id)
-          : [];
-      // A chat with no project yet (an intake chat maps the ticket to a project during the chat) gets the servers granted
-      // to the organization's projects this user belongs to; the agent's own mcp:<server> permission still applies.
-      const mcpGranted = row.thread_project_id
-        ? await grantedMcpServers(ctx.pool, row.thread_project_id)
-        : await orgGrantedMcpServers(ctx.pool, row.org_id, userId);
-      // The knowledge vault this chat may read (read-only): the project's, else the organization's (Owner/Admin workstations).
-      const vault = await vaultForConversation(ctx.pool, {
-        orgId: row.org_id,
-        projectId: row.thread_project_id,
-        workstationId: row.workstation_id,
+      const sent = await this.sendChatStart(row, inflight, msg.body, {
+        ...(prior?.sid ? { resumeSessionId: prior.sid as string } : {}),
+        userId,
       });
-      // Standing orders bind every agent in a conversation (backlog #75).
-      const orders = await standingOrdersForProjects(
-        ctx.pool,
-        row.org_id,
-        row.thread_project_id ? [row.thread_project_id] : [],
-      );
-      // The project's code graph (read-only `aom graph` verbs), when it has one.
-      const graph = row.thread_project_id
-        ? await graphScopeFor(ctx, row.thread_project_id, row.thread_card_id)
-        : undefined;
-      const context: ChatContext = {
-        ...(orders.length > 0 ? { standingOrders: orders } : {}),
-        orgId: row.org_id,
-        ...(row.thread_project_id ? { projectId: row.thread_project_id, projectKey: row.project_key } : {}),
-        ...(row.thread_card_id ? { cardId: row.thread_card_id, cardRef: row.card_ref } : {}),
-        ...(row.thread_card_id && typeof row.card_external_ref === 'string' && row.card_external_ref
-          ? { cardExternalRef: row.card_external_ref }
-          : {}),
-        ...(readsCode && row.thread_card_id && row.card_worktree_path
-          ? { cardWorktreePath: row.card_worktree_path }
-          : {}),
-        ...(readRepos.length > 0 ? { readRepos } : {}),
-        ...(localRepos.length > 0 ? { localReadRepos: localRepos } : {}),
-        ...(mcpGranted.length > 0 ? { mcpServers: mcpGranted } : {}),
-        ...(vault ? { vault } : {}),
-        ...(graph ? { graph } : {}),
-        ...(intake ? { intake } : {}),
-      };
-      const agentSpec = await agentSpecFor(ctx, row);
-      const playbookGrants = await playbookGrantKeys(ctx.pool, agentSpec.agentId);
-      const delegation =
-        agentSpec.isDevops || agentSpec.roleKey === 'ceo'
-          ? undefined
-          : await delegationSpecFor(ctx.pool, 'agent', agentSpec.agentId);
-      const sent = ctx.services.runners.send(
-        row.workstation_id,
-        'chat.start',
-        {
-          chatId,
-          threadId: msg.threadId,
-          agent: agentSpec,
-          message: msg.body,
-          ...(prior?.sid ? { resumeSessionId: prior.sid as string } : {}),
-          context,
-          ...(playbookGrants.length ? { playbookGrants } : {}),
-          ...(delegation ? { delegation } : {}),
-        },
-        ctx.clock.now(),
-      );
       if (!sent) await this.finish(inflight, 'rejected', CHAT_ERROR.workstationOffline);
     } catch (err) {
       ctx.log.error({ err }, 'chat.send failed');
       await this.finish(inflight, 'crashed', CHAT_ERROR.runnerError).catch(() => {});
     }
+  }
+
+  /**
+   * Builds the `chat.start` of one turn (the project's repositories, the card's worktree, vaults, standing orders, the agent's
+   * grants) and sends it to the agent's workstation. `mention` turns (an @agent in a card comment) get no delegation and no
+   * playbook grants: they are small, read-only tasks.
+   */
+  private async sendChatStart(
+    row: Row,
+    c: Inflight,
+    message: string,
+    opts: { resumeSessionId?: string; userId: string },
+  ): Promise<boolean> {
+    const { ctx } = this;
+    const userId = opts.userId;
+    const chatId = c.chatId;
+    const intake = await intakeContext(ctx, c.threadId);
+    // A chat about a project may read the project's own clones and its reference repositories (when this workstation has
+    // them); the DevOps engineer reads anywhere anyway.
+    // The business analyst never reads code (#47): the Architect investigates the repositories, the BA specifies. A BA chat
+    // gets no repository at all, neither the project's, the reference repositories nor a card's worktree.
+    const readsCode = row.role_key !== BA_ROLE_KEY && row.role_key !== 'ceo';
+    const readRepos: ReadRepo[] =
+      row.thread_project_id && readsCode
+        ? [
+            ...(await projectReadRepos(ctx.pool, row.thread_project_id)),
+            ...(await referenceReadRepos(ctx.pool, row.thread_project_id)),
+          ]
+        : [];
+    // A role with `readOrgRepos` (the architect) also reads every repository of the organization (read-only).
+    if (readsCode && row.permissions?.readOrgRepos === true) {
+      const seen = new Set(readRepos.map((r) => r.repoId));
+      for (const r of await orgReadRepos(ctx.pool, row.org_id, userId))
+        if (!seen.has(r.repoId)) readRepos.push(r);
+    }
+    const localRepos =
+      row.thread_project_id && readsCode
+        ? await localReadRepos(ctx.pool, row.thread_project_id, row.workstation_id)
+        : [];
+    // A chat with no project yet (an intake chat maps the ticket to a project during the chat) gets the servers granted
+    // to the organization's projects this user belongs to; the agent's own mcp:<server> permission still applies.
+    const mcpGranted = row.thread_project_id
+      ? await grantedMcpServers(ctx.pool, row.thread_project_id)
+      : await orgGrantedMcpServers(ctx.pool, row.org_id, userId);
+    // The knowledge vault this chat may read (read-only): the project's, else the organization's (Owner/Admin workstations).
+    const vault = await vaultForConversation(ctx.pool, {
+      orgId: row.org_id,
+      projectId: row.thread_project_id,
+      workstationId: row.workstation_id,
+    });
+    // Standing orders bind every agent in a conversation (backlog #75).
+    const orders = await standingOrdersForProjects(
+      ctx.pool,
+      row.org_id,
+      row.thread_project_id ? [row.thread_project_id] : [],
+    );
+    // The project's code graph (read-only `aom graph` verbs), when it has one.
+    const graph = row.thread_project_id
+      ? await graphScopeFor(ctx, row.thread_project_id, row.thread_card_id)
+      : undefined;
+    const context: ChatContext = {
+      ...(orders.length > 0 ? { standingOrders: orders } : {}),
+      orgId: row.org_id,
+      ...(row.thread_project_id ? { projectId: row.thread_project_id, projectKey: row.project_key } : {}),
+      ...(row.thread_card_id ? { cardId: row.thread_card_id, cardRef: row.card_ref } : {}),
+      ...(row.thread_card_id && typeof row.card_external_ref === 'string' && row.card_external_ref
+        ? { cardExternalRef: row.card_external_ref }
+        : {}),
+      ...(readsCode && row.thread_card_id && row.card_worktree_path
+        ? { cardWorktreePath: row.card_worktree_path }
+        : {}),
+      ...(readRepos.length > 0 ? { readRepos } : {}),
+      ...(localRepos.length > 0 ? { localReadRepos: localRepos } : {}),
+      ...(mcpGranted.length > 0 ? { mcpServers: mcpGranted } : {}),
+      ...(vault ? { vault } : {}),
+      ...(graph ? { graph } : {}),
+      ...(intake ? { intake } : {}),
+    };
+    const agentSpec = await agentSpecFor(ctx, row);
+    const playbookGrants = c.mention ? [] : await playbookGrantKeys(ctx.pool, agentSpec.agentId);
+    const delegation =
+      c.mention || agentSpec.isDevops || agentSpec.roleKey === 'ceo'
+        ? undefined
+        : await delegationSpecFor(ctx.pool, 'agent', agentSpec.agentId);
+    return ctx.services.runners.send(
+      row.workstation_id,
+      'chat.start',
+      {
+        chatId,
+        threadId: c.threadId,
+        agent: agentSpec,
+        message,
+        ...(opts.resumeSessionId ? { resumeSessionId: opts.resumeSessionId } : {}),
+        context,
+        ...(playbookGrants.length ? { playbookGrants } : {}),
+        ...(delegation ? { delegation } : {}),
+      },
+      ctx.clock.now(),
+    );
   }
 
   // ------------------------------------------------------------------------------------------ the CEO's turns
@@ -882,14 +907,14 @@ export class ChatRelay {
 
   onDelta(workstationId: string, msg: RunnerToServerOf<'chat.delta'>): void {
     const c = this.inflight.get(msg.chatId);
-    if (c && c.workstationId === workstationId)
+    if (c && c.workstationId === workstationId && !c.mention)
       this.tell(c.userId, { type: 'chat.delta', threadId: c.threadId, text: msg.text });
   }
 
   /** Tool activity of the running turn: forwarded to the browser as it is (not stored; the segments arrive in `chat.done`). */
   onActivity(workstationId: string, msg: RunnerToServerOf<'chat.activity'>): void {
     const c = this.inflight.get(msg.chatId);
-    if (c && c.workstationId === workstationId)
+    if (c && c.workstationId === workstationId && !c.mention)
       this.tell(c.userId, {
         type: 'chat.activity',
         threadId: c.threadId,
@@ -908,6 +933,7 @@ export class ChatRelay {
     const c = this.inflight.get(msg.chatId) ?? (await this.hydrate(msg.chatId, workstationId));
     if (!c || c.workstationId !== workstationId) return undefined;
     if (c.ceo) return this.applyCeoDone(c, msg, tx);
+    if (c.mention) return this.applyMentionDone(c, msg, tx);
     const messageId = randomUUID();
     await this.ctx.store.append(
       [
@@ -949,6 +975,17 @@ export class ChatRelay {
     const c = this.inflight.get(msg.chatId) ?? (await this.hydrate(msg.chatId, workstationId));
     if (!c || c.workstationId !== workstationId) return undefined;
     if (c.ceo) return this.applyCeoError(c, msg, tx);
+    if (c.mention) {
+      await this.ctx.store.append(
+        [
+          this.shiftEnded(c, msg.error === 'cancelled' ? 'stopped' : 'crashed'),
+          ...this.mentionFailed(c, msg.error),
+        ],
+        { tx },
+      );
+      this.release(c);
+      return { silent: true, userId: c.userId, threadId: c.threadId, reason: msg.error };
+    }
     await this.ctx.store.append([this.shiftEnded(c, msg.error === 'cancelled' ? 'stopped' : 'crashed')], {
       tx,
     });
@@ -957,7 +994,7 @@ export class ChatRelay {
   }
 
   notify(t: ChatTerminal | undefined): void {
-    if (!t) return;
+    if (!t || t.silent) return;
     if (t.messageId)
       this.tell(t.userId, {
         type: 'chat.done',
@@ -988,8 +1025,222 @@ export class ChatRelay {
 
   private async finish(c: Inflight, outcome: 'rejected' | 'crashed' | 'lost', reason: string): Promise<void> {
     this.release(c);
-    await this.ctx.store.append([this.shiftEnded(c, outcome)]);
-    this.fail(c.userId, c.threadId, reason);
+    await this.ctx.store.append([
+      this.shiftEnded(c, outcome),
+      ...(c.mention ? this.mentionFailed(c, reason) : []),
+    ]);
+    if (!c.mention) this.fail(c.userId, c.threadId, reason);
+  }
+
+  // ------------------------------------------------------------------------------------ @agent in a card comment (S-B2)
+
+  /**
+   * Starts one mention as a small read-only chat turn of the agent about the card. Cost is booked as a chat shift on the card
+   * (so the card's spend, the project budget and the provider cap include it); the answer is posted in the card thread when it
+   * is done. The checks that a chat makes at its start apply here too: workstation online, project not paused or over budget,
+   * provider cap, one run per card at a time. Returns the reason when it did not start; nothing is recorded then.
+   */
+  async startMention(a: {
+    userId: string;
+    card: Row;
+    agent: Row;
+    commentId: string;
+    mentionId: string;
+    prompt: string;
+  }): Promise<{ ok: true; chatId: string } | { ok: false; reason: string }> {
+    const { ctx } = this;
+    const { card, agent } = a;
+    if (this.byThread.has(card.id))
+      return { ok: false, reason: 'an agent is already answering on this card' };
+    if (await isProjectPaused(ctx.pool, card.project_id))
+      return { ok: false, reason: CHAT_ERROR.projectPaused };
+    const held = await one(
+      ctx.pool,
+      `SELECT ${budgetPausedSql('p', '$2')} AS held FROM projects p WHERE p.id=$1`,
+      [card.project_id, ctx.clock.now()],
+    );
+    if (held?.held === true) return { ok: false, reason: 'the project has used its monthly budget' };
+    if (
+      agent.status !== 'active' ||
+      !agent.workstation_id ||
+      !ctx.services.runners.isOnline(agent.workstation_id)
+    )
+      return { ok: false, reason: CHAT_ERROR.workstationOffline };
+    if (!(await workstationServesOrg(ctx.pool, agent.workstation_id, agent.org_id)))
+      return { ok: false, reason: CHAT_ERROR.simulationWorkstation };
+    if (
+      await agentCapBlocked(
+        ctx.pool,
+        { ...agent, runtimes: await runtimeReports(ctx.pool, agent.workstation_id) } as never,
+        ctx.clock.now(),
+      )
+    )
+      return { ok: false, reason: CHAT_ERROR.providerCapReached };
+    const project = await one(ctx.pool, 'SELECT key FROM projects WHERE id=$1', [card.project_id]);
+    const row: Row = {
+      ...agent,
+      thread_kind: 'card',
+      thread_project_id: card.project_id,
+      thread_card_id: card.id,
+      project_key: project?.key,
+      card_ref: card.ref,
+      card_worktree_path: card.worktree_path,
+      card_external_ref: card.fields?.externalRef,
+    };
+    const chatId = randomUUID();
+    const c: Inflight = {
+      chatId,
+      threadId: card.id,
+      userId: a.userId,
+      orgId: agent.org_id,
+      projectId: card.project_id,
+      agentId: agent.id,
+      workstationId: agent.workstation_id,
+      startedAt: ctx.clock.now(),
+      mention: {
+        mentionId: a.mentionId,
+        cardId: card.id,
+        projectId: card.project_id,
+        commentId: a.commentId,
+      },
+    };
+    this.inflight.set(chatId, c);
+    this.byThread.set(card.id, chatId);
+    try {
+      await ctx.store.append([
+        {
+          streamId: streamId.card(card.id),
+          event: {
+            type: 'CardMentionRequested',
+            payload: {
+              mentionId: a.mentionId,
+              orgId: agent.org_id,
+              projectId: card.project_id,
+              cardId: card.id,
+              agentId: agent.id,
+              requestedBy: a.userId,
+              commentId: a.commentId,
+            },
+          },
+          actor: userActor(a.userId),
+          scope: projectScope(agent.org_id, card.project_id),
+        },
+        {
+          streamId: streamId.shift(chatId),
+          event: {
+            type: 'ShiftStarted',
+            payload: {
+              shiftId: chatId,
+              agentId: agent.id,
+              workstationId: agent.workstation_id,
+              cardId: card.id,
+              kind: 'chat',
+              runtime: agent.runtime,
+              model: agent.model,
+              overflow: false,
+              chatUserId: a.userId,
+              projectId: card.project_id,
+            },
+          },
+          actor: runnerActor(agent.workstation_id),
+          scope: orgScope(agent.org_id),
+        },
+      ]);
+      const sent = await this.sendChatStart(row, c, a.prompt, { userId: a.userId });
+      if (!sent) {
+        await this.finish(c, 'rejected', CHAT_ERROR.workstationOffline);
+        return { ok: false, reason: CHAT_ERROR.workstationOffline };
+      }
+      return { ok: true, chatId };
+    } catch (err) {
+      ctx.log.error({ err }, 'mention start failed');
+      await this.finish(c, 'crashed', CHAT_ERROR.runnerError).catch(() => {});
+      return { ok: false, reason: CHAT_ERROR.runnerError };
+    }
+  }
+
+  /** The agent's answer, posted as a reply comment in the card thread, with the end of the mention. */
+  private async applyMentionDone(
+    c: Inflight,
+    msg: RunnerToServerOf<'chat.done'>,
+    tx: Tx,
+  ): Promise<ChatTerminal> {
+    const m = c.mention as NonNullable<Inflight['mention']>;
+    const scope = projectScope(c.orgId, m.projectId);
+    await this.ctx.store.append(
+      [
+        {
+          streamId: streamId.thread(c.threadId),
+          event: {
+            type: 'ThreadMessagePosted',
+            payload: {
+              threadId: c.threadId,
+              messageId: randomUUID(),
+              cardId: m.cardId,
+              authorKind: 'agent',
+              authorAgentId: c.agentId,
+              kind: 'comment',
+              body: turnBody(msg).slice(0, 20000) || '(no answer)',
+              data: { replyTo: m.commentId, mentionId: m.mentionId, usage: msg.usage, ...segmentData(msg) },
+            },
+          },
+          actor: agentActor(c.agentId),
+          scope,
+        },
+        {
+          streamId: streamId.card(m.cardId),
+          event: {
+            type: 'CardMentionEnded',
+            payload: { mentionId: m.mentionId, cardId: m.cardId, outcome: 'replied' },
+          },
+          actor: agentActor(c.agentId),
+          scope,
+        },
+        this.shiftEnded(c, 'reported', msg.usage),
+      ],
+      { tx },
+    );
+    this.release(c);
+    return { silent: true, userId: c.userId, threadId: c.threadId };
+  }
+
+  /** A mention that could not finish: a system comment says so, and the mention ends as failed. */
+  private mentionFailed(c: Inflight, reason: string): AppendInput[] {
+    const m = c.mention as NonNullable<Inflight['mention']>;
+    const scope = projectScope(c.orgId, m.projectId);
+    return [
+      {
+        streamId: streamId.thread(c.threadId),
+        event: {
+          type: 'ThreadMessagePosted',
+          payload: {
+            threadId: c.threadId,
+            messageId: randomUUID(),
+            cardId: m.cardId,
+            authorKind: 'system',
+            kind: 'system',
+            body: `The agent could not answer the mention: ${reason.slice(0, 300)}`,
+            data: { replyTo: m.commentId, mentionId: m.mentionId },
+          },
+        },
+        actor: SYSTEM_ACTOR,
+        scope,
+      },
+      {
+        streamId: streamId.card(m.cardId),
+        event: {
+          type: 'CardMentionEnded',
+          payload: {
+            mentionId: m.mentionId,
+            cardId: m.cardId,
+            outcome: 'failed',
+            reason: reason.slice(0, 500),
+          },
+        },
+        actor: SYSTEM_ACTOR,
+        scope,
+      },
+    ];
   }
 
   private shiftEnded(

@@ -5,6 +5,7 @@ import { autoPublishDue } from '../commands/blog.ts';
 import { blogDigestTick } from '../commands/blog-digest.ts';
 import { evaluateAllBudgets } from '../commands/budgets.ts';
 import { publishPendingDocuments } from '../commands/documents.ts';
+import { followUpSweep } from '../commands/follow-up.ts';
 import { fireDueHygiene } from '../commands/hygiene.ts';
 import { sweepIntegrations } from '../commands/integrations.ts';
 import { deliverDueInterests, fireDueInterests } from '../commands/interest-runs.ts';
@@ -148,6 +149,8 @@ export class Scheduler {
       await weeklyBriefingTick(this.ctx).catch((err) =>
         this.ctx.log.error({ err }, 'weekly briefing failed'),
       );
+      // Follow-up and chase: open desk items past the organization's window nudge their owner (once per window).
+      await followUpSweep(this.ctx).catch((err) => this.ctx.log.error({ err }, 'follow-up sweep failed'));
       return fired;
     });
     this.chain = next.catch(() => {});
