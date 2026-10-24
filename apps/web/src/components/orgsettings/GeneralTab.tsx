@@ -10,6 +10,7 @@ import { useLeaveOrg, useOrgMembers, usePatchOrg, useTransferOwnership } from '.
 import { PasswordInput } from '../auth/PasswordInput.tsx';
 import { HelpHint } from '../help/HelpHint.tsx';
 import { Button, ConfirmDialog, Dialog, ErrorBox, Panel, Select, TextInput, useToast } from '../ui.tsx';
+import { FollowUpPanel } from './FollowUpPanel.tsx';
 
 /** Name, owner and the Owner's controls: ownership transfer and the organization-wide two-factor requirement. */
 export function GeneralTab({ org, userId }: { org: OrgDetailResponse; userId: string }) {
@@ -133,6 +134,8 @@ export function GeneralTab({ org, userId }: { org: OrgDetailResponse; userId: st
         </div>
         {!isOwner && <p className="mt-2 text-xs text-subtle">Only the Owner changes this.</p>}
       </Panel>
+
+      <FollowUpPanel canChange={manager} />
 
       {/*
         The diagnostic-data consent. Customer organizations only get this panel once the consent text has been reviewed

@@ -11,6 +11,7 @@ import {
 import { ArrowLeft, MoreHorizontal } from 'lucide-react';
 import { createContext, type FormEvent, type ReactNode, useContext, useState } from 'react';
 import { Link, useParams } from 'react-router';
+import { useMentionable } from '../api/queries/agent-ux.ts';
 import { useWorkflows } from '../api/queries/agents.ts';
 import { useMe } from '../api/queries/auth.ts';
 import {
@@ -37,6 +38,7 @@ import {
   RiskTierDialog,
 } from '../components/CardEdit.tsx';
 import { CardPhase } from '../components/CardPhase.tsx';
+import { MentionBox } from '../components/cards/MentionBox.tsx';
 import { MoveToSheet } from '../components/cards/MoveToSheet.tsx';
 import { DependenciesPanel } from '../components/DependenciesPanel.tsx';
 import { DelegationStep } from '../components/delegation/DelegationSteps.tsx';
@@ -1026,11 +1028,20 @@ function ThreadPanel({
   canComment: boolean;
 }) {
   const comment = useComment(cardId);
+  const mentionable = useMentionable(cardId, canComment);
+  const toast = useToast();
   const [body, setBody] = useState('');
   const submit = (e: FormEvent) => {
     e.preventDefault();
     if (!body.trim()) return;
-    comment.mutate(body.trim(), { onSuccess: () => setBody('') });
+    comment.mutate(body.trim(), {
+      onSuccess: (r) => {
+        setBody('');
+        const started = r?.mentions?.filter((m) => m.status === 'started') ?? [];
+        if (started.length)
+          toast.success(`${started.map((m) => m.agentName).join(', ')} will answer in the thread`);
+      },
+    });
   };
   return (
     <Panel>
@@ -1056,7 +1067,12 @@ function ThreadPanel({
       </ul>
       {canComment && (
         <form onSubmit={submit} className="mt-3 flex flex-col gap-2" aria-label="Add comment">
-          <TextArea label="Comment" value={body} onChange={(e) => setBody(e.target.value)} />
+          <MentionBox
+            label="Comment"
+            value={body}
+            onChange={setBody}
+            agents={mentionable.data?.agents ?? []}
+          />
           <ErrorBox error={comment.error} />
           <Button
             type="submit"

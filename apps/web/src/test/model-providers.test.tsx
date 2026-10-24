@@ -333,7 +333,7 @@ describe('card work stays on Claude Code', () => {
     for (const f of users) {
       if (/ModelChip|ModelSelect/.test(f)) continue;
       // The hire form suggests the models of one runtime: it passes no direct providers, so no direct group can appear.
-      expect(f).toMatch(/Agents\.tsx$/);
+      expect(f).toMatch(/(Agents|HireDialog)\.tsx$/);
       expect(readFileSync(f, 'utf8')).toMatch(/modelChoicesFor\(\s*\[effectiveRuntime\],\s*\[\],/);
     }
   });

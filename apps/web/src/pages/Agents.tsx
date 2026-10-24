@@ -1,4 +1,5 @@
 import {
+  type AgentDraftDto,
   type AgentDto,
   backendDef,
   type HrAgent,
@@ -33,6 +34,9 @@ import { useRunningShifts } from '../api/queries/shifts.ts';
 import { useWorkstations } from '../api/queries/workstations.ts';
 import { AgentMcpSection } from '../components/agents/AgentMcpSection.tsx';
 import { AgentRoleFollow } from '../components/agents/AgentRoleFollow.tsx';
+import { DescribeAgentDialog } from '../components/agents/DescribeAgent.tsx';
+import { HireDialog } from '../components/agents/HireDialog.tsx';
+import { MentionPolicy } from '../components/agents/MentionPolicy.tsx';
 import { PackProvenance } from '../components/agents/PackProvenance.tsx';
 import {
   type Access,
@@ -42,6 +46,7 @@ import {
 } from '../components/agents/ProjectAccess.tsx';
 import { PickPackToHire } from '../components/capabilities/PickPackToHire.tsx';
 import { RoleOffers } from '../components/capabilities/RoleOffers.tsx';
+import { FirstRunGallery } from '../components/capabilities/StarterGallery.tsx';
 import { DelegateGrants } from '../components/delegation/DelegateGrants.tsx';
 import { AgentAvatar } from '../components/Face.tsx';
 import { AgentStats, WorkQualityPanel } from '../components/hr/AgentStats.tsx';
@@ -99,6 +104,9 @@ export function Agents() {
   });
   const [hireOpen, setHireOpen] = useState(!!prefill);
   const [packHireOpen, setPackHireOpen] = useState(false);
+  const [describeOpen, setDescribeOpen] = useState(false);
+  /** A reviewed draft waiting for the hire dialog (from "Describe the agent you need" or the starter gallery). */
+  const [draftHire, setDraftHire] = useState<AgentDraftDto | null>(null);
   const orgManager = useCanManageOrg();
   const [firing, setFiring] = useState<AgentDto | null>(null);
   const [rehoming, setRehoming] = useState<AgentDto | null>(null);
@@ -137,6 +145,9 @@ export function Agents() {
             <ButtonLink to="/metrics" data-testid="metrics-link">
               Metrics
             </ButtonLink>
+            <Button onClick={() => setDescribeOpen(true)} data-testid="describe-agent-open">
+              Describe the agent you need
+            </Button>
             <Button onClick={() => setPackHireOpen(true)} data-testid="hire-from-pack-open">
               Hire from a pack
             </Button>
@@ -147,6 +158,7 @@ export function Agents() {
         }
       />
       {orgManager && <RoleOffers />}
+      <FirstRunGallery />
       <div className="mb-4 flex flex-wrap gap-3">
         {(projects.data?.length ?? 0) > 1 && (
           <div className="w-full max-w-xs">
@@ -244,6 +256,16 @@ export function Agents() {
         </Disclosure>
       )}
       <HireDialog open={hireOpen} onOpenChange={setHireOpen} prefill={prefill} />
+      <DescribeAgentDialog
+        open={describeOpen}
+        onOpenChange={setDescribeOpen}
+        projectId={projectFilter || undefined}
+        onContinue={(d) => {
+          setDescribeOpen(false);
+          setDraftHire(d);
+        }}
+      />
+      {draftHire && <HireDialog open onOpenChange={(o) => !o && setDraftHire(null)} draft={draftHire} />}
       {packHireOpen && <PickPackToHire onClose={() => setPackHireOpen(false)} />}
       <FireDialog agent={firing} onClose={() => setFiring(null)} />
       <RehomeDialog agent={rehoming} onClose={() => setRehoming(null)} />
@@ -442,6 +464,7 @@ function AgentCard({
         />
       )}
       {!a.isDevops && <PlaybookGrants agentId={a.id} />}
+      {!a.isDevops && a.roleKey !== 'ceo' && <MentionPolicy agentId={a.id} canManage={canManage} />}
       {!a.isDevops && a.roleKey !== 'ceo' && <DelegateGrants ownerKind="agent" ownerId={a.id} />}
       {a.isDevops ? (
         <div className="mt-auto flex items-center gap-2">
@@ -655,314 +678,6 @@ function FireDialog({ agent, onClose }: { agent: AgentDto | null; onClose: () =>
           </div>
         </div>
       )}
-    </Dialog>
-  );
-}
-
-function HireDialog({
-  open,
-  onOpenChange,
-  prefill,
-}: {
-  open: boolean;
-  onOpenChange: (o: boolean) => void;
-  prefill?: { roleKey: string; projectId: string; seniority?: string } | null;
-}) {
-  const stations = useWorkstations();
-  const projects = useProjects();
-  const hire = useHire();
-  const [nonce, setNonce] = useState(0);
-  const [theme, setTheme] = useState('default');
-  const suggestions = useNameSuggestions(open, nonce, theme);
-  const [roleKey, setRoleKey] = useState(prefill?.roleKey ?? '');
-  const [seniority, setSeniority] = useState(prefill ? prefill.seniority || 'junior' : '');
-  const [workstationId, setWorkstationId] = useState('');
-  const me = useMe();
-  const activeOrg = me.data?.activeOrg ?? null;
-  const canAny = activeOrg?.role === 'owner' || activeOrg?.role === 'admin';
-  /** What the manager picked in "Where may this agent work?"; untouched, the default below applies. */
-  const [access, setAccess] = useState<Access | null>(null);
-  // The default for a new hire: the project the form was opened for, else the one worked on last. "Any project" is a
-  // deliberate choice of the organization's Owner and Admins.
-  const defaultProject =
-    (prefill?.projectId && projects.data?.find((p) => p.id === prefill.projectId)?.id) ||
-    projects.data?.find((p) => p.key === getLastProjectKey())?.id ||
-    projects.data?.find((p) => p.orgId === activeOrg?.id)?.id ||
-    projects.data?.[0]?.id ||
-    '';
-  // With no project to pick yet (a new organization) the agent may work any project it gets later.
-  const effectiveAccess: Access = access ?? { allowed: defaultProject ? [defaultProject] : null, focus: [] };
-  // A shared project runs on its owner's catalogue: the Hire form lists that organization's roles (custom ones too).
-  const roles = useRoles(effectiveAccess.allowed?.[0] || defaultProject || undefined);
-  const [runtime, setRuntime] = useState('');
-  const [model, setModel] = useState('');
-  const [effort, setEffort] = useState('');
-  const [skills, setSkills] = useState('');
-  const [name, setName] = useState('');
-  const [errors, setErrors] = useState<Record<string, string>>({});
-  /** The workstation+runtime the unsandboxed confirmation was given for: choosing another asks again. */
-  const [ackedFor, setAckedFor] = useState('');
-
-  const hireable = useMemo(
-    // The CEO is appointed on the CEO page, never hired here.
-    () => (roles.data ?? []).filter((r) => r.definition.key !== 'devops' && r.definition.key !== 'ceo'),
-    [roles.data],
-  );
-  const activeStations = (stations.data ?? []).filter((w) => w.status === 'active');
-  const effectiveRoleKey = roleKey || hireable[0]?.definition.key || '';
-  const role = hireable.find((r) => r.definition.key === effectiveRoleKey)?.definition;
-  const effectiveSeniority =
-    seniority && role?.seniorityLevels.includes(seniority as 'junior')
-      ? seniority
-      : (role?.seniorityLevels[0] ?? '');
-  const effectiveStation = workstationId || activeStations[0]?.id || '';
-  const station = activeStations.find((w) => w.id === effectiveStation);
-  const runtimeOptions = [
-    ...new Set(
-      [
-        role?.defaultModel.runtime,
-        // the direct API models have no shell or edit tools: an agent cannot run on them (the server refuses it)
-        ...(station?.runtimes.filter((r) => r.available && r.id !== 'direct-model').map((r) => r.id) ?? []),
-      ].filter(Boolean) as string[],
-    ),
-  ];
-
-  const effectiveRuntime = runtime || role?.defaultModel.runtime || '';
-  // Whether the role can run on the chosen runtime (the same rule the server and the runner apply), and which models the
-  // workstation offers for it: the Gemini CLI and opencode lists and the Bedrock, Vertex and gateway models are the workstation's.
-  const runtimeProblem = role?.permissions
-    ? runtimeRoleProblem(effectiveRuntime, { roleKey: role.key, permissions: role.permissions })
-    : null;
-  const stationList = station ? [station] : [];
-  // no direct providers: an agent never runs on the direct API models
-  const modelSuggestions = modelChoicesFor([effectiveRuntime], [], unionExtras(stationList)).flatMap((g) =>
-    g.models.map((m) => m.id),
-  );
-  const typedBackend = splitBackendModel(model.trim());
-  const modelCaution = typedBackend ? backendDef(typedBackend.backend)?.warning : undefined;
-  const unsandboxed = !!station && isRuntimeUnsandboxed(station.runtimes, effectiveRuntime);
-  const ackKey = `${effectiveStation}:${effectiveRuntime}`;
-  const ackUnsandboxed = ackedFor === ackKey;
-
-  const submit = (e: FormEvent) => {
-    e.preventDefault();
-    const errs: Record<string, string> = {};
-    if (!role) errs.role = 'Choose a role';
-    if (unsandboxed && !ackUnsandboxed)
-      errs.sandbox = 'Confirm that you accept hiring onto an unsandboxed workstation';
-    if (!name.trim()) errs.name = 'A name is required';
-    if (runtimeProblem) errs.runtime = runtimeProblem;
-    if (effectiveAccess.allowed !== null && effectiveAccess.allowed.length === 0)
-      errs.access = 'Pick at least one project, or allow any project';
-    if (!effectiveStation) errs.workstation = 'Pair a workstation first';
-    setErrors(errs);
-    if (Object.keys(errs).length || !role) return;
-    hire.mutate(
-      {
-        name: name.trim(),
-        roleKey: role.key,
-        seniority: effectiveSeniority as 'junior' | 'senior',
-        workstationId: effectiveStation,
-        allowedProjectIds: effectiveAccess.allowed,
-        ...(effectiveAccess.focus.length ? { focusProjectIds: effectiveAccess.focus } : {}),
-        ...(runtime ? { runtime } : {}),
-        ...(model.trim() ? { model: model.trim() } : {}),
-        ...(effort ? { effort } : {}),
-        ...(unsandboxed && ackUnsandboxed ? { acknowledgeUnsandboxed: true } : {}),
-        skills: skills
-          .split(',')
-          .map((s) => s.trim())
-          .filter(Boolean),
-        capacity: 1,
-      },
-      {
-        onSuccess: () => {
-          setName('');
-          setAccess(null);
-          setNonce((n) => n + 1);
-          onOpenChange(false);
-        },
-      },
-    );
-  };
-
-  return (
-    <Dialog
-      open={open}
-      onOpenChange={onOpenChange}
-      title="Hire agent"
-      description="Hire an agent onto one of your workstations."
-    >
-      <form onSubmit={submit} noValidate aria-label="Hire agent" className="flex flex-col gap-3">
-        <Select
-          label="Role"
-          value={effectiveRoleKey}
-          onChange={(e) => setRoleKey(e.target.value)}
-          error={errors.role}
-          hint={role?.department ? `Department: ${role.department}` : undefined}
-        >
-          {hireable.map((r) => (
-            <option key={r.definition.key} value={r.definition.key}>
-              {r.definition.name}
-            </option>
-          ))}
-        </Select>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Select label="Seniority" value={effectiveSeniority} onChange={(e) => setSeniority(e.target.value)}>
-            {(role?.seniorityLevels ?? []).map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </Select>
-          <Select
-            label="Workstation"
-            value={effectiveStation}
-            onChange={(e) => setWorkstationId(e.target.value)}
-            error={errors.workstation}
-          >
-            {activeStations.length === 0 && <option value="">No workstation paired</option>}
-            {activeStations.map((w) => (
-              <option key={w.id} value={w.id}>
-                {w.name} {w.connected ? '(connected)' : '(offline)'}
-              </option>
-            ))}
-          </Select>
-          <Select
-            label="Runtime"
-            value={runtime || role?.defaultModel.runtime || ''}
-            onChange={(e) => setRuntime(e.target.value)}
-            error={errors.runtime}
-          >
-            {runtimeOptions.map((r) => (
-              <option key={r} value={r}>
-                {r}
-              </option>
-            ))}
-          </Select>
-          <div>
-            <TextInput
-              label="Model"
-              placeholder={role?.defaultModel.model}
-              value={model}
-              list="hire-model-suggestions"
-              onChange={(e) => setModel(e.target.value)}
-            />
-            <datalist id="hire-model-suggestions">
-              {modelSuggestions.map((m) => (
-                <option key={m} value={m} />
-              ))}
-            </datalist>
-          </div>
-          <Select label="Effort" value={effort} onChange={(e) => setEffort(e.target.value)}>
-            <option value="">
-              Default{role?.defaultModel.effort ? ` (${role.defaultModel.effort})` : ''}
-            </option>
-            {['low', 'medium', 'high'].map((x) => (
-              <option key={x} value={x}>
-                {x}
-              </option>
-            ))}
-          </Select>
-        </div>
-        {runtimeProblem && (
-          <Callout tone="danger" role="alert" data-testid="hire-runtime-problem">
-            This role cannot run on {effectiveRuntime}: {runtimeProblem}
-          </Callout>
-        )}
-        {modelCaution && (
-          <Callout tone="warning" data-testid="hire-model-caution">
-            {modelCaution}
-          </Callout>
-        )}
-        <div>
-          <ProjectAccessEditor
-            value={effectiveAccess}
-            onChange={setAccess}
-            projects={projects.data ?? []}
-            canAny={canAny}
-            idPrefix="hire"
-          />
-          {errors.access && (
-            <p role="alert" className="mt-1 text-sm font-medium text-danger">
-              {errors.access}
-            </p>
-          )}
-        </div>
-        <TextInput
-          label="Skills"
-          hint="Comma separated, optional"
-          value={skills}
-          onChange={(e) => setSkills(e.target.value)}
-        />
-        <div>
-          <TextInput
-            label="Name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            error={errors.name}
-            maxLength={60}
-          />
-          <div className="mt-1.5 flex flex-wrap items-center gap-1.5" data-testid="name-suggestions">
-            <select
-              aria-label="Name theme"
-              data-testid="name-theme"
-              value={theme}
-              onChange={(e) => setTheme(e.target.value)}
-              className="rounded border border-control bg-surface px-1 py-0.5 text-xs"
-            >
-              {NAME_THEMES.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.label}
-                </option>
-              ))}
-            </select>
-            <span className="text-xs text-subtle">Suggestions:</span>
-            {suggestions.data?.map((n) => (
-              <button
-                type="button"
-                key={n}
-                onClick={() => setName(n)}
-                className="rounded-full border border-control px-2 py-0.5 text-xs hover:bg-sunken"
-              >
-                {n}
-              </button>
-            ))}
-            <button type="button" onClick={() => setNonce((n) => n + 1)} className="text-xs underline">
-              More
-            </button>
-          </div>
-        </div>
-        {unsandboxed && station && (
-          <div className="flex flex-col gap-2" data-testid="hire-unsandboxed">
-            <SandboxWarning testId="hire-sandbox-warning" role="alert" lead="Warning:">
-              {agentWarning(station.name, sandboxReasonOf(station.runtimes, effectiveRuntime))}
-            </SandboxWarning>
-            <label className="flex items-start gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={ackUnsandboxed}
-                onChange={(e) => setAckedFor(e.target.checked ? ackKey : '')}
-                aria-describedby={errors.sandbox ? 'hire-sandbox-error' : undefined}
-                className="mt-1"
-              />
-              <span>I understand this agent runs without an OS sandbox on {station.name}</span>
-            </label>
-            {errors.sandbox && (
-              <p id="hire-sandbox-error" role="alert" className="text-sm text-danger">
-                {errors.sandbox}
-              </p>
-            )}
-          </div>
-        )}
-        <ErrorBox error={hire.error} />
-        <div className="flex justify-end gap-2">
-          <Button onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button type="submit" variant="primary" disabled={hire.isPending}>
-            Hire
-          </Button>
-        </div>
-      </form>
     </Dialog>
   );
 }

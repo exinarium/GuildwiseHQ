@@ -2,6 +2,7 @@ import {
   type CardDetailResponse,
   CardDetailResponseSchema,
   type CreateCardRequest,
+  type MentionResult,
   type PatchCardRequest,
   SpecifyMissingResponseSchema,
 } from '@aom/shared';
@@ -61,7 +62,9 @@ export const useSendCardToBa = (id: string) =>
 export const usePatchCard = (id: string) =>
   useCardAction(id, (b: PatchCardRequest) => patch(`/cards/${id}`, b));
 export const useComment = (id: string) =>
-  useCardAction(id, (body: string) => post(`/cards/${id}/comments`, { body }));
+  useCardAction(id, (body: string) =>
+    post<{ mentions?: MentionResult[] }>(`/cards/${id}/comments`, { body }),
+  );
 export const useMoveCard = (id: string) =>
   useCardAction(id, (b: { toStage: string; reason: string }) =>
     post<{ moveNotice?: string }>(`/cards/${id}/move`, b),
