@@ -237,7 +237,8 @@ function MyPackCard({
         {pack.saving && <Badge tone="blue">saving…</Badge>}
       </div>
       <p className="mt-1 text-sm text-muted">
-        {pack.description || 'No description.'} Stored on <strong>{pack.workstationName}</strong>
+        {pack.description ? `${pack.description.replace(/[.!?]?$/, '.')} ` : ''}Stored on{' '}
+        <strong>{pack.workstationName}</strong>
         {pack.workstationOnline ? '' : ' (offline)'}
         {pack.revision > 0 && <>, revision {pack.revision}</>}.
       </p>

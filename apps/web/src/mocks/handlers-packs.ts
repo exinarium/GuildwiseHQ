@@ -69,6 +69,41 @@ const packDto = () => ({
 });
 
 export const packHandlers = [
+  // R3a: nothing authored yet, nothing waiting for an answer, no role update on offer (the mock server has no workstation keys)
+  http.get(`${A}/my-capabilities`, () =>
+    HttpResponse.json({
+      packs: [
+        {
+          id: '00000000-0000-4000-8000-0000000000d1',
+          name: 'mine',
+          description: 'My own skills and personas',
+          visibility: 'private',
+          state: 'draft',
+          workstationId: '00000000-0000-4000-8000-0000000000d2',
+          workstationName: 'Desk',
+          workstationOnline: true,
+          supported: true,
+          revision: 0,
+          pinnedSha: null,
+          status: 'pending',
+          error: null,
+          items: [],
+          hasScripts: false,
+          saving: false,
+          update: null,
+          mayApprove: true,
+          holders: [],
+          createdAt: new Date().toISOString(),
+          grantedAgentIds: [],
+        },
+      ],
+      workstations: [
+        { id: '00000000-0000-4000-8000-0000000000d2', name: 'Desk', online: true, supported: true },
+      ],
+    }),
+  ),
+  http.get(`${A}/pack-assignments`, () => HttpResponse.json({ items: [] })),
+  http.get(`${A}/role-offers`, () => HttpResponse.json({ items: [] })),
   http.get(`${A}/capabilities`, ({ request }) => {
     const kind = new URL(request.url).searchParams.get('kind');
     const usable = new URL(request.url).searchParams.get('usable') === 'true';

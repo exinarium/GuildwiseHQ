@@ -53,6 +53,10 @@ const issuesFor = (all: AuthoredIssue[], c: AuthoredCapability): AuthoredIssue[]
   return all.filter((i) => i.path === id || i.path.startsWith(main));
 };
 
+/** The parsers' own words, with the schema library's "too small" said as people say it. */
+const plainIssue = (m: string): string =>
+  m.replace(/Too small: expected string to have >=1 characters/g, 'cannot be empty');
+
 function Issues({ list }: { list: AuthoredIssue[] }) {
   if (list.length === 0) return null;
   return (
@@ -63,7 +67,7 @@ function Issues({ list }: { list: AuthoredIssue[] }) {
           className={i.severity === 'error' ? 'text-danger' : 'text-warning'}
           data-severity={i.severity}
         >
-          <strong>{i.severity === 'error' ? 'Error' : 'Note'}:</strong> {i.message}{' '}
+          <strong>{i.severity === 'error' ? 'Error' : 'Note'}:</strong> {plainIssue(i.message)}{' '}
           <code className="text-subtle">{i.path}</code>
         </li>
       ))}
