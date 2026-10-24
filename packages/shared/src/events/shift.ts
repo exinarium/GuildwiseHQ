@@ -31,6 +31,8 @@ export const shiftEvents = [
       runtime: z.string(),
       model: z.string(),
       overflow: z.boolean().default(false),
+      /** R3c (Q64): the person whose message started this agent chat; what an agent starts in the chat belongs to them. */
+      chatUserId: Id.optional(),
       /** Chats about a project without a card: the shift's project (card shifts resolve it through the card). */
       projectId: Id.optional(),
       runtimeSessionId: z.string().optional(),

@@ -243,6 +243,7 @@ export class ChatRelay {
               runtime: row.runtime,
               model: row.model,
               overflow: false,
+              chatUserId: userId,
               ...(row.thread_project_id ? { projectId: row.thread_project_id } : {}),
             },
           },

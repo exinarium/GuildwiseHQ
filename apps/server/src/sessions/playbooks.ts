@@ -255,7 +255,7 @@ export async function playbookRunRpc(
       undefined,
       `\`aom playbook run\` is not available for "${p.data.key}": nobody granted this agent that playbook (a manager grants it on the agent's page)`,
     ];
-  return startForAgent(ctx, workstationId, agent, p.data);
+  return startForAgent(ctx, workstationId, agent, p.data, shift.chat_user_id ?? null);
 }
 
 async function startForAgent(
@@ -263,9 +263,30 @@ async function startForAgent(
   workstationId: string,
   agent: Row,
   p: PlaybookRunParams,
+  /** The person whose message started the chat this runs from (Q64); null for a card shift or any run with no chat user. */
+  chatUserId: string | null = null,
 ): Promise<Reply> {
   const managerId = agent.manager_user_id as string;
-  const role = await orgRoleOf(ctx.pool, managerId, agent.org_id);
+  // The session belongs to the person in the chat (Q64) when there is one who is still in the organization and may run the
+  // playbook; otherwise to the agent's manager, as before.
+  let ownerId = managerId;
+  // a session runs on its creator's own workstation: the chat person's (the one the chat runs on when it is theirs); with none,
+  // it stays with the manager, whose workstation the agent is on
+  let stationId: string | undefined = agent.workstation_id ?? workstationId;
+  if (chatUserId && chatUserId !== managerId && (await orgRoleOf(ctx.pool, chatUserId, agent.org_id))) {
+    const visible = await runnablePlaybooks(ctx.pool, agent.org_id, chatUserId);
+    const mine = await one(
+      ctx.pool,
+      `SELECT id FROM workstations WHERE user_id=$1 AND status='active'
+        ORDER BY (id = $2::uuid) DESC, connected DESC, last_seen_at DESC NULLS LAST, paired_at LIMIT 1`,
+      [chatUserId, agent.workstation_id ?? workstationId],
+    );
+    if (visible.some((i) => i.key === p.key) && mine) {
+      ownerId = chatUserId;
+      stationId = mine.id as string;
+    }
+  }
+  const role = await orgRoleOf(ctx.pool, ownerId, agent.org_id);
   if (!role) return [false, undefined, "the agent's manager is no longer in the organization"];
   const since = new Date(ctx.clock.now().getTime() - 24 * 3600_000);
   const recent = await one(
@@ -281,7 +302,7 @@ async function startForAgent(
       undefined,
       `at most ${PLAYBOOK_LIMITS.maxPerDay} playbook sessions a day per agent: the owner has unanswered ones to get through first`,
     ];
-  const items = await runnablePlaybooks(ctx.pool, agent.org_id, managerId);
+  const items = await runnablePlaybooks(ctx.pool, agent.org_id, ownerId);
   const item = items.find((i) => i.key === p.key);
   if (!item)
     return [
@@ -289,7 +310,7 @@ async function startForAgent(
       undefined,
       `playbook "${p.key}" is not available (not approved, or not visible to the owner of this agent)`,
     ];
-  const who: Who = { userId: managerId, orgId: agent.org_id, role };
+  const who: Who = { userId: ownerId, orgId: agent.org_id, role };
   const state = await ctx.services.discovery.create(
     who,
     {
@@ -298,7 +319,7 @@ async function startForAgent(
       ceoMode: 'owner_only',
       playbook: item.key,
       idea: p.input ?? '',
-      workstationId: agent.workstation_id ?? workstationId,
+      workstationId: stationId,
     },
     undefined,
     initialRun(item, item.key, { kind: 'agent', agentId: agent.id, agentName: agent.name }),
@@ -309,12 +330,12 @@ async function startForAgent(
     kind: 'alert',
     subkind: 'playbook_input_needed',
     title: `${agent.name} started "${item.name}": your answers are needed`,
-    body: `${agent.name} started the playbook "${item.name}" as a guided session. The facilitator asks you questions on the session page; nothing happens until you answer.`,
+    body: `${agent.name} started the playbook "${item.name}" as a guided session${ownerId === managerId ? '' : ' from your chat'}. The facilitator asks you questions on the session page; nothing happens until you answer.`,
     data: {
       threadId: state.threadId,
       path: `/discovery/${state.threadId}`,
       agentId: agent.id,
-      forUserId: managerId,
+      forUserId: ownerId,
     },
     askedBy: { kind: 'agent', agentId: agent.id },
     actor: runnerActor(workstationId),
@@ -324,7 +345,7 @@ async function startForAgent(
     true,
     {
       threadId: state.threadId,
-      message: `Started the guided session "${item.name}" for ${agent.name}'s manager. It needs their answers and is on their desk; continue your work, do not wait for it.`,
+      message: `Started the guided session "${item.name}" for ${ownerId === managerId ? `${agent.name}'s manager` : 'the person you are chatting with'}. It needs their answers and is on their desk; continue your work, do not wait for it.`,
     },
   ];
 }

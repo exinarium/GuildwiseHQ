@@ -86,8 +86,8 @@ const rawMember = (method: string, url: string, body?: unknown) =>
 const keysOf = (r2: { items: Array<{ key: string }> }): string[] => r2.items.map((i) => i.key);
 
 /** The next facilitator turn the runner is sent, and the rpc a facilitator makes in it. */
-const nextStart = async (pred: (f: any) => boolean = () => true): Promise<any> => {
-  const f = await r.waitFor('chat.start', (x) => !seen.has(x.chatId) && pred(x), 15_000);
+const nextStart = async (pred: (f: any) => boolean = () => true, wait = 15_000): Promise<any> => {
+  const f = await r.waitFor('chat.start', (x) => !seen.has(x.chatId) && pred(x), wait);
   seen.add(f.chatId);
   return f;
 };
@@ -471,6 +471,71 @@ describe('an agent starts a playbook itself', () => {
     await asOwner('PUT', `/api/agents/${agentId}/playbook-grants`, { key: 'brainstorm', granted: false });
     const gone = await call(r, shiftId, 'playbook.run', { key: 'brainstorm' });
     expect(gone.error).toContain('nobody granted');
+  });
+
+  it('R3c: a playbook started from a chat belongs to the person in that chat, not the agent’s manager; a shift with no chat person keeps the manager', async () => {
+    const agent = (await w.hire('Dot', 'ba', 'senior')).id as string;
+    await asOwner('PUT', `/api/agents/${agent}/playbook-grants`, { key: 'brainstorm', granted: true });
+    const manager = (await q('SELECT manager_user_id FROM agents WHERE id=$1', [agent]))[0].manager_user_id;
+    expect(manager).not.toBe(member.id);
+    const chatShift = async (chatUser: string | null): Promise<string> => {
+      const id = randomUUID();
+      await q(
+        `INSERT INTO shifts (id, org_id, agent_id, workstation_id, kind, status, runtime, model, started_at, chat_user_id)
+         VALUES ($1,$2,$3,$4,'chat','running','mock','mock',now(),$5)`,
+        [id, w.owner.id, agent, w.workstationId, chatUser],
+      );
+      return id;
+    };
+    // the person in the chat
+    const res = await call(r, await chatShift(member.id), 'playbook.run', {
+      key: 'brainstorm',
+      input: 'pricing for teams',
+    });
+    expect(res.ok, res.error).toBe(true);
+    expect(res.result.message).toContain('the person you are chatting with');
+    const t = (await q(`SELECT created_by FROM threads WHERE id=$1`, [res.result.threadId]))[0];
+    expect(t.created_by).toBe(member.id);
+    const desk = (
+      await q(`SELECT title, body, data FROM desk_items WHERE subject_key=$1`, [
+        `playbook_session:${res.result.threadId}`,
+      ])
+    )[0];
+    expect(desk.body).toContain('from your chat');
+    expect(desk.data.forUserId).toBe(member.id);
+    // the member can open it; the agent's manager (an Owner here) is not a participant of it
+    const mine = await asMember('GET', `/api/discovery/${res.result.threadId}`);
+    expect(mine.state.threadId).toBe(res.result.threadId);
+    // no chat person (a card shift) or the manager themselves: the manager, as before
+    const none = await call(r, await chatShift(null), 'playbook.run', { key: 'brainstorm' });
+    expect(
+      (await q(`SELECT created_by FROM threads WHERE id=$1`, [none.result.threadId]))[0].created_by,
+    ).toBe(manager);
+    const self = await call(r, await chatShift(manager), 'playbook.run', { key: 'brainstorm' });
+    expect(self.result.message).toContain('manager');
+    // a chat person who is no longer in the organization (or has no workstation of their own) falls back to the manager
+    const other = (await w.hire('Dan', 'ba', 'senior')).id as string;
+    await asOwner('PUT', `/api/agents/${other}/playbook-grants`, { key: 'brainstorm', granted: true });
+    const otherManager = (await q('SELECT manager_user_id FROM agents WHERE id=$1', [other]))[0]
+      .manager_user_id;
+    const outsider = (await w.t.userSession(uniqueEmail('pb-gone'))).id;
+    const fbShift = randomUUID();
+    await q(
+      `INSERT INTO shifts (id, org_id, agent_id, workstation_id, kind, status, runtime, model, started_at, chat_user_id)
+       VALUES ($1,$2,$3,$4,'chat','running','mock','mock',now(),$5)`,
+      [fbShift, w.owner.id, other, w.workstationId, outsider],
+    );
+    const fb = await call(r, fbShift, 'playbook.run', { key: 'brainstorm' });
+    expect(fb.ok, fb.error).toBe(true);
+    expect((await q(`SELECT created_by FROM threads WHERE id=$1`, [fb.result.threadId]))[0].created_by).toBe(
+      otherManager,
+    );
+    // each guided session queues a facilitator turn (the runner runs them in turn): let it finish what it is sent
+    for (let i = 0; i < 4; i++) {
+      const st = await nextStart((f) => f.message.includes('"role":"facilitator"'), 3_000).catch(() => null);
+      if (!st) break;
+      await finish(st);
+    }
   });
 
   it('is not available to a session turn', async () => {
