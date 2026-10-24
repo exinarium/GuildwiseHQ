@@ -1,7 +1,14 @@
 import { z } from 'zod';
 import { BriefAttachmentSchema } from '../attachments/index.ts';
 import {
+  PackAuthorSavePayloadSchema,
+  PackBundlePutPayloadSchema,
+  PackBundleRequestPayloadSchema,
   PackCheckPayloadSchema,
+  PackCredentialClearPayloadSchema,
+  PackCredentialSetPayloadSchema,
+  PackPersonaReadPayloadSchema,
+  PackReadPayloadSchema,
   PacksReportSchema,
   PacksSyncPayloadSchema,
   ProjectCapabilitiesReportSchema,
@@ -829,6 +836,13 @@ export const RunnerCommandNameSchema = z.enum([
   'provider.endpoints.set',
   'packs.sync',
   'pack.check',
+  'pack.credential.set',
+  'pack.credential.clear',
+  'pack.author.save',
+  'pack.read',
+  'pack.persona.read',
+  'pack.bundle.request',
+  'pack.bundle.put',
 ]);
 export type RunnerCommandName = z.infer<typeof RunnerCommandNameSchema>;
 
@@ -837,6 +851,14 @@ export const CommandPayloadSchemas = {
   /** The full list of capability packs this workstation should hold (git, pinned commit, trust, scripts); see section 38.4. */
   'packs.sync': PacksSyncPayloadSchema,
   'pack.check': PackCheckPayloadSchema,
+  /** R3a: a private pack's deploy key or token (sealed), an authored pack's files (sealed), reads for the editor and for hiring, the relay of an authored org pack. */
+  'pack.credential.set': PackCredentialSetPayloadSchema,
+  'pack.credential.clear': PackCredentialClearPayloadSchema,
+  'pack.author.save': PackAuthorSavePayloadSchema,
+  'pack.read': PackReadPayloadSchema,
+  'pack.persona.read': PackPersonaReadPayloadSchema,
+  'pack.bundle.request': PackBundleRequestPayloadSchema,
+  'pack.bundle.put': PackBundlePutPayloadSchema,
   'provider.key.set': ProviderKeySetPayloadSchema,
   'provider.key.clear': ProviderKeyClearPayloadSchema,
   'provider.key.reseal': ProviderKeyResealPayloadSchema,

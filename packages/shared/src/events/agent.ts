@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { AvatarSeedSchema, AvatarStyleSchema } from '../avatars/index.ts';
+import { PackProvenanceSchema } from '../capabilities/provenance.ts';
 import { AgentPermissionsSchema, Seniority } from '../roles/schema.ts';
 import { defineEvent, Id } from './define.ts';
 
@@ -60,6 +61,8 @@ export const agentEvents = [
       /** The generated face; an agent hired before faces existed gets one seeded from its id. */
       avatarSeed: AvatarSeedSchema.optional(),
       avatarStyle: AvatarStyleSchema.optional(),
+      /** R3a: hired from a pack persona; shown as a tag on the HR board, the agent page and chats. */
+      provenance: PackProvenanceSchema.optional(),
     }),
   ),
   defineEvent(

@@ -1,3 +1,4 @@
+export * from './authoring.ts';
 export * from './bmad.ts';
 export * from './builtin.ts';
 export * from './pack-wire.ts';

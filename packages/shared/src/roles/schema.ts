@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { PackProvenanceSchema } from '../capabilities/provenance.ts';
 
 export const Seniority = z.enum(['junior', 'senior']);
 export type Seniority = z.infer<typeof Seniority>;
@@ -45,6 +46,8 @@ export const RoleDefinitionSchema = z.object({
   skills: z.array(z.string()),
   /** `workflowKey` or `*`, `stageId` or `*`. */
   claimableStages: z.array(z.object({ workflowKey: z.string(), stageId: z.string() })),
+  /** R3a: the role was made from a pack persona (chat and sessions only; it claims no workflow stage). */
+  source: PackProvenanceSchema.optional(),
 });
 export type RoleDefinition = z.infer<typeof RoleDefinitionSchema>;
 

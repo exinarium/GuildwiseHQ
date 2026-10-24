@@ -4,9 +4,10 @@ import { fenceMessage, safeName } from './untrusted.ts';
 
 /**
  * Multi-participant sessions (Discovery Studio and Boardroom, docs/design/discovery-boardroom-registry.md): a thread of
- * kind `discovery` or `boardroom` with participants and durable turns. Existing chat, card and CEO threads are untouched.
+ * kind `discovery` or `boardroom` with participants and durable turns. R3a adds `persona_chat`: a one-to-one session with a
+ * persona that is not hired (the creator and one persona, read-only, no verbs). Existing chat, card and CEO threads are untouched.
  */
-export const SESSION_THREAD_KINDS = ['discovery', 'boardroom'] as const;
+export const SESSION_THREAD_KINDS = ['discovery', 'boardroom', 'persona_chat'] as const;
 export const SessionThreadKindSchema = z.enum(SESSION_THREAD_KINDS);
 export type SessionThreadKind = z.infer<typeof SessionThreadKindSchema>;
 

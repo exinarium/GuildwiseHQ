@@ -58,6 +58,8 @@ const MetaExtras = {
   hasScripts: z.boolean().optional(),
   tags: z.array(z.string().max(40)).max(10).optional(),
   icon: z.string().max(60).optional(),
+  /** A persona's declared tools (advisory; read when it is hired from a pack to map a permission preset). */
+  tools: z.array(z.string().max(60)).max(30).optional(),
   /** Where a project-repository capability lives in its checkout (`.claude/skills/<name>`), for the review list. */
   path: z.string().max(300).optional(),
 };
@@ -351,6 +353,7 @@ export function capabilityMeta(e: ParsedCapability, source: CapabilitySource): C
     ...(e.hasScripts ? { hasScripts: true } : {}),
     ...(e.tags?.length ? { tags: e.tags } : {}),
     ...(e.icon ? { icon: e.icon } : {}),
+    ...(e.pack && e.kind === 'persona' && e.meta.tools?.length ? { tools: e.meta.tools } : {}),
   };
 }
 

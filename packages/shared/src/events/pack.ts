@@ -2,14 +2,18 @@ import { z } from 'zod';
 import {
   LegacyPackUrlSchema,
   PackAdapterSchema,
+  PackCredentialKindSchema,
   PackDiffSchema,
   PackNameSchema,
   PackRefSchema,
   PackScopeSchema,
   PackShaSchema,
   PackSnapshotSchema,
+  PackSourceSchema,
+  PackVisibilitySchema,
 } from '../capabilities/packs.ts';
 import { RegistryMetaSchema } from '../capabilities/parse.ts';
+import { PackProvenanceSchema } from '../capabilities/provenance.ts';
 import { defineEvent, Id } from './define.ts';
 
 /**
@@ -37,6 +41,14 @@ export const packEvents = [
        * Packs added before this field existed behave the same.
        */
       workstationIds: z.array(Id).max(20).default([]),
+      /** R3a, all additive. `authored`: made in the capability editor (no git remote; `url` is `authored:<packId>`). */
+      source: PackSourceSchema.default('git'),
+      /** `private`: only `ownerUserId` sees it and only that user's workstation holds it; no trust review. */
+      visibility: PackVisibilitySchema.default('org'),
+      ownerUserId: Id.nullable().default(null),
+      description: z.string().max(500).default(''),
+      /** A private git pack: the kind of credential sealed to the workstations (the secret itself is never in an event). */
+      credentialKind: PackCredentialKindSchema.nullable().default(null),
     }),
   ),
   /** A workstation resolved the ref to a commit and indexed it. The first one pins; later ones only matter if the pin is not set. */
@@ -138,5 +150,119 @@ export const packEvents = [
       status: z.enum(['reviewed', 'blocked', 'unreviewed']),
       by: Id,
     }),
+  ),
+  /** The admin changed which workstations hold the pack. A workstation of another member waits for that member's opt-in. */
+  defineEvent(
+    'PackWorkstationsChanged',
+    z.object({ packId: Id, orgId: Id, workstationIds: z.array(Id).max(20), changedBy: Id }),
+  ),
+  /** A pack was assigned to a workstation of another member: they decide on their desk (`deskItemId`). */
+  defineEvent(
+    'PackAssignmentRequested',
+    z.object({
+      packId: Id,
+      orgId: Id,
+      workstationId: Id,
+      userId: Id,
+      deskItemId: Id,
+      requestedBy: Id,
+    }),
+  ),
+  /** The member accepted (the workstation may clone the pack) or declined (the assignment is removed). */
+  defineEvent(
+    'PackAssignmentDecided',
+    z.object({ packId: Id, orgId: Id, workstationId: Id, userId: Id, accepted: z.boolean() }),
+  ),
+  /** A deploy key or token was sealed for these workstations (the secret is in no event; `fingerprint` is the public part of an ssh key). */
+  defineEvent(
+    'PackCredentialSet',
+    z.object({
+      packId: Id,
+      orgId: Id,
+      kind: PackCredentialKindSchema,
+      workstationIds: z.array(Id).max(20),
+      fingerprint: z.string().max(120).nullable().default(null),
+      setBy: Id,
+    }),
+  ),
+  defineEvent('PackCredentialCleared', z.object({ packId: Id, orgId: Id, clearedBy: Id })),
+  /** A workstation's answer to storing the credential. */
+  defineEvent(
+    'PackCredentialStored',
+    z.object({
+      packId: Id,
+      orgId: Id,
+      workstationId: Id,
+      stored: z.boolean(),
+      error: z.string().max(300).nullable().default(null),
+      fingerprint: z.string().max(120).nullable().default(null),
+    }),
+  ),
+  /** The first ssh fetch recorded the host key of the pack's git host on this workstation (trust on first use, then pinned). */
+  defineEvent(
+    'PackHostKeyPinned',
+    z.object({
+      packId: Id,
+      orgId: Id,
+      workstationId: Id,
+      host: z.string().max(255),
+      hostKey: z.string().max(2000),
+    }),
+  ),
+  /** The author saved the files of an authored pack (metadata only: the files are sealed to the author's workstation). */
+  defineEvent(
+    'PackAuthoredSaveRequested',
+    z.object({ packId: Id, orgId: Id, workstationId: Id, requestedBy: Id, approve: z.boolean() }),
+  ),
+  defineEvent(
+    'PackVisibilityChanged',
+    z.object({ packId: Id, orgId: Id, visibility: PackVisibilitySchema, changedBy: Id }),
+  ),
+  /** The owner of a private pack lets one of their agents (hired on their workstation) use it. */
+  defineEvent(
+    'PackAgentGranted',
+    z.object({ packId: Id, orgId: Id, agentId: Id, grantedBy: Id, granted: z.boolean() }),
+  ),
+  /** Hire from pack: asked, then done (a role version and an agent) or failed. */
+  defineEvent(
+    'PackHireRequested',
+    z.object({
+      requestId: Id,
+      packId: Id,
+      orgId: Id,
+      requestedBy: Id,
+      kind: z.enum(['hire', 'role_update']),
+      /** The persona keys (without the pack prefix) and, per key, the agent to create. */
+      items: z.array(z.object({ key: z.string().max(64), agentName: z.string().max(60).optional() })).max(60),
+      workstationId: Id.nullable(),
+    }),
+  ),
+  defineEvent(
+    'PackHireResolved',
+    z.object({
+      requestId: Id,
+      packId: Id,
+      orgId: Id,
+      status: z.enum(['done', 'failed']),
+      error: z.string().max(500).nullable().default(null),
+    }),
+  ),
+  /** A pack update changed a persona an agent was hired from: a new role version is on offer (never forced). */
+  defineEvent(
+    'RolePackUpdateOffered',
+    z.object({
+      orgId: Id,
+      roleKey: z.string().max(80),
+      fromVersion: z.number().int().min(1),
+      packId: Id,
+      capability: z.string().max(130),
+      sha: z.string().max(64),
+      hash: z.string().regex(/^[0-9a-f]{64}$/),
+      provenance: PackProvenanceSchema,
+    }),
+  ),
+  defineEvent(
+    'RolePackUpdateResolved',
+    z.object({ orgId: Id, roleKey: z.string().max(80), packId: Id, accepted: z.boolean(), by: Id }),
   ),
 ] as const;

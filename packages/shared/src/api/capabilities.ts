@@ -1,15 +1,21 @@
 import { z } from 'zod';
 import {
   PackAdapterSchema,
+  PackCredentialKindSchema,
   PackDiffSchema,
   PackNameSchema,
   PackRefSchema,
   PackScopeSchema,
   PackShaSchema,
   PackSnapshotSchema,
+  PackSourceSchema,
   PackUrlSchema,
+  PackVisibilitySchema,
+  PrivatePackUrlSchema,
 } from '../capabilities/packs.ts';
 import { CapabilityKindSchema, RegistryMetaSchema } from '../capabilities/parse.ts';
+import { PackProvenanceSchema } from '../capabilities/provenance.ts';
+import { AgentPermissionsSchema, Seniority } from '../roles/schema.ts';
 
 /**
  * `GET /api/capabilities`: the effective registry of the organization. Sources, lowest precedence first: built-in, organization
@@ -86,9 +92,32 @@ export type ReviewProjectSkillRequest = z.infer<typeof ReviewProjectSkillRequest
 // ------------------------------------------------------------------------------------------------------- packs
 
 /** `POST /api/packs`: add a pack by git URL and ref. The name is the namespace; a preset fills in the rest. */
+/**
+ * A deploy key (`ssh`) or an https token, sealed in the browser (hybrid RSA+AES, `sealLarge`) separately to each chosen
+ * workstation's runner key. The server relays the ciphertexts and never opens them.
+ */
+export const PackCredentialSharesSchema = z.object({
+  kind: PackCredentialKindSchema,
+  /** The ssh public half or key fingerprint is not secret; a token's user name (default `x-access-token`) is not either. */
+  username: z.string().max(100).optional(),
+  shares: z
+    .array(
+      z.object({
+        workstationId: z.uuid(),
+        keyId: z.string().max(100),
+        ciphertext: z.string().min(20).max(60_000),
+      }),
+    )
+    .min(1)
+    .max(20),
+});
+export type PackCredentialShares = z.infer<typeof PackCredentialSharesSchema>;
+
 export const AddPackRequestSchema = z.object({
   name: PackNameSchema.optional(),
-  url: PackUrlSchema,
+  url: z.union([PackUrlSchema, PrivatePackUrlSchema]),
+  /** R3a: a private repository. The URL may then be ssh; every chosen workstation needs a share. */
+  credential: PackCredentialSharesSchema.optional(),
   ref: PackRefSchema,
   adapter: PackAdapterSchema.default('auto'),
   scope: PackScopeSchema.default('org'),
@@ -103,6 +132,22 @@ export const AddPackRequestSchema = z.object({
 export type AddPackRequest = z.infer<typeof AddPackRequestSchema>;
 
 export const PackStatusSchema = z.enum(['pending', 'ready', 'failed']);
+
+/** One workstation that holds (or is asked to hold) a pack, with the member's opt-in and the state of its credential. */
+export const PackHolderSchema = z.object({
+  workstationId: z.uuid(),
+  workstationName: z.string(),
+  ownerName: z.string(),
+  mine: z.boolean(),
+  /** `pending`: the member has not accepted yet, nothing is cloned. `declined` rows are removed, so it is not listed. */
+  assignment: z.enum(['accepted', 'pending']),
+  credential: z.enum(['stored', 'pending', 'failed']).nullable(),
+  credentialError: z.string().nullable().default(null),
+  hostKeyPinned: z.boolean().default(false),
+  /** The workstation reported the pack at the pinned commit. */
+  hasContent: z.boolean().default(false),
+});
+export type PackHolder = z.infer<typeof PackHolderSchema>;
 
 export const PackDtoSchema = z.object({
   id: z.uuid(),
@@ -134,6 +179,18 @@ export const PackDtoSchema = z.object({
   lastCheckedAt: z.iso.datetime().nullable(),
   addedAt: z.iso.datetime(),
   attribution: z.string().nullable(),
+  /** R3a (all additive). */
+  source: PackSourceSchema.default('git'),
+  visibility: PackVisibilitySchema.default('org'),
+  ownerUserId: z.uuid().nullable().default(null),
+  ownerName: z.string().nullable().default(null),
+  description: z.string().default(''),
+  credentialKind: PackCredentialKindSchema.nullable().default(null),
+  /** Of an ssh deploy key, so the admin can compare it with the key on the git host. */
+  credentialFingerprint: z.string().nullable().default(null),
+  /** An authored pack's revision number (the `v<N>` of its ref). */
+  revision: z.number().int().default(0),
+  holders: z.array(PackHolderSchema).default([]),
 });
 export type PackDto = z.infer<typeof PackDtoSchema>;
 
@@ -165,3 +222,217 @@ export const TrustPackRequestSchema = z.object({
   contentHash: z.string().regex(/^[0-9a-f]{64}$/),
 });
 export const PackScriptsRequestSchema = z.object({ enabled: z.boolean() });
+
+// ------------------------------------------------------------------------------------------ private packs and opt-in
+
+/** `PUT /api/packs/:id/workstations`: the admin changes who holds the pack (new holders of other members wait for their opt-in). */
+export const SetPackWorkstationsRequestSchema = z.object({
+  workstationIds: z.array(z.uuid()).min(1).max(20),
+  /** A private repository: a share for each workstation added that has no credential yet. */
+  credential: PackCredentialSharesSchema.optional(),
+});
+export type SetPackWorkstationsRequest = z.infer<typeof SetPackWorkstationsRequestSchema>;
+
+/** `PUT /api/packs/:id/credential`: replace the deploy key or token (rotation). */
+export const SetPackCredentialRequestSchema = PackCredentialSharesSchema;
+
+/** A pack assigned to one of my workstations, waiting for my answer (`GET /api/pack-assignments`; also a desk item). */
+export const PackAssignmentDtoSchema = z.object({
+  packId: z.uuid(),
+  packName: z.string(),
+  url: z.string(),
+  ref: z.string(),
+  private: z.boolean(),
+  workstationId: z.uuid(),
+  workstationName: z.string(),
+  requestedByName: z.string().nullable(),
+  deskItemId: z.uuid().nullable(),
+  requestedAt: z.iso.datetime(),
+});
+export type PackAssignmentDto = z.infer<typeof PackAssignmentDtoSchema>;
+export const PackAssignmentsResponseSchema = z.object({ items: z.array(PackAssignmentDtoSchema) });
+export const DecidePackAssignmentRequestSchema = z.object({ workstationId: z.uuid(), accept: z.boolean() });
+
+// ------------------------------------------------------------------------------------------ my capabilities (authored)
+
+export const AUTHORED_PACK_STATES = ['draft', 'private', 'in_review', 'trusted'] as const;
+/**
+ * `draft`: nothing saved yet. `private`: only on my workstation, usable at once. `in_review`: organization-visible and waiting
+ * for an Owner or Admin to approve it (their own packs are approved when they save). `trusted`: listed for the organization.
+ */
+export const AuthoredPackStateSchema = z.enum(AUTHORED_PACK_STATES);
+
+export const MyPackDtoSchema = z.object({
+  id: z.uuid(),
+  name: z.string(),
+  description: z.string(),
+  visibility: PackVisibilitySchema,
+  state: AuthoredPackStateSchema,
+  workstationId: z.uuid(),
+  workstationName: z.string(),
+  workstationOnline: z.boolean(),
+  /** The author's workstation can author packs (`pack-authoring:1`). */
+  supported: z.boolean(),
+  revision: z.number().int(),
+  pinnedSha: PackShaSchema.nullable(),
+  status: PackStatusSchema,
+  error: z.string().nullable(),
+  /** What the last save contained, metadata only. */
+  items: z.array(
+    z.object({
+      kind: z.enum(['skill', 'persona', 'playbook']),
+      key: z.string(),
+      name: z.string(),
+      description: z.string(),
+    }),
+  ),
+  hasScripts: z.boolean(),
+  /** A save is on its way to the workstation or being indexed. */
+  saving: z.boolean(),
+  update: PackDtoSchema.shape.update,
+  /** I may approve my own save (Owner or Admin). */
+  mayApprove: z.boolean(),
+  holders: z.array(PackHolderSchema).default([]),
+  createdAt: z.iso.datetime(),
+  /** Which of my agents may use a private pack. */
+  grantedAgentIds: z.array(z.uuid()).default([]),
+});
+export type MyPackDto = z.infer<typeof MyPackDtoSchema>;
+export const MyPacksResponseSchema = z.object({
+  packs: z.array(MyPackDtoSchema),
+  /** My workstations, for the picker; `supported` false: update the runner. */
+  workstations: z.array(
+    z.object({ id: z.uuid(), name: z.string(), online: z.boolean(), supported: z.boolean() }),
+  ),
+});
+export type MyPacksResponse = z.infer<typeof MyPacksResponseSchema>;
+
+export const CreateMyPackRequestSchema = z.object({
+  name: PackNameSchema,
+  description: z.string().max(500).default(''),
+  visibility: PackVisibilitySchema,
+  workstationId: z.uuid(),
+});
+export type CreateMyPackRequest = z.infer<typeof CreateMyPackRequestSchema>;
+
+export const SaveMyPackRequestSchema = z.object({
+  /** The runner key the files were sealed with (so a changed key is refused instead of lost). */
+  keyId: z.string().max(100),
+  /** `sealLarge` of `{ tree }`: the server relays it to the author's workstation and never opens it. */
+  ciphertext: z.string().min(20).max(4_000_000),
+  /** Owners and Admins approving their own save of an organization pack. */
+  approve: z.boolean().default(false),
+});
+export type SaveMyPackRequest = z.infer<typeof SaveMyPackRequestSchema>;
+
+export const ReadMyPackRequestSchema = z.object({ replyKey: z.string().min(20).max(2000) });
+export const ReadMyPackResultSchema = z.object({
+  status: z.enum(['pending', 'ready', 'failed']),
+  ciphertext: z.string().optional(),
+  error: z.string().optional(),
+});
+export type ReadMyPackResult = z.infer<typeof ReadMyPackResultSchema>;
+
+export const SetPackVisibilityRequestSchema = z.object({ visibility: PackVisibilitySchema });
+export const GrantPackAgentRequestSchema = z.object({ agentId: z.uuid(), granted: z.boolean() });
+
+// ------------------------------------------------------------------------------------------ hire from pack
+
+/** A persona of a pack as the hire dialog shows it: what role and permissions the hire would get for the caller. */
+export const PackPersonaDtoSchema = z.object({
+  key: z.string(),
+  name: z.string(),
+  description: z.string(),
+  icon: z.string().nullable(),
+  declaredTools: z.array(z.string()),
+  permissions: AgentPermissionsSchema,
+  /** What the persona declared that the caller may not grant. */
+  withheld: z.array(z.string()),
+  provenanceLabel: z.string(),
+  roleKey: z.string(),
+  /** A role made from this persona already exists: the version and whether the pack has changed it since. */
+  role: z.object({ version: z.number().int(), upToDate: z.boolean() }).nullable(),
+  hiredAgentIds: z.array(z.uuid()),
+});
+export type PackPersonaDto = z.infer<typeof PackPersonaDtoSchema>;
+export const PackPersonasResponseSchema = z.object({
+  packId: z.uuid(),
+  packName: z.string(),
+  trusted: z.boolean(),
+  /** A hire needs the pack's files to be reachable on an online workstation. */
+  readableNow: z.boolean(),
+  personas: z.array(PackPersonaDtoSchema),
+});
+export type PackPersonasResponse = z.infer<typeof PackPersonasResponseSchema>;
+
+export const HireFromPackRequestSchema = z.object({
+  items: z
+    .array(
+      z.object({
+        key: z.string().min(1).max(64),
+        name: z.string().min(1).max(60),
+        seniority: Seniority.optional(),
+      }),
+    )
+    .min(1)
+    .max(30),
+  workstationId: z.uuid(),
+  runtime: z.string().max(60).optional(),
+  model: z.string().max(100).optional(),
+  effort: z.string().max(40).optional(),
+  capacity: z.number().int().min(1).max(8).default(1),
+  allowedProjectIds: z.array(z.uuid()).max(500).nullable().optional(),
+  acknowledgeUnsandboxed: z.boolean().optional(),
+});
+export type HireFromPackRequest = z.infer<typeof HireFromPackRequestSchema>;
+
+export const PackHireStatusSchema = z.object({
+  requestId: z.uuid(),
+  status: z.enum(['pending', 'done', 'failed']),
+  error: z.string().nullable(),
+  agents: z.array(z.object({ agentId: z.uuid(), name: z.string(), roleKey: z.string() })),
+});
+export type PackHireStatus = z.infer<typeof PackHireStatusSchema>;
+
+/** A new version of a persona an agent was hired from, on offer to the Owner/Admin (never applied by itself). */
+export const RoleOfferDtoSchema = z.object({
+  roleKey: z.string(),
+  roleName: z.string(),
+  fromVersion: z.number().int(),
+  packId: z.uuid(),
+  packName: z.string(),
+  capability: z.string(),
+  provenance: PackProvenanceSchema,
+  newLabel: z.string(),
+  offeredAt: z.iso.datetime(),
+  agentCount: z.number().int(),
+});
+export type RoleOfferDto = z.infer<typeof RoleOfferDtoSchema>;
+export const RoleOffersResponseSchema = z.object({ items: z.array(RoleOfferDtoSchema) });
+export const RoleOfferReviewSchema = z.object({
+  requestId: z.uuid(),
+  status: z.enum(['pending', 'ready', 'failed']),
+  error: z.string().nullable(),
+  /** The instructions of the current role version and the new persona text, for the diff. */
+  current: z.string().nullable(),
+  proposed: z.string().nullable(),
+});
+export type RoleOfferReview = z.infer<typeof RoleOfferReviewSchema>;
+
+/** Agents and roles whose pack is no longer trusted (or was removed): they keep their role version and show a warning. */
+export const PackWarningSchema = z.enum(['revoked', 'removed', 'private_gone']);
+export type PackWarning = z.infer<typeof PackWarningSchema>;
+
+// ------------------------------------------------------------------------------------------ persona chat
+
+export const StartPersonaChatRequestSchema = z.object({
+  /** `persona:<key>` is resolved against the registry; a pack persona is `<pack>:<key>`. */
+  personaKey: z.string().min(1).max(130),
+  /** The model to talk to; default: the persona's own, else the cheap default of the workstation. */
+  runtime: z.string().max(60).optional(),
+  model: z.string().max(100).optional(),
+  effort: z.string().max(40).optional(),
+  workstationId: z.uuid().optional(),
+  projectId: z.uuid().optional(),
+});
+export type StartPersonaChatRequest = z.infer<typeof StartPersonaChatRequestSchema>;

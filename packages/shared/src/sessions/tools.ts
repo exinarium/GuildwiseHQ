@@ -33,10 +33,16 @@ export const SESSION_PURPOSE_VERBS: Readonly<Record<string, readonly string[]>> 
   board_chair: ['show', 'add', 'next', 'pause', 'converge', 'disagreement', 'delegate'],
   board_cast: ['cast'],
   board_minutes: ['show', 'minutes'],
+  // A chat with a persona that is not hired: no verb at all, only the common tools (skill show/list, ledger search; all read-only).
+  persona_chat: [],
 };
 
 const purposesWhere = (board: boolean): Record<string, readonly string[]> =>
-  Object.fromEntries(Object.entries(SESSION_PURPOSE_VERBS).filter(([k]) => k.startsWith('board_') === board));
+  Object.fromEntries(
+    Object.entries(SESSION_PURPOSE_VERBS).filter(
+      ([k]) => k !== 'persona_chat' && k.startsWith('board_') === board,
+    ),
+  );
 /** The `aom session` verbs by purpose (discovery turns) and the `aom board` verbs by purpose (boardroom turns). */
 export const DISCOVERY_PURPOSE_VERBS = purposesWhere(false);
 export const BOARD_PURPOSE_VERBS = purposesWhere(true);

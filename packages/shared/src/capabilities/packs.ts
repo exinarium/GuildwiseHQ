@@ -68,7 +68,8 @@ export const LegacyPackUrlSchema = z
     (u) =>
       /^https:\/\/[^/@\s]+\/[^\s]+$/i.test(u) ||
       /^ssh:\/\/(?:git@)?[^/@\s:]+(?::\d+)?\/[^\s]+$/i.test(u) ||
-      /^git@[^/@\s:]+:[^\s]+$/i.test(u),
+      /^git@[^/@\s:]+:[^\s]+$/i.test(u) ||
+      /^authored:[0-9a-f-]{36}$/i.test(u),
     'use an https:// URL without a password or token in it',
   );
 
@@ -80,6 +81,44 @@ export const PackRefSchema = z
   .max(200)
   .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]*$/, 'a tag, branch or commit')
   .refine((r) => !r.includes('..') && !r.endsWith('/') && !r.endsWith('.lock'), 'not a valid ref name');
+
+/**
+ * Where a pack's files come from. `git`: a repository (public https, or private through a deploy key or token). `authored`: made
+ * in the capability editor and held as a plain folder (the standard pack layout) on the author's workstation.
+ */
+export const PACK_SOURCES = ['git', 'authored'] as const;
+export const PackSourceSchema = z.enum(PACK_SOURCES);
+export type PackSource = z.infer<typeof PackSourceSchema>;
+/** `org`: listed for the organization once approved. `private`: only the owner's workstation, only the owner sees it. */
+export const PACK_VISIBILITIES = ['org', 'private'] as const;
+export const PackVisibilitySchema = z.enum(PACK_VISIBILITIES);
+export type PackVisibility = z.infer<typeof PackVisibilitySchema>;
+/** `ssh`: a deploy key. `token`: an https access token. */
+export const PACK_CREDENTIAL_KINDS = ['ssh', 'token'] as const;
+export const PackCredentialKindSchema = z.enum(PACK_CREDENTIAL_KINDS);
+export type PackCredentialKind = z.infer<typeof PackCredentialKindSchema>;
+
+/**
+ * The URL of a private git pack: https, or ssh (`ssh://git@host/path`, `git@host:path`). Never a user name or password in an
+ * https URL (the credential is sealed separately); the ssh user is the usual `git`.
+ */
+export const PrivatePackUrlSchema = z
+  .string()
+  .trim()
+  .min(8)
+  .max(500)
+  .refine((u) => !/\s/.test(u), 'no spaces')
+  .refine(
+    (u) =>
+      /^https:\/\/[^/@\s]+\/[^\s]+$/i.test(u) ||
+      /^ssh:\/\/git@[^/@\s:]+(?::\d+)?\/[^\s]+$/i.test(u) ||
+      /^git@[^/@\s:]+:[^\s]+$/i.test(u),
+    'use https://host/path, ssh://git@host/path or git@host:path, without a password or token in it',
+  );
+
+/** The placeholder URL of an authored pack (it has no remote). */
+export const authoredPackUrl = (packId: string): string => `authored:${packId}`;
+export const isAuthoredUrl = (url: string): boolean => url.startsWith('authored:');
 
 export const PACK_ADAPTERS = ['auto', 'generic', 'bmad'] as const;
 export const PackAdapterSchema = z.enum(PACK_ADAPTERS);
@@ -510,6 +549,7 @@ export function packItemOf(e: ParsedCapability, pack: string): PackItem {
     ...(e.hasScripts ? { hasScripts: true } : {}),
     ...(e.tags?.length ? { tags: e.tags } : {}),
     ...(e.icon ? { icon: e.icon } : {}),
+    ...(e.kind === 'persona' && e.meta.tools?.length ? { tools: e.meta.tools } : {}),
     files: Object.entries(e.files)
       .sort(([a], [b]) => a.localeCompare(b))
       .slice(0, 300)
