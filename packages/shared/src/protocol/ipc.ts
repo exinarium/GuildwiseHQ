@@ -348,11 +348,13 @@ export const RpcMethodSchema = z.enum([
   'board.cast',
   'board.minutes',
   'board.score',
-  /** `aom delegate`: a read-only sub-task with a registry persona; run by the runner (`.run`), authorized and booked by the server (`.begin`, `.cost`). */
+  /** `aom delegate`: a sub-task for a granted target (R3b); run by the runner (`.run`), authorized and booked by the server (`.begin`, `.cost`). */
   'delegate.run',
   'delegate.begin',
   'delegate.cost',
   'delegate.heartbeat',
+  /** R3b: the PreToolUse guard of Claude Code's `Agent` tool asks whether a native subagent may start (granted, within the caps). */
+  'delegate.guard',
 ]);
 export type RpcMethod = z.infer<typeof RpcMethodSchema>;
 

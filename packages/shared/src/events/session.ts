@@ -1,5 +1,10 @@
 import { z } from 'zod';
-import { DelegateOutcomeSchema } from '../delegate/index.ts';
+import {
+  DelegateOutcomeSchema,
+  DelegateOwnerKindSchema,
+  DelegateProfileSchema,
+  DelegateTargetKindSchema,
+} from '../delegate/index.ts';
 import { ModelChoiceSchema } from '../models/choices.ts';
 import { ParticipantKindSchema, SessionContextSchema, SessionThreadKindSchema } from '../sessions/index.ts';
 import { defineEvent, Id, Usage } from './define.ts';
@@ -131,13 +136,39 @@ export const sessionEvents = [
       callerId: Id,
       /** The session of a `session_turn` caller (so the session page refreshes its cost meter). */
       threadId: Id.optional(),
-      personaKey: z.string().max(120),
+      /** The target's handle (a persona key, or `agent:<slug>`). */
+      personaKey: z.string().max(140),
       usage: Usage,
       outcome: DelegateOutcomeSchema,
       durationMs: z.number().int().nonnegative().optional(),
+      /** R3b: what the child was (additive; older events have none). */
+      targetKind: DelegateTargetKindSchema.optional(),
+      targetName: z.string().max(200).optional(),
+      profile: DelegateProfileSchema.optional(),
+      summary: z.string().max(400).optional(),
+      native: z.boolean().optional(),
       /** Stamped when appended, like `SessionTurnCompleted.costMicros`. */
       costMicros: z.number().int().nonnegative().optional(),
       costUnknown: z.boolean().optional(),
+    }),
+  ),
+  /**
+   * R3b: a delegation grant was set, changed or revoked (stream `agent-<id>` for an agent, `thread-<id>` for a session). The
+   * event is the audit trail; `delegate_grants` is the projection. Off by default: no row, no delegation.
+   */
+  defineEvent(
+    'DelegateGrantChanged',
+    z.object({
+      ownerKind: DelegateOwnerKindSchema,
+      ownerId: Id,
+      orgId: Id,
+      targetKind: DelegateTargetKindSchema,
+      targetKey: z.string().min(1).max(130),
+      granted: z.boolean(),
+      maxCalls: z.number().int().min(1).max(8).optional(),
+      timeoutSec: z.number().int().min(10).max(600).optional(),
+      maxProfile: DelegateProfileSchema.nullable().optional(),
+      changedBy: Id,
     }),
   ),
   defineEvent(

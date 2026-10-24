@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { DelegationSpecSchema } from '../delegate/grants.ts';
 import { ModelChoiceSchema } from '../models/choices.ts';
 import { fenceMessage, safeName } from './untrusted.ts';
 
@@ -150,6 +151,8 @@ export const SessionTurnSpecSchema = z.object({
    * false (a session built around someone else's agent, or an older server): they are not.
    */
   ownerSession: z.boolean().optional(),
+  /** R3b: the delegation targets the session's creator granted this facilitator or Chair (absent or empty: none). */
+  delegation: DelegationSpecSchema.optional(),
   /** The other seats in the room, for orientation. */
   roster: z
     .array(z.object({ name: z.string(), kind: ParticipantKindSchema, seat: z.string() }))

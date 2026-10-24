@@ -1,12 +1,16 @@
 import { z } from 'zod';
 import { Usage } from '../events/define.ts';
 import { DIRECT_RUNTIME, MODEL_CHOICES, type ModelChoice, splitDirectModel } from '../models/index.ts';
+import { DelegateProfileSchema, DelegateTargetSpecSchema } from './grants.ts';
+
+export * from './grants.ts';
 
 /**
- * `aom delegate <persona> "<task>" [--model <choice>]` (Phase E): a sub-task run with a persona of the capability registry
- * as a nested, read-only, cost-tracked turn. The runner executes it (`delegate.run`); the server only authorizes it
- * (`delegate.begin`: the caller's turn or shift is running, its purpose allows the verb, the budget is not used up) and
- * books the cost under the caller (`delegate.cost`, event `DelegateCompleted`).
+ * `aom delegate <target> "<task>"` (Phase E, explicit since R3b): a sub-task run by a granted target (a persona of the
+ * capability registry, or a hired agent) as a real child run on the target's own model, with a tool profile never wider than
+ * the caller's. The runner executes it (`delegate.run`); the server only authorizes it (`delegate.begin`: the caller's turn or
+ * shift is running, a grant names the target, the caps and budgets have room) and books the cost under the caller
+ * (`delegate.cost`, event `DelegateCompleted`). Delegation is off unless a grant exists.
  */
 export const DELEGATE_LIMITS = {
   /** Characters of the task a caller may hand over. */
@@ -43,13 +47,13 @@ export const isDelegateServerRpc = (m: string): boolean =>
   m === DELEGATE_BEGIN_RPC || m === DELEGATE_COST_RPC || m === DELEGATE_HEARTBEAT_RPC;
 
 export const DelegateRunParamsSchema = z.object({
-  persona: z
+  target: z
     .string()
     .trim()
     .min(1)
-    .max(120)
+    .max(140)
     .describe(
-      'The key of a persona of the capability registry (`aom skill list --kind persona`), e.g. `devils-advocate` or `bmad:analyst`.',
+      'A granted target, as the delegation note lists it: a persona key (`devils-advocate`, `bmad:analyst`) or `agent:<name>`.',
     ),
   task: z
     .string()
@@ -57,25 +61,36 @@ export const DelegateRunParamsSchema = z.object({
     .min(1)
     .max(DELEGATE_LIMITS.maxTaskChars)
     .describe('The sub-task, self-contained: the delegate sees nothing of your conversation.'),
-  model: z
-    .string()
-    .trim()
-    .min(1)
-    .max(120)
-    .optional()
-    .describe(
-      "A model the workstation offers (`haiku`, `sonnet`, `openai:gpt-5-mini`). Default: the persona's own model, else a small one.",
-    ),
+  /** Refused: the target runs on the model configured for it. Kept in the schema only so the refusal can say why. */
+  model: z.string().trim().max(120).optional(),
 });
 export type DelegateRunParams = z.infer<typeof DelegateRunParamsSchema>;
 
+/** What a model sees as the tool input: no `model` (a target runs on its own). */
+export const DelegateToolInputSchema = DelegateRunParamsSchema.omit({ model: true });
+
 export const DelegateBeginParamsSchema = z.object({
   delegateId: z.uuid(),
-  persona: z.string().min(1).max(120),
+  /** The handle the caller typed (the grant's persona key or `agent:<slug>`). */
+  target: z.string().min(1).max(140),
+  /** The model the runner is about to use: for an agent target the server compares it with the agent's own. */
   model: z.object({ runtime: z.string().min(1).max(60), model: z.string().min(1).max(120) }),
+  /** A persona's tool profile (read from its frontmatter on the workstation); the server narrows it to the grant. */
+  profile: DelegateProfileSchema.optional(),
   taskChars: z.number().int().nonnegative().max(1_000_000),
+  /** A Claude Code subagent started by its own `Agent` tool (the id is derived from the tool call). */
+  native: z.boolean().optional(),
 });
 export type DelegateBeginParams = z.infer<typeof DelegateBeginParamsSchema>;
+
+/** The server's word on a child run that may start. */
+export const DelegateBeginResultSchema = z.object({
+  delegateId: z.uuid(),
+  target: DelegateTargetSpecSchema,
+  /** The effective profile before the caller's own is applied: the target's, narrowed to the grant. */
+  profile: DelegateProfileSchema,
+});
+export type DelegateBeginResult = z.infer<typeof DelegateBeginResultSchema>;
 
 export const DELEGATE_OUTCOMES = ['ok', 'failed', 'timeout', 'cancelled'] as const;
 export const DelegateOutcomeSchema = z.enum(DELEGATE_OUTCOMES);
@@ -83,10 +98,16 @@ export type DelegateOutcome = z.infer<typeof DelegateOutcomeSchema>;
 
 export const DelegateCostParamsSchema = z.object({
   delegateId: z.uuid(),
-  persona: z.string().min(1).max(120),
+  /** The target's handle. */
+  target: z.string().min(1).max(140),
   usage: Usage,
   outcome: DelegateOutcomeSchema,
   durationMs: z.number().int().nonnegative().max(86_400_000).optional(),
+  /** The profile the child ran with (after the caller's clamp). */
+  profile: DelegateProfileSchema.optional(),
+  /** The first lines of the reply or the failure, for the card and the session page. */
+  summary: z.string().max(400).optional(),
+  native: z.boolean().optional(),
 });
 export type DelegateCostParams = z.infer<typeof DelegateCostParamsSchema>;
 
@@ -123,4 +144,10 @@ export function renderDelegateReply(persona: string, text: string, note?: string
     ...(note ? [`[${note}]`] : []),
     '--- end of delegate reply ---',
   ].join('\n');
+}
+
+/** The first lines of a reply, for the sub-step on the card (single line, cut). */
+export function summarizeReply(text: string, max = 280): string {
+  const t = text.replace(/\s+/g, ' ').trim();
+  return t.length > max ? `${t.slice(0, max - 1)}…` : t;
 }

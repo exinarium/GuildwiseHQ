@@ -23,6 +23,7 @@ import {
   ClaudeAccountEnsurePayloadSchema,
   ClaudeAccountInfoSchema,
 } from '../claude/accounts.ts';
+import { DelegationSpecSchema } from '../delegate/grants.ts';
 import {
   DeployConnectPayloadSchema,
   DeployKeyPayloadSchema,
@@ -1425,8 +1426,8 @@ export const RUN_USAGE_FEATURE = 'run-usage:1';
  * stored: the server counts it toward a provider's monthly cap while the run is going and stops the run at the cap.
  */
 export const RunUsageSchema = msg('run.usage', {
-  kind: z.enum(['shift', 'chat']),
-  /** The shift id, or the chat/session turn id. */
+  kind: z.enum(['shift', 'chat', 'delegate']),
+  /** The shift id, or the chat/session turn id, or the delegate id (R3b: a child run reports its own usage). */
   id: z.string(),
   usage: Usage,
 });
@@ -1559,6 +1560,8 @@ export const ShiftStartSchema = msg('shift.start', {
   resumeMessage: z.string().max(40_000).optional(),
   /** R3b: the playbooks this agent was granted (`aom playbook run`); absent or empty: none. The server checks the grant again. */
   playbookGrants: z.array(z.string().max(130)).max(40).optional(),
+  /** R3b: the delegation targets of this chat's agent (an agent chat); a session turn carries its own in `session.delegation`. */
+  delegation: DelegationSpecSchema.optional(),
 });
 export const ShiftStopSchema = msg('shift.stop', { shiftId: z.uuid(), reason: ShiftStopReasonSchema });
 /** "Stop the running command": the runner kills the commands the agent runs (its tool process trees); the shift goes on. */
