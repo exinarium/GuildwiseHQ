@@ -4,6 +4,7 @@ import type { Ctx } from '../context.ts';
 import { exec, one, rows } from '../db/sql.ts';
 import { forbidden } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
+import { notifyUsers } from '../push/notifier.ts';
 import { orgScope, SYSTEM_ACTOR } from './common.ts';
 import { authorWorkstationOf } from './pack-support.ts';
 
@@ -138,6 +139,18 @@ export async function notifyReviewersOfWorkstation(ctx: Ctx, workstationId: stri
     } as AppendInput;
     await ctx.store.append([ev]);
     told++;
+    // Q67 follow-up: the reviewer's phone hears of it too (the push channel of the other desk notices). Best effort: the desk item is the record.
+    await notifyUsers(ctx, [w.reviewer_user_id], {
+      category: 'desk_blocking',
+      subject: `${PACK_REVIEW_READY_SUBKIND}:${w.pack_id}`,
+      // a later wait, tells again
+      state: `online:${now.toISOString()}`,
+      title: `Pack review ready: "${w.pack_name}"`,
+      body: `The author's workstation is online. You can read "${w.pack_name}" and review it now.`,
+      url: `/desk#desk-item-${deskItemId}`,
+      priority: 'normal',
+      orgId: w.org_id,
+    }).catch((err) => ctx.log.warn({ err }, 'review wait push failed'));
   }
   return told;
 }

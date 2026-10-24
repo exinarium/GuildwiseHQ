@@ -1,9 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { uniqueEmail } from './helpers/app.ts';
 import { closeAdminPool, q as rawQ } from './helpers/db.ts';
 import type { FakeRunner } from './helpers/fake-runner.ts';
 import { createWorld, ok, until, type World } from './helpers/world.ts';
+
+const send = vi.hoisted(() => vi.fn());
+vi.mock('web-push', () => ({ default: { sendNotification: send, generateVAPIDKeys: () => ({}) } }));
 
 /**
  * Owner decision Q67: the server keeps no copy of an authored pack's text, so a review waits for the author's workstation, and the
@@ -18,12 +21,28 @@ let member: { id: string; cookie: string };
 const replyKey = 'A'.repeat(80);
 
 beforeAll(async () => {
-  w = await createWorld({ env: { AOM_FIRST_RUN_HIRE_CAP: 'false' } });
+  w = await createWorld({
+    env: {
+      AOM_FIRST_RUN_HIRE_CAP: 'false',
+      AOM_VAPID_PUBLIC_KEY: 'BPublicKeyForTests',
+      AOM_VAPID_PRIVATE_KEY: 'privateKeyForTests',
+      AOM_VAPID_SUBJECT: 'mailto:ops@example.com',
+    },
+  });
   r = await w.connectRunner();
   member = await w.t.userSession(uniqueEmail('member'));
   await w.t.addOrgMember(w.owner.id, member.id, 'member');
   packId = randomUUID();
   // an authored organization pack whose author's workstation is the world's (its text lives only there)
+  send.mockResolvedValue({ statusCode: 201 });
+  const sub = await w.t.req('POST', '/api/push/subscriptions', {
+    cookie: w.owner.cookie,
+    body: {
+      endpoint: `https://push.example.com/send/${randomUUID()}`,
+      keys: { p256dh: 'p256dh-key', auth: 'auth-secret' },
+    },
+  });
+  expect(sub.status).toBe(201);
   await q(
     `INSERT INTO packs (id, org_id, name, url, ref, source, visibility, workstation_ids, owner_user_id, added_at)
      VALUES ($1,$2,'crew','authored:crew','v1','authored','org',ARRAY[$3]::uuid[],$4, now())`,
@@ -90,6 +109,15 @@ describe('a review waits for the author workstation (Q67)', () => {
     expect(item).toMatchObject({ addressee_user_id: w.owner.id, subkind: 'pack_review_ready' });
     expect(item.title).toContain('crew');
     expect(item.body).toContain('server keeps no copy');
+    // the reviewer's phone is told as well, once, with a link to the desk item and no pack text
+    await w.t.app.ctx.services.push?.flush();
+    const pushed = send.mock.calls.map(
+      (c) => JSON.parse(c[1] as string) as { title: string; body: string; url: string },
+    );
+    expect(pushed).toHaveLength(1);
+    expect(pushed[0]?.title).toContain('crew');
+    expect(pushed[0]?.body).toContain('workstation is online');
+    expect(pushed[0]?.url).toBe(`/desk#desk-item-${item.id}`);
     expect((await waits())[0].notified_at).not.toBeNull();
     expect(await asOwner('GET', `/api/packs/${packId}/review-wait`)).toEqual({ waiting: false });
     // coming online again does not tell them again
