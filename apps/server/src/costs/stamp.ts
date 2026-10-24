@@ -39,7 +39,10 @@ export function createCostStampInterceptor(): Interceptor {
     const ownerPrices = async (orgId: string | null | undefined): Promise<OwnerModelPrice[]> => {
       if (!orgId) return [];
       let list = owned.get(orgId);
-      if (!list) owned.set(orgId, (list = await loadOwnerPrices(tx, orgId)));
+      if (!list) {
+        list = await loadOwnerPrices(tx, orgId);
+        owned.set(orgId, list);
+      }
       return list;
     };
     for (const input of inputs) {

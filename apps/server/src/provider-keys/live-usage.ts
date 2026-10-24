@@ -45,12 +45,18 @@ const registry = new WeakMap<Ctx, Map<string, Live>>();
 const stoppedRegistry = new WeakMap<Ctx, Set<string>>();
 const stoppedOf = (ctx: Ctx): Set<string> => {
   let m = stoppedRegistry.get(ctx);
-  if (!m) stoppedRegistry.set(ctx, (m = new Set()));
+  if (!m) {
+    m = new Set();
+    stoppedRegistry.set(ctx, m);
+  }
   return m;
 };
 const liveOf = (ctx: Ctx): Map<string, Live> => {
   let m = registry.get(ctx);
-  if (!m) registry.set(ctx, (m = new Map()));
+  if (!m) {
+    m = new Map();
+    registry.set(ctx, m);
+  }
   return m;
 };
 
