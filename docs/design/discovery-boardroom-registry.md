@@ -327,3 +327,15 @@ Details in `docs/ARCHITECTURE.md` section 38.10. Migration 2481; no new runner c
 - **Not built / next.** `--input` is free text (no per-playbook typed inputs). No separate "document kind" for epics. The `/` menu does not take text after the command (the playbook asks what the person wants). No per-user (rather than per-manager) owner for a session an agent starts from a chat. A playbook whose steps use scripts runs as the registry allows (scripts stay off unless the pack owner enabled them).
 - **Verified against real components.** Server flows against a real database with a fake runner (the facilitator's verbs and the agent's rpc are sent as the runner would); the web menu in jsdom. Not run against a real Claude Code turn: the playbook text is loaded by `aom skill show` as before, which R3a already verified; a real run of a BMAD step workflow is untested. No browser tool was available for a visual check.
 - **Open questions.** (a) Should a playbook started from a chat by a granted agent be owned by the chat's user rather than the manager? (b) Should the `/` menu accept text after the command as the playbook's `input`? (c) Should an Owner be able to grant a playbook to every agent of a role at once?
+
+**Owner decisions on the R2/R3a questions (2026-10-24), to build after R3b (as R3c)**
+- Q51 Session clock: **keeps running** while waiting on the creator, in both Discovery and Boardroom. Change the Boardroom so it doesn't pause at decisions.
+- Q52 Project-repo skills: **review before first use.** Unreviewed or changed skills are unusable until an Owner or Admin marks them reviewed.
+- Q53 Archiving a running Boardroom: **confirm, end it (minutes written), then archive.** Enforced on the server.
+- Q54 Push notification to the creator at the **5-minute warning and at time-up**.
+- Q55 Model prices: **as built** (Owners only, no marker in the session meter).
+- Q56 Prompt cache: stays at 5 minutes, as built.
+- Q57 Authored org pack review: **reviewers read the text.** It is sealed to the reviewer's own workstation or browser for review only, so nobody approves unread content.
+- Q58 Hire from a private pack: an **org role with a warning**, as built.
+- Q59 Role update offer: all agents of the role move together, as built.
+- Q60 **Members can hire from packs** in the HR page, within their existing hiring permissions.
