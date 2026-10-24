@@ -243,3 +243,8 @@ Details in `docs/ARCHITECTURE.md` section 38.4 (packs, trust, BMAD, materialisat
   4. **Manifest and graceful absence.** The media image serves `/videos/manifest.json` (slug, files, hash, captions, poster). The web app reads it. If the media service or manifest is unreachable, or a slug is missing, the video UI is hidden: no broken players, and no service-worker caching of failures.
   5. **Tests.** The section-video, tour and service-worker consistency tests switch to checking manifest entries and the hidden-when-unavailable behaviour.
   6. **Docs.** DEPLOY.md documents the media service and how to publish new videos.
+
+**Video voice-over: switch to Kokoro (owner decision, 2026-10-24)**
+- Replace Piper with **Kokoro** (offline TTS) for the video narration, using the **Heart** voice (`af_heart`).
+- Update `e2e/video/voice.ts` and `e2e/video/setup-voice.sh` (install Kokoro and the voice into `~/.cache/aom-video`, no network after setup), and the VIDEO-PLAN.md voice notes. The narration pacing (words per second) must be re-measured.
+- To be built after the media-container change lands (videos then live in `media/videos/`). Re-recording the videos stays for later.
