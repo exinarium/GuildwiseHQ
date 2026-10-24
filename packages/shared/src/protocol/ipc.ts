@@ -334,6 +334,10 @@ export const RpcMethodSchema = z.enum([
   'session.phase',
   'session.draft',
   'session.validate',
+  /** Playbook sessions: the facilitator reports the step it is on. */
+  'session.step',
+  /** `aom playbook run <key>`: an agent granted that playbook starts a guided session for its manager; answered by the server. */
+  'playbook.run',
   /** Boardroom turns: `aom board show|add|next|pause|converge|disagreement|cast|minutes`, answered by the server for a session turn. */
   'board.show',
   'board.add',

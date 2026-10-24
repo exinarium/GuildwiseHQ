@@ -1,7 +1,8 @@
 import { z } from 'zod';
-import { PackedKeySchema } from '../capabilities/parse.ts';
+import { CapabilityKeySchema, PackedKeySchema } from '../capabilities/parse.ts';
 import { DocumentKindSchema, DocumentStatusSchema } from '../documents/index.ts';
 import { ModelChoiceSchema } from '../models/choices.ts';
+import { PlaybookRunStateSchema } from '../playbooks/index.ts';
 import { SessionTurnDtoSchema } from '../sessions/index.ts';
 import { SessionTimeSchema } from '../sessions/time.ts';
 
@@ -36,8 +37,11 @@ export type DiscoveryCeoMode = z.infer<typeof CeoModeSchema>;
 /** The playbooks a session can start from. */
 export const DISCOVERY_PLAYBOOKS = ['brainstorm', 'advanced-elicitation', 'product-brief', 'prd'] as const;
 export const BuiltinDiscoveryPlaybookSchema = z.enum(DISCOVERY_PLAYBOOKS);
-/** A built-in playbook, or a registry playbook of an approved pack (`bmad:brainstorming`, tagged `discovery`). */
-export const DiscoveryPlaybookSchema = z.union([BuiltinDiscoveryPlaybookSchema, PackedKeySchema]);
+/**
+ * A built-in playbook, a registry playbook of an approved pack (`bmad:brainstorming`, tagged `discovery`), or (R3b, a guided
+ * playbook session) any usable playbook of the registry: a vault or project playbook has a plain key.
+ */
+export const DiscoveryPlaybookSchema = z.union([BuiltinDiscoveryPlaybookSchema, PackedKeySchema, CapabilityKeySchema]);
 export type DiscoveryPlaybook = z.infer<typeof DiscoveryPlaybookSchema>;
 /** A brief or PRD template of an approved pack (a playbook tagged `template:brief` or `template:prd`). */
 export const DiscoveryTemplateSchema = PackedKeySchema;
@@ -158,6 +162,8 @@ export const DiscoveryConfigSchema = z.object({
   handingOff: z.iso.datetime().nullable().default(null),
   /** The intake created by "Hand to BA". */
   intakeId: z.uuid().nullable().default(null),
+  /** R3b: a guided playbook session (started from `/` or by `aom playbook run`): what runs and the step it is on. */
+  playbookRun: PlaybookRunStateSchema.nullable().default(null),
 });
 export type DiscoveryConfig = z.infer<typeof DiscoveryConfigSchema>;
 
@@ -402,6 +408,8 @@ export const DiscoveryStateDtoSchema = z.object({
       .nullable(),
     intakeId: z.uuid().nullable(),
     prdValidation: DiscoveryConfigSchema.shape.prdValidation,
+    /** R3b: set for a guided playbook session. */
+    playbookRun: PlaybookRunStateSchema.nullable().optional(),
   }),
   progress: z.object({
     elapsedMinutes: z.number(),
@@ -444,6 +452,7 @@ export const SESSION_RPC_METHODS = [
   'session.phase',
   'session.draft',
   'session.validate',
+  'session.step',
 ] as const;
 export type SessionRpcMethod = (typeof SESSION_RPC_METHODS)[number];
 export const isSessionRpc = (m: string): m is SessionRpcMethod =>

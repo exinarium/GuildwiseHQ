@@ -1557,6 +1557,8 @@ export const ShiftStartSchema = msg('shift.start', {
   resumeSessionId: z.string().optional(),
   /** Lean Team v3: the first message of a resumed session (the answer to its question, or the review findings). */
   resumeMessage: z.string().max(40_000).optional(),
+  /** R3b: the playbooks this agent was granted (`aom playbook run`); absent or empty: none. The server checks the grant again. */
+  playbookGrants: z.array(z.string().max(130)).max(40).optional(),
 });
 export const ShiftStopSchema = msg('shift.stop', { shiftId: z.uuid(), reason: ShiftStopReasonSchema });
 /** "Stop the running command": the runner kills the commands the agent runs (its tool process trees); the shift goes on. */
@@ -1614,6 +1616,8 @@ export const ChatStartSchema = msg('chat.start', {
    * frames (`chatId` is the turn id). An older runner would run it as a plain chat.
    */
   session: SessionTurnSpecSchema.optional(),
+  /** R3b: the playbooks this agent was granted (`aom playbook run`); absent or empty: none. The server checks the grant again. */
+  playbookGrants: z.array(z.string().max(130)).max(40).optional(),
 });
 export const TokenRotatedSchema = msg('token.rotated', { token: z.string().min(1) });
 /** A browser started (or stopped) following the logs of a run environment: the runner sends `run.log` only meanwhile. */

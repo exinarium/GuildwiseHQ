@@ -10,6 +10,7 @@ import {
   BoardScoreParamsSchema,
 } from '../boardroom/index.ts';
 import { DelegateRunParamsSchema } from '../delegate/index.ts';
+import { PlaybookRunParamsSchema, SessionStepParamsSchema } from '../playbooks/index.ts';
 import {
   PanelSectionSchema,
   SessionAnswerParamsSchema,
@@ -26,7 +27,7 @@ import {
  * model, so a model is not offered a tool the server would refuse. One table, so the two can never disagree.
  */
 export const SESSION_PURPOSE_VERBS: Readonly<Record<string, readonly string[]>> = {
-  facilitator: ['show', 'ask', 'note', 'propose', 'phase', 'draft', 'validate', 'delegate'],
+  facilitator: ['show', 'ask', 'note', 'propose', 'phase', 'draft', 'validate', 'step', 'delegate'],
   ceo_answer: ['show', 'answer', 'note'],
   // No `delegate` for a speaker: the sealed first round stays the speaker's own view, and a cheap second opinion is the Chair's call.
   board_speaker: ['show', 'add', 'disagreement', 'score'],
@@ -179,6 +180,16 @@ export const SESSION_TOOLS: readonly SessionToolDef[] = [
     input: SessionValidateParamsSchema,
   },
   {
+    name: 'session_step',
+    cli: 'aom session step',
+    rpc: 'session.step',
+    verb: 'step',
+    family: 'session',
+    description:
+      'Playbook sessions: say which step of the playbook you are starting (1-based, with its title and the total number of steps).',
+    input: SessionStepParamsSchema,
+  },
+  {
     name: 'delegate',
     cli: 'aom delegate',
     rpc: 'delegate.run',
@@ -322,8 +333,25 @@ function familyMatches(t: SessionToolDef, purpose: string | undefined): boolean 
   return t.family === 'any' || t.family === (board ? 'board' : 'session');
 }
 
-/** Tools for a plain chat (no session purpose): reading the registry and the ledger. */
-export const chatToolsFor = (): SessionToolDef[] => [...COMMON_TOOLS];
+/**
+ * Starting a playbook (`aom playbook run`): offered to an agent's chat only when the agent was granted a playbook, never by
+ * default. The server checks the grant again for the key.
+ */
+export const PLAYBOOK_RUN_TOOL: SessionToolDef = {
+  name: 'playbook_run',
+  cli: 'aom playbook run',
+  rpc: 'playbook.run',
+  family: 'any',
+  description:
+    'Start a guided playbook session for the owner (question cards, panel, drafts), for a playbook you were granted. The owner answers it on the session page; you do not wait for it.',
+  input: PlaybookRunParamsSchema,
+};
+
+/** Tools for a plain chat (no session purpose): reading the registry and the ledger, and what the agent was granted. */
+export const chatToolsFor = (opts: { playbook?: boolean } = {}): SessionToolDef[] => [
+  ...COMMON_TOOLS,
+  ...(opts.playbook ? [PLAYBOOK_RUN_TOOL] : []),
+];
 
 /** `aom board add ...` -> `board_add`: lines for the system prompt of a runtime that has tools and no shell. */
 export function renderToolMapping(tools: readonly SessionToolDef[]): string {

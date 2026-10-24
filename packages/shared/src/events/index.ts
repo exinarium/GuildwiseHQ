@@ -30,6 +30,7 @@ import { mailEvents } from './mail.ts';
 import { orgEvents } from './org.ts';
 import { outboundEvents } from './outbound.ts';
 import { packEvents } from './pack.ts';
+import { playbookEvents } from './playbook.ts';
 import { phaseEvents } from './phase.ts';
 import { platformEvents } from './platform.ts';
 import { projectEvents } from './project.ts';
@@ -105,6 +106,7 @@ export const DomainEventSchema = z.discriminatedUnion('type', [
   ...documentEvents,
   ...capabilityEvents,
   ...packEvents,
+  ...playbookEvents,
 ]);
 export type DomainEvent = z.infer<typeof DomainEventSchema>;
 export type EventType = DomainEvent['type'];
@@ -112,6 +114,7 @@ export type EventOf<T extends EventType> = Extract<DomainEvent, { type: T }>;
 export type EventPayload<T extends EventType> = EventOf<T>['payload'];
 
 export * from './agent.ts';
+export * from './playbook.ts';
 export * from './approval.ts';
 export * from './backlog.ts';
 export * from './blog.ts';
