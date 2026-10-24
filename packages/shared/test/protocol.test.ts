@@ -272,6 +272,7 @@ const runnerToServer: Record<string, Record<string, unknown>> = {
     segment: { type: 'thinking' },
   },
   'chat.done': { ...env('chat.done'), chatId: 'c1', threadId: U.c, messageText: 'hi there', usage },
+  'run.usage': { ...env('run.usage'), kind: 'chat', id: 'c1', usage },
   'chat.error': { ...env('chat.error'), chatId: 'c1', threadId: U.c, error: 'boom' },
   'packs.report': { ...env('packs.report'), packId: U.a, state: 'current', sha: 'a'.repeat(40) },
   'capabilities.project.report': {
