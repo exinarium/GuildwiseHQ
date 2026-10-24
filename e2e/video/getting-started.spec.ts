@@ -13,7 +13,7 @@ import { demoApi, pairWorkstation } from './seed.ts';
  * business analyst, answering the planner's question on the Desk, the card moving on the Board by itself, and where
  * Help, the tour and Ctrl K are. A fresh local stack and the mock agent runtime (no real Claude, GitHub or Jira).
  *
- *   e2e/video/setup-voice.sh            once: Piper, the voice and a static ffmpeg into ~/.cache/aom-video
+ *   e2e/video/setup-voice.sh            once: Kokoro, the voice and a static ffmpeg into ~/.cache/aom-video
  *   pnpm build && e2e/video/record.sh getting-started
  *
  * Output: media/videos/getting-started.{webm,mp4,vtt,json}

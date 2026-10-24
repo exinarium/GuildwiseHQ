@@ -11,14 +11,14 @@ Labels of buttons, tabs and fields are written in `code` style when they are exa
 - G: 120 to 180 seconds (target 2:30).
 - Each section video: 60 to 120 seconds.
 - The `duration` in the chapters JSON that the pipeline writes after recording makes this measurable. A video outside its range is re-cut before it is published.
-- A rough guide: the voice speaks about 2.3 words a second, so 60 s is about 140 words of narration and 120 s about 280, plus the pauses between passages (0.7 s each).
+- A rough guide: the voice (Kokoro `af_heart`) speaks about 2.4 words a second in the finished video, so 60 s is about 145 words of narration and 120 s about 290, plus the pauses between passages (0.7 s each). Measured on 36 real narration passages (809 words): Kokoro 3.07 words a second of pure speech, the old Piper `en_GB-cori-high` 2.88 (about 7% slower; the 2.3 of the old guide was Piper including its pauses, so 2.3 x 3.07 / 2.88 is about 2.45).
 
 ## How a video is made
 
 The pipeline lives in `e2e/video/` (V-0 is done, see below):
 
 - A Playwright spec drives a seeded demo stack (default port 4671, database `aom_onboard_video`, organization "Acme", Owner "Alex Morgan", mock runner) and records the screen with a step banner and a visible pointer.
-- The voice is Piper `en_GB-cori-high`. The narration cues are spoken first and their lengths set the pacing of the clicks. Piper and a static ffmpeg live in `~/.cache/aom-video` (`e2e/video/setup-voice.sh`).
+- The voice is Kokoro-82M `af_heart` (Heart), through `kokoro-onnx` on the CPU (`e2e/video/kokoro-say.py`; chosen over the `kokoro` package because that one pulls in PyTorch and needs system espeak-ng, `kokoro-onnx` brings espeak-ng inside a wheel). The narration cues are spoken first and their lengths set the pacing of the clicks. Kokoro (about 0.5 GB with the model and voices), a static ffmpeg and the speech cache live in `~/.cache/aom-video`; `e2e/video/setup-voice.sh` installs them once, after which no network is needed. `AOM_VIDEO_VOICE` picks another Kokoro voice, `AOM_VIDEO_SPEED` the speed (1 is normal), and `AOM_VIDEO_TTS=piper` the old Piper voice. Cached speech is keyed by engine, voice, speed and text, so changing the voice re-speaks every passage. Videos recorded before the switch still have the Piper voice until they are re-recorded.
 - Output per video: WebM and MP4, VTT captions and a chapters JSON, together under 20 MB, in `media/videos/<slug>.*`. The videos are served by the media container (`media/Dockerfile`, see `docs/DEPLOY.md` "Help videos"); commit the files, then `scripts/media-changed.sh && scripts/media-build.sh` publishes them.
 - Only demo data appears on screen (`@demo.local`, `example.com`, invented names). No real customer or personal data.
 - How to record one video, a list, and several at once: `docs/guide/README.md`, "Recording a video".

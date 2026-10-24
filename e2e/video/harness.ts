@@ -4,10 +4,10 @@ import { type APIRequestContext, type Browser, expect, type Page } from '@playwr
 import { E2E_DIR, ROOT } from '../support/env.ts';
 import { caption, installOverlays, sleep } from './captions.ts';
 import type { Cue, NarratedChapter } from './narration/types.ts';
-import { mux, type Spoken, speak, toMp4, VOICE, vtt } from './voice.ts';
+import { mux, type Spoken, speak, toMp4, VOICE_LABEL, vtt } from './voice.ts';
 
 /**
- * The recording harness shared by every `e2e/video/<slug>.spec.ts`: it speaks the narration (Piper, offline), films
+ * The recording harness shared by every `e2e/video/<slug>.spec.ts`: it speaks the narration (Kokoro, offline), films
  * the real UI with Playwright's `recordVideo`, waits for every passage to finish, mixes the voice into the recording
  * and writes the four output files. A spec only keeps what is its own: its seeding and the clicks of each passage.
  *
@@ -156,7 +156,7 @@ export async function startRecording(
             { src: `/videos/${script.slug}.webm`, type: 'video/webm' },
           ],
           captions: `/videos/${script.slug}.vtt`,
-          voice: `Piper ${VOICE}`,
+          voice: VOICE_LABEL,
           duration,
           chapters,
         },

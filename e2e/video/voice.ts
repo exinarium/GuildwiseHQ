@@ -6,15 +6,26 @@ import { join } from 'node:path';
 import type { Cue } from './narration/types.ts';
 
 /**
- * Offline text to speech for the getting-started video: Piper (https://github.com/rhasspy/piper) with a female
- * English voice, no account and no network after setup. `e2e/video/setup-voice.sh` installs Piper and the voice into
- * `AOM_VIDEO_HOME` (default ~/.cache/aom-video). Audio is cached by text, so unchanged cues are not spoken again.
+ * Offline text to speech for the help videos: Kokoro-82M (kokoro-onnx, CPU) with the `af_heart` voice, no account and
+ * no network after setup. `e2e/video/setup-voice.sh` installs it and a static ffmpeg into `AOM_VIDEO_HOME` (default
+ * ~/.cache/aom-video). `AOM_VIDEO_TTS=piper` selects the old Piper engine. Audio is cached by engine, voice, speed
+ * and text, so unchanged cues are not spoken again.
  */
 export const VIDEO_HOME = process.env.AOM_VIDEO_HOME ?? join(homedir(), '.cache/aom-video');
-export const VOICE = process.env.AOM_VIDEO_VOICE ?? 'en_GB-cori-high';
+export const ENGINE: 'kokoro' | 'piper' = process.env.AOM_VIDEO_TTS === 'piper' ? 'piper' : 'kokoro';
+export const VOICE = process.env.AOM_VIDEO_VOICE ?? (ENGINE === 'piper' ? 'en_GB-cori-high' : 'af_heart');
+/** Kokoro: speaking speed (1 is normal). Piper: the length scale (above 1 is slower), kept for the old engine. */
+export const SPEED =
+  (ENGINE === 'piper' ? process.env.AOM_VIDEO_LENGTH_SCALE : process.env.AOM_VIDEO_SPEED) ??
+  (ENGINE === 'piper' ? '1.08' : '1');
+/** For the sidecar JSON: which voice spoke. */
+export const VOICE_LABEL = `${ENGINE === 'piper' ? 'Piper' : 'Kokoro'} ${VOICE}`;
 const PIPER = process.env.AOM_PIPER ?? join(VIDEO_HOME, 'venv/bin/piper');
-const MODEL = join(VIDEO_HOME, 'voices', `${VOICE}.onnx`);
-const LENGTH_SCALE = process.env.AOM_VIDEO_LENGTH_SCALE ?? '1.08'; // a touch slower than default: easier to follow
+const PIPER_MODEL = join(VIDEO_HOME, 'voices', `${VOICE}.onnx`);
+const KOKORO_PYTHON = process.env.AOM_KOKORO_PYTHON ?? join(VIDEO_HOME, 'kokoro-venv/bin/python');
+const KOKORO_MODEL = join(VIDEO_HOME, 'kokoro/kokoro-v1.0.onnx');
+const KOKORO_VOICES = join(VIDEO_HOME, 'kokoro/voices-v1.0.bin');
+const KOKORO_SAY = join(import.meta.dirname, 'kokoro-say.py');
 
 export interface Spoken {
   id: string;
@@ -43,30 +54,59 @@ export function wavSeconds(file: string): number {
 }
 
 export function voiceAvailable(): boolean {
-  return existsSync(PIPER) && existsSync(MODEL);
+  return ENGINE === 'piper'
+    ? existsSync(PIPER) && existsSync(PIPER_MODEL)
+    : existsSync(KOKORO_PYTHON) && existsSync(KOKORO_MODEL) && existsSync(KOKORO_VOICES);
+}
+
+/** The cache file name for a passage: engine, voice, speed and text decide it. */
+export function cacheKey(speech: string): string {
+  return createHash('sha1').update(`${ENGINE}|${VOICE}|${SPEED}|${speech}`).digest('hex').slice(0, 16);
 }
 
 export function speak(cues: Cue[]): Spoken[] {
   if (!voiceAvailable())
     throw new Error(
-      `Piper or the voice is missing (${PIPER}, ${MODEL}). Run e2e/video/setup-voice.sh first.`,
+      ENGINE === 'piper'
+        ? `Piper or the voice is missing (${PIPER}, ${PIPER_MODEL}). Run e2e/video/setup-voice.sh first.`
+        : `Kokoro or the voice is missing (${KOKORO_PYTHON}, ${KOKORO_MODEL}, ${KOKORO_VOICES}). Run e2e/video/setup-voice.sh first.`,
     );
   const dir = join(VIDEO_HOME, 'audio');
   mkdirSync(dir, { recursive: true });
   return cues.map((c) => {
     const speech = c.speech ?? c.text;
-    const key = createHash('sha1').update(`${VOICE}|${LENGTH_SCALE}|${speech}`).digest('hex').slice(0, 16);
+    const key = cacheKey(speech);
     const file = join(dir, `${key}.wav`);
     if (!existsSync(file)) {
       // written under a private name, then renamed: recordings running at once share this cache
-      const txt = join(dir, `${key}.${process.pid}.txt`);
       const part = join(dir, `${key}.${process.pid}.part.wav`);
-      writeFileSync(txt, speech);
-      execFileSync(
-        PIPER,
-        ['-m', MODEL, '-i', txt, '-f', part, '--length-scale', LENGTH_SCALE, '--sentence-silence', '0.3'],
-        { stdio: 'ignore' },
-      );
+      if (ENGINE === 'piper') {
+        const txt = join(dir, `${key}.${process.pid}.txt`);
+        writeFileSync(txt, speech);
+        execFileSync(
+          PIPER,
+          ['-m', PIPER_MODEL, '-i', txt, '-f', part, '--length-scale', SPEED, '--sentence-silence', '0.3'],
+          { stdio: 'ignore' },
+        );
+      } else {
+        execFileSync(
+          KOKORO_PYTHON,
+          [
+            KOKORO_SAY,
+            '--out',
+            part,
+            '--voice',
+            VOICE,
+            '--speed',
+            SPEED,
+            '--model',
+            KOKORO_MODEL,
+            '--voices',
+            KOKORO_VOICES,
+          ],
+          { input: speech, stdio: ['pipe', 'ignore', 'inherit'] },
+        );
+      }
       renameSync(part, file);
     }
     return { id: c.id, file, duration: wavSeconds(file) };
