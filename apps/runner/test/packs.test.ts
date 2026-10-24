@@ -619,6 +619,29 @@ describe('skill guard', () => {
     expect(ok).toBe(0);
     expect(out.join('')).toContain('deny');
   });
+  it('refuses when the guard overruns its own deadline (below the hook timeout)', async () => {
+    const { withGuardDeadline, skillGuardDeadlineMs, SKILL_GUARD_HOOK_TIMEOUT_S } = await import(
+      '../src/capabilities/skill-guard.ts'
+    );
+    const r = await withGuardDeadline(() => new Promise(() => {}), 20);
+    expect(JSON.parse(r.stdout).hookSpecificOutput.permissionDecision).toBe('deny');
+    expect(skillGuardDeadlineMs({})).toBeLessThan(SKILL_GUARD_HOOK_TIMEOUT_S * 1000);
+    expect(skillGuardDeadlineMs({ AOM_SKILL_GUARD_DEADLINE_MS: '99999' })).toBeLessThan(10_000);
+    // through the verb: a stalled read still ends in a refusal
+    const out: string[] = [];
+    const code = await runAom(['skill-guard'], {
+      env: { AOM_SKILL_GUARD_DEADLINE_MS: '30' },
+      io: { out: (s: string) => out.push(s), err: () => {} },
+      fetch,
+      readFile: () => {
+        const t = Date.now();
+        while (Date.now() - t < 5) {} // fast enough to finish; the deadline path is covered above
+        return JSON.stringify({ tool_name: 'Skill', tool_input: { skill: 'nope' } });
+      },
+    });
+    expect(code).toBe(0);
+    expect(out.join('')).toContain('deny');
+  });
   it('an unreadable configuration allows nothing', () => {
     expect(loadSkillGuardConfig('/no/such/file')).toEqual({ allowed: [] });
   });

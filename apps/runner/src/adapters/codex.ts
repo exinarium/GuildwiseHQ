@@ -28,6 +28,7 @@ import {
   shellDeny,
   toolchainReadPaths,
 } from './claude-policy.ts';
+import { withFileLock } from './login-lock.ts';
 import { CodexStreamParser, codexUsageLimit, isCodexAuthFailureText } from './codex-stream-parser.ts';
 import { spawnSession } from './process-session.ts';
 import { SECRET_FILE_GLOBS } from './read-only-dirs.ts';
@@ -648,9 +649,14 @@ export class CodexAdapter implements RuntimeAdapter {
       );
   }
 
+  /** In-process chain plus a lock file beside the owner's login, so two runners or a concurrent `codex login` cannot interleave. */
+  private locked<T>(fn: () => T | Promise<T>): Promise<T> {
+    return withAuthLock(() => withFileLock(`${this.loginFile()}.aom-lock`, fn));
+  }
+
   /** Puts the owner's login (or nothing, in api_key mode) into the agent's private Codex home. */
   private prepareLogin(codexHome: string): Promise<void> {
-    return withAuthLock(() => {
+    return this.locked(() => {
       mkdirSync(codexHome, { recursive: true, mode: 0o700 });
       const dest = join(codexHome, 'auth.json');
       if (this.cfg.authMode === 'api_key') {
@@ -658,6 +664,7 @@ export class CodexAdapter implements RuntimeAdapter {
         return;
       }
       const src = this.loginFile();
+      if (!existsSync(src)) return;
       // keep a copy that a running session of this agent already refreshed
       if (existsSync(dest) && lastRefresh(dest) > lastRefresh(src)) return;
       writePrivate(dest, readFileSync(src, 'utf8'));
@@ -667,7 +674,7 @@ export class CodexAdapter implements RuntimeAdapter {
   /** After a session: a refreshed login (newer `last_refresh`) goes back to the owner's file, so the next session starts valid. */
   private harvestLogin(codexHome: string): Promise<void> {
     if (this.cfg.authMode === 'api_key') return Promise.resolve();
-    return withAuthLock(() => {
+    return this.locked(() => {
       const mine = join(codexHome, 'auth.json');
       const src = this.loginFile();
       if (!existsSync(mine) || !existsSync(src)) return;

@@ -37,7 +37,7 @@ import {
   type ShiftReport,
 } from '@aom/shared';
 import { z } from 'zod';
-import { loadSkillGuardConfig, runSkillGuard } from '../capabilities/skill-guard.ts';
+import { loadSkillGuardConfig, runSkillGuard, skillGuardDeadlineMs, withGuardDeadline } from '../capabilities/skill-guard.ts';
 import { runGuardHook as runCeoGuardHook } from '../ceo/guard-hook.ts';
 import { PermissionRelay } from '../ceo/permission-relay.ts';
 import type { ChangeStateLookup } from '../devops/branch-cleanup.ts';
@@ -1986,10 +1986,15 @@ const VERBS: Record<string, Verb> = {
   'skill-guard': async (ctx) => {
     // Claude Code treats every hook exit code but 2 as "the hook failed, carry on": an error here must block, not allow.
     try {
-      const r = runSkillGuard({
-        stdin: ctx.readFile('-'),
-        cfg: loadSkillGuardConfig(ctx.env.AOM_SKILL_GUARD),
-      });
+      // Claude Code lets a call through when a hook is killed at its time limit: answer "deny" before that.
+      const r = await withGuardDeadline(
+        () =>
+          runSkillGuard({
+            stdin: ctx.readFile('-'),
+            cfg: loadSkillGuardConfig(ctx.env.AOM_SKILL_GUARD),
+          }),
+        skillGuardDeadlineMs(ctx.env),
+      );
       if (r.stdout) ctx.io.out(r.stdout);
       return r.code;
     } catch (err) {
@@ -2789,13 +2794,39 @@ export function confinedReader(
   };
 }
 
+/** The hook's stdin, read asynchronously so a stalled writer cannot block the guard past its own deadline. */
+async function preloadGuardStdin(): Promise<string> {
+  const ms = skillGuardDeadlineMs(process.env);
+  return await new Promise<string>((resolve) => {
+    const chunks: Buffer[] = [];
+    const done = () => resolve(Buffer.concat(chunks).toString('utf8'));
+    const t = setTimeout(() => {
+      resolve('');
+    }, ms);
+    process.stdin.on('data', (c: Buffer) => chunks.push(c));
+    process.stdin.on('end', () => {
+      clearTimeout(t);
+      done();
+    });
+    process.stdin.on('error', () => {
+      clearTimeout(t);
+      done();
+    });
+  });
+}
+
 if (isEntry) {
-  runAom(process.argv.slice(2), {
-    env: process.env,
-    io: { out: (s) => process.stdout.write(s), err: (s) => process.stderr.write(s) },
-    fetch: process.env.AOM_IPC_SOCKET ? socketFetch(process.env.AOM_IPC_SOCKET, fetch) : fetch,
-    readFile: confinedReader(process.env, process.cwd()),
-  }).then(
+  const confined = confinedReader(process.env, process.cwd());
+  const guardStdin = process.argv[2] === 'skill-guard' ? preloadGuardStdin() : undefined;
+  (async () => {
+    const stdinText = guardStdin ? await guardStdin : undefined;
+    return runAom(process.argv.slice(2), {
+      env: process.env,
+      io: { out: (s) => process.stdout.write(s), err: (s) => process.stderr.write(s) },
+      fetch: process.env.AOM_IPC_SOCKET ? socketFetch(process.env.AOM_IPC_SOCKET, fetch) : fetch,
+      readFile: (path) => (stdinText !== undefined && path === '-' ? stdinText : confined(path)),
+    });
+  })().then(
     (code) => process.exit(process.argv[2] === 'skill-guard' && code !== 0 ? 2 : code),
     () => process.exit(process.argv[2] === 'skill-guard' ? 2 : 1),
   );

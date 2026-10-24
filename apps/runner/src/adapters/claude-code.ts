@@ -659,8 +659,9 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     writeFileSync(file, `${JSON.stringify({ allowed: written })}\n`, { mode: 0o600 });
     const quote = (w: string) => `'${w.replace(/'/g, `'\\''`)}'`;
     // Claude Code lets the call through when a hook fails in any way but exit 2 (the command is not found: 127, it crashed). The
-    // `|| exit 2` makes every failure of the guard, a missing `aom` included, a refusal. (A hook that is killed at its time
-    // limit still counts as failed-open; the deny rules below are the second line for names we can list.)
+    // `|| exit 2` makes every failure of the guard, a missing `aom` included, a refusal. A hook that is killed at its time
+    // limit still counts as failed-open, so the guard has its own 7 s deadline below the 10 s limit and denies by itself; the
+    // deny rules below are the second line for names we can list.)
     const command = `AOM_SKILL_GUARD=${quote(file)} ${[...selfCommand('aom'), 'skill-guard'].map(quote).join(' ')} || exit 2`;
     settings.hooks = {
       PreToolUse: [
