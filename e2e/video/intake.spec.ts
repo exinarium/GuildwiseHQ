@@ -12,7 +12,7 @@ import { createProject, demoApi, hireAgent, pairWorkstation } from './seed.ts';
  * The Intake video (sidebar section 6): one ticket through the chat with the BA, the Batch tab, and the choice between
  * `Tell your CEO` and `Work with the BA directly`. The tickets are demo Jira tickets served to the mock BA from fixture
  * files (its "Jira skill"); no real Jira is contacted.
- * Output: apps/web/public/videos/intake.{webm,mp4,vtt,json}
+ * Output: media/videos/intake.{webm,mp4,vtt,json}
  *   e2e/video/record.sh intake
  */
 const SLUG = 'intake';

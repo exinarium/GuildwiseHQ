@@ -14,6 +14,10 @@ Production deployment with Docker Compose, Caddy HTTPS, and Postgres. Agents run
 │ app (fastify, :4600)                                    │
 │   REST /api/*, WebSocket /api/ws (browsers)            │
 │   Dispatcher, scheduler, runner gateway                │
+│   /videos/* forwarded to media (:80)                   │
+│   ↓                                                     │
+│ media (Caddy, static)                                   │
+│   the help videos, built from media/ only              │
 │   ↓                                                     │
 │ postgres (port 5432, local)                            │
 │   Event store (append-only)                            │
@@ -60,7 +64,7 @@ docker compose -f docker-compose.prod.yml up -d --build
 
 This:
 - Builds the app image (Node, bundles web + server)
-- Starts `app` (Fastify on :4600), `postgres` (internal), `caddy` (on :80/:443)
+- Starts `app` (Fastify on :4600), `media` (the help videos, internal), `postgres` (internal), `caddy` (on :80/:443)
 - Applies migrations on boot (via `AOM_MIGRATE_ON_BOOT=true`)
 - Logs to docker compose (use `docker compose logs -f` to watch)
 
@@ -132,6 +136,34 @@ Caddy) and to keep a dedicated key per computer so that a replacement computer c
   app is ready (it starts the app in the background) is not waited for; keep the health check on so that the previous version is put
   back when the app does not come up. A restart command that fails is always undone, with or without a health check.
 - *Files that are not a git checkout* are never sent to a server or into a release folder (they could include secrets).
+
+## Help videos (the media service)
+
+The help videos (about 184 MB of `.webm`, `.mp4`, `.vtt` and `.json` files) are not part of the app image. They live in
+`media/videos/` (the e2e recorder, `e2e/video`, writes there) and are served by their own small Caddy image
+(`media/Dockerfile`, build context `media/`: HTTP Range for seeking, correct MIME types, no directory listing,
+`Cache-Control: immutable` for the content-addressed `?v=<sha256>` URLs the manifest hands out). The app container
+forwards `/videos/*` to it (`AOM_MEDIA_URL`, `http://media:80` in the compose files), so playback stays same-origin: no
+CORS or CSP change, and the Caddy in front of the app needs no extra route.
+
+- **How it is built.** The image build generates `/videos/manifest.json` (`media/build-manifest.mjs`: per slug the files with
+  `sha256` and size, captions, poster, duration; plus one content hash of the whole folder). The web app shows a video only
+  when the manifest lists it; with the media service down or the manifest missing the video UI is simply hidden, and the
+  app answers `/videos/*` with 503 (404 when `AOM_MEDIA_URL` is unset).
+- **Publishing new or changed videos.** Record with `e2e/video/record.sh` (files land in `media/videos/`), set `published:
+  true` in `apps/web/src/lib/videos.ts` for a new slug, commit, then build and restart only the media service:
+  ```bash
+  scripts/media-changed.sh && scripts/media-build.sh   # exit 0 = media/ changed, 1 = unchanged
+  docker compose -f docker-compose.prod.yml up -d media
+  ```
+  `scripts/media-build.sh` labels the image `org.guildwise.media-hash` with the content hash of `media/videos`;
+  `scripts/media-changed.sh [tag]` compares that label with the current folder (an image without the label counts as
+  changed). A plain `docker compose build media` also works, it just carries no label.
+- **App releases do not rebuild media.** The root `.dockerignore` excludes `media/`, so an app build never reads the
+  videos, and `docker compose up -d --build app` leaves the media image and container alone. A deploy runs the two media
+  commands above only when `media-changed.sh` says `changed`.
+- **Other stacks.** Any stack that runs the app (UAT, preview) adds the same `media` service and sets `AOM_MEDIA_URL` on
+  the app; without it the videos are just hidden. `scripts/check-prod-compose.sh` checks the manifest and a Range request.
 
 ## Upgrades
 
@@ -338,6 +370,7 @@ PayFast set-up (fallback): PayFast is told the notification URL `https://<your p
 | `AOM_SERVE_WEB` | `false` | Serve the built web app from the server (enabled in `docker-compose.prod.yml`) |
 | `AOM_MIGRATIONS_DIR` | — | Override the directory SQL migrations are read from (defaults to the bundled `migrations/`) |
 | `AOM_WEB_DIST` | — | Path to built web assets (auto-set in Docker to `/app/dist/web`) |
+| `AOM_MEDIA_URL` | — | The media service (help videos), e.g. `http://media:80`. `/videos/*` is streamed from there (Range and conditional headers pass through). Unset: videos are off (404) and the web app hides them; set in `docker-compose.prod.yml` |
 | `AOM_RATE_LIMIT` | `true` | Enable request rate limiting |
 | `AOM_ALLOW_LOCAL_REMOTES` | `false` | **Tests only.** Accept `file://` and local-path git remotes for repositories and vaults; production refuses them |
 | `AOM_MOCK_UI` | `false` | **Dev and tests only.** Show the mock-runtime card fields (Mock script, ...) in the UI and accept them on the API; off, the API refuses them with 422 |

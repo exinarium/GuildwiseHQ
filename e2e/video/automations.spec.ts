@@ -9,7 +9,7 @@ import { createProject, demoApi } from './seed.ts';
 /**
  * The Automations video (sidebar section 7, nav id `schedules`): the `New automation` wizard (When, What, Details),
  * `Run now`, `History` and Pause. One automation already exists with a short history (a run on schedule and one by hand).
- * Output: apps/web/public/videos/automations.{webm,mp4,vtt,json}
+ * Output: media/videos/automations.{webm,mp4,vtt,json}
  *   e2e/video/record.sh automations
  */
 const SLUG = 'automations';

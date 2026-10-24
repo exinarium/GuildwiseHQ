@@ -156,6 +156,8 @@ export default defineConfig({
       '^/blog(/|$)': { target, changeOrigin: false },
       '/sitemap.xml': { target, changeOrigin: false },
       '/robots.txt': { target, changeOrigin: false },
+      // The help videos are served by the media container, through the app server (AOM_MEDIA_URL).
+      '/videos': { target, changeOrigin: false },
     },
   },
   test: {

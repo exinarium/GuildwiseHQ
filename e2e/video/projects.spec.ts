@@ -9,7 +9,7 @@ import { createProject, demoApi } from './seed.ts';
 /**
  * The Projects video (sidebar section 8): New project, the priority order, project settings and its jump chips, adding
  * a repository, the monthly budget and Send invitation.
- * Output: apps/web/public/videos/projects.{webm,mp4,vtt,json}
+ * Output: media/videos/projects.{webm,mp4,vtt,json}
  *   e2e/video/record.sh projects
  */
 const SLUG = 'projects';

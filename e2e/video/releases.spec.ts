@@ -23,7 +23,7 @@ import {
 /**
  * The Releases video (sidebar section 14): the queue (Release, Not now), What is live, the history and its filters, the
  * standard rule and the advanced rule sets, Freeze all releases and Lift the freeze.
- * Output: apps/web/public/videos/releases.{webm,mp4,vtt,json}
+ * Output: media/videos/releases.{webm,mp4,vtt,json}
  *   e2e/video/record.sh releases
  * The demo computers are mock runners with the fake docker of the runner tests (see seed-deploy.ts). The two queued
  * versions come from the merge trigger (its queue row, due at once): the server picks the version from the standard

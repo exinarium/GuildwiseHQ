@@ -9,3 +9,4 @@ playwright-report/
 release/
 .claude/worktrees/
 docs/guide/raw/
+media/videos/manifest.json

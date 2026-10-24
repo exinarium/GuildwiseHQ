@@ -9,6 +9,7 @@ import { buildNav } from '../components/shell/nav-config.ts';
 import { TourVideo } from '../components/tour/TourVideo.tsx';
 import { ARTICLES, articleBySlug } from '../help/articles.ts';
 import { Markdown } from '../help/Markdown.tsx';
+import { resetVideoManifest } from '../lib/video-manifest.ts';
 import {
   GETTING_STARTED_SLUG,
   navIdForPath,
@@ -18,30 +19,10 @@ import {
   videoForPath,
   videosForArticle,
 } from '../lib/videos.ts';
+import { serveVideos } from './video-fixtures.ts';
 
-const info = (slug: string) => ({
-  title: `Video ${slug}`,
-  src: `/videos/${slug}.webm`,
-  type: 'video/webm',
-  captions: `/videos/${slug}.vtt`,
-  duration: 70,
-  chapters: [
-    { t: 0, title: 'First' },
-    { t: 30, title: 'Second' },
-  ],
-});
-
-/** Serves the chapters JSON of the listed slugs; every other URL answers with the HTML fallback page. */
-const serve = (...slugs: string[]) => {
-  const fetchMock = vi.fn(async (url: string) => {
-    const slug = slugs.find((s) => url === `/videos/${s}.json`);
-    return slug
-      ? { ok: true, json: async () => info(slug) }
-      : { ok: true, json: async () => Promise.reject(new Error('not json')) };
-  });
-  vi.stubGlobal('fetch', fetchMock);
-  return fetchMock;
-};
+/** The media service lists and serves the chapters JSON of the given slugs; every other URL answers with the HTML fallback page. */
+const serve = (...slugs: string[]) => serveVideos({ listed: slugs });
 
 const publish = (...slugs: string[]) => {
   for (const s of slugs) (SECTION_VIDEOS[s] as { published: boolean }).published = true;
@@ -52,6 +33,7 @@ const unpublish = (...slugs: string[]) => {
 };
 let before: Record<string, boolean>;
 beforeEach(() => {
+  resetVideoManifest();
   before = Object.fromEntries(Object.entries(SECTION_VIDEOS).map(([k, v]) => [k, v.published]));
 });
 afterEach(() => {
@@ -98,7 +80,7 @@ describe('the video registry', () => {
     for (const [slug, e] of Object.entries(SECTION_VIDEOS)) {
       if (!e.published) continue;
       for (const ext of ['json', 'webm', 'mp4', 'vtt'])
-        expect(existsSync(join(__dirname, `../../public/videos/${slug}.${ext}`)), `${slug}.${ext}`).toBe(
+        expect(existsSync(join(__dirname, `../../../../media/videos/${slug}.${ext}`)), `${slug}.${ext}`).toBe(
           true,
         );
     }
@@ -168,18 +150,59 @@ describe('SectionVideo', () => {
     serve('desk');
     render(<SectionVideo slug="desk" />);
     const player = (await screen.findByTestId('desk-player')) as HTMLVideoElement;
-    expect(player.querySelector('source')).toHaveAttribute('src', '/videos/desk.webm');
-    expect(player.querySelector('track')).toHaveAttribute('src', '/videos/desk.vtt');
+    expect(player.querySelector('source')).toHaveAttribute('src', '/videos/desk.webm?v=sha-desk-webm');
+    expect(player.querySelector('track')).toHaveAttribute('src', '/videos/desk.vtt?v=sha-desk-vtt');
     expect(screen.getByRole('heading', { name: 'Your Desk' })).toBeInTheDocument();
     expect(screen.getByTestId('video-chapter-2')).toHaveTextContent('0:30');
   });
 
   it('shows nothing when a published video has no chapters JSON', async () => {
     publish('desk');
-    const f = serve();
+    const f = serveVideos({ listed: ['desk'], infos: [] });
     const { container } = render(<SectionVideo slug="desk" />);
-    await waitFor(() => expect(f).toHaveBeenCalledWith('/videos/desk.json', expect.anything()));
+    await waitFor(() =>
+      expect(f).toHaveBeenCalledWith('/videos/desk.json?v=sha-desk-json', expect.anything()),
+    );
     expect(container).toBeEmptyDOMElement();
+  });
+
+  it('shows nothing when the manifest does not list the slug (the video is not in the media image)', async () => {
+    publish('desk');
+    const f = serveVideos({ listed: ['board'], infos: ['desk'] });
+    const { container } = render(<SectionVideo slug="desk" />);
+    await waitFor(() => expect(f).toHaveBeenCalledWith('/videos/manifest.json', expect.anything()));
+    await Promise.resolve();
+    expect(container).toBeEmptyDOMElement();
+    expect(f).not.toHaveBeenCalledWith(expect.stringContaining('desk.json'), expect.anything());
+  });
+
+  it.each(['down', 'unavailable', 'html'] as const)(
+    'shows nothing when the manifest is unavailable (%s): no player, no request for the video',
+    async (manifest) => {
+      publish('desk');
+      const f = serveVideos({ listed: ['desk'], manifest });
+      const { container } = render(<SectionVideo slug="desk" />);
+      await waitFor(() => expect(f).toHaveBeenCalledWith('/videos/manifest.json', expect.anything()));
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(container).toBeEmptyDOMElement();
+      expect(screen.queryByTestId('desk-player')).toBeNull();
+      expect(f).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('asks for the manifest once for all the videos of a page', async () => {
+    publish('desk', 'board');
+    const f = serve('desk', 'board');
+    render(
+      <>
+        <SectionVideo slug="desk" />
+        <SectionVideo slug="board" />
+      </>,
+    );
+    await screen.findByTestId('desk-player');
+    await screen.findByTestId('board-player');
+    expect(f.mock.calls.filter(([u]) => u === '/videos/manifest.json')).toHaveLength(1);
   });
 });
 
@@ -192,11 +215,12 @@ describe('the Watch the video button of the page help', () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it('is absent when the video is published but its file is missing', async () => {
+  it('is absent when the video is published but the media service does not have it', async () => {
     publish('desk');
-    const f = serve();
+    const f = serveVideos({ listed: [] });
     const { container } = render(<PageVideo pathname="/desk" />);
     await waitFor(() => expect(f).toHaveBeenCalled());
+    await Promise.resolve();
     expect(container).toBeEmptyDOMElement();
   });
 
@@ -257,6 +281,7 @@ describe('every published video on its three places', () => {
     };
     for (const [slug, e] of Object.entries(SECTION_VIDEOS)) {
       if (slug === GETTING_STARTED_SLUG) continue; // its own player on Help and in the tour (tour.test.tsx)
+      resetVideoManifest();
       serve(slug);
       // Help: the article shows the player under the registered heading
       const [article] = e.help.split('#');

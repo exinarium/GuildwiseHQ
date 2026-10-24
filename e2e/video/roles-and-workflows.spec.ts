@@ -8,7 +8,7 @@ import { createProject, demoApi, pairWorkstation } from './seed.ts';
 /**
  * The Roles & workflows video (sidebar section 12, the page titled "Organization"): the Roles tab, the Workflows tab
  * (view, compare), the workflow builder (add a step, save), Create department and Design with the BA.
- * Output: apps/web/public/videos/roles-and-workflows.{webm,mp4,vtt,json}
+ * Output: media/videos/roles-and-workflows.{webm,mp4,vtt,json}
  *   e2e/video/record.sh roles-and-workflows
  */
 const SLUG = 'roles-and-workflows';

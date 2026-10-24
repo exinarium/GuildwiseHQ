@@ -8,7 +8,7 @@ import { createProject, demoApi, pairWorkstation, provisionCeo } from './seed.ts
 /**
  * The Org chart video (sidebar section 10): the chart, an agent's details, Allowed on project, the Chart and List
  * views, and the Workstations and DevOps panel.
- * Output: apps/web/public/videos/org-chart.{webm,mp4,vtt,json}
+ * Output: media/videos/org-chart.{webm,mp4,vtt,json}
  *   e2e/video/record.sh org-chart
  */
 const SLUG = 'org-chart';

@@ -8,7 +8,7 @@ import { createProject, demoApi, pairWorkstation, provisionCeo } from './seed.ts
 /**
  * The Agents video (sidebar section 9): Hire agent, Pause and Resume, Change model, the recommendations (apply one,
  * dismiss one) and the Project filter.
- * Output: apps/web/public/videos/agents.{webm,mp4,vtt,json}
+ * Output: media/videos/agents.{webm,mp4,vtt,json}
  *   e2e/video/record.sh agents
  */
 const SLUG = 'agents';

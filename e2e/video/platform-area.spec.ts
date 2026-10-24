@@ -10,7 +10,7 @@ import { demoApi } from './seed.ts';
 /**
  * The Platform area video (section P): the platform administrator's separate shell, page by page. The administrator
  * sets up two-factor login before the camera rolls (see platform.ts).
- * Output: apps/web/public/videos/platform-area.{webm,mp4,vtt,json}
+ * Output: media/videos/platform-area.{webm,mp4,vtt,json}
  *   e2e/video/record.sh platform-area
  */
 const SLUG = 'platform-area';

@@ -49,6 +49,7 @@ import { ConcurrencyError } from './eventstore/types.ts';
 import { registerHrHook } from './hr/hr.ts';
 import { createMailer, type Mailer } from './mail/mailer.ts';
 import { withSimulationPrefix } from './mail/simulation.ts';
+import { registerMediaProxy } from './media-proxy.ts';
 import { createOrgStatusInterceptor } from './orgs/guard.ts';
 import { reportServerError } from './platform-team/detectors.ts';
 import { buildProjectors } from './projections/index.ts';
@@ -489,6 +490,9 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
       return { now: clock.now().toISOString(), offsetMs: clock.offsetMs };
     });
   }
+
+  // The help videos live in the media container: /videos/* is forwarded there (404 when AOM_MEDIA_URL is unset).
+  registerMediaProxy(app, config.mediaUrl);
 
   if (config.serveWeb) {
     const root = webDistDir(config);

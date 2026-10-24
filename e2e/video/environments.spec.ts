@@ -23,7 +23,7 @@ import {
  * The Environments video (sidebar section 3): Your app and its DevOps suggestion, the test site and the live site (with
  * "Release the newest version" when nothing is waiting), Places with Check and Reconnect, Add an environment up to a
  * review whose Save is off with its reason, and the Releases switch.
- * Output: apps/web/public/videos/environments.{webm,mp4,vtt,json}
+ * Output: media/videos/environments.{webm,mp4,vtt,json}
  *   e2e/video/record.sh environments
  * The demo computers are mock runners with the fake docker of the runner tests (see seed-deploy.ts): the setup, the
  * dry runs and both releases are real runs of the server and runner code against throwaway files.

@@ -13,7 +13,7 @@ import { createProject, demoApi } from '../seed.ts';
  *   3. seed only what the entry's "Prerequisites and test data" lists, in this file (demo data only)
  *   4. e2e/video/record.sh <slug>
  *   5. in apps/web/src/lib/videos.ts set `published: true` for the slug, then commit the four files
- *      apps/web/public/videos/<slug>.{webm,mp4,vtt,json}
+ *      media/videos/<slug>.{webm,mp4,vtt,json}
  * This file lives in template/ so that `record.sh` and the video config never run it.
  */
 const SLUG = 'slug'; // the key in apps/web/src/lib/videos.ts and the file name stem
@@ -51,5 +51,5 @@ test('record the SLUG video', async ({ browser }) => {
   });
   await narrate('outro-1');
 
-  await finish(); // writes apps/web/public/videos/<slug>.{webm,mp4,vtt,json}
+  await finish(); // writes media/videos/<slug>.{webm,mp4,vtt,json}
 });

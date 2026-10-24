@@ -11,7 +11,7 @@ import { monthSpendMicros, seedDemoHistory } from './seed-history.ts';
  * By agent and By model, What the agents delivered, Export CSV and Currency and prices. 30 days of shift costs across
  * two projects are written by seed-history.ts; the web shop's
  * monthly budget is then set through the API so that this month's spend is at about 80 percent of it.
- * Output: apps/web/public/videos/costs.{webm,mp4,vtt,json}
+ * Output: media/videos/costs.{webm,mp4,vtt,json}
  *   e2e/video/record.sh costs
  */
 const SLUG = 'costs';

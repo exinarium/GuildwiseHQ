@@ -6,7 +6,7 @@
 # Needs `pnpm build` once (the stack serves apps/web/dist and runs apps/server/dist and apps/runner/dist) and
 # e2e/video/setup-voice.sh once. Two recordings at the same time need their own AOM_VIDEO_PORT and AOM_VIDEO_DB.
 # Environment: AOM_VIDEO_PORT (4671), AOM_VIDEO_DB (aom_onboard_video), AOM_VIDEO_DIR_BASE (TMPDIR),
-# AOM_VIDEO_OUT (apps/web/public/videos), AOM_VIDEO_PACE (1), AOM_VIDEO_VOICE, AOM_VIDEO_HOME.
+# AOM_VIDEO_OUT (media/videos), AOM_VIDEO_PACE (1), AOM_VIDEO_VOICE, AOM_VIDEO_HOME.
 set -uo pipefail
 cd "$(dirname "$0")/../.."
 [ "$#" -gt 0 ] || { echo "usage: e2e/video/record.sh <slug>..." >&2; exit 2; }

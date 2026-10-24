@@ -12,7 +12,7 @@ import { createProject, demoApi, pairWorkstation } from './seed.ts';
  * account, a git host and Jira, and signing in and out of an MCP server. Nothing is really connected: the mock runner
  * reports no integrations, so the facts a runner would report are written straight into its table (demo accounts only),
  * and every dialog is cancelled before it would ask the runner to act.
- * Output: apps/web/public/videos/integrations.{webm,mp4,vtt,json}
+ * Output: media/videos/integrations.{webm,mp4,vtt,json}
  *   e2e/video/record.sh integrations
  */
 const SLUG = 'integrations';

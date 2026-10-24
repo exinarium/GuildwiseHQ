@@ -8,7 +8,7 @@ import { createProject, demoApi } from './seed.ts';
 /**
  * The Ledger video (sidebar section 19): search, the scope and Project filters, Add entry (a standing order), edit and
  * history, retire and Show retired.
- * Output: apps/web/public/videos/ledger.{webm,mp4,vtt,json}
+ * Output: media/videos/ledger.{webm,mp4,vtt,json}
  *   e2e/video/record.sh ledger
  */
 const SLUG = 'ledger';

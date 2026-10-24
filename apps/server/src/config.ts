@@ -22,6 +22,14 @@ const EnvSchema = z.object({
   AOM_SECRET_KEY: z.preprocess((v) => (v === '' ? undefined : v), z.string().min(16).optional()),
   AOM_SERVE_WEB: bool(false),
   AOM_WEB_DIST: z.string().optional(),
+  AOM_MEDIA_URL: z.preprocess(
+    (v) => (v === '' ? undefined : v),
+    z
+      .string()
+      .url()
+      .refine((u) => /^https?:\/\//.test(u), 'must be an http(s) URL')
+      .optional(),
+  ),
   AOM_RATE_LIMIT: bool(true),
   AOM_TEST_CLOCK: bool(false),
   AOM_ALLOW_LOCAL_REMOTES: bool(false),
@@ -140,6 +148,8 @@ export interface Config {
   secretKey: string | undefined;
   serveWeb: boolean;
   webDist: string | undefined;
+  /** The media service (help videos), e.g. `http://media:80`: `/videos/*` is forwarded there. Unset: videos are off. */
+  mediaUrl: string | undefined;
   rateLimit: boolean;
   testClock: boolean;
   /** Accept `file://` and absolute-path git remotes (tests and the e2e harness only). */
@@ -239,6 +249,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     secretKey: e.AOM_SECRET_KEY,
     serveWeb: e.AOM_SERVE_WEB,
     webDist: e.AOM_WEB_DIST,
+    mediaUrl: e.AOM_MEDIA_URL,
     rateLimit: e.AOM_RATE_LIMIT,
     testClock: e.AOM_TEST_CLOCK,
     allowLocalRemotes: e.AOM_ALLOW_LOCAL_REMOTES,
