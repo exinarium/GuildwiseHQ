@@ -98,6 +98,8 @@ export interface DelegateDeps {
   /** A running child's usage so far, for the provider caps (`run.usage`, kind delegate). */
   reportUsage?(delegateId: string, usage: Usage): void;
   log?: Logger;
+  /** Test hook: environment added to every child (a fake API address for a real binary). */
+  childEnv?: Record<string, string>;
   /** Test hook: the wall-clock limit (default: the grant's). */
   timeoutMs?: number;
   /** Test hooks: the heartbeat period and the tool-call cap of a CLI-runtime delegate. */
@@ -371,6 +373,7 @@ export class DelegateRunner {
         AOM_SHIFT_TOKEN: token,
         AOM_SHIFT_ID: delegateId,
         ...(works ? (caller.work?.env ?? {}) : {}),
+        ...(this.deps.childEnv ?? {}),
         PATH:
           works && caller.work?.env?.PATH
             ? caller.work.env.PATH
