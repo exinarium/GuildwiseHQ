@@ -1332,7 +1332,9 @@ export class RunnerHandlers {
       // A discovery or boardroom turn is not a shift: its token is scoped to the turn.
       const sessionTurn = await ctx.services.discovery.turnOf(conn.workstationId, msg.shiftId);
       if (sessionTurn)
-        return reply(...(await ctx.services.discovery.rpc(sessionTurn, msg.method, msg.params)));
+        return reply(
+          ...(await ctx.services.discovery.rpc(sessionTurn, msg.method, msg.params, msg.attemptId)),
+        );
       const shift = await one(ctx.pool, 'SELECT * FROM shifts WHERE id=$1 AND workstation_id=$2', [
         msg.shiftId,
         conn.workstationId,

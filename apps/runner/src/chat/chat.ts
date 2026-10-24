@@ -134,6 +134,8 @@ interface ActiveChat {
   turnDir?: string;
   /** What a delegate that reads shares with this turn (its working directory and read folders). */
   delegateWork?: DelegateWork;
+  /** The dispatch the frames of this turn answer (`chat.start.attemptId`); a re-dispatch of a running turn replaces it. */
+  attemptId?: string;
 }
 
 /** How many finished chat ids are remembered to ignore a redelivered `chat.start`. */
@@ -265,9 +267,43 @@ export class ChatManager {
     );
   }
 
+  /** The dispatch id the frames of a chat carry (a running chat, or one that ended a moment ago). */
+  attemptOf(chatId: string): string | undefined {
+    return this.active.get(chatId)?.attemptId ?? this.attempts.get(chatId);
+  }
+
+  private readonly attempts = new Map<string, string>();
+  private noteAttempt(chatId: string, attemptId: string | undefined): void {
+    if (!attemptId) {
+      this.attempts.delete(chatId);
+      return;
+    }
+    this.attempts.set(chatId, attemptId);
+    if (this.attempts.size > RECENT_CHATS) {
+      const first = this.attempts.keys().next().value;
+      if (first !== undefined) this.attempts.delete(first);
+    }
+  }
+
   async handleStart(msg: ChatStartMsg): Promise<void> {
-    if (this.active.has(msg.chatId) || this.recent.has(msg.chatId)) return; // redelivery
-    const chat: ActiveChat = { msg };
+    const running = this.active.get(msg.chatId);
+    if (running) {
+      // The server sent the turn again (it had lost track of it) while this runner still has it: the work goes on, and its
+      // frames now answer the newest dispatch.
+      if (msg.attemptId && msg.attemptId !== running.attemptId) {
+        running.attemptId = msg.attemptId;
+        this.noteAttempt(msg.chatId, msg.attemptId);
+      }
+      return;
+    }
+    if (this.recent.has(msg.chatId)) {
+      // A redelivery of the dispatch that ended here is ignored; a NEW dispatch of a turn that already ended here (its reply was
+      // taken for lost) is work to do again, because the reply of the old dispatch is no longer the one the server waits for.
+      if (!msg.attemptId || msg.attemptId === this.attempts.get(msg.chatId)) return;
+      this.recent.delete(msg.chatId);
+    }
+    const chat: ActiveChat = { msg, ...(msg.attemptId ? { attemptId: msg.attemptId } : {}) };
+    this.noteAttempt(msg.chatId, msg.attemptId);
     this.active.set(msg.chatId, chat);
     try {
       await this.run(chat);

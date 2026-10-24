@@ -483,6 +483,145 @@ describe('durable turns', () => {
   });
 });
 
+describe('dispatch ids: a late reply is matched to its attempt (R3c)', () => {
+  const queueTurn = async (r: FakeRunner, message = 'Cost?') => {
+    const s = await newSession();
+    const t = (
+      await owner(
+        'POST',
+        `/api/sessions/${s.threadId}/turns`,
+        { participantId: speaker(s, 'cost-hawk').id, message },
+        202,
+      )
+    ).turn;
+    const start = await startOf(r, t.id);
+    await until(async () => (await turnRow(t.id)).status === 'running');
+    return { s, t, start };
+  };
+  const replyWith = (r: FakeRunner, start: any, text: string, attemptId: string | undefined) =>
+    r.send('chat.done', {
+      chatId: start.chatId,
+      threadId: start.threadId,
+      messageText: text,
+      usage: { inputTokens: 100, outputTokens: 20, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      ...(attemptId ? { attemptId } : {}),
+    });
+  /** What the server believes after a lost connection: the turn goes back to the queue (and is not sent yet). */
+  const requeue = async (t: any, threadId: string) => {
+    await w.t.app.ctx.store.append([
+      {
+        streamId: `session-turn-${t.id}`,
+        event: {
+          type: 'SessionTurnRequeued',
+          payload: {
+            turnId: t.id,
+            threadId,
+            reason: 'no answer from the workstation',
+            workstationId: w.workstationId,
+          },
+        },
+        actor: { kind: 'system', id: null },
+        scope: { orgId: w.owner.id, projectId: null, audience: 'org' },
+      } as never,
+    ]);
+  };
+
+  it('puts a dispatch id in chat.start, in the turn and in the event, and a new one for each dispatch', async () => {
+    let r = await connect();
+    const { t, start } = await queueTurn(r);
+    expect(typeof start.attemptId).toBe('string');
+    expect((await turnRow(t.id)).attempt_id).toBe(start.attemptId);
+    await hangUp(r);
+    r = await connect();
+    const again = await startOf(r, t.id);
+    await until(async () => (await turnRow(t.id)).attempts === 2);
+    expect(again.attemptId).toBeTruthy();
+    expect(again.attemptId).not.toBe(start.attemptId);
+    expect((await turnRow(t.id)).attempt_id).toBe(again.attemptId);
+    replyWith(r, again, 'Cheap enough.', again.attemptId);
+    await until(async () => (await turnRow(t.id)).status === 'done');
+    r.close();
+  });
+
+  it('ignores a late reply and a late error of an earlier dispatch, and takes the current dispatch’s reply', async () => {
+    let r = await connect();
+    const { s, t, start } = await queueTurn(r);
+    await hangUp(r);
+    r = await connect();
+    const again = await startOf(r, t.id);
+    await until(async () => (await turnRow(t.id)).attempts === 2);
+    // the first dispatch answers after the second began: the answer of an earlier attempt is not the one waited for
+    replyWith(r, start, 'LATE FROM THE FIRST', start.attemptId);
+    r.send('chat.error', { chatId: t.id, threadId: s.threadId, error: 'boom', attemptId: start.attemptId });
+    r.send('chat.delta', {
+      chatId: t.id,
+      threadId: s.threadId,
+      text: 'old words',
+      attemptId: start.attemptId,
+    });
+    await r.barrier();
+    expect(await turnRow(t.id)).toMatchObject({ status: 'running', attempts: 2 });
+    expect((await messages(s.threadId)).some((m) => m.body === 'LATE FROM THE FIRST')).toBe(false);
+    replyWith(r, again, 'The current answer', again.attemptId);
+    await until(async () => (await turnRow(t.id)).status === 'done');
+    expect((await messages(s.threadId)).map((m) => m.body)).toContain('The current answer');
+    r.close();
+  });
+
+  it('accepts the late reply of the current dispatch when the turn went back to the queue meanwhile, and does not send it again', async () => {
+    const r = await connect();
+    const { s, t, start } = await queueTurn(r);
+    await requeue(t, s.threadId);
+    expect((await turnRow(t.id)).status).toBe('queued');
+    replyWith(r, start, 'Finished after all', start.attemptId);
+    await until(async () => (await turnRow(t.id)).status === 'done');
+    expect((await messages(s.threadId)).map((m) => m.body)).toContain('Finished after all');
+    // it is done: nothing is sent again
+    await w.t.app.ctx.services.sessions.sweep(w.workstationId);
+    expect(r.of('chat.start').filter((f: any) => f.chatId === t.id)).toHaveLength(1);
+    r.close();
+  });
+
+  it('keeps the earlier rule for a runner that echoes no dispatch id: a frame for a queued turn is dropped', async () => {
+    const r = await connect();
+    const { s, t, start } = await queueTurn(r);
+    await requeue(t, s.threadId);
+    replyWith(r, start, 'OLD RUNNER LATE', undefined);
+    await r.barrier();
+    expect((await turnRow(t.id)).status).toBe('queued');
+    expect((await messages(s.threadId)).some((m) => m.body === 'OLD RUNNER LATE')).toBe(false);
+    r.close();
+  });
+
+  it('refuses the verbs of a stale dispatch and answers those of the current one', async () => {
+    const r = await connect();
+    const { t, start } = await queueTurn(r);
+    const call = async (attemptId: string | undefined) => {
+      const rpcId = `rpc-${Math.random()}`;
+      const from = r.received.length;
+      r.send('rpc.request', {
+        rpcId,
+        shiftId: t.id,
+        method: 'ledger.search',
+        params: { query: 'pricing' },
+        ...(attemptId ? { attemptId } : {}),
+      });
+      return (await r.waitFor('rpc.response', (f) => f.rpcId === rpcId, 10_000, from)) as {
+        ok: boolean;
+        error?: string;
+      };
+    };
+    const stale = await call('an-older-dispatch');
+    expect(stale.ok).toBe(false);
+    expect(stale.error).toMatch(/old attempt/);
+    expect((await call(start.attemptId as string)).error ?? '').not.toMatch(/old attempt/);
+    // an older runner sends none: allowed as before
+    expect((await call(undefined)).error ?? '').not.toMatch(/old attempt/);
+    replyWith(r, start, 'done', start.attemptId);
+    r.close();
+  });
+});
+
 describe('whose workstation a session may use, and who may end a turn', () => {
   let adm: { id: string; cookie: string; email: string };
   let admWs = '';

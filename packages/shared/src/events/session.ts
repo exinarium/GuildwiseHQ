@@ -102,7 +102,14 @@ export const sessionEvents = [
   /** The turn was sent to the workstation. Appended again for each re-dispatch after `SessionTurnRequeued`. */
   defineEvent(
     'SessionTurnStarted',
-    z.object({ turnId: Id, threadId: Id, workstationId: Id, attempt: z.number().int().min(1) }),
+    z.object({
+      turnId: Id,
+      threadId: Id,
+      workstationId: Id,
+      attempt: z.number().int().min(1),
+      /** R3c: the id of this dispatch (carried in `chat.start`, echoed by the runner). Absent on events from before. */
+      attemptId: z.string().max(80).optional(),
+    }),
   ),
   /** The workstation no longer holds a started turn (restart, lost connection): it goes back to the queue. */
   defineEvent(

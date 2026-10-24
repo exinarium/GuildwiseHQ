@@ -163,6 +163,60 @@ describe('a session turn on the runner (mock adapter)', () => {
   });
 });
 
+describe('dispatch ids on the runner (R3c)', () => {
+  it('echoes the id of the dispatch in every frame of the turn', async () => {
+    h = await startHarness();
+    const msg = { ...turn(), attemptId: 'attempt-A' };
+    h.server.send('chat.start', msg);
+    const done = await h.server.waitFor('chat.done', (d) => d.chatId === msg.chatId);
+    expect(done.attemptId).toBe('attempt-A');
+    const deltas = h.server.of('chat.delta').filter((d) => d.chatId === msg.chatId);
+    expect(deltas.length).toBeGreaterThan(0);
+    expect(deltas.every((d) => d.attemptId === 'attempt-A')).toBe(true);
+    expect(h.server.invalid).toEqual([]);
+  });
+
+  it('sends no id when the server sent none (an older server)', async () => {
+    h = await startHarness();
+    const msg = turn();
+    h.server.send('chat.start', msg);
+    const done = await h.server.waitFor('chat.done', (d) => d.chatId === msg.chatId);
+    expect(done).not.toHaveProperty('attemptId');
+  });
+
+  it('keeps a running turn when the server sends it again, and answers the newest dispatch from then on', async () => {
+    process.env.AOM_MOCK_CHAT_TOKEN_MS = '150';
+    try {
+      h = await startHarness();
+      const msg = { ...turn(), attemptId: 'attempt-A' };
+      h.server.send('chat.start', msg);
+      await h.server.waitFor('chat.delta', (d) => d.chatId === msg.chatId);
+      h.server.send('chat.start', { ...msg, attemptId: 'attempt-B' });
+      const done = await h.server.waitFor('chat.done', (d) => d.chatId === msg.chatId);
+      expect(done.attemptId).toBe('attempt-B');
+      // one run only: the second dispatch did not start another
+      expect(h.server.of('chat.done').filter((d) => d.chatId === msg.chatId)).toHaveLength(1);
+      expect(h.runner.chat.attemptOf(msg.chatId)).toBe('attempt-B');
+    } finally {
+      delete process.env.AOM_MOCK_CHAT_TOKEN_MS;
+    }
+  });
+
+  it('ignores a redelivery of the dispatch that ended, but runs a new dispatch of a turn that already ended here', async () => {
+    h = await startHarness();
+    const msg = { ...turn(), attemptId: 'attempt-A' };
+    h.server.send('chat.start', msg);
+    await h.server.waitFor('chat.done', (d) => d.chatId === msg.chatId);
+    h.server.send('chat.start', msg); // the same dispatch again
+    await new Promise((r) => setTimeout(r, 300));
+    expect(h.server.of('chat.done').filter((d) => d.chatId === msg.chatId)).toHaveLength(1);
+    // the server took the reply for lost and dispatched again: that is work, answered under the new id
+    h.server.send('chat.start', { ...msg, attemptId: 'attempt-B' });
+    await h.server.waitFor('chat.done', (d) => d.chatId === msg.chatId && d.attemptId === 'attempt-B');
+    expect(h.server.of('chat.done').filter((d) => d.chatId === msg.chatId)).toHaveLength(2);
+  });
+});
+
 describe('the capability index in a card shift', () => {
   it('lists the capabilities a role names, with name and description, and how to load them', async () => {
     h = await startHarness();

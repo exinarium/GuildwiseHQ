@@ -124,8 +124,8 @@ export const sessionProjectors: Record<string, Projector> = {
     const p = ev<'SessionTurnStarted'>(e).payload;
     await exec(
       tx,
-      `UPDATE session_turns SET status='running', attempts=$2, workstation_id=$3, started_at=$4 WHERE id=$1 AND status IN ('queued','running')`,
-      [p.turnId, p.attempt, p.workstationId, e.createdAt],
+      `UPDATE session_turns SET status='running', attempts=$2, workstation_id=$3, started_at=$4, attempt_id=$5 WHERE id=$1 AND status IN ('queued','running')`,
+      [p.turnId, p.attempt, p.workstationId, e.createdAt, p.attemptId ?? null],
     );
   },
   SessionTurnRequeued: async (tx, e) => {

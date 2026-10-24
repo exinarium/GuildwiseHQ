@@ -71,6 +71,7 @@ import {
   sessionDocs,
 } from './discovery-state.ts';
 import { sessionVerb } from './discovery-verbs.ts';
+import { attemptVerdict } from './turns.ts';
 
 /** Why a queue attempt was refused for a reason the owner can fix: the turn waits as a pending trigger. */
 const BLOCKING_CODES = new Set([
@@ -223,8 +224,12 @@ export class DiscoveryService {
     turn: Row,
     method: string,
     params: Record<string, unknown>,
+    /** The dispatch of the turn the verb was run in (R3c); an earlier one is refused. */
+    attemptId?: string,
   ): Promise<[boolean, unknown?, string?]> {
     if (turn.status !== 'running') return [false, undefined, 'this turn is over'];
+    if (attemptVerdict(turn as { attempt_id?: string | null }, attemptId) === 'stale')
+      return [false, undefined, 'this turn was started again: this is an old attempt, its verbs are refused'];
     if (method === 'ledger.search')
       return [true, await ledgerSearchRpc(this.ctx, { org_id: turn.org_id } as Row, params)];
     if (isSessionRpc(method)) return sessionVerb(this, this.ctx, turn, method, params);

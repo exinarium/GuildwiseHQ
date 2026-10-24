@@ -604,11 +604,11 @@ export class Runner {
       adapters: this.adapters,
       ipc: this.ipc,
       log: this.log,
-      send: (type, payload) => this.client.send(type, payload),
+      send: (type, payload) => this.client.send(type, this.withAttempt(type, payload)),
       chatActivity: () => this.serverFeatures.has(CHAT_ACTIVITY_FEATURE),
       liveUsage: () => this.serverFeatures.has(RUN_USAGE_FEATURE),
       delegateUsage: () => this.serverFeatures.has(DELEGATE_GRANTS_FEATURE),
-      rpc: (chatId, method, params) => this.rpc(chatId, method, params),
+      rpc: (chatId, method, params) => this.rpc(chatId, method, params, this.chat.attemptOf(chatId)),
       graph: () => this.graph,
       external: this.external,
       mcpSignInNote: (granted) => this.mcpSignInNote(granted),
@@ -1443,7 +1443,21 @@ export class Runner {
     }
   }
 
-  private rpc(shiftId: string, method: string, params: Record<string, unknown>): Promise<IpcRpcResponse> {
+  /** R3c: the frames of a session turn carry the id of the dispatch they answer, so the server can tell a late one from the current. */
+  private withAttempt<T extends object>(type: string, payload: T): T {
+    if (type !== 'chat.delta' && type !== 'chat.activity' && type !== 'chat.done' && type !== 'chat.error')
+      return payload;
+    const id = (payload as { chatId?: string }).chatId;
+    const attemptId = id ? this.chat.attemptOf(id) : undefined;
+    return attemptId ? { ...payload, attemptId } : payload;
+  }
+
+  private rpc(
+    shiftId: string,
+    method: string,
+    params: Record<string, unknown>,
+    attemptId?: string,
+  ): Promise<IpcRpcResponse> {
     if (!this.client.isReady)
       return Promise.resolve({ ok: false, error: 'server unreachable, try again later' });
     const rpcId = uuidv7();
@@ -1456,7 +1470,13 @@ export class Runner {
         clearTimeout(timer);
         resolve(r);
       });
-      this.client.send('rpc.request', { rpcId, shiftId, method, params });
+      this.client.send('rpc.request', {
+        rpcId,
+        shiftId,
+        method,
+        params,
+        ...(attemptId ? { attemptId } : {}),
+      });
     });
   }
 

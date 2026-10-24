@@ -1328,6 +1328,8 @@ export const RpcRequestSchema = msg('rpc.request', {
   shiftId: z.uuid(),
   method: RpcMethodSchema,
   params: z.record(z.string(), z.unknown()),
+  /** R3c: the dispatch of the session turn this verb belongs to (echoed from `chat.start.attemptId`); a stale one is refused. */
+  attemptId: z.string().max(80).optional(),
 });
 /**
  * The runner's sweep of stale worktrees (start-up and the hygiene job) asks which of the card worktrees it found are
@@ -1416,6 +1418,8 @@ export const ChatActivitySchema = msg('chat.activity', {
   seq: z.number().int().nonnegative(),
   segment: ChatSegmentSchema,
   replace: z.boolean().optional(),
+  /** R3c: the dispatch this frame answers (echoed from `chat.start.attemptId`); absent from an older runner. */
+  attemptId: z.string().max(80).optional(),
 });
 /** Announced in `welcome.features` by servers that accept `chat.activity` (an older server would log and drop it). */
 export const CHAT_ACTIVITY_FEATURE = 'chat-activity:1';
@@ -1437,6 +1441,8 @@ export const ChatDeltaSchema = msg('chat.delta', {
   chatId: z.string(),
   threadId: z.uuid(),
   text: z.string(),
+  /** R3c: the dispatch this frame answers (echoed from `chat.start.attemptId`); absent from an older runner. */
+  attemptId: z.string().max(80).optional(),
 });
 export const ChatDoneSchema = msg('chat.done', {
   chatId: z.string(),
@@ -1455,11 +1461,15 @@ export const ChatDoneSchema = msg('chat.done', {
   model: z.string().max(120).optional(),
   /** Additive: the full ordered turn (text, tool calls, thinking). `messageText` stays the final answer. */
   segments: z.array(ChatSegmentSchema).max(CHAT_SEGMENTS_MAX).optional(),
+  /** R3c: the dispatch this frame answers (echoed from `chat.start.attemptId`); absent from an older runner. */
+  attemptId: z.string().max(80).optional(),
 });
 export const ChatErrorSchema = msg('chat.error', {
   chatId: z.string(),
   threadId: z.uuid(),
   error: z.string(),
+  /** R3c: the dispatch this frame answers (echoed from `chat.start.attemptId`); absent from an older runner. */
+  attemptId: z.string().max(80).optional(),
 });
 export const CommandResultSchema = msg('command.result', {
   commandId: z.string(),
@@ -1625,6 +1635,12 @@ export const ChatStartSchema = msg('chat.start', {
   playbookGrants: z.array(z.string().max(130)).max(40).optional(),
   /** R3b: the delegation targets of this chat's agent (an agent chat); a session turn carries its own in `session.delegation`. */
   delegation: DelegationSpecSchema.optional(),
+  /**
+   * R3c: the id of this dispatch of a session turn. The runner echoes it in `chat.delta`, `chat.activity`, `chat.done`,
+   * `chat.error` and in the verbs of the turn (`rpc.request`), so the server can tell a late frame of an earlier dispatch from
+   * the current one. A dispatch of the same turn that finds it still running here only changes the id the frames carry.
+   */
+  attemptId: z.string().max(80).optional(),
 });
 export const TokenRotatedSchema = msg('token.rotated', { token: z.string().min(1) });
 /** A browser started (or stopped) following the logs of a run environment: the runner sends `run.log` only meanwhile. */

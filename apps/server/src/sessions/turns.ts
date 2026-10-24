@@ -128,11 +128,23 @@ function personaSpec(name: string, choice: ModelChoice, skills: string[]): Agent
  * when its workstation is online, and puts it back in the queue when the workstation lost it (a runner restart, a dropped
  * connection). The reply is stored as a thread message written by the speaker. Chat, card and CEO threads never come here.
  */
+/**
+ * What a frame's dispatch id says about the turn (R3c): `current` it answers the newest dispatch, `stale` an earlier one, `unknown`
+ * the runner echoes none (an older runner) or the turn has none (a row from before): the earlier rules apply.
+ */
+export function attemptVerdict(
+  turn: { attempt_id?: string | null },
+  frame: string | undefined,
+): 'current' | 'stale' | 'unknown' {
+  if (!frame || !turn.attempt_id) return 'unknown';
+  return frame === turn.attempt_id ? 'current' : 'stale';
+}
+
 export class SessionTurns {
   /** turn id -> workstation, for the turns this process sent and has not heard the end of. */
   private readonly inflight = new Map<
     string,
-    { workstationId: string; userIds: string[]; sealed: boolean }
+    { workstationId: string; userIds: string[]; sealed: boolean; attemptId?: string }
   >();
   private readonly dispatching = new Set<string>();
 
@@ -541,8 +553,12 @@ export class SessionTurns {
         await this.failTurn(turn, 'the speaker is no longer available');
         return false;
       }
+      // Each dispatch has its own id: the runner echoes it, and a late frame of an earlier dispatch is told from this one.
+      const attemptId = randomUUID();
+      payload.attemptId = attemptId;
       // Started first, then sent: a cancel or a lost runner that arrives right after the send finds a running turn.
       this.inflight.set(turn.id, {
+        attemptId,
         workstationId: wsId,
         userIds: await this.audience(ctx.pool, turn.thread_id),
         sealed: await this.isSealed(ctx.pool, turn),
@@ -558,6 +574,7 @@ export class SessionTurns {
               threadId: turn.thread_id,
               workstationId: wsId,
               attempt: (turn.attempts ?? 0) + 1,
+              attemptId,
             },
           },
           actor: runnerActor(wsId),
@@ -750,6 +767,8 @@ export class SessionTurns {
   onDelta(workstationId: string, msg: RunnerToServerOf<'chat.delta'>): boolean {
     const c = this.inflight.get(msg.chatId);
     if (!c) return false;
+    // a delta of an earlier dispatch is not shown (the turn was sent again)
+    if (msg.attemptId && c.attemptId && msg.attemptId !== c.attemptId) return true;
     // a sealed speaker's words are held back (the reply is read from the thread once the round is revealed)
     if (c.workstationId === workstationId && !c.sealed)
       this.tell(c.userIds, {
@@ -764,6 +783,7 @@ export class SessionTurns {
   onActivity(workstationId: string, msg: RunnerToServerOf<'chat.activity'>): boolean {
     const c = this.inflight.get(msg.chatId);
     if (!c) return false;
+    if (msg.attemptId && c.attemptId && msg.attemptId !== c.attemptId) return true;
     if (c.workstationId === workstationId && !c.sealed)
       this.tell(c.userIds, {
         type: 'chat.activity',
@@ -790,9 +810,15 @@ export class SessionTurns {
       participantId: turn.participant_id ?? null,
       workstationId,
     };
-    // Only the workstation the turn was sent to may end it, and only while it runs: a frame of an earlier attempt that arrives
-    // after the turn went back to the queue (or from any other workstation) changes nothing.
-    if (turn.workstation_id !== workstationId || turn.status === 'queued')
+    // Only the workstation the turn was sent to may end it. A frame of an earlier dispatch changes nothing. The reply of the
+    // CURRENT dispatch is accepted even when the turn went back to the queue meanwhile (the server had taken it for lost, the
+    // runner finished it after all): without dispatch ids (an older runner) a turn in the queue ignores the frame, as before.
+    const verdict = attemptVerdict(turn, msg.attemptId);
+    if (
+      turn.workstation_id !== workstationId ||
+      verdict === 'stale' ||
+      (turn.status === 'queued' && verdict !== 'current')
+    )
       return { ...base, workstationId: null, ignored: true };
     if (turn.status === 'done' || turn.status === 'failed')
       return { ...base, ...(turn.message_id ? { messageId: turn.message_id } : {}) };
@@ -876,7 +902,11 @@ export class SessionTurns {
       participantId: turn.participant_id ?? null,
       workstationId,
     };
-    if (turn.workstation_id !== workstationId || turn.status === 'queued')
+    if (
+      turn.workstation_id !== workstationId ||
+      turn.status === 'queued' ||
+      attemptVerdict(turn, msg.attemptId) === 'stale'
+    )
       return { ...base, workstationId: null, ignored: true };
     if (turn.status === 'done' || turn.status === 'failed') return base;
     const t = (await one(tx, 'SELECT org_id, project_id FROM threads WHERE id=$1', [turn.thread_id])) as
