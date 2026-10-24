@@ -35,6 +35,7 @@ export * from './members.ts';
 export * from './metrics.ts';
 export * from './org.ts';
 export * from './org-chart.ts';
+export * from './org-providers.ts';
 export * from './orgs.ts';
 export * from './outbound.ts';
 export * from './phases.ts';

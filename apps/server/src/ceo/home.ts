@@ -35,6 +35,7 @@ export async function moveCeo(
     if (a.workstation_id === ws.id) return;
     const ack = await sandboxGate(ctx, tx, user.id, ws.id, a.runtime, req.acknowledgeUnsandboxed, {
       roleKey: 'ceo',
+      model: a.model,
     });
     await ctx.store.append(
       [

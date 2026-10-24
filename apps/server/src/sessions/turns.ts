@@ -47,6 +47,7 @@ import type { Tx } from '../db/tx.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, HttpError, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
+import { assertProviderCapRoom, providerCapProblem } from '../provider-keys/caps.ts';
 import { threadMessageById } from '../queries/threads.ts';
 import { agentSpecFor } from '../runner-gateway/brief.ts';
 import { assertSessionMayQueue } from './cost.ts';
@@ -280,10 +281,13 @@ export class SessionTurns {
         );
       // A model the owner (or the Boardroom's defaults) picked must be one this workstation can run: its runtime is there and, for a
       // direct model, its provider has a key stored on that machine. Refused now, with the reason, rather than hanging in the queue.
+      const reports = await runtimeReports(tx, workstationId);
       if (req.model) {
-        const problem = runtimeProblem(await runtimeReports(tx, workstationId), choice);
+        const problem = runtimeProblem(reports, choice, t.org_id);
         if (problem) throw conflict('runtime_unavailable', problem);
       }
+      // The turn would spend the organization's key of a provider whose monthly cap is reached: refused now, with the reason.
+      await assertProviderCapRoom(tx, t.org_id, reports, choice, ctx.clock.now());
 
       const turnId = randomUUID();
       await ctx.store.append(
@@ -473,9 +477,21 @@ export class SessionTurns {
       }
       // The runtime this turn runs on must be there: a direct model needs its provider's key on the workstation. Failed clearly,
       // not left to hang (a Claude Code that is logged out or limited is left to the runner, which says so itself).
-      const problem = runtimeProblem(await runtimeReports(ctx.pool, wsId), turn.model as ModelChoice);
+      const wsReports = await runtimeReports(ctx.pool, wsId);
+      const problem = runtimeProblem(wsReports, turn.model as ModelChoice, turn.org_id);
       if (problem) {
         await this.failTurn(turn, `runtime_unavailable: ${problem}`);
+        return false;
+      }
+      const capProblem = await providerCapProblem(
+        ctx.pool,
+        turn.org_id,
+        wsReports,
+        turn.model as ModelChoice,
+        ctx.clock.now(),
+      );
+      if (capProblem) {
+        await this.failTurn(turn, `provider_cap_reached: ${capProblem}`);
         return false;
       }
       const purpose = (turn.meta as { purpose?: string } | null)?.purpose;

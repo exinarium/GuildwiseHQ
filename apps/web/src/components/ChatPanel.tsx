@@ -37,6 +37,8 @@ export function chatErrorText(reason: string): string {
       return 'The agent is still answering your previous message.';
     case 'project_paused':
       return 'This project is paused by an Owner or Admin: nothing new starts on it until it is resumed.';
+    case 'provider_cap_reached':
+      return "The organization's key for this agent's model provider has reached its monthly cap, so nothing new starts on it. An Owner or Admin can raise or override the cap under Settings > Model providers; a workstation's own key is not capped.";
     case 'unknown_thread':
       return 'This conversation no longer exists.';
     case 'cancelled':

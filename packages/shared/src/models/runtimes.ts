@@ -1,4 +1,5 @@
 import type { AgentPermissions } from '../roles/schema.ts';
+import { splitBackendModel } from './backends.ts';
 
 /**
  * The CLI harness runtimes besides Claude Code (docs/RUNNER.md, "Sandbox parity of the other runtimes"). Each runs a vendor's
@@ -93,3 +94,17 @@ export function runtimeRoleProblem(runtime: string, role: RoleForRuntimeCheck): 
 /** Should the picker offer this runtime for the role at all (a quick yes/no for the web)? */
 export const runtimeAllowsRole = (runtime: string, role: RoleForRuntimeCheck): boolean =>
   runtimeRoleProblem(runtime, role) === null;
+
+/**
+ * Claude Code through Bedrock, Vertex or a gateway uses a credential the runner holds, which the CEO's full-power turns and the
+ * DevOps engineer (the owner's own Claude login, the owner's whole machine) cannot take. Null when the model is not a backend model.
+ */
+export function claudeBackendRoleProblem(
+  model: string,
+  role: Pick<RoleForRuntimeCheck, 'roleKey' | 'isDevops'>,
+): string | null {
+  if (splitBackendModel(model) === null) return null;
+  if (role.isDevops || HARNESS_REFUSED_ROLES.includes(role.roleKey))
+    return `the ${role.roleKey} role works with the owner's own Claude login and full workstation access, which a Bedrock, Vertex or gateway credential cannot give: use a Claude model`;
+  return null;
+}

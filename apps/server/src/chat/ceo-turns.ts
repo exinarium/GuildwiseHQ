@@ -5,15 +5,16 @@ import {
   CEO_FULL_POWER_CAPABILITY,
   CEO_QUEUE_STALE_HOURS,
   type ChatContext,
-  CODEX_RUNTIME,
   costUsdMicros,
   DIRECT_RUNTIME,
   isKnownChoice,
   type ModelChoice,
   modelChoiceLabel,
   normalizeJobKind,
+  RUNTIME_GUARANTEES,
   type RunnerToServerOf,
   resolveModelChoice,
+  splitBackendModel,
   streamId,
   type ToolCounts,
 } from '@aom/shared';
@@ -75,9 +76,11 @@ export function resolveTurnModel(
   reports: readonly RuntimeReport[] = [],
 ): { choice: ModelChoice; source: 'message' | 'thread' | 'default' } | null {
   const providers = providersOf(reports);
-  // The CEO never runs on the Codex runtime (its sandbox cannot give the CEO's restricted profile): not a choice for it.
+  // The CEO never runs on a CLI harness runtime (Codex, Gemini CLI, opencode: their sandboxes cannot give the CEO's restricted
+  // profile) nor on a Bedrock, Vertex or gateway model (it works with the owner's own Claude login): not a choice for it.
   const known = (c: ModelChoice): boolean =>
-    c.runtime !== CODEX_RUNTIME &&
+    !RUNTIME_GUARANTEES[c.runtime] &&
+    !(c.runtime === 'claude-code' && splitBackendModel(c.model) !== null) &&
     isKnownChoice(c, c.runtime === DIRECT_RUNTIME && reports.length ? providers : undefined);
   const r = resolveModelChoice({
     message: message ?? null,

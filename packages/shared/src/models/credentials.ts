@@ -125,6 +125,9 @@ export const ProviderKeyResealPayloadSchema = z.object({
   /** The target workstation's runner key (its id and SPKI public key), as the server knows them. */
   targetKeyId: z.string().min(1).max(64),
   targetPublicKey: z.string().min(1).max(2000),
+  /** Who approved sharing, and to which workstation: for the server's bookkeeping when the answer arrives. */
+  targetWorkstationId: z.uuid().optional(),
+  approvedBy: z.uuid().optional(),
 });
 export const ProviderKeyResealResultSchema = z.object({
   ok: z.boolean(),

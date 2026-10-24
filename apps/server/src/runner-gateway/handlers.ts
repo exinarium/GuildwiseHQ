@@ -44,6 +44,7 @@ import { investigationRecordRpc } from '../commands/investigation.ts';
 import { applyMcpServersReport, mcpCallsIn, mergeMcpCalls } from '../commands/mcp-servers.ts';
 import { applyOrgFolderResult, applyOrgFoldersReport } from '../commands/org-folders.ts';
 import { dispatchOrgGraph } from '../commands/org-graph.ts';
+import { applyResealResult } from '../commands/org-provider-keys.ts';
 import { applyOutboundResult, finishOutboundCommand, queueApprovedFor } from '../commands/outbox.ts';
 import { applyPacksReport, applyProjectCapabilitiesReport, queuePacksSync } from '../commands/packs.ts';
 import { applyBranchCheckResult } from '../commands/phases.ts';
@@ -606,6 +607,10 @@ export class RunnerHandlers {
             msg.ok,
             msg.result,
           );
+        } else if (cmd?.type === 'provider.key.reseal') {
+          // Terminal: the answer carries the organization key sealed to another runner; it is relayed on, never kept here.
+          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+          await applyResealResult(this.ctx, conn.workstationId, cmd.payload, msg.ok, msg.result);
         } else if (cmd?.type === 'env.secret.set') {
           // Like the sudo password: the ciphertext is forgotten whatever the answer was.
           await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());

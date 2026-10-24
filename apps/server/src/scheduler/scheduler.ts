@@ -8,6 +8,7 @@ import { publishPendingDocuments } from '../commands/documents.ts';
 import { fireDueHygiene } from '../commands/hygiene.ts';
 import { sweepIntegrations } from '../commands/integrations.ts';
 import { deliverDueInterests, fireDueInterests } from '../commands/interest-runs.ts';
+import { evaluateAllProviderCaps } from '../commands/org-provider-keys.ts';
 import { auditMailTick } from '../commands/platform-notify.ts';
 import { expireRuns } from '../commands/runs.ts';
 import { deliverDue } from '../commands/schedule-delivery.ts';
@@ -114,6 +115,9 @@ export class Scheduler {
       const fired = await fireDueSchedules(this.ctx);
       // Budgets: a new month re-arms the thresholds, and a pause of last month's closes its desk item.
       await evaluateAllBudgets(this.ctx).catch((err) => this.ctx.log.error({ err }, 'budget check failed'));
+      await evaluateAllProviderCaps(this.ctx).catch((err) =>
+        this.ctx.log.error({ err }, 'provider cap check failed'),
+      );
       await this.interests();
       await this.triggers();
       await auditMailTick(this.ctx).catch((err) => this.ctx.log.error({ err }, 'audit mail failed'));

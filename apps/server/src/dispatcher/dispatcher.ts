@@ -11,6 +11,7 @@ import { DISPATCH_LOCK_ID } from '../db/tx.ts';
 import { deliveryPass } from '../delivery/triggers.ts';
 import type { StoredEvent } from '../eventstore/types.ts';
 import { platformPass } from '../platform-team/detectors.ts';
+import { agentCapBlocked, type ProviderCapState } from '../provider-keys/caps.ts';
 import { buildShiftStart } from '../runner-gateway/brief.ts';
 import { wsServesOrgSql } from '../simulation/fit.ts';
 import { accountFor, loadProjectAccounts, runtimeUsable, accountScope as scopeOf } from './accounts.ts';
@@ -191,9 +192,13 @@ export class Dispatcher {
     list.sort((x, y) => Number(originals.has(y.id)) - Number(originals.has(x.id)));
     // Roles whose smoke test failed on a workstation get no work there (runner 0.1.24, role.smoke).
     const blocked = await blockedRoles(this.ctx);
+    // An agent whose model would spend the organization's key of a provider whose monthly cap is reached gets no work (provider_cap_reached);
+    // the cards stay queued, the agents on a workstation's own key or a subscription go on.
+    const capCache = new Map<string, ProviderCapState>();
     const out = [];
     for (const a of list) {
       if (blocked.has(`${a.workstation_id}|${a.role_key}`)) continue;
+      if (await agentCapBlocked(this.ctx.pool, a as never, now, capCache)) continue;
       const rt = (
         a.runtimes as Array<{ id: string; available: boolean; capabilities: string[]; auth?: string }>
       ).find((r) => r.id === a.runtime);

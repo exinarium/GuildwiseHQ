@@ -39,6 +39,7 @@ import { one, type Row, rows } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
 import { isProjectPaused } from '../dispatcher/project-hold.ts';
 import type { AppendInput } from '../eventstore/types.ts';
+import { agentCapBlocked } from '../provider-keys/caps.ts';
 import { notifyUsers } from '../push/notifier.ts';
 import { standingOrdersForProjects } from '../queries/ledger.ts';
 import { threadMessageById } from '../queries/threads.ts';
@@ -175,6 +176,15 @@ export class ChatRelay {
     // A simulation organization's agents only run on its simulated workstation, a real one never answers for it.
     if (!(await workstationServesOrg(ctx.pool, row.workstation_id, row.org_id)))
       return this.fail(userId, msg.threadId, CHAT_ERROR.simulationWorkstation);
+    // The agent's model would spend the organization's key of a provider whose monthly cap is reached.
+    if (
+      await agentCapBlocked(
+        ctx.pool,
+        { ...row, runtimes: await runtimeReports(ctx.pool, row.workstation_id) } as never,
+        ctx.clock.now(),
+      )
+    )
+      return this.fail(userId, msg.threadId, CHAT_ERROR.providerCapReached);
 
     const prior = await one(
       ctx.pool,

@@ -6,6 +6,7 @@ import { endQuestionShift, escalateEvents, QUESTION_STALL_MS } from '../commands
 import type { Ctx } from '../context.ts';
 import { one, type Row, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
+import { agentCapBlocked, type ProviderCapState } from '../provider-keys/caps.ts';
 import { buildQuestionShiftStart, QUESTION_MAX_SHIFT_MINUTES } from '../runner-gateway/question-brief.ts';
 import { wsServesOrgSql } from '../simulation/fit.ts';
 import { accountFor } from './accounts.ts';
@@ -41,7 +42,7 @@ export async function questionPass(
     ctx.pool,
     `SELECT d.id, d.routed_agent_id, d.updated_at, d.created_at, d.card_id,
             cp.claude_account_key, cp.claude_account_fallback,
-            a.status AS agent_status, a.runtime, ws.id AS ws_id, ws.runtimes, ws.connected, ws.last_seen_at, ws.status AS ws_status,
+            a.status AS agent_status, a.runtime, a.model AS agent_model, d.org_id AS item_org_id, ws.id AS ws_id, ws.runtimes, ws.connected, ws.last_seen_at, ws.status AS ws_status,
             (SELECT count(*)::int FROM shifts s WHERE s.desk_item_id = d.id AND s.agent_id = d.routed_agent_id
                AND s.status = 'ended' AND s.outcome IS DISTINCT FROM 'rejected' AND s.outcome IS DISTINCT FROM 'reported') AS failed
        FROM desk_items d JOIN agents a ON a.id = d.routed_agent_id LEFT JOIN workstations ws ON ws.id = a.workstation_id
@@ -57,6 +58,7 @@ export async function questionPass(
                d.blocking DESC, d.created_at, d.id`,
   );
   const started: QuestionDispatch[] = [];
+  const capCache = new Map<string, ProviderCapState>();
   const busy = new Set<string>();
   for (const r of queued) {
     // The account: the card's project's, when the question is about one of its tickets; else main. No usable account
@@ -87,6 +89,16 @@ export async function questionPass(
       continue;
     }
     if (!reachable || busy.has(r.routed_agent_id) || skipAgent(r.routed_agent_id) || workstationFull(r.ws_id))
+      continue;
+    // The agent's model would spend the organization's key of a provider whose monthly cap is reached: the question waits.
+    if (
+      await agentCapBlocked(
+        ctx.pool,
+        { org_id: r.item_org_id, runtime: r.runtime, model: r.agent_model, runtimes: r.runtimes },
+        now,
+        capCache,
+      )
+    )
       continue;
     const conn = ctx.services.runners.get(r.ws_id);
     if (!conn || !conn.reconciled) continue;

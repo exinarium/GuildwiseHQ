@@ -1,11 +1,13 @@
 import {
   type CeoActionName,
-  CODEX_RUNTIME,
   canonicalWorkflowKey,
-  codexRoleProblem,
+  claudeBackendRoleProblem,
   DESK_SUBKIND,
   DIRECT_RUNTIME,
   isKnownChoice,
+  RUNTIME_GUARANTEES,
+  runtimeRoleProblem,
+  splitBackendModel,
   streamId,
 } from '@aom/shared';
 import { z } from 'zod';
@@ -135,25 +137,33 @@ const raiseModel: ActionDef<z.infer<typeof RaiseP>> = {
         ...base,
         refuse: `${p.model}${p.effort ? ` with effort ${p.effort}` : ''} is not a model choice of ${choice.runtime}`,
       };
-    // The Codex runtime cannot confine every role (no shell-less roles, no DevOps, no browsers, no path-limited writers): the agents
-    // that work this card must all be able to run there. The same rule as hiring or moving an agent onto Codex.
-    if (choice.runtime === CODEX_RUNTIME) {
+    // A CLI harness runtime (Codex, Gemini CLI, opencode) cannot confine every role (no DevOps or CEO, no browsers, no path-limited
+    // writers, and Codex no shell-less roles), and a Bedrock, Vertex or gateway model cannot serve the roles that use the owner's
+    // login: the agents that work this card must all be able to run there. The same rule as hiring or moving an agent.
+    const guard = RUNTIME_GUARANTEES[choice.runtime];
+    const backend = choice.runtime === 'claude-code' && splitBackendModel(choice.model) !== null;
+    if (guard || backend) {
       const ids = [card.claimed_by_agent_id, card.last_agent_id, card.original_builder_agent_id].filter(
         (x): x is string => !!x,
       );
-      if (!ids.length)
+      if (!ids.length && guard)
         return {
           ...base,
-          refuse: 'no agent works this card yet, so Codex cannot be checked against its role',
+          refuse: `no agent works this card yet, so ${guard.short} cannot be checked against its role`,
         };
       for (const a of await rows(env.ctx.pool, 'SELECT * FROM agents WHERE id = ANY($1::uuid[])', [ids])) {
         const spec = await agentSpecFor(env.ctx, a);
-        const problem = codexRoleProblem({
-          roleKey: spec.roleKey,
-          isDevops: spec.isDevops,
-          permissions: spec.permissions,
-        });
-        if (problem) return { ...base, refuse: `${a.name} cannot run on Codex: ${problem}` };
+        const problem =
+          (guard
+            ? runtimeRoleProblem(choice.runtime, {
+                roleKey: spec.roleKey,
+                isDevops: spec.isDevops,
+                permissions: spec.permissions,
+              })
+            : null) ??
+          claudeBackendRoleProblem(choice.model, { roleKey: spec.roleKey, isDevops: spec.isDevops });
+        if (problem)
+          return { ...base, refuse: `${a.name} cannot run on ${guard?.short ?? 'this model'}: ${problem}` };
       }
     }
     return { ...base, data: { card, choice } };

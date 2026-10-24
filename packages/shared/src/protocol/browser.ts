@@ -18,6 +18,8 @@ export const CHAT_ERROR = {
   unknownThread: 'unknown_thread',
   busy: 'busy',
   projectPaused: 'project_paused',
+  /** The agent's model would spend the organization's key of a provider whose monthly cap is reached. */
+  providerCapReached: 'provider_cap_reached',
   cancelled: 'cancelled',
   runnerError: 'runner_error',
   /** The DevOps engineer works through the CEO now: its chats are read-only (docs/design/ceo-front-door.md section 8). */

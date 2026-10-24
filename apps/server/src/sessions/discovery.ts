@@ -70,6 +70,7 @@ const BLOCKING_CODES = new Set([
   'session_budget_exceeded',
   'project_paused',
   'project_budget_paused',
+  'provider_cap_reached',
   'no_workstation',
   'runtime_unavailable',
 ]);
@@ -115,7 +116,9 @@ const sameEntry = (a: PendingEntry, b: PendingEntry): boolean =>
 const MERGEABLE = new Set(['answer', 'message', 'proposal', 'ceo_answered']);
 /** A failure that another try cannot fix: the owner asked for it, or the workstation cannot run the turn at all. */
 const isFinalFailure = (turn: Row): boolean =>
-  /^(cancel|runner_too_old|codex_role_refused)/i.test(String(turn.error ?? ''));
+  /^(cancel|runner_too_old|codex_role_refused|runtime_role_refused|provider_cap_reached)/i.test(
+    String(turn.error ?? ''),
+  );
 
 /**
  * Discovery Studio orchestrator (docs/ARCHITECTURE.md section 38, phase B). The state lives in events and projections: the

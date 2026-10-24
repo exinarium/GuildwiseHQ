@@ -6,6 +6,7 @@ import { cardUsage, limitReached, stopLossBudget, stopLossEvents } from '../comm
 import type { Ctx } from '../context.ts';
 import { one } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
+import { agentCapBlocked } from '../provider-keys/caps.ts';
 import { wsServesOrgSql } from '../simulation/fit.ts';
 import { type AgentView, agentView, isCandidate } from './candidates.ts';
 import { dependencyStates } from './dependencies.ts';
@@ -74,6 +75,9 @@ export async function claim(ctx: Ctx, args: ClaimArgs): Promise<ClaimResult | nu
       (r) => r.id === a.runtime,
     );
     const view: AgentView = agentView(a, runtime?.capabilities ?? []);
+    // The last guard (the overflow and preferred paths do not come through the dispatcher's agent list): no claim for an agent
+    // whose model would spend the organization's key of a provider whose monthly cap is reached.
+    if (await agentCapBlocked(tx, a as never, ctx.clock.now())) return null;
     if (!overflow) {
       const active = await one(
         tx,

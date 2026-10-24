@@ -13,6 +13,7 @@ import { withAppendTx } from '../db/tx.ts';
 import { conflict, notFound, unprocessable } from '../errors.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { providersOf, runtimeReports } from '../sessions/offer.ts';
+import { applyOrgKeyResult } from './org-provider-keys.ts';
 import { deliver } from './workstation-setup.ts';
 
 /**
@@ -116,6 +117,8 @@ export async function applyProviderKeyResult(
   result: unknown,
 ): Promise<void> {
   await exec(ctx.pool, `UPDATE runner_commands SET payload='{}'::jsonb WHERE id=$1`, [commandId]);
+  // The organization's key: only the fact that the copy was stored goes to the share row (the page of the Owner and Admins).
+  if (payload.source === 'org') return applyOrgKeyResult(ctx, workstationId, commandId, payload, ok, result);
   const parsed = ok ? ProviderKeyResultSchema.safeParse(result).data : undefined;
   const provider = String(payload.provider) as DirectProviderId;
   lastResults.set(workstationId, {

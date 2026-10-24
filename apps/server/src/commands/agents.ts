@@ -2,19 +2,19 @@ import { randomUUID } from 'node:crypto';
 import {
   type AgentChanges,
   type AgentPermissions,
-  CODEX_REFUSED_ROLES,
-  CODEX_RUNTIME,
   canHireAgentInOrg,
   canManageAgentInOrg,
   canWidenPermissions,
   checkPermissions,
-  codexRoleProblem,
+  claudeBackendRoleProblem,
   DEFAULT_AVATAR_STYLE,
   DEVOPS_ROLE_KEY,
   DIRECT_RUNTIME,
   type HireAgentRequest,
   isOrgManager,
+  RUNTIME_GUARANTEES,
   randomAvatarSeed,
+  runtimeRoleProblem,
   streamId,
   type UnsandboxedAck,
 } from '@aom/shared';
@@ -190,6 +190,33 @@ export async function suggestNames(
   return out;
 }
 
+/** Roles a role-less check still knows to be refused (the DevOps engineer, the CEO): no permissions needed. */
+const NO_SHELL_NEEDED = { allowedTools: ['shell'], writableGlobs: null, browser: false };
+
+/**
+ * Throws `runtime_not_for_role` when this role cannot run on this runtime (or on a Claude Code backend model): the one rule hiring,
+ * moving an agent, re-homing and the CEO's raise-model action share. A runtime without restrictions (Claude Code, the mock) passes.
+ */
+export function assertRuntimeFitsRole(
+  runtimeId: string,
+  role: { roleKey: string; isDevops?: boolean; permissions?: AgentPermissions; model?: string },
+): void {
+  const g = RUNTIME_GUARANTEES[runtimeId];
+  if (g) {
+    const refusedWithoutPermissions = role.isDevops || role.roleKey === 'devops' || role.roleKey === 'ceo';
+    const problem = role.permissions
+      ? runtimeRoleProblem(runtimeId, { ...role, permissions: role.permissions })
+      : refusedWithoutPermissions
+        ? runtimeRoleProblem(runtimeId, { ...role, permissions: NO_SHELL_NEEDED })
+        : null;
+    if (problem) throw badRequest('runtime_not_for_role', `${g.label} cannot run this agent: ${problem}`);
+  }
+  if (runtimeId === 'claude-code' && role.model) {
+    const problem = claudeBackendRoleProblem(role.model, role);
+    if (problem) throw badRequest('runtime_not_for_role', `this model cannot run this agent: ${problem}`);
+  }
+}
+
 /**
  * A workstation's runtime may only take an agent when it can run one: `unavailable` is refused with the runner's reason;
  * `unsandboxed` needs the caller's explicit acknowledgement, which is returned for the event (who and when).
@@ -201,8 +228,11 @@ export async function sandboxGate(
   workstationId: string,
   runtimeId: string,
   acknowledged: boolean | undefined,
-  /** The agent's role, when known: the Codex runtime refuses the roles its sandbox cannot confine (`codexRoleProblem`). */
-  role?: { roleKey: string; isDevops?: boolean; permissions?: AgentPermissions },
+  /**
+   * The agent's role (and model), when known: a CLI harness runtime refuses the roles its sandbox cannot confine
+   * (`runtimeRoleProblem`), and a Bedrock, Vertex or gateway model the roles that work with the owner's own login.
+   */
+  role?: { roleKey: string; isDevops?: boolean; permissions?: AgentPermissions; model?: string },
 ): Promise<UnsandboxedAck | undefined> {
   // Agents work cards and shifts with a shell and edit tools. The direct API models (conversation only) are for session turns.
   if (runtimeId === DIRECT_RUNTIME)
@@ -210,18 +240,7 @@ export async function sandboxGate(
       'runtime_not_for_agents',
       'the direct API models have no shell or edit tools, so an agent cannot run on them: pick them for a Discovery or Boardroom seat instead',
     );
-  if (runtimeId === CODEX_RUNTIME && role) {
-    const problem = role.permissions
-      ? codexRoleProblem({ ...role, permissions: role.permissions })
-      : CODEX_REFUSED_ROLES.includes(role.roleKey) || role.isDevops
-        ? codexRoleProblem({
-            ...role,
-            permissions: { allowedTools: ['shell'], writableGlobs: null, browser: false },
-          })
-        : null;
-    if (problem)
-      throw badRequest('runtime_not_for_role', `the Codex runtime cannot run this agent: ${problem}`);
-  }
+  if (role) assertRuntimeFitsRole(runtimeId, role);
   const ws = await one(tx, 'SELECT name, runtimes FROM workstations WHERE id=$1', [workstationId]);
   const rt = (
     ws?.runtimes as Array<{ id: string; sandbox?: string; sandboxReason?: string }> | undefined
@@ -335,7 +354,7 @@ export async function hireAgent(
       req.workstationId,
       req.runtime ?? dm.runtime,
       req.acknowledgeUnsandboxed,
-      { roleKey: roleDef.key, permissions: roleDef.definition.permissions },
+      { roleKey: roleDef.key, permissions: roleDef.definition.permissions, model: req.model ?? dm.model },
     );
     await ctx.store.append(
       [
@@ -447,11 +466,19 @@ export async function patchAgent(
         );
     }
     if (changes.permissions) await assertMcpAdditions(tx, user, a, role, changes.permissions);
+    // A model change alone can move the agent onto a backend credential (bedrock:, vertex:, gateway:) that some roles cannot take.
+    if (next.model && !(next.runtime && next.runtime !== a.runtime))
+      assertRuntimeFitsRole(next.runtime ?? a.runtime, {
+        roleKey: next.roleKey ?? a.role_key,
+        isDevops: a.is_devops === true,
+        model: next.model,
+      });
     const unsandboxedAck =
       next.runtime && next.runtime !== a.runtime && a.workstation_id
         ? await sandboxGate(ctx, tx, user.id, a.workstation_id, next.runtime, acknowledgeUnsandboxed, {
             roleKey: next.roleKey ?? a.role_key,
             isDevops: a.is_devops === true,
+            model: next.model ?? a.model,
             ...((next.permissions ?? role?.definition.permissions)
               ? { permissions: (next.permissions ?? role?.definition.permissions) as AgentPermissions }
               : {}),

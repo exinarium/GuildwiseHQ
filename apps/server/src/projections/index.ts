@@ -35,6 +35,7 @@ import { platformProjectors } from './platform.ts';
 import { platformAuditProjectors } from './platform-audit.ts';
 import { projectWorkflowProjectors } from './project-workflows.ts';
 import { projectProjectors } from './projects.ts';
+import { providerKeyProjectors } from './provider-keys.ts';
 import { questionFlowProjectors } from './question-flow.ts';
 import { repoProjectors } from './repo.ts';
 import { reporterProjectors } from './reporter.ts';
@@ -71,6 +72,7 @@ const domains: Array<Record<string, Projector>> = [
   subworkflowProjectors,
   shiftProjectors,
   costProjectors,
+  providerKeyProjectors,
   threadProjectors,
   deskProjectors,
   ledgerProjectors,
@@ -185,6 +187,7 @@ export const PROJECTION_TABLES = [
   'card_attachments',
   'shifts',
   'shift_costs',
+  'org_providers',
   'threads',
   'chat_archives',
   'chat_reads',

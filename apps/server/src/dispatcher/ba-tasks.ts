@@ -18,6 +18,7 @@ import { vaultForProject } from '../commands/vaults.ts';
 import type { Ctx } from '../context.ts';
 import { one, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
+import { agentCapBlocked, type ProviderCapState } from '../provider-keys/caps.ts';
 import { buildBaTaskShiftStart } from '../runner-gateway/ba-task-brief.ts';
 import { accountFor, loadProjectAccounts } from './accounts.ts';
 import { BA_TASK_AGENT_FROM, baTaskAgentEligibleSql } from './ba-agent-sql.ts';
@@ -58,6 +59,7 @@ export async function baTaskPass(
     [now],
   );
   const started: BaTaskDispatch[] = [];
+  const capCache = new Map<string, ProviderCapState>();
   const busy = new Set<string>();
   for (const t of queued) {
     // Batch intake: at most BATCH_MAX_IN_FLIGHT items of one batch are with a BA at once. Batch work also queues behind
@@ -154,6 +156,8 @@ export async function baTaskPass(
       const reachable =
         a.connected && a.last_seen_at && new Date(a.last_seen_at) > onlineSince && account !== null;
       if (!reachable || busy.has(a.id) || skipAgent(a.id) || workstationFull(a.ws_id)) continue;
+      // The agent's model would spend the organization's key of a provider whose monthly cap is reached.
+      if (await agentCapBlocked(ctx.pool, a as never, now, capCache)) continue;
       if (scopingRole !== null) {
         // The prompt of a scoping task is rendered on the runner: an older runner would not know the mode.
         if (!runnerAtLeast(a.runner_version, MIN_RUNNER_FOR_REPO_SCOPING)) continue;

@@ -1,4 +1,4 @@
-import { costUsdMicros, type EventOf } from '@aom/shared';
+import { costUsdMicros, type EventOf, isCostUnknown } from '@aom/shared';
 import { exec, one } from '../db/sql.ts';
 import type { Projector } from '../eventstore/types.ts';
 
@@ -30,8 +30,9 @@ export const costProjectors: Record<string, Projector> = {
     await exec(
       tx,
       `INSERT INTO shift_costs (shift_id, org_id, agent_id, project_id, card_id, phase_id, kind, model,
-         tokens_input, tokens_output, tokens_cache_read, tokens_cache_write, cost_usd_micros, reported_usd_micros, ended_at, cost_stamped)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+         tokens_input, tokens_output, tokens_cache_read, tokens_cache_write, cost_usd_micros, reported_usd_micros, ended_at, cost_stamped,
+         key_source, key_provider, cost_unknown)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
        ON CONFLICT (shift_id) DO NOTHING`,
       [
         p.shiftId,
@@ -50,6 +51,10 @@ export const costProjectors: Record<string, Projector> = {
         p.usage.costUsd === undefined ? null : Math.round(p.usage.costUsd * 1_000_000),
         e.createdAt,
         p.costMicros !== undefined,
+        p.usage.keySource ?? null,
+        p.usage.keyProvider ?? null,
+        // a shift on a stored key whose model has no price: counted as unknown, not as free (the cap cannot count it)
+        p.usage.keySource !== undefined && isCostUnknown(model),
       ],
     );
   },
@@ -68,7 +73,9 @@ export const costProjectors: Record<string, Projector> = {
     await exec(
       tx,
       `UPDATE shift_costs SET model=$2, tokens_input=$3, tokens_output=$4, tokens_cache_read=$5, tokens_cache_write=$6,
-              cost_usd_micros=$7, reported_usd_micros=$8 WHERE shift_id=$1`,
+              cost_usd_micros=$7, reported_usd_micros=$8,
+              key_source = COALESCE(key_source, $9), key_provider = COALESCE(key_provider, $10)
+        WHERE shift_id=$1`,
       [
         p.shiftId,
         model,
@@ -78,6 +85,8 @@ export const costProjectors: Record<string, Projector> = {
         p.usage.cacheWriteTokens,
         p.costMicros ?? costUsdMicros(model, { ...p.usage }),
         p.usage.costUsd === undefined ? null : Math.round(p.usage.costUsd * 1_000_000),
+        p.usage.keySource ?? null,
+        p.usage.keyProvider ?? null,
       ],
     );
   },

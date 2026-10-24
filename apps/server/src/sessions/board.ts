@@ -76,6 +76,7 @@ const BLOCKING_CODES = new Set([
   'session_budget_exceeded',
   'project_paused',
   'project_budget_paused',
+  'provider_cap_reached',
   'no_workstation',
   'runtime_unavailable',
 ]);
