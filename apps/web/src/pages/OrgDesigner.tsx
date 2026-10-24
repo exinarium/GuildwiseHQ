@@ -23,6 +23,7 @@ import { useProjects } from '../api/queries/projects.ts';
 import { RoleBuilder } from '../components/builder/RoleBuilder.tsx';
 import { ChatPanel } from '../components/ChatPanel.tsx';
 import { SkillPicker } from '../components/capabilities/SkillPicker.tsx';
+import { DelegateGrants } from '../components/delegation/DelegateGrants.tsx';
 import { ListInput } from '../components/org/ListInput.tsx';
 import { WorkflowGraph } from '../components/org/WorkflowGraph.tsx';
 import { LargerScreenNote } from '../components/ui/LargerScreenNote.tsx';
@@ -291,6 +292,11 @@ function RolesTab({ cat, projectId }: { cat: OrgCatalogueResponse; projectId?: s
                       {latest.claimableStages.map((c) => `${c.workflowKey}.${c.stageId}`).join(', ')}
                     </p>
                   )}
+                  {cat.canEdit && (
+                    <div className="mt-2">
+                      <DelegateGrants ownerKind="role" ownerId={r.key} />
+                    </div>
+                  )}
                 </Panel>
               </li>
             );
@@ -330,6 +336,11 @@ function RolesTab({ cat, projectId }: { cat: OrgCatalogueResponse; projectId?: s
                       <Button aria-label={`Extend ${r.key}`} onClick={() => setExtending(r.key)}>
                         Extend
                       </Button>
+                    </div>
+                  )}
+                  {cat.canEdit && r.key !== 'devops' && r.key !== 'ceo' && (
+                    <div className="mt-2">
+                      <DelegateGrants ownerKind="role" ownerId={r.key} />
                     </div>
                   )}
                 </Panel>

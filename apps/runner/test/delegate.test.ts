@@ -636,6 +636,86 @@ describe('the model of a delegate is the target’s', () => {
   });
 });
 
+describe('a grant that sets the model (R3c, Q62)', () => {
+  const claude = () => scripted({ id: 'claude-code' });
+  const agentTarget = (over: Record<string, unknown> = {}) =>
+    target('agent:rex', {
+      kind: 'agent',
+      key: '019e3f6a-7b1c-7a2d-8c3e-0123456789aa',
+      name: 'Rex',
+      runtime: 'claude-code',
+      model: 'opus',
+      profile: 'read_only',
+      permissions: READ,
+      instructions: '# You are Rex, a reviewer',
+      ...over,
+    });
+
+  it('runs a persona on the grant’s model instead of its own, and tells the server which', async () => {
+    const c = claude();
+    const s = setup([c]);
+    // the analyst persona is `model: sonnet`; the grant says haiku for this caller
+    const caller = {
+      ...CALLER,
+      runtime: 'claude-code',
+      delegation: {
+        targets: [target('analyst', { modelOverride: { runtime: 'claude-code', model: 'haiku' } })],
+      } as DelegationSpec,
+    };
+    const r = await run(s, { target: 'analyst', task: 'x' }, caller);
+    expect(r.ok).toBe(true);
+    expect(c.starts[0]?.agent).toMatchObject({ runtime: 'claude-code', model: 'haiku' });
+    expect(s.calls.find((x) => x.method === 'delegate.begin')?.params.model).toEqual({
+      runtime: 'claude-code',
+      model: 'haiku',
+    });
+  });
+
+  it('runs a hired agent on the grant’s model for this caller', async () => {
+    const c = claude();
+    const s = setup([c]);
+    const caller = {
+      ...CALLER,
+      delegation: { targets: [agentTarget({ modelOverride: { runtime: 'claude-code', model: 'haiku' } })] },
+    };
+    const r = await run(s, { target: 'agent:rex', task: 'Review this.' }, caller);
+    expect(r.ok).toBe(true);
+    expect(c.starts[0]?.agent).toMatchObject({ runtime: 'claude-code', model: 'haiku' });
+    expect(s.calls[0]?.params.model).toEqual({ runtime: 'claude-code', model: 'haiku' });
+  });
+
+  it('fails, and does not switch to another model, when the grant’s model is not offered here', async () => {
+    const s = setup([scripted()]);
+    const caller = {
+      ...CALLER,
+      delegation: {
+        targets: [target('analyst', { modelOverride: { runtime: 'claude-code', model: 'haiku' } })],
+      } as DelegationSpec,
+    };
+    const r = await run(s, { target: 'analyst', task: 'x' }, caller);
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain('claude-code:haiku');
+    expect(r.error).toContain('is not offered on this workstation');
+    expect(s.calls).toEqual([]);
+  });
+
+  it('still refuses --model from the caller', async () => {
+    const c = claude();
+    const s = setup([c]);
+    const caller = {
+      ...CALLER,
+      runtime: 'claude-code',
+      delegation: {
+        targets: [target('analyst', { modelOverride: { runtime: 'claude-code', model: 'haiku' } })],
+      } as DelegationSpec,
+    };
+    const r = await run(s, { target: 'analyst', task: 'x', model: 'opus' }, caller);
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain('`--model` is not accepted');
+    expect(c.starts).toEqual([]);
+  });
+});
+
 describe('the tool profile of a child', () => {
   const work = {
     cwd: '/work/card-1',

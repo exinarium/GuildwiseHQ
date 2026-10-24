@@ -540,6 +540,242 @@ describe('the data migration', () => {
   });
 });
 
+describe('role-level grants cover every agent of the role (R3c, Q61)', () => {
+  const roleUrl = (key: string) => `/api/roles/${key}/delegate-grants`;
+  const chatShift = async (agentId: string): Promise<string> => {
+    const chatId = randomUUID();
+    await seed(w, [
+      {
+        streamId: `shift-${chatId}`,
+        event: {
+          type: 'ShiftStarted',
+          payload: {
+            shiftId: chatId,
+            agentId,
+            workstationId: w.workstationId,
+            kind: 'chat',
+            runtime: 'mock',
+            model: 'mock',
+            overflow: false,
+          },
+        },
+        actor: { kind: 'runner', id: w.workstationId },
+        scope: { orgId, projectId: null, audience: 'org' },
+      },
+    ]);
+    return chatId;
+  };
+  let first = '';
+
+  it('is for Owners and Admins; a member cannot read or change it; the CEO and DevOps roles and unknown roles are refused', async () => {
+    expect((await call(member, 'GET', roleUrl('ba'))).status).toBe(403);
+    expect((await call(member, 'PUT', roleUrl('ba'), persona())).status).toBe(403);
+    expect((await call(admin, 'GET', roleUrl('ba'))).body).toMatchObject({
+      ownerKind: 'role',
+      roleKey: 'ba',
+      grants: [],
+      canManage: true,
+    });
+    expect((await call(w.owner, 'PUT', roleUrl('ceo'), persona())).status).toBe(400);
+    expect((await call(w.owner, 'PUT', roleUrl('devops'), persona())).status).toBe(400);
+    expect((await call(w.owner, 'PUT', roleUrl('no-such-role'), persona())).status).toBe(404);
+    expect((await call(w.owner, 'PUT', roleUrl('ba'), persona('no-such-persona'))).status).toBe(400);
+  });
+
+  it('gives the grant to every agent of the role, the future hires included, and to no other role', async () => {
+    first = (await w.hire('Rhea', 'ba', 'senior')).agent?.id ?? '';
+    first ||= (await q(`SELECT id FROM agents WHERE name='Rhea'`))[0]?.id;
+    const chat = await chatShift(first);
+    expect((await begin(chat)).error).toContain('not_granted');
+    const res = await call(admin, 'PUT', roleUrl('ba'), persona('devils-advocate', { maxCalls: 2 }));
+    expect(res.status).toBe(200);
+    expect(res.body.grants).toHaveLength(1);
+    // the agent that was hired before the grant has it, shown as inherited from the role
+    const g = (await agentGrants(first)).body;
+    expect(g.roleKey).toBe('ba');
+    expect(g.grants[0]).toMatchObject({ targetKey: 'devils-advocate', inherited: true, maxCalls: 2 });
+    expect((await begin(chat)).ok).toBe(true);
+    // an agent hired later has it too, with no action on the agent
+    const later =
+      (await w.hire('Rosa', 'ba', 'senior')).agent?.id ??
+      (await q(`SELECT id FROM agents WHERE name='Rosa'`))[0]?.id;
+    expect((await agentGrants(later)).body.grants.map((x: any) => [x.targetKey, x.inherited])).toEqual([
+      ['devils-advocate', true],
+    ]);
+    expect((await begin(await chatShift(later))).ok).toBe(true);
+    // an agent of another role does not
+    const other =
+      (await w.hire('Reg', 'reviewer', 'senior')).agent?.id ??
+      (await q(`SELECT id FROM agents WHERE name='Reg'`))[0]?.id;
+    expect((await agentGrants(other)).body.grants).toEqual([]);
+    expect((await begin(await chatShift(other))).error).toContain('not_granted');
+  });
+
+  it('lets a per-agent grant add targets but never take one of the role’s away', async () => {
+    const url = `/api/agents/${first}/delegate-grants`;
+    expect((await call(w.owner, 'PUT', url, persona('optimist'))).status).toBe(200);
+    const list = (await agentGrants(first)).body.grants.map((x: any) => [x.targetKey, x.inherited]);
+    expect(list).toEqual(
+      expect.arrayContaining([
+        ['devils-advocate', true],
+        ['optimist', false],
+      ]),
+    );
+    // removing the inherited one on the agent is refused, with the way out
+    const del = await call(w.owner, 'PUT', url, persona('devils-advocate', null));
+    expect(del.status).toBe(409);
+    expect(del.body.error.code).toBe('granted_by_role');
+    // granting the same target on the agent too changes nothing: the role’s grant is the one in force
+    expect((await call(w.owner, 'PUT', url, persona('devils-advocate', { maxCalls: 8 }))).status).toBe(200);
+    expect(
+      (await agentGrants(first)).body.grants.find((x: any) => x.targetKey === 'devils-advocate'),
+    ).toMatchObject({ inherited: true, maxCalls: 2 });
+    // the agent’s own ones can go (the same target as the role’s too: its own row, not the role’s)
+    expect((await call(w.owner, 'PUT', url, persona('optimist', null))).status).toBe(200);
+    expect((await call(w.owner, 'PUT', url, persona('devils-advocate', null))).status).toBe(200);
+    expect((await agentGrants(first)).body.grants.map((x: any) => x.targetKey)).toEqual(['devils-advocate']);
+  });
+
+  it('records each change as an event of the organization with the role, and a revoke on the role takes it from every agent', async () => {
+    const evs = await q(
+      `SELECT payload FROM events WHERE type='DelegateGrantChanged' AND payload->>'ownerKind'='role' ORDER BY seq`,
+    );
+    expect(
+      evs.map((e) => [e.payload.roleKey, e.payload.targetKey, e.payload.granted, e.payload.changedBy]),
+    ).toEqual([['ba', 'devils-advocate', true, admin.id]]);
+    expect((await call(w.owner, 'PUT', roleUrl('ba'), persona('devils-advocate', null))).status).toBe(200);
+    expect((await agentGrants(first)).body.grants).toEqual([]);
+    expect((await begin(await chatShift(first))).error).toContain('not_granted');
+    // a role cannot delegate to its own agents
+    const mine = await call(w.owner, 'PUT', roleUrl('ba'), {
+      targetKind: 'agent',
+      targetKey: first,
+      grant: {},
+    });
+    expect(mine.status).toBe(400);
+    // granted again for the replay test below
+    expect((await call(w.owner, 'PUT', roleUrl('ba'), persona('optimist'))).status).toBe(200);
+  });
+
+  it('tells the runner the role’s targets when the agent’s chat starts', async () => {
+    const { delegationSpecFor } = await import('../src/sessions/delegate-grants.ts');
+    const spec = await delegationSpecFor(w.t.app.ctx.pool, 'agent', first);
+    expect(spec?.targets.map((t) => t.handle)).toEqual(['optimist']);
+  });
+});
+
+describe('a grant may set the model the target runs on (R3c, Q62)', () => {
+  const MODEL = { runtime: 'claude-code', model: 'haiku' };
+  it('is shown, told to the runner, and the only model the target runs on for that caller; the caller still cannot choose', async () => {
+    const s = await newSession();
+    const first = await nextStart((f) => f.threadId === s.threadId);
+    const res = await call(
+      w.owner,
+      'PUT',
+      `/api/sessions/${s.threadId}/delegate-grants`,
+      persona('devils-advocate', { model: MODEL }),
+    );
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body.grants[0].modelOverride).toBe('claude-code:haiku');
+    await finish(first);
+    await owner('POST', `/api/discovery/${s.threadId}/say`, { body: 'go on' }, 201);
+    const start = await nextStart((f) => f.threadId === s.threadId);
+    expect(start.session.delegation.targets[0].modelOverride).toEqual(MODEL);
+    const wrong = await begin(start.chatId, { model: { runtime: 'claude-code', model: 'sonnet' } });
+    expect(wrong.ok).toBe(false);
+    expect(wrong.error).toContain('model_locked');
+    expect(wrong.error).toContain('claude-code:haiku');
+    const right = await begin(start.chatId, { model: MODEL });
+    expect(right.ok, right.error).toBe(true);
+    expect(right.result.target).toMatchObject({ modelOverride: MODEL });
+    // another grant of the same target on another owner keeps the target’s own model
+    await finish(start);
+  });
+
+  it('is checked when it is made: an unknown model, a runtime that cannot take the target, a runtime the workstation does not offer', async () => {
+    const s = await newSession();
+    const url = `/api/sessions/${s.threadId}/delegate-grants`;
+    const bad = await call(
+      w.owner,
+      'PUT',
+      url,
+      persona('devils-advocate', { model: { runtime: 'claude-code', model: 'no-such-model-9' } }),
+    );
+    expect([400, 409]).toContain(bad.status);
+    // a read-only target on Codex: Codex always has a shell, and a role without one stays on Claude Code
+    const codex = await call(
+      w.owner,
+      'PUT',
+      url,
+      persona('devils-advocate', { model: { runtime: 'codex', model: 'gpt-6.1-sol' } }),
+    );
+    expect(codex.status).toBe(400);
+    expect(codex.body.error.code).toBe('model_not_for_target');
+    const unknownRuntime = await call(
+      w.owner,
+      'PUT',
+      url,
+      persona('devils-advocate', { model: { runtime: 'nope', model: 'x' } }),
+    );
+    expect(unknownRuntime.status).toBe(400);
+    // nothing was granted
+    expect((await call(w.owner, 'GET', url)).body.grants).toEqual([]);
+    const start = await nextStart((f) => f.threadId === s.threadId);
+    await finish(start);
+  });
+
+  it('works on a role grant and on an agent as the target', async () => {
+    const hired =
+      (await w.hire('Mona', 'reviewer', 'senior')).agent?.id ??
+      (await q(`SELECT id FROM agents WHERE name='Mona'`))[0]?.id;
+    await q(`UPDATE agents SET model='sonnet', runtime='claude-code' WHERE id=$1`, [hired]);
+    const caller =
+      (await w.hire('Cal', 'planner', 'senior')).agent?.id ??
+      (await q(`SELECT id FROM agents WHERE name='Cal'`))[0]?.id;
+    const res = await call(w.owner, 'PUT', roleUrl2('planner'), {
+      targetKind: 'agent',
+      targetKey: hired,
+      grant: { model: MODEL },
+    });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body.grants[0]).toMatchObject({
+      targetKind: 'agent',
+      model: 'claude-code:sonnet',
+      modelOverride: 'claude-code:haiku',
+    });
+    const { delegationSpecFor } = await import('../src/sessions/delegate-grants.ts');
+    const spec = await delegationSpecFor(w.t.app.ctx.pool, 'agent', caller);
+    expect(spec?.targets[0]).toMatchObject({ kind: 'agent', model: 'sonnet', modelOverride: MODEL });
+    // the agent runs on the grant’s model for that caller: the server holds the caller to it
+    const chat = randomUUID();
+    await seed(w, [
+      {
+        streamId: `shift-${chat}`,
+        event: {
+          type: 'ShiftStarted',
+          payload: {
+            shiftId: chat,
+            agentId: caller,
+            workstationId: w.workstationId,
+            kind: 'chat',
+            runtime: 'mock',
+            model: 'mock',
+            overflow: false,
+          },
+        },
+        actor: { kind: 'runner', id: w.workstationId },
+        scope: { orgId, projectId: null, audience: 'org' },
+      },
+    ]);
+    const handle = (await agentGrants(caller)).body.grants[0].handle;
+    expect(
+      (await begin(chat, { target: handle, model: { runtime: 'claude-code', model: 'sonnet' } })).error,
+    ).toContain('model_locked');
+    expect((await begin(chat, { target: handle, model: MODEL })).ok).toBe(true);
+  });
+});
+const roleUrl2 = (key: string) => `/api/roles/${key}/delegate-grants`;
+
 describe('replay', () => {
   it('rebuilds the grants and the sub-steps exactly', async () => {
     expect(PROJECTION_TABLES).toContain('delegate_grants');
@@ -547,7 +783,7 @@ describe('replay', () => {
       JSON.parse(
         JSON.stringify({
           grants: await q(
-            `SELECT owner_kind, owner_id, target_kind, target_key, max_calls, timeout_sec, max_profile, granted_by FROM delegate_grants WHERE org_id=$1 ORDER BY owner_id, target_key`,
+            `SELECT owner_kind, owner_id, owner_key, target_kind, target_key, max_calls, timeout_sec, max_profile, granted_by, model_runtime, model_name FROM delegate_grants WHERE org_id=$1 ORDER BY owner_id, target_key`,
             [orgId],
           ),
           steps: await q(

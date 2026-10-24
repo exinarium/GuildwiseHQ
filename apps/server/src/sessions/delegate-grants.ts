@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
   agentHandle,
   DELEGATE_GRANT_LIMITS,
@@ -9,10 +10,12 @@ import {
   type DelegateTargetSpec,
   type DelegationSpec,
   type DelegationStepDto,
+  isKnownChoice,
   isTemplateTagged,
   type ModelChoice,
   profileOfPermissions,
   RoleDefinitionSchema,
+  runtimeRoleProblem,
   type SetDelegateGrantRequest,
   streamId,
 } from '@aom/shared';
@@ -39,11 +42,39 @@ export async function grantRows(
   ownerKind: DelegateOwnerKind,
   ownerId: string,
 ): Promise<Row[]> {
+  if (ownerKind === 'agent') {
+    // An agent also has the grants of its role (Q61): every agent of the role, the future hires included. A per-agent grant can
+    // add targets and never take one of the role's away, so for the same target the role's grant is the one in force.
+    const all = await rows(
+      db,
+      `SELECT g.*, (g.owner_kind = 'role') AS inherited FROM delegate_grants g
+        WHERE (g.owner_kind='agent' AND g.owner_id=$1)
+           OR (g.owner_kind='role' AND (g.org_id, g.owner_key) = (SELECT a.org_id, a.role_key FROM agents a WHERE a.id=$1))
+        ORDER BY (g.owner_kind = 'role') DESC, g.granted_at, g.target_kind, g.target_key`,
+      [ownerId],
+    );
+    const seen = new Set<string>();
+    return all.filter((g) => {
+      const k = `${g.target_kind}:${g.target_key}`;
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+  }
   return rows(
     db,
-    `SELECT * FROM delegate_grants WHERE owner_kind=$1 AND owner_id=$2 ORDER BY granted_at, target_kind, target_key`,
+    `SELECT *, false AS inherited FROM delegate_grants WHERE owner_kind=$1 AND owner_id=$2 ORDER BY granted_at, target_kind, target_key`,
     [ownerKind, ownerId],
   );
+}
+
+/**
+ * The id a role's grants are kept under: derived from the organization and the role key, the same on every replay. (A UUID by
+ * shape, version 5 style: the event and the table want one.)
+ */
+export function roleOwnerId(orgId: string, roleKey: string): string {
+  const h = createHash('sha256').update(`delegate-role:${orgId}:${roleKey}`).digest('hex');
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-5${h.slice(13, 16)}-8${h.slice(17, 20)}-${h.slice(20, 32)}`;
 }
 
 /** A grant row with the handle the caller types for it. Agent handles are unique among the owner's grants. */
@@ -128,6 +159,9 @@ export async function delegationSpecFor(
       maxCalls: g.row.max_calls as number,
       timeoutSec: g.row.timeout_sec as number,
       maxProfile: (g.row.max_profile ?? null) as DelegateProfile | null,
+      ...(g.row.model_runtime && g.row.model_name
+        ? { modelOverride: { runtime: g.row.model_runtime as string, model: g.row.model_name as string } }
+        : {}),
     };
     if (g.row.target_kind === 'persona') {
       const p = reg.get(g.row.target_key);
@@ -166,6 +200,7 @@ async function dtoFor(
   userId: string,
   workstationId: string | null,
   orgId: string,
+  roleKey: string | null = null,
 ): Promise<DelegateGrantsDto> {
   const grants = await grantsWithHandles(ctx.pool, ownerKind, ownerId);
   const reports = await runtimeReports(ctx.pool, workstationId);
@@ -183,6 +218,9 @@ async function dtoFor(
       maxProfile: g.row.max_profile ?? null,
       grantedAt: iso(g.row.granted_at) as string,
       grantedBy: g.row.granted_by ?? null,
+      modelOverride:
+        g.row.model_runtime && g.row.model_name ? `${g.row.model_runtime}:${g.row.model_name}` : null,
+      inherited: g.row.inherited === true,
     };
     if (g.row.target_kind === 'persona') {
       const p = personas.get(g.row.target_key);
@@ -213,7 +251,7 @@ async function dtoFor(
           : null),
     });
   }
-  return { ownerKind, ownerId, canManage, grants: out };
+  return { ownerKind, ownerId, canManage, roleKey, grants: out };
 }
 
 async function agentOwner(
@@ -234,7 +272,16 @@ export async function getAgentDelegateGrants(
   agentId: string,
 ): Promise<DelegateGrantsDto> {
   const { agent, canManage } = await agentOwner(ctx.pool, user, agentId);
-  return dtoFor(ctx, 'agent', agentId, canManage, user.id, agent.workstation_id ?? null, agent.org_id);
+  return dtoFor(
+    ctx,
+    'agent',
+    agentId,
+    canManage,
+    user.id,
+    agent.workstation_id ?? null,
+    agent.org_id,
+    agent.role_key ?? null,
+  );
 }
 
 export async function getSessionDelegateGrants(
@@ -262,6 +309,7 @@ async function assertGrantable(
   ownerKind: DelegateOwnerKind,
   ownerId: string,
   req: SetDelegateGrantRequest,
+  roleKey?: string,
 ): Promise<void> {
   if (req.targetKind === 'persona') {
     const reg = await effectiveRegistry(db, orgId, { kind: 'persona', usableOnly: true, userId: user.id });
@@ -270,6 +318,7 @@ async function assertGrantable(
         'unknown_persona',
         `"${req.targetKey}" is not a persona you can grant (it must be approved and visible to you)`,
       );
+    await assertGrantModel(db, orgId, ownerKind, ownerId, req, undefined, roleKey);
     return;
   }
   const t = await one(db, 'SELECT * FROM agents WHERE id=$1 AND org_id=$2', [req.targetKey, orgId]);
@@ -277,6 +326,72 @@ async function assertGrantable(
   if (problem || !t) throw badRequest('unknown_agent', problem ?? 'unknown agent');
   if (ownerKind === 'agent' && t.id === ownerId)
     throw badRequest('self_delegation', 'an agent cannot delegate to itself');
+  // a role's grant would reach the target itself too: the target may not be an agent of that role
+  if (ownerKind === 'role' && roleKey && t.role_key === roleKey)
+    throw badRequest('self_delegation', 'a role cannot delegate to its own agents');
+  await assertGrantModel(db, orgId, ownerKind, ownerId, req, t, roleKey);
+}
+
+/**
+ * The model a grant sets for its owner (Q62) must be one the product knows, take the target (the same role check the runner
+ * applies, `runtimeRoleProblem`) and be offered where the owner works: the workstation of the agent or of the session; for a role,
+ * the workstations of its agents. The caller never chooses (`--model` stays refused): this is the grant maker's choice.
+ */
+async function assertGrantModel(
+  db: Queryable,
+  orgId: string,
+  ownerKind: DelegateOwnerKind,
+  ownerId: string,
+  req: SetDelegateGrantRequest,
+  target: Row | undefined,
+  roleKey?: string,
+): Promise<void> {
+  const model = req.grant?.model;
+  if (!model) return;
+  if (!isKnownChoice(model))
+    throw badRequest(
+      'unknown_model',
+      `the model "${model.runtime}:${model.model}" is not one this product offers`,
+    );
+  // the target must be able to run on the runtime with the tools it will have (a working child on Codex, say, needs a shell)
+  const profile: DelegateProfile =
+    req.grant?.maxProfile ??
+    (target ? profileOfPermissions(target.permissions ?? { allowedTools: [] }) : 'read_only');
+  const tools =
+    profile === 'shell' ? ['read', 'edit', 'shell'] : profile === 'edit' ? ['read', 'edit'] : ['read'];
+  const bad = runtimeRoleProblem(model.runtime, {
+    roleKey: target ? String(target.role_key) : 'delegate',
+    isDevops: false,
+    permissions: {
+      allowedTools: tools as never,
+      writableGlobs: target?.permissions?.writableGlobs ?? null,
+      browser: false,
+    },
+  });
+  if (bad) throw badRequest('model_not_for_target', `${model.runtime}:${model.model}: ${bad}`);
+  // offered where the owner works
+  let stations: Array<string | null> = [];
+  if (ownerKind === 'agent')
+    stations = [
+      (await one(db, 'SELECT workstation_id FROM agents WHERE id=$1', [ownerId]))?.workstation_id ?? null,
+    ];
+  else if (ownerKind === 'session')
+    stations = [
+      (await one(db, 'SELECT workstation_id FROM threads WHERE id=$1', [ownerId]))?.workstation_id ?? null,
+    ];
+  else
+    stations = (
+      await rows(
+        db,
+        `SELECT DISTINCT workstation_id FROM agents WHERE org_id=$1 AND role_key=$2 AND status <> 'retired'`,
+        [orgId, roleKey ?? ''],
+      )
+    ).map((r) => r.workstation_id as string | null);
+  for (const ws of stations) {
+    if (!ws) continue;
+    const problem = runtimeProblem(await runtimeReports(db, ws), model, orgId);
+    if (problem) throw badRequest('runtime_unavailable', problem);
+  }
 }
 
 async function setGrant(
@@ -287,15 +402,32 @@ async function setGrant(
   orgId: string,
   req: SetDelegateGrantRequest,
   tx: Tx,
+  roleKey?: string,
 ): Promise<void> {
   const had = await one(
     tx,
     'SELECT 1 FROM delegate_grants WHERE owner_kind=$1 AND owner_id=$2 AND target_kind=$3 AND target_key=$4',
     [ownerKind, ownerId, req.targetKind, req.targetKey],
   );
-  if (req.grant === null && !had) return;
+  if (req.grant === null && !had) {
+    // a target the agent has only through its role cannot be taken away on the agent (Q61): it is changed on the role
+    if (ownerKind === 'agent') {
+      const viaRole = await one(
+        tx,
+        `SELECT g.owner_key FROM delegate_grants g JOIN agents a ON a.id=$1
+          WHERE g.owner_kind='role' AND g.org_id=a.org_id AND g.owner_key=a.role_key AND g.target_kind=$2 AND g.target_key=$3`,
+        [ownerId, req.targetKind, req.targetKey],
+      );
+      if (viaRole)
+        throw conflict(
+          'granted_by_role',
+          `This target comes from the role "${viaRole.owner_key}": every agent of the role has it. Change it on the role.`,
+        );
+    }
+    return;
+  }
   if (req.grant !== null) {
-    await assertGrantable(tx, user, orgId, ownerKind, ownerId, req);
+    await assertGrantable(tx, user, orgId, ownerKind, ownerId, req, roleKey);
     if (!had) {
       const n = await one(
         tx,
@@ -312,13 +444,19 @@ async function setGrant(
   await ctx.store.append(
     [
       {
-        streamId: ownerKind === 'agent' ? streamId.agent(ownerId) : streamId.thread(ownerId),
+        streamId:
+          ownerKind === 'agent'
+            ? streamId.agent(ownerId)
+            : ownerKind === 'role'
+              ? streamId.org(orgId)
+              : streamId.thread(ownerId),
         event: {
           type: 'DelegateGrantChanged',
           payload: {
             ownerKind,
             ownerId,
             ...(ownerKind === 'session' ? { threadId: ownerId } : {}),
+            ...(ownerKind === 'role' && roleKey ? { roleKey } : {}),
             orgId,
             targetKind: req.targetKind,
             targetKey: req.targetKey,
@@ -328,6 +466,7 @@ async function setGrant(
                   maxCalls: req.grant.maxCalls,
                   timeoutSec: req.grant.timeoutSec,
                   maxProfile: req.grant.maxProfile,
+                  model: req.grant.model,
                 }
               : {}),
             changedBy: user.id,
@@ -392,6 +531,18 @@ export async function delegateTargetOptions(
   const granted = new Set(
     (await grantRows(ctx.pool, ownerKind, ownerId)).map((g) => `${g.target_kind}:${g.target_key}`),
   );
+  return targetOptions(ctx, user, orgId, granted, {
+    excludeAgentId: ownerKind === 'agent' ? ownerId : undefined,
+  });
+}
+
+async function targetOptions(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  orgId: string,
+  granted: Set<string>,
+  except: { excludeAgentId?: string | undefined; excludeRoleKey?: string | undefined },
+): Promise<DelegateTargetOption[]> {
   const out: DelegateTargetOption[] = [];
   const reg = await effectiveRegistry(ctx.pool, orgId, {
     kind: 'persona',
@@ -413,8 +564,8 @@ export async function delegateTargetOptions(
   const agents = await rows(
     ctx.pool,
     `SELECT * FROM agents WHERE org_id=$1 AND status <> 'retired' AND NOT is_devops AND role_key NOT IN ('ceo','devops')
-        AND id <> $2 ORDER BY name`,
-    [orgId, ownerKind === 'agent' ? ownerId : '00000000-0000-0000-0000-000000000000'],
+        AND id <> $2 AND role_key <> $3 ORDER BY name`,
+    [orgId, except.excludeAgentId ?? '00000000-0000-0000-0000-000000000000', except.excludeRoleKey ?? ''],
   );
   for (const a of agents)
     out.push({
@@ -427,6 +578,60 @@ export async function delegateTargetOptions(
       granted: granted.has(`agent:${a.id}`),
     });
   return out;
+}
+
+// ------------------------------------------------------------------------------------------------------ role grants (Q61)
+
+/** A role the grants can be made on: any role of the organization except the CEO and the DevOps engineer, which never delegate. */
+async function assertRole(db: Queryable, orgId: string, roleKey: string): Promise<void> {
+  if (roleKey === 'ceo' || roleKey === 'devops')
+    throw badRequest('delegation_unavailable', 'this role cannot delegate');
+  const role = await loadRole(db, orgId, roleKey);
+  if (!role) throw notFound('role not found');
+}
+
+/** The delegation targets of a role: every agent of the role has them, the agents hired later too. Owners and Admins only. */
+export async function getRoleDelegateGrants(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  orgId: string,
+  roleKey: string,
+): Promise<DelegateGrantsDto> {
+  await assertRole(ctx.pool, orgId, roleKey);
+  return dtoFor(ctx, 'role', roleOwnerId(orgId, roleKey), true, user.id, null, orgId, roleKey);
+}
+
+/**
+ * Owners and Admins grant or revoke a role's delegation targets (Q61): the same rules as an agent's grants, applied to every agent
+ * of the role. Each change is an event (`DelegateGrantChanged` with the role key): the audit trail.
+ */
+export async function setRoleDelegateGrant(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  orgId: string,
+  roleKey: string,
+  req: SetDelegateGrantRequest,
+): Promise<DelegateGrantsDto> {
+  await withAppendTx(ctx.pool, async (tx) => {
+    await assertRole(tx, orgId, roleKey);
+    await setGrant(ctx, user, 'role', roleOwnerId(orgId, roleKey), orgId, req, tx, roleKey);
+  });
+  return getRoleDelegateGrants(ctx, user, orgId, roleKey);
+}
+
+export async function roleDelegateTargetOptions(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  orgId: string,
+  roleKey: string,
+): Promise<DelegateTargetOption[]> {
+  await assertRole(ctx.pool, orgId, roleKey);
+  const granted = new Set(
+    (await grantRows(ctx.pool, 'role', roleOwnerId(orgId, roleKey))).map(
+      (g) => `${g.target_kind}:${g.target_key}`,
+    ),
+  );
+  return targetOptions(ctx, user, orgId, granted, { excludeRoleKey: roleKey });
 }
 
 // ------------------------------------------------------------------------------------------------------ sub-steps

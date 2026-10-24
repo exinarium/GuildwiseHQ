@@ -262,11 +262,12 @@ export const sessionProjectors: Record<string, Projector> = {
     await exec(
       tx,
       `INSERT INTO delegate_grants (owner_kind, owner_id, org_id, target_kind, target_key, max_calls, timeout_sec, max_profile,
-         granted_by, granted_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+         granted_by, granted_at, owner_key, model_runtime, model_name, model_effort)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
        ON CONFLICT (owner_kind, owner_id, target_kind, target_key) DO UPDATE SET max_calls=EXCLUDED.max_calls,
          timeout_sec=EXCLUDED.timeout_sec, max_profile=EXCLUDED.max_profile, granted_by=EXCLUDED.granted_by,
-         granted_at=EXCLUDED.granted_at`,
+         granted_at=EXCLUDED.granted_at, owner_key=EXCLUDED.owner_key, model_runtime=EXCLUDED.model_runtime,
+         model_name=EXCLUDED.model_name, model_effort=EXCLUDED.model_effort`,
       [
         p.ownerKind,
         p.ownerId,
@@ -278,6 +279,10 @@ export const sessionProjectors: Record<string, Projector> = {
         p.maxProfile ?? null,
         p.changedBy,
         e.createdAt,
+        p.roleKey ?? null,
+        p.model?.runtime ?? null,
+        p.model?.model ?? null,
+        p.model?.effort ?? null,
       ],
     );
   },

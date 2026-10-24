@@ -9,7 +9,9 @@ import {
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { get, put } from '../client.ts';
 
-const base = (kind: DelegateOwnerKind, id: string) => `/${kind === 'agent' ? 'agents' : 'sessions'}/${id}`;
+/** An agent, a session, or (a role's grants, R3c) a role by its key. */
+const base = (kind: DelegateOwnerKind, id: string) =>
+  `/${kind === 'agent' ? 'agents' : kind === 'role' ? 'roles' : 'sessions'}/${encodeURIComponent(id)}`;
 
 /** What an agent (or a session's facilitator and Chair) may delegate to. Off by default: an empty list. */
 export function useDelegateGrants(kind: DelegateOwnerKind, id: string, enabled = true) {

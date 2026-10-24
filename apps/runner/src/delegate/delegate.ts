@@ -657,10 +657,12 @@ export class DelegateRunner {
         .flatMap(([runtime, o]) => modelChoicesFor([runtime], o.providers))
         .flatMap((g) => g.models.map((m) => m.id))
         .join(', ')}`;
+    // R3c (Q62): the grant may set the model for this caller; it runs on that or not at all (never a silent switch)
+    const forced = target.modelOverride;
     if (target.kind === 'agent') {
-      if (!target.runtime || !target.model)
+      if (!forced && (!target.runtime || !target.model))
         return { ok: false, error: `${target.handle} has no model configured` };
-      const choice = { runtime: target.runtime, model: target.model };
+      const choice = forced ?? { runtime: target.runtime as string, model: target.model as string };
       if (!usable(choice)) return { ok: false, error: notOffered(`${choice.runtime}:${choice.model}`) };
       const permissions = target.permissions ?? {
         allowedTools: ['read'],
@@ -689,6 +691,20 @@ export class DelegateRunner {
         error: `no persona "${key}" is available here (an imported pack's persona needs the pack to be approved and unchanged; a private one only reaches the agents its owner granted).`,
       };
     let choice: ModelChoice | null = null;
+    if (forced) {
+      if (!usable(forced)) return { ok: false, error: notOffered(`${forced.runtime}:${forced.model}`) };
+      return {
+        ok: true,
+        choice: forced,
+        profile: profileOfPersonaTools(persona.meta.tools),
+        permissions: permissionsForPersona(persona.meta.tools, { mayWiden: true }).permissions,
+        name: persona.meta.name,
+        text: persona.body,
+        stance: persona.meta.stance,
+        voice: persona.meta.voice,
+        personaKey: key,
+      };
+    }
     // A built-in persona's model is a default for a Claude workstation, not a deliberate choice: on a workstation without
     // that model it runs on the small model of the caller's runtime, like a persona with no model. A persona somebody
     // authored or imported, and a hired agent, name a model on purpose: it runs on that one or not at all.

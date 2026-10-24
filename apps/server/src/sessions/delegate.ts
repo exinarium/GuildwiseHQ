@@ -150,6 +150,11 @@ async function begin(
         : 'you have no delegation targets',
     );
   const grantMax = (g.row.max_profile ?? null) as DelegateProfile | null;
+  // R3c (Q62): the grant may set the model the target runs on for this caller; the caller still cannot choose
+  const override =
+    g.row.model_runtime && g.row.model_name
+      ? { runtime: g.row.model_runtime as string, model: g.row.model_name as string }
+      : null;
   let choice = p.data.model;
   let profile: DelegateProfile;
   let target: DelegateTargetSpec;
@@ -159,19 +164,21 @@ async function begin(
     maxCalls: g.row.max_calls as number,
     timeoutSec: g.row.timeout_sec as number,
     maxProfile: grantMax,
+    ...(override ? { modelOverride: override } : {}),
   };
   if (g.row.target_kind === 'agent') {
     const a = g.agent;
     if (!a || a.status === 'retired' || a.is_devops || a.role_key === 'ceo' || a.role_key === 'devops')
       return [false, undefined, `"${handle}" cannot be a delegate now (the agent is retired or unavailable)`];
-    // The model is the agent's own. The runner may not pick another one.
-    if (p.data.model.runtime !== a.runtime || p.data.model.model !== a.model)
+    // The model is the grant's (Q62), else the agent's own. The runner may not pick another one.
+    const mine = override ?? { runtime: a.runtime as string, model: a.model as string };
+    if (p.data.model.runtime !== mine.runtime || p.data.model.model !== mine.model)
       return [
         false,
         undefined,
-        `model_locked: "${handle}" runs on ${a.runtime}:${a.model}, the model configured for it; the caller cannot choose another`,
+        `model_locked: "${handle}" runs on ${mine.runtime}:${mine.model}, the model configured for it; the caller cannot choose another`,
       ];
-    choice = { runtime: a.runtime, model: a.model };
+    choice = mine;
     profile = effectiveProfile(
       profileOfPermissions(a.permissions ?? { allowedTools: [] }),
       'shell',
@@ -182,11 +189,18 @@ async function begin(
       ...common,
       name: a.name,
       description: '',
-      runtime: a.runtime,
-      model: a.model,
+      runtime: mine.runtime,
+      model: mine.model,
       profile,
     };
   } else {
+    if (override && (p.data.model.runtime !== override.runtime || p.data.model.model !== override.model))
+      return [
+        false,
+        undefined,
+        `model_locked: "${handle}" runs on ${override.runtime}:${override.model}, the model its grant sets; the caller cannot choose another`,
+      ];
+    if (override) choice = override;
     profile = effectiveProfile(p.data.profile ?? 'read_only', 'shell', grantMax);
     target = { kind: 'persona', ...common, name: handle, description: '', profile };
   }

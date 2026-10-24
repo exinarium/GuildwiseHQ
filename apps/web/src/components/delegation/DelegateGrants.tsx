@@ -5,7 +5,10 @@ import {
   type DelegateProfile,
 } from '@aom/shared';
 import { useState } from 'react';
+import { useMe } from '../../api/queries/auth.ts';
 import { useDelegateGrants, useDelegateTargets, useSetDelegateGrant } from '../../api/queries/delegation.ts';
+import { useWorkstations } from '../../api/queries/workstations.ts';
+import { ModelSelect, unionExtras, unionProviders } from '../ModelSelect.tsx';
 import { Badge, Callout, ErrorBox } from '../ui.tsx';
 
 export const profileText = (p: DelegateProfile | null): string =>
@@ -38,8 +41,17 @@ function Row({
         {g.targetKind === 'agent' ? 'Agent' : 'Persona'}
       </Badge>
       <span className="text-muted" data-testid="delegate-grant-model">
-        {g.model ? `runs on ${g.model}` : 'runs on its own model'}
+        {g.modelOverride
+          ? `runs on ${g.modelOverride} for this caller`
+          : g.model
+            ? `runs on ${g.model}`
+            : 'runs on its own model'}
       </span>
+      {g.inherited && (
+        <Badge tone="violet" data-testid="delegate-grant-inherited">
+          from the role
+        </Badge>
+      )}
       <span className="text-muted">{profileText(g.maxProfile ?? g.profile)}</span>
       <span className="text-subtle">
         up to {g.maxCalls} call{g.maxCalls === 1 ? '' : 's'} a turn, {g.timeoutSec} s each
@@ -49,7 +61,7 @@ function Row({
           {g.problem}
         </span>
       )}
-      {canManage && (
+      {canManage && !g.inherited && (
         <button
           type="button"
           aria-label={`Remove ${g.targetName}`}
@@ -78,11 +90,21 @@ function Body({ kind, id }: { kind: DelegateOwnerKind; id: string }) {
   const [maxCalls, setMaxCalls] = useState<number>(DELEGATE_GRANT_LIMITS.defaultMaxCalls);
   const [timeoutSec, setTimeoutSec] = useState<number>(DELEGATE_GRANT_LIMITS.defaultTimeoutSec);
   const [ceiling, setCeiling] = useState<'' | DelegateProfile>('');
+  // R3c (Q62): the model the target runs on for this caller; empty: the target's own
+  const [model, setModel] = useState('');
+  const me = useMe();
+  const stations = useWorkstations({ enabled: canManage });
+  const mine = (stations.data ?? []).filter((w) => w.userId === me.data?.user?.id && w.status === 'active');
   if (grants.isPending) return null;
   const list = grants.data?.grants ?? [];
   const options = (targets.data ?? []).filter((t) => !t.granted);
   const chosen = options.find((o) => `${o.targetKind}:${o.targetKey}` === pick);
-  const who = kind === 'agent' ? 'this agent' : 'the facilitator and the Chair of this session';
+  const who =
+    kind === 'agent'
+      ? 'this agent'
+      : kind === 'role'
+        ? 'every agent of this role'
+        : 'the facilitator and the Chair of this session';
   return (
     <section
       aria-labelledby={`delegation-h-${id}`}
@@ -93,15 +115,24 @@ function Body({ kind, id }: { kind: DelegateOwnerKind; id: string }) {
         Delegation
       </h3>
       <p className="text-sm text-muted">
-        Off by default. {kind === 'agent' ? 'This agent' : 'The facilitator and the Chair'} may hand a
-        self-contained sub-task to the targets listed here, and to no one else. Each target runs on the model
-        configured for it, with tools never wider than{' '}
-        {who === 'this agent' ? 'this agent’s' : 'a conversation’s (reading)'}; what it costs is booked here
-        and shows as a sub-step.
+        Off by default.{' '}
+        {kind === 'role'
+          ? 'Every agent of this role, the ones hired later too'
+          : kind === 'agent'
+            ? 'This agent'
+            : 'The facilitator and the Chair'}{' '}
+        may hand a self-contained sub-task to the targets listed here, and to no one else. Each target runs on
+        the model configured for it (or the one a grant sets), with tools never wider than{' '}
+        {kind === 'session' ? 'a conversation’s (reading)' : 'the caller’s'}; what it costs is booked here and
+        shows as a sub-step.
+        {kind === 'agent' && grants.data?.roleKey
+          ? ` Targets marked "from the role" come from the role ${grants.data.roleKey} and are changed there; here you can add more.`
+          : ''}
       </p>
       {list.length === 0 ? (
         <p className="text-sm text-subtle" data-testid="delegate-grants-none">
-          None. {who === 'this agent' ? 'This agent' : 'This session'} cannot delegate.
+          None. {kind === 'role' ? 'Agents of this role' : kind === 'agent' ? 'This agent' : 'This session'}{' '}
+          cannot delegate.
         </p>
       ) : (
         <ul className="flex flex-col gap-2">
@@ -185,20 +216,38 @@ function Body({ kind, id }: { kind: DelegateOwnerKind; id: string }) {
               <option value="shell">Edit and run commands</option>
             </select>
           </label>
+          <div className="min-w-48">
+            <ModelSelect
+              label="Model for this caller"
+              value={model}
+              onChange={setModel}
+              runtimes={mine.flatMap((w) => w.runtimes.filter((r) => r.available).map((r) => r.id))}
+              providers={unionProviders(mine)}
+              extras={unionExtras(mine)}
+              defaultLabel="The target’s own"
+              ariaLabel="Model for this caller"
+            />
+          </div>
           <button
             type="button"
             disabled={!chosen || set.isPending}
-            onClick={() =>
-              chosen &&
+            onClick={() => {
+              if (!chosen) return;
+              const [runtime, ...rest] = model.split('/');
               set.mutate(
                 {
                   targetKind: chosen.targetKind,
                   targetKey: chosen.targetKey,
-                  grant: { maxCalls, timeoutSec, maxProfile: ceiling === '' ? null : ceiling },
+                  grant: {
+                    maxCalls,
+                    timeoutSec,
+                    maxProfile: ceiling === '' ? null : ceiling,
+                    model: model && runtime && rest.length ? { runtime, model: rest.join('/') } : null,
+                  },
                 },
                 { onSuccess: () => setPick('') },
-              )
-            }
+              );
+            }}
             className="h-9 rounded-control bg-brand px-3 text-sm text-brand-fg disabled:bg-sunken disabled:text-disabled-fg"
           >
             Allow
@@ -208,7 +257,9 @@ function Body({ kind, id }: { kind: DelegateOwnerKind; id: string }) {
         <Callout tone="info">
           {kind === 'agent'
             ? 'Only an Owner, an Admin or the agent’s manager changes this list.'
-            : 'Only the creator of the session, an Owner or an Admin changes this list.'}
+            : kind === 'role'
+              ? 'Only an Owner or an Admin changes a role’s list.'
+              : 'Only the creator of the session, an Owner or an Admin changes this list.'}
         </Callout>
       )}
       <ErrorBox error={set.error} />
@@ -228,7 +279,13 @@ export function DelegateGrants({ ownerKind, ownerId }: { ownerKind: DelegateOwne
         onClick={() => setOpen((o) => !o)}
         className="text-sm font-medium text-brand-text hover:underline [@media(pointer:coarse)]:min-h-11"
       >
-        {open ? 'Hide delegation' : ownerKind === 'agent' ? 'Who it may delegate to' : 'Delegation'}
+        {open
+          ? 'Hide delegation'
+          : ownerKind === 'agent'
+            ? 'Who it may delegate to'
+            : ownerKind === 'role'
+              ? 'Who agents of this role may delegate to'
+              : 'Delegation'}
       </button>
       {open && (
         <div className="mt-2">

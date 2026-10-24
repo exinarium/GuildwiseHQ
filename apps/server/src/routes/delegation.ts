@@ -10,8 +10,11 @@ import type { Ctx } from '../context.ts';
 import {
   delegateTargetOptions,
   getAgentDelegateGrants,
+  getRoleDelegateGrants,
   getSessionDelegateGrants,
+  roleDelegateTargetOptions,
   setAgentDelegateGrant,
+  setRoleDelegateGrant,
   setSessionDelegateGrant,
 } from '../sessions/delegate-grants.ts';
 import { typed } from './util.ts';
@@ -50,6 +53,39 @@ export function delegationRoutes(ctx: Ctx) {
       async (req) => {
         const a = await requireOrg(ctx, req, { min: 'member' });
         return { items: await delegateTargetOptions(ctx, a.session.user, 'agent', req.params.id) };
+      },
+    );
+
+    // R3c (Q61): a role's grants cover every agent of the role, the future hires included. Owners and Admins, like the HR rule.
+    const RoleParams = z.object({ key: z.string().min(1).max(80) });
+    app.get(
+      '/api/roles/:key/delegate-grants',
+      { schema: { params: RoleParams, response: { 200: DelegateGrantsDtoSchema } } },
+      async (req) => {
+        const a = await requireOrg(ctx, req, { min: 'admin' });
+        return getRoleDelegateGrants(ctx, a.session.user, a.orgId, req.params.key);
+      },
+    );
+    app.put(
+      '/api/roles/:key/delegate-grants',
+      {
+        schema: {
+          params: RoleParams,
+          body: SetDelegateGrantRequestSchema,
+          response: { 200: DelegateGrantsDtoSchema },
+        },
+      },
+      async (req) => {
+        const a = await requireOrg(ctx, req, { min: 'admin' });
+        return setRoleDelegateGrant(ctx, a.session.user, a.orgId, req.params.key, req.body);
+      },
+    );
+    app.get(
+      '/api/roles/:key/delegate-targets',
+      { schema: { params: RoleParams, response: { 200: DelegateTargetOptionsDtoSchema } } },
+      async (req) => {
+        const a = await requireOrg(ctx, req, { min: 'admin' });
+        return { items: await roleDelegateTargetOptions(ctx, a.session.user, a.orgId, req.params.key) };
       },
     );
 

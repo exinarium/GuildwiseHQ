@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { personaToolSet } from '../capabilities/authoring.ts';
+import { ModelChoiceSchema } from '../models/choices.ts';
 import type { AgentPermissions } from '../roles/schema.ts';
 
 /**
@@ -110,7 +111,11 @@ export const DELEGATE_GRANT_LIMITS = {
   maxTimeoutSec: 540,
 } as const;
 
-export const DelegateOwnerKindSchema = z.enum(['agent', 'session']);
+/**
+ * Whose grant it is: one agent, one session (its facilitator and Chair), or a ROLE (R3c, Q61): a role's grants cover every agent
+ * of the role, the future hires included, and a per-agent grant can add targets but never take one of the role's away.
+ */
+export const DelegateOwnerKindSchema = z.enum(['agent', 'session', 'role']);
 export type DelegateOwnerKind = z.infer<typeof DelegateOwnerKindSchema>;
 export const DelegateTargetKindSchema = z.enum(['persona', 'agent']);
 export type DelegateTargetKind = z.infer<typeof DelegateTargetKindSchema>;
@@ -133,6 +138,12 @@ export const DelegateGrantSettingsSchema = z.object({
     .default(DELEGATE_GRANT_LIMITS.defaultTimeoutSec),
   /** Narrow the target's own tool profile (absent: the target's own, clamped to the caller's). */
   maxProfile: DelegateProfileSchema.nullable().default(null),
+  /**
+   * R3c (Q62): the model the target runs on FOR THIS CALLER, instead of its own. Checked when the grant is made (a model the
+   * product knows, a runtime that can take the target) and again at each call. The caller still cannot choose: `--model` stays
+   * refused. Absent: the target's own model.
+   */
+  model: ModelChoiceSchema.nullable().default(null),
 });
 export type DelegateGrantSettings = z.infer<typeof DelegateGrantSettingsSchema>;
 
@@ -164,6 +175,10 @@ export const DelegateGrantDtoSchema = z.object({
   problem: z.string().nullable(),
   grantedAt: z.iso.datetime(),
   grantedBy: z.uuid().nullable(),
+  /** R3c (Q62): the model the grant sets for this caller (`claude-code:haiku`), if any; `model` above is then not the one it runs on. */
+  modelOverride: z.string().nullable().default(null),
+  /** R3c (Q61): the grant comes from the agent's role, not from the agent: change it on the role. */
+  inherited: z.boolean().default(false),
 });
 export type DelegateGrantDto = z.infer<typeof DelegateGrantDtoSchema>;
 
@@ -172,6 +187,8 @@ export const DelegateGrantsDtoSchema = z.object({
   ownerId: z.uuid(),
   /** The viewer may add and remove grants. */
   canManage: z.boolean(),
+  /** R3c: an agent's role (whose grants it inherits) or, for a role, its key. */
+  roleKey: z.string().nullable().default(null),
   grants: z.array(DelegateGrantDtoSchema),
 });
 export type DelegateGrantsDto = z.infer<typeof DelegateGrantsDtoSchema>;
@@ -210,6 +227,8 @@ export const DelegateTargetSpecSchema = z.object({
     .min(DELEGATE_GRANT_LIMITS.minTimeoutSec)
     .max(DELEGATE_GRANT_LIMITS.maxTimeoutSec),
   maxProfile: DelegateProfileSchema.nullable().default(null),
+  /** R3c (Q62): the grant sets the model for this caller; absent: the target's own. */
+  modelOverride: z.object({ runtime: z.string().max(60), model: z.string().max(120) }).optional(),
   /** A hired agent: its runtime and model, and its tool profile (the role's permissions). */
   runtime: z.string().max(60).optional(),
   model: z.string().max(120).optional(),

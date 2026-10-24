@@ -29,6 +29,8 @@ const grant = (
   problem: null,
   grantedAt: NOW,
   grantedBy: ID(1),
+  modelOverride: null,
+  inherited: false,
   ...over,
 });
 
@@ -112,7 +114,7 @@ function view(ui: React.ReactElement) {
 
 describe('the delegation grants of an agent', () => {
   it('say it is off when nobody granted anything, and offer the form to those who manage the agent', async () => {
-    stub({ ownerKind: 'agent', ownerId: ID(1), canManage: true, grants: [] });
+    stub({ ownerKind: 'agent', ownerId: ID(1), canManage: true, roleKey: null, grants: [] });
     const user = userEvent.setup();
     view(<DelegateGrants ownerKind="agent" ownerId={ID(1)} />);
     // nothing is fetched until it is opened
@@ -129,6 +131,7 @@ describe('the delegation grants of an agent', () => {
       ownerKind: 'agent',
       ownerId: ID(1),
       canManage: true,
+      roleKey: null,
       grants: [
         grant(),
         grant({
@@ -166,7 +169,7 @@ describe('the delegation grants of an agent', () => {
   });
 
   it('grant a target with the calls, the time and a tool ceiling the manager chose', async () => {
-    const calls = stub({ ownerKind: 'agent', ownerId: ID(1), canManage: true, grants: [] });
+    const calls = stub({ ownerKind: 'agent', ownerId: ID(1), canManage: true, roleKey: null, grants: [] });
     const user = userEvent.setup();
     view(<DelegateGrants ownerKind="agent" ownerId={ID(1)} />);
     await user.click(screen.getByTestId('delegate-grants-toggle'));
@@ -204,6 +207,7 @@ describe('the delegation grants of an agent', () => {
       ownerKind: 'agent',
       ownerId: ID(1),
       canManage: false,
+      roleKey: null,
       grants: [grant({ problem: 'this agent is retired' })],
     });
     const user = userEvent.setup();
@@ -221,7 +225,7 @@ describe('the delegation grants of an agent', () => {
 
 describe('the delegation grants of a session', () => {
   it('use the session endpoint and say who changes them', async () => {
-    const calls = stub({ ownerKind: 'session', ownerId: ID(2), canManage: false, grants: [] });
+    const calls = stub({ ownerKind: 'session', ownerId: ID(2), canManage: false, roleKey: null, grants: [] });
     const user = userEvent.setup();
     view(<DelegateGrants ownerKind="session" ownerId={ID(2)} />);
     await user.click(screen.getByTestId('delegate-grants-toggle'));
@@ -373,5 +377,103 @@ describe('delegations shown as sub-steps', () => {
     expect(items[1]).toHaveAttribute('data-testid', 'timeline-delegation');
     expect(items[1]).toHaveTextContent('Delegated to Rex');
     expect(items[1]).toHaveTextContent('Looks fine to me.');
+  });
+});
+
+describe('role-level delegation grants and a model per grant (R3c)', () => {
+  it('shows what an agent has through its role as "from the role" with no remove button, and its own grants removable', async () => {
+    stub({
+      ownerKind: 'agent',
+      ownerId: ID(1),
+      canManage: true,
+      roleKey: 'builder',
+      grants: [
+        grant({
+          targetKey: 'optimist',
+          targetKind: 'persona',
+          targetName: 'Optimist',
+          handle: 'optimist',
+          inherited: true,
+          model: null,
+        }),
+        grant({
+          targetKey: 'cost-hawk',
+          targetKind: 'persona',
+          targetName: 'Cost Hawk',
+          handle: 'cost-hawk',
+          model: null,
+        }),
+      ],
+    });
+    const user = userEvent.setup();
+    view(<DelegateGrants ownerKind="agent" ownerId={ID(1)} />);
+    await user.click(screen.getByTestId('delegate-grants-toggle'));
+    const inherited = await screen.findByTestId('delegate-grant-optimist');
+    expect(within(inherited).getByTestId('delegate-grant-inherited')).toHaveTextContent('from the role');
+    expect(within(inherited).queryByRole('button', { name: /Remove/ })).toBeNull();
+    expect(
+      within(screen.getByTestId('delegate-grant-cost-hawk')).getByRole('button', {
+        name: 'Remove Cost Hawk',
+      }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/come from the role builder/)).toBeInTheDocument();
+  });
+
+  it('lists and edits a role’s grants at /api/roles/<key>/..., with the role wording', async () => {
+    const calls = stub({
+      ownerKind: 'role',
+      ownerId: ID(2),
+      canManage: true,
+      roleKey: 'builder',
+      grants: [],
+    });
+    const user = userEvent.setup();
+    view(<DelegateGrants ownerKind="role" ownerId="builder" />);
+    expect(screen.getByTestId('delegate-grants-toggle')).toHaveTextContent(
+      'Who agents of this role may delegate to',
+    );
+    await user.click(screen.getByTestId('delegate-grants-toggle'));
+    expect(await screen.findByTestId('delegate-grants-none')).toHaveTextContent(
+      'Agents of this role cannot delegate',
+    );
+    expect(screen.getByText(/the ones hired later too/)).toBeInTheDocument();
+    expect(calls[0]?.url).toBe('/api/roles/builder/delegate-grants');
+    await user.selectOptions(screen.getByLabelText('Delegation target'), 'persona:devils-advocate');
+    await user.click(screen.getByRole('button', { name: 'Allow' }));
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === 'PUT')?.url).toBe('/api/roles/builder/delegate-grants'),
+    );
+    expect(calls.find((c) => c.method === 'PUT')?.body).toMatchObject({
+      targetKind: 'persona',
+      targetKey: 'devils-advocate',
+      grant: { maxCalls: 4, timeoutSec: 110, maxProfile: null, model: null },
+    });
+  });
+
+  it('shows the model a grant sets for the caller, and sends the one picked', async () => {
+    const calls = stub({
+      ownerKind: 'agent',
+      ownerId: ID(1),
+      canManage: true,
+      roleKey: null,
+      grants: [grant({ modelOverride: 'claude-code:haiku', model: 'claude-code:opus' })],
+    });
+    const user = userEvent.setup();
+    view(<DelegateGrants ownerKind="agent" ownerId={ID(1)} />);
+    await user.click(screen.getByTestId('delegate-grants-toggle'));
+    expect(await screen.findByTestId('delegate-grant-model')).toHaveTextContent(
+      'runs on claude-code:haiku for this caller',
+    );
+    await user.selectOptions(screen.getByLabelText('Delegation target'), 'persona:devils-advocate');
+    const picker = screen.getByLabelText('Model for this caller') as HTMLSelectElement;
+    const haiku = [...picker.options].find((o) => o.value === 'claude-code/haiku');
+    expect(haiku).toBeTruthy();
+    await user.selectOptions(picker, 'claude-code/haiku');
+    await user.click(screen.getByRole('button', { name: 'Allow' }));
+    await waitFor(() => expect(calls.find((c) => c.method === 'PUT')).toBeTruthy());
+    expect(calls.find((c) => c.method === 'PUT')?.body.grant.model).toEqual({
+      runtime: 'claude-code',
+      model: 'haiku',
+    });
   });
 });

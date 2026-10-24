@@ -170,7 +170,10 @@ export const sessionEvents = [
     'DelegateGrantChanged',
     z.object({
       ownerKind: DelegateOwnerKindSchema,
+      /** An agent, a session or (R3c) a role: a stable id derived from the organization and the role key. */
       ownerId: Id,
+      /** R3c: the role's key when `ownerKind` is `role`. */
+      roleKey: z.string().min(1).max(80).optional(),
       /** The session of a session grant (so the event is as private as the session). */
       threadId: Id.optional(),
       orgId: Id,
@@ -180,6 +183,8 @@ export const sessionEvents = [
       maxCalls: z.number().int().min(1).max(8).optional(),
       timeoutSec: z.number().int().min(10).max(600).optional(),
       maxProfile: DelegateProfileSchema.nullable().optional(),
+      /** R3c (Q62): the model the target runs on for this owner. */
+      model: ModelChoiceSchema.nullable().optional(),
       changedBy: Id,
     }),
   ),
