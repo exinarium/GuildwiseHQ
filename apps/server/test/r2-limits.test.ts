@@ -161,6 +161,34 @@ describe('Boardroom time limit', () => {
     await K.nextStart(st.threadId, K.role('minutes'));
   });
 
+  it('keeps the clock running while the room waits for the creator at a decision (Q51), and warns and times out there', async () => {
+    const st = await K.createBoard({ timeLimitMinutes: 20, roundCap: 4 });
+    for (let i = 0; i < 5; i++) await K.finish(await K.nextStart(st.threadId, K.role('speaker')));
+    const chair = await K.nextStart(st.threadId, K.role('chair'));
+    expect(
+      (await K.call(chair.chatId, 'board.pause', { question: 'Pilot first?', options: ['Yes', 'No'] })).ok,
+    ).toBe(true);
+    await K.finish(chair, 'Over to you.');
+    let s = await K.board(st.threadId);
+    expect(s.config.stage).toBe('decision');
+    expect(s.time.running).toBe(true);
+    const at = s.time.elapsedMs;
+    await K.tickMinutes(16, sweeps);
+    s = await K.board(st.threadId);
+    expect(s.time.elapsedMs - at).toBeGreaterThanOrEqual(15 * 60_000);
+    expect(s.time.warned).toBe(true);
+    // a pause still stops it
+    await K.owner('POST', `/api/board/${st.threadId}/pause`);
+    const atPause = (await K.board(st.threadId)).time.elapsedMs;
+    await K.tickMinutes(5, sweeps);
+    expect((await K.board(st.threadId)).time.elapsedMs).toBe(atPause);
+    await K.owner('POST', `/api/board/${st.threadId}/resume`);
+    await K.tickMinutes(5, sweeps);
+    s = await K.board(st.threadId);
+    expect(s.time).toMatchObject({ up: true, running: false });
+    expect(s.config.stage).toBe('decision');
+  });
+
   it('sets, changes and removes the limit from the settings', async () => {
     const st = await K.createBoard();
     expect(st.time.limitMinutes).toBeNull();

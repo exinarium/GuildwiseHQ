@@ -729,7 +729,8 @@ export class BoardService {
   ): Promise<'queued' | 'blocked' | 'gone'> {
     let stance: string | null = p.stance ?? null;
     if (!stance && p.kind === 'persona' && !isAdHocPersona(p.ref_id))
-      stance = (await resolvePersona(this.ctx.pool, t.org_id, p.ref_id, t.project_id, t.created_by))?.stance ?? null;
+      stance =
+        (await resolvePersona(this.ctx.pool, t.org_id, p.ref_id, t.project_id, t.created_by))?.stance ?? null;
     const built = buildSpeakerTurn({
       topic: cfg.topic,
       brief: cfg.brief,
@@ -1369,7 +1370,7 @@ export class BoardService {
     const list = await rows(
       this.ctx.pool,
       `SELECT id FROM threads WHERE kind='boardroom' AND deleted_at IS NULL
-          AND session_config->>'stage' IN ('round','chair','minutes')
+          AND session_config->>'stage' IN ('round','chair','minutes','decision')
           AND session_config->>'paused' IS DISTINCT FROM 'true'`,
     );
     for (const { id } of list)

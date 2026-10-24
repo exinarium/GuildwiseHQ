@@ -6,9 +6,16 @@ import {
   type SessionTimeDto,
 } from '@aom/shared';
 
-/** Whether a boardroom's clock runs: a round or the Chair is working, not paused, not waiting for the creator's choice. */
+/**
+ * Whether a boardroom's clock runs: a round or the Chair is working, or the room waits for the creator's answer to a
+ * decision (Q51: the clock keeps running while waiting on the creator, as in Discovery). It stops when paused, at the
+ * time-up choice, while the minutes are written and when archived.
+ */
 export const boardClockRuns = (cfg: Pick<BoardConfig, 'stage' | 'paused' | 'timeUp' | 'archived'>): boolean =>
-  (cfg.stage === 'round' || cfg.stage === 'chair') && !cfg.paused && !cfg.timeUp && !cfg.archived;
+  (cfg.stage === 'round' || cfg.stage === 'chair' || cfg.stage === 'decision') &&
+  !cfg.paused &&
+  !cfg.timeUp &&
+  !cfg.archived;
 
 /** The boardroom's time as the page shows it at `now` (the stored time plus the part since the last tick, capped). */
 export function boardTime(cfg: BoardConfig, now: Date): SessionTimeDto {
