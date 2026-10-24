@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { sweepWorktrees } from '../src/git/sweep.ts';
@@ -113,6 +113,57 @@ describe('stale worktree sweep', () => {
     const r = await sweepWorktrees({ worktreesDir: worktrees, liveOf: liveSet() });
     expect(r.removed).toEqual([]);
     expect(existsSync(join(odd, 'a.txt'))).toBe(true);
+  });
+
+  describe('orphan folders (not a registered worktree)', () => {
+    const DAY = 86_400_000;
+    const orphan = (worktrees: string, proj: string, ref: string, dangling = false) => {
+      const dir = join(worktrees, proj, ref);
+      mkdirSync(join(dir, 'node_modules'), { recursive: true });
+      writeFileSync(join(dir, 'node_modules', 'big.bin'), 'x'.repeat(2000));
+      if (dangling) writeFileSync(join(dir, '.git'), 'gitdir: /nonexistent/clone/.git/worktrees/gone\n');
+      return dir;
+    };
+
+    it('removes an idle orphan (plain copy or dangling .git), keeps a fresh one, a live one and a busy one', async () => {
+      const worktrees = join(tmp(), 'worktrees');
+      const copy = orphan(worktrees, 'TOY-aaaaaaaa', 'TOY-1');
+      const dangling = orphan(worktrees, 'TOY-aaaaaaaa', 'TOY-2', true);
+      const live = orphan(worktrees, 'TOY-bbbbbbbb', 'TOY-3');
+      const busy = orphan(worktrees, 'TOY-bbbbbbbb', 'TOY-4');
+      const base = { worktreesDir: worktrees, liveOf: liveSet(live), busyPaths: [busy] };
+      // right after creation: nothing is idle long enough
+      const fresh = await sweepWorktrees(base);
+      expect(fresh.removed).toEqual([]);
+      expect(existsSync(copy)).toBe(true);
+      const r = await sweepWorktrees({ ...base, now: Date.now() + 2 * DAY });
+      expect(r.removed.sort()).toEqual([copy, dangling].sort());
+      expect(existsSync(copy)).toBe(false);
+      expect(existsSync(dangling)).toBe(false);
+      expect(existsSync(live)).toBe(true);
+      expect(existsSync(busy)).toBe(true);
+    });
+
+    it('never follows a symlink and keeps everything when the server does not answer', async () => {
+      const worktrees = join(tmp(), 'worktrees');
+      const outside = tmp('outside-');
+      writeFileSync(join(outside, 'precious.txt'), 'p');
+      mkdirSync(join(worktrees, 'TOY-aaaaaaaa'), { recursive: true });
+      // a symlinked folder is not a directory for the sweep (stat follows it, lstat does not): it is left alone
+      symlinkSync(outside, join(worktrees, 'TOY-aaaaaaaa', 'TOY-9'));
+      const copy = orphan(worktrees, 'TOY-aaaaaaaa', 'TOY-1');
+      const old = Date.now() + 2 * DAY;
+      const unanswered = await sweepWorktrees({
+        worktreesDir: worktrees,
+        liveOf: async () => null,
+        now: old,
+      });
+      expect(unanswered.skipped).toBeDefined();
+      expect(existsSync(copy)).toBe(true);
+      await sweepWorktrees({ worktreesDir: worktrees, liveOf: liveSet(), now: old });
+      expect(existsSync(join(outside, 'precious.txt'))).toBe(true);
+      expect(existsSync(copy)).toBe(false);
+    });
   });
 
   it('copes with a worktrees directory that does not exist', async () => {

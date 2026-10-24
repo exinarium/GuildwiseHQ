@@ -169,6 +169,26 @@ export const CeoConfigSchema = z.object({
   fullPower: z.boolean().default(false),
 });
 
+/**
+ * Retention of the agents' `scratch/` folders (docs/RUNNER.md, "Scratch retention"). Pruned after every shift and by a
+ * periodic sweep, only while the agent has no shift or chat running.
+ */
+export const ScratchConfigSchema = z.object({
+  enabled: z.boolean().default(true),
+  /** Top-level entries not touched for this many days are removed. */
+  maxAgeDays: z.number().positive().default(3),
+  /** Per-agent cap in bytes (default 10 GB, 0: no cap); the oldest entries go first. */
+  maxBytes: z
+    .number()
+    .int()
+    .nonnegative()
+    .default(10 * 1024 ** 3),
+  /** Top-level names never pruned. */
+  keep: z.array(z.string().min(1)).default([]),
+  /** Hours between the periodic scratch and worktree sweeps (also run at start). */
+  sweepIntervalHours: z.number().positive().default(4),
+});
+
 export const RunnerConfigSchema = z.object({
   serverUrl: z.string().min(1),
   workstationId: z.string().min(1),
@@ -214,6 +234,8 @@ export const RunnerConfigSchema = z.object({
     .refine((r) => r.from <= r.to, { message: 'runPortRange.from must not exceed to' })
     .default({ from: 20000, to: 29999 }),
   vaultSyncIntervalSec: z.number().int().positive().default(300),
+  /** Disk retention of the agents' scratch folders (see `ScratchConfigSchema`). */
+  scratch: ScratchConfigSchema.default(ScratchConfigSchema.parse({})),
 });
 export type RunnerConfig = z.infer<typeof RunnerConfigSchema>;
 

@@ -268,7 +268,7 @@ describe('code version 6 (the lean team flow)', () => {
     expect(pre?.defaultModel.model).toBe('sonnet');
     for (const role of [planner, pre]) expect(role?.permissions.mayCommit).toBe(false);
     const reviewer = BUILTIN_ROLES.find((r) => r.key === 'reviewer');
-    expect(reviewer?.version).toBe(8);
+    expect(reviewer?.version).toBe(9);
     expect(reviewer?.coreRules.join(' ')).toMatch(/never build the project and never run its tests/i);
     expect(reviewer?.instructions).not.toMatch(/rsync|cp -a/);
   });

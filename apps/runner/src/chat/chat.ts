@@ -237,6 +237,16 @@ export class ChatManager {
     return [...this.active.keys()];
   }
 
+  /**
+   * Folders the running turns work in or read (a card worktree a chat reads, shared with its delegate children). The
+   * stale-worktree sweep never removes one of them.
+   */
+  worktreePaths(): string[] {
+    return [...this.active.values()].flatMap((c) =>
+      c.delegateWork ? [c.delegateWork.cwd, ...c.delegateWork.readDirs] : [],
+    );
+  }
+
   private remember(chatId: string): void {
     this.recent.add(chatId);
     if (this.recent.size > RECENT_CHATS) {
