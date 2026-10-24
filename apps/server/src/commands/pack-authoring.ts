@@ -52,6 +52,8 @@ const reads = new Map<
     ciphertext?: string;
     error?: string;
     at: number;
+    /** Forgotten after the first delivery (a reviewer's read). */
+    once?: boolean;
   }
 >();
 const sweepReads = (): void => {
@@ -319,6 +321,7 @@ export async function startReadMyPack(
   orgId: string,
   packId: string,
   replyKey: string,
+  withPinned = false,
 ): Promise<{ requestId: string }> {
   sweepReads();
   const p = await loadMine(ctx.pool, userId, orgId, packId);
@@ -329,7 +332,44 @@ export async function startReadMyPack(
     ctx.pool,
     wsId,
     'pack.read',
-    { packId, requestId, replyKey },
+    { packId, requestId, replyKey, ...(withPinned ? { withPinned: true } : {}) },
+    new Date(Date.now() + READ_TTL_MS),
+  );
+  deliver(ctx, [wsId]);
+  return { requestId };
+}
+
+/**
+ * Q57: an Owner or Admin reads the text of an authored organization pack before approving it. The author's runner seals the files
+ * (the newest save, and the approved revision to compare with) to a one-time key of the reviewer's browser; the server relays the
+ * ciphertext, keeps it in memory for a few minutes and forgets it once it was delivered. The text never touches the server in the
+ * clear, and the reviewer sees exactly what the runner holds (the page checks it against the content hash being approved).
+ */
+export async function startReviewRead(
+  ctx: Ctx,
+  who: { userId: string; orgId: string; role: string },
+  packId: string,
+  replyKey: string,
+): Promise<{ requestId: string }> {
+  if (!isOrgManager({ orgRole: who.role as never }))
+    throw forbidden('only owners and admins review capability packs');
+  sweepReads();
+  const p = await one(
+    ctx.pool,
+    `SELECT * FROM packs WHERE id=$1 AND org_id=$2 AND removed_at IS NULL AND visibility='org' AND source='authored'`,
+    [packId, who.orgId],
+  );
+  // a git pack, a private pack and another organization's pack read the same: not found
+  if (!p) throw notFound('pack not found');
+  const wsId = authorWorkstationOf(p);
+  if (!wsId) throw conflict('no_author_workstation', "The author's workstation is not known yet.");
+  const requestId = randomUUID();
+  reads.set(requestId, { packId, userId: who.userId, status: 'pending', at: Date.now(), once: true });
+  await enqueueRunnerCommand(
+    ctx.pool,
+    wsId,
+    'pack.read',
+    { packId, requestId, replyKey, withPinned: true },
     new Date(Date.now() + READ_TTL_MS),
   );
   deliver(ctx, [wsId]);
@@ -341,6 +381,8 @@ export function getReadMyPack(userId: string, requestId: string): ReadMyPackResu
   const r = reads.get(requestId);
   // somebody else's request id reads as unknown
   if (!r || r.userId !== userId) throw notFound('request not found');
+  // a review read is forgotten once delivered
+  if (r.once && (r.status === 'ready' || r.status === 'failed')) reads.delete(requestId);
   return {
     status: r.status,
     ...(r.ciphertext ? { ciphertext: r.ciphertext } : {}),

@@ -1,6 +1,7 @@
 import type { PackDto, PackItem } from '@aom/shared';
 import { usePackDetail, useTrustPack } from '../../api/queries/capabilities.ts';
 import { Badge, Button, Callout, Dialog, ErrorBox, Spinner, useToast } from '../ui.tsx';
+import { AuthoredPackText, useAuthoredReview } from './AuthoredPackText.tsx';
 import { shortSha } from './badges.tsx';
 
 const KIND_ORDER = ['persona', 'playbook', 'skill'] as const;
@@ -18,6 +19,9 @@ export function TrustReview({ pack, onClose }: { pack: PackDto; onClose: () => v
   const toast = useToast();
   const snap = detail.data?.snapshot ?? null;
   const items = snap?.items ?? [];
+  // an authored organization pack is read before it is approved: nobody approves unread content (Q57)
+  const review = useAuthoredReview(pack, snap?.sha);
+  const unread = review.state !== 'none' && review.state !== 'ready';
   const approve = () => {
     if (!snap) return;
     trust.mutate(
@@ -42,7 +46,7 @@ export function TrustReview({ pack, onClose }: { pack: PackDto; onClose: () => v
           <Button variant="ghost" onClick={onClose}>
             Cancel
           </Button>
-          <Button variant="primary" disabled={!snap} loading={trust.isPending} onClick={approve}>
+          <Button variant="primary" disabled={!snap || unread} loading={trust.isPending} onClick={approve}>
             Approve this exact commit and content
           </Button>
         </>
@@ -116,6 +120,7 @@ export function TrustReview({ pack, onClose }: { pack: PackDto; onClose: () => v
                 </ul>
               </Callout>
             )}
+            <AuthoredPackText review={review} />
             {KIND_ORDER.map((kind) => {
               const group = items.filter((i) => i.kind === kind);
               if (group.length === 0) return null;

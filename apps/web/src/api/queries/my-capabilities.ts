@@ -8,6 +8,7 @@ import {
   type PackCredentialShares,
   type PackHireStatus,
   type PackPersonasResponse,
+  type PackReadContent,
   type ReadMyPackResult,
   type RoleOfferReview,
   type RoleOffersResponse,
@@ -84,14 +85,39 @@ export async function readMyPackTree(
   packId: string,
   opts: { attempts?: number; delayMs?: number } = {},
 ): Promise<Record<string, string>> {
+  return (await readPackContent(packId, { ...opts, mode: 'author' })).tree;
+}
+
+/**
+ * Reads the files of an authored pack sealed to a one-time key of this page, with the revision the organization approved when
+ * it is another one (`pinned`). `mode 'author'` is the author's own read (the editor); `'review'` is an Owner or Admin reading
+ * a pack before approving it (Q57). Either way the server relays ciphertext only.
+ */
+export async function readPackContent(
+  packId: string,
+  opts: {
+    attempts?: number;
+    delayMs?: number;
+    mode?: 'author' | 'review';
+    withPinned?: boolean;
+    /** Stops the polling when the page no longer wants the answer (the dialog closed). */
+    signal?: AbortSignal;
+  } = {},
+): Promise<PackReadContent> {
   const key = await makeReplyKey();
-  const { requestId } = await post<{ requestId: string }>(`/my-capabilities/${packId}/read`, {
-    replyKey: key.publicKey,
-  });
+  if (opts.signal?.aborted) throw new Error('cancelled');
+  const review = opts.mode === 'review';
+  const { requestId } = await post<{ requestId: string }>(
+    review ? `/packs/${packId}/review-read` : `/my-capabilities/${packId}/read`,
+    { replyKey: key.publicKey, ...(opts.withPinned ? { withPinned: true } : {}) },
+  );
   for (let i = 0; i < (opts.attempts ?? 40); i++) {
-    const r = await get<ReadMyPackResult>(`/my-capabilities/reads/${requestId}`);
+    if (opts.signal?.aborted) throw new Error('cancelled');
+    const r = await get<ReadMyPackResult>(
+      review ? `/packs/reads/${requestId}` : `/my-capabilities/reads/${requestId}`,
+    );
     if (r.status === 'ready' && r.ciphertext)
-      return (JSON.parse(await key.open(r.ciphertext)) as { tree: Record<string, string> }).tree;
+      return JSON.parse(await key.open(r.ciphertext)) as PackReadContent;
     if (r.status === 'failed') throw new Error(r.error ?? 'the workstation could not read the pack');
     await sleep(opts.delayMs ?? 750);
   }

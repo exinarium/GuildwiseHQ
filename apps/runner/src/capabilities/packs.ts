@@ -875,7 +875,16 @@ esac
     if (!sha || !existsSync(this.revDir(p.packId, sha)))
       return { ok: false, error: 'the pack has no saved files yet' };
     const { tree } = readPackTree(this.revDir(p.packId, sha));
-    return { ok: true, ciphertext: await sealLarge(p.replyKey, JSON.stringify({ tree, sha })) };
+    // R3c: the approved revision too (when it is another one and still on disk), for the diff against it
+    const pin = l.desired.pinnedSha;
+    const pinned =
+      p.withPinned && pin && pin !== sha && existsSync(this.revDir(p.packId, pin))
+        ? { tree: readPackTree(this.revDir(p.packId, pin)).tree, sha: pin }
+        : undefined;
+    return {
+      ok: true,
+      ciphertext: await sealLarge(p.replyKey, JSON.stringify({ tree, sha, ...(pinned ? { pinned } : {}) })),
+    };
   }
 
   /** `pack.persona.read`: the persona file as pinned, for hiring. Only a pack that may be used here is read. */

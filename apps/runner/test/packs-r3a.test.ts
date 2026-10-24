@@ -615,6 +615,43 @@ describe('authored packs', () => {
     await expect(stranger.open(out.ciphertext as string)).rejects.toThrow();
   });
 
+  it('Q57/R3c: a read for review or for the diff also seals the approved revision, when it is another one', async () => {
+    const r = rig();
+    await r.m.sync([authored({ visibility: 'org' })]);
+    await r.m.saveAuthoredFiles({
+      packId: ID,
+      keyId: r.keys.publicKey.keyId,
+      ciphertext: await sealTree(r.keys, [persona]),
+      approve: false,
+    });
+    const first = r.reports.filter((x) => x.state === 'resolved').at(-1)?.snapshot;
+    await r.m.sync([authored({ visibility: 'org', pinnedSha: first?.sha as string })]);
+    await r.m.saveAuthoredFiles({
+      packId: ID,
+      keyId: r.keys.publicKey.keyId,
+      ciphertext: await sealTree(r.keys, [persona, skill]),
+      approve: false,
+    });
+    const reply = await makeReplyKey();
+    const base = { packId: ID, requestId: '66666666-6666-4666-8666-666666666666', replyKey: reply.publicKey };
+    // without the flag (an editor read of an older page): no approved revision in the answer
+    const plain = await r.m.readFiles(base);
+    expect(JSON.parse(await reply.open(plain.ciphertext as string))).not.toHaveProperty('pinned');
+    const out = await r.m.readFiles({ ...base, withPinned: true });
+    const content = JSON.parse(await reply.open(out.ciphertext as string)) as {
+      tree: Record<string, string>;
+      sha: string;
+      pinned?: { tree: Record<string, string>; sha: string };
+    };
+    expect(Object.keys(content.tree).sort()).toEqual(Object.keys(packTree([persona, skill])).sort());
+    expect(content.pinned?.sha).toBe(first?.sha);
+    expect(Object.keys(content.pinned?.tree ?? {}).sort()).toEqual(Object.keys(packTree([persona])).sort());
+    expect(content.sha).not.toBe(content.pinned?.sha);
+    // the stranger's key opens nothing, and the plain text is not in the ciphertext
+    expect(out.ciphertext).not.toContain('weak spot');
+    await expect((await makeReplyKey()).open(out.ciphertext as string)).rejects.toThrow();
+  });
+
   it('reads a persona for hiring only from a pack that may be used here', async () => {
     const r = rig();
     await r.m.sync([authored({ visibility: 'org' })]);

@@ -327,7 +327,18 @@ export const SaveMyPackRequestSchema = z.object({
 });
 export type SaveMyPackRequest = z.infer<typeof SaveMyPackRequestSchema>;
 
-export const ReadMyPackRequestSchema = z.object({ replyKey: z.string().min(20).max(2000) });
+export const ReadMyPackRequestSchema = z.object({
+  replyKey: z.string().min(20).max(2000),
+  /** Also read the approved revision, for the diff against it (R3c). */
+  withPinned: z.boolean().optional(),
+});
+/** What a sealed read opens to: the newest save, and (when asked and different) the revision the organization approved. */
+export const PackReadContentSchema = z.object({
+  tree: z.record(z.string(), z.string()),
+  sha: z.string().optional(),
+  pinned: z.object({ tree: z.record(z.string(), z.string()), sha: z.string() }).optional(),
+});
+export type PackReadContent = z.infer<typeof PackReadContentSchema>;
 export const ReadMyPackResultSchema = z.object({
   status: z.enum(['pending', 'ready', 'failed']),
   ciphertext: z.string().optional(),

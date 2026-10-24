@@ -27,6 +27,7 @@ import {
   saveMyPack,
   setMyPackVisibility,
   startReadMyPack,
+  startReviewRead,
 } from '../commands/pack-authoring.ts';
 import {
   acceptRoleOffer,
@@ -121,6 +122,20 @@ export function packRoutes(ctx: Ctx) {
     // ---- any member --------------------------------------------------------------------------------------------
     const member = async (req: Parameters<typeof requireOrg>[1]) =>
       await requireOrg(ctx, req, { min: 'member' });
+    // Q57: an Owner or Admin reads the text of an authored organization pack before approving it (sealed to their browser)
+    app.post(
+      '/api/packs/:id/review-read',
+      { schema: { params: Params, body: ReadMyPackRequestSchema } },
+      async (req, reply) => {
+        reply.code(202);
+        return startReviewRead(ctx, await who(req), req.params.id, req.body.replyKey);
+      },
+    );
+    app.get(
+      '/api/packs/reads/:requestId',
+      { schema: { params: z.object({ requestId: z.uuid() }) } },
+      async (req) => getReadMyPack((await who(req)).userId, req.params.requestId),
+    );
     // my capabilities: packs I authored (private to my workstation, or for the organization)
     app.get('/api/my-capabilities', async (req) => {
       const a = await member(req);
@@ -146,7 +161,14 @@ export function packRoutes(ctx: Ctx) {
       async (req, reply) => {
         const a = await member(req);
         reply.code(202);
-        return startReadMyPack(ctx, a.session.user.id, a.orgId, req.params.id, req.body.replyKey);
+        return startReadMyPack(
+          ctx,
+          a.session.user.id,
+          a.orgId,
+          req.params.id,
+          req.body.replyKey,
+          req.body.withPinned,
+        );
       },
     );
     app.get(

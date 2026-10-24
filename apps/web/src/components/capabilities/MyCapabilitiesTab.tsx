@@ -3,6 +3,7 @@ import { type FormEvent, useState } from 'react';
 import { useAgents } from '../../api/queries/agents.ts';
 import {
   readMyPackTree,
+  readPackContent,
   useCreateMyPack,
   useGrantPackAgent,
   useMyPacks,
@@ -193,6 +194,7 @@ function MyPackCard({
   const remove = useRemoveMyPack();
   const toast = useToast();
   const [tree, setTree] = useState<Record<string, string> | null>(null);
+  const [approved, setApproved] = useState<Record<string, string> | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<'delete' | 'visibility' | null>(null);
@@ -206,7 +208,10 @@ function MyPackCard({
     }
     setLoading(true);
     try {
-      setTree(await readMyPackTree(pack.id));
+      // an organization pack also brings the approved revision, to show what the author changed since
+      const content = await readPackContent(pack.id, { withPinned: pack.visibility === 'org' });
+      setTree(content.tree);
+      setApproved(content.pinned?.tree ?? null);
       onEdit(true);
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : String(err));
@@ -302,6 +307,7 @@ function MyPackCard({
             name={pack.name}
             description={pack.description}
             initialTree={tree}
+            approvedTree={approved}
             saving={save.isPending || pack.saving}
             canApprove={pack.mayApprove && canApprove}
             orgVisible={pack.visibility === 'org'}

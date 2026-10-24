@@ -9,7 +9,8 @@ import {
   zipTree,
 } from '@aom/shared';
 import { useMemo, useState } from 'react';
-import { Badge, Button, Callout, TextArea, TextInput } from '../ui.tsx';
+import { Badge, Button, Callout, Disclosure, TextArea, TextInput } from '../ui.tsx';
+import { PackVersionDiff } from './PackVersionDiff.tsx';
 
 /**
  * The capability editor: skills (SKILL.md and optional reference, asset and script files), personas (the frontmatter fields and
@@ -363,6 +364,7 @@ export function PackEditor({
   name,
   description,
   initialTree,
+  approvedTree,
   saving,
   canApprove,
   orgVisible,
@@ -373,6 +375,8 @@ export function PackEditor({
   name: string;
   description: string;
   initialTree: Record<string, string>;
+  /** The revision the organization approved, when it is another one than the saved files: shown as a diff (R3c). */
+  approvedTree?: Record<string, string> | null;
   saving: boolean;
   /** The author may approve their own organization pack (Owner or Admin). */
   canApprove: boolean;
@@ -393,6 +397,7 @@ export function PackEditor({
   const current = caps[sel];
   const update = (c: AuthoredCapability) => setCaps(caps.map((x, i) => (i === sel ? c : x)));
   const tree = () => packTree(caps, { name, description });
+  const draftTree = useMemo(() => packTree(caps, { name, description }), [caps, name, description]);
   return (
     <div className="flex flex-col gap-3" data-testid="pack-editor">
       <div className="flex flex-wrap items-center gap-2">
@@ -430,6 +435,11 @@ export function PackEditor({
           <input type="checkbox" checked={approve} onChange={(e) => setApprove(e.target.checked)} />
           Approve this version myself (I am an Owner or Admin)
         </label>
+      )}
+      {approvedTree && (
+        <Disclosure summary="Changes since the approved version" data-testid="approved-diff">
+          <PackVersionDiff before={approvedTree} after={draftTree} beforeLabel="the approved version" />
+        </Disclosure>
       )}
       {errors && (
         <Callout tone="danger" role="alert" data-testid="editor-blocked">

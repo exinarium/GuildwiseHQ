@@ -285,18 +285,27 @@ describe('authored private packs: only the owner sees them', () => {
   it('reads the files back for the editor sealed to a key only the page has, for the owner alone, and keeps no copy', async () => {
     const replyKey = makeKey().publicKey;
     const r = await asMember('POST', `/api/my-capabilities/${id}/read`, { replyKey }, 202);
-    const cmd = await mem.waitFor('command', (f) => f.command === 'pack.read' && f.payload.requestId === r.requestId);
+    const cmd = await mem.waitFor(
+      'command',
+      (f) => f.command === 'pack.read' && f.payload.requestId === r.requestId,
+    );
     expect(cmd.payload).toMatchObject({ packId: id, replyKey });
     expect((await asMember('GET', `/api/my-capabilities/reads/${r.requestId}`)).status).toBe('pending');
     const ciphertext = await sealLarge(replyKey, JSON.stringify({ tree: packTree([critic]) }));
     mem.send('command.result', { commandId: cmd.commandId, ok: true, result: { ok: true, ciphertext } });
-    await until(async () => (await asMember('GET', `/api/my-capabilities/reads/${r.requestId}`)).status === 'ready');
+    await until(
+      async () => (await asMember('GET', `/api/my-capabilities/reads/${r.requestId}`)).status === 'ready',
+    );
     expect((await asMember('GET', `/api/my-capabilities/reads/${r.requestId}`)).ciphertext).toBe(ciphertext);
     // nobody else can fetch the answer, start a read of this pack, or find the ciphertext in the database
     await ok(w.t.req('GET', `/api/my-capabilities/reads/${r.requestId}`, { cookie: w.owner.cookie }), 404);
     await asOwner('POST', `/api/my-capabilities/${id}/read`, { replyKey }, 404);
-    expect(await q(`SELECT 1 FROM runner_commands WHERE payload::text LIKE $1`, [`%${ciphertext.slice(0, 40)}%`])).toEqual([]);
-    expect(await q(`SELECT 1 FROM events WHERE payload::text LIKE $1`, [`%${ciphertext.slice(0, 40)}%`])).toEqual([]);
+    expect(
+      await q(`SELECT 1 FROM runner_commands WHERE payload::text LIKE $1`, [`%${ciphertext.slice(0, 40)}%`]),
+    ).toEqual([]);
+    expect(
+      await q(`SELECT 1 FROM events WHERE payload::text LIKE $1`, [`%${ciphertext.slice(0, 40)}%`]),
+    ).toEqual([]);
   });
 
   it('takes a later save as the owner’s own and does not leave it waiting for a review', async () => {
@@ -422,6 +431,55 @@ describe('authored organization packs: review and approval', () => {
       (i: { key: string }) => i.key === 'crew:critic',
     );
     expect(usable).toMatchObject({ source: 'pack', usable: true, visibility: 'org' });
+  });
+
+  it('Q57: an Owner or Admin reads the text of the pack sealed to their browser key, with the approved revision to compare; the member and other organizations cannot; the server forgets it after delivery', async () => {
+    const replyKey = makeKey().publicKey;
+    // a Member cannot start a review read (the route is for Owners and Admins)
+    await asMember('POST', `/api/packs/${id}/review-read`, { replyKey }, 403);
+    const r = await asOwner('POST', `/api/packs/${id}/review-read`, { replyKey }, 202);
+    const cmd = await mem.waitFor(
+      'command',
+      (f) => f.command === 'pack.read' && f.payload.requestId === r.requestId,
+    );
+    // it is asked of the AUTHOR's workstation, with the reviewer's key and a request for the approved revision as well
+    expect(cmd.payload).toMatchObject({ packId: id, replyKey, withPinned: true });
+    expect((await asOwner('GET', `/api/packs/reads/${r.requestId}`)).status).toBe('pending');
+    const content = {
+      tree: packTree([critic]),
+      sha: snap.sha,
+      pinned: { tree: packTree([summarise]), sha: 'b'.repeat(64) },
+    };
+    const ciphertext = await sealLarge(replyKey, JSON.stringify(content));
+    mem.send('command.result', { commandId: cmd.commandId, ok: true, result: { ok: true, ciphertext } });
+    // someone else cannot fetch the answer (the route is for Owners and Admins)
+    await ok(
+      w.t.req('GET', `/api/packs/reads/${r.requestId}`, {
+        cookie: member.cookie,
+        headers: { 'x-aom-org': w.owner.id },
+      }),
+      403,
+    );
+    // never in the database, in the clear or sealed
+    expect(
+      await q(`SELECT 1 FROM runner_commands WHERE payload::text LIKE $1`, [`%${ciphertext.slice(0, 40)}%`]),
+    ).toEqual([]);
+    expect(
+      await q(`SELECT 1 FROM events WHERE payload::text LIKE $1`, [`%${ciphertext.slice(0, 40)}%`]),
+    ).toEqual([]);
+    // the first look that finds it delivers the ciphertext; after that the server has forgotten the request
+    let got: { status: string; ciphertext?: string } = { status: 'pending' };
+    await until(async () => {
+      got = await asOwner('GET', `/api/packs/reads/${r.requestId}`);
+      return got.status === 'ready';
+    });
+    expect(got.ciphertext).toBe(ciphertext);
+    await asOwner('GET', `/api/packs/reads/${r.requestId}`, undefined, 404);
+  });
+
+  it('Q57: a git pack, a private pack and an unknown pack cannot be read for review', async () => {
+    const replyKey = makeKey().publicKey;
+    await asOwner('POST', `/api/packs/${randomUUID()}/review-read`, { replyKey }, 404);
   });
 
   it('sends the pinned files to another holder sealed to its own key, after its member accepted, and forgets them', async () => {

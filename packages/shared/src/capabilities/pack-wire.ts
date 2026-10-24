@@ -166,6 +166,11 @@ export const PackReadPayloadSchema = z.object({
   requestId: z.uuid(),
   /** SPKI public key (base64) of the browser's one-time key pair. */
   replyKey: z.string().min(20).max(2000),
+  /**
+   * R3c (additive; an older runner ignores it): also return the revision the organization approved (`pinned`), so the author and
+   * the reviewer can read what changed. The sealed answer is `{tree, sha, pinned?: {tree, sha}}`, `tree` being the newest save.
+   */
+  withPinned: z.boolean().optional(),
 });
 export const PackReadResultSchema = z.object({
   ok: z.boolean(),

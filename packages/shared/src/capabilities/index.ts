@@ -6,3 +6,4 @@ export * from './packs.ts';
 export * from './parse.ts';
 export * from './reply-key.ts';
 export * from './toml-lite.ts';
+export * from './tree-diff.ts';

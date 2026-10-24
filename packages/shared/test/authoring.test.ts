@@ -3,8 +3,10 @@ import {
   AUTHORED_LIMITS,
   type AuthoredCapability,
   authoredHasErrors,
+  authoredTreeContentHash,
   capabilitiesOfTree,
   capabilityFiles,
+  diffPackTrees,
   indexPack,
   PackDesiredSchema,
   packContentHash,
@@ -261,5 +263,32 @@ describe('a role from a pack persona', () => {
         (i) => i.severity === 'error',
       ),
     ).toEqual([]);
+  });
+});
+
+describe('R3c: versions of an authored pack', () => {
+  it('hashes a tree to the content hash a snapshot of it carries', () => {
+    const tree = packTree([skill]);
+    const index = indexPack({ name: 'mine', adapter: 'generic', tree });
+    expect(authoredTreeContentHash('mine', tree)).toBe(packContentHash(index.entries));
+    expect(authoredTreeContentHash('mine', { ...tree, 'README.md': 'x' })).not.toBe('');
+    const edited = packTree([{ ...skill, body: '# Release notes\n\nGroup by author.' }]);
+    expect(authoredTreeContentHash('mine', edited)).not.toBe(authoredTreeContentHash('mine', tree));
+  });
+
+  it('lists the files that were added, removed, changed or left alone, in path order', () => {
+    const before = { 'a.md': '1', 'b.md': '2', 'c.md': '3' };
+    const after = { 'a.md': '1', 'b.md': '22', 'd.md': '4' };
+    expect(diffPackTrees(before, after).map((c) => [c.path, c.status])).toEqual([
+      ['a.md', 'unchanged'],
+      ['b.md', 'changed'],
+      ['c.md', 'removed'],
+      ['d.md', 'added'],
+    ]);
+    expect(diffPackTrees(null, after).every((c) => c.status === 'added')).toBe(true);
+    expect(diffPackTrees(before, after).find((c) => c.path === 'b.md')).toMatchObject({
+      before: '2',
+      after: '22',
+    });
   });
 });
