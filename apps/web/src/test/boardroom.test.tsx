@@ -427,7 +427,13 @@ describe('Boardroom list and the new boardroom dialog', () => {
     await user.click(within(dialog).getByTestId('add-adhoc'));
     expect(within(dialog).getByRole('list', { name: 'Chosen cast' })).toHaveTextContent('Regulator');
     expect(within(dialog).getByTestId('cast-counter')).toHaveTextContent('3 of 3-4 opinion seats');
-    await user.selectOptions(within(dialog).getByLabelText('Round cap'), '3');
+    // no cap unless one is typed
+    expect(within(dialog).getByLabelText('Round cap')).toHaveValue(null);
+    await user.type(within(dialog).getByLabelText('Round cap'), '51');
+    expect(within(dialog).getByText(/whole number from 1 to 50/)).toBeInTheDocument();
+    expect(start).toBeDisabled();
+    await user.clear(within(dialog).getByLabelText('Round cap'));
+    await user.type(within(dialog).getByLabelText('Round cap'), '3');
     await user.type(within(dialog).getByLabelText('Cost limit in USD (optional)'), '2');
     await user.selectOptions(within(dialog).getByLabelText('Time limit'), '45');
     await user.selectOptions(within(dialog).getByLabelText('The Chair runs on'), 'claude-code/sonnet');
@@ -501,6 +507,15 @@ describe('Boardroom list and the new boardroom dialog', () => {
               { kind: 'persona', refId: 'security' },
             ],
           },
+          {
+            id: '0192f3a0-0000-7000-8000-0000000000bc',
+            name: 'Open ended',
+            format: 'open',
+            roundCap: null,
+            models: {},
+            createdAt: AT,
+            cast: [{ kind: 'persona', refId: 'security' }],
+          },
         ],
       }),
       'GET /api/workstations': () => ({ workstations: [] }),
@@ -529,7 +544,13 @@ describe('Boardroom list and the new boardroom dialog', () => {
     );
     expect(within(dialog).getByRole('list', { name: 'Chosen cast' })).toHaveTextContent('Cost Hawk');
     expect(within(dialog).getByLabelText('Format')).toHaveValue('pre_mortem');
-    expect(within(dialog).getByLabelText('Round cap')).toHaveValue('3');
+    expect(within(dialog).getByLabelText('Round cap')).toHaveValue(3);
+    // a room saved without a cap clears the field
+    await user.selectOptions(
+      within(dialog).getByLabelText('Use a saved room'),
+      '0192f3a0-0000-7000-8000-0000000000bc',
+    );
+    expect(within(dialog).getByLabelText('Round cap')).toHaveValue(null);
   });
 });
 
@@ -618,6 +639,14 @@ describe('Boardroom session', () => {
     expect(screen.getByTestId('meter-estimate')).toHaveTextContent('~$0.03 for 3 speakers');
     expect(screen.getByTestId('waiting-for')).toHaveTextContent('The speakers are answering');
     expect(within(screen.getByTestId('cast')).getByText('@regulator')).toBeInTheDocument();
+  });
+
+  it('shows the round without "of N" when the session has no cap', async () => {
+    const base = state();
+    mountSession(state({ config: { ...base.config, roundCap: null, round: 5 } }), [message()]);
+    const meter = await screen.findByTestId('meter-round');
+    expect(meter).toHaveTextContent('5');
+    expect(meter).not.toHaveTextContent('of');
   });
 
   it('shows the Chair’s delegations and the Delegation control of the session', async () => {

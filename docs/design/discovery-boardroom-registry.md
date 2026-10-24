@@ -97,7 +97,7 @@ Details in `docs/ARCHITECTURE.md` section 38.2.
 - **Minutes**: exact sections (cast, disagreements, decisions, whiteboard snapshot) are assembled by the server from the data; the Chair's synthesis (positions, agreements, open questions) is the stronger-model part. If the synthesis cannot run (budget) the minutes are still written without it. On demand minutes make a new version of the same document.
 - **Pull into PRD**: `DiscoveryService.create(..., seed)` with `phase capture`, a seeded PRD draft (the PRD template, then the minutes' substance) and panel notes; CEO `joint` when a CEO exists.
 - **Models**: `{runtime, model}` per role (`persona`, `chair`, `synthesis`) and per seat (`castModels`); unset roles use `DEFAULT_BOARD_MODELS` (haiku, sonnet, opus) or, when the workstation does not offer that runtime, the first runtime it offers (`defaultModelFor`).
-- **Open product questions (decided by default):** the default round cap is 4 (max 12) and the cast 2 to 8; the session runs on its own until the cap, a decision point, a budget stop or the owner pauses (it does not wait for the owner after every round); a mention takes effect in the next round, not inside the current one; the budget is in USD like Discovery; only Owners and Admins create boardrooms and rooms, and rooms are shared by the organization; one minutes document per session (versions, not copies); real agents in the cast run on their own runtime and model unless a seat model is chosen; Suggest a cast leaves an unstarted session in the list marked "Setting up"; the Boardroom video is registered but unrecorded; `option_scoring` records scores as sticky notes, there is no tally yet; the Chair's chatter is not shown (its picks are).
+- **Open product questions (decided by default):** the round cap is optional and off by default (1 to 50 when set; changed in the fix pass, see the end of this document) and the cast 2 to 8; the session runs on its own until the cap, a decision point, a budget stop or the owner pauses (it does not wait for the owner after every round); a mention takes effect in the next round, not inside the current one; the budget is in USD like Discovery; only Owners and Admins create boardrooms and rooms, and rooms are shared by the organization; one minutes document per session (versions, not copies); real agents in the cast run on their own runtime and model unless a seat model is chosen; Suggest a cast leaves an unstarted session in the list marked "Setting up"; the Boardroom video is registered but unrecorded; `option_scoring` records scores as sticky notes, there is no tally yet; the Chair's chatter is not shown (its picks are).
 
 ## Phase D as built: notes and deviations
 
@@ -180,7 +180,7 @@ Details in `docs/ARCHITECTURE.md` section 38.5 and `docs/RUNNER.md` ("Claude Cod
   - "Hand to BA" checks for an existing intake before retrying.
   - Non-managers see no manager-only controls.
 - **Boardroom:**
-  - The round cap stays at 4 (max 12).
+  - The round cap stays at 4 (max 12). (Superseded by the fix pass: optional, off by default, 1 to 50.)
   - Option scoring gets a tally.
   - @mentions jump the current round.
   - Sessions can be deleted or archived.

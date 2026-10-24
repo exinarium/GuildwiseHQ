@@ -1,5 +1,4 @@
 import {
-  BOARD_ROUND_CAP_DEFAULT,
   type BoardCastDto,
   type BoardDecisionDto,
   type BoardDisagreementDto,
@@ -271,7 +270,7 @@ export async function boardState(ctx: Ctx, t: Row, userId: string): Promise<Boar
     : null;
 
   const openDecision = decRows.find((d) => d.status === 'open');
-  const nextRound = Math.min(cfg.round + 1, cfg.roundCap);
+  const nextRound = cfg.roundCap === null ? cfg.round + 1 : Math.min(cfg.round + 1, cfg.roundCap);
   const est = estimateNextRound({
     castSize: castRows.length,
     nextRound: cfg.stage === 'setup' ? 1 : nextRound,
@@ -317,7 +316,7 @@ export async function boardState(ctx: Ctx, t: Row, userId: string): Promise<Boar
       topic: cfg.topic,
       brief: cfg.brief,
       format: cfg.format,
-      roundCap: cfg.roundCap || BOARD_ROUND_CAP_DEFAULT,
+      roundCap: cfg.roundCap,
       stage: cfg.stage,
       round: cfg.round,
       revealedRound: cfg.revealedRound,

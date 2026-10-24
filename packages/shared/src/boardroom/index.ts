@@ -91,8 +91,13 @@ export function castProblem(cast: ReadonlyArray<{ kind: string; refId: string }>
     return `Besides the Optimist and the Devil's Advocate, choose ${BOARD_OTHER_SEATS_MIN} to ${BOARD_OTHER_SEATS_MAX} other opinion seats (you have ${others}).`;
   return null;
 }
-export const BOARD_ROUND_CAP_DEFAULT = 4;
-export const BOARD_ROUND_CAP_MAX = 12;
+/** The round cap is optional and off by default: a session ends on the owner's End, the time limit or the budget stop. */
+export const BOARD_ROUND_CAP_MAX = 50;
+/** After this many rounds in a row with nothing new the Chair proposes ending (a decision point) instead of looping. */
+export const BOARD_STAGNANT_ROUNDS = 2;
+/** The option of the Chair's "End here?" decision point that ends the session (the server writes the minutes when it is chosen). */
+export const BOARD_END_OPTION_LABEL = 'End and write the minutes';
+export const BOARD_KEEP_GOING_OPTION_LABEL = 'Keep going';
 /** The Chair picks two or three speakers per discussion round. */
 export const BOARD_SPEAKERS_MIN = 1;
 export const BOARD_SPEAKERS_MAX = 3;
@@ -151,7 +156,8 @@ export const BoardConfigSchema = z.object({
   /** The owner's brief (context, options, constraints). */
   brief: z.string().max(8000).default(''),
   format: BoardFormatSchema.default('open'),
-  roundCap: z.number().int().min(1).max(BOARD_ROUND_CAP_MAX).default(BOARD_ROUND_CAP_DEFAULT),
+  /** `null` = no cap (the default). Sessions created before the cap became optional keep the cap they were made with. */
+  roundCap: z.number().int().min(1).max(BOARD_ROUND_CAP_MAX).nullable().default(null),
   budgetUsd: z.number().positive().max(100_000).nullable().default(null),
   budgetStopped: z.boolean().default(false),
   models: BoardModelsSchema.default({}),
@@ -301,7 +307,8 @@ export type CastMember = z.infer<typeof CastMemberSchema>;
 
 export const BoardSettingsSchema = z.object({
   format: BoardFormatSchema.default('open'),
-  roundCap: z.number().int().min(1).max(BOARD_ROUND_CAP_MAX).default(BOARD_ROUND_CAP_DEFAULT),
+  /** Optional cap on rounds; absent or null: no cap. */
+  roundCap: z.number().int().min(1).max(BOARD_ROUND_CAP_MAX).nullable().default(null),
   /** Optional spend limit in USD; absent: no limit. */
   budgetUsd: z.number().positive().max(100_000).optional(),
   /** Optional time limit in minutes; absent: no limit. */
@@ -342,7 +349,8 @@ export const PatchBoardRequestSchema = z.object({
   budgetUsd: z.number().positive().max(100_000).nullable().optional(),
   /** `null` removes the time limit. */
   timeLimitMinutes: z.number().int().min(5).max(SESSION_TIME_MAX).nullable().optional(),
-  roundCap: z.number().int().min(1).max(BOARD_ROUND_CAP_MAX).optional(),
+  /** `null` removes the cap. */
+  roundCap: z.number().int().min(1).max(BOARD_ROUND_CAP_MAX).nullable().optional(),
   models: BoardModelsSchema.optional(),
 });
 export type PatchBoardRequest = z.infer<typeof PatchBoardRequestSchema>;
@@ -377,7 +385,7 @@ export const BoardRoomSchema = z.object({
   id: z.uuid(),
   name: z.string().min(1).max(100),
   format: BoardFormatSchema,
-  roundCap: z.number().int(),
+  roundCap: z.number().int().nullable(),
   cast: z.array(CastMemberSchema),
   models: BoardModelsSchema,
   createdAt: z.iso.datetime(),
@@ -386,7 +394,7 @@ export type BoardRoom = z.infer<typeof BoardRoomSchema>;
 export const SaveBoardRoomRequestSchema = z.object({
   name: z.string().min(1).max(100),
   format: BoardFormatSchema.default('open'),
-  roundCap: z.number().int().min(1).max(BOARD_ROUND_CAP_MAX).default(BOARD_ROUND_CAP_DEFAULT),
+  roundCap: z.number().int().min(1).max(BOARD_ROUND_CAP_MAX).nullable().default(null),
   cast: z.array(CastMemberSchema).min(BOARD_CAST_MIN).max(BOARD_CAST_MAX),
   models: BoardModelsSchema.default({}),
 });
@@ -526,7 +534,7 @@ export const BoardStateDtoSchema = z.object({
     topic: z.string(),
     brief: z.string(),
     format: BoardFormatSchema,
-    roundCap: z.number().int(),
+    roundCap: z.number().int().nullable(),
     stage: BoardStageSchema,
     round: z.number().int(),
     revealedRound: z.number().int(),

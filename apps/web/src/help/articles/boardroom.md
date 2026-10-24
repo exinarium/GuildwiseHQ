@@ -15,7 +15,7 @@ Sidebar, **Boardroom**, **New boardroom** (any member).
 2. Write the **topic** and, if you like, a **brief** (context, constraints, and the options if you want them scored).
 3. Pick a **format**: open discussion, pre-mortem, red and blue team, six hats, or option scoring.
 4. Choose the **cast**: always an **Optimist** (argues the upside) and a **Devil's Advocate** (attacks edge cases and failure modes), which cannot be removed, plus 3 or 4 other seats (5 or 6 in all): library personas, approved pack personas, your own agents, or personas cast from a one-line brief. **Suggest a cast** asks the Chair for the others; **Save this cast as a room** reuses it.
-5. Pick the **workstation** (one of yours), a **round cap**, an optional **cost limit** and **time limit** (empty means none), and the models if you want to choose them. Personas and the Chair run on cheap models by default; the minutes use a stronger one.
+5. Pick the **workstation** (one of yours), an optional **round cap** (1 to 50; empty means no cap, which is the default), an optional **cost limit** and **time limit** (empty means none), and the models if you want to choose them. Personas and the Chair run on cheap models by default; the minutes use a stronger one.
 
 You manage the boardroom you start. Others in it can talk, add notes and vote; an Owner or Admin who is in it can override you.
 
@@ -25,7 +25,8 @@ Round 1 is independent: each seat answers from your topic and brief alone, then 
 
 - Then the Chair picks two or three speakers per round (the line "Chair picks" says who and why). If answers agree too easily it calls a **dissent round**.
 - When only you can decide, it **pauses** with a decision card. Disagreements are recorded, not reconciled. Replies are short.
-- The session ends on **End session** or the round cap.
+- The session ends on **End session**, the time limit, the cost limit, or a round cap if you set one.
+- With no round cap the Chair steers to a close: when two rounds in a row add nothing new it asks **End here?** (End and write the minutes, or Keep going) instead of looping.
 
 ## Talk to the room {#interject}
 

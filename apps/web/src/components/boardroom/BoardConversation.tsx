@@ -29,7 +29,7 @@ const KIND_LABEL = {
   dissent: 'Dissent round',
 } as const;
 
-function RoundSeparator({ r, cap }: { r: BoardRoundDto; cap: number }) {
+function RoundSeparator({ r, cap }: { r: BoardRoundDto; cap: number | null }) {
   return (
     <li
       data-testid="round-separator"
@@ -39,7 +39,8 @@ function RoundSeparator({ r, cap }: { r: BoardRoundDto; cap: number }) {
       <div className="flex w-full items-center gap-3 text-xs font-medium text-muted">
         <span className="h-px flex-1 bg-line" />
         <span>
-          Round {r.round} of {cap} · {KIND_LABEL[r.kind]}
+          Round {r.round}
+          {cap === null ? '' : ` of ${cap}`} · {KIND_LABEL[r.kind]}
         </span>
         <span className="h-px flex-1 bg-line" />
       </div>

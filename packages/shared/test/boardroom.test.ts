@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   assembleMinutes,
+  BOARD_END_OPTION_LABEL,
   BOARD_SPEAKERS_MAX,
   BOARD_TURN_MAX_CHARS,
   BoardConfigSchema,
+  BoardSettingsSchema,
   buildCastTurn,
   buildChairTurn,
   buildMinutesTurn,
@@ -15,6 +17,7 @@ import {
   estimateNextRound,
   handlesOf,
   hatFor,
+  PatchBoardRequestSchema,
   parseBoardConfig,
   parseMentions,
   parsePosition,
@@ -33,14 +36,27 @@ describe('board config', () => {
     expect(c).toMatchObject({
       stage: 'setup',
       round: 0,
-      roundCap: 4,
+      roundCap: null,
       format: 'open',
       paused: false,
       mentions: [],
     });
     const bad = parseBoardConfig({ round: 'x', format: 'open', roundCap: 99, stage: 'round' });
-    expect(bad).toMatchObject({ round: 0, roundCap: 4, stage: 'round', format: 'open' });
+    expect(bad).toMatchObject({ round: 0, roundCap: null, stage: 'round', format: 'open' });
     expect(() => BoardConfigSchema.parse({ stage: 'nope' })).toThrow();
+  });
+
+  it('has no round cap by default; a session made with a cap keeps it (1 to 50)', () => {
+    expect(parseBoardConfig({}).roundCap).toBeNull();
+    expect(parseBoardConfig({ roundCap: 4 }).roundCap).toBe(4);
+    expect(parseBoardConfig({ roundCap: 12 }).roundCap).toBe(12);
+    expect(parseBoardConfig({ roundCap: 50 }).roundCap).toBe(50);
+    expect(parseBoardConfig({ roundCap: 0 }).roundCap).toBeNull();
+    const s = BoardSettingsSchema.parse({});
+    expect(s.roundCap).toBeNull();
+    expect(BoardSettingsSchema.parse({ roundCap: null }).roundCap).toBeNull();
+    expect(BoardSettingsSchema.safeParse({ roundCap: 51 }).success).toBe(false);
+    expect(PatchBoardRequestSchema.parse({ roundCap: null }).roundCap).toBeNull();
   });
 
   it('needs two to eight seats, an agent by id and a persona by key', () => {
@@ -332,6 +348,53 @@ describe('prompts', () => {
     expect(t).toContain('already flagged convergence');
     expect(t).toContain('Your last turn ended without a valid pick');
     expect(t).toContain('"lastSpeaker":"cost-hawk"');
+  });
+
+  it('tells the Chair there is no cap and to propose ending instead of looping', () => {
+    const people = [person(1, 'Cost Hawk')];
+    const base = {
+      topic: 'Launch?',
+      brief: '',
+      format: 'open' as const,
+      round: 3,
+      roundCap: null,
+      people,
+      lastSpeaker: null,
+      mentions: [],
+      dissentNext: false,
+      dissentNote: null,
+      notes: [],
+      disagreements: [],
+      decisions: [],
+      retry: false,
+    };
+    const calm = buildChairTurn(base).message;
+    expect(calm).toContain('no round cap');
+    expect(calm).not.toContain('at most');
+    expect(calm).toContain('End here?');
+    expect(calm).toContain(BOARD_END_OPTION_LABEL);
+    expect(calm).not.toContain('NOTHING NEW');
+    const dry = buildChairTurn({ ...base, quietRounds: 2 }).message;
+    expect(dry).toContain('NOTHING NEW');
+    expect(dry).toContain('aom board pause --question "End here?"');
+    expect(buildChairTurn({ ...base, quietRounds: 1 }).message).not.toContain('NOTHING NEW');
+    // a capped room still says so
+    expect(buildChairTurn({ ...base, roundCap: 4 }).message).toContain('at most 4');
+    const speaker = buildSpeakerTurn({
+      topic: 't',
+      brief: '',
+      format: 'open',
+      round: 5,
+      roundCap: null,
+      kind: 'discussion',
+      instruction: '',
+      reason: '',
+      speaker: { name: 'Cost Hawk', slug: 'cost-hawk', seat: 'Panelist', stance: null, index: 0 },
+      total: 3,
+      decisions: [],
+    }).message;
+    expect(speaker).toContain('Round 5:');
+    expect(speaker).not.toContain('of at most');
   });
 
   it('builds the cast and minutes turns', () => {

@@ -156,6 +156,113 @@ const chairPicks = async (id: string, speakers: string[], extra: Record<string, 
   return { start, reply: a };
 };
 
+/** One discussion round with a single speaker: the Chair picks, the speaker answers (optionally adding a whiteboard note). */
+const playRound = async (id: string, st: any, i: number, note?: string) => {
+  const keys = ['user-advocate', 'cost-hawk'];
+  const { reply } = await chairPicks(id, [slugOf(st, keys[i % 2] as string)]);
+  expect(reply.ok).toBe(true);
+  const spk = await nextStart(id, role('speaker'));
+  if (note) expect((await call(spk.chatId, 'board.add', { column: 'ideas', text: note })).ok).toBe(true);
+  await finish(spk, `round ${i + 2} view`);
+};
+
+describe('no round cap (the default)', () => {
+  it('has no cap unless one is given, and keeps the cap a session was made with', async () => {
+    const none = await create({ roundCap: null });
+    expect(none.config.roundCap).toBeNull();
+    const dflt = await owner('POST', '/api/board', { topic: 'Cap?', brief: '', cast: CAST }, 201);
+    expect(dflt.state.config.roundCap).toBeNull();
+    const capped = await create({ roundCap: 4 });
+    expect(capped.config.roundCap).toBe(4);
+    const over = await raw('POST', '/api/board', { topic: 'x', brief: '', cast: CAST, roundCap: 51 });
+    expect(over.status).toBe(400);
+    // the cap can be set and removed in the settings
+    expect((await owner('PATCH', `/api/board/${none.threadId}`, { roundCap: 7 })).state.config.roundCap).toBe(
+      7,
+    );
+    expect(
+      (await owner('PATCH', `/api/board/${none.threadId}`, { roundCap: null })).state.config.roundCap,
+    ).toBeNull();
+  });
+
+  it('does not stop at round 4; the Chair is told to propose ending when two rounds add nothing, and the owner ends it from the decision point', async () => {
+    const st = await create({ roundCap: null });
+    await answerRound1(st.threadId);
+    // rounds 2 to 5: a note in round 2 keeps the room "alive" for the next Chair turn
+    await playRound(st.threadId, st, 0, 'A new risk nobody had named');
+    let chair = await nextStart(st.threadId, role('chair'));
+    expect(chair.message).toContain('Round 2 is over');
+    expect(chair.message).toContain('the room has no round cap');
+    expect(chair.message).not.toContain('NOTHING NEW');
+    const first = await call(chair.chatId, 'board.next', {
+      speakers: [slugOf(st, 'cost-hawk')],
+      reason: 'r',
+    });
+    expect(first.ok).toBe(true);
+    await finish(chair, 'Next up.');
+    await finish(await nextStart(st.threadId, role('speaker')), 'round 3 view');
+    for (let i = 2; i < 4; i++) await playRound(st.threadId, st, i);
+    // round 5 is over: the session is still running, waiting for the Chair (a capped room of 4 would be in the minutes)
+    chair = await nextStart(st.threadId, role('chair'));
+    expect(chair.message).toContain('Round 5 is over');
+    const mid = await get(st.threadId);
+    expect(mid.config).toMatchObject({ stage: 'chair', round: 5, roundCap: null });
+    expect(mid.waitingFor).toBe('chair');
+    // rounds 3, 4 and 5 added nothing to the whiteboard: the Chair is told to propose ending
+    expect(chair.message).toContain('NOTHING NEW');
+    expect(chair.message).toContain('aom board pause --question "End here?"');
+    const paused = await call(chair.chatId, 'board.pause', {
+      question: 'End here?',
+      options: ['End and write the minutes', 'Keep going'],
+    });
+    expect(paused.ok, paused.error).toBe(true);
+    await finish(chair, 'Over to you.');
+    const asked = await get(st.threadId);
+    expect(asked.config.stage).toBe('decision');
+    const decision = asked.decisions.find((d: any) => d.status === 'open');
+    expect(decision.question).toBe('End here?');
+    // the owner chooses to end: the minutes follow with the owner as the reason, no round 6
+    const done = await owner('POST', `/api/board/${st.threadId}/decisions/${decision.id}/resolve`, {
+      optionId: 'o1',
+    });
+    expect(done.state.config).toMatchObject({ stage: 'minutes', endReason: 'owner' });
+    const min = await nextStart(st.threadId, role('minutes'));
+    expect(min.message).toContain('aom board minutes');
+    await finish(min, '## Positions\n\n- ended by the owner at the decision point');
+    await until(async () => (await get(st.threadId)).config.stage === 'ended');
+  });
+
+  it('keeps going when the owner answers "Keep going" at the end proposal', async () => {
+    const st = await create({ roundCap: null });
+    await answerRound1(st.threadId);
+    const chair = await nextStart(st.threadId, role('chair'));
+    expect(
+      (
+        await call(chair.chatId, 'board.pause', {
+          question: 'End here?',
+          options: ['End and write the minutes', 'Keep going'],
+        })
+      ).ok,
+    ).toBe(true);
+    await finish(chair, 'Over to you.');
+    const decision = (await get(st.threadId)).decisions.find((d: any) => d.status === 'open');
+    const res = await owner('POST', `/api/board/${st.threadId}/decisions/${decision.id}/resolve`, {
+      optionId: 'o2',
+    });
+    expect(res.state.config.stage).toBe('chair');
+    expect(res.state.config.endReason).toBeNull();
+    await nextStart(st.threadId, role('chair'));
+  });
+
+  it('a capped session still stops at its cap', async () => {
+    const st = await create({ roundCap: 2 });
+    await answerRound1(st.threadId);
+    await playRound(st.threadId, st, 0);
+    await nextStart(st.threadId, role('minutes'));
+    expect((await get(st.threadId)).config).toMatchObject({ stage: 'minutes', endReason: 'round_cap' });
+  });
+});
+
 describe('privacy of a session on the live paths', () => {
   it('holds the sealed first round back from live frames and events, and shows session payloads only to participants', async () => {
     const admin = await w.t.userSession(`pad-${randomUUID().slice(0, 6)}@example.test`);

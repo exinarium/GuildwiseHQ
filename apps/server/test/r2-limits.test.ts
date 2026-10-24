@@ -161,6 +161,29 @@ describe('Boardroom time limit', () => {
     await K.nextStart(st.threadId, K.role('minutes'));
   });
 
+  it('with no round cap, a time limit still wraps the session up: warning, final round, minutes', async () => {
+    const st = await K.createBoard({ timeLimitMinutes: 15, roundCap: null });
+    expect(st.config.roundCap).toBeNull();
+    const first: any[] = [];
+    for (let i = 0; i < 4; i++) first.push(await K.nextStart(st.threadId, K.role('speaker')));
+    await K.tickMinutes(11, sweeps);
+    expect((await K.board(st.threadId)).time.warned).toBe(true);
+    await K.finish(first[0]);
+    first.push(await K.nextStart(st.threadId, K.role('speaker')));
+    for (const x of first.slice(1)) await K.finish(x);
+    const chair = await K.nextStart(st.threadId, K.role('chair'));
+    expect(chair.message).toContain('TIME: about');
+    const slug = (await K.board(st.threadId)).cast.find((c: any) => c.refId === 'security').slug;
+    expect((await K.call(chair.chatId, 'board.next', { speakers: [slug], reason: 'Wrap up' })).ok).toBe(true);
+    await K.finish(chair);
+    const last = await K.nextStart(st.threadId, K.role('speaker'));
+    expect(last.message).toContain('This is the final round');
+    await K.finish(last);
+    await until(async () => (await K.board(st.threadId)).config.stage === 'minutes', 15_000);
+    expect((await K.board(st.threadId)).config.endReason).toBe('time');
+    await K.nextStart(st.threadId, K.role('minutes'));
+  });
+
   it('keeps the clock running while the room waits for the creator at a decision (Q51), and warns and times out there', async () => {
     const st = await K.createBoard({ timeLimitMinutes: 20, roundCap: 4 });
     for (let i = 0; i < 5; i++) await K.finish(await K.nextStart(st.threadId, K.role('speaker')));

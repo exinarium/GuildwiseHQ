@@ -26,7 +26,8 @@ function Row({ s }: { s: SessionDto }) {
             <Badge tone="warning">Setting up</Badge>
           ) : (
             <Badge tone="brand">
-              Round {cfg.round} of {cfg.roundCap}
+              Round {cfg.round}
+              {cfg.roundCap === null ? '' : ` of ${cfg.roundCap}`}
             </Badge>
           )}
           {cfg.archived && <Badge tone="neutral">Archived</Badge>}

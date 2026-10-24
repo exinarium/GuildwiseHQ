@@ -5,7 +5,7 @@ import {
   BOARD_FORMATS,
   BOARD_OTHER_SEATS_MAX,
   BOARD_OTHER_SEATS_MIN,
-  BOARD_ROUND_CAP_DEFAULT,
+  BOARD_ROUND_CAP_MAX,
   type BoardFormat,
   type BoardModels,
   type BoardRoom,
@@ -41,7 +41,6 @@ interface Seat extends CastMember {
   hint: string;
 }
 
-const ROUND_CAPS = [2, 3, 4, 5, 6, 8];
 /** The two seats every boardroom has: they cannot be removed. */
 const FIXED: Seat[] = BOARD_FIXED_SEATS.map((f) => ({
   kind: 'persona',
@@ -88,7 +87,7 @@ export function NewBoardroomDialog({
   const [brief, setBrief] = useState('');
   const [format, setFormat] = useState<BoardFormat>('open');
   const [projectId, setProjectId] = useState('');
-  const [roundCap, setRoundCap] = useState(String(BOARD_ROUND_CAP_DEFAULT));
+  const [roundCap, setRoundCap] = useState('');
   const [budget, setBudget] = useState('');
   const [seats, setSeats] = useState<Seat[]>(FIXED);
   const [workstationId, setWorkstationId] = useState('');
@@ -155,7 +154,7 @@ export function NewBoardroomDialog({
     const r: BoardRoom | undefined = rooms.data?.find((x) => x.id === id);
     if (!r) return;
     setFormat(r.format);
-    setRoundCap(String(r.roundCap));
+    setRoundCap(r.roundCap === null ? '' : String(r.roundCap));
     // an older room may lack the fixed seats: they are added in front
     const loaded: Seat[] = r.cast
       .filter((m) => !isFixedSeat(m))
@@ -211,7 +210,13 @@ export function NewBoardroomDialog({
     );
 
   const problem = castProblem(seats);
-  const valid = topic.trim().length > 0 && problem === null;
+  const capNumber = roundCap.trim() === '' ? null : Number(roundCap);
+  const capProblem =
+    capNumber !== null && !(Number.isInteger(capNumber) && capNumber >= 1 && capNumber <= BOARD_ROUND_CAP_MAX)
+      ? `A whole number from 1 to ${BOARD_ROUND_CAP_MAX}, or leave it empty for no cap.`
+      : null;
+  const capValue = capProblem ? null : capNumber;
+  const valid = topic.trim().length > 0 && problem === null && capProblem === null;
   const submit = (e: FormEvent) => {
     e.preventDefault();
     if (!valid) return;
@@ -219,7 +224,7 @@ export function NewBoardroomDialog({
       topic: topic.trim(),
       brief: brief.trim(),
       format,
-      roundCap: Number(roundCap),
+      roundCap: capValue,
       models: models(),
       cast: cast(),
       ...(budget.trim() && Number(budget) > 0 ? { budgetUsd: Number(budget) } : {}),
@@ -234,7 +239,7 @@ export function NewBoardroomDialog({
       saveRoom.mutate({
         name: roomName.trim(),
         format,
-        roundCap: Number(roundCap),
+        roundCap: capValue,
         cast: cast(),
         models: models(),
       });
@@ -534,18 +539,19 @@ export function NewBoardroomDialog({
         </fieldset>
 
         <div className="grid gap-3.5 sm:grid-cols-3">
-          <Select
+          <TextInput
             label="Round cap"
+            type="number"
+            min="1"
+            max={String(BOARD_ROUND_CAP_MAX)}
+            step="1"
+            inputMode="numeric"
+            placeholder="No cap"
             value={roundCap}
             onChange={(e) => setRoundCap(e.target.value)}
-            hint="The session ends here, or when you end it."
-          >
-            {ROUND_CAPS.map((n) => (
-              <option key={n} value={n}>
-                {n} rounds
-              </option>
-            ))}
-          </Select>
+            error={capProblem ?? undefined}
+            hint="Empty: no cap. The session ends when you end it, at the time limit or at the cost limit; the Chair proposes ending when the talk runs dry."
+          />
           <TextInput
             label="Cost limit in USD (optional)"
             type="number"

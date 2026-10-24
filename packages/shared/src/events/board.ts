@@ -133,7 +133,7 @@ export const boardEvents = [
       orgId: Id,
       name: z.string().min(1).max(100),
       format: BoardFormatSchema,
-      roundCap: z.number().int().min(1).max(12),
+      roundCap: z.number().int().min(1).max(50).nullable().optional(),
       cast: z.array(CastMemberSchema).min(1).max(8),
       models: BoardModelsSchema.default({}),
       createdBy: Id,

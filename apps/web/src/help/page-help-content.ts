@@ -1484,7 +1484,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
     controls: [
       {
         name: 'New boardroom',
-        text: 'Start a session: the topic and brief, the format, the cast (library personas, your agents, personas cast from a one-line brief, or a saved room), a round cap, a budget and the models.',
+        text: 'Start a session: the topic and brief, the format, the cast (library personas, your agents, personas cast from a one-line brief, or a saved room), an optional round cap (empty means none), a budget and the models.',
       },
       {
         name: 'A boardroom row',
@@ -1524,7 +1524,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'End session',
-        text: 'Stops the debate and has the Chair write the minutes. The session also ends at the round cap.',
+        text: 'Stops the debate and has the Chair write the minutes. The session also ends at the time or cost limit, or at a round cap if you set one.',
       },
       {
         name: 'Minutes and Pull into PRD',

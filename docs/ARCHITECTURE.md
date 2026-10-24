@@ -2610,7 +2610,7 @@ Migration 2350; projection tables `discovery_questions`, `discovery_notes`, `dis
 
 Migration 2360; projection tables `board_notes`, `board_rounds`, `board_disagreements`, `board_decisions`, `board_rooms`. Runner 0.1.44 announces `board-verbs:1`.
 
-- **State machine.** A boardroom is a `boardroom` thread. Its state is `threads.session_config` (`parseBoardConfig`, shared `boardroom/index.ts`): `topic`, `brief`, `format` (open|pre_mortem|red_blue|six_hats|option_scoring), `roundCap`
+- **State machine.** A boardroom is a `boardroom` thread. Its state is `threads.session_config` (`parseBoardConfig`, shared `boardroom/index.ts`): `topic`, `brief`, `format` (open|pre_mortem|red_blue|six_hats|option_scoring), `roundCap` (optional, `null` = no cap, the default; 1 to 50 when set; a session made with a cap keeps it)
   (default 4, max 12), `budgetUsd`/`budgetStopped`/`blocked`, `models` `{persona, chair, synthesis}` and `castModels` (`kind:refId` to a `ModelChoice`), `stage` (setup|round|chair|decision|minutes|ended), `round`, `plan`
   `{round, kind independent|discussion|dissent, speakers[], reason, instruction, source independent|chair|fallback}`, `revealedRound`, `paused`, `mentions`, `dissentNext`, `briefMessageId`, `endReason`, `chairFailures`,
   `minutesDocId`/`minutesTurnId`, `prdSessionId`, `suggestions`/`suggestState`. Everything changes by event: `SessionThreadUpdated` (config), `BoardRoundPlanned`, `BoardNoteAdded|Updated|Merged|Removed|Voted`,

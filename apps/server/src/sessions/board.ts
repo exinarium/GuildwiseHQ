@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   assembleMinutes,
+  BOARD_END_OPTION_LABEL,
   BOARD_FIXED_SEATS,
   BOARD_TURN_MAX_CHARS,
   type BoardCastDto,
@@ -308,7 +309,7 @@ export class BoardService {
       topic: req.topic,
       brief: req.brief,
       format: req.format,
-      roundCap: req.roundCap,
+      ...(req.roundCap !== null ? { roundCap: req.roundCap } : {}),
       models: req.models,
       castModels: this.castModels(req),
       stage: 'setup',
@@ -662,6 +663,18 @@ export class BoardService {
     return new Map(r.map((x) => [x.participant_id as string, x.n as number]));
   }
 
+  /** How many rounds, up to `round`, passed since a whiteboard note or a recorded disagreement last appeared. */
+  private async quietRounds(threadId: string, round: number): Promise<number> {
+    const r = await one(
+      this.ctx.pool,
+      `SELECT GREATEST(
+          COALESCE((SELECT max(round) FROM board_notes WHERE thread_id=$1 AND removed_at IS NULL), 0),
+          COALESCE((SELECT max(round) FROM board_disagreements WHERE thread_id=$1), 0)) AS last`,
+      [threadId],
+    );
+    return Math.max(0, round - Math.max(1, Number(r?.last ?? 0)));
+  }
+
   private async lastSpeakerId(threadId: string): Promise<string | null> {
     const r = await one(
       this.ctx.pool,
@@ -806,7 +819,7 @@ export class BoardService {
           revealed: 1,
         }),
       );
-    if (plan.round >= cfg.roundCap) {
+    if (cfg.roundCap !== null && plan.round >= cfg.roundCap) {
       await this.ctx.store.append([this.configEvent(t, patch), ...events]);
       return this.beginMinutes(t, 'round_cap');
     }
@@ -852,6 +865,7 @@ export class BoardService {
       })),
       decisions: await this.decisionsTaken(t.id),
       retry: cfg.chairFailures > 0,
+      quietRounds: await this.quietRounds(t.id, cfg.round),
       timeLeftMinutes:
         cfg.timeWarned && cfg.timeLimitMinutes
           ? Math.max(
@@ -886,7 +900,8 @@ export class BoardService {
     },
   ): Promise<{ round: number; kind: 'discussion' | 'dissent'; speakers: string[]; notes: string[] }> {
     const round = cfg.round + 1;
-    if (round > cfg.roundCap) throw conflict('round_cap', 'The round cap is reached.');
+    if (cfg.roundCap !== null && round > cfg.roundCap)
+      throw conflict('round_cap', 'The round cap is reached.');
     const cast = await castOf(this.ctx.pool, t.id);
     const counts = await this.spokenCounts(t.id);
     const pick = chooseSpeakers({
@@ -1567,8 +1582,9 @@ export class BoardService {
         raised = true;
       }
       if (req.roundCap !== undefined) {
-        if (req.roundCap < cfg.round)
+        if (req.roundCap !== null && req.roundCap < cfg.round)
           throw badRequest('round_cap_low', `The session is already in round ${cfg.round}.`);
+        // null removes the key: no cap
         patch.roundCap = req.roundCap;
       }
       if (req.models) patch.models = { ...cfg.models, ...req.models };
@@ -1644,6 +1660,11 @@ export class BoardService {
         kind: 'chat',
         data: { board: true, decisionId },
       });
+      // The Chair proposed ending ("End here?") and the owner chose to: the minutes follow, no further round.
+      if (label === BOARD_END_OPTION_LABEL) {
+        const f = await this.fresh(threadId);
+        if (f) await this.beginMinutes(f, 'owner', { userId });
+      }
     });
     await this.advance(threadId);
     return this.state(userId, threadId);
@@ -1928,7 +1949,7 @@ export class BoardService {
       id: r.id,
       name: r.name,
       format: r.format,
-      roundCap: r.round_cap,
+      roundCap: r.round_cap ?? null,
       cast: r.members,
       models: r.models ?? {},
       createdAt: iso(r.created_at) as string,

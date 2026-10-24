@@ -66,7 +66,8 @@ export function BoardMeters({ state, canManage }: { state: BoardStateDto; canMan
       <div className="min-w-[8rem]" data-testid="meter-round">
         <p className="text-xs text-subtle">Round</p>
         <p className="tnum font-medium text-fg">
-          {Math.max(config.round, 0)} <span className="text-muted">of {config.roundCap}</span>
+          {Math.max(config.round, 0)}{' '}
+          {config.roundCap !== null && <span className="text-muted">of {config.roundCap}</span>}
         </p>
       </div>
       {over && (

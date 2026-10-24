@@ -200,7 +200,7 @@ export const boardProjectors: Record<string, Projector> = {
         p.orgId,
         p.name,
         p.format,
-        p.roundCap,
+        p.roundCap ?? null,
         JSON.stringify(p.cast),
         JSON.stringify(p.models),
         p.createdBy,
