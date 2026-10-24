@@ -191,6 +191,32 @@ describe('the reviewer reads an authored organization pack (Q57)', () => {
     await user.click(within(err).getByRole('button', { name: 'Try again' }));
   });
 
+  it('Q67: with the author workstation offline the review says it waits and that the desk will say when it is back, and shows the files once read', async () => {
+    let waiting = true;
+    stub({
+      [`GET /api/packs/${PACK}`]: () => detail(pack(), sha1),
+      [`GET /api/packs/${PACK}/review-wait`]: () => ({
+        waiting,
+        workstationName: "Mia's laptop",
+        since: AT,
+      }),
+      'POST /api/packs/': () => ({
+        requestId: '0192f3a0-0000-7000-8000-0000000000e7',
+        wait: { waiting: true },
+      }),
+      // the read stays pending while the workstation is away
+      'GET /api/packs/reads/': () => ({ status: 'pending' }),
+    });
+    wrap(<TrustReview pack={pack()} onClose={() => undefined} />);
+    const note = await screen.findByTestId('authored-read-waiting');
+    expect(note).toHaveTextContent("Waiting for Mia's laptop");
+    expect(note).toHaveTextContent('the server keeps no copy');
+    expect(note).toHaveTextContent('note on your desk');
+    expect(screen.queryByTestId('authored-files')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Approve this exact commit and content' })).toBeDisabled();
+    waiting = false;
+  });
+
   it('does not ask for a read of a git pack', async () => {
     const calls = stub({ [`GET /api/packs/${PACK}`]: () => detail(pack({ source: 'git' }), sha1) });
     wrap(<TrustReview pack={pack({ source: 'git' })} onClose={() => undefined} />);

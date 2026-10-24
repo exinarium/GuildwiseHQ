@@ -1,12 +1,14 @@
 import { authoredTreeContentHash, type PackDto, type PackReadContent } from '@aom/shared';
 import { useQuery } from '@tanstack/react-query';
 import { readPackContent } from '../../api/queries/my-capabilities.ts';
+import { useReviewWait } from '../../api/queries/review-wait.ts';
 import { Button, Callout, Spinner } from '../ui.tsx';
 import { PackVersionDiff } from './PackVersionDiff.tsx';
 
 export type AuthoredReviewState =
   | { state: 'none' }
   | { state: 'loading' }
+  | { state: 'waiting'; workstation: string }
   | { state: 'error'; error: string; retry: () => void }
   | { state: 'mismatch'; retry: () => void }
   | { state: 'ready'; content: PackReadContent };
@@ -30,8 +32,13 @@ export function useAuthoredReview(
     // the plain text is not kept around once the dialog is closed
     gcTime: 0,
   });
+  // Q67: the text lives only on the author's workstation; offline, the read waits and the reviewer is told when it is back
+  const wait = useReviewWait(pack.id, enabled && q.isPending);
   if (!enabled) return { state: 'none' };
-  if (q.isPending) return { state: 'loading' };
+  if (q.isPending)
+    return wait.data?.waiting
+      ? { state: 'waiting', workstation: wait.data.workstationName ?? "the author's workstation" }
+      : { state: 'loading' };
   if (q.isError)
     return {
       state: 'error',
@@ -47,12 +54,23 @@ export function useAuthoredReview(
 export function AuthoredPackText({ review }: { review: AuthoredReviewState }) {
   if (review.state === 'none') return null;
   if (review.state === 'loading') return <Spinner label="Reading the files from the author's workstation" />;
+  if (review.state === 'waiting')
+    return (
+      <Callout tone="info" role="status" data-testid="authored-read-waiting">
+        <p>
+          Waiting for {review.workstation}. The text of this pack lives only on that workstation (the server
+          keeps no copy), so it can be read once the workstation is online. You will get a note on your desk
+          when it is, and you can close this and come back.
+        </p>
+      </Callout>
+    );
   if (review.state === 'error')
     return (
       <Callout tone="warning" role="alert" data-testid="authored-read-error">
         <p>
           The files could not be read from the author's workstation ({review.error}). An authored pack cannot
-          be approved unread: bring that workstation online and try again.
+          be approved unread: it waits for that workstation, and you get a note on your desk when it is
+          online.
         </p>
         <Button size="sm" className="mt-2" onClick={review.retry}>
           Try again

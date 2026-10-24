@@ -41,6 +41,7 @@ import {
   startRoleReview,
 } from '../commands/pack-hire.ts';
 import { decideAssignment, listMyAssignments } from '../commands/pack-holders.ts';
+import { getReviewWait, noteReviewWait } from '../commands/pack-review-wait.ts';
 import {
   acceptPackUpdate,
   addPack,
@@ -129,8 +130,15 @@ export function packRoutes(ctx: Ctx) {
       { schema: { params: Params, body: ReadMyPackRequestSchema } },
       async (req, reply) => {
         reply.code(202);
-        return startReviewRead(ctx, await who(req), req.params.id, req.body.replyKey);
+        const w = await who(req);
+        const started = await startReviewRead(ctx, w, req.params.id, req.body.replyKey);
+        // Q67: the text exists only on the author's workstation, so an offline one means the review waits (and the reviewer is told
+        // on their desk when it connects)
+        return { ...started, wait: await noteReviewWait(ctx, w, req.params.id) };
       },
+    );
+    app.get('/api/packs/:id/review-wait', { schema: { params: Params } }, async (req) =>
+      getReviewWait(ctx, await who(req), req.params.id),
     );
     app.get(
       '/api/packs/reads/:requestId',

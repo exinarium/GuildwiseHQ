@@ -34,6 +34,7 @@ import { registerDefinitionHook } from './commands/designer.ts';
 import { registerDevopsMembershipHook } from './commands/devops.ts';
 import { registerDevopsQuestionHook } from './commands/devops-routing.ts';
 import { registerProviderCapHook } from './commands/org-provider-keys.ts';
+import { registerPackReviewWaitHook } from './commands/pack-review-wait.ts';
 import { registerTasteHook } from './commands/taste.ts';
 import type { Config } from './config.ts';
 import type { Ctx } from './context.ts';
@@ -545,6 +546,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   const unhookTaste = registerTasteHook(ctx);
   const unhookBudgets = registerBudgetHook(ctx);
   const unhookProviderCaps = registerProviderCapHook(ctx);
+  const unhookPackReviewWaits = registerPackReviewWaitHook(ctx);
   const unhookDiscovery = ctx.services.discovery.registerHook();
   const unhookBoard = ctx.services.board.registerHook();
   const unhookHr = registerHrHook(ctx);
@@ -571,6 +573,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
     unhookTaste();
     unhookBudgets();
     unhookProviderCaps();
+    unhookPackReviewWaits();
     unhookDiscovery();
     unhookBoard();
     unhookHr();
