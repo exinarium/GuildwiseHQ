@@ -4,6 +4,7 @@ import {
   type DelegateOwnerKind,
   type DelegateTargetOption,
   DelegateTargetOptionsDtoSchema,
+  type SetDelegateExclusionRequest,
   type SetDelegateGrantRequest,
 } from '@aom/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -42,6 +43,18 @@ export function useSetDelegateGrant(kind: DelegateOwnerKind, id: string) {
     onSuccess: (data) => {
       qc.setQueryData(['delegate-grants', kind, id], data);
       void qc.invalidateQueries({ queryKey: ['delegate-targets', kind, id] });
+    },
+  });
+}
+
+/** Q66: an Owner or Admin excludes one agent from a target its role grants (or takes the exclusion back). */
+export function useSetDelegateExclusion(agentId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: SetDelegateExclusionRequest) =>
+      put<DelegateGrantsDto>(`${base('agent', agentId)}/delegate-exclusions`, v),
+    onSuccess: (data) => {
+      qc.setQueryData(['delegate-grants', 'agent', agentId], data);
     },
   });
 }

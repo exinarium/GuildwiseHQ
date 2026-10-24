@@ -687,6 +687,82 @@ describe('role-level grants cover every agent of the role (R3c, Q61)', () => {
     const spec = await delegationSpecFor(w.t.app.ctx.pool, 'agent', first);
     expect(spec?.targets.map((t) => t.handle)).toEqual(['optimist']);
   });
+
+  // ---------------------------------------------------------------------------------- Q66: one agent opts out of a role's target
+  const exclUrl = (agentId: string) => `/api/agents/${agentId}/delegate-exclusions`;
+  const exclude = (agentId: string, targetKey: string, excluded: boolean, who = admin) =>
+    call(who, 'PUT', exclUrl(agentId), { targetKind: 'persona', targetKey, excluded });
+
+  it('Q66: an Owner or Admin excludes one agent from a target its role grants; the others keep it, the agent shows it struck out and cannot delegate to it', async () => {
+    const { delegationSpecFor } = await import('../src/sessions/delegate-grants.ts');
+    const rosa = (await q(`SELECT id FROM agents WHERE name='Rosa'`))[0]?.id as string;
+    // who may: Owners and Admins only (a member, and the agent's own manager when only a member, cannot)
+    expect((await exclude(first, 'optimist', true, member)).status).toBe(403);
+    // only a target the role grants can be excluded
+    const none = await exclude(first, 'devils-advocate', true);
+    expect(none.status).toBe(400);
+    expect(none.body.error.code).toBe('not_granted_by_role');
+    // the exclusion
+    const res = await exclude(first, 'optimist', true);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body.canExclude).toBe(true);
+    expect(res.body.grants.find((x: any) => x.targetKey === 'optimist')).toMatchObject({
+      inherited: true,
+      excluded: true,
+    });
+    // not in force for this agent: no begin, nothing told to the runner
+    const chat = await chatShift(first);
+    expect((await begin(chat, { target: 'optimist' })).error).toContain('not_granted');
+    expect(await delegationSpecFor(w.t.app.ctx.pool, 'agent', first)).toBeUndefined();
+    // every other agent of the role keeps it, and so does a later hire
+    expect((await begin(await chatShift(rosa), { target: 'optimist' })).ok).toBe(true);
+    expect((await agentGrants(rosa)).body.grants[0]).toMatchObject({
+      targetKey: 'optimist',
+      excluded: false,
+    });
+    // an explicit grant to this agent for the same target is its own and stays in force
+    const url = `/api/agents/${first}/delegate-grants`;
+    expect((await call(w.owner, 'PUT', url, persona('optimist', { maxCalls: 3 }))).status).toBe(200);
+    expect((await begin(await chatShift(first), { target: 'optimist' })).ok).toBe(true);
+    expect((await call(w.owner, 'PUT', url, persona('optimist', null))).status).toBe(200);
+    expect((await begin(await chatShift(first), { target: 'optimist' })).error).toContain('not_granted');
+    // the audit trail: one event for the change, none for a repeat
+    expect((await exclude(first, 'optimist', true)).status).toBe(200);
+    const evs = await q(
+      `SELECT payload FROM events WHERE type='DelegateExclusionChanged' AND payload->>'agentId'=$1 ORDER BY seq`,
+      [first],
+    );
+    expect(evs.map((e) => [e.payload.targetKey, e.payload.excluded, e.payload.changedBy])).toEqual([
+      ['optimist', true, admin.id],
+    ]);
+    // the projection survives a rebuild
+    const snap = async () =>
+      q('SELECT agent_id, target_kind, target_key, excluded_by FROM delegate_exclusions WHERE agent_id=$1', [
+        first,
+      ]);
+    const before = await snap();
+    expect(before).toHaveLength(1);
+    await rebuildProjections(w.t.app.ctx.pool, w.t.app.ctx.store, w.t.clock.now());
+    expect(await snap()).toEqual(before);
+  });
+
+  it('Q66: the exclusion is taken back, and the grant is the agent’s again', async () => {
+    const back = await exclude(first, 'optimist', false);
+    expect(back.status).toBe(200);
+    expect(back.body.grants.find((x: any) => x.targetKey === 'optimist')).toMatchObject({
+      inherited: true,
+      excluded: false,
+    });
+    expect((await begin(await chatShift(first), { target: 'optimist' })).ok).toBe(true);
+    const evs = await q(
+      `SELECT payload->>'excluded' AS excluded FROM events WHERE type='DelegateExclusionChanged' AND payload->>'agentId'=$1 ORDER BY seq`,
+      [first],
+    );
+    expect(evs.map((e) => e.excluded)).toEqual(['true', 'false']);
+    expect((await q('SELECT 1 FROM delegate_exclusions WHERE agent_id=$1', [first])).length).toBe(0);
+    // an Owner or Admin is offered the exclusion on the agent’s page
+    expect((await agentGrants(first)).body.canExclude).toBe(true);
+  });
 });
 
 describe('a grant may set the model the target runs on (R3c, Q62)', () => {

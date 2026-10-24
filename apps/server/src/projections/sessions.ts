@@ -15,6 +15,7 @@ type SessionEventType =
   | 'SessionTurnCompleted'
   | 'DelegateCompleted'
   | 'DelegateGrantChanged'
+  | 'DelegateExclusionChanged'
   | 'SessionTurnFailed';
 
 const ev = <T extends SessionEventType>(e: StoredEvent) => e.event as EventOf<T>;
@@ -285,6 +286,24 @@ export const sessionProjectors: Record<string, Projector> = {
         p.model?.model ?? null,
         p.model?.effort ?? null,
       ],
+    );
+  },
+  DelegateExclusionChanged: async (tx, e) => {
+    const p = ev<'DelegateExclusionChanged'>(e).payload;
+    if (!p.excluded) {
+      await exec(
+        tx,
+        'DELETE FROM delegate_exclusions WHERE agent_id=$1 AND target_kind=$2 AND target_key=$3',
+        [p.agentId, p.targetKind, p.targetKey],
+      );
+      return;
+    }
+    await exec(
+      tx,
+      `INSERT INTO delegate_exclusions (agent_id, org_id, target_kind, target_key, excluded_by, excluded_at)
+       VALUES ($1,$2,$3,$4,$5,$6)
+       ON CONFLICT (agent_id, target_kind, target_key) DO UPDATE SET excluded_by=EXCLUDED.excluded_by, excluded_at=EXCLUDED.excluded_at`,
+      [p.agentId, p.orgId, p.targetKind, p.targetKey, p.changedBy, e.createdAt],
     );
   },
   SessionTurnFailed: async (tx, e) => {

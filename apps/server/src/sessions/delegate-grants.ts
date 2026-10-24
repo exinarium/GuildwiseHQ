@@ -16,6 +16,7 @@ import {
   profileOfPermissions,
   RoleDefinitionSchema,
   runtimeRoleProblem,
+  type SetDelegateExclusionRequest,
   type SetDelegateGrantRequest,
   streamId,
 } from '@aom/shared';
@@ -41,29 +42,40 @@ export async function grantRows(
   db: Queryable,
   ownerKind: DelegateOwnerKind,
   ownerId: string,
+  /** Q66: also the role's grants this agent was excluded from (flagged `excluded`), for the pages; never for what is in force. */
+  includeExcluded = false,
 ): Promise<Row[]> {
   if (ownerKind === 'agent') {
     // An agent also has the grants of its role (Q61): every agent of the role, the future hires included. A per-agent grant can
-    // add targets and never take one of the role's away, so for the same target the role's grant is the one in force.
+    // add targets and never take one of the role's away, so for the same target the role's grant is the one in force. An Owner or
+    // Admin can exclude one agent from a target its role grants (Q66): that grant is then not this agent's (an explicit grant to the
+    // agent itself for the same target stays).
     const all = await rows(
       db,
-      `SELECT g.*, (g.owner_kind = 'role') AS inherited FROM delegate_grants g
+      `SELECT g.*, (g.owner_kind = 'role') AS inherited, (x.agent_id IS NOT NULL) AS excluded
+         FROM delegate_grants g
+         LEFT JOIN delegate_exclusions x ON x.agent_id = $1 AND g.owner_kind = 'role'
+              AND x.target_kind = g.target_kind AND x.target_key = g.target_key
         WHERE (g.owner_kind='agent' AND g.owner_id=$1)
            OR (g.owner_kind='role' AND (g.org_id, g.owner_key) = (SELECT a.org_id, a.role_key FROM agents a WHERE a.id=$1))
         ORDER BY (g.owner_kind = 'role') DESC, g.granted_at, g.target_kind, g.target_key`,
       [ownerId],
     );
     const seen = new Set<string>();
-    return all.filter((g) => {
+    const keep = (g: Row): boolean => {
       const k = `${g.target_kind}:${g.target_key}`;
       if (seen.has(k)) return false;
       seen.add(k);
       return true;
-    });
+    };
+    const inForce = all.filter((g) => g.excluded !== true).filter(keep);
+    if (!includeExcluded) return inForce;
+    // the excluded ones follow, for the page to show them struck out
+    return [...inForce, ...all.filter((g) => g.excluded === true).filter(keep)];
   }
   return rows(
     db,
-    `SELECT *, false AS inherited FROM delegate_grants WHERE owner_kind=$1 AND owner_id=$2 ORDER BY granted_at, target_kind, target_key`,
+    `SELECT *, false AS inherited, false AS excluded FROM delegate_grants WHERE owner_kind=$1 AND owner_id=$2 ORDER BY granted_at, target_kind, target_key`,
     [ownerKind, ownerId],
   );
 }
@@ -82,10 +94,11 @@ export async function grantsWithHandles(
   db: Queryable,
   ownerKind: DelegateOwnerKind,
   ownerId: string,
+  includeExcluded = false,
 ): Promise<Array<{ row: Row; handle: string; agent?: Row }>> {
   const out: Array<{ row: Row; handle: string; agent?: Row }> = [];
   const taken = new Set<string>();
-  for (const row of await grantRows(db, ownerKind, ownerId)) {
+  for (const row of await grantRows(db, ownerKind, ownerId, includeExcluded)) {
     if (row.target_kind === 'persona') {
       out.push({ row, handle: row.target_key });
       continue;
@@ -95,7 +108,8 @@ export async function grantsWithHandles(
       row.org_id,
     ]);
     const handle = agentHandle(agent?.name ?? 'agent', taken, row.target_key);
-    taken.add(handle);
+    // an excluded grant is shown, not in force: it must not change the handle of one that is
+    if (row.excluded !== true) taken.add(handle);
     out.push({ row, handle, ...(agent ? { agent } : {}) });
   }
   return out;
@@ -201,8 +215,9 @@ async function dtoFor(
   workstationId: string | null,
   orgId: string,
   roleKey: string | null = null,
+  canExclude = false,
 ): Promise<DelegateGrantsDto> {
-  const grants = await grantsWithHandles(ctx.pool, ownerKind, ownerId);
+  const grants = await grantsWithHandles(ctx.pool, ownerKind, ownerId, true);
   const reports = await runtimeReports(ctx.pool, workstationId);
   const personas = new Map(
     (await effectiveRegistry(ctx.pool, orgId, { kind: 'persona', userId })).items.map((i) => [i.key, i]),
@@ -221,6 +236,7 @@ async function dtoFor(
       modelOverride:
         g.row.model_runtime && g.row.model_name ? `${g.row.model_runtime}:${g.row.model_name}` : null,
       inherited: g.row.inherited === true,
+      excluded: g.row.excluded === true,
     };
     if (g.row.target_kind === 'persona') {
       const p = personas.get(g.row.target_key);
@@ -251,7 +267,7 @@ async function dtoFor(
           : null),
     });
   }
-  return { ownerKind, ownerId, canManage, roleKey, grants: out };
+  return { ownerKind, ownerId, canManage, canExclude, roleKey, grants: out };
 }
 
 async function agentOwner(
@@ -272,6 +288,7 @@ export async function getAgentDelegateGrants(
   agentId: string,
 ): Promise<DelegateGrantsDto> {
   const { agent, canManage } = await agentOwner(ctx.pool, user, agentId);
+  const orgRole = await orgRoleOf(ctx.pool, user.id, agent.org_id);
   return dtoFor(
     ctx,
     'agent',
@@ -281,6 +298,7 @@ export async function getAgentDelegateGrants(
     agent.workstation_id ?? null,
     agent.org_id,
     agent.role_key ?? null,
+    orgRole === 'owner' || orgRole === 'admin',
   );
 }
 
@@ -421,7 +439,7 @@ async function setGrant(
       if (viaRole)
         throw conflict(
           'granted_by_role',
-          `This target comes from the role "${viaRole.owner_key}": every agent of the role has it. Change it on the role.`,
+          `This target comes from the role "${viaRole.owner_key}": every agent of the role has it. Change it on the role, or have an Owner or Admin exclude this agent from it.`,
         );
     }
     return;
@@ -495,6 +513,66 @@ export async function setAgentDelegateGrant(
     if (a.status === 'retired') throw conflict('agent_retired', 'agent is retired');
     if (isSpecialAgent(a)) throw badRequest('delegation_unavailable', 'this agent cannot delegate');
     await setGrant(ctx, user, 'agent', agentId, a.org_id, req, tx);
+  });
+  return getAgentDelegateGrants(ctx, user, agentId);
+}
+
+/**
+ * Q66: an Owner or Admin excludes ONE agent from a target its role grants (`excluded: true`), or takes the exclusion back. The
+ * role's grant is untouched and every other agent of the role keeps it. Only a target the role really grants can be excluded.
+ * The event is the audit trail.
+ */
+export async function setAgentDelegateExclusion(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  agentId: string,
+  req: SetDelegateExclusionRequest,
+): Promise<DelegateGrantsDto> {
+  await withAppendTx(ctx.pool, async (tx) => {
+    const a = await one(tx, 'SELECT * FROM agents WHERE id=$1', [agentId]);
+    if (!a) throw notFound('agent not found');
+    const role = await orgRoleOf(tx, user.id, a.org_id);
+    if (!role) throw notFound('agent not found');
+    if (role !== 'owner' && role !== 'admin')
+      throw forbidden('only an Owner or Admin can exclude an agent from a target its role grants');
+    if (a.status === 'retired') throw conflict('agent_retired', 'agent is retired');
+    const viaRole = await one(
+      tx,
+      `SELECT 1 FROM delegate_grants WHERE owner_kind='role' AND org_id=$1 AND owner_key=$2 AND target_kind=$3 AND target_key=$4`,
+      [a.org_id, a.role_key, req.targetKind, req.targetKey],
+    );
+    const had = await one(
+      tx,
+      'SELECT 1 FROM delegate_exclusions WHERE agent_id=$1 AND target_kind=$2 AND target_key=$3',
+      [agentId, req.targetKind, req.targetKey],
+    );
+    if (req.excluded && !viaRole)
+      throw badRequest(
+        'not_granted_by_role',
+        `The role "${a.role_key}" does not grant this target: there is nothing to exclude this agent from`,
+      );
+    if (req.excluded === !!had) return; // already so: nothing to record
+    await ctx.store.append(
+      [
+        {
+          streamId: streamId.agent(agentId),
+          event: {
+            type: 'DelegateExclusionChanged',
+            payload: {
+              agentId,
+              orgId: a.org_id,
+              targetKind: req.targetKind,
+              targetKey: req.targetKey,
+              excluded: req.excluded,
+              changedBy: user.id,
+            },
+          },
+          actor: userActor(user.id),
+          scope: orgScope(a.org_id),
+        },
+      ],
+      { tx },
+    );
   });
   return getAgentDelegateGrants(ctx, user, agentId);
 }

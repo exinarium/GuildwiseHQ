@@ -190,6 +190,22 @@ export const sessionEvents = [
       changedBy: Id,
     }),
   ),
+  /**
+   * R3c (owner decision Q66): an Owner or Admin excluded one agent from a target its role grants (`excluded: true`), or took the
+   * exclusion back. The role's grant stays; this agent just does not have it. The event is the audit trail; `delegate_exclusions`
+   * is the projection.
+   */
+  defineEvent(
+    'DelegateExclusionChanged',
+    z.object({
+      agentId: Id,
+      orgId: Id,
+      targetKind: DelegateTargetKindSchema,
+      targetKey: z.string().min(1).max(130),
+      excluded: z.boolean(),
+      changedBy: Id,
+    }),
+  ),
   defineEvent(
     'SessionTurnFailed',
     z.object({ turnId: Id, threadId: Id, error: z.string().max(500), workstationId: Id.optional() }),

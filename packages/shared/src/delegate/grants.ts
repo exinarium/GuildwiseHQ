@@ -156,6 +156,14 @@ export const SetDelegateGrantRequestSchema = z.object({
 });
 export type SetDelegateGrantRequest = z.infer<typeof SetDelegateGrantRequestSchema>;
 
+/** PUT body (Q66): exclude one agent from a target its role grants it, or take the exclusion back. */
+export const SetDelegateExclusionRequestSchema = z.object({
+  targetKind: DelegateTargetKindSchema,
+  targetKey: z.string().trim().min(1).max(130),
+  excluded: z.boolean(),
+});
+export type SetDelegateExclusionRequest = z.infer<typeof SetDelegateExclusionRequestSchema>;
+
 /** One grant as the pages show it. */
 export const DelegateGrantDtoSchema = z.object({
   targetKind: DelegateTargetKindSchema,
@@ -179,6 +187,8 @@ export const DelegateGrantDtoSchema = z.object({
   modelOverride: z.string().nullable().default(null),
   /** R3c (Q61): the grant comes from the agent's role, not from the agent: change it on the role. */
   inherited: z.boolean().default(false),
+  /** R3c (Q66): this agent was excluded from the role's grant: it does not have the target (shown struck out, with a way back). */
+  excluded: z.boolean().default(false),
 });
 export type DelegateGrantDto = z.infer<typeof DelegateGrantDtoSchema>;
 
@@ -187,6 +197,8 @@ export const DelegateGrantsDtoSchema = z.object({
   ownerId: z.uuid(),
   /** The viewer may add and remove grants. */
   canManage: z.boolean(),
+  /** R3c (Q66): the viewer (an Owner or Admin) may exclude this agent from a target its role grants. */
+  canExclude: z.boolean().default(false),
   /** R3c: an agent's role (whose grants it inherits) or, for a role, its key. */
   roleKey: z.string().nullable().default(null),
   grants: z.array(DelegateGrantDtoSchema),

@@ -271,6 +271,7 @@ export const PROJECTION_TABLES = [
   'pack_agent_grants',
   'agent_playbook_grants',
   'delegate_grants',
+  'delegate_exclusions',
   'role_pack_offers',
   'project_capability_index',
   'project_capability_status',

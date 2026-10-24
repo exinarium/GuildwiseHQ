@@ -1,6 +1,7 @@
 import {
   DelegateGrantsDtoSchema,
   DelegateTargetOptionsDtoSchema,
+  SetDelegateExclusionRequestSchema,
   SetDelegateGrantRequestSchema,
 } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
@@ -13,6 +14,7 @@ import {
   getRoleDelegateGrants,
   getSessionDelegateGrants,
   roleDelegateTargetOptions,
+  setAgentDelegateExclusion,
   setAgentDelegateGrant,
   setRoleDelegateGrant,
   setSessionDelegateGrant,
@@ -45,6 +47,21 @@ export function delegationRoutes(ctx: Ctx) {
       async (req) => {
         const a = await requireOrg(ctx, req, { min: 'member' });
         return setAgentDelegateGrant(ctx, a.session.user, req.params.id, req.body);
+      },
+    );
+    // R3c (Q66): one agent is excluded from a target its role grants. Owners and Admins; the event is the audit trail.
+    app.put(
+      '/api/agents/:id/delegate-exclusions',
+      {
+        schema: {
+          params: Params,
+          body: SetDelegateExclusionRequestSchema,
+          response: { 200: DelegateGrantsDtoSchema },
+        },
+      },
+      async (req) => {
+        const a = await requireOrg(ctx, req, { min: 'admin' });
+        return setAgentDelegateExclusion(ctx, a.session.user, req.params.id, req.body);
       },
     );
     app.get(

@@ -31,11 +31,12 @@ const grant = (
   grantedBy: ID(1),
   modelOverride: null,
   inherited: false,
+  excluded: false,
   ...over,
 });
 
-function stub(initial: DelegateGrantsDto) {
-  let state = initial;
+function stub(first: Omit<DelegateGrantsDto, 'canExclude'> & { canExclude?: boolean }) {
+  let state: DelegateGrantsDto = { canExclude: false, ...first };
   const calls: Array<{ method: string; url: string; body?: any }> = [];
   vi.stubGlobal(
     'fetch',
@@ -76,6 +77,16 @@ function stub(initial: DelegateGrantsDto) {
             ],
           }),
         );
+      if (url.endsWith('/delegate-exclusions') && method === 'PUT') {
+        const b = JSON.parse(String(init.body));
+        state = {
+          ...state,
+          grants: state.grants.map((g) =>
+            g.targetKey === b.targetKey && g.inherited ? { ...g, excluded: b.excluded } : g,
+          ),
+        };
+        return new Response(JSON.stringify(state));
+      }
       if (url.endsWith('/delegate-grants') && method === 'PUT') {
         const b = JSON.parse(String(init.body));
         state = {
@@ -418,6 +429,75 @@ describe('role-level delegation grants and a model per grant (R3c)', () => {
       }),
     ).toBeInTheDocument();
     expect(screen.getByText(/come from the role builder/)).toBeInTheDocument();
+  });
+
+  it('Q66: an Owner or Admin can exclude one agent from a target its role grants, sees it struck out with a way back, and others are not offered it', async () => {
+    const calls = stub({
+      ownerKind: 'agent',
+      ownerId: ID(1),
+      canManage: true,
+      canExclude: true,
+      roleKey: 'builder',
+      grants: [
+        grant({
+          targetKey: 'optimist',
+          targetKind: 'persona',
+          targetName: 'Optimist',
+          handle: 'optimist',
+          inherited: true,
+          model: null,
+        }),
+      ],
+    });
+    const user = userEvent.setup();
+    view(<DelegateGrants ownerKind="agent" ownerId={ID(1)} />);
+    await user.click(screen.getByTestId('delegate-grants-toggle'));
+    const row = await screen.findByTestId('delegate-grant-optimist');
+    expect(row).toHaveAttribute('data-excluded', 'false');
+    expect(screen.getByText(/exclude this agent from one of them/)).toBeInTheDocument();
+    await user.click(within(row).getByRole('button', { name: 'Exclude this agent from Optimist' }));
+    await waitFor(() =>
+      expect(calls.find((c) => c.url.endsWith('/delegate-exclusions'))?.body).toEqual({
+        targetKind: 'persona',
+        targetKey: 'optimist',
+        excluded: true,
+      }),
+    );
+    // clearly shown on the agent: struck out, labelled, and the way back
+    const after = await screen.findByTestId('delegate-grant-optimist');
+    await waitFor(() => expect(after).toHaveAttribute('data-excluded', 'true'));
+    expect(within(after).getByTestId('delegate-grant-excluded')).toHaveTextContent('excluded for this agent');
+    await user.click(within(after).getByRole('button', { name: 'Allow Optimist again for this agent' }));
+    await waitFor(() =>
+      expect(screen.getByTestId('delegate-grant-optimist')).toHaveAttribute('data-excluded', 'false'),
+    );
+  });
+
+  it('Q66: a manager who is not an Owner or Admin sees an excluded target but is offered no exclusion', async () => {
+    stub({
+      ownerKind: 'agent',
+      ownerId: ID(1),
+      canManage: true,
+      canExclude: false,
+      roleKey: 'builder',
+      grants: [
+        grant({
+          targetKey: 'optimist',
+          targetKind: 'persona',
+          targetName: 'Optimist',
+          handle: 'optimist',
+          inherited: true,
+          excluded: true,
+          model: null,
+        }),
+      ],
+    });
+    const user = userEvent.setup();
+    view(<DelegateGrants ownerKind="agent" ownerId={ID(1)} />);
+    await user.click(screen.getByTestId('delegate-grants-toggle'));
+    const row = await screen.findByTestId('delegate-grant-optimist');
+    expect(within(row).getByTestId('delegate-grant-excluded')).toBeInTheDocument();
+    expect(within(row).queryByRole('button')).toBeNull();
   });
 
   it('lists and edits a role’s grants at /api/roles/<key>/..., with the role wording', async () => {

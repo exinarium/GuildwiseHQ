@@ -6,7 +6,12 @@ import {
 } from '@aom/shared';
 import { useState } from 'react';
 import { useMe } from '../../api/queries/auth.ts';
-import { useDelegateGrants, useDelegateTargets, useSetDelegateGrant } from '../../api/queries/delegation.ts';
+import {
+  useDelegateGrants,
+  useDelegateTargets,
+  useSetDelegateExclusion,
+  useSetDelegateGrant,
+} from '../../api/queries/delegation.ts';
 import { useWorkstations } from '../../api/queries/workstations.ts';
 import { ModelSelect, unionExtras, unionProviders } from '../ModelSelect.tsx';
 import { Badge, Callout, ErrorBox } from '../ui.tsx';
@@ -23,20 +28,35 @@ export const profileText = (p: DelegateProfile | null): string =>
 function Row({
   g,
   canManage,
+  canExclude,
   onRemove,
+  onExclude,
   busy,
 }: {
   g: DelegateGrantDto;
   canManage: boolean;
+  /** Q66: an Owner or Admin on an agent's page: exclude this agent from a target its role grants (or take it back). */
+  canExclude: boolean;
   onRemove: () => void;
+  onExclude: (excluded: boolean) => void;
   busy: boolean;
 }) {
   return (
     <li
       data-testid={`delegate-grant-${g.targetKey}`}
-      className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-control border border-line bg-surface px-3 py-2 text-sm"
+      data-excluded={g.excluded ? 'true' : 'false'}
+      className={`flex flex-wrap items-center gap-x-3 gap-y-1 rounded-control border px-3 py-2 text-sm ${
+        g.excluded ? 'border-dashed border-line bg-sunken' : 'border-line bg-surface'
+      }`}
     >
-      <span className="font-medium text-fg">{g.targetName}</span>
+      <span className={`font-medium ${g.excluded ? 'text-subtle line-through' : 'text-fg'}`}>
+        {g.targetName}
+      </span>
+      {g.excluded && (
+        <Badge tone="warning" data-testid="delegate-grant-excluded">
+          excluded for this agent
+        </Badge>
+      )}
       <Badge tone={g.targetKind === 'agent' ? 'violet' : 'neutral'}>
         {g.targetKind === 'agent' ? 'Agent' : 'Persona'}
       </Badge>
@@ -60,6 +80,21 @@ function Row({
         <span className="text-xs text-warning-text" role="status">
           {g.problem}
         </span>
+      )}
+      {canExclude && g.inherited && (
+        <button
+          type="button"
+          aria-label={
+            g.excluded
+              ? `Allow ${g.targetName} again for this agent`
+              : `Exclude this agent from ${g.targetName}`
+          }
+          className="ml-auto text-subtle hover:text-fg [@media(pointer:coarse)]:min-h-11"
+          disabled={busy}
+          onClick={() => onExclude(!g.excluded)}
+        >
+          {g.excluded ? 'Allow again' : 'Exclude this agent'}
+        </button>
       )}
       {canManage && !g.inherited && (
         <button
@@ -86,6 +121,8 @@ function Body({ kind, id }: { kind: DelegateOwnerKind; id: string }) {
   const canManage = grants.data?.canManage ?? false;
   const targets = useDelegateTargets(kind, id, canManage);
   const set = useSetDelegateGrant(kind, id);
+  const exclusion = useSetDelegateExclusion(id);
+  const canExclude = kind === 'agent' && (grants.data?.canExclude ?? false);
   const [pick, setPick] = useState('');
   const [maxCalls, setMaxCalls] = useState<number>(DELEGATE_GRANT_LIMITS.defaultMaxCalls);
   const [timeoutSec, setTimeoutSec] = useState<number>(DELEGATE_GRANT_LIMITS.defaultTimeoutSec);
@@ -126,7 +163,9 @@ function Body({ kind, id }: { kind: DelegateOwnerKind; id: string }) {
         {kind === 'session' ? 'a conversation’s (reading)' : 'the caller’s'}; what it costs is booked here and
         shows as a sub-step.
         {kind === 'agent' && grants.data?.roleKey
-          ? ` Targets marked "from the role" come from the role ${grants.data.roleKey} and are changed there; here you can add more.`
+          ? ` Targets marked "from the role" come from the role ${grants.data.roleKey} and are changed there; here you can add more${
+              canExclude ? ', or exclude this agent from one of them' : ''
+            }. An excluded target stays with the role and every other agent of it.`
           : ''}
       </p>
       {list.length === 0 ? (
@@ -141,8 +180,12 @@ function Body({ kind, id }: { kind: DelegateOwnerKind; id: string }) {
               key={`${g.targetKind}:${g.targetKey}`}
               g={g}
               canManage={canManage}
-              busy={set.isPending}
+              canExclude={canExclude}
+              busy={set.isPending || exclusion.isPending}
               onRemove={() => set.mutate({ targetKind: g.targetKind, targetKey: g.targetKey, grant: null })}
+              onExclude={(excluded) =>
+                exclusion.mutate({ targetKind: g.targetKind, targetKey: g.targetKey, excluded })
+              }
             />
           ))}
         </ul>
@@ -262,7 +305,7 @@ function Body({ kind, id }: { kind: DelegateOwnerKind; id: string }) {
               : 'Only the creator of the session, an Owner or an Admin changes this list.'}
         </Callout>
       )}
-      <ErrorBox error={set.error} />
+      <ErrorBox error={set.error ?? exclusion.error} />
     </section>
   );
 }
