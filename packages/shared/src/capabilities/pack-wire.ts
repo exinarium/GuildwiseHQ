@@ -58,6 +58,8 @@ export const PackDesiredSchema = z.object({
   grantedAgentIds: z.array(z.uuid()).max(200).default([]),
 });
 export type PackDesired = z.infer<typeof PackDesiredSchema>;
+/** What a caller (a test, an older server's list) may give: the R3a fields default. */
+export type PackDesiredInput = z.input<typeof PackDesiredSchema>;
 
 /** A project-repository capability the owner blocked: the runner leaves it out of what an agent can use. */
 export const BlockedProjectCapabilitySchema = z.object({
@@ -90,6 +92,10 @@ export const PacksReportSchema = z.object({
   expected: z.string().optional(),
   actual: z.string().optional(),
   sha: PackShaSchema.optional(),
+  /** R3a: the host key an ssh fetch recorded on first use (the runner then insists on it). */
+  hostKey: z.object({ host: z.string().max(255), key: z.string().max(2000) }).optional(),
+  /** R3a: the pack is on this workstation but waits (`opt_in`: the member has not accepted; `content`: an authored pack's files have not arrived). */
+  waiting: z.enum(['opt_in', 'content', 'credential']).optional(),
 });
 export type PacksReport = z.infer<typeof PacksReportSchema>;
 
@@ -210,3 +216,15 @@ export const PackBundlePutResultSchema = z.object({
 /** What a sealed pack file set looks like once opened. */
 export const PackFileSetSchema = z.object({ tree: z.record(z.string().max(300), z.string()) });
 export type PackFileSet = z.infer<typeof PackFileSetSchema>;
+export type PackCredentialResult = z.infer<typeof PackCredentialResultSchema>;
+export type PackAuthorSavePayload = z.infer<typeof PackAuthorSavePayloadSchema>;
+export type PackAuthorSaveResult = z.infer<typeof PackAuthorSaveResultSchema>;
+export type PackReadPayload = z.infer<typeof PackReadPayloadSchema>;
+export type PackReadResult = z.infer<typeof PackReadResultSchema>;
+export type PackPersonaReadPayload = z.infer<typeof PackPersonaReadPayloadSchema>;
+export type PackPersonaReadResult = z.infer<typeof PackPersonaReadResultSchema>;
+export type PackBundleRequestPayload = z.infer<typeof PackBundleRequestPayloadSchema>;
+export type PackBundleRequestResult = z.infer<typeof PackBundleRequestResultSchema>;
+export type PackBundlePutPayload = z.infer<typeof PackBundlePutPayloadSchema>;
+export type PackBundlePutResult = z.infer<typeof PackBundlePutResultSchema>;
+export type PackCredentialSetPayload = z.infer<typeof PackCredentialSetPayloadSchema>;

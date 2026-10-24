@@ -1010,13 +1010,17 @@ export class ShiftSupervisor {
       if (r.changed) this.deps.onProjectCapabilities?.(registryProject, r);
     }
     const capIndex =
-      this.deps.capabilities?.instructionsIndex(msg.agent.skills, registryProject, msg.orgId) ?? '';
+      this.deps.capabilities?.instructionsIndex(msg.agent.skills, registryProject, msg.orgId, {
+        agentId: msg.agent.agentId,
+      }) ?? '';
     if (capIndex) texts.instructions += `\n${capIndex}\n`;
     if (msg.kind !== 'ceo' && msg.kind !== 'devops' && !msg.agent.isDevops && msg.agent.roleKey !== 'ceo')
       texts.instructions += `\n${DELEGATE_NOTE}\n`;
     // The skills this agent's role grants, for a runtime with native skills (Claude Code, Codex): written into its private folder.
     const grantedSkills =
-      this.deps.capabilities?.grantedSkills(msg.agent.skills, registryProject, msg.orgId) ?? [];
+      this.deps.capabilities?.grantedSkills(msg.agent.skills, registryProject, msg.orgId, {
+        agentId: msg.agent.agentId,
+      }) ?? [];
     // The project's reference repositories (read-only), for a card shift and a BA task shift (the server sends repositories
     // there only for a repository-scoping task given to an architect); only clones this runner found itself.
     const registeredFolders =
@@ -1567,6 +1571,7 @@ export class ShiftSupervisor {
             req.params,
             s.msg.brief?.project?.id,
             s.msg.orgId,
+            { agentId: s.msg.agent.agentId },
           );
         // `aom delegate`: a read-only sub-task with a registry persona. Not for the CEO's and the DevOps engineer's shifts.
         if (req.method === DELEGATE_RPC) {
@@ -1583,6 +1588,7 @@ export class ShiftSupervisor {
               runtime: s.msg.agent.runtime,
               ...(s.msg.brief?.project?.id ? { projectId: s.msg.brief.project.id } : {}),
               ...(s.msg.orgId ? { orgId: s.msg.orgId } : {}),
+              viewer: { agentId: s.msg.agent.agentId },
             },
             req.params,
           );

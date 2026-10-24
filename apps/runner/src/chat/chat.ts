@@ -41,6 +41,7 @@ import {
   type ServerHttp,
   syncCardAttachments,
 } from '../attachments/index.ts';
+import type { PackViewer } from '../capabilities/packs.ts';
 import { type CapabilityRegistry, skillRpc } from '../capabilities/registry.ts';
 import { type GuardClone, markJobStarted } from '../ceo/guard-hook.ts';
 import { selectChatProfile } from '../ceo/profile.ts';
@@ -175,6 +176,17 @@ const mainOk = (adapter: { accountGate?(account: string): { state: string } }, m
   // a model behind Bedrock, Vertex or a gateway needs no Claude login
   (model !== undefined && splitBackendModel(model) !== null) ||
   (adapter.accountGate?.('main') ?? { state: 'ok' }).state === 'ok';
+
+/**
+ * Who asks the registry for a chat or a session turn, for private packs: a session turn of a creator who is this workstation's own
+ * user is the owner's (their private packs are served); any other chat is an agent, which only gets what its owner granted it.
+ */
+export function viewerOfChat(msg: {
+  agent: { agentId: string };
+  session?: { ownerSession?: boolean } | undefined;
+}): PackViewer {
+  return msg.session ? { owner: msg.session.ownerSession === true } : { agentId: msg.agent.agentId };
+}
 
 export class ChatManager {
   private readonly active = new Map<string, ActiveChat>();
@@ -339,6 +351,7 @@ export class ChatManager {
             req.params,
             chat.msg.context?.projectId,
             chat.msg.context?.orgId,
+            viewerOfChat(chat.msg),
           );
         // `aom delegate`: a read-only sub-task with a registry persona. A session turn may use it where its purpose allows (the
         // server decides in `delegate.begin`); of the plain chats not the CEO's and the DevOps engineer's.
@@ -351,6 +364,7 @@ export class ChatManager {
               runtime: chat.msg.agent.runtime,
               ...(chat.msg.context?.projectId ? { projectId: chat.msg.context.projectId } : {}),
               ...(chat.msg.context?.orgId ? { orgId: chat.msg.context.orgId } : {}),
+              viewer: viewerOfChat(chat.msg),
             },
             req.params,
           );
@@ -783,7 +797,12 @@ export class ChatManager {
       );
     // A persona that lives in the organization vault travels without its text: read it from the registry here.
     const stored = session.speaker.personaKey
-      ? this.deps.capabilities?.persona(session.speaker.personaKey, undefined, msg.context.orgId)
+      ? this.deps.capabilities?.persona(
+          session.speaker.personaKey,
+          undefined,
+          msg.context.orgId,
+          viewerOfChat(msg),
+        )
       : undefined;
     const persona = session.instructions ?? stored?.body;
     if (session.speaker.kind === 'persona' && !persona)
@@ -808,7 +827,12 @@ export class ChatManager {
     chat.sandbox = sandbox;
     chat.releaseTmp = holdAgentTmp(sandbox);
     const capIndex =
-      this.deps.capabilities?.instructionsIndex(msg.agent.skills, undefined, msg.context.orgId) ?? '';
+      this.deps.capabilities?.instructionsIndex(
+        msg.agent.skills,
+        undefined,
+        msg.context.orgId,
+        viewerOfChat(msg),
+      ) ?? '';
     // A runtime with tools and no shell (the direct-model runtime) gets the same turn rendered for tools, with the call; the
     // others read `CLAUDE.md` from their config dir.
     const direct = adapter.instructionStyle === 'tools';
@@ -884,7 +908,12 @@ export class ChatManager {
     chat.sandbox = sandbox;
     chat.releaseTmp = holdAgentTmp(sandbox);
     const capIndex =
-      this.deps.capabilities?.instructionsIndex(msg.agent.skills, undefined, msg.context.orgId) ?? '';
+      this.deps.capabilities?.instructionsIndex(
+        msg.agent.skills,
+        undefined,
+        msg.context.orgId,
+        viewerOfChat(msg),
+      ) ?? '';
     const instructions = renderDirectSystemPrompt({
       chat: { agent: msg.agent, context: msg.context },
       tools: chatToolsFor(),
@@ -991,10 +1020,19 @@ export class ChatManager {
     const gs = msg.context.graph;
     const graphNote = gs && gs.arm === 'on' && this.deps.graph?.()?.load(gs) ? `\n${CHAT_GRAPH_NOTE}\n` : '';
     const capIndex =
-      this.deps.capabilities?.instructionsIndex(msg.agent.skills, msg.context.projectId, msg.context.orgId) ??
-      '';
+      this.deps.capabilities?.instructionsIndex(
+        msg.agent.skills,
+        msg.context.projectId,
+        msg.context.orgId,
+        viewerOfChat(msg),
+      ) ?? '';
     const grantedSkills =
-      this.deps.capabilities?.grantedSkills(msg.agent.skills, msg.context.projectId, msg.context.orgId) ?? [];
+      this.deps.capabilities?.grantedSkills(
+        msg.agent.skills,
+        msg.context.projectId,
+        msg.context.orgId,
+        viewerOfChat(msg),
+      ) ?? [];
     await adapter.writeInstructions(
       sandbox,
       `${signIn ? `${signIn}\n` : ''}${graphNote}${capIndex ? `${capIndex}\n\n` : ''}${devops || msg.agent.roleKey === 'ceo' ? '' : `${DELEGATE_NOTE}\n\n`}${renderChatInstructions(

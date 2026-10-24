@@ -145,6 +145,11 @@ export const SessionTurnSpecSchema = z.object({
    * the tools that purpose allows; the server enforces the same table. Additive: absent from older servers.
    */
   purpose: z.string().max(40).optional(),
+  /**
+   * The session's creator is the user of this very workstation: the workstation's private packs are served to the turn. Absent or
+   * false (a session built around someone else's agent, or an older server): they are not.
+   */
+  ownerSession: z.boolean().optional(),
   /** The other seats in the room, for orientation. */
   roster: z
     .array(z.object({ name: z.string(), kind: ParticipantKindSchema, seat: z.string() }))

@@ -10,7 +10,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { dirname, join } from 'node:path';
-import type { PackDesired, PacksReport } from '@aom/shared';
+import type { PackDesiredInput, PacksReport } from '@aom/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { bmadFixtureStable } from '../../../packages/shared/test/fixtures/bmad-fixture.ts';
 import { runAom } from '../src/aom/aom-cli.ts';
@@ -61,7 +61,7 @@ function makeRemote(tree: Record<string, string>) {
   return { url: bare, work, commit, sha };
 }
 
-const desired = (url: string, over: Partial<PackDesired> = {}): PackDesired => ({
+const desired = (url: string, over: Partial<PackDesiredInput> = {}): PackDesiredInput => ({
   packId: '11111111-1111-4111-8111-111111111111',
   name: 'bmad',
   url,
@@ -590,7 +590,7 @@ describe('where a pack may be cloned from', () => {
     expect(reports[0]).toMatchObject({ state: 'failed' });
     expect(reports[0]?.message).toMatch(/private or internal/);
     await m.sync([desired('git@github.com:a/b.git', { packId: '22222222-2222-4222-8222-222222222222' })]);
-    expect(reports.at(-1)?.message).toMatch(/https/);
+    expect(reports.at(-1)?.message).toMatch(/deploy key/);
   });
 });
 

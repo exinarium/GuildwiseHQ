@@ -56,17 +56,61 @@ export interface CheckedPackUrl {
   url: string;
   host: string;
   port: number;
+  /** `ssh`: a deploy key is used and the connection goes to the checked address (the host key is checked under the host name). */
+  scheme?: 'https' | 'ssh';
+  /** The path an ssh URL names (`org/repo.git`), for the one URL git is given. */
+  sshPath?: string;
   /** The addresses the host resolved to, all public; empty for a local test path. */
   addresses: string[];
 }
 
 /** Throws a readable error for a URL a runner must not clone; otherwise returns what was resolved. */
+/** `ssh://git@host[:port]/path` or `git@host:path` of a private pack. */
+export function parseSshPackUrl(raw: string): { host: string; port: number; path: string } | undefined {
+  const a = /^ssh:\/\/git@([^/@\s:]+)(?::(\d+))?\/([^\s]+)$/i.exec(raw);
+  if (a)
+    return { host: (a[1] as string).toLowerCase(), port: a[2] ? Number(a[2]) : 22, path: a[3] as string };
+  const b = /^git@([^/@\s:]+):([^\s]+)$/i.exec(raw);
+  if (b) return { host: (b[1] as string).toLowerCase(), port: 22, path: (b[2] as string).replace(/^\//, '') };
+  return undefined;
+}
+
 export async function checkPackUrl(
   raw: string,
-  opts: { allowLocal?: boolean; resolve?: Resolver } = {},
+  opts: {
+    allowLocal?: boolean;
+    resolve?: Resolver;
+    /** The pack has an ssh deploy key: ssh URLs are accepted (still only public addresses). */
+    allowSsh?: boolean;
+    /** Tests only: a loopback address is accepted (a local sshd or https server as the "git host"). */
+    allowLoopback?: boolean;
+  } = {},
 ): Promise<CheckedPackUrl> {
   if (opts.allowLocal && (raw.startsWith('/') || raw.startsWith('file://')))
     return { url: raw, host: '', port: 0, addresses: [] };
+  const ssh = parseSshPackUrl(raw);
+  if (ssh) {
+    if (!opts.allowSsh) throw new Error('an ssh pack needs a deploy key: add the key to the pack first');
+    const { host, port, path } = ssh;
+    if (!host || host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local'))
+      if (!opts.allowLoopback) throw new Error(`the pack host ${host || '(none)'} is not a public host`);
+    let addresses: string[];
+    if (isIP(host)) addresses = [host];
+    else {
+      try {
+        addresses = await (opts.resolve ?? defaultResolver)(host);
+      } catch {
+        throw new Error(`the pack host ${host} could not be resolved`);
+      }
+    }
+    if (!addresses.length) throw new Error(`the pack host ${host} could not be resolved`);
+    const bad = addresses.find(
+      (a) => isPrivateAddress(a) && !(opts.allowLoopback && (a === '127.0.0.1' || a === '::1')),
+    );
+    if (bad)
+      throw new Error(`the pack host ${host} points to a private or internal address and is not allowed`);
+    return { url: raw, host, port, addresses, scheme: 'ssh', sshPath: path };
+  }
   let u: URL;
   try {
     u = new URL(raw);
@@ -78,7 +122,7 @@ export async function checkPackUrl(
   if (u.username || u.password) throw new Error('a pack URL must not carry a user name or password');
   const host = u.hostname.replace(/^\[|\]$/g, '').toLowerCase();
   if (!host || host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local'))
-    throw new Error(`the pack host ${host || '(none)'} is not a public host`);
+    if (!opts.allowLoopback) throw new Error(`the pack host ${host || '(none)'} is not a public host`);
   const port = u.port ? Number(u.port) : 443;
   let addresses: string[];
   if (isIP(host)) addresses = [host];
@@ -90,8 +134,10 @@ export async function checkPackUrl(
     }
   }
   if (!addresses.length) throw new Error(`the pack host ${host} could not be resolved`);
-  const bad = addresses.find(isPrivateAddress);
+  const bad = addresses.find(
+    (a) => isPrivateAddress(a) && !(opts.allowLoopback && (a === '127.0.0.1' || a === '::1')),
+  );
   if (bad)
     throw new Error(`the pack host ${host} points to a private or internal address and is not allowed`);
-  return { url: u.toString(), host, port, addresses };
+  return { url: u.toString(), host, port, addresses, scheme: 'https' };
 }

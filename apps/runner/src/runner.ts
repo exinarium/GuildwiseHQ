@@ -23,6 +23,7 @@ import {
   LOCAL_VAULT_CAPABILITY,
   type McpAuthState,
   normalizeRemoteUrl,
+  PACK_AUTHORING_CAPABILITY,
   PACKS_CAPABILITY,
   PRIVATE_ENDPOINTS_CAPABILITY,
   PROVIDER_KEYS_CAPABILITY,
@@ -53,6 +54,7 @@ import { formatLimitTime } from './adapters/claude-usage-limit.ts';
 import { buildAdapters } from './adapters/registry.ts';
 import type { RuntimeAdapter } from './adapters/types.ts';
 import { ServerHttp } from './attachments/index.ts';
+import { PackCredentialStore } from './capabilities/pack-credentials.ts';
 import { PackManager } from './capabilities/packs.ts';
 import { CapabilityRegistry } from './capabilities/registry.ts';
 import { ChatManager } from './chat/chat.ts';
@@ -263,6 +265,7 @@ export class Runner {
   private readonly repoAccess: RepoAccessUpdater;
   /** The key pair for secrets the manager sends (the sudo password) and the store that holds the password. */
   readonly keys: RunnerKeys;
+  private readonly packCredentials: PackCredentialStore;
   readonly sudo: SudoVault;
   /** Test accounts for deploy targets (docs/design/run-and-integration-tests.md D11): ciphertext only on disk. */
   readonly targetSecrets: TargetSecrets;
@@ -472,11 +475,19 @@ export class Runner {
         load: { runningShifts: this.supervisor.size },
       }),
     });
+    this.packCredentials = new PackCredentialStore(
+      this.paths.packs,
+      (c) => this.keys.decryptAny(c),
+      () => this.keys.publicKey.keyId,
+    );
     this.packs = new PackManager({
       dir: this.paths.packs,
       log: this.log,
       report: (r) => void this.client.send('packs.report', r),
       allowLocal: process.env.AOM_PACKS_ALLOW_LOCAL === '1',
+      credentials: this.packCredentials,
+      open: (c) => this.keys.decryptAny(c),
+      keyId: () => this.keys.publicKey.keyId,
     });
     this.capabilities = new CapabilityRegistry({ log: this.log, packs: this.packs });
     this.vaults = new VaultManager({
@@ -1173,6 +1184,8 @@ export class Runner {
         PRIVATE_ENDPOINTS_CAPABILITY,
         // Capability packs: git import pinned to a commit, hash-checked before use (`packs.sync`, `pack.check`, `packs.report`).
         PACKS_CAPABILITY,
+        // Authored and private packs, deploy keys and tokens for private git packs, member opt-in, reads for the editor and for hiring.
+        PACK_AUTHORING_CAPABILITY,
         // The local opt-in (`aom-runner ceo full-power on`), read fresh: the server shows "Full power is off" without it.
         ...(this.freshConfig().ceo.fullPower ? [CEO_FULL_POWER_CAPABILITY] : []),
       ],
@@ -1803,6 +1816,30 @@ export class Runner {
         const p = CommandPayloadSchemas['pack.check'].parse(payload);
         await this.packs.check(p.packId, p.ref);
         done(true, {});
+      } else if (command === 'pack.credential.set') {
+        // Ciphertext in, a fact out: the deploy key or token is never in an answer, a log line or an event.
+        const p = CommandPayloadSchemas['pack.credential.set'].parse(payload);
+        done(true, await this.packCredentials.set(p));
+      } else if (command === 'pack.credential.clear') {
+        this.packCredentials.clear(CommandPayloadSchemas['pack.credential.clear'].parse(payload).packId);
+        done(true, { cleared: true });
+      } else if (command === 'pack.author.save') {
+        done(
+          true,
+          await this.packs.saveAuthoredFiles(CommandPayloadSchemas['pack.author.save'].parse(payload)),
+        );
+      } else if (command === 'pack.read') {
+        done(true, await this.packs.readFiles(CommandPayloadSchemas['pack.read'].parse(payload)));
+      } else if (command === 'pack.persona.read') {
+        const p = CommandPayloadSchemas['pack.persona.read'].parse(payload);
+        done(true, this.packs.readPersona(p.packId, p.key));
+      } else if (command === 'pack.bundle.request') {
+        done(
+          true,
+          await this.packs.bundleRequest(CommandPayloadSchemas['pack.bundle.request'].parse(payload)),
+        );
+      } else if (command === 'pack.bundle.put') {
+        done(true, await this.packs.bundlePut(CommandPayloadSchemas['pack.bundle.put'].parse(payload)));
       } else if (command === 'provider.key.set') {
         // Ciphertext in, a fact out (like env.secret.set): the key is never in an answer, a log line or an event.
         const r = this.providers.set(CommandPayloadSchemas['provider.key.set'].parse(payload));

@@ -24,6 +24,7 @@ import {
   type Usage,
 } from '@aom/shared';
 import type { RuntimeAdapter, RuntimeSession } from '../adapters/types.ts';
+import type { PackViewer } from '../capabilities/packs.ts';
 import { type CapabilityRegistry, skillRpc } from '../capabilities/registry.ts';
 import { resolveCommitIdentity } from '../git/identity.ts';
 import type { IpcServer, ShiftIpcHandler } from '../ipc/server.ts';
@@ -39,6 +40,8 @@ export interface DelegateCaller {
   projectId?: string;
   /** The caller's organization: a pack of another organization is never offered to it. */
   orgId?: string;
+  /** Who the caller is for private packs (the owner's session, or an agent the owner granted a pack to). */
+  viewer?: PackViewer;
   /** The caller's runtime: the default model of a delegate is a small one of the same runtime when it has one. */
   runtime: string;
 }
@@ -100,7 +103,7 @@ export class DelegateRunner {
       };
     const { task } = parsed.data;
     const key = parsed.data.persona.replace(/^persona:/, '');
-    const persona = this.deps.capabilities?.persona(key, caller.projectId, caller.orgId);
+    const persona = this.deps.capabilities?.persona(key, caller.projectId, caller.orgId, caller.viewer);
     if (!persona)
       return {
         ok: false,
@@ -337,7 +340,14 @@ export class DelegateRunner {
       }),
       rpc: async (req: IpcRpcRequest): Promise<IpcRpcResponse> => {
         if (req.method === 'skill.show' || req.method === 'skill.list')
-          return skillRpc(this.deps.capabilities, req.method, req.params, caller.projectId, caller.orgId);
+          return skillRpc(
+            this.deps.capabilities,
+            req.method,
+            req.params,
+            caller.projectId,
+            caller.orgId,
+            caller.viewer,
+          );
         if (req.method === 'ledger.search') return this.deps.rpc(caller.id, req.method, req.params);
         if (req.method === DELEGATE_RPC || req.method.startsWith('delegate.'))
           return {

@@ -191,7 +191,7 @@ export interface ChatStartInput {
   account?: string;
   /** A turn of a discovery or boardroom session: the mock runtime plays a facilitator or the CEO from the turn's message. */
   sessionTurn?: {
-    kind: 'discovery' | 'boardroom';
+    kind: 'discovery' | 'boardroom' | 'persona_chat';
     speakerKind: 'agent' | 'persona';
     personaKey?: string;
     /** What the turn is for (`facilitator`, `board_speaker`, ...): the direct-model runtime offers the tools it allows. */
