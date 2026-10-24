@@ -10,6 +10,8 @@ import {
   type PackHireStatus,
   type PackPersonasResponse,
   type PackReadContent,
+  packCredentialAad,
+  packCredentialHost,
   type ReadMyPackResult,
   type RoleOfferReview,
   type RoleOffersResponse,
@@ -147,17 +149,32 @@ export function useDecideAssignment() {
   });
 }
 
-/** Seals a deploy key or token separately to each workstation (the server never sees it in the clear). */
+/**
+ * Seals a deploy key or token separately to each workstation (the server never sees it in the clear). Each copy is bound to the
+ * pack, the kind and the host of its git URL and to that runner's key, so the server cannot hand it to another pack or aim it at
+ * another host: the runner opens it only for exactly these and uses it for no other host.
+ */
 export async function sealPackCredential(
   kind: 'ssh' | 'token',
   secret: string,
   workstationIds: readonly string[],
+  pack: { id: string; url: string },
   username?: string,
 ): Promise<PackCredentialShares> {
+  const host = packCredentialHost(pack.url);
+  if (!host) throw new Error('the repository address has no host');
   const shares = [];
   for (const workstationId of workstationIds) {
     const key = await get<RunnerKey>(`/workstations/${workstationId}/sudo-key`);
-    shares.push({ workstationId, keyId: key.keyId, ciphertext: await sealLarge(key.publicKey, secret) });
+    shares.push({
+      workstationId,
+      keyId: key.keyId,
+      ciphertext: await sealLarge(
+        key.publicKey,
+        secret,
+        packCredentialAad({ packId: pack.id, kind, host, keyId: key.keyId }),
+      ),
+    });
   }
   return { kind, ...(username ? { username } : {}), shares };
 }

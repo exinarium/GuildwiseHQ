@@ -14,6 +14,7 @@ import {
   makeReplyKey,
   type PackDesiredInput,
   type PacksReport,
+  packCredentialAad,
   packTree,
   sealLarge,
 } from '@aom/shared';
@@ -68,7 +69,7 @@ function rig(opts: { keys?: RunnerKeys; sshBin?: string; gitBin?: string; allowL
   const reports: PacksReport[] = [];
   const credentials = new PackCredentialStore(
     dir,
-    (c) => keys.decryptAny(c),
+    (c, aad) => keys.decryptAny(c, aad),
     () => keys.publicKey.keyId,
   );
   const m = new PackManager({
@@ -102,26 +103,36 @@ const authored = (over: Partial<PackDesiredInput> = {}): PackDesiredInput => ({
   ...over,
 });
 
+/** A deploy key or token sealed the way the web app does: bound to the pack, the kind, the git host and the runner key. */
+const HOST = 'example.org';
+const sealCred = (keys: RunnerKeys, kind: 'ssh' | 'token', secret: string, host = HOST, packId = ID) =>
+  sealLarge(
+    keys.publicKey.publicKey,
+    secret,
+    packCredentialAad({ packId, kind, host, keyId: keys.publicKey.keyId }),
+  );
+
 const sealTree = async (keys: RunnerKeys, caps: AuthoredCapability[]) =>
   sealLarge(keys.publicKey.publicKey, JSON.stringify({ tree: packTree(caps) }));
 
 describe('deploy keys and tokens of private git packs', () => {
   it('stores a token 0600 in a 0700 folder of its own and never returns it', async () => {
     const r = rig();
-    const sealed = await sealLarge(r.keys.publicKey.publicKey, 'ghp_supersecrettoken1234567890abcd');
+    const sealed = await sealCred(r.keys, 'token', 'ghp_supersecrettoken1234567890abcd');
     const out = await r.credentials.set({
       packId: ID,
       keyId: r.keys.publicKey.keyId,
       kind: 'token',
       ciphertext: sealed,
       username: 'bot',
+      host: HOST,
     });
     expect(out).toEqual({ stored: true });
     const dir = join(r.dir, '.cred', ID);
     expect(statSync(dir).mode & 0o777).toBe(0o700);
     expect(statSync(join(dir, 'token')).mode & 0o777).toBe(0o600);
     expect(r.credentials.token(ID)).toBe('ghp_supersecrettoken1234567890abcd');
-    expect(r.credentials.meta(ID)).toEqual({ kind: 'token', username: 'bot' });
+    expect(r.credentials.meta(ID)).toEqual({ kind: 'token', host: HOST, username: 'bot' });
     // redaction: the secret is replaced wherever it would be logged
     expect(redact('fatal: https://bot:ghp_supersecrettoken1234567890abcd@example.org')).not.toContain(
       'supersecret',
@@ -134,7 +145,7 @@ describe('deploy keys and tokens of private git packs', () => {
   it('refuses a credential sealed for another runner key, a bad token and a key with a passphrase', async () => {
     const r = rig();
     const other = new RunnerKeys(join(r.dir, 'other', 'k.pem'));
-    const sealed = await sealLarge(other.publicKey.publicKey, 'tok');
+    const sealed = await sealCred(other, 'token', 'tok');
     expect(
       (
         await r.credentials.set({
@@ -142,6 +153,7 @@ describe('deploy keys and tokens of private git packs', () => {
           keyId: other.publicKey.keyId,
           kind: 'token',
           ciphertext: sealed,
+          host: HOST,
         })
       ).stored,
     ).toBe(false);
@@ -153,10 +165,11 @@ describe('deploy keys and tokens of private git packs', () => {
           keyId: r.keys.publicKey.keyId,
           kind: 'token',
           ciphertext: sealed,
+          host: HOST,
         })
       ).error,
-    ).toMatch(/decrypt/);
-    const spaced = await sealLarge(r.keys.publicKey.publicKey, 'two words');
+    ).toMatch(/could not be opened/);
+    const spaced = await sealCred(r.keys, 'token', 'two words');
     expect(
       (
         await r.credentials.set({
@@ -164,17 +177,25 @@ describe('deploy keys and tokens of private git packs', () => {
           keyId: r.keys.publicKey.keyId,
           kind: 'token',
           ciphertext: spaced,
+          host: HOST,
         })
       ).stored,
     ).toBe(false);
     const k = join(r.dir, 'pp');
     execFileSync('ssh-keygen', ['-q', '-t', 'ed25519', '-N', 'secret-pass', '-f', k]);
-    const pp = await sealLarge(r.keys.publicKey.publicKey, readFileSync(k, 'utf8'));
+    const pp = await sealCred(r.keys, 'ssh', readFileSync(k, 'utf8'));
     expect(
-      (await r.credentials.set({ packId: ID, keyId: r.keys.publicKey.keyId, kind: 'ssh', ciphertext: pp }))
-        .error,
+      (
+        await r.credentials.set({
+          packId: ID,
+          keyId: r.keys.publicKey.keyId,
+          kind: 'ssh',
+          ciphertext: pp,
+          host: HOST,
+        })
+      ).error,
     ).toMatch(/passphrase/);
-    const notKey = await sealLarge(r.keys.publicKey.publicKey, 'hello');
+    const notKey = await sealCred(r.keys, 'ssh', 'hello');
     expect(
       (
         await r.credentials.set({
@@ -182,6 +203,7 @@ describe('deploy keys and tokens of private git packs', () => {
           keyId: r.keys.publicKey.keyId,
           kind: 'ssh',
           ciphertext: notKey,
+          host: HOST,
         })
       ).stored,
     ).toBe(false);
@@ -194,16 +216,104 @@ describe('deploy keys and tokens of private git packs', () => {
     const fp = /(SHA256:\S+)/.exec(
       execFileSync('ssh-keygen', ['-lf', `${k}.pub`], { encoding: 'utf8' }),
     )?.[1];
-    const sealed = await sealLarge(r.keys.publicKey.publicKey, readFileSync(k, 'utf8'));
+    const sealed = await sealCred(r.keys, 'ssh', readFileSync(k, 'utf8'));
     const out = await r.credentials.set({
       packId: ID,
       keyId: r.keys.publicKey.keyId,
       kind: 'ssh',
       ciphertext: sealed,
+      host: HOST,
     });
     expect(out).toEqual({ stored: true, fingerprint: fp });
     expect(statSync(r.credentials.keyFile(ID)).mode & 0o777).toBe(0o600);
     expect(readFileSync(r.credentials.keyFile(ID), 'utf8').endsWith('\n')).toBe(true);
+  });
+});
+
+describe('a pack credential is bound to its pack and host (security review finding 2)', () => {
+  const tokenSet = (r: ReturnType<typeof rig>, ciphertext: string, over: Record<string, unknown> = {}) =>
+    r.credentials.set({
+      packId: ID,
+      keyId: r.keys.publicKey.keyId,
+      kind: 'token',
+      ciphertext,
+      host: HOST,
+      ...over,
+    });
+
+  it('opens only for the pack, kind, host and runner key it was sealed for', async () => {
+    const r = rig();
+    const tok = 'ghp_boundtoken1234567890abcdefgh';
+    // another pack's credential relabelled for this pack
+    const otherPack = await sealCred(r.keys, 'token', tok, HOST, '99999999-9999-4999-8999-999999999999');
+    expect((await tokenSet(r, otherPack)).stored).toBe(false);
+    // sealed for one host, delivered with another (the server aiming the token at its own host)
+    const forHost = await sealCred(r.keys, 'token', tok, 'github.com');
+    expect(await tokenSet(r, forHost, { host: 'evil.example.net' })).toMatchObject({
+      stored: false,
+      error: expect.stringMatching(/could not be opened/),
+    });
+    // a deploy key sealed as a key, delivered as a token
+    const asSsh = await sealCred(r.keys, 'ssh', tok);
+    expect((await tokenSet(r, asSsh)).stored).toBe(false);
+    expect(r.credentials.has(ID)).toBe(false);
+    expect((await tokenSet(r, await sealCred(r.keys, 'token', tok))).stored).toBe(true);
+    expect(r.credentials.meta(ID)?.host).toBe(HOST);
+  });
+
+  it('refuses the older, unbound form and a command that names no host', async () => {
+    const r = rig();
+    const legacy = await sealLarge(r.keys.publicKey.publicKey, 'ghp_legacytoken1234567890abcdefgh');
+    expect(await tokenSet(r, legacy)).toMatchObject({
+      stored: false,
+      error: expect.stringMatching(/older form/),
+    });
+    const bound = await sealCred(r.keys, 'token', 'ghp_boundtoken1234567890abcdefgh');
+    expect((await tokenSet(r, bound, { host: undefined })).stored).toBe(false);
+    expect(r.credentials.has(ID)).toBe(false);
+  });
+
+  it('is not sent to another host when the pack’s address is changed afterwards, and a credential stored unbound is not used', async () => {
+    const dir = tmp('aom-r3a-bind-');
+    const log = join(dir, 'git.log');
+    const wrapper = join(dir, 'git-wrap.sh');
+    writeFileSync(wrapper, `#!/bin/sh\necho "GIT $*" >> '${log}'\nexec git "$@"\n`);
+    chmodSync(wrapper, 0o755);
+    const r = rig({ gitBin: wrapper });
+    expect(
+      (await tokenSet(r, await sealCred(r.keys, 'token', 'ghp_boundtoken1234567890abcdefgh'))).stored,
+    ).toBe(true);
+    const desired = (url: string) =>
+      ({
+        packId: ID,
+        orgId: ORG,
+        name: 'priv',
+        url,
+        ref: 'main',
+        adapter: 'generic',
+        scope: 'org',
+        projectId: null,
+        pinnedSha: null,
+        trusted: null,
+        scriptsEnabled: false,
+        credentialKind: 'token',
+      }) as PackDesiredInput;
+    await r.m.sync([desired('https://evil.example.net/a/b.git')]);
+    expect(r.reports.at(-1)).toMatchObject({
+      state: 'failed',
+      message: expect.stringMatching(/bound to example\.org, not evil\.example\.net/),
+    });
+    // git was never asked to talk to the other host
+    expect(existsSync(log) ? readFileSync(log, 'utf8') : '').not.toMatch(/fetch|ls-remote/);
+    // a record from before binding existed (no host) is not used either
+    const meta = join(r.dir, '.cred', ID, 'meta.json');
+    writeFileSync(meta, JSON.stringify({ kind: 'token', username: 'x-access-token' }));
+    await r.m.sync([desired('https://example.org/a/b.git')]);
+    expect(r.reports.at(-1)).toMatchObject({
+      state: 'failed',
+      message: expect.stringMatching(/older form/),
+    });
+    expect(existsSync(log) ? readFileSync(log, 'utf8') : '').not.toMatch(/fetch|ls-remote/);
   });
 });
 
@@ -276,8 +386,14 @@ exec sh -c "$2"
   async function withKey(r: ReturnType<typeof rig>) {
     const k = join(r.dir, 'dk');
     execFileSync('ssh-keygen', ['-q', '-t', 'ed25519', '-N', '', '-f', k]);
-    const sealed = await sealLarge(r.keys.publicKey.publicKey, readFileSync(k, 'utf8'));
-    await r.credentials.set({ packId: ID, keyId: r.keys.publicKey.keyId, kind: 'ssh', ciphertext: sealed });
+    const sealed = await sealCred(r.keys, 'ssh', readFileSync(k, 'utf8'));
+    await r.credentials.set({
+      packId: ID,
+      keyId: r.keys.publicKey.keyId,
+      kind: 'ssh',
+      ciphertext: sealed,
+      host: HOST,
+    });
     return readFileSync(k, 'utf8');
   }
 
@@ -399,8 +515,9 @@ exec git "$@"
       packId: ID,
       keyId: r.keys.publicKey.keyId,
       kind: 'token',
-      ciphertext: await sealLarge(r.keys.publicKey.publicKey, token),
+      ciphertext: await sealCred(r.keys, 'token', token),
       username: 'bot',
+      host: HOST,
     });
     await r.m.sync([
       {

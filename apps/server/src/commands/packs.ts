@@ -379,7 +379,7 @@ export async function addPack(ctx: Ctx, who: Who, req: AddPackRequest): Promise<
     throw badRequest('invalid_pack_name', 'choose another name for the pack');
   if (req.scope === 'project' && !req.projectId)
     throw badRequest('project_required', 'a project pack needs a project');
-  const id = randomUUID();
+  const id = req.id ?? randomUUID();
   let change: HolderChange | undefined;
   const chosen = [...new Set(req.workstationIds ?? [])];
   // A private repository: ssh needs a deploy key, https a token; without a credential only a public https URL is accepted.
@@ -421,6 +421,9 @@ export async function addPack(ctx: Ctx, who: Who, req: AddPackRequest): Promise<
       ]);
       if (!p) throw notFound('project not found');
     }
+    // a browser-chosen id (so a credential can be sealed bound to it) must be new
+    if (req.id && (await one(tx, 'SELECT 1 FROM packs WHERE id=$1', [id])))
+      throw conflict('pack_id_taken', 'choose another pack id');
     const n = await one(tx, 'SELECT count(*)::int AS n FROM packs WHERE org_id=$1 AND removed_at IS NULL', [
       who.orgId,
     ]);

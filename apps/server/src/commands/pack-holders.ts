@@ -5,6 +5,7 @@ import {
   type PackCredentialKind,
   PackCredentialResultSchema,
   type PackCredentialShares,
+  packCredentialHost,
   streamId,
 } from '@aom/shared';
 import type { AuthSession } from '../auth/sessions.ts';
@@ -53,6 +54,7 @@ async function queueCredential(
     [a.packId, a.workstationId],
   );
   if (!share?.ciphertext) return;
+  const pack = await one(tx, 'SELECT url FROM packs WHERE id=$1', [a.packId]);
   await supersedeCredential(tx, a.workstationId, a.packId);
   await enqueueRunnerCommand(
     tx,
@@ -64,6 +66,8 @@ async function queueCredential(
       kind: a.kind,
       ciphertext: share.ciphertext,
       ...(a.username ? { username: a.username } : {}),
+      // what the credential is bound to: the runner opens it only for this pack and host, and uses it for no other
+      ...(pack?.url ? { host: packCredentialHost(String(pack.url)) } : {}),
     },
     new Date(ctx.clock.now().getTime() + CREDENTIAL_TTL_MS),
   );

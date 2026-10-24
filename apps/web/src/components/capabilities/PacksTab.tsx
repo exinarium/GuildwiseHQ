@@ -152,6 +152,8 @@ function AddPackDialog({ workstations, onClose }: { workstations: PackWorkstatio
   const [username, setUsername] = useState('');
   const [sealing, setSealing] = useState(false);
   const [sealError, setSealError] = useState<string | null>(null);
+  // chosen here so a private pack's deploy key or token can be sealed bound to it before it exists
+  const [packId] = useState(() => crypto.randomUUID());
   const kind: 'ssh' | 'token' = /^(ssh:\/\/|git@)/i.test(url.trim()) ? 'ssh' : 'token';
   const ready =
     url.trim() &&
@@ -171,6 +173,7 @@ function AddPackDialog({ workstations, onClose }: { workstations: PackWorkstatio
           kind,
           secret.trim(),
           choice.current,
+          { id: packId, url: url.trim() },
           kind === 'token' ? username.trim() || undefined : undefined,
         );
       } catch (err) {
@@ -182,6 +185,8 @@ function AddPackDialog({ workstations, onClose }: { workstations: PackWorkstatio
     }
     add.mutate(
       {
+        // the id the credential was sealed for
+        ...(isPrivate ? { id: packId } : {}),
         url: url.trim(),
         ref: ref.trim(),
         adapter: 'auto',
@@ -632,7 +637,10 @@ function HoldersButton({ pack }: { pack: PackDto }) {
     setError(null);
     try {
       const credential = needsKey
-        ? await sealPackCredential(pack.credentialKind as 'ssh' | 'token', secret.trim(), ids)
+        ? await sealPackCredential(pack.credentialKind as 'ssh' | 'token', secret.trim(), ids, {
+            id: pack.id,
+            url: pack.url,
+          })
         : undefined;
       set.mutate(
         { id: pack.id, workstationIds: ids, ...(credential ? { credential } : {}) },

@@ -1,6 +1,6 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { PackCredentialKind, PackCredentialResult } from '@aom/shared';
+import { type PackCredentialKind, type PackCredentialResult, packCredentialAad } from '@aom/shared';
 import { execa } from 'execa';
 import { registerSecret, unregisterSecret } from '../secrets/redact.ts';
 
@@ -15,6 +15,8 @@ export interface StoredCredential {
   kind: PackCredentialKind;
   username?: string;
   fingerprint?: string;
+  /** The host of the pack's git URL the credential was bound to when it was sealed: it is used for no other host. */
+  host?: string;
 }
 
 const KEY_RE = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]+-----END [A-Z0-9 ]*PRIVATE KEY-----/;
@@ -22,7 +24,7 @@ const KEY_RE = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]+-----END [A-Z0-9 ]*P
 export class PackCredentialStore {
   constructor(
     private readonly root: string,
-    private readonly decrypt: (sealed: string) => string,
+    private readonly decrypt: (sealed: string, aad?: string) => string,
     private readonly keyId: () => string,
   ) {}
 
@@ -60,6 +62,20 @@ export class PackCredentialStore {
     return !!this.meta(packId);
   }
 
+  /**
+   * Why this credential may not be used for a pack at `host`, or undefined when it may. A credential stored before binding existed
+   * (no host in its record) is not used: the admin enters it again. One bound to another host is not sent there.
+   */
+  hostProblem(packId: string, host: string): string | undefined {
+    const m = this.meta(packId);
+    if (!m) return undefined;
+    if (!m.host)
+      return 'the deploy key or token of this pack was stored in the older form that is not tied to a host: enter it again';
+    if (m.host !== host.toLowerCase())
+      return `the deploy key or token of this pack is bound to ${m.host}, not ${host}: the pack's address changed. Enter the credential again for the new address`;
+    return undefined;
+  }
+
   keyFile(packId: string): string {
     return join(this.dirOf(packId), 'key');
   }
@@ -81,14 +97,30 @@ export class PackCredentialStore {
     kind: PackCredentialKind;
     ciphertext: string;
     username?: string | undefined;
+    host?: string | undefined;
   }): Promise<PackCredentialResult> {
     if (p.keyId !== this.keyId())
       return { stored: false, error: 'the credential was sealed for another runner key: enter it again' };
+    // The credential opens only with the pack, the kind, the host and this runner's key it was sealed for: a deploy key relabelled
+    // for another pack or aimed at another host does not open. The older, unbound form is refused (enter it again).
+    const host = (p.host ?? '').toLowerCase();
+    if (!host || !p.ciphertext.startsWith('h2.'))
+      return {
+        stored: false,
+        error:
+          'the credential was sealed in the older form that is not tied to its pack and host: enter the deploy key or token again',
+      };
     let plain: string;
     try {
-      plain = this.decrypt(p.ciphertext);
+      plain = this.decrypt(
+        p.ciphertext,
+        packCredentialAad({ packId: p.packId, kind: p.kind, host, keyId: p.keyId }),
+      );
     } catch {
-      return { stored: false, error: 'the credential could not be decrypted: enter it again' };
+      return {
+        stored: false,
+        error: 'the credential could not be opened for this pack and host: enter it again',
+      };
     }
     const dir = this.dirOf(p.packId);
     if (p.kind === 'ssh') {
@@ -117,7 +149,7 @@ export class PackCredentialStore {
       // each base64 line too: a log line may carry part of the key
       for (const line of key.split('\n'))
         if (line.length > 20 && !line.startsWith('-----')) registerSecret(line);
-      this.writeMeta(dir, { kind: 'ssh', ...(fingerprint ? { fingerprint } : {}) });
+      this.writeMeta(dir, { kind: 'ssh', host, ...(fingerprint ? { fingerprint } : {}) });
       return { stored: true, ...(fingerprint ? { fingerprint } : {}) };
     }
     const token = plain.trim();
@@ -132,6 +164,7 @@ export class PackCredentialStore {
     registerSecret(token);
     this.writeMeta(dir, {
       kind: 'token',
+      host,
       username: (p.username?.trim() || 'x-access-token').slice(0, 100),
     });
     return { stored: true };

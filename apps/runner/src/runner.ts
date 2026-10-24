@@ -25,6 +25,7 @@ import {
   type McpAuthState,
   normalizeRemoteUrl,
   PACK_AUTHORING_CAPABILITY,
+  PACK_CREDENTIALS_BOUND_CAPABILITY,
   PACKS_CAPABILITY,
   PRIVATE_ENDPOINTS_CAPABILITY,
   PROVIDER_KEYS_BOUND_CAPABILITY,
@@ -479,7 +480,8 @@ export class Runner {
     });
     this.packCredentials = new PackCredentialStore(
       this.paths.packs,
-      (c) => this.keys.decryptAny(c),
+      // a pack credential must be bound to its pack and host (h2); the older forms are refused
+      (c, aad) => this.keys.decryptAny(c, aad, { requireBound: true }),
       () => this.keys.publicKey.keyId,
     );
     this.packs = new PackManager({
@@ -1193,6 +1195,8 @@ export class Runner {
         PACKS_CAPABILITY,
         // Authored and private packs, deploy keys and tokens for private git packs, member opt-in, reads for the editor and for hiring.
         PACK_AUTHORING_CAPABILITY,
+        // A pack's deploy key or token is opened only bound to the pack and the host of its git URL, and used for no other host.
+        PACK_CREDENTIALS_BOUND_CAPABILITY,
         // The local opt-in (`aom-runner ceo full-power on`), read fresh: the server shows "Full power is off" without it.
         ...(this.freshConfig().ceo.fullPower ? [CEO_FULL_POWER_CAPABILITY] : []),
       ],

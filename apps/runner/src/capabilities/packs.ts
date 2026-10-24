@@ -33,6 +33,7 @@ import {
   type PackSnapshot,
   type PacksReport,
   type ParsedCapability,
+  packCredentialHost,
   packSnapshotOf,
   sealLarge,
   splitFrontmatter,
@@ -441,7 +442,12 @@ esac
   }
 
   /** Throws unless a runner may clone this URL (see `checkPackUrl`). */
-  private checkUrl(d: PackDesired): Promise<CheckedPackUrl> {
+  private async checkUrl(d: PackDesired): Promise<CheckedPackUrl> {
+    // a deploy key or token goes only to the host it was bound to when the admin sealed it (the server cannot redirect it)
+    if (d.credentialKind && this.opts.credentials?.has(d.packId)) {
+      const problem = this.opts.credentials.hostProblem(d.packId, packCredentialHost(d.url));
+      if (problem) throw new Error(problem);
+    }
     return checkPackUrl(d.url, {
       ...(this.opts.allowLocal !== undefined ? { allowLocal: this.opts.allowLocal } : {}),
       ...(this.opts.resolve ? { resolve: this.opts.resolve } : {}),

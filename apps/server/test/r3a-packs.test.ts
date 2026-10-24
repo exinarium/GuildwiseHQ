@@ -624,6 +624,7 @@ describe('authored organization packs: review and approval', () => {
 
 describe('private git packs and member opt-in', () => {
   const SSH_URL = 'ssh://git@git.example.org/acme/skills.git';
+  const CHOSEN_ID = '0192f3a0-0000-7000-8000-00000000c0de';
   let id = '';
   const secret =
     '-----BEGIN OPENSSH PRIVATE KEY-----\nAAAA-the-deploy-key\n-----END OPENSSH PRIVATE KEY-----\n';
@@ -693,6 +694,8 @@ describe('private git packs and member opt-in', () => {
       'POST',
       '/api/packs',
       {
+        // chosen by the browser so the credential can be sealed bound to this pack
+        id: CHOSEN_ID,
         url: SSH_URL,
         ref: 'main',
         name: 'acme',
@@ -703,6 +706,14 @@ describe('private git packs and member opt-in', () => {
       201,
     );
     id = res.pack.id;
+    expect(id).toBe(CHOSEN_ID);
+    // an id already in use is refused
+    await asOwner(
+      'POST',
+      '/api/packs',
+      { id: CHOSEN_ID, url: 'https://example.org/other/pack.git', ref: 'main', name: 'other' },
+      409,
+    );
     expect(res.pack).toMatchObject({ credentialKind: 'ssh' });
     expect(res.pack.holders.find((h: { mine: boolean }) => h.mine)).toMatchObject({
       assignment: 'accepted',
@@ -716,7 +727,13 @@ describe('private git packs and member opt-in', () => {
       'command',
       (f) => f.command === 'pack.credential.set' && f.payload.packId === id,
     );
-    expect(cred.payload).toMatchObject({ kind: 'ssh', keyId: ownerKey.keyId, ciphertext: own.ciphertext });
+    // the credential travels with the host of the pack's URL: the runner opens it bound to that host and sends it to no other
+    expect(cred.payload).toMatchObject({
+      kind: 'ssh',
+      keyId: ownerKey.keyId,
+      ciphertext: own.ciphertext,
+      host: 'git.example.org',
+    });
     owner.send('command.result', {
       commandId: cred.commandId,
       ok: true,

@@ -122,6 +122,12 @@ export type ProjectCapabilitiesReport = z.infer<typeof ProjectCapabilitiesReport
 /** Announced in `hello.capabilities` by runners that hold authored and private packs, deploy keys and member opt-in. */
 export const PACK_AUTHORING_CAPABILITY = 'pack-authoring:1';
 
+/**
+ * Announced by runners that open a pack's deploy key or token only when it is bound to the pack and the host of its git URL
+ * (`h2`, see `packCredentialAad`) and use it for no other host. An older runner cannot open such a credential.
+ */
+export const PACK_CREDENTIALS_BOUND_CAPABILITY = 'pack-credentials:2';
+
 /** A sealed (hybrid RSA+AES) credential or file set: the server relays it and never opens it. */
 const SealedSchema = z.string().min(20).max(4_000_000);
 
@@ -130,9 +136,11 @@ export const PackCredentialSetPayloadSchema = z.object({
   packId: z.uuid(),
   keyId: z.string().max(100),
   kind: PackCredentialKindSchema,
-  /** `sealLarge` of the key (ssh) or the token (https). For https a user name may travel in clear (it is not a secret). */
+  /** `sealProviderKey`-style `h2` of the key (ssh) or the token (https). For https a user name may travel in clear (it is not a secret). */
   ciphertext: SealedSchema,
   username: z.string().max(100).optional(),
+  /** The host of the pack's git URL the credential is bound to (`packCredentialHost`); the runner uses it for no other host. */
+  host: z.string().max(255).optional(),
 });
 export const PackCredentialClearPayloadSchema = z.object({ packId: z.uuid() });
 export const PackCredentialResultSchema = z.object({

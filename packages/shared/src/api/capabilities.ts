@@ -116,6 +116,11 @@ export const PackCredentialSharesSchema = z.object({
 export type PackCredentialShares = z.infer<typeof PackCredentialSharesSchema>;
 
 export const AddPackRequestSchema = z.object({
+  /**
+   * The pack's id, chosen by the browser so a deploy key or token can be sealed bound to it before the pack exists. Omitted: the
+   * server makes one (a pack without a credential).
+   */
+  id: z.uuid().optional(),
   name: PackNameSchema.optional(),
   url: z.union([PackUrlSchema, PrivatePackUrlSchema]),
   /** R3a: a private repository. The URL may then be ssh; every chosen workstation needs a share. */

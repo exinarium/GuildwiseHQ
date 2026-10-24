@@ -59,14 +59,14 @@ export function sealProviderKey(
 
 // ------------------------------------------------------------------------------------------------- pack credentials
 
-/** The host a pack credential may be used for: lower-case host (with port when not the default) of the pack's git URL. */
+/** The host a pack credential may be used for: the lower-case host name (no port) of the pack's git URL, ssh or https. */
 export function packCredentialHost(gitUrl: string): string {
   const t = gitUrl.trim();
   // scp-like ssh: git@host:owner/repo
   const scp = /^[\w.-]+@([\w.-]+):(?!\/\/)/.exec(t);
   if (scp?.[1]) return scp[1].toLowerCase();
   try {
-    return new URL(t).host.toLowerCase();
+    return new URL(t).hostname.toLowerCase().replace(/^\[|\]$/g, '');
   } catch {
     return '';
   }
@@ -74,7 +74,7 @@ export function packCredentialHost(gitUrl: string): string {
 
 export function packCredentialAad(b: {
   packId: string;
-  kind: 'ssh' | 'https';
+  kind: 'ssh' | 'token';
   host: string;
   keyId: string;
 }): string {

@@ -6,6 +6,7 @@ import {
   type AuthoredCapability,
   type PackDesiredInput,
   type PacksReport,
+  packCredentialAad,
   packTree,
   sealLarge,
 } from '@aom/shared';
@@ -121,7 +122,7 @@ describe.skipIf(!can)('a private pack over real ssh', () => {
       const keys = new RunnerKeys(join(dir, 'secrets', 'k.pem'));
       const creds = new PackCredentialStore(
         join(dir, 'packs'),
-        (c) => keys.decryptAny(c),
+        (c, aad) => keys.decryptAny(c, aad),
         () => keys.publicKey.keyId,
       );
       const reports: PacksReport[] = [];
@@ -139,7 +140,12 @@ describe.skipIf(!can)('a private pack over real ssh', () => {
         packId: ID,
         keyId: keys.publicKey.keyId,
         kind: 'ssh',
-        ciphertext: await sealLarge(keys.publicKey.publicKey, readFileSync(keyFile, 'utf8')),
+        host: '127.0.0.1',
+        ciphertext: await sealLarge(
+          keys.publicKey.publicKey,
+          readFileSync(keyFile, 'utf8'),
+          packCredentialAad({ packId: ID, kind: 'ssh', host: '127.0.0.1', keyId: keys.publicKey.keyId }),
+        ),
       });
       const desired: PackDesiredInput = {
         packId: ID,
@@ -170,7 +176,12 @@ describe.skipIf(!can)('a private pack over real ssh', () => {
           packId: ID,
           keyId: keys.publicKey.keyId,
           kind: 'ssh',
-          ciphertext: await sealLarge(keys.publicKey.publicKey, readFileSync(file, 'utf8')),
+          host: '127.0.0.1',
+          ciphertext: await sealLarge(
+            keys.publicKey.publicKey,
+            readFileSync(file, 'utf8'),
+            packCredentialAad({ packId: ID, kind: 'ssh', host: '127.0.0.1', keyId: keys.publicKey.keyId }),
+          ),
         });
       const other = join(dir, 'other');
       execFileSync('ssh-keygen', ['-q', '-t', 'ed25519', '-N', '', '-f', other]);
