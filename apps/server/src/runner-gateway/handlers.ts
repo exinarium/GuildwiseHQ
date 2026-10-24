@@ -111,7 +111,7 @@ import {
 } from '../commands/workstation-setup.ts';
 import { liveWorktreePaths } from '../commands/worktree-sweep.ts';
 import type { Ctx } from '../context.ts';
-import { exec, one, rows } from '../db/sql.ts';
+import { exec, one, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import { applyDeploySecretResult } from '../delivery/admin.ts';
 import { applyConnectResult } from '../delivery/connect.ts';
@@ -368,327 +368,26 @@ export class RunnerHandlers {
         }
         // A command is answered once: a second answer (a redelivered command run again) must not apply again.
         if (cmd.status === 'done') return this.ack(conn, msg);
-        if (cmd?.type === 'finalize.execute') {
-          // Terminal: the outcome (finalized, conflict or failure) is recorded on the card, never retried blindly.
-          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
-          await applyFinalizeResult(
-            this.ctx,
-            conn.workstationId,
-            cmd.payload.cardId,
-            msg.ok,
-            msg.result,
-            msg.error,
+        // Claim the answer in ONE statement: two answers for the same command (a redelivered command run twice) must not both
+        // apply. The claim is a short lease; a handler that fails gives it back so the next answer can be applied.
+        const claimed = await one(
+          this.ctx.pool,
+          `UPDATE runner_commands SET answering_at = $2
+            WHERE id = $1 AND workstation_id = $3 AND status <> 'done'
+              AND (answering_at IS NULL OR answering_at < $2::timestamptz - interval '2 minutes')
+          RETURNING id`,
+          [msg.commandId, this.ctx.clock.now(), conn.workstationId],
+        );
+        if (!claimed) return this.ack(conn, msg);
+        try {
+          await this.applyCommandResult(conn, msg, cmd);
+        } catch (err) {
+          await exec(
+            this.ctx.pool,
+            `UPDATE runner_commands SET answering_at = NULL WHERE id = $1 AND status <> 'done'`,
+            [msg.commandId],
           );
-        } else if (cmd?.type === 'outbound.post') {
-          // Terminal like finalize: posted, or a failure that lands on the desk (the manager retries from the card).
-          await finishOutboundCommand(this.ctx, msg.commandId);
-          await applyOutboundResult(
-            this.ctx,
-            conn.workstationId,
-            cmd.payload.draftId,
-            msg.ok,
-            msg.result,
-            msg.error,
-          );
-        } else if (cmd?.type === 'branch.check_merged') {
-          // Terminal: "not merged yet" is an answer, not a failure; the phase pass asks again later.
-          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
-          await applyBranchCheckResult(
-            this.ctx,
-            cmd.payload.cardId,
-            cmd.payload.workingBranch,
-            msg.ok,
-            msg.result,
-          );
-        } else if (cmd?.type === 'worktrees.sweep') {
-          // Terminal: the sweep ran (or was skipped); what it found is recorded, never retried blindly.
-          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
-          await applyWorktreeSweepResult(this.ctx, conn.workstationId, cmd.payload, msg.ok, msg.result);
-        } else if (cmd?.type === 'integration.run') {
-          // Terminal: the poll's answer is applied once (a failed poll shows in the schedule's history, the next
-          // cron fire asks again); never retried blindly.
-          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
-          await applyIntegrationResult(this.ctx, cmd.payload, msg.ok, msg.result, msg.error);
-        } else if (cmd?.type === 'repo.create') {
-          // Terminal like outbound.post: created and added to the project, or a failure on the desk (no blind retry).
-          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
-          await applyRepoCreateResult(
-            this.ctx,
-            conn.workstationId,
-            cmd.payload.requestId,
-            msg.ok,
-            msg.result,
-            msg.error,
-          );
-        } else if (cmd?.type === 'repo.clone') {
-          // Terminal: cloned, created, or a reason that shows in the Repositories tab (the manager retries there).
-          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
-          await applyRepoCloneResult(
-            this.ctx,
-            conn.workstationId,
-            cmd.payload,
-            msg.ok,
-            msg.result,
-            msg.error,
-          );
-        } else if (cmd?.type === 'env.ensure') {
-          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
-          await applyEnvEnsureResult(
-            this.ctx,
-            conn.workstationId,
-            cmd.payload,
-            msg.ok,
-            msg.result,
-            msg.error,
-          );
-        } else if (cmd?.type === 'forge.repos') {
-          // Terminal: the picker polls the stored answer.
-          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
-          await applyForgeReposResult(this.ctx, cmd.payload, msg.ok, msg.result, msg.error);
-        } else if (cmd?.type === 'repo.open_pr') {
-          // Terminal: the answer (pull request URL, nothing to do, or why not) is stored for the project settings.
-          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
-          await applyReleasePrResult(this.ctx, cmd.payload, msg.ok, msg.result, msg.error);
-        } else if (cmd?.type === 'claude.account.ensure') {
-          // Terminal: provisioning answered (ready, awaiting login, needs the owner, failed); never retried blindly.
-          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
-          await applyAccountEnsureResult(
-            this.ctx,
-            conn.workstationId,
-            cmd.payload,
-            msg.ok,
-            msg.result,
-            msg.error,
-          );
-        } else if (cmd?.type === 'runner.update.check') {
-          // Terminal: the outcome (up to date, found, paused, disabled, failed) is stored for the Workstations page.
-          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
-          await applyUpdateCheckResult(this.ctx, conn.workstationId, msg.ok, msg.result, msg.error);
-        } else if (cmd?.type === 'rights.verify') {
-          // Terminal. A failed or unreadable answer is kept on the command so the Workstations page can show it.
-          const problem = await applyRightsResult(
-            this.ctx,
-            conn.workstationId,
-            msg.ok,
-            msg.result,
-            msg.error,
-          );
-          if (problem)
-            await exec(
-              this.ctx.pool,
-              `UPDATE runner_commands SET status='failed', last_error=$2, done_at=$3 WHERE id=$1`,
-              [msg.commandId, problem.slice(0, 500), this.ctx.clock.now()],
-            );
-          else await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
-        } else if (cmd?.type === 'run.start') {
-          // Terminal: the runner is preparing the worktrees, or says why not (the environment then fails).
-          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
-          await applyRunStartResult(this.ctx, conn.workstationId, cmd.payload, msg.ok, msg.result, msg.error);
-        } else if (cmd?.type === 'run.restart') {
-          // Terminal: the runner started the restart, or says why not (shown on the environment).
-          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
-          await applyRunRestartResult(
-            this.ctx,
-            conn.workstationId,
-            cmd.payload,
-            msg.ok,
-            msg.result,
-            msg.error,
-          );
-        } else if (cmd?.type === 'repo.sync') {
-          // Terminal: the answer is the branch's state; "could not move it" is an answer, not a failure.
-          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
-          if (msg.ok) await applyRepoSyncStatus(this.ctx, conn.workstationId, msg.result);
-        } else if (cmd?.type === 'graph.org') {
-          // Terminal: the organization graph is built in the vault; the answer is counts and is only logged. A request that
-          // came in while it ran built nothing yet: it is asked again now.
-          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
-          if (cmd.payload.dirty === true && typeof cmd.payload.orgId === 'string')
-            await dispatchOrgGraph(this.ctx, cmd.payload.orgId).catch((err) =>
-              this.ctx.log.warn({ err }, 'could not queue the organization graph build'),
-            );
-        } else if (cmd?.type === 'graph.index' || cmd?.type === 'graph.update') {
-          // Terminal: the answer becomes graph STATUS (an event with ids and counts); a failure is retried by the hello pass.
-          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
-          await applyGraphResult(this.ctx, conn.workstationId, cmd.payload, msg.ok, msg.result, cmd.type);
-        } else if (cmd?.type === 'org.folder') {
-          // Terminal: a refusal is an answer; its reason shows on the Workstations page until the next success.
-          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
-          await applyOrgFolderResult(
-            this.ctx,
-            conn.workstationId,
-            cmd.payload,
-            msg.ok,
-            msg.result,
-            msg.error,
-          );
-        } else if (cmd?.type?.startsWith('integration.')) {
-          // Terminal: every answer (a status, a refusal sentence) is applied once and never retried blindly. The payload may
-          // hold a sealed envelope: it is emptied here.
-          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
-          await applyIntegrationCommandResult(
-            this.ctx,
-            conn.workstationId,
-            { id: msg.commandId, type: cmd.type, payload: cmd.payload },
-            msg.ok,
-            msg.result,
-            msg.error,
-          );
-        } else if (cmd?.type === 'recipe.inspect') {
-          // Terminal: what the workstation found in `delivery/` is recorded as an observation.
-          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
-          await applyInspectResult(this.ctx, conn.workstationId, cmd.payload, msg.ok, msg.result);
-        } else if (cmd?.type === 'recipe.write') {
-          // Terminal: the files were written (and are observed so the Owner can approve them) or refused with a reason.
-          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
-          await applyWriteResult(
-            this.ctx,
-            conn.workstationId,
-            cmd.payload,
-            msg.ok,
-            msg.result,
-            msg.commandId,
-            msg.error,
-          );
-        } else if (cmd?.type === 'deploy.probe') {
-          // Terminal: a probe is read-only and cheap, the wizard asks again with "Check again".
-          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
-          await applyProbeResult(this.ctx, conn.workstationId, cmd.payload, msg.ok, msg.result, msg.error);
-        } else if (
-          cmd?.type === 'deploy.hostkey' ||
-          cmd?.type === 'deploy.key' ||
-          cmd?.type === 'deploy.connect' ||
-          cmd?.type === 'deploy.revoke' ||
-          cmd?.type === 'deploy.prepare'
-        ) {
-          // Terminal: an answer (a refusal, a wrong password) is shown to the person, never retried blindly. The sealed
-          // sign-in of deploy.connect is forgotten here whatever the answer was.
-          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
-          await applyConnectResult(
-            this.ctx,
-            conn.workstationId,
-            { id: msg.commandId, type: cmd.type, payload: cmd.payload },
-            msg.ok,
-            msg.result,
-            msg.error,
-          );
-        } else if (cmd?.type === 'deploy.move') {
-          // Terminal: an answer (a refusal, a failed backup) is shown to the person; a step is never retried blindly.
-          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
-          await applyMoveResult(
-            this.ctx,
-            conn.workstationId,
-            { id: msg.commandId, payload: cmd.payload },
-            msg.ok,
-            msg.result,
-            msg.error,
-          );
-        } else if (cmd?.type === 'deploy.exec') {
-          // Terminal whatever the answer: a refusal or a failed deploy is an ANSWER, never a blind retry of a deploy.
-          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
-          await applyDeployResult(this.ctx, conn.workstationId, cmd.payload, msg.ok, msg.result, msg.error);
-        } else if (cmd?.type === 'deploy.secret.set') {
-          // Like the sudo password: the ciphertext is forgotten whatever the answer was.
-          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
-          await applyDeploySecretResult(
-            this.ctx,
-            conn.workstationId,
-            msg.commandId,
-            cmd.payload,
-            msg.ok,
-            msg.result,
-          );
-        } else if (cmd?.type === 'sudo.set') {
-          // The ciphertext is forgotten here (applySudoSetResult empties the payload) whatever the answer was.
-          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
-          await applySudoSetResult(
-            this.ctx,
-            conn.workstationId,
-            msg.commandId,
-            msg.ok,
-            msg.result,
-            String(cmd.payload.keyId ?? ''),
-          );
-        } else if (cmd?.type === 'provider.key.set' || cmd?.type === 'provider.key.clear') {
-          // The sealed key is forgotten whatever the answer was; only the fact is kept for the page.
-          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
-          await applyProviderKeyResult(
-            this.ctx,
-            conn.workstationId,
-            msg.commandId,
-            cmd.payload,
-            msg.ok,
-            msg.result,
-          );
-        } else if (cmd?.type === 'pack.credential.set') {
-          // The sealed deploy key or token is forgotten whatever the answer was; only the fact is kept.
-          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
-          await applyPackCredentialResult(
-            this.ctx,
-            conn.workstationId,
-            msg.commandId,
-            cmd.payload,
-            msg.ok,
-            msg.result,
-          );
-        } else if (cmd?.type === 'pack.author.save') {
-          // The sealed files are forgotten here; the outcome comes as packs.report (a refusal is an event for the author).
-          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
-          await applyAuthorSaveResult(
-            this.ctx,
-            conn.workstationId,
-            msg.commandId,
-            cmd.payload,
-            msg.ok,
-            msg.result,
-          );
-        } else if (cmd?.type === 'pack.read') {
-          // Sealed to the editor's one-time key: held in memory for the page, never stored.
-          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
-          applyReadResult(cmd.payload, msg.ok, msg.result);
-        } else if (cmd?.type === 'pack.persona.read') {
-          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
-          await applyPersonaReadResult(
-            this.ctx,
-            conn.workstationId,
-            msg.commandId,
-            cmd.payload,
-            msg.ok,
-            msg.result,
-          );
-        } else if (cmd?.type === 'pack.bundle.request') {
-          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
-          await applyBundleRequestResult(
-            this.ctx,
-            conn.workstationId,
-            msg.commandId,
-            cmd.payload,
-            msg.ok,
-            msg.result,
-          );
-        } else if (cmd?.type === 'pack.bundle.put') {
-          // The sealed files are forgotten; the workstation's own report says whether it holds the revision now.
-          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
-          await exec(this.ctx.pool, `UPDATE runner_commands SET payload='{}'::jsonb WHERE id=$1`, [
-            msg.commandId,
-          ]);
-        } else if (cmd?.type === 'provider.key.reseal') {
-          // Terminal: the answer carries the organization key sealed to another runner; it is relayed on, never kept here.
-          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
-          await applyResealResult(this.ctx, conn.workstationId, cmd.payload, msg.ok, msg.result);
-        } else if (cmd?.type === 'env.secret.set') {
-          // Like the sudo password: the ciphertext is forgotten whatever the answer was.
-          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
-          await applyTargetSecretResult(
-            this.ctx,
-            conn.workstationId,
-            msg.commandId,
-            cmd.payload,
-            msg.ok,
-            msg.result,
-          );
-        } else {
-          await completeCommand(this.ctx.pool, msg.commandId, msg.ok, msg.error, this.ctx.clock.now());
+          throw err;
         }
         return this.ack(conn, msg);
       }
@@ -761,6 +460,302 @@ export class RunnerHandlers {
   }
 
   /** A re-probe: store the runtimes and, when availability or sandbox state moved, tell the browsers (live refresh). */
+  /** What a runner's answer to a durable command does, by the command's type. Called once per command (see the claim). */
+  private async applyCommandResult(
+    conn: RunnerConn,
+    msg: RunnerToServerOf<'command.result'>,
+    cmd: Row,
+  ): Promise<void> {
+    if (cmd?.type === 'finalize.execute') {
+      // Terminal: the outcome (finalized, conflict or failure) is recorded on the card, never retried blindly.
+      await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      await applyFinalizeResult(
+        this.ctx,
+        conn.workstationId,
+        cmd.payload.cardId,
+        msg.ok,
+        msg.result,
+        msg.error,
+      );
+    } else if (cmd?.type === 'outbound.post') {
+      // Terminal like finalize: posted, or a failure that lands on the desk (the manager retries from the card).
+      await finishOutboundCommand(this.ctx, msg.commandId);
+      await applyOutboundResult(
+        this.ctx,
+        conn.workstationId,
+        cmd.payload.draftId,
+        msg.ok,
+        msg.result,
+        msg.error,
+      );
+    } else if (cmd?.type === 'branch.check_merged') {
+      // Terminal: "not merged yet" is an answer, not a failure; the phase pass asks again later.
+      await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      await applyBranchCheckResult(
+        this.ctx,
+        cmd.payload.cardId,
+        cmd.payload.workingBranch,
+        msg.ok,
+        msg.result,
+      );
+    } else if (cmd?.type === 'worktrees.sweep') {
+      // Terminal: the sweep ran (or was skipped); what it found is recorded, never retried blindly.
+      await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      await applyWorktreeSweepResult(this.ctx, conn.workstationId, cmd.payload, msg.ok, msg.result);
+    } else if (cmd?.type === 'integration.run') {
+      // Terminal: the poll's answer is applied once (a failed poll shows in the schedule's history, the next
+      // cron fire asks again); never retried blindly.
+      await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      await applyIntegrationResult(this.ctx, cmd.payload, msg.ok, msg.result, msg.error);
+    } else if (cmd?.type === 'repo.create') {
+      // Terminal like outbound.post: created and added to the project, or a failure on the desk (no blind retry).
+      await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      await applyRepoCreateResult(
+        this.ctx,
+        conn.workstationId,
+        cmd.payload.requestId,
+        msg.ok,
+        msg.result,
+        msg.error,
+      );
+    } else if (cmd?.type === 'repo.clone') {
+      // Terminal: cloned, created, or a reason that shows in the Repositories tab (the manager retries there).
+      await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      await applyRepoCloneResult(this.ctx, conn.workstationId, cmd.payload, msg.ok, msg.result, msg.error);
+    } else if (cmd?.type === 'env.ensure') {
+      await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      await applyEnvEnsureResult(this.ctx, conn.workstationId, cmd.payload, msg.ok, msg.result, msg.error);
+    } else if (cmd?.type === 'forge.repos') {
+      // Terminal: the picker polls the stored answer.
+      await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      await applyForgeReposResult(this.ctx, cmd.payload, msg.ok, msg.result, msg.error);
+    } else if (cmd?.type === 'repo.open_pr') {
+      // Terminal: the answer (pull request URL, nothing to do, or why not) is stored for the project settings.
+      await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      await applyReleasePrResult(this.ctx, cmd.payload, msg.ok, msg.result, msg.error);
+    } else if (cmd?.type === 'claude.account.ensure') {
+      // Terminal: provisioning answered (ready, awaiting login, needs the owner, failed); never retried blindly.
+      await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      await applyAccountEnsureResult(
+        this.ctx,
+        conn.workstationId,
+        cmd.payload,
+        msg.ok,
+        msg.result,
+        msg.error,
+      );
+    } else if (cmd?.type === 'runner.update.check') {
+      // Terminal: the outcome (up to date, found, paused, disabled, failed) is stored for the Workstations page.
+      await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      await applyUpdateCheckResult(this.ctx, conn.workstationId, msg.ok, msg.result, msg.error);
+    } else if (cmd?.type === 'rights.verify') {
+      // Terminal. A failed or unreadable answer is kept on the command so the Workstations page can show it.
+      const problem = await applyRightsResult(this.ctx, conn.workstationId, msg.ok, msg.result, msg.error);
+      if (problem)
+        await exec(
+          this.ctx.pool,
+          `UPDATE runner_commands SET status='failed', last_error=$2, done_at=$3 WHERE id=$1`,
+          [msg.commandId, problem.slice(0, 500), this.ctx.clock.now()],
+        );
+      else await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+    } else if (cmd?.type === 'run.start') {
+      // Terminal: the runner is preparing the worktrees, or says why not (the environment then fails).
+      await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      await applyRunStartResult(this.ctx, conn.workstationId, cmd.payload, msg.ok, msg.result, msg.error);
+    } else if (cmd?.type === 'run.restart') {
+      // Terminal: the runner started the restart, or says why not (shown on the environment).
+      await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      await applyRunRestartResult(this.ctx, conn.workstationId, cmd.payload, msg.ok, msg.result, msg.error);
+    } else if (cmd?.type === 'repo.sync') {
+      // Terminal: the answer is the branch's state; "could not move it" is an answer, not a failure.
+      await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      if (msg.ok) await applyRepoSyncStatus(this.ctx, conn.workstationId, msg.result);
+    } else if (cmd?.type === 'graph.org') {
+      // Terminal: the organization graph is built in the vault; the answer is counts and is only logged. A request that
+      // came in while it ran built nothing yet: it is asked again now.
+      await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      if (cmd.payload.dirty === true && typeof cmd.payload.orgId === 'string')
+        await dispatchOrgGraph(this.ctx, cmd.payload.orgId).catch((err) =>
+          this.ctx.log.warn({ err }, 'could not queue the organization graph build'),
+        );
+    } else if (cmd?.type === 'graph.index' || cmd?.type === 'graph.update') {
+      // Terminal: the answer becomes graph STATUS (an event with ids and counts); a failure is retried by the hello pass.
+      await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      await applyGraphResult(this.ctx, conn.workstationId, cmd.payload, msg.ok, msg.result, cmd.type);
+    } else if (cmd?.type === 'org.folder') {
+      // Terminal: a refusal is an answer; its reason shows on the Workstations page until the next success.
+      await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      await applyOrgFolderResult(this.ctx, conn.workstationId, cmd.payload, msg.ok, msg.result, msg.error);
+    } else if (cmd?.type?.startsWith('integration.')) {
+      // Terminal: every answer (a status, a refusal sentence) is applied once and never retried blindly. The payload may
+      // hold a sealed envelope: it is emptied here.
+      await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      await applyIntegrationCommandResult(
+        this.ctx,
+        conn.workstationId,
+        { id: msg.commandId, type: cmd.type, payload: cmd.payload },
+        msg.ok,
+        msg.result,
+        msg.error,
+      );
+    } else if (cmd?.type === 'recipe.inspect') {
+      // Terminal: what the workstation found in `delivery/` is recorded as an observation.
+      await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      await applyInspectResult(this.ctx, conn.workstationId, cmd.payload, msg.ok, msg.result);
+    } else if (cmd?.type === 'recipe.write') {
+      // Terminal: the files were written (and are observed so the Owner can approve them) or refused with a reason.
+      await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      await applyWriteResult(
+        this.ctx,
+        conn.workstationId,
+        cmd.payload,
+        msg.ok,
+        msg.result,
+        msg.commandId,
+        msg.error,
+      );
+    } else if (cmd?.type === 'deploy.probe') {
+      // Terminal: a probe is read-only and cheap, the wizard asks again with "Check again".
+      await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      await applyProbeResult(this.ctx, conn.workstationId, cmd.payload, msg.ok, msg.result, msg.error);
+    } else if (
+      cmd?.type === 'deploy.hostkey' ||
+      cmd?.type === 'deploy.key' ||
+      cmd?.type === 'deploy.connect' ||
+      cmd?.type === 'deploy.revoke' ||
+      cmd?.type === 'deploy.prepare'
+    ) {
+      // Terminal: an answer (a refusal, a wrong password) is shown to the person, never retried blindly. The sealed
+      // sign-in of deploy.connect is forgotten here whatever the answer was.
+      await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      await applyConnectResult(
+        this.ctx,
+        conn.workstationId,
+        { id: msg.commandId, type: cmd.type, payload: cmd.payload },
+        msg.ok,
+        msg.result,
+        msg.error,
+      );
+    } else if (cmd?.type === 'deploy.move') {
+      // Terminal: an answer (a refusal, a failed backup) is shown to the person; a step is never retried blindly.
+      await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      await applyMoveResult(
+        this.ctx,
+        conn.workstationId,
+        { id: msg.commandId, payload: cmd.payload },
+        msg.ok,
+        msg.result,
+        msg.error,
+      );
+    } else if (cmd?.type === 'deploy.exec') {
+      // Terminal whatever the answer: a refusal or a failed deploy is an ANSWER, never a blind retry of a deploy.
+      await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      await applyDeployResult(this.ctx, conn.workstationId, cmd.payload, msg.ok, msg.result, msg.error);
+    } else if (cmd?.type === 'deploy.secret.set') {
+      // Like the sudo password: the ciphertext is forgotten whatever the answer was.
+      await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      await applyDeploySecretResult(
+        this.ctx,
+        conn.workstationId,
+        msg.commandId,
+        cmd.payload,
+        msg.ok,
+        msg.result,
+      );
+    } else if (cmd?.type === 'sudo.set') {
+      // The ciphertext is forgotten here (applySudoSetResult empties the payload) whatever the answer was.
+      await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      await applySudoSetResult(
+        this.ctx,
+        conn.workstationId,
+        msg.commandId,
+        msg.ok,
+        msg.result,
+        String(cmd.payload.keyId ?? ''),
+      );
+    } else if (cmd?.type === 'provider.key.set' || cmd?.type === 'provider.key.clear') {
+      // The sealed key is forgotten whatever the answer was; only the fact is kept for the page.
+      await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      await applyProviderKeyResult(
+        this.ctx,
+        conn.workstationId,
+        msg.commandId,
+        cmd.payload,
+        msg.ok,
+        msg.result,
+      );
+    } else if (cmd?.type === 'pack.credential.set') {
+      // The sealed deploy key or token is forgotten whatever the answer was; only the fact is kept.
+      await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      await applyPackCredentialResult(
+        this.ctx,
+        conn.workstationId,
+        msg.commandId,
+        cmd.payload,
+        msg.ok,
+        msg.result,
+      );
+    } else if (cmd?.type === 'pack.author.save') {
+      // The sealed files are forgotten here; the outcome comes as packs.report (a refusal is an event for the author).
+      await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      await applyAuthorSaveResult(
+        this.ctx,
+        conn.workstationId,
+        msg.commandId,
+        cmd.payload,
+        msg.ok,
+        msg.result,
+      );
+    } else if (cmd?.type === 'pack.read') {
+      // Sealed to the editor's one-time key: held in memory for the page, never stored.
+      await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      applyReadResult(cmd.payload, msg.ok, msg.result);
+    } else if (cmd?.type === 'pack.persona.read') {
+      await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      await applyPersonaReadResult(
+        this.ctx,
+        conn.workstationId,
+        msg.commandId,
+        cmd.payload,
+        msg.ok,
+        msg.result,
+      );
+    } else if (cmd?.type === 'pack.bundle.request') {
+      await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      await applyBundleRequestResult(
+        this.ctx,
+        conn.workstationId,
+        msg.commandId,
+        cmd.payload,
+        msg.ok,
+        msg.result,
+      );
+    } else if (cmd?.type === 'pack.bundle.put') {
+      // The sealed files are forgotten; the workstation's own report says whether it holds the revision now.
+      await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      await exec(this.ctx.pool, `UPDATE runner_commands SET payload='{}'::jsonb WHERE id=$1`, [
+        msg.commandId,
+      ]);
+    } else if (cmd?.type === 'provider.key.reseal') {
+      // Terminal: the answer carries the organization key sealed to another runner; it is relayed on, never kept here.
+      await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      await applyResealResult(this.ctx, conn.workstationId, cmd.payload, msg.ok, msg.result);
+    } else if (cmd?.type === 'env.secret.set') {
+      // Like the sudo password: the ciphertext is forgotten whatever the answer was.
+      await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      await applyTargetSecretResult(
+        this.ctx,
+        conn.workstationId,
+        msg.commandId,
+        cmd.payload,
+        msg.ok,
+        msg.result,
+      );
+    } else {
+      await completeCommand(this.ctx.pool, msg.commandId, msg.ok, msg.error, this.ctx.clock.now());
+    }
+  }
+
   private async runtimesReport(conn: RunnerConn, runtimes: RunnerToServerOf<'hello'>['runtimes']) {
     const { ctx } = this;
     const before = await one(ctx.pool, 'SELECT runtimes FROM workstations WHERE id=$1', [conn.workstationId]);

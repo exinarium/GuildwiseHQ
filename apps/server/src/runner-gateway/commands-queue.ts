@@ -76,7 +76,7 @@ export async function completeCommand(
   // Failed: back to pending for a retry on the next delivery, until the attempt limit.
   await exec(
     db,
-    `UPDATE runner_commands SET last_error=$2,
+    `UPDATE runner_commands SET last_error=$2, answering_at=NULL,
             status = CASE WHEN attempts >= $3 THEN 'failed' ELSE 'pending' END WHERE id=$1`,
     [id, error ?? 'failed', MAX_COMMAND_ATTEMPTS],
   );
