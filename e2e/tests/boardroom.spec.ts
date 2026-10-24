@@ -61,7 +61,10 @@ test('the owner starts a boardroom: the cast, the format and the models, and rou
     .fill('Should we launch a pilot with our first customer? [[decide]] [[converge]]');
   await dialog.getByLabel('Brief (optional)').fill('We have one friendly customer and eight weeks.');
   await dialog.getByLabel('Format').selectOption('pre_mortem');
-  await dialog.getByRole('checkbox', { name: "Devil's Advocate" }).check();
+  // the Optimist and the Devil's Advocate are fixed seats: always in the cast, locked
+  await expect(dialog.getByTestId('fixed-seat-optimist')).toBeVisible();
+  await expect(dialog.getByTestId('fixed-seat-devils-advocate')).toBeVisible();
+  await expect(dialog.getByTestId('start-boardroom')).toBeDisabled();
   await dialog.getByRole('checkbox', { name: 'User Advocate' }).check();
   await dialog.getByRole('checkbox', { name: 'Cost Hawk' }).check();
   await dialog.getByLabel('Name', { exact: true }).fill('Regulator');
@@ -70,8 +73,9 @@ test('the owner starts a boardroom: the cast, the format and the models, and rou
     .fill('A cautious compliance officer who asks what could get us fined');
   await dialog.getByTestId('add-adhoc').click();
   await expect(dialog.getByRole('list', { name: 'Chosen cast' })).toContainText('Regulator');
+  await expect(dialog.getByTestId('cast-counter')).toContainText('3');
   await dialog.getByLabel('Round cap').selectOption('6');
-  await dialog.getByLabel('Budget in USD (optional)').fill('25');
+  await dialog.getByLabel('Cost limit in USD (optional)').fill('25');
   for (const l of ['Personas run on', 'The Chair runs on', 'Minutes are written by'])
     await dialog.getByLabel(l).selectOption({ label: 'Mock: Mock' });
   await dialog.getByTestId('start-boardroom').click();
@@ -84,7 +88,7 @@ test('the owner starts a boardroom: the cast, the format and the models, and rou
   await expect(page.getByTestId('board-turn')).toHaveCount(0);
   await page.screenshot({ path: `${paths.vaults}/boardroom-sealed.png`, fullPage: true });
   // revealed together
-  await expect(page.getByTestId('board-turn')).toHaveCount(4, { timeout: 90_000 });
+  await expect(page.getByTestId('board-turn')).toHaveCount(5, { timeout: 120_000 });
   await expect(sealed).toHaveCount(0);
   await expect(page.getByText('All the first answers are in')).toBeVisible();
   await expect(page.getByTestId('round-separator').first()).toContainText(

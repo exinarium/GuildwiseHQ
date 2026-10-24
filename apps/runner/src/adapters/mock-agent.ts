@@ -1916,6 +1916,16 @@ const BOARD_VOICES: Record<
     note: 'Adoption is assumed, not shown: test with ten paying users first',
     risk: true,
   },
+  optimist: {
+    first:
+      'This can work, and here is why: the need is real, we already have a friendly customer, and eight weeks is enough for a first proof. If it goes right, the pilot becomes the case study that sells the next ten.',
+    reply:
+      'The risks raised are fair and each has a way through: a small first step, a safeguard, a cheap test. None of them says no; they say how.',
+    dissent:
+      'Arguing for the upside once more: the biggest risk may be doing too little. A narrow, fast launch keeps the downside small and the learning large.',
+    column: 'ideas',
+    note: 'Start with the one customer who already wants it',
+  },
   'user-advocate': {
     first:
       'Start from the person using it on a bad day. If it takes more than two clicks or needs a manual, it will not be used. I want one clear promise and a first run that works without help.',
@@ -2034,11 +2044,13 @@ async function boardMain(): Promise<number> {
     if (header.format === 'option_scoring' && header.kind === 'independent') {
       run([
         'board',
-        'add',
-        '--column',
-        'decisions',
-        '--text',
-        `Option A: ${3 + (Number(header.index ?? 0) % 3)}/5 - ${v.note.slice(0, 80)}`,
+        'score',
+        '--option',
+        'Option A',
+        '--score',
+        String(1 + (Number(header.index ?? 0) % 5)),
+        '--why',
+        v.note.slice(0, 80),
       ]);
     } else {
       run(['board', 'add', '--column', header.kind === 'dissent' ? 'questions' : v.column, '--text', v.note]);
@@ -2055,7 +2067,8 @@ async function boardMain(): Promise<number> {
           ? 'Cost Hawk|Cap the pilot at four weeks and one person'
           : "Devil's Advocate|Prove demand with paying users before building",
         '--position',
-        'Creative Strategist|A bold pilot is the fastest way to learn',
+        // the Optimist is a fixed seat, so it is always in the room
+        'Optimist|A bold pilot is the fastest way to learn',
       ]);
     return finish();
   }
@@ -2103,7 +2116,8 @@ async function boardMain(): Promise<number> {
 
   if (header.role === 'cast') {
     const keys = (header.personas ?? []) as string[];
-    const want = ['devils-advocate', 'user-advocate', 'cost-hawk'].filter((k) => keys.includes(k));
+    // the Optimist and the Devil's Advocate are fixed seats: the suggestion is for the other voices (three or four)
+    const want = ['user-advocate', 'cost-hawk', 'creative-strategist'].filter((k) => keys.includes(k));
     for (const k of want) run(['board', 'cast', '--persona', k, '--why', 'A voice this topic needs.']);
     run([
       'board',

@@ -252,14 +252,14 @@ describe('discovery helpers', () => {
     );
   });
 
-  it('puts Discovery and Documents in the navigation for managers', () => {
+  it('puts Discovery and Documents in the navigation for every member', () => {
     const manager = buildNav({ projectKey: null, canManage: true });
     expect(manager.sections.flatMap((s) => s.items).map((i) => i.id)).toEqual(
       expect.arrayContaining(['discovery', 'documents']),
     );
     const member = buildNav({ projectKey: null, canManage: false });
     const ids = member.sections.flatMap((s) => s.items).map((i) => i.id);
-    expect(ids).not.toContain('discovery');
+    expect(ids).toContain('discovery');
     expect(ids).toContain('documents');
   });
 });

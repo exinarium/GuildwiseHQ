@@ -957,10 +957,7 @@ describe('suggesting a cast and saved rooms', () => {
   it('seats a real agent next to the personas', async () => {
     const ag = await w.hire(`Rae${Math.random().toString(36).slice(2, 6)}`, 'ba', 'senior');
     const st = await create({
-      cast: [
-        { kind: 'agent', refId: ag.agent?.id ?? ag.id, seat: 'Business analyst' },
-        ...CAST.slice(0, 4),
-      ],
+      cast: [{ kind: 'agent', refId: ag.agent?.id ?? ag.id, seat: 'Business analyst' }, ...CAST.slice(0, 4)],
       roundCap: 2,
     });
     const starts = await allSeats(st.threadId);

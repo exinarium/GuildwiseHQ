@@ -315,7 +315,7 @@ describe('boardroom helpers', () => {
     expect(completeMention('what about @co', 'cost-hawk')).toBe('what about @cost-hawk ');
   });
 
-  it('puts Boardroom in the navigation for managers only', () => {
+  it('puts Boardroom in the navigation for every member', () => {
     expect(
       buildNav({ projectKey: null, canManage: true })
         .sections.flatMap((s) => s.items)
@@ -325,7 +325,7 @@ describe('boardroom helpers', () => {
       buildNav({ projectKey: null, canManage: false })
         .sections.flatMap((s) => s.items)
         .map((i) => i.id),
-    ).not.toContain('boardroom');
+    ).toContain('boardroom');
   });
 });
 

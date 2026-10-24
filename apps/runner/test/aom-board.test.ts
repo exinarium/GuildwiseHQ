@@ -224,6 +224,21 @@ describe('boardroom turns on the runner: the board verbs reach the server, nothi
       await run({ role: 'speaker', slug: 'cost-hawk', kind: 'independent', format: 'open', index: 0 }),
     ).toEqual(['board.add']);
     expect(rpcs[0]?.params).toMatchObject({ column: 'risks' });
+    // the Optimist speaks in its own voice; option scoring uses the score verb
+    expect(
+      await run({ role: 'speaker', slug: 'optimist', kind: 'independent', format: 'open', index: 0 }),
+    ).toEqual(['board.add']);
+    expect(rpcs[0]?.params).toMatchObject({ column: 'ideas' });
+    expect(
+      await run({
+        role: 'speaker',
+        slug: 'optimist',
+        kind: 'independent',
+        format: 'option_scoring',
+        index: 0,
+      }),
+    ).toEqual(['board.score']);
+    expect(rpcs[0]?.params).toMatchObject({ option: 'Option A', score: 1 });
     // the devil's advocate records a disagreement in a discussion round
     expect(
       await run({ role: 'speaker', slug: 'devils-advocate', kind: 'discussion', format: 'open', index: 1 }),
@@ -256,12 +271,16 @@ describe('boardroom turns on the runner: the board verbs reach the server, nothi
         '[[converge]]',
       ),
     ).toEqual(['board.converge', 'board.next']);
-    expect(await run({ role: 'cast', personas: ['devils-advocate', 'user-advocate', 'cost-hawk'] })).toEqual([
-      'board.cast',
-      'board.cast',
-      'board.cast',
-      'board.cast',
-    ]);
+    // the cast turn suggests the other voices: the Optimist and the Devil's Advocate are fixed seats
+    expect(
+      await run({
+        role: 'cast',
+        personas: ['optimist', 'devils-advocate', 'user-advocate', 'cost-hawk', 'creative-strategist'],
+      }),
+    ).toEqual(['board.cast', 'board.cast', 'board.cast', 'board.cast']);
+    const cast = rpcs.slice(-4).map((r) => r.params.persona ?? r.params.name);
+    expect(cast).not.toContain('optimist');
+    expect(cast).not.toContain('devils-advocate');
     expect(await run({ role: 'minutes', people: ['Cost Hawk', 'User Advocate'] })).toEqual(['board.minutes']);
     const min = h.server
       .of('rpc.request')

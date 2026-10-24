@@ -28,8 +28,8 @@ import {
   shellDeny,
   toolchainReadPaths,
 } from './claude-policy.ts';
-import { withFileLock } from './login-lock.ts';
 import { CodexStreamParser, codexUsageLimit, isCodexAuthFailureText } from './codex-stream-parser.ts';
+import { withFileLock } from './login-lock.ts';
 import { spawnSession } from './process-session.ts';
 import { SECRET_FILE_GLOBS } from './read-only-dirs.ts';
 import type {

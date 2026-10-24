@@ -76,8 +76,8 @@ test('the owner starts a discovery and the analyst asks the first question', asy
   await dialog.getByLabel('Title').fill('Invoicing for freelancers');
   await dialog.getByLabel('Starting idea (optional)').fill('Invoices that chase late payers by themselves');
   await dialog.getByLabel('Project (optional)').selectOption({ label: 'DSC: Discovery project' });
-  await dialog.getByLabel('Time box').selectOption('60');
-  await dialog.getByLabel('Budget in USD (optional)').fill('25');
+  await dialog.getByLabel('Time limit').selectOption('60');
+  await dialog.getByLabel('Cost limit in USD (optional)').fill('25');
   await dialog.getByRole('button', { name: 'Start' }).click();
   await expect(page).toHaveURL(/\/discovery\/[0-9a-f-]{36}$/);
   sessionUrl = page.url();

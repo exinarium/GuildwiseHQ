@@ -109,22 +109,21 @@ export function buildNav(opts: {
   work.push({ id: 'desk', label: 'Desk', to: '/desk', icon: Inbox });
   if (on('integrations') && canManage)
     work.push({ id: 'intake', label: 'Intake', to: '/intake', icon: BriefcaseBusiness });
-  if (canManage)
-    work.push({
-      id: 'discovery',
-      label: 'Discovery',
-      to: '/discovery',
-      icon: Compass,
-      testId: 'nav-discovery',
-    });
-  if (canManage)
-    work.push({
-      id: 'boardroom',
-      label: 'Boardroom',
-      to: '/boardroom',
-      icon: Users,
-      testId: 'nav-boardroom',
-    });
+  // Every member can start a Discovery or Boardroom session (R2); each is private to the people in it.
+  work.push({
+    id: 'discovery',
+    label: 'Discovery',
+    to: '/discovery',
+    icon: Compass,
+    testId: 'nav-discovery',
+  });
+  work.push({
+    id: 'boardroom',
+    label: 'Boardroom',
+    to: '/boardroom',
+    icon: Users,
+    testId: 'nav-boardroom',
+  });
   work.push(
     { id: 'schedules', label: 'Automations', to: '/automations', icon: Timer },
     { id: 'projects', label: 'Projects', to: '/projects', icon: FolderKanban },

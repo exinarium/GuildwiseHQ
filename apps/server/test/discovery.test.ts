@@ -881,7 +881,9 @@ describe('PRD flow: draft, validate, approve, hand to the BA', () => {
       await q(`SELECT 1 FROM desk_items WHERE subkind='handoff_needs_ba' AND status='open'`),
     ).toHaveLength(1);
     // a second click is harmless, and nothing starts while there is no BA
-    expect((await raw('POST', `/api/discovery/${s.threadId}/hand-to-ba`)).body).toMatchObject({ queued: true });
+    expect((await raw('POST', `/api/discovery/${s.threadId}/hand-to-ba`)).body).toMatchObject({
+      queued: true,
+    });
     await w.t.app.ctx.services.discovery.sweep();
     expect((await get(s.threadId)).config.intakeId ?? null).toBeNull();
     // the BA is back: the sweep starts the intake (once, with the PRD linked)
