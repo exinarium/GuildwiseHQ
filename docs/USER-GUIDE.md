@@ -463,6 +463,10 @@ On **Organization, Members** you see everybody with their role.
 
 **To change a role or remove a person:** use the role selector and the remove button in the Members list. When somebody is removed, their agents are handed to you and any cards those agents held go back into the queue. Anyone except the Owner can leave an organization. The Owner must hand over ownership first (**General, Transfer ownership**, which asks for your password).
 
+**Removing a person runs an offboarding checklist.** The remove dialog lists it before you confirm, and a report shows what was done. Notification links of this organization are revoked; the organization's packs come off their workstations and the sealed copies of pack credentials are deleted; the organization's key is cleared from their workstations (rotate it if you do not trust them: a machine that is unlinked never receives the clear command); their agents and cards go to the Owner; Discovery and Boardroom sessions and organization packs they owned move to **you** (to the Owner when they left or were deactivated); private chats and private packs are kept for **30 days** and then deleted. If this was the person's last organization, they are also signed out everywhere, their workstations are unlinked and their notification devices removed; if they still belong to another organization, those stay.
+
+**Audit log export.** **Organization, Audit log** (Owner and Admins) downloads what people did in the organization as CSV or JSON, for a date range (up to a year at a time) and optionally one person. It holds actions (decisions, changes, additions, removals, exports), not message text, and anything that looks like a secret is masked. Each export is itself recorded.
+
 **Guests** are people from other organizations who work in a project you shared. The **Guests** tab lists them and the projects they can reach (see 4.3, sharing a project).
 
 ![The Guests tab](guide/assets/org-guests.jpg)
@@ -661,6 +665,10 @@ What hygiene cannot resolve, it does not force. For a conflict while pulling, th
 
 > **In the app:** watch the video "Your agents" (Help, "Agents", `/help/agents#hiring`). The page's own help panel (**?** in the top bar) has it too, under **Watch the video**.
 
+**What it may do.** **What it may do** on an agent's card shows, in one place, its tools, the repositories and projects it can reach, its provider and which key pays, who it may delegate to (including what its role gives it and what you excluded), its playbooks, skills and packs, what it has cost and the budgets that apply. Below that are its **approval gates**: switch on **Ask me before** merge and push, deploy, delegation or running a playbook, and that action pauses and lands on your Desk as an approval; the agent goes on after you approve it (once per approval; it is told to carry on and try the same command again). Outbound updates always ask. Gating pack scripts is not available yet. No agent has a gate until you set one. Whoever manages the agent can switch a gate on; only an Owner or Admin switches it off. The CEO keeps its own policy.
+
+**Packs say what they need.** A pack or one of its skills, personas or playbooks can declare scopes (such as `shell`, `web`, `commit`). When you grant one to an agent that lacks a scope, you see what is missing and must choose **Grant anyway**; granting does not give the agent the permission.
+
 ### 4.5 The desk, the ledger and standing orders
 
 The **Desk** is where every question and approval reaches you. Cards do not move past a question until you answer.
@@ -692,6 +700,8 @@ The **Ledger** page lists everything and is searchable, and has a **Project** fi
 ![The ledger](guide/assets/ledger.jpg)
 
 > **In the app:** Help, "The Decision desk" (`/help/desk`) and "Ledger and vaults" (`/help/ledger-and-vaults`).
+
+**Approve from the notification.** A push for an approval has **Approve** and **Reject** buttons, and a push for a question with options has its first two options (phones show two at most; the notification itself opens the Desk for the rest). A button opens a small page that asks you to sign in, shows the item and waits for you to press the button: nothing happens just from opening it. The link works once, for 15 minutes, only for you. It is not offered for code approvals (you see the diff first) or items that need more input. Every use is on the audit log.
 
 #### Testing without an environment
 

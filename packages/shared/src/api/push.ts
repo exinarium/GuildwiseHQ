@@ -129,11 +129,23 @@ export const PushTestResultSchema = z.object({ sent: z.number().int(), failed: z
 export type PushTestResult = z.infer<typeof PushTestResultSchema>;
 
 /** What the service worker receives (JSON in the push payload). */
+/** A button on the notification (Approve, Reject, a quick option): its `url` is the one-tap confirm page, never an action by itself. */
+export const PushActionSchema = z.object({
+  /** The id the service worker gets in `notificationclick` (`approve`, `reject`, `o1`). */
+  action: z.string().min(1).max(40),
+  title: z.string().min(1).max(40),
+  /** Same-origin path of the confirm page (`/m/desk/<token>`). */
+  url: z.string().min(1).max(400),
+});
+export type PushAction = z.infer<typeof PushActionSchema>;
+
 export const PushPayloadSchema = z.object({
   title: z.string(),
   body: z.string(),
   url: z.string(),
   tag: z.string(),
   badge: z.number().int().nonnegative(),
+  /** At most two (what the push services show); older service workers ignore the field. */
+  actions: z.array(PushActionSchema).max(2).optional(),
 });
 export type PushPayload = z.infer<typeof PushPayloadSchema>;

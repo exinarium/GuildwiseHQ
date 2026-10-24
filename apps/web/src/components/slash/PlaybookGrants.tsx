@@ -1,5 +1,7 @@
 import { useMemo, useState } from 'react';
+import { scopesMissing } from '../../api/queries/governance.ts';
 import { usePlaybookGrants, useSetPlaybookGrant, useSlashCommands } from '../../api/queries/playbooks.ts';
+import { ScopeConfirm, type ScopeInfo } from '../governance/ScopeConfirm.tsx';
 import { Callout, ErrorBox } from '../ui.tsx';
 
 /**
@@ -12,6 +14,8 @@ function PlaybookGrantsBody({ agentId }: { agentId: string }) {
   const set = useSetPlaybookGrant(agentId);
   const menu = useSlashCommands('session');
   const [pick, setPick] = useState('');
+  // S-B1: the playbook needs a scope this agent lacks: shown, and granted only when the granter confirms
+  const [needs, setNeeds] = useState<{ key: string; info: ScopeInfo } | null>(null);
   const granted = grants.data?.keys ?? [];
   const canManage = grants.data?.canManage ?? false;
   const nameOf = useMemo(() => new Map((menu.data?.items ?? []).map((i) => [i.key, i.name])), [menu.data]);
@@ -73,14 +77,25 @@ function PlaybookGrantsBody({ agentId }: { agentId: string }) {
             <option value="">Choose a playbook</option>
             {options.map((o) => (
               <option key={o.key} value={o.key}>
-                {o.name} ({o.key})
+                {o.name} ({o.key}){o.scopes?.length ? ` · needs ${o.scopes.join(', ')}` : ''}
               </option>
             ))}
           </select>
           <button
             type="button"
             disabled={!pick || set.isPending}
-            onClick={() => set.mutate({ key: pick, granted: true }, { onSuccess: () => setPick('') })}
+            onClick={() =>
+              set.mutate(
+                { key: pick, granted: true },
+                {
+                  onSuccess: () => setPick(''),
+                  onError: (e) => {
+                    const info = scopesMissing(e);
+                    if (info) setNeeds({ key: pick, info });
+                  },
+                },
+              )
+            }
             className="h-9 rounded-control bg-brand px-3 text-sm text-brand-fg disabled:bg-sunken disabled:text-disabled-fg"
           >
             Allow
@@ -89,7 +104,25 @@ function PlaybookGrantsBody({ agentId }: { agentId: string }) {
       ) : (
         <Callout tone="info">Only an Owner, an Admin or the agent&apos;s manager changes this list.</Callout>
       )}
-      <ErrorBox error={set.error} />
+      <ErrorBox error={scopesMissing(set.error) ? null : set.error} />
+      <ScopeConfirm
+        info={needs?.info ?? null}
+        what={`"${nameOf.get(needs?.key ?? '') ?? needs?.key ?? 'This playbook'}"`}
+        pending={set.isPending}
+        onCancel={() => setNeeds(null)}
+        onConfirm={() =>
+          needs &&
+          set.mutate(
+            { key: needs.key, granted: true, confirmScopes: true },
+            {
+              onSuccess: () => {
+                setNeeds(null);
+                setPick('');
+              },
+            },
+          )
+        }
+      />
     </section>
   );
 }

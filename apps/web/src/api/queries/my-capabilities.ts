@@ -55,8 +55,12 @@ export const useSetMyPackVisibility = () =>
   );
 export const useRemoveMyPack = () => useMyPackMutation((id: string) => del(`/my-capabilities/${id}`));
 export const useGrantPackAgent = () =>
-  useMyPackMutation((v: { id: string; agentId: string; granted: boolean }) =>
-    put(`/my-capabilities/${v.id}/agents`, { agentId: v.agentId, granted: v.granted }),
+  useMyPackMutation((v: { id: string; agentId: string; granted: boolean; confirmScopes?: boolean }) =>
+    put(`/my-capabilities/${v.id}/agents`, {
+      agentId: v.agentId,
+      granted: v.granted,
+      ...(v.confirmScopes ? { confirmScopes: true } : {}),
+    }),
   );
 
 interface RunnerKey {

@@ -3,6 +3,7 @@ import {
   type DelegateGrantDto,
   type DelegateOwnerKind,
   type DelegateProfile,
+  type SetDelegateGrantRequest,
 } from '@aom/shared';
 import { useState } from 'react';
 import { useMe } from '../../api/queries/auth.ts';
@@ -12,7 +13,9 @@ import {
   useSetDelegateExclusion,
   useSetDelegateGrant,
 } from '../../api/queries/delegation.ts';
+import { scopesMissing } from '../../api/queries/governance.ts';
 import { useWorkstations } from '../../api/queries/workstations.ts';
+import { ScopeConfirm, type ScopeInfo } from '../governance/ScopeConfirm.tsx';
 import { ModelSelect, unionExtras, unionProviders } from '../ModelSelect.tsx';
 import { Badge, Callout, ErrorBox } from '../ui.tsx';
 
@@ -124,6 +127,8 @@ function Body({ kind, id }: { kind: DelegateOwnerKind; id: string }) {
   const exclusion = useSetDelegateExclusion(id);
   const canExclude = kind === 'agent' && (grants.data?.canExclude ?? false);
   const [pick, setPick] = useState('');
+  // S-B1: a persona that needs a scope the agent lacks is granted only on confirmation
+  const [needs, setNeeds] = useState<{ req: SetDelegateGrantRequest; info: ScopeInfo } | null>(null);
   const [maxCalls, setMaxCalls] = useState<number>(DELEGATE_GRANT_LIMITS.defaultMaxCalls);
   const [timeoutSec, setTimeoutSec] = useState<number>(DELEGATE_GRANT_LIMITS.defaultTimeoutSec);
   const [ceiling, setCeiling] = useState<'' | DelegateProfile>('');
@@ -277,19 +282,23 @@ function Body({ kind, id }: { kind: DelegateOwnerKind; id: string }) {
             onClick={() => {
               if (!chosen) return;
               const [runtime, ...rest] = model.split('/');
-              set.mutate(
-                {
-                  targetKind: chosen.targetKind,
-                  targetKey: chosen.targetKey,
-                  grant: {
-                    maxCalls,
-                    timeoutSec,
-                    maxProfile: ceiling === '' ? null : ceiling,
-                    model: model && runtime && rest.length ? { runtime, model: rest.join('/') } : null,
-                  },
+              const req: SetDelegateGrantRequest = {
+                targetKind: chosen.targetKind,
+                targetKey: chosen.targetKey,
+                grant: {
+                  maxCalls,
+                  timeoutSec,
+                  maxProfile: ceiling === '' ? null : ceiling,
+                  model: model && runtime && rest.length ? { runtime, model: rest.join('/') } : null,
                 },
-                { onSuccess: () => setPick('') },
-              );
+              };
+              set.mutate(req, {
+                onSuccess: () => setPick(''),
+                onError: (e) => {
+                  const info = scopesMissing(e);
+                  if (info) setNeeds({ req, info });
+                },
+              });
             }}
             className="h-9 rounded-control bg-brand px-3 text-sm text-brand-fg disabled:bg-sunken disabled:text-disabled-fg"
           >
@@ -305,7 +314,25 @@ function Body({ kind, id }: { kind: DelegateOwnerKind; id: string }) {
               : 'Only the creator of the session, an Owner or an Admin changes this list.'}
         </Callout>
       )}
-      <ErrorBox error={set.error ?? exclusion.error} />
+      <ErrorBox error={(scopesMissing(set.error) ? null : set.error) ?? exclusion.error} />
+      <ScopeConfirm
+        info={needs?.info ?? null}
+        what={`"${needs?.req.targetKey ?? 'This persona'}"`}
+        pending={set.isPending}
+        onCancel={() => setNeeds(null)}
+        onConfirm={() =>
+          needs &&
+          set.mutate(
+            { ...needs.req, confirmScopes: true },
+            {
+              onSuccess: () => {
+                setNeeds(null);
+                setPick('');
+              },
+            },
+          )
+        }
+      />
     </section>
   );
 }

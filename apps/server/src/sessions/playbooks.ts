@@ -3,6 +3,7 @@ import {
   builtinCapabilities,
   type CapabilityMeta,
   isTemplateTagged,
+  normalizeScopes,
   PLAYBOOK_LIMITS,
   type PlaybookGrantsDto,
   type PlaybookRunParams,
@@ -26,6 +27,8 @@ import { one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
+import { gateAction } from '../governance/gates.ts';
+import { agentScopeFacts, assertScopesConfirmed, scopeWarning } from '../governance/scopes.ts';
 
 /** `[ok, result, error]`, as every rpc handler of the gateway answers. */
 type Reply = [boolean, unknown?, string?];
@@ -83,6 +86,9 @@ export async function slashCommands(
       source: i.source,
       ...(i.packId ? { packId: i.packId } : {}),
       ...(i.visibility ? { visibility: i.visibility } : {}),
+      ...(normalizeScopes((i as { scopes?: string[] }).scopes).length
+        ? { scopes: normalizeScopes((i as { scopes?: string[] }).scopes) }
+        : {}),
       canStartSession: i.kind === 'playbook',
     });
   }
@@ -201,8 +207,15 @@ export async function setPlaybookGrant(
         );
       // The granter must be able to see the playbook themselves (a private pack of someone else cannot be handed on).
       const items = await runnablePlaybooks(tx, a.org_id, user.id);
-      if (!items.some((i) => i.key === req.key))
-        throw badRequest('unknown_playbook', `"${req.key}" is not a playbook you can grant`);
+      const item = items.find((i) => i.key === req.key) as
+        | (CapabilityMeta & { scopes?: string[] })
+        | undefined;
+      if (!item) throw badRequest('unknown_playbook', `"${req.key}" is not a playbook you can grant`);
+      // S-B1: a playbook that needs a scope the agent lacks is granted only when the granter confirms it
+      assertScopesConfirmed(
+        scopeWarning(normalizeScopes(item.scopes), await agentScopeFacts(tx, a)),
+        req.confirmScopes,
+      );
     }
     await ctx.store.append(
       [
@@ -257,6 +270,16 @@ export async function playbookRunRpc(
       undefined,
       `\`aom playbook run\` is not available for "${p.data.key}": nobody granted this agent that playbook (a manager grants it on the agent's page)`,
     ];
+  // S-B1: an agent set to ask before it starts a playbook waits for an approval of this one
+  const gate = await gateAction(ctx, {
+    agent,
+    actionClass: 'playbook_run',
+    fingerprint: `playbook:${p.data.key}`,
+    summary: `run the playbook "${p.data.key}"${p.data.input ? `: ${p.data.input.slice(0, 160)}` : ''}`,
+    projectId: shift.project_id ?? null,
+    cardId: shift.card_id ?? null,
+  });
+  if (!gate.ok) return [false, undefined, gate.message];
   return startForAgent(
     ctx,
     workstationId,

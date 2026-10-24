@@ -1,5 +1,10 @@
 import { z } from 'zod';
 import { UserAvatarSchema } from '../avatars/index.ts';
+import {
+  OFFBOARDING_GRACE_DAYS,
+  OffboardingReportSchema,
+  OffboardingStepSchema,
+} from '../governance/index.ts';
 import { AssignableOrgRoleSchema, BannerSchema, OrgRoleSchema, OrgStatusSchema } from '../orgs/index.ts';
 import { OrgLimitsSchema } from '../orgs/plans.ts';
 import { IsoTime } from './common.ts';
@@ -126,8 +131,14 @@ export const OrgRemovalPreviewSchema = z.object({
   agents: z.array(z.object({ id: z.uuid(), name: z.string(), roleKey: z.string() })),
   releasedCards: z.array(z.object({ ref: z.string(), title: z.string() })),
   transferredCards: z.array(z.object({ ref: z.string(), title: z.string(), status: z.string() })),
+  /** S-B1: the offboarding checklist, as it will run. */
+  offboarding: z.array(OffboardingStepSchema).default([]),
+  privatePurgeDays: z.number().int().default(OFFBOARDING_GRACE_DAYS),
 });
 export type OrgRemovalPreview = z.infer<typeof OrgRemovalPreviewSchema>;
+
+/** `DELETE /api/org/members/:userId` answers with the members and what the offboarding did. */
+export const OffboardingResultSchema = z.object({ offboarding: OffboardingReportSchema.optional() });
 
 export const TransferOwnershipRequestSchema = z.object({
   userId: z.uuid(),

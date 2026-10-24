@@ -207,7 +207,7 @@ async function queueShare(
 }
 
 /** `generation` is the one being revoked or replaced: the runner refuses to take it (or an older one) again. */
-async function queueClear(
+export async function queueClear(
   tx: Tx,
   orgId: string,
   provider: string,

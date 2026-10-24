@@ -1,5 +1,6 @@
 import { stringify as stringifyYaml } from 'yaml';
 import { z } from 'zod';
+import { normalizeScopes } from '../governance/index.ts';
 import { sha256Hex } from '../graph/sha256.ts';
 import { renderUntrusted } from '../prompt/untrusted.ts';
 import { readPackManifest, safePackPath } from './pack-manifest.ts';
@@ -8,6 +9,7 @@ import {
   CAPABILITY_MAX_FILES,
   type CapabilityIssue,
   CapabilityKeySchema,
+  declaredScopesOf,
   hashCapabilityFiles,
   type ParsedCapability,
   packedKey,
@@ -505,7 +507,14 @@ export function indexPack(input: { name: string; adapter?: PackAdapterId; tree: 
       : inPack(input.name, e, icon ? { icon } : {});
   };
   const skillTags = new Map<string, string[]>();
+  const skillScopes = new Map<string, string[]>();
+  const playbookScopes = new Map<string, string[]>();
   const playbookTags = new Map<string, string[]>();
+  // S-B1: scopes the manifest gives an entry, by `kind:key` (the pack-level `scopes:` applies to every entry)
+  const entryScopes = new Map<string, string[]>();
+  const addScopes = (e: ParsedCapability, scopes: readonly string[] | undefined) => {
+    if (scopes?.length) entryScopes.set(`${e.kind}:${e.key}`, [...scopes]);
+  };
 
   const skills = [...found.skills];
   for (const m of manifest?.skills ?? []) {
@@ -517,6 +526,7 @@ export function indexPack(input: { name: string; adapter?: PackAdapterId; tree: 
     if (!skills.some((s) => s.dir === dir))
       skills.push({ key: dir.split('/').pop() as string, dir, files: filesUnder(tree, dir) });
     if (m.tags?.length) skillTags.set(dir, m.tags);
+    if (m.scopes?.length) skillScopes.set(dir, m.scopes);
   }
   for (const s of skills) {
     try {
@@ -528,7 +538,12 @@ export function indexPack(input: { name: string; adapter?: PackAdapterId; tree: 
         if (Object.keys(s.files).length > 1)
           notes.push(`${s.dir}: declares itself an agent; only its SKILL.md is used as the persona`);
         entries.push(labelled(e, skillTags.get(s.dir), e.kind === 'persona' ? e.meta.icon : undefined));
-      } else entries.push(labelled(parseSkill(s.key, s.files), skillTags.get(s.dir)));
+        addScopes(e, skillScopes.get(s.dir));
+      } else {
+        const sk = parseSkill(s.key, s.files);
+        entries.push(labelled(sk, skillTags.get(s.dir)));
+        addScopes(sk, skillScopes.get(s.dir));
+      }
     } catch (err) {
       issues.push({ path: `${s.dir}/SKILL.md`, message: msg(err) });
     }
@@ -566,6 +581,7 @@ export function indexPack(input: { name: string; adapter?: PackAdapterId; tree: 
         }),
       );
       entries.push(labelled(e, a.tags, e.kind === 'persona' ? e.meta.icon : undefined));
+      addScopes(e, a.scopes);
     } catch (err) {
       issues.push({ path, message: msg(err) });
     }
@@ -583,14 +599,35 @@ export function indexPack(input: { name: string; adapter?: PackAdapterId; tree: 
     if (!playbooks.some((x) => x.dir === dir))
       playbooks.push({ key: m.key ?? (dir.split('/').pop() as string), dir, files: filesUnder(tree, dir) });
     if (m.tags?.length) playbookTags.set(dir, m.tags);
+    if (m.scopes?.length) playbookScopes.set(dir, m.scopes);
   }
   for (const pb of playbooks) {
     try {
-      entries.push(labelled(parsePlaybook(pb.key, pb.files), playbookTags.get(pb.dir)));
+      const pe = parsePlaybook(pb.key, pb.files);
+      entries.push(labelled(pe, playbookTags.get(pb.dir)));
+      addScopes(pe, playbookScopes.get(pb.dir));
     } catch (err) {
       issues.push({ path: `${pb.dir}/workflow.md`, message: msg(err) });
     }
   }
+  // S-B1: what each capability needs = its own declaration + the manifest's entry + the manifest's pack-level scopes. A scope the
+  // manifest added changes the hash (the files did not change, the owner must still review it again); one in the files already does.
+  const packScopes = manifest?.scopes ?? [];
+  entries = entries.map((e) => {
+    const own = declaredScopesOf(e);
+    const plainKey = e.key.startsWith(`${input.name}:`) ? e.key.slice(input.name.length + 1) : e.key;
+    const fromManifest = [...packScopes, ...(entryScopes.get(`${e.kind}:${plainKey}`) ?? [])];
+    const all = normalizeScopes([...own, ...fromManifest]);
+    if (!all.length) return e;
+    const added = fromManifest.filter((x) => !own.includes(x));
+    return {
+      ...e,
+      scopes: all,
+      ...(added.length
+        ? { hash: sha256Hex(`${e.hash}\u0002scopes:${[...new Set(added)].sort().join(',')}`) }
+        : {}),
+    } as ParsedCapability;
+  });
   const seen = new Set<string>();
   entries = entries.filter((e) => {
     const id = `${e.kind}:${e.key}`;
@@ -653,6 +690,7 @@ export function packItemOf(e: ParsedCapability, pack: string): PackItem {
     pack,
     ...(e.hasScripts ? { hasScripts: true } : {}),
     ...(e.tags?.length ? { tags: e.tags } : {}),
+    ...(declaredScopesOf(e).length ? { scopes: declaredScopesOf(e) } : {}),
     ...(e.icon ? { icon: e.icon } : {}),
     ...(e.kind === 'persona' && e.meta.tools?.length ? { tools: e.meta.tools } : {}),
     files: Object.entries(e.files)

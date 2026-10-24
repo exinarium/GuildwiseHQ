@@ -67,6 +67,17 @@ function safeUrl(raw) {
   }
 }
 
+/** Action id -> confirm page. Only same-origin /m/desk/<token> links are kept: a payload cannot send a button anywhere else. */
+function confirmLinks(actions) {
+  const out = {};
+  for (const a of Array.isArray(actions) ? actions.slice(0, 2) : []) {
+    if (!a || typeof a.action !== 'string') continue;
+    const url = safeUrl(a.url);
+    if (url.indexOf('/m/desk/') === 0) out[a.action] = url;
+  }
+  return out;
+}
+
 self.addEventListener('push', (event) => {
   let data = {};
   try {
@@ -82,8 +93,14 @@ self.addEventListener('push', (event) => {
     renotify: !!data.tag,
     icon: '/icons/icon-192.png',
     badge: '/icons/icon-192.png',
-    data: { url: safeUrl(data.url) },
+    data: { url: safeUrl(data.url), actions: confirmLinks(data.actions) },
   };
+  // Buttons (Approve, Reject, a quick option): each one opens its own confirm page; nothing is applied from the notification itself.
+  const buttons = (Array.isArray(data.actions) ? data.actions : [])
+    .filter((a) => a && typeof a.action === 'string' && typeof a.title === 'string')
+    .slice(0, 2)
+    .map((a) => ({ action: a.action, title: a.title }));
+  if (buttons.length) options.actions = buttons;
   const tasks = [self.registration.showNotification(title, options)];
   if (typeof data.badge === 'number' && self.navigator && 'setAppBadge' in self.navigator) {
     tasks.push(
@@ -97,7 +114,9 @@ self.addEventListener('push', (event) => {
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const target = safeUrl(event.notification.data && event.notification.data.url);
+  const d = event.notification.data || {};
+  // a button opens its own confirm page; a tap on the notification itself opens the Desk (or the card) as before
+  const target = safeUrl((event.action && d.actions && d.actions[event.action]) || d.url);
   event.waitUntil(
     (async () => {
       const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });

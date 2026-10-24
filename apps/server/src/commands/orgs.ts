@@ -9,6 +9,8 @@ import {
   canSetOrgSecurity,
   canTransferOwnership,
   DIAGNOSTICS_CONSENT_VERSION,
+  OFFBOARDING_GRACE_DAYS,
+  type OffboardingReport,
   type OrgGuestDto,
   type OrgInvitationDto,
   type OrgMemberDto,
@@ -28,6 +30,12 @@ import { type Tx, withAppendTx } from '../db/tx.ts';
 import { userAvatarOf } from '../dto.ts';
 import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
+import {
+  type OffboardingRun,
+  offboardingFacts,
+  previewSteps,
+  runOffboardingIn,
+} from '../governance/offboarding.ts';
 import { senderName } from '../mail/layout.ts';
 import { orgInvitationMail } from '../mail/templates.ts';
 import { diagnosticsConsentAvailable } from '../orgs/diagnostics.ts';
@@ -233,6 +241,11 @@ export async function removalPreview(ctx: Ctx, a: OrgAccess, userId: string): Pr
     agents: plan.agents.map((x) => ({ id: x.id, name: x.name, roleKey: x.role_key })),
     releasedCards: plan.claimed.map((c) => ({ ref: c.ref, title: c.title })),
     transferredCards: plan.owned.map((c) => ({ ref: c.ref, title: c.title, status: c.status })),
+    offboarding: previewSteps(await offboardingFacts(ctx.pool, a.orgId, userId), {
+      agents: plan.agents.length,
+      cards: plan.owned.length,
+    }),
+    privatePurgeDays: OFFBOARDING_GRACE_DAYS,
   };
 }
 
@@ -276,7 +289,7 @@ export async function removeOrgMemberIn(
   orgId: string,
   userId: string,
   reason: 'removed' | 'left' | 'deactivated',
-): Promise<void> {
+): Promise<OffboardingRun> {
   const plan = await memberPlan(tx, orgId, userId);
   for (const p of plan.projects) {
     await removeMemberIn(ctx, tx, actorId, p, userId, { includeGrant: true });
@@ -325,6 +338,20 @@ export async function removeOrgMemberIn(
       actor: userActor(actorId),
       scope: orgScope(orgId),
     });
+  // S-B1: the offboarding checklist (sessions, tokens, pairings, pack credentials, key copies, ownership, private items). Items of
+  // the member go to the person who removes them; when they leave or an administrator deactivates them, to the organization's Owner.
+  const owner = await one<{ owner_user_id: string }>(
+    tx,
+    'SELECT owner_user_id FROM organizations WHERE id=$1',
+    [orgId],
+  );
+  const run = await runOffboardingIn(ctx, tx, {
+    actorId,
+    orgId,
+    userId,
+    transferTo: reason === 'removed' && actorId !== userId ? actorId : (owner?.owner_user_id ?? actorId),
+    counts: { agents: plan.agents.length, cards: plan.owned.length },
+  });
   events.push({
     streamId: streamId.org(orgId),
     event: { type: 'OrgMemberRemoved', payload: { orgId, userId, reason, by: actorId } },
@@ -336,10 +363,20 @@ export async function removeOrgMemberIn(
     if (a.workstation_id) await enqueueRunnerCommand(tx, a.workstation_id, 'agent.wipe', { agentId: a.id });
   for (const d of devops)
     if (d.workstation_id) await enqueueRunnerCommand(tx, d.workstation_id, 'agent.wipe', { agentId: d.id });
+  return run;
 }
 
-export async function removeOrgMember(ctx: Ctx, a: OrgAccess, userId: string): Promise<void> {
-  await withAppendTx(ctx.pool, async (tx) => {
+/** After the removal committed: queued commands go out and the packs of the member's workstations are re-synced. */
+async function afterOffboarding(ctx: Ctx, run: OffboardingRun): Promise<void> {
+  const { syncWorkstations } = await import('./packs.ts');
+  const ws = [...new Set([...run.deliver, ...run.sync])];
+  if (run.sync.length)
+    await syncWorkstations(ctx, run.sync).catch((err) => ctx.log.warn({ err }, 'pack sync failed'));
+  for (const id of ws) await Promise.resolve(ctx.services.gateway.deliverPending(id)).catch(() => undefined);
+}
+
+export async function removeOrgMember(ctx: Ctx, a: OrgAccess, userId: string): Promise<OffboardingReport> {
+  const run = await withAppendTx(ctx.pool, async (tx) => {
     const m = await activeMember(tx, a.orgId, userId);
     if (m.role === 'owner')
       throw conflict('owner_cannot_leave', 'the Owner cannot be removed: transfer the ownership first');
@@ -347,16 +384,19 @@ export async function removeOrgMember(ctx: Ctx, a: OrgAccess, userId: string): P
       throw forbidden(
         m.role === 'admin' ? 'only the Owner can remove an Admin' : 'you cannot remove this member',
       );
-    await removeOrgMemberIn(ctx, tx, a.session.user.id, a.orgId, userId, 'removed');
+    return removeOrgMemberIn(ctx, tx, a.session.user.id, a.orgId, userId, 'removed');
   });
+  await afterOffboarding(ctx, run);
+  return run.report;
 }
 
 export async function leaveOrg(ctx: Ctx, a: OrgAccess): Promise<void> {
-  await withAppendTx(ctx.pool, async (tx) => {
+  const run = await withAppendTx(ctx.pool, async (tx) => {
     if (a.role === 'owner')
       throw conflict('owner_cannot_leave', 'the Owner cannot leave: transfer the ownership first');
-    await removeOrgMemberIn(ctx, tx, a.session.user.id, a.orgId, a.session.user.id, 'left');
+    return removeOrgMemberIn(ctx, tx, a.session.user.id, a.orgId, a.session.user.id, 'left');
   });
+  await afterOffboarding(ctx, run);
 }
 
 /** Replaces the projects a Member works in (Owners and Admins see all of them): adds are active at once. */

@@ -26,6 +26,7 @@ export * from './external/index.ts';
 export * from './feed/index.ts';
 export * from './forge/index.ts';
 export * from './forge/remote-url.ts';
+export * from './governance/index.ts';
 export * from './graph/index.ts';
 export * from './hr/index.ts';
 export * from './hygiene/index.ts';

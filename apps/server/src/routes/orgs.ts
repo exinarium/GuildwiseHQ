@@ -151,8 +151,8 @@ export function orgRoutes(ctx: Ctx) {
 
     app.delete('/api/org/members/:userId', { schema: { params: OrgMemberParamsSchema } }, async (req) => {
       const a = await requireOrg(ctx, req, { min: 'admin' });
-      await removeOrgMember(ctx, a, req.params.userId);
-      return { members: await listMembers(ctx, a.orgId) };
+      const offboarding = await removeOrgMember(ctx, a, req.params.userId);
+      return { members: await listMembers(ctx, a.orgId), offboarding };
     });
 
     app.post(

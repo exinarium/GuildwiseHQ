@@ -153,6 +153,8 @@ export const SetDelegateGrantRequestSchema = z.object({
   /** A persona key (`devils-advocate`, `acme:analyst`) or an agent id. */
   targetKey: z.string().trim().min(1).max(130),
   grant: DelegateGrantSettingsSchema.nullable(),
+  /** S-B1: the persona needs a scope the agent lacks; the granter confirms they know. */
+  confirmScopes: z.boolean().optional(),
 });
 export type SetDelegateGrantRequest = z.infer<typeof SetDelegateGrantRequestSchema>;
 

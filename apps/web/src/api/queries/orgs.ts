@@ -1,5 +1,6 @@
 import {
   type CreateOrgInvitationRequest,
+  type OffboardingReport,
   type OrgDetailResponse,
   OrgDetailResponseSchema,
   type OrgGuestDto,
@@ -81,7 +82,7 @@ export function useRemovalPreview(userId: string | null) {
 export function useRemoveMember() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (userId: string) => del(`/org/members/${userId}`),
+    mutationFn: (userId: string) => del<{ offboarding?: OffboardingReport }>(`/org/members/${userId}`),
     onSuccess: () => refresh(qc),
   });
 }

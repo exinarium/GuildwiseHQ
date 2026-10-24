@@ -6,6 +6,7 @@ import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { agentActor, cardMessage, projectScope } from './common.ts';
 import { effectiveCompletionAction } from './completion.ts';
 import {
+  builderGatedForLanding,
   mergeApprovalEvents,
   mergeGate,
   ownerApprovalLapse,
@@ -130,7 +131,12 @@ export async function baFinalizeEvents(
     };
   const gate = await mergeGate(tx, card, action);
   if (gate === 'approval') {
-    const approval = mergeApprovalEvents(card, action, { requestedBy: agent.id, actor, by });
+    const approval = mergeApprovalEvents(card, action, {
+      requestedBy: agent.id,
+      actor,
+      by,
+      gatedLanding: await builderGatedForLanding(tx, card),
+    });
     events.push(...approval.events);
     return {
       ok: true,

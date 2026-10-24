@@ -31,6 +31,12 @@ import type { Ctx } from '../context.ts';
 import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
+import {
+  agentScopeFacts,
+  assertScopesConfirmed,
+  capabilityScopes,
+  scopeWarning,
+} from '../governance/scopes.ts';
 import { runtimeProblem, runtimeReports } from './offer.ts';
 
 /** Agents that never delegate and are never delegated to: the CEO and the DevOps engineer hold wider powers. */
@@ -512,6 +518,11 @@ export async function setAgentDelegateGrant(
     const a = await manageableAgent(tx, user, agentId);
     if (a.status === 'retired') throw conflict('agent_retired', 'agent is retired');
     if (isSpecialAgent(a)) throw badRequest('delegation_unavailable', 'this agent cannot delegate');
+    // S-B1: a persona that needs a scope the agent lacks is granted only when the granter confirms it
+    if (req.grant !== null && req.targetKind === 'persona') {
+      const scopes = await capabilityScopes(tx, a.org_id, user.id, 'persona', req.targetKey);
+      assertScopesConfirmed(scopeWarning(scopes, await agentScopeFacts(tx, a)), req.confirmScopes);
+    }
     await setGrant(ctx, user, 'agent', agentId, a.org_id, req, tx);
   });
   return getAgentDelegateGrants(ctx, user, agentId);

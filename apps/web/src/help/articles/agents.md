@@ -74,6 +74,14 @@ Each agent card has an **External tools (MCP)** section listing the plugin MCP s
 
 Off by default. Under **Who it may delegate to** on an agent's card (Owner, Admin or its manager), list the personas or agents it may hand sub-tasks to. Each runs on its own model, never with wider tools than the agent (when it would need more it runs with fewer, and the card says so), and shows as a sub-step on the card with its cost. Owners and Admins can also set delegation for a whole **role** (Org designer): it covers every agent of the role, including future hires, and shows as inherited on each card. A grant can also set the model the target runs on.
 
+## What it may do {#what-it-may-do}
+
+**What it may do** on an agent's card shows in one place its tools, the repositories and projects it can reach, its provider and which key pays, its delegation grants (including what its role gives it and exclusions), its playbooks, skills and packs, its cost and the budgets that apply.
+
+Under **Approval gates**, switch on **Ask me before** merge and push, deploy, delegation or running a playbook. That action then pauses and lands on your Desk as an approval; the agent carries on, and its next identical attempt goes through once you approve (it is told so). A rejection is reported to it and it is not asked again for an hour. Outbound updates always ask. Gating pack scripts is not available yet. No agent has a gate until someone sets one; whoever manages the agent switches a gate on, only an Owner or Admin switches it off. The CEO keeps its own policy.
+
+A pack's skills, personas and playbooks can say what they need (`shell`, `web`, `commit`, ...). When you grant one to an agent that lacks a scope, you see what is missing and choose **Grant anyway**; the grant does not give the agent the permission.
+
 ## HR board {#hr-board}
 
 The HR board is the Agents page. It shows at a glance:

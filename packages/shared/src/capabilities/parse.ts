@@ -1,5 +1,6 @@
 import { parse as parseYaml } from 'yaml';
 import { z } from 'zod';
+import { normalizeScopes } from '../governance/index.ts';
 import { sha256Hex } from '../graph/sha256.ts';
 
 /**
@@ -57,6 +58,8 @@ const MetaExtras = {
   pack: CapabilityKeySchema.optional(),
   hasScripts: z.boolean().optional(),
   tags: z.array(z.string().max(40)).max(10).optional(),
+  /** S-B1: scopes the capability declares it needs. */
+  scopes: z.array(z.string().max(40)).max(20).optional(),
   icon: z.string().max(60).optional(),
   /** A persona's declared tools (advisory; read when it is hired from a pack to map a permission preset). */
   tools: z.array(z.string().max(60)).max(30).optional(),
@@ -138,6 +141,11 @@ export const PersonaFrontmatterSchema = z.object({
   model: z.string().min(1).max(100).optional(),
   tools: z.array(z.string().min(1).max(60)).max(30).optional(),
   skills: z.array(CapabilityKeySchema).max(30).optional(),
+  /** S-B1: scopes it needs (`shell`, `web`, ...), shown when it is granted. */
+  scopes: z.preprocess(
+    (v) => (v === undefined ? undefined : normalizeScopes(v)),
+    z.array(z.string()).optional(),
+  ),
 });
 export type PersonaFrontmatter = z.infer<typeof PersonaFrontmatterSchema>;
 
@@ -146,6 +154,11 @@ export type PersonaFrontmatter = z.infer<typeof PersonaFrontmatterSchema>;
 export const PlaybookFrontmatterSchema = z.object({
   name: CapabilityKeySchema,
   description: z.string().min(1).max(1024),
+  /** S-B1: scopes it needs (`shell`, `web`, ...), shown when it is granted. */
+  scopes: z.preprocess(
+    (v) => (v === undefined ? undefined : normalizeScopes(v)),
+    z.array(z.string()).optional(),
+  ),
 });
 export type PlaybookFrontmatter = z.infer<typeof PlaybookFrontmatterSchema>;
 
@@ -162,6 +175,8 @@ interface Base {
   hasScripts?: boolean;
   /** Free labels the pickers read: `discovery`, `template:brief`, `template:prd`, `roster`, `delegate`. */
   tags?: string[];
+  /** S-B1: what the capability says it needs (frontmatter `scopes`, a skill's `metadata.scopes`, the pack manifest's `scopes:`). */
+  scopes?: string[];
   /** A persona's icon, for the pickers (the metadata does not carry the prompt). */
   icon?: string;
   /** Path of the file that carries the frontmatter, relative to the capability root (`SKILL.md`, `<key>.md`, `workflow.md`). */
@@ -341,6 +356,13 @@ export function indexCapabilityTree(tree: Record<string, string>): {
   return { entries, issues };
 }
 
+/** The scopes a capability declares: the pack reader's merged list, else its own frontmatter (a skill's `metadata.scopes`). */
+export function declaredScopesOf(e: ParsedCapability): string[] {
+  if (e.scopes?.length) return e.scopes;
+  if (e.kind === 'skill') return normalizeScopes(e.meta.metadata?.scopes);
+  return normalizeScopes(e.meta.scopes);
+}
+
 export function capabilityMeta(e: ParsedCapability, source: CapabilitySource): CapabilityMeta {
   return {
     key: e.key,
@@ -352,6 +374,7 @@ export function capabilityMeta(e: ParsedCapability, source: CapabilitySource): C
     ...(e.pack ? { pack: e.pack.name } : {}),
     ...(e.hasScripts ? { hasScripts: true } : {}),
     ...(e.tags?.length ? { tags: e.tags } : {}),
+    ...(declaredScopesOf(e).length ? { scopes: declaredScopesOf(e) } : {}),
     ...(e.icon ? { icon: e.icon } : {}),
     ...(e.pack && e.kind === 'persona' && e.meta.tools?.length ? { tools: e.meta.tools } : {}),
   };

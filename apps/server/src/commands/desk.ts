@@ -5,6 +5,7 @@ import {
   CEO_PERMISSION_SUBKIND,
   type DeskActor,
   type DeskResolution,
+  GATE_DESK_SUBKIND,
   HR_DESK_SUBKIND,
   isOrgManager,
   isPhaseDeskSubkind,
@@ -28,6 +29,7 @@ import { one, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
+import { resolveGateItemIn } from '../governance/gates.ts';
 import { resolvePlatformApprovalIn } from '../platform-team/approvals.ts';
 import { canAnswerItem, DESK_VISIBLE } from '../queries/desk.ts';
 import {
@@ -382,6 +384,9 @@ async function closeItem(
       // Phases: confirm a BA proposal, approve or reject the follow-ups, acknowledge the results (any member).
       await resolvePhaseDeskItemIn(ctx, tx, user, item, resolution, note);
       phases = true;
+    } else if (item.kind === 'approval' && item.subkind === GATE_DESK_SUBKIND) {
+      // S-B1: an agent paused on a gated action; approved lets its next attempt go through (once)
+      await resolveGateItemIn(ctx, tx, user, item, resolution);
     } else if (item.kind === 'approval' && item.subkind === PACK_ASSIGNMENT_SUBKIND) {
       // R3a: the member decides whether a pack may be placed on their workstation; approved lets the runner clone it.
       if (resolution === 'acknowledged')
