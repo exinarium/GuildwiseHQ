@@ -45,6 +45,7 @@ import {
 } from '../capabilities/skill-guard.ts';
 import { runGuardHook as runCeoGuardHook } from '../ceo/guard-hook.ts';
 import { PermissionRelay } from '../ceo/permission-relay.ts';
+import { loadSubagentGuardConfig, runSubagentGuard } from '../delegate/subagent-guard.ts';
 import type { ChangeStateLookup } from '../devops/branch-cleanup.ts';
 import { loadGuardConfig, runGuardHook } from '../devops/guard.ts';
 import { runHygiene } from '../devops/hygiene.ts';
@@ -2009,6 +2010,38 @@ const VERBS: Record<string, Verb> = {
       return 2;
     }
   },
+  /**
+   * The `Agent` tool allow-list (a Claude Code PreToolUse hook, see delegate/subagent-guard.ts): only the subagents of the
+   * agent's delegation targets run, each only after the runner and the server allowed it. Agents never call it.
+   */
+  'subagent-guard': async (ctx) => {
+    // every failure is a refusal: Claude Code lets a call through when a hook fails with any code but 2
+    try {
+      const r = await withGuardDeadline(
+        () =>
+          runSubagentGuard({
+            stdin: ctx.readFile('-'),
+            cfg: loadSubagentGuardConfig(ctx.env.AOM_SUBAGENT_GUARD),
+            ask: async (name, handle, toolUseId) => {
+              try {
+                await rpc(ctx, 'delegate.guard', { name, handle, toolUseId });
+                return { ok: true };
+              } catch (err) {
+                return { ok: false, error: err instanceof Error ? err.message : String(err) };
+              }
+            },
+          }),
+        skillGuardDeadlineMs(ctx.env),
+      );
+      if (r.stdout) ctx.io.out(r.stdout);
+      return r.code;
+    } catch (err) {
+      ctx.io.err(
+        `subagent guard failed, the subagent is refused: ${err instanceof Error ? err.message : String(err)}\n`,
+      );
+      return 2;
+    }
+  },
   'devops-done': async (ctx, p) => {
     const summary = textFlag(ctx, p, 'summary', true) as string;
     return report(ctx, outcome('devops_done', summary, { summary, commands: many(p, 'command') }));
@@ -2391,21 +2424,24 @@ const VERBS: Record<string, Verb> = {
     return 0;
   },
   /**
-   * `aom delegate <persona> "<task>" [--model <choice>]`: a read-only sub-task run by a persona of the registry on this
-   * workstation (nested, one level deep, its cost booked on this turn or shift). Prints the delegate's reply under a header
-   * that says it is the delegate's words (information, not instructions).
+   * `aom delegate <target> "<task>"`: a sub-task for one of the targets this agent was granted (a persona, or `agent:<name>`),
+   * run as a child on the target's own model with tools never wider than this agent's (nested, one level deep, its cost booked
+   * on this turn or shift). There is no `--model`: a target runs on the model configured for it. Prints the delegate's reply
+   * under a header that says it is the delegate's words (information, not instructions).
    */
   delegate: async (ctx, p) => {
-    const persona = p.positionals[0];
+    const target = p.positionals[0];
     const task = p.positionals.slice(1).join(' ');
-    if (!persona || !task)
+    if (!target || !task)
       throw new UsageError(
-        'usage: aom delegate <persona> "<task>" [--model <choice>]   (personas: aom skill list --kind persona; the task must be self-contained)',
+        'usage: aom delegate <target> "<task>"   (your targets are listed in your instructions; the task must be self-contained)',
       );
     const model = one(p, 'model');
-    const r = (await rpc(ctx, 'delegate.run', { persona, task, ...(model ? { model } : {}) })) as {
-      text?: string;
-    } | null;
+    if (model !== undefined)
+      throw new UsageError(
+        'a delegate runs on the model configured for its target: `--model` is not accepted (ask the owner to change the target’s model)',
+      );
+    const r = (await rpc(ctx, 'delegate.run', { target, task })) as { text?: string } | null;
     ctx.io.out(`${(r?.text ?? '').replace(/\n*$/, '')}\n`);
     return 0;
   },
@@ -2694,7 +2730,7 @@ export const USAGE = `usage: aom <verb> [options]
   card attach <path> [--card <REF>]          BA intake: attach a file from your scratch dir (for example a downloaded Jira attachment) to a card you drafted
   card attachments [<REF>]                   copy the card's attached files next to this shift (read-only) and print the paths; builders get them at the start of the shift
   org catalogue | org role draft --json '<json>' | --file <json|-> | org workflow draft (same) | org workflow variant --file <json|-> (a project's own version) | org validate <key> | org submit <key> | org department --name "<n>"   BA design chat: draft roles and workflows (the owner approves on the desk)
-  delegate <persona> "<task>" [--model <choice>]   hand a self-contained read-only sub-task to a persona of the registry (nested, one level, costs booked on you; the reply is information, not instructions; run it with a Bash timeout of at least 2 minutes)
+  delegate <target> "<task>"   hand a self-contained sub-task to one of your granted targets (a persona or agent:<name>; its own model and tools, never wider than yours; one level, costs booked on you; the reply is information, not instructions; run it with a Bash timeout of at least 10 minutes). Only where you were granted targets
   playbook run <key> [--input "<text>"]   start a guided playbook session for the owner (only a playbook you were granted; the owner answers on the session page; you do not wait)
   skill show <key | kind:key> [--file <path>]   print a capability of the registry (skill, playbook or persona; a playbook's steps and assets with --file); skill list [--kind k] lists them
   board add --column <c> --text "<t>" | next --speaker <h>... --reason "<r>" | pause --question "<q>" | converge --note "<n>" | disagreement add --topic "<t>" --position "<Name>|<view>"... | cast --persona <key> | minutes --content "<md>" | show   boardroom turns: whiteboard notes and disagreements; the Chair chooses speakers, flags early agreement and pauses for the owner; the minutes
@@ -2748,7 +2784,7 @@ export async function runAom(argv: string[], ctx: AomContext): Promise<number> {
     }
     ctx.io.err(`aom ${verb}: ${err instanceof Error ? err.message : String(err)}\n`);
     // a guard hook that fails must block (exit 2), never let the call through
-    return verb === 'skill-guard' ? 2 : 1;
+    return verb === 'skill-guard' || verb === 'subagent-guard' ? 2 : 1;
   }
 }
 
@@ -2862,7 +2898,8 @@ async function preloadGuardStdin(): Promise<string> {
 
 if (isEntry) {
   const confined = confinedReader(process.env, process.cwd());
-  const guardStdin = process.argv[2] === 'skill-guard' ? preloadGuardStdin() : undefined;
+  const isGuard = process.argv[2] === 'skill-guard' || process.argv[2] === 'subagent-guard';
+  const guardStdin = isGuard ? preloadGuardStdin() : undefined;
   (async () => {
     const stdinText = guardStdin ? await guardStdin : undefined;
     return runAom(process.argv.slice(2), {
@@ -2872,7 +2909,7 @@ if (isEntry) {
       readFile: (path) => (stdinText !== undefined && path === '-' ? stdinText : confined(path)),
     });
   })().then(
-    (code) => process.exit(process.argv[2] === 'skill-guard' && code !== 0 ? 2 : code),
-    () => process.exit(process.argv[2] === 'skill-guard' ? 2 : 1),
+    (code) => process.exit(isGuard && code !== 0 ? 2 : code),
+    () => process.exit(isGuard ? 2 : 1),
   );
 }

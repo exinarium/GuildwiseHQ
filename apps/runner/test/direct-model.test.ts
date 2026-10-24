@@ -283,11 +283,16 @@ describe('direct-model adapter: the tool loop', () => {
   });
 
   it('offers exactly the tools the turn purpose allows (the table the server enforces)', async () => {
-    const run = async (purpose: string, kind: 'discovery' | 'boardroom') => {
+    const run = async (purpose: string, kind: 'discovery' | 'boardroom', delegate = false) => {
       const model = new MockLanguageModelV4({ doStream: [textStep('ok')] });
       const r = await rig(model);
       await collect(
-        await r.adapter.startChat(r.input({ sessionTurn: { kind, speakerKind: 'persona', purpose } })),
+        await r.adapter.startChat(
+          r.input({
+            sessionTurn: { kind, speakerKind: 'persona', purpose },
+            ...(delegate ? { delegate: true } : {}),
+          }),
+        ),
       );
       return toolNames(model);
     };
@@ -304,9 +309,13 @@ describe('direct-model adapter: the tool loop', () => {
         'board_next',
         'board_pause',
         'board_show',
-        'delegate',
       ].sort(),
     );
+    // `delegate` only where the turn holds a grant, and only for the purposes that may hold one
+    expect(await run('board_chair', 'boardroom', true)).toContain('delegate');
+    expect(await run('facilitator', 'discovery', true)).toContain('delegate');
+    expect(await run('board_speaker', 'boardroom', true)).not.toContain('delegate');
+    expect(await run('facilitator', 'discovery')).not.toContain('delegate');
     expect(await run('board_minutes', 'boardroom')).toEqual(
       [...common, 'board_minutes', 'board_show'].sort(),
     );

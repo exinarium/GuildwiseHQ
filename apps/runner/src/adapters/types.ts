@@ -61,6 +61,37 @@ export interface DevopsGuardInput {
   readOnlyScan?: boolean;
 }
 
+/**
+ * A granted delegation target exposed as a native Claude Code subagent (`--agents`): it runs inside the parent's process, with
+ * the parent's permission rules and sandbox, on the target's own model, with `tools` narrowed to the target's profile. Only
+ * targets whose profile a native subagent can honour exactly are exposed (`nativeHonoursProfile`); the rest use `aom delegate`.
+ */
+export interface NativeSubagent {
+  /** The subagent type the model names in the `Agent` tool (`bmad-analyst`). */
+  name: string;
+  /** The grant's handle (`bmad:analyst`, `agent:rex`): what the server knows the target by. */
+  handle: string;
+  description: string;
+  prompt: string;
+  /** Claude Code tool names. */
+  tools: string[];
+  /** A Claude Code model alias or id. */
+  model: string;
+  profile: 'read_only' | 'edit' | 'shell';
+}
+
+/** What a native subagent used, read from the parent's transcript folder after the session ended. */
+export interface NativeSubagentUsage {
+  /** The parent's `Agent` tool call that started it. */
+  toolUseId: string;
+  /** The subagent type. */
+  name: string;
+  usage: Usage;
+  durationMs?: number;
+  /** The first lines of its last reply. */
+  summary?: string;
+}
+
 export interface ShiftStartInput {
   shiftId: string;
   /** Rendered card prompt (section 13.2). */
@@ -111,6 +142,8 @@ export interface ShiftStartInput {
   grantedSkills?: GrantedSkill[];
   /** The organization the shift belongs to: an organization's provider key counts only for its own organization. */
   orgId?: string;
+  /** Granted delegation targets a native-subagent runtime (Claude Code) exposes. Absent or empty: it exposes none and the tool is off. */
+  subagents?: NativeSubagent[];
   /** Raw runtime stream is appended here (logs/shifts/<shiftId>.jsonl). */
   logFile?: string;
 }
@@ -161,6 +194,8 @@ export interface RuntimeSession {
   killTools?(): Promise<number>;
   /** When the runtime last wrote anything (epoch ms); the idle watchdog reads it. */
   lastActivityAt?(): number;
+  /** Native subagents the session ran (Claude Code), read from its transcripts; call after the session ended. */
+  nativeSubagentUsage?(): NativeSubagentUsage[];
 }
 
 export interface ChatStartInput {
@@ -206,6 +241,10 @@ export interface ChatStartInput {
   grantedSkills?: GrantedSkill[];
   /** The playbooks this agent may start with `aom playbook run` (granted; absent or empty: none). */
   playbookGrants?: string[];
+  /** See `ShiftStartInput.subagents`. */
+  subagents?: NativeSubagent[];
+  /** The direct-model runtime offers the `delegate` tool: the turn holds delegation targets. */
+  delegate?: boolean;
   /** A narrower step cap than the runtime's own (a delegate's: `DELEGATE_LIMITS.maxSteps`). Only the direct-model runtime has steps. */
   maxSteps?: number;
   /** The organization of the chat or session turn: its provider key (not another organization's) is the one used. */

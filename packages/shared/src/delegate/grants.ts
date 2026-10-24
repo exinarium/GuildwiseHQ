@@ -271,3 +271,49 @@ export const DelegationStepDtoSchema = z.object({
   at: z.iso.datetime(),
 });
 export type DelegationStepDto = z.infer<typeof DelegationStepDtoSchema>;
+
+// ----------------------------------------------------------------------------------------- Claude Code native subagents
+
+/** The Claude Code tool names of a profile, for a native subagent's `tools` list. */
+export const NATIVE_SUBAGENT_TOOLS: Record<DelegateProfile, readonly string[]> = {
+  read_only: ['Read', 'Grep', 'Glob'],
+  edit: ['Read', 'Grep', 'Glob', 'Edit', 'Write'],
+  shell: ['Read', 'Grep', 'Glob', 'Edit', 'Write', 'Bash'],
+};
+
+/** A subagent name Claude Code accepts: lowercase letters, digits and hyphens (`bmad:analyst` -> `bmad-analyst`), unique in the list. */
+export function nativeSubagentName(handle: string, taken: ReadonlySet<string> = new Set()): string {
+  const base =
+    handle
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 60) || 'delegate';
+  if (!taken.has(base)) return base;
+  for (let i = 2; ; i++) if (!taken.has(`${base}-${i}`)) return `${base}-${i}`;
+}
+
+const sameSet = (a: readonly string[] | null, b: readonly string[] | null): boolean =>
+  a === null || b === null ? a === b : a.length === b.length && a.every((x) => b.includes(x));
+
+/**
+ * May this target run as a native Claude Code subagent without being allowed more or less than its own profile? A native
+ * subagent lives inside its parent's process: it gets the parent's permission rules and sandbox, and the `tools` list can only
+ * narrow them. So the target's profile is honoured exactly when it asks for reading only, or for the parent's own edit paths and
+ * shell denials (a persona has none of its own; a hired agent must have the same writable paths and at least the parent's
+ * denials). A hired agent with narrower write paths or its own denials is run with `aom delegate` instead, where the child gets
+ * the intersection as a separate sandboxed process.
+ */
+export function nativeHonoursProfile(
+  target: { kind: DelegateTargetKind; profile: DelegateProfile; permissions?: AgentPermissions | undefined },
+  parent: AgentPermissions,
+): boolean {
+  if (target.profile === 'read_only') return true;
+  if (target.kind === 'persona' || !target.permissions) return true;
+  const t = target.permissions;
+  return (
+    sameSet(t.writableGlobs, parent.writableGlobs) &&
+    parent.deniedShellPatterns.every((p) => t.deniedShellPatterns.includes(p)) &&
+    t.deniedShellPatterns.every((p) => parent.deniedShellPatterns.includes(p))
+  );
+}

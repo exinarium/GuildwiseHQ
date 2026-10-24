@@ -61,7 +61,13 @@ import {
 import { type CapabilityRegistry, type ProjectIndexResult, skillRpc } from '../capabilities/registry.ts';
 import type { RunnerConfig } from '../config.ts';
 import type { Outbox } from '../connection/outbox.ts';
-import { DELEGATE_NOTE, DelegateRunner } from '../delegate/delegate.ts';
+import {
+  type DelegateCaller,
+  DelegateRunner,
+  type DelegateWork,
+  delegateNote,
+  delegateUsageReporter,
+} from '../delegate/delegate.ts';
 import { recordDevopsAudit } from '../devops/audit.ts';
 import { redactCommand } from '../devops/guard.ts';
 import { cardPayload, shiftTexts } from '../devops/requests.ts';
@@ -210,6 +216,8 @@ export interface SupervisorDeps {
   progressFlushMs?: number;
   /** The server accepts `run.usage` (live usage for the provider caps); absent: no. */
   liveUsage?: () => boolean;
+  /** The server accepts the live usage of a delegate (it announced `DELEGATE_GRANTS_FEATURE`). */
+  delegateUsage?: () => boolean;
   /** Tester environment check before the session starts (default: Docker and the deployed app). */
   envChecker?: EnvChecker;
   /** How `aom transcript` reaches yt-dlp and the web (default: the real ones; tests inject fakes). */
@@ -276,6 +284,8 @@ const ticketOf = (msg: ShiftStartMsg): string | null => {
 
 interface ActiveShift {
   msg: ShiftStartMsg;
+  /** What a delegate that works shares with this shift (its working directory and read folders). */
+  delegateWork?: DelegateWork;
   startedAt: Date;
   token?: string;
   session?: RuntimeSession;
@@ -387,6 +397,10 @@ export class ShiftSupervisor {
       paths: deps.paths,
       ipc: deps.ipc,
       rpc: (id, method, params) => deps.rpc(id, method, params),
+      reportUsage: delegateUsageReporter(
+        () => deps.delegateUsage?.() === true,
+        (id, usage) => deps.transport.send('run.usage', { kind: 'delegate', id, usage }),
+      ),
       ...(deps.capabilities ? { capabilities: deps.capabilities } : {}),
       ...(deps.log ? { log: deps.log } : {}),
     });
@@ -1015,8 +1029,6 @@ export class ShiftSupervisor {
         agentId: msg.agent.agentId,
       }) ?? '';
     if (capIndex) texts.instructions += `\n${capIndex}\n`;
-    if (msg.kind !== 'ceo' && msg.kind !== 'devops' && !msg.agent.isDevops && msg.agent.roleKey !== 'ceo')
-      texts.instructions += `\n${DELEGATE_NOTE}\n`;
     if (playbookNote(msg.playbookGrants)) texts.instructions += `\n${playbookNote(msg.playbookGrants)}\n`;
     // The skills this agent's role grants, for a runtime with native skills (Claude Code, Codex): written into its private folder.
     const grantedSkills =
@@ -1115,6 +1127,27 @@ export class ShiftSupervisor {
         this.log.warn(`${msg.brief.card.ref}: ${note}`);
       }
     }
+    // Delegation (R3b): only an agent that was granted targets is told about `aom delegate`, and only a Claude Code agent gets
+    // native subagents (the same targets, in its own process). The work a child shares with this shift is its working directory.
+    s.delegateWork = {
+      cwd,
+      readDirs: [
+        ...readFolders,
+        ...(msg.kind === 'ba_task' ? registeredFolders : []),
+        ...vaultReadFolder,
+      ].map((f) => f.path),
+      addDirs: vaultCtx && msg.kind === 'card' ? [vaultCtx.addDir] : scanDirs,
+      ...(tc ? { toolchainReadDirs: tc.readDirs } : {}),
+    };
+    const subagents = this.mayDelegate(msg)
+      ? msg.agent.runtime === 'claude-code'
+        ? await this.delegates.nativeSubagents(this.delegateCaller(s))
+        : []
+      : [];
+    const note = this.mayDelegate(msg)
+      ? delegateNote(msg.delegation, this.delegates.nativeNames(msg.shiftId))
+      : '';
+    if (note) texts.instructions += `\n${note}\n`;
     // the agent's name and seniority close the file: everything before is shared by every agent of the role and project
     texts.instructions = identityLast(texts.instructions);
     await adapter.writeInstructions(sandbox, texts.instructions);
@@ -1235,6 +1268,7 @@ export class ShiftSupervisor {
         ...(hasEnv && testEnv?.mode === 'remote' && testEnv.target
           ? { extraAllowedDomains: targetHosts(testEnv.target) }
           : {}),
+        ...(subagents.length ? { subagents } : {}),
         maxShiftMinutes: msg.maxShiftMinutes,
         logFile: `${paths.shiftLogs}/${msg.shiftId}.jsonl`,
       });
@@ -1391,6 +1425,14 @@ export class ShiftSupervisor {
         });
       }
     }
+
+    // Native subagents this shift ran (Claude Code): booked as delegates of the shift from their transcripts.
+    if (s.session?.nativeSubagentUsage)
+      await this.delegates
+        .bookNative(this.delegateCaller(s), s.session.nativeSubagentUsage())
+        .catch((err) =>
+          this.log.warn(`could not book the subagents of shift ${msg.shiftId}: ${String(err)}`),
+        );
 
     // A role that may not commit (reviewer, scout, ...) leaves nothing behind, whatever it did to the worktree.
     if (msg.worktree && s.worktree && !msg.agent.permissions.mayCommit && s.startSha) {
@@ -1562,6 +1604,36 @@ export class ShiftSupervisor {
     this.deps.transport.send('shift.progress', { shiftId: s.msg.shiftId, items });
   }
 
+  /** Not the CEO's and not the DevOps engineer's shifts: they hold wider powers and never delegate. */
+  private mayDelegate(msg: ShiftStartMsg): boolean {
+    return msg.kind !== 'ceo' && msg.kind !== 'devops' && !msg.agent.isDevops && msg.agent.roleKey !== 'ceo';
+  }
+
+  /** The shift as the caller of a delegate: its permissions are the ceiling of every child, its worktree is shared with a working one. */
+  private delegateCaller(s: ActiveShift): DelegateCaller {
+    const work = s.delegateWork;
+    return {
+      id: s.msg.shiftId,
+      runtime: s.msg.agent.runtime,
+      ...(s.msg.brief?.project?.id ? { projectId: s.msg.brief.project.id } : {}),
+      ...(s.msg.orgId ? { orgId: s.msg.orgId } : {}),
+      viewer: { agentId: s.msg.agent.agentId },
+      permissions: s.msg.agent.permissions,
+      delegation: s.msg.delegation,
+      ...(work
+        ? {
+            work: {
+              ...work,
+              env: {
+                ...(s.env?.AOM_WORKDIR ? { AOM_WORKDIR: s.env.AOM_WORKDIR } : {}),
+                ...(s.env?.PATH ? { PATH: s.env.PATH } : {}),
+              },
+            },
+          }
+        : {}),
+    };
+  }
+
   private handlerFor(s: ActiveShift): ShiftIpcHandler {
     return {
       report: async (req: IpcReportRequest) => this.submit(s, req.report),
@@ -1575,25 +1647,18 @@ export class ShiftSupervisor {
             s.msg.orgId,
             { agentId: s.msg.agent.agentId },
           );
-        // `aom delegate`: a read-only sub-task with a registry persona. Not for the CEO's and the DevOps engineer's shifts.
+        // `aom delegate`: a sub-task for a granted target. Not for the CEO's and the DevOps engineer's shifts; the server decides
+        // (and the runner only knows the targets it was told about at the start).
         if (req.method === DELEGATE_RPC) {
-          if (
-            s.msg.kind === 'ceo' ||
-            s.msg.kind === 'devops' ||
-            s.msg.agent.isDevops ||
-            s.msg.agent.roleKey === 'ceo'
-          )
+          if (!this.mayDelegate(s.msg))
             return { ok: false, error: '`aom delegate` is not available to this agent' };
-          return this.delegates.run(
-            {
-              id: s.msg.shiftId,
-              runtime: s.msg.agent.runtime,
-              ...(s.msg.brief?.project?.id ? { projectId: s.msg.brief.project.id } : {}),
-              ...(s.msg.orgId ? { orgId: s.msg.orgId } : {}),
-              viewer: { agentId: s.msg.agent.agentId },
-            },
-            req.params,
-          );
+          return this.delegates.run(this.delegateCaller(s), req.params);
+        }
+        // the `Agent` tool's guard hook (Claude Code native subagents)
+        if (req.method === 'delegate.guard') {
+          if (!this.mayDelegate(s.msg))
+            return { ok: false, error: 'subagents are not available to this agent' };
+          return this.delegates.guardNative(this.delegateCaller(s), req.params);
         }
         // The runner's own questions to the server about a delegate are not for the agent to ask.
         if (isDelegateServerRpc(req.method)) return { ok: false, error: `${req.method} is not available` };

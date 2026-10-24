@@ -31,22 +31,29 @@ async function cli(reply: { ok: boolean; result?: unknown; error?: string }) {
 }
 
 describe('aom delegate', () => {
-  it('sends the persona, the task and the model, and prints the reply', async () => {
+  it('sends the target and the task, and prints the reply', async () => {
     const t = await cli({ ok: true, result: { text: '--- Reply of delegate "security" ---\nlooks fine\n' } });
-    expect(await t.run('delegate', 'security', 'Review the plan.', '--model', 'haiku')).toBe(0);
+    expect(await t.run('delegate', 'security', 'Review the plan.')).toBe(0);
     expect(t.rpcs).toEqual([
-      { method: 'delegate.run', params: { persona: 'security', task: 'Review the plan.', model: 'haiku' } },
+      { method: 'delegate.run', params: { target: 'security', task: 'Review the plan.' } },
     ]);
     expect(t.out.join('')).toContain('looks fine');
   });
 
-  it('joins a task that arrived as several words and omits an absent model', async () => {
+  it('takes an agent target and joins a task that arrived as several words', async () => {
     const t = await cli({ ok: true, result: { text: 'ok' } });
-    await t.run('delegate', 'cost-hawk', 'How', 'much?');
-    expect(t.rpcs[0]?.params).toEqual({ persona: 'cost-hawk', task: 'How much?' });
+    await t.run('delegate', 'agent:rex', 'How', 'much?');
+    expect(t.rpcs[0]?.params).toEqual({ target: 'agent:rex', task: 'How much?' });
   });
 
-  it('needs a persona and a task', async () => {
+  it('does not take a model: a target runs on the one configured for it', async () => {
+    const t = await cli({ ok: true, result: { text: 'ok' } });
+    expect(await t.run('delegate', 'security', 'Review the plan.', '--model', 'haiku')).not.toBe(0);
+    expect(t.rpcs).toEqual([]);
+    expect(t.err.join('')).toContain('`--model` is not accepted');
+  });
+
+  it('needs a target and a task', async () => {
     const t = await cli({ ok: true, result: {} });
     expect(await t.run('delegate', 'security')).not.toBe(0);
     expect(t.rpcs).toEqual([]);

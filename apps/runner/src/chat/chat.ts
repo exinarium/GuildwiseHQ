@@ -46,7 +46,14 @@ import { type CapabilityRegistry, skillRpc } from '../capabilities/registry.ts';
 import { type GuardClone, markJobStarted } from '../ceo/guard-hook.ts';
 import { selectChatProfile } from '../ceo/profile.ts';
 import { composeOwnerMessage, removeTurnDir, turnDirOf, writeTurnFiles } from '../ceo/turn-files.ts';
-import { DELEGATE_NOTE, DelegateRunner } from '../delegate/delegate.ts';
+import {
+  type DelegateCaller,
+  DelegateRunner,
+  type DelegateWork,
+  delegateNote,
+  delegateUsageReporter,
+  stopDelegate,
+} from '../delegate/delegate.ts';
 import { recordDevopsAudit } from '../devops/audit.ts';
 import { redactCommand } from '../devops/guard.ts';
 import { type ExternalAdapters, formatSource, readScopedJira } from '../external/index.ts';
@@ -84,6 +91,8 @@ export interface ChatDeps {
   chatActivity?: () => boolean;
   /** The server accepts `run.usage` (it announced `RUN_USAGE_FEATURE`); absent: no. */
   liveUsage?: () => boolean;
+  /** The server accepts the live usage of a delegate (it announced `DELEGATE_GRANTS_FEATURE`). */
+  delegateUsage?: () => boolean;
   /** The local opt-in `aom-runner ceo full-power on`, read fresh at each turn (default: off). */
   ceoFullPower?: () => boolean;
   /** The repository clones on this workstation (the use-the-system hook nudges edits inside them). */
@@ -123,6 +132,8 @@ interface ActiveChat {
   /** A CEO owner or order turn in the full-power profile: it survives a dropped connection. */
   fullPower?: 'owner' | 'order';
   turnDir?: string;
+  /** What a delegate that reads shares with this turn (its working directory and read folders). */
+  delegateWork?: DelegateWork;
 }
 
 /** How many finished chat ids are remembered to ignore a redelivered `chat.start`. */
@@ -204,6 +215,10 @@ export class ChatManager {
       paths: deps.paths,
       ipc: deps.ipc,
       rpc: (id, method, params) => deps.rpc(id, method, params),
+      reportUsage: delegateUsageReporter(
+        () => deps.delegateUsage?.() === true,
+        (id, usage) => deps.send('run.usage', { kind: 'delegate', id, usage }),
+      ),
       ...(deps.capabilities ? { capabilities: deps.capabilities } : {}),
       ...(deps.log ? { log: deps.log } : {}),
     });
@@ -271,7 +286,40 @@ export class ChatManager {
     }
   }
 
+  /** Not the CEO's and not the DevOps engineer's plain chats; a session turn holds its session's grants. */
+  private mayDelegate(msg: ChatStartMsg): boolean {
+    return !!msg.session || (!msg.agent.isDevops && msg.agent.roleKey !== 'ceo');
+  }
+
+  /** The delegation targets of a chat or turn: a session turn's are the session's, a chat's are its agent's. */
+  private delegationOf(msg: ChatStartMsg): ChatStartMsg['delegation'] {
+    return msg.session ? msg.session.delegation : msg.delegation;
+  }
+
+  /** The chat or turn as the caller of a delegate. It only reads, so no child it starts is wider than reading. */
+  private delegateCaller(chat: ActiveChat): DelegateCaller {
+    const { msg } = chat;
+    return {
+      id: msg.chatId,
+      runtime: msg.agent.runtime,
+      ...(msg.context?.projectId ? { projectId: msg.context.projectId } : {}),
+      ...(msg.context?.orgId ? { orgId: msg.context.orgId } : {}),
+      viewer: viewerOfChat(msg),
+      permissions: {
+        ...msg.agent.permissions,
+        allowedTools: ['read'],
+        writableGlobs: [],
+        mayCommit: false,
+        browser: false,
+      },
+      delegation: this.mayDelegate(msg) ? this.delegationOf(msg) : undefined,
+      ...(chat.delegateWork ? { work: chat.delegateWork } : {}),
+    };
+  }
+
   async handleCancel(chatId: string): Promise<void> {
+    // the server's cap stop names a running delegate by its own id
+    if (stopDelegate(chatId, 'cancelled')) return;
     const c = this.active.get(chatId);
     if (!c) return;
     c.stopReason ??= 'cancelled';
@@ -354,21 +402,19 @@ export class ChatManager {
             chat.msg.context?.orgId,
             viewerOfChat(chat.msg),
           );
-        // `aom delegate`: a read-only sub-task with a registry persona. A session turn may use it where its purpose allows (the
-        // server decides in `delegate.begin`); of the plain chats not the CEO's and the DevOps engineer's.
+        // `aom delegate`: a sub-task for a granted target (a chat only reads, so its children only read). A session turn
+        // holds the session's grants; of the plain chats not the CEO's and the DevOps engineer's. The server decides in
+        // `delegate.begin`; the runner only knows the targets it was told about at the start.
         if (req.method === DELEGATE_RPC) {
-          if (!chat.msg.session && (chat.msg.agent.isDevops || chat.msg.agent.roleKey === 'ceo'))
+          if (!this.mayDelegate(chat.msg))
             return { ok: false, error: '`aom delegate` is not available to this agent' };
-          return this.delegates.run(
-            {
-              id: chatId,
-              runtime: chat.msg.agent.runtime,
-              ...(chat.msg.context?.projectId ? { projectId: chat.msg.context.projectId } : {}),
-              ...(chat.msg.context?.orgId ? { orgId: chat.msg.context.orgId } : {}),
-              viewer: viewerOfChat(chat.msg),
-            },
-            req.params,
-          );
+          return this.delegates.run(this.delegateCaller(chat), req.params);
+        }
+        // the `Agent` tool's guard hook (Claude Code native subagents)
+        if (req.method === 'delegate.guard') {
+          if (!this.mayDelegate(chat.msg))
+            return { ok: false, error: 'subagents are not available to this agent' };
+          return this.delegates.guardNative(this.delegateCaller(chat), req.params);
         }
         // The runner's own questions to the server about a delegate are not for the agent to ask.
         if (isDelegateServerRpc(req.method)) return { ok: false, error: `${req.method} is not available` };
@@ -736,6 +782,11 @@ export class ChatManager {
       } else if (ev.kind === 'exit') exit = ev;
     }
 
+    // Native subagents this turn ran (Claude Code): booked as delegates of the turn from their transcripts.
+    if (session.nativeSubagentUsage)
+      await this.delegates
+        .bookNative(this.delegateCaller(chat), session.nativeSubagentUsage())
+        .catch((err) => this.log.warn(`could not book the subagents of chat ${msg.chatId}: ${String(err)}`));
     if (chat.stopReason) return this.error(msg, chat.stopReason);
     if (exit.code !== 0) {
       if (exit.authFailed)
@@ -837,21 +888,23 @@ export class ChatManager {
     // A runtime with tools and no shell (the direct-model runtime) gets the same turn rendered for tools, with the call; the
     // others read `CLAUDE.md` from their config dir.
     const direct = adapter.instructionStyle === 'tools';
+    // Delegation (R3b): the session's grants. A Claude Code turn also gets them as native subagents.
+    const subagents =
+      !direct && msg.agent.runtime === 'claude-code' && session.delegation?.targets.length
+        ? await this.delegates.nativeSubagents(this.delegateCaller(chat))
+        : [];
+    const note = delegateNote(session.delegation, this.delegates.nativeNames(msg.chatId));
     const instructions = direct
       ? renderDirectSystemPrompt({
           session: { spec, persona: persona ?? '' },
-          tools: sessionToolsFor(session.purpose),
-          capabilityIndex: capIndex,
+          tools: sessionToolsFor(session.purpose, { delegate: !!session.delegation?.targets.length }),
+          capabilityIndex: `${capIndex}${note ? `\n\n${note}` : ''}`,
         })
       : undefined;
     if (!direct)
       await adapter.writeInstructions(
         sandbox,
-        `${renderSessionTurnInstructions(spec, persona ?? '')}${capIndex ? `\n\n${capIndex}\n` : ''}${
-          session.purpose && SESSION_PURPOSE_VERBS[session.purpose]?.includes('delegate')
-            ? `\n\n${DELEGATE_NOTE}\n`
-            : ''
-        }`,
+        `${renderSessionTurnInstructions(spec, persona ?? '')}${capIndex ? `\n\n${capIndex}\n` : ''}${note ? `\n\n${note}\n` : ''}`,
       );
     chat.token = this.deps.ipc.registerShift(this.handlerFor(chat));
     const tc = this.deps.toolchains?.resolve();
@@ -883,6 +936,8 @@ export class ChatManager {
         ...(session.purpose ? { purpose: session.purpose } : {}),
       },
       ...(instructions ? { instructions } : {}),
+      ...(subagents.length ? { subagents } : {}),
+      ...(direct && session.delegation?.targets.length ? { delegate: true } : {}),
       logFile: `${paths.shiftLogs}/chat-${msg.chatId}.jsonl`,
     });
     if (chat.stopReason) void chat.session.stop(`chat.${chat.stopReason}`);
@@ -917,8 +972,11 @@ export class ChatManager {
       ) ?? '';
     const instructions = renderDirectSystemPrompt({
       chat: { agent: msg.agent, context: msg.context },
-      tools: chatToolsFor({ playbook: !!msg.playbookGrants?.length }),
-      capabilityIndex: capIndex,
+      tools: chatToolsFor({
+        playbook: !!msg.playbookGrants?.length,
+        delegate: !!msg.delegation?.targets.length && this.mayDelegate(msg),
+      }),
+      capabilityIndex: `${capIndex}${this.mayDelegate(msg) && delegateNote(msg.delegation) ? `\n\n${delegateNote(msg.delegation)}` : ''}`,
     });
     chat.token = this.deps.ipc.registerShift(this.handlerFor(chat));
     const env = {
@@ -939,6 +997,7 @@ export class ChatManager {
       ...(msg.context.orgId ? { orgId: msg.context.orgId } : {}),
       instructions,
       ...(msg.playbookGrants?.length ? { playbookGrants: msg.playbookGrants } : {}),
+      ...(msg.delegation?.targets.length && this.mayDelegate(msg) ? { delegate: true } : {}),
       ...(msg.resumeSessionId ? { resumeSessionId: msg.resumeSessionId } : {}),
       logFile: `${paths.shiftLogs}/chat-${msg.chatId}.jsonl`,
     });
@@ -1028,6 +1087,25 @@ export class ChatManager {
         msg.context.orgId,
         viewerOfChat(msg),
       ) ?? '';
+    // Delegation (R3b): the agent's grants; a Claude Code chat also gets them as native subagents (read only, like the chat).
+    chat.delegateWork = {
+      cwd,
+      readDirs: folders.map((f) => f.path),
+      ...(this.deps.toolchains?.resolve()
+        ? { toolchainReadDirs: this.deps.toolchains.resolve()?.readDirs ?? [] }
+        : {}),
+    };
+    const subagents =
+      !devops &&
+      this.mayDelegate(msg) &&
+      msg.agent.runtime === 'claude-code' &&
+      msg.delegation?.targets.length
+        ? await this.delegates.nativeSubagents(this.delegateCaller(chat))
+        : [];
+    const note =
+      !devops && this.mayDelegate(msg)
+        ? delegateNote(msg.delegation, this.delegates.nativeNames(msg.chatId))
+        : '';
     const grantedSkills =
       this.deps.capabilities?.grantedSkills(
         msg.agent.skills,
@@ -1037,7 +1115,7 @@ export class ChatManager {
       ) ?? [];
     await adapter.writeInstructions(
       sandbox,
-      `${signIn ? `${signIn}\n` : ''}${graphNote}${capIndex ? `${capIndex}\n\n` : ''}${devops || msg.agent.roleKey === 'ceo' ? '' : `${DELEGATE_NOTE}\n\n`}${playbookNote(msg.playbookGrants) ? `${playbookNote(msg.playbookGrants)}\n\n` : ''}${renderChatInstructions(
+      `${signIn ? `${signIn}\n` : ''}${graphNote}${capIndex ? `${capIndex}\n\n` : ''}${note ? `${note}\n\n` : ''}${playbookNote(msg.playbookGrants) ? `${playbookNote(msg.playbookGrants)}\n\n` : ''}${renderChatInstructions(
         msg.agent,
         msg.context,
         {
@@ -1080,6 +1158,7 @@ export class ChatManager {
       ...(msg.context.intake ? { intake: true } : {}),
       ...(msg.resumeSessionId ? { resumeSessionId: msg.resumeSessionId } : {}),
       ...(devops ? { devopsGuard: { sessionRef: msg.chatId } } : {}),
+      ...(subagents.length ? { subagents } : {}),
       logFile: `${paths.shiftLogs}/chat-${msg.chatId}.jsonl`,
     });
     if (chat.stopReason) void chat.session.stop(`chat.${chat.stopReason}`); // cancelled while starting

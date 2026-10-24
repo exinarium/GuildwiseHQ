@@ -1,6 +1,7 @@
 import {
   CAPABILITY_REGISTRY_FEATURE,
   CHAT_ACTIVITY_FEATURE,
+  DELEGATE_GRANTS_FEATURE,
   HEARTBEAT_SEC,
   isDelegateServerRpc,
   LOCAL_VAULT_CAPABILITY,
@@ -940,7 +941,13 @@ export class RunnerHandlers {
       limits: { maxConcurrentShifts: conn.maxShifts, shiftLimit: setting },
       // Safe mode: the runner version this workstation is pinned to (the runner's updater follows it, not the latest).
       runnerPin: await pinForWelcome(ctx.pool, conn.workstationId),
-      features: [CHAT_ACTIVITY_FEATURE, RUN_USAGE_FEATURE, CAPABILITY_REGISTRY_FEATURE, PACKS_CAPABILITY],
+      features: [
+        CHAT_ACTIVITY_FEATURE,
+        RUN_USAGE_FEATURE,
+        DELEGATE_GRANTS_FEATURE,
+        CAPABILITY_REGISTRY_FEATURE,
+        PACKS_CAPABILITY,
+      ],
     });
     // With nothing in the runner's outbox there is nothing to wait for; otherwise reconcile on outbox.flushed.
     if (msg.outboxPending === 0) await this.reconcile(conn);

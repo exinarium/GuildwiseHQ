@@ -239,8 +239,8 @@ export class DirectModelAdapter implements RuntimeAdapter {
     }
 
     const tools: SessionToolDef[] = input.sessionTurn
-      ? sessionToolsFor(input.sessionTurn.purpose)
-      : chatToolsFor({ playbook: !!input.playbookGrants?.length });
+      ? sessionToolsFor(input.sessionTurn.purpose, { delegate: input.delegate === true })
+      : chatToolsFor({ playbook: !!input.playbookGrants?.length, delegate: input.delegate === true });
     const ipcUrl = input.env.AOM_IPC_URL;
     const ipcToken = input.env.AOM_SHIFT_TOKEN;
     const toolSet: ToolSet =

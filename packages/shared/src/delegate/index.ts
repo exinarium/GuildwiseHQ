@@ -31,6 +31,8 @@ export const DELEGATE_LIMITS = {
    * flag for this, so the runner counts the stream's tool events and kills the process at the cap.
    */
   maxToolCalls: 10,
+  /** The same for a child that edits or runs commands: it works, so it needs more. */
+  maxToolCallsWork: 80,
   /** The runner tells the server every so often that a running delegate is alive (`delegate.heartbeat`). */
   heartbeatMs: 15_000,
   /** A delegate whose runner sent a heartbeat and then went quiet this long is taken to be gone (its slot is freed). */

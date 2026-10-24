@@ -4,7 +4,7 @@ import { createInterface } from 'node:readline';
 import type { Usage } from '@aom/shared';
 import { execa } from 'execa';
 import { killToolProcesses } from './proc-tree.ts';
-import type { RuntimeEvent, RuntimeSession } from './types.ts';
+import type { NativeSubagentUsage, RuntimeEvent, RuntimeSession } from './types.ts';
 
 export interface ProcessSpec {
   bin: string;
@@ -16,6 +16,8 @@ export interface ProcessSpec {
   usage: () => Usage;
   /** The session's context size right now (see `RuntimeSession.contextTokens`). */
   contextTokens?: () => number;
+  /** Native subagents the session ran, read after it ended (Claude Code). */
+  nativeSubagentUsage?: () => NativeSubagentUsage[];
   /** Also pass the runner's own environment to the child (default). Agent sessions with an allow-listed `env` set false. */
   inheritEnv?: boolean;
   /** Written to the child's stdin (then closed); without it stdin is closed. Keeps a big prompt out of argv (E2BIG). */
@@ -197,5 +199,6 @@ export function spawnSession(spec: ProcessSpec): RuntimeSession {
     lastActivityAt: () => lastActivity,
     usage: spec.usage,
     ...(spec.contextTokens ? { contextTokens: spec.contextTokens } : {}),
+    ...(spec.nativeSubagentUsage ? { nativeSubagentUsage: spec.nativeSubagentUsage } : {}),
   };
 }

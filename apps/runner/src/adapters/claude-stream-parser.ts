@@ -99,6 +99,8 @@ export class ClaudeStreamParser {
   private lastModel: string | undefined;
   private errorSubtype: string | undefined;
   sessionId: string | undefined;
+  /** Calls of the `Agent` tool by the session itself (native subagents). */
+  nativeSubagentCalls = 0;
   private authFailed = false;
   /** `--include-partial-messages` is on: thinking and text starts come from the stream, not the assistant message. */
   private sawStreamEvents = false;
@@ -201,9 +203,15 @@ export class ClaudeStreamParser {
         const t = assistantText(msg.message);
         if (isUsageLimitText(t)) this.limitText = t;
       }
-      if (typeof msg.message.model === 'string' && msg.message.model && !msg.message.model.startsWith('<'))
+      if (
+        typeof msg.message.model === 'string' &&
+        msg.message.model &&
+        !msg.message.model.startsWith('<') &&
+        msg.parent_tool_use_id == null
+      )
         this.lastModel = msg.message.model;
-      if (isObj(msg.message.usage) && typeof msg.message.id === 'string') {
+      // a native subagent's own calls are booked from its transcript (as a delegate), not as the parent's
+      if (isObj(msg.message.usage) && typeof msg.message.id === 'string' && msg.parent_tool_use_id == null) {
         const u = usageFromClaude(msg.message.usage);
         this.perMessage.set(msg.message.id, u);
         // a sub-agent's calls carry `parent_tool_use_id`: they do not grow this session's own context
@@ -222,6 +230,8 @@ export class ClaudeStreamParser {
         ) {
           events.push({ kind: 'thinking' });
         } else if (block.type === 'tool_use' && typeof block.name === 'string') {
+          if ((block.name === 'Agent' || block.name === 'Task') && msg.parent_tool_use_id == null)
+            this.nativeSubagentCalls++;
           events.push({
             kind: 'tool',
             name: block.name,
@@ -244,11 +254,17 @@ export class ClaudeStreamParser {
         });
       }
     } else if (msg.type === 'result') {
-      const model = dominantModel(msg.modelUsage) ?? this.lastModel;
+      // With native subagents `modelUsage` and `total_cost_usd` include them (`usage` does not): the parent keeps its own model
+      // and its tokens are priced from the table, while the subagents are booked from their transcripts as delegates.
+      const withSubagents = this.nativeSubagentCalls > 0;
+      const model = withSubagents
+        ? (this.lastModel ?? undefined)
+        : (dominantModel(msg.modelUsage) ?? this.lastModel);
       this.total = {
         ...usageFromClaude(msg.usage),
         ...(model ? { model } : {}),
-        ...(typeof msg.total_cost_usd === 'number' &&
+        ...(!withSubagents &&
+        typeof msg.total_cost_usd === 'number' &&
         Number.isFinite(msg.total_cost_usd) &&
         msg.total_cost_usd >= 0
           ? { costUsd: msg.total_cost_usd }

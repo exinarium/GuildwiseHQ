@@ -1421,6 +1421,8 @@ export const ChatActivitySchema = msg('chat.activity', {
 export const CHAT_ACTIVITY_FEATURE = 'chat-activity:1';
 /** Announced in `welcome.features` by servers that accept `run.usage` (live usage of a running shift or chat turn, for the provider caps). */
 export const RUN_USAGE_FEATURE = 'run-usage:1';
+/** Announced by servers that understand explicit delegation (R3b): grants on the start messages, `run.usage` of a delegate, the target-based `delegate.begin`. */
+export const DELEGATE_GRANTS_FEATURE = 'delegate-grants:1';
 /**
  * What a running shift or chat/session turn has used so far (cumulative, replaces the earlier report). Best effort and not
  * stored: the server counts it toward a provider's monthly cap while the run is going and stops the run at the cap.
@@ -1560,7 +1562,7 @@ export const ShiftStartSchema = msg('shift.start', {
   resumeMessage: z.string().max(40_000).optional(),
   /** R3b: the playbooks this agent was granted (`aom playbook run`); absent or empty: none. The server checks the grant again. */
   playbookGrants: z.array(z.string().max(130)).max(40).optional(),
-  /** R3b: the delegation targets of this chat's agent (an agent chat); a session turn carries its own in `session.delegation`. */
+  /** R3b: the delegation targets this agent was granted (absent or empty: it may not delegate). The server checks every call again. */
   delegation: DelegationSpecSchema.optional(),
 });
 export const ShiftStopSchema = msg('shift.stop', { shiftId: z.uuid(), reason: ShiftStopReasonSchema });
@@ -1621,6 +1623,8 @@ export const ChatStartSchema = msg('chat.start', {
   session: SessionTurnSpecSchema.optional(),
   /** R3b: the playbooks this agent was granted (`aom playbook run`); absent or empty: none. The server checks the grant again. */
   playbookGrants: z.array(z.string().max(130)).max(40).optional(),
+  /** R3b: the delegation targets of this chat's agent (an agent chat); a session turn carries its own in `session.delegation`. */
+  delegation: DelegationSpecSchema.optional(),
 });
 export const TokenRotatedSchema = msg('token.rotated', { token: z.string().min(1) });
 /** A browser started (or stopped) following the logs of a run environment: the runner sends `run.log` only meanwhile. */

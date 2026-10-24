@@ -52,6 +52,7 @@ import {
   toolchainReadPaths,
 } from './claude-policy.ts';
 import { ClaudeStreamParser } from './claude-stream-parser.ts';
+import { agentsDocument, NATIVE_SUBAGENT_ENV, readNativeSubagentUsage } from './claude-subagents.ts';
 import {
   type ClaudeUsageMonitor,
   detectUsageLimit,
@@ -65,6 +66,7 @@ import type {
   AccountGate,
   ChatStartInput,
   DevopsGuardInput,
+  NativeSubagent,
   OwnerTurnInput,
   RuntimeAdapter,
   RuntimeCapabilities,
@@ -204,6 +206,7 @@ export function buildClaudeCommand(input: ShiftStartInput, cfg: ClaudeConfig): C
   // working-directory block in the DevOps settings; the secret rules deny the settings files).
   if (input.devopsGuard?.readOnlyScan !== true)
     for (const d of [...input.addDirs, ...(input.readDirs ?? [])]) args.push('--add-dir', d);
+  if (input.subagents?.length) args.push('--agents', join(input.sandbox.configDir, AGENTS_FILE));
   if (input.resumeSessionId) args.push('--resume', input.resumeSessionId);
   return {
     bin: cfg.bin,
@@ -257,6 +260,7 @@ export function buildClaudeChatCommand(input: ChatStartInput, cfg: ClaudeConfig)
   );
   if (!nativeSkills(input)) args.push('--disable-slash-commands');
   for (const d of input.readDirs ?? []) args.push('--add-dir', d);
+  if (input.subagents?.length) args.push('--agents', join(input.sandbox.configDir, AGENTS_FILE));
   if (input.resumeSessionId) args.push('--resume', input.resumeSessionId);
   // G-Q1: the DevOps agent's chat works as the user like its shifts (real HOME, no sandbox); other chats stay sandboxed
   return {
@@ -273,6 +277,9 @@ export function buildClaudeChatCommand(input: ChatStartInput, cfg: ClaudeConfig)
     ),
   };
 }
+
+/** The native subagents' definitions, in the agent's private config dir (`--agents <file>`). */
+export const AGENTS_FILE = 'agents.json';
 
 export const OWNER_BRIEF_FILE = 'ceo-brief.md';
 export const OWNER_MCP_FILE = 'aom-permission.json';
@@ -682,6 +689,59 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     return { ...input, grantedSkills: kept };
   }
 
+  /**
+   * Native subagents (the `Agent` tool). Claude Code lets the model start its own subagent types (`general-purpose`, `Explore`,
+   * ...) whatever the permission mode says (verified with claude 2.1.309), on the parent's model and outside every grant. So
+   * the tool is removed for every agent that has no delegation target (a deny rule), and for one that has, only its granted
+   * targets are defined (`--agents`), kept in the foreground (the parent waits for each), and a PreToolUse hook (`aom
+   * subagent-guard`) refuses every other type and asks the server before each granted one. The DevOps engineer and the CEO keep
+   * their own behaviour.
+   */
+  private prepareSubagents<
+    T extends {
+      subagents?: NativeSubagent[];
+      agent: { isDevops?: boolean; roleKey: string };
+      env: Record<string, string>;
+    },
+  >(dir: string, input: T, settings: ClaudeSettings): T {
+    if (input.agent.isDevops || input.agent.roleKey === 'ceo') return input;
+    const subs = input.subagents ?? [];
+    if (subs.length === 0) {
+      settings.permissions.deny = [...new Set([...settings.permissions.deny, 'Agent', 'Task'])];
+      return input;
+    }
+    writeFileSync(join(dir, AGENTS_FILE), `${JSON.stringify(agentsDocument(subs))}\n`, { mode: 0o600 });
+    const guardFile = join(dir, 'subagent-guard.json');
+    writeFileSync(
+      guardFile,
+      `${JSON.stringify({ allowed: Object.fromEntries(subs.map((x) => [x.name, x.handle])) })}\n`,
+      { mode: 0o600 },
+    );
+    const quote = (w: string) => `'${w.replace(/'/g, `'\\''`)}'`;
+    // `|| exit 2`: any failure of the guard, a missing `aom` included, is a refusal (a hook that fails any other way lets the call through)
+    const command = `AOM_SUBAGENT_GUARD=${quote(guardFile)} ${[...selfCommand('aom'), 'subagent-guard'].map(quote).join(' ')} || exit 2`;
+    settings.hooks = {
+      PreToolUse: [
+        ...(settings.hooks?.PreToolUse ?? []),
+        { matcher: 'Agent|Task', hooks: [{ type: 'command' as const, command, timeout: 10 }] },
+      ],
+    };
+    settings.permissions.allow = [
+      ...new Set([...settings.permissions.allow, ...subs.map((x) => `Agent(${x.name})`)]),
+    ];
+    // the second line, for the types we can name; the hook is the allow-list for the rest
+    settings.permissions.deny = [
+      ...new Set([
+        ...settings.permissions.deny,
+        // not a bare `Task`: that is the old name of the same tool and would remove it for the granted types too
+        ...['general-purpose', 'Explore', 'Plan', 'statusline-setup', 'claude-code-guide'].map(
+          (n) => `Agent(${n})`,
+        ),
+      ]),
+    ];
+    return { ...input, env: { ...input.env, ...NATIVE_SUBAGENT_ENV, AOM_SUBAGENT_GUARD: guardFile } };
+  }
+
   /** Names of the skills in the accounts' own skills folders (`<config dir>/skills/*`): what can be listed is denied outright. */
   private accountSkillNames(): string[] {
     const dirs = [
@@ -773,6 +833,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       input.agent.isDevops,
     );
     input = this.prepareSkills(dir, input, settings);
+    input = this.prepareSubagents(dir, input, settings);
     await writeFile(join(dir, 'settings.json'), `${JSON.stringify(settings, null, 2)}\n`);
     // A read-only worktree (reviewer): Claude Code's sandbox must find its protected dotfile names already there.
     const dropPlaceholders = settings.sandbox?.filesystem.denyWrite.includes(input.cwd)
@@ -820,6 +881,8 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
           ? stampBackendUsage(parser.usage(), { backend: bk.backend, model: bk.model, source: bk.source })
           : parser.usage(),
       contextTokens: () => parser.contextTokens(),
+      nativeSubagentUsage: () =>
+        input.subagents?.length ? readNativeSubagentUsage(dir, parser.sessionId) : [],
       logFile: input.logFile,
       exitError: () => (parser.resultError ? `claude result: ${parser.resultError}` : undefined),
       ...hooks,
@@ -884,7 +947,11 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
             this.policy(chatInput, input.cwd, true),
             input.sandbox,
           );
-    const withSkills = this.prepareSkills(dir, chatInput, chatSettings);
+    const withSkills = this.prepareSubagents(
+      dir,
+      this.prepareSkills(dir, chatInput, chatSettings),
+      chatSettings,
+    );
     await writeFile(join(dir, 'settings.json'), `${JSON.stringify(chatSettings, null, 2)}\n`);
     if (bk) rmSync(join(dir, '.credentials.json'), { force: true });
     else await this.linkCredentials(dir, used, account.key);
@@ -907,6 +974,8 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
         bk
           ? stampBackendUsage(parser.usage(), { backend: bk.backend, model: bk.model, source: bk.source })
           : parser.usage(),
+      nativeSubagentUsage: () =>
+        input.subagents?.length ? readNativeSubagentUsage(dir, parser.sessionId) : [],
       logFile: input.logFile,
       exitError: () => (parser.resultError ? `claude result: ${parser.resultError}` : undefined),
       ...hooks,
