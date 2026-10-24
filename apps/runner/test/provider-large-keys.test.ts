@@ -53,7 +53,12 @@ describe('hybrid sealing of provider credentials', () => {
       Buffer.from('sk-old-key'),
     ).toString('base64');
     const store = new ProviderStore({ file: join(dir, 'providers.json'), keys: k });
-    const legacyResult = store.set({ provider: 'openai', keyId: k.publicKey.keyId, ciphertext: legacy, models: [] });
+    const legacyResult = store.set({
+      provider: 'openai',
+      keyId: k.publicKey.keyId,
+      ciphertext: legacy,
+      models: [],
+    });
     expect(legacyResult.stored).toBe(true);
     expect(legacyResult.warning).toMatch(/older form/);
     expect(store.get('openai')?.apiKey).toBe('sk-old-key');
