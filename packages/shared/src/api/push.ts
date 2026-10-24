@@ -15,6 +15,7 @@ export const PUSH_CATEGORIES = [
   'project_pause',
   'chat_replies',
   'session_time',
+  'follow_ups',
 ] as const;
 export const PushCategorySchema = z.enum(PUSH_CATEGORIES);
 export type PushCategory = z.infer<typeof PushCategorySchema>;
@@ -63,6 +64,11 @@ export const PUSH_CATEGORY_INFO: Record<
     label: 'Chat replies',
     description: 'An agent answered you in a chat.',
     defaultOn: false,
+  },
+  follow_ups: {
+    label: 'Reminders for open items',
+    description: 'A decision or rating on your Desk has been waiting for several days.',
+    defaultOn: true,
   },
   session_time: {
     label: 'Session time limit',

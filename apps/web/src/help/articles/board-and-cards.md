@@ -96,6 +96,10 @@ If an agent seems stuck, open the card: the live shift shows how long it has run
 
 **Ask DevOps** on the card opens a request to the DevOps engineer with the card attached, for example when a tool is missing or the card's repository has a problem.
 
+## Ask an agent in the thread {#mentions}
+
+Type **@** in a card's comment box to pick an agent, then ask a small question: "@una what is left to test?". The agent answers in the thread, read-only, and the cost is booked to the card. See [Agents](/help/agents#mentions) for who may mention which agent and the limits.
+
 ## Run a branch {#run-a-branch}
 
 **Run this branch** (card) or **Run branch...** (board) has the workstation's DevOps engineer start the project so you can try it; it stops by itself after the time in **Environments > Test copies**, or when you click **Stop**. The panel is called **Test copy**. Set the steps up once on the project's **Environments** page, under **Your app**: press **Scan with DevOps** (DevOps reads the project and suggests the steps; you answer its questions and confirm) or **Set up myself** (short forms in plain words). Starts then replay the steps in seconds with no DevOps run; without steps, the first start is worked out by the engineer and saved as a plan. **Restart** and **Update & restart** (fast-forward to the branch head) are on the panel.

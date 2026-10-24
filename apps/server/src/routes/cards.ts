@@ -14,6 +14,7 @@ import {
 import type { FastifyInstance } from 'fastify';
 import { requireUser } from '../auth/guards.ts';
 import { loadVisibleCard } from '../authz/scope.ts';
+import { handleMentions } from '../commands/agent-mentions.ts';
 import { sendCardToBa } from '../commands/ba-intake.ts';
 import {
   cancelCard,
@@ -105,6 +106,11 @@ export function cardRoutes(ctx: Ctx) {
       async (req, reply) => {
         const s = await requireUser(ctx, req);
         const { cardId, messageId } = await commentOnCard(ctx, s.user, req.params.id, req.body.body);
+        // @agent mentions (S-B2): started after the comment is saved; a refusal never fails the comment
+        const mentions = await handleMentions(ctx, s.user, cardId, messageId, req.body.body).catch((err) => {
+          ctx.log.error({ err }, 'mentions failed');
+          return [];
+        });
         const m = await one(
           ctx.pool,
           `SELECT m.*, u.display_name AS user_name FROM thread_messages m LEFT JOIN users u ON u.id = m.author_user_id WHERE m.id=$1`,
@@ -122,6 +128,7 @@ export function cardRoutes(ctx: Ctx) {
           body: req.body.body,
           data: {},
           createdAt: iso(m?.created_at) ?? ctx.clock.now().toISOString(),
+          ...(mentions.length ? { mentions } : {}),
         };
       },
     );

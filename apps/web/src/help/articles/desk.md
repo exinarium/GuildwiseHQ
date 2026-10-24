@@ -55,6 +55,12 @@ Only people who may answer see the form; on a card with the default policy only 
 
 A push notification for an approval has **Approve** and **Reject** buttons; one for a question with options has its first two options (the notification itself opens the Desk for the rest, and some phones show no buttons). A button opens a small page that asks you to sign in, shows the item, and waits for you to press the button: opening the link changes nothing. The link works **once**, for **15 minutes**, and only for you. There are no buttons on code approvals (you see the diff first) or on items that need more from you. Every use is on the audit log (Organization, Audit log).
 
+## Reminders {#reminders}
+
+A question, approval, escalation or digest rating that is still open after **3 days** reminds the person it is waiting for: a notification on their devices (the **Reminders for open items** category in notification settings) and a **Reminded** mark on the item. It repeats at most once per period. An item that sits with an agent is handed back to the agent once instead.
+
+Use **Snooze** on an item to hold its next reminder back for a day up to two weeks. An Owner or Admin changes the period, or turns reminders off with 0, under **Settings > General > Reminders for open items**.
+
 ## Standing orders {#standing-orders}
 
 **Standing orders** are recurring instructions that show up in every agent's shift. Use them for:

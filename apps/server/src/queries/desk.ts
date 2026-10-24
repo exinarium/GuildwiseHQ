@@ -26,7 +26,9 @@ SELECT d.*, c.ref AS card_ref, c.title AS card_title, c.stage AS card_stage, c.s
           FROM ceo_actions x LEFT JOIN agents ca ON ca.id = (SELECT agent_id FROM ceo_settings cs WHERE cs.org_id = x.org_id)
          WHERE x.id = d.ceo_action_id) AS ceo_action,
        (SELECT ca2.name FROM ceo_settings cs2 JOIN agents ca2 ON ca2.id = cs2.agent_id WHERE cs2.org_id = d.org_id) AS ceo_name,
-       (SELECT json_build_object('id', ii.id, 'name', ii.name) FROM interests ii WHERE ii.project_id = d.project_id AND d.kind = 'rating') AS interest
+       (SELECT json_build_object('id', ii.id, 'name', ii.name) FROM interests ii WHERE ii.project_id = d.project_id AND d.kind = 'rating') AS interest,
+       (SELECT json_build_object('nudgedAt', f.last_nudge_at, 'nudgeCount', f.nudge_count, 'snoozedUntil', f.snoozed_until)
+          FROM desk_follow_ups f WHERE f.desk_item_id = d.id AND (f.nudge_count > 0 OR f.snoozed_until IS NOT NULL)) AS follow_up
   FROM desk_items d
   LEFT JOIN cards c ON c.id = d.card_id
   LEFT JOIN projects p ON p.id = d.project_id
@@ -160,6 +162,7 @@ export function toDeskDto(
         }
       : {}),
     ...(r.interest ? { interest: r.interest } : {}),
+    ...(r.follow_up ? { followUp: r.follow_up } : {}),
     dedupEntries: (r.dedup_ledger_ids as string[]).flatMap((id) => {
       const e = dedup.get(id);
       return e ? [e] : [];

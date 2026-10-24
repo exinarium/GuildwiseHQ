@@ -1,4 +1,5 @@
 export * from './accounts/provider-accounts.ts';
+export * from './agent-ux/index.ts';
 export * from './api/index.ts';
 export * from './attachments/index.ts';
 export * from './authz/index.ts';

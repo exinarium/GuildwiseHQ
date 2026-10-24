@@ -20,3 +20,8 @@ export function builtinCapabilities(): ParsedCapability[] {
 export function builtinCapabilityMeta(): CapabilityMeta[] {
   return builtinCapabilities().map((e) => capabilityMeta(e, 'builtin'));
 }
+
+/** The text of a built-in persona file (frontmatter and prompt), or undefined. */
+export function builtinPersonaText(key: string): string | undefined {
+  return BUILTIN_CAPABILITY_FILES[`personas/${key}.md`];
+}

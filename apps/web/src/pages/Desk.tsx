@@ -35,6 +35,7 @@ import { MappingForm } from '../components/MappingForm.tsx';
 import { OutboundApproval } from '../components/OutboundApproval.tsx';
 import { PhaseDeskItem } from '../components/PhaseDeskItem.tsx';
 import { QaDeskItem } from '../components/QaDeskItem.tsx';
+import { ReminderBadges, SnoozeSelect } from '../components/SnoozeReminder.tsx';
 import { cx } from '../components/ui/cx.ts';
 import {
   Badge,
@@ -457,12 +458,14 @@ export function DeskItem({ item, now, bare = false }: { item: DeskItemDto; now?:
             <span data-testid="repeat-count">x{item.repeatCount}</span>
           </Badge>
         )}
+        <ReminderBadges item={item} />
         <span className="text-xs text-subtle" data-testid="affected-count">
           Affects {item.affectedCount} {item.affectedCount === 1 ? 'card' : 'cards'}
         </span>
         <span className="tnum ml-auto text-xs text-subtle" title={formatDateTime(item.createdAt)}>
           asked {ageLabel(item.createdAt, now)} ago
         </span>
+        <SnoozeSelect item={item} />
       </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">

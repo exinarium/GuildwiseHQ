@@ -37,6 +37,13 @@ Members can hire too, for projects they are on and on their own workstation. Own
 
 On an approved pack, **Hire from this pack** turns a persona into an agent tagged like *ACME · analyst · v1.2.0*. It gets read access unless the persona asks for more and you may grant it. **Add all agents** hires every persona. If the pack changes a persona you get a new version to review, never applied by itself. An agent whose pack lost its approval keeps working and shows a warning.
 
+## Starter gallery {#starter-gallery}
+
+**Settings > Capabilities > Starter gallery** lists a few built-in personas and playbooks worth trying first, each with a one-line outcome: product brief, brainstorm, release notes, weekly status, pull request triage, incident follow-up, and personas such as the Analyst, the Security reviewer and the Cost hawk. A new organization also sees it at the top of **Agents** until something is hired or started.
+
+- **Run it** (a playbook) starts a guided session on it.
+- **Hire it** (a persona) opens a review of the persona as an agent of your own, where you can change anything, and then the normal hire dialog. Nothing is hired before you press **Hire**.
+
 ## Chat with a persona {#chat-with-a-persona}
 
 **Chat** on a persona opens a one-to-one chat on your own workstation. It only reads, and its cost is tracked. You can set a cost limit and a time limit for the chat; chats are deleted after 90 days. A private persona is only yours.
