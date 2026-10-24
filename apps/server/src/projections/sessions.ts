@@ -14,6 +14,7 @@ type SessionEventType =
   | 'SessionTurnRequeued'
   | 'SessionTurnCompleted'
   | 'DelegateCompleted'
+  | 'DelegateGrantChanged'
   | 'SessionTurnFailed';
 
 const ev = <T extends SessionEventType>(e: StoredEvent) => e.event as EventOf<T>;
@@ -210,8 +211,10 @@ export const sessionProjectors: Record<string, Projector> = {
       tx,
       `INSERT INTO shift_costs (shift_id, org_id, agent_id, project_id, card_id, phase_id, kind, model, tokens_input,
          tokens_output, tokens_cache_read, tokens_cache_write, cost_usd_micros, reported_usd_micros, ended_at, cost_stamped,
-         cost_unknown, parent_id, key_source, key_provider, owner_priced)
-       VALUES ($1,$2,$3,$4,$5,$6,'delegate',$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
+         cost_unknown, parent_id, key_source, key_provider, owner_priced, delegate_target, delegate_target_name,
+         delegate_target_kind, delegate_profile, delegate_outcome, delegate_duration_ms, delegate_summary, delegate_native,
+         delegate_thread_id)
+       VALUES ($1,$2,$3,$4,$5,$6,'delegate',$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29)
        ON CONFLICT (shift_id) DO NOTHING`,
       [
         p.delegateId,
@@ -234,6 +237,47 @@ export const sessionProjectors: Record<string, Projector> = {
         p.usage.keySource ?? null,
         p.usage.keyProvider ?? null,
         p.usage.ownerPriced === true,
+        p.personaKey,
+        p.targetName ?? p.personaKey,
+        p.targetKind ?? null,
+        p.profile ?? null,
+        p.outcome,
+        p.durationMs ?? null,
+        p.summary ?? null,
+        p.native === true,
+        p.threadId ?? null,
+      ],
+    );
+  },
+  DelegateGrantChanged: async (tx, e) => {
+    const p = ev<'DelegateGrantChanged'>(e).payload;
+    if (!p.granted) {
+      await exec(
+        tx,
+        'DELETE FROM delegate_grants WHERE owner_kind=$1 AND owner_id=$2 AND target_kind=$3 AND target_key=$4',
+        [p.ownerKind, p.ownerId, p.targetKind, p.targetKey],
+      );
+      return;
+    }
+    await exec(
+      tx,
+      `INSERT INTO delegate_grants (owner_kind, owner_id, org_id, target_kind, target_key, max_calls, timeout_sec, max_profile,
+         granted_by, granted_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+       ON CONFLICT (owner_kind, owner_id, target_kind, target_key) DO UPDATE SET max_calls=EXCLUDED.max_calls,
+         timeout_sec=EXCLUDED.timeout_sec, max_profile=EXCLUDED.max_profile, granted_by=EXCLUDED.granted_by,
+         granted_at=EXCLUDED.granted_at`,
+      [
+        p.ownerKind,
+        p.ownerId,
+        p.orgId,
+        p.targetKind,
+        p.targetKey,
+        p.maxCalls ?? 4,
+        p.timeoutSec ?? 110,
+        p.maxProfile ?? null,
+        p.changedBy,
+        e.createdAt,
       ],
     );
   },

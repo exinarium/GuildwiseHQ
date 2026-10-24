@@ -899,7 +899,7 @@ describe('the cap stops running work at once', () => {
     );
     return id;
   }
-  const report = (id: string, out: number, kind: 'shift' | 'chat' = 'shift') =>
+  const report = (id: string, out: number, kind: 'shift' | 'chat' | 'delegate' = 'shift') =>
     import('../src/provider-keys/live-usage.ts').then((m) =>
       m.applyRunUsage(ctx(), { id: w.workstationId }, { kind, id, usage: usage(out) } as never),
     );
@@ -997,6 +997,31 @@ describe('the cap stops running work at once', () => {
     await until(async () => r1.received.some((f: any) => f.type === 'chat.cancel' && f.chatId === turn));
     const msgs = await q(`SELECT body FROM thread_messages WHERE thread_id=$1`, [thread]);
     expect(msgs.map((m: any) => m.body).join(' ')).toMatch(/reached its monthly cap while this was running/);
+    await q(`UPDATE org_providers SET cap_paused_month=NULL WHERE org_id=$1`, [orgId]);
+  });
+
+  it('stops a delegate (a child run) on the organization key of its own model, by its id', async () => {
+    await clearSpend();
+    await q(
+      `UPDATE org_providers SET cap_paused_month=NULL, cap_warned_month=NULL, cap_override_month=NULL WHERE org_id=$1`,
+      [orgId],
+    );
+    expect((await asOwner('PUT', '/api/org/providers/google/cap', { monthlyUsd: 10 })).status).toBe(200);
+    await giveGoogleKey('org');
+    // the parent runs on a Claude subscription; the child (granted by name) runs on Gemini with the organization key
+    const parent = await startShift('sonnet');
+    const child = randomUUID();
+    await q(
+      `INSERT INTO delegate_begins (delegate_id, caller_id, org_id, begun_at, workstation_id, target, target_kind, runtime, model)
+       VALUES ($1,$2,$3,now(),$4,'gem','persona','gemini','gemini-2.5-pro')`,
+      [child, parent, orgId, w.workstationId],
+    );
+    await report(child, 20_000_000, 'delegate');
+    await until(async () => r1.received.some((f: any) => f.type === 'chat.cancel' && f.chatId === child));
+    // the child is stopped once
+    await report(child, 21_000_000, 'delegate');
+    expect(r1.received.filter((f: any) => f.type === 'chat.cancel' && f.chatId === child)).toHaveLength(1);
+    await q('DELETE FROM delegate_begins WHERE delegate_id=$1', [child]);
     await q(`UPDATE org_providers SET cap_paused_month=NULL WHERE org_id=$1`, [orgId]);
   });
 

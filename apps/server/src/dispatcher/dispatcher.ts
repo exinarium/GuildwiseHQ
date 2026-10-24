@@ -13,6 +13,7 @@ import type { StoredEvent } from '../eventstore/types.ts';
 import { platformPass } from '../platform-team/detectors.ts';
 import { agentCapBlocked, type ProviderCapState } from '../provider-keys/caps.ts';
 import { buildShiftStart } from '../runner-gateway/brief.ts';
+import { delegationSpecFor } from '../sessions/delegate-grants.ts';
 import { playbookGrantKeys } from '../sessions/playbooks.ts';
 import { wsServesOrgSql } from '../simulation/fit.ts';
 import { accountFor, loadProjectAccounts, runtimeUsable, accountScope as scopeOf } from './accounts.ts';
@@ -394,7 +395,16 @@ export class Dispatcher {
     if (!built) return false;
     const withCommit = await withCommitAs(this.ctx, built);
     const playbookGrants = await playbookGrantKeys(this.ctx.pool, withCommit.agent.agentId);
-    const payload = playbookGrants.length ? { ...withCommit, playbookGrants } : withCommit;
+    // R3b: delegation is off unless the agent was granted targets (never for the CEO or the DevOps engineer)
+    const delegation =
+      withCommit.agent.isDevops || withCommit.agent.roleKey === 'ceo'
+        ? undefined
+        : await delegationSpecFor(this.ctx.pool, 'agent', withCommit.agent.agentId);
+    const payload = {
+      ...withCommit,
+      ...(playbookGrants.length ? { playbookGrants } : {}),
+      ...(delegation ? { delegation } : {}),
+    };
     const sent = this.ctx.services.runners.send(
       c.workstationId,
       'shift.start',

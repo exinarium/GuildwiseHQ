@@ -161,6 +161,8 @@ export const sessionEvents = [
     z.object({
       ownerKind: DelegateOwnerKindSchema,
       ownerId: Id,
+      /** The session of a session grant (so the event is as private as the session). */
+      threadId: Id.optional(),
       orgId: Id,
       targetKind: DelegateTargetKindSchema,
       targetKey: z.string().min(1).max(130),

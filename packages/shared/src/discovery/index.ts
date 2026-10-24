@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { CapabilityKeySchema, PackedKeySchema } from '../capabilities/parse.ts';
+import { DelegationStepDtoSchema } from '../delegate/grants.ts';
 import { DocumentKindSchema, DocumentStatusSchema } from '../documents/index.ts';
 import { ModelChoiceSchema } from '../models/choices.ts';
 import { PlaybookRunStateSchema } from '../playbooks/index.ts';
@@ -424,6 +425,8 @@ export const DiscoveryStateDtoSchema = z.object({
   time: SessionTimeSchema.optional(),
   /** The caller may steer the session (controls, answers, phase, End): its creator, an Owner or an Admin. */
   canManage: z.boolean().optional(),
+  /** R3b: what the facilitator or Chair delegated, as sub-steps (target, model, tool profile, time, cost, result). */
+  delegations: z.array(DelegationStepDtoSchema).optional(),
   /** Whether the organization has a BA hired, and whether its workstation is online (for "Hand to BA"). */
   baStatus: z.enum(['online', 'offline', 'none']).optional(),
   cost: SessionCostSchema,

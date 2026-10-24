@@ -46,6 +46,7 @@ import { threadMessageById } from '../queries/threads.ts';
 import { agentSpecFor } from '../runner-gateway/brief.ts';
 import { orgReadRepos, projectReadRepos, referenceReadRepos } from '../runner-gateway/read-repos.ts';
 import { localReadRepos } from '../runner-gateway/workstation-repos.ts';
+import { delegationSpecFor } from '../sessions/delegate-grants.ts';
 import { runtimeProblem, runtimeReports } from '../sessions/offer.ts';
 import { playbookGrantKeys } from '../sessions/playbooks.ts';
 import { workstationServesOrg } from '../simulation/fit.ts';
@@ -313,6 +314,10 @@ export class ChatRelay {
       };
       const agentSpec = await agentSpecFor(ctx, row);
       const playbookGrants = await playbookGrantKeys(ctx.pool, agentSpec.agentId);
+      const delegation =
+        agentSpec.isDevops || agentSpec.roleKey === 'ceo'
+          ? undefined
+          : await delegationSpecFor(ctx.pool, 'agent', agentSpec.agentId);
       const sent = ctx.services.runners.send(
         row.workstation_id,
         'chat.start',
@@ -324,6 +329,7 @@ export class ChatRelay {
           ...(prior?.sid ? { resumeSessionId: prior.sid as string } : {}),
           context,
           ...(playbookGrants.length ? { playbookGrants } : {}),
+          ...(delegation ? { delegation } : {}),
         },
         ctx.clock.now(),
       );

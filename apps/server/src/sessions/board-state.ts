@@ -28,6 +28,7 @@ import { isAdHocPersona, listParticipants } from '../commands/sessions.ts';
 import type { Ctx } from '../context.ts';
 import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { sessionCost } from './cost.ts';
+import { delegationSteps } from './delegate-grants.ts';
 import { availableCeo, sessionDocs } from './discovery-state.ts';
 import { providersOf, runtimeReports } from './offer.ts';
 import { boardTime } from './time.ts';
@@ -360,6 +361,7 @@ export async function boardState(ctx: Ctx, t: Row, userId: string): Promise<Boar
     waitingFor,
     chairStatus,
     canManage,
+    delegations: await delegationSteps(db, { threadId: t.id }),
     createdAt: iso(t.created_at) as string,
   };
 }

@@ -24,7 +24,7 @@ import { providerCapState } from './caps.ts';
  * A workstation's own key is never counted or stopped; a model with no price is unknown and counts nothing (Q50).
  */
 interface Live {
-  kind: 'shift' | 'chat';
+  kind: 'shift' | 'chat' | 'delegate';
   id: string;
   orgId: string;
   provider: string;
@@ -80,6 +80,25 @@ async function resolveRun(
   cardId: string | null;
   sessionTurn: boolean;
 } | null> {
+  if (msg.kind === 'delegate') {
+    // R3b: a child run reports its own usage; it counts against the cap of its own model's provider and is stopped with the rest.
+    const d = await one(
+      ctx.pool,
+      `SELECT b.org_id, b.runtime, b.model, b.thread_id, b.caller_id, s.card_id
+         FROM delegate_begins b LEFT JOIN shifts s ON s.id = b.caller_id
+        WHERE b.delegate_id::text=$1 AND b.workstation_id=$2`,
+      [msg.id, workstationId],
+    );
+    if (!d?.runtime || !d.model) return null;
+    return {
+      orgId: d.org_id,
+      runtime: d.runtime,
+      model: d.model,
+      threadId: d.thread_id ?? null,
+      cardId: d.card_id ?? null,
+      sessionTurn: !!d.thread_id,
+    };
+  }
   if (msg.kind === 'shift') {
     const s = await one(
       ctx.pool,
@@ -180,6 +199,7 @@ export async function enforceProviderCap(ctx: Ctx, orgId: string, provider: stri
     stoppedOf(ctx).add(l.id); // once: the stop below is not repeated by the next report
     const text = `Stopped: the organization's ${label} key reached its monthly cap while this was running. Raise the cap or override it for this month under Settings > Model providers, or run it on a workstation with its own ${label} key.`;
     if (l.kind === 'shift') ctx.services.gateway.stopShift(l.workstationId, l.id, 'manager');
+    // a chat, a session turn or a delegate: the runner knows each by this id
     else ctx.services.runners.send(l.workstationId, 'chat.cancel', { chatId: l.id }, now);
     const thread = l.threadId ?? (l.cardId ? await cardThread(ctx, l.cardId) : null);
     if (thread)

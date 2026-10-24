@@ -12,6 +12,7 @@ import { canManageSession, listParticipants } from '../commands/sessions.ts';
 import type { Ctx } from '../context.ts';
 import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { sessionCost } from './cost.ts';
+import { delegationSteps } from './delegate-grants.ts';
 import { discoveryTime } from './time.ts';
 import { turnDto } from './turns.ts';
 
@@ -178,6 +179,7 @@ export async function discoveryState(
     progress: discoveryProgress(cfg, now),
     time: discoveryTime(cfg, now),
     canManage: userId ? await canManageSession(db, userId, t) : false,
+    delegations: await delegationSteps(db, { threadId: t.id }),
     baStatus: await baStatus(ctx, t.org_id),
     cost,
     ceoAvailable: !!ceo,

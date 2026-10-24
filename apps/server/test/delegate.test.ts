@@ -72,7 +72,7 @@ const begin = (callerId: string, over: Record<string, unknown> = {}) => {
   const delegateId = randomUUID();
   return call(callerId, 'delegate.begin', {
     delegateId,
-    persona: 'devils-advocate',
+    target: 'devils-advocate',
     model: HAIKU,
     taskChars: 40,
     ...over,
@@ -81,14 +81,21 @@ const begin = (callerId: string, over: Record<string, unknown> = {}) => {
 const cost = (callerId: string, delegateId: string, usage: Record<string, unknown> = {}, over = {}) =>
   call(callerId, 'delegate.cost', {
     delegateId,
-    persona: 'devils-advocate',
+    target: 'devils-advocate',
     outcome: 'ok',
     usage: { inputTokens: 1_000_000, outputTokens: 100_000, model: 'claude-haiku-4-5', ...usage },
     ...over,
   });
 /** A running facilitator turn of a new session. */
-const facilitator = async (over: Record<string, unknown> = {}) => {
+const facilitator = async (over: Record<string, unknown> = {}, grant = true) => {
   const s = await create(over);
+  // delegation is off unless the session's creator grants a target
+  if (grant)
+    await owner('PUT', `/api/sessions/${s.threadId}/delegate-grants`, {
+      targetKind: 'persona',
+      targetKey: 'devils-advocate',
+      grant: { maxCalls: 8 },
+    });
   const start = await nextStart((f) => f.threadId === s.threadId);
   return { s, start, id: start.chatId as string };
 };
@@ -124,7 +131,7 @@ describe('delegate.begin for a session turn', () => {
       'unknown model',
     );
     expect((await begin(id, { taskChars: DELEGATE_LIMITS.maxTaskChars + 1 })).ok).toBe(false);
-    expect((await begin(id, { persona: '' })).ok).toBe(false);
+    expect((await begin(id, { target: '' })).ok).toBe(false);
     // the turn belongs to this workstation only
     await q(`UPDATE session_turns SET workstation_id=$2 WHERE id=$1`, [id, randomUUID()]);
     expect((await begin(id)).error).toBe('unknown caller');
@@ -294,14 +301,14 @@ describe('delegate.cost books the usage under the caller', () => {
     const { id } = await facilitator();
     const bad = await call(id, 'delegate.cost', {
       delegateId: 'nope',
-      persona: 'x',
+      target: 'x',
       usage: {},
       outcome: 'ok',
     });
     expect(bad.ok).toBe(false);
     const missing = await call(id, 'delegate.cost', {
       delegateId: randomUUID(),
-      persona: 'x',
+      target: 'x',
       outcome: 'ok',
     });
     expect(missing.ok).toBe(false);
@@ -363,6 +370,13 @@ describe('a shift as the caller', () => {
       async () => (await q('SELECT 1 FROM shifts WHERE id=$1 AND status=$2', [shiftId, 'running']))[0],
       3000,
     );
+    // no grant, no delegation
+    expect((await begin(shiftId)).error).toContain('not_granted');
+    await owner('PUT', `/api/agents/${agentId}/delegate-grants`, {
+      targetKind: 'persona',
+      targetKey: 'devils-advocate',
+      grant: { maxCalls: 8 },
+    });
     const b = await begin(shiftId);
     expect(b.ok).toBe(true);
     expect((await cost(shiftId, b.delegateId)).ok).toBe(true);

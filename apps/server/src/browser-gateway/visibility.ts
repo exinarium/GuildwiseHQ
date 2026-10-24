@@ -109,6 +109,7 @@ const SESSION_CONTENT_EVENTS = new Set([
   'SessionTurnCompleted',
   'SessionTurnFailed',
   'DelegateCompleted',
+  'DelegateGrantChanged',
   'DiscoveryQuestionAsked',
   'DiscoveryQuestionWithdrawn',
   'DiscoveryAnswerProposed',

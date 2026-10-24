@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { DelegationStepDtoSchema } from '../delegate/grants.ts';
 import { SessionCostSchema } from '../discovery/index.ts';
 import { ModelChoiceSchema } from '../models/choices.ts';
 import { ParticipantKindSchema, SessionTurnDtoSchema } from '../sessions/index.ts';
@@ -581,6 +582,8 @@ export const BoardStateDtoSchema = z.object({
   chairStatus: z.string().nullable(),
   /** The caller may steer the session (end, pause, decide, edit the whiteboard): its creator, an Owner or an Admin. */
   canManage: z.boolean().optional(),
+  /** R3b: what the facilitator or Chair delegated, as sub-steps (target, model, tool profile, time, cost, result). */
+  delegations: z.array(DelegationStepDtoSchema).optional(),
   createdAt: z.iso.datetime(),
 });
 export type BoardStateDto = z.infer<typeof BoardStateDtoSchema>;

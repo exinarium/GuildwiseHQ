@@ -270,6 +270,7 @@ export const PROJECTION_TABLES = [
   'pack_assignments',
   'pack_agent_grants',
   'agent_playbook_grants',
+  'delegate_grants',
   'role_pack_offers',
   'project_capability_index',
   'project_capability_status',

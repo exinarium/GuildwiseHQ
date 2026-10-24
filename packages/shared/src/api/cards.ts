@@ -12,6 +12,7 @@ import {
   StoredReviewRisk,
   ThreadMessageKind,
 } from '../cards/types.ts';
+import { DelegationStepDtoSchema } from '../delegate/grants.ts';
 import { CardChangesSchema } from '../events/card.ts';
 import { CardMcpUsageSchema } from '../mcp/index.ts';
 import { CardApprovalSchema } from './approval.ts';
@@ -340,6 +341,8 @@ export const CardDetailResponseSchema = z.object({
   publication: PublicationDtoSchema.nullable().optional(),
   /** Cost tracking: what the card's shifts cost so far (organization members only). */
   spend: SpendBriefSchema.optional(),
+  /** R3b: what the card's agents delegated, as sub-steps (target, model, tool profile, time, cost, result). */
+  delegations: z.array(DelegationStepDtoSchema).optional(),
   /** The phase this card belongs to, if any. */
   phase: z
     .object({

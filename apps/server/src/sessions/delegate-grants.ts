@@ -1,0 +1,464 @@
+import {
+  agentHandle,
+  DELEGATE_GRANT_LIMITS,
+  type DelegateGrantDto,
+  type DelegateGrantsDto,
+  type DelegateOwnerKind,
+  type DelegateProfile,
+  type DelegateTargetOption,
+  type DelegateTargetSpec,
+  type DelegationSpec,
+  type DelegationStepDto,
+  isTemplateTagged,
+  type ModelChoice,
+  profileOfPermissions,
+  RoleDefinitionSchema,
+  type SetDelegateGrantRequest,
+  streamId,
+} from '@aom/shared';
+import { orgRoleOf } from '../auth/org-context.ts';
+import type { AuthSession } from '../auth/sessions.ts';
+import { effectiveRegistry } from '../capabilities/registry.ts';
+import { loadRole } from '../catalogue/loader.ts';
+import { manageableAgent } from '../commands/agents.ts';
+import { orgScope, userActor } from '../commands/common.ts';
+import { canManageSession, loadSession } from '../commands/sessions.ts';
+import type { Ctx } from '../context.ts';
+import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
+import { type Tx, withAppendTx } from '../db/tx.ts';
+import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
+import { runtimeProblem, runtimeReports } from './offer.ts';
+
+/** Agents that never delegate and are never delegated to: the CEO and the DevOps engineer hold wider powers. */
+const isSpecialAgent = (a: Row): boolean =>
+  a.is_devops === true || a.role_key === 'ceo' || a.role_key === 'devops';
+
+/** The raw grant rows of an owner, oldest first (a stable order, so handles stay the same). */
+export async function grantRows(
+  db: Queryable,
+  ownerKind: DelegateOwnerKind,
+  ownerId: string,
+): Promise<Row[]> {
+  return rows(
+    db,
+    `SELECT * FROM delegate_grants WHERE owner_kind=$1 AND owner_id=$2 ORDER BY granted_at, target_kind, target_key`,
+    [ownerKind, ownerId],
+  );
+}
+
+/** A grant row with the handle the caller types for it. Agent handles are unique among the owner's grants. */
+export async function grantsWithHandles(
+  db: Queryable,
+  ownerKind: DelegateOwnerKind,
+  ownerId: string,
+): Promise<Array<{ row: Row; handle: string; agent?: Row }>> {
+  const out: Array<{ row: Row; handle: string; agent?: Row }> = [];
+  const taken = new Set<string>();
+  for (const row of await grantRows(db, ownerKind, ownerId)) {
+    if (row.target_kind === 'persona') {
+      out.push({ row, handle: row.target_key });
+      continue;
+    }
+    const agent = await one(db, 'SELECT * FROM agents WHERE id=$1 AND org_id=$2', [
+      row.target_key,
+      row.org_id,
+    ]);
+    const handle = agentHandle(agent?.name ?? 'agent', taken, row.target_key);
+    taken.add(handle);
+    out.push({ row, handle, ...(agent ? { agent } : {}) });
+  }
+  return out;
+}
+
+/** What a hired agent runs on and may do as a delegate: the server's word, from the agent's row and its role. */
+async function agentTarget(
+  db: Queryable,
+  agent: Row,
+): Promise<{
+  model: ModelChoice;
+  profile: DelegateProfile;
+  instructions: string;
+  permissions: Row['permissions'];
+}> {
+  const role = await loadRole(db, agent.org_id, agent.role_key, agent.role_version);
+  const def = role ? RoleDefinitionSchema.safeParse(role.definition) : undefined;
+  const text = def?.success
+    ? [
+        `# You are ${agent.name}, ${def.data.name}`,
+        def.data.instructions,
+        ...def.data.coreRules.map((r) => `- ${r}`),
+      ].join('\n\n')
+    : `# You are ${agent.name}`;
+  return {
+    model: { runtime: agent.runtime, model: agent.model },
+    profile: profileOfPermissions(agent.permissions ?? { allowedTools: [] }),
+    instructions: text.slice(0, 40_000),
+    permissions: agent.permissions,
+  };
+}
+
+/** Why a granted agent cannot be a delegate now (retired, special), or null. */
+function agentProblem(agent: Row | undefined): string | null {
+  if (!agent) return 'this agent no longer exists';
+  if (agent.status === 'retired') return 'this agent is retired';
+  if (isSpecialAgent(agent)) return 'this agent cannot be a delegate';
+  return null;
+}
+
+/**
+ * The targets an owner was granted, as the runner is told at the start of a shift, chat or session turn. Undefined when there
+ * is none (the runner then offers no delegation at all). The server checks every call again in `delegate.begin`.
+ */
+export async function delegationSpecFor(
+  db: Queryable,
+  ownerKind: DelegateOwnerKind,
+  ownerId: string,
+): Promise<DelegationSpec | undefined> {
+  const grants = await grantsWithHandles(db, ownerKind, ownerId);
+  if (grants.length === 0) return undefined;
+  const reg = new Map<string, { name: string; description: string }>();
+  const orgId = grants[0]?.row.org_id as string;
+  for (const i of (await effectiveRegistry(db, orgId, { kind: 'persona' })).items)
+    reg.set(i.key, { name: i.name, description: i.description });
+  const targets: DelegateTargetSpec[] = [];
+  for (const g of grants) {
+    const common = {
+      handle: g.handle,
+      key: g.row.target_key as string,
+      maxCalls: g.row.max_calls as number,
+      timeoutSec: g.row.timeout_sec as number,
+      maxProfile: (g.row.max_profile ?? null) as DelegateProfile | null,
+    };
+    if (g.row.target_kind === 'persona') {
+      const p = reg.get(g.row.target_key);
+      targets.push({
+        kind: 'persona',
+        ...common,
+        name: p?.name ?? g.row.target_key,
+        description: p?.description ?? '',
+      });
+      continue;
+    }
+    if (agentProblem(g.agent) || !g.agent) continue;
+    const t = await agentTarget(db, g.agent);
+    targets.push({
+      kind: 'agent',
+      ...common,
+      name: g.agent.name,
+      description: `${g.agent.name} (${g.agent.role_key})`,
+      runtime: t.model.runtime,
+      model: t.model.model,
+      profile: t.profile,
+      instructions: t.instructions,
+      permissions: t.permissions,
+    });
+  }
+  return targets.length ? { targets } : undefined;
+}
+
+// ------------------------------------------------------------------------------------------------------ the pages
+
+async function dtoFor(
+  ctx: Ctx,
+  ownerKind: DelegateOwnerKind,
+  ownerId: string,
+  canManage: boolean,
+  userId: string,
+  workstationId: string | null,
+  orgId: string,
+): Promise<DelegateGrantsDto> {
+  const grants = await grantsWithHandles(ctx.pool, ownerKind, ownerId);
+  const reports = await runtimeReports(ctx.pool, workstationId);
+  const personas = new Map(
+    (await effectiveRegistry(ctx.pool, orgId, { kind: 'persona', userId })).items.map((i) => [i.key, i]),
+  );
+  const out: DelegateGrantDto[] = [];
+  for (const g of grants) {
+    const base = {
+      targetKind: g.row.target_kind,
+      targetKey: g.row.target_key,
+      handle: g.handle,
+      maxCalls: g.row.max_calls,
+      timeoutSec: g.row.timeout_sec,
+      maxProfile: g.row.max_profile ?? null,
+      grantedAt: iso(g.row.granted_at) as string,
+      grantedBy: g.row.granted_by ?? null,
+    };
+    if (g.row.target_kind === 'persona') {
+      const p = personas.get(g.row.target_key);
+      out.push({
+        ...base,
+        targetName: p?.name ?? g.row.target_key,
+        profile: null,
+        model: null,
+        problem: p
+          ? p.usable === false
+            ? (p.unusableReason ?? 'this persona is not usable yet')
+            : null
+          : 'this persona is not in the registry',
+      });
+      continue;
+    }
+    const problem = agentProblem(g.agent);
+    const model = g.agent ? `${g.agent.runtime}:${g.agent.model}` : null;
+    out.push({
+      ...base,
+      targetName: g.agent?.name ?? 'a removed agent',
+      profile: g.agent ? profileOfPermissions(g.agent.permissions ?? { allowedTools: [] }) : null,
+      model,
+      problem:
+        problem ??
+        (g.agent && workstationId
+          ? runtimeProblem(reports, { runtime: g.agent.runtime, model: g.agent.model }, orgId)
+          : null),
+    });
+  }
+  return { ownerKind, ownerId, canManage, grants: out };
+}
+
+async function agentOwner(
+  db: Queryable,
+  user: AuthSession['user'],
+  agentId: string,
+): Promise<{ agent: Row; canManage: boolean }> {
+  const a = await one(db, 'SELECT * FROM agents WHERE id=$1', [agentId]);
+  if (!a) throw notFound('agent not found');
+  const role = await orgRoleOf(db, user.id, a.org_id);
+  if (!role) throw notFound('agent not found');
+  return { agent: a, canManage: role === 'owner' || role === 'admin' || a.manager_user_id === user.id };
+}
+
+export async function getAgentDelegateGrants(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  agentId: string,
+): Promise<DelegateGrantsDto> {
+  const { agent, canManage } = await agentOwner(ctx.pool, user, agentId);
+  return dtoFor(ctx, 'agent', agentId, canManage, user.id, agent.workstation_id ?? null, agent.org_id);
+}
+
+export async function getSessionDelegateGrants(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  threadId: string,
+): Promise<DelegateGrantsDto> {
+  const t = await loadSession(ctx.pool, user.id, threadId);
+  return dtoFor(
+    ctx,
+    'session',
+    threadId,
+    await canManageSession(ctx.pool, user.id, t),
+    user.id,
+    t.workstation_id ?? null,
+    t.org_id,
+  );
+}
+
+/** A target the owner may be given: checked on the way in, so a grant never names something the granter cannot see. */
+async function assertGrantable(
+  db: Queryable,
+  user: AuthSession['user'],
+  orgId: string,
+  ownerKind: DelegateOwnerKind,
+  ownerId: string,
+  req: SetDelegateGrantRequest,
+): Promise<void> {
+  if (req.targetKind === 'persona') {
+    const reg = await effectiveRegistry(db, orgId, { kind: 'persona', usableOnly: true, userId: user.id });
+    if (!reg.items.some((i) => i.key === req.targetKey))
+      throw badRequest(
+        'unknown_persona',
+        `"${req.targetKey}" is not a persona you can grant (it must be approved and visible to you)`,
+      );
+    return;
+  }
+  const t = await one(db, 'SELECT * FROM agents WHERE id=$1 AND org_id=$2', [req.targetKey, orgId]);
+  const problem = agentProblem(t);
+  if (problem || !t) throw badRequest('unknown_agent', problem ?? 'unknown agent');
+  if (ownerKind === 'agent' && t.id === ownerId)
+    throw badRequest('self_delegation', 'an agent cannot delegate to itself');
+}
+
+async function setGrant(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  ownerKind: DelegateOwnerKind,
+  ownerId: string,
+  orgId: string,
+  req: SetDelegateGrantRequest,
+  tx: Tx,
+): Promise<void> {
+  const had = await one(
+    tx,
+    'SELECT 1 FROM delegate_grants WHERE owner_kind=$1 AND owner_id=$2 AND target_kind=$3 AND target_key=$4',
+    [ownerKind, ownerId, req.targetKind, req.targetKey],
+  );
+  if (req.grant === null && !had) return;
+  if (req.grant !== null) {
+    await assertGrantable(tx, user, orgId, ownerKind, ownerId, req);
+    if (!had) {
+      const n = await one(
+        tx,
+        'SELECT count(*)::int AS n FROM delegate_grants WHERE owner_kind=$1 AND owner_id=$2',
+        [ownerKind, ownerId],
+      );
+      if ((n?.n ?? 0) >= DELEGATE_GRANT_LIMITS.maxGrantsPerOwner)
+        throw badRequest(
+          'too_many_grants',
+          `at most ${DELEGATE_GRANT_LIMITS.maxGrantsPerOwner} delegation targets per ${ownerKind}`,
+        );
+    }
+  }
+  await ctx.store.append(
+    [
+      {
+        streamId: ownerKind === 'agent' ? streamId.agent(ownerId) : streamId.thread(ownerId),
+        event: {
+          type: 'DelegateGrantChanged',
+          payload: {
+            ownerKind,
+            ownerId,
+            ...(ownerKind === 'session' ? { threadId: ownerId } : {}),
+            orgId,
+            targetKind: req.targetKind,
+            targetKey: req.targetKey,
+            granted: req.grant !== null,
+            ...(req.grant
+              ? {
+                  maxCalls: req.grant.maxCalls,
+                  timeoutSec: req.grant.timeoutSec,
+                  maxProfile: req.grant.maxProfile,
+                }
+              : {}),
+            changedBy: user.id,
+          },
+        },
+        actor: userActor(user.id),
+        scope: orgScope(orgId),
+      },
+    ],
+    { tx },
+  );
+}
+
+/**
+ * Owners, Admins and the agent's manager (the HR rule) grant or revoke an agent's delegation targets. Off by default; an event
+ * per change is the audit trail.
+ */
+export async function setAgentDelegateGrant(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  agentId: string,
+  req: SetDelegateGrantRequest,
+): Promise<DelegateGrantsDto> {
+  await withAppendTx(ctx.pool, async (tx) => {
+    const a = await manageableAgent(tx, user, agentId);
+    if (a.status === 'retired') throw conflict('agent_retired', 'agent is retired');
+    if (isSpecialAgent(a)) throw badRequest('delegation_unavailable', 'this agent cannot delegate');
+    await setGrant(ctx, user, 'agent', agentId, a.org_id, req, tx);
+  });
+  return getAgentDelegateGrants(ctx, user, agentId);
+}
+
+/** The creator of a session (an Owner or Admin in it may override) grants its facilitator and Chair their targets. */
+export async function setSessionDelegateGrant(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  threadId: string,
+  req: SetDelegateGrantRequest,
+): Promise<DelegateGrantsDto> {
+  await withAppendTx(ctx.pool, async (tx) => {
+    const t = await loadSession(tx, user.id, threadId, true);
+    if (!(await canManageSession(tx, user.id, t)))
+      throw forbidden('only the session creator, an Owner or an Admin can change its delegation');
+    if ((t.session_config as { archived?: boolean } | null)?.archived)
+      throw conflict('session_archived', 'This session is archived and read-only.');
+    await setGrant(ctx, user, 'session', threadId, t.org_id, req, tx);
+  });
+  return getSessionDelegateGrants(ctx, user, threadId);
+}
+
+/** What a grant picker offers: the usable personas the viewer can see and the org's other agents, each marked when granted. */
+export async function delegateTargetOptions(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  ownerKind: DelegateOwnerKind,
+  ownerId: string,
+): Promise<DelegateTargetOption[]> {
+  const orgId =
+    ownerKind === 'agent'
+      ? (await agentOwner(ctx.pool, user, ownerId)).agent.org_id
+      : (await loadSession(ctx.pool, user.id, ownerId)).org_id;
+  const granted = new Set(
+    (await grantRows(ctx.pool, ownerKind, ownerId)).map((g) => `${g.target_kind}:${g.target_key}`),
+  );
+  const out: DelegateTargetOption[] = [];
+  const reg = await effectiveRegistry(ctx.pool, orgId, {
+    kind: 'persona',
+    usableOnly: true,
+    userId: user.id,
+  });
+  for (const i of reg.items) {
+    if (isTemplateTagged(i.tags)) continue;
+    out.push({
+      targetKind: 'persona',
+      targetKey: i.key,
+      name: i.name,
+      description: i.description,
+      model: null,
+      profile: null,
+      granted: granted.has(`persona:${i.key}`),
+    });
+  }
+  const agents = await rows(
+    ctx.pool,
+    `SELECT * FROM agents WHERE org_id=$1 AND status <> 'retired' AND NOT is_devops AND role_key NOT IN ('ceo','devops')
+        AND id <> $2 ORDER BY name`,
+    [orgId, ownerKind === 'agent' ? ownerId : '00000000-0000-0000-0000-000000000000'],
+  );
+  for (const a of agents)
+    out.push({
+      targetKind: 'agent',
+      targetKey: a.id,
+      name: a.name,
+      description: `${a.role_key}, ${a.runtime}:${a.model}`,
+      model: `${a.runtime}:${a.model}`,
+      profile: profileOfPermissions(a.permissions ?? { allowedTools: [] }),
+      granted: granted.has(`agent:${a.id}`),
+    });
+  return out;
+}
+
+// ------------------------------------------------------------------------------------------------------ sub-steps
+
+/** The delegations of a card or a session as sub-steps: target, model, tool profile, duration, cost and the result summary. */
+export async function delegationSteps(
+  db: Queryable,
+  by: { cardId: string } | { threadId: string },
+): Promise<DelegationStepDto[]> {
+  const r = await rows(
+    db,
+    `SELECT shift_id, parent_id, model, cost_usd_micros, cost_unknown, ended_at, delegate_target, delegate_target_name,
+            delegate_target_kind, delegate_profile, delegate_outcome, delegate_duration_ms, delegate_summary, delegate_native
+       FROM shift_costs
+      WHERE kind='delegate' AND ${'cardId' in by ? 'card_id' : 'delegate_thread_id'} = $1
+      ORDER BY ended_at, shift_id LIMIT 200`,
+    ['cardId' in by ? by.cardId : by.threadId],
+  );
+  return r.map((x) => ({
+    delegateId: x.shift_id,
+    callerId: x.parent_id,
+    target: x.delegate_target ?? 'delegate',
+    targetName: x.delegate_target_name ?? x.delegate_target ?? 'delegate',
+    targetKind: x.delegate_target_kind ?? null,
+    model: x.model,
+    profile: x.delegate_profile ?? null,
+    outcome: x.delegate_outcome ?? 'ok',
+    durationMs: x.delegate_duration_ms ?? null,
+    costUsd: x.cost_unknown ? null : Number(x.cost_usd_micros) / 1_000_000,
+    costUnknown: x.cost_unknown === true,
+    summary: x.delegate_summary ?? null,
+    native: x.delegate_native === true,
+    at: iso(x.ended_at) as string,
+  }));
+}

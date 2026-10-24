@@ -45,6 +45,7 @@ import {
 import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { dependencyStates, landedSql } from '../dispatcher/dependencies.ts';
 import { notFound } from '../errors.ts';
+import { delegationSteps } from '../sessions/delegate-grants.ts';
 import { cardPhaseRef } from './phases.ts';
 import { publicationOfCard } from './research.ts';
 import { startedByMap, subworkflowsPanel, waitingChildren } from './subworkflows.ts';
@@ -324,6 +325,7 @@ export async function getCardDetail(ctx: Ctx, userId: string, idOrRef: string): 
       createdAt: iso(m.created_at) as string,
     })),
     attachments: await attachmentsOf(ctx.pool, card.id),
+    delegations: await delegationSteps(ctx.pool, { cardId: card.id }),
     currentShift: shiftRow ? toShiftDto(shiftRow) : null,
     mcpUsage: mcpShifts.map((s) => ({
       shiftId: s.id,

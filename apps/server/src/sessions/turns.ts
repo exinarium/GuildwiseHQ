@@ -15,6 +15,7 @@ import {
   type ModelChoice,
   PERSONA_HOST_AGENT_ID,
   parseBoardConfig,
+  purposeMayDelegate,
   type QueueTurnRequest,
   type RunnerToServerOf,
   renderSessionTranscript,
@@ -52,6 +53,7 @@ import { assertProviderCapRoom, providerCapProblem } from '../provider-keys/caps
 import { threadMessageById } from '../queries/threads.ts';
 import { agentSpecFor } from '../runner-gateway/brief.ts';
 import { assertSessionMayQueue } from './cost.ts';
+import { delegationSpecFor } from './delegate-grants.ts';
 import { runtimeProblem, runtimeReports } from './offer.ts';
 
 const ZERO_USAGE: Usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
@@ -659,6 +661,11 @@ export class SessionTurns {
     const wsOwner = turn.workstation_id
       ? await one(ctx.pool, 'SELECT user_id FROM workstations WHERE id=$1', [turn.workstation_id])
       : undefined;
+    const turnPurpose = (turn.meta as { purpose?: string } | null)?.purpose;
+    // R3b: the facilitator and the Chair delegate only to the targets the session's creator granted
+    const delegation = purposeMayDelegate(turnPurpose)
+      ? await delegationSpecFor(this.ctx.pool, 'session', turn.thread_id)
+      : undefined;
     const session: SessionTurnSpec = {
       turnId: turn.id,
       kind: thread.kind,
@@ -673,6 +680,7 @@ export class SessionTurns {
         ...(persona?.icon ? { icon: persona.icon } : {}),
       },
       ...(turn.instructions ? { instructions: turn.instructions } : {}),
+      ...(delegation ? { delegation } : {}),
       // What the turn is for: a runtime with tools offers the verbs this purpose allows (the server checks them again).
       ...((turn.meta as { purpose?: string } | null)?.purpose
         ? { purpose: (turn.meta as { purpose: string }).purpose }
