@@ -1,4 +1,5 @@
-import { readFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { withGuardDeadline } from '../capabilities/skill-guard.ts';
 
 /**
@@ -12,6 +13,10 @@ import { withGuardDeadline } from '../capabilities/skill-guard.ts';
 export interface SubagentGuardConfig {
   /** The subagent type name to the grant's handle. */
   allowed: Record<string, string>;
+  /** R3c: the grant's time limit for one call of each type, in seconds. */
+  limits?: Record<string, number>;
+  /** R3c: where the running calls leave their start marker (`<tool use id>.json`); absent: no time limit is enforced. */
+  stateDir?: string;
 }
 
 export function loadSubagentGuardConfig(file: string | undefined): SubagentGuardConfig {
@@ -20,7 +25,14 @@ export function loadSubagentGuardConfig(file: string | undefined): SubagentGuard
     const allowed: Record<string, string> = {};
     if (j && typeof j.allowed === 'object' && j.allowed)
       for (const [k, v] of Object.entries(j.allowed)) if (typeof v === 'string') allowed[k] = v;
-    return { allowed };
+    const limits: Record<string, number> = {};
+    if (j && typeof j.limits === 'object' && j.limits)
+      for (const [k, v] of Object.entries(j.limits)) if (typeof v === 'number' && v > 0) limits[k] = v;
+    return {
+      allowed,
+      ...(Object.keys(limits).length ? { limits } : {}),
+      ...(typeof j.stateDir === 'string' && j.stateDir ? { stateDir: j.stateDir } : {}),
+    };
   } catch {
     // an unreadable configuration allows nothing
     return { allowed: {} };
@@ -48,6 +60,7 @@ export async function runSubagentGuard(opts: {
   stdin: string;
   cfg: SubagentGuardConfig;
   ask: SubagentGuardAsk;
+  now?: () => number;
 }): Promise<{ stdout: string; code: number }> {
   let input: { tool_name?: string; tool_input?: Record<string, unknown>; tool_use_id?: unknown };
   try {
@@ -68,7 +81,105 @@ export async function runSubagentGuard(opts: {
   const toolUseId = typeof input.tool_use_id === 'string' ? input.tool_use_id : '';
   if (!toolUseId) return deny('the call has no id');
   const r = await opts.ask(name, handle, toolUseId);
-  return r.ok ? { stdout: '', code: 0 } : deny(r.error ?? 'the server refused the delegate');
+  if (!r.ok) return deny(r.error ?? 'the server refused the delegate');
+  // R3c: the call's clock starts now; `runSubagentDeadline` refuses the subagent's tool calls once it has run out
+  const limit = opts.cfg.limits?.[name];
+  if (opts.cfg.stateDir && limit && /^[A-Za-z0-9_.-]{1,120}$/.test(toolUseId)) {
+    try {
+      mkdirSync(opts.cfg.stateDir, { recursive: true, mode: 0o700 });
+      writeFileSync(
+        join(opts.cfg.stateDir, `${toolUseId}.json`),
+        JSON.stringify({ name, startedAt: (opts.now ?? Date.now)(), limitMs: limit * 1000 }),
+        { mode: 0o600 },
+      );
+    } catch {
+      // the marker is the time limit's clock: without it the call runs unlimited, like before R3c. The count and budget checks held.
+    }
+  }
+  return { stdout: '', code: 0 };
+}
+
+/** How long a marker whose end was never seen (a crash) keeps counting, beyond the limit itself. */
+export const SUBAGENT_MARKER_GRACE_MS = 5 * 60_000;
+
+interface Marker {
+  name: string;
+  startedAt: number;
+  limitMs: number;
+}
+
+function readMarkers(dir: string): Array<{ file: string; m: Marker }> {
+  const out: Array<{ file: string; m: Marker }> = [];
+  let names: string[] = [];
+  try {
+    names = readdirSync(dir).filter((f) => f.endsWith('.json'));
+  } catch {
+    return out;
+  }
+  for (const f of names) {
+    try {
+      const m = JSON.parse(readFileSync(join(dir, f), 'utf8')) as Marker;
+      if (typeof m.startedAt === 'number' && typeof m.limitMs === 'number')
+        out.push({ file: join(dir, f), m });
+    } catch {
+      // a marker half written: ignored
+    }
+  }
+  return out;
+}
+
+/**
+ * The time limit of a native subagent's call (R3c; `aom subagent-deadline`, a PreToolUse hook on every tool). Claude Code has no
+ * per-call limit for a subagent, so the guard keeps the start of each call (`runSubagentGuard`) and, once a call has run past
+ * the grant's limit, refuses every further tool call of the session until the call ends (its `Agent` call returns, which removes
+ * the marker: `runSubagentDone`): the subagent can only answer with what it has, and the parent, which waits in the foreground,
+ * gets that answer. A marker whose end was never seen (a crash) stops counting after the limit plus five minutes. Failing open: a
+ * hook that cannot read its markers allows the call (the count, the budgets and the provider cap still held at the start).
+ */
+export function runSubagentDeadline(opts: { stdin: string; cfg: SubagentGuardConfig; now?: () => number }): {
+  stdout: string;
+  code: number;
+} {
+  if (!opts.cfg.stateDir) return { stdout: '', code: 0 };
+  const now = (opts.now ?? Date.now)();
+  let toolName = '';
+  try {
+    toolName = String((JSON.parse(opts.stdin) as { tool_name?: unknown }).tool_name ?? '');
+  } catch {
+    // an unreadable input is not this hook's business
+  }
+  for (const { file, m } of readMarkers(opts.cfg.stateDir)) {
+    if (now > m.startedAt + m.limitMs + SUBAGENT_MARKER_GRACE_MS) {
+      rmSync(file, { force: true });
+      continue;
+    }
+    if (now > m.startedAt + m.limitMs) {
+      const secs = Math.round(m.limitMs / 1000);
+      return deny(
+        `the subagent "${m.name}" has used its time limit of ${secs} seconds for this call${
+          toolName === 'Agent' || toolName === 'Task'
+            ? ''
+            : ': stop using tools and answer with what you have'
+        }.`,
+      );
+    }
+  }
+  return { stdout: '', code: 0 };
+}
+
+/** The end of a native subagent's call (`aom subagent-done`, a PostToolUse hook on the `Agent` tool): its marker goes. */
+export function runSubagentDone(opts: { stdin: string; cfg: SubagentGuardConfig }): {
+  stdout: string;
+  code: number;
+} {
+  try {
+    const id = (JSON.parse(opts.stdin) as { tool_use_id?: unknown }).tool_use_id;
+    if (opts.cfg.stateDir && typeof id === 'string' && /^[A-Za-z0-9_.-]{1,120}$/.test(id))
+      rmSync(join(opts.cfg.stateDir, `${id}.json`), { force: true });
+  } catch {
+    // nothing to remove
+  }
+  return { stdout: '', code: 0 };
 }
 
 export { withGuardDeadline };

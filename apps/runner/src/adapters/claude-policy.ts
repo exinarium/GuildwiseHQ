@@ -278,6 +278,11 @@ export interface ClaudeSettings {
       matcher: string;
       hooks: Array<{ type: 'command'; command: string; timeout: number }>;
     }>;
+    /** R3c: the end of a native subagent's call takes its time-limit marker away. */
+    PostToolUse?: Array<{
+      matcher: string;
+      hooks: Array<{ type: 'command'; command: string; timeout: number }>;
+    }>;
   };
   includeCoAuthoredBy: false;
   /** Claude Code's newer switch: no "Co-Authored-By" trailer and no "Generated with" line in commits and pull requests. */

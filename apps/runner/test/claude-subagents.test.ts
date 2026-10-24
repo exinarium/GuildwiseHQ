@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { BUILTIN_ROLES } from '@aom/shared';
 import { describe, expect, it } from 'vitest';
@@ -11,7 +11,13 @@ import { ClaudeStreamParser } from '../src/adapters/claude-stream-parser.ts';
 import { agentsDocument, readNativeSubagentUsage } from '../src/adapters/claude-subagents.ts';
 import type { NativeSubagent, RuntimeEvent, RuntimeSession } from '../src/adapters/types.ts';
 import { ClaudeRuntimeConfigSchema } from '../src/config.ts';
-import { loadSubagentGuardConfig, runSubagentGuard } from '../src/delegate/subagent-guard.ts';
+import {
+  loadSubagentGuardConfig,
+  runSubagentDeadline,
+  runSubagentDone,
+  runSubagentGuard,
+  SUBAGENT_MARKER_GRACE_MS,
+} from '../src/delegate/subagent-guard.ts';
 import { runnerPaths } from '../src/paths.ts';
 import { ensureSandbox } from '../src/sandbox/sandbox.ts';
 import { cleanupTmp, tmp } from './helpers.ts';
@@ -170,6 +176,28 @@ describe('the Agent tool in the settings the adapter writes', () => {
     expect(r.env).toContain('CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1');
     expect(r.env).toContain('AOM_SUBAGENT_GUARD=');
   });
+
+  it('keeps the grant’s limit in the guard file and the settings, and the end of a call removes its marker', async () => {
+    const r = await settingsFor([sub('rev', { timeoutSec: 45 }), sub('other')]);
+    const guard = JSON.parse(readFileSync(join(r.dir, 'subagent-guard.json'), 'utf8'));
+    expect(guard.limits).toEqual({ rev: 45 });
+    expect(guard.stateDir).toBe(join(r.dir, 'subagent-live'));
+    expect(existsSync(guard.stateDir)).toBe(true);
+    const pre = r.settings.hooks.PreToolUse.find((h: { matcher: string }) => h.matcher === '*');
+    // the check costs a shell test when nothing is running, and a failing hook lets the call through
+    expect(pre.hooks[0].command).toContain('[ -n "$(ls -A ');
+    expect(pre.hooks[0].command).toContain('|| exit 0; AOM_SUBAGENT_GUARD=');
+    expect(pre.hooks[0].command).toMatch(/subagent-deadline.* \|\| exit 0$/);
+    const post = r.settings.hooks.PostToolUse.find((h: { matcher: string }) => h.matcher === 'Agent|Task');
+    expect(post.hooks[0].command).toMatch(/subagent-done.* \|\| exit 0$/);
+  });
+
+  it('adds no hook and no limit for a grant without a time limit', async () => {
+    const r = await settingsFor([sub('rev')]);
+    expect(r.settings.hooks.PreToolUse.some((h: { matcher: string }) => h.matcher === '*')).toBe(false);
+    expect(r.settings.hooks.PostToolUse).toBeUndefined();
+    expect(JSON.parse(readFileSync(join(r.dir, 'subagent-guard.json'), 'utf8')).limits).toBeUndefined();
+  });
 });
 
 describe('the subagent guard', () => {
@@ -241,6 +269,97 @@ describe('the subagent guard', () => {
       ask: async () => ({ ok: false }),
     });
     expect(r).toEqual({ stdout: '', code: 0 });
+  });
+});
+
+describe('the time limit of one native subagent call (R3c)', () => {
+  const dirOf = () => join(tmp('aom-sub-live-'), 'live');
+  const guardIn = (dir: string, now: number) => ({
+    cfg: { allowed: { rev: 'agent:rev' }, limits: { rev: 30 }, stateDir: dir },
+    now: () => now,
+  });
+  const agentCall = JSON.stringify({
+    tool_name: 'Agent',
+    tool_use_id: 'toolu_9',
+    tool_input: { subagent_type: 'rev' },
+  });
+  const read = JSON.stringify({ tool_name: 'Read', tool_use_id: 'toolu_r', tool_input: { file_path: '/x' } });
+  const denies = (r: { stdout: string }) =>
+    r.stdout && JSON.parse(r.stdout).hookSpecificOutput.permissionDecision === 'deny';
+
+  it('starts the clock when the runner allowed the call, and refuses the tool calls that come after the limit', async () => {
+    const dir = dirOf();
+    const t0 = 1_000_000;
+    const g = guardIn(dir, t0);
+    expect(
+      await runSubagentGuard({ stdin: agentCall, cfg: g.cfg, now: g.now, ask: async () => ({ ok: true }) }),
+    ).toEqual({ stdout: '', code: 0 });
+    expect(readdirSync(dir)).toEqual(['toolu_9.json']);
+    // inside the limit: allowed
+    expect(runSubagentDeadline({ stdin: read, cfg: g.cfg, now: () => t0 + 29_000 })).toEqual({
+      stdout: '',
+      code: 0,
+    });
+    // past it: refused, with the reason, for any tool, and for another subagent
+    const late = runSubagentDeadline({ stdin: read, cfg: g.cfg, now: () => t0 + 31_000 });
+    expect(denies(late)).toBe(true);
+    expect(JSON.parse(late.stdout).hookSpecificOutput.permissionDecisionReason).toMatch(
+      /time limit of 30 seconds.*answer with what you have/,
+    );
+    expect(denies(runSubagentDeadline({ stdin: agentCall, cfg: g.cfg, now: () => t0 + 31_000 }))).toBe(true);
+    // the call ended: nothing is refused any more
+    expect(runSubagentDone({ stdin: agentCall, cfg: g.cfg })).toEqual({ stdout: '', code: 0 });
+    expect(readdirSync(dir)).toEqual([]);
+    expect(runSubagentDeadline({ stdin: read, cfg: g.cfg, now: () => t0 + 40_000 })).toEqual({
+      stdout: '',
+      code: 0,
+    });
+  });
+
+  it('does not start a clock when the runner refused, and drops a marker whose end was never seen', async () => {
+    const dir = dirOf();
+    const g = guardIn(dir, 5_000);
+    const no = await runSubagentGuard({
+      stdin: agentCall,
+      cfg: g.cfg,
+      now: g.now,
+      ask: async () => ({ ok: false, error: 'budget' }),
+    });
+    expect(denies(no)).toBe(true);
+    expect(existsSync(dir) ? readdirSync(dir) : []).toEqual([]);
+    await runSubagentGuard({ stdin: agentCall, cfg: g.cfg, now: g.now, ask: async () => ({ ok: true }) });
+    // the end was lost (a crash): after the limit and the grace it counts no more, and the marker is cleaned up
+    const much = 5_000 + 30_000 + SUBAGENT_MARKER_GRACE_MS + 1;
+    expect(runSubagentDeadline({ stdin: read, cfg: g.cfg, now: () => much })).toEqual({
+      stdout: '',
+      code: 0,
+    });
+    expect(readdirSync(dir)).toEqual([]);
+  });
+
+  it('allows everything when there is no state folder, a broken marker or an unreadable input (it fails open)', () => {
+    expect(runSubagentDeadline({ stdin: read, cfg: { allowed: {} } })).toEqual({ stdout: '', code: 0 });
+    const dir = dirOf();
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'broken.json'), '{nope');
+    expect(runSubagentDeadline({ stdin: 'not json', cfg: { allowed: {}, stateDir: dir } })).toEqual({
+      stdout: '',
+      code: 0,
+    });
+  });
+
+  it('reads the limits and the folder from the guard file', () => {
+    const dir = tmp('aom-sub-cfg-');
+    const file = join(dir, 'g.json');
+    writeFileSync(
+      file,
+      JSON.stringify({ allowed: { a: 'x:a' }, limits: { a: 20, b: 'x', c: -1 }, stateDir: '/some/live' }),
+    );
+    expect(loadSubagentGuardConfig(file)).toEqual({
+      allowed: { a: 'x:a' },
+      limits: { a: 20 },
+      stateDir: '/some/live',
+    });
   });
 });
 

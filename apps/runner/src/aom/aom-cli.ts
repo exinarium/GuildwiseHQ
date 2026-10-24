@@ -45,7 +45,12 @@ import {
 } from '../capabilities/skill-guard.ts';
 import { runGuardHook as runCeoGuardHook } from '../ceo/guard-hook.ts';
 import { PermissionRelay } from '../ceo/permission-relay.ts';
-import { loadSubagentGuardConfig, runSubagentGuard } from '../delegate/subagent-guard.ts';
+import {
+  loadSubagentGuardConfig,
+  runSubagentDeadline,
+  runSubagentDone,
+  runSubagentGuard,
+} from '../delegate/subagent-guard.ts';
 import type { ChangeStateLookup } from '../devops/branch-cleanup.ts';
 import { loadGuardConfig, runGuardHook } from '../devops/guard.ts';
 import { runHygiene } from '../devops/hygiene.ts';
@@ -2042,6 +2047,28 @@ const VERBS: Record<string, Verb> = {
       return 2;
     }
   },
+  /** The time limit of a native subagent's call: a PreToolUse hook on every tool, failing open (docs/ARCHITECTURE.md section 38.11). */
+  'subagent-deadline': async (ctx) => {
+    try {
+      const r = runSubagentDeadline({
+        stdin: ctx.readFile('-'),
+        cfg: loadSubagentGuardConfig(ctx.env.AOM_SUBAGENT_GUARD),
+        ...(ctx.now ? { now: ctx.now } : {}),
+      });
+      if (r.stdout) ctx.io.out(r.stdout);
+      return r.code;
+    } catch {
+      return 0;
+    }
+  },
+  'subagent-done': async (ctx) => {
+    try {
+      runSubagentDone({ stdin: ctx.readFile('-'), cfg: loadSubagentGuardConfig(ctx.env.AOM_SUBAGENT_GUARD) });
+    } catch {
+      // nothing to remove
+    }
+    return 0;
+  },
   'devops-done': async (ctx, p) => {
     const summary = textFlag(ctx, p, 'summary', true) as string;
     return report(ctx, outcome('devops_done', summary, { summary, commands: many(p, 'command') }));
@@ -2899,7 +2926,10 @@ async function preloadGuardStdin(): Promise<string> {
 if (isEntry) {
   const confined = confinedReader(process.env, process.cwd());
   const isGuard = process.argv[2] === 'skill-guard' || process.argv[2] === 'subagent-guard';
-  const guardStdin = isGuard ? preloadGuardStdin() : undefined;
+  // the two time-limit hooks of a native subagent read their input the same way, but fail open
+  const readsHookInput =
+    isGuard || process.argv[2] === 'subagent-deadline' || process.argv[2] === 'subagent-done';
+  const guardStdin = readsHookInput ? preloadGuardStdin() : undefined;
   (async () => {
     const stdinText = guardStdin ? await guardStdin : undefined;
     return runAom(process.argv.slice(2), {

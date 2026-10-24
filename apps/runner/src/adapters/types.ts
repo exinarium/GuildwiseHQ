@@ -78,6 +78,8 @@ export interface NativeSubagent {
   /** A Claude Code model alias or id. */
   model: string;
   profile: 'read_only' | 'edit' | 'shell';
+  /** The grant's time limit for one call, in seconds (R3c): past it the subagent's tool calls are refused. */
+  timeoutSec?: number;
 }
 
 /** What a native subagent used, read from the parent's transcript folder after the session ended. */

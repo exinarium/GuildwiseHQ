@@ -258,4 +258,199 @@ describe.skipIf(!enabled)('real Claude Code with native subagents (fake API, ski
       await ipc.stop();
     }
   }, 120_000);
+
+  it('R3c: refuses the tool calls of a subagent that ran past the grant’s time limit for one call, and lets the parent go on', async () => {
+    mkdirSync(HOME_BASE, { recursive: true });
+    const root = realpathSync(mkdtempSync(join(HOME_BASE, 'l-')));
+    const paths = runnerPaths(root);
+    const A = '019e3f6a-7b1c-7a2d-8c3e-0123456789a1';
+    const sandbox = await ensureSandbox(paths, A, 'Ada');
+    const cwd = join(root, 'worktrees', 'P-1', 'X-1');
+    mkdirSync(cwd, { recursive: true });
+    spawnSync('git', ['init', '-q', '-b', 'main', cwd]);
+    const ipc = new IpcServer();
+    await ipc.start();
+    const token = ipc.registerShift({
+      report: async () => ({ accepted: false, message: 'no', error: 'no' }) as never,
+      rpc: async (r: IpcRpcRequest) =>
+        r.method === 'delegate.guard' ? { ok: true, result: {} } : { ok: false, error: 'no' },
+    });
+    // a subagent that keeps reading files, one every 700 ms, until a tool result tells it the time is over
+    const seen = { subResults: [] as string[], parentResults: [] as string[], subCalls: 0 };
+    const server = createServer((req, res) => {
+      const chunks: Buffer[] = [];
+      req.on('data', (c) => chunks.push(c));
+      req.on('end', () => {
+        let body: any = {};
+        try {
+          body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+        } catch {}
+        const sse = (event: string, data: unknown) => `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+        const toolNames: string[] = (body.tools ?? []).map((t: any) => t.name);
+        if (!req.url?.startsWith('/v1/messages') || !body.stream) {
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.end(
+            JSON.stringify({
+              id: 'm',
+              type: 'message',
+              role: 'assistant',
+              model: 'x',
+              content: [{ type: 'text', text: 'ok' }],
+              stop_reason: 'end_turn',
+              stop_sequence: null,
+              usage: { input_tokens: 1, output_tokens: 1 },
+            }),
+          );
+          return;
+        }
+        const isParent = toolNames.includes('Agent');
+        const results = (body.messages ?? [])
+          .flatMap((m: any) => (Array.isArray(m?.content) ? m.content : []))
+          .filter((b: any) => b.type === 'tool_result')
+          .map((r: any) => (typeof r.content === 'string' ? r.content : JSON.stringify(r.content)));
+        const reply = (blocks: string, stop: string) => {
+          res.writeHead(200, { 'content-type': 'text/event-stream' });
+          res.end(
+            sse('message_start', {
+              type: 'message_start',
+              message: {
+                id: `msg_${Math.random().toString(36).slice(2)}`,
+                type: 'message',
+                role: 'assistant',
+                model: body.model ?? 'x',
+                content: [],
+                stop_reason: null,
+                stop_sequence: null,
+                usage: { input_tokens: 2, output_tokens: 2 },
+              },
+            }) +
+              blocks +
+              sse('message_delta', {
+                type: 'message_delta',
+                delta: { stop_reason: stop, stop_sequence: null },
+                usage: { output_tokens: 2 },
+              }) +
+              sse('message_stop', { type: 'message_stop' }),
+          );
+        };
+        const toolUse = (id: string, name: string, input: unknown) =>
+          sse('content_block_start', {
+            type: 'content_block_start',
+            index: 0,
+            content_block: { type: 'tool_use', id, name, input: {} },
+          }) +
+          sse('content_block_delta', {
+            type: 'content_block_delta',
+            index: 0,
+            delta: { type: 'input_json_delta', partial_json: JSON.stringify(input) },
+          }) +
+          sse('content_block_stop', { type: 'content_block_stop', index: 0 });
+        const text = (t: string) =>
+          sse('content_block_start', {
+            type: 'content_block_start',
+            index: 0,
+            content_block: { type: 'text', text: '' },
+          }) +
+          sse('content_block_delta', {
+            type: 'content_block_delta',
+            index: 0,
+            delta: { type: 'text_delta', text: t },
+          }) +
+          sse('content_block_stop', { type: 'content_block_stop', index: 0 });
+        if (isParent) {
+          seen.parentResults = results;
+          if (results.length === 0)
+            return reply(
+              toolUse('toolu_loop', 'Agent', {
+                description: 'sub',
+                prompt: 'read things',
+                subagent_type: 'rev',
+              }),
+              'tool_use',
+            );
+          return reply(text('all done'), 'end_turn');
+        }
+        seen.subResults = results;
+        seen.subCalls++;
+        if (results.some((r: string) => /time limit/.test(r))) return reply(text('SUB-STOPPED'), 'end_turn');
+        setTimeout(
+          () =>
+            reply(
+              toolUse(`toolu_read_${seen.subCalls}`, 'Read', { file_path: join(cwd, '.git', 'HEAD') }),
+              'tool_use',
+            ),
+          700,
+        );
+      });
+    });
+    servers.push(server);
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+    const url = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+    const adapter = new ClaudeCodeAdapter(
+      ClaudeRuntimeConfigSchema.parse({
+        bin: CLAUDE,
+        sandbox: 'off',
+        authMode: 'api_key',
+        apiKey: 'sk-ant-fake-fake-fake',
+      }),
+      paths,
+    );
+    process.env.AOM_CLAUDE_SMOKE = '1';
+    const subagent: NativeSubagent = {
+      name: 'rev',
+      handle: 'agent:rev',
+      description: 'Reviews things',
+      prompt: 'You are REV-PROMPT, a reviewer.',
+      tools: ['Read', 'Grep', 'Glob'],
+      model: 'haiku',
+      profile: 'read_only',
+      timeoutSec: 2,
+    };
+    try {
+      const reviewer = BUILTIN_ROLES.find((r) => r.key === 'reviewer');
+      const session = await adapter.start({
+        shiftId: 'zz2',
+        prompt: 'Review the thing with a subagent.',
+        instructionsMarkdown: '',
+        cwd,
+        sandbox,
+        addDirs: [],
+        subagents: [subagent],
+        env: {
+          ...sandboxEnv(sandbox),
+          AOM_IPC_URL: ipc.url,
+          AOM_SHIFT_TOKEN: token,
+          AOM_SHIFT_ID: 'zz2',
+          ANTHROPIC_BASE_URL: url,
+          CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
+          DISABLE_AUTOUPDATER: '1',
+          ENABLE_TOOL_SEARCH: 'false',
+        },
+        maxShiftMinutes: 3,
+        agent: {
+          agentId: A,
+          name: 'Ada',
+          roleKey: 'reviewer',
+          seniority: 'senior',
+          runtime: 'claude-code',
+          model: 'claude-sonnet-4-5',
+          skills: [],
+          permissions: reviewer?.permissions,
+          isDevops: false,
+        },
+      } as never);
+      const events: RuntimeEvent[] = [];
+      for await (const e of session.events()) events.push(e);
+      expect(events.at(-1)).toMatchObject({ kind: 'exit', code: 0 });
+      // the early reads went through; once the call was over its two seconds the next read was refused with the reason,
+      // and the subagent answered with what it had
+      expect(seen.subResults.some((r) => /time limit of 2 seconds/.test(r))).toBe(true);
+      expect(seen.subResults.filter((r) => !/time limit/.test(r)).length).toBeGreaterThanOrEqual(1);
+      // the parent got the subagent's answer and was not held up by a marker that stayed behind
+      expect(seen.parentResults.join(' ')).toContain('SUB-STOPPED');
+    } finally {
+      delete process.env.AOM_CLAUDE_SMOKE;
+      await ipc.stop();
+    }
+  }, 120_000);
 });

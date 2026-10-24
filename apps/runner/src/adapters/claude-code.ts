@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -712,19 +712,44 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     }
     writeFileSync(join(dir, AGENTS_FILE), `${JSON.stringify(agentsDocument(subs))}\n`, { mode: 0o600 });
     const guardFile = join(dir, 'subagent-guard.json');
+    // the running calls leave their start here (the time limit's clock); emptied at every session start
+    const liveDir = join(dir, 'subagent-live');
+    rmSync(liveDir, { recursive: true, force: true });
+    mkdirSync(liveDir, { recursive: true, mode: 0o700 });
+    const limits = Object.fromEntries(
+      subs.filter((x) => x.timeoutSec).map((x) => [x.name, x.timeoutSec as number]),
+    );
     writeFileSync(
       guardFile,
-      `${JSON.stringify({ allowed: Object.fromEntries(subs.map((x) => [x.name, x.handle])) })}\n`,
+      `${JSON.stringify({
+        allowed: Object.fromEntries(subs.map((x) => [x.name, x.handle])),
+        ...(Object.keys(limits).length ? { limits, stateDir: liveDir } : {}),
+      })}\n`,
       { mode: 0o600 },
     );
     const quote = (w: string) => `'${w.replace(/'/g, `'\\''`)}'`;
     // `|| exit 2`: any failure of the guard, a missing `aom` included, is a refusal (a hook that fails any other way lets the call through)
     const command = `AOM_SUBAGENT_GUARD=${quote(guardFile)} ${[...selfCommand('aom'), 'subagent-guard'].map(quote).join(' ')} || exit 2`;
+    const aom = (verb: string) => [...selfCommand('aom'), verb].map(quote).join(' ');
+    // R3c, the time limit of one call: every tool call is checked against the start markers, but only when a call is running (the
+    // shell test costs nothing; the node process starts only then). The end of an `Agent` call removes its marker. Fail open.
+    const deadline = `[ -n "$(ls -A ${quote(liveDir)} 2>/dev/null)" ] || exit 0; AOM_SUBAGENT_GUARD=${quote(guardFile)} ${aom('subagent-deadline')} || exit 0`;
+    const done = `AOM_SUBAGENT_GUARD=${quote(guardFile)} ${aom('subagent-done')} || exit 0`;
     settings.hooks = {
       PreToolUse: [
         ...(settings.hooks?.PreToolUse ?? []),
         { matcher: 'Agent|Task', hooks: [{ type: 'command' as const, command, timeout: 10 }] },
+        ...(Object.keys(limits).length
+          ? [{ matcher: '*', hooks: [{ type: 'command' as const, command: deadline, timeout: 10 }] }]
+          : []),
       ],
+      ...(Object.keys(limits).length
+        ? {
+            PostToolUse: [
+              { matcher: 'Agent|Task', hooks: [{ type: 'command' as const, command: done, timeout: 10 }] },
+            ],
+          }
+        : {}),
     };
     settings.permissions.allow = [
       ...new Set([...settings.permissions.allow, ...subs.map((x) => `Agent(${x.name})`)]),

@@ -566,6 +566,7 @@ export class DelegateRunner {
         tools,
         model: r.choice.model,
         profile,
+        ...(t.timeoutSec ? { timeoutSec: t.timeoutSec } : {}),
       });
       mine.set(name, { handle: t.handle, choice: r.choice, profile, kind: t.kind });
     }
