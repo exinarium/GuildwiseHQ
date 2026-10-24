@@ -315,6 +315,55 @@ describe('delegate.cost books the usage under the caller', () => {
   });
 });
 
+describe('delegate.cost and delegate.heartbeat check who began the delegate (security review finding 10)', () => {
+  const rowOf = async (id: string) =>
+    (await q('SELECT * FROM delegate_begins WHERE delegate_id=$1', [id]))[0];
+  it('refuses a cost for a delegate that was never begun, or begun by another caller', async () => {
+    const a = await facilitator();
+    const b = await facilitator();
+    const mine = await begin(a.id);
+    // an id of the runner's own choosing
+    const invented = await cost(a.id, randomUUID());
+    expect(invented.ok).toBe(false);
+    expect(invented.error).toContain('unknown delegate');
+    // another caller's delegate
+    const theirs = await cost(b.id, mine.delegateId);
+    expect(theirs.ok).toBe(false);
+    expect(
+      (await q(`SELECT count(*)::int AS n FROM shift_costs WHERE shift_id=$1`, [mine.delegateId]))[0].n,
+    ).toBe(0);
+    expect(await rowOf(mine.delegateId)).toBeTruthy();
+    // the right caller books it once
+    expect((await cost(a.id, mine.delegateId)).result).toEqual({ recorded: true });
+    await finish(a.start);
+    await finish(b.start);
+  });
+
+  it('refuses a cost or a heartbeat from a delegate begun on another workstation', async () => {
+    const a = await facilitator();
+    const mine = await begin(a.id);
+    await q(`UPDATE delegate_begins SET workstation_id = $2 WHERE delegate_id=$1`, [
+      mine.delegateId,
+      randomUUID(),
+    ]);
+    expect((await cost(a.id, mine.delegateId)).ok).toBe(false);
+    expect((await call(a.id, 'delegate.heartbeat', { delegateId: mine.delegateId })).ok).toBe(false);
+    await finish(a.start);
+  });
+
+  it('a heartbeat only keeps its own caller delegate alive', async () => {
+    const a = await facilitator();
+    const b = await facilitator();
+    const mine = await begin(a.id);
+    const hb = await call(b.id, 'delegate.heartbeat', { delegateId: mine.delegateId });
+    expect(hb.ok).toBe(false);
+    expect((await rowOf(mine.delegateId)).heartbeat_at).toBeNull();
+    expect((await call(a.id, 'delegate.heartbeat', { delegateId: mine.delegateId })).ok).toBe(true);
+    await finish(a.start);
+    await finish(b.start);
+  });
+});
+
 describe('the session budget', () => {
   it('refuses a delegate once the session has used its budget, and works again when it is raised', async () => {
     const { s, start, id } = await facilitator({ budgetUsd: 1 });

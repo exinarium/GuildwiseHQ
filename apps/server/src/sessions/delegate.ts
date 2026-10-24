@@ -52,7 +52,7 @@ export async function delegateRpc(
     const caller = await loadCaller(ctx, workstationId, callerId);
     if (!caller) return [false, undefined, 'unknown caller'];
     if (method === 'delegate.begin') return await begin(ctx, caller, params, workstationId);
-    if (method === 'delegate.heartbeat') return await heartbeat(ctx, params);
+    if (method === 'delegate.heartbeat') return await heartbeat(ctx, workstationId, caller, params);
     if (method === 'delegate.cost') return await cost(ctx, workstationId, caller, params);
     return [false, undefined, `${method} is not available`];
   } catch (err) {
@@ -226,13 +226,20 @@ async function begin(
 const STALE_NO_HEARTBEAT_MS = DELEGATE_LIMITS.timeoutMs + 30_000;
 
 /** `delegate.heartbeat`: the runner says the delegate is alive. */
-async function heartbeat(ctx: Ctx, params: Record<string, unknown>): Promise<Reply> {
+async function heartbeat(
+  ctx: Ctx,
+  workstationId: string,
+  caller: Caller,
+  params: Record<string, unknown>,
+): Promise<Reply> {
   const id = typeof params.delegateId === 'string' ? params.delegateId : '';
   if (!/^[0-9a-f-]{36}$/i.test(id)) return [false, undefined, 'invalid delegate heartbeat'];
-  await ctx.pool.query('UPDATE delegate_begins SET heartbeat_at=$2 WHERE delegate_id=$1', [
-    id,
-    ctx.clock.now(),
-  ]);
+  // only the delegate this caller began on this workstation: another delegate's slot cannot be held open or touched
+  const r = await ctx.pool.query(
+    'UPDATE delegate_begins SET heartbeat_at=$2 WHERE delegate_id=$1 AND caller_id=$3 AND workstation_id=$4',
+    [id, ctx.clock.now(), caller.row.id, workstationId],
+  );
+  if (!r.rowCount) return [false, undefined, 'unknown delegate'];
   return [true, {}];
 }
 
@@ -365,13 +372,19 @@ async function cost(
   if (!p.success) return [false, undefined, 'invalid delegate cost report'];
   // Idempotent: a retried report is booked once.
   const had = await one(ctx.pool, 'SELECT 1 FROM shift_costs WHERE shift_id=$1', [p.data.delegateId]);
-  const begun = await one(ctx.pool, 'SELECT * FROM delegate_begins WHERE delegate_id=$1', [
-    p.data.delegateId,
-  ]);
+  // Only a delegate this caller began on this workstation can be costed: the runner cannot book usage for an id of its own
+  // choosing (another caller's delegate, one never begun) against the organization's spend and caps.
+  const begun = await one(
+    ctx.pool,
+    'SELECT * FROM delegate_begins WHERE delegate_id=$1 AND caller_id=$2 AND workstation_id=$3',
+    [p.data.delegateId, caller.row.id, workstationId],
+  );
   if (had) {
-    await ctx.pool.query('DELETE FROM delegate_begins WHERE delegate_id=$1', [p.data.delegateId]);
+    if (begun) await ctx.pool.query('DELETE FROM delegate_begins WHERE delegate_id=$1', [p.data.delegateId]);
     return [true, { recorded: false }];
   }
+  if (!begun)
+    return [false, undefined, 'unknown delegate: it was not begun by this caller on this workstation'];
   await ctx.store.append([
     {
       streamId: streamId.delegate(p.data.delegateId),
