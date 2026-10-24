@@ -115,3 +115,29 @@ describe('orgCredentialEndpointProblem (security review finding 6)', () => {
     expect(orgCredentialEndpointProblem('ftp://x.example.com', [])).toBeTruthy();
   });
 });
+
+describe('backend URLs go through the same checks (finding 6)', async () => {
+  const { validateBackendFields, backendEndpointProblem } = await import('../src/models/backends.ts');
+  const gw = (baseUrl: string) => ({ baseUrl, apiKey: 'k' });
+  it('refuses metadata for every credential', () => {
+    expect(validateBackendFields('gateway', gw('http://169.254.169.254/v1'))).toMatch(/metadata/);
+    expect(validateBackendFields('gateway', gw('https://[::ffff:a9fe:a9fe]/v1'))).toMatch(/metadata/);
+  });
+  it('an organization gateway must be https to a public address', () => {
+    const org = { orgSourced: true, endpoints: [] as string[] };
+    expect(validateBackendFields('gateway', gw('https://llm.example.com'), org)).toBeNull();
+    expect(validateBackendFields('gateway', gw('http://llm.example.com'), org)).toMatch(/https/);
+    expect(validateBackendFields('gateway', gw('https://127.0.0.1:4000'), org)).toBeTruthy();
+    expect(backendEndpointProblem('gateway', gw('http://10.0.0.5:4000'), org)).toBeTruthy();
+    expect(
+      backendEndpointProblem('gateway', gw('http://10.0.0.5:4000'), {
+        orgSourced: true,
+        endpoints: ['10.0.0.5:4000'],
+      }),
+    ).toBeNull();
+  });
+  it('the workstation own gateway keeps loopback', () => {
+    expect(validateBackendFields('gateway', gw('http://127.0.0.1:4000'), { endpoints: [] })).toBeNull();
+    expect(validateBackendFields('gateway', gw('http://192.168.1.9:4000'), { endpoints: [] })).toBeTruthy();
+  });
+});

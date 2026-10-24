@@ -194,11 +194,16 @@ export class DirectModelAdapter implements RuntimeAdapter {
    * The HTTP for an OpenAI-compatible endpoint (and its model list): the name of the base URL is resolved and judged against the
    * private-endpoint rules, and the connection goes to a judged address (R3c). The hosted providers need no such check.
    */
-  private endpointFetch(): FetchLike {
+  private endpointFetch(orgId?: string): FetchLike {
     // a test that points the HTTP at its own fake keeps it, unless it also supplies a resolver to exercise the check
     if (this.deps.fetch && !this.deps.resolve) return this.deps.fetch;
     return guardedFetch({
       entries: () => this.deps.store.endpoints(),
+      // an organization's endpoint is judged without the loopback exemption
+      isOrgUrl: (url) => {
+        const c = this.deps.store.get('openai-compatible', orgId);
+        return c?.source === 'org' && !!c.baseUrl && url.startsWith(c.baseUrl);
+      },
       ...(this.deps.resolve ? { resolve: this.deps.resolve } : {}),
       ...(this.deps.fetch ? { inner: this.deps.fetch } : {}),
     });
@@ -252,7 +257,7 @@ export class DirectModelAdapter implements RuntimeAdapter {
       model = this.factory(
         input.agent.model,
         cfg,
-        choice.provider === 'openai-compatible' ? this.endpointFetch() : this.deps.fetch,
+        choice.provider === 'openai-compatible' ? this.endpointFetch(input.orgId) : this.deps.fetch,
       );
     } catch (err) {
       fail(describeProviderError(choice.provider, err));

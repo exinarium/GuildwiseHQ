@@ -109,8 +109,10 @@ export function opencodeRoute(p: ProviderConfig): EgressRoute | undefined {
         prefix: routePrefix(p.id),
         upstream: p.baseUrl,
         headers: key ? { authorization: `Bearer ${key}` } : {},
-        // the owner entered this endpoint (Ollama on this machine, a LAN server): only this route may reach it
-        allowPrivateUpstream: true,
+        // the owner entered this endpoint (Ollama on this machine, a LAN server): only this route may reach it. An
+        // organization's endpoint was chosen by an org admin: https to a public address, or a private-endpoint entry only.
+        allowPrivateUpstream: p.source !== 'org',
+        ...(p.source === 'org' ? { orgSourced: true } : {}),
       };
     }
     default:
@@ -464,7 +466,7 @@ export class OpencodeAdapter implements RuntimeAdapter {
       const r = opencodeRoute(p);
       if (!r) return [];
       const over = this.host.routeUpstream?.(p.id);
-      return [over ? { ...r, upstream: over, allowPrivateUpstream: true } : r];
+      return [over ? { ...r, upstream: over, allowPrivateUpstream: true, orgSourced: false } : r];
     });
     const root = this.paths?.root ?? dirname(dirname(input.sandbox.home));
     const script = selfCommand('aom').at(-1);

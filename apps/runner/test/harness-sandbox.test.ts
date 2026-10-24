@@ -105,6 +105,7 @@ async function world(
     socketPath: sock,
     allowedHosts: proxyOpts.allowed ?? ['allowed.test'],
     allowPrivate: true,
+    allowedPorts: [up.port, 80, 443],
     resolve: async () => '127.0.0.1',
     ...(proxyOpts.routes
       ? {

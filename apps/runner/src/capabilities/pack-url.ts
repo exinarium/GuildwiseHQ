@@ -1,5 +1,6 @@
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
+import { classifyIp } from '@aom/shared';
 
 /**
  * Where a runner may clone a pack from (docs/ARCHITECTURE.md section 38.4). A pack URL comes from the server, so it is checked
@@ -30,20 +31,8 @@ export function isPrivateAddress(ip: string): boolean {
   }
   if (isIP(lower) === 6) {
     if (lower === '::' || lower === '::1') return true;
-    const mapped = /^::ffff:(?:(\d+\.\d+\.\d+\.\d+)|([0-9a-f]{1,4}):([0-9a-f]{1,4}))$/.exec(lower);
-    if (mapped) {
-      if (mapped[1]) return isPrivateAddress(mapped[1]);
-      const hi = Number.parseInt(mapped[2] as string, 16);
-      const lo = Number.parseInt(mapped[3] as string, 16);
-      return isPrivateAddress(`${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`);
-    }
-    const first = Number.parseInt(lower.split(':')[0] || '0', 16);
-    return (
-      (first & 0xfe00) === 0xfc00 || // unique local
-      (first & 0xffc0) === 0xfe80 || // link-local
-      (first & 0xff00) === 0xff00 || // multicast
-      (first === 0x2001 && lower.startsWith('2001:db8')) // documentation
-    );
+    // every notation, and the IPv4 an address carries (mapped hex, NAT64, 6to4, Teredo): packages/shared private-endpoints.ts
+    return classifyIp(lower) !== 'public' || lower.startsWith('2001:db8'); // documentation
   }
   return true; // not an address at all: refuse
 }

@@ -8,7 +8,7 @@ import {
 } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import { isIP, connect as netConnect, type Socket } from 'node:net';
-import { endpointListed } from '@aom/shared';
+import { classifyIp, endpointListed, orgCredentialEndpointProblem } from '@aom/shared';
 
 /**
  * The network of a harness sandbox (docs/RUNNER.md, "Sandbox parity of the other runtimes"). The sandboxed CLI has no network
@@ -32,6 +32,11 @@ export interface EgressRoute {
    * on any port. Only this route may reach it; the sandbox cannot name the address itself.
    */
   allowPrivateUpstream?: boolean;
+  /**
+   * The route carries an ORGANIZATION's credential to an endpoint an org admin chose: it needs https to a public address, or an
+   * exact entry in `privateEndpoints` (loopback is not exempt), whatever `allowPrivateUpstream` says. Enforced on every request.
+   */
+  orgSourced?: boolean;
 }
 
 export interface EgressProxyOptions {
@@ -49,6 +54,8 @@ export interface EgressProxyOptions {
    * Link-local and metadata addresses are never reachable, listed or not. Empty by default.
    */
   privateEndpoints?: string[];
+  /** Test hook: the ports a CONNECT or plain request may use (default 80 and 443). */
+  allowedPorts?: number[];
   /** Test hook: resolve names. */
   resolve?: (host: string) => Promise<string>;
 }
@@ -69,38 +76,41 @@ export function hostAllowed(host: string, allowed: readonly string[]): boolean {
   });
 }
 
-/** Loopback, private, link-local (the cloud metadata address included), unique-local, carrier-grade NAT and unspecified addresses. */
+/**
+ * Loopback, private, link-local (the cloud metadata address included), unique-local, site-local, carrier-grade NAT and
+ * unspecified addresses, in every notation: an IPv4 carried in an IPv4-mapped (dotted or hex), compatible, NAT64, 6to4 or Teredo
+ * address is judged as the IPv4 it is (packages/shared private-endpoints.ts).
+ */
 export function isPrivateAddress(ip: string): boolean {
-  if (isIP(ip) === 4) {
-    const [a = 0, b = 0] = ip.split('.').map(Number);
-    return (
-      a === 0 ||
-      a === 10 ||
-      a === 127 ||
-      (a === 100 && b >= 64 && b <= 127) ||
-      (a === 169 && b === 254) ||
-      (a === 172 && b >= 16 && b <= 31) ||
-      (a === 192 && b === 168) ||
-      a >= 224
-    );
-  }
-  const v = ip.toLowerCase();
-  if (v === '::' || v === '::1') return true;
-  if (v.startsWith('::ffff:')) return isPrivateAddress(v.slice(7));
-  return /^f[cd]/.test(v) || /^fe[89ab]/.test(v) || v.startsWith('ff');
+  const c = classifyIp(ip);
+  return c !== undefined && c !== 'public';
 }
 
 const ALLOWED_PORTS = new Set([80, 443]);
 
-/** 169.254/16 (the cloud metadata address included), fe80::/10, multicast and the unspecified address: no entry can open these. */
+/** 169.254/16 (the cloud metadata address included), fe80::/10, multicast and the unspecified address, in every notation. */
 export function isNeverReachable(ip: string): boolean {
-  const v = ip.toLowerCase();
-  if (v.startsWith('::ffff:')) return isNeverReachable(v.slice(7));
-  if (isIP(v) === 4) {
-    const [a = 0, b = 0] = v.split('.').map(Number);
-    return (a === 169 && b === 254) || a === 0 || a >= 224;
+  return classifyIp(ip) === 'forbidden';
+}
+
+function hasBadChar(s: string): boolean {
+  for (const ch of s) if (ch === '\\' || ch.charCodeAt(0) < 0x20) return true;
+  return false;
+}
+
+/** A route's path after its prefix, or undefined when it could climb out of the upstream prefix (`..`, encoded dots or slashes). */
+export function safeRoutePath(rest: string): string | undefined {
+  const q = rest.indexOf('?');
+  const path = q < 0 ? rest : rest.slice(0, q);
+  if (hasBadChar(rest) || /%(2e|2f|5c|00)/i.test(path)) return undefined;
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(path);
+  } catch {
+    return undefined;
   }
-  return v === '::' || /^fe[89ab]/.test(v) || v.startsWith('ff');
+  if (decoded.split('/').some((seg) => seg === '..' || seg === '.')) return undefined;
+  return rest;
 }
 
 /**
@@ -138,6 +148,7 @@ export async function startEgressProxy(o: EgressProxyOptions): Promise<EgressPro
       o.onDeny?.(host);
     }
   };
+  const portOk = (p: number): boolean => (o.allowedPorts ? o.allowedPorts.includes(p) : ALLOWED_PORTS.has(p));
   const sockets = new Set<Socket>();
   const routes = [...(o.routes ?? [])].sort((a, b) => b.prefix.length - a.prefix.length);
 
@@ -163,12 +174,31 @@ export async function startEgressProxy(o: EgressProxyOptions): Promise<EgressPro
         (r) => raw === r.prefix || raw.startsWith(`${r.prefix}/`) || raw.startsWith(`${r.prefix}?`),
       );
       if (!route) return fail(404, 'no such route');
-      target = new URL(route.upstream.replace(/\/+$/, '') + raw.slice(route.prefix.length));
+      const rest = safeRoutePath(raw.slice(route.prefix.length));
+      if (rest === undefined) return fail(400, 'bad path');
+      const upstreamBase = route.upstream.replace(/\/+$/, '');
+      try {
+        target = new URL(upstreamBase + rest);
+        const base = new URL(upstreamBase);
+        const basePath = base.pathname.replace(/\/+$/, '');
+        // the joined URL must stay on the upstream's origin and under its path prefix
+        if (
+          target.origin !== base.origin ||
+          !(target.pathname === basePath || target.pathname.startsWith(`${basePath}/`))
+        )
+          return fail(400, 'bad path');
+      } catch {
+        return fail(400, 'bad path');
+      }
       if (!hostAllowed(target.hostname, o.allowedHosts)) {
         deny(target.hostname);
         return fail(403, 'host not allowed');
       }
-      privateOk = route.allowPrivateUpstream === true;
+      if (route.orgSourced && orgCredentialEndpointProblem(route.upstream, o.privateEndpoints ?? [])) {
+        deny(target.hostname);
+        return fail(403, 'endpoint not allowed');
+      }
+      privateOk = route.allowPrivateUpstream === true && route.orgSourced !== true;
       routeHit = true;
       for (const k of ['authorization', 'x-goog-api-key', 'x-api-key', 'api-key', 'cookie'])
         delete headers[k];
@@ -180,7 +210,11 @@ export async function startEgressProxy(o: EgressProxyOptions): Promise<EgressPro
         return fail(400, 'bad request');
       }
       const listed = endpointListed(target.hostname, Number(target.port || 80), o.privateEndpoints ?? []);
-      if (target.protocol !== 'http:' || !(listed || hostAllowed(target.hostname, o.allowedHosts))) {
+      const port = Number(target.port || 80);
+      if (
+        target.protocol !== 'http:' ||
+        !(listed || (portOk(port) && hostAllowed(target.hostname, o.allowedHosts)))
+      ) {
         deny(target.hostname);
         return fail(403, 'host not allowed');
       }
@@ -231,7 +265,7 @@ export async function startEgressProxy(o: EgressProxyOptions): Promise<EgressPro
       client.end(`HTTP/1.1 ${code}\r\nConnection: close\r\n\r\n`);
     };
     const listed = !!hp && endpointListed(hp.host, hp.port, o.privateEndpoints ?? []);
-    if (!hp || !(listed || (ALLOWED_PORTS.has(hp.port) && hostAllowed(hp.host, o.allowedHosts)))) {
+    if (!hp || !(listed || (portOk(hp.port) && hostAllowed(hp.host, o.allowedHosts)))) {
       deny(hp?.host ?? '?');
       return refuse('403 Forbidden');
     }

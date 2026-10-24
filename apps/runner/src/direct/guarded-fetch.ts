@@ -1,6 +1,13 @@
 import { lookup as dnsLookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
-import { endpointListed, isForbiddenEndpointHost, isLoopbackHost, isPrivateEndpointHost } from '@aom/shared';
+import {
+  classifyIp,
+  endpointListed,
+  isForbiddenEndpointHost,
+  isLoopbackHost,
+  isPrivateEndpointHost,
+  orgCredentialEndpointProblem,
+} from '@aom/shared';
 import { Agent, fetch as undiciFetch } from 'undici';
 
 /**
@@ -13,6 +20,8 @@ import { Agent, fetch as undiciFetch } from 'undici';
  *   - a private-network address (RFC 1918, carrier-grade NAT, unique-local): only when the owner listed `host:port` (the name as
  *     written in the URL, or the address it resolved to) in the workstation's private endpoints (Q47);
  *   - a public address: fine.
+ * An ORGANIZATION's endpoint (an org admin chose the URL) gets no loopback exemption: it must be https to a public address, or an
+ * exact private-endpoint entry (`orgCredentialEndpointProblem`), and the address a name resolves to is judged the same way.
  */
 export type Resolver = (host: string) => Promise<string[]>;
 
@@ -24,9 +33,10 @@ export async function resolvedEndpointProblem(
   port: number,
   entries: readonly string[],
   resolve: Resolver = defaultResolve,
+  orgSourced = false,
 ): Promise<string | undefined> {
   const h = host.replace(/^\[|\]$/g, '');
-  if (isLoopbackHost(host)) return undefined;
+  if (isLoopbackHost(host) && !orgSourced) return undefined;
   let addrs: string[];
   if (isIP(h)) addrs = [h];
   else {
@@ -38,10 +48,11 @@ export async function resolvedEndpointProblem(
     if (addrs.length === 0) return `cannot resolve ${h}`;
   }
   for (const raw of addrs) {
-    const ip = raw.toLowerCase().replace(/^::ffff:/, '');
+    const ip = raw.toLowerCase();
     if (isForbiddenEndpointHost(ip))
       return `${h} resolves to ${ip}: link-local and metadata addresses cannot be used as an endpoint`;
-    if (isLoopbackHost(ip)) continue;
+    if (isLoopbackHost(ip) && !orgSourced) continue;
+    if (classifyIp(ip) === undefined) return `${h} resolves to ${ip}, which is not an IP address`;
     if (isPrivateEndpointHost(ip) && !endpointListed(h, port, entries) && !endpointListed(ip, port, entries))
       return `${h}:${port} resolves to ${ip}, which is on a private network. Add ${h}:${port} to this workstation's private endpoints first.`;
   }
@@ -61,6 +72,8 @@ type Lookup = (
 export function guardedFetch(o: {
   entries: () => readonly string[];
   resolve?: Resolver;
+  /** Whether a URL belongs to an organization's credential (judged without the loopback exemption). */
+  isOrgUrl?: (url: string) => boolean;
   /** Test hook: where the request really goes (default: undici with a guarded lookup). */
   inner?: (url: string, init?: RequestInit) => Promise<Response>;
 }): (url: string, init?: RequestInit) => Promise<Response> {
@@ -68,8 +81,8 @@ export function guardedFetch(o: {
   const portOf = (u: URL): number => Number(u.port || (u.protocol === 'https:' ? 443 : 80));
   // one agent per host and port: its lookup knows the port, which decides whether a private address is listed
   const agents = new Map<string, Agent>();
-  const dispatcher = (host: string, port: number): Agent => {
-    const key = `${host}:${port}`;
+  const dispatcher = (host: string, port: number, org: boolean): Agent => {
+    const key = `${host}:${port}:${org}`;
     let agent = agents.get(key);
     if (agent) return agent;
     agent = new Agent({
@@ -79,7 +92,8 @@ export function guardedFetch(o: {
             .then(async (addrs) => {
               const ok: string[] = [];
               for (const a of addrs)
-                if (!(await resolvedEndpointProblem(host, port, o.entries(), async () => [a]))) ok.push(a);
+                if (!(await resolvedEndpointProblem(host, port, o.entries(), async () => [a], org)))
+                  ok.push(a);
               if (ok.length === 0) return cb(new Error(`the endpoint ${hostname} is not allowed`), []);
               const fam = (a: string) => (a.includes(':') ? 6 : 4);
               if (options.all)
@@ -98,12 +112,15 @@ export function guardedFetch(o: {
   };
   return async (url, init) => {
     const u = new URL(url);
-    const problem = await resolvedEndpointProblem(u.hostname, portOf(u), o.entries(), resolve);
+    const org = o.isOrgUrl?.(url) === true;
+    const spelled = org ? orgCredentialEndpointProblem(url, o.entries()) : undefined;
+    if (spelled) throw new Error(spelled);
+    const problem = await resolvedEndpointProblem(u.hostname, portOf(u), o.entries(), resolve, org);
     if (problem) throw new Error(problem);
     if (o.inner) return o.inner(url, init);
     return undiciFetch(url, {
       ...(init as object),
-      dispatcher: dispatcher(u.hostname, portOf(u)),
+      dispatcher: dispatcher(u.hostname, portOf(u), org),
     } as never) as unknown as Promise<Response>;
   };
 }

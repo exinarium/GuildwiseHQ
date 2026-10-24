@@ -1,5 +1,10 @@
 import { z } from 'zod';
 import type { ModelTier } from './direct.ts';
+import {
+  baseUrlEndpointProblem,
+  isForbiddenEndpointHost,
+  orgCredentialEndpointProblem,
+} from './private-endpoints.ts';
 
 /**
  * Claude Code against another backend (docs/RUNNER.md, "Claude Code on Bedrock, Vertex AI or a gateway"): the same harness and
@@ -180,8 +185,45 @@ export function splitBackendModel(id: string): { backend: BackendId; model: stri
 export const BackendCredentialSchema = z.record(z.string().min(1).max(40), z.string().max(8000));
 export type BackendCredential = z.infer<typeof BackendCredentialSchema>;
 
+/** Where a backend credential came from and the workstation owner's private-endpoint allow-list (for the endpoint checks). */
+export interface BackendEndpointOptions {
+  /** The credential is an organization's: its URL must be https to a public address or a listed private endpoint. */
+  orgSourced?: boolean;
+  /** The workstation owner's private endpoints (`host:port`). Absent: only the checks that need no list (metadata, link-local). */
+  endpoints?: readonly string[];
+}
+
+/**
+ * Why a backend's endpoint URL (`baseUrl` of a gateway, Bedrock or Vertex) must not be used, or null. Metadata and link-local
+ * addresses are refused for every credential; an organization's URL is also refused when it is plain http, on this machine or on a
+ * private network, unless the workstation owner listed it (orgCredentialEndpointProblem); the workstation's own URL follows
+ * baseUrlEndpointProblem when the allow-list is known.
+ */
+export function backendEndpointProblem(
+  id: BackendId,
+  fields: Record<string, string>,
+  o: BackendEndpointOptions = {},
+): string | null {
+  const raw = (fields.baseUrl ?? '').trim();
+  if (!raw || !backendDef(id)) return null;
+  if (o.orgSourced) return orgCredentialEndpointProblem(raw, o.endpoints ?? []) ?? null;
+  if (o.endpoints) return baseUrlEndpointProblem(raw, o.endpoints) ?? null;
+  try {
+    const h = new URL(raw).hostname;
+    return isForbiddenEndpointHost(h)
+      ? 'link-local and metadata addresses cannot be used as an endpoint'
+      : null;
+  } catch {
+    return null; // the URL check reports it
+  }
+}
+
 /** Why these field values cannot work, or null. Used by the page before sealing and by the runner before storing. */
-export function validateBackendFields(id: BackendId, fields: Record<string, string>): string | null {
+export function validateBackendFields(
+  id: BackendId,
+  fields: Record<string, string>,
+  endpointOpts: BackendEndpointOptions = {},
+): string | null {
   const def = backendDef(id);
   if (!def) return 'unknown backend';
   const v = (k: string) => (fields[k] ?? '').trim();
@@ -197,7 +239,8 @@ export function validateBackendFields(id: BackendId, fields: Record<string, stri
     } catch {
       return `${label} is not a valid URL`;
     }
-    return null;
+    const where = backendEndpointProblem(id, fields, endpointOpts);
+    return where ? `${label}: ${where}` : null;
   };
   if (id === 'bedrock') {
     if (!/^[a-z]{2}(-[a-z]+)+-\d$/.test(v('region')))
