@@ -130,6 +130,8 @@ const EnvSchema = z.object({
   /** A workstation must stay disconnected this long before its owner is notified (restarts and updates reconnect within it). */
   AOM_PUSH_OFFLINE_GRACE_SECONDS: z.coerce.number().int().min(0).max(3600).default(120),
   /** Project graphs (docs/design/project-graphs.md): every project gets a vault and its code graph is indexed on the workstation. A kill switch, on by default. */
+  /** Persona chats (R3c) are removed from the lists after this many days without a message (0: keep for ever). */
+  AOM_PERSONA_CHAT_RETENTION_DAYS: z.coerce.number().int().min(0).max(3650).default(90),
   AOM_PROJECT_GRAPHS: bool(true),
   LOG_LEVEL: z.string().default('info'),
 });
@@ -190,6 +192,8 @@ export interface Config {
   /** The assistant kill switch (`AOM_ASSISTANT`): `public` only when a key is set and it is not switched off. */
   assistantMode: 'off' | 'public';
   assistantPublicDailyUsd: number;
+  /** Days a persona chat may sit unused before it is removed (0: never). */
+  personaChatRetentionDays: number;
   assistantModelPublic: string;
   /** Send the weekly blog digest (env switch; the super admin's blog settings are a second switch). */
   blogDigest: boolean;
@@ -276,6 +280,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     // Off without a key, whatever the switch says; with a key it is on unless switched off.
     assistantMode: e.ANTHROPIC_API_KEY ? (e.AOM_ASSISTANT ?? 'public') : 'off',
     assistantPublicDailyUsd: e.AOM_ASSISTANT_PUBLIC_DAILY_USD,
+    personaChatRetentionDays: e.AOM_PERSONA_CHAT_RETENTION_DAYS,
     assistantModelPublic: e.AOM_ASSISTANT_MODEL_PUBLIC,
     blogDigest: e.AOM_BLOG_DIGEST,
     diagnosticsConsentForCustomers: e.AOM_DIAGNOSTICS_CONSENT_CUSTOMERS,

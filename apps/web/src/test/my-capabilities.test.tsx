@@ -14,6 +14,7 @@ import { RegistryTab } from '../components/capabilities/RegistryTab.tsx';
 import { RoleOffers } from '../components/capabilities/RoleOffers.tsx';
 import { ToastProvider } from '../components/ui.tsx';
 import { diffLines } from '../lib/diff-lines.ts';
+import { PersonaChat } from '../pages/PersonaChat.tsx';
 
 const WS = '0192f3a0-0000-7000-8000-0000000000a1';
 const PACK = '0192f3a0-0000-7000-8000-0000000000c2';
@@ -705,5 +706,124 @@ describe('chat with a persona', () => {
     await user.click(screen.getByTestId('start-persona-chat'));
     await waitFor(() => expect(screen.getByText('persona chat page')).toBeInTheDocument());
     expect(calls.find((c) => c.url === '/api/persona-chats')?.body).toEqual({ personaKey: 'mine:critic' });
+  });
+
+  it('R3c: starts a chat with an optional budget and time limit, and says how long it is kept', async () => {
+    const user = userEvent.setup();
+    const calls = stub({
+      ...owner,
+      'GET /api/workstations': () => ({ workstations: [] }),
+      'GET /api/capabilities': () => ({
+        items: [
+          {
+            kind: 'persona',
+            key: 'mine:critic',
+            name: 'Critic',
+            description: 'Doubts.',
+            hash: H,
+            source: 'pack',
+            pack: 'mine',
+            overrides: false,
+            usable: true,
+            visibility: 'private',
+          },
+        ],
+        issues: [],
+        indexedAt: null,
+      }),
+      'POST /api/persona-chats': () => ({ session: { threadId: '0192f3a0-0000-7000-8000-0000000000d1' } }),
+    });
+    wrap(<RegistryTab />);
+    await user.click(await screen.findByTestId('chat-with-mine:critic'));
+    expect(await screen.findByText(/removed from your lists/)).toHaveTextContent('90 days');
+    await user.type(screen.getByLabelText('Budget in USD (optional)'), '2.5');
+    await user.type(screen.getByLabelText('Time limit in minutes (optional)'), '45');
+    await user.click(screen.getByTestId('start-persona-chat'));
+    await waitFor(() => expect(screen.getByText('persona chat page')).toBeInTheDocument());
+    expect(calls.find((c) => c.url === '/api/persona-chats')?.body).toEqual({
+      personaKey: 'mine:critic',
+      budgetUsd: 2.5,
+      timeLimitMinutes: 45,
+    });
+  });
+});
+
+describe('the persona chat page: limits (R3c)', () => {
+  const ID = '0192f3a0-0000-7000-8000-0000000000d2';
+  const session = (over: Record<string, unknown> = {}, cost: Record<string, unknown> = {}) => ({
+    threadId: ID,
+    kind: 'persona_chat',
+    title: 'Chat with Critic',
+    projectId: null,
+    facilitatorAgentId: null,
+    workstationId: WS,
+    workstationOnline: true,
+    config: { personaKey: 'mine:critic', budgetUsd: 2, timeLimitMinutes: 60 },
+    createdBy: 'u',
+    createdAt: new Date(Date.now() - 10 * 60_000).toISOString(),
+    lastMessageAt: null,
+    cost: {
+      costMicros: 500_000,
+      costUsd: 0.5,
+      turns: 1,
+      unpricedTurns: 0,
+      budgetUsd: 2,
+      exceeded: false,
+      ...cost,
+    },
+    participants: [
+      { id: 'p1', kind: 'persona', refId: 'mine:critic', displayName: 'Critic', seat: 'Persona' },
+    ],
+    ...over,
+  });
+  const wrapPage = () =>
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <ToastProvider>
+          <MemoryRouter initialEntries={[`/persona-chats/${ID}`]}>
+            <Routes>
+              <Route path="/persona-chats/:id" element={<PersonaChat />} />
+            </Routes>
+          </MemoryRouter>
+        </ToastProvider>
+      </QueryClientProvider>,
+    );
+
+  it('shows what is spent of the budget and the time left, and lets the person change both', async () => {
+    const user = userEvent.setup();
+    const calls = stub({
+      ...owner,
+      [`GET /api/sessions/${ID}/turns`]: () => ({ turns: [] }),
+      [`GET /api/sessions/${ID}`]: () => ({ session: session() }),
+      [`GET /api/threads/${ID}/messages`]: () => ({ messages: [] }),
+      [`PATCH /api/sessions/${ID}`]: () => ({ session: session() }),
+    });
+    wrapPage();
+    expect(await screen.findByTestId('chat-cost')).toHaveTextContent('$0.50 so far of $2.00');
+    expect(screen.getByTestId('chat-time')).toHaveTextContent(/5\d min left/);
+    await user.click(screen.getByText('Limits'));
+    const budget = screen.getByLabelText('Budget in USD');
+    await user.clear(budget);
+    await user.type(budget, '5');
+    await user.clear(screen.getByLabelText('Time limit in minutes'));
+    await user.click(screen.getByTestId('save-limits'));
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({
+        config: { budgetUsd: 5, timeLimitMinutes: null },
+      }),
+    );
+  });
+
+  it('says so when the budget is used up or the time is over', async () => {
+    stub({
+      ...owner,
+      [`GET /api/sessions/${ID}/turns`]: () => ({ turns: [] }),
+      [`GET /api/sessions/${ID}`]: () => ({
+        session: session({}, { exceeded: true, costUsd: 2.4, costMicros: 2_400_000 }),
+      }),
+      [`GET /api/threads/${ID}/messages`]: () => ({ messages: [] }),
+    });
+    wrapPage();
+    expect(await screen.findByTestId('chat-limit-reached')).toHaveTextContent('used its budget of $2.00');
   });
 });

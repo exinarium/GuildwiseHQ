@@ -18,7 +18,7 @@ import {
   sealLarge,
 } from '@aom/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { del, get, post, put } from '../client.ts';
+import { del, get, patch, post, put } from '../client.ts';
 
 export const myPacksKey = ['my-capabilities'] as const;
 
@@ -257,6 +257,17 @@ export function useStartPersonaChat() {
   return useMutation({
     mutationFn: async (b: StartPersonaChatRequest) =>
       (await post<{ session: SessionDto }>('/persona-chats', b)).session,
+  });
+}
+/** Raises, changes or removes a persona chat's budget and time limit (`null` removes one). */
+export function useSetPersonaChatLimits(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { budgetUsd: number | null; timeLimitMinutes: number | null }) =>
+      patch(`/sessions/${id}`, { config: { budgetUsd: v.budgetUsd, timeLimitMinutes: v.timeLimitMinutes } }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['persona-chat', id] });
+    },
   });
 }
 export function useSayToPersona(id: string) {

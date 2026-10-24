@@ -461,5 +461,9 @@ export const StartPersonaChatRequestSchema = z.object({
   effort: z.string().max(40).optional(),
   workstationId: z.uuid().optional(),
   projectId: z.uuid().optional(),
+  /** R3c: an optional budget in USD (the session cost limit: a new message is refused once the chat has cost this much). */
+  budgetUsd: z.number().positive().max(10_000).optional(),
+  /** R3c: an optional time limit in minutes from the start of the chat (a new message is refused after it). */
+  timeLimitMinutes: z.number().int().min(5).max(1440).optional(),
 });
 export type StartPersonaChatRequest = z.infer<typeof StartPersonaChatRequestSchema>;

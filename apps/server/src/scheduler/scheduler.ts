@@ -21,6 +21,7 @@ import type { Ctx } from '../context.ts';
 import { reachabilityTick } from '../delivery/reachability.ts';
 import { pruneMail } from '../mail/inbound/prune.ts';
 import { licensingTick } from '../orgs/licensing.ts';
+import { prunePersonaChats } from '../sessions/persona-chat.ts';
 
 const TICK_MS = 15_000;
 const LICENSING_MS = 5 * 60_000;
@@ -85,6 +86,10 @@ export class Scheduler {
     const next = this.chain.then(async () => {
       // The text of old inbound mail goes after its retention period (mail/inbound/prune.ts).
       await pruneMail(this.ctx).catch((err) => this.ctx.log.error({ err }, 'mail retention failed'));
+      // Persona chats nobody wrote in for 90 days (AOM_PERSONA_CHAT_RETENTION_DAYS) leave the lists (sessions/persona-chat.ts).
+      await prunePersonaChats(this.ctx).catch((err) =>
+        this.ctx.log.error({ err }, 'persona chat retention failed'),
+      );
       return licensingTick(this.ctx);
     });
     this.chain = next.catch(() => {});

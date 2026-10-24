@@ -1352,6 +1352,104 @@ describe('chat with a persona', () => {
     expect((await asOwner('GET', `/api/sessions/${threadId}`)).session.cost).toBeDefined();
   });
 
+  it('R3c: takes an optional budget and time limit, refuses a message past either, and goes on once the limit is raised', async () => {
+    const r = await asOwner(
+      'POST',
+      '/api/persona-chats',
+      {
+        personaKey: 'devils-advocate',
+        runtime: 'mock',
+        model: 'mock',
+        budgetUsd: 0.01,
+        timeLimitMinutes: 30,
+      },
+      201,
+    );
+    const id = r.session.threadId as string;
+    expect(r.session.config).toMatchObject({ budgetUsd: 0.01, timeLimitMinutes: 30 });
+    expect(r.session.cost.budgetUsd).toBe(0.01);
+    // bad limits are refused at the door
+    await asOwner('POST', '/api/persona-chats', { personaKey: 'devils-advocate', budgetUsd: -1 }, 400);
+    await asOwner('POST', '/api/persona-chats', { personaKey: 'devils-advocate', timeLimitMinutes: 1 }, 400);
+    // a first message goes; its answer costs more than the budget
+    await asOwner('POST', `/api/persona-chats/${id}/say`, { body: 'First question' }, 202);
+    const start = await owner.waitFor('chat.start', (f) => f.threadId === id);
+    owner.send('chat.done', {
+      chatId: start.chatId,
+      threadId: id,
+      messageText: 'An answer.',
+      usage: { inputTokens: 2_000_000, outputTokens: 100_000, cacheReadTokens: 0, cacheWriteTokens: 0 },
+    });
+    await until(
+      async () =>
+        (await q(`SELECT 1 FROM shift_costs WHERE kind='session' AND shift_id=$1`, [start.chatId])).length ===
+        1,
+    );
+    // over budget: the next message is refused before it is posted
+    const before = (await asOwner('GET', `/api/threads/${id}/messages`)).messages.length;
+    await w.t
+      .req('POST', `/api/persona-chats/${id}/say`, { cookie: w.owner.cookie, body: { body: 'Second' } })
+      .then((x) => {
+        expect(x.status).toBe(409);
+        expect(x.body.error.code).toBe('session_budget_exceeded');
+      });
+    expect((await asOwner('GET', `/api/threads/${id}/messages`)).messages).toHaveLength(before);
+    // raising the budget (the generic session patch) lets it go on
+    await asOwner('PATCH', `/api/sessions/${id}`, { config: { budgetUsd: 1000 } });
+    await asOwner('POST', `/api/persona-chats/${id}/say`, { body: 'Second' }, 202);
+    const second = await owner.waitFor('chat.start', (f) => f.threadId === id && f.chatId !== start.chatId);
+    owner.send('chat.error', { chatId: second.chatId, threadId: id, error: 'cancelled' });
+    // time: past 30 minutes from the start nothing is taken
+    await q(`UPDATE threads SET created_at = created_at - interval '31 minutes' WHERE id=$1`, [id]);
+    const late = await w.t.req('POST', `/api/persona-chats/${id}/say`, {
+      cookie: w.owner.cookie,
+      body: { body: 'Third' },
+    });
+    expect(late.status).toBe(409);
+    expect(late.body.error.code).toBe('session_time_up');
+    await asOwner('PATCH', `/api/sessions/${id}`, { config: { timeLimitMinutes: null } });
+    await asOwner('POST', `/api/persona-chats/${id}/say`, { body: 'Third' }, 202);
+    const third = await owner.waitFor(
+      'chat.start',
+      (f) => f.threadId === id && f.chatId !== second.chatId && f.chatId !== start.chatId,
+    );
+    owner.send('chat.error', { chatId: third.chatId, threadId: id, error: 'cancelled' });
+  });
+
+  it('R3c: a chat nobody wrote in for 90 days leaves the lists; a recent one and one with a turn in flight stay', async () => {
+    const mk = async () =>
+      (
+        await asOwner(
+          'POST',
+          '/api/persona-chats',
+          { personaKey: 'devils-advocate', runtime: 'mock', model: 'mock' },
+          201,
+        )
+      ).session.threadId as string;
+    const old = await mk();
+    const recent = await mk();
+    await asOwner('POST', `/api/persona-chats/${recent}/say`, { body: 'hello' }, 202);
+    const live = await owner.waitFor('chat.start', (f) => f.threadId === recent);
+    // the clock of the whole test world stays put (sessions would expire): the chats are made older instead
+    await q(`UPDATE threads SET created_at = now() - interval '95 days' WHERE id=$1`, [old]);
+    await q(`UPDATE threads SET created_at = now() - interval '95 days' WHERE id=$1`, [recent]);
+    const { prunePersonaChats } = await import('../src/sessions/persona-chat.ts');
+    expect(await prunePersonaChats(w.t.app.ctx)).toBeGreaterThanOrEqual(1);
+    await ok(w.t.req('GET', `/api/sessions/${old}`, { cookie: w.owner.cookie }), 404);
+    expect((await asOwner('GET', `/api/sessions/${recent}`)).session.threadId).toBe(recent);
+    // the removal is an event with its reason, and a rebuild keeps the chat hidden
+    const ev = await q(
+      `SELECT payload FROM events WHERE type='SessionThreadDeleted' AND payload->>'threadId'=$1`,
+      [old],
+    );
+    expect(ev[0]?.payload).toMatchObject({ reason: 'retention' });
+    await rebuildProjections(w.t.app.ctx.pool, w.t.app.ctx.store, w.t.clock.now());
+    await ok(w.t.req('GET', `/api/sessions/${old}`, { cookie: w.owner.cookie }), 404);
+    // a second pass changes nothing
+    expect(await prunePersonaChats(w.t.app.ctx)).toBe(0);
+    owner.send('chat.error', { chatId: live.chatId, threadId: recent, error: 'cancelled' });
+  });
+
   it('is private to its user: another member, an Admin and another organization cannot read, join or ask', async () => {
     await ok(
       w.t.req('GET', `/api/sessions/${threadId}`, {

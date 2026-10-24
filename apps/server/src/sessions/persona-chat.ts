@@ -21,10 +21,11 @@ import {
   sessionDto,
 } from '../commands/sessions.ts';
 import type { Ctx } from '../context.ts';
-import { one, type Row } from '../db/sql.ts';
+import { one, type Row, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
+import { assertSessionMayQueue } from './cost.ts';
 import { runtimeProblem, runtimeReports } from './offer.ts';
 
 /**
@@ -34,6 +35,53 @@ import { runtimeProblem, runtimeReports } from './offer.ts';
  * model or the one they chose. The persona has no verb at all (`persona_chat: []` in `SESSION_PURPOSE_VERBS`): only `aom skill`
  * (read) and `aom ledger search` (read) are reachable. A private persona resolves for its owner only.
  */
+
+/** The time limit of a persona chat: minutes from its start. Past it, no new message is taken until the limit is raised. */
+export function assertPersonaChatTime(t: Row, now: Date): void {
+  const limit = (t.session_config as { timeLimitMinutes?: number | null } | null)?.timeLimitMinutes;
+  if (!limit) return;
+  const elapsedMin = (now.getTime() - new Date(t.created_at).getTime()) / 60_000;
+  if (elapsedMin >= limit)
+    throw conflict(
+      'session_time_up',
+      `This chat has reached its time limit of ${limit} minutes. Raise the limit to continue.`,
+      { timeLimitMinutes: limit },
+    );
+}
+
+/**
+ * Retention of persona chats (R3c): a chat nobody wrote in for `days` days is removed from every list and query, like a session
+ * its owner deleted (a `SessionThreadDeleted` with reason `retention`; the event log is append-only, see docs/ARCHITECTURE.md
+ * section 38.8). The direct-model runtime's own copy of a chat's memory goes by the runner's `directChatRetentionDays` (90 by
+ * default), the same period. Returns how many chats were removed. Idempotent.
+ */
+export async function prunePersonaChats(ctx: Ctx): Promise<number> {
+  const days = ctx.config.personaChatRetentionDays;
+  if (days <= 0) return 0;
+  const cutoff = new Date(ctx.clock.now().getTime() - days * 86_400_000);
+  const old = await rows(
+    ctx.pool,
+    `SELECT t.id, t.org_id, t.project_id, t.created_by FROM threads t
+      WHERE t.kind='persona_chat' AND t.deleted_at IS NULL AND t.created_at < $1
+        AND COALESCE((SELECT max(m.created_at) FROM thread_messages m WHERE m.thread_id = t.id), t.created_at) < $1
+        AND NOT EXISTS (SELECT 1 FROM session_turns st WHERE st.thread_id = t.id AND st.status IN ('queued','running'))
+      LIMIT 200`,
+    [cutoff],
+  );
+  for (const t of old)
+    await ctx.store.append([
+      {
+        streamId: streamId.thread(t.id),
+        event: {
+          type: 'SessionThreadDeleted',
+          payload: { threadId: t.id, by: t.created_by, reason: 'retention' },
+        },
+        actor: { kind: 'system', id: null },
+        scope: orgScope(t.org_id),
+      },
+    ]);
+  return old.length;
+}
 
 const ASK = 'Answer the person’s latest message in character, concisely unless they ask for more.';
 
@@ -118,7 +166,12 @@ export async function startPersonaChat(
               createdBy: who.userId,
               ...(req.projectId ? { projectId: req.projectId } : {}),
               workstationId,
-              config: { personaKey: persona.key, ...(choice ? { model: choice } : {}) },
+              config: {
+                personaKey: persona.key,
+                ...(choice ? { model: choice } : {}),
+                ...(req.budgetUsd ? { budgetUsd: req.budgetUsd } : {}),
+                ...(req.timeLimitMinutes ? { timeLimitMinutes: req.timeLimitMinutes } : {}),
+              },
             },
           },
           actor: userActor(who.userId),
@@ -144,6 +197,10 @@ export async function sayToPersona(
   if (t.kind !== 'persona_chat') throw badRequest('not_a_persona_chat', 'this is not a persona chat');
   const persona = (await listParticipants(ctx.pool, threadId)).find((p) => p.kind === 'persona');
   if (!persona) throw conflict('persona_gone', 'the persona left this chat');
+  // the chat's own limits (the session cost limit and, for a chat, a time limit from its start), before anything is posted
+  const now = ctx.clock.now();
+  await assertSessionMayQueue(ctx.pool, t, now);
+  assertPersonaChatTime(t, now);
   const message = await postSessionMessage(ctx, userId, threadId, { body, kind: 'chat', data: {} });
   const cfg = (t.session_config ?? {}) as { model?: ModelChoice };
   const turn = await ctx.services.sessions.queue(

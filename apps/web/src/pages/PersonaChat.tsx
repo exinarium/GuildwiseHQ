@@ -3,10 +3,20 @@ import { MessageSquare } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router';
 import { useThreadMessages } from '../api/queries/chats.ts';
-import { usePersonaChat, useSayToPersona } from '../api/queries/my-capabilities.ts';
+import { usePersonaChat, useSayToPersona, useSetPersonaChatLimits } from '../api/queries/my-capabilities.ts';
 import { AgentTurn, UserBubble } from '../components/chat/AgentTurn.tsx';
 import { Composer } from '../components/chat/Composer.tsx';
-import { Badge, Callout, EmptyState, ErrorBox, PageHeader, PageSkeleton } from '../components/ui.tsx';
+import {
+  Badge,
+  Button,
+  Callout,
+  Disclosure,
+  EmptyState,
+  ErrorBox,
+  PageHeader,
+  PageSkeleton,
+  TextInput,
+} from '../components/ui.tsx';
 import { applyActivity, applyDelta, type ChatSegment } from '../lib/chatSegments.ts';
 import { getSocket } from '../ws/socket.ts';
 
@@ -51,6 +61,11 @@ export function PersonaChat() {
       />
     );
   const persona = s.participants.find((p) => p.kind === 'persona');
+  const limitMinutes = typeof s.config.timeLimitMinutes === 'number' ? s.config.timeLimitMinutes : null;
+  const timeLeft =
+    limitMinutes === null
+      ? null
+      : Math.ceil(limitMinutes - (Date.now() - new Date(s.createdAt).getTime()) / 60_000);
   const turns = chat.data?.turns ?? [];
   const busy = turns.some((t) => t.status === 'queued' || t.status === 'running');
   const last = turns[turns.length - 1];
@@ -65,9 +80,29 @@ export function PersonaChat() {
             <Badge>read only</Badge>
             <Badge tone="neutral" data-testid="chat-cost">
               ${s.cost.costUsd.toFixed(2)} so far
+              {s.cost.budgetUsd ? ` of $${s.cost.budgetUsd.toFixed(2)}` : ''}
             </Badge>
+            {timeLeft !== null && (
+              <Badge tone={timeLeft <= 0 ? 'danger' : 'neutral'} data-testid="chat-time">
+                {timeLeft <= 0 ? 'time is up' : `${timeLeft} min left`}
+              </Badge>
+            )}
           </div>
         }
+      />
+      {(s.cost.exceeded || (timeLeft !== null && timeLeft <= 0)) && (
+        <Callout tone="warning" role="status" className="mb-2" data-testid="chat-limit-reached">
+          {s.cost.exceeded
+            ? `This chat has used its budget of $${s.cost.budgetUsd?.toFixed(2)}.`
+            : `This chat has reached its time limit of ${limitMinutes} minutes.`}{' '}
+          Raise the limit below to carry on.
+        </Callout>
+      )}
+      <LimitsForm
+        key={`${s.cost.budgetUsd}-${limitMinutes}`}
+        id={id}
+        budgetUsd={s.cost.budgetUsd}
+        minutes={limitMinutes}
       />
       {!s.workstationOnline && (
         <Callout tone="warning" role="status" className="mb-2">
@@ -126,5 +161,56 @@ export function PersonaChat() {
         />
       </div>
     </div>
+  );
+}
+
+/** The chat's optional budget and time limit: change or remove them (an empty field removes the limit). */
+function LimitsForm({
+  id,
+  budgetUsd,
+  minutes,
+}: {
+  id: string;
+  budgetUsd: number | null;
+  minutes: number | null;
+}) {
+  const set = useSetPersonaChatLimits(id);
+  const [b, setB] = useState(budgetUsd ? String(budgetUsd) : '');
+  const [m, setM] = useState(minutes ? String(minutes) : '');
+  return (
+    <Disclosure summary="Limits" className="mb-2" data-testid="chat-limits">
+      <form
+        className="flex flex-wrap items-end gap-3"
+        onSubmit={(e) => {
+          e.preventDefault();
+          set.mutate({ budgetUsd: b ? Number(b) : null, timeLimitMinutes: m ? Number(m) : null });
+        }}
+      >
+        <TextInput
+          label="Budget in USD"
+          type="number"
+          min="0"
+          step="0.5"
+          value={b}
+          onChange={(e) => setB(e.target.value)}
+        />
+        <TextInput
+          label="Time limit in minutes"
+          type="number"
+          min="5"
+          step="5"
+          value={m}
+          onChange={(e) => setM(e.target.value)}
+        />
+        <Button type="submit" size="sm" loading={set.isPending} data-testid="save-limits">
+          Save limits
+        </Button>
+      </form>
+      <p className="mt-1 text-xs text-muted">
+        The time limit counts from the start of the chat. A chat nobody writes in for 90 days is removed from
+        your lists.
+      </p>
+      <ErrorBox error={set.error} />
+    </Disclosure>
   );
 }
