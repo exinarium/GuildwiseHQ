@@ -8,6 +8,7 @@ import { useEffect, useState } from 'react';
 import { Navigate, useParams, useSearchParams } from 'react-router';
 import { useMe } from '../api/queries/auth.ts';
 import { useIntegrationWorkstations, useWorkstationIntegrations } from '../api/queries/integrations.ts';
+import { AiRuntimeSection } from '../components/integrations/AiRuntimeSection.tsx';
 import { ConnectDialog } from '../components/integrations/ConnectDialog.tsx';
 import { IntegrationTile } from '../components/integrations/IntegrationTile.tsx';
 import { McpSignInList } from '../components/integrations/McpSignInList.tsx';
@@ -240,6 +241,7 @@ export function Integrations() {
                   </div>
                 );
               })}
+              {g.id === 'ai' && <AiRuntimeSection ctx={ctx} focus={focus} openConnect={connectLink} />}
             </div>
           </section>
         ))}

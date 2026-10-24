@@ -615,6 +615,58 @@ account (every 3 minutes, one tiny request). When an account is out, the project
 set on the project; see the [user guide](USER-GUIDE.md). A login that does not work, or was never completed, raises a desk
 notice for the workstation owner with the sign-in link and the terminal command. The notice closes when the account signs in.
 
+### Accounts for Codex, the Gemini CLI and provider keys (0.1.58)
+
+The Claude accounts above are the pattern; the other runtimes and the provider keys follow it. Capability
+`provider-accounts:1`. Per workstation a **main account** plus **named accounts**, for these scopes:
+
+| Scope | Kind | Main account | A named account |
+|---|---|---|---|
+| `claude-code` | login | `~/.claude` (or the token) | see above |
+| `codex` | login | the owner's `loginDir`, else `$CODEX_HOME`, else `~/.codex` | `~/.codex-gw-<key>` (a `CODEX_HOME`) |
+| `gemini` | login | the owner's `loginDir`, else `$GEMINI_CLI_HOME/.gemini`, else `~/.gemini` | `~/.gemini-gw-<key>` (a `GEMINI_CLI_HOME`, the login in its `.gemini`) |
+| `anthropic`, `openai`, `google`, `openai-compatible`, `bedrock`, `vertex`, `gateway` | key | the workstation's own sealed key | a slot of the same sealed store named by the account |
+
+opencode has no accounts of its own: it spends the key of the provider its model names, so its project choice is the key
+account of that provider. The direct-model runtime (chats, discovery and boardroom turns) always uses the main key.
+
+**Login accounts** register in `config.json` (`runtimes.codex.accounts`, `runtimes.gemini.accounts`: `{ "key": "work", "loginDir": "~/.codex-gw-work" }`,
+`loginDir` optional). The runner creates a folder only when the web asks for the sign-in or a key, with mode 0700 and the marker
+`.aom-runner-owned`, and never adopts a folder it did not create (a folder you name in `config.json` is used as it is). Folders inside
+the runner data directory, the main login folder or outside the home are refused. The rest is the Claude machinery: each agent
+gets a private home per account (`agents/<id>/codex-acct-<key>`, `gemini-acct-<key>`), the account's login is copied in for a
+session under the same lock, and a refreshed login goes back to the account's own file only after the same checks (same
+account, no extra keys). The state of every account (login `ok`/`expired`/`none`, usage `ok`/`limited` with the reset time) is
+reported in the runtime's `accounts[]` and kept across restarts in `codex-accounts-state.json` and `gemini-accounts-state.json`.
+A session that ends on an authentication failure marks only its account expired; a usage limit marks only its account limited
+until the reset time (no probe: the account is tried again after the time, and a limit that is still there is hit again). A
+login made in a terminal is noticed by its file changing. The runtime is `available` while any account is usable.
+
+**Sign in from the web** is the integrations flow with the kinds `codex` and `gemini`: `codex login --device-auth` with
+`CODEX_HOME` set to the account's folder (the page shows the link and the one-time code), and the Gemini CLI started with
+`GEMINI_CLI_HOME` set to the account's folder, `NO_BROWSER=true` and `GEMINI_FORCE_FILE_STORAGE=true` and its settings pointing
+at the Google login (the page shows the link and a box for the code). The result is judged by the login files, not by the
+screen text. These are machine-wide logins: the same primary-pairing rule as Claude's applies. Removing a named account unregisters
+it and deletes the login the runner stored in a folder it created; the main login is never removed from the web.
+
+**Key accounts** live in `secrets/providers-accounts.json` (mode 0600; `{ account: { provider: stored } }`) next to the
+workstation's own `providers.json`. The account name is bound into the `h2` associated data as one more element, only when there
+is an account, so the main key's associated data is what it always was and a blob sealed for one account opens for no other
+account, not as the main key, and not as the organization's. Generations and revocation floors are kept per account
+(`~workstation/<account>`). A named account needs the bound form (`h2`); the older forms are refused. At most 20 named accounts
+per workstation. `provider.key.set` and `.clear` carry `account`; the report (`keys[].accounts`, always present, even empty) gives
+the names, and `main: false` says there is only named accounts (no main or organization key) for a provider. A project can also
+choose `org`: the runner then uses the organization's key for that run even where the workstation has its own key (the run is
+booked to the organization and its cap).
+
+**Make main** (`provider.account.promote`) swaps a named account and the main account. Login scopes swap the folders in
+`config.json` (for Gemini the main `loginDir` is the `.gemini` folder and an account names the home that holds it, so the two
+forms are converted); key scopes open both sealed keys and seal them again under their new names with the runner's own key, with
+a new generation. Doing it again undoes it. Claude Code's main account is the machine login or the token and is not swapped.
+
+**Old runners.** A runner without `provider-accounts:1` is told to update (tile "Runner too old"); the server sends it no
+named account and no key command with an account name, and pauses or falls back for a project that names one.
+
 ## Running and connecting
 
 ### Start command

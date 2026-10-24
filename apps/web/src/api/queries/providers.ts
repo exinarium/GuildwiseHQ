@@ -26,6 +26,7 @@ function refreshSoon(qc: ReturnType<typeof useQueryClient>, workstationId: strin
   for (const ms of [800, 2000, 5000]) {
     setTimeout(() => {
       void qc.invalidateQueries({ queryKey: ['workstation-providers', workstationId] });
+      void qc.invalidateQueries({ queryKey: ['ai-runtimes', workstationId] });
       void qc.invalidateQueries({ queryKey: ['workstations'] });
     }, ms);
   }
@@ -38,7 +39,14 @@ function refreshSoon(qc: ReturnType<typeof useQueryClient>, workstationId: strin
 export function useSetProviderKey(workstationId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (v: { provider: ProviderKeyId; key: string; baseUrl?: string; models: string[] }) => {
+    mutationFn: async (v: {
+      provider: ProviderKeyId;
+      key: string;
+      baseUrl?: string;
+      models: string[];
+      /** A NAMED account of the workstation's own key (S-A); absent: the main key. The name is bound into the sealed blob. */
+      account?: string;
+    }) => {
       // Q73: the key's version (seconds since the epoch: a later entry is always higher), bound into the sealed blob; the runner
       // refuses an older one, so a removed or replaced key cannot be put back by replaying its blob
       const generation = Math.floor(Date.now() / 1000);
@@ -61,10 +69,12 @@ export function useSetProviderKey(workstationId: string) {
                 endpoint,
                 generation,
                 keyId: sealed.keyId,
+                ...(v.account ? { account: v.account } : {}),
               }),
             }
           : {}),
         ...(v.key ? { generation } : {}),
+        ...(v.account ? { account: v.account } : {}),
         ...(endpoint ? { baseUrl: endpoint } : {}),
         models: v.models,
       };
@@ -84,10 +94,17 @@ export function useSetPrivateEndpoints(workstationId: string) {
   });
 }
 
+/** Removes the workstation's key of a provider: the main key, or a named account (`{ provider, account }`). */
 export function useRemoveProviderKey(workstationId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (provider: ProviderKeyId) => del(`/workstations/${workstationId}/providers/${provider}`),
+    mutationFn: (v: ProviderKeyId | { provider: ProviderKeyId; account?: string }) => {
+      const provider = typeof v === 'string' ? v : v.provider;
+      const account = typeof v === 'string' ? undefined : v.account;
+      return del(
+        `/workstations/${workstationId}/providers/${provider}${account ? `?account=${encodeURIComponent(account)}` : ''}`,
+      );
+    },
     onSuccess: () => refreshSoon(qc, workstationId),
   });
 }

@@ -62,6 +62,7 @@ This guide is for people who have never worked with AI agents before. You do not
   - [4.23 Integration tests run by the tester](#423-integration-tests-run-by-the-tester)
   - [4.24 When the Claude usage limit is reached](#424-when-the-claude-usage-limit-is-reached)
   - [4.24a Claude accounts per project](#424a-claude-accounts-per-project)
+  - [4.24b AI runtimes and accounts per provider](#424b-ai-runtimes-and-accounts-per-provider)
   - [4.25 How many shifts a workstation runs at once](#425-how-many-shifts-a-workstation-runs-at-once)
   - [4.26 The lean team workflow (code version 6)](#426-the-lean-team-workflow-code-version-6)
   - [4.27 Environments and deploying with a recipe](#427-environments-and-deploying-with-a-recipe)
@@ -1231,6 +1232,36 @@ that works on the project then needs to sign in to that account once. The status
   by itself. Shifts already running finish on the account they started with.
 - **What always uses the main account.** CEO, DevOps and chat work, and BA work that is not about a ticket. Questions and BA
   work on a ticket follow the project's account.
+
+### 4.24b AI runtimes and accounts per provider
+
+**Integrations, AI runtime** (sidebar, Organization; pick the workstation) shows what a workstation can run agents on, one tile
+each: Claude Code, Codex, the Gemini CLI, opencode, and the API providers (Anthropic, OpenAI, Gemini, any OpenAI-compatible
+endpoint, and Claude Code on Amazon Bedrock, Vertex AI or a gateway). A tile tells you:
+
+- whether the program is **installed**, with the command to install it (restart the runner afterwards: it looks for the program when it starts);
+- who is **signed in**, or that the sign-in expired, or that a usage limit holds until a time;
+- whether a **key** is set and whose key is in effect: this workstation's own, or the organization's;
+- **Runner too old**, when the workstation's runner needs an update (0.1.58) to keep accounts.
+
+Each runtime and provider has one **main account** and any number of **named accounts**, per workstation. The actions:
+
+- **Sign in** runs the program's own login on the workstation: Codex shows a link and a code to type there, the Gemini CLI a link and a box for the code it shows, Claude the usual link and code. Every named account keeps its login in a folder of its own, so accounts never mix.
+- **Set key** or **Replace key** encrypts the key in your browser for that workstation's runner (it needs HTTPS or localhost; otherwise the page says so and the button stays off).
+- **Add a named account** takes a short name such as `work` (not `main` or `org`), then signs in or takes the key.
+- **Remove** deletes a named account and the login or key stored for it. The main account's login belongs to the machine and is removed in a terminal.
+- **Make main** swaps a named account with the main account. Nothing is lost, and doing it again undoes it.
+
+**Choosing the account for a project.** The project's settings page has **Accounts for other providers** (and the Claude account
+panel from 4.24a). For each provider you can pick a named account, the main account, or, for an API provider, **the
+organization's key**. The same rules as for Claude apply: the checkbox "If this account is out, use the workstation's main
+account" is off by default, so the project's tickets pause while the account is out; CEO, DevOps and chat work always use the
+main account; shifts already running finish on the account they started with. A named key account is your own key and is not
+capped; the organization's key stays under **Settings, Model providers** and its **monthly cap still applies** when a project
+chooses it.
+
+**Notices.** Per workstation and account, your desk gets a notice when an account a project names needs a sign-in or a key, and
+an information notice when a login account reaches its usage limit. They close by themselves when the account works again.
 
 ### 4.25 How many shifts a workstation runs at once
 

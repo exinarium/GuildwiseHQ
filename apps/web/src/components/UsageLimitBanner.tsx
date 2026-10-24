@@ -9,6 +9,9 @@ export function formatUntil(iso: string, now: Date = new Date()): string {
   return `${d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })} ${hm}`;
 }
 
+/** The runtime whose subscription is out, in words (Claude Code unless the server names another, S-A). */
+const RUNTIME_WORD: Record<string, string> = { codex: 'Codex', gemini: 'Gemini CLI' };
+
 /**
  * Backlog #73: the model subscription's usage limit was hit on the workstation(s) that run this project. Work is paused,
  * not failed, and resumes by itself; nothing for the viewer to do. With per-project Claude accounts
@@ -18,6 +21,7 @@ export function formatUntil(iso: string, now: Date = new Date()): string {
 export function UsageLimitBanner({ limit }: { limit: ProjectDto['usageLimit'] }) {
   if (!limit) return null;
   const account = limit.accountKey && limit.accountKey !== 'main' ? limit.accountKey : null;
+  const who = (limit.scope && RUNTIME_WORD[limit.scope]) || 'Claude';
   if (limit.mode === 'fallback')
     return (
       <Callout
@@ -27,9 +31,9 @@ export function UsageLimitBanner({ limit }: { limit: ProjectDto['usageLimit'] })
         title={`Running on the main account while ${account ?? 'the project account'} is out until ${formatUntil(limit.until)}`}
         className="mb-3"
       >
-        The Claude account {account ? <code className="font-mono">{account}</code> : 'of this project'}{' '}
-        reached its usage limit on {limit.workstationName}. Tickets use the workstation's main account until
-        it resets, then go back by themselves.
+        The {who} account {account ? <code className="font-mono">{account}</code> : 'of this project'} reached
+        its usage limit on {limit.workstationName}. Tickets use the workstation's main account until it
+        resets, then go back by themselves.
       </Callout>
     );
   return (
@@ -42,11 +46,11 @@ export function UsageLimitBanner({ limit }: { limit: ProjectDto['usageLimit'] })
     >
       {account ? (
         <>
-          The Claude account <code className="font-mono">{account}</code> behind this project hit its usage
+          The {who} account <code className="font-mono">{account}</code> behind this project hit its usage
           limit.
         </>
       ) : (
-        'The Claude subscription behind this project hit its usage limit.'
+        `The ${who} subscription behind this project hit its usage limit.`
       )}{' '}
       Cards stay in the queue without penalty and work resumes by itself when the limit resets.
     </Callout>

@@ -22,6 +22,7 @@ import { PhasesPanel } from '../components/PhasesPanel.tsx';
 import { ProjectDangerZone } from '../components/ProjectDangerZone.tsx';
 import { ProjectPolicyPanel } from '../components/ProjectPolicyPanel.tsx';
 import { ProjectWorkflows } from '../components/ProjectWorkflows.tsx';
+import { ProviderAccountPanel } from '../components/ProviderAccountPanel.tsx';
 import { ReferenceReposPanel } from '../components/ReferenceReposPanel.tsx';
 import { RepoAccessControl } from '../components/RepoAccessControl.tsx';
 import { RepoProjectPathControl } from '../components/RepoProjectPathControl.tsx';
@@ -430,6 +431,15 @@ export function ProjectSettings() {
       {project && traits.usesRepos && (
         <div id="claude-account" className="scroll-mt-20">
           <ClaudeAccountPanel
+            projectId={id}
+            project={project}
+            canChange={project.myRole === 'owner' || canConvert}
+          />
+        </div>
+      )}
+      {project && traits.usesRepos && (
+        <div id="provider-accounts" className="scroll-mt-20">
+          <ProviderAccountPanel
             projectId={id}
             project={project}
             canChange={project.myRole === 'owner' || canConvert}

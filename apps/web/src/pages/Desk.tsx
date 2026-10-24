@@ -530,7 +530,8 @@ export function DeskItem({ item, now, bare = false }: { item: DeskItemDto; now?:
       )}
       {(item.subkind === DESK_SUBKIND.claudeAuthExpired ||
         item.subkind === DESK_SUBKIND.mcpNeedsSignIn ||
-        item.subkind === 'claude_account_login') && <SignInFromWeb item={item} />}
+        item.subkind === 'claude_account_login' ||
+        item.subkind === 'provider_account_login') && <SignInFromWeb item={item} />}
       {item.kind === 'rating' && item.interest && (
         <p className="mt-1 text-sm text-muted">
           From the interest{' '}
@@ -635,13 +636,18 @@ function SignInFromWeb({ item }: { item: DeskItemDto }) {
   // A project's Claude account: the key is the last part of `claude_account:<workstation>:<key>`.
   const account =
     item.subkind === 'claude_account_login' ? data?.key?.split(':').slice(2).join(':') : undefined;
+  // Codex, the Gemini CLI or a provider key (S-A): `provider_account:<workstation>:<scope>:<account>`
+  const provider =
+    item.subkind === 'provider_account_login' ? (data?.key?.split(':').slice(2) ?? []) : undefined;
   const focus = mcp
     ? server
       ? focusOf('mcp', server)
       : 'mcp'
-    : account
-      ? focusOf('claude-code', account)
-      : 'claude-code';
+    : provider?.[0]
+      ? focusOf(provider[0], provider[1] && provider[1] !== 'main' ? provider[1] : '')
+      : account
+        ? focusOf('claude-code', account)
+        : 'claude-code';
   return (
     <p className="mt-2 text-sm">
       <Link

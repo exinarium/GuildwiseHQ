@@ -127,9 +127,12 @@ export function ConnectDialog({
   const scope = integrationScope(kind, method.id);
   const block = blockReason(ctx, kind, scope, instance);
   // A named Claude account is a key; leaving it empty would mean the main account, which has its own tile.
+  const byAccount = typeof kind.instances === 'object' && kind.instances.by === 'account';
   const instanceOk =
     validIntegrationInstance(kind, multi ? instance : '') &&
-    !(askInstance && kind.id === 'claude-code' && instance === '');
+    !(askInstance && byAccount && instance === '') &&
+    // `main` and `org` are the names of the main account and the organization's key (S-A): no named account takes them
+    !(askInstance && byAccount && (instance === 'main' || instance === 'org'));
   const missing = (method.fields ?? []).some((f) => f.required && !(values[f.key] ?? '').trim());
   const rState = result.data?.state;
   const checking = stage === 'checking' && !isRequestTerminal(rState);
