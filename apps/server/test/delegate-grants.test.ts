@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { DELEGATE_GRANT_LIMITS, SESSION_TURNS_CAPABILITY, SESSION_VERBS_CAPABILITY } from '@aom/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
+  BACKFILL_SQL,
   DELEGATION_EXPLICIT_MIGRATION,
   migrateDelegationExplicit,
 } from '../src/data-migrations/delegation-explicit.ts';
@@ -540,6 +541,27 @@ describe('the data migration', () => {
       grantsBefore,
     );
     expect(await migrateDelegationExplicit(env)).toBeNull();
+    // the marker was written with the backfill, in the same transaction, and carries its report
+    const marker = (
+      await q('SELECT summary FROM data_migrations WHERE name=$1', [DELEGATION_EXPLICIT_MIGRATION])
+    )[0];
+    expect(
+      JSON.parse(typeof marker.summary === 'string' ? marker.summary : JSON.stringify(marker.summary)),
+    ).toHaveProperty('backfilled');
+  });
+
+  it('finds the events through an index, not by scanning every event payload (finding 19)', async () => {
+    const c = await w.t.app.ctx.pool.connect();
+    try {
+      await c.query('BEGIN');
+      await c.query('SET LOCAL enable_seqscan = off');
+      const plan = (await c.query(`EXPLAIN ${BACKFILL_SQL}`)).rows.map((r) => r['QUERY PLAN']).join('\n');
+      expect(plan).not.toMatch(/Seq Scan on events/);
+      expect(plan).toMatch(/events_stream_id_stream_version_key|Index/);
+    } finally {
+      await c.query('ROLLBACK');
+      c.release();
+    }
   });
 });
 
