@@ -108,18 +108,77 @@ describe('@agent in a card comment', () => {
     expect((await q('SELECT status FROM shifts WHERE id=$1', [start.chatId]))[0]?.status).toBe('ended');
   });
 
-  it('refuses a second mention while an agent is still answering on the card', async () => {
-    await w.hire('Una', 'builder', 'junior');
+  it('runs up to three mentions of one comment side by side and refuses more while they run', async () => {
+    for (const n of ['Una', 'Vic', 'Wes', 'Xan']) await w.hire(n, 'builder', 'junior');
     const card = await w.card();
-    await comment(card.id, '@una first');
-    const start = await r.waitFor('chat.start', (f) => f.threadId === card.id);
-    const second = await comment(card.id, '@una second');
+    const res = await comment(card.id, '@una @vic @wes @xan please look');
+    expect(res.body.mentions.map((m: any) => m.status)).toEqual(['started', 'started', 'started', 'refused']);
+    const starts = [];
+    for (const n of ['Una', 'Vic', 'Wes'])
+      starts.push(await r.waitFor('chat.start', (f) => f.agent.name === n && f.threadId === card.id));
+    // a further comment on the card finds all slots taken
+    const second = await comment(card.id, '@xan and you');
     expect(second.body.mentions[0]).toMatchObject({
       status: 'refused',
       reason: expect.stringContaining('already answering'),
     });
-    answer(start, 'done');
+    for (const s of starts) answer(s, 'done');
+    await until(
+      async () =>
+        (await q(`SELECT count(*)::int AS n FROM card_mentions WHERE status='replied'`))[0]?.n === 3,
+    );
+    // the slots are free again
+    expect((await comment(card.id, '@xan now')).body.mentions[0].status).toBe('started');
+    answer(await r.waitFor('chat.start', (f) => f.agent.name === 'Xan'), 'ok');
+    await until(
+      async () =>
+        (await q(`SELECT count(*)::int AS n FROM card_mentions WHERE status='replied'`))[0]?.n === 4,
+    );
+  });
+
+  it('sends a read-only turn: only the card project is readable, no MCP servers, no write tools', async () => {
+    await w.hire('Una', 'builder', 'junior');
+    const card = await w.card();
+    await comment(card.id, '@una read this');
+    const start = await r.waitFor('chat.start', (f) => f.threadId === card.id);
+    expect(start.agent.permissions.allowedTools.every((t: string) => t === 'read')).toBe(true);
+    expect(start.agent.permissions).toMatchObject({
+      mayCommit: false,
+      writableGlobs: [],
+      browser: false,
+      readOrgRepos: false,
+    });
+    expect(start.context.mcpServers).toBeUndefined();
+    answer(start, 'ok');
     await until(async () => (await q(`SELECT status FROM card_mentions`))[0]?.status === 'replied');
+  });
+
+  it('ends a mention the server lost track of (restart) when the workstation reconnects', async () => {
+    await w.hire('Una', 'builder', 'junior');
+    const card = await w.card();
+    await comment(card.id, '@una hold on');
+    await r.waitFor('chat.start', (f) => f.threadId === card.id);
+    // forget the in-memory run, as a restart does
+    (w.t.app.ctx.services.chat as any).inflight.clear();
+    await w.t.app.ctx.services.chat.recoverMentions(w.workstationId, new Date(Date.now() + 1000));
+    expect((await q(`SELECT status FROM card_mentions`))[0]?.status).toBe('failed');
+    expect(
+      (await thread(card.id)).some((m) => m.kind === 'system' && m.body.includes('server restarted')),
+    ).toBe(true);
+    expect(
+      (await q(`SELECT status FROM shifts WHERE card_id=$1 AND kind='chat'`, [card.id]))[0]?.status,
+    ).toBe('ended');
+  });
+
+  it('answers the mention policy of an agent of another organization as not found', async () => {
+    const agent = await w.hire('Una', 'builder', 'junior');
+    const stranger = await w.t.userSession(`stranger-${Date.now()}@example.test`);
+    expect(
+      (await w.t.req('GET', `/api/agents/${agent.id}/mention-policy`, { cookie: stranger.cookie })).status,
+    ).toBe(404);
+    expect(
+      (await w.t.req('GET', `/api/agents/${agent.id}/mention-policy`, { cookie: w.owner.cookie })).status,
+    ).toBe(200);
   });
 
   it('does not start on a paused project', async () => {

@@ -5,7 +5,15 @@ import type { FakeRunner } from './helpers/fake-runner.ts';
 import { FakeRunner as Runner } from './helpers/fake-runner.ts';
 import { addMember as addProjectMember } from './helpers/members.ts';
 import { freshState } from './helpers/shifts.ts';
-import { createWorld, MOCK_RUNTIME, ok, pairWorkstation, REPO_SSH, until, type World } from './helpers/world.ts';
+import {
+  createWorld,
+  MOCK_RUNTIME,
+  ok,
+  pairWorkstation,
+  REPO_SSH,
+  until,
+  type World,
+} from './helpers/world.ts';
 
 let w: World;
 let r: FakeRunner;
@@ -277,8 +285,10 @@ describe('describe-an-agent hardening', () => {
   it('writes no role when the caller is not on the project (uniform 404, nothing injected into that organization)', async () => {
     const stranger = await w.t.userSession(`stranger-${Date.now()}@example.test`);
     const ws = await pairWorkstation(w.t, stranger, 'stranger-box');
-    const before = (await q(`SELECT count(*)::int AS n FROM role_definitions WHERE key LIKE 'draft-%'`))[0]!.n;
-    const events = (await q(`SELECT count(*)::int AS n FROM events WHERE type='RoleVersionRegistered'`))[0]!.n;
+    const before = (await q(`SELECT count(*)::int AS n FROM role_definitions WHERE key LIKE 'draft-%'`))[0]!
+      .n;
+    const events = (await q(`SELECT count(*)::int AS n FROM events WHERE type='RoleVersionRegistered'`))[0]!
+      .n;
     for (const projectId of [w.projectId, '00000000-0000-4000-8000-000000000001']) {
       const res = await w.t.req('POST', '/api/agents/hire-from-draft', {
         cookie: stranger.cookie,
@@ -286,19 +296,26 @@ describe('describe-an-agent hardening', () => {
       });
       expect(res.status).toBe(404);
     }
-    expect((await q(`SELECT count(*)::int AS n FROM role_definitions WHERE key LIKE 'draft-%'`))[0]!.n).toBe(before);
-    expect((await q(`SELECT count(*)::int AS n FROM events WHERE type='RoleVersionRegistered'`))[0]!.n).toBe(events);
+    expect((await q(`SELECT count(*)::int AS n FROM role_definitions WHERE key LIKE 'draft-%'`))[0]!.n).toBe(
+      before,
+    );
+    expect((await q(`SELECT count(*)::int AS n FROM events WHERE type='RoleVersionRegistered'`))[0]!.n).toBe(
+      events,
+    );
   });
 
   it('leaves no role behind when the hire itself is refused after the role would have been written', async () => {
     await w.hire('Taken', 'builder', 'junior');
-    const before = (await q(`SELECT count(*)::int AS n FROM role_definitions WHERE key LIKE 'draft-%'`))[0]!.n;
+    const before = (await q(`SELECT count(*)::int AS n FROM role_definitions WHERE key LIKE 'draft-%'`))[0]!
+      .n;
     const res = await w.t.req('POST', '/api/agents/hire-from-draft', {
       cookie: w.owner.cookie,
       body: body({ workstationId: w.workstationId }, { name: 'Taken', draft: { ...DRAFT, name: 'Taken' } }),
     });
     expect(res.status).toBe(409);
-    expect((await q(`SELECT count(*)::int AS n FROM role_definitions WHERE key LIKE 'draft-%'`))[0]!.n).toBe(before);
+    expect((await q(`SELECT count(*)::int AS n FROM role_definitions WHERE key LIKE 'draft-%'`))[0]!.n).toBe(
+      before,
+    );
   });
 
   it('refuses skills of the hire request that the hirer may not use', async () => {

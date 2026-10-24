@@ -8,6 +8,7 @@ import {
   capChatSegments,
   chatSegmentsText,
   DIRECT_RUNTIME,
+  MENTION_LIMITS,
   type ModelChoice,
   type ReadRepo,
   type RunnerToServerOf,
@@ -112,6 +113,9 @@ export interface ChatTerminal {
 export class ChatRelay {
   private readonly inflight = new Map<string, Inflight>();
   private readonly byThread = new Map<string, string>();
+  /** Running (or being started) mentions per comment and per card; checked and taken in one synchronous step. */
+  private readonly mentionsByComment = new Map<string, number>();
+  private readonly mentionsByCard = new Map<string, number>();
 
   constructor(private readonly ctx: Ctx) {}
 
@@ -124,8 +128,19 @@ export class ChatRelay {
   }
 
   private release(c: Inflight): void {
-    this.inflight.delete(c.chatId);
+    if (this.inflight.delete(c.chatId) && c.mention) this.releaseMentionSlot(c.mention);
     if (this.byThread.get(c.threadId) === c.chatId) this.byThread.delete(c.threadId);
+  }
+
+  private releaseMentionSlot(m: { commentId: string; cardId: string }): void {
+    for (const [map, key] of [
+      [this.mentionsByComment, m.commentId],
+      [this.mentionsByCard, m.cardId],
+    ] as const) {
+      const n = (map.get(key) ?? 0) - 1;
+      if (n > 0) map.set(key, n);
+      else map.delete(key);
+    }
   }
 
   /** `chat.send` from a browser. Errors are reported on the socket, never thrown. */
@@ -287,15 +302,18 @@ export class ChatRelay {
     // The business analyst never reads code (#47): the Architect investigates the repositories, the BA specifies. A BA chat
     // gets no repository at all, neither the project's, the reference repositories nor a card's worktree.
     const readsCode = row.role_key !== BA_ROLE_KEY && row.role_key !== 'ceo';
+    // A mention (an @agent in a card comment) reads the card's own project only: no reference repositories, no organization
+    // repositories and no MCP servers, whatever the agent's role could otherwise reach (any member's comment can start one).
+    const isMention = !!c.mention;
     const readRepos: ReadRepo[] =
       row.thread_project_id && readsCode
         ? [
             ...(await projectReadRepos(ctx.pool, row.thread_project_id)),
-            ...(await referenceReadRepos(ctx.pool, row.thread_project_id)),
+            ...(isMention ? [] : await referenceReadRepos(ctx.pool, row.thread_project_id)),
           ]
         : [];
     // A role with `readOrgRepos` (the architect) also reads every repository of the organization (read-only).
-    if (readsCode && row.permissions?.readOrgRepos === true) {
+    if (readsCode && !isMention && row.permissions?.readOrgRepos === true) {
       const seen = new Set(readRepos.map((r) => r.repoId));
       for (const r of await orgReadRepos(ctx.pool, row.org_id, userId))
         if (!seen.has(r.repoId)) readRepos.push(r);
@@ -306,9 +324,11 @@ export class ChatRelay {
         : [];
     // A chat with no project yet (an intake chat maps the ticket to a project during the chat) gets the servers granted
     // to the organization's projects this user belongs to; the agent's own mcp:<server> permission still applies.
-    const mcpGranted = row.thread_project_id
-      ? await grantedMcpServers(ctx.pool, row.thread_project_id)
-      : await orgGrantedMcpServers(ctx.pool, row.org_id, userId);
+    const mcpGranted = isMention
+      ? []
+      : row.thread_project_id
+        ? await grantedMcpServers(ctx.pool, row.thread_project_id)
+        : await orgGrantedMcpServers(ctx.pool, row.org_id, userId);
     // The knowledge vault this chat may read (read-only): the project's, else the organization's (Owner/Admin workstations).
     const vault = await vaultForConversation(ctx.pool, {
       orgId: row.org_id,
@@ -343,7 +363,22 @@ export class ChatRelay {
       ...(graph ? { graph } : {}),
       ...(intake ? { intake } : {}),
     };
-    const agentSpec = await agentSpecFor(ctx, row);
+    const baseSpec = await agentSpecFor(ctx, row);
+    // Read-only is enforced in what is sent, not only in the prompt: the tools, writable paths, commits, browser and
+    // organization-wide reads of a mention's turn are cut down to reading the card's project.
+    const agentSpec = isMention
+      ? {
+          ...baseSpec,
+          permissions: {
+            ...baseSpec.permissions,
+            allowedTools: baseSpec.permissions.allowedTools.filter((t) => t === 'read'),
+            writableGlobs: [],
+            mayCommit: false,
+            browser: false,
+            readOrgRepos: false,
+          },
+        }
+      : baseSpec;
     const playbookGrants = c.mention ? [] : await playbookGrantKeys(ctx.pool, agentSpec.agentId);
     const delegation =
       c.mention || agentSpec.isDevops || agentSpec.roleKey === 'ceo'
@@ -878,6 +913,55 @@ export class ChatRelay {
     }
   }
 
+  /**
+   * Mentions the server holds as running but no longer has in memory (it restarted while they ran) are over: the answer
+   * could not be delivered. A system comment says so and the mention ends as failed; the runner is told to drop the turn.
+   */
+  async recoverMentions(workstationId: string, helloAt: Date): Promise<void> {
+    const lost = await rows(
+      this.ctx.pool,
+      `SELECT m.*, a.org_id AS agent_org,
+              (SELECT s.id FROM shifts s WHERE s.card_id = m.card_id AND s.agent_id = m.agent_id
+                  AND s.kind='chat' AND s.status <> 'ended' AND s.started_at >= m.created_at
+                ORDER BY s.started_at LIMIT 1) AS shift_id
+         FROM card_mentions m JOIN agents a ON a.id = m.agent_id
+        WHERE a.workstation_id=$1 AND m.status='running' AND m.created_at <= $2`,
+      [workstationId, helloAt],
+    );
+    const live = new Set(
+      [...this.inflight.values()]
+        .filter((c) => c.mention)
+        .map((c) => (c.mention as { mentionId: string }).mentionId),
+    );
+    for (const m of lost) {
+      if (live.has(m.id)) continue;
+      const c: Inflight = {
+        chatId: (m.shift_id as string | null) ?? randomUUID(),
+        threadId: m.card_id,
+        userId: m.requested_by,
+        orgId: m.org_id,
+        projectId: m.project_id,
+        agentId: m.agent_id,
+        workstationId,
+        startedAt: new Date(m.created_at),
+        mention: { mentionId: m.id, cardId: m.card_id, projectId: m.project_id, commentId: m.comment_id },
+      };
+      if (m.shift_id)
+        this.ctx.services.runners.send(
+          workstationId,
+          'chat.cancel',
+          { chatId: c.chatId },
+          this.ctx.clock.now(),
+        );
+      await this.ctx.store
+        .append([
+          ...(m.shift_id ? [this.shiftEnded(c, 'lost')] : []),
+          ...this.mentionFailed(c, 'the server restarted before the agent answered; ask again'),
+        ])
+        .catch((err) => this.ctx.log.error({ err }, 'failed to end lost mention'));
+    }
+  }
+
   /** A reply to this thread is being written right now (the next message would be refused as busy). */
   isBusy(threadId: string): boolean {
     return this.byThread.has(threadId);
@@ -1050,24 +1134,47 @@ export class ChatRelay {
   }): Promise<{ ok: true; chatId: string } | { ok: false; reason: string }> {
     const { ctx } = this;
     const { card, agent } = a;
+    // A person's chat on the card thread is a single reply at a time; mentions run side by side, up to the per-comment cap.
     if (this.byThread.has(card.id))
       return { ok: false, reason: 'an agent is already answering on this card' };
-    if (await isProjectPaused(ctx.pool, card.project_id))
-      return { ok: false, reason: CHAT_ERROR.projectPaused };
+    // Check and take the slot in one synchronous step (no await in between), so concurrent mentions cannot all pass.
+    const slot = { commentId: a.commentId, cardId: card.id };
+    if (
+      (this.mentionsByComment.get(slot.commentId) ?? 0) >= MENTION_LIMITS.perComment ||
+      (this.mentionsByCard.get(slot.cardId) ?? 0) >= MENTION_LIMITS.perComment
+    )
+      return { ok: false, reason: 'agents are already answering on this card; try again in a moment' };
+    this.mentionsByComment.set(slot.commentId, (this.mentionsByComment.get(slot.commentId) ?? 0) + 1);
+    this.mentionsByCard.set(slot.cardId, (this.mentionsByCard.get(slot.cardId) ?? 0) + 1);
+    const state = { registered: false };
+    try {
+      const refusal = await this.mentionPreflight(card, agent);
+      if (refusal) return { ok: false, reason: refusal };
+      return await this.runMention(a, state);
+    } finally {
+      // Once the turn is in `inflight`, `release` gives the slot back; before that, it is given back here.
+      if (!state.registered) this.releaseMentionSlot(slot);
+    }
+  }
+
+  /** The checks a chat makes at its start; the reason, or undefined when the mention may start. */
+  private async mentionPreflight(card: Row, agent: Row): Promise<string | undefined> {
+    const { ctx } = this;
+    if (await isProjectPaused(ctx.pool, card.project_id)) return CHAT_ERROR.projectPaused;
     const held = await one(
       ctx.pool,
       `SELECT ${budgetPausedSql('p', '$2')} AS held FROM projects p WHERE p.id=$1`,
       [card.project_id, ctx.clock.now()],
     );
-    if (held?.held === true) return { ok: false, reason: 'the project has used its monthly budget' };
+    if (held?.held === true) return 'the project has used its monthly budget';
     if (
       agent.status !== 'active' ||
       !agent.workstation_id ||
       !ctx.services.runners.isOnline(agent.workstation_id)
     )
-      return { ok: false, reason: CHAT_ERROR.workstationOffline };
+      return CHAT_ERROR.workstationOffline;
     if (!(await workstationServesOrg(ctx.pool, agent.workstation_id, agent.org_id)))
-      return { ok: false, reason: CHAT_ERROR.simulationWorkstation };
+      return CHAT_ERROR.simulationWorkstation;
     if (
       await agentCapBlocked(
         ctx.pool,
@@ -1075,7 +1182,16 @@ export class ChatRelay {
         ctx.clock.now(),
       )
     )
-      return { ok: false, reason: CHAT_ERROR.providerCapReached };
+      return CHAT_ERROR.providerCapReached;
+    return undefined;
+  }
+
+  private async runMention(
+    a: { userId: string; card: Row; agent: Row; commentId: string; mentionId: string; prompt: string },
+    state: { registered: boolean },
+  ): Promise<{ ok: true; chatId: string } | { ok: false; reason: string }> {
+    const { ctx } = this;
+    const { card, agent } = a;
     const project = await one(ctx.pool, 'SELECT key FROM projects WHERE id=$1', [card.project_id]);
     const row: Row = {
       ...agent,
@@ -1105,7 +1221,7 @@ export class ChatRelay {
       },
     };
     this.inflight.set(chatId, c);
-    this.byThread.set(card.id, chatId);
+    state.registered = true;
     try {
       await ctx.store.append([
         {

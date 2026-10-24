@@ -26,7 +26,6 @@ import { attachmentRpc } from '../commands/card-attachments.ts';
 import { cardDependRpc, cardFactsRpc } from '../commands/card-facts.ts';
 import { cardBriefRpc, cardGroupRpc } from '../commands/card-group.ts';
 import { syncClaudeAccountNotices } from '../commands/claude-account-notices.ts';
-import { syncProviderAccountNotices } from '../commands/provider-account-notices.ts';
 import { applyAccountEnsureResult, queueMissingAccountEnsures } from '../commands/claude-accounts.ts';
 import { cardMessage, SYSTEM_ACTOR, userScope } from '../commands/common.ts';
 import { designRpc } from '../commands/design-rpc.ts';
@@ -60,6 +59,7 @@ import { applyPersonaReadResult } from '../commands/pack-hire.ts';
 import { applyPackCredentialResult } from '../commands/pack-holders.ts';
 import { applyPacksReport, applyProjectCapabilitiesReport, queuePacksSync } from '../commands/packs.ts';
 import { applyBranchCheckResult } from '../commands/phases.ts';
+import { syncProviderAccountNotices } from '../commands/provider-account-notices.ts';
 import { applyPromoteResult, applyProviderKeyResult } from '../commands/provider-keys.ts';
 import { questionStatus } from '../commands/question-flow.ts';
 import { applyReleasePrResult } from '../commands/release-pr.ts';
@@ -777,9 +777,11 @@ export class RunnerHandlers {
     await syncClaudeAccountNotices(ctx, { id: conn.workstationId, userId: conn.userId }, runtimes).catch(
       () => {},
     );
-    await syncProviderAccountNotices(ctx, { id: conn.workstationId, userId: conn.userId }, runtimes as never).catch(
-      () => {},
-    );
+    await syncProviderAccountNotices(
+      ctx,
+      { id: conn.workstationId, userId: conn.userId },
+      runtimes as never,
+    ).catch(() => {});
     const brief = (
       rs: Array<{
         id: string;
@@ -1001,6 +1003,8 @@ export class RunnerHandlers {
     await this.reconcileCeo(conn, known, helloAt);
     // CEO owner and order turns the runner no longer holds are over; messages that queued meanwhile go out in order.
     await ctx.services.chat.reconcileCeoTurns(conn.workstationId, conn.helloChatIds ?? [], helloAt);
+    // @agent mentions the server lost track of (it restarted while they ran) end as failed, with a comment saying so.
+    await ctx.services.chat.recoverMentions(conn.workstationId, helloAt);
     // Session turns the runner no longer holds go back to the queue; queued ones go out.
     await ctx.services.sessions.onReconnect(conn.workstationId, conn.helloChatIds ?? [], helloAt);
     await announceRestart(ctx, conn.workstationId);

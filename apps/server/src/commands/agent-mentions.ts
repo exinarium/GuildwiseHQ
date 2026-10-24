@@ -174,11 +174,12 @@ export async function handleMentions(
 
 export async function getMentionPolicy(
   ctx: Ctx,
-  _user: AuthSession['user'],
+  user: AuthSession['user'],
   agentId: string,
 ): Promise<MentionPolicy> {
   const a = await one(ctx.pool, 'SELECT org_id FROM agents WHERE id=$1', [agentId]);
-  if (!a) throw notFound('agent not found');
+  // an agent of another organization looks the same as one that does not exist
+  if (!a || !(await orgRoleOf(ctx.pool, user.id, a.org_id))) throw notFound('agent not found');
   const r = await one(ctx.pool, 'SELECT allow_members FROM agent_mention_policy WHERE agent_id=$1', [
     agentId,
   ]);
