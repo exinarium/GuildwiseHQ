@@ -347,6 +347,7 @@ export const RpcMethodSchema = z.enum([
   'delegate.run',
   'delegate.begin',
   'delegate.cost',
+  'delegate.heartbeat',
 ]);
 export type RpcMethod = z.infer<typeof RpcMethodSchema>;
 

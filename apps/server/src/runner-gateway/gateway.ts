@@ -21,6 +21,7 @@ import { sha256Hex } from '../crypto.ts';
 import { one, rows } from '../db/sql.ts';
 import { queueMergeTrigger } from '../delivery/triggers.ts';
 import type { StoredEvent } from '../eventstore/types.ts';
+import { releaseDelegatesOf } from '../sessions/delegate.ts';
 import { enqueueRunnerCommand } from './commands-queue.ts';
 import { RunnerHandlers } from './handlers.ts';
 import type { RunnerConn } from './registry.ts';
@@ -116,6 +117,9 @@ export class RunnerGateway {
         if (!c || this.closing) return;
         if (!ctx.services.runners.remove(c)) return; // superseded
         await ctx.services.chat.workstationLost(c.workstationId);
+        await releaseDelegatesOf(ctx, c.workstationId).catch((err) =>
+          ctx.log.error({ err }, 'failed to release delegate slots'),
+        );
         try {
           await ctx.store.append([
             {

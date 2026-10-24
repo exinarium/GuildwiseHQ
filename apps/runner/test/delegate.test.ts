@@ -30,6 +30,8 @@ interface ScriptOpts {
   usage?: Usage;
   exitCode?: number;
   hang?: boolean;
+  /** Tool calls streamed before the reply (a looping CLI agent), then it hangs until stopped. */
+  toolCalls?: number;
   style?: 'cli' | 'tools';
   providers?: RuntimeCapabilities['providers'];
 }
@@ -74,6 +76,15 @@ function scripted(o: ScriptOpts = {}): RuntimeAdapter & {
             yield { kind: 'exit', code: null, signal: 'SIGTERM' };
             return;
           }
+          if (o.toolCalls) {
+            for (let i = 0; i < o.toolCalls; i++) {
+              yield { kind: 'tool', name: 'Read', summary: `file ${i}` };
+              if (i > 50) break;
+            }
+            await stopped;
+            yield { kind: 'exit', code: null, signal: 'SIGTERM' };
+            return;
+          }
           yield { kind: 'delta', text: (o.reply ?? 'delegate says hi').slice(0, 5) };
           yield { kind: 'usage', usage: o.usage ?? USAGE };
           yield { kind: 'final', text: o.reply ?? 'delegate says hi' };
@@ -88,7 +99,10 @@ function scripted(o: ScriptOpts = {}): RuntimeAdapter & {
   };
 }
 
-function setup(adapters: RuntimeAdapter[], over: { refuse?: string; timeoutMs?: number } = {}) {
+function setup(
+  adapters: RuntimeAdapter[],
+  over: { refuse?: string; timeoutMs?: number; heartbeatMs?: number; maxToolCalls?: number } = {},
+) {
   const root = tmp();
   const paths = runnerPaths(root);
   const handlers: ShiftIpcHandler[] = [];
@@ -121,6 +135,8 @@ function setup(adapters: RuntimeAdapter[], over: { refuse?: string; timeoutMs?: 
     ipc: ipc as never,
     rpc,
     ...(over.timeoutMs ? { timeoutMs: over.timeoutMs } : {}),
+    ...(over.heartbeatMs ? { heartbeatMs: over.heartbeatMs } : {}),
+    ...(over.maxToolCalls ? { maxToolCalls: over.maxToolCalls } : {}),
   });
   return { runner, paths, handlers, revoked, calls, capabilities };
 }
@@ -304,6 +320,30 @@ describe('aom delegate on the runner', () => {
     expect(r.error).toContain('did not finish within');
     const cost = s.calls.find((c) => c.method === 'delegate.cost');
     expect((cost?.params as { outcome: string } | undefined)?.outcome).toBe('timeout');
+  });
+
+  it('stops a CLI-runtime delegate that loops on tools at the turn cap and books it', async () => {
+    const s = setup([scripted({ toolCalls: 20 })], { timeoutMs: 5000, maxToolCalls: 5 });
+    const r = await s.runner.run(CALLER, { persona: 'security', task: 'Loop.' });
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain('5 tool calls');
+    expect(s.calls.some((c) => c.method === 'delegate.cost')).toBe(true);
+  });
+
+  it('does not cap a direct-model delegate by tool events (it has maxSteps)', async () => {
+    const s = setup([scripted({ style: 'tools', reply: 'fine' })], { maxToolCalls: 1 });
+    expect((await s.runner.run(CALLER, { persona: 'security', task: 'Hi.' })).ok).toBe(true);
+  });
+
+  it('sends a heartbeat to the server while the delegate runs, and stops when it ends', async () => {
+    const s = setup([scripted({ hang: true })], { timeoutMs: 400, heartbeatMs: 40 });
+    await s.runner.run(CALLER, { persona: 'security', task: 'Wait.' });
+    const beats = s.calls.filter((c) => c.method === 'delegate.heartbeat');
+    expect(beats.length).toBeGreaterThanOrEqual(3);
+    expect(beats[0]?.params.delegateId).toBeTruthy();
+    const n = beats.length;
+    await new Promise((r) => setTimeout(r, 120));
+    expect(s.calls.filter((c) => c.method === 'delegate.heartbeat').length).toBe(n);
   });
 
   it('stops a running delegate when its caller ends', async () => {

@@ -176,6 +176,41 @@ describe('delegates that are still running', () => {
   });
 });
 
+describe('a stuck delegate slot', () => {
+  const rowOf = async (id: string) =>
+    (await q('SELECT * FROM delegate_begins WHERE delegate_id=$1', [id]))[0];
+  it('is held for the runner limit without a heartbeat, then freed', async () => {
+    const { id, start } = await facilitator({ budgetUsd: 100 });
+    const a = await begin(id);
+    expect(a.ok).toBe(true);
+    // 2 minutes in: still held (an older runner sends no heartbeat)
+    await q(`UPDATE delegate_begins SET begun_at = now() - interval '2 minutes' WHERE delegate_id=$1`, [
+      a.delegateId,
+    ]);
+    expect((await begin(id)).error).toContain('session_budget_pending');
+    await q(`UPDATE delegate_begins SET begun_at = now() - interval '4 minutes' WHERE delegate_id=$1`, [
+      a.delegateId,
+    ]);
+    expect((await begin(id)).ok).toBe(true);
+    expect(await rowOf(a.delegateId)).toBeUndefined();
+    await finish(start);
+  });
+  it('is freed within the heartbeat window once the heartbeats stop, and kept while they come', async () => {
+    const { id, start } = await facilitator({ budgetUsd: 100 });
+    const a = await begin(id);
+    expect((await call(id, 'delegate.heartbeat', { delegateId: a.delegateId })).ok).toBe(true);
+    expect((await rowOf(a.delegateId)).heartbeat_at).toBeTruthy();
+    expect((await begin(id)).error).toContain('session_budget_pending');
+    await q(
+      `UPDATE delegate_begins SET heartbeat_at = now() - interval '${DELEGATE_LIMITS.heartbeatStaleMs / 1000 + 5} seconds' WHERE delegate_id=$1`,
+      [a.delegateId],
+    );
+    expect((await begin(id)).ok).toBe(true);
+    expect((await call(id, 'delegate.heartbeat', { delegateId: 'nope' })).ok).toBe(false);
+    await finish(start);
+  });
+});
+
 describe('delegate.cost books the usage under the caller', () => {
   it('writes DelegateCompleted and a cost row of kind delegate that the session meter counts', async () => {
     const { s, start, id } = await facilitator({ projectId: w.projectId });
@@ -365,6 +400,21 @@ describe('a shift as the caller', () => {
     expect((await begin(shiftId)).ok).toBe(true);
     await q(`UPDATE shifts SET status='ended' WHERE id=$1`, [shiftId]);
     expect((await begin(shiftId)).error).toBe('this shift is over');
+  });
+});
+
+describe('a runner that disconnects', () => {
+  it('frees the slots of its delegates at once', async () => {
+    const { id } = await facilitator({ budgetUsd: 100 });
+    const a = await begin(id);
+    expect(a.ok).toBe(true);
+    expect((await q('SELECT 1 FROM delegate_begins WHERE delegate_id=$1', [a.delegateId])).length).toBe(1);
+    r.close();
+    await until(
+      async () =>
+        (await q('SELECT 1 FROM delegate_begins WHERE delegate_id=$1', [a.delegateId])).length === 0,
+    );
+    r = await w.connectRunner({ capabilities: [SESSION_TURNS_CAPABILITY, SESSION_VERBS_CAPABILITY] });
   });
 });
 

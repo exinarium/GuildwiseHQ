@@ -22,6 +22,15 @@ export const DELEGATE_LIMITS = {
   maxPerCaller: 8,
   /** Model calls a direct-model delegate may make (its tools are `skill_*` and `ledger_search` only). */
   maxSteps: 6,
+  /**
+   * Tool calls a delegate on a CLI runtime (Claude Code, Codex) may make before it is stopped. Claude Code has no max-turns
+   * flag for this, so the runner counts the stream's tool events and kills the process at the cap.
+   */
+  maxToolCalls: 10,
+  /** The runner tells the server every so often that a running delegate is alive (`delegate.heartbeat`). */
+  heartbeatMs: 15_000,
+  /** A delegate whose runner sent a heartbeat and then went quiet this long is taken to be gone (its slot is freed). */
+  heartbeatStaleMs: 45_000,
 } as const;
 
 /** The rpc the caller sends to its runner (CLI verb, direct-model tool). */
@@ -29,8 +38,9 @@ export const DELEGATE_RPC = 'delegate.run';
 /** The runner asks the server before it starts, and reports the usage when the delegate ends. */
 export const DELEGATE_BEGIN_RPC = 'delegate.begin';
 export const DELEGATE_COST_RPC = 'delegate.cost';
+export const DELEGATE_HEARTBEAT_RPC = 'delegate.heartbeat';
 export const isDelegateServerRpc = (m: string): boolean =>
-  m === DELEGATE_BEGIN_RPC || m === DELEGATE_COST_RPC;
+  m === DELEGATE_BEGIN_RPC || m === DELEGATE_COST_RPC || m === DELEGATE_HEARTBEAT_RPC;
 
 export const DelegateRunParamsSchema = z.object({
   persona: z

@@ -53,6 +53,9 @@ export interface DelegateDeps {
   log?: Logger;
   /** Test hook: the wall-clock limit (default `DELEGATE_LIMITS.timeoutMs`). */
   timeoutMs?: number;
+  /** Test hooks: the heartbeat period and the tool-call cap of a CLI-runtime delegate. */
+  heartbeatMs?: number;
+  maxToolCalls?: number;
 }
 
 interface Running {
@@ -197,10 +200,25 @@ export class DelegateRunner {
         void session.stop('delegate.timeout');
       }, this.deps.timeoutMs ?? DELEGATE_LIMITS.timeoutMs);
       timer.unref?.();
+      // tell the server we are alive: a runner that dies frees the slot within seconds, not minutes
+      const beat = setInterval(() => {
+        void this.deps.rpc(caller.id, 'delegate.heartbeat', { delegateId }).catch(() => undefined);
+      }, this.deps.heartbeatMs ?? DELEGATE_LIMITS.heartbeatMs);
+      beat.unref?.();
       try {
-        const r = await readSession(session);
+        const r = await readSession(
+          session,
+          direct ? undefined : (this.deps.maxToolCalls ?? DELEGATE_LIMITS.maxToolCalls),
+          () => {
+            handle.stopped ??= 'turn cap';
+            void session.stop('delegate.turn_cap');
+          },
+        );
         text = r.text;
-        if (handle.stopped === 'timeout') {
+        if (handle.stopped === 'turn cap') {
+          outcome = 'cancelled';
+          error = `the delegate used up its ${this.deps.maxToolCalls ?? DELEGATE_LIMITS.maxToolCalls} tool calls without answering`;
+        } else if (handle.stopped === 'timeout') {
           outcome = 'timeout';
           error = `the delegate did not finish within ${Math.round((this.deps.timeoutMs ?? DELEGATE_LIMITS.timeoutMs) / 1000)} seconds`;
         } else if (handle.stopped) {
@@ -216,6 +234,7 @@ export class DelegateRunner {
         } else outcome = 'ok';
       } finally {
         clearTimeout(timer);
+        clearInterval(beat);
       }
       usage = session.usage() ?? zeroUsage();
     } catch (err) {
@@ -383,7 +402,11 @@ export function renderDelegateInstructions(
 }
 
 /** Reads a session to its end: the reply text (the final text, else all streamed text) and how it exited. */
-async function readSession(session: RuntimeSession): Promise<{
+async function readSession(
+  session: RuntimeSession,
+  maxToolCalls: number | undefined,
+  onCap: () => void,
+): Promise<{
   text: string;
   exit: { code: number | null; error?: string; authFailed?: boolean; usageLimit?: { until: string } };
 }> {
@@ -392,7 +415,9 @@ async function readSession(session: RuntimeSession): Promise<{
   let exit: { code: number | null; error?: string; authFailed?: boolean; usageLimit?: { until: string } } = {
     code: null,
   };
+  let tools = 0;
   for await (const ev of session.events()) {
+    if (ev.kind === 'tool' && maxToolCalls !== undefined && ++tools > maxToolCalls) onCap();
     if (ev.kind === 'delta') streamed += ev.text;
     else if (ev.kind === 'final') final = ev.text;
     else if (ev.kind === 'exit') exit = ev;

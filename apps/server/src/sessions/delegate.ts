@@ -39,7 +39,8 @@ export async function delegateRpc(
   try {
     const caller = await loadCaller(ctx, workstationId, callerId);
     if (!caller) return [false, undefined, 'unknown caller'];
-    if (method === 'delegate.begin') return await begin(ctx, caller, params);
+    if (method === 'delegate.begin') return await begin(ctx, caller, params, workstationId);
+    if (method === 'delegate.heartbeat') return await heartbeat(ctx, params);
     if (method === 'delegate.cost') return await cost(ctx, workstationId, caller, params);
     return [false, undefined, `${method} is not available`];
   } catch (err) {
@@ -66,7 +67,12 @@ async function loadCaller(ctx: Ctx, workstationId: string, id: string): Promise<
   return shift ? { kind: 'shift', row: shift, project: shift.eff_project_id ?? null } : undefined;
 }
 
-async function begin(ctx: Ctx, caller: Caller, params: Record<string, unknown>): Promise<Reply> {
+async function begin(
+  ctx: Ctx,
+  caller: Caller,
+  params: Record<string, unknown>,
+  workstationId: string,
+): Promise<Reply> {
   const p = DelegateBeginParamsSchema.safeParse(params);
   if (!p.success) return [false, undefined, 'invalid delegate request'];
   if (!isKnownChoice(p.data.model)) return [false, undefined, `unknown model "${p.data.model.model}"`];
@@ -108,11 +114,30 @@ async function begin(ctx: Ctx, caller: Caller, params: Record<string, unknown>):
       return [false, undefined, message(err)];
     }
   }
-  return reserve(ctx, caller, p.data.delegateId, now, sessionBudgeted);
+  return reserve(ctx, caller, p.data.delegateId, now, sessionBudgeted, workstationId);
 }
 
-/** A delegate that has not reported its cost this long after it began is taken to be gone (the runner's own limit is shorter). */
-const STALE_MS = DELEGATE_LIMITS.timeoutMs * 3;
+/**
+ * A delegate that has not reported its cost this long after it began is taken to be gone. A runner that sends heartbeats is
+ * held to `heartbeatStaleMs` after the last one; an older runner (no heartbeat) gets its own limit plus a grace period.
+ */
+const STALE_NO_HEARTBEAT_MS = DELEGATE_LIMITS.timeoutMs + 30_000;
+
+/** `delegate.heartbeat`: the runner says the delegate is alive. */
+async function heartbeat(ctx: Ctx, params: Record<string, unknown>): Promise<Reply> {
+  const id = typeof params.delegateId === 'string' ? params.delegateId : '';
+  if (!/^[0-9a-f-]{36}$/i.test(id)) return [false, undefined, 'invalid delegate heartbeat'];
+  await ctx.pool.query('UPDATE delegate_begins SET heartbeat_at=$2 WHERE delegate_id=$1', [
+    id,
+    ctx.clock.now(),
+  ]);
+  return [true, {}];
+}
+
+/** A workstation's runner disconnected: its running delegates are gone, so their slots are freed now. */
+export async function releaseDelegatesOf(ctx: Ctx, workstationId: string): Promise<void> {
+  await ctx.pool.query('DELETE FROM delegate_begins WHERE workstation_id=$1', [workstationId]);
+}
 
 /**
  * Counts what the caller has started, finished or still running, and records this one, in one step under a lock per caller. A
@@ -125,6 +150,7 @@ async function reserve(
   delegateId: string,
   now: Date,
   sessionBudgeted: boolean,
+  workstationId: string,
 ): Promise<Reply> {
   const row = caller.row;
   const threadId: string | null = caller.kind === 'session_turn' ? (row.thread_id ?? null) : null;
@@ -134,8 +160,15 @@ async function reserve(
         ? caller.project
         : ((await one(tx, 'SELECT project_id FROM threads WHERE id=$1', [threadId]))?.project_id ?? null);
     await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`delegate:${row.id}`]);
-    const stale = new Date(now.getTime() - STALE_MS);
-    await tx.query('DELETE FROM delegate_begins WHERE begun_at < $1', [stale]);
+    await tx.query(
+      `DELETE FROM delegate_begins
+        WHERE (heartbeat_at IS NULL AND begun_at < $1)
+           OR (heartbeat_at IS NOT NULL AND heartbeat_at < $2)`,
+      [
+        new Date(now.getTime() - STALE_NO_HEARTBEAT_MS),
+        new Date(now.getTime() - DELEGATE_LIMITS.heartbeatStaleMs),
+      ],
+    );
     if (await one(tx, 'SELECT 1 FROM delegate_begins WHERE delegate_id=$1', [delegateId]))
       return [true, { delegateId }]; // a retried begin is the same delegate
     const used = await one(
@@ -174,9 +207,9 @@ async function reserve(
         'project_budget_pending: a delegate of this project is still running and the project has a budget; try again when it has finished',
       ];
     await tx.query(
-      `INSERT INTO delegate_begins (delegate_id, caller_id, org_id, thread_id, project_id, begun_at)
-       VALUES ($1,$2,$3,$4,$5,$6)`,
-      [delegateId, row.id, row.org_id, threadId, projectId, now],
+      `INSERT INTO delegate_begins (delegate_id, caller_id, org_id, thread_id, project_id, begun_at, workstation_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+      [delegateId, row.id, row.org_id, threadId, projectId, now, workstationId],
     );
     return [true, { delegateId }];
   });
