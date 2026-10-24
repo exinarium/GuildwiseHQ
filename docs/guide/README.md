@@ -58,9 +58,9 @@ Without `AOM_GUIDE_KEEP` the stack is stopped at the end, like in the default e2
 
 ## Recording a video
 
-The training videos (Getting started and one per section) are listed in [`VIDEO-PLAN.md`](VIDEO-PLAN.md). Each is a Playwright spec in `e2e/video/<slug>.spec.ts` that drives a fresh demo stack (organization "Acme", Owner "Alex Morgan", mock agents) while an offline voice (Piper) reads `e2e/video/narration/<slug>.ts`. Output goes to `media/videos/<slug>.{webm,mp4,vtt,json}`.
+The training videos (Getting started and one per section) are listed in [`VIDEO-PLAN.md`](VIDEO-PLAN.md). Each is a Playwright spec in `e2e/video/<slug>.spec.ts` that drives a fresh demo stack (organization "Acme", Owner "Alex Morgan", mock agents) while an offline voice (Kokoro `af_heart`) reads `e2e/video/narration/<slug>.ts`. Output goes to `media/videos/<slug>.{webm,mp4,vtt,json}`.
 
-Once per machine: Postgres on 127.0.0.1:5433 and Mailpit on 1025/8025 (as for `pnpm e2e`), `pnpm build` (the stack runs the built server, web and runner), and `e2e/video/setup-voice.sh` (Piper, the voice and a static ffmpeg into `~/.cache/aom-video`). Rebuild with `pnpm build` after the web app, server or runner changes.
+Once per machine: Postgres on 127.0.0.1:5433 and Mailpit on 1025/8025 (as for `pnpm e2e`), `pnpm build` (the stack runs the built server, web and runner), and `e2e/video/setup-voice.sh` (Kokoro, the `af_heart` voice and a static ffmpeg into `~/.cache/aom-video`). Rebuild with `pnpm build` after the web app, server or runner changes.
 
 **One video**
 
@@ -86,4 +86,4 @@ The defaults are port 4671 and database `aom_onboard_video`. The database is dro
 
 **A new video**: copy `e2e/video/template/slug.spec.ts` to `e2e/video/<slug>.spec.ts` and `e2e/video/narration/slug.ts` to `e2e/video/narration/<slug>.ts`, follow the entry in `VIDEO-PLAN.md`, record it, look at it, then set `published: true` for the slug in `apps/web/src/lib/videos.ts` and commit the spec, the narration and the four files. The Help article, the tour step and the page help of the section then show it; nothing links to a video that is not published.
 
-Shared on the machine, so not parallel-safe beyond what is described: the Piper audio cache (`~/.cache/aom-video/audio`, safe to share: files are written under a private name and renamed), Mailpit, and the Postgres container (each run uses its own database). The finished WebM and MP4 must each stay under 20 MB (the spec fails otherwise).
+Shared on the machine, so not parallel-safe beyond what is described: the voice audio cache (`~/.cache/aom-video/audio`, safe to share: files are written under a private name and renamed), Mailpit, and the Postgres container (each run uses its own database). The finished WebM and MP4 must each stay under 20 MB (the spec fails otherwise).
