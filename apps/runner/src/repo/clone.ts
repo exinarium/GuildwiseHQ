@@ -13,6 +13,7 @@ import {
 import { forgeForUrl } from '../forge/index.ts';
 import { defaultMethodFor, sshGitAuth } from '../forge/ssh.ts';
 import type { ForgeEnv, GitAuth } from '../forge/types.ts';
+import { GIT_HARDEN_ENV, hardenedGitArgs } from '../git/harden.ts';
 import type { Executor } from '../toolchain/exec.ts';
 
 /** `https://github.com/acme/My-App.git` -> `My-App`; null when nothing safe is left. */
@@ -106,10 +107,10 @@ export class RepoCloner {
   }
 
   private git(args: string[], cwd?: string, timeoutMs = 600_000, env: Record<string, string> = {}) {
-    return this.deps.exec.run('git', args, {
+    return this.deps.exec.run('git', hardenedGitArgs(args), {
       ...(cwd ? { cwd } : {}),
       timeoutMs,
-      env: { GIT_TERMINAL_PROMPT: '0', ...env },
+      env: { ...GIT_HARDEN_ENV, ...env },
     });
   }
 

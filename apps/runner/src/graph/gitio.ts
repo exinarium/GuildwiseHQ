@@ -1,5 +1,6 @@
 import { type ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
 import { git } from '../git/git.ts';
+import { GIT_HARDEN_ENV, hardenedGitArgs } from '../git/harden.ts';
 import type { TreeEntry } from './types.ts';
 
 /**
@@ -76,9 +77,9 @@ export class BlobReader {
   private ended = false;
 
   constructor(repoPath: string) {
-    this.child = spawn('git', ['cat-file', '--batch'], {
+    this.child = spawn('git', hardenedGitArgs(['cat-file', '--batch']), {
       cwd: repoPath,
-      env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+      env: { ...process.env, ...GIT_HARDEN_ENV },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     this.child.stdout.on('data', (d: Buffer) => {

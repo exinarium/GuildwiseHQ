@@ -1,6 +1,7 @@
 import { isAbsolute, resolve } from 'node:path';
 import { execa } from 'execa';
 import { clearLockStub } from './config-lock.ts';
+import { GIT_HARDEN_ENV, gitPointerProblem, hardenedGitArgs } from './harden.ts';
 
 export interface GitResult {
   stdout: string;
@@ -33,7 +34,14 @@ const CONFIG_LOCK_ERROR = /could not lock config file|config(\.worktree)?\.lock/
 
 /** Removes the sandbox's `config.lock` stub of the clone `cwd` belongs to; true when one was removed. */
 async function clearConfigLockStub(cwd: string): Promise<boolean> {
-  const r = await execa('git', ['rev-parse', '--git-common-dir'], { cwd, reject: false, stdin: 'ignore' });
+  if (gitPointerProblem(cwd)) return false;
+  const r = await execa('git', hardenedGitArgs(['rev-parse', '--git-common-dir']), {
+    cwd,
+    reject: false,
+    stdin: 'ignore',
+    env: { ...GIT_HARDEN_ENV },
+    extendEnv: true,
+  });
   const out = String(r.stdout ?? '').trim();
   if (r.exitCode !== 0 || !out) return false;
   return clearLockStub(isAbsolute(out) ? out : resolve(cwd, out)).length > 0;
@@ -47,12 +55,15 @@ export const lockRetry = { delaysMs: [100, 250, 500, 1000, 2000] };
  * process held (`.git/config.lock`, `index.lock`, a ref lock) is run again a few times: it changed nothing.
  */
 export async function git(cwd: string, args: string[], opts: GitOptions = {}): Promise<GitResult> {
+  // a worktree whose .git file points somewhere it should not is not a place to run git (docs/RUNNER.md, "the repository's configuration")
+  const pointer = gitPointerProblem(cwd);
+  if (pointer) return { stdout: '', stderr: `refusing to run git: ${pointer}`, exitCode: 128 };
   for (let attempt = 0; ; attempt++) {
-    const r = await execa('git', args, {
+    const r = await execa('git', hardenedGitArgs(args), {
       cwd,
       reject: false,
       stdin: 'ignore',
-      env: { GIT_TERMINAL_PROMPT: '0', ...opts.env },
+      env: { ...GIT_HARDEN_ENV, ...opts.env },
       extendEnv: true,
       ...(opts.timeoutMs ? { timeout: opts.timeoutMs } : {}),
     });

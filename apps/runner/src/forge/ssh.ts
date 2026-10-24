@@ -12,6 +12,7 @@ import {
   settingsHostFor,
   sshHostFor,
 } from '@aom/shared';
+import { GIT_HARDEN_ENV, hardenedGitArgs } from '../git/harden.ts';
 import type { Executor } from '../toolchain/exec.ts';
 import { ensureSshKey, sshKeyPathFor } from './connect.ts';
 import type { GitAuth } from './types.ts';
@@ -207,9 +208,9 @@ export async function checkSsh(
   if (q.repoUrl) {
     const url = isSshRemote(q.repoUrl) ? q.repoUrl : remoteUrlForMethod(q.repoUrl, 'ssh');
     if (!url) return { state: 'unknown', detail: 'The ssh address of this repository cannot be derived.' };
-    const r = await exec.run('git', ['ls-remote', '--exit-code', '--', url, 'HEAD'], {
+    const r = await exec.run('git', hardenedGitArgs(['ls-remote', '--exit-code', '--', url, 'HEAD']), {
       timeoutMs: 60_000,
-      env: { GIT_TERMINAL_PROMPT: '0', GIT_SSH_COMMAND: sshCommandString(ssh, key) },
+      env: { ...GIT_HARDEN_ENV, GIT_SSH_COMMAND: sshCommandString(ssh, key) },
     });
     if (r.exitCode === 0) return { state: 'ok', detail: `git can read ${url} over ssh.` };
     return classifySshOutput(r.exitCode === 128 ? 255 : r.exitCode, `${r.stderr}\n${r.stdout}`, q.host);

@@ -2,6 +2,7 @@ import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { delimiter, dirname, join, relative, resolve, sep } from 'node:path';
 import type { AgentPermissions } from '@aom/shared';
+import { protectedGitPaths } from '../git/harden.ts';
 import { sandboxReadEntries, scanCloneEntries, scanMasksFor, secretReadDenies } from './read-only-dirs.ts';
 
 /**
@@ -339,6 +340,10 @@ function sandboxBlock(
       // vault, or the runner's private state
       denyWrite: [
         ...ctx.gitDirs.flatMap((g) => [join(g, 'hooks'), join(g, 'config')]),
+        // the pointers and the configuration git reads when the runner (or the owner) next runs it in this worktree: the
+        // `.git` file and the worktree's admin entries `commondir`, `gitdir`, `config`, `config.worktree`, `hooks`
+        // (security review, finding 9)
+        ...protectedGitPaths(ctx.cwd),
         ...ctx.addDirs,
         ...readDirs,
         ...runnerPrivate,
@@ -660,7 +665,12 @@ export function buildShiftSettings(
   }
   if (!tools.has('web')) deny.push('WebFetch', 'WebSearch');
   if (!tools.has('shell')) deny.push('Bash');
-  deny.push(...commonDenies(ctx, paths.configDir), `Edit(${ruleAbs(join(ctx.cwd, '.git'))}/**)`);
+  deny.push(
+    ...commonDenies(ctx, paths.configDir),
+    `Edit(${ruleAbs(join(ctx.cwd, '.git'))}/**)`,
+    // the built-in file tools too: the `.git` file itself and the admin entries git reads
+    ...protectedGitPaths(ctx.cwd).flatMap((p) => [`Edit(${ruleAbs(p)})`, `Edit(${ruleAbs(p)}/**)`]),
+  );
   const out: ClaudeSettings = {
     permissions: {
       allow,

@@ -154,7 +154,7 @@ describe('the ssh check', () => {
     });
     const x = new FakeExec([
       [/^ssh -T/, { exitCode: 255, stderr: 'git@ssh.dev.azure.com: Permission denied (publickey).' }],
-      [/^git ls-remote/, { exitCode: 0 }],
+      [/^git (-c \S+ )*ls-remote/, { exitCode: 0 }],
     ]);
     const t = await checkSsh(x, ssh, { provider: 'azure-devops', host: 'dev.azure.com' });
     expect(t.state).toBe('not_authorized');

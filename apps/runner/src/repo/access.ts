@@ -2,6 +2,7 @@ import { normalizeRemoteUrl, parseRemote, type RepoAccessPayload, remoteUrlForMe
 import { forgeForUrl, gitAuthFor, originUrl } from '../forge/index.ts';
 import { defaultMethodFor, sshGitAuth } from '../forge/ssh.ts';
 import type { ForgeEnv } from '../forge/types.ts';
+import { GIT_HARDEN_ENV, hardenedGitArgs } from '../git/harden.ts';
 import type { Executor } from '../toolchain/exec.ts';
 
 export interface RepoAccessResult {
@@ -31,10 +32,10 @@ export class RepoAccessUpdater {
   ) {}
 
   private git(cwd: string, args: string[], env: Record<string, string> = {}) {
-    return this.deps.exec.run('git', args, {
+    return this.deps.exec.run('git', hardenedGitArgs(args), {
       cwd,
       timeoutMs: 60_000,
-      env: { GIT_TERMINAL_PROMPT: '0', ...env },
+      env: { ...GIT_HARDEN_ENV, ...env },
     });
   }
 

@@ -10,6 +10,7 @@ import {
 import { execa } from 'execa';
 import { forgeOfKind } from '../forge/index.ts';
 import type { ForgeEnv } from '../forge/types.ts';
+import { GIT_HARDEN_ENV, hardenedGitArgs } from '../git/harden.ts';
 import { resolveCommitIdentity } from '../git/identity.ts';
 
 /**
@@ -81,12 +82,12 @@ export class RepoCreator {
   }
 
   private git(cwd: string, args: string[], env: Record<string, string> = {}) {
-    return execa('git', args, {
+    return execa('git', hardenedGitArgs(args), {
       cwd,
       reject: false,
       stdin: 'ignore',
       timeout: 120_000,
-      env: { ...process.env, GIT_TERMINAL_PROMPT: '0', ...env },
+      env: { ...process.env, ...GIT_HARDEN_ENV, ...env },
     });
   }
 

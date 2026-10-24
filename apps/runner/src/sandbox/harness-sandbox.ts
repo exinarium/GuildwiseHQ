@@ -2,6 +2,7 @@ import { lstatSync, readlinkSync, statSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { gitAdminDirOf } from '../adapters/codex.ts';
 import { scanMasksFor } from '../adapters/read-only-dirs.ts';
+import { protectedGitPaths } from '../git/harden.ts';
 
 /**
  * An OS sandbox for a whole agent CLI (Gemini CLI, opencode): bubblewrap around the CLI process itself, so the CLI, its tools and
@@ -163,6 +164,13 @@ export function harnessBwrapArgs(i: HarnessSandboxInput): string[] {
       for (const p of [admin, `${common}/objects`, `${common}/refs`, `${common}/logs`]) bind(p, true);
     }
   }
+  // The pointers and the configuration git reads (the worktree's `.git` file, `commondir`, `gitdir`, `config`, `hooks` of its
+  // administrative folder) are read-only in the box whatever else is writable: git runs later outside the box and a
+  // configuration the agent wrote (core.fsmonitor, a hook) would run there (security review, finding 9). A file bound read-only
+  // cannot be replaced or removed either.
+  for (const p of protectedGitPaths(i.cwd))
+    if (inside(i.cwd, p) || i.gitDirs.some((g) => inside(g, p)))
+      mounts.push({ kind: 'ro-bind', src: p, dest: p });
   // parents before children, so a read-only parent never hides a writable child bound earlier
   mounts.sort((a, b) => a.dest.length - b.dest.length);
   const seen = new Set<string>();

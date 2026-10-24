@@ -26,6 +26,7 @@ import {
 } from '@aom/shared';
 import { execa } from 'execa';
 import { git } from '../git/git.ts';
+import { GIT_HARDEN_ENV, hardenedGitArgs } from '../git/harden.ts';
 
 /**
  * The delivery bundle: every file of `<folder>/delivery/` of a project vault, with the owner-executable bit and a content
@@ -77,8 +78,10 @@ export async function readBundleAtCommit(dir: string, folder: string, commit: st
   if (!(await hasCommit(dir, commit)))
     throw new BundleError('no_commit', `commit ${commit.slice(0, 10)} is not in the vault clone`);
   const prefix = `${folder}/${DELIVERY_DIR}`;
-  const ls = await execa('git', ['ls-tree', '-r', '-z', commit, '--', prefix], {
+  const ls = await execa('git', hardenedGitArgs(['ls-tree', '-r', '-z', commit, '--', prefix]), {
     cwd: dir,
+    env: { ...GIT_HARDEN_ENV },
+    extendEnv: true,
     reject: false,
     stdin: 'ignore',
   });
@@ -94,8 +97,10 @@ export async function readBundleAtCommit(dir: string, folder: string, commit: st
     if (type !== 'blob' || mode === '120000')
       throw new BundleError('unsafe', `${path} is a symlink or a submodule: recipes hold plain files only`);
     if (!isSafeVaultPath(`${prefix}/${path}`)) throw new BundleError('unsafe', `unsafe path ${path}`);
-    const blob = await execa('git', ['cat-file', 'blob', oid], {
+    const blob = await execa('git', hardenedGitArgs(['cat-file', 'blob', oid]), {
       cwd: dir,
+      env: { ...GIT_HARDEN_ENV },
+      extendEnv: true,
       encoding: 'buffer',
       stripFinalNewline: false,
       reject: false,
