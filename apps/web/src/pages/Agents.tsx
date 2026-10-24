@@ -49,6 +49,7 @@ import { RecommendationList, RoleUpdates } from '../components/hr/Recommendation
 import { unionExtras } from '../components/ModelSelect.tsx';
 import { SandboxWarning } from '../components/SandboxWarning.tsx';
 import { ShiftClock, ShiftStopControls } from '../components/ShiftStop.tsx';
+import { PlaybookGrants } from '../components/slash/PlaybookGrants.tsx';
 import {
   Avatar,
   Badge,
@@ -441,6 +442,7 @@ function AgentCard({
             : {})}
         />
       )}
+      {!a.isDevops && <PlaybookGrants agentId={a.id} />}
       {a.isDevops ? (
         <div className="mt-auto flex items-center gap-2">
           <Badge tone="violet">DevOps engineer</Badge>

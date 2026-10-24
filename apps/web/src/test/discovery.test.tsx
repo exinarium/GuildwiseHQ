@@ -922,6 +922,8 @@ describe('R2: ownership, limits, archive and hand-off', () => {
     // they can still talk and add notes
     expect(screen.getByPlaceholderText(/Write to the analyst|Answer above/)).toBeInTheDocument();
     expect(screen.getByLabelText('Add to Ideas')).toBeInTheDocument();
+    // the session composer has the / menu of playbooks
+    expect(screen.getByTestId('slash-button')).toBeInTheDocument();
   });
 
   it('treats a state without canManage as manageable (an older server)', async () => {

@@ -70,6 +70,12 @@ describe('ChatPanel', () => {
     expect(screen.queryByTestId('chat-visibility')).toBeNull();
   });
 
+  it('has the / menu of playbooks and skills in the composer', async () => {
+    renderPanel(true);
+    await screen.findByRole('log', { name: 'Conversation' });
+    expect(screen.getByTestId('slash-button')).toBeInTheDocument();
+  });
+
   it('sends over the socket, streams the reply token by token, and clears when it is done', async () => {
     renderPanel(true);
     await screen.findByRole('log', { name: 'Conversation' });

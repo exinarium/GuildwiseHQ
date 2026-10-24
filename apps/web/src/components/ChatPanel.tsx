@@ -299,6 +299,7 @@ export function ChatPanel({
             busy={busy}
             placeholder={name ? `Message ${name}` : 'Message'}
             autoFocus
+            slash={{ context: 'chat' }}
             tools={
               isCeo && ceoState ? (
                 <ModelChip

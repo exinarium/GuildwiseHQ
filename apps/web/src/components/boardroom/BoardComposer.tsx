@@ -50,6 +50,7 @@ export function BoardComposer({
         onStop={() => undefined}
         busy={false}
         placeholder={placeholder}
+        slash={{ context: 'session' }}
       />
     </div>
   );

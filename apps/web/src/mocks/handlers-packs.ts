@@ -185,4 +185,52 @@ export const packHandlers = [
     state.removed = false;
     return HttpResponse.json({ pack: packDto() }, { status: 201 });
   }),
+  // Playbooks as / commands (R3b)
+  http.get(`${A}/slash-commands`, ({ request }) => {
+    const session = new URL(request.url).searchParams.get('context') === 'session';
+    const playbooks = [
+      [
+        'prd',
+        'PRD',
+        'Produce a product requirements document from a brief or a discovery session.',
+        'builtin',
+      ],
+      ['brainstorm', 'Brainstorm', 'Facilitated idea generation that ends in a ranked shortlist.', 'builtin'],
+      [
+        'bmad:create-epics-and-stories',
+        'Create Epics and Stories',
+        'Break a PRD into epics and stories.',
+        'pack',
+      ],
+    ].map(([key, name, description, source]) => ({
+      kind: 'playbook',
+      key,
+      name,
+      description,
+      source,
+      canStartSession: true,
+    }));
+    const skills = session
+      ? []
+      : [
+          {
+            kind: 'skill',
+            key: 'interview-techniques',
+            name: 'Interview techniques',
+            description: 'How to interview an owner, one question at a time.',
+            source: 'builtin',
+            canStartSession: false,
+          },
+        ];
+    return HttpResponse.json({ items: [...playbooks, ...skills] });
+  }),
+  http.post(`${A}/playbooks/run`, () =>
+    HttpResponse.json(
+      { threadId: '00000000-0000-4000-8000-0000000000d9', path: '/discovery' },
+      { status: 201 },
+    ),
+  ),
+  http.get(`${A}/agents/:id/playbook-grants`, ({ params }) =>
+    HttpResponse.json({ agentId: params.id, keys: [], canManage: true }),
+  ),
 ];

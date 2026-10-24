@@ -122,6 +122,7 @@ export function PersonaChat() {
           onStop={() => undefined}
           busy={false}
           placeholder={`Write to ${persona?.displayName ?? 'the persona'}`}
+          slash={{ context: 'chat' }}
         />
       </div>
     </div>

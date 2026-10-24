@@ -22,6 +22,7 @@ import { DiscoveryConversation, type LiveTurn } from '../components/discovery/Di
 import { DraftPanel } from '../components/discovery/DraftPanel.tsx';
 import { PanelNotes } from '../components/discovery/PanelNotes.tsx';
 import { PhaseStepper } from '../components/discovery/PhaseStepper.tsx';
+import { PlaybookSteps } from '../components/discovery/PlaybookSteps.tsx';
 import { ReadOnlyHint } from '../components/session/ReadOnlyHint.tsx';
 import { ArchivedBanner, SessionAdmin } from '../components/session/SessionAdmin.tsx';
 import { TimeWarning } from '../components/session/SessionCountdown.tsx';
@@ -232,6 +233,7 @@ export function DiscoverySession() {
           placeholder={
             s.waitingFor === 'owner' ? 'Answer above, or write to the analyst' : 'Write to the analyst'
           }
+          slash={{ context: 'session', ...(s.projectId ? { projectId: s.projectId } : {}) }}
         />
       )}
     </div>
@@ -277,6 +279,7 @@ export function DiscoverySession() {
         }
       />
       <div className="mb-4 flex flex-col gap-3">
+        {s.config.playbookRun && <PlaybookSteps run={s.config.playbookRun} />}
         <PhaseStepper
           phase={s.config.phase}
           onSelect={readOnly ? undefined : (p) => setPhase.mutate(p)}
