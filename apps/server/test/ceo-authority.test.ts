@@ -172,6 +172,47 @@ describe('card.raise_model', () => {
     expect(res.message).toMatch(/cannot run on Codex/);
     expect((await cardRow(card.id)).model_override).toBeNull();
   });
+
+  it('applies the same role check to the Gemini CLI and opencode, and lets a role they can confine through', async () => {
+    const card = await w.card({ title: 'Gemini for whom?' });
+    const tester = await w.hire(`Tess${Math.random().toString(36).slice(2, 6)}`, 'tester', 'senior');
+    await q('UPDATE cards SET last_agent_id=$2 WHERE id=$1', [card.id, tester.id]);
+    for (const [runtime, model, name] of [
+      ['gemini', 'gemini-2.5-pro', 'Gemini CLI'],
+      ['opencode', 'openai/gpt-5', 'opencode'],
+    ] as const) {
+      const res = result(
+        await act(r, shiftId, 'raise-model', { card: card.ref, model, runtime }, { key: `rm-${runtime}` }),
+      );
+      expect(res.status).toBe('refused');
+      expect(res.message).toContain(`cannot run on ${name}`);
+    }
+    // a builder can run there (shell, edit, no browser)
+    const builder = await w.hire(`Bob${Math.random().toString(36).slice(2, 6)}`, 'builder', 'senior');
+    await q('UPDATE cards SET last_agent_id=$2 WHERE id=$1', [card.id, builder.id]);
+    const ok1 = result(
+      await act(
+        r,
+        shiftId,
+        'raise-model',
+        { card: card.ref, model: 'gemini-2.5-pro', runtime: 'gemini' },
+        { key: 'rm-gemini-ok' },
+      ),
+    );
+    expect(ok1.status).toBe('executed');
+    // a Bedrock model is fine for a builder too
+    const bedrock = result(
+      await act(
+        r,
+        shiftId,
+        'raise-model',
+        { card: card.ref, model: 'bedrock:us.anthropic.claude-opus-5-5', runtime: 'claude-code' },
+        { key: 'rm-bedrock' },
+      ),
+    );
+    expect(bedrock.status).toBe('executed');
+    await q(`UPDATE agents SET status='retired' WHERE id = $1`, [builder.id]);
+  });
 });
 
 /** Parks a card for its stop-loss through the real function and returns the new item. */

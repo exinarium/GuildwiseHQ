@@ -209,6 +209,53 @@ describe('which key a choice spends', () => {
   });
 });
 
+describe('resolution order of provider keys: workstation key, then the organization’s own key, then none', () => {
+  const A = '11111111-1111-4111-8111-111111111111';
+  const B = '22222222-2222-4222-8222-222222222222';
+  const reports = (key: object) => [{ id: 'direct-model', keys: [key] }] as never;
+  it('a workstation key is in effect whatever organization asks, and is not the organization’s', () => {
+    const r = reports({ provider: 'openai', source: 'workstation', orgKey: true, orgIds: [A] });
+    expect(choiceKeyUse(r, { runtime: 'direct-model', model: 'openai:gpt-5' }, A)).toEqual({
+      provider: 'openai',
+      source: 'workstation',
+    });
+    expect(choiceKeyUse(r, { runtime: 'direct-model', model: 'openai:gpt-5' }, B)).toEqual({
+      provider: 'openai',
+      source: 'workstation',
+    });
+  });
+  it('an organization key counts only for its own organization', () => {
+    const r = reports({ provider: 'openai', source: 'org', orgKey: true, orgIds: [A] });
+    expect(choiceKeyUse(r, { runtime: 'direct-model', model: 'openai:gpt-5' }, A)).toEqual({
+      provider: 'openai',
+      source: 'org',
+    });
+    expect(choiceKeyUse(r, { runtime: 'direct-model', model: 'openai:gpt-5' }, B)).toBeNull();
+    // an older runner reports no organizations: the key is taken as the one there is
+    expect(
+      choiceKeyUse(
+        reports({ provider: 'openai', source: 'org' }),
+        { runtime: 'direct-model', model: 'openai:gpt-5' },
+        B,
+      ),
+    ).toEqual({ provider: 'openai', source: 'org' });
+  });
+  it('a provider with no key at all is none, and a Claude Code backend resolves like any other key', () => {
+    expect(
+      choiceKeyUse(
+        reports({ provider: 'openai', source: 'workstation' }),
+        { runtime: 'direct-model', model: 'google:gemini-2.5-pro' },
+        A,
+      ),
+    ).toBeNull();
+    const r = reports({ provider: 'bedrock', source: 'org', orgIds: [A] });
+    expect(
+      choiceKeyUse(r, { runtime: 'claude-code', model: 'bedrock:us.anthropic.claude-sonnet-4-6' }, A),
+    ).toEqual({ provider: 'bedrock', source: 'org' });
+    expect(choiceKeyUse(r, { runtime: 'claude-code', model: 'sonnet' }, A)).toBeNull();
+  });
+});
+
 describe('cost of the harness runtimes', () => {
   const t = { inputTokens: 1_000_000, outputTokens: 1_000_000 };
   it('prices Gemini 2.5 from Google list prices and the newer ones as unknown', () => {
