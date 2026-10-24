@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
+  applyPlaybookStep,
   DISCOVERY_PURPOSE_VERBS,
   type DiscoveryConfig,
   type PanelSection,
@@ -14,6 +15,8 @@ import {
   SessionPhaseParamsSchema,
   SessionProposeParamsSchema,
   type SessionRpcMethod,
+  SessionStepParamsSchema,
+  stepLabel,
   SessionValidateParamsSchema,
   streamId,
 } from '@aom/shared';
@@ -86,6 +89,8 @@ export async function sessionVerb(
           return await draft(ctx, svc, fresh, cfg, turn, params);
         case 'validate':
           return await validate(ctx, fresh, cfg, params);
+        case 'step':
+          return await step(ctx, fresh, cfg, turn, params);
         default:
           return [false, undefined, `unknown verb ${verb}`];
       }
@@ -389,6 +394,37 @@ async function phase(
     },
   ]);
   return [true, { message: `Phase is now ${p.data.to}. The owner can override it.` }];
+}
+
+/** `aom session step <n>`: a playbook session's facilitator says which step it starts; the page shows "Step 2 of 6". */
+async function step(
+  ctx: Ctx,
+  t: Row,
+  cfg: DiscoveryConfig,
+  turn: Row,
+  params: Record<string, unknown>,
+): Promise<Reply> {
+  if (!cfg.playbookRun) return [false, undefined, 'this session does not run a playbook'];
+  const p = SessionStepParamsSchema.safeParse(params);
+  if (!p.success)
+    return [
+      false,
+      undefined,
+      `usage: aom session step <n> [--title "<step title>"] [--total <steps>] (${zodText(p.error.issues)})`,
+    ];
+  const r = applyPlaybookStep(cfg.playbookRun, p.data);
+  if (!r.ok) return [false, undefined, r.error];
+  const same = cfg.playbookRun.step === r.state.step && cfg.playbookRun.stepTitle === r.state.stepTitle;
+  if (!same)
+    await ctx.store.append([
+      {
+        streamId: streamId.thread(t.id),
+        event: { type: 'SessionThreadUpdated', payload: { threadId: t.id, config: { playbookRun: r.state } } },
+        actor: actorOf(turn),
+        scope: sessionScope(t),
+      },
+    ]);
+  return [true, { message: `${stepLabel(r.state)}. The owner sees it on the session page.` }];
 }
 
 async function draft(

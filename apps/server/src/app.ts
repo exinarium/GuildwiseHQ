@@ -66,6 +66,7 @@ import { blogPlatformRoutes } from './routes/blog-platform.ts';
 import { blogPublicRoutes } from './routes/blog-public.ts';
 import { boardRoutes } from './routes/board.ts';
 import { capabilityRoutes } from './routes/capabilities.ts';
+import { playbookRoutes } from './routes/playbooks.ts';
 import { cardAttachmentRoutes } from './routes/card-attachments.ts';
 import { cardRoutes } from './routes/cards.ts';
 import { catalogueRoutes } from './routes/catalogue.ts';
@@ -420,6 +421,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   await app.register(boardRoutes(ctx));
   await app.register(documentRoutes(ctx));
   await app.register(capabilityRoutes(ctx));
+  await app.register(playbookRoutes(ctx));
   await app.register(packRoutes(ctx));
   await app.register(intakeBatchRoutes(ctx));
   await app.register(hrRoutes(ctx));

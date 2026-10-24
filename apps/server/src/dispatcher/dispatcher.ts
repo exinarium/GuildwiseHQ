@@ -13,6 +13,7 @@ import type { StoredEvent } from '../eventstore/types.ts';
 import { platformPass } from '../platform-team/detectors.ts';
 import { agentCapBlocked, type ProviderCapState } from '../provider-keys/caps.ts';
 import { buildShiftStart } from '../runner-gateway/brief.ts';
+import { playbookGrantKeys } from '../sessions/playbooks.ts';
 import { wsServesOrgSql } from '../simulation/fit.ts';
 import { accountFor, loadProjectAccounts, runtimeUsable, accountScope as scopeOf } from './accounts.ts';
 import { baTaskPass } from './ba-tasks.ts';
@@ -391,7 +392,9 @@ export class Dispatcher {
   async sendShiftStart(c: ClaimResult): Promise<boolean> {
     const built = await buildShiftStart(this.ctx, c);
     if (!built) return false;
-    const payload = await withCommitAs(this.ctx, built);
+    const withCommit = await withCommitAs(this.ctx, built);
+    const playbookGrants = await playbookGrantKeys(this.ctx.pool, withCommit.agent.agentId);
+    const payload = playbookGrants.length ? { ...withCommit, playbookGrants } : withCommit;
     const sent = this.ctx.services.runners.send(
       c.workstationId,
       'shift.start',

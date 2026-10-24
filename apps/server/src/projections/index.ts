@@ -30,6 +30,7 @@ import { ledgerProjectors } from './ledger.ts';
 import { orgProjectors } from './orgs.ts';
 import { outboundProjectors } from './outbound.ts';
 import { packProjectors } from './packs.ts';
+import { playbookProjectors } from './playbooks.ts';
 import { phaseProjectors } from './phases.ts';
 import { platformProjectors } from './platform.ts';
 import { platformAuditProjectors } from './platform-audit.ts';
@@ -111,6 +112,7 @@ const domains: Array<Record<string, Projector>> = [
   documentProjectors,
   capabilityProjectors,
   packProjectors,
+  playbookProjectors,
 ];
 
 /**
@@ -267,6 +269,7 @@ export const PROJECTION_TABLES = [
   'pack_workstation_state',
   'pack_assignments',
   'pack_agent_grants',
+  'agent_playbook_grants',
   'role_pack_offers',
   'project_capability_index',
   'project_capability_status',

@@ -124,6 +124,7 @@ import { pinForWelcome } from '../platform-team/pins.ts';
 import { platformTriageRpc } from '../platform-team/rpc.ts';
 import { applyRunUsage } from '../provider-keys/live-usage.ts';
 import { delegateRpc } from '../sessions/delegate.ts';
+import { playbookRunRpc } from '../sessions/playbooks.ts';
 import type { SessionTerminal } from '../sessions/turns.ts';
 import { buildBrief } from './brief.ts';
 import { claimPendingCommands, completeCommand, requeueSentCommands } from './commands-queue.ts';
@@ -1331,6 +1332,9 @@ export class RunnerHandlers {
       ]);
       if (!shift) return reply(false, undefined, 'unknown shift');
       if (msg.method === 'ledger.search') return reply(true, await ledgerSearchRpc(ctx, shift, msg.params));
+      // `aom playbook run`: a guided session for the agent's manager, only for a playbook the agent was granted.
+      if (msg.method === 'playbook.run')
+        return reply(...(await playbookRunRpc(ctx, conn.workstationId, shift, msg.params)));
       if (msg.method === 'ledger.retire') return reply(...(await ledgerRetireRpc(ctx, shift, msg.params)));
       if (msg.method === 'platform.triage')
         return reply(...(await platformTriageRpc(ctx, shift, msg.params)));

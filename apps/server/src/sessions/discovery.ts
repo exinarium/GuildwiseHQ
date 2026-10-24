@@ -25,6 +25,7 @@ import {
   PANEL_SECTIONS,
   type PanelSection,
   type PatchDiscoveryRequest,
+  type PlaybookRunState,
   type PromptDoc,
   type PromptNote,
   type PromptPlaybook,
@@ -233,7 +234,13 @@ export class DiscoveryService {
 
   // ----------------------------------------------------------------------------------------------- creating and reading
 
-  async create(who: Who, req: CreateDiscoveryRequest, seed?: DiscoverySeed): Promise<DiscoveryStateDto> {
+  async create(
+    who: Who,
+    req: CreateDiscoveryRequest,
+    seed?: DiscoverySeed,
+    /** R3b: a guided playbook session (the caller checked that the playbook is usable and visible to the owner). */
+    run?: PlaybookRunState,
+  ): Promise<DiscoveryStateDto> {
     const { ctx } = this;
     let ceo: Row | undefined;
     if (req.ceoMode !== 'owner_only') {
@@ -247,7 +254,7 @@ export class DiscoveryService {
     if (req.model && !isKnownChoice(req.model))
       throw badRequest('unknown_model', 'unknown model choice for the facilitator');
     // A playbook or template of an imported pack must be usable now (the pack approved at its pinned commit, files unchanged).
-    if (isPackedKey(req.playbook) || req.templateKey) {
+    if (!run && (isPackedKey(req.playbook) || req.templateKey)) {
       const reg = await effectiveRegistry(ctx.pool, who.orgId, {
         kind: 'playbook',
         usableOnly: true,
@@ -285,6 +292,7 @@ export class DiscoveryService {
       ...(seed ? { prdDocId: seed.prdDocId } : {}),
       ceoMode: req.ceoMode,
       playbook: req.playbook,
+      ...(run ? { playbookRun: run } : {}),
       ...(req.templateKey ? { templateKey: req.templateKey } : {}),
       idea: req.idea,
       paused: false,
@@ -358,12 +366,24 @@ export class DiscoveryService {
       steps: [],
       assets: [],
     });
-    if (isPackedKey(cfg.playbook) && cfg.phase !== 'stress_test' && !(cfg.phase === 'capture' && tpl))
+    // A guided playbook session follows its own playbook in every phase (the phases are labels there); a playbook that is not
+    // built in (a pack's, the vault's, a project's) is loaded by the facilitator.
+    if (cfg.playbookRun) {
+      const own = builtinCapabilities().find((c) => c.kind === 'playbook' && c.key === cfg.playbook);
+      if (!own) return { playbook: external(cfg.playbook, 'playbook'), draftKind };
+    }
+    if (
+      !cfg.playbookRun &&
+      isPackedKey(cfg.playbook) &&
+      cfg.phase !== 'stress_test' &&
+      !(cfg.phase === 'capture' && tpl)
+    )
       return { playbook: external(cfg.playbook, 'playbook'), draftKind };
     if (tpl && (cfg.phase === 'capture' || trigger.kind === 'draft'))
       return { playbook: external(tpl, 'template'), draftKind };
-    const key =
-      cfg.phase === 'stress_test'
+    const key = cfg.playbookRun
+      ? cfg.playbook
+      : cfg.phase === 'stress_test'
         ? 'advanced-elicitation'
         : cfg.phase === 'capture'
           ? draftKind === 'brief'
@@ -612,6 +632,7 @@ export class DiscoveryService {
       proposals: facts.pp,
       docs: facts.pd,
       playbook,
+      ...(cfg.playbookRun ? { playbookRun: { ...cfg.playbookRun, input: cfg.idea } } : {}),
       draftKind,
       ceoPrep: cfg.ceoPrep,
       persona: await this.personaPrompt(t.org_id, 'analyst'),

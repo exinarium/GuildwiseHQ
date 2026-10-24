@@ -173,6 +173,7 @@ export async function discoveryState(
       ceoPrep: cfg.ceoPrep,
       intakeId: cfg.intakeId,
       prdValidation: cfg.prdValidation,
+      playbookRun: cfg.playbookRun,
     },
     progress: discoveryProgress(cfg, now),
     time: discoveryTime(cfg, now),

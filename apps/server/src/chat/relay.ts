@@ -47,6 +47,7 @@ import { agentSpecFor } from '../runner-gateway/brief.ts';
 import { orgReadRepos, projectReadRepos, referenceReadRepos } from '../runner-gateway/read-repos.ts';
 import { localReadRepos } from '../runner-gateway/workstation-repos.ts';
 import { runtimeProblem, runtimeReports } from '../sessions/offer.ts';
+import { playbookGrantKeys } from '../sessions/playbooks.ts';
 import { workstationServesOrg } from '../simulation/fit.ts';
 import {
   backstopJobEvents,
@@ -310,16 +311,19 @@ export class ChatRelay {
         ...(graph ? { graph } : {}),
         ...(intake ? { intake } : {}),
       };
+      const agentSpec = await agentSpecFor(ctx, row);
+      const playbookGrants = await playbookGrantKeys(ctx.pool, agentSpec.agentId);
       const sent = ctx.services.runners.send(
         row.workstation_id,
         'chat.start',
         {
           chatId,
           threadId: msg.threadId,
-          agent: await agentSpecFor(ctx, row),
+          agent: agentSpec,
           message: msg.body,
           ...(prior?.sid ? { resumeSessionId: prior.sid as string } : {}),
           context,
+          ...(playbookGrants.length ? { playbookGrants } : {}),
         },
         ctx.clock.now(),
       );
