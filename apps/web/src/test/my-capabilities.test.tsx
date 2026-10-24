@@ -647,6 +647,8 @@ describe('chat with a persona', () => {
     // no chat with a persona that cannot be used
     expect(screen.queryByTestId('chat-with-crew:locked')).not.toBeInTheDocument();
     await user.click(screen.getByTestId('chat-with-mine:critic'));
+    expect(await screen.findByLabelText('Model')).toHaveValue('');
+    await user.click(screen.getByTestId('start-persona-chat'));
     await waitFor(() => expect(screen.getByText('persona chat page')).toBeInTheDocument());
     expect(calls.find((c) => c.url === '/api/persona-chats')?.body).toEqual({ personaKey: 'mine:critic' });
   });

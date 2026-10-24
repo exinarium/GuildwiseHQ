@@ -1031,11 +1031,19 @@ function hostOfUrl(url: string): string {
   }
 }
 
-/** A git error without a URL that may carry a token, nor any registered secret, cut short. */
+/**
+ * A git error for the admin: git's own words (stderr, without the banner lines ssh draws), without a URL that may carry a token or
+ * any registered secret, cut short.
+ */
 function scrub(err: unknown): string {
-  const m = redact(
-    (err instanceof Error ? err.message : String(err)).replace(/https?:\/\/[^\s/@]+@/g, 'https://'),
-  );
+  const stderr =
+    typeof (err as { stderr?: unknown })?.stderr === 'string' ? (err as { stderr: string }).stderr : '';
+  const raw = stderr.trim() || (err instanceof Error ? err.message : String(err));
+  const lines = raw
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l && !/^@+$/.test(l));
+  const m = redact(lines.join('\n').replace(/https?:\/\/[^\s/@]+@/g, 'https://'));
   return m.split('\n').slice(0, 3).join(' ').slice(0, 480);
 }
 

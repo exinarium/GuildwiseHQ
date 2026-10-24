@@ -13,7 +13,7 @@ import {
   sealLarge,
 } from '@aom/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { replayVisible } from '../src/browser-gateway/visibility.ts';
+import { replayVisible, sessionAudienceOf, sessionLevel } from '../src/browser-gateway/visibility.ts';
 import { rebuildProjections } from '../src/projections/rebuild.ts';
 import { uniqueEmail } from './helpers/app.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
@@ -310,6 +310,25 @@ describe('authored private packs: only the owner sees them', () => {
     p = (await asMember('GET', '/api/my-capabilities')).packs[0];
     expect(p.state).toBe('private');
     expect((await asOwner('GET', '/api/packs')).packs.map((x: { id: string }) => x.id)).not.toContain(id);
+  });
+});
+
+describe('private packs and the agents of the workstation', () => {
+  it('serves a private pack to a card shift only when its owner granted that agent, and takes it back on revoke', async () => {
+    const agent = await w.hire(`Gr${Math.random().toString(36).slice(2, 6)}`, 'reviewer', 'senior');
+    const mine = await asOwner('POST', '/api/my-capabilities', { name: 'ownerpriv', visibility: 'private', workstationId: w.workstationId }, 201);
+    const id = mine.pack.id as string;
+    await until(async () => syncOf(owner).some((p) => p.packId === id));
+    expect((syncOf(owner).find((p) => p.packId === id) as { grantedAgentIds: string[] }).grantedAgentIds).toEqual([]);
+    await asOwner('PUT', `/api/my-capabilities/${id}/agents`, { agentId: agent.id, granted: true }, 204);
+    await until(async () => (syncOf(owner).find((p) => p.packId === id) as { grantedAgentIds: string[] } | undefined)?.grantedAgentIds?.includes(agent.id) === true);
+    // only an agent of this workstation, and only for a private pack
+    const m = await asMember('POST', '/api/my-capabilities', { name: 'mempriv', visibility: 'private', workstationId: memberWs }, 201);
+    await asMember('PUT', `/api/my-capabilities/${m.pack.id}/agents`, { agentId: agent.id, granted: true }, 404);
+    await asOwner('PUT', `/api/my-capabilities/${id}/agents`, { agentId: agent.id, granted: false }, 204);
+    await until(async () => (syncOf(owner).find((p) => p.packId === id) as { grantedAgentIds: string[] } | undefined)?.grantedAgentIds?.length === 0);
+    await asOwner('DELETE', `/api/my-capabilities/${id}`, undefined, 204);
+    await asMember('DELETE', `/api/my-capabilities/${m.pack.id}`, undefined, 204);
   });
 });
 
@@ -1221,8 +1240,15 @@ describe('chat with a persona', () => {
     );
     const mine = replay.filter((e) => e.streamId === `thread-${threadId}`);
     expect(mine.length).toBeGreaterThan(0);
-    const { toVisibleEvent } = await import('../src/browser-gateway/visibility.ts');
-    void toVisibleEvent;
+    const viewer = { userId: admin[0]?.id, kind: 'user', orgId: w.owner.id, orgRole: 'admin', visibleProjectIds: new Set<string>() } as never;
+    const levels = new Set<string | false>();
+    for (const e of mine) levels.add(sessionLevel('full', viewer, e, await sessionAudienceOf(w.t.app.ctx.pool, e)));
+    // the Admin is not in the chat: every event of it reaches them without its content
+    expect([...levels]).toEqual(['stripped']);
+    const ownerViewer = { userId: w.owner.id, kind: 'user', orgId: w.owner.id, orgRole: 'owner', visibleProjectIds: new Set<string>() } as never;
+    const own = new Set<string | false>();
+    for (const e of mine) own.add(sessionLevel('full', ownerViewer, e, await sessionAudienceOf(w.t.app.ctx.pool, e)));
+    expect([...own]).toEqual(['full']);
   });
 
   it('chats with a private persona only for its owner, on the workstation that holds it', async () => {
