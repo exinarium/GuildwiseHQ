@@ -11,6 +11,7 @@ import { rebuildProjections } from '../src/projections/rebuild.ts';
 import { uniqueEmail } from './helpers/app.ts';
 import { closeAdminPool, q as rawQ } from './helpers/db.ts';
 import type { FakeRunner } from './helpers/fake-runner.ts';
+import { seed } from './helpers/seed.ts';
 import { createWorld, ok, until, type World } from './helpers/world.ts';
 
 /**
@@ -391,6 +392,76 @@ describe('an agent as the target', () => {
   });
 });
 
+describe('a chat of an agent as the caller', () => {
+  it('delegates only to what its agent was granted, and books the cost on the chat', async () => {
+    const hired = await w.hire('Chet', 'ba', 'senior');
+    const agentId = hired.agent?.id ?? hired.id;
+    const chatId = randomUUID();
+    // the chat of an agent is a shift of kind chat, started by the relay (an event, so a rebuild keeps it)
+    await seed(w, [
+      {
+        streamId: `shift-${chatId}`,
+        event: {
+          type: 'ShiftStarted',
+          payload: {
+            shiftId: chatId,
+            agentId,
+            workstationId: w.workstationId,
+            kind: 'chat',
+            runtime: 'mock',
+            model: 'mock',
+            overflow: false,
+          },
+        },
+        actor: { kind: 'runner', id: w.workstationId },
+        scope: { orgId, projectId: null, audience: 'org' },
+      },
+    ]);
+    expect((await begin(chatId)).error).toContain('not_granted');
+    await owner('PUT', `/api/agents/${agentId}/delegate-grants`, persona());
+    const b = await begin(chatId);
+    expect(b.ok).toBe(true);
+    const done = await rpc(chatId, 'delegate.cost', {
+      delegateId: b.delegateId,
+      target: 'devils-advocate',
+      outcome: 'ok',
+      summary: 'a second opinion',
+      usage: { inputTokens: 10, outputTokens: 10, model: 'claude-haiku-4-5' },
+    });
+    expect(done.ok).toBe(true);
+    const row = (
+      await q('SELECT parent_id, agent_id, delegate_summary FROM shift_costs WHERE shift_id=$1', [
+        b.delegateId,
+      ])
+    )[0];
+    expect(row).toMatchObject({ parent_id: chatId, agent_id: agentId, delegate_summary: 'a second opinion' });
+    // the CEO and the DevOps engineer never delegate, grant or not
+    await q(`UPDATE agents SET role_key='ceo' WHERE id=$1`, [agentId]);
+    expect((await begin(chatId)).error).toContain('not available to this agent');
+    expect(
+      (await call(w.owner, 'PUT', `/api/agents/${agentId}/delegate-grants`, persona('optimist'))).status,
+    ).toBe(400);
+    await q(`UPDATE agents SET role_key='ba' WHERE id=$1`, [agentId]);
+    await seed(w, [
+      {
+        streamId: `shift-${chatId}`,
+        event: {
+          type: 'ShiftEnded',
+          payload: {
+            shiftId: chatId,
+            agentId,
+            outcome: 'stopped',
+            durationMs: 1,
+            usage: { inputTokens: 0, outputTokens: 0 },
+          },
+        },
+        actor: { kind: 'runner', id: w.workstationId },
+        scope: { orgId, projectId: null, audience: 'org' },
+      },
+    ]);
+  });
+});
+
 describe('what the organization allows', () => {
   it('refuses a delegate on a model the workstation cannot run, and a paused project', async () => {
     const s = await newSession({ projectId: w.projectId });
@@ -439,7 +510,9 @@ describe('the data migration', () => {
       `SELECT shift_id, delegate_target, delegate_outcome, delegate_thread_id FROM shift_costs WHERE kind='delegate' AND delegate_thread_id IS NOT NULL LIMIT 1`,
     );
     expect(before).toHaveLength(1);
-    const grantsBefore = (await q('SELECT count(*)::int AS n FROM delegate_grants'))[0].n;
+    const grantsBefore = (
+      await q('SELECT count(*)::int AS n FROM delegate_grants WHERE org_id=$1', [orgId])
+    )[0].n;
     // as a row projected before the columns existed
     await q(
       `UPDATE shift_costs SET delegate_target=NULL, delegate_target_name=NULL, delegate_outcome=NULL, delegate_duration_ms=NULL, delegate_thread_id=NULL WHERE shift_id=$1`,
@@ -460,7 +533,9 @@ describe('the data migration', () => {
       delegate_thread_id: before[0].delegate_thread_id,
     });
     // no grant was made, and a second run does nothing
-    expect((await q('SELECT count(*)::int AS n FROM delegate_grants'))[0].n).toBe(grantsBefore);
+    expect((await q('SELECT count(*)::int AS n FROM delegate_grants WHERE org_id=$1', [orgId]))[0].n).toBe(
+      grantsBefore,
+    );
     expect(await migrateDelegationExplicit(env)).toBeNull();
   });
 });
@@ -472,12 +547,14 @@ describe('replay', () => {
       JSON.parse(
         JSON.stringify({
           grants: await q(
-            `SELECT owner_kind, owner_id, target_kind, target_key, max_calls, timeout_sec, max_profile, granted_by FROM delegate_grants ORDER BY owner_id, target_key`,
+            `SELECT owner_kind, owner_id, target_kind, target_key, max_calls, timeout_sec, max_profile, granted_by FROM delegate_grants WHERE org_id=$1 ORDER BY owner_id, target_key`,
+            [orgId],
           ),
           steps: await q(
             `SELECT shift_id, delegate_target, delegate_target_name, delegate_target_kind, delegate_profile, delegate_outcome,
                     delegate_duration_ms, delegate_summary, delegate_native, delegate_thread_id
-               FROM shift_costs WHERE kind='delegate' ORDER BY shift_id`,
+               FROM shift_costs WHERE kind='delegate' AND org_id=$1 ORDER BY shift_id`,
+            [orgId],
           ),
         }),
       );

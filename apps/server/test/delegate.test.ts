@@ -434,13 +434,16 @@ describe('a runner that disconnects', () => {
 
 describe('replay', () => {
   it('rebuilds the delegate cost rows exactly (parent, price, flags) and stays out of other kinds', async () => {
+    // this world's rows only: other test files write to the same database while this one runs
+    const orgId = (await q('SELECT org_id FROM projects WHERE id=$1', [w.projectId]))[0]?.org_id as string;
     const snap = async () =>
       JSON.parse(
         JSON.stringify(
           await q(
             `SELECT shift_id, kind, parent_id, agent_id, project_id, card_id, model, tokens_input, tokens_output,
                     cost_usd_micros, cost_unknown, cost_stamped
-               FROM shift_costs WHERE kind IN ('delegate','session') ORDER BY kind, shift_id`,
+               FROM shift_costs WHERE kind IN ('delegate','session') AND org_id=$1 ORDER BY kind, shift_id`,
+            [orgId],
           ),
         ),
       );

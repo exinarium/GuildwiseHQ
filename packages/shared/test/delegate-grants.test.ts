@@ -117,7 +117,8 @@ describe('grants', () => {
     expect(DelegateGrantSettingsSchema.safeParse({ maxCalls: 0 }).success).toBe(false);
     expect(DelegateGrantSettingsSchema.safeParse({ maxCalls: 99 }).success).toBe(false);
     expect(DelegateGrantSettingsSchema.safeParse({ timeoutSec: 5 }).success).toBe(false);
-    expect(DelegateGrantSettingsSchema.safeParse({ timeoutSec: 601 }).success).toBe(false);
+    expect(DelegateGrantSettingsSchema.safeParse({ timeoutSec: 541 }).success).toBe(false);
+    expect(DelegateGrantSettingsSchema.safeParse({ timeoutSec: 540 }).success).toBe(true);
   });
 
   it('revoke with a null grant', () => {

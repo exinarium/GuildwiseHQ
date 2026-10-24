@@ -106,7 +106,8 @@ export const DELEGATE_GRANT_LIMITS = {
   /** The time limit of one child run, in seconds. */
   defaultTimeoutSec: 110,
   minTimeoutSec: 10,
-  maxTimeoutSec: 600,
+  /** Below the 10 minutes Claude Code allows a shell command, so the caller's own `aom delegate` call is not killed first. */
+  maxTimeoutSec: 540,
 } as const;
 
 export const DelegateOwnerKindSchema = z.enum(['agent', 'session']);
