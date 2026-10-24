@@ -216,7 +216,9 @@ export function DraftPanel({
       {docs.map((d) => (
         <DocBlock key={d.id} doc={d} state={state} canManage={canManage} />
       ))}
-      {state.config.handoff && state.baStatus === 'none' && <HireBa canHire={canHire} />}
+      {state.config.handoff && state.baStatus === 'none' && (
+        <HireBa canHire={canHire} projectId={state.projectId} />
+      )}
       <div className="flex flex-wrap gap-2">
         {canManage && !hasPrd && (
           <Button

@@ -1111,13 +1111,10 @@ describe('R2: ownership, limits, archive and hand-off', () => {
     );
     const hire = await screen.findByTestId('hire-ba');
     expect(hire).toHaveTextContent('no BA yet');
-    await waitFor(() => expect(within(hire).getByTestId('hire-ba-button')).toBeEnabled());
-    await user.click(within(hire).getByTestId('hire-ba-button'));
-    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.url === '/api/agents')).toBe(true));
-    expect(calls.find((c) => c.url === '/api/agents')?.body).toMatchObject({
-      roleKey: 'ba',
-      workstationId: 'w1',
-    });
+    // not a one-click hire any more: the button opens the full hire dialog, prefilled (role, seniority and the session's project)
+    const link = within(hire).getByTestId('hire-ba-button');
+    expect(link).toHaveAttribute('href', expect.stringMatching(/^\/agents\?hire=ba&seniority=junior/));
+    expect(calls.some((c) => c.method === 'POST' && c.url === '/api/agents')).toBe(false);
   });
 
   it('asks for the CEO pre-draft turn cap only in prep mode, between 2 and 40', async () => {
