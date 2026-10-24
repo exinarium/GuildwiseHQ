@@ -113,6 +113,7 @@ describe('grants', () => {
       maxCalls: DELEGATE_GRANT_LIMITS.defaultMaxCalls,
       timeoutSec: DELEGATE_GRANT_LIMITS.defaultTimeoutSec,
       maxProfile: null,
+      model: null,
     });
     expect(DelegateGrantSettingsSchema.safeParse({ maxCalls: 0 }).success).toBe(false);
     expect(DelegateGrantSettingsSchema.safeParse({ maxCalls: 99 }).success).toBe(false);

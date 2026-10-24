@@ -4,6 +4,7 @@ import {
   type SlashCommand,
   type SlashContext,
   skillChatInstruction,
+  slashInvocationOf,
   slashQueryOf,
 } from '@aom/shared';
 import { BookOpen, Lock, Wand2 } from 'lucide-react';
@@ -42,28 +43,35 @@ export function SlashMenu({
   keys: MutableRefObject<SlashKeyHandler | null>;
 }) {
   const query = slashQueryOf(value);
-  const open = query !== null;
+  const typing = value.startsWith('/');
   const list = useSlashCommands(config.context, {
-    enabled: open,
+    enabled: typing,
     ...(config.projectId ? { projectId: config.projectId } : {}),
   });
   const run = useRunPlaybook();
   const navigate = useNavigate();
-  const items = useMemo(() => filterSlashCommands(list.data?.items ?? [], query ?? ''), [list.data, query]);
+  // "/brainstorm pricing for teams": the text after a command's key is what the person wants out of it
+  const invoked = useMemo(() => slashInvocationOf(value, list.data?.items ?? []), [value, list.data]);
+  const open = query !== null || invoked !== null;
+  const items = useMemo(
+    () => (invoked ? [invoked.command] : filterSlashCommands(list.data?.items ?? [], query ?? '')),
+    [list.data, query, invoked],
+  );
   const [active, setActive] = useState(0);
   const [dismissed, setDismissed] = useState<string | null>(null);
   // biome-ignore lint/correctness/useExhaustiveDependencies: back to the first row when the search changes
   useEffect(() => setActive(0), [query]);
 
+  const typed = invoked?.input ?? '';
   const inChat = (c: SlashCommand) =>
     onChange(
       c.kind === 'skill'
-        ? skillChatInstruction({ key: c.key, name: c.name })
-        : playbookChatInstruction({ key: c.key, name: c.name }),
+        ? skillChatInstruction({ key: c.key, name: c.name, input: typed })
+        : playbookChatInstruction({ key: c.key, name: c.name, input: typed }),
     );
   const asSession = (c: SlashCommand) =>
     run.mutate(
-      { key: c.key, input: '', ...(config.projectId ? { projectId: config.projectId } : {}) },
+      { key: c.key, input: typed, ...(config.projectId ? { projectId: config.projectId } : {}) },
       { onSuccess: (r) => navigate(r.path) },
     );
   const choose = (c: SlashCommand) => {
@@ -115,6 +123,14 @@ export function SlashMenu({
       {run.isError && (
         <p role="alert" className="px-3 py-2 text-sm text-danger">
           {run.error instanceof Error ? run.error.message : 'The session could not be started.'}
+        </p>
+      )}
+      {invoked && (
+        <p className="px-3 py-1 text-xs text-muted" data-testid="slash-input">
+          {config.context === 'session' && invoked.command.kind === 'playbook'
+            ? 'Enter starts it with'
+            : 'Enter uses it with'}{' '}
+          “{invoked.input}”
         </p>
       )}
       <ul className="flex flex-col">

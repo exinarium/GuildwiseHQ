@@ -86,6 +86,22 @@ export function slashQueryOf(text: string): string | null {
   return m ? (m[1] ?? '') : null;
 }
 
+/**
+ * `/brainstorm pricing for teams`: a command key followed by text. The key must be exactly one of the commands the person may
+ * use (so ordinary text that happens to start with a slash is left alone); the rest is what they want out of it (the
+ * playbook input). Null when the text is not such an invocation.
+ */
+export function slashInvocationOf<T extends { key: string }>(
+  text: string,
+  commands: readonly T[],
+): { command: T; input: string } | null {
+  const m = /^\/(\S+)\s+([\s\S]*\S[\s\S]*)$/.exec(text);
+  if (!m) return null;
+  const key = (m[1] ?? '').toLowerCase();
+  const command = commands.find((c) => c.key.toLowerCase() === key);
+  return command ? { command, input: (m[2] ?? '').trim() } : null;
+}
+
 // ---------------------------------------------------------------------------------------------------- running one
 
 export const PlaybookRunRequestSchema = z.object({
@@ -206,8 +222,8 @@ export function playbookChatInstruction(p: { key: string; name: string; input?: 
 }
 
 /** The instruction a `/` skill puts in a chat. */
-export function skillChatInstruction(s: { key: string; name: string }): string {
-  return `Use the skill "${s.name}" for this (load it with \`aom skill show skill:${s.key}\` and follow it): `;
+export function skillChatInstruction(s: { key: string; name: string; input?: string }): string {
+  return `Use the skill "${s.name}" for this (load it with \`aom skill show skill:${s.key}\` and follow it): ${s.input?.trim() ?? ''}`;
 }
 
 /** Playbooks that are templates (a brief or PRD layout) are loaded by other playbooks; they are not started on their own. */

@@ -160,6 +160,40 @@ describe('the / menu of a chat composer', () => {
     expect(calls.find((c) => c.url === '/api/playbooks/run')?.body).toEqual({ key: 'prd', input: '' });
   });
 
+  it('R3c: text after /command is the playbook input, in a chat instruction and in a new session', async () => {
+    const calls = stub({
+      'POST /api/playbooks/run': () => ({ threadId: 't2', path: '/discovery/t2' }),
+    });
+    mount(<Host context="chat" />);
+    const box = screen.getByLabelText('Message') as HTMLTextAreaElement;
+    await userEvent.type(box, '/prd pricing for teams');
+    expect(await screen.findByTestId('slash-input')).toHaveTextContent('pricing for teams');
+    await userEvent.keyboard('{Enter}');
+    expect(box.value).toContain('Run the playbook "PRD"');
+    expect(box.value).toContain('What I want from it: pricing for teams');
+    // the same words start a guided session from the session composer
+    await userEvent.clear(box);
+    await userEvent.type(box, '/prd pricing for teams');
+    await userEvent.click(await screen.findByTestId('slash-session-prd'));
+    await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/discovery/t2'));
+    expect(calls.find((c) => c.url === '/api/playbooks/run')?.body).toEqual({
+      key: 'prd',
+      input: 'pricing for teams',
+    });
+  });
+
+  it('R3c: ordinary text that starts with a slash is not a command', async () => {
+    stub();
+    const onSend = vi.fn();
+    mount(<Host context="chat" onSend={onSend} />);
+    const box = screen.getByLabelText('Message') as HTMLTextAreaElement;
+    await userEvent.type(box, '/usr/bin is where it lives');
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.queryByTestId('slash-menu')).toBeNull();
+    await userEvent.keyboard('{Enter}');
+    expect(onSend).toHaveBeenCalled();
+  });
+
   it('is driven by the keyboard: arrows choose, Enter picks without sending, Escape closes', async () => {
     stub();
     const onSend = vi.fn();
