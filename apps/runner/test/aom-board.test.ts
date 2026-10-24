@@ -124,6 +124,9 @@ describe('aom board (the boardroom verbs)', () => {
       ),
     ).toBe(0);
     expect(await t.run('board', 'cast', '--name', 'No brief')).toBe(1);
+    expect(await t.run('board', 'score', '--option', 'Alpha', '--score', '4', '--why', 'cheap')).toBe(0);
+    expect(await t.run('board', 'score', '--option', 'Alpha')).toBe(1);
+    expect(await t.run('board', 'score', '--score', '3')).toBe(1);
     expect(await t.run('board', 'minutes', '--content-file', 'm.md')).toBe(0);
     expect(await t.run('board', 'minutes')).toBe(1);
     expect(await t.run('board', 'show')).toBe(0);
@@ -134,6 +137,7 @@ describe('aom board (the boardroom verbs)', () => {
       'board.disagreement',
       'board.cast',
       'board.cast',
+      'board.score',
       'board.minutes',
       'board.show',
     ]);
@@ -143,13 +147,18 @@ describe('aom board (the boardroom verbs)', () => {
       positions: ['Cost Hawk|later', 'User Advocate|now'],
     });
     expect(t.rpcs[3]?.params).toEqual({ persona: 'security', why: 'risk' });
+    expect(t.rpcs.find((x) => x.method === 'board.score')?.params).toEqual({
+      option: 'Alpha',
+      score: 4,
+      why: 'cheap',
+    });
     expect(t.rpcs[4]?.params).toEqual({
       name: 'Regulator',
       brief: 'A cautious officer',
       seat: 'Compliance',
       why: '',
     });
-    expect(t.rpcs[5]?.params).toEqual({ content: '## Positions\n\n- x' });
+    expect(t.rpcs[6]?.params).toEqual({ content: '## Positions\n\n- x' });
     expect(await t.run('board', 'bogus')).toBe(1);
   });
 });

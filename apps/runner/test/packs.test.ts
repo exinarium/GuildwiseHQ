@@ -422,6 +422,20 @@ describe('registry use of packs', () => {
     expect(reg.get('interview-techniques')?.description).not.toBe('Repo version');
     expect(reg.get('repo-skill')).toBeUndefined();
     expect(reg.meta(pid).find((m) => m.key === 'reviewer')?.source).toBe('project-repo');
+    // where each one was read from, for the owner's review list
+    const paths = Object.fromEntries(r.items.map((i) => [`${i.kind}:${i.key}`, i.path]));
+    expect(paths).toEqual({
+      'persona:reviewer': '.claude/agents/reviewer.md',
+      'skill:interview-techniques': '.agents/skills/interview-techniques',
+      'skill:repo-skill': '.claude/skills/repo-skill',
+    });
+    // a skill the owner blocked is indexed and reported, but no agent can use it
+    reg.setBlocked([{ projectId: pid, kind: 'skill', key: 'repo-skill' }]);
+    expect(reg.meta(pid).some((m) => m.key === 'repo-skill')).toBe(false);
+    expect(reg.get('repo-skill', pid)).toBeUndefined();
+    expect(reg.indexProject(pid, repo).items.some((i) => i.key === 'repo-skill')).toBe(true);
+    reg.setBlocked([]);
+    expect(reg.get('repo-skill', pid)?.description).toBe('From the repo');
   });
 });
 
