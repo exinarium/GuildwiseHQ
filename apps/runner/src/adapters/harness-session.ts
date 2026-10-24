@@ -7,6 +7,7 @@ import {
   type HarnessSandboxInput,
   harnessBwrapArgs,
   proxyEnv,
+  REAL_SHELL_IN_BOX,
   realShellPath,
   shellShimScript,
   type WrappedCommand,
@@ -36,6 +37,8 @@ export interface HarnessLaunch {
   hiddenFromShell?: string[];
   /** Variables only the CLI may have (removed for the commands it starts). */
   unsetForShell?: string[];
+  /** The CLI starts its shell by absolute path: replace the box's own `bash` with the masking shim (instead of using PATH). */
+  replaceShell?: boolean;
   cmd: { bin: string; args: string[]; env: Record<string, string> };
   /** The workstation owner's private-endpoint allow-list (exact host:port entries); empty by default. */
   privateEndpoints?: string[];
@@ -73,7 +76,12 @@ export async function launchInHarnessSandbox(l: HarnessLaunch): Promise<Launched
     mkdirSync(shimDir, { recursive: true });
     for (const name of ['bash', 'sh']) {
       const file = join(shimDir, name);
-      writeFileSync(file, shellShimScript(realShellPath(), hidden, unset));
+      writeFileSync(
+        file,
+        l.replaceShell
+          ? shellShimScript(REAL_SHELL_IN_BOX, hidden, unset, 'bwrap', REAL_SHELL_IN_BOX)
+          : shellShimScript(realShellPath(), hidden, unset),
+      );
       chmodSync(file, 0o755);
     }
   }
@@ -83,6 +91,9 @@ export async function launchInHarnessSandbox(l: HarnessLaunch): Promise<Launched
     bridgePort: BRIDGE_PORT,
     hiddenFromShell: hidden,
     ...(shimDir ? { shimDir } : {}),
+    ...(shimDir && l.replaceShell
+      ? { shellOverride: { shim: join(shimDir, 'bash'), real: realShellPath() } }
+      : {}),
   };
   const env = { ...l.cmd.env, ...proxyEnv(BRIDGE_PORT) };
   if (shimDir) env.SHELL = join(shimDir, 'bash');

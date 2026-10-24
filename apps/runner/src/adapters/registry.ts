@@ -48,6 +48,7 @@ export function buildAdapters(
       new CodexAdapter(
         { enabled: true, authMode: 'login', toolchainPaths: [], ...(c ?? {}), bin: codexBin },
         paths,
+        { ...(direct?.store ? { store: direct.store } : {}) },
       ),
     );
   }

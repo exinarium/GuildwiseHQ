@@ -10,6 +10,7 @@ import { hostAllowed, isPrivateAddress, startEgressProxy } from '../src/sandbox/
 import {
   type HarnessSandboxInput,
   proxyEnv,
+  REAL_SHELL_IN_BOX,
   realShellPath,
   shellShimScript,
   wrapInHarnessSandbox,
@@ -272,6 +273,45 @@ describe.skipIf(!ok || !probe)('the harness sandbox (real bubblewrap)', () => {
     expect(afterShim).not.toContain('REFRESH-TOKEN-XYZ');
     expect(afterShim).toContain('KEY=\n');
     expect(afterShim).toContain('SHELL-WRITES');
+    await w.proxy.close();
+  });
+
+  it('R3c: replaces the box’s own bash for a CLI that starts its shell by absolute path (Codex), without hiding the real one from the launcher', async () => {
+    const dir0 = join(root, 'override');
+    const shim = join(dir0, 'shimbin');
+    mkdirSync(shim, { recursive: true });
+    const shimFile = join(shim, 'bash');
+    const w = await world('override', {
+      shimDir: shim,
+      shellOverride: { shim: shimFile, real: realShellPath() },
+      hiddenFromShell: [],
+    });
+    const login = join(w.input.writable[0] as string, 'auth.json');
+    writeFileSync(login, 'CODEX-LOGIN-XYZ');
+    writeFileSync(
+      shimFile,
+      shellShimScript(REAL_SHELL_IN_BOX, [login], ['CODEX_HOME'], 'bwrap', REAL_SHELL_IN_BOX),
+    );
+    chmodSync(shimFile, 0o755);
+    // the launcher runs the real shell (so it still sees the login and its environment); `/bin/bash -c ...` is the masked one
+    const wrapped = wrapInHarnessSandbox(w.input, {
+      bin: '/bin/bash',
+      args: ['-c', `cat ${login} 2>&1; echo HOME-VAR=$CODEX_HOME; echo W > ${w.input.cwd}/o && echo WRITES`],
+      env: { PATH: '/usr/bin:/bin', CODEX_HOME: '/some/home', ...proxyEnv(3128) },
+    });
+    expect(wrapped.args).toContain(REAL_SHELL_IN_BOX);
+    const r = await execa(wrapped.bin, wrapped.args, {
+      cwd: w.input.cwd,
+      env: wrapped.env,
+      extendEnv: false,
+      reject: false,
+      all: true,
+      timeout: 30_000,
+    });
+    const out = String(r.all ?? '');
+    expect(out).not.toContain('CODEX-LOGIN-XYZ');
+    expect(out).toContain('HOME-VAR=\n');
+    expect(out).toContain('WRITES');
     await w.proxy.close();
   });
 });

@@ -72,7 +72,8 @@ export type JiraConfig = z.infer<typeof JiraConfigSchema>;
 
 /**
  * The Codex CLI runtime (docs/RUNNER.md, "Codex CLI runtime"). Registered only when the `codex` binary is found: on PATH, or at
- * `bin`. Its OS sandbox is Codex's own and always on (no `off`): the runtime is unavailable where that sandbox does not run.
+ * `bin`. Its OS sandbox is always on (no `off`), either the runner's harness sandbox (Linux) or Codex's own (macOS): the runtime is
+ * unavailable where it does not run.
  */
 export const CodexRuntimeConfigSchema = z.object({
   /** `false`: never register the runtime, even when `codex` is installed. */
@@ -90,6 +91,13 @@ export const CodexRuntimeConfigSchema = z.object({
   loginDir: z.string().optional(),
   /** Extra toolchain directories sandboxed shell commands may read (see the claude-code setting of the same name). */
   toolchainPaths: z.array(z.string()).default([]),
+  /**
+   * Where the sandbox comes from. `auto` (default): on Linux and WSL2 the runner's own bubblewrap sandbox and egress proxy around
+   * the whole CLI, as for Gemini and opencode (R3c); elsewhere (macOS) Codex's own permission profile. `harness` / `native` force one.
+   */
+  sandbox: z.enum(['auto', 'harness', 'native']).optional(),
+  /** More hosts the sandboxed CLI and its shell may reach (the harness sandbox's domain allow-list). */
+  extraAllowedDomains: z.array(z.string()).optional(),
 });
 export type CodexRuntimeConfig = z.infer<typeof CodexRuntimeConfigSchema>;
 

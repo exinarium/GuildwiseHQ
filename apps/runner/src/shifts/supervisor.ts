@@ -1204,7 +1204,10 @@ export class ShiftSupervisor {
     if (msg.resumeSessionId && !s.resumed) {
       const d = this.sessions.decide(msg.resumeSessionId, msg.agent.agentId, sandbox.configDir, accountKey);
       s.resumeAsked = { sessionId: msg.resumeSessionId, ...d, cwd };
-      if (d.state === 'resumed') {
+      if (d.state === 'resumed' && this.sessions.get(msg.resumeSessionId)?.runtime === 'codex') {
+        // a Codex thread is found by its id in the agent's Codex home, whatever folder the new shift works in
+        resumeSessionId = msg.resumeSessionId;
+      } else if (d.state === 'resumed') {
         // a group builder moves from one card worktree to the next: its transcript follows it into the new folder
         const how = copySessionTranscript(
           sandbox.configDir,
@@ -1549,6 +1552,9 @@ export class ShiftSupervisor {
       agentId: s.msg.agent.agentId,
       cwd,
       ...(s.msg.account && s.msg.account.key !== 'main' ? { accountKey: s.msg.account.key } : {}),
+      ...(s.msg.agent.runtime && s.msg.agent.runtime !== 'claude-code'
+        ? { runtime: s.msg.agent.runtime }
+        : {}),
       ...(s.resumeAsked?.state === 'resumed' ? { inheritFrom: s.resumeAsked.sessionId } : {}),
     });
     const contextTokens = s.session?.contextTokens?.() ?? 0;

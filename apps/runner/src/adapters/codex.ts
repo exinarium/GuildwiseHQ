@@ -16,7 +16,9 @@ import { type AgentPermissions, CODEX_RUNTIME, codexRoleProblem } from '@aom/sha
 import { execa } from 'execa';
 import { materializeSkills } from '../capabilities/materialize.ts';
 import type { CodexRuntimeConfig } from '../config.ts';
+import type { ProviderStore } from '../direct/store.ts';
 import type { RunnerPaths } from '../paths.ts';
+import { proxyEnv } from '../sandbox/harness-sandbox.ts';
 import { DOTNET_SHM_DIR, userNugetPackages } from '../sandbox/sandbox.ts';
 import { selfCommand } from '../shims.ts';
 import {
@@ -29,6 +31,13 @@ import {
   toolchainReadPaths,
 } from './claude-policy.ts';
 import { CodexStreamParser, codexUsageLimit, isCodexAuthFailureText } from './codex-stream-parser.ts';
+import {
+  BRIDGE_PORT,
+  type HarnessLaunch,
+  type LaunchedHarness,
+  launchInHarnessSandbox,
+  probeHarnessSandbox,
+} from './harness-session.ts';
 import { withFileLock } from './login-lock.ts';
 import { spawnSession } from './process-session.ts';
 import { SECRET_FILE_GLOBS } from './read-only-dirs.ts';
@@ -149,6 +158,8 @@ export function codexInstallDirs(bin: string): string[] {
         const name = (JSON.parse(readFileSync(pj, 'utf8')) as { name?: string }).name ?? '';
         if (name === '@openai/codex' || name.startsWith('@openai/codex')) {
           out.add(d);
+          // npm keeps the platform binary (`@openai/codex-linux-x64`) next to the package, in the same scope folder
+          if (dirname(d).endsWith(`${sep}@openai`)) out.add(dirname(d));
           // pnpm keeps the platform binary (`@openai/codex-linux-x64`) in a sibling folder of its store: <store>/.pnpm
           const k = real.indexOf(`${sep}.pnpm${sep}`);
           if (k > 0) out.add(real.slice(0, k + `${sep}.pnpm`.length));
@@ -253,7 +264,12 @@ export function codexPermissions(i: CodexProfileInput): Record<string, unknown> 
  * worktree-only filesystem) is what holds, because Codex matches a command's leading words after splitting a simple shell
  * script, and a pattern with a wildcard in the middle (`git -C * push`) has no equivalent.
  */
-export function codexRules(p: Pick<AgentPermissions, 'deniedShellPatterns'>, roleKey?: string): string {
+export function codexRules(
+  p: Pick<AgentPermissions, 'deniedShellPatterns'>,
+  roleKey?: string,
+  /** In the runner's harness sandbox `aom` reaches the runner through the box's socket: no rule has to run it outside a sandbox. */
+  harness = false,
+): string {
   const claude = [
     ...GIT_PUSH_DENIED,
     'Bash(git reset --hard:*)',
@@ -265,7 +281,7 @@ export function codexRules(p: Pick<AgentPermissions, 'deniedShellPatterns'>, rol
   // The aom CLI is the agent's only way to the runner (the sandbox has no network, and a Unix socket cannot be connected from
   // inside it). An `allow` rule runs a matching command OUTSIDE the sandbox without asking, as claude-code's excluded `aom`
   // does: only a standalone `aom ...` command matches, a compound command containing anything else stays sandboxed.
-  const lines: string[] = ['prefix_rule(pattern=["aom"], decision="allow")'];
+  const lines: string[] = harness ? [] : ['prefix_rule(pattern=["aom"], decision="allow")'];
   for (const r of claude) {
     const m = /^Bash\(([A-Za-z0-9_./ -]+?)(?::\*)?\)$/.exec(r);
     if (!m?.[1] || m[1].includes('*') || m[1].includes('/*')) continue;
@@ -379,6 +395,80 @@ export function buildCodexCommand(
   };
 }
 
+// ------------------------------------------------------------------------------------------------ command (harness sandbox)
+
+export interface CodexHarnessCommandInput {
+  prompt: string;
+  cwd: string;
+  model: string;
+  effort?: string;
+  resumeSessionId?: string;
+  /** The variables the agent's shell commands get (and the codex process, besides its own): the session's, plus the proxy's. */
+  shellEnv: Record<string, string>;
+  web: boolean;
+  codexHome: string;
+  /** `key`: Codex is pointed at the runner's proxy route and given a dummy key; the real one is added upstream. */
+  auth: 'login' | 'key';
+  bridgePort: number;
+}
+
+/**
+ * The argv/env of a `codex exec` session that runs inside the runner's harness sandbox (docs/RUNNER.md, "Codex in the harness
+ * sandbox"). Codex's own sandbox is switched off (`sandbox_mode = "danger-full-access"`, approvals `never`): the runner's bubblewrap
+ * around the whole CLI is the boundary, as for Gemini and opencode, so no permission profile and no `aom` exclusion rule are needed.
+ * Pure; unit tested.
+ */
+export function buildCodexHarnessCommand(
+  i: CodexHarnessCommandInput,
+  cfg: Pick<CodexConfig, 'bin'>,
+  parent: NodeJS.ProcessEnv = process.env,
+): CodexCommand {
+  const overrides: Array<[string, unknown]> = [
+    ['approval_policy', 'never'],
+    ['sandbox_mode', 'danger-full-access'],
+    ['shell_environment_policy', { inherit: 'none', set: i.shellEnv }],
+    ['allow_login_shell', false],
+    ['web_search', i.web ? 'live' : 'disabled'],
+    ['cli_auth_credentials_store', 'file'],
+    ['analytics', { enabled: false }],
+    ['feedback', { enabled: false }],
+    ['check_for_update_on_startup', false],
+    ['history', { persistence: 'none' }],
+    ['project_doc_max_bytes', 1_048_576],
+    ['skills', { bundled: { enabled: false } }],
+  ];
+  // the key stays in the runner: the proxy route adds it to the request
+  // (login mode keeps the owner's own choice, a ChatGPT sign-in or a stored API key)
+  if (i.auth === 'key') {
+    overrides.push(['forced_login_method', 'api']);
+    overrides.push(['openai_base_url', `http://127.0.0.1:${i.bridgePort}/openai/v1`]);
+  }
+  if (i.effort && EFFORTS.includes(i.effort)) overrides.push(['model_reasoning_effort', i.effort]);
+  const args = [
+    'exec',
+    '--json',
+    '--skip-git-repo-check',
+    '--strict-config',
+    '--color',
+    'never',
+    '--cd',
+    i.cwd,
+    `--model=${i.model}`,
+  ];
+  for (const [k, v] of overrides) args.push('-c', `${k}=${tomlValue(v)}`);
+  if (i.resumeSessionId && CODEX_THREAD_ID.test(i.resumeSessionId))
+    args.push('resume', '--', i.resumeSessionId, '-');
+  else args.push('--', '-');
+  const provider: Record<string, string> =
+    i.auth === 'key' ? { CODEX_API_KEY: 'aom-key-is-added-by-the-runner' } : {};
+  return {
+    bin: cfg.bin,
+    args,
+    env: agentEnv(i.shellEnv, provider, parent, { CODEX_HOME: i.codexHome }),
+    stdin: i.prompt,
+  };
+}
+
 // ------------------------------------------------------------------------------------------------ login handling
 
 /** Serialises copying and handing back the owner's login among this runner's sessions. */
@@ -421,6 +511,14 @@ export interface CodexHost {
   extraArgs?: string[];
   /** Test hook: the result of the sandbox self-test. */
   sandboxProbe?: () => Promise<{ ok: boolean; reason: string }>;
+  /** The workstation's provider keys (an `openai` key is used in `api_key` mode, and never enters the sandbox). */
+  store?: ProviderStore;
+  /** Test hook (harness sandbox): the key's upstream, a fake OpenAI API on localhost. */
+  upstream?: { url: string; allowPrivate?: boolean };
+  /** Test hook (harness sandbox): start the command without bubblewrap. */
+  launch?: (l: HarnessLaunch) => Promise<LaunchedHarness>;
+  /** Test hook (harness sandbox): the self-test result. */
+  harnessProbe?: () => { ok: boolean; reason: string };
 }
 
 const PROBE_TTL_MS = 10 * 60_000;
@@ -454,7 +552,8 @@ export class CodexAdapter implements RuntimeAdapter {
   }
 
   private loginState(): 'ok' | 'expired' {
-    if (this.cfg.authMode === 'api_key') return this.cfg.apiKey ? 'ok' : 'expired';
+    if (this.cfg.authMode === 'api_key')
+      return this.cfg.apiKey || this.host.store?.get('openai')?.apiKey ? 'ok' : 'expired';
     const f = this.loginFile();
     if (!existsSync(f)) return 'expired';
     if (this.authBad) {
@@ -466,6 +565,13 @@ export class CodexAdapter implements RuntimeAdapter {
       this.authBad = undefined;
     }
     return 'ok';
+  }
+
+  /** Where the sandbox comes from: the runner's own (Linux and WSL2, by default) or Codex's permission profile (macOS). */
+  sandboxKind(): 'harness' | 'native' {
+    const c = this.cfg.sandbox ?? 'auto';
+    if (c !== 'auto') return c;
+    return (this.host.platform ?? process.platform) === 'linux' ? 'harness' : 'native';
   }
 
   private sandboxPlatformProblem(): string | undefined {
@@ -480,6 +586,11 @@ export class CodexAdapter implements RuntimeAdapter {
    * CODEX_HOME. Cached for ten minutes. A failure is the reason shown to the owner (no bubblewrap, no user namespaces, ...).
    */
   async probeSandbox(): Promise<{ ok: boolean; reason: string }> {
+    if (this.sandboxKind() === 'harness') {
+      if (this.host.harnessProbe) return this.host.harnessProbe();
+      if (this.host.sandboxProbe) return this.host.sandboxProbe();
+      return probeHarnessSandbox(this.host.platform);
+    }
     const platformProblem = this.sandboxPlatformProblem();
     if (platformProblem) return { ok: false, reason: platformProblem };
     const now = (this.host.now?.() ?? new Date()).getTime();
@@ -492,7 +603,8 @@ export class CodexAdapter implements RuntimeAdapter {
   /** Folders of the codex install the sandbox must let the helper re-execute (found from the binary, or learned from a failed probe). */
   private readonly learned = new Set<string>();
   private installPaths(): string[] {
-    return [...new Set([...codexInstallDirs(this.cfg.bin), ...this.learned])];
+    // the folder the binary is started from (an npm `.bin` link) as well as the one it really lives in
+    return [...new Set([dirname(resolve(this.cfg.bin)), ...codexInstallDirs(this.cfg.bin), ...this.learned])];
   }
 
   private async runProbe(): Promise<{ ok: boolean; reason: string }> {
@@ -737,10 +849,11 @@ export class CodexAdapter implements RuntimeAdapter {
     grantedSkills: ShiftStartInput['grantedSkills'],
     permissions: AgentPermissions,
     roleKey: string,
+    harness = false,
   ): string {
     const home = codexHomeOf(sandbox);
     mkdirSync(join(home, 'rules'), { recursive: true, mode: 0o700 });
-    writeFileSync(join(home, 'rules', 'aom.rules'), codexRules(permissions, roleKey));
+    writeFileSync(join(home, 'rules', 'aom.rules'), codexRules(permissions, roleKey, harness));
     // The USER-scope skills folder, in the agent's private HOME: exactly the granted skills, nothing from the owner or an
     // earlier shift, and nothing written into the card's worktree.
     materializeSkills(codexSkillsDirOf(sandbox), grantedSkills ?? [], sandbox.home);
@@ -763,6 +876,7 @@ export class CodexAdapter implements RuntimeAdapter {
     parser: CodexStreamParser,
     logFile: string | undefined,
     codexHome: string,
+    cleanup?: () => Promise<void>,
   ): RuntimeSession {
     return spawnSession({
       bin: cmd.bin,
@@ -797,18 +911,184 @@ export class CodexAdapter implements RuntimeAdapter {
           await this.harvestLogin(codexHome);
         } catch {
           /* best effort */
+        } finally {
+          await cleanup?.().catch(() => undefined);
         }
       },
     });
+  }
+
+  // -------------------------------------------------------------------------------------------- harness sandbox
+
+  /** How Codex signs in right now (harness mode): the owner's login, or a stored OpenAI key that stays in the runner. */
+  authSelection(
+    orgId?: string,
+  ):
+    | { via: 'login' }
+    | { via: 'key'; apiKey: string; source: 'org' | 'workstation' }
+    | { via: 'none'; reason: string } {
+    if (this.cfg.authMode === 'api_key') {
+      if (this.cfg.apiKey) return { via: 'key', apiKey: this.cfg.apiKey, source: 'workstation' };
+      const k = this.host.store?.get('openai', orgId);
+      if (k?.apiKey) return { via: 'key', apiKey: k.apiKey, source: k.source ?? 'workstation' };
+      return {
+        via: 'none',
+        reason:
+          'Codex has no API key: set runtimes.codex.apiKey in the runner config, or add an OpenAI key under Model providers',
+      };
+    }
+    if (this.loginState() === 'ok') return { via: 'login' };
+    return {
+      via: 'none',
+      reason: 'Codex is not signed in on this workstation: run `codex login` as the runner user',
+    };
+  }
+
+  private harnessSpec(
+    input: {
+      cwd: string;
+      sandbox: SandboxInfo;
+      env: Record<string, string>;
+      addDirs?: string[];
+      readDirs?: string[];
+      toolchainReadDirs?: string[];
+    },
+    readOnlyCwd: boolean,
+    mayCommit: boolean,
+    codexHome: string,
+  ): HarnessLaunch['sandbox'] {
+    const root = this.paths?.root ?? dirname(dirname(input.sandbox.home));
+    const script = selfCommand('aom').at(-1);
+    const nuget = userNugetPackages(this.realHome());
+    return {
+      cwd: input.cwd,
+      readOnlyCwd,
+      home: input.sandbox.home,
+      scratch: input.sandbox.scratch,
+      tmp: input.sandbox.tmp,
+      ...(input.sandbox.cacheRoot ? { cacheRoot: input.sandbox.cacheRoot } : {}),
+      writable: [codexHome],
+      readonly: [
+        ...toolchainReadPaths(
+          [...this.cfg.toolchainPaths, ...(input.toolchainReadDirs ?? [])],
+          process.execPath,
+          this.realHome(),
+        ),
+        this.paths?.bin ?? join(root, 'bin'),
+        ...(script ? [dirname(script)] : []),
+        ...this.installPaths(),
+        ...(input.addDirs ?? []),
+      ],
+      readDirs: input.readDirs ?? [],
+      gitDirs: gitCommonDirs(input.cwd),
+      mayCommit,
+      ...(input.env.AOM_IPC_SOCKET ? { ipcSocket: input.env.AOM_IPC_SOCKET } : {}),
+      ...(nuget ? { nugetFallbackDir: nuget } : {}),
+      ...(process.platform === 'linux' ? { dotnetShmDir: DOTNET_SHM_DIR } : {}),
+    };
+  }
+
+  /**
+   * One session in the runner's harness sandbox: bubblewrap around the whole CLI, the network only through the egress proxy
+   * (domain allow-list, the owner's private endpoints), the model key (when there is one) added upstream by the proxy so it never
+   * exists in the box, the login file (when there is one) hidden from the shell the agent's commands run in.
+   */
+  private async runHarness(
+    input: ShiftStartInput | ChatStartInput,
+    o: {
+      prompt: string;
+      chat: boolean;
+      readOnlyCwd: boolean;
+      mayCommit: boolean;
+      perms: AgentPermissions;
+      roleKey: string;
+    },
+  ): Promise<RuntimeSession> {
+    const sb = await this.probeSandbox();
+    if (!sb.ok) throw new Error(`the Codex sandbox is unavailable: ${sb.reason}`);
+    const sel = this.authSelection(input.orgId);
+    if (sel.via === 'none') throw new Error(sel.reason);
+    const codexHome = this.prepareHome(input.sandbox, input.grantedSkills, o.perms, o.roleKey, true);
+    await this.prepareLogin(codexHome);
+    const shellEnv = { ...this.shellEnv(input), ...proxyEnv(BRIDGE_PORT) };
+    const cmd = buildCodexHarnessCommand(
+      {
+        prompt: o.prompt,
+        cwd: input.cwd,
+        model: input.agent.model,
+        ...(input.agent.effort ? { effort: input.agent.effort } : {}),
+        ...(input.resumeSessionId ? { resumeSessionId: input.resumeSessionId } : {}),
+        shellEnv,
+        web: o.perms.allowedTools.includes('web'),
+        codexHome,
+        auth: sel.via,
+        bridgePort: BRIDGE_PORT,
+      },
+      this.cfg,
+      this.parentEnv(),
+    );
+    this.withExtra(cmd);
+    const authFile = join(codexHome, 'auth.json');
+    const launch: HarnessLaunch = {
+      cliHosts: [
+        ...(sel.via === 'key' ? ['api.openai.com'] : ['chatgpt.com', 'auth.openai.com', 'api.openai.com']),
+        ...(this.host.upstream ? [new URL(this.host.upstream.url).hostname] : []),
+      ],
+      ...(this.host.upstream
+        ? { proxyTest: { allowPrivate: true as const, resolve: async () => '127.0.0.1' } }
+        : {}),
+      extraHosts: this.cfg.extraAllowedDomains ?? [],
+      ...(this.host.store?.endpoints().length ? { privateEndpoints: this.host.store.endpoints() } : {}),
+      ...(sel.via === 'key'
+        ? {
+            routes: [
+              {
+                prefix: '/openai',
+                upstream: this.host.upstream?.url ?? 'https://api.openai.com',
+                headers: { authorization: `Bearer ${sel.apiKey}` },
+              },
+            ],
+          }
+        : {}),
+      sandbox: this.harnessSpec(input, o.readOnlyCwd, o.mayCommit, codexHome),
+      hiddenFromShell: sel.via === 'login' ? [authFile] : [],
+      unsetForShell: ['CODEX_API_KEY', 'CODEX_HOME'],
+      // Codex starts `/bin/bash` by its absolute path: the masking shell is mounted over the box's bash
+      replaceShell: true,
+      cmd: { bin: cmd.bin, args: cmd.args, env: cmd.env },
+    };
+    const harness = await (this.host.launch ?? launchInHarnessSandbox)(launch);
+    const parser = new CodexStreamParser({
+      model: input.agent.model,
+      chat: o.chat,
+      ...(sel.via === 'key' ? { key: { source: sel.source, provider: 'openai' } } : {}),
+    });
+    return this.spawn(
+      { ...cmd, bin: harness.command.bin, args: harness.command.args, env: harness.command.env },
+      input.cwd,
+      parser,
+      input.logFile,
+      codexHome,
+      () => harness.cleanup(),
+    );
   }
 
   async start(input: ShiftStartInput): Promise<RuntimeSession> {
     this.assertRole(input.agent.roleKey, input.agent.isDevops, input.agent.permissions);
     if (input.devopsGuard || input.kind === 'devops' || input.kind === 'ceo')
       throw new Error('codex_role_refused: DevOps and CEO shifts run on Claude Code');
-    await this.assertCanRun();
     const perms = input.agent.permissions;
     const edit = perms.allowedTools.includes('edit');
+    if (this.sandboxKind() === 'harness')
+      return this.runHarness(input, {
+        prompt: input.prompt,
+        chat: false,
+        readOnlyCwd: !edit,
+        mayCommit: edit && perms.mayCommit,
+        perms,
+        roleKey: input.agent.roleKey,
+      });
+    await this.assertCanRun();
     const codexHome = this.prepareHome(input.sandbox, input.grantedSkills, perms, input.agent.roleKey);
     await this.prepareLogin(codexHome);
     const profile = this.profile(input, !edit, edit && perms.mayCommit);
@@ -844,6 +1124,16 @@ export class CodexAdapter implements RuntimeAdapter {
       throw new Error(
         'codex_role_refused: the intake chat needs the Jira tool (MCP), which Codex does not get',
       );
+    if (this.sandboxKind() === 'harness')
+      // A chat reads: its working folder is read-only (a card's worktree, or the scratch folder of a session turn).
+      return this.runHarness(input, {
+        prompt: input.message,
+        chat: true,
+        readOnlyCwd: true,
+        mayCommit: false,
+        perms: input.agent.permissions,
+        roleKey: input.agent.roleKey,
+      });
     await this.assertCanRun();
     const codexHome = this.prepareHome(
       input.sandbox,

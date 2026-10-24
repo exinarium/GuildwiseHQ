@@ -26,13 +26,20 @@ export const isCodexModel = (model: string): boolean =>
   model.startsWith(CODEX_MODEL_PREFIX) || /^(gpt-\d|o\d|codex-)/i.test(model);
 
 /**
- * List prices in USD per million tokens by model id (prefix match, longest first). Empty on purpose: the prices of the models
- * the Codex CLI offers were not published where this table could be checked, so a Codex turn is "cost unknown" (costed 0 and
- * flagged), never priced as another model. Add an entry here to price one.
+ * List prices in USD per million tokens by model id (prefix match, longest first): the Standard tier, short context
+ * (up to 272K input tokens) of OpenAI's price list for the models the Codex CLI offers (developers.openai.com, checked
+ * 2026-10-24). OpenAI bills cached input tokens at `cacheRead` and does not bill cache writes separately. A model not listed
+ * here is "cost unknown" (costed 0 and flagged), never priced as another model. A ChatGPT plan login is not billed per token:
+ * its turns carry the same API-equivalent figure the Claude Code subscription turns do.
  */
 export const CODEX_MODEL_PRICES: Readonly<
   Record<string, { input: number; output: number; cacheRead?: number; cacheWrite?: number }>
-> = {};
+> = {
+  'gpt-6-luna': { input: 0.1, output: 0.5, cacheRead: 0.01 },
+  'gpt-6.1-sol': { input: 2, output: 10, cacheRead: 0.1 },
+  'gpt-6-sol': { input: 2, output: 10, cacheRead: 0.2 },
+  'gpt-6-astra': { input: 10, output: 50, cacheRead: 1 },
+};
 
 export function codexPrice(
   model: string,

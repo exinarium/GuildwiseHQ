@@ -12,7 +12,9 @@ import { codexRoleProblem, costUsdMicros, isCostUnknown } from '@aom/shared';
 import { describe, expect, it } from 'vitest';
 import {
   buildCodexCommand,
+  buildCodexHarnessCommand,
   CodexAdapter,
+  type CodexHost,
   codexFilesystem,
   codexHomeOf,
   codexPermissions,
@@ -26,6 +28,7 @@ import {
   codexUsageLimit,
   isCodexAuthFailureText,
 } from '../src/adapters/codex-stream-parser.ts';
+import type { HarnessLaunch } from '../src/adapters/harness-session.ts';
 import { buildAdapters } from '../src/adapters/registry.ts';
 import type { ChatStartInput, RuntimeEvent, RuntimeSession, ShiftStartInput } from '../src/adapters/types.ts';
 import { RunnerConfigSchema } from '../src/config.ts';
@@ -179,7 +182,14 @@ interface Rig {
 }
 
 function rig(
-  opts: { mode?: FakeMode; authMode?: 'login' | 'api_key'; apiKey?: string; noLogin?: boolean } = {},
+  opts: {
+    mode?: FakeMode;
+    authMode?: 'login' | 'api_key';
+    apiKey?: string;
+    noLogin?: boolean;
+    sandbox?: 'native' | 'harness';
+    host?: CodexHost;
+  } = {},
 ): Rig {
   const fake = fakeCodex(opts.mode ?? { lines: OK_LINES });
   const root = tmp('aom-codex-root-');
@@ -213,9 +223,10 @@ function rig(
       authMode: opts.authMode ?? 'login',
       ...(opts.apiKey ? { apiKey: opts.apiKey } : {}),
       toolchainPaths: [],
+      sandbox: opts.sandbox ?? 'native',
     },
     runnerPaths(root),
-    { home, parent, platform: 'linux' },
+    { home, parent, platform: 'linux', ...(opts.host ?? {}) },
   );
   return { adapter, fake, root, login, sandbox, cwd, parent };
 }
@@ -482,7 +493,7 @@ describe('codex adapter: a shift on a fake codex binary', () => {
   it('reports a spawn failure as startFailed', async () => {
     const r = rig();
     const adapter = new CodexAdapter(
-      { enabled: true, bin: '/nonexistent/codex', authMode: 'login', toolchainPaths: [] },
+      { enabled: true, bin: '/nonexistent/codex', authMode: 'login', toolchainPaths: [], sandbox: 'native' },
       runnerPaths(r.root),
       {
         home: join(r.login, '..', '..'),
@@ -532,7 +543,7 @@ describe('codex adapter: sandbox state and refusals', () => {
   it('is unavailable on a platform without the Codex sandbox', async () => {
     const r = rig();
     const adapter = new CodexAdapter(
-      { enabled: true, bin: r.fake.bin, authMode: 'login', toolchainPaths: [] },
+      { enabled: true, bin: r.fake.bin, authMode: 'login', toolchainPaths: [], sandbox: 'native' },
       runnerPaths(r.root),
       {
         platform: 'win32',
@@ -884,11 +895,17 @@ describe('codex stream parser', () => {
 });
 
 describe('codex cost', () => {
-  it('has no price for a Codex model: cost unknown, never a Claude price', () => {
+  it('prices a listed Codex model by tokens, never as a Claude model; an unlisted one is cost unknown', () => {
     for (const m of ['codex:gpt-6-sol', 'gpt-6-sol', 'gpt-6.1-sol', 'codex:gpt-6-astra']) {
-      expect(isCostUnknown(m)).toBe(true);
-      expect(costUsdMicros(m, { inputTokens: 1_000_000, outputTokens: 1_000_000 })).toBe(0);
+      expect(isCostUnknown(m)).toBe(false);
+      expect(costUsdMicros(m, { inputTokens: 1_000_000, outputTokens: 1_000_000 })).toBeGreaterThanOrEqual(
+        12_000_000,
+      );
     }
+    expect(isCostUnknown('codex:some-new-model')).toBe(true);
+    expect(costUsdMicros('codex:some-new-model', { inputTokens: 1_000_000, outputTokens: 1_000_000 })).toBe(
+      0,
+    );
     expect(isCostUnknown('sonnet')).toBe(false);
   });
 });
@@ -935,5 +952,226 @@ describe('codex registration', () => {
     expect(caps?.runtime).toBe('codex');
     expect(caps?.version).toBe('0.163.0');
     expect(readdirSync(fake.dir)).toContain('codex');
+  });
+});
+
+// ------------------------------------------------------------------------------------------------- the harness sandbox (R3c)
+
+describe('codex in the runner harness sandbox: the command', () => {
+  const input = (over: Record<string, unknown> = {}) => ({
+    prompt: 'Work card ABC-1',
+    cwd: '/work/wt',
+    model: 'gpt-6-sol',
+    shellEnv: {
+      PATH: '/runner/bin:/usr/bin',
+      HOME: '/agent/home',
+      AOM_SHIFT_TOKEN: 't',
+      HTTPS_PROXY: 'http://127.0.0.1:3128',
+    },
+    web: false,
+    codexHome: '/agent/codex',
+    auth: 'login' as const,
+    bridgePort: 3128,
+    ...over,
+  });
+  const cfg = { bin: '/usr/bin/codex' };
+  const configs = (args: string[]): string[] => args.flatMap((a, i) => (args[i - 1] === '-c' ? [a] : []));
+
+  it('switches Codex’s own sandbox off, with no permission profile: the runner’s bubblewrap is the boundary', () => {
+    const cmd = buildCodexHarnessCommand(input(), cfg, { PATH: '/usr/bin' });
+    const c = configs(cmd.args);
+    expect(c).toContain('sandbox_mode="danger-full-access"');
+    expect(c).toContain('approval_policy="never"');
+    expect(c.some((x) => x.startsWith('permissions.aom') || x.startsWith('default_permissions'))).toBe(false);
+    expect(cmd.args.slice(0, 3)).toEqual(['exec', '--json', '--skip-git-repo-check']);
+    expect(cmd.args).toContain('--strict-config');
+    // the prompt is on stdin, never in argv
+    expect(cmd.args.at(-1)).toBe('-');
+    expect(cmd.args.join(' ')).not.toContain('Work card');
+    expect(cmd.stdin).toBe('Work card ABC-1');
+    expect(cmd.env.CODEX_HOME).toBe('/agent/codex');
+    // the shell gets the session's variables (the proxy's among them), not the codex process's
+    const shell = c.find((x) => x.startsWith('shell_environment_policy')) ?? '';
+    expect(shell).toContain('"inherit" = "none"');
+    expect(shell).toContain('HTTPS_PROXY');
+    expect(shell).not.toContain('CODEX_');
+  });
+
+  it('login mode keeps the owner’s own login method and has no key; key mode points Codex at the proxy with a dummy key', () => {
+    const login = buildCodexHarnessCommand(input(), cfg, { PATH: '/usr/bin' });
+    expect(configs(login.args).some((x) => x.startsWith('forced_login_method'))).toBe(false);
+    expect(configs(login.args).some((x) => x.startsWith('openai_base_url'))).toBe(false);
+    expect(login.env.CODEX_API_KEY).toBeUndefined();
+    const key = buildCodexHarnessCommand(input({ auth: 'key' }), cfg, { PATH: '/usr/bin' });
+    expect(configs(key.args)).toContain('forced_login_method="api"');
+    expect(configs(key.args)).toContain('openai_base_url="http://127.0.0.1:3128/openai/v1"');
+    expect(key.env.CODEX_API_KEY).toBe('aom-key-is-added-by-the-runner');
+    expect(JSON.stringify(key)).not.toMatch(/sk-/);
+  });
+
+  it('resumes only a thread id (a UUID), passes web search and a known effort, and drops an unknown one', () => {
+    const id = '0190bbbb-1111-7222-8333-444455556666';
+    const resumed = buildCodexHarnessCommand(input({ resumeSessionId: id, web: true, effort: 'high' }), cfg);
+    expect(resumed.args.slice(-4)).toEqual(['resume', '--', id, '-']);
+    expect(configs(resumed.args)).toContain('web_search="live"');
+    expect(configs(resumed.args)).toContain('model_reasoning_effort="high"');
+    const bad = buildCodexHarnessCommand(input({ resumeSessionId: '--oops', effort: 'bogus' }), cfg);
+    expect(bad.args.slice(-2)).toEqual(['--', '-']);
+    expect(configs(bad.args).some((x) => x.startsWith('model_reasoning_effort'))).toBe(false);
+  });
+
+  it('writes the execpolicy rules without the "run aom outside the sandbox" exception, keeping the denied prefixes', () => {
+    const native = codexRules(PERMS, 'builder');
+    expect(native).toContain('prefix_rule(pattern=["aom"], decision="allow")');
+    const harness = codexRules(PERMS, 'builder', true);
+    expect(harness).not.toContain('decision="allow"');
+    expect(harness).toContain('pattern=["git","push"], decision="forbidden"');
+  });
+});
+
+describe('codex in the runner harness sandbox: the adapter', () => {
+  /** Starts the fake binary directly (no bubblewrap in a unit test) and records what the adapter asked of the sandbox. */
+  function harnessRig(
+    opts: { authMode?: 'login' | 'api_key'; apiKey?: string; noLogin?: boolean; probeOk?: boolean } = {},
+  ) {
+    const launches: HarnessLaunch[] = [];
+    const r = rig({
+      sandbox: 'harness',
+      ...(opts.authMode ? { authMode: opts.authMode } : {}),
+      ...(opts.apiKey ? { apiKey: opts.apiKey } : {}),
+      ...(opts.noLogin ? { noLogin: true } : {}),
+      host: {
+        harnessProbe: () =>
+          opts.probeOk === false
+            ? { ok: false, reason: 'bwrap not installed: apt install bubblewrap socat' }
+            : { ok: true, reason: 'runner-managed bubblewrap with an egress proxy' },
+        launch: async (l) => {
+          launches.push(l);
+          return {
+            command: { bin: l.cmd.bin, args: l.cmd.args, env: l.cmd.env },
+            proxy: { close: async () => undefined, denied: () => [], asked: () => [] },
+            cleanup: async () => undefined,
+          };
+        },
+      },
+    });
+    return { ...r, launches };
+  }
+
+  it('is the default on Linux and Codex’s own profile elsewhere, and can be forced', async () => {
+    const mk = (platform: NodeJS.Platform, sandbox?: 'native' | 'harness' | 'auto') =>
+      new CodexAdapter(
+        {
+          enabled: true,
+          bin: '/x/codex',
+          authMode: 'login',
+          toolchainPaths: [],
+          ...(sandbox ? { sandbox } : {}),
+        },
+        undefined,
+        { platform },
+      ).sandboxKind();
+    expect(mk('linux')).toBe('harness');
+    expect(mk('darwin')).toBe('native');
+    expect(mk('linux', 'native')).toBe('native');
+    expect(mk('darwin', 'harness')).toBe('harness');
+  });
+
+  it('runs a shift in the harness: domain allow-list of the login, writable Codex home, hidden login, replaced shell, aom socket', async () => {
+    const r = harnessRig();
+    const events = await drain(await r.adapter.start(shiftInput(r)));
+    expect(events.at(-1)).toMatchObject({ kind: 'exit', code: 0 });
+    const l = r.launches[0] as HarnessLaunch;
+    expect(l.cliHosts).toEqual(expect.arrayContaining(['chatgpt.com', 'auth.openai.com', 'api.openai.com']));
+    expect(l.routes).toBeUndefined();
+    expect(l.sandbox.writable).toEqual([codexHomeOf(r.sandbox)]);
+    expect(l.sandbox.readOnlyCwd).toBe(false);
+    expect(l.sandbox.mayCommit).toBe(true);
+    expect(l.hiddenFromShell).toEqual([join(codexHomeOf(r.sandbox), 'auth.json')]);
+    expect(l.unsetForShell).toEqual(expect.arrayContaining(['CODEX_API_KEY', 'CODEX_HOME']));
+    expect(l.replaceShell).toBe(true);
+    // the install of the binary is readable in the box; the runner's token and the owner's home are not offered
+    expect(l.sandbox.readonly.some((p) => p === r.fake.dir)).toBe(true);
+    expect(JSON.stringify(l.sandbox)).not.toContain('runner-secret');
+    // the codex process still gets its login copy, the agent’s skills and rules (no aom exception)
+    const call = r.fake.calls()[0] as Recorded;
+    expect(call.authJson).toContain('user-token');
+    expect(call.skills).toEqual([]);
+    expect(call.rules).not.toContain('decision="allow"');
+    expect(call.rules).toContain('forbidden');
+    expect(call.argv).toContain('sandbox_mode="danger-full-access"');
+  });
+
+  it('api key mode: the key lives in the proxy route, never in the process environment, argv, or the box', async () => {
+    const r = harnessRig({ authMode: 'api_key', apiKey: 'sk-config-key-9999' });
+    const events = await drain(await r.adapter.start(shiftInput(r)));
+    expect(events.at(-1)).toMatchObject({ kind: 'exit', code: 0 });
+    const l = r.launches[0] as HarnessLaunch;
+    expect(l.cliHosts).toEqual(['api.openai.com']);
+    expect(l.routes).toEqual([
+      {
+        prefix: '/openai',
+        upstream: 'https://api.openai.com',
+        headers: { authorization: 'Bearer sk-config-key-9999' },
+      },
+    ]);
+    expect(l.hiddenFromShell).toEqual([]);
+    const seen = JSON.stringify({ args: l.cmd.args, env: l.cmd.env, sandbox: l.sandbox });
+    expect(seen).not.toContain('sk-config-key-9999');
+    const call = r.fake.calls()[0] as Recorded;
+    expect(call.env.CODEX_API_KEY).toBe('aom-key-is-added-by-the-runner');
+    expect(call.authJson).toBeNull();
+    // the usage is attributed to the key (the organization cap counts it)
+    const usage = events.find((e) => e.kind === 'usage') as { usage: Record<string, unknown> };
+    expect(usage.usage).toMatchObject({
+      keySource: 'workstation',
+      keyProvider: 'openai',
+      model: 'codex:gpt-6-sol',
+    });
+  });
+
+  it('chats run with a read-only working folder and cannot commit', async () => {
+    const r = harnessRig();
+    const events = await drain(await r.adapter.startChat(chatInput(r)));
+    expect(events.at(-1)).toMatchObject({ kind: 'exit', code: 0 });
+    const l = r.launches[0] as HarnessLaunch;
+    expect(l.sandbox.readOnlyCwd).toBe(true);
+    expect(l.sandbox.mayCommit).toBe(false);
+  });
+
+  it('reports the harness sandbox in the capabilities, and refuses every session when it does not start', async () => {
+    const down = harnessRig({ probeOk: false });
+    const caps = await down.adapter.capabilities();
+    expect(caps).toMatchObject({ available: false, sandbox: 'unavailable', capabilities: [] });
+    expect(caps.sandboxReason).toContain('bwrap not installed');
+    await expect(down.adapter.start(shiftInput(down))).rejects.toThrow(/Codex sandbox is unavailable/);
+    expect(down.fake.calls()).toHaveLength(0);
+    const up = harnessRig();
+    expect(await up.adapter.capabilities()).toMatchObject({
+      available: true,
+      sandbox: 'enforced',
+      sandboxReason: 'runner-managed bubblewrap with an egress proxy',
+    });
+  });
+
+  it('refuses with the reason when nobody is signed in and there is no key', async () => {
+    const r = harnessRig({ noLogin: true });
+    await expect(r.adapter.start(shiftInput(r))).rejects.toThrow(/not signed in/);
+    const k = harnessRig({ authMode: 'api_key' });
+    await expect(k.adapter.start(shiftInput(k))).rejects.toThrow(/no API key/);
+  });
+
+  it('keeps the same role refusals (shell-less roles, browser, path-scoped writers, DevOps, CEO)', async () => {
+    const r = harnessRig();
+    for (const [roleKey, permissions] of [
+      ['analyst', { allowedTools: ['read'] }],
+      ['tester', { browser: true }],
+      ['writer', { writableGlobs: ['docs/**'] }],
+    ] as const)
+      await expect(
+        r.adapter.start(shiftInput(r, { roleKey, permissions: { ...PERMS, ...permissions } })),
+      ).rejects.toThrow(/codex_role_refused/);
+    await expect(r.adapter.start(shiftInput(r, { roleKey: 'ceo' }))).rejects.toThrow(/codex_role_refused/);
+    expect(r.launches).toHaveLength(0);
   });
 });

@@ -51,6 +51,11 @@ export interface HarnessSandboxInput {
   hiddenFromShell: string[];
   /** Where the shell shim lives (a folder the runner wrote, mounted read-only first in `PATH`). Needed with `hiddenFromShell`. */
   shimDir?: string;
+  /**
+   * A CLI that starts its shell by absolute path (`/bin/bash`, Codex) never looks in PATH: the shim is mounted over the box's own
+   * `bash` instead, and the real shell is reachable only at `REAL_SHELL_IN_BOX` (the shim runs it in the nested sandbox).
+   */
+  shellOverride?: { shim: string; real: string };
   nugetFallbackDir?: string;
   dotnetShmDir?: string;
   /** The `bwrap` binary (default: `bwrap` on PATH). */
@@ -114,6 +119,18 @@ export function harnessBwrapArgs(i: HarnessSandboxInput): string[] {
       // absent on this distribution
     }
   }
+  if (i.shellOverride) {
+    args.push('--ro-bind', i.shellOverride.real, REAL_SHELL_IN_BOX);
+    // the box's bash (and sh) are the shim: whatever starts `/bin/bash` by its absolute path runs the masked shell
+    for (const p of ['/usr/bin/bash', '/bin/bash']) {
+      try {
+        if (exists(p) && !lstatSync(p).isSymbolicLink() && !lstatSync(dirname(p)).isSymbolicLink())
+          args.push('--ro-bind', i.shellOverride.shim, p);
+      } catch {
+        // not there on this distribution
+      }
+    }
+  }
   const mounts: Mount[] = [];
   const bind = (p: string, writable: boolean): void => {
     if (exists(p)) mounts.push({ kind: writable ? 'bind' : 'ro-bind', src: p, dest: p });
@@ -161,6 +178,9 @@ export function harnessBwrapArgs(i: HarnessSandboxInput): string[] {
   return args;
 }
 
+/** Where the real shell lives inside a box whose `bash` is replaced by the shim. */
+export const REAL_SHELL_IN_BOX = '/run/aom-real-bash';
+
 const sq = (s: string): string => `'${s.replace(/'/g, `'\\''`)}'`;
 
 /**
@@ -174,6 +194,8 @@ export function shellShimScript(
   hidden: string[],
   unset: string[],
   bwrap = 'bwrap',
+  /** The shim's own interpreter. When the shim REPLACES the box's bash (and `sh` is bash) it must not be `/bin/sh`. */
+  interpreter = '/bin/sh',
 ): string {
   for (const p of [...hidden, ...unset, realShell, bwrap])
     if (/['\n]/.test(p))
@@ -181,7 +203,7 @@ export function shellShimScript(
   const list = hidden.map((p) => `'${p}'`).join(' ');
   const unsets = unset.map((v) => `--unsetenv '${v}'`).join(' ');
   const evalLine = String.raw`eval "exec '${bwrap}' --unshare-pid --unshare-ipc --unshare-uts --die-with-parent --bind / / --proc /proc --dev /dev $masks ${unsets} -- '${realShell}' \"\$@\""`;
-  return `#!/bin/sh
+  return `#!${interpreter}
 masks=""
 for f in ${list || "''"}; do
   [ -n "$f" ] || continue
@@ -229,7 +251,17 @@ export function wrapInHarnessSandbox(
   if (i.shimDir) env.PATH = `${i.shimDir}:${env.PATH ?? '/usr/bin:/bin'}`;
   return {
     bin: i.bwrap ?? 'bwrap',
-    args: [...harnessBwrapArgs(i), '--', '/bin/sh', '-c', script, 'sh', cmd.bin, ...cmd.args],
+    // the launcher must not be the masking shim itself: with the shim over `bash`, it runs the real shell
+    args: [
+      ...harnessBwrapArgs(i),
+      '--',
+      i.shellOverride ? REAL_SHELL_IN_BOX : '/bin/sh',
+      '-c',
+      script,
+      'sh',
+      cmd.bin,
+      ...cmd.args,
+    ],
     env,
   };
 }

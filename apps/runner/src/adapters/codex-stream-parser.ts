@@ -77,11 +77,18 @@ export class CodexStreamParser {
   private readonly started = new Set<string>();
   private readonly model: string | undefined;
   private readonly chat: boolean;
+  private readonly key: { source: 'org' | 'workstation'; provider: string } | undefined;
 
-  /** `chat`: a reply also arrives as `textstart` + `delta` (Codex gives it whole), as the chat stream expects. */
-  constructor(opts: { model?: string; chat?: boolean } = {}) {
+  /**
+   * `chat`: a reply also arrives as `textstart` + `delta` (Codex gives it whole), as the chat stream expects. `key`: the stored
+   * key that paid (absent: the owner's ChatGPT or API login in Codex's own files).
+   */
+  constructor(
+    opts: { model?: string; chat?: boolean; key?: { source: 'org' | 'workstation'; provider: string } } = {},
+  ) {
     this.model = opts.model;
     this.chat = opts.chat === true;
+    this.key = opts.key;
   }
 
   /** The run failed with a login problem (a `turn.failed` / `error` event, or the text of one). */
@@ -100,7 +107,11 @@ export class CodexStreamParser {
 
   /** Tokens of every turn so far; `model` is `codex:<model>` so the cost lookup never reaches a Claude price. */
   usage(): Usage {
-    return { ...this.total, ...(this.model ? { model: codexUsageModel(this.model) } : {}) };
+    return {
+      ...this.total,
+      ...(this.model ? { model: codexUsageModel(this.model) } : {}),
+      ...(this.key ? { keySource: this.key.source, keyProvider: this.key.provider } : {}),
+    };
   }
 
   /** The last call's input tokens: what the next message resumes on top of. */

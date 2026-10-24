@@ -55,12 +55,20 @@ describe('codex cost', () => {
       expect(isCodexModel(m)).toBe(true);
     for (const m of ['sonnet', 'claude-opus-5-5', 'openai:gpt-5', 'mock'])
       expect(isCodexModel(m)).toBe(false);
-    expect(codexPrice('codex:gpt-6-sol')).toBeNull();
+    expect(codexPrice('codex:gpt-6-sol')).toMatchObject({ input: 2, output: 10, cacheRead: 0.2 });
+    // a dated snapshot is priced like its model; an unlisted Codex model has no price
+    expect(codexPrice('codex:gpt-6.1-sol-2026-10-01')).toMatchObject({ input: 2, cacheRead: 0.1 });
+    expect(codexPrice('codex:o3')).toBeNull();
   });
 
-  it('flags a Codex turn as cost unknown (0), and leaves Claude models priced', () => {
+  it('prices a Codex turn by tokens, flags an unlisted model as cost unknown (0), and leaves Claude models priced', () => {
     const tokens = { inputTokens: 1_000_000, outputTokens: 1_000_000, cacheReadTokens: 1_000_000 };
-    for (const m of ['codex:gpt-6-sol', 'gpt-6-astra']) {
+    // 2 + 10 + 0.2 USD per million tokens, in micro-USD
+    expect(isCostUnknown('codex:gpt-6-sol')).toBe(false);
+    expect(costUsdMicros('codex:gpt-6-sol', tokens)).toBe(12_200_000);
+    expect(costUsdMicros('codex:gpt-6-luna', tokens)).toBe(610_000);
+    expect(costUsdMicros('gpt-6-astra', tokens)).toBe(61_000_000);
+    for (const m of ['codex:o3', 'codex:codex-mini-latest']) {
       expect(isCostUnknown(m)).toBe(true);
       expect(costUsdMicros(m, tokens)).toBe(0);
     }

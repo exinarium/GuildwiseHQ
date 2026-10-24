@@ -9,6 +9,7 @@ import {
 } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { ResumeState } from '@aom/shared';
+import { codexRolloutFile, readCodexRollout } from './codex-rollout.ts';
 
 /**
  * Claude Code sessions this runner started, so a later shift of the same agent can resume one (`claude --resume`) and the
@@ -32,6 +33,8 @@ export interface SessionRecord {
   contextTokens: number;
   /** The Claude account the session ran on (absent: `main`). A session is never resumed on another account. */
   accountKey?: string;
+  /** The runtime that ran it (absent: Claude Code). Codex keeps its own transcript, in the agent's Codex home. */
+  runtime?: string;
 }
 
 export interface ResumeDecision {
@@ -97,6 +100,8 @@ export class SessionRegistry {
     inheritFrom?: string;
     /** Absent or `main`: the main account. */
     accountKey?: string;
+    /** Absent or `claude-code`: Claude Code. */
+    runtime?: string;
   }): void {
     this.load();
     const nowIso = new Date(this.now()).toISOString();
@@ -110,6 +115,7 @@ export class SessionRegistry {
       updatedAt: nowIso,
       contextTokens: r.contextTokens ?? prior?.contextTokens ?? 0,
       ...(r.accountKey && r.accountKey !== 'main' ? { accountKey: r.accountKey } : {}),
+      ...(r.runtime && r.runtime !== 'claude-code' ? { runtime: r.runtime } : {}),
     });
     this.save();
   }
@@ -150,6 +156,23 @@ export class SessionRegistry {
         state: 'fresh_too_old',
         detail: `the session is ${(ageMs / 3_600_000).toFixed(1)} hours old (limit ${RESUME_MAX_AGE_MS / 3_600_000})`,
       };
+    if (r.runtime === 'codex') {
+      // Codex's thread lives in the agent's own Codex home (`agents/<id>/codex`, next to the Claude config dir)
+      const file = codexRolloutFile(join(dirname(configDir), 'codex'), sessionId);
+      const info = file ? readCodexRollout(file) : undefined;
+      if (!info || info.id !== sessionId)
+        return {
+          state: 'fresh_transcript_missing',
+          detail: 'the Codex thread is gone from the agent’s Codex home',
+        };
+      // the rollout is the truth about size when the record has none yet (a crash before the last update)
+      if (info.contextTokens > RESUME_MAX_CONTEXT_TOKENS)
+        return {
+          state: 'fresh_too_large',
+          detail: `the session holds ${Math.round(info.contextTokens / 1000)}K context tokens (limit ${RESUME_MAX_CONTEXT_TOKENS / 1000}K)`,
+        };
+      return { state: 'resumed' };
+    }
     if (
       !existsSync(transcriptFile(configDir, r.cwd, sessionId)) &&
       !findTranscriptAnywhere(configDir, sessionId)

@@ -150,7 +150,14 @@ describe.skipIf(!BIN)('codex adapter against the real codex binary', () => {
     const api = fakeApi(script, bodies);
     const port = await api.port;
     const adapter = new CodexAdapter(
-      { enabled: true, bin: BIN as string, authMode: 'login', loginDir, toolchainPaths: [] },
+      {
+        enabled: true,
+        bin: BIN as string,
+        authMode: 'login',
+        loginDir,
+        toolchainPaths: [],
+        sandbox: 'native',
+      },
       undefined,
       {
         extraArgs: ['-c', `openai_base_url="http://127.0.0.1:${port}/v1"`],
