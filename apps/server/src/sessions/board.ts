@@ -1078,7 +1078,8 @@ export class BoardService {
 
   private async finishEnd(t: Row): Promise<void> {
     const f = (await this.fresh(t.id)) ?? t;
-    if (parseBoardConfig(f.session_config).stage === 'ended') return;
+    const cfg0 = parseBoardConfig(f.session_config);
+    if (cfg0.stage === 'ended') return;
     await this.ctx.store.append([
       this.configEvent(f, {
         stage: 'ended',
@@ -1086,6 +1087,8 @@ export class BoardService {
         minutesRequested: null,
         minutesAsk: null,
         timeUp: null,
+        // archived while it was running (Q53): it is archived now that the minutes are written
+        ...(cfg0.archiveAfterEnd ? { archived: true, archiveAfterEnd: null } : {}),
       }),
       this.systemMessage(f, 'The session is over. The minutes are ready.', { minutes: true }),
     ]);
@@ -1515,6 +1518,24 @@ export class BoardService {
       await this.beginMinutes(f, 'owner', { userId });
     });
     return this.state(userId, threadId);
+  }
+
+  /**
+   * Archiving a running boardroom (Q53): it is ended first, the minutes are written as on End, and it is archived when they
+   * are ready (at once when it is already over). The Chair's summary takes a turn, so the archive follows the minutes.
+   */
+  async endAndArchive(userId: string, threadId: string): Promise<void> {
+    await this.end(userId, threadId);
+    await this.serialized(threadId, async () => {
+      const f = await this.fresh(threadId);
+      if (!f) throw notFound('session not found');
+      const cfg = parseBoardConfig(f.session_config);
+      if (cfg.archived) return;
+      if (cfg.stage === 'ended')
+        await this.ctx.store.append([this.configEvent(f, { archived: true }, userActor(userId))]);
+      else if (!cfg.archiveAfterEnd)
+        await this.ctx.store.append([this.configEvent(f, { archiveAfterEnd: true }, userActor(userId))]);
+    });
   }
 
   async patch(userId: string, threadId: string, req: PatchBoardRequest): Promise<BoardStateDto> {

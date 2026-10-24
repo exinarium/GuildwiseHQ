@@ -7,6 +7,7 @@ import {
   type ParticipantInput,
   type PatchSessionRequest,
   type PostSessionMessageRequest,
+  parseBoardConfig,
   SESSION_THREAD_KINDS,
   type SessionDto,
   streamId,
@@ -521,7 +522,25 @@ export async function setSessionArchived(
   userId: string,
   threadId: string,
   archived: boolean,
+  endFirst = false,
 ): Promise<SessionDto> {
+  if (archived) {
+    // A running boardroom is ended first, with its minutes (Q53); enforced here, not only by the page.
+    const t0 = await loadSession(ctx.pool, userId, threadId);
+    if (t0.kind === 'boardroom') {
+      const cfg = parseBoardConfig(t0.session_config);
+      if (!cfg.archived && cfg.stage !== 'setup' && cfg.stage !== 'ended') {
+        await assertSessionManager(ctx.pool, userId, t0);
+        if (!endFirst)
+          throw conflict(
+            'boardroom_running',
+            'This boardroom is still running. End it first (its minutes are written), then archive it: send endFirst to do both.',
+          );
+        await ctx.services.board.endAndArchive(userId, threadId);
+        return sessionDto(ctx, (await one(ctx.pool, 'SELECT * FROM threads WHERE id=$1', [threadId])) as Row);
+      }
+    }
+  }
   const t = await withAppendTx(ctx.pool, async (tx) => {
     const t = await loadSession(tx, userId, threadId, true);
     await assertSessionManager(tx, userId, t);

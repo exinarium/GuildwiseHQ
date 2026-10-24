@@ -289,7 +289,8 @@ export function BoardroomSession() {
             threadId={id}
             archived={archived}
             backTo="/boardroom"
-            canArchive={over || s.config.stage === 'setup'}
+            endFirst={!over && s.config.stage !== 'setup'}
+            archivePending={!!s.config.archiveAfterEnd}
           />
         )}
         <ul className="flex flex-wrap gap-1.5" aria-label="Cast" data-testid="cast">

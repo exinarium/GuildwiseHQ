@@ -325,6 +325,7 @@ export async function boardState(ctx: Ctx, t: Row, userId: string): Promise<Boar
       budgetStopped: cfg.budgetStopped,
       endReason: cfg.endReason,
       archived: cfg.archived,
+      archiveAfterEnd: cfg.archiveAfterEnd,
       budgetUsd: cost.budgetUsd,
       minutesAsk: cfg.minutesAsk,
       models: cfg.models,

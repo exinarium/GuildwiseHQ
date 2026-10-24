@@ -1193,6 +1193,26 @@ describe('R2: fixed seats, limits, ownership, archive', () => {
     expect(await screen.findByText('No boardrooms yet')).toBeInTheDocument();
   });
 
+  it('asks before archiving a running boardroom, then ends and archives it (Q53)', async () => {
+    const running = state({ config: { ...state().config, stage: 'round' } });
+    const calls = mountSession(running, { [`POST /api/sessions/${T}/archive`]: () => ({ session: {} }) });
+    const user = userEvent.setup();
+    await user.click(await screen.findByTestId('archive-session'));
+    const dlg = await screen.findByRole('dialog');
+    expect(dlg).toHaveTextContent('minutes');
+    expect(calls.some((c) => c.url.endsWith('/archive'))).toBe(false);
+    await user.click(within(dlg).getByRole('button', { name: 'End and archive' }));
+    await waitFor(() =>
+      expect(calls.find((c) => c.url.endsWith('/archive'))?.body).toEqual({ archived: true, endFirst: true }),
+    );
+  });
+
+  it('shows that a boardroom is writing its minutes before it is archived', async () => {
+    mountSession(state({ config: { ...state().config, stage: 'minutes', archiveAfterEnd: true } }));
+    expect(await screen.findByTestId('archive-pending')).toBeInTheDocument();
+    expect(screen.queryByTestId('archive-session')).toBeNull();
+  });
+
   it('puts an archived boardroom in read-only mode', async () => {
     mountSession(state({ config: { ...state().config, archived: true } }));
     expect(await screen.findByTestId('archived-banner')).toBeInTheDocument();

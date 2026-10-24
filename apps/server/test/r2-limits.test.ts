@@ -200,6 +200,65 @@ describe('Boardroom time limit', () => {
   });
 });
 
+describe('Archiving a running boardroom (Q53)', () => {
+  it('is refused without endFirst; with it the boardroom ends, the minutes are written, and it is archived after', async () => {
+    const st = await K.createBoard({ roundCap: 3 });
+    for (let i = 0; i < 5; i++) await K.finish(await K.nextStart(st.threadId, K.role('speaker')));
+    const first = await K.nextStart(st.threadId, K.role('chair'));
+    // the server refuses to archive a running session by itself
+    const refused = await K.raw('POST', `/api/sessions/${st.threadId}/archive`, { archived: true });
+    expect(refused.status).toBe(409);
+    expect((await K.board(st.threadId)).config.archived).toBeFalsy();
+    // a member who does not manage the session cannot do it either
+    const member = await w.t.userSession('r2-archive-member@example.test');
+    await w.t.addOrgMember(w.owner.id, member.id, 'member');
+    expect(
+      (
+        await K.as(member.cookie)('POST', `/api/sessions/${st.threadId}/archive`, {
+          archived: true,
+          endFirst: true,
+        })
+      ).status,
+    ).toBeGreaterThanOrEqual(403);
+    // with endFirst: it goes to the minutes (as on End) and is archived once they are written
+    const res = await K.owner('POST', `/api/sessions/${st.threadId}/archive`, {
+      archived: true,
+      endFirst: true,
+    });
+    expect(res.session.config.archived).toBeFalsy();
+    let s = await K.board(st.threadId);
+    expect(s.config.stage).toBe('minutes');
+    expect(s.config.endReason).toBe('owner');
+    expect(s.config.archiveAfterEnd).toBe(true);
+    // a second click while the minutes are written changes nothing
+    await K.owner('POST', `/api/sessions/${st.threadId}/archive`, { archived: true, endFirst: true });
+    await K.finish(first);
+    const min = await K.nextStart(st.threadId, K.role('minutes'));
+    await K.call(min.chatId, 'board.minutes', {
+      content: '## Positions\n\n- all\n## Agreements\n\n- none\n## Open questions\n\n- x',
+    });
+    await K.finish(min);
+    await until(async () => (await K.board(st.threadId)).config.archived === true);
+    s = await K.board(st.threadId);
+    expect(s.config).toMatchObject({ stage: 'ended', archived: true });
+    expect(s.config.archiveAfterEnd).toBeFalsy();
+    expect(s.config.minutesDocId).toBeTruthy();
+    // it survives a replay
+    const before = (await q('SELECT session_config FROM threads WHERE id=$1', [st.threadId]))[0]
+      .session_config;
+    await rebuildProjections(w.t.app.ctx.pool, w.t.app.ctx.store, w.t.clock.now());
+    expect(
+      (await q('SELECT session_config FROM threads WHERE id=$1', [st.threadId]))[0].session_config,
+    ).toEqual(before);
+    // an unstarted or finished boardroom archives plainly (no endFirst needed): this one is over
+    await K.owner('POST', `/api/sessions/${st.threadId}/archive`, { archived: false });
+    expect(
+      (await K.owner('POST', `/api/sessions/${st.threadId}/archive`, { archived: true })).session.config
+        .archived,
+    ).toBe(true);
+  });
+});
+
 describe('Discovery time limit', () => {
   it('warns, then holds every new question at time-up until the creator extends; paused time does not count', async () => {
     const s = await K.createDiscovery({ timeBoxMinutes: 15 });

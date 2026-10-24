@@ -10,17 +10,23 @@ export function SessionAdmin({
   archived,
   backTo,
   canArchive = true,
+  endFirst = false,
+  archivePending = false,
 }: {
   threadId: string;
   archived: boolean;
   backTo: string;
-  /** A running boardroom is ended before it is archived. */
   canArchive?: boolean;
+  /** A running boardroom: archiving asks first, ends it (the minutes are written) and then archives it (Q53). */
+  endFirst?: boolean;
+  /** The boardroom is writing its minutes and will be archived when they are ready. */
+  archivePending?: boolean;
 }) {
   const nav = useNavigate();
   const archive = useArchiveSession(threadId);
   const remove = useDeleteSession(threadId);
   const [confirm, setConfirm] = useState(false);
+  const [confirmEnd, setConfirmEnd] = useState(false);
   return (
     <div className="flex flex-wrap items-center gap-2" data-testid="session-admin">
       {archived ? (
@@ -34,12 +40,16 @@ export function SessionAdmin({
           <ArchiveRestore aria-hidden="true" className="size-4" />
           Reopen
         </Button>
+      ) : archivePending ? (
+        <span className="text-sm text-muted" role="status" data-testid="archive-pending">
+          Writing the minutes, then it is archived.
+        </span>
       ) : (
         canArchive && (
           <Button
             size="sm"
             variant="ghost"
-            onClick={() => archive.mutate(true)}
+            onClick={() => (endFirst ? setConfirmEnd(true) : archive.mutate(true))}
             loading={archive.isPending}
             data-testid="archive-session"
           >
@@ -53,6 +63,17 @@ export function SessionAdmin({
         Delete
       </Button>
       <ErrorBox error={archive.error} />
+      <ConfirmDialog
+        open={confirmEnd}
+        onOpenChange={setConfirmEnd}
+        title="End this boardroom and archive it?"
+        description="The boardroom is still running. It ends now, the Chair writes the minutes as when you click End, and the session is archived when they are ready."
+        confirmLabel="End and archive"
+        pending={archive.isPending}
+        onConfirm={() =>
+          archive.mutate({ archived: true, endFirst: true }, { onSuccess: () => setConfirmEnd(false) })
+        }
+      />
       <ConfirmDialog
         open={confirm}
         onOpenChange={setConfirm}

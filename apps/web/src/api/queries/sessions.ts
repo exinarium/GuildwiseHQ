@@ -6,7 +6,8 @@ import { del, post } from '../client.ts';
 export function useArchiveSession(id: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (archived: boolean) => post(`/sessions/${id}/archive`, { archived }),
+    mutationFn: (arg: boolean | { archived: boolean; endFirst?: boolean }) =>
+      post(`/sessions/${id}/archive`, typeof arg === 'boolean' ? { archived: arg } : arg),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['discovery', id] });
       void qc.invalidateQueries({ queryKey: ['sessions'] });

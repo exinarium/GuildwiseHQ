@@ -72,7 +72,13 @@ export function sessionRoutes(ctx: Ctx) {
       async (req) => {
         const a = await requireOrg(ctx, req);
         return {
-          session: await setSessionArchived(ctx, a.session.user.id, req.params.id, req.body.archived),
+          session: await setSessionArchived(
+            ctx,
+            a.session.user.id,
+            req.params.id,
+            req.body.archived,
+            req.body.endFirst,
+          ),
         };
       },
     );

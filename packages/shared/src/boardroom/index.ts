@@ -193,6 +193,8 @@ export const BoardConfigSchema = z.object({
   minutesWithoutSummary: z.boolean().default(false),
   /** Read-only: the creator archived the session. */
   archived: z.boolean().default(false),
+  /** The creator archived a running session (Q53): it is ending, and is archived when the minutes are written. */
+  archiveAfterEnd: z.boolean().default(false),
   /** Chair turns in a row that ended without a valid pick (after two the server picks). */
   chairFailures: z.number().int().nonnegative().default(0),
   /** Why the last attempt to start a turn was refused (budget, paused project); the page shows it, the sweep retries. */
@@ -532,6 +534,7 @@ export const BoardStateDtoSchema = z.object({
     budgetStopped: z.boolean(),
     endReason: z.enum(['owner', 'round_cap', 'time']).nullable(),
     archived: z.boolean().optional(),
+    archiveAfterEnd: z.boolean().optional(),
     budgetUsd: z.number().nullable().optional(),
     /** The minutes wait for the creator: `budget` = write them without the Chair's summary, or raise the limit. */
     minutesAsk: z.enum(['budget']).nullable().optional(),

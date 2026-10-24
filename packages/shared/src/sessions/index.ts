@@ -79,7 +79,11 @@ export const SessionContextSchema = z.object({
 export type SessionContext = z.infer<typeof SessionContextSchema>;
 
 /** `POST /api/sessions/:id/archive`: `true` makes the session read-only, `false` opens it again. */
-export const ArchiveSessionRequestSchema = z.object({ archived: z.boolean() });
+export const ArchiveSessionRequestSchema = z.object({
+  archived: z.boolean(),
+  /** Archiving a running boardroom: end it first (the minutes are written as on End), then archive (Q53). Without it the server refuses. */
+  endFirst: z.boolean().optional(),
+});
 export type ArchiveSessionRequest = z.infer<typeof ArchiveSessionRequestSchema>;
 
 export const SESSION_TURN_MAX_ATTEMPTS = 3;
