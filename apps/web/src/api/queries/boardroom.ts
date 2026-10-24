@@ -6,6 +6,7 @@ import type {
   PatchBoardRequest,
   SaveBoardRoomRequest,
   SessionDto,
+  SessionTimeAction,
   StartBoardRequest,
   StickyColumn,
   SuggestCastRequest,
@@ -99,6 +100,14 @@ export const useEndBoard = (id: string) =>
   useBoardAction(id, (_: void) => post<StateResponse>(`/board/${id}/end`, {}));
 export const usePatchBoard = (id: string) =>
   useBoardAction(id, (b: PatchBoardRequest) => patch<StateResponse>(`/board/${id}`, b));
+/** The creator's answer to "time is up": extend, or wrap up (write the minutes). */
+export const useBoardTime = (id: string) =>
+  useBoardAction(id, (b: SessionTimeAction) => post<StateResponse>(`/board/${id}/time`, b));
+/** The budget ran out before the Chair's summary: write the minutes without it. */
+export const useMinutesChoice = (id: string) =>
+  useBoardAction(id, (_: void) =>
+    post<StateResponse>(`/board/${id}/minutes-choice`, { choice: 'without_summary' }),
+  );
 export const useWriteMinutes = (id: string) =>
   useBoardAction(id, (_: void) => post<StateResponse>(`/board/${id}/minutes`, {}));
 export const useResolveDecision = (id: string) =>

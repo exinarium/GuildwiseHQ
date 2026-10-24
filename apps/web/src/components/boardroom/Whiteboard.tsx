@@ -15,6 +15,7 @@ import {
   useVoteBoardNote,
 } from '../../api/queries/boardroom.ts';
 import { Button, cx, ErrorBox } from '../ui.tsx';
+import { ScoreTally } from './ScoreTally.tsx';
 
 const COLUMN_TONE: Record<StickyColumn, string> = {
   ideas: 'border-t-success-fill',
@@ -30,8 +31,12 @@ function Note({
   selecting,
   selected,
   onToggle,
+  canManage,
+  readOnly,
 }: {
   note: BoardNoteDto;
+  canManage: boolean;
+  readOnly: boolean;
   threadId: string;
   selecting: boolean;
   selected: boolean;
@@ -48,7 +53,7 @@ function Note({
   };
   return (
     <li
-      draggable={!editing}
+      draggable={canManage && !readOnly && !editing}
       onDragStart={(e) => {
         e.dataTransfer.setData('text/plain', note.id);
         e.dataTransfer.effectAllowed = 'move';
@@ -102,6 +107,7 @@ function Note({
           aria-label={note.votedByMe ? 'Take back your vote' : 'Vote +1'}
           aria-pressed={note.votedByMe}
           data-testid="vote-note"
+          disabled={readOnly}
           onClick={() => vote.mutate(note.id)}
           className={cx(
             'inline-flex h-7 items-center gap-1 rounded-control px-1.5 [@media(pointer:coarse)]:h-9',
@@ -111,37 +117,41 @@ function Note({
           <ThumbsUp aria-hidden="true" className="size-3.5" />
           <span className="tnum">{note.votes}</span>
         </button>
-        <label className="sr-only" htmlFor={`move-${note.id}`}>
-          Move to
-        </label>
-        <select
-          id={`move-${note.id}`}
-          value={note.column}
-          onChange={(e) => patch.mutate({ noteId: note.id, column: e.target.value as StickyColumn })}
-          className="h-7 rounded-control border border-control bg-surface px-1 text-xs [@media(pointer:coarse)]:h-9"
-        >
-          {BOARD_COLUMNS.map((c) => (
-            <option key={c} value={c}>
-              {BOARD_COLUMN_LABEL[c]}
-            </option>
-          ))}
-        </select>
-        <button
-          type="button"
-          aria-label="Edit note text"
-          onClick={() => setEditing(true)}
-          className="inline-flex size-7 items-center justify-center rounded-control text-muted hover:bg-sunken hover:text-fg [@media(pointer:coarse)]:size-9"
-        >
-          <Pencil aria-hidden="true" className="size-3.5" />
-        </button>
-        <button
-          type="button"
-          aria-label="Delete note"
-          onClick={() => remove.mutate(note.id)}
-          className="inline-flex size-7 items-center justify-center rounded-control text-muted hover:bg-danger-soft hover:text-danger [@media(pointer:coarse)]:size-9"
-        >
-          <Trash2 aria-hidden="true" className="size-3.5" />
-        </button>
+        {canManage && !readOnly && (
+          <>
+            <label className="sr-only" htmlFor={`move-${note.id}`}>
+              Move to
+            </label>
+            <select
+              id={`move-${note.id}`}
+              value={note.column}
+              onChange={(e) => patch.mutate({ noteId: note.id, column: e.target.value as StickyColumn })}
+              className="h-7 rounded-control border border-control bg-surface px-1 text-xs [@media(pointer:coarse)]:h-9"
+            >
+              {BOARD_COLUMNS.map((c) => (
+                <option key={c} value={c}>
+                  {BOARD_COLUMN_LABEL[c]}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              aria-label="Edit note text"
+              onClick={() => setEditing(true)}
+              className="inline-flex size-7 items-center justify-center rounded-control text-muted hover:bg-sunken hover:text-fg [@media(pointer:coarse)]:size-9"
+            >
+              <Pencil aria-hidden="true" className="size-3.5" />
+            </button>
+            <button
+              type="button"
+              aria-label="Delete note"
+              onClick={() => remove.mutate(note.id)}
+              className="inline-flex size-7 items-center justify-center rounded-control text-muted hover:bg-danger-soft hover:text-danger [@media(pointer:coarse)]:size-9"
+            >
+              <Trash2 aria-hidden="true" className="size-3.5" />
+            </button>
+          </>
+        )}
       </div>
     </li>
   );
@@ -185,7 +195,15 @@ function AddNote({ threadId, column }: { threadId: string; column: StickyColumn 
  * The whiteboard: five columns of sticky notes. Agents add notes; the owner adds, edits, moves (drag a note to another column,
  * or use its Move menu), votes +1, merges several notes into one and deletes.
  */
-export function Whiteboard({ state }: { state: BoardStateDto }) {
+export function Whiteboard({
+  state,
+  canManage = true,
+  readOnly = false,
+}: {
+  state: BoardStateDto;
+  canManage?: boolean;
+  readOnly?: boolean;
+}) {
   const threadId = state.threadId;
   const patch = usePatchBoardNote(threadId);
   const merge = useMergeBoardNotes(threadId);
@@ -207,20 +225,23 @@ export function Whiteboard({ state }: { state: BoardStateDto }) {
   };
   return (
     <div className="flex flex-col gap-3" data-testid="whiteboard">
+      <ScoreTally scores={state.scores ?? []} />
       <div className="flex flex-wrap items-center gap-2">
-        <Button
-          size="sm"
-          variant={selecting ? 'primary' : 'secondary'}
-          aria-pressed={selecting}
-          onClick={() => {
-            setSelecting(!selecting);
-            setPicked([]);
-          }}
-          data-testid="merge-mode"
-        >
-          <GitMerge aria-hidden="true" className="size-4" />
-          Merge notes
-        </Button>
+        {canManage && !readOnly && (
+          <Button
+            size="sm"
+            variant={selecting ? 'primary' : 'secondary'}
+            aria-pressed={selecting}
+            onClick={() => {
+              setSelecting(!selecting);
+              setPicked([]);
+            }}
+            data-testid="merge-mode"
+          >
+            <GitMerge aria-hidden="true" className="size-4" />
+            Merge notes
+          </Button>
+        )}
         {selecting && (
           <Button
             size="sm"
@@ -259,7 +280,7 @@ export function Whiteboard({ state }: { state: BoardStateDto }) {
                 setOver(null);
                 const id = e.dataTransfer.getData('text/plain');
                 const n = state.notes.find((x) => x.id === id);
-                if (n && n.column !== c) patch.mutate({ noteId: id, column: c });
+                if (canManage && !readOnly && n && n.column !== c) patch.mutate({ noteId: id, column: c });
               }}
               className={cx(
                 'flex flex-col gap-2 rounded-card border border-t-4 border-line bg-sunken p-2.5',
@@ -280,10 +301,12 @@ export function Whiteboard({ state }: { state: BoardStateDto }) {
                     selecting={selecting}
                     selected={picked.includes(n.id)}
                     onToggle={() => toggle(n.id)}
+                    canManage={canManage}
+                    readOnly={readOnly}
                   />
                 ))}
               </ul>
-              <AddNote threadId={threadId} column={c} />
+              {!readOnly && <AddNote threadId={threadId} column={c} />}
             </section>
           );
         })}

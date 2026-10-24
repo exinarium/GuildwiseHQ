@@ -16,12 +16,15 @@ export function QuestionCard({
   onAnswer,
   busy,
   error,
+  readOnly,
 }: {
   q: QuestionDto;
   ceoName: string | null;
   onAnswer: (body: AnswerQuestionRequest) => void;
   busy?: boolean;
   error?: string | null;
+  /** Not the creator: the card is shown, the answer is theirs to give. */
+  readOnly?: boolean;
 }) {
   const [text, setText] = useState('');
   const [editing, setEditing] = useState(false);
@@ -48,6 +51,18 @@ export function QuestionCard({
       </li>
     );
 
+  if (readOnly)
+    return (
+      <li
+        data-testid="question-card"
+        data-status={q.status}
+        data-readonly="true"
+        className="flex flex-col gap-1 rounded-card border border-brand/40 bg-surface p-4"
+      >
+        <h3 className="text-base font-semibold text-fg [overflow-wrap:anywhere]">{q.question}</h3>
+        <p className="text-sm text-muted">Waiting for the session creator to answer.</p>
+      </li>
+    );
   const proposed = q.proposed;
   const review = q.status === 'proposed';
   const who = proposed?.byName ?? ceoName ?? 'The CEO';

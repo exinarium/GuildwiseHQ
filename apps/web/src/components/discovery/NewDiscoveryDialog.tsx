@@ -2,6 +2,9 @@ import {
   CEO_MODES,
   type CreateDiscoveryRequest,
   DISCOVERY_PLAYBOOKS,
+  DISCOVERY_PREP_TURN_CAP,
+  DISCOVERY_PREP_TURN_CAP_MAX,
+  DISCOVERY_PREP_TURN_CAP_MIN,
   DISCOVERY_STANCES,
   type DiscoveryCeoMode,
   type DiscoveryStance,
@@ -20,16 +23,10 @@ import {
   STANCE_HELP,
   STANCE_LABEL,
 } from '../../lib/discovery.ts';
+import { TIME_LIMIT_PRESETS } from '../../lib/session.ts';
 import { ModelSelect, toChoice, unionExtras, unionProviders } from '../ModelSelect.tsx';
+import { WorkstationPicker } from '../session/WorkstationPicker.tsx';
 import { Button, Dialog, ErrorBox, Select, TextArea, TextInput } from '../ui.tsx';
-
-const TIME_BOXES = [
-  { value: '', label: 'No time box' },
-  { value: '15', label: '15 minutes' },
-  { value: '30', label: '30 minutes' },
-  { value: '60', label: '1 hour' },
-  { value: '90', label: '90 minutes' },
-];
 
 /** "New discovery": title, project, stance, CEO mode (only when there is a CEO), time box, starting playbook and idea. */
 export function NewDiscoveryDialog({
@@ -68,10 +65,16 @@ export function NewDiscoveryDialog({
   );
   const [idea, setIdea] = useState('');
   const [budget, setBudget] = useState('');
+  const [workstationId, setWorkstationId] = useState('');
+  const [prepCap, setPrepCap] = useState(String(DISCOVERY_PREP_TURN_CAP));
+  const prepN = Number(prepCap);
+  const prepOk =
+    Number.isInteger(prepN) && prepN >= DISCOVERY_PREP_TURN_CAP_MIN && prepN <= DISCOVERY_PREP_TURN_CAP_MAX;
+  const prepMode = ceoAvailable && ceoMode === 'ceo_prep';
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    if (!title.trim()) return;
+    if (!title.trim() || (prepMode && !prepOk)) return;
     const body: CreateDiscoveryRequest = {
       title: title.trim(),
       stance,
@@ -83,6 +86,8 @@ export function NewDiscoveryDialog({
       ...(projectId ? { projectId } : {}),
       ...(timeBox ? { timeBoxMinutes: Number(timeBox) } : {}),
       ...(budget.trim() && Number(budget) > 0 ? { budgetUsd: Number(budget) } : {}),
+      ...(workstationId ? { workstationId } : {}),
+      ...(prepMode ? { prepTurnCap: prepN } : {}),
     };
     create.mutate(body, {
       onSuccess: (s) => {
@@ -107,7 +112,7 @@ export function NewDiscoveryDialog({
             type="submit"
             form="new-discovery"
             loading={create.isPending}
-            disabled={!title.trim()}
+            disabled={!title.trim() || (prepMode && !prepOk)}
           >
             Start
           </Button>
@@ -169,6 +174,23 @@ export function NewDiscoveryDialog({
             ))}
           </Select>
         )}
+        {prepMode && (
+          <TextInput
+            label="CEO pre-draft turns"
+            type="number"
+            min={DISCOVERY_PREP_TURN_CAP_MIN}
+            max={DISCOVERY_PREP_TURN_CAP_MAX}
+            step="1"
+            value={prepCap}
+            onChange={(e) => setPrepCap(e.target.value)}
+            error={
+              prepOk ? undefined : `Between ${DISCOVERY_PREP_TURN_CAP_MIN} and ${DISCOVERY_PREP_TURN_CAP_MAX}`
+            }
+            hint="How many answers the CEO drafts on its own before you review them."
+            data-testid="prep-cap"
+          />
+        )}
+        <WorkstationPicker value={workstationId} onChange={setWorkstationId} open={open} />
         <Select label="Start from" value={playbook} onChange={(e) => setPlaybook(e.target.value)}>
           {DISCOVERY_PLAYBOOKS.map((p) => (
             <option key={p} value={p}>
@@ -197,22 +219,27 @@ export function NewDiscoveryDialog({
           </Select>
         )}
         <div className="grid gap-3.5 sm:grid-cols-2">
-          <Select label="Time box" value={timeBox} onChange={(e) => setTimeBox(e.target.value)}>
-            {TIME_BOXES.map((t) => (
+          <Select
+            label="Time limit"
+            value={timeBox}
+            onChange={(e) => setTimeBox(e.target.value)}
+            hint="Optional. Like a meeting: you see the time left, and choose what happens when it is up."
+          >
+            {TIME_LIMIT_PRESETS.map((t) => (
               <option key={t.value} value={t.value}>
                 {t.label}
               </option>
             ))}
           </Select>
           <TextInput
-            label="Budget in USD (optional)"
+            label="Cost limit in USD (optional)"
             type="number"
             min="0.5"
             step="0.5"
             inputMode="decimal"
             value={budget}
             onChange={(e) => setBudget(e.target.value)}
-            hint="The session stops asking the model when it is used up."
+            hint="Empty means no limit. A limit stops the session asking the model when it is used up."
           />
         </div>
         <ModelSelect

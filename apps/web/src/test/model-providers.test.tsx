@@ -75,6 +75,15 @@ beforeEach(() => {
               source: 'builtin',
               overrides: false,
             },
+            {
+              kind: 'persona',
+              key: 'ops',
+              name: 'Ops',
+              description: 'Run it',
+              hash: 'h',
+              source: 'builtin',
+              overrides: false,
+            },
           ],
           issues: [],
           indexedAt: null,
@@ -253,6 +262,7 @@ describe('model pickers with direct providers', () => {
     await user.type(within(dialog).getByLabelText('Topic'), 'Launch?');
     await user.click(await within(dialog).findByRole('checkbox', { name: 'Cost Hawk' }));
     await user.click(within(dialog).getByRole('checkbox', { name: 'Security' }));
+    await user.click(within(dialog).getByRole('checkbox', { name: 'Ops' }));
     await user.click(within(dialog).getByText(/Model per seat/));
     await user.selectOptions(
       await within(dialog).findByLabelText('Model for Cost Hawk'),
@@ -270,8 +280,11 @@ describe('model pickers with direct providers', () => {
     const body = (calls.find((c) => c.method === 'POST' && c.url === '/api/board') as Call).body;
     expect(body.models).toEqual({ chair: { runtime: 'direct-model', model: 'google:gemini-2.5-pro' } });
     expect(body.cast).toEqual([
+      { kind: 'persona', refId: 'optimist', seat: 'Optimist' },
+      { kind: 'persona', refId: 'devils-advocate', seat: "Devil's Advocate" },
       { kind: 'persona', refId: 'cost-hawk', model: { runtime: 'direct-model', model: 'openai:gpt-5-mini' } },
       { kind: 'persona', refId: 'security', model: { runtime: 'claude-code', model: 'haiku' } },
+      { kind: 'persona', refId: 'ops' },
     ]);
   });
 

@@ -6,7 +6,6 @@ import { useBoardSessions } from '../api/queries/boardroom.ts';
 import { NewBoardroomDialog } from '../components/boardroom/NewBoardroomDialog.tsx';
 import { Badge, Button, EmptyState, ErrorBox, ListSkeleton, PageHeader } from '../components/ui.tsx';
 import { formatUsd } from '../lib/discovery.ts';
-import { useCanManageOrg } from '../lib/orgRole.ts';
 import { ageLabel } from '../lib/time.ts';
 
 function Row({ s }: { s: SessionDto }) {
@@ -30,6 +29,7 @@ function Row({ s }: { s: SessionDto }) {
               Round {cfg.round} of {cfg.roundCap}
             </Badge>
           )}
+          {cfg.archived && <Badge tone="neutral">Archived</Badge>}
           {cfg.paused && <Badge tone="warning">Paused</Badge>}
           {cfg.stage === 'decision' && <Badge tone="warning">Needs your decision</Badge>}
           {cfg.budgetStopped && <Badge tone="danger">Budget used up</Badge>}
@@ -46,7 +46,6 @@ function Row({ s }: { s: SessionDto }) {
 /** Boardroom sessions: a Chair runs personas and agents through a question; the owner can interject at any time. */
 export function BoardroomList() {
   const sessions = useBoardSessions();
-  const canManage = useCanManageOrg();
   const [open, setOpen] = useState(false);
   return (
     <div className="mx-auto max-w-3xl">
@@ -54,12 +53,10 @@ export function BoardroomList() {
         title="Boardroom"
         sub="Put a question to a group of personas and agents. Everyone answers on their own first, then a Chair runs the debate."
         actions={
-          canManage ? (
-            <Button variant="primary" onClick={() => setOpen(true)} data-testid="new-boardroom">
-              <Plus aria-hidden="true" className="size-4" />
-              New boardroom
-            </Button>
-          ) : undefined
+          <Button variant="primary" onClick={() => setOpen(true)} data-testid="new-boardroom">
+            <Plus aria-hidden="true" className="size-4" />
+            New boardroom
+          </Button>
         }
       />
       {sessions.isPending && <ListSkeleton rows={3} />}
@@ -71,11 +68,9 @@ export function BoardroomList() {
           title="No boardrooms yet"
           description="Start one when a decision deserves more than one view. The minutes can become the start of a PRD."
           action={
-            canManage ? (
-              <Button variant="primary" onClick={() => setOpen(true)}>
-                New boardroom
-              </Button>
-            ) : undefined
+            <Button variant="primary" onClick={() => setOpen(true)}>
+              New boardroom
+            </Button>
           }
         />
       )}

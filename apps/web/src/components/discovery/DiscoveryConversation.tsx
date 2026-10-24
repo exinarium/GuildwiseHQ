@@ -55,6 +55,7 @@ export function DiscoveryConversation({
   answerError,
   resolveBusy,
   resolveError,
+  readOnly,
 }: {
   state: DiscoveryStateDto;
   messages: readonly ThreadMessageDto[];
@@ -65,6 +66,8 @@ export function DiscoveryConversation({
   answerError: string | null;
   resolveBusy: boolean;
   resolveError: string | null;
+  /** The caller does not manage the session: answers and proposals wait for the creator. */
+  readOnly?: boolean;
 }) {
   const items = useMemo(
     () => buildTimeline(messages, state.questions, state.proposals),
@@ -101,6 +104,7 @@ export function DiscoveryConversation({
               ceoName={state.ceoName}
               busy={answerBusy}
               error={answerError}
+              readOnly={!!readOnly}
               onAnswer={(b) => onAnswer(it.question.id, b)}
             />
           ) : (
@@ -109,6 +113,7 @@ export function DiscoveryConversation({
               p={it.proposal}
               busy={resolveBusy}
               error={resolveError}
+              readOnly={!!readOnly}
               onResolve={(b) => onResolve(it.proposal.id, b)}
             />
           ),

@@ -2,6 +2,7 @@ import type { DiscoveryStateDto } from '@aom/shared';
 import { type FormEvent, useState } from 'react';
 import { usePatchDiscovery } from '../../api/queries/discovery.ts';
 import { formatUsd } from '../../lib/discovery.ts';
+import { SessionCountdown } from '../session/SessionCountdown.tsx';
 import { cx } from '../ui/cx.ts';
 import { Button, TextInput } from '../ui.tsx';
 
@@ -11,11 +12,24 @@ export function CostMeter({ state, canManage }: { state: DiscoveryStateDto; canM
   const patch = usePatchDiscovery(state.threadId);
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(cost.budgetUsd ? String(cost.budgetUsd) : '');
+  const [limit, setLimit] = useState(config.timeBoxMinutes ? String(config.timeBoxMinutes) : '');
   const ratio = cost.budgetUsd ? Math.min(1, cost.costUsd / cost.budgetUsd) : null;
   const submit = (e: FormEvent) => {
     e.preventDefault();
     const n = Number(value);
-    patch.mutate({ budgetUsd: value.trim() === '' ? null : n }, { onSuccess: () => setEditing(false) });
+    const t = Number(limit);
+    patch.mutate(
+      {
+        // only what changed
+        ...(value.trim() === String(cost.budgetUsd ?? '')
+          ? {}
+          : { budgetUsd: value.trim() === '' ? null : n }),
+        ...(limit.trim() === String(config.timeBoxMinutes ?? '')
+          ? {}
+          : { timeBoxMinutes: limit.trim() === '' ? null : t }),
+      },
+      { onSuccess: () => setEditing(false) },
+    );
   };
   return (
     <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm" data-testid="session-meters">
@@ -72,9 +86,10 @@ export function CostMeter({ state, canManage }: { state: DiscoveryStateDto; canM
           </div>
         )}
       </div>
+      <SessionCountdown time={state.time} />
       {canManage &&
         (editing ? (
-          <form onSubmit={submit} className="flex items-end gap-2" aria-label="Session budget">
+          <form onSubmit={submit} className="flex flex-wrap items-end gap-2" aria-label="Session limits">
             <TextInput
               label="Budget (USD)"
               type="number"
@@ -84,6 +99,17 @@ export function CostMeter({ state, canManage }: { state: DiscoveryStateDto; canM
               placeholder="No limit"
               value={value}
               onChange={(e) => setValue(e.target.value)}
+              className="w-28"
+            />
+            <TextInput
+              label="Time limit (minutes)"
+              type="number"
+              min="5"
+              step="5"
+              inputMode="numeric"
+              placeholder="No limit"
+              value={limit}
+              onChange={(e) => setLimit(e.target.value)}
               className="w-28"
             />
             <Button type="submit" variant="primary" size="md" loading={patch.isPending}>

@@ -4,6 +4,8 @@ import type {
   PackDetailDto,
   PackDto,
   PacksResponse,
+  ProjectSkillsResponse,
+  ReviewProjectSkillRequest,
 } from '@aom/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { del, get, post } from '../client.ts';
@@ -72,6 +74,28 @@ function usePackMutation<V>(run: (v: V) => Promise<unknown>) {
     mutationFn: run,
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: packsKey });
+      void qc.invalidateQueries({ queryKey: ['capabilities'] });
+    },
+  });
+}
+
+export const projectSkillsKey = ['capabilities', 'project-skills'] as const;
+
+/** Capabilities found in project repositories, with the owner's review decisions (Owners and Admins). */
+export function useProjectSkills(enabled = true) {
+  return useQuery({
+    enabled,
+    queryKey: projectSkillsKey,
+    queryFn: async () => (await get<ProjectSkillsResponse>('/capabilities/project-skills')).items,
+  });
+}
+export function useReviewProjectSkill() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (b: ReviewProjectSkillRequest) =>
+      post<ProjectSkillsResponse>('/capabilities/project-skills/review', b),
+    onSuccess: (r) => {
+      qc.setQueryData(projectSkillsKey, r.items);
       void qc.invalidateQueries({ queryKey: ['capabilities'] });
     },
   });

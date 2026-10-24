@@ -1,6 +1,6 @@
 import type { BoardStateDto, SessionDto, ThreadMessageDto } from '@aom/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -387,7 +387,16 @@ describe('Boardroom list and the new boardroom dialog', () => {
       }),
       'GET /api/board-rooms': () => ({ rooms: [] }),
       'GET /api/workstations': () => ({
-        workstations: [{ id: 'w', runtimes: [{ id: 'claude-code', available: true }] }],
+        workstations: [
+          {
+            id: 'w',
+            userId: 'u',
+            name: 'Laptop',
+            status: 'active',
+            connected: true,
+            runtimes: [{ id: 'claude-code', available: true }],
+          },
+        ],
       }),
       'POST /api/board': () => ({ state: state() }),
       'GET /api/board/': () => ({ state: state() }),
@@ -400,6 +409,11 @@ describe('Boardroom list and the new boardroom dialog', () => {
     const dialog = await screen.findByRole('dialog');
     const start = within(dialog).getByTestId('start-boardroom');
     expect(start).toBeDisabled();
+    // the two fixed seats are there from the start and cannot be removed
+    expect(within(dialog).getByRole('list', { name: 'Chosen cast' })).toHaveTextContent('Optimist');
+    expect(within(dialog).getByTestId('fixed-seat-optimist')).toBeInTheDocument();
+    expect(within(dialog).queryByRole('button', { name: /Remove Optimist/ })).toBeNull();
+    expect(within(dialog).getByTestId('cast-counter')).toHaveTextContent('0 of 3-4 opinion seats');
     await user.type(within(dialog).getByLabelText('Topic'), 'Should we launch a pilot?');
     await user.type(within(dialog).getByLabelText('Brief (optional)'), 'Eight weeks');
     await user.selectOptions(within(dialog).getByLabelText('Format'), 'six_hats');
@@ -412,8 +426,10 @@ describe('Boardroom list and the new boardroom dialog', () => {
     await user.type(within(dialog).getByLabelText('Brief'), 'A cautious compliance officer');
     await user.click(within(dialog).getByTestId('add-adhoc'));
     expect(within(dialog).getByRole('list', { name: 'Chosen cast' })).toHaveTextContent('Regulator');
+    expect(within(dialog).getByTestId('cast-counter')).toHaveTextContent('3 of 3-4 opinion seats');
     await user.selectOptions(within(dialog).getByLabelText('Round cap'), '3');
-    await user.type(within(dialog).getByLabelText('Budget in USD (optional)'), '2');
+    await user.type(within(dialog).getByLabelText('Cost limit in USD (optional)'), '2');
+    await user.selectOptions(within(dialog).getByLabelText('Time limit'), '45');
     await user.selectOptions(within(dialog).getByLabelText('The Chair runs on'), 'claude-code/sonnet');
     await waitFor(() => expect(start).toBeEnabled());
     await user.click(start);
@@ -425,6 +441,8 @@ describe('Boardroom list and the new boardroom dialog', () => {
       roundCap: 3,
       models: { chair: { runtime: 'claude-code', model: 'sonnet' } },
       cast: [
+        { kind: 'persona', refId: 'optimist', seat: 'Optimist' },
+        { kind: 'persona', refId: 'devils-advocate', seat: "Devil's Advocate" },
         { kind: 'persona', refId: 'cost-hawk' },
         { kind: 'agent', refId: '0192f3a0-0000-7000-8000-0000000000aa' },
         {
@@ -435,6 +453,8 @@ describe('Boardroom list and the new boardroom dialog', () => {
         },
       ],
       budgetUsd: 2,
+      timeLimitMinutes: 45,
+      workstationId: 'w',
     });
   });
 
@@ -826,5 +846,320 @@ describe('Boardroom session', () => {
     expect(await screen.findByTestId('whiteboard')).toBeInTheDocument();
     await user.click(screen.getByRole('tab', { name: 'Minutes' }));
     expect(await screen.findByTestId('minutes-panel')).toBeInTheDocument();
+  });
+});
+
+describe('R2: fixed seats, limits, ownership, archive', () => {
+  const station = {
+    id: 'w1',
+    userId: 'u',
+    name: 'Laptop',
+    status: 'active',
+    connected: true,
+    runtimes: [],
+    repos: [],
+  };
+  const personas = [
+    'optimist',
+    'devils-advocate',
+    'cost-hawk',
+    'security',
+    'user-advocate',
+    'ops',
+    'customer-smb',
+  ].map((key) => ({
+    kind: 'persona',
+    key,
+    name: key === 'optimist' ? 'Optimist' : key,
+    description: key,
+    hash: 'h',
+    source: 'builtin',
+    overrides: false,
+  }));
+  const dialogHandlers = (extra: Record<string, Handler> = {}) =>
+    stub({
+      ...meHandlers,
+      'GET /api/sessions': () => ({ sessions: [] }),
+      'GET /api/projects': () => ({ projects: [] }),
+      'GET /api/agents': () => ({ agents: [] }),
+      'GET /api/capabilities': () => ({ items: personas, issues: [], indexedAt: null }),
+      'GET /api/board-rooms': () => ({ rooms: [] }),
+      'GET /api/workstations': () => ({
+        workstations: [
+          { ...station, id: 'w0', name: 'Old', connected: false },
+          station,
+          { ...station, id: 'x', userId: 'other' },
+        ],
+      }),
+      'POST /api/board': () => ({ state: state() }),
+      'GET /api/board/': () => ({ state: state() }),
+      'GET /api/threads/': () => thread([message()]),
+      ...extra,
+    });
+
+  it('locks the two fixed seats, counts the other seats and enables Start at three to four', async () => {
+    const calls = dialogHandlers();
+    mount('/boardroom');
+    const user = userEvent.setup();
+    await user.click(await screen.findByTestId('new-boardroom'));
+    const dialog = await screen.findByRole('dialog');
+    const start = within(dialog).getByTestId('start-boardroom');
+    await user.type(within(dialog).getByLabelText('Topic'), 'Go?');
+    const counter = within(dialog).getByTestId('cast-counter');
+    expect(counter).toHaveTextContent('0 of 3-4 opinion seats');
+    // the fixed ones are checked and cannot be unchecked
+    const optimist = await within(dialog).findByRole('checkbox', { name: 'Optimist' });
+    expect(optimist).toBeChecked();
+    expect(optimist).toBeDisabled();
+    expect(within(dialog).getByTestId('cast-problem')).toBeInTheDocument();
+    for (const n of ['cost-hawk', 'security'])
+      await user.click(within(dialog).getByRole('checkbox', { name: n }));
+    expect(start).toBeDisabled();
+    await user.click(within(dialog).getByRole('checkbox', { name: 'user-advocate' }));
+    expect(counter).toHaveTextContent('3 of 3-4 opinion seats');
+    await waitFor(() => expect(start).toBeEnabled());
+    await user.click(within(dialog).getByRole('checkbox', { name: 'ops' }));
+    // a fifth other seat is refused
+    await user.click(within(dialog).getByRole('checkbox', { name: 'customer-smb' }));
+    expect(counter).toHaveTextContent('4 of 3-4 opinion seats');
+    await user.click(start);
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.url === '/api/board')).toBe(true));
+    const cast = calls.find((c) => c.url === '/api/board')?.body.cast as Array<{ refId: string }>;
+    expect(cast.map((c) => c.refId)).toEqual([
+      'optimist',
+      'devils-advocate',
+      'cost-hawk',
+      'security',
+      'user-advocate',
+      'ops',
+    ]);
+  });
+
+  it('offers only my own workstations, online first; cost and time limits are optional', async () => {
+    const calls = dialogHandlers();
+    mount('/boardroom');
+    const user = userEvent.setup();
+    await user.click(await screen.findByTestId('new-boardroom'));
+    const dialog = await screen.findByRole('dialog');
+    const picker = await within(dialog).findByTestId('workstation-picker');
+    expect(
+      within(picker)
+        .getAllByRole('option')
+        .map((o) => o.textContent),
+    ).toEqual(['Laptop', 'Old (offline)']);
+    expect(picker).toHaveValue('w1');
+    await user.type(within(dialog).getByLabelText('Topic'), 'Go?');
+    for (const n of ['cost-hawk', 'security', 'user-advocate'])
+      await user.click(await within(dialog).findByRole('checkbox', { name: n }));
+    await user.click(within(dialog).getByTestId('start-boardroom'));
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.url === '/api/board')).toBe(true));
+    const body = calls.find((c) => c.url === '/api/board')?.body;
+    expect(body).toMatchObject({ workstationId: 'w1' });
+    expect(body).not.toHaveProperty('budgetUsd');
+    expect(body).not.toHaveProperty('timeLimitMinutes');
+  });
+
+  it('puts the fixed seats in front of an older saved room', async () => {
+    dialogHandlers({
+      'GET /api/board-rooms': () => ({
+        rooms: [
+          {
+            id: '0192f3a0-0000-7000-8000-0000000000bb',
+            name: 'Old room',
+            format: 'open',
+            roundCap: 3,
+            models: {},
+            createdAt: AT,
+            cast: [{ kind: 'persona', refId: 'cost-hawk' }],
+          },
+        ],
+      }),
+    });
+    mount('/boardroom');
+    const user = userEvent.setup();
+    await user.click(await screen.findByTestId('new-boardroom'));
+    const dialog = await screen.findByRole('dialog');
+    await user.selectOptions(
+      await within(dialog).findByLabelText('Use a saved room'),
+      '0192f3a0-0000-7000-8000-0000000000bb',
+    );
+    const chosen = within(dialog).getByRole('list', { name: 'Chosen cast' });
+    expect(chosen).toHaveTextContent('Optimist');
+    expect(chosen).toHaveTextContent("Devil's Advocate");
+    expect(chosen).toHaveTextContent('cost-hawk');
+    expect(within(dialog).getByTestId('cast-counter')).toHaveTextContent('1 of 3-4 opinion seats');
+  });
+
+  const mountSession = (s: BoardStateDto, extra: Record<string, Handler> = {}) => {
+    const calls = stub({
+      ...meHandlers,
+      'GET /api/board/': () => ({ state: s }),
+      'GET /api/threads/': () => thread([message()]),
+      'GET /api/sessions': () => ({ sessions: [] }),
+      ...extra,
+    });
+    mount(`/boardroom/${T}`);
+    return calls;
+  };
+  const timeOf = (over: Partial<NonNullable<BoardStateDto['time']>> = {}) => ({
+    limitMinutes: 30,
+    elapsedMs: 25 * 60_000,
+    running: true,
+    asOf: AT,
+    warned: false,
+    up: false,
+    ...over,
+  });
+
+  it('counts the time down and warns the room with five minutes left', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ['setInterval', 'clearInterval', 'Date'] });
+    try {
+      mountSession(state({ time: timeOf({ warned: true }) }));
+      expect(await screen.findByTestId('countdown-value')).toHaveTextContent('5:00');
+      expect(screen.getByTestId('time-warning')).toHaveTextContent('The Chair is steering to wrap-up');
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2000);
+      });
+      await waitFor(() => expect(screen.getByTestId('countdown-value')).toHaveTextContent('4:5'));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('at time-up the creator extends or wraps up into the minutes', async () => {
+    const up = state({
+      waitingFor: 'time',
+      time: timeOf({ elapsedMs: 30 * 60_000, up: true, running: false }),
+    });
+    const calls = mountSession(up, { [`POST /api/board/${T}/time`]: () => ({ state: up }) });
+    const user = userEvent.setup();
+    const card = await screen.findByTestId('time-up');
+    await user.click(within(card).getByTestId('extend-30'));
+    await waitFor(() => expect(calls.some((c) => c.url.endsWith('/time'))).toBe(true));
+    expect(calls.find((c) => c.url.endsWith('/time'))?.body).toEqual({ action: 'extend', minutes: 30 });
+    await user.click(within(card).getByRole('button', { name: 'Wrap up now (write minutes)' }));
+    await waitFor(() => expect(calls.filter((c) => c.url.endsWith('/time'))).toHaveLength(2));
+    expect(calls.filter((c) => c.url.endsWith('/time'))[1]?.body).toEqual({ action: 'wrap_up' });
+  });
+
+  it('asks the creator what to do when the budget ran out before the minutes summary', async () => {
+    const s = state({
+      waitingFor: 'budget',
+      config: { ...state().config, stage: 'minutes', minutesAsk: 'budget' },
+      cost: { costMicros: 5_100_000, costUsd: 5.1, turns: 9, unpricedTurns: 0, budgetUsd: 5, exceeded: true },
+    });
+    const calls = mountSession(s, {
+      [`POST /api/board/${T}/minutes-choice`]: () => ({ state: s }),
+      [`PATCH /api/board/${T}`]: () => ({ state: s }),
+    });
+    const user = userEvent.setup();
+    const card = await screen.findByTestId('minutes-budget-card');
+    expect(card).toHaveTextContent('The budget is used up before the Chair could write the minutes summary');
+    await user.click(within(card).getByTestId('minutes-without-summary'));
+    await waitFor(() => expect(calls.some((c) => c.url.endsWith('/minutes-choice'))).toBe(true));
+    expect(calls.find((c) => c.url.endsWith('/minutes-choice'))?.body).toEqual({ choice: 'without_summary' });
+    await user.click(within(card).getByTestId('raise-limit'));
+    await user.type(within(card).getByLabelText('New cost limit (USD)'), '12');
+    await user.click(within(card).getByRole('button', { name: 'Raise' }));
+    await waitFor(() => expect(calls.some((c) => c.method === 'PATCH')).toBe(true));
+    expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({ budgetUsd: 12 });
+  });
+
+  it('hides the controls from a participant who is not the creator, who can still add notes and vote', async () => {
+    mountSession(
+      state({
+        canManage: false,
+        config: { ...state().config, stage: 'minutes', minutesDocId: DOC },
+        decisions: [
+          {
+            id: D1,
+            question: 'Pilot?',
+            options: [],
+            round: 1,
+            status: 'open',
+            answer: null,
+            optionId: null,
+            askedByName: 'Chair',
+            askedAt: AT,
+            resolvedAt: null,
+          },
+        ],
+        waitingFor: 'decision',
+      }),
+    );
+    expect(await screen.findByTestId('read-only-hint')).toBeInTheDocument();
+    expect(screen.queryByTestId('pause-session')).toBeNull();
+    expect(screen.queryByTestId('end-session')).toBeNull();
+    expect(screen.queryByTestId('decide')).toBeNull();
+    expect(screen.queryByTestId('merge-mode')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Delete note' })).toBeNull();
+    expect(screen.queryByTestId('write-minutes')).toBeNull();
+    expect(screen.queryByTestId('pull-into-prd')).toBeNull();
+    expect(screen.queryByTestId('set-budget')).toBeNull();
+    expect(screen.queryByTestId('delete-session')).toBeNull();
+    expect(screen.getByTestId('vote-note')).toBeEnabled();
+    expect(screen.getByLabelText('New ideas note')).toBeInTheDocument();
+  });
+
+  it('shows the option-scoring tally on the whiteboard with the top option highlighted', async () => {
+    mountSession(
+      state({
+        scores: [
+          {
+            option: 'Pilot now',
+            total: 9,
+            average: 4.5,
+            scores: [
+              { participantId: P1, name: "Devil's Advocate", score: 4, why: '' },
+              { participantId: P2, name: 'Cost Hawk', score: 5, why: '' },
+            ],
+          },
+          {
+            option: 'Wait',
+            total: 5,
+            average: 2.5,
+            scores: [
+              { participantId: P1, name: "Devil's Advocate", score: 2, why: '' },
+              { participantId: P2, name: 'Cost Hawk', score: 3, why: '' },
+            ],
+          },
+        ],
+      }),
+    );
+    const table = await screen.findByTestId('score-tally');
+    const rows = within(table).getAllByTestId('score-row');
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toHaveAttribute('data-top', 'true');
+    expect(rows[0]).toHaveTextContent('Pilot now');
+    expect(rows[0]).toHaveTextContent('9');
+    expect(rows[0]).toHaveTextContent('4.5');
+    expect(rows[1]).not.toHaveAttribute('data-top');
+  });
+
+  it('archives, shows an archived session read-only, and deletes after a confirmation', async () => {
+    const ended = state({ config: { ...state().config, stage: 'ended' } });
+    const calls = mountSession(ended, {
+      [`POST /api/sessions/${T}/archive`]: () => ({ session: {} }),
+      [`DELETE /api/sessions/${T}`]: () => ({}),
+    });
+    const user = userEvent.setup();
+    await user.click(await screen.findByTestId('archive-session'));
+    await waitFor(() =>
+      expect(calls.find((c) => c.url.endsWith('/archive'))?.body).toEqual({ archived: true }),
+    );
+    await user.click(screen.getByTestId('delete-session'));
+    const dlg = await screen.findByRole('dialog');
+    await user.click(within(dlg).getByRole('button', { name: 'Delete' }));
+    await waitFor(() => expect(calls.some((c) => c.method === 'DELETE')).toBe(true));
+    expect(await screen.findByText('No boardrooms yet')).toBeInTheDocument();
+  });
+
+  it('puts an archived boardroom in read-only mode', async () => {
+    mountSession(state({ config: { ...state().config, archived: true } }));
+    expect(await screen.findByTestId('archived-banner')).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText(/Interject|Decide above/)).toBeNull();
+    expect(screen.queryByTestId('pause-session')).toBeNull();
+    expect(screen.getByTestId('reopen-session')).toBeInTheDocument();
+    expect(screen.getByTestId('vote-note')).toBeDisabled();
   });
 });

@@ -12,7 +12,12 @@ export function MinutesPanel({ state, canManage }: { state: BoardStateDto; canMa
   const minutes = useWriteMinutes(state.threadId);
   const pull = usePullIntoPrd(state.threadId);
   const running = state.waitingFor === 'minutes';
-  const canWrite = state.config.stage !== 'setup' && state.config.round >= 1 && !running;
+  const canWrite =
+    canManage &&
+    !state.config.archived &&
+    state.config.stage !== 'setup' &&
+    state.config.round >= 1 &&
+    !running;
   return (
     <div className="flex flex-col gap-3" data-testid="minutes-panel">
       <div className="flex flex-wrap items-center gap-2">
@@ -27,7 +32,7 @@ export function MinutesPanel({ state, canManage }: { state: BoardStateDto; canMa
             {docId ? 'Update the minutes' : 'Write minutes now'}
           </Button>
         )}
-        {docId && canManage && !state.config.prdSessionId && (
+        {docId && canManage && !state.config.archived && !state.config.prdSessionId && (
           <Button
             variant="primary"
             size="sm"

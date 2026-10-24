@@ -7,6 +7,7 @@ import type {
   PatchDiscoveryRequest,
   ResolveDiscoveryProposalRequest,
   SessionDto,
+  SessionTimeAction,
   ThreadMessageDto,
 } from '@aom/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -106,12 +107,19 @@ export const useRequestDraft = (id: string) =>
 export const useRequestValidation = (id: string) =>
   useSessionAction(id, (_: void) => post<StateResponse>(`/discovery/${id}/validate`, {}));
 
-/** "Hand to BA": an approved PRD becomes an intake. */
+/** The creator's answer to "time is up": extend, or wrap up (capture). */
+export const useDiscoveryTime = (id: string) =>
+  useSessionAction(id, (b: SessionTimeAction) => post<StateResponse>(`/discovery/${id}/time`, b));
+
+/** "Hand to BA": an approved PRD becomes an intake, or (no BA online) the hand-off is queued. */
 export function useHandToBa(id: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (_: void) =>
-      post<{ intakeId: string; state: DiscoveryStateDto }>(`/discovery/${id}/hand-to-ba`, {}),
+      post<{ intakeId: string | null; queued?: boolean; state: DiscoveryStateDto }>(
+        `/discovery/${id}/hand-to-ba`,
+        {},
+      ),
     onSuccess: (r) => {
       qc.setQueryData(['discovery', id], r.state);
       void qc.invalidateQueries({ queryKey: ['documents'] });

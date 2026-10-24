@@ -317,6 +317,11 @@ function PackCard({ pack }: { pack: PackDto }) {
   const project = projects.data?.find((p) => p.id === pack.projectId);
   const ready = pack.status === 'ready';
   const err = check.error ?? revoke.error ?? scripts.error ?? remove.error;
+  const quickCheck = () =>
+    check.mutate(
+      { id: pack.id },
+      { onSuccess: () => toast.success('Checking. A workstation looks and the result appears here.') },
+    );
   const doCheck = () =>
     check.mutate(
       { id: pack.id, ...(newRef.trim() ? { ref: newRef.trim() } : {}) },
@@ -426,8 +431,16 @@ function PackCard({ pack }: { pack: PackDto }) {
             Review and approve
           </Button>
         )}
-        <Button onClick={() => setChecking(true)} disabled={checking}>
+        <Button onClick={quickCheck} loading={check.isPending && !checking} data-testid="check-updates">
           Check for updates
+        </Button>
+        <Button
+          variant="ghost"
+          onClick={() => setChecking(true)}
+          disabled={checking}
+          data-testid="check-other"
+        >
+          Check another tag…
         </Button>
         {pack.trusted && <Button onClick={() => setConfirm('revoke')}>Revoke approval</Button>}
         <Button variant="danger-ghost" onClick={() => setConfirm('remove')}>

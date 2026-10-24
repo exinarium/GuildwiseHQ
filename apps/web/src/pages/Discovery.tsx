@@ -6,7 +6,6 @@ import { useDiscoverySessions } from '../api/queries/discovery.ts';
 import { NewDiscoveryDialog } from '../components/discovery/NewDiscoveryDialog.tsx';
 import { Badge, Button, EmptyState, ErrorBox, ListSkeleton, PageHeader } from '../components/ui.tsx';
 import { formatUsd, STANCE_LABEL } from '../lib/discovery.ts';
-import { useCanManageOrg } from '../lib/orgRole.ts';
 import { ageLabel } from '../lib/time.ts';
 
 function Row({ s }: { s: SessionDto }) {
@@ -21,6 +20,7 @@ function Row({ s }: { s: SessionDto }) {
         <span className="min-w-0 flex-1 truncate font-medium text-fg">{s.title}</span>
         <span className="flex flex-wrap items-center gap-2 text-xs text-muted">
           <Badge tone="brand">{DISCOVERY_PHASE_LABEL[cfg.phase]}</Badge>
+          {cfg.archived && <Badge tone="neutral">Archived</Badge>}
           {cfg.paused && <Badge tone="warning">Paused</Badge>}
           {cfg.budgetStopped && <Badge tone="danger">Budget used up</Badge>}
           <span>{STANCE_LABEL[cfg.stance]}</span>
@@ -35,7 +35,6 @@ function Row({ s }: { s: SessionDto }) {
 /** Discovery sessions: where an idea becomes a brief or a PRD, with an analyst (and optionally the CEO). */
 export function DiscoveryList() {
   const sessions = useDiscoverySessions();
-  const canManage = useCanManageOrg();
   const [open, setOpen] = useState(false);
   return (
     <div className="mx-auto max-w-3xl">
@@ -43,12 +42,10 @@ export function DiscoveryList() {
         title="Discovery"
         sub="Turn an idea into a brief or a PRD. An analyst interviews you one question at a time."
         actions={
-          canManage ? (
-            <Button variant="primary" onClick={() => setOpen(true)} data-testid="new-discovery">
-              <Plus aria-hidden="true" className="size-4" />
-              New discovery
-            </Button>
-          ) : undefined
+          <Button variant="primary" onClick={() => setOpen(true)} data-testid="new-discovery">
+            <Plus aria-hidden="true" className="size-4" />
+            New discovery
+          </Button>
         }
       />
       {sessions.isPending && <ListSkeleton rows={3} />}
@@ -60,11 +57,9 @@ export function DiscoveryList() {
           title="No discovery sessions yet"
           description="Start one when you have an idea that is not ready to build. The analyst keeps the notes and writes the PRD with you."
           action={
-            canManage ? (
-              <Button variant="primary" onClick={() => setOpen(true)}>
-                New discovery
-              </Button>
-            ) : undefined
+            <Button variant="primary" onClick={() => setOpen(true)}>
+              New discovery
+            </Button>
           }
         />
       )}

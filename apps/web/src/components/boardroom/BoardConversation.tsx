@@ -174,8 +174,10 @@ function DecisionCard({
   busy,
   error,
   onResolve,
+  readOnly,
 }: {
   d: BoardDecisionDto;
+  readOnly?: boolean;
   busy: boolean;
   error: string | null;
   onResolve: (v: { decisionId: string; answer: string; optionId?: string }) => void;
@@ -204,6 +206,20 @@ function DecisionCard({
         ) : (
           <p className="text-muted">Withdrawn.</p>
         )}
+      </li>
+    );
+  if (readOnly)
+    return (
+      <li
+        data-testid="decision-card"
+        data-open="true"
+        className="flex flex-col gap-1 rounded-card border border-warning-fill/60 bg-warning-soft px-3 py-3 text-sm text-warning-soft-fg"
+      >
+        <p className="flex items-center gap-2 font-semibold">
+          <Gavel aria-hidden="true" className="size-4" />
+          The Chair needs the creator's decision
+        </p>
+        <p className="font-medium [overflow-wrap:anywhere]">{d.question}</p>
       </li>
     );
   return (
@@ -273,6 +289,7 @@ export function BoardConversation({
   onResolve,
   resolveBusy,
   resolveError,
+  readOnly,
 }: {
   state: BoardStateDto;
   messages: readonly ThreadMessageDto[];
@@ -280,6 +297,7 @@ export function BoardConversation({
   onResolve: (v: { decisionId: string; answer: string; optionId?: string }) => void;
   resolveBusy: boolean;
   resolveError: string | null;
+  readOnly?: boolean;
 }) {
   const items: BoardTimelineItem[] = useMemo(() => buildBoardTimeline(messages, state), [messages, state]);
   const log = useRef<HTMLDivElement>(null);
@@ -319,6 +337,7 @@ export function BoardConversation({
               busy={resolveBusy}
               error={resolveError}
               onResolve={onResolve}
+              readOnly={!!readOnly}
             />
           );
         })}

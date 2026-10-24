@@ -39,6 +39,8 @@ export function boardWaitingText(s: Pick<BoardStateDto, 'waitingFor' | 'chair' |
       return 'Writing the minutes';
     case 'budget':
       return 'Stopped: budget used up';
+    case 'time':
+      return 'Time is up: waiting for the creator';
     case 'paused':
       return 'Paused';
     case 'ended':

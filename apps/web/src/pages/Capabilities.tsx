@@ -2,6 +2,7 @@ import { useSearchParams } from 'react-router';
 import { useMe } from '../api/queries/auth.ts';
 import { GrantsTab } from '../components/capabilities/GrantsTab.tsx';
 import { PacksTab } from '../components/capabilities/PacksTab.tsx';
+import { ProjectSkillsTab } from '../components/capabilities/ProjectSkillsTab.tsx';
 import { RegistryTab } from '../components/capabilities/RegistryTab.tsx';
 import { panelId, tabId } from '../components/ui/Tabs.tsx';
 import { EmptyState, PageHeader, PageSkeleton, Tabs } from '../components/ui.tsx';
@@ -9,6 +10,7 @@ import { EmptyState, PageHeader, PageSkeleton, Tabs } from '../components/ui.tsx
 const TABS = [
   { id: 'registry', label: 'Registry' },
   { id: 'packs', label: 'Packs' },
+  { id: 'project-skills', label: 'Project skills' },
   { id: 'grants', label: 'Skill grants' },
 ] as const;
 
@@ -44,6 +46,7 @@ export function Capabilities() {
       <div role="tabpanel" id={panelId('cap', tab)} aria-labelledby={tabId('cap', tab)}>
         {tab === 'registry' && <RegistryTab />}
         {tab === 'packs' && <PacksTab />}
+        {tab === 'project-skills' && <ProjectSkillsTab />}
         {tab === 'grants' && <GrantsTab />}
       </div>
     </div>

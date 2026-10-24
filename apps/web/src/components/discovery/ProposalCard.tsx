@@ -22,11 +22,13 @@ export function ProposalCard({
   onResolve,
   busy,
   error,
+  readOnly,
 }: {
   p: DiscoveryProposalDto;
   onResolve: (b: ResolveDiscoveryProposalRequest) => void;
   busy?: boolean;
   error?: string | null;
+  readOnly?: boolean;
 }) {
   const [redirecting, setRedirecting] = useState(false);
   const [text, setText] = useState('');
@@ -63,7 +65,11 @@ export function ProposalCard({
         <Markdown text={p.change} />
       </div>
       <p className="text-sm text-muted [overflow-wrap:anywhere]">Why: {p.rationale}</p>
-      {redirecting ? (
+      {readOnly ? (
+        <p className="text-sm text-muted" data-testid="proposal-readonly">
+          Waiting for the session creator to decide.
+        </p>
+      ) : redirecting ? (
         <form
           className="flex flex-col gap-2"
           aria-label="Redirect the proposal"

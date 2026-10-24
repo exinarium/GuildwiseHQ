@@ -7,6 +7,7 @@ import { useChangeDocumentStatus, useDocument, useDocumentVersion } from '../../
 import { ageLabel } from '../../lib/time.ts';
 import { Markdown } from '../chat/Markdown.tsx';
 import { Badge, Button, Callout, ErrorBox, Select, Spinner } from '../ui.tsx';
+import { HireBa } from './HireBa.tsx';
 
 const STATUS_TONE = {
   draft: 'neutral',
@@ -63,7 +64,15 @@ export function DocumentBody({ id, versions }: { id: string; versions?: boolean 
   );
 }
 
-function DocBlock({ doc, state }: { doc: DiscoveryDoc; state: DiscoveryStateDto }) {
+function DocBlock({
+  doc,
+  state,
+  canManage,
+}: {
+  doc: DiscoveryDoc;
+  state: DiscoveryStateDto;
+  canManage: boolean;
+}) {
   const id = state.threadId;
   const status = useChangeDocumentStatus(doc.id);
   const validate = useRequestValidation(id);
@@ -120,7 +129,7 @@ function DocBlock({ doc, state }: { doc: DiscoveryDoc; state: DiscoveryStateDto 
         </div>
       )}
       <div className="flex flex-wrap gap-2">
-        {isPrd && (doc.status === 'draft' || doc.status === 'in_review') && (
+        {canManage && isPrd && (doc.status === 'draft' || doc.status === 'in_review') && (
           <Button
             onClick={() => validate.mutate()}
             loading={validate.isPending}
@@ -130,7 +139,7 @@ function DocBlock({ doc, state }: { doc: DiscoveryDoc; state: DiscoveryStateDto 
             Validate against the checklist
           </Button>
         )}
-        {(doc.status === 'draft' || doc.status === 'in_review') && (
+        {canManage && (doc.status === 'draft' || doc.status === 'in_review') && (
           <Button
             variant="primary"
             onClick={() => void approve().catch(() => undefined)}
@@ -140,9 +149,9 @@ function DocBlock({ doc, state }: { doc: DiscoveryDoc; state: DiscoveryStateDto 
             Approve
           </Button>
         )}
-        {doc.status === 'approved' && (
+        {canManage && doc.status === 'approved' && (
           <>
-            {isPrd && !state.config.intakeId && (
+            {isPrd && !state.config.intakeId && !state.config.handoff && (
               <Button
                 variant="primary"
                 onClick={() => handoff.mutate()}
@@ -156,6 +165,11 @@ function DocBlock({ doc, state }: { doc: DiscoveryDoc; state: DiscoveryStateDto 
               Reopen
             </Button>
           </>
+        )}
+        {doc.status === 'handed_off' && !state.config.intakeId && state.config.handoff && (
+          <p className="text-sm text-muted" data-testid="handoff-queued">
+            Handed off. Waiting for a BA to come online; the intake starts on its own.
+          </p>
         )}
         {doc.status === 'handed_off' && state.config.intakeId && (
           <Link
@@ -179,7 +193,15 @@ function DocBlock({ doc, state }: { doc: DiscoveryDoc; state: DiscoveryStateDto 
 }
 
 /** The brief and the PRD of the session: text, versions, checklist, approval and the hand-over to the BA. */
-export function DraftPanel({ state }: { state: DiscoveryStateDto }) {
+export function DraftPanel({
+  state,
+  canManage = true,
+  canHire = false,
+}: {
+  state: DiscoveryStateDto;
+  canManage?: boolean;
+  canHire?: boolean;
+}) {
   const draft = useRequestDraft(state.threadId);
   const docs = state.documents.filter((d) => d.kind === 'prd' || d.kind === 'brief');
   const hasPrd = docs.some((d) => d.kind === 'prd');
@@ -192,10 +214,11 @@ export function DraftPanel({ state }: { state: DiscoveryStateDto }) {
         </Callout>
       )}
       {docs.map((d) => (
-        <DocBlock key={d.id} doc={d} state={state} />
+        <DocBlock key={d.id} doc={d} state={state} canManage={canManage} />
       ))}
+      {state.config.handoff && state.baStatus === 'none' && <HireBa canHire={canHire} />}
       <div className="flex flex-wrap gap-2">
-        {!hasPrd && (
+        {canManage && !hasPrd && (
           <Button
             onClick={() => draft.mutate('prd')}
             loading={draft.isPending}
@@ -205,7 +228,7 @@ export function DraftPanel({ state }: { state: DiscoveryStateDto }) {
             Draft the PRD now
           </Button>
         )}
-        {!hasBrief && (
+        {canManage && !hasBrief && (
           <Button
             onClick={() => draft.mutate('brief')}
             loading={draft.isPending}

@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useAddNote, usePatchNote, useRemoveNote } from '../../api/queries/discovery.ts';
 import { Button } from '../ui.tsx';
 
-function NoteRow({ note, threadId }: { note: NoteDto; threadId: string }) {
+function NoteRow({ note, threadId, canManage }: { note: NoteDto; threadId: string; canManage: boolean }) {
   const patch = usePatchNote(threadId);
   const remove = useRemoveNote(threadId);
   const [editing, setEditing] = useState(false);
@@ -43,37 +43,41 @@ function NoteRow({ note, threadId }: { note: NoteDto; threadId: string }) {
       <div className="flex flex-wrap items-center gap-1.5 text-xs text-subtle">
         <span>{note.byName}</span>
         <span className="flex-1" />
-        <label className="sr-only" htmlFor={`move-${note.id}`}>
-          Move to
-        </label>
-        <select
-          id={`move-${note.id}`}
-          value={note.section}
-          onChange={(e) => patch.mutate({ noteId: note.id, section: e.target.value as PanelSection })}
-          className="h-7 rounded-control border border-control bg-surface px-1 text-xs [@media(pointer:coarse)]:h-9"
-        >
-          {PANEL_SECTIONS.map((s) => (
-            <option key={s} value={s}>
-              {PANEL_SECTION_LABEL[s]}
-            </option>
-          ))}
-        </select>
-        <button
-          type="button"
-          aria-label="Edit note text"
-          onClick={() => setEditing(true)}
-          className="inline-flex size-7 items-center justify-center rounded-control text-muted hover:bg-sunken hover:text-fg [@media(pointer:coarse)]:size-9"
-        >
-          <Pencil aria-hidden="true" className="size-3.5" />
-        </button>
-        <button
-          type="button"
-          aria-label="Delete note"
-          onClick={() => remove.mutate(note.id)}
-          className="inline-flex size-7 items-center justify-center rounded-control text-muted hover:bg-danger-soft hover:text-danger [@media(pointer:coarse)]:size-9"
-        >
-          <Trash2 aria-hidden="true" className="size-3.5" />
-        </button>
+        {canManage && (
+          <>
+            <label className="sr-only" htmlFor={`move-${note.id}`}>
+              Move to
+            </label>
+            <select
+              id={`move-${note.id}`}
+              value={note.section}
+              onChange={(e) => patch.mutate({ noteId: note.id, section: e.target.value as PanelSection })}
+              className="h-7 rounded-control border border-control bg-surface px-1 text-xs [@media(pointer:coarse)]:h-9"
+            >
+              {PANEL_SECTIONS.map((s) => (
+                <option key={s} value={s}>
+                  {PANEL_SECTION_LABEL[s]}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              aria-label="Edit note text"
+              onClick={() => setEditing(true)}
+              className="inline-flex size-7 items-center justify-center rounded-control text-muted hover:bg-sunken hover:text-fg [@media(pointer:coarse)]:size-9"
+            >
+              <Pencil aria-hidden="true" className="size-3.5" />
+            </button>
+            <button
+              type="button"
+              aria-label="Delete note"
+              onClick={() => remove.mutate(note.id)}
+              className="inline-flex size-7 items-center justify-center rounded-control text-muted hover:bg-danger-soft hover:text-danger [@media(pointer:coarse)]:size-9"
+            >
+              <Trash2 aria-hidden="true" className="size-3.5" />
+            </button>
+          </>
+        )}
       </div>
     </li>
   );
@@ -105,7 +109,17 @@ function AddNote({ threadId, section }: { threadId: string; section: PanelSectio
 }
 
 /** Ideas, assumptions, open questions, decisions and parked items: kept by the facilitator, editable by the owner. */
-export function PanelNotes({ threadId, notes }: { threadId: string; notes: NoteDto[] }) {
+export function PanelNotes({
+  threadId,
+  notes,
+  canManage = true,
+  readOnly = false,
+}: {
+  threadId: string;
+  notes: NoteDto[];
+  canManage?: boolean;
+  readOnly?: boolean;
+}) {
   return (
     <div className="flex flex-col gap-4" data-testid="session-panel">
       {PANEL_SECTIONS.map((s) => {
@@ -126,11 +140,11 @@ export function PanelNotes({ threadId, notes }: { threadId: string; notes: NoteD
             {list.length > 0 && (
               <ul className="flex flex-col gap-1.5">
                 {list.map((n) => (
-                  <NoteRow key={n.id} note={n} threadId={threadId} />
+                  <NoteRow key={n.id} note={n} threadId={threadId} canManage={canManage && !readOnly} />
                 ))}
               </ul>
             )}
-            <AddNote threadId={threadId} section={s} />
+            {!readOnly && <AddNote threadId={threadId} section={s} />}
           </section>
         );
       })}

@@ -9,6 +9,7 @@ import {
   useAnswerQuestion,
   useContinueDiscovery,
   useDiscovery,
+  useDiscoveryTime,
   usePauseDiscovery,
   useResolveProposal,
   useResumeDiscovery,
@@ -21,6 +22,10 @@ import { DiscoveryConversation, type LiveTurn } from '../components/discovery/Di
 import { DraftPanel } from '../components/discovery/DraftPanel.tsx';
 import { PanelNotes } from '../components/discovery/PanelNotes.tsx';
 import { PhaseStepper } from '../components/discovery/PhaseStepper.tsx';
+import { ReadOnlyHint } from '../components/session/ReadOnlyHint.tsx';
+import { ArchivedBanner, SessionAdmin } from '../components/session/SessionAdmin.tsx';
+import { TimeWarning } from '../components/session/SessionCountdown.tsx';
+import { TimeUpCard } from '../components/session/TimeUpCard.tsx';
 import { Tabs } from '../components/ui/Tabs.tsx';
 import {
   Badge,
@@ -36,6 +41,7 @@ import { useIsMobile } from '../hooks/useIsMobile.ts';
 import { applyActivity, applyDelta } from '../lib/chatSegments.ts';
 import { questionsToReview, waitingText } from '../lib/discovery.ts';
 import { useCanManageOrg } from '../lib/orgRole.ts';
+import { canManageOf } from '../lib/session.ts';
 import { getSocket } from '../ws/socket.ts';
 
 const errorText = (e: unknown): string | null =>
@@ -50,7 +56,7 @@ export function DiscoverySession() {
   const messages = useThreadMessages(id);
   const qc = useQueryClient();
   const mobile = useIsMobile();
-  const canManage = useCanManageOrg();
+  const isOrgManager = useCanManageOrg();
   const [tab, setTab] = useState<Tab>('conversation');
   const [live, setLive] = useState<LiveTurn | null>(null);
   const [draft, setDraft] = useState('');
@@ -62,6 +68,7 @@ export function DiscoverySession() {
   const pause = usePauseDiscovery(id);
   const resume = useResumeDiscovery(id);
   const carryOn = useContinueDiscovery(id);
+  const timeAction = useDiscoveryTime(id);
 
   const s = state.data;
   const stateRef = useRef(s);
@@ -119,6 +126,9 @@ export function DiscoverySession() {
       />
     );
 
+  const canManage = canManageOf(s);
+  const archived = !!s.config.archived;
+  const readOnly = archived || !canManage;
   const lastTurn = s.turns[s.turns.length - 1];
   const failed = !s.busy && lastTurn?.status === 'failed' && lastTurn.error !== 'cancelled';
   const toReview = questionsToReview(s.questions);
@@ -134,15 +144,28 @@ export function DiscoverySession() {
           The workstation is offline. Turns wait for it and nothing is lost.
         </Callout>
       )}
+      {archived && <ArchivedBanner>{canManage ? 'Reopen it to carry on.' : ''}</ArchivedBanner>}
+      <TimeWarning time={s.time} steerer="facilitator" />
+      {s.waitingFor === 'time' && (
+        <TimeUpCard
+          canManage={canManage}
+          wrapLabel="Wrap up now (capture)"
+          busy={timeAction.isPending}
+          error={timeAction.error}
+          onAction={(a) => timeAction.mutate(a)}
+        />
+      )}
       {s.config.paused && (
         <Callout
           tone="info"
           role="status"
           title="Paused"
           actions={
-            <Button size="sm" onClick={() => resume.mutate()} loading={resume.isPending}>
-              Resume
-            </Button>
+            canManage && !archived ? (
+              <Button size="sm" onClick={() => resume.mutate()} loading={resume.isPending}>
+                Resume
+              </Button>
+            ) : undefined
           }
         >
           The clock is stopped and nothing new starts. Your answers are kept; come back whenever you like.
@@ -159,9 +182,11 @@ export function DiscoverySession() {
           role="alert"
           title="The last turn did not finish"
           actions={
-            <Button size="sm" onClick={() => carryOn.mutate()} loading={carryOn.isPending}>
-              Try again
-            </Button>
+            canManage && !archived ? (
+              <Button size="sm" onClick={() => carryOn.mutate()} loading={carryOn.isPending}>
+                Try again
+              </Button>
+            ) : undefined
           }
         >
           {lastTurn?.error}
@@ -193,23 +218,27 @@ export function DiscoverySession() {
         answerError={errorText(answer.error)}
         resolveBusy={resolve.isPending}
         resolveError={errorText(resolve.error)}
+        readOnly={readOnly}
       />
+      {!canManage && !archived && <ReadOnlyHint />}
       <ErrorBox error={say.error} />
-      <Composer
-        value={draft}
-        onChange={setDraft}
-        onSend={send}
-        onStop={() => undefined}
-        busy={false}
-        placeholder={
-          s.waitingFor === 'owner' ? 'Answer above, or write to the analyst' : 'Write to the analyst'
-        }
-      />
+      {!archived && (
+        <Composer
+          value={draft}
+          onChange={setDraft}
+          onSend={send}
+          onStop={() => undefined}
+          busy={false}
+          placeholder={
+            s.waitingFor === 'owner' ? 'Answer above, or write to the analyst' : 'Write to the analyst'
+          }
+        />
+      )}
     </div>
   );
 
-  const panel = <PanelNotes threadId={id} notes={s.notes} />;
-  const drafts = <DraftPanel state={s} />;
+  const panel = <PanelNotes threadId={id} notes={s.notes} canManage={canManage} readOnly={archived} />;
+  const drafts = <DraftPanel state={s} canManage={canManage && !archived} canHire={isOrgManager} />;
 
   return (
     <div className="mx-auto flex max-w-6xl flex-col" data-testid="discovery-session">
@@ -234,7 +263,7 @@ export function DiscoverySession() {
           </div>
         }
         actions={
-          s.config.paused ? (
+          !canManage || archived ? undefined : s.config.paused ? (
             <Button onClick={() => resume.mutate()} loading={resume.isPending} data-testid="resume-session">
               <Play aria-hidden="true" className="size-4" />
               Resume
@@ -250,10 +279,11 @@ export function DiscoverySession() {
       <div className="mb-4 flex flex-col gap-3">
         <PhaseStepper
           phase={s.config.phase}
-          onSelect={(p) => setPhase.mutate(p)}
+          onSelect={readOnly ? undefined : (p) => setPhase.mutate(p)}
           disabled={setPhase.isPending}
         />
-        <CostMeter state={s} canManage={canManage} />
+        <CostMeter state={s} canManage={canManage && !archived} />
+        {canManage && <SessionAdmin threadId={id} archived={archived} backTo="/discovery" />}
         <ErrorBox error={setPhase.error ?? pause.error ?? resume.error ?? carryOn.error} />
       </div>
       {mobile ? (

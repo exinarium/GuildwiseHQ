@@ -7,6 +7,7 @@ import { ApiError } from '../api/client.ts';
 import {
   useBoard,
   useBoardSay,
+  useBoardTime,
   useContinueBoard,
   useEndBoard,
   usePauseBoard,
@@ -17,8 +18,13 @@ import { useThreadMessages } from '../api/queries/chats.ts';
 import { BoardComposer } from '../components/boardroom/BoardComposer.tsx';
 import { BoardConversation, type LiveBoardTurn } from '../components/boardroom/BoardConversation.tsx';
 import { BoardMeters } from '../components/boardroom/BoardMeters.tsx';
+import { MinutesBudgetCard } from '../components/boardroom/MinutesBudgetCard.tsx';
 import { MinutesPanel } from '../components/boardroom/MinutesPanel.tsx';
 import { Whiteboard } from '../components/boardroom/Whiteboard.tsx';
+import { ReadOnlyHint } from '../components/session/ReadOnlyHint.tsx';
+import { ArchivedBanner, SessionAdmin } from '../components/session/SessionAdmin.tsx';
+import { TimeWarning } from '../components/session/SessionCountdown.tsx';
+import { TimeUpCard } from '../components/session/TimeUpCard.tsx';
 import { Tabs } from '../components/ui/Tabs.tsx';
 import {
   Badge,
@@ -34,7 +40,7 @@ import {
 import { useIsMobile } from '../hooks/useIsMobile.ts';
 import { boardWaitingText } from '../lib/boardroom.ts';
 import { applyActivity, applyDelta } from '../lib/chatSegments.ts';
-import { useCanManageOrg } from '../lib/orgRole.ts';
+import { canManageOf } from '../lib/session.ts';
 import { getSocket } from '../ws/socket.ts';
 
 const errorText = (e: unknown): string | null =>
@@ -49,7 +55,6 @@ export function BoardroomSession() {
   const messages = useThreadMessages(id);
   const qc = useQueryClient();
   const mobile = useIsMobile();
-  const canManage = useCanManageOrg();
   const [tab, setTab] = useState<Tab>('conversation');
   const [live, setLive] = useState<LiveBoardTurn[]>([]);
   const [draft, setDraft] = useState('');
@@ -61,6 +66,7 @@ export function BoardroomSession() {
   const carryOn = useContinueBoard(id);
   const end = useEndBoard(id);
   const decide = useResolveDecision(id);
+  const timeAction = useBoardTime(id);
 
   const s = state.data;
   const stateRef = useRef(s);
@@ -112,6 +118,9 @@ export function BoardroomSession() {
       />
     );
 
+  const canManage = canManageOf(s);
+  const archived = !!s.config.archived;
+  const readOnly = archived || !canManage;
   const over = s.config.stage === 'ended';
   const lastTurn = s.turns[s.turns.length - 1];
   const failed = !s.busy && lastTurn?.status === 'failed' && lastTurn.error !== 'cancelled' && !over;
@@ -128,15 +137,29 @@ export function BoardroomSession() {
           The workstation is offline. Turns wait for it and nothing is lost.
         </Callout>
       )}
+      {archived && <ArchivedBanner>{canManage ? 'Reopen it to carry on.' : ''}</ArchivedBanner>}
+      <TimeWarning time={s.time} steerer="Chair" />
+      {s.waitingFor === 'time' && (
+        <TimeUpCard
+          canManage={canManage}
+          wrapLabel="Wrap up now (write minutes)"
+          busy={timeAction.isPending}
+          error={timeAction.error}
+          onAction={(a) => timeAction.mutate(a)}
+        />
+      )}
+      {s.config.minutesAsk === 'budget' && <MinutesBudgetCard state={s} canManage={canManage && !archived} />}
       {s.config.paused && (
         <Callout
           tone="info"
           role="status"
           title="Paused"
           actions={
-            <Button size="sm" onClick={() => resume.mutate()} loading={resume.isPending}>
-              Resume
-            </Button>
+            canManage && !archived ? (
+              <Button size="sm" onClick={() => resume.mutate()} loading={resume.isPending}>
+                Resume
+              </Button>
+            ) : undefined
           }
         >
           Nothing new starts. What has been said is kept; come back whenever you like.
@@ -153,9 +176,11 @@ export function BoardroomSession() {
           role="alert"
           title="The last turn did not finish"
           actions={
-            <Button size="sm" onClick={() => carryOn.mutate()} loading={carryOn.isPending}>
-              Try again
-            </Button>
+            canManage && !archived ? (
+              <Button size="sm" onClick={() => carryOn.mutate()} loading={carryOn.isPending}>
+                Try again
+              </Button>
+            ) : undefined
           }
         >
           {lastTurn?.error}
@@ -168,9 +193,11 @@ export function BoardroomSession() {
         onResolve={(v) => decide.mutate(v)}
         resolveBusy={decide.isPending}
         resolveError={errorText(decide.error)}
+        readOnly={readOnly}
       />
+      {!canManage && !archived && <ReadOnlyHint />}
       <ErrorBox error={say.error} />
-      {!over && (
+      {!over && !archived && (
         <BoardComposer
           value={draft}
           onChange={setDraft}
@@ -191,8 +218,8 @@ export function BoardroomSession() {
     </div>
   );
 
-  const board = <Whiteboard state={s} />;
-  const minutes = <MinutesPanel state={s} canManage={canManage} />;
+  const board = <Whiteboard state={s} canManage={canManage} readOnly={archived} />;
+  const minutes = <MinutesPanel state={s} canManage={canManage && !archived} />;
 
   return (
     <div className="mx-auto flex max-w-6xl flex-col" data-testid="boardroom-session">
@@ -225,7 +252,8 @@ export function BoardroomSession() {
         actions={
           <div className="flex flex-wrap gap-2">
             {!over &&
-              s.canManage !== false &&
+              !archived &&
+              canManage &&
               (s.config.paused ? (
                 <Button
                   onClick={() => resume.mutate()}
@@ -241,7 +269,7 @@ export function BoardroomSession() {
                   Pause
                 </Button>
               ))}
-            {!over && s.canManage !== false && s.config.stage !== 'minutes' && (
+            {!over && !archived && canManage && s.config.stage !== 'minutes' && (
               <Button variant="danger" onClick={() => setConfirmEnd(true)} data-testid="end-session">
                 <Square aria-hidden="true" className="size-4" />
                 End session
@@ -251,7 +279,15 @@ export function BoardroomSession() {
         }
       />
       <div className="mb-4 flex flex-col gap-3">
-        <BoardMeters state={s} canManage={canManage} />
+        <BoardMeters state={s} canManage={canManage && !archived} />
+        {canManage && (
+          <SessionAdmin
+            threadId={id}
+            archived={archived}
+            backTo="/boardroom"
+            canArchive={over || s.config.stage === 'setup'}
+          />
+        )}
         <ul className="flex flex-wrap gap-1.5" aria-label="Cast" data-testid="cast">
           {s.cast.map((c) => (
             <li key={c.participantId} className="rounded-full bg-sunken px-2.5 py-1 text-xs text-fg">

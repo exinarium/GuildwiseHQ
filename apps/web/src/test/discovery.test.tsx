@@ -8,7 +8,7 @@ import type {
   ThreadMessageDto,
 } from '@aom/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -191,6 +191,16 @@ const mount = (path: string) => {
     </QueryClientProvider>,
   );
 };
+/** A workstation of the signed-in user (id 'u'). */
+const myStation = (id: string, name: string, connected = true, userId = 'u') => ({
+  id,
+  userId,
+  name,
+  status: 'active',
+  connected,
+  runtimes: [],
+  repos: [],
+});
 const meHandlers = {
   'GET /api/auth/me': () => ({
     user: { id: 'u', email: 'o@example.com', displayName: 'Owner' },
@@ -299,6 +309,9 @@ describe('Discovery list and the new session dialog', () => {
         projects: [{ id: '0192f3a0-0000-7000-8000-0000000000aa', key: 'TOY', name: 'Toy' }],
       }),
       'GET /api/ceo/status': () => ({ state: 'active' }),
+      'GET /api/workstations': () => ({
+        workstations: [myStation('w1', 'Laptop'), myStation('w2', 'Desk', false)],
+      }),
       'POST /api/discovery': () => ({ state: state() }),
       'GET /api/discovery/': () => ({ state: state() }),
       'GET /api/threads/': () => thread(),
@@ -316,7 +329,10 @@ describe('Discovery list and the new session dialog', () => {
     // the CEO is there, so the CEO modes are offered
     await waitFor(() => expect(within(dialog).getByLabelText('CEO')).toBeInTheDocument());
     await user.selectOptions(within(dialog).getByLabelText('CEO'), 'joint');
-    await user.selectOptions(within(dialog).getByLabelText('Time box'), '30');
+    await user.selectOptions(within(dialog).getByLabelText('Time limit'), '30');
+    // only the user's own workstations are offered, the online one first and chosen
+    expect(within(dialog).getByLabelText('Workstation')).toHaveValue('w1');
+    expect(within(dialog).queryByTestId('prep-cap')).toBeNull();
     await user.selectOptions(within(dialog).getByLabelText('Start from'), 'prd');
     await user.selectOptions(
       within(dialog).getByLabelText('Project (optional)'),
@@ -332,6 +348,7 @@ describe('Discovery list and the new session dialog', () => {
       idea: 'Invoices for freelancers',
       projectId: '0192f3a0-0000-7000-8000-0000000000aa',
       timeBoxMinutes: 30,
+      workstationId: 'w1',
     });
   });
 
@@ -863,5 +880,252 @@ describe('Documents pages', () => {
       `/discovery/${T}`,
     );
     expect(screen.getByText(/Copied to the vault as org\/docs\/prd-invoicing.md/)).toBeInTheDocument();
+  });
+});
+
+describe('R2: ownership, limits, archive and hand-off', () => {
+  const base = (s: DiscoveryStateDto, extra: Record<string, Handler> = {}) =>
+    stub({
+      ...meHandlers,
+      [`GET /api/discovery/${T}`]: () => ({ state: s }),
+      'GET /api/threads/': () => thread(),
+      'GET /api/sessions': () => ({ sessions: [] }),
+      ...extra,
+    });
+  const timeOf = (over: Partial<NonNullable<DiscoveryStateDto['time']>> = {}) => ({
+    limitMinutes: 30,
+    elapsedMs: 25 * 60_000,
+    running: true,
+    asOf: AT,
+    warned: false,
+    up: false,
+    ...over,
+  });
+
+  it('shows a participant who is not the creator a read-only view: they can talk and add notes, not steer', async () => {
+    base(state({ canManage: false, proposals: [proposal()] }));
+    mount(`/discovery/${T}`);
+    expect(await screen.findByTestId('read-only-hint')).toHaveTextContent(
+      'The session creator manages this session',
+    );
+    // no pause, no phase change, no answer buttons, no proposal gate, no note editing
+    expect(screen.queryByTestId('pause-session')).toBeNull();
+    expect(screen.getByTestId('phase-converge')).toBeDisabled();
+    expect(screen.queryByTestId('option-o1')).toBeNull();
+    expect(screen.queryByTestId('answer-skip')).toBeNull();
+    expect(screen.queryByTestId('proposal-apply')).toBeNull();
+    expect(screen.getByTestId('proposal-readonly')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Edit note text' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Delete note' })).toBeNull();
+    expect(screen.queryByTestId('set-budget')).toBeNull();
+    expect(screen.queryByTestId('delete-session')).toBeNull();
+    // they can still talk and add notes
+    expect(screen.getByPlaceholderText(/Write to the analyst|Answer above/)).toBeInTheDocument();
+    expect(screen.getByLabelText('Add to Ideas')).toBeInTheDocument();
+  });
+
+  it('treats a state without canManage as manageable (an older server)', async () => {
+    base(state());
+    mount(`/discovery/${T}`);
+    expect(await screen.findByTestId('pause-session')).toBeInTheDocument();
+    expect(screen.queryByTestId('read-only-hint')).toBeNull();
+  });
+
+  it('counts down the time limit each second, warns at five minutes and turns red when it is up', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ['setInterval', 'clearInterval', 'Date'] });
+    try {
+      base(state({ time: timeOf({ warned: true }) }));
+      mount(`/discovery/${T}`);
+      const value = await screen.findByTestId('countdown-value');
+      expect(value).toHaveTextContent('5:00');
+      expect(screen.getByTestId('meter-countdown')).toHaveAttribute('data-state', 'warn');
+      expect(screen.getByTestId('time-warning')).toHaveTextContent('About 5 minutes left');
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3000);
+      });
+      await waitFor(() => expect(screen.getByTestId('countdown-value')).toHaveTextContent('4:5'));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('shows no countdown without a limit', async () => {
+    base(state({ time: timeOf({ limitMinutes: null }) }));
+    mount(`/discovery/${T}`);
+    await screen.findByTestId('session-meters');
+    expect(screen.queryByTestId('meter-countdown')).toBeNull();
+  });
+
+  it('asks the creator at time-up: extend by 15 or wrap up', async () => {
+    const up = state({
+      waitingFor: 'time',
+      time: timeOf({ elapsedMs: 30 * 60_000, up: true, running: false }),
+    });
+    const calls = base(up, { [`POST /api/discovery/${T}/time`]: () => ({ state: up }) });
+    mount(`/discovery/${T}`);
+    const user = userEvent.setup();
+    const card = await screen.findByTestId('time-up');
+    expect(card).toHaveTextContent('The time limit is up');
+    expect(screen.getByTestId('meter-countdown')).toHaveAttribute('data-state', 'up');
+    await user.click(within(card).getByTestId('extend-15'));
+    await waitFor(() => expect(calls.some((c) => c.url.endsWith('/time'))).toBe(true));
+    expect(calls.find((c) => c.url.endsWith('/time'))?.body).toEqual({ action: 'extend', minutes: 15 });
+    await user.click(within(card).getByRole('button', { name: 'Wrap up now (capture)' }));
+    await waitFor(() => expect(calls.filter((c) => c.url.endsWith('/time'))).toHaveLength(2));
+    expect(calls.filter((c) => c.url.endsWith('/time'))[1]?.body).toEqual({ action: 'wrap_up' });
+  });
+
+  it('tells a non-manager to wait at time-up', async () => {
+    base(state({ canManage: false, waitingFor: 'time', time: timeOf({ up: true, running: false }) }));
+    mount(`/discovery/${T}`);
+    const card = await screen.findByTestId('time-up');
+    expect(card).toHaveTextContent('Waiting for the session creator to extend or wrap up.');
+    expect(within(card).queryByTestId('extend-10')).toBeNull();
+  });
+
+  it('edits the time limit with the cost limit; an empty field removes it', async () => {
+    const calls = base(state({ time: timeOf() }), {
+      [`PATCH /api/discovery/${T}`]: () => ({ state: state() }),
+    });
+    mount(`/discovery/${T}`);
+    const user = userEvent.setup();
+    await user.click(await screen.findByTestId('set-budget'));
+    await user.clear(screen.getByLabelText('Time limit (minutes)'));
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(calls.some((c) => c.method === 'PATCH')).toBe(true));
+    expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({ timeBoxMinutes: null });
+  });
+
+  it('shows an archived session read-only and lets the creator reopen it', async () => {
+    const calls = base(state({ config: { ...state().config, archived: true } }), {
+      [`POST /api/sessions/${T}/archive`]: () => ({ session: {} }),
+    });
+    mount(`/discovery/${T}`);
+    const user = userEvent.setup();
+    expect(await screen.findByTestId('archived-banner')).toHaveTextContent('read-only');
+    expect(screen.queryByPlaceholderText(/Write to the analyst|Answer above/)).toBeNull();
+    expect(screen.queryByTestId('pause-session')).toBeNull();
+    expect(screen.queryByTestId('option-o1')).toBeNull();
+    await user.click(screen.getByTestId('reopen-session'));
+    await waitFor(() => expect(calls.some((c) => c.url.endsWith('/archive'))).toBe(true));
+    expect(calls.find((c) => c.url.endsWith('/archive'))?.body).toEqual({ archived: false });
+  });
+
+  it('archives and deletes a session (delete asks first and returns to the list)', async () => {
+    const calls = base(state(), {
+      [`POST /api/sessions/${T}/archive`]: () => ({ session: {} }),
+      [`DELETE /api/sessions/${T}`]: () => ({}),
+    });
+    mount(`/discovery/${T}`);
+    const user = userEvent.setup();
+    await user.click(await screen.findByTestId('archive-session'));
+    await waitFor(() =>
+      expect(calls.find((c) => c.url.endsWith('/archive'))?.body).toEqual({ archived: true }),
+    );
+    await user.click(screen.getByTestId('delete-session'));
+    const dlg = await screen.findByRole('dialog');
+    expect(dlg).toHaveTextContent('Delete this session?');
+    await user.click(within(dlg).getByRole('button', { name: 'Delete' }));
+    await waitFor(() => expect(calls.some((c) => c.method === 'DELETE')).toBe(true));
+    expect(await screen.findByText('No discovery sessions yet')).toBeInTheDocument();
+  });
+
+  it('queues the hand-off when no BA is online, and recommends hiring one when there is none', async () => {
+    const approved = {
+      id: DOC,
+      kind: 'prd' as const,
+      title: 'PRD',
+      status: 'approved' as const,
+      currentVersion: 1,
+    };
+    const queued = state({
+      questions: [],
+      baStatus: 'none',
+      documents: [{ ...approved, status: 'handed_off' }],
+      config: {
+        ...state().config,
+        handoff: { state: 'queued', at: AT, by: 'u', reason: 'no_ba' },
+      },
+    });
+    let current = state({ questions: [], baStatus: 'none', documents: [approved] });
+    const calls = base(current, {
+      [`GET /api/discovery/${T}`]: () => ({ state: current }),
+      [`GET /api/documents/${DOC}`]: () => ({}),
+      'GET /api/workstations': () => ({ workstations: [myStation('w1', 'Laptop')] }),
+      [`POST /api/discovery/${T}/hand-to-ba`]: () => {
+        current = queued;
+        return { intakeId: null, queued: true, state: queued };
+      },
+      'POST /api/agents': () => ({}),
+    });
+    mount(`/discovery/${T}`);
+    const user = userEvent.setup();
+    await user.click(await screen.findByTestId('hand-to-ba'));
+    expect(await screen.findByTestId('handoff-queued')).toHaveTextContent(
+      'Handed off. Waiting for a BA to come online; the intake starts on its own.',
+    );
+    const hire = await screen.findByTestId('hire-ba');
+    expect(hire).toHaveTextContent('no BA yet');
+    await waitFor(() => expect(within(hire).getByTestId('hire-ba-button')).toBeEnabled());
+    await user.click(within(hire).getByTestId('hire-ba-button'));
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.url === '/api/agents')).toBe(true));
+    expect(calls.find((c) => c.url === '/api/agents')?.body).toMatchObject({
+      roleKey: 'ba',
+      workstationId: 'w1',
+    });
+  });
+
+  it('asks for the CEO pre-draft turn cap only in prep mode, between 2 and 40', async () => {
+    const calls = stub({
+      ...meHandlers,
+      'GET /api/sessions': () => ({ sessions: [] }),
+      'GET /api/projects': () => ({ projects: [] }),
+      'GET /api/ceo/status': () => ({ state: 'active' }),
+      'GET /api/workstations': () => ({ workstations: [myStation('w1', 'Laptop')] }),
+      'POST /api/discovery': () => ({ state: state() }),
+      'GET /api/discovery/': () => ({ state: state() }),
+      'GET /api/threads/': () => thread(),
+    });
+    mount('/discovery');
+    const user = userEvent.setup();
+    await user.click(await screen.findByTestId('new-discovery'));
+    const dialog = await screen.findByRole('dialog');
+    await user.type(within(dialog).getByLabelText('Title'), 'Prep');
+    await waitFor(() => expect(within(dialog).getByLabelText('CEO')).toBeInTheDocument());
+    expect(within(dialog).queryByTestId('prep-cap')).toBeNull();
+    await user.selectOptions(within(dialog).getByLabelText('CEO'), 'ceo_prep');
+    const cap = within(dialog).getByTestId('prep-cap');
+    expect(cap).toHaveValue(12);
+    const start = within(dialog).getByRole('button', { name: 'Start' });
+    await user.clear(cap);
+    await user.type(cap, '1');
+    expect(start).toBeDisabled();
+    await user.clear(cap);
+    await user.type(cap, '41');
+    expect(start).toBeDisabled();
+    await user.clear(cap);
+    await user.type(cap, '20');
+    expect(start).toBeEnabled();
+    // no budget by default: nothing about cost is sent
+    await user.click(start);
+    await waitFor(() =>
+      expect(calls.some((c) => c.method === 'POST' && c.url === '/api/discovery')).toBe(true),
+    );
+    const body = calls.find((c) => c.method === 'POST' && c.url === '/api/discovery')?.body;
+    expect(body).toMatchObject({ ceoMode: 'ceo_prep', prepTurnCap: 20 });
+    expect(body).not.toHaveProperty('budgetUsd');
+    expect(body).not.toHaveProperty('timeBoxMinutes');
+  });
+
+  it('offers the New button to every member', async () => {
+    stub({
+      'GET /api/auth/me': () => ({
+        user: { id: 'u', email: 'm@example.com', displayName: 'Member' },
+        activeOrg: { id: 'o', name: 'Org', role: 'member' },
+      }),
+      'GET /api/sessions': () => ({ sessions: [] }),
+    });
+    mount('/discovery');
+    expect(await screen.findByTestId('new-discovery')).toBeInTheDocument();
   });
 });

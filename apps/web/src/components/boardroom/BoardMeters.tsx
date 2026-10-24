@@ -2,6 +2,7 @@ import type { BoardStateDto } from '@aom/shared';
 import { type FormEvent, useState } from 'react';
 import { usePatchBoard } from '../../api/queries/boardroom.ts';
 import { estimateText, formatUsd } from '../../lib/boardroom.ts';
+import { SessionCountdown } from '../session/SessionCountdown.tsx';
 import { cx } from '../ui/cx.ts';
 import { Button, TextInput } from '../ui.tsx';
 
@@ -11,12 +12,21 @@ export function BoardMeters({ state, canManage }: { state: BoardStateDto; canMan
   const patch = usePatchBoard(state.threadId);
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(cost.budgetUsd ? String(cost.budgetUsd) : '');
+  const [limit, setLimit] = useState(state.time?.limitMinutes ? String(state.time.limitMinutes) : '');
   const ratio = cost.budgetUsd ? Math.min(1, cost.costUsd / cost.budgetUsd) : null;
   const over = config.stage !== 'ended' && config.stage !== 'setup';
   const submit = (e: FormEvent) => {
     e.preventDefault();
     patch.mutate(
-      { budgetUsd: value.trim() === '' ? null : Number(value) },
+      {
+        // only what changed
+        ...(value.trim() === String(cost.budgetUsd ?? '')
+          ? {}
+          : { budgetUsd: value.trim() === '' ? null : Number(value) }),
+        ...(limit.trim() === String(state.time?.limitMinutes ?? '')
+          ? {}
+          : { timeLimitMinutes: limit.trim() === '' ? null : Number(limit) }),
+      },
       { onSuccess: () => setEditing(false) },
     );
   };
@@ -65,9 +75,10 @@ export function BoardMeters({ state, canManage }: { state: BoardStateDto; canMan
           <p className="font-medium text-fg">{estimateText(estimate)}</p>
         </div>
       )}
+      <SessionCountdown time={state.time} />
       {canManage &&
         (editing ? (
-          <form onSubmit={submit} className="flex items-end gap-2" aria-label="Session budget">
+          <form onSubmit={submit} className="flex flex-wrap items-end gap-2" aria-label="Session limits">
             <TextInput
               label="Budget (USD)"
               type="number"
@@ -77,6 +88,17 @@ export function BoardMeters({ state, canManage }: { state: BoardStateDto; canMan
               placeholder="No limit"
               value={value}
               onChange={(e) => setValue(e.target.value)}
+              className="w-28"
+            />
+            <TextInput
+              label="Time limit (minutes)"
+              type="number"
+              min="5"
+              step="5"
+              inputMode="numeric"
+              placeholder="No limit"
+              value={limit}
+              onChange={(e) => setLimit(e.target.value)}
               className="w-28"
             />
             <Button type="submit" variant="primary" size="md" loading={patch.isPending}>

@@ -46,6 +46,8 @@ export function waitingText(
       return 'Paused';
     case 'budget':
       return 'Stopped: budget used up';
+    case 'time':
+      return 'Time is up: waiting for the creator';
     default:
       return 'Waiting for your message';
   }

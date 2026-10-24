@@ -1,18 +1,21 @@
 import {
-  BOARD_CAST_MAX,
-  BOARD_CAST_MIN,
+  BOARD_FIXED_SEATS,
   BOARD_FORMAT_HINT,
   BOARD_FORMAT_LABEL,
   BOARD_FORMATS,
+  BOARD_OTHER_SEATS_MAX,
+  BOARD_OTHER_SEATS_MIN,
   BOARD_ROUND_CAP_DEFAULT,
   type BoardFormat,
   type BoardModels,
   type BoardRoom,
   type CastMember,
+  castProblem,
+  isFixedSeat,
   type ModelChoice,
   participantSlug,
 } from '@aom/shared';
-import { Plus, Sparkles, X } from 'lucide-react';
+import { Lock, Plus, Sparkles, X } from 'lucide-react';
 import { type FormEvent, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { useAgents } from '../../api/queries/agents.ts';
@@ -27,7 +30,9 @@ import {
 } from '../../api/queries/boardroom.ts';
 import { useProjects } from '../../api/queries/projects.ts';
 import { useWorkstations } from '../../api/queries/workstations.ts';
+import { TIME_LIMIT_PRESETS } from '../../lib/session.ts';
 import { fromChoice, ModelSelect, toChoice, unionExtras, unionProviders } from '../ModelSelect.tsx';
+import { WorkstationPicker } from '../session/WorkstationPicker.tsx';
 import { Badge, Button, Dialog, ErrorBox, Select, TextArea, TextInput } from '../ui.tsx';
 
 interface Seat extends CastMember {
@@ -36,6 +41,14 @@ interface Seat extends CastMember {
 }
 
 const ROUND_CAPS = [2, 3, 4, 5, 6, 8];
+/** The two seats every boardroom has: they cannot be removed. */
+const FIXED: Seat[] = BOARD_FIXED_SEATS.map((f) => ({
+  kind: 'persona',
+  refId: f.personaKey,
+  seat: f.seat,
+  label: f.label,
+  hint: f.role,
+}));
 const key = (m: { kind: string; refId: string }) => `${m.kind}:${m.refId}`;
 
 /**
@@ -76,7 +89,9 @@ export function NewBoardroomDialog({
   const [projectId, setProjectId] = useState('');
   const [roundCap, setRoundCap] = useState(String(BOARD_ROUND_CAP_DEFAULT));
   const [budget, setBudget] = useState('');
-  const [seats, setSeats] = useState<Seat[]>([]);
+  const [seats, setSeats] = useState<Seat[]>(FIXED);
+  const [workstationId, setWorkstationId] = useState('');
+  const [timeLimit, setTimeLimit] = useState('');
   const [adHocName, setAdHocName] = useState('');
   const [adHocBrief, setAdHocBrief] = useState('');
   const [personaModel, setPersonaModel] = useState('');
@@ -89,11 +104,20 @@ export function NewBoardroomDialog({
   const start = useStartBoard(draftId ?? '');
 
   const has = (m: { kind: string; refId: string }) => seats.some((s) => key(s) === key(m));
+  const others = seats.filter((s) => !isFixedSeat(s));
   const addSeat = (s: Seat) =>
     setSeats((cur) =>
-      cur.length >= BOARD_CAST_MAX || cur.some((c) => key(c) === key(s)) ? cur : [...cur, s],
+      isFixedSeat(s) ||
+      cur.filter((c) => !isFixedSeat(c)).length >= BOARD_OTHER_SEATS_MAX ||
+      cur.some((c) => key(c) === key(s))
+        ? cur
+        : [...cur, s],
     );
-  const toggle = (s: Seat) => (has(s) ? setSeats((cur) => cur.filter((c) => key(c) !== key(s))) : addSeat(s));
+  const toggle = (s: Seat) => {
+    if (isFixedSeat(s)) return;
+    if (has(s)) setSeats((cur) => cur.filter((c) => key(c) !== key(s)));
+    else addSeat(s);
+  };
 
   const models = (): BoardModels => ({
     ...(toChoice(personaModel) ? { persona: toChoice(personaModel) as ModelChoice } : {}),
@@ -131,8 +155,10 @@ export function NewBoardroomDialog({
     if (!r) return;
     setFormat(r.format);
     setRoundCap(String(r.roundCap));
-    setSeats(
-      r.cast.map((m) => ({
+    // an older room may lack the fixed seats: they are added in front
+    const loaded: Seat[] = r.cast
+      .filter((m) => !isFixedSeat(m))
+      .map((m) => ({
         ...m,
         label:
           m.displayName ??
@@ -143,8 +169,15 @@ export function NewBoardroomDialog({
             .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
             .join(' '),
         hint: m.stance ?? '',
-      })),
-    );
+      }));
+    const fixedModels = r.cast.filter(isFixedSeat);
+    setSeats([
+      ...FIXED.map((f) => {
+        const m = fixedModels.find((x) => x.refId === f.refId)?.model;
+        return m ? { ...f, model: m } : f;
+      }),
+      ...loaded.slice(0, BOARD_OTHER_SEATS_MAX),
+    ]);
     setPersonaModel(fromChoice(r.models.persona));
     setChairModel(fromChoice(r.models.chair));
     setSynthModel(fromChoice(r.models.synthesis));
@@ -157,7 +190,9 @@ export function NewBoardroomDialog({
       { onSuccess: (s) => setDraftId(s.threadId) },
     );
   };
-  const suggestions = draft.data?.suggestions ?? [];
+  const suggestions = (draft.data?.suggestions ?? []).filter(
+    (s) => !isFixedSeat({ kind: 'persona', refId: s.personaKey ?? '' }),
+  );
   const asking = !!draftId && draft.data?.config.suggestState === 'asking';
   const addSuggestion = (s: (typeof suggestions)[number]) =>
     addSeat(
@@ -174,7 +209,8 @@ export function NewBoardroomDialog({
           },
     );
 
-  const valid = topic.trim().length > 0 && seats.length >= BOARD_CAST_MIN;
+  const problem = castProblem(seats);
+  const valid = topic.trim().length > 0 && problem === null;
   const submit = (e: FormEvent) => {
     e.preventDefault();
     if (!valid) return;
@@ -186,6 +222,7 @@ export function NewBoardroomDialog({
       models: models(),
       cast: cast(),
       ...(budget.trim() && Number(budget) > 0 ? { budgetUsd: Number(budget) } : {}),
+      ...(timeLimit ? { timeLimitMinutes: Number(timeLimit) } : {}),
       ...(roomId ? { roomId } : {}),
     };
     const go = (threadId: string) => {
@@ -202,7 +239,14 @@ export function NewBoardroomDialog({
       });
     if (draftId) start.mutate(common, { onSuccess: (r) => go(r.state.threadId) });
     else
-      create.mutate({ ...common, ...(projectId ? { projectId } : {}) }, { onSuccess: (s) => go(s.threadId) });
+      create.mutate(
+        {
+          ...common,
+          ...(projectId ? { projectId } : {}),
+          ...(workstationId ? { workstationId } : {}),
+        },
+        { onSuccess: (s) => go(s.threadId) },
+      );
   };
 
   const personaList = (personas.data ?? []).filter((p) => !['chair', 'analyst'].includes(p.key));
@@ -269,9 +313,16 @@ export function NewBoardroomDialog({
         </Select>
 
         <fieldset className="flex flex-col gap-2.5 rounded-card border border-line p-3">
-          <legend className="px-1 text-sm font-semibold text-fg">
-            Cast ({seats.length} of {BOARD_CAST_MIN} to {BOARD_CAST_MAX})
-          </legend>
+          <legend className="px-1 text-sm font-semibold text-fg">Cast</legend>
+          <p className="text-xs text-muted" data-testid="cast-counter">
+            {`${others.length} of ${BOARD_OTHER_SEATS_MIN}-${BOARD_OTHER_SEATS_MAX} opinion seats`}
+            {", plus the Optimist and the Devil's Advocate, who are always in the room."}
+          </p>
+          {problem && topic.trim() && (
+            <p className="text-xs text-warning" role="status" data-testid="cast-problem">
+              {problem}
+            </p>
+          )}
           {roomList.length > 0 && (
             <Select label="Use a saved room" value={roomId} onChange={(e) => applyRoom(e.target.value)}>
               <option value="">Choose a room…</option>
@@ -288,14 +339,24 @@ export function NewBoardroomDialog({
                 <li key={key(s)}>
                   <span className="inline-flex min-h-8 items-center gap-1 rounded-full bg-brand-soft py-0.5 pr-1 pl-3 text-sm text-brand-soft-fg">
                     {s.label}
-                    <button
-                      type="button"
-                      aria-label={`Remove ${s.label}`}
-                      onClick={() => toggle(s)}
-                      className="inline-flex size-6 items-center justify-center rounded-full hover:bg-sunken"
-                    >
-                      <X aria-hidden="true" className="size-3.5" />
-                    </button>
+                    {isFixedSeat(s) ? (
+                      <span
+                        className="inline-flex size-6 items-center justify-center"
+                        title={s.hint}
+                        data-testid={`fixed-seat-${s.refId}`}
+                      >
+                        <Lock aria-label={`${s.label} is a fixed seat`} className="size-3.5" />
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        aria-label={`Remove ${s.label}`}
+                        onClick={() => toggle(s)}
+                        className="inline-flex size-6 items-center justify-center rounded-full hover:bg-sunken"
+                      >
+                        <X aria-hidden="true" className="size-3.5" />
+                      </button>
+                    )}
                   </span>
                 </li>
               ))}
@@ -335,6 +396,7 @@ export function NewBoardroomDialog({
                         type="checkbox"
                         className="mt-1 size-4"
                         checked={has(seat)}
+                        disabled={isFixedSeat(seat)}
                         onChange={() => toggle(seat)}
                         aria-label={p.name}
                       />
@@ -481,14 +543,14 @@ export function NewBoardroomDialog({
             ))}
           </Select>
           <TextInput
-            label="Budget in USD (optional)"
+            label="Cost limit in USD (optional)"
             type="number"
             min="0.5"
             step="0.5"
             inputMode="decimal"
             value={budget}
             onChange={(e) => setBudget(e.target.value)}
-            hint="No new turn starts once it is used up."
+            hint="Empty means no limit. A limit stops new turns once it is used up."
           />
           <Select label="Project (optional)" value={projectId} onChange={(e) => setProjectId(e.target.value)}>
             <option value="">No project</option>
@@ -498,6 +560,21 @@ export function NewBoardroomDialog({
               </option>
             ))}
           </Select>
+        </div>
+        <div className="grid gap-3.5 sm:grid-cols-2">
+          <Select
+            label="Time limit"
+            value={timeLimit}
+            onChange={(e) => setTimeLimit(e.target.value)}
+            hint="Optional. Like a meeting: a countdown, a warning with 5 minutes left, and your choice when it is up."
+          >
+            {TIME_LIMIT_PRESETS.map((t) => (
+              <option key={t.value} value={t.value}>
+                {t.label}
+              </option>
+            ))}
+          </Select>
+          {!draftId && <WorkstationPicker value={workstationId} onChange={setWorkstationId} open={open} />}
         </div>
         <div className="grid gap-3.5 sm:grid-cols-3">
           <ModelSelect

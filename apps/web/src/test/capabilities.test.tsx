@@ -401,7 +401,7 @@ describe('Capabilities: packs', () => {
     const user = userEvent.setup();
     const calls = stub(packsHandlers(pack({ trusted: true }), { 'POST /api/packs/': () => ({}) }));
     packsTab();
-    await user.click(await screen.findByRole('button', { name: 'Check for updates' }));
+    await user.click(await screen.findByRole('button', { name: 'Check another tag…' }));
     await user.type(screen.getByLabelText('New tag, branch or commit (optional)'), 'v7.0.0');
     await user.click(screen.getByRole('button', { name: 'Check' }));
     await waitFor(() =>
@@ -610,5 +610,90 @@ describe('Discovery dialog and registry playbooks', () => {
       const post = calls.find((c) => c.method === 'POST');
       expect(post?.body).toMatchObject({ playbook: 'bmad:brainstorming', templateKey: 'bmad:prd-template' });
     });
+  });
+});
+
+describe('Capabilities: R2 project skills review and one-click update check', () => {
+  const skill = (over: Record<string, unknown> = {}) => ({
+    projectId: '0192f3a0-0000-7000-8000-0000000000e1',
+    projectKey: 'TOY',
+    projectName: 'Toy',
+    kind: 'skill',
+    key: 'deploy-helper',
+    name: 'Deploy helper',
+    description: 'Deploys things',
+    hash: 'a'.repeat(64),
+    repo: 'toy-app',
+    path: '.claude/skills/deploy-helper',
+    status: 'unreviewed',
+    reviewedHash: null,
+    reviewedBy: null,
+    reviewedAt: null,
+    indexedAt: '2026-10-03T10:00:00.000Z',
+    ...over,
+  });
+
+  it('checks a pack for updates with one click on its current ref', async () => {
+    const user = userEvent.setup();
+    const calls = stub(packsHandlers(pack({ trusted: true }), { 'POST /api/packs/': () => ({}) }));
+    packsTab();
+    await user.click(await screen.findByRole('button', { name: 'Check for updates' }));
+    await waitFor(() => expect(calls.find((c) => c.url === `/api/packs/${PACK}/check`)).toBeTruthy());
+    expect(calls.find((c) => c.url === `/api/packs/${PACK}/check`)?.body).toEqual({});
+  });
+
+  it('lists project repository skills with repo, path, hash and status, and reviews or blocks them', async () => {
+    const user = userEvent.setup();
+    let items = [skill(), skill({ key: 'old', name: 'Old', status: 'changed' })];
+    const calls = stub({
+      ...me,
+      'GET /api/capabilities/project-skills': () => ({ items }),
+      'POST /api/capabilities/project-skills/review': (init) => {
+        const b = JSON.parse(String(init.body));
+        items = items.map((i) => (i.key === b.key ? skill({ ...i, status: b.status }) : i));
+        return { items };
+      },
+    });
+    wrap(<Capabilities />, '/settings/capabilities?tab=project-skills');
+    const rows = await screen.findAllByTestId('project-skill');
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toHaveTextContent('toy-app');
+    expect(rows[0]).toHaveTextContent('.claude/skills/deploy-helper');
+    expect(rows[0]).toHaveTextContent('aaaaaaaaaaaa');
+    expect(within(rows[0] as HTMLElement).getByTestId('skill-status')).toHaveTextContent('Not reviewed');
+    expect(within(rows[1] as HTMLElement).getByTestId('skill-status')).toHaveTextContent(
+      'Changed since review',
+    );
+    await user.click(within(rows[0] as HTMLElement).getByRole('button', { name: 'Mark reviewed' }));
+    await waitFor(() =>
+      expect(calls.find((c) => c.url.endsWith('/review'))?.body).toEqual({
+        projectId: '0192f3a0-0000-7000-8000-0000000000e1',
+        kind: 'skill',
+        key: 'deploy-helper',
+        hash: 'a'.repeat(64),
+        status: 'reviewed',
+      }),
+    );
+    await waitFor(() =>
+      expect(
+        within(screen.getAllByTestId('project-skill')[0] as HTMLElement).getByTestId('skill-status'),
+      ).toHaveTextContent('Reviewed'),
+    );
+    await user.click(
+      within(screen.getAllByTestId('project-skill')[1] as HTMLElement).getByRole('button', { name: 'Block' }),
+    );
+    await waitFor(() =>
+      expect(calls.filter((c) => c.url.endsWith('/review')).map((c) => c.body.status)).toEqual([
+        'reviewed',
+        'blocked',
+      ]),
+    );
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Unblock' })).toBeInTheDocument());
+  });
+
+  it('says so when no project repository carries a capability', async () => {
+    stub({ ...me, 'GET /api/capabilities/project-skills': () => ({ items: [] }) });
+    wrap(<Capabilities />, '/settings/capabilities?tab=project-skills');
+    expect(await screen.findByText('Nothing found in project repositories')).toBeInTheDocument();
   });
 });
