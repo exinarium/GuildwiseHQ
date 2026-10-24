@@ -293,7 +293,7 @@ describe('direct-model adapter: the tool loop', () => {
     };
     const common = ['ledger_search', 'skill_list', 'skill_show'];
     expect(await run('board_speaker', 'boardroom')).toEqual(
-      [...common, 'board_add', 'board_disagreement', 'board_show'].sort(),
+      [...common, 'board_add', 'board_disagreement', 'board_score', 'board_show'].sort(),
     );
     expect(await run('board_chair', 'boardroom')).toEqual(
       [

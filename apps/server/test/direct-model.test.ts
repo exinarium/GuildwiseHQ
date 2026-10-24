@@ -475,6 +475,7 @@ describe('session turns on direct models', () => {
 
 describe('a boardroom on mixed providers', () => {
   const CAST = [
+    { kind: 'persona', refId: 'optimist' },
     {
       kind: 'persona',
       refId: 'devils-advocate',
@@ -482,6 +483,7 @@ describe('a boardroom on mixed providers', () => {
     },
     { kind: 'persona', refId: 'user-advocate', model: { runtime: 'claude-code', model: 'haiku' } },
     { kind: 'persona', refId: 'cost-hawk' },
+    { kind: 'persona', refId: 'security' },
   ];
   const create = async (over: Record<string, unknown> = {}) =>
     (
@@ -514,7 +516,8 @@ describe('a boardroom on mixed providers', () => {
   it('runs each seat on its own provider, with the purpose of the turn, and hides round 1 until it is revealed', async () => {
     const st = await create();
     const starts: any[] = [];
-    for (let i = 0; i < 3; i++) starts.push(await nextStart(st.threadId, role('speaker')));
+    // a workstation runs four session turns at once: the fifth seat starts when one of the first four ends
+    for (let i = 0; i < 4; i++) starts.push(await nextStart(st.threadId, role('speaker')));
     const by = (key: string) => starts.find((s) => s.session.speaker.personaKey === key);
     expect(by('devils-advocate').agent).toMatchObject({
       runtime: 'direct-model',
@@ -526,10 +529,11 @@ describe('a boardroom on mixed providers', () => {
       runtime: 'direct-model',
       model: 'google:gemini-2.5-flash',
     });
-    for (const s of starts) expect(s.session.purpose).toBe('board_speaker');
 
     // two seats answer: nobody, not even the owner's own GET, sees their words yet
     await finish(by('devils-advocate'), 'DA: it is too early');
+    starts.push(await nextStart(st.threadId, role('speaker')));
+    for (const s of starts) expect(s.session.purpose).toBe('board_speaker');
     await finish(by('user-advocate'), 'UA: users want it');
     let msgs = (await owner('GET', `/api/threads/${st.threadId}/messages`)).messages as any[];
     expect(msgs.map((m) => m.body).join('\n')).not.toContain('too early');
@@ -539,6 +543,8 @@ describe('a boardroom on mixed providers', () => {
     ).toBe(true);
     // the third answers: round 1 is revealed
     await finish(by('cost-hawk'), 'CH: watch the spend');
+    await finish(by('optimist'), 'OP: it can work');
+    await finish(by('security'), 'SE: lock it down');
     await until(
       async () => (await owner('GET', `/api/board/${st.threadId}`)).state.config.revealedRound >= 1,
     );

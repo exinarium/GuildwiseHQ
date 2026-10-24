@@ -860,7 +860,7 @@ describe('PRD flow: draft, validate, approve, hand to the BA', () => {
     });
   });
 
-  it('refuses a hand-over without a BA online', async () => {
+  it('queues the hand-over when no BA is hired, raises a desk notice, and starts the intake once a BA is online', async () => {
     const s = await create({ title: 'No BA' });
     const start = await nextStart();
     await call(start.chatId, 'session.draft', { kind: 'prd', content: '# PRD\n\ntext' });
@@ -870,10 +870,38 @@ describe('PRD flow: draft, validate, approve, hand to the BA', () => {
     await owner('POST', `/api/documents/${docId}/status`, { status: 'approved' });
     await q(`UPDATE agents SET status='retired' WHERE role_key='ba'`);
     const res = await raw('POST', `/api/discovery/${s.threadId}/hand-to-ba`);
-    expect(res.status).toBe(409);
-    expect(JSON.stringify(res.body)).toContain('no_ba');
-    expect((await get(s.threadId)).config.handingOff ?? null).toBeNull();
-    expect((await owner('GET', `/api/documents/${docId}`)).document.status).toBe('approved');
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ intakeId: null, queued: true });
+    const st = (await get(s.threadId)).config;
+    expect(st.handingOff ?? null).toBeNull();
+    expect(st.handoff).toMatchObject({ state: 'queued', reason: 'no_ba' });
+    expect((await get(s.threadId)).baStatus).toBe('none');
+    expect((await owner('GET', `/api/documents/${docId}`)).document.status).toBe('handed_off');
+    expect(
+      await q(`SELECT 1 FROM desk_items WHERE subkind='handoff_needs_ba' AND status='open'`),
+    ).toHaveLength(1);
+    // a second click is harmless, and nothing starts while there is no BA
+    expect((await raw('POST', `/api/discovery/${s.threadId}/hand-to-ba`)).body).toMatchObject({ queued: true });
+    await w.t.app.ctx.services.discovery.sweep();
+    expect((await get(s.threadId)).config.intakeId ?? null).toBeNull();
+    // the BA is back: the sweep starts the intake (once, with the PRD linked)
+    await q(`UPDATE agents SET status='active' WHERE role_key='ba'`);
+    await w.t.app.ctx.services.discovery.sweep();
+    await w.t.app.ctx.services.discovery.sweep();
+    const after = (await get(s.threadId)).config;
+    expect(after.handoff ?? null).toBeNull();
+    expect(after.intakeId).toBeTruthy();
+    expect(
+      await q(`SELECT 1 FROM intakes WHERE linked_doc_ids @> $1::jsonb`, [JSON.stringify([docId])]),
+    ).toHaveLength(1);
+    const intake = (await owner('GET', `/api/intakes/${after.intakeId}`)).intake;
+    const baStart = await nextStart((f) => f.threadId === intake.threadId);
+    r.send('chat.done', {
+      chatId: baStart.chatId,
+      threadId: baStart.threadId,
+      messageText: 'ok',
+      usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 },
+    });
   });
 });
 

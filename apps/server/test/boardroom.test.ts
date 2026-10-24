@@ -65,10 +65,13 @@ const owner = (method: string, url: string, body?: unknown, expected = 200) =>
 const raw = (method: string, url: string, body?: unknown) =>
   w.t.req(method, url, { cookie: w.owner.cookie, ...(body !== undefined ? { body } : {}) });
 
+/** The two fixed seats plus three other opinion seats: the smallest cast a new boardroom may have. */
 const CAST = [
+  { kind: 'persona', refId: 'optimist' },
   { kind: 'persona', refId: 'devils-advocate' },
   { kind: 'persona', refId: 'user-advocate' },
   { kind: 'persona', refId: 'cost-hawk' },
+  { kind: 'persona', refId: 'security' },
 ];
 const create = async (over: Record<string, unknown> = {}) =>
   (
@@ -109,6 +112,7 @@ const call = async (turnId: string, method: string, params: Record<string, unkno
   };
 };
 const finish = async (start: any, text = 'ok', usage = { inputTokens: 100, outputTokens: 20 }) => {
+  if (start.done) return;
   r.send('chat.done', {
     chatId: start.chatId,
     threadId: start.threadId,
@@ -122,10 +126,24 @@ const finish = async (start: any, text = 'ok', usage = { inputTokens: 100, outpu
 };
 const speakerOf = (f: any): string => f.session.speaker.personaKey as string;
 
+/**
+ * The speakers of round 1, all queued at once. A workstation runs four session turns at a time, so the fifth seat starts
+ * only when a turn ends: `release` is the index of the turn finished early to let it through (already done afterwards).
+ */
+const allSeats = async (id: string, pred: (f: any) => boolean = role('speaker'), release = 3) => {
+  const out: any[] = [];
+  for (let i = 0; i < Math.min(CAST.length, 4); i++) out.push(await nextStart(id, pred));
+  if (CAST.length > 4) {
+    await finish(out[release], 'released early');
+    out[release].done = true;
+    while (out.length < CAST.length) out.push(await nextStart(id, pred));
+  }
+  return out;
+};
+
 /** Answers round 1: the three independent turns, in the order they arrived. */
 const answerRound1 = async (id: string, texts: Record<string, string> = {}) => {
-  const out: any[] = [];
-  for (let i = 0; i < 3; i++) out.push(await nextStart(id, role('speaker')));
+  const out = await allSeats(id);
   for (const s of out) await finish(s, texts[speakerOf(s)] ?? `${speakerOf(s)} answers on its own`);
   return out;
 };
@@ -147,8 +165,7 @@ describe('privacy of a session on the live paths', () => {
     await mine.hello();
     await other.hello();
     const st = await create();
-    const starts = [];
-    for (let i = 0; i < 3; i++) starts.push(await nextStart(st.threadId, role('speaker')));
+    const starts = await allSeats(st.threadId);
     const first = starts[0];
     r.send('chat.delta', { chatId: first.chatId, threadId: st.threadId, text: 'SECRET-DELTA' });
     await finish(first, 'SECRET-ANSWER');
@@ -180,8 +197,7 @@ describe('privacy of a session on the live paths', () => {
     });
     expect(res.status).toBe(404);
     // the answers are revealed together once every seat has answered; then they can be read
-    await finish(starts[1], 'Two');
-    await finish(starts[2], 'Three');
+    for (const x of starts.slice(1)) await finish(x, 'More');
     await until(async () => (await get(st.threadId)).config.revealedRound === 1);
     const msgs = (await owner('GET', `/api/threads/${st.threadId}/messages`)).messages as any[];
     expect(msgs.some((m) => m.body === 'SECRET-ANSWER')).toBe(true);
@@ -200,12 +216,11 @@ describe('creating a boardroom and the independent first round', () => {
       waitingFor: 'speakers',
       chair: { displayName: 'Chair' },
     });
-    expect(st.cast.map((c: any) => c.refId)).toEqual(['devils-advocate', 'user-advocate', 'cost-hawk']);
+    expect(st.cast.map((c: any) => c.refId)).toEqual(CAST.map((c) => c.refId));
     expect(st.rounds[0]).toMatchObject({ round: 1, kind: 'independent', source: 'independent' });
     await b.until(() => b.of('discovery.updated').some((m) => m.threadId === st.threadId));
 
-    const starts = [];
-    for (let i = 0; i < 3; i++) starts.push(await nextStart(st.threadId, role('speaker')));
+    const starts = await allSeats(st.threadId);
     // all three were queued at once, each sees the topic and the brief and nothing else
     for (const s of starts) {
       expect(s.session).toMatchObject({ kind: 'boardroom', speaker: { kind: 'persona' } });
@@ -219,7 +234,7 @@ describe('creating a boardroom and the independent first round', () => {
     const turns = await q(`SELECT context, round, meta, model FROM session_turns WHERE thread_id=$1`, [
       st.threadId,
     ]);
-    expect(turns).toHaveLength(3);
+    expect(turns).toHaveLength(CAST.length);
     for (const t of turns) {
       expect(t.context.mode).toBe('selected');
       expect(t.context.messageIds).toHaveLength(1);
@@ -242,13 +257,13 @@ describe('creating a boardroom and the independent first round', () => {
     await finish(starts[0], 'Devil answers');
     await finish(starts[1], 'User answers');
     let mid = await get(st.threadId);
-    expect(mid.sealedProgress).toEqual({ done: 2, total: 3 });
-    expect(mid.sealedMessageIds).toHaveLength(2);
+    expect(mid.sealedProgress).toEqual({ done: 3, total: CAST.length });
+    expect(mid.sealedMessageIds).toHaveLength(3);
     expect(mid.hiddenNotes).toBe(1);
     expect(mid.notes).toHaveLength(0);
     expect(mid.config.revealedRound).toBe(0);
 
-    await finish(starts[2], 'Cost answers');
+    for (const x of starts.slice(2)) await finish(x, 'Cost answers');
     await until(async () => (await get(st.threadId)).config.revealedRound === 1);
     mid = await get(st.threadId);
     expect(mid.config).toMatchObject({ stage: 'chair', revealedRound: 1 });
@@ -258,7 +273,7 @@ describe('creating a boardroom and the independent first round', () => {
     expect(mid.rounds[0].status).toBe('done');
     const msgs = (await owner('GET', `/api/threads/${st.threadId}/messages`)).messages as any[];
     expect(msgs.some((m) => m.kind === 'system' && /revealed together/.test(m.body))).toBe(true);
-    expect(msgs.filter((m) => m.authorKind === 'agent' && m.data?.round === 1)).toHaveLength(3);
+    expect(msgs.filter((m) => m.authorKind === 'agent' && m.data?.round === 1)).toHaveLength(CAST.length);
     // the Chair is up next
     const chair = await nextStart(st.threadId, role('chair'));
     expect(chair.session.speaker.personaKey).toBe('chair');
@@ -273,7 +288,7 @@ describe('the Chair chooses the speakers', () => {
   it('plans the next round, never opens with the last speaker, caps the pick at three, and runs the speakers one after the other', async () => {
     const st = await create({ roundCap: 4 });
     const round1 = await answerRound1(st.threadId);
-    const last = speakerOf(round1[2]);
+    const last = speakerOf(round1[round1.length - 1]);
     const others = ['devils-advocate', 'user-advocate', 'cost-hawk'].filter((k) => k !== last);
     // the Chair picks the last speaker first, a duplicate, and a stranger: the server fixes the pick
     const chair = await nextStart(st.threadId, role('chair'));
@@ -343,7 +358,7 @@ describe('the Chair chooses the speakers', () => {
   it('honours the owner @mentions: a mentioned seat speaks next, even if it spoke last', async () => {
     const st = await create({ roundCap: 4 });
     const round1 = await answerRound1(st.threadId);
-    const last = speakerOf(round1[2]);
+    const last = speakerOf(round1[round1.length - 1]);
     const chair = await nextStart(st.threadId, role('chair'));
     const said = await owner(
       'POST',
@@ -371,7 +386,7 @@ describe('the Chair chooses the speakers', () => {
     expect(spk.message).toContain('what does this cost us?');
     // @all reaches the whole cast
     const all = await owner('POST', `/api/board/${st.threadId}/say`, { body: 'Hey @all, quick check' }, 201);
-    expect(all.mentioned).toHaveLength(3);
+    expect(all.mentioned).toHaveLength(CAST.length);
     // unknown handles mention nobody
     expect(
       (await owner('POST', `/api/board/${st.threadId}/say`, { body: '@nobody hi' }, 201)).mentioned,
@@ -628,8 +643,7 @@ describe('convergence, decision points and the end', () => {
 describe('the whiteboard', () => {
   it('lets agents add (capped, no duplicates) and the owner add, move, edit, vote, merge and delete', async () => {
     const st = await create({ roundCap: 4 });
-    const starts = [];
-    for (let i = 0; i < 3; i++) starts.push(await nextStart(st.threadId, role('speaker')));
+    const starts = await allSeats(st.threadId);
     const s = starts[0];
     expect((await call(s.chatId, 'board.add', { column: 'ideas', text: 'Idea one' })).ok).toBe(true);
     expect(
@@ -697,24 +711,28 @@ describe('the whiteboard', () => {
 describe('formats, length cap and models', () => {
   it('gives each seat its format assignment: six hats rotate, red and blue are split, option scoring asks for scores', async () => {
     const hats = await create({ format: 'six_hats', roundCap: 2 });
-    const starts = [];
-    for (let i = 0; i < 3; i++) starts.push(await nextStart(hats.threadId, role('speaker')));
+    const starts = await allSeats(hats.threadId);
     const labels = starts.map((s) => /"label":"([^"]*)"/.exec(s.message)?.[1]);
-    expect(new Set(labels).size).toBe(3);
+    expect(new Set(labels).size).toBe(CAST.length);
     expect(labels.every((l) => /hat$/.test(l as string))).toBe(true);
     for (const s of starts) await finish(s);
-    await finish(await nextStart(hats.threadId, role('chair')));
+    const chats = await nextStart(hats.threadId, role('chair'));
+    await owner('POST', `/api/board/${hats.threadId}/pause`);
+    await finish(chats);
 
     const rb = await create({ format: 'red_blue', roundCap: 2 });
-    const rbs = [];
-    for (let i = 0; i < 3; i++) rbs.push(await nextStart(rb.threadId, role('speaker')));
+    const rbs = await allSeats(rb.threadId);
     expect(rbs.map((s) => /"label":"([^"]*)"/.exec(s.message)?.[1]).sort()).toEqual([
       'Blue team',
+      'Blue team',
+      'Red team',
       'Red team',
       'Red team',
     ]);
     for (const s of rbs) await finish(s);
-    await finish(await nextStart(rb.threadId, role('chair')));
+    const crb = await nextStart(rb.threadId, role('chair'));
+    await owner('POST', `/api/board/${rb.threadId}/pause`);
+    await finish(crb);
 
     const os = await create({
       format: 'option_scoring',
@@ -724,9 +742,9 @@ describe('formats, length cap and models', () => {
     const oss = await nextStart(os.threadId, role('speaker'));
     expect(oss.message).toContain('Score each option from 1');
     await finish(oss);
-    for (let i = 0; i < 2; i++) await finish(await nextStart(os.threadId, role('speaker')));
+    for (let i = 0; i < 4; i++) await finish(await nextStart(os.threadId, role('speaker')));
     await finish(await nextStart(os.threadId, role('chair')));
-  });
+  }, 90_000);
 
   it('cuts a speaker that ignores the length cap, and runs personas, the Chair and the minutes on the chosen models', async () => {
     const st = await create({
@@ -737,7 +755,9 @@ describe('formats, length cap and models', () => {
         synthesis: { runtime: 'mock', model: 'mock' },
       },
       cast: [
+        { kind: 'persona', refId: 'optimist' },
         { kind: 'persona', refId: 'devils-advocate', model: { runtime: 'mock', model: 'mock' } },
+        { kind: 'persona', refId: 'cost-hawk' },
         { kind: 'persona', refId: 'user-advocate' },
         {
           kind: 'persona',
@@ -754,8 +774,7 @@ describe('formats, length cap and models', () => {
       stance: 'A cautious compliance officer',
       slug: 'regulator',
     });
-    const starts = [];
-    for (let i = 0; i < 3; i++) starts.push(await nextStart(st.threadId, role('speaker')));
+    const starts = await allSeats(st.threadId);
     const reg = starts.find((s) => speakerOf(s) === 'ad-hoc-regulator');
     expect(reg.message).toContain(
       'Your stance (hold it, whatever the others say): A cautious compliance officer',
@@ -836,6 +855,8 @@ describe('suggesting a cast and saved rooms', () => {
         topic: 'Should we open a second office?',
         roundCap: 2,
         cast: [
+          { kind: 'persona', refId: 'optimist' },
+          { kind: 'persona', refId: 'devils-advocate' },
           { kind: 'persona', refId: 'cost-hawk' },
           { kind: 'persona', refId: 'security' },
           {
@@ -848,8 +869,8 @@ describe('suggesting a cast and saved rooms', () => {
       })
     ).state;
     expect(started.config).toMatchObject({ stage: 'round', round: 1, suggestState: null });
-    expect(started.cast).toHaveLength(3);
-    for (let i = 0; i < 3; i++) await finish(await nextStart(sug.threadId, role('speaker')));
+    expect(started.cast).toHaveLength(5);
+    for (let i = 0; i < CAST.length; i++) await finish(await nextStart(sug.threadId, role('speaker')));
     await finish(await nextStart(sug.threadId, role('chair')));
     expect((await raw('POST', `/api/board/${sug.threadId}/start`, { topic: 'x', cast: CAST })).status).toBe(
       409,
@@ -865,10 +886,7 @@ describe('suggesting a cast and saved rooms', () => {
           name: 'Product review',
           format: 'pre_mortem',
           roundCap: 3,
-          cast: [
-            { kind: 'persona', refId: 'devils-advocate' },
-            { kind: 'persona', refId: 'user-advocate' },
-          ],
+          cast: CAST,
         },
         201,
       )
@@ -882,9 +900,9 @@ describe('suggesting a cast and saved rooms', () => {
       roundCap: room.roundCap,
       roomId: room.id,
     });
-    expect(st.cast).toHaveLength(2);
+    expect(st.cast).toHaveLength(CAST.length);
     expect(st.config.format).toBe('pre_mortem');
-    for (let i = 0; i < 2; i++) await finish(await nextStart(st.threadId, role('speaker')));
+    for (let i = 0; i < CAST.length; i++) await finish(await nextStart(st.threadId, role('speaker')));
     await finish(await nextStart(st.threadId, role('chair')));
     await owner('DELETE', `/api/board-rooms/${room.id}`, undefined, 204);
     expect(((await owner('GET', '/api/board-rooms')).rooms as any[]).some((x) => x.id === room.id)).toBe(
@@ -941,14 +959,11 @@ describe('suggesting a cast and saved rooms', () => {
     const st = await create({
       cast: [
         { kind: 'agent', refId: ag.agent?.id ?? ag.id, seat: 'Business analyst' },
-        { kind: 'persona', refId: 'cost-hawk' },
+        ...CAST.slice(0, 4),
       ],
       roundCap: 2,
     });
-    const starts = [
-      await nextStart(st.threadId, role('speaker')),
-      await nextStart(st.threadId, role('speaker')),
-    ];
+    const starts = await allSeats(st.threadId);
     const agent = starts.find((s) => s.session.speaker.kind === 'agent');
     expect(agent.agent.roleKey).toBe('ba');
     expect(agent.message).toContain('seated as Business analyst');
@@ -962,14 +977,10 @@ describe('a seat that is gone', () => {
     const ag = await w.hire(`Gil${Math.random().toString(36).slice(2, 6)}`, 'ba', 'senior');
     const agentId = ag.agent?.id ?? ag.id;
     const st = await create({
-      cast: [
-        { kind: 'agent', refId: agentId },
-        { kind: 'persona', refId: 'cost-hawk' },
-        { kind: 'persona', refId: 'user-advocate' },
-      ],
+      cast: [{ kind: 'agent', refId: agentId }, ...CAST.slice(0, 4)],
       roundCap: 3,
     });
-    for (let i = 0; i < 3; i++) await finish(await nextStart(st.threadId, role('speaker')));
+    for (let i = 0; i < CAST.length; i++) await finish(await nextStart(st.threadId, role('speaker')));
     const chair = await nextStart(st.threadId, role('chair'));
     await q(`UPDATE agents SET status='retired' WHERE id=$1`, [agentId]);
     const agentSlug = st.cast.find((c: any) => c.refId === agentId).slug;
@@ -982,7 +993,7 @@ describe('a seat that is gone', () => {
     const spk = await nextStart(st.threadId, role('speaker'));
     expect(speakerOf(spk)).toBe('cost-hawk');
     const mid = await get(st.threadId);
-    expect(mid.cast.map((c: any) => c.refId)).toEqual(['cost-hawk', 'user-advocate']);
+    expect(mid.cast.map((c: any) => c.refId)).toEqual(CAST.slice(0, 4).map((c) => c.refId));
     const msgs = (await owner('GET', `/api/threads/${st.threadId}/messages`)).messages as any[];
     expect(
       msgs.some((m) => m.kind === 'system' && /no longer available and left the room/.test(m.body)),
@@ -997,17 +1008,15 @@ describe('cost, budget, pause and restart', () => {
     const st = await create({ budgetUsd: 0.5, roundCap: 4 });
     expect(st.estimate).toMatchObject({ speakers: 3, basis: 'default' });
     expect(st.cost).toMatchObject({ turns: 0, budgetUsd: 0.5, exceeded: false });
-    const starts = [];
-    for (let i = 0; i < 3; i++) starts.push(await nextStart(st.threadId, role('speaker')));
+    const starts = await allSeats(st.threadId);
     // 2M input tokens on the mock model price: well above 0.5 USD
     await finish(starts[0], 'a', { inputTokens: 2_000_000, outputTokens: 500_000 });
     let mid = await get(st.threadId);
-    expect(mid.cost.turns).toBe(1);
+    expect(mid.cost.turns).toBe(2);
     expect(mid.cost.costUsd).toBeGreaterThan(0.5);
     expect(mid.cost.exceeded).toBe(true);
     expect(mid.estimate.basis).toBe('average');
-    await finish(starts[1]);
-    await finish(starts[2]);
+    for (const x of starts.slice(1)) await finish(x);
     // the Chair cannot be queued: the room stops and says so
     await until(async () => (await get(st.threadId)).config.budgetStopped === true);
     mid = await get(st.threadId);
@@ -1035,12 +1044,10 @@ describe('cost, budget, pause and restart', () => {
 
   it('keeps everything across a pause and goes on at resume; a server that missed a turn end is caught by the sweep', async () => {
     const st = await create({ roundCap: 4 });
-    const starts = [];
-    for (let i = 0; i < 3; i++) starts.push(await nextStart(st.threadId, role('speaker')));
+    const starts = await allSeats(st.threadId);
     await finish(starts[0]);
     await owner('POST', `/api/board/${st.threadId}/pause`);
-    await finish(starts[1]);
-    await finish(starts[2]);
+    for (const x of starts.slice(1)) await finish(x);
     let mid = await get(st.threadId);
     expect(mid.waitingFor).toBe('paused');
     expect(mid.config.stage).toBe('round');
@@ -1115,7 +1122,7 @@ describe('access and replay', () => {
     const disc = (await owner('POST', '/api/discovery', { title: 'x', idea: 'y' }, 201)).state;
     expect((await raw('GET', `/api/board/${disc.threadId}`)).status).toBe(404);
     // a boardroom turn is not reachable through a discovery verb and the other way round
-    for (let i = 0; i < 3; i++) await finish(await nextStart(st.threadId, role('speaker')));
+    for (let i = 0; i < CAST.length; i++) await finish(await nextStart(st.threadId, role('speaker')));
     const facilitator = await nextStart(disc.threadId, role('facilitator'));
     expect((await call(facilitator.chatId, 'board.add', { column: 'ideas', text: 'x' })).ok).toBe(false);
     await finish(facilitator);

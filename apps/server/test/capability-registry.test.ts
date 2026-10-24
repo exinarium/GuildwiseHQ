@@ -54,7 +54,7 @@ describe('the effective registry', () => {
     ).toBe(true);
     expect(all.indexedAt).toBeNull();
     const personas = (await call('GET', '/api/capabilities?kind=persona')).items;
-    expect(personas.length).toBe(9);
+    expect(personas.length).toBe(10);
     expect(personas.every((i: { kind: string }) => i.kind === 'persona')).toBe(true);
     expect((await w.t.req('GET', '/api/capabilities')).status).toBe(401);
   });
