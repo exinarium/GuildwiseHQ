@@ -12,7 +12,7 @@ import {
   SESSION_VERBS_CAPABILITY,
 } from '@aom/shared';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { bmadFixtureStable } from '../../../packages/shared/test/fixtures/bmad-fixture.ts';
+import { samplePackFixture } from '../../../packages/shared/test/fixtures/sample-pack-fixture.ts';
 import { rebuildProjections } from '../src/projections/rebuild.ts';
 import { uniqueEmail } from './helpers/app.ts';
 import { closeAdminPool, q as rawQ } from './helpers/db.ts';
@@ -156,39 +156,44 @@ describe('the / menu', () => {
     expect(session.items.every((i: { kind: string }) => i.kind === 'playbook')).toBe(true);
   });
 
-  let bmadId = '';
-  it('lists the BMAD workflows once the pack is approved, as playbooks, and not its templates', async () => {
-    bmadId = (
+  let sampleId = '';
+  it('lists the pack workflows once the pack is approved, as playbooks, and not its templates', async () => {
+    sampleId = (
       await asOwner(
         'POST',
         '/api/packs',
-        { preset: 'bmad', url: 'https://github.com/x/bmad.git', ref: 'v6.12.4' },
+        { name: 'sample', url: 'https://github.com/x/sample.git', ref: 'v1.2.0' },
         201,
       )
     ).pack.id;
     const snap = packSnapshotOf({
-      name: 'bmad',
+      name: 'sample',
       ref: 'v6.12.4',
       sha: 'b'.repeat(40),
-      index: indexPack({ name: 'bmad', adapter: 'auto', tree: bmadFixtureStable() }),
+      index: indexPack({ name: 'sample', adapter: 'auto', tree: samplePackFixture() }),
     });
-    r.send('packs.report', { packId: bmadId, state: 'resolved', snapshot: snap });
+    r.send('packs.report', { packId: sampleId, state: 'resolved', snapshot: snap });
     await until(
       async () =>
-        (await asOwner('GET', '/api/packs')).packs.find((p: any) => p.id === bmadId)?.status === 'ready',
+        (await asOwner('GET', '/api/packs')).packs.find((p: any) => p.id === sampleId)?.status === 'ready',
     );
     // not approved yet: not listed
     expect(keysOf(await asOwner('GET', '/api/slash-commands'))).not.toContain(
-      'bmad:create-epics-and-stories',
+      'sample:create-epics-and-stories',
     );
-    await asOwner('POST', `/api/packs/${bmadId}/trust`, { sha: snap.sha, contentHash: snap.contentHash });
+    await asOwner('POST', `/api/packs/${sampleId}/trust`, { sha: snap.sha, contentHash: snap.contentHash });
     const list = await asOwner('GET', '/api/slash-commands?context=session');
     const keys = keysOf(list);
-    expect(keys).toEqual(expect.arrayContaining(['bmad:create-epics-and-stories', 'bmad:brainstorming']));
-    expect(keys).not.toContain('bmad:prd'); // a template, loaded by other playbooks
-    expect(keys).not.toContain('bmad:product-brief');
-    const epics = list.items.find((i: { key: string }) => i.key === 'bmad:create-epics-and-stories');
-    expect(epics).toMatchObject({ kind: 'playbook', source: 'pack', canStartSession: true, packId: bmadId });
+    expect(keys).toEqual(expect.arrayContaining(['sample:create-epics-and-stories', 'sample:brainstorming']));
+    expect(keys).not.toContain('sample:prd'); // a template, loaded by other playbooks
+    expect(keys).not.toContain('sample:product-brief');
+    const epics = list.items.find((i: { key: string }) => i.key === 'sample:create-epics-and-stories');
+    expect(epics).toMatchObject({
+      kind: 'playbook',
+      source: 'pack',
+      canStartSession: true,
+      packId: sampleId,
+    });
   });
 
   let privId = '';
@@ -273,15 +278,15 @@ describe('a person starts a guided session', () => {
     await finish(start);
   });
 
-  it('runs a BMAD workflow of an approved pack, loaded by the facilitator, with titles reported as it goes', async () => {
+  it('runs a workflow of an approved pack, loaded by the facilitator, with titles reported as it goes', async () => {
     const res = await asOwner(
       'POST',
       '/api/playbooks/run',
-      { key: 'bmad:create-epics-and-stories', input: 'billing PRD' },
+      { key: 'sample:create-epics-and-stories', input: 'billing PRD' },
       201,
     );
     const start = await nextStart((f) => f.message.includes('"role":"facilitator"'));
-    expect(start.message).toContain('aom skill show playbook:bmad:create-epics-and-stories');
+    expect(start.message).toContain('aom skill show playbook:sample:create-epics-and-stories');
     expect(start.message).toContain("Read the playbook's steps with the `aom skill show`");
     const a = await call(r, start.chatId, 'session.step', {
       step: 1,
@@ -301,7 +306,7 @@ describe('a person starts a guided session', () => {
   });
 
   it('refuses a playbook that is unknown, not approved, a template, or another member’s private one', async () => {
-    for (const key of ['nope', 'bmad:prd', 'mine:secret-play']) {
+    for (const key of ['nope', 'sample:prd', 'mine:secret-play']) {
       const res = await rawOwner('POST', '/api/playbooks/run', { key });
       expect(res.status, key).toBe(400);
       expect(JSON.stringify(res.body)).toContain('unknown_playbook');
@@ -314,7 +319,7 @@ describe('a person starts a guided session', () => {
     );
     expect(memStart.message).toContain('"role":"facilitator"');
     // another organization has neither the pack nor the member's playbook
-    for (const key of ['bmad:create-epics-and-stories', 'mine:secret-play']) {
+    for (const key of ['sample:create-epics-and-stories', 'mine:secret-play']) {
       const strange = await w.t.req('POST', '/api/playbooks/run', { cookie: stranger.cookie, body: { key } });
       expect(strange.status, key).toBe(400);
     }
@@ -361,7 +366,7 @@ describe('who may grant a playbook to an agent', () => {
   });
 
   it('refuses a playbook the granter cannot see, and the member’s private playbook for the Owner', async () => {
-    for (const key of ['nope', 'mine:secret-play', 'bmad:prd']) {
+    for (const key of ['nope', 'mine:secret-play', 'sample:prd']) {
       const res = await rawOwner('PUT', `/api/agents/${agentId}/playbook-grants`, { key, granted: true });
       expect(res.status, key).toBe(400);
     }
@@ -771,6 +776,6 @@ describe('replay and isolation', () => {
     });
     expect([403, 404]).toContain(put.status);
     const list = await w.t.req('GET', '/api/slash-commands', { cookie: stranger.cookie });
-    expect(JSON.stringify(list.body)).not.toContain('bmad:');
+    expect(JSON.stringify(list.body)).not.toContain('sample:');
   });
 });

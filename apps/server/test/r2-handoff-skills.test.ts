@@ -6,7 +6,7 @@ import {
   SESSION_VERBS_CAPABILITY,
 } from '@aom/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { bmadFixtureStable } from '../../../packages/shared/test/fixtures/bmad-fixture.ts';
+import { samplePackFixture } from '../../../packages/shared/test/fixtures/sample-pack-fixture.ts';
 import { startIntakeIn } from '../src/commands/intake.ts';
 import { applyProjectCapabilitiesReport, queuePacksSync } from '../src/commands/packs.ts';
 import { rebuildProjections } from '../src/projections/rebuild.ts';
@@ -145,8 +145,8 @@ describe('packs scoped to a project', () => {
       'POST',
       '/api/packs',
       {
-        preset: 'bmad',
-        url: 'https://github.com/x/proj-bmad.git',
+        name: 'sample',
+        url: 'https://github.com/x/proj-sample.git',
         ref: 'v6.12.4',
         scope: 'project',
         projectId: w.projectId,
@@ -158,7 +158,7 @@ describe('packs scoped to a project', () => {
       name: add.pack.name,
       ref: 'v6.12.4',
       sha: 'b'.repeat(40),
-      index: indexPack({ name: add.pack.name, adapter: 'auto', tree: bmadFixtureStable() }),
+      index: indexPack({ name: add.pack.name, adapter: 'auto', tree: samplePackFixture() }),
     });
     r.send('packs.report', { packId, state: 'resolved', snapshot: snap });
     await until(

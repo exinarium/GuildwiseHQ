@@ -4,7 +4,6 @@ import {
   diffPackSnapshots,
   isOrgManager,
   PACK_AUTHORING_CAPABILITY,
-  PACK_PRESETS,
   PACKS_CAPABILITY,
   type PackCredentialShares,
   type PackDesiredInput,
@@ -58,8 +57,20 @@ const MAX_PACKS = 30;
 /** True when any workstation found the pack's files changed from the approved content. */
 const INTEGRITY_SQL = `EXISTS (SELECT 1 FROM pack_workstation_state s WHERE s.pack_id = p.id AND s.integrity_failed)`;
 
+/** The attribution shown with a pack: the copyright line and licence its LICENSE file states, if any. */
+export function attributionOf(snap: PackSnapshot | null, license: string | null): string | null {
+  const copyright = snap?.copyright ?? null;
+  if (!copyright && !license) return null;
+  return [
+    copyright ? (copyright.endsWith('.') ? copyright : `${copyright}.`) : '',
+    license ? `${license} licence.` : '',
+    'Imported as an optional pack; not part of Guildwise.',
+  ]
+    .filter(Boolean)
+    .join(' ');
+}
+
 export function dto(r: Row, holders: PackHolder[] = [], ownerName: string | null = null): PackDto {
-  const preset = PACK_PRESETS.find((p) => p.id === r.preset);
   const snap = r.snapshot as PackSnapshot | null;
   return {
     id: r.id,
@@ -92,7 +103,7 @@ export function dto(r: Row, holders: PackHolder[] = [], ownerName: string | null
       : null,
     lastCheckedAt: iso(r.last_checked_at),
     addedAt: iso(r.added_at) as string,
-    attribution: preset?.attribution ?? null,
+    attribution: attributionOf(snap, r.license ?? null),
     source: r.source ?? 'git',
     visibility: r.visibility ?? 'org',
     ownerUserId: r.owner_user_id ?? null,
@@ -369,9 +380,7 @@ const slugOf = (url: string): string =>
 
 export async function addPack(ctx: Ctx, who: Who, req: AddPackRequest): Promise<PackDto> {
   requireManager(who);
-  const preset = req.preset ? PACK_PRESETS.find((p) => p.id === req.preset) : undefined;
-  if (req.preset && !preset) throw badRequest('unknown_preset', 'unknown preset');
-  const name = req.name ?? preset?.name ?? slugOf(req.url);
+  const name = req.name ?? slugOf(req.url);
   if (
     !/^[a-z0-9]+(-[a-z0-9]+)*$/.test(name) ||
     ['skill', 'persona', 'playbook', 'builtin', 'org', 'project', 'pack'].includes(name)
@@ -444,10 +453,9 @@ export async function addPack(ctx: Ctx, who: Who, req: AddPackRequest): Promise<
             name,
             url: req.url,
             ref: req.ref,
-            adapter: preset && req.adapter === 'auto' ? preset.adapter : req.adapter,
+            adapter: req.adapter,
             scope: req.scope,
             projectId: req.scope === 'project' ? (req.projectId ?? null) : null,
-            preset: preset?.id ?? null,
             addedBy: who.userId,
             // the holders are set below, so that another member's workstation goes through the opt-in
             workstationIds: [],

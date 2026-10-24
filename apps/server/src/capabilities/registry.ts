@@ -243,7 +243,7 @@ export async function resolvePersona(
   /** The user the persona is for: their own private packs resolve, nobody else's. */
   viewerUserId?: string | null,
 ): Promise<ResolvedPersona | undefined> {
-  // An imported pack's persona (`bmad:analyst`): only when the pack is approved at its pinned commit and unchanged. The text
+  // An imported pack's persona (`acme:analyst`): only when the pack is approved at its pinned commit and unchanged. The text
   // is never on the server; the runner reads it from its clone (and fences it as outside content).
   if (isPackedKey(key)) {
     const hit = (await packItems(db, orgId, projectId ?? undefined, viewerUserId ?? undefined)).find(

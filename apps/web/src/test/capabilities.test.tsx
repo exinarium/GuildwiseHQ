@@ -20,13 +20,13 @@ const AT = '2026-10-20T10:00:00.000Z';
 
 const pack = (over: Partial<PackDto> = {}): PackDto => ({
   id: PACK,
-  name: 'bmad',
-  url: 'https://github.com/bmad-code-org/BMAD-METHOD.git',
+  name: 'sample',
+  url: 'https://github.com/example/sample-pack.git',
   ref: 'v6.12.4',
-  adapter: 'bmad',
+  adapter: 'generic',
   scope: 'org',
   projectId: null,
-  preset: 'bmad',
+  preset: null,
   status: 'ready',
   error: null,
   pinnedSha: SHA,
@@ -42,7 +42,7 @@ const pack = (over: Partial<PackDto> = {}): PackDto => ({
   update: null,
   lastCheckedAt: null,
   addedAt: AT,
-  attribution: 'BMad Method, by BMad Code, LLC. MIT licence.',
+  attribution: 'Copyright (c) 2025 Example Maintainers. MIT licence.',
   source: 'git',
   visibility: 'org',
   ownerUserId: null,
@@ -71,31 +71,31 @@ const snapshot = {
   ref: 'v6.12.4',
   sha: SHA,
   contentHash: HASH,
-  adapter: 'bmad',
+  adapter: 'generic',
   license: 'MIT',
   hasScripts: true,
   issues: [{ path: 'broken/SKILL.md', message: 'missing frontmatter' }],
-  notes: ['bmad-party-mode: not imported, the Boardroom replaces it'],
+  notes: ['agents/x.md: listed in the manifest but not in the pack'],
   items: [
     {
       kind: 'persona',
-      key: 'bmad:analyst',
+      key: 'sample:analyst',
       name: 'Mary, Analyst',
       description: 'Digs into the problem',
       hash: H,
       source: 'pack',
-      pack: 'bmad',
+      pack: 'sample',
       icon: 'M',
       files: [{ path: 'agents/analyst.md', size: 100, script: false, hash: 'aaaaaaaaaaaa' }],
     },
     {
       kind: 'skill',
-      key: 'bmad:create-epics',
+      key: 'sample:create-epics',
       name: 'Create epics',
       description: 'Epics and stories',
       hash: H,
       source: 'pack',
-      pack: 'bmad',
+      pack: 'sample',
       hasScripts: true,
       files: [
         { path: 'create-epics/SKILL.md', size: 3000, script: false, hash: 'bbbbbbbbbbbb' },
@@ -153,19 +153,19 @@ describe('Capabilities: registry browser', () => {
     item({}),
     item({ kind: 'persona', key: 'security', name: 'Security', source: 'org-vault', overrides: true }),
     item({
-      key: 'bmad:create-epics',
+      key: 'sample:create-epics',
       name: 'Create epics',
       source: 'pack',
-      pack: 'bmad',
+      pack: 'sample',
       usable: false,
       unusableReason: 'untrusted',
       hasScripts: true,
     }),
     item({
-      key: 'bmad:other',
+      key: 'sample:other',
       name: 'Other',
       source: 'pack',
-      pack: 'bmad',
+      pack: 'sample',
       usable: false,
       unusableReason: 'integrity',
     }),
@@ -182,11 +182,11 @@ describe('Capabilities: registry browser', () => {
       }),
     });
     wrap(<Capabilities />);
-    const row = await screen.findByTestId('cap-skill-bmad:create-epics');
-    expect(row).toHaveTextContent('pack: bmad');
+    const row = await screen.findByTestId('cap-skill-sample:create-epics');
+    expect(row).toHaveTextContent('pack: sample');
     expect(row).toHaveTextContent('needs approval');
     expect(row).toHaveTextContent('has scripts');
-    expect(screen.getByTestId('cap-skill-bmad:other')).toHaveTextContent('files changed');
+    expect(screen.getByTestId('cap-skill-sample:other')).toHaveTextContent('files changed');
     expect(screen.getByTestId('cap-persona-security')).toHaveTextContent('organization vault');
     expect(screen.getByTestId('cap-persona-security')).toHaveTextContent('overrides');
     expect(screen.getByTestId('cap-skill-git')).toHaveTextContent('built-in');
@@ -198,9 +198,9 @@ describe('Capabilities: registry browser', () => {
     await user.selectOptions(screen.getByLabelText('Kind'), '');
     await user.selectOptions(screen.getByLabelText('Source'), 'pack');
     expect(screen.queryByTestId('cap-skill-git')).not.toBeInTheDocument();
-    expect(screen.getByTestId('cap-skill-bmad:other')).toBeInTheDocument();
+    expect(screen.getByTestId('cap-skill-sample:other')).toBeInTheDocument();
     await user.type(screen.getByLabelText('Search'), 'epics');
-    expect(screen.queryByTestId('cap-skill-bmad:other')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('cap-skill-sample:other')).not.toBeInTheDocument();
   });
 
   it('shows a member the registry and their own capabilities, and none of the admin tabs', async () => {
@@ -228,12 +228,12 @@ describe('Capabilities: packs', () => {
       'GET /api/packs': () => ({ packs: [pack({ preset: null })], workstationsOnline: 0 }),
     });
     packsTab();
-    const card = await screen.findByTestId('pack-bmad');
+    const card = await screen.findByTestId('pack-sample');
     expect(card).toHaveTextContent('untrusted');
     expect(card).toHaveTextContent('a1b2c3d');
     expect(card).toHaveTextContent('v6.12.4');
     expect(card).toHaveTextContent('licence MIT');
-    expect(card).toHaveTextContent('BMad Method, by BMad Code, LLC');
+    expect(card).toHaveTextContent('Copyright (c) 2025 Example Maintainers. MIT licence.');
     expect(screen.getByTestId('no-workstation')).toHaveTextContent('No workstation is online');
     expect(screen.queryByLabelText('Allow this pack', { exact: false })).not.toBeInTheDocument();
   });
@@ -303,38 +303,13 @@ describe('Capabilities: packs', () => {
     );
   });
 
-  it('adds the BMAD preset after showing its attribution and MIT licence', async () => {
-    const user = userEvent.setup();
-    const calls = stub({
-      ...me,
-      'GET /api/projects': () => ({ projects: [] }),
-      'GET /api/packs': () => ({ packs: [], workstationsOnline: 1 }),
-      'POST /api/packs': () => ({ pack: pack() }),
-    });
-    packsTab();
-    await user.click(await screen.findByTestId('preset-bmad'));
-    const dlg = await screen.findByTestId('preset-dialog');
-    expect(dlg).toHaveTextContent('BMad Code, LLC');
-    expect(dlg).toHaveTextContent('MIT');
-    expect(dlg).toHaveTextContent('stays untrusted');
-    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Add BMAD Method' }));
-    await waitFor(() => {
-      const body = calls.find((c) => c.method === 'POST' && c.url === '/api/packs')?.body;
-      expect(body).toMatchObject({
-        name: 'bmad',
-        adapter: 'bmad',
-        preset: 'bmad',
-        scope: 'org',
-        ref: expect.stringMatching(/^v/),
-      });
-    });
-  });
-
-  it('hides the preset button once that preset is added', async () => {
+  it('has no one-click preset: a pack is added by git URL, with a neutral note about the format', async () => {
     stub(packsHandlers(pack()));
     packsTab();
-    await screen.findByTestId('pack-bmad');
-    expect(screen.queryByTestId('preset-bmad')).not.toBeInTheDocument();
+    await screen.findByTestId('pack-sample');
+    expect(screen.queryByTestId(/^preset-/)).not.toBeInTheDocument();
+    expect(screen.getByTestId('packs-format-note')).toHaveTextContent('Agent Skills format');
+    expect(document.body.textContent ?? '').not.toMatch(/bmad/i);
   });
 
   it('review shows scripts flagged, notes and issues, and approves the exact sha and content hash', async () => {
@@ -345,9 +320,11 @@ describe('Capabilities: packs', () => {
     packsTab();
     await user.click(await screen.findByRole('button', { name: 'Review and approve' }));
     const review = await screen.findByTestId('trust-review');
-    await within(review).findByTestId('review-item-bmad:create-epics');
+    await within(review).findByTestId('review-item-sample:create-epics');
     expect(within(review).getByTestId('review-sha')).toHaveTextContent('a1b2c3d');
-    expect(within(review).getByTestId('review-notes')).toHaveTextContent('bmad-party-mode: not imported');
+    expect(within(review).getByTestId('review-notes')).toHaveTextContent(
+      'agents/x.md: listed in the manifest',
+    );
     expect(within(review).getByTestId('review-issues')).toHaveTextContent('broken/SKILL.md');
     expect(within(review).getByTestId('review-has-scripts')).toBeInTheDocument();
     expect(within(review).getByText(/Scripts stay off/)).toBeInTheDocument();
@@ -373,18 +350,18 @@ describe('Capabilities: packs', () => {
       ref: 'v6.13.0',
       foundAt: AT,
       diff: {
-        addedCapabilities: [{ id: 'skill:bmad:new', name: 'New skill' }],
-        removedCapabilities: [{ id: 'skill:bmad:old', name: 'Old skill' }],
+        addedCapabilities: [{ id: 'skill:sample:new', name: 'New skill' }],
+        removedCapabilities: [{ id: 'skill:sample:old', name: 'Old skill' }],
         changedCapabilities: [
           {
-            id: 'skill:bmad:create-epics',
+            id: 'skill:sample:create-epics',
             name: 'Create epics',
             addedFiles: ['scripts/extra.sh'],
             removedFiles: [],
             changedFiles: ['SKILL.md'],
           },
         ],
-        scriptsAdded: ['skill:bmad:create-epics/scripts/extra.sh'],
+        scriptsAdded: ['skill:sample:create-epics/scripts/extra.sh'],
         scriptsChanged: [],
         counts: { filesAdded: 2, filesRemoved: 1, filesChanged: 1 },
         hasChanges: true,
@@ -403,7 +380,9 @@ describe('Capabilities: packs', () => {
     const diff = await screen.findByTestId('pack-diff');
     expect(diff).toHaveTextContent('New skill');
     expect(diff).toHaveTextContent('Old skill');
-    expect(within(diff).getByTestId('changed-skill:bmad:create-epics')).toHaveTextContent('SKILL.md changed');
+    expect(within(diff).getByTestId('changed-skill:sample:create-epics')).toHaveTextContent(
+      'SKILL.md changed',
+    );
     expect(within(diff).getByTestId('diff-scripts')).toHaveTextContent('scripts/extra.sh');
     await user.click(screen.getByRole('button', { name: /Accept update/ }));
     await waitFor(() =>
@@ -441,7 +420,7 @@ describe('Capabilities: packs', () => {
   it('has no scripts toggle for an untrusted pack or a trusted pack without scripts', async () => {
     stub(packsHandlers(pack({ trusted: false })));
     const first = packsTab();
-    await screen.findByTestId('pack-bmad');
+    await screen.findByTestId('pack-sample');
     expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
     first.unmount();
     stub(packsHandlers(pack({ trusted: true, hasScripts: false })));
@@ -518,12 +497,12 @@ describe('skill grants picker', () => {
     return {
       items: [
         item({ key: 'git', name: 'Git' }),
-        item({ key: 'bmad:create-epics', name: 'Create epics', source: 'pack', pack: 'bmad' }),
+        item({ key: 'sample:create-epics', name: 'Create epics', source: 'pack', pack: 'sample' }),
         item({
-          key: 'bmad:untrusted',
+          key: 'sample:untrusted',
           name: 'Hidden skill',
           source: 'pack',
-          pack: 'bmad',
+          pack: 'sample',
           usable: false,
           unusableReason: 'untrusted',
         }),
@@ -544,20 +523,20 @@ describe('skill grants picker', () => {
     wrap(<Harness />);
     const options = await screen.findByTestId('skill-options');
     expect(options).toHaveTextContent('Git');
-    expect(options).toHaveTextContent('bmad:create-epics');
-    expect(within(options).getByTestId('source-pack')).toHaveTextContent('pack: bmad');
+    expect(options).toHaveTextContent('sample:create-epics');
+    expect(within(options).getByTestId('source-pack')).toHaveTextContent('pack: sample');
     expect(options).not.toHaveTextContent('Hidden skill');
-    await user.click(screen.getByRole('button', { name: 'Add skill bmad:create-epics' }));
-    expect(screen.getByTestId('value')).toHaveTextContent('["bmad:create-epics"]');
-    expect(screen.getByTestId('granted-bmad:create-epics')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Add skill bmad:create-epics' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Add skill sample:create-epics' }));
+    expect(screen.getByTestId('value')).toHaveTextContent('["sample:create-epics"]');
+    expect(screen.getByTestId('granted-sample:create-epics')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Add skill sample:create-epics' })).not.toBeInTheDocument();
     seen = '';
   });
 
   it('marks a granted pack skill that is not usable now', async () => {
     stub({ 'GET /api/capabilities': () => capHandler('?kind=skill&usable=true') });
-    wrap(<Harness initial={['bmad:gone']} />);
-    expect(await screen.findByTestId('granted-bmad:gone')).toHaveTextContent('not usable now');
+    wrap(<Harness initial={['sample:gone']} />);
+    expect(await screen.findByTestId('granted-sample:gone')).toHaveTextContent('not usable now');
   });
 
   it('renders nothing when the registry has no skills', async () => {
@@ -579,26 +558,26 @@ describe('Discovery dialog and registry playbooks', () => {
         items: [
           item({
             kind: 'playbook',
-            key: 'bmad:brainstorming',
-            name: 'BMAD brainstorming',
+            key: 'sample:brainstorming',
+            name: 'Sample brainstorming',
             source: 'pack',
-            pack: 'bmad',
+            pack: 'sample',
             tags: ['discovery'],
           }),
           item({
             kind: 'playbook',
-            key: 'bmad:prd-template',
-            name: 'BMAD PRD',
+            key: 'sample:prd-template',
+            name: 'Sample PRD',
             source: 'pack',
-            pack: 'bmad',
+            pack: 'sample',
             tags: ['template:prd'],
           }),
           item({
             kind: 'playbook',
-            key: 'bmad:locked',
+            key: 'sample:locked',
             name: 'Locked play',
             source: 'pack',
-            pack: 'bmad',
+            pack: 'sample',
             tags: ['discovery'],
             usable: false,
             unusableReason: 'untrusted',
@@ -611,18 +590,21 @@ describe('Discovery dialog and registry playbooks', () => {
     });
     wrap(<NewDiscoveryDialog open onOpenChange={() => undefined} />, '/discovery');
     const start = await screen.findByLabelText('Start from');
-    await screen.findByRole('option', { name: 'BMAD brainstorming (bmad)' });
+    await screen.findByRole('option', { name: 'Sample brainstorming (sample)' });
     expect(screen.queryByRole('option', { name: /Locked play/ })).not.toBeInTheDocument();
     await user.type(screen.getByLabelText('Title'), 'Invoicing');
-    await user.selectOptions(start, 'bmad:brainstorming');
+    await user.selectOptions(start, 'sample:brainstorming');
     await user.selectOptions(
       await screen.findByLabelText('Document template (optional)'),
-      'bmad:prd-template',
+      'sample:prd-template',
     );
     await user.click(screen.getByRole('button', { name: 'Start' }));
     await waitFor(() => {
       const post = calls.find((c) => c.method === 'POST');
-      expect(post?.body).toMatchObject({ playbook: 'bmad:brainstorming', templateKey: 'bmad:prd-template' });
+      expect(post?.body).toMatchObject({
+        playbook: 'sample:brainstorming',
+        templateKey: 'sample:prd-template',
+      });
     });
   });
 });

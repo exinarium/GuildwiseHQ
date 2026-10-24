@@ -1030,7 +1030,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
         text: 'Every capability with where it comes from. Filter by kind and source. A pack item says needs approval or files changed until it can be used.',
       },
       {
-        name: 'Add a pack / Add BMAD Method',
+        name: 'Add a pack',
         text: 'Add a git repository at a tag or commit. It stays untrusted: nothing of it is used until you approve it.',
       },
       {

@@ -55,7 +55,7 @@ export const DelegateRunParamsSchema = z.object({
     .min(1)
     .max(140)
     .describe(
-      'A granted target, as the delegation note lists it: a persona key (`devils-advocate`, `bmad:analyst`) or `agent:<name>`.',
+      'A granted target, as the delegation note lists it: a persona key (`devils-advocate`, `acme:analyst`) or `agent:<name>`.',
     ),
   task: z
     .string()

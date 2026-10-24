@@ -6,7 +6,7 @@ import {
   SESSION_TURNS_CAPABILITY,
 } from '@aom/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { bmadFixtureStable } from '../../../packages/shared/test/fixtures/bmad-fixture.ts';
+import { samplePackFixture } from '../../../packages/shared/test/fixtures/sample-pack-fixture.ts';
 import { followProjectPacks } from '../src/commands/pack-follow.ts';
 import { uniqueEmail } from './helpers/app.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
@@ -70,8 +70,8 @@ beforeAll(async () => {
     'POST',
     '/api/packs',
     {
-      preset: 'bmad',
-      url: 'https://github.com/x/follow-bmad.git',
+      name: 'sample',
+      url: 'https://github.com/x/follow-sample.git',
       ref: 'v6.12.4',
       scope: 'project',
       projectId: w.projectId,
@@ -84,7 +84,7 @@ beforeAll(async () => {
     name: packName,
     ref: 'v6.12.4',
     sha: 'c'.repeat(40),
-    index: indexPack({ name: packName, adapter: 'auto', tree: bmadFixtureStable() }),
+    index: indexPack({ name: packName, adapter: 'auto', tree: samplePackFixture() }),
   });
   owner.send('packs.report', { packId, state: 'resolved', snapshot: snap });
   await until(
@@ -225,8 +225,7 @@ describe('a "no" is remembered, and some packs are never moved by themselves', (
       '/api/packs',
       {
         name: 'untrusted-one',
-        preset: 'bmad',
-        url: 'https://github.com/x/untrusted-bmad.git',
+        url: 'https://github.com/x/untrusted-sample.git',
         ref: 'v1',
         scope: 'project',
         projectId: w.projectId,
@@ -239,8 +238,7 @@ describe('a "no" is remembered, and some packs are never moved by themselves', (
       '/api/packs',
       {
         name: 'keyed-one',
-        preset: 'bmad',
-        url: 'https://github.com/x/keyed-bmad.git',
+        url: 'https://github.com/x/keyed-sample.git',
         ref: 'v1',
         scope: 'project',
         projectId: w.projectId,

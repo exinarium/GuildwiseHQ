@@ -191,14 +191,14 @@ describe('persona tool profile to permissions', () => {
 });
 
 describe('provenance', () => {
-  it('reads like BMAD · analyst · v6.12.4', () => {
+  it('reads like ACME · analyst · v6.12.4', () => {
     expect(
-      provenanceLabel({ packName: 'bmad', capability: 'bmad:analyst', ref: 'v6.12.4', sha: 'a'.repeat(40) }),
-    ).toBe('BMAD · analyst · v6.12.4');
+      provenanceLabel({ packName: 'acme', capability: 'acme:analyst', ref: 'v6.12.4', sha: 'a'.repeat(40) }),
+    ).toBe('ACME · analyst · v6.12.4');
     expect(
       provenanceLabel({ packName: 'acme-kit', capability: 'reviewer', ref: 'main', sha: 'abcdef0123' }),
     ).toBe('acme-kit · reviewer · abcdef0');
-    expect(roleKeyForPackPersona('bmad', 'bmad:analyst')).toBe('bmad-analyst');
+    expect(roleKeyForPackPersona('acme', 'acme:analyst')).toBe('acme-analyst');
   });
 });
 
@@ -238,7 +238,7 @@ describe('a role from a pack persona', () => {
   } as AuthoredCapability)['analyst.md'] as string;
   const base = {
     packId: '3f2b8c1e-6a43-4c1a-9d52-1a2b3c4d5e6f',
-    packName: 'bmad',
+    packName: 'acme',
     capability: 'analyst',
     text,
     hash: 'a'.repeat(64),
@@ -248,15 +248,15 @@ describe('a role from a pack persona', () => {
     version: 1,
   };
   it('makes instructions of the prompt and a role that claims nothing', () => {
-    const r = roleFromPersona({ ...base, packSkills: ['bmad:brief'] });
-    expect(r.key).toBe('bmad-analyst');
+    const r = roleFromPersona({ ...base, packSkills: ['acme:brief'] });
+    expect(r.key).toBe('acme-analyst');
     expect(r.instructions).toContain('Interview the owner.');
     expect(r.instructions).toContain('Stance: Ask before assuming.');
     expect(r.claimableStages).toEqual([]);
-    expect(r.skills).toEqual(['bmad:brief']);
+    expect(r.skills).toEqual(['acme:brief']);
     expect(r.permissions.allowedTools).toEqual(['read', 'web', 'shell']);
     expect(r.permissions.mayCommit).toBe(false);
-    expect(r.source && provenanceLabel(r.source)).toBe('BMAD · analyst · v6.12.4');
+    expect(r.source && provenanceLabel(r.source)).toBe('ACME · analyst · v6.12.4');
     expect(RoleDefinitionSchema.safeParse(r).success).toBe(true);
     expect(
       validateRoleDefinition(r, { builtinRoleKeys: [], builtinWorkflowKeys: [], departments: [] }).filter(
@@ -283,7 +283,7 @@ describe('a role from a PRIVATE pack persona (security review finding 3)', () =>
   const OWNER = '019e3f6a-7b1c-7a2d-8c3e-0123456789a1';
   const input = {
     packId: PACK,
-    packName: 'bmad',
+    packName: 'acme',
     capability: 'analyst',
     text: text3,
     hash: 'a'.repeat(64),
@@ -293,15 +293,15 @@ describe('a role from a PRIVATE pack persona (security review finding 3)', () =>
   };
 
   it('gets a key of its own: a private pack named like an organization pack never lands on the organization’s role', () => {
-    expect(roleKeyForPackPersona('bmad', 'analyst')).toBe('bmad-analyst');
-    const k = roleKeyForPackPersona('bmad', 'analyst', { visibility: 'private', packId: PACK });
-    expect(k).toBe('bmad-analyst-p3f2b8c1e');
-    expect(k).not.toBe('bmad-analyst');
-    expect(roleKeyForPackPersona('bmad', 'analyst', { visibility: 'org', packId: PACK })).toBe(
-      'bmad-analyst',
+    expect(roleKeyForPackPersona('acme', 'analyst')).toBe('acme-analyst');
+    const k = roleKeyForPackPersona('acme', 'analyst', { visibility: 'private', packId: PACK });
+    expect(k).toBe('acme-analyst-p3f2b8c1e');
+    expect(k).not.toBe('acme-analyst');
+    expect(roleKeyForPackPersona('acme', 'analyst', { visibility: 'org', packId: PACK })).toBe(
+      'acme-analyst',
     );
     // another pack of the same name gets another key; a long name keeps the tag and stays inside the key pattern
-    expect(roleKeyForPackPersona('bmad', 'analyst', { visibility: 'private', packId: OWNER })).not.toBe(k);
+    expect(roleKeyForPackPersona('acme', 'analyst', { visibility: 'private', packId: OWNER })).not.toBe(k);
     const long = roleKeyForPackPersona('a'.repeat(40), 'b'.repeat(40), {
       visibility: 'private',
       packId: PACK,
@@ -313,7 +313,7 @@ describe('a role from a PRIVATE pack persona (security review finding 3)', () =>
 
   it('carries the owner and, for a Member, only the tools a Member may grant; for an Owner or Admin the persona’s own', () => {
     const member = roleFromPersona({ ...input, visibility: 'private', ownerUserId: OWNER, mayWiden: false });
-    expect(member.key).toBe('bmad-analyst-p3f2b8c1e');
+    expect(member.key).toBe('acme-analyst-p3f2b8c1e');
     expect(member.permissions.allowedTools).toEqual(['read']);
     expect(member.permissions.mayCommit).toBe(false);
     expect(member.source).toMatchObject({ visibility: 'private', ownerUserId: OWNER, packId: PACK });

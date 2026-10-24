@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { hashCapabilityFiles, parseTomlLite, shimBmadText, tomlString } from '../src/index.ts';
+import { hashCapabilityFiles, indexPack, parseTomlLite, tomlString } from '../src/index.ts';
 
-describe('toml-lite and shim hardening', () => {
+describe('toml-lite and manifest hardening', () => {
   it('does not pollute Object.prototype through a table path or key', () => {
     const t = parseTomlLite(
       '[__proto__]\npolluted = "yes"\n[a.constructor]\nx = 1\n__proto__ = "x"\n[[prototype]]\ny=2',
@@ -21,7 +21,12 @@ describe('toml-lite and shim hardening', () => {
     parseTomlLite(`${'[['.repeat(5000)}x`);
     const deep = parseTomlLite(`[${Array.from({ length: 30 }, (_, i) => `k${i}`).join('.')}]\nz=1`);
     expect(JSON.stringify(deep)).not.toContain('"z"');
-    shimBmadText(`#${' '.repeat(50000)}x ${' '.repeat(50000)}.`, { pack: 'p', known: new Set() });
+    // a hostile manifest and hostile skill text index quickly and never throw
+    indexPack({
+      name: 'p',
+      tree: { 'pack.yaml': `agents: [${'['.repeat(20000)}`, 'a/b/SKILL.md': `#${' '.repeat(50000)}x` },
+    });
+    indexPack({ name: 'p', tree: { 'pack.json': `{"agents":[${'{"file":"x"},'.repeat(5000)}{}]}` } });
     expect(Date.now() - t0).toBeLessThan(3000);
   });
   it('hashes ambiguous file sets differently', () => {

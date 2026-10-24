@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { indexPack, PACKS_CAPABILITY, type PackSnapshot, packSnapshotOf } from '@aom/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { bmadFixtureStable } from '../../../packages/shared/test/fixtures/bmad-fixture.ts';
+import { samplePackFixture } from '../../../packages/shared/test/fixtures/sample-pack-fixture.ts';
 import { rebuildProjections } from '../src/projections/rebuild.ts';
 import { uniqueEmail } from './helpers/app.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
@@ -40,7 +40,7 @@ const call = (
   );
 
 const snapshotOf = (tree: Record<string, string>, sha: string, ref = 'v6.12.4'): PackSnapshot =>
-  packSnapshotOf({ name: 'bmad', ref, sha, index: indexPack({ name: 'bmad', adapter: 'auto', tree }) });
+  packSnapshotOf({ name: 'sample', ref, sha, index: indexPack({ name: 'sample', adapter: 'auto', tree }) });
 
 const SHA1 = 'a'.repeat(40);
 const SHA2 = 'b'.repeat(40);
@@ -69,29 +69,30 @@ describe('adding a pack', () => {
     );
   });
 
-  it('records PackAdded from the BMAD preset and asks the workstation to fetch it', async () => {
+  it('records PackAdded from a git URL and asks the workstation to fetch it', async () => {
     const preset = (
       await call(
         'POST',
         '/api/packs',
-        { preset: 'bmad', url: 'https://github.com/bmad-code-org/BMAD-METHOD.git', ref: 'v6.12.4' },
+        { name: 'sample', url: 'https://github.com/example/sample-pack.git', ref: 'v1.2.0' },
         201,
       )
     ).pack;
     packId = preset.id;
     expect(preset).toMatchObject({
-      name: 'bmad',
+      name: 'sample',
       status: 'pending',
       trusted: false,
-      preset: 'bmad',
-      adapter: 'bmad',
+      adapter: 'auto',
+      preset: null,
     });
-    expect(preset.attribution).toMatch(/MIT/);
+    // no preset text: the attribution comes from the pack's own LICENSE once a workstation has read it
+    expect(preset.attribution).toBeNull();
     await until(async () => lastSync()?.length === 1);
     expect(lastSync()).toEqual([
       expect.objectContaining({
         packId,
-        name: 'bmad',
+        name: 'sample',
         pinnedSha: null,
         trusted: null,
         scriptsEnabled: false,
@@ -100,7 +101,7 @@ describe('adding a pack', () => {
     await call(
       'POST',
       '/api/packs',
-      { preset: 'bmad', url: 'https://github.com/bmad-code-org/BMAD-METHOD.git', ref: 'v1' },
+      { name: 'sample', url: 'https://github.com/example/sample-pack.git', ref: 'v1' },
       409,
     );
   });
@@ -108,7 +109,7 @@ describe('adding a pack', () => {
 
 describe('resolving, pinning and the trust gate', () => {
   it('pins the commit the first workstation resolved and lists its capabilities as not usable', async () => {
-    snap1 = snapshotOf(bmadFixtureStable(), SHA1);
+    snap1 = snapshotOf(samplePackFixture(), SHA1);
     r.send('packs.report', { packId, state: 'resolved', snapshot: snap1 });
     await until(async () => (await call('GET', '/api/packs')).packs[0].status === 'ready');
     const p = (await call('GET', `/api/packs/${packId}`)).pack;
@@ -119,14 +120,15 @@ describe('resolving, pinning and the trust gate', () => {
       hasScripts: true,
       license: 'MIT',
     });
+    expect(p.attribution).toMatch(/Copyright \(c\) 2025 Example Maintainers\. MIT licence\./);
     expect(p.snapshot.items.length).toBeGreaterThan(5);
     // a second report of another commit does not move the pin
-    r.send('packs.report', { packId, state: 'resolved', snapshot: snapshotOf(bmadFixtureStable(), SHA2) });
+    r.send('packs.report', { packId, state: 'resolved', snapshot: snapshotOf(samplePackFixture(), SHA2) });
     await r.barrier();
     expect((await call('GET', `/api/packs/${packId}`)).pack.pinnedSha).toBe(SHA1);
 
     const all = (await call('GET', '/api/capabilities')).items;
-    const analyst = all.find((i: { key: string }) => i.key === 'bmad:analyst');
+    const analyst = all.find((i: { key: string }) => i.key === 'sample:analyst');
     expect(analyst).toMatchObject({
       source: 'pack',
       usable: false,
@@ -147,7 +149,7 @@ describe('resolving, pinning and the trust gate', () => {
       body: {
         kind: 'boardroom',
         title: 'Untrusted cast',
-        participants: [{ kind: 'persona', refId: 'bmad:analyst', seat: 'Analyst' }],
+        participants: [{ kind: 'persona', refId: 'sample:analyst', seat: 'Analyst' }],
       },
     });
     expect(res.status).toBeGreaterThanOrEqual(400);
@@ -173,11 +175,11 @@ describe('resolving, pinning and the trust gate', () => {
       scriptsEnabled: false,
     });
     const items = (await call('GET', '/api/capabilities?usable=true')).items;
-    expect(items.find((i: { key: string }) => i.key === 'bmad:analyst')).toMatchObject({
+    expect(items.find((i: { key: string }) => i.key === 'sample:analyst')).toMatchObject({
       usable: true,
       source: 'pack',
     });
-    expect(items.find((i: { key: string }) => i.key === 'bmad:brainstorming')).toMatchObject({
+    expect(items.find((i: { key: string }) => i.key === 'sample:brainstorming')).toMatchObject({
       hasScripts: true,
       tags: expect.arrayContaining(['discovery']),
     });
@@ -189,7 +191,7 @@ describe('resolving, pinning and the trust gate', () => {
       body: {
         kind: 'boardroom',
         title: 'Trusted cast',
-        participants: [{ kind: 'persona', refId: 'bmad:analyst', seat: 'Analyst' }],
+        participants: [{ kind: 'persona', refId: 'sample:analyst', seat: 'Analyst' }],
       },
     });
     expect(res.status, JSON.stringify(res.body)).toBeLessThan(300);
@@ -214,14 +216,14 @@ describe('resolving, pinning and the trust gate', () => {
 
 describe('integrity', () => {
   it('flags the pack when a workstation reports other content for the pinned commit, and clears it when the files are right again', async () => {
-    const tampered = { ...bmadFixtureStable() };
+    const tampered = { ...samplePackFixture() };
     const k = Object.keys(tampered).find((x) => x.endsWith('prd-template.md')) as string;
     tampered[k] = '# tampered\n';
     r.send('packs.report', { packId, state: 'resolved', snapshot: snapshotOf(tampered, SHA1) });
     await until(async () => (await call('GET', '/api/packs')).packs[0].integrityFailed === true);
     // a finding on one workstation is shown, but it does not switch the pack off for the organization
     const items = (await call('GET', '/api/capabilities')).items;
-    expect(items.find((i: { key: string }) => i.key === 'bmad:analyst')).toMatchObject({ usable: true });
+    expect(items.find((i: { key: string }) => i.key === 'sample:analyst')).toMatchObject({ usable: true });
     r.send('packs.report', { packId, state: 'resolved', snapshot: snap1 });
     await until(async () => (await call('GET', '/api/packs')).packs[0].integrityFailed === false);
     r.send('packs.report', {
@@ -239,9 +241,9 @@ describe('integrity', () => {
 
 describe('updates are offered, never applied', () => {
   const changed = () => {
-    const t = { ...bmadFixtureStable() };
-    t['src/bmm-skills/plan/bmad-prd/assets/prd-template.md'] = '# PRD v2\n';
-    t['src/bmm-skills/ship/bmad-dev-story/scripts/go.sh'] = 'echo\n';
+    const t = { ...samplePackFixture() };
+    t['playbooks/prd/assets/prd-template.md'] = '# PRD v2\n';
+    t['skills/dev-story/scripts/go.sh'] = 'echo\n';
     return t;
   };
 
@@ -260,15 +262,15 @@ describe('updates are offered, never applied', () => {
     expect(p.pinnedSha).toBe(SHA1);
     expect(p.update.sha).toBe(SHA2);
     expect(p.update.diff.changedCapabilities.map((c: { id: string }) => c.id).sort()).toEqual([
-      'playbook:bmad:prd',
-      'skill:bmad:dev-story',
+      'playbook:sample:prd',
+      'skill:sample:dev-story',
     ]);
     expect(p.update.diff.scriptsAdded.length).toBe(1);
     expect(p.updateSnapshot.sha).toBe(SHA2);
     // the registry still serves the pinned commit
     expect(
       (await call('GET', '/api/capabilities?usable=true')).items.find(
-        (i: { key: string }) => i.key === 'bmad:analyst',
+        (i: { key: string }) => i.key === 'sample:analyst',
       )?.sha,
     ).toBe(SHA1);
   });
@@ -346,7 +348,7 @@ describe('who may report on a pack', () => {
       name: 'forge',
       ref: 'v1',
       sha: SHA1,
-      index: indexPack({ name: 'forge', adapter: 'generic', tree: bmadFixtureStable() }),
+      index: indexPack({ name: 'forge', adapter: 'generic', tree: samplePackFixture() }),
     });
   const pack = async () => (await call('GET', `/api/packs/${forgeId}`)).pack;
   const stateRows = async () =>
@@ -452,7 +454,7 @@ describe('who may report on a pack', () => {
       name: 'shared',
       ref: 'v1',
       sha: SHA1,
-      index: indexPack({ name: 'shared', adapter: 'generic', tree: bmadFixtureStable() }),
+      index: indexPack({ name: 'shared', adapter: 'generic', tree: samplePackFixture() }),
     });
     mr.send('packs.report', { packId: id, state: 'resolved', snapshot: snap });
     await mr.barrier();
@@ -467,7 +469,7 @@ describe('who may report on a pack', () => {
       index: indexPack({
         name: 'shared',
         adapter: 'generic',
-        tree: { ...bmadFixtureStable(), 'x/NOTE.md': 'x' },
+        tree: { ...samplePackFixture(), 'x/NOTE.md': 'x' },
       }),
     });
     mr.send('packs.report', { packId: id, state: 'update', snapshot: next });
@@ -541,6 +543,11 @@ describe('isolation, removal and rebuild', () => {
       (await call('GET', '/api/capabilities')).items.some((i: { source: string }) => i.source === 'pack'),
     ).toBe(false);
     // the name can be used again
-    await call('POST', '/api/packs', { url: 'https://github.com/a/bmad.git', ref: 'v1', name: 'bmad' }, 201);
+    await call(
+      'POST',
+      '/api/packs',
+      { url: 'https://github.com/a/sample.git', ref: 'v1', name: 'sample' },
+      201,
+    );
   });
 });

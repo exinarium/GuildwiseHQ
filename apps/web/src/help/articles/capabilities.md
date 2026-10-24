@@ -1,7 +1,7 @@
 ---
 title: Capabilities and packs
 summary: The skills, personas and playbooks agents can use, how to add and approve a pack, write your own, and hire or chat with a persona.
-keywords: [capabilities, registry, pack, bmad, skill, persona, playbook, trust, approve, scripts, project skills, review, block, editor, private, deploy key, token, hire, chat]
+keywords: [capabilities, registry, pack, git, skill, persona, playbook, trust, approve, scripts, project skills, review, block, editor, private, deploy key, token, hire, chat]
 order: 27
 ---
 
@@ -13,7 +13,7 @@ It lists every skill, persona and playbook and where it comes from: built in, yo
 
 ## Packs {#packs}
 
-Add a pack by git URL and tag, or click **Add BMAD Method**. It starts untrusted: nothing of it is used. **Review and approve** shows its files, scripts flagged, and approves that exact commit. Scripts stay off unless you enable them, and only run in the sandbox. Pack text reaches agents as outside content. **Check for updates** fetches now and shows a diff to accept. A pack added to one project applies in that project's sessions.
+Add a pack by git URL and tag (any repository of skills in the Agent Skills format, folders with a SKILL.md, works). It starts untrusted: nothing of it is used. **Review and approve** shows its files, scripts flagged, and approves that exact commit. Scripts stay off unless you enable them, and only run in the sandbox. Pack text reaches agents as outside content. **Check for updates** fetches now and shows a diff to accept. A pack added to one project applies in that project's sessions.
 
 ## Project skills {#project-skills}
 
@@ -31,7 +31,7 @@ For a private git repository add a deploy key (ssh) or token (https). Your brows
 
 Members can hire too, for projects they are on and on their own workstation. Owners and Admins can also **read the text** of an organization pack before approving it, with a diff against the version approved before (the text is encrypted for your browser only).
 
-On an approved pack, **Hire from this pack** turns a persona into an agent tagged like *BMAD · analyst · v6.12.4*. It gets read access unless the persona asks for more and you may grant it. **Add all agents** hires every persona. If the pack changes a persona you get a new version to review, never applied by itself. An agent whose pack lost its approval keeps working and shows a warning.
+On an approved pack, **Hire from this pack** turns a persona into an agent tagged like *ACME · analyst · v1.2.0*. It gets read access unless the persona asks for more and you may grant it. **Add all agents** hires every persona. If the pack changes a persona you get a new version to review, never applied by itself. An agent whose pack lost its approval keeps working and shows a warning.
 
 ## Chat with a persona {#chat-with-a-persona}
 

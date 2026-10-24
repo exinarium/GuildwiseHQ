@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import {
+  PackAdapterRequestSchema,
   PackAdapterSchema,
   PackCredentialKindSchema,
   PackDiffSchema,
@@ -93,7 +94,7 @@ export type ReviewProjectSkillRequest = z.infer<typeof ReviewProjectSkillRequest
 
 // ------------------------------------------------------------------------------------------------------- packs
 
-/** `POST /api/packs`: add a pack by git URL and ref. The name is the namespace; a preset fills in the rest. */
+/** `POST /api/packs`: add a pack by git URL and ref. The name is the namespace; the URL and ref are all that is needed. */
 /**
  * A deploy key (`ssh`) or an https token, sealed in the browser (hybrid RSA+AES, `sealLarge`) separately to each chosen
  * workstation's runner key. The server relays the ciphertexts and never opens them.
@@ -126,10 +127,9 @@ export const AddPackRequestSchema = z.object({
   /** R3a: a private repository. The URL may then be ssh; every chosen workstation needs a share. */
   credential: PackCredentialSharesSchema.optional(),
   ref: PackRefSchema,
-  adapter: PackAdapterSchema.default('auto'),
+  adapter: PackAdapterRequestSchema.default('auto'),
   scope: PackScopeSchema.default('org'),
   projectId: z.uuid().optional(),
-  preset: z.string().max(40).optional(),
   /**
    * The workstations that fetch and hold the pack. Omitted: the adding admin's own workstations. A chosen list must include
    * one of the admin's own (only those can pin the commit).

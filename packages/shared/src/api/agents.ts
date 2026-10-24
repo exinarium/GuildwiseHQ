@@ -48,7 +48,7 @@ export const AgentDtoSchema = z.object({
   /** Active claims right now. */
   activeCards: z.array(z.object({ cardId: z.uuid(), ref: z.string(), title: z.string() })).default([]),
   /**
-   * R3a: hired from a pack persona (`BMAD · analyst · v6.12.4`). `warning`: the pack's approval was withdrawn (`revoked`) or the
+   * R3a: hired from a pack persona (`ACME · analyst · v1.2.0`). `warning`: the pack's approval was withdrawn (`revoked`) or the
    * pack was removed; the agent keeps its role version and its work, and shows a warning.
    */
   provenance: PackProvenanceSchema.extend({

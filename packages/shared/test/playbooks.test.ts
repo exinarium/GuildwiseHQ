@@ -78,7 +78,7 @@ describe('the / list', () => {
     },
     {
       kind: 'playbook' as const,
-      key: 'bmad:create-epics-and-stories',
+      key: 'acme:create-epics-and-stories',
       name: 'Create Epics and Stories',
       description: 'Break a PRD into epics',
     },
@@ -93,12 +93,12 @@ describe('the / list', () => {
     // the key match first, then the descriptions that mention it
     expect(filterSlashCommands(items, 'prd').map((i) => i.key)).toEqual([
       'prd',
-      'bmad:create-epics-and-stories',
+      'acme:create-epics-and-stories',
       'interview-techniques',
     ]);
-    expect(filterSlashCommands(items, 'epics').map((i) => i.key)[0]).toBe('bmad:create-epics-and-stories');
+    expect(filterSlashCommands(items, 'epics').map((i) => i.key)[0]).toBe('acme:create-epics-and-stories');
     expect(filterSlashCommands(items, 'create-epics').map((i) => i.key)).toEqual([
-      'bmad:create-epics-and-stories',
+      'acme:create-epics-and-stories',
     ]);
     expect(filterSlashCommands(items, '').length).toBe(3);
     expect(filterSlashCommands(items, 'zzz')).toEqual([]);
@@ -118,11 +118,11 @@ describe('the / list', () => {
 describe('what goes into the chat', () => {
   it('a playbook becomes an instruction that loads it from the registry and fences it as guidance', () => {
     const t = playbookChatInstruction({
-      key: 'bmad:create-epics-and-stories',
+      key: 'acme:create-epics-and-stories',
       name: 'Create Epics',
       input: 'for the billing PRD',
     });
-    expect(t).toContain('aom skill show playbook:bmad:create-epics-and-stories');
+    expect(t).toContain('aom skill show playbook:acme:create-epics-and-stories');
     expect(t).toContain('one step at a time');
     expect(t).toContain('for the billing PRD');
     expect(playbookChatInstruction({ key: 'prd', name: 'PRD' })).toContain('asking what I want');

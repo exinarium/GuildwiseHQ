@@ -67,9 +67,9 @@ export interface DevopsGuardInput {
  * targets whose profile a native subagent can honour exactly are exposed (`nativeHonoursProfile`); the rest use `aom delegate`.
  */
 export interface NativeSubagent {
-  /** The subagent type the model names in the `Agent` tool (`bmad-analyst`). */
+  /** The subagent type the model names in the `Agent` tool (`acme-analyst`). */
   name: string;
-  /** The grant's handle (`bmad:analyst`, `agent:rex`): what the server knows the target by. */
+  /** The grant's handle (`acme:analyst`, `agent:rex`): what the server knows the target by. */
   handle: string;
   description: string;
   prompt: string;

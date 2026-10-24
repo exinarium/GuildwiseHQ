@@ -6,7 +6,7 @@ import { SourceBadge } from './badges.tsx';
 const MAX_SHOWN = 8;
 
 /**
- * Picks the registry skills a role is granted. The stored value stays a list of keys (`git`, `bmad:create-epics-and-stories`);
+ * Picks the registry skills a role is granted. The stored value stays a list of keys (`git`, `acme:create-epics-and-stories`);
  * only skills that can be used now are offered, so an unapproved pack's skills never appear. A key that is not in the
  * registry (typed by hand, or from a pack that is no longer approved) is kept and marked.
  */

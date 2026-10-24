@@ -1,7 +1,7 @@
 import type { AgentDto } from '@aom/shared';
 import { Badge } from '../ui.tsx';
 
-/** Where an agent hired from a pack persona came from (`BMAD · analyst · v6.12.4`), and a warning when the pack lost its approval. */
+/** Where an agent hired from a pack persona came from (`ACME · analyst · v1.2.0`), and a warning when the pack lost its approval. */
 export function PackProvenance({ agent }: { agent: Pick<AgentDto, 'provenance'> }) {
   const p = agent.provenance;
   if (!p) return null;

@@ -150,7 +150,7 @@ export type DelegateGrantSettings = z.infer<typeof DelegateGrantSettingsSchema>;
 /** PUT body: grant (or change) a target; `grant: null` revokes it. */
 export const SetDelegateGrantRequestSchema = z.object({
   targetKind: DelegateTargetKindSchema,
-  /** A persona key (`devils-advocate`, `bmad:analyst`) or an agent id. */
+  /** A persona key (`devils-advocate`, `acme:analyst`) or an agent id. */
   targetKey: z.string().trim().min(1).max(130),
   grant: DelegateGrantSettingsSchema.nullable(),
 });
@@ -315,7 +315,7 @@ export const NATIVE_SUBAGENT_TOOLS: Record<DelegateProfile, readonly string[]> =
   shell: ['Read', 'Grep', 'Glob', 'Edit', 'Write', 'Bash'],
 };
 
-/** A subagent name Claude Code accepts: lowercase letters, digits and hyphens (`bmad:analyst` -> `bmad-analyst`), unique in the list. */
+/** A subagent name Claude Code accepts: lowercase letters, digits and hyphens (`acme:analyst` -> `acme-analyst`), unique in the list. */
 export function nativeSubagentName(handle: string, taken: ReadonlySet<string> = new Set()): string {
   const base =
     handle

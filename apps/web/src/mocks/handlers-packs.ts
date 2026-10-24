@@ -12,12 +12,12 @@ const state = { trusted: false, scripts: false, removed: false };
 const packItems = () => [
   {
     kind: 'persona',
-    key: 'bmad:analyst',
+    key: 'sample:analyst',
     name: 'Mary, Analyst',
     description: 'Business analyst who digs into the problem first.',
     hash,
     source: 'pack',
-    pack: 'bmad',
+    pack: 'sample',
     icon: '📊',
     tags: [],
     hasScripts: false,
@@ -25,12 +25,12 @@ const packItems = () => [
   },
   {
     kind: 'playbook',
-    key: 'bmad:brainstorming',
+    key: 'sample:brainstorming',
     name: 'Brainstorming',
     description: 'Guided brainstorming techniques.',
     hash,
     source: 'pack',
-    pack: 'bmad',
+    pack: 'sample',
     tags: ['discovery'],
     hasScripts: true,
     files: [
@@ -42,13 +42,13 @@ const packItems = () => [
 
 const packDto = () => ({
   id: PACK_ID,
-  name: 'bmad',
-  url: 'https://github.com/bmad-code-org/BMAD-METHOD.git',
+  name: 'sample',
+  url: 'https://github.com/example/sample-pack.git',
   ref: 'v6.12.4',
-  adapter: 'bmad',
+  adapter: 'generic',
   scope: 'org',
   projectId: null,
-  preset: 'bmad',
+  preset: null,
   status: 'ready',
   error: null,
   pinnedSha: SHA,
@@ -65,7 +65,7 @@ const packDto = () => ({
   lastCheckedAt: null,
   addedAt: new Date().toISOString(),
   attribution:
-    'BMad Method, by BMad Code, LLC (github.com/bmad-code-org/BMAD-METHOD), MIT licence. Imported as an optional pack; not part of Guildwise.',
+    'Copyright (c) 2025 Example Maintainers. MIT licence. Imported as an optional pack; not part of Guildwise.',
 });
 
 export const packHandlers = [
@@ -153,10 +153,10 @@ export const packHandlers = [
           ref: 'v6.12.4',
           sha: SHA,
           contentHash: HASH,
-          adapter: 'bmad',
+          adapter: 'generic',
           items: packItems(),
           issues: [],
-          notes: ['bmad-party-mode: not imported, the Boardroom replaces it'],
+          notes: ['agents/x.md: listed in the manifest but not in the pack'],
           license: 'MIT',
           hasScripts: true,
         },
@@ -197,7 +197,7 @@ export const packHandlers = [
       ],
       ['brainstorm', 'Brainstorm', 'Facilitated idea generation that ends in a ranked shortlist.', 'builtin'],
       [
-        'bmad:create-epics-and-stories',
+        'sample:create-epics-and-stories',
         'Create Epics and Stories',
         'Break a PRD into epics and stories.',
         'pack',

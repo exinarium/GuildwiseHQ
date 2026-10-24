@@ -42,7 +42,7 @@ import { deliver } from './workstation-setup.ts';
 /**
  * Hire from pack (docs/ARCHITECTURE.md section 38.8). A persona of a trusted organization pack, or of the caller's own private
  * pack, becomes a role (its text the instructions, its declared tool profile the permissions, read only when it declares none,
- * never wider than the hiring user may grant) and an agent with a provenance tag (`BMAD · analyst · v6.12.4`). The persona text is
+ * never wider than the hiring user may grant) and an agent with a provenance tag (`ACME · analyst · v1.2.0`). The persona text is
  * read from a workstation that holds the pack (`pack.persona.read`, hash-checked against what the owner approved); the server
  * uses it only to write the role. "Add all agents from this pack" is the same call with every persona.
  *

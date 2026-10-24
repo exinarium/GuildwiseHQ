@@ -472,7 +472,7 @@ export { type PackProvenance, PackProvenanceSchema };
 
 const displayPackName = (n: string): string => (n.length <= 4 ? n.toUpperCase() : n);
 
-/** `BMAD · analyst · v6.12.4`: pack, capability, and the version (a tag-like ref, else the short commit). */
+/** `ACME · analyst · v1.2.0`: pack, capability, and the version (a tag-like ref, else the short commit). */
 export function provenanceLabel(p: Pick<PackProvenance, 'packName' | 'capability' | 'ref' | 'sha'>): string {
   const cap = p.capability.includes(':') ? p.capability.split(':').slice(1).join(':') : p.capability;
   const version = p.ref && /^v?\d/.test(p.ref) ? p.ref : p.sha.slice(0, 7);

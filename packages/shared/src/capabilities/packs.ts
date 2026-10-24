@@ -2,7 +2,7 @@ import { stringify as stringifyYaml } from 'yaml';
 import { z } from 'zod';
 import { sha256Hex } from '../graph/sha256.ts';
 import { renderUntrusted } from '../prompt/untrusted.ts';
-import { indexBmadPack } from './bmad.ts';
+import { readPackManifest, safePackPath } from './pack-manifest.ts';
 import {
   CAPABILITY_MAX_FILE_BYTES,
   CAPABILITY_MAX_FILES,
@@ -20,7 +20,7 @@ import {
 
 /**
  * External capability packs (docs/design/discovery-boardroom-registry.md "Phase E as built"): a git repository, pinned to
- * a commit, whose skills, personas and playbooks join the registry under a namespace (`bmad:analyst`). The owner reviews and
+ * a commit, whose skills, personas and playbooks join the registry under a namespace (`acme:analyst`). The owner reviews and
  * trusts a pack before anything of it is usable. Everything in this file is pure; the runner does the git and file work.
  */
 
@@ -120,44 +120,21 @@ export const PrivatePackUrlSchema = z
 export const authoredPackUrl = (packId: string): string => `authored:${packId}`;
 export const isAuthoredUrl = (url: string): boolean => url.startsWith('authored:');
 
-export const PACK_ADAPTERS = ['auto', 'generic', 'bmad'] as const;
-export const PackAdapterSchema = z.enum(PACK_ADAPTERS);
+/**
+ * What a new pack may ask for. Every pack is read by the same generic conventions (see `indexPack`); `generic` is kept as a
+ * name for it. Packs added before the generic reading may carry the retired `bmad` value: it is still accepted when a stored
+ * event or a report is read (`PackAdapterSchema`) and means the same as `auto`; nothing produces it any more.
+ */
+export const PACK_ADAPTERS = ['auto', 'generic'] as const;
+export const PackAdapterRequestSchema = z.enum(PACK_ADAPTERS);
+/** Stored values: includes the retired `bmad`, accepted on replay only. */
+export const PackAdapterSchema = z.enum([...PACK_ADAPTERS, 'bmad']);
 export type PackAdapterId = z.infer<typeof PackAdapterSchema>;
 export const PACK_SCOPES = ['org', 'project'] as const;
 export const PackScopeSchema = z.enum(PACK_SCOPES);
 export type PackScope = z.infer<typeof PackScopeSchema>;
 
 export const PackShaSchema = z.string().regex(/^[0-9a-f]{40}([0-9a-f]{24})?$/);
-
-/** One-click presets in the packs UI. Still subject to trust review. */
-export interface PackPreset {
-  id: string;
-  /** The namespace the pack gets. */
-  name: string;
-  label: string;
-  description: string;
-  url: string;
-  /** The latest stable tag at the time of writing; the owner can change it. */
-  ref: string;
-  adapter: PackAdapterId;
-  license: string;
-  attribution: string;
-}
-export const PACK_PRESETS: readonly PackPreset[] = [
-  {
-    id: 'bmad',
-    name: 'bmad',
-    label: 'Add BMAD Method',
-    description:
-      'The BMad Method agent personas, brainstorming and elicitation playbooks, product brief and PRD templates, and its development skills.',
-    url: 'https://github.com/bmad-code-org/BMAD-METHOD.git',
-    ref: 'v6.12.4',
-    adapter: 'bmad',
-    license: 'MIT',
-    attribution:
-      'BMad Method, by BMad Code, LLC (github.com/bmad-code-org/BMAD-METHOD), MIT licence. Imported as an optional pack; not part of Guildwise.',
-  },
-];
 
 // -------------------------------------------------------------------------------------------------------- files
 
@@ -190,12 +167,15 @@ export const PackSnapshotSchema = z.object({
   sha: PackShaSchema,
   /** Hash over every capability's hash: the value the owner approves and the runner re-checks before each use. */
   contentHash: z.string().regex(/^[0-9a-f]{64}$/),
+  /** `bmad` only in snapshots reported before the generic reading; new ones say `generic`. */
   adapter: z.enum(['generic', 'bmad']),
   items: z.array(PackItemSchema).max(500),
   issues: z.array(PackIssueSchema).max(100).default([]),
-  /** What the adapter left out or changed, in words (for example "bmad-party-mode: replaced by the Boardroom"). */
+  /** What the adapter left out or changed, in words (for example "agents/x.md: not found"). */
   notes: z.array(z.string().max(300)).max(60).default([]),
   license: z.string().max(100).nullable().default(null),
+  /** The copyright line of the pack's LICENSE (`Copyright (c) 2025 Example Maintainers`), shown with the licence as attribution. */
+  copyright: z.string().max(200).nullable().default(null),
   hasScripts: z.boolean(),
 });
 export type PackSnapshot = z.infer<typeof PackSnapshotSchema>;
@@ -288,8 +268,9 @@ export interface PackIndexResult {
   entries: ParsedCapability[];
   issues: CapabilityIssue[];
   notes: string[];
-  adapter: 'generic' | 'bmad';
+  adapter: 'generic';
   license: string | null;
+  copyright: string | null;
   hasScripts: boolean;
 }
 
@@ -306,7 +287,6 @@ const SKIPPED_SEGMENTS = new Set([
   '__tests__',
   'docs',
   'docs-site',
-  'v6-shims',
 ]);
 
 const normalise = (p: string): string => p.replace(/\\/g, '/').replace(/^\.\//, '');
@@ -348,13 +328,27 @@ const titleCase = (key: string): string =>
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
     .join(' ');
 
+/** What a pack may say about a persona beyond its file: the manifest's `agents:` entry. */
+export interface PersonaOverrides {
+  name?: string | undefined;
+  title?: string | undefined;
+  description?: string | undefined;
+  stance?: string | undefined;
+  voice?: string | undefined;
+  icon?: string | undefined;
+}
+
 /**
  * A Claude Code subagent (`.claude/agents/<key>.md`: frontmatter `name`, `description`, optional `tools`, `model`, `skills`;
  * the body is the prompt) as a persona text of ours. `tools` and `model` are advisory: they never widen anything.
+ * With `over` (a manifest entry, or a skill that declares itself an agent) the file's own `stance`, `voice` and `icon`, when it
+ * has them, are kept, and the overrides win over both.
  */
-export function claudeAgentToPersonaText(key: string, text: string): string {
+export function claudeAgentToPersonaText(key: string, text: string, over?: PersonaOverrides): string {
   const { data, body } = splitFrontmatter(text);
-  const description = String(data.description ?? '').trim() || `Subagent ${key}`;
+  const str = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() ? v.trim() : undefined);
+  const own = (k: string): string | undefined => (over ? str(data[k]) : undefined);
+  const description = over?.description?.trim() || String(data.description ?? '').trim() || `Subagent ${key}`;
   const tools = Array.isArray(data.tools)
     ? data.tools.map(String)
     : typeof data.tools === 'string'
@@ -368,12 +362,19 @@ export function claudeAgentToPersonaText(key: string, text: string): string {
   const skills = Array.isArray(data.skills)
     ? data.skills.map(String).filter((s) => CapabilityKeySchema.safeParse(s).success)
     : [];
+  const fileName =
+    typeof data.name === 'string' && data.name.trim() ? titleCase(data.name.trim()) : titleCase(key);
+  const named = over?.name?.trim() || fileName;
   const fm: Record<string, unknown> = {
-    name: typeof data.name === 'string' && data.name.trim() ? titleCase(data.name.trim()) : titleCase(key),
+    name: (over?.title ? `${named} (${over.title.trim()})` : named).slice(0, 100),
     description: description.slice(0, 1024),
-    stance: description.split(/(?<=[.!?])\s/)[0]?.slice(0, 500) || description.slice(0, 500),
-    voice: 'Plain and direct',
-    icon: '🤖',
+    stance:
+      over?.stance?.trim().slice(0, 500) ||
+      own('stance')?.slice(0, 500) ||
+      description.split(/(?<=[.!?])\s/)[0]?.slice(0, 500) ||
+      description.slice(0, 500),
+    voice: over?.voice?.trim().slice(0, 500) || own('voice')?.slice(0, 500) || 'Plain and direct',
+    icon: over?.icon?.trim().slice(0, 60) || own('icon')?.slice(0, 60) || '🤖',
     ...(tools.length ? { tools: tools.slice(0, 30) } : {}),
     ...(model ? { model: model.slice(0, 100) } : {}),
     ...(skills.length ? { skills: skills.slice(0, 30) } : {}),
@@ -427,65 +428,167 @@ export function inPack(
 
 const msg = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
-/** Re-hashes an adapted entry together with the adapter version. */
-export function adaptedHash(files: Record<string, string>, adapter: string): string {
-  return sha256Hex(`${hashCapabilityFiles(files)}\u0002${adapter}:${PACK_ADAPTER_VERSION}`);
+/**
+ * Re-hashes an entry together with the labels a manifest gave it: a label decides where a picker offers the capability, so a
+ * changed label re-opens the review like a changed file. The version keeps a changed reading of labels from passing silently.
+ */
+export function manifestHash(files: Record<string, string>, tags: readonly string[]): string {
+  return sha256Hex(
+    `${hashCapabilityFiles(files)}\u0002manifest:${PACK_ADAPTER_VERSION}:${[...tags].sort().join(',')}`,
+  );
 }
 
-export function detectPackAdapter(tree: PackTree): 'generic' | 'bmad' {
-  return Object.keys(tree).some((p) => /(^|\/)bmad-agent-[a-z0-9-]+\/SKILL\.md$/.test(p))
-    ? 'bmad'
-    : 'generic';
+/** True for a skill that declares itself an agent (a persona): `metadata.kind: agent` or `type: agent` in its frontmatter. */
+export function isAgentSkill(skillMd: string): boolean {
+  try {
+    const { data } = splitFrontmatter(skillMd);
+    const meta = data.metadata;
+    const m = (meta && typeof meta === 'object' ? (meta as Record<string, unknown>) : {}) as Record<
+      string,
+      unknown
+    >;
+    return [m.kind, m.type, data.type, data.kind].some(
+      (v) => typeof v === 'string' && v.trim().toLowerCase() === 'agent',
+    );
+  } catch {
+    return false;
+  }
+}
+
+const filesUnder = (tree: PackTree, dir: string): Record<string, string> => {
+  const files: Record<string, string> = {};
+  for (const [p, t] of Object.entries(tree)) if (p.startsWith(`${dir}/`)) files[p.slice(dir.length + 1)] = t;
+  return files;
+};
+
+/** The copyright line of a LICENSE text (`Copyright (c) 2025 Example Maintainers`), for the attribution shown with the licence. */
+function copyrightOf(license: string): string | null {
+  for (const raw of license.split('\n').slice(0, 60)) {
+    const line = raw.trim();
+    if (line.length > 400 || !/^(copyright|\(c\)|©)/i.test(line)) continue;
+    const t = line.replace(/\s+/g, ' ');
+    if (t.length > 12) return t.slice(0, 200);
+  }
+  return null;
 }
 
 /**
- * Indexes the text files of a pack into capabilities. `adapter` `auto` picks `bmad` when the BMAD agent skills are there.
- * A bad capability becomes an issue and is skipped; the rest is returned.
+ * Indexes the text files of a pack into capabilities, the same way for every pack:
+ *  - skills: folders with a `SKILL.md`, anywhere (except tests, docs and vendored code);
+ *  - personas: `personas/*.md`, `.claude/agents/*.md` (Claude Code subagents), the files an optional manifest (`pack.yaml` or
+ *    `pack.json`, see `pack-manifest.ts`) lists under `agents:`, and a skill whose frontmatter says `metadata.kind: agent`;
+ *  - playbooks: `playbooks/<key>/workflow.md` folders (with `steps/`), and the folders the manifest lists under `playbooks:`.
+ * What does not fit is a plain skill. A bad capability becomes an issue and is skipped; the rest is returned. `adapter` is
+ * accepted for packs stored with the retired `bmad` value and changes nothing.
  */
-export function indexPack(input: { name: string; adapter: PackAdapterId; tree: PackTree }): PackIndexResult {
+export function indexPack(input: { name: string; adapter?: PackAdapterId; tree: PackTree }): PackIndexResult {
   const tree: PackTree = {};
   for (const [p, t] of Object.entries(input.tree)) {
     const path = normalise(p);
     if (path.split('/').includes('..') || path.startsWith('/')) continue;
     tree[path] = t;
   }
-  const adapter = input.adapter === 'auto' ? detectPackAdapter(tree) : input.adapter;
   const found = discoverCapabilities(tree);
   const issues: CapabilityIssue[] = [];
   const notes: string[] = [];
   let entries: ParsedCapability[] = [];
+  const { manifest, file: manifestFile, error: manifestError } = readPackManifest(tree);
+  if (manifestError) issues.push({ path: manifestFile ?? 'pack.yaml', message: manifestError });
+  const labelled = (
+    e: ParsedCapability,
+    tags: readonly string[] | undefined,
+    icon?: string,
+  ): ParsedCapability => {
+    const t = [...new Set(tags ?? [])];
+    return t.length
+      ? inPack(input.name, { ...e, hash: manifestHash(e.files, t) }, { tags: t, ...(icon ? { icon } : {}) })
+      : inPack(input.name, e, icon ? { icon } : {});
+  };
+  const skillTags = new Map<string, string[]>();
+  const playbookTags = new Map<string, string[]>();
 
-  if (adapter === 'bmad') {
-    const r = indexBmadPack(input.name, tree, found);
-    entries = r.entries;
-    issues.push(...r.issues);
-    notes.push(...r.notes);
-  } else {
-    for (const s of found.skills) {
-      try {
-        if (Object.keys(s.files).length > CAPABILITY_MAX_FILES) throw new Error('too many files');
-        for (const [p, t] of Object.entries(s.files))
-          if (t.length > CAPABILITY_MAX_FILE_BYTES) throw new Error(`${p} is too large`);
-        entries.push(inPack(input.name, parseSkill(s.key, s.files)));
-      } catch (err) {
-        issues.push({ path: `${s.dir}/SKILL.md`, message: msg(err) });
-      }
+  const skills = [...found.skills];
+  for (const m of manifest?.skills ?? []) {
+    const dir = safePackPath(m.dir);
+    if (!dir || tree[`${dir}/SKILL.md`] === undefined) {
+      issues.push({ path: m.dir, message: 'listed under skills: in the manifest, but it has no SKILL.md' });
+      continue;
     }
-    for (const p of found.personas) {
-      try {
-        const text = p.path.startsWith('.claude/agents/') ? claudeAgentToPersonaText(p.key, p.text) : p.text;
-        const e = parsePersona(p.key, text);
-        entries.push(inPack(input.name, e, { icon: e.kind === 'persona' ? e.meta.icon : undefined }));
-      } catch (err) {
-        issues.push({ path: p.path, message: msg(err) });
-      }
+    if (!skills.some((s) => s.dir === dir))
+      skills.push({ key: dir.split('/').pop() as string, dir, files: filesUnder(tree, dir) });
+    if (m.tags?.length) skillTags.set(dir, m.tags);
+  }
+  for (const s of skills) {
+    try {
+      if (Object.keys(s.files).length > CAPABILITY_MAX_FILES) throw new Error('too many files');
+      for (const [p, t] of Object.entries(s.files))
+        if (t.length > CAPABILITY_MAX_FILE_BYTES) throw new Error(`${p} is too large`);
+      if (isAgentSkill(s.files['SKILL.md'] as string)) {
+        const e = parsePersona(s.key, claudeAgentToPersonaText(s.key, s.files['SKILL.md'] as string, {}));
+        if (Object.keys(s.files).length > 1)
+          notes.push(`${s.dir}: declares itself an agent; only its SKILL.md is used as the persona`);
+        entries.push(labelled(e, skillTags.get(s.dir), e.kind === 'persona' ? e.meta.icon : undefined));
+      } else entries.push(labelled(parseSkill(s.key, s.files), skillTags.get(s.dir)));
+    } catch (err) {
+      issues.push({ path: `${s.dir}/SKILL.md`, message: msg(err) });
     }
-    for (const pb of found.playbooks) {
-      try {
-        entries.push(inPack(input.name, parsePlaybook(pb.key, pb.files)));
-      } catch (err) {
-        issues.push({ path: `${pb.dir}/workflow.md`, message: msg(err) });
-      }
+  }
+  for (const p of found.personas) {
+    try {
+      const text = p.path.startsWith('.claude/agents/') ? claudeAgentToPersonaText(p.key, p.text) : p.text;
+      const e = parsePersona(p.key, text);
+      entries.push(inPack(input.name, e, { icon: e.kind === 'persona' ? e.meta.icon : undefined }));
+    } catch (err) {
+      issues.push({ path: p.path, message: msg(err) });
+    }
+  }
+  for (const a of manifest?.agents ?? []) {
+    const path = safePackPath(a.file);
+    const text = path ? tree[path] : undefined;
+    if (!path || text === undefined) {
+      issues.push({
+        path: a.file,
+        message: 'listed under agents: in the manifest, but the file is not in the pack',
+      });
+      continue;
+    }
+    try {
+      const key = a.key ?? (path.split('/').pop() as string).replace(/\.md$/i, '');
+      const e = parsePersona(
+        key,
+        claudeAgentToPersonaText(key, text, {
+          name: a.name,
+          title: a.title,
+          description: a.description,
+          stance: a.stance,
+          voice: a.voice,
+          icon: a.icon,
+        }),
+      );
+      entries.push(labelled(e, a.tags, e.kind === 'persona' ? e.meta.icon : undefined));
+    } catch (err) {
+      issues.push({ path, message: msg(err) });
+    }
+  }
+  const playbooks = [...found.playbooks];
+  for (const m of manifest?.playbooks ?? []) {
+    const dir = safePackPath(m.dir);
+    if (!dir || tree[`${dir}/workflow.md`] === undefined) {
+      issues.push({
+        path: m.dir,
+        message: 'listed under playbooks: in the manifest, but it has no workflow.md',
+      });
+      continue;
+    }
+    if (!playbooks.some((x) => x.dir === dir))
+      playbooks.push({ key: m.key ?? (dir.split('/').pop() as string), dir, files: filesUnder(tree, dir) });
+    if (m.tags?.length) playbookTags.set(dir, m.tags);
+  }
+  for (const pb of playbooks) {
+    try {
+      entries.push(labelled(parsePlaybook(pb.key, pb.files), playbookTags.get(pb.dir)));
+    } catch (err) {
+      issues.push({ path: `${pb.dir}/workflow.md`, message: msg(err) });
     }
   }
   const seen = new Set<string>();
@@ -502,15 +605,17 @@ export function indexPack(input: { name: string; adapter: PackAdapterId; tree: P
     return true;
   });
   entries.sort((a, b) => (a.kind === b.kind ? a.key.localeCompare(b.key) : a.kind.localeCompare(b.kind)));
+  const licenseText = tree.LICENSE ?? tree['LICENSE.md'] ?? tree['LICENSE.txt'] ?? '';
   const license = /^\s*(MIT License|Apache License|BSD|ISC License|Mozilla Public License|GNU )/im.exec(
-    tree.LICENSE ?? tree['LICENSE.md'] ?? tree['LICENSE.txt'] ?? '',
+    licenseText,
   )?.[1];
   return {
     entries,
     issues,
     notes,
-    adapter,
+    adapter: 'generic',
     license: license ? normaliseLicense(license) : null,
+    copyright: licenseText ? copyrightOf(licenseText) : null,
     hasScripts: entries.some((e) => e.hasScripts),
   };
 }
@@ -588,6 +693,7 @@ export function packSnapshotOf(input: {
       .map((i) => ({ path: i.path.slice(0, 300), message: i.message.slice(0, 500) })),
     notes: index.notes.slice(0, 60).map((n) => n.slice(0, 300)),
     license: index.license,
+    copyright: index.copyright,
     hasScripts: index.hasScripts,
   };
 }

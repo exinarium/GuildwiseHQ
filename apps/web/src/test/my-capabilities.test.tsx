@@ -431,8 +431,8 @@ describe('hire from pack', () => {
       repoIds: null,
     },
     withheld: ['the shell tool'],
-    provenanceLabel: 'BMAD · analyst · v6.12.4',
-    roleKey: 'bmad-analyst',
+    provenanceLabel: 'sample · analyst · v6.12.4',
+    roleKey: 'sample-analyst',
     role: null,
     hiredAgentIds: [],
     ...over,
@@ -459,7 +459,7 @@ describe('hire from pack', () => {
     }),
     [`GET /api/packs/${PACK}/personas`]: () => ({
       packId: PACK,
-      packName: 'bmad',
+      packName: 'sample',
       trusted: true,
       readableNow: true,
       personas,
@@ -475,19 +475,19 @@ describe('hire from pack', () => {
         requestId: 'x',
         status: 'done',
         error: null,
-        agents: [{ agentId: 'a1', name: 'Mary', roleKey: 'bmad-analyst' }],
+        agents: [{ agentId: 'a1', name: 'Mary', roleKey: 'sample-analyst' }],
       }),
     });
     const onClose = vi.fn();
-    wrap(<HirePackDialog packId={PACK} packName="bmad" onClose={onClose} />);
+    wrap(<HirePackDialog packId={PACK} packName="sample" onClose={onClose} />);
     const row = await screen.findByTestId('persona-analyst');
-    expect(row).toHaveTextContent('BMAD · analyst · v6.12.4');
+    expect(row).toHaveTextContent('sample · analyst · v6.12.4');
     await user.click(within(row).getByLabelText('Hire Mary, Analyst'));
     expect(screen.getByTestId('permissions-analyst')).toHaveTextContent('Tools it would get: read');
     expect(screen.getByTestId('permissions-analyst')).toHaveTextContent(
       'Withheld, because you may not grant it: the shell tool',
     );
-    expect(screen.getByTestId('hire-review')).toHaveTextContent('bmad-analyst');
+    expect(screen.getByTestId('hire-review')).toHaveTextContent('sample-analyst');
     const name = screen.getByLabelText('Agent name for Mary, Analyst');
     await user.clear(name);
     await user.type(name, 'Mary');
@@ -516,7 +516,7 @@ describe('hire from pack', () => {
       [`POST /api/packs/${PACK}/hire`]: () => ({ requestId: '0192f3a0-0000-7000-8000-0000000000e2' }),
       'GET /api/pack-hires/': () => ({ requestId: 'x', status: 'done', error: null, agents: [] }),
     });
-    wrap(<HirePackDialog packId={PACK} packName="bmad" onClose={() => undefined} />);
+    wrap(<HirePackDialog packId={PACK} packName="sample" onClose={() => undefined} />);
     await user.click(await screen.findByLabelText('Hire Mary, Analyst'));
     expect(await screen.findByTestId('hire-access')).toBeInTheDocument();
     expect(screen.queryByText('Any project')).toBeNull();
@@ -560,16 +560,16 @@ describe('hire from pack', () => {
         personaDto({
           key: 'architect',
           name: 'Winston',
-          roleKey: 'bmad-architect',
-          provenanceLabel: 'BMAD · architect · v6.12.4',
+          roleKey: 'sample-architect',
+          provenanceLabel: 'sample · architect · v6.12.4',
         }),
       ]),
     );
-    wrap(<HirePackDialog packId={PACK} packName="bmad" onClose={() => undefined} />);
+    wrap(<HirePackDialog packId={PACK} packName="sample" onClose={() => undefined} />);
     await user.click(await screen.findByTestId('add-all'));
     expect(screen.getByTestId('confirm-hire')).toHaveTextContent('Hire 2 agents');
-    expect(screen.getByTestId('hire-review')).toHaveTextContent('bmad-architect');
-    expect(screen.getByTestId('hire-review')).toHaveTextContent('bmad-analyst');
+    expect(screen.getByTestId('hire-review')).toHaveTextContent('sample-architect');
+    expect(screen.getByTestId('hire-review')).toHaveTextContent('sample-analyst');
   });
 
   it('says so when no workstation holding the pack is online, or the pack is not approved', async () => {
@@ -577,13 +577,13 @@ describe('hire from pack', () => {
       ...base([personaDto()]),
       [`GET /api/packs/${PACK}/personas`]: () => ({
         packId: PACK,
-        packName: 'bmad',
+        packName: 'sample',
         trusted: true,
         readableNow: false,
         personas: [personaDto()],
       }),
     });
-    wrap(<HirePackDialog packId={PACK} packName="bmad" onClose={() => undefined} />);
+    wrap(<HirePackDialog packId={PACK} packName="sample" onClose={() => undefined} />);
     expect(await screen.findByTestId('hire-offline')).toBeInTheDocument();
   });
 
@@ -593,19 +593,19 @@ describe('hire from pack', () => {
         agent={{
           provenance: {
             packId: PACK,
-            packName: 'bmad',
+            packName: 'sample',
             capability: 'analyst',
             ref: 'v6.12.4',
             sha: 'a'.repeat(40),
             hash: H,
             visibility: 'org',
-            label: 'BMAD · analyst · v6.12.4',
+            label: 'sample · analyst · v6.12.4',
             warning: 'revoked',
           },
         }}
       />,
     );
-    expect(screen.getByTestId('pack-provenance')).toHaveTextContent('BMAD · analyst · v6.12.4');
+    expect(screen.getByTestId('pack-provenance')).toHaveTextContent('sample · analyst · v6.12.4');
     expect(screen.getByTestId('pack-provenance-warning')).toHaveTextContent('pack no longer approved');
   });
 });
@@ -618,41 +618,41 @@ describe('role update offers', () => {
       'GET /api/role-offers': () => ({
         items: [
           {
-            roleKey: 'bmad-analyst',
+            roleKey: 'sample-analyst',
             roleName: 'Mary, Analyst',
             fromVersion: 1,
             packId: PACK,
-            packName: 'bmad',
+            packName: 'sample',
             capability: 'analyst',
             provenance: {
               packId: PACK,
-              packName: 'bmad',
+              packName: 'sample',
               capability: 'analyst',
               ref: 'v6.13.0',
               sha: 'b'.repeat(40),
               hash: H,
               visibility: 'org',
             },
-            newLabel: 'BMAD · analyst · v6.13.0',
+            newLabel: 'sample · analyst · v6.13.0',
             offeredAt: AT,
             agentCount: 2,
           },
         ],
       }),
-      'POST /api/role-offers/bmad-analyst/review': () => ({
+      'POST /api/role-offers/sample-analyst/review': () => ({
         requestId: '0192f3a0-0000-7000-8000-0000000000e3',
       }),
-      'GET /api/role-offers/bmad-analyst/review/': () => ({
+      'GET /api/role-offers/sample-analyst/review/': () => ({
         requestId: '0192f3a0-0000-7000-8000-0000000000e3',
         status: 'ready',
         error: null,
         current: 'Line one\nOld line\nLine three',
         proposed: 'Line one\nNew line\nLine three',
       }),
-      'POST /api/role-offers/bmad-analyst/accept': () => ({ version: 2, movedAgents: 2 }),
+      'POST /api/role-offers/sample-analyst/accept': () => ({ version: 2, movedAgents: 2 }),
     });
     wrap(<RoleOffers />);
-    const offer = await screen.findByTestId('role-offer-bmad-analyst');
+    const offer = await screen.findByTestId('role-offer-sample-analyst');
     expect(offer).toHaveTextContent('keep it until you accept');
     await user.click(within(offer).getByRole('button', { name: 'Review the change' }));
     await user.click(await screen.findByTestId('load-diff'));

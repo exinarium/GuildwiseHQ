@@ -198,7 +198,7 @@ export async function createMyPack(
     if (dup)
       throw conflict('pack_name_taken', `a pack named "${req.name}" already exists: choose another name`);
     // A private pack may not take the name of an organization pack: its capabilities would read as the organization's
-    // (`bmad:analyst`) and a hire from it could be taken for one from the approved pack.
+    // (`acme:analyst`) and a hire from it could be taken for one from the approved pack.
     if (req.visibility === 'private') {
       const org = await one(
         tx,

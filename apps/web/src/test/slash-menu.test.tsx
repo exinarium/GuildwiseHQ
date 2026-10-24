@@ -21,7 +21,7 @@ const ITEMS: SlashCommand[] = [
   },
   {
     kind: 'playbook',
-    key: 'bmad:create-epics-and-stories',
+    key: 'sample:create-epics-and-stories',
     name: 'Create Epics and Stories',
     description: 'Break a PRD into epics',
     source: 'pack',
@@ -118,7 +118,7 @@ describe('the / menu of a chat composer', () => {
     stub();
     mount(<Host context="chat" />);
     await userEvent.type(screen.getByLabelText('Message'), '/epics');
-    expect(await screen.findByTestId('slash-playbook-bmad:create-epics-and-stories')).toBeInTheDocument();
+    expect(await screen.findByTestId('slash-playbook-sample:create-epics-and-stories')).toBeInTheDocument();
     expect(screen.queryByTestId('slash-playbook-prd')).toBeNull();
     await userEvent.clear(screen.getByLabelText('Message'));
     await userEvent.type(screen.getByLabelText('Message'), '/interview');
@@ -202,7 +202,7 @@ describe('the / menu of a chat composer', () => {
     await userEvent.type(box, '/');
     await screen.findByTestId('slash-playbook-prd');
     await userEvent.keyboard('{ArrowDown}{Enter}');
-    expect(box.value).toContain('bmad:create-epics-and-stories');
+    expect(box.value).toContain('sample:create-epics-and-stories');
     expect(onSend).not.toHaveBeenCalled();
     await userEvent.clear(box);
     await userEvent.type(box, '/');
@@ -230,9 +230,11 @@ describe('the / menu of a session composer', () => {
     await screen.findByTestId('slash-playbook-prd');
     expect(screen.queryByTestId('slash-skill-interview-techniques')).toBeNull();
     expect(screen.queryByTestId('slash-session-prd')).toBeNull();
-    await userEvent.click(screen.getByText('/bmad:create-epics-and-stories'));
+    await userEvent.click(screen.getByText('/sample:create-epics-and-stories'));
     await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/discovery/t2'));
-    expect(calls.find((c) => c.url === '/api/playbooks/run')?.body.key).toBe('bmad:create-epics-and-stories');
+    expect(calls.find((c) => c.url === '/api/playbooks/run')?.body.key).toBe(
+      'sample:create-epics-and-stories',
+    );
   });
 });
 

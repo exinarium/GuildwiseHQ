@@ -43,9 +43,9 @@ const sub = (name: string, over: Partial<NativeSubagent> = {}): NativeSubagent =
 describe('the native subagent definitions', () => {
   it('give each type its description, prompt, tools and model', () => {
     expect(
-      agentsDocument([sub('bmad-analyst'), sub('agent-rex', { model: 'opus', tools: ['Read'] })]),
+      agentsDocument([sub('sample-analyst'), sub('agent-rex', { model: 'opus', tools: ['Read'] })]),
     ).toEqual({
-      'bmad-analyst': {
+      'sample-analyst': {
         description: 'A subagent',
         prompt: 'You are one.',
         tools: ['Read', 'Grep', 'Glob'],
@@ -151,20 +151,20 @@ describe('the Agent tool in the settings the adapter writes', () => {
   });
 
   it('defines exactly the granted targets, guards the tool with a hook that fails closed, and keeps subagents in the foreground', async () => {
-    const r = await settingsFor([sub('bmad-analyst'), sub('agent-rex')]);
+    const r = await settingsFor([sub('sample-analyst'), sub('agent-rex')]);
     expect(r.argv).toContain(`--agents ${join(r.dir, 'agents.json')}`);
     expect(Object.keys(JSON.parse(readFileSync(join(r.dir, 'agents.json'), 'utf8')))).toEqual([
-      'bmad-analyst',
+      'sample-analyst',
       'agent-rex',
     ]);
     expect(JSON.parse(readFileSync(join(r.dir, 'subagent-guard.json'), 'utf8'))).toEqual({
-      allowed: { 'bmad-analyst': 'bmad:analyst', 'agent-rex': 'agent:rex' },
+      allowed: { 'sample-analyst': 'sample:analyst', 'agent-rex': 'agent:rex' },
     });
     const hook = r.settings.hooks.PreToolUse.find((h: { matcher: string }) => h.matcher === 'Agent|Task');
     expect(hook.hooks[0].command).toMatch(/subagent-guard.* \|\| exit 2$/);
     expect(hook.hooks[0].command).toContain('AOM_SUBAGENT_GUARD=');
     expect(r.settings.permissions.allow).toEqual(
-      expect.arrayContaining(['Agent(bmad-analyst)', 'Agent(agent-rex)']),
+      expect.arrayContaining(['Agent(sample-analyst)', 'Agent(agent-rex)']),
     );
     // Claude Code’s own types are denied by name too, the hook being the allow-list for the rest
     expect(r.settings.permissions.deny).toEqual(
@@ -202,12 +202,12 @@ describe('the Agent tool in the settings the adapter writes', () => {
 });
 
 describe('the subagent guard', () => {
-  const cfgOf = { allowed: { 'bmad-analyst': 'bmad:analyst' } };
+  const cfgOf = { allowed: { 'sample-analyst': 'sample:analyst' } };
   const hookInput = (over: Record<string, unknown> = {}) =>
     JSON.stringify({
       tool_name: 'Agent',
       tool_use_id: 'toolu_1',
-      tool_input: { subagent_type: 'bmad-analyst', prompt: 'x' },
+      tool_input: { subagent_type: 'sample-analyst', prompt: 'x' },
       ...over,
     });
   const denied = (r: { stdout: string }) =>
@@ -224,7 +224,7 @@ describe('the subagent guard', () => {
       },
     });
     expect(r).toEqual({ stdout: '', code: 0 });
-    expect(asked).toEqual([['bmad-analyst', 'bmad:analyst', 'toolu_1']]);
+    expect(asked).toEqual([['sample-analyst', 'sample:analyst', 'toolu_1']]);
   });
 
   it('refuses every other subagent type, a call without a type or an id, and the old tool name of one', async () => {
@@ -491,7 +491,7 @@ describe('reading what native subagents used from the transcripts', () => {
   it('sums each subagent’s calls once, with its model, duration and last reply', () => {
     const config = tmp();
     const dir = join(config, 'projects', '-work-card', 'sess-1', 'subagents');
-    transcript(dir, 'a1', { agentType: 'bmad-analyst', toolUseId: 'toolu_1' }, [
+    transcript(dir, 'a1', { agentType: 'sample-analyst', toolUseId: 'toolu_1' }, [
       { type: 'user', timestamp: '2026-10-24T10:00:00.000Z', message: { role: 'user', content: 'go' } },
       msg('m1', 'first', '2026-10-24T10:00:01.000Z', {
         input_tokens: 2,
@@ -519,7 +519,7 @@ describe('reading what native subagents used from the transcripts', () => {
     expect(used).toHaveLength(2);
     expect(used[0]).toMatchObject({
       toolUseId: 'toolu_1',
-      name: 'bmad-analyst',
+      name: 'sample-analyst',
       durationMs: 3000,
       summary: 'The answer is 4.',
       usage: {

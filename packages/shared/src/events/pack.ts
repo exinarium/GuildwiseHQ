@@ -33,7 +33,7 @@ export const packEvents = [
       adapter: PackAdapterSchema,
       scope: PackScopeSchema,
       projectId: Id.nullable().default(null),
-      /** The preset it was added from (`bmad`), for attribution. */
+      /** Retired: packs added from a one-click preset (before presets were removed) carry its id here. Nothing writes it any more. */
       preset: z.string().max(40).nullable().default(null),
       addedBy: Id,
       /**

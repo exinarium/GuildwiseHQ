@@ -15,7 +15,7 @@ const SOURCE_TONE = {
   pack: 'amber',
 } as const;
 
-/** Where a registry entry comes from; a pack's name is added (`pack: bmad`). */
+/** Where a registry entry comes from; a pack's name is added (`pack: acme`). */
 export function SourceBadge({ source, pack }: { source: Source; pack?: string | undefined }) {
   return (
     <Badge tone={SOURCE_TONE[source]} data-testid={`source-${source}`}>

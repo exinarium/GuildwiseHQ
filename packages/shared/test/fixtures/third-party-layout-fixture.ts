@@ -1,7 +1,9 @@
 /**
- * A small repository in the layout of the BMad Method (original text written for the tests; nothing is copied from the
- * project). `stable` mimics the v6.12 tags (`src/core-skills`, `src/bmm-skills/<group>`, `module.yaml`), `branch` the top-level
- * `skills/` layout.
+ * A small repository in the layout of a popular third-party skill collection (the BMad Method, written for another tool;
+ * original text written for the tests, nothing is copied from the project): skills with `customize.toml`, activation steps,
+ * `uv run` calls and a module roster. Used to prove that such a repository imports as plain skills, without errors, through
+ * the generic pack reading. `stable` mimics the v6.12 tags (`src/core-skills`, `src/bmm-skills/<group>`, `module.yaml`),
+ * `branch` the top-level `skills/` layout.
  */
 export type Tree = Record<string, string>;
 
@@ -109,7 +111,7 @@ agents:
     description: "Roster description for Mary"
 `;
 
-export function bmadFixtureStable(): Tree {
+export function thirdPartyLayoutStable(): Tree {
   const t: Tree = { LICENSE, 'README.md': '# fixture\n', 'src/bmm-skills/module.yaml': MODULE_YAML };
   const place: Record<string, string> = {
     'bmad-brainstorming': 'src/core-skills',
@@ -133,7 +135,7 @@ export function bmadFixtureStable(): Tree {
   return t;
 }
 
-export function bmadFixtureBranch(): Tree {
+export function thirdPartyLayoutBranch(): Tree {
   const t: Tree = { LICENSE, 'README.md': '# fixture\n' };
   for (const [name, files] of Object.entries(skillTree()))
     for (const [p, text] of Object.entries(files)) t[`skills/${name}/${p}`] = text;

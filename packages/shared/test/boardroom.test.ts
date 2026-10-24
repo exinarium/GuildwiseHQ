@@ -59,6 +59,23 @@ describe('board config', () => {
     expect(PatchBoardRequestSchema.parse({ roundCap: null }).roundCap).toBeNull();
   });
 
+  it('replays saved rooms with a cap, without one and with the old maximum', () => {
+    const room = (roundCap?: number | null) =>
+      DomainEventSchema.parse({
+        type: 'BoardRoomSaved',
+        payload: {
+          roomId: ID(1),
+          orgId: ID(2),
+          name: 'R',
+          format: 'open',
+          ...(roundCap === undefined ? {} : { roundCap }),
+          cast: [{ kind: 'persona', refId: 'optimist' }],
+          createdBy: ID(3),
+        },
+      });
+    for (const cap of [4, 12, null, undefined]) expect(() => room(cap)).not.toThrow();
+  });
+
   it('needs two to eight seats, an agent by id and a persona by key', () => {
     const ok = {
       topic: 't',

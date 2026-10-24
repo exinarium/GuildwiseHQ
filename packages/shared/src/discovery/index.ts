@@ -39,7 +39,7 @@ export type DiscoveryCeoMode = z.infer<typeof CeoModeSchema>;
 export const DISCOVERY_PLAYBOOKS = ['brainstorm', 'advanced-elicitation', 'product-brief', 'prd'] as const;
 export const BuiltinDiscoveryPlaybookSchema = z.enum(DISCOVERY_PLAYBOOKS);
 /**
- * A built-in playbook, a registry playbook of an approved pack (`bmad:brainstorming`, tagged `discovery`), or (R3b, a guided
+ * A built-in playbook, a registry playbook of an approved pack (`acme:brainstorming`, tagged `discovery`), or (R3b, a guided
  * playbook session) any usable playbook of the registry: a vault or project playbook has a plain key.
  */
 export const DiscoveryPlaybookSchema = z.union([

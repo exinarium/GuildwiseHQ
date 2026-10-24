@@ -34,7 +34,7 @@ export type SlashContext = z.infer<typeof SlashContextSchema>;
 
 export const SlashCommandSchema = z.object({
   kind: SlashKindSchema,
-  /** The registry key (`prd`, `bmad:create-epics-and-stories`). */
+  /** The registry key (`prd`, `acme:create-epics-and-stories`). */
   key: z.string().min(1).max(130),
   name: z.string(),
   description: z.string(),

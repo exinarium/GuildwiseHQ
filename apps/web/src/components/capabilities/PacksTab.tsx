@@ -1,4 +1,4 @@
-import { PACK_PRESETS, type PackDto, type PackPreset, type PacksResponse } from '@aom/shared';
+import type { PackDto, PacksResponse } from '@aom/shared';
 import { type FormEvent, useState } from 'react';
 import {
   useAddPack,
@@ -36,20 +36,17 @@ import { UpdateReview } from './UpdateReview.tsx';
 export function PacksTab() {
   const q = usePacks();
   const [adding, setAdding] = useState(false);
-  const [preset, setPreset] = useState<PackPreset | null>(null);
   const packs = q.data?.packs ?? [];
-  const presets = PACK_PRESETS.filter((p) => !packs.some((k) => k.preset === p.id));
   return (
     <div className="flex flex-col gap-4" data-testid="packs-tab">
       <div className="flex flex-wrap items-center gap-2">
         <Button variant="primary" onClick={() => setAdding(true)}>
           Add a pack by git URL
         </Button>
-        {presets.map((p) => (
-          <Button key={p.id} onClick={() => setPreset(p)} data-testid={`preset-${p.id}`}>
-            {p.label}
-          </Button>
-        ))}
+        <span className="text-xs text-muted" data-testid="packs-format-note">
+          Any repository of skills in the Agent Skills format (folders with a SKILL.md) can be added by its
+          git URL.
+        </span>
       </div>
       {q.data && q.data.workstationsOnline === 0 && (
         <Callout tone="warning" data-testid="no-workstation">
@@ -73,13 +70,6 @@ export function PacksTab() {
         />
       )}
       {adding && <AddPackDialog workstations={q.data?.workstations ?? []} onClose={() => setAdding(false)} />}
-      {preset && (
-        <PresetDialog
-          preset={preset}
-          workstations={q.data?.workstations ?? []}
-          onClose={() => setPreset(null)}
-        />
-      )}
     </div>
   );
 }
@@ -254,7 +244,7 @@ function AddPackDialog({ workstations, onClose }: { workstations: PackWorkstatio
           label="Name (optional)"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          hint="The prefix of its keys, for example bmad gives bmad:analyst. Taken from the URL when empty."
+          hint="The prefix of its keys, for example acme gives acme:analyst. Taken from the URL when empty."
         />
         <Select
           label="Available to"
@@ -322,77 +312,6 @@ function AddPackDialog({ workstations, onClose }: { workstations: PackWorkstatio
         {sealError && <Callout tone="danger">{sealError}</Callout>}
         <ErrorBox error={add.error} />
       </form>
-    </Dialog>
-  );
-}
-
-function PresetDialog({
-  preset,
-  workstations,
-  onClose,
-}: {
-  preset: PackPreset;
-  workstations: PackWorkstation[];
-  onClose: () => void;
-}) {
-  const choice = useWorkstationChoice(workstations);
-  const add = useAddPack();
-  const toast = useToast();
-  const [ref, setRef] = useState(preset.ref);
-  return (
-    <Dialog
-      open
-      onOpenChange={(o) => !o && onClose()}
-      title={preset.label}
-      description={preset.description}
-      footer={
-        <>
-          <Button variant="ghost" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button
-            variant="primary"
-            disabled={!ref.trim() || !choice.valid}
-            loading={add.isPending}
-            onClick={() =>
-              add.mutate(
-                {
-                  name: preset.name,
-                  url: preset.url,
-                  ref: ref.trim(),
-                  adapter: preset.adapter,
-                  scope: 'org',
-                  preset: preset.id,
-                  ...choice.field,
-                },
-                {
-                  onSuccess: () => {
-                    toast.success(`${preset.label}: added. Review it before anything of it is used.`);
-                    onClose();
-                  },
-                },
-              )
-            }
-          >
-            {preset.label}
-          </Button>
-        </>
-      }
-    >
-      <div className="flex flex-col gap-3 text-sm" data-testid="preset-dialog">
-        <p data-testid="preset-attribution">{preset.attribution}</p>
-        <p>
-          Licence: <strong>{preset.license}</strong>. Copyright and permission notice are kept with the
-          imported files.
-        </p>
-        <TextInput label="Version (tag)" value={ref} onChange={(e) => setRef(e.target.value)} />
-        <WorkstationPicker workstations={workstations} choice={choice} />
-        <Callout tone="info">
-          Adding it does not turn anything on. It stays untrusted until you review it and approve the exact
-          commit.
-        </Callout>
-        <ErrorBox error={add.error} />
-      </div>
     </Dialog>
   );
 }

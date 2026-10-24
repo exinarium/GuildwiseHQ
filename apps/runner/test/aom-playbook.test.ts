@@ -39,9 +39,11 @@ async function cli(answer: { ok: boolean; result?: unknown; error?: string }) {
 describe('aom playbook run', () => {
   it('sends the key and the input and prints what the server says', async () => {
     const t = await cli({ ok: true, result: { message: 'Started the guided session.' } });
-    expect(await t.run('playbook', 'run', 'bmad:create-epics-and-stories', '--input', 'billing PRD')).toBe(0);
+    expect(await t.run('playbook', 'run', 'sample:create-epics-and-stories', '--input', 'billing PRD')).toBe(
+      0,
+    );
     expect(t.rpcs).toEqual([
-      { method: 'playbook.run', params: { key: 'bmad:create-epics-and-stories', input: 'billing PRD' } },
+      { method: 'playbook.run', params: { key: 'sample:create-epics-and-stories', input: 'billing PRD' } },
     ]);
     expect(t.out.join('')).toContain('Started the guided session.');
     expect(await t.run('playbook', 'run', 'prd')).toBe(0);
@@ -82,9 +84,9 @@ describe('what an agent is told', () => {
   it('says nothing without a grant, and names the granted playbooks with one', () => {
     expect(playbookNote(undefined)).toBe('');
     expect(playbookNote([])).toBe('');
-    const n = playbookNote(['prd', 'bmad:create-epics-and-stories']);
+    const n = playbookNote(['prd', 'sample:create-epics-and-stories']);
     expect(n).toContain('`prd`');
-    expect(n).toContain('`bmad:create-epics-and-stories`');
+    expect(n).toContain('`sample:create-epics-and-stories`');
     expect(n).toContain('aom playbook run');
     expect(n).toContain('do not wait');
   });

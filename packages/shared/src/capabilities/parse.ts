@@ -20,7 +20,7 @@ export type CapabilityKind = z.infer<typeof CapabilityKindSchema>;
 /**
  * Where a capability came from. Precedence, lowest first: built-in, organization vault, project repository, imported pack
  * (`SOURCE_RANK`). A later source overrides an earlier one with the same kind and key; a pack's keys are namespaced
- * (`bmad:analyst`) so in practice a pack never shadows anything by accident.
+ * (`acme:analyst`) so in practice a pack never shadows anything by accident.
  */
 export const CAPABILITY_SOURCES = ['builtin', 'org-vault', 'project-repo', 'pack'] as const;
 export const CapabilitySourceSchema = z.enum(CAPABILITY_SOURCES);
@@ -388,7 +388,7 @@ export function resolveCapabilityRef<T extends { kind: CapabilityKind; key: stri
   const colon = ref.indexOf(':');
   if (colon > 0) {
     const kind = ref.slice(0, colon);
-    // `persona:bmad:analyst` is exact; `bmad:analyst` (a pack key) is not a kind prefix and resolves like a bare key.
+    // `persona:acme:analyst` is exact; `acme:analyst` (a pack key) is not a kind prefix and resolves like a bare key.
     if ((CAPABILITY_KINDS as readonly string[]).includes(kind)) {
       const key = ref.slice(colon + 1);
       return all.find((c) => c.kind === kind && c.key === key);

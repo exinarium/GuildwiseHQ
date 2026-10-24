@@ -101,12 +101,12 @@ describe('Claude Code with granted skills', () => {
       return ev.at(-1);
     };
     try {
-      expect(await run([skill('bmad-dev-story'), skill('Bad Name')])).toMatchObject({
+      expect(await run([skill('sample-dev-story'), skill('Bad Name')])).toMatchObject({
         kind: 'exit',
         code: 0,
       });
       const dir = join(sandbox.configDir, 'skills');
-      expect(existsSync(join(dir, 'bmad-dev-story/SKILL.md'))).toBe(true);
+      expect(existsSync(join(dir, 'sample-dev-story/SKILL.md'))).toBe(true);
       expect(readFileSync(argv, 'utf8')).not.toContain('--disable-slash-commands');
       const settings = JSON.parse(readFileSync(join(sandbox.configDir, 'settings.json'), 'utf8'));
       expect(settings.hooks.PreToolUse.some((h: { matcher: string }) => h.matcher === 'Skill')).toBe(true);
@@ -117,7 +117,7 @@ describe('Claude Code with granted skills', () => {
       // the same shape with the binary missing really exits 2
       expect(spawnSync('sh', ['-c', '/no/such/aom skill-guard || exit 2']).status).toBe(2);
       expect(JSON.parse(readFileSync(join(sandbox.configDir, 'skill-guard.json'), 'utf8'))).toEqual({
-        allowed: ['bmad-dev-story'],
+        allowed: ['sample-dev-story'],
       });
       // the next shift grants nothing: the folder is emptied and the switch is back
       expect(await run([])).toMatchObject({ kind: 'exit', code: 0 });
