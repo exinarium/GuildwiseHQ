@@ -141,6 +141,22 @@ describe('What it may do', () => {
     expect((await call(member, 'GET', `/api/agents/${agentId}/may-do`)).status).toBe(200);
     expect((await call(member, 'GET', `/api/agents/${agentId}/may-do`)).body.canGate).toBe(false);
   });
+
+  it('shows full detail to the Owner and a summary without other projects’ names and budgets to a plain member', async () => {
+    const before = (await q('SELECT allowed_project_ids FROM agents WHERE id=$1', [agentId]))[0];
+    await q('UPDATE agents SET allowed_project_ids=$2 WHERE id=$1', [agentId, [w.projectId]]);
+    try {
+      const full = await owner('GET', `/api/agents/${agentId}/may-do`);
+      expect(full.data.projects).toHaveLength(1);
+      expect(full.spend).not.toBeNull();
+      const mine = (await call(member, 'GET', `/api/agents/${agentId}/may-do`)).body;
+      expect(mine.data.projects).toEqual([]); // the member is not on that project
+      expect(mine.spend).toBeNull();
+      expect(JSON.stringify(mine)).not.toContain(full.data.projects[0].name);
+    } finally {
+      await q('UPDATE agents SET allowed_project_ids=$2 WHERE id=$1', [agentId, before?.allowed_project_ids]);
+    }
+  });
 });
 
 describe('who switches a gate', () => {

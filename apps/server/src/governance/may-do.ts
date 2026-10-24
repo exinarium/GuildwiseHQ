@@ -1,26 +1,24 @@
-import {
-  type AgentMayDo,
-  GATE_CLASSES,
-  GATE_INFO,
-  normalizeScopes,
-} from '@aom/shared';
+import { type AgentMayDo, GATE_CLASSES, GATE_INFO, normalizeScopes } from '@aom/shared';
 import { orgRoleOf } from '../auth/org-context.ts';
 import type { AuthSession } from '../auth/sessions.ts';
 import { effectiveRegistry } from '../capabilities/registry.ts';
-import { orgCostCtx, spendBriefs } from '../costs/index.ts';
-import { monthOf } from '../costs/index.ts';
 import type { Ctx } from '../context.ts';
+import { monthOf, orgCostCtx, spendBriefs } from '../costs/index.ts';
 import { one, rows } from '../db/sql.ts';
 import { notFound } from '../errors.ts';
 import { grantsWithHandles } from '../sessions/delegate-grants.ts';
-import { agentsPacksGranted, packScopes } from './scopes.ts';
 import { gatedClassesOf } from './gates.ts';
+import { agentsPacksGranted, packScopes } from './scopes.ts';
 
 /**
  * "What it may do" for one agent: everything that decides what the agent can do, in one answer. Read-only; every number comes from
  * the same tables the enforcement reads (permissions, grants, gates, budgets), so the screen cannot drift from the rules.
  */
-export async function getAgentMayDo(ctx: Ctx, user: AuthSession['user'], agentId: string): Promise<AgentMayDo> {
+export async function getAgentMayDo(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  agentId: string,
+): Promise<AgentMayDo> {
   const agent = await one(ctx.pool, 'SELECT * FROM agents WHERE id=$1', [agentId]);
   if (!agent) throw notFound('agent not found');
   const role = await orgRoleOf(ctx.pool, user.id, agent.org_id);
@@ -28,14 +26,34 @@ export async function getAgentMayDo(ctx: Ctx, user: AuthSession['user'], agentId
   const perms = (agent.permissions ?? {}) as Record<string, any>;
   const canManage = role === 'owner' || role === 'admin' || agent.manager_user_id === user.id;
   const manager = role === 'owner' || role === 'admin';
+  // Full detail for the Owner, the Admins and the agent's manager; everyone else sees a summary limited to the projects they
+  // are members of (no repository names, project names or budgets of other projects, no key caps, no connected servers).
+  const full = canManage;
+  const mine = full
+    ? null
+    : new Set(
+        (
+          await rows(
+            ctx.pool,
+            `SELECT project_id FROM project_members WHERE user_id=$1 AND status='active'`,
+            [user.id],
+          )
+        ).map((r) => r.project_id as string),
+      );
   const now = ctx.clock.now();
 
   // repositories
   let repos: AgentMayDo['repos']['repos'] = null;
   if (Array.isArray(perms.repoIds)) {
     repos = (
-      await rows(ctx.pool, 'SELECT id, name FROM project_repos WHERE id = ANY($1::uuid[])', [perms.repoIds])
-    ).map((r) => ({ id: r.id as string, name: r.name as string }));
+      await rows(
+        ctx.pool,
+        'SELECT id, name, project_id FROM project_repos WHERE id = ANY($1::uuid[]) AND removed_at IS NULL',
+        [perms.repoIds],
+      )
+    )
+      .filter((r) => !mine || mine.has(r.project_id as string))
+      .map((r) => ({ id: r.id as string, name: r.name as string }));
   }
   // data scopes: the projects it may work on
   const allowed = agent.allowed_project_ids as string[] | null;
@@ -46,8 +64,10 @@ export async function getAgentMayDo(ctx: Ctx, user: AuthSession['user'], agentId
           await rows(ctx.pool, 'SELECT id, key, name FROM projects WHERE id = ANY($1::uuid[]) ORDER BY key', [
             allowed,
           ])
-        ).map((p) => ({ id: p.id as string, key: p.key as string, name: p.name as string }));
-  const tools: string[] = perms.allowedTools ?? [];
+        )
+          .filter((p) => !mine || mine.has(p.id as string))
+          .map((p) => ({ id: p.id as string, key: p.key as string, name: p.name as string }));
+  const tools: string[] = (perms.allowedTools ?? []).filter((t: string) => full || !t.startsWith('mcp:'));
 
   // which key pays: from the agent's latest recorded work
   const lastCost = await one(
@@ -73,11 +93,15 @@ export async function getAgentMayDo(ctx: Ctx, user: AuthSession['user'], agentId
 
   // playbook and skill grants, with what each needs
   const reg = await effectiveRegistry(ctx.pool, agent.org_id, { usableOnly: true, userId: user.id });
-  const meta = new Map(reg.items.map((i) => [`${i.kind}:${i.key}`, i as unknown as { name: string; scopes?: string[] }]));
+  const meta = new Map(
+    reg.items.map((i) => [`${i.kind}:${i.key}`, i as unknown as { name: string; scopes?: string[] }]),
+  );
   const playbookKeys = (
-    await rows(ctx.pool, 'SELECT playbook_key FROM agent_playbook_grants WHERE agent_id=$1 ORDER BY playbook_key', [
-      agentId,
-    ])
+    await rows(
+      ctx.pool,
+      'SELECT playbook_key FROM agent_playbook_grants WHERE agent_id=$1 ORDER BY playbook_key',
+      [agentId],
+    )
   ).map((r) => r.playbook_key as string);
   const playbooks = playbookKeys.map((key) => ({ key, name: meta.get(`playbook:${key}`)?.name ?? key }));
   const skills = ((agent.skills ?? []) as string[]).map((key) => ({
@@ -179,9 +203,15 @@ export async function getAgentMayDo(ctx: Ctx, user: AuthSession['user'], agentId
     playbooks,
     skills,
     packs,
-    spend: spend
-      ? { currency: spend.currency, monthMicros: spend.monthMicros, totalMicros: spend.totalMicros, budgets }
-      : null,
+    spend:
+      spend && full
+        ? {
+            currency: spend.currency,
+            monthMicros: spend.monthMicros,
+            totalMicros: spend.totalMicros,
+            budgets,
+          }
+        : null,
     gates,
     canGate: canManage && agent.role_key !== 'ceo',
     canUngate: manager && agent.role_key !== 'ceo',
