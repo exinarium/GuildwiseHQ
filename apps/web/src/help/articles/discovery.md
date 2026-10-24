@@ -40,6 +40,10 @@ The page shows cost and time used (also in **Costs**). With a cost limit, no new
 
 A **time limit** works like a meeting: a countdown shows what is left, and about 5 minutes before the end the analyst steers to wrap-up. At time-up nothing new starts and you choose **Extend** (+10, +15 or +30 minutes) or **Wrap up now** (the analyst captures where you got to). Paused time does not count. Change either limit in the session's settings.
 
+## Guided playbook sessions {#playbook-sessions}
+
+Type **/** and choose a playbook to open a session that follows it step by step. The page lists the playbook's steps and marks the one the analyst is on. It works like any session: answer the question cards, apply or reject proposals, and save drafts as documents. A session an agent started shows who started it and waits on your answers.
+
 ## Draft, approve and hand to the BA {#prd}
 
 In Capture the analyst writes the **Draft**. **Validate against the checklist**, then **Approve**; **Hand to BA** opens an intake linked to the PRD.

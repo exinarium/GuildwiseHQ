@@ -34,3 +34,11 @@ On an approved pack, **Hire from this pack** turns a persona into an agent tagge
 ## Chat with a persona {#chat-with-a-persona}
 
 **Chat** on a persona opens a one-to-one chat on your own workstation. It only reads, and its cost is tracked. A private persona is only yours.
+
+## Playbooks and the / menu {#playbooks}
+
+Type **/** in any chat or session message box (or click the **/** button) to list the playbooks and skills you may use; typing searches names and descriptions. Private packs show only to you, and a pack that is not approved shows to no one.
+
+A skill adds an instruction to your message. A playbook either runs **in this chat** (the agent follows its steps with you) or **as a new session**, a guided Discovery session with question cards, the panel and drafts.
+
+An agent starts a playbook itself only when allowed: open **Playbooks it may start** on the agent's card (Owners, Admins and the agent's manager). It is empty by default, and the session it opens belongs to the manager, who gets a notice on the Desk.

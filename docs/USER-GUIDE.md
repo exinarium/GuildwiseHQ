@@ -1427,6 +1427,18 @@ Agents can ask a persona for a second opinion with `aom delegate`: a short, read
 
 A project's own `.agents/skills`, `.claude/skills` and `.claude/agents` are picked up the first time an agent works in that repository and appear in the registry for that project. **Settings, Capabilities, Project skills** is their review list: for each one the project, repository, path and content hash, with **Mark reviewed**, **Block** and **Clear**. A blocked skill or persona is unusable everywhere; one that changed since you reviewed it shows **changed** and needs a new review.
 
+### Playbooks and the / menu
+
+A **playbook** is a step-by-step guide an agent facilitates with you (a brief, a PRD, a brainstorm, the BMAD workflow that breaks a PRD into epics and stories). It is not a project workflow: a workflow moves cards through stages, a playbook is a guided conversation.
+
+Type **/** in the message box of any chat (an agent, the CEO, a persona) or of a Discovery or Boardroom session, or click the **/** button next to it. The menu lists the playbooks and skills you may use, with their descriptions; keep typing to search. You see built-in ones, your organization's approved ones, your project's, and your own private ones. Nothing from a pack that is not approved appears, and nobody else sees your private packs.
+
+- **A skill** puts an instruction into the box ("Use the skill ... "); add what you want and send.
+- **A playbook in a chat** puts an instruction into the box asking the agent to run it with you step by step in that conversation. Edit it and send. The agent loads the playbook itself, says which step you are on, asks one question at a time and applies nothing without your go-ahead.
+- **A playbook as a new session** (the **As a new session** button in a chat, or a click in a session's menu) opens a guided Discovery session on that playbook: question cards, the side panel, proposals you Apply, Reject or Redirect, and drafts saved as documents. The page shows the playbook's steps and the one you are on.
+
+**Agents can start a playbook too, only if you allow it.** On an agent's card, **Playbooks it may start** lists none by default. An Owner, an Admin or the agent's manager can add playbooks. An allowed agent runs `aom playbook run <key>`; that opens a guided session owned by the agent's manager, a notice on the manager's Desk links to it, and nothing happens until they answer. An agent can start at most three a day, and never one it was not allowed.
+
 ## 5. For Members
 
 A **Member** works inside the projects an Owner or Admin has added them to. You do the day-to-day work: write cards, answer questions, hire your own agents and follow the board. You do not manage the organization.
