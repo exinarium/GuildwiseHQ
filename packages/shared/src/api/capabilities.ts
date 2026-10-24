@@ -411,6 +411,7 @@ export const RoleOfferDtoSchema = z.object({
 });
 export type RoleOfferDto = z.infer<typeof RoleOfferDtoSchema>;
 export const RoleOffersResponseSchema = z.object({ items: z.array(RoleOfferDtoSchema) });
+export type RoleOffersResponse = z.infer<typeof RoleOffersResponseSchema>;
 export const RoleOfferReviewSchema = z.object({
   requestId: z.uuid(),
   status: z.enum(['pending', 'ready', 'failed']),

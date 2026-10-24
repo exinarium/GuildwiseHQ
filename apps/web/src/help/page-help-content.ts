@@ -1015,8 +1015,16 @@ export const PAGE_HELP: Record<string, PageHelp> = {
   '/settings/capabilities': {
     title: 'Capabilities',
     intro:
-      'The skills, personas and playbooks your agents can use, and the packs that add more. Owners and Admins manage them.',
+      'The skills, personas and playbooks your agents can use, the packs that add more, and the ones you write yourself. Owners and Admins manage packs; everyone writes their own.',
     controls: [
+      {
+        name: 'My capabilities',
+        text: 'Write skills, personas and playbooks. Private ones stay on your workstation and only you see them; organization ones are reviewed by an Owner or Admin. Export as a git-ready folder any time.',
+      },
+      {
+        name: 'Hire from this pack',
+        text: 'Turn a persona of an approved pack into an agent, tagged with where it came from. Add all agents at once from the review list.',
+      },
       {
         name: 'Registry',
         text: 'Every capability with where it comes from. Filter by kind and source. A pack item says needs approval or files changed until it can be used.',
@@ -1039,6 +1047,16 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
     ],
     article: 'capabilities#packs',
+  },
+  '/persona-chats/:id': {
+    title: 'Chat with a persona',
+    intro:
+      'A one-to-one chat with a persona that is not hired, on your own workstation. It can read skills and search the ledger and does nothing else.',
+    controls: [
+      { name: 'Message box', text: 'Write and press Enter. A reply that cannot run now waits for your workstation.' },
+      { name: 'Cost', text: 'What the chat has cost so far; it is part of the organization costs.' },
+    ],
+    article: 'capabilities#chat-with-a-persona',
   },
   '/settings/providers': {
     title: 'Model providers',

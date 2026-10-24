@@ -8,6 +8,7 @@ import {
   useRemovePack,
   useRevokePack,
 } from '../../api/queries/capabilities.ts';
+import { sealPackCredential, useSetPackWorkstations } from '../../api/queries/my-capabilities.ts';
 import { useProjects } from '../../api/queries/projects.ts';
 import { formatDateTime } from '../../lib/time.ts';
 import {
@@ -20,10 +21,12 @@ import {
   ErrorBox,
   ListSkeleton,
   Select,
+  TextArea,
   TextInput,
   useToast,
 } from '../ui.tsx';
 import { shortSha } from './badges.tsx';
+import { HirePackDialog } from './HirePackDialog.tsx';
 import { TrustReview } from './TrustReview.tsx';
 import { UpdateReview } from './UpdateReview.tsx';
 
@@ -125,8 +128,9 @@ function WorkstationPicker({
         </label>
       ))}
       <p className="text-xs text-muted">
-        A pack is cloned from a public https URL with no credentials of whoever owns the workstation. Include
-        at least one of your own: only your workstation can pin the commit you review.
+        A pack is cloned in a clean environment with none of the credentials of whoever owns the workstation.
+        Include at least one of your own: only your workstation can pin the commit you review. Another
+        member's workstation gets a request on their desk and clones the pack only after they accept.
       </p>
     </fieldset>
   );
@@ -142,10 +146,40 @@ function AddPackDialog({ workstations, onClose }: { workstations: PackWorkstatio
   const [name, setName] = useState('');
   const [scope, setScope] = useState<'org' | 'project'>('org');
   const [projectId, setProjectId] = useState('');
-  const ready = url.trim() && ref.trim() && (scope === 'org' || projectId) && choice.valid;
-  const submit = (e: FormEvent) => {
+  // a private repository: a deploy key (ssh) or a token (https), sealed in the browser to each chosen workstation
+  const [isPrivate, setIsPrivate] = useState(false);
+  const [secret, setSecret] = useState('');
+  const [username, setUsername] = useState('');
+  const [sealing, setSealing] = useState(false);
+  const [sealError, setSealError] = useState<string | null>(null);
+  const kind: 'ssh' | 'token' = /^(ssh:\/\/|git@)/i.test(url.trim()) ? 'ssh' : 'token';
+  const ready =
+    url.trim() &&
+    ref.trim() &&
+    (scope === 'org' || projectId) &&
+    choice.valid &&
+    (!isPrivate || (secret.trim() && choice.current.length > 0));
+  const submit = async (e: FormEvent) => {
     e.preventDefault();
     if (!ready) return;
+    setSealError(null);
+    let credential: Awaited<ReturnType<typeof sealPackCredential>> | undefined;
+    if (isPrivate) {
+      setSealing(true);
+      try {
+        credential = await sealPackCredential(
+          kind,
+          secret.trim(),
+          choice.current,
+          kind === 'token' ? username.trim() || undefined : undefined,
+        );
+      } catch (err) {
+        setSealError(err instanceof Error ? err.message : String(err));
+        return;
+      } finally {
+        setSealing(false);
+      }
+    }
     add.mutate(
       {
         url: url.trim(),
@@ -154,10 +188,13 @@ function AddPackDialog({ workstations, onClose }: { workstations: PackWorkstatio
         scope,
         ...(name.trim() ? { name: name.trim() } : {}),
         ...(scope === 'project' ? { projectId } : {}),
-        ...choice.field,
+        ...(isPrivate
+          ? { workstationIds: choice.current, ...(credential ? { credential } : {}) }
+          : choice.field),
       },
       {
         onSuccess: () => {
+          setSecret('');
           toast.success('Pack added. Review it before anything of it is used.');
           onClose();
         },
@@ -169,13 +206,19 @@ function AddPackDialog({ workstations, onClose }: { workstations: PackWorkstatio
       open
       onOpenChange={(o) => !o && onClose()}
       title="Add a pack"
-      description="Give a public https git URL and a tag, branch or commit. No password or token in the URL: packs are fetched without anyone's git credentials or ssh keys."
+      description="Give a git URL and a tag, branch or commit. A public https repository needs nothing else; a private one needs a deploy key or token, which is sealed in your browser to the workstations you choose. Never put a password or token in the URL."
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>
             Cancel
           </Button>
-          <Button variant="primary" type="submit" form="add-pack" disabled={!ready} loading={add.isPending}>
+          <Button
+            variant="primary"
+            type="submit"
+            form="add-pack"
+            disabled={!ready}
+            loading={add.isPending || sealing}
+          >
             Add pack
           </Button>
         </>
@@ -225,6 +268,50 @@ function AddPackDialog({ workstations, onClose }: { workstations: PackWorkstatio
           </Select>
         )}
         <WorkstationPicker workstations={workstations} choice={choice} />
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={isPrivate}
+            onChange={(e) => setIsPrivate(e.target.checked)}
+            data-testid="private-repo"
+          />
+          This is a private repository
+        </label>
+        {isPrivate && (
+          <div
+            className="flex flex-col gap-3 rounded-card border border-line p-3"
+            data-testid="private-credential"
+          >
+            <p className="text-sm text-muted">
+              {kind === 'ssh'
+                ? 'An ssh URL needs a deploy key: the private key, with no passphrase, whose public half is added to the repository as a read-only deploy key.'
+                : 'An https URL needs an access token with read access to the repository.'}{' '}
+              It is encrypted here for each chosen workstation separately, stored there with permission 0600,
+              used only to fetch this pack, and never shown again. The server only relays the encrypted
+              copies.
+            </p>
+            {kind === 'token' && (
+              <TextInput
+                label="User name (optional)"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                hint="Defaults to x-access-token, which GitHub accepts."
+              />
+            )}
+            <TextArea
+              label={kind === 'ssh' ? 'Deploy key (private key)' : 'Access token'}
+              value={secret}
+              onChange={(e) => setSecret(e.target.value)}
+              rows={kind === 'ssh' ? 6 : 2}
+              autoComplete="off"
+              spellCheck={false}
+            />
+            <p className="text-xs text-muted">
+              The first fetch over ssh records the host key of the git server and pins it for this pack.
+            </p>
+          </div>
+        )}
+        {sealError && <Callout tone="danger">{sealError}</Callout>}
         <ErrorBox error={add.error} />
       </form>
     </Dialog>
@@ -314,6 +401,7 @@ function PackCard({ pack }: { pack: PackDto }) {
   const [checking, setChecking] = useState(false);
   const [newRef, setNewRef] = useState('');
   const [confirm, setConfirm] = useState<'remove' | 'revoke' | 'scripts' | null>(null);
+  const [hiring, setHiring] = useState(false);
   const project = projects.data?.find((p) => p.id === pack.projectId);
   const ready = pack.status === 'ready';
   const err = check.error ?? revoke.error ?? scripts.error ?? remove.error;
@@ -350,11 +438,22 @@ function PackCard({ pack }: { pack: PackDto }) {
           </Badge>
         )}
         {pack.scope === 'project' && <Badge tone="violet">project{project ? `: ${project.key}` : ''}</Badge>}
+        {pack.source === 'authored' && (
+          <Badge tone="blue" data-testid="authored-badge">
+            written by {pack.ownerName ?? 'a member'}
+          </Badge>
+        )}
+        {pack.credentialKind && (
+          <Badge tone="violet" data-testid="private-repo-badge">
+            private repository ({pack.credentialKind === 'ssh' ? 'deploy key' : 'token'})
+          </Badge>
+        )}
         {pack.hasScripts && <Badge tone="amber">has scripts</Badge>}
         {pack.scriptsEnabled && <Badge tone="red">scripts on</Badge>}
       </div>
       <p className="mt-1 text-sm text-muted [overflow-wrap:anywhere]">
-        {pack.url} at <code>{pack.ref}</code>
+        {pack.source === 'authored' ? 'Authored in the capability editor' : pack.url} at{' '}
+        <code>{pack.ref}</code>
         {pack.pinnedSha && (
           <>
             , commit <code data-testid="pinned-sha">{shortSha(pack.pinnedSha)}</code>
@@ -364,6 +463,31 @@ function PackCard({ pack }: { pack: PackDto }) {
         {ready && <>, {pack.itemCount} capabilities</>}
       </p>
       {pack.attribution && <p className="mt-1 text-xs text-muted">{pack.attribution}</p>}
+      {pack.credentialFingerprint && (
+        <p className="mt-1 text-xs text-muted" data-testid="key-fingerprint">
+          Deploy key fingerprint <code>{pack.credentialFingerprint}</code>: compare it with the key on your
+          git host.
+        </p>
+      )}
+      {pack.holders.length > 0 && (
+        <ul className="mt-2 flex flex-col gap-1 text-xs text-muted" data-testid="pack-holders">
+          {pack.holders.map((h) => (
+            <li key={h.workstationId} data-testid={`holder-${h.workstationName}`}>
+              <strong>{h.workstationName}</strong> ({h.ownerName}):{' '}
+              {h.assignment === 'pending'
+                ? `waiting for ${h.ownerName} to accept`
+                : h.hasContent
+                  ? 'holds the pinned version'
+                  : 'accepted'}
+              {h.credential &&
+                `, key ${h.credential === 'stored' ? 'stored' : h.credential === 'failed' ? `failed (${h.credentialError ?? 'see the runner'})` : 'on its way'}`}
+              {pack.credentialKind === 'ssh' &&
+                h.credential === 'stored' &&
+                (h.hostKeyPinned ? ', host key pinned' : ', host key not pinned yet')}
+            </li>
+          ))}
+        </ul>
+      )}
       {pack.lastCheckedAt && (
         <p className="mt-1 text-xs text-subtle">Last checked {formatDateTime(pack.lastCheckedAt)}.</p>
       )}
@@ -431,23 +555,34 @@ function PackCard({ pack }: { pack: PackDto }) {
             Review and approve
           </Button>
         )}
-        <Button onClick={quickCheck} loading={check.isPending && !checking} data-testid="check-updates">
-          Check for updates
-        </Button>
-        <Button
-          variant="ghost"
-          onClick={() => setChecking(true)}
-          disabled={checking}
-          data-testid="check-other"
-        >
-          Check another tag…
-        </Button>
+        {pack.source !== 'authored' && (
+          <>
+            <Button onClick={quickCheck} loading={check.isPending && !checking} data-testid="check-updates">
+              Check for updates
+            </Button>
+            <Button
+              variant="ghost"
+              onClick={() => setChecking(true)}
+              disabled={checking}
+              data-testid="check-other"
+            >
+              Check another tag…
+            </Button>
+          </>
+        )}
+        {pack.trusted && (
+          <Button variant="primary" onClick={() => setHiring(true)} data-testid="hire-from-pack">
+            Hire from this pack…
+          </Button>
+        )}
+        <HoldersButton pack={pack} />
         {pack.trusted && <Button onClick={() => setConfirm('revoke')}>Revoke approval</Button>}
         <Button variant="danger-ghost" onClick={() => setConfirm('remove')}>
           Remove
         </Button>
       </div>
       {reviewing && <TrustReview pack={pack} onClose={() => setReviewing(false)} />}
+      {hiring && <HirePackDialog packId={pack.id} packName={pack.name} onClose={() => setHiring(false)} />}
       {updating && <UpdateReview pack={pack} onClose={() => setUpdating(false)} />}
       <ConfirmDialog
         open={confirm === 'remove'}
@@ -479,5 +614,98 @@ function PackCard({ pack }: { pack: PackDto }) {
         }
       />
     </div>
+  );
+}
+
+/** Which workstations hold the pack. A workstation of another member gets a request on their desk first. */
+function HoldersButton({ pack }: { pack: PackDto }) {
+  const q = usePacks();
+  const set = useSetPackWorkstations();
+  const [open, setOpen] = useState(false);
+  const ws = q.data?.workstations ?? [];
+  const [ids, setIds] = useState<string[]>(pack.holders.map((h) => h.workstationId));
+  const [secret, setSecret] = useState('');
+  const added = ids.filter((id) => !pack.holders.some((h) => h.workstationId === id));
+  const needsKey = !!pack.credentialKind && added.length > 0;
+  const [error, setError] = useState<string | null>(null);
+  const save = async () => {
+    setError(null);
+    try {
+      const credential = needsKey
+        ? await sealPackCredential(pack.credentialKind as 'ssh' | 'token', secret.trim(), ids)
+        : undefined;
+      set.mutate(
+        { id: pack.id, workstationIds: ids, ...(credential ? { credential } : {}) },
+        {
+          onSuccess: () => {
+            setSecret('');
+            setOpen(false);
+          },
+        },
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+  return (
+    <>
+      <Button onClick={() => setOpen(true)} data-testid="pack-holders-edit">
+        Workstations…
+      </Button>
+      {open && (
+        <Dialog
+          open
+          onOpenChange={(o) => !o && setOpen(false)}
+          title={`Where ${pack.name} lives`}
+          description="A workstation of another member is asked first and clones the pack only after they accept."
+          footer={
+            <>
+              <Button variant="ghost" onClick={() => setOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                loading={set.isPending}
+                disabled={ids.length === 0 || (needsKey && !secret.trim())}
+                onClick={save}
+              >
+                Save
+              </Button>
+            </>
+          }
+        >
+          <div className="flex flex-col gap-2 text-sm">
+            {ws.map((w) => (
+              <label key={w.id} className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={ids.includes(w.id)}
+                  disabled={pack.source === 'authored' && pack.holders[0]?.workstationId === w.id}
+                  onChange={() => setIds(ids.includes(w.id) ? ids.filter((x) => x !== w.id) : [...ids, w.id])}
+                />
+                {w.name}
+                {w.mine ? ' (yours)' : ''}
+              </label>
+            ))}
+            {needsKey && (
+              <TextArea
+                label={
+                  pack.credentialKind === 'ssh'
+                    ? 'Deploy key for the new workstations'
+                    : 'Access token for the new workstations'
+                }
+                value={secret}
+                onChange={(e) => setSecret(e.target.value)}
+                rows={4}
+                autoComplete="off"
+                hint="Encrypted here for each workstation; the server never sees it."
+              />
+            )}
+            {error && <Callout tone="danger">{error}</Callout>}
+            <ErrorBox error={set.error} />
+          </div>
+        </Dialog>
+      )}
+    </>
   );
 }

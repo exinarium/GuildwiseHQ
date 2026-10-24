@@ -1,6 +1,8 @@
 import { MessageSquareOff } from 'lucide-react';
 import { Navigate, useLocation, useParams } from 'react-router';
+import { useAgents } from '../api/queries/agents.ts';
 import { useChat } from '../api/queries/chats.ts';
+import { PackProvenance } from '../components/agents/PackProvenance.tsx';
 import { ChatPanel } from '../components/ChatPanel.tsx';
 import { AgentAvatar } from '../components/Face.tsx';
 import { PinnedScreen } from '../components/PinnedScreen.tsx';
@@ -12,6 +14,8 @@ import { usePageTitle } from '../lib/usePageTitle.ts';
 export function Chat() {
   const { threadId = '' } = useParams();
   const chat = useChat(threadId);
+  const agents = useAgents();
+  const agent = agents.data?.find((a) => a.id === chat.data?.agentId);
   const location = useLocation();
   const prefill = (location.state as CeoChatLocationState | null)?.ceoPrefill;
   const title = chat.data ? `Chat with ${chat.data.agentName}` : 'Chat';
@@ -27,6 +31,7 @@ export function Chat() {
       <header className="mb-2 flex shrink-0 items-center gap-2.5 border-b border-line pb-2">
         {chat.data && <AgentAvatar agentId={chat.data.agentId} name={chat.data.agentName} size={32} />}
         <h1 className="min-w-0 flex-1 truncate text-lg font-semibold text-fg">{title}</h1>
+        {agent && <PackProvenance agent={agent} />}
         {chat.data && <ConnectionDot connected={chat.data.workstationOnline} />}
       </header>
       {chat.data ? (

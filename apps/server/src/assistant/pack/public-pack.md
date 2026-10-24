@@ -419,8 +419,12 @@ The built-in agent you talk to first: it runs your desk and the floor, works on 
 - Talking to it: Press Ask in the top bar for your standing chat, or give it a task on the Tasks tab. Its spend shows as Management on the Costs page. The DevOps engineer no longer has a chat of its own: ask the CEO, who delegates to DevOps and tells you what happened.…
 
 ### Capabilities and packs
-The skills, personas and playbooks agents can use, and how to add and approve a pack from git.
+The skills, personas and playbooks agents can use, how to add and approve a pack, write your own, and hire or chat with a persona.
 - The registry: It lists every skill, persona and playbook and where it comes from: built in, your vault, a project or a pack. Pick a role's skills on Roles and workflows.
 - Packs: Add a pack by git URL and tag, or click Add BMAD Method. It starts untrusted: nothing of it is used. Review and approve shows its files, scripts flagged, and approves that exact commit. Scripts stay off unless you enable them, and only run in the sandbox.…
 - Project skills: Project skills lists the skills and personas found in project repositories (repository, path, hash). Mark one reviewed or block it; a blocked one cannot be used, and a changed file needs a new review.
+- My capabilities: Write skills, personas and playbooks in the editor; the page checks them as you type. Each pack you write is stored on your workstation in the standard pack layout, so Export as zip gives a folder you can push to git unchanged.…
+- Private repositories and workstations: For a private git repository add a deploy key (ssh) or token (https). Your browser encrypts it for each workstation you choose, which stores it for that pack only. A member's workstation asks its owner first (a request on their desk) and clones only after they accept.
+- Hire from a pack: On an approved pack, Hire from this pack turns a persona into an agent tagged like *BMAD · analyst · v6.12.4*. It gets read access unless the persona asks for more and you may grant it. Add all agents hires every persona.…
+- Chat with a persona: Chat on a persona opens a one-to-one chat on your own workstation. It only reads, and its cost is tracked. A private persona is only yours.
 </help_outline>

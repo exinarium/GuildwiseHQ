@@ -43,6 +43,15 @@ const pack = (over: Partial<PackDto> = {}): PackDto => ({
   lastCheckedAt: null,
   addedAt: AT,
   attribution: 'BMad Method, by BMad Code, LLC. MIT licence.',
+  source: 'git',
+  visibility: 'org',
+  ownerUserId: null,
+  ownerName: null,
+  description: '',
+  credentialKind: null,
+  credentialFingerprint: null,
+  revision: 0,
+  holders: [],
   ...over,
 });
 
@@ -194,15 +203,20 @@ describe('Capabilities: registry browser', () => {
     expect(screen.queryByTestId('cap-skill-bmad:other')).not.toBeInTheDocument();
   });
 
-  it('tells a member that only Owners and Admins manage capabilities', async () => {
+  it('shows a member the registry and their own capabilities, and none of the admin tabs', async () => {
     stub({
       'GET /api/auth/me': () => ({
         user: { id: 'u', email: 'm@example.com', displayName: 'M' },
         activeOrg: { id: 'o', name: 'Org', role: 'member' },
       }),
+      'GET /api/projects': () => ({ projects: [] }),
+      'GET /api/capabilities': () => ({ items: [], issues: [], indexedAt: null }),
     });
     wrap(<Capabilities />);
-    expect(await screen.findByText('Owners and Admins only')).toBeInTheDocument();
+    expect(await screen.findByRole('tab', { name: 'My capabilities' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Registry' })).toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: 'Packs' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: 'Skill grants' })).not.toBeInTheDocument();
   });
 });
 

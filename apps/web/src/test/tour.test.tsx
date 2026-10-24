@@ -70,11 +70,11 @@ describe('the tour steps', () => {
     expect(tourSteps('platform', new Set()).some((s) => s.video)).toBe(false);
   });
 
-  it('a Member has no Intake, CEO, Costs or Vaults step', () => {
+  it('a Member has no Intake, CEO, Costs or Vaults step, and has Capabilities (their own packs)', () => {
     const steps = ids('member', MEMBER_NAV);
     expect(steps).toContain('workstations');
     expect(steps).toContain('interests');
-    for (const gone of ['intake', 'ceo', 'costs', 'vaults', 'capabilities'])
+    for (const gone of ['intake', 'ceo', 'costs', 'vaults'])
       expect(steps).not.toContain(gone);
   });
 

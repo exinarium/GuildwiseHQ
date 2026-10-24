@@ -4,6 +4,7 @@ import { useProjects } from '../../api/queries/projects.ts';
 import { formatDateTime } from '../../lib/time.ts';
 import { Badge, Callout, EmptyState, ErrorBox, ListSkeleton, Select, TextInput } from '../ui.tsx';
 import { SourceBadge, UnusableBadge } from './badges.tsx';
+import { ChatWithPersona } from './ChatWithPersona.tsx';
 
 const KINDS = ['skill', 'persona', 'playbook'] as const;
 const SOURCES = ['builtin', 'org-vault', 'project-repo', 'pack'] as const;
@@ -123,7 +124,21 @@ function RegistryRow({ item: i }: { item: RegistryItem }) {
             overrides
           </Badge>
         )}
+        {i.visibility === 'private' && (
+          <Badge
+            tone="violet"
+            data-testid="private-badge"
+            title="Only you see this: it lives on your workstation"
+          >
+            private to you
+          </Badge>
+        )}
         <UnusableBadge usable={i.usable} reason={i.unusableReason} />
+        {i.kind === 'persona' && i.usable !== false && (
+          <span className="ml-auto">
+            <ChatWithPersona personaKey={i.key} name={i.name} />
+          </span>
+        )}
         {i.hasScripts && (
           <Badge tone="amber" title="The pack ships script files. They stay off unless you enable them.">
             has scripts

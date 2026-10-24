@@ -15,7 +15,12 @@ const b64 = (u: Uint8Array): string => {
   for (const b of u) bin += String.fromCharCode(b);
   return btoa(bin);
 };
-const unb64 = (s: string): Uint8Array => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+const unb64 = (s: string): Uint8Array<ArrayBuffer> => {
+  const bin = atob(s);
+  const out = new Uint8Array(new ArrayBuffer(bin.length));
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+};
 
 export async function makeReplyKey(): Promise<ReplyKey> {
   const subtle = globalThis.crypto.subtle;

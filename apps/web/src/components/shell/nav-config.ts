@@ -149,14 +149,14 @@ export function buildNav(opts: {
       icon: Vault,
       testId: 'nav-vaults',
     });
-  if (canManage)
-    knowledge.push({
-      id: 'capabilities',
-      label: 'Capabilities',
-      to: '/settings/capabilities',
-      icon: Puzzle,
-      testId: 'nav-capabilities',
-    });
+  // R3a: every member writes capabilities of their own here; the other tabs are for Owners and Admins
+  knowledge.push({
+    id: 'capabilities',
+    label: 'Capabilities',
+    to: '/settings/capabilities',
+    icon: Puzzle,
+    testId: 'nav-capabilities',
+  });
   const sections: NavSection[] = [
     { label: 'Work', items: work },
     {

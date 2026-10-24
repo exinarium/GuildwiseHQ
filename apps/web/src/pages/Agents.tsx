@@ -33,12 +33,15 @@ import { useRunningShifts } from '../api/queries/shifts.ts';
 import { useWorkstations } from '../api/queries/workstations.ts';
 import { AgentMcpSection } from '../components/agents/AgentMcpSection.tsx';
 import { AgentRoleFollow } from '../components/agents/AgentRoleFollow.tsx';
+import { PackProvenance } from '../components/agents/PackProvenance.tsx';
 import {
   type Access,
   AllowedProjectsDialog,
   ProjectAccessEditor,
   WorksOn,
 } from '../components/agents/ProjectAccess.tsx';
+import { PickPackToHire } from '../components/capabilities/PickPackToHire.tsx';
+import { RoleOffers } from '../components/capabilities/RoleOffers.tsx';
 import { AgentAvatar } from '../components/Face.tsx';
 import { AgentStats, WorkQualityPanel } from '../components/hr/AgentStats.tsx';
 import { ChangeModelDialog, ChangeRoleDialog } from '../components/hr/ChangeDialogs.tsx';
@@ -65,6 +68,7 @@ import {
 } from '../components/ui.tsx';
 import { getLastProjectKey } from '../lib/lastProject.ts';
 import { money } from '../lib/money.ts';
+import { useCanManageOrg } from '../lib/orgRole.ts';
 import { agentWarning, isRuntimeUnsandboxed, sandboxReasonOf } from '../lib/sandbox.ts';
 
 /**
@@ -92,6 +96,8 @@ export function Agents() {
       : null;
   });
   const [hireOpen, setHireOpen] = useState(!!prefill);
+  const [packHireOpen, setPackHireOpen] = useState(false);
+  const orgManager = useCanManageOrg();
   const [firing, setFiring] = useState<AgentDto | null>(null);
   const [rehoming, setRehoming] = useState<AgentDto | null>(null);
   const [changingModel, setChangingModel] = useState<AgentDto | null>(null);
@@ -129,12 +135,18 @@ export function Agents() {
             <ButtonLink to="/metrics" data-testid="metrics-link">
               Metrics
             </ButtonLink>
+            {orgManager && (
+              <Button onClick={() => setPackHireOpen(true)} data-testid="hire-from-pack-open">
+                Hire from a pack
+              </Button>
+            )}
             <Button variant="primary" onClick={() => setHireOpen(true)}>
               Hire agent
             </Button>
           </>
         }
       />
+      {orgManager && <RoleOffers />}
       <div className="mb-4 flex flex-wrap gap-3">
         {(projects.data?.length ?? 0) > 1 && (
           <div className="w-full max-w-xs">
@@ -232,6 +244,7 @@ export function Agents() {
         </Disclosure>
       )}
       <HireDialog open={hireOpen} onOpenChange={setHireOpen} prefill={prefill} />
+      {packHireOpen && <PickPackToHire onClose={() => setPackHireOpen(false)} />}
       <FireDialog agent={firing} onClose={() => setFiring(null)} />
       <RehomeDialog agent={rehoming} onClose={() => setRehoming(null)} />
       <AllowedProjectsDialog
@@ -370,6 +383,7 @@ function AgentCard({
           )}
         </span>
       </div>
+      <PackProvenance agent={a} />
       <p className="font-mono text-xs text-subtle" data-testid="agent-model">
         {a.runtime} · {a.model}
         {a.effort ? ` · ${a.effort}` : ''}

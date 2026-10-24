@@ -41,6 +41,7 @@ import { OrgChartPage } from './pages/OrgChart.tsx';
 import { OrgDesigner } from './pages/OrgDesigner.tsx';
 import { OrgProviders } from './pages/OrgProviders.tsx';
 import { OrgSettings } from './pages/OrgSettings.tsx';
+import { PersonaChat } from './pages/PersonaChat.tsx';
 import { Phase } from './pages/Phase.tsx';
 import { PlatformTeamDesk } from './pages/PlatformTeamDesk.tsx';
 import { ProjectEnvironments } from './pages/ProjectEnvironments.tsx';
@@ -136,6 +137,7 @@ export const routes = [
       { path: '/settings', element: <Settings /> },
       { path: '/settings/vaults', element: <Vaults /> },
       { path: '/settings/capabilities', element: <Capabilities /> },
+      { path: '/persona-chats/:id', element: <PersonaChat /> },
       { path: '/settings/providers', element: <OrgProviders /> },
       { path: '/settings/org', element: <OrgSettings /> },
       { path: '/admin', element: <Navigate to="/settings/org" replace /> },

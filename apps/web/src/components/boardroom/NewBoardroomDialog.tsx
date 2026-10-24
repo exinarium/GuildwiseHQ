@@ -31,6 +31,7 @@ import {
 import { useProjects } from '../../api/queries/projects.ts';
 import { useWorkstations } from '../../api/queries/workstations.ts';
 import { TIME_LIMIT_PRESETS } from '../../lib/session.ts';
+import { ChatWithPersona } from '../capabilities/ChatWithPersona.tsx';
 import { fromChoice, ModelSelect, toChoice, unionExtras, unionProviders } from '../ModelSelect.tsx';
 import { WorkstationPicker } from '../session/WorkstationPicker.tsx';
 import { Badge, Button, Dialog, ErrorBox, Select, TextArea, TextInput } from '../ui.tsx';
@@ -413,6 +414,9 @@ export function NewBoardroomDialog({
                         </span>
                       </span>
                     </label>
+                    <span className="ml-8">
+                      <ChatWithPersona personaKey={p.key} name={p.name} />
+                    </span>
                   </li>
                 );
               })}
