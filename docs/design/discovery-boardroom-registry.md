@@ -132,3 +132,64 @@ Details in `docs/ARCHITECTURE.md` section 38.4 (packs, trust, BMAD, materialisat
 
 - **Delegation and Codex, open questions (defaults chosen):** delegate targets are persona keys, not hired agents; a persona's own model wins over the cheap default; Claude Code has no max-turns flag so only the 110 s timeout caps a Claude delegate; delegates are not offered to board speakers (sealed rounds) or plain direct chats; Codex runs only roles its sandbox can confine, has no network allow-list, and a Codex agent's shift resume starts fresh; Codex prices are unknown (cost shown as unknown).
 
+
+## Owner decisions (2026-10-24), to build in the revision pass
+
+### Owner's own decisions
+- **Hand to BA:** when no BA is online, queue the hand-off and start the intake once a BA's workstation is online. If the org has no BA hired at all, recommend hiring one, with a one-click "Hire a BA".
+- **Who creates sessions:** any member can create Discovery and Boardroom sessions.
+- **Session ownership:**
+  - A session (Discovery or Boardroom/whiteboard) belongs to the member who created it.
+  - The creator manages it in full: whiteboard edit/merge/delete, controls, decisions, End.
+  - Owners and Admins can override.
+  - Other participants can talk, add notes and vote.
+- **Session limits:**
+  - **Cost:** no limit by default. A limit is optional. If a session with a limit runs out when the minutes are due, ask the owner: write the minutes without the Chair's summary, or raise the budget.
+  - **Time:** also optional, set per session (e.g. 30 min), like a meeting.
+    - Show the remaining time.
+    - Warn as time runs short (e.g. at 5 minutes left), and have the Chair or facilitator steer to wrap up.
+    - When time is up, prompt the creator: extend, or wrap up and write minutes/capture now. Don't let it silently overrun.
+- **Boardroom cast:** every Boardroom always includes one **Optimist** (argues for the idea and its upside) and one **Devil's Advocate** (attacks edge cases and failure modes), plus 3 to 4 other opinion-giving seats (personas or agents). Total 5 to 6. The two fixed seats can't be removed. A built-in `optimist` persona is needed.
+- **Pacing:** Boardroom auto-runs, as built.
+- **Card work on other providers is a priority.** Some users only have, for example, a Gemini subscription.
+  - First: Claude Code against Bedrock, Vertex or an Anthropic-compatible gateway.
+  - Then CLI harness adapters (Gemini CLI first, then opencode), each with a sandbox-parity check like Codex.
+- **Provider keys:**
+  - Org-wide keys with a monthly spend cap per provider.
+  - A workstation's own key overrides the org key and isn't subject to the org cap.
+  - The server still never holds plaintext: org keys are sealed separately to each workstation's public key.
+- **Packs:**
+  - Private packs are allowed, through a deploy key or token sealed to the chosen workstations only.
+  - A member must opt in (via a desk item) before a pack is cloned on their workstation.
+- **Videos:** later, not in this pass.
+
+### Recommendations accepted by default
+- **Discovery:**
+  - Budget stays in USD.
+  - The facilitator's phase change applies and the owner overrides it.
+  - The prep-mode turn cap becomes a setting.
+  - "Hand to BA" checks for an existing intake before retrying.
+  - Non-managers see no manager-only controls.
+- **Boardroom:**
+  - The round cap stays at 4 (max 12).
+  - Option scoring gets a tally.
+  - @mentions jump the current round.
+  - Sessions can be deleted or archived.
+- **Packs:**
+  - Approval stays for the whole pack.
+  - Project packs apply in sessions that have a project.
+  - Project-repo skills get a review list.
+  - An "update check" button is added.
+- **Hardening and small items:**
+  - The skill guard blocks when it times out.
+  - Claude delegates get a turn cap and a shorter stuck-slot time.
+  - The Codex login is shared without conflicts.
+  - Session document events are hidden from non-participant Owners and Admins.
+  - Workstation pickers are added to the dialogs.
+  - Large keys are supported.
+  - Prompt caching is turned on.
+  - Prices can be set for local models.
+  - Chat history retention is 90 days.
+  - The `http://` endpoint warning is shown and the legal link is fixed.
+- **Kept as built:** items 11-13, 17, 21, 25, 33, 38, 42, 44.
+- **Later:** remove the package-age exemption.
