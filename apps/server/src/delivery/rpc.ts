@@ -8,6 +8,7 @@ import { runAction } from '../ceo/engine.ts';
 import { ceoCallContext } from '../ceo/gateway.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Row, rows } from '../db/sql.ts';
+import { gateAction } from '../governance/gates.ts';
 import { applyProbeResult } from './probes.ts';
 import { loadRecipeRow, NO_PROJECT_VAULT, observeRecipe, projectVault } from './recipes.ts';
 import { requestDeployRun } from './runs.ts';
@@ -119,6 +120,15 @@ export async function deployRpc(
       );
       return [true, r];
     }
+    // S-B1: a DevOps engineer set to ask before it deploys waits for an approval of this project and environment
+    const gate = await gateAction(ctx, {
+      agent: (await one(ctx.pool, 'SELECT * FROM agents WHERE id=$1', [agent.id])) as Row,
+      actionClass: 'deploy',
+      fingerprint: `deploy:${project.id}:${p.data.env}:${p.data.commit ?? ''}:${p.data.target ?? ''}`,
+      summary: `deploy ${project.key} to ${p.data.env}${p.data.commit ? ` (${String(p.data.commit).slice(0, 10)})` : ''}`,
+      projectId: project.id,
+    });
+    if (!gate.ok) return [false, undefined, gate.message];
     const r = await requestDeployRun(ctx, {
       projectId: project.id,
       env: p.data.env,

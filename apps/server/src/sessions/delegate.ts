@@ -17,6 +17,7 @@ import { orgScope, runnerActor } from '../commands/common.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Row } from '../db/sql.ts';
 import { withTx } from '../db/tx.ts';
+import { gateAction } from '../governance/gates.ts';
 import { providerCapProblem } from '../provider-keys/caps.ts';
 import { assertProjectMayRun, sessionCost } from './cost.ts';
 import { grantsWithHandles } from './delegate-grants.ts';
@@ -149,6 +150,21 @@ async function begin(
         ? `"${handle}" is not one of your delegation targets (${grants.map((x) => x.handle).join(', ')})`
         : 'you have no delegation targets',
     );
+  // S-B1: an agent set to ask before it delegates waits for an approval of this target (a session's delegation is its creator's own).
+  if (owner.kind === 'agent') {
+    const agent = await one(ctx.pool, 'SELECT * FROM agents WHERE id=$1', [owner.id]);
+    if (agent) {
+      const gate = await gateAction(ctx, {
+        agent,
+        actionClass: 'delegation',
+        fingerprint: `delegate:${g.row.target_kind}:${g.row.target_key}`,
+        summary: `delegate to ${g.handle}`,
+        projectId: caller.kind === 'shift' ? caller.project : null,
+        cardId: caller.kind === 'shift' ? (caller.row.card_id ?? null) : null,
+      });
+      if (!gate.ok) return [false, undefined, gate.message];
+    }
+  }
   const grantMax = (g.row.max_profile ?? null) as DelegateProfile | null;
   // R3c (Q62): the grant may set the model the target runs on for this caller; the caller still cannot choose
   const override =

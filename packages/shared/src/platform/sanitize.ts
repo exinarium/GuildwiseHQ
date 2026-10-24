@@ -30,6 +30,30 @@ export function maskText(text: string, home?: string): string {
     .join('\n');
 }
 
+/** Masks secrets and credentials only (ids, e-mail addresses and paths stay): for records where who/what must stay readable. */
+export function maskSecrets(text: string): string {
+  return text.replace(URL_CREDENTIALS, '$1***@').replace(SECRET, '***').replace(KEYED_SECRET, '$1***');
+}
+
+/** Object keys whose value is never exported. */
+const SECRET_KEY =
+  /(secret|passw|passphrase|token|ciphertext|api[_-]?key|private[_-]?key|sealed|credential|authorization|cookie|totp|recovery)/i;
+
+/** A copy of a JSON value that is safe to export: secret-looking keys are replaced and secret-looking text is masked. */
+export function redactForExport(value: unknown, depth = 0): unknown {
+  if (depth > 8) return '[truncated]';
+  if (typeof value === 'string') return maskSecrets(value.length > 2000 ? `${value.slice(0, 2000)}…` : value);
+  if (Array.isArray(value)) return value.slice(0, 200).map((v) => redactForExport(v, depth + 1));
+  if (value && typeof value === 'object')
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([k, v]) => [
+        k,
+        SECRET_KEY.test(k) ? '[redacted]' : redactForExport(v, depth + 1),
+      ]),
+    );
+  return value;
+}
+
 /**
  * Shortens the absolute paths of one line. A lone path keeps its last two segments. When a line holds several different paths
  * (a message that compares two files) only the leading segments they SHARE are dropped, so the part that differs always shows:

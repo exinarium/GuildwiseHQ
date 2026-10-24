@@ -83,6 +83,7 @@ import { devopsRoutes } from './routes/devops.ts';
 import { digestRoutes } from './routes/digests.ts';
 import { discoveryRoutes } from './routes/discovery.ts';
 import { documentRoutes } from './routes/documents.ts';
+import { governanceRoutes } from './routes/governance.ts';
 import { graphRoutes } from './routes/graph.ts';
 import { hookRoutes } from './routes/hooks.ts';
 import { hrRoutes } from './routes/hr.ts';
@@ -425,6 +426,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   await app.register(capabilityRoutes(ctx));
   await app.register(playbookRoutes(ctx));
   await app.register(delegationRoutes(ctx));
+  await app.register(governanceRoutes(ctx));
   await app.register(packRoutes(ctx));
   await app.register(intakeBatchRoutes(ctx));
   await app.register(hrRoutes(ctx));

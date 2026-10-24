@@ -209,6 +209,7 @@ export function packRoutes(ctx: Ctx) {
           req.params.id,
           req.body.agentId,
           req.body.granted,
+          req.body.confirmScopes,
         );
         reply.code(204);
       },

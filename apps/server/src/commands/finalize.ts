@@ -54,12 +54,26 @@ export async function mergeGate(
   // lean team: the owner approved (or the policy waived it) at the approval step after the review, bound to the reviewed
   // commit; the merge does not ask again (the lapse check below guards the commit).
   if (await hasOwnerApprovalStep(db, card)) return 'none';
+  // S-B1: an agent that built this card is set to ask before its work lands (merge, branch push or pull request): always the
+  // manager's approval, whatever the size, and the project's waiver does not apply
+  if (await builderGatedForLanding(db, card)) return 'approval';
   if (isHighRiskMerge(card, action)) return 'approval'; // the project's waiver does not apply to a high risk
   if (!isLargeMerge(card, action)) return 'none';
   const p = await one(db, 'SELECT merge_large_without_approval AS waived FROM projects WHERE id=$1', [
     card.project_id,
   ]);
   return p?.waived ? 'waived' : 'approval';
+}
+
+/** Is an agent that worked on the card (built or last touched it) gated on the `merge_push` class? */
+export async function builderGatedForLanding(db: Queryable, card: Row): Promise<boolean> {
+  const ids = [card.original_builder_agent_id, card.last_agent_id].filter(Boolean);
+  if (ids.length === 0) return false;
+  return !!(await one(
+    db,
+    `SELECT 1 FROM agent_action_gates WHERE action_class='merge_push' AND agent_id = ANY($1::uuid[])`,
+    [ids],
+  ));
 }
 
 /** Does the card's workflow have the owner approval step after the review (lean team)? */
@@ -172,8 +186,9 @@ export async function queueExecute(tx: Tx, card: Row, action: CompletionAction):
 export function mergeApprovalEvents(
   card: Row,
   action: CompletionAction,
-  who: { requestedBy: string; actor: AppendInput['actor']; by: string },
+  who: { requestedBy: string; actor: AppendInput['actor']; by: string; gatedLanding?: boolean },
 ): { deskItemId: string; events: AppendInput[] } {
+  const gatedLanding = who.gatedLanding === true;
   const scope = projectScope(card.org_id, card.project_id);
   const deskItemId = randomUUID();
   return {
@@ -188,7 +203,7 @@ export function mergeApprovalEvents(
             kind: 'approval',
             subkind: DESK_SUBKIND.largeMerge,
             title: `Approve merge of ${card.ref}: ${card.title}`,
-            body: `${isHighRisk(card) ? `${card.ref} was rated HIGH risk by the reviewer (${riskOf(card)?.analysis.slice(0, 600) ?? ''}). ` : ''}${card.ref} is a ${card.risk_tier === 'large' ? 'large change (two reviewers approved)' : 'change'}. Approving merges ${card.branch_name} into the working branch (${card.base_branch ?? 'main'}); the runner does it, then a full E2E suite runs on the result.`,
+            body: `${gatedLanding ? `The agent that built ${card.ref} is set to ask before its work lands. ` : ''}${isHighRisk(card) ? `${card.ref} was rated HIGH risk by the reviewer (${riskOf(card)?.analysis.slice(0, 600) ?? ''}). ` : ''}${card.ref} is a ${card.risk_tier === 'large' ? 'large change (two reviewers approved)' : 'change'}. ${action === 'merge' ? `Approving merges ${card.branch_name} into the working branch (${card.base_branch ?? 'main'}); the runner does it, then a full E2E suite runs on the result.` : `Approving lets the runner land it as a ${action === 'pr' ? 'pull request' : 'pushed branch'}.`}`,
             options: [],
             blocking: false,
             pinned: true,
@@ -267,6 +282,7 @@ export async function requestFinalize(
         requestedBy: user.id,
         actor: userActor(user.id),
         by: user.displayName,
+        gatedLanding: await builderGatedForLanding(tx, card),
       });
       events.push(...approval.events);
       const deskItemId = approval.deskItemId;

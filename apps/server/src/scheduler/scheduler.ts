@@ -19,6 +19,7 @@ import { sweepSubworkflows } from '../commands/subworkflows.ts';
 import { weeklyBriefingTick } from '../commands/weekly-briefing.ts';
 import type { Ctx } from '../context.ts';
 import { reachabilityTick } from '../delivery/reachability.ts';
+import { governanceTick } from '../governance/offboarding.ts';
 import { pruneMail } from '../mail/inbound/prune.ts';
 import { licensingTick } from '../orgs/licensing.ts';
 import { prunePersonaChats } from '../sessions/persona-chat.ts';
@@ -148,6 +149,8 @@ export class Scheduler {
       await weeklyBriefingTick(this.ctx).catch((err) =>
         this.ctx.log.error({ err }, 'weekly briefing failed'),
       );
+      // Governance housekeeping: private items of removed members past their grace period, old notification links.
+      await governanceTick(this.ctx).catch((err) => this.ctx.log.error({ err }, 'governance tick failed'));
       return fired;
     });
     this.chain = next.catch(() => {});

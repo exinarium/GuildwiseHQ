@@ -18,6 +18,7 @@ import type { Ctx } from '../context.ts';
 import { exec, iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
+import { agentScopeFacts, assertScopesConfirmed, packScopes, scopeWarning } from '../governance/scopes.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { authorWorkstationOf, HOLDS_PACK_SQL, packEvent, packWorkstations } from './pack-support.ts';
 import { holdersOf } from './packs.ts';
@@ -481,6 +482,7 @@ export async function grantPackAgent(
   packId: string,
   agentId: string,
   granted: boolean,
+  confirmScopes?: boolean,
 ): Promise<void> {
   let ws = '';
   await withAppendTx(ctx.pool, async (tx) => {
@@ -499,6 +501,15 @@ export async function grantPackAgent(
     if (!a || a.workstation_id !== authorWorkstationOf(p))
       throw notFound('agent not found on that workstation');
     ws = a.workstation_id;
+    // S-B1: a pack that needs a scope the agent lacks is granted only when the granter confirms it
+    if (granted) {
+      const full = await one(tx, 'SELECT * FROM agents WHERE id=$1', [agentId]);
+      if (full)
+        assertScopesConfirmed(
+          scopeWarning(await packScopes(tx, packId), await agentScopeFacts(tx, full)),
+          confirmScopes,
+        );
+    }
     await ctx.store.append(
       [packEvent('PackAgentGranted', { packId, orgId, agentId, grantedBy: userId, granted }, p, userId)],
       { tx },

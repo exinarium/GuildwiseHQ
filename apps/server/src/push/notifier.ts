@@ -1,6 +1,7 @@
 import {
   maskText,
   PLATFORM_DESK_SUBKIND,
+  type PushAction,
   type PushCategory,
   type PushPayload,
   parseBoardConfig,
@@ -10,8 +11,10 @@ import type { Ctx } from '../context.ts';
 import { exec, one, rows } from '../db/sql.ts';
 import type { StoredEvent } from '../eventstore/types.ts';
 import { boardTime, discoveryTime } from '../sessions/time.ts';
+import { pushActionsFor } from './desk-actions.ts';
 import { inQuietHours, loadPreferences } from './prefs.ts';
 import { badgeCountFor, sendToUser, subscriptionsOf } from './sender.ts';
+import { safeBody } from './text.ts';
 
 /** Same thing, same state, within this long: sent once. */
 export const DEDUPE_WINDOW_MS = 24 * 3600_000;
@@ -31,20 +34,11 @@ export interface PushNotice {
   orgId: string | null;
   /** The person whose action caused it: never notified. */
   actorUserId?: string | null | undefined;
+  /** S-B1: notification buttons for one person (a one-tap confirm link each); called only when the notice is really sent. */
+  actionsFor?: ((userId: string) => Promise<PushAction[]>) | undefined;
 }
 
-/** A notification body: one plain line of at most 140 characters, no code, no secrets, no paths or ids. */
-export function safeBody(text: string | null | undefined, max = 140): string {
-  const plain = maskText(
-    (text ?? '')
-      .replace(/```[\s\S]*?```/g, ' ')
-      .replace(/`[^`]*`/g, ' ')
-      .replace(/[#*_>]+/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim(),
-  );
-  return plain.length > max ? `${plain.slice(0, max - 1).trimEnd()}…` : plain;
-}
+export { safeBody };
 
 const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s);
 
@@ -86,12 +80,14 @@ export async function notifyUsers(ctx: Ctx, userIds: string[], notice: PushNotic
         ],
       );
       if (!claimed) continue;
+      const actions = notice.actionsFor ? await notice.actionsFor(userId).catch(() => []) : [];
       const payload: PushPayload = {
         title: clip(maskText(notice.title), 80),
         body: safeBody(notice.body),
         url: notice.url,
         tag: `${notice.category}:${notice.subject}`.slice(0, 120),
         badge: await badgeCountFor(ctx, userId),
+        ...(actions.length ? { actions } : {}),
       };
       const r = await sendToUser(ctx, userId, payload, {
         urgency: notice.priority === 'blocking' ? 'high' : 'normal',
@@ -226,6 +222,8 @@ async function onDeskItem(ctx: Ctx, e: StoredEvent, deskItemId: string): Promise
     subject: d.id,
     state: 'open',
     priority: d.blocking ? 'blocking' : 'normal',
+    // S-B1: Approve / Reject (or the quick options of a question) on the notification itself
+    actionsFor: (userId) => pushActionsFor(ctx, userId, d.id),
   });
 }
 

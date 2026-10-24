@@ -352,7 +352,12 @@ export const ReadMyPackResultSchema = z.object({
 export type ReadMyPackResult = z.infer<typeof ReadMyPackResultSchema>;
 
 export const SetPackVisibilityRequestSchema = z.object({ visibility: PackVisibilitySchema });
-export const GrantPackAgentRequestSchema = z.object({ agentId: z.uuid(), granted: z.boolean() });
+export const GrantPackAgentRequestSchema = z.object({
+  agentId: z.uuid(),
+  granted: z.boolean(),
+  /** S-B1: the pack needs a scope the agent lacks; the granter confirms they know. */
+  confirmScopes: z.boolean().optional(),
+});
 
 // ------------------------------------------------------------------------------------------ hire from pack
 

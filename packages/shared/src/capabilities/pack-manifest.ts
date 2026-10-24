@@ -1,5 +1,6 @@
 import { parse as parseYaml } from 'yaml';
 import { z } from 'zod';
+import { normalizeScopes } from '../governance/index.ts';
 import { CapabilityKeySchema } from './parse.ts';
 
 /**
@@ -7,6 +8,7 @@ import { CapabilityKeySchema } from './parse.ts';
  * pointer to files the pack already holds (the pack is still reviewed and pinned as a whole); nothing in it grants anything.
  *
  * ```yaml
+ * scopes: [shell, web]           # what the pack needs (shown when it is granted); each entry below may add its own `scopes:`
  * agents:                         # personas: a file each (a persona .md, or a Claude Code subagent .md)
  *   - file: agents/analyst.md
  *     key: analyst                # optional, default: the file name
@@ -31,6 +33,11 @@ const MAX_MANIFEST_BYTES = 64 * 1024;
 
 const Tag = z.string().min(1).max(40);
 const ManifestPath = z.string().min(1).max(300);
+/** `scopes: [shell, web]` or `scopes: "shell, web"`: what the pack (or one entry) needs; shown when it is granted to an agent. */
+const Scopes = z.preprocess(
+  (v) => (v === undefined ? undefined : normalizeScopes(v)),
+  z.array(z.string()).max(20).optional(),
+);
 
 export const ManifestAgentSchema = z.object({
   file: ManifestPath,
@@ -42,6 +49,7 @@ export const ManifestAgentSchema = z.object({
   voice: z.string().min(1).max(500).optional(),
   icon: z.string().min(1).max(60).optional(),
   tags: z.array(Tag).max(10).optional(),
+  scopes: Scopes,
 });
 export type ManifestAgent = z.infer<typeof ManifestAgentSchema>;
 
@@ -49,10 +57,13 @@ export const ManifestDirSchema = z.object({
   dir: ManifestPath,
   key: CapabilityKeySchema.optional(),
   tags: z.array(Tag).max(10).optional(),
+  scopes: Scopes,
 });
 export type ManifestDir = z.infer<typeof ManifestDirSchema>;
 
 export const PackManifestSchema = z.object({
+  /** Scopes every capability of the pack needs. */
+  scopes: Scopes,
   agents: z.array(ManifestAgentSchema).max(MAX_ENTRIES).default([]),
   playbooks: z.array(ManifestDirSchema).max(MAX_ENTRIES).default([]),
   skills: z.array(ManifestDirSchema).max(MAX_ENTRIES).default([]),

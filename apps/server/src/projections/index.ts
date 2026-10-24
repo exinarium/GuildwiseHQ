@@ -20,6 +20,7 @@ import { discoveryProjectors } from './discovery.ts';
 import { documentProjectors } from './documents.ts';
 import { environmentProjectors } from './environment.ts';
 import { feedProjectors } from './feeds.ts';
+import { governanceProjectors } from './governance.ts';
 import { graphProjectors } from './graph.ts';
 import { hygieneProjectors } from './hygiene.ts';
 import { intakeProjectors } from './intake.ts';
@@ -113,6 +114,7 @@ const domains: Array<Record<string, Projector>> = [
   capabilityProjectors,
   packProjectors,
   playbookProjectors,
+  governanceProjectors,
 ];
 
 /**
@@ -277,4 +279,7 @@ export const PROJECTION_TABLES = [
   'project_capability_index',
   'project_capability_status',
   'capability_reviews',
+  'agent_action_gates',
+  'gated_actions',
+  'offboarding_purges',
 ];

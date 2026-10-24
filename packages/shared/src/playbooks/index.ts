@@ -43,6 +43,8 @@ export const SlashCommandSchema = z.object({
   packId: z.uuid().optional(),
   /** `private`: a pack of the asking user's own workstation. */
   visibility: PackVisibilitySchema.optional(),
+  /** S-B1: scopes the capability says it needs (`shell`, `web`, ...), shown when it is granted. */
+  scopes: z.array(z.string()).optional(),
   /** A playbook that can start a guided session (every usable playbook that is not a template). */
   canStartSession: z.boolean().default(false),
 });
@@ -245,5 +247,7 @@ export type PlaybookGrantsDto = z.infer<typeof PlaybookGrantsDtoSchema>;
 export const SetPlaybookGrantRequestSchema = z.object({
   key: z.string().trim().min(1).max(130),
   granted: z.boolean(),
+  /** S-B1: the playbook needs a scope the agent lacks; the granter confirms they know. */
+  confirmScopes: z.boolean().optional(),
 });
 export type SetPlaybookGrantRequest = z.infer<typeof SetPlaybookGrantRequestSchema>;
