@@ -876,3 +876,140 @@ describe('what a workstation can run', () => {
     ).toBeNull();
   });
 });
+
+// ------------------------------------------------------------------------------------------------ live stop at the cap (Q48)
+
+describe('the cap stops running work at once', () => {
+  const usage = (out: number, over: Record<string, unknown> = {}) => ({
+    inputTokens: 0,
+    outputTokens: out,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    ...over,
+  });
+  async function startShift(model = 'gemini-2.5-pro'): Promise<string> {
+    const agent =
+      (await q(`SELECT id FROM agents LIMIT 1`))[0]?.id ??
+      (await w.hire('Cap', 'builder', 'junior')).agent?.id;
+    const id = randomUUID();
+    await q(
+      `INSERT INTO shifts (id, org_id, agent_id, workstation_id, kind, status, runtime, model, started_at)
+       VALUES ($1,$2,$3,$4,'chat','running','gemini',$5, now())`,
+      [id, orgId, agent, w.workstationId, model],
+    );
+    return id;
+  }
+  const report = (id: string, out: number, kind: 'shift' | 'chat' = 'shift') =>
+    import('../src/provider-keys/live-usage.ts').then((m) =>
+      m.applyRunUsage(ctx(), { id: w.workstationId }, { kind, id, usage: usage(out) } as never),
+    );
+  const stops = (r: FakeRunner, id: string) =>
+    r.received.filter((f: any) => f.type === 'shift.stop' && f.shiftId === id);
+
+  it('stops a running shift on the organization key when the live usage crosses the cap, with a notice, once', async () => {
+    await clearSpend();
+    await q('DELETE FROM desk_items WHERE subkind IN ($1,$2)', [
+      'provider_cap_paused',
+      'provider_cap_warning',
+    ]);
+    await q(
+      `UPDATE org_providers SET cap_paused_month=NULL, cap_warned_month=NULL, cap_override_month=NULL WHERE org_id=$1`,
+      [orgId],
+    );
+    expect((await asOwner('PUT', '/api/org/providers/google/cap', { monthlyUsd: 10 })).status).toBe(200);
+    await giveGoogleKey('org');
+    const id = await startShift();
+    // $5 of output so far: below the cap
+    await report(id, 500_000);
+    expect(stops(r1, id)).toHaveLength(0);
+    // booked spend plus what is in flight crosses it
+    await addOrgSpend(3_000_000);
+    await report(id, 800_000);
+    await until(async () => stops(r1, id).length > 0);
+    expect((await alerts('provider_cap_paused')).length).toBe(1);
+    // the same report again changes nothing: one stop, one notice
+    await report(id, 900_000);
+    await evaluateProviderCap(ctx(), orgId, 'google');
+    expect(stops(r1, id)).toHaveLength(1);
+    expect((await alerts('provider_cap_paused')).length).toBe(1);
+    // new runs are refused although the stopped run's cost is not booked yet
+    expect(
+      await providerCapProblem(
+        ctx().pool,
+        orgId,
+        GEMINI_RUNTIMES([orgId]) as never,
+        { runtime: 'gemini', model: 'gemini-2.5-pro' },
+        ctx().clock.now(),
+      ),
+    ).toMatch(/monthly cap/);
+    // an override lets runs through again
+    expect((await asOwner('POST', '/api/org/providers/google/cap/override')).status).toBe(200);
+    const again = await startShift();
+    await report(again, 5_000_000);
+    expect(stops(r1, again)).toHaveLength(0);
+  });
+
+  it('does not stop a run on the workstation’s own key, and does not count a model with no price', async () => {
+    await clearSpend();
+    await q(
+      `UPDATE org_providers SET cap_paused_month=NULL, cap_warned_month=NULL, cap_override_month=NULL WHERE org_id=$1`,
+      [orgId],
+    );
+    await giveGoogleKey('workstation');
+    const own = await startShift();
+    await report(own, 9_000_000);
+    expect(stops(r1, own)).toHaveLength(0);
+    await giveGoogleKey('org');
+    const unpriced = await startShift('gemini-nonexistent-9');
+    await report(unpriced, 9_000_000);
+    expect(stops(r1, unpriced)).toHaveLength(0);
+    const { liveSpendMicros } = await import('../src/provider-keys/live-usage.ts');
+    expect(liveSpendMicros(ctx(), orgId, 'google')).toBe(0);
+  });
+
+  it('cancels a running session turn on the organization key and tells the session', async () => {
+    await clearSpend();
+    await q(
+      `UPDATE org_providers SET cap_paused_month=NULL, cap_warned_month=NULL, cap_override_month=NULL WHERE org_id=$1`,
+      [orgId],
+    );
+    await giveGoogleKey('org');
+    const thread = randomUUID();
+    const turn = randomUUID();
+    await q(
+      `INSERT INTO threads (id, org_id, kind, title, created_by, created_at, workstation_id, session_config)
+       VALUES ($1,$2,'discovery','Capped',$3,now(),$4,'{}')`,
+      [thread, orgId, w.owner.id, w.workstationId],
+    );
+    await q(
+      `INSERT INTO session_turns (id, org_id, thread_id, speaker_kind, speaker_name, message, context, model, workstation_id, status, queued_at, requested_by)
+       VALUES ($1,$2,$3,'persona','Analyst','go','{}',$4,$5,'running',now(),$6)`,
+      [
+        turn,
+        orgId,
+        thread,
+        JSON.stringify({ runtime: 'gemini', model: 'gemini-2.5-pro' }),
+        w.workstationId,
+        w.owner.id,
+      ],
+    );
+    await report(turn, 12_000_000, 'chat');
+    await until(async () => r1.received.some((f: any) => f.type === 'chat.cancel' && f.chatId === turn));
+    const msgs = await q(`SELECT body FROM thread_messages WHERE thread_id=$1`, [thread]);
+    expect(msgs.map((m: any) => m.body).join(' ')).toMatch(/reached its monthly cap while this was running/);
+    await q(`UPDATE org_providers SET cap_paused_month=NULL WHERE org_id=$1`, [orgId]);
+  });
+
+  it('forgets a run when it ends (its cost is booked then), and a report for a run that is not running counts nothing', async () => {
+    await clearSpend();
+    const { liveSpendMicros, dropLiveUsage } = await import('../src/provider-keys/live-usage.ts');
+    const id = await startShift();
+    await report(id, 100_000);
+    expect(liveSpendMicros(ctx(), orgId, 'google')).toBeGreaterThan(0);
+    dropLiveUsage(ctx(), id);
+    expect(liveSpendMicros(ctx(), orgId, 'google')).toBe(0);
+    await q(`UPDATE shifts SET status='ended' WHERE id=$1`, [id]);
+    await report(id, 100_000);
+    expect(liveSpendMicros(ctx(), orgId, 'google')).toBe(0);
+  });
+});

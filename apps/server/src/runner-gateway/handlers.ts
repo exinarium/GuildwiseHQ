@@ -7,6 +7,7 @@ import {
   type McpCall,
   normalizeRemoteUrl,
   PACKS_CAPABILITY,
+  RUN_USAGE_FEATURE,
   type RunnerToServer,
   type RunnerToServerOf,
   type ServerToRunner,
@@ -112,6 +113,7 @@ import { applyDeployProgress, applyDeployResult } from '../delivery/runs.ts';
 import { applyWriteResult } from '../delivery/setup.ts';
 import { pinForWelcome } from '../platform-team/pins.ts';
 import { platformTriageRpc } from '../platform-team/rpc.ts';
+import { applyRunUsage } from '../provider-keys/live-usage.ts';
 import { delegateRpc } from '../sessions/delegate.ts';
 import type { SessionTerminal } from '../sessions/turns.ts';
 import { buildBrief } from './brief.ts';
@@ -631,6 +633,11 @@ export class RunnerHandlers {
         // Turns of discovery and boardroom sessions are told apart by their id and handled by the session service.
         if (this.ctx.services.sessions.onDelta(conn.workstationId, msg)) return;
         return this.ctx.services.chat.onDelta(conn.workstationId, msg);
+      case 'run.usage':
+        // Live usage for the provider caps: counted, and the runs on a capped key are stopped (best effort, not acked).
+        return applyRunUsage(this.ctx, { id: conn.workstationId }, msg).catch((err) =>
+          this.ctx.log.warn({ err }, 'run.usage failed'),
+        );
       case 'chat.activity':
         if (this.ctx.services.sessions.onActivity(conn.workstationId, msg)) return;
         return this.ctx.services.chat.onActivity(conn.workstationId, msg);
@@ -866,7 +873,7 @@ export class RunnerHandlers {
       limits: { maxConcurrentShifts: conn.maxShifts, shiftLimit: setting },
       // Safe mode: the runner version this workstation is pinned to (the runner's updater follows it, not the latest).
       runnerPin: await pinForWelcome(ctx.pool, conn.workstationId),
-      features: [CHAT_ACTIVITY_FEATURE, CAPABILITY_REGISTRY_FEATURE, PACKS_CAPABILITY],
+      features: [CHAT_ACTIVITY_FEATURE, RUN_USAGE_FEATURE, CAPABILITY_REGISTRY_FEATURE, PACKS_CAPABILITY],
     });
     // With nothing in the runner's outbox there is nothing to wait for; otherwise reconcile on outbox.flushed.
     if (msg.outboxPending === 0) await this.reconcile(conn);

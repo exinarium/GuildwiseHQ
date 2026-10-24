@@ -1396,6 +1396,18 @@ export const ChatDeltaSchema = msg('chat.delta', {
 export const ChatDoneSchema = msg('chat.done', {
   chatId: z.string(),
   threadId: z.uuid(),
+/** Announced in `welcome.features` by servers that accept `run.usage` (live usage of a running shift or chat turn, for the provider caps). */
+export const RUN_USAGE_FEATURE = 'run-usage:1';
+/**
+ * What a running shift or chat/session turn has used so far (cumulative, replaces the earlier report). Best effort and not
+ * stored: the server counts it toward a provider's monthly cap while the run is going and stops the run at the cap.
+ */
+export const RunUsageSchema = msg('run.usage', {
+  kind: z.enum(['shift', 'chat']),
+  /** The shift id, or the chat/session turn id. */
+  id: z.string(),
+  usage: Usage,
+});
   messageText: z.string(),
   usage: Usage,
   /** Runtime session to `--resume` on the next message of this conversation. */
@@ -1631,6 +1643,7 @@ export const RunnerToServerSchema = z.discriminatedUnion('type', [
   DeployProgressSchema,
   TokenRotateSchema,
   AckSchema,
+  RunUsageSchema,
 ]);
 export type RunnerToServer = z.infer<typeof RunnerToServerSchema>;
 

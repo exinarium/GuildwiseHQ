@@ -75,11 +75,13 @@ export interface ChatDeps {
   log?: Logger;
   /** Acked types (`chat.done`, `chat.error`) go through the outbox; `chat.delta` is dropped while offline. */
   send(
-    type: 'chat.delta' | 'chat.activity' | 'chat.done' | 'chat.error' | 'devops.audit',
+    type: 'chat.delta' | 'chat.activity' | 'run.usage' | 'chat.done' | 'chat.error' | 'devops.audit',
     payload: Record<string, unknown>,
   ): string | undefined;
   /** The server accepts `chat.activity` (it announced `CHAT_ACTIVITY_FEATURE` in `welcome`); absent: yes. */
   chatActivity?: () => boolean;
+  /** The server accepts `run.usage` (it announced `RUN_USAGE_FEATURE`); absent: no. */
+  liveUsage?: () => boolean;
   /** The local opt-in `aom-runner ceo full-power on`, read fresh at each turn (default: off). */
   ceoFullPower?: () => boolean;
   /** The repository clones on this workstation (the use-the-system hook nudges edits inside them). */
@@ -676,7 +678,13 @@ export class ChatManager {
       authFailed?: boolean;
       usageLimit?: { until: string };
     } = { code: null };
+    let usageSentAt = 0;
     for await (const ev of session.events()) {
+      if (ev.kind === 'usage' && this.deps.liveUsage?.() && Date.now() - usageSentAt >= 3000) {
+        // live usage for the provider caps (cumulative; the server stops the turn when the cap is reached)
+        usageSentAt = Date.now();
+        this.deps.send('run.usage', { kind: 'chat', id: msg.chatId, usage: ev.usage });
+      }
       if (ev.kind === 'session') sessionId = ev.runtimeSessionId;
       else if (ev.kind === 'delta') {
         streamed += ev.text;

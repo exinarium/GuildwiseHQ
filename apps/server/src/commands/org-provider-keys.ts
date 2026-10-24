@@ -27,6 +27,7 @@ import { type Tx, withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, notFound, unprocessable } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { providerCapState } from '../provider-keys/caps.ts';
+import { dropLiveUsage } from '../provider-keys/live-usage.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { wsServesOrgSql } from '../simulation/fit.ts';
 import { orgScope, SYSTEM_ACTOR, userActor } from './common.ts';
@@ -674,7 +675,13 @@ function resolveNotice(orgId: string, deskItemId: string, note: string): AppendI
  * notice for the Owner and Admins. Called after a run ends, after a cap change and on the scheduler tick. Turns with an unknown
  * cost are named in the text: the cap cannot count them.
  */
-export async function evaluateProviderCap(ctx: Ctx, orgId: string, provider: string): Promise<void> {
+export async function evaluateProviderCap(
+  ctx: Ctx,
+  orgId: string,
+  provider: string,
+  /** What runs in flight have used on this key so far (Q48): counted like booked spend. */
+  liveMicros = 0,
+): Promise<void> {
   await withAppendTx(ctx.pool, async (tx) => {
     const p = await one(tx, 'SELECT * FROM org_providers WHERE org_id=$1 AND provider=$2 FOR UPDATE', [
       orgId,
@@ -682,6 +689,7 @@ export async function evaluateProviderCap(ctx: Ctx, orgId: string, provider: str
     ]);
     if (!p || p.cap_micros === null) return;
     const st = await providerCapState(tx, orgId, provider, ctx.clock.now());
+    st.spendMicros += liveMicros;
     const cap = Number(p.cap_micros);
     const events: AppendInput[] = [];
     if (p.cap_paused_month && p.cap_paused_month !== st.month && (await noticeOpen(tx, p.cap_desk_item_id)))
@@ -736,8 +744,8 @@ export async function evaluateProviderCap(ctx: Ctx, orgId: string, provider: str
                   : `The organization's ${label} key has used ${pct}% of its monthly cap`,
               body:
                 level === 'paused'
-                  ? `${money(st.spendMicros)} of the ${money(cap)} cap is spent this month. Agents and sessions that would use the organization's ${label} key do not start (running ones finish); work on a workstation's own key goes on. Raise the cap or override it for this month under Settings > Model providers, or it resets on ${resets}.${unknown}`
-                  : `${money(st.spendMicros)} of the ${money(cap)} cap is spent this month. At 100% runs on the organization's ${label} key stop starting (running ones finish). It resets on ${resets}.${unknown}`,
+                  ? `${money(st.spendMicros)} of the ${money(cap)} cap is spent this month. Agents and sessions that would use the organization's ${label} key do not start, and running ones on that key are stopped; work on a workstation's own key goes on. Raise the cap or override it for this month under Settings > Model providers, or it resets on ${resets}.${unknown}`
+                  : `${money(st.spendMicros)} of the ${money(cap)} cap is spent this month. At 100% runs on the organization's ${label} key are stopped and do not start. It resets on ${resets}.${unknown}`,
               options: [],
               blocking: false,
               pinned: level === 'paused',
@@ -778,6 +786,10 @@ export async function evaluateAllProviderCaps(ctx: Ctx): Promise<void> {
 export function registerProviderCapHook(ctx: Ctx): () => void {
   return ctx.store.subscribe(async (e) => {
     const t = e.event.type;
+    if (t === 'ShiftEnded') dropLiveUsage(ctx, e.event.payload.shiftId);
+    else if (t === 'SessionTurnCompleted' || t === 'SessionTurnFailed')
+      dropLiveUsage(ctx, e.event.payload.turnId);
+    else if (t === 'DelegateCompleted') dropLiveUsage(ctx, e.event.payload.delegateId);
     const id =
       t === 'ShiftEnded' || t === 'ShiftUsageRecorded'
         ? e.event.payload.shiftId

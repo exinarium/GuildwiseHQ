@@ -41,7 +41,7 @@ export async function providerCapState(
 ): Promise<ProviderCapState> {
   const row = await one(
     db,
-    'SELECT cap_micros, cap_override_month FROM org_providers WHERE org_id = $1 AND provider = $2',
+    'SELECT cap_micros, cap_override_month, cap_paused_month FROM org_providers WHERE org_id = $1 AND provider = $2',
     [orgId, provider],
   );
   const c = await orgCostCtx(db, orgId);
@@ -56,7 +56,13 @@ export async function providerCapState(
   const cap = row?.cap_micros === null || row?.cap_micros === undefined ? null : Number(row.cap_micros);
   const spendMicros = Number(spend?.usd ?? 0);
   const overridden = row?.cap_override_month === m.key;
-  const { state, percent } = budgetStatus(cap, spendMicros, overridden);
+  let { state, percent } = budgetStatus(cap, spendMicros, overridden);
+  // A live stop (Q48) paused the cap for this month before the stopped runs' cost was booked: it stays paused until the cap is
+  // raised (which clears the mark) or overridden.
+  if (cap !== null && !overridden && row?.cap_paused_month === m.key) {
+    state = 'paused';
+    percent = Math.max(percent ?? 0, 100);
+  }
   return {
     provider,
     capMicros: cap,

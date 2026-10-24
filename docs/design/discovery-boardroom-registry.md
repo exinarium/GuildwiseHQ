@@ -276,6 +276,7 @@ Details in `docs/ARCHITECTURE.md` section 38.7. Migrations 2440 and 2441; runner
   10. Archiving is allowed in any stage on the server (the web offers it for finished and unstarted boardrooms); a deleted session keeps its events and rows, hidden by `deleted_at`.
   11. Owners and Admins who are not in a session still cannot open it (sessions are private to their participants); "override" applies once they are in it.
   12. "Hire a BA" is a plain hire with defaults (junior, the user's first online workstation), not the full hire dialog.
+- **Provider cap stop (Q48).** Built as `run.usage` live reports from the runner (0.1.52) counted in memory with the booked spend; at the cap running org-key shifts, chats and session turns are cancelled with a notice, workstation keys and unpriced models are not counted. Delegates are not stopped separately (they have a tool-call cap and are counted when booked).
 - **Not built (R3).** Capability editor, private/custom packs, private git packs and deploy keys, member opt-in for packs, hire-from-pack, persona chat, `/` playbooks, explicit delegation grants.
 - **Open questions.** (a) Should the Boardroom clock also stop while it waits for the creator at a decision? It does now; the Discovery one does not. (b) Should an unreviewed project skill need review before first use? (c) Should "Archive" of a running Boardroom end it first? (d) Should the time-up choice also notify the creator outside the page (push)?
 

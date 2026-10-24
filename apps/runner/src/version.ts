@@ -1,1 +1,1 @@
-export const RUNNER_VERSION = '0.1.51';
+export const RUNNER_VERSION = '0.1.52';

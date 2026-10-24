@@ -207,6 +207,8 @@ export interface SupervisorDeps {
   /** How long the session may linger after an accepted report. Default 2 min. */
   exitGraceMs?: number;
   progressFlushMs?: number;
+  /** The server accepts `run.usage` (live usage for the provider caps); absent: no. */
+  liveUsage?: () => boolean;
   /** Tester environment check before the session starts (default: Docker and the deployed app). */
   envChecker?: EnvChecker;
   /** How `aom transcript` reaches yt-dlp and the web (default: the real ones; tests inject fakes). */
@@ -331,6 +333,7 @@ interface ActiveShift {
   /** The session this shift was asked to resume, and what the runner decided (reported with the first session update). */
   resumeAsked?: { sessionId: string; state: ResumeState; detail?: string; cwd: string };
   lastContextSent?: number;
+  usageSentAt?: number;
 }
 
 type ShiftStartedSyncMain = {
@@ -1531,11 +1534,23 @@ export class ShiftSupervisor {
     });
   }
 
+  /** Cumulative usage of the running session every few seconds, for the organization key's monthly cap (best effort). */
+  private reportLiveUsage(s: ActiveShift): void {
+    if (!this.deps.liveUsage?.() || !s.session) return;
+    const now = Date.now();
+    if (now - (s.usageSentAt ?? 0) < 5000) return;
+    const u = s.session.usage();
+    if (!u || u.inputTokens + u.outputTokens + u.cacheReadTokens + u.cacheWriteTokens <= 0) return;
+    s.usageSentAt = now;
+    this.deps.transport.send('run.usage', { kind: 'shift', id: s.msg.shiftId, usage: u });
+  }
+
   private addProgress(s: ActiveShift, kind: 'text' | 'tool' | 'status', text: string): void {
     s.progress.push({ at: new Date().toISOString(), kind, text: text.slice(0, 500) });
   }
 
   private flushProgress(s: ActiveShift): void {
+    this.reportLiveUsage(s);
     if (s.progress.length === 0) return;
     const items = s.progress.splice(0, s.progress.length);
     this.deps.transport.send('shift.progress', { shiftId: s.msg.shiftId, items });
