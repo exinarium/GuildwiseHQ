@@ -7,7 +7,6 @@ import {
   WorkstationProvidersResponseSchema,
 } from '@aom/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { encryptForRunner } from '../../lib/runner-seal.ts';
 import { del, get, put } from '../client.ts';
 
 /** The direct API providers configured on a workstation (names and models only; the runner never reports a key). */
@@ -43,14 +42,9 @@ export function useSetProviderKey(workstationId: string) {
       );
       const body: SetProviderKeyRequest = {
         keyId: sealed.keyId,
-        // A Claude Code backend's credential is a JSON of fields (longer than RSA can take): sealed hybrid. A key is short: RSA-OAEP.
-        ...(v.key
-          ? {
-              ciphertext: backendDef(v.provider)
-                ? await sealLarge(sealed.publicKey, v.key)
-                : await encryptForRunner(sealed.publicKey, v.key),
-            }
-          : {}),
+        // Always hybrid (RSA-OAEP wrapped AES-GCM key): a credential of any length fits, a service-account JSON included. The
+        // runner still opens the older RSA-only blobs it already stores.
+        ...(v.key ? { ciphertext: await sealLarge(sealed.publicKey, v.key) } : {}),
         ...(v.baseUrl ? { baseUrl: v.baseUrl } : {}),
         models: v.models,
       };

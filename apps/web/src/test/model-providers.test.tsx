@@ -102,9 +102,9 @@ const wrap = (ui: React.ReactElement) => {
 };
 
 // Web Crypto: sealing needs a real RSA public key; the test swaps the sealing function for a marker.
-vi.mock('../lib/runner-seal.ts', async (orig) => ({
-  ...(await orig<typeof import('../lib/runner-seal.ts')>()),
-  encryptForRunner: async (_k: string, text: string) => `sealed(${text.length})`,
+vi.mock('@aom/shared', async (orig) => ({
+  ...(await orig<typeof import('@aom/shared')>()),
+  sealLarge: async (_k: string, text: string) => `h1.sealed(${text.length})`,
 }));
 
 describe('model providers settings', () => {
@@ -136,7 +136,7 @@ describe('model providers settings', () => {
     expect(put.url).toBe(`/api/workstations/${WS}/providers/openai`);
     expect(put.body).toEqual({
       keyId: 'k1',
-      ciphertext: 'sealed(13)',
+      ciphertext: 'h1.sealed(13)',
       models: ['gpt-9', 'gpt-9-mini'],
     });
     expect(JSON.stringify(calls)).not.toContain('sk-secret-123');
@@ -160,6 +160,34 @@ describe('model providers settings', () => {
       baseUrl: 'http://localhost:11434/v1',
       models: [],
     });
+  });
+
+  it('seals a long credential (a service-account JSON) the same way, without a length limit', async () => {
+    const user = userEvent.setup();
+    wrap(<ModelProviders w={ws({}, [])} canEdit />);
+    await user.click(screen.getByTestId('provider-edit-google'));
+    const sa = JSON.stringify({ type: 'service_account', private_key: 'x'.repeat(2500) });
+    await user.click(screen.getByTestId('provider-key-google'));
+    await user.paste(sa);
+    await user.click(screen.getByTestId('provider-save-google'));
+    await waitFor(() => expect(calls.find((c) => c.method === 'PUT')).toBeTruthy());
+    expect((calls.find((c) => c.method === 'PUT') as Call).body.ciphertext).toBe(`h1.sealed(${sa.length})`);
+    expect(JSON.stringify(calls)).not.toContain('service_account');
+  });
+
+  it('warns about a plain http:// endpoint away from this machine, not about https or localhost', async () => {
+    const user = userEvent.setup();
+    wrap(<ModelProviders w={ws({}, [])} canEdit />);
+    await user.click(screen.getByTestId('provider-edit-openai-compatible'));
+    const url = screen.getByTestId('provider-url-openai-compatible');
+    await user.type(url, 'http://llm.internal:8000/v1');
+    expect(screen.getByTestId('provider-http-warning')).toHaveTextContent('unencrypted');
+    await user.clear(url);
+    await user.type(url, 'http://localhost:11434/v1');
+    expect(screen.queryByTestId('provider-http-warning')).toBeNull();
+    await user.clear(url);
+    await user.type(url, 'https://openrouter.ai/api/v1');
+    expect(screen.queryByTestId('provider-http-warning')).toBeNull();
   });
 
   it('removes a provider', async () => {

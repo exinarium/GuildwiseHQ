@@ -36,6 +36,19 @@ export const backendsOf = (runtimes: WorkstationDto['runtimes']): ReportedBacken
 export const supportsBackends = (runtimes: WorkstationDto['runtimes']): boolean =>
   runtimes.find((r) => r.id === DIRECT_RUNTIME)?.keys !== undefined;
 
+/** An http:// endpoint that is not on this machine (the runner warns after saving too; this is the warning before). */
+export function plainHttpAway(raw: string): boolean {
+  try {
+    const u = new URL(raw.trim());
+    return (
+      u.protocol === 'http:' &&
+      !(/^(localhost|127(\.\d{1,3}){3}|\[::1\]|::1)$/i.test(u.hostname) || u.hostname.endsWith('.localhost'))
+    );
+  } catch {
+    return false;
+  }
+}
+
 /** Whose key is in effect, in words: the workstation's own key overrides the organization's. */
 export function KeySourceBadge({
   source,
@@ -371,6 +384,12 @@ function ProviderRow({
                 baseUrl && baseProblem ? 'Enter a full URL starting with http:// or https://' : undefined
               }
             />
+          )}
+          {baseUrl && plainHttpAway(baseUrl) && (
+            <Callout tone="warning" data-testid="provider-http-warning">
+              This endpoint uses plain http:// away from this machine: the key and every prompt travel
+              unencrypted. Use https:// unless the network is trusted.
+            </Callout>
           )}
           <TextInput
             label={def.keyLabel}

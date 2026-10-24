@@ -5,6 +5,7 @@ import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { splitDirectModel } from '@aom/shared';
 import type { LanguageModel } from 'ai';
 import { redact } from '../secrets/redact.ts';
+import { parseServiceAccount, serviceAccountFetch } from './google-sa.ts';
 import type { ProviderConfig } from './store.ts';
 
 export type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
@@ -21,8 +22,19 @@ export const defaultModelFactory: ModelFactory = (choiceModel, cfg, fetch) => {
       return createAnthropic({ ...(cfg.apiKey ? { apiKey: cfg.apiKey } : {}), ...common })(d.model);
     case 'openai':
       return createOpenAI({ ...(cfg.apiKey ? { apiKey: cfg.apiKey } : {}), ...common })(d.model);
-    case 'google':
+    case 'google': {
+      // a service-account JSON is exchanged for a bearer token on each call; an API key is sent as is
+      const sa = parseServiceAccount(cfg.apiKey);
+      if (sa)
+        return createGoogleGenerativeAI({
+          apiKey: 'service-account',
+          fetch: serviceAccountFetch(
+            sa,
+            (fetch ?? globalThis.fetch) as FetchLike,
+          ) as unknown as typeof globalThis.fetch,
+        })(d.model);
       return createGoogleGenerativeAI({ ...(cfg.apiKey ? { apiKey: cfg.apiKey } : {}), ...common })(d.model);
+    }
     case 'openai-compatible': {
       if (!cfg.baseUrl) throw new Error('the OpenAI-compatible endpoint has no base URL');
       return createOpenAICompatible({

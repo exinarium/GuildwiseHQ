@@ -116,7 +116,7 @@ export const DIRECT_PROVIDERS: readonly DirectProviderDef[] = [
   {
     id: 'google',
     label: 'Google Gemini',
-    keyLabel: 'Gemini API key',
+    keyLabel: 'Gemini API key or Google service-account JSON',
     needsBaseUrl: false,
     keyOptional: false,
     dataNote:
