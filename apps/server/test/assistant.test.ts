@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AnthropicLike } from '../src/assistant/service.ts';
+import { TOPIC_LIMITS } from '../src/assistant/topics.ts';
 import { createTestApp, type TestApp, uniqueEmail } from './helpers/app.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 
@@ -160,7 +161,40 @@ describe('a conversation', () => {
     expect(fake.calls[0]?.system[0].text).toBe(fake.calls[1]?.system[0].text);
     // only the newest turn carries the second breakpoint
     const last = fake.calls[1]?.messages;
-    expect(last.map((m: any) => !!m.content[0].cache_control)).toEqual([false, false, true]);
+    expect(last.map((m: any) => !!m.content.at(-1).cache_control)).toEqual([false, false, true]);
+  });
+
+  it('attaches the help articles that match the question to the newest message only, within the token budget', async () => {
+    await ask({ messages: [user('Do you have a free trial and what do the plans cost?')], page: '/pricing' });
+    const [call] = fake.calls;
+    // the system text is the constant rules, facts and topic index: no article text in it
+    expect(call?.system[0].text).not.toContain('<relevant_help>\n');
+    const content = call?.messages[0].content;
+    expect(content).toHaveLength(2);
+    expect(content[0].text.startsWith('<relevant_help>')).toBe(true);
+    expect(content[0].text).toContain('### Plans and billing');
+    expect(content[0].cache_control).toBeUndefined();
+    expect(content[1]).toMatchObject({ text: 'Do you have a free trial and what do the plans cost?' });
+    expect(content[1].cache_control).toEqual({ type: 'ephemeral' });
+    expect(content[0].text.length / 4).toBeLessThanOrEqual(TOPIC_LIMITS.budgetTokens + 40);
+    // an older message of the conversation never carries help text
+    await ask({
+      messages: [
+        user('What is the Decision desk?'),
+        { role: 'assistant', content: 'It is where decisions wait.' },
+        user('thanks'),
+      ],
+    });
+    const msgs = fake.calls[1]?.messages;
+    expect(msgs[0].content).toHaveLength(1);
+    // a short follow-up keeps the topic of the question before it
+    expect(msgs[2].content).toHaveLength(2);
+    expect(msgs[2].content[0].text).toContain('### The Decision desk');
+  });
+
+  it('sends no help block for an off-topic question', async () => {
+    await ask({ messages: [user('What is the weather like in Paris?')] });
+    expect(fake.calls[0]?.messages[0].content).toHaveLength(1);
   });
 
   it('keeps no conversation: no events, and only counters in the database', async () => {

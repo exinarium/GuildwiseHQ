@@ -23,6 +23,7 @@ import {
   visitorCounts,
 } from './limits.ts';
 import { publicSystemText } from './prompt.ts';
+import { relevantHelpBlock, selectTopics } from './topics.ts';
 
 /**
  * The part of the Anthropic SDK the assistant uses: `messages.stream(params)` returns something async-iterable of the
@@ -141,6 +142,7 @@ export async function* answer(
 ): AsyncGenerator<AssistantEvent> {
   const usage = { input: 0, cacheWrite: 0, cacheRead: 0, output: 0 };
   const last = body.messages.length - 1;
+  const help = relevantHelpBlock(selectTopics(body.messages, { page: body.page }));
   // The system text and the conversation so far are the cached prefix; the breakpoint on the newest turn lets the
   // next turn read the history from cache.
   const params = {
@@ -150,6 +152,8 @@ export async function* answer(
     messages: body.messages.map((m, i) => ({
       role: m.role,
       content: [
+        // the help articles that match the question travel with the newest visitor message (the system text stays the same)
+        ...(i === last && help ? [{ type: 'text', text: help }] : []),
         { type: 'text', text: m.content, ...(i === last ? { cache_control: { type: 'ephemeral' } } : {}) },
       ],
     })),

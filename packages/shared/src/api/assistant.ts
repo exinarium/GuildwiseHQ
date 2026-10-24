@@ -17,6 +17,8 @@ export const AssistantChatRequestSchema = z.object({
     .max(ASSISTANT_LIMITS.maxUserTurns * 2 - 1),
   /** The solution to a challenge from `GET /api/public/assistant/challenge`, needed after a few messages. */
   pow: z.object({ challenge: z.string().max(200), nonce: z.string().max(40) }).optional(),
+  /** The page the visitor is on (a path), which lifts the help topics that belong to it. */
+  page: z.string().max(120).optional(),
 });
 export type AssistantChatRequest = z.infer<typeof AssistantChatRequestSchema>;
 

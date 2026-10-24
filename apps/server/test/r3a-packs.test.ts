@@ -1060,10 +1060,10 @@ describe('hire from pack', () => {
         `SELECT manager_user_id, allowed_project_ids, workstation_id, provenance FROM agents WHERE name='Memo'`,
       )
     )[0];
-    expect(row.manager_user_id).toBe(member.id);
-    expect(row.allowed_project_ids).toEqual([w.projectId]);
-    expect(row.workstation_id).toBe(memberWs);
-    expect(row.provenance).toMatchObject({ packName: 'crew', capability: 'critic' });
+    expect(row?.manager_user_id).toBe(member.id);
+    expect(row?.allowed_project_ids).toEqual([w.projectId]);
+    expect(row?.workstation_id).toBe(memberWs);
+    expect(row?.provenance).toMatchObject({ packName: 'crew', capability: 'critic' });
     // the role it got is read only: a Member never widens the persona's tools
     const agent = (await asMember('GET', '/api/agents')).agents.find(
       (a: { name: string }) => a.name === 'Memo',

@@ -3,22 +3,28 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 /**
- * The knowledge pack of the public landing-page assistant (docs/design/ai-assistant.md, section 2.1): the curated
- * product facts plus a condensed outline of every help article (title, summary and the first paragraph of each
- * section). It is built from files in the repository and committed (`src/assistant/pack/public-pack.md`), so the
- * model's cached prefix is byte-for-byte the same between deploys unless a source changed. A test regenerates it and
- * fails when the committed copy is stale: run `pnpm --filter @aom/server assistant:pack`.
+ * The knowledge of the public landing-page assistant (docs/design/ai-assistant.md, section 2.1), split by topic (R3c): a small
+ * always-on index (the curated product facts and one line per help topic) in the cached system prompt, and one chunk per help
+ * article (title, summary and the first paragraph of each section) that `topics.ts` picks per question and attaches to the
+ * newest visitor message, within a per-request token budget. Built from files in the repository and committed
+ * (`src/assistant/pack/index.md`, `pack/topics/<slug>.md`), so the cached prefix is byte-for-byte the same between deploys
+ * unless a source changed. A test regenerates them and fails when the committed copy is stale:
+ * run `pnpm --filter @aom/server assistant:pack`.
  */
 
 const here = dirname(fileURLToPath(import.meta.url));
 /** The repository root when running from the source tree. */
 export const REPO_ROOT = join(here, '..', '..', '..', '..');
-export const PACK_FILE = join(here, 'pack', 'public-pack.md');
+export const PACK_DIR = join(here, 'pack');
+/** The always-on part: the curated product facts and the index of help topics. */
+export const INDEX_FILE = join(PACK_DIR, 'index.md');
+/** One file per help article, loaded on demand (`topics/<slug>.md`). */
+export const TOPICS_DIR = join(PACK_DIR, 'topics');
 
 /** Longest paragraph kept per section: the pack is an outline, the full articles are in the app. */
 const SECTION_CHARS = 290;
 
-interface Article {
+export interface Article {
   slug: string;
   title: string;
   summary: string;
@@ -76,27 +82,50 @@ export function parseArticle(slug: string, raw: string): Article {
   };
 }
 
-/** The pack text for a repository checkout at `root`. Deterministic: sorted inputs, LF line ends, no dates. */
-export function buildPublicPack(root: string = REPO_ROOT): string {
+/** The product facts without the maintainer notes above the first section. */
+function productFacts(root: string): string {
   const factsRaw = readFileSync(join(root, 'docs', 'assistant', 'product-facts.md'), 'utf8')
     .replace(/\r\n?/g, '\n')
     .trim();
-  // Maintainer notes sit above the first section; the model gets only the facts.
-  const facts = factsRaw.slice(Math.max(0, factsRaw.indexOf('\n## ') + 1));
+  return factsRaw.slice(Math.max(0, factsRaw.indexOf('\n## ') + 1));
+}
+
+/** The help articles, in reading order. */
+export function readArticles(root: string = REPO_ROOT): Article[] {
   const dir = join(root, 'apps', 'web', 'src', 'help', 'articles');
-  const articles = readdirSync(dir)
+  return readdirSync(dir)
     .filter((f) => f.endsWith('.md'))
     .sort()
     .map((f) => parseArticle(f.replace(/\.md$/, ''), readFileSync(join(dir, f), 'utf8')))
     .sort((a, b) => a.order - b.order || a.slug.localeCompare(b.slug));
-  const outline = articles
-    .map((a) =>
-      [
-        `### ${a.title}`,
-        a.summary,
-        ...a.sections.map((s) => `- ${s.heading}${s.text ? `: ${s.text}` : ''}`),
-      ].join('\n'),
-    )
-    .join('\n\n');
-  return `<product_facts>\n${facts}\n</product_facts>\n\n<help_outline>\nAn outline of the in-app help articles, to answer how things work. Do not quote it as a manual.\n\n${outline}\n</help_outline>\n`;
+}
+
+const SUMMARY_IN_INDEX = 140;
+
+/**
+ * The always-on text: the facts and the topic index (slug, title, a clipped summary). Deterministic: sorted inputs, LF line ends,
+ * no dates. The model sees the topics it could be given in full and can say what it does not know.
+ */
+export function buildIndexPack(root: string = REPO_ROOT): string {
+  const topics = readArticles(root)
+    .map((a) => `- ${a.title}${a.summary ? `: ${clip(a.summary, SUMMARY_IN_INDEX)}` : ''}`)
+    .join('\n');
+  return `<product_facts>\n${productFacts(root)}\n</product_facts>\n\n<help_topics>\nThe in-app help articles. The ones that match the visitor's question are attached to their message as <relevant_help>; do not quote them as a manual.\n\n${topics}\n</help_topics>\n`;
+}
+
+/** One chunk per article: what is attached to the visitor's message when the article matches the question. */
+export function buildTopicChunk(a: Article): string {
+  return [
+    `### ${a.title}`,
+    a.summary,
+    ...a.sections.map((s) => `- ${s.heading}${s.text ? `: ${s.text}` : ''}`),
+  ]
+    .filter((l) => l !== '')
+    .join('\n')
+    .concat('\n');
+}
+
+/** `{ 'topics/<slug>.md': text }` for every article. */
+export function buildTopicFiles(root: string = REPO_ROOT): Record<string, string> {
+  return Object.fromEntries(readArticles(root).map((a) => [`${a.slug}.md`, buildTopicChunk(a)]));
 }

@@ -1,0 +1,9 @@
+### Interests
+Topics you watch, who can see them, creating and editing, run and delivery schedules, taste rules.
+- Who can see: - Owners and Admins see every interest. - Members and guests see interests they created and ones shared with them by an Owner or Admin. - An interest a Member or guest creates is private to them (and to the Owner and Admins) until an Owner or Admin shares it, with Share with under Who can…
+- Creating and editing: To create an interest:
+- Run and delivery schedule: - Run schedule: when the agents scan for new content. A scan can happen on a preset or custom cron schedule, or only when you press Run scan on the interest page. - Delivery: when you get the results on your desk.…
+- Daily quiet cap: On the Interests page, the Daily quiet cap panel sets the most digest items that may reach your desk in 24 hours across all interests (by default there is no limit; click Change and enter Items per day, 1 to 1000).…
+- Research this: Research is on demand only. Click Research this on an interest or on an item in its digest:
+- Taste rules: Besides ratings that grow from your feedback, write explicit rules under Explicit rules on the Taste tab:
+- Archiving: Under More actions, Archive stops the interest's runs and hides it. Restore brings it back with a fresh schedule. Delete permanently (archived interests only) removes its cards, items, ratings and run log. The vault folder is never touched.
