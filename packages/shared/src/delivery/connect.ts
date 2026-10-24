@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { requireSubtle } from '../secure-context.ts';
 import { ConnectionStateSchema, type ProbeReport } from './probe.ts';
 import { LocalPathSchema, RemotePathSchema, ServiceNameSchema, SshAliasSchema } from './setup.ts';
 
@@ -758,7 +759,7 @@ export const REACHABILITY_TEXT: Record<
  * base64. Works in the browser and in Node (WebCrypto). The runner opens it with `RunnerKeys.decryptAny`.
  */
 export async function sealLarge(publicKeyB64: string, text: string, aad?: string): Promise<string> {
-  const subtle = globalThis.crypto.subtle;
+  const subtle = requireSubtle();
   const b64 = (u: Uint8Array) => {
     let bin = '';
     for (const b of u) bin += String.fromCharCode(b);

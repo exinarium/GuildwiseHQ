@@ -40,3 +40,11 @@ export async function copyText(text: string): Promise<boolean> {
     ta.remove();
   }
 }
+
+/**
+ * Whether this page can seal a secret for a runner: WebCrypto needs a secure context (HTTPS or localhost). Where the browser does not
+ * say (jsdom, old engines) it is assumed to work, and the sealing code reports the real problem if it does not.
+ */
+export function canSealHere(): boolean {
+  return typeof window === 'undefined' || window.isSecureContext !== false;
+}

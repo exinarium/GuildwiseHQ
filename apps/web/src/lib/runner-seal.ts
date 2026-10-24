@@ -1,19 +1,17 @@
 import {
   type IntegrationEnvelopeOp,
   type IntegrationKindId,
+  requireSubtle,
   type SealedEnvelope,
   sealForRunner,
 } from '@aom/shared';
 
 /** RSA-OAEP / SHA-256 with the runner's SPKI public key (base64); returns base64 ciphertext. Used for the sudo password. */
 export async function encryptForRunner(publicKeyB64: string, text: string): Promise<string> {
+  const subtle = requireSubtle();
   const der = Uint8Array.from(atob(publicKeyB64), (c) => c.charCodeAt(0));
-  const key = await crypto.subtle.importKey('spki', der, { name: 'RSA-OAEP', hash: 'SHA-256' }, false, [
-    'encrypt',
-  ]);
-  const ct = new Uint8Array(
-    await crypto.subtle.encrypt({ name: 'RSA-OAEP' }, key, new TextEncoder().encode(text)),
-  );
+  const key = await subtle.importKey('spki', der, { name: 'RSA-OAEP', hash: 'SHA-256' }, false, ['encrypt']);
+  const ct = new Uint8Array(await subtle.encrypt({ name: 'RSA-OAEP' }, key, new TextEncoder().encode(text)));
   let bin = '';
   for (const b of ct) bin += String.fromCharCode(b);
   return btoa(bin);

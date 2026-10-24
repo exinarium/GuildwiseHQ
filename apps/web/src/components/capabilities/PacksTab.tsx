@@ -10,7 +10,9 @@ import {
 } from '../../api/queries/capabilities.ts';
 import { sealPackCredential, useSetPackWorkstations } from '../../api/queries/my-capabilities.ts';
 import { useProjects } from '../../api/queries/projects.ts';
+import { canSealHere, newId } from '../../lib/secure.ts';
 import { formatDateTime } from '../../lib/time.ts';
+import { SecureContextNotice } from '../SecureContextNotice.tsx';
 import {
   Badge,
   Button,
@@ -153,14 +155,14 @@ function AddPackDialog({ workstations, onClose }: { workstations: PackWorkstatio
   const [sealing, setSealing] = useState(false);
   const [sealError, setSealError] = useState<string | null>(null);
   // chosen here so a private pack's deploy key or token can be sealed bound to it before it exists
-  const [packId] = useState(() => crypto.randomUUID());
+  const [packId] = useState(() => newId());
   const kind: 'ssh' | 'token' = /^(ssh:\/\/|git@)/i.test(url.trim()) ? 'ssh' : 'token';
   const ready =
     url.trim() &&
     ref.trim() &&
     (scope === 'org' || projectId) &&
     choice.valid &&
-    (!isPrivate || (secret.trim() && choice.current.length > 0));
+    (!isPrivate || (secret.trim() && choice.current.length > 0 && canSealHere()));
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     if (!ready) return;
@@ -287,6 +289,7 @@ function AddPackDialog({ workstations, onClose }: { workstations: PackWorkstatio
             className="flex flex-col gap-3 rounded-card border border-line p-3"
             data-testid="private-credential"
           >
+            <SecureContextNotice />
             <p className="text-sm text-muted">
               {kind === 'ssh'
                 ? 'An ssh URL needs a deploy key: the private key, with no passphrase, whose public half is added to the repository as a read-only deploy key.'
@@ -674,7 +677,7 @@ function HoldersButton({ pack }: { pack: PackDto }) {
               <Button
                 variant="primary"
                 loading={set.isPending}
-                disabled={ids.length === 0 || (needsKey && !secret.trim())}
+                disabled={ids.length === 0 || (needsKey && (!secret.trim() || !canSealHere()))}
                 onClick={save}
               >
                 Save
@@ -709,6 +712,7 @@ function HoldersButton({ pack }: { pack: PackDto }) {
                 hint="Encrypted here for each workstation; the server never sees it."
               />
             )}
+            {needsKey && <SecureContextNotice />}
             {error && <Callout tone="danger">{error}</Callout>}
             <ErrorBox error={set.error} />
           </div>

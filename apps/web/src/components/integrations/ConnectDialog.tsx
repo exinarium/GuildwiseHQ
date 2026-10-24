@@ -17,6 +17,8 @@ import {
 } from '../../api/queries/integrations.ts';
 import { blockReason, type PageCtx } from '../../lib/integrations.ts';
 import { sealIntegration } from '../../lib/runner-seal.ts';
+import { canSealHere, newId } from '../../lib/secure.ts';
+import { SecureContextNotice } from '../SecureContextNotice.tsx';
 import { Button, Callout, Dialog, ErrorBox, TextInput } from '../ui.tsx';
 import { SignInSession } from './SignInSession.tsx';
 
@@ -64,8 +66,6 @@ export function MethodSteps({ method }: { method: IntegrationMethod }) {
     </div>
   );
 }
-
-const newId = (): string => crypto.randomUUID();
 
 /**
  * Connect or replace one integration. Fields methods: the values are sealed in the browser for this workstation's runner
@@ -302,6 +302,7 @@ export function ConnectDialog({
                       : { autoComplete: 'off', spellCheck: false })}
                   />
                 ))}
+                <SecureContextNotice />
                 {block && (
                   <p className="text-sm text-muted" data-testid="connect-blocked">
                     {block}
@@ -323,7 +324,9 @@ export function ConnectDialog({
                     type="submit"
                     variant="primary"
                     loading={stage === 'sealing' || checking}
-                    disabled={!!block || missing || !instanceOk || stage === 'sealing' || checking}
+                    disabled={
+                      !!block || missing || !instanceOk || stage === 'sealing' || checking || !canSealHere()
+                    }
                   >
                     {stage === 'sealing'
                       ? `Encrypting for ${ctx.workstationName}...`

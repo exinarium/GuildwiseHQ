@@ -6,6 +6,7 @@ import {
   SETUP_GENERATOR,
 } from '@aom/shared';
 import { HttpResponse, http } from 'msw';
+import { newId } from '../lib/secure.ts';
 import {
   ago,
   bareServerReport,
@@ -41,7 +42,7 @@ const MOCK_RUNNER_KEY =
 const FP_ED = 'SHA256:5kXwQ2m0n7yT1p3QbZ9sJd8vLr4uHc6aGfE2iNoPtYw';
 const ops = new Map<string, Record<string, unknown>>();
 const op = (kind: string, ok: boolean, result: unknown, errorText: string | null = null) => {
-  const id = crypto.randomUUID();
+  const id = newId();
   ops.set(id, { id, kind, state: ok ? 'done' : 'failed', ok, result, errorText, at: ago(0) });
   return id;
 };
@@ -206,7 +207,7 @@ const probeDto = (
   targetId: string | null = null,
   dirs: string[] = [],
 ) => ({
-  id: crypto.randomUUID(),
+  id: newId(),
   targetId,
   workstationId: WS,
   workstationName: 'Office PC',
@@ -409,7 +410,7 @@ export const deploySetupHandlers = [
   }),
   http.post(`${A}/projects/:id/delivery/targets/:targetId/retire`, () => {
     setMove('retired');
-    return HttpResponse.json({ commandId: crypto.randomUUID() }, { status: 202 });
+    return HttpResponse.json({ commandId: newId() }, { status: 202 });
   }),
   http.get(`${A}/projects/:id/delivery/setup`, () => HttpResponse.json(state())),
   http.put(`${A}/projects/:id/delivery/setup`, async ({ request }) => {
@@ -575,7 +576,7 @@ export const deploySetupHandlers = [
       ),
       probeDto(b.scope, b.host ?? null, report, tid, dirs),
     ];
-    return HttpResponse.json({ commandId: crypto.randomUUID(), workstationId: WS }, { status: 202 });
+    return HttpResponse.json({ commandId: newId(), workstationId: WS }, { status: 202 });
   }),
   http.post(`${A}/projects/:id/delivery/setup/preview`, async ({ request }) => {
     const b = (await request.json()) as { setup: unknown; removeFiles?: string[] };
@@ -712,7 +713,7 @@ export const deploySetupHandlers = [
     if (b.area === 'deploy') {
       setScenario('proposal');
     }
-    return HttpResponse.json({ requestId: crypto.randomUUID() }, { status: 202 });
+    return HttpResponse.json({ requestId: newId() }, { status: 202 });
   }),
   http.get(`${A}/projects/:id/deploy-targets`, () =>
     HttpResponse.json({
@@ -741,7 +742,7 @@ export const deploySetupHandlers = [
       appUrl?: string | null;
       production?: boolean;
     };
-    const id = crypto.randomUUID();
+    const id = newId();
     update((s) => {
       s.targets.push({
         id,
@@ -841,7 +842,7 @@ export const deploySetupHandlers = [
         rules: live ? ['test site is healthy on the same version for 10 minutes'] : [],
         current: r?.version
           ? {
-              runId: crypto.randomUUID(),
+              runId: newId(),
               commit: r.commit,
               version: r.version,
               since: ago(r.sinceMin),
@@ -856,7 +857,7 @@ export const deploySetupHandlers = [
         },
         lastRun: r?.failed
           ? {
-              runId: crypto.randomUUID(),
+              runId: newId(),
               status: 'failed',
               at: ago(20),
               summary: r.failed.reason,
@@ -864,7 +865,7 @@ export const deploySetupHandlers = [
             }
           : r?.version
             ? {
-                runId: crypto.randomUUID(),
+                runId: newId(),
                 status: 'succeeded',
                 at: ago(r.sinceMin),
                 summary: null,
@@ -1004,7 +1005,7 @@ export const deploySetupHandlers = [
         t.reachAgo = 0;
       }
     });
-    return HttpResponse.json({ commandId: crypto.randomUUID(), workstationId: WS }, { status: 202 });
+    return HttpResponse.json({ commandId: newId(), workstationId: WS }, { status: 202 });
   }),
   http.post(`${A}/projects/:id/delivery/prepare`, async ({ request }) => {
     const b = (await request.json()) as {

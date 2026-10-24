@@ -11,6 +11,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useConnect, useCreateKey, useOp, useStartHostKey } from '../../../api/queries/deploy-connect.ts';
 import { useSetupState } from '../../../api/queries/deploy-setup.ts';
 import { usePatchDeployTarget } from '../../../api/queries/phases.ts';
+import { canSealHere, newId } from '../../../lib/secure.ts';
+import { SecureContextNotice } from '../../SecureContextNotice.tsx';
 import { Badge, Button, Callout, ErrorBox, Select, Spinner, TextArea, TextInput } from '../../ui.tsx';
 import { CopyButton } from './CopyButton.tsx';
 import { KeysList } from './KeysList.tsx';
@@ -94,7 +96,7 @@ export function ConnectServer({
   const [keyOp, setKeyOp] = useState<string | null>(null);
   const [connectOp, setConnectOp] = useState<string | null>(null);
   const [created, setCreated] = useState<{ targetId: string; alias: string } | null>(null);
-  const [keyRef] = useState(() => crypto.randomUUID());
+  const [keyRef] = useState(() => newId());
   const [waitedLong, setWaitedLong] = useState(false);
 
   const chosen =
@@ -240,6 +242,8 @@ export function ConnectServer({
 
   const needsSecret =
     (method === 'password' && !password) || (method === 'keyfile' && privateKey.trim().length < 40);
+  // a password or key file is sealed in the browser, which needs a secure context
+  const cannotSeal = method !== 'panel' && !canSealHere();
   const otherKeys = (target?.keys ?? []).filter((k) => k.state === 'active' && k.workstationId !== chosen);
 
   return (
@@ -466,6 +470,7 @@ export function ConnectServer({
               {finished.errorText}
             </Callout>
           )}
+          {method !== 'panel' && <SecureContextNotice />}
           {method === 'password' && (
             <>
               <Callout
@@ -589,7 +594,7 @@ export function ConnectServer({
             <Button
               variant="primary"
               className="flex-1 sm:flex-none"
-              disabled={needsSecret || (method === 'panel' && !publicKey) || connect.isPending}
+              disabled={needsSecret || cannotSeal || (method === 'panel' && !publicKey) || connect.isPending}
               loading={connect.isPending}
               onClick={send}
               data-testid="connect-go"

@@ -1,3 +1,4 @@
+import { requireSubtle } from '../secure-context.ts';
 /**
  * A one-time key pair the browser makes for a single read of an authored pack (the capability editor opening a pack, "export").
  * The runner seals the files to the public half (`sealLarge`), the server relays the ciphertext and never sees the files, and
@@ -23,7 +24,7 @@ const unb64 = (s: string): Uint8Array<ArrayBuffer> => {
 };
 
 export async function makeReplyKey(): Promise<ReplyKey> {
-  const subtle = globalThis.crypto.subtle;
+  const subtle = requireSubtle();
   const pair = await subtle.generateKey(
     { name: 'RSA-OAEP', modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: 'SHA-256' },
     false,

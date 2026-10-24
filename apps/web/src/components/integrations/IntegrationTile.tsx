@@ -16,7 +16,7 @@ import {
   useTestIntegration,
 } from '../../api/queries/integrations.ts';
 import { blockReason, daysUntil, type PageCtx, scopeOf, tileId } from '../../lib/integrations.ts';
-import { copyText } from '../../lib/secure.ts';
+import { copyText, newId } from '../../lib/secure.ts';
 import { formatDateTime } from '../../lib/time.ts';
 import { Badge, Button, ConfirmDialog, ErrorBox, useToast } from '../ui.tsx';
 import { ConnectDialog, MethodSteps } from './ConnectDialog.tsx';
@@ -89,7 +89,7 @@ export function IntegrationTile({
   }, [openConnect, hasConnect, block]);
 
   const run = (what: 'test' | 'remove') => {
-    const body = { requestId: crypto.randomUUID(), kind: kind.id, instance };
+    const body = { requestId: newId(), kind: kind.id, instance };
     const m = what === 'test' ? test : remove;
     setActionKind(what);
     m.mutate(body, { onSuccess: (r) => setActionId(r.id) });

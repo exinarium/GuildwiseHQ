@@ -2,7 +2,9 @@ import type { DeliverySettingsResponse } from '@aom/shared';
 import { useState } from 'react';
 import { useSetDeploySecret } from '../../api/queries/delivery.ts';
 import { useProjectWorkstations } from '../../api/queries/phases.ts';
+import { canSealHere } from '../../lib/secure.ts';
 import { formatDateTime } from '../../lib/time.ts';
+import { SecureContextNotice } from '../SecureContextNotice.tsx';
 import { Button, Callout, ErrorBox, Select, TextInput, useToast } from '../ui.tsx';
 
 /** Secrets the recipe names: set the value on one of your workstations. It is encrypted here for the runner and never reaches Guildwise. */
@@ -24,6 +26,7 @@ export function DeliverySecrets({ projectId, d }: { projectId: string; d: Delive
         A value is encrypted in your browser for the runner of the workstation you choose and kept only there.
         Guildwise never sees it, and it is hidden from every log.
       </Callout>
+      <SecureContextNotice className="mb-2" />
       {mine.length > 1 && (
         <Select label="On workstation" value={target} onChange={(e) => setWsId(e.target.value)}>
           {mine.map((w) => (
@@ -50,7 +53,7 @@ export function DeliverySecrets({ projectId, d }: { projectId: string; d: Delive
               />
             </div>
             <Button
-              disabled={!values[n] || !target}
+              disabled={!values[n] || !target || !canSealHere()}
               loading={set.isPending}
               data-testid={`deploy-secret-save-${n}`}
               onClick={() =>

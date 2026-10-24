@@ -9,7 +9,8 @@ import {
 } from '../../api/queries/integrations.ts';
 import type { PageCtx } from '../../lib/integrations.ts';
 import { sealIntegration } from '../../lib/runner-seal.ts';
-import { copyText } from '../../lib/secure.ts';
+import { canSealHere, copyText } from '../../lib/secure.ts';
+import { SecureContextNotice } from '../SecureContextNotice.tsx';
 import { Button, Callout, ErrorBox, TextInput, useToast } from '../ui.tsx';
 
 /** The runner accepts at most three pastes per session (`claude mcp login` keeps asking after a wrong address). */
@@ -207,12 +208,13 @@ export function SignInSession({
                   onChange={(e) => setValue(e.target.value)}
                   disabled={sealing || send.isPending || sentState || attempt > MAX_PASTES}
                 />
+                <SecureContextNotice />
                 <Button
                   type="submit"
                   variant="primary"
                   className="self-start"
                   loading={sealing || send.isPending}
-                  disabled={!value.trim() || sentState || attempt > MAX_PASTES}
+                  disabled={!value.trim() || sentState || attempt > MAX_PASTES || !canSealHere()}
                 >
                   {sealing ? `Encrypting for ${ctx.workstationName}...` : 'Send'}
                 </Button>

@@ -19,10 +19,12 @@ import {
   useVerifyRights,
 } from '../api/queries/devops.ts';
 import { openCeoChat } from '../lib/openCeoChat.ts';
+import { canSealHere } from '../lib/secure.ts';
 import { formatDateTime } from '../lib/time.ts';
 import { useCeoName } from './ceo/useCeoName.ts';
 import { AskDevOpsButton } from './devops/AskDevOps.tsx';
 import { FixWithDevOps } from './devops/FixWithDevOps.tsx';
+import { SecureContextNotice } from './SecureContextNotice.tsx';
 import { Badge, Button, ErrorBox, Select, TextArea, TextInput } from './ui.tsx';
 
 const TONE = {
@@ -257,6 +259,7 @@ function SudoPassword({ w }: { w: WorkstationDto }) {
         shown again and never written to a log.
         {sudo?.keyId ? ` Key ${sudo.keyId} (the same as \`aom-runner doctor\` shows).` : ''}
       </p>
+      <SecureContextNotice className="mt-1" />
       <div className="mt-1 flex flex-col gap-2 sm:flex-row sm:items-end">
         <div className="flex-1">
           <TextInput
@@ -267,7 +270,11 @@ function SudoPassword({ w }: { w: WorkstationDto }) {
             onChange={(e) => setPw(e.target.value)}
           />
         </div>
-        <Button type="submit" variant="primary" disabled={!pw || set.isPending || !w.connected}>
+        <Button
+          type="submit"
+          variant="primary"
+          disabled={!pw || set.isPending || !w.connected || !canSealHere()}
+        >
           Send to {w.name}
         </Button>
         {sudo?.passwordSet && (

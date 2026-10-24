@@ -12,6 +12,8 @@ import {
   useSetMyPackVisibility,
 } from '../../api/queries/my-capabilities.ts';
 import { useCanManageOrg } from '../../lib/orgRole.ts';
+import { canSealHere } from '../../lib/secure.ts';
+import { SecureContextNotice } from '../SecureContextNotice.tsx';
 import {
   Badge,
   Button,
@@ -272,6 +274,7 @@ function MyPackCard({
         </p>
       )}
       <ErrorBox error={save.error ?? visibility.error ?? remove.error} />
+      {(pack.pinnedSha || editing) && <SecureContextNotice className="mt-2" />}
       {loadError && (
         <Callout tone="warning" className="mt-2" role="alert">
           {loadError}
@@ -283,14 +286,14 @@ function MyPackCard({
             variant="primary"
             onClick={open}
             loading={loading}
-            disabled={!pack.supported}
+            disabled={!pack.supported || (!!pack.pinnedSha && !canSealHere())}
             data-testid="edit-pack"
           >
             {pack.pinnedSha ? 'Edit' : 'Start writing'}
           </Button>
         )}
         {pack.pinnedSha && (
-          <Button onClick={exportZip} disabled={loading} data-testid="export-pack">
+          <Button onClick={exportZip} disabled={loading || !canSealHere()} data-testid="export-pack">
             Export as zip
           </Button>
         )}

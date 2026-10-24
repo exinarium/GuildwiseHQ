@@ -21,6 +21,7 @@ import {
   secretOf,
 } from '../components/providers/CredentialFields.tsx';
 import { ModelPrices } from '../components/providers/ModelPrices.tsx';
+import { SecureContextNotice } from '../components/SecureContextNotice.tsx';
 import {
   Badge,
   Button,
@@ -35,6 +36,7 @@ import {
   TextInput,
   useToast,
 } from '../components/ui.tsx';
+import { canSealHere } from '../lib/secure.ts';
 
 const SHARE_TEXT: Record<
   OrgProviderWorkstation['status'],
@@ -345,6 +347,7 @@ function WorkstationList({ p }: { p: OrgProvider }) {
                       size="sm"
                       variant="secondary"
                       loading={share.isPending}
+                      disabled={!canSealHere()}
                       data-testid={`org-provider-reshare-${p.provider}-${w.workstationId}`}
                       title={`${holders[0]?.name} re-seals the key for ${w.name}. You do not have to type it again.`}
                       onClick={() =>
@@ -368,6 +371,7 @@ function WorkstationList({ p }: { p: OrgProvider }) {
           </li>
         ))}
       </ul>
+      {holders.length > 0 && <SecureContextNotice />}
       <ErrorBox error={share.error} />
       {again && <ShareAgainDialog p={p} w={again} onClose={() => setAgain(null)} />}
       {approving && (
@@ -426,12 +430,13 @@ function ShareAgainDialog({
     >
       <div className="flex flex-col gap-3">
         <CredentialFields id={p.provider} draft={draft} onChange={setDraft} testPrefix="org-share" />
+        <SecureContextNotice />
         <ErrorBox error={share.error} />
         <div className="flex justify-end gap-2">
           <Button onClick={onClose}>Cancel</Button>
           <Button
             variant="primary"
-            disabled={!!problem || !target || !me.data?.activeOrg}
+            disabled={!!problem || !target || !me.data?.activeOrg || !canSealHere()}
             loading={share.isPending}
             data-testid="org-share-send"
             onClick={() =>
@@ -498,6 +503,7 @@ function SetKeyDialog({
     >
       <div className="flex flex-col gap-3">
         <CredentialFields id={p.provider} draft={draft} onChange={setDraft} testPrefix="org-set" />
+        <SecureContextNotice />
         <fieldset className="flex flex-col gap-1.5" data-testid="org-set-targets">
           <legend className="text-sm font-medium text-fg">Workstations that get the key</legend>
           {targets.length === 0 && (
@@ -530,7 +536,7 @@ function SetKeyDialog({
           <Button onClick={onClose}>Cancel</Button>
           <Button
             variant="primary"
-            disabled={!!problem || chosen.length === 0 || !me.data?.activeOrg}
+            disabled={!!problem || chosen.length === 0 || !me.data?.activeOrg || !canSealHere()}
             loading={set.isPending}
             data-testid="org-set-send"
             title={problem ?? (chosen.length === 0 ? 'Pick at least one workstation' : undefined)}

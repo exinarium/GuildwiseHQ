@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { sealLarge } from '../delivery/connect.ts';
+import { requireSubtle } from '../secure-context.ts';
 
 /**
  * What a sealed credential is bound to (security review, findings 1, 2 and 8). A hybrid blob without associated data (`h1.`) can
@@ -121,7 +122,7 @@ const toHex = (u: ArrayBuffer) => [...new Uint8Array(u)].map((x) => x.toString(1
 /** SHA-256 (hex) of a base64 SPKI public key. */
 export async function spkiSha256(publicKeyB64: string): Promise<string> {
   const der = Uint8Array.from(atob(publicKeyB64), (c) => c.charCodeAt(0));
-  return toHex(await globalThis.crypto.subtle.digest('SHA-256', der));
+  return toHex(await requireSubtle().digest('SHA-256', der));
 }
 
 /** The runner key id of a public key: the first 16 hex digits of the SHA-256 of the SPKI (what a runner announces). */
@@ -142,6 +143,7 @@ export async function sealResealApproval(a: {
   approvedBy: string;
   now?: number;
 }): Promise<string> {
+  requireSubtle();
   const nonce = toHex(globalThis.crypto.getRandomValues(new Uint8Array(16)).buffer as ArrayBuffer);
   const body: ResealApproval = {
     v: 1,

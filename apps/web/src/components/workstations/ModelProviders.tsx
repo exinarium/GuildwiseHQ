@@ -16,6 +16,7 @@ import {
   useSetPrivateEndpoints,
   useSetProviderKey,
 } from '../../api/queries/providers.ts';
+import { canSealHere } from '../../lib/secure.ts';
 import {
   type CredentialDraft,
   CredentialFields,
@@ -24,6 +25,7 @@ import {
   parseModelIds,
   secretOf,
 } from '../providers/CredentialFields.tsx';
+import { SecureContextNotice } from '../SecureContextNotice.tsx';
 import { Badge, Button, Callout, ErrorBox, TextInput, useToast } from '../ui.tsx';
 
 /** Does this workstation's runner have the direct API adapter? Older runners do not report the runtime at all. */
@@ -346,13 +348,14 @@ function BackendRow({
       )}
       {open && !offline && canEdit && (
         <div className="mt-2 flex flex-col gap-2">
+          <SecureContextNotice />
           <CredentialFields id={def.id} draft={draft} onChange={setDraft} testPrefix="backend" />
           <div>
             <Button
               variant="primary"
               size="sm"
               loading={set.isPending}
-              disabled={!!problem}
+              disabled={!!problem || !canSealHere()}
               title={problem ?? undefined}
               data-testid={`backend-save-${def.id}`}
               onClick={save}
@@ -466,6 +469,7 @@ function ProviderRow({
       )}
       {open && !disabled && (
         <div className="mt-2 flex flex-col gap-2">
+          {key ? <SecureContextNotice /> : null}
           {def.needsBaseUrl && (
             <TextInput
               label="Base URL"
@@ -505,7 +509,7 @@ function ProviderRow({
               variant="primary"
               size="sm"
               loading={set.isPending}
-              disabled={keyProblem || baseProblem}
+              disabled={keyProblem || baseProblem || (!!key && !canSealHere())}
               data-testid={`provider-save-${def.id}`}
               onClick={save}
             >

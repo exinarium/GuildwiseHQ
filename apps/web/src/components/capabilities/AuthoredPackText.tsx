@@ -1,7 +1,13 @@
-import { authoredTreeContentHash, type PackDto, type PackReadContent } from '@aom/shared';
+import {
+  authoredTreeContentHash,
+  type PackDto,
+  type PackReadContent,
+  SECURE_CONTEXT_MESSAGE,
+} from '@aom/shared';
 import { useQuery } from '@tanstack/react-query';
 import { readPackContent } from '../../api/queries/my-capabilities.ts';
 import { useReviewWait } from '../../api/queries/review-wait.ts';
+import { canSealHere } from '../../lib/secure.ts';
 import { Button, Callout, Spinner } from '../ui.tsx';
 import { PackVersionDiff } from './PackVersionDiff.tsx';
 
@@ -22,7 +28,10 @@ export function useAuthoredReview(
   pack: PackDto,
   expectedSha: string | null | undefined,
 ): AuthoredReviewState {
-  const enabled = pack.source === 'authored' && pack.visibility === 'org' && !!expectedSha;
+  const applies = pack.source === 'authored' && pack.visibility === 'org' && !!expectedSha;
+  // the files come sealed to a one-time key made with WebCrypto, which needs a secure context
+  const secure = canSealHere();
+  const enabled = applies && secure;
   const q = useQuery({
     enabled,
     queryKey: ['packs', 'review-read', pack.id, expectedSha],
@@ -34,6 +43,7 @@ export function useAuthoredReview(
   });
   // Q67: the text lives only on the author's workstation; offline, the read waits and the reviewer is told when it is back
   const wait = useReviewWait(pack.id, enabled && q.isPending);
+  if (applies && !secure) return { state: 'error', error: SECURE_CONTEXT_MESSAGE, retry: () => undefined };
   if (!enabled) return { state: 'none' };
   if (q.isPending)
     return wait.data?.waiting
@@ -67,14 +77,20 @@ export function AuthoredPackText({ review }: { review: AuthoredReviewState }) {
   if (review.state === 'error')
     return (
       <Callout tone="warning" role="alert" data-testid="authored-read-error">
-        <p>
-          The files could not be read from the author's workstation ({review.error}). An authored pack cannot
-          be approved unread: it waits for that workstation, and you get a note on your desk when it is
-          online.
-        </p>
-        <Button size="sm" className="mt-2" onClick={review.retry}>
-          Try again
-        </Button>
+        {review.error === SECURE_CONTEXT_MESSAGE ? (
+          <p>{review.error}. An authored pack cannot be approved unread.</p>
+        ) : (
+          <>
+            <p>
+              The files could not be read from the author's workstation ({review.error}). An authored pack
+              cannot be approved unread: it waits for that workstation, and you get a note on your desk when
+              it is online.
+            </p>
+            <Button size="sm" className="mt-2" onClick={review.retry}>
+              Try again
+            </Button>
+          </>
+        )}
       </Callout>
     );
   if (review.state === 'mismatch')

@@ -14,6 +14,7 @@ import {
   requiredMissing,
 } from '@aom/shared';
 import { HttpResponse, http } from 'msw';
+import { newId } from '../lib/secure.ts';
 import {
   agentView,
   buildBoard,
@@ -39,7 +40,7 @@ import { runHandlers } from './handlers-run.ts';
 
 const err = (status: number, code: string, message: string, details?: unknown) =>
   HttpResponse.json({ error: { code, message, ...(details ? { details } : {}) } }, { status });
-const uuid = () => crypto.randomUUID();
+const uuid = () => newId();
 const iso = () => new Date().toISOString();
 const NAMES = [
   'Marlowe',

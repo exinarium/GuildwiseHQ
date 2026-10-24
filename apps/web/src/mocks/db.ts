@@ -15,12 +15,13 @@ import {
   type UserDto,
   type WorkstationDto,
 } from '@aom/shared';
+import { newId } from '../lib/secure.ts';
 import type { LiveSocket } from '../ws/socket.ts';
 
 /** In-memory fake server state for MSW dev mode. Not shipped in production builds (dynamic import behind VITE_MSW). */
 
 const iso = (minAgo = 0) => new Date(Date.now() - minAgo * 60_000).toISOString();
-const uuid = () => crypto.randomUUID();
+const uuid = () => newId();
 
 export const PASSWORD = 'password123456';
 export const ORG_ID = uuid();

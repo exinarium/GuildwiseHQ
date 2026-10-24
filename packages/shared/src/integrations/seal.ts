@@ -1,3 +1,4 @@
+import { SecureContextError } from '../secure-context.ts';
 import {
   ENVELOPE_TTL_MS,
   INTEGRATION_ENVELOPE_ALG,
@@ -34,7 +35,7 @@ interface CryptoLike {
 }
 const webcrypto = (): CryptoLike => {
   const c = (globalThis as unknown as { crypto?: CryptoLike }).crypto;
-  if (!c?.subtle) throw new Error('WebCrypto is not available in this browser');
+  if (!c?.subtle) throw new SecureContextError();
   return c;
 };
 

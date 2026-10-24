@@ -2,7 +2,9 @@ import type { DeployTargetDto, ProjectWorkstation } from '@aom/shared';
 import { type FormEvent, useEffect, useState } from 'react';
 import { usePatchDeployTarget } from '../../api/queries/phases.ts';
 import { useSetTargetSecret, useTargetSecrets } from '../../api/queries/runs.ts';
+import { canSealHere } from '../../lib/secure.ts';
 import { formatDateTime } from '../../lib/time.ts';
+import { SecureContextNotice } from '../SecureContextNotice.tsx';
 import { Badge, Button, Callout, ErrorBox, Select, TextInput, useToast } from '../ui.tsx';
 
 const words = (s: string) => s.split(/[\s,]+/).filter(Boolean);
@@ -168,6 +170,7 @@ function TargetSecretValues({
         A value is encrypted in your browser for the runner of the workstation you choose and kept only there.
         Guildwise never sees it, and it is hidden from everything the tester attaches to a card.
       </Callout>
+      <SecureContextNotice />
       {mine.length > 1 && (
         <Select label="On workstation" value={ws} onChange={(e) => setWs(e.target.value)}>
           {mine.map((w) => (
@@ -195,7 +198,7 @@ function TargetSecretValues({
             </div>
             <Button
               loading={set.isPending}
-              disabled={!(values[name] ?? '')}
+              disabled={!(values[name] ?? '') || !canSealHere()}
               data-testid={`secret-save-${name}`}
               onClick={() =>
                 set.mutate(

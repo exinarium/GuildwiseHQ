@@ -9,6 +9,7 @@ import {
   zipTree,
 } from '@aom/shared';
 import { useMemo, useState } from 'react';
+import { canSealHere } from '../../lib/secure.ts';
 import { Badge, Button, Callout, Disclosure, TextArea, TextInput } from '../ui.tsx';
 import { PackVersionDiff } from './PackVersionDiff.tsx';
 
@@ -417,7 +418,7 @@ export function PackEditor({
         <Button
           variant="primary"
           loading={saving}
-          disabled={errors || caps.length === 0}
+          disabled={errors || caps.length === 0 || !canSealHere()}
           onClick={() => onSave(tree(), approve)}
           data-testid="save-pack"
         >
