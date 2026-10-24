@@ -288,3 +288,10 @@ Details in `docs/ARCHITECTURE.md` section 38.6 and `docs/RUNNER.md` ("R2 hardeni
 - **Not verified against real services:** the service-account to bearer exchange against Google, Anthropic cache hits and OpenAI cached-token reporting (tested with the SDK's mock model and a fake token endpoint; the first real turn on each provider will show whether the cache counters move).
 - **Open questions:** (1) Should owner-priced turns be marked in the session cost meter too (today the mark is in `shift_costs.owner_priced` and the price list)? (2) Should Admins be allowed to set prices? (3) A 1-hour cache TTL for Anthropic would cut cost for long Boardroom sessions but writes cost more: keep the 5 minute default?
 
+
+**Owner decisions on the R1 questions (2026-10-24)**
+- Q46 Gemini Google login inside the sandbox: **allowed** (subscription users), as built.
+- Q47 Private endpoints: **per-workstation allow-list.** The workstation owner can add specific private host:port entries (e.g. LAN Ollama or LM Studio) that its agents' sandboxes may reach. Off by default. Shown in the workstation's provider section.
+- Q48 Cap reached: **stop immediately.** Running shifts, session turns, delegates and chats that use the org key for that provider are stopped as soon as the cap is hit, with a clear notice. Enforcement is based on live usage reports, not only at queue or dispatch.
+- Q49 Gemini and opencode: **Linux/WSL2 only**, as built.
+- Q50 Unpriced models: **stay "cost unknown"** and aren't counted against the cap, with a warning, as built.
