@@ -8,13 +8,16 @@ import type { ClaudeUsageMonitor } from './claude-usage-limit.ts';
 import { CodexAdapter, detectCodex } from './codex.ts';
 import type { DirectModelOptions } from './direct-model.ts';
 import { DirectModelAdapter } from './direct-model.ts';
+import { detectGemini, GeminiAdapter } from './gemini.ts';
 import { MockAdapter } from './mock.ts';
+import { detectOpencode, OpencodeAdapter } from './opencode.ts';
 import type { RuntimeAdapter } from './types.ts';
 
 /**
  * Adapters enabled by the config: `claude-code` always, `mock` only when `runtimes.mock.enabled`, `direct-model` whenever the
  * runner has a provider store (it reports no providers, and is unavailable, until a key is stored), and `codex` only when the
- * `codex` binary is found (on PATH or at `runtimes.codex.bin`) at start: installing it later needs a runner restart.
+ * `codex` binary is found (on PATH or at `runtimes.codex.bin`) at start, `gemini` and `opencode` likewise (Linux only, in the runner's own
+ * bubblewrap sandbox): installing either later needs a runner restart.
  */
 export function buildAdapters(
   config: RunnerConfig,
@@ -45,6 +48,38 @@ export function buildAdapters(
       new CodexAdapter(
         { enabled: true, authMode: 'login', toolchainPaths: [], ...(c ?? {}), bin: codexBin },
         paths,
+      ),
+    );
+  }
+  const geminiBin = detectGemini(config.runtimes.gemini, { blocked: realClaudeBlocked() });
+  if (geminiBin) {
+    const g = config.runtimes.gemini;
+    adapters.set(
+      'gemini',
+      new GeminiAdapter(
+        {
+          enabled: true,
+          authMode: 'auto',
+          toolchainPaths: [],
+          extraAllowedDomains: [],
+          models: [],
+          ...(g ?? {}),
+          bin: geminiBin,
+        },
+        paths,
+        direct?.store,
+      ),
+    );
+  }
+  const opencodeBin = detectOpencode(config.runtimes.opencode, { blocked: realClaudeBlocked() });
+  if (opencodeBin) {
+    const o = config.runtimes.opencode;
+    adapters.set(
+      'opencode',
+      new OpencodeAdapter(
+        { enabled: true, toolchainPaths: [], extraAllowedDomains: [], ...(o ?? {}), bin: opencodeBin },
+        paths,
+        direct?.store,
       ),
     );
   }

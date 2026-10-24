@@ -875,7 +875,7 @@ export class CodexAdapter implements RuntimeAdapter {
 }
 
 /** The main repository's `.git` dir of a linked worktree (empty for a plain clone, whose `.git` is inside the workspace). */
-function gitCommonDirs(cwd: string): string[] {
+export function gitCommonDirs(cwd: string): string[] {
   const admin = gitAdminDirOf(cwd);
   if (!admin) return [];
   return /[\\/]worktrees[\\/][^\\/]+$/.test(admin) ? [resolve(admin, '..', '..')] : [admin];

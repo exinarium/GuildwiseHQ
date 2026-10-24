@@ -93,6 +93,47 @@ export const CodexRuntimeConfigSchema = z.object({
 });
 export type CodexRuntimeConfig = z.infer<typeof CodexRuntimeConfigSchema>;
 
+/**
+ * The Gemini CLI runtime (docs/RUNNER.md, "Gemini CLI runtime"). Registered only when the `gemini` binary is found: on PATH, or
+ * at `bin`, on Linux. It runs inside the runner's own bubblewrap sandbox, always on: the runtime is unavailable where that does not run.
+ */
+export const GeminiRuntimeConfigSchema = z.object({
+  /** `false`: never register the runtime, even when `gemini` is installed. */
+  enabled: z.boolean().default(true),
+  /** Path of the `gemini` binary (`~` allowed). Absent: look for `gemini` on PATH. */
+  bin: z.string().optional(),
+  /**
+   * `auto` (default): the owner's Google login when there is one (it is a subscription, not billed per token), else the stored
+   * `google` key. `login`: only the login. `api_key`: only the stored key (workstation key over organization key).
+   */
+  authMode: z.enum(['auto', 'login', 'api_key']).default('auto'),
+  /** The owner's `.gemini` folder (`~` allowed). Default `$GEMINI_CLI_HOME/.gemini`, else `~/.gemini`. */
+  loginDir: z.string().optional(),
+  /** Extra toolchain directories the agent's commands may read. */
+  toolchainPaths: z.array(z.string()).default([]),
+  /** More hosts the agent's commands may reach (the package registries are always allowed). */
+  extraAllowedDomains: z.array(z.string()).default([]),
+  /** Model ids besides the built-in ones, reported to the server so they can be picked. */
+  models: z.array(z.string().min(1).max(120)).default([]),
+});
+export type GeminiRuntimeConfig = z.infer<typeof GeminiRuntimeConfigSchema>;
+
+/**
+ * The opencode runtime (docs/RUNNER.md, "opencode runtime"). Registered only when the `opencode` binary is found: on PATH, or at
+ * `bin`, on Linux. It runs in the runner's own bubblewrap sandbox; its providers are the keys held under Model providers.
+ */
+export const OpencodeRuntimeConfigSchema = z.object({
+  /** `false`: never register the runtime, even when `opencode` is installed. */
+  enabled: z.boolean().default(true),
+  /** Path of the `opencode` binary (`~` allowed). Absent: look for `opencode` on PATH. */
+  bin: z.string().optional(),
+  /** Extra toolchain directories the agent's commands may read. */
+  toolchainPaths: z.array(z.string()).default([]),
+  /** More hosts the agent's commands may reach (the package registries are always allowed). */
+  extraAllowedDomains: z.array(z.string()).default([]),
+});
+export type OpencodeRuntimeConfig = z.infer<typeof OpencodeRuntimeConfigSchema>;
+
 export const MockRuntimeConfigSchema = z.object({
   enabled: z.boolean().default(false),
   /** Narrow the advertised capabilities (default: all). */
@@ -137,6 +178,8 @@ export const RunnerConfigSchema = z.object({
       'claude-code': ClaudeRuntimeConfigSchema.default(ClaudeRuntimeConfigSchema.parse({})),
       mock: MockRuntimeConfigSchema.optional(),
       codex: CodexRuntimeConfigSchema.optional(),
+      gemini: GeminiRuntimeConfigSchema.optional(),
+      opencode: OpencodeRuntimeConfigSchema.optional(),
     })
     .default({ 'claude-code': ClaudeRuntimeConfigSchema.parse({}) }),
   /** M8: credentials for posting approved updates to Jira (GitHub uses this machine's `gh` login). */
