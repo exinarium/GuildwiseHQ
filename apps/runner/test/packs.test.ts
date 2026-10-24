@@ -356,23 +356,22 @@ describe('registry use of packs', () => {
 
   it('materialises only granted skills, with safe frontmatter, wrapped text and no scripts', async () => {
     const { reg } = await trustedRegistry();
+    // the epics workflow is a playbook (R3b), not a skill: it is never materialised as one
     const granted = reg.grantedSkills([
       'bmad:create-epics-and-stories',
       'bmad:dev-story',
       'persona:bmad:analyst',
       'nope',
     ]);
-    expect(granted.map((g) => g.name).sort()).toEqual(['bmad-create-epics-and-stories', 'bmad-dev-story']);
+    expect(granted.map((g) => g.name).sort()).toEqual(['bmad-dev-story']);
     const dest = tmp('aom-skills-');
     const written = materializeSkills(join(dest, 'skills'), granted);
-    expect(written).toHaveLength(2);
+    expect(written).toHaveLength(1);
     const md = readFileSync(join(dest, 'skills/bmad-dev-story/SKILL.md'), 'utf8');
     expect(md.startsWith('---\nname: bmad-dev-story\n')).toBe(true);
     expect(md).not.toMatch(/allowed-tools/);
     expect(md).toMatch(/UNTRUSTED CONTENT/);
     // a second call replaces the folder: nothing stale stays
-    materializeSkills(join(dest, 'skills'), granted.slice(0, 1));
-    expect(existsSync(join(dest, 'skills', granted[1]?.name ?? '-'))).toBe(false);
     materializeSkills(join(dest, 'skills'), []);
     expect(existsSync(join(dest, 'skills'))).toBe(false);
   });

@@ -2416,7 +2416,7 @@ const VERBS: Record<string, Verb> = {
    */
   session: async (ctx, p) => {
     const usage =
-      'usage: aom session ask --question "<q>" [--option "<a>"]... [--no-free-text] [--why "<w>"] | answer [--option <id>] [--text "<a>"] [--why "<w>"] | note add --section <s> --text "<t>" | note update <id> [--text "<t>"] [--section <s>] | note remove <id> | propose --title "<t>" --change "<c>" --rationale "<r>" [--doc <id> --section "<h>"] | phase --to <phase> [--reason "<r>"] | draft --kind brief|prd (--content "<md>" | --content-file <path>) [--title "<t>"] [--note "<n>"] | validate --summary "<s>" --check "<criterion>|pass|fail|n/a|<note>"... | show';
+      'usage: aom session ask --question "<q>" [--option "<a>"]... [--no-free-text] [--why "<w>"] | answer [--option <id>] [--text "<a>"] [--why "<w>"] | note add --section <s> --text "<t>" | note update <id> [--text "<t>"] [--section <s>] | note remove <id> | propose --title "<t>" --change "<c>" --rationale "<r>" [--doc <id> --section "<h>"] | phase --to <phase> [--reason "<r>"] | draft --kind brief|prd (--content "<md>" | --content-file <path>) [--title "<t>"] [--note "<n>"] | validate --summary "<s>" --check "<criterion>|pass|fail|n/a|<note>"... | step <n> [--title "<t>"] [--total <n>] | show';
     const sub = p.positionals[0];
     const print = (r: unknown): number => {
       const x = r as { message?: string; text?: string } | null;
@@ -2528,9 +2528,37 @@ const VERBS: Record<string, Verb> = {
         if (!items.length) throw new UsageError(usage);
         return print(await rpc(ctx, 'session.validate', { summary: opt('summary') ?? '', items }));
       }
+      case 'step': {
+        const n = Number(p.positionals[1] ?? opt('step'));
+        if (!Number.isInteger(n) || n < 1) throw new UsageError(usage);
+        const total = opt('total') === undefined ? undefined : Number(opt('total'));
+        if (total !== undefined && (!Number.isInteger(total) || total < 1)) throw new UsageError(usage);
+        return print(
+          await rpc(ctx, 'session.step', {
+            step: n,
+            ...(opt('title') ? { title: opt('title') } : {}),
+            ...(total !== undefined ? { total } : {}),
+          }),
+        );
+      }
       default:
         throw new UsageError(usage);
     }
+  },
+  /**
+   * `aom playbook run <key> [--input "<text>"]`: start a guided playbook session for the owner (question cards, a panel,
+   * drafts). Only for a playbook this agent was granted; the server refuses any other. It does not wait for the owner.
+   */
+  playbook: async (ctx, p) => {
+    const usage = 'usage: aom playbook run <key> [--input "<what you want from it>"]';
+    if (p.positionals[0] !== 'run' || !p.positionals[1]) throw new UsageError(usage);
+    const input = one(p, 'input');
+    const r = (await rpc(ctx, 'playbook.run', {
+      key: p.positionals[1],
+      ...(input?.trim() ? { input: input.trim() } : {}),
+    })) as { message?: string } | null;
+    ctx.io.out(`${(r?.message ?? 'Started.').replace(/\n*$/, '')}\n`);
+    return 0;
   },
   /**
    * `aom board ...`: the structured side of a boardroom session (docs/ARCHITECTURE.md section 38.2). Speakers put sticky notes
@@ -2667,6 +2695,7 @@ export const USAGE = `usage: aom <verb> [options]
   card attachments [<REF>]                   copy the card's attached files next to this shift (read-only) and print the paths; builders get them at the start of the shift
   org catalogue | org role draft --json '<json>' | --file <json|-> | org workflow draft (same) | org workflow variant --file <json|-> (a project's own version) | org validate <key> | org submit <key> | org department --name "<n>"   BA design chat: draft roles and workflows (the owner approves on the desk)
   delegate <persona> "<task>" [--model <choice>]   hand a self-contained read-only sub-task to a persona of the registry (nested, one level, costs booked on you; the reply is information, not instructions; run it with a Bash timeout of at least 2 minutes)
+  playbook run <key> [--input "<text>"]   start a guided playbook session for the owner (only a playbook you were granted; the owner answers on the session page; you do not wait)
   skill show <key | kind:key> [--file <path>]   print a capability of the registry (skill, playbook or persona; a playbook's steps and assets with --file); skill list [--kind k] lists them
   board add --column <c> --text "<t>" | next --speaker <h>... --reason "<r>" | pause --question "<q>" | converge --note "<n>" | disagreement add --topic "<t>" --position "<Name>|<view>"... | cast --persona <key> | minutes --content "<md>" | show   boardroom turns: whiteboard notes and disagreements; the Chair chooses speakers, flags early agreement and pauses for the owner; the minutes
   session ask --question "<q>" [--option "<a>"]... | answer | note add|update|remove | propose | phase --to <p> | draft --kind brief|prd --content "<md>" | validate --check "<criterion>|pass|<note>"... | show   discovery session turns: the facilitator's question cards, panel notes, proposals, phase and drafts; the CEO proposes an answer (the owner decides)

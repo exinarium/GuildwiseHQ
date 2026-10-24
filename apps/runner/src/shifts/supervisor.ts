@@ -62,6 +62,7 @@ import { type CapabilityRegistry, type ProjectIndexResult, skillRpc } from '../c
 import type { RunnerConfig } from '../config.ts';
 import type { Outbox } from '../connection/outbox.ts';
 import { DELEGATE_NOTE, DelegateRunner } from '../delegate/delegate.ts';
+import { playbookNote } from '../playbooks/note.ts';
 import { recordDevopsAudit } from '../devops/audit.ts';
 import { redactCommand } from '../devops/guard.ts';
 import { cardPayload, shiftTexts } from '../devops/requests.ts';
@@ -1016,6 +1017,7 @@ export class ShiftSupervisor {
     if (capIndex) texts.instructions += `\n${capIndex}\n`;
     if (msg.kind !== 'ceo' && msg.kind !== 'devops' && !msg.agent.isDevops && msg.agent.roleKey !== 'ceo')
       texts.instructions += `\n${DELEGATE_NOTE}\n`;
+    if (playbookNote(msg.playbookGrants)) texts.instructions += `\n${playbookNote(msg.playbookGrants)}\n`;
     // The skills this agent's role grants, for a runtime with native skills (Claude Code, Codex): written into its private folder.
     const grantedSkills =
       this.deps.capabilities?.grantedSkills(msg.agent.skills, registryProject, msg.orgId, {

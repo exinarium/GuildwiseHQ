@@ -47,6 +47,7 @@ import { type GuardClone, markJobStarted } from '../ceo/guard-hook.ts';
 import { selectChatProfile } from '../ceo/profile.ts';
 import { composeOwnerMessage, removeTurnDir, turnDirOf, writeTurnFiles } from '../ceo/turn-files.ts';
 import { DELEGATE_NOTE, DelegateRunner } from '../delegate/delegate.ts';
+import { playbookNote } from '../playbooks/note.ts';
 import { recordDevopsAudit } from '../devops/audit.ts';
 import { redactCommand } from '../devops/guard.ts';
 import { type ExternalAdapters, formatSource, readScopedJira } from '../external/index.ts';
@@ -916,7 +917,7 @@ export class ChatManager {
       ) ?? '';
     const instructions = renderDirectSystemPrompt({
       chat: { agent: msg.agent, context: msg.context },
-      tools: chatToolsFor(),
+      tools: chatToolsFor({ playbook: !!msg.playbookGrants?.length }),
       capabilityIndex: capIndex,
     });
     chat.token = this.deps.ipc.registerShift(this.handlerFor(chat));
@@ -937,6 +938,7 @@ export class ChatManager {
       context: msg.context,
       ...(msg.context.orgId ? { orgId: msg.context.orgId } : {}),
       instructions,
+      ...(msg.playbookGrants?.length ? { playbookGrants: msg.playbookGrants } : {}),
       ...(msg.resumeSessionId ? { resumeSessionId: msg.resumeSessionId } : {}),
       logFile: `${paths.shiftLogs}/chat-${msg.chatId}.jsonl`,
     });
@@ -1035,7 +1037,7 @@ export class ChatManager {
       ) ?? [];
     await adapter.writeInstructions(
       sandbox,
-      `${signIn ? `${signIn}\n` : ''}${graphNote}${capIndex ? `${capIndex}\n\n` : ''}${devops || msg.agent.roleKey === 'ceo' ? '' : `${DELEGATE_NOTE}\n\n`}${renderChatInstructions(
+      `${signIn ? `${signIn}\n` : ''}${graphNote}${capIndex ? `${capIndex}\n\n` : ''}${devops || msg.agent.roleKey === 'ceo' ? '' : `${DELEGATE_NOTE}\n\n`}${playbookNote(msg.playbookGrants) ? `${playbookNote(msg.playbookGrants)}\n\n` : ''}${renderChatInstructions(
         msg.agent,
         msg.context,
         {

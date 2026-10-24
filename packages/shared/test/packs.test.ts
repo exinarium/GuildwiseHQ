@@ -157,10 +157,11 @@ describe('bmad adapter', () => {
         expect([...m.keys()].filter((k) => /party|help|method|create-prd/.test(k))).toEqual([]);
         expect(r.notes.join('\n')).toMatch(/party-mode/);
       });
-      it('keeps dev and epics skills as skills, the epics one labelled for the BA', () => {
+      it('keeps the dev skill a skill and makes the epics workflow a runnable playbook labelled for the BA', () => {
         expect(m.get('skill:bmad:dev-story')?.kind).toBe('skill');
-        const e = m.get('skill:bmad:create-epics-and-stories');
-        expect(e?.tags).toEqual(['ba']);
+        expect(m.get('skill:bmad:create-epics-and-stories')).toBeUndefined();
+        const e = m.get('playbook:bmad:create-epics-and-stories');
+        expect(e?.tags).toEqual(['workflow', 'ba']);
         expect(Object.keys(e?.files ?? {})).toContain('steps/step-01-validate.md');
         expect(e?.files['customize.toml']).toBeUndefined();
       });

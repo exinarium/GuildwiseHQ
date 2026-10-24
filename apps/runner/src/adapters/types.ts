@@ -204,6 +204,8 @@ export interface ChatStartInput {
   instructions?: string;
   /** See `ShiftStartInput.grantedSkills`. */
   grantedSkills?: GrantedSkill[];
+  /** The playbooks this agent may start with `aom playbook run` (granted; absent or empty: none). */
+  playbookGrants?: string[];
   /** A narrower step cap than the runtime's own (a delegate's: `DELEGATE_LIMITS.maxSteps`). Only the direct-model runtime has steps. */
   maxSteps?: number;
   /** The organization of the chat or session turn: its provider key (not another organization's) is the one used. */

@@ -27,7 +27,9 @@ import { parseTomlLite, tomlString, tomlStrings, tomlTable } from './toml-lite.t
  *  - `bmad-product-brief`, `bmad-prd` -> playbooks labelled `template:brief` and `template:prd` (templates and checklist as assets);
  *  - `bmad-party-mode` -> not imported (the Boardroom replaces it; the personas stay usable);
  *  - installer and tooling skills (`bmad`, `bmod-*`, `bmad-customize`, `bmad-help`, `bmad-toolsmith`) -> not imported;
- *  - everything else (dev, story, code review, `bmad-create-epics-and-stories`, ...) -> skills, available to grant, not wired into delivery.
+ *  - `bmad-create-epics-and-stories`, `bmad-create-architecture`, `bmad-create-ux-design`, `bmad-check-implementation-readiness`
+ *    -> playbooks labelled `workflow` (runnable from the `/` menu and by `aom playbook run`);
+ *  - everything else (dev, story, code review, ...) -> skills, available to grant, not wired into delivery.
  * `customize.toml` is read only for the safe persona fields; it is never served to an agent. Scripts stay in the file list and
  * are removed at use time unless the owner enabled scripts for the pack.
  */
@@ -38,10 +40,14 @@ const PLAYBOOKS: Record<string, string[]> = {
   'bmad-advanced-elicitation': ['discovery', 'stress_test'],
   'bmad-product-brief': ['template:brief'],
   'bmad-prd': ['template:prd'],
+  // R3b: the step-file workflows of the planning group are playbooks too, so the `/` menu and `aom playbook run` start them as
+  // guided sessions (the BA's epics and stories among them). `workflow` marks them as runnable, not as a discovery or template.
+  'bmad-create-epics-and-stories': ['workflow', 'ba'],
+  'bmad-create-architecture': ['workflow'],
+  'bmad-create-ux-design': ['workflow'],
+  'bmad-check-implementation-readiness': ['workflow'],
 };
-const SKILL_TAGS: Record<string, string[]> = {
-  'bmad-create-epics-and-stories': ['ba'],
-};
+const SKILL_TAGS: Record<string, string[]> = {};
 
 /** What the original text calls things, in our terms. Applied to every markdown file of an imported capability. */
 export const BMAD_VARIABLES: ReadonlyArray<readonly [string, string]> = [
