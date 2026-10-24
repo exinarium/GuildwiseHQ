@@ -14,6 +14,7 @@ export const PUSH_CATEGORIES = [
   'platform_bugs',
   'project_pause',
   'chat_replies',
+  'session_time',
 ] as const;
 export const PushCategorySchema = z.enum(PUSH_CATEGORIES);
 export type PushCategory = z.infer<typeof PushCategorySchema>;
@@ -62,6 +63,12 @@ export const PUSH_CATEGORY_INFO: Record<
     label: 'Chat replies',
     description: 'An agent answered you in a chat.',
     defaultOn: false,
+  },
+  session_time: {
+    label: 'Session time limit',
+    description:
+      'Your Discovery or Boardroom session is about to reach its time limit, or the time is up and it waits for you to extend or wrap up.',
+    defaultOn: true,
   },
 };
 

@@ -1,7 +1,15 @@
-import { maskText, PLATFORM_DESK_SUBKIND, type PushCategory, type PushPayload } from '@aom/shared';
+import {
+  maskText,
+  PLATFORM_DESK_SUBKIND,
+  type PushCategory,
+  type PushPayload,
+  parseBoardConfig,
+  parseDiscoveryConfig,
+} from '@aom/shared';
 import type { Ctx } from '../context.ts';
 import { exec, one, rows } from '../db/sql.ts';
 import type { StoredEvent } from '../eventstore/types.ts';
+import { boardTime, discoveryTime } from '../sessions/time.ts';
 import { inQuietHours, loadPreferences } from './prefs.ts';
 import { badgeCountFor, sendToUser, subscriptionsOf } from './sender.ts';
 
@@ -221,6 +229,54 @@ async function onDeskItem(ctx: Ctx, e: StoredEvent, deskItemId: string): Promise
   });
 }
 
+/**
+ * Q54: the creator of a Discovery or Boardroom session is told at the time-limit warning (a third of the limit, at most 5
+ * minutes before the end) and at time-up, on their devices. The sweeps write `timeWarned` / `timeUp` in the session's config;
+ * this is the one place that turns those writes into a notification.
+ */
+async function onSessionTime(ctx: Ctx, e: StoredEvent): Promise<void> {
+  const p = e.event.payload as { threadId?: string; config?: Record<string, unknown> };
+  const cfg = p.config;
+  if (!p.threadId || !cfg) return;
+  const up = cfg.timeUp === true;
+  const warn = !up && cfg.timeWarned === true;
+  if (!up && !warn) return;
+  const t = await one(
+    ctx.pool,
+    `SELECT id, kind, org_id, title, created_by, session_config FROM threads
+      WHERE id=$1 AND kind IN ('discovery','boardroom') AND deleted_at IS NULL`,
+    [p.threadId],
+  );
+  if (!t?.created_by) return;
+  const sc = (t.session_config ?? {}) as Record<string, unknown>;
+  if (sc.archived === true) return;
+  const now = ctx.clock.now();
+  const time =
+    t.kind === 'boardroom'
+      ? boardTime(parseBoardConfig(sc), now)
+      : discoveryTime(parseDiscoveryConfig(sc), now);
+  const left = Math.max(
+    1,
+    Math.ceil((time.limitMinutes ? time.limitMinutes * 60_000 - time.elapsedMs : 0) / 60_000),
+  );
+  const what = t.kind === 'boardroom' ? 'Boardroom' : 'Discovery';
+  const name = (t.title as string | null)?.trim() || `${what} session`;
+  await notifyUsers(ctx, [t.created_by as string], {
+    category: 'session_time',
+    subject: `session-time:${t.id}`,
+    // the event id: an extended session warns (and runs out) again, and each is told once
+    state: `${up ? 'up' : 'warn'}:${e.id}`,
+    title: up ? `${what} time is up` : `${what}: about ${left} minute${left === 1 ? '' : 's'} left`,
+    body: up
+      ? `${name}: nothing new starts until you extend the session or wrap it up.`
+      : `${name} is close to its time limit. Extend it or let it wrap up.`,
+    url: `/${t.kind === 'boardroom' ? 'boardroom' : 'discovery'}/${t.id}`,
+    // time is up waits for the person, so it goes through quiet hours; the warning does not
+    priority: up ? 'blocking' : 'normal',
+    orgId: t.org_id as string,
+  });
+}
+
 export interface PushService {
   /** Resolves when everything queued so far has been handled (tests). */
   flush(): Promise<void>;
@@ -332,6 +388,8 @@ export function registerPushNotifier(ctx: Ctx): PushService {
           'runner_alerts',
           `ws-offline:${(ev.payload as { workstationId: string }).workstationId}`,
         );
+      case 'SessionThreadUpdated':
+        return onSessionTime(ctx, e);
       case 'ThreadMessagePosted': {
         const p = ev.payload as {
           threadId: string;
