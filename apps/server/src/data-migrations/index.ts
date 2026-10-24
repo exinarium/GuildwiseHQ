@@ -5,6 +5,7 @@ import { migrateCeoAuthority, migrateCeoDecisionDedupe } from './ceo-authority.t
 import { migrateCeoBuiltin } from './ceo-builtin.ts';
 import { migrateCeoModels } from './ceo-models.ts';
 import { migrateCeoWorkingBranch } from './ceo-working-branch.ts';
+import { migrateDelegationExplicit } from './delegation-explicit.ts';
 import { migrateDesignHeldStatus } from './design-held-status.ts';
 import { migrateGraphBackfill } from './graph-backfill.ts';
 import { migrateGuidedMode } from './guided-mode.ts';
@@ -106,6 +107,7 @@ export const DATA_MIGRATIONS: Array<{ name: string; run: (env: DataMigrationEnv)
   { name: 'ceo-authority-2026-10', run: (env) => migrateCeoAuthority(env) },
   { name: 'ceo-decision-dedupe-2026-10', run: (env) => migrateCeoDecisionDedupe(env) },
   { name: 'stranded-test-cards-2026-10', run: (env) => migrateStrandedTestCards(env) },
+  { name: 'delegation-explicit-2026-10', run: (env) => migrateDelegationExplicit(env) },
 ];
 
 export async function runDataMigrations(env: DataMigrationEnv): Promise<void> {

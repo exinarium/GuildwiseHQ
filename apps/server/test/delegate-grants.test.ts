@@ -1,6 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { DELEGATE_GRANT_LIMITS, SESSION_TURNS_CAPABILITY, SESSION_VERBS_CAPABILITY } from '@aom/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import {
+  DELEGATION_EXPLICIT_MIGRATION,
+  migrateDelegationExplicit,
+} from '../src/data-migrations/delegation-explicit.ts';
+import { DATA_MIGRATIONS } from '../src/data-migrations/index.ts';
 import { PROJECTION_TABLES } from '../src/projections/index.ts';
 import { rebuildProjections } from '../src/projections/rebuild.ts';
 import { uniqueEmail } from './helpers/app.ts';
@@ -424,6 +429,39 @@ describe('the session shows what was delegated', () => {
         summary: 'the delegate timed out',
       }),
     ]);
+  });
+});
+
+describe('the data migration', () => {
+  it('grants nothing, and gives delegations booked before their sub-step columns', async () => {
+    expect(DATA_MIGRATIONS.map((m) => m.name)).toContain(DELEGATION_EXPLICIT_MIGRATION);
+    const before = await q(
+      `SELECT shift_id, delegate_target, delegate_outcome, delegate_thread_id FROM shift_costs WHERE kind='delegate' AND delegate_thread_id IS NOT NULL LIMIT 1`,
+    );
+    expect(before).toHaveLength(1);
+    const grantsBefore = (await q('SELECT count(*)::int AS n FROM delegate_grants'))[0].n;
+    // as a row projected before the columns existed
+    await q(
+      `UPDATE shift_costs SET delegate_target=NULL, delegate_target_name=NULL, delegate_outcome=NULL, delegate_duration_ms=NULL, delegate_thread_id=NULL WHERE shift_id=$1`,
+      [before[0].shift_id],
+    );
+    await q('DELETE FROM data_migrations WHERE name=$1', [DELEGATION_EXPLICIT_MIGRATION]);
+    const env = { pool: w.t.app.ctx.pool, store: w.t.app.ctx.store, clock: w.t.app.ctx.clock, log: () => {} };
+    expect(await migrateDelegationExplicit(env)).toMatchObject({ backfilled: expect.any(Number) });
+    const after = (
+      await q(
+        `SELECT delegate_target, delegate_outcome, delegate_thread_id FROM shift_costs WHERE shift_id=$1`,
+        [before[0].shift_id],
+      )
+    )[0];
+    expect(after).toEqual({
+      delegate_target: before[0].delegate_target,
+      delegate_outcome: before[0].delegate_outcome,
+      delegate_thread_id: before[0].delegate_thread_id,
+    });
+    // no grant was made, and a second run does nothing
+    expect((await q('SELECT count(*)::int AS n FROM delegate_grants'))[0].n).toBe(grantsBefore);
+    expect(await migrateDelegationExplicit(env)).toBeNull();
   });
 });
 
