@@ -285,6 +285,11 @@ describe('card work stays on Claude Code', () => {
     walk(dir);
     const users = files.filter((f) => /modelChoicesFor\(/.test(readFileSync(f, 'utf8')));
     // Only the session and chat pickers merge providers; none of them is an agent or role default picker.
-    for (const f of users) expect(f).toMatch(/ModelChip|ModelSelect/);
+    for (const f of users) {
+      if (/ModelChip|ModelSelect/.test(f)) continue;
+      // The hire form suggests the models of one runtime: it passes no direct providers, so no direct group can appear.
+      expect(f).toMatch(/Agents\.tsx$/);
+      expect(readFileSync(f, 'utf8')).toMatch(/modelChoicesFor\(\s*\[effectiveRuntime\],\s*\[\],/);
+    }
   });
 });

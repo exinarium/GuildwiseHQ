@@ -27,7 +27,7 @@ import {
 } from '../../api/queries/boardroom.ts';
 import { useProjects } from '../../api/queries/projects.ts';
 import { useWorkstations } from '../../api/queries/workstations.ts';
-import { fromChoice, ModelSelect, toChoice, unionProviders } from '../ModelSelect.tsx';
+import { fromChoice, ModelSelect, toChoice, unionExtras, unionProviders } from '../ModelSelect.tsx';
 import { Badge, Button, Dialog, ErrorBox, Select, TextArea, TextInput } from '../ui.tsx';
 
 interface Seat extends CastMember {
@@ -68,6 +68,7 @@ export function NewBoardroomDialog({
   // Direct API providers configured on the workstations (the session runs on one of them; the server refuses a model its
   // workstation does not offer with `runtime_unavailable`).
   const providers = unionProviders(workstations.data ?? []);
+  const extras = unionExtras(workstations.data ?? []);
 
   const [topic, setTopic] = useState('');
   const [brief, setBrief] = useState('');
@@ -315,6 +316,7 @@ export function NewBoardroomDialog({
                     onChange={(v) => setSeatModel(s, v)}
                     runtimes={runtimes}
                     providers={providers}
+                    extras={extras}
                     defaultLabel="Room default"
                   />
                 ))}
@@ -505,6 +507,7 @@ export function NewBoardroomDialog({
             onChange={setPersonaModel}
             runtimes={runtimes}
             providers={providers}
+            extras={extras}
           />
           <ModelSelect
             label="The Chair runs on"
@@ -513,6 +516,7 @@ export function NewBoardroomDialog({
             onChange={setChairModel}
             runtimes={runtimes}
             providers={providers}
+            extras={extras}
           />
           <ModelSelect
             label="Minutes are written by"
@@ -521,6 +525,7 @@ export function NewBoardroomDialog({
             onChange={setSynthModel}
             runtimes={runtimes}
             providers={providers}
+            extras={extras}
           />
         </div>
         <ErrorBox error={create.error ?? start.error ?? suggest.error} />

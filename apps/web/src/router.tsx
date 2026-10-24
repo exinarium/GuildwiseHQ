@@ -39,6 +39,7 @@ import { Login } from './pages/Login.tsx';
 import { Metrics } from './pages/Metrics.tsx';
 import { OrgChartPage } from './pages/OrgChart.tsx';
 import { OrgDesigner } from './pages/OrgDesigner.tsx';
+import { OrgProviders } from './pages/OrgProviders.tsx';
 import { OrgSettings } from './pages/OrgSettings.tsx';
 import { Phase } from './pages/Phase.tsx';
 import { PlatformTeamDesk } from './pages/PlatformTeamDesk.tsx';
@@ -135,6 +136,7 @@ export const routes = [
       { path: '/settings', element: <Settings /> },
       { path: '/settings/vaults', element: <Vaults /> },
       { path: '/settings/capabilities', element: <Capabilities /> },
+      { path: '/settings/providers', element: <OrgProviders /> },
       { path: '/settings/org', element: <OrgSettings /> },
       { path: '/admin', element: <Navigate to="/settings/org" replace /> },
       { path: '/desk', element: <Desk /> },

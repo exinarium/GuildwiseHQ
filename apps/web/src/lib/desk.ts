@@ -69,6 +69,8 @@ const SUBKIND_LABEL: Record<string, string> = {
   repo_create_failed: 'Repository not created',
   budget_warning: 'Budget warning',
   budget_paused: 'Budget paused',
+  provider_cap_warning: 'Provider cap warning',
+  provider_cap_paused: 'Provider cap reached',
   tester_bottleneck: 'Tester bottleneck',
   test_environment: 'Test environment',
   bug_reported: 'Bug reported',

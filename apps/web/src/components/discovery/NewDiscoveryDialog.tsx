@@ -20,7 +20,7 @@ import {
   STANCE_HELP,
   STANCE_LABEL,
 } from '../../lib/discovery.ts';
-import { ModelSelect, toChoice, unionProviders } from '../ModelSelect.tsx';
+import { ModelSelect, toChoice, unionExtras, unionProviders } from '../ModelSelect.tsx';
 import { Button, Dialog, ErrorBox, Select, TextArea, TextInput } from '../ui.tsx';
 
 const TIME_BOXES = [
@@ -222,6 +222,7 @@ export function NewDiscoveryDialog({
           onChange={setModel}
           runtimes={runtimes}
           providers={unionProviders(wsList)}
+          extras={unionExtras(wsList)}
           defaultLabel="The facilitator's own"
         />
         <ErrorBox error={create.error} />

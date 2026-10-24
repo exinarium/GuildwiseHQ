@@ -1,4 +1,4 @@
-import { DirectProviderIdSchema, IdParamsSchema, SetProviderKeyRequestSchema } from '@aom/shared';
+import { IdParamsSchema, ProviderKeyIdSchema, SetProviderKeyRequestSchema } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { requireUser } from '../auth/guards.ts';
@@ -6,7 +6,7 @@ import { clearProviderKey, setProviderKey, workstationProviders } from '../comma
 import type { Ctx } from '../context.ts';
 import { typed } from './util.ts';
 
-const ProviderParamsSchema = z.object({ id: z.uuid(), provider: DirectProviderIdSchema });
+const ProviderParamsSchema = z.object({ id: z.uuid(), provider: ProviderKeyIdSchema });
 
 /** Provider keys of the direct-model runtime: the owner's workstation only; the key is sealed in the browser (section 38.3). */
 export function providerRoutes(ctx: Ctx) {

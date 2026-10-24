@@ -1040,6 +1040,30 @@ export const PAGE_HELP: Record<string, PageHelp> = {
     ],
     article: 'capabilities#packs',
   },
+  '/settings/providers': {
+    title: 'Model providers',
+    intro:
+      "Keys your whole organization can use, with a monthly spend cap per provider. Owners and Admins manage them. A workstation's own key overrides the organization's and is not capped.",
+    controls: [
+      {
+        name: 'Set key / Replace key',
+        text: 'Enter the key once. Your browser encrypts it for each workstation you tick; Guildwise stores only those encrypted copies and the runners decrypt them.',
+      },
+      {
+        name: 'Workstations',
+        text: 'Which workstations hold the key. A workstation that joined later shows Not shared: Share from another workstation (its runner re-seals the key, you do not type it again) or Enter the key again.',
+      },
+      {
+        name: 'Monthly cap',
+        text: 'The most the organization key may spend on this provider in a calendar month, in US dollars. You get a notice at 80% and 100%; at 100% new runs on the organization key are refused until you raise the cap, override it for this month, or the month ends. Runs with an unknown price are listed but cannot be counted.',
+      },
+      {
+        name: 'Revoke',
+        text: 'Removes the organization key from every workstation.',
+      },
+    ],
+    article: 'workstations-and-installer',
+  },
   '/settings/org': {
     title: 'Organization',
     intro: 'Manage your organization: members, invitations, guests, plan and billing.',

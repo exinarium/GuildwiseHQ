@@ -1,10 +1,14 @@
 import {
   type AgentDto,
+  backendDef,
   type HrAgent,
   type McpServerCandidateDto,
+  modelChoicesFor,
   NAME_THEMES,
   type ProjectDto,
   type RoleDefinition,
+  runtimeRoleProblem,
+  splitBackendModel,
 } from '@aom/shared';
 import { Dices, Users } from 'lucide-react';
 import { type FormEvent, useEffect, useMemo, useState } from 'react';
@@ -39,6 +43,7 @@ import { AgentAvatar } from '../components/Face.tsx';
 import { AgentStats, WorkQualityPanel } from '../components/hr/AgentStats.tsx';
 import { ChangeModelDialog, ChangeRoleDialog } from '../components/hr/ChangeDialogs.tsx';
 import { RecommendationList, RoleUpdates } from '../components/hr/Recommendations.tsx';
+import { unionExtras } from '../components/ModelSelect.tsx';
 import { SandboxWarning } from '../components/SandboxWarning.tsx';
 import { ShiftClock, ShiftStopControls } from '../components/ShiftStop.tsx';
 import {
@@ -46,6 +51,7 @@ import {
   Badge,
   Button,
   ButtonLink,
+  Callout,
   Dialog,
   Disclosure,
   EmptyState,
@@ -699,12 +705,25 @@ function HireDialog({
     ...new Set(
       [
         role?.defaultModel.runtime,
-        ...(station?.runtimes.filter((r) => r.available).map((r) => r.id) ?? []),
+        // the direct API models have no shell or edit tools: an agent cannot run on them (the server refuses it)
+        ...(station?.runtimes.filter((r) => r.available && r.id !== 'direct-model').map((r) => r.id) ?? []),
       ].filter(Boolean) as string[],
     ),
   ];
 
   const effectiveRuntime = runtime || role?.defaultModel.runtime || '';
+  // Whether the role can run on the chosen runtime (the same rule the server and the runner apply), and which models the
+  // workstation offers for it: the Gemini CLI and opencode lists and the Bedrock, Vertex and gateway models are the workstation's.
+  const runtimeProblem = role?.permissions
+    ? runtimeRoleProblem(effectiveRuntime, { roleKey: role.key, permissions: role.permissions })
+    : null;
+  const stationList = station ? [station] : [];
+  // no direct providers: an agent never runs on the direct API models
+  const modelSuggestions = modelChoicesFor([effectiveRuntime], [], unionExtras(stationList)).flatMap((g) =>
+    g.models.map((m) => m.id),
+  );
+  const typedBackend = splitBackendModel(model.trim());
+  const modelCaution = typedBackend ? backendDef(typedBackend.backend)?.warning : undefined;
   const unsandboxed = !!station && isRuntimeUnsandboxed(station.runtimes, effectiveRuntime);
   const ackKey = `${effectiveStation}:${effectiveRuntime}`;
   const ackUnsandboxed = ackedFor === ackKey;
@@ -716,6 +735,7 @@ function HireDialog({
     if (unsandboxed && !ackUnsandboxed)
       errs.sandbox = 'Confirm that you accept hiring onto an unsandboxed workstation';
     if (!name.trim()) errs.name = 'A name is required';
+    if (runtimeProblem) errs.runtime = runtimeProblem;
     if (effectiveAccess.allowed !== null && effectiveAccess.allowed.length === 0)
       errs.access = 'Pick at least one project, or allow any project';
     if (!effectiveStation) errs.workstation = 'Pair a workstation first';
@@ -796,6 +816,7 @@ function HireDialog({
             label="Runtime"
             value={runtime || role?.defaultModel.runtime || ''}
             onChange={(e) => setRuntime(e.target.value)}
+            error={errors.runtime}
           >
             {runtimeOptions.map((r) => (
               <option key={r} value={r}>
@@ -803,12 +824,20 @@ function HireDialog({
               </option>
             ))}
           </Select>
-          <TextInput
-            label="Model"
-            placeholder={role?.defaultModel.model}
-            value={model}
-            onChange={(e) => setModel(e.target.value)}
-          />
+          <div>
+            <TextInput
+              label="Model"
+              placeholder={role?.defaultModel.model}
+              value={model}
+              list="hire-model-suggestions"
+              onChange={(e) => setModel(e.target.value)}
+            />
+            <datalist id="hire-model-suggestions">
+              {modelSuggestions.map((m) => (
+                <option key={m} value={m} />
+              ))}
+            </datalist>
+          </div>
           <Select label="Effort" value={effort} onChange={(e) => setEffort(e.target.value)}>
             <option value="">
               Default{role?.defaultModel.effort ? ` (${role.defaultModel.effort})` : ''}
@@ -820,6 +849,16 @@ function HireDialog({
             ))}
           </Select>
         </div>
+        {runtimeProblem && (
+          <Callout tone="danger" role="alert" data-testid="hire-runtime-problem">
+            This role cannot run on {effectiveRuntime}: {runtimeProblem}
+          </Callout>
+        )}
+        {modelCaution && (
+          <Callout tone="warning" data-testid="hire-model-caution">
+            {modelCaution}
+          </Callout>
+        )}
         <div>
           <ProjectAccessEditor
             value={effectiveAccess}

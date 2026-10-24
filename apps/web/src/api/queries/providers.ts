@@ -1,6 +1,8 @@
 import {
-  type DirectProviderId,
+  backendDef,
+  type ProviderKeyId,
   type SetProviderKeyRequest,
+  sealLarge,
   type WorkstationProvidersResponse,
   WorkstationProvidersResponseSchema,
 } from '@aom/shared';
@@ -35,18 +37,20 @@ function refreshSoon(qc: ReturnType<typeof useQueryClient>, workstationId: strin
 export function useSetProviderKey(workstationId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (v: {
-      provider: DirectProviderId;
-      key: string;
-      baseUrl?: string;
-      models: string[];
-    }) => {
+    mutationFn: async (v: { provider: ProviderKeyId; key: string; baseUrl?: string; models: string[] }) => {
       const sealed = await get<{ keyId: string; publicKey: string }>(
         `/workstations/${workstationId}/sudo-key`,
       );
       const body: SetProviderKeyRequest = {
         keyId: sealed.keyId,
-        ...(v.key ? { ciphertext: await encryptForRunner(sealed.publicKey, v.key) } : {}),
+        // A Claude Code backend's credential is a JSON of fields (longer than RSA can take): sealed hybrid. A key is short: RSA-OAEP.
+        ...(v.key
+          ? {
+              ciphertext: backendDef(v.provider)
+                ? await sealLarge(sealed.publicKey, v.key)
+                : await encryptForRunner(sealed.publicKey, v.key),
+            }
+          : {}),
         ...(v.baseUrl ? { baseUrl: v.baseUrl } : {}),
         models: v.models,
       };
@@ -59,7 +63,7 @@ export function useSetProviderKey(workstationId: string) {
 export function useRemoveProviderKey(workstationId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (provider: DirectProviderId) => del(`/workstations/${workstationId}/providers/${provider}`),
+    mutationFn: (provider: ProviderKeyId) => del(`/workstations/${workstationId}/providers/${provider}`),
     onSuccess: () => refreshSoon(qc, workstationId),
   });
 }

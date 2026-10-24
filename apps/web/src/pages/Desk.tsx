@@ -944,6 +944,23 @@ function ResolveButtons({ item }: { item: DeskItemDto }) {
           </>
         ) : item.subkind === 'budget_paused' && item.budgetProject ? (
           <BudgetActions item={item} />
+        ) : item.subkind === 'provider_cap_paused' || item.subkind === 'provider_cap_warning' ? (
+          <>
+            <Button
+              variant="primary"
+              data-testid="desk-provider-cap-open"
+              onClick={() => nav('/settings/providers')}
+            >
+              Open Model providers
+            </Button>
+            <Button
+              onClick={() =>
+                resolve.mutate({ id: item.id, body: { resolution: 'acknowledged' } }, done('Acknowledged'))
+              }
+            >
+              Acknowledge
+            </Button>
+          </>
         ) : item.subkind === 'repo_create_failed' ? (
           // Also for alerts the server stored without options: Retry queues the same request again.
           <Button

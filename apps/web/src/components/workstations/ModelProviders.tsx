@@ -1,12 +1,24 @@
 import {
+  BACKENDS,
+  type BackendDef,
   DIRECT_PROVIDERS,
   DIRECT_RUNTIME,
   type DirectProviderDef,
+  type KeySource,
+  type ReportedBackend,
   type ReportedProvider,
   type WorkstationDto,
 } from '@aom/shared';
 import { useState } from 'react';
 import { useRemoveProviderKey, useSetProviderKey } from '../../api/queries/providers.ts';
+import {
+  type CredentialDraft,
+  CredentialFields,
+  draftProblem,
+  emptyDraft,
+  parseModelIds,
+  secretOf,
+} from '../providers/CredentialFields.tsx';
 import { Badge, Button, Callout, ErrorBox, TextInput, useToast } from '../ui.tsx';
 
 /** Does this workstation's runner have the direct API adapter? Older runners do not report the runtime at all. */
@@ -15,6 +27,45 @@ export const supportsDirect = (runtimes: WorkstationDto['runtimes']): boolean =>
 
 export const providersOf = (runtimes: WorkstationDto['runtimes']): ReportedProvider[] =>
   runtimes.find((r) => r.id === DIRECT_RUNTIME)?.providers ?? [];
+
+/** The Claude Code backends (Bedrock, Vertex, a gateway) that have a credential on this workstation. */
+export const backendsOf = (runtimes: WorkstationDto['runtimes']): ReportedBackend[] =>
+  runtimes.find((r) => r.id === 'claude-code')?.backends ?? [];
+
+/** Does the runner keep organization keys and the Claude Code backends? Newer runners always report their `keys`, even none. */
+export const supportsBackends = (runtimes: WorkstationDto['runtimes']): boolean =>
+  runtimes.find((r) => r.id === DIRECT_RUNTIME)?.keys !== undefined;
+
+/** Whose key is in effect, in words: the workstation's own key overrides the organization's. */
+export function KeySourceBadge({
+  source,
+  orgKey,
+}: {
+  source: KeySource | undefined;
+  orgKey: boolean | undefined;
+}) {
+  if (source === 'org')
+    return (
+      <Badge
+        tone="info"
+        title="The organization's key, sent by an Owner or Admin. Runs on it count against the organization's monthly cap."
+      >
+        Organization key
+      </Badge>
+    );
+  return (
+    <Badge
+      tone="neutral"
+      title={
+        orgKey
+          ? 'This workstation has its own key; the organization also has one, which this key overrides. Runs on your own key are not capped.'
+          : 'Your own key. Runs on it are not capped.'
+      }
+    >
+      {orgKey ? 'Own key (overrides the organization’s)' : 'Own key'}
+    </Badge>
+  );
+}
 
 const parseModels = (text: string): string[] => [
   ...new Set(
@@ -46,8 +97,11 @@ export function ModelProviders({ w, canEdit }: { w: WorkstationDto; canEdit: boo
           <Callout tone="info">
             A key is encrypted in your browser for the runner of this workstation and kept only there. Calls
             go from this workstation straight to the provider; Guildwise never sees the key or the traffic.
-            These models talk in Discovery, the Boardroom and chat. They have no shell or file tools, so card
-            work stays on Claude Code.
+            These models talk in Discovery, the Boardroom and chat. They have no shell or file tools: for card
+            work the same keys serve the Gemini CLI and opencode runtimes, and Claude Code can use Bedrock,
+            Vertex AI or a gateway (below). An Owner or Admin can also share an organization-wide key with
+            this workstation (Settings, Model providers); a key you add here overrides it and is not subject
+            to the organization's monthly cap.
           </Callout>
           <ul className="mt-2 flex flex-col gap-2">
             {DIRECT_PROVIDERS.map((def) => (
@@ -62,7 +116,147 @@ export function ModelProviders({ w, canEdit }: { w: WorkstationDto; canEdit: boo
           </ul>
         </>
       )}
+      {supported && <BackendsSection w={w} canEdit={canEdit} />}
     </div>
+  );
+}
+
+/** Claude Code against Amazon Bedrock, Google Vertex AI or an Anthropic-compatible gateway: same harness and sandbox, another backend. */
+function BackendsSection({ w, canEdit }: { w: WorkstationDto; canEdit: boolean }) {
+  if (!supportsBackends(w.runtimes))
+    return (
+      <p className="mt-3 text-xs text-muted" data-testid="backends-update-runner">
+        Update the runner to use Claude Code with Amazon Bedrock, Google Vertex AI or a gateway.
+      </p>
+    );
+  const reported = backendsOf(w.runtimes);
+  return (
+    <div className="mt-4" data-testid="claude-backends">
+      <p className="mb-1 text-xs font-medium text-subtle">Claude Code on another backend</p>
+      <p className="mb-2 text-xs text-muted">
+        Agents keep Claude Code's tools and sandbox; only the model comes from your cloud account or gateway.
+        Pick such a model when you hire an agent or change its model. The credentials are encrypted for this
+        runner and put into that agent's process only.
+      </p>
+      <ul className="flex flex-col gap-2">
+        {BACKENDS.map((def) => (
+          <BackendRow
+            key={def.id}
+            def={def}
+            w={w}
+            reported={reported.find((b) => b.id === def.id)}
+            canEdit={canEdit}
+          />
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function BackendRow({
+  def,
+  w,
+  reported,
+  canEdit,
+}: {
+  def: BackendDef;
+  w: WorkstationDto;
+  reported: ReportedBackend | undefined;
+  canEdit: boolean;
+}) {
+  const set = useSetProviderKey(w.id);
+  const remove = useRemoveProviderKey(w.id);
+  const toast = useToast();
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState<CredentialDraft>(emptyDraft());
+  const problem = draftProblem(def.id, draft);
+  const offline = !w.connected;
+  const save = () =>
+    set.mutate(
+      { provider: def.id, key: secretOf(def.id, draft), models: parseModelIds(draft.models) },
+      {
+        onSuccess: () => {
+          setDraft(emptyDraft());
+          setOpen(false);
+          toast.success(`${def.label} sent to ${w.name}`);
+        },
+      },
+    );
+  return (
+    <li
+      className="rounded-control border border-line bg-canvas p-3 text-sm"
+      data-testid={`backend-${def.id}`}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="font-medium text-fg">{def.label}</span>
+        <span className="flex flex-wrap items-center gap-1.5">
+          {reported && <KeySourceBadge source={reported.keySource} orgKey={reported.orgKey} />}
+          <Badge tone={reported ? 'green' : 'neutral'}>{reported ? 'Configured' : 'Not configured'}</Badge>
+        </span>
+      </div>
+      {reported && (
+        <p className="mt-1 text-xs text-muted" data-testid={`backend-models-${def.id}`}>
+          {reported.detail ? `${reported.detail}: ` : ''}
+          {reported.models.length
+            ? reported.models.map((m) => m.label).join(', ')
+            : 'No models yet: add model ids'}
+        </p>
+      )}
+      <p className="mt-1 text-xs text-subtle">{def.dataNote}</p>
+      {def.warning && (
+        <p className="mt-1 text-xs text-warning-soft-fg" data-testid={`backend-warning-${def.id}`}>
+          {def.warning}
+        </p>
+      )}
+      {canEdit && (
+        <div className="mt-2 flex flex-wrap gap-2">
+          <Button
+            size="sm"
+            disabled={offline}
+            onClick={() => setOpen((o) => !o)}
+            data-testid={`backend-edit-${def.id}`}
+          >
+            {reported ? 'Replace credentials' : 'Add credentials'}
+          </Button>
+          {reported && (
+            <Button
+              size="sm"
+              variant="danger-ghost"
+              disabled={offline}
+              loading={remove.isPending}
+              data-testid={`backend-remove-${def.id}`}
+              onClick={() =>
+                remove.mutate(def.id, {
+                  onSuccess: () => toast.success(`${def.label} removed from ${w.name}`),
+                })
+              }
+            >
+              Remove
+            </Button>
+          )}
+          {offline && <span className="self-center text-xs text-subtle">The workstation is offline.</span>}
+        </div>
+      )}
+      {open && !offline && canEdit && (
+        <div className="mt-2 flex flex-col gap-2">
+          <CredentialFields id={def.id} draft={draft} onChange={setDraft} testPrefix="backend" />
+          <div>
+            <Button
+              variant="primary"
+              size="sm"
+              loading={set.isPending}
+              disabled={!!problem}
+              title={problem ?? undefined}
+              data-testid={`backend-save-${def.id}`}
+              onClick={save}
+            >
+              Save
+            </Button>
+          </div>
+        </div>
+      )}
+      <ErrorBox error={set.error ?? remove.error} />
+    </li>
   );
 }
 
@@ -111,13 +305,16 @@ function ProviderRow({
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="font-medium text-fg">{def.label}</span>
-        {reported ? (
-          <Badge tone={reported.problem ? 'neutral' : 'green'}>
-            {reported.problem ? 'Problem' : 'Configured'}
-          </Badge>
-        ) : (
-          <Badge tone="neutral">Not configured</Badge>
-        )}
+        <span className="flex flex-wrap items-center gap-1.5">
+          {reported && <KeySourceBadge source={reported.keySource} orgKey={reported.orgKey} />}
+          {reported ? (
+            <Badge tone={reported.problem ? 'neutral' : 'green'}>
+              {reported.problem ? 'Problem' : 'Configured'}
+            </Badge>
+          ) : (
+            <Badge tone="neutral">Not configured</Badge>
+          )}
+        </span>
       </div>
       {reported && (
         <p className="mt-1 text-xs text-muted" data-testid={`provider-models-${def.id}`}>

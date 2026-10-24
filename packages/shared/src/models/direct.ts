@@ -258,7 +258,11 @@ export const ProviderKeyResultSchema = z.object({
 export type ProviderKeyResult = z.infer<typeof ProviderKeyResultSchema>;
 
 /** `PUT /api/workstations/:id/providers/:provider`: the browser's sealed key (same shape as the command payload). */
-export const SetProviderKeyRequestSchema = ProviderKeySetPayloadSchema.omit({ provider: true });
+export const SetProviderKeyRequestSchema = ProviderKeySetPayloadSchema.omit({
+  provider: true,
+  source: true,
+  orgId: true,
+});
 export type SetProviderKeyRequest = z.infer<typeof SetProviderKeyRequestSchema>;
 
 /** `GET /api/workstations/:id/providers`: what the runner reports (names and models), and what the catalogue offers. */

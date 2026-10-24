@@ -1,4 +1,14 @@
-import { DIRECT_RUNTIME, type ModelChoice, modelChoicesFor, type ReportedProvider } from '@aom/shared';
+import {
+  backendDef,
+  DIRECT_RUNTIME,
+  type ModelChoice,
+  modelChoicesFor,
+  type ReportedBackend,
+  type ReportedModel,
+  type ReportedProvider,
+  type RuntimeExtras,
+  splitBackendModel,
+} from '@aom/shared';
 import { Select } from './ui.tsx';
 
 /** Role pickers for the three models; empty means "the default for the workstation" (cheap for personas and the Chair, strong for the minutes). */
@@ -9,6 +19,7 @@ export function ModelSelect({
   onChange,
   runtimes,
   providers,
+  extras,
   defaultLabel = 'Default',
   ariaLabel,
 }: {
@@ -18,17 +29,27 @@ export function ModelSelect({
   onChange: (v: string) => void;
   runtimes: string[];
   providers: ReportedProvider[];
+  /** The Claude Code backends and the data-driven model lists the workstations report (`unionExtras`). */
+  extras?: RuntimeExtras;
   defaultLabel?: string;
   ariaLabel?: string;
 }) {
-  const groups = modelChoicesFor(runtimes.length ? runtimes : undefined, providers);
+  const groups = modelChoicesFor(runtimes.length ? runtimes : undefined, providers, extras);
   const direct = value.startsWith(`${DIRECT_RUNTIME}/`);
+  // a model behind a gateway may follow Claude Code's tools and instructions less reliably: said where it is picked
+  const picked = value.startsWith('claude-code/')
+    ? splitBackendModel(value.slice('claude-code/'.length))
+    : null;
+  const caution = picked ? backendDef(picked.backend)?.warning : undefined;
   return (
     <Select
       label={label}
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      hint={direct ? 'Direct API model: no shell or file tools, which a boardroom does not need.' : hint}
+      hint={
+        caution ??
+        (direct ? 'Direct API model: no shell or file tools, which a boardroom does not need.' : hint)
+      }
       aria-label={ariaLabel}
     >
       <option value="">{defaultLabel}</option>
@@ -67,4 +88,34 @@ export function unionProviders(
           else for (const m of p.models) if (!cur.models.some((x) => x.id === m.id)) cur.models.push(m);
         }
   return [...by.values()];
+}
+
+/**
+ * What the workstations report beyond the direct providers: the Claude Code backends with a credential (models united by
+ * backend) and the data-driven model lists of the Gemini CLI and opencode (united by runtime).
+ */
+export function unionExtras(
+  list: ReadonlyArray<{
+    runtimes?: Array<{ id: string; backends?: ReportedBackend[]; models?: ReportedModel[] }>;
+  }>,
+): RuntimeExtras {
+  const backends = new Map<string, ReportedBackend>();
+  const models: Record<string, ReportedModel[]> = {};
+  for (const w of list)
+    for (const r of w.runtimes ?? []) {
+      for (const b of r.backends ?? []) {
+        const cur = backends.get(b.id);
+        if (!cur) backends.set(b.id, { ...b, models: [...b.models] });
+        else for (const m of b.models) if (!cur.models.some((x) => x.id === m.id)) cur.models.push(m);
+      }
+      if (r.models?.length) {
+        const cur = models[r.id] ?? [];
+        models[r.id] = cur;
+        for (const m of r.models) if (!cur.some((x) => x.id === m.id)) cur.push(m);
+      }
+    }
+  return {
+    ...(backends.size ? { backends: [...backends.values()] } : {}),
+    ...(Object.keys(models).length ? { models } : {}),
+  };
 }

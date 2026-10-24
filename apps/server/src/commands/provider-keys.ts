@@ -1,6 +1,8 @@
 import {
+  BACKEND_IDS,
   DIRECT_MODEL_CAPABILITY,
-  type DirectProviderId,
+  PROVIDER_KEYS_CAPABILITY,
+  type ProviderKeyId,
   ProviderKeyResultSchema,
   type ReportedProvider,
   type SetProviderKeyRequest,
@@ -28,7 +30,7 @@ const KEY_TTL_MS = 24 * 3600_000;
 /** The last answer of a runner to a key command, per workstation and provider: transient, for the page right after a save. */
 const lastResults = new Map<
   string,
-  { provider: DirectProviderId; stored: boolean; error?: string; warning?: string; at: Date }
+  { provider: ProviderKeyId; stored: boolean; error?: string; warning?: string; at: Date }
 >();
 
 async function ownWorkstation(
@@ -49,7 +51,7 @@ export async function setProviderKey(
   ctx: Ctx,
   user: AuthSession['user'],
   workstationId: string,
-  provider: DirectProviderId,
+  provider: ProviderKeyId,
   body: SetProviderKeyRequest,
 ): Promise<void> {
   await withAppendTx(ctx.pool, async (tx) => {
@@ -57,18 +59,26 @@ export async function setProviderKey(
     const k = await one(tx, 'SELECT key_id FROM workstation_keys WHERE workstation_id=$1', [workstationId]);
     if (!k || k.key_id !== body.keyId)
       throw conflict('sudo_key_changed', "the runner's key changed: reload the page and enter the key again");
+    // Bedrock, Vertex and a gateway (Claude Code backends) need a runner that knows them; a direct provider needs the direct-model adapter.
+    const backend = (BACKEND_IDS as readonly string[]).includes(provider);
     const caps = await one(
       tx,
       'SELECT $2 = ANY(capabilities) AS ok FROM workstation_capabilities WHERE workstation_id=$1',
-      [workstationId, DIRECT_MODEL_CAPABILITY],
+      [workstationId, backend ? PROVIDER_KEYS_CAPABILITY : DIRECT_MODEL_CAPABILITY],
     );
     if (!caps?.ok)
-      throw unprocessable('runner_too_old', 'update the runner on this workstation to use direct API models');
+      throw unprocessable(
+        'runner_too_old',
+        backend
+          ? 'update the runner on this workstation to use Amazon Bedrock, Google Vertex AI or a gateway with Claude Code'
+          : 'update the runner on this workstation to use direct API models',
+      );
     // One key per provider is pending at a time.
     await exec(
       tx,
       `UPDATE runner_commands SET status='failed', payload='{}'::jsonb
-        WHERE workstation_id=$1 AND type='provider.key.set' AND status IN ('pending','sent') AND payload->>'provider' = $2`,
+        WHERE workstation_id=$1 AND type='provider.key.set' AND status IN ('pending','sent') AND payload->>'provider' = $2
+          AND payload->>'source' IS DISTINCT FROM 'org'`,
       [workstationId, provider],
     );
     await enqueueRunnerCommand(
@@ -92,14 +102,15 @@ export async function clearProviderKey(
   ctx: Ctx,
   user: AuthSession['user'],
   workstationId: string,
-  provider: DirectProviderId,
+  provider: ProviderKeyId,
 ): Promise<void> {
   await withAppendTx(ctx.pool, async (tx) => {
     await ownWorkstation(ctx, tx, user, workstationId);
     await exec(
       tx,
       `UPDATE runner_commands SET status='failed', payload='{}'::jsonb
-        WHERE workstation_id=$1 AND type='provider.key.set' AND status IN ('pending','sent') AND payload->>'provider' = $2`,
+        WHERE workstation_id=$1 AND type='provider.key.set' AND status IN ('pending','sent') AND payload->>'provider' = $2
+          AND payload->>'source' IS DISTINCT FROM 'org'`,
       [workstationId, provider],
     );
     await enqueueRunnerCommand(tx, workstationId, 'provider.key.clear', { provider });
@@ -120,7 +131,7 @@ export async function applyProviderKeyResult(
   // The organization's key: only the fact that the copy was stored goes to the share row (the page of the Owner and Admins).
   if (payload.source === 'org') return applyOrgKeyResult(ctx, workstationId, commandId, payload, ok, result);
   const parsed = ok ? ProviderKeyResultSchema.safeParse(result).data : undefined;
-  const provider = String(payload.provider) as DirectProviderId;
+  const provider = String(payload.provider) as ProviderKeyId;
   lastResults.set(workstationId, {
     provider,
     stored: parsed?.stored ?? ok,

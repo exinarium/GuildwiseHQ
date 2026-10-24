@@ -11,8 +11,18 @@ import { PlanTab } from '../components/orgsettings/PlanTab.tsx';
 import { ProjectLinksTab } from '../components/orgsettings/ProjectLinksTab.tsx';
 import { panelId, tabId } from '../components/ui/Tabs.tsx';
 import { EmptyState, ErrorBox, PageHeader, PageSkeleton, Tabs } from '../components/ui.tsx';
+import { OrgProvidersBody } from './OrgProviders.tsx';
 
-type TabId = 'general' | 'members' | 'invitations' | 'guests' | 'mail' | 'links' | 'plan' | 'billing';
+type TabId =
+  | 'general'
+  | 'members'
+  | 'invitations'
+  | 'guests'
+  | 'mail'
+  | 'links'
+  | 'providers'
+  | 'plan'
+  | 'billing';
 
 /** `/settings/org`: General, Members, Invitations, Guests, Plan & limits (docs/design/organizations.md section 11.2). */
 export function OrgSettings() {
@@ -30,6 +40,7 @@ export function OrgSettings() {
           { id: 'guests', label: 'Guests' },
           { id: 'mail', label: 'E-mail inbox' },
           { id: 'links', label: 'Project links' },
+          { id: 'providers', label: 'Model providers' },
           { id: 'plan', label: 'Plan & limits' },
         ]
       : []),
@@ -70,6 +81,7 @@ export function OrgSettings() {
         {tab === 'guests' && manager && <GuestsTab />}
         {tab === 'mail' && manager && role && <MailInboxTab orgRole={role === 'owner' ? 'owner' : 'admin'} />}
         {tab === 'links' && manager && <ProjectLinksTab />}
+        {tab === 'providers' && manager && <OrgProvidersBody />}
         {tab === 'plan' && manager && <PlanTab org={org.data} />}
         {tab === 'billing' && role === 'owner' && <BillingTab />}
       </div>
