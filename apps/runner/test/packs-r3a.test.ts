@@ -515,7 +515,7 @@ describe('authored packs', () => {
     const up = r.reports.at(-1);
     expect(up?.state).toBe('update');
     expect(up?.snapshot?.ref).toBe('v2');
-    expect((up?.diff as { addedCapabilities: unknown[] }).addedCapabilities).toHaveLength(1);
+    expect((up?.diff as { addedCapabilities: unknown[] } | undefined)?.addedCapabilities).toHaveLength(1);
     // the serving revision is still the pinned one until the server moves the pin
     const reg = new CapabilityRegistry({ packs: r.m });
     expect(reg.entries(undefined, ORG, { owner: true }).filter((e) => e.pack)).toHaveLength(1);
@@ -712,5 +712,20 @@ describe('an authored organization pack travels to another workstation sealed, a
         })
       ).ok,
     ).toBe(false);
+  });
+});
+
+describe('who a chat or a turn is, for private packs', () => {
+  it('a session turn is the owner’s only when its creator is this workstation’s own user; an agent is itself', async () => {
+    const { viewerOfChat } = await import('../src/chat/chat.ts');
+    expect(viewerOfChat({ agent: { agentId: AGENT }, session: { ownerSession: true } })).toEqual({
+      owner: true,
+    });
+    expect(viewerOfChat({ agent: { agentId: AGENT }, session: { ownerSession: false } })).toEqual({
+      owner: false,
+    });
+    // a session from an older server says nothing: the private packs are not served
+    expect(viewerOfChat({ agent: { agentId: AGENT }, session: {} })).toEqual({ owner: false });
+    expect(viewerOfChat({ agent: { agentId: AGENT } })).toEqual({ agentId: AGENT });
   });
 });

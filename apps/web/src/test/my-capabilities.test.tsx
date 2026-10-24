@@ -1,4 +1,4 @@
-import { type AuthoredCapability, capabilitiesOfTree, packTree, unzipTree } from '@aom/shared';
+import { type AuthoredCapability, capabilitiesOfTree, packTree, sealLarge, unzipTree } from '@aom/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -330,6 +330,31 @@ describe('My capabilities', () => {
     const card = await screen.findByTestId('my-pack-mine');
     expect(within(card).getByTestId('pack-state')).toHaveTextContent('waiting for an Owner or Admin');
     expect(card).toHaveTextContent(/waits for an Owner or Admin to review it/);
+  });
+
+  it('opens a saved pack in the editor: the files come back sealed to a key only this page has', async () => {
+    const user = userEvent.setup();
+    let replyKey = '';
+    stub({
+      ...owner,
+      'GET /api/my-capabilities': () => myPacks(),
+      'GET /api/pack-assignments': () => ({ items: [] }),
+      'GET /api/agents': () => ({ agents: [] }),
+      'POST /api/my-capabilities/': (init) => {
+        replyKey = JSON.parse(String(init.body)).replyKey;
+        return { requestId: '0192f3a0-0000-7000-8000-0000000000e9' };
+      },
+      'GET /api/my-capabilities/reads/': async () => ({
+        status: 'ready',
+        ciphertext: await sealLarge(replyKey, JSON.stringify({ tree: packTree([persona]) })),
+      }),
+    });
+    wrap(<MyCapabilitiesTab />);
+    await user.click(await screen.findByTestId('edit-pack'));
+    expect(await screen.findByTestId('pack-editor')).toBeInTheDocument();
+    expect(screen.getByTestId('editor-cap-persona-critic')).toBeInTheDocument();
+    // the private pack offers the grant of agents of its workstation
+    expect(screen.getByTestId('grant-agents')).toHaveTextContent('No agent runs on this workstation');
   });
 
   it('shows a refusal of the workstation, and offline editing as a message instead of a spinner', async () => {

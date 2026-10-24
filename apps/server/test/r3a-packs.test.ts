@@ -282,6 +282,23 @@ describe('authored private packs: only the owner sees them', () => {
     expect((await replay(member.id, 'member')).some((e) => e.streamId === `pack-${id}`)).toBe(true);
   });
 
+  it('reads the files back for the editor sealed to a key only the page has, for the owner alone, and keeps no copy', async () => {
+    const replyKey = makeKey().publicKey;
+    const r = await asMember('POST', `/api/my-capabilities/${id}/read`, { replyKey }, 202);
+    const cmd = await mem.waitFor('command', (f) => f.command === 'pack.read' && f.payload.requestId === r.requestId);
+    expect(cmd.payload).toMatchObject({ packId: id, replyKey });
+    expect((await asMember('GET', `/api/my-capabilities/reads/${r.requestId}`)).status).toBe('pending');
+    const ciphertext = await sealLarge(replyKey, JSON.stringify({ tree: packTree([critic]) }));
+    mem.send('command.result', { commandId: cmd.commandId, ok: true, result: { ok: true, ciphertext } });
+    await until(async () => (await asMember('GET', `/api/my-capabilities/reads/${r.requestId}`)).status === 'ready');
+    expect((await asMember('GET', `/api/my-capabilities/reads/${r.requestId}`)).ciphertext).toBe(ciphertext);
+    // nobody else can fetch the answer, start a read of this pack, or find the ciphertext in the database
+    await ok(w.t.req('GET', `/api/my-capabilities/reads/${r.requestId}`, { cookie: w.owner.cookie }), 404);
+    await asOwner('POST', `/api/my-capabilities/${id}/read`, { replyKey }, 404);
+    expect(await q(`SELECT 1 FROM runner_commands WHERE payload::text LIKE $1`, [`%${ciphertext.slice(0, 40)}%`])).toEqual([]);
+    expect(await q(`SELECT 1 FROM events WHERE payload::text LIKE $1`, [`%${ciphertext.slice(0, 40)}%`])).toEqual([]);
+  });
+
   it('takes a later save as the owner’s own and does not leave it waiting for a review', async () => {
     const snap2 = revision('mine', [critic, { ...summarise, body: 'Be shorter.' }], 2);
     mem.send('packs.report', { packId: id, state: 'update', snapshot: snap2, diff: {} });
