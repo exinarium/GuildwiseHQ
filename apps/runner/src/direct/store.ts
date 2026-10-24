@@ -161,7 +161,10 @@ export class ProviderStore {
   }
 
   private saveSlot(source: KeySource, orgId: string | undefined, slot: SlotFileContent): void {
-    if (source === 'workstation') return this.write(this.deps.file, slot);
+    if (source === 'workstation') {
+      this.write(this.deps.file, slot);
+      return;
+    }
     if (!orgId) throw new Error('an organization key needs its organization');
     const all = this.orgs();
     if (Object.keys(slot).length === 0) delete all[orgId];
