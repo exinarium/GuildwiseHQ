@@ -846,6 +846,21 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     else if (!input.agent.isDevops) this.assertCanRun();
     const account = this.account(input.account);
     const bk = this.backendSession(input.agent, input.shiftId, input.orgId);
+    // The Vertex key file exists from here on: whatever fails before the process runs (and so before its exit hook can remove
+    // the file) removes it.
+    try {
+      return await this.startShiftSession(input, account, bk);
+    } catch (err) {
+      bk?.cleanup();
+      throw err;
+    }
+  }
+
+  private async startShiftSession(
+    input: ShiftStartInput,
+    account: ReturnType<ClaudeCodeAdapter['account']>,
+    bk: ReturnType<ClaudeCodeAdapter['backendSession']>,
+  ): Promise<RuntimeSession> {
     const dir = input.sandbox.configDir;
     await mkdir(dir, { recursive: true });
     const guard = input.agent.isDevops ? this.devopsGuard(dir, input.devopsGuard, 'shift') : undefined;
@@ -943,6 +958,22 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     };
     const account = this.account(input.account);
     const bk = this.backendSession(input.agent, input.chatId, input.orgId);
+    // see `start`: the Vertex key file is removed when anything fails before the process runs
+    try {
+      return await this.startChatSession(input, chatInput, devops, account, bk);
+    } catch (err) {
+      bk?.cleanup();
+      throw err;
+    }
+  }
+
+  private async startChatSession(
+    input: ChatStartInput,
+    chatInput: ChatStartInput,
+    devops: boolean,
+    account: ReturnType<ClaudeCodeAdapter['account']>,
+    bk: ReturnType<ClaudeCodeAdapter['backendSession']>,
+  ): Promise<RuntimeSession> {
     const dir = input.sandbox.configDir;
     await mkdir(dir, { recursive: true });
     const guard = devops ? this.devopsGuard(dir, input.devopsGuard, 'chat') : undefined;

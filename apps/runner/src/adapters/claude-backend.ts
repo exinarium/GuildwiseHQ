@@ -1,4 +1,5 @@
-import { chmodSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
+import { chmodSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { type BackendId, splitBackendModel, type Usage } from '@aom/shared';
 import type { BackendConfig } from '../direct/store.ts';
@@ -77,13 +78,17 @@ export function backendProcessEnv(
 }
 
 /**
- * The Vertex service account key, written for the claude process only: `<secrets dir>/vertex-<session>.json` (mode 0600). The
- * secrets folder is hidden from every agent's shell. The caller removes it when the session ends (`removeVertexKey`).
+ * The Vertex service account key, written for the claude process only: `<secrets dir>/vertex-<session>-<random>.json` (mode 0600,
+ * created exclusively: an existing file is never reused). The secrets folder is hidden from every agent's shell. The caller removes
+ * it when the session ends (`removeVertexKey`) or fails to start; `sweepVertexKeys` removes what a crash left behind.
  */
 export function writeVertexKey(secretsDir: string, session: string, json: string): string {
   mkdirSync(secretsDir, { recursive: true, mode: 0o700 });
-  const file = join(secretsDir, `vertex-${session.replace(/[^A-Za-z0-9_-]/g, '_')}.json`);
-  writeFileSync(file, json, { mode: 0o600 });
+  const file = join(
+    secretsDir,
+    `vertex-${session.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 40)}-${randomBytes(8).toString('hex')}.json`,
+  );
+  writeFileSync(file, json, { mode: 0o600, flag: 'wx' });
   try {
     chmodSync(file, 0o600);
   } catch {
@@ -95,6 +100,24 @@ export function writeVertexKey(secretsDir: string, session: string, json: string
 export const removeVertexKey = (file: string | undefined): void => {
   if (file) rmSync(file, { force: true });
 };
+
+/**
+ * Removes every `vertex-*.json` in the secrets folder. Called when the runner starts: no claude process survives the runner (they
+ * are killed with it), so a key file found then belongs to a session that ended abnormally.
+ */
+export function sweepVertexKeys(secretsDir: string): number {
+  let n = 0;
+  try {
+    for (const f of readdirSync(secretsDir))
+      if (/^vertex-.*\.json$/.test(f)) {
+        rmSync(join(secretsDir, f), { force: true });
+        n++;
+      }
+  } catch {
+    // no secrets folder yet
+  }
+  return n;
+}
 
 /**
  * Usage of a backend session: which key paid (the server counts the organization's against its cap) and a model name the cost

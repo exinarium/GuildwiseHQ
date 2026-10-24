@@ -1,4 +1,12 @@
-import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { BUILTIN_ROLES, type ProviderKeyId, sealLarge } from '@aom/shared';
 import { describe, expect, it } from 'vitest';
@@ -7,6 +15,8 @@ import {
   backendProcessEnv,
   backendRoleProblem,
   stampBackendUsage,
+  sweepVertexKeys,
+  writeVertexKey,
 } from '../src/adapters/claude-backend.ts';
 import { ClaudeCodeAdapter } from '../src/adapters/claude-code.ts';
 import type { RuntimeEvent } from '../src/adapters/types.ts';
@@ -411,6 +421,63 @@ console.log(${JSON.stringify(RESULT)});
     expect(r.keyFile.startsWith(x.paths.secrets)).toBe(true);
     expect(existsSync(r.keyFile)).toBe(false);
     expect(readdirSync(x.paths.secrets).filter((f) => f.startsWith('vertex-'))).toEqual([]);
+  });
+
+  it('removes the Vertex key when the session fails before the process runs (finding 11)', async () => {
+    const x = await setup();
+    x.store.set({
+      provider: 'vertex',
+      keyId: x.keys.publicKey.keyId,
+      ciphertext: await sealLarge(
+        x.keys.publicKey.publicKey,
+        JSON.stringify({ projectId: 'my-proj-1', region: 'us-east5', serviceAccountJson: SA }),
+      ),
+      models: [],
+    });
+    // the config folder cannot be made (its parent is a file): everything after the key file was written fails
+    const blocker = join(x.t, 'a-file');
+    writeFileSync(blocker, 'x');
+    const vertexFiles = () => readdirSync(x.paths.secrets).filter((f) => f.startsWith('vertex-'));
+    await expect(
+      x.start('vertex:claude-sonnet-4-6', builder, {
+        sandbox: { ...x.sandbox, configDir: join(blocker, 'config') },
+      }),
+    ).rejects.toThrow();
+    expect(vertexFiles()).toEqual([]);
+    // and the chat path
+    const chatInput = {
+      chatId: 'chat-1',
+      cwd: x.t,
+      sandbox: { ...x.sandbox, configDir: join(blocker, 'config') },
+      agent: {
+        agentId: A,
+        name: 'Bob',
+        roleKey: 'builder',
+        seniority: 'senior',
+        runtime: 'claude-code',
+        model: 'vertex:claude-sonnet-4-6',
+        skills: [],
+        permissions: builder.permissions,
+        isDevops: false,
+      },
+      env: {},
+    };
+    await expect(x.adapter.startChat(chatInput as never)).rejects.toThrow();
+    expect(vertexFiles()).toEqual([]);
+  });
+
+  it('names the Vertex key file at random, exclusively, and sweeps what a crash left (finding 11)', () => {
+    const dir = tmp('aom-vertex-');
+    const a = writeVertexKey(dir, 'shift-1', '{"a":1}');
+    const b = writeVertexKey(dir, 'shift-1', '{"b":2}');
+    expect(a).not.toBe(b);
+    expect(a).toMatch(/vertex-shift-1-[0-9a-f]{16}\.json$/);
+    expect(statSync(a).mode & 0o777).toBe(0o600);
+    writeFileSync(join(dir, 'providers.json'), '{}');
+    expect(sweepVertexKeys(dir)).toBe(2);
+    expect(existsSync(a)).toBe(false);
+    expect(readdirSync(dir)).toEqual(['providers.json']);
+    expect(sweepVertexKeys(join(dir, 'missing'))).toBe(0);
   });
 
   it('refuses a backend that is not set up, and roles that need the owner’s login', async () => {

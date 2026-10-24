@@ -52,6 +52,7 @@ import {
 import { ensureClaudeAccount } from './adapters/claude-account-provision.ts';
 import { ClaudeAccountRegistry } from './adapters/claude-accounts.ts';
 import { probeClaudeLogin } from './adapters/claude-auth.ts';
+import { sweepVertexKeys } from './adapters/claude-backend.ts';
 import { ClaudeCodeAdapter, realClaudeBlocked } from './adapters/claude-code.ts';
 import { formatLimitTime } from './adapters/claude-usage-limit.ts';
 import { buildAdapters } from './adapters/registry.ts';
@@ -375,6 +376,8 @@ export class Runner {
     });
     this.deploySecrets = new DeploySecrets({ secretsDir: this.paths.secrets, keys: this.keys });
     this.providers = new ProviderStore({ file: join(this.paths.secrets, 'providers.json'), keys: this.keys });
+    // A Vertex service-account key file left by a session that ended abnormally (no claude process outlives the runner).
+    sweepVertexKeys(this.paths.secrets);
     this.serverLimitFile = join(this.paths.root, 'server-limits.json');
     // Until the server says otherwise: the owner's saved choice, else this runner's own configured value.
     this.maxConcurrent =
