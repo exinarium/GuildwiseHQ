@@ -45,7 +45,7 @@ export function HirePackDialog({
     projects.data?.find((p) => p.orgId === me.data?.activeOrg?.id)?.id ?? projects.data?.[0]?.id;
   const effectiveAccess: Access = access ?? { allowed: defaultProject ? [defaultProject] : [], focus: [] };
   const toast = useToast();
-  const mine = (stations.data ?? []).filter((w) => w.userId === me.data?.user.id && w.status === 'active');
+  const mine = (stations.data ?? []).filter((w) => w.userId === me.data?.user?.id && w.status === 'active');
   const [picked, setPicked] = useState<Record<string, string>>({});
   const [workstationId, setWorkstationId] = useState('');
   const [model, setModel] = useState('');

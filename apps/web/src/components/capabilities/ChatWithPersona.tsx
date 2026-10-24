@@ -18,7 +18,7 @@ export function ChatWithPersona({ personaKey, name }: { personaKey: string; name
   const stations = useWorkstations({ enabled: true });
   const [open, setOpen] = useState(false);
   const [model, setModel] = useState('');
-  const mine = (stations.data ?? []).filter((w) => w.userId === me.data?.user.id && w.status === 'active');
+  const mine = (stations.data ?? []).filter((w) => w.userId === me.data?.user?.id && w.status === 'active');
   const go = () => {
     const [runtime, ...rest] = model.split('/');
     start.mutate(
