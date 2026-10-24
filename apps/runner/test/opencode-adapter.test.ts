@@ -26,6 +26,7 @@ import { runnerPaths } from '../src/paths.ts';
 import { ensureSandbox } from '../src/sandbox/sandbox.ts';
 import { RunnerKeys } from '../src/secrets/keys.ts';
 import { cleanupTmp, makeConfig, tmp } from './helpers.ts';
+import { sealOrg, sealWs } from './seal-helpers.ts';
 
 cleanupTmp();
 const ORG = '11111111-1111-4111-8111-111111111111';
@@ -361,8 +362,14 @@ async function world(
     store.set({
       provider: p.id,
       keyId: keys.publicKey.keyId,
-      ...(p.org ? { source: 'org' as const, orgId: ORG } : {}),
-      ...(p.key ? { ciphertext: await sealLarge(keys.publicKey.publicKey, p.key) } : {}),
+      ...(p.org ? { source: 'org' as const, orgId: ORG, generation: 1 } : {}),
+      ...(p.key
+        ? {
+            ciphertext: p.org
+              ? await sealOrg(keys, ORG, p.id, p.key, 1, p.baseUrl)
+              : await sealWs(keys, p.id, p.key, p.baseUrl),
+          }
+        : {}),
       ...(p.baseUrl ? { baseUrl: p.baseUrl } : {}),
       models: p.models ?? [],
     });
@@ -413,6 +420,7 @@ async function world(
       },
       maxShiftMinutes: 5,
       agent: agent(over.agent),
+      orgId: ORG,
       ...(over.kind ? { kind: over.kind } : {}),
       ...(over.skills
         ? {

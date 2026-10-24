@@ -14,6 +14,7 @@ import { ProviderStore } from '../src/direct/store.ts';
 import { runnerPaths } from '../src/paths.ts';
 import { ensureSandbox } from '../src/sandbox/sandbox.ts';
 import { RunnerKeys } from '../src/secrets/keys.ts';
+import { sealOrg, sealWs } from './seal-helpers.ts';
 
 /**
  * Opt-in: runs the REAL opencode binary (AOM_OPENCODE_REAL_BIN=/path/to/opencode, 1.19.4) through the adapter, inside the runner's
@@ -129,8 +130,14 @@ async function setup(
     store.set({
       provider: p.id,
       keyId: keys.publicKey.keyId,
-      ...(p.org ? { source: 'org' as const, orgId: ORG } : {}),
-      ...(p.key ? { ciphertext: await sealLarge(keys.publicKey.publicKey, p.key) } : {}),
+      ...(p.org ? { source: 'org' as const, orgId: ORG, generation: 1 } : {}),
+      ...(p.key
+        ? {
+            ciphertext: p.org
+              ? await sealOrg(keys, ORG, p.id, p.key, 1, p.baseUrl)
+              : await sealWs(keys, p.id, p.key, p.baseUrl),
+          }
+        : {}),
       ...(p.baseUrl ? { baseUrl: p.baseUrl } : {}),
       models: p.models ?? [],
     });
@@ -253,7 +260,8 @@ describe.skipIf(!BIN || !bwrapOk)('the opencode adapter against the real opencod
       keyId: w.keys.publicKey.keyId,
       source: 'org',
       orgId: ORG,
-      ciphertext: await sealLarge(w.keys.publicKey.publicKey, 'sk-real-compat-key'),
+      generation: 1,
+      ciphertext: await sealOrg(w.keys, ORG, 'openai-compatible', 'sk-real-compat-key', 1, `${api2.url}/v1`),
       baseUrl: `${api2.url}/v1`,
       models: ['m1'],
     });

@@ -33,6 +33,7 @@ import { runnerPaths } from '../src/paths.ts';
 import { ensureSandbox } from '../src/sandbox/sandbox.ts';
 import { RunnerKeys } from '../src/secrets/keys.ts';
 import { cleanupTmp, makeConfig, tmp } from './helpers.ts';
+import { sealOrg, sealWs } from './seal-helpers.ts';
 
 cleanupTmp();
 const ORG = '11111111-1111-4111-8111-111111111111';
@@ -390,8 +391,11 @@ async function world(
     store.set({
       provider: 'google',
       keyId: keys.publicKey.keyId,
-      ...(opts.key === 'org' ? { source: 'org' as const, orgId: ORG } : {}),
-      ciphertext: await sealLarge(keys.publicKey.publicKey, 'AIza-secret-key-1234'),
+      ...(opts.key === 'org' ? { source: 'org' as const, orgId: ORG, generation: 1 } : {}),
+      ciphertext:
+        opts.key === 'org'
+          ? await sealOrg(keys, ORG, 'google', 'AIza-secret-key-1234')
+          : await sealWs(keys, 'google', 'AIza-secret-key-1234'),
       models: [],
     });
   const launches: HarnessLaunch[] = [];
@@ -429,9 +433,10 @@ async function world(
     isDevops: false,
     ...over,
   });
-  const start = async (over: { agent?: object; kind?: string; devopsGuard?: object } = {}) => {
+  const start = async (over: { agent?: object; kind?: string; devopsGuard?: object; orgId?: string } = {}) => {
     const s = await adapter.start({
       shiftId: 's1',
+      ...('orgId' in over ? (over.orgId ? { orgId: over.orgId } : {}) : opts.key ? { orgId: ORG } : {}),
       prompt: 'do the card',
       instructionsMarkdown: '',
       cwd,
@@ -550,14 +555,14 @@ describe('the Gemini adapter (fake binary)', () => {
       login: j({ access_token: 'a', expiry_date: 1 }),
       mode: { lines: REAL_LINES },
     });
-    expect(both.adapter.authSelection().via).toBe('login');
+    expect(both.adapter.authSelection(ORG).via).toBe('login');
     const keyOnly = new GeminiAdapter(
       GeminiRuntimeConfigSchema.parse({ bin: both.fake.bin, authMode: 'api_key' }) as never,
       both.paths,
       both.store,
       { home: both.ownerHome },
     );
-    expect(keyOnly.authSelection().via).toBe('key');
+    expect(keyOnly.authSelection(ORG).via).toBe('key');
   });
 
   it('is available with a login or a key, reports its auth path and extra models, and is unavailable without sign-in', async () => {

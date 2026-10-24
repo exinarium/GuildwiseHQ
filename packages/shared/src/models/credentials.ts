@@ -129,10 +129,19 @@ export const ProviderKeyResealPayloadSchema = z.object({
   /** Who approved sharing, and to which workstation: for the server's bookkeeping when the answer arrives. */
   targetWorkstationId: z.uuid().optional(),
   approvedBy: z.uuid().optional(),
+  /** The generation of the organization key the admin approved sharing (`org_providers.key_generation`). */
+  generation: z.number().int().min(1).max(2_000_000_000).optional(),
+  /**
+   * `sealResealApproval` output: the admin's approval, sealed in their browser to THIS runner's key. The runner opens it and
+   * shares only to the target key it names (recomputed from `targetPublicKey`). Without a valid one it refuses.
+   */
+  approval: z.string().max(8000).optional(),
 });
 export const ProviderKeyResealResultSchema = z.object({
   ok: z.boolean(),
   ciphertext: z.string().max(20000).optional(),
+  /** The generation of the key that was sealed (the runner's own record): the server drops the answer if it is no longer current. */
+  generation: z.number().int().optional(),
   error: z.string().max(300).optional(),
 });
 export type ProviderKeyResealResult = z.infer<typeof ProviderKeyResealResultSchema>;

@@ -1399,8 +1399,39 @@ describe('chat with a persona', () => {
     await asOwner('POST', `/api/persona-chats/${id}/say`, { body: 'Second' }, 202);
     const second = await owner.waitFor('chat.start', (f) => f.threadId === id && f.chatId !== start.chatId);
     owner.send('chat.error', { chatId: second.chatId, threadId: id, error: 'cancelled' });
-    // time: past 30 minutes from the start nothing is taken
-    await q(`UPDATE threads SET created_at = created_at - interval '31 minutes' WHERE id=$1`, [id]);
+    // time: the clock is the chat's active time (the persona working), not the wall clock since it was made. A chat that sat idle
+    // for a day is still fresh ...
+    await q(`UPDATE threads SET created_at = created_at - interval '1 day' WHERE id=$1`, [id]);
+    await q(
+      `UPDATE session_turns SET queued_at = queued_at - interval '1 day', started_at = started_at - interval '1 day',
+              finished_at = finished_at - interval '1 day' WHERE thread_id=$1`,
+      [id],
+    );
+    let idleChat = '';
+    {
+      const idle = await w.t.req('POST', `/api/persona-chats/${id}/say`, {
+        cookie: w.owner.cookie,
+        body: { body: 'After a day' },
+      });
+      expect(idle.status).toBe(202);
+      const idleStart = await owner.waitFor(
+        'chat.start',
+        (f) => f.threadId === id && f.chatId !== second.chatId && f.chatId !== start.chatId,
+      );
+      idleChat = idleStart.chatId;
+      owner.send('chat.error', { chatId: idleStart.chatId, threadId: id, error: 'cancelled' });
+      await until(
+        async () =>
+          (await q(`SELECT status FROM session_turns WHERE id=$1`, [idleStart.chatId]))[0]?.status ===
+          'failed',
+      );
+    }
+    // ... and one whose persona has worked past 30 minutes takes nothing more
+    await q(
+      `UPDATE session_turns SET started_at = now() - interval '45 minutes', finished_at = now() - interval '5 minutes'
+        WHERE id=$1`,
+      [start.chatId],
+    );
     const late = await w.t.req('POST', `/api/persona-chats/${id}/say`, {
       cookie: w.owner.cookie,
       body: { body: 'Third' },
@@ -1411,9 +1442,64 @@ describe('chat with a persona', () => {
     await asOwner('POST', `/api/persona-chats/${id}/say`, { body: 'Third' }, 202);
     const third = await owner.waitFor(
       'chat.start',
-      (f) => f.threadId === id && f.chatId !== second.chatId && f.chatId !== start.chatId,
+      (f) => f.threadId === id && ![second.chatId, start.chatId, idleChat].includes(f.chatId),
     );
     owner.send('chat.error', { chatId: third.chatId, threadId: id, error: 'cancelled' });
+  });
+
+  it('finding 18: a chat with a persona is strictly one-to-one: no other user or participant can be added', async () => {
+    const r = await asOwner(
+      'POST',
+      '/api/persona-chats',
+      { personaKey: 'devils-advocate', runtime: 'mock', model: 'mock' },
+      201,
+    );
+    const id = r.session.threadId as string;
+    const other = await w.t.userSession(uniqueEmail('other'));
+    await w.t.addOrgMember(w.owner.id, other.id, 'member');
+    for (const body of [
+      { kind: 'user', refId: other.id, seat: 'Guest' },
+      { kind: 'persona', refId: 'optimist', seat: 'Extra' },
+    ]) {
+      const res = await w.t.req('POST', `/api/sessions/${id}/participants`, { cookie: w.owner.cookie, body });
+      expect(res.status, JSON.stringify(body)).toBe(409);
+      expect(res.body.error.code).toBe('persona_chat_one_to_one');
+    }
+    const parts = await q(`SELECT kind FROM thread_participants WHERE thread_id=$1 AND removed_at IS NULL`, [
+      id,
+    ]);
+    expect(parts.map((p) => p.kind).sort()).toEqual(['persona', 'user']);
+    // and the other user cannot see or write in it
+    const peek = await w.t.req('POST', `/api/persona-chats/${id}/say`, {
+      cookie: other.cookie,
+      body: { body: 'hi' },
+    });
+    expect(peek.status).toBeGreaterThanOrEqual(400);
+  });
+
+  it('finding 18: the persona-chat clock counts the persona working and one tick between messages, never an idle day', async () => {
+    const { personaChatElapsedMs } = await import('../src/sessions/persona-chat.ts');
+    const thread = randomUUID();
+    await q(
+      `INSERT INTO threads (id, org_id, kind, title, created_by, created_at, session_config)
+       VALUES ($1,$2,'persona_chat','x',$3,now() - interval '3 days','{}')`,
+      [thread, w.owner.id, w.owner.id],
+    );
+    const turn = (queued: string, started: string, finished: string | null, status: string) =>
+      q(
+        `INSERT INTO session_turns (id, org_id, thread_id, speaker_kind, speaker_name, message, context, model, status, queued_at, started_at, finished_at)
+         VALUES ($1,$2,$3,'persona','P','m','{}','{"runtime":"mock","model":"mock"}',$4, now() - $5::interval, now() - $6::interval, ${finished ? 'now() - $7::interval' : '$7::text::timestamptz'})`,
+        [randomUUID(), w.owner.id, thread, status, queued, started, finished],
+      );
+    const now = w.t.app.ctx.clock.now();
+    // two turns of 2 minutes each, a day apart; a queued turn that never started counts nothing
+    await turn('1 day 2 minutes', '1 day 2 minutes', '1 day', 'done');
+    await turn('10 minutes', '10 minutes', '8 minutes', 'done');
+    await turn('5 minutes', '5 minutes', null, 'queued');
+    const ms = await personaChatElapsedMs(w.t.app.ctx.pool, thread, now);
+    // 2 + 2 minutes of work + one tick (60 s) between the turns + one tick since the last reply: nowhere near a day
+    expect(ms).toBeGreaterThanOrEqual(4 * 60_000 + 60_000);
+    expect(ms).toBeLessThanOrEqual(4 * 60_000 + 2 * 60_000 + 5_000);
   });
 
   it('R3c: a chat nobody wrote in for 90 days leaves the lists; a recent one and one with a turn in flight stay', async () => {

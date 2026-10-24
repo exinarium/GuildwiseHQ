@@ -6,7 +6,8 @@ import {
   OrgProvidersResponseSchema,
   type ProviderKeyId,
   type ReshareOrgProviderKeyRequest,
-  sealLarge,
+  sealProviderKey,
+  sealResealApproval,
 } from '@aom/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { del, get, post, put } from '../client.ts';
@@ -38,20 +39,31 @@ export interface SealTarget {
   publicKey: string;
 }
 
+/** What a sealed organization key is bound to: it opens only for this organization, provider, endpoint and key generation. */
+export interface OrgSealBinding {
+  orgId: string;
+  provider: ProviderKeyId;
+  /** The endpoint (base URL) the credential is for, as the server will store it; none for a hosted provider. */
+  endpoint?: string | undefined;
+  /** The generation the blob is bound to: a new key `current + 1`, a share of the current key `current`. */
+  generation: number;
+}
+
 /**
- * Seals a key for each target with that workstation's own public key, in the browser (RSA-OAEP + AES-GCM): the request carries
- * one ciphertext per workstation and the plain key exists only in this function. `secret` is the key, or the JSON of a
- * credential's fields (a Bedrock, Vertex or gateway credential).
+ * Seals a key for each target with that workstation's own public key, in the browser (RSA-OAEP + AES-GCM, with the purpose as
+ * associated data): the request carries one ciphertext per workstation and the plain key exists only in this function. `secret`
+ * is the key, or the JSON of a credential's fields (a Bedrock, Vertex or gateway credential).
  */
 export async function sealForTargets(
   secret: string,
   targets: readonly SealTarget[],
+  binding: OrgSealBinding,
 ): Promise<Array<{ workstationId: string; keyId: string; ciphertext: string }>> {
   return Promise.all(
     targets.map(async (t) => ({
       workstationId: t.workstationId,
       keyId: t.keyId,
-      ciphertext: await sealLarge(t.publicKey, secret),
+      ciphertext: await sealProviderKey(t.publicKey, secret, { scope: 'org', ...binding, keyId: t.keyId }),
     })),
   );
 }
@@ -65,12 +77,21 @@ export function useSetOrgProviderKey(provider: ProviderKeyId) {
       detail?: string;
       baseUrl?: string;
       models: string[];
+      /** The organization, and the generation of the key now (from the list): the new key is bound to the next one. */
+      orgId: string;
+      currentGeneration: number;
     }) =>
       put(`/org/providers/${provider}`, {
         ...(v.detail ? { detail: v.detail } : {}),
         ...(v.baseUrl ? { baseUrl: v.baseUrl } : {}),
         models: v.models,
-        shares: await sealForTargets(v.secret, v.targets),
+        generation: v.currentGeneration + 1,
+        shares: await sealForTargets(v.secret, v.targets, {
+          orgId: v.orgId,
+          provider,
+          endpoint: v.baseUrl,
+          generation: v.currentGeneration + 1,
+        }),
       }),
     onSuccess: refresh,
   });
@@ -80,19 +101,55 @@ export function useSetOrgProviderKey(provider: ProviderKeyId) {
 export function useShareOrgProviderKey(provider: ProviderKeyId) {
   const refresh = useRefresh();
   return useMutation({
-    mutationFn: async (v: { secret: string; target: SealTarget }) => {
-      const [share] = await sealForTargets(v.secret, [v.target]);
-      return put(`/org/providers/${provider}/shares`, share);
+    mutationFn: async (v: {
+      secret: string;
+      target: SealTarget;
+      orgId: string;
+      /** The key's generation and endpoint as the list shows them: the copy is bound to both. */
+      generation: number;
+      baseUrl: string | null;
+    }) => {
+      const [share] = await sealForTargets(v.secret, [v.target], {
+        orgId: v.orgId,
+        provider,
+        endpoint: v.baseUrl ?? undefined,
+        generation: v.generation,
+      });
+      return put(`/org/providers/${provider}/shares`, { ...share, generation: v.generation });
     },
     onSuccess: refresh,
   });
 }
 
-/** A runner that holds the key re-seals it to another workstation, on the admin's approval. */
+/**
+ * A runner that holds the key re-seals it to another workstation, on the admin's approval. The approval is made here: it names
+ * the target runner's key as the admin was shown it and is sealed to the source runner, which seals the key to that key only.
+ */
 export function useReshareOrgProviderKey(provider: ProviderKeyId) {
   const refresh = useRefresh();
   return useMutation({
-    mutationFn: (v: ReshareOrgProviderKeyRequest) => post(`/org/providers/${provider}/reshare`, v),
+    mutationFn: async (v: {
+      orgId: string;
+      approvedBy: string;
+      generation: number;
+      source: SealTarget;
+      target: SealTarget;
+    }) => {
+      const body: ReshareOrgProviderKeyRequest = {
+        sourceWorkstationId: v.source.workstationId,
+        targetWorkstationId: v.target.workstationId,
+        generation: v.generation,
+        approval: await sealResealApproval({
+          source: v.source,
+          target: v.target,
+          orgId: v.orgId,
+          provider,
+          generation: v.generation,
+          approvedBy: v.approvedBy,
+        }),
+      };
+      return post(`/org/providers/${provider}/reshare`, body);
+    },
     onSuccess: refresh,
   });
 }

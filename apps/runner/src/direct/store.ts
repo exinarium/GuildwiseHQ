@@ -10,18 +10,28 @@ import {
   type DirectProviderId,
   directProvider,
   type KeySource,
+  keyIdOfSpki,
+  normalizeEndpoint,
   normalizePrivateEndpoints,
+  orgCredentialEndpointProblem,
+  type ProviderKeyBinding,
   type ProviderKeyClearPayload,
   type ProviderKeyId,
   type ProviderKeyResealResult,
   type ProviderKeyResult,
   type ProviderKeySetPayload,
+  providerKeyAad,
+  RESEAL_APPROVAL_MAX_MS,
   type ReportedBackend,
   type ReportedKey,
   type ReportedProvider,
-  sealLarge,
+  ResealApprovalSchema,
+  resealApprovalAad,
+  sealProviderKey,
+  spkiSha256,
   validateBackendFields,
 } from '@aom/shared';
+import { ReplayCache } from '../integrations/seen.ts';
 import type { RunnerKeys } from '../secrets/keys.ts';
 import { registerSecret, unregisterSecret } from '../secrets/redact.ts';
 
@@ -32,6 +42,15 @@ interface StoredProvider {
   /** Extra model ids the owner added (besides the built-in list). */
   models: string[];
   setAt: string;
+  /**
+   * The credential is sealed `h2` and bound to this slot (provider, organization, `endpoint`, `generation`, this runner's key):
+   * it is opened only with the associated data rebuilt from these fields. Absent on a credential stored before runner 0.1.56.
+   */
+  bound?: true;
+  /** The endpoint the sealed credential is bound to (normalised; empty when it has none). */
+  endpoint?: string;
+  /** An organization key's generation (`org_providers.key_generation`). */
+  generation?: number;
 }
 
 type SlotFileContent = Partial<Record<ProviderKeyId, StoredProvider>>;
@@ -96,6 +115,9 @@ export class ProviderStore {
   private changed: Array<() => void> = [];
   private readonly orgFile: string;
   private readonly endpointsFile: string;
+  /** The highest generation of each organization key that was revoked or replaced here: never accepted again. */
+  private readonly floorFile: string;
+  private readonly approvals: ReplayCache;
 
   constructor(
     private readonly deps: {
@@ -103,17 +125,23 @@ export class ProviderStore {
       /** The organization slot's file (default: `providers-org.json` next to `file`). */
       orgFile?: string;
       keys: Pick<RunnerKeys, 'decrypt'> & {
-        decryptAny?: (value: string) => string;
+        decryptAny?: (value: string, aad?: string, opts?: { requireBound?: boolean }) => string;
         publicKey: { keyId: string };
       };
+      /** Clock for the approval's expiry (tests). */
+      now?: () => number;
     },
   ) {
     this.orgFile = deps.orgFile ?? join(dirname(deps.file), 'providers-org.json');
     this.endpointsFile = join(dirname(deps.file), 'private-endpoints.json');
+    this.floorFile = join(dirname(deps.file), 'providers-org-floor.json');
+    this.approvals = new ReplayCache(join(dirname(deps.file), 'reseal-approvals.json'), deps.now ?? Date.now);
     // After a restart, redaction must know the keys before the first log line.
-    for (const p of Object.values(this.own())) if (p.ciphertext) this.register(p.ciphertext);
-    for (const slot of Object.values(this.orgs()))
-      for (const p of Object.values(slot)) if (p.ciphertext) this.register(p.ciphertext);
+    for (const [id, p] of Object.entries(this.own()))
+      if (p.ciphertext) this.register(p.ciphertext, this.aadOf('workstation', undefined, id, p));
+    for (const [orgId, slot] of Object.entries(this.orgs()))
+      for (const [id, p] of Object.entries(slot))
+        if (p.ciphertext && p.bound) this.register(p.ciphertext, this.aadOf('org', orgId, id, p));
   }
 
   /** The private-endpoint allow-list (exact `host:port`, set by the workstation's owner; empty by default). */
@@ -136,9 +164,43 @@ export class ProviderStore {
     this.changed.push(fn);
   }
 
-  private open(ciphertext: string): string {
+  /** Opens a sealed value. A bound (`h2`) one needs the associated data; `requireBound` refuses the older forms. */
+  private open(ciphertext: string, aad?: string, requireBound = false): string {
     const k = this.deps.keys;
-    return k.decryptAny ? k.decryptAny(ciphertext) : k.decrypt(ciphertext);
+    return k.decryptAny ? k.decryptAny(ciphertext, aad, { requireBound }) : k.decrypt(ciphertext);
+  }
+
+  /** What a stored credential is bound to, rebuilt from its slot (undefined for a credential stored before binding existed). */
+  private aadOf(
+    source: KeySource,
+    orgId: string | undefined,
+    provider: string,
+    s: Pick<StoredProvider, 'bound' | 'endpoint' | 'generation' | 'baseUrl'>,
+  ): string | undefined {
+    if (!s.bound) return undefined;
+    const b: ProviderKeyBinding = {
+      scope: source,
+      orgId,
+      provider,
+      endpoint: s.endpoint ?? s.baseUrl ?? '',
+      generation: s.generation ?? 0,
+      keyId: this.deps.keys.publicKey.keyId,
+    };
+    return providerKeyAad(b);
+  }
+
+  private floorOf(orgId: string, provider: string): number {
+    const j = this.readJson(this.floorFile) as Record<string, Record<string, unknown>> | null;
+    const n = j?.[orgId]?.[provider];
+    return typeof n === 'number' ? n : 0;
+  }
+
+  private raiseFloor(orgId: string, provider: string, generation: number): void {
+    const j = (this.readJson(this.floorFile) as Record<string, Record<string, number>> | null) ?? {};
+    const slot = j[orgId] ?? {};
+    slot[provider] = Math.max(slot[provider] ?? 0, generation);
+    j[orgId] = slot;
+    this.write(this.floorFile, j);
   }
 
   private readJson(file: string): unknown {
@@ -193,10 +255,10 @@ export class ProviderStore {
   }
 
   /** Registers every secret in a sealed value: a plain key, or each secret field of a backend credential. */
-  private secretsOf(ciphertext: string): string[] {
+  private secretsOf(ciphertext: string, aad?: string): string[] {
     let plain: string;
     try {
-      plain = this.open(ciphertext);
+      plain = this.open(ciphertext, aad);
     } catch {
       return []; // sealed for another key: unreadable anyway
     }
@@ -212,13 +274,62 @@ export class ProviderStore {
     return out;
   }
 
-  private register(ciphertext: string): void {
-    for (const x of this.secretsOf(ciphertext)) registerSecret(x);
+  private register(ciphertext: string, aad?: string): void {
+    for (const x of this.secretsOf(ciphertext, aad)) registerSecret(x);
   }
 
-  private unregister(ciphertext: string | undefined): void {
+  private unregister(ciphertext: string | undefined, aad?: string): void {
     if (!ciphertext) return;
-    for (const x of this.secretsOf(ciphertext)) unregisterSecret(x);
+    for (const x of this.secretsOf(ciphertext, aad)) unregisterSecret(x);
+  }
+
+  /**
+   * How a sealed blob of a `provider.key.set` is opened. Bound (`h2`) blobs are opened with the associated data rebuilt from the
+   * command; an organization's key must be bound (the older forms are refused: ask the admin to enter the key again), a
+   * workstation's own may still be an older form (with a warning), unless the slot already holds a bound one (no downgrade).
+   */
+  private openSet(
+    p: ProviderKeySetPayload,
+    source: KeySource,
+    endpoint: string,
+  ): { plain: string; bound: boolean; warning?: string } | { error: string } {
+    const ct = p.ciphertext as string;
+    if (ct.startsWith('h2.')) {
+      const aad = providerKeyAad({
+        scope: source,
+        orgId: p.orgId,
+        provider: p.provider,
+        endpoint,
+        generation: source === 'org' ? (p.generation ?? 0) : 0,
+        keyId: p.keyId,
+      });
+      try {
+        return { plain: this.open(ct, aad, true), bound: true };
+      } catch {
+        return {
+          error:
+            'the key could not be opened: it was sealed for another provider, organization, endpoint or key version. Enter it again.',
+        };
+      }
+    }
+    if (source === 'org')
+      return {
+        error:
+          'this organization key was sealed in the older form that is not tied to its purpose. Ask the Owner or an Admin to enter the key again (Settings, Model providers).',
+      };
+    const held = this.own()[p.provider as ProviderKeyId];
+    if (held?.bound)
+      return { error: 'this key was sealed in the older form; reload the web app and enter it again' };
+    try {
+      return {
+        plain: this.open(ct),
+        bound: false,
+        warning:
+          'This key was sealed in the older form that is not tied to its purpose. Update the web app and enter it again to bind it to this provider and endpoint.',
+      };
+    } catch {
+      return { error: 'the key could not be decrypted: enter it again' };
+    }
   }
 
   /** `provider.key.set`. Never returns or logs the key. */
@@ -231,41 +342,55 @@ export class ProviderStore {
         stored: false,
         error: 'the key was encrypted for another runner key (the runner key changed): enter it again',
       };
+    if (source === 'org') {
+      const refused = this.generationProblem(p.orgId as string, p.provider, p.generation);
+      if (refused) return { stored: false, error: refused };
+    }
     if ((BACKEND_IDS as readonly string[]).includes(p.provider))
       return this.setBackend(p, source, p.provider as BackendId);
     const def = directProvider(p.provider);
     if (!def) return { stored: false, error: 'unknown provider' };
-    let plain: string | undefined;
-    if (p.ciphertext) {
-      try {
-        plain = this.open(p.ciphertext);
-      } catch {
-        return { stored: false, error: 'the key could not be decrypted: enter it again' };
-      }
-      plain = plain.trim();
-      if (!plain) return { stored: false, error: 'empty key' };
-    } else if (!def.keyOptional) {
-      return { stored: false, error: `${def.label} needs an API key` };
-    }
+    // what a sealed key is bound to: the endpoint the server named (checked below, and again against the blob)
+    const endpoint = normalizeEndpoint(p.baseUrl);
     let baseUrl: string | undefined;
     let warning: string | undefined;
     if (def.needsBaseUrl) {
       if (!p.baseUrl?.trim()) return { stored: false, error: 'enter the endpoint (base URL)' };
       const v = validateBaseUrl(p.baseUrl);
       if (!v.ok) return { stored: false, error: v.error };
-      // a private-network address is reachable only when the workstation's owner listed that exact host:port
-      const blocked = baseUrlEndpointProblem(v.url, this.endpoints());
+      // a private-network address is reachable only when the workstation's owner listed that exact host:port; an organization's
+      // endpoint is untrusted on a member's machine: https to a public address, or listed (loopback is not exempt)
+      const blocked =
+        source === 'org'
+          ? orgCredentialEndpointProblem(v.url, this.endpoints())
+          : baseUrlEndpointProblem(v.url, this.endpoints());
       if (blocked) return { stored: false, error: blocked };
       baseUrl = v.url;
       warning = v.warning;
     }
+    let plain: string | undefined;
+    let bound = false;
+    if (p.ciphertext) {
+      const r = this.openSet(p, source, endpoint);
+      if ('error' in r) return { stored: false, error: r.error };
+      plain = r.plain.trim();
+      bound = r.bound;
+      if (r.warning) warning = warning ? `${warning} ${r.warning}` : r.warning;
+      if (!plain) return { stored: false, error: 'empty key' };
+    } else if (!def.keyOptional) {
+      return { stored: false, error: `${def.label} needs an API key` };
+    }
     const all = this.slotFor(source, p.orgId);
-    this.unregister(all[p.provider]?.ciphertext);
+    const old = all[p.provider];
+    this.unregister(old?.ciphertext, old && this.aadOf(source, p.orgId, p.provider, old));
     all[p.provider] = {
       ...(p.ciphertext ? { ciphertext: p.ciphertext } : {}),
       ...(baseUrl ? { baseUrl } : {}),
       models: [...new Set(p.models.map((m) => m.trim()).filter(Boolean))],
       setAt: new Date().toISOString(),
+      ...(bound
+        ? { bound: true as const, endpoint, ...(source === 'org' ? { generation: p.generation } : {}) }
+        : {}),
     };
     this.saveSlot(source, p.orgId, all);
     if (plain) registerSecret(plain);
@@ -273,12 +398,32 @@ export class ProviderStore {
     return { stored: true, ...(warning ? { warning } : {}) };
   }
 
+  /** An organization key is accepted only at a generation newer than any revoked here and not older than the one held. */
+  private generationProblem(
+    orgId: string,
+    provider: string,
+    generation: number | undefined,
+  ): string | undefined {
+    if (!generation)
+      return 'this organization key does not say which version it is: update the web app and enter it again';
+    if (generation <= this.floorOf(orgId, provider))
+      return 'this organization key was revoked or replaced: it is not accepted again';
+    const held = this.orgs()[orgId]?.[provider as ProviderKeyId]?.generation;
+    if (held && generation < held) return 'a newer version of this organization key is already stored';
+    return undefined;
+  }
+
   private setBackend(p: ProviderKeySetPayload, source: KeySource, id: BackendId): ProviderKeyResult {
     if (!p.ciphertext)
       return { stored: false, error: `${backendDef(id)?.label ?? id} needs its credentials` };
+    // the credential's endpoint is inside the blob: the command names it, the blob is opened bound to it, and the fields must agree
+    const endpoint = normalizeEndpoint(p.baseUrl);
+    const opened = this.openSet(p, source, endpoint);
+    if ('error' in opened)
+      return { stored: false, error: opened.error.replace('the key could', 'the credentials could') };
     let fields: Record<string, string>;
     try {
-      const parsed = JSON.parse(this.open(p.ciphertext)) as unknown;
+      const parsed = JSON.parse(opened.plain) as unknown;
       if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('shape');
       fields = Object.fromEntries(
         Object.entries(parsed as Record<string, unknown>).map(([k, v]) => [k, String(v ?? '').trim()]),
@@ -288,69 +433,114 @@ export class ProviderStore {
     }
     const bad = validateBackendFields(id, fields);
     if (bad) return { stored: false, error: bad };
+    if (opened.bound && normalizeEndpoint(fields.baseUrl) !== endpoint)
+      return {
+        stored: false,
+        error: 'the credentials are for another endpoint than the one named: enter them again',
+      };
+    if (source === 'org' && fields.baseUrl) {
+      const blocked = orgCredentialEndpointProblem(fields.baseUrl, this.endpoints());
+      if (blocked) return { stored: false, error: blocked };
+    }
     const all = this.slotFor(source, p.orgId);
-    this.unregister(all[id]?.ciphertext);
+    const old = all[id];
+    this.unregister(old?.ciphertext, old && this.aadOf(source, p.orgId, id, old));
     all[id] = {
       ciphertext: p.ciphertext,
       models: [...new Set(p.models.map((m) => m.trim()).filter(Boolean))],
       setAt: new Date().toISOString(),
+      ...(opened.bound
+        ? { bound: true as const, endpoint, ...(source === 'org' ? { generation: p.generation } : {}) }
+        : {}),
     };
     this.saveSlot(source, p.orgId, all);
-    this.register(p.ciphertext);
+    this.register(p.ciphertext, this.aadOf(source, p.orgId, id, all[id] as StoredProvider));
     for (const f of this.changed) f();
-    const warning =
+    const plainHttp =
       fields.baseUrl?.startsWith('http://') && !/^http:\/\/(localhost|127\.|\[::1\])/.test(fields.baseUrl)
         ? 'This endpoint uses plain http:// away from this machine: the credentials and every prompt travel unencrypted. Use https:// unless the network is trusted.'
         : undefined;
+    const warning = [plainHttp, opened.warning].filter(Boolean).join(' ');
     return { stored: true, ...(warning ? { warning } : {}) };
   }
 
-  /** `provider.key.clear`: forget the key and the endpoint of one slot (default: the workstation's own). */
-  clear(provider: ProviderKeyId, source: KeySource = 'workstation', orgId?: string): void {
+  /**
+   * `provider.key.clear`: forget the key and the endpoint of one slot (default: the workstation's own). An organization key's
+   * generation is remembered as revoked, so a replayed copy of it is refused later.
+   */
+  clear(
+    provider: ProviderKeyId,
+    source: KeySource = 'workstation',
+    orgId?: string,
+    generation?: number,
+  ): void {
     const all = this.slotFor(source, orgId);
-    if (!all[provider]) return;
-    this.unregister(all[provider]?.ciphertext);
+    const old = all[provider];
+    if (source === 'org' && orgId) {
+      const g = Math.max(generation ?? 0, old?.generation ?? 0);
+      if (g > 0) this.raiseFloor(orgId, provider, g);
+    }
+    if (!old) return;
+    this.unregister(old.ciphertext, this.aadOf(source, orgId, provider, old));
     delete all[provider];
     this.saveSlot(source, orgId, all);
     for (const f of this.changed) f();
   }
 
   clearPayload(p: ProviderKeyClearPayload): void {
-    this.clear(p.provider, p.source ?? 'workstation', p.orgId);
+    this.clear(p.provider, p.source ?? 'workstation', p.orgId, p.generation);
   }
 
   /**
    * The slot in effect for a provider: the workstation's own key, else the key of `orgId`. Without an organization (a caller that
-   * does not know it) the organization key counts only when exactly one organization has one here.
+   * does not know it) only the workstation's own key counts: an organization key is never picked for a run that does not name its
+   * organization. An organization key stored before keys were bound to their purpose is not used (it has to be entered again).
    */
   private slotOf(
     provider: string,
     orgId?: string,
-  ): { source: KeySource; stored: StoredProvider; orgAlso: boolean; orgId?: string } | undefined {
+  ): { source: KeySource; stored: StoredProvider; orgId?: string } | undefined {
     const own = this.own()[provider as ProviderKeyId];
-    const orgs = this.orgs();
-    const holders = Object.entries(orgs).filter(([, slot]) => slot[provider as ProviderKeyId]);
-    const pick = orgId ? holders.find(([id]) => id === orgId) : holders.length === 1 ? holders[0] : undefined;
-    const org = pick
-      ? { id: pick[0], stored: pick[1][provider as ProviderKeyId] as StoredProvider }
-      : undefined;
-    if (own) return { source: 'workstation', stored: own, orgAlso: holders.length > 0 };
-    if (org) return { source: 'org', stored: org.stored, orgAlso: true, orgId: org.id };
-    return undefined;
+    if (own) return { source: 'workstation', stored: own };
+    if (!orgId) return undefined;
+    const org = this.orgs()[orgId]?.[provider as ProviderKeyId];
+    return org?.bound ? { source: 'org', stored: org, orgId } : undefined;
   }
 
-  /** The configuration of one provider with its key decrypted, or undefined when it is not set (or its key is unreadable). */
-  get(provider: string, orgId?: string): ProviderConfig | undefined {
-    if (!(DIRECT_PROVIDER_IDS as readonly string[]).includes(provider)) return undefined;
-    const slot = this.slotOf(provider, orgId);
-    if (!slot) return undefined;
+  /** For the report only (names, models, whose key): the workstation's own, else the first organization that holds a bound one. */
+  private reportSlotOf(
+    provider: string,
+  ): { source: KeySource; stored: StoredProvider; orgId?: string; orgAlso: boolean } | undefined {
+    const holders = Object.entries(this.orgs()).filter(([, slot]) => slot[provider as ProviderKeyId]?.bound);
+    const own = this.own()[provider as ProviderKeyId];
+    if (own) return { source: 'workstation', stored: own, orgAlso: holders.length > 0 };
+    const first = holders[0];
+    if (!first) return undefined;
+    return {
+      source: 'org',
+      stored: first[1][provider as ProviderKeyId] as StoredProvider,
+      orgId: first[0],
+      orgAlso: true,
+    };
+  }
+
+  private configOf(
+    provider: string,
+    slot: { source: KeySource; stored: StoredProvider; orgId?: string },
+  ): ProviderConfig | undefined {
     const s = slot.stored;
     // An endpoint on a private network stops working when its entry is removed from the allow-list.
-    if (s.baseUrl && baseUrlEndpointProblem(s.baseUrl, this.endpoints())) return undefined;
+    if (s.baseUrl) {
+      const problem =
+        slot.source === 'org'
+          ? orgCredentialEndpointProblem(s.baseUrl, this.endpoints())
+          : baseUrlEndpointProblem(s.baseUrl, this.endpoints());
+      if (problem) return undefined;
+    }
     let apiKey: string | undefined;
     if (s.ciphertext) {
       try {
-        apiKey = this.open(s.ciphertext);
+        apiKey = this.open(s.ciphertext, this.aadOf(slot.source, slot.orgId, provider, s));
       } catch {
         return undefined;
       }
@@ -364,26 +554,66 @@ export class ProviderStore {
     };
   }
 
-  /** The providers that are set, with their keys readable. */
+  /** The configuration of one provider with its key decrypted, or undefined when it is not set (or its key is unreadable). */
+  get(provider: string, orgId?: string): ProviderConfig | undefined {
+    if (!(DIRECT_PROVIDER_IDS as readonly string[]).includes(provider)) return undefined;
+    const slot = this.slotOf(provider, orgId);
+    return slot ? this.configOf(provider, slot) : undefined;
+  }
+
+  /** The providers that are set for a run of `orgId` (the workstation's own, else that organization's), with their keys readable. */
   configured(orgId?: string): ProviderConfig[] {
     return DIRECT_PROVIDER_IDS.map((id) => this.get(id, orgId)).filter((c): c is ProviderConfig => !!c);
+  }
+
+  private backendOf(
+    id: BackendId,
+    slot: { source: KeySource; stored: StoredProvider; orgId?: string },
+  ): BackendConfig | undefined {
+    if (!slot.stored.ciphertext) return undefined;
+    try {
+      const j = JSON.parse(
+        this.open(slot.stored.ciphertext, this.aadOf(slot.source, slot.orgId, id, slot.stored)),
+      ) as Record<string, unknown>;
+      const fields = Object.fromEntries(Object.entries(j).map(([k, v]) => [k, String(v ?? '')]));
+      if (
+        slot.source === 'org' &&
+        fields.baseUrl &&
+        orgCredentialEndpointProblem(fields.baseUrl, this.endpoints())
+      )
+        return undefined;
+      return { id, fields, models: slot.stored.models ?? [], source: slot.source };
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * For availability reports only (no run, no organization in hand): the providers that have a readable key here, the workstation's
+   * own or any organization's, WITHOUT the key. Never use this to run something: a run names its organization and calls `get`.
+   */
+  reportConfigured(): ProviderConfig[] {
+    const out: ProviderConfig[] = [];
+    for (const id of DIRECT_PROVIDER_IDS) {
+      const slot = this.reportSlotOf(id);
+      const c = slot ? this.configOf(id, slot) : undefined;
+      if (c) {
+        const { apiKey: _key, ...rest } = c;
+        out.push(rest);
+      }
+    }
+    return out;
+  }
+
+  /** Is a readable key for the provider held here (the workstation's own or an organization's)? For availability reports only. */
+  holds(provider: string): boolean {
+    return this.reportConfigured().some((c) => c.id === provider);
   }
 
   /** A backend's credential opened, or undefined when it is not set or unreadable. */
   getBackend(id: BackendId, orgId?: string): BackendConfig | undefined {
     const slot = this.slotOf(id, orgId);
-    if (!slot?.stored.ciphertext) return undefined;
-    try {
-      const j = JSON.parse(this.open(slot.stored.ciphertext)) as Record<string, unknown>;
-      return {
-        id,
-        fields: Object.fromEntries(Object.entries(j).map(([k, v]) => [k, String(v ?? '')])),
-        models: slot.stored.models ?? [],
-        source: slot.source,
-      };
-    } catch {
-      return undefined;
-    }
+    return slot ? this.backendOf(id, slot) : undefined;
   }
 
   configuredBackends(orgId?: string): BackendConfig[] {
@@ -397,21 +627,26 @@ export class ProviderStore {
 
   /** Claude Code backends with a credential here: names, models and whose credential it is. */
   reportBackends(): ReportedBackend[] {
-    return this.configuredBackends().map((c) => {
+    const out: ReportedBackend[] = [];
+    for (const id of BACKEND_IDS) {
+      const slot = this.reportSlotOf(id);
+      const c = slot ? this.backendOf(id, slot) : undefined;
+      if (!slot || !c) continue;
       const def = backendDef(c.id);
       const ids = new Map<string, { id: string; label: string; tier?: 'small' | 'medium' | 'large' }>();
       for (const m of def?.models ?? []) ids.set(m.id, { id: m.id, label: m.label, tier: m.tier });
-      for (const id of c.models) if (!ids.has(id)) ids.set(id, { id, label: id });
+      for (const mid of c.models) if (!ids.has(mid)) ids.set(mid, { id: mid, label: mid });
       const detail = backendDetail(c.id, c.fields);
-      return {
+      out.push({
         id: c.id,
         label: def?.label ?? c.id,
         models: [...ids.values()].map(({ tier, ...m }) => ({ ...m, ...(tier ? { tier } : {}) })),
         ...(detail ? { detail } : {}),
         keySource: c.source,
-        ...(this.slotOf(c.id)?.orgAlso ? { orgKey: true } : {}),
-      };
-    });
+        ...(slot.orgAlso ? { orgKey: true } : {}),
+      });
+    }
+    return out;
   }
 
   /** Every stored key and whose it is, for the server's resolution and caps. */
@@ -421,7 +656,7 @@ export class ProviderStore {
     for (const id of [...DIRECT_PROVIDER_IDS, ...BACKEND_IDS] as ProviderKeyId[]) {
       const own = !!this.own()[id];
       const orgIds = Object.entries(orgs)
-        .filter(([, slot]) => slot[id])
+        .filter(([, slot]) => slot[id]?.bound)
         .map(([o]) => o);
       if (!own && orgIds.length === 0) continue;
       out.push({
@@ -435,29 +670,96 @@ export class ProviderStore {
 
   /** Is the organization's key stored here (it may be overridden by the workstation's own)? */
   hasOrgKey(provider: ProviderKeyId, orgId: string): boolean {
-    return !!this.orgs()[orgId]?.[provider];
+    return !!this.orgs()[orgId]?.[provider]?.bound;
+  }
+
+  /** Organization keys stored in the older, unbound form: they are not used until the admin enters them again. */
+  legacyOrgKeys(): Array<{ orgId: string; provider: string }> {
+    return Object.entries(this.orgs()).flatMap(([orgId, slot]) =>
+      Object.entries(slot)
+        .filter(([, v]) => v?.ciphertext && !v.bound)
+        .map(([provider]) => ({ orgId, provider })),
+    );
   }
 
   /**
    * `provider.key.reseal`: opens the organization's key and seals it to another runner's public key, for an Owner or Admin who
-   * approved sharing it. The plain key exists in this function only; the answer is the ciphertext for the target.
+   * approved sharing it. The approval is made in the admin's browser and sealed to THIS runner: it names the target runner's key
+   * id and the hash of its public key, and this function recomputes both from the public key it is asked to seal to, so a server
+   * that swaps in another key (or sends no approval) gets nothing. Each approval works once, for this key generation only. The
+   * plain key exists in this function only; the answer is the ciphertext for the target.
    */
-  async reseal(
-    provider: ProviderKeyId,
-    orgId: string,
-    target: { keyId: string; publicKey: string },
-  ): Promise<ProviderKeyResealResult> {
+  async reseal(p: {
+    provider: ProviderKeyId;
+    orgId: string;
+    targetKeyId: string;
+    targetPublicKey: string;
+    approval?: string;
+    generation?: number;
+  }): Promise<ProviderKeyResealResult> {
+    const { provider, orgId } = p;
     const stored = this.orgs()[orgId]?.[provider];
-    if (!stored) return { ok: false, error: 'this workstation does not hold the organization key' };
+    if (!stored?.bound) return { ok: false, error: 'this workstation does not hold the organization key' };
     // keyless endpoints have nothing to seal: the server shares the settings itself
     if (!stored.ciphertext) return { ok: false, error: 'this key has no secret to share' };
+    if (!p.approval)
+      return { ok: false, error: 'sharing needs the approval of an Owner or Admin made in the web app' };
+    const own = this.deps.keys.publicKey.keyId;
+    const now = (this.deps.now ?? Date.now)();
+    let approval: ReturnType<typeof ResealApprovalSchema.parse>;
+    try {
+      approval = ResealApprovalSchema.parse(
+        JSON.parse(this.open(p.approval, resealApprovalAad({ orgId, provider, sourceKeyId: own }), true)),
+      );
+    } catch {
+      return {
+        ok: false,
+        error: 'the approval could not be opened: approve the sharing again in the web app',
+      };
+    }
+    if (approval.orgId !== orgId || approval.provider !== provider || approval.sourceKeyId !== own)
+      return { ok: false, error: 'the approval is for another key or workstation' };
+    if (approval.exp <= now || approval.exp > now + RESEAL_APPROVAL_MAX_MS)
+      return { ok: false, error: 'the approval expired: approve the sharing again' };
+    if (approval.generation !== stored.generation || (p.generation && p.generation !== stored.generation))
+      return { ok: false, error: 'the approval is for another version of the key' };
+    // the key the server wants us to seal to must be the one the admin was shown
+    let spkiHash: string;
+    let spkiKeyId: string;
+    try {
+      spkiHash = await spkiSha256(p.targetPublicKey);
+      spkiKeyId = await keyIdOfSpki(p.targetPublicKey);
+    } catch {
+      return { ok: false, error: 'the target workstation’s public key is not valid' };
+    }
+    if (
+      spkiKeyId !== p.targetKeyId ||
+      approval.targetKeyId !== spkiKeyId ||
+      approval.targetPublicKeySha256 !== spkiHash
+    )
+      return { ok: false, error: 'the target workstation’s key is not the one that was approved' };
+    if (spkiKeyId === own) return { ok: false, error: 'the target is this workstation' };
+    if (!this.approvals.claim(`reseal:${approval.nonce}`, approval.exp))
+      return { ok: false, error: 'this approval was already used: approve the sharing again' };
     let plain: string;
     try {
-      plain = this.open(stored.ciphertext);
+      plain = this.open(stored.ciphertext, this.aadOf('org', orgId, provider, stored));
     } catch {
       return { ok: false, error: 'the stored key could not be opened' };
     }
-    return { ok: true, ciphertext: await sealLarge(target.publicKey, plain) };
+    const generation = stored.generation as number;
+    return {
+      ok: true,
+      generation,
+      ciphertext: await sealProviderKey(p.targetPublicKey, plain, {
+        scope: 'org',
+        orgId,
+        provider,
+        endpoint: stored.endpoint ?? '',
+        generation,
+        keyId: spkiKeyId,
+      }),
+    };
   }
 
   /**
@@ -468,7 +770,13 @@ export class ProviderStore {
     listed: Partial<Record<string, string[]>> = {},
     problems: Partial<Record<string, string>> = {},
   ): ReportedProvider[] {
-    return this.configured().map((c) => {
+    const reportable: Array<{ c: ProviderConfig; orgAlso: boolean }> = [];
+    for (const id of DIRECT_PROVIDER_IDS) {
+      const slot = this.reportSlotOf(id);
+      const c = slot ? this.configOf(id, slot) : undefined;
+      if (slot && c) reportable.push({ c, orgAlso: slot.orgAlso });
+    }
+    return reportable.map(({ c, orgAlso }) => {
       const def = directProvider(c.id);
       const ids = new Map<string, { id: string; label: string; tier?: 'small' | 'medium' | 'large' }>();
       for (const m of def?.models ?? []) ids.set(m.id, { id: m.id, label: m.label, tier: m.tier });
@@ -489,7 +797,7 @@ export class ProviderStore {
         ...(endpointHost ? { endpointHost } : {}),
         ...(problems[c.id] ? { problem: problems[c.id] as string } : {}),
         keySource: c.source,
-        ...(this.slotOf(c.id)?.orgAlso ? { orgKey: true } : {}),
+        ...(orgAlso ? { orgKey: true } : {}),
       };
     });
   }

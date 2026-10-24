@@ -495,7 +495,7 @@ describe('provider store', () => {
     const { file, store } = mk();
     expect(
       store.set({ provider: 'anthropic', keyId: 'key-1', ciphertext: S('sk-ant-secret-987654'), models: [] }),
-    ).toEqual({ stored: true });
+    ).toMatchObject({ stored: true });
     const raw = readFileSync(file, 'utf8');
     expect(raw).not.toContain('sk-ant-secret-987654');
     expect(statSync(file).mode & 0o077).toBe(0);

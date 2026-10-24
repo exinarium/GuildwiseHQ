@@ -114,7 +114,7 @@ const wrap = (ui: React.ReactElement) => {
 // Web Crypto: sealing needs a real RSA public key; the test swaps the sealing function for a marker.
 vi.mock('@aom/shared', async (orig) => ({
   ...(await orig<typeof import('@aom/shared')>()),
-  sealLarge: async (_k: string, text: string) => `h1.sealed(${text.length})`,
+  sealProviderKey: async (_k: string, text: string) => `h2.sealed(${text.length})`,
 }));
 
 describe('model providers settings', () => {
@@ -146,7 +146,7 @@ describe('model providers settings', () => {
     expect(put.url).toBe(`/api/workstations/${WS}/providers/openai`);
     expect(put.body).toEqual({
       keyId: 'k1',
-      ciphertext: 'h1.sealed(13)',
+      ciphertext: 'h2.sealed(13)',
       models: ['gpt-9', 'gpt-9-mini'],
     });
     expect(JSON.stringify(calls)).not.toContain('sk-secret-123');
@@ -181,7 +181,7 @@ describe('model providers settings', () => {
     await user.paste(sa);
     await user.click(screen.getByTestId('provider-save-google'));
     await waitFor(() => expect(calls.find((c) => c.method === 'PUT')).toBeTruthy());
-    expect((calls.find((c) => c.method === 'PUT') as Call).body.ciphertext).toBe(`h1.sealed(${sa.length})`);
+    expect((calls.find((c) => c.method === 'PUT') as Call).body.ciphertext).toBe(`h2.sealed(${sa.length})`);
     expect(JSON.stringify(calls)).not.toContain('service_account');
   });
 

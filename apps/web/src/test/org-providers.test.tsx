@@ -11,7 +11,12 @@ import { OrgProviders } from '../pages/OrgProviders.tsx';
 // Web Crypto in the test: sealing is swapped for a marker that keeps only the length (the real one is RSA-OAEP + AES-GCM).
 vi.mock('@aom/shared', async (orig) => ({
   ...(await orig<typeof import('@aom/shared')>()),
-  sealLarge: async (publicKey: string, text: string) => `h1.for-${publicKey}.len-${text.length}`,
+  sealProviderKey: async (publicKey: string, text: string) => `h2.for-${publicKey}.len-${text.length}`,
+  sealResealApproval: async (a: {
+    source: { keyId: string };
+    target: { keyId: string };
+    generation: number;
+  }) => `approval:${a.source.keyId}>${a.target.keyId}@${a.generation}`,
 }));
 
 const W1 = '0192f3a0-0000-7000-8000-0000000000a1';
@@ -46,6 +51,7 @@ const provider = (id: string, label: string, over: Partial<OrgProvider> = {}): O
   models: [],
   setAt: null,
   setByName: null,
+  generation: 0,
   cap: {
     monthlyMicros: null,
     spendMicros: 0,
@@ -175,9 +181,11 @@ describe('Settings > Model providers', () => {
       {
         workstationId: W1,
         keyId: 'key-Desktop',
-        ciphertext: `h1.for-pub-Desktop.len-${'sk-org-secret-123'.length}`,
+        ciphertext: `h2.for-pub-Desktop.len-${'sk-org-secret-123'.length}`,
       },
     ]);
+    // a new key is bound to the generation after the current one
+    expect(put.body.generation).toBe(1);
     expect(JSON.stringify(calls)).not.toContain('sk-org-secret-123');
   });
 
@@ -196,7 +204,7 @@ describe('Settings > Model providers', () => {
     await waitFor(() => expect(puts().find((c) => c.url === '/api/org/providers/bedrock')).toBeTruthy());
     const put = puts().find((c) => c.url === '/api/org/providers/bedrock') as Call;
     expect(put.body.detail).toBe('us-east-1');
-    expect(put.body.shares[0].ciphertext).toMatch(/^h1\.for-pub-Desktop\.len-\d+$/);
+    expect(put.body.shares[0].ciphertext).toMatch(/^h2\.for-pub-Desktop\.len-\d+$/);
     expect(JSON.stringify(calls)).not.toContain('bedrock-key-xyz');
   });
 
@@ -291,6 +299,7 @@ describe('Settings > Model providers', () => {
     providers = [
       provider('openai', 'OpenAI', {
         configured: true,
+        generation: 3,
         workstations: [
           ws(W1, 'Desktop', { status: 'stored', canShare: true }),
           ws(W3, 'Joined later', { status: 'not_shared' }),
@@ -299,12 +308,18 @@ describe('Settings > Model providers', () => {
     ];
     wrap();
     await user.click(await screen.findByTestId(`org-provider-reshare-openai-${W3}`));
+    // the admin is shown the target runner's key id and approves it: the approval is made in the browser
+    expect(await screen.findByText(/key id key-Joined later/)).toBeInTheDocument();
+    expect(calls.find((c) => c.url === '/api/org/providers/openai/reshare')).toBeUndefined();
+    await user.click(screen.getByText('Approve and share'));
     await waitFor(() =>
       expect(calls.find((c) => c.url === '/api/org/providers/openai/reshare')).toBeTruthy(),
     );
     expect(calls.find((c) => c.url === '/api/org/providers/openai/reshare')?.body).toEqual({
       sourceWorkstationId: W1,
       targetWorkstationId: W3,
+      generation: 3,
+      approval: 'approval:key-Desktop>key-Joined later@3',
     });
     await user.click(screen.getByTestId(`org-provider-enter-openai-${W3}`));
     await user.type(screen.getByTestId('org-share-key-openai'), 'sk-again-456');
@@ -315,7 +330,8 @@ describe('Settings > Model providers', () => {
     expect((puts().find((c) => c.url === '/api/org/providers/openai/shares') as Call).body).toEqual({
       workstationId: W3,
       keyId: 'key-Joined later',
-      ciphertext: `h1.for-pub-Joined later.len-${'sk-again-456'.length}`,
+      ciphertext: `h2.for-pub-Joined later.len-${'sk-again-456'.length}`,
+      generation: 3,
     });
     expect(JSON.stringify(calls)).not.toContain('sk-again-456');
   });

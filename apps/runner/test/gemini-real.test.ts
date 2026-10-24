@@ -24,6 +24,7 @@ import { ProviderStore } from '../src/direct/store.ts';
 import { runnerPaths } from '../src/paths.ts';
 import { ensureSandbox } from '../src/sandbox/sandbox.ts';
 import { RunnerKeys } from '../src/secrets/keys.ts';
+import { sealOrg, sealWs } from './seal-helpers.ts';
 
 /**
  * Opt-in: runs the REAL gemini binary (AOM_GEMINI_REAL_BIN=/path/to/gemini, @google/gemini-cli 0.65.0) through the adapter,
@@ -121,8 +122,8 @@ async function setup(
     store.set({
       provider: 'google',
       keyId: keys.publicKey.keyId,
-      ...(source ? { source, orgId: ORG } : {}),
-      ciphertext: await sealLarge(keys.publicKey.publicKey, key),
+      ...(source ? { source, orgId: ORG, generation: 1 } : {}),
+      ciphertext: source ? await sealOrg(keys, ORG, 'google', key) : await sealWs(keys, 'google', key),
       models: [],
     });
   if (opts.orgKey) await put('org', 'AIza-ORG-KEY-never-in-sandbox');

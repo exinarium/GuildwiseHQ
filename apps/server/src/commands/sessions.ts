@@ -395,6 +395,9 @@ export async function addParticipant(
   return withAppendTx(ctx.pool, async (tx) => {
     const t = await loadSession(tx, userId, threadId, true);
     await assertSessionManager(tx, userId, t);
+    // a chat with a persona is strictly one-to-one: the user and the persona it was started with, nobody else
+    if (t.kind === 'persona_chat')
+      throw conflict('persona_chat_one_to_one', 'a chat with a persona is between you and the persona only');
     const { displayName } = await checkParticipant(tx, t.org_id, req, t.project_id, t.created_by);
     const existing = await one(
       tx,

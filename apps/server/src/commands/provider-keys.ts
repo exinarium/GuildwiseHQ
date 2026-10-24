@@ -4,7 +4,7 @@ import {
   DIRECT_RUNTIME,
   normalizePrivateEndpoints,
   PRIVATE_ENDPOINTS_CAPABILITY,
-  PROVIDER_KEYS_CAPABILITY,
+  PROVIDER_KEYS_BOUND_CAPABILITY,
   type ProviderKeyId,
   ProviderKeyResultSchema,
   type ReportedProvider,
@@ -63,11 +63,16 @@ export async function setProviderKey(
     if (!k || k.key_id !== body.keyId)
       throw conflict('sudo_key_changed', "the runner's key changed: reload the page and enter the key again");
     // Bedrock, Vertex and a gateway (Claude Code backends) need a runner that knows them; a direct provider needs the direct-model adapter.
+    // Every key is sealed bound to its purpose (`h2`): a runner that cannot open that form is told to update.
     const backend = (BACKEND_IDS as readonly string[]).includes(provider);
     const caps = await one(
       tx,
-      'SELECT $2 = ANY(capabilities) AS ok FROM workstation_capabilities WHERE workstation_id=$1',
-      [workstationId, backend ? PROVIDER_KEYS_CAPABILITY : DIRECT_MODEL_CAPABILITY],
+      `SELECT ($2 = ANY(capabilities) AND $3 = ANY(capabilities)) AS ok FROM workstation_capabilities WHERE workstation_id=$1`,
+      [
+        workstationId,
+        backend ? PROVIDER_KEYS_BOUND_CAPABILITY : DIRECT_MODEL_CAPABILITY,
+        PROVIDER_KEYS_BOUND_CAPABILITY,
+      ],
     );
     if (!caps?.ok)
       throw unprocessable(

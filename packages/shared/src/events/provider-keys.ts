@@ -25,6 +25,8 @@ export const providerKeyEvents = [
       /** Extra model ids that go with the key (a gateway's models, an OpenAI-compatible endpoint's). */
       models: z.array(z.string().min(1).max(120)).max(50),
       workstationIds: z.array(Id).max(500),
+      /** The generation this key got (`org_providers.key_generation`, one more than the one it replaces); 0 on older events. */
+      generation: z.number().int().min(0).default(0),
     }),
   ),
   /** The key was sealed to one more workstation (the admin entered it again, or a runner that holds it re-sealed it). */

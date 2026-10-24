@@ -296,8 +296,14 @@ function CapRow({ p }: { p: OrgProvider }) {
 }
 
 function WorkstationList({ p }: { p: OrgProvider }) {
+  const me = useMe();
   const share = useReshareOrgProviderKey(p.provider);
   const [again, setAgain] = useState<OrgProviderWorkstation | null>(null);
+  // The admin sees the target runner's key fingerprint and approves it: the approval is sealed to the source runner.
+  const [approving, setApproving] = useState<{
+    source: OrgProviderWorkstation;
+    target: OrgProviderWorkstation;
+  } | null>(null);
   const toast = useToast();
   const holders = p.workstations.filter((w) => w.canShare);
   return (
@@ -342,16 +348,7 @@ function WorkstationList({ p }: { p: OrgProvider }) {
                       data-testid={`org-provider-reshare-${p.provider}-${w.workstationId}`}
                       title={`${holders[0]?.name} re-seals the key for ${w.name}. You do not have to type it again.`}
                       onClick={() =>
-                        share.mutate(
-                          {
-                            sourceWorkstationId: (holders[0] as OrgProviderWorkstation).workstationId,
-                            targetWorkstationId: w.workstationId,
-                          },
-                          {
-                            onSuccess: () =>
-                              toast.success(`${holders[0]?.name} is sending the key to ${w.name}`),
-                          },
-                        )
+                        setApproving({ source: holders[0] as OrgProviderWorkstation, target: w })
                       }
                     >
                       Share from {holders[0]?.name}
@@ -373,6 +370,31 @@ function WorkstationList({ p }: { p: OrgProvider }) {
       </ul>
       <ErrorBox error={share.error} />
       {again && <ShareAgainDialog p={p} w={again} onClose={() => setAgain(null)} />}
+      {approving && (
+        <ConfirmDialog
+          open
+          onOpenChange={(o) => !o && setApproving(null)}
+          title={`Share the ${p.label} key with ${approving.target.name}?`}
+          description={`${approving.source.name} will encrypt the key for ${approving.target.name}'s runner, identified by the key id ${approving.target.keyId ?? '?'}. Only share it if that is the workstation you mean.`}
+          confirmLabel="Approve and share"
+          tone="primary"
+          onConfirm={() => {
+            const from = toTarget(approving.source);
+            const to = toTarget(approving.target);
+            const orgId = me.data?.activeOrg?.id;
+            const userId = me.data?.user.id;
+            if (!from || !to || !orgId || !userId) return setApproving(null);
+            share.mutate(
+              { orgId, approvedBy: userId, generation: p.generation, source: from, target: to },
+              {
+                onSuccess: () =>
+                  toast.success(`${approving.source.name} is sending the key to ${approving.target.name}`),
+              },
+            );
+            setApproving(null);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -390,6 +412,7 @@ function ShareAgainDialog({
   onClose: () => void;
 }) {
   const [draft, setDraft] = useState<CredentialDraft>(emptyDraft());
+  const me = useMe();
   const share = useShareOrgProviderKey(p.provider);
   const toast = useToast();
   const target = toTarget(w);
@@ -408,13 +431,19 @@ function ShareAgainDialog({
           <Button onClick={onClose}>Cancel</Button>
           <Button
             variant="primary"
-            disabled={!!problem || !target}
+            disabled={!!problem || !target || !me.data?.activeOrg}
             loading={share.isPending}
             data-testid="org-share-send"
             onClick={() =>
               target &&
               share.mutate(
-                { secret: secretOf(p.provider, draft), target },
+                {
+                  secret: secretOf(p.provider, draft),
+                  target,
+                  orgId: me.data?.activeOrg?.id ?? '',
+                  generation: p.generation,
+                  baseUrl: p.baseUrl,
+                },
                 {
                   onSuccess: () => {
                     toast.success(`Key sent to ${w.name}`);
@@ -446,6 +475,7 @@ function SetKeyDialog({
   const [draft, setDraft] = useState<CredentialDraft>(emptyDraft());
   // Everything that can take it is ticked (a runner that is offline gets the key when it connects).
   const [picked, setPicked] = useState<Set<string>>(() => new Set(targets.map((t) => t.workstationId)));
+  const me = useMe();
   const set = useSetOrgProviderKey(p.provider);
   const problem = draftProblem(p.provider, draft);
   const chosen = targets
@@ -500,7 +530,7 @@ function SetKeyDialog({
           <Button onClick={onClose}>Cancel</Button>
           <Button
             variant="primary"
-            disabled={!!problem || chosen.length === 0}
+            disabled={!!problem || chosen.length === 0 || !me.data?.activeOrg}
             loading={set.isPending}
             data-testid="org-set-send"
             title={problem ?? (chosen.length === 0 ? 'Pick at least one workstation' : undefined)}
@@ -509,6 +539,8 @@ function SetKeyDialog({
                 {
                   secret: secretOf(p.provider, draft),
                   targets: chosen,
+                  orgId: me.data?.activeOrg?.id ?? '',
+                  currentGeneration: p.generation,
                   models: parseModelIds(draft.models),
                   ...(detailOf(p.provider, draft) ? { detail: detailOf(p.provider, draft) } : {}),
                   ...(draft.baseUrl.trim()

@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { parseServiceAccount, serviceAccountFetch } from '../src/direct/google-sa.ts';
 import { ProviderStore } from '../src/direct/store.ts';
 import { RunnerKeys } from '../src/secrets/keys.ts';
+import { sealWs } from './seal-helpers.ts';
 
 const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
 const pem = privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
@@ -28,8 +29,8 @@ describe('hybrid sealing of provider credentials', () => {
   it('round-trips a service-account JSON far over the RSA limit, through the provider store', async () => {
     const { dir, keys: k } = keys();
     expect(saJson.length).toBeGreaterThan(1500);
-    const sealed = await sealLarge(k.publicKey.publicKey, saJson);
-    expect(sealed.startsWith('h1.')).toBe(true);
+    const sealed = await sealWs(k, 'google', saJson);
+    expect(sealed.startsWith('h2.')).toBe(true);
     expect(sealed).not.toContain('service_account');
     const store = new ProviderStore({ file: join(dir, 'providers.json'), keys: k });
     expect(
@@ -52,9 +53,9 @@ describe('hybrid sealing of provider credentials', () => {
       Buffer.from('sk-old-key'),
     ).toString('base64');
     const store = new ProviderStore({ file: join(dir, 'providers.json'), keys: k });
-    expect(
-      store.set({ provider: 'openai', keyId: k.publicKey.keyId, ciphertext: legacy, models: [] }).stored,
-    ).toBe(true);
+    const legacyResult = store.set({ provider: 'openai', keyId: k.publicKey.keyId, ciphertext: legacy, models: [] });
+    expect(legacyResult.stored).toBe(true);
+    expect(legacyResult.warning).toMatch(/older form/);
     expect(store.get('openai')?.apiKey).toBe('sk-old-key');
     expect(k.decryptAny(legacy)).toBe('sk-old-key');
   });

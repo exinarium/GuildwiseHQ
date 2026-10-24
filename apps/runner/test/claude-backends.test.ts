@@ -1,6 +1,6 @@
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { BUILTIN_ROLES, sealLarge } from '@aom/shared';
+import { BUILTIN_ROLES, type ProviderKeyId, sealLarge } from '@aom/shared';
 import { describe, expect, it } from 'vitest';
 import {
   backendOfModel,
@@ -17,6 +17,7 @@ import { ensureSandbox } from '../src/sandbox/sandbox.ts';
 import { RunnerKeys } from '../src/secrets/keys.ts';
 import { redact } from '../src/secrets/redact.ts';
 import { cleanupTmp, tmp } from './helpers.ts';
+import { sealOrg, sealWs } from './seal-helpers.ts';
 
 cleanupTmp();
 const builder = BUILTIN_ROLES.find((r) => r.key === 'builder') as (typeof BUILTIN_ROLES)[number];
@@ -29,8 +30,8 @@ function makeStore() {
   const root = tmp('aom-backends-');
   const keys = new RunnerKeys(join(root, 'secrets', 'runner-key.pem'));
   const store = new ProviderStore({ file: join(root, 'secrets', 'providers.json'), keys });
-  const seal = (fields: Record<string, string>) =>
-    sealLarge(keys.publicKey.publicKey, JSON.stringify(fields));
+  const seal = (fields: Record<string, string>, provider: ProviderKeyId = 'bedrock') =>
+    sealWs(keys, provider, JSON.stringify(fields), fields.baseUrl);
   return { root, keys, store, seal };
 }
 
@@ -101,7 +102,8 @@ describe('the provider store: two slots, three backends', () => {
       keyId: keys.publicKey.keyId,
       source: 'org',
       orgId: ORG,
-      ciphertext: await rsa('sk-org-key-1111'),
+      generation: 1,
+      ciphertext: await sealOrg(keys, ORG, 'openai', 'sk-org-key-1111'),
       models: [],
     });
     expect(store.get('openai', ORG)).toMatchObject({ apiKey: 'sk-org-key-1111', source: 'org' });
@@ -133,40 +135,13 @@ describe('the provider store: two slots, three backends', () => {
       keyId: keys.publicKey.keyId,
       source: 'org',
       orgId: ORG,
-      ciphertext: await sealLarge(keys.publicKey.publicKey, 'AIza-org-secret-9999'),
+      generation: 1,
+      ciphertext: await sealOrg(keys, ORG, 'google', 'AIza-org-secret-9999'),
       models: [],
     });
     const again = new ProviderStore({ file: join(root, 'secrets', 'providers.json'), keys });
     expect(again.get('google', ORG)?.source).toBe('org');
     expect(redact('AIza-org-secret-9999')).toBe('***');
-  });
-
-  it('re-seals the organization key to another runner, and only that key', async () => {
-    const a = makeStore();
-    const b = makeStore();
-    a.store.set({
-      provider: 'openai',
-      keyId: a.keys.publicKey.keyId,
-      source: 'org',
-      orgId: ORG,
-      ciphertext: await sealLarge(a.keys.publicKey.publicKey, 'sk-share-me-3333'),
-      models: [],
-    });
-    const out = await a.store.reseal('openai', ORG, b.keys.publicKey);
-    expect(out.ok).toBe(true);
-    expect(out.ciphertext).toBeDefined();
-    expect(JSON.stringify(out)).not.toContain('sk-share-me-3333');
-    expect(b.keys.decryptAny(out.ciphertext as string)).toBe('sk-share-me-3333');
-    expect(() => a.keys.decryptAny(out.ciphertext as string)).toThrow();
-    // a workstation's own key is never shared, and a runner without the organization key cannot reseal
-    a.store.set({
-      provider: 'google',
-      keyId: a.keys.publicKey.keyId,
-      ciphertext: await sealLarge(a.keys.publicKey.publicKey, 'own-google-key'),
-      models: [],
-    });
-    expect((await a.store.reseal('google', ORG, b.keys.publicKey)).ok).toBe(false);
-    expect((await b.store.reseal('openai', ORG, a.keys.publicKey)).ok).toBe(false);
   });
 });
 
@@ -368,13 +343,19 @@ console.log(${JSON.stringify(RESULT)});
       keyId: x.keys.publicKey.keyId,
       source: 'org',
       orgId: ORG,
-      ciphertext: await sealLarge(
-        x.keys.publicKey.publicKey,
+      generation: 1,
+      baseUrl: 'https://litellm.example.com',
+      ciphertext: await sealOrg(
+        x.keys,
+        ORG,
+        'gateway',
         JSON.stringify({ baseUrl: 'https://litellm.example.com', authToken: 'gw-secret-token-42' }),
+        1,
+        'https://litellm.example.com',
       ),
       models: ['gemini/gemini-2.5-pro'],
     });
-    const { ev, usage } = await x.start('gateway:gemini/gemini-2.5-pro');
+    const { ev, usage } = await x.start('gateway:gemini/gemini-2.5-pro', builder, { orgId: ORG });
     expect(ev.at(-1)).toMatchObject({ kind: 'exit', code: 0 });
     const r = x.read();
     expect(r.argv[r.argv.indexOf('--model') + 1]).toBe('gemini/gemini-2.5-pro');

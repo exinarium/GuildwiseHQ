@@ -52,6 +52,8 @@ export const OrgProviderSchema = z.object({
   models: z.array(z.string()),
   setAt: z.iso.datetime().nullable(),
   setByName: z.string().nullable(),
+  /** The key's generation: the browser seals the next key for `generation + 1` and a share for `generation` (it is bound into the blob). */
+  generation: z.number().int().min(0),
   cap: OrgProviderCapSchema,
   workstations: z.array(OrgProviderWorkstationSchema),
 });
@@ -75,17 +77,25 @@ export const SetOrgProviderKeyRequestSchema = z.object({
   baseUrl: z.string().max(300).optional(),
   models: z.array(z.string().min(1).max(120)).max(50).default([]),
   shares: z.array(Sealed).min(1).max(500),
+  /** The generation the blobs are bound to: the current one plus one. A different number means the page is stale (409). */
+  generation: z.number().int().min(1).max(2_000_000_000),
 });
 export type SetOrgProviderKeyRequest = z.infer<typeof SetOrgProviderKeyRequestSchema>;
 
 /** `PUT /api/org/providers/:provider/shares`: seal the key to one more workstation (the admin entered it again). */
-export const ShareOrgProviderKeyRequestSchema = Sealed;
+export const ShareOrgProviderKeyRequestSchema = Sealed.extend({
+  /** The generation the blob is bound to: the current one. */
+  generation: z.number().int().min(1).max(2_000_000_000),
+});
 export type ShareOrgProviderKeyRequest = z.infer<typeof ShareOrgProviderKeyRequestSchema>;
 
 /** `POST /api/org/providers/:provider/reshare`: a runner that holds the key re-seals it to another workstation. */
 export const ReshareOrgProviderKeyRequestSchema = z.object({
   sourceWorkstationId: z.uuid(),
   targetWorkstationId: z.uuid(),
+  /** The generation the admin saw, and `sealResealApproval` output for it (sealed to the source runner, see key-seal.ts). */
+  generation: z.number().int().min(1).max(2_000_000_000),
+  approval: z.string().min(1).max(8000),
 });
 export type ReshareOrgProviderKeyRequest = z.infer<typeof ReshareOrgProviderKeyRequestSchema>;
 

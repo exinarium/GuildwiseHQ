@@ -418,7 +418,9 @@ export class GeminiAdapter implements RuntimeAdapter {
   async capabilities(): Promise<RuntimeCapabilities> {
     const caps = ['shell', 'edit', 'web', 'skills', 'resume'];
     const sel = this.authSelection();
-    const auth = sel.via === 'none' ? ('expired' as const) : ('ok' as const);
+    // availability only: a key of some organization counts, but a run uses it only for the organization it names
+    const keyHeld = this.cfg.authMode !== 'login' && !!this.store?.holds('google');
+    const auth = sel.via === 'none' && !keyHeld ? ('expired' as const) : ('ok' as const);
     const models = this.cfg.models.map((id) => ({ id, label: id }));
     let version = 'unknown';
     const down = (reason: string): RuntimeCapabilities => ({
@@ -455,7 +457,9 @@ export class GeminiAdapter implements RuntimeAdapter {
       sandbox: sb.ok ? 'enforced' : 'unavailable',
       sandboxReason: sb.reason,
       auth,
-      ...(sel.via !== 'none' ? { authVia: sel.via === 'login' ? ('login' as const) : ('key' as const) } : {}),
+      ...(sel.via !== 'none' || keyHeld
+        ? { authVia: sel.via === 'login' ? ('login' as const) : ('key' as const) }
+        : {}),
       ...(models.length ? { models } : {}),
     };
   }

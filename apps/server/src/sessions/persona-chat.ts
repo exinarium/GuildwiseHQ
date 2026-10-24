@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import {
   isKnownChoice,
   type ModelChoice,
+  SESSION_TIME_TICK_MAX_MS,
   type SessionDto,
   type SessionTurnDto,
   type StartPersonaChatRequest,
@@ -21,7 +22,7 @@ import {
   sessionDto,
 } from '../commands/sessions.ts';
 import type { Ctx } from '../context.ts';
-import { one, type Row, rows } from '../db/sql.ts';
+import { one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
@@ -36,11 +37,38 @@ import { runtimeProblem, runtimeReports } from './offer.ts';
  * (read) and `aom ledger search` (read) are reachable. A private persona resolves for its owner only.
  */
 
-/** The time limit of a persona chat: minutes from its start. Past it, no new message is taken until the limit is raised. */
-export function assertPersonaChatTime(t: Row, now: Date): void {
+/**
+ * The active time of a persona chat in ms at `now`: the same paused-clock model as a session. The clock runs while the persona is
+ * working on a turn (queued turns that never started and a workstation that is offline do not count), and between a reply and the
+ * next message only as much as one tick (`SESSION_TIME_TICK_MAX_MS`, as the Boardroom's clock caps a gap), so a chat left alone
+ * for a day has not used a day. Derived from the durable turns, so a restart loses nothing.
+ */
+export async function personaChatElapsedMs(db: Queryable, threadId: string, now: Date): Promise<number> {
+  const turns = await rows<{ started: Date | null; finished: Date | null; status: string; queued: Date }>(
+    db,
+    `SELECT started_at AS started, finished_at AS finished, status, queued_at AS queued
+       FROM session_turns WHERE thread_id=$1 AND status IN ('running','done','failed') ORDER BY queued_at`,
+    [threadId],
+  );
+  let ms = 0;
+  let prevEnd: number | null = null;
+  for (const t of turns) {
+    const begin = new Date(t.started ?? t.queued).getTime();
+    const end = t.finished ? new Date(t.finished).getTime() : now.getTime();
+    if (prevEnd !== null) ms += Math.min(Math.max(0, begin - prevEnd), SESSION_TIME_TICK_MAX_MS);
+    ms += Math.max(0, end - begin);
+    prevEnd = Math.max(prevEnd ?? 0, end);
+  }
+  // the gap between the last reply and this moment (the message being sent now), as one tick at most
+  if (prevEnd !== null) ms += Math.min(Math.max(0, now.getTime() - prevEnd), SESSION_TIME_TICK_MAX_MS);
+  return ms;
+}
+
+/** The time limit of a persona chat (minutes of active time). Past it, no new message is taken until the limit is raised. */
+export async function assertPersonaChatTime(db: Queryable, t: Row, now: Date): Promise<void> {
   const limit = (t.session_config as { timeLimitMinutes?: number | null } | null)?.timeLimitMinutes;
   if (!limit) return;
-  const elapsedMin = (now.getTime() - new Date(t.created_at).getTime()) / 60_000;
+  const elapsedMin = (await personaChatElapsedMs(db, t.id, now)) / 60_000;
   if (elapsedMin >= limit)
     throw conflict(
       'session_time_up',
@@ -200,7 +228,7 @@ export async function sayToPersona(
   // the chat's own limits (the session cost limit and, for a chat, a time limit from its start), before anything is posted
   const now = ctx.clock.now();
   await assertSessionMayQueue(ctx.pool, t, now);
-  assertPersonaChatTime(t, now);
+  await assertPersonaChatTime(ctx.pool, t, now);
   const message = await postSessionMessage(ctx, userId, threadId, { body, kind: 'chat', data: {} });
   const cfg = (t.session_config ?? {}) as { model?: ModelChoice };
   const turn = await ctx.services.sessions.queue(

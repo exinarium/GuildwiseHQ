@@ -9,7 +9,7 @@ import {
   type OrgProvider,
   type OrgProvidersResponse,
   PROVIDER_KEY_LABEL,
-  PROVIDER_KEYS_CAPABILITY,
+  PROVIDER_KEYS_BOUND_CAPABILITY,
   type ProviderKeyId,
   ProviderKeyResealResultSchema,
   ProviderKeyResultSchema,
@@ -91,7 +91,7 @@ async function targetWorkstations(db: Queryable, orgId: string) {
        LEFT JOIN workstation_capabilities c ON c.workstation_id = ws.id
       WHERE ws.status = 'active' AND ${wsServesOrgSql('ws', '$1::uuid')}
       ORDER BY u.display_name, ws.name, ws.id`,
-    [orgId, PROVIDER_KEYS_CAPABILITY],
+    [orgId, PROVIDER_KEYS_BOUND_CAPABILITY],
   );
 }
 
@@ -114,6 +114,35 @@ function assertSealableTo(t: Target, keyId: string): void {
       'sudo_key_changed',
       `the runner key of ${t.name} changed: reload the page and enter the key again`,
     );
+}
+
+/**
+ * Serialises changes to one organization key (set, share, revoke, reshare) and returns its current generation: the number of
+ * times it was set. The browser binds a new key to `generation + 1`, a share of the current key to `generation`.
+ */
+async function lockGeneration(tx: Tx, orgId: string, provider: string): Promise<number> {
+  await exec(tx, 'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [
+    `org-provider-key:${orgId}:${provider}`,
+  ]);
+  const row = await one(tx, 'SELECT key_generation FROM org_providers WHERE org_id=$1 AND provider=$2', [
+    orgId,
+    provider,
+  ]);
+  return Number(row?.key_generation ?? 0);
+}
+
+/**
+ * A reshare that is waiting for its source runner (or being answered) must not outlive a change to the key: its answer would
+ * resurrect a key that was replaced or revoked. Its payload (with the admin's sealed approval) is emptied too.
+ */
+async function failPendingReshares(tx: Tx, orgId: string, provider: string): Promise<void> {
+  await exec(
+    tx,
+    `UPDATE runner_commands SET status='failed', payload='{}'::jsonb, last_error='superseded'
+      WHERE type='provider.key.reseal' AND status IN ('pending','sent')
+        AND payload->>'orgId' = $1 AND payload->>'provider' = $2`,
+    [orgId, provider],
+  );
 }
 
 /** One key per organization, provider and workstation is pending at a time. */
@@ -143,6 +172,8 @@ async function queueShare(
     ciphertext: string;
     baseUrl: string | null;
     models: string[];
+    /** The generation the blob is bound to (`org_providers.key_generation`). */
+    generation: number;
     by: string;
     via: 'browser' | 'runner';
   },
@@ -160,6 +191,7 @@ async function queueShare(
       ciphertext: a.ciphertext,
       ...(a.baseUrl ? { baseUrl: a.baseUrl } : {}),
       models: a.models,
+      generation: a.generation,
     },
     new Date(ctx.clock.now().getTime() + KEY_TTL_MS),
   );
@@ -174,9 +206,21 @@ async function queueShare(
   );
 }
 
-async function queueClear(tx: Tx, orgId: string, provider: string, workstationId: string): Promise<void> {
+/** `generation` is the one being revoked or replaced: the runner refuses to take it (or an older one) again. */
+async function queueClear(
+  tx: Tx,
+  orgId: string,
+  provider: string,
+  workstationId: string,
+  generation: number,
+): Promise<void> {
   await supersedePending(tx, workstationId, orgId, provider);
-  await enqueueRunnerCommand(tx, workstationId, 'provider.key.clear', { provider, source: 'org', orgId });
+  await enqueueRunnerCommand(tx, workstationId, 'provider.key.clear', {
+    provider,
+    source: 'org',
+    orgId,
+    ...(generation > 0 ? { generation } : {}),
+  });
 }
 
 // ------------------------------------------------------------------------------------------------ the page
@@ -212,6 +256,7 @@ export async function listOrgProviders(
       models: Array.isArray(row?.models) ? (row?.models as string[]) : [],
       setAt: row?.set_at ? new Date(row.set_at).toISOString() : null,
       setByName: row?.set_by_name ?? null,
+      generation: Number(row?.key_generation ?? 0),
       cap: {
         monthlyMicros: cap.capMicros,
         spendMicros: cap.spendMicros,
@@ -268,6 +313,14 @@ export async function setOrgProviderKey(
   const touched: string[] = [];
   await withAppendTx(ctx.pool, async (tx) => {
     await requireManager(tx, user, orgId);
+    const current = await lockGeneration(tx, orgId, provider);
+    // the blobs are bound to the generation the page saw plus one: a page that is out of date seals for the wrong one
+    if (req.generation !== current + 1)
+      throw conflict(
+        'stale_generation',
+        'the key changed since this page was loaded: reload the page and enter it again',
+      );
+    await failPendingReshares(tx, orgId, provider);
     const targets = await targetWorkstations(tx, orgId);
     const wanted = new Set<string>();
     for (const s of req.shares) {
@@ -286,7 +339,7 @@ export async function setOrgProviderKey(
     );
     for (const h of held)
       if (!wanted.has(h.workstation_id)) {
-        await queueClear(tx, orgId, provider, h.workstation_id);
+        await queueClear(tx, orgId, provider, h.workstation_id, current);
         await exec(
           tx,
           'DELETE FROM org_provider_key_shares WHERE org_id=$1 AND provider=$2 AND workstation_id=$3',
@@ -303,6 +356,7 @@ export async function setOrgProviderKey(
         ciphertext: s.ciphertext,
         baseUrl,
         models: req.models,
+        generation: current + 1,
         by: user.id,
         via: 'browser',
       });
@@ -322,6 +376,7 @@ export async function setOrgProviderKey(
               baseUrl,
               models: req.models,
               workstationIds: [...wanted],
+              generation: current + 1,
             },
           },
           actor: userActor(user.id),
@@ -346,6 +401,7 @@ export async function shareOrgProviderKey(
   assertProvider(provider);
   await withAppendTx(ctx.pool, async (tx) => {
     await requireManager(tx, user, orgId);
+    const current = await lockGeneration(tx, orgId, provider);
     const row = await one(
       tx,
       'SELECT configured, base_url, models FROM org_providers WHERE org_id=$1 AND provider=$2',
@@ -353,6 +409,11 @@ export async function shareOrgProviderKey(
     );
     if (!row?.configured)
       throw conflict('no_org_key', 'the organization has no key for this provider yet: set it first');
+    if (req.generation !== current)
+      throw conflict(
+        'stale_generation',
+        'the key changed since this page was loaded: reload the page and enter it again',
+      );
     const t = await targetOf(tx, orgId, req.workstationId);
     assertSealableTo(t, req.keyId);
     await queueShare(ctx, tx, {
@@ -363,6 +424,7 @@ export async function shareOrgProviderKey(
       ciphertext: req.ciphertext,
       baseUrl: row.base_url ?? null,
       models: Array.isArray(row.models) ? (row.models as string[]) : [],
+      generation: current,
       by: user.id,
       via: 'browser',
     });
@@ -399,6 +461,17 @@ export async function reshareOrgProviderKey(
   assertProvider(provider);
   await withAppendTx(ctx.pool, async (tx) => {
     await requireManager(tx, user, orgId);
+    const current = await lockGeneration(tx, orgId, provider);
+    const kept = await one(tx, 'SELECT configured FROM org_providers WHERE org_id=$1 AND provider=$2', [
+      orgId,
+      provider,
+    ]);
+    if (!kept?.configured) throw conflict('no_org_key', 'the organization has no key for this provider');
+    if (req.generation !== current)
+      throw conflict(
+        'stale_generation',
+        'the key changed since this page was loaded: reload the page and approve again',
+      );
     const source = await targetOf(tx, orgId, req.sourceWorkstationId);
     const target = await targetOf(tx, orgId, req.targetWorkstationId);
     const share = await one(
@@ -426,6 +499,9 @@ export async function reshareOrgProviderKey(
         targetPublicKey: target.public_key,
         targetWorkstationId: target.id,
         approvedBy: user.id,
+        generation: current,
+        // made in the admin's browser and sealed to the source runner: it names the target key the admin was shown
+        approval: req.approval,
       },
       new Date(ctx.clock.now().getTime() + 15 * 60_000),
     );
@@ -444,13 +520,15 @@ export async function revokeOrgProviderKey(
   const touched: string[] = [];
   await withAppendTx(ctx.pool, async (tx) => {
     await requireManager(tx, user, orgId);
+    const current = await lockGeneration(tx, orgId, provider);
+    await failPendingReshares(tx, orgId, provider);
     const held = await rows<{ workstation_id: string }>(
       tx,
       'SELECT workstation_id FROM org_provider_key_shares WHERE org_id = $1 AND provider = $2',
       [orgId, provider],
     );
     for (const h of held) {
-      await queueClear(tx, orgId, provider, h.workstation_id);
+      await queueClear(tx, orgId, provider, h.workstation_id, current);
       touched.push(h.workstation_id);
     }
     // a copy still waiting in the command queue (a reshare answer on its way) must not arrive after the revocation either
@@ -529,6 +607,7 @@ export async function applyResealResult(
   if (!isProvider(provider) || !/^[0-9a-f-]{36}$/i.test(orgId) || !/^[0-9a-f-]{36}$/i.test(targetId)) return;
   let delivered = false;
   await withAppendTx(ctx.pool, async (tx) => {
+    const current = await lockGeneration(tx, orgId, provider);
     const org = await one(
       tx,
       'SELECT configured, base_url, models FROM org_providers WHERE org_id=$1 AND provider=$2',
@@ -536,6 +615,9 @@ export async function applyResealResult(
     );
     // revoked meanwhile: the answer is dropped
     if (!org?.configured) return;
+    // replaced meanwhile (or answered for another version of the key): the answer would bring back a key that is gone
+    const asked = Number(payload.generation ?? 0);
+    if (asked < 1 || asked !== current || parsed.generation !== current) return;
     const target = (await targetWorkstations(tx, orgId)).find((t) => t.id === targetId);
     // the target's runner key must still be the one the key was sealed to
     if (!target?.supported || target.key_id !== payload.targetKeyId) return;
@@ -547,6 +629,7 @@ export async function applyResealResult(
       ciphertext: parsed.ciphertext as string,
       baseUrl: org.base_url ?? null,
       models: Array.isArray(org.models) ? (org.models as string[]) : [],
+      generation: current,
       by: /^[0-9a-f-]{36}$/i.test(approvedBy) ? approvedBy : sourceWorkstationId,
       via: 'runner',
     });

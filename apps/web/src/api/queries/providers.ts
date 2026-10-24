@@ -1,8 +1,10 @@
 import {
+  BACKEND_IDS,
   backendDef,
+  normalizeEndpoint,
   type ProviderKeyId,
   type SetProviderKeyRequest,
-  sealLarge,
+  sealProviderKey,
   type WorkstationProvidersResponse,
   WorkstationProvidersResponseSchema,
 } from '@aom/shared';
@@ -40,12 +42,26 @@ export function useSetProviderKey(workstationId: string) {
       const sealed = await get<{ keyId: string; publicKey: string }>(
         `/workstations/${workstationId}/sudo-key`,
       );
+      // The endpoint the key is bound to: an OpenAI-compatible provider's base URL, or the endpoint inside a backend credential.
+      const endpoint = (BACKEND_IDS as readonly string[]).includes(v.provider)
+        ? backendEndpointOf(v.key)
+        : (v.baseUrl ?? '');
       const body: SetProviderKeyRequest = {
         keyId: sealed.keyId,
-        // Always hybrid (RSA-OAEP wrapped AES-GCM key): a credential of any length fits, a service-account JSON included. The
-        // runner still opens the older RSA-only blobs it already stores.
-        ...(v.key ? { ciphertext: await sealLarge(sealed.publicKey, v.key) } : {}),
-        ...(v.baseUrl ? { baseUrl: v.baseUrl } : {}),
+        // Always hybrid (RSA-OAEP wrapped AES-GCM key) with the purpose as associated data: a credential of any length fits, a
+        // service-account JSON included, and the blob opens only for this provider and endpoint on this runner key.
+        ...(v.key
+          ? {
+              ciphertext: await sealProviderKey(sealed.publicKey, v.key, {
+                scope: 'workstation',
+                provider: v.provider,
+                endpoint,
+                generation: 0,
+                keyId: sealed.keyId,
+              }),
+            }
+          : {}),
+        ...(endpoint ? { baseUrl: endpoint } : {}),
         models: v.models,
       };
       return put(`/workstations/${workstationId}/providers/${v.provider}`, body);
@@ -70,4 +86,14 @@ export function useRemoveProviderKey(workstationId: string) {
     mutationFn: (provider: ProviderKeyId) => del(`/workstations/${workstationId}/providers/${provider}`),
     onSuccess: () => refreshSoon(qc, workstationId),
   });
+}
+
+/** The endpoint (`baseUrl` field) of a backend credential's JSON, normalised; empty when it has none. */
+function backendEndpointOf(json: string): string {
+  try {
+    const f = JSON.parse(json) as Record<string, unknown>;
+    return typeof f.baseUrl === 'string' ? normalizeEndpoint(f.baseUrl) : '';
+  } catch {
+    return '';
+  }
 }

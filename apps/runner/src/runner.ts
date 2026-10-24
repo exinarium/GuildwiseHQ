@@ -27,6 +27,7 @@ import {
   PACK_AUTHORING_CAPABILITY,
   PACKS_CAPABILITY,
   PRIVATE_ENDPOINTS_CAPABILITY,
+  PROVIDER_KEYS_BOUND_CAPABILITY,
   PROVIDER_KEYS_CAPABILITY,
   READONLY_DESIGN_CAPABILITY,
   type RepoReport,
@@ -1183,6 +1184,9 @@ export class Runner {
         DIRECT_MODEL_CAPABILITY,
         // An organization key beside the workstation's own, Claude Code backends (Bedrock, Vertex, gateways) and re-sealing the organization key.
         PROVIDER_KEYS_CAPABILITY,
+        // Provider and backend credentials bound to their purpose (`h2` with associated data), organization key generations,
+        // and re-sealing only on an approval made in the admin's browser.
+        PROVIDER_KEYS_BOUND_CAPABILITY,
         // The workstation owner's private-endpoint allow-list (`provider.endpoints.set`).
         PRIVATE_ENDPOINTS_CAPABILITY,
         // Capability packs: git import pinned to a commit, hash-checked before use (`packs.sync`, `pack.check`, `packs.report`).
@@ -1885,9 +1889,13 @@ export class Runner {
         // An Owner or Admin approved sharing the organization key with another workstation: seal it to that runner's key. The
         // answer carries the ciphertext for the server to relay; the plain key never leaves this function.
         const p = CommandPayloadSchemas['provider.key.reseal'].parse(payload);
-        const r = await this.providers.reseal(p.provider, p.orgId, {
-          keyId: p.targetKeyId,
-          publicKey: p.targetPublicKey,
+        const r = await this.providers.reseal({
+          provider: p.provider,
+          orgId: p.orgId,
+          targetKeyId: p.targetKeyId,
+          targetPublicKey: p.targetPublicKey,
+          ...(p.approval ? { approval: p.approval } : {}),
+          ...(p.generation ? { generation: p.generation } : {}),
         });
         done(r.ok, r, r.ok ? undefined : r.error);
       } else if (command === 'env.secret.clear') {

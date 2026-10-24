@@ -31,6 +31,12 @@ export type KeySource = z.infer<typeof KeySourceSchema>;
 
 /** Announced in `hello.capabilities` by runners that keep an organization key beside the workstation's own and know the backends. */
 export const PROVIDER_KEYS_CAPABILITY = 'provider-keys:2';
+/**
+ * Announced by runners that open provider and backend credentials only when they are bound to their purpose (`h2.` with associated
+ * data: provider, organization, endpoint, key generation) and reshare organization keys only on a browser-made approval. The server
+ * sends keys to no other runner: an older one cannot open a bound blob.
+ */
+export const PROVIDER_KEYS_BOUND_CAPABILITY = 'provider-keys:3';
 
 export type ModelTier = 'small' | 'medium' | 'large';
 
@@ -239,6 +245,11 @@ export const ProviderKeySetPayloadSchema = z.object({
   orgId: z.uuid().optional(),
   baseUrl: z.string().max(300).optional(),
   models: z.array(z.string().min(1).max(120)).max(50).default([]),
+  /**
+   * The organization key's generation (`org_providers.key_generation`), required for `source: 'org'`: it is part of what the blob
+   * is bound to, and the runner refuses a generation older than one it already held or revoked (a replayed key).
+   */
+  generation: z.number().int().min(1).max(2_000_000_000).optional(),
 });
 export type ProviderKeySetPayload = z.infer<typeof ProviderKeySetPayloadSchema>;
 export type ProviderKeyClearPayload = z.infer<typeof ProviderKeyClearPayloadSchema>;
@@ -248,6 +259,8 @@ export const ProviderKeyClearPayloadSchema = z.object({
   source: KeySourceSchema.optional(),
   /** With `source: 'org'`: the organization whose key to forget. */
   orgId: z.uuid().optional(),
+  /** With `source: 'org'`: the generation being revoked or replaced; the runner refuses to take that generation (or older) again. */
+  generation: z.number().int().min(0).max(2_000_000_000).optional(),
 });
 export const ProviderKeyResultSchema = z.object({
   stored: z.boolean(),

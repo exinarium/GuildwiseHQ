@@ -105,8 +105,14 @@ export class RunnerKeys {
     return Buffer.concat([d.update(buf.subarray(0, buf.length - 16)), d.final()]).toString('utf8');
   }
 
-  /** `decrypt` for a short value, `decryptHybrid` for a sealed one of any length. */
-  decryptAny(value: string, aad?: string): string {
+  /**
+   * `decrypt` for a short value, `decryptHybrid` for a sealed one of any length. `requireBound` refuses every form that is not
+   * tied to its purpose by associated data (`h2.`): the RSA-only form and `h1.` carry no binding, so whoever relays them can
+   * relabel what they are for.
+   */
+  decryptAny(value: string, aad?: string, opts: { requireBound?: boolean } = {}): string {
+    if (opts.requireBound && !value.startsWith('h2.'))
+      throw new Error('this sealed value is not bound to its purpose and is refused');
     return value.startsWith('h1.') || value.startsWith('h2.')
       ? this.decryptHybrid(value, aad)
       : this.decrypt(value);

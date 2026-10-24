@@ -35,11 +35,11 @@ export const providerKeyProjectors: Record<string, Projector> = {
     const p = ev<EventOf<'OrgProviderKeySet'>>(e).payload;
     await exec(
       tx,
-      `INSERT INTO org_providers (org_id, provider, configured, detail, base_url, models, set_by, set_at)
-       VALUES ($1, $2, true, $3, $4, $5, $6, $7)
+      `INSERT INTO org_providers (org_id, provider, configured, detail, base_url, models, set_by, set_at, key_generation)
+       VALUES ($1, $2, true, $3, $4, $5, $6, $7, 1)
        ON CONFLICT (org_id, provider) DO UPDATE
          SET configured = true, detail = EXCLUDED.detail, base_url = EXCLUDED.base_url, models = EXCLUDED.models,
-             set_by = EXCLUDED.set_by, set_at = EXCLUDED.set_at`,
+             set_by = EXCLUDED.set_by, set_at = EXCLUDED.set_at, key_generation = org_providers.key_generation + 1`,
       [p.orgId, p.provider, p.detail, p.baseUrl, JSON.stringify(p.models), p.by, e.createdAt],
     );
   },

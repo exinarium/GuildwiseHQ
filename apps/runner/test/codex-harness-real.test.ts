@@ -23,6 +23,7 @@ import { runnerPaths } from '../src/paths.ts';
 import { ensureSandbox } from '../src/sandbox/sandbox.ts';
 import { RunnerKeys } from '../src/secrets/keys.ts';
 import { codexRolloutFile, readCodexRollout } from '../src/sessions/codex-rollout.ts';
+import { sealOrg } from './seal-helpers.ts';
 
 /**
  * Opt-in: runs the REAL codex binary (AOM_CODEX_REAL_BIN=/path/to/codex, codex-cli 0.164.0) through the adapter, inside the
@@ -140,7 +141,8 @@ async function setup(name: string, mode: 'key' | 'login', script: string) {
       keyId: keys.publicKey.keyId,
       source: 'org',
       orgId: ORG,
-      ciphertext: await sealLarge(keys.publicKey.publicKey, 'sk-ORG-KEY-never-in-sandbox'),
+      generation: 1,
+      ciphertext: await sealOrg(keys, ORG, 'openai', 'sk-ORG-KEY-never-in-sandbox'),
       models: [],
     });
   const loginDir = join(dir, 'owner-codex');

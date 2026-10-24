@@ -327,7 +327,10 @@ export class OpencodeAdapter implements RuntimeAdapter {
 
   async capabilities(): Promise<RuntimeCapabilities> {
     const caps = ['shell', 'edit', 'web', 'skills', 'resume'];
-    const providers = this.providers();
+    // availability only: a key of some organization counts, but a run uses it only for the organization it names
+    const providers = (this.store?.reportConfigured() ?? []).filter((p) =>
+      (OPENCODE_PROVIDERS as readonly string[]).includes(p.id),
+    );
     const auth = providers.length > 0 ? ('ok' as const) : ('expired' as const);
     let version = 'unknown';
     const down = (reason: string, models?: ReportedModel[]): RuntimeCapabilities => ({

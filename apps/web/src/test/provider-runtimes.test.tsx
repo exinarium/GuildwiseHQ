@@ -13,7 +13,7 @@ import { Agents } from '../pages/Agents.tsx';
 
 vi.mock('@aom/shared', async (orig) => ({
   ...(await orig<typeof import('@aom/shared')>()),
-  sealLarge: async (_k: string, text: string) => `h1.sealed-${text.length}`,
+  sealProviderKey: async (_k: string, text: string) => `h2.sealed-${text.length}`,
 }));
 vi.mock('../lib/runner-seal.ts', async (orig) => ({
   ...(await orig<typeof import('../lib/runner-seal.ts')>()),
@@ -177,7 +177,7 @@ describe('the workstation: whose key is in effect, and Claude Code on another ba
     const put = calls.find((c) => c.method === 'PUT') as Call;
     expect(put.url).toBe(`/api/workstations/${WS}/providers/bedrock`);
     expect(put.body.keyId).toBe('k1');
-    expect(put.body.ciphertext).toMatch(/^h1\.sealed-\d+$/);
+    expect(put.body.ciphertext).toMatch(/^h2\.sealed-\d+$/);
     expect(JSON.stringify(calls)).not.toMatch(/AKIAEXAMPLE|sekrit-value/);
   });
 

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { BUILTIN_ROLES, PROVIDER_KEYS_CAPABILITY } from '@aom/shared';
+import { BUILTIN_ROLES, PROVIDER_KEYS_BOUND_CAPABILITY } from '@aom/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { evaluateAllProviderCaps, evaluateProviderCap } from '../src/commands/org-provider-keys.ts';
 import { PROJECTION_TABLES } from '../src/projections/index.ts';
@@ -72,7 +72,7 @@ beforeAll(async () => {
   r1 = await w.connectRunner({ hello: false });
   r1.hello({
     runtimes: GEMINI_RUNTIMES([]) as never,
-    capabilities: [PROVIDER_KEYS_CAPABILITY],
+    capabilities: [PROVIDER_KEYS_BOUND_CAPABILITY],
     sudoKey: KEY1,
   });
   await r1.waitFor('welcome');
@@ -80,7 +80,7 @@ beforeAll(async () => {
   const m = await pairWorkstation(w.t, member, 'member-box');
   ws2 = m.workstationId;
   r2 = await FakeRunner.connect(w.baseUrl, m.runnerToken);
-  r2.hello({ capabilities: [PROVIDER_KEYS_CAPABILITY], sudoKey: KEY2 });
+  r2.hello({ capabilities: [PROVIDER_KEYS_BOUND_CAPABILITY], sudoKey: KEY2 });
   await r2.waitFor('welcome');
   // a third workstation (the member's) with an older runner that does not know organization keys
   const old = await pairWorkstation(w.t, member, 'old-box');
@@ -103,6 +103,36 @@ const share = (workstationId: string, keyId: string, ciphertext: string) => ({
   keyId,
   ciphertext,
 });
+/** The generation the page would bind a new key to: the current one plus one (read from the projection, like the list does). */
+const generationOf = async (provider: string): Promise<number> =>
+  Number(
+    (
+      await q('SELECT key_generation FROM org_providers WHERE org_id=$1 AND provider=$2', [orgId, provider])
+    )[0]?.key_generation ?? 0,
+  );
+const setKey = async (u: { cookie: string }, provider: string, body: Record<string, unknown>) =>
+  call(u, 'PUT', `/api/org/providers/${provider}`, {
+    generation: (await generationOf(provider)) + 1,
+    ...body,
+  });
+const shareKey = async (u: { cookie: string }, provider: string, s: ReturnType<typeof share>) =>
+  call(u, 'PUT', `/api/org/providers/${provider}/shares`, {
+    ...s,
+    generation: Math.max(1, await generationOf(provider)),
+  });
+const APPROVAL = 'c2VhbGVkLWFwcHJvdmFs';
+const reshareKey = async (
+  u: { cookie: string },
+  provider: string,
+  body: { sourceWorkstationId: string; targetWorkstationId: string },
+  over: Record<string, unknown> = {},
+) =>
+  call(u, 'POST', `/api/org/providers/${provider}/reshare`, {
+    ...body,
+    generation: await generationOf(provider),
+    approval: APPROVAL,
+    ...over,
+  });
 const commandsOf = (r: FakeRunner, type: string, from = 0) =>
   r.received.slice(from).filter((f) => f.type === 'command' && f.command === type) as any[];
 
@@ -110,7 +140,7 @@ describe('setting an organization key', () => {
   it('stores one ciphertext per workstation, relays it with its organization, and forgets it once the runner stored it', async () => {
     const from1 = r1.received.length;
     const from2 = r2.received.length;
-    const res = await call(admin, 'PUT', '/api/org/providers/openai', {
+    const res = await setKey(admin, 'openai', {
       detail: 'main account',
       models: [],
       shares: [share(w.workstationId, KEY1.keyId, SECRET1), share(ws2, KEY2.keyId, SECRET2)],
@@ -210,19 +240,19 @@ describe('setting an organization key', () => {
   });
 
   it('refuses a stale runner key, a runner that predates organization keys, and a workstation of someone outside the organization', async () => {
-    const stale = await call(admin, 'PUT', '/api/org/providers/google', {
+    const stale = await setKey(admin, 'google', {
       models: [],
       shares: [share(w.workstationId, 'old', SECRET1)],
     });
     expect(stale.status).toBe(409);
-    const old = await call(admin, 'PUT', '/api/org/providers/google', {
+    const old = await setKey(admin, 'google', {
       models: [],
       shares: [share(ws3, 'cccccccccccccccc', SECRET1)],
     });
     expect(old.status).toBe(422);
     expect(old.body.error?.code ?? old.body.code).toBe('runner_too_old');
     const stranger = await pairWorkstation(w.t, outsider, 'stranger-box');
-    const out = await call(admin, 'PUT', '/api/org/providers/google', {
+    const out = await setKey(admin, 'google', {
       models: [],
       shares: [share(stranger.workstationId, KEY1.keyId, SECRET1)],
     });
@@ -238,7 +268,7 @@ describe('setting an organization key', () => {
     expect((await call(member, 'GET', '/api/org/providers')).status).toBe(403);
     expect(
       (
-        await call(member, 'PUT', '/api/org/providers/openai', {
+        await setKey(member, 'openai', {
           models: [],
           shares: [share(ws2, KEY2.keyId, SECRET2)],
         })
@@ -258,7 +288,7 @@ describe('setting an organization key', () => {
     ).toBe(true);
     expect(
       (
-        await call(w.owner, 'PUT', '/api/org/providers/mistral', {
+        await setKey(w.owner, 'mistral', {
           models: [],
           shares: [share(ws2, KEY2.keyId, SECRET2)],
         })
@@ -269,7 +299,7 @@ describe('setting an organization key', () => {
   it('replacing the key sends the new copies and makes the workstations left out forget the old one', async () => {
     const from1 = r1.received.length;
     const from2 = r2.received.length;
-    await call(admin, 'PUT', '/api/org/providers/openai', {
+    await setKey(admin, 'openai', {
       models: [],
       shares: [share(w.workstationId, KEY1.keyId, 'bmV3LWNpcGhlcg==')],
     });
@@ -281,7 +311,13 @@ describe('setting an organization key', () => {
     );
     r1.send('command.result', { commandId: set.commandId, ok: true, result: { stored: true } });
     const clear = await r2.waitFor('command', (c) => c.command === 'provider.key.clear', 5000, from2);
-    expect(clear.payload).toEqual({ provider: 'openai', source: 'org', orgId });
+    // the clear names the generation being replaced: the runner refuses to take it again
+    expect(clear.payload).toEqual({
+      provider: 'openai',
+      source: 'org',
+      orgId,
+      generation: expect.any(Number),
+    });
     expect(
       (
         await q('SELECT workstation_id FROM org_provider_key_shares WHERE org_id=$1 AND provider=$2', [
@@ -296,7 +332,7 @@ describe('setting an organization key', () => {
   it('revoking removes the key everywhere: copies deleted, a clear command for every workstation, pending copies dropped', async () => {
     const from1 = r1.received.length;
     // a copy that has not been delivered yet must not arrive after the revocation
-    await call(admin, 'PUT', '/api/org/providers/anthropic', {
+    await setKey(admin, 'anthropic', {
       models: [],
       shares: [share(w.workstationId, KEY1.keyId, SECRET1), share(ws2, KEY2.keyId, SECRET2)],
     });
@@ -315,7 +351,7 @@ describe('setting an organization key', () => {
       5000,
       from1,
     );
-    expect(c1.payload).toEqual({ provider: 'anthropic', source: 'org', orgId });
+    expect(c1.payload).toEqual({ provider: 'anthropic', source: 'org', orgId, generation: 1 });
     await r2.waitFor(
       'command',
       (c) => c.command === 'provider.key.clear' && c.payload.provider === 'anthropic',
@@ -341,12 +377,7 @@ describe('setting an organization key', () => {
 describe('sharing the key with a workstation that joined later', () => {
   it('lets the Owner or an Admin enter the key again for one workstation', async () => {
     const from2 = r2.received.length;
-    const res = await call(
-      admin,
-      'PUT',
-      '/api/org/providers/openai/shares',
-      share(ws2, KEY2.keyId, 'YWdhaW4='),
-    );
+    const res = await shareKey(admin, 'openai', share(ws2, KEY2.keyId, 'YWdhaW4='));
     expect(res.status).toBe(202);
     const c = await r2.waitFor(
       'command',
@@ -354,7 +385,13 @@ describe('sharing the key with a workstation that joined later', () => {
       5000,
       from2,
     );
-    expect(c.payload).toMatchObject({ source: 'org', orgId, provider: 'openai', keyId: KEY2.keyId });
+    expect(c.payload).toMatchObject({
+      source: 'org',
+      orgId,
+      provider: 'openai',
+      keyId: KEY2.keyId,
+      generation: await generationOf('openai'),
+    });
     r2.send('command.result', { commandId: c.commandId, ok: true, result: { stored: true } });
     await r2.barrier();
     await until(
@@ -367,18 +404,13 @@ describe('sharing the key with a workstation that joined later', () => {
         )[0]?.status === 'stored',
     );
     // nothing to share for a provider the organization has no key for
-    const none = await call(
-      admin,
-      'PUT',
-      '/api/org/providers/google/shares',
-      share(ws2, KEY2.keyId, 'YWdhaW4='),
-    );
+    const none = await shareKey(admin, 'google', share(ws2, KEY2.keyId, 'YWdhaW4='));
     expect(none.status).toBe(409);
   });
 
   it('asks a runner that holds the key to re-seal it to the new one, on an approval, and relays the answer', async () => {
     // the member's workstation forgets it, then it is shared again from the Owner's runner
-    await call(admin, 'PUT', '/api/org/providers/openai', {
+    await setKey(admin, 'openai', {
       models: ['m1'],
       shares: [share(w.workstationId, KEY1.keyId, 'b3duZXI=')],
     });
@@ -400,7 +432,7 @@ describe('sharing the key with a workstation that joined later', () => {
     // a member cannot approve it
     expect(
       (
-        await call(member, 'POST', '/api/org/providers/openai/reshare', {
+        await reshareKey(member, 'openai', {
           sourceWorkstationId: w.workstationId,
           targetWorkstationId: ws2,
         })
@@ -409,7 +441,7 @@ describe('sharing the key with a workstation that joined later', () => {
     // the target must be a workstation of the organization, the source must hold the key
     expect(
       (
-        await call(admin, 'POST', '/api/org/providers/openai/reshare', {
+        await reshareKey(admin, 'openai', {
           sourceWorkstationId: ws2,
           targetWorkstationId: w.workstationId,
         })
@@ -417,7 +449,7 @@ describe('sharing the key with a workstation that joined later', () => {
     ).toBe(409);
     const from1 = r1.received.length;
     const from2 = r2.received.length;
-    const res = await call(admin, 'POST', '/api/org/providers/openai/reshare', {
+    const res = await reshareKey(admin, 'openai', {
       sourceWorkstationId: w.workstationId,
       targetWorkstationId: ws2,
     });
@@ -430,12 +462,14 @@ describe('sharing the key with a workstation that joined later', () => {
       targetPublicKey: KEY2.publicKey,
       targetWorkstationId: ws2,
       approvedBy: admin.id,
+      generation: await generationOf('openai'),
+      approval: APPROVAL,
     });
     // the source runner answers with the key sealed to the target; the server relays it as a normal organization key command
     r1.send('command.result', {
       commandId: reseal.commandId,
       ok: true,
-      result: { ok: true, ciphertext: 'aC5yZXNlYWxlZC10by1iYm9i' },
+      result: { ok: true, ciphertext: 'aC5yZXNlYWxlZC10by1iYm9i', generation: await generationOf('openai') },
     });
     const relayed = await r2.waitFor(
       'command',
@@ -463,7 +497,7 @@ describe('sharing the key with a workstation that joined later', () => {
 
   it('drops a re-sealed answer when the key was revoked meanwhile or the target runner key changed', async () => {
     const from1 = r1.received.length;
-    await call(admin, 'POST', '/api/org/providers/openai/reshare', {
+    await reshareKey(admin, 'openai', {
       sourceWorkstationId: w.workstationId,
       targetWorkstationId: ws2,
     });
@@ -473,7 +507,7 @@ describe('sharing the key with a workstation that joined later', () => {
     r1.send('command.result', {
       commandId: reseal.commandId,
       ok: true,
-      result: { ok: true, ciphertext: 'bGF0ZQ==' },
+      result: { ok: true, ciphertext: 'bGF0ZQ==', generation: 1 },
     });
     await r1.barrier();
     await new Promise((res) => setTimeout(res, 200));
@@ -483,6 +517,230 @@ describe('sharing the key with a workstation that joined later', () => {
     expect(
       await q('SELECT 1 FROM org_provider_key_shares WHERE org_id=$1 AND provider=$2', [orgId, 'openai']),
     ).toEqual([]);
+  });
+});
+
+describe('key generations and the reshare approval (security review findings 1 and 8)', () => {
+  const cmdRow = async (id: string) =>
+    (await q('SELECT status, payload FROM runner_commands WHERE id=$1', [id]))[0];
+
+  async function holdOnR1(secret: string) {
+    const from1 = r1.received.length;
+    const res = await setKey(admin, 'openai', {
+      models: [],
+      shares: [share(w.workstationId, KEY1.keyId, secret)],
+    });
+    expect(res.status).toBe(202);
+    const set = await r1.waitFor(
+      'command',
+      (c) => c.command === 'provider.key.set' && c.payload.ciphertext === secret,
+      5000,
+      from1,
+    );
+    r1.send('command.result', { commandId: set.commandId, ok: true, result: { stored: true } });
+    await r1.barrier();
+    await until(
+      async () =>
+        (
+          await q(
+            'SELECT status FROM org_provider_key_shares WHERE org_id=$1 AND provider=$2 AND workstation_id=$3',
+            [orgId, 'openai', w.workstationId],
+          )
+        )[0]?.status === 'stored',
+    );
+    return set;
+  }
+
+  it('binds each key to a generation: one more than the last, and a stale page is refused', async () => {
+    const before = await generationOf('openai');
+    const set = await holdOnR1('Z2VuLW9uZQ==');
+    expect(await generationOf('openai')).toBe(before + 1);
+    expect(set.payload.generation).toBe(before + 1);
+    // the event carries it
+    expect(
+      (await q(`SELECT payload FROM events WHERE type='OrgProviderKeySet' ORDER BY seq DESC LIMIT 1`))[0]
+        ?.payload,
+    ).toMatchObject({ provider: 'openai', generation: before + 1 });
+    // sealed for the wrong generation (the page was stale): nothing is queued
+    const wrong = await call(admin, 'PUT', '/api/org/providers/openai', {
+      generation: before + 1,
+      models: [],
+      shares: [share(w.workstationId, KEY1.keyId, 'c3RhbGU=')],
+    });
+    expect(wrong.status).toBe(409);
+    expect((wrong.body.error?.code ?? wrong.body.code) as string).toBe('stale_generation');
+    const wrongShare = await call(admin, 'PUT', '/api/org/providers/openai/shares', {
+      ...share(ws2, KEY2.keyId, 'c3RhbGU='),
+      generation: before + 7,
+    });
+    expect(wrongShare.status).toBe(409);
+    expect(await generationOf('openai')).toBe(before + 1);
+    // the list tells the page which generation to bind to
+    const page = await call(admin, 'GET', '/api/org/providers');
+    expect(page.body.providers.find((p: any) => p.provider === 'openai').generation).toBe(before + 1);
+    // revoking keeps the number going up: the next key can never be mistaken for the revoked one
+    await call(admin, 'DELETE', '/api/org/providers/openai');
+    expect(await generationOf('openai')).toBe(before + 1);
+    const again = await holdOnR1('Z2VuLXR3bw==');
+    expect(again.payload.generation).toBe(before + 2);
+  });
+
+  it('refuses a reshare without the admin’s approval, for another generation, or for a revoked key', async () => {
+    const gen = await generationOf('openai');
+    const missing = await call(admin, 'POST', '/api/org/providers/openai/reshare', {
+      sourceWorkstationId: w.workstationId,
+      targetWorkstationId: ws2,
+      generation: gen,
+    });
+    expect(missing.status).toBe(400);
+    const stale = await reshareKey(
+      admin,
+      'openai',
+      { sourceWorkstationId: w.workstationId, targetWorkstationId: ws2 },
+      { generation: gen - 1 },
+    );
+    expect(stale.status).toBe(409);
+    expect(commandsOf(r1, 'provider.key.reseal').filter((c) => c.payload.generation === gen - 1)).toEqual([]);
+  });
+
+  it('carries the sealed approval to the source runner and empties it with the command', async () => {
+    const from1 = r1.received.length;
+    const res = await reshareKey(admin, 'openai', {
+      sourceWorkstationId: w.workstationId,
+      targetWorkstationId: ws2,
+    });
+    expect(res.status).toBe(202);
+    const reseal = await r1.waitFor('command', (c) => c.command === 'provider.key.reseal', 5000, from1);
+    expect(reseal.payload.approval).toBe(APPROVAL);
+    expect(reseal.payload.generation).toBe(await generationOf('openai'));
+    // answered with a failure (the runner refused): nothing is relayed and nothing is kept
+    const from2 = r2.received.length;
+    r1.send('command.result', {
+      commandId: reseal.commandId,
+      ok: false,
+      result: { ok: false, error: 'the approval expired' },
+    });
+    await r1.barrier();
+    await new Promise((res2) => setTimeout(res2, 150));
+    expect(commandsOf(r2, 'provider.key.set', from2)).toEqual([]);
+  });
+
+  it('a pending reshare fails when the key is replaced, and its late answer cannot bring the old key back', async () => {
+    const from1 = r1.received.length;
+    await reshareKey(admin, 'openai', { sourceWorkstationId: w.workstationId, targetWorkstationId: ws2 });
+    const reseal = await r1.waitFor('command', (c) => c.command === 'provider.key.reseal', 5000, from1);
+    const oldGen = reseal.payload.generation as number;
+    // the admin replaces the key while the source runner is still working on the old one
+    await holdOnR1('cmVwbGFjZWQ=');
+    const row = await cmdRow(reseal.commandId);
+    expect(row?.status).toBe('failed');
+    expect(row?.payload).toEqual({});
+    const from2 = r2.received.length;
+    r1.send('command.result', {
+      commandId: reseal.commandId,
+      ok: true,
+      result: { ok: true, ciphertext: 'b2xkLWtleQ==', generation: oldGen },
+    });
+    await r1.barrier();
+    await new Promise((res2) => setTimeout(res2, 200));
+    expect(
+      commandsOf(r2, 'provider.key.set', from2).filter((c) => c.payload.ciphertext === 'b2xkLWtleQ=='),
+    ).toEqual([]);
+  });
+
+  it('a pending reshare fails when the key is revoked', async () => {
+    const from1 = r1.received.length;
+    await reshareKey(admin, 'openai', { sourceWorkstationId: w.workstationId, targetWorkstationId: ws2 });
+    const reseal = await r1.waitFor('command', (c) => c.command === 'provider.key.reseal', 5000, from1);
+    await call(admin, 'DELETE', '/api/org/providers/openai');
+    const row = await cmdRow(reseal.commandId);
+    expect(row?.status).toBe('failed');
+    expect(row?.payload).toEqual({});
+    await holdOnR1('YWZ0ZXItcmV2b2tl');
+  });
+
+  it('drops an answer that claims another generation than the one asked for', async () => {
+    const from1 = r1.received.length;
+    await reshareKey(admin, 'openai', { sourceWorkstationId: w.workstationId, targetWorkstationId: ws2 });
+    const reseal = await r1.waitFor('command', (c) => c.command === 'provider.key.reseal', 5000, from1);
+    const gen = reseal.payload.generation as number;
+    const from2 = r2.received.length;
+    r1.send('command.result', {
+      commandId: reseal.commandId,
+      ok: true,
+      result: { ok: true, ciphertext: 'd3JvbmctZ2Vu', generation: gen - 1 },
+    });
+    await r1.barrier();
+    await new Promise((res2) => setTimeout(res2, 200));
+    expect(
+      commandsOf(r2, 'provider.key.set', from2).filter((c) => c.payload.ciphertext === 'd3JvbmctZ2Vu'),
+    ).toEqual([]);
+  });
+});
+
+describe('an answer to a command applies once (security review finding 21)', () => {
+  it('two answers to the same command, sent together, relay the re-sealed key once', async () => {
+    const from1 = r1.received.length;
+    const from2 = r2.received.length;
+    const sharedEvents = async () =>
+      Number(
+        (
+          await q(
+            `SELECT count(*)::int AS n FROM events WHERE type='OrgProviderKeyShared' AND payload->>'via'='runner' AND payload->>'workstationId'=$1`,
+            [ws2],
+          )
+        )[0]?.n,
+      );
+    const eventsBefore = await sharedEvents();
+    await reshareKey(admin, 'openai', { sourceWorkstationId: w.workstationId, targetWorkstationId: ws2 });
+    const reseal = await r1.waitFor('command', (c) => c.command === 'provider.key.reseal', 5000, from1);
+    const answer = {
+      commandId: reseal.commandId,
+      ok: true,
+      result: { ok: true, ciphertext: 'b25jZS1vbmx5', generation: reseal.payload.generation },
+    };
+    // two connections of one workstation (a reconnect while the old socket is still draining) answer at the same moment: the
+    // gateway orders the frames of ONE connection, so the race is driven through the handlers directly
+    const conn = ctx().services.runners.get(w.workstationId) as never;
+    const handlers = (
+      ctx().services.gateway as unknown as { handlers: { handle: (c: never, m: never) => Promise<void> } }
+    ).handlers;
+    const frame = { type: 'command.result', id: randomUUID(), ...answer } as never;
+    await Promise.all(
+      Array.from({ length: 4 }, () =>
+        handlers.handle(conn, { ...(frame as object), id: randomUUID() } as never),
+      ),
+    );
+    await new Promise((res) => setTimeout(res, 400));
+    expect(
+      commandsOf(r2, 'provider.key.set', from2).filter((c) => c.payload.ciphertext === 'b25jZS1vbmx5'),
+    ).toHaveLength(1);
+    // each application records an OrgProviderKeyShared event: once, not once per answer
+    expect((await sharedEvents()) - eventsBefore).toBe(1);
+    expect((await q('SELECT status FROM runner_commands WHERE id=$1', [reseal.commandId]))[0]?.status).toBe(
+      'done',
+    );
+  });
+
+  it('a handler that fails gives the claim back, so a redelivered answer is applied', async () => {
+    const id = (
+      await q(
+        `INSERT INTO runner_commands (workstation_id, type, payload, status) VALUES ($1, 'provider.key.reseal', '{}'::jsonb, 'sent') RETURNING id`,
+        [w.workstationId],
+      )
+    )[0]?.id as string;
+    const claim = () =>
+      q(
+        `UPDATE runner_commands SET answering_at = now() WHERE id = $1 AND status <> 'done' AND (answering_at IS NULL OR answering_at < now() - interval '2 minutes') RETURNING id`,
+        [id],
+      );
+    expect(await claim()).toHaveLength(1);
+    // the second answer finds the claim held
+    expect(await claim()).toHaveLength(0);
+    // a failed answer (completeCommand with ok = false) puts the command back and frees the claim
+    const { completeCommand } = await import('../src/runner-gateway/commands-queue.ts');
+    await completeCommand(ctx().pool, id, false, 'boom', ctx().clock.now());
+    expect(await claim()).toHaveLength(1);
   });
 });
 
