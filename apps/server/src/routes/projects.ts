@@ -1,4 +1,5 @@
 import {
+  AccountScopeSchema,
   AddRepoRequestSchema,
   ConvertPreviewQuerySchema,
   ConvertProjectRequestSchema,
@@ -21,11 +22,13 @@ import {
   SetOwnerApprovalRequestSchema,
   SetProjectMcpServersRequestSchema,
   SetProjectPolicyRequestSchema,
+  SetProviderAccountRequestSchema,
   SetReferenceReposRequestSchema,
   SetStopLossRequestSchema,
   SetWorkingBranchRequestSchema,
 } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
+import { z } from 'zod';
 import { requireOrg, requireOrgRole, requireUser } from '../auth/guards.ts';
 import { setArchitectSettings } from '../commands/architect.ts';
 import { cancelConversion, convertPreview, convertProject } from '../commands/convert.ts';
@@ -51,6 +54,7 @@ import {
   setManualQa,
   setMergePolicy,
   setProjectPolicy,
+  setProviderAccount,
   setReferenceRepos,
   setStopLoss,
   updateProject,
@@ -61,7 +65,10 @@ import type { Ctx } from '../context.ts';
 import { gone } from '../errors.ts';
 import { getProjectClaudeAccounts } from '../queries/claude-accounts.ts';
 import { getProjectDetail, listProjects } from '../queries/misc.ts';
+import { getProjectProviderAccounts } from '../queries/provider-accounts.ts';
 import { typed } from './util.ts';
+
+const ProviderAccountParamsSchema = z.object({ id: z.uuid(), scope: AccountScopeSchema });
 
 export function projectRoutes(ctx: Ctx) {
   return async (fastify: FastifyInstance) => {
@@ -273,6 +280,33 @@ export function projectRoutes(ctx: Ctx) {
         const a = await requireOrg(ctx, req);
         await setClaudeAccount(ctx, a.session.user, { id: a.orgId, role: a.role }, req.params.id, req.body);
         return getProjectDetail(ctx, a.session.user.id, req.params.id);
+      },
+    );
+
+    /** The account for another provider or runtime (S-A): Codex, the Gemini CLI, or a provider key; `claude-code` maps to the route above. */
+    app.put(
+      '/api/projects/:id/provider-accounts/:scope',
+      { schema: { params: ProviderAccountParamsSchema, body: SetProviderAccountRequestSchema } },
+      async (req) => {
+        const a = await requireOrg(ctx, req);
+        await setProviderAccount(
+          ctx,
+          a.session.user,
+          { id: a.orgId, role: a.role },
+          req.params.id,
+          req.params.scope,
+          req.body,
+        );
+        return getProjectDetail(ctx, a.session.user.id, req.params.id);
+      },
+    );
+
+    app.get(
+      '/api/projects/:id/provider-accounts/:scope',
+      { schema: { params: ProviderAccountParamsSchema } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        return getProjectProviderAccounts(ctx, s.user.id, req.params.id, req.params.scope);
       },
     );
 

@@ -1,10 +1,14 @@
 import {
+  type AiRuntimesResponse,
   BACKEND_IDS,
+  buildAiRuntimeTiles,
   DIRECT_MODEL_CAPABILITY,
   DIRECT_RUNTIME,
   normalizePrivateEndpoints,
   PRIVATE_ENDPOINTS_CAPABILITY,
+  PROVIDER_ACCOUNTS_CAPABILITY,
   PROVIDER_KEYS_BOUND_CAPABILITY,
+  type ProviderAccountPromotePayload,
   type ProviderKeyId,
   ProviderKeyResultSchema,
   type ReportedProvider,
@@ -59,6 +63,7 @@ export async function setProviderKey(
 ): Promise<void> {
   await withAppendTx(ctx.pool, async (tx) => {
     await ownWorkstation(ctx, tx, user, workstationId);
+    if (body.account) await requireAccountsRunner(tx, workstationId);
     const k = await one(tx, 'SELECT key_id FROM workstation_keys WHERE workstation_id=$1', [workstationId]);
     if (!k || k.key_id !== body.keyId)
       throw conflict('sudo_key_changed', "the runner's key changed: reload the page and enter the key again");
@@ -81,13 +86,13 @@ export async function setProviderKey(
           ? 'update the runner on this workstation to use Amazon Bedrock, Google Vertex AI or a gateway with Claude Code'
           : 'update the runner on this workstation to use direct API models',
       );
-    // One key per provider is pending at a time.
+    // One key per provider (and account) is pending at a time.
     await exec(
       tx,
       `UPDATE runner_commands SET status='failed', payload='{}'::jsonb
         WHERE workstation_id=$1 AND type='provider.key.set' AND status IN ('pending','sent') AND payload->>'provider' = $2
-          AND payload->>'source' IS DISTINCT FROM 'org'`,
-      [workstationId, provider],
+          AND payload->>'source' IS DISTINCT FROM 'org' AND payload->>'account' IS NOT DISTINCT FROM $3`,
+      [workstationId, provider, body.account ?? null],
     );
     await enqueueRunnerCommand(
       tx,
@@ -98,6 +103,7 @@ export async function setProviderKey(
         keyId: body.keyId,
         ...(body.ciphertext ? { ciphertext: body.ciphertext } : {}),
         ...(body.ciphertext && body.generation ? { generation: body.generation } : {}),
+        ...(body.account ? { account: body.account } : {}),
         ...(body.baseUrl ? { baseUrl: body.baseUrl } : {}),
         models: body.models,
       },
@@ -148,17 +154,23 @@ export async function clearProviderKey(
   user: AuthSession['user'],
   workstationId: string,
   provider: ProviderKeyId,
+  /** A named account of the workstation's own key (S-A); absent: the main key. */
+  account?: string,
 ): Promise<void> {
   await withAppendTx(ctx.pool, async (tx) => {
     await ownWorkstation(ctx, tx, user, workstationId);
+    if (account) await requireAccountsRunner(tx, workstationId);
     await exec(
       tx,
       `UPDATE runner_commands SET status='failed', payload='{}'::jsonb
         WHERE workstation_id=$1 AND type='provider.key.set' AND status IN ('pending','sent') AND payload->>'provider' = $2
-          AND payload->>'source' IS DISTINCT FROM 'org'`,
-      [workstationId, provider],
+          AND payload->>'source' IS DISTINCT FROM 'org' AND payload->>'account' IS NOT DISTINCT FROM $3`,
+      [workstationId, provider, account ?? null],
     );
-    await enqueueRunnerCommand(tx, workstationId, 'provider.key.clear', { provider });
+    await enqueueRunnerCommand(tx, workstationId, 'provider.key.clear', {
+      provider,
+      ...(account ? { account } : {}),
+    });
   });
   deliver(ctx, [workstationId]);
 }
@@ -227,6 +239,113 @@ export async function workstationProviders(
           stored: last.stored,
           ...(last.error ? { error: last.error } : {}),
           ...(last.warning ? { warning: last.warning } : {}),
+          at: last.at.toISOString(),
+        }
+      : null,
+  };
+}
+
+/** A named account (S-A) needs a runner that keeps them: an older one would store the key as the MAIN key. */
+async function requireAccountsRunner(db: Parameters<typeof one>[0], workstationId: string): Promise<void> {
+  const c = await one(
+    db,
+    'SELECT $2 = ANY(capabilities) AS ok FROM workstation_capabilities WHERE workstation_id=$1',
+    [workstationId, PROVIDER_ACCOUNTS_CAPABILITY],
+  );
+  if (!c?.ok)
+    throw unprocessable(
+      'runner_too_old',
+      'update the runner on this workstation to use named accounts (0.1.58 or newer)',
+    );
+}
+
+/** The last answer to "Make main", per workstation (transient, like the key answers: for the page right after the click). */
+const lastPromote = new Map<string, { scope: string; key: string; ok: boolean; error?: string; at: Date }>();
+
+/**
+ * "Make main" (S-A): a named account and the main account of a scope swap places. Only the workstation's owner. The runner does
+ * the swap (login folders, or the two sealed keys re-sealed under their new names) and reports its runtimes again.
+ */
+export async function promoteAccount(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  workstationId: string,
+  body: ProviderAccountPromotePayload,
+): Promise<void> {
+  await withAppendTx(ctx.pool, async (tx) => {
+    await ownWorkstation(ctx, tx, user, workstationId);
+    await requireAccountsRunner(tx, workstationId);
+    if (body.scope === 'claude-code')
+      throw unprocessable(
+        'not_supported',
+        'the main Claude Code account is the machine login or token: it is not swapped from here',
+      );
+    await enqueueRunnerCommand(tx, workstationId, 'provider.account.promote', body);
+  });
+  deliver(ctx, [workstationId]);
+}
+
+/** `command.result` of `provider.account.promote`: remembered for the page. */
+export function applyPromoteResult(
+  ctx: Ctx,
+  workstationId: string,
+  payload: Record<string, any>,
+  ok: boolean,
+  result: unknown,
+): void {
+  const r = (result ?? {}) as { ok?: boolean; error?: string };
+  const good = ok && r.ok !== false;
+  lastPromote.set(workstationId, {
+    scope: String(payload.scope ?? ''),
+    key: String(payload.key ?? ''),
+    ok: good,
+    ...(good
+      ? {}
+      : { error: typeof r.error === 'string' ? r.error.slice(0, 300) : 'the workstation could not do it' }),
+    at: ctx.clock.now(),
+  });
+}
+
+/**
+ * Integrations > AI runtime (S-A): the runtimes and providers of one workstation with their accounts, built from what its runner
+ * reported. Only the workstation's owner.
+ */
+export async function workstationAiRuntimes(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  workstationId: string,
+): Promise<
+  AiRuntimesResponse & {
+    lastPromote: { scope: string; key: string; ok: boolean; error?: string; at: string } | null;
+  }
+> {
+  const ws = await one(
+    ctx.pool,
+    `SELECT id, runtimes, runner_version FROM workstations WHERE id=$1 AND user_id=$2 AND status='active'`,
+    [workstationId, user.id],
+  );
+  if (!ws) throw notFound('workstation not found');
+  const caps = await one(
+    ctx.pool,
+    'SELECT capabilities FROM workstation_capabilities WHERE workstation_id=$1',
+    [workstationId],
+  );
+  const tiles = buildAiRuntimeTiles({
+    runtimes: Array.isArray(ws.runtimes) ? (ws.runtimes as never) : [],
+    capabilities: Array.isArray(caps?.capabilities) ? (caps?.capabilities as string[]) : [],
+  });
+  const last = lastPromote.get(workstationId);
+  return {
+    workstationId,
+    online: ctx.services.runners.isOnline(workstationId),
+    runnerVersion: (ws.runner_version as string | null) ?? null,
+    tiles,
+    lastPromote: last
+      ? {
+          scope: last.scope,
+          key: last.key,
+          ok: last.ok,
+          ...(last.error ? { error: last.error } : {}),
           at: last.at.toISOString(),
         }
       : null,

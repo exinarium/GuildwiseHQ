@@ -208,6 +208,8 @@ export const ProjectDtoSchema = z.object({
       accountKey: AccountKeySchema.optional(),
       /** `paused`: nothing runs until `until`. `fallback`: the project's account is out and shifts use main. Absent = paused. */
       mode: z.enum(['paused', 'fallback']).optional(),
+      /** The runtime whose subscription is out (S-A): `claude-code` (absent), `codex` or `gemini`. */
+      scope: z.string().optional(),
     })
     .nullable()
     .optional(),

@@ -9,7 +9,7 @@ import { withAppendTx } from '../db/tx.ts';
 import { agentCapBlocked, type ProviderCapState } from '../provider-keys/caps.ts';
 import { buildQuestionShiftStart, QUESTION_MAX_SHIFT_MINUTES } from '../runner-gateway/question-brief.ts';
 import { wsServesOrgSql } from '../simulation/fit.ts';
-import { accountFor } from './accounts.ts';
+import { accountForAgent, loadProjectAccounts } from './accounts.ts';
 import { projectPausedSql } from './project-hold.ts';
 
 const ONLINE_WINDOW_MS = 45_000;
@@ -41,7 +41,7 @@ export async function questionPass(
   const queued = await rows(
     ctx.pool,
     `SELECT d.id, d.routed_agent_id, d.updated_at, d.created_at, d.card_id,
-            cp.claude_account_key, cp.claude_account_fallback,
+            dc.project_id AS card_project_id,
             a.status AS agent_status, a.runtime, a.model AS agent_model, d.org_id AS item_org_id, ws.id AS ws_id, ws.runtimes, ws.connected, ws.last_seen_at, ws.status AS ws_status,
             (SELECT count(*)::int FROM shifts s WHERE s.desk_item_id = d.id AND s.agent_id = d.routed_agent_id
                AND s.status = 'ended' AND s.outcome IS DISTINCT FROM 'rejected' AND s.outcome IS DISTINCT FROM 'reported') AS failed
@@ -58,20 +58,15 @@ export async function questionPass(
                d.blocking DESC, d.created_at, d.id`,
   );
   const started: QuestionDispatch[] = [];
+  const accounts = await loadProjectAccounts(ctx.pool);
   const capCache = new Map<string, ProviderCapState>();
   const busy = new Set<string>();
   for (const r of queued) {
     // The account: the card's project's, when the question is about one of its tickets; else main. No usable account
     // (the project's is out and it does not fall back, or main is out) counts as not reachable: the item waits, and
     // goes on along its chain if that lasts (as with a limited runtime before accounts).
-    const account = accountFor(
-      r.card_id && r.claude_account_key
-        ? { accountKey: r.claude_account_key, fallbackToMain: r.claude_account_fallback === true }
-        : null,
-      r.runtimes,
-      r.runtime,
-      now,
-    );
+    const agent = { runtime: r.runtime, model: r.agent_model, runtimes: r.runtimes, org_id: r.item_org_id };
+    const account = accountForAgent(accounts, r.card_id ? r.card_project_id : null, agent, now);
     const reachable =
       r.agent_status === 'active' &&
       r.ws_status === 'active' &&
@@ -91,15 +86,7 @@ export async function questionPass(
     if (!reachable || busy.has(r.routed_agent_id) || skipAgent(r.routed_agent_id) || workstationFull(r.ws_id))
       continue;
     // The agent's model would spend the organization's key of a provider whose monthly cap is reached: the question waits.
-    if (
-      await agentCapBlocked(
-        ctx.pool,
-        { org_id: r.item_org_id, runtime: r.runtime, model: r.agent_model, runtimes: r.runtimes },
-        now,
-        capCache,
-      )
-    )
-      continue;
+    if (await agentCapBlocked(ctx.pool, agent, now, capCache, account?.key)) continue;
     const conn = ctx.services.runners.get(r.ws_id);
     if (!conn || !conn.reconciled) continue;
     const shiftId = randomUUID();

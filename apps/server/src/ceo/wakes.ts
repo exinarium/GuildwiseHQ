@@ -58,6 +58,8 @@ const NO_WAKE_SUBKINDS = new Set([
   'ceo_permission',
   // The system notice already tells the owner (desk and mail); a CEO relay would be a second notice for the same cause.
   'claude_account_login',
+  'provider_account_login',
+  'provider_account_usage',
   'order_escalation',
 ]);
 
@@ -202,7 +204,7 @@ export function registerCeoWakes(ctx: Ctx): () => void {
         // The same subject (a card and what is asked about it, or an alert of one title) is handled once until it changes.
         const dedupe = await deskSubject(ctx.pool, p);
         // A reached model usage limit is information (work resumes by itself), never an incident.
-        const info = sub === 'claude_usage_limit';
+        const info = sub === 'claude_usage_limit' || sub === 'provider_account_usage';
         await enqueueWake(
           ctx.pool,
           orgId,

@@ -20,7 +20,7 @@ import { one, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { agentCapBlocked, type ProviderCapState } from '../provider-keys/caps.ts';
 import { buildBaTaskShiftStart } from '../runner-gateway/ba-task-brief.ts';
-import { accountFor, loadProjectAccounts } from './accounts.ts';
+import { accountForAgent, loadProjectAccounts } from './accounts.ts';
 import { BA_TASK_AGENT_FROM, baTaskAgentEligibleSql } from './ba-agent-sql.ts';
 import { projectHeldSql } from './project-hold.ts';
 
@@ -146,18 +146,19 @@ export async function baTaskPass(
       continue;
     }
     // Claude account: a task about one ticket runs on its project's account; a task without a card uses main.
-    let setting = null;
+    let accounts: Awaited<ReturnType<typeof loadProjectAccounts>> | undefined;
+    let accountProject: string | null = null;
     if (t.card_id) {
-      const pid = await cardProject(ctx, t.card_id, t.project_id);
-      setting = (await loadProjectAccounts(ctx.pool, [pid])).get(pid) ?? null;
+      accountProject = await cardProject(ctx, t.card_id, t.project_id);
+      accounts = await loadProjectAccounts(ctx.pool, [accountProject]);
     }
     for (const a of bas) {
-      const account = accountFor(setting, a.runtimes, a.runtime, now);
+      const account = accountForAgent(accounts, accountProject, a as never, now);
       const reachable =
         a.connected && a.last_seen_at && new Date(a.last_seen_at) > onlineSince && account !== null;
       if (!reachable || busy.has(a.id) || skipAgent(a.id) || workstationFull(a.ws_id)) continue;
       // The agent's model would spend the organization's key of a provider whose monthly cap is reached.
-      if (await agentCapBlocked(ctx.pool, a as never, now, capCache)) continue;
+      if (await agentCapBlocked(ctx.pool, a as never, now, capCache, account?.key)) continue;
       if (scopingRole !== null) {
         // The prompt of a scoping task is rendered on the runner: an older runner would not know the mode.
         if (!runnerAtLeast(a.runner_version, MIN_RUNNER_FOR_REPO_SCOPING)) continue;

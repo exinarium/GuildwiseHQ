@@ -4,6 +4,7 @@ import { exec, one, type Queryable, rows } from '../db/sql.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { wsServesOrgSql } from '../simulation/fit.ts';
 import { syncClaudeAccountNotices } from './claude-account-notices.ts';
+import { syncProviderAccountNotices } from './provider-account-notices.ts';
 import { syncClaudeUsageNotice } from './workstation-notices.ts';
 
 /**
@@ -171,6 +172,8 @@ export async function markAccountOut(
   workstationId: string,
   accountKey: string,
   how: { usage: 'limited'; limitedUntil: string } | { login: 'expired' | 'none' },
+  /** The runtime the account belongs to (Claude Code by default; Codex and the Gemini CLI since S-A). */
+  runtimeId = 'claude-code',
 ): Promise<void> {
   const ws = await one<{ runtimes: unknown }>(
     db,
@@ -179,7 +182,7 @@ export async function markAccountOut(
   );
   if (!Array.isArray(ws?.runtimes)) return;
   const runtimes = ws.runtimes as Array<Record<string, any>>;
-  const rt = runtimes.find((r) => r.id === 'claude-code');
+  const rt = runtimes.find((r) => r.id === runtimeId);
   if (!rt) return;
   const patch = (o: Record<string, any>) => {
     if ('usage' in how) Object.assign(o, { usage: 'limited', limitedUntil: how.limitedUntil });
@@ -218,5 +221,6 @@ export async function resyncAccountNotices(ctx: Ctx, orgId: string): Promise<voi
     const ref = { id: w.id, userId: w.user_id };
     await syncClaudeAccountNotices(ctx, ref, runtimes).catch(() => {});
     await syncClaudeUsageNotice(ctx, ref, runtimes).catch(() => {});
+    await syncProviderAccountNotices(ctx, ref, runtimes as never).catch(() => {});
   }
 }

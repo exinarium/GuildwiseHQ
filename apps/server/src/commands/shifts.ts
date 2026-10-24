@@ -1149,18 +1149,24 @@ export async function applyShiftRejected(
   // An account that is out (or missing) is known to the dispatcher at once (docs/design/claude-accounts.md 2.4).
   const accountKey = msg.accountKey ?? s.account_key ?? undefined;
   if (accountKey && msg.reason === 'usage_limited')
-    await markAccountOut(tx, ws.id, accountKey, {
-      usage: 'limited',
-      limitedUntil: msg.limitedUntil ?? new Date(ctx.clock.now().getTime() + 3_600_000).toISOString(),
-    });
+    await markAccountOut(
+      tx,
+      ws.id,
+      accountKey,
+      {
+        usage: 'limited',
+        limitedUntil: msg.limitedUntil ?? new Date(ctx.clock.now().getTime() + 3_600_000).toISOString(),
+      },
+      s.runtime,
+    );
   else if (accountKey && msg.reason === 'auth_expired')
-    await markAccountOut(tx, ws.id, accountKey, { login: 'expired' });
+    await markAccountOut(tx, ws.id, accountKey, { login: 'expired' }, s.runtime);
   else if (
     accountKey &&
     msg.reason === 'runtime_unavailable' &&
     (msg.detail ?? '').startsWith('account_missing:')
   )
-    await markAccountOut(tx, ws.id, accountKey, { login: 'none' });
+    await markAccountOut(tx, ws.id, accountKey, { login: 'none' }, s.runtime);
   if (s.kind === 'devops') {
     await ctx.store.append(await endDevopsShift(tx, s, 'rejected', { finalText: msg.detail }), { tx });
     return;

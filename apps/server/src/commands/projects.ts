@@ -1,16 +1,21 @@
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import {
+  type AccountScope,
+  AccountScopeSchema,
   type AddRepoRequest,
   type CreateProjectRequest,
   canCreateProject,
+  isKeyScope,
   isOrgManager,
   isResearchStage,
   normalizeProjectPath,
   normalizeRemoteUrl,
+  ORG_ACCOUNT,
   type OrgRole,
   type PatchProjectRequest,
   type ProjectImpact,
+  ProviderAccountKeySchema,
   type StopLossSettings,
   streamId,
 } from '@aom/shared';
@@ -20,7 +25,7 @@ import { resolveWorkflow } from '../catalogue/loader.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
-import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
+import { badRequest, conflict, forbidden, notFound, unprocessable } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { assertWithinLimit } from '../orgs/limits.ts';
 import { specifyStuckBugCards } from '../platform-team/intake.ts';
@@ -332,6 +337,73 @@ export async function setClaudeAccount(
   await resyncAccountNotices(ctx, asked.orgId);
   for (const id of asked.ids)
     void Promise.resolve(ctx.services.gateway.deliverPending(id)).catch(() => undefined);
+}
+
+/**
+ * Names the account the project's tickets run on for one provider or runtime (S-A, docs/design/discovery-boardroom-registry.md):
+ * Codex or the Gemini CLI (a named login account), or a provider key (a named key account, or `org`, the organization's key,
+ * whose monthly cap still applies). Null is the main account. Claude Code's choice is `setClaudeAccount`: the scope
+ * `claude-code` goes there. Same authorisation as that one. Accounts are created on the workstation (Integrations > AI
+ * runtime), so nothing is queued for the runners here. The fallback switch is stored off when there is no account.
+ */
+export async function setProviderAccount(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  org: { id: string; role: OrgRole | null },
+  projectId: string,
+  scopeRaw: string,
+  setting: { accountKey: string | null; fallbackToMain: boolean },
+) {
+  const parsed = AccountScopeSchema.safeParse(scopeRaw);
+  if (!parsed.success) throw unprocessable('unknown_scope', `unknown provider or runtime: ${scopeRaw}`);
+  const scope: AccountScope = parsed.data;
+  if (scope === 'claude-code') {
+    if (setting.accountKey === ORG_ACCOUNT)
+      throw unprocessable('bad_account', 'Claude Code has no organization key account');
+    return setClaudeAccount(ctx, user, org, projectId, setting);
+  }
+  const key = setting.accountKey;
+  if (key !== null) {
+    const named = ProviderAccountKeySchema.safeParse(key).success;
+    if (!named && !(key === ORG_ACCOUNT && isKeyScope(scope)))
+      throw unprocessable(
+        'bad_account',
+        key === ORG_ACCOUNT
+          ? 'only a provider key can use the organization’s key'
+          : 'an account name is lowercase letters, digits and dashes, starts with a letter, and is not "main"',
+      );
+  }
+  const orgId = await withAppendTx(ctx.pool, async (tx) => {
+    const p = await loadVisibleProject(tx, user.id, projectId);
+    const orgAdmin = isOrgManager({ orgRole: org.role }) && org.id === p.org_id;
+    if (p.my_role !== 'owner' && !orgAdmin)
+      throw forbidden('only the project Owner or an organization Owner or Admin can do this');
+    const fallbackToMain = key ? setting.fallbackToMain : false;
+    const cur = await one<{ account_key: string; fallback_to_main: boolean }>(
+      tx,
+      'SELECT account_key, fallback_to_main FROM project_provider_accounts WHERE project_id=$1 AND scope=$2',
+      [projectId, scope],
+    );
+    const same =
+      (cur?.account_key ?? null) === key && (cur ? cur.fallback_to_main : false) === fallbackToMain;
+    if (!same)
+      await ctx.store.append(
+        [
+          {
+            streamId: streamId.project(projectId),
+            event: {
+              type: 'ProjectProviderAccountSet',
+              payload: { projectId, scope, accountKey: key, fallbackToMain, changedBy: user.id },
+            },
+            actor: userActor(user.id),
+            scope: projectScope(p.org_id, projectId),
+          },
+        ],
+        { tx },
+      );
+    return p.org_id as string;
+  });
+  await resyncAccountNotices(ctx, orgId);
 }
 
 /**

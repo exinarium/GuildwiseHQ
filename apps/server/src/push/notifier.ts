@@ -122,6 +122,8 @@ const RUNNER_SUBKINDS = new Set([
   'claude_auth_expired',
   'claude_usage_limit',
   'claude_account_login',
+  'provider_account_login',
+  'provider_account_usage',
   'role_smoke_failed',
   // a deploy server the computer can no longer sign in to
   'deploy_unreachable',

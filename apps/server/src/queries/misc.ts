@@ -62,6 +62,10 @@ const HAS_VAULT_SQL = `EXISTS (SELECT 1 FROM vaults v WHERE v.project_id = p.id
 /** Published research notes of the project (the Research tab shows when there are some). */
 const PUBLISHED_NOTES_SQL = `(SELECT count(*)::int FROM research_publications rp WHERE rp.project_id = p.id) AS published_notes`;
 
+/** The project's account per provider or runtime other than Claude Code (S-A): `{ scope: { key, fallbackToMain } }`. */
+const PROVIDER_ACCOUNTS_SQL = `(SELECT jsonb_object_agg(pa.scope, jsonb_build_object('key', pa.account_key, 'fallbackToMain', pa.fallback_to_main))
+    FROM project_provider_accounts pa WHERE pa.project_id = p.id) AS provider_accounts`;
+
 export function toProjectDto(p: Row, myRole: 'owner' | 'manager'): ProjectDto {
   return {
     id: p.id,
@@ -92,6 +96,9 @@ export function toProjectDto(p: Row, myRole: 'owner' | 'manager'): ProjectDto {
     stopLoss: StopLossSettingsSchema.safeParse(p.stop_loss).data ?? DEFAULT_STOP_LOSS,
     fullSuiteAfterFinalize: p.full_suite_after_finalize ?? true,
     claudeAccount: { key: p.claude_account_key ?? null, fallbackToMain: p.claude_account_fallback ?? false },
+    ...(p.provider_accounts && typeof p.provider_accounts === 'object'
+      ? { providerAccounts: p.provider_accounts as NonNullable<ProjectDto['providerAccounts']> }
+      : {}),
     ownerApprovalPolicy: p.owner_approval_policy ?? 'large_or_high_risk',
     e2eAreas: p.e2e_areas ?? null,
     decisionsProjectOnly: p.decisions_project_only ?? false,
@@ -126,7 +133,7 @@ export async function listProjects(
   const r = (
     await rows(
       ctx.pool,
-      `SELECT p.*, pm.role AS my_role, o.name AS org_name, ${PROJECT_DEPARTMENT_SQL}, ${LEAN_TEAM_SQL}, ${MERGE_CHANGED_BY_SQL}, ${PAUSED_BY_SQL}, ${PUBLISHED_NOTES_SQL}, ${HAS_VAULT_SQL}
+      `SELECT p.*, pm.role AS my_role, o.name AS org_name, ${PROJECT_DEPARTMENT_SQL}, ${LEAN_TEAM_SQL}, ${MERGE_CHANGED_BY_SQL}, ${PAUSED_BY_SQL}, ${PUBLISHED_NOTES_SQL}, ${HAS_VAULT_SQL}, ${PROVIDER_ACCOUNTS_SQL}
          FROM projects p JOIN project_members pm
          ON pm.project_id = p.id AND pm.user_id = $1 AND pm.status = 'active'
          LEFT JOIN organizations o ON o.id = p.org_id
@@ -204,7 +211,7 @@ export async function getProjectDetail(
   const p = await one(
     ctx.pool,
     `SELECT p.*, pm.role AS my_role, o.name AS org_name, o.status AS org_status, o.owner_user_id AS org_owner,
-            ${PROJECT_DEPARTMENT_SQL}, ${LEAN_TEAM_SQL}, ${MERGE_CHANGED_BY_SQL}, ${PAUSED_BY_SQL}, ${PUBLISHED_NOTES_SQL}, ${HAS_VAULT_SQL} FROM projects p JOIN project_members pm
+            ${PROJECT_DEPARTMENT_SQL}, ${LEAN_TEAM_SQL}, ${MERGE_CHANGED_BY_SQL}, ${PAUSED_BY_SQL}, ${PUBLISHED_NOTES_SQL}, ${HAS_VAULT_SQL}, ${PROVIDER_ACCOUNTS_SQL} FROM projects p JOIN project_members pm
        ON pm.project_id = p.id AND pm.user_id = $1 AND pm.status = 'active'
        LEFT JOIN organizations o ON o.id = p.org_id WHERE p.id = $2`,
     [userId, projectId],

@@ -1,12 +1,14 @@
 import {
   type AccountRuntimeView,
   accountUsable,
+  isLoginScope,
   MAIN_ACCOUNT,
   type ProjectDto,
   resolveShiftAccount,
 } from '@aom/shared';
 import type { Ctx } from '../context.ts';
 import { type Row, rows } from '../db/sql.ts';
+import { agentScope, loadProjectAccounts } from '../dispatcher/accounts.ts';
 import { wsServesOrgSql } from '../simulation/fit.ts';
 
 type UsageLimit = NonNullable<ProjectDto['usageLimit']>;
@@ -41,6 +43,8 @@ interface Blocker {
   ws: string;
   label: string | null;
   key: string;
+  /** The runtime whose subscription is out. */
+  scope: string;
 }
 
 /**
@@ -59,20 +63,20 @@ export async function usageLimitsFor(ctx: Ctx, projects: Row[]): Promise<Map<str
     e?.usage === 'limited' && e.limitedUntil && new Date(e.limitedUntil).getTime() > now.getTime()
       ? (e as LimitFields & { limitedUntil: string })
       : undefined;
+  const accounts = await loadProjectAccounts(
+    ctx.pool,
+    projects.map((p) => p.id as string),
+  );
   for (const orgId of new Set(projects.map((p) => p.org_id as string))) {
     const agents = await rows(
       ctx.pool,
-      `SELECT a.runtime, a.allowed_project_ids, ws.name AS ws_name, ws.runtimes
+      `SELECT a.runtime, a.model, a.allowed_project_ids, ws.name AS ws_name, ws.runtimes
          FROM agents a JOIN workstations ws ON ws.id = a.workstation_id
         WHERE a.org_id = $1 AND a.status='active' AND a.role_key <> 'ceo' AND NOT a.is_devops AND ws.status='active'
           AND ${wsServesOrgSql('ws', 'a.org_id')}`,
       [orgId],
     );
     for (const p of projects.filter((x) => x.org_id === orgId)) {
-      const setting = p.claude_account_key
-        ? { accountKey: p.claude_account_key as string, fallbackToMain: p.claude_account_fallback === true }
-        : null;
-      const own = setting?.accountKey ?? MAIN_ACCOUNT;
       const eligible = agents.filter((a) => !a.allowed_project_ids || a.allowed_project_ids.includes(p.id));
       if (eligible.length === 0) continue;
       const paused: Blocker[] = [];
@@ -80,12 +84,16 @@ export async function usageLimitsFor(ctx: Ctx, projects: Row[]): Promise<Map<str
       let running = false;
       let unreported = false;
       for (const a of eligible) {
-        if (a.runtime !== 'claude-code') {
+        // A usage limit is a subscription login's (Claude Code, Codex, the Gemini CLI); a provider key has none
+        const scope = agentScope({ runtime: a.runtime, model: a.model, runtimes: a.runtimes });
+        if (!scope || !isLoginScope(scope)) {
           running = true;
           break;
         }
+        const setting = accounts.settingFor(p.id, scope);
+        const own = setting?.accountKey ?? MAIN_ACCOUNT;
         const rt = (Array.isArray(a.runtimes) ? (a.runtimes as RuntimeRow[]) : []).find(
-          (r) => r?.id === 'claude-code',
+          (r) => r?.id === a.runtime,
         );
         const res = resolveShiftAccount(setting, rt as AccountRuntimeView | undefined, now);
         if (res && !res.viaFallback) {
@@ -104,6 +112,7 @@ export async function usageLimitsFor(ctx: Ctx, projects: Row[]): Promise<Map<str
               ws: a.ws_name,
               label: ownLimit.limitedLabel ?? null,
               key: own,
+              scope,
             });
           continue;
         }
@@ -117,6 +126,7 @@ export async function usageLimitsFor(ctx: Ctx, projects: Row[]): Promise<Map<str
           ws: a.ws_name,
           label: blocking.limitedLabel ?? null,
           key: ownLimit ? own : MAIN_ACCOUNT,
+          scope,
         });
       }
       if (running) continue;
@@ -131,6 +141,7 @@ export async function usageLimitsFor(ctx: Ctx, projects: Row[]): Promise<Map<str
         label: first.label,
         accountKey: first.key,
         mode,
+        ...(first.scope !== 'claude-code' ? { scope: first.scope } : {}),
       });
     }
   }

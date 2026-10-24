@@ -1,9 +1,11 @@
 import {
+  accountScopeOf,
   BUDGET,
   type BudgetState,
   budgetStatus,
   choiceKeyUse,
   formatMoney,
+  isKeyScope,
   type KeyUseReport,
   type ModelChoice,
   PROVIDER_KEY_LABEL,
@@ -94,8 +96,10 @@ export async function providerCapProblem(
   choice: Pick<ModelChoice, 'runtime' | 'model'>,
   now: Date,
   cache?: Map<string, ProviderCapState>,
+  /** The project's account for this run (S-A): a named account is the workstation's own key (never capped); `org` is capped. */
+  account?: string,
 ): Promise<string | null> {
-  const use = choiceKeyUse(reports, choice, orgId);
+  const use = choiceKeyUse(reports, choice, orgId, account);
   if (!use || use.source !== 'org') return null;
   const key = `${orgId}|${use.provider}`;
   let st = cache?.get(key);
@@ -112,6 +116,8 @@ export async function agentCapBlocked(
   agent: { org_id: string; runtime: string; model: string; runtimes?: unknown },
   now: Date,
   cache?: Map<string, ProviderCapState>,
+  /** The account the run would use (S-A); absent: the main account. */
+  account?: string,
 ): Promise<string | null> {
   if (!providerOfChoice(agent.runtime, agent.model)) return null;
   const reports = Array.isArray(agent.runtimes) ? (agent.runtimes as KeyUseReport[]) : [];
@@ -122,7 +128,38 @@ export async function agentCapBlocked(
     { runtime: agent.runtime, model: agent.model },
     now,
     cache,
+    account,
   );
+}
+
+/**
+ * Is the organization's monthly cap for the provider an agent's model spends reached (S-A)? Independent of which key a run would
+ * use: the dispatcher hands it to the account resolver, which then treats the organization's key as unusable (so a project on a
+ * named account or the workstation's own key goes on, and one on the organization's key waits). False for a model that spends
+ * no provider key.
+ */
+export async function orgCapPaused(
+  db: Queryable,
+  agent: { org_id: string; runtime: string; model: string; runtimes?: unknown },
+  now: Date,
+  cache?: Map<string, ProviderCapState>,
+): Promise<boolean> {
+  const authVia = (
+    Array.isArray(agent.runtimes)
+      ? (agent.runtimes as Array<{ id?: string; authVia?: 'login' | 'key' }>).find(
+          (r) => r?.id === agent.runtime,
+        )
+      : undefined
+  )?.authVia;
+  const scope = accountScopeOf(agent.runtime, agent.model, authVia);
+  if (!scope || !isKeyScope(scope)) return false;
+  const key = `${agent.org_id}|${scope}`;
+  let st = cache?.get(key);
+  if (!st) {
+    st = await providerCapState(db, agent.org_id, scope, now);
+    cache?.set(key, st);
+  }
+  return st.state === 'paused';
 }
 
 /** Throws the conflict a queued run is refused with. */

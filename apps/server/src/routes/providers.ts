@@ -1,6 +1,8 @@
 import {
   IdParamsSchema,
   PrivateEndpointsSetSchema,
+  ProviderAccountKeySchema,
+  ProviderAccountPromotePayloadSchema,
   ProviderKeyIdSchema,
   SetProviderKeyRequestSchema,
 } from '@aom/shared';
@@ -9,8 +11,10 @@ import { z } from 'zod';
 import { requireUser } from '../auth/guards.ts';
 import {
   clearProviderKey,
+  promoteAccount,
   setPrivateEndpoints,
   setProviderKey,
+  workstationAiRuntimes,
   workstationProviders,
 } from '../commands/provider-keys.ts';
 import type { Ctx } from '../context.ts';
@@ -53,10 +57,32 @@ export function providerRoutes(ctx: Ctx) {
 
     app.delete(
       '/api/workstations/:id/providers/:provider',
-      { schema: { params: ProviderParamsSchema } },
+      {
+        schema: {
+          params: ProviderParamsSchema,
+          querystring: z.object({ account: ProviderAccountKeySchema.optional() }),
+        },
+      },
       async (req, reply) => {
         const s = await requireUser(ctx, req);
-        await clearProviderKey(ctx, s.user, req.params.id, req.params.provider);
+        await clearProviderKey(ctx, s.user, req.params.id, req.params.provider, req.query.account);
+        reply.code(202);
+        return { queued: true };
+      },
+    );
+
+    // Integrations > AI runtime (S-A): the runtimes and providers with their accounts, and "Make main".
+    app.get('/api/workstations/:id/ai-runtimes', { schema: { params: IdParamsSchema } }, async (req) => {
+      const s = await requireUser(ctx, req);
+      return workstationAiRuntimes(ctx, s.user, req.params.id);
+    });
+
+    app.post(
+      '/api/workstations/:id/accounts/promote',
+      { schema: { params: IdParamsSchema, body: ProviderAccountPromotePayloadSchema } },
+      async (req, reply) => {
+        const s = await requireUser(ctx, req);
+        await promoteAccount(ctx, s.user, req.params.id, req.body);
         reply.code(202);
         return { queued: true };
       },

@@ -349,6 +349,24 @@ export const projectProjectors: Record<string, Projector> = {
       p.fallbackToMain,
     ]);
   },
+  // S-A: one row per (project, scope); the main account (null) is no row, so the table only holds choices
+  ProjectProviderAccountSet: async (tx, e) => {
+    const p = (e.event as EventOf<'ProjectProviderAccountSet'>).payload;
+    if (p.accountKey === null)
+      await exec(tx, 'DELETE FROM project_provider_accounts WHERE project_id=$1 AND scope=$2', [
+        p.projectId,
+        p.scope,
+      ]);
+    else
+      await exec(
+        tx,
+        `INSERT INTO project_provider_accounts (project_id, scope, account_key, fallback_to_main, updated_at)
+         VALUES ($1,$2,$3,$4,$5)
+         ON CONFLICT (project_id, scope) DO UPDATE
+           SET account_key = EXCLUDED.account_key, fallback_to_main = EXCLUDED.fallback_to_main, updated_at = EXCLUDED.updated_at`,
+        [p.projectId, p.scope, p.accountKey, p.fallbackToMain, e.createdAt],
+      );
+  },
   ProjectManualQaSet: async (tx, e) => {
     const p = (e.event as EventOf<'ProjectManualQaSet'>).payload;
     await exec(tx, 'UPDATE projects SET manual_qa=$2 WHERE id=$1', [p.projectId, p.enabled]);

@@ -77,7 +77,7 @@ export async function claim(ctx: Ctx, args: ClaimArgs): Promise<ClaimResult | nu
     const view: AgentView = agentView(a, runtime?.capabilities ?? []);
     // The last guard (the overflow and preferred paths do not come through the dispatcher's agent list): no claim for an agent
     // whose model would spend the organization's key of a provider whose monthly cap is reached.
-    if (await agentCapBlocked(tx, a as never, ctx.clock.now())) return null;
+    if (await agentCapBlocked(tx, a as never, ctx.clock.now(), undefined, accountKey)) return null;
     if (!overflow) {
       const active = await one(
         tx,

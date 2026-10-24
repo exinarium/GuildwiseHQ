@@ -11,12 +11,12 @@ import { DISPATCH_LOCK_ID } from '../db/tx.ts';
 import { deliveryPass } from '../delivery/triggers.ts';
 import type { StoredEvent } from '../eventstore/types.ts';
 import { platformPass } from '../platform-team/detectors.ts';
-import { agentCapBlocked, type ProviderCapState } from '../provider-keys/caps.ts';
+import { orgCapPaused, type ProviderCapState } from '../provider-keys/caps.ts';
 import { buildShiftStart } from '../runner-gateway/brief.ts';
 import { delegationSpecFor } from '../sessions/delegate-grants.ts';
 import { playbookGrantKeys } from '../sessions/playbooks.ts';
 import { wsServesOrgSql } from '../simulation/fit.ts';
-import { accountFor, loadProjectAccounts, runtimeUsable, accountScope as scopeOf } from './accounts.ts';
+import { accountForAgent, loadProjectAccounts, runtimeUsable, accountScope as scopeOf } from './accounts.ts';
 import { baTaskPass } from './ba-tasks.ts';
 import { testingPass } from './bottleneck.ts';
 import { agentView, candidateCards, isCandidate, ONLINE_WINDOW_MS } from './candidates.ts';
@@ -85,6 +85,15 @@ const TRIGGER_TYPES = new Set([
 const REJECT_COOLDOWN_MS = 30_000;
 const LATE_SCHEDULED_MS = 30_000;
 const MAX_CONSECUTIVE_PASSES = 20;
+
+/** An agent the dispatcher may offer work: its row, capabilities, active shifts, and whether its organization's key cap is reached. */
+interface FreeAgent {
+  row: Row;
+  caps: string[];
+  active: number;
+  /** The organization's monthly cap for the provider the agent's model spends is reached (S-A: decides per account). */
+  capped: boolean;
+}
 
 export class Dispatcher {
   private lockClient: pg.Client | null = null;
@@ -167,7 +176,7 @@ export class Dispatcher {
     return this.hasLock;
   }
 
-  private async freeAgents(): Promise<Array<{ row: Row; caps: string[]; active: number }>> {
+  private async freeAgents(): Promise<Array<FreeAgent>> {
     const now = this.ctx.clock.now();
     const onlineSince = new Date(now.getTime() - ONLINE_WINDOW_MS);
     const list = await rows(
@@ -194,13 +203,15 @@ export class Dispatcher {
     list.sort((x, y) => Number(originals.has(y.id)) - Number(originals.has(x.id)));
     // Roles whose smoke test failed on a workstation get no work there (runner 0.1.24, role.smoke).
     const blocked = await blockedRoles(this.ctx);
-    // An agent whose model would spend the organization's key of a provider whose monthly cap is reached gets no work (provider_cap_reached);
-    // the cards stay queued, the agents on a workstation's own key or a subscription go on.
+    // An agent whose model would spend the organization's key of a provider whose monthly cap is reached gets no work on that key
+    // (provider_cap_reached); the cards stay queued, the agents on a workstation's own key or a subscription go on. Since accounts
+    // (S-A) this is decided per card: `capped` makes the organization's key unusable for the account resolver, so a project on a
+    // named account or the workstation's own key still runs.
     const capCache = new Map<string, ProviderCapState>();
-    const out = [];
+    const out: FreeAgent[] = [];
     for (const a of list) {
       if (blocked.has(`${a.workstation_id}|${a.role_key}`)) continue;
-      if (await agentCapBlocked(this.ctx.pool, a as never, now, capCache)) continue;
+      const capped = await orgCapPaused(this.ctx.pool, a as never, now, capCache);
       const rt = (
         a.runtimes as Array<{ id: string; available: boolean; capabilities: string[]; auth?: string }>
       ).find((r) => r.id === a.runtime);
@@ -208,7 +219,7 @@ export class Dispatcher {
       // workstation is offered work while any account of the runtime is usable (which account a card runs on is
       // decided per card: docs/design/claude-accounts.md).
       if (!rt || !runtimeUsable(a.runtimes, a.runtime, now)) continue;
-      out.push({ row: a, caps: rt.capabilities, active: Number(a.active) });
+      out.push({ row: a, caps: rt.capabilities, active: Number(a.active), capped });
     }
     return out;
   }
@@ -237,12 +248,13 @@ export class Dispatcher {
     await this.safely('phase', () => phasePass(this.ctx), undefined);
     const made: ClaimResult[] = [];
     const agents = await this.freeAgents();
-    // The Claude account each project names (docs/design/claude-accounts.md): chosen again for every claim.
+    // The account each project names for the provider or runtime the agent spends (docs/design/claude-accounts.md, S-A): chosen
+    // again for every claim.
     const settings = await loadProjectAccounts(this.ctx.pool);
     const at = new Date(nowMs);
-    const accountOf = (row: Row, projectId: string) =>
-      accountFor(settings.get(projectId), row.runtimes, row.runtime, at);
-    const accountScope = (row: Row) => scopeOf(settings, row.runtimes, row.runtime, at);
+    const accountOf = (row: Row, projectId: string, capped = false) =>
+      accountForAgent(settings, projectId, row as never, at, capped);
+    const accountScope = (row: Row, capped = false) => scopeOf(settings, row as never, at, capped);
     // Shifts each workstation runs now against the limit its owner set (backlog #76): a full workstation is not offered more.
     const load = await this.shiftLoad();
     const full = (workstationId: string): boolean => {
@@ -266,7 +278,7 @@ export class Dispatcher {
       )
         continue;
       const pcard = await one(this.ctx.pool, 'SELECT project_id FROM cards WHERE id=$1', [cardId]);
-      const acct = accountOf(a.row, pcard?.project_id);
+      const acct = accountOf(a.row, pcard?.project_id, a.capped);
       if (!acct) continue;
       const r = await claim(this.ctx, {
         cardId,
@@ -281,12 +293,12 @@ export class Dispatcher {
         load.set(a.row.workstation_id, (load.get(a.row.workstation_id) ?? 0) + 1);
       }
     }
-    for (const { row, caps, active } of agents) {
+    for (const { row, caps, active, capped } of agents) {
       if (active >= row.capacity || this.skip(row, nowMs) || full(row.workstation_id)) continue;
       const view = agentView(row, caps);
-      const cands = await candidateCards(this.ctx.pool, view, new Date(nowMs), accountScope(row));
+      const cands = await candidateCards(this.ctx.pool, view, new Date(nowMs), accountScope(row, capped));
       for (const c of cands) {
-        const acct = accountOf(row, c.project_id);
+        const acct = accountOf(row, c.project_id, capped);
         if (!acct) continue;
         const r = await claim(this.ctx, {
           cardId: c.id,
@@ -342,10 +354,12 @@ export class Dispatcher {
 
   /** Spec rule 1: a late scheduled card with no free agent gets one extra shift at a time per organization. */
   private async overflowPass(
-    agents: Array<{ row: Row; caps: string[]; active: number }>,
+    agents: FreeAgent[],
     nowMs: number,
     full: (workstationId: string) => boolean = () => false,
-    accountOf: (row: Row, projectId: string) => { key: string } | null = () => ({ key: 'main' }),
+    accountOf: (row: Row, projectId: string, capped?: boolean) => { key: string } | null = () => ({
+      key: 'main',
+    }),
   ): Promise<ClaimResult[]> {
     const late = await rows(
       this.ctx.pool,
@@ -372,7 +386,7 @@ export class Dispatcher {
         .sort((x, y) => x.active - y.active);
       for (const a of atCapacity) {
         if (!(await isCandidate(this.ctx.pool, agentView(a.row, a.caps), card.id, new Date(nowMs)))) continue;
-        const acct = accountOf(a.row, card.project_id);
+        const acct = accountOf(a.row, card.project_id, a.capped);
         if (!acct) continue;
         const r = await claim(this.ctx, {
           cardId: card.id,

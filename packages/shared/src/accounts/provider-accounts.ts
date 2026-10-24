@@ -260,6 +260,17 @@ export const AiRuntimesResponseSchema = z.object({
   online: z.boolean(),
   runnerVersion: z.string().nullable(),
   tiles: z.array(AiRuntimeTileSchema),
+  /** The last answer to "Make main" in this server process (transient, for the page right after the click). */
+  lastPromote: z
+    .object({
+      scope: z.string(),
+      key: z.string(),
+      ok: z.boolean(),
+      error: z.string().optional(),
+      at: z.iso.datetime(),
+    })
+    .nullable()
+    .default(null),
 });
 export type AiRuntimesResponse = z.infer<typeof AiRuntimesResponseSchema>;
 

@@ -26,6 +26,7 @@ import { attachmentRpc } from '../commands/card-attachments.ts';
 import { cardDependRpc, cardFactsRpc } from '../commands/card-facts.ts';
 import { cardBriefRpc, cardGroupRpc } from '../commands/card-group.ts';
 import { syncClaudeAccountNotices } from '../commands/claude-account-notices.ts';
+import { syncProviderAccountNotices } from '../commands/provider-account-notices.ts';
 import { applyAccountEnsureResult, queueMissingAccountEnsures } from '../commands/claude-accounts.ts';
 import { cardMessage, SYSTEM_ACTOR, userScope } from '../commands/common.ts';
 import { designRpc } from '../commands/design-rpc.ts';
@@ -59,7 +60,7 @@ import { applyPersonaReadResult } from '../commands/pack-hire.ts';
 import { applyPackCredentialResult } from '../commands/pack-holders.ts';
 import { applyPacksReport, applyProjectCapabilitiesReport, queuePacksSync } from '../commands/packs.ts';
 import { applyBranchCheckResult } from '../commands/phases.ts';
-import { applyProviderKeyResult } from '../commands/provider-keys.ts';
+import { applyPromoteResult, applyProviderKeyResult } from '../commands/provider-keys.ts';
 import { questionStatus } from '../commands/question-flow.ts';
 import { applyReleasePrResult } from '../commands/release-pr.ts';
 import { applyRepoCreateResult, repoCreateRpc } from '../commands/repo-create.ts';
@@ -684,6 +685,9 @@ export class RunnerHandlers {
         msg.ok,
         msg.result,
       );
+    } else if (cmd?.type === 'provider.account.promote') {
+      await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      applyPromoteResult(this.ctx, conn.workstationId, cmd.payload, msg.ok, msg.result);
     } else if (cmd?.type === 'pack.credential.set') {
       // The sealed deploy key or token is forgotten whatever the answer was; only the fact is kept.
       await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
@@ -771,6 +775,9 @@ export class RunnerHandlers {
       () => {},
     );
     await syncClaudeAccountNotices(ctx, { id: conn.workstationId, userId: conn.userId }, runtimes).catch(
+      () => {},
+    );
+    await syncProviderAccountNotices(ctx, { id: conn.workstationId, userId: conn.userId }, runtimes as never).catch(
       () => {},
     );
     const brief = (
@@ -918,6 +925,11 @@ export class RunnerHandlers {
     await syncClaudeAccountNotices(ctx, { id: conn.workstationId, userId: conn.userId }, msg.runtimes).catch(
       () => {},
     );
+    await syncProviderAccountNotices(
+      ctx,
+      { id: conn.workstationId, userId: conn.userId },
+      msg.runtimes as never,
+    ).catch(() => {});
     await ctx.store.append([
       {
         streamId: streamId.workstation(conn.workstationId),

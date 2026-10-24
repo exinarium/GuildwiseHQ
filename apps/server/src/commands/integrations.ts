@@ -19,6 +19,7 @@ import {
   integrationKind,
   integrationsSupportedBy,
   MAX_INTEGRATION_STATUSES,
+  PROVIDER_ACCOUNTS_CAPABILITY,
   type RunnerCommandName,
   streamId,
   type WorkstationIntegrationsResponse,
@@ -510,16 +511,20 @@ async function requireAccountsRunner(
   kindId: string,
   instance: string,
 ): Promise<void> {
-  if (kindId !== 'claude-code' || instance === '') return;
+  // Codex and the Gemini CLI (S-A) are new kinds: every instance, the main account too, needs a runner that knows them
+  const other = kindId === 'codex' || kindId === 'gemini';
+  if (!other && (kindId !== 'claude-code' || instance === '')) return;
   const c = await one(
     ctx.pool,
     'SELECT $2 = ANY(capabilities) AS ok FROM workstation_capabilities WHERE workstation_id=$1',
-    [workstationId, CLAUDE_ACCOUNTS_CAPABILITY],
+    [workstationId, other ? PROVIDER_ACCOUNTS_CAPABILITY : CLAUDE_ACCOUNTS_CAPABILITY],
   );
   if (!c?.ok)
     throw conflict(
       'runner_too_old',
-      `update the runner to ${integrationKind(kindId)?.minRunnerForInstance ?? 'the latest version'} or newer to use a named Claude account from here`,
+      other
+        ? `update the runner to ${integrationKind(kindId)?.minRunner ?? 'the latest version'} or newer to sign in to ${integrationKind(kindId)?.label ?? kindId} from here`
+        : `update the runner to ${integrationKind(kindId)?.minRunnerForInstance ?? 'the latest version'} or newer to use a named Claude account from here`,
     );
 }
 

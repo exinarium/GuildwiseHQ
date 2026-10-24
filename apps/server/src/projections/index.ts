@@ -159,6 +159,7 @@ export const PROJECTION_TABLES = [
   'blog_topics',
   'workstations',
   'projects',
+  'project_provider_accounts',
   'project_repos',
   'project_members',
   'project_workflows',
