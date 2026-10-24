@@ -37,6 +37,12 @@ export interface HarnessLaunch {
   hiddenFromShell?: string[];
   /** Variables only the CLI may have (removed for the commands it starts). */
   unsetForShell?: string[];
+  /**
+   * Owner decision Q68: the shell of this session runs only `aom ...`, enforced by the shim in the box (not by the CLI's own
+   * rules). `trustedScripts` are the runner's own script folders (read-only in the box) a helper may be started from; default: the
+   * read-only folders named `bin`. Set for a role without the `shell` tool and for every chat.
+   */
+  aomOnlyShell?: boolean | { trustedScripts?: string[] };
   /** The CLI starts its shell by absolute path: replace the box's own `bash` with the masking shim (instead of using PATH). */
   replaceShell?: boolean;
   cmd: { bin: string; args: string[]; env: Record<string, string> };
@@ -71,7 +77,15 @@ export async function launchInHarnessSandbox(l: HarnessLaunch): Promise<Launched
   let shimDir: string | undefined;
   const hidden = l.hiddenFromShell ?? [];
   const unset = l.unsetForShell ?? [];
-  if (hidden.length || unset.length) {
+  const aomOnly = l.aomOnlyShell
+    ? {
+        trustedScripts:
+          typeof l.aomOnlyShell === 'object' && l.aomOnlyShell.trustedScripts
+            ? l.aomOnlyShell.trustedScripts
+            : l.sandbox.readonly.filter((p) => /[\\/]bin$/.test(p)),
+      }
+    : undefined;
+  if (hidden.length || unset.length || aomOnly) {
     shimDir = join(dir, 'shim');
     mkdirSync(shimDir, { recursive: true });
     for (const name of ['bash', 'sh']) {
@@ -79,8 +93,15 @@ export async function launchInHarnessSandbox(l: HarnessLaunch): Promise<Launched
       writeFileSync(
         file,
         l.replaceShell
-          ? shellShimScript(REAL_SHELL_IN_BOX, hidden, unset, 'bwrap', REAL_SHELL_IN_BOX)
-          : shellShimScript(realShellPath(), hidden, unset),
+          ? shellShimScript(REAL_SHELL_IN_BOX, hidden, unset, 'bwrap', REAL_SHELL_IN_BOX, aomOnly)
+          : shellShimScript(
+              realShellPath(),
+              hidden,
+              unset,
+              'bwrap',
+              aomOnly ? realShellPath() : '/bin/sh',
+              aomOnly,
+            ),
       );
       chmodSync(file, 0o755);
     }

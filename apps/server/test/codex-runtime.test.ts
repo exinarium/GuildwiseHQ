@@ -69,14 +69,19 @@ describe('hiring on the Codex runtime', () => {
   });
 
   it.each([
-    ['analyst', 'no shell'],
     ['tester', 'browsers'],
     ['writer', 'certain paths'],
-    ['researcher', 'no shell'],
   ])('refuses the %s role (%s)', async (roleKey) => {
     const res = await hire(roleKey, `Nope ${roleKey}`);
     expect(res.status).toBe(400);
     expect(JSON.stringify(res.body)).toContain('runtime_not_for_role');
+  });
+
+  it('Q68: accepts roles without a shell (the runner’s harness sandbox runs only aom for them; the runner decides at session start where it cannot)', async () => {
+    for (const roleKey of ['analyst', 'researcher']) {
+      const res = await hire(roleKey, `Shell-less ${roleKey}`);
+      expect(res.status, roleKey).toBe(201);
+    }
   });
 
   it('refuses an agent whose workstation reports the Codex sandbox unavailable', async () => {
@@ -93,7 +98,7 @@ describe('hiring on the Codex runtime', () => {
       cookie: w.owner.cookie,
       body: {
         name: 'Mover',
-        roleKey: 'analyst',
+        roleKey: 'tester',
         seniority: 'senior',
         workstationId: w.workstationId,
         runtime: 'claude-code',

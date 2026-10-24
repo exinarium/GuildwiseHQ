@@ -2,6 +2,7 @@ import {
   CODEX_RUNTIME,
   HARNESS_REFUSED_ROLES,
   type RoleForRuntimeCheck,
+  type RuntimeEnvironment,
   runtimeRoleProblem,
 } from './runtimes.ts';
 
@@ -60,6 +61,13 @@ export const CODEX_REFUSED_ROLES: readonly string[] = HARNESS_REFUSED_ROLES;
  * Why an agent with this role and these permissions cannot run on the Codex runtime, or null when it can: the Codex case of
  * `runtimeRoleProblem` (the rule all harness runtimes share).
  */
-export function codexRoleProblem(role: RoleForRuntimeCheck): string | null {
-  return runtimeRoleProblem(CODEX_RUNTIME, role);
+export function codexRoleProblem(
+  role: RoleForRuntimeCheck,
+  /**
+   * Where the session runs. A role without a shell needs the runner's harness sandbox, whose box runs `aom ...` and nothing else
+   * (Q68): the default is the strict answer (not the harness), so a caller that does not say refuses such roles as before.
+   */
+  env: RuntimeEnvironment = { harness: false },
+): string | null {
+  return runtimeRoleProblem(CODEX_RUNTIME, role, env);
 }

@@ -28,6 +28,12 @@ export interface RuntimeGuarantees {
    * `Bash(aom:*)`). False: the runtime always has a full shell, so shell-less roles stay on Claude Code.
    */
   aomOnlyShell: boolean;
+  /**
+   * `aomOnlyShell` holds only in the runner's own harness sandbox (Codex on Linux and WSL2: the box's `bash` is a shim that runs
+   * `aom ...` and nothing else); the sandbox of the same CLI on macOS (its own permission profile) always has a full shell. The
+   * runner passes where it runs (`RuntimeEnvironment.harness`); the server, which does not know, lets the role through.
+   */
+  aomOnlyShellNeedsHarness?: boolean;
   /** Browser roles (Unix sockets for Chromium/Playwright) can be confined. */
   browser: boolean;
   /** A role that may write only some paths (`writableGlobs`) can be confined. */
@@ -40,7 +46,9 @@ export const RUNTIME_GUARANTEES: Readonly<Record<string, RuntimeGuarantees>> = {
     runtime: CODEX_RUNTIME,
     label: 'the Codex runtime',
     short: 'Codex',
-    aomOnlyShell: false,
+    // Q68: in the runner's harness sandbox the box's bash is the aom-only shim (docs/RUNNER.md, "Codex without a shell")
+    aomOnlyShell: true,
+    aomOnlyShellNeedsHarness: true,
     browser: false,
     pathScopedWrites: false,
   },
@@ -62,6 +70,12 @@ export const RUNTIME_GUARANTEES: Readonly<Record<string, RuntimeGuarantees>> = {
   },
 };
 
+/** Where a runtime runs, for the guarantees that depend on it. */
+export interface RuntimeEnvironment {
+  /** The session runs in the runner's own harness sandbox (false: the CLI's own sandbox, as Codex does on macOS). Unknown: absent. */
+  harness?: boolean;
+}
+
 export interface RoleForRuntimeCheck {
   roleKey: string;
   isDevops?: boolean;
@@ -75,7 +89,12 @@ export interface RoleForRuntimeCheck {
  * full-power profile, open the Unix sockets a browser needs, limit writes to globs that do not exist yet (a tester's e2e folder),
  * and, for a runtime with `aomOnlyShell: false`, remove the shell tool. The runner applies the same rule at session start.
  */
-export function runtimeRoleProblem(runtime: string, role: RoleForRuntimeCheck): string | null {
+export function runtimeRoleProblem(
+  runtime: string,
+  role: RoleForRuntimeCheck,
+  /** Where the runtime runs, when known (the runner knows; the server does not and passes nothing). */
+  env: RuntimeEnvironment = {},
+): string | null {
   const g = RUNTIME_GUARANTEES[runtime];
   if (!g) return null;
   const use = 'use Claude Code';
@@ -84,6 +103,8 @@ export function runtimeRoleProblem(runtime: string, role: RoleForRuntimeCheck): 
   const p = role.permissions;
   if (!p.allowedTools.includes('shell') && !g.aomOnlyShell)
     return `this role has no shell, and ${g.short} always has one: ${use} (the shell-less roles are not offered on ${g.short})`;
+  if (!p.allowedTools.includes('shell') && g.aomOnlyShellNeedsHarness && env.harness === false)
+    return `this role has no shell, and ${g.short} has one on this workstation that the runner cannot limit to aom (its own sandbox, not the runner's): ${use}`;
   if (p.browser && !g.browser)
     return `this role runs browsers, which need Unix sockets the ${g.short} sandbox does not open: ${use}`;
   if (p.allowedTools.includes('edit') && p.writableGlobs !== null && !g.pathScopedWrites)

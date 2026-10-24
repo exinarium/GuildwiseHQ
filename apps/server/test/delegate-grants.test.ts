@@ -803,7 +803,7 @@ describe('a grant may set the model the target runs on (R3c, Q62)', () => {
       persona('devils-advocate', { model: { runtime: 'claude-code', model: 'no-such-model-9' } }),
     );
     expect([400, 409]).toContain(bad.status);
-    // a read-only target on Codex: Codex always has a shell, and a role without one stays on Claude Code
+    // a read-only target on Codex needs no shell (Q68): the role rule lets it through, and this workstation does not offer Codex
     const codex = await call(
       w.owner,
       'PUT',
@@ -811,7 +811,7 @@ describe('a grant may set the model the target runs on (R3c, Q62)', () => {
       persona('devils-advocate', { model: { runtime: 'codex', model: 'gpt-6.1-sol' } }),
     );
     expect(codex.status).toBe(400);
-    expect(codex.body.error.code).toBe('model_not_for_target');
+    expect(codex.body.error.code).toBe('runtime_unavailable');
     const unknownRuntime = await call(
       w.owner,
       'PUT',

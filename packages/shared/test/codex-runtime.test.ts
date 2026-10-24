@@ -95,13 +95,27 @@ describe('which roles may run on codex', () => {
       codexRoleProblem({ roleKey: 'ba', permissions: p({ allowedTools: ['read', 'shell', 'web'] }) }),
     ).toBeNull();
   });
-  it('refuses DevOps, the CEO, shell-less, browser and path-limited roles', () => {
+  it('Q68: lets a role without a shell run in the runner’s harness sandbox, whose shell runs only aom', () => {
+    const analyst = { roleKey: 'analyst', permissions: p({ allowedTools: ['read'] }) };
+    expect(codexRoleProblem(analyst, { harness: true })).toBeNull();
+    expect(
+      codexRoleProblem({ roleKey: 'tester', permissions: p({ browser: true }) }, { harness: true }),
+    ).toMatch(/browsers/);
+  });
+  it('refuses DevOps, the CEO, shell-less (outside the harness), browser and path-limited roles', () => {
     expect(codexRoleProblem({ roleKey: 'devops', permissions: p() })).toMatch(/guard/);
     expect(codexRoleProblem({ roleKey: 'ceo', permissions: p() })).toMatch(/guard/);
     expect(codexRoleProblem({ roleKey: 'custom', isDevops: true, permissions: p() })).not.toBeNull();
+    // a caller that does not say where Codex runs gets the strict answer (as before Q68)
     expect(codexRoleProblem({ roleKey: 'analyst', permissions: p({ allowedTools: ['read'] }) })).toMatch(
       /no shell/,
     );
+    expect(
+      codexRoleProblem(
+        { roleKey: 'analyst', permissions: p({ allowedTools: ['read'] }) },
+        { harness: false },
+      ),
+    ).toMatch(/no shell/);
     expect(codexRoleProblem({ roleKey: 'tester', permissions: p({ browser: true }) })).toMatch(/browsers/);
     expect(codexRoleProblem({ roleKey: 'writer', permissions: p({ writableGlobs: ['docs/**'] }) })).toMatch(
       /certain paths/,

@@ -23,11 +23,29 @@ const perms = (over = {}) => ({
 });
 
 describe('runtimeRoleProblem: the rule every harness runtime shares', () => {
-  it('gives Codex the same answers as before', () => {
+  it('gives Codex a shell-less role only where the runner’s harness sandbox makes its shell aom-only (Q68)', () => {
     expect(runtimeRoleProblem('codex', { roleKey: 'builder', permissions: perms() })).toBeNull();
+    const analyst = { roleKey: 'analyst', permissions: perms({ allowedTools: ['read'] }) };
+    // the server does not know where the workstation runs it: it lets the role through, and the runner decides at session start
+    expect(runtimeRoleProblem('codex', analyst)).toBeNull();
+    expect(runtimeRoleProblem('codex', analyst, { harness: true })).toBeNull();
+    // Codex's own sandbox (macOS) always has a full shell
+    expect(runtimeRoleProblem('codex', analyst, { harness: false })).toMatch(/cannot limit to aom/);
+    // everything else stays refused in the harness
     expect(
-      runtimeRoleProblem('codex', { roleKey: 'analyst', permissions: perms({ allowedTools: ['read'] }) }),
-    ).toMatch(/no shell/);
+      runtimeRoleProblem(
+        'codex',
+        { roleKey: 'tester', permissions: perms({ browser: true }) },
+        { harness: true },
+      ),
+    ).toMatch(/browsers/);
+    expect(
+      runtimeRoleProblem(
+        'codex',
+        { roleKey: 'ceo', permissions: perms({ allowedTools: ['read'] }) },
+        { harness: true },
+      ),
+    ).toMatch(/guard/);
   });
 
   for (const runtime of [GEMINI_RUNTIME, OPENCODE_RUNTIME]) {

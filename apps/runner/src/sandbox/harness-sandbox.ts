@@ -204,21 +204,77 @@ export function shellShimScript(
   bwrap = 'bwrap',
   /** The shim's own interpreter. When the shim REPLACES the box's bash (and `sh` is bash) it must not be `/bin/sh`. */
   interpreter = '/bin/sh',
+  /** The shell runs only `aom ...` (see `AOM_ONLY_VALIDATOR`): the shim is then the enforcement, whatever the CLI's own rules say. */
+  aomOnly?: { trustedScripts: string[] },
 ): string {
-  for (const p of [...hidden, ...unset, realShell, bwrap])
+  for (const p of [...hidden, ...unset, realShell, bwrap, ...(aomOnly?.trustedScripts ?? [])])
     if (/['\n]/.test(p))
       throw new Error('a path or name with a quote or a newline cannot go into the shell shim');
+  if (aomOnly && !/bash$/.test(interpreter))
+    throw new Error('the aom-only shell needs bash as the shim interpreter');
   const list = hidden.map((p) => `'${p}'`).join(' ');
   const unsets = unset.map((v) => `--unsetenv '${v}'`).join(' ');
   const evalLine = String.raw`eval "exec '${bwrap}' --unshare-pid --unshare-ipc --unshare-uts --die-with-parent --bind / / --proc /proc --dev /dev $masks ${unsets} -- '${realShell}' \"\$@\""`;
   return `#!${interpreter}
-masks=""
+${aomOnly ? aomOnlyPrologue(aomOnly.trustedScripts) : ''}masks=""
 for f in ${list || "''"}; do
   [ -n "$f" ] || continue
   if [ -d "$f" ]; then masks="$masks --tmpfs '$f'"
   elif [ -e "$f" ]; then masks="$masks --ro-bind /dev/null '$f'"; fi
 done
 ${evalLine}
+`;
+}
+
+/**
+ * The shell of a role that has no `shell` tool, and of every chat, in a box where the CLI's own rules cannot be trusted to hold
+ * (Codex, whose shell tool always exists): the box's `bash` is this shim, and it runs a command only when the command is exactly
+ * `aom` and its arguments, written as plain words or in quotes without any expansion. No `;`, `&&`, `|`, redirection, `$`, backtick,
+ * subshell, glob, brace or newline outside quotes, and no `$`, backtick, backslash or `!` inside double quotes, so what runs is the
+ * runner's `aom` command and nothing the model composed around it. `bash <script>` is allowed for the runner's own scripts
+ * (`trustedScripts`, read-only in the box), which is how a `#!/usr/bin/env bash` helper starts. (Owner decision Q68.)
+ */
+function aomOnlyPrologue(trustedScripts: string[]): string {
+  const trusted = trustedScripts.map((t) => `${t.replace(/\/+$/, '')}/*`).join('|');
+  return `aom_refuse() { echo "this agent may run only the aom command in the shell" >&2; exit 126; }
+aom_valid() {
+  local s="$1" n=\${#1} i=0 c st=0
+  case "$s" in aom|"aom "*) ;; *) return 1 ;; esac
+  case "$s" in *$'\n'*|*$'\r'*) return 1 ;; esac
+  while [ "$i" -lt "$n" ]; do
+    c="\${s:$i:1}"; i=$((i+1))
+    case $st in
+      0) case "$c" in
+           [A-Za-z0-9_./:=@%+,-]|" ") ;;
+           "'") st=1 ;;
+           '"') st=2 ;;
+           *) return 1 ;;
+         esac ;;
+      1) [ "$c" = "'" ] && st=0 ;;
+      2) case "$c" in
+           '"') st=0 ;;
+           '$'|'\`'|'\\'|'!') return 1 ;;
+         esac ;;
+    esac
+  done
+  [ "$st" -eq 0 ]
+}
+aom_orig=("$@")
+aom_cmd=""; aom_mode=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -l|--login|--noprofile|--norc) shift ;;
+    -c|-lc|-cl) shift; [ "$#" -ge 1 ] || aom_refuse; aom_mode=c; aom_cmd="$1"; shift; break ;;
+    -*) aom_refuse ;;
+    *) aom_mode=file; break ;;
+  esac
+done
+case "$aom_mode" in
+  c) [ "$#" -eq 0 ] || aom_refuse; aom_valid "$aom_cmd" || aom_refuse ;;
+  file) ${trusted ? `case "$1" in *..*) aom_refuse ;; ${trusted}) ;; *) aom_refuse ;; esac` : 'aom_refuse'} ;;
+  *) aom_refuse ;;
+esac
+set -- "\${aom_orig[@]}"
 `;
 }
 
