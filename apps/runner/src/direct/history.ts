@@ -1,5 +1,14 @@
 import { randomUUID } from 'node:crypto';
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 
 export interface HistoryMessage {
@@ -56,5 +65,27 @@ export class ChatHistory {
     } catch {
       // Windows
     }
+  }
+
+  /**
+   * Deletes the chats not written to for `maxAgeMs` (by file modification time: a chat that is still talked in is rewritten on
+   * every message, so it stays). Only files named like a chat are touched. Returns how many were removed.
+   */
+  prune(maxAgeMs: number, now: number = Date.now()): number {
+    if (!existsSync(this.dir)) return 0;
+    let removed = 0;
+    for (const name of readdirSync(this.dir)) {
+      if (!name.endsWith('.json') || !ID.test(name.slice(0, -5))) continue;
+      const file = join(this.dir, name);
+      try {
+        if (now - statSync(file).mtimeMs > maxAgeMs) {
+          rmSync(file, { force: true });
+          removed++;
+        }
+      } catch {
+        // gone already or unreadable: leave it
+      }
+    }
+    return removed;
   }
 }

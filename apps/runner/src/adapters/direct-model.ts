@@ -10,6 +10,7 @@ import {
   type Usage,
 } from '@aom/shared';
 import { isStepCount, streamText, type ToolSet } from 'ai';
+import { withPromptCaching } from '../direct/cache.ts';
 import { ChatHistory } from '../direct/history.ts';
 import { defaultModelFactory, type FetchLike, type ModelFactory, ModelLister } from '../direct/models.ts';
 import type { ProviderStore } from '../direct/store.ts';
@@ -36,12 +37,15 @@ export interface DirectModelOptions {
   turnTimeoutMs: number;
   /** The most tokens one model call may write. */
   maxOutputTokens: number;
+  /** Days a plain chat's text is kept on this workstation; 0 keeps it forever. */
+  chatRetentionDays: number;
 }
 
 export const DIRECT_MODEL_DEFAULTS: DirectModelOptions = {
   maxSteps: 12,
   turnTimeoutMs: 5 * 60_000,
   maxOutputTokens: 8_000,
+  chatRetentionDays: 90,
 };
 
 /** A queue the stream's consumer reads as an async iterable and the producer pushes into. */
@@ -130,8 +134,28 @@ export class DirectModelAdapter implements RuntimeAdapter {
     this.factory = deps.modelFactory ?? defaultModelFactory;
     this.opts = { ...DIRECT_MODEL_DEFAULTS, ...deps.options };
     this.log = deps.log ?? nullLogger;
+    this.startPruning();
     // A changed provider forgets what it listed.
     deps.store.onChange(() => this.lister.invalidate());
+  }
+
+  /** Deletes chat memory older than the retention period: now, and every six hours while the runner lives. */
+  pruneHistory(now: number = Date.now()): number {
+    if (this.opts.chatRetentionDays <= 0) return 0;
+    try {
+      const n = this.history.prune(this.opts.chatRetentionDays * 86_400_000, now);
+      if (n) this.log.info(`direct chats: removed ${n} older than ${this.opts.chatRetentionDays} days`);
+      return n;
+    } catch (err) {
+      this.log.warn(`direct chat pruning failed: ${redact(String(err))}`);
+      return 0;
+    }
+  }
+
+  private startPruning(): void {
+    this.pruneHistory();
+    const t = setInterval(() => this.pruneHistory(), 6 * 3_600_000);
+    t.unref?.();
   }
 
   async capabilities(): Promise<RuntimeCapabilities> {
@@ -232,6 +256,8 @@ export class DirectModelAdapter implements RuntimeAdapter {
         : this.history.newId();
     const messages = [...prior, { role: 'user' as const, content: input.message }];
 
+    const cached = withPromptCaching(choice.provider, input.instructions ?? '', messages, prior.length);
+
     const timeout = setTimeout(() => {
       stopReason ??= `timed out after ${Math.round(this.opts.turnTimeoutMs / 60_000)} minutes`;
       ac.abort();
@@ -248,14 +274,17 @@ export class DirectModelAdapter implements RuntimeAdapter {
       try {
         const result = streamText({
           model,
-          system: input.instructions ?? '',
-          messages,
+          system: cached.system,
+          messages: cached.messages,
           tools: toolSet,
           stopWhen: isStepCount(Math.min(input.maxSteps ?? this.opts.maxSteps, this.opts.maxSteps)),
           abortSignal: ac.signal,
           maxOutputTokens: this.opts.maxOutputTokens,
           maxRetries: 2,
-          providerOptions: { openai: { strictJsonSchema: false } },
+          providerOptions: {
+            ...cached.providerOptions,
+            openai: { strictJsonSchema: false, ...cached.providerOptions.openai },
+          },
           onError: () => {
             // reported by the `error` part below
           },

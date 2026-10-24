@@ -193,6 +193,54 @@ describe('direct-model adapter: streaming and usage', () => {
   });
 });
 
+describe('direct-model adapter: prompt caching', () => {
+  const agentOf = (r: Rig, model: string) => ({ ...r.input().agent, model });
+  it('marks the system prompt as a cache breakpoint on Anthropic, and books cache reads and writes', async () => {
+    const u = {
+      inputTokens: { total: 1500, noCache: 100, cacheRead: 1000, cacheWrite: 400 },
+      outputTokens: { total: 50, text: 50, reasoning: 0 },
+    };
+    const model = new MockLanguageModelV4({ doStream: [textStep('Fine', u)] });
+    const r = await rig(model);
+    expect(
+      r.store.set({ provider: 'anthropic', keyId: 'key-1', ciphertext: S('sk-ant-test-1234'), models: [] })
+        .stored,
+    ).toBe(true);
+    const evs = await collect(
+      await r.adapter.startChat(r.input({ agent: agentOf(r, 'anthropic:claude-sonnet-5-5') })),
+    );
+    const sys = (model.doStreamCalls[0]?.prompt ?? [])[0] as { role: string; providerOptions?: unknown };
+    expect(sys.role).toBe('system');
+    expect(sys.providerOptions).toEqual({ anthropic: { cacheControl: { type: 'ephemeral' } } });
+    const usage = (evs.find((e) => e.kind === 'usage') as { usage: Usage }).usage;
+    expect(usage).toMatchObject({ inputTokens: 100, cacheReadTokens: 1000, cacheWriteTokens: 400 });
+    // cache reads are priced below input, writes above it (the Claude table)
+    const cached = costUsdMicros('anthropic:claude-sonnet-5-5', usage);
+    const plain = costUsdMicros('anthropic:claude-sonnet-5-5', {
+      ...usage,
+      inputTokens: 1500,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+    });
+    expect(cached).toBeGreaterThan(0);
+    expect(cached).not.toBe(plain);
+  });
+  it('gives OpenAI a stable cache key per instructions text and keeps the stable prefix first', async () => {
+    const model = new MockLanguageModelV4({ doStream: [textStep('One'), textStep('Two')] });
+    const r = await rig(model);
+    await collect(await r.adapter.startChat(r.input()));
+    await collect(await r.adapter.startChat(r.input({ message: 'And now?' })));
+    const key = (i: number) =>
+      (model.doStreamCalls[i]?.providerOptions as { openai?: { promptCacheKey?: string } } | undefined)
+        ?.openai?.promptCacheKey;
+    expect(key(0)).toMatch(/^aom-[0-9a-f]{24}$/);
+    expect(key(1)).toBe(key(0));
+    const prompt = model.doStreamCalls[1]?.prompt ?? [];
+    expect(prompt[0]?.role).toBe('system');
+    expect(prompt[prompt.length - 1]?.role).toBe('user');
+  });
+});
+
 describe('direct-model adapter: the tool loop', () => {
   it('calls an allowed verb through the runner IPC and gives the answer back to the model', async () => {
     const model = new MockLanguageModelV4({

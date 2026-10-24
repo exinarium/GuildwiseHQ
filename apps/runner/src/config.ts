@@ -173,6 +173,11 @@ export const RunnerConfigSchema = z.object({
    * The server never learns the path.
    */
   orgSourceFolders: z.record(z.string(), z.string()).default({}),
+  /**
+   * Days a chat on a direct-model provider keeps its text on this workstation (`direct-chats/`). Older chats are deleted by a
+   * pruning job (at start and every six hours); a deleted chat simply starts afresh when the person writes in it again. 0: keep forever.
+   */
+  directChatRetentionDays: z.number().int().min(0).max(3650).default(90),
   runtimes: z
     .object({
       'claude-code': ClaudeRuntimeConfigSchema.default(ClaudeRuntimeConfigSchema.parse({})),

@@ -420,7 +420,11 @@ export class Runner {
         mainCredential,
         this.claudeUsage,
         this.claudeAccounts,
-        { store: this.providers, onModelsChanged: () => void this.reportRuntimes() },
+        {
+          store: this.providers,
+          onModelsChanged: () => void this.reportRuntimes(),
+          options: { chatRetentionDays: opts.config.directChatRetentionDays },
+        },
       );
     this.integrations = new IntegrationService({
       workstationId: opts.config.workstationId,
