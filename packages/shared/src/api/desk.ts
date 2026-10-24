@@ -307,6 +307,8 @@ export const ResolveDeskItemRequestSchema = z.object({
   note: z.string().max(2000).optional(),
   /** Approving a standing-order proposal that repeats a live order: `merge` puts its wording into that order. */
   onDuplicate: z.literal('merge').optional(),
+  /** Q69: approving "where should this playbook run?" names one of the person's own workstations (the item's options). */
+  workstationId: z.uuid().optional(),
 });
 export type ResolveDeskItemRequest = z.infer<typeof ResolveDeskItemRequestSchema>;
 

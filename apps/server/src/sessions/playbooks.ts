@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import {
   builtinCapabilities,
   type CapabilityMeta,
@@ -18,12 +19,13 @@ import { orgRoleOf, type Who } from '../auth/org-context.ts';
 import type { AuthSession } from '../auth/sessions.ts';
 import { effectiveRegistry } from '../capabilities/registry.ts';
 import { manageableAgent } from '../commands/agents.ts';
-import { orgScope, runnerActor, userActor } from '../commands/common.ts';
+import { orgScope, runnerActor, SYSTEM_ACTOR, userActor } from '../commands/common.ts';
 import { raiseOrCoalesce } from '../commands/desk-coalesce.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Queryable, type Row, rows } from '../db/sql.ts';
-import { withAppendTx } from '../db/tx.ts';
-import { badRequest, conflict, notFound } from '../errors.ts';
+import { type Tx, withAppendTx } from '../db/tx.ts';
+import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
+import type { AppendInput } from '../eventstore/types.ts';
 
 /** `[ok, result, error]`, as every rpc handler of the gateway answers. */
 type Reply = [boolean, unknown?, string?];
@@ -255,8 +257,18 @@ export async function playbookRunRpc(
       undefined,
       `\`aom playbook run\` is not available for "${p.data.key}": nobody granted this agent that playbook (a manager grants it on the agent's page)`,
     ];
-  return startForAgent(ctx, workstationId, agent, p.data, shift.chat_user_id ?? null);
+  return startForAgent(
+    ctx,
+    workstationId,
+    agent,
+    p.data,
+    shift.chat_user_id ?? null,
+    ctx.services.chat?.threadOfChat(shift.id) ?? null,
+  );
 }
+
+/** The subkind of the desk item that asks the chat person where an agent-started playbook should run (Q69). */
+export const PLAYBOOK_WORKSTATION_SUBKIND = 'playbook_workstation';
 
 async function startForAgent(
   ctx: Ctx,
@@ -265,38 +277,46 @@ async function startForAgent(
   p: PlaybookRunParams,
   /** The person whose message started the chat this runs from (Q64); null for a card shift or any run with no chat user. */
   chatUserId: string | null = null,
+  /** The chat the agent works in, told how the request ended (Q69). */
+  chatThreadId: string | null = null,
 ): Promise<Reply> {
   const managerId = agent.manager_user_id as string;
-  // The session belongs to the person in the chat (Q64) when there is one who is still in the organization and may run the
-  // playbook; otherwise to the agent's manager, as before.
+  // The session belongs to the person in the chat (Q64) when there is one who is still in the organization, may run the
+  // playbook and has a workstation of their own; otherwise to the agent's manager, as before.
   let ownerId = managerId;
-  // a session runs on its creator's own workstation: the chat person's (the one the chat runs on when it is theirs); with none,
-  // it stays with the manager, whose workstation the agent is on
-  let stationId: string | undefined = agent.workstation_id ?? workstationId;
-  if (chatUserId && chatUserId !== managerId && (await orgRoleOf(ctx.pool, chatUserId, agent.org_id))) {
+  const agentStation: string = agent.workstation_id ?? workstationId;
+  let stationId: string = agentStation;
+  // Q69: a session runs on its creator's own workstation. When the agent's workstation is not one of the chat person's, the
+  // session does not start on one chosen for them: the person is asked to pick one of their own or decline.
+  let ask: Array<{ id: string; name: string }> | null = null;
+  if (chatUserId && (await orgRoleOf(ctx.pool, chatUserId, agent.org_id))) {
     const visible = await runnablePlaybooks(ctx.pool, agent.org_id, chatUserId);
-    const mine = await one(
+    const mine = await rows<{ id: string; name: string }>(
       ctx.pool,
-      `SELECT id FROM workstations WHERE user_id=$1 AND status='active'
-        ORDER BY (id = $2::uuid) DESC, connected DESC, last_seen_at DESC NULLS LAST, paired_at LIMIT 1`,
-      [chatUserId, agent.workstation_id ?? workstationId],
+      `SELECT id, name FROM workstations WHERE user_id=$1 AND status='active'
+        ORDER BY (id = $2::uuid) DESC, connected DESC, last_seen_at DESC NULLS LAST, paired_at`,
+      [chatUserId, agentStation],
     );
-    if (visible.some((i) => i.key === p.key) && mine) {
+    if (visible.some((i) => i.key === p.key) && mine.length > 0) {
       ownerId = chatUserId;
-      stationId = mine.id as string;
+      if (mine.some((m) => m.id === agentStation)) stationId = agentStation;
+      else ask = mine;
     }
   }
   const role = await orgRoleOf(ctx.pool, ownerId, agent.org_id);
   if (!role) return [false, undefined, "the agent's manager is no longer in the organization"];
   const since = new Date(ctx.clock.now().getTime() - 24 * 3600_000);
+  // sessions started, and requests asked (started ones are already among the sessions): a prompt is as much of the person's time
   const recent = await one(
     ctx.pool,
-    `SELECT count(*)::int AS n FROM threads
-      WHERE org_id=$1 AND kind='discovery' AND created_at >= $2
-        AND session_config->'playbookRun'->'startedBy'->>'agentId' = $3`,
+    `SELECT (SELECT count(*) FROM threads
+              WHERE org_id=$1 AND kind='discovery' AND created_at >= $2
+                AND session_config->'playbookRun'->'startedBy'->>'agentId' = $3::text)
+          + (SELECT count(*) FROM playbook_run_requests
+              WHERE org_id=$1 AND agent_id=$3::uuid AND requested_at >= $2 AND status <> 'started') AS n`,
     [agent.org_id, since, agent.id],
   );
-  if ((recent?.n ?? 0) >= PLAYBOOK_LIMITS.maxPerDay)
+  if (Number(recent?.n ?? 0) >= PLAYBOOK_LIMITS.maxPerDay)
     return [
       false,
       undefined,
@@ -310,16 +330,54 @@ async function startForAgent(
       undefined,
       `playbook "${p.key}" is not available (not approved, or not visible to the owner of this agent)`,
     ];
-  const who: Who = { userId: ownerId, orgId: agent.org_id, role };
+  if (ask && chatUserId)
+    return askWhereToRun(ctx, workstationId, agent, item, p, chatUserId, chatThreadId, ask);
+  const started = await launchSession(ctx, {
+    agent,
+    item,
+    input: p.input ?? '',
+    ownerId,
+    role,
+    stationId,
+    managerId,
+    actor: runnerActor(workstationId),
+  });
+  return [
+    true,
+    {
+      threadId: started.threadId,
+      message: `Started the guided session "${item.name}" for ${ownerId === managerId ? `${agent.name}'s manager` : 'the person you are chatting with'}. It needs their answers and is on their desk; continue your work, do not wait for it.`,
+    },
+  ];
+}
+
+type PlaybookItem = CapabilityMeta & { packId?: string; visibility?: 'org' | 'private' };
+
+/** Opens the guided Discovery session of an agent-started playbook for `ownerId` on `stationId`, and puts it on their desk. */
+async function launchSession(
+  ctx: Ctx,
+  o: {
+    agent: Row;
+    item: PlaybookItem;
+    input: string;
+    ownerId: string;
+    role: string;
+    stationId: string;
+    managerId: string;
+    actor: AppendInput['actor'];
+  },
+): Promise<{ threadId: string }> {
+  const { agent, item, ownerId, managerId } = o;
+  const who: Who = { userId: ownerId, orgId: agent.org_id, role: o.role as Who['role'] };
   const state = await ctx.services.discovery.create(
     who,
     {
-      title: titleOf(item.name, p.input ?? ''),
+      title: titleOf(item.name, o.input),
       stance: 'facilitator',
       ceoMode: 'owner_only',
       playbook: item.key,
-      idea: p.input ?? '',
-      workstationId: stationId,
+      idea: o.input,
+      workstationId: o.stationId,
     },
     undefined,
     initialRun(item, item.key, { kind: 'agent', agentId: agent.id, agentName: agent.name }),
@@ -338,14 +396,214 @@ async function startForAgent(
       forUserId: ownerId,
     },
     askedBy: { kind: 'agent', agentId: agent.id },
-    actor: runnerActor(workstationId),
+    actor: o.actor,
     scope: orgScope(agent.org_id),
   });
+  return { threadId: state.threadId };
+}
+
+/**
+ * Q69: the chat person is asked, on their desk, which of their own workstations the playbook should run on, or to decline. The
+ * request waits (it is a projection of its events); nothing starts before they answer. One open request per agent, person and
+ * playbook.
+ */
+async function askWhereToRun(
+  ctx: Ctx,
+  workstationId: string,
+  agent: Row,
+  item: PlaybookItem,
+  p: PlaybookRunParams,
+  chatUserId: string,
+  chatThreadId: string | null,
+  mine: Array<{ id: string; name: string }>,
+): Promise<Reply> {
+  const open = await one(
+    ctx.pool,
+    `SELECT 1 FROM playbook_run_requests WHERE agent_id=$1 AND chat_user_id=$2 AND playbook_key=$3 AND status IN ('pending','accepted')`,
+    [agent.id, chatUserId, item.key],
+  );
+  if (open)
+    return [
+      true,
+      {
+        requested: true,
+        message: `The person you are chatting with was already asked where "${item.name}" should run. It is on their desk; continue your work, do not wait for it.`,
+      },
+    ];
+  const requestId = randomUUID();
+  const deskItemId = randomUUID();
+  await ctx.store.append([
+    {
+      streamId: streamId.agent(agent.id),
+      event: {
+        type: 'PlaybookRunRequested',
+        payload: {
+          requestId,
+          orgId: agent.org_id,
+          agentId: agent.id,
+          chatUserId,
+          playbookKey: item.key,
+          input: p.input ?? '',
+          ...(chatThreadId ? { chatThreadId } : {}),
+          deskItemId,
+          workstationIds: mine.map((m) => m.id),
+        },
+      },
+      actor: runnerActor(workstationId),
+      scope: orgScope(agent.org_id),
+    },
+    {
+      streamId: streamId.desk(deskItemId),
+      event: {
+        type: 'DeskItemCreated',
+        payload: {
+          deskItemId,
+          kind: 'approval',
+          subkind: PLAYBOOK_WORKSTATION_SUBKIND,
+          title: `${agent.name} wants to start "${item.name}": which of your workstations should run it?`,
+          body: `${agent.name} started the playbook "${item.name}" from your chat. It is a guided session you answer, and a session runs on its own person's workstation; ${agent.name} works on a workstation that is not yours. Pick one of yours to start it there, or decline and nothing starts.`,
+          options: mine.map((m) => ({ id: m.id, label: m.name })),
+          blocking: false,
+          pinned: false,
+          affectedCardIds: [],
+          addresseeUserId: chatUserId,
+          askedBy: { kind: 'agent', agentId: agent.id },
+          data: { requestId, playbookKey: item.key, agentId: agent.id },
+          subjectKey: `playbook_run:${requestId}`,
+        },
+      },
+      actor: runnerActor(workstationId),
+      scope: orgScope(agent.org_id),
+    },
+  ]);
   return [
     true,
     {
-      threadId: state.threadId,
-      message: `Started the guided session "${item.name}" for ${ownerId === managerId ? `${agent.name}'s manager` : 'the person you are chatting with'}. It needs their answers and is on their desk; continue your work, do not wait for it.`,
+      requested: true,
+      message: `Asked the person you are chatting with which of their workstations should run "${item.name}", or to decline. It is on their desk; nothing has started. Continue your work, do not wait for it.`,
     },
   ];
+}
+
+/**
+ * The person answered the desk item (inside the desk's transaction): decline, or pick one of their own active workstations among
+ * the ones offered. Records `PlaybookRunDecided`; the session is started after the transaction (`afterPlaybookRunDecision`).
+ */
+export async function resolvePlaybookRunIn(
+  ctx: Ctx,
+  tx: Tx,
+  user: { id: string },
+  item: Row,
+  resolution: 'approved' | 'rejected' | 'acknowledged',
+  workstationId?: string,
+): Promise<{ requestId: string; accepted: boolean }> {
+  if (resolution === 'acknowledged')
+    throw badRequest('wrong_resolution', 'pick one of your workstations to start it, or decline');
+  const req = await one(tx, 'SELECT * FROM playbook_run_requests WHERE desk_item_id=$1 FOR UPDATE', [
+    item.id,
+  ]);
+  if (!req) throw notFound('playbook request not found');
+  if (req.chat_user_id !== user.id) throw forbidden('only the person in the chat decides where this runs');
+  if (req.status !== 'pending') throw conflict('already_resolved', `this request is already ${req.status}`);
+  let chosen: string | undefined;
+  if (resolution === 'approved') {
+    if (!workstationId || !(req.workstation_ids as string[]).includes(workstationId))
+      throw badRequest('pick_a_workstation', 'pick one of the workstations offered');
+    const own = await one(tx, `SELECT 1 FROM workstations WHERE id=$1 AND user_id=$2 AND status='active'`, [
+      workstationId,
+      user.id,
+    ]);
+    if (!own) throw badRequest('pick_a_workstation', 'that workstation is not one of yours any more');
+    chosen = workstationId;
+  }
+  await ctx.store.append(
+    [
+      {
+        streamId: streamId.agent(req.agent_id),
+        event: {
+          type: 'PlaybookRunDecided',
+          payload: {
+            requestId: req.request_id,
+            orgId: req.org_id,
+            decision: chosen ? 'accepted' : 'declined',
+            ...(chosen ? { workstationId: chosen } : {}),
+            decidedBy: user.id,
+          },
+        },
+        actor: userActor(user.id),
+        scope: orgScope(req.org_id),
+      },
+    ],
+    { tx },
+  );
+  return { requestId: req.request_id, accepted: !!chosen };
+}
+
+/** After the desk transaction: start the chosen session, or tell the chat that the person declined. */
+export async function afterPlaybookRunDecision(
+  ctx: Ctx,
+  d: { requestId: string; accepted: boolean },
+): Promise<void> {
+  const req = await one(ctx.pool, 'SELECT * FROM playbook_run_requests WHERE request_id=$1', [d.requestId]);
+  if (!req) return;
+  const agent = await one(ctx.pool, 'SELECT * FROM agents WHERE id=$1', [req.agent_id]);
+  const items = await runnablePlaybooks(ctx.pool, req.org_id, req.chat_user_id);
+  const item = items.find((i) => i.key === req.playbook_key);
+  const tell = async (body: string): Promise<void> => {
+    if (!req.chat_thread_id) return;
+    await ctx.store
+      .append([
+        {
+          streamId: streamId.thread(req.chat_thread_id),
+          event: {
+            type: 'ThreadMessagePosted',
+            payload: {
+              threadId: req.chat_thread_id,
+              messageId: randomUUID(),
+              authorKind: 'system',
+              kind: 'system',
+              body,
+              data: { playbookRequest: req.request_id },
+            },
+          },
+          actor: SYSTEM_ACTOR,
+          scope: orgScope(req.org_id),
+        },
+      ])
+      .catch((err) => ctx.log.warn({ err }, 'could not tell the chat about the playbook request'));
+  };
+  const name = item?.name ?? req.playbook_key;
+  if (!d.accepted) {
+    await tell(`The playbook "${name}" was not started: you chose not to run it.`);
+    return;
+  }
+  const role = await orgRoleOf(ctx.pool, req.chat_user_id, req.org_id);
+  if (!agent || !item || !role || !req.workstation_id) {
+    await tell(
+      `The playbook "${name}" could not be started any more (it is not available, or you left the organization).`,
+    );
+    return;
+  }
+  const started = await launchSession(ctx, {
+    agent,
+    item,
+    input: req.input,
+    ownerId: req.chat_user_id,
+    role,
+    stationId: req.workstation_id,
+    managerId: agent.manager_user_id,
+    actor: userActor(req.chat_user_id),
+  });
+  await ctx.store.append([
+    {
+      streamId: streamId.agent(req.agent_id),
+      event: {
+        type: 'PlaybookRunStarted',
+        payload: { requestId: req.request_id, orgId: req.org_id, sessionThreadId: started.threadId },
+      },
+      actor: userActor(req.chat_user_id),
+      scope: orgScope(req.org_id),
+    },
+  ]);
+  await tell(`Started the guided session "${name}" on the workstation you chose. It is on your desk.`);
 }

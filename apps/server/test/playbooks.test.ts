@@ -487,15 +487,41 @@ describe('an agent starts a playbook itself', () => {
       );
       return id;
     };
-    // the person in the chat
-    const res = await call(r, await chatShift(member.id), 'playbook.run', {
+    // the person in the chat: the agent's workstation is not theirs, so (Q69) they are asked which of theirs should run it and
+    // nothing starts until they answer
+    const asked = await call(r, await chatShift(member.id), 'playbook.run', {
       key: 'brainstorm',
       input: 'pricing for teams',
     });
-    expect(res.ok, res.error).toBe(true);
-    expect(res.result.message).toContain('the person you are chatting with');
-    const t = (await q(`SELECT created_by FROM threads WHERE id=$1`, [res.result.threadId]))[0];
+    expect(asked.ok, asked.error).toBe(true);
+    expect(asked.result.requested).toBe(true);
+    expect(asked.result.message).toContain('which of their workstations');
+    expect(asked.result.threadId).toBeUndefined();
+    const item = (await asMember('GET', '/api/desk')).items.find(
+      (i: any) => i.subkind === 'playbook_workstation',
+    );
+    expect(item.options.map((o: any) => o.id)).toEqual([memberWs]);
+    const answered = await asMember('POST', `/api/desk/${item.id}/resolve`, {
+      resolution: 'approved',
+      workstationId: memberWs,
+    });
+    void answered;
+    const started = (
+      await q(
+        `SELECT session_thread_id, status, workstation_id FROM playbook_run_requests WHERE desk_item_id=$1`,
+        [item.id],
+      )
+    )[0];
+    expect(started).toMatchObject({ status: 'started', workstation_id: memberWs });
+    const res = {
+      ok: true,
+      result: { threadId: started.session_thread_id as string, message: 'the person you are chatting with' },
+    };
+    const t = (
+      await q(`SELECT created_by, workstation_id FROM threads WHERE id=$1`, [res.result.threadId])
+    )[0];
     expect(t.created_by).toBe(member.id);
+    expect(t.workstation_id).toBe(memberWs);
     const desk = (
       await q(`SELECT title, body, data FROM desk_items WHERE subject_key=$1`, [
         `playbook_session:${res.result.threadId}`,
@@ -536,6 +562,131 @@ describe('an agent starts a playbook itself', () => {
       if (!st) break;
       await finish(st);
     }
+  });
+
+  describe('Q69: where an agent-started playbook runs, when it is not the chat person\u2019s workstation', () => {
+    let agent = '';
+    const chatShift = async (chatUser: string, agentId = agent, ws = w.workstationId): Promise<string> => {
+      const id = randomUUID();
+      await q(
+        `INSERT INTO shifts (id, org_id, agent_id, workstation_id, kind, status, runtime, model, started_at, chat_user_id)
+         VALUES ($1,$2,$3,$4,'chat','running','mock','mock',now(),$5)`,
+        [id, w.owner.id, agentId, ws, chatUser],
+      );
+      return id;
+    };
+    const itemFor = async (key: string) =>
+      (await asMember('GET', '/api/desk')).items.find(
+        (i: any) => i.subkind === 'playbook_workstation' && i.data?.playbookKey === key,
+      ) ?? (await asMember('GET', '/api/desk')).items.find((i: any) => i.subkind === 'playbook_workstation');
+    const declineOpen = async () => {
+      for (const i of (await asMember('GET', '/api/desk')).items.filter(
+        (x: any) => x.subkind === 'playbook_workstation' && x.status === 'open',
+      ))
+        await asMember('POST', `/api/desk/${i.id}/resolve`, { resolution: 'rejected' });
+    };
+    const requests = () =>
+      q('SELECT * FROM playbook_run_requests WHERE agent_id=$1 ORDER BY requested_at', [agent]);
+
+    it('asks the person to pick one of their workstations or decline; nothing starts before; a repeat does not ask twice', async () => {
+      agent = (await w.hire('Eve', 'ba', 'senior')).id as string;
+      await asOwner('PUT', `/api/agents/${agent}/playbook-grants`, { key: 'brainstorm', granted: true });
+      const threadsBefore = (await q(`SELECT count(*)::int AS n FROM threads WHERE kind='discovery'`))[0].n;
+      const shift = await chatShift(member.id);
+      const first = await call(r, shift, 'playbook.run', { key: 'brainstorm', input: 'naming' });
+      expect(first.ok, first.error).toBe(true);
+      expect(first.result.requested).toBe(true);
+      expect((await q(`SELECT count(*)::int AS n FROM threads WHERE kind='discovery'`))[0].n).toBe(
+        threadsBefore,
+      );
+      const rows = await requests();
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        status: 'pending',
+        chat_user_id: member.id,
+        workstation_ids: [memberWs],
+      });
+      // the desk item is the member's to answer: the Owner (the agent's manager) sees it among the organization's items and cannot
+      const it1 = await itemFor('brainstorm');
+      expect(it1).toMatchObject({ kind: 'approval', canAnswer: true });
+      expect(
+        (await asOwner('GET', '/api/desk')).items.find((i: any) => i.subkind === 'playbook_workstation')
+          ?.canAnswer,
+      ).not.toBe(true);
+      // asking again while it is open is the same question
+      const again = await call(r, shift, 'playbook.run', { key: 'brainstorm', input: 'naming' });
+      expect(again.result.message).toContain('already asked');
+      expect(await requests()).toHaveLength(1);
+      // only the person answers, with a workstation that was offered
+      expect(
+        (
+          await rawOwner('POST', `/api/desk/${it1.id}/resolve`, {
+            resolution: 'approved',
+            workstationId: memberWs,
+          })
+        ).status,
+      ).toBeGreaterThanOrEqual(400);
+      const bad = await rawMember('POST', `/api/desk/${it1.id}/resolve`, {
+        resolution: 'approved',
+        workstationId: w.workstationId,
+      });
+      expect(bad.status).toBe(400);
+      expect(bad.body.error.code).toBe('pick_a_workstation');
+      const none = await rawMember('POST', `/api/desk/${it1.id}/resolve`, { resolution: 'approved' });
+      expect(none.status).toBe(400);
+      expect((await requests())[0].status).toBe('pending');
+      // decline: nothing starts, the item is closed, and the request says so
+      await asMember('POST', `/api/desk/${it1.id}/resolve`, { resolution: 'rejected' });
+      expect((await requests())[0]).toMatchObject({ status: 'declined', session_thread_id: null });
+      expect((await q(`SELECT count(*)::int AS n FROM threads WHERE kind='discovery'`))[0].n).toBe(
+        threadsBefore,
+      );
+      expect(
+        (await rawMember('POST', `/api/desk/${it1.id}/resolve`, { resolution: 'rejected' })).status,
+      ).toBe(409);
+      // after a decline the agent may ask again (a new request)
+      const retry = await call(r, shift, 'playbook.run', { key: 'brainstorm' });
+      expect(retry.result.requested).toBe(true);
+      expect(await requests()).toHaveLength(2);
+    });
+
+    it('starts at once when the agent already works on the person’s own workstation (nothing to ask)', async () => {
+      // an agent that works on the member's own workstation (moved there directly: hiring onto it is the member's business)
+      const onMine = (await w.hire('Fay', 'ba', 'senior')).id as string;
+      await q('UPDATE agents SET workstation_id=$2 WHERE id=$1', [onMine, memberWs]);
+      await asOwner('PUT', `/api/agents/${onMine}/playbook-grants`, { key: 'brainstorm', granted: true });
+      const shift = await chatShift(member.id, onMine, memberWs);
+      const res = await call(mem, shift, 'playbook.run', { key: 'brainstorm', input: 'at home' });
+      expect(res.ok, res.error).toBe(true);
+      expect(res.result.threadId).toBeTruthy();
+      expect(res.result.requested).toBeUndefined();
+      const t = (
+        await q('SELECT created_by, workstation_id FROM threads WHERE id=$1', [res.result.threadId])
+      )[0];
+      expect(t).toMatchObject({ created_by: member.id, workstation_id: memberWs });
+      expect(await q('SELECT 1 FROM playbook_run_requests WHERE agent_id=$1', [onMine])).toHaveLength(0);
+    });
+
+    it('counts the asking against the agent’s three a day, and rebuilds to the same rows', async () => {
+      // two requests so far (one declined, one open); closing the open one lets a third ask, and the fourth is over the day's limit
+      await declineOpen();
+      const shift = await chatShift(member.id);
+      const open = await call(r, shift, 'playbook.run', { key: 'brainstorm', input: 'third' });
+      expect(open.ok, open.error).toBe(true);
+      expect(open.result.requested).toBe(true);
+      await declineOpen();
+      const over = await call(r, shift, 'playbook.run', { key: 'brainstorm', input: 'fourth' });
+      expect(over.ok).toBe(false);
+      expect(over.error).toContain('a day');
+      const snap = async () =>
+        q(
+          'SELECT request_id, status, workstation_id, session_thread_id, chat_user_id, playbook_key FROM playbook_run_requests WHERE agent_id=$1 ORDER BY request_id',
+          [agent],
+        );
+      const before = JSON.parse(JSON.stringify(await snap()));
+      await rebuildProjections(w.t.app.ctx.pool, w.t.app.ctx.store, w.t.clock.now());
+      expect(JSON.parse(JSON.stringify(await snap()))).toEqual(before);
+    });
   });
 
   it('is not available to a session turn', async () => {

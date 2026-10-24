@@ -840,6 +840,64 @@ function BudgetActions({ item }: { item: DeskItemDto }) {
   );
 }
 
+/**
+ * Q69: an agent started a playbook from your chat and it would run on a workstation that is not yours. Pick one of yours to start
+ * it there, or decline and nothing starts. The offered workstations are the item's options.
+ */
+function PlaybookWorkstationActions({ item }: { item: DeskItemDto }) {
+  const resolve = useResolveDeskItem();
+  const toast = useToast();
+  const [ws, setWs] = useState(item.options[0]?.id ?? '');
+  return (
+    <div
+      className="flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end"
+      data-testid="desk-playbook-workstation"
+    >
+      <label className="flex flex-col gap-1 text-xs text-muted">
+        Run it on
+        <select
+          value={ws}
+          onChange={(e) => setWs(e.target.value)}
+          aria-label="Workstation to run the playbook on"
+          className="h-9 rounded-control border border-control bg-surface px-2 text-sm text-fg"
+        >
+          {item.options.map((o) => (
+            <option key={o.id} value={o.id}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <Button
+        variant="primary"
+        disabled={!ws}
+        loading={resolve.isPending}
+        data-testid="desk-playbook-start"
+        onClick={() =>
+          resolve.mutate(
+            { id: item.id, body: { resolution: 'approved', workstationId: ws } },
+            { onSuccess: () => toast.success('Starting the session') },
+          )
+        }
+      >
+        Start it there
+      </Button>
+      <Button
+        data-testid="desk-playbook-decline"
+        onClick={() =>
+          resolve.mutate(
+            { id: item.id, body: { resolution: 'rejected' } },
+            { onSuccess: () => toast.success('Declined: nothing starts') },
+          )
+        }
+      >
+        Decline
+      </Button>
+      <ErrorBox error={resolve.error} />
+    </div>
+  );
+}
+
 function ResolveButtons({ item }: { item: DeskItemDto }) {
   const expert = useExpertMode();
   const nav = useNavigate();
@@ -933,7 +991,9 @@ function ResolveButtons({ item }: { item: DeskItemDto }) {
         )}
       >
         <DismissButton item={item} />
-        {item.kind === 'approval' ? (
+        {item.kind === 'approval' && item.subkind === 'playbook_workstation' ? (
+          <PlaybookWorkstationActions item={item} />
+        ) : item.kind === 'approval' ? (
           <>
             <Button
               onClick={() =>

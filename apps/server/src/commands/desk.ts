@@ -30,6 +30,11 @@ import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { resolvePlatformApprovalIn } from '../platform-team/approvals.ts';
 import { canAnswerItem, DESK_VISIBLE } from '../queries/desk.ts';
+import {
+  afterPlaybookRunDecision,
+  PLAYBOOK_WORKSTATION_SUBKIND,
+  resolvePlaybookRunIn,
+} from '../sessions/playbooks.ts';
 import { cardMessage, orgScope, projectScope, userActor } from './common.ts';
 import { plannedVaultPath } from './decisions.ts';
 import { resolveDefinitionIn } from './designer.ts';
@@ -273,7 +278,16 @@ export async function resolveDeskItem(
   id: string,
   req: ResolveDeskItemRequest,
 ): Promise<void> {
-  await closeItem(ctx, user, id, req.resolution, req.note, req.editedBody, req.onDuplicate);
+  await closeItem(
+    ctx,
+    user,
+    id,
+    req.resolution,
+    req.note,
+    req.editedBody,
+    req.onDuplicate,
+    req.workstationId,
+  );
 }
 
 export async function dismissDeskItem(
@@ -293,6 +307,7 @@ async function closeItem(
   note?: string,
   editedBody?: string,
   onDuplicate?: 'merge',
+  workstationId?: string,
 ) {
   let mergeInto: { id: string; body: string } | undefined;
   let workstationToDeliver: string | undefined;
@@ -304,6 +319,7 @@ async function closeItem(
   let packWorkstation: string | undefined;
   let packAccepted = false;
   let packId: string | undefined;
+  let playbookRun: { requestId: string; accepted: boolean } | undefined;
   await withAppendTx(ctx.pool, async (tx) => {
     const { item, mayAct } = await lockItem(tx, user, id);
     // Acknowledging a "repository not created" alert is not giving up on the request: Retry still works on it while
@@ -373,6 +389,9 @@ async function closeItem(
       packWorkstation = await resolvePackAssignmentIn(ctx, tx, user, item, resolution);
       packAccepted = resolution === 'approved';
       packId = (item.data as { packId?: string } | null)?.packId;
+    } else if (item.kind === 'approval' && item.subkind === PLAYBOOK_WORKSTATION_SUBKIND) {
+      // Q69: the chat person picks one of their workstations for an agent-started playbook, or declines
+      playbookRun = await resolvePlaybookRunIn(ctx, tx, user, item, resolution as never, workstationId);
     } else if (item.kind === 'approval' && item.subkind === 'definition') {
       // M10: approving makes the role or workflow available; only the owner decides.
       await resolveDefinitionIn(ctx, tx, user, item, resolution, note);
@@ -504,6 +523,7 @@ async function closeItem(
     else await rejectRecommendation(ctx, user, ceoItem, note);
   }
   if (workstationToDeliver) await ctx.services.gateway.deliverPending(workstationToDeliver);
+  if (playbookRun) await afterPlaybookRunDecision(ctx, playbookRun);
   if (packWorkstation) {
     await afterAssignmentDecision(ctx, packWorkstation);
     if (packAccepted && packId) await relayAuthoredBundles(ctx, packId);
