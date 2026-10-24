@@ -37,7 +37,12 @@ import {
   type ShiftReport,
 } from '@aom/shared';
 import { z } from 'zod';
-import { loadSkillGuardConfig, runSkillGuard, skillGuardDeadlineMs, withGuardDeadline } from '../capabilities/skill-guard.ts';
+import {
+  loadSkillGuardConfig,
+  runSkillGuard,
+  skillGuardDeadlineMs,
+  withGuardDeadline,
+} from '../capabilities/skill-guard.ts';
 import { runGuardHook as runCeoGuardHook } from '../ceo/guard-hook.ts';
 import { PermissionRelay } from '../ceo/permission-relay.ts';
 import type { ChangeStateLookup } from '../devops/branch-cleanup.ts';
@@ -2534,7 +2539,7 @@ const VERBS: Record<string, Verb> = {
    */
   board: async (ctx, p) => {
     const usage =
-      'usage: aom board add --column ideas|risks|questions|decisions|parked --text "<t>" | next --speaker <handle>... --reason "<r>" [--instruction "<i>"] | pause --question "<q>" [--option "<a>"]... | converge --note "<n>" | disagreement add --topic "<t>" --position "<Name>|<view>"... | cast (--persona <key> | --name "<n>" --brief "<one line>") [--seat "<s>"] [--why "<w>"] | minutes (--content "<md>" | --content-file <path>) | show';
+      'usage: aom board add --column ideas|risks|questions|decisions|parked --text "<t>" | next --speaker <handle>... --reason "<r>" [--instruction "<i>"] | pause --question "<q>" [--option "<a>"]... | converge --note "<n>" | disagreement add --topic "<t>" --position "<Name>|<view>"... | score --option "<o>" --score 1-5 [--why "<w>"] | cast (--persona <key> | --name "<n>" --brief "<one line>") [--seat "<s>"] [--why "<w>"] | minutes (--content "<md>" | --content-file <path>) | show';
     const sub = p.positionals[0];
     const print = (r: unknown): number => {
       const x = r as { message?: string; text?: string } | null;
@@ -2589,6 +2594,17 @@ const VERBS: Record<string, Verb> = {
             ...(opt('brief') ? { brief: opt('brief') } : {}),
             ...(opt('seat') ? { seat: opt('seat') } : {}),
             why: opt('why') ?? '',
+          }),
+        );
+      }
+      case 'score': {
+        const score = Number(opt('score'));
+        if (!opt('option') || !Number.isInteger(score)) throw new UsageError(usage);
+        return print(
+          await rpc(ctx, 'board.score', {
+            option: opt('option'),
+            score,
+            ...(opt('why') ? { why: opt('why') } : {}),
           }),
         );
       }

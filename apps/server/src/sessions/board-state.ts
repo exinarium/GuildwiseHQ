@@ -4,6 +4,7 @@ import {
   type BoardDecisionDto,
   type BoardDisagreementDto,
   type BoardNoteDto,
+  type BoardOptionScore,
   type BoardRoundDto,
   type BoardStateDto,
   CHAIR_SEAT,
@@ -19,6 +20,7 @@ import {
   parseBoardConfig,
   participantSlug,
   type ReportedProvider,
+  tallyScores,
 } from '@aom/shared';
 import { orgRoleOf } from '../auth/org-context.ts';
 import { resolvePersona } from '../capabilities/registry.ts';
@@ -28,6 +30,7 @@ import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { sessionCost } from './cost.ts';
 import { availableCeo, sessionDocs } from './discovery-state.ts';
 import { providersOf, runtimeReports } from './offer.ts';
+import { boardTime } from './time.ts';
 import { turnDto } from './turns.ts';
 
 /** The purposes of board turns, as `session_turns.meta.purpose`. */
@@ -141,6 +144,29 @@ export const listBoardNotes = (db: Queryable, threadId: string) =>
 export const listDisagreements = (db: Queryable, threadId: string) =>
   rows(db, 'SELECT * FROM board_disagreements WHERE thread_id=$1 ORDER BY seq', [threadId]);
 
+export const listScores = (db: Queryable, threadId: string) =>
+  rows(db, 'SELECT * FROM board_scores WHERE thread_id=$1 ORDER BY seq', [threadId]);
+
+/** The option-scoring tally of a session: highest total first. */
+export async function scoreTally(
+  db: Queryable,
+  threadId: string,
+  hideRound1 = false,
+): Promise<BoardOptionScore[]> {
+  const list = await listScores(db, threadId);
+  return tallyScores(
+    list
+      .filter((r) => !(hideRound1 && r.round === 1))
+      .map((r) => ({
+        option: r.option,
+        participantId: r.participant_id,
+        name: r.name,
+        score: r.score,
+        why: r.why,
+      })),
+  );
+}
+
 export const listDecisions = (db: Queryable, threadId: string) =>
   rows(db, 'SELECT * FROM board_decisions WHERE thread_id=$1 ORDER BY seq', [threadId]);
 
@@ -186,7 +212,7 @@ export async function boardState(ctx: Ctx, t: Row, userId: string): Promise<Boar
   for (const [index, p] of castRows.entries()) {
     const persona =
       p.kind === 'persona' && !isAdHocPersona(p.ref_id)
-        ? await resolvePersona(db, t.org_id, p.ref_id)
+        ? await resolvePersona(db, t.org_id, p.ref_id, t.project_id)
         : undefined;
     cast.push({
       participantId: p.id,
@@ -256,6 +282,8 @@ export async function boardState(ctx: Ctx, t: Row, userId: string): Promise<Boar
   const purpose = (active?.meta as { purpose?: string } | null)?.purpose;
   if (cfg.stage === 'ended') waitingFor = 'ended';
   else if (cfg.paused) waitingFor = 'paused';
+  else if (cfg.timeUp) waitingFor = 'time';
+  else if (cfg.minutesAsk) waitingFor = 'budget';
   else if (cfg.blocked === 'session_budget_exceeded' || cfg.budgetStopped || cost.exceeded)
     waitingFor = 'budget';
   else if (cfg.stage === 'decision' || openDecision) waitingFor = 'decision';
@@ -295,6 +323,9 @@ export async function boardState(ctx: Ctx, t: Row, userId: string): Promise<Boar
       paused: cfg.paused,
       budgetStopped: cfg.budgetStopped,
       endReason: cfg.endReason,
+      archived: cfg.archived,
+      budgetUsd: cost.budgetUsd,
+      minutesAsk: cfg.minutesAsk,
       models: cfg.models,
       dissentNext: cfg.dissentNext,
       minutesDocId: cfg.minutesDocId,
@@ -308,6 +339,8 @@ export async function boardState(ctx: Ctx, t: Row, userId: string): Promise<Boar
     hiddenNotes: notesAll.length - visibleNotes.length,
     disagreements: disRows.filter((d) => !(sealed && d.round === 1)).map(disagreementDto),
     decisions: decRows.map(decisionDto),
+    scores: await scoreTally(db, t.id, sealed),
+    time: boardTime(cfg, ctx.clock.now()),
     suggestions: cfg.suggestions,
     sealedMessageIds,
     sealedProgress,

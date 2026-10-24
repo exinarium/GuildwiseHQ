@@ -10,6 +10,7 @@ import {
   PatchNoteRequestSchema,
   ResolveDiscoveryProposalRequestSchema,
   SayRequestSchema,
+  SessionTimeActionSchema,
   SetPhaseRequestSchema,
 } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
@@ -161,6 +162,15 @@ export function discoveryRoutes(ctx: Ctx) {
         const a = await requireOrg(ctx, req);
         reply.code(202);
         return { state: await svc().requestValidation(a.session.user.id, req.params.id) };
+      },
+    );
+
+    app.post(
+      '/api/discovery/:id/time',
+      { schema: { params: DiscoveryParamsSchema, body: SessionTimeActionSchema } },
+      async (req) => {
+        const a = await requireOrg(ctx, req);
+        return { state: await svc().timeAction(a.session.user.id, req.params.id, req.body) };
       },
     );
 

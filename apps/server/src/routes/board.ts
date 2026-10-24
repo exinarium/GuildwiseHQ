@@ -1,6 +1,7 @@
 import {
   AddBoardNoteRequestSchema,
   BoardDecisionParamsSchema,
+  BoardMinutesChoiceRequestSchema,
   BoardNoteParamsSchema,
   BoardParamsSchema,
   BoardResolveDecisionRequestSchema,
@@ -11,6 +12,7 @@ import {
   PatchBoardNoteRequestSchema,
   PatchBoardRequestSchema,
   SaveBoardRoomRequestSchema,
+  SessionTimeActionSchema,
   StartBoardRequestSchema,
   SuggestCastRequestSchema,
 } from '@aom/shared';
@@ -88,6 +90,20 @@ export function boardRoutes(ctx: Ctx) {
       app.post(`/api/board/:id/${verb}`, { schema: { params: BoardParamsSchema } }, async (req) => ({
         state: await svc()[verb](await uid(req), req.params.id),
       }));
+
+    app.post(
+      '/api/board/:id/time',
+      { schema: { params: BoardParamsSchema, body: SessionTimeActionSchema } },
+      async (req) => ({ state: await svc().timeAction(await uid(req), req.params.id, req.body) }),
+    );
+
+    app.post(
+      '/api/board/:id/minutes-choice',
+      { schema: { params: BoardParamsSchema, body: BoardMinutesChoiceRequestSchema } },
+      async (req) => ({
+        state: await svc().minutesChoice(await uid(req), req.params.id, req.body.choice),
+      }),
+    );
 
     app.post('/api/board/:id/minutes', { schema: { params: BoardParamsSchema } }, async (req, reply) => {
       reply.code(202);

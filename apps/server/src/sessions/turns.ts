@@ -36,6 +36,7 @@ import { resolvePersona } from '../capabilities/registry.ts';
 import { agentActor, runnerActor, userActor } from '../commands/common.ts';
 import {
   assertWorkstation,
+  assertWritable,
   isAdHocPersona,
   listParticipants,
   loadSession,
@@ -193,6 +194,7 @@ export class SessionTurns {
     const { ctx } = this;
     const row = await withAppendTx(ctx.pool, async (tx) => {
       const t = await loadSession(tx, userId, threadId);
+      assertWritable(t);
       // A used-up session budget or a paused project stops new turns with a message the page shows as it is.
       await assertSessionMayQueue(tx, t, ctx.clock.now());
       const part = (await listParticipants(tx, threadId)).find((p) => p.id === req.participantId);
@@ -245,7 +247,7 @@ export class SessionTurns {
           instructions ??= `You are ${part.display_name}. ${part.stance ?? ''}`.trim();
           choice = defaultPersonaChoice(host, undefined);
         } else {
-          const persona = await resolvePersona(tx, t.org_id, personaKey);
+          const persona = await resolvePersona(tx, t.org_id, personaKey, t.project_id);
           if (!persona)
             throw conflict('persona_unavailable', `persona "${personaKey}" is no longer in the registry`);
           // A built-in persona travels with the turn; a vault persona is read by the runner from its clone.
@@ -360,6 +362,26 @@ export class SessionTurns {
       ctx.services.runners.send(turn.workstation_id, 'chat.cancel', { chatId: turn.id }, ctx.clock.now());
     } else throw conflict('turn_finished', 'that turn already ended');
     return turnDto((await one(ctx.pool, 'SELECT * FROM session_turns WHERE id=$1', [turnId])) as Row);
+  }
+
+  /** Cancels every queued and running turn of a session (archive and delete): no access check, the caller did it. */
+  async cancelAll(userId: string, threadId: string): Promise<void> {
+    const { ctx } = this;
+    const t = await one(ctx.pool, 'SELECT * FROM threads WHERE id=$1', [threadId]);
+    if (!t) return;
+    const open = await rows(
+      ctx.pool,
+      `SELECT * FROM session_turns WHERE thread_id=$1 AND status IN ('queued','running')`,
+      [threadId],
+    );
+    for (const turn of open) {
+      if (turn.status === 'queued') {
+        await ctx.store.append([this.failed(turn, t, 'cancelled', userActor(userId))]);
+        await this.announce(ctx.pool, turn, 'failed', 'cancelled');
+        this.ended(turn.thread_id, turn.id, 'failed');
+      } else if (turn.workstation_id)
+        ctx.services.runners.send(turn.workstation_id, 'chat.cancel', { chatId: turn.id }, ctx.clock.now());
+    }
   }
 
   // ----------------------------------------------------------------------------------------------- dispatching
@@ -618,14 +640,14 @@ export class SessionTurns {
       skills = spec.skills;
     } else {
       const persona = !isAdHocPersona(turn.persona_key ?? '')
-        ? await resolvePersona(ctx.pool, turn.org_id, turn.persona_key)
+        ? await resolvePersona(ctx.pool, turn.org_id, turn.persona_key, thread.project_id)
         : undefined;
       skills = persona?.skills ?? [];
       spec = personaSpec(turn.speaker_name, choice, skills);
     }
     const persona =
       turn.speaker_kind === 'persona' && turn.persona_key && !isAdHocPersona(turn.persona_key)
-        ? await resolvePersona(ctx.pool, turn.org_id, turn.persona_key)
+        ? await resolvePersona(ctx.pool, turn.org_id, turn.persona_key, thread.project_id)
         : undefined;
     const roster = (await listParticipants(ctx.pool, turn.thread_id)).map((p) => ({
       name: p.display_name as string,

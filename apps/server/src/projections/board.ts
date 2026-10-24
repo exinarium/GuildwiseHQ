@@ -10,6 +10,7 @@ type BoardEventType =
   | 'BoardNoteRemoved'
   | 'BoardNoteVoted'
   | 'BoardDisagreementRecorded'
+  | 'BoardOptionScored'
   | 'BoardDecisionRaised'
   | 'BoardDecisionResolved'
   | 'BoardRoomSaved'
@@ -127,6 +128,29 @@ export const boardProjectors: Record<string, Projector> = {
         JSON.stringify(p.positions),
         p.round,
         p.by.name,
+        e.createdAt,
+      ],
+    );
+  },
+  BoardOptionScored: async (tx, e) => {
+    const p = ev<'BoardOptionScored'>(e).payload;
+    await exec(
+      tx,
+      `INSERT INTO board_scores (thread_id, org_id, option_key, option, participant_id, name, score, why, round, seq, updated_at)
+       VALUES ($1,$2,lower($3),$3,$4,$5,$6,$7,$8,$9,$10)
+       ON CONFLICT (thread_id, option_key, participant_id)
+       DO UPDATE SET score=EXCLUDED.score, why=EXCLUDED.why, round=EXCLUDED.round, name=EXCLUDED.name, seq=EXCLUDED.seq, updated_at=EXCLUDED.updated_at
+         WHERE board_scores.seq < EXCLUDED.seq`,
+      [
+        p.threadId,
+        e.scope.orgId,
+        p.option,
+        p.participantId,
+        p.name,
+        p.score,
+        p.why,
+        p.round,
+        e.seq.toString(),
         e.createdAt,
       ],
     );

@@ -1,3 +1,4 @@
+import { SESSION_TIME_WARN_MINUTES } from '../sessions/time.ts';
 import { headerJson, oneLine, safeName } from '../sessions/untrusted.ts';
 import {
   DISCOVERY_PHASE_LABEL,
@@ -236,7 +237,9 @@ export function buildFacilitatorTurn(i: FacilitatorPromptInput): { instructions:
           ? `Time: ${i.timeBox.elapsedMinutes} minutes so far, no time box.`
           : i.timeBox.remainingMinutes === 0
             ? `Time box used up (${i.timeBox.elapsedMinutes} minutes). Wrap up: move to capture and write the result down.`
-            : `Time: ${i.timeBox.elapsedMinutes} minutes used, ${i.timeBox.remainingMinutes} left in the time box. Pace yourself.`
+            : i.timeBox.remainingMinutes <= SESSION_TIME_WARN_MINUTES
+              ? `Time: only ${i.timeBox.remainingMinutes} minute${i.timeBox.remainingMinutes === 1 ? '' : 's'} left in the time limit (${i.timeBox.elapsedMinutes} used). Steer to wrap-up: open no new topics, ask at most one more question, then move to capture and write the result down.`
+              : `Time: ${i.timeBox.elapsedMinutes} minutes used, ${i.timeBox.remainingMinutes} left in the time box. Pace yourself.`
         : '',
       i.ceoMode === 'owner_only'
         ? 'The CEO is not in this session.'

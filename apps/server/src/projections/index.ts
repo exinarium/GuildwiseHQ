@@ -256,6 +256,7 @@ export const PROJECTION_TABLES = [
   'board_notes',
   'board_rounds',
   'board_disagreements',
+  'board_scores',
   'board_decisions',
   'board_rooms',
   'documents',
@@ -266,4 +267,5 @@ export const PROJECTION_TABLES = [
   'pack_workstation_state',
   'project_capability_index',
   'project_capability_status',
+  'capability_reviews',
 ];

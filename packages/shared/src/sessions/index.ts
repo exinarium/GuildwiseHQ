@@ -76,6 +76,10 @@ export const SessionContextSchema = z.object({
 });
 export type SessionContext = z.infer<typeof SessionContextSchema>;
 
+/** `POST /api/sessions/:id/archive`: `true` makes the session read-only, `false` opens it again. */
+export const ArchiveSessionRequestSchema = z.object({ archived: z.boolean() });
+export type ArchiveSessionRequest = z.infer<typeof ArchiveSessionRequestSchema>;
+
 export const SESSION_TURN_MAX_ATTEMPTS = 3;
 /** A turn that waited longer than this for a workstation is failed (`expired`) instead of answering a stale question. */
 export const SESSION_TURN_STALE_HOURS = 24;

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   assembleMinutes,
+  BOARD_FIXED_SEATS,
   BOARD_TURN_MAX_CHARS,
   type BoardCastDto,
   type BoardConfig,
@@ -16,10 +17,13 @@ import {
   CAST_SEAT_DEFAULT,
   CHAIR_SEAT,
   type CreateBoardRequest,
+  castProblem,
   chooseSpeakers,
   documentSlug,
+  extendedLimitMinutes,
   handlesOf,
   isBoardRpc,
+  isFixedSeat,
   isOrgManager,
   type ModelChoice,
   type ParticipantInput,
@@ -29,12 +33,15 @@ import {
   parseMentions,
   participantSlug,
   type SaveBoardRoomRequest,
+  type SessionTimeAction,
   type SessionTurnDto,
   type StartBoardRequest,
   type SuggestCastRequest,
   seedPrdFromMinutes,
   streamId,
   type ThreadMessageDto,
+  tickClock,
+  timeStatus,
 } from '@aom/shared';
 import type { Who } from '../auth/org-context.ts';
 import { effectiveRegistry, resolvePersona } from '../capabilities/registry.ts';
@@ -43,6 +50,7 @@ import { scopeOfDoc, versionEvent } from '../commands/documents.ts';
 import {
   addParticipant,
   assertSessionManager,
+  assertWritable,
   createSession,
   isAdHocPersona,
   listParticipants,
@@ -65,11 +73,13 @@ import {
   listDecisions,
   listDisagreements,
   type ModelRole,
+  scoreTally,
 } from './board-state.ts';
 import { boardVerb } from './board-verbs.ts';
 import { sessionCost } from './cost.ts';
 import { availableCeo } from './discovery-state.ts';
 import { providersOf, runtimeReports } from './offer.ts';
+import { boardClockRuns } from './time.ts';
 
 /** Why a queue attempt was refused for a reason the owner can fix: the session waits and the sweep retries. */
 const BLOCKING_CODES = new Set([
@@ -181,10 +191,28 @@ export class BoardService {
   ): AppendInput {
     return {
       streamId: streamId.thread(t.id),
-      event: { type: 'SessionThreadUpdated', payload: { threadId: t.id, config } },
+      event: { type: 'SessionThreadUpdated', payload: { threadId: t.id, config: this.withClock(t, config) } },
       actor,
       scope: sessionScope(t),
     };
+  }
+
+  /**
+   * A change that starts or stops the time limit's clock (a round begins, the session pauses, a decision is raised) books
+   * the running time up to now in the same event, so paused time never counts and a restart loses nothing.
+   */
+  private withClock(t: Row, config: Record<string, unknown>): Record<string, unknown> {
+    if (!('stage' in config || 'paused' in config || 'timeUp' in config) || 'tickAt' in config) return config;
+    const cur = parseBoardConfig(t.session_config);
+    if (!cur.timeLimitMinutes && !('timeLimitMinutes' in config)) return config;
+    const next = parseBoardConfig({ ...(t.session_config as object), ...config });
+    if (boardClockRuns(cur) === boardClockRuns(next)) return config;
+    const c = tickClock(
+      { elapsedMs: cur.elapsedMs, tickAt: cur.tickAt },
+      this.ctx.clock.now(),
+      boardClockRuns(cur),
+    );
+    return { ...config, elapsedMs: c.elapsedMs, tickAt: c.tickAt };
   }
 
   systemMessage(t: Row, body: string, data: Record<string, unknown> = {}): AppendInput {
@@ -211,6 +239,7 @@ export class BoardService {
     const t = await loadSession(this.ctx.pool, userId, threadId);
     assertBoard(t);
     await assertSessionManager(this.ctx.pool, userId, t);
+    assertWritable(t);
     return t;
   }
 
@@ -246,6 +275,20 @@ export class BoardService {
     return out;
   }
 
+  /** The cast of a new boardroom: the fixed seats get their labels, then the 5-to-6 rule applies. */
+  private fixedSeats<T extends { kind: string; refId: string; seat?: string | undefined }>(cast: T[]): T[] {
+    return cast.map((m) => {
+      const f = isFixedSeat(m) ? BOARD_FIXED_SEATS.find((x) => x.personaKey === m.refId) : undefined;
+      return f ? { ...m, seat: f.seat } : m;
+    });
+  }
+
+  private assertNewCast(cast: CreateBoardRequest['cast']): void {
+    this.assertCast(cast);
+    const problem = castProblem(cast);
+    if (problem) throw badRequest('bad_cast', problem);
+  }
+
   private assertCast(cast: CreateBoardRequest['cast']): void {
     const seen = new Set<string>();
     for (const m of cast) {
@@ -257,8 +300,9 @@ export class BoardService {
     }
   }
 
-  async create(who: Who, req: CreateBoardRequest): Promise<BoardStateDto> {
-    this.assertCast(req.cast);
+  async create(who: Who, req0: CreateBoardRequest): Promise<BoardStateDto> {
+    const req = { ...req0, cast: this.fixedSeats(req0.cast) };
+    this.assertNewCast(req.cast);
     const config: Record<string, unknown> = {
       board: true,
       topic: req.topic,
@@ -269,6 +313,7 @@ export class BoardService {
       castModels: this.castModels(req),
       stage: 'setup',
       ...(req.budgetUsd ? { budgetUsd: req.budgetUsd } : {}),
+      ...(req.timeLimitMinutes ? { timeLimitMinutes: req.timeLimitMinutes } : {}),
       ...(req.roomId ? { roomId: req.roomId } : {}),
     };
     const session = await createSession(this.ctx, who, {
@@ -310,7 +355,11 @@ export class BoardService {
     const cfg = parseBoardConfig(t.session_config);
     const chair = await chairOf(this.ctx.pool, threadId);
     if (!chair) return;
-    const reg = await effectiveRegistry(this.ctx.pool, t.org_id, { kind: 'persona', usableOnly: true });
+    const reg = await effectiveRegistry(this.ctx.pool, t.org_id, {
+      kind: 'persona',
+      usableOnly: true,
+      ...(t.project_id ? { projectId: t.project_id } : {}),
+    });
     const agents = await rows(
       this.ctx.pool,
       `SELECT name, role_key FROM agents WHERE org_id=$1 AND status='active' ORDER BY name LIMIT 20`,
@@ -335,8 +384,9 @@ export class BoardService {
     if (!ok) await this.ctx.store.append([this.configEvent(t, { suggestState: 'failed' })]);
   }
 
-  async start(userId: string, threadId: string, req: StartBoardRequest): Promise<BoardStateDto> {
-    this.assertCast(req.cast);
+  async start(userId: string, threadId: string, req0: StartBoardRequest): Promise<BoardStateDto> {
+    const req = { ...req0, cast: this.fixedSeats(req0.cast) };
+    this.assertNewCast(req.cast);
     const t0 = await loadSession(this.ctx.pool, userId, threadId);
     assertBoard(t0);
     await assertSessionManager(this.ctx.pool, userId, t0);
@@ -361,6 +411,7 @@ export class BoardService {
               castModels: this.castModels(req),
               suggestState: null,
               ...(req.budgetUsd ? { budgetUsd: req.budgetUsd } : {}),
+              ...(req.timeLimitMinutes ? { timeLimitMinutes: req.timeLimitMinutes } : {}),
               ...(req.roomId ? { roomId: req.roomId } : {}),
             },
           },
@@ -508,14 +559,96 @@ export class BoardService {
   }
 
   private async advanceLocked(threadId: string): Promise<void> {
-    const t = await this.fresh(threadId);
-    if (!t) return;
+    const t0 = await this.fresh(threadId);
+    if (!t0) return;
+    const t = await this.tick(t0);
     const cfg = parseBoardConfig(t.session_config);
+    if (cfg.archived) return;
     if (cfg.stage === 'setup' || cfg.stage === 'ended' || cfg.stage === 'decision' || cfg.paused) return;
+    // Time is up: nothing new starts (turns in flight finish) until the creator extends or wraps up.
+    if (cfg.timeUp && cfg.stage !== 'minutes') return;
     if (await this.activeTurn(threadId)) return;
     if (cfg.stage === 'round') return this.runRound(t, cfg);
     if (cfg.stage === 'chair') return this.runChair(t, cfg);
     if (cfg.stage === 'minutes') return this.runMinutes(t, cfg);
+  }
+
+  // ----------------------------------------------------------------------------------------------- the time limit
+
+  /**
+   * One tick of the time limit's clock (the sweep, and every step): books the running time, gives the warning in the last
+   * minutes and raises "time is up". Durable: the clock lives in the session's config, written at most every 30 s.
+   */
+  private async tick(t: Row): Promise<Row> {
+    const cfg = parseBoardConfig(t.session_config);
+    if (!cfg.timeLimitMinutes || cfg.archived || !boardClockRuns(cfg)) return t;
+    const now = this.ctx.clock.now();
+    const c = tickClock({ elapsedMs: cfg.elapsedMs, tickAt: cfg.tickAt }, now, true);
+    const st = timeStatus(cfg.timeLimitMinutes, c.elapsedMs);
+    const base = { elapsedMs: c.elapsedMs, tickAt: c.tickAt };
+    let events: AppendInput[] = [];
+    if (st?.over) {
+      events = [
+        this.configEvent(t, { ...base, timeUp: true, timeWarned: true }),
+        this.systemMessage(
+          t,
+          'The time limit is up. Nothing new starts until the creator extends the session or wraps it up.',
+          { timeUp: true },
+        ),
+      ];
+    } else if (st?.warn && !cfg.timeWarned) {
+      const left = Math.max(1, Math.ceil(st.remainingMs / 60_000));
+      events = [
+        this.configEvent(t, { ...base, timeWarned: true }),
+        this.systemMessage(
+          t,
+          `About ${left} minute${left === 1 ? '' : 's'} left. The Chair steers to wrap-up: the next round is the final one.`,
+          { timeWarning: left },
+        ),
+      ];
+    } else if (!cfg.tickAt || now.getTime() - new Date(cfg.tickAt).getTime() >= 30_000) {
+      events = [this.configEvent(t, base)];
+    }
+    if (!events.length) return t;
+    await this.ctx.store.append(events);
+    return (await this.fresh(t.id)) ?? t;
+  }
+
+  /** The creator's answer to "time is up" (or a way out of the warning): extend by 10/15/30 minutes, or wrap up now. */
+  async timeAction(userId: string, threadId: string, action: SessionTimeAction): Promise<BoardStateDto> {
+    await this.loadManaged(userId, threadId);
+    await this.serialized(threadId, async () => {
+      const f0 = await this.fresh(threadId);
+      if (!f0) throw notFound('session not found');
+      const f = await this.tick(f0);
+      const cfg = parseBoardConfig(f.session_config);
+      assertWritable(f);
+      if (cfg.stage === 'setup') throw conflict('not_started', 'The boardroom has not started yet.');
+      if (cfg.stage === 'ended') throw conflict('session_ended', 'The session is over.');
+      if (action.action === 'wrap_up') {
+        if (cfg.stage === 'minutes') return;
+        return this.beginMinutes(f, 'time', { userId });
+      }
+      if (!cfg.timeLimitMinutes) throw conflict('no_time_limit', 'This session has no time limit.');
+      const limit = extendedLimitMinutes(cfg.elapsedMs, action.minutes);
+      const now = this.ctx.clock.now().toISOString();
+      await this.ctx.store.append([
+        this.configEvent(
+          f,
+          { timeLimitMinutes: limit, timeUp: null, timeWarned: null, finalRound: null, tickAt: now },
+          userActor(userId),
+        ),
+        this.systemMessage(
+          f,
+          `${await this.userName(userId)} extended the session by ${action.minutes} minutes.`,
+          {
+            timeExtended: action.minutes,
+          },
+        ),
+      ]);
+    });
+    await this.advance(threadId);
+    return this.state(userId, threadId);
   }
 
   private async spokenCounts(threadId: string): Promise<Map<string, number>> {
@@ -595,7 +728,7 @@ export class BoardService {
   ): Promise<'queued' | 'blocked' | 'gone'> {
     let stance: string | null = p.stance ?? null;
     if (!stance && p.kind === 'persona' && !isAdHocPersona(p.ref_id))
-      stance = (await resolvePersona(this.ctx.pool, t.org_id, p.ref_id))?.stance ?? null;
+      stance = (await resolvePersona(this.ctx.pool, t.org_id, p.ref_id, t.project_id))?.stance ?? null;
     const built = buildSpeakerTurn({
       topic: cfg.topic,
       brief: cfg.brief,
@@ -617,6 +750,7 @@ export class BoardService {
       },
       total: cast.length,
       decisions: await this.decisionsTaken(t.id),
+      finalRound: cfg.finalRound !== null && plan.round >= cfg.finalRound,
     });
     const independent = plan.kind === 'independent';
     try {
@@ -674,6 +808,11 @@ export class BoardService {
       await this.ctx.store.append([this.configEvent(t, patch), ...events]);
       return this.beginMinutes(t, 'round_cap');
     }
+    // The warning made this the final round: after it the Chair writes the minutes.
+    if (cfg.finalRound !== null && plan.round >= cfg.finalRound) {
+      await this.ctx.store.append([this.configEvent(t, patch), ...events]);
+      return this.beginMinutes(t, 'time');
+    }
     patch.stage = 'chair';
     await this.ctx.store.append([this.configEvent(t, patch), ...events]);
     return this.advanceLocked(t.id);
@@ -711,6 +850,13 @@ export class BoardService {
       })),
       decisions: await this.decisionsTaken(t.id),
       retry: cfg.chairFailures > 0,
+      timeLeftMinutes:
+        cfg.timeWarned && cfg.timeLimitMinutes
+          ? Math.max(
+              1,
+              Math.ceil((timeStatus(cfg.timeLimitMinutes, cfg.elapsedMs)?.remainingMs ?? 0) / 60_000),
+            )
+          : null,
     });
     await this.tryQueue(t, cfg, {
       participantId: chair.id,
@@ -779,6 +925,8 @@ export class BoardService {
         dissentNext: null,
         dissentNote: null,
         chairFailures: 0,
+        // The five-minute warning was given: this round is the last one.
+        ...(cfg.timeWarned && cfg.finalRound === null ? { finalRound: round } : {}),
       }),
     ]);
     return { round, kind, speakers: pick.speakers, notes: pick.notes };
@@ -790,7 +938,7 @@ export class BoardService {
    */
   private async beginMinutes(
     t: Row,
-    reason: 'owner' | 'round_cap',
+    reason: 'owner' | 'round_cap' | 'time',
     cancelFor?: { userId: string },
   ): Promise<void> {
     const open = await rows(
@@ -810,12 +958,20 @@ export class BoardService {
           scope: sessionScope(t),
         }),
       ),
-      this.configEvent(t, { stage: 'minutes', endReason: reason, minutesTurnId: null }),
+      this.configEvent(t, {
+        stage: 'minutes',
+        endReason: reason,
+        minutesTurnId: null,
+        timeUp: null,
+        paused: null,
+      }),
       this.systemMessage(
         t,
         reason === 'owner'
           ? 'The owner ended the session. The Chair is writing the minutes.'
-          : 'The round cap is reached. The Chair is writing the minutes.',
+          : reason === 'time'
+            ? 'The time limit is reached. The Chair is writing the minutes.'
+            : 'The round cap is reached. The Chair is writing the minutes.',
         { ended: reason },
       ),
     ]);
@@ -864,7 +1020,9 @@ export class BoardService {
           ? 'ended by the owner'
           : cfg.endReason === 'round_cap'
             ? 'round cap reached'
-            : 'on demand',
+            : cfg.endReason === 'time'
+              ? 'time limit reached'
+              : 'on demand',
     });
     return this.tryQueue(t, cfg, {
       participantId: chair.id,
@@ -886,6 +1044,20 @@ export class BoardService {
       // workstation, runtime unavailable) leaves the session in 'minutes' with `blocked` set, and the sweep retries.
       const cur = parseBoardConfig(((await this.fresh(t.id)) ?? t).session_config);
       if (cur.blocked && cur.blocked !== 'session_budget_exceeded') return;
+      // The budget ran out before the Chair's summary: never write the minutes silently without it. The creator decides:
+      // write them without the summary, or raise the limit (which retries the summary).
+      if (!cur.minutesWithoutSummary) {
+        if (cur.minutesAsk !== 'budget')
+          await this.ctx.store.append([
+            this.configEvent(t, { minutesAsk: 'budget' }),
+            this.systemMessage(
+              t,
+              "The session budget is used up, so the Chair cannot write the minutes' summary. The creator can write the minutes without it, or raise the limit.",
+              { minutesAsk: 'budget' },
+            ),
+          ]);
+        return;
+      }
       await this.ctx.store.append([
         this.systemMessage(
           t,
@@ -906,7 +1078,13 @@ export class BoardService {
     const f = (await this.fresh(t.id)) ?? t;
     if (parseBoardConfig(f.session_config).stage === 'ended') return;
     await this.ctx.store.append([
-      this.configEvent(f, { stage: 'ended', plan: null, minutesRequested: null }),
+      this.configEvent(f, {
+        stage: 'ended',
+        plan: null,
+        minutesRequested: null,
+        minutesAsk: null,
+        timeUp: null,
+      }),
       this.systemMessage(f, 'The session is over. The minutes are ready.', { minutes: true }),
     ]);
   }
@@ -923,11 +1101,12 @@ export class BoardService {
   ): Promise<{ docId: string; version: number }> {
     const cfg = parseBoardConfig((await this.fresh(t.id))?.session_config ?? t.session_config);
     const cast = await castOf(this.ctx.pool, t.id);
-    const [notes, disagreements, decisions, cost] = await Promise.all([
+    const [notes, disagreements, decisions, cost, scores] = await Promise.all([
       this.promptNotes(t.id),
       listDisagreements(this.ctx.pool, t.id),
       this.decisionsTaken(t.id),
       sessionCost(this.ctx.pool, t),
+      scoreTally(this.ctx.pool, t.id),
     ]);
     const content = assembleMinutes({
       topic: cfg.topic,
@@ -940,13 +1119,16 @@ export class BoardService {
           ? 'by the owner'
           : cfg.endReason === 'round_cap'
             ? 'at the round cap'
-            : 'minutes taken on demand',
+            : cfg.endReason === 'time'
+              ? 'at the time limit'
+              : 'minutes taken on demand',
       people: cast.map((c) => ({ name: c.display_name, seat: c.seat, kind: c.kind })),
       synthesis,
       disagreements: disagreements.map((d) => ({ topic: d.topic, positions: d.positions })),
       decisions,
       notes,
       costUsd: cost.costUsd,
+      scores,
     });
     const note = turnId ? `Chair synthesis (turn ${turnId})` : 'Minutes';
     const scope = this.docScope(t);
@@ -1090,6 +1272,24 @@ export class BoardService {
     return this.state(userId, threadId);
   }
 
+  /** The creator's choice when the budget ran out before the Chair's summary: write the minutes without it. */
+  async minutesChoice(userId: string, threadId: string, _choice: 'without_summary'): Promise<BoardStateDto> {
+    await this.loadManaged(userId, threadId);
+    await this.serialized(threadId, async () => {
+      const t = await this.fresh(threadId);
+      if (!t) throw notFound('session not found');
+      assertWritable(t);
+      const cfg = parseBoardConfig(t.session_config);
+      if (cfg.stage !== 'minutes' || cfg.minutesAsk !== 'budget')
+        throw conflict('no_choice_pending', 'The minutes are not waiting for this choice.');
+      await this.ctx.store.append([
+        this.configEvent(t, { minutesWithoutSummary: true, minutesAsk: null }, userActor(userId)),
+      ]);
+    });
+    await this.advance(threadId);
+    return this.state(userId, threadId);
+  }
+
   // ----------------------------------------------------------------------------------------------- when a turn ends
 
   onTurnEnded(threadId: string, turnId: string, status: 'done' | 'failed'): Promise<void> {
@@ -1192,6 +1392,7 @@ export class BoardService {
   ): Promise<{ message: ThreadMessageDto; mentioned: string[]; state: BoardStateDto }> {
     const t = await loadSession(this.ctx.pool, userId, threadId);
     assertBoard(t);
+    assertWritable(t);
     const cfg = parseBoardConfig(t.session_config);
     if (cfg.stage === 'setup') throw conflict('not_started', 'The boardroom has not started yet.');
     if (cfg.stage === 'ended') throw conflict('session_ended', 'The session is over.');
@@ -1212,13 +1413,70 @@ export class BoardService {
     if (mentioned.length)
       await this.serialized(threadId, async () => {
         const f = (await this.fresh(threadId)) as Row;
-        const cur = parseBoardConfig(f.session_config).mentions;
-        await this.ctx.store.append([
-          this.configEvent(f, { mentions: [...new Set([...cur, ...mentioned])] }, userActor(userId)),
-        ]);
+        const fc = parseBoardConfig(f.session_config);
+        // A mention jumps the round in progress: a seat that has not spoken in it speaks next (the owner's wish is exempt from
+        // the no-immediate-repeat rule, which only matters for a seat that already spoke). The others wait for the next round.
+        const jump = await this.mentionJump(f, fc, mentioned);
+        const rest = mentioned.filter((id) => !jump.includes(id));
+        const mentions = [...new Set([...fc.mentions.filter((id) => !jump.includes(id)), ...rest])];
+        if (mentions.length !== fc.mentions.length || mentions.some((m, i) => m !== fc.mentions[i]))
+          await this.ctx.store.append([this.configEvent(f, { mentions }, userActor(userId))]);
       });
     await this.advance(threadId);
     return { message, mentioned, state: await this.state(userId, threadId) };
+  }
+
+  /**
+   * Moves mentioned seats that have not spoken in the current (discussion or dissent) round to the front of the unspoken part
+   * of its plan. Returns the ids moved; the rest keep waiting in `mentions` for the next pick.
+   */
+  private async mentionJump(t: Row, cfg: BoardConfig, mentioned: string[]): Promise<string[]> {
+    const plan = cfg.plan;
+    if (cfg.stage !== 'round' || !plan || plan.kind === 'independent' || cfg.timeUp) return [];
+    const cast = await castOf(this.ctx.pool, t.id);
+    const have = new Set(
+      (
+        await rows(
+          this.ctx.pool,
+          `SELECT participant_id FROM session_turns WHERE thread_id=$1 AND round=$2 AND meta->>'purpose'='board_speaker'`,
+          [t.id, plan.round],
+        )
+      ).map((r) => r.participant_id as string),
+    );
+    const jump = mentioned.filter((id) => cast.some((c) => c.id === id) && !have.has(id));
+    if (!jump.length) return [];
+    const speakers = [
+      ...plan.speakers.filter((id) => have.has(id)),
+      ...jump,
+      ...plan.speakers.filter((id) => !have.has(id) && !jump.includes(id)),
+    ];
+    const reason = `${plan.reason ? `${plan.reason} ` : ''}(The owner mentioned ${jump
+      .map((id) => cast.find((c) => c.id === id)?.display_name)
+      .join(', ')}: they speak next.)`.slice(0, 600);
+    await this.ctx.store.append([
+      {
+        streamId: streamId.thread(t.id),
+        event: {
+          type: 'BoardRoundPlanned',
+          payload: {
+            threadId: t.id,
+            round: plan.round,
+            kind: plan.kind,
+            speakers: speakers.map((id) => ({
+              participantId: id,
+              name: (cast.find((c) => c.id === id)?.display_name as string) ?? 'Speaker',
+            })),
+            reason,
+            instruction: plan.instruction,
+            source: plan.source,
+          },
+        },
+        actor: SYSTEM_ACTOR,
+        scope: sessionScope(t),
+      },
+      this.configEvent(t, { plan: { ...plan, speakers, reason } }),
+    ]);
+    return jump;
   }
 
   async pause(userId: string, threadId: string): Promise<BoardStateDto> {
@@ -1263,12 +1521,26 @@ export class BoardService {
       const t = await loadSession(tx, userId, threadId, true);
       assertBoard(t);
       await assertSessionManager(tx, userId, t);
+      assertWritable(t);
       const cfg = parseBoardConfig(t.session_config);
       const patch: Record<string, unknown> = {};
       if (req.budgetUsd !== undefined) {
         patch.budgetUsd = req.budgetUsd;
         patch.budgetStopped = null;
         patch.blocked = null;
+        // a raised (or removed) limit retries the Chair's summary of the minutes
+        patch.minutesAsk = null;
+        raised = true;
+      }
+      if (req.timeLimitMinutes !== undefined) {
+        const now = this.ctx.clock.now().toISOString();
+        patch.timeLimitMinutes = req.timeLimitMinutes;
+        patch.timeUp = null;
+        patch.timeWarned = null;
+        patch.finalRound = null;
+        // a limit set now starts its clock now; removing it forgets the count
+        patch.tickAt = req.timeLimitMinutes ? now : null;
+        if (!cfg.timeLimitMinutes || !req.timeLimitMinutes) patch.elapsedMs = 0;
         raised = true;
       }
       if (req.roundCap !== undefined) {
@@ -1359,6 +1631,7 @@ export class BoardService {
   async addNote(userId: string, threadId: string, column: string, text: string): Promise<BoardStateDto> {
     const t = await loadSession(this.ctx.pool, userId, threadId);
     assertBoard(t);
+    assertWritable(t);
     const name = await this.userName(userId);
     await this.ctx.store.append([
       {
@@ -1472,6 +1745,7 @@ export class BoardService {
   async voteNote(userId: string, threadId: string, noteId: string): Promise<BoardStateDto> {
     const t = await loadSession(this.ctx.pool, userId, threadId);
     assertBoard(t);
+    assertWritable(t);
     const n = await this.note(threadId, noteId);
     const has = (n.votes as string[]).includes(userId);
     await this.ctx.store.append([
@@ -1498,8 +1772,8 @@ export class BoardService {
     const t0 = await loadSession(this.ctx.pool, who.userId, threadId);
     assertBoard(t0);
     if (t0.org_id !== who.orgId) throw notFound('session not found');
-    if (!isOrgManager({ orgRole: who.role }))
-      throw forbidden('only an Owner or an Admin can start a discovery session');
+    // The PRD session belongs to whoever pulls it; only the boardroom's creator (or an Owner/Admin) may do that.
+    await assertSessionManager(this.ctx.pool, who.userId, t0);
     const out = await this.serialized(threadId, async () => {
       const t = await this.fresh(threadId);
       if (!t) throw notFound('session not found');
@@ -1621,13 +1895,7 @@ export class BoardService {
 
   // ----------------------------------------------------------------------------------------------- rooms
 
-  private assertManager(who: Who): void {
-    if (!isOrgManager({ orgRole: who.role }))
-      throw forbidden('only an Owner or an Admin can manage boardroom casts');
-  }
-
   async listRooms(who: Who): Promise<BoardRoom[]> {
-    this.assertManager(who);
     const list = await rows(
       this.ctx.pool,
       'SELECT * FROM board_rooms WHERE org_id=$1 AND deleted_at IS NULL ORDER BY created_at, id',
@@ -1645,7 +1913,6 @@ export class BoardService {
   }
 
   async saveRoom(who: Who, req: SaveBoardRoomRequest): Promise<BoardRoom> {
-    this.assertManager(who);
     this.assertCast(req.cast);
     const roomId = randomUUID();
     await this.ctx.store.append([
@@ -1671,14 +1938,16 @@ export class BoardService {
     return (await this.listRooms(who)).find((r) => r.id === roomId) as BoardRoom;
   }
 
+  /** A saved cast is deleted by whoever saved it, or an Owner or Admin. */
   async deleteRoom(who: Who, roomId: string): Promise<void> {
-    this.assertManager(who);
     const r = await one(
       this.ctx.pool,
-      'SELECT id FROM board_rooms WHERE id=$1 AND org_id=$2 AND deleted_at IS NULL',
+      'SELECT id, created_by FROM board_rooms WHERE id=$1 AND org_id=$2 AND deleted_at IS NULL',
       [roomId, who.orgId],
     );
     if (!r) throw notFound('room not found');
+    if (r.created_by !== who.userId && !isOrgManager({ orgRole: who.role }))
+      throw forbidden('only the member who saved this cast, an Owner or an Admin can delete it');
     await this.ctx.store.append([
       {
         streamId: streamId.boardRooms(who.orgId),

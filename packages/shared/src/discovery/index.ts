@@ -3,6 +3,7 @@ import { PackedKeySchema } from '../capabilities/parse.ts';
 import { DocumentKindSchema, DocumentStatusSchema } from '../documents/index.ts';
 import { ModelChoiceSchema } from '../models/choices.ts';
 import { SessionTurnDtoSchema } from '../sessions/index.ts';
+import { SessionTimeSchema } from '../sessions/time.ts';
 
 /**
  * Discovery Studio (docs/design/discovery-boardroom-registry.md, phase B): the facilitated session, its panel, its
@@ -54,6 +55,8 @@ export const PANEL_SECTION_LABEL: Record<PanelSection, string> = {
 
 /** Most turns the CEO may take on its own in `ceo_prep` before the owner reviews. */
 export const DISCOVERY_PREP_TURN_CAP = 12;
+export const DISCOVERY_PREP_TURN_CAP_MIN = 2;
+export const DISCOVERY_PREP_TURN_CAP_MAX = 40;
 export const DISCOVERY_QUESTION_MAX_OPTIONS = 6;
 /** Most characters of a PRD put in the BA's first message (the document stays linked in full). */
 export const HANDOFF_NOTE_MAX_CHARS = 18_000;
@@ -130,6 +133,27 @@ export const DiscoveryConfigSchema = z.object({
   blocked: z.string().max(60).nullable().default(null),
   /** Facilitator turns in a row that failed (the server retries once on its own, then waits for the owner). */
   facilitatorFailures: z.number().int().nonnegative().default(0),
+  /** The five-minute warning of the time limit was given. */
+  timeWarned: z.boolean().default(false),
+  /** The time limit ran out: no new question or turn starts until the creator extends or wraps up. */
+  timeUp: z.boolean().default(false),
+  /** The creator chose "Wrap up now": the limit is no longer enforced (the session is capturing). */
+  timeWrapped: z.boolean().default(false),
+  /** Read-only: the creator archived the session. */
+  archived: z.boolean().default(false),
+  /**
+   * "Hand to BA" with no BA online (or none hired): the hand-off waits, the document is already handed off, and the sweep
+   * starts the intake when a BA's workstation is online.
+   */
+  handoff: z
+    .object({
+      state: z.literal('queued'),
+      at: z.iso.datetime(),
+      by: z.uuid(),
+      reason: z.enum(['ba_offline', 'no_ba']),
+    })
+    .nullable()
+    .default(null),
   /** Set (an ISO time) while "Hand to BA" is creating the intake: a second click is refused. */
   handingOff: z.iso.datetime().nullable().default(null),
   /** The intake created by "Hand to BA". */
@@ -301,6 +325,8 @@ export const CreateDiscoveryRequestSchema = z.object({
   templateKey: DiscoveryTemplateSchema.optional(),
   idea: z.string().max(4000).default(''),
   budgetUsd: z.number().positive().max(100_000).optional(),
+  /** Turns the CEO may take on its own in `ceo_prep` before the owner reviews (default 12). */
+  prepTurnCap: z.number().int().min(DISCOVERY_PREP_TURN_CAP_MIN).max(DISCOVERY_PREP_TURN_CAP_MAX).optional(),
   workstationId: z.uuid().optional(),
   /** The facilitator's model (any runtime the workstation offers, a direct provider included); absent: the facilitator's own. */
   model: ModelChoiceSchema.optional(),
@@ -364,6 +390,10 @@ export const DiscoveryStateDtoSchema = z.object({
     idea: z.string(),
     timeBoxMinutes: z.number().nullable(),
     paused: z.boolean(),
+    timeUp: z.boolean().optional(),
+    archived: z.boolean().optional(),
+    /** The hand-off to the BA is waiting for a BA (see `baStatus`). */
+    handoff: DiscoveryConfigSchema.shape.handoff.optional(),
     /** The facilitator's chosen model (null: its own). */
     model: ModelChoiceSchema.nullable(),
     budgetStopped: z.boolean(),
@@ -378,6 +408,12 @@ export const DiscoveryStateDtoSchema = z.object({
     remainingMinutes: z.number().nullable(),
     fraction: z.number().nullable(),
   }),
+  /** The time limit as a countdown (limit null: none). */
+  time: SessionTimeSchema.optional(),
+  /** The caller may steer the session (controls, answers, phase, End): its creator, an Owner or an Admin. */
+  canManage: z.boolean().optional(),
+  /** Whether the organization has a BA hired, and whether its workstation is online (for "Hand to BA"). */
+  baStatus: z.enum(['online', 'offline', 'none']).optional(),
   cost: SessionCostSchema,
   /** Whether the organization has a CEO that can take part. */
   ceoAvailable: z.boolean(),
@@ -392,7 +428,7 @@ export const DiscoveryStateDtoSchema = z.object({
   /** True while a facilitator or CEO turn is queued or running. */
   busy: z.boolean(),
   /** What the owner must do next, for the banner. */
-  waitingFor: z.enum(['owner', 'ceo', 'facilitator', 'review', 'paused', 'budget', 'nothing']),
+  waitingFor: z.enum(['owner', 'ceo', 'facilitator', 'review', 'paused', 'budget', 'time', 'nothing']),
   createdAt: z.iso.datetime(),
 });
 export type DiscoveryStateDto = z.infer<typeof DiscoveryStateDtoSchema>;

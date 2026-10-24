@@ -98,11 +98,26 @@ export async function loadSession(
   return t;
 }
 
+/**
+ * Whether `userId` manages the session: controls, decisions, proposals, answers, phase, drafts, End, minutes, the whiteboard,
+ * archive and delete. A session belongs to its creator, who manages it in full; an Owner or Admin of the organization can
+ * override. Every other participant can talk, add notes and vote.
+ */
+export async function canManageSession(db: Queryable, userId: string, t: Row): Promise<boolean> {
+  if (t.created_by === userId) return true;
+  return isOrgManager({ orgRole: await orgRoleOf(db, userId, t.org_id) });
+}
+
 /** Changing who is in the room, its config or its workstation: the creator or an Owner/Admin of the organization. */
 export async function assertSessionManager(db: Queryable, userId: string, t: Row): Promise<void> {
-  if (t.created_by === userId) return;
-  if (!isOrgManager({ orgRole: await orgRoleOf(db, userId, t.org_id) }))
+  if (!(await canManageSession(db, userId, t)))
     throw forbidden('only the session creator, an Owner or an Admin can change this session');
+}
+
+/** An archived session is read-only: nobody writes to it (talk, notes, votes, turns). */
+export function assertWritable(t: Row): void {
+  if ((t.session_config as { archived?: boolean } | null)?.archived)
+    throw conflict('session_archived', 'This session is archived and read-only.');
 }
 
 /** The workstation a user's session runs on when none is named: the agent's, else the user's own (online first). */
@@ -156,6 +171,7 @@ async function checkParticipant(
   db: Queryable,
   orgId: string,
   p: ParticipantInput,
+  projectId?: string | null,
 ): Promise<{ displayName: string }> {
   if (p.kind === 'user') {
     const u = await one(
@@ -183,7 +199,7 @@ async function checkParticipant(
       );
     return { displayName: p.displayName ?? p.refId.slice('ad-hoc-'.length).replace(/-/g, ' ') };
   }
-  const persona = await resolvePersona(db, orgId, p.refId);
+  const persona = await resolvePersona(db, orgId, p.refId, projectId);
   if (!persona) throw badRequest('unknown_persona', `persona "${p.refId}" is not in the registry`);
   return { displayName: p.displayName ?? persona.name };
 }
@@ -222,7 +238,7 @@ export const sessionScope = (t: Row) => orgScope(t.org_id);
 
 /** `POST /api/sessions`: a thread of kind `discovery` or `boardroom`, its participants and its first workstation. */
 export async function createSession(ctx: Ctx, who: Who, req: CreateSessionRequest): Promise<SessionDto> {
-  if (!isOrgManager({ orgRole: who.role })) throw forbidden('only an Owner or an Admin can start a session');
+  // Any member of the organization may start a session; it runs on their own workstation (assertWorkstation below).
   return withAppendTx(ctx.pool, async (tx) => {
     if (req.projectId) {
       const p = await loadVisibleProject(tx, who.userId, req.projectId);
@@ -278,7 +294,7 @@ export async function createSession(ctx: Ctx, who: Who, req: CreateSessionReques
       },
     ];
     for (const p of list) {
-      const { displayName } = await checkParticipant(tx, who.orgId, p);
+      const { displayName } = await checkParticipant(tx, who.orgId, p, req.projectId);
       events.push(participantEvent(threadId, p, displayName, scope, who.userId));
     }
     await ctx.store.append(events, { tx });
@@ -359,7 +375,7 @@ export async function addParticipant(
   return withAppendTx(ctx.pool, async (tx) => {
     const t = await loadSession(tx, userId, threadId, true);
     await assertSessionManager(tx, userId, t);
-    const { displayName } = await checkParticipant(tx, t.org_id, req);
+    const { displayName } = await checkParticipant(tx, t.org_id, req, t.project_id);
     const existing = await one(
       tx,
       'SELECT 1 FROM thread_participants WHERE thread_id=$1 AND kind=$2 AND ref_id=$3 AND removed_at IS NULL',
@@ -454,6 +470,7 @@ export async function postSessionMessage(
 ): Promise<ThreadMessageDto> {
   return withAppendTx(ctx.pool, async (tx) => {
     const t = await loadSession(tx, userId, threadId);
+    assertWritable(t);
     const me = await one(
       tx,
       `SELECT id FROM thread_participants WHERE thread_id=$1 AND kind='user' AND ref_id=$2 AND removed_at IS NULL`,
@@ -484,4 +501,55 @@ export async function postSessionMessage(
     );
     return (await threadMessageById(tx, messageId)) as ThreadMessageDto;
   });
+}
+
+/** `POST /api/sessions/:id/archive`: the session becomes read-only (or writable again). Queued and running turns are cancelled. */
+export async function setSessionArchived(
+  ctx: Ctx,
+  userId: string,
+  threadId: string,
+  archived: boolean,
+): Promise<SessionDto> {
+  const t = await withAppendTx(ctx.pool, async (tx) => {
+    const t = await loadSession(tx, userId, threadId, true);
+    await assertSessionManager(tx, userId, t);
+    if (!!(t.session_config as { archived?: boolean } | null)?.archived === archived) return t;
+    await ctx.store.append(
+      [
+        {
+          streamId: streamId.thread(threadId),
+          event: {
+            type: 'SessionThreadUpdated',
+            payload: { threadId, config: { archived: archived || null } },
+          },
+          actor: userActor(userId),
+          scope: sessionScope(t),
+        },
+      ],
+      { tx },
+    );
+    return t;
+  });
+  if (archived) await ctx.services.sessions.cancelAll(userId, threadId).catch(() => undefined);
+  return sessionDto(ctx, (await one(ctx.pool, 'SELECT * FROM threads WHERE id=$1', [threadId])) as Row);
+}
+
+/** `DELETE /api/sessions/:id`: a tombstone event. The session and its messages vanish from lists and queries. */
+export async function deleteSession(ctx: Ctx, userId: string, threadId: string): Promise<void> {
+  await withAppendTx(ctx.pool, async (tx) => {
+    const t = await loadSession(tx, userId, threadId, true);
+    await assertSessionManager(tx, userId, t);
+    await ctx.store.append(
+      [
+        {
+          streamId: streamId.thread(threadId),
+          event: { type: 'SessionThreadDeleted', payload: { threadId, by: userId } },
+          actor: userActor(userId),
+          scope: sessionScope(t),
+        },
+      ],
+      { tx },
+    );
+  });
+  await ctx.services.sessions.cancelAll(userId, threadId).catch(() => undefined);
 }

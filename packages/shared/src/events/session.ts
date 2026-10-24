@@ -35,6 +35,11 @@ export const sessionEvents = [
       workstationId: Id.optional(),
     }),
   ),
+  /**
+   * The creator (or an Owner or Admin) deleted the session: a tombstone. The session and its messages disappear from every
+   * list and query; the events stay in the log.
+   */
+  defineEvent('SessionThreadDeleted', z.object({ threadId: Id, by: Id })),
   defineEvent(
     'ThreadParticipantAdded',
     z.object({

@@ -10,6 +10,7 @@ import {
   BoardNextParamsSchema,
   BoardPauseParamsSchema,
   type BoardRpcMethod,
+  BoardScoreParamsSchema,
   boardShortId,
   parseBoardConfig,
   parsePosition,
@@ -93,6 +94,8 @@ export async function boardVerb(
           return await disagreement(ctx, fresh, turn, params);
         case 'cast':
           return await cast(svc, ctx, fresh, turn, params);
+        case 'score':
+          return await score(ctx, fresh, turn, params);
         case 'minutes':
           return await minutes(svc, fresh, turn, params);
         default:
@@ -382,7 +385,7 @@ async function cast(
   if (p.data.persona) {
     if (['chair', 'analyst'].includes(p.data.persona))
       return [false, undefined, 'The chair and the analyst do not take a seat in the cast.'];
-    const persona = await resolvePersona(ctx.pool, t.org_id, p.data.persona);
+    const persona = await resolvePersona(ctx.pool, t.org_id, p.data.persona, t.project_id);
     if (!persona) return [false, undefined, `persona "${p.data.persona}" is not in the registry`];
     if (cfg.suggestions.some((x) => x.personaKey === persona.key))
       return [true, { message: 'Already suggested.' }];
@@ -409,6 +412,50 @@ async function cast(
   await ctx.store.append([svc.configEvent(t, { suggestions: [...cfg.suggestions, s] }, actorOf(turn))]);
   return [true, { message: `Suggested ${s.name}.` }];
 }
+
+/** Option scoring: one score per option per seat (scoring again replaces it). */
+async function score(ctx: Ctx, t: Row, turn: Row, params: Record<string, unknown>): Promise<Reply> {
+  const p = BoardScoreParamsSchema.safeParse(params);
+  if (!p.success)
+    return [
+      false,
+      undefined,
+      `usage: aom board score --option "<option>" --score 1-5 [--why "<reason>"] (${zodText(p.error.issues)})`,
+    ];
+  const cfg = parseBoardConfig(t.session_config);
+  if (cfg.format !== 'option_scoring')
+    return [false, undefined, 'Scoring is for option-scoring boardrooms: put your view in words or a note.'];
+  if (!turn.participant_id) return [false, undefined, 'only a seat in the room can score'];
+  const known = await one(
+    ctx.pool,
+    `SELECT count(DISTINCT option_key)::int AS n, bool_or(option_key = lower($2)) AS has FROM board_scores WHERE thread_id=$1`,
+    [t.id, p.data.option],
+  );
+  if (!known?.has && (known?.n ?? 0) >= MAX_SCORED_OPTIONS)
+    return [false, undefined, `At most ${MAX_SCORED_OPTIONS} options can be scored.`];
+  await ctx.store.append([
+    {
+      streamId: streamId.thread(t.id),
+      event: {
+        type: 'BoardOptionScored',
+        payload: {
+          threadId: t.id,
+          option: p.data.option.trim(),
+          participantId: turn.participant_id,
+          name: turn.speaker_name,
+          score: p.data.score,
+          why: p.data.why,
+          round: turn.round ?? null,
+        },
+      },
+      actor: actorOf(turn),
+      scope: sessionScope(t),
+    },
+  ]);
+  return [true, { message: `Scored "${p.data.option.trim()}" ${p.data.score}/5.` }];
+}
+
+const MAX_SCORED_OPTIONS = 12;
 
 async function minutes(
   svc: BoardService,

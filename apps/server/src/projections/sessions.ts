@@ -5,6 +5,7 @@ import type { Projector, StoredEvent } from '../eventstore/types.ts';
 type SessionEventType =
   | 'SessionThreadCreated'
   | 'SessionThreadUpdated'
+  | 'SessionThreadDeleted'
   | 'ThreadParticipantAdded'
   | 'ThreadParticipantUpdated'
   | 'ThreadParticipantRemoved'
@@ -51,6 +52,14 @@ export const sessionProjectors: Record<string, Projector> = {
         WHERE id = $1`,
       [p.threadId, p.title ?? null, p.workstationId ?? null, p.config ? JSON.stringify(p.config) : null],
     );
+  },
+  // A tombstone: the row stays (late events of the session still find it), every list and query skips it.
+  SessionThreadDeleted: async (tx, e) => {
+    const p = ev<'SessionThreadDeleted'>(e).payload;
+    await exec(tx, 'UPDATE threads SET deleted_at = COALESCE(deleted_at, $2) WHERE id = $1', [
+      p.threadId,
+      e.createdAt,
+    ]);
   },
   ThreadParticipantAdded: async (tx, e) => {
     const p = ev<'ThreadParticipantAdded'>(e).payload;

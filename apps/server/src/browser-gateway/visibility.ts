@@ -126,6 +126,14 @@ const SESSION_CONTENT_EVENTS = new Set([
   'BoardDecisionResolved',
 ]);
 
+/** Events of a document; one that comes from a session (a minutes, brief or PRD draft) is as private as the session. */
+const DOCUMENT_EVENTS = new Set([
+  'DocumentCreated',
+  'DocumentVersionSaved',
+  'DocumentStatusChanged',
+  'DocumentPublishQueued',
+]);
+
 export interface SessionAudience {
   /** Creator and user participants. */
   users: ReadonlySet<string>;
@@ -135,6 +143,7 @@ export interface SessionAudience {
 
 /** Who may see the content of this event, when it belongs to a session thread; null: it does not. */
 export async function sessionAudienceOf(db: Queryable, e: StoredEvent): Promise<SessionAudience | null> {
+  if (DOCUMENT_EVENTS.has(e.event.type)) return e.scope.audience === 'org' ? documentAudienceOf(db, e) : null;
   if (!SESSION_CONTENT_EVENTS.has(e.event.type) || e.scope.audience !== 'org') return null;
   const threadId = (e.event.payload as { threadId?: unknown }).threadId;
   if (typeof threadId !== 'string') return null;
@@ -153,6 +162,38 @@ export async function sessionAudienceOf(db: Queryable, e: StoredEvent): Promise<
   return {
     users: new Set([...(t.created_by ? [t.created_by as string] : []), ...p.map((r) => r.ref_id as string)]),
     sealed: !!cfg && cfg.round >= 1 && cfg.revealedRound < 1 && cfg.stage !== 'setup',
+  };
+}
+
+/**
+ * A document that lists session threads as its sources (`documents.source_thread_ids`, or the event's own list for a document
+ * that is being created) is visible in full to the creators and user participants of those sessions only. Owners and Admins
+ * who are not in the session get it stripped, like its messages. A document with no session source is not concerned.
+ */
+async function documentAudienceOf(db: Queryable, e: StoredEvent): Promise<SessionAudience | null> {
+  const p = e.event.payload as { docId?: unknown; sourceThreadIds?: unknown };
+  if (typeof p.docId !== 'string') return null;
+  let sources: string[] = Array.isArray(p.sourceThreadIds) ? (p.sourceThreadIds as string[]) : [];
+  const d = await one(db, 'SELECT source_thread_ids FROM documents WHERE id=$1', [p.docId]);
+  if (d) sources = [...new Set([...sources, ...((d.source_thread_ids as string[] | null) ?? [])])];
+  if (!sources.length) return null;
+  const threads = await rows(
+    db,
+    `SELECT id, created_by FROM threads WHERE id = ANY($1::uuid[]) AND kind IN ('discovery','boardroom')`,
+    [sources],
+  );
+  if (!threads.length) return null;
+  const parts = await rows(
+    db,
+    `SELECT ref_id FROM thread_participants WHERE thread_id = ANY($1::uuid[]) AND kind='user' AND removed_at IS NULL`,
+    [threads.map((t) => t.id)],
+  );
+  return {
+    users: new Set([
+      ...threads.map((t) => t.created_by as string).filter(Boolean),
+      ...parts.map((r) => r.ref_id as string),
+    ]),
+    sealed: false,
   };
 }
 

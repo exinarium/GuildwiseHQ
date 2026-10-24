@@ -8,6 +8,7 @@ import {
   BOARD_SPEAKERS_MAX,
   BOARD_TURN_MAX_WORDS,
   type BoardFormat,
+  type BoardOptionScore,
   type BoardRoundKind,
   boardShortId,
   type StickyColumn,
@@ -142,12 +143,12 @@ export function roundAssignment(
       if (o.kind === 'independent')
         return {
           label: 'Score',
-          text: "Option scoring. The options are in the owner's brief (if there are none, name three yourself). Score each option from 1 (poor) to 5 (excellent) on value, cost and risk as your stance sees them, and give a total out of 5. Add one decision note per option, as `Option <name>: <score>/5 - <reason in a few words>`.",
+          text: 'Option scoring. The options are in the owner\'s brief (if there are none, name three yourself). Score each option from 1 (poor) to 5 (excellent) on value, cost and risk as your stance sees them. Record each score with one command: `aom board score --option "<option name>" --score <1-5> --why "<reason in a few words>"`. The scores are tallied on the whiteboard and in the minutes.',
         };
       if (o.kind === 'dissent') return { label: 'Dissent', text: dissent };
       return {
         label: 'Revise',
-        text: 'Having read the others, say which of your scores you would change and why, and which option you vote for. Add your vote as a decision note: `Vote: <option> - <reason>`.',
+        text: 'Having read the others, say which of your scores you would change and why (score the option again with `aom board score` to replace it), and which option you vote for. Add your vote as a decision note: `Vote: <option> - <reason>`.',
       };
     default:
       if (o.kind === 'independent')
@@ -215,7 +216,12 @@ export interface SpeakerPromptInput {
   total: number;
   /** Decisions the owner already took in this session. */
   decisions: PromptDecision[];
+  /** Time is nearly up: this is the final round, so conclude. */
+  finalRound?: boolean;
 }
+
+export const FINAL_ROUND_TEXT =
+  'This is the final round: the time limit is nearly up. Do not open new topics. State your conclusion, the one condition under which you would change it, and what you would do first.';
 
 export function boardSpeakerProtocol(independent: boolean): string {
   return [
@@ -258,6 +264,7 @@ export function buildSpeakerTurn(i: SpeakerPromptInput): { message: string } {
       i.speaker.stance ? `Your stance (hold it, whatever the others say): ${i.speaker.stance}` : '',
       a.label ? `Your role this round: ${a.label}.` : '',
       a.text,
+      i.finalRound ? FINAL_ROUND_TEXT : '',
       i.instruction ? `The Chair asks: ${oneLine(i.instruction, 600)}` : '',
       i.reason ? `(The Chair picked you because: ${oneLine(i.reason, 300)})` : '',
     ]
@@ -293,6 +300,8 @@ export interface ChairPromptInput {
   decisions: PromptDecision[];
   /** The Chair failed to pick last time: say so. */
   retry: boolean;
+  /** Minutes left of the time limit once it is in the warning window; the Chair steers to the final round. */
+  timeLeftMinutes?: number | null;
 }
 
 export function chairProtocol(): string {
@@ -347,6 +356,9 @@ export function buildChairTurn(i: ChairPromptInput): { message: string } {
       ? `You already flagged convergence${i.dissentNote ? ` ("${oneLine(i.dissentNote, 200)}")` : ''}: the next round is a dissent round. Pick the speakers best placed to dissent.`
       : 'Read the last answers. If they agree too easily, call `aom board converge` before you pick.',
     i.retry ? 'Your last turn ended without a valid pick. Call `aom board next` now.' : '',
+    i.timeLeftMinutes != null
+      ? `TIME: about ${i.timeLeftMinutes} minute${i.timeLeftMinutes === 1 ? '' : 's'} are left of the time limit. Steer to wrap-up: the server makes round ${i.round + 1} the final round. Pick the voices that can best conclude, and use --instruction to ask for conclusions rather than new topics. If the owner must decide something first, use \`aom board pause\` now.`
+      : '',
   ].filter(Boolean);
   if (i.brief.trim()) parts.push("## The owner's brief", clip(i.brief.trim(), 2000));
   parts.push(
@@ -378,7 +390,7 @@ export function buildCastTurn(i: CastPromptInput): { message: string } {
   const header = headerJson({ role: 'cast', format: i.format, personas: i.personas.map((p) => p.key) });
   const parts = [
     `<!--board:${header}-->`,
-    'Propose the cast for this boardroom: three to six voices that will disagree usefully about the topic. Mix library personas and, where the topic needs a viewpoint nobody covers, personas cast from a one-line brief.',
+    "Propose the other voices for this boardroom: three or four that will disagree usefully about the topic. The Optimist (argues the upside) and the Devil's Advocate (attacks edge cases and failure modes) already have fixed seats: do not suggest them. Mix library personas and, where the topic needs a viewpoint nobody covers, personas cast from a one-line brief.",
     '## The topic',
     clip(i.topic, 1500),
     ...(i.brief.trim() ? ["## The owner's brief", clip(i.brief.trim(), 3000)] : []),
@@ -396,7 +408,7 @@ export function buildCastTurn(i: CastPromptInput): { message: string } {
       'For each voice run one command on its own (no pipes or redirects):',
       '- `aom board cast --persona <key> --why "<why this voice for this topic>"` for a library persona;',
       '- `aom board cast --name "<Name>" --brief "<one-line stance>" [--seat "<seat>"] --why "<why>"` for a persona cast from a brief.',
-      'Do not suggest the chair or the analyst. Your reply text is one short sentence.',
+      'Do not suggest the chair, the analyst, the optimist or the devils-advocate. Suggest exactly three or four voices. Your reply text is one short sentence.',
     ].join('\n'),
   ];
   return { message: parts.join('\n\n') };
@@ -460,6 +472,8 @@ export interface MinutesDocInput {
   decisions: PromptDecision[];
   notes: PromptBoardNote[];
   costUsd: number;
+  /** Option scoring tally (option-scoring boardrooms). */
+  scores?: BoardOptionScore[];
 }
 
 /**
@@ -515,6 +529,7 @@ export function assembleMinutes(i: MinutesDocInput): string {
       : '_None._',
     '',
   );
+  if (i.scores?.length) out.push('## Option scores', '', renderScoreTable(i.scores), '');
   out.push('## Whiteboard', '');
   for (const c of BOARD_COLUMNS) {
     const list = i.notes.filter((n) => n.column === c);
@@ -529,6 +544,19 @@ export function assembleMinutes(i: MinutesDocInput): string {
     .join('\n')
     .replace(/\n{3,}/g, '\n\n')
     .trimEnd()}\n`;
+}
+
+/** The option-scoring tally as a markdown table: one row per option, one column per scoring seat, then total and average. */
+export function renderScoreTable(scores: readonly BoardOptionScore[]): string {
+  const names = [...new Set(scores.flatMap((o) => o.scores.map((s) => s.name)))];
+  const cell = (s: string) => s.replace(/\|/g, '/').replace(/\n/g, ' ');
+  const head = `| Option | ${names.map(cell).join(' | ')} | Total | Average |`;
+  const sep = `|${' --- |'.repeat(names.length + 3)}`;
+  const body = scores.map(
+    (o) =>
+      `| ${cell(o.option)} | ${names.map((n) => String(o.scores.find((x) => x.name === n)?.score ?? '-')).join(' | ')} | ${o.total} | ${o.average ?? '-'} |`,
+  );
+  return [head, sep, ...body].join('\n');
 }
 
 /** The text a "Pull into PRD" seeds the PRD draft with: the minutes' substance as background and the board's results. */

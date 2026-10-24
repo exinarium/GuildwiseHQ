@@ -1,4 +1,5 @@
 import {
+  BA_ROLE_KEY,
   type DiscoveryDoc,
   type DiscoveryProposalDto,
   type DiscoveryStateDto,
@@ -7,10 +8,11 @@ import {
   parseDiscoveryConfig,
   type QuestionDto,
 } from '@aom/shared';
-import { listParticipants } from '../commands/sessions.ts';
+import { canManageSession, listParticipants } from '../commands/sessions.ts';
 import type { Ctx } from '../context.ts';
 import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { sessionCost } from './cost.ts';
+import { discoveryTime } from './time.ts';
 import { turnDto } from './turns.ts';
 
 export const FACILITATOR_SEAT = 'Facilitator';
@@ -105,7 +107,24 @@ export async function availableCeo(db: Queryable, orgId: string): Promise<Row | 
   );
 }
 
-export async function discoveryState(ctx: Ctx, t: Row, db: Queryable = ctx.pool): Promise<DiscoveryStateDto> {
+/** Whether the organization has a BA hired, and whether one of them has a workstation online (for "Hand to BA"). */
+export async function baStatus(ctx: Ctx, orgId: string): Promise<'online' | 'offline' | 'none'> {
+  const bas = await rows(
+    ctx.pool,
+    `SELECT a.workstation_id FROM agents a JOIN workstations ws ON ws.id = a.workstation_id
+      WHERE a.org_id = $1 AND a.role_key = $2 AND a.status = 'active' AND ws.status = 'active'`,
+    [orgId, BA_ROLE_KEY],
+  );
+  if (!bas.length) return 'none';
+  return bas.some((a) => ctx.services.runners.isOnline(a.workstation_id)) ? 'online' : 'offline';
+}
+
+export async function discoveryState(
+  ctx: Ctx,
+  t: Row,
+  userId: string | null = null,
+  db: Queryable = ctx.pool,
+): Promise<DiscoveryStateDto> {
   const cfg = parseDiscoveryConfig(t.session_config);
   const now = ctx.clock.now();
   const [questions, notes, proposals, documents, turnRows, cost, participants, ceo] = await Promise.all([
@@ -125,6 +144,7 @@ export async function discoveryState(ctx: Ctx, t: Row, db: Queryable = ctx.pool)
   const open = questions.find((q) => q.status === 'open');
   let waitingFor: DiscoveryStateDto['waitingFor'] = 'nothing';
   if (cfg.paused) waitingFor = 'paused';
+  else if (cfg.timeUp) waitingFor = 'time';
   else if (cfg.budgetStopped || cost.exceeded) waitingFor = 'budget';
   else if (active)
     waitingFor =
@@ -145,6 +165,9 @@ export async function discoveryState(ctx: Ctx, t: Row, db: Queryable = ctx.pool)
       idea: cfg.idea,
       timeBoxMinutes: cfg.timeBoxMinutes,
       paused: cfg.paused,
+      timeUp: cfg.timeUp,
+      archived: cfg.archived,
+      handoff: cfg.handoff,
       model: cfg.model,
       budgetStopped: cfg.budgetStopped,
       ceoPrep: cfg.ceoPrep,
@@ -152,6 +175,9 @@ export async function discoveryState(ctx: Ctx, t: Row, db: Queryable = ctx.pool)
       prdValidation: cfg.prdValidation,
     },
     progress: discoveryProgress(cfg, now),
+    time: discoveryTime(cfg, now),
+    canManage: userId ? await canManageSession(db, userId, t) : false,
+    baStatus: await baStatus(ctx, t.org_id),
     cost,
     ceoAvailable: !!ceo,
     facilitatorName: facilitator?.display_name ?? 'Analyst',

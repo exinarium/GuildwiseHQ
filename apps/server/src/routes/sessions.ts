@@ -1,4 +1,5 @@
 import {
+  ArchiveSessionRequestSchema,
   CreateSessionRequestSchema,
   ListSessionsQuerySchema,
   ParticipantInputSchema,
@@ -16,11 +17,13 @@ import { whoOf } from '../auth/org-context.ts';
 import {
   addParticipant,
   createSession,
+  deleteSession,
   getSession,
   listSessions,
   patchSession,
   postSessionMessage,
   removeParticipant,
+  setSessionArchived,
   updateParticipant,
 } from '../commands/sessions.ts';
 import type { Ctx } from '../context.ts';
@@ -59,6 +62,23 @@ export function sessionRoutes(ctx: Ctx) {
         return { session: await patchSession(ctx, a.session.user.id, req.params.id, req.body) };
       },
     );
+
+    app.post(
+      '/api/sessions/:id/archive',
+      { schema: { params: SessionParamsSchema, body: ArchiveSessionRequestSchema } },
+      async (req) => {
+        const a = await requireOrg(ctx, req);
+        return {
+          session: await setSessionArchived(ctx, a.session.user.id, req.params.id, req.body.archived),
+        };
+      },
+    );
+
+    app.delete('/api/sessions/:id', { schema: { params: SessionParamsSchema } }, async (req, reply) => {
+      const a = await requireOrg(ctx, req);
+      await deleteSession(ctx, a.session.user.id, req.params.id);
+      reply.code(204);
+    });
 
     app.post(
       '/api/sessions/:id/participants',

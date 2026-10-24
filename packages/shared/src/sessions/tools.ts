@@ -7,6 +7,7 @@ import {
   BoardMinutesParamsSchema,
   BoardNextParamsSchema,
   BoardPauseParamsSchema,
+  BoardScoreParamsSchema,
 } from '../boardroom/index.ts';
 import { DelegateRunParamsSchema } from '../delegate/index.ts';
 import {
@@ -28,7 +29,7 @@ export const SESSION_PURPOSE_VERBS: Readonly<Record<string, readonly string[]>> 
   facilitator: ['show', 'ask', 'note', 'propose', 'phase', 'draft', 'validate', 'delegate'],
   ceo_answer: ['show', 'answer', 'note'],
   // No `delegate` for a speaker: the sealed first round stays the speaker's own view, and a cheap second opinion is the Chair's call.
-  board_speaker: ['show', 'add', 'disagreement'],
+  board_speaker: ['show', 'add', 'disagreement', 'score'],
   board_chair: ['show', 'add', 'next', 'pause', 'converge', 'disagreement', 'delegate'],
   board_cast: ['cast'],
   board_minutes: ['show', 'minutes'],
@@ -236,6 +237,16 @@ export const SESSION_TOOLS: readonly SessionToolDef[] = [
     family: 'board',
     description: 'Record a disagreement: the topic and each position as `<Name>|<their view>` (two or more).',
     input: BoardDisagreementParamsSchema,
+  },
+  {
+    name: 'board_score',
+    cli: 'aom board score',
+    rpc: 'board.score',
+    verb: 'score',
+    family: 'board',
+    description:
+      'Option scoring: score one option from 1 (poor) to 5 (strong) with a short reason. Scoring an option again replaces your score.',
+    input: BoardScoreParamsSchema,
   },
   {
     name: 'board_cast',

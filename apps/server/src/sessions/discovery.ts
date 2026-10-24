@@ -14,6 +14,7 @@ import {
   type DiscoveryStateDto,
   discoveryElapsedMs,
   discoveryProgress,
+  extendedLimitMinutes,
   type FacilitatorTrigger,
   getBuiltinRole,
   HANDOFF_NOTE_MAX_CHARS,
@@ -31,16 +32,20 @@ import {
   type PromptQuestion,
   parseDiscoveryConfig,
   type ResolveDiscoveryProposalRequest,
+  type SessionTimeAction,
   streamId,
   type ThreadMessageDto,
+  timeStatus,
 } from '@aom/shared';
 import type { Who } from '../auth/org-context.ts';
 import { effectiveRegistry, resolvePersona } from '../capabilities/registry.ts';
-import { SYSTEM_ACTOR, userActor } from '../commands/common.ts';
+import { orgScope, SYSTEM_ACTOR, userActor } from '../commands/common.ts';
+import { openItemForSubject, raiseOrCoalesce } from '../commands/desk-coalesce.ts';
 import { scopeOfDoc, versionEvent } from '../commands/documents.ts';
 import { startIntakeIn } from '../commands/intake.ts';
 import {
   assertSessionManager,
+  assertWritable,
   createSession,
   listParticipants,
   loadSession,
@@ -55,6 +60,7 @@ import type { AppendInput, StoredEvent } from '../eventstore/types.ts';
 import { ledgerSearchRpc } from '../runner-gateway/ledger-rpc.ts';
 import {
   availableCeo,
+  baStatus,
   CEO_SEAT,
   discoveryState,
   FACILITATOR_SEAT,
@@ -242,7 +248,11 @@ export class DiscoveryService {
       throw badRequest('unknown_model', 'unknown model choice for the facilitator');
     // A playbook or template of an imported pack must be usable now (the pack approved at its pinned commit, files unchanged).
     if (isPackedKey(req.playbook) || req.templateKey) {
-      const reg = await effectiveRegistry(ctx.pool, who.orgId, { kind: 'playbook', usableOnly: true });
+      const reg = await effectiveRegistry(ctx.pool, who.orgId, {
+        kind: 'playbook',
+        usableOnly: true,
+        ...(req.projectId ? { projectId: req.projectId } : {}),
+      });
       if (
         isPackedKey(req.playbook) &&
         !reg.items.some((i) => i.key === req.playbook && i.tags?.includes('discovery'))
@@ -283,7 +293,7 @@ export class DiscoveryService {
       ...(req.budgetUsd ? { budgetUsd: req.budgetUsd } : {}),
       ...(req.model ? { model: req.model } : {}),
       ...(req.ceoMode === 'ceo_prep'
-        ? { ceoPrep: { state: 'running', turns: 0, cap: DISCOVERY_PREP_TURN_CAP } }
+        ? { ceoPrep: { state: 'running', turns: 0, cap: req.prepTurnCap ?? DISCOVERY_PREP_TURN_CAP } }
         : {}),
     };
     const session = await createSession(ctx, who, {
@@ -313,7 +323,7 @@ export class DiscoveryService {
   async state(userId: string, threadId: string): Promise<DiscoveryStateDto> {
     const t = await loadSession(this.ctx.pool, userId, threadId);
     assertDiscovery(t);
-    return discoveryState(this.ctx, t);
+    return discoveryState(this.ctx, t, userId);
   }
 
   // ----------------------------------------------------------------------------------------------- prompts and turns
@@ -322,6 +332,7 @@ export class DiscoveryService {
     cfg: DiscoveryConfig,
     trigger: FacilitatorTrigger,
     orgId: string,
+    projectId: string | null = null,
   ): Promise<{
     playbook: PromptPlaybook | null;
     draftKind: 'brief' | 'prd';
@@ -330,7 +341,11 @@ export class DiscoveryService {
     // The kind of the draft: a pack template says so by its tag; otherwise the built-in product-brief playbook means a brief.
     let draftKind: 'brief' | 'prd' = cfg.playbook === 'product-brief' ? 'brief' : 'prd';
     if (tpl) {
-      const reg = await effectiveRegistry(this.ctx.pool, orgId, { kind: 'playbook', usableOnly: true });
+      const reg = await effectiveRegistry(this.ctx.pool, orgId, {
+        kind: 'playbook',
+        usableOnly: true,
+        ...(projectId ? { projectId } : {}),
+      });
       const tags = reg.items.find((i) => i.key === tpl)?.tags ?? [];
       if (tags.includes('template:brief')) draftKind = 'brief';
       else if (tags.includes('template:prd')) draftKind = 'prd';
@@ -535,7 +550,8 @@ export class DiscoveryService {
       if (changed(list)) await ctx.store.append([this.configEvent(t, listPatch(list))]);
       return result;
     };
-    if (cfg.paused || (await this.activeTurn(threadId))) return hold('pending');
+    // Paused, archived, or time is up (nothing new starts until the creator chooses): every waiting trigger stays.
+    if (cfg.paused || cfg.timeUp || cfg.archived || (await this.activeTurn(threadId))) return hold('pending');
     const participants = await listParticipants(ctx.pool, threadId);
     const fac = participants.find((p) => p.seat === FACILITATOR_SEAT && p.kind !== 'user');
     if (!fac) return hold('blocked');
@@ -579,7 +595,7 @@ export class DiscoveryService {
     }
     const facts = await this.promptFacts(t);
     const ceoPart = participants.find((p) => p.seat === CEO_SEAT && p.kind === 'agent');
-    const { playbook, draftKind } = await this.playbookFor(cfg, trigger, t.org_id);
+    const { playbook, draftKind } = await this.playbookFor(cfg, trigger, t.org_id, t.project_id);
     const progress = discoveryProgress(cfg, ctx.clock.now());
     const built = buildFacilitatorTurn({
       title: t.title,
@@ -639,6 +655,7 @@ export class DiscoveryService {
   private async queueCeoAnswer(t: Row, q: Row, mode: 'joint' | 'ceo_prep'): Promise<boolean> {
     const { ctx } = this;
     const cfg = parseDiscoveryConfig(t.session_config);
+    if (cfg.timeUp || cfg.archived) return false;
     const participants = await listParticipants(ctx.pool, t.id);
     const ceo = participants.find((p) => p.seat === CEO_SEAT && p.kind === 'agent');
     if (!ceo) return false;
@@ -705,7 +722,7 @@ export class DiscoveryService {
   private async flushPending(t: Row): Promise<boolean> {
     const fresh = (await one(this.ctx.pool, 'SELECT * FROM threads WHERE id=$1', [t.id])) as Row;
     const cfg = parseDiscoveryConfig(fresh.session_config);
-    if (!pendingOf(cfg).length || cfg.paused) return false;
+    if (!pendingOf(cfg).length || cfg.paused || cfg.timeUp || cfg.archived) return false;
     return (await this.queueFacilitator(t.id)) === 'queued';
   }
 
@@ -848,6 +865,8 @@ export class DiscoveryService {
    * session that a lost turn-end hook left standing (a CEO follow-up or pre-draft step that never started) is picked up.
    */
   async sweep(): Promise<void> {
+    await this.timeSweep().catch((err) => this.ctx.log.error({ err }, 'discovery time limits failed'));
+    await this.handoffSweep().catch((err) => this.ctx.log.error({ err }, 'discovery hand-offs failed'));
     const list = await rows(
       this.ctx.pool,
       `SELECT id FROM threads WHERE kind='discovery' AND deleted_at IS NULL
@@ -864,6 +883,133 @@ export class DiscoveryService {
         if (await this.flushPending(t)) return;
         await this.recover(t);
       }).catch((err) => this.ctx.log.error({ err, threadId: id }, 'discovery sweep failed'));
+  }
+
+  // ----------------------------------------------------------------------------------------------- the time limit
+
+  /**
+   * The sweep's pass over sessions with a time limit: the warning in the last minutes and "time is up". The clock is the
+   * session's own (`elapsedMs` plus the time since `activeSince`, frozen while paused), so a restart loses nothing.
+   */
+  private async timeSweep(): Promise<void> {
+    const list = await rows(
+      this.ctx.pool,
+      `SELECT id FROM threads WHERE kind='discovery' AND deleted_at IS NULL
+         AND session_config->>'timeBoxMinutes' IS NOT NULL
+         AND session_config->>'paused' IS DISTINCT FROM 'true'
+         AND session_config->>'timeUp' IS DISTINCT FROM 'true'
+         AND session_config->>'timeWrapped' IS DISTINCT FROM 'true'
+         AND session_config->>'archived' IS DISTINCT FROM 'true'`,
+    );
+    for (const { id } of list)
+      await this.serial(id, async () => {
+        const t = await one(this.ctx.pool, `SELECT * FROM threads WHERE id=$1 AND deleted_at IS NULL`, [id]);
+        if (!t) return;
+        const cfg = parseDiscoveryConfig(t.session_config);
+        if (!cfg.timeBoxMinutes || cfg.paused || cfg.timeUp || cfg.timeWrapped || cfg.archived) return;
+        const st = timeStatus(cfg.timeBoxMinutes, discoveryElapsedMs(cfg, this.ctx.clock.now()));
+        if (st?.over) {
+          await this.ctx.store.append([
+            this.configEvent(t, { timeUp: true, timeWarned: true }),
+            this.systemMessage(
+              t,
+              'The time limit is up. No new question starts until the creator extends the session or wraps it up.',
+              { timeUp: true },
+            ),
+          ]);
+        } else if (st?.warn && !cfg.timeWarned) {
+          const left = Math.max(1, Math.ceil(st.remainingMs / 60_000));
+          await this.ctx.store.append([
+            this.configEvent(t, { timeWarned: true }),
+            this.systemMessage(
+              t,
+              `About ${left} minute${left === 1 ? '' : 's'} left. The facilitator steers to wrap-up.`,
+              { timeWarning: left },
+            ),
+          ]);
+          // the facilitator hears it with its next turn (the time line of its prompt); an idle session is nudged now
+          if (
+            !(await this.activeTurn(id)) &&
+            !(await one(
+              this.ctx.pool,
+              `SELECT 1 FROM discovery_questions WHERE thread_id=$1 AND status='open'`,
+              [id],
+            ))
+          )
+            await this.queueFacilitator(id, {
+              kind: 'message',
+              detail: `Time check: about ${left} minutes are left of the time limit. Steer to wrap-up.`,
+            });
+        }
+      });
+  }
+
+  /** The creator's answer to "time is up": extend by 10/15/30 minutes, or wrap up now (capture the result). */
+  async timeAction(userId: string, threadId: string, action: SessionTimeAction): Promise<DiscoveryStateDto> {
+    const t = await this.loadManaged(userId, threadId);
+    const cfg0 = parseDiscoveryConfig(t.session_config);
+    if (!cfg0.timeBoxMinutes && action.action === 'extend')
+      throw conflict('no_time_limit', 'This session has no time limit.');
+    let wrapped = false;
+    await this.serial(threadId, async () => {
+      const f = (await one(this.ctx.pool, 'SELECT * FROM threads WHERE id=$1', [threadId])) as Row;
+      const cfg = parseDiscoveryConfig(f.session_config);
+      if (action.action === 'extend') {
+        const limit = extendedLimitMinutes(discoveryElapsedMs(cfg, this.ctx.clock.now()), action.minutes);
+        await this.ctx.store.append([
+          this.configEvent(
+            f,
+            { timeBoxMinutes: limit, timeUp: null, timeWarned: null, timeWrapped: null },
+            userActor(userId),
+          ),
+          this.systemMessage(
+            f,
+            `${await this.userName(this.ctx.pool, userId)} extended the session by ${action.minutes} minutes.`,
+            { timeExtended: action.minutes },
+          ),
+        ]);
+        return;
+      }
+      wrapped = true;
+      const events: AppendInput[] = [];
+      if (cfg.phase !== 'capture')
+        events.push({
+          streamId: streamId.thread(threadId),
+          event: {
+            type: 'DiscoveryPhaseChanged',
+            payload: {
+              threadId,
+              from: cfg.phase,
+              to: 'capture',
+              by: { kind: 'user', id: userId, name: await this.userName(this.ctx.pool, userId) },
+            },
+          },
+          actor: userActor(userId),
+          scope: sessionScope(f),
+        });
+      events.push(
+        this.configEvent(f, { timeUp: null, timeWrapped: true }, userActor(userId)),
+        this.systemMessage(f, 'Wrapping up: the facilitator captures where the session got to.', {
+          wrapUp: true,
+        }),
+      );
+      await this.ctx.store.append(events);
+    });
+    if (wrapped)
+      await this.requestFacilitator(threadId, {
+        kind: 'phase_override',
+        detail:
+          'The time limit is up and the creator chose to wrap up. Ask no new questions. Capture where the session got to: write the result with `aom session draft` from what is on the panel and in the answers, and mark gaps as open questions.',
+      });
+    else
+      await this.serial(
+        threadId,
+        async () =>
+          void (await this.flushPending(
+            (await one(this.ctx.pool, 'SELECT * FROM threads WHERE id=$1', [threadId])) as Row,
+          )),
+      );
+    return this.state(userId, threadId);
   }
 
   /** The turn-end hook never ran for the latest turn (the server died first): do what it would have done. */
@@ -930,6 +1076,7 @@ export class DiscoveryService {
     const t = await loadSession(this.ctx.pool, userId, threadId);
     assertDiscovery(t);
     await assertSessionManager(this.ctx.pool, userId, t);
+    assertWritable(t);
     return t;
   }
 
@@ -949,6 +1096,7 @@ export class DiscoveryService {
       const t = await loadSession(tx, userId, threadId, true);
       assertDiscovery(t);
       await assertSessionManager(tx, userId, t);
+      assertWritable(t);
       const q = await one(tx, 'SELECT * FROM discovery_questions WHERE id=$1 AND thread_id=$2 FOR UPDATE', [
         questionId,
         threadId,
@@ -1059,6 +1207,7 @@ export class DiscoveryService {
   ): Promise<{ message: ThreadMessageDto; state: DiscoveryStateDto }> {
     const t = await loadSession(this.ctx.pool, userId, threadId);
     assertDiscovery(t);
+    assertWritable(t);
     const message = await postSessionMessage(this.ctx, userId, threadId, { body, kind: 'chat', data: {} });
     await this.requestFacilitator(threadId, { kind: 'message', detail: body });
     return { message, state: await this.state(userId, threadId) };
@@ -1095,6 +1244,7 @@ export class DiscoveryService {
     await withAppendTx(this.ctx.pool, async (tx) => {
       const t = await loadSession(tx, userId, threadId);
       assertDiscovery(t);
+      assertWritable(t);
       await this.ctx.store.append(
         [
           this.noteEvent(t, section, text, {
@@ -1118,6 +1268,8 @@ export class DiscoveryService {
     await withAppendTx(this.ctx.pool, async (tx) => {
       const t = await loadSession(tx, userId, threadId);
       assertDiscovery(t);
+      await assertSessionManager(tx, userId, t);
+      assertWritable(t);
       const n = await one(
         tx,
         'SELECT id FROM discovery_notes WHERE id=$1 AND thread_id=$2 AND removed_at IS NULL',
@@ -1152,6 +1304,8 @@ export class DiscoveryService {
     await withAppendTx(this.ctx.pool, async (tx) => {
       const t = await loadSession(tx, userId, threadId);
       assertDiscovery(t);
+      await assertSessionManager(tx, userId, t);
+      assertWritable(t);
       const n = await one(
         tx,
         'SELECT id FROM discovery_notes WHERE id=$1 AND thread_id=$2 AND removed_at IS NULL',
@@ -1463,83 +1617,224 @@ export class DiscoveryService {
   /**
    * "Hand to BA": an approved PRD becomes a BA intake with the PRD linked and its text in the first message; cards the BA
    * drafts carry the document in `linkedDocIds`. The document becomes `handed_off`.
+   *
+   * With no BA online the hand-off is queued instead (the document is handed off, the session says so) and the sweep starts
+   * the intake when a BA's workstation comes online. With no BA hired at all, the same, plus a desk notice recommending to
+   * hire one. Before any start (the click or a retry) the intakes are searched for one that already links this PRD, so a crash
+   * between creating the intake and recording it never makes a second one.
    */
-  async handToBa(userId: string, threadId: string): Promise<{ intakeId: string; state: DiscoveryStateDto }> {
-    const { ctx } = this;
+  async handToBa(
+    userId: string,
+    threadId: string,
+  ): Promise<{ intakeId: string | null; queued: boolean; state: DiscoveryStateDto }> {
     await this.loadManaged(userId, threadId);
-    // One at a time, and a marker first: a second click (or a retry while the first still runs) finds it and is refused.
-    const intakeId = await this.serial(threadId, async () => {
-      const t = (await one(ctx.pool, 'SELECT * FROM threads WHERE id=$1', [threadId])) as Row;
+    const out = await this.serial(threadId, async () => {
+      const t = (await one(this.ctx.pool, 'SELECT * FROM threads WHERE id=$1', [threadId])) as Row;
       const cfg = parseDiscoveryConfig(t.session_config);
       if (!cfg.prdDocId) throw conflict('no_prd', 'There is no PRD to hand over yet.');
       if (cfg.intakeId) throw conflict('already_handed_off', 'This PRD was already handed to the BA.');
-      const now = ctx.clock.now();
+      if (cfg.handoff) return { intakeId: null, queued: true };
+      const now = this.ctx.clock.now();
       if (cfg.handingOff && now.getTime() - new Date(cfg.handingOff).getTime() < 2 * 60_000)
         throw conflict('handoff_in_progress', 'The PRD is being handed to the BA right now.');
-      const d = await one(ctx.pool, 'SELECT * FROM documents WHERE id=$1 AND org_id=$2', [
+      const d = await one(this.ctx.pool, 'SELECT * FROM documents WHERE id=$1 AND org_id=$2', [
         cfg.prdDocId,
         t.org_id,
       ]);
+      const existing = await this.intakeOfDoc(t.org_id, cfg.prdDocId);
+      if (existing) return { intakeId: await this.adoptIntake(t, d, existing, userId), queued: false };
       if (!d || d.status !== 'approved')
         throw conflict('prd_not_approved', 'Approve the PRD first: only an approved PRD goes to the BA.');
-      await ctx.store.append([this.configEvent(t, { handingOff: now.toISOString() }, userActor(userId))]);
+      await this.ctx.store.append([
+        this.configEvent(t, { handingOff: now.toISOString() }, userActor(userId)),
+      ]);
       try {
-        const version = d.approved_version ?? d.current_version;
-        const cur = await one(
-          ctx.pool,
-          'SELECT content FROM document_versions WHERE document_id=$1 AND version=$2',
-          [d.id, version],
-        );
-        const note = buildHandoffNote({
-          title: d.title,
-          docId: d.id,
-          version,
-          content: cur?.content ?? '',
-          max: HANDOFF_NOTE_MAX_CHARS,
-        });
-        const intake = await startIntakeIn(
-          ctx,
-          { id: userId },
-          t.org_id,
-          { note },
-          {
-            linkedDocIds: [d.id],
-            ...(t.project_id ? { projectId: t.project_id } : {}),
-          },
-        );
-        await ctx.store.append([
-          {
-            streamId: streamId.document(d.id),
-            event: {
-              type: 'DocumentStatusChanged',
-              payload: {
-                docId: d.id,
-                from: 'approved',
-                to: 'handed_off',
-                version,
-                by: userId,
-                note: 'Handed to the BA',
-              },
-            },
-            actor: userActor(userId),
-            scope: scopeOfDoc(d as never),
-          },
-          this.configEvent(t, { intakeId: intake.id, handingOff: null }, userActor(userId)),
-          this.systemMessage(t, `The PRD was handed to the BA. Follow it in Intake.`, {
-            intakeId: intake.id,
-          }),
-        ]);
-        return intake.id;
+        const intakeId = await this.startHandoff(t, d, userId);
+        return { intakeId, queued: false };
       } catch (err) {
+        if (err instanceof HttpError && (err.code === 'ba_offline' || err.code === 'no_ba')) {
+          await this.queueHandoff(t, d, userId, err.code);
+          return { intakeId: null, queued: true };
+        }
         // nothing was created (startIntakeIn refuses before it writes): release the marker so the owner can try again
-        const again = (await one(ctx.pool, 'SELECT session_config FROM threads WHERE id=$1', [
+        const again = (await one(this.ctx.pool, 'SELECT session_config FROM threads WHERE id=$1', [
           threadId,
         ])) as Row;
         if (!parseDiscoveryConfig(again.session_config).intakeId)
-          await ctx.store.append([this.configEvent(t, { handingOff: null }, userActor(userId))]);
+          await this.ctx.store.append([this.configEvent(t, { handingOff: null }, userActor(userId))]);
         throw err;
       }
     });
-    return { intakeId, state: await this.state(userId, threadId) };
+    return { ...out, state: await this.state(userId, threadId) };
+  }
+
+  /** An intake that already links this PRD (the hand-off crashed after creating it, or a retry raced). */
+  private async intakeOfDoc(orgId: string, docId: string): Promise<string | undefined> {
+    const r = await one(
+      this.ctx.pool,
+      `SELECT id FROM intakes WHERE org_id=$1 AND linked_doc_ids @> $2::jsonb ORDER BY created_at LIMIT 1`,
+      [orgId, JSON.stringify([docId])],
+    );
+    return r?.id;
+  }
+
+  /** Records an intake that exists: the document is handed off (if it is not yet), the session links it. */
+  private async adoptIntake(t: Row, d: Row | undefined, intakeId: string, by: string): Promise<string> {
+    const events: AppendInput[] = [];
+    if (d && d.status === 'approved') events.push(this.handedOffEvent(d, by, 'Handed to the BA'));
+    events.push(
+      this.configEvent(t, { intakeId, handingOff: null, handoff: null }, userActor(by)),
+      this.systemMessage(t, 'The PRD was handed to the BA. Follow it in Intake.', { intakeId }),
+    );
+    await this.ctx.store.append(events);
+    await this.closeNoBaNotice(t);
+    return intakeId;
+  }
+
+  private handedOffEvent(d: Row, by: string, note: string): AppendInput {
+    return {
+      streamId: streamId.document(d.id),
+      event: {
+        type: 'DocumentStatusChanged',
+        payload: {
+          docId: d.id,
+          from: 'approved',
+          to: 'handed_off',
+          version: d.approved_version ?? d.current_version,
+          by,
+          note,
+        },
+      },
+      actor: userActor(by),
+      scope: scopeOfDoc(d as never),
+    };
+  }
+
+  /** Creates the intake for a PRD and records it (and, if the document is still approved, hands it off). */
+  private async startHandoff(t: Row, d: Row, by: string): Promise<string> {
+    const version = d.approved_version ?? d.current_version;
+    const cur = await one(
+      this.ctx.pool,
+      'SELECT content FROM document_versions WHERE document_id=$1 AND version=$2',
+      [d.id, version],
+    );
+    const note = buildHandoffNote({
+      title: d.title,
+      docId: d.id,
+      version,
+      content: cur?.content ?? '',
+      max: HANDOFF_NOTE_MAX_CHARS,
+    });
+    const intake = await startIntakeIn(
+      this.ctx,
+      { id: by },
+      t.org_id,
+      { note },
+      { linkedDocIds: [d.id], ...(t.project_id ? { projectId: t.project_id } : {}) },
+    );
+    return this.adoptIntake(t, d, intake.id, by);
+  }
+
+  /** No BA online: the document is handed off now, the intake starts when a BA comes online (the sweep). */
+  private async queueHandoff(t: Row, d: Row, by: string, reason: 'ba_offline' | 'no_ba'): Promise<void> {
+    const events: AppendInput[] = [
+      this.handedOffEvent(d, by, 'Handed to the BA (queued)'),
+      this.configEvent(
+        t,
+        {
+          handingOff: null,
+          handoff: { state: 'queued', at: this.ctx.clock.now().toISOString(), by, reason },
+        },
+        userActor(by),
+      ),
+      this.systemMessage(
+        t,
+        reason === 'no_ba'
+          ? 'The PRD is handed off, but the organization has no BA yet. Hire one: the intake starts as soon as the BA is online.'
+          : "The PRD is handed off. The BA's workstation is offline, so the intake starts as soon as it is online.",
+        { handoffQueued: reason },
+      ),
+    ];
+    await this.ctx.store.append(events);
+    if (reason === 'no_ba')
+      await raiseOrCoalesce(this.ctx, {
+        subjectKey: `handoff_no_ba:${t.org_id}`,
+        orgId: t.org_id,
+        kind: 'alert',
+        subkind: 'handoff_needs_ba',
+        title: 'Hire a business analyst (BA): a PRD is waiting to be handed over',
+        body: `The PRD of "${t.title}" was handed off, but the organization has no BA. Hire one with the built-in BA role: the intake starts when the BA's workstation is online.`,
+        data: { threadId: t.id, role: 'ba' },
+        projectId: t.project_id ?? undefined,
+        actor: SYSTEM_ACTOR,
+        scope: orgScope(t.org_id),
+      });
+  }
+
+  private async closeNoBaNotice(t: Row): Promise<void> {
+    const open = await openItemForSubject(this.ctx.pool, t.org_id, `handoff_no_ba:${t.org_id}`);
+    if (!open) return;
+    await this.ctx.store.append([
+      {
+        streamId: streamId.desk(open.id),
+        event: {
+          type: 'DeskItemResolved',
+          payload: {
+            deskItemId: open.id,
+            resolution: 'acknowledged',
+            note: 'A BA took the hand-off.',
+            by: { kind: 'system' },
+          },
+        },
+        actor: SYSTEM_ACTOR,
+        scope: orgScope(t.org_id),
+      },
+    ]);
+  }
+
+  /**
+   * The sweep: a queued hand-off starts when a BA is online, and a hand-off marker left by a crash is settled: if an intake
+   * for the PRD exists it is recorded, if none was made the marker is released.
+   */
+  private async handoffSweep(): Promise<void> {
+    const list = await rows(
+      this.ctx.pool,
+      `SELECT id FROM threads WHERE kind='discovery' AND deleted_at IS NULL
+         AND session_config->>'intakeId' IS NULL
+         AND (session_config->'handoff' IS NOT NULL OR session_config->>'handingOff' IS NOT NULL)`,
+    );
+    for (const { id } of list)
+      await this.serial(id, async () => {
+        const t = await one(this.ctx.pool, `SELECT * FROM threads WHERE id=$1 AND deleted_at IS NULL`, [id]);
+        if (!t) return;
+        const cfg = parseDiscoveryConfig(t.session_config);
+        if (cfg.intakeId || !cfg.prdDocId) return;
+        const d = await one(this.ctx.pool, 'SELECT * FROM documents WHERE id=$1 AND org_id=$2', [
+          cfg.prdDocId,
+          t.org_id,
+        ]);
+        if (!d) return;
+        const by = cfg.handoff?.by ?? t.created_by;
+        const existing = await this.intakeOfDoc(t.org_id, cfg.prdDocId);
+        if (existing) {
+          await this.adoptIntake(t, d, existing, by);
+          return;
+        }
+        if (!cfg.handoff) {
+          // a click that died half way: nothing was made, so the owner can click again
+          const age = cfg.handingOff
+            ? this.ctx.clock.now().getTime() - new Date(cfg.handingOff).getTime()
+            : 0;
+          if (age >= 2 * 60_000) await this.ctx.store.append([this.configEvent(t, { handingOff: null })]);
+          return;
+        }
+        if ((await baStatus(this.ctx, t.org_id)) !== 'online') return;
+        try {
+          await this.startHandoff(t, d, by);
+        } catch (err) {
+          if (err instanceof HttpError && (err.code === 'ba_offline' || err.code === 'no_ba')) return;
+          throw err;
+        }
+      });
   }
 }

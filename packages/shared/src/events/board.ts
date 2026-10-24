@@ -82,6 +82,22 @@ export const boardEvents = [
       by: Author,
     }),
   ),
+  /**
+   * Option scoring: a seat scored an option 1 to 5. One row per (option, participant): scoring again replaces the score.
+   * `participantId` is the seat's participant id (a string: a replayed event never needs the participant to exist).
+   */
+  defineEvent(
+    'BoardOptionScored',
+    z.object({
+      threadId: Id,
+      option: z.string().min(1).max(200),
+      participantId: z.string().min(1).max(80),
+      name: z.string().min(1).max(100),
+      score: z.number().int().min(1).max(5),
+      why: z.string().max(400).default(''),
+      round: z.number().int().nullable().default(null),
+    }),
+  ),
   /** The Chair stopped at a decision only the owner can take. */
   defineEvent(
     'BoardDecisionRaised',

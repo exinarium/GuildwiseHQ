@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { SessionCostSchema } from '../discovery/index.ts';
 import { ModelChoiceSchema } from '../models/choices.ts';
 import { ParticipantKindSchema, SessionTurnDtoSchema } from '../sessions/index.ts';
+import { SESSION_TIME_MAX, SessionTimeSchema } from '../sessions/time.ts';
 
 /**
  * Boardroom (docs/design/discovery-boardroom-registry.md, phase C): a group conversation between the owner, a cast of
@@ -53,8 +54,42 @@ export type BoardRoundKind = z.infer<typeof BoardRoundKindSchema>;
 export const CHAIR_SEAT = 'Chair';
 export const CAST_SEAT_DEFAULT = 'Panelist';
 
+/** What the parser accepts (older rooms and sessions had 2 to 8 seats); new boardrooms follow the fixed-seat rule below. */
 export const BOARD_CAST_MIN = 2;
 export const BOARD_CAST_MAX = 8;
+/** A new boardroom has the two fixed seats plus 3 to 4 other opinion seats: 5 to 6 in all. */
+export const BOARD_OTHER_SEATS_MIN = 3;
+export const BOARD_OTHER_SEATS_MAX = 4;
+export const BOARD_FIXED_SEATS = [
+  {
+    personaKey: 'optimist',
+    seat: 'Optimist',
+    label: 'Optimist',
+    role: 'argues the upside and why it can work',
+  },
+  {
+    personaKey: 'devils-advocate',
+    seat: "Devil's Advocate",
+    label: "Devil's Advocate",
+    role: 'attacks edge cases and failure modes',
+  },
+] as const;
+export const isFixedSeat = (m: { kind: string; refId: string }): boolean =>
+  m.kind === 'persona' && BOARD_FIXED_SEATS.some((f) => f.personaKey === m.refId);
+
+/**
+ * The cast rule of a new boardroom: the Optimist and the Devil's Advocate (fixed, cannot be left out) and 3 to 4 other
+ * opinion seats. Returns the problem, or null. Pure; used by the server and the dialogs.
+ */
+export function castProblem(cast: ReadonlyArray<{ kind: string; refId: string }>): string | null {
+  for (const f of BOARD_FIXED_SEATS)
+    if (!cast.some((m) => m.kind === 'persona' && m.refId === f.personaKey))
+      return `The ${f.label} seat is fixed: every boardroom has one.`;
+  const others = cast.filter((m) => !isFixedSeat(m)).length;
+  if (others < BOARD_OTHER_SEATS_MIN || others > BOARD_OTHER_SEATS_MAX)
+    return `Besides the Optimist and the Devil's Advocate, choose ${BOARD_OTHER_SEATS_MIN} to ${BOARD_OTHER_SEATS_MAX} other opinion seats (you have ${others}).`;
+  return null;
+}
 export const BOARD_ROUND_CAP_DEFAULT = 4;
 export const BOARD_ROUND_CAP_MAX = 12;
 /** The Chair picks two or three speakers per discussion round. */
@@ -134,7 +169,29 @@ export const BoardConfigSchema = z.object({
   dissentNext: z.boolean().default(false),
   dissentNote: z.string().max(600).nullable().default(null),
   briefMessageId: z.uuid().nullable().default(null),
-  endReason: z.enum(['owner', 'round_cap']).nullable().default(null),
+  endReason: z.enum(['owner', 'round_cap', 'time']).nullable().default(null),
+  /** Optional time limit like a meeting (minutes of active time); paused time does not count. */
+  timeLimitMinutes: z
+    .number()
+    .int()
+    .min(1)
+    .max(SESSION_TIME_MAX + 60)
+    .nullable()
+    .default(null),
+  /** Active time used, counted by the sweep's clock ticks (`tickAt` is the last tick). */
+  elapsedMs: z.number().int().nonnegative().default(0),
+  tickAt: z.iso.datetime().nullable().default(null),
+  timeWarned: z.boolean().default(false),
+  /** After the five-minute warning, the next round planned is the final one; the session goes to the minutes after it. */
+  finalRound: z.number().int().positive().nullable().default(null),
+  /** The time ran out: no new round starts until the creator extends or wraps up. */
+  timeUp: z.boolean().default(false),
+  /** The minutes cannot be written with the Chair's summary (budget used up): the creator chooses what to do. */
+  minutesAsk: z.enum(['budget']).nullable().default(null),
+  /** The creator chose to write the minutes without the Chair's summary. */
+  minutesWithoutSummary: z.boolean().default(false),
+  /** Read-only: the creator archived the session. */
+  archived: z.boolean().default(false),
   /** Chair turns in a row that ended without a valid pick (after two the server picks). */
   chairFailures: z.number().int().nonnegative().default(0),
   /** Why the last attempt to start a turn was refused (budget, paused project); the page shows it, the sweep retries. */
@@ -242,7 +299,10 @@ export type CastMember = z.infer<typeof CastMemberSchema>;
 export const BoardSettingsSchema = z.object({
   format: BoardFormatSchema.default('open'),
   roundCap: z.number().int().min(1).max(BOARD_ROUND_CAP_MAX).default(BOARD_ROUND_CAP_DEFAULT),
+  /** Optional spend limit in USD; absent: no limit. */
   budgetUsd: z.number().positive().max(100_000).optional(),
+  /** Optional time limit in minutes; absent: no limit. */
+  timeLimitMinutes: z.number().int().min(5).max(SESSION_TIME_MAX).optional(),
   models: BoardModelsSchema.default({}),
 });
 
@@ -277,10 +337,15 @@ export type StartBoardRequest = z.infer<typeof StartBoardRequestSchema>;
 
 export const PatchBoardRequestSchema = z.object({
   budgetUsd: z.number().positive().max(100_000).nullable().optional(),
+  /** `null` removes the time limit. */
+  timeLimitMinutes: z.number().int().min(5).max(SESSION_TIME_MAX).nullable().optional(),
   roundCap: z.number().int().min(1).max(BOARD_ROUND_CAP_MAX).optional(),
   models: BoardModelsSchema.optional(),
 });
 export type PatchBoardRequest = z.infer<typeof PatchBoardRequestSchema>;
+
+/** The creator's answer when the minutes cannot get the Chair's summary because the budget is used up. */
+export const BoardMinutesChoiceRequestSchema = z.object({ choice: z.literal('without_summary') });
 
 export const BoardSayRequestSchema = z.object({ body: z.string().min(1).max(8000) });
 export const BoardResolveDecisionRequestSchema = z.object({
@@ -356,6 +421,49 @@ export const BoardNoteDtoSchema = z.object({
 });
 export type BoardNoteDto = z.infer<typeof BoardNoteDtoSchema>;
 
+/** Option scoring: what each participant scored each option (1 to 5), and the tally per option. */
+export const BOARD_SCORE_MIN = 1;
+export const BOARD_SCORE_MAX = 5;
+export const BoardOptionScoreSchema = z.object({
+  option: z.string(),
+  scores: z.array(
+    z.object({
+      participantId: z.string(),
+      name: z.string(),
+      score: z.number().int().min(BOARD_SCORE_MIN).max(BOARD_SCORE_MAX),
+      why: z.string(),
+    }),
+  ),
+  total: z.number().int(),
+  average: z.number().nullable(),
+});
+export type BoardOptionScore = z.infer<typeof BoardOptionScoreSchema>;
+
+/** The tally of scored options from the raw rows. Pure: highest total first; ties by average, then name. */
+export function tallyScores(
+  rows: ReadonlyArray<{ option: string; participantId: string; name: string; score: number; why: string }>,
+): BoardOptionScore[] {
+  const by = new Map<string, BoardOptionScore['scores']>();
+  for (const r of rows) {
+    const list = by.get(r.option) ?? [];
+    list.push({ participantId: r.participantId, name: r.name, score: r.score, why: r.why });
+    by.set(r.option, list);
+  }
+  return [...by.entries()]
+    .map(([option, scores]) => {
+      const total = scores.reduce((a, x) => a + x.score, 0);
+      return {
+        option,
+        scores,
+        total,
+        average: scores.length ? Math.round((total / scores.length) * 100) / 100 : null,
+      };
+    })
+    .sort(
+      (a, b) => b.total - a.total || (b.average ?? 0) - (a.average ?? 0) || a.option.localeCompare(b.option),
+    );
+}
+
 export const BoardDisagreementDtoSchema = z.object({
   id: z.uuid(),
   topic: z.string(),
@@ -401,6 +509,7 @@ export const BoardWaitingSchema = z.enum([
   'owner',
   'minutes',
   'budget',
+  'time',
   'paused',
   'ended',
   'nothing',
@@ -420,7 +529,11 @@ export const BoardStateDtoSchema = z.object({
     revealedRound: z.number().int(),
     paused: z.boolean(),
     budgetStopped: z.boolean(),
-    endReason: z.enum(['owner', 'round_cap']).nullable(),
+    endReason: z.enum(['owner', 'round_cap', 'time']).nullable(),
+    archived: z.boolean().optional(),
+    budgetUsd: z.number().nullable().optional(),
+    /** The minutes wait for the creator: `budget` = write them without the Chair's summary, or raise the limit. */
+    minutesAsk: z.enum(['budget']).nullable().optional(),
     models: BoardModelsSchema,
     dissentNext: z.boolean(),
     minutesDocId: z.uuid().nullable(),
@@ -435,6 +548,10 @@ export const BoardStateDtoSchema = z.object({
   hiddenNotes: z.number().int(),
   disagreements: z.array(BoardDisagreementDtoSchema),
   decisions: z.array(BoardDecisionDtoSchema),
+  /** Option scoring tally (empty unless seats scored options). */
+  scores: z.array(BoardOptionScoreSchema).optional(),
+  /** The time limit as a countdown (limit null: none). */
+  time: SessionTimeSchema.optional(),
   suggestions: z.array(BoardSuggestionSchema),
   /** Messages of the sealed round: the page does not show them until the round is revealed. */
   sealedMessageIds: z.array(z.uuid()),
@@ -505,6 +622,7 @@ export const BOARD_RPC_METHODS = [
   'board.disagreement',
   'board.cast',
   'board.minutes',
+  'board.score',
 ] as const;
 export type BoardRpcMethod = (typeof BOARD_RPC_METHODS)[number];
 export const isBoardRpc = (m: string): m is BoardRpcMethod =>
@@ -540,6 +658,11 @@ export const BoardCastParamsSchema = z
     why: z.string().max(400).default(''),
   })
   .refine((v) => v.persona || (v.name && v.brief), 'name a library persona, or give --name and --brief');
+export const BoardScoreParamsSchema = z.object({
+  option: z.string().min(1).max(200),
+  score: z.number().int().min(BOARD_SCORE_MIN).max(BOARD_SCORE_MAX),
+  why: z.string().max(400).default(''),
+});
 export const BoardMinutesParamsSchema = z.object({ content: z.string().min(1).max(120_000) });
 
 /** Parses `who|position` (the `aom board disagreement add --position` form). */
