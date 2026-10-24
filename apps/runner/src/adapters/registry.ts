@@ -33,6 +33,7 @@ export function buildAdapters(
       ...(credentials ? { credentials } : {}),
       ...(usage ? { usage } : {}),
       ...(accounts ? { accounts } : {}),
+      ...(direct ? { providers: direct.store } : {}),
     }),
   );
   if (config.runtimes.mock?.enabled) adapters.set('mock', new MockAdapter(config.runtimes.mock, paths));

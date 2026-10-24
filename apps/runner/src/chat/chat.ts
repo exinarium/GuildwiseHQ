@@ -24,6 +24,7 @@ import {
   SESSION_PURPOSE_VERBS,
   type ServerToRunnerOf,
   sessionToolsFor,
+  splitBackendModel,
   summarizeCommandTexts,
   type ToolCounts,
   type Usage,
@@ -168,7 +169,9 @@ const zeroUsage = (): Usage => ({ inputTokens: 0, outputTokens: 0, cacheReadToke
  * Chats never claim cards and do not count against the shift capacity.
  */
 /** Chats and the CEO owner turn always run on the main account: `available` only says some account is usable. */
-const mainOk = (adapter: { accountGate?(account: string): { state: string } }): boolean =>
+const mainOk = (adapter: { accountGate?(account: string): { state: string } }, model?: string): boolean =>
+  // a model behind Bedrock, Vertex or a gateway needs no Claude login
+  (model !== undefined && splitBackendModel(model) !== null) ||
   (adapter.accountGate?.('main') ?? { state: 'ok' }).state === 'ok';
 
 export class ChatManager {
@@ -765,7 +768,7 @@ export class ChatManager {
     const { paths } = this.deps;
     const adapter = this.deps.adapters.get(msg.agent.runtime);
     const caps = adapter ? await adapter.capabilities() : undefined;
-    if (!adapter?.startChat || !caps?.available || !mainOk(adapter))
+    if (!adapter?.startChat || !caps?.available || !mainOk(adapter, msg.agent.model))
       return this.error(
         msg,
         `runtime ${msg.agent.runtime} is not available for session turns on this workstation`,
@@ -913,7 +916,7 @@ export class ChatManager {
     if (profile.kind === 'full') return this.runOwnerTurn(chat, profile.mode);
     const adapter = this.deps.adapters.get(msg.agent.runtime);
     const caps = adapter ? await adapter.capabilities() : undefined;
-    if (!adapter?.startChat || !caps?.available || !mainOk(adapter)) {
+    if (!adapter?.startChat || !caps?.available || !mainOk(adapter, msg.agent.model)) {
       this.error(msg, `runtime ${msg.agent.runtime} is not available for chat on this workstation`);
       return;
     }

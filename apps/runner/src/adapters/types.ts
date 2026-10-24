@@ -1,4 +1,13 @@
-import type { AgentRuntimeSpec, ChatContext, ClaudeAccountInfo, ReportedProvider, Usage } from '@aom/shared';
+import type {
+  AgentRuntimeSpec,
+  ChatContext,
+  ClaudeAccountInfo,
+  ReportedBackend,
+  ReportedKey,
+  ReportedModel,
+  ReportedProvider,
+  Usage,
+} from '@aom/shared';
 import type { GrantedSkill } from '../capabilities/materialize.ts';
 import type { Sandbox } from '../sandbox/sandbox.ts';
 
@@ -22,6 +31,14 @@ export interface RuntimeCapabilities {
   accounts?: ClaudeAccountInfo[];
   /** Direct-model: the providers that have a key (or endpoint) on this workstation, with their models. Names only. */
   providers?: ReportedProvider[];
+  /** Direct-model: every stored provider key or credential and whose it is. Names only. */
+  keys?: ReportedKey[];
+  /** Claude Code: the backends (Bedrock, Vertex, gateway) with a credential on this workstation, with their models. */
+  backends?: ReportedBackend[];
+  /** Gemini CLI, opencode: the models this workstation offers. */
+  models?: ReportedModel[];
+  /** Gemini CLI: signed in with the owner's Google login, or spending the stored `google` key. */
+  authVia?: 'login' | 'key';
 }
 
 /** May a shift run on this account now? (`ClaudeCodeAdapter.accountGate`) */

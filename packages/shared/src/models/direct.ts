@@ -239,6 +239,7 @@ export const ProviderKeySetPayloadSchema = z.object({
   models: z.array(z.string().min(1).max(120)).max(50).default([]),
 });
 export type ProviderKeySetPayload = z.infer<typeof ProviderKeySetPayloadSchema>;
+export type ProviderKeyClearPayload = z.infer<typeof ProviderKeyClearPayloadSchema>;
 export const ProviderKeyClearPayloadSchema = z.object({
   provider: ProviderKeyIdSchema,
   /** Which slot to empty. Absent: the workstation's own key. */

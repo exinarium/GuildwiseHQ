@@ -41,6 +41,7 @@ import {
   type ShiftReport,
   ShiftReportSchema,
   scanReportForSecrets,
+  splitBackendModel,
   type TranscriptRef,
   uuidv7,
   type VaultWriteCommand,
@@ -690,7 +691,9 @@ export class ShiftSupervisor {
     // The Claude account this shift runs on (absent: main). It was chosen by the server for this shift; a shift that is
     // already running finishes on it, and a resumed one (after a runner restart) stays on it.
     const accountKey = msg.account?.key ?? 'main';
-    const gate = adapter?.accountGate?.(accountKey);
+    // A model behind Bedrock, Vertex or a gateway needs no Claude login: the account's login and limits do not gate it.
+    const backendModel = splitBackendModel(msg.agent.model) !== null;
+    const gate = backendModel ? undefined : adapter?.accountGate?.(accountKey);
     if (gate && gate.state !== 'ok') {
       // Checked before the runtime as a whole: the server learns WHICH account is out. All of these put the card back
       // without penalty. A shift resumed after a restart is not turned away for a limit that appeared meanwhile.
@@ -767,6 +770,7 @@ export class ShiftSupervisor {
     // shift on it (the check reads the expiry and only calls Claude when the token is about to expire).
     if (
       !s.resumed &&
+      !backendModel &&
       adapter.checkLogin &&
       (await adapter.checkLogin(accountKey).catch(() => 'unknown')) === 'expired'
     ) {

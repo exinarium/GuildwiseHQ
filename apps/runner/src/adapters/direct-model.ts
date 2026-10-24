@@ -158,6 +158,7 @@ export class DirectModelAdapter implements RuntimeAdapter {
       // No 'shell', no 'edit', no 'web': this runtime cannot take part in card or shift work.
       capabilities: ['skills', 'resume'],
       providers,
+      keys: this.deps.store.reportKeys(),
     };
   }
 
@@ -341,6 +342,8 @@ export class DirectModelAdapter implements RuntimeAdapter {
       } else {
         usage = { ...usage, model: input.agent.model };
       }
+      // Whose key paid: the server counts the organization's against its monthly cap and leaves the workstation's own out.
+      usage = { ...usage, keySource: cfg.source ?? 'workstation', keyProvider: choice.provider };
       q.push({ kind: 'usage', usage });
       if (failure) {
         q.push({ kind: 'exit', code: 1, error: failure });

@@ -498,6 +498,7 @@ describe('provider store', () => {
           { id: 'qwen3', label: 'qwen3' },
         ],
         endpointHost: 'localhost:11434',
+        keySource: 'workstation',
       },
     ]);
     expect(store.get('openai-compatible')?.baseUrl).toBe('http://localhost:11434/v1');

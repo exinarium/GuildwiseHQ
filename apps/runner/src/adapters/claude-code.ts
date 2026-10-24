@@ -8,6 +8,7 @@ import type { z } from 'zod';
 import { type GrantedSkill, materializeSkills, skillsDirOf } from '../capabilities/materialize.ts';
 import type { ClaudeRuntimeConfigSchema } from '../config.ts';
 import { deleteRootsFor, type GuardConfig } from '../devops/guard.ts';
+import type { ProviderStore } from '../direct/store.ts';
 import { holdSandboxRepo } from '../git/config-lock.ts';
 import { discoverPluginMcpServers, mcpConfigFor, type PluginMcpServer } from '../mcp/plugins.ts';
 import type { RunnerPaths } from '../paths.ts';
@@ -26,6 +27,14 @@ import {
   readCredentials,
   withLock,
 } from './claude-auth.ts';
+import {
+  backendOfModel,
+  backendProcessEnv,
+  backendRoleProblem,
+  removeVertexKey,
+  stampBackendUsage,
+  writeVertexKey,
+} from './claude-backend.ts';
 import {
   agentEnv,
   buildCeoSettings,
@@ -387,6 +396,8 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       credentials?: () => Pick<ClaudeConfig, 'authMode' | 'oauthToken' | 'apiKey'> | undefined;
       /** The Claude accounts of this workstation (main + additional); without it only `main` exists. */
       accounts?: ClaudeAccountRegistry;
+      /** The provider credentials of this workstation: the Bedrock, Vertex and gateway backends read theirs here. */
+      providers?: ProviderStore;
     } = {},
   ) {
     this.registry =
@@ -595,6 +606,8 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
         : {}),
       ...(this.host.accounts ? { accounts: this.accountInfos() } : {}),
     };
+    // Credentials for Bedrock, Vertex or a gateway: agents on those models need no Claude login.
+    const backends = this.host.providers?.reportBackends() ?? [];
     try {
       const r = await execa(this.cfg.bin, ['--version'], { reject: false, timeout: 10_000, stdin: 'ignore' });
       const m = /(\d+)\.(\d+)(?:\.(\d+))?/.exec(String(r.stdout));
@@ -613,8 +626,15 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       if (sb.state === 'unavailable') ok = false;
       // No account can take a shift (every login expired or never completed, or every usage limit hit): the runtime is
       // paused until a probe works (backlog #73). One usable account keeps it available.
-      if (!anyUsable) ok = false;
-      return { runtime: this.id, version: m[0], available: ok, capabilities: ok ? caps : [], ...sandbox };
+      if (!anyUsable && backends.length === 0) ok = false;
+      return {
+        runtime: this.id,
+        version: m[0],
+        available: ok,
+        capabilities: ok ? caps : [],
+        ...sandbox,
+        ...(backends.length ? { backends } : {}),
+      };
     } catch {
       return { runtime: this.id, version: 'unknown', available: false, capabilities: [], ...sandbox };
     }
@@ -683,6 +703,54 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     await writeFile(join(sandbox.configDir, 'CLAUDE.md'), markdown);
   }
 
+  /**
+   * A session whose model names a backend (`bedrock:<id>`): the credential of this workstation (its own, else the organization's),
+   * the environment that points the claude process at it, and the cleanup. Throws when the role cannot take a backend credential or
+   * the backend is not set up here. The credential reaches only this agent's claude process.
+   */
+  private backendSession(
+    agent: { model: string; roleKey: string; isDevops?: boolean },
+    sessionRef: string,
+  ):
+    | {
+        model: string;
+        backend: NonNullable<ReturnType<typeof backendOfModel>>['backend'];
+        source: 'org' | 'workstation';
+        env: Record<string, string>;
+        cleanup: () => void;
+      }
+    | undefined {
+    const b = backendOfModel(agent.model);
+    if (!b) return undefined;
+    const role = backendRoleProblem(agent);
+    if (role) throw new Error(`runtime_role_refused: ${role}`);
+    const cred = this.host.providers?.getBackend(b.backend);
+    if (!cred)
+      throw new Error(
+        `${b.backend} is not set up on this workstation: add its credentials under Workstations > Model providers (or ask an Owner or Admin to share the organization's)`,
+      );
+    let vertexKeyFile: string | undefined;
+    if (b.backend === 'vertex')
+      vertexKeyFile = writeVertexKey(
+        this.paths?.secrets ?? join(homedir(), '.aom-runner', 'secrets'),
+        sessionRef,
+        cred.fields.serviceAccountJson ?? '',
+      );
+    return {
+      model: b.model,
+      backend: b.backend,
+      source: cred.source,
+      env: backendProcessEnv(cred, b.model, vertexKeyFile ? { vertexKeyFile } : {}),
+      cleanup: () => removeVertexKey(vertexKeyFile),
+    };
+  }
+
+  /** The runtime configuration of a backend session: no Claude token of this workstation reaches it. */
+  private noClaudeToken(cfg: ClaudeConfig): ClaudeConfig {
+    const { oauthToken: _o, apiKey: _k, ...rest } = cfg;
+    return { ...rest, authMode: 'default' };
+  }
+
   async start(input: ShiftStartInput): Promise<RuntimeSession> {
     if (realClaudeBlocked()) throw new RealClaudeBlockedError();
     // The DevOps engineer runs without the OS sandbox, so a missing bwrap/socat does not stop it. A scan is the exception:
@@ -690,6 +758,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     if (input.agent.isDevops && input.devopsGuard?.readOnlyScan === true) this.assertScanSandbox();
     else if (!input.agent.isDevops) this.assertCanRun();
     const account = this.account(input.account);
+    const bk = this.backendSession(input.agent, input.shiftId);
     const dir = input.sandbox.configDir;
     await mkdir(dir, { recursive: true });
     const guard = input.agent.isDevops ? this.devopsGuard(dir, input.devopsGuard, 'shift') : undefined;
@@ -712,12 +781,15 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       input.agent.permissions.allowedTools,
       input.agent.isDevops ? undefined : input.mcpServers,
     );
-    await this.linkCredentials(dir, used, account.key);
+    // A backend session has no Claude login: nothing of the account's credentials is copied into its config dir.
+    if (bk) rmSync(join(dir, '.credentials.json'), { force: true });
+    else await this.linkCredentials(dir, used, account.key);
 
     const cmd = buildClaudeCommand(
       // the card repository metadata is readable (never through a rule that makes it read-only for the commit)
       {
         ...input,
+        ...(bk ? { agent: { ...input.agent, model: bk.model } } : {}),
         readDirs: [
           ...new Set([
             ...(input.readDirs ?? []),
@@ -726,10 +798,11 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
           ]),
         ],
       },
-      this.liveFor(account),
+      bk ? this.noClaudeToken(this.liveFor(account)) : this.liveFor(account),
     );
+    if (bk) Object.assign(cmd.env, bk.env);
     const parser = new ClaudeStreamParser();
-    const hooks = this.sessionHooks(dir, parser, account);
+    const hooks = bk ? {} : this.sessionHooks(dir, parser, account);
     // The sandbox leaves an empty read-only .git/config.lock behind on the host: removed when the clone's last shift ends.
     const releaseRepo = holdSandboxRepo(gitDirsOf(input.cwd));
     return spawnSession({
@@ -740,17 +813,21 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       inheritEnv: false,
       ...(cmd.stdin !== undefined ? { input: cmd.stdin } : {}),
       parseLine: (l) => parser.parseLine(l),
-      usage: () => parser.usage(),
+      usage: () =>
+        bk
+          ? stampBackendUsage(parser.usage(), { backend: bk.backend, model: bk.model, source: bk.source })
+          : parser.usage(),
       contextTokens: () => parser.contextTokens(),
       logFile: input.logFile,
       exitError: () => (parser.resultError ? `claude result: ${parser.resultError}` : undefined),
       ...hooks,
       onExit: async (r) => {
         try {
-          await hooks.onExit?.(r);
+          await ('onExit' in hooks ? hooks.onExit?.(r) : undefined);
         } finally {
           dropPlaceholders();
           releaseRepo();
+          bk?.cleanup();
         }
       },
     });
@@ -775,6 +852,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
           ],
     };
     const account = this.account(input.account);
+    const bk = this.backendSession(input.agent, input.chatId);
     const dir = input.sandbox.configDir;
     await mkdir(dir, { recursive: true });
     const guard = devops ? this.devopsGuard(dir, input.devopsGuard, 'chat') : undefined;
@@ -806,12 +884,16 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
           );
     const withSkills = this.prepareSkills(dir, chatInput, chatSettings);
     await writeFile(join(dir, 'settings.json'), `${JSON.stringify(chatSettings, null, 2)}\n`);
-    await this.linkCredentials(dir, used, account.key);
+    if (bk) rmSync(join(dir, '.credentials.json'), { force: true });
+    else await this.linkCredentials(dir, used, account.key);
+    const chatInputFinal = guard ? { ...withSkills, env: input.env } : withSkills;
     const cmd = buildClaudeChatCommand(
-      guard ? { ...withSkills, env: input.env } : withSkills,
-      this.liveFor(account),
+      bk ? { ...chatInputFinal, agent: { ...chatInputFinal.agent, model: bk.model } } : chatInputFinal,
+      bk ? this.noClaudeToken(this.liveFor(account)) : this.liveFor(account),
     );
+    if (bk) Object.assign(cmd.env, bk.env);
     const parser = new ClaudeStreamParser();
+    const hooks = bk ? {} : this.sessionHooks(dir, parser, account);
     return spawnSession({
       bin: cmd.bin,
       args: cmd.args,
@@ -819,10 +901,14 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       env: cmd.env,
       inheritEnv: false,
       parseLine: (l) => parser.parseLine(l),
-      usage: () => parser.usage(),
+      usage: () =>
+        bk
+          ? stampBackendUsage(parser.usage(), { backend: bk.backend, model: bk.model, source: bk.source })
+          : parser.usage(),
       logFile: input.logFile,
       exitError: () => (parser.resultError ? `claude result: ${parser.resultError}` : undefined),
-      ...this.sessionHooks(dir, parser, account),
+      ...hooks,
+      ...(bk ? { onExit: async () => bk.cleanup() } : {}),
     });
   }
 
