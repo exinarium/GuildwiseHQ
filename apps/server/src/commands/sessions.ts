@@ -25,6 +25,7 @@ import { threadMessageById } from '../queries/threads.ts';
 import { sessionCost } from '../sessions/cost.ts';
 import { workstationServesOrg } from '../simulation/fit.ts';
 import { orgScope, userActor } from './common.ts';
+import { followProjectPacks } from './pack-follow.ts';
 
 /** `ad-hoc-<slug>`: a persona cast on the fly from a one-line brief (the brief is its stance; it is not in the registry). */
 export const isAdHocPersona = (key: string): boolean => key.startsWith('ad-hoc-');
@@ -249,7 +250,7 @@ export async function createSession(ctx: Ctx, who: Who, req: CreateSessionReques
       'start a chat with a persona from the registry (POST /api/persona-chats)',
     );
   // Any member of the organization may start a session; it runs on their own workstation (assertWorkstation below).
-  return withAppendTx(ctx.pool, async (tx) => {
+  const created = await withAppendTx(ctx.pool, async (tx) => {
     if (req.projectId) {
       const p = await loadVisibleProject(tx, who.userId, req.projectId);
       if (p.org_id !== who.orgId) throw notFound('project not found');
@@ -310,6 +311,15 @@ export async function createSession(ctx: Ctx, who: Who, req: CreateSessionReques
     await ctx.store.append(events, { tx });
     return sessionDto(ctx, (await one(tx, 'SELECT * FROM threads WHERE id=$1', [threadId])) as Row, tx);
   });
+  // The project's approved packs follow the session to its workstation (the person is asked first): R3c, pack-follow.ts.
+  if (req.projectId && created.workstationId)
+    await followProjectPacks(ctx, {
+      orgId: who.orgId,
+      projectId: req.projectId,
+      workstationId: created.workstationId,
+      userId: who.userId,
+    }).catch((err) => ctx.log.warn({ err }, 'project packs could not follow the session'));
+  return created;
 }
 
 export async function listSessions(

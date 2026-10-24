@@ -90,7 +90,14 @@ export async function applyHolders(
   ctx: Ctx,
   tx: Tx,
   pack: Pack,
-  by: { userId: string; name?: string },
+  by: {
+    userId: string;
+    name?: string;
+    /** Why the pack is going to these workstations, said in the request to a member (R3c: a session in the project). */
+    why?: string;
+    /** The person who acts is not exempt from the opt-in for their own workstation (a session's creator is asked). */
+    askActor?: boolean;
+  },
   newIds: string[],
   credential?: PackCredentialShares,
 ): Promise<HolderChange> {
@@ -165,7 +172,7 @@ export async function applyHolders(
     const w = known.get(id);
     if (!w) continue;
     // the admin's own workstations (the one who added the pack, or the one changing the holders) need no opt-in
-    if (w.user_id === pack.added_by || w.user_id === by.userId) continue;
+    if (w.user_id === pack.added_by || (w.user_id === by.userId && !by.askActor)) continue;
     const deskItemId = randomUUID();
     pending.add(id);
     events.push(
@@ -178,7 +185,7 @@ export async function applyHolders(
             kind: 'approval',
             subkind: PACK_ASSIGNMENT_SUBKIND,
             title: `Allow the pack "${pack.name}" on ${w.name}?`,
-            body: assignmentBody(pack, by.name),
+            body: assignmentBody(pack, by.name, by.why),
             options: [],
             blocking: false,
             pinned: false,
@@ -288,10 +295,12 @@ const isPending = async (db: Queryable, packId: string, workstationId: string): 
     [packId, workstationId],
   ));
 
-function assignmentBody(pack: Pack, adminName?: string): string {
+function assignmentBody(pack: Pack, adminName?: string, why?: string): string {
   const from = pack.source === 'authored' ? 'an authored capability pack' : `the git repository ${pack.url}`;
   return [
-    `${adminName ?? 'An organization admin'} wants to put the capability pack "${pack.name}" (${from}) on your workstation.`,
+    why
+      ? `${why} It uses the capability pack "${pack.name}" (${from}), which is not on your workstation yet.`
+      : `${adminName ?? 'An organization admin'} wants to put the capability pack "${pack.name}" (${from}) on your workstation.`,
     'A pack adds skills, personas and playbooks that agents and sessions on this workstation can load. Nothing is downloaded until you accept.',
     pack.credential_kind
       ? 'The repository is private: the admin sealed a deploy key or token to this workstation. It stays on the workstation and is only used to fetch this pack.'
