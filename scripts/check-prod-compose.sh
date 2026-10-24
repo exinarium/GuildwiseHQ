@@ -40,6 +40,15 @@ echo "health: $(cat "$WORK/health.json")"
 grep -q '"ok":true' "$WORK/health.json"
 dc logs app | grep -q "applied .* migration" && echo "migrations applied on boot"
 
+# The help videos come from the media container through the app: manifest, and a Range request (seeking).
+"${CURL[@]}" "$ORIGIN/videos/manifest.json" | grep -q '"videos"'
+SLUG="$("${CURL[@]}" "$ORIGIN/videos/manifest.json" | sed -n 's/.*"path": "\/videos\/\([a-z0-9-]*\)\.mp4".*/\1/p' | head -1)"
+if [ -n "$SLUG" ]; then
+  "${CURL[@]}" -s -o /dev/null -D "$WORK/range.txt" -H 'Range: bytes=0-99' "$ORIGIN/videos/$SLUG.mp4"
+  grep -qi '^HTTP/[0-9.]* 206' "$WORK/range.txt" && grep -qi '^content-range: bytes 0-99/' "$WORK/range.txt"
+  echo "media: manifest served and Range request answered with 206 ($SLUG.mp4)"
+fi
+
 dc exec -T app node dist/admin-create.mjs --email prod@test.local --name Prod --password prod-password-1234
 J=(-c "$WORK/jar" -b "$WORK/jar" -H "Origin: $ORIGIN" -H "content-type: application/json")
 "${CURL[@]}" "${J[@]}" -X POST "$ORIGIN/api/auth/login" -d '{"email":"prod@test.local","password":"prod-password-1234"}' >/dev/null

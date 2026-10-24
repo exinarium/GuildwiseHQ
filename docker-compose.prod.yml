@@ -1,4 +1,4 @@
-# Production stack: app (API + web) + Postgres + Caddy (HTTPS).
+# Production stack: app (API + web) + media (help videos) + Postgres + Caddy (HTTPS).
 #   cp .env.prod.example .env && edit it, then:  docker compose -f docker-compose.prod.yml up -d --build
 # See docs/DEPLOY.md.
 services:
@@ -42,10 +42,24 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-info}
       # Simulation organizations keep their runner data and local repositories here (see docs/DEPLOY.md).
       AOM_SIMULATION_DIR: /data/simulation
+      # The help videos: the app forwards /videos/* to the media service (unset = no videos). docs/DEPLOY.md "Help videos".
+      AOM_MEDIA_URL: ${AOM_MEDIA_URL:-http://media:80}
     volumes:
       - simulation:/data/simulation
     expose:
       - "4600"
+
+  # The help videos (media/Dockerfile): built from media/ only, so an app release never rebuilds or re-uploads them.
+  # scripts/media-changed.sh tells whether media/ changed; scripts/media-build.sh builds the image with its content hash.
+  media:
+    build:
+      context: ./media
+      args:
+        MEDIA_HASH: ${MEDIA_HASH:-}
+    image: ${AOM_MEDIA_IMAGE:-aom-media:latest}
+    restart: unless-stopped
+    expose:
+      - "80"
 
   # Optional catch-all mail sink for trying the stack without an SMTP relay: --profile mail (UI on 127.0.0.1:8025).
   mailpit:

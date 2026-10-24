@@ -1,7 +1,9 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GettingStartedVideo } from '../components/help/GettingStartedVideo.tsx';
+import { resetVideoManifest } from '../lib/video-manifest.ts';
+import { serveVideos } from './video-fixtures.ts';
 
 const info = {
   title: 'Getting started with Guildwise HQ',
@@ -17,11 +19,9 @@ const info = {
 };
 
 const respond = (body: unknown, ok = true) =>
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(async () => ({ ok, json: async () => body })),
-  );
+  serveVideos({ listed: ['getting-started'], infos: ok && body ? ['getting-started'] : [] }, () => body);
 
+beforeEach(() => resetVideoManifest());
 afterEach(() => vi.unstubAllGlobals());
 
 describe('the getting-started video', () => {
@@ -30,9 +30,12 @@ describe('the getting-started video', () => {
     const user = userEvent.setup();
     render(<GettingStartedVideo />);
     const player = (await screen.findByTestId('getting-started-player')) as HTMLVideoElement;
-    expect(player.querySelector('source')).toHaveAttribute('src', '/videos/getting-started.webm');
+    expect(player.querySelector('source')).toHaveAttribute(
+      'src',
+      '/videos/getting-started.webm?v=sha-getting-started-webm',
+    );
     const track = player.querySelector('track');
-    expect(track).toHaveAttribute('src', '/videos/getting-started.vtt');
+    expect(track).toHaveAttribute('src', '/videos/getting-started.vtt?v=sha-getting-started-vtt');
     expect(track).toHaveAttribute('kind', 'captions');
     expect(screen.getAllByRole('listitem')).toHaveLength(3);
     expect(screen.getByTestId('video-chapter-3')).toHaveTextContent('1:05');
@@ -41,17 +44,24 @@ describe('the getting-started video', () => {
     expect(player.currentTime).toBe(30);
   });
 
-  it('says it is coming soon when there is no video yet (an HTML fallback page, a 404 or a network error)', async () => {
+  it('is hidden when there is no video: no description, a missing slug in the manifest, an unreachable media service', async () => {
     for (const setup of [
       () => respond(null),
       () => respond({}, false),
-      () => vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline'))),
+      () => serveVideos({ listed: ['board'] }),
+      () => serveVideos({ listed: ['getting-started'], manifest: 'down' }),
+      () => serveVideos({ listed: ['getting-started'], manifest: 'unavailable' }),
+      () => serveVideos({ listed: ['getting-started'], manifest: 'html' }),
     ]) {
-      setup();
-      const { unmount } = render(<GettingStartedVideo />);
-      await waitFor(() => expect(screen.getByTestId('video-coming-soon')).toBeInTheDocument());
+      resetVideoManifest();
+      const f = setup();
+      const { container } = render(<GettingStartedVideo />);
+      await waitFor(() => expect(f).toHaveBeenCalled());
+      await new Promise((r) => setTimeout(r, 0));
+      expect(container).toBeEmptyDOMElement();
+      expect(screen.queryByTestId('video-coming-soon')).toBeNull();
       expect(screen.queryByTestId('getting-started-player')).toBeNull();
-      unmount();
+      cleanup();
     }
   });
 });

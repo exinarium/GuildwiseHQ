@@ -1,5 +1,7 @@
 /* Guildwise service worker: installable shell, offline page, Web Push. Served from the web root (scope /).
- * It never caches /api, /ws or HTML: pages always come from the network; only the hashed build assets are kept. */
+ * It never caches /api, /ws, /videos or HTML: pages always come from the network; only the hashed build assets are kept.
+ * The help videos come from the media container through the app server: they are big, requested with Range and may be
+ * missing (media service down), so a failed, partial or opaque response is never stored. */
 const VERSION = 'v1';
 const SHELL = `guildwise-shell-${VERSION}`;
 const ASSETS = `guildwise-assets-${VERSION}`;
@@ -33,6 +35,8 @@ self.addEventListener('fetch', (event) => {
   if (url.origin !== self.location.origin) return;
   // Live data and sockets are never cached.
   if (url.pathname.startsWith('/api/') || url.pathname === '/api' || url.pathname.startsWith('/ws')) return;
+  // Videos, captions and their manifest: straight to the network (the browser's HTTP cache handles the immutable URLs).
+  if (url.pathname.startsWith('/videos/') || (req.headers && req.headers.get('range'))) return;
 
   if (req.mode === 'navigate') {
     // Network first; a failed navigation shows the offline page.
@@ -46,7 +50,8 @@ self.addEventListener('fetch', (event) => {
         const hit = await cache.match(req);
         if (hit) return hit;
         const res = await fetch(req);
-        if (res.ok) cache.put(req, res.clone());
+        // Only a complete, same-origin 200: never a failure, a partial (206) or an opaque response.
+        if (res.status === 200 && res.type !== 'opaque') cache.put(req, res.clone());
         return res;
       }),
     );

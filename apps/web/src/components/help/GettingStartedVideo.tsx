@@ -1,5 +1,11 @@
 import { Clapperboard } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import {
+  loadVideoManifest,
+  type ManifestVideo,
+  slugOfInfoUrl,
+  versionedUrl,
+} from '../../lib/video-manifest.ts';
 import { GETTING_STARTED_SLUG, videoInfoUrl } from '../../lib/videos.ts';
 
 /** What the harness of `e2e/video/*.spec.ts` writes next to every video (seconds from the start). */
@@ -24,9 +30,25 @@ function isInfo(v: unknown): v is VideoInfo {
   return !!i && typeof i.src === 'string' && Array.isArray(i.chapters);
 }
 
+/** Points the files of a description at the manifest's content-addressed URLs and drops what the media image lacks. */
+function withManifest(info: VideoInfo, entry: ManifestVideo, slug: string): VideoInfo | null {
+  const known = new Map<string, string>();
+  for (const f of [...Object.values(entry.files), entry.captions].filter((x) => !!x))
+    known.set(f.path, versionedUrl(f));
+  const sources = (info.sources?.length ? info.sources : [{ src: info.src, type: info.type }])
+    .filter((s) => known.has(s.src))
+    .map((s) => ({ ...s, src: known.get(s.src) as string }));
+  const first = sources[0];
+  if (!first) return null;
+  const captions = known.get(info.captions ?? `/videos/${slug}.vtt`);
+  const { captions: _drop, ...rest } = info;
+  return { ...rest, src: first.src, type: first.type, sources, ...(captions ? { captions } : {}) };
+}
+
 /**
- * Loads the video's description once per mounting; `null` while loading, `'none'` when there is no video yet. `url` is
- * the chapters JSON (default: Getting started); `null` skips the request and stays `'none'`.
+ * Loads the video's description once per mounting; `null` while loading, `'none'` when there is no video (the media
+ * service is down, the manifest does not list the slug, or the description cannot be read). `url` is the chapters JSON
+ * (default: Getting started); `null` skips every request and stays `'none'`.
  */
 export function useVideoInfo(url: string | null = VIDEO_INFO_URL): VideoInfo | null | 'none' {
   const [info, setInfo] = useState<VideoInfo | null | 'none'>(url ? null : 'none');
@@ -37,10 +59,17 @@ export function useVideoInfo(url: string | null = VIDEO_INFO_URL): VideoInfo | n
     }
     setInfo(null);
     let live = true;
-    fetch(url, { headers: { accept: 'application/json' } })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((j: unknown) => live && setInfo(isInfo(j) ? j : 'none'))
-      .catch(() => live && setInfo('none'));
+    const slug = slugOfInfoUrl(url);
+    loadVideoManifest()
+      .then(async (manifest) => {
+        const entry = slug ? manifest?.videos[slug] : undefined;
+        if (!entry) return 'none' as const;
+        const r = await fetch(versionedUrl(entry.info), { headers: { accept: 'application/json' } });
+        const j: unknown = r.ok ? await r.json() : null;
+        return isInfo(j) ? (withManifest(j, entry, slug as string) ?? 'none') : ('none' as const);
+      })
+      .catch(() => 'none' as const)
+      .then((result) => live && setInfo(result));
     return () => {
       live = false;
     };
@@ -75,6 +104,7 @@ export function VideoPlayer({
   };
   return (
     <>
+      {/* biome-ignore lint/a11y/useMediaCaption: the captions track is rendered whenever the manifest lists one */}
       <video
         ref={video}
         controls
@@ -94,13 +124,7 @@ export function VideoPlayer({
           />
         ))}
         {/* the narration as captions (on by default; the CC button turns them off) */}
-        <track
-          kind="captions"
-          src={info.captions ?? `/videos/${slug}.vtt`}
-          srcLang="en"
-          label="English"
-          default
-        />
+        {info.captions && <track kind="captions" src={info.captions} srcLang="en" label="English" default />}
       </video>
       <ol className="mt-3 flex flex-wrap gap-2" aria-label="Chapters">
         {info.chapters.map((c, i) => (
@@ -123,13 +147,14 @@ export function VideoPlayer({
 
 /**
  * The "Getting started" video with its chapters (the Get started checklist, a workstation, a project, a lean team, a card
- * and the BA, the Desk, the board, Help). The video is a static file recorded by `pnpm --filter @aom/e2e video`; until it exists, or when it cannot be
- * loaded, a short "coming soon" note takes its place (the written article below says the same).
+ * and the BA, the Desk, the board, Help). The files live in the media container (media/videos); when the media service is
+ * down, the manifest does not list the video or no encoding loads, the whole section is hidden (the written article says
+ * the same).
  */
 export function GettingStartedVideo() {
   const info = useVideoInfo();
   const [broken, setBroken] = useState(false);
-  if (info === null) return null;
+  if (info === null || info === 'none' || broken) return null;
   return (
     <section
       aria-labelledby="gs-video-h"
@@ -145,17 +170,7 @@ export function GettingStartedVideo() {
         started checklist, a workstation, a project, a lean team, a first card and the business analyst, the
         Desk and the board. Captions are on; use the CC button to turn them off.
       </p>
-      {info === 'none' || broken ? (
-        <p
-          role="status"
-          data-testid="video-coming-soon"
-          className="rounded-control border border-line bg-sunken px-3 py-6 text-center text-sm text-muted"
-        >
-          The getting-started video is coming soon. The steps are written out in the Getting started article.
-        </p>
-      ) : (
-        <VideoPlayer info={info} onBroken={() => setBroken(true)} />
-      )}
+      <VideoPlayer info={info} onBroken={() => setBroken(true)} />
     </section>
   );
 }

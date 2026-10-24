@@ -8,6 +8,8 @@ import { buildNav } from '../components/shell/nav-config.ts';
 import { TourProvider } from '../components/tour/Tour.tsx';
 import { useTour } from '../components/tour/TourContext.tsx';
 import { type TourRole, tourSteps } from '../lib/tour.ts';
+import { resetVideoManifest } from '../lib/video-manifest.ts';
+import { manifestOf } from './video-fixtures.ts';
 
 const navIdsOf = (canManage: boolean) => [
   ...buildNav({ projectKey: 'P', hasResearch: true, hasEnvironments: true, canManage }).sections.flatMap(
@@ -197,6 +199,8 @@ const makeMe = (tour: unknown, over: Record<string, unknown> = {}) =>
 beforeEach(() => {
   puts.length = 0;
   videoInfo = null;
+  mediaUp = true;
+  resetVideoManifest();
   workstations = [{ id: U, status: 'active' }];
   vi.stubGlobal(
     'fetch',
@@ -209,7 +213,9 @@ beforeEach(() => {
         return json(me);
       }
       if (url === '/api/workstations') return json({ workstations });
-      if (url === '/videos/getting-started.json')
+      if (url === '/videos/manifest.json')
+        return mediaUp ? json(manifestOf('getting-started')) : new Response('down', { status: 503 });
+      if (url.split('?')[0] === '/videos/getting-started.json')
         return videoInfo ? json(videoInfo) : new Response('<html></html>', { status: 200 });
       return json({});
     }),
@@ -218,6 +224,8 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 let videoInfo: unknown = null;
+/** False: the media service is down, so the manifest cannot be loaded. */
+let mediaUp = true;
 const NAV = new Set(['board', 'desk', 'workstations', 'settings', 'help']);
 
 function Where() {
@@ -379,8 +387,8 @@ describe('the first-login tour', () => {
   it('the first step shows the training video with captions and chapters, and pauses it when moving on', async () => {
     videoInfo = {
       title: 'Getting started with Guildwise HQ',
-      src: '/videos/getting-started.mp4',
-      type: 'video/mp4',
+      src: '/videos/getting-started.webm',
+      type: 'video/webm',
       captions: '/videos/getting-started.vtt',
       duration: 180,
       chapters: [
@@ -412,6 +420,26 @@ describe('the first-login tour', () => {
     await new Promise((r) => setTimeout(r, 30));
     expect(screen.queryByTestId('getting-started-player')).toBeNull();
     expect(screen.getByRole('dialog')).toHaveTextContent(/from an empty organization to a team at work/);
+    await user.click(screen.getByTestId('tour-next'));
+    expect(screen.getByTestId('tour-title')).toHaveTextContent('Welcome to Guildwise HQ');
+  });
+
+  it('shows the text intro only when the media service is down, and the tour carries on', async () => {
+    videoInfo = {
+      title: 'x',
+      src: '/videos/getting-started.webm',
+      type: 'video/webm',
+      duration: 1,
+      chapters: [],
+    };
+    mediaUp = false;
+    me = makeMe({ status: 'new', step: 0 });
+    const user = userEvent.setup();
+    mount();
+    await screen.findByRole('dialog');
+    await new Promise((r) => setTimeout(r, 30));
+    expect(screen.queryByTestId('tour-video')).toBeNull();
+    expect(screen.queryByTestId('getting-started-player')).toBeNull();
     await user.click(screen.getByTestId('tour-next'));
     expect(screen.getByTestId('tour-title')).toHaveTextContent('Welcome to Guildwise HQ');
   });

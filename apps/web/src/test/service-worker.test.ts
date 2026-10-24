@@ -10,7 +10,14 @@ const manifest = JSON.parse(
 );
 
 type Handler = (e: Record<string, unknown>) => void;
-function load(opts: { windows?: Array<Record<string, unknown>>; badge?: boolean } = {}) {
+function load(
+  opts: {
+    windows?: Array<Record<string, unknown>>;
+    badge?: boolean;
+    caches?: unknown;
+    fetch?: (req: unknown) => Promise<unknown>;
+  } = {},
+) {
   const handlers: Record<string, Handler> = {};
   const shown: Array<{ title: string; options: Record<string, any> }> = [];
   const setAppBadge = vi.fn(async () => undefined);
@@ -32,7 +39,14 @@ function load(opts: { windows?: Array<Record<string, unknown>>; badge?: boolean 
   };
   vm.runInNewContext(
     source,
-    { self, caches: {}, URL, Response, fetch: vi.fn(async () => new Response('ok')), Promise },
+    {
+      self,
+      caches: opts.caches ?? {},
+      URL,
+      Response,
+      fetch: opts.fetch ?? vi.fn(async () => new Response('ok')),
+      Promise,
+    },
     { filename: 'sw.js' },
   );
   const waits: Promise<unknown>[] = [];
@@ -152,6 +166,45 @@ describe('fetch', () => {
     expect(respondWith).not.toHaveBeenCalled();
     sw.handlers.fetch?.(ev('https://app.example.com/desk', 'GET', 'navigate'));
     expect(respondWith).toHaveBeenCalledTimes(1);
+  });
+
+  it('never intercepts the help videos, their captions or the manifest (including Range requests)', () => {
+    const sw = load();
+    const respondWith = vi.fn();
+    const ev = (url: string, headers: Record<string, string> = {}) => ({
+      request: { url, method: 'GET', mode: 'no-cors', headers: new Headers(headers) },
+      respondWith,
+    });
+    sw.handlers.fetch?.(ev('https://app.example.com/videos/desk.mp4?v=abc', { range: 'bytes=0-' }));
+    sw.handlers.fetch?.(ev('https://app.example.com/videos/desk.vtt'));
+    sw.handlers.fetch?.(ev('https://app.example.com/videos/manifest.json'));
+    sw.handlers.fetch?.(ev('https://app.example.com/other.mp4', { range: 'bytes=10-20' }));
+    expect(respondWith).not.toHaveBeenCalled();
+  });
+
+  it('keeps a hashed asset only when the response is a complete 200 (not a failure, a 206 or an opaque one)', async () => {
+    const put = vi.fn();
+    const store = { match: async () => undefined, put };
+    const responses = [
+      { status: 200, type: 'basic', ok: true },
+      { status: 404, type: 'basic', ok: false },
+      { status: 206, type: 'basic', ok: true },
+      { status: 200, type: 'opaque', ok: false },
+    ].map((r) => ({ ...r, clone: () => r }));
+    let n = 0;
+    const sw = load({
+      caches: { open: async () => store },
+      fetch: async () => responses[n++],
+    });
+    for (let i = 0; i < responses.length; i++) {
+      const respondWith = vi.fn();
+      sw.handlers.fetch?.({
+        request: { url: `https://app.example.com/assets/a${i}.js`, method: 'GET', mode: 'no-cors' },
+        respondWith,
+      });
+      await respondWith.mock.calls[0]?.[0];
+    }
+    expect(put).toHaveBeenCalledTimes(1);
   });
 
   it('only skips waiting when the page asks', async () => {
