@@ -339,3 +339,15 @@ Details in `docs/ARCHITECTURE.md` section 38.10. Migration 2481; no new runner c
 - Q58 Hire from a private pack: an **org role with a warning**, as built.
 - Q59 Role update offer: all agents of the role move together, as built.
 - Q60 **Members can hire from packs** in the HR page, within their existing hiring permissions.
+
+**Owner decisions on the open gaps (2026-10-24), to build in R3c along with the decisions above**
+- **Codex:** run it inside the runner's own harness sandbox and egress proxy, like Gemini and opencode, to get the same allow-list. Add shift resume and token-based cost where Codex reports usage.
+- **Assistant help:** split the help pack by topic and load sections on demand, instead of one 16k-token pack.
+- **Spending-cap accuracy:** live spend counts owner-set prices and running delegates. The private-endpoint check resolves hostnames for direct-runtime base URLs.
+- **Late replies:** each dispatch gets an attempt id, so a late reply from a turn that was sent back to the queue is matched to its attempt instead of being dropped.
+- **Polish:**
+  - "Hire a BA" opens the full hire dialog, prefilled.
+  - Persona chat gets an optional budget and time limit, plus 90-day retention.
+  - Authored packs show a diff against the approved version.
+- **Project packs follow sessions:** a project's packs are synced (with member opt-in) to the session creator's workstation, so they work in that project's sessions.
+- **UAT deploy:** the coordinator updates the owner's WSL2 workstation runner to the branch runner and keeps the old version for rollback.
