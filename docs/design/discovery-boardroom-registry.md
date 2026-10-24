@@ -491,3 +491,45 @@ Five owner-driven fixes on `feat/discovery-boardroom`, found while testing the U
 ### Coordination
 - Migration number ranges: S-A 2510–2519, S-B1 2520–2529, S-B2 2530–2539.
 - Only S-A bumps `RUNNER_VERSION` (0.1.58). If B1 or B2 need runner changes, they say so and the coordinator bumps it at merge.
+
+## S-B1 as built (2026-10-25, branch `feat/governance`)
+
+Technical detail is in `docs/ARCHITECTURE.md` section 39. Migrations 2520 (gates, gated actions, notification links) and 2521 (offboarding purges). **No runner change; `RUNNER_VERSION` is untouched.**
+
+**1. Approve and answer from the notification.**
+- A desk push carries up to two buttons: Approve and Reject for an approval; the recommended option, then the next, for a question with options. The notification's own tap still opens the Desk, which is the way to the other options.
+- Each button is its own link `/m/desk/<token>`: an HMAC-signed id whose row binds it to one user, one item, one action, 15 minutes and one use. The service worker opens it; the page asks the person to sign in (`/login?next=`), shows the item and waits. `GET` previews, `POST /apply` applies through the normal `resolveDeskItem`/`answerDeskItem`.
+- Wrong person: 403 and the token stays unspent. Reused: 409. Expired: 410. Each outcome, applied or refused, is the audit event `DeskNotificationActionTaken`.
+- No buttons for items that need input of their own (manual QA, the code approval step, the playbook workstation choice, CEO decisions, approvals with options).
+
+**2. What it may do.**
+- `GET /api/agents/:id/may-do` and **What it may do** on the agent card show tools, repositories, data scopes, provider and the key that pays, delegation grants (role-inherited and excluded marked), playbook, skill and pack grants with their scopes, spend and budgets, and the gates.
+- Gates are opt-in per agent and class: `merge_push` (the existing merge approval desk item, for a merge, a pull request or a pushed branch of a card the agent built), `deploy` (the DevOps engineer's `aom deploy run`), `delegation`, `playbook_run`. The gated RPC answers `approval_required`, raises one desk item and, after the approval, lets the agent's next identical call through once. `outbound_mail` is shown as always on (every outbound draft already needs the manager); `pack_scripts` is shown as not available.
+- Scopes: manifest `scopes:`, `metadata.scopes`, persona and playbook frontmatter `scopes:`; shown in the `/` menu, the pack item and the may-do screen; a grant that needs a scope the agent lacks is refused with 409 `scopes_missing` until the request says `confirmScopes: true` (UI: "Grant anyway").
+
+**3. Audit export and offboarding.**
+- `GET /api/org/audit/export` streams CSV or JSON (range up to 366 days, actor and type filters, secrets redacted) for Owners and Admins, and is itself audited.
+- Removing a member runs the checklist and returns a report (steps in the removal dialog before, report after). Details in the architecture section.
+
+**Tests.** Server: `desk-notification-actions` (14), `agent-gates` (15), `audit-export` (10), `org-offboarding` (6). Shared: `governance` (7). Web: `desk-action-confirm` (9), `may-do` (4), `offboarding-audit` (3), `service-worker` (+3).
+
+### Decided by default (the owner was asleep; change any of these)
+- **Buttons.** Two at most (what push services show). The rest is one tap away on the Desk.
+- **Link lifetime and use.** 15 minutes, once, signed in as the person it was made for. No separate re-authentication: a signed-in session (which already needs the password and two-factor login) is the proof. Code approvals never get buttons, because the rule there is that you approve the diff you are shown.
+- **Who may gate.** Whoever manages the agent switches a gate on; only an Owner or Admin switches it off. The CEO is excluded (it keeps its policy). No agent has a gate until someone sets one.
+- **A gate pauses by refusing and raising a desk item.** The agent is told to retry the same command; an approval is single-use and valid for two hours; a rejection is reported for an hour without a new item. A running shift is not woken after the approval.
+- **Gated landing is the existing merge approval.** It applies to cards whose original builder or last agent is gated, to merge, pull request and push-branch alike, and ignores the project's "merge large without approval" waiver. The lean-team owner approval step, which comes first, already covers it.
+- **Who approves a gate.** Org-level items (delegation, playbook, deploy) go to the Owner and Admins; with a card, the card's owner.
+- **What counts as audit.** Actions with a user actor in the organization plus a few governance events the system writes. Message bodies, drafts, read marks and similar content are left out. Payloads are redacted by key name and by secret patterns, keeping ids and e-mail addresses.
+- **Export size.** At most 366 days per export, streamed in batches.
+- **Offboarding scope.** Sign-out, pairing codes, notification devices and workstation unlinking happen only when it was the person's last organization (their other organizations stay untouched, the existing rule). Everything of this organization is always removed or moved.
+- **Offboarding ownership.** Sessions and organization packs they owned go to the person who removed them (the Owner if they left or were deactivated). Private chats and private packs are deleted after **30 days** (cancelled if the person rejoins first). Packs authored on their workstation stay held there and are flagged.
+- **Key copies.** The organization's key is cleared from their workstations; when a copy was stored, the report advises rotating the key (a machine that is unlinked never gets the command).
+- **Scopes.** A small known vocabulary; an unknown scope is displayed and never blocks. A scope added by the manifest changes the item hash (review again); one in the files already does.
+- **API tokens.** The product has no per-user API tokens; runner tokens end with the workstation.
+
+### Gaps
+- **Pack scripts gate** is listed but not enforced: scripts run on the workstation and the server has no choke point (it would need the runner to ask before running a script). Scripts stay off until an Owner enables them per pack.
+- **Pack scopes from released runners.** A runner built before this reports no scopes, so no warning appears for packs it indexed until it is rebuilt with this shared code (no protocol change; the coordinator decides whether to bump `RUNNER_VERSION`).
+- **The agent is not woken** when a gate is approved; it retries when it next acts. A chat or card shift that has ended picks the work up on its next turn.
+- **Deactivation by the platform** does not deliver the queued key-clear commands at once (they go out when the workstation next connects).
