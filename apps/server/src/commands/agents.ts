@@ -22,7 +22,7 @@ import {
 import { orgRoleOf } from '../auth/org-context.ts';
 import type { AuthSession } from '../auth/sessions.ts';
 import { projectRole } from '../authz/scope.ts';
-import { loadRole } from '../catalogue/loader.ts';
+import { isOthersPrivateRole, loadRole } from '../catalogue/loader.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
@@ -322,6 +322,9 @@ export async function hireAgent(
     if (!uses) await assertWithinLimit(tx, orgId, 'workstations');
     const roleDef = await loadRole(tx, orgId, req.roleKey);
     if (!roleDef) throw badRequest('unknown_role', `role '${req.roleKey}' does not exist`);
+    // a role made from someone's private pack is that person's alone
+    if (isOthersPrivateRole(roleDef.definition.source, user.id))
+      throw badRequest('unknown_role', `role '${req.roleKey}' does not exist`);
     if (roleDef.definition.key === DEVOPS_ROLE_KEY)
       throw badRequest('invalid_role', 'DevOps engineers are hired automatically per workstation');
     if (roleDef.definition.key === 'ceo')

@@ -12,5 +12,7 @@ export const PackProvenanceSchema = z.object({
   /** Hash of the persona's files when the role was made: a different hash later means the pack changed it. */
   hash: z.string().regex(/^[0-9a-f]{64}$/),
   visibility: z.enum(['org', 'private']).default('org'),
+  /** A private pack's owner: a role made from it is the owner's alone (listed and hired by nobody else). */
+  ownerUserId: z.uuid().optional(),
 });
 export type PackProvenance = z.infer<typeof PackProvenanceSchema>;

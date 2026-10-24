@@ -479,9 +479,21 @@ export function provenanceLabel(p: Pick<PackProvenance, 'packName' | 'capability
   return `${displayPackName(p.packName)} · ${cap} · ${version}`;
 }
 
-/** The role key a persona hired from a pack gets: `<pack>-<capability>`, within the role key pattern. */
-export const roleKeyForPackPersona = (packName: string, capability: string): string => {
+/**
+ * The role key a persona hired from a pack gets: `<pack>-<capability>`, within the role key pattern. A PRIVATE pack's key also
+ * carries the first digits of the pack's id (`<pack>-<capability>-p1a2b3c4d`): a person's private pack that happens to be named
+ * like an organization pack can never land on the organization's role, and two people's packs of one name get roles of their own.
+ */
+export const roleKeyForPackPersona = (
+  packName: string,
+  capability: string,
+  scope?: { visibility: 'org' | 'private'; packId: string },
+): string => {
   const cap = capability.includes(':') ? capability.split(':').slice(1).join(':') : capability;
+  if (scope?.visibility === 'private') {
+    const tag = `p${scope.packId.replace(/-/g, '').slice(0, 8)}`;
+    return `${`${packName}-${cap}`.slice(0, 60 - tag.length - 1).replace(/-+$/, '')}-${tag}`;
+  }
   return `${packName}-${cap}`.slice(0, 60).replace(/-+$/, '');
 };
 
@@ -620,6 +632,13 @@ export interface PersonaRoleInput {
   sha: string;
   ref: string | null;
   visibility: 'org' | 'private';
+  /** A private pack's owner (the role is theirs alone). */
+  ownerUserId?: string | undefined;
+  /**
+   * Whether the role may carry the widest tool profile the persona declares. An organization pack's owner approved it, so yes;
+   * a private pack's role carries only what its hirer may grant (an Owner or Admin: everything; a Member: read only).
+   */
+  mayWiden?: boolean;
   version: number;
   /** Skill keys the pack carries (`<pack>:<skill>` in the registry): a persona's plain skill names are mapped to them. */
   packSkills?: readonly string[];
@@ -642,6 +661,7 @@ export function roleFromPersona(i: PersonaRoleInput): RoleDefinition {
     sha: i.sha,
     hash: i.hash,
     visibility: i.visibility,
+    ...(i.visibility === 'private' && i.ownerUserId ? { ownerUserId: i.ownerUserId } : {}),
   };
   const label = provenanceLabel(provenance);
   const instructions = [
@@ -651,10 +671,12 @@ export function roleFromPersona(i: PersonaRoleInput): RoleDefinition {
     body.trim(),
     `(This role was made from the persona "${i.capability}" of the pack ${i.packName} at ${label}. It works in chats and sessions; it does not claim workflow stages.)`,
   ].join('\n\n');
-  const skills = (fm.skills ?? []).map((s) => (i.packSkills?.includes(`${i.packName}:${s}`) ? `${i.packName}:${s}` : s));
+  const skills = (fm.skills ?? []).map((s) =>
+    i.packSkills?.includes(`${i.packName}:${s}`) ? `${i.packName}:${s}` : s,
+  );
   const model = fm.model && /^[a-z0-9._:/-]+$/i.test(fm.model) ? fm.model : 'sonnet';
   return {
-    key: roleKeyForPackPersona(i.packName, i.capability),
+    key: roleKeyForPackPersona(i.packName, i.capability, { visibility: i.visibility, packId: i.packId }),
     version: i.version,
     name: fm.name,
     purpose: fm.description.slice(0, 300),
@@ -666,7 +688,7 @@ export function roleFromPersona(i: PersonaRoleInput): RoleDefinition {
     ],
     seniorityLevels: ['senior', 'junior'],
     defaultModel: { runtime: 'claude-code', model, effort: 'medium' },
-    permissions: permissionsForPersona(fm.tools, { mayWiden: true }).permissions,
+    permissions: permissionsForPersona(fm.tools, { mayWiden: i.mayWiden ?? true }).permissions,
     skills,
     claimableStages: [],
     source: PackProvenanceSchema.parse(provenance),

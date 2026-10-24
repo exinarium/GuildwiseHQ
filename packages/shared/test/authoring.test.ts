@@ -266,6 +266,67 @@ describe('a role from a pack persona', () => {
   });
 });
 
+describe('a role from a PRIVATE pack persona (security review finding 3)', () => {
+  const persona3: AuthoredCapability = {
+    kind: 'persona',
+    key: 'analyst',
+    name: 'Analyst',
+    description: 'Turns ideas into briefs.',
+    stance: 'Ask before assuming.',
+    voice: 'Warm',
+    icon: 'A',
+    tools: ['read', 'edit', 'shell', 'web'],
+    prompt: 'Interview the owner.',
+  };
+  const text3 = capabilityFiles(persona3)['analyst.md'] as string;
+  const PACK = '3f2b8c1e-6a43-4c1a-9d52-1a2b3c4d5e6f';
+  const OWNER = '019e3f6a-7b1c-7a2d-8c3e-0123456789a1';
+  const input = {
+    packId: PACK,
+    packName: 'bmad',
+    capability: 'analyst',
+    text: text3,
+    hash: 'a'.repeat(64),
+    sha: 'b'.repeat(40),
+    ref: null,
+    version: 1,
+  };
+
+  it('gets a key of its own: a private pack named like an organization pack never lands on the organization’s role', () => {
+    expect(roleKeyForPackPersona('bmad', 'analyst')).toBe('bmad-analyst');
+    const k = roleKeyForPackPersona('bmad', 'analyst', { visibility: 'private', packId: PACK });
+    expect(k).toBe('bmad-analyst-p3f2b8c1e');
+    expect(k).not.toBe('bmad-analyst');
+    expect(roleKeyForPackPersona('bmad', 'analyst', { visibility: 'org', packId: PACK })).toBe(
+      'bmad-analyst',
+    );
+    // another pack of the same name gets another key; a long name keeps the tag and stays inside the key pattern
+    expect(roleKeyForPackPersona('bmad', 'analyst', { visibility: 'private', packId: OWNER })).not.toBe(k);
+    const long = roleKeyForPackPersona('a'.repeat(40), 'b'.repeat(40), {
+      visibility: 'private',
+      packId: PACK,
+    });
+    expect(long.length).toBeLessThanOrEqual(60);
+    expect(long.endsWith('-p3f2b8c1e')).toBe(true);
+    expect(long).toMatch(/^[a-z0-9]+(-[a-z0-9]+)*$/);
+  });
+
+  it('carries the owner and, for a Member, only the tools a Member may grant; for an Owner or Admin the persona’s own', () => {
+    const member = roleFromPersona({ ...input, visibility: 'private', ownerUserId: OWNER, mayWiden: false });
+    expect(member.key).toBe('bmad-analyst-p3f2b8c1e');
+    expect(member.permissions.allowedTools).toEqual(['read']);
+    expect(member.permissions.mayCommit).toBe(false);
+    expect(member.source).toMatchObject({ visibility: 'private', ownerUserId: OWNER, packId: PACK });
+    const admin = roleFromPersona({ ...input, visibility: 'private', ownerUserId: OWNER, mayWiden: true });
+    expect(admin.permissions.allowedTools).toEqual(['read', 'edit', 'shell', 'web']);
+    // an organization pack's role is not clamped (its owner approved the pack) and has no owner
+    const org = roleFromPersona({ ...input, visibility: 'org' });
+    expect(org.permissions.allowedTools).toEqual(['read', 'edit', 'shell', 'web']);
+    expect(org.source?.ownerUserId).toBeUndefined();
+    expect(RoleDefinitionSchema.safeParse(member).success).toBe(true);
+  });
+});
+
 describe('R3c: versions of an authored pack', () => {
   it('hashes a tree to the content hash a snapshot of it carries', () => {
     const tree = packTree([skill]);

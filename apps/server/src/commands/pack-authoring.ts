@@ -197,6 +197,20 @@ export async function createMyPack(
     );
     if (dup)
       throw conflict('pack_name_taken', `a pack named "${req.name}" already exists: choose another name`);
+    // A private pack may not take the name of an organization pack: its capabilities would read as the organization's
+    // (`bmad:analyst`) and a hire from it could be taken for one from the approved pack.
+    if (req.visibility === 'private') {
+      const org = await one(
+        tx,
+        `SELECT 1 FROM packs WHERE org_id=$1 AND name=$2 AND removed_at IS NULL AND visibility='org'`,
+        [orgId, req.name],
+      );
+      if (org)
+        throw conflict(
+          'pack_name_taken',
+          `an organization pack named "${req.name}" already exists: choose another name for yours`,
+        );
+    }
     await ctx.store.append(
       [
         packEvent(

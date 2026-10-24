@@ -70,6 +70,17 @@ export async function resolveWorkflow(
   return r ? toRow(r) : null;
 }
 
+/**
+ * A role made from someone's PRIVATE pack belongs to that person alone: nobody else lists it or hires from it. (A role without a
+ * recorded owner, from before owners were recorded, is treated as public.)
+ */
+export function isOthersPrivateRole(
+  source: { visibility?: string; ownerUserId?: string } | null | undefined,
+  userId: string,
+): boolean {
+  return source?.visibility === 'private' && !!source.ownerUserId && source.ownerUserId !== userId;
+}
+
 export interface RoleRow {
   id: string;
   orgId: string | null;

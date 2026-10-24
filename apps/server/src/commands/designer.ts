@@ -33,6 +33,7 @@ import {
 import { loadOrg, orgRoleOf, requireFeature } from '../auth/org-context.ts';
 import type { AuthSession } from '../auth/sessions.ts';
 import { projectRole } from '../authz/scope.ts';
+import { isOthersPrivateRole } from '../catalogue/loader.ts';
 import { subworkflowLookupFor } from '../catalogue/subworkflow-lookup.ts';
 import { variantIssues } from '../catalogue/variants.ts';
 import type { Ctx } from '../context.ts';
@@ -688,6 +689,14 @@ export async function orgCatalogue(
   const exts = await rows(ctx.pool, 'SELECT * FROM role_extensions WHERE org_id=$1', [orgId]);
   const roles = new Map<string, OrgCatalogueResponse['roles'][number]>();
   for (const r of roleRows) {
+    // a role made from someone's private pack is that person's alone
+    if (
+      isOthersPrivateRole(
+        (r.definition as { source?: { visibility?: string; ownerUserId?: string } } | null)?.source,
+        user.id,
+      )
+    )
+      continue;
     const k = `${r.org_id ?? ''}/${r.key}`;
     let g = roles.get(k);
     if (!g) {

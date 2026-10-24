@@ -42,6 +42,10 @@ export async function rebaseAgentsToCurrentRoles(
       const pinned = past.filter((p) => p.version === a.role_version).at(-1);
       const base = (pinned?.definition as { permissions?: AgentPermissions } | undefined)?.permissions;
       if (!base) continue;
+      // An agent follows its role, not another role of the same key: a version that comes from another pack than the one the
+      // agent's version came from (or from a pack when the agent's did not) is not followed.
+      const fromPack = (pinned?.definition as { source?: { packId?: string } } | undefined)?.source?.packId;
+      if ((current.definition.source?.packId ?? null) !== (fromPack ?? null)) continue;
       const known = (f: 'allowedTools' | 'deniedShellPatterns' | 'riskTiers') =>
         perms.flatMap((p) => p?.[f] ?? []);
       const next = rebasePermissions(

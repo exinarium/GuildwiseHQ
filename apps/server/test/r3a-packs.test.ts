@@ -14,6 +14,9 @@ import {
 } from '@aom/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { replayVisible, sessionAudienceOf, sessionLevel } from '../src/browser-gateway/visibility.ts';
+import { ensureRole } from '../src/commands/pack-hire.ts';
+import { withAppendTx } from '../src/db/tx.ts';
+import { rebaseAgentsToCurrentRoles } from '../src/hr/follow-role.ts';
 import { rebuildProjections } from '../src/projections/rebuild.ts';
 import { uniqueEmail } from './helpers/app.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
@@ -116,6 +119,7 @@ function revision(pack: string, caps: AuthoredCapability[], n: number): PackSnap
   const s = packSnapshotOf({ name: pack, ref: `v${n}`, sha: 'a'.repeat(64), index });
   return { ...s, sha: s.contentHash };
 }
+const rebaseAll = () => rebaseAgentsToCurrentRoles(w.t.app.ctx, { orgId: w.owner.id });
 const seal = (k: Key, v: unknown) => sealLarge(k.publicKey, JSON.stringify(v));
 
 const lastCommand = (r: FakeRunner, command: string) =>
@@ -1271,6 +1275,207 @@ describe('hire from pack', () => {
       provenance: { warning: null },
     });
     expect((await asOwner('GET', '/api/role-offers')).items).toEqual([]);
+  });
+
+  describe('security review finding 3: a pack adds versions only to a role of its own', () => {
+    const mineIdOf = async () =>
+      (
+        await q(
+          `SELECT id FROM packs WHERE owner_user_id=$1 AND visibility='private' AND removed_at IS NULL AND source='authored' LIMIT 1`,
+          [member.id],
+        )
+      )[0]?.id as string;
+    const versionsOf = async (key: string) =>
+      Number((await q(`SELECT count(*)::int AS n FROM role_definitions WHERE key=$1`, [key]))[0]?.n);
+    /** Answers the next persona read of a pack the Owner cannot fetch (a private pack): the snapshot comes from the table. */
+    const answerFromTable = async (packId: string, text: string) => {
+      const row = (await q(`SELECT snapshot, pinned_sha FROM packs WHERE id=$1`, [packId]))[0] as Record<
+        string,
+        any
+      >;
+      let cmd: Record<string, any> | undefined;
+      await until(async () => {
+        cmd = mem
+          .of('command')
+          .find(
+            (f) =>
+              f.command === 'pack.persona.read' &&
+              f.payload.packId === packId &&
+              !answered.has(f.commandId as string),
+          ) as Record<string, any> | undefined;
+        return !!cmd;
+      });
+      if (!cmd) throw new Error('no persona read');
+      answered.add(cmd.commandId as string);
+      const item = row.snapshot.items.find((i: { key: string }) => i.key.endsWith(`:${cmd?.payload.key}`));
+      mem.send('command.result', {
+        commandId: cmd.commandId,
+        ok: true,
+        result: { ok: true, text, hash: item.hash, sha: row.pinned_sha },
+      });
+    };
+
+    it('a Member’s private pack named like an organization pack gets a role of its own, clamped to what the Member may grant, and never touches the organization’s role or its agents', async () => {
+      const mineId = await mineIdOf();
+      expect(mineId).toBeTruthy();
+      // The pack was named before the organization pack existed (the name check below now stops a new one): force the collision
+      const renamed = (from: string, to: string) =>
+        q(`UPDATE packs SET name=$3, snapshot = replace(snapshot::text, $2, $4)::jsonb WHERE id=$1`, [
+          mineId,
+          `${from}:`,
+          to,
+          `${to}:`,
+        ]);
+      await renamed('mine', 'crew');
+      const orgVersions = await versionsOf('crew-critic');
+      const orgRole = (
+        await q(
+          `SELECT definition FROM role_definitions WHERE key='crew-critic' ORDER BY version DESC LIMIT 1`,
+        )
+      )[0]?.definition;
+      const agentBefore = (await q(`SELECT role_version, permissions FROM agents WHERE id=$1`, [agentId]))[0];
+      const r = await asMember(
+        'POST',
+        `/api/packs/${mineId}/hire`,
+        {
+          items: [{ key: 'critic', name: 'Hijack' }],
+          workstationId: memberWs,
+          runtime: 'mock',
+          model: 'mock',
+          allowedProjectIds: [w.projectId],
+        },
+        202,
+      );
+      await answerFromTable(mineId, personaText(critic));
+      await until(async () => (await asMember('GET', `/api/pack-hires/${r.requestId}`)).status !== 'pending');
+      const status = await asMember('GET', `/api/pack-hires/${r.requestId}`);
+      expect(status.status, status.error ?? '').toBe('done');
+      const privateKey = `crew-critic-p${mineId.replace(/-/g, '').slice(0, 8)}`;
+      expect(status.agents[0].roleKey).toBe(privateKey);
+      // the organization's role did not move: same versions, same definition, same agents on it
+      expect(await versionsOf('crew-critic')).toBe(orgVersions);
+      expect(
+        (
+          await q(
+            `SELECT definition FROM role_definitions WHERE key='crew-critic' ORDER BY version DESC LIMIT 1`,
+          )
+        )[0]?.definition,
+      ).toEqual(orgRole);
+      expect((await q(`SELECT role_version, permissions FROM agents WHERE id=$1`, [agentId]))[0]).toEqual(
+        agentBefore,
+      );
+      expect(await rebaseAll()).toBe(0);
+      // the new role belongs to the Member: it is theirs, and carries only the Member's grantable tools (read), not the persona's edit
+      const def = (await q(`SELECT definition FROM role_definitions WHERE key=$1`, [privateKey]))[0]
+        ?.definition;
+      expect(def.permissions.allowedTools).toEqual(['read']);
+      expect(def.source).toMatchObject({ visibility: 'private', ownerUserId: member.id, packId: mineId });
+      // nobody else lists it or hires from it
+      const memberRoles = (await asMember('GET', '/api/roles')).roles.map(
+        (x: { definition: { key: string } }) => x.definition.key,
+      );
+      const ownerRoles = (await asOwner('GET', '/api/roles')).roles.map(
+        (x: { definition: { key: string } }) => x.definition.key,
+      );
+      expect(memberRoles).toContain(privateKey);
+      expect(ownerRoles).not.toContain(privateKey);
+      expect(ownerRoles).toContain('crew-critic');
+      await asOwner(
+        'POST',
+        '/api/agents',
+        {
+          name: 'Stolen',
+          roleKey: privateKey,
+          seniority: 'senior',
+          workstationId: w.workstationId,
+          capacity: 1,
+        },
+        400,
+      );
+      // tidy: the Member's hire goes, the pack gets its name back
+      const agent = (await asMember('GET', '/api/agents')).agents.find(
+        (a: { name: string }) => a.name === 'Hijack',
+      );
+      await asMember('POST', `/api/agents/${agent.id}/fire`, undefined, 200);
+      await renamed('crew', 'mine');
+    });
+
+    it('a private pack cannot take the name of an organization pack', async () => {
+      const res = await asMember(
+        'POST',
+        '/api/my-capabilities',
+        { name: 'crew', visibility: 'private', workstationId: memberWs },
+        409,
+      );
+      expect(JSON.stringify(res)).toMatch(/organization pack named/);
+    });
+
+    it('ensureRole refuses a role of the same key that another pack, the designer or the catalogue made', async () => {
+      const crew = (await q(`SELECT * FROM packs WHERE id=$1`, [crewId]))[0] as Record<string, any>;
+      const item = (crew.snapshot as PackSnapshot).items.find(
+        (i) => i.kind === 'persona',
+      ) as PackSnapshot['items'][number];
+      const read = { text: personaText(critic), hash: item.hash, sha: crew.pinned_sha };
+      const orgId = w.owner.id;
+      const rival = { ...crew, id: randomUUID(), visibility: 'org' };
+      const run = (pack: Record<string, unknown>) =>
+        withAppendTx(w.t.app.ctx.pool, (tx) =>
+          ensureRole(w.t.app.ctx, tx, orgId, w.owner.id, pack as never, item, read, true),
+        );
+      // another ACTIVE pack's role of that key: refused, nothing registered
+      const before = await versionsOf('crew-critic');
+      await expect(run(rival)).rejects.toMatchObject({ code: 'role_key_taken' });
+      expect(await versionsOf('crew-critic')).toBe(before);
+      // a role from the designer / built-in catalogue under the key of a pack's role: refused too
+      await q(`UPDATE role_definitions SET definition = definition - 'source' WHERE key='crew-critic'`);
+      await expect(run(crew)).rejects.toMatchObject({ code: 'role_key_taken' });
+      await q(
+        `UPDATE role_definitions SET definition = jsonb_set(definition, '{source}', $1::jsonb) WHERE key='crew-critic'`,
+        [
+          JSON.stringify({
+            packId: crewId,
+            packName: 'crew',
+            capability: 'critic',
+            ref: null,
+            sha: crew.pinned_sha,
+            hash: item.hash,
+            visibility: 'org',
+          }),
+        ],
+      );
+      // the pack's own role is reused as before
+      expect((await run(crew)).key).toBe('crew-critic');
+    });
+
+    it('an agent does not follow a newer version of its role that comes from another pack', async () => {
+      const cur = (
+        await q(
+          `SELECT version, definition FROM role_definitions WHERE key='crew-critic' ORDER BY version DESC LIMIT 1`,
+        )
+      )[0] as Record<string, any>;
+      const version = Number(cur.version) + 1;
+      // a version as another pack would have made it: written straight into the projection so the replay test is not disturbed
+      await q(
+        `INSERT INTO role_definitions (org_id, key, version, definition, status, created_at) VALUES ($1,'crew-critic',$2,$3,'active',now())`,
+        [
+          w.owner.id,
+          version,
+          JSON.stringify({
+            ...cur.definition,
+            version,
+            source: { ...cur.definition.source, packId: randomUUID(), visibility: 'private' },
+            permissions: { ...cur.definition.permissions, allowedTools: ['read', 'edit', 'shell', 'web'] },
+          }),
+        ],
+      );
+      const before = (await q(`SELECT role_version, permissions FROM agents WHERE id=$1`, [agentId]))[0];
+      expect(await rebaseAll()).toBe(0);
+      expect((await q(`SELECT role_version, permissions FROM agents WHERE id=$1`, [agentId]))[0]).toEqual(
+        before,
+      );
+      // the foreign version is taken out of the way for the tests that follow
+      await q(`DELETE FROM role_definitions WHERE key='crew-critic' AND version=$1`, [version]);
+    });
   });
 
   it('flags the agent when the pack is removed', async () => {

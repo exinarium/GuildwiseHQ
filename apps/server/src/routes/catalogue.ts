@@ -7,6 +7,7 @@ import {
 import type { FastifyInstance } from 'fastify';
 import { requireUser } from '../auth/guards.ts';
 import { requestedOrgId, resolveOrgId } from '../auth/org-context.ts';
+import { isOthersPrivateRole } from '../catalogue/loader.ts';
 import { subworkflowTargets } from '../catalogue/subworkflow-lookup.ts';
 import { catalogueOrg } from '../commands/designer.ts';
 import type { Ctx } from '../context.ts';
@@ -38,12 +39,15 @@ export function catalogueRoutes(ctx: Ctx) {
         [orgId],
       );
       return {
-        roles: list.map((r) => ({
-          definition: RoleDefinitionSchema.parse(r.definition),
-          orgId: r.org_id,
-          status: r.status,
-          extensions: r.extensions ?? null,
-        })),
+        roles: list
+          .map((r) => ({
+            definition: RoleDefinitionSchema.parse(r.definition),
+            orgId: r.org_id,
+            status: r.status,
+            extensions: r.extensions ?? null,
+          }))
+          // a role made from someone's private pack is that person's alone
+          .filter((r) => !isOthersPrivateRole(r.definition.source, s.user.id)),
       };
     });
 

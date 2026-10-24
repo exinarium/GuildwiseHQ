@@ -80,6 +80,7 @@ function provenanceOf(p: Row, item: PackItem): PackProvenance {
     sha: p.pinned_sha,
     hash: item.hash,
     visibility: p.visibility,
+    ...(p.visibility === 'private' && p.owner_user_id ? { ownerUserId: p.owner_user_id as string } : {}),
   };
 }
 
@@ -138,7 +139,7 @@ export async function listPackPersonas(ctx: Ctx, who: Who, packId: string): Prom
             const cap = shortKey(p.name, i.key);
             const prov = provenanceOf(p, i);
             const m = permissionsForPersona(i.tools, { mayWiden });
-            const roleKey = roleKeyForPackPersona(p.name, cap);
+            const roleKey = roleKeyForPackPersona(p.name, cap, { visibility: p.visibility, packId: p.id });
             const role = roles.find((r) => r.key === roleKey);
             return {
               key: cap,
@@ -361,7 +362,7 @@ async function fail(ctx: Ctx, req: Row, error: string): Promise<void> {
 }
 
 /** Registers the role version for a persona unless an active version already carries exactly this content. */
-async function ensureRole(
+export async function ensureRole(
   ctx: Ctx,
   tx: Queryable & { query: unknown },
   orgId: string,
@@ -369,15 +370,33 @@ async function ensureRole(
   p: Row,
   item: PackItem,
   read: { text: string; hash: string; sha: string },
+  /** Whether the hirer may grant the widest tool profile (an Owner or Admin). Decides what a PRIVATE pack's role carries. */
+  hirerMayWiden: boolean,
 ): Promise<RoleDefinition> {
   const snap = p.snapshot as PackSnapshot;
   const cap = shortKey(p.name, item.key);
-  const key = roleKeyForPackPersona(p.name, cap);
+  const key = roleKeyForPackPersona(p.name, cap, { visibility: p.visibility, packId: p.id });
   if ((BUILTIN_ROLE_KEYS as readonly string[]).includes(key))
     throw badRequest('builtin_key', `'${key}' is a built-in role: rename the pack`);
   const existing = await loadRole(tx as never, orgId, key);
   if (existing?.definition.source?.hash === read.hash && existing.definition.source.packId === p.id)
     return existing.definition;
+  // A pack adds versions only to a role that IS its own. A role of the same key that came from another pack, from the role
+  // designer or from the built-in catalogue is not touched (a private pack named like an organization pack must not become a new
+  // version of the organization's role, and every agent on that role follows the newest version). The one exception is an
+  // organization pack taking over the role of an organization pack that was removed (a pack removed and added again).
+  if (existing && existing.definition.source?.packId !== p.id) {
+    const src = existing.definition.source;
+    const oldActive = src
+      ? await one(tx as never, 'SELECT 1 FROM packs WHERE id=$1 AND removed_at IS NULL', [src.packId])
+      : null;
+    const takeover = p.visibility === 'org' && src?.visibility === 'org' && !oldActive;
+    if (!takeover)
+      throw conflict(
+        'role_key_taken',
+        `a role '${key}' already exists and was not made from this pack: rename the pack and try again`,
+      );
+  }
   const version = await nextVersion(tx as never, 'role_definitions', orgId, key);
   const input: PersonaRoleInput = {
     packId: p.id,
@@ -388,6 +407,10 @@ async function ensureRole(
     sha: read.sha,
     ref: snap.ref ?? null,
     visibility: p.visibility,
+    ...(p.visibility === 'private' && p.owner_user_id ? { ownerUserId: p.owner_user_id as string } : {}),
+    // an organization pack was approved by its owner: its role carries the persona's declared tools; a private pack's role
+    // carries only what the person who hires from it may grant
+    mayWiden: p.visibility === 'org' ? true : hirerMayWiden,
     version,
     packSkills: snap.items.filter((i) => i.kind === 'skill').map((i) => i.key),
   };
@@ -449,7 +472,7 @@ async function completeHire(ctx: Ctx, req: Row): Promise<void> {
       if (!item || !read || read.hash !== item.hash || read.sha !== p.pinned_sha || !isTrustedRow(p))
         throw conflict('pack_changed', 'the pack changed while it was being read: try again');
       const def = await withAppendTx(ctx.pool, async (tx) =>
-        ensureRole(ctx, tx, req.org_id, req.requested_by, p, item, read),
+        ensureRole(ctx, tx, req.org_id, req.requested_by, p, item, read, isOrgManager({ orgRole: role })),
       );
       const provenance = provenanceOf(p, item);
       const mapped = permissionsForPersona(item.tools, { mayWiden: isOrgManager({ orgRole: role }) });
@@ -701,7 +724,16 @@ export async function acceptRoleOffer(
       throw conflict('offer_stale', 'the pack is no longer approved at that revision');
     const item = personaItems(p).find((i) => shortKey(p.name, i.key) === o.capability);
     if (!item || item.hash !== o.hash) throw conflict('offer_stale', 'the pack changed again');
-    const def = await ensureRole(ctx, tx, who.orgId, who.userId, p, item, proposed);
+    const def = await ensureRole(
+      ctx,
+      tx,
+      who.orgId,
+      who.userId,
+      p,
+      item,
+      proposed,
+      isOrgManager({ orgRole: who.role }),
+    );
     await ctx.store.append(
       [
         {
