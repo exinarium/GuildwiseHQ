@@ -44,6 +44,15 @@ export const providerKeyProjectors: Record<string, Projector> = {
     );
   },
 
+  OrgProviderKeyGenerationBumped: async (tx, e) => {
+    const p = ev<EventOf<'OrgProviderKeyGenerationBumped'>>(e).payload;
+    await exec(
+      tx,
+      'UPDATE org_providers SET key_generation = key_generation + 1 WHERE org_id=$1 AND provider=$2',
+      [p.orgId, p.provider],
+    );
+  },
+
   OrgProviderKeyRevoked: async (tx, e) => {
     const p = ev<EventOf<'OrgProviderKeyRevoked'>>(e).payload;
     await exec(

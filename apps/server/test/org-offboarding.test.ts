@@ -130,7 +130,7 @@ describe('offboarding a removed member', () => {
     const { owner, admin, member, org, as, orgPack, ownedPack, privPack, chat, session } = await acme();
     const r = await ok<any>(as(admin, 'DELETE', `/api/org/members/${member.id}`));
     const rep = r.offboarding;
-    expect(rep).toMatchObject({ orgId: org, userId: member.id, transferredTo: admin.id });
+    expect(rep).toMatchObject({ orgId: org, userId: member.id, transferredTo: owner.id });
     expect(rep.privatePurgeAfter).toBeTruthy();
 
     // the member is still a member of their own organization: workstation, sessions and phone stay
@@ -175,10 +175,10 @@ describe('offboarding a removed member', () => {
     expect((await q('SELECT 1 FROM pack_credential_shares WHERE pack_id=$1', [privPack])).length).toBe(0);
     expect(step(rep, 'pack_credentials').count).toBe(1);
 
-    // organization-visible things move to the person who removed them
-    expect((await q('SELECT created_by FROM threads WHERE id=$1', [session]))[0]?.created_by).toBe(admin.id);
+    // organization-visible things move to the Owner, not to the Admin who removed them
+    expect((await q('SELECT created_by FROM threads WHERE id=$1', [session]))[0]?.created_by).toBe(owner.id);
     expect((await q('SELECT owner_user_id FROM packs WHERE id=$1', [ownedPack]))[0]?.owner_user_id).toBe(
-      admin.id,
+      owner.id,
     );
     // private things are flagged for deletion after the grace period, not deleted now
     const purge = (
@@ -217,6 +217,68 @@ describe('offboarding a removed member', () => {
     ).toBe(0);
     expect((await q('SELECT 1 FROM push_subscriptions WHERE user_id=$1', [member.id])).length).toBe(0);
     expect(org).toBeTruthy();
+  });
+
+  it('counts a guest membership on another organization’s project as another organization', async () => {
+    const { admin, member, as } = await acme({ memberHasOtherOrg: false });
+    const other = await t.userSession(uniqueEmail('host'));
+    const proj = await ok<any>(
+      t.req('POST', '/api/projects', { cookie: other.cookie, body: { key: 'HOST', name: 'Host' } }),
+      201,
+    );
+    await ok(
+      t.req('POST', `/api/projects/${proj.project.id}/members`, {
+        cookie: other.cookie,
+        body: { email: member.email },
+      }),
+      201,
+    );
+    await ok(t.req('POST', `/api/projects/${proj.project.id}/members/accept`, { cookie: member.cookie }));
+    const preview = await ok<any>(as(admin, 'GET', `/api/org/members/${member.id}/removal-preview`));
+    expect(preview.offboarding.find((x: any) => x.key === 'sessions').status).toBe('kept');
+    const rep = (await ok<any>(as(admin, 'DELETE', `/api/org/members/${member.id}`))).offboarding;
+    expect(step(rep, 'sessions').status).toBe('kept');
+    expect(step(rep, 'workstations').status).toBe('kept');
+    expect(await sessions(member.id)).toBeGreaterThan(0);
+    expect((await q('SELECT status FROM workstations WHERE id=$1', [member.workstationId]))[0]?.status).toBe(
+      'active',
+    );
+    expect(rep.notes.join(' ')).toContain('guest');
+  });
+
+  it('closes the browser connections of a person who was signed out', async () => {
+    const { admin, member, as } = await acme({ memberHasOtherOrg: false });
+    const closed: string[] = [];
+    const browser = t.app.ctx.services.browser;
+    const orig = browser.closeUser.bind(browser);
+    browser.closeUser = (id: string) => {
+      closed.push(id);
+      orig(id);
+    };
+    try {
+      await ok(as(admin, 'DELETE', `/api/org/members/${member.id}`));
+    } finally {
+      browser.closeUser = orig;
+    }
+    expect(closed).toContain(member.id);
+  });
+
+  it('raises the key generation and asks the Owner to rotate when a stored key copy is stranded on an unlinked workstation', async () => {
+    const { admin, member, as, org } = await acme({ memberHasOtherOrg: false });
+    const before = (await q(`SELECT key_generation FROM org_providers WHERE org_id=$1`, [org]))[0]
+      ?.key_generation;
+    const rep = (await ok<any>(as(admin, 'DELETE', `/api/org/members/${member.id}`))).offboarding;
+    const after = (await q(`SELECT key_generation FROM org_providers WHERE org_id=$1`, [org]))[0]
+      ?.key_generation;
+    expect(Number(after)).toBe(Number(before ?? 0) + 1);
+    expect(
+      (
+        await q(`SELECT 1 FROM desk_items WHERE org_id=$1 AND subkind='org_key_rotate' AND status='open'`, [
+          org,
+        ])
+      ).length,
+    ).toBe(1);
+    expect(rep.notes.join(' ')).toContain('generation');
   });
 
   it('leaving moves their items to the Owner, not to themselves', async () => {

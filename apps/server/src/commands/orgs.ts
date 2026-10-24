@@ -339,7 +339,7 @@ export async function removeOrgMemberIn(
       scope: orgScope(orgId),
     });
   // S-B1: the offboarding checklist (sessions, tokens, pairings, pack credentials, key copies, ownership, private items). Items of
-  // the member go to the person who removes them; when they leave or an administrator deactivates them, to the organization's Owner.
+  // the member go to the Owner (not to the Admin who removes them).
   const owner = await one<{ owner_user_id: string }>(
     tx,
     'SELECT owner_user_id FROM organizations WHERE id=$1',
@@ -349,7 +349,8 @@ export async function removeOrgMemberIn(
     actorId,
     orgId,
     userId,
-    transferTo: reason === 'removed' && actorId !== userId ? actorId : (owner?.owner_user_id ?? actorId),
+    // creator-private sessions and organization packs go to the Owner, not to the Admin who happened to do the removal
+    transferTo: owner?.owner_user_id ?? actorId,
     counts: { agents: plan.agents.length, cards: plan.owned.length },
   });
   events.push({
@@ -370,6 +371,8 @@ export async function removeOrgMemberIn(
 async function afterOffboarding(ctx: Ctx, run: OffboardingRun): Promise<void> {
   const { syncWorkstations } = await import('./packs.ts');
   const ws = [...new Set([...run.deliver, ...run.sync])];
+  // their sessions were deleted: an open browser connection must not outlive them
+  if (run.signedOutUserId) ctx.services.browser.closeUser(run.signedOutUserId);
   if (run.sync.length)
     await syncWorkstations(ctx, run.sync).catch((err) => ctx.log.warn({ err }, 'pack sync failed'));
   for (const id of ws) await Promise.resolve(ctx.services.gateway.deliverPending(id)).catch(() => undefined);

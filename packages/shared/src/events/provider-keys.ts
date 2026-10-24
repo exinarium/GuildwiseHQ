@@ -40,6 +40,15 @@ export const providerKeyEvents = [
       via: z.enum(['browser', 'runner']),
     }),
   ),
+  /**
+   * The key's generation was raised without a new key (a copy of it sits on a machine that can no longer be told to forget it,
+   * for example the workstation of a removed member): every page and share that is bound to the old generation is stale, so
+   * an Owner or Admin must enter a new key, and the old copy is refused where generations are checked.
+   */
+  defineEvent(
+    'OrgProviderKeyGenerationBumped',
+    z.object({ orgId: Id, provider: ProviderKeyIdSchema, by: Id, reason: z.string().max(300) }),
+  ),
   /** The organization's key was revoked: every workstation forgets it. The cap setting stays. */
   defineEvent('OrgProviderKeyRevoked', z.object({ orgId: Id, provider: ProviderKeyIdSchema, by: Id })),
   /**
