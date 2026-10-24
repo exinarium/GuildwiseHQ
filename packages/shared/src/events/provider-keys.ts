@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ProviderKeyIdSchema } from '../models/direct.ts';
+import { DirectProviderIdSchema, ProviderKeyIdSchema } from '../models/direct.ts';
 import { defineEvent, Id } from './define.ts';
 
 /**
@@ -74,5 +74,25 @@ export const providerKeyEvents = [
   defineEvent(
     'OrgProviderCapOverridden',
     z.object({ orgId: Id, provider: ProviderKeyIdSchema, month: Month, by: Id }),
+  ),
+  /**
+   * The Owner set the price of a model that has none in the built-in tables (a local Ollama model, a new release): USD per million
+   * tokens. Used from then on to price its turns, which are marked as owner-priced; it never changes a past turn's stamped cost.
+   */
+  defineEvent(
+    'OrgModelPriceSet',
+    z.object({
+      orgId: Id,
+      provider: DirectProviderIdSchema,
+      model: z.string().min(1).max(120),
+      inputPerMtok: z.number().min(0).max(100_000),
+      outputPerMtok: z.number().min(0).max(100_000),
+      cacheReadPerMtok: z.number().min(0).max(100_000).nullable().default(null),
+      by: Id,
+    }),
+  ),
+  defineEvent(
+    'OrgModelPriceRemoved',
+    z.object({ orgId: Id, provider: DirectProviderIdSchema, model: z.string().min(1).max(120), by: Id }),
   ),
 ] as const;

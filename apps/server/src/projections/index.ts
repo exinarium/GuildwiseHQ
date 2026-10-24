@@ -188,6 +188,7 @@ export const PROJECTION_TABLES = [
   'shifts',
   'shift_costs',
   'org_providers',
+  'org_model_prices',
   'threads',
   'chat_archives',
   'chat_reads',

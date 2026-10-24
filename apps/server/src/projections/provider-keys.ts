@@ -9,6 +9,28 @@ const ev = <T>(e: { event: unknown }) => e.event as T;
  * which is only ever a sealed copy per workstation in `org_provider_key_shares`, outside the event store) and the cap state.
  */
 export const providerKeyProjectors: Record<string, Projector> = {
+  OrgModelPriceSet: async (tx, e) => {
+    const p = ev<EventOf<'OrgModelPriceSet'>>(e).payload;
+    await exec(
+      tx,
+      `INSERT INTO org_model_prices (org_id, provider, model, input_per_mtok, output_per_mtok, cache_read_per_mtok, set_by, set_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+       ON CONFLICT (org_id, provider, model) DO UPDATE
+         SET input_per_mtok = EXCLUDED.input_per_mtok, output_per_mtok = EXCLUDED.output_per_mtok,
+             cache_read_per_mtok = EXCLUDED.cache_read_per_mtok, set_by = EXCLUDED.set_by, set_at = EXCLUDED.set_at`,
+      [p.orgId, p.provider, p.model, p.inputPerMtok, p.outputPerMtok, p.cacheReadPerMtok, p.by, e.createdAt],
+    );
+  },
+
+  OrgModelPriceRemoved: async (tx, e) => {
+    const p = ev<EventOf<'OrgModelPriceRemoved'>>(e).payload;
+    await exec(tx, 'DELETE FROM org_model_prices WHERE org_id=$1 AND provider=$2 AND model=$3', [
+      p.orgId,
+      p.provider,
+      p.model,
+    ]);
+  },
+
   OrgProviderKeySet: async (tx, e) => {
     const p = ev<EventOf<'OrgProviderKeySet'>>(e).payload;
     await exec(

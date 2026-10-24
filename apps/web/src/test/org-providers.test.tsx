@@ -61,6 +61,7 @@ const provider = (id: string, label: string, over: Partial<OrgProvider> = {}): O
 
 let role = 'owner';
 let providers: OrgProvider[] = [];
+let prices: any[] = [];
 type Call = { method: string; url: string; body?: any };
 let calls: Call[];
 
@@ -68,6 +69,7 @@ beforeEach(() => {
   calls = [];
   role = 'owner';
   providers = [];
+  prices = [];
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: string, init: RequestInit = {}) => {
@@ -81,6 +83,10 @@ beforeEach(() => {
           activeOrg: { id: 'o', name: 'Org', role },
         });
       if (url === '/api/org/providers' && method === 'GET') return json({ providers });
+      if (url.startsWith('/api/org/model-prices')) {
+        if (method === 'GET') return json({ prices });
+        return json({ ok: true });
+      }
       if (url.startsWith('/api/org/providers'))
         return json(
           { queued: true },
@@ -334,5 +340,55 @@ describe('Settings > Model providers', () => {
     await waitFor(() =>
       expect(calls.find((c) => c.method === 'DELETE' && c.url === '/api/org/providers/openai')).toBeTruthy(),
     );
+  });
+});
+
+describe('Settings > Model providers > prices for other models', () => {
+  it('lists owner-set prices and lets the Owner add and remove one', async () => {
+    prices = [
+      {
+        provider: 'openai-compatible',
+        model: 'llama3',
+        inputPerMtok: 0.2,
+        outputPerMtok: 0.6,
+        cacheReadPerMtok: null,
+        setAt: AT,
+      },
+    ];
+    const user = userEvent.setup();
+    wrap();
+    const row = await screen.findByTestId('model-price-openai-compatible-llama3');
+    expect(row).toHaveTextContent('Owner-set');
+    expect(row).toHaveTextContent('$0.2 in / $0.6 out');
+    expect(screen.getByTestId('model-price-save')).toBeDisabled();
+    await user.type(screen.getByTestId('model-price-model'), 'qwen3');
+    await user.type(screen.getByTestId('model-price-input'), '0,1');
+    await user.type(screen.getByTestId('model-price-output'), '0.4');
+    await user.click(screen.getByTestId('model-price-save'));
+    await waitFor(() => expect(puts().find((c) => c.url === '/api/org/model-prices')).toBeTruthy());
+    expect(puts().find((c) => c.url === '/api/org/model-prices')?.body).toEqual({
+      provider: 'openai-compatible',
+      model: 'qwen3',
+      inputPerMtok: 0.1,
+      outputPerMtok: 0.4,
+      cacheReadPerMtok: null,
+    });
+    await user.click(screen.getByTestId('model-price-remove-openai-compatible-llama3'));
+    await waitFor(() =>
+      expect(
+        calls.some(
+          (c) =>
+            c.method === 'DELETE' &&
+            c.url === '/api/org/model-prices?provider=openai-compatible&model=llama3',
+        ),
+      ).toBe(true),
+    );
+  });
+
+  it('is read-only for an Admin', async () => {
+    role = 'admin';
+    wrap();
+    expect(await screen.findByText('Only the Owner can change prices.')).toBeInTheDocument();
+    expect(screen.queryByTestId('model-price-save')).toBeNull();
   });
 });

@@ -1,5 +1,7 @@
 import {
+  RemoveOrgModelPriceQuerySchema,
   ReshareOrgProviderKeyRequestSchema,
+  SetOrgModelPriceRequestSchema,
   SetOrgProviderCapRequestSchema,
   SetOrgProviderKeyRequestSchema,
   ShareOrgProviderKeyRequestSchema,
@@ -7,6 +9,7 @@ import {
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { requireOrg } from '../auth/guards.ts';
+import { listOrgModelPrices, removeOrgModelPrice, setOrgModelPrice } from '../commands/org-model-prices.ts';
 import {
   listOrgProviders,
   overrideOrgProviderCap,
@@ -75,6 +78,28 @@ export function orgProviderRoutes(ctx: Ctx) {
         await reshareOrgProviderKey(ctx, a.session.user, a.orgId, req.params.provider, req.body);
         reply.code(202);
         return { queued: true };
+      },
+    );
+
+    // Owner-set prices for models the built-in tables do not price (Owner and Admins read, the Owner sets).
+    app.get('/api/org/model-prices', async (req) => {
+      const a = await requireOrg(ctx, req, { min: 'admin' });
+      return listOrgModelPrices(ctx, a.session.user, a.orgId);
+    });
+
+    app.put('/api/org/model-prices', { schema: { body: SetOrgModelPriceRequestSchema } }, async (req) => {
+      const a = await requireOrg(ctx, req, { min: 'admin' });
+      await setOrgModelPrice(ctx, a.session.user, a.orgId, req.body);
+      return { ok: true };
+    });
+
+    app.delete(
+      '/api/org/model-prices',
+      { schema: { querystring: RemoveOrgModelPriceQuerySchema } },
+      async (req) => {
+        const a = await requireOrg(ctx, req, { min: 'admin' });
+        await removeOrgModelPrice(ctx, a.session.user, a.orgId, req.query.provider, req.query.model);
+        return { ok: true };
       },
     );
 

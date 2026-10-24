@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ProviderKeyIdSchema } from '../models/direct.ts';
+import { DirectProviderIdSchema, ProviderKeyIdSchema } from '../models/direct.ts';
 
 /**
  * Organization-wide provider keys (docs/ARCHITECTURE.md section 38.5). The Owner or an Admin seals a key in the browser to each
@@ -97,3 +97,28 @@ export type SetOrgProviderCapRequest = z.infer<typeof SetOrgProviderCapRequestSc
 
 /** The error code of a run refused because the provider's cap on the organization's key is reached. */
 export const PROVIDER_CAP_REACHED = 'provider_cap_reached';
+
+// ------------------------------------------------------------------------------------------------- owner-set model prices
+
+/**
+ * `GET/PUT/DELETE /api/org/model-prices`: the Owner's prices (USD per million tokens) for models the built-in tables do not price
+ * (a local Ollama model, a model released after this version). Turns on such a model are costed with it and marked owner-priced;
+ * a model with a list price keeps it. Prices are stamped on a turn when it ends: a later change never reprices the past.
+ */
+export const OrgModelPriceSchema = z.object({
+  provider: DirectProviderIdSchema,
+  model: z.string().min(1).max(120),
+  inputPerMtok: z.number().min(0).max(100_000),
+  outputPerMtok: z.number().min(0).max(100_000),
+  cacheReadPerMtok: z.number().min(0).max(100_000).nullable(),
+});
+export type OrgModelPrice = z.infer<typeof OrgModelPriceSchema>;
+export const OrgModelPricesResponseSchema = z.object({
+  prices: z.array(OrgModelPriceSchema.extend({ setAt: z.iso.datetime().nullable() })),
+});
+export type OrgModelPricesResponse = z.infer<typeof OrgModelPricesResponseSchema>;
+export const SetOrgModelPriceRequestSchema = OrgModelPriceSchema;
+export const RemoveOrgModelPriceQuerySchema = z.object({
+  provider: DirectProviderIdSchema,
+  model: z.string().min(1).max(120),
+});

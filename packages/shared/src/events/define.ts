@@ -23,6 +23,8 @@ export const Usage = z.object({
   keySource: z.enum(['org', 'workstation']).optional(),
   /** The provider key id that was used (`openai`, `google`, `bedrock`, ...), with `keySource`. */
   keyProvider: z.string().max(40).optional(),
+  /** The price came from the organization's owner-set table (a local or unlisted model), not from the built-in list prices. */
+  ownerPriced: z.boolean().optional(),
 });
 export type Usage = z.infer<typeof Usage>;
 

@@ -149,8 +149,8 @@ export const sessionProjectors: Record<string, Projector> = {
       tx,
       `INSERT INTO shift_costs (shift_id, org_id, agent_id, project_id, kind, model, tokens_input, tokens_output,
          tokens_cache_read, tokens_cache_write, cost_usd_micros, reported_usd_micros, ended_at, cost_stamped, cost_unknown,
-         key_source, key_provider)
-       VALUES ($1,$2,$3,$4,'session',$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+         key_source, key_provider, owner_priced)
+       VALUES ($1,$2,$3,$4,'session',$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
        ON CONFLICT (shift_id) DO NOTHING`,
       [
         p.turnId,
@@ -167,9 +167,10 @@ export const sessionProjectors: Record<string, Projector> = {
         e.createdAt,
         p.costMicros !== undefined,
         // Stamped by the interceptor; an event from before it is judged by the model, which is deterministic on replay.
-        p.costUnknown ?? isCostUnknown(model),
+        p.costUnknown ?? (p.usage.ownerPriced ? false : isCostUnknown(model)),
         p.usage.keySource ?? null,
         p.usage.keyProvider ?? null,
+        p.usage.ownerPriced === true,
       ],
     );
   },
@@ -200,8 +201,8 @@ export const sessionProjectors: Record<string, Projector> = {
       tx,
       `INSERT INTO shift_costs (shift_id, org_id, agent_id, project_id, card_id, phase_id, kind, model, tokens_input,
          tokens_output, tokens_cache_read, tokens_cache_write, cost_usd_micros, reported_usd_micros, ended_at, cost_stamped,
-         cost_unknown, parent_id, key_source, key_provider)
-       VALUES ($1,$2,$3,$4,$5,$6,'delegate',$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+         cost_unknown, parent_id, key_source, key_provider, owner_priced)
+       VALUES ($1,$2,$3,$4,$5,$6,'delegate',$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
        ON CONFLICT (shift_id) DO NOTHING`,
       [
         p.delegateId,
@@ -219,10 +220,11 @@ export const sessionProjectors: Record<string, Projector> = {
         p.usage.costUsd === undefined ? null : Math.round(p.usage.costUsd * 1_000_000),
         e.createdAt,
         p.costMicros !== undefined,
-        p.costUnknown ?? isCostUnknown(model),
+        p.costUnknown ?? (p.usage.ownerPriced ? false : isCostUnknown(model)),
         p.callerId,
         p.usage.keySource ?? null,
         p.usage.keyProvider ?? null,
+        p.usage.ownerPriced === true,
       ],
     );
   },

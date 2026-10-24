@@ -1,4 +1,7 @@
 import {
+  type OrgModelPrice,
+  type OrgModelPricesResponse,
+  OrgModelPricesResponseSchema,
   type OrgProvidersResponse,
   OrgProvidersResponseSchema,
   type ProviderKeyId,
@@ -112,5 +115,32 @@ export function useOverrideOrgProviderCap(provider: ProviderKeyId) {
   return useMutation({
     mutationFn: () => post(`/org/providers/${provider}/cap/override`, {}),
     onSuccess: refresh,
+  });
+}
+
+/** The Owner's prices (USD per million tokens) for models the built-in tables do not price. */
+export function useOrgModelPrices() {
+  return useQuery({
+    queryKey: ['org-model-prices'],
+    queryFn: (): Promise<OrgModelPricesResponse> => get('/org/model-prices', OrgModelPricesResponseSchema),
+  });
+}
+
+export function useSetOrgModelPrice() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: OrgModelPrice) => put('/org/model-prices', v),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['org-model-prices'] }),
+  });
+}
+
+export function useRemoveOrgModelPrice() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { provider: string; model: string }) =>
+      del(
+        `/org/model-prices?provider=${encodeURIComponent(v.provider)}&model=${encodeURIComponent(v.model)}`,
+      ),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['org-model-prices'] }),
   });
 }

@@ -20,6 +20,7 @@ import {
   parseModelIds,
   secretOf,
 } from '../components/providers/CredentialFields.tsx';
+import { ModelPrices } from '../components/providers/ModelPrices.tsx';
 import {
   Badge,
   Button,
@@ -96,6 +97,7 @@ export function OrgProvidersBody() {
           ))}
         </ul>
       )}
+      <ModelPrices />
     </div>
   );
 }

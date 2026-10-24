@@ -31,8 +31,8 @@ export const costProjectors: Record<string, Projector> = {
       tx,
       `INSERT INTO shift_costs (shift_id, org_id, agent_id, project_id, card_id, phase_id, kind, model,
          tokens_input, tokens_output, tokens_cache_read, tokens_cache_write, cost_usd_micros, reported_usd_micros, ended_at, cost_stamped,
-         key_source, key_provider, cost_unknown)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+         key_source, key_provider, cost_unknown, owner_priced)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
        ON CONFLICT (shift_id) DO NOTHING`,
       [
         p.shiftId,
@@ -54,7 +54,8 @@ export const costProjectors: Record<string, Projector> = {
         p.usage.keySource ?? null,
         p.usage.keyProvider ?? null,
         // a shift on a stored key whose model has no price: counted as unknown, not as free (the cap cannot count it)
-        p.usage.keySource !== undefined && isCostUnknown(model),
+        p.usage.keySource !== undefined && !p.usage.ownerPriced && isCostUnknown(model),
+        p.usage.ownerPriced === true,
       ],
     );
   },

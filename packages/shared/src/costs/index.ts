@@ -113,8 +113,54 @@ export interface TokenCounts {
   cacheWrite1hTokens?: number;
 }
 
+/** A price the organization's Owner set for a model the built-in tables do not know (USD per million tokens). */
+export interface OwnerModelPrice {
+  provider: string;
+  model: string;
+  inputPerMtok: number;
+  outputPerMtok: number;
+  cacheReadPerMtok?: number | null;
+}
+
+/** The Owner's price for `provider:model` (exact id), if there is one. */
+export function ownerPriceOf(
+  model: string,
+  owner: readonly OwnerModelPrice[] | undefined,
+): { input: number; output: number; cacheRead?: number } | undefined {
+  if (!owner?.length) return undefined;
+  const d = splitDirectModel(model);
+  if (!d) return undefined;
+  const hit = owner.find((o) => o.provider === d.provider && o.model === d.model);
+  return hit
+    ? {
+        input: hit.inputPerMtok,
+        output: hit.outputPerMtok,
+        ...(hit.cacheReadPerMtok != null ? { cacheRead: hit.cacheReadPerMtok } : {}),
+      }
+    : undefined;
+}
+
+/** True when the cost of `model` comes from an Owner-set price: the built-in tables have none and the Owner entered one. */
+export function isOwnerPriced(
+  model: string,
+  owner: readonly OwnerModelPrice[] | undefined,
+  table: readonly ModelPrice[] = DEFAULT_MODEL_PRICES,
+): boolean {
+  return directPriceOf(model, table) === null && ownerPriceOf(model, owner) !== undefined;
+}
+
 /** The price of a model of the direct-model runtime (`provider:model`): undefined for any other model, null when unknown. */
 function directPriceOf(
+  model: string,
+  table: readonly ModelPrice[],
+  owner?: readonly OwnerModelPrice[],
+): { input: number; output: number; cacheRead?: number; cacheWrite?: number } | null | undefined {
+  const built = builtinDirectPriceOf(model, table);
+  // The Owner's table fills gaps only: a model with a list price keeps it.
+  return built === null ? (ownerPriceOf(model, owner) ?? null) : built;
+}
+
+function builtinDirectPriceOf(
   model: string,
   table: readonly ModelPrice[],
 ): { input: number; output: number; cacheRead?: number; cacheWrite?: number } | null | undefined {
@@ -157,8 +203,12 @@ function directPriceOf(
  * A model of the direct-model runtime with no price in the tables: its cost shows as 0 and must be flagged "cost unknown"
  * wherever it is shown. Every other model is priced (an unknown one like Sonnet).
  */
-export function isCostUnknown(model: string, table: readonly ModelPrice[] = DEFAULT_MODEL_PRICES): boolean {
-  return directPriceOf(model, table) === null;
+export function isCostUnknown(
+  model: string,
+  table: readonly ModelPrice[] = DEFAULT_MODEL_PRICES,
+  owner?: readonly OwnerModelPrice[],
+): boolean {
+  return directPriceOf(model, table, owner) === null;
 }
 
 export function priceFor(model: string, table: readonly ModelPrice[] = DEFAULT_MODEL_PRICES): ModelPrice {
@@ -179,8 +229,9 @@ export function costUsdMicros(
   model: string,
   usage: TokenCounts,
   table: readonly ModelPrice[] = DEFAULT_MODEL_PRICES,
+  owner?: readonly OwnerModelPrice[],
 ): number {
-  const direct = directPriceOf(model, table);
+  const direct = directPriceOf(model, table, owner);
   if (direct !== undefined) {
     if (direct === null) return 0; // unknown price: zero here, flagged by `isCostUnknown` (never silently priced as Sonnet)
     // Thousandths of a micro-USD: cache prices like $0.025 per million stay exact.
