@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   type CreateSessionRequest,
+  isFixedSeat,
   isOrgManager,
   type ParticipantDto,
   type ParticipantInput,
@@ -447,6 +448,9 @@ export async function removeParticipant(
     const p = await loadParticipant(tx, threadId, participantId);
     if (p.kind === 'user' && p.ref_id === t.created_by)
       throw conflict('cannot_remove_creator', 'the session creator cannot be removed');
+    // The Optimist and the Devil's Advocate are fixed seats of a boardroom.
+    if (t.kind === 'boardroom' && isFixedSeat({ kind: p.kind, refId: p.ref_id }))
+      throw conflict('fixed_seat', "The Optimist and the Devil's Advocate are fixed seats of a boardroom.");
     await ctx.store.append(
       [
         {

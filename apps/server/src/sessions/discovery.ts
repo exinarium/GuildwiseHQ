@@ -1340,6 +1340,7 @@ export class DiscoveryService {
       const t = await loadSession(tx, userId, threadId, true);
       assertDiscovery(t);
       await assertSessionManager(tx, userId, t);
+      assertWritable(t);
       const p = await one(tx, 'SELECT * FROM discovery_proposals WHERE id=$1 AND thread_id=$2 FOR UPDATE', [
         proposalId,
         threadId,
@@ -1432,6 +1433,7 @@ export class DiscoveryService {
       const t = await loadSession(tx, userId, threadId, true);
       assertDiscovery(t);
       await assertSessionManager(tx, userId, t);
+      assertWritable(t);
       from = parseDiscoveryConfig(t.session_config).phase;
       if (from === phase) return;
       changed = true;
@@ -1468,6 +1470,7 @@ export class DiscoveryService {
       const t = await loadSession(tx, userId, threadId, true);
       assertDiscovery(t);
       await assertSessionManager(tx, userId, t);
+      assertWritable(t);
       const cfg = parseDiscoveryConfig(t.session_config);
       if (cfg.paused) return;
       await this.ctx.store.append(
@@ -1499,6 +1502,7 @@ export class DiscoveryService {
       const t = await loadSession(tx, userId, threadId, true);
       assertDiscovery(t);
       await assertSessionManager(tx, userId, t);
+      assertWritable(t);
       const cfg = parseDiscoveryConfig(t.session_config);
       if (!cfg.paused) return;
       was = true;
@@ -1537,6 +1541,7 @@ export class DiscoveryService {
       const t = await loadSession(tx, userId, threadId, true);
       assertDiscovery(t);
       await assertSessionManager(tx, userId, t);
+      assertWritable(t);
       const cfg: Record<string, unknown> = {};
       if (req.budgetUsd !== undefined) {
         cfg.budgetUsd = req.budgetUsd;

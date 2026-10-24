@@ -433,6 +433,15 @@ async function score(ctx: Ctx, t: Row, turn: Row, params: Record<string, unknown
   );
   if (!known?.has && (known?.n ?? 0) >= MAX_SCORED_OPTIONS)
     return [false, undefined, `At most ${MAX_SCORED_OPTIONS} options can be scored.`];
+  // one spelling per option: a score for "alpha" goes to the option first written "Alpha"
+  const option =
+    (
+      await one(
+        ctx.pool,
+        'SELECT option FROM board_scores WHERE thread_id=$1 AND option_key=lower($2) ORDER BY seq LIMIT 1',
+        [t.id, p.data.option.trim()],
+      )
+    )?.option ?? p.data.option.trim();
   await ctx.store.append([
     {
       streamId: streamId.thread(t.id),
@@ -440,7 +449,7 @@ async function score(ctx: Ctx, t: Row, turn: Row, params: Record<string, unknown
         type: 'BoardOptionScored',
         payload: {
           threadId: t.id,
-          option: p.data.option.trim(),
+          option,
           participantId: turn.participant_id,
           name: turn.speaker_name,
           score: p.data.score,
@@ -452,7 +461,7 @@ async function score(ctx: Ctx, t: Row, turn: Row, params: Record<string, unknown
       scope: sessionScope(t),
     },
   ]);
-  return [true, { message: `Scored "${p.data.option.trim()}" ${p.data.score}/5.` }];
+  return [true, { message: `Scored "${option}" ${p.data.score}/5.` }];
 }
 
 const MAX_SCORED_OPTIONS = 12;

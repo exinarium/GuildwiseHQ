@@ -31,7 +31,7 @@ export async function listProjectSkills(ctx: Ctx, who: Who): Promise<ProjectSkil
             p.key AS project_key, p.name AS project_name,
             cr.status AS review_status, cr.hash AS review_hash, cr.reviewed_at, u.display_name AS reviewed_by,
             (SELECT r.name FROM project_repos r WHERE r.project_id = i.project_id AND r.removed_at IS NULL
-              ORDER BY r.created_at LIMIT 1) AS repo
+              ORDER BY r.name LIMIT 1) AS repo
        FROM project_capability_index i
        JOIN projects p ON p.id = i.project_id AND p.org_id = $1
        LEFT JOIN capability_reviews cr ON cr.project_id = i.project_id AND cr.kind = i.kind AND cr.key = i.key
