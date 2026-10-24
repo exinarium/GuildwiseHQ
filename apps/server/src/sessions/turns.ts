@@ -247,7 +247,7 @@ export class SessionTurns {
           instructions ??= `You are ${part.display_name}. ${part.stance ?? ''}`.trim();
           choice = defaultPersonaChoice(host, undefined);
         } else {
-          const persona = await resolvePersona(tx, t.org_id, personaKey, t.project_id);
+          const persona = await resolvePersona(tx, t.org_id, personaKey, t.project_id, t.created_by);
           if (!persona)
             throw conflict('persona_unavailable', `persona "${personaKey}" is no longer in the registry`);
           // A built-in persona travels with the turn; a vault persona is read by the runner from its clone.
@@ -517,7 +517,8 @@ export class SessionTurns {
         return false;
       }
       const purpose = (turn.meta as { purpose?: string } | null)?.purpose;
-      if (purpose) {
+      // a persona chat has no verb at all: any runner that runs session turns can take it
+      if (purpose && purpose !== 'persona_chat') {
         // A boardroom turn needs the board verbs, a discovery turn the session verbs (an older runner has the latter only).
         const boardTurn = purpose.startsWith('board_');
         const verbs = await one(
@@ -640,23 +641,28 @@ export class SessionTurns {
       skills = spec.skills;
     } else {
       const persona = !isAdHocPersona(turn.persona_key ?? '')
-        ? await resolvePersona(ctx.pool, turn.org_id, turn.persona_key, thread.project_id)
+        ? await resolvePersona(ctx.pool, turn.org_id, turn.persona_key, thread.project_id, thread.created_by)
         : undefined;
       skills = persona?.skills ?? [];
       spec = personaSpec(turn.speaker_name, choice, skills);
     }
     const persona =
       turn.speaker_kind === 'persona' && turn.persona_key && !isAdHocPersona(turn.persona_key)
-        ? await resolvePersona(ctx.pool, turn.org_id, turn.persona_key, thread.project_id)
+        ? await resolvePersona(ctx.pool, turn.org_id, turn.persona_key, thread.project_id, thread.created_by)
         : undefined;
     const roster = (await listParticipants(ctx.pool, turn.thread_id)).map((p) => ({
       name: p.display_name as string,
       kind: p.kind as 'user' | 'agent' | 'persona',
       seat: p.seat as string,
     }));
+    // R3a: the workstation's private packs are served to a turn only when the session's creator is that workstation's own user.
+    const wsOwner = turn.workstation_id
+      ? await one(ctx.pool, 'SELECT user_id FROM workstations WHERE id=$1', [turn.workstation_id])
+      : undefined;
     const session: SessionTurnSpec = {
       turnId: turn.id,
       kind: thread.kind,
+      ownerSession: !!wsOwner && wsOwner.user_id === thread.created_by,
       speaker: {
         kind: turn.speaker_kind,
         name: turn.speaker_name,

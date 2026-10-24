@@ -115,7 +115,7 @@ export const packEvents = [
       packId: Id,
       orgId: Id,
       workstationId: Id,
-      stage: z.enum(['fetch', 'check']),
+      stage: z.enum(['fetch', 'check', 'save']),
       message: z.string().max(500),
     }),
   ),

@@ -51,7 +51,7 @@ export const authorOf = (d: Designer) =>
   d.kind === 'user' ? ({ kind: 'user', id: d.userId } as const) : ({ kind: 'agent', id: d.agentId } as const);
 export const actorOf = (d: Designer) => (d.kind === 'user' ? userActor(d.userId) : agentActor(d.agentId));
 
-const BUILTIN_ROLE_KEYS = BUILTIN_ROLES.map((r) => r.key);
+export const BUILTIN_ROLE_KEYS = BUILTIN_ROLES.map((r) => r.key);
 export const BUILTIN_WORKFLOW_KEYS = BUILTIN_WORKFLOWS.map((w) => w.key);
 const BUILTIN_DEPARTMENTS = [
   ...new Set(

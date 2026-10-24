@@ -33,7 +33,7 @@ export async function threadMessages(
               WHERE r.thread_id = t.id AND w.user_id = $2))
         OR (t.kind = 'intake' AND EXISTS (SELECT 1 FROM org_members om WHERE om.org_id = t.org_id AND om.user_id = $2
               AND om.status = 'active' AND om.role IN ('owner','admin')))
-        OR (t.kind IN ('discovery','boardroom')
+        OR (t.kind IN ('discovery','boardroom','persona_chat')
             AND EXISTS (SELECT 1 FROM org_members om WHERE om.org_id = t.org_id AND om.user_id = $2 AND om.status = 'active')
             AND (t.created_by = $2 OR EXISTS (SELECT 1 FROM thread_participants tp
               WHERE tp.thread_id = t.id AND tp.kind = 'user' AND tp.ref_id = $2::text AND tp.removed_at IS NULL))))`,

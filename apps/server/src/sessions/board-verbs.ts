@@ -385,7 +385,7 @@ async function cast(
   if (p.data.persona) {
     if (['chair', 'analyst'].includes(p.data.persona))
       return [false, undefined, 'The chair and the analyst do not take a seat in the cast.'];
-    const persona = await resolvePersona(ctx.pool, t.org_id, p.data.persona, t.project_id);
+    const persona = await resolvePersona(ctx.pool, t.org_id, p.data.persona, t.project_id, t.created_by);
     if (!persona) return [false, undefined, `persona "${p.data.persona}" is not in the registry`];
     if (cfg.suggestions.some((x) => x.personaKey === persona.key))
       return [true, { message: 'Already suggested.' }];

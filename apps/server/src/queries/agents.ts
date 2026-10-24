@@ -1,8 +1,13 @@
-import type { AgentDto } from '@aom/shared';
+import { type AgentDto, type PackProvenance, provenanceLabel } from '@aom/shared';
 import type { Ctx } from '../context.ts';
 import { iso, type Row, rows } from '../db/sql.ts';
 
-export function toAgentDto(a: Row, active: Array<{ cardId: string; ref: string; title: string }>): AgentDto {
+export function toAgentDto(
+  a: Row,
+  active: Array<{ cardId: string; ref: string; title: string }>,
+  warning: 'revoked' | 'removed' | null = null,
+): AgentDto {
+  const prov = a.provenance as PackProvenance | null | undefined;
   return {
     id: a.id,
     orgId: a.org_id,
@@ -36,6 +41,7 @@ export function toAgentDto(a: Row, active: Array<{ cardId: string; ref: string; 
     sandbox: a.sandbox ?? null,
     sandboxReason: a.sandbox_reason ?? null,
     activeCards: active,
+    ...(prov ? { provenance: { ...prov, label: provenanceLabel(prov), warning } } : {}),
   };
 }
 
@@ -92,6 +98,27 @@ export async function listAgents(
     `SELECT id, ref, title, claimed_by_agent_id FROM cards WHERE claimed_by_agent_id = ANY($1::uuid[]) AND claim_id IS NOT NULL`,
     [list.map((a) => a.id)],
   );
+  // Agents hired from a pack: a pack whose approval was withdrawn, or that was removed, flags them (they keep their role version).
+  const packIds = [
+    ...new Set(list.map((a) => a.provenance?.packId as string | undefined).filter((x): x is string => !!x)),
+  ];
+  const packs = packIds.length
+    ? await rows(
+        ctx.pool,
+        `SELECT id, removed_at, visibility, pinned_sha, content_hash, trusted, trusted_sha, trusted_hash FROM packs WHERE id = ANY($1::uuid[])`,
+        [packIds],
+      )
+    : [];
+  const warningOf = (a: Row): 'revoked' | 'removed' | null => {
+    const id = a.provenance?.packId as string | undefined;
+    if (!id) return null;
+    const p = packs.find((x) => x.id === id);
+    if (!p || p.removed_at) return 'removed';
+    if (p.visibility === 'private') return null;
+    return p.trusted && p.trusted_sha === p.pinned_sha && p.trusted_hash === p.content_hash
+      ? null
+      : 'revoked';
+  };
   return list
     .filter((a) => !department || a.department === department)
     .map((a) =>
@@ -100,6 +127,7 @@ export async function listAgents(
         claims
           .filter((c) => c.claimed_by_agent_id === a.id)
           .map((c) => ({ cardId: c.id, ref: c.ref, title: c.title })),
+        warningOf(a),
       ),
     );
 }

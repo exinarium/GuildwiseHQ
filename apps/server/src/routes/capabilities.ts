@@ -14,6 +14,7 @@ export function capabilityRoutes(ctx: Ctx) {
     app.get('/api/capabilities', { schema: { querystring: ListCapabilitiesQuerySchema } }, async (req) => {
       const a = await requireOrg(ctx, req, { min: 'member' });
       return effectiveRegistry(ctx.pool, a.orgId, {
+        userId: a.session.user.id,
         ...(req.query.kind ? { kind: req.query.kind } : {}),
         ...(req.query.projectId ? { projectId: req.query.projectId } : {}),
         ...(req.query.usable === 'true' ? { usableOnly: true } : {}),

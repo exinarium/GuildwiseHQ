@@ -45,6 +45,8 @@ export interface RegistryOptions {
   projectId?: string;
   /** Leave out what cannot be used now (a pack that is not approved, or whose files changed). */
   usableOnly?: boolean;
+  /** Who asks: their own private packs are listed, nobody else's (R3a). Without it no private pack is listed. */
+  userId?: string;
 }
 
 /** Whether a pack's capabilities may be used: approved at exactly the pinned commit and content, and not flagged. */
@@ -55,22 +57,29 @@ export function packUsable(p: {
   trusted_sha: string | null;
   trusted_hash: string | null;
   integrity_failed?: boolean;
+  visibility?: string;
 }): { usable: boolean; reason?: 'untrusted' | 'integrity' | 'pending' } {
   if (!p.pinned_sha) return { usable: false, reason: 'pending' };
+  // a private pack is its owner's own: no review
+  if (p.visibility === 'private')
+    return p.integrity_failed ? { usable: false, reason: 'integrity' } : { usable: true };
   if (!p.trusted || p.trusted_sha !== p.pinned_sha || p.trusted_hash !== p.content_hash)
     return { usable: false, reason: 'untrusted' };
   if (p.integrity_failed) return { usable: false, reason: 'integrity' };
   return { usable: true };
 }
 
-async function packItems(db: Queryable, orgId: string, projectId?: string) {
+async function packItems(db: Queryable, orgId: string, projectId?: string, userId?: string) {
+  // A private pack is listed to its owner only: for anyone else (an Owner, an Admin, another member) it does not exist.
   const packs = await rows(
     db,
-    `SELECT id, scope, project_id, pinned_sha, content_hash, snapshot, trusted, trusted_sha, trusted_hash
-       FROM packs WHERE org_id=$1 AND removed_at IS NULL AND snapshot IS NOT NULL
-        AND (scope='org' OR (project_id IS NOT NULL AND project_id = $2))
-      ORDER BY name`,
-    [orgId, projectId ?? null],
+    `SELECT p.id, p.scope, p.project_id, p.pinned_sha, p.content_hash, p.snapshot, p.trusted, p.trusted_sha, p.trusted_hash,
+            p.visibility, p.name
+       FROM packs p WHERE p.org_id=$1 AND p.removed_at IS NULL AND p.snapshot IS NOT NULL
+        AND (p.scope='org' OR (p.project_id IS NOT NULL AND p.project_id = $2))
+        AND (p.visibility = 'org' OR (p.owner_user_id IS NOT NULL AND p.owner_user_id = $3::uuid))
+      ORDER BY p.name`,
+    [orgId, projectId ?? null, userId ?? null],
   );
   const out: Array<{
     meta: CapabilityMeta;
@@ -78,6 +87,7 @@ async function packItems(db: Queryable, orgId: string, projectId?: string) {
     reason?: 'untrusted' | 'integrity' | 'pending';
     packId: string;
     sha: string;
+    visibility: 'org' | 'private';
   }> = [];
   for (const p of packs) {
     const u = packUsable(p as never);
@@ -89,6 +99,7 @@ async function packItems(db: Queryable, orgId: string, projectId?: string) {
         ...(u.reason ? { reason: u.reason } : {}),
         packId: p.id,
         sha: p.pinned_sha,
+        visibility: p.visibility as 'org' | 'private',
       });
     }
   }
@@ -137,7 +148,7 @@ export async function effectiveRegistry(
   const repoRaw = o.projectId ? await projectRepoMeta(db, orgId, o.projectId) : [];
   // A capability the owner blocked is not in the registry at all (it does not shadow a built-in either).
   const repo: CapabilityMeta[] = repoRaw.filter((r) => !r.blocked).map(({ blocked: _b, ...m }) => m);
-  const packs = await packItems(db, orgId, o.projectId);
+  const packs = await packItems(db, orgId, o.projectId, o.userId);
   const idsOf = (l: CapabilityMeta[]) => l.map((b) => `${b.kind}:${b.key}`);
   // what each source can override: the ids of the sources below it
   const below: Record<string, Set<string>> = {
@@ -165,7 +176,7 @@ export async function effectiveRegistry(
         overrides: below[m.source]?.has(id) ?? false,
         usable: pk ? pk.usable : true,
         ...(pk && !pk.usable && pk.reason ? { unusableReason: pk.reason } : {}),
-        ...(pk ? { packId: pk.packId, sha: pk.sha } : {}),
+        ...(pk ? { packId: pk.packId, sha: pk.sha, visibility: pk.visibility } : {}),
         ...(m.source === 'project-repo' && o.projectId ? { projectId: o.projectId } : {}),
       };
     })
@@ -198,11 +209,13 @@ export async function resolvePersona(
   key: string,
   /** The session's project: a pack added to that project applies in it (an org pack applies everywhere). */
   projectId?: string | null,
+  /** The user the persona is for: their own private packs resolve, nobody else's. */
+  viewerUserId?: string | null,
 ): Promise<ResolvedPersona | undefined> {
   // An imported pack's persona (`bmad:analyst`): only when the pack is approved at its pinned commit and unchanged. The text
   // is never on the server; the runner reads it from its clone (and fences it as outside content).
   if (isPackedKey(key)) {
-    const hit = (await packItems(db, orgId, projectId ?? undefined)).find(
+    const hit = (await packItems(db, orgId, projectId ?? undefined, viewerUserId ?? undefined)).find(
       (p) => p.meta.kind === 'persona' && p.meta.key === key,
     );
     if (!hit?.usable) return undefined;

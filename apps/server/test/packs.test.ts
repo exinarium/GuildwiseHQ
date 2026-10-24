@@ -430,6 +430,15 @@ describe('who may report on a pack', () => {
         201,
       )
     ).pack.id as string;
+    // another member's workstation is cloned to only after that member accepted (R3a); the admin's own needs no opt-in
+    await call(
+      'POST',
+      `/api/pack-assignments/${id}/decide`,
+      { workstationId: memberWs, accept: true },
+      204,
+      member.cookie,
+      w.owner.id,
+    );
     await until(async () =>
       mr
         .of('command')

@@ -173,6 +173,8 @@ async function checkParticipant(
   orgId: string,
   p: ParticipantInput,
   projectId?: string | null,
+  /** The user the persona is for (the session's creator): their own private personas resolve. */
+  viewerId?: string | null,
 ): Promise<{ displayName: string }> {
   if (p.kind === 'user') {
     const u = await one(
@@ -200,7 +202,7 @@ async function checkParticipant(
       );
     return { displayName: p.displayName ?? p.refId.slice('ad-hoc-'.length).replace(/-/g, ' ') };
   }
-  const persona = await resolvePersona(db, orgId, p.refId, projectId);
+  const persona = await resolvePersona(db, orgId, p.refId, projectId, viewerId);
   if (!persona) throw badRequest('unknown_persona', `persona "${p.refId}" is not in the registry`);
   return { displayName: p.displayName ?? persona.name };
 }
@@ -295,7 +297,7 @@ export async function createSession(ctx: Ctx, who: Who, req: CreateSessionReques
       },
     ];
     for (const p of list) {
-      const { displayName } = await checkParticipant(tx, who.orgId, p, req.projectId);
+      const { displayName } = await checkParticipant(tx, who.orgId, p, req.projectId, who.userId);
       events.push(participantEvent(threadId, p, displayName, scope, who.userId));
     }
     await ctx.store.append(events, { tx });
@@ -376,7 +378,7 @@ export async function addParticipant(
   return withAppendTx(ctx.pool, async (tx) => {
     const t = await loadSession(tx, userId, threadId, true);
     await assertSessionManager(tx, userId, t);
-    const { displayName } = await checkParticipant(tx, t.org_id, req, t.project_id);
+    const { displayName } = await checkParticipant(tx, t.org_id, req, t.project_id, t.created_by);
     const existing = await one(
       tx,
       'SELECT 1 FROM thread_participants WHERE thread_id=$1 AND kind=$2 AND ref_id=$3 AND removed_at IS NULL',

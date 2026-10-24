@@ -358,6 +358,7 @@ export class BoardService {
     const reg = await effectiveRegistry(this.ctx.pool, t.org_id, {
       kind: 'persona',
       usableOnly: true,
+      ...(t.created_by ? { userId: t.created_by } : {}),
       ...(t.project_id ? { projectId: t.project_id } : {}),
     });
     const agents = await rows(
@@ -728,7 +729,7 @@ export class BoardService {
   ): Promise<'queued' | 'blocked' | 'gone'> {
     let stance: string | null = p.stance ?? null;
     if (!stance && p.kind === 'persona' && !isAdHocPersona(p.ref_id))
-      stance = (await resolvePersona(this.ctx.pool, t.org_id, p.ref_id, t.project_id))?.stance ?? null;
+      stance = (await resolvePersona(this.ctx.pool, t.org_id, p.ref_id, t.project_id, t.created_by))?.stance ?? null;
     const built = buildSpeakerTurn({
       topic: cfg.topic,
       brief: cfg.brief,

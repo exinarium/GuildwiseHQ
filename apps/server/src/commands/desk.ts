@@ -42,6 +42,8 @@ import { batchAnsweredEvents, batchDismissedEvents } from './intake-batch.ts';
 import { editLedgerEntry } from './ledger.ts';
 import { findNearDuplicate } from './ledger-checks.ts';
 import { resolveOutboundIn } from './outbox.ts';
+import { relayAuthoredBundles } from './pack-authoring.ts';
+import { afterAssignmentDecision, PACK_ASSIGNMENT_SUBKIND, resolvePackAssignmentIn } from './pack-holders.ts';
 import { resolvePhaseDeskItemIn } from './phases.ts';
 import { resolveRepoCreateIn, retryRepoCreateIn } from './repo-create.ts';
 import { testerLoopAnswered } from './tester-loop.ts';
@@ -299,6 +301,9 @@ async function closeItem(
   let phases = false;
   let ceoItem: Row | undefined;
   let topicsItem: Row | undefined;
+  let packWorkstation: string | undefined;
+  let packAccepted = false;
+  let packId: string | undefined;
   await withAppendTx(ctx.pool, async (tx) => {
     const { item, mayAct } = await lockItem(tx, user, id);
     // Acknowledging a "repository not created" alert is not giving up on the request: Retry still works on it while
@@ -361,6 +366,13 @@ async function closeItem(
       // Phases: confirm a BA proposal, approve or reject the follow-ups, acknowledge the results (any member).
       await resolvePhaseDeskItemIn(ctx, tx, user, item, resolution, note);
       phases = true;
+    } else if (item.kind === 'approval' && item.subkind === PACK_ASSIGNMENT_SUBKIND) {
+      // R3a: the member decides whether a pack may be placed on their workstation; approved lets the runner clone it.
+      if (resolution === 'acknowledged')
+        throw badRequest('wrong_resolution', 'a pack is allowed on your workstation or declined');
+      packWorkstation = await resolvePackAssignmentIn(ctx, tx, user, item, resolution);
+      packAccepted = resolution === 'approved';
+      packId = (item.data as { packId?: string } | null)?.packId;
     } else if (item.kind === 'approval' && item.subkind === 'definition') {
       // M10: approving makes the role or workflow available; only the owner decides.
       await resolveDefinitionIn(ctx, tx, user, item, resolution, note);
@@ -492,4 +504,8 @@ async function closeItem(
     else await rejectRecommendation(ctx, user, ceoItem, note);
   }
   if (workstationToDeliver) await ctx.services.gateway.deliverPending(workstationToDeliver);
+  if (packWorkstation) {
+    await afterAssignmentDecision(ctx, packWorkstation);
+    if (packAccepted && packId) await relayAuthoredBundles(ctx, packId);
+  }
 }

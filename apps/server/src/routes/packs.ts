@@ -2,13 +2,43 @@ import {
   AcceptPackUpdateRequestSchema,
   AddPackRequestSchema,
   CheckPackRequestSchema,
+  CreateMyPackRequestSchema,
+  DecidePackAssignmentRequestSchema,
+  GrantPackAgentRequestSchema,
+  HireFromPackRequestSchema,
   PackScriptsRequestSchema,
+  ReadMyPackRequestSchema,
+  SaveMyPackRequestSchema,
+  SetPackCredentialRequestSchema,
+  SetPackVisibilityRequestSchema,
+  SetPackWorkstationsRequestSchema,
   TrustPackRequestSchema,
 } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { requireOrg } from '../auth/guards.ts';
 import { whoOf } from '../auth/org-context.ts';
+import {
+  createMyPack,
+  getReadMyPack,
+  grantPackAgent,
+  listMyPacks,
+  removeMyPack,
+  saveMyPack,
+  setMyPackVisibility,
+  startReadMyPack,
+} from '../commands/pack-authoring.ts';
+import {
+  acceptRoleOffer,
+  dismissRoleOffer,
+  getHireStatus,
+  getRoleReview,
+  hireFromPack,
+  listPackPersonas,
+  listRoleOffers,
+  startRoleReview,
+} from '../commands/pack-hire.ts';
+import { decideAssignment, listMyAssignments } from '../commands/pack-holders.ts';
 import {
   acceptPackUpdate,
   addPack,
@@ -17,7 +47,9 @@ import {
   listPacks,
   removePack,
   revokePack,
+  setPackCredential,
   setPackScripts,
+  setPackWorkstations,
   trustPack,
 } from '../commands/packs.ts';
 import type { Ctx } from '../context.ts';
@@ -72,6 +104,155 @@ export function packRoutes(ctx: Ctx) {
     );
     app.delete('/api/packs/:id', { schema: { params: Params } }, async (req, reply) => {
       await removePack(ctx, await who(req), req.params.id);
+      reply.code(204);
+    });
+    // R3a: who holds the pack (member opt-in) and the deploy key or token of a private repository (sealed in the browser)
+    app.put(
+      '/api/packs/:id/workstations',
+      { schema: { params: Params, body: SetPackWorkstationsRequestSchema } },
+      async (req) => ({ pack: await setPackWorkstations(ctx, await who(req), req.params.id, req.body) }),
+    );
+    app.put(
+      '/api/packs/:id/credential',
+      { schema: { params: Params, body: SetPackCredentialRequestSchema } },
+      async (req) => ({ pack: await setPackCredential(ctx, await who(req), req.params.id, req.body) }),
+    );
+
+    // ---- any member --------------------------------------------------------------------------------------------
+    const member = async (req: Parameters<typeof requireOrg>[1]) =>
+      await requireOrg(ctx, req, { min: 'member' });
+    // my capabilities: packs I authored (private to my workstation, or for the organization)
+    app.get('/api/my-capabilities', async (req) => {
+      const a = await member(req);
+      return listMyPacks(ctx, a.session.user.id, a.orgId);
+    });
+    app.post('/api/my-capabilities', { schema: { body: CreateMyPackRequestSchema } }, async (req, reply) => {
+      const a = await member(req);
+      reply.code(201);
+      return { pack: await createMyPack(ctx, a.session.user, a.orgId, req.body) };
+    });
+    app.post(
+      '/api/my-capabilities/:id/save',
+      { schema: { params: Params, body: SaveMyPackRequestSchema } },
+      async (req, reply) => {
+        const a = await member(req);
+        reply.code(202);
+        return saveMyPack(ctx, a.session.user.id, a.orgId, req.params.id, req.body);
+      },
+    );
+    app.post(
+      '/api/my-capabilities/:id/read',
+      { schema: { params: Params, body: ReadMyPackRequestSchema } },
+      async (req, reply) => {
+        const a = await member(req);
+        reply.code(202);
+        return startReadMyPack(ctx, a.session.user.id, a.orgId, req.params.id, req.body.replyKey);
+      },
+    );
+    app.get(
+      '/api/my-capabilities/reads/:requestId',
+      { schema: { params: z.object({ requestId: z.uuid() }) } },
+      async (req) => {
+        const a = await member(req);
+        return getReadMyPack(a.session.user.id, req.params.requestId);
+      },
+    );
+    app.put(
+      '/api/my-capabilities/:id/visibility',
+      { schema: { params: Params, body: SetPackVisibilityRequestSchema } },
+      async (req, reply) => {
+        const a = await member(req);
+        await setMyPackVisibility(ctx, a.session.user.id, a.orgId, req.params.id, req.body.visibility);
+        reply.code(204);
+      },
+    );
+    app.put(
+      '/api/my-capabilities/:id/agents',
+      { schema: { params: Params, body: GrantPackAgentRequestSchema } },
+      async (req, reply) => {
+        const a = await member(req);
+        await grantPackAgent(
+          ctx,
+          a.session.user.id,
+          a.orgId,
+          req.params.id,
+          req.body.agentId,
+          req.body.granted,
+        );
+        reply.code(204);
+      },
+    );
+    app.delete('/api/my-capabilities/:id', { schema: { params: Params } }, async (req, reply) => {
+      const a = await member(req);
+      await removeMyPack(ctx, a.session.user.id, a.orgId, req.params.id);
+      reply.code(204);
+    });
+
+    // member opt-in: a pack assigned to one of my workstations
+    app.get('/api/pack-assignments', async (req) => {
+      const a = await requireOrg(ctx, req, { min: 'member' });
+      return { items: await listMyAssignments(ctx, a.session.user.id) };
+    });
+    app.post(
+      '/api/pack-assignments/:id/decide',
+      { schema: { params: Params, body: DecidePackAssignmentRequestSchema } },
+      async (req, reply) => {
+        const a = await member(req);
+        await decideAssignment(
+          ctx,
+          a.session.user.id,
+          req.params.id,
+          req.body.workstationId,
+          req.body.accept,
+        );
+        reply.code(204);
+      },
+    );
+
+    // hire from pack
+    app.get('/api/packs/:id/personas', { schema: { params: Params } }, async (req) =>
+      listPackPersonas(ctx, whoOf(await member(req)), req.params.id),
+    );
+    app.post(
+      '/api/packs/:id/hire',
+      { schema: { params: Params, body: HireFromPackRequestSchema } },
+      async (req, reply) => {
+        const a = await member(req);
+        reply.code(202);
+        return hireFromPack(ctx, a.session.user, whoOf(a), req.params.id, req.body);
+      },
+    );
+    app.get(
+      '/api/pack-hires/:requestId',
+      { schema: { params: z.object({ requestId: z.uuid() }) } },
+      async (req) => getHireStatus(ctx, whoOf(await member(req)), req.params.requestId),
+    );
+
+    // a pack update changed a persona an agent was hired from: a new role version on offer (never applied by itself)
+    app.get('/api/role-offers', async (req) => ({
+      items: await listRoleOffers(ctx, whoOf(await member(req))),
+    }));
+    const RoleParams = z.object({ roleKey: z.string().min(1).max(80) });
+    app.post('/api/role-offers/:roleKey/review', { schema: { params: RoleParams } }, async (req, reply) => {
+      reply.code(202);
+      return startRoleReview(ctx, whoOf(await member(req)), req.params.roleKey);
+    });
+    app.get(
+      '/api/role-offers/:roleKey/review/:requestId',
+      { schema: { params: RoleParams.extend({ requestId: z.uuid() }) } },
+      async (req) => getRoleReview(ctx, whoOf(await member(req)), req.params.roleKey, req.params.requestId),
+    );
+    app.post(
+      '/api/role-offers/:roleKey/accept',
+      { schema: { params: RoleParams, body: z.object({ requestId: z.uuid() }) } },
+      async (req) => {
+        const a = await member(req);
+        return acceptRoleOffer(ctx, a.session.user, whoOf(a), req.params.roleKey, req.body.requestId);
+      },
+    );
+    app.post('/api/role-offers/:roleKey/dismiss', { schema: { params: RoleParams } }, async (req, reply) => {
+      const a = await member(req);
+      await dismissRoleOffer(ctx, a.session.user, whoOf(a), req.params.roleKey);
       reply.code(204);
     });
   };

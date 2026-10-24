@@ -212,7 +212,7 @@ export async function boardState(ctx: Ctx, t: Row, userId: string): Promise<Boar
   for (const [index, p] of castRows.entries()) {
     const persona =
       p.kind === 'persona' && !isAdHocPersona(p.ref_id)
-        ? await resolvePersona(db, t.org_id, p.ref_id, t.project_id)
+        ? await resolvePersona(db, t.org_id, p.ref_id, t.project_id, t.created_by)
         : undefined;
     cast.push({
       participantId: p.id,

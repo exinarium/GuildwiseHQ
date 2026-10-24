@@ -12,6 +12,7 @@ import {
   DIRECT_RUNTIME,
   type HireAgentRequest,
   isOrgManager,
+  type PackProvenance,
   RUNTIME_GUARANTEES,
   randomAvatarSeed,
   runtimeRoleProblem,
@@ -269,6 +270,8 @@ export async function hireAgent(
   user: AuthSession['user'],
   org: { id: string },
   req: HireAgentRequest,
+  /** R3a, hire from pack: where the agent came from, and permissions narrower than the role's (never wider). */
+  extra: { provenance?: PackProvenance; permissions?: AgentPermissions } = {},
 ): Promise<string> {
   const agentId = randomUUID();
   await withAppendTx(ctx.pool, async (tx) => {
@@ -378,12 +381,13 @@ export async function hireAgent(
               model: req.model ?? dm.model,
               effort: req.effort ?? dm.effort,
               skills: req.skills ?? roleDef.definition.skills,
-              permissions: roleDef.definition.permissions,
+              permissions: extra.permissions ?? roleDef.definition.permissions,
               capacity: req.capacity,
               isDevops: false,
               avatarSeed: randomAvatarSeed(),
               avatarStyle: DEFAULT_AVATAR_STYLE,
               ...(unsandboxedAck ? { unsandboxedAck } : {}),
+              ...(extra.provenance ? { provenance: extra.provenance } : {}),
             },
           },
           actor: userActor(user.id),

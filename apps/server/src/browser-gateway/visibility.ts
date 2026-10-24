@@ -149,7 +149,7 @@ export async function sessionAudienceOf(db: Queryable, e: StoredEvent): Promise<
   if (typeof threadId !== 'string') return null;
   const t = await one(
     db,
-    `SELECT kind, created_by, session_config FROM threads WHERE id=$1 AND kind IN ('discovery','boardroom')`,
+    `SELECT kind, created_by, session_config FROM threads WHERE id=$1 AND kind IN ('discovery','boardroom','persona_chat')`,
     [threadId],
   );
   if (!t) return null;
@@ -179,7 +179,7 @@ async function documentAudienceOf(db: Queryable, e: StoredEvent): Promise<Sessio
   if (!sources.length) return null;
   const threads = await rows(
     db,
-    `SELECT id, created_by FROM threads WHERE id = ANY($1::uuid[]) AND kind IN ('discovery','boardroom')`,
+    `SELECT id, created_by FROM threads WHERE id = ANY($1::uuid[]) AND kind IN ('discovery','boardroom','persona_chat')`,
     [sources],
   );
   if (!threads.length) return null;

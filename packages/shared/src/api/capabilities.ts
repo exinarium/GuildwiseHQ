@@ -40,6 +40,8 @@ export const CapabilitiesResponseSchema = z.object({
       packId: z.uuid().optional(),
       sha: PackShaSchema.optional(),
       projectId: z.uuid().optional(),
+      /** R3a: `private` is a pack of the asking user's own workstation; nobody else is ever sent one. */
+      visibility: PackVisibilitySchema.optional(),
     }),
   ),
   /** Vault files that did not parse, so the owner can fix them. */

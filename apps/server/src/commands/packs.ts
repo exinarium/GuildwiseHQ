@@ -3,17 +3,22 @@ import {
   type AddPackRequest,
   diffPackSnapshots,
   isOrgManager,
+  PACK_AUTHORING_CAPABILITY,
   PACK_PRESETS,
   PACKS_CAPABILITY,
-  type PackDesired,
+  type PackCredentialShares,
+  type PackDesiredInput,
   type PackDetailDto,
   type PackDto,
+  type PackHolder,
   type PackSnapshot,
   type PacksReport,
   type PacksResponse,
+  PackUrlSchema,
   type ProjectCapabilitiesReport,
   packSnapshotContentHash,
   type RunnerToServerOf,
+  type SetPackWorkstationsRequest,
   streamId,
 } from '@aom/shared';
 import type { Who } from '../auth/org-context.ts';
@@ -25,6 +30,18 @@ import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { orgScope, runnerActor, userActor } from './common.ts';
+import { relayAuthoredBundles } from './pack-authoring.ts';
+import { offerRoleUpdates } from './pack-hire.ts';
+import { applyHolders, type HolderChange } from './pack-holders.ts';
+import {
+  authorWorkstationOf,
+  HOLDS_PACK_SQL,
+  isTrustedRow,
+  packEvent,
+  packScopeOf,
+  packWorkstations,
+  wsHas,
+} from './pack-support.ts';
 import { deliver } from './workstation-setup.ts';
 
 /**
@@ -41,7 +58,7 @@ const MAX_PACKS = 30;
 /** True when any workstation found the pack's files changed from the approved content. */
 const INTEGRITY_SQL = `EXISTS (SELECT 1 FROM pack_workstation_state s WHERE s.pack_id = p.id AND s.integrity_failed)`;
 
-function dto(r: Row): PackDto {
+export function dto(r: Row, holders: PackHolder[] = [], ownerName: string | null = null): PackDto {
   const preset = PACK_PRESETS.find((p) => p.id === r.preset);
   const snap = r.snapshot as PackSnapshot | null;
   return {
@@ -57,7 +74,7 @@ function dto(r: Row): PackDto {
     error: r.error ?? null,
     pinnedSha: r.pinned_sha ?? null,
     contentHash: r.content_hash ?? null,
-    trusted: !!r.trusted && r.trusted_sha === r.pinned_sha && r.trusted_hash === r.content_hash,
+    trusted: isTrustedRow(r) && !!r.pinned_sha,
     trustedSha: r.trusted_sha ?? null,
     scriptsEnabled: !!r.scripts_enabled,
     hasScripts: !!r.has_scripts,
@@ -76,43 +93,83 @@ function dto(r: Row): PackDto {
     lastCheckedAt: iso(r.last_checked_at),
     addedAt: iso(r.added_at) as string,
     attribution: preset?.attribution ?? null,
+    source: r.source ?? 'git',
+    visibility: r.visibility ?? 'org',
+    ownerUserId: r.owner_user_id ?? null,
+    ownerName,
+    description: r.description ?? '',
+    credentialKind: r.credential_kind ?? null,
+    credentialFingerprint: r.credential_fingerprint ?? null,
+    revision: r.revision ?? 0,
+    holders,
   };
+}
+
+/** The workstations that hold (or are asked to hold) each pack, with the opt-in and credential state, for the pack pages. */
+export async function holdersOf(
+  db: Queryable,
+  packRows: Row[],
+  viewerUserId: string,
+): Promise<Map<string, PackHolder[]>> {
+  const out = new Map<string, PackHolder[]>();
+  if (!packRows.length) return out;
+  const ids = packRows.map((p) => p.id);
+  const ws = await rows(
+    db,
+    `SELECT p.id AS pack_id, w.id AS workstation_id, w.name, u.display_name AS owner_name, w.user_id,
+            pa.status AS assignment, cs.status AS cred_status, cs.error AS cred_error,
+            COALESCE(st.host_key_pinned, false) AS host_key_pinned, (st.content_sha IS NOT NULL AND st.content_sha = p.pinned_sha) AS has_content
+       FROM packs p
+       JOIN workstations w ON (w.id = ANY(p.workstation_ids) OR (cardinality(p.workstation_ids) = 0 AND w.user_id = p.added_by))
+       JOIN users u ON u.id = w.user_id
+       LEFT JOIN pack_assignments pa ON pa.pack_id = p.id AND pa.workstation_id = w.id
+       LEFT JOIN pack_credential_shares cs ON cs.pack_id = p.id AND cs.workstation_id = w.id
+       LEFT JOIN pack_workstation_state st ON st.pack_id = p.id AND st.workstation_id = w.id
+      WHERE p.id = ANY($1::uuid[]) AND w.status = 'active'
+      ORDER BY w.name, w.id`,
+    [ids],
+  );
+  for (const r of ws) {
+    const list = out.get(r.pack_id) ?? [];
+    list.push({
+      workstationId: r.workstation_id,
+      workstationName: r.name,
+      ownerName: r.owner_name,
+      mine: r.user_id === viewerUserId,
+      assignment: r.assignment === 'pending' ? 'pending' : 'accepted',
+      credential: r.cred_status
+        ? r.cred_status === 'stored'
+          ? 'stored'
+          : r.cred_status === 'failed'
+            ? 'failed'
+            : 'pending'
+        : null,
+      credentialError: r.cred_error ?? null,
+      hostKeyPinned: !!r.host_key_pinned,
+      hasContent: !!r.has_content,
+    });
+    out.set(r.pack_id, list);
+  }
+  return out;
+}
+
+async function packDto(ctx: Ctx, who: Who, id: string): Promise<PackDto> {
+  const r = await load(ctx.pool, who, id);
+  const holders = await holdersOf(ctx.pool, [r], who.userId);
+  return dto(r, holders.get(r.id) ?? []);
 }
 
 async function load(db: Queryable, who: Who, id: string, lock = false): Promise<Row> {
   const r = await one(
     db,
     `SELECT p.*, ${INTEGRITY_SQL} AS integrity_failed FROM packs p
-      WHERE p.id=$1 AND p.org_id=$2 AND p.removed_at IS NULL ${lock ? 'FOR UPDATE OF p' : ''}`,
+      WHERE p.id=$1 AND p.org_id=$2 AND p.removed_at IS NULL AND p.visibility = 'org' ${lock ? 'FOR UPDATE OF p' : ''}`,
     [id, who.orgId],
   );
+  // A private pack is not found here whoever asks: only its owner's "My capabilities" sees it.
   if (!r) throw notFound('pack not found');
   return r;
 }
-
-/** Workstations of the organization's members that announce `packs:1`: the ones an admin may choose from. */
-async function packWorkstations(
-  db: Queryable,
-  orgId: string,
-): Promise<Array<{ id: string; name: string; user_id: string }>> {
-  return rows(
-    db,
-    `SELECT w.id, w.name, w.user_id FROM workstations w
-       JOIN org_members om ON om.user_id = w.user_id AND om.org_id = $1 AND om.status = 'active'
-       JOIN workstation_capabilities wc ON wc.workstation_id = w.id
-      WHERE w.status = 'active' AND $2 = ANY(wc.capabilities)
-      ORDER BY w.name, w.id`,
-    [orgId, PACKS_CAPABILITY],
-  );
-}
-
-/**
- * Whether a pack may be on, and may be reported by, this workstation: it is active, its owner is an active member of the
- * pack's organization, and it is one the adding admin chose (no choice: any workstation of the admin who added the pack).
- */
-const HOLDS_PACK_SQL = `w.status = 'active'
-  AND EXISTS (SELECT 1 FROM org_members om WHERE om.user_id = w.user_id AND om.org_id = p.org_id AND om.status = 'active')
-  AND (w.id = ANY(p.workstation_ids) OR (cardinality(p.workstation_ids) = 0 AND w.user_id = p.added_by))`;
 
 export async function workstationHoldsPack(
   db: Queryable,
@@ -128,15 +185,34 @@ export async function workstationHoldsPack(
 }
 
 /** Every pack this workstation is meant to hold, as `packs.sync` wants them. Packs of other workstations are never sent. */
-export async function desiredPacksFor(db: Queryable, workstationId: string): Promise<PackDesired[]> {
+export async function desiredPacksFor(db: Queryable, workstationId: string): Promise<PackDesiredInput[]> {
+  // A runner from before R3a cannot hold an authored pack, a private pack or one that needs a deploy key: it is not sent them
+  // (its schema would not even read the URL of an authored pack).
+  const authoring = await wsHas(db, workstationId, PACK_AUTHORING_CAPABILITY);
   const r = await rows(
     db,
-    `SELECT p.* FROM packs p JOIN workstations w ON w.id = $1
+    `SELECT p.*, COALESCE((SELECT array_agg(g.agent_id) FROM pack_agent_grants g
+                            JOIN agents a ON a.id = g.agent_id AND a.workstation_id = w.id AND a.status <> 'retired'
+                           WHERE g.pack_id = p.id), '{}') AS granted_agent_ids
+       FROM packs p JOIN workstations w ON w.id = $1
       WHERE p.removed_at IS NULL AND ${HOLDS_PACK_SQL}
+        AND ($2::boolean OR (p.source = 'git' AND p.visibility = 'org' AND p.credential_kind IS NULL))
       ORDER BY p.added_at`,
-    [workstationId],
+    [workstationId, authoring],
   );
   return r.map((p) => ({
+    // The R3a fields appear only when they are not the defaults: a plain public pack is sent exactly as before.
+    ...(p.source === 'authored'
+      ? { source: 'authored' as const, authorWorkstationId: authorWorkstationOf(p) }
+      : {}),
+    ...(p.visibility === 'private'
+      ? {
+          visibility: 'private' as const,
+          ownerUserId: p.owner_user_id ?? null,
+          grantedAgentIds: (p.granted_agent_ids ?? []) as string[],
+        }
+      : {}),
+    ...(p.credential_kind ? { credentialKind: p.credential_kind, hostKey: p.host_key ?? null } : {}),
     packId: p.id,
     orgId: p.org_id,
     name: p.name,
@@ -147,7 +223,7 @@ export async function desiredPacksFor(db: Queryable, workstationId: string): Pro
     projectId: p.project_id ?? null,
     pinnedSha: p.pinned_sha ?? null,
     trusted:
-      p.trusted && p.trusted_sha && p.trusted_hash
+      p.trusted && p.trusted_sha && p.trusted_hash && p.visibility !== 'private'
         ? { sha: p.trusted_sha, contentHash: p.trusted_hash }
         : null,
     scriptsEnabled: !!p.scripts_enabled,
@@ -192,6 +268,12 @@ export async function syncOrg(ctx: Ctx, orgId: string): Promise<void> {
   );
 }
 
+/** The full list for these workstations only (a private pack, a changed holder). */
+export async function syncWorkstations(ctx: Ctx, workstationIds: string[]): Promise<void> {
+  for (const id of new Set(workstationIds)) await queuePacksSync(ctx.pool, id);
+  deliver(ctx, [...new Set(workstationIds)]);
+}
+
 const ev = (
   type: string,
   payload: Record<string, unknown>,
@@ -210,15 +292,19 @@ const ev = (
 
 export async function listPacks(ctx: Ctx, who: Who): Promise<PacksResponse> {
   requireManager(who);
+  // A private pack is not here whoever asks, nor is an authored organization pack its author has not saved yet.
   const r = await rows(
     ctx.pool,
-    `SELECT p.*, ${INTEGRITY_SQL} AS integrity_failed FROM packs p
-      WHERE p.org_id=$1 AND p.removed_at IS NULL ORDER BY p.added_at`,
+    `SELECT p.*, ${INTEGRITY_SQL} AS integrity_failed, u.display_name AS owner_name FROM packs p
+       LEFT JOIN users u ON u.id = p.owner_user_id
+      WHERE p.org_id=$1 AND p.removed_at IS NULL AND p.visibility = 'org' AND NOT (p.source = 'authored' AND p.pinned_sha IS NULL)
+      ORDER BY p.added_at`,
     [who.orgId],
   );
   const ws = await packWorkstations(ctx.pool, who.orgId);
+  const holders = await holdersOf(ctx.pool, r, who.userId);
   return {
-    packs: r.map(dto),
+    packs: r.map((p) => dto(p, holders.get(p.id) ?? [], p.owner_name ?? null)),
     // the caller's own: the default holders of a pack they add
     workstationsOnline: ws.filter((w) => w.user_id === who.userId && ctx.services.runners.isOnline(w.id))
       .length,
@@ -234,7 +320,15 @@ export async function listPacks(ctx: Ctx, who: Who): Promise<PacksResponse> {
 export async function getPack(ctx: Ctx, who: Who, id: string): Promise<PackDetailDto> {
   requireManager(who);
   const r = await load(ctx.pool, who, id);
-  return { ...dto(r), snapshot: r.snapshot ?? null, updateSnapshot: r.update_snapshot ?? null };
+  const holders = await holdersOf(ctx.pool, [r], who.userId);
+  const owner = r.owner_user_id
+    ? await one(ctx.pool, 'SELECT display_name FROM users WHERE id=$1', [r.owner_user_id])
+    : undefined;
+  return {
+    ...dto(r, holders.get(r.id) ?? [], owner?.display_name ?? null),
+    snapshot: r.snapshot ?? null,
+    updateSnapshot: r.update_snapshot ?? null,
+  };
 }
 
 // -------------------------------------------------------------------------------------------------- owner actions
@@ -265,7 +359,27 @@ export async function addPack(ctx: Ctx, who: Who, req: AddPackRequest): Promise<
   if (req.scope === 'project' && !req.projectId)
     throw badRequest('project_required', 'a project pack needs a project');
   const id = randomUUID();
+  let change: HolderChange | undefined;
   const chosen = [...new Set(req.workstationIds ?? [])];
+  // A private repository: ssh needs a deploy key, https a token; without a credential only a public https URL is accepted.
+  const cred = req.credential;
+  if (!cred && !PackUrlSchema.safeParse(req.url).success)
+    throw badRequest(
+      'invalid_url',
+      'use a public https:// URL, or add a deploy key or token for a private repository',
+    );
+  if (cred) {
+    const ssh = /^(ssh:\/\/|git@)/i.test(req.url);
+    if (cred.kind === 'ssh' && !ssh)
+      throw badRequest(
+        'invalid_url',
+        'a deploy key is for an ssh URL (ssh://git@host/path or git@host:path)',
+      );
+    if (cred.kind === 'token' && ssh)
+      throw badRequest('invalid_url', 'a token is for an https:// URL; use a deploy key for ssh');
+    if (!chosen.length)
+      throw badRequest('workstations_required', 'choose the workstations that get the deploy key or token');
+  }
   await withAppendTx(ctx.pool, async (tx) => {
     if (chosen.length) {
       const ok = await packWorkstations(tx, who.orgId);
@@ -290,10 +404,11 @@ export async function addPack(ctx: Ctx, who: Who, req: AddPackRequest): Promise<
       who.orgId,
     ]);
     if ((n?.n ?? 0) >= MAX_PACKS) throw conflict('too_many_packs', `at most ${MAX_PACKS} packs`);
-    const dup = await one(tx, 'SELECT 1 FROM packs WHERE org_id=$1 AND name=$2 AND removed_at IS NULL', [
-      who.orgId,
-      name,
-    ]);
+    const dup = await one(
+      tx,
+      `SELECT 1 FROM packs WHERE org_id=$1 AND name=$2 AND removed_at IS NULL AND visibility='org'`,
+      [who.orgId, name],
+    );
     if (dup) throw conflict('pack_name_taken', `a pack named "${name}" already exists: choose another name`);
     await ctx.store.append(
       [
@@ -310,7 +425,9 @@ export async function addPack(ctx: Ctx, who: Who, req: AddPackRequest): Promise<
             projectId: req.scope === 'project' ? (req.projectId ?? null) : null,
             preset: preset?.id ?? null,
             addedBy: who.userId,
-            workstationIds: chosen,
+            // the holders are set below, so that another member's workstation goes through the opt-in
+            workstationIds: [],
+            credentialKind: cred?.kind ?? null,
           },
           who.orgId,
           id,
@@ -319,14 +436,105 @@ export async function addPack(ctx: Ctx, who: Who, req: AddPackRequest): Promise<
       ],
       { tx },
     );
+    if (chosen.length) {
+      const pack = await one(tx, 'SELECT * FROM packs WHERE id=$1', [id]);
+      const me = await one(tx, 'SELECT display_name FROM users WHERE id=$1', [who.userId]);
+      change = await applyHolders(
+        ctx,
+        tx,
+        pack as Row,
+        { userId: who.userId, name: me?.display_name },
+        chosen,
+        cred,
+      );
+    }
   });
   await syncOrg(ctx, who.orgId);
-  return dto(await load(ctx.pool, who, id));
+  if (change) deliver(ctx, change.deliver);
+  return packDto(ctx, who, id);
+}
+
+/** The admin changes who holds the pack; a workstation of another member waits for that member to accept. */
+export async function setPackWorkstations(
+  ctx: Ctx,
+  who: Who,
+  id: string,
+  req: SetPackWorkstationsRequest,
+): Promise<PackDto> {
+  requireManager(who);
+  let change: HolderChange | undefined;
+  await withAppendTx(ctx.pool, async (tx) => {
+    const pack = await load(tx, who, id, true);
+    const ids = [...new Set(req.workstationIds)];
+    const ok = await packWorkstations(tx, who.orgId);
+    const known = new Map(ok.map((w) => [w.id, w]));
+    if (pack.source === 'authored') {
+      // the author's workstation always holds it (and stays first): it is the source of the files
+      const author = authorWorkstationOf(pack);
+      if (!author || !ids.includes(author))
+        throw badRequest('author_workstation_required', "an authored pack stays on its author's workstation");
+      ids.splice(ids.indexOf(author), 1);
+      ids.unshift(author);
+    } else if (!ids.some((c) => known.get(c)?.user_id === pack.added_by)) {
+      throw badRequest('own_workstation_required', 'keep one of the adding admin’s own workstations');
+    }
+    const me = await one(tx, 'SELECT display_name FROM users WHERE id=$1', [who.userId]);
+    change = await applyHolders(
+      ctx,
+      tx,
+      pack,
+      { userId: who.userId, name: me?.display_name },
+      ids,
+      req.credential,
+    );
+  });
+  await syncOrg(ctx, who.orgId);
+  if (change) deliver(ctx, change.deliver);
+  // an approved authored pack goes to the holders that were added
+  await relayAuthoredBundles(ctx, id);
+  return packDto(ctx, who, id);
+}
+
+/** Replaces the deploy key or token of a private repository on every holder (rotation). */
+export async function setPackCredential(
+  ctx: Ctx,
+  who: Who,
+  id: string,
+  cred: PackCredentialShares,
+): Promise<PackDto> {
+  requireManager(who);
+  let change: HolderChange | undefined;
+  await withAppendTx(ctx.pool, async (tx) => {
+    const pack = await load(tx, who, id, true);
+    if (pack.source !== 'git') throw badRequest('not_a_git_pack', 'only a git pack has a credential');
+    const ssh = /^(ssh:\/\/|git@)/i.test(pack.url);
+    if ((cred.kind === 'ssh') !== ssh)
+      throw badRequest(
+        'invalid_url',
+        ssh ? 'this repository uses ssh: use a deploy key' : 'this repository uses https: use a token',
+      );
+    const me = await one(tx, 'SELECT display_name FROM users WHERE id=$1', [who.userId]);
+    change = await applyHolders(
+      ctx,
+      tx,
+      pack,
+      { userId: who.userId, name: me?.display_name },
+      (pack.workstation_ids as string[]).length
+        ? (pack.workstation_ids as string[])
+        : cred.shares.map((s) => s.workstationId),
+      cred,
+    );
+  });
+  await syncOrg(ctx, who.orgId);
+  if (change) deliver(ctx, change.deliver);
+  return packDto(ctx, who, id);
 }
 
 export async function checkPack(ctx: Ctx, who: Who, id: string, ref?: string): Promise<{ queued: boolean }> {
   requireManager(who);
   const r = await load(ctx.pool, who, id);
+  if (r.source === 'authored')
+    throw conflict('no_remote', 'an authored pack has no remote: its updates are the author’s saves');
   if (!r.pinned_sha) throw conflict('pack_pending', 'the pack has not been fetched yet');
   // only a workstation of the admin who added the pack reports updates (the same one that pinned it)
   const holders = await rows(
@@ -371,12 +579,15 @@ export async function acceptPackUpdate(ctx: Ctx, who: Who, id: string, sha: stri
           id,
           who.userId,
         ),
+        // agents hired from a persona this update changed: a new role version is on offer (never applied by itself)
+        ...(await offerRoleUpdates(ctx, tx, r, r.snapshot as PackSnapshot | null, up)),
       ],
       { tx },
     );
   });
   await syncOrg(ctx, who.orgId);
-  return dto(await load(ctx.pool, who, id));
+  await relayAuthoredBundles(ctx, id);
+  return packDto(ctx, who, id);
 }
 
 export async function trustPack(
@@ -406,7 +617,9 @@ export async function trustPack(
     );
   });
   await syncOrg(ctx, who.orgId);
-  return dto(await load(ctx.pool, who, id));
+  // an authored pack is approved on its author's workstation: the other holders may now receive the files
+  await relayAuthoredBundles(ctx, id);
+  return packDto(ctx, who, id);
 }
 
 export async function revokePack(ctx: Ctx, who: Who, id: string): Promise<PackDto> {
@@ -427,7 +640,7 @@ export async function revokePack(ctx: Ctx, who: Who, id: string): Promise<PackDt
     );
   });
   await syncOrg(ctx, who.orgId);
-  return dto(await load(ctx.pool, who, id));
+  return packDto(ctx, who, id);
 }
 
 export async function setPackScripts(ctx: Ctx, who: Who, id: string, enabled: boolean): Promise<PackDto> {
@@ -452,7 +665,7 @@ export async function setPackScripts(ctx: Ctx, who: Who, id: string, enabled: bo
     );
   });
   await syncOrg(ctx, who.orgId);
-  return dto(await load(ctx.pool, who, id));
+  return packDto(ctx, who, id);
 }
 
 export async function removePack(ctx: Ctx, who: Who, id: string): Promise<void> {
@@ -481,51 +694,117 @@ export async function applyPacksReport(
 ): Promise<void> {
   const r = await one(ctx.pool, 'SELECT * FROM packs WHERE id=$1 AND removed_at IS NULL', [msg.packId]);
   if (!r) return;
-  // a workstation reports only on packs it was sent: member of the organization, chosen by the admin who added the pack
+  // a workstation reports only on packs it was sent: member of the organization, chosen by the admin who added the pack, and (for
+  // another member's workstation) accepted by that member; a private pack only from its owner's workstation
   if (!(await workstationHoldsPack(ctx.pool, msg.packId, ws.id))) return;
   const orgId = r.org_id as string;
-  const fromAdder = ws.userId === r.added_by;
+  const authored = r.source === 'authored';
+  // who may pin and offer updates: the adding admin's workstation, or an authored pack's author workstation
+  const fromAdder = authored ? authorWorkstationOf(r) === ws.id : ws.userId === r.added_by;
   const base = { packId: msg.packId, orgId, workstationId: ws.id };
   const out: AppendInput[] = [];
   const m = msg as PacksReport;
   const mk = (type: string, payload: Record<string, unknown>) =>
-    ({
-      streamId: streamId.pack(msg.packId),
-      event: { type, payload },
-      actor: runnerActor(ws.id),
-      scope: orgScope(orgId),
-    }) as AppendInput;
+    packEvent(type, payload, r as never, { workstationId: ws.id });
   // The server never takes a reported content hash on trust: it is recomputed from the snapshot's own items, and a snapshot
   // whose hash does not match them is dropped.
   const snapshotOk = (s: PackSnapshot | undefined): s is PackSnapshot =>
     !!s && packSnapshotContentHash(s) === s.contentHash;
+  // An authored revision is named by its content hash: a snapshot whose sha is something else is not one of ours.
+  const authoredOk = (s: PackSnapshot): boolean => !authored || s.sha === s.contentHash;
+  // The workstation is waiting (for the member's opt-in, a credential, the files): a fact, not a failure.
+  if (m.waiting) return;
+  // The ssh host key the first fetch recorded: remembered once, so a re-installed runner keeps the pin.
+  if (m.hostKey && r.credential_kind === 'ssh' && !r.host_key)
+    out.push(
+      mk('PackHostKeyPinned', {
+        ...base,
+        host: m.hostKey.host.slice(0, 255),
+        hostKey: m.hostKey.key.slice(0, 2000),
+      }),
+    );
+  // Anyone who may approve their own save: an Owner or Admin who asked for it when saving.
+  const ownerMayApprove = async (): Promise<boolean> =>
+    authored &&
+    r.visibility === 'org' &&
+    !!r.save_approve &&
+    !!r.owner_user_id &&
+    isOrgManager({ orgRole: await orgRoleOf(ctx.pool, r.owner_user_id, orgId) });
+  let accepted = false;
   if (m.state === 'resolved' && m.snapshot) {
-    if (!snapshotOk(m.snapshot)) return;
+    if (!snapshotOk(m.snapshot) || !authoredOk(m.snapshot)) return;
     // the first resolution pins the commit and the content the owner will review: only the adding admin's own workstation may
     // supply it. Other chosen workstations can only confirm it afterwards.
     if (!r.pinned_sha) {
-      if (fromAdder) out.push(mk('PackRefResolved', { ...base, snapshot: m.snapshot }));
+      if (fromAdder) {
+        out.push(mk('PackRefResolved', { ...base, snapshot: m.snapshot }));
+        // an Owner or Admin who approves their own pack: the same save is the review
+        if (await ownerMayApprove())
+          out.push(
+            mk('PackTrusted', {
+              packId: msg.packId,
+              orgId,
+              sha: m.snapshot.sha,
+              contentHash: m.snapshot.contentHash,
+              trustedBy: r.owner_user_id,
+            }),
+          );
+      }
     } else if (m.snapshot.sha === r.pinned_sha) {
       if (m.snapshot.contentHash !== r.content_hash)
         out.push(
           mk('PackIntegrityFailed', { ...base, expected: r.content_hash, actual: m.snapshot.contentHash }),
         );
-      else if (r.status !== 'ready' || r.error || (await integrityFailedOn(ctx.pool, msg.packId, ws.id)))
+      else if (
+        r.status !== 'ready' ||
+        r.error ||
+        (await integrityFailedOn(ctx.pool, msg.packId, ws.id)) ||
+        // an authored organization pack travels to the others: note which workstation holds the pinned revision now
+        (authored && !(await holdsContent(ctx.pool, msg.packId, ws.id, r.pinned_sha)))
+      )
         out.push(mk('PackRefResolved', { ...base, snapshot: m.snapshot }));
     }
   } else if (m.state === 'update' && m.snapshot) {
-    if (!snapshotOk(m.snapshot) || !fromAdder) return;
+    if (!snapshotOk(m.snapshot) || !authoredOk(m.snapshot) || !fromAdder) return;
     const have = r.update_snapshot as PackSnapshot | null;
-    if (m.snapshot.sha !== r.pinned_sha && have?.sha !== m.snapshot.sha && r.snapshot)
-      out.push(
-        mk('PackUpdateAvailable', {
-          ...base,
-          snapshot: m.snapshot,
-          diff: diffPackSnapshots(r.snapshot as PackSnapshot, m.snapshot),
-        }),
-      );
+    if (m.snapshot.sha !== r.pinned_sha && have?.sha !== m.snapshot.sha && r.snapshot) {
+      const diff = diffPackSnapshots(r.snapshot as PackSnapshot, m.snapshot);
+      out.push(mk('PackUpdateAvailable', { ...base, snapshot: m.snapshot, diff }));
+      // The author's own pack takes its new revision at once when it is private (it is theirs) or when an Owner or Admin
+      // approved their own save; a Member's organization pack waits for an Owner or Admin, with the diff, like any update.
+      const approve = await ownerMayApprove();
+      if (authored && (r.visibility === 'private' || approve)) {
+        accepted = true;
+        out.push(
+          mk('PackUpdateAccepted', {
+            packId: msg.packId,
+            orgId,
+            sha: m.snapshot.sha,
+            ref: m.snapshot.ref,
+            contentHash: m.snapshot.contentHash,
+            acceptedBy: r.owner_user_id,
+            keepTrust: false,
+            scriptsReset: diff.scriptsAdded.length + diff.scriptsChanged.length > 0,
+          }),
+        );
+        if (approve)
+          out.push(
+            mk('PackTrusted', {
+              packId: msg.packId,
+              orgId,
+              sha: m.snapshot.sha,
+              contentHash: m.snapshot.contentHash,
+              trustedBy: r.owner_user_id,
+            }),
+          );
+        out.push(...(await offerRoleUpdates(ctx, ctx.pool, r, r.snapshot as PackSnapshot, m.snapshot)));
+      }
+    }
   } else if (m.state === 'current' && m.sha) {
-    if (fromAdder) out.push(mk('PackUpToDate', { ...base, sha: m.sha, ref: r.ref }));
+    // a save of the same files: nothing to offer, and the pending save is over
+    if (authored && r.save_pending) {
+      out.push(mk('PackUpToDate', { ...base, sha: m.sha, ref: r.ref }));
+    } else if (fromAdder && !authored) out.push(mk('PackUpToDate', { ...base, sha: m.sha, ref: r.ref }));
   } else if (m.state === 'integrity') {
     // only a fact about this workstation (the projection keeps it per workstation)
     if (!(await integrityFailedOn(ctx.pool, msg.packId, ws.id)))
@@ -542,6 +821,29 @@ export async function applyPacksReport(
       out.push(mk('PackFailed', { ...base, stage: r.pinned_sha ? 'check' : 'fetch', message }));
   }
   if (out.length) await ctx.store.append(out);
+  // the new revision (or the first pin, or the approval) goes to the holders
+  if (out.length && authored) {
+    if (r.visibility === 'private')
+      await syncWorkstations(ctx, ((r.workstation_ids as string[]) ?? []).slice(0, 1));
+    else {
+      if (accepted || out.some((e) => e.event.type === 'PackRefResolved' || e.event.type === 'PackTrusted'))
+        await syncOrg(ctx, orgId);
+      await relayAuthoredBundles(ctx, msg.packId);
+    }
+  }
+}
+
+async function holdsContent(
+  db: Queryable,
+  packId: string,
+  workstationId: string,
+  sha: string,
+): Promise<boolean> {
+  return !!(await one(
+    db,
+    'SELECT 1 FROM pack_workstation_state WHERE pack_id=$1 AND workstation_id=$2 AND content_sha=$3',
+    [packId, workstationId, sha],
+  ));
 }
 
 async function integrityFailedOn(db: Queryable, packId: string, workstationId: string): Promise<boolean> {

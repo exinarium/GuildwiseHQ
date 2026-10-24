@@ -251,6 +251,7 @@ export class DiscoveryService {
       const reg = await effectiveRegistry(ctx.pool, who.orgId, {
         kind: 'playbook',
         usableOnly: true,
+        userId: who.userId,
         ...(req.projectId ? { projectId: req.projectId } : {}),
       });
       if (

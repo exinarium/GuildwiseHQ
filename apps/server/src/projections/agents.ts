@@ -52,6 +52,11 @@ export const agentProjectors: Record<string, Projector> = {
         p.isBuiltin ?? (p.isDevops || p.roleKey === 'ceo'),
       ],
     );
+    if (p.provenance)
+      await exec(tx, 'UPDATE agents SET provenance=$2 WHERE id=$1', [
+        p.agentId,
+        JSON.stringify(p.provenance),
+      ]);
   },
   AgentAllowedSet: async (tx, e) => {
     const p = (e.event as EventOf<'AgentAllowedSet'>).payload;

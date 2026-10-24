@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { PackProvenanceSchema } from '../capabilities/provenance.ts';
 import { AvatarStyleSchema } from '../avatars/index.ts';
 import { AgentChangesSchema } from '../events/agent.ts';
 import { SandboxStateSchema } from '../protocol/runner.ts';
@@ -46,6 +47,16 @@ export const AgentDtoSchema = z.object({
   sandboxReason: z.string().nullable().optional(),
   /** Active claims right now. */
   activeCards: z.array(z.object({ cardId: z.uuid(), ref: z.string(), title: z.string() })).default([]),
+  /**
+   * R3a: hired from a pack persona (`BMAD · analyst · v6.12.4`). `warning`: the pack's approval was withdrawn (`revoked`) or the
+   * pack was removed; the agent keeps its role version and its work, and shows a warning.
+   */
+  provenance: PackProvenanceSchema.extend({
+    label: z.string(),
+    warning: z.enum(['revoked', 'removed']).nullable().default(null),
+  })
+    .nullable()
+    .optional(),
 });
 export type AgentDto = z.infer<typeof AgentDtoSchema>;
 export const AgentsResponseSchema = z.object({ agents: z.array(AgentDtoSchema) });

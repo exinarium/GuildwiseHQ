@@ -12,6 +12,9 @@ import {
   permissionsForPersona,
   personaToolSet,
   provenanceLabel,
+  RoleDefinitionSchema,
+  roleFromPersona,
+  validateRoleDefinition,
   roleKeyForPackPersona,
   unzipTree,
   validateAuthored,
@@ -215,5 +218,44 @@ describe('pack wire stays readable by the new fields', () => {
     expect(d.visibility).toBe('org');
     expect(d.accepted).toBe(true);
     expect(d.grantedAgentIds).toEqual([]);
+  });
+});
+
+describe('a role from a pack persona', () => {
+  const text = capabilityFiles({
+    kind: 'persona',
+    key: 'analyst',
+    name: 'Analyst',
+    description: 'Turns ideas into briefs.',
+    stance: 'Ask before assuming.',
+    voice: 'Warm',
+    icon: 'A',
+    tools: ['read', 'web', 'shell'],
+    skills: ['brief'],
+    prompt: 'Interview the owner.',
+  } as AuthoredCapability)['analyst.md'] as string;
+  const base = {
+    packId: '3f2b8c1e-6a43-4c1a-9d52-1a2b3c4d5e6f',
+    packName: 'bmad',
+    capability: 'analyst',
+    text,
+    hash: 'a'.repeat(64),
+    sha: 'b'.repeat(40),
+    ref: 'v6.12.4',
+    visibility: 'org' as const,
+    version: 1,
+  };
+  it('makes instructions of the prompt and a role that claims nothing', () => {
+    const r = roleFromPersona({ ...base, packSkills: ['bmad:brief'] });
+    expect(r.key).toBe('bmad-analyst');
+    expect(r.instructions).toContain('Interview the owner.');
+    expect(r.instructions).toContain('Stance: Ask before assuming.');
+    expect(r.claimableStages).toEqual([]);
+    expect(r.skills).toEqual(['bmad:brief']);
+    expect(r.permissions.allowedTools).toEqual(['read', 'web', 'shell']);
+    expect(r.permissions.mayCommit).toBe(false);
+    expect(r.source && provenanceLabel(r.source)).toBe('BMAD · analyst · v6.12.4');
+    expect(RoleDefinitionSchema.safeParse(r).success).toBe(true);
+    expect(validateRoleDefinition(r, { builtinRoleKeys: [], builtinWorkflowKeys: [], departments: [] }).filter((i) => i.severity === 'error')).toEqual([]);
   });
 });

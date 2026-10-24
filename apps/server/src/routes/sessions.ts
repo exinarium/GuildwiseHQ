@@ -7,9 +7,11 @@ import {
   PatchSessionRequestSchema,
   PostSessionMessageRequestSchema,
   QueueTurnRequestSchema,
+  PostSessionMessageRequestSchema as SayRequestSchema,
   SessionParamsSchema,
   SessionParticipantParamsSchema,
   SessionTurnParamsSchema,
+  StartPersonaChatRequestSchema,
 } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
 import { requireOrg } from '../auth/guards.ts';
@@ -27,6 +29,7 @@ import {
   updateParticipant,
 } from '../commands/sessions.ts';
 import type { Ctx } from '../context.ts';
+import { sayToPersona, startPersonaChat } from '../sessions/persona-chat.ts';
 import { typed } from './util.ts';
 
 /**
@@ -140,6 +143,26 @@ export function sessionRoutes(ctx: Ctx) {
         const turn = await ctx.services.sessions.queue(a.session.user.id, req.params.id, req.body);
         reply.code(202);
         return { turn };
+      },
+    );
+
+    // Chat with a persona that is not hired: a one-to-one session on the user's own workstation (R3a).
+    app.post(
+      '/api/persona-chats',
+      { schema: { body: StartPersonaChatRequestSchema } },
+      async (req, reply) => {
+        const a = await requireOrg(ctx, req);
+        reply.code(201);
+        return { session: await startPersonaChat(ctx, whoOf(a), req.body) };
+      },
+    );
+    app.post(
+      '/api/persona-chats/:id/say',
+      { schema: { params: SessionParamsSchema, body: SayRequestSchema.pick({ body: true }) } },
+      async (req, reply) => {
+        const a = await requireOrg(ctx, req);
+        reply.code(202);
+        return sayToPersona(ctx, a.session.user.id, req.params.id, req.body.body);
       },
     );
 

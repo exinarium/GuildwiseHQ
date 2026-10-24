@@ -6,6 +6,7 @@ import {
   LOCAL_VAULT_CAPABILITY,
   type McpCall,
   normalizeRemoteUrl,
+  PACK_AUTHORING_CAPABILITY,
   PACKS_CAPABILITY,
   RUN_USAGE_FEATURE,
   type RunnerToServer,
@@ -47,6 +48,14 @@ import { applyOrgFolderResult, applyOrgFoldersReport } from '../commands/org-fol
 import { dispatchOrgGraph } from '../commands/org-graph.ts';
 import { applyResealResult } from '../commands/org-provider-keys.ts';
 import { applyOutboundResult, finishOutboundCommand, queueApprovedFor } from '../commands/outbox.ts';
+import {
+  applyAuthorSaveResult,
+  applyBundleRequestResult,
+  applyReadResult,
+  relayForAuthor,
+} from '../commands/pack-authoring.ts';
+import { applyPersonaReadResult } from '../commands/pack-hire.ts';
+import { applyPackCredentialResult } from '../commands/pack-holders.ts';
 import { applyPacksReport, applyProjectCapabilitiesReport, queuePacksSync } from '../commands/packs.ts';
 import { applyBranchCheckResult } from '../commands/phases.ts';
 import { applyProviderKeyResult } from '../commands/provider-keys.ts';
@@ -609,6 +618,58 @@ export class RunnerHandlers {
             msg.ok,
             msg.result,
           );
+        } else if (cmd?.type === 'pack.credential.set') {
+          // The sealed deploy key or token is forgotten whatever the answer was; only the fact is kept.
+          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+          await applyPackCredentialResult(
+            this.ctx,
+            conn.workstationId,
+            msg.commandId,
+            cmd.payload,
+            msg.ok,
+            msg.result,
+          );
+        } else if (cmd?.type === 'pack.author.save') {
+          // The sealed files are forgotten here; the outcome comes as packs.report (a refusal is an event for the author).
+          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+          await applyAuthorSaveResult(
+            this.ctx,
+            conn.workstationId,
+            msg.commandId,
+            cmd.payload,
+            msg.ok,
+            msg.result,
+          );
+        } else if (cmd?.type === 'pack.read') {
+          // Sealed to the editor's one-time key: held in memory for the page, never stored.
+          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+          applyReadResult(cmd.payload, msg.ok, msg.result);
+        } else if (cmd?.type === 'pack.persona.read') {
+          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+          await applyPersonaReadResult(
+            this.ctx,
+            conn.workstationId,
+            msg.commandId,
+            cmd.payload,
+            msg.ok,
+            msg.result,
+          );
+        } else if (cmd?.type === 'pack.bundle.request') {
+          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+          await applyBundleRequestResult(
+            this.ctx,
+            conn.workstationId,
+            msg.commandId,
+            cmd.payload,
+            msg.ok,
+            msg.result,
+          );
+        } else if (cmd?.type === 'pack.bundle.put') {
+          // The sealed files are forgotten; the workstation's own report says whether it holds the revision now.
+          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+          await exec(this.ctx.pool, `UPDATE runner_commands SET payload='{}'::jsonb WHERE id=$1`, [
+            msg.commandId,
+          ]);
         } else if (cmd?.type === 'provider.key.reseal') {
           // Terminal: the answer carries the organization key sealed to another runner; it is relayed on, never kept here.
           await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
@@ -829,6 +890,11 @@ export class RunnerHandlers {
     if ((msg.capabilities ?? []).includes(PACKS_CAPABILITY))
       await queuePacksSync(ctx.pool, conn.workstationId).catch((err) =>
         ctx.log.warn({ err }, 'packs.sync not queued'),
+      );
+    // An authored organization pack lives on its author's workstation: the others may be waiting for its files.
+    if ((msg.capabilities ?? []).includes(PACK_AUTHORING_CAPABILITY))
+      await relayForAuthor(ctx, conn.workstationId).catch((err) =>
+        ctx.log.warn({ err }, 'authored pack files not relayed'),
       );
     // Whatever the previous connection was sent may not have arrived: it is due again on this one.
     await requeueSentCommands(ctx.pool, conn.workstationId);
