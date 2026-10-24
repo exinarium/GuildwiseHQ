@@ -1,4 +1,4 @@
-import { createDecipheriv, scryptSync } from 'node:crypto';
+import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'node:crypto';
 import {
   chmodSync,
   existsSync,
@@ -20,6 +20,7 @@ import type { GeminiRuntimeConfig } from '../config.ts';
 import type { ProviderStore } from '../direct/store.ts';
 import type { RunnerPaths } from '../paths.ts';
 import { DOTNET_SHM_DIR, userNugetPackages } from '../sandbox/sandbox.ts';
+import { registerSecret } from '../secrets/redact.ts';
 import { selfCommand } from '../shims.ts';
 import { agentEnv, toolchainReadPaths } from './claude-policy.ts';
 import { findBinary, gitCommonDirs } from './codex.ts';
@@ -32,6 +33,7 @@ import {
   launchInHarnessSandbox,
   probeHarnessSandbox,
 } from './harness-session.ts';
+import { withFileLock } from './login-lock.ts';
 import { spawnSession } from './process-session.ts';
 import type {
   ChatStartInput,
@@ -124,6 +126,22 @@ export interface GeminiPolicyInput {
 
 const q = (s: string): string => JSON.stringify(s);
 
+/** The tools that take a path or a command, for the rule that keeps the login files out of reach of file tool calls. */
+const GEMINI_PATH_TOOLS = [
+  'read_file',
+  'read_many_files',
+  'list_directory',
+  'glob',
+  'grep_search',
+  'search_file_content',
+  'write_file',
+  'replace',
+  'run_shell_command',
+];
+/** Matched against a tool call's arguments: the names of the login files, whatever the path in front of them. */
+export const GEMINI_LOGIN_ARGS_PATTERN =
+  '(oauth_creds|gemini-credentials|google_accounts|\\.gemini[/\\\\]+(?:credentials|oauth|auth))';
+
 /**
  * The policy file passed with `--admin-policy` (TOML; docs/reference/policy-engine.md of the CLI). Admin rules beat user and
  * workspace rules, so a repository's `.gemini/settings.json` cannot loosen them. Higher `priority` wins within the tier.
@@ -169,6 +187,15 @@ export function geminiPolicy(i: GeminiPolicyInput): string {
   if (!tools.includes('edit') || i.chat) deny(['write_file', 'replace'], 'this agent cannot edit files');
   if (!tools.includes('web')) deny(['google_web_search', 'web_fetch'], 'this agent has no web access');
   deny(['save_memory', 'ask_user', 'enter_plan_mode', 'exit_plan_mode'], 'not available to an agent');
+  // The Google login lives in the agent's private Gemini home, which the file tools can reach: no tool call may name it, whatever the
+  // role. (The shell cannot see it either: the sandbox hides it from the shell.) Above every other rule.
+  rule([
+    `toolName = [${GEMINI_PATH_TOOLS.map(q).join(', ')}]`,
+    `argsPattern = ${q(GEMINI_LOGIN_ARGS_PATTERN)}`,
+    'decision = "deny"',
+    'priority = 990',
+    `denyMessage = ${q('the sign-in files are not available to an agent')}`,
+  ]);
   rule(['toolName = "mcp_*"', 'decision = "deny"', 'priority = 800']);
   return out.join('\n');
 }
@@ -238,7 +265,7 @@ const KEYCHAIN_SERVICE = 'gemini-cli-oauth';
 const KEYCHAIN_ACCOUNT = 'main-account';
 
 /** The key `gemini-credentials.json` is sealed under (the CLI derives it from the host and user name). */
-function credentialsKey(): Buffer {
+export function credentialsKey(): Buffer {
   return scryptSync('gemini-cli-oauth', `${hostname()}-${userInfo().username}-gemini-cli`, 32);
 }
 
@@ -302,6 +329,177 @@ export function geminiLoginFreshness(file: string): number {
   }
 }
 
+// ---- reading, checking and writing back a login (finding 5: a login the agent's session wrote is never trusted as it is)
+
+/** A login in either form, reduced to what the runner checks and writes back. */
+export interface ParsedGeminiLogin {
+  form: 'plain' | 'encrypted';
+  accessToken?: string;
+  refreshToken?: string;
+  expiresAt?: number;
+  scope?: string;
+  tokenType?: string;
+  idToken?: string;
+  /** Keys the file has beyond the ones a Google login carries (a plain file only): a login with any is not handed back. */
+  unknownKeys: string[];
+}
+
+const PLAIN_LOGIN_KEYS = new Set([
+  'access_token',
+  'refresh_token',
+  'scope',
+  'token_type',
+  'expiry_date',
+  'id_token',
+]);
+
+export function parseGeminiLogin(file: string): ParsedGeminiLogin | undefined {
+  try {
+    if (file.endsWith('oauth_creds.json')) {
+      const j = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
+      if (!j || typeof j !== 'object' || Array.isArray(j)) return undefined;
+      const str = (k: string): string | undefined =>
+        typeof j[k] === 'string' ? (j[k] as string) : undefined;
+      return {
+        form: 'plain',
+        ...(str('access_token') ? { accessToken: str('access_token') as string } : {}),
+        ...(str('refresh_token') ? { refreshToken: str('refresh_token') as string } : {}),
+        ...(typeof j.expiry_date === 'number' ? { expiresAt: j.expiry_date } : {}),
+        ...(str('scope') ? { scope: str('scope') as string } : {}),
+        ...(str('token_type') ? { tokenType: str('token_type') as string } : {}),
+        ...(str('id_token') ? { idToken: str('id_token') as string } : {}),
+        unknownKeys: Object.keys(j).filter((k) => !PLAIN_LOGIN_KEYS.has(k)),
+      };
+    }
+    const t = readEncryptedGeminiLogin(file);
+    if (!t) return undefined;
+    return {
+      form: 'encrypted',
+      ...(t.accessToken ? { accessToken: t.accessToken } : {}),
+      ...(t.refreshToken ? { refreshToken: t.refreshToken } : {}),
+      ...(t.expiresAt !== undefined ? { expiresAt: t.expiresAt } : {}),
+      ...(t.scope ? { scope: t.scope } : {}),
+      ...(t.tokenType ? { tokenType: t.tokenType } : {}),
+      unknownKeys: [],
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+/** The longest an access token is believed to live: Google issues one hour; anything beyond this is not a refresh. */
+const MAX_TOKEN_LIFETIME_MS = 2 * 3_600_000;
+
+const TOKEN_TEXT = /^[\x21-\x7e]{16,4096}$/;
+const REFRESH_TEXT = /^[\x21-\x7e]{1,4096}$/;
+
+const jwtSubject = (jwt: string | undefined): string | undefined => {
+  try {
+    const part = jwt?.split('.')[1];
+    if (!part) return undefined;
+    const sub = (JSON.parse(Buffer.from(part, 'base64url').toString('utf8')) as { sub?: unknown }).sub;
+    return typeof sub === 'string' ? sub : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * Whether a login found in an agent's private home after a session may go back to the owner's file. The agent's tools could write
+ * that file, so it is checked as input: it parses, it is the same Google account (the refresh token of a Google login does not
+ * change when it is used, and the id token names the same subject), its scopes are not wider, its access token is one token and its
+ * expiry is a plausible refresh (later than the owner's, no more than a token's lifetime ahead). Undefined: all fine.
+ */
+export function geminiLoginProblem(
+  mine: ParsedGeminiLogin | undefined,
+  src: ParsedGeminiLogin | undefined,
+  nowMs: number,
+): string | undefined {
+  if (!mine) return 'it cannot be read';
+  if (mine.unknownKeys.length) return `it has unexpected fields (${mine.unknownKeys.slice(0, 3).join(', ')})`;
+  if (!mine.accessToken || !TOKEN_TEXT.test(mine.accessToken)) return 'its access token is not a token';
+  if (mine.refreshToken && !REFRESH_TEXT.test(mine.refreshToken)) return 'its refresh token is not a token';
+  if (typeof mine.expiresAt !== 'number' || !Number.isFinite(mine.expiresAt)) return 'it has no expiry';
+  if (mine.expiresAt > nowMs + MAX_TOKEN_LIFETIME_MS) return 'its expiry is further ahead than a token lives';
+  if (!src) return undefined;
+  if ((src.refreshToken ?? null) !== (mine.refreshToken ?? null))
+    return 'it is not the owner’s account (another refresh token)';
+  const a = jwtSubject(src.idToken);
+  const b = jwtSubject(mine.idToken);
+  if (a && b && a !== b) return 'it is not the owner’s account (another subject)';
+  if (src.scope && mine.scope) {
+    const had = new Set(src.scope.split(/\s+/).filter(Boolean));
+    for (const sc of mine.scope.split(/\s+/).filter(Boolean))
+      if (!had.has(sc)) return 'its scopes are wider than the owner’s';
+  }
+  return undefined;
+}
+
+/** Registers the tokens of a login with the redaction registry, so no log line, tool result or error shows one. */
+export function registerGeminiLoginSecrets(file: string): void {
+  const l = parseGeminiLogin(file);
+  for (const t of [l?.accessToken, l?.refreshToken, l?.idToken]) if (t && t.length >= 12) registerSecret(t);
+}
+
+/**
+ * The owner's login file in its own form, with the token fields of `mine` (already checked) put in. A plain file is written fresh
+ * from the checked fields; an encrypted one is decrypted, updated and sealed again under the same key and layout, so a login is
+ * never downgraded from the encrypted store to a plain file. Undefined when the owner's file cannot be read or is encrypted and
+ * `mine` is not (nothing is written then).
+ */
+export function loginTextFor(
+  srcFile: string,
+  mine: ParsedGeminiLogin,
+  now: number,
+  key: Buffer = credentialsKey(),
+): string | undefined {
+  if (srcFile.endsWith('oauth_creds.json')) {
+    return `${JSON.stringify({
+      access_token: mine.accessToken,
+      ...(mine.refreshToken ? { refresh_token: mine.refreshToken } : {}),
+      ...(mine.scope ? { scope: mine.scope } : {}),
+      token_type: mine.tokenType ?? 'Bearer',
+      ...(mine.expiresAt !== undefined ? { expiry_date: mine.expiresAt } : {}),
+      ...(mine.idToken ? { id_token: mine.idToken } : {}),
+    })}\n`;
+  }
+  try {
+    const [iv, tag, enc] = readFileSync(srcFile, 'utf8').trim().split(':');
+    if (!iv || !tag || !enc) return undefined;
+    const d = createDecipheriv('aes-256-gcm', key, Buffer.from(iv, 'hex'), { authTagLength: 16 });
+    d.setAuthTag(Buffer.from(tag, 'hex'));
+    const all = JSON.parse(d.update(enc, 'hex', 'utf8') + d.final('utf8')) as Record<
+      string,
+      Record<string, string>
+    >;
+    const rec = JSON.parse(all[KEYCHAIN_SERVICE]?.[KEYCHAIN_ACCOUNT] ?? 'null') as {
+      token?: Record<string, unknown>;
+      updatedAt?: number;
+    } | null;
+    if (!rec?.token) return undefined;
+    rec.token = {
+      ...rec.token,
+      accessToken: mine.accessToken,
+      ...(mine.expiresAt !== undefined ? { expiresAt: mine.expiresAt } : {}),
+      ...(mine.tokenType ? { tokenType: mine.tokenType } : {}),
+      ...(mine.scope ? { scope: mine.scope } : {}),
+    };
+    rec.updatedAt = now;
+    (all[KEYCHAIN_SERVICE] as Record<string, string>)[KEYCHAIN_ACCOUNT] = JSON.stringify(rec);
+    return encryptGeminiStore(all, key);
+  } catch {
+    return undefined;
+  }
+}
+
+/** `gemini-credentials.json` content: `iv:tag:ciphertext` (hex), AES-256-GCM of the store's JSON under the host-derived key. */
+export function encryptGeminiStore(store: unknown, key: Buffer = credentialsKey()): string {
+  const nonce = randomBytes(16);
+  const c = createCipheriv('aes-256-gcm', key, nonce, { authTagLength: 16 });
+  const out = c.update(JSON.stringify(store), 'utf8', 'hex') + c.final('hex');
+  return `${nonce.toString('hex')}:${c.getAuthTag().toString('hex')}:${out}`;
+}
+
 function writePrivate(file: string, text: string): void {
   mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
   const tmp = `${file}.${process.pid}.tmp`;
@@ -334,6 +532,8 @@ export interface GeminiHost {
   home?: string;
   parent?: NodeJS.ProcessEnv;
   now?: () => Date;
+  /** Told when a login is not handed back to the owner (so the owner can find out why). */
+  warn?: (message: string) => void;
   /** Test hook: the result of the sandbox self-test. */
   sandboxProbe?: () => { ok: boolean; reason: string };
   /** Test hook: more hosts the CLI may reach, and the key's upstream (a fake Gemini API on localhost). */
@@ -512,46 +712,75 @@ export class GeminiAdapter implements RuntimeAdapter {
     return { ghome, policyFile, loginFiles };
   }
 
+  /** In-process chain plus a lock folder beside the owner's login, so two runners or the owner's own CLI cannot interleave with us. */
+  private locked<T>(fn: () => T | Promise<T>): Promise<T> {
+    const f = this.loginFile() ?? join(this.loginDir(), 'gemini-credentials.json');
+    return withAuthLock(() => withFileLock(`${f}.aom-lock`, fn));
+  }
+
   private prepareLogin(ghome: string): Promise<void> {
-    return withAuthLock(() => {
+    return this.locked(() => {
       const src = this.loginFile();
       if (!src) return;
       const dir = dotGemini(ghome);
       const name = src.endsWith('oauth_creds.json') ? 'oauth_creds.json' : 'gemini-credentials.json';
       const dest = join(dir, name);
       // keep a copy that an earlier session of this agent already refreshed
-      if (existsSync(dest) && geminiLoginFreshness(dest) > geminiLoginFreshness(src)) return;
+      // (but not one that fails the checks of a login coming back: a private copy an agent edited is replaced by the owner's)
+      if (
+        existsSync(dest) &&
+        geminiLoginFreshness(dest) > geminiLoginFreshness(src) &&
+        !geminiLoginProblem(
+          parseGeminiLogin(dest),
+          parseGeminiLogin(src),
+          (this.host.now?.() ?? new Date()).getTime(),
+        )
+      ) {
+        registerGeminiLoginSecrets(dest);
+        return;
+      }
       for (const n of LOGIN_FILES) rmSync(join(dir, n), { force: true });
       writePrivate(dest, readFileSync(src, 'utf8'));
+      registerGeminiLoginSecrets(dest);
     });
   }
 
-  /** After a session: a refreshed login (a later expiry) goes back to the owner's file, in the form it is kept in. */
+  /**
+   * After a session: a refreshed login (a later expiry) goes back to the owner's file, in the form it is kept in. What the session
+   * left in the agent's home is checked first (`geminiLoginProblem`): a file an agent wrote cannot overwrite the owner's login.
+   */
   private harvestLogin(ghome: string): Promise<void> {
-    return withAuthLock(() => {
+    return this.locked(() => {
       const src = this.loginFile();
       if (!src) return;
       const dir = dotGemini(ghome);
+      const now = (this.host.now?.() ?? new Date()).getTime();
       for (const n of LOGIN_FILES) {
-        const mine = join(dir, n);
-        if (!existsSync(mine) || geminiLoginFreshness(mine) <= geminiLoginFreshness(src)) continue;
-        if (n === 'oauth_creds.json' || !src.endsWith('oauth_creds.json')) {
-          writePrivate(src, readFileSync(mine, 'utf8'));
-        } else {
-          // the CLI moved a plain login into its encrypted store: hand it back in the plain form the owner keeps
-          const t = readEncryptedGeminiLogin(mine);
-          if (t?.accessToken)
-            writePrivate(
-              src,
-              `${JSON.stringify({
-                access_token: t.accessToken,
-                ...(t.refreshToken ? { refresh_token: t.refreshToken } : {}),
-                ...(t.scope ? { scope: t.scope } : {}),
-                token_type: t.tokenType ?? 'Bearer',
-                ...(t.expiresAt ? { expiry_date: t.expiresAt } : {}),
-              })}\n`,
-            );
+        const file = join(dir, n);
+        if (!existsSync(file) || geminiLoginFreshness(file) <= geminiLoginFreshness(src)) continue;
+        // tokens the CLI refreshed are secrets from now on, whatever becomes of the file
+        registerGeminiLoginSecrets(file);
+        const mine = parseGeminiLogin(file);
+        const problem = geminiLoginProblem(mine, parseGeminiLogin(src), now);
+        if (problem || !mine) {
+          (this.host.warn ?? ((m: string) => console.warn(`[gemini] ${m}`)))(
+            `the login left by a Gemini session was not handed back to the owner: ${problem ?? 'unreadable'}`,
+          );
+          return;
         }
+        // the owner's file keeps its form; an encrypted store is never replaced by a plain file
+        if (!src.endsWith('oauth_creds.json') && mine.form === 'plain') {
+          (this.host.warn ?? ((m: string) => console.warn(`[gemini] ${m}`)))(
+            'the login left by a Gemini session is a plain file but the owner keeps an encrypted one: not handed back',
+          );
+          return;
+        }
+        const srcLogin = parseGeminiLogin(src);
+        // an id token comes along only when the owner's login has one (and it is the same subject: checked above)
+        const keep: ParsedGeminiLogin = { ...mine };
+        if (!srcLogin?.idToken) delete keep.idToken;
+        const text = loginTextFor(src, keep, now);
+        if (text) writePrivate(src, text);
         return;
       }
     });

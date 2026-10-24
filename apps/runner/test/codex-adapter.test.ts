@@ -33,6 +33,7 @@ import { buildAdapters } from '../src/adapters/registry.ts';
 import type { ChatStartInput, RuntimeEvent, RuntimeSession, ShiftStartInput } from '../src/adapters/types.ts';
 import { RunnerConfigSchema } from '../src/config.ts';
 import { runnerPaths } from '../src/paths.ts';
+import { redact, unregisterSecret } from '../src/secrets/redact.ts';
 import { cleanupTmp, makeConfig, tmp } from './helpers.ts';
 
 cleanupTmp();
@@ -46,6 +47,8 @@ interface FakeMode {
   stderr?: string;
   /** `codex sandbox -- true` fails with this text. */
   sandboxFail?: string;
+  /** Written to `$CODEX_HOME/auth.json` while `codex exec` runs (a refresh, or a file the agent wrote). */
+  authTo?: string;
 }
 
 interface Recorded {
@@ -99,6 +102,7 @@ process.stdin.on('end', () => {
     agentsMd: read(path.join(home, 'AGENTS.md')), authJson: read(path.join(home, 'auth.json')), skills,
     rules: read(path.join(home, 'rules', 'aom.rules')),
   }) + '\\n');
+  if (mode.authTo) fs.writeFileSync(path.join(home, 'auth.json'), mode.authTo);
   for (const l of mode.lines || []) console.log(l);
   if (mode.stderr) console.error(mode.stderr);
   process.exit(mode.exit || 0);
@@ -407,6 +411,112 @@ describe('codex adapter: a shift on a fake codex binary', () => {
     await drain(await r.adapter.start(shiftInput(r)));
     expect(readFileSync(r.login, 'utf8')).toContain('refreshed');
     expect(readFileSync(mine, 'utf8')).toContain('refreshed');
+  });
+
+  describe('a login an agent session left behind (security review finding 5)', () => {
+    const jwt = (sub: string) => `h.${Buffer.from(JSON.stringify({ sub })).toString('base64url')}.s`;
+    const OWNER = {
+      OPENAI_API_KEY: null,
+      tokens: {
+        id_token: jwt('owner-sub'),
+        access_token: 'owner-access-token',
+        refresh_token: 'owner-refresh-token',
+        account_id: 'acct-owner',
+      },
+      last_refresh: '2026-01-01T00:00:00Z',
+    };
+    const REFRESHED = {
+      ...OWNER,
+      tokens: {
+        ...OWNER.tokens,
+        access_token: 'refreshed-access-token',
+        refresh_token: 'rotated-refresh-token',
+      },
+      last_refresh: '2026-06-01T00:00:00Z',
+    };
+    /** One session during which the file is written, as a refresh by the CLI or an edit by the agent would leave it. */
+    const handBack = async (left: unknown) => {
+      const warnings: string[] = [];
+      const r = rig({
+        mode: { lines: OK_LINES, authTo: typeof left === 'string' ? left : j(left as object) },
+        host: { warn: (m) => warnings.push(m) },
+      });
+      writeFileSync(r.login, j(OWNER));
+      await drain(await r.adapter.start(shiftInput(r)));
+      return { r, warnings, owner: () => JSON.parse(readFileSync(r.login, 'utf8')) };
+    };
+
+    it('takes a plausible refresh (the refresh token rotates) and keeps what else the file says', async () => {
+      const x = await handBack(REFRESHED);
+      expect(x.owner().tokens).toMatchObject({
+        access_token: 'refreshed-access-token',
+        refresh_token: 'rotated-refresh-token',
+        account_id: 'acct-owner',
+      });
+      expect(x.warnings).toEqual([]);
+    });
+
+    it('does not take one for another account, with an API key set, a refresh time in the future, or the wrong shape', async () => {
+      const cases: Array<[string, unknown]> = [
+        [
+          'another account id',
+          { ...REFRESHED, tokens: { ...REFRESHED.tokens, account_id: 'acct-attacker' } },
+        ],
+        ['another subject', { ...REFRESHED, tokens: { ...REFRESHED.tokens, id_token: jwt('attacker-sub') } }],
+        ['an API key added', { ...REFRESHED, OPENAI_API_KEY: 'sk-attacker-key-0123456789' }],
+        ['a refresh time next year', { ...REFRESHED, last_refresh: '2999-01-01T00:00:00Z' }],
+        ['an unknown token field', { ...REFRESHED, tokens: { ...REFRESHED.tokens, extra: 'x'.repeat(20) } }],
+        [
+          'a token with a space',
+          { ...REFRESHED, tokens: { ...REFRESHED.tokens, access_token: 'two words here' } },
+        ],
+        ['an object where a scalar belongs', { ...REFRESHED, auth_mode: { a: 1 } }],
+        [
+          'no refresh token any more',
+          { ...REFRESHED, tokens: { ...REFRESHED.tokens, refresh_token: undefined } },
+        ],
+        ['not JSON', 'attacker text'],
+      ];
+      for (const [name, left] of cases) {
+        const x = await handBack(left);
+        expect(x.owner().tokens.access_token, name).toBe('owner-access-token');
+        // an unreadable file is not even a candidate (it has no refresh time), the rest are refused with a reason
+        if (name !== 'not JSON') expect(x.warnings.length, name).toBeGreaterThan(0);
+      }
+    });
+
+    it('does not start the next session from a private copy that fails the same checks', async () => {
+      const r = rig();
+      await drain(await r.adapter.start(shiftInput(r)));
+      const mine = join(codexHomeOf(r.sandbox), 'auth.json');
+      // the agent wrote a login for another account, dated far ahead so that it looks fresher than the owner's
+      writeFileSync(
+        mine,
+        j({
+          ...REFRESHED,
+          tokens: { ...REFRESHED.tokens, account_id: 'acct-attacker' },
+          last_refresh: '2999-01-01T00:00:00Z',
+        }),
+      );
+      writeFileSync(r.login, j(OWNER));
+      await drain(await r.adapter.start(shiftInput(r)));
+      expect(r.fake.calls().at(-1)?.authJson).toContain('owner-access-token');
+      expect(r.fake.calls().at(-1)?.authJson).not.toContain('acct-attacker');
+    });
+
+    it('registers the tokens with the redactor', async () => {
+      const x = await handBack(REFRESHED);
+      for (const t of [
+        'owner-access-token',
+        'refreshed-access-token',
+        'rotated-refresh-token',
+        'owner-refresh-token',
+      ]) {
+        expect(redact(`401 for token ${t}`), t).not.toContain(t);
+        unregisterSecret(t);
+      }
+      void x;
+    });
   });
 
   it('api_key mode passes CODEX_API_KEY and forces the API login; no login file is read', async () => {

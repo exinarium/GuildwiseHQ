@@ -20,6 +20,7 @@ import type { ProviderStore } from '../direct/store.ts';
 import type { RunnerPaths } from '../paths.ts';
 import { proxyEnv } from '../sandbox/harness-sandbox.ts';
 import { DOTNET_SHM_DIR, userNugetPackages } from '../sandbox/sandbox.ts';
+import { registerSecret } from '../secrets/redact.ts';
 import { selfCommand } from '../shims.ts';
 import {
   agentEnv,
@@ -489,6 +490,89 @@ function lastRefresh(file: string): number {
   }
 }
 
+// ---- a login an agent session left behind is checked before it goes back to the owner's file (finding 5)
+
+type Json = Record<string, unknown>;
+
+function readLoginJson(file: string): Json | undefined {
+  try {
+    const j = JSON.parse(readFileSync(file, 'utf8')) as unknown;
+    return j && typeof j === 'object' && !Array.isArray(j) ? (j as Json) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+const TOKEN_KEYS = ['id_token', 'access_token', 'refresh_token', 'account_id'] as const;
+/** One token: printable, no spaces, of a plausible length (a JWT is a few KB at most). */
+const CODEX_TOKEN_TEXT = /^[\x21-\x7e]{8,8192}$/;
+/** Clock skew allowed between the machine that wrote `last_refresh` and this one. */
+const REFRESH_SKEW_MS = 5 * 60_000;
+
+const jwtSub = (jwt: unknown): string | undefined => {
+  try {
+    const part = typeof jwt === 'string' ? jwt.split('.')[1] : undefined;
+    if (!part) return undefined;
+    const sub = (JSON.parse(Buffer.from(part, 'base64url').toString('utf8')) as { sub?: unknown }).sub;
+    return typeof sub === 'string' ? sub : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * Whether the `auth.json` an agent session left in its private Codex home may go back to the owner's file. The home is writable to
+ * the agent (`apply_patch` can edit it), so the file is checked as input: an object with the shape Codex writes, tokens that are
+ * single tokens, the same account (`account_id`, the id token's subject) and the same API key setting as the owner's, a
+ * `last_refresh` that is not in the future. (Codex rotates the refresh token on use, so that one may differ.) Undefined: fine.
+ */
+export function codexLoginProblem(
+  mine: Json | undefined,
+  src: Json | undefined,
+  nowMs: number,
+): string | undefined {
+  if (!mine) return 'it cannot be read';
+  const refreshed = typeof mine.last_refresh === 'string' ? Date.parse(mine.last_refresh) : Number.NaN;
+  if (!Number.isFinite(refreshed)) return 'it has no refresh time';
+  if (refreshed > nowMs + REFRESH_SKEW_MS) return 'its refresh time is in the future';
+  const tokens = mine.tokens;
+  if (tokens !== undefined && tokens !== null) {
+    if (typeof tokens !== 'object' || Array.isArray(tokens)) return 'its tokens are not an object';
+    for (const [k, v] of Object.entries(tokens as Json)) {
+      if (!(TOKEN_KEYS as readonly string[]).includes(k)) return `it has an unexpected token field (${k})`;
+      if (typeof v !== 'string' || !CODEX_TOKEN_TEXT.test(v)) return `its ${k} is not a token`;
+    }
+  }
+  for (const [k, v] of Object.entries(mine)) {
+    if (k === 'tokens' || k === 'last_refresh' || k === 'OPENAI_API_KEY') continue;
+    if (v !== null && !['string', 'number', 'boolean'].includes(typeof v))
+      return `it has an unexpected field (${k})`;
+    if (typeof v === 'string' && v.length > 200) return `it has an unexpected field (${k})`;
+  }
+  if (!src) return undefined;
+  // the API key the file carries is the owner's setting, not something a session sets
+  if ((mine.OPENAI_API_KEY ?? null) !== (src.OPENAI_API_KEY ?? null))
+    return 'it changes the API key of the login';
+  const a = (src.tokens ?? {}) as Json;
+  const b = (mine.tokens ?? {}) as Json;
+  if (a.account_id !== undefined && a.account_id !== b.account_id) return 'it is not the owner’s account';
+  const subA = jwtSub(a.id_token);
+  const subB = jwtSub(b.id_token);
+  if (subA && subA !== subB) return 'it is not the owner’s account (another subject)';
+  if (a.refresh_token !== undefined && typeof b.refresh_token !== 'string')
+    return 'it has lost the refresh token';
+  return undefined;
+}
+
+/** Registers the secrets of an `auth.json` with the redaction registry. */
+export function registerCodexLoginSecrets(file: string): void {
+  const j = readLoginJson(file);
+  if (!j) return;
+  const t = (j.tokens ?? {}) as Json;
+  for (const v of [j.OPENAI_API_KEY, t.id_token, t.access_token, t.refresh_token])
+    if (typeof v === 'string' && v.length >= 8) registerSecret(v);
+}
+
 function writePrivate(file: string, text: string): void {
   const tmp = `${file}.${process.pid}.tmp`;
   writeFileSync(tmp, text, { mode: 0o600 });
@@ -507,6 +591,8 @@ export interface CodexHost {
   /** The environment the allow-list reads from. */
   parent?: NodeJS.ProcessEnv;
   now?: () => Date;
+  /** Told when a login is not handed back to the owner (so the owner can find out why). */
+  warn?: (message: string) => void;
   /** Test hook: extra argv for `codex exec` (e.g. `-c openai_base_url=...` to point it at a fake API), put before the prompt. */
   extraArgs?: string[];
   /** Test hook: the result of the sandbox self-test. */
@@ -553,7 +639,8 @@ export class CodexAdapter implements RuntimeAdapter {
 
   private loginState(): 'ok' | 'expired' {
     if (this.cfg.authMode === 'api_key')
-      return this.cfg.apiKey || this.host.store?.get('openai')?.apiKey ? 'ok' : 'expired';
+      // availability only: an organization's key counts, but a run uses it only for the organization it names
+      return this.cfg.apiKey || this.host.store?.holds('openai') ? 'ok' : 'expired';
     const f = this.loginFile();
     if (!existsSync(f)) return 'expired';
     if (this.authBad) {
@@ -778,8 +865,21 @@ export class CodexAdapter implements RuntimeAdapter {
       const src = this.loginFile();
       if (!existsSync(src)) return;
       // keep a copy that a running session of this agent already refreshed
-      if (existsSync(dest) && lastRefresh(dest) > lastRefresh(src)) return;
+      // (but not one that fails the checks of a login coming back: a private copy an agent edited is replaced by the owner's)
+      if (
+        existsSync(dest) &&
+        lastRefresh(dest) > lastRefresh(src) &&
+        !codexLoginProblem(
+          readLoginJson(dest),
+          readLoginJson(src),
+          (this.host.now?.() ?? new Date()).getTime(),
+        )
+      ) {
+        registerCodexLoginSecrets(dest);
+        return;
+      }
       writePrivate(dest, readFileSync(src, 'utf8'));
+      registerCodexLoginSecrets(dest);
     });
   }
 
@@ -790,7 +890,22 @@ export class CodexAdapter implements RuntimeAdapter {
       const mine = join(codexHome, 'auth.json');
       const src = this.loginFile();
       if (!existsSync(mine) || !existsSync(src)) return;
-      if (lastRefresh(mine) > lastRefresh(src)) writePrivate(src, readFileSync(mine, 'utf8'));
+      if (lastRefresh(mine) <= lastRefresh(src)) return;
+      // tokens the CLI refreshed are secrets from now on, whatever becomes of the file
+      registerCodexLoginSecrets(mine);
+      const parsed = readLoginJson(mine);
+      const problem = codexLoginProblem(
+        parsed,
+        readLoginJson(src),
+        (this.host.now?.() ?? new Date()).getTime(),
+      );
+      if (problem || !parsed) {
+        (this.host.warn ?? ((m: string) => console.warn(`[codex] ${m}`)))(
+          `the login left by a Codex session was not handed back to the owner: ${problem ?? 'unreadable'}`,
+        );
+        return;
+      }
+      writePrivate(src, `${JSON.stringify(parsed, null, 2)}\n`);
     });
   }
 

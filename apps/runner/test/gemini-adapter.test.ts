@@ -13,11 +13,14 @@ import { describe, expect, it } from 'vitest';
 import {
   buildGeminiCommand,
   detectGemini,
+  encryptGeminiStore,
+  GEMINI_LOGIN_ARGS_PATTERN,
   GeminiAdapter,
   geminiHomeOf,
   geminiLoginFreshness,
   geminiPolicy,
   geminiSettings,
+  readEncryptedGeminiLogin,
 } from '../src/adapters/gemini.ts';
 import {
   GeminiStreamParser,
@@ -32,11 +35,14 @@ import { ProviderStore } from '../src/direct/store.ts';
 import { runnerPaths } from '../src/paths.ts';
 import { ensureSandbox } from '../src/sandbox/sandbox.ts';
 import { RunnerKeys } from '../src/secrets/keys.ts';
+import { redact, unregisterSecret } from '../src/secrets/redact.ts';
 import { cleanupTmp, makeConfig, tmp } from './helpers.ts';
 import { sealOrg, sealWs } from './seal-helpers.ts';
 
 cleanupTmp();
 const ORG = '11111111-1111-4111-8111-111111111111';
+const NOW = Date.now();
+const NEW_TOKEN = 'ya29.refreshed-token-0123456789';
 
 const j = (o: object): string => JSON.stringify(o);
 // captured from gemini-cli 0.65.0 (see test/gemini-real.test.ts for the run against the real binary)
@@ -272,7 +278,49 @@ describe('the Gemini settings and policy', () => {
     expect(t).toContain('toolName = "mcp_*"');
     expect(t).toContain('["google_web_search", "web_fetch"]');
     expect(t).not.toContain('commandPrefix = "aom"');
-    expect(t).not.toContain('"write_file"');
+    // write_file is named only in the rule that keeps the sign-in files out of reach, never in a rule that denies editing
+    expect(t.replace(/\[\[rule\]\]\ntoolName = \[[^\]]*\]\nargsPattern[^[]*/, '')).not.toContain(
+      '"write_file"',
+    );
+  });
+
+  it('keeps the sign-in files out of reach of every file tool and the shell, whatever the role', () => {
+    for (const chat of [false, true]) {
+      const t = geminiPolicy({ perms: perms(['read', 'edit', 'shell', 'web']), roleKey: 'builder', chat });
+      const rule =
+        /\[\[rule\]\]\ntoolName = \[([^\]]*)\]\nargsPattern = ("[^\n]*")\ndecision = "deny"\npriority = (\d+)/.exec(
+          t,
+        );
+      expect(rule, 'the login rule is in the policy').not.toBeNull();
+      const tools = (rule?.[1] ?? '').split(', ').map((x) => JSON.parse(x) as string);
+      for (const tool of [
+        'read_file',
+        'read_many_files',
+        'list_directory',
+        'glob',
+        'write_file',
+        'replace',
+        'run_shell_command',
+      ])
+        expect(tools).toContain(tool);
+      // above every other rule of the policy (the denied-shell prefixes are at 900)
+      expect(Number(rule?.[3])).toBeGreaterThan(900);
+      const re = new RegExp(JSON.parse(rule?.[2] ?? '""') as string);
+      expect(re).toEqual(new RegExp(GEMINI_LOGIN_ARGS_PATTERN));
+      for (const hit of [
+        '{"file_path":"/home/u/.gemini/oauth_creds.json"}',
+        '{"absolute_path":"/agents/a/gemini/.gemini/gemini-credentials.json"}',
+        '{"command":"cat ~/.gemini/google_accounts.json"}',
+        '{"dir_path":"C:\\\\Users\\\\u\\\\.gemini\\\\oauth"}',
+      ])
+        expect(re.test(hit), hit).toBe(true);
+      for (const miss of [
+        '{"file_path":"/w/src/app.ts"}',
+        '{"command":"git status"}',
+        '{"pattern":"oauth2 client"}',
+      ])
+        expect(re.test(miss), miss).toBe(false);
+    }
   });
 
   it('a role without a shell, and every chat, may run only aom; without edit there are no write tools', () => {
@@ -305,6 +353,8 @@ interface FakeMode {
   stderr?: string;
   /** Written into the private home's `.gemini/oauth_creds.json` while the session runs (a refresh). */
   refreshTo?: string;
+  /** Which login file `refreshTo` is written to (default `oauth_creds.json`). */
+  refreshFile?: string;
 }
 
 function fakeGemini(mode: FakeMode = {}) {
@@ -331,7 +381,7 @@ process.stdin.on('end', () => {
     settings: read(path.join(g, 'settings.json')), policy: read(path.join(g, 'aom-policy.toml')),
     geminiMd: read(path.join(g, 'GEMINI.md')), oauth: read(path.join(g, 'oauth_creds.json')), skills,
   }) + '\\n');
-  if (mode.refreshTo) fs.writeFileSync(path.join(g, 'oauth_creds.json'), mode.refreshTo);
+  if (mode.refreshTo) fs.writeFileSync(path.join(g, mode.refreshFile || 'oauth_creds.json'), mode.refreshTo);
   for (const l of mode.lines || []) console.log(l);
   if (mode.stderr) console.error(mode.stderr);
   process.exit(mode.exit || 0);
@@ -399,6 +449,7 @@ async function world(
       models: [],
     });
   const launches: HarnessLaunch[] = [];
+  const warnings: string[] = [];
   const adapter = new GeminiAdapter(
     GeminiRuntimeConfigSchema.parse({
       bin: fake.bin,
@@ -410,6 +461,7 @@ async function world(
     {
       home: ownerHome,
       parent: { PATH: process.env.PATH ?? '', GH_TOKEN: 'runner-token' },
+      warn: (m) => warnings.push(m),
       sandboxProbe: () => ({ ok: true, reason: 'test' }),
       launch: async (l) => {
         launches.push(l);
@@ -433,7 +485,9 @@ async function world(
     isDevops: false,
     ...over,
   });
-  const start = async (over: { agent?: object; kind?: string; devopsGuard?: object; orgId?: string } = {}) => {
+  const start = async (
+    over: { agent?: object; kind?: string; devopsGuard?: object; orgId?: string } = {},
+  ) => {
     const s = await adapter.start({
       shiftId: 's1',
       ...('orgId' in over ? (over.orgId ? { orgId: over.orgId } : {}) : opts.key ? { orgId: ORG } : {}),
@@ -457,7 +511,22 @@ async function world(
     for await (const e of s.events()) ev.push(e);
     return { ev, usage: s.usage() };
   };
-  return { t, fake, paths, sb, cwd, ownerHome, loginFile, store, keys, adapter, launches, start, agent };
+  return {
+    t,
+    fake,
+    paths,
+    sb,
+    cwd,
+    ownerHome,
+    loginFile,
+    store,
+    keys,
+    adapter,
+    launches,
+    warnings,
+    start,
+    agent,
+  };
 }
 
 describe('the Gemini adapter (fake binary)', () => {
@@ -515,18 +584,163 @@ describe('the Gemini adapter (fake binary)', () => {
       login: j({ access_token: 'old', refresh_token: 'r', expiry_date: 1_000 }),
       mode: {
         lines: REAL_LINES,
-        refreshTo: j({ access_token: 'new', refresh_token: 'r', expiry_date: 9_000_000_000_000 }),
+        refreshTo: j({ access_token: NEW_TOKEN, refresh_token: 'r', expiry_date: NOW + 3_600_000 }),
       },
     });
     await w.start();
-    expect(JSON.parse(readFileSync(w.loginFile, 'utf8')).access_token).toBe('new');
+    expect(JSON.parse(readFileSync(w.loginFile, 'utf8')).access_token).toBe(NEW_TOKEN);
     // a second agent session finds the owner's file newer than a stale private copy: it starts from the owner's
     const copy = join(geminiHomeOf(w.sb), '.gemini', 'oauth_creds.json');
     writeFileSync(copy, j({ access_token: 'stale', expiry_date: 5 }));
     w.fake.set({ lines: REAL_LINES });
     await w.start();
-    expect(JSON.parse(w.fake.calls()[1].oauth).access_token).toBe('new');
-    expect(geminiLoginFreshness(w.loginFile)).toBe(9_000_000_000_000);
+    expect(JSON.parse(w.fake.calls()[1].oauth).access_token).toBe(NEW_TOKEN);
+    expect(geminiLoginFreshness(w.loginFile)).toBe(NOW + 3_600_000);
+  });
+
+  describe('a login an agent session left behind (security review finding 5)', () => {
+    const OWNER = {
+      access_token: 'old-owner-access-token',
+      refresh_token: 'owner-refresh-token',
+      expiry_date: 1_000,
+    };
+    const owner = () => j(OWNER);
+    const poisoned = async (refreshTo: string, over: { login?: string } = {}) => {
+      const w = await world({
+        login: over.login ?? owner(),
+        mode: { lines: REAL_LINES, refreshTo },
+      });
+      await w.start();
+      return w;
+    };
+    const ownerFile = (w: { loginFile: string }) => JSON.parse(readFileSync(w.loginFile, 'utf8'));
+
+    it('is not handed back when it is another account, wider, further ahead than a token lives, or not a login at all', async () => {
+      const good = { ...OWNER, access_token: NEW_TOKEN, expiry_date: NOW + 3_600_000 };
+      const cases: Array<[string, Record<string, unknown> | string]> = [
+        ['another refresh token', { ...good, refresh_token: 'attacker-refresh-token' }],
+        ['no refresh token', { access_token: NEW_TOKEN, expiry_date: NOW + 3_600_000 }],
+        ['an expiry years ahead', { ...good, expiry_date: 9_000_000_000_000 }],
+        ['an expiry a day ahead', { ...good, expiry_date: NOW + 86_400_000 }],
+        ['a field the CLI never writes', { ...good, client_secret: 'x' }],
+        ['an access token with a space', { ...good, access_token: 'ya29.two words in a token' }],
+        ['an access token that is far too short', { ...good, access_token: 'x' }],
+        ['no expiry', { access_token: NEW_TOKEN, refresh_token: OWNER.refresh_token }],
+        ['not JSON', '<<< attacker text >>>'],
+      ];
+      for (const [name, content] of cases) {
+        const w = await poisoned(typeof content === 'string' ? content : j(content));
+        expect(ownerFile(w).access_token, name).toBe('old-owner-access-token');
+        // an unreadable file is not even a candidate (no freshness), so it is skipped without a word
+        if (typeof content !== 'string') expect(w.warnings.length, name).toBeGreaterThan(0);
+      }
+      // the same account, a plausible refresh: handed back
+      const w = await poisoned(j(good));
+      expect(ownerFile(w)).toMatchObject({ access_token: NEW_TOKEN, refresh_token: OWNER.refresh_token });
+      expect(w.warnings).toEqual([]);
+    });
+
+    it('does not widen the scopes, and takes an id token only when the owner has one for the same subject', async () => {
+      const jwt = (sub: string) => `h.${Buffer.from(JSON.stringify({ sub })).toString('base64url')}.s`;
+      const base = { ...OWNER, scope: 'openid email', id_token: jwt('owner-sub') };
+      const good = { ...base, access_token: NEW_TOKEN, expiry_date: NOW + 3_000_000 };
+      const wider = await poisoned(
+        j({ ...good, scope: 'openid email https://www.googleapis.com/auth/drive' }),
+        {
+          login: j(base),
+        },
+      );
+      expect(ownerFile(wider).access_token).toBe('old-owner-access-token');
+      const other = await poisoned(j({ ...good, id_token: jwt('someone-else') }), { login: j(base) });
+      expect(ownerFile(other).access_token).toBe('old-owner-access-token');
+      const ok = await poisoned(j(good), { login: j(base) });
+      expect(ownerFile(ok)).toMatchObject({ access_token: NEW_TOKEN, id_token: jwt('owner-sub') });
+      // an id token the owner's login did not have is not taken over
+      const addedIdToken = await poisoned(
+        j({ ...OWNER, access_token: NEW_TOKEN, expiry_date: NOW + 3_000_000, id_token: jwt('x') }),
+      );
+      expect(ownerFile(addedIdToken).access_token).toBe(NEW_TOKEN);
+      expect(ownerFile(addedIdToken)).not.toHaveProperty('id_token');
+    });
+
+    it('keeps an encrypted login encrypted: a refreshed store is sealed again in the owner’s layout, a plain file is not put in its place', async () => {
+      const store = (token: Record<string, unknown>) => ({
+        'gemini-cli-oauth': {
+          'main-account': JSON.stringify({ serverName: 'main-account', token, updatedAt: 1 }),
+        },
+        'other-service': { 'other-account': 'keep me' },
+      });
+      const tok = {
+        accessToken: 'old-owner-access-token',
+        refreshToken: 'owner-refresh-token',
+        expiresAt: 1_000,
+        tokenType: 'Bearer',
+      };
+      const ownerStore = encryptGeminiStore(store(tok));
+      const refreshed = encryptGeminiStore(
+        store({ ...tok, accessToken: NEW_TOKEN, expiresAt: NOW + 3_000_000 }),
+      );
+      const mk = async (refreshTo: string, refreshFile: string) => {
+        const w = await world({ mode: { lines: REAL_LINES, refreshTo, refreshFile } });
+        const file = join(w.ownerHome, '.gemini', 'gemini-credentials.json');
+        writeFileSync(file, ownerStore);
+        await w.start();
+        return { w, file };
+      };
+      // the CLI refreshed the encrypted store: it goes back encrypted, with the other entries untouched
+      const a = await mk(refreshed, 'gemini-credentials.json');
+      expect(readEncryptedGeminiLogin(a.file)).toMatchObject({
+        accessToken: NEW_TOKEN,
+        refreshToken: 'owner-refresh-token',
+      });
+      expect(readFileSync(a.file, 'utf8')).not.toContain('{');
+      expect(a.w.warnings).toEqual([]);
+      // the session left a plain oauth_creds.json while the owner keeps an encrypted store: never a downgrade
+      const b = await mk(
+        j({ ...OWNER, access_token: NEW_TOKEN, expiry_date: NOW + 3_000_000 }),
+        'oauth_creds.json',
+      );
+      expect(readFileSync(b.file, 'utf8')).toBe(ownerStore);
+      expect(b.w.warnings.join(' ')).toMatch(/plain file but the owner keeps an encrypted one/);
+      // a store of another account is refused too
+      const c = await mk(
+        encryptGeminiStore(
+          store({ ...tok, accessToken: NEW_TOKEN, refreshToken: 'attacker', expiresAt: NOW + 3_000_000 }),
+        ),
+        'gemini-credentials.json',
+      );
+      expect(readFileSync(c.file, 'utf8')).toBe(ownerStore);
+    });
+
+    it('registers the tokens with the redactor, those copied in and those the CLI refreshed', async () => {
+      const w = await poisoned(j({ ...OWNER, access_token: NEW_TOKEN, expiry_date: NOW + 3_000_000 }), {
+        login: j({ ...OWNER, access_token: 'old-owner-access-token-0123' }),
+      });
+      for (const t of [NEW_TOKEN, 'old-owner-access-token-0123', 'owner-refresh-token']) {
+        expect(redact(`error: bad credentials ${t} given`), t).not.toContain(t);
+        unregisterSecret(t);
+      }
+      void w;
+    });
+
+    it('takes a lock folder beside the owner’s login while it copies and hands back, and breaks a stale one', async () => {
+      const w = await world({
+        login: owner(),
+        mode: {
+          lines: REAL_LINES,
+          refreshTo: j({ ...OWNER, access_token: NEW_TOKEN, expiry_date: NOW + 3_000_000 }),
+        },
+      });
+      const lock = `${w.loginFile}.aom-lock`;
+      // a lock a crashed process left long ago does not hold a session up
+      mkdirSync(lock);
+      utimesSync(lock, new Date(Date.now() - 60_000), new Date(Date.now() - 60_000));
+      const t0 = Date.now();
+      await w.start();
+      expect(Date.now() - t0).toBeLessThan(4000);
+      expect(existsSync(lock)).toBe(false);
+      expect(ownerFile(w).access_token).toBe(NEW_TOKEN);
+    });
   });
 
   it('uses the stored key when there is no login: the key goes to the proxy route, never to the process', async () => {
