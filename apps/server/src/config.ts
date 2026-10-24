@@ -2,6 +2,39 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
 
+/**
+ * `AOM_EXTRA_ORIGINS`: comma-separated exact origins (`scheme://host[:port]`), normalised the way a browser sends the Origin
+ * header. A wildcard, a path, a query, credentials or any other scheme than http(s) stops the boot: the list is what the
+ * CSRF check trusts, so a typo must not quietly widen it.
+ */
+export function parseExtraOrigins(raw: string | undefined): string[] {
+  const out: string[] = [];
+  for (const part of (raw ?? '').split(',')) {
+    const v = part.trim();
+    if (!v) continue;
+    const bad = (why: string): never => {
+      throw new Error(`AOM_EXTRA_ORIGINS: "${v}" ${why}`);
+    };
+    if (v.includes('*')) {
+      bad('is not allowed: wildcards are never accepted');
+    }
+    let u: URL;
+    try {
+      u = new URL(v);
+    } catch {
+      return bad('is not a valid origin (use scheme://host[:port])');
+    }
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') {
+      bad('must be an http or https origin');
+    }
+    if (u.username || u.password || u.search || u.hash || (u.pathname !== '/' && u.pathname !== '')) {
+      bad('must be an origin only (no path, query or credentials)');
+    }
+    if (!out.includes(u.origin)) out.push(u.origin);
+  }
+  return out;
+}
+
 const bool = (def: boolean) =>
   z
     .string()
@@ -15,6 +48,24 @@ const EnvSchema = z.object({
   AOM_PORT: z.coerce.number().int().min(0).max(65535).default(4600),
   AOM_HOST: z.string().default('127.0.0.1'),
   AOM_PUBLIC_ORIGIN: z.string().default('http://localhost:5173'),
+  /** More origins the web app may be opened from (a LAN address next to the public one): comma-separated exact origins. */
+  AOM_EXTRA_ORIGINS: z
+    .string()
+    .optional()
+    .superRefine((v, ctx) => {
+      try {
+        parseExtraOrigins(v);
+      } catch (err) {
+        ctx.addIssue({ code: 'custom', message: (err as Error).message });
+      }
+    })
+    .transform((v) => {
+      try {
+        return parseExtraOrigins(v);
+      } catch {
+        return [];
+      }
+    }),
   AOM_SMTP_URL: z.string().default('smtp://127.0.0.1:1025'),
   AOM_MAIL_FROM: z.string().default('Guildwise HQ <noreply@aom.local>'),
   AOM_MIGRATE_ON_BOOT: bool(true),
@@ -144,6 +195,8 @@ export interface Config {
   port: number;
   host: string;
   publicOrigin: string;
+  /** Further exact origins accepted by the CSRF and WebSocket origin checks (`AOM_EXTRA_ORIGINS`), normalised. */
+  extraOrigins: string[];
   smtpUrl: string;
   mailFrom: string;
   migrateOnBoot: boolean;
@@ -251,6 +304,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     port: e.AOM_PORT,
     host: e.AOM_HOST,
     publicOrigin,
+    extraOrigins: e.AOM_EXTRA_ORIGINS,
     smtpUrl: e.AOM_SMTP_URL,
     mailFrom: e.AOM_MAIL_FROM,
     migrateOnBoot: e.AOM_MIGRATE_ON_BOOT,

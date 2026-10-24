@@ -236,6 +236,7 @@ Set these in `.env` before starting the server. All have defaults suitable for d
 | `AOM_HOST` | `127.0.0.1` | Server bind address (use `0.0.0.0` in Docker) |
 | `AOM_PORT` | `4600` | Server port (expose through Caddy, not directly) |
 | `AOM_PUBLIC_ORIGIN` | `http://localhost:5173` | Full URL users open; determines CSRF origin, cookie Secure flag, invitation links |
+| `AOM_EXTRA_ORIGINS` | — | Optional comma-separated list of further exact origins the web app may be opened from, for example `http://192.168.1.10:4700` (a LAN address next to the public name). Each must be `scheme://host[:port]` with no path; they are normalised (`HTTP://Host:80/` becomes `http://host`). A `*`, a path or any other scheme stops the server at boot. Accepted by the CSRF Origin check and the WebSocket upgrade check, alongside `AOM_PUBLIC_ORIGIN`; nothing else changes (cookie Secure flag and links still follow `AOM_PUBLIC_ORIGIN`) |
 | `AOM_DOMAIN` | — | Public domain (used by Caddy for Let's Encrypt certs; omit for internal IP/CA) |
 | `AOM_HTTP_PORT` | `80` | Caddy HTTP port (for ACME challenges) |
 | `AOM_HTTPS_PORT` | `443` | Caddy HTTPS port |
@@ -598,3 +599,10 @@ Downtime is typically <5 seconds (container rebuild + migration).
 - `.env.prod.example`: commented environment template
 - `docker-compose.prod.yml`: production compose file
 - `deploy/Caddyfile`: Caddy configuration
+
+### Opening the app from a second address (UAT and LAN)
+
+The server trusts one browser origin, `AOM_PUBLIC_ORIGIN`. A page opened from any other address (for example the UAT stack by its LAN IP while `AOM_PUBLIC_ORIGIN` is the host name) gets `403 bad_origin` on every write and its WebSocket is refused. List the extra addresses in `AOM_EXTRA_ORIGINS` (exact origins, comma-separated, never `*`) and restart. Notes:
+
+- A page served over plain `http` on a LAN address is not a secure context: the browser has no `crypto.subtle`. The app still works, but anything that encrypts a secret in the browser (provider keys, sudo and environment secrets, private pack credentials, integrations, server connect, reading an authored pack) shows "Encrypting secrets needs HTTPS or localhost — open this page over https" and its button is disabled. Open the app over https (or `localhost`) for those.
+- If `AOM_PUBLIC_ORIGIN` is `https`, session cookies are `Secure` and are not sent over a plain-http extra origin, so sign-in will not stick there. Use extra origins that match the scheme you need, or set `AOM_PUBLIC_ORIGIN` to the `http` address on a UAT stack.

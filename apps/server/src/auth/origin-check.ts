@@ -23,12 +23,18 @@ const EXEMPT_PREFIXES = [
  * CSRF defence (docs/ARCHITECTURE.md section 18): strict Origin check on every non-GET request, and mutating
  * endpoints accept only application/json (blocks HTML form posts).
  */
+/** The origins the web app may call from: the public origin and the optional `AOM_EXTRA_ORIGINS`, compared exactly. */
+export function originAllowed(config: Config, origin: string | undefined): boolean {
+  if (origin === undefined || origin === '*' || origin === 'null') return false;
+  return origin === config.publicOrigin || (config.extraOrigins ?? []).includes(origin);
+}
+
 export function checkOrigin(config: Config, req: FastifyRequest): void {
   if (SAFE.has(req.method)) return;
   const path = req.url.split('?')[0] ?? '';
   if (!path.startsWith('/api/')) return;
   if (EXEMPT_PREFIXES.some((p) => path.startsWith(p))) return;
-  if (req.headers.origin !== config.publicOrigin) {
+  if (!originAllowed(config, req.headers.origin)) {
     throw new HttpError(403, 'bad_origin', 'Origin header missing or not allowed');
   }
 }
@@ -55,5 +61,5 @@ export function checkContentType(req: FastifyRequest): void {
 }
 
 export function checkWsOrigin(config: Config, origin: string | undefined): boolean {
-  return origin === config.publicOrigin;
+  return originAllowed(config, origin);
 }
