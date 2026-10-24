@@ -301,6 +301,67 @@ describe('a gated landing (merge, push, pull request)', () => {
   });
 });
 
+describe('gate hardening', () => {
+  it('asks for the landing approval even when the workflow has the lean team owner approval step', async () => {
+    const card = (await q(`SELECT * FROM cards WHERE project_id=$1 LIMIT 1`, [w.projectId]))[0];
+    if (!card) return;
+    const c = { ...card, original_builder_agent_id: agentId, risk_tier: 'small' };
+    await q(
+      `INSERT INTO workflow_stages (workflow_version_id, stage_id, ordinal, kind, column_key)
+       VALUES ($1,'owner_approval',99,'manual','review') ON CONFLICT DO NOTHING`,
+      [card.workflow_version_id],
+    );
+    try {
+      expect(await mergeGate(w.t.app.ctx.pool, c, 'merge')).toBe('none');
+      await setGate(w.owner, 'merge_push', true);
+      expect(await mergeGate(w.t.app.ctx.pool, c, 'merge')).toBe('approval');
+    } finally {
+      await setGate(w.owner, 'merge_push', false);
+      await q(
+        `DELETE FROM workflow_stages WHERE workflow_version_id=$1 AND stage_id='owner_approval' AND ordinal=99`,
+        [card.workflow_version_id],
+      );
+    }
+  });
+
+  it('binds an approval to the playbook input: another input asks again', async () => {
+    await owner('PUT', `/api/agents/${agentId}/playbook-grants`, { key: 'brainstorm', granted: true });
+    await setGate(w.owner, 'playbook_run', true);
+    try {
+      const a = await rpc(shiftId, 'playbook.run', { key: 'brainstorm', input: 'alpha plan' });
+      expect(a.error).toContain('approval_required');
+      const item = (await gateItems()).find((i) => i.status === 'open' && i.body.includes('alpha plan'));
+      await owner('POST', `/api/desk/${item?.id}/resolve`, { resolution: 'approved' });
+      const other = await rpc(shiftId, 'playbook.run', {
+        key: 'brainstorm',
+        input: 'something else entirely',
+      });
+      expect(other.error).toContain('approval_required');
+      const go = await rpc(shiftId, 'playbook.run', { key: 'brainstorm', input: 'alpha plan' });
+      expect(go.error ?? '').not.toContain('approval_');
+    } finally {
+      await setGate(w.owner, 'playbook_run', false);
+    }
+  });
+
+  it('lets only an Owner or Admin, the agent manager or the person who set the gate decide a gate item', async () => {
+    await setGate(w.owner, 'playbook_run', true);
+    try {
+      await rpc(shiftId, 'playbook.run', { key: 'brainstorm', input: 'for the admin to decide' });
+      const item = (await gateItems()).find((i) => i.status === 'open' && i.body.includes('for the admin'));
+      expect(item).toBeTruthy();
+      expect([403, 404]).toContain(
+        (await call(member, 'POST', `/api/desk/${item?.id}/resolve`, { resolution: 'approved' })).status,
+      );
+      expect(
+        (await call(admin, 'POST', `/api/desk/${item?.id}/resolve`, { resolution: 'approved' })).status,
+      ).toBe(200);
+    } finally {
+      await setGate(w.owner, 'playbook_run', false);
+    }
+  });
+});
+
 describe('scopes on a grant', () => {
   let packId = '';
   it('warns when the playbook needs a scope the agent lacks, and grants only on confirmation', async () => {

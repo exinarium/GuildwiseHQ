@@ -51,12 +51,13 @@ export async function mergeGate(
   card: Row,
   action: StoredCompletionAction,
 ): Promise<MergeGate> {
+  // S-B1: an agent that built this card is set to ask before its work lands (merge, branch push or pull request): always the
+  // manager's approval, whatever the size, and the project's waiver does not apply. This gate is checked first: the lean team's
+  // owner approval step below does not stand in for it (the gate applies whatever the workflow).
+  if (await builderGatedForLanding(db, card)) return 'approval';
   // lean team: the owner approved (or the policy waived it) at the approval step after the review, bound to the reviewed
   // commit; the merge does not ask again (the lapse check below guards the commit).
   if (await hasOwnerApprovalStep(db, card)) return 'none';
-  // S-B1: an agent that built this card is set to ask before its work lands (merge, branch push or pull request): always the
-  // manager's approval, whatever the size, and the project's waiver does not apply
-  if (await builderGatedForLanding(db, card)) return 'approval';
   if (isHighRiskMerge(card, action)) return 'approval'; // the project's waiver does not apply to a high risk
   if (!isLargeMerge(card, action)) return 'none';
   const p = await one(db, 'SELECT merge_large_without_approval AS waived FROM projects WHERE id=$1', [

@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   builtinCapabilities,
   type CapabilityMeta,
@@ -274,7 +274,11 @@ export async function playbookRunRpc(
   const gate = await gateAction(ctx, {
     agent,
     actionClass: 'playbook_run',
-    fingerprint: `playbook:${p.data.key}`,
+    // the approval is for this playbook with this input, not for any later run of it with another input
+    fingerprint: `playbook:${p.data.key}:${createHash('sha256')
+      .update(p.data.input ?? '')
+      .digest('hex')
+      .slice(0, 16)}`,
     summary: `run the playbook "${p.data.key}"${p.data.input ? `: ${p.data.input.slice(0, 160)}` : ''}`,
     projectId: shift.project_id ?? null,
     cardId: shift.card_id ?? null,

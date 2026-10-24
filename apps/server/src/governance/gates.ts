@@ -50,7 +50,10 @@ export async function setAgentGate(
     const a = await manageableAgent(tx, user, agentId);
     if (a.status === 'retired') throw conflict('agent_retired', 'agent is retired');
     if (a.role_key === 'ceo')
-      throw badRequest('ceo_policy', 'the CEO keeps its own policy (Settings > CEO): gates do not apply to it');
+      throw badRequest(
+        'ceo_policy',
+        'the CEO keeps its own policy (Settings > CEO): gates do not apply to it',
+      );
     const info = GATE_INFO[req.actionClass];
     if (info.enforcement === 'always')
       throw badRequest('always_gated', `${info.label} always asks the manager: there is nothing to switch`);
@@ -69,7 +72,13 @@ export async function setAgentGate(
           streamId: streamId.agent(agentId),
           event: {
             type: 'AgentGateSet',
-            payload: { agentId, orgId: a.org_id, actionClass: req.actionClass, gated: req.gated, by: user.id },
+            payload: {
+              agentId,
+              orgId: a.org_id,
+              actionClass: req.actionClass,
+              gated: req.gated,
+              by: user.id,
+            },
           },
           actor: userActor(user.id),
           scope: orgScope(a.org_id),
@@ -121,7 +130,10 @@ export async function gateAction(ctx: Ctx, ask: GateAsk): Promise<GateOutcome> {
         [
           {
             streamId: streamId.agent(agent.id),
-            event: { type: 'GatedActionUsed', payload: { requestId: usable.request_id, orgId: agent.org_id, agentId: agent.id } },
+            event: {
+              type: 'GatedActionUsed',
+              payload: { requestId: usable.request_id, orgId: agent.org_id, agentId: agent.id },
+            },
             actor: SYSTEM_ACTOR,
             scope: orgScope(agent.org_id),
           },
@@ -205,7 +217,29 @@ export async function resolveGateItemIn(
   item: Row,
   resolution: 'approved' | 'rejected' | 'acknowledged' | 'dismissed',
 ): Promise<void> {
-  if (resolution === 'acknowledged') throw badRequest('wrong_resolution', 'a gated action is approved or rejected');
+  if (resolution === 'acknowledged')
+    throw badRequest('wrong_resolution', 'a gated action is approved or rejected');
+  // Not the card's owner by default: the Owner and Admins, the agent's manager, or the person who set the gate decide
+  // (the gate exists to keep a person in the loop that someone chose).
+  const gateAgentId = (item.data as { agentId?: string } | null)?.agentId;
+  const gateClass = (item.data as { actionClass?: string } | null)?.actionClass;
+  const orgRole = await orgRoleOf(tx, user.id, item.org_id);
+  if (orgRole !== 'owner' && orgRole !== 'admin') {
+    const agent = gateAgentId
+      ? await one(tx, 'SELECT manager_user_id FROM agents WHERE id=$1', [gateAgentId])
+      : null;
+    const gate =
+      gateAgentId && gateClass
+        ? await one(tx, 'SELECT set_by FROM agent_action_gates WHERE agent_id=$1 AND action_class=$2', [
+            gateAgentId,
+            gateClass,
+          ])
+        : null;
+    if (agent?.manager_user_id !== user.id && gate?.set_by !== user.id)
+      throw forbidden(
+        'only an Owner or Admin, the agent’s manager or the person who set this gate can decide it',
+      );
+  }
   const requestId = (item.data as { requestId?: string } | null)?.requestId;
   if (!requestId) return;
   await ctx.store.append(
