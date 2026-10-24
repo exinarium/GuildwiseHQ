@@ -257,3 +257,13 @@ Details in `docs/ARCHITECTURE.md` section 38.5 and `docs/RUNNER.md` ("Claude Cod
 - Replace Piper with **Kokoro** (offline TTS) for the video narration, using the **Heart** voice (`af_heart`).
 - Update `e2e/video/voice.ts` and `e2e/video/setup-voice.sh` (install Kokoro and the voice into `~/.cache/aom-video`, no network after setup), and the VIDEO-PLAN.md voice notes. The narration pacing (words per second) must be re-measured.
 - To be built after the media-container change lands (videos then live in `media/videos/`). Re-recording the videos stays for later.
+
+## Revision R2 hardening as built (workstation and cost side)
+
+Details in `docs/ARCHITECTURE.md` section 38.6 and `docs/RUNNER.md` ("R2 hardening on the runner"). Runner 0.1.50, migrations 2450 and 2460. The session, limits, cast and hand-off items of R2 are in "Revision R2 as built".
+
+- **Built:** the skill guard denies at its own 7 s deadline; a tool-call cap (10) for CLI-runtime delegates; delegate heartbeat (15 s), stale slot after 45 s, slots freed on disconnect; Codex login copy and hand-back under a lock directory; hybrid sealing for every provider key, and a Google service-account JSON as the Gemini credential; prompt caching for Anthropic, OpenAI and Gemini with cache tokens in usage and cost; owner-set model prices; 90-day (configurable) retention of direct chat history; the `http://` warning in the provider form; a neutral terms line for custom OpenAI-compatible endpoints.
+- **Decided by default:** Claude Code has no max-turns flag in print mode, so the delegate cap counts stream tool events and kills the process; the owner price table fills gaps only (a model with a list price keeps it) and applies to later turns, never repricing stamped ones; only the Owner sets prices; the service-account exchange is limited to Google's token host; retention is counted from the last write; Gemini caching is implicit (no explicit cache objects).
+- **Not verified against real services:** the service-account to bearer exchange against Google, Anthropic cache hits and OpenAI cached-token reporting (tested with the SDK's mock model and a fake token endpoint; the first real turn on each provider will show whether the cache counters move).
+- **Open questions:** (1) Should owner-priced turns be marked in the session cost meter too (today the mark is in `shift_costs.owner_priced` and the price list)? (2) Should Admins be allowed to set prices? (3) A 1-hour cache TTL for Anthropic would cut cost for long Boardroom sessions but writes cost more: keep the 5 minute default?
+
