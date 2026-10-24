@@ -182,9 +182,17 @@ function webDistDir(config: Config): string | null {
   return candidates.find((c) => existsSync(join(c, 'index.html'))) ?? null;
 }
 
-/** Secrets that travel in URLs: invitation tokens (`/api/invitations/<t>`, `/invite/<t>`) and pairing codes. */
+/** `/m/desk/<token>` as it appears in a path, or percent-encoded (once or twice) inside a `next=` parameter. */
+const DESK_LINK_TOKEN =
+  /((?:\/|%2F|%252F)m(?:\/|%2F|%252F)desk(?:\/|%2F|%252F))(?:[A-Za-z0-9_\-.~]|%(?!25?2F)[0-9A-Fa-f]{2})+/gi;
+
+/**
+ * Secrets that travel in URLs: invitation tokens (`/api/invitations/<t>`, `/invite/<t>`), pairing codes and the one-time
+ * desk links of push notifications (`/api/m/desk/<t>`, `/api/m/desk/<t>/apply`, `/m/desk/<t>`, also inside a login `next=`).
+ */
 export function redactUrl(url: string): string {
   return url
+    .replace(DESK_LINK_TOKEN, '$1[redacted]')
     .replace(/(\/(?:api\/invitations|invite)\/)[^/?#\s]+/gi, '$1[redacted]')
     .replace(/([?&](?:token|code|invite|pairing[_-]?code)=)[^&#\s]*/gi, '$1[redacted]');
 }

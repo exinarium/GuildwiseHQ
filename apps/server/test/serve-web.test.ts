@@ -71,6 +71,13 @@ describe('access logs do not carry secrets (review low)', () => {
     expect(redactUrl('/invite/secretToken')).toBe('/invite/[redacted]');
     expect(redactUrl('/pair?code=ABCD-1234&x=1')).toBe('/pair?code=[redacted]&x=1');
     expect(redactUrl('/api/health')).toBe('/api/health');
+    expect(redactUrl('/api/m/desk/tok_en-1.2~3')).toBe('/api/m/desk/[redacted]');
+    expect(redactUrl('/api/m/desk/tok_en-1/apply?x=1')).toBe('/api/m/desk/[redacted]/apply?x=1');
+    expect(redactUrl('/m/desk/tok_en-1')).toBe('/m/desk/[redacted]');
+    expect(redactUrl('/login?next=%2Fm%2Fdesk%2Ftok_en-1&a=b')).toBe(
+      '/login?next=%2Fm%2Fdesk%2F[redacted]&a=b',
+    );
+    expect(redactUrl('/login?next=/m/desk/tok_en-1')).toBe('/login?next=/m/desk/[redacted]');
     expect(requestLogSerializer({ method: 'GET', url: '/invite/tok123' }).url).toBe('/invite/[redacted]');
   });
 });
