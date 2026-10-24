@@ -671,6 +671,8 @@ describe('Capabilities: R2 project skills review and one-click update check', ()
     wrap(<Capabilities />, '/settings/capabilities?tab=project-skills');
     const rows = await screen.findAllByTestId('project-skill');
     expect(rows).toHaveLength(2);
+    // Q52: what waits for review is shown clearly, because it is not used until reviewed
+    expect(screen.getByTestId('project-skills-pending')).toHaveTextContent('2 items wait for review');
     expect(rows[0]).toHaveTextContent('toy-app');
     expect(rows[0]).toHaveTextContent('.claude/skills/deploy-helper');
     expect(rows[0]).toHaveTextContent('aaaaaaaaaaaa');

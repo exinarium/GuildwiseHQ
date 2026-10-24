@@ -28,7 +28,7 @@ export const ListCapabilitiesQuerySchema = z.object({
   /** Pickers ask for what can be used now: capabilities of an untrusted pack or one whose files changed are left out. */
   usable: z.enum(['true', 'false']).optional(),
 });
-export const UnusableReasonSchema = z.enum(['untrusted', 'integrity', 'pending']);
+export const UnusableReasonSchema = z.enum(['untrusted', 'integrity', 'pending', 'unreviewed', 'changed']);
 export const CapabilitiesResponseSchema = z.object({
   items: z.array(
     RegistryMetaSchema.extend({

@@ -435,6 +435,24 @@ describe('registry use of packs', () => {
     expect(reg.indexProject(pid, repo).items.some((i) => i.key === 'repo-skill')).toBe(true);
     reg.setBlocked([]);
     expect(reg.get('repo-skill', pid)?.description).toBe('From the repo');
+    // Q52: once the server asks for review, only entries reviewed at their current hash are served
+    const hashes = Object.fromEntries(reg.indexProject(pid, repo).items.map((i) => [i.key, i.hash]));
+    reg.setReviewed([]);
+    expect(reg.get('repo-skill', pid)).toBeUndefined();
+    expect(reg.meta(pid).some((m) => m.source === 'project-repo')).toBe(false);
+    // the vault/built-in version of an overridden skill is served instead of the unreviewed repo one
+    expect(reg.get('interview-techniques', pid)?.description).not.toBe('Repo version');
+    reg.setReviewed([
+      { projectId: pid, kind: 'skill', key: 'repo-skill', hash: hashes['repo-skill'] as string },
+    ]);
+    expect(reg.get('repo-skill', pid)?.description).toBe('From the repo');
+    expect(reg.get('reviewer', pid)).toBeUndefined();
+    // a changed file (another hash than the reviewed one) is out again
+    reg.setReviewed([{ projectId: pid, kind: 'skill', key: 'repo-skill', hash: 'f'.repeat(64) }]);
+    expect(reg.get('repo-skill', pid)).toBeUndefined();
+    // an older server sends no list: everything is served, as before
+    reg.setReviewed(undefined);
+    expect(reg.get('repo-skill', pid)?.description).toBe('From the repo');
   });
 });
 

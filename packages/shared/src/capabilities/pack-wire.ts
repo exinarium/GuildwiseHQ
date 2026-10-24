@@ -69,10 +69,22 @@ export const BlockedProjectCapabilitySchema = z.object({
 });
 export type BlockedProjectCapability = z.infer<typeof BlockedProjectCapabilitySchema>;
 
+/** R3c (Q52): a project-repository capability an Owner or Admin reviewed, at exactly this content hash. */
+export const ReviewedProjectCapabilitySchema = BlockedProjectCapabilitySchema.extend({
+  hash: z.string().regex(/^[0-9a-f]{64}$/),
+});
+export type ReviewedProjectCapability = z.infer<typeof ReviewedProjectCapabilitySchema>;
+
 export const PacksSyncPayloadSchema = z.object({
   packs: z.array(PackDesiredSchema).max(100),
   /** Additive: absent from an older server. */
   blocked: z.array(BlockedProjectCapabilitySchema).max(1000).default([]),
+  /**
+   * R3c (Q52), additive: the project-repository capabilities that were reviewed (at that hash). When present, the runner
+   * serves a capability read from a project's repository only if it is listed here; absent (an older server): all are served,
+   * as before.
+   */
+  reviewed: z.array(ReviewedProjectCapabilitySchema).max(3000).optional(),
 });
 /** "Check for updates": fetch `ref` (default the pack's own) and report the commit it points to now. */
 export const PackCheckPayloadSchema = z.object({ packId: z.uuid(), ref: PackRefSchema.optional() });

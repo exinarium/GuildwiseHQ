@@ -106,21 +106,34 @@ async function packItems(db: Queryable, orgId: string, projectId?: string, userI
   return out;
 }
 
+/** A project-repository capability's review state (Q52): usable only when `reviewed` at exactly its current hash. */
+export type ProjectCapabilityState = 'reviewed' | 'changed' | 'unreviewed' | 'blocked';
+export function projectCapabilityState(
+  reviewStatus: string | null | undefined,
+  reviewHash: string | null | undefined,
+  hash: string,
+): ProjectCapabilityState {
+  if (reviewStatus === 'blocked') return 'blocked';
+  if (reviewStatus === 'reviewed') return reviewHash === hash ? 'reviewed' : 'changed';
+  return 'unreviewed';
+}
+
 async function projectRepoMeta(
   db: Queryable,
   orgId: string,
   projectId: string,
-): Promise<Array<CapabilityMeta & { blocked?: boolean }>> {
+): Promise<Array<CapabilityMeta & { blocked?: boolean; state: ProjectCapabilityState }>> {
   const r = await rows(
     db,
-    `SELECT i.kind, i.key, i.name, i.description, i.hash, i.icon, i.path, (cr.status = 'blocked') AS blocked
+    `SELECT i.kind, i.key, i.name, i.description, i.hash, i.icon, i.path, cr.status AS review_status, cr.hash AS review_hash
        FROM project_capability_index i
        LEFT JOIN capability_reviews cr ON cr.project_id = i.project_id AND cr.kind = i.kind AND cr.key = i.key
       WHERE i.org_id=$1 AND i.project_id=$2 ORDER BY i.kind, i.key`,
     [orgId, projectId],
   );
   return r.map((x) => ({
-    ...(x.blocked ? { blocked: true } : {}),
+    ...(x.review_status === 'blocked' ? { blocked: true } : {}),
+    state: projectCapabilityState(x.review_status, x.review_hash, x.hash),
     ...(x.path ? { path: x.path } : {}),
     kind: x.kind as CapabilityKind,
     key: x.key,
@@ -147,7 +160,11 @@ export async function effectiveRegistry(
   const vault = await vaultCapabilityMeta(db, orgId);
   const repoRaw = o.projectId ? await projectRepoMeta(db, orgId, o.projectId) : [];
   // A capability the owner blocked is not in the registry at all (it does not shadow a built-in either).
-  const repo: CapabilityMeta[] = repoRaw.filter((r) => !r.blocked).map(({ blocked: _b, ...m }) => m);
+  // An unreviewed capability, or one changed since it was reviewed, is unusable until an Owner or Admin marks it reviewed
+  // (Q52); it does not shadow a built-in or a vault entry either, and is listed (unusable) only when nothing else has its id.
+  const strip = ({ blocked: _b, state: _s, ...m }: (typeof repoRaw)[number]): CapabilityMeta => m;
+  const repo: CapabilityMeta[] = repoRaw.filter((r) => r.state === 'reviewed').map(strip);
+  const pending = repoRaw.filter((r) => r.state === 'unreviewed' || r.state === 'changed');
   const packs = await packItems(db, orgId, o.projectId, o.userId);
   const idsOf = (l: CapabilityMeta[]) => l.map((b) => `${b.kind}:${b.key}`);
   // what each source can override: the ids of the sources below it
@@ -160,7 +177,7 @@ export async function effectiveRegistry(
   const status = await one(db, 'SELECT issues, reported_at FROM capability_index_status WHERE org_id=$1', [
     orgId,
   ]);
-  const items = mergeRegistry(
+  const items: CapabilitiesResponse['items'] = mergeRegistry(
     builtin,
     vault,
     repo,
@@ -181,6 +198,20 @@ export async function effectiveRegistry(
       };
     })
     .filter((m) => !o.usableOnly || m.usable);
+  if (!o.usableOnly && o.projectId) {
+    const have = new Set(items.map((m) => `${m.kind}:${m.key}`));
+    for (const r of pending) {
+      if (have.has(`${r.kind}:${r.key}`) || (o.kind && r.kind !== o.kind)) continue;
+      items.push({
+        ...strip(r),
+        overrides: false,
+        usable: false,
+        unusableReason: r.state === 'changed' ? 'changed' : 'unreviewed',
+        projectId: o.projectId,
+      });
+    }
+    items.sort((a, b) => (a.kind === b.kind ? a.key.localeCompare(b.key) : a.kind.localeCompare(b.kind)));
+  }
   return {
     items,
     issues: (status?.issues as Array<{ path: string; message: string }> | undefined) ?? [],

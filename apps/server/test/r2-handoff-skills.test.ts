@@ -8,7 +8,7 @@ import {
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { bmadFixtureStable } from '../../../packages/shared/test/fixtures/bmad-fixture.ts';
 import { startIntakeIn } from '../src/commands/intake.ts';
-import { queuePacksSync } from '../src/commands/packs.ts';
+import { applyProjectCapabilitiesReport, queuePacksSync } from '../src/commands/packs.ts';
 import { rebuildProjections } from '../src/projections/rebuild.ts';
 import { closeAdminPool } from './helpers/db.ts';
 import type { FakeRunner } from './helpers/fake-runner.ts';
@@ -189,31 +189,20 @@ describe('packs scoped to a project', () => {
 describe('review list of project-repository skills', () => {
   const hash = (c: string) => c.repeat(64);
   const report = async (items: Array<{ key: string; hash: string; path?: string }>) => {
-    await w.t.app.ctx.store.append([
-      {
-        streamId: `project-capabilities-${w.projectId}`,
-        event: {
-          type: 'ProjectCapabilitiesReported',
-          payload: {
-            orgId: w.owner.id,
-            projectId: w.projectId,
-            workstationId: w.workstationId,
-            items: items.map((i) => ({
-              kind: 'skill',
-              key: i.key,
-              name: i.key,
-              description: `${i.key} skill`,
-              hash: i.hash,
-              source: 'project-repo',
-              ...(i.path ? { path: i.path } : {}),
-            })),
-            issues: [],
-          },
-        },
-        actor: { kind: 'runner', id: w.workstationId },
-        scope: { audience: 'org', orgId: w.owner.id },
-      } as never,
-    ]);
+    await applyProjectCapabilitiesReport(w.t.app.ctx, { id: w.workstationId, userId: w.owner.id }, {
+      type: 'capabilities.project.report',
+      projectId: w.projectId,
+      items: items.map((i) => ({
+        kind: 'skill',
+        key: i.key,
+        name: i.key,
+        description: `${i.key} skill`,
+        hash: i.hash,
+        source: 'project-repo',
+        ...(i.path ? { path: i.path } : {}),
+      })),
+      issues: [],
+    } as never);
   };
   const list = async () => (await K.owner('GET', '/api/capabilities/project-skills')).items as any[];
   const review = (key: string, h: string, status: string) =>
@@ -259,36 +248,85 @@ describe('review list of project-repository skills', () => {
     expect((await K.as(m.cookie)('GET', '/api/capabilities/project-skills')).status).toBe(403);
   });
 
-  it("a blocked skill is unusable: out of the registry and on the runners' blocked list; clearing brings it back; replay-safe", async () => {
+  const lastSync = async () =>
+    (
+      await q(
+        `SELECT payload FROM runner_commands WHERE workstation_id=$1 AND type='packs.sync' ORDER BY created_at DESC LIMIT 1`,
+        [w.workstationId],
+      )
+    )[0].payload;
+  const usable = async () =>
+    (await K.owner('GET', `/api/capabilities?kind=skill&usable=true&projectId=${w.projectId}`)).items.map(
+      (i: any) => i.key,
+    );
+  const noticeOpen = async () =>
+    (
+      await q(`SELECT id FROM desk_items WHERE subject_key=$1 AND status='open'`, [
+        `project_skills_review:${w.projectId}`,
+      ])
+    ).length;
+
+  it('Q52: an unreviewed or changed skill is unusable until reviewed at its current hash; the runner is told which hashes; a desk notice shows what waits', async () => {
+    await report([{ key: 'fresh-skill', hash: hash('d'), path: '.claude/skills/fresh-skill' }]);
+    // never reviewed: not usable, listed (unusable) in the registry with the reason, a notice is open
+    expect(await usable()).not.toContain('fresh-skill');
+    const all = (await K.owner('GET', `/api/capabilities?kind=skill&projectId=${w.projectId}`))
+      .items as any[];
+    expect(all.find((i) => i.key === 'fresh-skill')).toMatchObject({
+      usable: false,
+      unusableReason: 'unreviewed',
+    });
+    expect(await noticeOpen()).toBe(1);
+    await queuePacksSync(w.t.app.ctx.pool, w.workstationId);
+    expect((await lastSync()).reviewed).toEqual(
+      expect.not.arrayContaining([expect.objectContaining({ key: 'fresh-skill' })]),
+    );
+    // reviewed at the hash: usable, on the runner's reviewed list, the notice closes
+    expect((await review('fresh-skill', hash('d'), 'reviewed')).status).toBe(200);
+    expect(await usable()).toContain('fresh-skill');
+    expect(await noticeOpen()).toBe(0);
+    expect((await lastSync()).reviewed).toContainEqual({
+      projectId: w.projectId,
+      kind: 'skill',
+      key: 'fresh-skill',
+      hash: hash('d'),
+    });
+    // the file changes: unusable again with reason "changed", and a notice returns
+    await report([{ key: 'fresh-skill', hash: hash('e'), path: '.claude/skills/fresh-skill' }]);
+    expect(await usable()).not.toContain('fresh-skill');
+    const again = (await K.owner('GET', `/api/capabilities?kind=skill&projectId=${w.projectId}`))
+      .items as any[];
+    expect(again.find((i) => i.key === 'fresh-skill')).toMatchObject({
+      usable: false,
+      unusableReason: 'changed',
+    });
+    expect(await noticeOpen()).toBe(1);
+    // an owner who reviews the old hash cannot approve the new file
+    expect((await review('fresh-skill', hash('d'), 'reviewed')).status).toBe(409);
+    expect((await review('fresh-skill', hash('e'), 'reviewed')).status).toBe(200);
+    expect(await usable()).toContain('fresh-skill');
+    // the sessions of that project see a persona only when reviewed (a member session uses usableOnly registry)
+    await rebuildProjections(w.t.app.ctx.pool, w.t.app.ctx.store, w.t.clock.now());
+    expect(await usable()).toContain('fresh-skill');
+  });
+
+  it("a blocked skill is unusable: out of the registry and on the runners' blocked list; clearing the block makes it unreviewed again; replay-safe", async () => {
     await report([{ key: 'lint-fixer', hash: hash('b'), path: '.agents/skills/lint-fixer' }]);
-    const usable = async () =>
-      (await K.owner('GET', `/api/capabilities?kind=skill&usable=true&projectId=${w.projectId}`)).items.map(
-        (i: any) => i.key,
-      );
+    expect((await review('lint-fixer', hash('b'), 'reviewed')).status).toBe(200);
     expect(await usable()).toContain('lint-fixer');
     expect((await review('lint-fixer', hash('b'), 'blocked')).status).toBe(200);
     expect((await list()).find((i) => i.key === 'lint-fixer').status).toBe('blocked');
     expect(await usable()).not.toContain('lint-fixer');
     // the runners are told with the next packs.sync
     await queuePacksSync(w.t.app.ctx.pool, w.workstationId);
-    const cmd = (
-      await q(
-        `SELECT payload FROM runner_commands WHERE workstation_id=$1 AND type='packs.sync' ORDER BY created_at DESC LIMIT 1`,
-        [w.workstationId],
-      )
-    )[0].payload;
+    const cmd = await lastSync();
     expect(cmd.blocked).toContainEqual({ projectId: w.projectId, kind: 'skill', key: 'lint-fixer' });
+    expect(cmd.reviewed ?? []).not.toContainEqual(expect.objectContaining({ key: 'lint-fixer' }));
     await rebuildProjections(w.t.app.ctx.pool, w.t.app.ctx.store, w.t.clock.now());
     expect((await list()).find((i) => i.key === 'lint-fixer').status).toBe('blocked');
     expect((await review('lint-fixer', hash('b'), 'unreviewed')).status).toBe(200);
-    expect(await usable()).toContain('lint-fixer');
+    expect(await usable()).not.toContain('lint-fixer');
     await queuePacksSync(w.t.app.ctx.pool, w.workstationId);
-    const cmd2 = (
-      await q(
-        `SELECT payload FROM runner_commands WHERE workstation_id=$1 AND type='packs.sync' ORDER BY created_at DESC LIMIT 1`,
-        [w.workstationId],
-      )
-    )[0].payload;
-    expect(cmd2.blocked).toEqual([]);
+    expect((await lastSync()).blocked).toEqual([]);
   });
 });

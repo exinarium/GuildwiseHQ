@@ -41,6 +41,7 @@ import {
   packWorkstations,
   wsHas,
 } from './pack-support.ts';
+import { refreshProjectSkillsNotice } from './project-skills-notice.ts';
 import { deliver } from './workstation-setup.ts';
 
 /**
@@ -239,6 +240,7 @@ export async function queuePacksSync(db: Queryable, workstationId: string): Prom
   await enqueueRunnerCommand(db, workstationId, 'packs.sync', {
     packs: await desiredPacksFor(db, workstationId),
     blocked: await blockedProjectCapabilities(db, workstationId),
+    reviewed: await reviewedProjectCapabilities(db, workstationId),
   });
 }
 
@@ -256,6 +258,26 @@ export async function blockedProjectCapabilities(
     [workstationId],
   );
   return r.map((x) => ({ projectId: x.project_id, kind: x.kind, key: x.key }));
+}
+
+/**
+ * The project-repository capabilities an Owner or Admin reviewed (at the hash that was reviewed), in the organizations this
+ * workstation's owner belongs to. The runner serves a capability read from a project's repository only if it is listed here
+ * at its current content hash (Q52): unreviewed and changed ones are unusable.
+ */
+export async function reviewedProjectCapabilities(
+  db: Queryable,
+  workstationId: string,
+): Promise<Array<{ projectId: string; kind: 'skill' | 'persona' | 'playbook'; key: string; hash: string }>> {
+  const r = await rows(
+    db,
+    `SELECT cr.project_id, cr.kind, cr.key, cr.hash FROM capability_reviews cr
+       JOIN workstations w ON w.id = $1
+       JOIN org_members om ON om.user_id = w.user_id AND om.org_id = cr.org_id AND om.status = 'active'
+      WHERE cr.status = 'reviewed' ORDER BY cr.project_id, cr.kind, cr.key LIMIT 3000`,
+    [workstationId],
+  );
+  return r.map((x) => ({ projectId: x.project_id, kind: x.kind, key: x.key, hash: x.hash }));
 }
 
 export async function syncOrg(ctx: Ctx, orgId: string): Promise<void> {
@@ -880,4 +902,8 @@ export async function applyProjectCapabilitiesReport(
       scope: orgScope(p.org_id),
     } as AppendInput,
   ]);
+  // Anything new or changed in the repository waits for an Owner's or Admin's review (Q52): a desk notice says so.
+  await refreshProjectSkillsNotice(ctx, p.org_id, msg.projectId).catch((err) =>
+    ctx.log.warn({ err }, 'project skills notice failed'),
+  );
 }

@@ -136,6 +136,7 @@ export class CapabilityRegistry {
   private packs: PackManager | undefined;
   /** Project-repository capabilities the owner blocked (`<projectId>/<kind>:<key>`): indexed and reported, never served. */
   private blocked = new Set<string>();
+  private reviewed: Map<string, string> | undefined;
 
   constructor(opts: { log?: Logger; packs?: PackManager } = {}) {
     this.log = opts.log ?? nullLogger;
@@ -149,6 +150,26 @@ export class CapabilityRegistry {
   /** The owner's blocked list from the server (`packs.sync`): a blocked capability is left out of every effective view. */
   setBlocked(list: ReadonlyArray<{ projectId: string; kind: string; key: string }>): void {
     this.blocked = new Set(list.map((b) => `${b.projectId}/${b.kind}:${b.key}`));
+  }
+
+  /**
+   * R3c (Q52): the reviewed project-repository capabilities (`<projectId>/<kind>:<key>` to the content hash reviewed). Once a
+   * server has sent the list, an entry read from a project's repository is served only if its hash is the reviewed one: an
+   * unreviewed or changed file is unusable. `undefined` (an older server) keeps the earlier behaviour.
+   */
+  setReviewed(
+    list: ReadonlyArray<{ projectId: string; kind: string; key: string; hash: string }> | undefined,
+  ): void {
+    this.reviewed = list
+      ? new Map(list.map((b) => [`${b.projectId}/${b.kind}:${b.key}`, b.hash]))
+      : undefined;
+  }
+
+  /** Whether a project-repository entry may be served now (not blocked; reviewed at its current hash once the server asks for review). */
+  projectEntryUsable(projectId: string, e: ParsedCapability): boolean {
+    const id = `${projectId}/${capabilityId(e)}`;
+    if (this.blocked.has(id)) return false;
+    return !this.reviewed || this.reviewed.get(id) === e.hash;
   }
 
   /** Re-reads the organization vault folder (`<clone>/org`). */
@@ -236,8 +257,7 @@ export class CapabilityRegistry {
     for (const e of this.vault) byId.set(capabilityId(e), { e, source: 'org-vault' });
     if (projectId)
       for (const e of this.projectRepo.get(projectId) ?? [])
-        if (!this.blocked.has(`${projectId}/${capabilityId(e)}`))
-          byId.set(capabilityId(e), { e, source: 'project-repo' });
+        if (this.projectEntryUsable(projectId, e)) byId.set(capabilityId(e), { e, source: 'project-repo' });
     for (const e of this.packs?.entries(projectId, orgId, viewer) ?? [])
       byId.set(capabilityId(e), { e, source: 'pack' });
     return [...byId.values()].sort((a, b) =>

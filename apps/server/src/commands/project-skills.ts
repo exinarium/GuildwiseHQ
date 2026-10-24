@@ -6,17 +6,20 @@ import {
   streamId,
 } from '@aom/shared';
 import type { Who } from '../auth/org-context.ts';
+import { projectCapabilityState } from '../capabilities/registry.ts';
 import type { Ctx } from '../context.ts';
 import { iso, one, rows } from '../db/sql.ts';
 import { conflict, forbidden, notFound } from '../errors.ts';
 import { orgScope, userActor } from './common.ts';
 import { syncOrg } from './packs.ts';
+import { refreshProjectSkillsNotice } from './project-skills-notice.ts';
 
 /**
  * Review list of the capabilities a project's own repository carries (docs/ARCHITECTURE.md section 38.7). A repository is
  * code the organization does not control as tightly as its vault, so an Owner or Admin can see what was found (repository,
- * path, content hash), mark it reviewed (at that hash) or block it. A blocked capability is unusable: the registry marks it
- * and the runners leave it out. Unreviewed ones stay usable (a review is a record, not a gate), as before.
+ * path, content hash), mark it reviewed (at that hash) or block it. From R3c (Q52) a review is a gate: an unreviewed
+ * capability, or one whose file changed since it was reviewed, and a blocked one are unusable (registry, materialisation,
+ * sessions, delegate targets) until an Owner or Admin marks it reviewed at its current hash.
  */
 const requireManager = (who: Who): void => {
   if (!isOrgManager({ orgRole: who.role }))
@@ -51,14 +54,7 @@ export async function listProjectSkills(ctx: Ctx, who: Who): Promise<ProjectSkil
     hash: x.hash,
     repo: x.repo ?? null,
     path: x.path ?? null,
-    status:
-      x.review_status === 'blocked'
-        ? 'blocked'
-        : x.review_status === 'reviewed'
-          ? x.review_hash === x.hash
-            ? 'reviewed'
-            : 'changed'
-          : 'unreviewed',
+    status: projectCapabilityState(x.review_status, x.review_hash, x.hash),
     reviewedHash: x.review_hash ?? null,
     reviewedBy: x.reviewed_by ?? null,
     reviewedAt: iso(x.reviewed_at),
@@ -101,7 +97,8 @@ export async function reviewProjectSkill(
       scope: orgScope(who.orgId),
     },
   ]);
-  // the runners hear about a block (or its removal) now
+  // the runners hear about a review or a block (or their removal) now
   await syncOrg(ctx, who.orgId);
+  await refreshProjectSkillsNotice(ctx, who.orgId, req.projectId);
   return listProjectSkills(ctx, who);
 }

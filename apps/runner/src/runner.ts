@@ -1813,6 +1813,8 @@ export class Runner {
         const sync = CommandPayloadSchemas['packs.sync'].parse(payload);
         // The owner's blocked project-repository capabilities (additive: an older server sends none).
         this.capabilities.setBlocked(sync.blocked);
+        // R3c (Q52): an unreviewed or changed project-repository capability is unusable (additive: an older server sends none).
+        this.capabilities.setReviewed(sync.reviewed);
         await this.packs.sync(sync.packs);
         done(true, { packs: this.packs.summary().length });
       } else if (command === 'pack.check') {

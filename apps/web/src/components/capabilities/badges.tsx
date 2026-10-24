@@ -29,6 +29,8 @@ export const UNUSABLE_LABEL = {
   untrusted: 'needs approval',
   pending: 'needs approval',
   integrity: 'files changed',
+  unreviewed: 'needs review',
+  changed: 'changed, needs review',
 } as const;
 
 /** Why a pack capability cannot be used yet (nothing when it can). */
@@ -37,7 +39,7 @@ export function UnusableBadge({
   reason,
 }: {
   usable: boolean;
-  reason?: 'untrusted' | 'integrity' | 'pending' | undefined;
+  reason?: 'untrusted' | 'integrity' | 'pending' | 'unreviewed' | 'changed' | undefined;
 }) {
   if (usable) return null;
   const r = reason ?? 'untrusted';

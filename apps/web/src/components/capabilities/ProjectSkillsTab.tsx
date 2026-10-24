@@ -70,12 +70,20 @@ function Row({ item }: { item: ProjectSkillDto }) {
 export function ProjectSkillsTab() {
   const q = useProjectSkills();
   const items = q.data ?? [];
+  const pending = items.filter((i) => i.status === 'unreviewed' || i.status === 'changed').length;
   return (
     <div className="flex flex-col gap-3" data-testid="project-skills-tab">
       <Callout tone="info">
         These come from the repositories of your projects (.claude/skills, .agents/skills, .claude/agents).
-        Review what they contain; a blocked one is not offered to any agent. Unreviewed ones stay usable.
+        Nothing here is used until an Owner or Admin has read it and marked it reviewed, and again whenever a
+        file changes. A blocked one is never offered to any agent.
       </Callout>
+      {pending > 0 && (
+        <Callout tone="warning" data-testid="project-skills-pending">
+          {pending} {pending === 1 ? 'item waits' : 'items wait'} for review and{' '}
+          {pending === 1 ? 'is' : 'are'} not available to agents or sessions yet.
+        </Callout>
+      )}
       {q.isPending && <ListSkeleton rows={3} />}
       <ErrorBox error={q.error} onRetry={() => void q.refetch()} />
       {q.data && items.length === 0 && (

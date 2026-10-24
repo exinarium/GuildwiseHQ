@@ -17,7 +17,7 @@ Add a pack by git URL and tag, or click **Add BMAD Method**. It starts untrusted
 
 ## Project skills {#project-skills}
 
-**Project skills** lists the skills and personas found in project repositories (repository, path, hash). Mark one **reviewed** or **block** it; a blocked one cannot be used, and a changed file needs a new review.
+**Project skills** lists the skills and personas found in project repositories (repository, path, hash). Nothing found there is used until an Owner or Admin has read it and marked it **reviewed**; a file that changes needs a new review. You also get a notice on your desk when something waits. **Block** one to keep it out for good.
 
 ## My capabilities {#mine}
 
