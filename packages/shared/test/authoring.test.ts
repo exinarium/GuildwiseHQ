@@ -14,12 +14,12 @@ import {
   provenanceLabel,
   RoleDefinitionSchema,
   roleFromPersona,
-  validateRoleDefinition,
   roleKeyForPackPersona,
   unzipTree,
   validateAuthored,
   validateAuthoredPack,
   validateAuthoredTree,
+  validateRoleDefinition,
   zipTree,
 } from '../src/index.ts';
 
@@ -256,6 +256,10 @@ describe('a role from a pack persona', () => {
     expect(r.permissions.mayCommit).toBe(false);
     expect(r.source && provenanceLabel(r.source)).toBe('BMAD · analyst · v6.12.4');
     expect(RoleDefinitionSchema.safeParse(r).success).toBe(true);
-    expect(validateRoleDefinition(r, { builtinRoleKeys: [], builtinWorkflowKeys: [], departments: [] }).filter((i) => i.severity === 'error')).toEqual([]);
+    expect(
+      validateRoleDefinition(r, { builtinRoleKeys: [], builtinWorkflowKeys: [], departments: [] }).filter(
+        (i) => i.severity === 'error',
+      ),
+    ).toEqual([]);
   });
 });

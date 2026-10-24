@@ -19,7 +19,6 @@ import { exec, iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
-import { applyHolders } from './pack-holders.ts';
 import { authorWorkstationOf, HOLDS_PACK_SQL, packEvent, packWorkstations } from './pack-support.ts';
 import { holdersOf } from './packs.ts';
 import { deliver } from './workstation-setup.ts';

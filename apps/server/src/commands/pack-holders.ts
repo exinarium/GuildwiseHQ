@@ -322,7 +322,7 @@ export async function decideAssignmentIn(
       WHERE pa.pack_id=$1 AND pa.workstation_id=$2 FOR UPDATE OF pa`,
     [packId, workstationId],
   );
-  if (!a || a.status !== 'pending') throw notFound('this request is already answered');
+  if (a?.status !== 'pending') throw notFound('this request is already answered');
   if (a.user_id !== userId) throw forbidden('only the owner of that workstation can answer');
   const events: AppendInput[] = [
     packEvent(
@@ -383,7 +383,7 @@ export async function resolvePackAssignmentIn(
     data.packId,
     data.workstationId,
   ]);
-  if (!a || a.status !== 'pending') return undefined;
+  if (a?.status !== 'pending') return undefined;
   const ws = await decideAssignmentIn(
     ctx,
     tx,

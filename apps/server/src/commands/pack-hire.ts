@@ -257,7 +257,7 @@ export async function getHireStatus(ctx: Ctx, who: Who, requestId: string): Prom
 export async function applyPersonaReadResult(
   ctx: Ctx,
   workstationId: string,
-  commandId: string,
+  _commandId: string,
   payload: Record<string, unknown>,
   ok: boolean,
   result: unknown,
@@ -286,7 +286,7 @@ export async function applyPersonaReadResult(
   const data = parsed.data;
   const next = await withAppendTx(ctx.pool, async (tx) => {
     const cur = await one(tx, 'SELECT * FROM pack_requests WHERE id=$1 FOR UPDATE', [requestId]);
-    if (!cur || cur.status !== 'pending') return undefined;
+    if (cur?.status !== 'pending') return undefined;
     const results = { ...(cur.results as Record<string, unknown>) };
     const reads = {
       ...((results.reads as Record<string, unknown>) ?? {}),
@@ -481,7 +481,7 @@ async function completeHire(ctx: Ctx, req: Row): Promise<void> {
  * keep the role version they run until someone accepts the offer.
  */
 export async function offerRoleUpdates(
-  ctx: Ctx,
+  _ctx: Ctx,
   tx: Queryable,
   pack: Row,
   oldSnap: PackSnapshot | null,

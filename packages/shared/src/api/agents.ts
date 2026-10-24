@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { PackProvenanceSchema } from '../capabilities/provenance.ts';
 import { AvatarStyleSchema } from '../avatars/index.ts';
+import { PackProvenanceSchema } from '../capabilities/provenance.ts';
 import { AgentChangesSchema } from '../events/agent.ts';
 import { SandboxStateSchema } from '../protocol/runner.ts';
 import { AgentPermissionsSchema, Seniority } from '../roles/schema.ts';

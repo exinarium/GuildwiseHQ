@@ -38,7 +38,6 @@ import {
   HOLDS_PACK_SQL,
   isTrustedRow,
   packEvent,
-  packScopeOf,
   packWorkstations,
   wsHas,
 } from './pack-support.ts';
