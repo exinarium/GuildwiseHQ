@@ -761,6 +761,18 @@ describe('the Gemini adapter (fake binary)', () => {
     expect(l.hiddenFromShell).toEqual([]);
   });
 
+  it('never picks an organization key for a run that names no organization (finding 13)', async () => {
+    const w = await world({ key: 'org', mode: { lines: REAL_LINES } });
+    expect(w.adapter.authSelection(ORG)).toMatchObject({ via: 'key', source: 'org' });
+    expect(w.adapter.authSelection()).toMatchObject({ via: 'none' });
+    expect(w.adapter.authSelection('22222222-2222-4222-8222-222222222222')).toMatchObject({ via: 'none' });
+    await expect(w.start({ orgId: '' })).rejects.toThrow(/not signed in/);
+    // availability (names only) still says a key is held, so the runtime is offered
+    expect(await w.adapter.capabilities()).toMatchObject({ available: true, authVia: 'key' });
+    // the run that names its organization works
+    expect((await w.start()).usage).toMatchObject({ keySource: 'org' });
+  });
+
   it('a workstation key beats the organization key; auto prefers the login over a key', async () => {
     const own = await world({ key: 'own', mode: { lines: REAL_LINES } });
     expect((await own.start()).usage.keySource).toBe('workstation');

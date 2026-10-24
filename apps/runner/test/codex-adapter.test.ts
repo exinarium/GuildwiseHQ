@@ -32,9 +32,12 @@ import type { HarnessLaunch } from '../src/adapters/harness-session.ts';
 import { buildAdapters } from '../src/adapters/registry.ts';
 import type { ChatStartInput, RuntimeEvent, RuntimeSession, ShiftStartInput } from '../src/adapters/types.ts';
 import { RunnerConfigSchema } from '../src/config.ts';
+import { ProviderStore } from '../src/direct/store.ts';
 import { runnerPaths } from '../src/paths.ts';
+import { RunnerKeys } from '../src/secrets/keys.ts';
 import { redact, unregisterSecret } from '../src/secrets/redact.ts';
 import { cleanupTmp, makeConfig, tmp } from './helpers.ts';
+import { sealOrg } from './seal-helpers.ts';
 
 cleanupTmp();
 
@@ -1238,6 +1241,36 @@ describe('codex in the runner harness sandbox: the adapter', () => {
       keyProvider: 'openai',
       model: 'codex:gpt-6-sol',
     });
+  });
+
+  it('never picks an organization key for a run that names no organization (finding 13)', async () => {
+    const root = tmp('aom-codex-org-');
+    const keys = new RunnerKeys(join(root, 'secrets', 'runner-key.pem'));
+    const store = new ProviderStore({ file: join(root, 'secrets', 'providers.json'), keys });
+    const ORG_A = '11111111-1111-4111-8111-111111111111';
+    expect(
+      store.set({
+        provider: 'openai',
+        keyId: keys.publicKey.keyId,
+        source: 'org',
+        orgId: ORG_A,
+        generation: 1,
+        ciphertext: await sealOrg(keys, ORG_A, 'openai', 'sk-org-codex-key-1234'),
+        models: [],
+      }).stored,
+    ).toBe(true);
+    const adapter = new CodexAdapter(
+      { enabled: true, bin: 'codex', authMode: 'api_key', toolchainPaths: [], sandbox: 'harness' },
+      undefined,
+      { store },
+    );
+    expect(adapter.authSelection(ORG_A)).toMatchObject({
+      via: 'key',
+      source: 'org',
+      apiKey: 'sk-org-codex-key-1234',
+    });
+    expect(adapter.authSelection()).toMatchObject({ via: 'none' });
+    expect(adapter.authSelection('22222222-2222-4222-8222-222222222222')).toMatchObject({ via: 'none' });
   });
 
   it('chats run with a read-only working folder and cannot commit', async () => {
