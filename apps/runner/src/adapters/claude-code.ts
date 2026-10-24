@@ -732,8 +732,10 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     const command = `AOM_SUBAGENT_GUARD=${quote(guardFile)} ${[...selfCommand('aom'), 'subagent-guard'].map(quote).join(' ')} || exit 2`;
     const aom = (verb: string) => [...selfCommand('aom'), verb].map(quote).join(' ');
     // R3c, the time limit of one call: every tool call is checked against the start markers, but only when a call is running (the
-    // shell test costs nothing; the node process starts only then). The end of an `Agent` call removes its marker. Fail open.
-    const deadline = `[ -n "$(ls -A ${quote(liveDir)} 2>/dev/null)" ] || exit 0; AOM_SUBAGENT_GUARD=${quote(guardFile)} ${aom('subagent-deadline')} || exit 0`;
+    // shell test costs nothing; the node process starts only then). The end of an `Agent` call removes its marker. Fail closed.
+    // Fails closed: a folder that is gone, or a deadline hook that cannot even start, refuses the tool call (exit 2). The hook itself
+    // answers with a decision, so its own failures are refusals too (aom subagent-deadline).
+    const deadline = `[ -d ${quote(liveDir)} ] || exit 2; [ -n "$(ls -A ${quote(liveDir)} 2>/dev/null)" ] || exit 0; AOM_SUBAGENT_GUARD=${quote(guardFile)} ${aom('subagent-deadline')} || exit 2`;
     const done = `AOM_SUBAGENT_GUARD=${quote(guardFile)} ${aom('subagent-done')} || exit 0`;
     settings.hooks = {
       PreToolUse: [

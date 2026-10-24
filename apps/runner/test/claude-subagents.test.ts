@@ -184,10 +184,11 @@ describe('the Agent tool in the settings the adapter writes', () => {
     expect(guard.stateDir).toBe(join(r.dir, 'subagent-live'));
     expect(existsSync(guard.stateDir)).toBe(true);
     const pre = r.settings.hooks.PreToolUse.find((h: { matcher: string }) => h.matcher === '*');
-    // the check costs a shell test when nothing is running, and a failing hook lets the call through
-    expect(pre.hooks[0].command).toContain('[ -n "$(ls -A ');
+    // the check costs a shell test when nothing is running, and it fails closed: a vanished folder or a hook that cannot start refuses
+    expect(pre.hooks[0].command).toContain('[ -d ');
+    expect(pre.hooks[0].command).toContain('|| exit 2; [ -n "$(ls -A ');
     expect(pre.hooks[0].command).toContain('|| exit 0; AOM_SUBAGENT_GUARD=');
-    expect(pre.hooks[0].command).toMatch(/subagent-deadline.* \|\| exit 0$/);
+    expect(pre.hooks[0].command).toMatch(/subagent-deadline.* \|\| exit 2$/);
     const post = r.settings.hooks.PostToolUse.find((h: { matcher: string }) => h.matcher === 'Agent|Task');
     expect(post.hooks[0].command).toMatch(/subagent-done.* \|\| exit 0$/);
   });

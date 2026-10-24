@@ -833,7 +833,11 @@ export class CodexAdapter implements RuntimeAdapter {
   // -------------------------------------------------------------------------------------------- session
 
   private assertRole(roleKey: string, isDevops: boolean | undefined, permissions: AgentPermissions): void {
-    const problem = codexRoleProblem({ roleKey, isDevops: isDevops === true, permissions });
+    // Q68: a role without a shell runs only where the runner's harness sandbox makes the box's shell aom-only
+    const problem = codexRoleProblem(
+      { roleKey, isDevops: isDevops === true, permissions },
+      { harness: this.sandboxKind() === 'harness' },
+    );
     if (problem) throw new Error(`codex_role_refused: ${problem}`);
   }
 
@@ -1170,6 +1174,8 @@ export class CodexAdapter implements RuntimeAdapter {
       unsetForShell: ['CODEX_API_KEY', 'CODEX_HOME'],
       // Codex starts `/bin/bash` by its absolute path: the masking shell is mounted over the box's bash
       replaceShell: true,
+      // Q68: no shell tool, or a chat: the box's shell runs `aom ...` and nothing else, whatever Codex's own rules say
+      ...(!o.perms.allowedTools.includes('shell') || o.chat ? { aomOnlyShell: true as const } : {}),
       cmd: { bin: cmd.bin, args: cmd.args, env: cmd.env },
     };
     const harness = await (this.host.launch ?? launchInHarnessSandbox)(launch);

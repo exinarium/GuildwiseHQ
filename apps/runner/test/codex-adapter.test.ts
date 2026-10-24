@@ -1304,10 +1304,9 @@ describe('codex in the runner harness sandbox: the adapter', () => {
     await expect(k.adapter.start(shiftInput(k))).rejects.toThrow(/no API key/);
   });
 
-  it('keeps the same role refusals (shell-less roles, browser, path-scoped writers, DevOps, CEO)', async () => {
+  it('keeps the role refusals (browser, path-scoped writers, DevOps, CEO); a role without a shell now runs, in an aom-only shell (Q68)', async () => {
     const r = harnessRig();
     for (const [roleKey, permissions] of [
-      ['analyst', { allowedTools: ['read'] }],
       ['tester', { browser: true }],
       ['writer', { writableGlobs: ['docs/**'] }],
     ] as const)
@@ -1316,5 +1315,24 @@ describe('codex in the runner harness sandbox: the adapter', () => {
       ).rejects.toThrow(/codex_role_refused/);
     await expect(r.adapter.start(shiftInput(r, { roleKey: 'ceo' }))).rejects.toThrow(/codex_role_refused/);
     expect(r.launches).toHaveLength(0);
+    // no shell tool: it runs, and its box's shell runs only aom
+    await drain(
+      await r.adapter.start(
+        shiftInput(r, { roleKey: 'analyst', permissions: { ...PERMS, allowedTools: ['read'] } }),
+      ),
+    );
+    expect((r.launches[0] as HarnessLaunch).aomOnlyShell).toBe(true);
+    // a role with a shell keeps a full one
+    await drain(await r.adapter.start(shiftInput(r)));
+    expect((r.launches[1] as HarnessLaunch).aomOnlyShell).toBeUndefined();
+  });
+
+  it('Q68: Codex in its own (native) sandbox still refuses a role without a shell', async () => {
+    const r = rig({ sandbox: 'native' });
+    await expect(
+      r.adapter.start(
+        shiftInput(r, { roleKey: 'analyst', permissions: { ...PERMS, allowedTools: ['read'] } }),
+      ),
+    ).rejects.toThrow(/codex_role_refused/);
   });
 });
