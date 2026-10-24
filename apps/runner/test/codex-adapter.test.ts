@@ -33,6 +33,7 @@ import { buildAdapters } from '../src/adapters/registry.ts';
 import type { ChatStartInput, RuntimeEvent, RuntimeSession, ShiftStartInput } from '../src/adapters/types.ts';
 import { RunnerConfigSchema } from '../src/config.ts';
 import { ProviderStore } from '../src/direct/store.ts';
+import { protectedGitPaths } from '../src/git/harden.ts';
 import { runnerPaths } from '../src/paths.ts';
 import { RunnerKeys } from '../src/secrets/keys.ts';
 import { redact, unregisterSecret } from '../src/secrets/redact.ts';
@@ -834,6 +835,26 @@ describe('codex command and profile', () => {
     expect(commit[join(common, 'hooks')]).toBeUndefined();
     const readOnly = codexFilesystem({ ...profileBase, cwd: wt, gitDirs: [common], mayCommit: false });
     expect(Object.entries(readOnly).filter(([k, v]) => k.startsWith(common) && v === 'write')).toEqual([]);
+  });
+
+  it('keeps the same git paths read-only as the harness box: .git file, commondir, gitdir, config, config.worktree, hooks', () => {
+    const repo = tmp('aom-codex-repo-');
+    const common = join(repo, '.git');
+    const admin = join(common, 'worktrees', 'card');
+    mkdirSync(join(admin, 'hooks'), { recursive: true });
+    for (const f of ['commondir', 'gitdir', 'config', 'config.worktree'])
+      writeFileSync(join(admin, f), 'x\n');
+    const wt = tmp('aom-codex-wt-');
+    writeFileSync(join(wt, '.git'), `gitdir: ${admin}\n`);
+    const fs = codexFilesystem({ ...profileBase, cwd: wt, gitDirs: [common], mayCommit: true });
+    // the admin dir stays writable for committing, the entries inside it do not
+    expect(fs[admin]).toBe('write');
+    const expected = protectedGitPaths(wt);
+    expect(expected).toContain(join(wt, '.git'));
+    expect(expected).toHaveLength(6);
+    for (const p of expected) expect(fs[p], p).toBe('read');
+    for (const f of ['commondir', 'gitdir', 'config', 'config.worktree', 'hooks'])
+      expect(fs[join(admin, f)], f).toBe('read');
   });
 
   it('a read-only working folder is read-only, scratch included when it is the working folder', () => {

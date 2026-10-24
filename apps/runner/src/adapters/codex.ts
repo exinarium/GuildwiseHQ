@@ -17,6 +17,7 @@ import { execa } from 'execa';
 import { materializeSkills } from '../capabilities/materialize.ts';
 import type { CodexRuntimeConfig } from '../config.ts';
 import type { ProviderStore } from '../direct/store.ts';
+import { protectedGitPaths } from '../git/harden.ts';
 import type { RunnerPaths } from '../paths.ts';
 import { proxyEnv } from '../sandbox/harness-sandbox.ts';
 import { DOTNET_SHM_DIR, userNugetPackages } from '../sandbox/sandbox.ts';
@@ -245,6 +246,14 @@ export function codexFilesystem(i: CodexProfileInput): Record<string, unknown> {
       for (const p of [admin, join(common, 'objects'), join(common, 'refs'), join(common, 'logs')])
         set(p, 'write');
     }
+  }
+  // The same git paths the harness box and the claude policy keep read-only (git, run later outside the sandbox, reads them and
+  // some of what they hold starts programs): the worktree's `.git` file and the admin dir's commondir, gitdir, config,
+  // config.worktree and hooks. More specific than the writable admin dir / working folder above, so they win there; never
+  // downgrades a deny.
+  for (const p of protectedGitPaths(i.cwd)) {
+    const abs = resolve(p);
+    if (fs[abs] !== 'deny') fs[abs] = 'read';
   }
   return fs;
 }
