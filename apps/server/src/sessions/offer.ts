@@ -24,6 +24,7 @@ export interface RuntimeReport {
   available?: boolean;
   providers?: ReportedProvider[];
   keys?: ReportedKey[];
+  privateEndpoints?: string[];
   backends?: ReportedBackend[];
   models?: ReportedModel[];
   authVia?: 'login' | 'key';

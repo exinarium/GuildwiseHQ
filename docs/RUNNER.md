@@ -2748,3 +2748,7 @@ rm -rf ~/.aom-runner/agents/*/claude/cache
 - **`aom board score --option "<o>" --score 1-5 [--why "<w>"]`** (rpc `board.score`): option scoring for a speaker; the server decides who may call it (speakers of an option-scoring boardroom).
 - **Project-repository capabilities** are reported with their `path` (`.claude/skills/<name>`, `.agents/skills/<name>`, `.claude/agents/<name>.md`) for the owner's review list.
 - **Blocked list.** `packs.sync` may carry `blocked: [{projectId, kind, key}]`; `CapabilityRegistry.setBlocked` leaves those project-repository capabilities out of every effective view (they are still indexed and reported, so the list shows them). An older server sends none.
+
+### Private endpoints (R2, 0.1.52)
+
+Off by default. The workstation's owner lists exact `host:port` entries (Workstations, your workstation, Model providers, **Private endpoints**); they are kept in `secrets/private-endpoints.json` and reported with the direct-model runtime. The Gemini CLI and opencode egress proxy then lets the sandbox's requests and CONNECTs, and a configured model route, reach those addresses and no others on private networks (loopback for a configured route works as before). Link-local, cloud-metadata and multicast addresses are never reachable, even if listed or if a listed name resolves to one. The direct runtime accepts an OpenAI-compatible endpoint on a private IP address only when it is listed; removing the entry stops the provider from being used. Announces `private-endpoints:1`.

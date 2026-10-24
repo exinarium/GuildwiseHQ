@@ -33,6 +33,8 @@ export interface RuntimeCapabilities {
   providers?: ReportedProvider[];
   /** Direct-model: every stored provider key or credential and whose it is. Names only. */
   keys?: ReportedKey[];
+  /** Direct-model: the private-endpoint allow-list of this workstation (exact host:port entries). */
+  privateEndpoints?: string[];
   /** Claude Code: the backends (Bedrock, Vertex, gateway) with a credential on this workstation, with their models. */
   backends?: ReportedBackend[];
   /** Gemini CLI, opencode: the models this workstation offers. */

@@ -24,11 +24,12 @@ import {
   type McpAuthState,
   normalizeRemoteUrl,
   PACKS_CAPABILITY,
+  PRIVATE_ENDPOINTS_CAPABILITY,
   PROVIDER_KEYS_CAPABILITY,
   READONLY_DESIGN_CAPABILITY,
   type RepoReport,
-  RUNNER_PIN_CAPABILITY,
   RUN_USAGE_FEATURE,
+  RUNNER_PIN_CAPABILITY,
   RUNNER_UPDATE_CHECK_CAPABILITY,
   type RunnerCommandName,
   type RunnerUpdateCheckResult,
@@ -528,8 +529,8 @@ export class Runner {
       outbox: this.outbox,
       log: this.log,
       transport: { send: (type, payload) => this.client.send(type as never, payload) },
-      onRunnerRestart: (shiftId, reason) => this.restartAfterReply.request(shiftId, reason),
       liveUsage: () => this.serverFeatures.has(RUN_USAGE_FEATURE),
+      onRunnerRestart: (shiftId, reason) => this.restartAfterReply.request(shiftId, reason),
       onShiftEnded: (shiftId, frameId) => this.restartAfterReply.turnFinished(shiftId, frameId),
       findRepo: (norm) => this.findRepo(norm),
       findLocal: (k) => this.findLocal(k),
@@ -592,8 +593,8 @@ export class Runner {
       log: this.log,
       send: (type, payload) => this.client.send(type, payload),
       chatActivity: () => this.serverFeatures.has(CHAT_ACTIVITY_FEATURE),
-      rpc: (chatId, method, params) => this.rpc(chatId, method, params),
       liveUsage: () => this.serverFeatures.has(RUN_USAGE_FEATURE),
+      rpc: (chatId, method, params) => this.rpc(chatId, method, params),
       graph: () => this.graph,
       external: this.external,
       mcpSignInNote: (granted) => this.mcpSignInNote(granted),
@@ -1031,6 +1032,7 @@ export class Runner {
         ...(c.accounts ? { accounts: c.accounts } : {}),
         ...(c.providers ? { providers: c.providers } : {}),
         ...(c.keys ? { keys: c.keys } : {}),
+        ...(c.privateEndpoints ? { privateEndpoints: c.privateEndpoints } : {}),
         ...(c.backends ? { backends: c.backends } : {}),
         ...(c.models ? { models: c.models } : {}),
         ...(c.authVia ? { authVia: c.authVia } : {}),
@@ -1167,6 +1169,8 @@ export class Runner {
         DIRECT_MODEL_CAPABILITY,
         // An organization key beside the workstation's own, Claude Code backends (Bedrock, Vertex, gateways) and re-sealing the organization key.
         PROVIDER_KEYS_CAPABILITY,
+        // The workstation owner's private-endpoint allow-list (`provider.endpoints.set`).
+        PRIVATE_ENDPOINTS_CAPABILITY,
         // Capability packs: git import pinned to a commit, hash-checked before use (`packs.sync`, `pack.check`, `packs.report`).
         PACKS_CAPABILITY,
         // The local opt-in (`aom-runner ceo full-power on`), read fresh: the server shows "Full power is off" without it.
@@ -1808,6 +1812,13 @@ export class Runner {
         this.providers.clearPayload(CommandPayloadSchemas['provider.key.clear'].parse(payload));
         void this.reportRuntimes();
         done(true, { cleared: true });
+      } else if (command === 'provider.endpoints.set') {
+        // Exact host:port entries of private endpoints this workstation may reach (not secret); reported back with the runtimes.
+        const r = this.providers.setEndpoints(
+          CommandPayloadSchemas['provider.endpoints.set'].parse(payload).endpoints,
+        );
+        void this.reportRuntimes();
+        done(true, r);
       } else if (command === 'provider.key.reseal') {
         // An Owner or Admin approved sharing the organization key with another workstation: seal it to that runner's key. The
         // answer carries the ciphertext for the server to relay; the plain key never leaves this function.

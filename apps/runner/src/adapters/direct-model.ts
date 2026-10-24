@@ -183,6 +183,7 @@ export class DirectModelAdapter implements RuntimeAdapter {
       capabilities: ['skills', 'resume'],
       providers,
       keys: this.deps.store.reportKeys(),
+      privateEndpoints: this.deps.store.endpoints(),
     };
   }
 

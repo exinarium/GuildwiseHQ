@@ -1,8 +1,18 @@
-import { IdParamsSchema, ProviderKeyIdSchema, SetProviderKeyRequestSchema } from '@aom/shared';
+import {
+  IdParamsSchema,
+  PrivateEndpointsSetSchema,
+  ProviderKeyIdSchema,
+  SetProviderKeyRequestSchema,
+} from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { requireUser } from '../auth/guards.ts';
-import { clearProviderKey, setProviderKey, workstationProviders } from '../commands/provider-keys.ts';
+import {
+  clearProviderKey,
+  setPrivateEndpoints,
+  setProviderKey,
+  workstationProviders,
+} from '../commands/provider-keys.ts';
 import type { Ctx } from '../context.ts';
 import { typed } from './util.ts';
 
@@ -26,6 +36,18 @@ export function providerRoutes(ctx: Ctx) {
         await setProviderKey(ctx, s.user, req.params.id, req.params.provider, req.body);
         reply.code(202);
         return { queued: true };
+      },
+    );
+
+    // The private-endpoint allow-list (R2): the workstation's owner only.
+    app.put(
+      '/api/workstations/:id/private-endpoints',
+      { schema: { params: IdParamsSchema, body: PrivateEndpointsSetSchema } },
+      async (req, reply) => {
+        const s = await requireUser(ctx, req);
+        const endpoints = await setPrivateEndpoints(ctx, s.user, req.params.id, req.body.endpoints);
+        reply.code(202);
+        return { queued: true, endpoints };
       },
     );
 

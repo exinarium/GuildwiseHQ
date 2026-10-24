@@ -5,12 +5,17 @@ import {
   DIRECT_RUNTIME,
   type DirectProviderDef,
   type KeySource,
+  parsePrivateEndpoint,
   type ReportedBackend,
   type ReportedProvider,
   type WorkstationDto,
 } from '@aom/shared';
 import { useState } from 'react';
-import { useRemoveProviderKey, useSetProviderKey } from '../../api/queries/providers.ts';
+import {
+  useRemoveProviderKey,
+  useSetPrivateEndpoints,
+  useSetProviderKey,
+} from '../../api/queries/providers.ts';
 import {
   type CredentialDraft,
   CredentialFields,
@@ -129,7 +134,96 @@ export function ModelProviders({ w, canEdit }: { w: WorkstationDto; canEdit: boo
           </ul>
         </>
       )}
+      {supported && <PrivateEndpoints w={w} canEdit={canEdit} />}
       {supported && <BackendsSection w={w} canEdit={canEdit} />}
+    </div>
+  );
+}
+
+/** The private-endpoint allow-list the runner last reported; undefined from a runner that does not know it. */
+export const privateEndpointsOf = (runtimes: WorkstationDto['runtimes']): string[] | undefined =>
+  runtimes.find((r) => r.id === DIRECT_RUNTIME)?.privateEndpoints;
+
+/**
+ * Private endpoints (R2): specific host:port entries on a private network (a LAN Ollama or LM Studio) that this workstation's
+ * agents' sandboxes and its direct models may reach. Off by default; exact entries only; the workstation's owner edits it.
+ */
+function PrivateEndpoints({ w, canEdit }: { w: WorkstationDto; canEdit: boolean }) {
+  const list = privateEndpointsOf(w.runtimes);
+  const set = useSetPrivateEndpoints(w.id);
+  const toast = useToast();
+  const [text, setText] = useState('');
+  const parsed = text.trim() ? parsePrivateEndpoint(text) : undefined;
+  if (list === undefined) return null;
+  const save = (next: string[], done?: () => void) =>
+    set.mutate(next, {
+      onSuccess: () => {
+        toast.success('Saved. The workstation applies it in a moment.');
+        done?.();
+      },
+    });
+  return (
+    <div className="mt-3" data-testid="private-endpoints">
+      <p className="mb-1 text-xs font-medium text-subtle">Private endpoints (off by default)</p>
+      <p className="text-sm text-muted">
+        Agents on this workstation and its direct models can only reach the public internet and this computer.
+        To let them reach a model server on your network (a LAN Ollama or LM Studio), list its exact address
+        and port, for example <code>192.168.1.12:11434</code>. No wildcards or ranges; cloud metadata and
+        link-local addresses can never be listed.
+      </p>
+      {list.length === 0 ? (
+        <p className="mt-1 text-sm text-muted" data-testid="private-endpoints-empty">
+          None listed.
+        </p>
+      ) : (
+        <ul className="mt-1 flex flex-col gap-1" aria-label="Private endpoints">
+          {list.map((e) => (
+            <li key={e} className="flex items-center gap-2 text-sm">
+              <code>{e}</code>
+              {canEdit && (
+                <Button
+                  size="sm"
+                  variant="danger-ghost"
+                  aria-label={`Remove ${e}`}
+                  loading={set.isPending}
+                  onClick={() =>
+                    save(
+                      list.filter((x) => x !== e),
+                      undefined,
+                    )
+                  }
+                >
+                  Remove
+                </Button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      {canEdit && (
+        <div className="mt-2 flex flex-wrap items-end gap-2">
+          <TextInput
+            label="Add host:port"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder="192.168.1.12:11434"
+          />
+          <Button
+            variant="primary"
+            disabled={!parsed?.ok}
+            loading={set.isPending}
+            onClick={() => parsed?.ok && save([...new Set([...list, parsed.entry])], () => setText(''))}
+          >
+            Add
+          </Button>
+        </div>
+      )}
+      {parsed && !parsed.ok && (
+        <p className="mt-1 text-xs text-danger" role="alert" data-testid="private-endpoint-problem">
+          {parsed.error}
+        </p>
+      )}
+      <ErrorBox error={set.error} />
     </div>
   );
 }

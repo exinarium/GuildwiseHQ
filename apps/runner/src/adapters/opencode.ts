@@ -474,6 +474,7 @@ export class OpencodeAdapter implements RuntimeAdapter {
       cliHosts: routes.map((r) => new URL(r.upstream).hostname),
       extraHosts: this.cfg.extraAllowedDomains,
       routes,
+      ...(this.store?.endpoints().length ? { privateEndpoints: this.store.endpoints() } : {}),
       ...(this.host.proxyTest ? { proxyTest: this.host.proxyTest } : {}),
       sandbox: {
         cwd: input.cwd,

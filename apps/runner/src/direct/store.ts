@@ -5,10 +5,12 @@ import {
   type BackendId,
   backendDef,
   backendDetail,
+  baseUrlEndpointProblem,
   DIRECT_PROVIDER_IDS,
   type DirectProviderId,
   directProvider,
   type KeySource,
+  normalizePrivateEndpoints,
   type ProviderKeyClearPayload,
   type ProviderKeyId,
   type ProviderKeyResealResult,
@@ -93,6 +95,7 @@ export function validateBaseUrl(
 export class ProviderStore {
   private changed: Array<() => void> = [];
   private readonly orgFile: string;
+  private readonly endpointsFile: string;
 
   constructor(
     private readonly deps: {
@@ -106,10 +109,27 @@ export class ProviderStore {
     },
   ) {
     this.orgFile = deps.orgFile ?? join(dirname(deps.file), 'providers-org.json');
+    this.endpointsFile = join(dirname(deps.file), 'private-endpoints.json');
     // After a restart, redaction must know the keys before the first log line.
     for (const p of Object.values(this.own())) if (p.ciphertext) this.register(p.ciphertext);
     for (const slot of Object.values(this.orgs()))
       for (const p of Object.values(slot)) if (p.ciphertext) this.register(p.ciphertext);
+  }
+
+  /** The private-endpoint allow-list (exact `host:port`, set by the workstation's owner; empty by default). */
+  endpoints(): string[] {
+    const j = this.readJson(this.endpointsFile);
+    const list = (j as { endpoints?: unknown } | null)?.endpoints;
+    return Array.isArray(list) ? list.filter((x): x is string => typeof x === 'string') : [];
+  }
+
+  /** Replaces the allow-list. Every entry is checked again here: the server's answer is not trusted. */
+  setEndpoints(list: readonly string[]): { stored: boolean; error?: string } {
+    const n = normalizePrivateEndpoints(list);
+    if (!n.ok) return { stored: false, error: n.error };
+    this.write(this.endpointsFile, { endpoints: n.entries });
+    for (const f of this.changed) f();
+    return { stored: true };
   }
 
   onChange(fn: () => void): void {
@@ -233,6 +253,9 @@ export class ProviderStore {
       if (!p.baseUrl?.trim()) return { stored: false, error: 'enter the endpoint (base URL)' };
       const v = validateBaseUrl(p.baseUrl);
       if (!v.ok) return { stored: false, error: v.error };
+      // a private-network address is reachable only when the workstation's owner listed that exact host:port
+      const blocked = baseUrlEndpointProblem(v.url, this.endpoints());
+      if (blocked) return { stored: false, error: blocked };
       baseUrl = v.url;
       warning = v.warning;
     }
@@ -322,6 +345,8 @@ export class ProviderStore {
     const slot = this.slotOf(provider, orgId);
     if (!slot) return undefined;
     const s = slot.stored;
+    // An endpoint on a private network stops working when its entry is removed from the allow-list.
+    if (s.baseUrl && baseUrlEndpointProblem(s.baseUrl, this.endpoints())) return undefined;
     let apiKey: string | undefined;
     if (s.ciphertext) {
       try {

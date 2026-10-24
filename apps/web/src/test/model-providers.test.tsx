@@ -53,6 +53,7 @@ beforeEach(() => {
         new Response(JSON.stringify(b), { status, headers: { 'content-type': 'application/json' } });
       if (url.endsWith('/sudo-key')) return json({ keyId: 'k1', publicKey: 'AAAA' });
       if (url.includes('/providers/')) return json({ queued: true }, 202);
+      if (url.includes('/private-endpoints')) return json({ queued: true }, 202);
       if (url.startsWith('/api/workstations')) return json({ workstations });
       if (url.startsWith('/api/capabilities'))
         return json({
@@ -332,5 +333,74 @@ describe('card work stays on Claude Code', () => {
       expect(f).toMatch(/Agents\.tsx$/);
       expect(readFileSync(f, 'utf8')).toMatch(/modelChoicesFor\(\s*\[effectiveRuntime\],\s*\[\],/);
     }
+  });
+});
+
+describe('private endpoints of a workstation', () => {
+  const withEndpoints = (list: string[] | undefined) =>
+    ws(
+      {
+        runtimes: [
+          { id: 'claude-code', version: '1', available: true, capabilities: [] },
+          {
+            id: 'direct-model',
+            version: '1',
+            available: true,
+            capabilities: [],
+            providers: [],
+            ...(list ? { privateEndpoints: list } : {}),
+          },
+        ],
+      },
+      undefined,
+    );
+
+  it('is off by default, validates what is typed, and saves the exact entry', async () => {
+    wrap(<ModelProviders w={withEndpoints([])} canEdit />);
+    const box = within(screen.getByTestId('private-endpoints'));
+    expect(box.getByTestId('private-endpoints-empty')).toBeInTheDocument();
+    const input = box.getByLabelText('Add host:port');
+    const add = box.getByRole('button', { name: 'Add' });
+    expect(add).toBeDisabled();
+    for (const [bad, why] of [
+      ['192.168.*.*:80', /wildcards/],
+      ['8.8.8.8:53', /private/],
+      ['169.254.169.254:80', /never/],
+      ['10.0.0.5', /host:port/],
+    ] as const) {
+      await userEvent.clear(input);
+      await userEvent.type(input, bad);
+      expect(box.getByTestId('private-endpoint-problem')).toHaveTextContent(why);
+      expect(add).toBeDisabled();
+    }
+    await userEvent.clear(input);
+    await userEvent.type(input, ' 192.168.1.12:11434 ');
+    expect(add).toBeEnabled();
+    await userEvent.click(add);
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === 'PUT' && c.url.endsWith('/private-endpoints'))?.body).toEqual({
+        endpoints: ['192.168.1.12:11434'],
+      }),
+    );
+  });
+
+  it('lists the entries and removes one', async () => {
+    wrap(<ModelProviders w={withEndpoints(['192.168.1.12:11434', 'studio.lan:1234'])} canEdit />);
+    await userEvent.click(screen.getByRole('button', { name: 'Remove 192.168.1.12:11434' }));
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === 'PUT' && c.url.endsWith('/private-endpoints'))?.body).toEqual({
+        endpoints: ['studio.lan:1234'],
+      }),
+    );
+  });
+
+  it('is read-only for someone who does not own the workstation, and absent for an older runner', () => {
+    const { unmount } = wrap(<ModelProviders w={withEndpoints(['10.0.0.5:80'])} canEdit={false} />);
+    expect(screen.getByText('10.0.0.5:80')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Add host:port')).toBeNull();
+    expect(screen.queryByRole('button', { name: /Remove/ })).toBeNull();
+    unmount();
+    wrap(<ModelProviders w={withEndpoints(undefined)} canEdit />);
+    expect(screen.queryByTestId('private-endpoints')).toBeNull();
   });
 });

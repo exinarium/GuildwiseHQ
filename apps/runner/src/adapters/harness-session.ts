@@ -37,6 +37,8 @@ export interface HarnessLaunch {
   /** Variables only the CLI may have (removed for the commands it starts). */
   unsetForShell?: string[];
   cmd: { bin: string; args: string[]; env: Record<string, string> };
+  /** The workstation owner's private-endpoint allow-list (exact host:port entries); empty by default. */
+  privateEndpoints?: string[];
   /** Log a refused host (no path, no credential). */
   onDeny?: (host: string) => void;
   /** Test hook: reach loopback and private addresses, and resolve names as given (a fake API on localhost). */
@@ -60,6 +62,7 @@ export async function launchInHarnessSandbox(l: HarnessLaunch): Promise<Launched
     allowedHosts: [...l.cliHosts, ...SHELL_DOMAINS, ...(l.extraHosts ?? [])],
     ...(l.routes ? { routes: l.routes } : {}),
     ...(l.onDeny ? { onDeny: l.onDeny } : {}),
+    ...(l.privateEndpoints?.length ? { privateEndpoints: l.privateEndpoints } : {}),
     ...(l.proxyTest ?? {}),
   });
   let shimDir: string | undefined;

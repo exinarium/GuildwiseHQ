@@ -663,6 +663,7 @@ export class GeminiAdapter implements RuntimeAdapter {
         ? { proxyTest: { allowPrivate: true as const, resolve: async () => '127.0.0.1' } }
         : {}),
       extraHosts: this.cfg.extraAllowedDomains,
+      ...(this.store?.endpoints().length ? { privateEndpoints: this.store.endpoints() } : {}),
       ...(sel.via === 'key'
         ? {
             routes: [

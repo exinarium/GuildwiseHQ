@@ -84,6 +84,7 @@ import {
   ProviderKeySetPayloadSchema,
   ReportedProviderSchema,
 } from '../models/direct.ts';
+import { PrivateEndpointsSetSchema } from '../models/private-endpoints.ts';
 import { BaTaskShiftSchema, BranchCheckMergedPayloadSchema } from '../phases/index.ts';
 import { CommitAsSchema, RepoCreatePayloadSchema, RepoIdentityFactSchema } from '../repo/index.ts';
 import { AgentPermissionsSchema, Seniority } from '../roles/schema.ts';
@@ -181,6 +182,11 @@ export const RuntimeInfoSchema = z.object({
    * Facts for the server's key resolution and spend caps; never a key. Absent from older runners.
    */
   keys: z.array(ReportedKeySchema).max(20).optional(),
+  /**
+   * Direct-model runtime: the workstation's private-endpoint allow-list (exact `host:port` entries, set by its owner). Not secret.
+   * Absent from older runners.
+   */
+  privateEndpoints: z.array(z.string().max(120)).max(20).optional(),
   /** Claude Code: the backends (Bedrock, Vertex, a gateway) that have a credential on this workstation, with their models. */
   backends: z.array(ReportedBackendSchema).max(5).optional(),
   /** Gemini CLI and opencode: the models this workstation offers (the Gemini built-ins plus the owner's extras; opencode's own list). */
@@ -820,6 +826,7 @@ export const RunnerCommandNameSchema = z.enum([
   'provider.key.set',
   'provider.key.clear',
   'provider.key.reseal',
+  'provider.endpoints.set',
   'packs.sync',
   'pack.check',
 ]);
@@ -833,6 +840,7 @@ export const CommandPayloadSchemas = {
   'provider.key.set': ProviderKeySetPayloadSchema,
   'provider.key.clear': ProviderKeyClearPayloadSchema,
   'provider.key.reseal': ProviderKeyResealPayloadSchema,
+  'provider.endpoints.set': PrivateEndpointsSetSchema,
   'claude.account.ensure': ClaudeAccountEnsurePayloadSchema,
   'vault.configure': VaultConfigureCommandSchema,
   'vault.write': VaultWriteCommandSchema,
@@ -1388,14 +1396,6 @@ export const ChatActivitySchema = msg('chat.activity', {
 });
 /** Announced in `welcome.features` by servers that accept `chat.activity` (an older server would log and drop it). */
 export const CHAT_ACTIVITY_FEATURE = 'chat-activity:1';
-export const ChatDeltaSchema = msg('chat.delta', {
-  chatId: z.string(),
-  threadId: z.uuid(),
-  text: z.string(),
-});
-export const ChatDoneSchema = msg('chat.done', {
-  chatId: z.string(),
-  threadId: z.uuid(),
 /** Announced in `welcome.features` by servers that accept `run.usage` (live usage of a running shift or chat turn, for the provider caps). */
 export const RUN_USAGE_FEATURE = 'run-usage:1';
 /**
@@ -1408,6 +1408,14 @@ export const RunUsageSchema = msg('run.usage', {
   id: z.string(),
   usage: Usage,
 });
+export const ChatDeltaSchema = msg('chat.delta', {
+  chatId: z.string(),
+  threadId: z.uuid(),
+  text: z.string(),
+});
+export const ChatDoneSchema = msg('chat.done', {
+  chatId: z.string(),
+  threadId: z.uuid(),
   messageText: z.string(),
   usage: Usage,
   /** Runtime session to `--resume` on the next message of this conversation. */
@@ -1635,6 +1643,7 @@ export const RunnerToServerSchema = z.discriminatedUnion('type', [
   RunReplayFailedMsgSchemaWire,
   ChatDeltaSchema,
   ChatActivitySchema,
+  RunUsageSchema,
   ChatDoneSchema,
   ChatErrorSchema,
   CommandResultSchema,
@@ -1643,7 +1652,6 @@ export const RunnerToServerSchema = z.discriminatedUnion('type', [
   DeployProgressSchema,
   TokenRotateSchema,
   AckSchema,
-  RunUsageSchema,
 ]);
 export type RunnerToServer = z.infer<typeof RunnerToServerSchema>;
 

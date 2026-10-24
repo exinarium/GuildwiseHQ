@@ -1,6 +1,9 @@
 import {
   BACKEND_IDS,
   DIRECT_MODEL_CAPABILITY,
+  DIRECT_RUNTIME,
+  normalizePrivateEndpoints,
+  PRIVATE_ENDPOINTS_CAPABILITY,
   PROVIDER_KEYS_CAPABILITY,
   type ProviderKeyId,
   ProviderKeyResultSchema,
@@ -98,6 +101,42 @@ export async function setProviderKey(
   deliver(ctx, [workstationId]);
 }
 
+/**
+ * The workstation's private-endpoint allow-list (R2, Q47): exact `host:port` entries of private-network endpoints (a LAN Ollama)
+ * its agents' sandboxes and its direct-model runtime may reach. Not a secret, so it travels as a plain durable command; the
+ * runner stores it and reports it back with its runtimes. Only the workstation's owner edits it; every entry is checked here
+ * and again on the runner.
+ */
+export async function setPrivateEndpoints(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  workstationId: string,
+  endpoints: string[],
+): Promise<string[]> {
+  const n = normalizePrivateEndpoints(endpoints);
+  if (!n.ok) throw unprocessable('bad_endpoint', n.error);
+  await withAppendTx(ctx.pool, async (tx) => {
+    await ownWorkstation(ctx, tx, user, workstationId);
+    const caps = await one(
+      tx,
+      'SELECT $2 = ANY(capabilities) AS ok FROM workstation_capabilities WHERE workstation_id=$1',
+      [workstationId, PRIVATE_ENDPOINTS_CAPABILITY],
+    );
+    if (!caps?.ok)
+      throw unprocessable('runner_too_old', 'update the runner on this workstation to use private endpoints');
+    // the newest list replaces one that has not been delivered yet
+    await exec(
+      tx,
+      `UPDATE runner_commands SET status='failed', last_error='superseded'
+        WHERE workstation_id=$1 AND type='provider.endpoints.set' AND status IN ('pending','sent')`,
+      [workstationId],
+    );
+    await enqueueRunnerCommand(tx, workstationId, 'provider.endpoints.set', { endpoints: n.entries });
+  });
+  deliver(ctx, [workstationId]);
+  return n.entries;
+}
+
 export async function clearProviderKey(
   ctx: Ctx,
   user: AuthSession['user'],
@@ -163,12 +202,19 @@ export async function workstationProviders(
   );
   const reports = await runtimeReports(ctx.pool, workstationId);
   const providers: ReportedProvider[] = providersOf(reports);
+  const ep = await one(
+    ctx.pool,
+    'SELECT $2 = ANY(capabilities) AS ok FROM workstation_capabilities WHERE workstation_id=$1',
+    [workstationId, PRIVATE_ENDPOINTS_CAPABILITY],
+  );
   const last = lastResults.get(workstationId);
   return {
     workstationId,
     supported: !!caps?.ok,
     online: ctx.services.runners.isOnline(workstationId),
     providers,
+    privateEndpoints: reports.find((r) => r.id === DIRECT_RUNTIME)?.privateEndpoints ?? [],
+    privateEndpointsSupported: !!ep?.ok,
     lastResult: last
       ? {
           provider: last.provider,

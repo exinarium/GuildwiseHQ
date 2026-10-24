@@ -54,6 +54,16 @@ export function useSetProviderKey(workstationId: string) {
   });
 }
 
+/** Replaces the workstation's private-endpoint allow-list (exact host:port entries; only its owner may). */
+export function useSetPrivateEndpoints(workstationId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (endpoints: string[]) =>
+      put(`/workstations/${workstationId}/private-endpoints`, { endpoints }),
+    onSuccess: () => refreshSoon(qc, workstationId),
+  });
+}
+
 export function useRemoveProviderKey(workstationId: string) {
   const qc = useQueryClient();
   return useMutation({

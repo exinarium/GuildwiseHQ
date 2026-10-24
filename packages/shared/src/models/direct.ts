@@ -273,6 +273,10 @@ export const WorkstationProvidersResponseSchema = z.object({
   /** The workstation is connected right now (a key is stored only while it is). */
   online: z.boolean(),
   providers: z.array(ReportedProviderSchema),
+  /** The workstation's private-endpoint allow-list as its runner last reported it (exact host:port entries; empty by default). */
+  privateEndpoints: z.array(z.string()).default([]),
+  /** The runner can hold the allow-list (`private-endpoints:1`); an older one is told to update. */
+  privateEndpointsSupported: z.boolean().default(false),
   /** The last `provider.key.set` or `.clear` answer of the runner in this server process (transient). */
   lastResult: z
     .object({

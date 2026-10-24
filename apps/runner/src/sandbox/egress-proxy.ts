@@ -8,6 +8,7 @@ import {
 } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import { isIP, connect as netConnect, type Socket } from 'node:net';
+import { endpointListed } from '@aom/shared';
 
 /**
  * The network of a harness sandbox (docs/RUNNER.md, "Sandbox parity of the other runtimes"). The sandboxed CLI has no network
@@ -42,6 +43,12 @@ export interface EgressProxyOptions {
   onDeny?: (host: string) => void;
   /** Test hook: also reach loopback and private addresses. */
   allowPrivate?: boolean;
+  /**
+   * The workstation owner's private-endpoint allow-list: exact `host:port` entries (a LAN Ollama). A route to a private address
+   * works only for loopback (this machine) or an entry; the sandbox's own CONNECT and plain requests may reach an entry too.
+   * Link-local and metadata addresses are never reachable, listed or not. Empty by default.
+   */
+  privateEndpoints?: string[];
   /** Test hook: resolve names. */
   resolve?: (host: string) => Promise<string>;
 }
@@ -85,10 +92,34 @@ export function isPrivateAddress(ip: string): boolean {
 
 const ALLOWED_PORTS = new Set([80, 443]);
 
-async function publicAddress(host: string, o: EgressProxyOptions): Promise<string | undefined> {
+/** 169.254/16 (the cloud metadata address included), fe80::/10, multicast and the unspecified address: no entry can open these. */
+export function isNeverReachable(ip: string): boolean {
+  const v = ip.toLowerCase();
+  if (v.startsWith('::ffff:')) return isNeverReachable(v.slice(7));
+  if (isIP(v) === 4) {
+    const [a = 0, b = 0] = v.split('.').map(Number);
+    return (a === 169 && b === 254) || a === 0 || a >= 224;
+  }
+  return v === '::' || /^fe[89ab]/.test(v) || v.startsWith('ff');
+}
+
+/**
+ * The address to connect to, or undefined when it is not allowed: a public address; a private one only for a listed `host:port`
+ * (or loopback on a route the owner configured, or the test hook); never a link-local or metadata one.
+ */
+async function publicAddress(
+  host: string,
+  o: EgressProxyOptions,
+  port?: number,
+  viaRoute = false,
+): Promise<string | undefined> {
   const ip = isIP(host) ? host : await (o.resolve ?? (async (h) => (await lookup(h)).address))(host);
-  if (!o.allowPrivate && isPrivateAddress(ip)) return undefined;
-  return ip;
+  if (o.allowPrivate) return ip;
+  if (isNeverReachable(ip)) return undefined;
+  if (!isPrivateAddress(ip)) return ip;
+  if (port !== undefined && endpointListed(host, port, o.privateEndpoints ?? [])) return ip;
+  if (viaRoute && (ip === '::1' || ip.startsWith('127.'))) return ip;
+  return undefined;
 }
 
 function parseHostPort(target: string): { host: string; port: number } | undefined {
@@ -122,6 +153,7 @@ export async function startEgressProxy(o: EgressProxyOptions): Promise<EgressPro
     const raw = req.url ?? '/';
     let target: URL;
     let privateOk = false;
+    let routeHit = false;
     const headers: Record<string, string | string[]> = {};
     for (const [k, v] of Object.entries(req.headers)) if (v !== undefined) headers[k] = v;
     for (const k of ['host', 'connection', 'proxy-connection', 'keep-alive', 'transfer-encoding', 'upgrade'])
@@ -137,6 +169,7 @@ export async function startEgressProxy(o: EgressProxyOptions): Promise<EgressPro
         return fail(403, 'host not allowed');
       }
       privateOk = route.allowPrivateUpstream === true;
+      routeHit = true;
       for (const k of ['authorization', 'x-goog-api-key', 'x-api-key', 'api-key', 'cookie'])
         delete headers[k];
       for (const [k, v] of Object.entries(route.headers)) headers[k.toLowerCase()] = v;
@@ -146,7 +179,8 @@ export async function startEgressProxy(o: EgressProxyOptions): Promise<EgressPro
       } catch {
         return fail(400, 'bad request');
       }
-      if (target.protocol !== 'http:' || !hostAllowed(target.hostname, o.allowedHosts)) {
+      const listed = endpointListed(target.hostname, Number(target.port || 80), o.privateEndpoints ?? []);
+      if (target.protocol !== 'http:' || !(listed || hostAllowed(target.hostname, o.allowedHosts))) {
         deny(target.hostname);
         return fail(403, 'host not allowed');
       }
@@ -154,7 +188,12 @@ export async function startEgressProxy(o: EgressProxyOptions): Promise<EgressPro
     asked.add(target.hostname);
     let ip: string | undefined;
     try {
-      ip = await publicAddress(target.hostname, privateOk ? { ...o, allowPrivate: true } : o);
+      ip = await publicAddress(
+        target.hostname,
+        o,
+        Number(target.port || (target.protocol === 'https:' ? 443 : 80)),
+        routeHit && privateOk,
+      );
     } catch {
       return fail(502, 'name does not resolve');
     }
@@ -191,11 +230,12 @@ export async function startEgressProxy(o: EgressProxyOptions): Promise<EgressPro
     const refuse = (code: string): void => {
       client.end(`HTTP/1.1 ${code}\r\nConnection: close\r\n\r\n`);
     };
-    if (!hp || !ALLOWED_PORTS.has(hp.port) || !hostAllowed(hp.host, o.allowedHosts)) {
+    const listed = !!hp && endpointListed(hp.host, hp.port, o.privateEndpoints ?? []);
+    if (!hp || !(listed || (ALLOWED_PORTS.has(hp.port) && hostAllowed(hp.host, o.allowedHosts)))) {
       deny(hp?.host ?? '?');
       return refuse('403 Forbidden');
     }
-    void publicAddress(hp.host, o).then(
+    void publicAddress(hp.host, o, hp.port).then(
       (ip) => {
         if (!ip) {
           deny(hp.host);
