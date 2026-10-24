@@ -280,6 +280,21 @@ async function startForAgent(
   /** The chat the agent works in, told how the request ended (Q69). */
   chatThreadId: string | null = null,
 ): Promise<Reply> {
+  // Q69 follow-up: the chat person declined this playbook in this chat; the agent does not ask again there (a different
+  // playbook or a new chat is fine). The declined request row is the projection of `PlaybookRunDecided`, so this survives replay.
+  if (chatThreadId) {
+    const declined = await one(
+      ctx.pool,
+      `SELECT 1 FROM playbook_run_requests WHERE agent_id=$1 AND playbook_key=$2 AND chat_thread_id=$3 AND status='declined'`,
+      [agent.id, p.key, chatThreadId],
+    );
+    if (declined)
+      return [
+        false,
+        undefined,
+        `the person you are chatting with declined "${p.key}" in this chat: do not ask for it again here. Continue without it, or ask them in the chat what they would like instead.`,
+      ];
+  }
   const managerId = agent.manager_user_id as string;
   // The session belongs to the person in the chat (Q64) when there is one who is still in the organization, may run the
   // playbook and has a workstation of their own; otherwise to the agent's manager, as before.

@@ -11,7 +11,7 @@ import {
   SESSION_TURNS_CAPABILITY,
   SESSION_VERBS_CAPABILITY,
 } from '@aom/shared';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { bmadFixtureStable } from '../../../packages/shared/test/fixtures/bmad-fixture.ts';
 import { rebuildProjections } from '../src/projections/rebuild.ts';
 import { uniqueEmail } from './helpers/app.ts';
@@ -648,6 +648,50 @@ describe('an agent starts a playbook itself', () => {
       const retry = await call(r, shift, 'playbook.run', { key: 'brainstorm' });
       expect(retry.result.requested).toBe(true);
       expect(await requests()).toHaveLength(2);
+    });
+
+    it('after a decline the agent may not ask for the same playbook again in that chat (a new chat or another playbook is fine), and a rebuild keeps it', async () => {
+      const g = (await w.hire('Gus', 'ba', 'senior')).id as string;
+      for (const key of ['brainstorm', 'prd'])
+        await asOwner('PUT', `/api/agents/${g}/playbook-grants`, { key, granted: true });
+      const chatA = randomUUID();
+      const chatB = randomUUID();
+      const threads = new Map<string, string>();
+      const spy = vi
+        .spyOn(w.t.app.ctx.services.chat, 'threadOfChat')
+        .mockImplementation((id: string) => threads.get(id));
+      try {
+        const shiftA = await chatShift(member.id, g);
+        threads.set(shiftA, chatA);
+        const first = await call(r, shiftA, 'playbook.run', { key: 'brainstorm' });
+        expect(first.result.requested).toBe(true);
+        await declineOpen();
+        const again = await call(r, shiftA, 'playbook.run', { key: 'brainstorm' });
+        expect(again.ok).toBe(false);
+        expect(again.error).toContain('declined');
+        expect(again.error).toContain('do not ask');
+        const mine = () => q(`SELECT count(*)::int AS n FROM playbook_run_requests WHERE agent_id=$1`, [g]);
+        expect((await mine())[0].n).toBe(1);
+        // another playbook in the same chat: asked
+        const other = await call(r, shiftA, 'playbook.run', { key: 'prd' });
+        expect(other.ok, other.error).toBe(true);
+        expect(other.result.requested).toBe(true);
+        // a new chat: asked again
+        const shiftB = await chatShift(member.id, g);
+        threads.set(shiftB, chatB);
+        expect((await call(r, shiftB, 'playbook.run', { key: 'brainstorm' })).result.requested).toBe(true);
+        // the decision is an event: after a rebuild of the projections the declined request is still there to refuse by
+        await rebuildProjections(w.t.app.ctx.pool, w.t.app.ctx.store, w.t.clock.now());
+        expect(
+          await q(
+            `SELECT 1 FROM playbook_run_requests WHERE agent_id=$1 AND playbook_key='brainstorm' AND chat_thread_id=$2 AND status='declined'`,
+            [g, chatA],
+          ),
+        ).toHaveLength(1);
+      } finally {
+        spy.mockRestore();
+        await declineOpen();
+      }
     });
 
     it('starts at once when the agent already works on the person’s own workstation (nothing to ask)', async () => {
