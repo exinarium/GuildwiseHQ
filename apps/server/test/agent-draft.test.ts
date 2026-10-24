@@ -5,7 +5,7 @@ import type { FakeRunner } from './helpers/fake-runner.ts';
 import { FakeRunner as Runner } from './helpers/fake-runner.ts';
 import { addMember as addProjectMember } from './helpers/members.ts';
 import { freshState } from './helpers/shifts.ts';
-import { createWorld, MOCK_RUNTIME, ok, REPO_SSH, until, type World } from './helpers/world.ts';
+import { createWorld, MOCK_RUNTIME, ok, pairWorkstation, REPO_SSH, until, type World } from './helpers/world.ts';
 
 let w: World;
 let r: FakeRunner;
@@ -199,7 +199,7 @@ describe('describe-an-agent quick hire', () => {
     const role = (
       await q(`SELECT * FROM role_definitions WHERE key=$1 ORDER BY version DESC LIMIT 1`, [res.roleKey])
     )[0]!;
-    expect(role.key).toMatch(/^draft-penny-[a-z0-9]{4}$/);
+    expect(role.key).toMatch(/^draft-penny-[a-z0-9]{12}$/);
     expect(JSON.stringify(role.definition)).toContain('release notes for customers');
     expect(role.definition.claimableStages).toEqual([]);
     expect(res.skills).toEqual(['interview-techniques']);
@@ -258,6 +258,66 @@ describe('describe-an-agent quick hire', () => {
         })
       ).status,
     ).toBe(404);
+  });
+});
+
+describe('describe-an-agent hardening', () => {
+  const body = (m: { workstationId: string }, over: Record<string, unknown> = {}) => ({
+    draft: { ...DRAFT, name: 'Mallory' },
+    name: 'Mallory',
+    seniority: 'junior',
+    workstationId: m.workstationId,
+    runtime: 'mock',
+    model: 'mock',
+    allowedProjectIds: [w.projectId],
+    capacity: 1,
+    ...over,
+  });
+
+  it('writes no role when the caller is not on the project (uniform 404, nothing injected into that organization)', async () => {
+    const stranger = await w.t.userSession(`stranger-${Date.now()}@example.test`);
+    const ws = await pairWorkstation(w.t, stranger, 'stranger-box');
+    const before = (await q(`SELECT count(*)::int AS n FROM role_definitions WHERE key LIKE 'draft-%'`))[0]!.n;
+    const events = (await q(`SELECT count(*)::int AS n FROM events WHERE type='RoleVersionRegistered'`))[0]!.n;
+    for (const projectId of [w.projectId, '00000000-0000-4000-8000-000000000001']) {
+      const res = await w.t.req('POST', '/api/agents/hire-from-draft', {
+        cookie: stranger.cookie,
+        body: body(ws, { allowedProjectIds: [projectId] }),
+      });
+      expect(res.status).toBe(404);
+    }
+    expect((await q(`SELECT count(*)::int AS n FROM role_definitions WHERE key LIKE 'draft-%'`))[0]!.n).toBe(before);
+    expect((await q(`SELECT count(*)::int AS n FROM events WHERE type='RoleVersionRegistered'`))[0]!.n).toBe(events);
+  });
+
+  it('leaves no role behind when the hire itself is refused after the role would have been written', async () => {
+    await w.hire('Taken', 'builder', 'junior');
+    const before = (await q(`SELECT count(*)::int AS n FROM role_definitions WHERE key LIKE 'draft-%'`))[0]!.n;
+    const res = await w.t.req('POST', '/api/agents/hire-from-draft', {
+      cookie: w.owner.cookie,
+      body: body({ workstationId: w.workstationId }, { name: 'Taken', draft: { ...DRAFT, name: 'Taken' } }),
+    });
+    expect(res.status).toBe(409);
+    expect((await q(`SELECT count(*)::int AS n FROM role_definitions WHERE key LIKE 'draft-%'`))[0]!.n).toBe(before);
+  });
+
+  it('refuses skills of the hire request that the hirer may not use', async () => {
+    const res = await w.t.req('POST', '/api/agents/hire-from-draft', {
+      cookie: w.owner.cookie,
+      body: body({ workstationId: w.workstationId }, { name: 'Skilly', skills: ['no-such-skill'] }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('caps how many drafting turns a person may start in an hour', async () => {
+    await q(`DELETE FROM threads WHERE kind='persona_chat'`);
+    const start = () =>
+      w.t.req('POST', '/api/agents/draft', {
+        cookie: w.owner.cookie,
+        body: { description: 'An agent that writes our release notes', runtime: 'mock', model: 'mock' },
+      });
+    for (let i = 0; i < 5; i++) expect((await start()).status).toBe(202);
+    expect((await start()).status).toBe(429);
   });
 });
 

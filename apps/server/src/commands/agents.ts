@@ -271,7 +271,15 @@ export async function hireAgent(
   org: { id: string },
   req: HireAgentRequest,
   /** R3a, hire from pack: where the agent came from, and permissions narrower than the role's (never wider). */
-  extra: { provenance?: PackProvenance; permissions?: AgentPermissions } = {},
+  extra: {
+    provenance?: PackProvenance;
+    permissions?: AgentPermissions;
+    /**
+     * Registers the role this agent is hired into, inside the hire transaction and after every authorization check, so a
+     * refused hire leaves no role behind (describe-an-agent: the drafted role).
+     */
+    registerRole?: (tx: Tx, orgId: string) => Promise<void>;
+  } = {},
 ): Promise<string> {
   const agentId = randomUUID();
   await withAppendTx(ctx.pool, async (tx) => {
@@ -320,6 +328,7 @@ export async function hireAgent(
       [orgId, req.workstationId],
     );
     if (!uses) await assertWithinLimit(tx, orgId, 'workstations');
+    if (extra.registerRole) await extra.registerRole(tx, orgId);
     const roleDef = await loadRole(tx, orgId, req.roleKey);
     if (!roleDef) throw badRequest('unknown_role', `role '${req.roleKey}' does not exist`);
     // a role made from someone's private pack is that person's alone

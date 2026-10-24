@@ -163,7 +163,7 @@ describe('agent draft', () => {
     expect(m.tools).toEqual(['read']);
   });
   it('makes a role key that cannot be a built-in', () => {
-    expect(draftRoleKey('Penny the Scribe', 'ab12-ff')).toBe('draft-penny-the-scribe-ab12');
+    expect(draftRoleKey('Penny the Scribe', 'ab12-ff')).toBe('draft-penny-the-scribe-ab12ff');
     expect(draftRoleKey('!!!', 'zz')).toBe('draft-agent-zz');
   });
   it('turns a built-in persona into a draft', () => {

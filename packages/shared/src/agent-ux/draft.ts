@@ -131,12 +131,12 @@ export function clampDraft(
   };
 }
 
-/** A role key for a drafted agent: `draft-<name>-<4 chars>`; the suffix keeps two drafts of one name apart. */
+/** A role key for a drafted agent: `draft-<name>-<12 chars>`; the suffix keeps two drafts of one name apart. */
 export function draftRoleKey(name: string, nonce: string): string {
   const base = slugify(name, 30) || 'agent';
   return `draft-${base}-${nonce
     .replace(/[^a-z0-9]/gi, '')
-    .slice(0, 4)
+    .slice(0, 12)
     .toLowerCase()}`;
 }
 
