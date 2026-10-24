@@ -193,3 +193,53 @@ Details in `docs/ARCHITECTURE.md` section 38.4 (packs, trust, BMAD, materialisat
   - The `http://` endpoint warning is shown and the legal link is fixed.
 - **Kept as built:** items 11-13, 17, 21, 25, 33, 38, 42, 44.
 - **Later:** remove the package-age exemption.
+
+### Owner decisions (2026-10-24, continued)
+
+**Custom and private capabilities**
+- Settings > Capabilities gets an editor for skills, personas (agents) and playbooks.
+- Anything authored there is stored as a real pack, in the same format as imported packs, so the owner's own work can later be published or shared unchanged.
+- Each pack has a visibility setting:
+  - **Organisation:** listed for everyone, and goes through trust review.
+  - **Private to my workstation:**
+    - Files live only on that workstation. Metadata is visible only to its owner.
+    - The workstation's providers and agents can use it, but it isn't shown to anyone else.
+    - No trust review is needed.
+
+**Delegation is off by default and an explicit choice**
+- No agent, facilitator or Chair may delegate unless the user turns it on. This replaces the current default, where delegation was allowed for the facilitator and Chair purposes and for card, question and BA shifts.
+- It's enabled per agent, and the user lists exactly which personas or agents that agent may delegate to.
+- Each target runs on the model the user configured for it. The caller can't override the target's model, because a model is chosen deliberately.
+- Every grant and every delegation is visible on the agent, and on the card or session.
+- Delegation becomes a real child shift:
+  - Its tool profile is read-only, edit or shell, and never wider than the parent's.
+  - It uses the same sandbox.
+  - Its cost is booked to the parent.
+  - It shows as a sub-step.
+- Native Claude Code subagents are allowed only for granted targets, with their usage read from the transcript.
+
+**Pack agents on the HR board**
+- "Hire from pack" turns a persona into a role (persona text as instructions, permissions from its tool profile) and an agent with a source tag (e.g. `BMAD · analyst · v6.12.4`).
+- Import can optionally "add all agents from this pack".
+- When a pack updates, a new role version is offered and never forced.
+
+**Chat**
+- Hired pack agents use the normal chat.
+- Personas that aren't hired get "Chat with persona", a one-to-one session on the persona's model.
+
+**Playbooks (`/` commands; not project workflows)**
+- A `/` menu in chat and session composers lists the playbooks and skills the user may use.
+- A playbook runs step by step, with question cards and Apply/Reject, in the chat or as a new session.
+- `aom playbook run <key>` lets an agent start a playbook itself, where granted.
+
+**Build order:** card work on other providers, then the capability editor and private packs, then hire-from-pack and persona chat, then `/` playbooks, then explicit delegation.
+
+**Help videos move out of the app image**
+- **Current state:** about 100 files (184 MB) in `apps/web/public/videos`. They are committed to git (49 commits touch them), copied into `dist` and baked into every app image, and served same-origin at `/videos/<slug>.*` (`apps/web/src/lib/videos.ts`).
+- **Proposal:**
+  1. **A separate `aom-media` container.** A static server (Caddy or nginx with byte-range support, needed for seeking) serves a media volume. Same-origin routing through the existing Caddy (`/videos/*` goes to the media service) avoids CORS and CSP changes. `AOM_MEDIA_ORIGIN` allows a real CDN later.
+  2. **A manifest** (`/videos/manifest.json`: slug, files, content hash, captions, poster). The web app reads it. If the media service or manifest is unreachable, or a slug is missing, the video UI is hidden: no broken players, and no service-worker caching of failures.
+  3. **Publishing without rebuilds.** The recording pipeline (`e2e/video`) writes into a media folder. A publish script syncs only the files whose hash changed to the media volume (rsync, or `docker cp` for UAT). An app release never touches videos.
+  4. **Out of git.** Move the videos out of the main repo, into a separate media repo, Git LFS or artifact storage, so clones and builds stop carrying 184 MB of history.
+  5. **Tests.** The section-video, tour and service-worker consistency tests switch to checking manifest entries and the hidden-when-unavailable behaviour.
+  6. **Compose.** Add a `media` service to the UAT and production compose files, and document it in DEPLOY.md.
