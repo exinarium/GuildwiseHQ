@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { BUILTIN_ROLES, sealProviderKey } from '@aom/shared';
 import { describe, expect, it } from 'vitest';
 import { ClaudeCodeAdapter } from '../src/adapters/claude-code.ts';
+import { OpencodeAdapter } from '../src/adapters/opencode.ts';
 import type { RuntimeEvent } from '../src/adapters/types.ts';
 import { ClaudeRuntimeConfigSchema } from '../src/config.ts';
 import { ProviderStore } from '../src/direct/store.ts';
@@ -143,5 +144,48 @@ describe('Claude Code on a backend: the project’s account picks the credential
   it('an account this workstation does not have is an error that names it (not a Claude-account error)', async () => {
     const x = await rig();
     await expect(x.start('ghost')).rejects.toThrow(/gateway has no account ghost/);
+  });
+});
+
+describe('opencode: the project’s account applies to the provider its model names (S-A)', () => {
+  it('uses the account’s key for that provider and every other provider’s main key', async () => {
+    const t = tmp();
+    const paths = runnerPaths(join(t, 'data'));
+    const keys = new RunnerKeys(join(paths.secrets, 'runner-key.pem'));
+    const store = new ProviderStore({ file: join(paths.secrets, 'providers.json'), keys });
+    const put = async (provider: 'openai' | 'anthropic', secret: string, account?: string) =>
+      store.set({
+        provider,
+        ...(account ? { account } : {}),
+        keyId: keys.publicKey.keyId,
+        generation: 10,
+        ciphertext: await sealProviderKey(keys.publicKey.publicKey, secret, {
+          scope: 'workstation',
+          provider,
+          generation: 10,
+          keyId: keys.publicKey.keyId,
+          ...(account ? { account } : {}),
+        }),
+        models: [],
+      });
+    await put('openai', 'sk-main-openai-1');
+    await put('openai', 'sk-work-openai-2', 'work');
+    await put('anthropic', 'sk-main-anthropic-3');
+    const adapter = new OpencodeAdapter(
+      { enabled: true, bin: '/nonexistent/opencode', toolchainPaths: [], extraAllowedDomains: [] },
+      paths,
+      store,
+    );
+    const keyOf = (list: Array<{ id: string; apiKey?: string }>, id: string) =>
+      list.find((p) => p.id === id)?.apiKey;
+    const main = adapter.providers(undefined);
+    expect(keyOf(main, 'openai')).toBe('sk-main-openai-1');
+    const work = adapter.providers(undefined, { provider: 'openai', account: 'work' });
+    expect(keyOf(work, 'openai')).toBe('sk-work-openai-2');
+    expect(keyOf(work, 'anthropic')).toBe('sk-main-anthropic-3');
+    // an account this workstation lacks leaves that provider out: the shift fails clearly instead of spending the main key
+    expect(
+      keyOf(adapter.providers(undefined, { provider: 'openai', account: 'ghost' }), 'openai'),
+    ).toBeUndefined();
   });
 });

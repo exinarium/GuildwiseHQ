@@ -61,7 +61,7 @@ describe('the assistant knowledge, split by topic', () => {
 
   it('keeps every chunk small enough to attach: no topic is more than a quarter of the per-request budget alone', () => {
     const sizes = loadTopics().map((t) => approxTokens(t.text));
-    expect(loadTopics()).toHaveLength(34);
+    expect(loadTopics()).toHaveLength(35);
     expect(Math.max(...sizes)).toBeLessThan(TOPIC_LIMITS.budgetTokens / 2);
     expect(sizes.reduce((a, b) => a + b, 0)).toBeGreaterThan(8000); // the whole help centre is still here, just not sent every time
   });
