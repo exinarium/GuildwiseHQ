@@ -237,9 +237,9 @@ Details in `docs/ARCHITECTURE.md` section 38.4 (packs, trust, BMAD, materialisat
 **Help videos move out of the app image**
 - **Current state:** about 100 files (184 MB) in `apps/web/public/videos`. They are committed to git (49 commits touch them), copied into `dist` and baked into every app image, and served same-origin at `/videos/<slug>.*` (`apps/web/src/lib/videos.ts`).
 - **Proposal:**
-  1. **A separate `aom-media` container.** A static server (Caddy or nginx with byte-range support, needed for seeking) serves a media volume. Same-origin routing through the existing Caddy (`/videos/*` goes to the media service) avoids CORS and CSP changes. `AOM_MEDIA_ORIGIN` allows a real CDN later.
-  2. **A manifest** (`/videos/manifest.json`: slug, files, content hash, captions, poster). The web app reads it. If the media service or manifest is unreachable, or a slug is missing, the video UI is hidden: no broken players, and no service-worker caching of failures.
-  3. **Publishing without rebuilds.** The recording pipeline (`e2e/video`) writes into a media folder. A publish script syncs only the files whose hash changed to the media volume (rsync, or `docker cp` for UAT). An app release never touches videos.
-  4. **Out of git.** Move the videos out of the main repo, into a separate media repo, Git LFS or artifact storage, so clones and builds stop carrying 184 MB of history.
+  1. **Same repo, own folder.** Videos move from `apps/web/public/videos` to a top-level `media/videos/` (recordings from `e2e/video` are written there). The app's `.dockerignore` excludes `media/`, so app builds and images never carry the videos.
+  2. **Own Dockerfile.** `media/Dockerfile` builds a small static-server image (Caddy or nginx with byte-range support, for seeking) that copies `media/videos/`. It's added to the UAT and production compose files as a `media` service. The existing Caddy routes `/videos/*` to it, so playback stays same-origin and needs no CORS or CSP changes.
+  3. **Only rebuilt when videos change.** The media image is built from its own context. The deploy builds and restarts `media` only when `media/` changed (detected by a content hash or Docker's layer cache), so app releases never re-upload videos.
+  4. **Manifest and graceful absence.** The media image serves `/videos/manifest.json` (slug, files, hash, captions, poster). The web app reads it. If the media service or manifest is unreachable, or a slug is missing, the video UI is hidden: no broken players, and no service-worker caching of failures.
   5. **Tests.** The section-video, tour and service-worker consistency tests switch to checking manifest entries and the hidden-when-unavailable behaviour.
-  6. **Compose.** Add a `media` service to the UAT and production compose files, and document it in DEPLOY.md.
+  6. **Docs.** DEPLOY.md documents the media service and how to publish new videos.
