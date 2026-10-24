@@ -37,8 +37,10 @@ export const ReportedKeySchema = z.object({
   provider: ProviderKeyIdSchema,
   /** The slot in effect on this workstation: its own key, else the organization's. */
   source: KeySourceSchema,
-  /** The organization's key is stored here too (overridden when `source` is `workstation`). */
+  /** An organization's key is stored here too (overridden when `source` is `workstation`). */
   orgKey: z.boolean().optional(),
+  /** The organizations whose key is stored here: one workstation can serve several, each with its own key and cap. */
+  orgIds: z.array(z.uuid()).max(50).optional(),
   /** Short note about the setup (region, endpoint host); no secret. */
   detail: z.string().max(200).optional(),
 });
@@ -80,6 +82,8 @@ export interface KeyUseReport {
 export function choiceKeyUse(
   reports: readonly KeyUseReport[],
   choice: { runtime: string; model: string },
+  /** The organization the work belongs to: an organization key counts only when it is that organization's. */
+  orgId?: string,
 ): { provider: ProviderKeyId; source: KeySource } | null {
   const provider = providerOfChoice(choice.runtime, choice.model);
   if (!provider) return null;
@@ -89,7 +93,10 @@ export function choiceKeyUse(
   }
   const keys = reports.find((r) => r.id === DIRECT_RUNTIME)?.keys ?? [];
   const k = keys.find((x) => x.provider === provider);
-  return k ? { provider, source: k.source } : null;
+  if (!k) return null;
+  // the key in effect is an organization's but not this organization's: this work has no key here
+  if (k.source === 'org' && orgId && k.orgIds && !k.orgIds.includes(orgId)) return null;
+  return { provider, source: k.source };
 }
 
 /** Provider ids an organization key can be set for (every key this product holds). */
@@ -113,6 +120,8 @@ export const PROVIDER_KEY_LABEL: Readonly<Record<string, string>> = {
  */
 export const ProviderKeyResealPayloadSchema = z.object({
   provider: ProviderKeyIdSchema,
+  /** Whose organization key to share. */
+  orgId: z.uuid(),
   /** The target workstation's runner key (its id and SPKI public key), as the server knows them. */
   targetKeyId: z.string().min(1).max(64),
   targetPublicKey: z.string().min(1).max(2000),

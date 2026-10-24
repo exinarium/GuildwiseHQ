@@ -391,12 +391,14 @@ export class GeminiAdapter implements RuntimeAdapter {
   }
 
   /** How this workstation signs the CLI in right now. */
-  authSelection():
+  authSelection(
+    orgId?: string,
+  ):
     | { via: 'login' }
     | { via: 'key'; apiKey: string; source: 'org' | 'workstation' }
     | { via: 'none'; reason: string } {
     const mode = this.cfg.authMode;
-    const key = this.store?.get('google');
+    const key = this.store?.get('google', orgId);
     if (mode !== 'api_key' && this.loginUsable()) return { via: 'login' };
     if (mode !== 'login' && key?.apiKey)
       return { via: 'key', apiKey: key.apiKey, source: key.source ?? 'workstation' };
@@ -472,10 +474,12 @@ export class GeminiAdapter implements RuntimeAdapter {
     if (problem) throw new Error(`runtime_role_refused: ${problem}`);
   }
 
-  private assertCanRun(): ReturnType<GeminiAdapter['authSelection']> & { via: 'login' | 'key' } {
+  private assertCanRun(
+    orgId?: string,
+  ): ReturnType<GeminiAdapter['authSelection']> & { via: 'login' | 'key' } {
     const sb = this.sandboxProblem();
     if (!sb.ok) throw new Error(`the Gemini CLI sandbox is unavailable: ${sb.reason}`);
-    const sel = this.authSelection();
+    const sel = this.authSelection(orgId);
     if (sel.via === 'none') throw new Error(sel.reason);
     return sel;
   }
@@ -620,7 +624,7 @@ export class GeminiAdapter implements RuntimeAdapter {
       roleKey: string;
     },
   ): Promise<RuntimeSession> {
-    const sel = this.assertCanRun();
+    const sel = this.assertCanRun(input.orgId);
     const { ghome, policyFile } = this.prepareHome(input.sandbox, sel, input.grantedSkills, {
       perms: opts.perms,
       roleKey: opts.roleKey,

@@ -31,6 +31,7 @@ import { RunnerKeys } from '../src/secrets/keys.ts';
  * It checks what the unit tests with a fake binary cannot: that the CLI really honours the flags, the policy file, the proxy and
  * the base URL, and that the sandbox keeps the guarantees of docs/RUNNER.md with the CLI's own tools.
  */
+const ORG = '11111111-1111-4111-8111-111111111111';
 const BIN = process.env.AOM_GEMINI_REAL_BIN;
 const root = realpathSync(mkdtempSync(join(userInfo().homedir, '.aom-gemini-real-')));
 const servers: Server[] = [];
@@ -120,7 +121,7 @@ async function setup(
     store.set({
       provider: 'google',
       keyId: keys.publicKey.keyId,
-      ...(source ? { source } : {}),
+      ...(source ? { source, orgId: ORG } : {}),
       ciphertext: await sealLarge(keys.publicKey.publicKey, key),
       models: [],
     });

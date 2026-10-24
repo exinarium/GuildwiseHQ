@@ -33,6 +33,8 @@ interface StoredProvider {
 }
 
 type SlotFileContent = Partial<Record<ProviderKeyId, StoredProvider>>;
+/** The organizations' slots: `{ [orgId]: { [provider]: StoredProvider } }`. */
+type OrgFileContent = Record<string, SlotFileContent>;
 
 /** What the adapter needs to call a provider. The key is plain text: never log it, never put it in an event. */
 export interface ProviderConfig {
@@ -105,8 +107,9 @@ export class ProviderStore {
   ) {
     this.orgFile = deps.orgFile ?? join(dirname(deps.file), 'providers-org.json');
     // After a restart, redaction must know the keys before the first log line.
-    for (const source of ['workstation', 'org'] as const)
-      for (const p of Object.values(this.all(source))) if (p.ciphertext) this.register(p.ciphertext);
+    for (const p of Object.values(this.own())) if (p.ciphertext) this.register(p.ciphertext);
+    for (const slot of Object.values(this.orgs()))
+      for (const p of Object.values(slot)) if (p.ciphertext) this.register(p.ciphertext);
   }
 
   onChange(fn: () => void): void {
@@ -118,32 +121,52 @@ export class ProviderStore {
     return k.decryptAny ? k.decryptAny(ciphertext) : k.decrypt(ciphertext);
   }
 
-  private fileOf(source: KeySource): string {
-    return source === 'org' ? this.orgFile : this.deps.file;
-  }
-
-  private all(source: KeySource): SlotFileContent {
-    const file = this.fileOf(source);
+  private readJson(file: string): unknown {
     if (!existsSync(file)) return {};
     try {
-      const j = JSON.parse(readFileSync(file, 'utf8')) as unknown;
-      return j && typeof j === 'object' ? (j as SlotFileContent) : {};
+      return JSON.parse(readFileSync(file, 'utf8')) as unknown;
     } catch {
       return {};
     }
   }
 
-  private save(source: KeySource, all: SlotFileContent): void {
-    const file = this.fileOf(source);
+  /** The workstation's own keys. */
+  private own(): SlotFileContent {
+    const j = this.readJson(this.deps.file);
+    return j && typeof j === 'object' ? (j as SlotFileContent) : {};
+  }
+
+  /** The organizations' keys, by organization. */
+  private orgs(): OrgFileContent {
+    const j = this.readJson(this.orgFile);
+    return j && typeof j === 'object' ? (j as OrgFileContent) : {};
+  }
+
+  private write(file: string, data: object): void {
     mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
     const tmp = `${file}.${process.pid}.tmp`;
-    writeFileSync(tmp, JSON.stringify(all), { mode: 0o600 });
+    writeFileSync(tmp, JSON.stringify(data), { mode: 0o600 });
     renameSync(tmp, file);
     try {
       chmodSync(file, 0o600);
     } catch {
       // Windows
     }
+  }
+
+  /** The slot a key is written to or read from: the workstation's, or one organization's. */
+  private slotFor(source: KeySource, orgId: string | undefined): SlotFileContent {
+    if (source === 'workstation') return this.own();
+    return (orgId ? this.orgs()[orgId] : undefined) ?? {};
+  }
+
+  private saveSlot(source: KeySource, orgId: string | undefined, slot: SlotFileContent): void {
+    if (source === 'workstation') return this.write(this.deps.file, slot);
+    if (!orgId) throw new Error('an organization key needs its organization');
+    const all = this.orgs();
+    if (Object.keys(slot).length === 0) delete all[orgId];
+    else all[orgId] = slot;
+    this.write(this.orgFile, all);
   }
 
   /** Registers every secret in a sealed value: a plain key, or each secret field of a backend credential. */
@@ -178,6 +201,8 @@ export class ProviderStore {
   /** `provider.key.set`. Never returns or logs the key. */
   set(p: ProviderKeySetPayload): ProviderKeyResult {
     const source: KeySource = p.source ?? 'workstation';
+    if (source === 'org' && !p.orgId)
+      return { stored: false, error: 'an organization key needs its organization' };
     if (p.keyId !== this.deps.keys.publicKey.keyId)
       return {
         stored: false,
@@ -208,7 +233,7 @@ export class ProviderStore {
       baseUrl = v.url;
       warning = v.warning;
     }
-    const all = this.all(source);
+    const all = this.slotFor(source, p.orgId);
     this.unregister(all[p.provider]?.ciphertext);
     all[p.provider] = {
       ...(p.ciphertext ? { ciphertext: p.ciphertext } : {}),
@@ -216,7 +241,7 @@ export class ProviderStore {
       models: [...new Set(p.models.map((m) => m.trim()).filter(Boolean))],
       setAt: new Date().toISOString(),
     };
-    this.save(source, all);
+    this.saveSlot(source, p.orgId, all);
     if (plain) registerSecret(plain);
     for (const f of this.changed) f();
     return { stored: true, ...(warning ? { warning } : {}) };
@@ -237,14 +262,14 @@ export class ProviderStore {
     }
     const bad = validateBackendFields(id, fields);
     if (bad) return { stored: false, error: bad };
-    const all = this.all(source);
+    const all = this.slotFor(source, p.orgId);
     this.unregister(all[id]?.ciphertext);
     all[id] = {
       ciphertext: p.ciphertext,
       models: [...new Set(p.models.map((m) => m.trim()).filter(Boolean))],
       setAt: new Date().toISOString(),
     };
-    this.save(source, all);
+    this.saveSlot(source, p.orgId, all);
     this.register(p.ciphertext);
     for (const f of this.changed) f();
     const warning =
@@ -255,34 +280,43 @@ export class ProviderStore {
   }
 
   /** `provider.key.clear`: forget the key and the endpoint of one slot (default: the workstation's own). */
-  clear(provider: ProviderKeyId, source: KeySource = 'workstation'): void {
-    const all = this.all(source);
+  clear(provider: ProviderKeyId, source: KeySource = 'workstation', orgId?: string): void {
+    const all = this.slotFor(source, orgId);
     if (!all[provider]) return;
     this.unregister(all[provider]?.ciphertext);
     delete all[provider];
-    this.save(source, all);
+    this.saveSlot(source, orgId, all);
     for (const f of this.changed) f();
   }
 
   clearPayload(p: ProviderKeyClearPayload): void {
-    this.clear(p.provider, p.source ?? 'workstation');
+    this.clear(p.provider, p.source ?? 'workstation', p.orgId);
   }
 
-  /** The slot in effect for a provider: the workstation's own key, else the organization's. */
+  /**
+   * The slot in effect for a provider: the workstation's own key, else the key of `orgId`. Without an organization (a caller that
+   * does not know it) the organization key counts only when exactly one organization has one here.
+   */
   private slotOf(
     provider: string,
-  ): { source: KeySource; stored: StoredProvider; orgAlso: boolean } | undefined {
-    const own = this.all('workstation')[provider as ProviderKeyId];
-    const org = this.all('org')[provider as ProviderKeyId];
-    if (own) return { source: 'workstation', stored: own, orgAlso: !!org };
-    if (org) return { source: 'org', stored: org, orgAlso: true };
+    orgId?: string,
+  ): { source: KeySource; stored: StoredProvider; orgAlso: boolean; orgId?: string } | undefined {
+    const own = this.own()[provider as ProviderKeyId];
+    const orgs = this.orgs();
+    const holders = Object.entries(orgs).filter(([, slot]) => slot[provider as ProviderKeyId]);
+    const pick = orgId ? holders.find(([id]) => id === orgId) : holders.length === 1 ? holders[0] : undefined;
+    const org = pick
+      ? { id: pick[0], stored: pick[1][provider as ProviderKeyId] as StoredProvider }
+      : undefined;
+    if (own) return { source: 'workstation', stored: own, orgAlso: holders.length > 0 };
+    if (org) return { source: 'org', stored: org.stored, orgAlso: true, orgId: org.id };
     return undefined;
   }
 
   /** The configuration of one provider with its key decrypted, or undefined when it is not set (or its key is unreadable). */
-  get(provider: string): ProviderConfig | undefined {
+  get(provider: string, orgId?: string): ProviderConfig | undefined {
     if (!(DIRECT_PROVIDER_IDS as readonly string[]).includes(provider)) return undefined;
-    const slot = this.slotOf(provider);
+    const slot = this.slotOf(provider, orgId);
     if (!slot) return undefined;
     const s = slot.stored;
     let apiKey: string | undefined;
@@ -303,13 +337,13 @@ export class ProviderStore {
   }
 
   /** The providers that are set, with their keys readable. */
-  configured(): ProviderConfig[] {
-    return DIRECT_PROVIDER_IDS.map((id) => this.get(id)).filter((c): c is ProviderConfig => !!c);
+  configured(orgId?: string): ProviderConfig[] {
+    return DIRECT_PROVIDER_IDS.map((id) => this.get(id, orgId)).filter((c): c is ProviderConfig => !!c);
   }
 
   /** A backend's credential opened, or undefined when it is not set or unreadable. */
-  getBackend(id: BackendId): BackendConfig | undefined {
-    const slot = this.slotOf(id);
+  getBackend(id: BackendId, orgId?: string): BackendConfig | undefined {
+    const slot = this.slotOf(id, orgId);
     if (!slot?.stored.ciphertext) return undefined;
     try {
       const j = JSON.parse(this.open(slot.stored.ciphertext)) as Record<string, unknown>;
@@ -324,13 +358,13 @@ export class ProviderStore {
     }
   }
 
-  configuredBackends(): BackendConfig[] {
-    return BACKEND_IDS.map((id) => this.getBackend(id)).filter((c): c is BackendConfig => !!c);
+  configuredBackends(orgId?: string): BackendConfig[] {
+    return BACKEND_IDS.map((id) => this.getBackend(id, orgId)).filter((c): c is BackendConfig => !!c);
   }
 
   /** Whose key is in effect for a provider, or null. */
-  sourceOf(provider: string): KeySource | null {
-    return this.slotOf(provider)?.source ?? null;
+  sourceOf(provider: string, orgId?: string): KeySource | null {
+    return this.slotOf(provider, orgId)?.source ?? null;
   }
 
   /** Claude Code backends with a credential here: names, models and whose credential it is. */
@@ -355,21 +389,25 @@ export class ProviderStore {
   /** Every stored key and whose it is, for the server's resolution and caps. */
   reportKeys(): ReportedKey[] {
     const out: ReportedKey[] = [];
+    const orgs = this.orgs();
     for (const id of [...DIRECT_PROVIDER_IDS, ...BACKEND_IDS] as ProviderKeyId[]) {
-      const slot = this.slotOf(id);
-      if (!slot) continue;
+      const own = !!this.own()[id];
+      const orgIds = Object.entries(orgs)
+        .filter(([, slot]) => slot[id])
+        .map(([o]) => o);
+      if (!own && orgIds.length === 0) continue;
       out.push({
         provider: id,
-        source: slot.source,
-        ...(slot.orgAlso ? { orgKey: true } : {}),
+        source: own ? 'workstation' : 'org',
+        ...(orgIds.length ? { orgKey: true, orgIds: orgIds.slice(0, 50) } : {}),
       });
     }
     return out;
   }
 
   /** Is the organization's key stored here (it may be overridden by the workstation's own)? */
-  hasOrgKey(provider: ProviderKeyId): boolean {
-    return !!this.all('org')[provider];
+  hasOrgKey(provider: ProviderKeyId, orgId: string): boolean {
+    return !!this.orgs()[orgId]?.[provider];
   }
 
   /**
@@ -378,9 +416,10 @@ export class ProviderStore {
    */
   async reseal(
     provider: ProviderKeyId,
+    orgId: string,
     target: { keyId: string; publicKey: string },
   ): Promise<ProviderKeyResealResult> {
-    const stored = this.all('org')[provider];
+    const stored = this.orgs()[orgId]?.[provider];
     if (!stored) return { ok: false, error: 'this workstation does not hold the organization key' };
     // keyless endpoints have nothing to seal: the server shares the settings itself
     if (!stored.ciphertext) return { ok: false, error: 'this key has no secret to share' };

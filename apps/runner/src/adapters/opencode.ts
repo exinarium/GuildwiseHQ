@@ -262,8 +262,8 @@ export class OpencodeAdapter implements RuntimeAdapter {
   }
 
   /** The providers this workstation holds keys (or an endpoint) for, workstation key over organization key. */
-  providers(): ProviderConfig[] {
-    return (this.store?.configured() ?? []).filter((p) =>
+  providers(orgId?: string): ProviderConfig[] {
+    return (this.store?.configured(orgId) ?? []).filter((p) =>
       (OPENCODE_PROVIDERS as readonly string[]).includes(p.id),
     );
   }
@@ -391,9 +391,9 @@ export class OpencodeAdapter implements RuntimeAdapter {
   }
 
   /** The provider an agent's model names, with its key; throws when it is not set up here. */
-  private providerOf(model: string): ProviderConfig {
+  private providerOf(model: string, orgId?: string): ProviderConfig {
     const id = model.split('/')[0] ?? '';
-    const p = this.providers().find((x) => x.id === id);
+    const p = this.providers(orgId).find((x) => x.id === id);
     if (!p)
       throw new Error(
         `${id || 'the provider'} is not set up on this workstation: add its key under Workstations > Model providers (or ask an Owner or Admin to share the organization's)`,
@@ -426,8 +426,8 @@ export class OpencodeAdapter implements RuntimeAdapter {
   ): Promise<RuntimeSession> {
     const sb = this.sandboxProblem();
     if (!sb.ok) throw new Error(`the opencode sandbox is unavailable: ${sb.reason}`);
-    const used = this.providerOf(input.agent.model);
-    const all = this.providers();
+    const used = this.providerOf(input.agent.model, input.orgId);
+    const all = this.providers(input.orgId);
     const ohome = opencodeHomeOf(input.sandbox);
     const confDir = join(ohome, 'config', 'opencode');
     for (const d of ['config', 'data', 'cache', 'state'].map((x) => join(ohome, x)))

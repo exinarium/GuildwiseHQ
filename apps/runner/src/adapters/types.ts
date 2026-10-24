@@ -107,6 +107,8 @@ export interface ShiftStartInput {
    * account's own. Absent or empty: the runtime loads no skills.
    */
   grantedSkills?: GrantedSkill[];
+  /** The organization the shift belongs to: an organization's provider key counts only for its own organization. */
+  orgId?: string;
   /** Raw runtime stream is appended here (logs/shifts/<shiftId>.jsonl). */
   logFile?: string;
 }
@@ -202,6 +204,8 @@ export interface ChatStartInput {
   grantedSkills?: GrantedSkill[];
   /** A narrower step cap than the runtime's own (a delegate's: `DELEGATE_LIMITS.maxSteps`). Only the direct-model runtime has steps. */
   maxSteps?: number;
+  /** The organization of the chat or session turn: its provider key (not another organization's) is the one used. */
+  orgId?: string;
   logFile?: string;
 }
 

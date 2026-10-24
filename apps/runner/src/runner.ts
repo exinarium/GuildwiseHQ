@@ -1802,7 +1802,7 @@ export class Runner {
         // An Owner or Admin approved sharing the organization key with another workstation: seal it to that runner's key. The
         // answer carries the ciphertext for the server to relay; the plain key never leaves this function.
         const p = CommandPayloadSchemas['provider.key.reseal'].parse(payload);
-        const r = await this.providers.reseal(p.provider, {
+        const r = await this.providers.reseal(p.provider, p.orgId, {
           keyId: p.targetKeyId,
           publicKey: p.targetPublicKey,
         });

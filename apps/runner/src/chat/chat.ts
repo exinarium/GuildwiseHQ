@@ -842,6 +842,7 @@ export class ChatManager {
       readDirs: [],
       ...(tc ? { toolchainReadDirs: tc.readDirs } : {}),
       context: msg.context,
+      ...(msg.context.orgId ? { orgId: msg.context.orgId } : {}),
       sessionTurn: {
         kind: session.kind,
         speakerKind: session.speaker.kind,
@@ -897,6 +898,7 @@ export class ChatManager {
       env,
       readOnly: true,
       context: msg.context,
+      ...(msg.context.orgId ? { orgId: msg.context.orgId } : {}),
       instructions,
       ...(msg.resumeSessionId ? { resumeSessionId: msg.resumeSessionId } : {}),
       logFile: `${paths.shiftLogs}/chat-${msg.chatId}.jsonl`,
@@ -1024,6 +1026,7 @@ export class ChatManager {
       readDirs: folders.map((f) => f.path),
       ...(tc ? { toolchainReadDirs: tc.readDirs } : {}),
       context: msg.context,
+      ...(msg.context.orgId ? { orgId: msg.context.orgId } : {}),
       // Skills this agent's role grants, loaded natively by a runtime that has them (never for the CEO's conversation or DevOps).
       ...(!devops && msg.agent.roleKey !== 'ceo' ? { grantedSkills } : {}),
       ...(msg.context.intake ? { intake: true } : {}),

@@ -35,6 +35,7 @@ import { RunnerKeys } from '../src/secrets/keys.ts';
 import { cleanupTmp, makeConfig, tmp } from './helpers.ts';
 
 cleanupTmp();
+const ORG = '11111111-1111-4111-8111-111111111111';
 
 const j = (o: object): string => JSON.stringify(o);
 // captured from gemini-cli 0.65.0 (see test/gemini-real.test.ts for the run against the real binary)
@@ -389,7 +390,7 @@ async function world(
     store.set({
       provider: 'google',
       keyId: keys.publicKey.keyId,
-      ...(opts.key === 'org' ? { source: 'org' as const } : {}),
+      ...(opts.key === 'org' ? { source: 'org' as const, orgId: ORG } : {}),
       ciphertext: await sealLarge(keys.publicKey.publicKey, 'AIza-secret-key-1234'),
       models: [],
     });

@@ -1193,6 +1193,7 @@ export class ShiftSupervisor {
         prompt: texts.prompt,
         instructionsMarkdown: texts.instructions,
         kind: msg.kind,
+        ...(msg.orgId ? { orgId: msg.orgId } : {}),
         ...(shortShift ? { promptCacheTtl: '5m' as const } : {}),
         ...(resumeSessionId ? { resumeSessionId } : {}),
         ...(accountKey !== 'main' ? { account: accountKey } : {}),

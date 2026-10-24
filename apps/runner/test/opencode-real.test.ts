@@ -20,6 +20,7 @@ import { RunnerKeys } from '../src/secrets/keys.ts';
  * real bubblewrap sandbox, against fake provider APIs on localhost. No tokens, no login. Checks the permission rules, the
  * instructions and skills, the routes that carry the keys, the model list, and what the sandbox hides.
  */
+const ORG = '11111111-1111-4111-8111-111111111111';
 const BIN = process.env.AOM_OPENCODE_REAL_BIN;
 const root = realpathSync(mkdtempSync(join(userInfo().homedir, '.aom-opencode-real-')));
 const servers: Server[] = [];
@@ -128,7 +129,7 @@ async function setup(
     store.set({
       provider: p.id,
       keyId: keys.publicKey.keyId,
-      ...(p.org ? { source: 'org' as const } : {}),
+      ...(p.org ? { source: 'org' as const, orgId: ORG } : {}),
       ...(p.key ? { ciphertext: await sealLarge(keys.publicKey.publicKey, p.key) } : {}),
       ...(p.baseUrl ? { baseUrl: p.baseUrl } : {}),
       models: p.models ?? [],
@@ -251,6 +252,7 @@ describe.skipIf(!BIN || !bwrapOk)('the opencode adapter against the real opencod
       provider: 'openai-compatible',
       keyId: w.keys.publicKey.keyId,
       source: 'org',
+      orgId: ORG,
       ciphertext: await sealLarge(w.keys.publicKey.publicKey, 'sk-real-compat-key'),
       baseUrl: `${api2.url}/v1`,
       models: ['m1'],

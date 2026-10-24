@@ -235,6 +235,8 @@ export const ProviderKeySetPayloadSchema = z.object({
   ciphertext: z.string().min(1).max(20000).optional(),
   /** Whose slot this fills. Absent (an older server): the workstation's own key. */
   source: KeySourceSchema.optional(),
+  /** The organization an organization key belongs to (required with `source: 'org'`): one workstation can serve several. */
+  orgId: z.uuid().optional(),
   baseUrl: z.string().max(300).optional(),
   models: z.array(z.string().min(1).max(120)).max(50).default([]),
 });
@@ -244,6 +246,8 @@ export const ProviderKeyClearPayloadSchema = z.object({
   provider: ProviderKeyIdSchema,
   /** Which slot to empty. Absent: the workstation's own key. */
   source: KeySourceSchema.optional(),
+  /** With `source: 'org'`: the organization whose key to forget. */
+  orgId: z.uuid().optional(),
 });
 export const ProviderKeyResultSchema = z.object({
   stored: z.boolean(),

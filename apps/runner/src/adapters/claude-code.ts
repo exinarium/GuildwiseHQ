@@ -711,6 +711,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
   private backendSession(
     agent: { model: string; roleKey: string; isDevops?: boolean },
     sessionRef: string,
+    orgId?: string,
   ):
     | {
         model: string;
@@ -724,7 +725,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     if (!b) return undefined;
     const role = backendRoleProblem(agent);
     if (role) throw new Error(`runtime_role_refused: ${role}`);
-    const cred = this.host.providers?.getBackend(b.backend);
+    const cred = this.host.providers?.getBackend(b.backend, orgId);
     if (!cred)
       throw new Error(
         `${b.backend} is not set up on this workstation: add its credentials under Workstations > Model providers (or ask an Owner or Admin to share the organization's)`,
@@ -758,7 +759,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     if (input.agent.isDevops && input.devopsGuard?.readOnlyScan === true) this.assertScanSandbox();
     else if (!input.agent.isDevops) this.assertCanRun();
     const account = this.account(input.account);
-    const bk = this.backendSession(input.agent, input.shiftId);
+    const bk = this.backendSession(input.agent, input.shiftId, input.orgId);
     const dir = input.sandbox.configDir;
     await mkdir(dir, { recursive: true });
     const guard = input.agent.isDevops ? this.devopsGuard(dir, input.devopsGuard, 'shift') : undefined;
@@ -852,7 +853,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
           ],
     };
     const account = this.account(input.account);
-    const bk = this.backendSession(input.agent, input.chatId);
+    const bk = this.backendSession(input.agent, input.chatId, input.orgId);
     const dir = input.sandbox.configDir;
     await mkdir(dir, { recursive: true });
     const guard = devops ? this.devopsGuard(dir, input.devopsGuard, 'chat') : undefined;

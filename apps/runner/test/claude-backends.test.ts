@@ -22,6 +22,8 @@ cleanupTmp();
 const builder = BUILTIN_ROLES.find((r) => r.key === 'builder') as (typeof BUILTIN_ROLES)[number];
 if (!builder) throw new Error('role');
 const A = '019e3f6a-7b1c-7a2d-8c3e-0123456789a1';
+const ORG = '11111111-1111-4111-8111-111111111111';
+const ORG2 = '22222222-2222-4222-8222-222222222222';
 
 function makeStore() {
   const root = tmp('aom-backends-');
@@ -98,23 +100,27 @@ describe('the provider store: two slots, three backends', () => {
       provider: 'openai',
       keyId: keys.publicKey.keyId,
       source: 'org',
+      orgId: ORG,
       ciphertext: await rsa('sk-org-key-1111'),
       models: [],
     });
-    expect(store.get('openai')).toMatchObject({ apiKey: 'sk-org-key-1111', source: 'org' });
-    expect(store.reportKeys()).toEqual([{ provider: 'openai', source: 'org', orgKey: true }]);
+    expect(store.get('openai', ORG)).toMatchObject({ apiKey: 'sk-org-key-1111', source: 'org' });
+    // another organization's work on this workstation has no key here
+    expect(store.get('openai', ORG2)).toBeUndefined();
+    expect(store.reportKeys()).toEqual([{ provider: 'openai', source: 'org', orgKey: true, orgIds: [ORG] }]);
     store.set({
       provider: 'openai',
       keyId: keys.publicKey.keyId,
       ciphertext: await rsa('sk-own-key-2222'),
       models: [],
     });
-    expect(store.get('openai')).toMatchObject({ apiKey: 'sk-own-key-2222', source: 'workstation' });
+    expect(store.get('openai', ORG)).toMatchObject({ apiKey: 'sk-own-key-2222', source: 'workstation' });
+    expect(store.get('openai', ORG2)).toMatchObject({ source: 'workstation' });
     expect(store.report()[0]).toMatchObject({ keySource: 'workstation', orgKey: true });
     // clearing the workstation key brings the organization's back; clearing the organization's removes it everywhere
     store.clearPayload({ provider: 'openai' });
-    expect(store.get('openai')).toMatchObject({ apiKey: 'sk-org-key-1111', source: 'org' });
-    store.clearPayload({ provider: 'openai', source: 'org' });
+    expect(store.get('openai', ORG)).toMatchObject({ apiKey: 'sk-org-key-1111', source: 'org' });
+    store.clearPayload({ provider: 'openai', source: 'org', orgId: ORG });
     expect(store.get('openai')).toBeUndefined();
     expect(redact('sk-org-key-1111 sk-own-key-2222')).toBe('sk-org-key-1111 sk-own-key-2222');
     void seal;
@@ -126,11 +132,12 @@ describe('the provider store: two slots, three backends', () => {
       provider: 'google',
       keyId: keys.publicKey.keyId,
       source: 'org',
+      orgId: ORG,
       ciphertext: await sealLarge(keys.publicKey.publicKey, 'AIza-org-secret-9999'),
       models: [],
     });
     const again = new ProviderStore({ file: join(root, 'secrets', 'providers.json'), keys });
-    expect(again.get('google')?.source).toBe('org');
+    expect(again.get('google', ORG)?.source).toBe('org');
     expect(redact('AIza-org-secret-9999')).toBe('***');
   });
 
@@ -141,10 +148,11 @@ describe('the provider store: two slots, three backends', () => {
       provider: 'openai',
       keyId: a.keys.publicKey.keyId,
       source: 'org',
+      orgId: ORG,
       ciphertext: await sealLarge(a.keys.publicKey.publicKey, 'sk-share-me-3333'),
       models: [],
     });
-    const out = await a.store.reseal('openai', b.keys.publicKey);
+    const out = await a.store.reseal('openai', ORG, b.keys.publicKey);
     expect(out.ok).toBe(true);
     expect(out.ciphertext).toBeDefined();
     expect(JSON.stringify(out)).not.toContain('sk-share-me-3333');
@@ -157,8 +165,8 @@ describe('the provider store: two slots, three backends', () => {
       ciphertext: await sealLarge(a.keys.publicKey.publicKey, 'own-google-key'),
       models: [],
     });
-    expect((await a.store.reseal('google', b.keys.publicKey)).ok).toBe(false);
-    expect((await b.store.reseal('openai', a.keys.publicKey)).ok).toBe(false);
+    expect((await a.store.reseal('google', ORG, b.keys.publicKey)).ok).toBe(false);
+    expect((await b.store.reseal('openai', ORG, a.keys.publicKey)).ok).toBe(false);
   });
 });
 
@@ -359,6 +367,7 @@ console.log(${JSON.stringify(RESULT)});
       provider: 'gateway',
       keyId: x.keys.publicKey.keyId,
       source: 'org',
+      orgId: ORG,
       ciphertext: await sealLarge(
         x.keys.publicKey.publicKey,
         JSON.stringify({ baseUrl: 'https://litellm.example.com', authToken: 'gw-secret-token-42' }),

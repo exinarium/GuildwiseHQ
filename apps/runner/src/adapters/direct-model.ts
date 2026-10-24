@@ -198,7 +198,7 @@ export class DirectModelAdapter implements RuntimeAdapter {
       fail(`"${input.agent.model}" is not a direct-model id (provider:model)`);
       return session;
     }
-    const cfg = this.deps.store.get(choice.provider);
+    const cfg = this.deps.store.get(choice.provider, input.orgId);
     if (!cfg) {
       fail(
         `${directProvider(choice.provider)?.label ?? choice.provider} is not set up on this workstation: add its key under Workstations > Model providers`,
