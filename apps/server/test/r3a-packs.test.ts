@@ -1729,6 +1729,10 @@ describe('chat with a persona', () => {
     await asOwner('POST', `/api/persona-chats/${id}/say`, { body: 'Second' }, 202);
     const second = await owner.waitFor('chat.start', (f) => f.threadId === id && f.chatId !== start.chatId);
     owner.send('chat.error', { chatId: second.chatId, threadId: id, error: 'cancelled' });
+    await until(
+      async () =>
+        (await q(`SELECT status FROM session_turns WHERE id=$1`, [second.chatId]))[0]?.status === 'failed',
+    );
     // time: the clock is the chat's active time (the persona working), not the wall clock since it was made. A chat that sat idle
     // for a day is still fresh ...
     await q(`UPDATE threads SET created_at = created_at - interval '1 day' WHERE id=$1`, [id]);
@@ -1757,11 +1761,13 @@ describe('chat with a persona', () => {
       );
     }
     // ... and one whose persona has worked past 30 minutes takes nothing more
-    await q(
-      `UPDATE session_turns SET started_at = now() - interval '45 minutes', finished_at = now() - interval '5 minutes'
-        WHERE id=$1`,
-      [start.chatId],
-    );
+    // (relative to the server's own clock, which a test world may keep apart from the database's)
+    const serverNow = w.t.app.ctx.clock.now().getTime();
+    await q(`UPDATE session_turns SET started_at = $2, finished_at = $3 WHERE id=$1`, [
+      start.chatId,
+      new Date(serverNow - 45 * 60_000),
+      new Date(serverNow - 5 * 60_000),
+    ]);
     const late = await w.t.req('POST', `/api/persona-chats/${id}/say`, {
       cookie: w.owner.cookie,
       body: { body: 'Third' },
