@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { readdir, rmdir, stat } from 'node:fs/promises';
+import { lstat, readdir, rmdir, stat } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
 import type { WorktreeSweepResult } from '@aom/shared';
 import { statusLinesWithoutStubs } from '../adapters/sandbox-placeholders.ts';
@@ -17,6 +17,13 @@ export interface SweepInput {
   repoPaths?: Iterable<string>;
   /** Messages about worktrees may still be in flight (a non-empty outbox): sweeping then could remove a live one. */
   outboxPending?: number;
+  /**
+   * An orphan folder (not a registered worktree: no usable `.git`, or one pointing at a clone that no longer lists it) is
+   * removed only when it has not been touched for this long, so a worktree being created is never taken. Default 1 hour.
+   */
+  orphanMinAgeMs?: number;
+  /** Test hook: the current time. */
+  now?: number;
 }
 
 /** First 50 changed paths of a worktree (`git status --porcelain`, untracked files included). */
@@ -164,9 +171,15 @@ export async function sweepWorktrees(input: SweepInput): Promise<WorktreeSweepRe
         continue;
       }
     } else if ((await readdir(path).catch(() => ['?'])).length > 0) {
-      // Not a git worktree and not empty: not ours to judge.
-      result.kept++;
-      continue;
+      // Not a registered git worktree and not empty, and the server does not know it as live: an orphan left by a
+      // crashed create, a pruned registration or a deleted clone (this is where whole copies of a repository stayed).
+      // Removed only once it has been idle for a while, and never through a symlink.
+      const st = await lstat(path).catch(() => null);
+      const idle = (input.now ?? Date.now()) - (st?.mtimeMs ?? Date.now());
+      if (!st || st.isSymbolicLink() || idle < (input.orphanMinAgeMs ?? 3_600_000)) {
+        result.kept++;
+        continue;
+      }
     }
     try {
       await removeWorktree({ path, deleteBranch: false, roots: [input.worktreesDir] });

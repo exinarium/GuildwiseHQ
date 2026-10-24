@@ -101,7 +101,15 @@ import { mergeReadFolders, resolveOrgFolderRepos, resolveReadRepos } from '../re
 import { preparePublication } from '../research/publish.ts';
 import { type EnvForwards, startForwards } from '../runs/forward.ts';
 import type { RunManager } from '../runs/manager.ts';
-import { cleanAgentTmp, ensureSandbox, holdAgentTmp, type Sandbox, sandboxEnv } from '../sandbox/sandbox.ts';
+import {
+  agentTmpHeld,
+  cleanAgentTmp,
+  ensureSandbox,
+  holdAgentTmp,
+  type Sandbox,
+  sandboxEnv,
+} from '../sandbox/sandbox.ts';
+import { DEFAULT_SCRATCH_POLICY, describePrune, pruneScratch } from '../sandbox/scratch.ts';
 import type { TargetSecrets } from '../secrets/targets.ts';
 import { copySessionTranscript, SessionRegistry } from '../sessions/registry.ts';
 import { e2eAreasSection } from '../testing/e2e-areas.ts';
@@ -458,7 +466,15 @@ export class ShiftSupervisor {
       this.active.delete(msg.shiftId);
       // every outcome (done, crash, stop, timeout): the agent's per-shift temp content goes (backlog #81)
       shift.releaseTmp?.();
-      if (shift.sandbox) await cleanAgentTmp(shift.sandbox.tmp);
+      if (shift.sandbox) {
+        await cleanAgentTmp(shift.sandbox.tmp);
+        // scratch retention: age and size limits (a no-op while another shift or chat of the agent runs)
+        const sb = shift.sandbox;
+        const r = await pruneScratch(sb.scratch, this.deps.config.scratch ?? DEFAULT_SCRATCH_POLICY, () =>
+          agentTmpHeld(sb.tmp),
+        );
+        if (r.pruned.length) this.log.info(describePrune(shift.msg.agent.agentId, r));
+      }
       this.forget(msg.shiftId);
     }
   }

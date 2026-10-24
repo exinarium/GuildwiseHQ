@@ -104,6 +104,7 @@ import { RepoCreator } from './repo/create.ts';
 import { RestartAfterReply } from './restart-after-reply.ts';
 import { RunManager } from './runs/manager.ts';
 import { sweepAgentTmps, wipeAgent } from './sandbox/sandbox.ts';
+import { sweepAgentScratch } from './sandbox/scratch.ts';
 import { DeploySecrets } from './secrets/deploy.ts';
 import { RunnerKeys } from './secrets/keys.ts';
 import { SudoVault } from './secrets/sudo.ts';
@@ -157,6 +158,8 @@ export interface RunnerOptions {
   probeTarget?: (url: string) => Promise<string | null>;
   /** Sweep stale worktrees this long after the first connection of the process (default 15 s); a negative value turns it off. */
   startupSweepMs?: number;
+  /** Test hook: milliseconds between the periodic scratch and worktree sweeps (default: `scratch.sweepIntervalHours`). */
+  scratchSweepMs?: number;
   /** How long a sweep waits for the server's answer about live worktrees (default 15 s). */
   sweepAnswerMs?: number;
   /**
@@ -877,6 +880,7 @@ export class Runner {
           this.log.info(`temp sweep: removed ${r.removed} entries of ${r.agents} agent temp dir(s)`);
       })
       .catch((err) => this.log.warn(`temp sweep failed: ${String(err)}`));
+    this.startScratchSweeps();
     this.supervisor.resumePersisted();
     await this.runs
       .adopt()
@@ -1210,6 +1214,39 @@ export class Runner {
         error: (err instanceof Error ? err.message : String(err)).slice(0, 400),
       };
     }
+  }
+
+  /**
+   * Disk retention: prunes the agents' scratch folders now (not those of agents about to resume) and then every
+   * `scratch.sweepIntervalHours` together with the stale-worktree sweep. An agent with a shift or chat running is skipped.
+   */
+  private startScratchSweeps(): void {
+    const sweepScratch = (skip: string[] = []) =>
+      sweepAgentScratch(this.paths, this.freshConfig().scratch, {
+        skipAgentIds: skip,
+        log: (m) => this.log.info(m),
+      })
+        .then((r) => {
+          if (r.pruned)
+            this.log.info(`scratch sweep: removed ${r.pruned} entries (${Math.round(r.bytes / 1048576)} MB)`);
+        })
+        .catch((err) => this.log.warn(`scratch sweep failed: ${String(err)}`));
+    void sweepScratch(this.supervisor.persistedAgentIds());
+    const hours = this.freshConfig().scratch.sweepIntervalHours;
+    const t = setInterval(
+      () => {
+        void sweepScratch(this.supervisor.persistedAgentIds());
+        void this.sweepWorktrees()
+          .then((r) => {
+            if (r.removed.length || r.dirty.length || r.emptyDirsRemoved.length)
+              this.log.info(`worktree sweep: ${JSON.stringify(r)}`);
+          })
+          .catch((err) => this.log.warn(`worktree sweep failed: ${String(err)}`));
+      },
+      Math.max(1000, this.opts.scratchSweepMs ?? hours * 3_600_000),
+    );
+    t.unref();
+    this.timers.push(t);
   }
 
   /** Once per process, shortly after the first connection: the stale-worktree sweep (owner decision 4). */
