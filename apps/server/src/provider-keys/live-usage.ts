@@ -172,7 +172,7 @@ async function resolveRun(
       ctx.pool,
       `SELECT b.org_id, b.runtime, b.model, b.thread_id, b.caller_id, b.begun_at, s.card_id
          FROM delegate_begins b LEFT JOIN shifts s ON s.id = b.caller_id
-        WHERE b.delegate_id::text=$1 AND b.workstation_id=$2
+        WHERE b.delegate_id::text=$1 AND b.workstation_id=$2 AND b.released_at IS NULL
           AND NOT EXISTS (SELECT 1 FROM shift_costs sc WHERE sc.shift_id = b.delegate_id AND sc.kind = 'delegate')`,
       [msg.id, workstationId],
     );

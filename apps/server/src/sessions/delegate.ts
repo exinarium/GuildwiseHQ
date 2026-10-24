@@ -235,8 +235,10 @@ async function heartbeat(
   const id = typeof params.delegateId === 'string' ? params.delegateId : '';
   if (!/^[0-9a-f-]{36}$/i.test(id)) return [false, undefined, 'invalid delegate heartbeat'];
   // only the delegate this caller began on this workstation: another delegate's slot cannot be held open or touched
+  // a heartbeat from a runner that is still running the delegate also takes back a slot released by a dropped connection
   const r = await ctx.pool.query(
-    'UPDATE delegate_begins SET heartbeat_at=$2 WHERE delegate_id=$1 AND caller_id=$3 AND workstation_id=$4',
+    `UPDATE delegate_begins SET heartbeat_at=$2, released_at=NULL
+      WHERE delegate_id=$1 AND caller_id=$3 AND workstation_id=$4`,
     [id, ctx.clock.now(), caller.row.id, workstationId],
   );
   if (!r.rowCount) return [false, undefined, 'unknown delegate'];
@@ -245,8 +247,15 @@ async function heartbeat(
 
 /** A workstation's runner disconnected: its running delegates are gone, so their slots are freed now. */
 export async function releaseDelegatesOf(ctx: Ctx, workstationId: string): Promise<void> {
-  await ctx.pool.query('DELETE FROM delegate_begins WHERE workstation_id=$1', [workstationId]);
+  // released, not deleted: the cost the runner books after it reconnects (or restarts) must still find its row
+  await ctx.pool.query(
+    'UPDATE delegate_begins SET released_at=$2 WHERE workstation_id=$1 AND released_at IS NULL',
+    [workstationId, ctx.clock.now()],
+  );
 }
+
+/** How long a released delegate stays known, for its late cost. */
+const RELEASED_KEEP_MS = 2 * 86_400_000;
 
 /**
  * Counts what the caller has started, finished or still running, and records this one, in one step under a lock per caller. A
@@ -277,20 +286,24 @@ async function reserve(
         : ((await one(tx, 'SELECT project_id FROM threads WHERE id=$1', [threadId]))?.project_id ?? null);
     await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`delegate:${row.id}`]);
     await tx.query(
-      `DELETE FROM delegate_begins
-        WHERE (heartbeat_at IS NULL AND begun_at < $1)
-           OR (heartbeat_at IS NOT NULL AND heartbeat_at < $2)`,
+      `UPDATE delegate_begins SET released_at=$3
+        WHERE released_at IS NULL
+          AND ((heartbeat_at IS NULL AND begun_at < $1) OR (heartbeat_at IS NOT NULL AND heartbeat_at < $2))`,
       [
         new Date(now.getTime() - STALE_NO_HEARTBEAT_MS),
         new Date(now.getTime() - DELEGATE_LIMITS.heartbeatStaleMs),
+        now,
       ],
     );
+    await tx.query('DELETE FROM delegate_begins WHERE released_at < $1', [
+      new Date(now.getTime() - RELEASED_KEEP_MS),
+    ]);
     if (await one(tx, 'SELECT 1 FROM delegate_begins WHERE delegate_id=$1', [delegateId]))
       return [true, answer]; // a retried begin is the same delegate
     const used = await one(
       tx,
       `SELECT (SELECT count(*) FROM shift_costs WHERE parent_id=$1)
-            + (SELECT count(*) FROM delegate_begins b WHERE b.caller_id=$1
+            + (SELECT count(*) FROM delegate_begins b WHERE b.caller_id=$1 AND b.released_at IS NULL
                   AND NOT EXISTS (SELECT 1 FROM shift_costs sc WHERE sc.shift_id = b.delegate_id)) AS n`,
       [row.id],
     );
@@ -304,7 +317,7 @@ async function reserve(
     const forTarget = await one(
       tx,
       `SELECT (SELECT count(*) FROM shift_costs WHERE parent_id=$1 AND delegate_target=$2)
-            + (SELECT count(*) FROM delegate_begins b WHERE b.caller_id=$1 AND b.target=$2
+            + (SELECT count(*) FROM delegate_begins b WHERE b.caller_id=$1 AND b.target=$2 AND b.released_at IS NULL
                   AND NOT EXISTS (SELECT 1 FROM shift_costs sc WHERE sc.shift_id = b.delegate_id)) AS n`,
       [row.id, info.target.handle],
     );
@@ -317,7 +330,7 @@ async function reserve(
     const running = async (col: 'thread_id' | 'project_id', id: string): Promise<boolean> =>
       !!(await one(
         tx,
-        `SELECT 1 FROM delegate_begins b WHERE b.${col}=$1
+        `SELECT 1 FROM delegate_begins b WHERE b.${col}=$1 AND b.released_at IS NULL
             AND NOT EXISTS (SELECT 1 FROM shift_costs sc WHERE sc.shift_id = b.delegate_id) LIMIT 1`,
         [id],
       ));

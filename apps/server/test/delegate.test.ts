@@ -199,7 +199,8 @@ describe('a stuck delegate slot', () => {
       a.delegateId,
     ]);
     expect((await begin(id)).ok).toBe(true);
-    expect(await rowOf(a.delegateId)).toBeUndefined();
+    // released, not deleted: a late cost still finds its row
+    expect((await rowOf(a.delegateId)).released_at).toBeTruthy();
     await finish(start);
   });
   it('is freed within the heartbeat window once the heartbeats stop, and kept while they come', async () => {
@@ -475,9 +476,19 @@ describe('a runner that disconnects', () => {
     r.close();
     await until(
       async () =>
-        (await q('SELECT 1 FROM delegate_begins WHERE delegate_id=$1', [a.delegateId])).length === 0,
+        (
+          await q('SELECT 1 FROM delegate_begins WHERE delegate_id=$1 AND released_at IS NOT NULL', [
+            a.delegateId,
+          ])
+        ).length === 1,
     );
     r = await w.connectRunner({ capabilities: [SESSION_TURNS_CAPABILITY, SESSION_VERBS_CAPABILITY] });
+    // the slot is free (a second delegate starts under the one-at-a-time budget rule), and the released one's cost, booked by a
+    // runner that read it from a transcript after a restart, is still accepted: it was begun by this caller on this workstation
+    expect((await begin(id)).ok).toBe(true);
+    const late = await cost(id, a.delegateId);
+    expect(late.ok).toBe(true);
+    expect(late.result).toEqual({ recorded: true });
   });
 });
 
