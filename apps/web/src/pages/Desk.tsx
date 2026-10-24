@@ -849,7 +849,9 @@ function ResolveButtons({ item }: { item: DeskItemDto }) {
         ? 'Approve merge'
         : item.subkind === 'repo_create'
           ? 'Create repository'
-          : 'Approve';
+          : item.subkind === 'pack_assignment'
+            ? 'Allow the pack'
+            : 'Approve';
   const approve = (merge = false) =>
     resolve.mutate(
       {
@@ -930,7 +932,11 @@ function ResolveButtons({ item }: { item: DeskItemDto }) {
                 )
               }
             >
-              {item.subkind === 'ceo_recommendation' ? 'Not now' : 'Reject'}
+              {item.subkind === 'ceo_recommendation'
+                ? 'Not now'
+                : item.subkind === 'pack_assignment'
+                  ? 'Decline'
+                  : 'Reject'}
             </Button>
             <Button
               variant="primary"
