@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { delimiter } from 'node:path';
+import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { delimiter, join } from 'node:path';
 import {
   type AgentPermissions,
   type AgentRuntimeSpec,
@@ -39,6 +40,7 @@ import {
   summarizeReply,
   type Usage,
 } from '@aom/shared';
+import { forgetNativeTranscripts, readNativeSubagentUsage } from '../adapters/claude-subagents.ts';
 import type {
   NativeSubagent,
   NativeSubagentUsage,
@@ -103,6 +105,8 @@ export interface DelegateDeps {
   childEnv?: Record<string, string>;
   /** Test hook: the wall-clock limit (default: the grant's). */
   timeoutMs?: number;
+  /** Test hook: how often a running native subagent is read for its live usage and held alive (default 5 s). */
+  nativeWatchMs?: number;
   /** Test hooks: the heartbeat period and the tool-call cap of a CLI-runtime delegate. */
   heartbeatMs?: number;
   maxToolCalls?: number;
@@ -112,6 +116,35 @@ interface Running {
   session?: RuntimeSession;
   stopped?: string;
 }
+
+/** What the runner keeps of a Claude Code session that runs native subagents, while it runs (see `DelegateRunner.attachNative`). */
+export interface NativeWatch {
+  /** The parent's session: a cap stop of a running subagent stops it (the subagent lives inside it); its transcripts are read. */
+  session: Pick<RuntimeSession, 'stop' | 'nativeSubagentUsage'>;
+  /** Where Claude Code keeps the transcripts (`CLAUDE_CONFIG_DIR`), with the session id: what a restart needs to book them. */
+  configDir?: string;
+  sessionId?: () => string | undefined;
+}
+
+interface NativeState extends NativeWatch {
+  /** The delegate ids of the subagents this session started. */
+  ids: Set<string>;
+  timer?: ReturnType<typeof setInterval>;
+  beatAt: number;
+  journaled?: string;
+}
+
+/** A native session that was running when the runner stopped: what is needed to book its subagents at the next start. */
+interface NativeJournal {
+  callerId: string;
+  configDir: string;
+  sessionId: string;
+  at: number;
+  delegates: Record<string, { handle: string; profile: DelegateProfile }>;
+}
+
+/** How long an unbooked journal is kept (the transcripts are as old). */
+const JOURNAL_KEEP_MS = 7 * 86_400_000;
 
 /** Children that run now, by id, in this process: the server's cap stop (`chat.cancel` with the delegate's id) finds them here. */
 const liveChildren = new Map<string, Running>();
@@ -196,6 +229,8 @@ export class DelegateRunner {
     Map<string, { handle: string; choice: ModelChoice; profile: DelegateProfile; kind: 'persona' | 'agent' }>
   >();
   private readonly nativeBooked = new Set<string>();
+  /** Claude Code sessions that run native subagents now, by caller. */
+  private readonly natives = new Map<string, NativeState>();
 
   constructor(private readonly deps: DelegateDeps) {
     this.log = deps.log ?? nullLogger;
@@ -210,6 +245,7 @@ export class DelegateRunner {
     this.running.delete(callerId);
     this.started.delete(callerId);
     this.nativeOf.delete(callerId);
+    this.detachNative(callerId);
   }
 
   /** Waits for the write lock of a working directory; returns the release. */
@@ -513,7 +549,7 @@ export class DelegateRunner {
     summary: string,
     native = false,
     narrowedFrom?: DelegateProfile,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const cost = await this.deps
       .rpc(caller.id, 'delegate.cost', {
         delegateId,
@@ -528,6 +564,7 @@ export class DelegateRunner {
       })
       .catch((err: unknown) => ({ ok: false, error: String(err) }) as IpcRpcResponse);
     if (!cost.ok) this.log.warn(`delegate ${delegateId}: could not report its cost: ${cost.error}`);
+    return cost.ok;
   }
 
   // ------------------------------------------------------------------------------------ Claude Code native subagents
@@ -621,17 +658,210 @@ export class DelegateRunner {
     if (!begin.ok) return { ok: false, error: begin.error ?? 'the server refused the delegate' };
     mine.total++;
     mine.by.set(nat.handle, (mine.by.get(nat.handle) ?? 0) + 1);
+    this.watchNative(caller.id, delegateId, nat.handle, nat.profile);
     return { ok: true, result: { delegateId } };
+  }
+
+  // ----------------------------------------------------------------------- native subagents while they run (finding 14)
+
+  /**
+   * The supervisor or the chat says: this caller's Claude Code session runs native subagents. From the first one that starts
+   * (`guardNative`), the session's subagent transcripts are read every few seconds and reported as `run.usage` of each subagent's
+   * delegate (so the organization key's cap sees them live and can stop them: the stop goes to the parent session, in which the
+   * subagent lives), each subagent's server row is kept alive with heartbeats (a long call must not lapse), and a journal is kept
+   * so that a runner that dies mid-session books them from the transcripts at its next start.
+   */
+  attachNative(callerId: string, w: NativeWatch): void {
+    this.natives.set(callerId, { ...w, ids: new Set(), beatAt: 0 });
+  }
+
+  private watchNative(callerId: string, delegateId: string, handle: string, profile: DelegateProfile): void {
+    const st = this.natives.get(callerId);
+    if (!st) return;
+    st.ids.add(delegateId);
+    this.journalDelegate(callerId, delegateId, handle, profile);
+    // the server's cap stop (`chat.cancel` with the subagent's id) reaches the parent session through the same table as a child
+    liveChildren.set(delegateId, {
+      session: { stop: (reason: string) => st.session.stop(reason) } as RuntimeSession,
+    });
+    if (!st.timer) {
+      st.timer = setInterval(() => void this.tickNative(callerId), this.deps.nativeWatchMs ?? 5000);
+      st.timer.unref?.();
+    }
+    void this.tickNative(callerId);
+  }
+
+  private async tickNative(callerId: string): Promise<void> {
+    const st = this.natives.get(callerId);
+    if (!st) return;
+    const now = Date.now();
+    if (now - st.beatAt >= DELEGATE_LIMITS.heartbeatMs) {
+      st.beatAt = now;
+      for (const id of st.ids)
+        void this.deps.rpc(callerId, 'delegate.heartbeat', { delegateId: id }).catch(() => undefined);
+    }
+    let used: NativeSubagentUsage[] = [];
+    try {
+      used = st.session.nativeSubagentUsage?.() ?? [];
+    } catch {
+      return;
+    }
+    for (const u of used) {
+      const id = nativeDelegateId(u.toolUseId);
+      if (!st.ids.has(id)) continue;
+      this.deps.reportUsage?.(id, u.usage);
+    }
+    this.journalSession(callerId);
+  }
+
+  private detachNative(callerId: string): void {
+    const st = this.natives.get(callerId);
+    if (!st) return;
+    if (st.timer) clearInterval(st.timer);
+    for (const id of st.ids) liveChildren.delete(id);
+    this.natives.delete(callerId);
+  }
+
+  private journalFile(callerId: string): string | undefined {
+    if (!/^[A-Za-z0-9_-]{8,64}$/.test(callerId)) return undefined;
+    return join(this.deps.paths.root, 'native-pending', `${callerId}.json`);
+  }
+
+  private readJournal(file: string): NativeJournal | undefined {
+    try {
+      const j = JSON.parse(readFileSync(file, 'utf8')) as NativeJournal;
+      return typeof j.callerId === 'string' &&
+        typeof j.configDir === 'string' &&
+        typeof j.sessionId === 'string'
+        ? j
+        : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private writeJournal(callerId: string, j: NativeJournal): void {
+    const file = this.journalFile(callerId);
+    if (!file) return;
+    try {
+      mkdirSync(join(this.deps.paths.root, 'native-pending'), { recursive: true, mode: 0o700 });
+      writeFileSync(`${file}.tmp`, JSON.stringify(j), { mode: 0o600 });
+      renameSync(`${file}.tmp`, file);
+    } catch (err) {
+      this.log.warn(`could not keep the journal of the subagents of ${callerId}: ${String(err)}`);
+    }
+  }
+
+  private journalDelegate(
+    callerId: string,
+    delegateId: string,
+    handle: string,
+    profile: DelegateProfile,
+  ): void {
+    const st = this.natives.get(callerId);
+    const file = this.journalFile(callerId);
+    const configDir = st?.configDir;
+    const sessionId = st?.sessionId?.();
+    if (!st || !file || !configDir || !sessionId) return;
+    const j = this.readJournal(file) ?? { callerId, configDir, sessionId, at: Date.now(), delegates: {} };
+    j.sessionId = sessionId;
+    j.delegates[delegateId] = { handle, profile };
+    this.writeJournal(callerId, j);
+    st.journaled = sessionId;
+  }
+
+  /** The session id can become known after the first subagent started: the journal is brought up to date. */
+  private journalSession(callerId: string): void {
+    const st = this.natives.get(callerId);
+    const file = this.journalFile(callerId);
+    const sessionId = st?.sessionId?.();
+    if (!st || !file || !sessionId || !st.configDir || st.journaled === sessionId) return;
+    const j = this.readJournal(file);
+    if (!j) return;
+    j.sessionId = sessionId;
+    this.writeJournal(callerId, j);
+    st.journaled = sessionId;
+  }
+
+  /** Journals left by a runner that stopped mid-session, captured once at start (this process's own are not among them). */
+  private recoverQueue: string[] | undefined;
+
+  /**
+   * Books the native subagents of sessions that were running when the runner stopped (the parent crashed, the machine went down,
+   * the runner was restarted), from their transcripts. Runs at the start and again every minute until every journal is done (the
+   * server may not be reachable yet). Each subagent books once (`delegate.cost` is idempotent by its id).
+   */
+  startNativeRecovery(everyMs = 60_000, firstMs = 10_000): void {
+    if (this.recoverQueue) return;
+    const dir = join(this.deps.paths.root, 'native-pending');
+    let files: string[] = [];
+    try {
+      files = readdirSync(dir)
+        .filter((f) => f.endsWith('.json'))
+        .map((f) => join(dir, f));
+    } catch {
+      files = [];
+    }
+    this.recoverQueue = files;
+    if (files.length === 0) return;
+    const run = async (): Promise<void> => {
+      await this.recoverNativeOnce().catch((err) =>
+        this.log.warn(`native subagent recovery: ${String(err)}`),
+      );
+      if ((this.recoverQueue?.length ?? 0) > 0) {
+        const t = setTimeout(() => void run(), everyMs);
+        t.unref?.();
+      }
+    };
+    const t = setTimeout(() => void run(), firstMs);
+    t.unref?.();
+  }
+
+  /** One pass over the captured journals; returns how many are left. */
+  async recoverNativeOnce(): Promise<number> {
+    const left: string[] = [];
+    for (const file of this.recoverQueue ?? []) {
+      const j = this.readJournal(file);
+      if (!j || Date.now() - j.at > JOURNAL_KEEP_MS) {
+        rmSync(file, { force: true });
+        continue;
+      }
+      let ok = true;
+      for (const u of readNativeSubagentUsage(j.configDir, j.sessionId)) {
+        const delegateId = nativeDelegateId(u.toolUseId);
+        const known = j.delegates[delegateId];
+        if (!known || this.nativeBooked.has(delegateId)) continue;
+        const booked = await this.book(
+          { id: j.callerId } as DelegateCaller,
+          delegateId,
+          known.handle,
+          u.usage,
+          'ok',
+          u.durationMs ?? 0,
+          known.profile,
+          u.summary ?? '',
+          true,
+        );
+        if (booked) this.nativeBooked.add(delegateId);
+        else ok = false;
+      }
+      if (ok) {
+        rmSync(file, { force: true });
+        forgetNativeTranscripts(j.configDir, j.sessionId);
+      } else left.push(file);
+    }
+    this.recoverQueue = left;
+    return left.length;
   }
 
   /** Books what the native subagents of a finished session used, one delegate each (the tokens were spent, whatever happened). */
   async bookNative(caller: DelegateCaller, used: readonly NativeSubagentUsage[]): Promise<void> {
+    let allBooked = true;
     for (const u of used) {
       const delegateId = nativeDelegateId(u.toolUseId);
       if (this.nativeBooked.has(delegateId)) continue;
-      this.nativeBooked.add(delegateId);
       const nat = this.nativeOf.get(caller.id)?.get(u.name);
-      await this.book(
+      const ok = await this.book(
         caller,
         delegateId,
         nat?.handle ?? u.name,
@@ -642,7 +872,15 @@ export class DelegateRunner {
         u.summary ?? '',
         true,
       );
+      if (ok) this.nativeBooked.add(delegateId);
+      else allBooked = false;
+      liveChildren.delete(delegateId);
     }
+    // the journal is for a runner that did not get here; booked, it has done its work (a failed booking is left for the next start)
+    const st = this.natives.get(caller.id);
+    const file = this.journalFile(caller.id);
+    if (allBooked && file) rmSync(file, { force: true });
+    if (allBooked && st?.configDir) forgetNativeTranscripts(st.configDir, st.sessionId?.());
   }
 
   /**

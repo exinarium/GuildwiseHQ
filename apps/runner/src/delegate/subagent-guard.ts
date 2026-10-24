@@ -1,4 +1,4 @@
-import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { withGuardDeadline } from '../capabilities/skill-guard.ts';
 
@@ -39,7 +39,7 @@ export function loadSubagentGuardConfig(file: string | undefined): SubagentGuard
   }
 }
 
-const deny = (reason: string): { stdout: string; code: number } => ({
+export const denyHook = (reason: string): { stdout: string; code: number } => ({
   stdout: JSON.stringify({
     hookSpecificOutput: {
       hookEventName: 'PreToolUse',
@@ -66,7 +66,7 @@ export async function runSubagentGuard(opts: {
   try {
     input = JSON.parse(opts.stdin);
   } catch {
-    return deny('the hook input could not be read');
+    return denyHook('the hook input could not be read');
   }
   if (input.tool_name !== undefined && input.tool_name !== 'Agent' && input.tool_name !== 'Task')
     return { stdout: '', code: 0 };
@@ -75,25 +75,34 @@ export async function runSubagentGuard(opts: {
   const handle = name ? opts.cfg.allowed[name] : undefined;
   const granted = Object.keys(opts.cfg.allowed);
   if (!name || !handle)
-    return deny(
+    return denyHook(
       `the subagent "${name || 'general-purpose'}" is not one of your delegation targets${granted.length ? ` (yours: ${granted.join(', ')})` : ''}.`,
     );
   const toolUseId = typeof input.tool_use_id === 'string' ? input.tool_use_id : '';
-  if (!toolUseId) return deny('the call has no id');
+  if (!toolUseId) return denyHook('the call has no id');
   const r = await opts.ask(name, handle, toolUseId);
-  if (!r.ok) return deny(r.error ?? 'the server refused the delegate');
+  if (!r.ok) return denyHook(r.error ?? 'the server refused the delegate');
   // R3c: the call's clock starts now; `runSubagentDeadline` refuses the subagent's tool calls once it has run out
   const limit = opts.cfg.limits?.[name];
-  if (opts.cfg.stateDir && limit && /^[A-Za-z0-9_.-]{1,120}$/.test(toolUseId)) {
+  if (opts.cfg.stateDir && limit) {
+    // The marker is the time limit's clock. Without it the call would run unlimited, so a call that cannot leave one is refused
+    // (fail closed). Written whole and renamed into place, so the deadline hook never reads half a marker.
+    if (!/^[A-Za-z0-9_.-]{1,120}$/.test(toolUseId))
+      return denyHook('the call has an id the time limit cannot track');
     try {
       mkdirSync(opts.cfg.stateDir, { recursive: true, mode: 0o700 });
+      const file = join(opts.cfg.stateDir, `${toolUseId}.json`);
+      const tmp = `${file}.tmp`;
       writeFileSync(
-        join(opts.cfg.stateDir, `${toolUseId}.json`),
+        tmp,
         JSON.stringify({ name, startedAt: (opts.now ?? Date.now)(), limitMs: limit * 1000 }),
-        { mode: 0o600 },
+        {
+          mode: 0o600,
+        },
       );
+      renameSync(tmp, file);
     } catch {
-      // the marker is the time limit's clock: without it the call runs unlimited, like before R3c. The count and budget checks held.
+      return denyHook('the time limit of this call could not be started');
     }
   }
   return { stdout: '', code: 0 };
@@ -108,24 +117,27 @@ interface Marker {
   limitMs: number;
 }
 
-function readMarkers(dir: string): Array<{ file: string; m: Marker }> {
-  const out: Array<{ file: string; m: Marker }> = [];
+/** The markers, and whether every one could be read: a marker that cannot be read is a clock nobody can see (the caller refuses). */
+function readMarkers(dir: string): { markers: Array<{ file: string; m: Marker }>; unreadable: boolean } {
+  const markers: Array<{ file: string; m: Marker }> = [];
   let names: string[] = [];
   try {
     names = readdirSync(dir).filter((f) => f.endsWith('.json'));
   } catch {
-    return out;
+    return { markers, unreadable: true };
   }
+  let unreadable = false;
   for (const f of names) {
     try {
       const m = JSON.parse(readFileSync(join(dir, f), 'utf8')) as Marker;
       if (typeof m.startedAt === 'number' && typeof m.limitMs === 'number')
-        out.push({ file: join(dir, f), m });
+        markers.push({ file: join(dir, f), m });
+      else unreadable = true;
     } catch {
-      // a marker half written: ignored
+      unreadable = true;
     }
   }
-  return out;
+  return { markers, unreadable };
 }
 
 /**
@@ -133,8 +145,9 @@ function readMarkers(dir: string): Array<{ file: string; m: Marker }> {
  * per-call limit for a subagent, so the guard keeps the start of each call (`runSubagentGuard`) and, once a call has run past
  * the grant's limit, refuses every further tool call of the session until the call ends (its `Agent` call returns, which removes
  * the marker: `runSubagentDone`): the subagent can only answer with what it has, and the parent, which waits in the foreground,
- * gets that answer. A marker whose end was never seen (a crash) stops counting after the limit plus five minutes. Failing open: a
- * hook that cannot read its markers allows the call (the count, the budgets and the provider cap still held at the start).
+ * gets that answer. A marker whose end was never seen (a crash) stops counting after the limit plus five minutes. Failing closed
+ * (security review, finding 14): a hook that cannot read its markers refuses the call, because a clock nobody can read cannot
+ * hold the limit. The markers live in the runner's own folder (the Claude config dir), which the agent's shell cannot write.
  */
 export function runSubagentDeadline(opts: { stdin: string; cfg: SubagentGuardConfig; now?: () => number }): {
   stdout: string;
@@ -148,14 +161,17 @@ export function runSubagentDeadline(opts: { stdin: string; cfg: SubagentGuardCon
   } catch {
     // an unreadable input is not this hook's business
   }
-  for (const { file, m } of readMarkers(opts.cfg.stateDir)) {
+  const { markers, unreadable } = readMarkers(opts.cfg.stateDir);
+  if (unreadable)
+    return denyHook('the time limit of the running subagent could not be read, so no tool is allowed');
+  for (const { file, m } of markers) {
     if (now > m.startedAt + m.limitMs + SUBAGENT_MARKER_GRACE_MS) {
       rmSync(file, { force: true });
       continue;
     }
     if (now > m.startedAt + m.limitMs) {
       const secs = Math.round(m.limitMs / 1000);
-      return deny(
+      return denyHook(
         `the subagent "${m.name}" has used its time limit of ${secs} seconds for this call${
           toolName === 'Agent' || toolName === 'Task'
             ? ''

@@ -1,4 +1,5 @@
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   type AgentPermissions,
   DELEGATE_LIMITS,
@@ -134,6 +135,10 @@ function setup(
     maxToolCalls?: number;
     /** What the server answers a begin with (default: nothing narrower). */
     begin?: Record<string, unknown>;
+    nativeWatchMs?: number;
+    reportUsage?: (id: string, usage: Usage) => void;
+    /** The server answers `delegate.cost` with a failure (offline). */
+    failCost?: boolean;
   } = {},
 ) {
   const root = tmp();
@@ -151,6 +156,7 @@ function setup(
     if (method === 'delegate.begin' && over.refuse) return { ok: false, error: over.refuse };
     if (method === 'delegate.begin' && over.begin) return { ok: true, result: over.begin };
     if (method === 'ledger.search') return { ok: true, result: { entries: [] } };
+    if (method === 'delegate.cost' && over.failCost) return { ok: false, error: 'offline' };
     return { ok: true, result: {} };
   };
   const ipc = {
@@ -171,6 +177,8 @@ function setup(
     ...(over.timeoutMs ? { timeoutMs: over.timeoutMs } : {}),
     ...(over.heartbeatMs ? { heartbeatMs: over.heartbeatMs } : {}),
     ...(over.maxToolCalls ? { maxToolCalls: over.maxToolCalls } : {}),
+    ...(over.nativeWatchMs ? { nativeWatchMs: over.nativeWatchMs } : {}),
+    ...(over.reportUsage ? { reportUsage: over.reportUsage } : {}),
   });
   return { runner, paths, handlers, revoked, calls, capabilities };
 }
@@ -1051,6 +1059,173 @@ describe('Claude Code native subagents', () => {
       durationMs: 1500,
       summary: 'looks fine',
     });
+  });
+});
+
+describe('native subagents while they run (security review finding 14)', () => {
+  const claudeCaller = (over: Partial<DelegateCaller> = {}): DelegateCaller => ({
+    ...CALLER,
+    runtime: 'claude-code',
+    ...over,
+  });
+  const USED = (n: number) => ({
+    toolUseId: 'toolu_live',
+    name: 'analyst',
+    usage: {
+      inputTokens: n,
+      outputTokens: n,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      model: 'claude-sonnet-4-5',
+    },
+  });
+  const until = async (f: () => boolean) => {
+    for (let i = 0; i < 200 && !f(); i++) await new Promise((r) => setTimeout(r, 10));
+    expect(f()).toBe(true);
+  };
+
+  it('streams the running subagent usage as run.usage of its delegate, holds its row, stops the parent at the cap, keeps a journal and books once', async () => {
+    const reports: Array<{ id: string; usage: Usage }> = [];
+    const s = setup([scripted({ id: 'claude-code' })], {
+      nativeWatchMs: 15,
+      reportUsage: (id, usage) => reports.push({ id, usage }),
+    });
+    const caller = claudeCaller({ delegation: { targets: [target('analyst')] } });
+    await s.runner.nativeSubagents(caller);
+    let used = [] as ReturnType<typeof USED>[];
+    const stopped: string[] = [];
+    s.runner.attachNative(caller.id, {
+      session: {
+        stop: async (r: string) => {
+          stopped.push(r);
+        },
+        nativeSubagentUsage: () => used,
+      },
+      configDir: s.paths.root,
+      sessionId: () => 'sess-1',
+    });
+    const id = nativeDelegateId('toolu_live');
+    expect(
+      (await s.runner.guardNative(caller, { name: 'analyst', handle: 'analyst', toolUseId: 'toolu_live' }))
+        .ok,
+    ).toBe(true);
+    // its server row is held alive from the start (a long call must not lapse)
+    await until(() => s.calls.some((c) => c.method === 'delegate.heartbeat' && c.params.delegateId === id));
+    // the usage of the subagent so far is reported while it runs, growing
+    used = [USED(1000)];
+    await until(() => reports.some((r) => r.id === id && r.usage.inputTokens === 1000));
+    used = [USED(5000)];
+    await until(() => reports.some((r) => r.id === id && r.usage.inputTokens === 5000));
+    // a usage line of a subagent this caller never started is not reported
+    used = [USED(5000), { ...USED(1), toolUseId: 'toolu_other' }];
+    await new Promise((r) => setTimeout(r, 60));
+    expect(reports.every((r) => r.id === id)).toBe(true);
+    // the journal a crashed runner would book from
+    const journal = join(s.paths.root, 'native-pending', `${caller.id}.json`);
+    expect(JSON.parse(readFileSync(journal, 'utf8'))).toMatchObject({
+      callerId: caller.id,
+      configDir: s.paths.root,
+      sessionId: 'sess-1',
+      delegates: { [id]: { handle: 'analyst', profile: 'read_only' } },
+    });
+    // the server's cap stop (chat.cancel with the subagent's id) reaches the parent session the subagent lives in
+    expect(stopDelegate(id, 'cancelled')).toBe(true);
+    expect(stopped).toEqual(['delegate.cancelled']);
+    // booked at the end: once, and the journal has done its work
+    used = [USED(5000)];
+    await s.runner.bookNative(caller, used);
+    expect(s.calls.filter((c) => c.method === 'delegate.cost')).toHaveLength(1);
+    expect(existsSync(journal)).toBe(false);
+    expect(stopDelegate(id)).toBe(false);
+    s.runner.endCaller(caller.id);
+    const beats = s.calls.filter((c) => c.method === 'delegate.heartbeat').length;
+    await new Promise((r) => setTimeout(r, 60));
+    expect(s.calls.filter((c) => c.method === 'delegate.heartbeat').length).toBe(beats);
+  });
+
+  /** A Claude Code session folder with one subagent transcript, as the runner finds it after a crash. */
+  function crashedSession(root: string, sessionId: string, toolUseId: string) {
+    const dir = join(root, 'cfg', 'projects', 'p1', sessionId, 'subagents');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'agent-1.meta.json'), JSON.stringify({ toolUseId, agentType: 'analyst' }));
+    const line = (id: string, input: number, output: number) =>
+      JSON.stringify({
+        type: 'assistant',
+        timestamp: '2026-10-24T10:00:00.000Z',
+        message: {
+          id,
+          model: 'claude-sonnet-4-5',
+          usage: { input_tokens: input, output_tokens: output },
+          content: [{ type: 'text', text: 'looks fine' }],
+        },
+      });
+    writeFileSync(join(dir, 'agent-1.jsonl'), `${line('m1', 100, 10)}\n${line('m2', 200, 20)}\n`);
+    return join(root, 'cfg');
+  }
+
+  it('books the subagents of a session whose runner died, from their transcripts, at the next start', async () => {
+    const s = setup([scripted({ id: 'claude-code' })]);
+    const callerId = '019e3f6a-7b1c-7a2d-8c3e-0123456789d1';
+    const toolUseId = 'toolu_crash';
+    const configDir = crashedSession(s.paths.root, 'sess-crash', toolUseId);
+    const id = nativeDelegateId(toolUseId);
+    mkdirSync(join(s.paths.root, 'native-pending'), { recursive: true });
+    const file = join(s.paths.root, 'native-pending', `${callerId}.json`);
+    writeFileSync(
+      file,
+      JSON.stringify({
+        callerId,
+        configDir,
+        sessionId: 'sess-crash',
+        at: Date.now(),
+        delegates: { [id]: { handle: 'analyst', profile: 'read_only' } },
+      }),
+    );
+    s.runner.startNativeRecovery(10_000, 10_000);
+    expect(await s.runner.recoverNativeOnce()).toBe(0);
+    const costs = s.calls.filter((c) => c.method === 'delegate.cost');
+    expect(costs).toHaveLength(1);
+    expect(costs[0]).toMatchObject({ id: callerId });
+    expect(costs[0]?.params).toMatchObject({
+      delegateId: id,
+      target: 'analyst',
+      native: true,
+      outcome: 'ok',
+      usage: { inputTokens: 300, outputTokens: 30, model: 'claude-sonnet-4-5' },
+    });
+    expect(existsSync(file)).toBe(false);
+    // nothing is booked twice
+    expect(await s.runner.recoverNativeOnce()).toBe(0);
+    expect(s.calls.filter((c) => c.method === 'delegate.cost')).toHaveLength(1);
+  });
+
+  it('keeps the journal while the server cannot be reached, and a stale one is dropped', async () => {
+    const s = setup([scripted({ id: 'claude-code' })], { failCost: true });
+    const callerId = '019e3f6a-7b1c-7a2d-8c3e-0123456789d2';
+    const configDir = crashedSession(s.paths.root, 'sess-off', 'toolu_off');
+    mkdirSync(join(s.paths.root, 'native-pending'), { recursive: true });
+    const file = join(s.paths.root, 'native-pending', `${callerId}.json`);
+    const j = {
+      callerId,
+      configDir,
+      sessionId: 'sess-off',
+      at: Date.now(),
+      delegates: { [nativeDelegateId('toolu_off')]: { handle: 'analyst', profile: 'read_only' } },
+    };
+    writeFileSync(file, JSON.stringify(j));
+    const old = join(s.paths.root, 'native-pending', '019e3f6a-7b1c-7a2d-8c3e-0123456789d3.json');
+    writeFileSync(
+      old,
+      JSON.stringify({
+        ...j,
+        callerId: '019e3f6a-7b1c-7a2d-8c3e-0123456789d3',
+        at: Date.now() - 30 * 86_400_000,
+      }),
+    );
+    s.runner.startNativeRecovery(10_000, 10_000);
+    expect(await s.runner.recoverNativeOnce()).toBe(1);
+    expect(existsSync(file)).toBe(true);
+    expect(existsSync(old)).toBe(false);
   });
 });
 

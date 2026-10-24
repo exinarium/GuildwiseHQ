@@ -405,6 +405,8 @@ export class ShiftSupervisor {
       ...(deps.log ? { log: deps.log } : {}),
     });
     this.sessions = deps.sessions ?? new SessionRegistry(join(deps.paths.root, 'sessions.json'));
+    // native subagents of a session that was running when this runner last stopped are booked from their transcripts
+    this.delegates.startNativeRecovery();
   }
 
   /** Shifts that are running (for `hello` and heartbeats). */
@@ -1279,6 +1281,14 @@ export class ShiftSupervisor {
       this.startFailed(s, err);
       return;
     }
+    // Claude Code native subagents: their transcripts are read while the session runs, their rows kept alive, a journal kept
+    // for a runner that dies (docs/RUNNER.md, "Native subagents")
+    if (subagents.length && s.session)
+      this.delegates.attachNative(msg.shiftId, {
+        session: s.session,
+        configDir: sandbox.configDir,
+        sessionId: () => s.runtimeSessionId,
+      });
 
     if (!s.startedSent)
       this.deps.transport.send('shift.started', {

@@ -46,6 +46,7 @@ import {
 import { runGuardHook as runCeoGuardHook } from '../ceo/guard-hook.ts';
 import { PermissionRelay } from '../ceo/permission-relay.ts';
 import {
+  denyHook,
   loadSubagentGuardConfig,
   runSubagentDeadline,
   runSubagentDone,
@@ -2047,7 +2048,7 @@ const VERBS: Record<string, Verb> = {
       return 2;
     }
   },
-  /** The time limit of a native subagent's call: a PreToolUse hook on every tool, failing open (docs/ARCHITECTURE.md section 38.11). */
+  /** The time limit of a native subagent's call: a PreToolUse hook on every tool, failing closed (docs/ARCHITECTURE.md section 38.11). */
   'subagent-deadline': async (ctx) => {
     try {
       const r = runSubagentDeadline({
@@ -2058,6 +2059,9 @@ const VERBS: Record<string, Verb> = {
       if (r.stdout) ctx.io.out(r.stdout);
       return r.code;
     } catch {
+      // fail closed: a deadline hook that broke refuses the call (the answer travels as a decision, so the shell wrapper's
+      // exit status does not matter)
+      ctx.io.out(denyHook('the subagent time limit check failed').stdout);
       return 0;
     }
   },
@@ -2810,6 +2814,11 @@ export async function runAom(argv: string[], ctx: AomContext): Promise<number> {
       return 2;
     }
     ctx.io.err(`aom ${verb}: ${err instanceof Error ? err.message : String(err)}\n`);
+    // the time-limit hook answers with a decision (the wrapper around it turns a failing exit into "allow")
+    if (verb === 'subagent-deadline') {
+      ctx.io.out(denyHook('the subagent time limit check failed').stdout);
+      return 0;
+    }
     // a guard hook that fails must block (exit 2), never let the call through
     return verb === 'skill-guard' || verb === 'subagent-guard' ? 2 : 1;
   }
@@ -2926,7 +2935,7 @@ async function preloadGuardStdin(): Promise<string> {
 if (isEntry) {
   const confined = confinedReader(process.env, process.cwd());
   const isGuard = process.argv[2] === 'skill-guard' || process.argv[2] === 'subagent-guard';
-  // the two time-limit hooks of a native subagent read their input the same way, but fail open
+  // the two time-limit hooks of a native subagent read their input the same way (the deadline fails closed, the done hook has nothing to protect)
   const readsHookInput =
     isGuard || process.argv[2] === 'subagent-deadline' || process.argv[2] === 'subagent-done';
   const guardStdin = readsHookInput ? preloadGuardStdin() : undefined;

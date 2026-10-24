@@ -134,6 +134,8 @@ interface ActiveChat {
   turnDir?: string;
   /** What a delegate that reads shares with this turn (its working directory and read folders). */
   delegateWork?: DelegateWork;
+  /** The runtime's session id, once it said (a Claude Code transcript folder is named after it). */
+  runtimeSessionId?: string;
   /** The dispatch the frames of this turn answer (`chat.start.attemptId`); a re-dispatch of a running turn replaces it. */
   attemptId?: string;
 }
@@ -782,8 +784,10 @@ export class ChatManager {
         usageSentAt = Date.now();
         this.deps.send('run.usage', { kind: 'chat', id: msg.chatId, usage: ev.usage });
       }
-      if (ev.kind === 'session') sessionId = ev.runtimeSessionId;
-      else if (ev.kind === 'delta') {
+      if (ev.kind === 'session') {
+        sessionId = ev.runtimeSessionId;
+        chat.runtimeSessionId = ev.runtimeSessionId;
+      } else if (ev.kind === 'delta') {
         streamed += ev.text;
         if (segments[segments.length - 1]?.type !== 'text') startText();
         const last = segments[segments.length - 1];
@@ -976,6 +980,12 @@ export class ChatManager {
       ...(direct && session.delegation?.targets.length ? { delegate: true } : {}),
       logFile: `${paths.shiftLogs}/chat-${msg.chatId}.jsonl`,
     });
+    if (subagents.length && chat.session)
+      this.delegates.attachNative(msg.chatId, {
+        session: chat.session,
+        configDir: sandbox.configDir,
+        sessionId: () => chat.runtimeSessionId,
+      });
     if (chat.stopReason) void chat.session.stop(`chat.${chat.stopReason}`);
     await this.finishTurn(chat, { fullPower: false });
   }
@@ -1197,6 +1207,12 @@ export class ChatManager {
       ...(subagents.length ? { subagents } : {}),
       logFile: `${paths.shiftLogs}/chat-${msg.chatId}.jsonl`,
     });
+    if (subagents.length && chat.session)
+      this.delegates.attachNative(msg.chatId, {
+        session: chat.session,
+        configDir: sandbox.configDir,
+        sessionId: () => chat.runtimeSessionId,
+      });
     if (chat.stopReason) void chat.session.stop(`chat.${chat.stopReason}`); // cancelled while starting
 
     await this.finishTurn(chat, {

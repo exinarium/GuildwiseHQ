@@ -337,15 +337,44 @@ describe('the time limit of one native subagent call (R3c)', () => {
     expect(readdirSync(dir)).toEqual([]);
   });
 
-  it('allows everything when there is no state folder, a broken marker or an unreadable input (it fails open)', () => {
+  it('allows everything only when no limit is configured; a broken marker or a missing state folder refuses (fails closed)', () => {
+    // no limit configured: nothing to hold
     expect(runSubagentDeadline({ stdin: read, cfg: { allowed: {} } })).toEqual({ stdout: '', code: 0 });
-    const dir = dirOf();
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, 'broken.json'), '{nope');
-    expect(runSubagentDeadline({ stdin: 'not json', cfg: { allowed: {}, stateDir: dir } })).toEqual({
+    // an unreadable hook input with healthy markers is not this hook's business
+    const healthy = dirOf();
+    mkdirSync(healthy, { recursive: true });
+    expect(runSubagentDeadline({ stdin: 'not json', cfg: { allowed: {}, stateDir: healthy } })).toEqual({
       stdout: '',
       code: 0,
     });
+    // a clock nobody can read cannot hold the limit: the call is refused
+    const broken = dirOf();
+    mkdirSync(broken, { recursive: true });
+    writeFileSync(join(broken, 'broken.json'), '{nope');
+    expect(denies(runSubagentDeadline({ stdin: read, cfg: { allowed: {}, stateDir: broken } }))).toBe(true);
+    writeFileSync(join(broken, 'broken.json'), '{"startedAt":"x"}');
+    expect(denies(runSubagentDeadline({ stdin: read, cfg: { allowed: {}, stateDir: broken } }))).toBe(true);
+    // the state folder is gone
+    expect(
+      denies(runSubagentDeadline({ stdin: read, cfg: { allowed: {}, stateDir: join(dirOf(), 'missing') } })),
+    ).toBe(true);
+  });
+
+  it('refuses to start a call whose clock cannot be started (the marker cannot be written), and writes it whole', async () => {
+    const dir = dirOf();
+    const g = guardIn(dir, 5_000);
+    // the state folder path is under a regular file: it cannot be created
+    const blocker = join(tmp('aom-sub-blk-'), 'file');
+    writeFileSync(blocker, 'x');
+    const cfg = { ...g.cfg, stateDir: join(blocker, 'live') };
+    const r = await runSubagentGuard({ stdin: agentCall, cfg, now: g.now, ask: async () => ({ ok: true }) });
+    expect(denies(r)).toBe(true);
+    expect(JSON.parse(r.stdout).hookSpecificOutput.permissionDecisionReason).toMatch(
+      /time limit.*could not be started/,
+    );
+    // and the working case leaves a whole marker and no temporary file
+    await runSubagentGuard({ stdin: agentCall, cfg: g.cfg, now: g.now, ask: async () => ({ ok: true }) });
+    expect(readdirSync(dir).every((f) => f.endsWith('.json'))).toBe(true);
   });
 
   it('reads the limits and the folder from the guard file', () => {
@@ -501,6 +530,51 @@ describe('reading what native subagents used from the transcripts', () => {
       },
     });
     expect(used[1]?.usage.model).toBe('claude-opus-5-5');
+  });
+
+  it('can be read while the subagent runs: each read takes only the new lines, and a half-written line waits for its end', async () => {
+    const { appendFileSync } = await import('node:fs');
+    const config = tmp();
+    const dir = join(config, 'projects', '-work-live', 'sess-live', 'subagents');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, 'agent-a1.meta.json'),
+      JSON.stringify({ agentType: 'analyst', toolUseId: 'toolu_live' }),
+    );
+    const file = join(dir, 'agent-a1.jsonl');
+    const line = (id: string, input: number, output: number, t: string) =>
+      `${JSON.stringify(msg(id, 'working', t, { input_tokens: input, output_tokens: output }))}`;
+    writeFileSync(file, `${line('m1', 10, 100, '2026-10-24T10:00:01.000Z')}\n`);
+    expect(readNativeSubagentUsage(config, 'sess-live')[0]?.usage).toMatchObject({
+      inputTokens: 10,
+      outputTokens: 100,
+    });
+    // a second call, then half of a third line: the half does not count yet
+    const second = `${line('m2', 5, 50, '2026-10-24T10:00:02.000Z')}\n`;
+    const third = line('m3', 7, 70, '2026-10-24T10:00:03.000Z');
+    appendFileSync(file, second + third.slice(0, 30));
+    expect(readNativeSubagentUsage(config, 'sess-live')[0]?.usage).toMatchObject({
+      inputTokens: 15,
+      outputTokens: 150,
+    });
+    // the rest of the line arrives
+    appendFileSync(file, `${third.slice(30)}\n`);
+    const u = readNativeSubagentUsage(config, 'sess-live')[0];
+    expect(u?.usage).toMatchObject({ inputTokens: 22, outputTokens: 220 });
+    expect(u?.durationMs).toBe(2000);
+    // reading again changes nothing, and a complete last line without its newline is used
+    expect(readNativeSubagentUsage(config, 'sess-live')[0]?.usage).toMatchObject({ inputTokens: 22 });
+    appendFileSync(file, line('m4', 1, 1, '2026-10-24T10:00:04.000Z'));
+    expect(readNativeSubagentUsage(config, 'sess-live')[0]?.usage).toMatchObject({
+      inputTokens: 23,
+      outputTokens: 221,
+    });
+    // a transcript that was replaced by a shorter one starts over
+    writeFileSync(file, `${line('z1', 2, 3, '2026-10-24T10:01:00.000Z')}\n`);
+    expect(readNativeSubagentUsage(config, 'sess-live')[0]?.usage).toMatchObject({
+      inputTokens: 2,
+      outputTokens: 3,
+    });
   });
 
   it('finds nothing for another session, a missing folder, an unknown session id or a broken file', () => {
