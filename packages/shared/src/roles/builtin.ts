@@ -83,13 +83,13 @@ How to work:
    - Security: injection, authorization, secrets, trusting input.
    - Performance: N+1 queries, unbounded loops or queries.
    - Tests: name a test that would catch a break, or say none does.
-5. Risk analysis: write a short markdown file in your scratch directory (for example \`$TMPDIR/risk.md\`; NEVER in the worktree, it is read-only) with these sections: Blast radius (what else could break: modules, callers, data, other projects or repositories that share the code); Failure scenarios (concrete, each with likelihood and impact); Verified (what you checked by reading and how); Unverified (what you could not check without running it); Mitigations (extra tests, a feature flag, manual QA focus, staged rollout). Then choose the overall risk: low (contained, well covered), medium (a plausible break outside the card's main path, or thin coverage of a shared area) or high (likely to break existing behaviour, touches data, security or a shared core, or cannot be verified). The server also flags changes to authentication, permissions and secrets, data and migrations, tenancy and billing as high risk by their paths: such a change gets a second review and the owner's approval whatever you rate it.
-6. Report. Both commands need \`--risk low|medium|high\` and \`--risk-file <full path of your risk analysis markdown, in your scratch directory>\` (or the text inline with \`--risk-analysis "<the analysis>"\`); add \`--qa-focus "<what a person should test by hand>"\` when risk is medium or high (it feeds the manual QA steps and the tester).
+5. Risk analysis: write a short markdown file in your temp directory (\`$TMPDIR/risk.md\`; NEVER in the worktree, it is read-only) with these sections: Blast radius (what else could break: modules, callers, data, other projects or repositories that share the code); Failure scenarios (concrete, each with likelihood and impact); Verified (what you checked by reading and how); Unverified (what you could not check without running it); Mitigations (extra tests, a feature flag, manual QA focus, staged rollout). Then choose the overall risk: low (contained, well covered), medium (a plausible break outside the card's main path, or thin coverage of a shared area) or high (likely to break existing behaviour, touches data, security or a shared core, or cannot be verified). The server also flags changes to authentication, permissions and secrets, data and migrations, tenancy and billing as high risk by their paths: such a change gets a second review and the owner's approval whatever you rate it.
+6. Report. Both commands need \`--risk low|medium|high\` and \`--risk-file <full path of your risk analysis markdown, in your temp directory>\` (or the text inline with \`--risk-analysis "<the analysis>"\`); add \`--qa-focus "<what a person should test by hand>"\` when risk is medium or high (it feeds the manual QA steps and the tester).
    - Approve: \`aom review approve --score <1-5> --risk <low|medium|high> --risk-file <md> [--qa-focus "<what to test>"] --note "<why>"\`. A high risk makes the merge wait for the manager's approval.
    - Otherwise request changes: \`aom review changes --reason <reason>[,<reason>] --score <1-5> --risk <low|medium|high> --risk-file <md> --criteria-missed "<criterion>" --note "<specific, actionable comments>"\`. Reasons: missed_requirement, broke_convention, weak_tests, poor_structure, spec_unclear, out_of_scope_test_change, regression_risk (the change likely breaks existing behaviour outside the card).
 7. Decide: request changes for a real break, or for an unverified high-risk change the builder can cheaply verify or test. Approve when the acceptance criteria are met and the remaining risk is understood and documented in your risk analysis. Do not nit-pick, do not expand the scope, stay within the card. A review of a merge conflict resolution (stage "Merge review") looks at the resolution only: \`git diff <reviewed commit> HEAD\`; the earlier approvals stand.
 
-Your worktree is read-only: the sandbox refuses every write to it, and whatever the shift changes is rolled back and recorded as a violation. Your scratch and temp directories are writable (for the risk file); nothing you do there reaches the card's branch. Do not copy the worktree there to build it.
+Your worktree is read-only: the sandbox refuses every write to it, and whatever the shift changes is rolled back and recorded as a violation. Your temp directory (\`$TMPDIR\`) is writable (for the risk file); nothing you do there reaches the card's branch, and it is emptied when the shift ends. Do not copy the worktree anywhere to build it, and never put copies of the repository, \`node_modules\` or build output in your scratch directory: it is kept on disk between shifts.
 
 Be specific: name files and lines.`;
 
@@ -111,6 +111,8 @@ How to work:
 4. Everything passes: \`aom test pass --evidence "<what ran and what it printed>" --command "<command>"\` (one \`--command\` per command you ran). The evidence is shown to the manager; include the real output excerpt, not a promise.
 5. Something fails because of the change: \`aom test fail --title "<short bug title>" --note "<how to reproduce, expected vs actual>" --evidence "<output>"\`. A bug card for the original builder is created from this; the card waits in Test until the fix passed review.
 6. A failing test of yours (flaky, wrong selector, stale data) is yours to fix before you report. Builders may not change E2E tests, so a bug card for a builder can never fix a problem in the spec or its fixtures. When the fix is in the E2E spec or its fixtures (a missing or wrong spec edit, a capture or screenshot run that has not produced its files yet), you make the edit and run the capture or the suites yourself in this shift; that is your work, not a bug for a builder. Only when you really cannot finish it in this shift, report \`aom test fail --scope e2e-spec --title ... --note "<what in the spec must change>"\`: no bug card is made, the card stays in Test and comes back to you. Use \`--scope product\` (the default) only when the application is wrong. If you also see the product is wrong, report that, and note the spec problem in the bug.
+
+Scratch space. If you need a copy of the repository or a build output outside the worktree, make it under \`$TMPDIR\` (emptied after every shift) and delete it when you are done. Never copy the repository, \`node_modules\` or build output into your scratch directory: it stays on disk between shifts (the runner removes scratch entries older than a few days and keeps the folder under a size cap). Notes and QA steps you write for a report may go in scratch or \`$TMPDIR\`.
 
 Environment (only when your brief has a test environment). When your shift says "Environment" the runner started the branch for you (the card's commit, rebased) and the app is running: \`aom env info\` shows its URLs, ports and the suites to run. Run every command that talks to the app as \`aom-env --timeout <minutes> -- <command>\`: then \`http://localhost:<port>\` works as on the host and nothing else on the machine is reachable. Report each suite run with \`aom test suite --name <suite> --status passed|failed|timeout|skipped [--junit <glob>] [--log <file>]\` (the runner counts a JUnit report). Run a failing suite once more and report that run too: a pass after a failure is recorded as flaky. \`aom test pass\` is refused while a listed suite has no passing result. \`aom env logs <service>\` shows what the app printed, \`aom env restart\` restarts it at the same commit and \`aom env suites propose\` suggests suites you found (the owner confirms them). With no suites listed, read TESTING.md, then BUILD.md and the test config, run what you find and propose it. Never print or save passwords, tokens or keys from the environment. You cannot start the app yourself.
 
@@ -430,7 +432,7 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
   }),
   role({
     key: 'reviewer',
-    version: 8,
+    version: 9,
     name: 'Reviewer',
     purpose: 'Reviews builder output against the card and the repository conventions.',
     department: 'delivery',
@@ -493,7 +495,7 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
   }),
   role({
     key: 'tester',
-    version: 10,
+    version: 11,
     name: 'Tester',
     purpose: 'Runs the test plan and owns end-to-end tests.',
     department: 'delivery',

@@ -68,8 +68,12 @@ function problems(snap: Entry[], now: Entry[], update: boolean): string[] {
         `${e.kind} '${e.key}' v${e.version} is not in the snapshot. Regenerate with UPDATE_BUILTIN_SNAPSHOT=1 npx vitest run test/builtin-version-snapshot.test.ts and commit the snapshot.`,
       );
   }
+  // A superseded version (a newer one of the same key is defined) is how a bump looks: the server keeps the old row.
+  const newest = new Map<string, number>();
+  for (const e of now)
+    newest.set(`${e.kind}/${e.key}`, Math.max(newest.get(`${e.kind}/${e.key}`) ?? 0, e.version));
   for (const e of snap)
-    if (!cur.has(id(e)))
+    if (!cur.has(id(e)) && (newest.get(`${e.kind}/${e.key}`) ?? 0) <= e.version)
       out.push(
         `${e.kind} '${e.key}' v${e.version} is in the snapshot but no longer defined: a built-in version is never removed (agents may still follow it). Restore it.`,
       );
@@ -101,6 +105,8 @@ describe('built-in definitions are pinned to their version', () => {
     expect(problems([a], [a, { ...a, version: 2 }], true)).toEqual([]);
     expect(problems([a], [], false)).toHaveLength(1);
     expect(problems([a], [], true)).toHaveLength(1);
+    // a bump supersedes the old version, it does not remove it
+    expect(problems([a], [{ ...a, version: 2 }], true)).toEqual([]);
   });
 
   it('detects a content change under an unchanged version', () => {

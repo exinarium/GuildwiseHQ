@@ -949,7 +949,8 @@ See [DevOps shifts are unsandboxed](#devops-shifts-are-unsandboxed).
 - `agents/<agentId>/claude/`: CLAUDE_CONFIG_DIR for Claude Code (credentials, auto-memory, caches)
 - `agents/<agentId>/scratch/`: working directory for agent's scratch files
 
-All are cleaned up when the agent is fired.
+All are cleaned up when the agent is fired. `scratch/` is also pruned by a retention policy while the agent lives, see
+"Scratch retention" below.
 
 ### Agent temp directory (`TMPDIR`), cleaned after every shift
 
@@ -972,6 +973,31 @@ where `/tmp` is a RAM tmpfs nothing removed them, and they filled it (backlog #8
 - **Not moved to disk**: the temp dir stays under `/tmp` because of the socket length limit, and Claude Code's shell
   derives its `$TMPDIR` from `CLAUDE_CODE_TMPDIR`, so a long on-disk path would break the sockets; cleaning is the fix.
   The agent's `scratch/` is on disk under the data dir.
+
+### Scratch retention (`scratch.*` in `config.json`)
+
+`agents/<id>/scratch/` is on disk and used to grow without limit (backlog #83: 200 GB of repository copies made by
+reviewers and testers). The runner now prunes it. Only the top-level entries of the folder are judged, each as a unit
+(its age is the newest file inside it):
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `scratch.enabled` | `true` | Master switch. |
+| `scratch.maxAgeDays` | `3` | Entries not touched for this long are removed. |
+| `scratch.maxBytes` | `10737418240` (10 GB) | Per-agent cap; the oldest entries are evicted first until the folder fits. `0`: no cap. |
+| `scratch.keep` | `[]` | Top-level names that are never pruned (small notes an agent keeps across shifts; nothing in Guildwise needs this, reports and QA steps are consumed in the shift that writes them). |
+| `scratch.sweepIntervalHours` | `4` | Period of the sweep of all agents (it also runs at runner start). The stale-worktree sweep runs on the same period. |
+
+When it runs: after every shift (right after the TMPDIR cleanup), at runner start and every `sweepIntervalHours`. It never
+touches an agent that has a shift or chat running in this process (the same hold as for TMPDIR) or whose shift is about to
+be resumed, and it refuses a `scratch` that is a symlink. It uses `lstat` only: a symlink is unlinked and never followed.
+Each removal is logged to `logs/runner.log` (`scratch prune of agent <id>: removed ... (name MB reason)`). Build copies
+belong in `$TMPDIR` (emptied after every shift): the reviewer (role v9) and tester (role v11) instructions say so.
+
+The stale-worktree sweep (above) now also runs every `scratch.sweepIntervalHours`, and removes orphan folders under
+`worktrees/<KEY>-<project>/`: a folder that is not a registered git worktree (no `.git`, or one pointing at a clone that no
+longer lists it), that the server does not report as live, that no shift uses and that has been idle for an hour. A
+worktree of a live card, a busy one, or one with uncommitted changes is still never removed.
 
 ### Shared package caches and .NET in the sandbox
 
@@ -1133,7 +1159,7 @@ on `.git/config.lock`. A git command that still hits "could not lock" or `index.
 
 A safety net for worktrees nobody removed (a crash, a card cancelled while the runner was offline, a database that was
 reset). About 15 seconds after the first connection of the runner process, and again for every repository hygiene run
-(the server sends the command `worktrees.sweep`), the runner:
+(the server sends the command `worktrees.sweep`), and since backlog #83 every `scratch.sweepIntervalHours`, the runner:
 
 1. lists `worktrees/<KEY>-<project id prefix>/<REF>` and asks the server (`worktrees.query`) which of those paths still
    belong to a live card of this workstation (a card that is not done or cancelled, or is done with its finalize still
@@ -1145,7 +1171,7 @@ It is conservative: it removes nothing when the server does not answer within 15
 to the server are still queued in `outbox/`; it never touches the worktree of a running shift; and it never deletes a
 worktree with uncommitted changes. For a stale worktree that has some, nothing is deleted: the server records a
 finding (a BA signal in the daily report) with the paths of the changed files. A non-empty folder that is not a git
-worktree is left alone. The result is logged to `logs/runner.log` when anything was removed or reported.
+worktree is removed only as an idle orphan (see "Scratch retention"), otherwise left alone. The result is logged to `logs/runner.log` when anything was removed or reported.
 
 Everything the server sends that ends up in git or on the filesystem is treated as untrusted:
 branch names and base branches must be valid git refs without a leading `-` (checked again on the runner, `--` is passed

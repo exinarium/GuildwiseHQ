@@ -2,6 +2,32 @@
 
 Logged fixes to pick up when development resumes. Newest first.
 
+## 2026-10-24
+
+### 83. Agent scratch folders and worktrees fill the disk (done, hotfix, runner 0.1.42)
+
+Production runner data dir (runner 0.1.41): 250 GB, of which `agents/<id>/scratch` 200 GB (one agent 80 GB) in many 3-4 GB
+per-task copies (`p517-r6`, `p517-alan`, `rv2`, ...) and `worktrees/` 45 GB (`worktrees/P4-98eeafb0` is a project folder
+holding every card worktree of that project, not one worktree).
+
+Root cause. (1) Nothing ever cleaned `scratch/` before the agent was fired (backlog #81 only handled TMPDIR). (2) The
+reviewer and tester instructions called the writable place "your scratch directory" (even for `$TMPDIR/risk.md`), the
+reviewer text said "Your scratch and temp directories are writable", and the Claude Code sandbox puts scratch on the
+agent's cwd/allow-write list, so agents that copied the repository to build it picked scratch, which lives on disk and
+survives shifts. (3) Worktrees: the stale-worktree sweep ran only 15 s after the runner started and on a hygiene run, never
+periodically; it kept every non-empty folder that was not a git worktree (orphans of a crashed create, a pruned
+registration or a removed clone were never removed), and never removes a worktree with uncommitted changes or one of a live
+card (a card in Build/Review/Test keeps its worktree, node_modules included, until it is done).
+
+**Done (2026-10-24).** `apps/runner/src/sandbox/scratch.ts`: `pruneScratch` / `sweepAgentScratch` remove top-level scratch
+entries not touched for `scratch.maxAgeDays` (3) and, oldest first, enough to fit `scratch.maxBytes` (10 GB); after each
+shift, at runner start and every `scratch.sweepIntervalHours` (4); never while the agent has a shift or chat running
+(`agentTmpHeld`) or a persisted shift to resume; lstat only, symlinks unlinked and never followed; `scratch.keep` names are
+never pruned; every removal is logged. Periodic worktree sweep (same interval) plus removal of orphan worktree folders (not
+registered, idle for 1 hour, not live, not used by a shift; then `git worktree prune`). Reviewer role v9 and tester role v11
+send build copies to `$TMPDIR`. Tests: `scratch-prune.test.ts`, `sweep.test.ts` (orphans). Not done: worktrees of live cards
+that are idle for long stay (they may hold unpushed work); disk usage per agent on the workstation report.
+
 ## 2026-10-18
 
 ### 82. Project graphs and an organization graph — SHIPPED, measuring
@@ -297,6 +323,7 @@ The details of each done item follow this list, by date.
 - #63: Batch intake: hand the BA a list of tickets. Done 2026-10-14.
 - #58: Start action: run a project branch on a workstation (phase 1: manual start, supervised services, panel, plans recorded). Done 2026-10-14; P2 done (plan replay, service sandbox, Restart / Update & restart, run worktree sweep, services survive a runner restart); P3 and P4 done under #59.
 - #59: Integration and E2E tests per project, run by testers (local test environment per card, remote deploy targets). Done 2026-10-14 (P3 and P4; private-address targets and macOS testers left).
+- #83: Hotfix: agent scratch folders (200 GB) and stale worktrees filled the runner's disk: scratch retention, periodic worktree sweep, build copies to TMPDIR. Done 2026-10-24.
 - #82: Hotfix: the CEO still did not run after #79 (production 2026-10-15 23:00-23:42 UTC: 48 wakes pending, no CEO shift for 40+ minutes, no notice saying why). Root cause: the hourly wake limit (`maxWakesPerHour` 12) counted every `ceo_batches` row of the last hour except `rejected`/`lost`. The server that ran before the #79 deploy had stopped 12 CEO shifts (claim lost, 22:57-23:00 UTC) and left their batches `failed` with outcome NULL and error NULL (the pre-#79 end path wrote neither); those 12 counted, the limit was reached, and `ceoPass` skipped the org silently until 23:57 UTC (the oldest batch leaving the window). Nothing else held it: ceo_settings enabled and not paused, the agent not paused, workstation 3921a750 connected with `ceo:1`, all shifts ended, no wake `taken`, no backoff (NULL outcomes are not start failures). Also: the "Your CEO is offline" notice was sent whenever an urgent wake was 30 minutes old, even for a reachable CEO ("unreachable"), and the failure notice read "cannot start: unknown". Fix: the cap counts only batches that really ran (not failed with outcome NULL, rejected, lost, stopped, released; `ceo/gate.ts`); `ceoFailures` ignores batches without an outcome; migration 2016 gives the legacy rows outcome `released` with an explanatory error; one shared `ceoGate` (backoff, running shift, hourly limit) is used by the dispatcher and by the CEO Overview, which shows "The CEO has 48 wakes pending and is waiting: hourly limit reached (12 of 12 shifts in the last hour), next shift at 23:57 UTC" (also "backoff until 23:30 UTC ..." and "the runner is not connected yet"); the desk notice for an urgent wake waiting over 30 minutes now names the real blocker (offline reason, backoff, limit) instead of always saying offline. Tests: `ceo-hourly-cap.test.ts`, `ceo-overview.test.tsx`. Done 2026-10-16.
 - #81: Agent temp folders are never cleaned (filled the RAM /tmp). Done 2026-10-16.
 - #80: Dependencies count as landed at Finalize; the Architect designs before dependencies land (assumptions reviewed after landing). Done 2026-10-15.

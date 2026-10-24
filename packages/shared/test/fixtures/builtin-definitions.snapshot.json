@@ -62,8 +62,8 @@
   {
     "kind": "role",
     "key": "reviewer",
-    "version": 8,
-    "sha256": "3a3d32bd70d3534e87116236825f319ba660450fe6a8e3211b26e0a5bfbac1a5"
+    "version": 9,
+    "sha256": "109cd751717f15928bcb9217921eb79b7577f680772de7d3a22a2f15a96b33ee"
   },
   {
     "kind": "role",
@@ -74,8 +74,8 @@
   {
     "kind": "role",
     "key": "tester",
-    "version": 10,
-    "sha256": "ca0449d71f9560fd2042fd77e3d8494bd1be7990895fbf09ccb7926b6d26cc70"
+    "version": 11,
+    "sha256": "65052e591e24430f5e03c445118d61112cf559ad4df32b895b57a050aea5707d"
   },
   {
     "kind": "role",
