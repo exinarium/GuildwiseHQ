@@ -12,7 +12,7 @@ import { createProject, demoApi, pairWorkstation } from './seed.ts';
 /**
  * The Vaults video (sidebar section 20): the vault cards, Register a vault (a git repository for a project that has a
  * local folder), the sync interval and Edit, and a paused sync with "I resolved it, resume".
- * Output: apps/web/public/videos/vaults.{webm,mp4,vtt,json}
+ * Output: media/videos/vaults.{webm,mp4,vtt,json}
  *   e2e/video/record.sh vaults
  */
 const SLUG = 'vaults';

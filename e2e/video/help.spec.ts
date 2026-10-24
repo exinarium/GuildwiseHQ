@@ -9,7 +9,7 @@ import { demoApi } from './seed.ts';
 /**
  * The Help video (sidebar section 23): search the articles, the glossary, what's new, the blog, Contact us and My
  * requests, the "?" page help and the tour.
- * Output: apps/web/public/videos/help.{webm,mp4,vtt,json}
+ * Output: media/videos/help.{webm,mp4,vtt,json}
  *   e2e/video/record.sh help
  */
 const SLUG = 'help';

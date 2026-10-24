@@ -11,7 +11,7 @@ import { createProject, demoApi } from './seed.ts';
 /**
  * The Organization video (sidebar section 22): General and your role, Members (roles, Invite member, Send invitation),
  * Invitations (Resend, Revoke), Guests, E-mail inbox, Project links and Plan & limits.
- * Output: apps/web/public/videos/organization.{webm,mp4,vtt,json}
+ * Output: media/videos/organization.{webm,mp4,vtt,json}
  *   e2e/video/record.sh organization
  */
 const SLUG = 'organization';

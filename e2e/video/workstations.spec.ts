@@ -10,7 +10,7 @@ import { createProject, demoApi, pairWorkstation } from './seed.ts';
 /**
  * The Workstations video (sidebar section 13): the Add a workstation wizard, pairing with a code, the workstation card
  * (health, Shifts at once, git hosts) and Check for updates.
- * Output: apps/web/public/videos/workstations.{webm,mp4,vtt,json}
+ * Output: media/videos/workstations.{webm,mp4,vtt,json}
  *   e2e/video/record.sh workstations
  */
 const SLUG = 'workstations';

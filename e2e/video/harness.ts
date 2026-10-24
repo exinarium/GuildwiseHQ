@@ -12,9 +12,9 @@ import { mux, type Spoken, speak, toMp4, VOICE, vtt } from './voice.ts';
  * and writes the four output files. A spec only keeps what is its own: its seeding and the clicks of each passage.
  *
  * Output (served by the app as static files, read by the Help page, the tour and the "Watch the video" button):
- *   <OUT_DIR>/<slug>.webm  .mp4  .vtt  .json     OUT_DIR is apps/web/public/videos, or AOM_VIDEO_OUT
+ *   <OUT_DIR>/<slug>.webm  .mp4  .vtt  .json     OUT_DIR is media/videos, or AOM_VIDEO_OUT
  */
-export const OUT_DIR = process.env.AOM_VIDEO_OUT ?? join(ROOT, 'apps/web/public/videos');
+export const OUT_DIR = process.env.AOM_VIDEO_OUT ?? join(ROOT, 'media/videos');
 const RAW_DIR = join(E2E_DIR, 'video-raw');
 const PACE = Number(process.env.AOM_VIDEO_PACE ?? 1); // pauses between actions; 0.5 is twice as fast (the voice sets the pace)
 /** A pause between actions, scaled by AOM_VIDEO_PACE. */
@@ -23,7 +23,7 @@ const GAP = 0.7; // seconds of quiet after every passage
 const MAX_BYTES = 20 * 1024 * 1024;
 
 export interface VideoScript {
-  /** File name stem: `apps/web/public/videos/<slug>.*`. Must match the key in apps/web/src/lib/videos.ts. */
+  /** File name stem: `media/videos/<slug>.*`. Must match the key in apps/web/src/lib/videos.ts. */
   slug: string;
   /** Shown above the player and written to the chapters JSON. */
   title: string;

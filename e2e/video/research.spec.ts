@@ -8,7 +8,7 @@ import { createProject, demoApi, hireAgent, pairWorkstation } from './seed.ts';
 /**
  * The Research video (sidebar section 4): New research card, the research In progress, and the Published notes with
  * their citations and where each note is kept.
- * Output: apps/web/public/videos/research.{webm,mp4,vtt,json}
+ * Output: media/videos/research.{webm,mp4,vtt,json}
  *   e2e/video/record.sh research
  * A mock researcher and checker work the cards with scripted claims (example.com sources): no network, no tokens.
  */

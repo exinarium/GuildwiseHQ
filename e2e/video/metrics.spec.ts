@@ -9,7 +9,7 @@ import { seedDemoHistory } from './seed-history.ts';
 /**
  * The Metrics video (sidebar section 16): the range and Project filter, then the six panels. A mock run lasts minutes,
  * so 30 days of finished cards, waits, test runs and shifts across two projects are written by seed-history.ts.
- * Output: apps/web/public/videos/metrics.{webm,mp4,vtt,json}
+ * Output: media/videos/metrics.{webm,mp4,vtt,json}
  *   e2e/video/record.sh metrics
  */
 const SLUG = 'metrics';

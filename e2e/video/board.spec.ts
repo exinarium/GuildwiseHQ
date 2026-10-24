@@ -8,7 +8,7 @@ import { createProject, demoApi, hireAgent, pairWorkstation } from './seed.ts';
 /**
  * The Board video (sidebar section 1): the columns of the workflow, the filter chips, a card's detail, New card,
  * Pause project and the Archive.
- * Output: apps/web/public/videos/board.{webm,mp4,vtt,json}
+ * Output: media/videos/board.{webm,mp4,vtt,json}
  *   e2e/video/record.sh board
  */
 const SLUG = 'board';

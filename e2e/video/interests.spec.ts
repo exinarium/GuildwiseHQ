@@ -9,7 +9,7 @@ import { demoApi, hireAgent, pairWorkstation } from './seed.ts';
 /**
  * The Interests video (sidebar section 18): New interest with its run and delivery schedules, taste rules, the daily
  * quiet cap, Deliver now, archive and restore.
- * Output: apps/web/public/videos/interests.{webm,mp4,vtt,json}
+ * Output: media/videos/interests.{webm,mp4,vtt,json}
  *   e2e/video/record.sh interests
  */
 const SLUG = 'interests';

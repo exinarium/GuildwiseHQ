@@ -7,7 +7,7 @@ import { createProject, demoApi } from './seed.ts';
 
 /**
  * The Backlog video (sidebar section 2): quick add, flag, sort, drop, and choosing what to send to the BA.
- * Output: apps/web/public/videos/backlog.{webm,mp4,vtt,json}
+ * Output: media/videos/backlog.{webm,mp4,vtt,json}
  *   e2e/video/record.sh backlog
  */
 const SLUG = 'backlog';

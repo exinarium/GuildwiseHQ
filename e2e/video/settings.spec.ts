@@ -8,7 +8,7 @@ import { createProject, demoApi } from './seed.ts';
 /**
  * The Settings video (sidebar section 21): your picture, two-factor login (shown, not enrolled), Expert mode for code
  * changes, the Monday briefing, notifications, the weekly blog digest and your time zone.
- * Output: apps/web/public/videos/settings.{webm,mp4,vtt,json}
+ * Output: media/videos/settings.{webm,mp4,vtt,json}
  *   e2e/video/record.sh settings
  */
 const SLUG = 'settings';

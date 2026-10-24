@@ -2,7 +2,7 @@ import { buildNav, isActive } from '../components/shell/nav-config.ts';
 
 /**
  * The training videos: one Getting started video and one video per section of the sidebar (see
- * docs/guide/VIDEO-PLAN.md). The files are recorded by `e2e/video/<slug>.spec.ts` into `public/videos/<slug>.*`.
+ * docs/guide/VIDEO-PLAN.md). The files are recorded by `e2e/video/<slug>.spec.ts` into `media/videos/<slug>.*`.
  *
  * Nothing links to a video that has not been recorded: every link (the Help article, the tour step and the "Watch the
  * video" button of the page help) goes through `publishedVideos`, which only lists entries marked `published`, and the

@@ -16,7 +16,7 @@ import { demoApi, pairWorkstation } from './seed.ts';
  *   e2e/video/setup-voice.sh            once: Piper, the voice and a static ffmpeg into ~/.cache/aom-video
  *   pnpm build && e2e/video/record.sh getting-started
  *
- * Output: apps/web/public/videos/getting-started.{webm,mp4,vtt,json}
+ * Output: media/videos/getting-started.{webm,mp4,vtt,json}
  */
 const SLUG = 'getting-started';
 

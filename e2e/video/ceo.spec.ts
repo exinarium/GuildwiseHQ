@@ -9,7 +9,7 @@ import { ceoAct, createProject, demoApi, pairWorkstation, provisionCeo } from '.
 /**
  * The CEO video (sidebar section 11): Overview, Authority, Reporting & alerts, Ask {CEO}, the Activity log with Undo,
  * and the Workstations tab.
- * Output: apps/web/public/videos/ceo.{webm,mp4,vtt,json}
+ * Output: media/videos/ceo.{webm,mp4,vtt,json}
  *   e2e/video/record.sh ceo
  */
 const SLUG = 'ceo';

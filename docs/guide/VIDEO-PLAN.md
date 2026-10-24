@@ -19,13 +19,13 @@ The pipeline lives in `e2e/video/` (V-0 is done, see below):
 
 - A Playwright spec drives a seeded demo stack (default port 4671, database `aom_onboard_video`, organization "Acme", Owner "Alex Morgan", mock runner) and records the screen with a step banner and a visible pointer.
 - The voice is Piper `en_GB-cori-high`. The narration cues are spoken first and their lengths set the pacing of the clicks. Piper and a static ffmpeg live in `~/.cache/aom-video` (`e2e/video/setup-voice.sh`).
-- Output per video: WebM and MP4, VTT captions and a chapters JSON, together under 20 MB, in `apps/web/public/videos/<slug>.*`.
+- Output per video: WebM and MP4, VTT captions and a chapters JSON, together under 20 MB, in `media/videos/<slug>.*`. The videos are served by the media container (`media/Dockerfile`, see `docs/DEPLOY.md` "Help videos"); commit the files, then `scripts/media-changed.sh && scripts/media-build.sh` publishes them.
 - Only demo data appears on screen (`@demo.local`, `example.com`, invented names). No real customer or personal data.
 - How to record one video, a list, and several at once: `docs/guide/README.md`, "Recording a video".
 
 ## Rules for every video
 
-1. One spec file and one narration module per video: `e2e/video/<slug>.spec.ts` and `e2e/video/narration/<slug>.ts`. Output `apps/web/public/videos/<slug>.*`.
+1. One spec file and one narration module per video: `e2e/video/<slug>.spec.ts` and `e2e/video/narration/<slug>.ts`. Output `media/videos/<slug>.*`.
 2. Each video seeds its own data through the API in its own spec (helpers in `e2e/video/seed.ts`). It never relies on the recording or the state of another video. `record.sh` gives every video a fresh stack and database.
 3. It starts on its own page, reached through the sidebar (never "as we saw in…"), and ends on that page.
 4. It never names or shows another section video. It may say "see the guide, chapter x".
@@ -37,7 +37,7 @@ The pipeline lives in `e2e/video/` (V-0 is done, see below):
 ## Pipeline (V-0, done)
 
 - `e2e/video/playwright.video.config.ts` matches every `e2e/video/*.spec.ts`; `AOM_VIDEO_SLUG` picks one. `e2e/video/record.sh <slug>...` records a list, each on a fresh stack.
-- Each spec writes `apps/web/public/videos/<slug>.{webm,mp4,vtt,json}` through the shared harness (`harness.ts`); narration modules live in `e2e/video/narration/<slug>.ts`; seeding helpers (Acme, Alex Morgan, mock runner, demo project, agents, cards) are in `seed.ts`; the spec template is `e2e/video/template/slug.spec.ts`.
+- Each spec writes `media/videos/<slug>.{webm,mp4,vtt,json}` through the shared harness (`harness.ts`); narration modules live in `e2e/video/narration/<slug>.ts`; seeding helpers (Acme, Alex Morgan, mock runner, demo project, agents, cards) are in `seed.ts`; the spec template is `e2e/video/template/slug.spec.ts`.
 - The stack's port, database and scratch directory are set per run (`AOM_VIDEO_PORT`, `AOM_VIDEO_DB`, `AOM_VIDEO_DIR_BASE`), so recordings can run at once.
 - The web app: `useVideoInfo(url)` and `VideoPlayer` take a URL or slug that defaults to getting-started; `apps/web/src/lib/videos.ts` is the registry (slug to title, sidebar entry, Help anchor and a `published` flag); a published video appears under its Help anchor, in the tour step of its section and behind a `Watch the video` button in the page help panel of its section.
 - The Backlog video was recorded as the proof of the pipeline and is published.

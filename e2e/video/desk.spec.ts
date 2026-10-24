@@ -11,7 +11,7 @@ import { createProject, demoApi, hireAgent, pairWorkstation } from './seed.ts';
 /**
  * The Desk video (sidebar section 5): the filters and groups, answering a question with `Add to ledger as`, accepting
  * the CEO's recommendation, what the CEO handled on its own and its Daily report.
- * Output: apps/web/public/videos/desk.{webm,mp4,vtt,json}
+ * Output: media/videos/desk.{webm,mp4,vtt,json}
  *   e2e/video/record.sh desk
  */
 const SLUG = 'desk';
