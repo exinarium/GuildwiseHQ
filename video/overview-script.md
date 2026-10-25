@@ -33,7 +33,7 @@
 | 2 | A team of agents, not a chatbot | 00:45 | 1:15 |
 | 3 | Your organization and who does what | 02:00 | 0:50 |
 | 4 | The board: how a card travels | 02:50 | 1:40 |
-| 5 | The Desk: decisions only you can make | 04:30 | 1:00 |
+| 5 | Your desk: decisions only you can make | 04:30 | 1:00 |
 | 6 | From an idea to a PRD: Discovery and the Boardroom | 05:30 | 1:45 |
 | 7 | Your agents, the CEO and the org chart | 07:15 | 1:15 |
 | 8 | Workstations: your code stays on your machines | 08:30 | 1:15 |
@@ -132,7 +132,7 @@
 
 ---
 
-## Chapter 5. The Desk: decisions only you can make
+## Chapter 5. Your desk: decisions only you can make
 
 **Start: 04:30. Target: 1:00.**
 
@@ -144,7 +144,7 @@
 
 **Narration**
 
-> The Desk is your inbox of decisions. It holds the questions, the approvals and the go-aheads that only you can give.
+> Your desk is your inbox of decisions. It holds the questions, the approvals and the go-aheads that only you can give.
 >
 > When an agent is unsure, it asks you here, and it carries on once you answer. When something is risky, such as merging a large change, it waits for your approval.
 >

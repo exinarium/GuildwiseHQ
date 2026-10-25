@@ -162,7 +162,7 @@ export function Desk() {
   if (open.isPending)
     return (
       <div className="mx-auto max-w-3xl">
-        <PageHeader title="Decision desk" />
+        <PageHeader title="Your desk" />
         <DeskSkeleton />
       </div>
     );
@@ -185,7 +185,7 @@ export function Desk() {
   return (
     <div className="mx-auto max-w-3xl">
       <PageHeader
-        title="Decision desk"
+        title="Your desk"
         sub={
           <span data-testid="desk-counts">
             {counts.open} open · {counts.blocking} blocking

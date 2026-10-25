@@ -6,7 +6,7 @@ export const SHORTCUTS: Array<{ keys: string[]; label: string; group: 'General' 
   { group: 'General', keys: ['/'], label: 'Search cards (focus the board search, or open the palette)' },
   { group: 'General', keys: ['?'], label: 'Show this list' },
   { group: 'Go to', keys: ['g', 'b'], label: 'Board' },
-  { group: 'Go to', keys: ['g', 'd'], label: 'Decision desk' },
+  { group: 'Go to', keys: ['g', 'd'], label: 'Your desk' },
   { group: 'Go to', keys: ['g', 'a'], label: 'Agents' },
   { group: 'Go to', keys: ['g', 'p'], label: 'Projects' },
   { group: 'Go to', keys: ['g', 'w'], label: 'Workstations' },

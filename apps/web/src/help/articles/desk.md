@@ -1,11 +1,11 @@
 ---
-title: The Decision desk
-summary: Desk items and kinds, blocking, answering questions, standing orders and adding to the ledger.
+title: Your desk
+summary: Desk items and kinds, the decision desk, blocking, answering questions, standing orders, the ledger.
 keywords: [desk, question, approval, blocking, standing order, ledger]
 order: 8
 ---
 
-The **desk** is where every question and approval reaches you. Cards that wait on a question do not move forward until you answer. The **Decision desk** page shows every item waiting for you, with filters (**All**, **Blocking**, **Questions**, **Approvals**, **Notices**) and a sort order (Priority, Oldest, Newest). Items are grouped as **Needs you first**, **Blocking work**, **Decisions** and **Heads-up**.
+The **desk** is where every question and approval reaches you. Cards that wait on a question do not move forward until you answer. The **Desk** page shows every item waiting for you, with filters (**All**, **Blocking**, **Questions**, **Approvals**, **Notices**) and a sort order (Priority, Oldest, Newest). Items are grouped as **Needs you first**, **Blocking work**, **Decisions** and **Heads-up**.
 
 ## Desk items {#desk-items}
 

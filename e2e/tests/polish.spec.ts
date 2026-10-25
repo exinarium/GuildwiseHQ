@@ -117,7 +117,7 @@ test('Ctrl+K jumps to a card, g d goes to the desk, ? lists the shortcuts', asyn
   await page.keyboard.press('Escape');
   await page.locator('main').click({ position: { x: 5, y: 5 } });
   await page.keyboard.press('?');
-  await expect(page.getByTestId('shortcuts-dialog')).toContainText('Decision desk');
+  await expect(page.getByTestId('shortcuts-dialog')).toContainText('Your desk');
   await page.keyboard.press('Escape');
   await page.keyboard.press('n');
   await expect(page).toHaveURL(/\/cards\/new\?project=POL/);

@@ -1,6 +1,6 @@
 # Guildwise HQ
 
-**Run an organization of AI agents.** Free and open source. Give your agents roles, a lean team, a board, a decision desk, approval gates, budgets and an audit trail, on your own machines and AI accounts, while you make the decisions. It comes set up for software delivery (spec, build, review, test, deploy) and extends to other work you hand to agents.
+**Run an organization of AI agents.** Free and open source. Give your agents roles, a lean team, a board, your desk, approval gates, budgets and an audit trail, on your own machines and AI accounts, while you make the decisions. It comes set up for software delivery (spec, build, review, test, deploy) and extends to other work you hand to agents.
 
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Latest release](https://img.shields.io/github/v/release/exinarium/GuildwiseHQ)](https://github.com/exinarium/GuildwiseHQ/releases)

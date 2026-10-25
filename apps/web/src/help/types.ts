@@ -10,7 +10,7 @@ export interface PageHelpControl {
 
 /** The "What's on this page" panel of one route. */
 export interface PageHelp {
-  /** The page name as the user knows it ("Decision desk"). */
+  /** The page name as the user knows it ("Your desk"). */
   title: string;
   /** One to three sentences: what the page is for. */
   intro: string;

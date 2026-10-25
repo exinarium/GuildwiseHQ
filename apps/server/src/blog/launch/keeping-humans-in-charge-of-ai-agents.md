@@ -8,7 +8,7 @@ cover:
   alt: Abstract grid of connected nodes on a dark blue gradient
 seo:
   metaTitle: "Keeping humans in charge of AI agents"
-  metaDescription: "Approvals, a decision desk, budgets and audit trails: practical governance for small teams running AI agents."
+  metaDescription: "Approvals, your desk, budgets and audit trails: practical governance for small teams running AI agents."
 social:
   facebookText: "New on the blog: how a small team keeps people in charge of AI agents with approvals, one place for decisions, budgets and an audit trail."
   linkedinText: "You do not need a compliance department to govern AI agents. Five habits go a long way: least privilege, approvals for high-impact actions, one place for decisions, budgets, and a record of what happened. A practical guide for small teams."
@@ -61,7 +61,7 @@ That last line has a legal angle in some places. South Africa's Protection of Pe
 
 Approvals fail in practice when they arrive as scattered chat messages and emails. The agent waits, the person misses the message, and work stalls or someone approves from a phone without the context.
 
-A decision desk is the fix: every question, approval and alert lands in one queue, with the context, the options and a recommendation, so an answer takes a minute rather than an investigation. Two further details matter.
+Your desk is the fix: every question, approval and alert lands in one queue, with the context, the options and a recommendation, so an answer takes a minute rather than an investigation. Two further details matter.
 
 First, the answer should be recorded once and available to every agent that asks later. Being asked the same question five times is how people start approving without reading.
 

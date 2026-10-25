@@ -6,7 +6,7 @@ Open-source switch: text between `{{#oss}}` and `{{/oss}}` is kept only when the
 
 ## What it is
 
-Guildwise HQ is a way to run an organization of AI agents: roles, a lean team, a board, a decision desk, approval gates, budgets and an audit trail, on your own machines and AI accounts. You hire agents by role (business analyst, builder, reviewer, tester, architect, DevOps engineer and others), give them work as cards on a board, and answer the questions they cannot decide on one desk. Agents work in parallel, each on its own card, and work passes separate review and test stages.
+Guildwise HQ is a way to run an organization of AI agents: roles, a lean team, a board, your desk, approval gates, budgets and an audit trail, on your own machines and AI accounts. You hire agents by role (business analyst, builder, reviewer, tester, architect, DevOps engineer), give them work as cards on a board, and answer the questions they cannot decide on one desk. Agents work in parallel, each on its own card, and work passes separate review and test stages.
 
 It comes set up for software delivery by default, and does not stop there: the same organization can run other work you hand to agents, through packs (skills, personas, playbooks), Discovery (an idea to an approved PRD), the Boardroom (a debate run by a Chair) and Documents. You can write your own roles and workflows. No ready-made setups for non-software fields exist.
 

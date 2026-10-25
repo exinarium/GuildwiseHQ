@@ -1129,7 +1129,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
     article: 'organizations-and-roles#roles',
   },
   '/desk': {
-    title: 'Decision desk',
+    title: 'Your desk',
     intro:
       'Questions, approvals and alerts from your agents waiting on your answer. Answer them to keep work moving.',
     controls: [

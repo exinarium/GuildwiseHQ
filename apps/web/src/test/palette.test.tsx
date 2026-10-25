@@ -127,7 +127,7 @@ describe('keyboard shortcuts', () => {
     setup();
     await user.keyboard('?');
     const dlg = await screen.findByTestId('shortcuts-dialog');
-    expect(dlg).toHaveTextContent('Decision desk');
+    expect(dlg).toHaveTextContent('Your desk');
     expect(dlg).toHaveTextContent('New card');
   });
 });

@@ -180,7 +180,7 @@ describe('a conversation', () => {
     // an older message of the conversation never carries help text
     await ask({
       messages: [
-        user('What is the Decision desk?'),
+        user('What is the decision desk?'),
         { role: 'assistant', content: 'It is where decisions wait.' },
         user('thanks'),
       ],
@@ -189,7 +189,7 @@ describe('a conversation', () => {
     expect(msgs[0].content).toHaveLength(1);
     // a short follow-up keeps the topic of the question before it
     expect(msgs[2].content).toHaveLength(2);
-    expect(msgs[2].content[0].text).toContain('### The Decision desk');
+    expect(msgs[2].content[0].text).toContain('### Your desk');
   });
 
   it('sends no help block for an off-topic question', async () => {

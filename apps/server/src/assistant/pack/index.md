@@ -1,7 +1,7 @@
 <product_facts>
 ## What it is
 
-Guildwise HQ is a way to run an organization of AI agents: roles, a lean team, a board, a decision desk, approval gates, budgets and an audit trail, on your own machines and AI accounts. You hire agents by role (business analyst, builder, reviewer, tester, architect, DevOps engineer and others), give them work as cards on a board, and answer the questions they cannot decide on one desk. Agents work in parallel, each on its own card, and work passes separate review and test stages.
+Guildwise HQ is a way to run an organization of AI agents: roles, a lean team, a board, your desk, approval gates, budgets and an audit trail, on your own machines and AI accounts. You hire agents by role (business analyst, builder, reviewer, tester, architect, DevOps engineer), give them work as cards on a board, and answer the questions they cannot decide on one desk. Agents work in parallel, each on its own card, and work passes separate review and test stages.
 
 It comes set up for software delivery by default, and does not stop there: the same organization can run other work you hand to agents, through packs (skills, personas, playbooks), Discovery (an idea to an approved PRD), the Boardroom (a debate run by a Chair) and Documents. You can write your own roles and workflows. No ready-made setups for non-software fields exist.
 
@@ -120,7 +120,7 @@ The in-app help articles. The ones that match the visitor's question are attache
 - Board and cards: Reading the board and its warning banners, creating and editing cards, moving cards, backing off, risk tiers and search.
 - Agents: Hiring agents, seniority, runtime and model, allowed projects, focus, firing and the HR board.
 - DevOps and repository hygiene: The DevOps engineer and Ask DevOps, approvals, conflicts, repository hygiene and saved work, the toolchain, the working branch and new…
-- The Decision desk: Desk items and kinds, blocking, answering questions, standing orders and adding to the ledger.
+- Your desk: Desk items and kinds, the decision desk, blocking, answering questions, standing orders, the ledger.
 - Ledger and vaults: The ledger, searching it, vaults and shared knowledge, vault conflicts.
 - Intake and outbox: Intake from Jira and GitHub, unmapped tickets, credentials, the outbox and guardrails.
 - The architect: investigate and design: The optional design step before build, investigation-only cards, where reports go, the main branch merge, and what the architect may touch.

@@ -20,7 +20,7 @@ The board shows one column per stage (for a Code project: Spec, To do, Rework, I
 - **Backing off** badge when the card is being held back after failed shifts (see below).
 - **Badges** for the workflow it runs on (for example Research), its phase, **Blocked**, or a waiting reason such as **waiting on bug**, **Awaiting your approval**, **Finalizing**, **waiting on DevOps** or **waiting for sub-workflow**. A card made by a sub-workflow step of another card says **Started by** that card.
 - **Warning banners** under the card, written out in words, each with a link that fixes it when there is one:
-  - **Blocked: the question** that holds the card, with a link to the Decision desk.
+  - **Blocked: the question** that holds the card, with a link to your desk.
   - **Repository problem** (for example a conflict while updating, or a failed login) on the card's repository, linking to the project's repository settings. See [repository hygiene](/help/devops-and-hygiene#hygiene).
   - **Monthly budget** nearly used up, used up (new work waits), or overridden, linking to the budget settings for Owners and Admins. See [Budgets and costs](/help/budgets-and-costs#monthly-budgets).
   - Plus the "nobody can take this card" and backing-off messages described below. Tap the arrow on a banner for the full reason.

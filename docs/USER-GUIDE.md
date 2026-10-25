@@ -703,7 +703,7 @@ The **Ledger** page lists everything and is searchable, and has a **Project** fi
 
 ![The ledger](guide/assets/ledger.jpg)
 
-> **In the app:** Help, "The Decision desk" (`/help/desk`) and "Ledger and vaults" (`/help/ledger-and-vaults`).
+> **In the app:** Help, "Your desk" (`/help/desk`) and "Ledger and vaults" (`/help/ledger-and-vaults`).
 
 **Approve from the notification.** A push for an approval has **Approve** and **Reject** buttons, and a push for a question with options has its first two options (phones show two at most; the notification itself opens the Desk for the rest). A button opens a small page that asks you to sign in, shows the item and waits for you to press the button: nothing happens just from opening it. The link works once, for 15 minutes, only for you. It is not offered for code approvals (you see the diff first) or items that need more input. Every use is on the audit log.
 
@@ -711,7 +711,7 @@ The **Ledger** page lists everything and is searchable, and has a **Project** fi
 
 In the project settings, **Test without an environment** replaces the old "Test mode" and "Test Environment" standing orders (which contradicted each other). Off (the default): when a card needs a test environment and none is ready, it waits for DevOps to start one. On: the tester runs what it can without an environment and records in its note that none was used.
 
-> **In the app:** watch the videos "Your Desk" (Help, "The Decision desk", `/help/desk#desk-items`) and "The Ledger" (Help, "Ledger and vaults", `/help/ledger-and-vaults#ledger`). The page's own help panel (**?** in the top bar) has each too, under **Watch the video**.
+> **In the app:** watch the videos "Your Desk" (Help, "Your desk", `/help/desk#desk-items`) and "The Ledger" (Help, "Ledger and vaults", `/help/ledger-and-vaults#ledger`). The page's own help panel (**?** in the top bar) has each too, under **Watch the video**.
 
 **Reminders for open items.** A question, approval, escalation or digest rating that stays open for **3 days** (the period is an organization setting under **Settings > General > Reminders for open items**; 0 turns it off) reminds the person it is waiting for (the person it is addressed to, else the card's owner, else the project's owners, else the Owners and Admins). They get a notification on their devices (category **Reminders for open items**, on by default) and the item shows **Reminded**. It repeats at most once per period. An item that sits with an agent is handed back to the agent once instead. **Snooze** on an item holds its reminders back for 1 day to 2 weeks. Reports (the floor report, BA reports, CEO notices) are never chased.
 
@@ -1542,7 +1542,7 @@ The **Members** list under **Organization** is visible to you, read-only.
 - Check the desk once or twice a day. Blocked cards wait for answers, and waiting costs time, not money.
 - Keep an eye on the budget bar in the board header. If the project nears its budget, tell an Owner or Admin before the pause starts.
 
-> **In the app:** Help, "Board and cards" (`/help/board-and-cards`) and "The Decision desk" (`/help/desk`).
+> **In the app:** Help, "Board and cards" (`/help/board-and-cards`) and "Your desk" (`/help/desk`).
 
 ## 6. For Guests
 
@@ -1923,7 +1923,7 @@ Every entry of the sidebar, in sidebar order, with who sees it, where this guide
 | 2 | **Backlog** (project tab) | Everybody reads; Owners and Admins edit | 4.3b | `backlog` | Board and cards |
 | 3 | **Environments** (code projects) | Everybody; Owner approves | 4.21, 4.23, 4.27 | `environments` | Phases and follow-ups |
 | 4 | **Research** (projects with research) | Everybody | 4.13, 8.2 | `research` | Converting a project |
-| 5 | **Desk** | Everybody | 3.8, 4.5, 4.11 | `desk` | The Decision desk |
+| 5 | **Desk** | Everybody | 3.8, 4.5, 4.11 | `desk` | Your desk |
 | 6 | **Intake** | Owners and Admins | 4.8 | `intake` | Intake and outbox |
 | 7 | **Automations** | Everybody | 4.8 | `schedules` | Automations and integrations |
 | 8 | **Projects** (and project settings) | Everybody; Owners and Admins change | 3.6, 4.3, 4.3a, 4.14, 6.1 | `projects` | Projects |

@@ -61,7 +61,7 @@ const NAV_STEPS: Record<string, { title: string; body: string; more?: string }> 
   },
   desk: {
     title: 'Desk',
-    body: 'Your decision desk. When an agent needs an answer, an approval or a go-ahead it lands here, and the number shows how many are waiting (red when something is blocked). Answer once and the whole team moves on.',
+    body: 'Your desk. When an agent needs an answer, an approval or a go-ahead it lands here, and the number shows how many are waiting (red when something is blocked). Answer once and the whole team moves on.',
     more: 'desk#desk-items',
   },
   intake: {

@@ -116,7 +116,7 @@ describe('choosing the topics of a question', () => {
     ['How do I suggest a feature?', 'open-source-and-self-hosting'],
     ['Does it work with Codex or Gemini?', 'ai-runtimes'],
     ['What can an agent do and how do I export the audit log?', 'governance'],
-    ['What is the Decision desk?', 'desk'],
+    ['What is the decision desk?', 'desk'],
     ['Can I run agents on a cloud VPS or Codespaces?', 'cloud-workstations'],
     ['How do I set up two-factor login?', 'two-factor'],
     ['What is the Boardroom and how do personas debate?', 'boardroom'],
@@ -182,8 +182,8 @@ describe('choosing the topics of a question', () => {
   });
 
   it('wraps what it attached in one block', () => {
-    const block = relevantHelpBlock(selectTopics([{ role: 'user', content: 'What is the Decision desk?' }]));
-    expect(block?.startsWith('<relevant_help>\n### The Decision desk')).toBe(true);
+    const block = relevantHelpBlock(selectTopics([{ role: 'user', content: 'What is the decision desk?' }]));
+    expect(block?.startsWith('<relevant_help>\n### Your desk')).toBe(true);
     expect(block?.endsWith('</relevant_help>')).toBe(true);
   });
 });

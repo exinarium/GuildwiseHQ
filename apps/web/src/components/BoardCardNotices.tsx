@@ -13,7 +13,7 @@ export function BlockedReasonNotice({ reason }: { reason: BoardCard['blockedReas
       testId="blocked-reason"
       level="danger"
       summary={`Blocked: ${reason.title}${more}`}
-      detail="The card moves on when a manager answers this on the Decision desk."
+      detail="The card moves on when a manager answers this on your desk."
       action={
         <Link to="/desk" data-testid="blocked-reason-fix" className={FIX}>
           Answer on the desk
