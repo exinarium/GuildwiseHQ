@@ -205,10 +205,10 @@ describe('places', () => {
   it('is readable by a member of the project, who cannot change it', async () => {
     const m = await d.member();
     await q(
-      `INSERT INTO project_members (project_id, user_id, role, status, added_at) VALUES ($1,$2,'manager','active',now())
+      `INSERT INTO project_members (project_id, user_id, role, status, joined_at) VALUES ($1,$2,'manager','active',now())
        ON CONFLICT DO NOTHING`,
       [d.w.projectId, m.id],
-    ).catch(() => undefined);
+    );
     const res = await req('GET', `${base()}/places`, undefined, m.cookie);
     expect([200, 404]).toContain(res.status);
     if (res.status === 200) expect(res.body.canEdit).toBe(false);
