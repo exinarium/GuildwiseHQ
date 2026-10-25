@@ -203,7 +203,7 @@ Prefer not to run a server? **Guildwise Cloud** at [guildwisehq.com](https://gui
 - **$30 per month** covers the organization and its owner, plus **$10 per month for each regular member**. VAT is included. A 7-day trial is available.
 - **No backups, by design.** We don't own your data, so we don't keep copies of it. Export whenever you like.
 - Hosted customers join the community, with free occasional webinars and training.
-- Custom workflow and agent development, and organizational planning, are quoted on request: contact us through the site.
+- Customization and setup support (custom workflow and agent development, and organizational planning) is quoted on request: contact us through the site.
 
 **Self-hosted installs get every feature, and any number of organizations.** There is no plan, trial or limit on your own server.
 

@@ -20,7 +20,7 @@ This document describes how Guildwise HQ is run: who decides, how work is accept
 
 Support is provided **on a best-effort basis**. There is no guaranteed response time, and no service-level commitment for the open-source project. Help from other users in Discussions is welcome.
 
-Guildwise Cloud customers receive support as described in their plan. Setup, custom workflows and custom agents are quoted separately (see the [README](README.md)).
+Guildwise Cloud customers receive support as described in their plan. Customization and setup support (custom workflow and agent development, and organizational planning) is quoted on request (see the [README](README.md)).
 
 ## Community spaces
 
