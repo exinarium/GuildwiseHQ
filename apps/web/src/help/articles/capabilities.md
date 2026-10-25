@@ -13,7 +13,7 @@ It lists every skill, persona and playbook and where it comes from: built in, yo
 
 ## Packs {#packs}
 
-Add a pack by git URL and tag (any repository of skills in the Agent Skills format, folders with a SKILL.md, works). It starts untrusted: nothing of it is used. **Review and approve** shows its files, scripts flagged, and approves that exact commit. Scripts stay off unless you enable them, and only run in the sandbox. Pack text reaches agents as outside content. **Check for updates** fetches now and shows a diff to accept. A pack added to one project applies in that project's sessions.
+Add a pack by git URL and tag (any repository of skills in the Agent Skills format, folders with a SKILL.md, works). It starts untrusted: nothing of it is used. **Review and approve** shows its files, scripts flagged, and approves that exact commit. Scripts stay off unless you enable them, and only run in the sandbox. An agent can also be set to ask you before each script file of a pack is handed to it (**What it may do**, **Approval gates**). Pack text reaches agents as outside content. **Check for updates** fetches now and shows a diff to accept. A pack added to one project applies in that project's sessions.
 
 ## Scopes a pack needs {#scopes}
 

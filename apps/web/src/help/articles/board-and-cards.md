@@ -98,7 +98,7 @@ If an agent seems stuck, open the card: the live shift shows how long it has run
 
 ## Ask an agent in the thread {#mentions}
 
-Type **@** in a card's comment box to pick an agent, then ask a small question: "@una what is left to test?". The agent answers in the thread, read-only, and the cost is booked to the card. See [Agents](/help/agents#mentions) for who may mention which agent and the limits.
+Type **@** in a card's comment box to pick an agent, then ask a small question: "@una what is left to test?". The agent answers in the thread (when an Owner or Admin asks, it may also edit or run commands in the card's folder), and the cost is booked to the card. See [Agents](/help/agents#mentions) for who may mention which agent and the limits.
 
 ## Run a branch {#run-a-branch}
 

@@ -9,7 +9,7 @@ order: 28
 
 ## Accounts {#accounts}
 
-Each runtime and provider has one **main account** and any number of **named accounts**, per workstation. Use **Add a named account** and give it a short name such as `work`. The main account is what the CEO, DevOps and chats always use.
+Each runtime and provider has one **main account** and any number of **named accounts**, per workstation. Use **Add a named account** and give it a short name such as `work`. The main account is what the CEO, DevOps and chats that are not about a card use. A chat or an @mention about a project's card uses the account that project chose for the agent's runtime (with the project's fallback to main), like the card's own work.
 
 A tile shows whether the program is installed (with the command to install it), who is signed in, whether a key is set and whose key is in effect, and a **Runner too old** note when the workstation's runner needs an update. The runner looks for a program when it starts, so restart it after installing one.
 
@@ -27,7 +27,7 @@ A named account belongs to one workstation and spends its owner's own key or log
 
 ## Make main {#make-main}
 
-**Make main** swaps a named account with the main account. Nothing is lost, and doing it again undoes it.
+**Make main** swaps a named account with the main account. Nothing is lost, and doing it again undoes it. It works the same for every provider, Claude Code included. For Claude Code it swaps the sign-in of `~/.claude` with the one in the named account's own folder (plugin sign-ins and settings stay where they are); it needs the workstation to be idle (no agent working), both accounts signed in, a main account that uses the machine login (not a token or key set in the runner's files), the primary pairing's permission to change the machine login from the web, and runner 0.1.60 or newer. A token account cannot become main.
 
 ## Per project {#projects}
 
