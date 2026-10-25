@@ -1,0 +1,36 @@
+{
+  "title": "Capabilities and packs",
+  "src": "/videos/capabilities.webm",
+  "type": "video/webm",
+  "sources": [
+    {
+      "src": "/videos/capabilities.mp4",
+      "type": "video/mp4"
+    },
+    {
+      "src": "/videos/capabilities.webm",
+      "type": "video/webm"
+    }
+  ],
+  "captions": "/videos/capabilities.vtt",
+  "voice": "Kokoro af_heart",
+  "duration": 137.3,
+  "chapters": [
+    {
+      "t": 10.9,
+      "title": "The registry"
+    },
+    {
+      "t": 40.3,
+      "title": "Packs and trust"
+    },
+    {
+      "t": 77.9,
+      "title": "Write your own"
+    },
+    {
+      "t": 114.2,
+      "title": "Project skills and grants"
+    }
+  ]
+}

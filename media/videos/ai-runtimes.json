@@ -1,0 +1,32 @@
+{
+  "title": "AI runtimes and model providers",
+  "src": "/videos/ai-runtimes.webm",
+  "type": "video/webm",
+  "sources": [
+    {
+      "src": "/videos/ai-runtimes.mp4",
+      "type": "video/mp4"
+    },
+    {
+      "src": "/videos/ai-runtimes.webm",
+      "type": "video/webm"
+    }
+  ],
+  "captions": "/videos/ai-runtimes.vtt",
+  "voice": "Kokoro af_heart",
+  "duration": 124.9,
+  "chapters": [
+    {
+      "t": 14.2,
+      "title": "What a workstation can run"
+    },
+    {
+      "t": 41.6,
+      "title": "Keys and named accounts"
+    },
+    {
+      "t": 81.1,
+      "title": "Organization keys"
+    }
+  ]
+}

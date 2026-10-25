@@ -1,0 +1,49 @@
+WEBVTT
+
+1
+00:00:00.702 --> 00:00:13.545
+Agents run on an AI runtime: Claude Code, Codex, the Gemini CLI, or a model provider you reach with a key. This video shows where you set them up, and how you keep their cost under control.
+
+2
+00:00:14.250 --> 00:00:22.463
+Open Integrations in the sidebar and pick your workstation. Under AI runtime there is one tile for each program and provider.
+
+3
+00:00:23.164 --> 00:00:32.743
+A tile says whether the program is installed, with the command to install it if it is not, who is signed in, and whether a key is set and whose key is in effect.
+
+4
+00:00:33.442 --> 00:00:40.909
+Sign in runs the program's own login on the workstation. Open the link, enter the code, and the account shows Signed in.
+
+5
+00:00:41.611 --> 00:00:49.376
+For an API provider, click Set key. The key is encrypted in your browser for this workstation, and only its runner keeps it.
+
+6
+00:00:52.220 --> 00:01:00.924
+Every runtime has one main account, and any number of named accounts. Click Add a named account, give it a short name such as work, and set its key.
+
+7
+00:01:02.692 --> 00:01:11.524
+Make main swaps a named account with the main one. Nothing is lost, and doing it again undoes it. A project picks its account in its own settings.
+
+8
+00:01:12.224 --> 00:01:20.373
+Allow projects to use my accounts decides whether projects you are not a member of may spend your named accounts. It is off by default.
+
+9
+00:01:21.082 --> 00:01:30.981
+For keys the whole organization shares, follow the link to Settings, Model providers. Owners and Admins set the key once, and choose which workstations get it.
+
+10
+00:01:31.681 --> 00:01:42.305
+Each provider has a monthly cap. You are warned at eighty percent and again at one hundred, and at the cap new runs on the organization key are refused until you raise it.
+
+11
+00:01:43.004 --> 00:01:57.617
+A workstation that joined later shows Not shared. Share it from a workstation that has the key, without typing the key again. A workstation with a key of its own uses that one instead, and it is not capped. Revoke removes the key everywhere.
+
+12
+00:01:58.318 --> 00:02:04.185
+Keys never leave your browser unencrypted, and a named account is your own key, so it is never capped.

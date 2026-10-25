@@ -1,0 +1,49 @@
+WEBVTT
+
+1
+00:00:00.873 --> 00:00:10.217
+Capabilities are what your agents can use beyond their role: skills, personas and playbooks. This is their registry, and the place to add more, safely.
+
+2
+00:00:10.921 --> 00:00:20.756
+Open Capabilities in the sidebar. The Registry lists every skill, persona and playbook, and where each one comes from: built in, a vault, a project, or a pack.
+
+3
+00:00:21.456 --> 00:00:28.432
+Search by name, or filter by kind and by source. A pack item says if it needs approval before it can be used.
+
+4
+00:00:29.131 --> 00:00:39.584
+The Starter gallery has a few to try first. Run it starts a guided session on a playbook. Hire it opens a review of a persona, and nothing is hired until you press Hire.
+
+5
+00:00:40.289 --> 00:00:55.393
+A pack brings more from a git repository. On Packs, click Add a pack by git URL, give the URL and a tag, and choose the workstation that reads it. A private repository takes a deploy key or a token, sealed in your browser.
+
+6
+00:00:57.227 --> 00:01:05.803
+A new pack starts untrusted: nothing of it is used. Review and approve shows its files, flags any scripts, and approves that exact commit.
+
+7
+00:01:06.504 --> 00:01:17.149
+Scripts stay off unless you switch them on. Once a pack is approved, Hire from this pack turns a persona into an agent, and Check for updates shows what changed before you accept it.
+
+8
+00:01:17.855 --> 00:01:30.484
+Under My capabilities you write your own: click New pack, then Start writing. A pack can be private to your workstation, so only you see it, or shared with the organization after an Owner or Admin approves it.
+
+9
+00:01:31.184 --> 00:01:41.659
+Add a skill, a persona or a playbook. The editor checks your work as you type, and Save to workstation keeps the pack there. Export as zip gives a folder you can push to git.
+
+10
+00:01:54.171 --> 00:02:05.414
+Project skills lists the skills found in your project repositories. Nothing found there is used until an Owner or Admin has read it and marked it reviewed. Block keeps one out for good.
+
+11
+00:02:06.113 --> 00:02:10.550
+Skill grants shows which skills each role has, resolved against the registry.
+
+12
+00:02:11.249 --> 00:02:16.582
+Agents only ever use what you have approved, and a changed file always needs a new review.

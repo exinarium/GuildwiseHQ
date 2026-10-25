@@ -1,0 +1,36 @@
+{
+  "title": "Governance: approvals, grants, audit and offboarding",
+  "src": "/videos/governance.webm",
+  "type": "video/webm",
+  "sources": [
+    {
+      "src": "/videos/governance.mp4",
+      "type": "video/mp4"
+    },
+    {
+      "src": "/videos/governance.webm",
+      "type": "video/webm"
+    }
+  ],
+  "captions": "/videos/governance.vtt",
+  "voice": "Kokoro af_heart",
+  "duration": 119.7,
+  "chapters": [
+    {
+      "t": 13.2,
+      "title": "Approve from a notification"
+    },
+    {
+      "t": 40.2,
+      "title": "What it may do"
+    },
+    {
+      "t": 73.2,
+      "title": "Audit export"
+    },
+    {
+      "t": 93.6,
+      "title": "Offboarding"
+    }
+  ]
+}

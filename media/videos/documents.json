@@ -1,0 +1,28 @@
+{
+  "title": "Documents",
+  "src": "/videos/documents.webm",
+  "type": "video/webm",
+  "sources": [
+    {
+      "src": "/videos/documents.mp4",
+      "type": "video/mp4"
+    },
+    {
+      "src": "/videos/documents.webm",
+      "type": "video/webm"
+    }
+  ],
+  "captions": "/videos/documents.vtt",
+  "voice": "Kokoro af_heart",
+  "duration": 64.6,
+  "chapters": [
+    {
+      "t": 12,
+      "title": "Find a document"
+    },
+    {
+      "t": 36.5,
+      "title": "Read and approve"
+    }
+  ]
+}

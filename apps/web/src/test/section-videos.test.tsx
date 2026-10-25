@@ -42,9 +42,9 @@ afterEach(() => {
 });
 
 describe('the video registry', () => {
-  it('has 29 videos: Getting started and one per section, with unique kebab-case slugs', () => {
+  it('has 31 videos: Getting started, one per section and two cross-cutting ones, with unique kebab-case slugs', () => {
     const slugs = Object.keys(SECTION_VIDEOS);
-    expect(slugs).toHaveLength(29);
+    expect(slugs).toHaveLength(31);
     for (const s of slugs) expect(s).toMatch(/^[a-z0-9]+(-[a-z0-9]+)*$/);
   });
 
@@ -86,14 +86,20 @@ describe('the video registry', () => {
     }
   });
 
-  it('publishes every recorded video, each with its four files (Discovery, Documents and Boardroom wait for their recording)', () => {
-    const waiting = new Set(['discovery', 'documents', 'boardroom', 'capabilities']);
-    for (const [slug, e] of Object.entries(SECTION_VIDEOS))
-      expect(e.published, slug).toBe(!waiting.has(slug));
+  it('publishes every recorded video, each with its four files', () => {
+    for (const [slug, e] of Object.entries(SECTION_VIDEOS)) expect(e.published, slug).toBe(true);
+  });
+
+  it('shows a video without a sidebar entry in its Help article and on its pages', () => {
+    expect(videosForArticle('ai-runtimes').map((v) => [v.slug, v.anchor])).toEqual([
+      ['ai-runtimes', 'accounts'],
+    ]);
+    expect(videosForArticle('organizations-and-roles').map((v) => v.slug)).toContain('governance');
+    expect(videoForPath('/settings/providers')?.slug).toBe('ai-runtimes');
+    expect(videoForPath('/settings')?.slug).toBe('settings');
   });
 
   it('finds a video by nav id, article and path for every section', () => {
-    publish('discovery', 'documents', 'boardroom', 'capabilities'); // not recorded yet: published for this check only (restored after each test)
     for (const [slug, e] of Object.entries(SECTION_VIDEOS)) {
       if (slug === GETTING_STARTED_SLUG) continue; // its own player on Help and in the tour (tour.test.tsx)
       if (e.nav) expect(videoForNav(e.nav)?.slug, slug).toBe(slug);
@@ -271,7 +277,6 @@ describe('a Help article', () => {
 
 describe('every published video on its three places', () => {
   it("Help, the tour card and the page help's Watch the video show each section video", async () => {
-    publish('discovery', 'documents', 'boardroom', 'capabilities'); // not recorded yet: published for this check only (restored after each test)
     const user = userEvent.setup();
     const paths: Record<string, string> = {
       board: '/p/X/board',

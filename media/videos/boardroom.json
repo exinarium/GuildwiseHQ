@@ -1,0 +1,36 @@
+{
+  "title": "Boardroom: a debate with a Chair",
+  "src": "/videos/boardroom.webm",
+  "type": "video/webm",
+  "sources": [
+    {
+      "src": "/videos/boardroom.mp4",
+      "type": "video/mp4"
+    },
+    {
+      "src": "/videos/boardroom.webm",
+      "type": "video/webm"
+    }
+  ],
+  "captions": "/videos/boardroom.vtt",
+  "voice": "Kokoro af_heart",
+  "duration": 130.6,
+  "chapters": [
+    {
+      "t": 11.2,
+      "title": "Set up the meeting"
+    },
+    {
+      "t": 51.5,
+      "title": "Round one is sealed"
+    },
+    {
+      "t": 68.3,
+      "title": "Decide and steer"
+    },
+    {
+      "t": 91,
+      "title": "Minutes and PRD"
+    }
+  ]
+}

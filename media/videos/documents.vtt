@@ -1,0 +1,33 @@
+WEBVTT
+
+1
+00:00:00.426 --> 00:00:11.263
+Documents is the shelf for everything your discovery and boardroom sessions write: product briefs, PRDs and minutes. Nothing is lost, and every change is kept as a version.
+
+2
+00:00:11.971 --> 00:00:21.166
+Open Documents in the sidebar. The newest document comes first. Each row shows the kind, the status, the version and how long ago it changed.
+
+3
+00:00:21.864 --> 00:00:28.136
+The first row of chips filters by kind. Pick PRD to see only the product requirement documents.
+
+4
+00:00:28.837 --> 00:00:35.024
+The second row filters by status. Draft, In review, Approved, Handed to the BA and Archived.
+
+5
+00:00:36.541 --> 00:00:41.234
+Open a document to read it. The version picker lets you read any earlier version.
+
+6
+00:00:42.529 --> 00:00:49.398
+An Owner or Admin can approve it here. Approved documents are copied to your vault, so agents can find them later.
+
+7
+00:00:50.099 --> 00:00:57.843
+Reopen turns an approved document back into a draft, and when a document came from a session, a link at the bottom takes you back to it.
+
+8
+00:00:58.544 --> 00:01:03.941
+That is Documents: every brief, PRD and set of minutes in one place, with its history.

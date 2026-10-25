@@ -1,0 +1,32 @@
+{
+  "title": "Discovery: from an idea to a PRD",
+  "src": "/videos/discovery.webm",
+  "type": "video/webm",
+  "sources": [
+    {
+      "src": "/videos/discovery.mp4",
+      "type": "video/mp4"
+    },
+    {
+      "src": "/videos/discovery.webm",
+      "type": "video/webm"
+    }
+  ],
+  "captions": "/videos/discovery.vtt",
+  "voice": "Kokoro af_heart",
+  "duration": 104,
+  "chapters": [
+    {
+      "t": 11.2,
+      "title": "Start a discovery"
+    },
+    {
+      "t": 51.5,
+      "title": "Answer the questions"
+    },
+    {
+      "t": 80.3,
+      "title": "Approve and hand over"
+    }
+  ]
+}

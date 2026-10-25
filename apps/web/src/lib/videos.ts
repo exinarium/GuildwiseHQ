@@ -11,8 +11,13 @@ import { buildNav, isActive } from '../components/shell/nav-config.ts';
 export interface SectionVideoEntry {
   /** Shown above the player. */
   title: string;
-  /** The sidebar entry (its id in nav-config) the video explains; `platform` is the platform area; null for Getting started. */
+  /**
+   * The sidebar entry (its id in nav-config) the video explains; `platform` is the platform area; null for Getting started
+   * and for the cross-cutting videos that have no sidebar entry of their own (they use `paths` and their Help anchor).
+   */
   nav: string | null;
+  /** Pages (a pathname prefix) whose page help offers this video, for a video that has no sidebar entry of its own. */
+  paths?: string[];
   /** The Help article section the video is shown in: `slug#anchor`. */
   help: string;
   /** Set to true in the commit that adds the recorded files. */
@@ -63,22 +68,19 @@ export const SECTION_VIDEOS: Record<string, SectionVideoEntry> = {
     title: 'Discovery: from an idea to a PRD',
     nav: 'discovery',
     help: 'discovery#start',
-    // not recorded yet: the recording task flips this flag together with the files
-    published: false,
+    published: true,
   },
   boardroom: {
     title: 'Boardroom: a debate with a Chair',
     nav: 'boardroom',
     help: 'boardroom#start',
-    // not recorded yet: the recording task flips this flag together with the files
-    published: false,
+    published: true,
   },
   capabilities: {
     title: 'Capabilities and packs',
     nav: 'capabilities',
     help: 'capabilities#packs',
-    // not recorded yet: the recording task flips this flag together with the files
-    published: false,
+    published: true,
   },
   automations: {
     title: 'Automations',
@@ -137,7 +139,7 @@ export const SECTION_VIDEOS: Record<string, SectionVideoEntry> = {
     title: 'Documents',
     nav: 'documents',
     help: 'discovery#documents',
-    published: false,
+    published: true,
   },
   vaults: { title: 'Vaults', nav: 'vaults', help: 'ledger-and-vaults#vaults', published: true },
   settings: {
@@ -153,6 +155,19 @@ export const SECTION_VIDEOS: Record<string, SectionVideoEntry> = {
     published: true,
   },
   help: { title: 'The Help centre', nav: 'help', help: 'getting-started#the-sidebar', published: true },
+  'ai-runtimes': {
+    title: 'AI runtimes and model providers',
+    nav: null,
+    paths: ['/settings/providers'],
+    help: 'ai-runtimes#accounts',
+    published: true,
+  },
+  governance: {
+    title: 'Governance: approvals, grants, audit and offboarding',
+    nav: null,
+    help: 'organizations-and-roles#audit-log',
+    published: true,
+  },
   'platform-area': {
     title: 'The platform area',
     nav: 'platform',
@@ -183,7 +198,9 @@ export function videosForArticle(
 ): Array<SectionVideoEntry & { slug: string; anchor: string }> {
   return Object.entries(SECTION_VIDEOS).flatMap(([slug, e]) => {
     const [a, anchor] = e.help.split('#');
-    return e.published && e.nav !== null && a === article && anchor ? [{ ...e, slug, anchor }] : [];
+    return e.published && slug !== GETTING_STARTED_SLUG && a === article && anchor
+      ? [{ ...e, slug, anchor }]
+      : [];
   });
 }
 
@@ -204,6 +221,9 @@ export function navIdForPath(pathname: string): string | null {
 
 /** The published video of the page at `pathname`, if there is one. */
 export function videoForPath(pathname: string): (SectionVideoEntry & { slug: string }) | undefined {
+  for (const [slug, e] of Object.entries(SECTION_VIDEOS))
+    if (e.published && e.paths?.some((p) => pathname === p || pathname.startsWith(`${p}/`)))
+      return { ...e, slug };
   const nav = navIdForPath(pathname);
   return nav ? videoForNav(nav) : undefined;
 }
