@@ -1,4 +1,4 @@
-# Guildwise HQ (agent-org-manager)
+# Guildwise HQ (GuildwiseHQ)
 
 pnpm monorepo: `apps/server` (Fastify, Postgres, event-sourced), `apps/web` (React), `apps/runner` (workstation runner),
 `packages/shared` (types, schemas, shared logic). Architecture: `docs/ARCHITECTURE.md`.
@@ -24,3 +24,10 @@ pnpm monorepo: `apps/server` (Fastify, Postgres, event-sourced), `apps/web` (Rea
   replay-safe. A data fix is a data migration in `apps/server/src/data-migrations/` (registered in `index.ts`), a schema
   change a new numbered file in `apps/server/migrations/`.
 - The runner's version is `RUNNER_VERSION` in `apps/runner/src/version.ts` (not `package.json`).
+
+## Extensions
+
+The server (`apps/server/src/extension.ts`) and the web app (`apps/web/src/extension/`) have extension points that default
+to no-ops; a hosting business plugs in billing, sign-up, support and landing pages without forking (docs/ARCHITECTURE.md
+section 40). Rules: core code never imports from an extension (`scripts/check-no-cloud-imports.sh`); a core table never
+references an extension table; an applied migration is never edited (extension migrations keep their ids).

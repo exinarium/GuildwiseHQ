@@ -4,7 +4,7 @@ _Guildwise HQ: your guild of AI agents. Many hands. One master._
 
 Guildwise HQ is the product name you see in the web app, the emails and the guides. The internal identifiers keep their names: the `@aom/*` packages, the `aom` CLI, `aom-runner`, the `AOM_*` environment variables and the database.
 
-A self-hosted site for running an organization of AI coding agents. A manager creates projects and cards; builder, reviewer and other agents claim cards exclusively, work in git worktrees on the manager's own workstations (through a small runner), and hand work off through a board. State is event sourced in Postgres.
+Open source (Apache 2.0). A self-hosted site for running an organization of AI coding agents. A manager creates projects and cards; builder, reviewer and other agents claim cards exclusively, work in git worktrees on the manager's own workstations (through a small runner), and hand work off through a board. State is event sourced in Postgres.
 
 - **Product spec**: `docs/SPEC.md`
 - **Design contract**: `docs/ARCHITECTURE.md`
@@ -12,6 +12,39 @@ A self-hosted site for running an organization of AI coding agents. A manager cr
 - **Deployment guide**: `docs/DEPLOY.md`
 - **User guide**: `docs/USER-GUIDE.md` (plain-language guide for every role), with an illustrated PDF: `docs/guide/Guildwise-HQ-User-Guide.pdf`
 - **Runner guide**: `docs/RUNNER.md`
+
+## Self-hosting in five minutes
+
+```
+cp .env.prod.example .env      # set POSTGRES_PASSWORD, AOM_SECRET_KEY, AOM_DOMAIN and AOM_PUBLIC_ORIGIN
+docker compose -f docker-compose.prod.yml up -d --build
+docker compose -f docker-compose.prod.yml exec app node dist/superadmin-create.mjs --email you@example.com --name You --password '<a long password>'
+```
+
+Sign in at your `AOM_PUBLIC_ORIGIN` as that platform super-user, invite your first organization, and follow `docs/DEPLOY.md`
+for mail, inbound mail, push and backups. A self-hosted installation has no billing, no sign-up page and no limits: every
+organization is unlimited and the platform super-user manages them directly. `AOM_SECRET_KEY` is required in production.
+
+## Development
+
+```
+pnpm install
+docker compose -f docker-compose.dev.yml up -d postgres
+pnpm dev                       # server on :4600, web on :5173
+pnpm -r typecheck && pnpm test # see CLAUDE.md for the per-package test commands and the test database
+```
+
+## Extending Guildwise (hosted service, add-ons)
+
+The server and the web app have extension points that default to no-ops: a plan-limits provider, extra routes, background
+jobs and migrations on the server; routes, navigation, settings tabs and screens on the web. The hosted service
+(billing, sign-up, support desk, landing pages) is built this way on top of this repository. See `docs/ARCHITECTURE.md`
+section 40. The core never imports from an extension (`scripts/check-no-cloud-imports.sh` runs in CI).
+
+## License
+
+Apache License 2.0, see `LICENSE` and `NOTICE`. Contributions are welcome, see `CONTRIBUTING.md`; report security problems
+as described in `SECURITY.md`.
 
 ## Features
 
