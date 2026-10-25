@@ -28,8 +28,8 @@ export function PlatformInbound() {
               {health.data.provider ? '' : 'AOM_INBOUND_PROVIDER is not set. '}
               {health.data.domain ? '' : 'AOM_INBOUND_DOMAIN is not set. '}
               {health.data.secretSet ? '' : 'AOM_INBOUND_SECRET is not set. '}
-              Organisations cannot make inbox addresses until all three are. The steps are in docs/SELF-HOSTING.md,
-              "Inbound e-mail".
+              Organisations cannot make inbox addresses until all three are. The steps are in
+              docs/SELF-HOSTING.md, "Inbound e-mail".
             </Callout>
           )}
           <Panel title="Provider">

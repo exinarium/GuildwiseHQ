@@ -481,9 +481,7 @@ describe('the DevOps prompt of a run request', () => {
         }),
       }),
     );
-    expect(text).toContain(
-      'Build guide above the repositories: /home/u/src/demo/sources/BUILD.md (for web)',
-    );
+    expect(text).toContain('Build guide above the repositories: /home/u/src/demo/sources/BUILD.md (for web)');
     expect(text).toContain('Use the embedded server of the webconsole.');
     expect(text).toContain('follow them first, and literally');
     expect(text).toContain(
