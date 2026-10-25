@@ -39,6 +39,8 @@ export function chatErrorText(reason: string): string {
       return 'This project is paused by an Owner or Admin: nothing new starts on it until it is resumed.';
     case 'provider_cap_reached':
       return "The organization's key for this agent's model provider has reached its monthly cap, so nothing new starts on it. An Owner or Admin can raise or override the cap under Settings > Model providers; a workstation's own key is not capped.";
+    case 'account_unavailable':
+      return "The AI account this project chose is not available on the agent's workstation right now (usage limit, signed out, not set up there, or the runner is too old). Try again later, or ask an Owner or Admin to change the project's account.";
     case 'unknown_thread':
       return 'This conversation no longer exists.';
     case 'cancelled':

@@ -1646,6 +1646,8 @@ export const ChatStartSchema = msg('chat.start', {
    * the current one. A dispatch of the same turn that finds it still running here only changes the id the frames carry.
    */
   attemptId: z.string().max(80).optional(),
+  /** The account of the project this chat's card belongs to (absent: main). Only sent to a runner announcing `chat-accounts:1`. */
+  account: z.object({ key: AccountKeySchema }).optional(),
 });
 export const TokenRotatedSchema = msg('token.rotated', { token: z.string().min(1) });
 /** A browser started (or stopped) following the logs of a run environment: the runner sends `run.log` only meanwhile. */

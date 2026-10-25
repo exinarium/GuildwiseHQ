@@ -162,6 +162,36 @@ describe('chat on the runner (mock adapter)', () => {
     expect(adapter.ownerTurns).toHaveLength(0);
   });
 
+  it('runs a chat about a project card on the account the server named, even while main is out; an account that is out refuses it', async () => {
+    h = await startHarness();
+    const out = new Set(['main']);
+    const adapter = Object.assign(new FakeChatAdapter(), {
+      accountGate: (key: string) =>
+        out.has(key)
+          ? { state: 'limited' as const, limitedUntil: new Date(Date.now() + 3_600_000).toISOString() }
+          : { state: 'ok' as const },
+    });
+    h.runner.chat.deps.adapters.set('mock', adapter);
+    const onWork = chatStart('hello', { account: { key: 'work' } });
+    h.server.send('chat.start', onWork);
+    await h.server.waitFor('chat.done', (d) => d.chatId === onWork.chatId);
+    expect(adapter.chats.map((c) => c.account)).toEqual(['work']);
+    // main is out and nothing names an account: refused, as before
+    const onMain = chatStart('hello');
+    h.server.send('chat.start', onMain);
+    expect((await h.server.waitFor('chat.error', (e) => e.chatId === onMain.chatId)).error).toMatch(
+      /not available for chat/,
+    );
+    // the named account is out too
+    out.add('work');
+    const again = chatStart('hello', { account: { key: 'work' } });
+    h.server.send('chat.start', again);
+    expect((await h.server.waitFor('chat.error', (e) => e.chatId === again.chatId)).error).toMatch(
+      /not available for chat/,
+    );
+    expect(adapter.chats).toHaveLength(1);
+  });
+
   it('a dropped connection cancels running chats; the error reaches the server from the outbox after reconnect', async () => {
     process.env.AOM_MOCK_CHAT_TOKEN_MS = '300';
     try {

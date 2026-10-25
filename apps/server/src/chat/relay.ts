@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   BA_ROLE_KEY,
+  CHAT_ACCOUNTS_CAPABILITY,
   CHAT_ERROR,
   type ChatContext,
   type ChatSegment,
@@ -39,6 +40,7 @@ import type { Ctx } from '../context.ts';
 import { budgetPausedSql } from '../costs/index.ts';
 import { one, type Row, rows } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
+import { accountForAgent, loadProjectAccounts } from '../dispatcher/accounts.ts';
 import { isProjectPaused } from '../dispatcher/project-hold.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { agentCapBlocked } from '../provider-keys/caps.ts';
@@ -207,6 +209,9 @@ export class ChatRelay {
       )
     )
       return this.fail(userId, msg.threadId, CHAT_ERROR.providerCapReached);
+    // A chat about a project's card runs on the account the project chose (not always main).
+    const account = await this.chatAccount(row, row.thread_project_id, row.thread_card_id);
+    if (!account) return this.fail(userId, msg.threadId, CHAT_ERROR.accountUnavailable);
 
     const prior = await one(
       ctx.pool,
@@ -265,6 +270,7 @@ export class ChatRelay {
               overflow: false,
               chatUserId: userId,
               ...(row.thread_project_id ? { projectId: row.thread_project_id } : {}),
+              ...(account.key ? { accountKey: account.key } : {}),
             },
           },
           actor: runnerActor(row.workstation_id),
@@ -274,6 +280,7 @@ export class ChatRelay {
       const sent = await this.sendChatStart(row, inflight, msg.body, {
         ...(prior?.sid ? { resumeSessionId: prior.sid as string } : {}),
         userId,
+        ...(account.key ? { account: account.key } : {}),
       });
       if (!sent) await this.finish(inflight, 'rejected', CHAT_ERROR.workstationOffline);
     } catch (err) {
@@ -291,7 +298,7 @@ export class ChatRelay {
     row: Row,
     c: Inflight,
     message: string,
-    opts: { resumeSessionId?: string; userId: string },
+    opts: { resumeSessionId?: string; userId: string; account?: string },
   ): Promise<boolean> {
     const { ctx } = this;
     const userId = opts.userId;
@@ -396,6 +403,7 @@ export class ChatRelay {
         context,
         ...(playbookGrants.length ? { playbookGrants } : {}),
         ...(delegation ? { delegation } : {}),
+        ...(opts.account ? { account: { key: opts.account } } : {}),
       },
       ctx.clock.now(),
     );
@@ -1157,6 +1165,47 @@ export class ChatRelay {
     }
   }
 
+  /**
+   * The account a chat about a project's card runs on: the one the project chose for the agent's runtime (owner decision
+   * 2026-10-25; it used to be main). `{ key: null }` is the main account; null means the chat cannot start now (the account is out
+   * with no fallback, is not set up on the workstation, may not be used there, or the runner is too old to run a chat on it).
+   * Chats that are not about a card keep the main account.
+   */
+  private async chatAccount(
+    agent: Row,
+    projectId: string | null | undefined,
+    cardId: string | null | undefined,
+  ): Promise<{ key: string | null } | null> {
+    const { ctx } = this;
+    if (!projectId || !cardId || !agent.workstation_id) return { key: null };
+    const accounts = await loadProjectAccounts(ctx.pool, [projectId]);
+    const ws = await one(
+      ctx.pool,
+      `SELECT w.user_id AS ws_user_id, w.share_accounts, w.runtimes, c.capabilities
+         FROM workstations w LEFT JOIN workstation_capabilities c ON c.workstation_id = w.id WHERE w.id=$1`,
+      [agent.workstation_id],
+    );
+    if (!ws) return { key: null };
+    const hit = accountForAgent(
+      accounts,
+      projectId,
+      {
+        runtime: agent.runtime,
+        model: agent.model,
+        runtimes: ws.runtimes,
+        org_id: agent.org_id,
+        ws_user_id: ws.ws_user_id,
+        share_accounts: ws.share_accounts,
+      },
+      ctx.clock.now(),
+    );
+    if (!hit) return null;
+    if (hit.key === 'main') return { key: null };
+    // a runner that does not know `chat.start.account` would answer on its main account
+    if (!((ws.capabilities as string[] | null) ?? []).includes(CHAT_ACCOUNTS_CAPABILITY)) return null;
+    return { key: hit.key };
+  }
+
   /** The checks a chat makes at its start; the reason, or undefined when the mention may start. */
   private async mentionPreflight(card: Row, agent: Row): Promise<string | undefined> {
     const { ctx } = this;
@@ -1183,6 +1232,7 @@ export class ChatRelay {
       )
     )
       return CHAT_ERROR.providerCapReached;
+    if (!(await this.chatAccount(agent, card.project_id, card.id))) return CHAT_ERROR.accountUnavailable;
     return undefined;
   }
 
@@ -1203,6 +1253,8 @@ export class ChatRelay {
       card_worktree_path: card.worktree_path,
       card_external_ref: card.fields?.externalRef,
     };
+    const account = await this.chatAccount(agent, card.project_id, card.id);
+    if (!account) return { ok: false, reason: CHAT_ERROR.accountUnavailable };
     const chatId = randomUUID();
     const c: Inflight = {
       chatId,
@@ -1256,13 +1308,17 @@ export class ChatRelay {
               overflow: false,
               chatUserId: a.userId,
               projectId: card.project_id,
+              ...(account.key ? { accountKey: account.key } : {}),
             },
           },
           actor: runnerActor(agent.workstation_id),
           scope: orgScope(agent.org_id),
         },
       ]);
-      const sent = await this.sendChatStart(row, c, a.prompt, { userId: a.userId });
+      const sent = await this.sendChatStart(row, c, a.prompt, {
+        userId: a.userId,
+        ...(account.key ? { account: account.key } : {}),
+      });
       if (!sent) {
         await this.finish(c, 'rejected', CHAT_ERROR.workstationOffline);
         return { ok: false, reason: CHAT_ERROR.workstationOffline };

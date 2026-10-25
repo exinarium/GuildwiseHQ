@@ -39,8 +39,8 @@ export const shiftProjectors: Record<string, Projector> = {
       await exec(
         tx,
         `INSERT INTO shifts (id, org_id, agent_id, workstation_id, card_id, kind, stage, status, runtime, model,
-           runtime_session_id, overflow, started_at, project_id, chat_user_id)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,'running',$8,$9,$10,$11,$12,$13,$14)
+           runtime_session_id, overflow, started_at, project_id, chat_user_id, account_key)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,'running',$8,$9,$10,$11,$12,$13,$14,$15)
          ON CONFLICT (id) DO UPDATE SET status = 'running', runtime_session_id = EXCLUDED.runtime_session_id,
            project_id = COALESCE(shifts.project_id, EXCLUDED.project_id)`,
         [
@@ -58,6 +58,7 @@ export const shiftProjectors: Record<string, Projector> = {
           e.createdAt,
           p.projectId ?? null,
           p.chatUserId ?? null,
+          p.accountKey ?? null,
         ],
       );
       // A shift that started is the end of "the last attempt failed" on the board.

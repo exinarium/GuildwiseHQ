@@ -5,6 +5,7 @@ import {
   BOARD_VERBS_CAPABILITY,
   CAPABILITY_REGISTRY_FEATURE,
   CEO_FULL_POWER_CAPABILITY,
+  CHAT_ACCOUNTS_CAPABILITY,
   CHAT_ACTIVITY_FEATURE,
   CLAUDE_ACCOUNTS_CAPABILITY,
   CLAUDE_MAIN_SWAP_CAPABILITY,
@@ -1333,6 +1334,8 @@ export class Runner {
         PACK_SCRIPT_GATE_CAPABILITY,
         // "Make main" for Claude Code: a named folder account and the main login swap places.
         CLAUDE_MAIN_SWAP_CAPABILITY,
+        // A chat about a project's card runs on the account the project chose (`chat.start.account`).
+        CHAT_ACCOUNTS_CAPABILITY,
         // Runs the turns of discovery and boardroom sessions (`chat.start.session`) and indexes the capability registry.
         SESSION_TURNS_CAPABILITY,
         // A session turn may call the `aom session ...` verbs (the facilitator's questions, notes, proposals and drafts).

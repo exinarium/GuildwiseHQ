@@ -187,11 +187,18 @@ const zeroUsage = (): Usage => ({ inputTokens: 0, outputTokens: 0, cacheReadToke
  * message in the agent's sandbox, streamed back as `chat.delta` and finished with `chat.done` (or `chat.error`).
  * Chats never claim cards and do not count against the shift capacity.
  */
-/** Chats and the CEO owner turn always run on the main account: `available` only says some account is usable. */
-const mainOk = (adapter: { accountGate?(account: string): { state: string } }, model?: string): boolean =>
+/**
+ * Chats run on the account the server named (a chat about a project's card: the project's choice), else on main; the CEO owner
+ * turn and session turns always run on main. `available` only says some account is usable, so the account's own gate decides.
+ */
+const mainOk = (
+  adapter: { accountGate?(account: string): { state: string } },
+  model?: string,
+  account = 'main',
+): boolean =>
   // a model behind Bedrock, Vertex or a gateway needs no Claude login
   (model !== undefined && splitBackendModel(model) !== null) ||
-  (adapter.accountGate?.('main') ?? { state: 'ok' }).state === 'ok';
+  (adapter.accountGate?.(account) ?? { state: 'ok' }).state === 'ok';
 
 /**
  * Who asks the registry for a chat or a session turn, for private packs: a session turn of a creator who is this workstation's own
@@ -1078,7 +1085,11 @@ export class ChatManager {
     if (profile.kind === 'full') return this.runOwnerTurn(chat, profile.mode);
     const adapter = this.deps.adapters.get(msg.agent.runtime);
     const caps = adapter ? await adapter.capabilities() : undefined;
-    if (!adapter?.startChat || !caps?.available || !mainOk(adapter, msg.agent.model)) {
+    if (
+      !adapter?.startChat ||
+      !caps?.available ||
+      !mainOk(adapter, msg.agent.model, msg.account?.key ?? 'main')
+    ) {
       this.error(msg, `runtime ${msg.agent.runtime} is not available for chat on this workstation`);
       return;
     }
@@ -1220,6 +1231,8 @@ export class ChatManager {
       ...(!devops && msg.agent.roleKey !== 'ceo' ? { grantedSkills } : {}),
       ...(msg.context.intake ? { intake: true } : {}),
       ...(msg.resumeSessionId ? { resumeSessionId: msg.resumeSessionId } : {}),
+      // the account the server chose for a chat about a project's card (absent: main)
+      ...(msg.account && msg.account.key !== 'main' ? { account: msg.account.key } : {}),
       ...(devops ? { devopsGuard: { sessionRef: msg.chatId } } : {}),
       ...(subagents.length ? { subagents } : {}),
       logFile: `${paths.shiftLogs}/chat-${msg.chatId}.jsonl`,

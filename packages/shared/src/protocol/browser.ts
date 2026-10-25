@@ -27,6 +27,8 @@ export const CHAT_ERROR = {
   /** The standing "BA reports" chat is read-only: the BA no longer reports, the CEO does (docs/design/ceo-front-door.md step 3). */
   baReportsRetired: 'ba_reports_retired',
   unknownModel: 'unknown_model',
+  /** The account the project chose for its cards' chats is out (usage limit, sign-in) or this workstation lacks it or cannot use it. */
+  accountUnavailable: 'account_unavailable',
 } as const;
 
 // client -> server

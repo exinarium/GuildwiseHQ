@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { AccountKeySchema } from '../claude/accounts.ts';
 import { defineEvent, Id, Stage, Usage } from './define.ts';
 
 export const ShiftKind = z.enum(['card', 'chat', 'question', 'devops', 'ba_task', 'ceo']);
@@ -36,6 +37,8 @@ export const shiftEvents = [
       /** Chats about a project without a card: the shift's project (card shifts resolve it through the card). */
       projectId: Id.optional(),
       runtimeSessionId: z.string().optional(),
+      /** A chat about a project's card: the account the project chose for it (absent: the main account). */
+      accountKey: AccountKeySchema.optional(),
       /** A CEO chat turn: `owner` (the Owner's message) or `order` (an Owner-authorized standing order); absent otherwise. */
       mode: z.enum(['owner', 'order']).optional(),
       /** Additive: set from the runner's `shift.started`; the server learns the worktree path here. */
