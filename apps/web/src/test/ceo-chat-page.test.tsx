@@ -7,7 +7,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CeoChat } from '../pages/CeoChat.tsx';
 import { ceoStatus, Fail, stubApi, U } from './ceo-fixtures.tsx';
 
-afterEach(() => vi.unstubAllGlobals());
+// Let the query cache deliver what it has queued (it flushes in a timer) before the test environment is torn down:
+// a late flush used to reach react-dom after `window` was gone ("window is not defined", an unhandled error).
+afterEach(async () => {
+  for (const c of clients.splice(0)) await c.cancelQueries();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  vi.unstubAllGlobals();
+});
+const clients: QueryClient[] = [];
 
 const ceoChat = (n: number): ChatDto => ({
   threadId: U(n),
@@ -28,9 +35,11 @@ const ceoChat = (n: number): ChatDto => ({
 function Where() {
   return <p data-testid="where">{useLocation().pathname}</p>;
 }
-const mount = (path: string) =>
-  render(
-    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+const mount = (path: string) => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  clients.push(client);
+  return render(
+    <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={[path]}>
         <Routes>
           <Route path="/ceo-chat" element={<CeoChat />} />
@@ -40,6 +49,7 @@ const mount = (path: string) =>
       </MemoryRouter>
     </QueryClientProvider>,
   );
+};
 
 const routes = (extra: Array<[string, () => unknown]> = []): Array<[string, () => unknown]> => [
   ...extra,

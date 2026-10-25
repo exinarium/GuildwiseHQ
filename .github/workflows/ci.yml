@@ -18,8 +18,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  # Only a new push to the same pull request replaces a running check; a push to main never cancels another.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   boundary:
