@@ -146,7 +146,7 @@ describe('a conversation', () => {
     expect(call?.system).toHaveLength(1);
     expect(call?.system[0].cache_control).toEqual({ type: 'ephemeral' });
     expect(call?.system[0].text).toContain('<product_facts>');
-    expect(call?.system[0].text).toContain('Starter: $19');
+    expect(call?.system[0].text).toContain('Guildwise Cloud: $30 per organization per month');
     expect(call?.messages).toEqual([
       {
         role: 'user',
@@ -172,7 +172,7 @@ describe('a conversation', () => {
     const content = call?.messages[0].content;
     expect(content).toHaveLength(2);
     expect(content[0].text.startsWith('<relevant_help>')).toBe(true);
-    expect(content[0].text).toContain('### Plans and billing');
+    expect(content[0].text).toContain('### Pricing');
     expect(content[0].cache_control).toBeUndefined();
     expect(content[1]).toMatchObject({ text: 'Do you have a free trial and what do the plans cost?' });
     expect(content[1].cache_control).toEqual({ type: 'ephemeral' });

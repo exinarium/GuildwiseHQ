@@ -22,7 +22,7 @@ To hire an agent:
    - **Name**: a name for the agent (the form suggests unused names).
 3. Click **Hire**.
 
-There is no limit on agents. Your plan limits only members, workstations and projects; **Organization, Plan & limits** shows what you use (Owner and Admin). See [Plans and billing](/help/billing-and-plans#plans).
+There is no limit on agents. On a hosted service, a plan may limit members, workstations and projects, and **Organization, Plan & limits** shows what you use (Owner and Admin). See [Billing](/help/billing-and-plans#plans).
 
 ## Allow-lists {#allow-lists}
 

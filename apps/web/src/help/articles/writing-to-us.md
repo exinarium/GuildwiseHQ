@@ -18,7 +18,7 @@ Open **Contact us** from:
 
 To send a message:
 
-1. Choose what it is about: bug report, question, feature request or billing (plans and payments are explained in [Plans and billing](/help/billing-and-plans)).
+1. Choose what it is about: bug report, question, feature request or billing (payments are explained in [Billing](/help/billing-and-plans)).
 2. Write a subject and a message.
 3. Optionally attach a screenshot (PNG, JPEG or WebP, up to 2.5 MB).
 4. When opening from the menu or palette, the page you were on is captured first. Look at it, remove it, or upload a different image.

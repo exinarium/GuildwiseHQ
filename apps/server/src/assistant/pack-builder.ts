@@ -82,21 +82,42 @@ export function parseArticle(slug: string, raw: string): Article {
   };
 }
 
+/**
+ * Whether the repository is public. While false, the facts say the code is being released at launch and give no repository
+ * address. Flip it in the launch commit and rebuild the pack (`assistant:pack`); `--open-source-live` builds it for one run.
+ */
+export const OPEN_SOURCE_LIVE = false;
+
+/** Keeps `{{#oss}}..{{/oss}}` when live and `{{^oss}}..{{/oss}}` when not. */
+export function applyOpenSource(text: string, live: boolean): string {
+  return text
+    .replace(/\{\{#oss\}\}([\s\S]*?)\{\{\/oss\}\}/g, (_m, t: string) => (live ? t : ''))
+    .replace(/\{\{\^oss\}\}([\s\S]*?)\{\{\/oss\}\}/g, (_m, t: string) => (live ? '' : t));
+}
+
 /** The product facts without the maintainer notes above the first section. */
-function productFacts(root: string): string {
+function productFacts(root: string, live: boolean): string {
   const factsRaw = readFileSync(join(root, 'docs', 'assistant', 'product-facts.md'), 'utf8')
     .replace(/\r\n?/g, '\n')
     .trim();
-  return factsRaw.slice(Math.max(0, factsRaw.indexOf('\n## ') + 1));
+  return applyOpenSource(factsRaw.slice(Math.max(0, factsRaw.indexOf('\n## ') + 1)), live);
 }
 
 /** The help articles, in reading order. */
 export function readArticles(root: string = REPO_ROOT): Article[] {
-  const dir = join(root, 'apps', 'web', 'src', 'help', 'articles');
-  return readdirSync(dir)
-    .filter((f) => f.endsWith('.md'))
-    .sort()
-    .map((f) => parseArticle(f.replace(/\.md$/, ''), readFileSync(join(dir, f), 'utf8')))
+  // The in-app help articles, then topics only the assistant has (docs/assistant/topics/*.md: hosted pricing and the like,
+  // which a self-hosted server's Help centre must not show).
+  const dirs = [
+    join(root, 'apps', 'web', 'src', 'help', 'articles'),
+    join(root, 'docs', 'assistant', 'topics'),
+  ];
+  return dirs
+    .flatMap((dir) =>
+      readdirSync(dir)
+        .filter((f) => f.endsWith('.md'))
+        .sort()
+        .map((f) => parseArticle(f.replace(/\.md$/, ''), readFileSync(join(dir, f), 'utf8'))),
+    )
     .sort((a, b) => a.order - b.order || a.slug.localeCompare(b.slug));
 }
 
@@ -106,11 +127,11 @@ const SUMMARY_IN_INDEX = 140;
  * The always-on text: the facts and the topic index (slug, title, a clipped summary). Deterministic: sorted inputs, LF line ends,
  * no dates. The model sees the topics it could be given in full and can say what it does not know.
  */
-export function buildIndexPack(root: string = REPO_ROOT): string {
+export function buildIndexPack(root: string = REPO_ROOT, live: boolean = OPEN_SOURCE_LIVE): string {
   const topics = readArticles(root)
     .map((a) => `- ${a.title}${a.summary ? `: ${clip(a.summary, SUMMARY_IN_INDEX)}` : ''}`)
     .join('\n');
-  return `<product_facts>\n${productFacts(root)}\n</product_facts>\n\n<help_topics>\nThe in-app help articles. The ones that match the visitor's question are attached to their message as <relevant_help>; do not quote them as a manual.\n\n${topics}\n</help_topics>\n`;
+  return `<product_facts>\n${productFacts(root, live)}\n</product_facts>\n\n<help_topics>\nThe in-app help articles. The ones that match the visitor's question are attached to their message as <relevant_help>; do not quote them as a manual.\n\n${topics}\n</help_topics>\n`;
 }
 
 /** One chunk per article: what is attached to the visitor's message when the article matches the question. */

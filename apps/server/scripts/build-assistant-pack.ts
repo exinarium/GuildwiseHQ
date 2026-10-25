@@ -1,10 +1,18 @@
 import { mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { buildIndexPack, buildTopicFiles, INDEX_FILE, TOPICS_DIR } from '../src/assistant/pack-builder.ts';
+import {
+  buildIndexPack,
+  buildTopicFiles,
+  INDEX_FILE,
+  OPEN_SOURCE_LIVE,
+  REPO_ROOT,
+  TOPICS_DIR,
+} from '../src/assistant/pack-builder.ts';
 
 // Rebuilds the landing-page assistant's knowledge from the help articles and docs/assistant/product-facts.md:
 // the always-on index and one chunk per help topic.
-const index = buildIndexPack();
+const live = OPEN_SOURCE_LIVE || process.argv.includes('--open-source-live');
+const index = buildIndexPack(REPO_ROOT, live);
 const topics = buildTopicFiles();
 mkdirSync(TOPICS_DIR, { recursive: true });
 writeFileSync(INDEX_FILE, index);

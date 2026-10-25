@@ -141,7 +141,7 @@ function indexOf(all: TopicChunk[]) {
 
 /** The page a visitor is on suggests topics: pricing page, the blog, security and hosting. Slugs of help articles. */
 export const PAGE_TOPICS: ReadonlyArray<{ prefix: string; slugs: readonly string[] }> = [
-  { prefix: '/pricing', slugs: ['billing-and-plans', 'budgets-and-costs'] },
+  { prefix: '/pricing', slugs: ['pricing', 'billing-and-plans', 'open-source-and-self-hosting'] },
   { prefix: '/blog', slugs: ['blog-and-digest'] },
   { prefix: '/security', slugs: ['workstations-and-installer', 'cloud-workstations', 'two-factor'] },
   { prefix: '/contact', slugs: ['writing-to-us'] },

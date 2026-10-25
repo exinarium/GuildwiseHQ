@@ -22,6 +22,10 @@ On the **Help** page, the **Getting started** video is a spoken tutorial of unde
 
 The captions show everything the voice says and are on by default; use the **CC** button on the player to turn them off. Under the video, each step is a button that jumps to that part.
 
+## Videos {#videos}
+
+There are 30 short videos, one per screen, in the Help centre and on the website. Each runs one to two minutes, with a voice-over and captions.
+
 ## Your settings {#your-settings}
 
 **Settings** (sidebar, bottom) is your own account: your picture, your time zone, **Notifications** (push notifications on your devices, with quiet hours), the **Monday briefing**, **Two-factor login** (**Set up**), the weekly blog digest and expert mode for code changes. The time of the CEO's daily report is not here: the Owner sets it on the CEO's **Reporting & alerts** tab. Organization-wide settings are on **Organization**, next to it.
@@ -30,7 +34,7 @@ The captions show everything the voice says and are on by default; use the **CC*
 
 There are two ways in:
 
-- **Start your own organization.** On the website click **Start free trial**, pick a plan and fill in your organization name, your name, email and a password (12 or more characters). Open the link in the confirmation email: you are signed in and see one page, **Start your 7-day free trial**, where you add a card to start the trial. Nothing else opens until the card is saved, and nothing is charged until the trial ends. See [Plans and billing](/help/billing-and-plans#trial).
+- **Start your own organization.** If you use a hosted service, click its sign-up button on the website and fill in your organization name, your name, email and a password (12 or more characters), then open the link in the confirmation email. A hosted service may ask you to add a card to start a free trial first; see [Billing](/help/billing-and-plans#trial). If you run Guildwise HQ yourself, the platform account invites people to start an organization (see the self-hosting guide).
 - **Join with an invitation.** Open the invitation email. It comes from the Owner or an Admin of the organization you join (or from the platform administrator for a new organization). Click the link and choose your name and a password. If you already have an account, sign in instead and confirm.
 
 After you sign in you land in the app, and the guided tour starts. For a new sign-up that is right after the card is saved: until then the tour, the Get started checklist and What's new wait.

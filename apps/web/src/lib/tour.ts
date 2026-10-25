@@ -294,7 +294,7 @@ const PLATFORM_STEPS: TourStep[] = [
     id: 'platform-billing',
     target: 'platform-nav-billing',
     title: 'Billing',
-    body: 'The plans, their prices and limits, the Business add-on prices, VAT and the exchange rate. Every change needs a reason and is audited.',
+    body: 'The plan prices of the hosting service, VAT and the exchange rate. Every change needs a reason and is audited.',
     more: 'billing-and-plans#platform',
   },
   {

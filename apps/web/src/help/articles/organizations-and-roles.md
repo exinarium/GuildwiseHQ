@@ -39,7 +39,7 @@ The **Invitations** tab shows pending and past invitations. You can **Resend** o
 
 Everyone can reset their own password with **Forgot your password?** on the sign-in page (see [Getting started](/help/getting-started#forgot-password)). If a member cannot get the reset email, the Owner or an Admin can open the actions menu on their row and choose **Reset password**. You get a temporary password to copy and pass on yourself (it is shown once and no email is sent). The member is signed out everywhere and chooses their own password at the next sign-in. An Admin can do this for Members only; the Owner can do it for Members and Admins. Nobody resets their own password this way (use Account, Security). Their account is one account for every organization, so the new password applies in their other organizations too.
 
-The Owner can change an Admin or Member's role from the role selector on their row. Your plan may limit how many members you can have; the **Plan & limits** tab shows it (see [Plans and billing](/help/billing-and-plans#plans)).
+The Owner can change an Admin or Member's role from the role selector on their row. On a hosted service your plan may limit how many members you can have; the **Plan & limits** tab shows it (see [Billing](/help/billing-and-plans#plans)).
 
 ## Removing a member: offboarding {#offboarding}
 
@@ -71,7 +71,7 @@ The **Guests** tab under **Organization** shows who from other organizations has
 
 A platform administrator can suspend your organization. Running shifts finish and nothing new starts. Scheduled actions are skipped and recorded. A banner at the top explains the suspension.
 
-Only the Owner can still sign in, with read access plus organization settings and member management. To resume, the administrator reactivates the organization and everything continues where it stopped. An organization that is paused because of billing shows a banner with a link to the Billing page: see [Plans and billing](/help/billing-and-plans#failed-payments).
+Only the Owner can still sign in, with read access plus organization settings and member management. To resume, the administrator reactivates the organization and everything continues where it stopped. An organization that is paused because of billing shows a banner with a link to the Billing page: see [Billing](/help/billing-and-plans#failed-payments).
 
 ## Platform area {#platform-area}
 

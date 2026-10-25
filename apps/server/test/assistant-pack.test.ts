@@ -2,6 +2,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
+  applyOpenSource,
   buildIndexPack,
   buildTopicFiles,
   INDEX_FILE,
@@ -27,6 +28,21 @@ const ask = (
 ) => selectTopics([...history, { role: 'user', content: q }], { page }).map((s) => s.chunk.slug);
 
 describe('the assistant knowledge, split by topic', () => {
+  it('says what Guildwise Cloud does not include and never names the operating company or an Unlimited plan', () => {
+    const all = buildIndexPack() + Object.values(buildTopicFiles()).join('\n');
+    expect(all).toContain('does not include backups');
+    expect(all).not.toMatch(/creativ360/i);
+    expect(all).not.toMatch(/unlimited plan/i);
+    expect(all).toContain('from $5');
+  });
+
+  it('keeps the repository address out of the facts until the source is public', () => {
+    expect(buildIndexPack(undefined, false)).not.toContain('github.com/exinarium/GuildwiseHQ');
+    expect(buildIndexPack(undefined, true)).toContain('github.com/exinarium/GuildwiseHQ');
+    expect(applyOpenSource('a{{#oss}}B{{/oss}}{{^oss}}C{{/oss}}', true)).toBe('aB');
+    expect(applyOpenSource('a{{#oss}}B{{/oss}}{{^oss}}C{{/oss}}', false)).toBe('aC');
+  });
+
   it('is up to date: regenerate it with `pnpm --filter @aom/server assistant:pack` and commit it', () => {
     expect(readFileSync(INDEX_FILE, 'utf8')).toBe(buildIndexPack());
     const built = buildTopicFiles();
@@ -51,7 +67,9 @@ describe('the assistant knowledge, split by topic', () => {
   it('carries the curated facts and an index line for every help article, and no private company name', () => {
     const index = buildIndexPack();
     expect(index).toContain('<product_facts>');
-    expect(index).toContain('Starter: $19');
+    expect(index).toContain('Guildwise Cloud: $30 per organization per month');
+    expect(index).not.toMatch(/Starter|Business plan|\$149|\$19\b/);
+    expect(index).not.toMatch(/Unlimited plan/i);
     expect(index).toContain('<help_topics>');
     for (const t of loadTopics()) expect(index).toContain(t.title);
     expect(index).not.toMatch(/\(Pty\) Ltd/i); // no operating company in the pack
@@ -61,7 +79,7 @@ describe('the assistant knowledge, split by topic', () => {
 
   it('keeps every chunk small enough to attach: no topic is more than a quarter of the per-request budget alone', () => {
     const sizes = loadTopics().map((t) => approxTokens(t.text));
-    expect(loadTopics()).toHaveLength(35);
+    expect(loadTopics()).toHaveLength(38);
     expect(Math.max(...sizes)).toBeLessThan(TOPIC_LIMITS.budgetTokens / 2);
     expect(sizes.reduce((a, b) => a + b, 0)).toBeGreaterThan(8000); // the whole help centre is still here, just not sent every time
   });
@@ -87,7 +105,12 @@ describe('choosing the topics of a question', () => {
   });
 
   it.each([
-    ['How much does it cost and what plans are there?', 'billing-and-plans'],
+    ['How much does it cost and what plans are there?', 'pricing'],
+    ['How much for 7 people?', 'pricing'],
+    ['Does Cloud include backups?', 'pricing'],
+    ['How do I suggest a feature?', 'open-source-and-self-hosting'],
+    ['Does it work with Codex or Gemini?', 'ai-runtimes'],
+    ['What can an agent do and how do I export the audit log?', 'governance'],
     ['What is the Decision desk?', 'desk'],
     ['Can I run agents on a cloud VPS or Codespaces?', 'cloud-workstations'],
     ['How do I set up two-factor login?', 'two-factor'],
@@ -133,6 +156,10 @@ describe('choosing the topics of a question', () => {
     expect(relevantHelpBlock([])).toBeUndefined();
   });
 
+  it('also finds the open-source article for a company asking about paying', () => {
+    expect(ask('Can I use it in my company without paying?')).toContain('open-source-and-self-hosting');
+  });
+
   it('keeps a follow-up on its topic through the earlier question, at half weight', () => {
     const history = [
       { role: 'user' as const, content: 'How does billing work?' },
@@ -144,9 +171,8 @@ describe('choosing the topics of a question', () => {
 
   it('lets the page lift a topic that already matches a little, and never invents one', () => {
     const q = [{ role: 'user' as const, content: 'What does it cost?' }];
-    expect(selectTopics(q).map((s) => s.chunk.slug)).not.toContain('billing-and-plans');
     const lifted = selectTopics(q, { page: '/pricing' });
-    expect(lifted.map((s) => s.chunk.slug)).toContain('billing-and-plans');
+    expect(lifted.map((s) => s.chunk.slug)).toContain('pricing');
     expect(ask('hello', '/pricing')).toEqual([]);
   });
 

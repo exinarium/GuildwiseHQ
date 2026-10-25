@@ -5,7 +5,7 @@ keywords: [budget, cost, spend, monthly, override, currency, tokens]
 order: 16
 ---
 
-Every shift records what it uses: input tokens, output tokens, and which model ran. Guildwise HQ turns this into money at US dollar list prices and shows it in your organization's currency. These are estimates of what the work costs, not an invoice. Your Guildwise HQ subscription is separate: see [Plans and billing](/help/billing-and-plans).
+Every shift records what it uses: input tokens, output tokens, and which model ran. Guildwise HQ turns this into money at US dollar list prices and shows it in your organization's currency. These are estimates of what the work costs, not an invoice. A hosting service's subscription, if you use one, is separate: see [Billing](/help/billing-and-plans).
 
 ## Where spend shows {#where-spend-shows}
 

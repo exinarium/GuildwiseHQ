@@ -27,6 +27,10 @@ A pack can say what it needs: `scopes:` in its `pack.yaml` (for the whole pack o
 
 Write skills, personas and playbooks in the editor; the page checks them as you type. Each pack you write is stored on your workstation in the standard pack layout, so **Export as zip** gives a folder you can push to git unchanged. **Private** packs stay on that workstation: only you see them and the server never gets their text. **Organization** packs are reviewed by an Owner or Admin first (an Owner or Admin can approve their own save) and then reach the workstations chosen for the pack.
 
+## BMad Method {#bmad}
+
+A repository laid out for BMad Method imports as skills like any other pack: add its git repository as a pack, review it and approve it.
+
 ## Private repositories and workstations {#private}
 
 For a private git repository add a deploy key (ssh) or token (https). Your browser encrypts it for each workstation you choose, which stores it for that pack only. A member's workstation asks its owner first (a request on their desk) and clones only after they accept.

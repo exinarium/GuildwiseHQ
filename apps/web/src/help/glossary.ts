@@ -235,7 +235,7 @@ export const GLOSSARY: GlossaryEntry[] = [
     term: 'Free trial',
     aka: ['trial', 'plan', 'sign up', 'pricing'],
     definition:
-      'Seven days of a paid plan at no cost, after you sign up, confirm your email and add a card. The first payment is taken when it ends; cancel before then and you pay nothing.',
+      'Offered by hosted services before the first charge (Guildwise Cloud gives seven days). Self-hosted servers have no trial. The hosting service says how it works.',
     article: 'billing-and-plans#trial',
   },
   {

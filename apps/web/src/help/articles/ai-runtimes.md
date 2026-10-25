@@ -7,6 +7,10 @@ order: 28
 
 **Integrations, AI runtime** shows what a workstation can run agents on: Claude Code, Codex, the Gemini CLI, opencode, and API providers (Anthropic, OpenAI, Gemini, any OpenAI-compatible endpoint, and Claude Code on Amazon Bedrock, Vertex AI or a gateway).
 
+## Which runtimes {#runtimes}
+
+Claude Code, Codex, the Gemini CLI, opencode, and direct APIs: Anthropic, OpenAI, Gemini, any OpenAI-compatible endpoint, and Claude Code on Amazon Bedrock, Vertex AI or a gateway.
+
 ## Accounts {#accounts}
 
 Each runtime and provider has one **main account** and any number of **named accounts**, per workstation. Use **Add a named account** and give it a short name such as `work`. The main account is what the CEO, DevOps and chats that are not about a card use. A chat or an @mention about a project's card uses the account that project chose for the agent's runtime (with the project's fallback to main), like the card's own work.
