@@ -490,7 +490,12 @@ describe('supervisor', () => {
     expect(ended.outcome).toBe('reported');
     expect(h!.server.of('shift.accepted').filter((m) => m.shiftId === msg.shiftId)).toHaveLength(0);
     expect(h!.server.of('shift.started').filter((m) => m.shiftId === msg.shiftId)).toHaveLength(0);
-    expect(existsSync(join(dir, `${msg.shiftId}.json`))).toBe(false); // forgotten once the shift is over
+    // forgotten once the shift is over (right after `shift.ended` is sent, so wait for it)
+    await waitUntil(
+      () => !existsSync(join(dir, `${msg.shiftId}.json`)),
+      5000,
+      'the persisted shift forgotten',
+    );
   });
 
   it('commands: agent.wipe and worktree.remove are idempotent', async () => {

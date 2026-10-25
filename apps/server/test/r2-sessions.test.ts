@@ -289,7 +289,13 @@ describe('option scoring, the tally', () => {
     // its end first: finish whatever else starts until the minutes turn does.
     let min = await K.nextStart(st.threadId);
     while (!K.role('minutes')(min)) {
-      await K.finish(min);
+      // (not K.finish: a turn the ending cancelled never reaches `done`, and nothing here depends on its state)
+      r.send('chat.done', {
+        chatId: min.chatId,
+        threadId: min.threadId,
+        messageText: 'ok',
+        usage: { inputTokens: 100, outputTokens: 20, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      });
       min = await K.nextStart(st.threadId);
     }
     await K.call(min.chatId, 'board.minutes', {
