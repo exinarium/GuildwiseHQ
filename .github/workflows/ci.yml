@@ -114,6 +114,14 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # The sandbox tests run the agents' real sandbox: bubblewrap and socat, and (on Ubuntu 24.04) unprivileged user
+      # namespaces, which the runner image restricts by default.
+      - name: Install the sandbox tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends bubblewrap socat
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
       - name: Runner tests
         run: pnpm --filter @aom/runner test
 

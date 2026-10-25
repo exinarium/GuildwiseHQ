@@ -285,7 +285,13 @@ describe('option scoring, the tally', () => {
     expect(s.scores[0].scores.map((x: any) => x.score).sort()).toEqual([2, 5]);
     // minutes carry the tally
     await K.owner('POST', `/api/board/${st.threadId}/end`);
-    const min = await K.nextStart(st.threadId, K.role('minutes'));
+    // A turn the dispatcher had already started when the board ended (the Chair's next pick, on a slow machine) runs to
+    // its end first: finish whatever else starts until the minutes turn does.
+    let min = await K.nextStart(st.threadId);
+    while (!K.role('minutes')(min)) {
+      await K.finish(min);
+      min = await K.nextStart(st.threadId);
+    }
     await K.call(min.chatId, 'board.minutes', {
       content: '## Positions\n\n- a\n## Agreements\n\n- b\n## Open questions\n\n- c',
     });
