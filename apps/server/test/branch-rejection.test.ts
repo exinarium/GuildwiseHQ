@@ -235,12 +235,12 @@ describe('a working branch the runner created', () => {
     r.accepted(start.shiftId);
     r.send('shift.started', {
       shiftId: start.shiftId,
-      branchCreated: { base: 'pieter/dev', from: 'main', pushed: true, mainBranchSet: false },
+      branchCreated: { base: 'alex/dev', from: 'main', pushed: true, mainBranchSet: false },
     });
     await new Promise((res) => setTimeout(res, 300));
     let proj = await ok<any>(owner('GET', `/api/projects/${w.projectId}`));
     let repo = proj.repos.find((x: any) => x.id === w.repoId);
-    expect(repo.knownBranches).toContain('pieter/dev');
+    expect(repo.knownBranches).toContain('alex/dev');
     const notes = await q(`SELECT payload FROM events WHERE type='ThreadMessagePosted' AND stream_id=$1`, [
       `thread-${card.id}`,
     ]);
@@ -251,11 +251,11 @@ describe('a working branch the runner created', () => {
     expect(alerts).toHaveLength(1);
 
     // origin's own list replaces the stored one and dates it
-    r.send('shift.started', { shiftId: start.shiftId, originBranches: ['main', 'pieter/dev', 'feature/x'] });
+    r.send('shift.started', { shiftId: start.shiftId, originBranches: ['main', 'alex/dev', 'feature/x'] });
     await new Promise((res) => setTimeout(res, 300));
     proj = await ok<any>(owner('GET', `/api/projects/${w.projectId}`));
     repo = proj.repos.find((x: any) => x.id === w.repoId);
-    expect(repo.knownBranches).toEqual(['main', 'pieter/dev', 'feature/x']);
+    expect(repo.knownBranches).toEqual(['main', 'alex/dev', 'feature/x']);
     expect(repo.knownBranchesAt).toBeTruthy();
     r.ended(start.shiftId, 'stopped');
   });

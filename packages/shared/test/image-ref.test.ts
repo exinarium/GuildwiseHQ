@@ -9,20 +9,20 @@ describe('parseImageRef', () => {
     expect(parseImageRef('app:1.2')).toEqual({ registry: '', name: 'app', tag: '1.2', digest: '' });
   });
   it('host:port/name:tag keeps the whole registry address (the P5 bug cut it to "192.168.1.11")', () => {
-    expect(parseImageRef('192.168.1.11:5000/dcode-server:showcase-cd30f7bb33')).toEqual({
+    expect(parseImageRef('192.168.1.11:5000/demo-server:showcase-cd30f7bb33')).toEqual({
       registry: '192.168.1.11:5000',
-      name: 'dcode-server',
+      name: 'demo-server',
       tag: 'showcase-cd30f7bb33',
       digest: '',
     });
-    expect(imageNameOf('192.168.1.11:5000/dcode-server:showcase-cd30f7bb33')).toBe(
-      '192.168.1.11:5000/dcode-server',
+    expect(imageNameOf('192.168.1.11:5000/demo-server:showcase-cd30f7bb33')).toBe(
+      '192.168.1.11:5000/demo-server',
     );
   });
   it('host:port/name without a tag', () => {
-    expect(parseImageRef('192.168.1.11:5000/dcode-server')).toMatchObject({
+    expect(parseImageRef('192.168.1.11:5000/demo-server')).toMatchObject({
       registry: '192.168.1.11:5000',
-      name: 'dcode-server',
+      name: 'demo-server',
       tag: '',
     });
   });

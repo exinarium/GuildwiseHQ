@@ -209,7 +209,7 @@ test.describe('Environments: user journeys (mocked world)', () => {
     await tid(page, 'role-live').click();
     await tid(page, 'choose-add-server').click();
     await tid(page, 'host-use-flow5-server').click();
-    await expect(tid(page, 'server-found')).toContainText('/home/administrator/dcode/flow5-full');
+    await expect(tid(page, 'server-found')).toContainText('/home/administrator/demo/flow5-full');
     await tid(page, 'server-done').click();
     await tid(page, 'stack-choice').click();
     await expect(tid(page, 'update-method')).toContainText('How should new versions get onto the server?');
@@ -468,7 +468,7 @@ test.describe('Environments: user journeys (mocked world)', () => {
     const saved = await page.evaluate(() => localStorage.getItem('aom-mock-env') ?? '');
     expect(saved).toContain(tilde);
     expect(saved).not.toContain('mm-fixes-wt/deploy/local/docker-compose.yml"');
-    expect(saved).toContain('"imageName":"dcode-server"');
+    expect(saved).toContain('"imageName":"demo-server"');
     expect(saved).not.toContain('"imageName":"192.168.1.11"');
   });
 

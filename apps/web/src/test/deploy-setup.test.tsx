@@ -1372,11 +1372,11 @@ describe('the Add environment dialog', () => {
     expect(miss).toHaveTextContent('/opt, /srv');
     expect(miss.textContent).not.toMatch(/^No app found/);
     await user.click(screen.getByTestId('somewhere-else'));
-    await user.type(screen.getByTestId('folder-input'), '/home/u/dcode/uat');
+    await user.type(screen.getByTestId('folder-input'), '/home/u/demo/uat');
     await user.click(screen.getByTestId('folder-look'));
     await waitFor(() =>
       expect(calls.filter((x) => x.url.endsWith('/delivery/probe')).at(-1)?.body.hints).toMatchObject({
-        dirs: ['/home/u/dcode/uat'],
+        dirs: ['/home/u/demo/uat'],
       }),
     );
     expect(await screen.findByTestId('stack-choice', undefined, { timeout: 6000 })).toHaveTextContent('uat');
@@ -1516,7 +1516,7 @@ describe('the update method of a server', () => {
     const a = {
       ...emptyAnswers('live'),
       host: 'prod',
-      stackPath: '/home/administrator/dcode/flow5-full/docker-compose.yml',
+      stackPath: '/home/administrator/demo/flow5-full/docker-compose.yml',
       appService: 'app',
       imageName: 'flow5/app',
       targetName: 'flow5-server',

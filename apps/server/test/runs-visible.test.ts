@@ -52,17 +52,17 @@ describe('the Build guide setting', () => {
     const saved = await call(
       'PUT',
       `/api/projects/${w.projectId}/run-settings`,
-      settings({ buildGuides: ['/home/u/src/dcode/sources/BUILD.md'] }),
+      settings({ buildGuides: ['/home/u/src/demo/sources/BUILD.md'] }),
     );
-    expect(saved.settings.buildGuides).toEqual(['/home/u/src/dcode/sources/BUILD.md']);
+    expect(saved.settings.buildGuides).toEqual(['/home/u/src/demo/sources/BUILD.md']);
     expect(await settingsHashOf(w.t.app.ctx.pool, w.projectId)).not.toBe(before);
     expect((await call('GET', `/api/projects/${w.projectId}/run-settings`)).settings.buildGuides).toEqual([
-      '/home/u/src/dcode/sources/BUILD.md',
+      '/home/u/src/demo/sources/BUILD.md',
     ]);
 
     const { environment: env } = await start();
     const frame = await r.waitFor('command', (f) => f.command === 'run.start' && f.payload.envId === env.id);
-    expect(frame.payload.buildGuides).toEqual(['/home/u/src/dcode/sources/BUILD.md']);
+    expect(frame.payload.buildGuides).toEqual(['/home/u/src/demo/sources/BUILD.md']);
 
     // a relative path is refused
     await call(
@@ -118,14 +118,14 @@ describe('a failed environment stays visible', () => {
     // DevOps ends its request with its report, then the environment is given up
     await q(`UPDATE devops_requests SET status='done', result_summary=$2 WHERE id=$1`, [
       env.devopsRequestId,
-      'The environment failed: Flow-Server needs a Couchbase server and none is running.',
+      'The environment failed: Demo-Server needs a Couchbase server and none is running.',
     ]);
     await status(env.id, 'failed', { error: 'DevOps gave up', endReason: 'failed' });
 
     const shown = (await list()).find((e) => e.id === env.id);
     expect(shown).toMatchObject({
       state: 'failed',
-      failureReason: 'The environment failed: Flow-Server needs a Couchbase server and none is running.',
+      failureReason: 'The environment failed: Demo-Server needs a Couchbase server and none is running.',
       lastError: 'DevOps gave up',
       devopsRequestId: env.devopsRequestId,
       canRetry: true,
@@ -191,7 +191,7 @@ describe('waiting for the owner', () => {
     await status(env.id, 'starting');
     const approval = {
       deskItemId: '00000000-0000-4000-8000-000000000001',
-      action: 'Question: Flow-Server needs Couchbase at couchbase://localhost',
+      action: 'Question: Demo-Server needs Couchbase at couchbase://localhost',
       reason: 'A) use the Couchbase on 192.168.1.12 B) allow Docker C) give me a connection string',
       commands: [],
       resolution: null,

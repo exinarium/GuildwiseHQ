@@ -273,7 +273,7 @@ export function guessDbService(stack: Stack): string {
   return stack.services.find((s) => s.database === 'postgres')?.name ?? '';
 }
 
-/** `guildwise-hq` from `guildwise-hq:4f2c1ab`, `dcode-server` from `192.168.1.11:5000/dcode-server:v1` (the registry is the registry field); a compose-built service has `<project>-<service>`. */
+/** `guildwise-hq` from `guildwise-hq:4f2c1ab`, `demo-server` from `192.168.1.11:5000/demo-server:v1` (the registry is the registry field); a compose-built service has `<project>-<service>`. */
 export function guessImageName(stack: Stack, service: string, serverImage?: string): string {
   const fromImage = parseImageRef(
     serverImage ?? stack.containers.find((c) => c.service === service)?.image ?? '',

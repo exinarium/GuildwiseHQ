@@ -19,8 +19,8 @@ const RUN = '/home/user/projects/p5-run-trial/deploy/local/docker-compose.yml';
 const OTHER = '/home/user/projects/mm-fixes-wt/deploy/local/docker-compose.yml';
 const copy = (path: string) => ({
   path,
-  project: 'dcode-flow-local',
-  services: [{ name: 'dcode-server', image: '192.168.1.11:5000/dcode-server:showcase-cd30f7bb33' }],
+  project: 'demo-flow-local',
+  services: [{ name: 'demo-server', image: '192.168.1.11:5000/demo-server:showcase-cd30f7bb33' }],
   volumes: [],
 });
 const report = (over: Record<string, unknown> = {}): ProbeReport =>
@@ -31,10 +31,10 @@ const report = (over: Record<string, unknown> = {}): ProbeReport =>
     composeFiles: [copy(OTHER), copy(RUN)],
     containers: [
       {
-        name: 'dcode-flow-local-dcode-server-1',
-        project: 'dcode-flow-local',
-        service: 'dcode-server',
-        image: '192.168.1.11:5000/dcode-server:showcase-cd30f7bb33',
+        name: 'demo-flow-local-demo-server-1',
+        project: 'demo-flow-local',
+        service: 'demo-server',
+        image: '192.168.1.11:5000/demo-server:showcase-cd30f7bb33',
         state: 'running',
         ports: [{ host: 5500, container: 500, bind: '0.0.0.0' }],
         composeFile: RUN,
@@ -99,7 +99,7 @@ describe('case 1: the running copy wins when several checkouts share a compose p
 
   it('runningFileFor names the file the app runs from when the setup points at another copy', () => {
     const env = {
-      app: { composeFile: OTHER, service: 'dcode-server', composeProject: 'dcode-flow-local' },
+      app: { composeFile: OTHER, service: 'demo-server', composeProject: 'demo-flow-local' },
     } as unknown as SetupEnv;
     expect(runningFileFor(env, report())).toBe(RUN);
     const same = {
@@ -130,21 +130,21 @@ describe('case 2: the mismatch failure is translated', () => {
 });
 
 describe('case 3: the image name keeps the registry port out of the name', () => {
-  it('192.168.1.11:5000/dcode-server:showcase-cd30f7bb33 is dcode-server, never 192.168.1.11', () => {
+  it('192.168.1.11:5000/demo-server:showcase-cd30f7bb33 is demo-server, never 192.168.1.11', () => {
     const stack = stacksFromReport(report())[0];
     if (!stack) throw new Error('no stack');
-    expect(guessAppService(stack)).toBe('dcode-server');
-    expect(guessImageName(stack, 'dcode-server')).toBe('dcode-server');
-    expect(guessImageName(stack, 'dcode-server', 'localhost:5000/x:1')).toBe('x');
-    expect(guessImageName(stack, 'dcode-server', 'ghcr.io/acme/api@sha256:abcdef')).toBe('acme/api');
-    expect(guessImageName(stack, 'dcode-server', 'guildwise-hq:4f2c1ab')).toBe('guildwise-hq');
+    expect(guessAppService(stack)).toBe('demo-server');
+    expect(guessImageName(stack, 'demo-server')).toBe('demo-server');
+    expect(guessImageName(stack, 'demo-server', 'localhost:5000/x:1')).toBe('x');
+    expect(guessImageName(stack, 'demo-server', 'ghcr.io/acme/api@sha256:abcdef')).toBe('acme/api');
+    expect(guessImageName(stack, 'demo-server', 'guildwise-hq:4f2c1ab')).toBe('guildwise-hq');
   });
 });
 
 describe('case 4: the health address of a server comes from its address, the published port and the usual paths', () => {
   it('reads the published port of the running app part (0.0.0.0:5500->500)', () => {
     const stack = stacksFromReport(report())[0];
-    expect(publishedPort(stack, 'dcode-server')).toBe(5500);
+    expect(publishedPort(stack, 'demo-server')).toBe(5500);
     expect(publishedPort(stack, 'other')).toBeNull();
   });
   it('a port bound to loopback only is not reachable from outside', () => {
@@ -152,8 +152,8 @@ describe('case 4: the health address of a server comes from its address, the pub
       containers: [
         {
           name: 'a',
-          project: 'dcode-flow-local',
-          service: 'dcode-server',
+          project: 'demo-flow-local',
+          service: 'demo-server',
           image: 'x',
           state: 'running',
           ports: [{ host: 5500, container: 500, bind: '127.0.0.1' }],
@@ -161,7 +161,7 @@ describe('case 4: the health address of a server comes from its address, the pub
         },
       ],
     });
-    expect(publishedPort(stacksFromReport(r)[0], 'dcode-server')).toBeNull();
+    expect(publishedPort(stacksFromReport(r)[0], 'demo-server')).toBeNull();
   });
   it('candidates are /ready, /api/health, /health and the root, in that order', () => {
     expect(healthCandidates(serverAppBase('192.168.1.13', 5500))).toEqual([

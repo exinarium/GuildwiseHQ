@@ -2,13 +2,13 @@
  * A container image reference: `[host[:port]/]path/name[:tag][@sha256:digest]`.
  *
  * The first part is a registry host only when it has a `.` or a `:` or is `localhost` (Docker's own rule), so
- * `192.168.1.11:5000/dcode-server:showcase-cd30f7bb33` is registry `192.168.1.11:5000`, name `dcode-server`, tag
+ * `192.168.1.11:5000/demo-server:showcase-cd30f7bb33` is registry `192.168.1.11:5000`, name `demo-server`, tag
  * `showcase-cd30f7bb33`, and `acme/api` is a Docker Hub path without a registry. A `:` only starts a tag after the last `/`.
  */
 export interface ImageRef {
   /** `192.168.1.11:5000`, `ghcr.io`, `localhost:5000`; empty when the reference has no registry host. */
   registry: string;
-  /** Everything between the registry and the tag, e.g. `dcode-server` or `acme/api`. */
+  /** Everything between the registry and the tag, e.g. `demo-server` or `acme/api`. */
   name: string;
   tag: string;
   digest: string;
@@ -40,7 +40,7 @@ export function parseImageRef(ref: string): ImageRef {
   return { registry, name: rest, tag, digest };
 }
 
-/** The reference without its tag and digest, keeping the registry: `192.168.1.11:5000/dcode-server`. */
+/** The reference without its tag and digest, keeping the registry: `192.168.1.11:5000/demo-server`. */
 export function imageNameOf(ref: string): string {
   const p = parseImageRef(ref);
   return p.registry ? `${p.registry}/${p.name}` : p.name;

@@ -197,7 +197,7 @@ export const HygieneRepoResultSchema = z.object({
         cardId: z.uuid(),
         ref: z.string(),
         branch: z.string(),
-        /** Why it was safe: "merged into pieter/dev", "all commits already in ...", "pull request merged". */
+        /** Why it was safe: "merged into alex/dev", "all commits already in ...", "pull request merged". */
         reason: z.string(),
         origin: z.boolean().default(false),
         local: z.boolean().default(false),

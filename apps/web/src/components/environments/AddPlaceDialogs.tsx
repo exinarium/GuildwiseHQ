@@ -294,7 +294,7 @@ function ServerLook({
                 label={`Folder on ${alias}`}
                 hint="The folder that holds docker-compose.yml."
                 value={dir}
-                placeholder="/home/you/dcode/app"
+                placeholder="/home/you/demo/app"
                 autoCapitalize="none"
                 onChange={(e) => setDir(e.target.value)}
                 data-testid="server-folder-input"

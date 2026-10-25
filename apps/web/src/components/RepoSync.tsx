@@ -59,7 +59,7 @@ export function syncText(
 }
 
 /**
- * One line under a repository: "pieter/dev is in sync with origin" or "pieter/dev is 3 behind origin", when it was last
+ * One line under a repository: "alex/dev is in sync with origin" or "alex/dev is 3 behind origin", when it was last
  * checked, and a "Sync now" button (only where the user may sync: their own workstation). Nothing is shown until the
  * runner has checked the branch once.
  */

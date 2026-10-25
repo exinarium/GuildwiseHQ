@@ -3,13 +3,13 @@
 set -euo pipefail
 
 ENV_NAME='production'
-SERVICE='dcode-server'
-IMAGE='dcode-server'
+SERVICE='demo-server'
+IMAGE='demo-server'
 IMAGE_VAR=''
 REGISTRY='192.168.1.11:5000'
-APP_DIR='/home/administrator/dcode/flow5-full'
-COMPOSE_FILE='/home/administrator/dcode/flow5-full/compose.yaml'
-COMPOSE_PROJECT='dcode-flow5-remote'
+APP_DIR='/home/administrator/demo/flow5-full'
+COMPOSE_FILE='/home/administrator/demo/flow5-full/compose.yaml'
+COMPOSE_PROJECT='demo-flow5-remote'
 HEALTH_URL='http://192.168.1.13:5500/ready'
 HEALTH_TIMEOUT=120
 
@@ -51,7 +51,7 @@ if command -v flock >/dev/null 2>&1; then
   LOCK_DIR="${XDG_RUNTIME_DIR:-$HOME/.cache}"
   mkdir -p -- "$LOCK_DIR" 2>/dev/null || LOCK_DIR=/tmp
   LOCK_PROJECT="${AOM_DEPLOY_PROJECT_ID:-x}"
-  exec 9>"$LOCK_DIR/aom-deploy-${LOCK_PROJECT//[^A-Za-z0-9-]/}-dcode-flow5-remote-production.lock"
+  exec 9>"$LOCK_DIR/aom-deploy-${LOCK_PROJECT//[^A-Za-z0-9-]/}-demo-flow5-remote-production.lock"
   flock -n 9 || die "another deploy of $ENV_NAME is running"
 fi
 
@@ -203,7 +203,7 @@ trap 'exit 143' TERM
 trap 'exit 130' INT
 
 # step 1: back up the database
-BACKUP_DIR='/home/administrator/dcode/flow5-full/backups'
+BACKUP_DIR='/home/administrator/demo/flow5-full/backups'
 DB_SERVICE='postgres'
 DB_USER=''
 DB_NAME=''
@@ -259,7 +259,7 @@ else
   write_override "$TAG"
 fi
 
-# step 4: restart only dcode-server on the server
+# step 4: restart only demo-server on the server
 if [ "$DRY_RUN" = 1 ]; then
   compose_up_remote 1
 else

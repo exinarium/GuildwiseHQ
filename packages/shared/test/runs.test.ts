@@ -465,7 +465,7 @@ describe('the DevOps prompt of a run request', () => {
           ...run,
           buildGuides: [
             {
-              path: '/home/u/src/dcode/sources/BUILD.md',
+              path: '/home/u/src/demo/sources/BUILD.md',
               content: 'Use the embedded server of the webconsole.',
               origin: 'parent',
               repoIds: [ID(1)],
@@ -474,7 +474,7 @@ describe('the DevOps prompt of a run request', () => {
           pathMap: [
             {
               repoId: ID(1),
-              clonePath: '/home/u/src/dcode/sources/web',
+              clonePath: '/home/u/src/demo/sources/web',
               worktreePath: '/home/u/.aom-runner/worktrees/run-1/web',
             },
           ],
@@ -482,12 +482,12 @@ describe('the DevOps prompt of a run request', () => {
       }),
     );
     expect(text).toContain(
-      'Build guide above the repositories: /home/u/src/dcode/sources/BUILD.md (for web)',
+      'Build guide above the repositories: /home/u/src/demo/sources/BUILD.md (for web)',
     );
     expect(text).toContain('Use the embedded server of the webconsole.');
     expect(text).toContain('follow them first, and literally');
     expect(text).toContain(
-      "Map every path in a guide that points into the owner's checkout to its run worktree equivalent: /home/u/src/dcode/sources/web => /home/u/.aom-runner/worktrees/run-1/web",
+      "Map every path in a guide that points into the owner's checkout to its run worktree equivalent: /home/u/src/demo/sources/web => /home/u/.aom-runner/worktrees/run-1/web",
     );
     expect(text).toContain('follow the guide and say so in your summary');
     expect(text).toContain('appsettings.{Environment}.json');

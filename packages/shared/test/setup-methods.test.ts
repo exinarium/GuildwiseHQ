@@ -24,16 +24,16 @@ const base = {
   label: 'Live site',
   target: 'flow5-server',
   host: 'flow5-server',
-  composeFile: '/home/administrator/dcode/flow5-full/compose.yaml',
-  composeProject: 'dcode-flow5-remote',
-  service: 'dcode-server',
-  imageName: 'dcode-server',
+  composeFile: '/home/administrator/demo/flow5-full/compose.yaml',
+  composeProject: 'demo-flow5-remote',
+  service: 'demo-server',
+  imageName: 'demo-server',
   healthUrl: 'http://192.168.1.13:5500/ready',
-  database: { service: 'postgres', dir: '/home/administrator/dcode/flow5-full/backups' },
+  database: { service: 'postgres', dir: '/home/administrator/demo/flow5-full/backups' },
 };
 const cases = {
   copy: () => sshShipEnv({ ...base }),
-  'copy-envvar': () => sshShipEnv({ ...base, imageVar: 'DCODE_IMAGE' }),
+  'copy-envvar': () => sshShipEnv({ ...base, imageVar: 'DEMO_IMAGE' }),
   registry: () => sshShipEnv({ ...base, method: 'registry', registry: '192.168.1.11:5000' }),
   'registry-ci': () =>
     sshShipEnv({ ...base, method: 'registry', registry: '192.168.1.11:5000', registryPush: false }),

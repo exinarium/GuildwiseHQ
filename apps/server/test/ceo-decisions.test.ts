@@ -53,7 +53,7 @@ const decisions = () =>
 
 /** A working-branch question on the manager's desk (what the hygiene and intake flow raises). */
 async function branchQuestion(
-  title = 'Keep pieter/dev as the working branch of Flow-Web (P4), or use another branch?',
+  title = 'Keep alex/dev as the working branch of Demo-Web (P4), or use another branch?',
 ) {
   await q(`UPDATE project_repos SET working_branch='main' WHERE id=$1`, [w.repoId]);
   const id = randomUUID();
@@ -238,13 +238,13 @@ describe('CEO decisions on the desk', () => {
 describe('correcting a decision', () => {
   it('records an owner-confirmed memory and the BA reviews it; the CEO replies and records the lesson', async () => {
     await w.hire('Ben', 'ba', 'senior');
-    const id = await branchQuestion('Keep pieter/dev as the working branch of Flow-Web (P4)?');
+    const id = await branchQuestion('Keep alex/dev as the working branch of Demo-Web (P4)?');
     result(await act(r, shiftId, 'answer', { item: id, option: 'keep' }, { key: 'corr-1' }));
     const item = (await decisions()).find((d) => d.id === id)!;
 
     const out = await ok<any>(
       owner('POST', `/api/desk/${item.id}/ceo-decision/correct`, {
-        correction: 'Use develop: pieter/dev is a personal branch and never the working branch.',
+        correction: 'Use develop: alex/dev is a personal branch and never the working branch.',
       }),
     );
     expect(out.item.status).toBe('answered');
@@ -285,7 +285,7 @@ describe('correcting a decision', () => {
     );
     const report = [
       'The CEO treated the intake default as the working branch.',
-      'It missed that pieter/dev is a personal branch.',
+      'It missed that alex/dev is a personal branch.',
       'Rule: never keep a personal branch as the working branch of a repository.',
     ].join('\n');
     const { reportId } = r.report(start.shiftId, {

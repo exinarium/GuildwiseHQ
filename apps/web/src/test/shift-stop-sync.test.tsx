@@ -97,13 +97,13 @@ describe('stopping a shift', () => {
 });
 
 const sync = (over: Record<string, unknown> = {}) => ({
-  workingBranch: 'pieter/dev',
+  workingBranch: 'alex/dev',
   state: 'behind' as const,
   ahead: 0,
   behind: 3,
   dirty: false,
   onBranch: true,
-  checkedOutBranch: 'pieter/dev',
+  checkedOutBranch: 'alex/dev',
   checkedAt: new Date().toISOString(),
   ...over,
 });
@@ -112,7 +112,7 @@ describe('working branch sync line', () => {
   it('says how far behind and offers Sync now', async () => {
     const user = userEvent.setup();
     wrap(<RepoSyncLine sync={sync()} workstationId={ID(7)} repoId={ID(8)} canSync />);
-    expect(screen.getByText('pieter/dev is 3 commits behind origin')).toBeInTheDocument();
+    expect(screen.getByText('alex/dev is 3 commits behind origin')).toBeInTheDocument();
     await user.click(screen.getByTestId('sync-now'));
     await waitFor(() =>
       expect(calls.find((c) => c.method === 'POST')).toMatchObject({
@@ -125,7 +125,7 @@ describe('working branch sync line', () => {
     expect(syncText(sync({ state: 'diverged', ahead: 2, behind: 1 }) as never)?.text).toMatch(/diverged/);
     expect(syncText(sync({ state: 'dirty', dirty: true }) as never)?.text).toMatch(/uncommitted changes/);
     expect(syncText(sync({ state: 'synced', behind: 0, dirty: false }) as never)).toEqual({
-      text: 'pieter/dev is in sync with origin',
+      text: 'alex/dev is in sync with origin',
       tone: 'success',
     });
     expect(syncText(sync({ state: 'updated', behind: 0, dirty: true }) as never)?.text).toMatch(

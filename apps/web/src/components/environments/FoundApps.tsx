@@ -240,7 +240,7 @@ export function FoundApps({
               >
                 <TextInput
                   label={`Where is it? (folder on ${placeName})`}
-                  hint="The folder that holds docker-compose.yml, for example /home/you/dcode/shop."
+                  hint="The folder that holds docker-compose.yml, for example /home/you/demo/shop."
                   value={folder}
                   placeholder="/home/you/app"
                   autoCapitalize="none"

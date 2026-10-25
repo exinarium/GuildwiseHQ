@@ -124,14 +124,14 @@ const p5Live = (): SetupEnv =>
       label: 'Live site',
       target: 'flow5-server',
       host: 'flow5-server',
-      composeFile: '/home/administrator/dcode/flow5-full/docker-compose.yml',
+      composeFile: '/home/administrator/demo/flow5-full/docker-compose.yml',
       composeProject: 'flow5-full',
       service: 'app',
       imageName: 'flow5/app',
       method: 'ship',
       healthUrl: 'http://192.168.1.13:8080/api/health',
       appUrl: 'http://192.168.1.13:8080',
-      database: { service: 'postgres', dir: '/home/administrator/dcode/flow5-full/backups' },
+      database: { service: 'postgres', dir: '/home/administrator/demo/flow5-full/backups' },
     },
     'test-site',
   );
@@ -514,10 +514,10 @@ export const localReportCopies = () => {
   const dir = (n: string) => `/home/user/projects/${n}/deploy/local`;
   const file = (n: string) => ({
     path: `${dir(n)}/docker-compose.yml`,
-    project: 'dcode-flow-local',
+    project: 'demo-flow-local',
     services: [
-      part('dcode-server', {
-        image: '192.168.1.11:5000/dcode-server:showcase-cd30f7bb33',
+      part('demo-server', {
+        image: '192.168.1.11:5000/demo-server:showcase-cd30f7bb33',
         ports: ['5500:500'],
       }),
     ],
@@ -527,10 +527,10 @@ export const localReportCopies = () => {
     ...bareLocalReport(),
     containers: [
       {
-        name: 'dcode-flow-local-dcode-server-1',
-        project: 'dcode-flow-local',
-        service: 'dcode-server',
-        image: '192.168.1.11:5000/dcode-server:showcase-cd30f7bb33',
+        name: 'demo-flow-local-demo-server-1',
+        project: 'demo-flow-local',
+        service: 'demo-server',
+        image: '192.168.1.11:5000/demo-server:showcase-cd30f7bb33',
         state: 'running',
         status: 'Up 2 days',
         ports: [{ host: 5500, container: 500, bind: '0.0.0.0' }],
@@ -681,7 +681,7 @@ export const serverReportP5 = () =>
         state: 'running',
         status: 'Up 6 days',
         ports: [{ host: 8080, container: 4600, bind: '0.0.0.0' }],
-        composeFile: '/home/administrator/dcode/flow5-full/docker-compose.yml',
+        composeFile: '/home/administrator/demo/flow5-full/docker-compose.yml',
       },
       {
         name: 'flow5-full-postgres-1',
@@ -702,7 +702,7 @@ export const serverReportP5 = () =>
     ],
     composeFiles: [
       {
-        path: '/home/administrator/dcode/flow5-full/docker-compose.yml',
+        path: '/home/administrator/demo/flow5-full/docker-compose.yml',
         project: 'flow5-full',
         services: [
           part('app', { image: 'flow5/app:1.4.1', ports: ['8080:4600'] }),
@@ -715,7 +715,7 @@ export const serverReportP5 = () =>
     volumes: ['flow5-full_pgdata'],
     folders: [
       {
-        path: '/home/administrator/dcode/flow5-full',
+        path: '/home/administrator/demo/flow5-full',
         exists: true,
         entries: ['docker-compose.yml', '.env', 'backups'],
         envKeys: ['DATABASE_URL', 'SECRET_KEY_BASE'],
@@ -746,7 +746,7 @@ export function reportFor(
   host: string | undefined,
   dirs: string[] = [],
 ): ProbeReport {
-  const typed = dirs.some((d) => /flow5|myapp|dcode/.test(d));
+  const typed = dirs.some((d) => /flow5|myapp|demo/.test(d));
   if (scope === 'ssh_hosts') return hostsReport() as unknown as ProbeReport;
   if (scenario === 'native' || scenario === 'nativeempty') {
     if (scope === 'local')

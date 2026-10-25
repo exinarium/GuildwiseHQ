@@ -31,7 +31,7 @@ const COMMIT = 'bcd474e3c3c4ae5f1b2aa1fdd0d39f4c55b90b36';
 const SHORT = COMMIT.slice(0, 12);
 const COMMIT2 = '9e8d7c6b5a4f3e2d1c0b9a8f7e6d5c4b3a291807';
 const SHORT2 = COMMIT2.slice(0, 12);
-const OLD_IMAGE = 'dcode-server:remote29-showcase-old000000';
+const OLD_IMAGE = 'demo-server:remote29-showcase-old000000';
 
 interface W {
   root: string;
@@ -76,18 +76,18 @@ function world(): W {
   put('ssh', 'fake-ssh.sh');
   writeFileSync(
     join(bin, 'curl'),
-    `#!/bin/bash\necho "curl $*" >> "$FAKE_ROOT/curl.log"\nif [ -f "$FAKE_ROOT/unhealthy" ] && [ "$(sed -n 2p "$FAKE_STATE_REMOTE/c/dcode-server")" = "$(cat "$FAKE_ROOT/unhealthy")" ]; then printf 500; else printf 200; fi\n`,
+    `#!/bin/bash\necho "curl $*" >> "$FAKE_ROOT/curl.log"\nif [ -f "$FAKE_ROOT/unhealthy" ] && [ "$(sed -n 2p "$FAKE_STATE_REMOTE/c/demo-server")" = "$(cat "$FAKE_ROOT/unhealthy")" ]; then printf 500; else printf 200; fi\n`,
   );
   chmodSync(join(bin, 'curl'), 0o755);
   // the running stack (as `docker compose up` left it): its compose file has a LITERAL tag, a published port, no .env variable
   writeFileSync(
     join(appDir, 'compose.yaml'),
-    `services:\n  dcode-server:\n    image: ${OLD_IMAGE}\n    ports:\n      - "5500:500"\n  postgres:\n    image: postgres:18\n`,
+    `services:\n  demo-server:\n    image: ${OLD_IMAGE}\n    ports:\n      - "5500:500"\n  postgres:\n    image: postgres:18\n`,
   );
   const files = join(appDir, 'compose.yaml');
   const seed = (svc: string, id: string, image: string, port = '') =>
-    writeFileSync(join(server, 'c', svc), `${id}\n${image}\ndcode-flow5-remote\n${files}\n${port}\n`);
-  seed('dcode-server', 'app-old-cid', OLD_IMAGE, '5500');
+    writeFileSync(join(server, 'c', svc), `${id}\n${image}\ndemo-flow5-remote\n${files}\n${port}\n`);
+  seed('demo-server', 'app-old-cid', OLD_IMAGE, '5500');
   seed('postgres', 'db-cid-1', 'postgres:18');
   writeFileSync(join(server, 'images', OLD_IMAGE.replace(/[/:@]/g, '_')), OLD_IMAGE);
   const env: NodeJS.ProcessEnv = {
@@ -128,9 +128,9 @@ const flow = (w: W, over: Record<string, unknown> = {}) =>
     target: 'flow5-server',
     host: 'e2e-flow',
     composeFile: join(w.appDir, 'compose.yaml'),
-    composeProject: 'dcode-flow5-remote',
-    service: 'dcode-server',
-    imageName: 'dcode-server',
+    composeProject: 'demo-flow5-remote',
+    service: 'demo-server',
+    imageName: 'demo-server',
     healthUrl: 'http://127.0.0.1:5500/ready',
     database: { service: 'postgres', dir: join(w.appDir, 'backups') },
     ...over,
@@ -161,7 +161,7 @@ describe('copy from this computer, a literal tag and no .env variable (the owner
     expect(r.out).toContain('docker-compose.guildwise.yml');
     expect(existsSync(override(w))).toBe(false);
     expect(existsSync(join(w.appDir, 'backups'))).toBe(false);
-    expect(w.cid('dcode-server')).toBe('app-old-cid');
+    expect(w.cid('demo-server')).toBe('app-old-cid');
   });
 
   it('a real release: backup, build here, copy over, override file, ONLY the app is replaced, compose file and .env untouched', () => {
@@ -169,48 +169,48 @@ describe('copy from this computer, a literal tag and no .env variable (the owner
     const composeSha = sha(join(w.appDir, 'compose.yaml'));
     const r = run(w, script(flow(w)));
     expect(r.code, r.out).toBe(0);
-    expect(readFileSync(override(w), 'utf8')).toContain(`image: "dcode-server:${SHORT}"`);
+    expect(readFileSync(override(w), 'utf8')).toContain(`image: "demo-server:${SHORT}"`);
     expect(sha(join(w.appDir, 'compose.yaml'))).toBe(composeSha);
     expect(existsSync(join(w.appDir, '.env'))).toBe(false);
     expect(w.cid('postgres')).toBe('db-cid-1');
-    expect(w.cid('dcode-server')).not.toBe('app-old-cid');
-    expect(w.image('dcode-server')).toBe(`dcode-server:${SHORT}`);
+    expect(w.cid('demo-server')).not.toBe('app-old-cid');
+    expect(w.image('demo-server')).toBe(`demo-server:${SHORT}`);
     expect(readdirSync(join(w.appDir, 'backups'))).toHaveLength(1);
     // the stack's own project name is used for everything on the server, never the folder name
     const server = w.calls('server');
     expect(
       server
         .filter((c) => c.startsWith('docker compose') && !c.includes('version'))
-        .every((c) => c.includes('-p dcode-flow5-remote')),
+        .every((c) => c.includes('-p demo-flow5-remote')),
     ).toBe(true);
-    expect(server.some((c) => /up -d --no-deps --no-build dcode-server/.test(c))).toBe(true);
+    expect(server.some((c) => /up -d --no-deps --no-build demo-server/.test(c))).toBe(true);
     expect(server.some((c) => /\b(down|rm|stop|kill)\b/.test(c))).toBe(false);
-    expect(w.calls('local').some((c) => c.startsWith('docker build -t dcode-server:'))).toBe(true);
+    expect(w.calls('local').some((c) => c.startsWith('docker build -t demo-server:'))).toBe(true);
     expect(r.out).toContain('AOM-DEPLOY');
   });
 
   it('an unhealthy release goes back to the earlier image; with no override file before, the override is removed (not pinned); the database is untouched', () => {
     const w = world();
-    writeFileSync(join(w.root, 'unhealthy'), `dcode-server:${SHORT}`);
+    writeFileSync(join(w.root, 'unhealthy'), `demo-server:${SHORT}`);
     const r = run(w, script(flow(w)));
     expect(r.code, r.out).not.toBe(0);
     expect(r.out).toContain('putting the previous version back');
     expect(r.out).toContain('the database was NOT rolled back');
     expect(r.out).toContain('the compose file names the image again');
     expect(existsSync(override(w))).toBe(false);
-    expect(w.image('dcode-server')).toBe(OLD_IMAGE);
+    expect(w.image('demo-server')).toBe(OLD_IMAGE);
     expect(w.cid('postgres')).toBe('db-cid-1');
   });
 
   it('an unhealthy release after an earlier one goes back to the earlier image through the same override file', () => {
     const w = world();
     expect(run(w, script(flow(w))).code).toBe(0);
-    writeFileSync(join(w.root, 'unhealthy'), `dcode-server:${SHORT2}`);
+    writeFileSync(join(w.root, 'unhealthy'), `demo-server:${SHORT2}`);
     const r = run(w, script(flow(w)), { AOM_DEPLOY_COMMIT: COMMIT2 });
     expect(r.code, r.out).not.toBe(0);
     expect(r.out).toContain('putting the previous version back');
-    expect(readFileSync(override(w), 'utf8')).toContain(`image: "dcode-server:${SHORT}"`);
-    expect(w.image('dcode-server')).toBe(`dcode-server:${SHORT}`);
+    expect(readFileSync(override(w), 'utf8')).toContain(`image: "demo-server:${SHORT}"`);
+    expect(w.image('demo-server')).toBe(`demo-server:${SHORT}`);
   });
 
   it('a second release replaces the first; the earlier override is kept as a copy', () => {
@@ -218,7 +218,7 @@ describe('copy from this computer, a literal tag and no .env variable (the owner
     expect(run(w, script(flow(w))).code).toBe(0);
     const r = run(w, script(flow(w)), { AOM_DEPLOY_COMMIT: COMMIT2 });
     expect(r.code, r.out).toBe(0);
-    expect(readFileSync(override(w), 'utf8')).toContain(`dcode-server:${SHORT2}`);
+    expect(readFileSync(override(w), 'utf8')).toContain(`demo-server:${SHORT2}`);
     expect(existsSync(`${override(w)}.bak-before-${SHORT2}`)).toBe(true);
     expect(w.cid('postgres')).toBe('db-cid-1');
   });
@@ -230,7 +230,7 @@ describe('copy from this computer, a literal tag and no .env variable (the owner
     expect(r.code).not.toBe(0);
     expect(r.out).toContain('the database backup failed; nothing was changed');
     expect(existsSync(override(w))).toBe(false);
-    expect(w.cid('dcode-server')).toBe('app-old-cid');
+    expect(w.cid('demo-server')).toBe('app-old-cid');
   });
 });
 
@@ -240,14 +240,14 @@ describe('pull from a registry', () => {
     const env = flow(w, { method: 'registry', registry: '192.168.1.11:5000' });
     const r = run(w, script(env));
     expect(r.code, r.out).toBe(0);
-    const tag = `192.168.1.11:5000/dcode-server:${SHORT}`;
+    const tag = `192.168.1.11:5000/demo-server:${SHORT}`;
     expect(readFileSync(override(w), 'utf8')).toContain(`image: "${tag}"`);
     expect(w.calls('local')).toEqual(expect.arrayContaining([`docker push ${tag}`]));
     expect(w.calls('server')).toEqual(expect.arrayContaining([`docker pull ${tag}`]));
     expect(w.cid('postgres')).toBe('db-cid-1');
     // CI already pushed a later commit: no build, no push
     const w2 = world();
-    writeFileSync(join(w2.root, 'registry.txt'), `192.168.1.11:5000/dcode-server:${SHORT}\n`);
+    writeFileSync(join(w2.root, 'registry.txt'), `192.168.1.11:5000/demo-server:${SHORT}\n`);
     const ci = run(
       w2,
       script(flow(w2, { method: 'registry', registry: '192.168.1.11:5000', registryPush: false })),
@@ -268,7 +268,7 @@ describe('pull from a registry', () => {
     expect(r.code).not.toBe(0);
     expect(r.out).toContain('the server could not download');
     expect(existsSync(override(w))).toBe(false);
-    expect(w.cid('dcode-server')).toBe('app-old-cid');
+    expect(w.cid('demo-server')).toBe('app-old-cid');
   });
 });
 
@@ -280,7 +280,7 @@ describe('build on the server', () => {
     // the compose file builds the app (a build: line), as many stacks do
     writeFileSync(
       join(w.appDir, 'compose.yaml'),
-      `services:\n  dcode-server:\n    build: ./src\n    image: ${OLD_IMAGE}\n    ports:\n      - "5500:500"\n  postgres:\n    image: postgres:18\n`,
+      `services:\n  demo-server:\n    build: ./src\n    image: ${OLD_IMAGE}\n    ports:\n      - "5500:500"\n  postgres:\n    image: postgres:18\n`,
     );
     const r = run(w, script(flow(w, { method: 'build_on_server' })));
     expect(r.code, r.out).toBe(0);
@@ -288,8 +288,8 @@ describe('build on the server', () => {
     expect(readFileSync(join(src, 'app.js'), 'utf8')).toContain('console.log(1)');
     expect(existsSync(join(src, '.env'))).toBe(false);
     expect(existsSync(join(src, '.aom-complete'))).toBe(true);
-    expect(w.image('dcode-server')).toBe(`dcode-server:${SHORT}`);
-    expect(readFileSync(override(w), 'utf8')).toContain(`dcode-server:${SHORT}`);
+    expect(w.image('demo-server')).toBe(`demo-server:${SHORT}`);
+    expect(readFileSync(override(w), 'utf8')).toContain(`demo-server:${SHORT}`);
     expect(w.cid('postgres')).toBe('db-cid-1');
     expect(statSync(src).isDirectory()).toBe(true);
     expect(w.calls('server').filter((c) => / build /.test(c))).toHaveLength(1);
@@ -302,22 +302,22 @@ describe('a stack that was started another way is not restarted (M3), and a sour
     [
       'several compose files',
       (w) =>
-        `${join(w.appDir, 'compose.yaml')},${join(w.appDir, 'extra.yaml')}|${w.appDir}|dcode-flow5-remote|`,
+        `${join(w.appDir, 'compose.yaml')},${join(w.appDir, 'extra.yaml')}|${w.appDir}|demo-flow5-remote|`,
       'several compose files',
     ],
     [
       'another compose file',
-      (w) => `${join(w.root, 'elsewhere', 'compose.yaml')}|${join(w.root, 'elsewhere')}|dcode-flow5-remote|`,
+      (w) => `${join(w.root, 'elsewhere', 'compose.yaml')}|${join(w.root, 'elsewhere')}|demo-flow5-remote|`,
       'not from',
     ],
     [
       'another project folder',
-      (w) => `${join(w.appDir, 'compose.yaml')}|${join(w.root, 'other')}|dcode-flow5-remote|`,
+      (w) => `${join(w.appDir, 'compose.yaml')}|${join(w.root, 'other')}|demo-flow5-remote|`,
       'another project folder',
     ],
     [
       'an --env-file',
-      (w) => `${join(w.appDir, 'compose.yaml')}|${w.appDir}|dcode-flow5-remote|${join(w.root, 'x.env')}`,
+      (w) => `${join(w.appDir, 'compose.yaml')}|${w.appDir}|demo-flow5-remote|${join(w.root, 'x.env')}`,
       '--env-file',
     ],
   ];
@@ -332,7 +332,7 @@ describe('a stack that was started another way is not restarted (M3), and a sour
         expect(r.out).toContain(text);
         expect(r.out).toMatch(/nothing was changed/i);
         expect(existsSync(override(w))).toBe(false);
-        expect(w.cid('dcode-server')).toBe('app-old-cid');
+        expect(w.cid('demo-server')).toBe('app-old-cid');
         expect(existsSync(join(w.appDir, 'backups'))).toBe(false);
       }
     },
@@ -342,7 +342,7 @@ describe('a stack that was started another way is not restarted (M3), and a sour
     const w = world();
     labels(
       w,
-      `${join(w.appDir, 'compose.yaml')},${join(w.appDir, 'docker-compose.guildwise.yml')}|${w.appDir}|dcode-flow5-remote|`,
+      `${join(w.appDir, 'compose.yaml')},${join(w.appDir, 'docker-compose.guildwise.yml')}|${w.appDir}|demo-flow5-remote|`,
     );
     const r = run(w, script(flow(w)));
     expect(r.code, r.out).toBe(0);
@@ -353,7 +353,7 @@ describe('a stack that was started another way is not restarted (M3), and a sour
     rmSync(join(w.checkout, '.git'), { recursive: true, force: true });
     writeFileSync(
       join(w.appDir, 'compose.yaml'),
-      `services:\n  dcode-server:\n    build: ./src\n    image: ${OLD_IMAGE}\n    ports:\n      - "5500:500"\n  postgres:\n    image: postgres:18\n`,
+      `services:\n  demo-server:\n    build: ./src\n    image: ${OLD_IMAGE}\n    ports:\n      - "5500:500"\n  postgres:\n    image: postgres:18\n`,
     );
     const r = run(w, script(flow(w, { method: 'build_on_server' })));
     expect(r.code).not.toBe(0);

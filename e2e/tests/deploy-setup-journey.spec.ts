@@ -14,7 +14,7 @@ import { git } from '../support/vault.ts';
  * The deploy-setup journey of a person who runs a stack on their own server, against the REAL server, a REAL runner, a REAL sshd
  * (a throwaway container with a fake docker, apps/runner/test/fixtures/fake-flow-docker.sh) and a REAL registry (a throwaway
  * registry:2 container): the stack lives in /home/deploy/app/flow (NOT /opt), has a LITERAL image tag, a published port, no
- * .env variable, and its compose project (dcode-flow5-remote) is not the folder's name. Everything goes through the same API the
+ * .env variable, and its compose project (demo-flow5-remote) is not the folder's name. Everything goes through the same API the
  * page uses: connect the server (an existing sign-in), let the probe find the stack from its labels, save, try without changing
  * anything, approve, a real release that replaces ONLY the app (the database container keeps its id; the compose file is not
  * edited), a second environment (this computer) that does not overwrite the first, a DevOps scan merged into the draft, another
@@ -37,9 +37,9 @@ const CLONE = join(DIR, 'repos', 'app');
 const IMAGE = 'aom-test-sshd:1';
 const BOX = `aom-e2e-journey-box-${process.pid}`;
 const REG = `aom-e2e-journey-registry-${process.pid}`;
-const COMPOSE_PROJECT = 'dcode-flow5-remote';
+const COMPOSE_PROJECT = 'demo-flow5-remote';
 const APP_DIR = '/home/deploy/app/flow';
-const OLD_IMAGE = 'dcode-server:remote29-showcase-0000000000';
+const OLD_IMAGE = 'demo-server:remote29-showcase-0000000000';
 const REAL_DOCKER = '/usr/bin/docker';
 
 const docker = (...args: string[]) =>
@@ -153,8 +153,8 @@ const liveEnv = (over: Record<string, unknown> = {}) =>
     host: 'e2e-flow',
     composeFile: `${APP_DIR}/compose.yaml`,
     composeProject: COMPOSE_PROJECT,
-    service: 'dcode-server',
-    imageName: 'dcode-server',
+    service: 'demo-server',
+    imageName: 'demo-server',
     healthUrl: `http://127.0.0.1:${httpPort}/ready`,
     appUrl: `http://127.0.0.1:${httpPort}`,
     database: { service: 'postgres', dir: `${APP_DIR}/backups` },
@@ -292,9 +292,9 @@ test('setup: a throwaway server (sshd + fake docker) with the stack outside /opt
   onBox(
     [
       `mkdir -p ${APP_DIR} /var/fakedocker/c /var/fakedocker/images /var/fakedocker/www`,
-      `printf 'services:\\n  dcode-server:\\n    image: ${OLD_IMAGE}\\n    ports:\\n      - "5500:500"\\n  postgres:\\n    image: postgres:18\\n    ports:\\n      - "127.0.0.1:5432:5432"\\n' > ${files}`,
+      `printf 'services:\\n  demo-server:\\n    image: ${OLD_IMAGE}\\n    ports:\\n      - "5500:500"\\n  postgres:\\n    image: postgres:18\\n    ports:\\n      - "127.0.0.1:5432:5432"\\n' > ${files}`,
       `printf 'POSTGRES_PASSWORD=journey-secret-value\\nTOKEN=x\\n' > ${APP_DIR}/.env`,
-      `printf 'cid-app-0001\\n${OLD_IMAGE}\\n${COMPOSE_PROJECT}\\n${files}\\n5500\\n' > /var/fakedocker/c/dcode-server`,
+      `printf 'cid-app-0001\\n${OLD_IMAGE}\\n${COMPOSE_PROJECT}\\n${files}\\n5500\\n' > /var/fakedocker/c/demo-server`,
       `printf 'cid-db-0001\\npostgres:18\\n${COMPOSE_PROJECT}\\n${files}\\n\\n' > /var/fakedocker/c/postgres`,
       `printf 'portainer-0001\\nportainer/portainer-ce\\n\\n\\n\\n' > /var/fakedocker/c/portainer`,
       `printf %s '${OLD_IMAGE}' > /var/fakedocker/images/${OLD_IMAGE.replace(/[/:@]/g, '_')}`,
@@ -310,7 +310,7 @@ test('setup: a throwaway server (sshd + fake docker) with the stack outside /opt
   );
   composeSha = onBox(`sha256sum ${files}`).split(' ')[0] as string;
   dbCid = onBox('head -n 1 /var/fakedocker/c/postgres').trim();
-  appCid = onBox('head -n 1 /var/fakedocker/c/dcode-server').trim();
+  appCid = onBox('head -n 1 /var/fakedocker/c/demo-server').trim();
   await waitFor(
     'the old app answers',
     async () => {
@@ -442,10 +442,10 @@ test('connect the server with an existing sign-in; it finds the running stack fr
   const cf = rep.composeFiles.find((c) => c.path === `${APP_DIR}/compose.yaml`);
   expect(cf, JSON.stringify(rep.composeFiles)).toBeTruthy();
   expect(cf?.project).toBe(COMPOSE_PROJECT);
-  expect(cf?.services.map((s) => s.name)).toEqual(['dcode-server', 'postgres']);
+  expect(cf?.services.map((s) => s.name)).toEqual(['demo-server', 'postgres']);
   expect(rep.containers.map((c) => c.name)).toEqual(
     expect.arrayContaining([
-      `${COMPOSE_PROJECT}-dcode-server-1`,
+      `${COMPOSE_PROJECT}-demo-server-1`,
       `${COMPOSE_PROJECT}-postgres-1`,
       'portainer-1',
     ]),
@@ -470,7 +470,7 @@ test('save with the stack as it is (literal tag, no variable), try it without ch
   await tryAndApprove(['live']);
   await put(`${base()}/delivery/mode`, { mode: 'recipe' });
   // nothing on the server changed so far
-  expect(onBox('head -n 1 /var/fakedocker/c/dcode-server').trim()).toBe(appCid);
+  expect(onBox('head -n 1 /var/fakedocker/c/demo-server').trim()).toBe(appCid);
   expect(onBox(`ls ${APP_DIR}`)).not.toContain('docker-compose.guildwise.yml');
   expect(onBox(`ls ${APP_DIR}`)).not.toContain('backups');
 });
@@ -481,11 +481,11 @@ test('a real release replaces ONLY the app: the database and the bystander keep 
   expect(r.status, r.log_tail).toBe('succeeded');
   expect(onBox('head -n 1 /var/fakedocker/c/postgres').trim()).toBe(dbCid);
   expect(onBox('head -n 1 /var/fakedocker/c/portainer').trim()).toBe('portainer-0001');
-  expect(onBox('head -n 1 /var/fakedocker/c/dcode-server').trim()).not.toBe(appCid);
-  expect(onBox('sed -n 2p /var/fakedocker/c/dcode-server').trim()).toBe(`dcode-server:${sha.slice(0, 12)}`);
+  expect(onBox('head -n 1 /var/fakedocker/c/demo-server').trim()).not.toBe(appCid);
+  expect(onBox('sed -n 2p /var/fakedocker/c/demo-server').trim()).toBe(`demo-server:${sha.slice(0, 12)}`);
   expect(onBox(`sha256sum ${APP_DIR}/compose.yaml`).split(' ')[0]).toBe(composeSha);
   expect(onBox(`cat ${APP_DIR}/docker-compose.guildwise.yml`)).toContain(
-    `image: "dcode-server:${sha.slice(0, 12)}"`,
+    `image: "demo-server:${sha.slice(0, 12)}"`,
   );
   expect(onBox(`ls ${APP_DIR}/backups`)).toMatch(/live-before-/);
   // the settings file was not touched
@@ -497,7 +497,7 @@ test('a real release replaces ONLY the app: the database and the bystander keep 
   const live = s.environments.find((e: { env: string }) => e.env === 'live');
   expect(live).toMatchObject({ state: 'healthy', placeName: 'Flow server', role: 'live' });
   expect(live.current.commit).toBe(sha);
-  appCid = onBox('head -n 1 /var/fakedocker/c/dcode-server').trim();
+  appCid = onBox('head -n 1 /var/fakedocker/c/demo-server').trim();
 });
 
 let liveScriptBefore: string | null = '';
@@ -572,7 +572,7 @@ test('add a second environment on this computer; the first one is not overwritte
 test('a DevOps scan is merged into the draft: the environments it does not mention stay; a question is answered in a field', async () => {
   const scan = await post(
     `${base()}/scan`,
-    { area: 'deploy', note: 'the stack is called dcode-flow5-remote' },
+    { area: 'deploy', note: 'the stack is called demo-flow5-remote' },
     202,
   );
   void scan;
@@ -680,14 +680,14 @@ test('registry: build here, push to the registry, the server pulls and the overr
   const sha = commit('fourth version', { marker: 'v4\n' });
   const r = await release('live', sha);
   expect(r.status, r.log_tail).toBe('succeeded');
-  const tag = `127.0.0.1:${regPort}/dcode-server:${sha.slice(0, 12)}`;
+  const tag = `127.0.0.1:${regPort}/demo-server:${sha.slice(0, 12)}`;
   // the image really is in the registry
-  const tags = (await (await fetch(`http://127.0.0.1:${regPort}/v2/dcode-server/tags/list`)).json()) as {
+  const tags = (await (await fetch(`http://127.0.0.1:${regPort}/v2/demo-server/tags/list`)).json()) as {
     tags: string[];
   };
   expect(tags.tags).toContain(sha.slice(0, 12));
   expect(onBox(`cat ${APP_DIR}/docker-compose.guildwise.yml`)).toContain(`image: "${tag}"`);
-  expect(onBox('sed -n 2p /var/fakedocker/c/dcode-server').trim()).toBe(tag);
+  expect(onBox('sed -n 2p /var/fakedocker/c/demo-server').trim()).toBe(tag);
   expect(onBox('head -n 1 /var/fakedocker/c/postgres').trim()).toBe(dbCid);
   expect(onBox(`sha256sum ${APP_DIR}/compose.yaml`).split(' ')[0]).toBe(composeSha);
 });

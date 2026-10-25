@@ -468,7 +468,7 @@ describe('removing the branches of finished cards', () => {
               cardId: a.id,
               ref: a.ref,
               branch: 'aom/toy-x-a',
-              reason: 'merged into pieter/dev',
+              reason: 'merged into alex/dev',
               origin: true,
               local: true,
               worktree: false,
@@ -495,7 +495,7 @@ describe('removing the branches of finished cards', () => {
         .map((m: any) => m.body)
         .join('\n');
     expect(await log(a.id)).toContain(
-      'Branch aom/toy-x-a deleted from origin, this workstation: merged into pieter/dev.',
+      'Branch aom/toy-x-a deleted from origin, this workstation: merged into alex/dev.',
     );
     expect(await log(b.id)).toContain('deleted from origin, its worktree: its pull request was declined.');
     const notices = await q(`SELECT title, body FROM desk_items WHERE subkind='branch_cleanup'`);

@@ -254,13 +254,13 @@ describe('environment panel', () => {
             stopReason: 'failed',
             lastError: 'DevOps gave up',
             failureReason:
-              'The environment failed: Flow-Server needs a Couchbase server and none is running.',
+              'The environment failed: Demo-Server needs a Couchbase server and none is running.',
           }) as never
         }
       />,
     );
     expect(screen.getByTestId('run-state')).toHaveTextContent('Failed');
-    expect(screen.getByTestId('run-failure')).toHaveTextContent('Flow-Server needs a Couchbase server');
+    expect(screen.getByTestId('run-failure')).toHaveTextContent('Demo-Server needs a Couchbase server');
     expect(screen.getByTestId('run-error')).not.toHaveTextContent('DevOps gave up');
     expect(screen.getByTestId('run-devops-link')).toHaveAttribute(
       'href',
@@ -303,7 +303,7 @@ describe('environment panel', () => {
             state: 'starting',
             servicesStatus: [],
             waiting: {
-              action: 'Question: Flow-Server needs Couchbase',
+              action: 'Question: Demo-Server needs Couchbase',
               reason: 'A) use 192.168.1.12 B) allow Docker',
             },
           }) as never
@@ -311,7 +311,7 @@ describe('environment panel', () => {
       />,
     );
     expect(screen.getByTestId('run-state')).toHaveTextContent('Waiting for you');
-    expect(screen.getByTestId('run-waiting')).toHaveTextContent('Question: Flow-Server needs Couchbase');
+    expect(screen.getByTestId('run-waiting')).toHaveTextContent('Question: Demo-Server needs Couchbase');
     expect(screen.getByTestId('run-waiting')).toHaveTextContent('A) use 192.168.1.12 B) allow Docker');
     expect(screen.getByTestId('run-devops-link')).toBeInTheDocument();
     expect(screen.queryByTestId('run-working')).toBeNull();
@@ -643,7 +643,7 @@ describe('run and test settings', () => {
     expect(screen.getByText(/root-equivalent access/)).toBeInTheDocument();
     await user.type(
       screen.getByTestId('run-build-guides'),
-      '/home/u/src/dcode/sources/BUILD.md{enter}/home/u/other.md',
+      '/home/u/src/demo/sources/BUILD.md{enter}/home/u/other.md',
     );
     await user.click(screen.getByTestId('run-settings-save'));
     await waitFor(() => expect(calls.find((c) => c.method === 'PUT')).toBeTruthy());
@@ -652,7 +652,7 @@ describe('run and test settings', () => {
     expect(body.settings).toMatchObject({
       ttlHours: 8,
       allowDocker: true,
-      buildGuides: ['/home/u/src/dcode/sources/BUILD.md', '/home/u/other.md'],
+      buildGuides: ['/home/u/src/demo/sources/BUILD.md', '/home/u/other.md'],
     });
     expect(body.settings.services.map((s: any) => s.name)).toEqual(['db', 'api', 'web']);
     expect(body.settings.services[1]).toMatchObject({

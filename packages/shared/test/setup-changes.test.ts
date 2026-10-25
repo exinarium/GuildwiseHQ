@@ -56,8 +56,8 @@ const uatReport = () =>
         ports: [],
       },
       {
-        name: 'dcode-flow-local-postgres-1',
-        project: 'dcode',
+        name: 'demo-flow-local-postgres-1',
+        project: 'demo',
         service: 'postgres',
         image: 'postgres:16',
         state: 'running',
@@ -95,7 +95,7 @@ describe('planChanges', () => {
     expect(untouched).toContain('Part "postgres"');
     expect(untouched).toContain('Part "mailpit"');
     expect(untouched).toContain('Container aom-uat-postgres-1');
-    expect(untouched).toContain('Container dcode-flow-local-postgres-1');
+    expect(untouched).toContain('Container demo-flow-local-postgres-1');
     expect(untouched).toContain('Volume "pgdata"');
     expect(untouched).toContain('Volume "other_data"');
     expect(untouched).not.toContain('aom-uat-app-1');
