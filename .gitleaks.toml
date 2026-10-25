@@ -1,0 +1,15 @@
+title = "Guildwise HQ gitleaks configuration"
+
+[extend]
+useDefault = true
+
+# The test suites and mocks contain deliberately fake credentials (redaction fixtures such as `sk-ant-test-...`, the public
+# OAuth 1.0a documentation example, placeholder tokens). Real code and configuration are still scanned.
+[[allowlists]]
+description = "fake credentials in tests, mocks and the compose smoke test"
+paths = [
+  '''(^|/)test/''',
+  '''(^|/)mocks/''',
+  '''^e2e/''',
+  '''^scripts/check-prod-compose\.sh$''',
+]
