@@ -39,7 +39,13 @@ const filter = (f: Record<string, unknown> = {}) => BacklogFilter.parse(f);
 describe('backlog requests', () => {
   it('defaults: Normal, no tags, not flagged', () => {
     const r = CreateBacklogItemRequest.parse({ title: '  Add dark mode  ' });
-    expect(r).toEqual({ title: 'Add dark mode', description: '', priority: 'normal', tags: [], flagged: false });
+    expect(r).toEqual({
+      title: 'Add dark mode',
+      description: '',
+      priority: 'normal',
+      tags: [],
+      flagged: false,
+    });
   });
   it('rejects an empty or blank title and unknown priorities', () => {
     expect(CreateBacklogItemRequest.safeParse({ title: '' }).success).toBe(false);
@@ -52,12 +58,26 @@ describe('backlog requests', () => {
   });
   it('the patch is strict: status, source and the linked card are refused', () => {
     expect(PatchBacklogItemRequest.safeParse({ title: 'ok', flagged: true }).success).toBe(true);
-    for (const bad of [{ status: 'done' }, { source: { kind: 'agent' } }, { cardRef: 'GWP-1' }, { cardId: 'x' }])
+    for (const bad of [
+      { status: 'done' },
+      { source: { kind: 'agent' } },
+      { cardRef: 'GWP-1' },
+      { cardId: 'x' },
+    ])
       expect(PatchBacklogItemRequest.safeParse(bad).success).toBe(false);
   });
   it('an agent suggestion carries no source, agent, card, status or flag', () => {
-    expect(BacklogSuggestParams.safeParse({ title: 'Follow up', tags: ['a'], priority: 'low' }).success).toBe(true);
-    for (const bad of [{ source: 'owner' }, { agentName: 'Ada' }, { cardRef: 'GWP-1' }, { status: 'done' }, { flagged: true }, { itemId: 'x' }])
+    expect(BacklogSuggestParams.safeParse({ title: 'Follow up', tags: ['a'], priority: 'low' }).success).toBe(
+      true,
+    );
+    for (const bad of [
+      { source: 'owner' },
+      { agentName: 'Ada' },
+      { cardRef: 'GWP-1' },
+      { status: 'done' },
+      { flagged: true },
+      { itemId: 'x' },
+    ])
       expect(BacklogSuggestParams.safeParse({ title: 't', ...bad }).success).toBe(false);
   });
 });
@@ -72,7 +92,14 @@ describe('backlog filter', () => {
   it('filters by priority, tag (all given), flagged and source', () => {
     const a = item({ priority: 'high', tags: ['ui', 'x'], flagged: true });
     const b = item({ priority: 'low', tags: ['ui'] });
-    const c = item({ source: { kind: 'agent', agentId: '22222222-2222-4222-8222-222222222222', agentName: 'Ada', cardRef: 'GWP-3' } });
+    const c = item({
+      source: {
+        kind: 'agent',
+        agentId: '22222222-2222-4222-8222-222222222222',
+        agentName: 'Ada',
+        cardRef: 'GWP-3',
+      },
+    });
     const all = [a, b, c];
     expect(filterBacklog(all, filter({ priority: 'high,critical' }))).toEqual([a]);
     expect(filterBacklog(all, filter({ tag: 'ui' }))).toHaveLength(2);
@@ -136,7 +163,12 @@ describe('Send to BA mapping', () => {
       description: '  ',
       priority: 'low',
       tags: [],
-      source: { kind: 'agent', agentId: '22222222-2222-4222-8222-222222222222', agentName: 'Ada', cardRef: 'GWP-3' },
+      source: {
+        kind: 'agent',
+        agentId: '22222222-2222-4222-8222-222222222222',
+        agentName: 'Ada',
+        cardRef: 'GWP-3',
+      },
     });
     expect(text).toBe(
       'Only a title\n\n---\nFrom the project backlog. Priority: Low. Suggested by Ada while working on GWP-3.',

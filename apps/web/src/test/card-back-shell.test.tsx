@@ -68,7 +68,8 @@ beforeEach(() => {
     'fetch',
     vi.fn(async (url: string) => {
       if (url === '/api/auth/me') return json(me);
-      if (url.startsWith('/api/desk')) return json({ items: [], counts: { open: 0, blocking: 0, urgent: 0 } });
+      if (url.startsWith('/api/desk'))
+        return json({ items: [], counts: { open: 0, blocking: 0, urgent: 0 } });
       if (url.startsWith('/api/projects'))
         return json({
           projects: [

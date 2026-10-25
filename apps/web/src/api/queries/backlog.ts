@@ -51,8 +51,7 @@ function useBacklogMutation<V, R>(fn: (v: V) => Promise<R>) {
     mutationFn: fn,
     // A send makes a card: the board and the desk change too.
     onSettled: () => {
-      for (const key of ['backlog', 'board', 'card', 'desk'])
-        void qc.invalidateQueries({ queryKey: [key] });
+      for (const key of ['backlog', 'board', 'card', 'desk']) void qc.invalidateQueries({ queryKey: [key] });
     },
   });
 }

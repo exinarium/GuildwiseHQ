@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { addBacklogSuggestionRpc } from '../src/commands/backlog.ts';
 import { postCeoReport } from '../src/ceo/report.ts';
+import { addBacklogSuggestionRpc } from '../src/commands/backlog.ts';
 import { act, appoint, ceo, startCeoShift, wakeNow } from './helpers/ceo.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import type { FakeRunner } from './helpers/fake-runner.ts';
@@ -63,7 +63,12 @@ describe('items', () => {
       priority: 'high',
       tags: ['a', 'b'],
     });
-    expect(edited.item).toMatchObject({ title: 'Edited', description: 'What we want', priority: 'high', tags: ['a', 'b'] });
+    expect(edited.item).toMatchObject({
+      title: 'Edited',
+      description: 'What we want',
+      priority: 'high',
+      tags: ['a', 'b'],
+    });
     expect((await call('PATCH', `/api/backlog/${item.id}`, { flagged: true })).item.flagged).toBe(true);
     expect((await call('POST', `/api/backlog/${item.id}/drop`)).item.status).toBe('dropped');
     expect(await counts()).toEqual(before);
@@ -103,7 +108,10 @@ describe('items', () => {
     });
     expect([403, 404]).toContain(r.status);
     const other = await w.t.userSession('stranger-backlog@example.com', 'member');
-    expect((await w.t.req('PATCH', `/api/backlog/${item.id}`, { cookie: other.cookie, body: { flagged: true } })).status).toBe(404);
+    expect(
+      (await w.t.req('PATCH', `/api/backlog/${item.id}`, { cookie: other.cookie, body: { flagged: true } }))
+        .status,
+    ).toBe(404);
   });
 });
 
@@ -111,7 +119,10 @@ describe('Send to BA', () => {
   it('bulk send of an item the user cannot see names the id, never its title', async () => {
     const item = await add('Secret title of another org');
     const other = await w.t.userSession('stranger-bulk@example.com', 'member');
-    const r = await w.t.req('POST', '/api/backlog/send', { cookie: other.cookie, body: { itemIds: [item.id] } });
+    const r = await w.t.req('POST', '/api/backlog/send', {
+      cookie: other.cookie,
+      body: { itemIds: [item.id] },
+    });
     expect(JSON.stringify(r.body)).not.toContain('Secret title');
     expect((await list()).find((i) => i.id === item.id)).toMatchObject({ status: 'open', cardRef: null });
   });
@@ -128,7 +139,11 @@ describe('Send to BA', () => {
 
   it('with a BA: one draft card with the priority and tags, a BA task, the item Done and linked', async () => {
     await w.hire('Ben', 'ba', 'senior');
-    const item = await add('Send me', { description: 'Please build the thing', priority: 'high', tags: ['ui', 'onboarding'] });
+    const item = await add('Send me', {
+      description: 'Please build the thing',
+      priority: 'high',
+      tags: ['ui', 'onboarding'],
+    });
     const before = await counts();
     const out = await call('POST', `/api/backlog/${item.id}/send`);
     expect(out.result.ok).toBe(true);
@@ -142,7 +157,9 @@ describe('Send to BA', () => {
     const after = await counts();
     expect(after.cards).toBe(before.cards + 1);
     expect((await list()).map((i) => i.id)).not.toContain(item.id);
-    expect((await list('?status=done')).find((i) => i.id === item.id)).toMatchObject({ cardRef: out.result.cardRef });
+    expect((await list('?status=done')).find((i) => i.id === item.id)).toMatchObject({
+      cardRef: out.result.cardRef,
+    });
   });
 
   it('Done and Dropped items cannot be sent again', async () => {
@@ -219,7 +236,12 @@ describe('agent suggestions and the daily report', () => {
 
   it('refuses params that name a source, a status or an id; a duplicate open title; and more than 5 per shift', async () => {
     const s = shift();
-    for (const bad of [{ source: 'owner' }, { status: 'done' }, { itemId: randomUUID() }, { flagged: true }]) {
+    for (const bad of [
+      { source: 'owner' },
+      { status: 'done' },
+      { itemId: randomUUID() },
+      { flagged: true },
+    ]) {
       const [ok, , error] = await suggest(s, { title: 'Bad', ...bad });
       expect(ok).toBe(false);
       expect(error).toContain('only add suggestions');
@@ -234,7 +256,10 @@ describe('agent suggestions and the daily report', () => {
   });
 
   it('refuses a shift with no card', async () => {
-    const [ok, , error] = await suggest({ id: randomUUID(), card_id: null, agent_id: agent.id }, { title: 'No card' });
+    const [ok, , error] = await suggest(
+      { id: randomUUID(), card_id: null, agent_id: agent.id },
+      { title: 'No card' },
+    );
     expect(ok).toBe(false);
     expect(error).toContain('no card');
   });
@@ -245,11 +270,17 @@ describe('agent suggestions and the daily report', () => {
     expect(first.id).toBeTruthy();
     await appoint(w);
     const post = (report: string) =>
-      postCeoReport(w.t.app.ctx, w.t.app.ctx.pool, orgId, { report, localDate: '2026-10-21', fallback: true });
+      postCeoReport(w.t.app.ctx, w.t.app.ctx.pool, orgId, {
+        report,
+        localDate: '2026-10-21',
+        fallback: true,
+      });
     const [ok1] = await suggest(shift(), { title: 'Before the first report', priority: 'high' });
     expect(ok1).toBe(true);
     await post('First report');
-    const body1 = (await q(`SELECT body FROM desk_items WHERE subkind='ceo_report' ORDER BY created_at DESC LIMIT 1`))[0]!.body as string;
+    const body1 = (
+      await q(`SELECT body FROM desk_items WHERE subkind='ceo_report' ORDER BY created_at DESC LIMIT 1`)
+    )[0]!.body as string;
     expect(body1).toContain('## New backlog suggestions from agents');
     expect(body1).toContain('Before the first report (High)');
     expect(body1).toContain(`suggested by ${agent.name} on ${cardRow.ref}`);
@@ -257,14 +288,18 @@ describe('agent suggestions and the daily report', () => {
 
     // Nothing new: no section, no event.
     await post('Second report');
-    const body2 = (await q(`SELECT body FROM desk_items WHERE subkind='ceo_report' ORDER BY created_at DESC LIMIT 1`))[0]!.body as string;
+    const body2 = (
+      await q(`SELECT body FROM desk_items WHERE subkind='ceo_report' ORDER BY created_at DESC LIMIT 1`)
+    )[0]!.body as string;
     expect(body2).not.toContain('New backlog suggestions');
     expect(await q(`SELECT 1 FROM events WHERE type='BacklogSuggestionsReported'`)).toHaveLength(1);
 
     // One new suggestion: only that one is listed.
     await suggest(shift(), { title: 'After the first report' });
     await post('Third report');
-    const body3 = (await q(`SELECT body FROM desk_items WHERE subkind='ceo_report' ORDER BY created_at DESC LIMIT 1`))[0]!.body as string;
+    const body3 = (
+      await q(`SELECT body FROM desk_items WHERE subkind='ceo_report' ORDER BY created_at DESC LIMIT 1`)
+    )[0]!.body as string;
     expect(body3).toContain('After the first report');
     expect(body3).not.toContain('Before the first report');
   });
@@ -296,27 +331,54 @@ describe('the CEO verbs', () => {
     expect(def.items.map((i: any) => i.id)).toEqual([open.id]);
     expect(def.text).toContain(open.id);
     expect(def.text).toContain('[Open] Low ceolist "CEO list open" (owner)');
-    expect((await ceoList({ tag: ['ceolist'], status: ['dropped'] })).items.map((i: any) => i.id)).toEqual([gone.id]);
-    expect((await ceoList({ project: 'TOY', q: 'ceo list open' })).items.map((i: any) => i.id)).toEqual([open.id]);
+    expect((await ceoList({ tag: ['ceolist'], status: ['dropped'] })).items.map((i: any) => i.id)).toEqual([
+      gone.id,
+    ]);
+    expect((await ceoList({ project: 'TOY', q: 'ceo list open' })).items.map((i: any) => i.id)).toEqual([
+      open.id,
+    ]);
     expect((await ceoList({ project: 'NOPE', tag: ['ceolist'] })).items).toEqual([]);
   });
 
   it('backlog-add then backlog-update (flag, fields, drop), seen in the web list', async () => {
     const added = result(
-      await act(r, shiftId, 'backlog-add', { project: 'TOY', title: 'From the CEO', tags: ['ui'], priority: 'high' }, { key: 'b-add' }),
+      await act(
+        r,
+        shiftId,
+        'backlog-add',
+        { project: 'TOY', title: 'From the CEO', tags: ['ui'], priority: 'high' },
+        { key: 'b-add' },
+      ),
     );
     expect(added.status, JSON.stringify(added)).toBe('executed');
     const id = added.result.itemId as string;
-    expect((await list('?tag=ui')).find((i) => i.id === id)).toMatchObject({ source: { kind: 'owner' }, priority: 'high' });
-    const flagged = result(await act(r, shiftId, 'backlog-update', { item: id, flagged: true, title: 'Renamed' }, { key: 'b-flag' }));
+    expect((await list('?tag=ui')).find((i) => i.id === id)).toMatchObject({
+      source: { kind: 'owner' },
+      priority: 'high',
+    });
+    const flagged = result(
+      await act(
+        r,
+        shiftId,
+        'backlog-update',
+        { item: id, flagged: true, title: 'Renamed' },
+        { key: 'b-flag' },
+      ),
+    );
     expect(flagged.status).toBe('executed');
     expect((await list('?flagged=true')).find((i) => i.id === id)).toMatchObject({ title: 'Renamed' });
-    const mixed = result(await act(r, shiftId, 'backlog-update', { item: id, drop: true, title: 'x' }, { key: 'b-mixed' }));
+    const mixed = result(
+      await act(r, shiftId, 'backlog-update', { item: id, drop: true, title: 'x' }, { key: 'b-mixed' }),
+    );
     expect(mixed.status).toBe('refused');
-    const dropped = result(await act(r, shiftId, 'backlog-update', { item: id, drop: true }, { key: 'b-drop' }));
+    const dropped = result(
+      await act(r, shiftId, 'backlog-update', { item: id, drop: true }, { key: 'b-drop' }),
+    );
     expect(dropped.status).toBe('executed');
     expect((await list('?status=dropped')).map((i) => i.id)).toContain(id);
-    const sendDropped = result(await act(r, shiftId, 'backlog-send', { item: id }, { key: 'b-send-dropped' }));
+    const sendDropped = result(
+      await act(r, shiftId, 'backlog-send', { item: id }, { key: 'b-send-dropped' }),
+    );
     expect(sendDropped.status).toBe('refused');
   });
 
@@ -327,7 +389,9 @@ describe('the CEO verbs', () => {
     await add('Flagged other', { tags: ['other'], flagged: true });
     const bare = result(await act(r, shiftId, 'backlog-send', {}, { key: 'b-bare' }));
     expect(bare.status).toBe('refused');
-    const sent = result(await act(r, shiftId, 'backlog-send', { tag: ['sendui'], flagged: true }, { key: 'b-send' }));
+    const sent = result(
+      await act(r, shiftId, 'backlog-send', { tag: ['sendui'], flagged: true }, { key: 'b-send' }),
+    );
     expect(sent.status, JSON.stringify(sent)).toBe('executed');
     expect(sent.result.results).toHaveLength(1);
     expect(sent.message).toContain('<- Flagged ui');

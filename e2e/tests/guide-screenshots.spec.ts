@@ -1,5 +1,5 @@
-import { chmodSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
+import { chmodSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   type APIRequestContext,
@@ -1814,60 +1814,57 @@ step('platform: the administrator, other organizations, support requests', async
   await staffCtx.close();
 });
 
-step(
-  'the daily report of the next morning (the test clock moves; keep this step last)',
-  async (browser) => {
-    // the CEO writes the daily report: provision the built-in CEO (it lives on workstation A) and run it on the mock
-    execFileSync('pnpm', ['--filter', '@aom/server', 'exec', 'tsx', `${ROOT}/e2e/support/provision-ceo.ts`], {
-      cwd: ROOT,
-      env: { ...process.env, DATABASE_URL },
-      stdio: 'pipe',
+step('the daily report of the next morning (the test clock moves; keep this step last)', async (browser) => {
+  // the CEO writes the daily report: provision the built-in CEO (it lives on workstation A) and run it on the mock
+  execFileSync('pnpm', ['--filter', '@aom/server', 'exec', 'tsx', `${ROOT}/e2e/support/provision-ceo.ts`], {
+    cwd: ROOT,
+    env: { ...process.env, DATABASE_URL },
+    stdio: 'pipe',
+  });
+  const pp = await pieter();
+  const ceo = (await (await pp.get('/api/agents')).json()).agents.find((a: any) => a.roleKey === 'ceo');
+  expect(ceo, 'the built-in CEO exists').toBeTruthy();
+  // the CEO goes to the Owner's most recently seen workstation, which can be the unsandboxed workstation B
+  const ceoMock = await pp.patch(`/api/agents/${ceo.id}`, {
+    data: { runtime: 'mock', model: 'mock', acknowledgeUnsandboxed: true },
+  });
+  expect(ceoMock.ok(), await ceoMock.text()).toBe(true);
+  S.ids['agent:ceo'] = ceo.id;
+  const p = await pieter();
+  const ZONE = 'Africa/Johannesburg';
+  const ctx = await browser.newContext({ storageState: await p.storageState(), timezoneId: ZONE });
+  const page = await ctx.newPage();
+  await page.goto('/settings');
+  await waitFor(
+    'the browser time zone is stored',
+    async () => q<any>(`SELECT timezone FROM users WHERE email=$1`, [PIETER.email]),
+    (r) => r[0]?.timezone === ZONE,
+    30_000,
+  );
+  await ctx.close();
+  const orgId = (
+    await q<any>(
+      `SELECT m.org_id FROM org_members m JOIN users u ON u.id=m.user_id WHERE u.email=$1 AND m.status='active'`,
+      [PIETER.email],
+    )
+  )[0].org_id as string;
+  const clock = (advanceMs: number) =>
+    fetch(`${BASE_URL}/api/test/clock`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: BASE_URL },
+      body: JSON.stringify({ advanceMs }),
     });
-    const pp = await pieter();
-    const ceo = (await (await pp.get('/api/agents')).json()).agents.find((a: any) => a.roleKey === 'ceo');
-    expect(ceo, 'the built-in CEO exists').toBeTruthy();
-    // the CEO goes to the Owner's most recently seen workstation, which can be the unsandboxed workstation B
-    const ceoMock = await pp.patch(`/api/agents/${ceo.id}`, {
-      data: { runtime: 'mock', model: 'mock', acknowledgeUnsandboxed: true },
-    });
-    expect(ceoMock.ok(), await ceoMock.text()).toBe(true);
-    S.ids['agent:ceo'] = ceo.id;
-    const p = await pieter();
-    const ZONE = 'Africa/Johannesburg';
-    const ctx = await browser.newContext({ storageState: await p.storageState(), timezoneId: ZONE });
-    const page = await ctx.newPage();
-    await page.goto('/settings');
-    await waitFor(
-      'the browser time zone is stored',
-      async () => q<any>(`SELECT timezone FROM users WHERE email=$1`, [PIETER.email]),
-      (r) => r[0]?.timezone === ZONE,
-      30_000,
-    );
-    await ctx.close();
-    const orgId = (
-      await q<any>(
-        `SELECT m.org_id FROM org_members m JOIN users u ON u.id=m.user_id WHERE u.email=$1 AND m.status='active'`,
-        [PIETER.email],
-      )
-    )[0].org_id as string;
-    const clock = (advanceMs: number) =>
-      fetch(`${BASE_URL}/api/test/clock`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', origin: BASE_URL },
-        body: JSON.stringify({ advanceMs }),
-      });
-    const now = new Date(((await (await clock(0)).json()) as { now: string }).now);
-    const local = new Date(now.getTime() + 2 * 3_600_000);
-    const target = Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate() + 1, 7, 0, 0);
-    expect((await clock(target - now.getTime())).ok).toBe(true);
-    await waitFor(
-      'the daily report',
-      () => q<any>(`SELECT id FROM desk_items WHERE subkind='ceo_report' AND org_id=$1`, [orgId]),
-      (r) => r.length > 0,
-      180_000,
-    );
-  },
-);
+  const now = new Date(((await (await clock(0)).json()) as { now: string }).now);
+  const local = new Date(now.getTime() + 2 * 3_600_000);
+  const target = Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate() + 1, 7, 0, 0);
+  expect((await clock(target - now.getTime())).ok).toBe(true);
+  await waitFor(
+    'the daily report',
+    () => q<any>(`SELECT id FROM desk_items WHERE subkind='ceo_report' AND org_id=$1`, [orgId]),
+    (r) => r.length > 0,
+    180_000,
+  );
+});
 
 step('backlog items and links between projects', async () => {
   const p = await pieter();
@@ -1877,7 +1874,9 @@ step('backlog items and links between projects', async () => {
     ['Order export for the accountant', 'A monthly CSV of paid orders.', 'normal', false],
     ['Dark mode for the admin area', 'Nice to have; no one is waiting for it.', 'low', false],
   ] as const) {
-    const r = await p.post(`/api/projects/${web}/backlog`, { data: { title, description, priority, flagged } });
+    const r = await p.post(`/api/projects/${web}/backlog`, {
+      data: { title, description, priority, flagged },
+    });
     expect(r.status(), await r.text()).toBe(201);
   }
   for (const data of [
@@ -1887,7 +1886,12 @@ step('backlog items and links between projects', async () => {
       kind: 'depends_on',
       note: 'The shop reads the research notes for its product texts.',
     },
-    { from: { projectId: web }, to: { name: 'Payment provider' }, kind: 'uses', note: 'Card payments, via example.com.' },
+    {
+      from: { projectId: web },
+      to: { name: 'Payment provider' },
+      kind: 'uses',
+      note: 'Card payments, via example.com.',
+    },
   ]) {
     const r = await p.post('/api/org-graph/links', { data });
     expect(r.status(), await r.text()).toBeLessThan(300);

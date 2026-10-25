@@ -89,7 +89,7 @@ describe('review tiers', () => {
   });
 });
 
-describe('out-of-scope unit test changes are the reviewer\'s decision', () => {
+describe("out-of-scope unit test changes are the reviewer's decision", () => {
   // A diff recorded by an older runner still carries the retired flag; it must not matter any more.
   const legacy = {
     diffStats: { files: 3, added: 20, removed: 5, architecturalPaths: [], outOfScopeTestChange: true },

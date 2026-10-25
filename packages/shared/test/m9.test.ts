@@ -82,9 +82,9 @@ describe('M9 contract', () => {
     expect(DiffStats.parse({ files: 1, added: 1, removed: 0 }).testFiles).toBeUndefined();
     expect(DiffStats.parse({ files: 1, added: 1, removed: 0, testFiles: 2 }).testFiles).toBe(2);
     // the retired out-of-scope test flag is dropped from old records
-    expect(DiffStats.parse({ files: 1, added: 1, removed: 0, outOfScopeTestChange: true })).not.toHaveProperty(
-      'outOfScopeTestChange',
-    );
+    expect(
+      DiffStats.parse({ files: 1, added: 1, removed: 0, outOfScopeTestChange: true }),
+    ).not.toHaveProperty('outOfScopeTestChange');
   });
 
   it('validates the response shapes', () => {

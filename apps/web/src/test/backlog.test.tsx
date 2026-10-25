@@ -63,7 +63,11 @@ function stub(opts: { role?: string; items?: unknown[]; sendResults?: unknown[] 
       const json = init?.body ? JSON.parse(String(init.body)) : undefined;
       let body: unknown = {};
       if (url === '/api/auth/me')
-        body = { user: { id: 'u1' }, activeOrg: { id: ORG, role: opts.role ?? 'owner', features: {} }, orgs: [] };
+        body = {
+          user: { id: 'u1' },
+          activeOrg: { id: ORG, role: opts.role ?? 'owner', features: {} },
+          orgs: [],
+        };
       else if (url === '/api/projects') body = { projects: [project] };
       else if (url.startsWith(`/api/projects/${PROJECT}/backlog`) && method === 'GET') {
         calls.lists.push(url);

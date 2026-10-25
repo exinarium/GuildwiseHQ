@@ -26,6 +26,8 @@ export function scrubSecrets(text: string): string {
   return out;
 }
 
+// Matching control characters is the point of this pattern.
+// biome-ignore lint/suspicious/noControlCharactersInRegex: strips control and bidi characters from labels
 const CONTROL = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g;
 
 /** A label for a node: control and bidi characters removed, whitespace collapsed, secrets scrubbed, at most 256 characters. */

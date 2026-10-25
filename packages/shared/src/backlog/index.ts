@@ -17,10 +17,24 @@ export const BACKLOG_PRIORITY_LABEL: Record<BacklogPriority, string> = {
   normal: 'Normal',
   low: 'Low',
 };
-export const BACKLOG_STATUS_LABEL: Record<BacklogStatus, string> = { open: 'Open', done: 'Done', dropped: 'Dropped' };
-export const BACKLOG_PRIORITY_RANK: Record<BacklogPriority, number> = { critical: 0, high: 1, normal: 2, low: 3 };
+export const BACKLOG_STATUS_LABEL: Record<BacklogStatus, string> = {
+  open: 'Open',
+  done: 'Done',
+  dropped: 'Dropped',
+};
+export const BACKLOG_PRIORITY_RANK: Record<BacklogPriority, number> = {
+  critical: 0,
+  high: 1,
+  normal: 2,
+  low: 3,
+};
 /** The card priority (1 = most urgent … 9) each backlog priority becomes: the web levels Urgent 1, High 3, Normal 5, Low 8. */
-export const BACKLOG_CARD_PRIORITY: Record<BacklogPriority, number> = { critical: 1, high: 3, normal: 5, low: 8 };
+export const BACKLOG_CARD_PRIORITY: Record<BacklogPriority, number> = {
+  critical: 1,
+  high: 3,
+  normal: 5,
+  low: 8,
+};
 
 export const BACKLOG_TITLE_MAX = 300;
 export const BACKLOG_DESCRIPTION_MAX = 8000;
@@ -115,15 +129,29 @@ const csv = <T extends z.ZodType>(item: T) =>
   z.preprocess((v) => {
     if (v === undefined || v === null || v === '') return undefined;
     const parts = Array.isArray(v) ? v : [v];
-    return parts.flatMap((p) => String(p).split(',')).map((s) => s.trim()).filter(Boolean);
+    return parts
+      .flatMap((p) => String(p).split(','))
+      .map((s) => s.trim())
+      .filter(Boolean);
   }, z.array(item).optional());
 
-const flagParam = z.preprocess((v) => (v === 'true' ? true : v === 'false' ? false : v), z.boolean().optional());
+const flagParam = z.preprocess(
+  (v) => (v === 'true' ? true : v === 'false' ? false : v),
+  z.boolean().optional(),
+);
 
 export const BacklogFilter = z.object({
   /** The default view is Open only (Done and Dropped are hidden until asked for). */
   status: z.preprocess(
-    (v) => (v === undefined || v === '' ? undefined : Array.isArray(v) ? v : String(v).split(',').map((s) => s.trim()).filter(Boolean)),
+    (v) =>
+      v === undefined || v === ''
+        ? undefined
+        : Array.isArray(v)
+          ? v
+          : String(v)
+              .split(',')
+              .map((s) => s.trim())
+              .filter(Boolean),
     z.array(BacklogStatus).min(1).default(['open']),
   ),
   priority: csv(BacklogPriority),

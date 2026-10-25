@@ -42,7 +42,11 @@ describe('discovery config', () => {
     expect(discoveryElapsedMs(running, new Date(t0.getTime() + 10 * 60_000))).toBe(15 * 60_000);
     const paused = { elapsedMs: 15 * 60_000, activeSince: null, timeBoxMinutes: 30 };
     expect(discoveryElapsedMs(paused, new Date(t0.getTime() + 99 * 3_600_000))).toBe(15 * 60_000);
-    expect(discoveryProgress(paused, t0)).toEqual({ elapsedMinutes: 15, remainingMinutes: 15, fraction: 0.5 });
+    expect(discoveryProgress(paused, t0)).toEqual({
+      elapsedMinutes: 15,
+      remainingMinutes: 15,
+      fraction: 0.5,
+    });
     expect(discoveryProgress({ ...paused, elapsedMs: 40 * 60_000 }, t0)).toMatchObject({
       remainingMinutes: 0,
       fraction: 1,
@@ -55,7 +59,12 @@ describe('discovery config', () => {
 
   it('validates a new session request', () => {
     const r = CreateDiscoveryRequestSchema.parse({ title: 'x' });
-    expect(r).toMatchObject({ stance: 'facilitator', ceoMode: 'owner_only', playbook: 'brainstorm', idea: '' });
+    expect(r).toMatchObject({
+      stance: 'facilitator',
+      ceoMode: 'owner_only',
+      playbook: 'brainstorm',
+      idea: '',
+    });
     expect(CreateDiscoveryRequestSchema.safeParse({ title: 'x', ceoMode: 'always' }).success).toBe(false);
     expect(CreateDiscoveryRequestSchema.safeParse({ title: 'x', timeBoxMinutes: 1 }).success).toBe(false);
   });
@@ -69,8 +78,13 @@ describe('the aom session verbs', () => {
   });
 
   it('checks ask and note params', () => {
-    expect(SessionAskParamsSchema.parse({ question: 'q' })).toMatchObject({ options: [], allowFreeText: true });
-    expect(SessionAskParamsSchema.safeParse({ question: 'q', options: Array(7).fill('x') }).success).toBe(false);
+    expect(SessionAskParamsSchema.parse({ question: 'q' })).toMatchObject({
+      options: [],
+      allowFreeText: true,
+    });
+    expect(SessionAskParamsSchema.safeParse({ question: 'q', options: Array(7).fill('x') }).success).toBe(
+      false,
+    );
     expect(SessionNoteParamsSchema.safeParse({ op: 'add', section: 'ideas', text: 'x' }).success).toBe(true);
     expect(SessionNoteParamsSchema.safeParse({ op: 'add', section: 'plans', text: 'x' }).success).toBe(false);
     expect(SessionNoteParamsSchema.safeParse({ op: 'remove', id: 'ab' }).success).toBe(false);
@@ -113,13 +127,26 @@ describe('the facilitator turn', () => {
   it('puts the persona and the protocol in the instructions and the situation in the message', () => {
     const t = buildFacilitatorTurn(input());
     expect(t.instructions).toContain('You are the Analyst.');
-    for (const verb of ['session ask', 'session note add', 'session propose', 'session phase', 'session draft', 'session validate'])
+    for (const verb of [
+      'session ask',
+      'session note add',
+      'session propose',
+      'session phase',
+      'session draft',
+      'session validate',
+    ])
       expect(t.instructions).toContain(`aom ${verb}`);
     expect(t.instructions).toContain('no pipes, redirects');
     expect(t.message).toContain('The session has just started');
     expect(t.message).toContain('Starting idea: Invoices for freelancers');
     expect(t.message).toContain('Phase: Frame (1 of 5)');
-    expect(header(t.message)).toMatchObject({ role: 'facilitator', trigger: 'start', phase: 'frame', asked: 0, openQuestion: false });
+    expect(header(t.message)).toMatchObject({
+      role: 'facilitator',
+      trigger: 'start',
+      phase: 'frame',
+      asked: 0,
+      openQuestion: false,
+    });
   });
 
   it('shows the question log, the panel with short ids, proposals and the playbook', () => {
@@ -129,11 +156,51 @@ describe('the facilitator turn', () => {
         stance: 'ideate_for_me',
         trigger: { kind: 'answer', detail: 'Answer to "Who?": Agencies.' },
         questions: [
-          { id: '1', question: 'Who is it for?', status: 'answered', phase: 'frame', options: [{ id: 'o1', label: 'Freelancers' }], answer: { kind: 'pick', optionId: 'o1', text: null, source: 'owner' }, proposed: null },
-          { id: '2', question: 'Pricing?', status: 'proposed', phase: 'frame', options: [], answer: null, proposed: { text: 'Paid', optionId: null, byName: 'Ada' } },
-          { id: '3', question: 'Launch?', status: 'open', phase: 'converge', options: [], answer: null, proposed: { text: 'Q1', optionId: null, byName: 'Ada' } },
-          { id: '4', question: 'Skipped one', status: 'skipped', phase: 'frame', options: [], answer: { kind: 'skip', optionId: null, text: null, source: 'owner' }, proposed: null },
-          { id: '5', question: 'Withdrawn one', status: 'withdrawn', phase: 'frame', options: [], answer: null, proposed: null },
+          {
+            id: '1',
+            question: 'Who is it for?',
+            status: 'answered',
+            phase: 'frame',
+            options: [{ id: 'o1', label: 'Freelancers' }],
+            answer: { kind: 'pick', optionId: 'o1', text: null, source: 'owner' },
+            proposed: null,
+          },
+          {
+            id: '2',
+            question: 'Pricing?',
+            status: 'proposed',
+            phase: 'frame',
+            options: [],
+            answer: null,
+            proposed: { text: 'Paid', optionId: null, byName: 'Ada' },
+          },
+          {
+            id: '3',
+            question: 'Launch?',
+            status: 'open',
+            phase: 'converge',
+            options: [],
+            answer: null,
+            proposed: { text: 'Q1', optionId: null, byName: 'Ada' },
+          },
+          {
+            id: '4',
+            question: 'Skipped one',
+            status: 'skipped',
+            phase: 'frame',
+            options: [],
+            answer: { kind: 'skip', optionId: null, text: null, source: 'owner' },
+            proposed: null,
+          },
+          {
+            id: '5',
+            question: 'Withdrawn one',
+            status: 'withdrawn',
+            phase: 'frame',
+            options: [],
+            answer: null,
+            proposed: null,
+          },
         ],
         notes: [{ id: U, section: 'ideas', text: 'Recurring invoices', byName: 'Analyst' }],
         proposals: [
@@ -166,22 +233,49 @@ describe('the facilitator turn', () => {
     expect(t.message).toContain('PRD playbook body');
     expect(t.message).toContain('Gather the facts');
     expect(t.message).toContain('# Template');
-    expect(header(t.message)).toMatchObject({ openQuestion: true, asked: 4, answered: 3, openProposals: 1, hasPrd: true, hasBrief: false });
+    expect(header(t.message)).toMatchObject({
+      openQuestion: true,
+      asked: 4,
+      answered: 3,
+      openProposals: 1,
+      hasPrd: true,
+      hasBrief: false,
+    });
   });
 
   it('describes the CEO mode and the time box', () => {
-    const joint = buildFacilitatorTurn(input({ ceoMode: 'joint', ceoName: 'Ada', timeBox: { elapsedMinutes: 10, remainingMinutes: 20 } }));
+    const joint = buildFacilitatorTurn(
+      input({ ceoMode: 'joint', ceoName: 'Ada', timeBox: { elapsedMinutes: 10, remainingMinutes: 20 } }),
+    );
     expect(joint.message).toContain('Ada takes part');
     expect(joint.message).toContain('proposals, never decisions');
     expect(joint.message).toContain('10 minutes used, 20 left');
-    const prep = buildFacilitatorTurn(input({ ceoMode: 'ceo_prep', ceoName: 'Ada', ceoPrep: { state: 'running', turns: 3, cap: 12 }, timeBox: { elapsedMinutes: 40, remainingMinutes: 0 } }));
+    const prep = buildFacilitatorTurn(
+      input({
+        ceoMode: 'ceo_prep',
+        ceoName: 'Ada',
+        ceoPrep: { state: 'running', turns: 3, cap: 12 },
+        timeBox: { elapsedMinutes: 40, remainingMinutes: 0 },
+      }),
+    );
     expect(prep.message).toContain('3 of 12 turns used');
     expect(prep.message).toContain('Time box used up');
     expect(header(prep.message).timeUp).toBe(true);
   });
 
   it('has a sentence for every trigger and every phase', () => {
-    for (const kind of ['start', 'answer', 'message', 'proposal', 'resume', 'phase_override', 'ceo_answered', 'review_done', 'draft', 'validate'] as const) {
+    for (const kind of [
+      'start',
+      'answer',
+      'message',
+      'proposal',
+      'resume',
+      'phase_override',
+      'ceo_answered',
+      'review_done',
+      'draft',
+      'validate',
+    ] as const) {
       const trigger = ['message', 'proposal', 'phase_override', 'draft', 'validate'].includes(kind)
         ? ({ kind, detail: 'D' } as never)
         : ({ kind } as never);
@@ -189,7 +283,8 @@ describe('the facilitator turn', () => {
       expect(header(t.message).trigger).toBe(kind);
       expect(t.message.split('\n\n')[1]?.length).toBeGreaterThan(20);
     }
-    for (const phase of DISCOVERY_PHASES) expect(buildFacilitatorTurn(input({ phase })).message).toContain('Phase:');
+    for (const phase of DISCOVERY_PHASES)
+      expect(buildFacilitatorTurn(input({ phase })).message).toContain('Phase:');
   });
 
   it('renders an empty panel and log', () => {
@@ -206,7 +301,16 @@ describe('the CEO turn', () => {
       idea: 'Invoices',
       phase: 'frame',
       mode: 'joint',
-      question: { id: 'q9', question: 'Who is it for?', why: 'scope', options: [{ id: 'o1', label: 'Freelancers' }, { id: 'o2', label: 'Agencies' }], allowFreeText: true },
+      question: {
+        id: 'q9',
+        question: 'Who is it for?',
+        why: 'scope',
+        options: [
+          { id: 'o1', label: 'Freelancers' },
+          { id: 'o2', label: 'Agencies' },
+        ],
+        allowFreeText: true,
+      },
       questions: [],
       notes: [],
       persona: '',
@@ -216,7 +320,13 @@ describe('the CEO turn', () => {
     expect(t.instructions).toContain('aom session answer');
     expect(t.message).toContain('- o1: Freelancers');
     expect(t.message).toContain('The facilitator asks because: scope');
-    expect(header(t.message)).toEqual({ role: 'ceo_answer', questionId: 'q9', options: ['o1', 'o2'], mode: 'joint', phase: 'frame' });
+    expect(header(t.message)).toEqual({
+      role: 'ceo_answer',
+      questionId: 'q9',
+      options: ['o1', 'o2'],
+      mode: 'joint',
+      phase: 'frame',
+    });
   });
 });
 
@@ -247,7 +357,13 @@ describe('the hand-off note', () => {
     const n = buildHandoffNote({ title: 'PRD: X', docId: U, version: 3, content: 'a'.repeat(50), max: 100 });
     expect(n).toContain(`document ${U}, version 3`);
     expect(n).toContain('a'.repeat(50));
-    const cut = buildHandoffNote({ title: 'PRD: X', docId: U, version: 3, content: 'b'.repeat(500), max: 100 });
+    const cut = buildHandoffNote({
+      title: 'PRD: X',
+      docId: U,
+      version: 3,
+      content: 'b'.repeat(500),
+      max: 100,
+    });
     expect(cut).toContain('b'.repeat(100));
     expect(cut).not.toContain('b'.repeat(101));
     expect(cut).toContain('the PRD continues');

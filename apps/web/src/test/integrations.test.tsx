@@ -141,7 +141,13 @@ beforeEach(() => {
       if (url === '/api/workstations') return json({ workstations: server.workstations });
       if (url === `/api/workstations/${WS}/integrations`) return json(server.page);
       if (url === `/api/workstations/${WS}/ai-runtimes`)
-        return json({ workstationId: WS, online: true, runnerVersion: '0.1.58', tiles: [], lastPromote: null });
+        return json({
+          workstationId: WS,
+          online: true,
+          runnerVersion: '0.1.58',
+          tiles: [],
+          lastPromote: null,
+        });
       const m = /\/integrations\/requests\/([^/]+)$/.exec(url);
       if (m) return json(server.requests.get(m[1] as string) ?? req(m[1] as string, {}));
       if (method === 'POST' && url.endsWith('/integrations/connect')) {

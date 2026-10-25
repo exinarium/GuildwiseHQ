@@ -19,7 +19,15 @@ describe('the pack-scripts gate in the runner', () => {
     const reg = registry();
     const rpc = vi.fn(async () => ({ ok: true }));
     const gate = makePackScriptGate(rpc, 'shift-1');
-    const r = await skillRpc(reg, 'skill.show', { ref: 'skill:pk:lint', file: 'scripts/run.sh' }, undefined, undefined, undefined, gate);
+    const r = await skillRpc(
+      reg,
+      'skill.show',
+      { ref: 'skill:pk:lint', file: 'scripts/run.sh' },
+      undefined,
+      undefined,
+      undefined,
+      gate,
+    );
     expect(r.ok).toBe(true);
     expect(rpc).toHaveBeenCalledWith('shift-1', 'pack.script.gate', {
       pack: 'pk',
@@ -28,20 +36,36 @@ describe('the pack-scripts gate in the runner', () => {
     });
   });
 
-  it('refuses the script with the server\'s message when it is not approved', async () => {
+  it("refuses the script with the server's message when it is not approved", async () => {
     const reg = registry();
     const gate = makePackScriptGate(
       async () => ({ ok: false, error: 'approval_required: ask the manager' }),
       'shift-1',
     );
-    const r = await skillRpc(reg, 'skill.show', { ref: 'skill:pk:lint', file: 'scripts/run.sh' }, undefined, undefined, undefined, gate);
+    const r = await skillRpc(
+      reg,
+      'skill.show',
+      { ref: 'skill:pk:lint', file: 'scripts/run.sh' },
+      undefined,
+      undefined,
+      undefined,
+      gate,
+    );
     expect(r).toEqual({ ok: false, error: 'approval_required: ask the manager' });
   });
 
   it('fails closed when the server cannot be asked', async () => {
     const reg = registry();
     const gate = makePackScriptGate(async () => Promise.reject(new Error('offline')), 'shift-1');
-    const r = await skillRpc(reg, 'skill.show', { ref: 'skill:pk:lint', file: 'scripts/run.sh' }, undefined, undefined, undefined, gate);
+    const r = await skillRpc(
+      reg,
+      'skill.show',
+      { ref: 'skill:pk:lint', file: 'scripts/run.sh' },
+      undefined,
+      undefined,
+      undefined,
+      gate,
+    );
     expect(r.ok).toBe(false);
   });
 
@@ -49,17 +73,35 @@ describe('the pack-scripts gate in the runner', () => {
     const reg = registry();
     const rpc = vi.fn(async () => ({ ok: true }));
     const gate = makePackScriptGate(rpc, 'shift-1');
-    expect((await skillRpc(reg, 'skill.show', { ref: 'skill:pk:lint', file: 'references/notes.md' }, undefined, undefined, undefined, gate)).ok).toBe(true);
-    expect((await skillRpc(reg, 'skill.show', { ref: 'skill:pk:lint' }, undefined, undefined, undefined, gate)).ok).toBe(true);
+    expect(
+      (
+        await skillRpc(
+          reg,
+          'skill.show',
+          { ref: 'skill:pk:lint', file: 'references/notes.md' },
+          undefined,
+          undefined,
+          undefined,
+          gate,
+        )
+      ).ok,
+    ).toBe(true);
+    expect(
+      (await skillRpc(reg, 'skill.show', { ref: 'skill:pk:lint' }, undefined, undefined, undefined, gate)).ok,
+    ).toBe(true);
     expect(rpc).not.toHaveBeenCalled();
-    expect((await skillRpc(reg, 'skill.show', { ref: 'skill:pk:lint', file: 'scripts/run.sh' })).ok).toBe(true);
+    expect((await skillRpc(reg, 'skill.show', { ref: 'skill:pk:lint', file: 'scripts/run.sh' })).ok).toBe(
+      true,
+    );
   });
 
   it('leaves scripts out of the folder it materialises for a gated agent', () => {
     const reg = registry();
     const open = reg.grantedSkills(['skill:pk:lint']);
     expect(Object.keys(open[0]?.files ?? {})).toContain('scripts/run.sh');
-    const gated = reg.grantedSkills(['skill:pk:lint'], undefined, undefined, undefined, { packScriptsGated: true });
+    const gated = reg.grantedSkills(['skill:pk:lint'], undefined, undefined, undefined, {
+      packScriptsGated: true,
+    });
     expect(Object.keys(gated[0]?.files ?? {})).not.toContain('scripts/run.sh');
     expect(Object.keys(gated[0]?.files ?? {})).toContain('references/notes.md');
   });

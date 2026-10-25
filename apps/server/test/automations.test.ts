@@ -28,8 +28,9 @@ beforeAll(async () => {
     )
   )[0];
   wfKey = wf?.key as string;
-  stage = (wf?.definition.stages as Array<{ id: string; kind: string }>).find((s) => s.kind === 'agent')
-    ?.id as string;
+  stage = (wf?.definition.stages as Array<{ id: string; kind: string }> | undefined)?.find(
+    (s) => s.kind === 'agent',
+  )?.id as string;
 });
 afterAll(async () => {
   r.close();
