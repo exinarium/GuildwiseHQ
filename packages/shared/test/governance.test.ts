@@ -93,7 +93,7 @@ describe('gates', () => {
   it('describes every class and says where it is enforced', () => {
     for (const c of GATE_CLASSES) expect(GATE_INFO[c].label).toBeTruthy();
     expect(GATE_INFO.outbound_mail.enforcement).toBe('always');
-    expect(GATE_INFO.pack_scripts.enforcement).toBe('not_enforced');
+    expect(GATE_INFO.pack_scripts.enforcement).toBe('opt_in');
     expect(GATE_INFO.merge_push.enforcement).toBe('opt_in');
   });
 });
