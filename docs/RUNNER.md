@@ -662,7 +662,9 @@ booked to the organization and its cap).
 **Make main** (`provider.account.promote`) swaps a named account and the main account. Login scopes swap the folders in
 `config.json` (for Gemini the main `loginDir` is the `.gemini` folder and an account names the home that holds it, so the two
 forms are converted); key scopes open both sealed keys and seal them again under their new names with the runner's own key, with
-a new generation. Doing it again undoes it. Claude Code's main account is the machine login or the token and is not swapped.
+a new generation. Doing it again undoes it. Claude Code (runner 0.1.60, `claude-main-swap:1`) swaps the model login of `~/.claude` with a named account that has its own folder: the `claudeAiOauth` entry of each `.credentials.json` and the `oauthAccount` entry of each `.claude.json`, under both credential locks, with a journal of paths that `recoverClaudeMainSwap` finishes at the next start; it needs an idle runner, both accounts signed in, a main account on the machine login (not a token or key), and `integrations.machineScopeFromWeb: primary`. Plugin sign-ins and settings stay.
+
+**Pack scripts gate and work mentions (runner 0.1.60).** `pack-script-gate:1`: for an agent whose spec says `packScriptsGated`, no script file of a pack is written into the runtime's skill folder, and `aom skill show --file <script>` asks the server (`pack.script.gate`, runner to server only) first; a server that cannot be reached denies. `mention-work:1`: `chat.start.mentionWork` makes the chat of an @mention work in the card's folder (writable, `buildMentionWorkSettings`: the shift policy of the permissions the server cut, branch moving and push denied, no web/MCP), Claude Code only; without the folder on this workstation the chat fails. `chat-accounts:1`: `chat.start.account` runs a chat about a project's card on the project's account (the account gate of that account decides, not main's).
 
 **Old runners.** A runner without `provider-accounts:1` is told to update (tile "Runner too old"); the server sends it no
 named account and no key command with an account name, and pauses or falls back for a project that names one.
