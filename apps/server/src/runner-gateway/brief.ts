@@ -38,6 +38,7 @@ import type { Ctx } from '../context.ts';
 import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import type { ClaimResult } from '../dispatcher/claim.ts';
 import { dependencyStates } from '../dispatcher/dependencies.ts';
+import { isGated } from '../governance/gates.ts';
 import { cardLedgerEntries, standingOrdersFor, standingOrdersForProjects } from '../queries/ledger.ts';
 import { orgReadRepos, referenceReadRepos } from './read-repos.ts';
 import { localReadRepos } from './workstation-repos.ts';
@@ -61,7 +62,9 @@ export function agentSpec(a: Row): AgentRuntimeSpec {
 
 /** The agent as its runner sees it, with `browser` off when the organization has the browser-tools feature switched off. */
 export async function agentSpecFor(ctx: Ctx, a: Row): Promise<AgentRuntimeSpec> {
-  const spec = agentSpec(a);
+  let spec = agentSpec(a);
+  // S-B1 gate `pack_scripts`: the runner asks the server before it hands this agent a pack script.
+  if (await isGated(ctx.pool, a.id, 'pack_scripts')) spec = { ...spec, packScriptsGated: true };
   if (!spec.permissions.browser) return spec;
   const org = await one(ctx.pool, 'SELECT plan, features FROM organizations WHERE id=$1', [a.org_id]);
   if (org && !effectiveFeatures(org.plan, org.features).browserTools)

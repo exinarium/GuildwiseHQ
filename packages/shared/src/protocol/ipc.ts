@@ -325,6 +325,8 @@ export const RpcMethodSchema = z.enum([
   /** Capability Registry: `aom skill show|list`, answered by the runner from its local registry (built-ins and the organization vault). */
   'skill.show',
   'skill.list',
+  /** Runner to server only: an agent set to ask before pack scripts needs an approval before the runner hands one out. */
+  'pack.script.gate',
   /** Discovery sessions: `aom session ask|answer|note|propose|phase|draft|validate|show`, answered by the server for a session turn. */
   'session.show',
   'session.ask',

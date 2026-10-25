@@ -58,7 +58,12 @@ import {
   type ServerHttp,
   syncCardAttachments,
 } from '../attachments/index.ts';
-import { type CapabilityRegistry, type ProjectIndexResult, skillRpc } from '../capabilities/registry.ts';
+import {
+  type CapabilityRegistry,
+  makePackScriptGate,
+  type ProjectIndexResult,
+  skillRpc,
+} from '../capabilities/registry.ts';
 import type { RunnerConfig } from '../config.ts';
 import type { Outbox } from '../connection/outbox.ts';
 import {
@@ -1050,9 +1055,13 @@ export class ShiftSupervisor {
     if (playbookNote(msg.playbookGrants)) texts.instructions += `\n${playbookNote(msg.playbookGrants)}\n`;
     // The skills this agent's role grants, for a runtime with native skills (Claude Code, Codex): written into its private folder.
     const grantedSkills =
-      this.deps.capabilities?.grantedSkills(msg.agent.skills, registryProject, msg.orgId, {
-        agentId: msg.agent.agentId,
-      }) ?? [];
+      this.deps.capabilities?.grantedSkills(
+        msg.agent.skills,
+        registryProject,
+        msg.orgId,
+        { agentId: msg.agent.agentId },
+        { packScriptsGated: msg.agent.packScriptsGated === true },
+      ) ?? [];
     // The project's reference repositories (read-only), for a card shift and a BA task shift (the server sends repositories
     // there only for a repository-scoping task given to an architect); only clones this runner found itself.
     const registeredFolders =
@@ -1637,6 +1646,10 @@ export class ShiftSupervisor {
   }
 
   /** Not the CEO's and not the DevOps engineer's shifts: they hold wider powers and never delegate. */
+  private scriptGate(shiftId: string) {
+    return makePackScriptGate((id, m, p) => this.deps.rpc(id, m, p), shiftId);
+  }
+
   private mayDelegate(msg: ShiftStartMsg): boolean {
     return msg.kind !== 'ceo' && msg.kind !== 'devops' && !msg.agent.isDevops && msg.agent.roleKey !== 'ceo';
   }
@@ -1652,6 +1665,7 @@ export class ShiftSupervisor {
       viewer: { agentId: s.msg.agent.agentId },
       permissions: s.msg.agent.permissions,
       delegation: s.msg.delegation,
+      ...(s.msg.agent.packScriptsGated ? { packScriptsGated: true } : {}),
       ...(work
         ? {
             work: {
@@ -1678,6 +1692,7 @@ export class ShiftSupervisor {
             s.msg.brief?.project?.id,
             s.msg.orgId,
             { agentId: s.msg.agent.agentId },
+            s.msg.agent.packScriptsGated ? this.scriptGate(s.msg.shiftId) : undefined,
           );
         // `aom delegate`: a sub-task for a granted target. Not for the CEO's and the DevOps engineer's shifts; the server decides
         // (and the runner only knows the targets it was told about at the start).

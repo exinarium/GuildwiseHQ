@@ -123,14 +123,14 @@ describe('What it may do', () => {
     for (const c of GATE_CLASSES) expect(w.getByTestId(`gate-${c}`)).toBeTruthy();
   });
 
-  it('switches a gate on with one click; the always-on and the not-yet-available ones cannot be switched', async () => {
+  it('switches a gate on with one click; the always-on one cannot be switched', async () => {
     const calls = renderMayDo(mayDo());
     await userEvent.click(screen.getByRole('button', { name: 'What Mia may do' }));
     const row = async (c: string) =>
       within(await screen.findByTestId(`gate-${c}`)).getByRole('checkbox') as HTMLInputElement;
     expect((await row('outbound_mail')).disabled).toBe(true);
     expect((await row('outbound_mail')).checked).toBe(true);
-    expect((await row('pack_scripts')).disabled).toBe(true);
+    expect((await row('pack_scripts')).disabled).toBe(false);
     const merge = await row('merge_push');
     expect(merge.checked).toBe(false);
     await userEvent.click(merge);

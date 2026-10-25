@@ -120,12 +120,12 @@ describe('aom skill show', () => {
     }
   });
 
-  it('answers the rpc methods and builds the instructions index', () => {
+  it('answers the rpc methods and builds the instructions index', async () => {
     const reg = new CapabilityRegistry();
-    expect(skillRpc(undefined, 'skill.show', { ref: 'prd' }).ok).toBe(false);
-    expect(skillRpc(reg, 'skill.show', {})).toMatchObject({ ok: false });
-    expect(skillRpc(reg, 'skill.show', { ref: 'chair' })).toMatchObject({ ok: true });
-    const list = skillRpc(reg, 'skill.list', { kind: 'persona' });
+    expect((await skillRpc(undefined, 'skill.show', { ref: 'prd' })).ok).toBe(false);
+    expect(await skillRpc(reg, 'skill.show', {})).toMatchObject({ ok: false });
+    expect(await skillRpc(reg, 'skill.show', { ref: 'chair' })).toMatchObject({ ok: true });
+    const list = await skillRpc(reg, 'skill.list', { kind: 'persona' });
     expect(list.ok && (list.result as { text: string }).text.split('\n')).toHaveLength(10);
     const idx = reg.instructionsIndex(['interview-techniques', 'prd', 'missing']);
     expect(idx).toContain('`skill:interview-techniques`');

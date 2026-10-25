@@ -48,7 +48,7 @@ import type {
   RuntimeSession,
 } from '../adapters/types.ts';
 import type { PackViewer } from '../capabilities/packs.ts';
-import { type CapabilityRegistry, skillRpc } from '../capabilities/registry.ts';
+import { type CapabilityRegistry, makePackScriptGate, skillRpc } from '../capabilities/registry.ts';
 import { resolveCommitIdentity } from '../git/identity.ts';
 import type { IpcServer, ShiftIpcHandler } from '../ipc/server.ts';
 import { type Logger, nullLogger } from '../log.ts';
@@ -89,6 +89,8 @@ export interface DelegateCaller {
   /** The targets granted to the caller (from the start message); none: no delegation. */
   delegation?: DelegationSpec | undefined;
   work?: DelegateWork | undefined;
+  /** The caller is set to ask before pack scripts: its delegates ask through the caller too. */
+  packScriptsGated?: boolean | undefined;
 }
 
 export interface DelegateDeps {
@@ -1034,6 +1036,9 @@ export class DelegateRunner {
             caller.projectId,
             caller.orgId,
             caller.viewer,
+            caller.packScriptsGated
+              ? makePackScriptGate((id, m, p) => this.deps.rpc(id, m, p), caller.id)
+              : undefined,
           );
         if (req.method === 'ledger.search') return this.deps.rpc(caller.id, req.method, req.params);
         if (req.method === DELEGATE_RPC || req.method.startsWith('delegate.'))

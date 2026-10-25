@@ -27,6 +27,7 @@ import {
   normalizeRemoteUrl,
   PACK_AUTHORING_CAPABILITY,
   PACK_CREDENTIALS_BOUND_CAPABILITY,
+  PACK_SCRIPT_GATE_CAPABILITY,
   PACKS_CAPABILITY,
   PRIVATE_ENDPOINTS_CAPABILITY,
   PROVIDER_ACCOUNTS_CAPABILITY,
@@ -1315,6 +1316,8 @@ export class Runner {
         CLAUDE_ACCOUNTS_CAPABILITY,
         // Named accounts of Codex, the Gemini CLI and the provider keys; "Make main" (`provider.account.promote`).
         PROVIDER_ACCOUNTS_CAPABILITY,
+        // Asks the server before it hands a pack script to an agent that is gated on pack scripts (`pack.script.gate`).
+        PACK_SCRIPT_GATE_CAPABILITY,
         // Runs the turns of discovery and boardroom sessions (`chat.start.session`) and indexes the capability registry.
         SESSION_TURNS_CAPABILITY,
         // A session turn may call the `aom session ...` verbs (the facilitator's questions, notes, proposals and drafts).

@@ -122,6 +122,7 @@ import { applyInspectResult, onProjectVaultSynced } from '../delivery/recipes.ts
 import { deployRpc } from '../delivery/rpc.ts';
 import { applyDeployProgress, applyDeployResult } from '../delivery/runs.ts';
 import { applyWriteResult } from '../delivery/setup.ts';
+import { packScriptGateRpc } from '../governance/gates.ts';
 import { pinForWelcome } from '../platform-team/pins.ts';
 import { platformTriageRpc } from '../platform-team/rpc.ts';
 import { applyRunUsage } from '../provider-keys/live-usage.ts';
@@ -1354,6 +1355,9 @@ export class RunnerHandlers {
       // `aom delegate` asks the server before it starts and reports its usage after (the caller may have just ended).
       if (isDelegateServerRpc(msg.method))
         return reply(...(await delegateRpc(ctx, conn.workstationId, msg.shiftId, msg.method, msg.params)));
+      // A pack script for an agent set to ask first (the runner asks before it hands the file out).
+      if (msg.method === 'pack.script.gate')
+        return reply(...(await packScriptGateRpc(ctx, conn.workstationId, msg.shiftId, msg.params)));
       // A discovery or boardroom turn is not a shift: its token is scoped to the turn.
       const sessionTurn = await ctx.services.discovery.turnOf(conn.workstationId, msg.shiftId);
       if (sessionTurn)

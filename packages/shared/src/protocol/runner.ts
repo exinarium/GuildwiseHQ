@@ -237,6 +237,8 @@ export const AgentRuntimeSpecSchema = z.object({
   skills: z.array(z.string()),
   permissions: AgentPermissionsSchema,
   isDevops: z.boolean(),
+  /** Additive: the agent is set to ask before it runs pack scripts (gate `pack_scripts`); the runner then asks per script file. */
+  packScriptsGated: z.boolean().optional(),
 });
 export type AgentRuntimeSpec = z.infer<typeof AgentRuntimeSpecSchema>;
 

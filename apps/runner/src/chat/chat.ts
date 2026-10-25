@@ -42,7 +42,7 @@ import {
   syncCardAttachments,
 } from '../attachments/index.ts';
 import type { PackViewer } from '../capabilities/packs.ts';
-import { type CapabilityRegistry, skillRpc } from '../capabilities/registry.ts';
+import { type CapabilityRegistry, makePackScriptGate, skillRpc } from '../capabilities/registry.ts';
 import { type GuardClone, markJobStarted } from '../ceo/guard-hook.ts';
 import { selectChatProfile } from '../ceo/profile.ts';
 import { composeOwnerMessage, removeTurnDir, turnDirOf, writeTurnFiles } from '../ceo/turn-files.ts';
@@ -335,6 +335,10 @@ export class ChatManager {
   }
 
   /** Not the CEO's and not the DevOps engineer's plain chats; a session turn holds its session's grants. */
+  private scriptGate(chatId: string) {
+    return makePackScriptGate((id, m, p) => this.deps.rpc(id, m, p), chatId);
+  }
+
   private mayDelegate(msg: ChatStartMsg): boolean {
     return !!msg.session || (!msg.agent.isDevops && msg.agent.roleKey !== 'ceo');
   }
@@ -361,6 +365,7 @@ export class ChatManager {
         browser: false,
       },
       delegation: this.mayDelegate(msg) ? this.delegationOf(msg) : undefined,
+      ...(msg.agent.packScriptsGated ? { packScriptsGated: true } : {}),
       ...(chat.delegateWork ? { work: chat.delegateWork } : {}),
     };
   }
@@ -449,6 +454,7 @@ export class ChatManager {
             chat.msg.context?.projectId,
             chat.msg.context?.orgId,
             viewerOfChat(chat.msg),
+            chat.msg.agent.packScriptsGated ? this.scriptGate(chatId) : undefined,
           );
         // `aom delegate`: a sub-task for a granted target (a chat only reads, so its children only read). A session turn
         // holds the session's grants; of the plain chats not the CEO's and the DevOps engineer's. The server decides in
@@ -1168,6 +1174,7 @@ export class ChatManager {
         msg.context.projectId,
         msg.context.orgId,
         viewerOfChat(msg),
+        { packScriptsGated: msg.agent.packScriptsGated === true },
       ) ?? [];
     await adapter.writeInstructions(
       sandbox,

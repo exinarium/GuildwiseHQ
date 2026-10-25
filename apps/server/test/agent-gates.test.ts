@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   indexPack,
+  PACK_SCRIPT_GATE_CAPABILITY,
   PACKS_CAPABILITY,
   packSnapshotOf,
   SESSION_TURNS_CAPABILITY,
@@ -30,7 +31,12 @@ let shiftId = '';
 beforeAll(async () => {
   w = await createWorld({ env: { AOM_FIRST_RUN_HIRE_CAP: 'false' } });
   r = await w.connectRunner({
-    capabilities: [SESSION_TURNS_CAPABILITY, SESSION_VERBS_CAPABILITY, PACKS_CAPABILITY],
+    capabilities: [
+      SESSION_TURNS_CAPABILITY,
+      SESSION_VERBS_CAPABILITY,
+      PACKS_CAPABILITY,
+      PACK_SCRIPT_GATE_CAPABILITY,
+    ],
   });
   orgId = (await q('SELECT org_id FROM projects WHERE id=$1', [w.projectId]))[0]?.org_id as string;
   admin = await w.t.userSession(uniqueEmail('admin'));
@@ -101,7 +107,7 @@ describe('What it may do', () => {
     for (const c of ['merge_push', 'deploy', 'pack_scripts', 'delegation', 'playbook_run'])
       expect(by[c].gated).toBe(false);
     expect(by.outbound_mail).toMatchObject({ gated: true, enforcement: 'always' });
-    expect(by.pack_scripts.enforcement).toBe('not_enforced');
+    expect(by.pack_scripts.enforcement).toBe('opt_in');
     expect((await q('SELECT 1 FROM agent_action_gates')).length).toBe(0);
   });
 
@@ -183,11 +189,10 @@ describe('who switches a gate', () => {
     expect((await setGate(admin, 'playbook_run', false)).status).toBe(200);
   });
 
-  it('refuses classes that always ask or cannot be gated yet, and the CEO', async () => {
+  it('refuses classes that always ask, and the CEO', async () => {
     const always = await setGate(admin, 'outbound_mail', true);
     expect(always.status).toBe(400);
     expect(always.body.error.code).toBe('always_gated');
-    expect((await setGate(admin, 'pack_scripts', true)).body.error.code).toBe('not_enforced');
     const ceo = (await q(`SELECT id FROM agents WHERE org_id=$1 AND role_key='ceo' LIMIT 1`, [orgId]))[0]?.id;
     if (ceo) {
       const r2 = await call(admin, 'PUT', `/api/agents/${ceo}/gates`, { actionClass: 'deploy', gated: true });
@@ -473,5 +478,68 @@ describe('replay', () => {
       before,
     );
     expect(await q('SELECT agent_id, action_class FROM agent_action_gates ORDER BY 1,2')).toEqual(gates);
+  });
+});
+
+describe('a gated pack script', () => {
+  const script = { pack: 'tools', capability: 'skill:tools:lint', file: 'scripts/run.sh' };
+  // an earlier suite rebuilds the projections, which drops the chat shift inserted by hand at the top
+  beforeAll(async () => {
+    shiftId = randomUUID();
+    await q(
+      `INSERT INTO shifts (id, org_id, agent_id, workstation_id, kind, status, runtime, model, started_at)
+       VALUES ($1,$2,$3,$4,'chat','running','mock','mock',now())`,
+      [shiftId, orgId, agentId, w.workstationId],
+    );
+  });
+  const spec = async () => {
+    const [row] = await q('SELECT * FROM agents WHERE id=$1', [agentId]);
+    const { agentSpecFor } = await import('../src/runner-gateway/brief.ts');
+    return agentSpecFor(w.t.app.ctx, row);
+  };
+
+  it('is not asked while the gate is off, and the agent spec says nothing', async () => {
+    expect((await rpc(shiftId, 'pack.script.gate', script)).ok).toBe(true);
+    expect((await spec()).packScriptsGated).toBeUndefined();
+  });
+
+  it('refuses the gate on a workstation whose runner cannot ask', async () => {
+    await q(
+      'UPDATE workstation_capabilities SET capabilities = array_remove(capabilities,$2) WHERE workstation_id=$1',
+      [w.workstationId, PACK_SCRIPT_GATE_CAPABILITY],
+    );
+    try {
+      const res = await setGate(w.owner, 'pack_scripts', true);
+      expect(res.status).toBe(422);
+      expect(res.body.error.code).toBe('runner_too_old');
+    } finally {
+      await q(
+        'UPDATE workstation_capabilities SET capabilities = capabilities || $2::text[] WHERE workstation_id=$1',
+        [w.workstationId, [PACK_SCRIPT_GATE_CAPABILITY]],
+      );
+    }
+  });
+
+  it('pauses, raises a desk item and lets that script through once after the approval', async () => {
+    expect((await setGate(w.owner, 'pack_scripts', true)).status).toBe(200);
+    expect((await spec()).packScriptsGated).toBe(true);
+    const first = await rpc(shiftId, 'pack.script.gate', script);
+    expect(first.ok).toBe(false);
+    expect(first.error).toContain('approval_required');
+    const item = (await gateItems()).find((i) => (i.data as any).actionClass === 'pack_scripts');
+    expect(item).toBeTruthy();
+    expect((await rpc(shiftId, 'pack.script.gate', script)).error).toContain('approval_pending');
+    await owner('POST', `/api/desk/${item?.id}/resolve`, { resolution: 'approved' });
+    // another script is another ask
+    expect((await rpc(shiftId, 'pack.script.gate', { ...script, file: 'scripts/other.sh' })).error).toContain(
+      'approval_required',
+    );
+    expect((await rpc(shiftId, 'pack.script.gate', script)).ok).toBe(true);
+    expect((await rpc(shiftId, 'pack.script.gate', script)).error).toContain('approval_required');
+    await setGate(w.owner, 'pack_scripts', false);
+  });
+
+  it('a caller that is no shift (a session turn) has no agent and is not gated', async () => {
+    expect((await rpc(randomUUID(), 'pack.script.gate', script)).ok).toBe(true);
   });
 });

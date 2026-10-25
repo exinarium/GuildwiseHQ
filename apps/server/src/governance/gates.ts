@@ -4,6 +4,7 @@ import {
   GATE_DESK_SUBKIND,
   GATE_INFO,
   type GateClass,
+  PACK_SCRIPT_GATE_CAPABILITY,
   type SetAgentGateRequest,
   streamId,
 } from '@aom/shared';
@@ -14,7 +15,7 @@ import { orgScope, projectScope, SYSTEM_ACTOR, userActor } from '../commands/com
 import type { Ctx } from '../context.ts';
 import { one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
-import { badRequest, conflict, forbidden } from '../errors.ts';
+import { badRequest, conflict, forbidden, unprocessable } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 
 /** After a rejection the same ask is not raised again for this long (the agent is told, and does not nag). */
@@ -59,6 +60,19 @@ export async function setAgentGate(
       throw badRequest('always_gated', `${info.label} always asks the manager: there is nothing to switch`);
     if (info.enforcement === 'not_enforced')
       throw badRequest('not_enforced', `${info.label} cannot be gated yet: ${info.note}`);
+    if (req.actionClass === 'pack_scripts' && req.gated && a.workstation_id) {
+      // an older runner would hand the scripts out without asking: the gate would look on and do nothing
+      const c = await one(
+        tx,
+        'SELECT $2 = ANY(capabilities) AS ok FROM workstation_capabilities WHERE workstation_id=$1',
+        [a.workstation_id, PACK_SCRIPT_GATE_CAPABILITY],
+      );
+      if (!c?.ok)
+        throw unprocessable(
+          'runner_too_old',
+          'update the runner on this agent’s workstation (0.1.60 or newer) to gate pack scripts',
+        );
+    }
     const had = await isGated(tx, agentId, req.actionClass);
     if (had === req.gated) return;
     if (!req.gated) {
@@ -262,4 +276,38 @@ export async function resolveGateItemIn(
     ],
     { tx },
   );
+}
+
+/**
+ * `pack.script.gate`, asked by the runner before it hands a pack script to an agent set to ask first. The caller is the shift or
+ * chat the call belongs to; a caller that is no shift (a session turn) has no agent and no gate. One approval lets one script
+ * file through once; the agent is told to retry after the manager has decided.
+ */
+export async function packScriptGateRpc(
+  ctx: Ctx,
+  workstationId: string,
+  callerId: string,
+  params: Record<string, unknown>,
+): Promise<[boolean, unknown?, string?]> {
+  const shift = await one(ctx.pool, 'SELECT * FROM shifts WHERE id=$1 AND workstation_id=$2', [
+    callerId,
+    workstationId,
+  ]);
+  if (!shift?.agent_id) return [true, { gated: false }];
+  const agent = await one(ctx.pool, 'SELECT * FROM agents WHERE id=$1', [shift.agent_id]);
+  if (!agent) return [false, undefined, 'unknown agent'];
+  const str = (v: unknown, max: number) => (typeof v === 'string' ? v.slice(0, max) : '');
+  const pack = str(params.pack, 80);
+  const capability = str(params.capability, 120);
+  const file = str(params.file, 200);
+  if (!pack || !capability || !file) return [false, undefined, 'pack, capability and file are required'];
+  const gate = await gateAction(ctx, {
+    agent,
+    actionClass: 'pack_scripts',
+    fingerprint: `pack_script:${pack}:${capability}:${file}`,
+    summary: `use the script ${file} of ${capability} (pack ${pack})`,
+    projectId: shift.project_id ?? null,
+    cardId: shift.card_id ?? null,
+  });
+  return gate.ok ? [true, { gated: true }] : [false, undefined, gate.message];
 }

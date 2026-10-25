@@ -13,6 +13,7 @@ import {
   digestCapabilityIndex,
   type IpcRpcResponse,
   indexCapabilityTree,
+  isScriptPath,
   materialisedSkillMarkdown,
   type ParsedCapability,
   packLabel,
@@ -375,6 +376,7 @@ export class CapabilityRegistry {
     projectId?: string,
     orgId?: string,
     viewer?: PackViewer,
+    opts: { packScriptsGated?: boolean } = {},
   ): GrantedSkill[] {
     const out: GrantedSkill[] = [];
     const seen = new Set<string>();
@@ -384,6 +386,10 @@ export class CapabilityRegistry {
       seen.add(capabilityId(e));
       const name = e.pack ? `${e.pack.name}-${e.key.slice(e.pack.name.length + 1)}` : e.key;
       const files = { ...e.files };
+      // An agent set to ask before it runs pack scripts gets no script copied into its folder: it reads one with
+      // `aom skill show --file`, which asks the manager (a single-use approval) first.
+      if (opts.packScriptsGated && e.pack)
+        for (const f of Object.keys(files)) if (isScriptPath(f)) delete files[f];
       files['SKILL.md'] = materialisedSkillMarkdown(
         name,
         e.pack
@@ -414,15 +420,47 @@ export function readCapabilityTreeAt(root: string, folders: readonly string[]): 
   return out;
 }
 
+/** Asks the server whether a gated agent may have a pack script (`pack.script.gate`); fails closed. */
+export type PackScriptGate = (f: {
+  pack: string;
+  capability: string;
+  file: string;
+}) => Promise<{ ok: true } | { ok: false; error: string }>;
+
+/**
+ * The gate of an agent set to ask before pack scripts: one `pack.script.gate` call to the server for the caller's id (the
+ * server resolves the agent and asks the manager, or uses up an approval). A server that cannot be reached denies.
+ */
+export function makePackScriptGate(
+  rpc: (id: string, method: string, params: Record<string, unknown>) => Promise<IpcRpcResponse>,
+  id: string,
+): PackScriptGate {
+  return async (f) => {
+    try {
+      const r = await rpc(id, 'pack.script.gate', f);
+      return r.ok
+        ? { ok: true }
+        : { ok: false, error: r.error ?? 'the manager has not approved this script' };
+    } catch {
+      return {
+        ok: false,
+        error: 'could not ask the server whether this script may be used; try again later',
+      };
+    }
+  };
+}
+
 /** The `skill.show` and `skill.list` rpc methods, answered by the runner from its own registry (chats and shifts alike). */
-export function skillRpc(
+export async function skillRpc(
   registry: CapabilityRegistry | undefined,
   method: string,
   params: Record<string, unknown>,
   projectId?: string,
   orgId?: string,
   viewer?: PackViewer,
-): IpcRpcResponse {
+  /** Set for an agent whose pack-scripts gate is on: asked before a pack's script file is handed out. */
+  scriptGate?: PackScriptGate,
+): Promise<IpcRpcResponse> {
   if (!registry) return { ok: false, error: 'the capability registry is not available on this workstation' };
   if (method === 'skill.list')
     return {
@@ -438,12 +476,15 @@ export function skillRpc(
     };
   const ref = typeof params.ref === 'string' ? params.ref.trim() : '';
   if (!ref) return { ok: false, error: 'usage: aom skill show <key> [--file <path>]' };
-  const r = registry.show(
-    ref,
-    typeof params.file === 'string' && params.file ? params.file : undefined,
-    projectId,
-    orgId,
-    viewer,
-  );
+  const file = typeof params.file === 'string' && params.file ? params.file : undefined;
+  if (file && scriptGate) {
+    const e = registry.get(ref, projectId, orgId, viewer);
+    const clean = file.replace(/\\/g, '/').replace(/^\.\//, '');
+    if (e?.pack && Object.hasOwn(e.files, clean) && isScriptPath(clean)) {
+      const g = await scriptGate({ pack: e.pack.name, capability: `${e.kind}:${e.key}`, file: clean });
+      if (!g.ok) return { ok: false, error: g.error };
+    }
+  }
+  const r = registry.show(ref, file, projectId, orgId, viewer);
   return r.ok ? { ok: true, result: { text: r.text } } : { ok: false, error: r.error };
 }

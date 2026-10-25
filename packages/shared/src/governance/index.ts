@@ -43,7 +43,14 @@ export type DeskActionApplied = z.infer<typeof DeskActionAppliedSchema>;
  * The side-effecting action classes an agent may be gated on. A gated action pauses and raises a desk item; the agent
  * continues (retries) after the approval. `enforcement` says where the server enforces it today.
  */
-export const GATE_CLASSES = ['merge_push', 'deploy', 'outbound_mail', 'pack_scripts', 'delegation', 'playbook_run'] as const;
+export const GATE_CLASSES = [
+  'merge_push',
+  'deploy',
+  'outbound_mail',
+  'pack_scripts',
+  'delegation',
+  'playbook_run',
+] as const;
 export const GateClassSchema = z.enum(GATE_CLASSES);
 export type GateClass = z.infer<typeof GateClassSchema>;
 
@@ -72,8 +79,8 @@ export const GATE_INFO: Record<
   pack_scripts: {
     label: 'Pack scripts',
     description: 'Running scripts that ship with a capability pack.',
-    enforcement: 'not_enforced',
-    note: 'Scripts run on the workstation, so the server cannot pause them yet. Scripts stay off until an Owner enables them for the pack.',
+    enforcement: 'opt_in',
+    note: 'Gated, each script file of a pack is handed to the agent only after an approval (single use). Scripts also stay off until an Owner enables them for the pack. Needs runner 0.1.60 or newer.',
   },
   delegation: {
     label: 'Delegation',
@@ -88,6 +95,11 @@ export const GATE_INFO: Record<
     note: 'Gated, each run waits for an approval, on top of the playbook grant.',
   },
 };
+
+/** Announced in `hello.capabilities` by runners that ask the server before they hand a pack script to a gated agent (runner 0.1.60). */
+export const PACK_SCRIPT_GATE_CAPABILITY = 'pack-script-gate:1';
+/** Announced by runners that can run an @mention with the work tools the server grants it (runner 0.1.60). */
+export const MENTION_WORK_CAPABILITY = 'mention-work:1';
 
 /** How long an approved gated action may be used by the agent's retry. */
 export const GATE_APPROVAL_TTL_MS = 2 * 3600_000;
@@ -285,7 +297,17 @@ export const AuditExportQuerySchema = z.object({
   type: z.string().min(1).max(80).optional(),
 });
 export type AuditExportQuery = z.infer<typeof AuditExportQuerySchema>;
-export const AUDIT_COLUMNS = ['at', 'type', 'actor_kind', 'actor_id', 'actor_name', 'stream', 'project_id', 'summary', 'payload'] as const;
+export const AUDIT_COLUMNS = [
+  'at',
+  'type',
+  'actor_kind',
+  'actor_id',
+  'actor_name',
+  'stream',
+  'project_id',
+  'summary',
+  'payload',
+] as const;
 
 export const OFFBOARDING_GRACE_DAYS = 30;
 
