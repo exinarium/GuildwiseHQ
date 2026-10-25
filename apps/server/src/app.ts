@@ -551,6 +551,12 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
           void reply.header('cache-control', 'no-cache');
           return reply.sendFile(existsSync(join(root, `${doc}.html`)) ? `${doc}.html` : 'index.html');
         });
+      // Public pages an extension builds into the dist (the hosted pricing page, license certificates).
+      for (const page of ctx.ext.list.flatMap((e) => e.publicPages ?? []))
+        app.get(page.route, (_req, reply) => {
+          void reply.header('cache-control', 'no-cache');
+          return reply.sendFile(existsSync(join(root, page.file)) ? page.file : 'index.html');
+        });
     } else app.log.warn('AOM_SERVE_WEB is set but apps/web/dist was not found');
   }
 

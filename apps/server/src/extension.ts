@@ -66,6 +66,15 @@ export interface ServerExtension {
   formPostPaths?: string[];
   /** Extra hosts the browser may post forms to (CSP `form-action`). */
   cspFormActions?: string[];
+  /**
+   * Public pages built into the web dist as static files (prerendered marketing pages): `route` is a fastify route
+   * (`/pricing`, `/license/:id`), `file` the file under the web dist. Served to everyone; without the file the app shell.
+   */
+  publicPages?: Array<{
+    route: string;
+    file: string /** List the route in sitemap.xml. */;
+    sitemap?: boolean;
+  }>;
   /** Replaces the default (unlimited) plan-limits provider. */
   planLimits?: PlanLimitsProvider;
   /** Background jobs. */

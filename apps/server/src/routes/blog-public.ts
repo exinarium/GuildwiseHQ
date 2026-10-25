@@ -123,6 +123,8 @@ export function blogPublicRoutes(ctx: Ctx) {
           origin,
           posts,
           (await publishedTags(ctx)).map((t) => t.tag),
+          // pages an extension builds into the web dist and wants indexed (the hosted pricing page)
+          ctx.ext.list.flatMap((e) => (e.publicPages ?? []).filter((pg) => pg.sitemap).map((pg) => pg.route)),
         );
       }),
     );
