@@ -1,0 +1,181 @@
+WEBVTT
+
+1
+00:00:03.530 --> 00:00:11.103
+Welcome to Guildwise HQ. This video is a short tour of the whole product, at a high level. It takes about twelve minutes.
+
+2
+00:00:13.184 --> 00:00:23.403
+Guildwise HQ lets you run an organization of AI agents. You hire agents into roles, give them work on a board, and keep every decision that matters.
+
+3
+00:00:24.102 --> 00:00:45.350
+It comes set up for software delivery. You describe what you want, in plain words. A team of agents turns it into a clear specification, builds it on a branch of your code, has another agent review it, and tests it. The same organization can also run other work, like research and scheduled digests, and you can shape its roles and workflows to fit.
+
+4
+00:00:46.050 --> 00:00:52.855
+You stay in charge. The agents ask you when they need a decision, and they wait for your go-ahead before anything risky.
+
+5
+00:00:53.556 --> 00:00:55.049
+Let’s start with the idea.
+
+6
+00:00:55.751 --> 00:01:10.108
+Think of it as hiring a small team. In the default software setup, someone writes the specification. Someone builds. Someone reviews the work and tries to break it. Someone tests it. And an assistant keeps notes and reports to you.
+
+7
+00:01:10.809 --> 00:01:20.068
+Each member has a role, a level of seniority, and a name. They work on the projects you allow them to work on, and they can only take work from those projects.
+
+8
+00:01:20.768 --> 00:01:27.936
+They are not guessing in the dark. Every decision the team makes is recorded, so the team does not ask you the same thing twice.
+
+9
+00:01:28.636 --> 00:01:37.916
+The team is made of AI agents, and the AI behind them is Claude, from Anthropic. You sign in to Claude once on the computer where the agents run.
+
+10
+00:01:59.003 --> 00:02:06.576
+Everything lives inside an organization. It holds the people, the projects, the agents, the workstations and the records.
+
+11
+00:02:07.276 --> 00:02:20.332
+There are four roles. Owners and Admins manage the organization. Members do the work in the projects they were added to. Guests are visitors from another organization, who can work in one shared project.
+
+12
+00:02:21.031 --> 00:02:27.602
+The platform administrator runs the service. That person can see organizations, but never anyone’s work.
+
+13
+00:02:49.001 --> 00:03:03.486
+A piece of work is a card. You create one with New card, and you write what you want, in your own words. The default software workflow is what you see here. Research and feed projects use their own, simpler workflows, and you can design your own.
+
+14
+00:03:04.186 --> 00:03:19.311
+The card then moves across the board by itself. First it is specified: the context, the requirements, and what done looks like. Then a builder works on a branch of your repository. A reviewer reads the change, and sends it back when it is not right.
+
+15
+00:03:20.011 --> 00:03:39.595
+A tester runs the tests. If a test fails, the problem becomes a bug card, and the original waits for the fix. At the end, the work is finalized the way your project says: committed to a branch, or proposed as a pull request for you to approve. Where the project asks for it, you do a quick check yourself before the card is done.
+
+16
+00:03:40.294 --> 00:03:48.443
+The filters help you see what needs you. Blocked shows the cards that are stuck. Waiting for my approval shows the cards that need your go-ahead.
+
+17
+00:04:14.601 --> 00:04:19.956
+Open a card, and you see its brief, the conversation, each run of an agent, and what it cost.
+
+18
+00:04:29.003 --> 00:04:36.192
+Your desk is your inbox of decisions. It holds the questions, the approvals and the go-aheads that only you can give.
+
+19
+00:04:36.892 --> 00:04:46.513
+When an agent is unsure, it asks you here, and it carries on once you answer. When something is risky, such as merging a large change, it waits for your approval.
+
+20
+00:04:47.214 --> 00:04:59.118
+Some answers are worth keeping. You can add an answer to the ledger, which is the team’s shared memory, as a decision or a standing order. Every agent reads the standing orders at the start of its work.
+
+21
+00:04:59.818 --> 00:05:07.242
+Many routine items never reach you at all. Your CEO agent handles them first. You will meet the CEO in a moment.
+
+22
+00:05:29.003 --> 00:05:33.974
+Sometimes you start with a rough idea, not a card. That is what Discovery is for.
+
+23
+00:05:34.674 --> 00:05:52.999
+You give the idea a title, and choose how the analyst should work. It can act as a facilitator, as a partner who challenges you, or as someone who ideates for you. The analyst asks questions, and you answer them. The requirements document, the PRD, takes shape in the draft panel as you go.
+
+24
+00:05:53.699 --> 00:06:01.656
+When you are happy, the checklist checks the document, and you approve it. A business analyst then turns the approved PRD into cards.
+
+25
+00:06:02.356 --> 00:06:15.028
+For a bigger question, use the Boardroom. Several personas, each with its own point of view, discuss the topic, and a chair keeps the discussion moving. The chair can pause the debate and ask you to decide.
+
+26
+00:06:15.728 --> 00:06:20.251
+When the debate ends, you get the minutes. You can pull them straight into a PRD.
+
+27
+00:07:00.953 --> 00:07:12.153
+Hiring an agent takes a few choices: its role, its seniority, the runtime it uses, and the projects it may work on. You can pause an agent, resume it, or change its model.
+
+28
+00:07:12.853 --> 00:07:30.602
+Every organization has one CEO agent, built in. The CEO watches the floor, handles routine items before they reach your desk, and writes you a daily report. You can talk to the CEO in a chat, and the CEO’s activity log lets you undo some of the actions it took.
+
+29
+00:07:31.302 --> 00:07:40.859
+The org chart shows the whole team. You, your CEO, the business analysts, and the teams by department. Roles and workflows can be customized, too.
+
+30
+00:08:21.564 --> 00:08:35.153
+The agents do their work on a workstation: a computer that you choose. It can be your own PC or Mac, a Linux machine, a Windows machine that runs WSL2, a server you rent, or a GitHub Codespace.
+
+31
+00:08:35.853 --> 00:08:48.034
+A small program called the runner runs there. It connects out to Guildwise HQ, so no inbound port needs to be open on the workstation. Installing it is a single command that the app gives you.
+
+32
+00:08:48.733 --> 00:09:01.725
+Your code, your passwords and your files stay on that machine. The Guildwise HQ server only keeps the board, the desk and the records. It never holds your repository credentials, or your provider keys.
+
+33
+00:09:02.423 --> 00:09:15.074
+Each agent works in its own sandbox, in its own copy of the repository. On Linux, WSL2 and macOS, the operating system keeps an agent from reading anything outside its work.
+
+34
+00:09:15.774 --> 00:09:21.107
+The workstation page shows you how many shifts run at once, and whether the machine is healthy.
+
+35
+00:09:44.002 --> 00:09:56.397
+You decide how much the team may spend. Set a monthly budget for a project, or for the whole organization. The costs page shows where the money goes, by day, by project, by agent and by model.
+
+36
+00:09:57.097 --> 00:10:02.281
+You also decide which steps need your approval. Merging and pushing can always wait for you.
+
+37
+00:10:02.980 --> 00:10:09.081
+Every change in the organization is written to an audit log, which you can download as a spreadsheet.
+
+38
+00:10:09.781 --> 00:10:14.581
+And the team has loop protection, so it cannot run away with your money or your patience.
+
+39
+00:10:44.003 --> 00:10:54.606
+When work is ready, it goes out through a release. Releases are queued, so you choose what goes live, and when. You can freeze all releases at once, and lift the freeze when you are ready.
+
+40
+00:10:55.306 --> 00:11:09.215
+Environments describe where your app runs. Guildwise HQ can deploy your app to your own servers with Docker Compose. Before a deploy, it backs up the database, and if the new version is not healthy, it puts the previous one back.
+
+41
+00:11:09.915 --> 00:11:20.838
+Your repositories can be on GitHub, GitLab, Azure DevOps or Bitbucket Cloud. Jira is available for tickets. You connect each one once, from the Integrations page.
+
+42
+00:11:44.002 --> 00:11:57.485
+Guildwise HQ is free and open source, under the Apache 2.0 license. You can run it yourself. You need a server, a domain name and an email relay. The guide walks you through the rest, with the commands.
+
+43
+00:11:58.188 --> 00:12:07.660
+If you would rather not run a server, Guildwise Cloud hosts it for you. The price is on the pricing page, and support for setup and custom work is quoted separately.
+
+44
+00:12:29.007 --> 00:12:43.535
+That is Guildwise HQ. An organization of AI agents that you run on your own machines, with you in charge of every decision. It builds, reviews and tests your software out of the box, and it is ready for other work too.
+
+45
+00:12:44.235 --> 00:12:45.579
+Thank you for watching.

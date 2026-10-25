@@ -14,30 +14,30 @@
   ],
   "captions": "/videos/organization.vtt",
   "voice": "Kokoro af_heart",
-  "duration": 80.9,
+  "duration": 78.5,
   "chapters": [
     {
-      "t": 8.1,
+      "t": 7.8,
       "title": "General and your role"
     },
     {
-      "t": 17.2,
+      "t": 16.9,
       "title": "Members and inviting"
     },
     {
-      "t": 36.9,
+      "t": 36.6,
       "title": "Invitations"
     },
     {
-      "t": 45.7,
+      "t": 45.3,
       "title": "Guests"
     },
     {
-      "t": 52.7,
+      "t": 52.3,
       "title": "E-mail inbox and project links"
     },
     {
-      "t": 68.6,
+      "t": 68.2,
       "title": "Plan and limits"
     }
   ]

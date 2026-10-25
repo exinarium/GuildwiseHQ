@@ -14,34 +14,26 @@
   ],
   "captions": "/videos/platform-area.vtt",
   "voice": "Kokoro af_heart",
-  "duration": 94.8,
+  "duration": 74.9,
   "chapters": [
     {
-      "t": 11.2,
+      "t": 11,
       "title": "Organizations"
     },
     {
-      "t": 23.7,
+      "t": 23.9,
       "title": "Invitations"
     },
     {
-      "t": 32.7,
+      "t": 32.9,
       "title": "Accounts"
     },
     {
-      "t": 37,
-      "title": "Billing"
-    },
-    {
-      "t": 44.4,
-      "title": "Support and Blog"
-    },
-    {
-      "t": 57,
+      "t": 37.2,
       "title": "Keys, runners, team and mail"
     },
     {
-      "t": 80.4,
+      "t": 60.5,
       "title": "Audit log"
     }
   ]

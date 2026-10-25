@@ -14,14 +14,14 @@
   ],
   "captions": "/videos/settings.vtt",
   "voice": "Kokoro af_heart",
-  "duration": 69.9,
+  "duration": 70,
   "chapters": [
     {
-      "t": 8.1,
+      "t": 8.2,
       "title": "Your picture"
     },
     {
-      "t": 19.4,
+      "t": 19.5,
       "title": "Two-factor login"
     },
     {
@@ -29,7 +29,7 @@
       "title": "Expert mode for code changes"
     },
     {
-      "t": 39.3,
+      "t": 39.4,
       "title": "Briefing, notifications and the blog digest"
     },
     {

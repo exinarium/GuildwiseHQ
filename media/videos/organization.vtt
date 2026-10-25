@@ -1,41 +1,41 @@
 WEBVTT
 
 1
-00:00:00.779 --> 00:00:07.392
+00:00:00.449 --> 00:00:07.062
 Organization is where the Owner and Admins manage who belongs to your organization, and what your plan allows.
 
 2
-00:00:08.100 --> 00:00:16.527
+00:00:07.768 --> 00:00:16.195
 Open Organization in the sidebar. General shows the name of the organization, its Owner, and your role. Here, you are the Owner.
 
 3
-00:00:17.240 --> 00:00:27.395
+00:00:16.898 --> 00:00:27.053
 Members lists everyone with their role. Admins help run the organization; Members work on the projects they are given. As the Owner, you change a role right here.
 
 4
-00:00:28.094 --> 00:00:36.243
+00:00:27.752 --> 00:00:35.901
 To add someone, choose Invite member. Enter their email, pick the role and the projects they start on, then choose Send invitation.
 
 5
-00:00:36.962 --> 00:00:44.983
+00:00:36.609 --> 00:00:44.630
 Invitations shows who was invited and whether they joined. Resend sends the email again. Revoke makes the link in it stop working.
 
 6
-00:00:45.694 --> 00:00:51.966
+00:00:45.333 --> 00:00:51.605
 Guests belong to another organization and work on one of your projects. They do not count against your limits.
 
 7
-00:00:52.672 --> 00:01:01.739
+00:00:52.306 --> 00:01:01.373
 E-mail inbox gives your organization addresses whose mail can become draft cards, once your platform administrator has connected a mail provider.
 
 8
-00:01:02.438 --> 00:01:07.857
+00:01:02.073 --> 00:01:07.492
 Project links record how your projects depend on each other, or on something outside Guildwise.
 
 9
-00:01:08.570 --> 00:01:14.458
-Plan and limits shows your plan, what you use, and the limits that apply. The Owner also sees Billing.
+00:01:08.199 --> 00:01:12.060
+Plan and limits shows your plan, what you use, and the limits that apply.
 
 10
-00:01:15.157 --> 00:01:20.170
+00:01:12.760 --> 00:01:17.773
 That is Organization: who is in, what each person may do, and what your plan allows.

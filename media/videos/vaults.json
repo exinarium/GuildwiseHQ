@@ -14,22 +14,22 @@
   ],
   "captions": "/videos/vaults.vtt",
   "voice": "Kokoro af_heart",
-  "duration": 70.4,
+  "duration": 70.2,
   "chapters": [
     {
-      "t": 11.3,
+      "t": 11.1,
       "title": "Open Vaults"
     },
     {
-      "t": 21,
+      "t": 20.8,
       "title": "Register a vault"
     },
     {
-      "t": 42,
+      "t": 41.8,
       "title": "The vault card and Edit"
     },
     {
-      "t": 54,
+      "t": 53.8,
       "title": "A paused sync"
     }
   ]

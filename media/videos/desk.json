@@ -14,30 +14,30 @@
   ],
   "captions": "/videos/desk.vtt",
   "voice": "Kokoro af_heart",
-  "duration": 95,
+  "duration": 94,
   "chapters": [
     {
-      "t": 8.8,
+      "t": 8.3,
       "title": "Open the desk"
     },
     {
-      "t": 22.9,
+      "t": 22.3,
       "title": "Filters"
     },
     {
-      "t": 33.6,
+      "t": 32.6,
       "title": "Answer a question"
     },
     {
-      "t": 49.3,
+      "t": 48.4,
       "title": "Accept a recommendation"
     },
     {
-      "t": 61.1,
+      "t": 60.1,
       "title": "What the CEO handled"
     },
     {
-      "t": 78.3,
+      "t": 77.3,
       "title": "The daily report"
     }
   ]

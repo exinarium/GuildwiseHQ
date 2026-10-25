@@ -1,69 +1,69 @@
 WEBVTT
 
 1
-00:00:00.630 --> 00:00:08.267
+00:00:00.694 --> 00:00:08.331
 Welcome to Guildwise HQ. In under three minutes, you go from an empty organization to a team of AI agents at work.
 
 2
-00:00:08.974 --> 00:00:22.030
+00:00:09.035 --> 00:00:22.091
 A new organization shows Get started in the sidebar. It lists what is left: a project, its repository, a workstation, your team, and a first talk with the business analyst. Each step ticks itself off.
 
 3
-00:00:22.733 --> 00:00:29.090
+00:00:22.795 --> 00:00:29.152
 A workstation is the computer that runs your agents. Open Workstations, and choose Add a workstation.
 
 4
-00:00:29.790 --> 00:00:39.326
+00:00:29.853 --> 00:00:39.389
 The guide asks where your agents run, gives you one command to copy, and shows the progress live. Here, Alex's laptop is already paired and online.
 
 5
-00:00:40.031 --> 00:00:47.562
+00:00:40.091 --> 00:00:47.622
 Next, open Projects and choose New project. Give it a name and a short key. The key goes in front of every card number.
 
 6
-00:00:48.261 --> 00:00:52.378
+00:00:48.321 --> 00:00:52.438
 Then, in the project settings, add the repository where the code lives.
 
 7
-00:00:53.080 --> 00:01:01.165
+00:00:53.141 --> 00:01:01.226
 Now hire your team. On Agents, choose Hire agent, pick a role, and keep this project selected under Where may this agent work.
 
 8
-00:01:01.865 --> 00:01:09.268
+00:01:01.926 --> 00:01:09.329
 A lean team has seven roles: a business analyst, a planner, an architect, a builder, a pre-reviewer, a reviewer and a tester.
 
 9
-00:01:12.609 --> 00:01:17.942
+00:01:12.073 --> 00:01:17.406
 Together they plan, design, build and check every change before it reaches your main code.
 
 10
-00:01:23.905 --> 00:01:32.396
+00:01:22.622 --> 00:01:31.113
 To ask for work, use New card at the top of the sidebar. Give it a title, say what you need and how you will know it is done, then choose Specify.
 
 11
-00:01:33.100 --> 00:01:38.881
+00:01:31.813 --> 00:01:37.594
 You can also just talk to your business analyst. Open the chat, pick Bea, and ask in plain words.
 
 12
-00:01:41.308 --> 00:01:45.127
+00:01:39.668 --> 00:01:43.487
 She answers like a colleague, and can turn the conversation into cards.
 
 13
-00:01:47.396 --> 00:01:52.644
+00:01:45.713 --> 00:01:50.961
 When an agent needs a decision, it lands on the Desk, and the number in the sidebar tells you.
 
 14
-00:01:53.345 --> 00:01:57.526
+00:01:51.660 --> 00:01:55.841
 Pick an option and choose Answer. The count drops, and the agent carries on.
 
 15
-00:01:58.234 --> 00:02:05.722
+00:01:56.545 --> 00:02:04.033
 On the Board, the card moves from column to column by itself, as the agents plan, design, build, review and test.
 
 16
-00:02:09.433 --> 00:02:16.622
+00:02:07.736 --> 00:02:14.925
 Help is at the bottom of the sidebar, with the articles, the glossary and the guided tour. And Ctrl K jumps anywhere.
 
 17
-00:02:17.470 --> 00:02:21.417
+00:02:15.646 --> 00:02:19.593
 That is all it takes. Thank you for watching, and enjoy your new team.

@@ -1,49 +1,49 @@
 WEBVTT
 
 1
-00:00:00.749 --> 00:00:12.546
+00:00:00.728 --> 00:00:12.525
 Governance is how you stay in charge of agents that act on their own: you approve from a notification, you see exactly what an agent may do, you export the audit trail, and you offboard people cleanly.
 
 2
-00:00:13.252 --> 00:00:22.703
+00:00:13.230 --> 00:00:22.681
 When an approval is waiting for you, the push notification carries Approve and Reject buttons. A question with options shows its first two options instead.
 
 3
-00:00:23.402 --> 00:00:33.642
+00:00:23.380 --> 00:00:33.620
 A button opens a small page that asks you to sign in, shows what you are deciding, and waits. Opening the link changes nothing. Only your own press of the button does.
 
 4
-00:00:34.342 --> 00:00:39.547
+00:00:34.320 --> 00:00:39.525
 The link works once, for fifteen minutes, and only for you. Every use is on the audit log.
 
 5
-00:00:40.253 --> 00:00:49.981
+00:00:40.241 --> 00:00:49.969
 On Agents, click What it may do on an agent's card. One view shows its tools, the repositories and projects it can reach, its provider and which key pays.
 
 6
-00:00:50.681 --> 00:01:01.049
+00:00:50.670 --> 00:01:01.038
 It also shows who the agent may delegate to, including what its role gives it and any exclusions, its playbooks, skills and packs, and what it has cost against its budgets.
 
 7
-00:01:01.750 --> 00:01:12.481
+00:01:01.738 --> 00:01:12.469
 Under Approval gates, switch on Ask me before, for example merge and push. That action then pauses and lands on your Desk as an approval. Outbound mail always asks.
 
 8
-00:01:13.183 --> 00:01:24.447
+00:01:13.174 --> 00:01:24.438
 Owners and Admins open Organization, then Audit log. Pick a date range of up to a year, optionally one person, and a format, CSV or JSON, and click Download.
 
 9
-00:01:25.148 --> 00:01:32.871
+00:01:25.138 --> 00:01:32.861
 It lists what people did, not message text, and anything that looks like a secret is masked. The export itself is recorded too.
 
 10
-00:01:33.576 --> 00:01:42.067
+00:01:33.570 --> 00:01:42.061
 To remove someone, open Members and choose Remove from organization. The dialog lists the offboarding checklist before anything happens.
 
 11
-00:01:42.766 --> 00:01:53.219
+00:01:42.760 --> 00:01:53.213
 Their agents and sessions move to you, their sign-in is ended, and the organization's packs and keys come off their workstations. A report afterwards shows what each step did.
 
 12
-00:01:53.919 --> 00:01:58.954
+00:01:53.914 --> 00:01:58.949
 Approvals, grants, audit and offboarding: each one leaves a record you can read later.
