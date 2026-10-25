@@ -13,31 +13,31 @@
     }
   ],
   "captions": "/videos/organization.vtt",
-  "voice": "Piper en_GB-cori-high",
-  "duration": 85.1,
+  "voice": "Kokoro af_heart",
+  "duration": 80.9,
   "chapters": [
     {
-      "t": 8.3,
+      "t": 8.1,
       "title": "General and your role"
     },
     {
-      "t": 17.9,
+      "t": 17.2,
       "title": "Members and inviting"
     },
     {
-      "t": 38,
+      "t": 36.9,
       "title": "Invitations"
     },
     {
-      "t": 47.6,
+      "t": 45.7,
       "title": "Guests"
     },
     {
-      "t": 54.9,
+      "t": 52.7,
       "title": "E-mail inbox and project links"
     },
     {
-      "t": 71,
+      "t": 68.6,
       "title": "Plan and limits"
     }
   ]

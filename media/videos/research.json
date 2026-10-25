@@ -13,19 +13,19 @@
     }
   ],
   "captions": "/videos/research.vtt",
-  "voice": "Piper en_GB-cori-high",
-  "duration": 64.2,
+  "voice": "Kokoro af_heart",
+  "duration": 63.2,
   "chapters": [
     {
-      "t": 11.3,
+      "t": 11.4,
       "title": "Ask a question"
     },
     {
-      "t": 31,
+      "t": 32,
       "title": "In progress"
     },
     {
-      "t": 40.9,
+      "t": 41.3,
       "title": "Published notes"
     }
   ]

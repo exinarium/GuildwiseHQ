@@ -13,11 +13,11 @@
     }
   ],
   "captions": "/videos/vaults.vtt",
-  "voice": "Piper en_GB-cori-high",
-  "duration": 70.3,
+  "voice": "Kokoro af_heart",
+  "duration": 70.4,
   "chapters": [
     {
-      "t": 11.1,
+      "t": 11.3,
       "title": "Open Vaults"
     },
     {
@@ -25,7 +25,7 @@
       "title": "Register a vault"
     },
     {
-      "t": 41.7,
+      "t": 42,
       "title": "The vault card and Edit"
     },
     {

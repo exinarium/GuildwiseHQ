@@ -13,15 +13,15 @@
     }
   ],
   "captions": "/videos/board.vtt",
-  "voice": "Piper en_GB-cori-high",
-  "duration": 95.3,
+  "voice": "Kokoro af_heart",
+  "duration": 93.2,
   "chapters": [
     {
-      "t": 8.4,
+      "t": 8.5,
       "title": "Read the board"
     },
     {
-      "t": 24.1,
+      "t": 24,
       "title": "Filter what needs you"
     },
     {
@@ -29,7 +29,7 @@
       "title": "Open a card"
     },
     {
-      "t": 65.3,
+      "t": 63.9,
       "title": "New card, pause and archive"
     }
   ]

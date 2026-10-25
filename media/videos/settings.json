@@ -13,27 +13,27 @@
     }
   ],
   "captions": "/videos/settings.vtt",
-  "voice": "Piper en_GB-cori-high",
-  "duration": 74.2,
+  "voice": "Kokoro af_heart",
+  "duration": 69.9,
   "chapters": [
     {
-      "t": 9.2,
+      "t": 8.1,
       "title": "Your picture"
     },
     {
-      "t": 20.9,
+      "t": 19.4,
       "title": "Two-factor login"
     },
     {
-      "t": 28.9,
+      "t": 27.2,
       "title": "Expert mode for code changes"
     },
     {
-      "t": 41.8,
+      "t": 39.3,
       "title": "Briefing, notifications and the blog digest"
     },
     {
-      "t": 60.9,
+      "t": 57.9,
       "title": "Your time zone"
     }
   ]

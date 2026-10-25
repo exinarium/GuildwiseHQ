@@ -13,23 +13,23 @@
     }
   ],
   "captions": "/videos/ledger.vtt",
-  "voice": "Piper en_GB-cori-high",
-  "duration": 78.9,
+  "voice": "Kokoro af_heart",
+  "duration": 73.6,
   "chapters": [
     {
-      "t": 10.3,
+      "t": 9.5,
       "title": "Search and filter"
     },
     {
-      "t": 24.1,
+      "t": 22.3,
       "title": "Add a standing order"
     },
     {
-      "t": 46.5,
+      "t": 43.8,
       "title": "Edit and history"
     },
     {
-      "t": 58.8,
+      "t": 55,
       "title": "Retire an entry"
     }
   ]

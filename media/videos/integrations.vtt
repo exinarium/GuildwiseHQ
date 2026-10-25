@@ -1,41 +1,41 @@
 WEBVTT
 
 1
-00:00:00.384 --> 00:00:12.689
+00:00:00.624 --> 00:00:12.080
 Integrations are the logins and tokens a workstation uses: Claude Code, your git hosts, Jira and MCP servers. They are stored on the workstation itself, never on our server.
 
 2
-00:00:13.394 --> 00:00:22.783
+00:00:12.790 --> 00:00:21.302
 Open Integrations in the sidebar. With more than one workstation, you first choose which one. A badge says when something there needs attention.
 
 3
-00:00:23.486 --> 00:00:34.163
+00:00:22.014 --> 00:00:32.019
 Each Claude Code account has its own tile. The main account is the one Claude Code itself is signed in with. A second account, here called work, spreads the usage.
 
 4
-00:00:34.863 --> 00:00:43.847
+00:00:32.719 --> 00:00:41.210
 A tile shows the account, how it signed in and when it was last checked. Test checks the login again, and Remove deletes it from the workstation.
 
 5
-00:00:44.548 --> 00:00:53.542
+00:00:41.909 --> 00:00:48.970
 To add one, choose Connect another account. Name it, pick how you want to connect, and Start sign-in. We will cancel here.
 
 6
-00:00:54.246 --> 00:01:03.195
+00:00:49.769 --> 00:00:57.982
 Git hosts let the agents push branches and open pull requests. The GitHub tile shows the account and the scopes its token has.
 
 7
-00:01:03.896 --> 00:01:10.003
+00:00:58.682 --> 00:01:04.250
 The Jira tile connects your tracker, so agents can read the tickets and attachments behind a card.
 
 8
-00:01:10.705 --> 00:01:19.295
+00:01:04.953 --> 00:01:12.953
 MCP servers come with Claude Code plugins. A server that needs a sign-in shows Sign in, which starts the sign-in in your browser.
 
 9
-00:01:19.995 --> 00:01:27.830
+00:01:13.653 --> 00:01:20.608
 A server you are signed in to shows Sign out. It asks first, because the sign-in is shared by every pairing on that machine.
 
 10
-00:01:28.530 --> 00:01:35.659
+00:01:21.307 --> 00:01:27.835
 That is the Integrations page: every login of a workstation in one place, tested and changed from here.

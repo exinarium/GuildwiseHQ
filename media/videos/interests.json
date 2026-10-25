@@ -13,27 +13,27 @@
     }
   ],
   "captions": "/videos/interests.vtt",
-  "voice": "Piper en_GB-cori-high",
-  "duration": 99.4,
+  "voice": "Kokoro af_heart",
+  "duration": 89.4,
   "chapters": [
     {
-      "t": 10.6,
+      "t": 9.7,
       "title": "Open Interests"
     },
     {
-      "t": 20.4,
+      "t": 17.9,
       "title": "A new interest and its schedules"
     },
     {
-      "t": 46.1,
+      "t": 41.4,
       "title": "Taste rules and the quiet cap"
     },
     {
-      "t": 62.2,
+      "t": 56.5,
       "title": "Deliver now"
     },
     {
-      "t": 76.3,
+      "t": 68.9,
       "title": "Archive and restore"
     }
   ]

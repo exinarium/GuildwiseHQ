@@ -13,19 +13,19 @@
     }
   ],
   "captions": "/videos/backlog.vtt",
-  "voice": "Piper en_GB-cori-high",
-  "duration": 60.9,
+  "voice": "Kokoro af_heart",
+  "duration": 62.9,
   "chapters": [
     {
-      "t": 8.7,
+      "t": 8.8,
       "title": "Open the backlog and add ideas"
     },
     {
-      "t": 21.1,
+      "t": 19.7,
       "title": "Flag, sort and drop"
     },
     {
-      "t": 45.1,
+      "t": 42.6,
       "title": "Send it to the BA"
     }
   ]

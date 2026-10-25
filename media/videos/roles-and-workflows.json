@@ -13,27 +13,27 @@
     }
   ],
   "captions": "/videos/roles-and-workflows.vtt",
-  "voice": "Piper en_GB-cori-high",
-  "duration": 82.9,
+  "voice": "Kokoro af_heart",
+  "duration": 77.5,
   "chapters": [
     {
       "t": 8,
       "title": "Roles"
     },
     {
-      "t": 24.5,
+      "t": 23.5,
       "title": "Workflows"
     },
     {
-      "t": 37.5,
+      "t": 35.4,
       "title": "The workflow builder"
     },
     {
-      "t": 59.8,
+      "t": 55.6,
       "title": "Departments"
     },
     {
-      "t": 67.2,
+      "t": 62.4,
       "title": "Design with the BA"
     }
   ]

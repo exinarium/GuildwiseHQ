@@ -1,53 +1,53 @@
 WEBVTT
 
 1
-00:00:00.383 --> 00:00:10.250
+00:00:00.726 --> 00:00:10.518
 The platform area is for the people who run Guildwise HQ itself. A platform administrator signs in with two-factor login and sees this separate menu.
 
 2
-00:00:10.953 --> 00:00:17.975
+00:00:11.226 --> 00:00:17.178
 Organizations lists every customer, with its plan and status. You see metadata, never their work.
 
 3
-00:00:18.678 --> 00:00:25.017
+00:00:17.880 --> 00:00:23.021
 Open one for its overview, its plan, limits and features, and its recent activity.
 
 4
-00:00:25.720 --> 00:00:33.975
+00:00:23.727 --> 00:00:32.004
 Invitations starts a new organization: enter the owner’s email and the organization name, and they become its Owner when they accept.
 
 5
-00:00:34.682 --> 00:00:39.291
+00:00:32.709 --> 00:00:36.293
 Accounts lists everyone with an account, in every organization.
 
 6
-00:00:39.995 --> 00:00:48.087
+00:00:37.000 --> 00:00:43.656
 Billing holds the payment provider, the plans and their prices, the add-ons, VAT and the invoice details.
 
 7
-00:00:48.792 --> 00:00:56.604
+00:00:44.361 --> 00:00:51.998
 Support is the inbox of every Contact us request. Your reply is emailed, and shows under the person’s My requests.
 
 8
-00:00:57.306 --> 00:01:00.661
+00:00:52.698 --> 00:00:56.346
 Blog is where new posts wait for your review before they are published.
 
 9
-00:01:01.366 --> 00:01:08.028
+00:00:57.049 --> 00:01:02.596
 API keys are for the agent API. A key is stored hashed, and shown only once.
 
 10
-00:01:08.731 --> 00:01:15.022
+00:01:03.296 --> 00:01:09.504
 Runners shows the runner version this server offers. Workstations check once a day and update themselves.
 
 11
-00:01:15.722 --> 00:01:24.915
+00:01:10.206 --> 00:01:19.699
 Platform team names the organization that fixes Guildwise itself. And Inbound mail sets up the provider for the mail that organizations receive.
 
 12
-00:01:25.619 --> 00:01:31.575
+00:01:20.402 --> 00:01:25.671
 Finally, the Audit log records every platform administrator action, and is kept forever.
 
 13
-00:01:32.277 --> 00:01:39.742
+00:01:26.373 --> 00:01:34.117
 That is the platform area: customers, money, support and the running system, kept apart from the work of each organization.

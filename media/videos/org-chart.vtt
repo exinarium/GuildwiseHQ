@@ -1,33 +1,33 @@
 WEBVTT
 
 1
-00:00:00.385 --> 00:00:07.119
+00:00:00.751 --> 00:00:06.596
 The org chart shows who is on the floor, whom each agent reports to, and who answers its questions.
 
 2
-00:00:07.831 --> 00:00:17.558
+00:00:07.304 --> 00:00:16.733
 Open Org chart in the sidebar. You are at the top as the manager, with your CEO and your business analyst below you, and the teams grouped by department.
 
 3
-00:00:18.258 --> 00:00:31.166
+00:00:17.433 --> 00:00:30.596
 Each tile says in words what the agent is doing, and where it runs. The legend under the chart shows how a question climbs: to a senior of the same role, then the BA, then the CEO, and last to you, on the desk.
 
 4
-00:00:31.868 --> 00:00:40.982
+00:00:31.296 --> 00:00:40.192
 Click an agent for its details: the projects it works on, whom it reports to and escalates to, its workstation, its spend and its recent work.
 
 5
-00:00:41.684 --> 00:00:48.079
+00:00:40.897 --> 00:00:46.764
 Allowed on project shows who may work one project. Agents allowed on any project always show.
 
 6
-00:00:48.780 --> 00:00:53.285
+00:00:47.463 --> 00:00:51.602
 The View switch turns the chart into a list, grouped by department, and back.
 
 7
-00:00:53.986 --> 00:01:02.854
+00:00:52.564 --> 00:01:01.780
 Below the chart, Workstations and DevOps lists every machine with its own DevOps engineer. It looks after that machine and reports to your desk.
 
 8
-00:01:03.555 --> 00:01:06.678
+00:01:02.481 --> 00:01:05.404
 That is the org chart: your whole team on one page.

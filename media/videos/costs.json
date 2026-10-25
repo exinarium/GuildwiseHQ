@@ -13,23 +13,23 @@
     }
   ],
   "captions": "/videos/costs.vtt",
-  "voice": "Piper en_GB-cori-high",
-  "duration": 72.5,
+  "voice": "Kokoro af_heart",
+  "duration": 69.4,
   "chapters": [
     {
-      "t": 8.7,
+      "t": 7.8,
       "title": "Range and total spend"
     },
     {
-      "t": 26.3,
+      "t": 23.9,
       "title": "By project, agent and model"
     },
     {
-      "t": 45.7,
+      "t": 42.4,
       "title": "What the agents delivered"
     },
     {
-      "t": 55.9,
+      "t": 52.4,
       "title": "Export and currency"
     }
   ]

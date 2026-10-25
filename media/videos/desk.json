@@ -13,31 +13,31 @@
     }
   ],
   "captions": "/videos/desk.vtt",
-  "voice": "Piper en_GB-cori-high",
-  "duration": 99.9,
+  "voice": "Kokoro af_heart",
+  "duration": 95,
   "chapters": [
     {
-      "t": 9.2,
+      "t": 8.8,
       "title": "Open the desk"
     },
     {
-      "t": 23.6,
+      "t": 22.9,
       "title": "Filters"
     },
     {
-      "t": 34.5,
+      "t": 33.6,
       "title": "Answer a question"
     },
     {
-      "t": 52.3,
+      "t": 49.3,
       "title": "Accept a recommendation"
     },
     {
-      "t": 65.6,
+      "t": 61.1,
       "title": "What the CEO handled"
     },
     {
-      "t": 82.7,
+      "t": 78.3,
       "title": "The daily report"
     }
   ]

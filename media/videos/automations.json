@@ -13,23 +13,23 @@
     }
   ],
   "captions": "/videos/automations.vtt",
-  "voice": "Piper en_GB-cori-high",
-  "duration": 75,
+  "voice": "Kokoro af_heart",
+  "duration": 68.8,
   "chapters": [
     {
-      "t": 8.2,
+      "t": 7.1,
       "title": "Your automations"
     },
     {
-      "t": 17.9,
+      "t": 15.4,
       "title": "New automation: When"
     },
     {
-      "t": 34.1,
+      "t": 31.5,
       "title": "What and Details"
     },
     {
-      "t": 50.7,
+      "t": 47,
       "title": "Run now, History and Pause"
     }
   ]

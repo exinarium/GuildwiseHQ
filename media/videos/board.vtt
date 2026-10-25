@@ -1,49 +1,49 @@
 WEBVTT
 
 1
-00:00:00.421 --> 00:00:07.675
+00:00:00.696 --> 00:00:07.843
 The board shows every card of a project, in the stages of its workflow. Cards move by themselves as your agents work.
 
 2
-00:00:08.379 --> 00:00:15.239
+00:00:08.550 --> 00:00:15.121
 Open Board in the sidebar. Each column is a stage of the workflow, from Spec on the left to Done on the right.
 
 3
-00:00:15.938 --> 00:00:23.378
+00:00:15.820 --> 00:00:23.265
 The header counts the open and blocked cards and shows what the project spent this month. Each card shows what it has cost so far.
 
 4
-00:00:24.081 --> 00:00:29.327
+00:00:23.968 --> 00:00:29.173
 The chips narrow the board. Blocked shows only the cards that wait for your answer at the desk.
 
 5
-00:00:30.026 --> 00:00:36.909
+00:00:29.872 --> 00:00:37.104
 Waiting for my approval shows the cards you must approve. Waiting for my QA shows the ones you test before they are done.
 
 6
-00:00:39.277 --> 00:00:45.672
+00:00:39.265 --> 00:00:45.814
 Click a card to open it. This one is blocked: its builder asked a question, and the card waits for your answer.
 
 7
-00:00:46.373 --> 00:00:54.498
+00:00:46.514 --> 00:00:53.810
 The brief says what to build: context, requirements and acceptance criteria. The details show its stage and risk.
 
 8
-00:00:55.198 --> 00:01:04.579
+00:00:54.509 --> 00:01:03.170
 Further down, the thread holds the conversation, with the question itself, and the handoffs record every shift: which agent did it, and the outcome.
 
 9
-00:01:05.281 --> 00:01:11.270
+00:01:03.874 --> 00:01:10.338
 New card opens the form: a title, the repository and the brief. Cancel takes you back to the board.
 
 10
-00:01:12.467 --> 00:01:19.837
+00:01:11.225 --> 00:01:17.881
 Pause project stops new work from starting. Running shifts finish, and Resume project picks up where it left off.
 
 11
-00:01:21.020 --> 00:01:27.671
+00:01:20.276 --> 00:01:26.527
 Finished cards leave the board a day later. Archive lists them, and you can open or reopen any of them.
 
 12
-00:01:28.370 --> 00:01:34.591
+00:01:27.225 --> 00:01:32.516
 That is the board. Check the chips each day, and open a card whenever you want the full story.

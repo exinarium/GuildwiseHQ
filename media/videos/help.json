@@ -13,23 +13,23 @@
     }
   ],
   "captions": "/videos/help.vtt",
-  "voice": "Piper en_GB-cori-high",
-  "duration": 73.9,
+  "voice": "Kokoro af_heart",
+  "duration": 66.6,
   "chapters": [
     {
-      "t": 9.7,
+      "t": 7.6,
       "title": "Search the articles"
     },
     {
-      "t": 23.7,
+      "t": 20.2,
       "title": "Glossary, what’s new and the blog"
     },
     {
-      "t": 41.5,
+      "t": 37.5,
       "title": "Contact us and My requests"
     },
     {
-      "t": 56.8,
+      "t": 50.8,
       "title": "Page help and the tour"
     }
   ]

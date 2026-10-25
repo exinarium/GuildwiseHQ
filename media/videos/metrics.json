@@ -13,23 +13,23 @@
     }
   ],
   "captions": "/videos/metrics.vtt",
-  "voice": "Piper en_GB-cori-high",
-  "duration": 64.9,
+  "voice": "Kokoro af_heart",
+  "duration": 62.7,
   "chapters": [
     {
-      "t": 6.8,
+      "t": 5.9,
       "title": "Range and project"
     },
     {
-      "t": 17.1,
+      "t": 15.4,
       "title": "Throughput and time blocked"
     },
     {
-      "t": 29.5,
+      "t": 27.4,
       "title": "Bounce rate and bugs"
     },
     {
-      "t": 43.2,
+      "t": 41.6,
       "title": "Duration and queues"
     }
   ]

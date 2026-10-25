@@ -13,19 +13,19 @@
     }
   ],
   "captions": "/videos/org-chart.vtt",
-  "voice": "Piper en_GB-cori-high",
-  "duration": 67.4,
+  "voice": "Kokoro af_heart",
+  "duration": 66.1,
   "chapters": [
     {
-      "t": 7.8,
+      "t": 7.3,
       "title": "Who reports to whom"
     },
     {
-      "t": 41.7,
+      "t": 40.9,
       "title": "Filter and switch views"
     },
     {
-      "t": 54,
+      "t": 52.6,
       "title": "Workstations and DevOps"
     }
   ]

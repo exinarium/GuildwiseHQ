@@ -13,27 +13,27 @@
     }
   ],
   "captions": "/videos/environments.vtt",
-  "voice": "Piper en_GB-cori-high",
-  "duration": 106.2,
+  "voice": "Kokoro af_heart",
+  "duration": 99.8,
   "chapters": [
     {
       "t": 9.2,
       "title": "Your app: how to start it"
     },
     {
-      "t": 29.1,
+      "t": 28.6,
       "title": "The test site and the live site"
     },
     {
-      "t": 52.6,
+      "t": 49.2,
       "title": "Places"
     },
     {
-      "t": 70.1,
+      "t": 64.9,
       "title": "Add an environment"
     },
     {
-      "t": 88.2,
+      "t": 82.8,
       "title": "Pause releases"
     }
   ]

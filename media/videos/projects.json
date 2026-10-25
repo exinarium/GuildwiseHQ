@@ -13,23 +13,23 @@
     }
   ],
   "captions": "/videos/projects.vtt",
-  "voice": "Piper en_GB-cori-high",
-  "duration": 72,
+  "voice": "Kokoro af_heart",
+  "duration": 69.3,
   "chapters": [
     {
-      "t": 6.3,
+      "t": 6.6,
       "title": "A new project"
     },
     {
-      "t": 18.9,
+      "t": 17.7,
       "title": "The priority order"
     },
     {
-      "t": 29.5,
+      "t": 28,
       "title": "Project settings"
     },
     {
-      "t": 45.9,
+      "t": 44.1,
       "title": "Budget and team"
     }
   ]

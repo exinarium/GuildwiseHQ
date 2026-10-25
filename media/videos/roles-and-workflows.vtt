@@ -1,45 +1,45 @@
 WEBVTT
 
 1
-00:00:00.408 --> 00:00:07.258
+00:00:00.721 --> 00:00:07.270
 Roles and workflows define how your organization works: who may do which step, and the steps a card goes through.
 
 2
-00:00:07.962 --> 00:00:14.334
+00:00:07.976 --> 00:00:14.184
 Open Roles and workflows in the sidebar. The Roles tab lists your custom roles and the built-in ones.
 
 3
-00:00:15.034 --> 00:00:23.798
+00:00:14.885 --> 00:00:22.778
 Built-in roles ship with the app. You can extend them with extra instructions, skills and standing orders, but their core rules stay.
 
 4
-00:00:24.500 --> 00:00:32.265
+00:00:23.482 --> 00:00:30.479
 The Workflows tab lists every workflow with its versions. View shows the Code workflow as a diagram, step by step.
 
 5
-00:00:32.964 --> 00:00:36.807
+00:00:31.179 --> 00:00:34.635
 Compare with previous lists what changed from the version before.
 
 6
-00:00:37.513 --> 00:00:43.444
+00:00:35.359 --> 00:00:40.778
 A custom workflow is edited in the builder. New version opens it on a copy of the current one.
 
 7
-00:00:44.143 --> 00:00:54.219
+00:00:41.478 --> 00:00:50.694
 Add a step, name it, and choose who does it. Save draft keeps it as a draft; nothing changes until you send it for approval and approve it on the desk.
 
 8
-00:00:54.917 --> 00:00:59.097
+00:00:51.394 --> 00:00:54.935
 Back in the list, the new draft compares against the active version.
 
 9
-00:00:59.799 --> 00:01:06.496
+00:00:55.638 --> 00:01:01.697
 A department groups the roles and workflows of one function. Type a name and choose Create department.
 
 10
-00:01:07.199 --> 00:01:16.009
+00:01:02.414 --> 00:01:11.118
 In Design with the BA, start a design chat and describe the role or workflow you need. The BA drafts it and puts it on your desk for approval.
 
 11
-00:01:16.709 --> 00:01:22.247
+00:01:11.818 --> 00:01:16.831
 That is Roles and workflows: shape how your team works, one approved version at a time.

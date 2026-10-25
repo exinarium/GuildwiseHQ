@@ -13,23 +13,23 @@
     }
   ],
   "captions": "/videos/workstations.vtt",
-  "voice": "Piper en_GB-cori-high",
-  "duration": 90.7,
+  "voice": "Kokoro af_heart",
+  "duration": 85.2,
   "chapters": [
     {
-      "t": 7.8,
+      "t": 8.1,
       "title": "Add a workstation"
     },
     {
-      "t": 41.2,
+      "t": 38.2,
       "title": "Pair with a code"
     },
     {
-      "t": 50.9,
+      "t": 47.1,
       "title": "The workstation card"
     },
     {
-      "t": 74.9,
+      "t": 70.5,
       "title": "Check for updates"
     }
   ]

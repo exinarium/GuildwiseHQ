@@ -1,45 +1,45 @@
 WEBVTT
 
 1
-00:00:00.481 --> 00:00:09.651
+00:00:00.735 --> 00:00:09.567
 The Agents page is your team. Every agent has a card with its role, model, current work and how it performs against the others in its role.
 
 2
-00:00:10.356 --> 00:00:13.746
+00:00:10.277 --> 00:00:13.477
 Open Agents in the sidebar, then choose Hire agent.
 
 3
-00:00:14.446 --> 00:00:21.085
+00:00:14.176 --> 00:00:20.299
 Pick the role and the seniority. The runtime and the effort come from the role, and you can change them here.
 
 4
-00:00:21.785 --> 00:00:29.885
+00:00:21.001 --> 00:00:28.446
 Under Where may this agent work, tick the projects it is allowed on. Give it a name, and Hire. It appears on the page at once.
 
 5
-00:00:30.619 --> 00:00:37.722
+00:00:29.164 --> 00:00:35.351
 Pause stops an agent from taking new work; a running shift still finishes. Resume puts it back to work.
 
 6
-00:00:38.425 --> 00:00:47.444
+00:00:36.050 --> 00:00:43.901
 Change model switches an agent to another model or effort. It applies from its next shift, and the agent keeps its name and history.
 
 7
-00:00:48.216 --> 00:00:55.470
+00:00:44.649 --> 00:00:52.777
 Recommendations are rule-based suggestions with their evidence. Here two builders have been idle for ten days while the queue is empty.
 
 8
-00:00:56.177 --> 00:01:00.902
+00:00:53.477 --> 00:00:58.192
 Apply one with its button: Fire retires Cleo, and the card says what was done.
 
 9
-00:01:01.602 --> 00:01:10.317
+00:00:58.894 --> 00:01:07.235
 Dismiss the other if you disagree. It will not be suggested again for thirty days. With several open, Dismiss all clears them in one go.
 
 10
-00:01:11.022 --> 00:01:18.301
+00:01:07.942 --> 00:01:14.875
 The Project filter shows only the agents allowed on one project, and the Department filter does the same for a department.
 
 11
-00:01:19.012 --> 00:01:25.326
+00:01:15.575 --> 00:01:20.951
 That is the Agents page. Hire the team you need, and keep it tuned with the recommendations.

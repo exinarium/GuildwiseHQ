@@ -1,37 +1,37 @@
 WEBVTT
 
 1
-00:00:00.459 --> 00:00:07.980
+00:00:00.590 --> 00:00:08.078
 The backlog is where wanted work waits before it becomes a card. Nothing here is worked on until you send it to your business analyst.
 
 2
-00:00:08.686 --> 00:00:13.282
+00:00:08.787 --> 00:00:12.691
 Open Backlog in the sidebar. Each project keeps its own list.
 
 3
-00:00:13.980 --> 00:00:20.398
+00:00:13.392 --> 00:00:19.045
 To add an idea, type a title and press Enter. It lands at the top, with normal priority.
 
 4
-00:00:21.100 --> 00:00:23.631
+00:00:19.749 --> 00:00:22.010
 Click the star to flag what matters most.
 
 5
-00:00:24.330 --> 00:00:27.221
+00:00:22.709 --> 00:00:25.077
 Sort by Newest to see what was added last.
 
 6
-00:00:27.920 --> 00:00:36.627
+00:00:25.776 --> 00:00:34.523
 The search box finds an item by its title, its description or a tag, and the filters narrow the list by priority or by who suggested it.
 
 7
-00:00:37.327 --> 00:00:44.384
+00:00:35.222 --> 00:00:41.942
 An idea that is no longer wanted can be dropped from its actions menu. You can still find it with the Dropped filter.
 
 8
-00:00:45.089 --> 00:00:54.828
+00:00:42.646 --> 00:00:51.841
 To start work, tick the items you want and choose Send to the BA. Owners and Admins can edit the backlog, and everyone on the project can read it.
 
 9
-00:00:55.528 --> 00:01:00.240
-That is the backlog. Keep ideas here, and send them on when you are ready.
+00:00:52.540 --> 00:01:02.225
+That is the backlog. Keep ideas here as long as you like, and send them on to your business analyst when you are ready. Even dropped ideas can still be found again.

@@ -1,53 +1,53 @@
 WEBVTT
 
 1
-00:00:00.521 --> 00:00:08.520
+00:00:00.683 --> 00:00:08.534
 Environments is where your app runs: the test site your team tries, the live site your customers use, and the computers they run on.
 
 2
-00:00:09.223 --> 00:00:14.016
+00:00:09.247 --> 00:00:13.386
 Open Environments in the sidebar. Each project has its own page.
 
 3
-00:00:14.716 --> 00:00:21.562
+00:00:14.089 --> 00:00:19.913
 Your app says how to start the app. DevOps has looked at the project and has a suggestion. Review it.
 
 4
-00:00:22.261 --> 00:00:28.366
+00:00:20.615 --> 00:00:26.012
 Answer its question, then press Use these steps. Test copies of cards use the same steps.
 
 5
-00:00:29.072 --> 00:00:39.833
+00:00:28.605 --> 00:00:37.416
 Each environment shows where it runs, its address, the version that runs, and when it updates. The test site updates by itself after each merge.
 
 6
-00:00:40.532 --> 00:00:51.894
+00:00:38.115 --> 00:00:48.547
 The live site changes only when you say so. With nothing waiting, Release the newest version puts the latest approved version live. A database backup is taken first.
 
 7
-00:00:52.597 --> 00:01:01.707
+00:00:49.251 --> 00:00:57.294
 Places lists the computers and servers this project uses, and what uses them. Check looks at a computer again. Nothing is changed.
 
 8
-00:01:02.407 --> 00:01:09.383
+00:00:57.996 --> 00:01:04.225
 A server is reached from one of your computers. Reconnect signs in again, and you choose which computer does it.
 
 9
-00:01:10.085 --> 00:01:14.810
+00:01:04.929 --> 00:01:09.964
 Add an environment asks what it is for and where it runs, then shows the app it found there.
 
 10
-00:01:18.601 --> 00:01:27.479
+00:01:14.542 --> 00:01:22.073
 Nothing is saved before the review. When Save is off, it always says why. Here, Docker Compose is missing on that computer.
 
 11
-00:01:28.181 --> 00:01:37.245
+00:01:22.777 --> 00:01:31.268
 What you started stays as a draft. At the top, the Releases switch pauses releases and automatic updates. Nothing that runs is stopped.
 
 12
-00:01:37.944 --> 00:01:40.092
+00:01:31.967 --> 00:01:33.780
 Turn it on again when you are ready.
 
 13
-00:01:40.790 --> 00:01:45.538
+00:01:34.480 --> 00:01:39.131
 That is Environments: set up where your app runs once, and release when you are ready.

@@ -1,41 +1,41 @@
 WEBVTT
 
 1
-00:00:00.419 --> 00:00:07.499
+00:00:00.467 --> 00:00:06.398
 Automations do routine work for you. Each one has a trigger, when it runs, and an action, what it does.
 
 2
-00:00:08.204 --> 00:00:17.235
+00:00:07.102 --> 00:00:14.718
 Open Automations in the sidebar. Each automation shows its trigger, the next run and the last run, grouped by project.
 
 3
-00:00:17.938 --> 00:00:22.884
+00:00:15.424 --> 00:00:20.011
 New automation opens a wizard in three steps: When, What and Details.
 
 4
-00:00:23.583 --> 00:00:33.450
+00:00:20.709 --> 00:00:30.778
 When can be a time, something that happens in a project, an incoming ticket or e-mail, or only when you run it. Here: on a schedule, weekdays at seven in the morning.
 
 5
-00:00:34.155 --> 00:00:43.697
+00:00:31.483 --> 00:00:40.187
 What is the action. Create a card is the most common; it can also ask DevOps, ask the CEO, send a webhook or e-mail a digest.
 
 6
-00:00:44.397 --> 00:00:50.005
+00:00:40.887 --> 00:00:46.284
 Details names the automation and fills in the card it creates: the project and the title.
 
 7
-00:00:50.708 --> 00:00:57.173
+00:00:46.989 --> 00:00:53.048
 Create automation saves it. Run now runs it once, straight away: here it creates the card at once.
 
 8
-00:00:57.872 --> 00:01:03.201
+00:00:53.748 --> 00:00:58.591
 History lists every run: what triggered it, on schedule or by hand, and what it did.
 
 9
-00:01:03.900 --> 00:01:08.774
+00:00:59.290 --> 00:01:03.834
 Pause switches an automation off without deleting it. Resume turns it back on.
 
 10
-00:01:09.475 --> 00:01:14.338
+00:01:04.534 --> 00:01:08.075
 That is Automations. Set up the routine once, and let it run.

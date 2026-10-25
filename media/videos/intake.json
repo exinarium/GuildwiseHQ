@@ -13,19 +13,19 @@
     }
   ],
   "captions": "/videos/intake.vtt",
-  "voice": "Piper en_GB-cori-high",
-  "duration": 63.3,
+  "voice": "Kokoro af_heart",
+  "duration": 60.6,
   "chapters": [
     {
-      "t": 7.8,
+      "t": 7.9,
       "title": "One ticket"
     },
     {
-      "t": 27.7,
+      "t": 27.3,
       "title": "The chat with the BA"
     },
     {
-      "t": 42.2,
+      "t": 40.2,
       "title": "A batch of tickets"
     }
   ]

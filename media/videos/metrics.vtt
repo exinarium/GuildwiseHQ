@@ -1,25 +1,25 @@
 WEBVTT
 
 1
-00:00:00.942 --> 00:00:06.050
+00:00:00.479 --> 00:00:05.172
 Metrics shows what your team delivered, where work waited on you, and where quality slipped.
 
 2
-00:00:06.780 --> 00:00:16.380
+00:00:05.878 --> 00:00:14.689
 Open Metrics in the sidebar. Pick a range of seven, fourteen, thirty or ninety days, and narrow it to one project, or keep all projects.
 
 3
-00:00:17.114 --> 00:00:28.790
+00:00:15.392 --> 00:00:26.720
 Throughput counts the cards finished per day. Time blocked on you adds up how long cards waited for your answer, and how many cards were held up. Answer your Desk quickly, and this number stays small.
 
 4
-00:00:29.524 --> 00:00:42.465
+00:00:27.424 --> 00:00:40.949
 Bounce rate per builder shows how often a builder’s work came back from review or failed its test. Bugs escaped past test counts the failed test runs per day. A high rate often means the briefs need more detail.
 
 5
-00:00:43.189 --> 00:00:55.596
+00:00:41.652 --> 00:00:54.303
 Duration shows how long a card takes from start to finish, and the shift time of each agent. Queue depth per column shows where cards are waiting right now. A long bar means work is piling up in that column.
 
 6
-00:00:56.296 --> 00:01:04.177
+00:00:55.002 --> 00:01:02.021
 The numbers come from what really happened on your boards. Check Metrics now and then to see where your team flows, and where it waits.
