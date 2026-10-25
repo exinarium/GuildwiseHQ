@@ -1,6 +1,7 @@
 import {
   type AccountScope,
   type AiRuntimeAccount,
+  type AiRuntimesResponse,
   type AiRuntimeTile,
   accountScopeDef,
   backendDef,
@@ -164,10 +165,13 @@ function AccountRow({
   blocked,
   focused,
   openOnArrival,
+  pinned,
 }: {
   tile: AiRuntimeTile;
   a: AiRuntimeAccount;
   ctx: PageCtx;
+  /** Projects that name an account of a scope explicitly (for the "Make main" confirmation). */
+  pinned: AiRuntimesResponse['pinnedProjects'];
   /** Why the actions are off now (or null). */
   blocked: string | null;
   focused: boolean;
@@ -183,6 +187,7 @@ function AccountRow({
   const removeKey = useRemoveProviderKey(ctx.workstationId);
   const removeLogin = useRemoveIntegration(ctx.workstationId);
   const promoteM = usePromoteAccount(ctx.workstationId);
+  const affected = pinned.filter((p) => p.scope === tile.id && (p.account === 'main' || p.account === a.key));
   const st = accountStatus(a);
   const name = a.main ? 'Main account' : a.key;
   const id = `${tile.id}-${a.key}`;
@@ -302,7 +307,13 @@ function AccountRow({
         open={promote}
         onOpenChange={setPromote}
         title={`Make ${a.key} the main ${tile.label} account?`}
-        description={`${a.key} takes the place of the main account and the main account becomes ${a.key}: nothing is lost, and doing it again undoes it. Work that uses the main account (the CEO, DevOps, chats, projects without an account) moves with it.`}
+        description={`${a.key} takes the place of the main account and the main account becomes ${a.key}: nothing is lost, and doing it again undoes it. Work that uses the main account (the CEO, DevOps, chats, projects without an account) moves with it.${
+          affected.length > 0
+            ? ` Projects that name an account of ${tile.label} and change what they get: ${affected
+                .map((p) => `${p.projectKey} (${p.account === 'main' ? 'main account' : p.account})`)
+                .join(', ')}.`
+            : ''
+        }`}
         confirmLabel="Make main"
         tone="primary"
         pending={promoteM.isPending}
@@ -325,9 +336,11 @@ function AiTile({
   online,
   focus,
   openConnect,
+  pinned,
 }: {
   tile: AiRuntimeTile;
   ctx: PageCtx;
+  pinned: AiRuntimesResponse['pinnedProjects'];
   online: boolean;
   focus: { kind: string; instance: string } | null;
   openConnect: boolean;
@@ -402,6 +415,7 @@ function AiTile({
               blocked={blocked}
               focused={isFocusTile && (focus?.instance === a.key || (!focus?.instance && a.main))}
               openOnArrival={openConnect}
+              pinned={pinned}
             />
           ))}
         </ul>
@@ -474,7 +488,7 @@ export function AiRuntimeSection({
         Could not read the AI runtimes of {ctx.workstationName}.
       </Callout>
     );
-  const { tiles = [], online, lastPromote } = q.data;
+  const { tiles = [], online, lastPromote, pinnedProjects: pinned = [] } = q.data;
   // Claude Code has its own tiles above; opencode and the providers follow the login runtimes
   const rest = tiles.filter((t) => t.id !== 'claude-code');
   const keys = rest.filter((t) => t.kind === 'key');
@@ -496,13 +510,29 @@ export function AiRuntimeSection({
         .
       </p>
       {runtimes.map((t) => (
-        <AiTile key={t.id} tile={t} ctx={ctx} online={online} focus={focus} openConnect={openConnect} />
+        <AiTile
+          key={t.id}
+          tile={t}
+          ctx={ctx}
+          online={online}
+          focus={focus}
+          openConnect={openConnect}
+          pinned={pinned}
+        />
       ))}
       <h3 className="mt-2 text-sm font-semibold text-fg" id="h-ai-keys">
         API keys and cloud accounts
       </h3>
       {keys.map((t) => (
-        <AiTile key={t.id} tile={t} ctx={ctx} online={online} focus={focus} openConnect={openConnect} />
+        <AiTile
+          key={t.id}
+          tile={t}
+          ctx={ctx}
+          online={online}
+          focus={focus}
+          openConnect={openConnect}
+          pinned={pinned}
+        />
       ))}
     </div>
   );

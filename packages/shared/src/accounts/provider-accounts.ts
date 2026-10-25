@@ -4,6 +4,7 @@ import {
   type AccountRuntimeView,
   accountUsable,
   type ClaudeAccountInfoSchema,
+  isReservedAccountName,
   MAIN_ACCOUNT,
   type ProjectAccountSetting,
   resolveShiftAccount,
@@ -38,7 +39,7 @@ export const PROVIDER_ACCOUNTS_CAPABILITY = 'provider-accounts:1';
 
 /** A named account: never `main`, never `org`. */
 export const ProviderAccountKeySchema = AccountKeySchema.refine(
-  (k) => k !== MAIN_ACCOUNT && k !== ORG_ACCOUNT,
+  (k) => k !== MAIN_ACCOUNT && k !== ORG_ACCOUNT && !isReservedAccountName(k),
   { message: 'reserved' },
 );
 
@@ -142,6 +143,11 @@ export function resolveScopeAccount(
 export const ProviderAccountPromotePayloadSchema = z.object({
   scope: AccountScopeSchema,
   key: ProviderAccountKeySchema,
+  /**
+   * One id per click, set by the server. The runner remembers the ids it has applied and answers a repeat with the first answer
+   * without swapping again (a command delivered twice would otherwise swap the accounts back). Absent from an older server.
+   */
+  nonce: z.string().min(8).max(64).optional(),
 });
 export type ProviderAccountPromotePayload = z.infer<typeof ProviderAccountPromotePayloadSchema>;
 export const ProviderAccountPromoteResultSchema = z.object({
@@ -271,6 +277,20 @@ export const AiRuntimesResponseSchema = z.object({
     })
     .nullable()
     .default(null),
+  /**
+   * Projects (visible to the owner) that name an account of a scope explicitly (`main` or a named one): "Make main" changes what
+   * these get, so the confirmation lists them. Projects with no choice follow the main account and are not listed.
+   */
+  pinnedProjects: z
+    .array(
+      z.object({
+        scope: z.string(),
+        account: z.string(),
+        projectKey: z.string(),
+        projectName: z.string(),
+      }),
+    )
+    .default([]),
 });
 export type AiRuntimesResponse = z.infer<typeof AiRuntimesResponseSchema>;
 

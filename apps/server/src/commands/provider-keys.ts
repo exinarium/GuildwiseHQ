@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import {
   type AiRuntimesResponse,
   BACKEND_IDS,
@@ -16,8 +17,9 @@ import {
   type WorkstationProvidersResponse,
 } from '@aom/shared';
 import type { AuthSession } from '../auth/sessions.ts';
+import { visibleProjectIds } from '../authz/scope.ts';
 import type { Ctx } from '../context.ts';
-import { exec, one } from '../db/sql.ts';
+import { exec, one, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { conflict, notFound, unprocessable } from '../errors.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
@@ -280,7 +282,30 @@ export async function promoteAccount(
         'not_supported',
         'the main Claude Code account is the machine login or token: it is not swapped from here',
       );
-    await enqueueRunnerCommand(tx, workstationId, 'provider.account.promote', body);
+    // One at a time per workstation: a second click (or a second tab) while one is on its way would swap the accounts back.
+    await exec(tx, 'SELECT pg_advisory_xact_lock(hashtext($1))', [`promote:${workstationId}`]);
+    // a swap that never got an answer (the workstation stayed offline) stops blocking after ten minutes, and is not delivered later
+    await exec(
+      tx,
+      `UPDATE runner_commands SET status='failed', last_error='no answer from the workstation in time'
+        WHERE workstation_id=$1 AND type='provider.account.promote' AND status IN ('pending','sent') AND created_at < $2`,
+      [workstationId, new Date(ctx.clock.now().getTime() - 600_000)],
+    );
+    const waiting = await one(
+      tx,
+      `SELECT 1 FROM runner_commands WHERE workstation_id=$1 AND type='provider.account.promote' AND status IN ('pending','sent')`,
+      [workstationId],
+    );
+    if (waiting)
+      throw conflict(
+        'promote_pending',
+        'a swap is already on its way to this workstation: wait for its answer before asking again',
+      );
+    // the runner applies each nonce once (a command delivered twice does not swap twice)
+    await enqueueRunnerCommand(tx, workstationId, 'provider.account.promote', {
+      ...body,
+      nonce: randomUUID(),
+    });
   });
   deliver(ctx, [workstationId]);
 }
@@ -335,9 +360,23 @@ export async function workstationAiRuntimes(
     capabilities: Array.isArray(caps?.capabilities) ? (caps?.capabilities as string[]) : [],
   });
   const last = lastPromote.get(workstationId);
+  const pinned = await rows(
+    ctx.pool,
+    `SELECT ppa.scope, ppa.account_key, p.key AS project_key, p.name AS project_name
+       FROM project_provider_accounts ppa JOIN projects p ON p.id = ppa.project_id
+      WHERE ppa.account_key <> 'org' AND p.status <> 'archived' AND p.id = ANY($1::uuid[])
+      ORDER BY p.key, ppa.scope LIMIT 200`,
+    [await visibleProjectIds(ctx.pool, user.id)],
+  );
   return {
     workstationId,
     online: ctx.services.runners.isOnline(workstationId),
+    pinnedProjects: pinned.map((r) => ({
+      scope: r.scope as string,
+      account: r.account_key as string,
+      projectKey: r.project_key as string,
+      projectName: r.project_name as string,
+    })),
     runnerVersion: (ws.runner_version as string | null) ?? null,
     tiles,
     lastPromote: last

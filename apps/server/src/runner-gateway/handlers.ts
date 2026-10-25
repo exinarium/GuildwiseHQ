@@ -129,7 +129,12 @@ import { delegateRpc } from '../sessions/delegate.ts';
 import { playbookRunRpc } from '../sessions/playbooks.ts';
 import type { SessionTerminal } from '../sessions/turns.ts';
 import { buildBrief } from './brief.ts';
-import { claimPendingCommands, completeCommand, requeueSentCommands } from './commands-queue.ts';
+import {
+  claimPendingCommands,
+  completeCommand,
+  failCommandFinal,
+  requeueSentCommands,
+} from './commands-queue.ts';
 import { ledgerRetireRpc, ledgerSearchRpc } from './ledger-rpc.ts';
 import type { RunnerConn } from './registry.ts';
 import { issueRotatedToken } from './rotation.ts';
@@ -686,7 +691,16 @@ export class RunnerHandlers {
         msg.result,
       );
     } else if (cmd?.type === 'provider.account.promote') {
-      await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      // done when the swap happened; a refusal ends as failed at once (it is never retried: a retry could swap twice)
+      const swapped = msg.ok && (msg.result as { ok?: boolean } | undefined)?.ok !== false;
+      if (swapped) await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      else
+        await failCommandFinal(
+          this.ctx.pool,
+          msg.commandId,
+          String((msg.result as { error?: string } | undefined)?.error ?? 'the workstation could not do it'),
+          this.ctx.clock.now(),
+        );
       applyPromoteResult(this.ctx, conn.workstationId, cmd.payload, msg.ok, msg.result);
     } else if (cmd?.type === 'pack.credential.set') {
       // The sealed deploy key or token is forgotten whatever the answer was; only the fact is kept.

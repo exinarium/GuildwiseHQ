@@ -1,4 +1,4 @@
-import { existsSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { homedir, hostname, platform } from 'node:os';
 import { basename, join } from 'node:path';
 import {
@@ -1199,6 +1199,47 @@ export class Runner {
    * folders in this pairing's config; a key scope opens both sealed keys and seals them again under their new names with this
    * runner's own key. Claude Code's main account is the machine login or token, which is not swapped from here.
    */
+  private promoteLogFile(): string {
+    return join(this.paths.root, 'promote-applied.json');
+  }
+
+  /** The answers to the "Make main" commands already applied here, by command nonce (the last 50). */
+  private promoteLog(): Record<string, ProviderAccountPromoteResult> {
+    try {
+      const j = JSON.parse(readFileSync(this.promoteLogFile(), 'utf8')) as unknown;
+      return j && typeof j === 'object' ? (j as Record<string, ProviderAccountPromoteResult>) : {};
+    } catch {
+      return {};
+    }
+  }
+
+  /**
+   * One "Make main" per command nonce: a command delivered twice (a lost answer, a reconnect) gets its first answer back and does
+   * not swap the accounts again. The answer is remembered before it is reported.
+   */
+  private async promoteOnce(
+    scope: string,
+    key: string,
+    nonce: string | undefined,
+  ): Promise<ProviderAccountPromoteResult> {
+    const id = nonce ? `${scope}/${key}/${nonce}` : undefined;
+    const log = this.promoteLog();
+    if (id && Object.hasOwn(log, id)) return log[id] as ProviderAccountPromoteResult;
+    const r = await this.promoteAccount(scope, key);
+    if (id) {
+      const entries = Object.entries({ ...log, [id]: r }).slice(-50);
+      try {
+        mkdirSync(this.paths.root, { recursive: true });
+        const tmp = `${this.promoteLogFile()}.${process.pid}.tmp`;
+        writeFileSync(tmp, JSON.stringify(Object.fromEntries(entries)), { mode: 0o600 });
+        renameSync(tmp, this.promoteLogFile());
+      } catch (err) {
+        this.log.warn(`could not remember the Make main answer: ${err instanceof Error ? err.message : err}`);
+      }
+    }
+    return r;
+  }
+
   private async promoteAccount(scope: string, key: string): Promise<ProviderAccountPromoteResult> {
     if (scope === 'codex' || scope === 'gemini') {
       const reg = scope === 'codex' ? this.codexAccounts : this.geminiAccounts;
@@ -1716,7 +1757,7 @@ export class Runner {
       } else if (command === 'provider.account.promote') {
         // "Make main": the named account and the main account swap places (login folders, or the two sealed keys)
         const p = CommandPayloadSchemas['provider.account.promote'].parse(payload);
-        const r = await this.promoteAccount(p.scope, p.key);
+        const r = await this.promoteOnce(p.scope, p.key, p.nonce);
         this.log.info(`provider account ${p.scope}/${p.key}: make main ${r.ok ? 'done' : 'refused'}`);
         void this.reportRuntimes();
         done(true, r);

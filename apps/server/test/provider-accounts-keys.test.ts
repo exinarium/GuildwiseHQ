@@ -6,6 +6,7 @@ import {
   PROVIDER_KEYS_BOUND_CAPABILITY,
 } from '@aom/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { requeueSentCommands } from '../src/runner-gateway/commands-queue.ts';
 import { closeAdminPool, q as rawQ } from './helpers/db.ts';
 import type { FakeRunner } from './helpers/fake-runner.ts';
 import { createWorld, MOCK_RUNTIME, until, type World } from './helpers/world.ts';
@@ -153,7 +154,7 @@ describe('Make main', () => {
     const from = r.received.length;
     expect((await promote({ scope: 'openai', key: 'work' })).status).toBe(202);
     const cmd = (await commandsOf('provider.account.promote', from))[0];
-    expect(cmd.payload).toEqual({ scope: 'openai', key: 'work' });
+    expect(cmd.payload).toMatchObject({ scope: 'openai', key: 'work', nonce: expect.any(String) });
     r.send('command.result', {
       commandId: cmd.commandId,
       ok: true,
@@ -171,6 +172,58 @@ describe('Make main', () => {
       ok: false,
       error: expect.stringContaining('no openai key'),
     });
+  });
+
+  it('refuses a second swap while one is on its way, ends a refused swap as failed, and never re-sends a swap whose answer was lost', async () => {
+    await q(`DELETE FROM runner_commands WHERE type='provider.account.promote'`);
+    const from = r.received.length;
+    expect((await promote({ scope: 'openai', key: 'work' })).status).toBe(202);
+    const cmd = (await commandsOf('provider.account.promote', from))[0];
+    // a double click, or a second tab
+    const second = await promote({ scope: 'openai', key: 'work' });
+    expect(second.status).toBe(409);
+    expect(second.body.code ?? second.body.error?.code).toBe('promote_pending');
+    // the connection drops before the answer: the next connection does not get it again
+    await requeueSentCommands(w.t.app.ctx.pool, w.workstationId);
+    expect((await q(`SELECT status FROM runner_commands WHERE id=$1`, [cmd.commandId]))[0]?.status).toBe(
+      'failed',
+    );
+    // now a new one is accepted; the runner's refusal ends it as failed without a retry
+    const from2 = r.received.length;
+    expect((await promote({ scope: 'openai', key: 'work' })).status).toBe(202);
+    const cmd2 = (await commandsOf('provider.account.promote', from2))[0];
+    r.send('command.result', { commandId: cmd2.commandId, ok: true, result: { ok: false, error: 'nope' } });
+    await r.barrier();
+    await until(
+      async () =>
+        (await q(`SELECT status FROM runner_commands WHERE id=$1`, [cmd2.commandId]))[0]?.status === 'failed',
+    );
+    expect(
+      (await q(`SELECT last_error FROM runner_commands WHERE id=$1`, [cmd2.commandId]))[0]?.last_error,
+    ).toBe('nope');
+    // and one the runner did is done
+    const from3 = r.received.length;
+    expect((await promote({ scope: 'openai', key: 'work' })).status).toBe(202);
+    const cmd3 = (await commandsOf('provider.account.promote', from3))[0];
+    r.send('command.result', { commandId: cmd3.commandId, ok: true, result: { ok: true } });
+    await r.barrier();
+    await until(
+      async () =>
+        (await q(`SELECT status FROM runner_commands WHERE id=$1`, [cmd3.commandId]))[0]?.status === 'done',
+    );
+  });
+
+  it('lists the projects that name an account explicitly, for the confirmation', async () => {
+    await q(
+      `INSERT INTO project_provider_accounts (project_id, scope, account_key, fallback_to_main) VALUES ($1,'openai','work',false)
+       ON CONFLICT (project_id, scope) DO UPDATE SET account_key='work'`,
+      [w.projectId],
+    );
+    const page = (await call('GET', `/api/workstations/${w.workstationId}/ai-runtimes`)).body;
+    expect(page.pinnedProjects).toEqual([
+      { scope: 'openai', account: 'work', projectKey: 'TOY', projectName: 'Toy' },
+    ]);
+    await q('DELETE FROM project_provider_accounts WHERE project_id=$1', [w.projectId]);
   });
 
   it('refuses main and org as the account, Claude Code, an unknown scope, a stranger and a runner without accounts', async () => {

@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type ProviderKeyId, providerKeyAad, sealLarge, sealProviderKey } from '@aom/shared';
@@ -375,5 +375,89 @@ describe('key slots with account names (S-A)', () => {
     });
     // an existing one can still be replaced
     expect((await setAcct('openai', 'a3', 'sk-new-zzzz', 200)).stored).toBe(true);
+  });
+
+  it('refuses account names that are properties of every object, and never finds one by accident', async () => {
+    const { store, setAcct } = rig();
+    for (const name of ['constructor', 'prototype']) {
+      expect(await setAcct('openai', name, 'sk-reserved-1')).toMatchObject({
+        stored: false,
+        error: expect.stringMatching(/not allowed/),
+      });
+      expect(await store.promote('openai', name)).toMatchObject({ ok: false });
+      expect(store.holdsAccount('openai', name)).toBe(false);
+      expect(store.get('openai', undefined, name)).toBeUndefined();
+    }
+  });
+
+  it('Make main with no main key raises the floor of the emptied named slot, so its old blob is not accepted again', async () => {
+    const { store, setAcct } = rig();
+    expect((await setAcct('google', 'work', 'AIza-work-key', 70)).stored).toBe(true);
+    expect(await store.promote('google', 'work')).toEqual({ ok: true });
+    expect(await setAcct('google', 'work', 'AIza-work-key', 70)).toMatchObject({
+      stored: false,
+      error: expect.stringMatching(/removed or replaced/),
+    });
+    // a newer key under the same name is fine
+    expect((await setAcct('google', 'work', 'AIza-newer-key', 5_000_000_000)).stored).toBe(true);
+  });
+
+  it('does not write over a key that was set while the swap was being sealed', async () => {
+    const { keys, store, setAcct } = rig();
+    store.set({
+      provider: 'openai',
+      keyId: keys.publicKey.keyId,
+      generation: 50,
+      ciphertext: await sealWs(keys, 'openai', 'sk-old-main', undefined, 50),
+      models: [],
+    });
+    await setAcct('openai', 'work', 'sk-work-new', 60);
+    const racing = store.promote('openai', 'work');
+    // runs while promote waits for its seals
+    store.set({
+      provider: 'openai',
+      keyId: keys.publicKey.keyId,
+      generation: 55,
+      ciphertext: await sealWs(keys, 'openai', 'sk-set-meanwhile', undefined, 55),
+      models: [],
+    });
+    expect(await racing).toMatchObject({ ok: false, error: expect.stringMatching(/changed while/) });
+    expect(store.get('openai')?.apiKey).toBe('sk-set-meanwhile');
+    expect(store.get('openai', undefined, 'work')?.apiKey).toBe('sk-work-new');
+  });
+
+  it('finishes a swap that was interrupted between its two file writes', async () => {
+    const { dir, keys, store, setAcct } = rig();
+    store.set({
+      provider: 'openai',
+      keyId: keys.publicKey.keyId,
+      generation: 50,
+      ciphertext: await sealWs(keys, 'openai', 'sk-old-main', undefined, 50),
+      models: [],
+    });
+    await setAcct('openai', 'work', 'sk-work-new', 60);
+    // what promote has sealed for the swap, taken from a completed one on a copy, then the state is put back half-way
+    const before = {
+      main: readFileSync(join(dir, 'secrets', 'providers.json'), 'utf8'),
+      acct: readFileSync(join(dir, 'secrets', 'providers-accounts.json'), 'utf8'),
+    };
+    expect(await store.promote('openai', 'work')).toEqual({ ok: true });
+    const after = JSON.parse(readFileSync(join(dir, 'secrets', 'providers.json'), 'utf8'));
+    const afterAcct = JSON.parse(readFileSync(join(dir, 'secrets', 'providers-accounts.json'), 'utf8'));
+    // crash: the journal exists, the main file was written, the accounts file is the old one
+    writeFileSync(join(dir, 'secrets', 'providers-accounts.json'), before.acct);
+    writeFileSync(
+      join(dir, 'secrets', 'providers-promote.journal.json'),
+      JSON.stringify({
+        provider: 'openai',
+        account: 'work',
+        nextMain: after.openai,
+        nextAcct: afterAcct.work.openai,
+      }),
+    );
+    const reopened = new ProviderStore({ file: join(dir, 'secrets', 'providers.json'), keys });
+    expect(existsSync(join(dir, 'secrets', 'providers-promote.journal.json'))).toBe(false);
+    expect(reopened.get('openai')?.apiKey).toBe('sk-work-new');
+    expect(reopened.get('openai', undefined, 'work')?.apiKey).toBe('sk-old-main');
   });
 });

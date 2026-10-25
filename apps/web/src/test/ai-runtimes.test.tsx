@@ -25,6 +25,7 @@ let publicKeyB64: string;
 let tiles: AiRuntimeTile[];
 let online = true;
 let lastPromote: unknown = null;
+let pinnedProjects: unknown[] = [];
 const calls: Array<{ method: string; url: string; body?: Record<string, unknown> }> = [];
 
 const info = (key: string, over: Record<string, unknown> = {}) => ({
@@ -70,6 +71,7 @@ beforeEach(async () => {
   tiles = defaultTiles();
   online = true;
   lastPromote = null;
+  pinnedProjects = [];
   calls.length = 0;
   vi.stubGlobal(
     'fetch',
@@ -108,7 +110,14 @@ beforeEach(async () => {
           legacy: false,
         });
       if (url === `/api/workstations/${WS}/ai-runtimes`)
-        return json({ workstationId: WS, online, runnerVersion: '0.1.58', tiles, lastPromote });
+        return json({
+          workstationId: WS,
+          online,
+          runnerVersion: '0.1.58',
+          tiles,
+          lastPromote,
+          pinnedProjects,
+        });
       if (url === `/api/workstations/${WS}/sudo-key`)
         return json({ keyId: 'key-3f9a', publicKey: publicKeyB64 });
       if (method === 'POST' && url.endsWith('/integrations/sessions'))
@@ -297,6 +306,24 @@ describe('Integrations > AI runtime: sign in', () => {
     expect(callTo('POST', '/integrations/remove')?.body).toMatchObject({ kind: 'codex', instance: 'work' });
     // the main account has no Remove
     expect(codex.queryByTestId('ai-remove-codex-main')).toBeNull();
+  });
+
+  it('Make main lists the projects that name the main or the named account before it swaps them', async () => {
+    pinnedProjects = [
+      { scope: 'codex', account: 'main', projectKey: 'TOY', projectName: 'Toy' },
+      { scope: 'codex', account: 'work', projectKey: 'WEB', projectName: 'Web' },
+      { scope: 'codex', account: 'other', projectKey: 'OTH', projectName: 'Other' },
+      { scope: 'openai', account: 'main', projectKey: 'KEY', projectName: 'Keys' },
+    ];
+    const user = userEvent.setup();
+    page();
+    const codex = await tile('codex');
+    await user.click(codex.getByTestId('ai-promote-codex-work'));
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog).toHaveTextContent('TOY (main account)');
+    expect(dialog).toHaveTextContent('WEB (work)');
+    expect(dialog).not.toHaveTextContent('OTH');
+    expect(dialog).not.toHaveTextContent('KEY');
   });
 
   it('Make main asks first and sends the swap', async () => {

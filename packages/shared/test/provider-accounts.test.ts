@@ -10,6 +10,7 @@ import {
   integrationKind,
   isKeyScope,
   isLoginScope,
+  isReservedAccountName,
   keyAccountSource,
   keyAccountUsable,
   ORG_ACCOUNT,
@@ -336,5 +337,12 @@ describe('the contract', () => {
         openai: { key: 'org', fallbackToMain: false },
       }),
     ).toBeTruthy();
+  });
+
+  it('reserves the names every object has as an account name', () => {
+    for (const k of ['constructor', 'prototype', '__proto__']) expect(isReservedAccountName(k)).toBe(true);
+    expect(ProviderAccountKeySchema.safeParse('constructor').success).toBe(false);
+    expect(ProviderAccountKeySchema.safeParse('prototype').success).toBe(false);
+    expect(ProviderAccountKeySchema.safeParse('work').success).toBe(true);
   });
 });

@@ -2,12 +2,17 @@ import { z } from 'zod';
 
 export const MAIN_ACCOUNT = 'main' as const;
 export const ACCOUNT_KEY_RE = /^[a-z][a-z0-9-]{0,31}$/;
+/** Names that are also properties every object has: refused as an account name wherever accounts are kept in a map. */
+export const RESERVED_ACCOUNT_NAMES = ['constructor', 'prototype', '__proto__'] as const;
+export const isReservedAccountName = (k: string): boolean =>
+  (RESERVED_ACCOUNT_NAMES as readonly string[]).includes(k);
 /** Any account key including 'main'. */
 export const AccountKeySchema = z.string().regex(ACCOUNT_KEY_RE);
 /** A project / additional account key: never 'main'. */
-export const ClaudeAccountKeySchema = AccountKeySchema.refine((k) => k !== MAIN_ACCOUNT, {
-  message: 'reserved',
-});
+export const ClaudeAccountKeySchema = AccountKeySchema.refine(
+  (k) => k !== MAIN_ACCOUNT && !isReservedAccountName(k),
+  { message: 'reserved' },
+);
 
 /** Announced in hello.capabilities by runners that understand accounts (shift.start.account, claude.account.ensure). */
 export const CLAUDE_ACCOUNTS_CAPABILITY = 'claude-accounts:1';

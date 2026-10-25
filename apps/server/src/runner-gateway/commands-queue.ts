@@ -54,10 +54,26 @@ export async function claimPendingCommands(
 }
 
 /** A (re)connect: commands sent on the lost connection may not have arrived, so they are due again. */
-export const requeueSentCommands = (db: Queryable, workstationId: string) =>
-  exec(db, `UPDATE runner_commands SET status='pending' WHERE workstation_id=$1 AND status='sent'`, [
-    workstationId,
-  ]);
+export async function requeueSentCommands(db: Queryable, workstationId: string): Promise<void> {
+  await exec(
+    db,
+    `UPDATE runner_commands SET status='pending'
+      WHERE workstation_id=$1 AND status='sent' AND type <> ALL($2::text[])`,
+    [workstationId, AT_MOST_ONCE_COMMANDS],
+  );
+  // A command that must not run twice (it swaps two things) is not handed out again when its answer was lost: the owner sees that
+  // it failed, checks the accounts and decides.
+  await exec(
+    db,
+    `UPDATE runner_commands SET status='failed',
+            last_error='the connection dropped before the answer arrived: check the accounts, then try again'
+      WHERE workstation_id=$1 AND status='sent' AND type = ANY($2::text[])`,
+    [workstationId, AT_MOST_ONCE_COMMANDS],
+  );
+}
+
+/** Commands that are delivered at most once: "Make main" swaps two accounts, so a second run would undo the first. */
+export const AT_MOST_ONCE_COMMANDS: string[] = ['provider.account.promote'];
 
 export async function completeCommand(
   db: Queryable,
@@ -80,4 +96,13 @@ export async function completeCommand(
             status = CASE WHEN attempts >= $3 THEN 'failed' ELSE 'pending' END WHERE id=$1`,
     [id, error ?? 'failed', MAX_COMMAND_ATTEMPTS],
   );
+}
+
+/** A command the runner answered with a refusal that retrying cannot change: it ends as failed at once (no retry). */
+export async function failCommandFinal(db: Queryable, id: string, error: string, now: Date): Promise<void> {
+  await exec(db, `UPDATE runner_commands SET status='failed', last_error=$2, done_at=$3 WHERE id=$1`, [
+    id,
+    error.slice(0, 300),
+    now,
+  ]);
 }

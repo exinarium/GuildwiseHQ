@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import {
   BACKEND_IDS,
@@ -9,6 +9,7 @@ import {
   DIRECT_PROVIDER_IDS,
   type DirectProviderId,
   directProvider,
+  isReservedAccountName,
   type KeySource,
   keyIdOfSpki,
   MAIN_ACCOUNT,
@@ -66,6 +67,11 @@ type AccountsFileContent = Record<string, SlotFileContent>;
 /** The most named accounts a workstation keeps (the report and the pickers stay small). */
 const MAX_NAMED_ACCOUNTS = 20;
 const ACCOUNT_NAME_RE = /^[a-z][a-z0-9-]{0,31}$/;
+const allowedAccountName = (a: string): boolean =>
+  ACCOUNT_NAME_RE.test(a) && a !== MAIN_ACCOUNT && a !== ORG_ACCOUNT && !isReservedAccountName(a);
+/** A copy of a parsed file that has no prototype: a name like `constructor` is never found on it by accident. */
+const plainMap = <T>(j: unknown): Record<string, T> =>
+  Object.assign(Object.create(null) as Record<string, T>, j && typeof j === 'object' ? j : {});
 const floorSlotOf = (account?: string): string => (account ? `${OWN_FLOOR_SLOT}/${account}` : OWN_FLOOR_SLOT);
 /** The organizations' slots: `{ [orgId]: { [provider]: StoredProvider } }`. */
 type OrgFileContent = Record<string, SlotFileContent>;
@@ -135,6 +141,7 @@ export class ProviderStore {
   private readonly endpointsFile: string;
   /** The highest generation of each organization key that was revoked or replaced here: never accepted again. */
   private readonly floorFile: string;
+  private readonly promoteJournalFile: string;
   private readonly approvals: ReplayCache;
 
   constructor(
@@ -154,6 +161,8 @@ export class ProviderStore {
     this.accountsFile = join(dirname(deps.file), 'providers-accounts.json');
     this.endpointsFile = join(dirname(deps.file), 'private-endpoints.json');
     this.floorFile = join(dirname(deps.file), 'providers-org-floor.json');
+    this.promoteJournalFile = join(dirname(deps.file), 'providers-promote.journal.json');
+    this.recoverPromote();
     this.approvals = new ReplayCache(join(dirname(deps.file), 'reseal-approvals.json'), deps.now ?? Date.now);
     // After a restart, redaction must know the keys before the first log line.
     for (const [id, p] of Object.entries(this.own()))
@@ -215,15 +224,16 @@ export class ProviderStore {
   }
 
   private floorOf(orgId: string, provider: string): number {
-    const j = this.readJson(this.floorFile) as Record<string, Record<string, unknown>> | null;
-    const n = j?.[orgId]?.[provider];
+    const j = plainMap<Record<string, unknown>>(this.readJson(this.floorFile));
+    const slot = Object.hasOwn(j, orgId) ? j[orgId] : undefined;
+    const n = slot && Object.hasOwn(slot, provider) ? slot[provider] : undefined;
     return typeof n === 'number' ? n : 0;
   }
 
   private raiseFloor(orgId: string, provider: string, generation: number): void {
-    const j = (this.readJson(this.floorFile) as Record<string, Record<string, number>> | null) ?? {};
-    const slot = j[orgId] ?? {};
-    slot[provider] = Math.max(slot[provider] ?? 0, generation);
+    const j = plainMap<Record<string, number>>(this.readJson(this.floorFile));
+    const slot = plainMap<number>(Object.hasOwn(j, orgId) ? j[orgId] : undefined);
+    slot[provider] = Math.max(Object.hasOwn(slot, provider) ? (slot[provider] as number) : 0, generation);
     j[orgId] = slot;
     this.write(this.floorFile, j);
   }
@@ -245,14 +255,12 @@ export class ProviderStore {
 
   /** The named accounts' keys, by account name. */
   private namedAccounts(): AccountsFileContent {
-    const j = this.readJson(this.accountsFile);
-    return j && typeof j === 'object' ? (j as AccountsFileContent) : {};
+    return plainMap<SlotFileContent>(this.readJson(this.accountsFile));
   }
 
   /** The organizations' keys, by organization. */
   private orgs(): OrgFileContent {
-    const j = this.readJson(this.orgFile);
-    return j && typeof j === 'object' ? (j as OrgFileContent) : {};
+    return plainMap<SlotFileContent>(this.readJson(this.orgFile));
   }
 
   private write(file: string, data: object): void {
@@ -269,8 +277,10 @@ export class ProviderStore {
 
   /** The slot a key is written to or read from: the workstation's, or one organization's. */
   private slotFor(source: KeySource, orgId: string | undefined, account?: string): SlotFileContent {
-    if (source === 'workstation') return account ? (this.namedAccounts()[account] ?? {}) : this.own();
-    return (orgId ? this.orgs()[orgId] : undefined) ?? {};
+    const pick = (all: Record<string, SlotFileContent>, k: string): SlotFileContent =>
+      Object.hasOwn(all, k) ? (all[k] as SlotFileContent) : {};
+    if (source === 'workstation') return account ? pick(this.namedAccounts(), account) : this.own();
+    return orgId ? pick(this.orgs(), orgId) : {};
   }
 
   private saveSlot(
@@ -390,8 +400,7 @@ export class ProviderStore {
           stored: false,
           error: 'a named account holds the workstation’s own key, not the organization’s',
         };
-      if (!ACCOUNT_NAME_RE.test(p.account) || p.account === MAIN_ACCOUNT || p.account === ORG_ACCOUNT)
-        return { stored: false, error: 'that account name is not allowed' };
+      if (!allowedAccountName(p.account)) return { stored: false, error: 'that account name is not allowed' };
       const names = Object.keys(this.namedAccounts());
       if (!names.includes(p.account) && names.length >= MAX_NAMED_ACCOUNTS)
         return { stored: false, error: `a workstation keeps at most ${MAX_NAMED_ACCOUNTS} named accounts` };
@@ -491,7 +500,8 @@ export class ProviderStore {
       return 'this organization key does not say which version it is: update the web app and enter it again';
     if (generation <= this.floorOf(orgId, provider))
       return 'this organization key was revoked or replaced: it is not accepted again';
-    const held = this.orgs()[orgId]?.[provider as ProviderKeyId]?.generation;
+    const orgSlot = this.slotFor('org', orgId);
+    const held = orgSlot[provider as ProviderKeyId]?.generation;
     if (held && generation < held) return 'a newer version of this organization key is already stored';
     return undefined;
   }
@@ -822,8 +832,7 @@ export class ProviderStore {
    * gets a generation newer than any held, so an old blob of either cannot be replayed over the new state.
    */
   async promote(provider: ProviderKeyId, account: string): Promise<ProviderAccountPromoteResult> {
-    if (!ACCOUNT_NAME_RE.test(account) || account === MAIN_ACCOUNT || account === ORG_ACCOUNT)
-      return { ok: false, error: 'that account name is not allowed' };
+    if (!allowedAccountName(account)) return { ok: false, error: 'that account name is not allowed' };
     if (!this.deps.keys.publicKey.publicKey)
       return { ok: false, error: 'this runner cannot seal keys: update it' };
     const named = this.namedAccounts();
@@ -868,9 +877,37 @@ export class ProviderStore {
         error: e instanceof Error ? e.message.slice(0, 200) : 'the key could not be moved',
       };
     }
+    // A key was set or cleared while the new blobs were being sealed (the awaits above): do not write over it.
+    if (
+      this.namedAccounts()[account]?.[provider]?.ciphertext !== acct.ciphertext ||
+      this.own()[provider]?.ciphertext !== main?.ciphertext
+    )
+      return { ok: false, error: 'a key changed while it was being moved: nothing was changed, try again' };
     // forget the redaction entries of the old blobs, then write both slots
     this.unregister(acct.ciphertext, this.aadOf('workstation', undefined, provider, acct, account));
     if (main) this.unregister(main.ciphertext, this.aadOf('workstation', undefined, provider, main));
+    // Two files change: the intent is written first (a journal, itself a single atomic write) and replayed on the next start if the
+    // process dies between the two writes, so the keys are never left in both places or in neither.
+    this.write(this.promoteJournalFile, { provider, account, nextMain, nextAcct: nextAcct ?? null });
+    this.applyPromote(provider, account, nextMain, nextAcct);
+    rmSync(this.promoteJournalFile, { force: true });
+    // the old named slot's blobs may not be put back by replay, also when there was no main to take its place
+    if (!nextAcct && (acct.generation ?? 0) > 0)
+      this.raiseFloor(floorSlotOf(account), provider, acct.generation as number);
+    this.register(nextMain.ciphertext ?? '', this.aadOf('workstation', undefined, provider, nextMain));
+    if (nextAcct?.ciphertext)
+      this.register(nextAcct.ciphertext, this.aadOf('workstation', undefined, provider, nextAcct, account));
+    for (const f of this.changed) f();
+    return { ok: true };
+  }
+
+  /** Writes the result of a "Make main" to the two slot files (idempotent: it is also what the journal replays). */
+  private applyPromote(
+    provider: ProviderKeyId,
+    account: string,
+    nextMain: StoredProvider,
+    nextAcct: StoredProvider | undefined | null,
+  ): void {
     const own = this.own();
     own[provider] = nextMain;
     this.saveSlot('workstation', undefined, own);
@@ -878,11 +915,20 @@ export class ProviderStore {
     if (nextAcct) acctSlot[provider] = nextAcct;
     else delete acctSlot[provider];
     this.saveSlot('workstation', undefined, acctSlot, account);
-    this.register(nextMain.ciphertext ?? '', this.aadOf('workstation', undefined, provider, nextMain));
-    if (nextAcct?.ciphertext)
-      this.register(nextAcct.ciphertext, this.aadOf('workstation', undefined, provider, nextAcct, account));
-    for (const f of this.changed) f();
-    return { ok: true };
+  }
+
+  /** A "Make main" that was interrupted between its two file writes is finished (called when the store opens). */
+  private recoverPromote(): void {
+    if (!existsSync(this.promoteJournalFile)) return;
+    const j = this.readJson(this.promoteJournalFile) as {
+      provider?: ProviderKeyId;
+      account?: string;
+      nextMain?: StoredProvider;
+      nextAcct?: StoredProvider | null;
+    };
+    if (j.provider && j.account && j.nextMain && allowedAccountName(j.account))
+      this.applyPromote(j.provider, j.account, j.nextMain, j.nextAcct ?? null);
+    rmSync(this.promoteJournalFile, { force: true });
   }
 
   /** Is the organization's key stored here (it may be overridden by the workstation's own)? */
