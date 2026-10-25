@@ -2077,7 +2077,11 @@ async function boardMain(): Promise<number> {
     const people = (header.people ?? []) as Array<{ slug: string; name: string; spoken: number }>;
     const mentions = (header.mentions ?? []) as string[];
     const last = header.lastSpeaker as string | null;
-    if (message.includes('[[decide]]') && !message.includes('## Decisions the owner took')) {
+    // the topic marker, or (recordings: so the topic reads naturally) AOM_MOCK_BOARD_DECIDE=1
+    if (
+      (message.includes('[[decide]]') || process.env.AOM_MOCK_BOARD_DECIDE === '1') &&
+      !message.includes('## Decisions the owner took')
+    ) {
       run([
         'board',
         'pause',
@@ -2091,7 +2095,11 @@ async function boardMain(): Promise<number> {
       say('We have reached a decision only you can take.');
       return finish();
     }
-    if (message.includes('[[converge]]') && header.round === 1 && !header.dissentNext)
+    if (
+      (message.includes('[[converge]]') || process.env.AOM_MOCK_BOARD_DECIDE === '1') &&
+      header.round === 1 &&
+      !header.dissentNext
+    )
       run(['board', 'converge', '--note', 'every first answer leans the same way']);
     const pool = people
       .filter((p) => p.slug !== last || mentions.includes(p.slug))
